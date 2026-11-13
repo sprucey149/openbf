@@ -28,7 +28,12 @@ impl InstantAction {
                 } else if i.confirm && live[focus] {
                     self.click(MenuSound::Accept);
                     let g = GROUPS[focus];
-                    let rows = vec![true; self.options.rows(g).len()];
+                    let rows: Vec<_> = self
+                        .options
+                        .rows(g)
+                        .into_iter()
+                        .map(|o| self.options.option_enabled(o))
+                        .collect();
                     self.go(Page::Group(g, ListCursor::first(&rows, OPTION_ROWS)));
                 } else if i.up {
                     self.click(MenuSound::Select);
@@ -47,7 +52,10 @@ impl InstantAction {
                     return Some(IaCommand::Prefs);
                 }
                 let rows = self.options.rows(g);
-                let live = vec![true; rows.len()];
+                let live: Vec<_> = rows
+                    .iter()
+                    .map(|o| self.options.option_enabled(*o))
+                    .collect();
                 let mut moved = false;
                 if i.up {
                     moved |= cur.step(&live, -1, OPTION_ROWS);
@@ -65,7 +73,10 @@ impl InstantAction {
                     (_, _, _, true) => (1, 10),
                     _ => (0, 0),
                 };
-                if let (true, Some(o)) = (dir != 0, rows.get(cur.at)) {
+                if let Some(o) = rows
+                    .get(cur.at)
+                    .filter(|o| dir != 0 && self.options.option_enabled(**o))
+                {
                     // Select on every step, also at a clamp (menuref).
                     self.click(MenuSound::Select);
                     self.options.adjust(*o, dir, mult);
@@ -153,7 +164,12 @@ impl InstantAction {
             }
             State::Map => {
                 let live = self.live(&self.map_rows());
-                if moves(&mut self.map_list, &live, LIST_ROWS) {
+                let moved = if i.up != i.down && !input.l1 && !input.r1 {
+                    self.map_list.step_wrapping(&live, i.down, LIST_ROWS)
+                } else {
+                    moves(&mut self.map_list, &live, LIST_ROWS)
+                };
+                if moved {
                     self.click(MenuSound::Select);
                 }
                 if i.back {

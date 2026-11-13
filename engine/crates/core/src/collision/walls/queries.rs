@@ -124,6 +124,21 @@ fn local_query_aabb(world: Aabb, body: &Body) -> parry3d::bounding_volume::Aabb 
     parry3d::bounding_volume::Aabb::new(point(local.min), point(local.max))
 }
 
+/// The translation along the nearest box face that separates these two
+/// shapes' enclosing boxes. This bounds the minimum translation from
+/// above. EPA may return a converged face within its tolerance, so leave
+/// the sweep's existing margin between the bound and the winning depth.
+/// The comparison is strict to preserve first-in-traversal ties.
+fn cannot_beat_contact(
+    query: &parry3d::bounding_volume::Aabb,
+    bounds: &parry3d::bounding_volume::Aabb,
+    depth: f32,
+) -> bool {
+    let positive = bounds.maxs - query.mins;
+    let negative = query.maxs - bounds.mins;
+    positive.min().min(negative.min()) < depth - SWEEP_CONTACT_DIST
+}
+
 /// The deepest contact between the capsule (`cap_shape` placed by the WORLD
 /// isometry `cap_iso`) and `mesh` as placed by `body`, or `None` when they do
 /// not touch. Points and normals come back in WORLD space.
@@ -166,6 +181,14 @@ fn mesh_contact<S: parry3d::shape::Shape>(
     let mut best_wall: Option<parry3d::query::Contact> = None;
     for i in mesh.bvh().intersect_aabb(&query) {
         let tri = mesh.triangle(i);
+        // In the wall-first pass, even a shallow wall can beat a deeper
+        // floor. Until we have a wall, every overlapping triangle competes.
+        let incumbent = if walls_first { best_wall } else { best };
+        if incumbent.is_some_and(|hit| {
+            hit.dist < 0.0 && cannot_beat_contact(&query, &tri.local_aabb(), -hit.dist)
+        }) {
+            continue;
+        }
         let c = triangle_contact(cap_iso, cap_shape, &body.iso, &tri);
         let Some(c) = c else { continue };
         if start.is_some_and(|s| pushes_past(body, &tri, &c, s)) {
@@ -321,6 +344,10 @@ fn ledge_contact(
                 };
                 if top_in_disc([w(tri.a), w(tri.b), w(tri.c)], full.base, full.radius)
                     .is_none_or(|t| t <= step_top)
+                {
+                    continue;
+                }
+                if best.is_some_and(|hit| cannot_beat_contact(&query, &tri.local_aabb(), -hit.dist))
                 {
                     continue;
                 }
@@ -1320,7 +1347,13 @@ fn penetration_block(
                         }
                     })
                     .flatten();
-                let e = || box_of.intersects(&local_end).then(|| at(end_iso)).flatten();
+                let e = || {
+                    let depth = best.map_or(SWEEP_CONTACT_DIST, |(depth, _)| depth);
+                    (box_of.intersects(&local_end)
+                        && !cannot_beat_contact(&local_end, &box_of, depth))
+                    .then(|| at(end_iso))
+                    .flatten()
+                };
                 let Some((pen1, n)) = deepened_by_step(s, e, dir, dist) else {
                     continue;
                 };

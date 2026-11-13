@@ -91,8 +91,13 @@ pub fn weapon_from_db(db: &ClassDb, weapon: &str) -> Result<WeaponClass> {
     }
     w.give_sniper_assist();
     // A BF1 weapon leaves the cycle for BF2's award that stands for it.
-    if !db.is_bf2() && w.medal_lock.is_none() {
-        w.medal_lock = awards::bf1_medal_lock(&w.name);
+    if !db.is_bf2() {
+        if let Some((row, _)) = awards::bf1_award(&w.name) {
+            w.medals_type = Some(row.medal);
+            if row.replaces && w.medal_lock.is_none() {
+                w.medal_lock = Some(row.medal);
+            }
+        }
     }
     Ok(w)
 }

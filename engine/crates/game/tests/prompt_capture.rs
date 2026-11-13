@@ -23,6 +23,7 @@ fn stats() -> ui::stats::StatsScreens {
         posts: 0,
         me,
         personal: vec![("Kills".into(), points.to_string())],
+        medals: Vec::new(),
     };
     let mut s = StatsScreens::new(
         StatsTexts {
@@ -111,6 +112,7 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         respawn_label: Some("Respawn".into()),
         outcome_line: None,
         in_shell: shell.then(|| "Game Options".to_owned()),
+        ..Default::default()
     };
     m.cursor = ui::menu::rows(&m)
         .iter()

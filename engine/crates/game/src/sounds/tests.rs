@@ -419,6 +419,8 @@ fn lib() -> SoundLib {
         handed: None,
         rate_mul: 1.0,
         buses: bus_table("bf1"),
+        effects_volume: 1.0,
+        dialogue_volume: 1.0,
     }
 }
 

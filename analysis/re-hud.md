@@ -219,6 +219,11 @@ EventInput → EventOutput.
   totalAmmoBullets = (int)((reserve + clip) × rounds) — clip and reserve in ONE number; totalClipBullets = (int)(clip ×
   rounds); fractions likewise; infinite (count ≥ 2³¹ or class +0x9c = 0) sends −1 and `ammoInfinite`. On a weapon change it
   sends `.change` with the weapon's vfunc +0x98 value and the localised name (class +0x60, else the class name at +0x40).
+- The port sends the localized names from the match's text tables
+  for both rows. Class identity can refresh the original name fade even
+  when two weapons share the same HUD mesh. Icon-sheet fallbacks still
+  send the same change event, so the labels use the authored placement
+  and 0.25 s fade-in, 2.5 s hold and 1 s fade-out.
 - [V][O] **Which mesh a weapon shows** (second Opus verifier, 2026-09-30, verdict PARTLY on my first wording — this is its
   corrected rule): `.change` carries the weapon's vtable +0x98 value (D:409827, sent at D:409858). For 19 of the 20 BF2
   weapon vtables that is `FUN_00326e28` (D:318603): class+0x68 if non-zero, else class+0x64. class+0x68 = fnv(`HUDTag`),

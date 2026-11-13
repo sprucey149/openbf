@@ -1983,8 +1983,8 @@ and height; a too-weak one only in BF2, only on a waiting / landing / taking-off
 seat / passenger slot), 10 (item) and 11 do fall to the matrix's default (the zeroed mode: no attack). [H] Of the other
 reads of the state word in the AI range [receipt:5878f5dc], `FUN_002c42d8` (vtable 0x622970, unnamed) drops a flyer
 target not in state 0 - it walks to within the two bodies' radii + 1.5 m and claims the target with kind 1, which reads
-as boarding, not the attack. The port's `arsenal::against_vehicle` refuses every weapon at a flyer of 16 m/s or more in
-both games (card HVYA).
+as boarding, not the attack. The port's `arsenal::against_vehicle` applies this gate only to a weak weapon (issue #131,
+November 12, 2026).
 
 ### 24.3 22.1 step 5's building flag [O]
 Bit 0 of the halfword at +0x26e (bit 48 of the u64 at +0x268) is "the class's MaxHealth is finite": the entity base ctor
@@ -2031,3 +2031,13 @@ named by its IsA slot +8 -> type-id global -> `lead_tmp/sair/tools2/typeids.py`)
   (4.3's 10 s is the grenade's).
 - The port (card HVYA): `ArmState::claim` covers thrown weapons on any target, one per team; a missile is not claimed. Named
   in `ai/arsenal.rs`'s header as a deviation; the build is card HVYB.
+
+
+### Minefield hints in the port (November 12, 2026)
+
+The ground brain checks nearby Minefield hints during a capture order.
+A proximity mine goes through the usual weapon switch and trigger. The
+mover follows the normal authored graph, with a bounded approach and a
+short hold after placement. BF2 FUN_002d4908 and FUN_002d4a60
+(B2 259977–260071) establish dispenser capacity and the three-second
+hold. Detpack detonation and native floor selection remain open (#132).

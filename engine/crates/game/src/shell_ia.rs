@@ -57,10 +57,12 @@ pub fn instant_action(
         bf2.bf2_text(key)
             .map_or_else(|| english.to_owned(), |t| t.trim_end().to_owned())
     });
+    let dlc_heroes_installed = crate::dlc::installed(assets_dir);
     let options = SessionOptions {
         difficulty: ia_level(difficulty),
         population_table: crate::conquest_defaults::TABLE,
-        dlc_heroes_installed: crate::dlc::installed(assets_dir),
+        dlc_heroes_installed,
+        dlc_heroes: dlc_heroes_installed,
         ..Default::default()
     };
     InstantAction::new(maps, texts, options)

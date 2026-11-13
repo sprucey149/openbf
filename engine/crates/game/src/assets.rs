@@ -1369,39 +1369,75 @@ impl Scene {
     }
 }
 
-/// Baked BF1 load-screen sequence (bake loadscreen): textures in order.
+/// Baked loading screen textures in display order.
 pub struct LoadScreenAssets {
     pub sequence: Vec<(String, CpuTexture)>,
     /// BF2 stills: show ONE of `sequence` for the load instead of stepping.
     pub pool: bool,
 }
 
-// `LoadScreen`/`LoadStyle` are re-exported at the top of this module: ONE
-// definition shared with `bake::loadscreen`, which writes the file. Before
-// this each side carried its own copy. `LoadScreen::extras` (BF1's planet
-// globe) is read and not yet drawn; the load-screen layout pass is where it
-// lands (PLAN §Presentation, P10 polish).
+fn loadscreen_index(map_dir: &Path) -> Option<LoadScreen> {
+    let text = pak::read_to_string(map_dir.join("load/load.ron")).ok()?;
+    ron::from_str(&text).ok()
+}
+
+/// Read one baked loading image from an unpacked or packaged map.
+pub fn load_loading_image(map_dir: &Path, name: String) -> Option<(String, CpuTexture)> {
+    let path = map_dir.join("load").join(format!("{name}.ktx2"));
+    let bytes = pak::read(path).ok()?;
+    let tex = load_ktx2(&bytes).ok()?;
+    let len = (tex.width as usize)
+        .checked_mul(tex.height as usize)?
+        .checked_mul(4)?;
+    (len != 0 && tex.rgba.len() == len).then_some((name, tex))
+}
+
 /// `<map dir>/load/load.ron` + KTX2s, or None when the map has no load screen.
 pub fn load_loadscreen(map_dir: &Path) -> Option<LoadScreenAssets> {
-    let dir = map_dir.join("load");
-    let ron_txt = pak::read_to_string(dir.join("load.ron")).ok()?;
-    let ls: LoadScreen = ron::from_str(&ron_txt).ok()?;
-    let mut sequence = Vec::new();
-    for name in ls.sequence {
-        let bytes = pak::read(dir.join(format!("{name}.ktx2"))).ok()?;
-        let tex = load_ktx2(&bytes).ok()?;
-        let len = (tex.width as usize)
-            .checked_mul(tex.height as usize)?
-            .checked_mul(4)?;
-        if tex.width == 0 || tex.height == 0 || tex.rgba.len() != len {
-            return None;
-        }
-        sequence.push((name, tex));
-    }
+    let ls = loadscreen_index(map_dir)?;
+    let sequence = ls
+        .sequence
+        .into_iter()
+        .map(|name| load_loading_image(map_dir, name))
+        .collect::<Option<Vec<_>>>()?;
     (!sequence.is_empty()).then_some(LoadScreenAssets {
         sequence,
         pool: ls.style == LoadStyle::Pool,
     })
+}
+
+/// Read only the selected BF2 still, trying the other stills if it is missing.
+pub fn load_loading_still(map_dir: &Path, preferred: &str) -> Option<(String, CpuTexture)> {
+    let ls = loadscreen_index(map_dir)?;
+    if ls.style != LoadStyle::Pool {
+        return None;
+    }
+    let mut names = ls.sequence;
+    if let Some(index) = names.iter().position(|name| name == preferred) {
+        names[..=index].rotate_right(1);
+    }
+    let (name, mut texture) = names
+        .into_iter()
+        .find_map(|name| load_loading_image(map_dir, name))?;
+    // The authored BF2 stills have 1/8-height black bars above and below
+    // their 4:3 content. Remove those for the shared 4:3 zoom canvas.
+    if texture.width == texture.height && texture.height.is_multiple_of(8) {
+        let row = texture.width as usize * 4;
+        let bar = texture.height as usize / 8 * row;
+        texture.rgba.truncate(texture.rgba.len() - bar);
+        texture.rgba.drain(..bar);
+        texture.height -= texture.height / 4;
+        texture.extra_mips.clear();
+    }
+    Some((name, texture))
+}
+
+/// Find the BF1 opening plate even if a later step of that sequence is missing.
+pub fn load_loading_galaxy(map_dir: &Path) -> Option<(String, CpuTexture)> {
+    let ls = loadscreen_index(map_dir)?;
+    let name = ls.sequence.into_iter().next()?;
+    (ls.style == LoadStyle::Sequence && name.starts_with("load_galacticmap"))
+        .then(|| load_loading_image(map_dir, name))?
 }
 
 pub fn load_scene(dir: &Path) -> Result<Scene> {

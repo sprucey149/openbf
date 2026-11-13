@@ -1,14 +1,11 @@
-//! Pause menu (BF2-style, controller-navigated). On the ground it is the
-//! originals' Game Menu ([`PausePage`]): Resume Game, Options (the shell's
-//! settings page), Cheats (the session cheat registry, PLAN §Cheats), Change
-//! class, Respawn, Restart Mission and Quit, the last three behind a Yes/No
-//! popup that opens on No ([`Popup`]). Space battles and the shell's settings
-//! page keep one flat list ([`MenuModel::page`] `None`). Pure egui over a
-//! [`MenuModel`]; the game applies the returned [`MenuAction`]s.
+//! Pause menu state and actions. Ground and space battles use the
+//! BF2-style Game Menu, with the same settings pages in the shell and in
+//! battle. The native presentation is in [`crate::pause_draw`]. Egui draws
+//! the fallback when the baked menu art is unavailable.
 //!
 //! Navigation: D-pad up/down moves the cursor, Cross activates/toggles,
 //! left/right adjusts sliders, Circle or Start resumes; on a keyboard the
-//! arrows, Enter and Esc do the same. The pointer clicks rows (egui), and a
+//! arrows, Enter and Esc do the same. The pointer clicks rows, and a
 //! value row's ◀ and ▶ step it as Left and Right do ([`step`]).
 
 use egui::{Align2, Color32, RichText, Vec2};
@@ -26,11 +23,16 @@ pub struct ClassPickerModel {
 pub enum PausePage {
     #[default]
     Main,
-    /// The shell's Game / Audio Options rows ([`settings_rows`]).
     Options,
+    Settings(SettingsPage),
     /// `[ours]` The session cheat registry (PLAN §Cheats).
     Cheats,
 }
+
+mod settings;
+pub use settings::{
+    draw_fps_counter, rumble_level, ControlContext, FpsCounter, SettingsPage, RUMBLE_LEVELS,
+};
 
 /// A Yes/No popup over the menu; it opens on No (both games' pause menus).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,13 +74,28 @@ impl Default for PauseTexts {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BindingRows {
+    pub title: &'static str,
+    pub labels: Vec<(String, String)>,
+    pub capture: bool,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MenuModel {
     pub class_picker_available: bool,
+    pub bindings: Option<BindingRows>,
     pub class_choices: Option<ClassPickerModel>,
     /// Cheat registry rows: (id, label, enabled).
     pub cheats: Vec<(&'static str, &'static str, bool)>,
     pub assist_intensity: f32,
+    /// Instant Action's 1-based Easy / Normal / Hard / Elite selector.
+    pub difficulty: i32,
+    pub effects_volume: f32,
+    pub dialogue_volume: f32,
+    pub fps_counter: FpsCounter,
+
     /// Team size percentage (the historical action name is SetAiCap).
     pub team_size_pct: u32,
     pub reinforcements_pct: u32,
@@ -94,6 +111,9 @@ pub struct MenuModel {
     pub fov_deg: f32,
     /// The music volume, 0..1 (1 = the disc record's own gain, 0 = off).
     pub music_volume: f32,
+    pub rumble_strength: f32,
+    pub rumble_on_fire: bool,
+    pub career_awards_disabled: bool,
     pub mouse_sensitivity: f32,
     /// The right stick's look sensitivity ([`PAD_LOOK_SENSITIVITY_RANGE`]).
     pub pad_look_sensitivity: f32,
@@ -142,11 +162,19 @@ pub enum MenuAction {
     Restart,
     ToggleCheat(usize),
     SetAssist(f32),
+    SetDifficulty(i32),
+    SetEffectsVolume(f32),
+    SetDialogueVolume(f32),
+    SetFpsCounter(FpsCounter),
+    EditBindings(SettingsPage, ControlContext),
     /// Map-relative team size percentage, 10..=[`crate::population::MAX_TEAM_PCT`].
     SetAiCap(u32),
     SetReinforcements(u32),
     SetFov(f32),
     SetMusic(f32),
+    SetRumble(f32),
+    ToggleRumbleOnFire,
+    SetCareerAwards(bool),
     SetMouseSensitivity(f32),
     SetPadLookSensitivity(f32),
     ToggleFlightControls,
@@ -188,7 +216,7 @@ pub fn draw_controls(
                 .show(ui, |ui| {
                     ui.heading("CONTROLS");
                     ui.label(if capture {
-                        "Press a control · Esc / Start cancels"
+                        "Press and release a control · Hold to cancel"
                     } else {
                         "Select a row to change it · Back returns"
                     });
@@ -234,6 +262,7 @@ pub struct MenuInput {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Row {
     ClassPicker,
+    Binding(usize),
     ClassBack,
     ClassChoice(usize),
     Resume,
@@ -241,12 +270,22 @@ pub enum Row {
     No,
     Yes,
     Cheat(usize),
+    Settings(SettingsPage),
+    EditBindings(ControlContext),
+    Difficulty,
+    EffectsVolume,
+    DialogueVolume,
+    GraphicsQuality,
+    FpsCounter,
     Assist,
     AiCap,
     Reinforcements,
     Viewpoint,
     Fov,
     Music,
+    Rumble,
+    RumbleOnFire,
+    CareerAwards,
     MouseSensitivity,
     PadLookSensitivity,
     FlightControls,
@@ -264,7 +303,7 @@ pub enum Row {
 
 /// The settings rows, in order: the shell's settings page and the Game
 /// Menu's Options page alike.
-pub fn settings_rows() -> [Row; 12] {
+pub fn settings_rows() -> [Row; 14] {
     [
         Row::Assist,
         Row::AiCap,
@@ -274,14 +313,19 @@ pub fn settings_rows() -> [Row; 12] {
         Row::MouseSensitivity,
         Row::PadLookSensitivity,
         Row::FlightControls,
+        Row::Rumble,
         Row::InvertY,
         Row::LowPowerResolution,
         Row::InputIcons,
         Row::Viewpoint,
+        Row::CareerAwards,
     ]
 }
 
 pub fn rows(m: &MenuModel) -> Vec<Row> {
+    if let Some(bindings) = &m.bindings {
+        return (0..bindings.labels.len()).map(Row::Binding).collect();
+    }
     if let Some(choices) = &m.class_choices {
         return std::iter::once(Row::ClassBack)
             .chain(choices.choices.iter().map(|(id, _)| Row::ClassChoice(*id)))
@@ -296,9 +340,6 @@ pub fn rows(m: &MenuModel) -> Vec<Row> {
         // `[ours]` Cheats and Change class follow Options.
         Some(PausePage::Main) => {
             let mut v = vec![Row::Resume, Row::Options];
-            if !m.cheats.is_empty() {
-                v.push(Row::Cheats);
-            }
             if m.class_picker_available {
                 v.push(Row::ClassPicker);
             }
@@ -312,7 +353,10 @@ pub fn rows(m: &MenuModel) -> Vec<Row> {
             v
         }
         Some(PausePage::Options) => std::iter::once(Row::PageBack)
-            .chain(settings_rows())
+            .chain(SettingsPage::CATEGORIES.map(Row::Settings))
+            .collect(),
+        Some(PausePage::Settings(page)) => std::iter::once(Row::PageBack)
+            .chain(page.rows().iter().copied())
             .collect(),
         Some(PausePage::Cheats) => std::iter::once(Row::PageBack).chain(cheats).collect(),
         None => {
@@ -349,10 +393,22 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
         Row::Resume => MenuAction::Resume,
         Row::Cheat(i) => MenuAction::ToggleCheat(i),
         Row::Options => MenuAction::OpenPage(PausePage::Options),
-        Row::Cheats => MenuAction::OpenPage(PausePage::Cheats),
+        Row::Cheats if row_locked(m, row).is_none() => MenuAction::OpenPage(PausePage::Cheats),
+        Row::Settings(page) => MenuAction::OpenPage(PausePage::Settings(page)),
+        Row::EditBindings(context) => match m.page {
+            Some(PausePage::Settings(page)) => MenuAction::EditBindings(page, context),
+            _ => return None,
+        },
         Row::PageBack => MenuAction::ClosePage,
         Row::Restart => MenuAction::RequestRestart,
         Row::FlightControls => MenuAction::ToggleFlightControls,
+        Row::FpsCounter => MenuAction::SetFpsCounter(m.fps_counter.toggled()),
+        Row::CareerAwards => MenuAction::SetCareerAwards(m.career_awards_disabled),
+        Row::Rumble => {
+            let next = (rumble_level(m.rumble_strength) + 1) % RUMBLE_LEVELS.len();
+            MenuAction::SetRumble(RUMBLE_LEVELS[next].0)
+        }
+        Row::RumbleOnFire => MenuAction::ToggleRumbleOnFire,
         // The flat list (space battles) quits at once, as it always has.
         Row::Quit if m.page.is_some() => MenuAction::RequestQuit,
         Row::Quit => MenuAction::Quit,
@@ -390,6 +446,22 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             m.population_note[1]
         )),
         Row::Reinforcements => Some(m.population_note[1].clone()),
+        Row::Binding(_) => m.bindings.as_ref().and_then(|b| {
+            if b.capture {
+                Some("Press and release a control to assign it. Hold a control to cancel.".into())
+            } else {
+                b.message.clone()
+            }
+        }),
+        Row::Difficulty if m.in_shell.is_none() => Some("Changes apply from the next round.".into()),
+        Row::Rumble => Some(
+            "Vibrates when you take a hit, your vehicle takes damage, or your ship collides."
+                .into(),
+        ),
+        Row::CareerAwards => Some(
+            "Use earned weapons and stat bonuses. Medals and career stats still count when off."
+                .to_owned(),
+        ),
         Row::InputIcons => Some(
             "Which button icons the game shows. Auto follows the controller you are using."
                 .to_owned(),
@@ -415,6 +487,10 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
 /// with this reason as its help, and takes no step.
 pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
     match row {
+        Row::GraphicsQuality => Some("Normal is the current graphics preset."),
+        Row::Cheats if m.cheats.is_empty() => {
+            Some("Cheats are available while a battle is paused.")
+        }
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team size is fixed in this battle: it has no map team sizes to scale.")
         }
@@ -423,7 +499,7 @@ pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
 }
 
 /// The rows a step changes (Left / Right, ◀ / ▶); Button prompts too.
-fn is_value_row(row: Row) -> bool {
+pub(crate) fn is_value_row(row: Row) -> bool {
     matches!(
         row,
         Row::Assist
@@ -431,9 +507,15 @@ fn is_value_row(row: Row) -> bool {
             | Row::Reinforcements
             | Row::Fov
             | Row::Music
+            | Row::Difficulty
+            | Row::EffectsVolume
+            | Row::DialogueVolume
+            | Row::FpsCounter
+            | Row::Rumble
             | Row::MouseSensitivity
             | Row::PadLookSensitivity
             | Row::FlightControls
+            | Row::CareerAwards
             | Row::InputIcons
     )
 }
@@ -471,7 +553,16 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     // Back resumes from anywhere, the class picker and the Respawn popup
     // included (playtest A3).
     if input.back {
-        return (cursor, vec![MenuAction::Resume]);
+        let back = if matches!(
+            m.page,
+            Some(PausePage::Options | PausePage::Settings(_) | PausePage::Cheats)
+        ) && m.popup.is_none()
+        {
+            MenuAction::ClosePage
+        } else {
+            MenuAction::Resume
+        };
+        return (cursor, vec![back]);
     }
     if let Some(picker) = &m.class_choices {
         let n = picker.tabs.len();
@@ -503,7 +594,7 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         Row::Assist if input.left || input.right => {
             let d = if input.right { 0.1 } else { -0.1 };
             actions.push(MenuAction::SetAssist(
-                ((m.assist_intensity + d) * 10.0).round() / 10.0,
+                ((m.assist_intensity + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
             ));
         }
         Row::AiCap if input.left || input.right => {
@@ -530,6 +621,39 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
                 ((m.fov_scale + d) * 20.0).round() / 20.0,
             ));
         }
+        Row::Difficulty if input.left || input.right => {
+            let d = if input.right { 1 } else { -1 };
+            actions.push(MenuAction::SetDifficulty((m.difficulty + d).clamp(1, 4)));
+        }
+        Row::EffectsVolume | Row::DialogueVolume if input.left || input.right => {
+            let effects = rows[cursor] == Row::EffectsVolume;
+            let level = if effects {
+                m.effects_volume
+            } else {
+                m.dialogue_volume
+            };
+            let d = if input.right { 1.0 } else { -1.0 };
+            let level = ((level * 10.0).round() + d).clamp(0.0, 10.0) / 10.0;
+            actions.push(if effects {
+                MenuAction::SetEffectsVolume(level)
+            } else {
+                MenuAction::SetDialogueVolume(level)
+            });
+        }
+        Row::FpsCounter if input.left || input.right => {
+            actions.push(MenuAction::SetFpsCounter(m.fps_counter.toggled()));
+        }
+        Row::Rumble if input.left || input.right => {
+            let i = rumble_level(m.rumble_strength);
+            let next = if input.right {
+                (i + 1).min(RUMBLE_LEVELS.len() - 1)
+            } else {
+                i.saturating_sub(1)
+            };
+            if next != i {
+                actions.push(MenuAction::SetRumble(RUMBLE_LEVELS[next].0));
+            }
+        }
         Row::Music if input.left || input.right => {
             let d = if input.right { 0.1 } else { -0.1 };
             actions.push(MenuAction::SetMusic(
@@ -552,6 +676,9 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         }
         Row::FlightControls if input.left || input.right => {
             actions.push(MenuAction::ToggleFlightControls)
+        }
+        Row::CareerAwards if input.left || input.right => {
+            actions.push(MenuAction::SetCareerAwards(input.right));
         }
         Row::InvertY if input.confirm || input.left || input.right => {
             actions.push(MenuAction::ToggleInvertY)
@@ -819,16 +946,21 @@ impl RowList {
 
 /// The first row of a list of `rows` showing `shown`, with `cursor` as near the
 /// middle as the ends allow.
-fn first_row(cursor: usize, shown: usize, rows: usize) -> usize {
+pub(crate) fn first_row(cursor: usize, shown: usize, rows: usize) -> usize {
     cursor
         .saturating_sub(shown / 2)
         .min(rows.saturating_sub(shown))
 }
 
 /// A row's label and value as drawn.
-fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
+pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
+    let volume = |level: f32| Some(format!("{:.0}%", level * 100.0));
     let on_off = |on: bool| Some(if on { "ON" } else { "off" }.to_owned());
     match row {
+        Row::Binding(i) => {
+            let (name, value) = &m.bindings.as_ref().unwrap().labels[i];
+            (name.clone(), (!value.is_empty()).then(|| value.clone()))
+        }
         Row::ClassPicker => ("Change class / hero (testing)".into(), None),
         Row::ClassBack => ("Back".into(), None),
         Row::ClassChoice(k) => (
@@ -863,6 +995,18 @@ fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
             }
         }
         Row::Options => (m.texts.options.clone(), None),
+        Row::Settings(page) => (page.title().into(), None),
+        Row::EditBindings(context) => (context.title().into(), None),
+        Row::Difficulty => (
+            "Difficulty".into(),
+            Some(
+                ["Easy", "Normal", "Hard", "Elite"][(m.difficulty.clamp(1, 4) - 1) as usize].into(),
+            ),
+        ),
+        Row::EffectsVolume => ("Sound Effects Volume".into(), volume(m.effects_volume)),
+        Row::DialogueVolume => ("Dialogue Volume".into(), volume(m.dialogue_volume)),
+        Row::GraphicsQuality => ("Graphics quality".into(), Some("Normal".into())),
+        Row::FpsCounter => ("FPS counter".into(), Some(m.fps_counter.label().into())),
         Row::Cheats => (m.texts.cheats.clone(), None),
         Row::Restart => (m.texts.restart.clone(), None),
         Row::PageBack => ("Back".into(), None),
@@ -889,10 +1033,7 @@ fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
                 .into(),
             ),
         ),
-        Row::Fov => (
-            "Field of view".into(),
-            Some(format!("{:.2}× ({:.0}°)", m.fov_scale, m.fov_deg)),
-        ),
+        Row::Fov => ("Field of view".into(), Some(format!("{:.0}°", m.fov_deg))),
         Row::Music => (
             "Music volume".into(),
             Some(if m.music_volume <= 0.0 {
@@ -900,6 +1041,25 @@ fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
             } else {
                 format!("{:.0}%", m.music_volume * 100.0)
             }),
+        ),
+        Row::CareerAwards => (
+            "Career award bonuses".into(),
+            Some(
+                if m.career_awards_disabled {
+                    "Off"
+                } else {
+                    "On"
+                }
+                .into(),
+            ),
+        ),
+        Row::Rumble => (
+            "Controller rumble".into(),
+            Some(RUMBLE_LEVELS[rumble_level(m.rumble_strength)].1.into()),
+        ),
+        Row::RumbleOnFire => (
+            "Rumble on fire".into(),
+            Some(if m.rumble_on_fire { "On" } else { "Off" }.into()),
         ),
         Row::MouseSensitivity => (
             "Mouse sensitivity".into(),
@@ -932,20 +1092,24 @@ fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
 
 /// The panel's title: the Game Menu's page, the class picker's, the shell
 /// page's own, or the flat list's.
-fn menu_title(m: &MenuModel) -> &str {
+pub(crate) fn menu_title(m: &MenuModel) -> &str {
     if m.class_choices.is_some() {
         return "CHANGE CLASS / HERO";
+    }
+    if let Some(bindings) = &m.bindings {
+        return bindings.title;
     }
     match m.page {
         Some(PausePage::Main) => &m.texts.title,
         Some(PausePage::Options) => &m.texts.options,
         Some(PausePage::Cheats) => &m.texts.cheats,
+        Some(PausePage::Settings(page)) => page.title(),
         None => m.in_shell.as_deref().unwrap_or("PAUSED"),
     }
 }
 
 /// The open popup's question.
-fn popup_prompt(m: &MenuModel) -> Option<&str> {
+pub(crate) fn popup_prompt(m: &MenuModel) -> Option<&str> {
     Some(match m.popup? {
         Popup::Respawn => &m.texts.respawn_prompt,
         Popup::Quit => &m.texts.quit_prompt,
@@ -961,6 +1125,7 @@ fn list_key(m: &MenuModel) -> u8 {
         (None, None | Some(PausePage::Main)) => 0,
         (None, Some(PausePage::Options)) => 4,
         (None, Some(PausePage::Cheats)) => 5,
+        (None, Some(PausePage::Settings(page))) => 6 + page as u8,
     }
 }
 
@@ -1014,7 +1179,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     let rows = rows(m);
                     let has_help = rows.iter().any(|r| {
-                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls)
+                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble)
                             || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;
@@ -1090,7 +1255,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                         RichText::new(if m.class_choices.is_some() {
                             "Up/Down choose · Left/Right tabs · Enter select · Esc back".to_owned()
                         } else {
-                            m.icons.menu_footer(m.in_shell.is_none())
+                            m.icons.menu_footer()
                         })
                             .size(12.0)
                             .color(Color32::GRAY),

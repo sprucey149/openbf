@@ -18,7 +18,9 @@ fn texts() -> Texts {
         ("common.sides.all.lastnames.01", "Pulastra"),
         ("level.hoth.cp5", "Echo Base"),
         ("weapons.imp.weap.inf_rifle", "Blaster Rifle"),
+        ("game.awards.medal.warhero", "War Hero"),
         ("game.awards.bonus.regulator", "Award: Flechette Shotgun"),
+        ("game.awards.bonus.warhero", "Award: Damage Increase"),
         ("ifs.sideselect.chooseteam", "Select a team"),
         ("entity.all.inf_soldier", "Rebel Soldier"),
         ("entity.imp.inf_rifleman", "Stormtrooper"),
@@ -1089,9 +1091,89 @@ fn the_heavy_blast_cannon_has_its_own_name_and_line() {
         feed.award_bonus("regulator", None).as_deref(),
         Some("Award: Flechette Shotgun")
     );
-    assert_eq!(feed.award_bonus("warhero", None), None);
+    assert_eq!(feed.award_bonus("guardian", None), None);
     assert_eq!(feed.weapon_name("imp_weap_award_shotgun"), None);
     assert_eq!(feed.weapon_name("geo_weap_award_blast_cannon"), None);
+}
+
+#[test]
+fn medals_earned_without_bonuses_are_announced_and_flushed_to_the_career() {
+    let mut walk = crate::walk::WalkSim::new(7, Vec3::ZERO, None);
+    let player = walk.player;
+    let mut profile = crate::profile::Profile::default();
+    profile.settings.career_awards = false;
+    profile.career.medals[8] = 3;
+    profile.career.medals[0] = 20;
+    let mut seen = profile.career.medals;
+    walk.sim.install_medal_career(player, seen);
+    walk.sim.set_career_award_bonuses(false);
+    walk.sim.score_medal_points(player, 36);
+    let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
+    feed.round.opening_medals = Some(seen);
+    feed.note_medals(&walk.sim, player, &mut seen);
+    let messages = feed.take();
+    assert_eq!(messages.last().unwrap().text, "War Hero");
+    assert_eq!(messages.last().unwrap().color, [32, 223, 223]);
+    assert!(!messages.iter().any(|m| m.text.starts_with("Award: ")));
+    assert!(walk.flush_career_progress(&mut profile));
+    assert_eq!(profile.career.medals[8], 4);
+    assert!(!profile.settings.career_awards);
+    assert_eq!(walk.sim.award_bits(walk.sim.unit(player).unwrap()), 0);
+
+    // Final stats still see an award after profile autosave when the HUD's
+    // notification path has already advanced its seen counts.
+    seen = profile.career.medals;
+    feed.note_medals(&walk.sim, player, &mut seen);
+    let stats = crate::round_stats::screens(
+        &walk.sim,
+        feed.round(),
+        player,
+        &profile.career,
+        &crate::round_stats::Names {
+            unit: &|i| format!("Player {i}"),
+            class: &|_, _| String::new(),
+            weapon: &|_| String::new(),
+            text: &|_, fallback| fallback.to_owned(),
+            sides: ["all", "imp"],
+        },
+    );
+    assert_eq!(
+        stats.selected().unwrap().medals,
+        [
+            ("Endurance".to_owned(), 1),
+            ("Guardian".to_owned(), 1),
+            ("War Hero".to_owned(), 1)
+        ]
+    );
+    assert_eq!(stats.career.medals[0].count, 20);
+    assert_eq!(stats.career.medals.last().unwrap().count, 4);
+}
+
+#[test]
+fn the_medal_name_precedes_a_newly_active_bonus() {
+    for (career_count, bonus) in [(0, false), (3, true), (63, true), (64, false)] {
+        let mut walk = crate::walk::WalkSim::new(7, Vec3::ZERO, None);
+        let player = walk.player;
+        let mut seen = [0; core::sim::MEDAL_THRESHOLDS.len()];
+        seen[8] = career_count;
+        walk.sim.install_medal_career(player, seen);
+        walk.sim.score_medal_points(player, 36);
+        let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
+        feed.note_medals(&walk.sim, player, &mut seen);
+        let messages = feed.take();
+        let messages: Vec<_> = messages
+            .iter()
+            .filter(|m| matches!(m.text.as_str(), "War Hero" | "Award: Damage Increase"))
+            .map(|m| (m.text.as_str(), m.color))
+            .collect();
+        let mut expected = vec![("War Hero", [32, 223, 223])];
+        if bonus {
+            expected.push(("Award: Damage Increase", [223, 223, 32]));
+        }
+        assert_eq!(messages, expected, "{career_count} previous medals");
+        feed.note_medals(&walk.sim, player, &mut seen);
+        assert!(feed.take().is_empty());
+    }
 }
 
 #[test]

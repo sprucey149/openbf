@@ -96,7 +96,8 @@ mod water;
 mod weak_lock;
 
 pub use awards::{
-    DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL, TECHNICIAN_MEDAL, WEAPON_MEDALS,
+    medal_level, medal_threshold, MedalCounts, DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL,
+    MEDAL_THRESHOLDS, TECHNICIAN_MEDAL, WEAPON_MEDALS,
 };
 pub use beam::Beam;
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};

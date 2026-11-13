@@ -142,6 +142,24 @@ fn refresh(current: &mut (f32, f32), incoming: (f32, f32)) -> bool {
 }
 
 impl Sim {
+    /// Keep the damage and defense effects in step with their awards.
+    pub(super) fn sync_award_buffs(&mut self, i: usize) {
+        let u = &self.units[i];
+        let war_hero = self.medal_effect(u, WAR_HERO_MEDAL);
+        let guardian = self.medal_effect(u, GUARDIAN_MEDAL);
+        let buffs = &mut self.units[i].buffs;
+        if war_hero {
+            buffs.offense = WAR_HERO;
+        } else if buffs.offense == WAR_HERO {
+            buffs.offense = Buffs::default().offense;
+        }
+        if guardian {
+            buffs.defense = GUARDIAN;
+        } else if buffs.defense == GUARDIAN {
+            buffs.defense = Buffs::default().defense;
+        }
+    }
+
     /// One tick of every soldier's effects: dead soldiers lose theirs,
     /// regeneration heals up to full health, poison damages with its
     /// caster's credit.
@@ -151,23 +169,8 @@ impl Sim {
                 self.units[i].buffs = Buffs::default();
                 continue;
             }
-            // The damage and defense awards last exactly as long as their
-            // medals are held.
-            let u = &self.units[i];
-            let war_hero = self.medal_effect(u, WAR_HERO_MEDAL);
-            let guardian = self.medal_effect(u, GUARDIAN_MEDAL);
-            let buffs = &mut self.units[i].buffs;
-            if war_hero {
-                buffs.offense = WAR_HERO;
-            } else if buffs.offense == WAR_HERO {
-                buffs.offense = Buffs::default().offense;
-            }
-            if guardian {
-                buffs.defense = GUARDIAN;
-            } else if buffs.defense == GUARDIAN {
-                buffs.defense = Buffs::default().defense;
-            }
-            buffs.tick(dt);
+            self.sync_award_buffs(i);
+            self.units[i].buffs.tick(dt);
             let sealed = self.units[i].mount.is_some() && !self.hero_body_active(i);
             let u = &mut self.units[i];
             // Inside a hull his health is what he boarded with, either way.

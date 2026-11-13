@@ -544,6 +544,31 @@ fn weapon(key: &str, class: &str, icon: Option<&str>, total: Option<u32>) -> ui:
     }
 }
 
+#[test]
+fn stock_hud_places_weapon_names_above_both_rows() {
+    let Some(mut v) = view([640, 480]) else {
+        return;
+    };
+    let texts = game::event_feed::Texts::load(&baked(), "bf2");
+    let mut m = hot1_post_a();
+    let rifle = m.weapon.as_mut().unwrap();
+    rifle.class = "all_weap_inf_rifle".into();
+    rifle.name = texts.weapon_name(&rifle.class).expect("stock rifle name");
+    let grenade = "rep_weap_inf_thermaldetonator";
+    m.weapon2 = Some(ui::hud::HudWeapon {
+        name: texts.weapon_name(grenade).expect("stock grenade name"),
+        ..weapon(grenade, grenade, None, Some(4))
+    });
+    v.update(&m, 0.3, [640, 480]);
+    let primary = v.bounds("player1weapon1name").unwrap();
+    let secondary = v.bounds("player1weapon2name").unwrap();
+    let ammo = v.bounds("player1health_fill").unwrap();
+    assert!(primary[1] < ammo[1] && secondary[1] < primary[1]);
+    v.update(&m, 4.0, [640, 480]);
+    assert!(v.bounds("player1weapon1name").is_none());
+    assert!(v.bounds("player1weapon2name").is_none());
+}
+
 /// `v` after `model` has been up for a second (past the rows' fades).
 fn shown(v: &mut HudView, model: &ui::hud::HudModel) {
     v.update(model, 0.0, [640, 480]);

@@ -227,6 +227,7 @@ pub(crate) struct Ctx<'a> {
     pub(crate) hud: &'a Hud,
     pub(crate) art: &'a HudArt,
     pub(crate) out: HudFrame,
+    pub(crate) menu_fonts: bool,
 }
 
 /// A textured quad in element-local frame pixels.
@@ -662,7 +663,7 @@ impl<'a> Ctx<'a> {
     }
 
     pub(crate) fn font(&self, role: &str) -> Option<&'a HudFont> {
-        if self.hud.shell.is_some() {
+        if self.menu_fonts {
             self.art.menu_font(role)
         } else {
             self.art.fonts.get(role)
@@ -940,11 +941,33 @@ pub(crate) fn run_width(font: &HudFont, text: &str, kx: f32, shadow: bool) -> f3
 }
 
 /// Lay the HUD out for a window of `size` pixels.
+/// The shell movie with the same options panel used in battle.
+pub fn draw_shell_options(
+    hud: &Hud,
+    art: &HudArt,
+    menus: &crate::shell_ps2::ShellMenus,
+    movie: bool,
+    model: &crate::menu::MenuModel,
+    animation: &crate::pause_draw::Animation,
+    size: [f32; 2],
+) -> HudFrame {
+    let mut ctx = Ctx {
+        hud,
+        art,
+        out: HudFrame::default(),
+        menu_fonts: true,
+    };
+    ctx.shell_page(menus, movie, size);
+    crate::pause_draw::draw_stack(&mut ctx, model, animation, size);
+    ctx.out
+}
+
 pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
     let mut ctx = Ctx {
         hud,
         art,
         out: HudFrame::default(),
+        menu_fonts: hud.shell.is_some(),
     };
     if let Some((menus, movie)) = &hud.shell {
         ctx.shell_page(menus, *movie, size);
@@ -1108,6 +1131,7 @@ mod tests {
                         hud: &hud,
                         art,
                         out: HudFrame::default(),
+                        menu_fonts: false,
                     };
                     ctx.run(
                         0,
@@ -1276,6 +1300,7 @@ mod tests {
                 hud,
                 art: &art,
                 out: HudFrame::default(),
+                menu_fonts: false,
             };
             ctx.mesh(0, "m", &Mat4::IDENTITY, &screen, [1.0; 4], false);
             ctx.out.verts[0].uv

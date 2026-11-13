@@ -440,6 +440,9 @@ struct App {
     feed: game::event_feed::EventFeed,
     paused: bool,
     pause_menu: game::pause::PauseMenu,
+    controls: Option<front::Controls>,
+    binding_context: Option<ui::menu::ControlContext>,
+    context_gamepad: Option<input::Mapping>,
     /// Placeholder muzzle/impact effects (visual only — `game::fx`).
     fx: game::fx::Fx,
     /// The map's precipitation and wind (visual only — `game::weather`).
@@ -470,6 +473,7 @@ struct App {
     /// The frame record (dev mode, card HITCH) and `OPENBF_FRAME_PROFILE=<csv>`'s
     /// row of CPU / GPU ms per battle frame (`game::frame_profile`).
     frame_profile: Option<game::frame_profile::FrameProfile>,
+    frame_seconds: f32,
     /// Low Power Resolution's controller (`game::dyn_res`).
     dyn_res: game::dyn_res::DynRes,
     /// What it holds this battle's frames to, read from the display once.
@@ -534,6 +538,8 @@ struct App {
     vehicle_vis: game::viewer::VehicleVisuals,
     deka_vis: game::viewer::DroidekaVisuals,
     gilrs: Option<gilrs::Gilrs>,
+    rumble_effect: Option<gilrs::ff::Effect>,
+    rumble_tick: game::rumble::TickFeedback,
     /// A connected pad's dead camera stick / FIRE (`input::log_pads`), shown
     /// on every screen until a pad that resolves replaces it (card PADM).
     pad_warning: Option<String>,
@@ -727,9 +733,13 @@ impl App {
             feed: game::event_feed::EventFeed::default(),
             paused: false,
             pause_menu: game::pause::PauseMenu::default(),
+            controls: None,
+            binding_context: None,
+            context_gamepad: None,
             quit_clicked: false,
             restart_clicked: false,
             frame_profile: None,
+            frame_seconds: 0.0,
             dyn_res: game::dyn_res::DynRes::default(),
             dyn_res_budget_ms: None,
             profile,
@@ -751,6 +761,8 @@ impl App {
             stick_range: input::StickRange::default(),
             stick_sample: ([0.0; 2], [0.0; 2]),
             active_pad: input::ActivePad::default(),
+            rumble_effect: None,
+            rumble_tick: Default::default(),
             icon_device: game::input_icons::DeviceTracker::default(),
             keys_held: 0,
             keys_tapped: 0,
@@ -1127,6 +1139,10 @@ impl App {
         }
         // `[ours]` The session's cheats, whatever the setup says (CHEAT2).
         self.cheats.install(&mut walk.sim);
+        walk.sim
+            .install_medal_career(walk.player, self.profile.career.medals);
+        walk.sim
+            .set_career_award_bonuses(self.profile.settings.career_awards);
         walk.blend = game::render_blend::Blend::from_env();
         self.foley = game::foley::Foley::load(&scene.dir, &walk);
         self.engines = game::engine_sound::EngineSounds::new(&scene.dir, &walk);
@@ -1209,6 +1225,7 @@ impl App {
         let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
         let setup_started = std::time::Instant::now();
         self.sounds = game::sounds::SoundLib::load(&scene.dir);
+        self.sync_audio_levels();
         self.music_voice = None;
         // The mission whose pair was picked (Republic against CIS runs the
         // map's Clone Wars script), the player's army on its own team there;
@@ -1389,6 +1406,8 @@ impl App {
 
     /// Battle → shell (records the round).
     fn leave_battle(&mut self) {
+        self.rumble_effect = None;
+        self.rumble_tick = Default::default();
         self.blackbox_exit();
         if let Some((walk, _)) = self.walk.as_mut() {
             if !self.round_recorded {
@@ -1422,6 +1441,13 @@ impl App {
     }
 
     /// The control prompts' icons this frame.
+    fn sync_audio_levels(&mut self) {
+        let s = &self.profile.settings;
+        if let Some(lib) = self.sounds.as_mut() {
+            lib.set_user_volumes(s.effects_volume, s.dialogue_volume);
+        }
+    }
+
     fn current_icons(&mut self) -> ui::input_icons::Icons {
         self.icon_device.sync(self.gilrs.as_ref(), &self.active_pad);
         let settings = &self.profile.settings;
@@ -1443,9 +1469,6 @@ impl App {
                 self.pad_warning = input::log_pads_with(g, map, &self.active_pad);
                 self.gameplay_stick.select(None);
                 self.stick_range.reset();
-                if let Some(front) = self.front.as_mut() {
-                    front.reset_control_device();
-                }
             } else if self.active_pad.id != was {
                 self.pad_warning = input::active_pad_warning(g, map, &self.active_pad);
             }
@@ -1508,6 +1531,9 @@ impl App {
                 }
             }
         }
+        if self.active_pad.id.is_none() {
+            self.reset_control_device();
+        }
         let shell = matches!(self.screen, Screen::Shell);
         now |= game::kbm::menu_bits(self.keys_held, shell);
         let tapped = game::kbm::menu_bits(std::mem::take(&mut self.keys_tapped), shell);
@@ -1515,6 +1541,29 @@ impl App {
         let edges = game::kbm::menu_edges(now, self.prev_menu_buttons, tapped, north_backs);
         self.prev_menu_buttons = now;
         edges
+    }
+
+    fn sync_binding_context(&mut self) {
+        let context = self
+            .walk
+            .as_ref()
+            .and_then(|(walk, _)| game::control_layout::current(walk));
+        if context != self.binding_context {
+            self.binding_context = context;
+            self.refresh_context_bindings();
+        }
+    }
+
+    fn refresh_context_bindings(&mut self) {
+        let settings = &self.profile.settings;
+        let keyboard = self.binding_context.and_then(|context| {
+            game::control_layout::keyboard(context, settings.keyboard_layouts.get(context))
+        });
+        self.kbm
+            .set_bindings(keyboard.as_ref().unwrap_or(&settings.keyboard_bindings));
+        self.context_gamepad = self.binding_context.and_then(|context| {
+            game::control_layout::gamepad(context, settings.gamepad_layouts.get(context))
+        });
     }
 
     /// Sample the active gamepad into a sim PadState (walk mode); `look` is
@@ -1561,7 +1610,9 @@ impl App {
                 self.stick_sample = (raw, full);
                 let (state, arms) = input::pad_from_gamepad_with_arms(
                     &pad,
-                    &self.profile.settings.controller_bindings,
+                    self.context_gamepad
+                        .as_ref()
+                        .unwrap_or(&self.profile.settings.controller_bindings),
                     self.gameplay_stick.arms,
                     look,
                     full,

@@ -375,15 +375,15 @@ impl WalkSim {
     /// mission's (seeded by the round's tick), the banner for `music_secs` -
     /// and steps with this frame's presses on the stats pages (issue #50;
     /// the caller makes them when [`crate::round_end::RoundEnd::wants_stats`]).
-    /// True once it is left (the next playlist map, else the shell).
+    /// Whether it is left and which menu cue this input requested.
     pub fn follow_round_end(
         &mut self,
         dt: f32,
         pad: ui::stats::Pad,
         music_secs: Option<f32>,
-    ) -> bool {
+    ) -> (bool, Option<ui::shell_feel::MenuSound>) {
         let Some(winner) = self.sim.outcome else {
-            return false;
+            return (false, None);
         };
         let r = self.round_end.get_or_insert_with(|| {
             use crate::round_end::{Result, RoundEnd};
@@ -397,8 +397,8 @@ impl WalkSim {
             };
             RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs)
         });
-        r.step(dt, pad);
-        r.done()
+        let sound = r.step(dt, pad);
+        (r.done(), sound)
     }
 
     /// The level start's backdrop follows slot 0's spawn screen and ends

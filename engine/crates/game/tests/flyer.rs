@@ -450,3 +450,117 @@ fn flight_space_yavin_seeded_round_uses_real_follower_classes() {
         assert_eq!(run(), run());
     }
 }
+
+#[test]
+fn stock_heavy_launchers_guide_a_rocket_to_a_hostile_aircraft() {
+    use core::missile::MissileTarget;
+    use core::sim::{buttons, PadState, Sim, SpaceAssault};
+    use core::soldier::GroundRules;
+    use core::unit::UnitSpec;
+    use core::vehicle::{flyer::FlightPhase, SeatKind, VehicleKind, VehicleSpec};
+    use glam::Vec3;
+
+    let root = std::env::var_os("OPENBF_ASSETS_BAKED")
+        .map(PathBuf::from)
+        .unwrap_or_else(game::assets::baked_root)
+        .join("classes");
+    if !root.join("bf1_imp.ron").is_file() || !root.join("bf2_imp.ron").is_file() {
+        assert!(
+            std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+            "missing stock launcher classes in {}",
+            root.display()
+        );
+        return;
+    }
+    for (game, class, ship, space) in [
+        (
+            "bf1",
+            "imp_weap_inf_torpedo_launcher",
+            "all_fly_xwing",
+            false,
+        ),
+        (
+            "bf2",
+            "imp_weap_inf_rocket_launcher",
+            "all_fly_xwing_sc",
+            false,
+        ),
+        (
+            "bf2",
+            "imp_weap_inf_rocket_launcher",
+            "all_fly_xwing_sc",
+            true,
+        ),
+    ] {
+        let db = game::roster::load_classdb(&root, game, &["imp", "all"]).unwrap();
+        let launcher = game::roster::weapon_from_db(&db, class).unwrap();
+        let mut sim = Sim::empty(1);
+        sim.ground_rules = if game == "bf1" {
+            GroundRules::Bf1
+        } else {
+            GroundRules::Bf2
+        };
+        if space {
+            sim.install_space_assault(SpaceAssault::new(180));
+        }
+        sim.heightfield = Some(core::heightfield::Heightfield {
+            size: 2,
+            unit: 400.0,
+            offset_x: 200.0,
+            offset_z: 200.0,
+            heights: vec![0.0; 4],
+        });
+        let class = sim.add_weapon_class(launcher);
+        let player = sim
+            .spawn(&UnitSpec {
+                weapon_class: class,
+                ..UnitSpec::player(0, Vec3::ZERO)
+            })
+            .unwrap();
+        let target = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(1),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::new(-20.0, 24.0, -65.0),
+            yaw: 0.0,
+            max_health: 1_500.0,
+            health_type: game::vehicle_class::health_type(&db, ship),
+            seats: vec![SeatKind::Pilot],
+        });
+        sim.vehicle_mut(target).unwrap().flyer.phase = FlightPhase::Flying;
+        for tick in 0..60 {
+            let pos = Vec3::new(-20.0 + tick as f32 * 0.5, 24.0, -65.0);
+            sim.vehicle_mut(target).unwrap().pos = pos;
+            let u = sim.unit_mut(player).unwrap();
+            let d = pos - (u.soldier.pos + Vec3::Y * 1.7);
+            u.soldier.yaw = (-d.x).atan2(-d.z);
+            u.soldier.pitch = d.y.atan2(d.x.hypot(d.z));
+            sim.step(&[PadState::default()]);
+        }
+        let u = sim.unit(player).unwrap();
+        assert!(
+            u.weapon.lock_held >= sim.weapon_classes[class].lock_time,
+            "{game} space={space}"
+        );
+        let fire = PadState {
+            buttons: buttons::FIRE,
+            ..Default::default()
+        };
+        let missile = (0..30).find_map(|_| {
+            sim.step(&[fire]);
+            sim.bolts
+                .iter()
+                .find(|b| b.owner == player)
+                .and_then(|b| b.missile)
+        });
+        assert_eq!(
+            missile
+                .expect("the launcher fires after its authored startup")
+                .target,
+            Some(MissileTarget::Vehicle(target)),
+            "{game} space={space}"
+        );
+    }
+}

@@ -11,7 +11,8 @@ and LAN are decisions for later work, not current tasks.
   player's own files. Original meshes, art, audio, script bytecode and localized text stay in local builds.
 - **Inputs.** One source per game, identified by content, with unknown formats refused clearly. PC BF1 plus PC BF2 can build
   without a console disc; single-game PC installs still need the other game. Existing console combinations remain supported.
-  From the DLC only Kit Fisto and Asajj Ventress are taken. Where versions overlap, compare them and take the
+  From the DLC only Kit Fisto and Asajj Ventress are taken. When installed, they are enabled by default as
+  additions to Hero Assault. Where versions overlap, compare them and take the
   best, or write something better than all of them.
 - **HUD.** BF2's on every map, with the heat ring around the centre reticle.
 - **Shell font (2026-11-04, corrected).** BF2 Light uses the player's BF2 glyphs
@@ -23,6 +24,8 @@ and LAN are decisions for later work, not current tasks.
   and mirror their right parenthesis: a similar treatment using different source
   glyphs. PC/Xbox builds require no PS2 copy. Battle HUD, spawn, loading and results
   retain their existing fonts, art and metrics.
+- **Graphics quality.** Normal is the only preset while feature-based tiers
+  are being designed. Low Power Resolution remains a separate adaptive option.
 - **Grenades.** BF1 maps keep their grenade types, throwing rules, explosions
   and sounds. The BF2 HUD's round grenade artwork stays mostly gray, with a
   light blue tint for thermals, gold for concussion grenades and violet for
@@ -87,8 +90,9 @@ and LAN are decisions for later work, not current tasks.
   This presentation choice does not change the shared gameplay numbers.
 - **Weapon balance.** Keep the current openbf values. A future rebalance would record each weapon's
   change and retain the original-game measurements for comparison and rollback.
-- Awards & medals: **KEEP (BF2 system)** — grind-to-permanent-unlock stays. Settings
-  toggle on/off; "all awards this session" cheat.
+- Awards & medals: **KEEP (BF2 system)** — earn permanent unlocks through
+  play. Career award bonuses can be disabled while earning and stats
+  continue. The session award cheats remain available.
 - Classes: **hybrid unlock**. In-battle: BF2-style score unlock for special classes, every
   battle. Meta: cumulative usage/feats (elite-rifle-style graduated criteria) lower the
   in-battle threshold over time → eventually permanently unlocked.
@@ -264,10 +268,12 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 - Announcer/VO: **per source map**. SFX where games differ: **BF2**.
 - Music: union, per-map source game.
 - Loading uses the BF1 sequence for locations with a matching sequence. BF2-only
-  locations use the BF1 galaxy view, with a plain loading frame when the art is
-  unavailable. The first fresh button press opens a three-second skip prompt.
-  A second fresh press while it is visible ends the presentation once the
-  battle is ready.
+  destinations show the BF1 galaxy, a view of the destination from orbit, and a
+  still of the ground map or space battle. Each transition uses BF1's scan, zoom
+  and sounds. Available images still play if an input is missing, with a plain
+  loading frame as the last fallback. The first fresh button press opens a
+  three-second skip prompt. A second fresh press while it is visible ends the
+  presentation once the battle is ready.
 
 ### Cheats (session-scoped, BF2-style pause-menu codes)
 - From the originals: invincibility, infinite ammo.
@@ -285,6 +291,14 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   Conquest.
 - **Host-only session authority.** In MP/splitscreen, only the host toggles cheats and
   session rules (e.g., awards on/off). Per-profile progression still saves for everyone.
+- **Post-match results (2026-11-12).** The team scoreboard lists all players and
+  bots. Continue opens the viewer's Personal Stats, followed by their Career
+  Stats. In splitscreen, show each local player's match and career pages in
+  order. The controller assigned to the displayed player advances those pages.
+  In LAN, each client sees the same team scoreboard and its own match and career
+  pages. After confirming the last page, the client shows “Waiting for other
+  players” until the host has received confirmation from every connected player.
+  The host then advances the playlist. A disconnected player leaves the ready check.
 - **MP Galactic Conquest autosave ownership: OPEN** — host-only save vs replicated to all
   players (so anyone can continue solo) vs hybrid. Deferred design item #8.
 

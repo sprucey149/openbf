@@ -23,24 +23,19 @@ iso/
 ```
 
 Then build as usual. `python3 scripts/input_scan.py` prints what it found and
-says `Kit Fisto and Asajj Ventress used`, off until the row below is turned on. Adding or removing the folder makes
+says `Kit Fisto and Asajj Ventress used`. Adding or removing the folder makes
 the next `scripts/pack.py` bake everything again.
 
 A disc that was rebuilt to hold the DLC is refused, as any modified disc is.
 
 ## In the game
 
-With the bake in place, Hero Options in Instant Action gain a `DLC Heroes` row. It stays
-`Off` until you change it, and every map keeps its usual hero. `On` then gives every BF2
-battle with a Republic or CIS hero Kit Fisto for the Republic and Asajj Ventress for the
-CIS. A battle has one hero per team, so for that session they stand in for the map's usual
-Republic or CIS hero. Alliance and Empire battles keep their own heroes. BF1 maps have
-none. The usual hero options, score offer, acceptance, health drain and death rules apply.
+The `DLC Heroes` row in Instant Action's Hero Options starts On when the DLC is
+installed and is disabled at Off otherwise. With the option On, Kit Fisto joins
+the light side and Asajj Ventress joins the dark side in Hero Assault. Both are
+added alongside the original roster. Conquest keeps each map's authored heroes.
 
-What the heroes do never depends on which copy of the DLC went in: the PS2 and
-PC formats give the same combat, checked hash for hash. A build with them is not
-the same game as a build without them, though: every other input changes only the
-look, and these change who fights, so the two do not stay in step with each other.
+The PS2 and PC DLC formats use the same combat rules.
 
 ## What they are missing
 

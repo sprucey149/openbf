@@ -643,6 +643,20 @@ fn terrain_march(hf: &Heightfield, a: Vec3, b: Vec3, clear: &mut bool) -> f32 {
                 return 1.0;
             }
         }
+        // A long segment can have a moving sample even when its other
+        // axis is clamped to the terrain's edge. For a small rectangle of
+        // cells, every midpoint stays inside its conservative height bounds.
+        if d.x.abs().max(d.z.abs()) > TERRAIN_RAY_PIECE * 2.0 {
+            if let Some((low, high)) = hf.segment_cell_bounds(a, b) {
+                if a.y.min(b.y) >= high {
+                    *clear = true;
+                    return 1.0;
+                }
+                if !*clear && a.y.max(b.y) < low {
+                    return 1.0;
+                }
+            }
+        }
         let f = terrain_march(hf, a, mid, clear);
         if f < 1.0 {
             return f * 0.5;
@@ -756,6 +770,48 @@ mod tests {
         let b = b.with_y(-3.0);
         let f = ray_terrain_ps2(&hf, &[], a, b).unwrap();
         assert_eq!(f, 0.25);
+    }
+
+    #[test]
+    fn retail_terrain_ray_preserves_a_varying_clamped_cell() {
+        let hf = Heightfield {
+            size: 2,
+            unit: 4000.0,
+            offset_x: 0.0,
+            offset_z: 0.0,
+            heights: vec![0.0, 10.0, 1.0, 11.0],
+        };
+        let a = Vec3::new(200.0, 1.0, -100_000.0);
+        let b = Vec3::new(3800.0, 1.0, -2.0);
+        let hit = ray_terrain_ps2(&hf, &[], a, b).expect("edge height rises across the ray");
+        assert!((0.05..0.06).contains(&hit), "{hit}");
+        assert_eq!(
+            ray_terrain_ps2(&hf, &[], a.with_y(12.0), b.with_y(12.0)),
+            None
+        );
+        assert_eq!(
+            ray_terrain_ps2(&hf, &[], a.with_y(-1.0), b.with_y(-1.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn retail_terrain_ray_keeps_the_first_crossing_across_two_cells() {
+        let hf = Heightfield {
+            size: 3,
+            unit: 4000.0,
+            offset_x: 0.0,
+            offset_z: 0.0,
+            heights: vec![0.0, 8.0, 0.0, 0.0, 8.0, 0.0, 0.0, 8.0, 0.0],
+        };
+        let a = Vec3::new(100.0, 1.0, -100_000.0);
+        let b = Vec3::new(7900.0, 1.0, -2.0);
+        let hit = ray_terrain_ps2(&hf, &[], a, b).expect("the middle vertex rises above the ray");
+        assert!((0.04..0.06).contains(&hit), "{hit}");
+        assert_eq!(
+            ray_terrain_ps2(&hf, &[], a.with_y(9.0), b.with_y(9.0)),
+            None
+        );
     }
 
     #[test]

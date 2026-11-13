@@ -58,6 +58,38 @@ impl Heightfield {
         (ix, iz, fx * inv - ix as f32, fz * inv - iz as f32)
     }
 
+    /// Conservative height bounds for a segment across at most two cells
+    /// on each axis. Clamping is monotone, so every midpoint stays inside
+    /// the same rectangle of cells.
+    pub(crate) fn segment_cell_bounds(&self, a: Vec3, b: Vec3) -> Option<(f32, f32)> {
+        let (ax, az, _, _) = self.cell(a.x, a.z);
+        let (bx, bz, _, _) = self.cell(b.x, b.z);
+        if ax.abs_diff(bx) > 1 || az.abs_diff(bz) > 1 {
+            return None;
+        }
+        let mut low = f32::INFINITY;
+        let mut high = f32::NEG_INFINITY;
+        for z in az.min(bz)..=az.max(bz) + 1 {
+            for x in ax.min(bx)..=ax.max(bx) + 1 {
+                let h = self.h(x, z);
+                if !h.is_finite() {
+                    return None;
+                }
+                low = low.min(h);
+                high = high.max(h);
+            }
+        }
+        let scale = high.abs().max(low.abs());
+        // Each corner difference is bounded by twice scale. Leave room
+        // for both differences, both products and both additions to round.
+        // A difference that can overflow must still use the original lerp.
+        if scale > f32::MAX * 0.5 {
+            return None;
+        }
+        let rounding = (8.0 * f32::EPSILON * scale).max(f32::MIN_POSITIVE);
+        Some((low - rounding, high + rounding))
+    }
+
     /// (x, z) held on the sheet's rectangle; unchanged when already on it.
     pub fn clamp_xz(&self, x: f32, z: f32) -> (f32, f32) {
         let max = (self.size - 1) as f32 * self.unit;

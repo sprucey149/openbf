@@ -75,6 +75,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
     /// BF1 aim-assist intensity slider (1.0 = PS2-authentic).
+    #[serde(default = "one", deserialize_with = "assist_intensity_setting")]
     pub assist_intensity: f32,
     /// Difficulty tier for the next round (PLAN §Saves: host authority). The
     /// `--difficulty` CLI flag WINS over this for the session it is given in.
@@ -90,6 +91,9 @@ pub struct Settings {
     /// Host option: the Elite team handicap (D12).
     #[serde(default = "yes")]
     pub team_handicap_on: bool,
+    /// Use earned weapons and stat bonuses in ground battles.
+    #[serde(default = "yes")]
+    pub career_awards: bool,
     /// FOV option: a multiplier on the PS2 chase camera's vertical FOV (1.0 =
     /// the PS2's framing; `game::walk::FOV_SCALE_RANGE`). Hor+ either way.
     #[serde(default = "one")]
@@ -98,6 +102,18 @@ pub struct Settings {
     /// `game::music::VOLUME_RANGE`; 0 = no music.
     #[serde(default = "one")]
     pub music_volume: f32,
+    #[serde(default = "one")]
+    pub effects_volume: f32,
+    #[serde(default = "one")]
+    pub dialogue_volume: f32,
+    /// 0 = off, 1 = on. Older profiles may store 2, which also enables it.
+    #[serde(default)]
+    pub fps_counter: u8,
+    /// Controller feedback strength. Zero turns it off.
+    #[serde(default = "one", deserialize_with = "rumble_setting")]
+    pub rumble_strength: f32,
+    #[serde(default)]
+    pub rumble_on_fire: bool,
     #[serde(default = "one")]
     pub mouse_sensitivity: f32,
     /// The controller's look sensitivity on the right stick
@@ -116,6 +132,10 @@ pub struct Settings {
     pub keyboard_bindings: crate::kbm::Bindings,
     #[serde(default, deserialize_with = "controller_bindings")]
     pub controller_bindings: input::Mapping,
+    #[serde(default)]
+    pub keyboard_layouts: crate::control_layout::Layouts<crate::kbm::Trigger>,
+    #[serde(default)]
+    pub gamepad_layouts: crate::control_layout::Layouts<gilrs::Button>,
     #[serde(default)]
     pub flight_controls: input::FlightControls,
     /// Which icons the control prompts draw; Auto follows the device in use.
@@ -138,8 +158,14 @@ impl Default for Settings {
             difficulty: core::skill::Difficulty::default(),
             aim_assist: true,
             team_handicap_on: true,
+            career_awards: true,
             fov_scale: 1.0,
             music_volume: 1.0,
+            effects_volume: 1.0,
+            dialogue_volume: 1.0,
+            fps_counter: 0,
+            rumble_strength: 1.0,
+            rumble_on_fire: false,
             mouse_sensitivity: 1.0,
             pad_look_sensitivity: 1.0,
             invert_y: false,
@@ -147,6 +173,8 @@ impl Default for Settings {
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
+            keyboard_layouts: Default::default(),
+            gamepad_layouts: Default::default(),
             flight_controls: input::FlightControls::default(),
             input_icons: crate::input_icons::IconChoice::default(),
             team_size_pct: 100,
@@ -173,6 +201,8 @@ pub struct Career {
     /// profile from before it starts at 0.
     #[serde(default)]
     pub points: i64,
+    #[serde(default)]
+    pub medals: core::sim::MedalCounts,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -283,8 +313,23 @@ fn hundred() -> u32 {
     100
 }
 
+fn assist_intensity_setting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    f32::deserialize(d).map(clamp_assist_intensity)
+}
+
+pub fn clamp_assist_intensity(value: f32) -> f32 {
+    if value.is_nan() {
+        return 1.0;
+    }
+    value.clamp(0.0, 1.0)
+}
+
 fn pad_look_setting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     f32::deserialize(d).map(clamp_pad_look)
+}
+
+fn rumble_setting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    f32::deserialize(d).map(|v| ui::menu::RUMBLE_LEVELS[ui::menu::rumble_level(v)].0)
 }
 
 /// A look sensitivity held to its range; a broken value reads as 1.
@@ -300,6 +345,15 @@ pub fn clamp_pad_look(v: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loaded_aim_assist_intensity_stays_in_range() {
+        for (value, expected) in [("1.5", 1.0), ("-0.1", 0.0), ("0.7", 0.7), ("NaN", 1.0)] {
+            let settings: Settings =
+                ron::from_str(&format!("(assist_intensity: {value})")).unwrap();
+            assert_eq!(settings.assist_intensity, expected);
+        }
+    }
 
     #[test]
     fn an_older_profile_keeps_aggregate_stats_and_starts_with_no_class_kills() {
@@ -320,6 +374,7 @@ mod tests {
                 captures: 4,
                 class_kills: Default::default(),
                 points: 0,
+                medals: Default::default(),
             }
         );
         assert_eq!(profile.settings.assist_intensity, 0.7);
@@ -417,6 +472,30 @@ mod tests {
         assert_eq!(s.assist_intensity, 0.5);
         assert_eq!(s.keyboard_bindings, crate::kbm::Bindings::default());
         assert_eq!(s.controller_bindings, input::Mapping::default());
+    }
+
+    #[test]
+    fn career_awards_default_on_and_an_off_profile_keeps_its_medals() {
+        let settings: Settings = ron::from_str("(assist_intensity: 1.0)").unwrap();
+        assert!(settings.career_awards);
+
+        let mut profile = Profile::default();
+        profile.settings.career_awards = false;
+        profile.career.medals[1] = 64;
+        let saved = ron::to_string(&profile).unwrap();
+        assert_eq!(ron::from_str::<Profile>(&saved).unwrap(), profile);
+    }
+
+    #[test]
+    fn retired_graphics_quality_preserves_the_low_power_preference() {
+        for preset in [1, 2] {
+            let saved = format!("(graphics_quality: {preset}, low_power_resolution: true)");
+            let settings: Settings = ron::from_str(&saved).unwrap();
+            assert!(settings.low_power_resolution);
+            assert!(!ron::to_string(&settings)
+                .unwrap()
+                .contains("graphics_quality"));
+        }
     }
 
     #[test]
@@ -571,6 +650,8 @@ mod tests {
         p.record_round(Some(true), 12, 3, 240, 90, 2);
         p.career.class_kills.insert("all_inf_officer".into(), 7);
         p.career.class_kills.insert("all_inf_wookiee".into(), 5);
+        p.career.medals[4] = 32;
+        p.settings.career_awards = false;
         p.save().expect("save");
         let back = Profile::load_or_default();
         assert_eq!(back, p);

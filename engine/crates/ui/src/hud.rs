@@ -131,6 +131,8 @@ pub mod message_color {
     pub const ENEMY: [u8; 3] = [200, 100, 100];
     /// Nobody's (team index 0: a death with no killer).
     pub const NEUTRAL: [u8; 3] = [192, 192, 192];
+    /// An earned medal (BF2 color at 0x69a628).
+    pub const MEDAL: [u8; 3] = [32, 223, 223];
     /// Bonuses and the mission's `ShowMessageText` (`DAT_0076c250`).
     pub const YELLOW: [u8; 3] = [223, 223, 32];
 }
@@ -446,23 +448,27 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         // The mesh: the PS2's `.change` through the NameMesh table. `[ours]`
         // what its tree has no event for: a weapon with no model shows its
         // icon sheet, else nothing in the last one's place (the backdrop
-        // stays). Each path forgets the other's event, so a switch back
-        // sends again.
+        // stays). The class and mesh key both qualify as weapon changes.
         let drawable = hud.name_mesh(&ev("change"), &w.key, has_mesh).is_some();
         let shown = match (&w.icon, drawable) {
             (Some(sheet), _) => Some(format!("bitmap:{sheet}")),
             (None, false) => Some(String::new()),
             (None, true) => None,
         };
-        match shown {
-            Some(mesh) => {
-                hud.forget(&ev("change"));
-                hud.publish(&ev("mesh"), EventValue::Text(mesh), has_mesh);
-            }
-            None => {
-                hud.forget(&ev("mesh"));
-                hud.publish(&ev("change"), EventValue::Text(w.key.clone()), has_mesh);
-            }
+        let class_event = format!("hud.weapon{row}.class");
+        let class = EventValue::Text(w.class.clone());
+        if hud.last(&class_event) != Some(&class) {
+            hud.publish(&class_event, class, has_mesh);
+            hud.forget(&ev("change"));
+        }
+        let change = ev("change");
+        let key = EventValue::Text(w.key.clone());
+        if hud.last(&change) != Some(&key) {
+            hud.publish(&change, key, has_mesh);
+            hud.forget(&ev("mesh"));
+        }
+        if let Some(mesh) = shown {
+            hud.publish(&ev("mesh"), EventValue::Text(mesh), has_mesh);
         }
         let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
         put(&ev("name"), EventValue::Text(w.name.clone()));
@@ -1165,6 +1171,76 @@ mod tests {
             feed(&mut hud, &model, &|_| false);
             assert_eq!(hud.banner, None);
         }
+    }
+
+    #[test]
+    fn weapon_names_fade_and_reappear_when_either_row_changes() {
+        use manifest::hud::{HudArg, HudLayout, HudNode};
+        let node = |name: &str, value: HudArg| HudNode {
+            name: name.into(),
+            args: vec![value],
+            children: Vec::new(),
+        };
+        let layout = HudLayout {
+            name: "weapon label fixture".into(),
+            nodes: (1..=2)
+                .map(|row| {
+                    let mut text = node("Text", HudArg::Str(format!("weapon{row}")));
+                    text.children = vec![
+                        node(
+                            "eventtext",
+                            HudArg::Str(format!("player1.weapon{row}.name")),
+                        ),
+                        node(
+                            "eventenable",
+                            HudArg::Str(format!("player1.weapon{row}.change")),
+                        ),
+                        node("fadeintime", HudArg::Num(0.25)),
+                        node("fadeholdtime", HudArg::Num(2.5)),
+                        node("fadeouttime", HudArg::Num(1.0)),
+                    ];
+                    text
+                })
+                .collect(),
+        };
+        let mut hud = Hud::new(
+            &layout,
+            &HudLayout {
+                name: String::new(),
+                nodes: vec![],
+            },
+        );
+        let weapon = |class: &str, name: &str| HudWeapon {
+            key: "shared_mesh".into(),
+            class: class.into(),
+            name: name.into(),
+            icon: Some("shared_icon".into()),
+            ..Default::default()
+        };
+        let mut m = model();
+        m.weapon = Some(weapon("rifle", "Rifle"));
+        m.weapon2 = Some(weapon("thermal", "Thermal Detonator"));
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(3.8);
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(0.25);
+        let a = hud.find("weapon1").unwrap();
+        let b = hud.find("weapon2").unwrap();
+        assert_eq!(hud.elems[a].fader.alpha(), 0.0);
+        assert_eq!(hud.elems[b].fader.alpha(), 0.0);
+
+        m.weapon2 = Some(weapon("concussion", "Concussion Grenade"));
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(0.25);
+        assert_eq!(hud.elems[b].text, "Concussion Grenade");
+        assert_eq!(hud.elems[b].fader.alpha(), 1.0);
+        assert_eq!(hud.elems[a].fader.alpha(), 0.0);
+
+        m.weapon = Some(weapon("pistol", "Pistol"));
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(0.25);
+        assert_eq!(hud.elems[a].text, "Pistol");
+        assert_eq!(hud.elems[a].fader.alpha(), 1.0);
     }
 
     /// The egui overlay also lays out at wide aspects.

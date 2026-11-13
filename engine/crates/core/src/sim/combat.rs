@@ -398,9 +398,11 @@ impl Sim {
                 if self.deflect_bolt(h, b) {
                     return true;
                 }
-                if self.unit(h).is_none() {
+                let Some(target) = self.unit(h) else {
                     return false; // died in flight → bolt dies, no impact
-                }
+                };
+                let health_type = target.health.health_type;
+                let enemy = self.hostile(b.team, target.team);
                 // Card TOKN: a bot without one of this human's tokens aimed
                 // beside him; a bolt that meets him anyway is real (counted).
                 if crate::ai::tokn::bars(self, b.owner, h) {
@@ -425,13 +427,23 @@ impl Sim {
                     });
                 }
                 self.push_impact(b, Surface::Soldier, None);
-                if self.finish_direct_damage(
+                let killed = self.finish_direct_damage(
                     h,
                     Some(b.owner),
                     damage,
                     b.age,
                     b.vel.normalize_or_zero(),
-                ) {
+                );
+                if enemy && damage > 0.0 {
+                    self.medal_weapon_hit(
+                        b.owner,
+                        b.weapon_class,
+                        health_type,
+                        killed,
+                        scale > 1.0,
+                    );
+                }
+                if killed {
                     // The direct hit's death kick along the shot (B1
                     // FUN_00200c30 -> FUN_00200f90, re-knockback §3).
                     let u = &mut self.units[h.index as usize];
@@ -483,6 +495,8 @@ impl Sim {
                 let Some(v) = self.vehicle(vh) else {
                     return false;
                 };
+                let health_type = v.health.health_type;
+                let enemy = v.team.is_some_and(|team| self.hostile(b.team, team));
                 let surface =
                     if v.kind == crate::vehicle::VehicleKind::Turret && v.instance.is_some() {
                         Surface::Building
@@ -504,6 +518,16 @@ impl Sim {
                     Some(b.team),
                     Some(b.vel.normalize_or_zero()),
                 );
+                if enemy && damage > 0.0 {
+                    let killed = self.vehicle(vh).is_none();
+                    self.medal_weapon_hit(
+                        b.owner,
+                        b.weapon_class,
+                        health_type,
+                        killed,
+                        scale > 1.0,
+                    );
+                }
                 // A weak part's factor that took health: the critical
                 // hit, as a head's (hitmark).
                 if scale > 1.0 && damage > 0.0 {

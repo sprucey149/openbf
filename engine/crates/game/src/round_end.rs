@@ -8,7 +8,8 @@
 //! back to the shell.
 
 use crate::spawn_backdrop::{CameraShot, ShotPicker};
-use ui::stats::{Command, Pad, StatsScreens};
+use ui::shell_feel::MenuSound;
+use ui::stats::{Command, Pad, Page, StatsScreens};
 
 /// The banner's shortest and longest stay (BF1 §2.1: 7 s `FUN_0033f718`; 5 s
 /// and the music's end `FUN_002be838` / `FUN_002bec60`).
@@ -89,13 +90,30 @@ impl RoundEnd {
     }
 
     /// One frame: `pad` is this frame's presses.
-    pub fn step(&mut self, dt: f32, pad: Pad) {
+    pub fn step(&mut self, dt: f32, pad: Pad) -> Option<MenuSound> {
         self.secs += dt;
+        let mut sound = None;
         let next = match self.phase {
             Phase::Banner => (self.secs >= self.banner_secs).then_some(Phase::Stats),
             Phase::Stats => {
                 self.idle = if pad.any() { 0.0 } else { self.idle + dt };
-                let quit = self.stats.as_mut().and_then(|s| s.input(pad));
+                let quit = self.stats.as_mut().and_then(|s| {
+                    let before = s.selection();
+                    let command = s.input(pad);
+                    let after = s.selection();
+                    sound = if command == Some(Command::Quit)
+                        || matches!(
+                            (before.0, after.0),
+                            (Page::Personal, Page::Team) | (Page::Career, Page::Personal)
+                        ) {
+                        Some(MenuSound::Exit)
+                    } else if before.0 != after.0 {
+                        Some(MenuSound::Accept)
+                    } else {
+                        (before != after).then_some(MenuSound::Select)
+                    };
+                    command
+                });
                 (self.idle >= STATS_IDLE_SECS || quit == Some(Command::Quit)).then_some(Phase::Done)
             }
             Phase::Done => None,
@@ -105,6 +123,7 @@ impl RoundEnd {
             self.secs = 0.0;
             self.idle = 0.0;
         }
+        sound
     }
 
     pub fn done(&self) -> bool {
@@ -127,6 +146,11 @@ mod flow_tests {
         let me = StatRow {
             name: "Player 1".into(),
             me: true,
+            personal: vec![
+                ("Points".into(), "3".into()),
+                (String::new(), String::new()),
+                ("Kills".into(), "2".into()),
+            ],
             ..Default::default()
         };
         StatsScreens::new(
@@ -186,11 +210,23 @@ mod flow_tests {
         assert!(!r.done(), "no pages yet: nothing to quit");
         r.stats = Some(pages());
         assert!(!r.wants_stats());
-        r.step(0.1, press(|p| p.cross = true));
+        assert_eq!(
+            r.step(0.1, press(|p| p.cross = true)),
+            Some(MenuSound::Accept)
+        );
         assert_eq!(r.stats.as_ref().unwrap().page, Page::Personal);
+        assert_eq!(
+            r.step(0.1, press(|p| p.down = true)),
+            Some(MenuSound::Select)
+        );
+        assert_eq!(r.stats.as_ref().unwrap().personal_row, 2);
+        assert_eq!(r.step(0.1, press(|p| p.down = true)), None);
         r.step(0.1, press(|p| p.cross = true));
         assert_eq!(r.stats.as_ref().unwrap().page, Page::Career);
-        r.step(0.1, press(|p| p.triangle = true));
+        assert_eq!(
+            r.step(0.1, press(|p| p.triangle = true)),
+            Some(MenuSound::Exit)
+        );
         r.step(0.1, press(|p| p.triangle = true));
         assert_eq!(r.stats.as_ref().unwrap().page, Page::Team);
         r.step(0.1, press(|p| p.triangle = true));
@@ -242,7 +278,7 @@ mod tests {
         let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
         let shot = CameraShot::from_call([1.0, 0.0, 0.0, 0.0, 40.0, 25.0, -10.0]);
         w.end_shots = vec![shot];
-        assert!(!w.follow_round_end(0.1, Pad::default(), None));
+        assert!(!w.follow_round_end(0.1, Pad::default(), None).0);
         assert!(w.round_end.is_none(), "not before the round is decided");
         let me = w.sim.units[w.player.index as usize].team;
         w.sim.outcome = Some(me);
@@ -273,7 +309,7 @@ mod tests {
             square: true,
             ..Pad::default()
         };
-        assert!(w.follow_round_end(0.1, square, None), "Done: out");
+        assert!(w.follow_round_end(0.1, square, None).0, "Done: out");
         let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
         w.sim.outcome = Some(1 - me.min(1));
         let before = w.camera().position;

@@ -576,8 +576,7 @@ struct BattleSetup {
     /// The session's hero rules (`game::heroes::rules`); `None` = Heroes
     /// Off, no hero installed. The CLI takes the retail defaults.
     heroes: Option<core::sim::heroes::HeroRules>,
-    /// The shell's "DLC Heroes" row: the DLC heroes for the map's own
-    /// (`game::heroes::append_with`). The CLI keeps the map's own.
+    /// Include installed DLC heroes in Hero Assault.
     dlc_heroes: bool,
     score_limit: u32,
 }
@@ -651,7 +650,7 @@ impl BattleSetup {
             mission_file: mission_file.as_deref().and_then(file_name),
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),
-            dlc_heroes: false,
+            dlc_heroes: v.mode == "eli",
             score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
             classes_dir: v.classes.clone().unwrap_or_else(|| {
                 v.map

@@ -654,6 +654,7 @@ if want load; then
   "$BAKE" loadscreen "$(ci "$B1" LOAD/TAT1.LVL)"   "$OUT/tat1"
   "$BAKE" loadscreen "$(ci "$B2" LOAD/TAT2.LVL)"   "$OUT/tat2"
   "$BAKE" loadscreen "$(ci "$UI2" LOAD/COMMON.LVL)" "$OUT/common_bf2"
+  "$BAKE" load-orbits "$(ci "$UI2" GAL/GAL1.LVL)" "$OUT/common_bf2"
 fi
 
 if want maps; then

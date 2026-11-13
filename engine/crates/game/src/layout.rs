@@ -931,6 +931,14 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
             finish_on_heading_plane: true,
         });
     }
+    // OURS: tactical hops from the Bespin decks need a walkable landing.
+    // measure: native Dark Trooper landings and deck-edge falls (#135).
+    if m.source_game == "bf1" && m.map == "bes1" {
+        g.hop_support_areas.push(core::collision::Aabb {
+            min: Vec3::new(f32::MIN, 90.0, f32::MIN),
+            max: Vec3::new(f32::MAX, 170.0, f32::MAX),
+        });
+    }
     // OURS: walk from the lower service level to the clear platform route.
     // measure: original BF1 Bespin lower walkway and the four bot lives (#108).
     if m.source_game == "bf1"

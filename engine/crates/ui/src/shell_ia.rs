@@ -9,8 +9,8 @@
 //! code route is not read (the command stack's origin, §9.1 item 8) or the
 //! frame disagrees with it.
 //!
-//! `[ours]` Hor+ as the other shell pages: everything keeps the 4:3 box at
-//! the window's centre, the help lines their edges.
+//! The mission browser widens its side panels with the window while keeping
+//! the centre controls at the same scale. The options pages use the shell frame.
 
 use crate::hud_draw::{color, run_width, Ctx, Quad};
 use crate::hud_tree::HAlign;
@@ -36,27 +36,25 @@ pub const LIST_FONT: &str = MAP_FONT;
 const SAFE_TOP: f32 = 22.4;
 /// The two list windows (f34 pc 97-190): centre y 175.5, 183 tall. Across,
 /// the script's centre x 256 ∓ 146 / + 142 and width 172.8 put the borders
-/// at 23.6..196.4 and 311.6..484.4; `[M]` the frames' outer borders are at
-/// 19.2..196.0 and 312.8..489.6 (`ia_missionselect.png` row 230 px), drawn
-/// so.
-pub const LEFT_WINDOW: [f32; 4] = [
+/// at 23.6..196.4 and 311.6..484.4. Inset the left window from the
+/// artwork's centre trim and widen both windows at the outside edges.
+const LEFT_WINDOW: [f32; 4] = [
     19.2,
     SAFE_TOP + 175.5 - 91.5,
-    196.0,
+    188.0,
     SAFE_TOP + 175.5 + 91.5,
 ];
-pub const RIGHT_WINDOW: [f32; 4] = [312.8, LEFT_WINDOW[1], 489.6, LEFT_WINDOW[3]];
+const RIGHT_WINDOW: [f32; 4] = [312.8, LEFT_WINDOW[1], 489.6, LEFT_WINDOW[3]];
 /// The info box (f34 pc 191-240): y 309, 76 tall; across the script's x -2
 /// and safe width 460.8 give 23.6..484.4, `[M]` the frames 19.2..489.6.
-pub const INFO_BOX: [f32; 4] = [
+const INFO_BOX: [f32; 4] = [
     19.2,
     SAFE_TOP + 309.0 - 38.0,
     489.6,
     SAFE_TOP + 309.0 + 38.0,
 ];
-/// Its text: x -220.4 (10 in from the box's left), y -34 from its centre,
-/// 440.8 wide; `[M]` 10 in from the frames' box (ink from 29.6).
-pub const INFO_TEXT: (f32, f32, f32) = (INFO_BOX[0] + 10.0, SAFE_TOP + 309.0 - 34.0, 440.8);
+/// The info text starts four units below its panel.
+const INFO_TEXT_Y: f32 = INFO_BOX[1] + 4.0;
 /// The list rows: 17 tall (Era 38) (f34 pc 28-63). The script makes them
 /// 167.8 wide in a window of rows + 30; `[M]` the frames' focus box runs
 /// from 4.8 inside the window's left border to 7.6 inside its right (164.4
@@ -84,7 +82,7 @@ const CURSOR_H: f32 = 0.87;
 /// The scroll arrows: two mirrored `listbox_topbot_more` halves, x -32..2
 /// and 32..-1 from the list's centre, 16 tall (listmanager f0); `[M]` the
 /// down arrow's ink sits right under the last row (`ia_planet_list.png`).
-const ARROW: [f32; 3] = [-32.0, 2.0, 16.0];
+const ARROW: [f32; 3] = [-32.0, 0.0, 16.0];
 /// The window title bar: 28 tall, 4 above the window (buttonwindow f0);
 /// `[M]` as wide as the window (the frames' bar spans the window, not the
 /// script's width - 26).
@@ -93,13 +91,70 @@ const TITLE_GAP: f32 = 4.0;
 /// `border_3_pieces`: 16-unit corners (buttonwindow main.f0) over 16 of the
 /// sheet's 64 texels.
 const BORDER: f32 = 16.0;
-/// The command stack `[M]` (`ia_playlist_launch.png`; its route from `yTop
-/// -130` is not read, §9.1 item 8): the bars' edges across, the first bar's
-/// top, rows 21 tall (`gamefont_tiny` 15 + 6) every 25.
-pub const STACK_X: [f32; 2] = [202.4, 306.4];
-pub const STACK_TOP: f32 = 150.3;
-const STACK_ROW: f32 = 21.0;
-const STACK_PITCH: f32 = 25.0;
+/// Four command bars inside the artwork's inset at x 199..297, y 149..247.
+const STACK_X: [f32; 2] = [203.0, 294.0];
+const STACK_TOP: f32 = 153.0;
+const STACK_ROW: f32 = 19.0;
+const STACK_PITCH: f32 = 23.0;
+
+/// Keep the middle of the original artwork registered with the command
+/// buttons. Each outside slice widens by the same amount as its list.
+struct MissionLayout {
+    screen: crate::hud_draw::Screen,
+    extra: f32,
+    height: f32,
+}
+
+impl MissionLayout {
+    fn new(size: [f32; 2]) -> Self {
+        let height = size[1].min(size[0] * 0.75);
+        let mut screen = screen_at([size[0], height], Anchor::Centre);
+        screen.origin[1] = (size[1] - height) * 0.5;
+        let extra = (screen.origin[0] / screen.scale[0]).max(0.0);
+        Self {
+            screen,
+            extra,
+            height,
+        }
+    }
+
+    fn point(&self, [x, y]: [f32; 2]) -> [f32; 2] {
+        [
+            (x - self.screen.origin[0]) / self.screen.scale[0],
+            (y - self.screen.origin[1]) / self.screen.scale[1],
+        ]
+    }
+
+    fn left(&self) -> [f32; 4] {
+        let [left, top, right, bottom] = LEFT_WINDOW;
+        [left - self.extra, top, right, bottom]
+    }
+
+    fn right(&self) -> [f32; 4] {
+        let [left, top, right, bottom] = RIGHT_WINDOW;
+        [left, top, right + self.extra, bottom]
+    }
+
+    fn info(&self) -> [f32; 4] {
+        let [left, top, right, bottom] = INFO_BOX;
+        [left - self.extra, top, right + self.extra, bottom]
+    }
+}
+
+/// Which list is under the pointer, including the frame used for scrolling.
+pub(crate) fn list_under_pointer(point: [f32; 2], size: [f32; 2]) -> Option<bool> {
+    if size[0] <= 0.0 || size[1] <= 0.0 {
+        return None;
+    }
+    let layout = MissionLayout::new(size);
+    let [x, y] = layout.point(point);
+    [layout.left(), layout.right()]
+        .into_iter()
+        .zip([false, true])
+        .find_map(|([left, top, right, bottom], playlist)| {
+            ((left..=right).contains(&x) && (top..=bottom).contains(&y)).then_some(playlist)
+        })
+}
 
 /// Hit-test the visible row geometry used by the Instant Action renderer.
 pub fn pointer_target(
@@ -116,6 +171,10 @@ pub fn pointer_target(
     let y = point[1] / (size[1] / 448.0);
     match ia.page {
         Page::Missions => {
+            let layout = MissionLayout::new(size);
+            let [x, y] = layout.point(point);
+            let left = layout.left();
+            let right = layout.right();
             if (STACK_X[0]..=STACK_X[1]).contains(&x) {
                 for (k, &command) in COMMANDS.iter().enumerate() {
                     let y0 = STACK_TOP + STACK_PITCH * k as f32;
@@ -125,10 +184,10 @@ pub fn pointer_target(
                 }
             }
             let play_rows = ia.play_rows();
-            let rx0 = RIGHT_WINDOW[0] + LIST_IN[0];
-            let rx1 = RIGHT_WINDOW[2] - LIST_IN[1];
+            let rx0 = right[0] + LIST_IN[0];
+            let rx1 = right[2] - LIST_IN[1];
             let rcx = (rx0 + rx1) * 0.5;
-            let ry0 = RIGHT_WINDOW[1] + LIST_PAD;
+            let ry0 = right[1] + LIST_PAD;
             let rlast = ry0 + ROW * LIST_ROWS.min(play_rows.len()) as f32;
             if (rcx - 32.0..=rcx + 32.0).contains(&x) {
                 if ia.play_list.top > 0 && (ry0 - 16.0..=ry0).contains(&y) {
@@ -178,10 +237,10 @@ pub fn pointer_target(
             } else {
                 LIST_ROWS
             };
-            let lx0 = LEFT_WINDOW[0] + LIST_IN[0];
-            let lx1 = LEFT_WINDOW[2] - LIST_IN[1];
+            let lx0 = left[0] + LIST_IN[0];
+            let lx1 = left[2] - LIST_IN[1];
             let lcx = (lx0 + lx1) * 0.5;
-            let ly0 = LEFT_WINDOW[1] + pad;
+            let ly0 = left[1] + pad;
             let llast = ly0 + row_h * shown.min(rows.len()) as f32;
             if (lcx - 32.0..=lcx + 32.0).contains(&x) {
                 if cur.top > 0 && (ly0 - 16.0..=ly0).contains(&y) {
@@ -252,7 +311,9 @@ pub fn pointer_target(
             let row = ((y - y0) / OPTION_ROW).floor() as isize + cur.top as isize;
             if x >= x0 && x <= x1 && y >= y0 && row >= cur.top as isize {
                 let k = row as usize;
-                if k < rows.len() && k < cur.top + OPTION_ROWS {
+                if k < cur.top + OPTION_ROWS
+                    && rows.get(k).is_some_and(|o| ia.options.option_enabled(*o))
+                {
                     let centre = (x0 + x1) * 0.5;
                     return Some(crate::shell::PointerTarget::Option(k, x >= centre));
                 }
@@ -442,38 +503,19 @@ impl Ctx<'_> {
         self.tinted(s, [x1 - h, y0, x1, y1], full, pieces[2], st);
     }
 
-    /// A list row's text, left-aligned; `[ours]` squeezed across to fit
-    /// `width` (the merged list's "<name> (bfN)" rows outgrow BF2's own
-    /// names: "Bespin: Cloud City (bf1)").
-    fn label_fit(
-        &mut self,
-        s: &crate::hud_draw::Screen,
-        text: &str,
-        at: (f32, f32),
-        width: f32,
-        (rgb, alpha): Style,
-    ) {
+    /// Pick one size for the catalog, preserving the font's proportions.
+    fn map_text_scale(&self, ia: &InstantAction, width: f32) -> f32 {
         let Some(font) = self.font(LIST_FONT) else {
-            return;
+            return 1.0;
         };
-        let kx = stretch(LIST_FONT);
-        let w = run_width(font, text, kx, false);
-        let k = if w > width { kx * width / w } else { kx };
-        self.run(
-            NONE,
-            &Mat4::IDENTITY,
-            s,
-            font,
-            &crate::hud_draw::Run {
-                text,
-                at,
-                h_align: HAlign::Left,
-                scale: [k, 1.0],
-                color: color(rgb, alpha),
-                additive: false,
-                shadow: false,
-            },
-        );
+        let widest = ia
+            .maps
+            .iter()
+            .map(|map| map.label.as_str())
+            .chain([ia.texts.all_maps.as_str(), ia.texts.remove_all.as_str()])
+            .map(|text| run_width(font, text, MAP_STRETCH, false))
+            .fold(1.0, f32::max);
+        (width / widest).min(1.0)
     }
 
     fn font_h(&self, font: &str) -> f32 {
@@ -500,6 +542,7 @@ impl Ctx<'_> {
         shown: usize,
         row_h: f32,
         focused: bool,
+        map_scale: Option<f32>,
     ) {
         let x0 = win[0] + LIST_IN[0];
         let x1 = win[2] - LIST_IN[1];
@@ -525,10 +568,35 @@ impl Ctx<'_> {
                 Some(f) if era => wrap(f, &row.text, width),
                 _ => vec![row.text.clone()],
             };
-            let ty = y + (row_h - lh * lines.len() as f32) * 0.5;
-            for (j, line) in lines.iter().enumerate() {
-                let at_xy = (x0 + TEXT_X, ty + lh * j as f32);
-                self.label_fit(s, line, at_xy, width, style);
+            let scale = map_scale.unwrap_or_else(|| {
+                self.font(LIST_FONT).map_or(1.0, |font| {
+                    let widest = lines
+                        .iter()
+                        .map(|line| run_width(font, line, MAP_STRETCH, false))
+                        .fold(1.0, f32::max);
+                    (width / widest).min(1.0)
+                })
+            });
+            let line_h = lh * scale;
+            let ty = y + (row_h - line_h * lines.len() as f32) * 0.5;
+            if let Some(font) = self.font(LIST_FONT) {
+                for (j, line) in lines.iter().enumerate() {
+                    self.run(
+                        NONE,
+                        &Mat4::IDENTITY,
+                        s,
+                        font,
+                        &crate::hud_draw::Run {
+                            text: line,
+                            at: (x0 + TEXT_X, ty + line_h * j as f32),
+                            h_align: HAlign::Left,
+                            scale: [MAP_STRETCH * scale, scale],
+                            color: color(style.0, style.1),
+                            additive: false,
+                            shadow: false,
+                        },
+                    );
+                }
             }
             let iy = y + (row_h - icon) * 0.5;
             if let Some(tex) = row.icon {
@@ -621,15 +689,21 @@ impl Ctx<'_> {
     }
 
     fn missions(&mut self, ia: &InstantAction, pulse: f32, size: [f32; 2]) {
-        let s = screen_at(size, Anchor::Centre);
+        let layout = MissionLayout::new(size);
+        let s = layout.screen;
         let t = &ia.texts;
-        self.tinted(
-            &s,
-            [0.0, 0.0, 512.0, 448.0],
-            [0.0, 0.0, 1.0, 0.875],
-            BACKDROP,
-            ([255.0; 3], 1.0),
-        );
+        let help_size = [size[0], layout.height];
+        let slice = [0.0, 192.0, 308.0, 512.0];
+        let drawn = [-layout.extra, slice[1], slice[2], 512.0 + layout.extra];
+        for k in 0..3 {
+            self.tinted(
+                &s,
+                [drawn[k], 0.0, drawn[k + 1], 448.0],
+                [slice[k] / 512.0, 0.0, slice[k + 1] / 512.0, 0.875],
+                BACKDROP,
+                ([255.0; 3], 1.0),
+            );
+        }
         if ia.full {
             self.window_box(&s, POPUP, None);
             if let Some(f) = self.font(SMALL_FONT) {
@@ -641,7 +715,7 @@ impl Ctx<'_> {
                     self.label(&s, SMALL_FONT, l, at, HAlign::Center, UNSELECTED_TEXT);
                 }
             }
-            self.help(size, true, Prompt::Accept, &t.select);
+            self.help_bottom(help_size, true, Prompt::Accept, &t.select, size[1]);
             return;
         }
         // The left window: Planet, or Mode / Era in their states (f12).
@@ -651,30 +725,39 @@ impl Ctx<'_> {
             _ => (&t.planet, ia.map_rows(), ia.map_list, LIST_ROWS, ROW),
         };
         let left_focus = matches!(ia.state, State::Map | State::Mode | State::Era);
-        self.window_box(&s, LEFT_WINDOW, Some(title));
+        let left = layout.left();
+        let right = layout.right();
+        let text_room =
+            |[x0, _, x1, _]: [f32; 4]| x1 - x0 - LIST_IN.iter().sum::<f32>() - 2.0 * TEXT_X;
+        let map_scale = self.map_text_scale(ia, text_room(left));
+        let playlist_scale =
+            self.map_text_scale(ia, text_room(right) - ICON_IN - 2.0 * MODE_ICON - ICON_GAP);
+        self.window_box(&s, left, Some(title));
         self.list(
             &s,
-            LEFT_WINDOW,
+            left,
             &rows,
             cur.at,
             cur.top,
             shown,
             row_h,
             left_focus,
+            (!matches!(ia.state, State::Mode | State::Era)).then_some(map_scale),
         );
-        self.window_box(&s, RIGHT_WINDOW, Some(&t.playlist));
+        self.window_box(&s, right, Some(&t.playlist));
         let play = ia.play_rows();
         let pc = ia.play_list;
         let focus = ia.state == State::Playlist;
         self.list(
             &s,
-            RIGHT_WINDOW,
+            right,
             &play,
             pc.at,
             pc.top,
             LIST_ROWS,
             ROW,
             focus,
+            Some(playlist_scale),
         );
         // The command stack: square notched bars, `gamefont_tiny` labels
         // (main pc 87); the kept focus blue and pulsing even while a list
@@ -700,17 +783,18 @@ impl Ctx<'_> {
             self.label(&s, LIST_FONT, t.command(*c).0, at, HAlign::Center, style);
         }
         // The info box (f9).
-        self.window_box(&s, INFO_BOX, None);
+        let info = layout.info();
+        self.window_box(&s, info, None);
         if let Some(f) = self.font(LIST_FONT) {
-            let (x, y, w) = INFO_TEXT;
+            let (x, y, w) = (info[0] + 10.0, INFO_TEXT_Y, info[2] - info[0] - 20.0);
             let lh = f32::from(f.line_height);
             for (j, line) in wrap(f, &ia.info(), w).iter().enumerate() {
                 let at = (x, y + lh * j as f32);
                 self.label(&s, LIST_FONT, line, at, HAlign::Left, SELECTED_TEXT);
             }
         }
-        self.help(size, false, Prompt::Back, &t.back);
-        self.help(size, true, Prompt::Accept, &t.select);
+        self.help_bottom(help_size, false, Prompt::Back, &t.back, size[1]);
+        self.help_bottom(help_size, true, Prompt::Accept, &t.select, size[1]);
     }
 
     /// "Session Options": the PS2 stack rule of `crate::shell_ps2`
@@ -791,12 +875,14 @@ impl Ctx<'_> {
         let rows = ia.options.rows(g);
         for (k, o) in rows.iter().enumerate().skip(cur.top).take(OPTION_ROWS) {
             let y = y0 + OPTION_ROW * (k - cur.top) as f32;
-            if k == cur.at {
+            let live = ia.options.option_enabled(*o);
+            if live && k == cur.at {
                 let m = OPTION_ROW * (1.0 - CURSOR_H) * 0.5;
                 self.cursor_box(&s, [x0, y + m, x1, y + OPTION_ROW - m]);
             }
-            // Every row is white; the focused one blue (main.f1, the frames).
-            let style = if k == cur.at {
+            let style = if !live {
+                ([DIMMED_GREY; 3], UNSELECTED_TEXT.1)
+            } else if k == cur.at {
                 SELECTED_TEXT
             } else {
                 UNSELECTED_TEXT
@@ -980,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn the_windows_sit_where_the_script_puts_them() {
+    fn mission_windows_fit_and_keep_the_centre_controls_registered() {
         // §1.2: the Planet window's body 106.4..289.4 (the frame 109..287).
         assert!((LEFT_WINDOW[1] - 106.4).abs() < 0.01);
         assert!((LEFT_WINDOW[3] - 289.4).abs() < 0.01);
@@ -988,6 +1074,28 @@ mod tests {
         // Nine rows of 17 + 30 fill the window.
         assert!(LIST_PAD + LIST_ROWS as f32 * ROW < 183.0);
         assert!((INFO_BOX[1] - (22.4 + 309.0 - 38.0)).abs() < 0.01);
+        for size in [
+            [640.0, 480.0],
+            [3840.0, 2160.0],
+            [3440.0, 1440.0],
+            [600.0, 900.0],
+        ] {
+            let layout = MissionLayout::new(size);
+            let left = layout.left();
+            let right = layout.right();
+            let px = |x, y| layout.screen.map(glam::Vec3::new(x, y, 0.0));
+            assert!(px(left[0], left[1])[0] >= 0.0);
+            assert!(px(right[2], right[3])[0] <= size[0]);
+            assert_eq!(
+                list_under_pointer(px(left[0] + 2.0, left[1] + 2.0), size),
+                Some(false)
+            );
+            assert_eq!(
+                list_under_pointer(px(right[2] - 2.0, right[1] + 2.0), size),
+                Some(true)
+            );
+            assert_eq!(list_under_pointer(px(248.5, STACK_TOP), size), None);
+        }
     }
 
     /// The screen as the HUD pass lays it out: the backdrop, the windows,

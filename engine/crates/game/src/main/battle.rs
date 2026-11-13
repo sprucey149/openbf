@@ -165,12 +165,11 @@ fn team_templates(
             let templates = rosters.map(|mut r| {
                 // Heroes Off: no hero class at all (Session Options).
                 if b.heroes.is_some() {
-                    hero_classes[team] = game::heroes::append_with(
+                    hero_classes[team] = game::heroes::append(
                         &mut r,
                         &b.classes_dir,
                         b.mission.as_ref(),
                         team,
-                        b.dlc_heroes,
                     );
                 }
                 let mut table = Vec::new();
@@ -739,7 +738,15 @@ pub(super) fn hud_model(
     let spawn = spawn_model(walk, feed).and_then(|s| s.page);
     let slot = me.spec.player_slot.map_or(0, usize::from);
     // On foot the soldier's rows; flying, the droid's.
-    let [weapon, weapon2] = game::hud_feed::weapon_rows(walk);
+    let [weapon, weapon2] = game::hud_feed::weapon_rows(walk).map(|row| {
+        row.map(|mut weapon| {
+            weapon.name = feed
+                .weapon_name(&weapon.class)
+                .or_else(|| feed.weapon_name(&weapon.key))
+                .unwrap_or_else(|| weapon.class.clone());
+            weapon
+        })
+    });
     let gauge = game::hud_feed::weapon_gauge(walk);
     let leaving = walk
         .sim

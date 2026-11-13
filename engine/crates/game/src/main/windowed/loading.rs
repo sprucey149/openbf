@@ -158,7 +158,7 @@ pub(super) fn prepare(dir: PathBuf, mode: String) -> anyhow::Result<Worker<Prepa
 
 /// BF2 locations reuse an authored sequence from the same planet. Prefer
 /// the matching location where BF1 has one. Space maps use their planet's
-/// ground sequence. A destination with no BF1 planet gets the galaxy view.
+/// ground sequence.
 fn bf1_donor(key: &str) -> Option<&str> {
     match key {
         "bf2_end1" => Some("bf1_end1"),
@@ -174,37 +174,80 @@ fn bf1_donor(key: &str) -> Option<&str> {
     }
 }
 
-pub(super) fn presentation(root: &Path, key: &str) -> Option<game::assets::LoadScreenAssets> {
+/// BF2-only destinations share orbit views across ground and space maps.
+fn bf2_orbit(key: &str) -> Option<&'static str> {
+    match key {
+        "bf2_cor1" => Some("orbit_coruscant"),
+        "bf2_dag1" => Some("orbit_dagobah"),
+        "bf2_dea1" => Some("orbit_death_star"),
+        "bf2_fel1" | "bf2_spa7" => Some("orbit_felucia"),
+        "bf2_mus1" => Some("orbit_mustafar"),
+        "bf2_myg1" | "bf2_spa6" => Some("orbit_mygeeto"),
+        "bf2_pol1" => Some("orbit_polismassa"),
+        "bf2_uta1" => Some("orbit_utapau"),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Motion {
+    Authored,
+    Arrival,
+    Still,
+}
+
+struct Presentation {
+    sequence: Vec<(String, game::assets::CpuTexture)>,
+    motion: Motion,
+}
+
+fn presentation(root: &Path, key: &str) -> Option<Presentation> {
     // Identify the source by manifest content, including legacy map keys.
     let maps = game::assets::discover_maps(root);
-    let own = maps
-        .iter()
-        .find(|(k, source, _)| k == key && source == "bf1")
-        .map(|(_, _, dir)| dir.clone());
-    let target = own.or_else(|| bf1_donor(key).map(|k| root.join(k)));
-    if let Some(dir) = target {
-        if let Some(ls) = game::assets::load_loadscreen(&dir).filter(|s| !s.pool) {
-            return Some(ls);
-        }
+    let own = maps.iter().find(|(k, _, _)| k == key);
+    let bf1 = own
+        .filter(|(_, source, _)| source == "bf1")
+        .map(|(_, _, dir)| dir.clone())
+        .or_else(|| bf1_donor(key).map(|k| root.join(k)));
+    if let Some(assets) = bf1
+        .and_then(|dir| game::assets::load_loadscreen(&dir))
+        .filter(|s| !s.pool)
+    {
+        return Some(Presentation {
+            sequence: assets.sequence,
+            motion: Motion::Authored,
+        });
     }
-    // discover_maps is sorted and also supports packed assets.
-    for (_, source, dir) in maps {
-        if source != "bf1" {
-            continue;
-        }
-        if let Some(mut ls) = game::assets::load_loadscreen(&dir).filter(|s| !s.pool) {
-            // An arbitrary first image is not necessarily a galaxy view.
-            if ls
-                .sequence
-                .first()
-                .is_some_and(|(name, _)| name.starts_with("load_galacticmap"))
-            {
-                ls.sequence.truncate(1);
-                return Some(ls);
-            }
-        }
-    }
-    None // Missing/corrupt owned data: the UI still paints a loading frame.
+    // The shared space pool mixes eras. Choose Clone Wars ships for the
+    // two BF2-only stock space maps; select the first still on ground maps.
+    let preferred = match key {
+        "bf2_spa6" => "spa_6",
+        "bf2_spa7" => "spa_7",
+        _ => "",
+    };
+    let arrival = own
+        .filter(|(_, source, _)| source == "bf2")
+        .and_then(|(_, _, dir)| game::assets::load_loading_still(dir, preferred));
+    let galaxy = maps
+        .into_iter()
+        .filter(|(_, source, _)| source == "bf1")
+        .find_map(|(_, _, dir)| game::assets::load_loading_galaxy(&dir));
+    let orbit = if key == "bf2_tan1" {
+        // Tantive IV was boarded over Tatooine. Keep its own interior art
+        // as the destination and borrow only Tatooine's view from orbit.
+        game::assets::load_loading_image(&root.join("tat1"), "load_locale_tatooine_1".into())
+    } else {
+        bf2_orbit(key).and_then(|name| {
+            game::assets::load_loading_image(&root.join("common_bf2"), name.into())
+        })
+    };
+    let sequence: Vec<_> = galaxy.into_iter().chain(orbit).chain(arrival).collect();
+    let motion = if sequence.len() > 1 {
+        Motion::Arrival
+    } else {
+        Motion::Still
+    };
+    (!sequence.is_empty()).then_some(Presentation { sequence, motion })
 }
 
 #[derive(Default)]
@@ -223,7 +266,7 @@ impl Display {
         let Some(assets) = presentation(root, key) else {
             return Self::default();
         };
-        let authored = Self::load_authored(root, key, &assets, ctx);
+        let authored = Self::load_motion(root, key, &assets, ctx);
         let textures = assets
             .sequence
             .into_iter()
@@ -234,42 +277,58 @@ impl Display {
         Self { textures, authored }
     }
 
-    fn load_authored(
+    fn load_motion(
         root: &Path,
         key: &str,
-        assets: &game::assets::LoadScreenAssets,
+        assets: &Presentation,
         ctx: &ui::egui::Context,
     ) -> Option<AuthoredDisplay> {
-        let count = assets.sequence.len();
-        if count < 2 {
-            return None;
-        }
+        use ui::egui::{pos2, Rect};
         let dir = root.join("common_bf1/load");
         let config = pak::read_to_string(dir.join("layout.ron")).ok()?;
         let layout: manifest::LoadingLayout = ron::from_str(&config).ok()?;
-        let key = bf1_donor(key).unwrap_or(key);
-        let targets = layout.maps.get(key.strip_prefix("bf1_").unwrap_or(key))?;
-        if targets.len() != count {
-            return None;
-        }
-        let rects = targets[..count - 1]
-            .iter()
-            .zip(&assets.sequence)
-            .map(|(target, (name, texture))| {
-                if target.image != *name {
+        let rects = match assets.motion {
+            Motion::Arrival => {
+                // OURS: BF2 arrivals use a centered scan for each transition
+                // with BF1's cue timing. measure: map-specific crop framing.
+                let centered = Rect::from_min_max(pos2(0.25, 0.25), pos2(0.75, 0.75));
+                let mut rects = vec![centered; assets.sequence.len().checked_sub(1)?];
+                if key == "bf2_tan1" && rects.len() == 2 {
+                    // Preserve BF1's authored Tatooine orbit target when its
+                    // exact plate is present.
+                    if let Some(target) =
+                        layout.maps.get("tat1").and_then(|targets| targets.first())
+                    {
+                        let (name, texture) = &assets.sequence[0];
+                        if target.image == *name {
+                            rects[0] = target_rect(target, texture);
+                        }
+                    }
+                }
+                rects
+            }
+            Motion::Authored => {
+                let key = bf1_donor(key).unwrap_or(key);
+                let targets = layout.maps.get(key.strip_prefix("bf1_").unwrap_or(key))?;
+                let (last, targets) = targets.split_last()?;
+                if targets.len() + 1 != assets.sequence.len()
+                    || last.image != assets.sequence.last()?.0
+                {
                     return None;
                 }
-                let [x, y, w, h] = target.rect;
-                let (tw, th) = (texture.width as f32, texture.height as f32);
-                Some(ui::egui::Rect::from_min_max(
-                    ui::egui::pos2(x / tw, y / th),
-                    ui::egui::pos2((x + w) / tw, (y + h) / th),
-                ))
-            })
-            .collect::<Option<Vec<_>>>()?;
-        if targets.last()?.image != assets.sequence.last()?.0 {
-            return None;
-        }
+                targets
+                    .iter()
+                    .zip(&assets.sequence)
+                    .map(|(target, (name, texture))| {
+                        if target.image != *name {
+                            return None;
+                        }
+                        Some(target_rect(target, texture))
+                    })
+                    .collect::<Option<Vec<_>>>()?
+            }
+            Motion::Still => return None,
+        };
         let motion =
             ui::loading::Choreography::new(layout.tracking_seconds, layout.zoom_seconds, rects)?;
         use ui::egui::TextureOptions;
@@ -340,6 +399,18 @@ impl Display {
             );
         }
     }
+}
+
+fn target_rect(
+    target: &manifest::LoadingTarget,
+    texture: &game::assets::CpuTexture,
+) -> ui::egui::Rect {
+    let [x, y, w, h] = target.rect;
+    let (tw, th) = (texture.width as f32, texture.height as f32);
+    ui::egui::Rect::from_min_max(
+        ui::egui::pos2(x / tw, y / th),
+        ui::egui::pos2((x + w) / tw, (y + h) / th),
+    )
 }
 
 fn loading_label(ctx: &ui::egui::Context, dir: &Path) -> Option<ui::loading::Label> {

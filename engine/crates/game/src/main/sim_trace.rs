@@ -17,6 +17,8 @@ struct SpaceReport {
     out: std::fs::File,
     flyers_lost: [u32; 3],
     stations_lost: u32,
+    critical_lost: u32,
+    critical_by_flyers: u32,
     won_at: Option<u64>,
 }
 
@@ -26,12 +28,14 @@ impl SpaceReport {
         let mut out = std::fs::File::create(&path).with_context(|| path.display().to_string())?;
         writeln!(
             out,
-            "seconds,points0,points1,units0,units1,flying0,flying1,flyers_shot,flyers_crashed,flyers_unseen,stations_lost,system_hits,outcome"
+            "seconds,points0,points1,units0,units1,flying0,flying1,flyers_shot,flyers_crashed,flyers_unseen,stations_lost,system_hits,outcome,critical_lost,critical_by_flyers"
         )?;
         Ok(Self {
             out,
             flyers_lost: [0; 3],
             stations_lost: 0,
+            critical_lost: 0,
+            critical_by_flyers: 0,
             won_at: None,
         })
     }
@@ -50,7 +54,27 @@ impl SpaceReport {
                         self.flyers_lost[usize::from(killer.is_none())] += 1;
                     }
                 }
-                Event::StationDestroyed { .. } => self.stations_lost += 1,
+                Event::StationDestroyed {
+                    station, killer, ..
+                } => {
+                    self.stations_lost += 1;
+                    if sim.space_assault.as_ref().is_some_and(|space| {
+                        space
+                            .critical
+                            .iter()
+                            .any(|system| system.station == *station)
+                    }) {
+                        self.critical_lost += 1;
+                        if killer
+                            .and_then(|h| sim.unit(h))
+                            .and_then(|u| u.mount)
+                            .and_then(|m| sim.vehicle(m.vehicle))
+                            .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer)
+                        {
+                            self.critical_by_flyers += 1;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -89,7 +113,7 @@ impl SpaceReport {
         let unseen = balance.fighter_kills;
         writeln!(
             self.out,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{:?}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{:?},{},{}",
             sim.tick / u64::from(core::TICK_HZ),
             points[0],
             points[1],
@@ -102,7 +126,9 @@ impl SpaceReport {
             unseen,
             self.stations_lost,
             balance.system_hits,
-            sim.outcome
+            sim.outcome,
+            self.critical_lost,
+            self.critical_by_flyers,
         )?;
         Ok(())
     }

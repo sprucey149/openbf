@@ -373,13 +373,26 @@ impl Ctx<'_> {
     /// A help line: the pad icon at the safe area's edge, its label beside
     /// it on the inside.
     pub(crate) fn help(&mut self, size: [f32; 2], right: bool, prompt: Prompt, text: &str) {
+        self.help_bottom(size, right, prompt, text, size[1]);
+    }
+
+    /// The same footer at the bottom of a window taller than its UI frame.
+    pub(crate) fn help_bottom(
+        &mut self,
+        size: [f32; 2],
+        right: bool,
+        prompt: Prompt,
+        text: &str,
+        bottom: f32,
+    ) {
         let icon = self.art.icons.sheet(prompt);
         let (a, ix) = if right {
             (Anchor::Right, SAFE_X[1] - ICON[0])
         } else {
             (Anchor::Left, SAFE_X[0])
         };
-        let s = screen_at(size, a);
+        let mut s = screen_at(size, a);
+        s.origin[1] += bottom - size[1];
         let top = HELP_Y - ICON[1] * 0.5;
         self.sheet(
             &s,

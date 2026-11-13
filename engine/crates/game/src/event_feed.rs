@@ -329,7 +329,7 @@ impl Texts {
     }
 
     /// The line an earned award shows (issue #130): BF2's
-    /// `game.awards.bonus.<medal>` (`medal` as `round_stats::MEDALS` keys
+    /// `game.awards.bonus.<medal>` (`medal` as `round_stats::MEDAL_NAMES` keys
     /// it), or our own for an award weapon of ours, `award` being the class
     /// the medal unlocks in the player's kit (the Heavy Blast Cannon on a BF1
     /// map, where BF2's text would name the flechette).
@@ -508,6 +508,7 @@ impl EventFeed {
             &walk.post_keys,
         );
         feed.space_round = walk.space_round.clone();
+        feed.round.opening_medals = walk.sim.medal_counts();
         feed.classes = [0, 1].map(|t| {
             walk.teams[t]
                 .classes
@@ -604,6 +605,58 @@ impl EventFeed {
     /// The line an earned award shows ([`Texts::award_bonus`]).
     pub fn award_bonus(&self, medal: &str, award: Option<&str>) -> Option<String> {
         self.texts.award_bonus(medal, award)
+    }
+
+    pub fn note_medals(
+        &mut self,
+        sim: &Sim,
+        viewer: UnitHandle,
+        seen: &mut core::sim::MedalCounts,
+    ) {
+        let Some(counts) = sim.medal_counts() else {
+            return;
+        };
+        use crate::round_stats::{CAREER_MEDAL_ORDER, MEDAL_NAMES};
+        for id in CAREER_MEDAL_ORDER {
+            if counts[id] <= seen[id] {
+                continue;
+            }
+            let (key, label) = MEDAL_NAMES[id];
+            // BF2 queues the medal on earning (FUN_0035fd50) and the award
+            // on activation (FUN_00360200). The HUD admits one line at a time.
+            let name = self.screen_text(&format!("game.awards.medal.{key}"), label);
+            self.say(name, message_color::MEDAL, sim.tick);
+            if !sim.career_award_bonuses()
+                || core::sim::medal_level(counts[id]) == 0
+                || core::sim::medal_level(seen[id]) == 3
+            {
+                continue;
+            }
+            let Some(unit) = sim
+                .unit(viewer)
+                .filter(|u| sim.award_bits(u) & (1 << id) != 0)
+            else {
+                continue;
+            };
+            let award = if core::sim::WEAPON_MEDALS & (1 << id) != 0 {
+                let Some(class) = std::iter::once(unit.weapon_class)
+                    .chain(unit.held.iter().map(|w| w.class))
+                    .filter_map(|class| sim.weapon_classes.get(class))
+                    .find(|class| class.unlock_medal() == Some(id as i8))
+                else {
+                    continue;
+                };
+                Some(class.name.as_str())
+            } else if sim.medal_effect(unit, id as u16) {
+                None
+            } else {
+                continue;
+            };
+            if let Some(message) = self.award_bonus(key, award) {
+                self.say(message, message_color::YELLOW, sim.tick);
+            }
+        }
+        *seen = counts;
     }
 
     /// The boundary's warning in the map's game's words (`re-boundary.md` T4).
@@ -753,12 +806,13 @@ impl EventFeed {
     /// Read the sim's events if its tick is new. `viewer` is the local
     /// player: the lines are coloured for his team and the statistics are
     /// his. Call once per stepped tick (and freely more often).
-    pub fn tick(&mut self, sim: &Sim, viewer: UnitHandle) {
+    pub fn tick(&mut self, sim: &Sim, viewer: UnitHandle) -> u32 {
         let tick = sim.tick;
         if self.seen == Some(tick) {
-            return;
+            return 0;
         }
         self.seen = Some(tick);
+        let mut positive = 0;
         let my_team = sim.units[viewer.index as usize].team;
         // A team as the viewer's team sees it (§1.2).
         let relation = |team: u8| {
@@ -901,7 +955,9 @@ impl EventFeed {
                             self.points += points::TEAM_KILL;
                         } else {
                             self.kills += 1;
-                            self.points += points::kill(v.is_player, hero);
+                            let points = points::kill(v.is_player, hero);
+                            self.points += points;
+                            positive += points as u32;
                         }
                     }
                 }
@@ -909,9 +965,12 @@ impl EventFeed {
                     shooter,
                     victim,
                     weapon_class,
-                } if shooter == viewer => {
-                    if let Some(color) = critical_mark(sim, victim, weapon_class, my_team) {
-                        self.critical = Some((tick, color));
+                } => {
+                    self.round.critical_hit(shooter);
+                    if shooter == viewer {
+                        if let Some(color) = critical_mark(sim, victim, weapon_class, my_team) {
+                            self.critical = Some((tick, color));
+                        }
                     }
                 }
                 Event::EnvDeath { unit, .. } => {
@@ -989,11 +1048,13 @@ impl EventFeed {
                     }
                     if let Some(first) = self.capture_credit(sim, viewer, cp, team) {
                         self.battle.captures = self.battle.captures.saturating_add(1);
-                        self.points += if first {
+                        let points = if first {
                             points::CAPTURE
                         } else {
                             points::CAPTURE_ASSIST
                         };
+                        self.points += points;
+                        positive += points as u32;
                     }
                     // Every soldier's share, for the stats pages (issue #50).
                     for i in 0..sim.units.len() {
@@ -1047,6 +1108,7 @@ impl EventFeed {
             }
         }
         self.owners = sim.cps.iter().map(|c| c.owner).collect();
+        positive
     }
 
     /// Keep, per unit, the post whose capture region it stands in and the

@@ -298,6 +298,23 @@ impl ListCursor {
         moved
     }
 
+    fn step_wrapping(&mut self, live: &[bool], down: bool, shown: usize) -> bool {
+        if self.step(live, if down { 1 } else { -1 }, shown) {
+            return true;
+        }
+        let Some(other_end) = (if down {
+            live.iter().position(|&enabled| enabled)
+        } else {
+            live.iter().rposition(|&enabled| enabled)
+        }) else {
+            return false;
+        };
+        let moved = self.at != other_end;
+        self.at = other_end;
+        self.show(live.len(), shown);
+        moved
+    }
+
     /// The first live row (or 0), shown.
     fn first(live: &[bool], shown: usize) -> ListCursor {
         let mut c = ListCursor {
@@ -472,19 +489,10 @@ impl InstantAction {
         match self.page {
             Page::Missions => {
                 if let (Some(point), Some(size)) = (point, size) {
-                    if size[0] > 0.0 && size[1] > 0.0 {
-                        let box_w = 4.0 / 3.0 * size[1];
-                        let x = (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0);
-                        if (crate::shell_ia::RIGHT_WINDOW[0]..=crate::shell_ia::RIGHT_WINDOW[2])
-                            .contains(&x)
-                        {
-                            return self.scroll_right(delta);
-                        }
-                        if (crate::shell_ia::LEFT_WINDOW[0]..=crate::shell_ia::LEFT_WINDOW[2])
-                            .contains(&x)
-                        {
-                            return self.scroll_left(delta);
-                        }
+                    match crate::shell_ia::list_under_pointer(point, size) {
+                        Some(true) => return self.scroll_right(delta),
+                        Some(false) => return self.scroll_left(delta),
+                        None => {}
                     }
                 }
                 if self.state == State::Playlist {
@@ -537,9 +545,10 @@ impl InstantAction {
             }
             PointerTarget::Option(k, _) => {
                 if let Page::Group(g, mut cur) = self.page {
-                    if k < self.options.rows(g).len() {
+                    let rows = self.options.rows(g);
+                    if rows.get(k).is_some_and(|o| self.options.option_enabled(*o)) {
                         cur.at = k;
-                        cur.show(self.options.rows(g).len(), OPTION_ROWS);
+                        cur.show(rows.len(), OPTION_ROWS);
                         self.page = Page::Group(g, cur);
                         return true;
                     }

@@ -201,9 +201,11 @@ pub fn rows(career: &Career, text: &dyn Fn(&str, &str) -> String) -> Vec<ui::sta
             let info = match Unlockable::next_stage(kills) {
                 Some(HALF_AT) => format!(
                     "{HALF_AT} career kills with the {name} halves its unlock cost. \
-                     {FREE_AT} career kills unlock it permanently."
+                     {FREE_AT} career kills to unlock it permanently."
                 ),
-                Some(_) => format!("{FREE_AT} career kills with the {name} unlock it permanently."),
+                Some(_) => {
+                    format!("{FREE_AT} career kills to unlock it permanently.")
+                }
                 None => format!("You have unlocked the {name} permanently."),
             };
             ui::stats::Medal {
@@ -304,7 +306,7 @@ mod tests {
         assert_eq!(
             wookiee.info,
             "50 career kills with the Wookiee Warrior halves its unlock cost. 100 career kills \
-             unlock it permanently."
+             to unlock it permanently."
         );
         let magna = &rows[6];
         assert_eq!((magna.count, magna.level.as_str()), (140, "UNLOCKED"));

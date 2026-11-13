@@ -134,6 +134,15 @@ fn up() -> IaInput {
     press(|i| i.menu.up = true)
 }
 
+#[test]
+fn map_navigation_wraps_over_disabled_rows() {
+    let mut cursor = ListCursor::first(&[false, true, true, false], 2);
+    assert!(cursor.step_wrapping(&[false, true, true, false], false, 2));
+    assert_eq!(cursor.at, 2);
+    assert!(cursor.step_wrapping(&[false, true, true, false], true, 2));
+    assert_eq!(cursor.at, 1);
+}
+
 /// §6 "Merged list": the 40 rows in the case-folded order, each with its
 /// game, then All Maps.
 #[test]
@@ -467,39 +476,43 @@ fn option_ranges_steps_and_defaults() {
     assert_eq!(o.hero_respawn, -1, "121 wraps to Never");
     o.adjust(Opt::HeroUnlock, 1, 1);
     assert_eq!(o.hero_unlock, 5);
-    assert_eq!(o.rows(Group::Hero).len(), 5, "Heroes On");
+    assert_eq!(o.rows(Group::Hero).len(), 7, "Heroes On");
     o.adjust(Opt::HeroesOnOff, 1, 1);
-    assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff], "Heroes Off");
+    assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff, Opt::DlcHeroes]);
 }
 
-/// The DLC heroes are a choice: the row exists only with their bake, and until
-/// it is changed every map keeps its own hero.
 #[test]
-fn the_dlc_hero_row_is_an_option_and_the_maps_own_hero_is_the_default() {
-    let t = IaTexts::new(&|_, english| english.to_owned());
-    let flat = |pieces: Vec<Piece>| -> String {
-        pieces
-            .into_iter()
-            .map(|p| match p {
-                Piece::Text(s) => s,
-                Piece::Left => "<".into(),
-                Piece::Right => ">".into(),
-            })
-            .collect()
-    };
-    let mut o = SessionOptions::default();
-    assert!(!o.rows(Group::Hero).contains(&Opt::DlcHeroes), "no bake");
-    o.dlc_heroes_installed = true;
-    assert_eq!(o.rows(Group::Hero)[1], Opt::DlcHeroes, "in sight");
-    assert_eq!(o.rows(Group::Hero).len(), 6);
-    assert!(!o.dlc_heroes, "the map's own hero by default");
-    assert_eq!(flat(t.option(Opt::DlcHeroes, &o)), "DLC Heroes: < Off >");
-    o.adjust(Opt::DlcHeroes, 1, 1);
-    assert!(o.dlc_heroes);
-    assert_eq!(flat(t.option(Opt::DlcHeroes, &o)), "DLC Heroes: < On >");
-    assert!(!t.help(Opt::DlcHeroes).is_empty());
-    o.adjust(Opt::HeroesOnOff, 1, 1);
-    assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff], "Heroes Off");
+fn dlc_heroes_stay_visible_but_cannot_be_changed_without_the_bake() {
+    let texts = IaTexts::new(&|_, english| english.to_owned());
+    let options = SessionOptions::default();
+    let row = Opt::DlcHeroes;
+    let mut ia = InstantAction::new(Vec::new(), texts, options);
+    ia.page = Page::Group(Group::Hero, ListCursor::default());
+    assert_eq!(ia.options.rows(Group::Hero)[1], row);
+    assert!(!ia.options.option_enabled(row));
+    assert_eq!(
+        ia.texts.option(row, &ia.options),
+        [Piece::Text("DLC Heroes: Off".into())]
+    );
+    assert!(!ia.focus_pointer(PointerTarget::Option(1, true)));
+    ia.step(
+        IaInput {
+            menu: crate::menu::MenuInput {
+                down: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        0.0,
+    );
+    assert_eq!(
+        ia.page,
+        Page::Group(Group::Hero, ListCursor { at: 2, top: 0 })
+    );
+    ia.options.adjust(row, 1, 1);
+    assert!(!ia.options.dlc_heroes);
+    ia.options.adjust(Opt::HeroesOnOff, 1, 1);
+    assert_eq!(ia.options.rows(Group::Hero), [Opt::HeroesOnOff, row]);
 }
 
 /// Supported modes use bounded percentages; unsupported modes keep raw counts.
@@ -538,7 +551,7 @@ fn hero_defaults_and_ranges() {
     assert!(o.heroes, "Heroes On by default");
     o.adjust(Opt::HeroesOnOff, 1, 1);
     assert!(!o.heroes);
-    assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff], "the rest hidden");
+    assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff, Opt::DlcHeroes]);
     assert_eq!(flat(t.option(Opt::HeroesOnOff, &o)), "Heroes: < Off >");
     o.adjust(Opt::HeroesOnOff, 1, 1);
     let rows: Vec<String> = o
@@ -550,6 +563,8 @@ fn hero_defaults_and_ranges() {
         rows,
         [
             "Heroes: < On >",
+            "DLC Heroes: Off",
+            "AI heroes: < Off >",
             "Unlock Hero: < Points >",
             "First to < 10 > points",
             "Assign To: < Best Player >",
@@ -662,7 +677,8 @@ fn instant_action_clicks() {
     m.step(cross(), 0.0);
     assert_eq!(m.take_clicks(), [S::Accept]);
     m.step(up(), 0.0);
-    assert!(m.take_clicks().is_empty(), "Up on row 0: silent");
+    assert_eq!(m.take_clicks(), [S::Select], "Up wraps to the last map row");
+    assert_eq!(m.map_list.at, m.map_rows().len() - 1);
     m.step(down(), 0.0);
     m.step(press(|i| i.r1 = true), 0.0);
     assert_eq!(m.take_clicks(), [S::Select, S::Select]);
@@ -886,8 +902,7 @@ fn option_rows_read_as_the_disc_writes_them() {
     );
 }
 
-/// §2.1-2.2: OPTIONS opens the overview (Hero, CTF, Hunt, Assault dimmed
-/// and skipped), a group page adjusts with Left/Right and L1/R1, Triangle
+/// §2.1-2.2: OPTIONS opens the overview (CTF and Hunt dimmed and skipped), a group page adjusts with Left/Right and L1/R1, Triangle
 /// walks back and asks for the prefs to be kept.
 #[test]
 fn session_options_pages() {
@@ -896,12 +911,24 @@ fn session_options_pages() {
     m.step(cross(), 0.0);
     assert_eq!(m.page, Page::Overview(0));
     let live: Vec<bool> = m.overview().iter().map(|(_, l)| *l).collect();
-    assert_eq!(live, [true, false, true, false, false, false]);
-    m.step(down(), 0.0);
-    assert_eq!(m.page, Page::Overview(2), "Hero skipped");
-    m.step(down(), 0.0);
-    assert_eq!(m.page, Page::Overview(0), "wraps past the dimmed three");
+    assert_eq!(live, [true, true, true, false, false, true]);
     m.step(up(), 0.0);
+    assert_eq!(m.page, Page::Overview(5), "wraps to Assault");
+    m.step(cross(), 0.0);
+    assert!(matches!(m.page, Page::Group(Group::Assault, _)));
+    m.step(down(), 0.0);
+    m.step(press(|i| i.menu.right = true), 0.0);
+    assert_eq!(m.options.ass_score, 190);
+    assert_eq!(m.step(triangle(), 0.0), Some(IaCommand::Prefs));
+    m.step(down(), 0.0);
+    m.step(down(), 0.0);
+    assert_eq!(m.page, Page::Overview(1), "Hero options are selectable");
+    m.step(cross(), 0.0);
+    m.step(down(), 0.0);
+    m.step(press(|i| i.menu.right = true), 0.0);
+    assert!(m.options.ai_heroes);
+    assert_eq!(m.step(triangle(), 0.0), Some(IaCommand::Prefs));
+    m.step(down(), 0.0);
     assert_eq!(m.page, Page::Overview(2));
     m.step(cross(), 0.0);
     assert!(matches!(m.page, Page::Group(Group::Conquest, _)));

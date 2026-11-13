@@ -10,7 +10,7 @@
 #   scripts/gpu_tests.sh --game --include-ignored FILTER # include ordinary game suite tests
 #   scripts/gpu_tests.sh --game-lib [--include-ignored] [CARGO_ARGS] # serial game lib
 #   scripts/gpu_tests.sh --battle-launch # owned Hero Assault shell launch checks
-#   scripts/gpu_tests.sh --render   # only the render crate's GPU tests
+#   scripts/gpu_tests.sh --render [CARGO_ARGS] # only the render crate's GPU tests
 #   scripts/gpu_tests.sh --hit-feedback # issue #104 captures on fresh side bakes
 #   scripts/gpu_tests.sh --hud-item-layer # issue #114 real-content weapon overlap
 set -euo pipefail
@@ -73,6 +73,9 @@ if [ "${1:-}" = "--ui-sharp" ]; then
   exec cargo test --release -p game --test ui_sharp "$@" -- --ignored --test-threads=1 --nocapture
 fi
 
+if [ "${1:-}" = "--render" ]; then
+    shift
+    exec cargo test -p render "$@" -- --ignored --test-threads=1
+fi
 cargo test -p render -- --ignored --test-threads=1
-[ "${1:-}" = "--render" ] && exit 0
 exec "$ROOT/scripts/goldens.sh" --check

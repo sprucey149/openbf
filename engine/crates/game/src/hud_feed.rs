@@ -254,7 +254,7 @@ pub fn hud_weapon(
         class: hud.class.clone(),
         bf2: hud.bf2,
         icon: hud.icon.clone(),
-        // The localised weapon name waits for the Locl tables.
+        // The match HUD resolves the name from its localization tables.
         name: String::new(),
         total,
         clip_fraction,
@@ -294,6 +294,7 @@ pub struct HudView {
     /// The squad cross's parts of the last layout.
     squad: Vec<(ui::hud_squad::Part, [f32; 4], f32)>,
     settled: bool,
+    pause_art: bool,
     /// The shell movie's texture and the frame waiting to be written into
     /// it (card BSHLA).
     movie: Option<HudTexture>,
@@ -678,6 +679,11 @@ impl HudView {
             });
         }
         ui::hud::place_countdown_labels(&mut hud);
+        let pause_art = [ui::spawn_draw::BUTTON_FONT, ui::spawn_draw::SMALL_FONT]
+            .iter()
+            .all(|role| art.menu_font(role).is_some())
+            && ui::pause_draw::button_sheets()
+                .all(|sheet| pak::is_file(common.join("textures").join(format!("{sheet}.ktx2"))));
         Ok(Self {
             hud,
             art,
@@ -709,6 +715,7 @@ impl HudView {
             boxes: Vec::new(),
             squad: Vec::new(),
             settled: false,
+            pause_art,
             movie: None,
             movie_frame: None,
         })
@@ -729,6 +736,12 @@ impl HudView {
     /// Feed `model`, advance the fades by `dt` seconds and lay the HUD out
     /// for a `size` window. The first call settles the fades.
     pub fn update(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) {
+        self.feed(model, dt);
+        let frame = ui::hud_draw::draw(&self.hud, &self.art, size.map(|v| v as f32));
+        self.install_frame(frame);
+    }
+
+    fn feed(&mut self, model: &HudModel, dt: f32) {
         // Each weapon row's model, else its icon sheet ([`Self::weapon_mesh`]).
         let mut model = model.clone();
         for (row, w) in [(1, &mut model.weapon), (2, &mut model.weapon2)] {
@@ -803,9 +816,28 @@ impl HudView {
                 }
             }
         }
+    }
 
-        let frame = ui::hud_draw::draw(&self.hud, &self.art, [size[0] as f32, size[1] as f32]);
-        self.install_frame(frame);
+    pub fn can_draw_pause(&self) -> bool {
+        self.pause_art
+    }
+
+    /// Feed and hold the battle HUD while laying out the Game Menu in its place.
+    pub fn update_pause(
+        &mut self,
+        hud: &HudModel,
+        menu: &ui::menu::MenuModel,
+        anim: &ui::pause_draw::Animation,
+        size: [u32; 2],
+    ) {
+        self.feed(hud, 0.0);
+        self.install_frame(ui::pause_draw::draw(
+            &self.hud,
+            &self.art,
+            menu,
+            anim,
+            size.map(|v| v as f32),
+        ));
     }
 
     /// Lay the shell's page `menus` out for a `size` window (card BSHLA):
@@ -817,6 +849,27 @@ impl HudView {
         let frame = ui::hud_draw::draw(&self.hud, &self.art, [size[0] as f32, size[1] as f32]);
         self.hud.shell = None;
         self.install_frame(frame);
+    }
+
+    /// The shared options panel drawn over the shell movie.
+    pub fn update_shell_options(
+        &mut self,
+        menus: &ui::shell_ps2::ShellMenus,
+        movie: bool,
+        model: &ui::menu::MenuModel,
+        animation: &ui::pause_draw::Animation,
+        size: [u32; 2],
+    ) {
+        let movie = movie && (self.movie.is_some() || self.movie_frame.is_some());
+        self.install_frame(ui::hud_draw::draw_shell_options(
+            &self.hud,
+            &self.art,
+            menus,
+            movie,
+            model,
+            animation,
+            size.map(|x| x as f32),
+        ));
     }
 
     /// [`HudView::update_shell`] with the Instant Action screen `ia` over

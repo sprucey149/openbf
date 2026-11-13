@@ -519,6 +519,15 @@ PS2 max is [H] 10 (read `ScriptCB_GetVolumes` in RAM). Defaults [M menuref `audi
 thumb ZPos 159 (pc 59-75). `HSlider_MoveThumb` (main.f0): thumb spans x = -w/2 + w x pos .. + 0.1 w, full height;
 the bg is stretched to -w/2 .. w/2 + 0.1 w. Alpha set on both (main.f1).
 
+**openbf settings** (issue #128). The shared shell and pause options group game,
+audio, graphics and controls settings. Controls first chooses keyboard/mouse or
+gamepad. Sound Effects and Dialogue volumes scale the authored effects and
+speech gains independently of music. The pause menu's Game Options holds
+the session cheat controls. The FPS counter is optional and reports presented
+frames with render scale in Advanced mode. Instant Action exposes its Hero
+and Assault groups. Conquest hero eligibility extends to bots only when AI
+heroes is enabled.
+
 ### ifs_opt_contmode (Controls -> Select Control Type)
 
 Script `common/ifs_opt_controller_mode` [V]:
@@ -608,11 +617,20 @@ Script `common/ifs_pausemenu` [V]. `nologo`, no movie, `bDimBackdrop`, `bAcceptI
 Triangle = resume (`exitSound`, `ScriptCB_Unpause`; main.f14) [V]. In single player the PS2 shows the host text
 "Leaving the game now will end this session. Are you sure you want to leave?" [M menuref `pause_menu`].
 
-Port (playtest A6, #128): ground battles draw this Game Menu with the same texts, row order and popups (focus No;
-Quit shows the host text). `[ours]`: Cheats and Change class (testing) follow Options; Options stays after the round
-ends; the Options page is the shell's one settings page (Game and Audio together, no Controls or Online rows yet);
-Back resumes from every page and popup (playtest A3), and a page's own Back row returns to the Game Menu. Space
-battles keep the flat list (`ui::menu::MenuModel::page` `None`).
+The original 4:3 Hero Assault pause capture shows a dim scene, with the
+HUD gone and a centered, translucent six-bar stack. Measured in the shell's
+512 × 448 frame, it is about 320 units wide and centered at (258, 221).
+The blue title and gray buttons use the shell's segmented art. The opening
+sweeps in each bar from the left and the selected row pulses.
+
+The port uses this presentation for ground and space battles (#128), with
+the same text keys and original row order. Quit shows the host text and
+confirmations open on No. Cheats and the test class picker follow Options
+when available. Options stays after the round ends and combines the
+port's settings in one page. The Options, Cheats and confirmation pages
+use compact BF2-styled bars with the existing actions. The Back control
+resumes from any page (playtest A3). A page's own Back row returns to the
+Game Menu. Partial bakes without the menu art can use the fallback panel.
 
 ### Hidden on the PS2 (do not draw)
 
