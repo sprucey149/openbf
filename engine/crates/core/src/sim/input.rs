@@ -493,9 +493,7 @@ impl Sim {
                 })
             }
             AimTarget::Vehicle(h) => {
-                let v = self
-                    .vehicle(h)
-                    .filter(|v| v.health.alive())?;
+                let v = self.vehicle(h).filter(|v| v.health.alive())?;
                 let (c, r) = match (v.aim_sphere, self.blast_setup.get(v.class as usize)) {
                     (Some(s), _) => s,
                     (None, Some(Some(b))) => (b.sphere_centre, b.sphere_radius),
@@ -517,8 +515,10 @@ impl Sim {
             }
             AimTarget::Droid(_) => None,
             AimTarget::Station(i) => {
-                self.space_assault.as_ref()?;
-                let s = self.stations.get(usize::from(i)).filter(|s| !s.destroyed)?;
+                let s = self
+                    .stations
+                    .get(usize::from(i))
+                    .filter(|s| !s.destroyed && s.health.max > 0.0 && s.health.alive())?;
                 Some(Candidate {
                     team: s.team,
                     kind: s.health.health_type as u32,
@@ -761,6 +761,20 @@ impl Sim {
             if clear(&c) {
                 near = s;
                 pick = Some((AimTarget::Droid(d.id), rel(&c)));
+            }
+        }
+        // Finite-health buildings share the readout and relation color
+        // (B2 FUN_003b3398:410036-410060, re-target-hud §2). Retain the
+        // existing station readout's policy of not pulling infantry aim.
+        for i in 0..self.stations.len() {
+            let t = AimTarget::Station(i as u16);
+            let Some(c) = self.aim_candidate(t) else {
+                continue;
+            };
+            let score = cone_score(c.r, angle, er, pos, dir, c.ctr);
+            if score >= 0.0 && score < near && clear(&c) {
+                near = score;
+                pick = Some((t, rel(&c)));
             }
         }
         self.magnet[slot] = if valid && droid.is_none() {

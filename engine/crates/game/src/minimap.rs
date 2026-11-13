@@ -136,6 +136,24 @@ pub fn droid_icon(db: &ClassDb, remote: &str) -> ClassIcon {
     icon
 }
 
+/// B2 FUN_003a5940:388779-388817 dims an inactive map object halfway
+/// toward RGB 64. A live gun's refire progress supplies its firing pulse
+/// (FUN_003a68d0:389118-389127), rather than a separate blink clock.
+fn turret_color(v: &core::vehicle::Vehicle, team: [u8; 3]) -> [u8; 3] {
+    if !v.seats.iter().any(|s| s.occupant.is_some()) {
+        return team.map(|c| ((u16::from(c) + 64 + 1) / 2) as u8);
+    }
+    let pulse = v
+        .guns
+        .iter()
+        .flatten()
+        .flat_map(|g| &g.weapons)
+        .filter(|w| w.state == core::weapon::FireState::Firing && w.refire_time > 0.0)
+        .map(|w| (1.0 - w.refire_accum / w.refire_time).clamp(0.0, 1.0))
+        .fold(0.0, f32::max);
+    team.map(|c| (f32::from(c) * (1.0 - pulse) + 255.0 * pulse + 0.5) as u8)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MapStatic {
     /// The map's own `textures` directory (the image's sheet).
@@ -156,6 +174,8 @@ pub struct MapStatic {
     pub soldiers: Vec<ClassIcon>,
     /// By `Vehicle::class`.
     pub vehicles: Vec<ClassIcon>,
+    /// Health-bearing placed objects: icon and registered command-post role.
+    pub structures: Vec<(ClassIcon, bool)>,
     /// A remote droid's icon by its `Droid::weapon_class`: the droid
     /// class's own `MapTexture` / `MapScale` (`troop_icon` 1.0 on both discs,
     /// `analysis/re-remote-droid.md` §8).
@@ -315,6 +335,18 @@ impl MapStatic {
         let sheet_dir = scene.dir.join("textures");
         Self {
             droids,
+            structures: walk
+                .sim
+                .station_classes
+                .iter()
+                .map(|c| {
+                    (
+                        ClassIcon::of(&db, &c.name),
+                        db.engine_base(&c.name)
+                            .is_some_and(|b| b.eq_ignore_ascii_case("commandpost")),
+                    )
+                })
+                .collect(),
             image: image_of(&sheet_dir, &m.map),
             sheet_dir,
             bounds: mapbounds(m).map(bounds_of),
@@ -431,6 +463,34 @@ impl MapStatic {
         // visible, clamped to the rim, including an enemy or our own mount.
         posts.extend(self.command_posts(walk).into_iter().map(|(_, icon)| icon));
         let mut units = Vec::new();
+        for station in &sim.stations {
+            if station.destroyed || !station.health.alive() {
+                continue;
+            }
+            let Some((class, post)) = self.structures.get(station.class as usize) else {
+                continue;
+            };
+            let Some(texture) = class.texture.clone() else {
+                continue;
+            };
+            if !post && station.team.is_some_and(|t| t != own) && !detected(station.pos, None) {
+                continue;
+            }
+            let f = station.transform.z_axis;
+            let icon = MapIcon {
+                pos: [station.pos.x, station.pos.z],
+                texture,
+                scale: class.scale,
+                color: rel(station.team),
+                heading: Some(heading([f.x, f.z])),
+                number: None,
+            };
+            if *post {
+                posts.push(icon);
+            } else {
+                units.push(icon);
+            }
+        }
         for (i, u) in sim.units.iter().enumerate() {
             // The player's own body shows while his droid flies.
             let own_body = i == walk.player.index as usize && flown.is_none();
@@ -502,7 +562,15 @@ impl MapStatic {
             else {
                 continue;
             };
-            if v.team != Some(own) && !detected(v.pos, None) {
+            // Neutral objects bypass the detector (B2 FUN_003a64b8,
+            // 389022-389035); the map disc still clips their icons.
+            let firing = v
+                .guns
+                .iter()
+                .flatten()
+                .flat_map(|g| &g.weapons)
+                .any(|w| w.state == core::weapon::FireState::Firing);
+            if v.team.is_some_and(|t| t != own) && !firing && !detected(v.pos, None) {
                 continue;
             }
             let f = v.rot * Vec3::Z;
@@ -510,7 +578,11 @@ impl MapStatic {
                 pos: [v.pos.x, v.pos.z],
                 texture,
                 scale: icon.scale,
-                color: rel(v.team),
+                color: if v.kind == core::vehicle::VehicleKind::Turret {
+                    turret_color(v, rel(v.team))
+                } else {
+                    rel(v.team)
+                },
                 heading: Some(heading([f.x, f.z])),
                 number: None,
             });

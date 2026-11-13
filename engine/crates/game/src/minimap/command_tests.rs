@@ -103,3 +103,35 @@ fn spawn_ring_tracks_the_friendly_walker_and_enemy_posts_are_not_spawn_choices()
     assert!(dead.select.is_none());
     assert_eq!(dead.posts.len(), 1);
 }
+
+#[test]
+fn turret_markers_dim_empty_and_flash_with_the_occupied_guns_refire_progress() {
+    let (mut walk, _, h, _) = fixture();
+    let v = &mut walk.sim.vehicles[h.index as usize];
+    assert_eq!(turret_color(v, NEUTRAL), [128; 3]);
+    v.seats[0].occupant = Some(walk.player);
+    assert_eq!(turret_color(v, FRIEND), FRIEND);
+    assert_eq!(turret_color(v, ENEMY), ENEMY);
+    let class = core::weapon::WeaponClass::bf1_rifle();
+    let mut weapon = core::weapon::WeaponState::new(&class, true, 0);
+    weapon.state = core::weapon::FireState::Firing;
+    weapon.refire_time = 1.0;
+    weapon.refire_accum = 0.25;
+    v.guns = vec![Some(core::vehicle::gun::GunState {
+        look: (0.0, 0.0),
+        aim: (0.0, 0.0),
+        rel: (0.0, 0.0),
+        rate: (0.0, 0.0),
+        weapons: vec![weapon],
+        zoom: None,
+    })];
+    let blue = turret_color(v, FRIEND);
+    let red = turret_color(v, ENEMY);
+    assert!(blue[2] > blue[0]);
+    assert!(red[0] > red[2]);
+    v.guns[0].as_mut().unwrap().weapons[0].refire_accum = 0.75;
+    assert_ne!(turret_color(v, FRIEND), blue);
+    assert_ne!(turret_color(v, ENEMY), red);
+    v.seats[0].occupant = None;
+    assert_eq!(turret_color(v, NEUTRAL), [128; 3]);
+}

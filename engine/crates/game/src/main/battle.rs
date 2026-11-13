@@ -887,7 +887,7 @@ pub(super) fn hud_model(
         leaving,
         reticle,
         // The reticle's pick by name and health (card HTGT).
-        target: (on_foot || walk.sim.flyer_of(walk.player).is_some())
+        target: (on_foot || game::hud_feed::armed_seat(walk))
             .then(|| feed.target(&walk.sim, slot))
             .flatten(),
         lock: hud_lock(walk, feed, slot, aspect),
