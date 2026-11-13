@@ -20,6 +20,25 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     // scene's far plane, the models and the water at `FarSceneRange`. The
     // sky's own upload path takes none.
     let cull = far_cull(&scene.manifest.lighting);
+    let sheet_available = scene.lowres.as_ref().is_some_and(|m| !m.indices.is_empty())
+        && scene
+            .manifest
+            .sky
+            .as_ref()
+            .and_then(|s| s.low_res_terrain.as_ref())
+            .is_some_and(|name| scene.textures.contains_key(&name.to_ascii_lowercase()));
+    let terrain_lod = super::look::terrain_lod_range(
+        true,
+        sheet_available,
+        &scene.manifest.lighting,
+        scene.manifest.sky.as_ref(),
+    );
+    let terrain_far = terrain_lod.map(|r| r.0).or(cull.map(|c| c.terrain));
+    let sheet_range = terrain_lod.or_else(|| {
+        lowres_enabled()
+            .then(|| lowres_range(cull, &scene.manifest.lighting, scene.manifest.sky.as_ref()))
+            .flatten()
+    });
 
     // Terrain at identity: bake emits world-space positions. Its material is
     // LTEX layer 0, tiled by SCAL[0] in the baked UVs (bake::terrain_glb).
@@ -54,7 +73,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                 // or Light2 reaches the PS2's terrain (re-terrain-lighting.md
                 // §0, [O]).
                 Some(b) => draw_in(layer, mesh, b.handle, Mat4::IDENTITY)
-                    .with_cull(cull.map(|c| c.terrain))
+                    .with_cull(terrain_far)
                     .with_light(render::LightPath::Terrain),
                 None => {
                     // Its own report line: this is a whole SHEET of terrain
@@ -78,32 +97,16 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         for (mesh, mat) in upload_terrain_layer_chunks(r, t, layers)? {
             match get_terrain_texture(r, scene, &mut textures, &mat.to_ascii_lowercase())? {
                 Some(b) => draws.push(
-                    DrawCmd::terrain_layer(mesh, b.handle, Mat4::IDENTITY)
-                        .with_cull(cull.map(|c| c.terrain)),
+                    DrawCmd::terrain_layer(mesh, b.handle, Mat4::IDENTITY).with_cull(terrain_far),
                 ),
                 None => census.terrain_dropped += 1,
             }
         }
     }
 
-    // The `LOWR` far-LOD sheet at identity, like the terrain, and behind
-    // `OPENBF_LOWRES=1`: the only terrain either PS2 draws past its near
-    // scene (`analysis/re-lowr.md` §0.2 [V]). Its range is
-    // [`lowres_range`] — MaxDistance out, and the heightfield's own end in,
-    // which is the port's one deviation and is written up there.
-    //
-    // Drawn on its own pass, `DrawLayer::FarSheet` (queue CLN5): UNLIT, as
-    // the disc's base colour 0x80808080 is GS unity; alpha-tested at the
-    // disc's AREF 0x10, which cuts real holes in BF1 KAS1's and KAS2's
-    // sheets (`bake::lowres_glb`); and fogged like any far-scene draw — the
-    // sheet is drawn with the `fogspread` program, never as sky
-    // (re-lowr.md §2.2 [V]).
-    // `TerrainEnable(0)` switches it off with the rest (`terrain_drawn`).
-    if lowres_enabled() && terrain_drawn(&scene.manifest.source_game, scene.manifest.sky.as_ref()) {
-        if let (Some(mesh), Some((near, far))) = (
-            &scene.lowres,
-            lowres_range(cull, &scene.manifest.lighting, scene.manifest.sky.as_ref()),
-        ) {
+    let terrain_end = draws.len();
+    if terrain_drawn(&scene.manifest.source_game, scene.manifest.sky.as_ref()) {
+        if let (Some(mesh), Some((near, far))) = (&scene.lowres, sheet_range) {
             let name = scene
                 .manifest
                 .sky
@@ -129,6 +132,17 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             }
         }
     }
+
+    let terrain_lod = terrain_lod
+        .filter(|_| draws.len() > terrain_end)
+        .map(|(near, far)| super::TerrainLod {
+            detailed: 0..terrain_end,
+            sheet: terrain_end,
+            near,
+            far,
+            detailed_far: cull.map(|c| c.terrain),
+            enabled: true,
+        });
 
     // Water at identity, like the terrain: `bake::water_glb` emits world-space
     // positions at the plane's own height. Its texture gets a DEDICATED
@@ -776,8 +790,10 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         .map(|((a, b), n)| (a, b, n))
         .collect();
     untextured.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
-    Ok(SceneGpu {
+    let mut gpu = SceneGpu {
         draws,
+        terrain_lod,
+        softness: scene.manifest.lighting.softness,
         skipped,
         untextured,
         disc_untextured: census.disc_untextured,
@@ -824,5 +840,10 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         ground_lights: crate::point_light::ground_lights(scene),
         post_lights: scene.manifest.source_game == "bf2",
         holo: crate::holo::HoloArt::load(r, scene),
-    })
+    };
+    gpu.set_terrain_lod(
+        std::env::var("OPENBF_TERRAIN_LOD").as_deref() == Ok("1")
+            || (lowres_enabled() && cull.is_some()),
+    );
+    Ok(gpu)
 }

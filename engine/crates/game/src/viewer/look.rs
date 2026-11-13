@@ -482,6 +482,18 @@ pub fn lowres_enabled() -> bool {
 /// drawn sheets take it.
 const DEFAULT_LOW_RES_MAX_DISTANCE: f32 = 2000.0;
 
+pub fn terrain_lod_range(
+    enabled: bool,
+    available: bool,
+    lighting: &manifest::ManifestLighting,
+    sky: Option<&manifest::ManifestSky>,
+) -> Option<(f32, f32)> {
+    if !enabled || !available {
+        return None;
+    }
+    lowres_range(far_cull_from(lighting), lighting, sky)
+}
+
 /// Where the `LOWR` sheet is drawn: `(near, far)` metres from the eye, or
 /// `None` when this map draws none.
 ///

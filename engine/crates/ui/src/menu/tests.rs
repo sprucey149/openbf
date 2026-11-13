@@ -133,6 +133,8 @@ fn model() -> MenuModel {
         career_awards_disabled: false,
         invert_y: false,
         low_power_resolution: false,
+        terrain_lod: false,
+        scene_softness: false,
         input_icons_label: "Auto",
         icons: Default::default(),
         first_person: false,
@@ -709,5 +711,43 @@ fn the_value_arrows_clear_their_labels() {
             value.right() <= right.left(),
             "{row:?}: {value:?} {right:?}"
         );
+    }
+}
+
+#[test]
+fn render_options_toggle_from_shell_and_pause_options() {
+    for shell in [false, true] {
+        let mut m = MenuModel {
+            in_shell: shell.then(|| "Options".into()),
+            page: Some(PausePage::Settings(SettingsPage::Graphics)),
+            ..Default::default()
+        };
+        for (row, action) in [
+            (Row::TerrainLod, MenuAction::ToggleTerrainLod),
+            (Row::SceneSoftness, MenuAction::ToggleSceneSoftness),
+        ] {
+            m.cursor = rows(&m).iter().position(|r| *r == row).unwrap();
+            assert_eq!(row_text(&m, row).1.as_deref(), Some("off"));
+            for input in [
+                MenuInput {
+                    confirm: true,
+                    ..Default::default()
+                },
+                MenuInput {
+                    left: true,
+                    ..Default::default()
+                },
+                MenuInput {
+                    right: true,
+                    ..Default::default()
+                },
+            ] {
+                assert_eq!(navigate(&m, input).1, vec![action]);
+            }
+        }
+        m.terrain_lod = true;
+        m.scene_softness = true;
+        assert_eq!(row_text(&m, Row::TerrainLod).1.as_deref(), Some("ON"));
+        assert_eq!(row_text(&m, Row::SceneSoftness).1.as_deref(), Some("ON"));
     }
 }

@@ -436,6 +436,8 @@ impl winit::application::ApplicationHandler for App {
                                 == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
+                            terrain_lod: self.profile.settings.terrain_lod,
+                            scene_softness: self.profile.settings.scene_softness,
                             input_icons_label: self.profile.settings.input_icons.label(),
                             icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
@@ -598,6 +600,8 @@ impl winit::application::ApplicationHandler for App {
                                     == input::FlightControls::RcMode2,
                                 invert_y: self.profile.settings.invert_y,
                                 low_power_resolution: self.profile.settings.low_power_resolution,
+                                terrain_lod: self.profile.settings.terrain_lod,
+                                scene_softness: self.profile.settings.scene_softness,
                                 input_icons_label: self.profile.settings.input_icons.label(),
                                 first_person: self.profile.settings.viewpoint.is_first(),
                                 ..model
@@ -999,6 +1003,11 @@ impl winit::application::ApplicationHandler for App {
                 }
 
                 if let (Some(r), Some(gpu)) = (&mut self.renderer, &mut self.gpu) {
+                    gpu.apply_render_options(
+                        r,
+                        self.profile.settings.terrain_lod,
+                        self.profile.settings.scene_softness,
+                    );
                     // The water moves on the renderer's clock (queue OC).
                     if let Err(e) = gpu.animate_water_live(r, camera.position) {
                         eprintln!("water: {e:#}");

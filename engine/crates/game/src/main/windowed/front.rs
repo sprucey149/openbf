@@ -798,6 +798,8 @@ impl App {
                 rc_flight_controls: settings.flight_controls == input::FlightControls::RcMode2,
                 invert_y: settings.invert_y,
                 low_power_resolution: settings.low_power_resolution,
+                terrain_lod: settings.terrain_lod,
+                scene_softness: settings.scene_softness,
                 input_icons_label: settings.input_icons.label(),
                 icons,
                 first_person: settings.viewpoint.is_first(),
@@ -1135,6 +1137,8 @@ impl App {
                 s.pad_look_sensitivity = game::profile::clamp_pad_look(v)
             }
             MenuAction::ToggleFlightControls => s.flight_controls = s.flight_controls.toggled(),
+            MenuAction::ToggleTerrainLod => s.terrain_lod = !s.terrain_lod,
+            MenuAction::ToggleSceneSoftness => s.scene_softness = !s.scene_softness,
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
             MenuAction::ToggleLowPowerResolution => {
                 s.low_power_resolution = !s.low_power_resolution

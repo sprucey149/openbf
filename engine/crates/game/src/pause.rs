@@ -231,6 +231,8 @@ pub fn apply_menu_action(
         | MenuAction::SetMouseSensitivity(_)
         | MenuAction::ToggleFlightControls
         | MenuAction::ToggleInvertY
+        | MenuAction::ToggleTerrainLod
+        | MenuAction::ToggleSceneSoftness
         | MenuAction::ToggleLowPowerResolution
         | MenuAction::CycleInputIcons(_)
         | MenuAction::ToggleViewpoint => {}

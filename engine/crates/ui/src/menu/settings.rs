@@ -57,6 +57,8 @@ impl SettingsPage {
                 Fov,
                 GraphicsQuality,
                 LowPowerResolution,
+                TerrainLod,
+                SceneSoftness,
                 FpsCounter,
             ],
             Self::Controls => &[Settings(Self::KeyboardMouse), Settings(Self::Gamepad)],

@@ -245,3 +245,101 @@ python3 engine/artifacts/lead_tmp/s14/re/lowr/lowr_census.py                    
 - `DetailTexture`/`DetailTextureScale` consumer (BF2 POL1 only).
 - The water's low-res pass (`FUN_0048b9c0`, BF2 twin `FUN_005755b0` per re-sky-pass) is named here, not decoded;
   `analysis/re-fog.md` §2.2's table row calls `FUN_0048b9c0` "terrain" — it is the water.
+
+
+## 2026-11-13 distant-terrain playtest preview
+
+The maintainer's BF2 Kashyyyk pair shows a broad dark green mountain in the PS2
+image, while the port retains tiled grass detail across the slope. This is a
+terrain LOD difference, independent of DomeInfo Softness: the latter blends the
+finished scene and cannot replace a terrain material or mesh.
+
+The existing disc bake already supplies `lowres_kas2.glb` and its `kas2` aerial
+texture. The runtime left both LOWR and the full far-scene cull off by default.
+As described in section 3, BF2 `FUN_00571bd0` at B2:706497-706501 selects the
+LOWR sheet for the far scene; `FUN_00572458` at B2:706768-706863 supplies its
+texture, fog and range. Kashyyyk authors NearSceneRange (0.5, 85, 100), a far
+scene of 5000 m, and a LowResTerrain scope with the default 2000 m maximum.
+
+`OPENBF_TERRAIN_LOD` now enables a terrain-only preview by default. Set it to
+`0` before launching to restore the detailed terrain at long distances; `1`
+explicitly enables the preview. The choice is read on scene upload. The preview
+switches both base terrain and painted layers at the existing near-scene far
+plane, and draws the existing unlit, fogged LOWR pass beyond that plane. World
+models, vehicles and water keep their existing range settings. Softness keeps
+its independent opt-in gate.
+
+Only maps with a nonempty loaded LOWR mesh, a loaded named sheet texture, valid
+near ranges and an enabled authored far scene switch. Missing/stale assets and
+maps without a drawable far sheet retain detailed terrain, avoiding the old
+full far-cull mode's empty backgrounds. The legacy OPENBF_LOWRES / OPENBF_FAR_CULL
+pair still works independently when explicitly requested.
+
+The existing single-depth-buffer boundary deviation in `lowres_range` remains:
+the port starts the far sheet at 100 m on Kashyyyk, whereas the PS2's separate
+far buffer begins it at 85 m behind the near scene. Coarse sheet geometry can
+produce a visible transition; this preview does not claim camera-matched pixel
+parity, exact native compositing, or complete cross-source alignment acceptance.
+No gameplay terrain, collision, baked assets or simulation values change.
+
+
+Focused evidence (2026-11-13, source `6af19a8` plus local changes): the latest
+Kashyyyk black box (`dist/openbf_data/playtest/last.json`, seed 377, tick 2275)
+records camera eye (-29.95, 3.23, -46.41), direction (0.005, 0.065, -0.998).
+Headless captures from that eye at 960x720 with softness forced off show the
+same tiled hillside with terrain LOD off, and a broad green mountain with it
+on, matching the type of difference in the supplied original-game screenshot.
+The port pair changes 52,164 of 691,200 pixels, bounded by (0,88)-(868,419),
+with one additional LOWR draw (568 to 569 draws). Local reproduction outputs
+are in `engine/artifacts/kas2-distance/`; they contain owned artwork and are
+not committed. These are port comparisons from a black-box camera, not a
+registered original-camera pixel comparison.
+
+
+Validation for the preview: `cargo build --release -p game` passed.
+`cargo test --release -p game --lib terrain_lod_requires_a_drawable_sheet_and_preserves_world_ranges -- --test-threads=1`
+passed (1 test, 985 filtered out), covering disable, missing mesh availability,
+missing scope, FarSceneRange(0) and the retained world range. An initial attempt
+ran across concurrent hover-field edits and failed to compile; the completed
+rerun above passed after the current core/game definitions were rebuilt.
+The refreshed `dist/openbf.exe` packs 28,750 files (1,957,969,103 bytes); the
+profile hash was preserved and playtest files were not touched. Its headless
+capture using embedded `assets_baked/bf2_kas2` and no terrain-LOD environment
+variable is byte-identical to the enabled capture. Full cross-source alignment
+acceptance and a matched PS2 camera replay remain unchecked.
+
+
+### Options menu follow-up
+
+The subsequent maintainer request exposes `Distant terrain` and `Scene softness`
+next to Low power resolution in shell and pause Graphics Options. Both now default OFF,
+including profiles saved before these fields existed. Saved choices apply to
+interactive rendering on the next frame; no map reload or new GPU upload is
+needed. The distant sheet is prepared once on scene upload, and toggling swaps
+its visibility and the near terrain's cull together. Softness independently
+sets or clears the map's authored strength. Headless tools remain profile-free
+and retain explicit OPENBF_TERRAIN_LOD=1 / OPENBF_SOFTNESS=1 controls.
+
+
+After integration with upstream `ce05b00c` (local main `46a557ee`, vehicle branch
+merge `4a73613c`), the new switches live in the shared Graphics category. The
+legacy flat settings list is retained as upstream defines it. Focused checks:
+`cargo check --manifest-path engine/Cargo.toml -p game -p ui --tests` passed;
+`cargo test --manifest-path engine/Cargo.toml -p ui --lib menu::` passed all 39
+menu checks. The serial GPU wrapper invocation
+`scripts/gpu_tests.sh --game-lib --include-ignored --release render_options`
+passed both selected tests (1004 filtered out): legacy-profile defaults and all
+four persisted setting combinations, plus live terrain/softness switching and
+byte-identical restoration after disabling both. The live test keeps the same
+uploaded scene and draw count throughout. A 640x480 Graphics Options capture
+was visually inspected; both rows and their off values are visible, with the
+remaining graphics settings and navigation footer intact. Local outputs are
+under `engine/artifacts/render-options/`, outside Git.
+
+
+Final combined release build passed after the upstream merge. The repacked
+`dist/openbf.exe` contains 28,750 current asset/mission files (1,958,134,991 bytes)
+and successfully captures embedded BF2 Kashyyyk with both experiment environment
+variables absent. The existing profile hash and playtest files are preserved.
+Both local main and feature/vehicle-parity were pushed with the merge history;
+ongoing vehicle and presentation changes retain their previous staging split.

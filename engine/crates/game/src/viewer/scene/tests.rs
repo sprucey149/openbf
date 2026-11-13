@@ -455,3 +455,89 @@ fn mustafar_world_material_moves_and_static_control_does_not() {
     );
     eprintln!("Mustafar lava: {changed} pixels changed; static control unchanged");
 }
+
+#[test]
+#[ignore = "requires a GPU adapter and the owned BF2 Kashyyyk bake"]
+fn render_options_switch_live_without_reuploading_the_scene() {
+    let root = crate::assets::baked_root();
+    let scene = crate::assets::load_scene(&root.join("bf2_kas2")).unwrap();
+    let mut r = Renderer::new_headless(640, 480).unwrap();
+    let mut gpu = upload_scene(&mut r, &scene).unwrap();
+    assert!(gpu.terrain_lod.is_some());
+    assert!(gpu.softness.is_some());
+    let count = gpu.draws.len();
+    let camera = render::Camera {
+        position: Vec3::new(-29.95, 3.23, -46.41),
+        yaw: -0.287f32.to_radians(),
+        pitch: 3.727f32.to_radians(),
+        ..Default::default()
+    };
+    let frame = |r: &mut Renderer, gpu: &SceneGpu| {
+        r.render_frame(&camera, &gpu.draws, &[], gpu.clear, None)
+            .unwrap();
+        r.capture_rgba().unwrap().0
+    };
+    let mut frames = Vec::new();
+    for (terrain, softness) in [(false, false), (true, false), (true, true), (false, false)] {
+        gpu.apply_render_options(&mut r, terrain, softness);
+        assert_eq!(gpu.draws.len(), count);
+        frames.push(frame(&mut r, &gpu));
+    }
+    assert_ne!(frames[0], frames[1]);
+    assert_ne!(frames[1], frames[2]);
+    assert_eq!(frames[0], frames[3]);
+    if let Some(out) = std::env::var_os("OPENBF_RENDER_OPTIONS_PICTURES") {
+        let out = std::path::PathBuf::from(out);
+        std::fs::create_dir_all(&out).unwrap();
+        for (label, rgba) in ["both-off", "terrain-on", "both-on", "restored"]
+            .into_iter()
+            .zip(&frames)
+        {
+            std::fs::write(
+                out.join(format!("{label}.png")),
+                render::encode_png(rgba, 640, 480).unwrap(),
+            )
+            .unwrap();
+        }
+        let mut overlay = ui::overlay::EguiOverlay::headless(r.device(), render::HEADLESS_FORMAT);
+        for (w, h) in [(640, 480)] {
+            let mut model = ui::menu::MenuModel {
+                page: Some(ui::menu::PausePage::Settings(
+                    ui::menu::SettingsPage::Graphics,
+                )),
+                fov_scale: 1.0,
+                fov_deg: 52.0,
+                assist_intensity: 1.0,
+                team_size_pct: 100,
+                reinforcements_pct: 100,
+                music_volume: 1.0,
+                mouse_sensitivity: 1.0,
+                pad_look_sensitivity: 1.0,
+                ..Default::default()
+            };
+            model.cursor = ui::menu::rows(&model)
+                .iter()
+                .position(|r| *r == ui::menu::Row::SceneSoftness)
+                .unwrap();
+            let paint = overlay.begin_headless([w, h], 1.0, |ctx| {
+                ui::menu::draw_menu(ctx, &model);
+            });
+            r.render_frame(
+                &camera,
+                &gpu.draws,
+                &[],
+                gpu.clear,
+                Some(&mut |dev, q, enc, target, size| {
+                    overlay.paint(&paint, dev, q, enc, target, size)
+                }),
+            )
+            .unwrap();
+            let rgba = r.capture_rgba().unwrap().0;
+            std::fs::write(
+                out.join(format!("options-{w}x{h}.png")),
+                render::encode_png(&rgba, w, h).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+}

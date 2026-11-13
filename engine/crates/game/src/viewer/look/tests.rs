@@ -660,3 +660,30 @@ fn lod_bands_come_from_the_scene_ranges() {
     assert_eq!(b.at(LodMode::ClassicPlus, Some(400.0)), 260.0);
     assert_eq!(b.at(LodMode::Ps2, Some(80.0)), 115.0);
 }
+
+#[test]
+fn terrain_lod_requires_a_drawable_sheet_and_preserves_world_ranges() {
+    let lighting = ranges(Some([0.5, 85.0, 100.0]), Some(5000.0));
+    let sky = manifest::ManifestSky {
+        glow_masks_preserved: false,
+        texture: None,
+        models: Vec::new(),
+        ambient: [0.0; 3],
+        low_res_terrain: Some("kas2".into()),
+        low_res_max_distance: None,
+        objects: Vec::new(),
+        terrain_enable: None,
+        reflection_color: None,
+        stars: None,
+    };
+    assert_eq!(
+        terrain_lod_range(true, true, &lighting, Some(&sky)),
+        Some((100.0, 2000.0))
+    );
+    assert_eq!(terrain_lod_range(false, true, &lighting, Some(&sky)), None);
+    assert_eq!(terrain_lod_range(true, false, &lighting, Some(&sky)), None);
+    assert_eq!(terrain_lod_range(true, true, &lighting, None), None);
+    assert_eq!(far_cull_from(&lighting).unwrap().world, 5000.0);
+    let no_far = ranges(lighting.near_scene_range, Some(0.0));
+    assert_eq!(terrain_lod_range(true, true, &no_far, Some(&sky)), None);
+}
