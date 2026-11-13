@@ -89,6 +89,7 @@ mod vehicle_pads;
 mod vehicle_rider;
 mod walker_enter;
 mod walker_shots;
+mod command_walker_map;
 mod water_anim;
 mod water_floor;
 mod water_fx;

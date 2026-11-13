@@ -402,7 +402,7 @@ impl MapStatic {
                 || last_shot.is_some_and(|t| sim.tick.saturating_sub(t) <= firing)
         };
         let clock = sim.tick as f32 / core::TICK_HZ as f32;
-        let posts = sim
+        let mut posts: Vec<_> = sim
             .cps
             .iter()
             .map(|cp| {
@@ -426,6 +426,10 @@ impl MapStatic {
                 }
             })
             .collect();
+        // A command walker's registered post replaces its ordinary vehicle
+        // marker (BF2 FUN_003a6a48, re-command-walker-post §5): always
+        // visible, clamped to the rim, including an enemy or our own mount.
+        posts.extend(self.command_posts(walk).into_iter().map(|(_, icon)| icon));
         let mut units = Vec::new();
         for (i, u) in sim.units.iter().enumerate() {
             // The player's own body shows while his droid flies.
@@ -481,7 +485,14 @@ impl MapStatic {
         }
         for (i, v) in sim.vehicles.iter().enumerate() {
             let own_ride = me.mount.is_some_and(|m| m.vehicle.index as usize == i);
-            if !v.alive || own_ride {
+            if !v.alive
+                || own_ride
+                || sim
+                    .walker_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|p| !p.spawn_points.is_empty())
+            {
                 continue;
             }
             let Some((icon, texture)) = self
@@ -546,46 +557,44 @@ impl MapStatic {
         }
     }
 
-    /// The spawn map page's minimap (card SSELB, re-hud-map §1-§3): the
-    /// Spawn view of [`MapStatic::model`]'s posts plus the team's live
-    /// command walkers - each a post on the PS2 (Hoth's AT-ATs: `atat_icon`
-    /// 3.5 [M]) - and the ring on the slot's pick (`Sim::spawn_post_selected`).
-    pub fn spawn_model(&self, walk: &WalkSim, slot: usize) -> MapModel {
+    /// Live command walkers are posts on every map view. Keep their IDs
+    /// beside their icons so the spawn ring uses the same ordering.
+    fn command_posts(&self, walk: &WalkSim) -> Vec<(core::unit::SpawnPost, MapIcon)> {
         let sim = &walk.sim;
-        let me = &sim.units[walk.player.index as usize];
-        let mut map = self.model(walk);
-        let pick = sim.spawn_post_selected(slot);
-        let mut select = match pick {
-            Some(core::unit::SpawnPost::Post(i)) => Some(usize::from(i)),
-            _ => None,
-        };
-        for (post, pos) in sim.player_spawn_posts(me.team) {
-            let core::unit::SpawnPost::Walker(h) = post else {
-                continue;
-            };
-            let Some((icon, texture)) = sim
-                .vehicle(h)
-                .and_then(|v| self.vehicles.get(v.class as usize))
-                .and_then(|c| Some((c, c.texture.clone()?)))
-            else {
-                continue;
-            };
-            let heading = sim.vehicle(h).map(|v| {
+        let own = sim.units[walk.player.index as usize].team;
+        sim.command_walkers(0)
+            .chain(sim.command_walkers(1))
+            .filter_map(|(h, v)| {
+                let icon = self.vehicles.get(v.class as usize)?;
                 let f = v.rot * Vec3::Z;
-                heading([f.x, f.z])
-            });
-            if pick == Some(post) {
-                select = Some(map.posts.len());
-            }
-            map.posts.push(MapIcon {
-                pos: [pos.x, pos.z],
-                texture,
-                scale: icon.scale,
-                color: FRIEND,
-                heading,
-                number: None,
-            });
-        }
+                Some((
+                    core::unit::SpawnPost::Walker(h),
+                    MapIcon {
+                        pos: [v.pos.x, v.pos.z],
+                        texture: icon.texture.clone()?,
+                        scale: icon.scale,
+                        color: if v.team == Some(own) { FRIEND } else { ENEMY },
+                        heading: Some(heading([f.x, f.z])),
+                        number: None,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Spawn view of the same registered posts, with a ring on the sim's
+    /// selected friendly post (re-command-walker-post §5).
+    pub fn spawn_model(&self, walk: &WalkSim, slot: usize) -> MapModel {
+        let map = self.model(walk);
+        let select = match walk.sim.spawn_post_selected(slot) {
+            Some(core::unit::SpawnPost::Post(i)) => Some(usize::from(i)),
+            Some(post @ core::unit::SpawnPost::Walker(_)) => self
+                .command_posts(walk)
+                .iter()
+                .position(|(p, _)| *p == post)
+                .map(|i| walk.sim.cps.len() + i),
+            None => None,
+        };
         map.spawn_view(select)
     }
 }
@@ -1200,3 +1209,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "minimap/command_tests.rs"]
+mod command_tests;
