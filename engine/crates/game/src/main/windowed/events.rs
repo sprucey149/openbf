@@ -39,6 +39,7 @@ impl winit::application::ApplicationHandler for App {
             return;
         };
         self.sounds = game::sounds::SoundLib::load(&map);
+        self.sync_audio_levels();
         self.music_voice = None;
         if let Some(sl) = &self.sounds {
             println!(
@@ -92,7 +93,6 @@ impl winit::application::ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        // Released while winit's display and surface are still alive.
         self.idle = None;
         self.release_mouse();
     }
@@ -121,7 +121,16 @@ impl winit::application::ApplicationHandler for App {
         if self.loading_window_event(&event) {
             return;
         }
+        self.sync_binding_context();
         if self.capture_keyboard(&event) {
+            if let WindowEvent::KeyboardInput { event, .. } = &event {
+                if !event.state.is_pressed() {
+                    if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
+                        self.keys_held &= !game::kbm::menu_key(code);
+                        self.kbm.press(game::kbm::Trigger::Key(code), false);
+                    }
+                }
+            }
             return;
         }
         if let (Some(o), Some(w)) = (&mut self.overlay, &self.window) {
@@ -135,6 +144,7 @@ impl winit::application::ApplicationHandler for App {
         self.mouse_window_event(&event);
         match event {
             WindowEvent::Focused(false) => {
+                self.rumble_effect = None;
                 self.keys_held = 0;
                 self.keys_tapped = 0;
                 self.prev_menu_buttons = 0;
@@ -192,8 +202,17 @@ impl winit::application::ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let dt = self.last.elapsed().as_secs_f32().min(0.1);
+                let elapsed = self.last.elapsed().as_secs_f32();
+                let dt = elapsed.min(0.1);
                 self.last = std::time::Instant::now();
+                if matches!(self.screen, Screen::Loading) {
+                    self.frame_seconds = 0.0;
+                } else if self.frame_seconds == 0.0 {
+                    self.frame_seconds = elapsed;
+                } else {
+                    self.frame_seconds += (elapsed - self.frame_seconds) * (elapsed * 3.0).min(1.0);
+                }
+                self.sync_audio_levels();
                 // The renderer's animation clock, for UV-scrolling materials
                 // (a map's water). Wrapped so `uv + velocity * time` keeps
                 // its f32 precision in a long session — see Renderer::time.
@@ -250,11 +269,13 @@ impl winit::application::ApplicationHandler for App {
                 } else {
                     0
                 };
-                if self.walk.is_some() && edges & 64 != 0 {
+                if self.walk.is_some() && self.controls.is_none() && edges & 64 != 0 {
                     if !self.pause_menu.class_picker {
                         self.paused = !self.paused;
                     }
                     self.pause_menu.reset();
+                    self.shell_pointer.take_frame();
+                    self.shell_pointer.take_wheel();
                     // Start opens the pause menu with the accept click
                     // (menuref "In battle").
                     if self.paused {
@@ -268,11 +289,63 @@ impl winit::application::ApplicationHandler for App {
                 }
                 self.sync_grab();
                 self.sync_pause_audio();
+                let native_pause = self.hud_view.as_ref().is_some_and(|v| v.can_draw_pause());
+                let mut binding_menu = self.controls.is_some();
+                if binding_menu {
+                    let input = ui::menu::MenuInput {
+                        up: edges & 1 != 0,
+                        down: edges & 2 != 0,
+                        confirm: edges & 16 != 0,
+                        back: edges & 32 != 0,
+                        ..Default::default()
+                    };
+                    let mut sound = self.step_controls(input);
+                    let pointer = self.shell_pointer.take_frame();
+                    let wheel = self.shell_pointer.take_wheel();
+                    if let Some(mut model) = self.controls_model(icons).filter(|_| !input.back) {
+                        if native_pause {
+                            if wheel != 0.0 {
+                                ui::pause_draw::scroll(&mut model, wheel);
+                                if let Some(controls) = self.controls.as_mut() {
+                                    controls.cursor = model.cursor;
+                                }
+                            }
+                            if let (Some((point, true)), Some(r)) =
+                                (pointer, self.renderer.as_ref())
+                            {
+                                let (w, h) = r.size();
+                                if let Some(ui::pause_draw::Target::Row(row)) =
+                                    ui::pause_draw::target(
+                                        &model,
+                                        &self.pause_menu.animation,
+                                        point,
+                                        [w as f32, h as f32],
+                                    )
+                                {
+                                    sound = self.activate_control_row(row).or(sound);
+                                }
+                            }
+                        }
+                    }
+                    if let (Some(sound), Some(lib)) = (sound, self.sounds.as_mut()) {
+                        lib.play_2d(self.audio.as_mut(), sound.name());
+                    }
+                    menu = self.controls_model(icons);
+                }
                 let camera = if self.walk.is_some() {
                     self.step_spawn_pointer(dt);
                     let pad = if self.paused {
                         self.kbm.drop_taps();
                         game::pause::hold_for_resume(&mut self.resume_gate);
+                        PadState::default()
+                    } else if self
+                        .walk
+                        .as_ref()
+                        .is_some_and(|(walk, _)| walk.sim.outcome.is_some())
+                    {
+                        // Results and the banner use menu_edges only. Continue the
+                        // scene with a neutral pad so the D-pad never gives orders.
+                        self.kbm.drop_taps();
                         PadState::default()
                     } else {
                         let walk = &self.walk.as_ref().expect("battle walk").0;
@@ -321,18 +394,26 @@ impl winit::application::ApplicationHandler for App {
                     let pad = walk.blend.stamp(pad);
                     let mut stuck_alarm = false;
                     let mut look = PadState::default();
-                    if paused {
+                    if paused && binding_menu {
+                        // The controls editor consumed the frame's menu input above.
+                    } else if paused {
                         if !self.audio.as_ref().is_some_and(|a| a.game_paused()) {
                             if let Some(sl) = self.sounds.as_mut() {
                                 sl.stop_loops();
                             }
                         }
-                        let model = ui::menu::MenuModel {
-                            class_picker_available: walk.class_picker.is_some()
-                                && game::class_picker::ClassPicker::available(walk),
+                        let mut model = ui::menu::MenuModel {
+                            class_picker_available: false,
+                            bindings: None,
                             class_choices: self.pause_menu.class_picker_model(walk),
                             cheats: walk.sim.cheats.entries().to_vec(),
                             assist_intensity: walk.sim.assist_intensity,
+                            difficulty: game::shell_ia::ia_level(self.profile.settings.difficulty),
+                            effects_volume: self.profile.settings.effects_volume,
+                            dialogue_volume: self.profile.settings.dialogue_volume,
+                            fps_counter: ui::menu::FpsCounter::from_index(
+                                self.profile.settings.fps_counter,
+                            ),
                             team_size_pct: walk.team_size_pct,
                             reinforcements_pct: walk.reinforcement_pct,
                             population_note: game::conquest_defaults::menu_note(
@@ -348,6 +429,9 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
+                            rumble_strength: self.profile.settings.rumble_strength,
+                            rumble_on_fire: self.profile.settings.rumble_on_fire,
+                            career_awards_disabled: !self.profile.settings.career_awards,
                             rc_flight_controls: self.profile.settings.flight_controls
                                 == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
@@ -358,15 +442,9 @@ impl winit::application::ApplicationHandler for App {
                             cursor: self.pause_menu.cursor,
                             page: Some(self.pause_menu.page),
                             popup: self.pause_menu.confirm,
-                            restart_available: self.map.is_none() && self.current.is_some(),
+                            restart_available: false,
                             texts: game::pause::texts(&self.feed),
-                            // The disc's key; English fallback is §7's label.
-                            respawn_label: (walk.sim.outcome.is_none()
-                                && walk.sim.unit(walk.player).is_some())
-                            .then(|| {
-                                self.feed
-                                    .screen_text(game::pause::RESPAWN_LABEL_KEY, "Respawn")
-                            }),
+                            respawn_label: game::pause::respawn_label(walk, &self.feed),
                             in_shell: None,
                             outcome_line: walk.sim.outcome.map(|w| match w {
                                 core::sim::OUTCOME_DRAW => "Time up — both teams win".to_string(),
@@ -394,17 +472,45 @@ impl winit::application::ApplicationHandler for App {
                             input,
                             adjust & game::kbm::MENU_ADJUST_LEFT != 0,
                             adjust & game::kbm::MENU_ADJUST_RIGHT != 0,
-                            model.popup.is_some() || model.class_choices.is_some(),
+                            model.popup.is_some()
+                                || model.class_choices.is_some()
+                                || matches!(self.pause_menu.page, ui::menu::PausePage::Settings(_)),
                         );
-                        let (cursor, actions) = ui::menu::navigate(&model, rows_input);
-                        let click =
-                            game::pause::pause_sound(rows_input, model.cursor, cursor, &actions);
+                        let pointer = self.shell_pointer.take_frame();
+                        let wheel = self.shell_pointer.take_wheel();
+                        let from = model.cursor;
+                        let target = if native_pause {
+                            let target = match (pointer, self.renderer.as_ref()) {
+                                (Some((point, true)), Some(r)) => {
+                                    let (w, h) = r.size();
+                                    ui::pause_draw::target(
+                                        &model,
+                                        &self.pause_menu.animation,
+                                        point,
+                                        [w as f32, h as f32],
+                                    )
+                                }
+                                _ => None,
+                            };
+                            if target.is_none() && wheel != 0.0 {
+                                ui::pause_draw::scroll(&mut model, wheel);
+                            }
+                            self.pause_menu.animation.advance(dt);
+                            target
+                        } else {
+                            None
+                        };
+                        let (cursor, actions) = match target.filter(|_| !rows_input.back) {
+                            Some(hit) => ui::pause_draw::click(&mut model, hit),
+                            None => ui::menu::navigate(&model, rows_input),
+                        };
+                        let click = game::pause::pause_sound(rows_input, from, cursor, &actions);
                         if let (Some(c), Some(sl)) = (click, self.sounds.as_mut()) {
                             sl.play_2d(self.audio.as_mut(), c.name());
                         }
                         // The PS2 matcher runs beside the menu on the same
                         // edges (the cursor wiggle while typing is authentic).
-                        if let Some(line) = (!self.pause_menu.class_picker)
+                        if let Some(line) = (self.pause_menu.page == ui::menu::PausePage::Cheats)
                             .then(|| self.cheats.feed(input, &mut walk.sim))
                             .flatten()
                         {
@@ -422,6 +528,14 @@ impl winit::application::ApplicationHandler for App {
                         self.pause_menu.cursor = cursor;
                         let mut quit = false;
                         for a in actions {
+                            if let ui::menu::MenuAction::EditBindings(device, context) = a {
+                                self.controls = Some(super::front::Controls::new(
+                                    device,
+                                    context,
+                                    &self.profile.settings,
+                                ));
+                                binding_menu = true;
+                            }
                             self.restart_clicked |= a == ui::menu::MenuAction::Restart;
                             quit |= apply_pause_action(
                                 walk,
@@ -434,40 +548,61 @@ impl winit::application::ApplicationHandler for App {
                                 &mut self.kbm,
                                 self.music_voice.as_mut(),
                             );
+                            if matches!(a, ui::menu::MenuAction::SetRumble(_)) {
+                                game::rumble::preview(
+                                    self.gilrs.as_mut(),
+                                    &self.active_pad,
+                                    &mut self.rumble_effect,
+                                    self.profile.settings.rumble_strength,
+                                );
+                            }
                         }
                         if quit {
                             self.quit_clicked = true;
                         }
-                        menu = Some(ui::menu::MenuModel {
-                            class_choices: self.pause_menu.class_picker_model(walk),
-                            cursor: self.pause_menu.cursor,
-                            page: model.page.map(|_| self.pause_menu.page),
-                            popup: self.pause_menu.confirm,
-                            cheats: walk.sim.cheats.entries().to_vec(),
-                            assist_intensity: walk.sim.assist_intensity,
-                            team_size_pct: walk.team_size_pct,
-                            reinforcements_pct: walk.reinforcement_pct,
-                            population_note: game::conquest_defaults::menu_note(
-                                walk.team_size_pct,
-                                walk.reinforcement_pct,
-                            ),
-                            team_size_off: walk.conquest_defaults.is_none(),
-                            fov_scale: walk.fov_scale,
-                            fov_deg: walk.fov_y().to_degrees(),
-                            music_volume: walk
-                                .music
-                                .as_ref()
-                                .map_or(self.profile.settings.music_volume, |m| m.volume),
-                            mouse_sensitivity: self.profile.settings.mouse_sensitivity,
-                            pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
-                            rc_flight_controls: self.profile.settings.flight_controls
-                                == input::FlightControls::RcMode2,
-                            invert_y: self.profile.settings.invert_y,
-                            low_power_resolution: self.profile.settings.low_power_resolution,
-                            input_icons_label: self.profile.settings.input_icons.label(),
-                            first_person: self.profile.settings.viewpoint.is_first(),
-                            ..model
-                        });
+                        if !binding_menu {
+                            menu = Some(ui::menu::MenuModel {
+                                difficulty: game::shell_ia::ia_level(
+                                    self.profile.settings.difficulty,
+                                ),
+                                effects_volume: self.profile.settings.effects_volume,
+                                dialogue_volume: self.profile.settings.dialogue_volume,
+                                fps_counter: ui::menu::FpsCounter::from_index(
+                                    self.profile.settings.fps_counter,
+                                ),
+                                class_choices: self.pause_menu.class_picker_model(walk),
+                                cursor: self.pause_menu.cursor,
+                                page: model.page.map(|_| self.pause_menu.page),
+                                popup: self.pause_menu.confirm,
+                                cheats: walk.sim.cheats.entries().to_vec(),
+                                assist_intensity: walk.sim.assist_intensity,
+                                team_size_pct: walk.team_size_pct,
+                                reinforcements_pct: walk.reinforcement_pct,
+                                population_note: game::conquest_defaults::menu_note(
+                                    walk.team_size_pct,
+                                    walk.reinforcement_pct,
+                                ),
+                                team_size_off: walk.conquest_defaults.is_none(),
+                                fov_scale: walk.fov_scale,
+                                fov_deg: walk.fov_y().to_degrees(),
+                                music_volume: walk
+                                    .music
+                                    .as_ref()
+                                    .map_or(self.profile.settings.music_volume, |m| m.volume),
+                                mouse_sensitivity: self.profile.settings.mouse_sensitivity,
+                                pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
+                                rumble_strength: self.profile.settings.rumble_strength,
+                                rumble_on_fire: self.profile.settings.rumble_on_fire,
+                                career_awards_disabled: !self.profile.settings.career_awards,
+                                rc_flight_controls: self.profile.settings.flight_controls
+                                    == input::FlightControls::RcMode2,
+                                invert_y: self.profile.settings.invert_y,
+                                low_power_resolution: self.profile.settings.low_power_resolution,
+                                input_icons_label: self.profile.settings.input_icons.label(),
+                                first_person: self.profile.settings.viewpoint.is_first(),
+                                ..model
+                            });
+                        }
                     } else {
                         // Each stepped tick's events are read in the hook,
                         // once: a frame steps no tick (every other one at
@@ -490,6 +625,8 @@ impl winit::application::ApplicationHandler for App {
                         }
                         let mut tick_pad = pad;
                         let mut selection = Selection::read(walk);
+                        let mut medals_seen = self.profile.career.medals;
+                        let mut previous_mount = walk.sim.unit(walk.player).and_then(|u| u.mount);
                         let ticks = walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
                             let hook_t0 = std::time::Instant::now();
                             if let Some(gpu) = self.gpu.as_mut() {
@@ -530,36 +667,31 @@ impl winit::application::ApplicationHandler for App {
                                 play_ambience(audio, sl, &self.ambience, walk);
                             }
                             game::heroes::tick(walk, &mut self.feed);
+                            self.feed
+                                .note_medals(&walk.sim, walk.player, &mut medals_seen);
                             if let Some(bb) = self.blackbox.as_mut() {
                                 stuck_alarm |= bb.tick(walk, Some(tick_pad));
                                 note_sounds(bb, self.sounds.as_mut(), walk.sim.tick);
                             }
-                            for event in &walk.sim.events {
-                                if let core::sim::Event::FlyerImpact {
-                                    vehicle, lethal, ..
-                                } = event
-                                {
-                                    let is_player = walk
-                                        .sim
-                                        .unit(walk.player)
-                                        .and_then(|u| u.mount)
-                                        .is_some_and(|m| m.vehicle == *vehicle);
-                                    if is_player {
-                                        if let Some(g) = self.gilrs.as_mut() {
-                                            if let Some((id, _)) =
-                                                input::active_gamepad(g, &self.active_pad)
-                                            {
-                                                let (weak, strong, duration_ms) = if *lethal {
-                                                    (0.8, 0.6, 600)
-                                                } else {
-                                                    (0.6, 0.4, 300)
-                                                };
-                                                input::rumble(g, id, weak, strong, duration_ms);
-                                            }
+                            let strength = self.profile.settings.rumble_strength;
+                            if strength > 0.0 {
+                                if let Some(pulse) = self.rumble_tick.pulse(
+                                    &walk.sim,
+                                    walk.player,
+                                    previous_mount,
+                                    self.profile.settings.rumble_on_fire,
+                                ) {
+                                    if let Some(g) = self.gilrs.as_mut() {
+                                        if let Some((id, _)) =
+                                            input::active_gamepad(g, &self.active_pad)
+                                        {
+                                            self.rumble_effect =
+                                                input::rumble(g, id, pulse, strength);
                                         }
                                     }
                                 }
                             }
+                            previous_mount = walk.sim.unit(walk.player).and_then(|u| u.mount);
                             if let Some(m) = self.matchlog.as_mut() {
                                 m.tick(&walk.sim, &tick_pad);
                                 if walk.sim.outcome.is_some() && !m.written() {
@@ -578,7 +710,7 @@ impl winit::application::ApplicationHandler for App {
                         });
                         self.kbm.consumed(&pad, ticks);
                         walk.blend.consumed(ticks);
-                        if walk.flush_class_kills(&mut self.profile) {
+                        if walk.flush_career_progress(&mut self.profile) {
                             if let Err(e) = self.profile.save() {
                                 eprintln!("profile autosave failed: {e:#}");
                             }
@@ -794,7 +926,11 @@ impl winit::application::ApplicationHandler for App {
                             let team = walk.sim.units.get(walk.player.index as usize)?.team;
                             m.end_music_secs(usize::from(team), walk.sim.outcome?)
                         });
-                        if walk.follow_round_end(dt, pad, music_secs) {
+                        let (done, cue) = walk.follow_round_end(dt, pad, music_secs);
+                        if let (Some(cue), Some(sounds)) = (cue, self.sounds.as_mut()) {
+                            sounds.play_2d(self.audio.as_mut(), cue.name());
+                        }
+                        if done {
                             self.quit_clicked = true;
                             self.round_over = true;
                         }
@@ -841,6 +977,13 @@ impl winit::application::ApplicationHandler for App {
                     self.drive_fly_camera(dt);
                     self.cam
                 };
+                let menu = if binding_menu {
+                    self.controls_model(icons)
+                } else {
+                    menu
+                };
+                let menu = menu.filter(|_| self.paused);
+                let native_pause = native_pause && menu.is_some();
                 if let Some(quad) = self.fx_quad {
                     extra.extend(self.fx.draws(quad, self.fx_sprite, &camera));
                     if let Some((walk, _)) = &self.walk {
@@ -975,20 +1118,55 @@ impl winit::application::ApplicationHandler for App {
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
                             hv.set_icons(icons);
-                            hv.update(model, hud_dt, [w, h]);
-                            game::round_end::hud_pass_drawn(model.round_end.is_some(), hud_hidden)
+                            if let Some(m) = menu.as_ref().filter(|_| native_pause) {
+                                hv.update_pause(model, m, &self.pause_menu.animation, [w, h]);
+                                Some(hv)
+                            } else {
+                                hv.update(model, hud_dt, [w, h]);
+                                game::round_end::hud_pass_drawn(
+                                    model.round_end.is_some(),
+                                    hud_hidden,
+                                )
                                 .then_some(hv)
+                            }
                         }
                         _ => None,
                     };
                     if let Some(p) = self.frame_profile.as_mut() {
                         p.lap("draws_ms");
                     }
+                    // Low Power Resolution scales the world while the HUD draws at window resolution.
+                    let scale = if self.profile.settings.low_power_resolution && self.walk.is_some()
+                    {
+                        let window = &self.window;
+                        let budget = *self.dyn_res_budget_ms.get_or_insert_with(|| {
+                            game::dyn_res::display_budget_ms(
+                                window
+                                    .as_ref()
+                                    .and_then(|w| w.current_monitor())
+                                    .and_then(|m| m.refresh_rate_millihertz()),
+                            )
+                        });
+                        self.dyn_res.frame(dt * 1000.0, budget)
+                    } else {
+                        self.dyn_res = game::dyn_res::DynRes::default();
+                        self.dyn_res_budget_ms = None;
+                        1.0
+                    };
+                    r.set_world_scale(scale);
+                    let mut binding_click = None;
                     let result = match (&mut self.overlay, &self.window, hud) {
                         (Some(overlay), Some(window), Some(model)) => {
                             let mut clicked: Vec<ui::menu::MenuAction> = Vec::new();
                             let paint = overlay.begin(window, |ctx| {
-                                if !hud_hidden {
+                                ui::menu::draw_fps_counter(
+                                    ctx,
+                                    ui::menu::FpsCounter::from_index(
+                                        self.profile.settings.fps_counter,
+                                    ),
+                                    self.frame_seconds,
+                                );
+                                if !hud_hidden && !native_pause {
                                     // The death camera and the spawn screen
                                     // own the death: the egui banner is only
                                     // for launches with neither.
@@ -1012,8 +1190,18 @@ impl winit::application::ApplicationHandler for App {
                                         }
                                     }
                                 }
-                                if let Some(m) = &menu {
-                                    clicked = ui::menu::draw_menu(ctx, m);
+                                if let Some(m) = menu.as_ref().filter(|_| !native_pause) {
+                                    if let Some(b) = m.bindings.as_ref() {
+                                        binding_click = ui::menu::draw_controls(
+                                            ctx,
+                                            &b.labels,
+                                            m.cursor,
+                                            b.capture,
+                                            b.message.as_deref(),
+                                        );
+                                    } else {
+                                        clicked = ui::menu::draw_menu(ctx, m);
+                                    }
                                 }
                                 if let Some(w) = &pad_warning {
                                     ui::hud::draw_pad_warning(ctx, w);
@@ -1036,6 +1224,13 @@ impl winit::application::ApplicationHandler for App {
                                     sl.play_2d(self.audio.as_mut(), c.name());
                                 }
                                 for a in clicked {
+                                    if let ui::menu::MenuAction::EditBindings(device, context) = a {
+                                        self.controls = Some(super::front::Controls::new(
+                                            device,
+                                            context,
+                                            &self.profile.settings,
+                                        ));
+                                    }
                                     self.restart_clicked |= a == ui::menu::MenuAction::Restart;
                                     self.quit_clicked |= apply_pause_action(
                                         walk,
@@ -1048,6 +1243,14 @@ impl winit::application::ApplicationHandler for App {
                                         &mut self.kbm,
                                         self.music_voice.as_mut(),
                                     );
+                                    if matches!(a, ui::menu::MenuAction::SetRumble(_)) {
+                                        game::rumble::preview(
+                                            self.gilrs.as_mut(),
+                                            &self.active_pad,
+                                            &mut self.rumble_effect,
+                                            self.profile.settings.rumble_strength,
+                                        );
+                                    }
                                 }
                             }
                             r.render_frame(
@@ -1070,29 +1273,16 @@ impl winit::application::ApplicationHandler for App {
                         let tick = self.walk.as_ref().map_or(0, |w| w.0.sim.tick);
                         p.end(f64::from(dt) * 1000.0, tick, r);
                     }
-                    // A battle only, and a fresh controller for each: a load
-                    // screen's long frames say nothing about the battle's.
-                    r.set_world_scale(
-                        if self.profile.settings.low_power_resolution && self.walk.is_some() {
-                            let window = &self.window;
-                            let budget = *self.dyn_res_budget_ms.get_or_insert_with(|| {
-                                game::dyn_res::display_budget_ms(
-                                    window
-                                        .as_ref()
-                                        .and_then(|w| w.current_monitor())
-                                        .and_then(|m| m.refresh_rate_millihertz()),
-                                )
-                            });
-                            self.dyn_res.frame(dt * 1000.0, budget)
-                        } else {
-                            self.dyn_res = game::dyn_res::DynRes::default();
-                            self.dyn_res_budget_ms = None;
-                            1.0
-                        },
-                    );
                     if let Err(e) = result {
                         eprintln!("render: {e}");
                         event_loop.exit();
+                    }
+                    if let Some(sound) =
+                        binding_click.and_then(|row| self.activate_control_row(row))
+                    {
+                        if let Some(lib) = self.sounds.as_mut() {
+                            lib.play_2d(self.audio.as_mut(), sound.name());
+                        }
                     }
                 }
                 // Without a renderer the draw window above is skipped.

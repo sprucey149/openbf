@@ -641,6 +641,8 @@ pub struct SoundLib {
     pub rate_mul: f32,
     /// The map's game's bus gains ([`bus_table`]).
     buses: Vec<(u32, f32)>,
+    effects_volume: f32,
+    dialogue_volume: f32,
 }
 
 /// The 3-D listener's rolloff factor: the level function multiplies a
@@ -816,6 +818,8 @@ impl SoundLib {
             handed: None,
             rate_mul: 1.0,
             buses,
+            effects_volume: 1.0,
+            dialogue_volume: 1.0,
         })
     }
 
@@ -1007,13 +1011,29 @@ impl SoundLib {
         Some((ears, (p.pitch * pitch_factor).max(0.1)))
     }
 
-    /// The final gain of the bus `p` plays on ([`bus_table`]; 1.0 for one
-    /// the table does not list).
+    /// User gain multipliers over the source game's bus mix.
+    pub fn set_user_volumes(&mut self, effects: f32, dialogue: f32) {
+        self.effects_volume = effects.clamp(0.0, 1.0);
+        self.dialogue_volume = dialogue.clamp(0.0, 1.0);
+    }
+
+    /// The final gain of the bus `p` plays on, including the user's slider.
     fn bus_of(&self, p: &SoundProp) -> f32 {
-        self.buses
+        let gain = self
+            .buses
             .iter()
             .find(|b| b.0 == p.bus)
-            .map_or(1.0, |b| b.1)
+            .map_or(1.0, |b| b.1);
+        // FNV-1a names from the authored mix tables.
+        const VOICEOVER: u32 = 0x3b13_aa4b;
+        const CHATTER: u32 = 0x74d7_71fc;
+        const SHELL_MUSIC: u32 = 0xb00a_2068;
+        let user = match p.bus {
+            VOICEOVER | CHATTER => self.dialogue_volume,
+            SHELL_MUSIC => 1.0,
+            _ => self.effects_volume,
+        };
+        gain * user
     }
 
     /// Play this tick's engine layers: a voice per (vehicle or jet soldier,

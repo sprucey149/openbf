@@ -873,7 +873,13 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
             .ride
             .and_then(|r| r.board)
             .is_some_and(|vh| super::man::is_turret(sim, vh));
-    match fight.filter(|_| free && melee_goal.is_none()) {
+    let close_on = gun.close_on.filter(|_| free);
+    if close_on.is_some() {
+        super::tactic::release(st, sim.tick);
+        st.hold = None;
+        st.fight.mode = 0;
+    }
+    match fight.filter(|_| free && melee_goal.is_none() && close_on.is_none()) {
         Some((e, r)) => fight_position(sim, &tk, st, e, r, thinking, &mut nt),
         None if !free || st.hold.is_none_or(|h| sim.tick >= h.until) => {
             if st.fight.mode == FightState::TAKE {
@@ -940,7 +946,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
                 ),
         },
     };
-    if let Some(goal) = melee_goal {
+    if let Some(goal) = melee_goal.or(close_on) {
         mv.kind = WalkAsk::LEG;
         mv.goal = Some(goal);
         mv.arrive = None;

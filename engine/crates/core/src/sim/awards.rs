@@ -4,12 +4,89 @@
 //! `game::roster::awards`); a slot joins the channel-0 switch cycle only when
 //! the unit holds that medal, and then the weapon it replaces
 //! (`MedalsTypeToLock`) leaves the cycle (B2 `FUN_00240bf8` 161138-161154).
-//! Medals are not earned yet (issue #130): the session cheat "awards" grants
-//! the player the weapon medals, and one cheat each the four stat medals
-//! (`Sim::medal_effect`).
+//! The local player's earned medals follow BF2's thresholds and career tiers.
 
 use super::state::Sim;
-use crate::unit::Unit;
+use crate::unit::{Unit, UnitHandle};
+use crate::weapon::HealthType;
+
+/// BF2 medal IDs in simulation order (B2 medal table at 0x62c560).
+pub const MEDAL_THRESHOLDS: [u32; 9] = [6, 12, 4, 1, 6, 8, 12, 24, 36];
+pub type MedalCounts = [u32; MEDAL_THRESHOLDS.len()];
+
+/// Green, Veteran, Elite and Legendary (B2 FUN_0035fc28).
+pub fn medal_level(count: u32) -> usize {
+    match count {
+        0..=3 => 0,
+        4..=31 => 1,
+        32..=63 => 2,
+        _ => 3,
+    }
+}
+
+pub fn medal_threshold(medal: usize, count: u32) -> u32 {
+    let base = MEDAL_THRESHOLDS[medal];
+    if medal_level(count) >= 2 {
+        (base * 3 / 4).max(1)
+    } else {
+        base
+    }
+}
+
+pub(super) struct MedalCareer {
+    life: UnitHandle,
+    counts: MedalCounts,
+    progress: MedalCounts,
+    earned: u16,
+    bonuses: bool,
+}
+
+impl MedalCareer {
+    fn add(&mut self, life: UnitHandle, medal: usize, amount: u32) {
+        if self.life != life {
+            self.life = life;
+            self.progress.fill(0);
+            self.earned = 0;
+        }
+        let bit = 1 << medal;
+        if self.earned & bit != 0 {
+            return;
+        }
+        let threshold = medal_threshold(medal, self.counts[medal]);
+        self.progress[medal] = (self.progress[medal] + amount.min(threshold)).min(threshold);
+        if self.progress[medal] == threshold {
+            self.counts[medal] = self.counts[medal].saturating_add(1);
+            self.earned |= bit;
+        }
+    }
+
+    fn bits(&self, gen: u32) -> u16 {
+        if !self.bonuses {
+            return 0;
+        }
+        self.counts.iter().enumerate().fold(0, |bits, (i, &count)| {
+            let bit = 1 << i;
+            if count >= 64 || (count >= 4 && self.life.gen == gen && self.earned & bit != 0) {
+                bits | bit
+            } else {
+                bits
+            }
+        })
+    }
+
+    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        eat(b"MEDAL_CAREER");
+        eat(&self.life.index.to_le_bytes());
+        eat(&self.life.gen.to_le_bytes());
+        eat(&self.earned.to_le_bytes());
+        for n in self.counts.into_iter().chain(self.progress) {
+            eat(&n.to_le_bytes());
+        }
+        if !self.bonuses {
+            eat(b"MEDAL_BONUSES_OFF");
+        }
+    }
+}
 
 /// The medals that unlock a weapon: Gunslinger 0, Frenzy 1, Demolition 2,
 /// Marksman 4, Regulator 5 (`analysis/re-hitzones.md` Part B section 3).
@@ -50,18 +127,108 @@ fn bit(t: i8) -> u16 {
 }
 
 impl Sim {
-    /// The medals unit `u` holds, one bit per medal type. Only the session
-    /// cheats set any, for a player, outside the space modes (which keep
-    /// their kits as they are): "awards" the weapon medals, and "damage",
-    /// "guardian", "endurance" and "technician" one stat medal each. Bots
-    /// hold none, so no difficulty depends on them. Issue #130 adds earned
-    /// medals here.
+    /// Initialize the local player's career from the saved profile.
+    pub fn install_medal_career(&mut self, life: UnitHandle, counts: MedalCounts) {
+        if !self.space_round() {
+            self.medal_career = Some(MedalCareer {
+                life,
+                counts,
+                progress: [0; MEDAL_THRESHOLDS.len()],
+                earned: 0,
+                bonuses: true,
+            });
+        }
+    }
+
+    /// Whether earned career medals can grant weapons and stat bonuses.
+    pub fn career_award_bonuses(&self) -> bool {
+        self.medal_career.as_ref().is_some_and(|c| c.bonuses)
+    }
+
+    /// Apply the bonus preference while continuing to record progress.
+    pub fn set_career_award_bonuses(&mut self, enabled: bool) {
+        let Some(career) = self.medal_career.as_mut().filter(|c| c.bonuses != enabled) else {
+            return;
+        };
+        career.bonuses = enabled;
+        let i = career.life.index as usize;
+        if self.units.get(i).is_some_and(|u| u.is_player && u.alive) {
+            self.award_fixup(i);
+            self.sync_award_buffs(i);
+        }
+    }
+
+    pub fn medal_counts(&self) -> Option<MedalCounts> {
+        self.medal_career.as_ref().map(|career| career.counts)
+    }
+
+    fn medal_progress(&mut self, life: UnitHandle, medal: usize, amount: u32) {
+        if self
+            .medal_career
+            .as_ref()
+            .is_some_and(|c| c.life.index == life.index)
+            && self
+                .units
+                .get(life.index as usize)
+                .is_some_and(|u| u.is_player && u.gen == life.gen)
+        {
+            self.medal_career.as_mut().unwrap().add(life, medal, amount);
+        }
+    }
+
+    pub fn score_medal_points(&mut self, life: UnitHandle, amount: u32) {
+        if amount > 0 {
+            for medal in 6..=8 {
+                self.medal_progress(life, medal, amount);
+            }
+        }
+    }
+
+    pub(super) fn medal_slice(&mut self, life: UnitHandle, health_type: HealthType) {
+        if health_type == HealthType::Vehicle {
+            self.medal_progress(life, usize::from(TECHNICIAN_MEDAL), 1);
+        }
+    }
+
+    // B2 FUN_001e0580 calls FUN_0035fd50 with the actual firing weapon,
+    // a kill bit, a critical-hit bit and the target's health type.
+    pub(super) fn medal_weapon_hit(
+        &mut self,
+        life: UnitHandle,
+        class: usize,
+        health_type: HealthType,
+        killed: bool,
+        critical: bool,
+    ) {
+        if self.medal_career.is_none() {
+            return;
+        }
+        match self.weapon_classes.get(class).and_then(|w| w.medals_type) {
+            Some(i @ (0 | 1 | 5)) if killed => self.medal_progress(life, i as usize, 1),
+            Some(2) if critical && health_type == HealthType::Vehicle => {
+                self.medal_progress(life, 2, 1)
+            }
+            Some(4)
+                if critical
+                    && matches!(
+                        health_type,
+                        HealthType::Person | HealthType::Animal | HealthType::Droid
+                    ) =>
+            {
+                self.medal_progress(life, 4, 1)
+            }
+            _ => {}
+        }
+    }
+
+    /// Earned medals and session cheats for the player. Bots and space
+    /// rounds keep their ordinary kits.
     pub fn award_bits(&self, u: &Unit) -> u16 {
         if !u.is_player || self.space_round() {
             return 0;
         }
         let c = &self.cheats;
-        let mut bits = 0;
+        let mut bits = self.medal_career.as_ref().map_or(0, |c| c.bits(u.gen));
         if c.all_awards {
             bits |= WEAPON_MEDALS;
         }

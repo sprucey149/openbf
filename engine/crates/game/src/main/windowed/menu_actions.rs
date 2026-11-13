@@ -23,6 +23,18 @@ pub(super) fn persist_setting(
         }
         MenuAction::SetFov(_) => profile.settings.fov_scale = walk.fov_scale,
         MenuAction::SetMusic(v) => profile.settings.music_volume = v,
+        MenuAction::SetDifficulty(v) => {
+            profile.settings.difficulty = game::shell_ia::port_difficulty(v);
+            session.difficulty = v;
+        }
+        MenuAction::SetEffectsVolume(v) => profile.settings.effects_volume = v.clamp(0.0, 1.0),
+        MenuAction::SetDialogueVolume(v) => profile.settings.dialogue_volume = v.clamp(0.0, 1.0),
+        MenuAction::SetFpsCounter(v) => profile.settings.fps_counter = v as u8,
+        MenuAction::SetCareerAwards(on) => profile.settings.career_awards = on,
+        MenuAction::SetRumble(v) => profile.settings.rumble_strength = v.clamp(0.0, 1.0),
+        MenuAction::ToggleRumbleOnFire => {
+            profile.settings.rumble_on_fire = !profile.settings.rumble_on_fire;
+        }
         MenuAction::SetMouseSensitivity(v) => {
             profile.settings.mouse_sensitivity = v.clamp(
                 game::kbm::SENSITIVITY_RANGE.0,
@@ -70,7 +82,8 @@ pub(super) fn apply_pause_action(
     game::pause::apply_menu_action(walk, a, paused, menu);
     cheats.follow(&walk.sim);
     persist_setting(profile, session, a, walk);
-    kbm.follow(&profile.settings);
+    kbm.sensitivity = profile.settings.mouse_sensitivity;
+    kbm.invert_y = profile.settings.invert_y;
     // The music follows its slider; with the game bus paused the change is
     // heard on resume.
     if let (ui::menu::MenuAction::SetMusic(_), Some(m), Some(v)) =

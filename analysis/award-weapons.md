@@ -197,40 +197,28 @@ differed and are now the same on every map:
 
 Only a player slices; bots never do, on either game.
 
-## 5. The other awards: what exists and what issue #130 still needs
+## 5. Earning and using career awards (issue #130)
 
-Exists, the same on both games:
+The local ground player earns BF2's medals from weapon kills, vehicle
+weak-point hits, slices, sniper headshots and positive score events.
+The thresholds fall to three quarters at Elite. Veteran and Elite
+bonuses last for the life that earns them. Legendary bonuses apply on
+later lives. Profile counts drive the career stats. The battle feed
+reports each medal as it is earned. Both games' troop kits share the
+unlock and replacement rules, including the BF1 award matches in
+section 3.
 
-- the medal bits and the switch rule (`Sim::award_bits`, `Sim::weapon_locked`);
-- award slots on every trooper class of both games;
-- the four stat medals' effects as player-only cheat rows (section 9);
-- critical-hit counting for the demolition award (`WeaponClass::rocket_launcher`,
-  `Event::CriticalHit`);
-- the round-end stats and medal pages (`game::round_stats`; medal counts are always 0);
-- class unlock points (`game::unlocks`).
+The port's Career award bonuses setting defaults to On. Off leaves the
+player's ordinary weapons and stats in effect while career medals and
+other stats continue to accrue. A medal earned while Off still appears
+in the battle feed. Re-enabling bonuses applies the current career
+unlocks under the normal life and tier rules. The session cheats have
+their own controls.
 
-Not built (issue #130):
-
-- earning: the per-life counters and thresholds (`re-hitzones.md` Part B section 3: pistol 6
-  kills, rifle 12, launcher 4 vehicle critical hits, 1 slice, sniper 6 head hits, shotgun 8
-  kills, and 12 / 24 / 36 points), the three-quarter threshold at a higher career level, the
-  bit update with its on-screen message, loss on death and permanence at the top level;
-- career counts in the profile and on the stats pages, and the settings toggle;
-- the yellow "Award: <bonus>" line when a bonus becomes available (`game.awards.bonus.*`; its
-  text is ready, `EventFeed::award_bonus`, our own for the Heavy Blast Cannon; nothing calls it
-  yet, and the line should call `award_bonus(medal_key, Some(<the award class the medal unlocks
-  in the player's kit>))` so a BF1 kit reads its own award);
-- the riders' "Slicer Alert" line;
-- the weak-part lock's count (the maintainer's ask, 2026-11-10: "I want the lock onto vehicle weak
-  parts that give the award"): since the third weak-spot pass any round that strikes a weak part
-  deals its vehicle class's factor (x4 on the AT-TE, the AT-AT and the spider walker, x2 on the
-  rest) and raises `Event::CriticalHit`, locked or not (`re-ordnance-kinds.md` §5.1), so a
-  part-locked rocket on the part is a real critical hit and counts as one, from the rocket
-  launcher's `Event::CriticalHit`. One that meets the plate beside the part (about 1 in 25 in the
-  survey) is plain and does not count; replace: count every part-locked hit on its vehicle if the
-  maintainer wants that;
-- whether bots earn medals;
-- medal scoring keys on BF1 weapons (`ScoreForMedalsType`), which earning will need.
+The outstanding comparisons cover the original game's scoring events,
+the slicer alert and live earning through death, a round transition
+and profile reload. See `re-hitzones.md` Part B section 3 and
+`re-ordnance-kinds.md` §5.1 for the underlying hit rules.
 
 ## 6. Bots and locked awards
 
@@ -356,7 +344,7 @@ Rules, the same on both games' maps:
   own sound (`buff_rage_fire` and the like) beside the weapon's `com_buff_fire`. Both were
   missing for the officer and hero abilities too.
 
-Not done: the "Award: <bonus>" line, earning and career levels (issue #130). trace: whether the PS2 hides the aura while its soldier sits in a
+For earning and career levels see section 5. trace: whether the PS2 hides the aura while its soldier sits in a
 vehicle (`FUN_002368a0`'s attach test); the port draws it at the rider as before.
 
 Hashes, measured 2026-11-10: a release binary of the base (`2fc4df71`) against this one,

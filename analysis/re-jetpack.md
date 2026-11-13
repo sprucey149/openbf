@@ -881,3 +881,13 @@ Tests: `bf1_jet_borrowing_matches_the_bf2_twins`, `bf1_geonosians_fly_on_their_b
 |---|---|---|
 | BF2 GEO1 | 7.8 m mean displacement, 33% of samples near still | 25.6 m, 3% |
 | BF1 GEO1 | 4.9 m, 31% | 18.5 m, 0% |
+
+### Bespin Platforms tactical landing check (2026-11-12, #135)
+
+The Dark Trooper could select a sky-clear spot over the void and fly
+past the deck. The native BF1 tactical spot query uses the authored
+barrier and sky checks (FUN_0025aa08, B1 177019–177134). The port's
+Bespin deck zone also requires a reachable, walkable-height landing
+surface through the existing tactical spot check. Authored jet links
+and hover-attack goals follow their own queries. measure: matched
+original Dark Trooper landings and deck-edge falls.

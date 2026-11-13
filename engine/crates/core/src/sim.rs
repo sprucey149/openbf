@@ -96,7 +96,8 @@ mod water;
 mod weak_lock;
 
 pub use awards::{
-    DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL, TECHNICIAN_MEDAL, WEAPON_MEDALS,
+    medal_level, medal_threshold, MedalCounts, DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL,
+    MEDAL_THRESHOLDS, TECHNICIAN_MEDAL, WEAPON_MEDALS,
 };
 pub use beam::{Beam, SeatBeam};
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};
@@ -133,7 +134,8 @@ pub(crate) use round_rules::RoundRules;
 pub use seats::{ENTER_REACH, EXIT_RING};
 pub use space_assault::{
     CapitalMeter, CriticalSystem, FrigateTurrets, LinkedTurretSet, ShieldGroup, SpaceAssault,
-    DEFAULT_SCORE_LIMIT, FIGHTER_KILL_POINTS, SPENT_MAX_HEALTH, UNMANNED_FLYER_POINTS,
+    DEFAULT_SCORE_LIMIT, FIGHTER_KILL_POINTS, POST_KILL_RANGE_SQ, SPENT_MAX_HEALTH,
+    UNMANNED_FLYER_POINTS,
 };
 pub use space_balance::SpaceBalance;
 pub use spawn::{ClassAmmo, ClassRefusal, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING};

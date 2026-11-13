@@ -708,7 +708,7 @@ class Pack(unittest.TestCase):
         self.assertIsNone(code)
         for line in (f"BF1 gameplay: PS2 disc {self.iso / 'a'}", f"BF2 gameplay: PS2 disc {self.iso / 'b'}",
                      f"BF2 texture donors: PC install {self.iso / 'e/GameData/Data/_LVL_PC'}",
-                     f"DLC: {self.iso / 'd'} (Kit Fisto and Asajj Ventress used, off until the DLC Heroes row in Hero Options is turned on)",
+                     f"DLC: {self.iso / 'd'} (Kit Fisto and Asajj Ventress used in Hero Assault)",
                      f"not supported yet: {self.iso / 'c'} - Xbox Star Wars: Battlefront II disc (trimmed); recognized, not read"):
             self.assertIn(line, printed)
         self.assertEqual(self.out.with_name('game.inputs.txt').read_text().strip(), printed[:printed.index('Input summary')].strip())

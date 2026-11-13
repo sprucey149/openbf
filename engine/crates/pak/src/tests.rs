@@ -101,6 +101,35 @@ fn reader_seeks_inside_one_entry() {
 }
 
 #[test]
+fn reader_keeps_the_mounted_archive_after_path_replacement() {
+    const ENTRY: &str = "assets_baked/audio/x.bin";
+    let (d, path) = packed("replaced");
+    let original = Archive::open(&path).unwrap().unwrap();
+    let replacement = d.join("replacement");
+    std::fs::write(d.join("changed_exe"), [0xff; 512]).unwrap();
+    write_pack(
+        &d.join("changed_exe"),
+        &replacement,
+        &[(ENTRY.to_owned(), d.join("c"))],
+    )
+    .unwrap();
+    std::fs::rename(replacement, &path).unwrap();
+    let current = Archive::open(&path).unwrap().unwrap();
+    assert_ne!(original.get(ENTRY), current.get(ENTRY));
+
+    let mut first = original.open_entry(ENTRY).unwrap();
+    let mut second = original.open_entry(ENTRY).unwrap();
+    let mut block = [0; 4];
+    first.seek(SeekFrom::Start(12)).unwrap();
+    second.seek(SeekFrom::End(-4)).unwrap();
+    first.read_exact(&mut block).unwrap();
+    assert_eq!(block, [12, 13, 14, 15]);
+    second.read_exact(&mut block).unwrap();
+    assert_eq!(block, [252, 253, 254, 255]);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
 fn normalize_is_lexical() {
     assert_eq!(
         normalize(Path::new("assets_baked/bf1_kam1/../missions/./x")),
@@ -433,7 +462,7 @@ fn a_build_at_the_limit_writes_a_small_executable_and_an_archive_beside_it() {
     assert_fixture(&inside);
     assert!(Archive::open(&out).unwrap().is_none());
     let found = find_archive(&out).unwrap();
-    assert_eq!(found.path, pak);
+    assert_eq!(found.start(), 0);
     assert_fixture(&found);
     let _ = std::fs::remove_dir_all(d);
 }

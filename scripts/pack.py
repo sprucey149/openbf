@@ -663,7 +663,7 @@ def main():
         if why:
             print(f"   making the missions again: {why}")
         command = [sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"),
-                   "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS]
+                   "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS, "--hunt"]
         run(command + (["--space"] if space else []) + correction_args + table_only_args, env=mission_env)
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)

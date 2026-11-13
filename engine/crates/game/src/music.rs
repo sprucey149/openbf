@@ -230,7 +230,7 @@ impl BattleMusic {
         }
         // OURS (maintainer, 2026-11-05): Hero Assault plays its heroes'
         // music too, though `tat2g_eli` switches hero music off.
-        let hero = sim.is_hero(player) || sim.deathmatch.is_some();
+        let hero = sim.is_hero(player) || sim.hero_assault();
         if sim.outcome.is_none() && hero {
             let track = me.and_then(|u| {
                 self.hero_tracks

@@ -53,7 +53,6 @@ pub enum PackLayout {
 /// An archive: the open file and its index (path -> offset, length).
 pub struct Archive {
     file: File,
-    path: PathBuf,
     start: u64,
     entries: BTreeMap<String, (u64, u64)>,
 }
@@ -108,7 +107,6 @@ impl Archive {
         }
         Ok(Some(Archive {
             file,
-            path: path.to_path_buf(),
             start,
             entries,
         }))
@@ -118,6 +116,21 @@ impl Archive {
     pub fn read_entry(&self, name: &str) -> io::Result<Vec<u8>> {
         let (off, raw_len) = self.get(name).ok_or_else(|| not_found(name))?;
         self.read(off, raw_len)
+    }
+
+    fn open_entry(&self, name: &str) -> io::Result<Reader> {
+        let (start, len) = self.get(name).ok_or_else(|| not_found(name))?;
+        if (len & COMPRESSED_FLAG) != 0 {
+            Ok(Reader::Mem(io::Cursor::new(self.read(start, len)?)))
+        } else {
+            // The index belongs to this open file even if the package was replaced.
+            Ok(Reader::Pak {
+                file: self.file.try_clone()?,
+                start,
+                len,
+                pos: 0,
+            })
+        }
     }
 
     /// Bytes of the file before the pack: the executable proper.
@@ -666,19 +679,7 @@ pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
     count(0);
     match place(path.as_ref()) {
         Place::Disk(p) => Ok(Reader::Disk(File::open(p)?)),
-        Place::Pak(k) => {
-            let (start, len) = pak().get(&k).ok_or_else(|| not_found(&k))?;
-            if (len & COMPRESSED_FLAG) != 0 {
-                Ok(Reader::Mem(io::Cursor::new(pak().read(start, len)?)))
-            } else {
-                Ok(Reader::Pak {
-                    file: File::open(&pak().path)?,
-                    start,
-                    len,
-                    pos: 0,
-                })
-            }
-        }
+        Place::Pak(k) => pak().open_entry(&k),
     }
 }
 

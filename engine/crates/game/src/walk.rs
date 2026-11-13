@@ -1392,12 +1392,25 @@ impl WalkSim {
         changed
     }
 
+    pub fn flush_career_progress(&mut self, profile: &mut crate::profile::Profile) -> bool {
+        let mut changed = self.flush_class_kills(profile);
+        if let Some(counts) = self
+            .sim
+            .medal_counts()
+            .filter(|c| *c != profile.career.medals)
+        {
+            profile.career.medals = counts;
+            changed = true;
+        }
+        changed
+    }
+
     pub fn record_battle(
         &mut self,
         profile: &mut crate::profile::Profile,
         stats: crate::profile::BattleStats,
     ) {
-        self.flush_class_kills(profile);
+        self.flush_career_progress(profile);
         let me = &self.sim.units[self.player.index as usize];
         let won = self
             .sim

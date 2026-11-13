@@ -46,7 +46,6 @@ fn the_game_menu_lists_the_original_rows_in_order() {
         vec![
             Row::Resume,
             Row::Options,
-            Row::Cheats,
             Row::ClassPicker,
             Row::Respawn,
             Row::Restart,
@@ -79,10 +78,12 @@ fn the_flat_menu_remains_available() {
         Row::MouseSensitivity,
         Row::PadLookSensitivity,
         Row::FlightControls,
+        Row::Rumble,
         Row::InvertY,
         Row::LowPowerResolution,
         Row::InputIcons,
         Row::Viewpoint,
+        Row::CareerAwards,
     ];
     let mut want = vec![Row::Resume, Row::ClassPicker, Row::Cheat(0), Row::Cheat(1)];
     want.extend(settings);
@@ -104,42 +105,66 @@ fn the_flat_menu_remains_available() {
     assert_eq!(rows(&shell), want);
 }
 
-/// The Game Menu's Options page is the shell's settings page under a Back row.
+/// The shell and battle use the same category and device rows.
 #[test]
-fn the_options_page_is_the_shell_settings_page() {
+fn the_options_page_is_shared_with_the_shell() {
     let options = MenuModel {
         page: Some(PausePage::Options),
         ..ground()
     };
-    let shell = MenuModel {
-        page: None,
-        in_shell: Some("Game Options".into()),
-        cheats: Vec::new(),
-        ..ground()
-    };
-    assert_eq!(rows(&options)[0], Row::PageBack);
-    assert_eq!(rows(&options)[1..], rows(&shell)[1..]);
-    let cheats = MenuModel {
-        page: Some(PausePage::Cheats),
-        ..ground()
-    };
     assert_eq!(
-        rows(&cheats),
-        vec![Row::PageBack, Row::Cheat(0), Row::Cheat(1)]
+        rows(&options),
+        [
+            Row::PageBack,
+            Row::Settings(SettingsPage::Game),
+            Row::Settings(SettingsPage::Audio),
+            Row::Settings(SettingsPage::Graphics),
+            Row::Settings(SettingsPage::Controls),
+        ]
     );
+    let page = |page| MenuModel {
+        page: Some(page),
+        ..ground()
+    };
+    let game = page(PausePage::Settings(SettingsPage::Game));
+    let mut shell = game.clone();
+    shell.cheats.clear();
+    shell.in_shell = Some(String::new());
+    assert_eq!(rows(&game), rows(&shell));
+    assert_eq!(
+        row_locked(&shell, Row::Cheats),
+        Some("Cheats are available while a battle is paused.")
+    );
+    let controls = page(PausePage::Settings(SettingsPage::Controls));
+    assert_eq!(
+        rows(&controls),
+        [
+            Row::PageBack,
+            Row::Settings(SettingsPage::KeyboardMouse),
+            Row::Settings(SettingsPage::Gamepad)
+        ]
+    );
+    let pad = page(PausePage::Settings(SettingsPage::Gamepad));
+    assert!(rows(&pad).contains(&Row::Assist));
+    assert_eq!(
+        press(&pad, Row::RumbleOnFire),
+        Some(MenuAction::ToggleRumbleOnFire)
+    );
+    assert!(!rows(&pad).contains(&Row::MouseSensitivity));
+    let keyboard = page(PausePage::Settings(SettingsPage::KeyboardMouse));
+    assert!(rows(&keyboard).contains(&Row::MouseSensitivity));
+    assert!(!rows(&keyboard).contains(&Row::Rumble));
+    let cheats = page(PausePage::Cheats);
+    assert_eq!(rows(&cheats), [Row::PageBack, Row::Cheat(0), Row::Cheat(1)]);
     let cross = input(|i| i.confirm = true);
-    assert_eq!(navigate(&options, cross).1, vec![MenuAction::ClosePage]);
+    assert_eq!(navigate(&options, cross).1, [MenuAction::ClosePage]);
     assert_eq!(
-        navigate(&at(&ground(), Row::Options), cross).1,
-        vec![MenuAction::OpenPage(PausePage::Options)]
-    );
-    assert_eq!(
-        navigate(&at(&ground(), Row::Cheats), cross).1,
-        vec![MenuAction::OpenPage(PausePage::Cheats)]
+        navigate(&at(&game, Row::Cheats), cross).1,
+        [MenuAction::OpenPage(PausePage::Cheats)]
     );
     assert_eq!(
         navigate(&at(&cheats, Row::Cheat(1)), cross).1,
-        vec![MenuAction::ToggleCheat(1)]
+        [MenuAction::ToggleCheat(1)]
     );
 }
 
@@ -186,9 +211,9 @@ fn quit_and_restart_ask_first_with_no_focused() {
     }
 }
 
-/// Playtest A3: Back resumes from every page and popup of the ground menu.
+/// Back from a settings page goes up one level; the main menu and its popups retain Resume.
 #[test]
-fn back_resumes_from_every_page() {
+fn back_returns_from_the_settings_page() {
     let back = input(|i| i.back = true);
     for page in [PausePage::Main, PausePage::Options, PausePage::Cheats] {
         let m = MenuModel {
@@ -200,7 +225,12 @@ fn back_resumes_from_every_page() {
                 cursor,
                 ..m.clone()
             };
-            assert_eq!(navigate(&m, back).1, vec![MenuAction::Resume], "{page:?}");
+            let action = if page == PausePage::Main {
+                MenuAction::Resume
+            } else {
+                MenuAction::ClosePage
+            };
+            assert_eq!(navigate(&m, back).1, [action], "{page:?}");
         }
     }
     for popup in [Popup::Respawn, Popup::Quit, Popup::Restart] {
@@ -213,6 +243,22 @@ fn back_resumes_from_every_page() {
 }
 
 /// The Game Menu's title and labels come from its texts.
+#[test]
+fn controller_rumble_steps_through_four_levels() {
+    let mut model = MenuModel {
+        page: Some(PausePage::Settings(SettingsPage::Gamepad)),
+        ..Default::default()
+    };
+    let row = rows(&model).iter().position(|r| *r == Row::Rumble).unwrap();
+    assert!(step(&model, row, false).is_empty());
+    for (strength, _) in RUMBLE_LEVELS.into_iter().skip(1) {
+        assert_eq!(step(&model, row, true), [MenuAction::SetRumble(strength)]);
+        model.rumble_strength = strength;
+    }
+    assert!(step(&model, row, true).is_empty());
+    assert_eq!(press(&model, Row::Rumble), Some(MenuAction::SetRumble(0.0)));
+}
+
 #[test]
 fn the_game_menu_is_titled_by_its_page() {
     let m = ground();
@@ -302,4 +348,33 @@ fn the_game_menu_rows_take_the_mouse() {
     };
     assert_eq!(click_label(&asked, "Yes"), vec![MenuAction::Quit]);
     assert_eq!(click_label(&asked, "No"), vec![MenuAction::CancelPopup]);
+}
+
+#[test]
+fn career_awards_can_be_set_with_confirm_or_the_value_arrows() {
+    let options = MenuModel {
+        page: Some(PausePage::Settings(SettingsPage::Game)),
+        ..ground()
+    };
+    let on = at(&options, Row::CareerAwards);
+    let off = MenuModel {
+        career_awards_disabled: true,
+        ..on.clone()
+    };
+    assert_eq!(
+        press(&on, Row::CareerAwards),
+        Some(MenuAction::SetCareerAwards(false))
+    );
+    assert_eq!(
+        navigate(&off, input(|i| i.confirm = true)).1,
+        vec![MenuAction::SetCareerAwards(true)]
+    );
+    assert_eq!(
+        step(&on, on.cursor, false),
+        vec![MenuAction::SetCareerAwards(false)]
+    );
+    assert_eq!(
+        step(&off, off.cursor, true),
+        vec![MenuAction::SetCareerAwards(true)]
+    );
 }

@@ -13,6 +13,9 @@ impl Sim {
             }
         };
         eat(&self.tick.to_le_bytes());
+        if let Some(career) = &self.medal_career {
+            career.hash_into(&mut eat);
+        }
         if !self.mission_ai.allow_blind_jet_jumps {
             eat(b"NO_BLIND_JET_HOPS");
         }

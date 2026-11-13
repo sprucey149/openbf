@@ -124,6 +124,7 @@ pub enum RowId {
     InstantAction,
     GameOptions,
     AudioOptions,
+    GraphicsOptions,
     Controls,
 }
 
@@ -143,6 +144,7 @@ impl RowId {
             RowId::InstantAction => ("ifs.sp.ia", "Instant Action"),
             RowId::GameOptions => ("ifs.GameOpt.title", "Game Options"),
             RowId::AudioOptions => ("ifs.SoundOpt.title", "Audio Options"),
+            RowId::GraphicsOptions => ("openbf.graphicsoptions", "Graphics Options"),
             RowId::Controls => ("ifs.controls.Vehicle_Unit", "Controls"),
         }
     }
@@ -198,9 +200,7 @@ impl Stack {
 pub enum ShellCommand {
     /// Singleplayer → Instant Action: today's IA setup (until card BSHLB).
     InstantAction,
-    /// Options → Game Options / Audio Options: the port's settings page.
-    Settings,
-    Controls,
+    Settings(crate::menu::SettingsPage),
     /// Back on the title screen, or the main menu's Quit Game row (`[ours]`:
     /// the PS2 has no way out).
     Quit,
@@ -285,6 +285,7 @@ impl ShellMenus {
                 vec![
                     row(RowId::GameOptions, true),
                     row(RowId::AudioOptions, true),
+                    row(RowId::GraphicsOptions, true),
                     row(RowId::Controls, true),
                 ],
                 true,
@@ -406,8 +407,18 @@ impl ShellMenus {
             RowId::Singleplayer => self.go(Page::Singleplayer),
             RowId::Options => self.go(Page::Options),
             RowId::InstantAction => return Some(ShellCommand::InstantAction),
-            RowId::GameOptions | RowId::AudioOptions => return Some(ShellCommand::Settings),
-            RowId::Controls => return Some(ShellCommand::Controls),
+            RowId::GameOptions => {
+                return Some(ShellCommand::Settings(crate::menu::SettingsPage::Game))
+            }
+            RowId::AudioOptions => {
+                return Some(ShellCommand::Settings(crate::menu::SettingsPage::Audio))
+            }
+            RowId::GraphicsOptions => {
+                return Some(ShellCommand::Settings(crate::menu::SettingsPage::Graphics))
+            }
+            RowId::Controls => {
+                return Some(ShellCommand::Settings(crate::menu::SettingsPage::Controls))
+            }
             RowId::QuitGame => return Some(ShellCommand::Quit),
             _ => {}
         }
@@ -589,7 +600,13 @@ impl Ctx<'_> {
     /// (re-bf2-menus §5 [V]): the bar's middle wipes out, a `cursor` square
     /// sweeps across the text box, the text pops up about its centre line
     /// and fades in.
-    fn flashy_row(&mut self, s: &crate::hud_draw::Screen, row: &FlashyRow<'_>, t: f32, lh: f32) {
+    pub(crate) fn flashy_row(
+        &mut self,
+        s: &crate::hud_draw::Screen,
+        row: &FlashyRow<'_>,
+        t: f32,
+        lh: f32,
+    ) {
         let f = flashy(t);
         let [x0, y0, x1, y1] = row.rect;
         let Some(out) = f.bar else {
@@ -626,13 +643,13 @@ impl Ctx<'_> {
 }
 
 /// A row as [`Ctx::flashy_row`] draws it.
-struct FlashyRow<'a> {
-    rect: [f32; 4],
-    pieces: [&'static str; 3],
+pub(crate) struct FlashyRow<'a> {
+    pub(crate) rect: [f32; 4],
+    pub(crate) pieces: [&'static str; 3],
     /// The bar's tint and alpha.
-    bar: ([f32; 3], f32),
-    text: &'a str,
-    style: ([f32; 3], f32),
+    pub(crate) bar: ([f32; 3], f32),
+    pub(crate) text: &'a str,
+    pub(crate) style: ([f32; 3], f32),
 }
 
 #[cfg(test)]
@@ -706,8 +723,9 @@ mod tests {
             hud: &hud,
             art: &art,
             out: Default::default(),
+            menu_fonts: true,
         };
-        assert_eq!(ctx.font(BUTTON_FONT).unwrap().name, BUTTON_FONT);
+        assert_eq!(ctx.font(BUTTON_FONT).unwrap().name, "menu_gamefont_large");
     }
 
     fn menus() -> ShellMenus {
@@ -941,7 +959,10 @@ mod tests {
         m.step(press(|i| i.down = true), false, 0.1);
         m.step(confirm, false, 0.1);
         assert_eq!(m.page, Page::Options);
-        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::Settings));
+        assert_eq!(
+            m.step(confirm, false, 0.1),
+            Some(ShellCommand::Settings(crate::menu::SettingsPage::Game))
+        );
         m.step(press(|i| i.back = true), false, 0.1);
         m.step(press(|i| i.back = true), false, 0.1);
         assert_eq!(m.page, Page::Title);
@@ -965,7 +986,7 @@ mod tests {
         assert!(m.options.rows[m.options.focus].enabled);
         assert_eq!(
             m.step(press(|i| i.confirm = true), false, 0.1),
-            Some(ShellCommand::Controls)
+            Some(ShellCommand::Settings(crate::menu::SettingsPage::Controls))
         );
     }
 

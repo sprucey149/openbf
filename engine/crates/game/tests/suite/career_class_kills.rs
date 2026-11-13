@@ -8,27 +8,18 @@ use glam::Vec3;
 
 struct ProfileFile {
     path: std::path::PathBuf,
-    previous: Option<std::ffi::OsString>,
 }
 
 impl ProfileFile {
     fn new() -> Self {
         let path =
             std::env::temp_dir().join(format!("openbf-class-career-{}.ron", std::process::id()));
-        let previous = std::env::var_os("OPENBF_PROFILE");
-        unsafe { std::env::set_var("OPENBF_PROFILE", &path) };
-        Self { path, previous }
+        Self { path }
     }
 }
 
 impl Drop for ProfileFile {
     fn drop(&mut self) {
-        unsafe {
-            match self.previous.take() {
-                Some(value) => std::env::set_var("OPENBF_PROFILE", value),
-                None => std::env::remove_var("OPENBF_PROFILE"),
-            }
-        };
         let _ = std::fs::remove_file(&self.path);
     }
 }
@@ -345,7 +336,7 @@ fn real_match_class_switching_autosaves_and_profile_reload_keep_each_kill_once()
     let Some(mut walk) = utapau_match() else {
         return;
     };
-    let _file = ProfileFile::new();
+    let file = ProfileFile::new();
     let mut profile = Profile::default();
     let mut feed = EventFeed::default();
     profile.record_round(Some(true), 10, 2, 100, 50, 2);
@@ -379,9 +370,9 @@ fn real_match_class_switching_autosaves_and_profile_reload_keep_each_kill_once()
     assert_eq!(profile.career.class_kills["all_inf_officer"], 4);
     assert!(!walk.flush_class_kills(&mut profile));
     assert_eq!(profile.career.kills, 10);
-    profile.save().unwrap();
-    assert_eq!(Profile::load_or_default(), profile);
-    profile = Profile::load_or_default();
+    profile.save_to(&file.path).unwrap();
+    assert_eq!(Profile::load_from(&file.path), profile);
+    profile = Profile::load_from(&file.path);
     shoot_enemy(&mut walk, &mut feed);
 
     walk.request_respawn();
@@ -418,10 +409,10 @@ fn real_match_class_switching_autosaves_and_profile_reload_keep_each_kill_once()
     assert_eq!(profile.career.hits, 50 + stats.hits);
     assert_eq!(profile.career.captures, 3);
 
-    profile.save().unwrap();
-    let restored = Profile::load_or_default();
-    profile.save().unwrap();
-    let saved_twice = Profile::load_or_default();
+    profile.save_to(&file.path).unwrap();
+    let restored = Profile::load_from(&file.path);
+    profile.save_to(&file.path).unwrap();
+    let saved_twice = Profile::load_from(&file.path);
     assert_eq!(restored, profile);
     assert_eq!(saved_twice, profile);
     println!("bf2_uta1: officer +2, respawn, Wookiee +1, victory; shots +{}, hits +{}, captures +{}; repeated tick/save and disk reload preserve counts", stats.shots, stats.hits, stats.captures);

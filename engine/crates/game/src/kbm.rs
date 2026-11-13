@@ -358,9 +358,13 @@ impl Kbm {
     pub fn follow(&mut self, settings: &crate::profile::Settings) {
         self.sensitivity = settings.mouse_sensitivity;
         self.invert_y = settings.invert_y;
-        if self.bindings != settings.keyboard_bindings {
+        self.set_bindings(&settings.keyboard_bindings);
+    }
+
+    pub fn set_bindings(&mut self, bindings: &Bindings) {
+        if &self.bindings != bindings {
             self.release_keys();
-            self.bindings = settings.keyboard_bindings.clone();
+            self.bindings.clone_from(bindings);
         }
     }
 

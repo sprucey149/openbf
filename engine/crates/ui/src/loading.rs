@@ -410,14 +410,21 @@ pub fn draw_loading_with_skip(
 
 fn draw_skip(painter: &egui::Painter, screen: Rect, prompt: bool) {
     if prompt {
-        // Painter text has no Area fade-in/out: the deadline is exactly 3 s.
-        painter.text(
-            screen.right_bottom() - Vec2::new(24.0, 24.0),
-            Align2::RIGHT_BOTTOM,
-            "Push any button to skip",
-            egui::FontId::proportional(18.0),
+        // Paint after the scan so the prompt stays legible on narrow screens
+        // as well as in the right pillarbox. No Area fade changes its deadline.
+        let text = painter.layout_no_wrap(
+            "Press any button to skip".into(),
+            FontId::proportional(18.0),
             Color32::WHITE,
         );
+        let bottom_right = screen.right_bottom() - vec2(12.0, 12.0);
+        let bounds = Align2::RIGHT_BOTTOM.anchor_size(bottom_right, text.size());
+        painter.rect_filled(
+            bounds.expand2(vec2(6.0, 3.0)),
+            3.0,
+            Color32::from_black_alpha(210),
+        );
+        painter.galley(bounds.min, text, Color32::WHITE);
     }
 }
 

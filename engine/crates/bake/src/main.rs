@@ -503,6 +503,9 @@ fn main() -> Result<()> {
         Some("load-layout") if args.len() == 4 => {
             bake::loadscreen::bake_loading_layout(&ci(&args[2]), &args[3])
         }
+        Some("load-orbits") if args.len() == 4 => {
+            bake::loadscreen::bake_loading_orbits(&ci(&args[2]), &args[3])
+        }
         Some("loadscreen") if args.len() == 4 => {
             let ls = bake::loadscreen::bake_loadscreen(&ci(&args[2]), &args[3])?;
             println!(
@@ -574,6 +577,7 @@ fn main() -> Result<()> {
                  \x20 bake common     <common.lvl> <outdir> [pc.lvl]  shared models/textures/classes\n\
                  \x20 bake classes    <file.lvl>   <out.ron>      entc/wpnc/ordc/expc props\n\
                  \x20 bake loadscreen <load.lvl>   <mapdir>       load screen sequence/pool\n\
+                 \x20 bake load-orbits <gal1.lvl>  <common-dir>   BF2 loading orbit views\n\
                  \x20 bake load-layout <load.lvl>  <common-dir>   BF1 loading layout and sprites\n\
                  \x20 bake sounds     <sound.lvl>  <mapdir> [CORE.LVL] [--donor-bnk <bnk>]  sample banks + snd_ props\n\
                  \x20 bake map-icons  <outdir> <side.lvl>...      class-authored minimap sheets\n\

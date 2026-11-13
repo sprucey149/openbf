@@ -72,6 +72,16 @@ fn an_enemy_kill_scores_for_the_killers_team() {
 }
 
 #[test]
+fn hunt_uses_the_team_weight_and_ends_without_hero_rules() {
+    let (mut sim, first, _, enemy) = arena(3);
+    sim.deathmatch = Some(Deathmatch::hunt(3, [12, 12], [1, 3]));
+    assert!(!sim.hero_unit(sim.unit(first).unwrap()));
+    sim.unit_killed_with_cause(first, Some(enemy), DeathCause::Suicide);
+    assert_eq!(sim.team_points(), Some(([0, 3], 3)));
+    assert_eq!(sim.outcome, Some(1));
+}
+
+#[test]
 fn team_kills_suicides_and_the_environment_score_nothing() {
     let (mut sim, first, ally, enemy) = arena(100);
     sim.unit_killed_with_cause(ally, Some(first), DeathCause::Suicide);

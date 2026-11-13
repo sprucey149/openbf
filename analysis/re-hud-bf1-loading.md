@@ -14,4 +14,16 @@ The retail loading screen tracks a rectangle on each image, then expands that re
 
 The common loading bake reads the selected copy's timing, texture names and rectangles. The game normalizes each rectangle against its actual image dimensions. The render and sound use one elapsed-time sample. The scan interpolates between 50 ms samples of the original recurrence, based on the PS2 update's 40 ms minimum and the measured refresh cadence (B1:253731–253743).
 
-The port holds the final image until the scene is ready. The two-press skip can end the presentation early. Maps without a BF1 location use the galaxy view. The loading bus applies a common output gain measured against the PS2 capture. The direct SPU2 gain, exact PS2 blend/filter output and the separately named transition sound remain open.
+The port holds the final image until the scene is ready. The two-press skip can end the presentation early. The loading bus applies a common output gain measured against the PS2 capture. The direct SPU2 gain, exact PS2 blend/filter output and the separately named transition sound remain open.
+
+
+## BF2 destinations without a BF1 match
+
+The port plays the BF1 galaxy, a view from orbit and a native BF2 map still.
+The two transitions use the authored BF1 timing from the player's copy.
+The orbit frames are composed from the original BF2 Galactic Conquest planet
+textures in the offline bake. Felucia and Mygeeto share that orbit view
+between their ground and space maps. The Death Star uses the station's
+surface and dish. Tantive IV uses BF1's Tatooine orbit frame and the BF2
+interior still, based on the [original boarding location](https://www.starwars.com/databank/tantive-iv).
+The source art stays in each player's own build.

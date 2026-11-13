@@ -153,6 +153,7 @@ fn every_value_row_steps_by_pointer() {
         music_volume: 0.5,
         mouse_sensitivity: 1.0,
         pad_look_sensitivity: 1.0,
+        rumble_strength: 0.67,
         input_icons_label: "Auto",
         respawn_label: Some("Respawn".into()),
         ..Default::default()
@@ -171,6 +172,8 @@ fn every_value_row_steps_by_pointer() {
         Row::MouseSensitivity,
         Row::PadLookSensitivity,
         Row::FlightControls,
+        Row::Rumble,
+        Row::CareerAwards,
         Row::InputIcons,
     ];
     for m in [base, shell] {

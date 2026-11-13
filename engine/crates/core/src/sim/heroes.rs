@@ -338,7 +338,7 @@ impl Sim {
     /// Is `u` a hero: the hero manager's class for its team, or any class
     /// in Hero Assault, where every roster class is a hero.
     pub fn hero_unit(&self, u: &Unit) -> bool {
-        self.deathmatch.is_some() || self.hero_class(u.team) == Some(u.spec.class)
+        self.hero_assault() || self.hero_class(u.team) == Some(u.spec.class)
     }
 
     pub fn is_hero(&self, h: UnitHandle) -> bool {

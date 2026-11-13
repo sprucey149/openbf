@@ -127,6 +127,12 @@ const MEDALS_BOX: [f32; 4] = [PANEL_X[0], 264.1, PANEL_X[1], 385.5];
 const LINE_X: [f32; 2] = [36.0, 474.0];
 const LINE_TOP: f32 = 57.6;
 const LINE_PITCH: f32 = 16.07;
+// BF2 ifs_personalstats main.f4/f6: fill two columns across each row,
+// showing only earned medals, with each count in parentheses.
+const ROUND_MEDAL_X: [f32; 2] = [36.0, 256.8];
+const ROUND_MEDAL_TOP: f32 = 270.2;
+const ROUND_MEDAL_PITCH: f32 = 14.0;
+const ROUND_MEDAL_W: f32 = 216.0;
 
 /// Career Stats: three boxes sharing borders (57 .. 165, 161 .. 331, 327 ..
 /// 422 px); the values' lines at line 0, 2 and 3 of a 23.5 px pitch from
@@ -231,7 +237,11 @@ impl Ctx<'_> {
     /// The x stretch that keeps `text` within `width` (the scripts'
     /// `ifs_careerstats_fnShrinkToFit`): `kx`, or less.
     fn fit(&self, text: &str, kx: f32, width: f32) -> f32 {
-        let w = self.text_width(TEXT_FONT, text, kx);
+        self.fit_font(TEXT_FONT, text, kx, width)
+    }
+
+    fn fit_font(&self, font: &str, text: &str, kx: f32, width: f32) -> f32 {
+        let w = self.text_width(font, text, kx);
         if w > width {
             kx * width / w
         } else {
@@ -254,15 +264,8 @@ impl Ctx<'_> {
             TITLE_CX,
             title_top([tab[1], tab[3]], self.font_height(TITLE_FONT)),
         );
-        self.stats_text(
-            s,
-            TITLE_FONT,
-            title,
-            at,
-            HAlign::Center,
-            KX_TITLE,
-            TITLE_TEXT,
-        );
+        let kx = self.fit_font(TITLE_FONT, title, KX_TITLE, tab[2] - tab[0] - 36.0);
+        self.stats_text(s, TITLE_FONT, title, at, HAlign::Center, kx, TITLE_TEXT);
         self.stats_box(s, body);
     }
 
@@ -442,24 +445,49 @@ impl Ctx<'_> {
 
     fn personal_stats(&mut self, s: &Screen, st: &StatsScreens, size: [f32; 2]) {
         let tab = [PANEL_X[0], TAB[0], PANEL_X[1], TAB[1]];
-        self.stats_panel(s, tab, &st.texts.personal_title, PERSONAL_BOX);
+        let title = st
+            .player_row()
+            .filter(|row| !row.name.is_empty())
+            .map_or_else(
+                || st.texts.personal_title.clone(),
+                |row| format!("{} ({})", st.texts.personal_title, row.name),
+            );
+        self.stats_panel(s, tab, &title, PERSONAL_BOX);
         let medals_tab = [PANEL_X[0], MEDALS_TAB[0], PANEL_X[1], MEDALS_TAB[1]];
         self.stats_panel(s, medals_tab, &st.texts.medals_title, MEDALS_BOX);
-        if let Some(row) = st.selected() {
+        if let Some(row) = st.player_row() {
             for (k, (label, value)) in row.personal.iter().enumerate() {
                 let top = LINE_TOP + LINE_PITCH * k as f32;
+                let focused = k == st.personal_row && !label.is_empty();
+                if focused {
+                    self.cursor_box(
+                        s,
+                        [
+                            LINE_X[0] - 6.0,
+                            top - 0.5,
+                            LINE_X[1] + 6.0,
+                            top + LINE_PITCH,
+                        ],
+                    );
+                }
                 let at = (LINE_X[0], top);
-                self.stats_text(s, TEXT_FONT, label, at, HAlign::Left, KX_PAGE, WHITE);
+                let tint = if focused { BLUE } else { WHITE };
+                self.stats_text(s, TEXT_FONT, label, at, HAlign::Left, KX_PAGE, tint);
                 let at = (LINE_X[1], top);
                 self.stats_text(s, TEXT_FONT, value, at, HAlign::Right, KX_PAGE, WHITE);
             }
+            for (i, (name, count)) in row.medals.iter().enumerate() {
+                let label = format!("{name} ({count})");
+                let at = (
+                    ROUND_MEDAL_X[i % 2],
+                    ROUND_MEDAL_TOP + ROUND_MEDAL_PITCH * (i / 2) as f32,
+                );
+                let kx = self.fit(&label, KX_PAGE, ROUND_MEDAL_W);
+                self.stats_text(s, TEXT_FONT, &label, at, HAlign::Left, kx, WHITE);
+            }
         }
         self.stats_help(size, false, Icon::Triangle, &st.texts.back);
-        if st.personal_is_mine() {
-            self.stats_help(size, true, Icon::Cross, &st.texts.career_title);
-        } else {
-            self.stats_help(size, true, Icon::Square, &st.texts.done);
-        }
+        self.stats_help(size, true, Icon::Cross, &st.texts.career_title);
     }
 
     fn career_stats(&mut self, s: &Screen, st: &StatsScreens, size: [f32; 2]) {
@@ -588,6 +616,7 @@ mod tests {
             posts: 0,
             me,
             personal: vec![("Kills".into(), points.to_string())],
+            medals: Vec::new(),
         };
         let lists = [
             TeamList {
@@ -753,9 +782,7 @@ mod tests {
         assert!(!pink, "the PS2's drawn Square stayed");
     }
 
-    /// Personal Stats of the player: the Medals panel, Back and Career Stats
-    /// help; of a bot: Done on Square. Career Stats: its three boxes and the
-    /// medal cursor.
+    /// Personal Stats and Career Stats retain the player's rows and controls.
     #[test]
     fn personal_and_career_pages_draw() {
         let mut st = screens();
@@ -764,13 +791,10 @@ mod tests {
         assert!(sheets(&f).contains(&"btnb") && sheets(&f).contains(&"btna"));
         st.row = 0;
         let f = frame(&st);
-        let pink = f.verts.iter().any(|v| {
-            v.color[..3]
-                .iter()
-                .zip(SQUARE_PINK)
-                .all(|(a, b)| (a - b / 255.0).abs() < 1e-4)
-        });
-        assert!(pink && !sheets(&f).contains(&"btna"), "a bot's page: Done");
+        assert!(
+            sheets(&f).contains(&"btna"),
+            "Career Stats after browsing a bot on the scoreboard"
+        );
         st.row = 1;
         st.page = Page::Career;
         let f = frame(&st);

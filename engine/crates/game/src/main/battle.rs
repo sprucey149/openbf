@@ -135,6 +135,12 @@ fn team_templates(
     b: &BattleSetup,
     sim: &mut core::sim::Sim,
 ) -> Result<[game::walk::TeamTemplate; 2]> {
+    let hunt = b.mission.as_ref().filter(|m| m.is_hunt());
+    let health = hunt
+        .and_then(|m| m.hunt_health_percent)
+        .map_or([100; 2], |tiers| {
+            tiers[usize::from(b.difficulty.bytes()[0])]
+        });
     let defaults = game::roster::default_factions(&scene.manifest.source_game);
     let factions: [&str; 2] = match &b.teams {
         Some(t) => [t[0].as_str(), t[1].as_str()],
@@ -164,18 +170,20 @@ fn team_templates(
             let mut hero_classes = [None; 2];
             let templates = rosters.map(|mut r| {
                 // Heroes Off: no hero class at all (Session Options).
-                if b.heroes.is_some() {
-                    hero_classes[team] = game::heroes::append_with(
+                if b.heroes.is_some() && hunt.is_none() {
+                    hero_classes[team] = game::heroes::append(
                         &mut r,
                         &b.classes_dir,
                         b.mission.as_ref(),
                         team,
-                        b.dlc_heroes,
                     );
                 }
                 let mut table = Vec::new();
                 let mut visuals = Vec::new();
-                for c in &r.classes {
+                for c in &mut r.classes {
+                    if health[team] != 100 {
+                        c.max_health *= f32::from(health[team]) / 100.0;
+                    }
                     let uc = c.register(sim, &mut names);
                     println!(
                         "team {} class {}: {} — min {} — {} HP, {:.1} m/s, {} ({} dmg, {} m/s bolts){}",
@@ -198,12 +206,15 @@ fn team_templates(
                 team += 1;
                 game::walk::TeamTemplate::from_roster(&r, &sim.classes[team - 1][0], visuals)
             });
-            if let Some(rules) = b.heroes {
+            if let Some(rules) = b.heroes.filter(|_| hunt.is_none()) {
                 game::heroes::install_with(sim, hero_classes, rules);
             }
             Ok(templates)
         }
         Err(e) => {
+            if hunt.is_some() {
+                return Err(e.context("Hunt roster unavailable"));
+            }
             if b.mission.as_ref().is_some_and(|m| m.is_hero_assault()) {
                 return Err(e.context("Hero Assault roster unavailable"));
             }
@@ -283,32 +294,34 @@ pub(super) fn stats_pages(
     game::round_stats::screens(sim, feed.round(), walk.player, career, &names)
 }
 
-/// Refuse an Assault round without its matching mission. Other modes retain
-/// optional missions and allow copied or renamed asset directories.
+/// Spawn-only rounds require their matching mission.
 fn validate_mission(
     scene: &game::assets::Scene,
     mission: Option<&game::mission::MissionDef>,
 ) -> Result<()> {
-    let assault = scene.manifest.spawn_only_posts;
+    let spawn_only = scene.manifest.spawn_only_posts;
     anyhow::ensure!(
-        !assault || mission.is_some(),
-        "Hero Assault requires a mission"
+        !spawn_only || mission.is_some(),
+        "Hero Assault and Hunt require a mission"
     );
-    if let Some(m) = mission.filter(|m| assault || m.is_hero_assault()) {
+    if let Some(m) = mission {
+        let requires_spawn_only = m.is_hero_assault() || m.is_hunt();
         anyhow::ensure!(
-            assault == m.is_hero_assault(),
+            spawn_only == requires_spawn_only,
             "mission mode {} differs from the loaded map mode",
             m.mode
         );
-        anyhow::ensure!(
-            scene
-                .dir
-                .file_name()
-                .is_some_and(|key| m.map.eq_ignore_ascii_case(&key.to_string_lossy()))
-                && m.source_game
-                    .eq_ignore_ascii_case(&scene.manifest.source_game),
-            "mission does not describe this map and game"
-        );
+        if requires_spawn_only {
+            anyhow::ensure!(
+                scene
+                    .dir
+                    .file_name()
+                    .is_some_and(|key| m.map.eq_ignore_ascii_case(&key.to_string_lossy()))
+                    && m.source_game
+                        .eq_ignore_ascii_case(&scene.manifest.source_game),
+                "mission does not describe this map and game"
+            );
+        }
     }
     Ok(())
 }
@@ -326,6 +339,7 @@ pub(super) fn make_walk_with_counts(
     counts: Option<[u32; 2]>,
 ) -> Result<WalkSim> {
     validate_mission(scene, b.mission.as_ref())?;
+    let hunt = b.mission.as_ref().is_some_and(|m| m.is_hunt());
     let mut sim = core::sim::Sim::empty(b.seed);
     // The tier is set BEFORE `setup_conquest` spawns anyone: every bot takes
     // its skill at spawn (D2).
@@ -343,6 +357,7 @@ pub(super) fn make_walk_with_counts(
     let map_defaults = b
         .mission
         .as_ref()
+        .filter(|m| !m.is_hunt())
         .and_then(|m| game::conquest_defaults::for_map(&m.map, m.era.as_deref() == Some("cw")));
     let defaults = b.team_size_pct.and(map_defaults);
     let resolved = defaults.map(|d| d.scaled(b.team_size_pct.unwrap_or(100), b.ticket_pct));
@@ -361,6 +376,40 @@ pub(super) fn make_walk_with_counts(
     if let Some(m) = &b.mission {
         sim.ai_alive_cap = m.ai_alive_cap;
         m.apply_death_drains(&mut sim.battle);
+        if m.is_hunt() {
+            let tier = usize::from(b.difficulty.bytes()[0]);
+            let weights = m
+                .hunt_kill_values
+                .filter(|_| m.source_game == "bf1")
+                .map(|values| values[tier])
+                .or(m.hunt_points_per_kill)
+                .ok_or_else(|| anyhow::anyhow!("Hunt kill points are missing"))?;
+            anyhow::ensure!(
+                m.teams.len() == 2 && weights.into_iter().all(|n| n > 0),
+                "Hunt requires two teams and positive kill values"
+            );
+            sim.battle.unlimited_reinforcements = true;
+            sim.time_limit = Some(if b.time_limit == 0 {
+                300
+            } else {
+                b.time_limit * 60
+            });
+            let members = m
+                .hunt_combatants
+                .map_or([m.teams[0].units, m.teams[1].units], |sizes| sizes[tier]);
+            anyhow::ensure!(
+                members.into_iter().all(|n| n > 0)
+                    && m.hunt_health_percent
+                        .is_none_or(|health| health[tier].into_iter().all(|n| n > 0)),
+                "Hunt requires positive team size and health"
+            );
+            sim.team_combatants = Some(members.map(|n| n.min(m.ai_alive_cap)));
+            sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::hunt(
+                b.score_limit,
+                members,
+                weights,
+            ));
+        }
         if m.is_hero_assault() {
             sim.time_limit = None;
             sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::new(
@@ -402,7 +451,9 @@ pub(super) fn make_walk_with_counts(
     // Percentages use the map's combatant slots. A bench's explicit counts
     // win, then --ai; legacy CLI launches without percentages use authored
     // mission counts.
-    let ai_counts = counts.or(if let Some(n) = b.ai {
+    let ai_counts = counts.or(if hunt {
+        Some([walk.sim.ai_limit(0), walk.sim.ai_limit(1)])
+    } else if let Some(n) = b.ai {
         Some([n; 2])
     } else if let Some(d) = resolved {
         Some(d.initial_ai(b.player_team))
@@ -412,7 +463,29 @@ pub(super) fn make_walk_with_counts(
             .map(|m| [m.initial_ai(0, seat == 0), m.initial_ai(1, seat == 1)])
     });
     let mut vehicle_classes: Vec<String> = Vec::new();
-    let mut layout = game::layout::MapLayout::from_manifest(&scene.manifest);
+    let mut layout = game::layout::MapLayout::from_battle_manifest(&scene.manifest, hunt);
+    if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
+        // Hoth and Theed register hazards by name in the Hunt scripts.
+        // Their baked shapes also occur in the map's shared design worlds.
+        // Reuse the named shapes without importing the other modes' posts.
+        for name in &m.death_regions {
+            if layout.region(name).is_some() {
+                continue;
+            }
+            if let Some(region) = scene
+                .manifest
+                .layers
+                .iter()
+                .flat_map(|layer| &layer.regions)
+                .find(|region| region.name.eq_ignore_ascii_case(name))
+                .and_then(|r| {
+                    core::region::Region::from_rows(&r.shape, r.rotation, r.translation, r.size)
+                })
+            {
+                layout.regions.push((name.clone(), region));
+            }
+        }
+    }
     // The mission owns the command-post roster, the posts it kills, the
     // ownership it re-authors and its death regions (game::layout).
     if let Some(m) = &b.mission {
@@ -447,6 +520,15 @@ pub(super) fn make_walk_with_counts(
     }
     if let Some(counts) = ai_counts {
         walk.add_posts(&layout);
+        if hunt {
+            for team in 0..2 {
+                anyhow::ensure!(
+                    !walk.sim.spawn_points(team).is_empty(),
+                    "Hunt team {} has no spawn points",
+                    team + 1
+                );
+            }
+        }
         // The mission's AI settings (card MAIS), its capture bans by post.
         if let Some(m) = &b.mission {
             m.apply_ai(&mut walk.sim);
@@ -563,7 +645,7 @@ pub(super) fn make_walk_with_counts(
             let bf2 = m.source_game == "bf2";
             walk.music = Some(game::music::BattleMusic::new(&m.music, bf2, tickets));
             // Conquest: the team's hero; Hero Assault: every class.
-            let assault = walk.sim.deathmatch.is_some();
+            let assault = walk.sim.hero_assault();
             let names = [0u8, 1]
                 .into_iter()
                 .flat_map(|team| {
@@ -739,7 +821,15 @@ pub(super) fn hud_model(
     let spawn = spawn_model(walk, feed).and_then(|s| s.page);
     let slot = me.spec.player_slot.map_or(0, usize::from);
     // On foot the soldier's rows; flying, the droid's.
-    let [weapon, weapon2] = game::hud_feed::weapon_rows(walk);
+    let [weapon, weapon2] = game::hud_feed::weapon_rows(walk).map(|row| {
+        row.map(|mut weapon| {
+            weapon.name = feed
+                .weapon_name(&weapon.class)
+                .or_else(|| feed.weapon_name(&weapon.key))
+                .unwrap_or_else(|| weapon.class.clone());
+            weapon
+        })
+    });
     let gauge = game::hud_feed::weapon_gauge(walk);
     let leaving = walk
         .sim

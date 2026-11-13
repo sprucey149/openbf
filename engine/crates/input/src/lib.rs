@@ -791,48 +791,66 @@ pub fn pad_from_gamepad_with_arms(
     )
 }
 
-/// Trigger controller vibration/rumble feedback on the specified gamepad.
-///
-/// `weak` and `strong` are normalized motor intensities in `[0.0, 1.0]`.
-/// `duration_ms` is the effect duration in milliseconds.
+/// Magnitude, duration and fade time for one feedback motor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RumbleMotor {
+    pub magnitude: f32,
+    pub duration_ms: u32,
+    pub fade_ms: u32,
+}
+
+/// Play a two-motor pulse and retain its handle until the caller replaces it.
 pub fn rumble(
     g: &mut gilrs::Gilrs,
     id: gilrs::GamepadId,
-    weak: f32,
-    strong: f32,
-    duration_ms: u32,
-) {
-    let weak_u16 = (weak.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
-    let strong_u16 = (strong.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
-    let duration = gilrs::ff::Ticks::from_ms(duration_ms);
-    let mut builder = gilrs::ff::EffectBuilder::new();
-    if strong_u16 > 0 {
-        builder.add_effect(gilrs::ff::BaseEffect {
-            kind: gilrs::ff::BaseEffectType::Strong {
-                magnitude: strong_u16,
+    [weak, strong]: [RumbleMotor; 2],
+    strength: f32,
+) -> Option<gilrs::ff::Effect> {
+    use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Envelope, Repeat, Replay, Ticks};
+
+    let magnitude = |v: f32| ((v * strength).clamp(0.0, 1.0) * u16::MAX as f32) as u16;
+    let mut builder = EffectBuilder::new();
+    for (kind, motor) in [
+        (
+            BaseEffectType::Weak {
+                magnitude: magnitude(weak.magnitude),
             },
-            scheduling: gilrs::ff::Replay {
-                play_for: duration,
-                ..Default::default()
+            weak,
+        ),
+        (
+            BaseEffectType::Strong {
+                magnitude: magnitude(strong.magnitude),
             },
-            envelope: Default::default(),
-        });
+            strong,
+        ),
+    ] {
+        let play_for = Ticks::from_ms(motor.duration_ms);
+        if motor.duration_ms != 0 && motor.magnitude > 0.0 {
+            let fade_length = Ticks::from_ms(motor.fade_ms);
+            let fade_length = if fade_length < play_for {
+                fade_length
+            } else {
+                play_for - Ticks::from_ms(1)
+            };
+            builder.add_effect(BaseEffect {
+                kind,
+                scheduling: Replay {
+                    play_for,
+                    ..Default::default()
+                },
+                envelope: Envelope {
+                    fade_length,
+                    ..Default::default()
+                },
+            });
+        }
     }
-    if weak_u16 > 0 {
-        builder.add_effect(gilrs::ff::BaseEffect {
-            kind: gilrs::ff::BaseEffectType::Weak {
-                magnitude: weak_u16,
-            },
-            scheduling: gilrs::ff::Replay {
-                play_for: duration,
-                ..Default::default()
-            },
-            envelope: Default::default(),
-        });
-    }
-    if let Ok(effect) = builder.add_gamepad(&g.gamepad(id)).finish(g) {
-        let _ = effect.play();
-    }
+    builder.repeat(Repeat::For(Ticks::from_ms(
+        weak.duration_ms.max(strong.duration_ms),
+    )));
+    let effect = builder.add_gamepad(&g.gamepad(id)).finish(g).ok()?;
+    effect.play().ok()?;
+    Some(effect)
 }
 
 #[cfg(test)]
@@ -1224,6 +1242,25 @@ mod tests {
             field(k);
         }
         assert!(line.ends_with("platform:Linux,"));
+    }
+
+    #[test]
+    fn the_g7_pro_xbox_receiver_maps_the_xpad_axes() {
+        let line = PADS_TXT
+            .lines()
+            .find(|line| line.starts_with("03000000373500009c10000046010000,"))
+            .expect("G7 Pro Xbox-mode receiver mapping");
+        // The receiver's Linux xpad device lists X, Y, Z, RX, RY and RZ.
+        for field in [
+            "leftx:a0",
+            "lefty:a1",
+            "lefttrigger:a2",
+            "rightx:a3",
+            "righty:a4",
+            "righttrigger:a5",
+        ] {
+            assert!(line.split(',').any(|value| value == field), "{field}");
+        }
     }
 
     #[test]

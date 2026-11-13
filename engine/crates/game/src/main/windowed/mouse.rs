@@ -93,12 +93,12 @@ impl App {
                 button: winit::event::MouseButton::Left,
                 state: winit::event::ElementState::Pressed,
                 ..
-            } if matches!(self.screen, Screen::Shell)
-                || (self.in_battle() && !self.paused && !self.can_grab()) =>
-            {
+            } if matches!(self.screen, Screen::Shell) || (self.in_battle() && !self.can_grab()) => {
                 self.shell_pointer.click();
             }
-            WindowEvent::MouseWheel { delta, .. } if matches!(self.screen, Screen::Shell) => {
+            WindowEvent::MouseWheel { delta, .. }
+                if matches!(self.screen, Screen::Shell) || (self.in_battle() && self.paused) =>
+            {
                 let dy = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
                     winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 32.0) as f32,
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn spawn_screens_left_click_records_pointer_click() {
+    fn spawn_and_pause_screens_record_pointer_clicks() {
         let mut a = app();
         a.screen = Screen::Battle;
         a.walk = Some((
@@ -236,7 +236,14 @@ mod tests {
             state: winit::event::ElementState::Pressed,
             button: winit::event::MouseButton::Left,
         });
-        assert_eq!(a.shell_pointer.take_frame(), None);
+        a.step_spawn_pointer_at(0.016, None);
+        assert_eq!(a.shell_pointer.take_frame(), Some(([100.0, 100.0], true)));
+        a.mouse_window_event(&WindowEvent::MouseWheel {
+            device_id: winit::event::DeviceId::dummy(),
+            delta: winit::event::MouseScrollDelta::LineDelta(0.0, -1.0),
+            phase: winit::event::TouchPhase::Moved,
+        });
+        assert_eq!(a.shell_pointer.take_wheel(), -1.0);
     }
 
     #[test]

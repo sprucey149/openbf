@@ -1463,3 +1463,19 @@ winner at 3,600 seconds in either build. The extended updated run
 reaches the limit at 4,451 seconds with a score of 107–183. These
 runs measure round completion. Matched original transport behavior,
 the trench floor and direct capital-system attacks remain open.
+
+### Capital hangar shields and ordnance (2026-11-12)
+
+The stock hangar shield classes clear the vehicle collision subset and
+select it for flyers (§11, BF2 FUN_00169328, B2 7790–7870). They retain the
+soldier and ordnance collision subsets. This lets aircraft cross the
+barrier while bullets and missiles strike it or the adjoining hull.
+The port's explosion query uses an ordnance line from the impact side
+to the target. The capital ship's scored shield generator is a separate
+gameplay object.
+
+The owned-map regression samples both sides of the hangar meshes on the
+six stock maps in Assault and one-flag. Bolts and torpedoes stop in both
+directions. A nearby hostile witness on the far side takes no damage,
+while the same explosion damages a witness at the tested distance in
+open space. The test loads stock collision and missile properties.

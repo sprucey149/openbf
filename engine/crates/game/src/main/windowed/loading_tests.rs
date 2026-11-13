@@ -183,6 +183,16 @@ impl Fixture {
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
+    fn image(&self, key: &str, name: &str) {
+        let dir = self.0.join(key).join("load");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{name}.ktx2")),
+            bake::ktx2w::write_rgba8(2, 2, &[vec![128; 16]]),
+        )
+        .unwrap();
+    }
+
     fn map(&self, key: &str, names: &[&str], pool: bool) {
         let dir = self.0.join(key);
         std::fs::create_dir_all(dir.join("load")).unwrap();
@@ -203,11 +213,7 @@ impl Fixture {
         )
         .unwrap();
         for name in names {
-            std::fs::write(
-                dir.join(format!("load/{name}.ktx2")),
-                bake::ktx2w::write_rgba8(2, 2, &[vec![128; 16]]),
-            )
-            .unwrap();
+            self.image(key, name);
         }
     }
 }
@@ -218,7 +224,7 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn presentation_rejects_corrupt_missing_pool_and_wrong_planet_art() {
+fn presentation_uses_only_authored_donors_and_the_destinations_own_still() {
     let f = Fixture::new();
     f.map("bf1_bes1", &["load_galacticmap_0", "bespin_ground"], false);
     f.map("bf1_hot1", &["load_galacticmap_0", "hoth_ground"], false);
@@ -226,7 +232,10 @@ fn presentation_rejects_corrupt_missing_pool_and_wrong_planet_art() {
     assert_eq!(presentation(&f.0, "bf1_bes1").unwrap().sequence.len(), 2);
     let seq = presentation(&f.0, "bf2_hot1").unwrap();
     assert_eq!(seq.sequence[1].0, "hoth_ground");
-    assert_eq!(presentation(&f.0, "bf2_pol1").unwrap().sequence.len(), 1);
+    let pol = presentation(&f.0, "bf2_pol1").unwrap();
+    assert_eq!(pol.sequence[0].0, "load_galacticmap_0");
+    assert_eq!(pol.sequence[1].0, "native_bf2_still");
+    assert!(matches!(pol.motion, Motion::Arrival));
     std::fs::write(f.0.join("bf1_hot1/load/hoth_ground.ktx2"), "corrupt").unwrap();
     let seq = presentation(&f.0, "bf2_hot1").unwrap();
     assert_eq!(
@@ -238,11 +247,62 @@ fn presentation_rejects_corrupt_missing_pool_and_wrong_planet_art() {
     let mut short = bake::ktx2w::write_rgba8(2, 2, &[vec![0; 16]]);
     short[20..24].copy_from_slice(&3u32.to_le_bytes());
     std::fs::write(f.0.join("bf1_bes1/load/load_galacticmap_0.ktx2"), short).unwrap();
-    assert!(presentation(&f.0, "bf2_pol1").is_none());
+    let pol = presentation(&f.0, "bf2_pol1").unwrap();
+    assert_eq!(pol.sequence[0].0, "load_galacticmap_0");
+    assert!(matches!(pol.motion, Motion::Arrival));
+    std::fs::remove_file(f.0.join("bf1_hot1/load/load_galacticmap_0.ktx2")).unwrap();
+    let pol = presentation(&f.0, "bf2_pol1").unwrap();
+    assert_eq!(pol.sequence.len(), 1);
+    assert_eq!(pol.sequence[0].0, "native_bf2_still");
+    assert!(matches!(pol.motion, Motion::Still));
+    f.image("common_bf2", "orbit_polismassa");
+    let pol = presentation(&f.0, "bf2_pol1").unwrap();
+    assert_eq!(pol.sequence[0].0, "orbit_polismassa");
+    assert_eq!(pol.sequence[1].0, "native_bf2_still");
+    assert!(matches!(pol.motion, Motion::Arrival));
+    f.image("bf1_bes1", "load_galacticmap_0");
+    let pol = presentation(&f.0, "bf2_pol1").unwrap();
+    assert_eq!(pol.sequence.len(), 3);
+    assert_eq!(pol.sequence[0].0, "load_galacticmap_0");
+    assert_eq!(pol.sequence[1].0, "orbit_polismassa");
+    assert_eq!(pol.sequence[2].0, "native_bf2_still");
+
     let mut worker = prepare(f.0.join("bf2_pol1"), "con".into()).unwrap();
     assert!(
         await_worker(&mut worker).is_err(),
         "discoverable but broken scene reports an error"
+    );
+}
+
+#[test]
+fn bf2_arrival_picks_era_appropriate_still_and_recovers_from_missing_preferred_art() {
+    let f = Fixture::new();
+    f.map("bf2_spa6", &["spa_1", "spa_6"], true);
+    f.map("bf2_spa7", &["spa_1", "spa_7"], true);
+    f.image("common_bf2", "orbit_mygeeto");
+    f.image("common_bf2", "orbit_felucia");
+    f.map("bf1_bes1", &["load_galacticmap_0", "bespin_ground"], false);
+
+    let sequence = |key| {
+        presentation(&f.0, key)
+            .unwrap()
+            .sequence
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        sequence("bf2_spa6"),
+        ["load_galacticmap_0", "orbit_mygeeto", "spa_6"]
+    );
+    assert_eq!(
+        sequence("bf2_spa7"),
+        ["load_galacticmap_0", "orbit_felucia", "spa_7"]
+    );
+    std::fs::remove_file(f.0.join("bf2_spa6/load/spa_6.ktx2")).unwrap();
+    assert_eq!(
+        sequence("bf2_spa6"),
+        ["load_galacticmap_0", "orbit_mygeeto", "spa_1"]
     );
 }
 
@@ -350,6 +410,30 @@ fn capture_loading_overlap_and_setup() {
         );
         assert_eq!(display.duration(), Duration::from_millis(13_500), "{key}");
     }
+    for key in [
+        "bf2_cor1", "bf2_dag1", "bf2_dea1", "bf2_fel1", "bf2_mus1", "bf2_myg1", "bf2_pol1",
+        "bf2_tan1", "bf2_uta1", "bf2_spa6", "bf2_spa7",
+    ] {
+        let assets = presentation(&root, key).expect("owned arrival art");
+        assert!(matches!(assets.motion, Motion::Arrival), "{key}");
+        assert!(
+            assets.sequence[0].0.starts_with("load_galacticmap"),
+            "{key}"
+        );
+        assert_eq!(assets.sequence.len(), 3, "{key}");
+        let orbit = bf2_orbit(key).unwrap_or("load_locale_tatooine_1");
+        assert_eq!(assets.sequence[1].0, orbit, "{key}");
+        let (_, still) = &assets.sequence[2];
+        assert_eq!(still.width * 3, still.height * 4, "{key}");
+        let display = Display::load(&root, key, &context);
+        assert_eq!(display.duration(), Duration::from_millis(9_000), "{key}");
+        assert_eq!(display.sample(Duration::ZERO).unwrap().step, 0);
+        assert_eq!(
+            display.sample(Duration::from_millis(4_500)).unwrap().step,
+            1
+        );
+        assert_eq!(display.sample(display.duration()).unwrap().step, 2);
+    }
     let mut coruscant = app(root.clone());
     coruscant.renderer = Some(render::Renderer::new_headless(640, 480).unwrap());
     let mut session = ui::shell::SessionOptions::default();
@@ -375,22 +459,19 @@ fn capture_loading_overlap_and_setup() {
         let start = Instant::now();
         let ls = presentation(&root, key).expect("owned BF1 loading art");
         if key == "bf2_pol1" {
-            assert_eq!(ls.sequence.len(), 1);
+            assert_eq!(ls.sequence[1].0, "orbit_polismassa");
+            assert_eq!(ls.sequence[2].0, "pol_1");
         }
         if key == "bf2_hot1" {
             assert!(ls.sequence.iter().any(|(n, _)| n.contains("hoth")));
         }
         let display = Display::load(&root, key, overlay.ctx());
-        if key == "bf2_pol1" {
-            assert!(display.sample(Duration::ZERO).is_none());
-            assert_eq!(display.duration(), Duration::from_secs(1));
-        } else {
-            assert!(
-                display.sample(Duration::ZERO).is_some(),
-                "{key} must play BF1 animation"
-            );
-            assert_eq!(display.duration(), Duration::from_millis(13_500));
-        }
+        assert!(
+            display.sample(Duration::ZERO).is_some(),
+            "{key} must animate"
+        );
+        let millis = if key == "bf2_pol1" { 9_000 } else { 13_500 };
+        assert_eq!(display.duration(), Duration::from_millis(millis));
         let mut frames_pending = 0;
         let prepared = loop {
             if let Some(result) = worker.poll() {
@@ -535,6 +616,9 @@ fn capture_loading_overlap_and_setup() {
         assert_eq!(direct_gpu.draws.len(), a.gpu.as_ref().unwrap().draws.len());
         let mut control = super::super::make_walk(&scene, &a.setup).unwrap();
         a.cheats.install(&mut control.sim);
+        control
+            .sim
+            .install_medal_career(control.player, a.profile.career.medals);
         control.sim.assist_intensity = a.profile.settings.assist_intensity;
         control.sim.assist_armed = a.profile.settings.aim_assist;
         control.sim.team_handicap_on = a.profile.settings.team_handicap_on;

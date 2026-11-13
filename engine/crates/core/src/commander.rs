@@ -396,6 +396,21 @@ struct PostInfo {
 /// think against the plan made this same tick.
 pub fn plan(sim: &mut Sim, team: u8) {
     let t = usize::from(team).min(1);
+    if sim.is_hunt() {
+        let plan = &mut sim.commander[t];
+        plan.next_plan_tick = sim.tick + PLAN_PERIOD;
+        plan.assignment.resize(sim.units.len(), None);
+        plan.gens.resize(sim.units.len(), 0);
+        for (i, unit) in sim.units.iter().enumerate() {
+            plan.assignment[i] = (unit.alive
+                && unit.team == team
+                && unit.controller == crate::unit::Controller::Ai
+                && unit.command.is_none())
+            .then_some(Objective::Hunt);
+            plan.gens[i] = unit.gen;
+        }
+        return;
+    }
     let rules = GoalRules::of(sim);
     sim.commander[t].next_plan_tick = sim.tick + PLAN_PERIOD;
     sim.nav_stats.plans += 1;

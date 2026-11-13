@@ -64,20 +64,8 @@ pub fn append(
     mission: Option<&MissionDef>,
     team: usize,
 ) -> Option<u8> {
-    append_with(roster, classes_dir, mission, team, false)
-}
-
-/// [`append`], with the session's choice of the optional DLC heroes
-/// (`crate::dlc`): a team that fields a hero fields the map's own unless
-/// `dlc_heroes` asks for theirs.
-pub fn append_with(
-    roster: &mut FactionRoster,
-    classes_dir: &Path,
-    mission: Option<&MissionDef>,
-    team: usize,
-    dlc_heroes: bool,
-) -> Option<u8> {
-    let m = mission.filter(|m| m.source_game.eq_ignore_ascii_case("bf2"))?;
+    let m =
+        mission.filter(|m| m.source_game.eq_ignore_ascii_case("bf2") && !m.is_hero_assault())?;
     let source_team = if m
         .teams
         .get(team)
@@ -87,19 +75,11 @@ pub fn append_with(
     } else {
         m.teams.iter().position(|t| t.faction == roster.faction)? + 1
     };
-    let authored = &m
+    let name = &m
         .heroes
         .iter()
         .find(|(t, _)| usize::from(*t) == source_team)?
         .1;
-    let dlc = match crate::dlc::hero(classes_dir, m, &roster.faction) {
-        Ok(hero) => hero.filter(|_| dlc_heroes),
-        Err(error) => {
-            eprintln!("DLC heroes: {error:#}");
-            None
-        }
-    };
-    let name = dlc.unwrap_or(authored);
     if roster
         .classes
         .iter()
@@ -108,7 +88,7 @@ pub fn append_with(
         return None;
     }
     let source_faction = name.split('_').next().unwrap_or(&roster.faction);
-    let mut db =
+    let db =
         match crate::roster::load_classdb(classes_dir, "bf2", &[&roster.faction, source_faction]) {
             Ok(db) => db,
             Err(e) => {
@@ -116,30 +96,13 @@ pub fn append_with(
                 return None;
             }
         };
-    if dlc.is_some() {
-        if let Err(error) = db.load(&classes_dir.join(crate::dlc::CLASSES)) {
-            eprintln!("hero {name}: {error:#}");
-            return None;
-        }
-    }
     let Some(name) = db.resolve(name) else {
         eprintln!("hero {name}: class not baked");
         return None;
     };
     match ClassRoster::build(&db, name, 0, Some(1)) {
         Ok(mut class) => {
-            if let Some(label) = dlc.and_then(crate::dlc::label) {
-                class.label = label.to_owned();
-            }
-            let descriptors = if dlc.is_some() {
-                class.geometry.as_deref().map_or_else(
-                    || Err(anyhow::anyhow!("{name}: no DLC geometry")),
-                    |geometry| crate::dlc::animations(classes_dir, geometry),
-                )
-            } else {
-                crate::animator::custom::for_hero(classes_dir, m, name)
-            };
-            class.anim.custom = match descriptors {
+            class.anim.custom = match crate::animator::custom::for_hero(classes_dir, m, name) {
                 Ok(descriptors) => descriptors,
                 Err(error) => {
                     eprintln!("hero {name}: custom animations: {error:#}");
@@ -242,8 +205,7 @@ pub fn install_with(sim: &mut Sim, classes: [Option<u8>; 2], rules: HeroRules) {
 /// the manager: Unlock Hero 3 Points / 5 Timer with its value, Assign To
 /// 1 Best / 4 Worst / 7 Random, the respawn Timer 0 Always / n s / -1
 /// Never (`analysis/re-bf2-menus.md` §2.3). `None` when Heroes is Off: no
-/// hero is installed at all. Heroes stay human-only here
-/// (`ai_candidates` false; the maintainer, 2026-10-30).
+/// hero is installed at all. The separate AI switch opts bots into eligibility.
 pub fn rules(session: &ui::shell::SessionOptions) -> Option<HeroRules> {
     if !session.heroes {
         return None;
@@ -262,6 +224,7 @@ pub fn rules(session: &ui::shell::SessionOptions) -> Option<HeroRules> {
         },
         respawn_ticks: (session.hero_respawn >= 0)
             .then(|| session.hero_respawn.min(120) as u64 * u64::from(core::TICK_HZ)),
+        ai_candidates: session.ai_heroes,
         ..HeroRules::default()
     })
 }
@@ -282,7 +245,8 @@ pub fn scores(sim: &mut Sim, feed: &EventFeed) {
 /// Read one tick's events and publish its score before the next fixed tick,
 /// including when several ticks run within one rendered frame.
 pub fn tick(walk: &mut crate::walk::WalkSim, feed: &mut EventFeed) {
-    feed.tick(&walk.sim, walk.player);
+    let positive_points = feed.tick(&walk.sim, walk.player);
+    walk.sim.score_medal_points(walk.player, positive_points);
     scores(&mut walk.sim, feed);
 }
 
@@ -321,6 +285,8 @@ mod tests {
             s.hero_respawn = row;
             assert_eq!(rules(&s).unwrap().respawn_ticks, want, "{row}");
         }
-        assert!(!rules(&s).unwrap().ai_candidates, "human-only heroes");
+        assert!(!rules(&s).unwrap().ai_candidates, "human-only by default");
+        s.ai_heroes = true;
+        assert!(rules(&s).unwrap().ai_candidates, "the switch admits bots");
     }
 }

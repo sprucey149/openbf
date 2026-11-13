@@ -452,6 +452,7 @@ pub struct Sim {
     pub station_live_collision: Vec<Vec<crate::collision::HullPart>>,
     pub battle: Battle,
     pub cheats: Cheats,
+    pub(super) medal_career: Option<super::awards::MedalCareer>,
     /// BF1 DAT_00517508 / BF2 DAT_005fcbe0: the profile's friendly-fire
     /// percent x 0.01, 100 in every instant-action battle state read (326
     /// states, both games; re-blaster-damage.md section 6.3). A bot's shot
@@ -1101,6 +1102,7 @@ impl Sim {
             station_live_collision: Vec::new(),
             battle: Battle::new([250, 250]),
             cheats: Cheats::default(),
+            medal_career: None,
             friendly_fire_scale: 1.0,
             assist_intensity: 1.0,
             pad_look_sensitivity: 1.0,
