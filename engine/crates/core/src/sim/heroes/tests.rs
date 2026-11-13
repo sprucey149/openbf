@@ -64,6 +64,50 @@ fn hero_unlocks_at_ten_points_and_reserves_only_the_winner() {
 }
 
 #[test]
+fn hero_swap_preserves_medal_life_through_instant_and_interactive_spawn() {
+    for interactive in [false, true] {
+        let (mut sim, player) = scene();
+        sim.spawn_screens = interactive;
+        sim.install_medal_career(player, [0; 9]);
+        sim.score_medal_points(player, 35);
+        earn(&mut sim, player, 10);
+        sim.step(&[PadState::default()]);
+        sim.step(&[PadState {
+            buttons: buttons::HERO_ACCEPT,
+            ..Default::default()
+        }]);
+        if interactive {
+            assert!(!sim.units[player.index as usize].alive);
+            let accept = PadState {
+                buttons: buttons::SPAWN_ACCEPT,
+                ..Default::default()
+            };
+            sim.step(&[accept]);
+            sim.step(&[PadState::default()]);
+            sim.step(&[accept]);
+        }
+        let hero = sim.players[0].unwrap();
+        assert!(sim.is_hero(hero));
+        assert_ne!(player, hero);
+        sim.score_medal_points(hero, 1);
+        assert_eq!(sim.medal_counts().unwrap()[8], 1);
+    }
+}
+
+#[test]
+fn already_dead_hero_accept_keeps_medal_progress_on_the_previous_life() {
+    let (mut sim, player) = scene();
+    sim.install_medal_career(player, [0; 9]);
+    sim.score_medal_points(player, 35);
+    sim.units[player.index as usize].alive = false;
+    assert!(sim.accept_hero_member(player.index, 1));
+    let hero = sim.players[0].unwrap();
+    assert!(sim.is_hero(hero));
+    sim.score_medal_points(hero, 1);
+    assert_eq!(sim.medal_counts().unwrap()[8], 0);
+}
+
+#[test]
 fn hero_accept_replaces_without_a_death_ticket_drop_then_health_drains() {
     let (mut sim, p) = scene();
     earn(&mut sim, p, 10);

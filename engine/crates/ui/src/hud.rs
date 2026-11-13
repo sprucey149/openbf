@@ -21,8 +21,9 @@ pub struct HudWeapon {
     /// it when `key` (its own `GeometryName`) has no entry there: BF2's
     /// classes of the same name carry no geometry and send their name.
     pub class: String,
-    /// The class is a BF2 disc's: the table is read with `key`, else the
-    /// model named `key` is shown, as the PS2 does (`re-hud.md` §2.5); only
+    /// A BF2 HUD key (also a BF1 vehicle's counterpart): the table is read
+    /// with `key`, else the model named `key` is shown, as the PS2 does
+    /// (`re-hud.md` §2.5); only
     /// a key naming no model the bake has falls back to `class` (`[ours]`:
     /// `hud_rep_defense_buff` lives in the side LVL, not in the bake).
     pub bf2: bool,
@@ -260,8 +261,6 @@ pub struct HudModel {
     /// place for a camera section's tilt).
     pub reticle_y: f32,
     pub dead: bool,
-    /// Seconds until the dead player's spawn slot (member timer ∨ spawn wave).
-    pub respawn_in: Option<f32>,
     /// Winning team once the round is decided; 2 = the time limit ran out
     /// on equal reinforcements and both teams win (`core::sim::OUTCOME_DRAW`).
     pub outcome: Option<u8>,
@@ -1021,7 +1020,7 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
             });
     }
 
-    // Center banner: round over / respawning.
+    // Center banner for a round without the native round-end presentation.
     let banner = match m.outcome {
         Some(2) => Some(("TIME UP — BOTH TEAMS WIN".to_string(), Color32::WHITE)),
         Some(w) => Some((
@@ -1030,13 +1029,6 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
                 m.team_names[usize::from(w.min(1))].to_uppercase()
             ),
             TEAM_COLORS[usize::from(w.min(1))],
-        )),
-        None if m.dead => Some((
-            match m.respawn_in {
-                Some(s) => format!("RESPAWNING IN {}", s.ceil() as u32),
-                None => "RESPAWNING…".to_string(),
-            },
-            Color32::LIGHT_GRAY,
         )),
         None => None,
     };
@@ -1118,7 +1110,6 @@ mod tests {
             reticle_y: 0.5,
             dead: false,
             seat_health: None,
-            respawn_in: None,
             outcome: None,
             countdown: None,
             round_end: None,

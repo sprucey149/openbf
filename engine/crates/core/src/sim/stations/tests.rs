@@ -25,26 +25,29 @@ fn ammo_droid() -> StationClass {
 
 #[test]
 fn hero_refuses_station_health_but_keeps_ammo_and_regular_service() {
-    let mut s = sim(StationClass::soldier("mixed", 0.5, 25.0, 1));
-    s.ground_rules = crate::soldier::GroundRules::Bf2;
-    s.heroes = Some(crate::sim::heroes::Heroes::new([Some(1), None]));
-    let hero = s
-        .spawn(&UnitSpec {
-            class: 1,
-            ..UnitSpec::trooper(0, Vec3::X)
-        })
-        .unwrap();
-    let regular = s.spawn(&UnitSpec::trooper(1, Vec3::NEG_X)).unwrap();
-    for h in [hero, regular] {
-        s.units[h.index as usize].health.cur = 100.0;
-        s.units[h.index as usize].weapon.spare = 0;
+    use crate::soldier::GroundRules;
+    for rules in [GroundRules::Bf1, GroundRules::Bf2] {
+        let mut s = sim(StationClass::soldier("mixed", 0.5, 25.0, 1));
+        s.ground_rules = rules;
+        s.heroes = Some(crate::sim::heroes::Heroes::new([Some(1), None]));
+        let hero = s
+            .spawn(&UnitSpec {
+                class: 1,
+                ..UnitSpec::trooper(0, Vec3::X)
+            })
+            .unwrap();
+        let regular = s.spawn(&UnitSpec::trooper(1, Vec3::NEG_X)).unwrap();
+        for h in [hero, regular] {
+            s.units[h.index as usize].health.cur = 100.0;
+            s.units[h.index as usize].weapon.spare = 0;
+        }
+        s.station_pass(0);
+        assert_eq!(s.unit(hero).unwrap().health.cur, 100.0);
+        assert_eq!(s.unit(regular).unwrap().health.cur, 125.0);
+        assert!(s.unit(hero).unwrap().weapon.spare > 0);
+        assert!(s.events.iter().any(|e| matches!(e,
+            Event::StationServed { unit: Some(h), health: false, ammo: true, .. } if *h == hero)));
     }
-    s.station_pass(0);
-    assert_eq!(s.unit(hero).unwrap().health.cur, 100.0);
-    assert_eq!(s.unit(regular).unwrap().health.cur, 125.0);
-    assert!(s.unit(hero).unwrap().weapon.spare > 0);
-    assert!(s.events.iter().any(|e| matches!(e,
-        Event::StationServed { unit: Some(h), health: false, ammo: true, .. } if *h == hero)));
 }
 
 /// A sim with one station of `class` at the origin, `Radius` 5.0.

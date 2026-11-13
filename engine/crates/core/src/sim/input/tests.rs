@@ -966,3 +966,226 @@ fn the_reticle_does_not_jump_when_the_runner_turns_about() {
         assert_eq!(ours.unpicked, 0, "{speed} at {dist} m: the HUD's pick held");
     }
 }
+
+#[test]
+fn pure_strafe_tracking_uses_both_axes_and_caps_diagonal_push() {
+    let (mut s, p, targets) = range(&[(1, Vec3::new(0.0, 0.0, -30.0))]);
+    let m = AimTarget::Unit(targets[0]);
+    s.assist_lead_on = false;
+    let (_, lat, _) = s.unit(p).unwrap().aim_frame();
+    s.unit_mut(p).unwrap().soldier.vel = lat * 5.0;
+    let run = |lx, ly| {
+        s.assisted(
+            0,
+            p,
+            m,
+            &PadState {
+                lx,
+                ly,
+                ..Default::default()
+            },
+            crate::TICK_DT,
+        )
+        .unwrap()
+        .0
+        .rx
+    };
+    let forward = run(0, i16::MAX);
+    assert_ne!(forward, 0);
+    for (lx, ly) in [
+        (i16::MAX, 0),
+        (i16::MIN, 0),
+        (0, i16::MIN),
+        (i16::MAX, i16::MAX),
+    ] {
+        assert_eq!(run(lx, ly), forward, "move {lx},{ly}");
+    }
+    assert_eq!(run(0, 0), 0, "passive PS2 tracking still needs movement");
+}
+
+#[test]
+fn heavy_rocket_infantry_magnet_uses_half_configured_assist_only_on_foot() {
+    use crate::soldier::GroundRules;
+    for rules in [GroundRules::Bf1, GroundRules::Bf2] {
+        for intensity in [0.0, 0.5, 1.0] {
+            let (mut s, p, targets) = range(&[(1, Vec3::new(0.3, 0.0, -30.0))]);
+            s.ground_rules = rules;
+            s.assist_intensity = intensity;
+            let w = s.unit(p).unwrap().weapon_class;
+            s.weapon_classes[w] = crate::sim::foot_lock::tests::launcher();
+            s.weapon_classes[w].name = "rep_weap_inf_torpedo_launcher".into();
+            let mask = s.weapon_classes[w].target_kind;
+            s.acquire_magnet(0, p, false);
+            let target = AimTarget::Unit(targets[0]);
+            assert_eq!(s.magnet[0], Some(target), "{rules:?} {intensity}");
+            assert_eq!(
+                s.weapon_classes[w].target_kind, mask,
+                "guidance kinds stay authored"
+            );
+            let pad = PadState {
+                rx: 3000,
+                ry: 6000,
+                buttons: buttons::FIRE,
+                ..Default::default()
+            };
+            let actual = s.assisted(0, p, target, &pad, crate::TICK_DT).unwrap().0;
+            s.weapon_classes[w].name = "com_weap_inf_bulldog".into();
+            s.assist_intensity = intensity * 0.5;
+            let expected = s.assisted(0, p, target, &pad, crate::TICK_DT).unwrap().0;
+            assert_eq!(actual, expected, "{rules:?} {intensity}");
+        }
+    }
+}
+
+#[test]
+fn sniper_slowdown_tracking_and_pull_fade_at_long_range() {
+    for scoped in [false, true] {
+        for intensity in [0.0, 0.5, 1.0] {
+            for (dist, fade) in [
+                (50.0, 1.0),
+                (64.0, 1.0),
+                (96.0, 0.5),
+                (120.0, 0.125),
+                (128.0, 0.0),
+                (129.0, 0.0),
+            ] {
+                let (mut s, p, targets) = range(&[(1, Vec3::new(0.0, 0.0, -dist))]);
+                let w = s.unit(p).unwrap().weapon_class;
+                let mut sniper = crate::weapon::tests::disc_sniper(0.0);
+                sniper.give_sniper_assist();
+                s.weapon_classes[w] = sniper;
+                s.assist_intensity = intensity;
+                if scoped {
+                    s.unit_mut(p).unwrap().zoom = Some(crate::unit::Zoom {
+                        step: 1,
+                        value: 8.0,
+                        divisor: 8.0,
+                        scope: true,
+                    });
+                }
+                let (eye, fwd) = s.unit(p).unwrap().aim_ray(s.ground_rules, s.views());
+                let center = s.unit(targets[0]).unwrap().capsule().center();
+                // Set the collision centre at the exact measuring distance.
+                s.unit_mut(targets[0]).unwrap().soldier.pos += eye + fwd * dist - center;
+                let m = AimTarget::Unit(targets[0]);
+                s.acquire_magnet(0, p, false);
+                if dist <= 128.0 {
+                    assert_eq!(s.magnet[0], Some(m));
+                }
+                let pad = PadState {
+                    rx: 8000,
+                    ry: 12000,
+                    ..Default::default()
+                };
+                let out = s.assisted(0, p, m, &pad, crate::TICK_DT).unwrap().0;
+                let slow = 1.0 - 0.5 * intensity * fade;
+                assert!(
+                    (f32::from(out.ry) - f32::from(pad.ry) * slow).abs() <= 1.0,
+                    "slowdown {dist} scoped {scoped} intensity {intensity}: {}",
+                    out.ry
+                );
+                s.unit_mut(targets[0]).unwrap().soldier.vel = Vec3::X * 2.0;
+                let (_, _, lead) = s
+                    .assisted(0, p, m, &PadState::default(), crate::TICK_DT)
+                    .unwrap();
+                let lead = lead.unwrap().1;
+                assert_eq!(lead.offset, Vec3::X * (-2.0 * crate::unit::HUMAN_SHOT_LAG));
+                for fire in [false, true] {
+                    let pad = PadState {
+                        buttons: if fire { buttons::FIRE } else { 0 },
+                        ..Default::default()
+                    };
+                    let out = s.assisted(0, p, m, &pad, crate::TICK_DT).unwrap().0;
+                    // A full-strength control at the same distance: remove only
+                    // sniper classification, retaining the identical scope and lead.
+                    s.weapon_classes[w].zoom_first_person = false;
+                    s.assist_lead[0] = Some((m, lead));
+                    s.assist_intensity = intensity * fade;
+                    // Before fire the scoped sniper follows half the angular rate.
+                    let expected = if !fire && scoped {
+                        let (_, lat, _) = s.unit(p).unwrap().aim_frame();
+                        let r = s.unit(p).unwrap().consts.max_turn_speed / 8.0;
+                        PadState::quantize(
+                            0.5 * (Vec3::X * 2.0).dot(lat) / (dist * r) * intensity * fade,
+                        )
+                    } else {
+                        s.assisted(0, p, m, &pad, crate::TICK_DT).unwrap().0.rx
+                    };
+                    assert!((i32::from(out.rx) - i32::from(expected)).abs() <= 1,
+                        "tracking/pull {dist} scoped {scoped} fire {fire} intensity {intensity}: {} vs {expected}", out.rx);
+                    s.weapon_classes[w].zoom_first_person = true;
+                    s.assist_intensity = intensity;
+                    s.assist_lead[0] = None;
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn heavy_vehicle_assist_and_named_other_weapons_keep_full_strength() {
+    let (mut s, p, targets) = range(&[(1, Vec3::new(0.3, 0.0, -30.0))]);
+    let v = put_vehicle(&mut s, crate::vehicle::VehicleKind::Hover);
+    s.vehicle_mut(v).unwrap().team = Some(1);
+    let w = s.unit(p).unwrap().weapon_class;
+    s.weapon_classes[w] = crate::sim::foot_lock::tests::launcher();
+    let pad = PadState {
+        rx: 3000,
+        ry: 6000,
+        buttons: buttons::FIRE,
+        ..Default::default()
+    };
+    let unit = AimTarget::Unit(targets[0]);
+    let vehicle = AimTarget::Vehicle(v);
+    s.weapon_classes[w].name = "rep_weap_inf_torpedo_launcher".into();
+    let heavy_vehicle = s.assisted(0, p, vehicle, &pad, crate::TICK_DT).unwrap().0;
+    for name in [
+        "com_weap_inf_bulldog",
+        "cis_weap_inf_wrist_rocket",
+        "rep_weap_inf_emp_launcher",
+        "rep_weap_hover_missile",
+    ] {
+        s.weapon_classes[w].name = name.into();
+        let out = s.assisted(0, p, vehicle, &pad, crate::TICK_DT).unwrap().0;
+        assert_eq!(out, heavy_vehicle, "{name}: vehicle assist");
+        s.acquire_magnet(0, p, false);
+        assert_ne!(s.magnet[0], Some(unit), "{name}: no extra infantry kinds");
+    }
+    // A mounted soldier's weapon is outside the infantry-only override.
+    assert!(s.seat_unit(p, v, 0));
+    s.weapon_classes[w].name = "com_weap_inf_bulldog".into();
+    let full = s.assisted(0, p, unit, &pad, crate::TICK_DT).unwrap().0;
+    s.weapon_classes[w].name = "rep_weap_inf_torpedo_launcher".into();
+    let mounted = s.assisted(0, p, unit, &pad, crate::TICK_DT).unwrap().0;
+    assert_eq!(mounted, full, "mounted weapons keep their existing assist");
+}
+
+#[test]
+fn zero_intensity_and_sniper_range_fringe_preserve_the_pad_exactly() {
+    for sniper in [false, true] {
+        let (mut s, p, targets) = range(&[(1, Vec3::new(0.0, 0.0, -129.0))]);
+        if sniper {
+            let w = s.unit(p).unwrap().weapon_class;
+            s.weapon_classes[w] = crate::weapon::tests::disc_sniper(0.0);
+            s.weapon_classes[w].give_sniper_assist();
+        } else {
+            s.assist_intensity = 0.0;
+        }
+        for (rx, ry) in [(i16::MIN, i16::MAX), (i16::MAX, i16::MIN), (1234, -5678)] {
+            let pad = PadState {
+                lx: 123,
+                ly: -456,
+                rx,
+                ry,
+                buttons: buttons::FIRE,
+                ..Default::default()
+            };
+            assert_eq!(
+                s.assisted(0, p, AimTarget::Unit(targets[0]), &pad, crate::TICK_DT)
+                    .unwrap()
+                    .0,
+                pad
+            );
+        }
+    }
+}

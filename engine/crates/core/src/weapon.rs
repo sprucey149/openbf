@@ -555,7 +555,7 @@ pub const SNIPER_LOCK_ON_RANGE: f32 = 128.0;
 /// `LockOnAngle` (none on the discs): the discs' sniper `LockOnAngle`, 1°.
 pub const SNIPER_LOCK_ON_ANGLE: f32 = DEG;
 /// `TargetPerson | TargetAnimal | TargetDroid`.
-const TARGET_SOLDIER_KINDS: u32 = 0b111;
+pub(crate) const TARGET_SOLDIER_KINDS: u32 = 0b111;
 
 /// The AI sniper distance table: `(d² upper edge, yaw half-angle in radians)`
 /// (B2:323373-323398 / B1:211274-211299, byte-identical constants in both

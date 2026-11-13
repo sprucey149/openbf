@@ -66,6 +66,14 @@ pub fn think(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick)
             }
         }
     }
+    if let Some(plan) = crate::ai::supply::plan(sim, me, st, nt.thought != 0, &pad) {
+        mover::finish(
+            &mut pad,
+            plan.walk
+                .map_or(mover::MoverMode::Serve, mover::MoverMode::SupplyCollect),
+        );
+        gunner_foot::finish(&mut pad, gunner_foot::GunMode::Serve(plan.gun));
+    }
     crate::ai::why::log(st, sim.tick, was, cp, &nt);
     (pad, nt)
 }

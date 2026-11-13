@@ -998,3 +998,23 @@ its own LockOnAngle (1°), and TargetVehicle when its round hurts vehicles (BF2 
   the vehicle and turret bodies of §10.7; whether the terrain ray's miss from below is by design; a second writer of
   BF2's E+0x340 (FUN_0023cfd0) that leaves it 0.13-0.28 m off the eye in four held states while the aim origin stays
   exact.
+
+
+### 10.10 Controller follow-up, November 13, 2026
+
+The original BF1 term in FUN_0025fea8 (181096–181110) projects relative
+velocity onto the aim lateral axis and weights it by one movement axis.
+Openbf reads both movement axes for ordinary tracking and matches full
+shooter-minus-lead velocity while firing. Scope tracking uses the visible
+body for instant shots. It remains at the configured strength through
+half the weapon's nominal range, then fades to zero at that range.
+Measure: controller tracking on crossing and co-moving targets, and
+scoped tracking at 50, 64, 96, 120 and 128 m.
+
+BF2 FUN_0033a658 (331689–331775) checks the human launcher's authored
+target kind, sight and firing cone. Openbf keeps vehicle guidance and
+gives heavy launchers half-strength passive controller assistance against
+foot soldiers without passing them to the player missile lock.
+Measure: matched infantry and vehicle shots with a controller, on ground
+and in a space hangar. The bot guidance path has its own replay evidence
+in issue #164.

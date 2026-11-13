@@ -1,4 +1,4 @@
-//! BF2 mission heroes: append their authored class beside the ordinary mix,
+//! Mission heroes with BF2 playable kits: append beside the ordinary mix,
 //! then send the existing round-score feed to the sim's hero manager.
 
 use crate::{
@@ -64,8 +64,12 @@ pub fn append(
     mission: Option<&MissionDef>,
     team: usize,
 ) -> Option<u8> {
-    let m =
-        mission.filter(|m| m.source_game.eq_ignore_ascii_case("bf2") && !m.is_hero_assault())?;
+    let m = mission.filter(|m| {
+        !m.is_hero_assault()
+            && !m.is_hunt()
+            && (m.source_game.eq_ignore_ascii_case("bf2")
+                || (m.source_game.eq_ignore_ascii_case("bf1") && m.mode == "con"))
+    })?;
     let source_team = if m
         .teams
         .get(team)

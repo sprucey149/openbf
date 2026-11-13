@@ -704,18 +704,21 @@ fn hero_victim_uses_disc_points_and_hero_message_even_after_death() {
 }
 
 #[test]
-fn hero_earned_points_show_in_the_total_and_do_not_rank_future_offers() {
+fn hero_earned_points_count_toward_medals_and_do_not_rank_future_offers() {
     let mut s = scene();
     s.sim.heroes = Some(core::sim::heroes::Heroes::new([None, Some(0)]));
     let me = s.me;
     let victim = s.rebels[0];
-    happen(
-        &mut s,
-        &[Event::Kill {
-            shooter: me,
-            victim,
-        }],
-    );
+    s.sim.install_medal_career(me, [0; 9]);
+    s.sim.score_medal_points(me, 35);
+    s.sim.tick += 1;
+    s.sim.events = vec![Event::Kill {
+        shooter: me,
+        victim,
+    }];
+    let points = s.feed.tick(&s.sim, me);
+    s.sim.score_medal_points(me, points);
+    assert_eq!(s.sim.medal_counts().unwrap()[8], 1);
     let stats = s.feed.stats(&s.sim, me);
     assert_eq!(stats.points, 1);
     assert_eq!(s.feed.round().units[me.index as usize].ordinary_points(), 0);

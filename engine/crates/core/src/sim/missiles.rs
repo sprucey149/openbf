@@ -180,8 +180,14 @@ impl Sim {
                     }),
                 _ => ai_target.and_then(|f| f.unit()).map(MissileTarget::Unit),
             };
-            // A dead handle is no target (BF1's and BF2's one in-flight test).
-            let candidate = candidate.filter(|t| self.missile_aim(*t).is_some());
+            // The controller magnet can assist an unguided shot at a soldier.
+            // An infantry launcher's player lock still guides to vehicles only.
+            let candidate = candidate.filter(|t| {
+                let infantry_lock = matches!(controller, Controller::Player { .. })
+                    && matches!(t, MissileTarget::Unit(_))
+                    && c.rocket_launcher();
+                !infantry_lock && self.missile_aim(*t).is_some()
+            });
             let st = &mut self.units[i].weapon;
             if candidate != st.lock_target {
                 st.lock_target = candidate;

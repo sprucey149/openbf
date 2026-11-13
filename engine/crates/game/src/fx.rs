@@ -880,6 +880,12 @@ impl Fx {
             }
         }
         let mut fx = Fx::load(assets_dir, map_dir, game, &factions);
+        let bf1_heroes = game.eq_ignore_ascii_case("bf1") && walk.sim.heroes.is_some();
+        if bf1_heroes {
+            // BF2 hero kits bring their Force and saber effects after native
+            // map layers, just as a cross-game class in the testing picker.
+            fx.extend_test_classes(assets_dir, map_dir, "bf2", walk);
+        }
         fx.particle_lod_bias = walk.particle_lod_bias;
         if let (Some(lib), Ok(mut db)) = (
             fx.library.as_ref(),
@@ -887,6 +893,13 @@ impl Fx {
         ) {
             if let Err(e) = db.load_map(map_dir) {
                 eprintln!("chunk classes: {e:#}");
+            }
+            if bf1_heroes {
+                for file in crate::roster::class_files("bf2", &factions) {
+                    if let Err(e) = db.load(&assets_dir.join("classes").join(file)) {
+                        eprintln!("hero effect classes: {e:#}");
+                    }
+                }
             }
             let mut names = walk.vehicle_classes.clone();
             names.extend(

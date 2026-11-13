@@ -10,6 +10,7 @@ use crate::collision::lead_point;
 use crate::perception;
 use crate::unit::{SpawnPost, UnitHandle};
 use crate::vehicle::{VehicleHandle, VehicleKind};
+use crate::weapon::TARGET_SOLDIER_KINDS;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -617,7 +618,15 @@ impl Sim {
             .map(|d| (d.muzzle(), d.aim_frame().0, d.weapon_class));
         let c = &self.weapon_classes[droid.map_or(p.weapon_class, |d| d.2)];
         let (er, lor, angle) = (c.extreme_range, c.lock_on_range, c.lock_on_angle);
-        let (team_bits, kind_bits) = (c.target_team, c.target_kind);
+        // A heavy launcher may help aim an unguided shot at infantry at
+        // half strength. Keep its authored guidance kinds separate: only
+        // this passive magnet gains soldier kinds (issue #164).
+        let kind_bits = if p.mount.is_none() && c.rocket_launcher() {
+            c.target_kind | TARGET_SOLDIER_KINDS
+        } else {
+            c.target_kind
+        };
+        let team_bits = c.target_team;
         // The cone is centred on the reticle's ray (`re-aim-assist.md`
         // §10.5), not on the view's centre.
         let (pos, dir) = match droid {
@@ -880,7 +889,9 @@ impl Sim {
         // Sign bridge: aim_assist yaw stick is POSITIVE-LEFT (BF1 f2
         // semantics); our rx is positive-right.
         let mut sticks = Sticks {
-            move_mag: PadState::axis(pad.ly),
+            move_mag: glam::Vec2::new(PadState::axis(pad.lx), PadState::axis(pad.ly))
+                .length()
+                .min(1.0),
             yaw: -PadState::axis(pad.rx),
             pitch: PadState::axis(pad.ry),
         };
@@ -913,11 +924,23 @@ impl Sim {
             look_scale: (LOOK_SCALE * self.pad_look_sensitivity).min(1.0),
         };
         let mut st = self.assist.get(slot).copied().unwrap_or_default();
-        aim_assist::apply(dt, &mut sticks, &env, &mut st, self.assist_intensity);
-        let out = PadState {
-            rx: PadState::quantize(-sticks.yaw),
-            ry: PadState::quantize(sticks.pitch),
-            ..*pad
+        let mut intensity = self.assist_intensity;
+        if p.mount.is_none() && weapon.rocket_launcher() && matches!(m, AimTarget::Unit(_)) {
+            intensity *= 0.5;
+        }
+        if sniper {
+            intensity *=
+                aim_assist::sniper_range_scale((center - eye).length(), weapon.lock_on_range);
+        }
+        aim_assist::apply(dt, &mut sticks, &env, &mut st, intensity);
+        let out = if intensity <= 0.0 {
+            *pad
+        } else {
+            PadState {
+                rx: PadState::quantize(-sticks.yaw),
+                ry: PadState::quantize(sticks.pitch),
+                ..*pad
+            }
         };
         Some((out, st, kept))
     }

@@ -44,7 +44,6 @@ fn render_headless_hud(
     skinned: &[render::SkinnedDrawCmd],
     model: &ui::hud::HudModel,
     spawn: Option<&ui::spawn::SpawnModel>,
-    death_view: bool,
     clear: [f64; 4],
 ) -> Result<()> {
     let (w, h) = r.size();
@@ -54,13 +53,7 @@ fn render_headless_hud(
         hv.update(model, dt, [w, h]);
     }
     let paint = overlay.begin_headless([w, h], 1.0, |ctx| {
-        // The death camera and the spawn screen own the death: the egui
-        // banner is only for launches with neither.
-        let hud = ui::hud::HudModel {
-            dead: model.dead && spawn.is_none() && !death_view,
-            ..model.clone()
-        };
-        ui::hud::draw_hud(ctx, &hud);
+        ui::hud::draw_hud(ctx, model);
         if let Some(s) = spawn {
             // The PS2's screen is the HUD pass's; without one the panel
             // stands in.
@@ -193,7 +186,6 @@ impl ReplayFrame {
                     &skinned,
                     &model,
                     spawn.as_ref(),
-                    walk.death_cam.is_some() || walk.holds_seat_view(),
                     gpu.clear,
                 )?
             }

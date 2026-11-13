@@ -72,6 +72,7 @@ pub(super) struct MoveRequest<'a> {
 
 pub(super) enum MoverMode {
     Serve,
+    SupplyCollect((i16, i16)),
     Droideka { stop: bool },
 }
 
@@ -79,6 +80,10 @@ pub(super) fn finish(pad: &mut PadState, mode: MoverMode) {
     pad.lx = 0;
     match mode {
         MoverMode::Serve => pad.ly = 0,
+        MoverMode::SupplyCollect((lx, ly)) => {
+            pad.lx = lx;
+            pad.ly = ly;
+        }
         MoverMode::Droideka { stop } => {
             pad.buttons &=
                 !(buttons::ROLL_STANCE | buttons::JUMP | buttons::SPRINT | buttons::ACTION);

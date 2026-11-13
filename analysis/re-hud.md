@@ -247,11 +247,21 @@ EventInput → EventOutput.
   (< 1/3, middle, > 2/3), keeping its 4:3 offset from that anchor (Hor+, never stretched, COMPARISON_RULES). Whether to
   keep the PS2's 1.128 horizontal stretch of HUD meshes and texel glyphs is a look call for the build (default: keep —
   it is the PS2 frame; one constant each).
+  The victory and defeat timer groups use the right anchor: their small negative
+  group origins otherwise select the left anchor despite their right-hand children.
+  This keeps label, number and shadow below the minimap on widescreen, with the
+  authored 4:3 position and vertical spacing unchanged.
 - Text: keep the drop-shadow twins the data already carries; TextStyle Shadow draws its own (+1, +1) black copy only for
   bitmaps as read (§2.2) — text Shadow is [H] the same.
 - BF1 maps: the same BF2 tree; the minimap uses the BF1 map's own `*_map`; a BF1 weapon with no BF2 mesh and no
   `hudtransforms` entry shows its BF1 `IconTexture` sheet (e.g. `IMP_blasterrifle_icon`, BF1 COMMON) as a Bitmap in the
   weapon slot (PLAN §Presentation).
+  Mounted weapons first use the BF2 counterpart's inherited HUD key, with the
+  existing vehicle twin table resolving renamed counterparts. This deliberately
+  replaces BF1's vehicle bitmap icons under the shared BF2 HUD rule. Class identity,
+  weapon channels and ammunition remain the mounted gun's; missing counterparts
+  or missing model art keep the existing icon fallback. The key selection follows
+  BF2 `FUN_00326e28` (B2 318603–318620), described in §3.
 - Feed: health/max, stamina, clip+spare as one number, clip fraction, weapon class + name, reinforcements friend/enemy
   and the bleed period, the reticle pick colour (AIMF's `reticle_pick`), the minimap's posts.
 

@@ -418,6 +418,11 @@ pub struct FlyerAi {
     pub relocate_in: f32,
     pub burst_in: f32,
     pub fire_held: bool,
+    /// A hangar's approach target and the earliest departure after unloading.
+    pub transport_goal: Option<Vec3>,
+    pub transport_returning: bool,
+    pub transport_departing: bool,
+    pub transport_depart_at: Option<u64>,
 }
 
 impl FlyerAi {
@@ -426,6 +431,18 @@ impl FlyerAi {
             return;
         }
         eat(b"FAI");
+        if self.transport_returning || self.transport_departing {
+            eat(&[
+                b'T',
+                b'R',
+                u8::from(self.transport_returning),
+                u8::from(self.transport_departing),
+            ]);
+        }
+        if let Some(at) = self.transport_depart_at {
+            eat(b"TD");
+            eat(&at.to_le_bytes());
+        }
         eat(&[self.agent as u8, self.pursuit as u8, self.wedges]);
         if self.relocate_in != 0.0 {
             eat(&self.relocate_in.to_bits().to_le_bytes());
@@ -476,6 +493,10 @@ impl FlyerAi {
             }
             None => eat(&[0]),
         };
+        if self.transport_goal.is_some() {
+            eat(b"TG");
+            vec(self.transport_goal, eat);
+        }
         vec(self.trick, eat);
         vec(self.goal, eat);
         vec(self.run, eat);
@@ -630,6 +651,12 @@ pub struct FlyerEnvironment {
     pub require_landing_region: bool,
     pub player_aboard: bool,
     pub crash_random: [f32; 4],
+}
+
+impl FlyerEnvironment {
+    pub(crate) fn permits_bf2_landing(self) -> bool {
+        !self.require_landing_region || self.almost_inside_landing_region
+    }
 }
 
 impl Default for FlyerEnvironment {
@@ -945,8 +972,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         }
         FlightPhase::Flying => {
             s.lift = 1.0;
-            if toggle && (!p.bf2 || !env.require_landing_region || env.almost_inside_landing_region)
-            {
+            if toggle && (!p.bf2 || env.permits_bf2_landing()) {
                 s.phase = FlightPhase::Landing;
             }
         }

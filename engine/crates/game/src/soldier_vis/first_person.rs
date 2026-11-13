@@ -2,7 +2,7 @@
 //!
 //! Renders the player's FPM arms and 1st-person weapon model (`re-first-person-arms.md`).
 
-use super::{fire_point, intern_name, SoldierVisuals, UnitVisual, WeaponAsset};
+use super::{fire_point, intern_model, SoldierVisuals, UnitVisual, WeaponAsset};
 use crate::assets::{load_skinned_glb, SkinnedAsset};
 use crate::first_person::{
     bone_global, clip_name, frame_scale, model_matrix, run_rate, Chooser, Fire, Input, Motion,
@@ -64,31 +64,50 @@ impl FirstPersonVisuals {
         teams: &[TeamTemplate; 2],
         cache: &mut HashMap<String, Option<TextureHandle>>,
     ) -> Self {
-        let side = assets_dir.join(format!("side_{game}"));
         let mut models = Vec::new();
+        let mut model_games = Vec::new();
         let mut guns = Vec::new();
+        let mut gun_games = Vec::new();
         let mut classes: [Vec<FpClass>; 2] = Default::default();
         for (team, t) in teams.iter().enumerate() {
             for c in &t.classes {
+                let game = c.asset_game(game);
                 let primary = &c.first_person_weapon;
                 classes[team].push(FpClass {
                     bf2: game.eq_ignore_ascii_case("bf2"),
-                    arms: intern_name(&mut models, c.first_person.as_deref()),
+                    arms: intern_model(
+                        &mut models,
+                        &mut model_games,
+                        game,
+                        c.first_person.as_deref(),
+                    ),
                     primary: (
-                        intern_name(&mut guns, primary.geometry.as_deref()),
+                        intern_model(&mut guns, &mut gun_games, game, primary.geometry.as_deref()),
                         primary.row,
                     ),
                     held: c
                         .first_person_held
                         .iter()
-                        .map(|(s, w)| (*s, intern_name(&mut guns, w.geometry.as_deref()), w.row))
+                        .map(|(s, w)| {
+                            (
+                                *s,
+                                intern_model(
+                                    &mut guns,
+                                    &mut gun_games,
+                                    game,
+                                    w.geometry.as_deref(),
+                                ),
+                                w.row,
+                            )
+                        })
                         .collect(),
                 });
             }
         }
         let mut arms = Vec::new();
         let mut loaded: Vec<Option<usize>> = Vec::new();
-        for model in &models {
+        for (model, game) in models.iter().zip(&model_games) {
+            let side = assets_dir.join(format!("side_{game}"));
             loaded.push(
                 Self::load_arms(r.as_deref_mut(), &side, model, cache).map(|a| {
                     arms.push(a);
@@ -103,7 +122,10 @@ impl FirstPersonVisuals {
         }
         let weapons = guns
             .iter()
-            .map(|g| SoldierVisuals::load_weapon(r.as_deref_mut(), assets_dir, game, g, cache))
+            .zip(&gun_games)
+            .map(|(g, game)| {
+                SoldierVisuals::load_weapon(r.as_deref_mut(), assets_dir, game, g, cache)
+            })
             .collect();
         Self {
             arms,
