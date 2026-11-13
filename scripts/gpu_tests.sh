@@ -73,6 +73,10 @@ if [ "${1:-}" = "--ui-sharp" ]; then
   exec cargo test --release -p game --test ui_sharp "$@" -- --ignored --test-threads=1 --nocapture
 fi
 
+if [ "${1:-}" = "--render" ]; then
+  shift
+  exec cargo test -p render "$@" -- --ignored --test-threads=1
+fi
+
 cargo test -p render -- --ignored --test-threads=1
-[ "${1:-}" = "--render" ] && exit 0
 exec "$ROOT/scripts/goldens.sh" --check

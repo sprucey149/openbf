@@ -302,6 +302,7 @@ fn full_manifest() -> Manifest {
                 threshold: 50.0,
                 intensity: 50.0,
             }),
+            softness: Some(60.0),
         },
         sky: Some(ManifestSky {
             texture: Some("tat1sky".into()),
