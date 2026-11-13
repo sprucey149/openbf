@@ -188,6 +188,7 @@ impl Default for HoverClass {
     fn default() -> Self {
         Self {
             motion: HoverParams {
+                mass: 1.0,
                 set_altitude: 1.0,
                 gravity_scale: 1.0,
                 acceleration: 10.0,

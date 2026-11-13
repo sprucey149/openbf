@@ -1134,3 +1134,120 @@ the water and leaves no wake.
   hover over water at (x, surface + 0.02, z) (BF1: + 0), and stops it on land or at death. Test
   `a_hover_keeps_its_wake_on_the_water_under_it_and_drops_it_on_land` uses save state 8's numbers.
 - **Not traced:** the velocity a tracked effect inherits (the port gives 0).
+
+### 13.15 Hover and treaded vehicle pairs (STAP, 2026-11-13)
+
+Scope: the current `feature/vehicle-parity` branch, source
+`72d7d0c331bc` plus this working-tree change. Fix solid contacts between
+hover, treaded and commandhover vehicles using their existing authored
+subsets. No class-name exceptions. Walker/flyer pair response is outside
+this change; this is not ground-vehicle parity acceptance.
+
+**Original-game evidence.** The maintainer's BF2 Kashyyyk slot 8 has SHA-256
+`4959006b7f51f750050e77249dd08203e5745fd7c1cf25f805569e8b710888a6`.
+Its stored screenshot and the paused installed PCSX2 show the STAP above
+the armored tank droid. Reading the state's EE memory gives the live human
+STAP at E `0x1d07f90`, K `0x1a4f840`, class hash `0xbae4d86a`, position
+(104.189, 3.221, 124.600). The nearby snail tank is E `0x1d114f0`, K
+`0x1acfe40`, hash `0x51fbd467`, position (104.747, 1.709, 121.635).
+The local receipt and screenshot are under `engine/artifacts/stap-collision/`;
+original game data stays untracked. The automated PCSX2 build rejected
+restoring the newer native save state; no moving-pair trajectory comparison
+is claimed from that adapter.
+
+**Port evidence.** `dist/openbf_data/playtest/last.json` is a Kashyyyk CW
+exit snapshot at tick 2112, seed 389. Its build is `0831363a0d78+dirty`,
+with checkout `72d7d0c331bc`, so it is not evidence for the new source.
+`WorldContacts` queried static world bodies; the separate traffic pass
+excluded hover/hover pairs and changed translation only for AI drivers.
+Both class hulls already carried their VEHICLE subset. The STAP names
+`p_sphere` and `p_sphere1` for vehicle contacts; its drawing/collision mesh
+is not a substitute for them.
+
+**Response, re-read in the current local BF2 listing.**
+`FUN_0021fd98`, B2:134589-134590, handles another physics-class-8 body
+before the spring hook at B2:134593-134600. Thus even a spring sphere
+against another hover is solid: it does not compress as suspension.
+The relative normal speed drives damage and response. B2:134657-134711
+sets friction 0.25, restitution 0.125 and scales the normal impulse by the
+two speed-weighted masses. B2:134827 delegates full separation to
+`FUN_00169668`. Collision meshes remain targets, not moving primitives
+(§13.1). These are behavioral descriptions, not copied implementation.
+
+**Mass correction to §7.0.** The physics constructor initializes mass to
+1, but `FUN_00212b38` overwrites it at B2:125778-125782 with the product
+of the model vis-box's three full dimensions plus 0.0001. Slot 8's
+E+0x78 agrees: STAP 11.062572, BARC 24.668806, fighter tank 652.253601,
+snail tank 302.695404. `vehicle_pads` now computes the same number from
+the existing baked `vis_box`; no new manifest or rebake is required.
+The gameplay correction pipeline already preserves canonical model bounds
+(`bake::gameplay::rebuild::model_bounds`).
+
+**Implementation.** `sim::hover_pairs` runs between static contacts and
+springs, queries each moving primitive against another live hover's
+VEHICLE subset, applies full-depth separation and relative-velocity
+friction/impulse, and sends impacts through the existing damage path.
+The same code runs for human, AI and empty vehicles. Own hulls, removed
+vehicles and bodies outside either subset cannot participate. Stable slot
+and part ordering is retained. There are no new gameplay state fields.
+
+**Remaining measurement.** A missing vis-box (older side bakes and a map's
+own skiff metadata) still falls back to constructor mass 1: measure and
+carry those missing canonical model bounds. Other-body damage factor 1
+remains provisional; measure PS2 moving-pair trajectories,
+per-body damage factors and constrained multi-contact response. The existing
+per-query depth correction and Parry narrowphase remain approximations.
+Full 34-map rounds, high-speed crossing trajectories and gameplay feel
+remain unchecked. A source-only pass is not alignment acceptance.
+
+**Checks on this working tree (2026-11-13).**
+
+- `cargo check --manifest-path engine/Cargo.toml -p game --tests`: passed.
+- `cargo test --manifest-path engine/Cargo.toml -p core --lib hover_pair -- --nocapture`:
+  seven passed: separation/suspension, subsets and removal, moving-frame
+  response, primitive/mesh targets, human/AI/empty seats, damage and mass.
+- The resulting core test executable, filters `vehicle::`,
+  `sim::vehicles::`, `sim::traffic::`, `sim::state::tests`: 74 + 34 + 6 + 26
+  passed. The 100-tick fixture remains `5573f2b603ed95f4`.
+- `cargo test --manifest-path engine/Cargo.toml -p game --test suite kashyyyk_hover_vehicle_pairs -- --nocapture`:
+  passed with all four actual baked classes. Each meets the parked tank
+  above ground instead of falling through it; a forced 40 m/s side crossing
+  differs from the no-target trajectory. These are CPU regression fixtures,
+  not matched original-game trajectories. The installed masses match the
+  four slot-8 measurements within 0.001.
+- The resulting game suite executable, filters `vehicle_pads::` and
+  `vehicle_class::`: 9 + 15 passed, including the new data-backed test.
+  Total focused coverage: 171 passed.
+- `cargo build --manifest-path engine/Cargo.toml --release -p game`: passed.
+  Release `--sim-hash 100` retains the pin. A 30-second headless KAS2 CW
+  run, seed 42, completed 900 ticks; snapshot
+  `engine/artifacts/playtest/headless/bf2_kas2_con_42.json`. This is a smoke
+  test, not round completion or original-game parity.
+- `python scripts/check_provisional.py` and `git diff --check`: passed.
+  Direct rustfmt checks passed for the new modules and formatted touched
+  files; whole-package formatting still reports pre-existing differences.
+- `fmath::` has eight passes and one existing failure: its game-input
+  scanner rejects `main/windowed/loading.rs`'s test-module declaration
+  with an intervening `#[path]`. The same declaration is present at HEAD;
+  it was not changed here. Do not call the full math referee green.
+- `py -3.11 scripts/gates.py --groups alignment --out engine/artifacts/stap-collision/alignment`
+  cannot start: `engine/artifacts/loop/gates.toml` is absent. The independent
+  alignment source roots are also not configured for this run. Alignment
+  acceptance remains unchecked. The size-report shell's `python3` resolves
+  to the Windows Store alias here; new modules are all below 1,500 lines
+  and have explicit crate-map rows.
+
+Local test build: `dist/openbf-stap-collision.exe`, packed from the release
+binary and current local caches with `game --write-pack` (28,827 files).
+`scripts/pack.py --game-bin ...` first tried a full rebake because of a
+stale cache stamp; it was stopped during bake compilation. No fresh bake
+provenance is claimed. `engine/artifacts/stap-collision/build.json` records
+the candidate's size and SHA-256. The existing `dist/openbf.exe` was not
+replaced. This candidate is private game data, not a Git or PR artifact.
+The packed candidate also reproduced `5573f2b603ed95f4` and completed
+10-second and 30-second headless Kashyyyk CW runs from its embedded assets.
+Their logs/snapshots are retained under `engine/artifacts/stap-collision/`.
+
+Maintainer acceptance (2026-11-13): the maintainer tested the candidate
+and confirmed that the reported STAP collision problem was fixed.
+This accepts that reported case, not the unchecked broader parity gates.

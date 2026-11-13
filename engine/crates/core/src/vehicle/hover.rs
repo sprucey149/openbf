@@ -35,7 +35,7 @@
 //! (§6.9) pushes along E's up row for a time that grows with the speed.
 //!
 //! PROVISIONAL (re-hover §11.7 and ours): the jitter's RNG; the trample (§6.12, not built); the other body's
-//! damage factor (1); masses (1.0); the depth correction between contacts of
+//! damage factor (1); missing model mass metadata; the depth correction between contacts of
 //! one query ([`contacts`]); bodies are the CollisionWorld's SOLDIER subset
 //! (the port has no vehicle subset yet, card VSUB); a hull box or cylinder
 //! against a building is parry's exact contact (FUN_0016bf10's box branch is
@@ -44,8 +44,9 @@
 //! built yet: a hull box or cylinder against the TERRAIN (§13.5's corner and
 //! rim rules; no shipped hover has one in its terrain subset), the water
 //! float (§4 S3, card HWAT), the AI's boost (I5's AI branch, card VAI), the
-//! tread scroll (§6.18), the no-spring branch (§6.4), vehicle-vs-vehicle
-//! contacts (K4 / the class-8 branch of K7).
+//! tread scroll (§6.18), the no-spring branch (§6.4). Hover/treaded pairs
+//! run through `sim::hover_pairs` between contacts and springs (§13.15);
+//! contacts with other vehicle physics classes remain unimplemented.
 //!
 //! Which bodies meet the world (re-hover §13, card HHUL): the spring spheres
 //! meet the terrain and the buildings; [`HoverParams::hull`] holds the
@@ -131,6 +132,9 @@ pub struct HullBody {
 /// (constructor defaults, then the ODF). SETUP data: never hashed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoverParams {
+    /// Model vis-box volume + 0.0001 (BF2 FUN_00212b38, B2:125779-125782).
+    /// The physics constructor's 1.0 is retained when no model is installed.
+    pub mass: f32,
     pub set_altitude: f32,
     pub gravity_scale: f32,
     pub acceleration: f32,

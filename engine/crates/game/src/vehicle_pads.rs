@@ -692,6 +692,14 @@ pub fn install_for_mission(
         .iter()
         .map(|c| {
             vehicle_class::HoverClass::from_db(&db, c).map(|h| core::vehicle::hover::HoverParams {
+                // PROVISIONAL only when absent: retain constructor mass 1.
+                // measure: carry canonical vis-boxes for map-local/older bakes.
+                mass: vis_boxes
+                    .get(&c.to_ascii_lowercase())
+                    .map_or(1.0, |(min, max)| {
+                        let size = Vec3::from(*max) - Vec3::from(*min);
+                        size.x * size.y * size.z + 0.0001
+                    }),
                 bf1_ai: game == "bf1",
                 hull: hover_hull_from(m, map_dir, &sides, c, &h),
                 ..h.params()

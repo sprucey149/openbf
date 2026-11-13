@@ -737,3 +737,136 @@ fn vehicle_critical_prims_are_on_the_hull() {
     }
     eprintln!("classes with a critical prim checked: {checked}");
 }
+
+/// Actual Kashyyyk hulls through the public sim tick. Keep the target parked
+/// and disable gravity/damage to isolate solid support from suspension and death.
+#[test]
+fn kashyyyk_hover_vehicle_pairs_support_each_others_hulls() {
+    use core::collision::{Layers, Shape};
+    use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    use glam::Vec3;
+    let dir = game::assets::baked_root().join("bf2_kas2");
+    let m = conquest_manifest(&dir).expect("Kashyyyk bake required");
+    let classes = game::assets::baked_root().join("classes");
+    let mut installed = core::sim::Sim::empty(1);
+    let build = game::vehicle_pads::install(
+        &mut installed,
+        &m,
+        &dir,
+        &classes,
+        &["rep".into(), "cis".into()],
+    )
+    .unwrap();
+    let tank = build
+        .classes
+        .iter()
+        .position(|c| c == "cis_tread_snailtank" || c == "cis_tread_tank")
+        .expect("snail tank");
+    let tank_parts = installed.hull_parts[tank].clone().expect("tank collision");
+    let mut checked = 0;
+    for (class, name) in build.classes.iter().enumerate() {
+        let Some(mut params) = installed.hover_params.get(class).and_then(Clone::clone) else {
+            continue;
+        };
+        let measured_mass = match name.as_str() {
+            "cis_hover_stap" => 11.062_572,
+            "cis_tread_snailtank" | "cis_tread_tank" => 302.695_4,
+            "rep_hover_barcspeeder" => 24.668_806,
+            "rep_hover_fightertank" => 652.253_6,
+            _ => panic!("unmeasured Kashyyyk class {name}"),
+        };
+        assert!(
+            (params.mass - measured_mass).abs() < 0.001,
+            "{name}: mass {}, PS2 {measured_mass}",
+            params.mass
+        );
+        let parts = installed.hull_parts[class]
+            .clone()
+            .expect("hover collision");
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.layers.contains(Layers::VEHICLE) && !matches!(p.shape, Shape::Mesh(_))),
+            "{name}: no moving vehicle prims"
+        );
+        params.gravity_scale = 0.0;
+        params.level_spring = 0.0;
+        params.thrust_pitch_angle = 0.0;
+        params.strafe_roll_angle = 0.0;
+        params.bank_angle = 0.0;
+        params.collision_scale = [0.0; 3];
+        let run = |solid: bool, sideways: bool| {
+            let mut sim = core::sim::Sim::empty(3);
+            sim.hover_params = vec![Some(params.clone()), None];
+            sim.hull_parts = vec![Some(parts.clone()), Some(tank_parts.clone())];
+            let spec = |class, pos| VehicleSpec {
+                kind: VehicleKind::Hover,
+                class,
+                pos,
+                yaw: 0.0,
+                home_team: None,
+                neutral_when_empty: true,
+                spawn_pad: None,
+                max_health: 10000.0,
+                health_type: core::weapon::HealthType::Vehicle,
+                seats: vec![SeatKind::Pilot],
+            };
+            let target = sim.spawn_vehicle(&spec(1, Vec3::ZERO));
+            let top = sim
+                .collision
+                .hull(target)
+                .iter()
+                .filter(|b| b.layers.contains(Layers::VEHICLE))
+                .map(|b| b.aabb.max.y)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let mover = sim.spawn_vehicle(&spec(0, Vec3::ZERO));
+            let bottom = sim
+                .collision
+                .hull(mover)
+                .iter()
+                .filter(|b| {
+                    b.layers.contains(Layers::VEHICLE) && !matches!(b.shape, Shape::Mesh(_))
+                })
+                .map(|b| b.aabb.min.y)
+                .fold(f32::INFINITY, f32::min);
+            let start = top - bottom + 0.2;
+            sim.vehicle_mut(mover).unwrap().pos.y = start;
+            sim.vehicle_mut(mover).unwrap().vel = Vec3::NEG_Y * 2.0;
+            if sideways {
+                let v = sim.vehicle_mut(mover).unwrap();
+                v.pos = Vec3::new(-10.0, start - 1.5, 0.0);
+                v.vel = Vec3::X * 40.0;
+            }
+            if !solid {
+                sim.hull_parts[1] = None;
+            }
+            for _ in 0..if sideways { 12 } else { 60 } {
+                if sideways {
+                    sim.vehicle_mut(mover).unwrap().vel = Vec3::X * 40.0;
+                }
+                sim.step(&[]);
+            }
+            let pos = sim.vehicle(mover).unwrap().pos;
+            (start, if sideways { pos.x } else { pos.y })
+        };
+        let (start, solid) = run(true, false);
+        let (_, absent) = run(false, false);
+        assert!(
+            solid > absent + 1.0,
+            "{name}: start {start}, solid {solid}, absent {absent}"
+        );
+        eprintln!("{name}: start={start:.3}, supported={solid:.3}, without target={absent:.3}");
+        let (_, blocked) = run(true, true);
+        let (_, through) = run(false, true);
+        assert!(
+            blocked < through - 0.01,
+            "{name}: 40 m/s crossing, solid x={blocked}, absent x={through}"
+        );
+        eprintln!("{name}: 40 m/s crossing solid x={blocked:.3}, without target x={through:.3}");
+        checked += 1;
+    }
+    assert!(
+        checked >= 4,
+        "must exercise STAP, bike, fighter tank and snail tank"
+    );
+}

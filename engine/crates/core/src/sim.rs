@@ -60,6 +60,7 @@ mod guided;
 mod guns;
 mod hero_bodies;
 pub mod heroes;
+mod hover_pairs;
 mod input;
 mod landing;
 mod lock_on;

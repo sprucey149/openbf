@@ -24,6 +24,7 @@ pub(crate) fn skiff() -> HoverParams {
         omega_z_damp: 1.0,
     };
     HoverParams {
+        mass: 1.0,
         set_altitude: 1.0,
         gravity_scale: 4.0,
         acceleration: 5.0,

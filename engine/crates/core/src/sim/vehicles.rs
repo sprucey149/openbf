@@ -772,7 +772,18 @@ impl Sim {
             };
             let from = v.pos;
             let held_up = v.rot * Vec3::Y;
-            let impacts = hover::step(&mut self.vehicles[i], p, &world, dt);
+            hover::drive(&mut self.vehicles[i], p, dt);
+            let mut impacts = hover::contacts(&mut self.vehicles[i], p, &world);
+            super::hover_pairs::contacts(
+                &mut self.vehicles,
+                i,
+                p,
+                &self.hover_params,
+                &self.hull_parts,
+                &self.collision,
+                &mut impacts,
+            );
+            hover::springs(&mut self.vehicles[i], p, |at| world.water_under(at), dt);
             let (threshold, scale) = (p.collision_threshold, p.collision_scale);
             self.hold_pilot_aim(i, held_up);
             self.vehicle_regen(i, dt);
