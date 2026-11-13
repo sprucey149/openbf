@@ -246,8 +246,6 @@ pub struct Sim {
     /// Immutable setup for querying animated walker tow collision.
     pub tow_frames: Option<std::sync::Arc<dyn crate::vehicle::tow::TowFrames>>,
     pub tow_cables: Vec<super::TowCable>,
-    /// Falling walkers remain in building collision until their clip ends.
-    pub tow_falls: Vec<super::TowFall>,
     pub heightfield: Option<Heightfield>,
     /// The map's baked model collision (`coll` meshes, `prim` primitives,
     /// terrain cutters). Empty = heightfield-only, as before. An INPUT like the
@@ -1032,7 +1030,6 @@ impl Sim {
             hero_rider_frames: None,
             tow_frames: None,
             tow_cables: Vec::new(),
-            tow_falls: Vec::new(),
             heightfield: None,
             collision: CollisionWorld::default(),
             doors: Vec::new(),

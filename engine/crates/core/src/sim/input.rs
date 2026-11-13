@@ -9,7 +9,7 @@ use crate::aim_assist::{self, AssistEnv, AssistState, Lead, Sticks};
 use crate::collision::lead_point;
 use crate::perception;
 use crate::unit::{SpawnPost, UnitHandle};
-use crate::vehicle::{VehicleHandle, VehicleKind};
+use crate::vehicle::VehicleHandle;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -495,7 +495,7 @@ impl Sim {
             AimTarget::Vehicle(h) => {
                 let v = self
                     .vehicle(h)
-                    .filter(|v| v.kind != VehicleKind::Flyer || v.health.alive())?;
+                    .filter(|v| v.health.alive())?;
                 let (c, r) = match (v.aim_sphere, self.blast_setup.get(v.class as usize)) {
                     (Some(s), _) => s,
                     (None, Some(Some(b))) => (b.sphere_centre, b.sphere_radius),

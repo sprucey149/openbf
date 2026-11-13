@@ -151,7 +151,7 @@ pub use stations::{
     DELAY_DEFAULT as STATION_DELAY_DEFAULT, GATHER_MAX as STATION_GATHER_MAX,
 };
 pub use target_hints::{TargetHint, TargetHints};
-pub use tow::{TowCable, TowFall};
+pub use tow::TowCable;
 pub use weak_lock::{GROUND_WEAK_SPOT_FACTOR, HEAVY_WALKER_WEAK_SPOT_FACTOR};
 
 #[cfg(test)]

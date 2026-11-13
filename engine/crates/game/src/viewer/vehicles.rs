@@ -535,19 +535,12 @@ impl VehicleVisuals {
     ) -> Vec<DrawCmd> {
         let mut out = Vec::new();
         self.shadow_triangles.clear();
-        let fallen: Vec<_> = sim
-            .tow_falls
-            .iter()
-            .map(|fall| fall.pose(sim.tick))
-            .collect();
         self.hover_nines
             .step(sim, sim.ground_rules == core::soldier::GroundRules::Bf2);
         self.tread_clocks.step(sim, &self.treads);
+        // A dying walker is still live: it draws its death clip.
         let live = sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive);
-        // Temporary fallen meshes keep their own slots if a pad recycles
-        // the vehicle's sim slot before its clip finishes.
-        let falls = fallen.iter().enumerate().map(|(i, v)| (usize::MAX - i, v));
-        for (slot, v) in live.chain(falls) {
+        for (slot, v) in live {
             let Some(Some(class)) = self.classes.get_mut(v.class as usize) else {
                 continue;
             };

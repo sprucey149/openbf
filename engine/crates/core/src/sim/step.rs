@@ -512,7 +512,7 @@ impl Sim {
         // The hulls where their vehicles are (card VHULL): a caller may have
         // moved one, or installed a new world, since the last tick.
         self.sync_hulls();
-        self.sync_tow_falls();
+        self.sync_dying_walkers();
         // Existing hero lives drain before this tick's replacements/spawns.
         self.tick_hero_health(dt);
         // A press a prompt answered stays out of play until released.

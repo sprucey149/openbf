@@ -450,6 +450,13 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 killer.map_or(String::new(), |s| s.index.to_string()),
                 vehicle.index
             ),
+            // `a` the vehicle, the value 1 for a walker's final blast.
+            Event::VehicleExplosion { vehicle, last, .. } => format!(
+                "{tick},vehicle_explosion,{},,{}
+",
+                vehicle.index,
+                u8::from(*last)
+            ),
             // `a` the droid, `b` its team, the value the chunks' scale.
             Event::DroidBurst {
                 unit, team, scale, ..

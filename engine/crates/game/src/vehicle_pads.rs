@@ -719,6 +719,13 @@ pub fn install_for_mission(
                 let mut params = w.params(walkers.get(&name));
                 params.spawn_sphere_centre =
                     spheres.get(&name).map(|&[x, y, z, _]| Vec3::new(x, y, z));
+                // A name the db lacks leaves class+0xd90 at 0: the death
+                // falls back to ExplosionName (B2:179248-179252).
+                params.death.final_explosion = w
+                    .final_explosion
+                    .as_deref()
+                    .filter(|e| !db.chain(e).is_empty())
+                    .map(|e| explosion_class(&db, e));
                 params
             })
         })
@@ -1452,7 +1459,10 @@ fn fire_ring(
     let d = std::f32::consts::PI / 180.0;
     let lim = |l: [f32; 2]| [l[0].min(l[1]) * d, l[0].max(l[1]) * d];
     let add = |a: [[f32; 2]; 2], b: [[f32; 2]; 2]| {
-        [[a[0][0] + b[0][0], a[0][1] + b[0][1]], [a[1][0] + b[1][0], a[1][1] + b[1][1]]]
+        [
+            [a[0][0] + b[0][0], a[0][1] + b[0][1]],
+            [a[1][0] + b[1][0], a[1][1] + b[1][1]],
+        ]
     };
     let (mut points, mut limits) = (Vec::new(), Vec::new());
     let mut carried = [[0.0; 2]; 2];
@@ -1505,16 +1515,21 @@ pub fn turret_law(g: &mut GunSetup, s: &vehicle_class::SeatSpec, bf2: bool) {
     g.framed = s.turret_node.is_some();
 }
 
+/// Explosion class `e` with its look.
+fn explosion_class(db: &ClassDb, e: &str) -> ExplosionClass {
+    ExplosionClass {
+        look: crate::roster::explosion_look(db, e).unwrap_or_default(),
+        ..ExplosionClass::from_props(&crate::roster::ClassSrc { db, class: e })
+    }
+}
+
 /// A class's [`BlastSetup`] (card VDTH): its `ExplosionName` class read as
 /// an [`ExplosionClass`], and [`vehicle_class::blast_sphere`] over the baked
 /// SPHR `sphr`.
 pub fn blast_setup(db: &ClassDb, class: &str, sphr: Option<[f32; 4]>) -> BlastSetup {
     let explosion = vehicle_class::explosion_name(db, class)
         .filter(|e| !db.chain(e).is_empty())
-        .map(|e| ExplosionClass {
-            look: crate::roster::explosion_look(db, &e).unwrap_or_default(),
-            ..ExplosionClass::from_props(&crate::roster::ClassSrc { db, class: &e })
-        });
+        .map(|e| explosion_class(db, &e));
     let (c, w) = vehicle_class::blast_sphere(db, class, sphr);
     BlastSetup {
         explosion,

@@ -184,6 +184,9 @@ pub struct WalkerClass {
     /// The post's `SpawnPointLocation`s: (x, y, z) in the walker's frame and
     /// the angle about up in radians (`angle × 0.017453294`), in PROP order.
     pub spawn_points: Vec<(Vec3, f32)>,
+    /// `FinalExplosion` / `FinalExplosionName` (class+0xd90): the dying
+    /// walker's second blast (`core::vehicle::walker::WalkerDeath`).
+    pub final_explosion: Option<String>,
 }
 
 impl Default for WalkerClass {
@@ -197,6 +200,7 @@ impl Default for WalkerClass {
             building: Vec::new(),
             command: false,
             spawn_point_count: 0,
+            final_explosion: None,
             spawn_points: Vec::new(),
         }
     }
@@ -459,6 +463,19 @@ impl WalkerClass {
             }
         } else if k == h("BuildingCollision") {
             self.building.push(v.trim().to_owned());
+        } else if k == h("ExplosionOffset") {
+            // class+0xd80 (B2:183135); the death's first blast.
+            if let Some([x, y, z]) = floats::<3>(v) {
+                self.motion.death.offset = Vec3::new(x, y, z);
+            }
+        } else if k == h("FinalExplosionOffset") {
+            // class+0xda0 (B2:182950).
+            if let Some([x, y, z]) = floats::<3>(v) {
+                self.motion.death.final_offset = Vec3::new(x, y, z);
+            }
+        } else if k == h("FinalExplosion") || k == h("FinalExplosionName") {
+            // class+0xd90 (B2:182659, 183193).
+            self.final_explosion = Some(v.trim().to_owned()).filter(|s| !s.is_empty());
         } else if self.command && k == h("SpawnPointCount") {
             // "%i": the two lists are allocated afresh at this size.
             self.spawn_point_count = v.trim().parse::<usize>().unwrap_or(0);

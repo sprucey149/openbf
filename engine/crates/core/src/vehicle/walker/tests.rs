@@ -80,6 +80,7 @@ pub(crate) fn atst() -> WalkerParams {
         building: Vec::new(),
         spawn_points: Vec::new(),
         spawn_sphere_centre: None,
+        death: WalkerDeath::default(),
     }
 }
 
@@ -156,6 +157,40 @@ fn full_stick_walks_the_clip_at_0_7346_and_covers_5_m_s() {
         "on its feet: {}",
         v.pos.y
     );
+}
+
+/// A walker killed mid-stride finishes the clip in hand, then plays death01
+/// to its end and hands over to entry 4, whatever its stick says; the legs
+/// no longer hold it (FUN_0025d5e0's die action, FUN_00261208 B1/B3).
+#[test]
+fn a_dead_walker_finishes_its_step_then_plays_death01_to_entry_4() {
+    let mut p = atst();
+    p.clips[usize::from(ANIM_DEATH)] = clip(61, 0.0);
+    let mut v = walker(&p);
+    drive(&mut v, 1.0, 0.0, 0.0, false);
+    for _ in 0..40 {
+        step(&mut v, &p, &Flat, DT);
+    }
+    let striding = v.walker.anim;
+    assert!((5..=10).contains(&striding), "{striding}");
+    v.walker.dead = true;
+    let mut seen = vec![v.walker.anim];
+    let mut ticks = 0;
+    while !death_finished(&v) && ticks < 200 {
+        step(&mut v, &p, &Flat, DT);
+        if seen.last() != Some(&v.walker.anim) {
+            seen.push(v.walker.anim);
+        }
+        ticks += 1;
+    }
+    assert_eq!(seen, [striding, ANIM_DEATH, ANIM_NONE]);
+    let left = (21 - 1) as f32 / 30.0;
+    assert!(
+        ticks as f32 * DT <= left / CLOCK_FLOOR + 2.0 + 2.0 * DT,
+        "{ticks} ticks: the stride's rest, then 2 s of death01"
+    );
+    assert!(ticks as f32 * DT >= 2.0, "{ticks}");
+    assert!(!v.walker.supported, "the legs stop");
 }
 
 #[test]

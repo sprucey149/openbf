@@ -252,7 +252,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         if v.kind == VehicleKind::Turret {
             continue;
         }
-        if v.kind == VehicleKind::Flyer && !v.health.alive() {
+        if !v.health.alive() {
             continue;
         }
         let space_flyer = space && v.kind == VehicleKind::Flyer;

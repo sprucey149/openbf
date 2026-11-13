@@ -122,9 +122,6 @@ impl Sim {
         for tow in &self.tow_cables {
             tow.hash_into(&mut eat);
         }
-        for fall in &self.tow_falls {
-            fall.hash_into(&mut eat);
-        }
         // HASH: a live bolt carries its predictive hit and historical shooter.
         // Empty fixtures keep their pins; live-bolt replays need a sim re-baseline.
         if !self.bolts.is_empty() {

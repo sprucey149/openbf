@@ -229,7 +229,8 @@ impl Sim {
     /// [`Sim::hull_parts`] at `pos` and the drawn heading (a walker's legs,
     /// `walker::legs_rot`, as `game::viewer::vehicles` draws it; else `rot`),
     /// rigid — PROVISIONAL: a walker's animated prims stay at the bind pose.
-    /// A dead slot, or a class with no parts, has none.
+    /// A dead slot, or a class with no parts, has none; nor has a dying
+    /// walker posed by the tow frames (`Sim::sync_dying_walkers`).
     pub(crate) fn sync_hull(&mut self, i: usize) {
         let Some(v) = self.vehicles.get(i) else {
             return;
@@ -242,7 +243,7 @@ impl Sim {
             .hull_parts
             .get(v.class as usize)
             .and_then(|p| p.clone())
-            .filter(|_| v.alive);
+            .filter(|_| v.alive && self.dying_walker_bodies(v).is_none());
         match parts {
             Some(parts) => {
                 let rot = if v.kind == crate::vehicle::VehicleKind::Walker {
@@ -622,25 +623,25 @@ impl Sim {
     /// (§5); it does not gather the dying vehicle itself, nor
     /// the riders of a dying building turret (the PS2's turret path is not
     /// read; they die in the loop below either way).
+    ///
+    /// A walker does not go at once: it dies in place, plays its death clip
+    /// and only then throws its chunks ([`walker::WalkerDeath`],
+    /// [`Sim::start_walker_death`]).
     pub fn destroy_vehicle(&mut self, h: VehicleHandle, killer: Option<UnitHandle>) {
         let Some(v) = self.vehicle(h) else {
             return;
         };
+        if v.kind == VehicleKind::Walker
+            && self
+                .walker_params
+                .get(v.class as usize)
+                .is_some_and(Option::is_some)
+        {
+            self.start_walker_death(h, killer);
+            return;
+        }
         let (class, pos, vel, team) = (v.class, v.pos, v.vel, v.team);
-        // Each rider with where he sits (`rider_pose`), so he dies there.
-        let seated = |kind: fn(SeatKind) -> bool| -> Vec<(UnitHandle, Vec3)> {
-            v.seats
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| kind(s.kind))
-                .filter_map(|(i, s)| Some((s.occupant?, self.rider_pose(v, i as u8).0)))
-                .collect()
-        };
-        let mut riders = seated(|k| matches!(k, SeatKind::Gunner(_)));
-        riders.extend(seated(|k| matches!(k, SeatKind::Passenger(_))));
-        let pilot_seat = seated(|k| k == SeatKind::Pilot).first().copied();
-        let pilot = pilot_seat.map(|(u, _)| u);
-        riders.extend(pilot_seat);
+        let (riders, pilot) = self.riders_in_death_order(v);
         self.space_flyer_destroyed(h, killer);
         if self.vehicles[h.index as usize].kind == VehicleKind::Flyer {
             self.vehicles[h.index as usize].flyer.phase = FlightPhase::Crashed;
@@ -657,6 +658,12 @@ impl Sim {
             .get(class as usize)
             .and_then(|b| b.as_ref())
             .and_then(|b| b.explosion.clone());
+        self.events.push(Event::VehicleExplosion {
+            vehicle: h,
+            class,
+            pos,
+            last: false,
+        });
         if let Some(e) = exp {
             self.explode_from(
                 &e,
@@ -666,6 +673,37 @@ impl Sim {
                 Some(super::blast::BlastSource::Vehicle(h)),
             );
         }
+        self.kill_riders(riders, killer);
+        self.remove_vehicle(h);
+        // A building turret falls to its wreck or pad (card TBLD).
+        self.fell_building_turret(h);
+    }
+
+    /// Every rider of `v` with where he sits (`rider_pose`), so he dies
+    /// there, in the death function's order: turret seats, passenger seats,
+    /// then the driver's (re-vehicle-death §10); and the driver alone.
+    fn riders_in_death_order(
+        &self,
+        v: &Vehicle,
+    ) -> (Vec<(UnitHandle, Vec3)>, Option<UnitHandle>) {
+        let seated = |kind: fn(SeatKind) -> bool| -> Vec<(UnitHandle, Vec3)> {
+            v.seats
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| kind(s.kind))
+                .filter_map(|(i, s)| Some((s.occupant?, self.rider_pose(v, i as u8).0)))
+                .collect()
+        };
+        let mut riders = seated(|k| matches!(k, SeatKind::Gunner(_)));
+        riders.extend(seated(|k| matches!(k, SeatKind::Passenger(_))));
+        let pilot_seat = seated(|k| k == SeatKind::Pilot).first().copied();
+        riders.extend(pilot_seat);
+        (riders, pilot_seat.map(|(u, _)| u))
+    }
+
+    /// Kill each rider where he sits, with the vehicle's last-damage record
+    /// (re-vehicle-death §10): a kill of `killer`, or a death with no killer.
+    fn kill_riders(&mut self, riders: Vec<(UnitHandle, Vec3)>, killer: Option<UnitHandle>) {
         for (u, at) in riders {
             if let Some(r) = self.unit_mut(u) {
                 r.soldier.pos = at;
@@ -681,9 +719,117 @@ impl Sim {
                 None => self.kill_environment(u, DeathCause::VehicleDestroyed),
             }
         }
+    }
+
+    /// A walker's hull pool ran out ([`walker::WalkerDeath`]): its death
+    /// function kills the riders (the health slot +0xc ahead of FUN_0025ce68,
+    /// B2:179015-179018; B1:130333-130336 ahead of FUN_00218ac8), marks the
+    /// walker dead and detonates `ExplosionName` at `ExplosionOffset`. The
+    /// walker stays in the world, empty and solid, finishes the clip in hand
+    /// and plays death01; [`Sim::finish_walker_death`] ends it.
+    fn start_walker_death(&mut self, h: VehicleHandle, killer: Option<UnitHandle>) {
+        let Some(v) = self.vehicle(h) else {
+            return;
+        };
+        if v.walker.dead {
+            return;
+        }
+        let (riders, _) = self.riders_in_death_order(v);
+        if let Some(v) = self.vehicle_mut(h) {
+            v.walker.dead = true;
+            v.walker.killer = killer;
+            v.health.cur = v.health.cur.min(0.0);
+        }
+        self.space_flyer_destroyed(h, killer);
+        self.kill_riders(riders, killer);
+        self.walker_blast(h, false);
+    }
+
+    /// FUN_0025f4a0's dead branch at entry 4 (B2:179231-179307; B1:130521-
+    /// 130588): the vehicle-kill award and the chunks
+    /// ([`Event::VehicleDestroyed`]), the final blast, then the walker is
+    /// gone.
+    pub(super) fn finish_walker_death(&mut self, h: VehicleHandle) {
+        let Some(v) = self.vehicle(h) else {
+            return;
+        };
+        let (class, pos, vel, killer) = (v.class, v.pos, v.vel, v.walker.killer);
+        self.events.push(Event::VehicleDestroyed {
+            vehicle: h,
+            class,
+            pos,
+            vel,
+            killer,
+        });
+        self.walker_blast(h, true);
         self.remove_vehicle(h);
-        // A building turret falls to its wreck or pad (card TBLD).
-        self.fell_building_turret(h);
+    }
+
+    /// The explosion class `class` detonates at its death
+    /// ([`Event::VehicleExplosion`]): `ExplosionName`, or for a walker's
+    /// `last` blast its `FinalExplosion` when it names one
+    /// ([`walker::WalkerDeath`]).
+    pub fn vehicle_explosion(&self, class: u32, last: bool) -> Option<&crate::weapon::ExplosionClass> {
+        let name = self
+            .blast_setup
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .and_then(|b| b.explosion.as_ref());
+        let fin = self
+            .walker_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .and_then(|p| p.death.final_explosion.as_ref())
+            .filter(|_| last);
+        fin.or(name)
+    }
+
+    /// One of a dying walker's two blasts ([`walker::WalkerDeath`]): the
+    /// first is `ExplosionName` at `ExplosionOffset`, the `last` one
+    /// `FinalExplosion` (else `ExplosionName`) at `FinalExplosionOffset`,
+    /// each through the walker's frame. Both carry the destroyer as their
+    /// attacker, with his team: their desc is the vehicle's record.
+    fn walker_blast(&mut self, h: VehicleHandle, last: bool) {
+        let Some(v) = self.vehicle(h) else {
+            return;
+        };
+        let (class, killer) = (v.class, v.walker.killer);
+        let Some(death) = self
+            .walker_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .map(|p| &p.death)
+        else {
+            return;
+        };
+        let offset = if last {
+            death.final_offset
+        } else {
+            death.offset
+        };
+        let exp = self.vehicle_explosion(class, last).cloned();
+        let at = v.pos + v.rot * offset;
+        self.events.push(Event::VehicleExplosion {
+            vehicle: h,
+            class,
+            pos: at,
+            last,
+        });
+        let team = killer.and_then(|k| {
+            self.units
+                .get(k.index as usize)
+                .filter(|u| u.gen == k.gen)
+                .map(|u| u.team)
+        });
+        if let Some(e) = exp {
+            self.explode_from(
+                &e,
+                at,
+                killer,
+                team,
+                Some(super::blast::BlastSource::Vehicle(h)),
+            );
+        }
     }
 
     /// Remove a vehicle (the PS2 leaves no wreck, §6), releasing every rider
@@ -870,6 +1016,14 @@ impl Sim {
                     mask: self.water_mask.as_ref(),
                 }),
             };
+            if walker::death_finished(v) {
+                let h = VehicleHandle {
+                    index: i as u32,
+                    gen: v.gen,
+                };
+                self.finish_walker_death(h);
+                continue;
+            }
             let from = v.pos;
             walker::step(&mut self.vehicles[i], p, &world, dt);
             self.vehicle_regen(i, dt);

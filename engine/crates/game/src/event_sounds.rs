@@ -336,14 +336,18 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 let x = sticky.as_ref().and_then(|s| s.explosion.as_ref());
                 boom(x.map(|x| &x.look), *pos, &mut play);
             }
-            Event::VehicleDestroyed { class, pos, .. } => {
-                let setup = walk.sim.blast_setup.get(*class as usize);
-                let x = setup.and_then(|b| b.as_ref()?.explosion.as_ref());
+            // The death blast, and with the death itself (the first blast)
+            // the class's DeathSound, as a unit's starts with its kill.
+            Event::VehicleExplosion {
+                class, pos, last, ..
+            } => {
+                let x = walk.sim.vehicle_explosion(*class, *last);
                 boom(x.map(|x| &x.look), *pos, &mut play);
                 if let Some(s) = walk
                     .vehicle_sounds
                     .get(*class as usize)
                     .and_then(|s| s.death_sound.as_deref())
+                    .filter(|_| !*last)
                 {
                     play(s, *pos);
                 }
