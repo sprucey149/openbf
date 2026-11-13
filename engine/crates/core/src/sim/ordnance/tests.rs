@@ -7,6 +7,38 @@ use crate::TICK_DT;
 
 mod charged_sticky;
 
+#[test]
+fn damaging_sticky_hits_a_soldier_even_when_it_bounces() {
+    let mut sim = Sim::empty(7);
+    let thrower = sim
+        .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, 4.0)))
+        .unwrap();
+    let target = sim.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
+    let center = sim.unit(target).unwrap().capsule().center();
+    let health = sim.unit(target).unwrap().health.cur;
+    let mut weapon = thermal(true);
+    weapon.ordnance.max_damage = 80.0;
+    let sticky = weapon.ordnance.sticky.as_mut().unwrap();
+    sticky.stick_mask = 0;
+    sticky.gravity = 0.0;
+    sticky.explosion = None;
+    let sticky = sticky.clone();
+    let class = sim.add_weapon_class(weapon);
+    let mut shot = Sticky::new(
+        center + Vec3::Z,
+        -Vec3::Z * 60.0,
+        &sticky,
+        2.0,
+        thrower,
+        0,
+        class,
+    );
+    shot.direct = Some((1.0, 0.0, false));
+    assert!(sim.tick_sticky(&mut shot, TICK_DT));
+    assert!(shot.moving && shot.touched.is_some() && shot.anchor.is_none());
+    assert_eq!(sim.unit(target).unwrap().health.cur, health - 80.0);
+}
+
 /// Same-owner warnings are linked to instances, even when contacts share
 /// a tick and unrelated warnings are compacted out of the vector.
 #[test]

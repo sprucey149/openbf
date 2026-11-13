@@ -526,7 +526,7 @@ impl Commander {
             // Assault every hero says its own spawn and defeat line where it
             // stands, as the hero manager says the spawn line at the hero
             // (re-announcer.md 2.6); the player's own line is 2-D.
-            if sim.deathmatch.is_some() {
+            if sim.hero_assault() {
                 let (name, call) = match phase {
                     1 => (&hero.spawned, core::sim::Call::HeroSpawned),
                     2 => (&hero.defeated, core::sim::Call::HeroDefeated),
@@ -908,6 +908,7 @@ mod tests {
         sim.events.clear();
         sim.events.push(core::sim::Event::FlagDropped {
             flag: 0,
+            unit: carrier,
             team: 1,
             pos: glam::Vec3::ZERO,
         });
@@ -917,8 +918,11 @@ mod tests {
         commander.flag_calls(&sim);
         assert!(commander.queue.waiting("imp_1Flag_drop_all"));
         sim.events.clear();
-        sim.events
-            .push(core::sim::Event::FlagCaptured { flag: 0, team: 0 });
+        sim.events.push(core::sim::Event::FlagCaptured {
+            flag: 0,
+            unit: carrier,
+            team: 0,
+        });
         sim.tick += 3 * u64::from(core::TICK_HZ) + 1;
         commander.flag_calls(&sim);
         assert!(commander.queue.waiting("imp_impFlag_score"));

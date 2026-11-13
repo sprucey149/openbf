@@ -688,7 +688,7 @@ pub(crate) fn saber_visible(u: &core::unit::Unit, classes: &[core::weapon::Weapo
 /// Whether `u` gets its class's hero sounds: the team's hero class, or any
 /// unit in Hero Assault, where every class is a hero.
 pub(crate) fn sounds_as_hero(sim: &core::sim::Sim, u: &core::unit::Unit) -> bool {
-    sim.deathmatch.is_some() || sim.hero_class(u.team) == Some(u.spec.class)
+    sim.hero_assault() || sim.hero_class(u.team) == Some(u.spec.class)
 }
 
 pub fn hero_sample_asks(walk: &WalkSim) -> Vec<(core::unit::UnitHandle, String, Vec3)> {

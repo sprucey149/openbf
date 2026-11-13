@@ -819,7 +819,7 @@ impl Sim {
         if self.classes.get(t).is_none_or(Vec::is_empty) {
             return None;
         }
-        let c = if self.deathmatch.is_some() {
+        let c = if self.hero_assault() {
             self.assault_class(team, None)?
         } else {
             self.ai_class(team)
@@ -867,7 +867,7 @@ impl Sim {
         } else {
             None
         };
-        let assault_class = if slot.is_none() && forced.is_none() && self.deathmatch.is_some() {
+        let assault_class = if slot.is_none() && forced.is_none() && self.hero_assault() {
             let picked = self
                 .assault_class(team, None)
                 .or_else(|| self.assault_class(team, Some(i)));

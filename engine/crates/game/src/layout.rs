@@ -1622,6 +1622,10 @@ fn post_lines(props: &[(u32, String)]) -> PostLines {
 
 impl MapLayout {
     pub fn from_manifest(m: &Manifest) -> MapLayout {
+        Self::from_battle_manifest(m, false)
+    }
+
+    pub fn from_battle_manifest(m: &Manifest, hunt: bool) -> MapLayout {
         let region = |name: &str| -> Option<Region> {
             let r = m
                 .regions
@@ -1633,8 +1637,11 @@ impl MapLayout {
         for inst in &m.instances {
             // A space hangar's post has no capture region: its control region is where
             // it stands, and only its spawns matter.
-            let space_post = inst.class.eq_ignore_ascii_case("com_bldg_controlzone_ctf")
-                && prop(&inst.props, PROP_SPAWN_PATH).is_some();
+            let has_spawn_path = prop(&inst.props, PROP_SPAWN_PATH).is_some();
+            let space_post =
+                inst.class.eq_ignore_ascii_case("com_bldg_controlzone_ctf") && has_spawn_path;
+            let hunt_post =
+                hunt && has_spawn_path && inst.class.eq_ignore_ascii_case("com_bldg_controlzone");
             let cap_name = match prop(&inst.props, PROP_CAPTURE_REGION) {
                 Some(name) => Some(name),
                 None if space_post => match prop(&inst.props, PROP_CONTROL_REGION) {
@@ -1642,6 +1649,7 @@ impl MapLayout {
                     None if m.spawn_only_posts => None,
                     None => continue,
                 },
+                None if hunt_post => None,
                 None => continue, // not a command post
             };
             cps.push(CommandPostDef {

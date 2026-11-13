@@ -45,13 +45,14 @@ pub fn page(
                 select: feed.screen_text("common.select", "Select"),
             })
         }
-        // The objective is the conquest mission's `AddMissionObjective`
-        // text (`game.modes.con`; the defenders' `con2` reads the same);
-        // the port's battles are all conquest.
         SpawnStage::Map => Some(SpawnPage::Map {
-            objective: feed.space_objective(me.team).unwrap_or_else(|| {
-                feed.screen_text("game.modes.con", "Capture all the Command Posts")
-            }),
+            objective: if walk.sim.is_hunt() {
+                "Defeat the opposing team to score points.".to_owned()
+            } else {
+                feed.space_objective(me.team).unwrap_or_else(|| {
+                    feed.screen_text("game.modes.con", "Capture all the Command Posts")
+                })
+            },
             legend: [
                 feed.screen_text("game.spawndisplay.commandpost", "Command Post"),
                 feed.screen_text("game.spawndisplay.cpchange", "Change Command Post"),

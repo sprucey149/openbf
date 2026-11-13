@@ -578,6 +578,20 @@ fn capture_battle_pause_theme() {
         for (name, state) in [
             ("pause_game_menu", menu.clone()),
             (
+                "pause_categories",
+                MenuModel {
+                    page: Some(PausePage::Options),
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_controls",
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Controls)),
+                    ..menu.clone()
+                },
+            ),
+            (
                 "pause_options",
                 MenuModel {
                     page: Some(PausePage::Settings(SettingsPage::Game)),

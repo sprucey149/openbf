@@ -902,7 +902,7 @@ fn option_rows_read_as_the_disc_writes_them() {
     );
 }
 
-/// §2.1-2.2: OPTIONS opens the overview (CTF and Hunt dimmed and skipped), a group page adjusts with Left/Right and L1/R1, Triangle
+/// §2.1-2.2: OPTIONS opens the overview (CTF dimmed), a group page adjusts with Left/Right and L1/R1, Triangle
 /// walks back and asks for the prefs to be kept.
 #[test]
 fn session_options_pages() {
@@ -911,7 +911,7 @@ fn session_options_pages() {
     m.step(cross(), 0.0);
     assert_eq!(m.page, Page::Overview(0));
     let live: Vec<bool> = m.overview().iter().map(|(_, l)| *l).collect();
-    assert_eq!(live, [true, true, true, false, false, true]);
+    assert_eq!(live, [true, true, true, false, true, true]);
     m.step(up(), 0.0);
     assert_eq!(m.page, Page::Overview(5), "wraps to Assault");
     m.step(cross(), 0.0);
@@ -986,6 +986,48 @@ fn launch_hands_over_the_playlist_in_order() {
     m.step(press(|i| i.l1 = true), 0.0);
     m.step(press(|i| i.l1 = true), 0.0);
     assert_eq!(m.map_list.at, 0);
+}
+
+#[test]
+fn hunt_queues_the_native_matchup_from_the_selected_map() {
+    let bakes = [
+        ("bf1_end1".into(), "bf1".into()),
+        ("bf2_end1".into(), "bf2".into()),
+    ];
+    let maps = catalog(&text, &bakes, &|key, mode| {
+        if key.ends_with("_end1") && mode == Mode::Hunt {
+            vec![["imp".into(), "ewk".into()]]
+        } else {
+            Vec::new()
+        }
+    });
+    let mut shell = InstantAction::new(
+        maps,
+        IaTexts::new(&|_, fallback| fallback.to_owned()),
+        SessionOptions::default(),
+    );
+    let mode = ModePick::One(Mode::Hunt);
+    let side = Side::Era(Era::Gcw);
+    for game in [Game::Bf1, Game::Bf2] {
+        let index = shell
+            .maps
+            .iter()
+            .position(|map| map.game == game && map.key.ends_with("_end1"))
+            .unwrap();
+        let map = &shell.maps[index];
+        assert!(map.runnable(Mode::Hunt, side));
+        assert!(!map.runnable(Mode::Hunt, Side::Era(Era::Cw)));
+        shell.add(MapPick::One(index), mode, SidePick::One(side));
+    }
+    shell.focus_command(Cmd::Launch);
+    let Some(IaCommand::Launch(playlist)) = shell.step(cross(), 0.0) else {
+        panic!("no Hunt launch");
+    };
+    assert_eq!(playlist.len(), 2);
+    for launch in playlist {
+        assert_eq!(launch.mode, Mode::Hunt);
+        assert_eq!(launch.armies, ["imp".to_owned(), "ewk".to_owned()]);
+    }
 }
 
 #[test]

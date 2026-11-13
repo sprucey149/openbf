@@ -84,32 +84,46 @@ impl RoundStats {
         &mut self.units[i]
     }
 
-    /// `Event::Kill`.
-    pub fn kill(&mut self, sim: &Sim, shooter: UnitHandle, victim: UnitHandle) {
+    #[cfg(test)]
+    fn kill(&mut self, sim: &Sim, shooter: UnitHandle, victim: UnitHandle) {
+        let k = &sim.units[shooter.index as usize];
+        let d = &sim.units[victim.index as usize];
+        let amount = if shooter == victim {
+            points::SUICIDE
+        } else if sim.allied(k.team, d.team) {
+            points::TEAM_KILL
+        } else {
+            points::kill(d.is_player, sim.hero_unit(d))
+        };
+        self.kill_with_points(sim, shooter, victim, amount);
+    }
+
+    /// `Event::Kill` and its score from the event feed.
+    pub(crate) fn kill_with_points(
+        &mut self,
+        sim: &Sim,
+        shooter: UnitHandle,
+        victim: UnitHandle,
+        amount: i32,
+    ) {
         let (s, v) = (shooter.index as usize, victim.index as usize);
         let (Some(k), Some(d)) = (sim.units.get(s), sim.units.get(v)) else {
             return;
         };
-        let human = d.is_player;
-        let hero = sim.hero_class(k.team) == Some(k.spec.class);
+        let hero = sim.hero_unit(k);
         let same_team = sim.allied(k.team, d.team);
         self.died(v);
         let me = self.unit(s);
+        me.score(amount, hero);
         if s == v {
             me.kills -= 1;
-            me.score(points::SUICIDE, hero);
             return;
         }
         if same_team {
             me.kills -= 1;
-            me.score(points::TEAM_KILL, hero);
             me.team_kills += 1;
         } else {
             me.kills += 1;
-            me.score(
-                points::kill(human, sim.hero_class(d.team) == Some(d.spec.class)),
-                hero,
-            );
             // BF2's kill stat groups kills no more than four seconds apart.
             // Its survivalist check uses the last health sample (B2 359243–359276).
             if me
@@ -131,15 +145,16 @@ impl RoundStats {
         *self.unit(v).killed_by.entry(s).or_default() += 1;
     }
 
+    pub(crate) fn score(&mut self, unit: UnitHandle, amount: i32, hero: bool) {
+        self.unit(unit.index as usize).score(amount, hero);
+    }
+
     /// `Event::EnvDeath`: the world killed him.
     pub fn env_death(&mut self, sim: &Sim, unit: UnitHandle) {
         let i = unit.index as usize;
         self.died(i);
         let u = &sim.units[i];
-        self.unit(i).score(
-            points::SUICIDE,
-            sim.hero_class(u.team) == Some(u.spec.class),
-        );
+        self.unit(i).score(points::SUICIDE, sim.hero_unit(u));
     }
 
     fn died(&mut self, i: usize) {
@@ -335,14 +350,7 @@ pub fn screens(
                     posts: r.posts as i32,
                     me: i == viewer.index as usize,
                     personal: vec![
-                        (
-                            label("ifs.stats.points", "Player Points"),
-                            r.ordinary_points().to_string(),
-                        ),
-                        (
-                            label("ifs.stats.hero_points", "Hero Points"),
-                            r.hero_points.to_string(),
-                        ),
+                        (label("ifs.stats.score", "Points"), r.points.to_string()),
                         (label("ifs.stats.kills", "Kills"), r.kills.to_string()),
                         (label("ifs.stats.deaths", "Deaths"), u.deaths.to_string()),
                         (String::new(), String::new()),
@@ -587,7 +595,7 @@ mod tests {
             .find(|r| r.name == format!("U{}", a[0].index))
             .unwrap();
         assert_eq!(row.personal[0].1, row.points.to_string());
-        assert_eq!(row.personal[9].1, format!("U{} (2)", b[0].index), "Bait");
+        assert_eq!(row.personal[8].1, format!("U{} (2)", b[0].index), "Bait");
         assert_eq!(s.career.values[3].1, "1.50");
         assert_eq!(s.career.values[5].1, "3");
         assert_eq!(s.career.medals[0].info, "6");
@@ -632,8 +640,8 @@ mod tests {
         }
         assert!(s.awards[0][2].winner.ends_with("0:01"));
         let personal = &s.selected().unwrap().personal;
-        assert_eq!(personal[0].1, "2", "Player Points excludes Hero Points");
-        assert_eq!(personal[1].1, "5");
+        assert_eq!(personal[0], ("Points".into(), "7".into()));
+        assert_eq!(u.ordinary_points(), 2);
         assert!(personal
             .iter()
             .any(|(label, value)| label == "Head Shots" && value == "2"));
@@ -662,11 +670,11 @@ mod tests {
         );
         let row = s.selected().unwrap();
         assert!(
-            row.personal[5].1.ends_with(" 0:36"),
+            row.personal[4].1.ends_with(" 0:36"),
             "{:?}",
-            row.personal[5]
+            row.personal[4]
         );
-        assert!(row.personal[6].1.starts_with('W'), "{:?}", row.personal[6]);
+        assert!(row.personal[5].1.starts_with('W'), "{:?}", row.personal[5]);
     }
 
     #[test]

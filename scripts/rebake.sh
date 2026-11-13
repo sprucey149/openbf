@@ -409,11 +409,14 @@ if want side; then
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear "$A1"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" wok wok_inf_wookie wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher "$A1"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gar gar_inf_nabooguard gar_weap_inf_rifle,gar_weap_inf_pistol,gar_weap_inf_fusioncutter,gar_weap_inf_launcher,gar_weap_inf_thermaldetonator "$A1"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A1"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle "$A1"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" snw hot_inf_wampa hot_inf_weap_l_smash,hot_inf_weap_r_smash,hot_inf_weap_head_smash "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle,des_weap_inf_fusioncutter "$A2"
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
@@ -545,12 +548,12 @@ if want classes; then
   "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/ALL.LVL)"          "$OUT/classes/bf2_all.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/IMP.LVL)"          "$OUT/classes/bf2_imp.ron"
-  for side in ewk wok geo des; do
+  for side in ewk wok geo des gun gar; do
     "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
+  done
+  for side in ewk wok geo des gun snw; do
     "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
   done
-  # A mission's extra side (game::vehicle_pads::mission_side_files).
-  "$BAKE" classes "$(ci "$B1" SIDE/GUN.LVL)"          "$OUT/classes/bf1_gun.ron"
   # BF2's building turrets (card VTUR2): their PROPs; each map bake pulls the
   # models, collision and skel nodes of the TUR classes its worlds place.
   "$BAKE" classes "$(ci "$B2" SIDE/TUR.LVL)"          "$OUT/classes/bf2_tur.ron"

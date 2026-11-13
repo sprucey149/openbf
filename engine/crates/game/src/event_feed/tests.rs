@@ -704,7 +704,7 @@ fn hero_victim_uses_disc_points_and_hero_message_even_after_death() {
 }
 
 #[test]
-fn hero_earned_points_are_displayed_separately_and_do_not_rank_future_offers() {
+fn hero_earned_points_show_in_the_total_and_do_not_rank_future_offers() {
     let mut s = scene();
     s.sim.heroes = Some(core::sim::heroes::Heroes::new([None, Some(0)]));
     let me = s.me;
@@ -717,10 +717,67 @@ fn hero_earned_points_are_displayed_separately_and_do_not_rank_future_offers() {
         }],
     );
     let stats = s.feed.stats(&s.sim, me);
-    assert_eq!((stats.points, stats.hero_points), (1, 1));
+    assert_eq!(stats.points, 1);
     assert_eq!(s.feed.round().units[me.index as usize].ordinary_points(), 0);
     crate::heroes::scores(&mut s.sim, &s.feed);
     assert_eq!(s.sim.heroes.as_ref().unwrap().points[me.index as usize], 0);
+}
+
+#[test]
+fn contextual_kill_and_flag_capture_score_are_shared_by_hud_and_results() {
+    use core::sim::ctf::CtfState;
+    let mut s = scene();
+    let me = s.me;
+    let enemy = s.rebels[0];
+    let mate = s.mate;
+    let cp = s.sim.cps[0].def.pos;
+    s.sim.units[enemy.index as usize].soldier.pos = cp;
+    s.sim.units[mate.index as usize].soldier.pos = cp;
+    s.sim.ctf = Some(CtfState::new_ground_one_flag(5, cp, Vec3::ZERO, Vec3::ZERO));
+
+    happen(
+        &mut s,
+        &[
+            Event::Kill {
+                shooter: me,
+                victim: enemy,
+            },
+            Event::FlagDropped {
+                flag: 0,
+                unit: enemy,
+                team: 0,
+                pos: cp,
+            },
+        ],
+    );
+    assert_eq!(s.feed.stats(&s.sim, me).points, 6);
+    happen(
+        &mut s,
+        &[
+            Event::FlagDropped {
+                flag: 0,
+                unit: mate,
+                team: 1,
+                pos: cp,
+            },
+            Event::Kill {
+                shooter: me,
+                victim: mate,
+            },
+        ],
+    );
+    assert_eq!(s.feed.stats(&s.sim, me).points, -6);
+    happen(
+        &mut s,
+        &[Event::FlagCaptured {
+            flag: 0,
+            unit: me,
+            team: 1,
+        }],
+    );
+    assert_eq!(s.feed.stats(&s.sim, me).points, 4);
+    assert_eq!(s.feed.battle_stats().points, 4);
+    assert_eq!(s.feed.round().units[me.index as usize].points, 4);
 }
 
 /// Card EVMSG's gate (`re-event-messages.md` §1.1): only a human's death
@@ -920,7 +977,7 @@ fn post_and_team_names_fall_back() {
     let t = texts();
     assert_eq!(t.post_name("level.hoth.cp5"), "Echo Base");
     assert_eq!(t.post_name("level.hoth.cp9"), "Command Post");
-    assert_eq!(t.team_name("gun"), "GUN");
+    assert_eq!(t.team_name("gun"), "Gungans");
     assert_eq!(title_case("PIER ONE"), "Pier One");
     assert_eq!(title_case("WESTERN LZ"), "Western LZ");
     assert_eq!(

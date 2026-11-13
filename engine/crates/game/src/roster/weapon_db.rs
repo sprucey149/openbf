@@ -122,7 +122,7 @@ pub(super) fn charge_points(db: &ClassDb, ord_name: &str, ord: &mut OrdnanceClas
     if let Some(&first) = cuts.first() {
         let sticky = db
             .engine_base(name)
-            .is_some_and(|base| base.eq_ignore_ascii_case("sticky"));
+            .is_some_and(|base| matches!(base, "sticky" | "grenade"));
         let upto = |end: usize| {
             let src = ListSrc {
                 props: &props[..end],
@@ -509,6 +509,15 @@ pub(super) fn sticky_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
     charge_points(db, ord_name, &mut ord);
     ord.impact = impact_look(db, ord_name);
     let mut sticky = core::sticky::StickyClass::replay(chain_props(db, ord_name), db.is_bf2());
+    if db.engine_base(ord_name) == Some("grenade") {
+        // BF1 grenade ordnance uses authored friction and rebound, and never
+        // sticks. See FUN_0027b068 and FUN_0027b640.
+        sticky.stick_mask = 0;
+        sticky.grenade_bounce = Some((
+            db.prop_f32(ord_name, "Rebound").unwrap_or(0.5),
+            db.prop_f32(ord_name, "Friction").unwrap_or(0.2),
+        ));
+    }
     sticky.explosion = db
         .prop(ord_name, "ExplosionExpire")
         .and_then(|e| explosion_class(db, e));
@@ -518,13 +527,20 @@ pub(super) fn sticky_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
 }
 
 /// A thrown weapon (card GREN, `analysis/re-grenades.md` §3, §4): a
-/// `grenade` weapon class whose ordnance is a `sticky`. `Ok(None)` for any
-/// other pair — the Gungan `grenade` ordnance base, a dispenser, a cannon.
+/// `grenade` weapon class with a sticky or bouncing grenade projectile.
 /// The weapon is the base parse plus the grenade class's defaults and keys
 /// ([`Thrown::apply`]); the ordnance takes the shell's defaults (`LifeSpan`
 /// 3.0, `Velocity` 35.0, §4.1) where the bolt's would apply, the sticky's
 /// own keys replayed in file order, and its `ExplosionExpire` class.
 pub fn thrown_weapon_from_db(db: &ClassDb, weapon: &str) -> Result<Option<WeaponClass>> {
+    thrown_weapon(db, weapon, false)
+}
+
+pub(super) fn thrown_weapon(
+    db: &ClassDb,
+    weapon: &str,
+    allow_bouncing: bool,
+) -> Result<Option<WeaponClass>> {
     let is = |class: &str, base: &str| {
         db.engine_base(class)
             .is_some_and(|b| b.eq_ignore_ascii_case(base))
@@ -538,7 +554,7 @@ pub fn thrown_weapon_from_db(db: &ClassDb, weapon: &str) -> Result<Option<Weapon
     let ord_name = db
         .resolve(&ord_name)
         .with_context(|| format!("ordnance class {ord_name} not in class db"))?;
-    if !is(ord_name, "sticky") {
+    if !(is(ord_name, "sticky") || allow_bouncing && is(ord_name, "grenade")) {
         return Ok(None);
     }
     let ord = sticky_ordnance(db, ord_name);

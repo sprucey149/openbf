@@ -30,7 +30,13 @@ pub const OPTION_ROWS: usize = 5;
 /// `ScriptCB_GetNetGameDefaults`' non-network branch).
 pub const MAX_BOTS: i32 = 16;
 /// The modes the port's sim can run (§7 dims the rest).
-pub const PORT_MODES: [Mode; 4] = [Mode::Con, Mode::Eli, Mode::Assault, Mode::OneFlag];
+pub const PORT_MODES: [Mode; 5] = [
+    Mode::Con,
+    Mode::Eli,
+    Mode::Assault,
+    Mode::OneFlag,
+    Mode::Hunt,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Game {
@@ -670,7 +676,13 @@ impl InstantAction {
             .iter()
             .map(|&p| match p {
                 ModePick::One(m) => ListRow {
-                    text: self.texts.mode(m).0.to_owned(),
+                    text: if m == Mode::Hunt
+                        && matches!(self.picked_map, MapPick::One(i) if self.maps[i].game == Game::Bf1)
+                    {
+                        format!("{} (openbf)", self.texts.mode(m).0)
+                    } else {
+                        self.texts.mode(m).0.to_owned()
+                    },
                     enabled: self.mode_live(p),
                     icon: Some(m.icon()),
                     icon2: None,
@@ -900,7 +912,7 @@ impl InstantAction {
                     key: m.key.clone(),
                     game: m.game,
                     mode: e.mode,
-                    armies: e.side.armies().map(str::to_owned),
+                    armies: m.launch_armies(e.mode, e.side),
                     label: m.label.clone(),
                 }
             })

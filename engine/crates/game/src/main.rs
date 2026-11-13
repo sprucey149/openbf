@@ -606,10 +606,9 @@ impl BattleSetup {
             .as_deref()
             .map(game::mission::MissionDef::load)
             .transpose()?;
-        if let Some(mission) = mission
-            .as_ref()
-            .filter(|m| v.mode == "eli" || m.is_hero_assault())
-        {
+        if let Some(mission) = mission.as_ref().filter(|m| {
+            matches!(v.mode.as_str(), "eli" | "hunt") || m.is_hero_assault() || m.is_hunt()
+        }) {
             anyhow::ensure!(
                 mission.mode == v.mode,
                 "mission mode {} differs from --mode {}",
@@ -651,7 +650,11 @@ impl BattleSetup {
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: v.mode == "eli",
-            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
+            score_limit: if v.mode == "hunt" {
+                50
+            } else {
+                core::sim::deathmatch::ASSAULT_SCORE_LIMIT
+            },
             classes_dir: v.classes.clone().unwrap_or_else(|| {
                 v.map
                     .parent()

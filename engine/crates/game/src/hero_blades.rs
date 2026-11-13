@@ -206,7 +206,8 @@ fn edges(db: &ClassDb, weapon: &str) -> Result<Vec<Edge>> {
     }
     for edge in &result {
         if !edge.blade.length.is_finite()
-            || edge.blade.length <= 0.0
+            || edge.blade.length < 0.0
+            || (edge.blade.length == 0.0 && !edge.blade.texture.is_empty())
             || !edge.blade.width.is_finite()
             || edge.blade.width <= 0.0
         {
@@ -225,9 +226,20 @@ pub fn blade_bindings(root: &Path, db: &ClassDb, weapon: &str) -> Result<Vec<Bla
     edges(db, weapon)?
         .into_iter()
         .map(|edge| {
+            // Wampa paw and head edges have zero base length. Their combo
+            // supplies an absolute attack length, so retain the posed axis.
+            let track_length = if edge.blade.length == 0.0 {
+                1.0
+            } else {
+                edge.blade.length
+            };
             let local = match &edge.geometry {
                 Some(model) => {
-                    let path = manifest::weapon_nodes_path(&root.join("side_bf2"), model);
+                    let side = root.join("side_bf2");
+                    let mut path = manifest::weapon_nodes_path(&side, model);
+                    if !pak::is_file(&path) {
+                        path = manifest::weapon_nodes_path(&side.join("locals"), model);
+                    }
                     let nodes: manifest::WeaponNodes = ron::from_str(
                         &pak::read_to_string(&path)
                             .with_context(|| format!("{} (rebake BF2 heroes)", path.display()))?,
@@ -250,12 +262,12 @@ pub fn blade_bindings(root: &Path, db: &ClassDb, weapon: &str) -> Result<Vec<Bla
                     let start = Vec3::from(node.pos);
                     BladeSegment {
                         start,
-                        end: start + Vec3::from(axes[2]) * edge.blade.length,
+                        end: start + Vec3::from(axes[2]) * track_length,
                     }
                 }
                 None => BladeSegment {
                     start: edge.offset,
-                    end: edge.offset + edge.direction * edge.blade.length,
+                    end: edge.offset + edge.direction * track_length,
                 },
             };
             physical::edge(local)?;
@@ -366,8 +378,14 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
         .ok_or_else(|| anyhow!("{soldier}: class database has no asset root"))?;
     let geometry =
         scalar(db, soldier, "GeometryName").ok_or_else(|| anyhow!("{soldier}: no GeometryName"))?;
-    let side = root.join("side_bf2");
-    let path = side.join("soldiers").join(format!("{geometry}.combos.ron"));
+    let stock = root.join("side_bf2");
+    let combo_path = Path::new("soldiers").join(format!("{geometry}.combos.ron"));
+    let side = if pak::is_file(stock.join(&combo_path)) {
+        stock
+    } else {
+        stock.join("locals")
+    };
+    let path = side.join(combo_path);
     let combos: ComboSet = ron::from_str(
         &pak::read_to_string(&path)
             .with_context(|| format!("{} (rebake BF2 heroes)", path.display()))?,
@@ -407,13 +425,15 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
         .and_then(|b| asset.skeleton.index_of(&b.blade.bone));
     let throw_edges: Vec<BladeSegment> = bindings
         .iter()
-        .filter(|b| b.blade.bone.eq_ignore_ascii_case("hp_weapons"))
+        .filter(|b| b.blade.length > 0.0 && b.blade.bone.eq_ignore_ascii_case("hp_weapons"))
         .map(|b| b.local)
         .collect();
     let deflect_edges = bindings.first().map_or_else(Vec::new, |first| {
         bindings
             .iter()
-            .filter(|b| b.blade.bone.eq_ignore_ascii_case(&first.blade.bone))
+            .filter(|b| {
+                b.blade.length > 0.0 && b.blade.bone.eq_ignore_ascii_case(&first.blade.bone)
+            })
             .map(|b| b.local)
             .collect()
     });

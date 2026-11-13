@@ -420,7 +420,7 @@ impl Scene {
     /// conquest posts on 1 of 16 BF2 maps. BF1 maps have no layers
     /// (everything is in the base world). Returns the layer name.
     pub fn apply_mode_layer(&mut self, mode: &str) -> Option<String> {
-        self.manifest.spawn_only_posts = mode == "eli";
+        self.manifest.spawn_only_posts = matches!(mode, "eli" | "hunt");
         let idx = mode_layer_index(&self.manifest, mode)?;
         let layer = self.manifest.layers.remove(idx);
         self.manifest.regions.extend(layer.regions);
@@ -1563,7 +1563,9 @@ pub struct BattleLoad {
 pub fn load_battle_scene(dir: &Path, mode: &str) -> Result<(Scene, BattleLoad)> {
     let mut scene = load_scene(dir)?;
     anyhow::ensure!(
-        mode != "eli" || authored_mode_layer_index(&scene.manifest, mode).is_some(),
+        (mode == "hunt" && scene.manifest.source_game == "bf1")
+            || !matches!(mode, "eli" | "hunt")
+            || authored_mode_layer_index(&scene.manifest, mode).is_some(),
         "map has no authored world layer for mode {mode}"
     );
     let layer = scene.apply_mode_layer(mode);

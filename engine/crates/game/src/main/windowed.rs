@@ -1260,8 +1260,8 @@ impl App {
         }
         let mut mission = pick.map(|p| p.mission);
         anyhow::ensure!(
-            self.mode != "eli" || mission.is_some(),
-            "Hero Assault requires a mission"
+            !matches!(self.mode.as_str(), "eli" | "hunt") || mission.is_some(),
+            "Hero Assault and Hunt require a mission"
         );
         anyhow::ensure!(
             mission.as_ref().is_none_or(|m| m.mode == self.mode),
@@ -1269,6 +1269,7 @@ impl App {
             self.mode
         );
         let assault = mission.as_ref().is_some_and(|m| m.is_hero_assault());
+        let hunt = self.mode == "hunt";
         if let Some(m) = mission.as_mut().filter(|_| assault) {
             m.ai_alive_cap = self.session.ass_numbots.max(0) as u32;
         }
@@ -1285,16 +1286,18 @@ impl App {
             ai: None,
             // Explicit CLI cap is separate from the percentage setting.
             ai_cap: space.then_some(self.session.ass_numbots.max(0) as u32),
-            team_size_pct: (!assault && !space).then_some(self.session.con_numbots as u32),
+            team_size_pct: (!assault && !space && !hunt).then_some(self.session.con_numbots as u32),
             // Calibrated map tickets, scaled by the shell percentage.
             tickets: 250,
             tickets_set: false,
-            ticket_pct: if assault || space {
+            ticket_pct: if assault || space || hunt {
                 100
             } else {
                 self.session.con_mult.max(10) as u32
             },
-            time_limit: if assault || space {
+            time_limit: if hunt {
+                self.session.hun_timer.max(1) as u32
+            } else if assault || space {
                 0
             } else {
                 self.session.con_timer.max(0) as u32
@@ -1308,7 +1311,11 @@ impl App {
             player_team,
             heroes: game::heroes::rules(&self.session),
             dlc_heroes: self.session.dlc_heroes,
-            score_limit: self.session.ass_score.max(0) as u32,
+            score_limit: if hunt {
+                self.session.hun_score.max(1) as u32
+            } else {
+                self.session.ass_score.max(0) as u32
+            },
         };
         // Release the renderer field borrow while installing the other App resources.
         let mut renderer = self.renderer.take().expect("loaded renderer");

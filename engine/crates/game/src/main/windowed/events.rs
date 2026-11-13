@@ -93,7 +93,6 @@ impl winit::application::ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        // Released while winit's display and surface are still alive.
         self.idle = None;
         self.release_mouse();
     }

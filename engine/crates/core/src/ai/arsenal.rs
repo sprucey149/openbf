@@ -523,8 +523,8 @@ pub(super) fn is_crowd(own: u32, foes: u32) -> bool {
 /// team on foot, other than `u`, within [`FRIEND_RADIUS`] of `at` — where he
 /// stands, or where his walk takes him in `lead` seconds? No grenade is
 /// chosen for, or thrown at, such a point.
-fn friend_by(sim: &Sim, u: &Unit, at: Vec3, lead: f32) -> bool {
-    let near = |p: Vec3| p.distance_squared(at) < FRIEND_RADIUS * FRIEND_RADIUS;
+fn friend_near(sim: &Sim, u: &Unit, at: Vec3, lead: f32, radius: f32) -> bool {
+    let near = |p: Vec3| p.distance_squared(at) < radius * radius;
     sim.alive_units().any(|(_, o)| {
         o.team == u.team
             && !std::ptr::eq(o, u)
@@ -670,11 +670,17 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
                 .claim
                 .is_some_and(|c| c.0 == target && sim.tick < c.1)
             && (mine.is_none() || h.index < me.index)
-    }) || (u
-        .held
-        .iter()
-        .any(|w| sim.weapon_classes[w.class].thrown.is_some())
-        && friend_by(sim, u, e.soldier.pos, 0.0));
+    }) || if sim.is_hunt() {
+        u.held.iter().any(|w| {
+            let wc = &sim.weapon_classes[w.class];
+            wc.thrown.is_some() && friend_near(sim, u, e.soldier.pos, 0.0, throw_clearance(sim, wc))
+        })
+    } else {
+        u.held
+            .iter()
+            .any(|w| sim.weapon_classes[w.class].thrown.is_some())
+            && friend_near(sim, u, e.soldier.pos, 0.0, FRIEND_RADIUS)
+    };
     let bf2 = sim.ground_rules == GroundRules::Bf2;
     let cands = slots(sim, u);
     // Card HVYW: a rider's vehicle is the target, and the choice is for it.
@@ -853,6 +859,7 @@ fn in_hand<'a>(sim: &'a Sim, u: &Unit) -> Armed<'a> {
     let class = &sim.weapon_classes[u.weapon_class];
     match class.ordnance.kind {
         OrdKind::Shell => Armed::Lobbed(class),
+        OrdKind::Lobbed if sim.is_hunt() && class.thrown.is_some() => Armed::Lobbed(class),
         _ => Armed::Hand,
     }
 }
@@ -912,6 +919,22 @@ pub(super) fn lob(s: f32, g: f32, d: Vec3) -> (f32, f32, bool) {
     (-0.5 * g * t2, t2.sqrt(), ok)
 }
 
+/// A spear checks its actual line and a Booma its blast radius. Applying
+/// the thermal detonator's 12 m exclusion to both stops the entire group
+/// throwing once they close to their own short weapon range.
+fn throw_clearance(sim: &Sim, wc: &WeaponClass) -> f32 {
+    if !sim.is_hunt() {
+        return FRIEND_RADIUS;
+    }
+    let Some(sticky) = &wc.ordnance.sticky else {
+        return FRIEND_RADIUS;
+    };
+    if sticky.grenade_bounce.is_none() && !wc.ordnance.shot_is_direct() {
+        return FRIEND_RADIUS;
+    }
+    sticky.explosion.as_ref().map_or(0.0, |x| x.damage_outer)
+}
+
 /// The point a bot looks at to lob `gc` at `target` (moving at `vel`), seen
 /// from its `eye`, and whether the round reaches. The arc starts at the hand
 /// a grenade leaves ([`crate::weapon::Thrown::hand`], with the soldier turned
@@ -923,7 +946,7 @@ pub(super) fn lob(s: f32, g: f32, d: Vec3) -> (f32, f32, bool) {
 /// OURS: no throw into a wall — the arc's first nine tenths, as four chords,
 /// have to be clear of the world (a bot at a door frame threw at its own
 /// feet) — none at a target that will be inside `MinRange` when the
-/// grenade lands, and none where a friend is or walks to ([`friend_by`]).
+/// grenade lands, and none where a friend is or walks to ([`friend_near`]).
 pub(super) fn lob_aim(
     sim: &Sim,
     u: &Unit,
@@ -958,10 +981,11 @@ pub(super) fn lob_aim(
         let s = 0.9 * t * k / 4.0;
         origin + v0 * s + Vec3::Y * (0.5 * g * s * s)
     };
+    let clearance = throw_clearance(sim, gc);
     let ok = ok
         && Vec3::new(lead.x, 0.0, lead.z).length() > gc.ai_range[0]
         && (0..4).all(|k| crate::perception::los(sim, at(k as f32), at(k as f32 + 1.0)))
-        && !friend_by(sim, u, origin + lead, t + FRIEND_LEAD);
+        && (clearance == 0.0 || !friend_near(sim, u, origin + lead, t + FRIEND_LEAD, clearance));
     (eye + dir * d.length().max(1.0), ok)
 }
 

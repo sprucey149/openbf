@@ -105,6 +105,9 @@ pub(super) struct GunReport {
     /// here (the arc does not reach, the target is outside its band or too
     /// steep). A throw under way is not one.
     pub no_throw: bool,
+    /// Short-range Hunt weapons must close inside their usable range before
+    /// the mover chooses a stationary firing position.
+    pub close_on: Option<Vec3>,
 }
 
 /// Yaw (engine convention: 0 = −Z, positive left) that faces `dir`.
@@ -243,7 +246,13 @@ pub(super) fn run(
         (AimRequest::Enemy(e, _), Armed::Thrown(gc, _) | Armed::Lobbed(gc)) => {
             let c = e.capsule().center();
             let err = seen_aim(sim, me, st, eye, e, 1e6, wc, false) - c;
-            let mut feet = e.soldier.pos + Vec3::new(err.x, 0.0, err.z);
+            let destination =
+                if sim.is_hunt() && gc.ordnance.sticky.is_some() && gc.ordnance.shot_is_direct() {
+                    c
+                } else {
+                    e.soldier.pos
+                };
+            let mut feet = destination + Vec3::new(err.x, 0.0, err.z);
             if let Some(off) = barred.and_then(|h| super::tokn::short_of(sim, me, h, eye, feet)) {
                 feet += off;
             }
@@ -386,6 +395,7 @@ pub(super) fn run(
             .or_else(|| friend_in_blast(sim, me, u, at, wc))
         });
     let mut no_throw = false;
+    let mut close_on = None;
     let target = enemy
         .map(|e| {
             let ready =
@@ -412,6 +422,9 @@ pub(super) fn run(
                 // A shell in the hands (the mortar) is fired by the hand's
                 // own gate: the aim on its arc is the whole change (issue
                 // #29); the gate is the hand weapon's, unchanged.
+                Armed::Lobbed(gc) if sim.is_hunt() && gc.thrown.is_some() => {
+                    reaches && range > gc.ai_range[0] && range < gc.ai_range[2]
+                }
                 Armed::Hand | Armed::Lobbed(_) if hand.is_some() => {
                     range <= wc.shot_range() && !st.arm.spare
                 }
@@ -451,6 +464,20 @@ pub(super) fn run(
                         && barred.is_none() && !st.arm.spare
                 }
             };
+            if sim.is_hunt() && !in_reach {
+                let throw = match armed {
+                    Armed::Lobbed(gc) | Armed::Thrown(gc, _) if gc.thrown.is_some() => Some(gc),
+                    _ => None,
+                };
+                let thrown_out_of_range =
+                    throw.is_some_and(|gc| !reaches || range >= gc.ai_range[2]);
+                let cone_out_of_range = wc.emitter.as_ref().is_some_and(|emitter| {
+                    emitter.is_cone() && range >= wc.shot_range().min(wc.ai_range[2])
+                });
+                if thrown_out_of_range || cone_out_of_range {
+                    close_on = enemy.filter(|e| e.mount.is_none()).map(|e| e.soldier.pos);
+                }
+            }
             no_throw = matches!(armed, Armed::Thrown(_, true)) && !in_reach;
             let tol = match hand {
                 Some(_) => super::proxy::hand::tolerance(range),
@@ -529,6 +556,7 @@ pub(super) fn run(
         line,
         range,
         no_throw,
+        close_on,
     })
 }
 

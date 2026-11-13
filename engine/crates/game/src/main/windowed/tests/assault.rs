@@ -39,6 +39,98 @@ fn start(a: &mut App, name: &str) -> anyhow::Result<()> {
 }
 
 #[test]
+#[ignore = "owned Hunt assets and headless GPU; scripts/gpu_tests.sh --battle-launch"]
+fn shell_hunt_launches_every_matchup_with_playable_models_and_session_rules() {
+    use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SpawnStage};
+
+    let Some(root) = std::env::var_os("OPENBF_HUNT_ROOT").map(PathBuf::from) else {
+        eprintln!("SKIP: set OPENBF_HUNT_ROOT to a Hunt bake");
+        return;
+    };
+    let mut a = app(&root);
+    a.mode = "hunt".into();
+    a.session.hun_timer = 10;
+    a.session.hun_score = 70;
+    let mut maps: Vec<_> = std::fs::read_dir(root.join("missions"))
+        .unwrap()
+        .filter_map(|entry| {
+            let file = entry.ok()?.file_name().into_string().ok()?;
+            file.strip_suffix("_hunt.ron").map(str::to_owned)
+        })
+        .collect();
+    maps.sort();
+    assert_eq!(maps.len(), 14);
+    for name in maps {
+        let mission = game::mission::MissionDef::load(
+            &root.join("missions").join(format!("{name}_hunt.ron")),
+        )
+        .unwrap();
+        a.current = Some(ui::shell::Launch {
+            key: name.clone(),
+            game: if mission.source_game == "bf1" {
+                ui::shell::Game::Bf1
+            } else {
+                ui::shell::Game::Bf2
+            },
+            mode: ui::shell::Mode::Hunt,
+            armies: mission.factions(),
+            label: name.clone(),
+        });
+        start(&mut a, &name).unwrap_or_else(|e| panic!("{name}: {e:#}"));
+        let walk = &mut a.walk.as_mut().unwrap().0;
+        let sim = &walk.sim;
+        assert!(sim.is_hunt(), "{name}");
+        assert_eq!(sim.team_points(), Some(([0, 0], 70)), "{name}");
+        assert_eq!(sim.time_limit, Some(600), "{name}");
+        assert_eq!(sim.spawn_stage[0], core::sim::SpawnStage::Side, "{name}");
+        let vis = a.soldier_vis.as_ref().unwrap();
+        for team in 0..2 {
+            assert!(!sim.spawn_points(team).is_empty(), "{name} team {team}");
+            for (class, visual) in walk.teams[usize::from(team)].classes.iter().enumerate() {
+                assert!(
+                    vis.asset_for(team, class as u8).is_some(),
+                    "{name} team {team} class {} has no body model",
+                    visual.name
+                );
+            }
+        }
+
+        let team = match name.as_str() {
+            "bf2_hot1" | "tat2" => 0,
+            _ => 1,
+        };
+        let press = |walk: &mut WalkSim, pick| {
+            walk.step_tick(&[PadState {
+                buttons: SPAWN_ACCEPT,
+                pick,
+                ..Default::default()
+            }]);
+            walk.step_tick(&[PadState::default()]);
+        };
+        press(walk, Some(ScreenPick::Side(team)));
+        assert_eq!(walk.sim.spawn_stage[0], SpawnStage::Map, "{name}");
+        let post = walk
+            .sim
+            .cps
+            .iter()
+            .position(|cp| cp.owner == Some(team))
+            .expect("playable side has a spawn post");
+        press(walk, Some(ScreenPick::Post(post as u16)));
+        assert_eq!(walk.sim.spawn_stage[0], SpawnStage::Class, "{name}");
+        press(walk, None);
+        for _ in 0..core::TICK_HZ * 20 {
+            if walk.sim.unit(walk.player).is_some_and(|unit| unit.alive) {
+                break;
+            }
+            walk.step_tick(&[PadState::default()]);
+        }
+        let unit = walk.sim.unit(walk.player).expect("player slot");
+        assert!(unit.alive, "{name}: native player spawned");
+        assert_eq!(unit.team, team, "{name}");
+    }
+}
+
+#[test]
 #[ignore = "owned Hero Assault assets and headless GPU; scripts/gpu_tests.sh --battle-launch"]
 fn shell_assault_preserves_authored_seats_options_and_spawn_flow() {
     use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SpawnStage};

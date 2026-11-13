@@ -95,6 +95,14 @@ impl SoldierVisuals {
         walk: &WalkSim,
     ) -> Self {
         let mut vis = Self::load(r, assets_dir, &scene.manifest.source_game, &walk.teams);
+        let game = &scene.manifest.source_game;
+        if walk.sim.is_hunt() {
+            for (team, template) in walk.teams.iter().enumerate() {
+                if !crate::roster::FACTION_ORDER.contains(&template.faction.as_str()) {
+                    vis.load_native_team(r, assets_dir, game, team as u8, template);
+                }
+            }
+        }
         for (&team, template) in &walk.native_teams {
             vis.load_native_team(r, assets_dir, &scene.manifest.source_game, team, template);
         }
@@ -120,8 +128,7 @@ impl SoldierVisuals {
                         .join(format!("side_{native}"))
                         .join("weapons")
                         .join(format!("{name}.glb"));
-                    let model_game = if !walk.native_teams.is_empty() && pak::is_file(&native_model)
-                    {
+                    let model_game = if !vis.native.is_empty() && pak::is_file(&native_model) {
                         &native
                     } else {
                         game

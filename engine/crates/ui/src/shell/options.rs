@@ -58,7 +58,7 @@ impl Group {
     pub fn honoured(self) -> bool {
         matches!(
             self,
-            Group::Global | Group::Hero | Group::Conquest | Group::Assault
+            Group::Global | Group::Hero | Group::Conquest | Group::Assault | Group::Hunt
         )
     }
 }

@@ -138,7 +138,7 @@ pub mod message_color {
 }
 
 /// The player's statistics as BF2 publishes them (`re-event-messages.md` §5
-/// [V] `FUN_003b5de8`): five numbers, of which the 1-player layout shows the
+/// [V] `FUN_003b5de8`): four numbers, of which the 1-player layout shows the
 /// points and the kills; a change in any of the five opens the pop-up.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HudStats {
@@ -147,7 +147,6 @@ pub struct HudStats {
     /// Kills less two per team kill.
     pub kills: i32,
     pub deaths: i32,
-    pub hero_points: i32,
     pub captures: i32,
 }
 
@@ -672,7 +671,6 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             ("points", st.points),
             ("kills", st.kills),
             ("deaths", st.deaths),
-            ("heropoints", st.hero_points),
             ("captures", st.captures),
         ] {
             let event = format!("player1.statistic.{name}");

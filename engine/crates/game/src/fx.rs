@@ -871,7 +871,7 @@ impl Fx {
             walk.teams[1].faction.as_str(),
         ];
         if game.eq_ignore_ascii_case("bf2")
-            && (walk.sim.heroes.is_some() || walk.sim.deathmatch.is_some())
+            && (walk.sim.heroes.is_some() || walk.sim.hero_assault())
         {
             for side in ["all", "imp", "rep", "cis"] {
                 if !factions.contains(&side) {

@@ -118,8 +118,7 @@ const SAME_LINE_TICKS: u64 = 4 * core::TICK_HZ as u64;
 
 /// BF2's points per event (§9: the table at 0x5fedf0, filled at run time by
 /// `ScriptCB_SetPlayerStatsPoints`, read from two HOT1 save states [M]; the
-/// events by their call sites [V]). Not built: the 2-point kills beside a
-/// post (events 0x17, 0x18, 0x1b, 0x1d, 0x1e).
+/// events by their call sites [V]).
 pub mod points {
     /// Event 0: killing an AI soldier (`FUN_00362268`).
     pub const KILL_AI: i32 = 1;
@@ -141,6 +140,9 @@ pub mod points {
     pub const SUICIDE: i32 = -1;
     /// Event 4: killing a teammate.
     pub const TEAM_KILL: i32 = -2;
+    pub const TEAM_KILL_CARRIER: i32 = -12;
+    pub const OBJECTIVE_KILL: i32 = 2;
+    pub const FLAG_CAPTURE: i32 = 10;
     /// Event 0x15: capturing a post as the unit longest in its capture
     /// region (`FUN_00357440` → `FUN_00363a30`).
     pub const CAPTURE: i32 = 5;
@@ -285,7 +287,20 @@ impl Texts {
             .as_ref()
             .and_then(|l| l.text(&format!("common.sides.{faction}.name")))
             .filter(|t| !t.trim().is_empty())
-            .map_or_else(|| faction.to_uppercase(), str::to_owned)
+            .map_or_else(
+                || match faction {
+                    "ewk" => "Ewoks".into(),
+                    "geo" => "Geonosians".into(),
+                    "wok" => "Wookiees".into(),
+                    "gun" => "Gungans".into(),
+                    "gar" => "Naboo Guard".into(),
+                    "snw" => "Wampas".into(),
+                    "tusken" => "Tusken Raiders".into(),
+                    "jawa" => "Jawas".into(),
+                    _ => faction.to_uppercase(),
+                },
+                str::to_owned,
+            )
     }
 
     /// A post's name by its key path (`level.<map>.<label>`: [D] the path
@@ -443,8 +458,9 @@ pub struct EventFeed {
     owners: Vec<Option<u8>>,
     /// Per unit: the post whose capture region it stands in, and since when.
     inside: Vec<Option<(u32, u64)>>,
-    points: i32,
-    kills: i32,
+    // Last carrier of each dropped flag, until the flag resets.
+    last_flag_carriers: Vec<Option<UnitHandle>>,
+    viewer: Option<usize>,
     battle: crate::profile::BattleStats,
     /// Every soldier's round, for the stats pages (issue #50).
     round: crate::round_stats::RoundStats,
@@ -492,8 +508,8 @@ impl EventFeed {
             seen: None,
             owners: Vec::new(),
             inside: Vec::new(),
-            points: 0,
-            kills: 0,
+            last_flag_carriers: Vec::new(),
+            viewer: None,
             round: Default::default(),
             battle: Default::default(),
             order: None,
@@ -803,6 +819,54 @@ impl EventFeed {
         self.out.push(HudMessage { text, color });
     }
 
+    // B2 FUN_00362268 (359079–359237) awards one post bonus and can
+    // add multiple flag bonuses. Any such award replaces the base kill.
+    fn kill_points(&self, sim: &Sim, shooter: UnitHandle, victim: UnitHandle) -> i32 {
+        let k = &sim.units[shooter.index as usize];
+        let v = &sim.units[victim.index as usize];
+        if shooter == victim {
+            return points::SUICIDE;
+        }
+        let carried = |index| {
+            self.last_flag_carriers
+                .get(index)
+                .copied()
+                .flatten()
+                .is_some_and(|last: UnitHandle| last.index == victim.index)
+        };
+        if sim.allied(k.team, v.team) {
+            return if (0..self.last_flag_carriers.len()).any(carried) {
+                points::TEAM_KILL_CARRIER
+            } else {
+                points::TEAM_KILL
+            };
+        }
+        let pos = v.soldier.pos;
+        let at_post = sim.cps.iter().take(16).any(|cp| {
+            cp.owner.is_none_or(|owner| !sim.allied(v.team, owner))
+                && ((cp.owner == Some(k.team) && cp.def.capture.contains(pos))
+                    || cp.def.pos.distance_squared(pos) < core::sim::POST_KILL_RANGE_SQ)
+        });
+        let mut bonuses = i32::from(at_post);
+        if let Some(ctf) = &sim.ctf {
+            for (index, flag) in ctf.flags.iter().enumerate() {
+                bonuses += i32::from(carried(index));
+                let own_flag = ctf.mode == core::sim::ctf::CtfMode::TwoFlag && flag.team == v.team;
+                if !own_flag
+                    && flag.current_pos.distance_squared(pos) <= 100.0
+                    && flag.carrier() != Some(shooter)
+                {
+                    bonuses += 1;
+                }
+            }
+        }
+        if bonuses == 0 {
+            points::kill(v.is_player, sim.hero_unit(v))
+        } else {
+            bonuses * points::OBJECTIVE_KILL
+        }
+    }
+
     /// Read the sim's events if its tick is new. `viewer` is the local
     /// player: the lines are coloured for his team and the statistics are
     /// his. Call once per stepped tick (and freely more often).
@@ -812,6 +876,17 @@ impl EventFeed {
             return 0;
         }
         self.seen = Some(tick);
+        self.viewer = Some(viewer.index as usize);
+        self.last_flag_carriers
+            .resize(sim.ctf.as_ref().map_or(0, |ctf| ctf.flags.len()), None);
+        // CTF drops a dead carrier's flag after combat on this tick.
+        for event in &sim.events {
+            if let Event::FlagDropped { flag, unit, .. } = *event {
+                if let Some(last) = self.last_flag_carriers.get_mut(usize::from(flag)) {
+                    *last = Some(unit);
+                }
+            }
+        }
         let mut positive = 0;
         let my_team = sim.units[viewer.index as usize].team;
         // A team as the viewer's team sees it (§1.2).
@@ -915,7 +990,8 @@ impl EventFeed {
                     self.battle.hits = self.battle.hits.saturating_add(1);
                 }
                 Event::Kill { shooter, victim } => {
-                    self.round.kill(sim, shooter, victim);
+                    let points = self.kill_points(sim, shooter, victim);
+                    self.round.kill_with_points(sim, shooter, victim, points);
                     let (k, v) = (
                         &sim.units[shooter.index as usize],
                         &sim.units[victim.index as usize],
@@ -946,19 +1022,8 @@ impl EventFeed {
                         };
                         self.say(text, relation(v.team), tick);
                     }
-                    if shooter == viewer {
-                        if shooter == victim {
-                            self.kills -= 1;
-                            self.points += points::SUICIDE;
-                        } else if sim.allied(k.team, v.team) {
-                            self.kills -= 1;
-                            self.points += points::TEAM_KILL;
-                        } else {
-                            self.kills += 1;
-                            let points = points::kill(v.is_player, hero);
-                            self.points += points;
-                            positive += points as u32;
-                        }
+                    if shooter == viewer && points > 0 && !sim.hero_unit(k) {
+                        positive += points as u32;
                     }
                 }
                 Event::CriticalHit {
@@ -987,9 +1052,6 @@ impl EventFeed {
                         };
                         let text = fill(&self.texts.line(if hero { FLED } else { DIED }), &[&name]);
                         self.say(text, message_color::NEUTRAL, tick);
-                    }
-                    if unit == viewer {
-                        self.points += points::SUICIDE;
                     }
                     self.round.env_death(sim, unit);
                 }
@@ -1035,6 +1097,22 @@ impl EventFeed {
                         .and_then(|v| v.team);
                     self.round.vehicle(sim, killer, team);
                 }
+                Event::FlagCaptured { flag, unit, .. } => {
+                    let u = &sim.units[unit.index as usize];
+                    let hero = sim.hero_unit(u);
+                    self.round.score(unit, points::FLAG_CAPTURE, hero);
+                    if unit == viewer && !hero {
+                        positive += points::FLAG_CAPTURE as u32;
+                    }
+                    if let Some(last) = self.last_flag_carriers.get_mut(usize::from(flag)) {
+                        *last = None;
+                    }
+                }
+                Event::FlagReset { flag } | Event::FlagReturned { flag, .. } => {
+                    if let Some(last) = self.last_flag_carriers.get_mut(usize::from(flag)) {
+                        *last = None;
+                    }
+                }
                 Event::Captured { cp, team } => {
                     if POST_LINES {
                         let text = fill(
@@ -1053,18 +1131,15 @@ impl EventFeed {
                         } else {
                             points::CAPTURE_ASSIST
                         };
-                        self.points += points;
-                        positive += points as u32;
+                        if !sim.hero_unit(&sim.units[viewer.index as usize]) {
+                            positive += points as u32;
+                        }
                     }
                     // Every soldier's share, for the stats pages (issue #50).
                     for i in 0..sim.units.len() {
                         if let Some(first) = self.capture_credit(sim, sim.handle(i), cp, team) {
                             let u = &sim.units[i];
-                            self.round.capture(
-                                i,
-                                first,
-                                sim.hero_class(u.team) == Some(u.spec.class),
-                            );
+                            self.round.capture(i, first, sim.hero_unit(u));
                         }
                     }
                 }
@@ -1436,15 +1511,11 @@ impl EventFeed {
 
     /// The viewer's statistics as BF2 publishes them (§5).
     pub fn stats(&self, sim: &Sim, viewer: UnitHandle) -> HudStats {
+        let row = self.round.units.get(viewer.index as usize);
         HudStats {
-            points: self.points,
-            kills: self.kills,
+            points: row.map_or(0, |row| row.points),
+            kills: row.map_or(0, |row| row.kills),
             deaths: sim.units[viewer.index as usize].deaths as i32,
-            hero_points: self
-                .round
-                .units
-                .get(viewer.index as usize)
-                .map_or(0, |u| u.hero_points),
             captures: self.battle.captures.min(i32::MAX as u32) as i32,
         }
     }
@@ -1463,7 +1534,10 @@ impl EventFeed {
 
     pub fn battle_stats(&self) -> crate::profile::BattleStats {
         crate::profile::BattleStats {
-            points: self.points,
+            points: self
+                .viewer
+                .and_then(|i| self.round.units.get(i))
+                .map_or(0, |row| row.points),
             ..self.battle
         }
     }

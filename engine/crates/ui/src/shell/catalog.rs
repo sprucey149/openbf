@@ -86,6 +86,14 @@ pub(super) const BF2_MAPS: [(&str, &[Mode], &[Mode]); 24] = {
 
 const OPTIONAL_ASSAULT: [&str; 1] = ["cor1"];
 
+fn bf1_hunt_era(code: &str) -> Option<Era> {
+    match code {
+        "end1" | "tat1" | "tat2" => Some(Era::Gcw),
+        "geo1" | "kas1" | "kas2" | "nab1" | "nab2" => Some(Era::Cw),
+        _ => None,
+    }
+}
+
 /// The BF1 IA maps (§6 "BF1 table"): code, name key, English, has a Clone
 /// Wars mission, has a Galactic Civil War one. Conquest only.
 pub(super) const BF1_MAPS: [(&str, &str, &str, bool, bool); 16] = [
@@ -239,6 +247,10 @@ impl MapEntry {
             return false;
         }
         let mut pairs = self.missions.iter().filter(|(m, _)| *m == mode);
+        if mode == Mode::Hunt {
+            return matches!(side, Side::Era(era) if self.modes[era.index()].contains(&mode))
+                && pairs.next().is_some();
+        }
         match side {
             Side::Era(era) => {
                 self.modes[era.index()].contains(&mode)
@@ -249,6 +261,15 @@ impl MapEntry {
             }
             Side::Mixed(_) => mode != Mode::Eli && pairs.next().is_some(),
         }
+    }
+
+    pub(super) fn launch_armies(&self, mode: Mode, side: Side) -> [String; 2] {
+        if mode == Mode::Hunt {
+            if let Some((_, pair)) = self.missions.iter().find(|(m, _)| *m == mode) {
+                return pair.clone();
+            }
+        }
+        side.armies().map(str::to_owned)
     }
 }
 
@@ -323,7 +344,13 @@ pub fn catalog(
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        let modes = [cw, gcw].map(|on| if on { vec![Mode::Con] } else { Vec::new() });
+        let mut modes = [cw, gcw].map(|on| if on { vec![Mode::Con] } else { Vec::new() });
+        if let Some(era) = bf1_hunt_era(code) {
+            let key = find(Game::Bf1, code).unwrap_or_else(|| format!("bf1_{code}"));
+            if !missions(&key, Mode::Hunt).is_empty() {
+                modes[era.index()].push(Mode::Hunt);
+            }
+        }
         out.push(entry(Game::Bf1, code, name.clone(), name, modes));
     }
     out.sort_by_key(|m| m.label.to_lowercase());

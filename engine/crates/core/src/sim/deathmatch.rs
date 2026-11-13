@@ -11,6 +11,7 @@ pub struct Deathmatch {
     pub score_limit: u32,
     pub members: [u32; 2],
     pub points: [u32; 2],
+    hunt_points_per_kill: Option<[u8; 2]>,
 }
 
 impl Deathmatch {
@@ -19,11 +20,27 @@ impl Deathmatch {
             score_limit,
             members,
             points: [0; 2],
+            hunt_points_per_kill: None,
         }
+    }
+
+    pub fn hunt(score_limit: u32, members: [u32; 2], points_per_kill: [u8; 2]) -> Self {
+        Self {
+            hunt_points_per_kill: Some(points_per_kill),
+            ..Self::new(score_limit, members)
+        }
+    }
+
+    pub fn is_hero_assault(&self) -> bool {
+        self.hunt_points_per_kill.is_none()
     }
 
     pub(crate) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"DEATHMATCH");
+        if let Some(weights) = self.hunt_points_per_kill {
+            eat(b"HUNT");
+            eat(&weights);
+        }
         eat(&self.score_limit.to_le_bytes());
         for team in 0..2 {
             eat(&self.members[team].to_le_bytes());
@@ -33,6 +50,18 @@ impl Deathmatch {
 }
 
 impl Sim {
+    pub fn is_hunt(&self) -> bool {
+        self.deathmatch
+            .as_ref()
+            .is_some_and(|round| !round.is_hero_assault())
+    }
+
+    pub fn hero_assault(&self) -> bool {
+        self.deathmatch
+            .as_ref()
+            .is_some_and(Deathmatch::is_hero_assault)
+    }
+
     pub(super) fn deathmatch_kill(&mut self, killer: UnitHandle, victim_team: u8) {
         if self.outcome.is_some() {
             return;
@@ -47,7 +76,10 @@ impl Sim {
             return;
         }
         let team = usize::from(killer_team);
-        deathmatch.points[team] += 1;
+        let points = deathmatch
+            .hunt_points_per_kill
+            .map_or(1, |weights| weights[team]);
+        deathmatch.points[team] += u32::from(points);
         if deathmatch.points[team] >= deathmatch.score_limit {
             self.outcome = Some(killer_team);
             self.events.push(Event::TeamDefeated {

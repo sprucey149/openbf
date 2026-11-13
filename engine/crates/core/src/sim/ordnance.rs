@@ -489,7 +489,7 @@ impl Sim {
         // Sticky inherits the shell/bullet/base charge evaluation
         // (B1 FUN_0027eb18:203821; B2 FUN_003207e8:313521).
         let blend = class.ordnance.charged(charge);
-        let g = Sticky::new(
+        let mut g = Sticky::new(
             origin,
             dir * blend.velocity,
             sc,
@@ -498,6 +498,7 @@ impl Sim {
             u.team,
             wc,
         );
+        g.direct = (self.is_hunt() && blend.damage > 0.0).then_some((charge, 0.0, u.is_player));
         self.stickies.push(g);
         self.events.push(Event::Throw {
             unit: owner,
@@ -545,6 +546,9 @@ impl Sim {
         if !g.moving {
             return true;
         }
+        if let Some((_, age, _)) = g.direct.as_mut() {
+            *age += dt;
+        }
         let prev = g.pos;
         let level = self.water_under(prev);
         g.fly(dt, level.is_some_and(|l| prev.y < l));
@@ -564,6 +568,34 @@ impl Sim {
         let first = g.touched.is_none();
         if first {
             g.touched = Some(self.tick);
+        }
+        // BF2 FUN_00320fe8 and BF1 FUN_0027f1e8 apply direct damage on
+        // entity contact, whether the projectile sticks or bounces.
+        if let Some((charge, age, player)) = g.direct {
+            let desc = self.weapon_classes[wc]
+                .ordnance
+                .damage_desc_charged(age, false, charge);
+            match what {
+                Surface::Unit { handle, .. } => {
+                    let scale = self.buff_scale(Some(g.owner), handle);
+                    if let Some(damage) =
+                        self.shot_strikes_unit(g.team, player, handle, &desc, scale, true)
+                    {
+                        self.finish_direct_damage(handle, Some(g.owner), damage, age, dir);
+                    }
+                }
+                Surface::Vehicle { handle, .. } => {
+                    self.damage_vehicle_by(
+                        handle,
+                        &desc,
+                        1.0,
+                        Some(g.owner),
+                        Some(g.team),
+                        Some(dir),
+                    );
+                }
+                _ => {}
+            }
         }
         let room = self.push_off_room(point, n);
         let out = g.contact(&class, point, n, what, room);

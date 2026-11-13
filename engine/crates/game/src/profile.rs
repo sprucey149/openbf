@@ -10,7 +10,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn yes() -> bool {
     true
@@ -241,8 +241,12 @@ impl Profile {
     /// Load the profile, or a fresh default one (also when the file is
     /// unreadable — a corrupt profile must never block play; it is backed up).
     pub fn load_or_default() -> Profile {
-        let path = Self::path();
-        match std::fs::read_to_string(&path) {
+        Self::load_from(&Self::path())
+    }
+
+    /// Load from an explicit file, with the same recovery as the default path.
+    pub fn load_from(path: &Path) -> Profile {
+        match std::fs::read_to_string(path) {
             Ok(txt) => match ron::from_str::<Profile>(&txt) {
                 Ok(p) => p,
                 Err(e) => {
@@ -250,7 +254,7 @@ impl Profile {
                         "profile {} unreadable ({e}); starting fresh",
                         path.display()
                     );
-                    let _ = std::fs::rename(&path, path.with_extension("ron.bad"));
+                    let _ = std::fs::rename(path, path.with_extension("ron.bad"));
                     Profile::fresh()
                 }
             },
@@ -267,14 +271,18 @@ impl Profile {
 
     /// Atomic save.
     pub fn save(&self) -> Result<()> {
-        let path = Self::path();
+        self.save_to(&Self::path())
+    }
+
+    /// Atomically save to an explicit file.
+    pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
         }
         let txt = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
         let tmp = path.with_extension("ron.tmp");
         std::fs::write(&tmp, txt).with_context(|| tmp.display().to_string())?;
-        std::fs::rename(&tmp, &path).with_context(|| path.display().to_string())?;
+        std::fs::rename(&tmp, path).with_context(|| path.display().to_string())?;
         Ok(())
     }
 
@@ -640,10 +648,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openbf-profile-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("nested").join("profile.ron");
-        // SAFETY: test-only env override, single-threaded use of this var.
-        unsafe { std::env::set_var("OPENBF_PROFILE", &path) };
-        assert_eq!(Profile::path(), path);
-        let mut p = Profile::load_or_default();
+        let mut p = Profile::load_from(&path);
         assert_eq!(p.career, Career::default());
         p.settings.assist_intensity = 0.7;
         p.settings.last_map = Some("tat2".into());
@@ -652,16 +657,15 @@ mod tests {
         p.career.class_kills.insert("all_inf_wookiee".into(), 5);
         p.career.medals[4] = 32;
         p.settings.career_awards = false;
-        p.save().expect("save");
-        let back = Profile::load_or_default();
+        p.save_to(&path).expect("save");
+        let back = Profile::load_from(&path);
         assert_eq!(back, p);
         assert_eq!(back.career.wins, 1);
         // Corrupt file → fresh profile, original kept as .bad.
         std::fs::write(&path, "(not ron").unwrap();
-        let fresh = Profile::load_or_default();
+        let fresh = Profile::load_from(&path);
         assert_eq!(fresh.career, Career::default());
         assert!(path.with_extension("ron.bad").exists());
-        unsafe { std::env::remove_var("OPENBF_PROFILE") };
         let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]

@@ -70,6 +70,18 @@ pub struct MissionDef {
     pub map: String,
     pub mode: String,
     pub source_game: String,
+    /// Per-team kill values authored by the original Hunt mission.
+    #[serde(default)]
+    pub hunt_points_per_kill: Option<[u8; 2]>,
+    /// BF1 Hunt adaptation kill values by difficulty. BF2 uses its authored values.
+    #[serde(default)]
+    pub hunt_kill_values: Option<[[u8; 2]; 4]>,
+    /// Hunt-only health percentages, in mission team order, by difficulty.
+    #[serde(default)]
+    pub hunt_health_percent: Option<[[u16; 2]; 4]>,
+    /// Hunt-only population by difficulty, including the player.
+    #[serde(default)]
+    pub hunt_combatants: Option<[[u32; 2]; 4]>,
     /// `SetHeroClass(team, class)` from the BF2 PS2 mission (Lua team numbers).
     #[serde(default)]
     pub heroes: Vec<(u8, String)>,
@@ -590,6 +602,10 @@ impl MissionDef {
 
     pub fn is_hero_assault(&self) -> bool {
         self.mode == "eli"
+    }
+
+    pub fn is_hunt(&self) -> bool {
+        self.mode == "hunt"
     }
 
     pub fn tickets(&self) -> [u32; 2] {
