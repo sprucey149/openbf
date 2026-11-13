@@ -11,7 +11,7 @@ use crate::{
     collision::{HullFilter, Layers},
     fmath, nav, perception,
     sim::{buttons, PadState, Sim},
-    soldier::{BotJet, Stance},
+    soldier::{BotJet, GroundRules, Stance},
     unit::UnitHandle,
 };
 use glam::{Vec3, Vec3Swizzles};
@@ -128,9 +128,28 @@ fn hop_spot(sim: &Sim, tk: &Tick) -> Option<Vec3> {
         (!barred
             && !line_blocked
             && hop_sky_clear(sim, me, spot)
-            && hop_floor_clear(sim, pos, spot))
+            && hop_floor_clear(sim, pos, spot)
+            && discretionary_landing_clear(sim, pos, spot, tk.u.consts.max_speed))
         .then_some(spot)
     })
+}
+
+fn discretionary_landing_clear(sim: &Sim, from: Vec3, goal: Vec3, speed: f32) -> bool {
+    if sim.ground_rules != GroundRules::Bf1 || sim.mission_ai.allow_blind_jet_jumps {
+        return true;
+    }
+    let (floor, normal) = sim.ground_point_under_n(goal, from.y);
+    let landing = goal.with_y(floor);
+    // OURS: on BF1 Kamino, a discretionary jet can drop out early or coast
+    // past the goal. Require continuous deck and room to coast. Authored jet
+    // arcs still cross gaps. measure: original hover release and deck
+    // clearance, and Jango's observed travel past release.
+    let heading = (goal - from).with_y(0.0).normalize_or_zero();
+    let coast = landing + heading * (speed * 3.0);
+    floor > crate::collision::NO_GROUND
+        && normal.y >= sim.ground_rules.climb_min_ny()
+        && sim.floor_line(from, landing)
+        && sim.floor_line(landing, coast)
 }
 
 fn hop_floor_clear(sim: &Sim, from: Vec3, spot: Vec3) -> bool {
@@ -289,6 +308,7 @@ pub(super) fn run(
                         && c.jet_fuel_cost > 0.0
                         && c.max_speed > 0.0
                         && distance / c.max_speed <= (s.fuel - c.jet_fuel_initial) / c.jet_fuel_cost
+                        && discretionary_landing_clear(sim, s.pos, *p, c.max_speed)
                 });
         let hint = if !c.jet_hover && sim.tick >= st.jet.next_hint {
             st.jet.next_hint = after(tk.me, sim.tick, 3, 8, HINT_SALT);

@@ -37,7 +37,7 @@ AI opt-in, audio and remaining original-game comparisons.
 ## Deliberate port choices
 
 [D] Following the [canonical hero decision](plan/FEATURE_SET.md#heroes),
-BF1 identities use BF2's playable kits and the existing hero manager:
+BF1 Conquest uses BF2's playable kits and the existing hero manager:
 killable heroes, health drain and kill healing, player offers and the
 optional AI eligibility switch. This does not import BF1 invincibility or
 automatic NPC spawning. BF2 HUD applies on these maps too.
@@ -56,33 +56,42 @@ automatic NPC spawning. BF2 HUD applies on these maps too.
   weapons and first-person bank. BF2 saber bindings and textures load on
   BF1 maps. Force effects add BF2 layers after existing native layers.
 - BF1 battles import missing sound dependencies for the selected hero
-  kits from BF2 Geonosis (Mace/Dooku), Jabba's Palace (Jedi Luke) and
-  Hoth (pilot Luke/Vader). Existing BF1 definitions retain priority.
+  kits from the BF2 maps that use them. Existing BF1 definitions retain priority.
   Imported sample paths and stream/music records retain their source.
   Thus coincident BF1 sound names can keep their native presentation.
 
-The five-name conversion is applied after the canonical mission overlay,
-so supported source combinations share the assignments. Unknown BF1 hero
-names fail generation rather than choosing a substitute. BF1 Hunt
-adaptations explicitly discard the source encounter's Conquest heroes.
-BF2 Hunt and Hero Assault retain their separate roster paths.
+The stock identity conversion and the faction-specific choices below apply
+after the canonical mission overlay. Supported source combinations share
+the assignments. Unknown BF1 hero names fail generation. Hunt and Hero
+Assault have their own roster paths.
+
+### BF1 map-specific matchups
+
+The maintainer approved five Conquest matchups for variety using base-game
+BF2 kits. The mission generator keys the changes by map, era and faction.
+The other 23 BF1 Conquest missions keep their original hero identities.
+
+- Bespin: Cloud City, Galactic Civil War — Han Solo and Boba Fett.
+- Kamino: Tipoca City, Clone Wars — Obi-Wan Kenobi and Jango Fett.
+- Kashyyyk: Islands, Clone Wars — Yoda and Count Dooku.
+- Kashyyyk: Docks, Galactic Civil War — Chewbacca and Darth Vader.
+- Naboo: Theed, Clone Wars — Obi-Wan Kenobi and Darth Maul.
 
 ## Verification boundary
 
-The focused checks enumerate all 56 assignments, retain infantry, load all
-five BF2 bodies and animation banks, resolve sound takes/themes and stage
+The focused checks enumerate all 56 assignments, retain infantry, load the
+12 BF2 bodies and animation banks, resolve sound takes/themes and stage
 the shared manager's player offer/accept and optional AI path. Headless
-GPU checks cover body/hilt/blade asset submission. These checks require
+GPU checks cover bodies, held weapons and blade submission. These checks require
 locally owned data and missions generated into an owned output folder.
 They do not certify a packaged Instant Action round, live controller
 acceptance, animation feel, audio mix or an original-game comparison.
 
-[V, bounded port gap] The owned-data census finds no selectable native
-BF1 foley row for Mace or Dooku on the 14 CW missions (28 assignments).
-Their keys are `rep_inf_soldier` / `cis_inf_soldier`; the cached BF1 hero
-classes use the same keys. GCW hero foley rows resolve. This slice does not
-invent movement sounds or claim that the originals were silent; the original
-fallback and the port's missing CW hero movement foley remain to be traced.
-Both Luke classes' inherited first-person models are absent from the local
-bake; the other three kits author none. First-person bank selection is
-implemented, but first-person presentation remains unchecked.
+[V, bounded port gap] The first owned-data census found no selectable
+native BF1 foley row for Mace or Dooku on the 14 CW missions. With the
+varied roster the same bake reports 27 of 28 CW assignments without a
+native row. Jango on Kamino and the GCW assignments resolve. Original
+fallback behavior and the port's CW hero movement foley remain open.
+Both Luke arms loaded on a fresh mixed bake in the earlier integration.
+Live first-person presentation and weapon models across bake profiles
+remain open.

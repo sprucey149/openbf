@@ -30,7 +30,14 @@ class Bf1HeroTests(unittest.TestCase):
     def test_owned_bf1_scripts_supply_all_56_assignments(self):
         if not Path(g.PS2_BF1).is_dir():
             self.skipTest('requires owned BF1 PS2 mission bytecode')
-        count, snow = 0, []
+        approved = {
+            'bes2a': {'all': 'all_hero_hansolo_tat', 'imp': 'imp_hero_bobafett'},
+            'kam1c': {'rep': 'rep_hero_obiwan', 'cis': 'cis_hero_jangofett'},
+            'kas1c': {'rep': 'rep_hero_yoda'},
+            'kas2i': {'all': 'all_hero_chewbacca'},
+            'nab2c': {'rep': 'rep_hero_obiwan', 'cis': 'cis_hero_darthmaul'},
+        }
+        count, snow, changed = 0, [], set()
         with patch.object(g, 'PS2_ONLY', True), patch.object(g, 'GAMEPLAY_REFERENCES', {}):
             for key, game, planet, eras in g.MAPS:
                 if game != 'bf1':
@@ -38,8 +45,12 @@ class Bf1HeroTests(unittest.TestCase):
                 for era, (stem, script) in eras.items():
                     original = g.facts_from_calls(g.calls40(g.load_ps2(game, script)))
                     built = g.build(key, game, planet, era, stem, script)
-                    self.assertEqual(built.heroes, [(t, g.BF1_HERO_CLASSES[n.lower()])
-                                                   for t, n in sorted(original['heroes'].items())])
+                    stock = g.mission_heroes('bf1', 'con', original)
+                    expected = [(team, approved.get(script, {}).get(original['names'][team], hero))
+                                for team, hero in stock]
+                    self.assertEqual(built.heroes, expected, script)
+                    if built.heroes != stock:
+                        changed.add(script)
                     self.assertEqual(len(built.heroes), 2, script)
                     self.assertEqual(built.classes, [original['classes'][1], original['classes'][2]])
                     self.assertEqual(built.class_load_order, [])
@@ -49,6 +60,7 @@ class Bf1HeroTests(unittest.TestCase):
                             snow.append(script)
                     count += len(built.heroes)
         self.assertEqual(count, 56)
+        self.assertEqual(changed, set(approved))
         self.assertEqual(sorted(snow), ['hot1i', 'rhn1i'])
 
     def test_owned_bf1_hunt_adaptations_keep_heroes_out(self):

@@ -115,6 +115,43 @@ fn a_marked_hop_landing_needs_room_to_coast() {
 }
 
 #[test]
+fn kamino_discretionary_jet_needs_deck_before_and_after_the_goal() {
+    use crate::collision::{Body, Layers, Shape};
+
+    let (mut sim, _) = sim(true);
+    sim.heightfield = None;
+    sim.ground_rules = GroundRules::Bf1;
+    sim.mission_ai.allow_blind_jet_jumps = false;
+    let deck = |start: f32, end: f32| {
+        Body::with_layers(
+            glam::Mat4::from_translation(Vec3::new((start + end) * 0.5, -1.0, 0.0)),
+            Shape::Box {
+                half: Vec3::new((end - start) * 0.5, 1.0, 5.0),
+            },
+            Layers::ALL,
+        )
+    };
+    sim.collision.push_body(deck(-5.0, 25.0));
+    let target = Vec3::X * 20.0;
+    assert!(!discretionary_landing_clear(&sim, Vec3::ZERO, target, 8.0));
+    sim.collision.push_body(deck(25.0, 60.0));
+    assert!(discretionary_landing_clear(&sim, Vec3::ZERO, target, 8.0));
+    assert!(!discretionary_landing_clear(
+        &sim,
+        Vec3::ZERO,
+        target + Vec3::Z * 8.0,
+        8.0
+    ));
+    sim.ground_rules = GroundRules::Bf2;
+    assert!(discretionary_landing_clear(
+        &sim,
+        Vec3::ZERO,
+        target + Vec3::Z * 8.0,
+        8.0
+    ));
+}
+
+#[test]
 fn bots_out_of_a_fight_do_not_hop_and_replay_identically() {
     for hover in [false, true] {
         let run = || {

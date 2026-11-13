@@ -636,7 +636,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/water_anim.rs` 1204 — moving water: FFT ocean, foam and flat-water bob · `Ocean`, `Foam`, `WaterMotion`, `cells_in_range`, `cell_draws`; unwrapped f64 water time and CPU cell routing; module header owns whole-cell far-pass limits and `analysis/re-water.md` references.
 - `game/src/weather.rs` 931 — precipitation, wind, rain-shadow cell selection and splash draws · `Weather`, `Precip`, `Wind`, `Shadow`, `View`, `cell_walk`; module header and `analysis/re-weather.md`.
 - `game/src/sounds.rs` 1591 — runtime sound banks/stream lookup (the shell's with the CORE clicks: `load_shell`), map-specific SBD fire/equip/reload fallbacks, shared state, attenuation/bus/pan laws, engine/ambient loop voices, mixer handoff and instrumentation · `SoundLib`, `Refused`, `attenuation`, `Handed`, `AmbientHeard`, `AmbientTake`, `MusicTrack`, `load_for`, `for_battle`, `music`, `loop_voices`, `ambient_voices`, `ambient_heard`, `ambient_take`; playback methods live in the private child; black-box starts via `handed`; rules in module/API docs and `analysis/re-sound-distance.md` / `analysis/re-unit-chatter.md`; sublevel referees `game/tests/suite/sound_sublevels.rs`.
-- `game/src/sounds/bf1_heroes.rs` 142 — selected BF2 hero sound dependency imports, native-priority samples and cross-game stream/music resolution for BF1 Conquest.
+- `game/src/sounds/bf1_heroes.rs` 146 — selected BF2 hero sound dependency imports, native-priority samples and cross-game stream/music resolution for BF1 Conquest.
 - `game/src/sounds/mixing.rs` 105 — distance attenuation, per-ear levels, mixer conversion and authored bus gains · `attenuation`, `side`, `ears_3d`, `mixer_pair`, `bus_table`
 - `game/src/sounds/walker.rs` 25 — Walker weapon and movement sound routing.
 - `game/src/sounds/playback.rs` 831 — private SoundLib prepared voices, shared loop playback for engine and repair sources, one-shots, cries, station playback and layer scheduling · `play_loop_voice`, `play_loop_set`, `play_repair_loops`, `play_shield_loops`, `voice_take`, `play_voice`, `ask_line`, `play`, `play_2d`, `cry`, `cries`, `play_cries`, `station_ambient`, `play_station_ambient`, `start`, `tick`.
@@ -1147,7 +1147,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 ### Bot jet control and BF2 fuel HUD
 
-- `core/src/ai/jet.rs` 357 — rechargeable foot-bot jet scheduler, tactical sky/optional barrier-line clearance, committed flight and hash.
+- `core/src/ai/jet.rs` 381 — rechargeable foot-bot jet scheduler, sky and optional deck clearance, committed flight and hash.
 - `core/src/ai/jet/tests.rs` 701 — launch order, fuel/range gates, height steering and deterministic hops.
 - `game/tests/suite/jet_bots.rs` 274 — original class route eligibility, BF2 fuel-bar lifecycle, isolated Mustafar links with mission hazards and PS2-measured damage-region controls.
 - `game/tests/suite/jet_round.rs` 286 — seeded headless Mustafar traversal round: four jet troopers plan both links out and back, land alive without hazard contact or stalled progress, and replay every tick.

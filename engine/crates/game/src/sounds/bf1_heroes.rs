@@ -1,4 +1,4 @@
-//! BF2 sound dependencies of the five playable kits selected by BF1 missions.
+//! BF2 sound dependencies of the playable kits selected by BF1 missions.
 
 use super::{note_indexed, note_music, read_index, Bank, SoundLib};
 use crate::{classdb::fnv1a_lowercase as hash, roster};
@@ -38,6 +38,10 @@ impl SoundLib {
                 "rep_hero_macewindu" | "cis_hero_countdooku" => "bf2_geo1",
                 "all_hero_luke_jedi" => "bf2_tat3",
                 "all_hero_luke_pilot" | "imp_hero_darthvader" => "bf2_hot1",
+                "rep_hero_obiwan" | "cis_hero_jangofett" => "bf2_kam1",
+                "rep_hero_yoda" | "all_hero_chewbacca" => "bf2_kas2",
+                "all_hero_hansolo_tat" | "imp_hero_bobafett" => "tat2",
+                "cis_hero_darthmaul" => "bf2_nab2",
                 _ => continue,
             };
             sources.insert(donor);

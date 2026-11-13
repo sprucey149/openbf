@@ -172,6 +172,7 @@ fn bf1_heroes_all_assignments_assets_and_audio() {
                 eprintln!("HERO_FOLEY_GAP {} {} {:08x}", m.map, c.name, c.foley_class);
             }
             for sound in [
+                &audio.offer,
                 &audio.spawned,
                 &audio.defeated,
                 &audio.saber_ambient,
@@ -181,6 +182,10 @@ fn bf1_heroes_all_assignments_assets_and_audio() {
                 &c.cries.hurt,
                 &c.cries.death,
                 &c.cries.low_health,
+                &c.jet_look.turn_on,
+                &c.jet_look.turning_off,
+                &c.jet_look.turn_off,
+                &c.jet_look.engine,
             ]
             .into_iter()
             .flatten()
@@ -194,6 +199,19 @@ fn bf1_heroes_all_assignments_assets_and_audio() {
                 );
                 assert!(path.is_file(), "{}", path.display());
                 assert!(audio::decode(&path).unwrap().frames() > 0);
+            }
+            let kit = &walk.sim.classes[team][usize::from(hero)];
+            for slot in kit.slots.iter() {
+                let weapon = &walk.sim.weapon_classes[slot.weapon_class];
+                if let Some(sound) = &weapon.fire_sound {
+                    assert!(
+                        lib.take_path(sound, 0).is_some_and(|path| path.is_file()),
+                        "{} {} {}: {sound}",
+                        m.map,
+                        c.name,
+                        weapon.name,
+                    );
+                }
             }
             for entry in &c.cries.vo.entries {
                 assert!(lib.has(&entry.sound), "{} {}", c.name, entry.sound);
@@ -224,46 +242,79 @@ fn bf1_heroes_all_assignments_assets_and_audio() {
                 );
                 assert!(actual.rig.is_some());
                 assert!(!actual.asset.clips.is_empty());
-                assert!(
-                    c.anim.custom != Default::default(),
-                    "{} descriptors",
-                    c.name
-                );
+                if c.cries.hero.saber_ambient.is_some() {
+                    assert!(
+                        c.anim.custom != Default::default(),
+                        "{} descriptors",
+                        c.name
+                    );
+                }
             }
             count += 1;
         }
     }
     assert_eq!(count, 56);
-    assert_eq!(names.len(), 5);
+    assert_eq!(names.len(), 12);
 }
 
 #[test]
 #[ignore = "requires owned generated missions and BF1/BF2 bake"]
 fn bf1_heroes_player_offer_and_optional_ai_use_existing_manager() {
-    let m = missions()
-        .into_iter()
-        .find(|m| m.map == "bf1_bes1" && m.era.as_deref() == Some("cw") && m.mode == "con")
-        .unwrap();
-    assert_eq!(
-        player_and_ai_life(&m),
-        player_and_ai_life(&m),
-        "seeded hero path is repeatable"
-    );
+    let cases = [
+        (
+            "bf1_bes1",
+            "cw",
+            ["rep_hero_macewindu", "cis_hero_countdooku"],
+        ),
+        (
+            "bf1_bes2",
+            "gcw",
+            ["all_hero_hansolo_tat", "imp_hero_bobafett"],
+        ),
+        ("bf1_kam1", "cw", ["rep_hero_obiwan", "cis_hero_jangofett"]),
+        ("bf1_kas1", "cw", ["rep_hero_yoda", "cis_hero_countdooku"]),
+        (
+            "bf1_kas2",
+            "gcw",
+            ["all_hero_chewbacca", "imp_hero_darthvader"],
+        ),
+        ("bf1_nab2", "cw", ["rep_hero_obiwan", "cis_hero_darthmaul"]),
+    ];
+    let missions = missions();
+    for (map, era, expected) in cases {
+        let m = missions
+            .iter()
+            .find(|m| m.map == map && m.era.as_deref() == Some(era) && m.mode == "con")
+            .unwrap();
+        let [first, second] = m.factions();
+        let expected = if matches!(first.as_str(), "all" | "rep") {
+            expected
+        } else {
+            assert!(matches!(second.as_str(), "all" | "rep"));
+            [expected[1], expected[0]]
+        };
+        assert_eq!(
+            player_and_ai_life(m, expected),
+            player_and_ai_life(m, expected)
+        );
+    }
 }
 
-fn player_and_ai_life(m: &MissionDef) -> u64 {
+fn player_and_ai_life(m: &MissionDef, expected: [&str; 2]) -> u64 {
     let root = game::assets::baked_root();
     let mut reversed = FactionRoster {
         faction: m.teams[1].faction.clone(),
         classes: Vec::new(),
     };
     let swapped = game::heroes::append(&mut reversed, &root.join("classes"), Some(m), 0).unwrap();
-    assert_eq!(
-        reversed.classes[usize::from(swapped)].class,
-        "cis_hero_countdooku"
-    );
+    assert_eq!(reversed.classes[usize::from(swapped)].class, expected[1]);
     let mut foreign = FactionRoster {
-        faction: "all".into(),
+        faction: if m.era.as_deref() == Some("cw") {
+            "all"
+        } else {
+            "rep"
+        }
+        .into(),
         classes: Vec::new(),
     };
     assert!(game::heroes::append(&mut foreign, &root.join("classes"), Some(m), 0).is_none());
@@ -308,10 +359,10 @@ fn player_and_ai_life(m: &MissionDef) -> u64 {
     let bot = sim.handle(bot.index as usize);
     assert!(sim.is_hero(bot));
     let human_name = &teams[0].class(sim.unit(human).unwrap().spec.class).name;
-    assert_eq!(human_name, "rep_hero_macewindu");
+    assert_eq!(human_name, expected[0]);
     assert_eq!(
         teams[1].class(sim.unit(bot).unwrap().spec.class).name,
-        "cis_hero_countdooku"
+        expected[1]
     );
     let health = sim.unit(human).unwrap().health.cur;
     sim.step(&[PadState::default()]);
@@ -324,7 +375,7 @@ fn player_and_ai_life(m: &MissionDef) -> u64 {
 
 #[test]
 #[ignore = "headless GPU; requires owned generated missions and BF1/BF2 bake"]
-fn bf1_heroes_headless_bodies_and_blades() {
+fn bf1_heroes_headless_bodies_and_weapons() {
     let root = game::assets::baked_root();
     let mut renderer = render::Renderer::new_headless(320, 240).expect("headless GPU");
     let mut names = std::collections::BTreeSet::new();
@@ -365,17 +416,32 @@ fn bf1_heroes_headless_bodies_and_blades() {
         for (t, h) in heroes.into_iter().enumerate() {
             let body = vis.asset_for(t as u8, h).unwrap();
             assert!(!body.meshes.is_empty(), "hero body uploaded");
+            let class = walk.teams[t].class(h);
+            if class.weapon_geometry.is_some() {
+                assert!(
+                    vis.per_class[t][usize::from(h)].weapon.is_some(),
+                    "{} weapon uploaded",
+                    class.name
+                );
+            }
         }
-        assert!(!vis.saber_hilts(&walk).is_empty(), "hero hilt uploaded");
         let blades = vis.saber_draws(&walk);
-        assert!(
-            blades.iter().any(|d| d.key.x < -2.0),
-            "team 0 textured blade"
-        );
-        assert!(
-            blades.iter().any(|d| d.key.x > 2.0),
-            "team 1 textured blade"
-        );
+        for (team, hero) in heroes.into_iter().enumerate() {
+            let class = walk.teams[team].class(hero);
+            let has_blade = blades.iter().any(|draw| {
+                if team == 0 {
+                    draw.key.x < -2.0
+                } else {
+                    draw.key.x > 2.0
+                }
+            });
+            assert_eq!(
+                has_blade,
+                class.cries.hero.saber_ambient.is_some(),
+                "{} blade",
+                class.name
+            );
+        }
         let camera = render::Camera {
             position: Vec3::new(0.0, 1.5, -12.0),
             yaw: std::f32::consts::PI,
@@ -383,30 +449,22 @@ fn bf1_heroes_headless_bodies_and_blades() {
         };
         let draws = vis.draws(&walk);
         assert!(!draws.is_empty(), "posed hero bodies reach draw submission");
+        let mut weapons = vis.weapon_draws(&walk);
+        weapons.extend(vis.saber_hilts(&walk));
+        assert!(!weapons.is_empty(), "hero weapons reach draw submission");
         renderer.set_particles(Vec::new());
         renderer
-            .render_frame(
-                &camera,
-                &vis.saber_hilts(&walk),
-                &draws,
-                [0.1, 0.1, 0.1, 1.0],
-                None,
-            )
+            .render_frame(&camera, &weapons, &draws, [0.1, 0.1, 0.1, 1.0], None)
             .unwrap();
         assert!(
             renderer.frame_stats().submitted > 0,
             "hero draw lies inside capture frustum"
         );
         let without_blades = renderer.capture_rgba().unwrap().0;
+        let expect_blade_pixels = !blades.is_empty();
         renderer.set_particles(blades);
         renderer
-            .render_frame(
-                &camera,
-                &vis.saber_hilts(&walk),
-                &draws,
-                [0.1, 0.1, 0.1, 1.0],
-                None,
-            )
+            .render_frame(&camera, &weapons, &draws, [0.1, 0.1, 0.1, 1.0], None)
             .unwrap();
         let (pixels, width, height) = renderer.capture_rgba().unwrap();
         let blade_pixels = pixels
@@ -414,7 +472,11 @@ fn bf1_heroes_headless_bodies_and_blades() {
             .zip(without_blades.chunks_exact(4))
             .filter(|(a, b)| a != b)
             .count();
-        assert!(blade_pixels > 0, "textured blades reach pixels");
+        assert_eq!(
+            blade_pixels > 0,
+            expect_blade_pixels,
+            "textured blades reach pixels"
+        );
         eprintln!("HERO_BLADE_PIXELS {} {:?} {blade_pixels}", m.map, m.era);
         if let Some(dir) = std::env::var_os("OPENBF_TEST_ARTIFACTS") {
             let path =
@@ -428,7 +490,7 @@ fn bf1_heroes_headless_bodies_and_blades() {
             "rendered hero frame contains geometry"
         );
     }
-    assert_eq!(names.len(), 5);
+    assert_eq!(names.len(), 12);
 }
 
 fn flat_ground() -> core::heightfield::Heightfield {

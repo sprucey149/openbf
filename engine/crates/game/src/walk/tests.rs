@@ -1175,13 +1175,21 @@ fn a_ground_rider_lost_with_the_hull_holds_the_seat_view_past_four_seconds() {
 
 #[test]
 fn rc_flight_controls_follow_the_preference_in_ground_and_space_pilot_seats() {
+    use core::vehicle::flyer::{untilted, FlightPhase, FlyerParams};
     use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
     use input::FlightControls;
-    for space in [false, true] {
-        let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+    for (space, params) in [
+        (false, FlyerParams::default()),
+        (false, FlyerParams::bf2()),
+        (true, FlyerParams::bf2()),
+    ] {
+        let ground = (!space).then(flat_ground);
+        let mut walk = WalkSim::new(42, Vec3::ZERO, ground);
         if space {
             walk.sim.space_assault = Some(core::sim::SpaceAssault::new(10));
         }
+        let bf2 = params.bf2;
+        walk.sim.flyer_params = vec![Some(params)];
         let rc = FlightControls::RcMode2;
         assert_eq!(walk.flight_controls(rc), None);
         let flyer = walk.sim.spawn_vehicle(&VehicleSpec {
@@ -1205,6 +1213,30 @@ fn rc_flight_controls_follow_the_preference_in_ground_and_space_pilot_seats() {
             walk.flight_controls(rc.toggled()),
             Some(FlightControls::Classic)
         );
+
+        let aircraft = walk.sim.vehicle_mut(flyer).unwrap();
+        aircraft.pos.y = 50.0;
+        aircraft.flyer.phase = FlightPhase::Flying;
+        aircraft.flyer.lift = 1.0;
+        let level = aircraft.clone();
+        let mut kbm = crate::kbm::Kbm::default();
+        for (stick_y, nose_direction) in [(-1.0, 1.0), (1.0, -1.0)] {
+            *walk.sim.vehicle_mut(flyer).unwrap() = level.clone();
+            let controller = PadState {
+                ry: PadState::quantize(stick_y * core::sim::LOOK_SCALE),
+                ..PadState::default()
+            };
+            let layout = walk.flight_controls(rc).unwrap();
+            let pad = kbm.flyer_pad(layout.map_sticks(controller));
+            run_ticks(&mut walk, pad, 1);
+            let aircraft = walk.sim.vehicle(flyer).unwrap();
+            let nose_y = (untilted(aircraft) * Vec3::Z).y;
+            assert!(
+                nose_y * nose_direction > 0.0,
+                "bf2={bf2}, space={space}, right stick Y={stick_y}, nose Y={nose_y}"
+            );
+        }
+
         walk.sim.unseat_unit(walk.player);
         assert_eq!(walk.flight_controls(rc), None);
     }
