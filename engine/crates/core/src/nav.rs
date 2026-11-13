@@ -30,7 +30,7 @@
 
 mod barriers;
 
-use glam::{Vec2, Vec3};
+use glam::{Vec2, Vec3, Vec4};
 
 pub mod flank;
 pub use flank::{FlankRoute, FlankTable};
@@ -548,6 +548,22 @@ struct DetourCand {
     /// The barrier's rectangle grown by the leg's radius lies in this circle.
     reach: f32,
     index: u16,
+    /// Circle extents as (max x, max z, -min x, -min z), for a single
+    /// comparison against each leg's box.
+    extent: Vec4,
+}
+
+impl DetourCand {
+    fn new(centre: Vec2, reach: f32, index: u16) -> Self {
+        let lo = centre - Vec2::splat(reach);
+        let hi = centre + Vec2::splat(reach);
+        Self {
+            centre,
+            reach,
+            index,
+            extent: Vec4::new(hi.x, hi.y, -lo.x, -lo.y),
+        }
+    }
 }
 
 /// A running corner search ([`NavGraph::detour`]).
@@ -585,6 +601,7 @@ impl DetourSearch<'_> {
         // A barrier's circle clear of the segment's box is clear of the
         // segment: most of the map, for far less than the distance below.
         let (lo, hi) = cull_box(a, b);
+        let extent = Vec4::new(lo.x, lo.y, -hi.x, -hi.y);
         let first = self
             .cand
             .partition_point(|c| c.centre.x < lo.x - self.max_reach);
@@ -592,12 +609,7 @@ impl DetourSearch<'_> {
             if c.centre.x > hi.x + self.max_reach {
                 break;
             }
-            if c.centre.x + c.reach < lo.x
-                || c.centre.x - c.reach > hi.x
-                || c.centre.y + c.reach < lo.y
-                || c.centre.y - c.reach > hi.y
-                || dist_to_segment(c.centre, a, b) > c.reach
-            {
+            if c.extent.cmplt(extent).any() || dist_to_segment(c.centre, a, b) > c.reach {
                 continue;
             }
             let i = c.index as usize;
@@ -1463,15 +1475,12 @@ impl NavGraph {
             .filter(|i| self.barriers[*i as usize].blocks(ty) && !ignore.contains(i))
             .map(|index| {
                 let br = &self.barriers[index as usize];
-                DetourCand {
-                    centre: br.centre,
-                    reach: if cull {
-                        br.bound_radius() + radius * std::f32::consts::SQRT_2
-                    } else {
-                        f32::INFINITY
-                    },
-                    index,
-                }
+                let reach = if cull {
+                    br.bound_radius() + radius * std::f32::consts::SQRT_2
+                } else {
+                    f32::INFINITY
+                };
+                DetourCand::new(br.centre, reach, index)
             })
             .filter(|c| {
                 !finite || perp.dot(c.centre - b).abs() <= band + c.reach + DETOUR_CULL_SLACK

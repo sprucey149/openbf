@@ -159,7 +159,9 @@ fn claim_seat_policy(
         && sim
             .unit(me)
             .is_some_and(|u| u.controller == crate::unit::Controller::Ai && u.mount.is_none());
-    (k == 0 || armed(k) || explicit).then_some(k)
+    let cargo = super::flyer_drive::uses_authored_transport(sim, v)
+        && matches!(v.seats[usize::from(k)].kind, SeatKind::Passenger(_));
+    (k == 0 || armed(k) || explicit || cargo).then_some(k)
 }
 
 /// Is `u` near enough to board `vh`? A vehicle: within the vehicle's radius
@@ -689,14 +691,18 @@ pub(super) fn drive(
         return (pad, nt);
     }
     if v.seats.get(usize::from(m.seat)).map(|s| s.kind) != Some(SeatKind::Pilot) {
-        let piloted = v
-            .seats
-            .first()
-            .is_some_and(|s| s.kind == SeatKind::Pilot && s.occupant.is_some());
-        if piloted {
-            super::gunner::aim(sim, me, st, &mut pad, Look::Seat, None);
-        } else {
+        let pilot = v.pilot_seat().and_then(|s| s.occupant);
+        let deploy = v.flyer.phase == crate::vehicle::flyer::FlightPhase::Landed
+            && !v.flyer.ai.transport_returning
+            && !v.flyer.ai.transport_departing
+            && super::flyer_drive::transport_destination(sim, v)
+            && pilot
+                .and_then(|h| sim.unit(h))
+                .is_some_and(|u| u.controller == crate::unit::Controller::Ai && !u.is_human());
+        if pilot.is_none() || deploy {
             request_exit(st);
+        } else {
+            super::gunner::aim(sim, me, st, &mut pad, Look::Seat, None);
         }
         return (pad, nt);
     }

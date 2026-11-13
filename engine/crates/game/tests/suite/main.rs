@@ -14,6 +14,7 @@ mod auto_turret_damage;
 mod auto_turrets;
 mod award_weapons;
 mod battle_replay;
+mod bf1_heroes;
 mod career_class_kills;
 mod charged_sticky;
 mod cheat_ammo;

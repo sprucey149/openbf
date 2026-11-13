@@ -15,10 +15,18 @@ pub struct AllySpawn {
     pub nodes: Vec<(Vec3, f32)>,
 }
 
+/// An owned, non-capturable native spawn post, outside the conquest objectives.
+#[derive(Clone, Debug)]
+pub struct NativeSpawnPost {
+    pub count: u32,
+    pub nodes: Vec<(Vec3, f32)>,
+}
+
 #[derive(Debug)]
 pub(super) struct NativeTeam {
     team: u8,
     pending: VecDeque<UnitSpec>,
+    spawn_posts: Vec<NativeSpawnPost>,
     waves: SpawnWaves,
 }
 
@@ -42,6 +50,17 @@ impl Sim {
     /// Queue the authored native member pool. Member templates stay tied to
     /// their slot through death, independent of the main armies' class draws.
     pub fn add_native_team(&mut self, team: u8, members: Vec<UnitSpec>) {
+        self.add_native_team_with_posts(team, members, Vec::new());
+    }
+
+    /// Keep invisible native spawn posts separate from capturable objectives.
+    /// Their authored capacity and paths still participate in native waves.
+    pub fn add_native_team_with_posts(
+        &mut self,
+        team: u8,
+        members: Vec<UnitSpec>,
+        spawn_posts: Vec<NativeSpawnPost>,
+    ) {
         assert!(team >= 2 && self.native_team_index(team).is_none());
         assert!(members.iter().all(|spec| {
             spec.team == team && spec.controller == Controller::Ai && !spec.is_player()
@@ -49,6 +68,7 @@ impl Sim {
         self.native_teams.push(NativeTeam {
             team,
             pending: members.into(),
+            spawn_posts,
             waves: SpawnWaves {
                 timer: 0.0,
                 wave: 0,
@@ -83,7 +103,14 @@ impl Sim {
     // and a distinct AllyPath (BF1 FUN_0029de80:227148-227170;
     // BF2 FUN_00356880:350959-350978; re-cp-capture §6).
     fn native_spawn_nodes(&self, team: u8, post: usize) -> Option<&[(Vec3, f32)]> {
-        let cp = self.cps.get(post)?;
+        let Some(cp) = self.cps.get(post) else {
+            let entry = self.native_team_index(team)?;
+            let nodes = &self.native_teams[entry]
+                .spawn_posts
+                .get(post - self.cps.len())?
+                .nodes;
+            return (!nodes.is_empty()).then_some(nodes.as_slice());
+        };
         let owner = cp.owner?;
         let nodes = if owner == team {
             &cp.def.spawn_nodes
@@ -99,6 +126,13 @@ impl Sim {
         // Capacity is summed independently of usable paths, then effectively
         // clamped by the team's member pool. BF1 FUN_002ac378:237768-237783;
         // BF2 FUN_0036c750:366105-366110,366161-366164.
+        let owned = self.native_team_index(team).map_or(0, |entry| {
+            self.native_teams[entry]
+                .spawn_posts
+                .iter()
+                .map(|post| post.count)
+                .fold(0, u32::saturating_add)
+        });
         let limit = self
             .ally_spawns
             .iter()
@@ -109,7 +143,7 @@ impl Sim {
                     .is_some_and(|owner| self.allied(owner, team))
             })
             .map(|post| post.count)
-            .fold(0, u32::saturating_add);
+            .fold(owned, u32::saturating_add);
         let alive = self.alive_units().filter(|(_, u)| u.team == team).count();
         alive < limit as usize
     }
@@ -118,7 +152,10 @@ impl Sim {
         if !self.admit_native(team) {
             return None;
         }
-        let eligible = (0..self.cps.len())
+        let owned = self
+            .native_team_index(team)
+            .map_or(0, |entry| self.native_teams[entry].spawn_posts.len());
+        let eligible = (0..self.cps.len() + owned)
             .filter(|&post| self.native_spawn_nodes(team, post).is_some())
             .collect::<Vec<_>>();
         if eligible.is_empty() {
@@ -189,6 +226,19 @@ impl Sim {
             eat(&entry.waves.timer.to_bits().to_le_bytes());
             eat(&entry.waves.wave.to_le_bytes());
             eat(&entry.waves.next_slot.to_le_bytes());
+            if !entry.spawn_posts.is_empty() {
+                eat(b"native-spawn-posts");
+                eat(&(entry.spawn_posts.len() as u32).to_le_bytes());
+                for post in &entry.spawn_posts {
+                    eat(&post.count.to_le_bytes());
+                    eat(&(post.nodes.len() as u32).to_le_bytes());
+                    for (pos, yaw) in &post.nodes {
+                        for value in [pos.x, pos.y, pos.z, *yaw] {
+                            eat(&value.to_bits().to_le_bytes());
+                        }
+                    }
+                }
+            }
         }
         eat(&(self.team_relations.len() as u32).to_le_bytes());
         for (&(from, to), &friendly) in &self.team_relations {
@@ -225,6 +275,99 @@ mod tests {
             count: 1,
             nodes: vec![(pos, 1.25)],
         }
+    }
+
+    #[test]
+    fn native_only_posts_use_capacity_and_respawn_without_changing_objectives() {
+        let mut sim = Sim::empty(4);
+        sim.heightfield = Some(crate::heightfield::Heightfield {
+            size: 2,
+            unit: 50.0,
+            offset_x: 25.0,
+            offset_z: 25.0,
+            heights: vec![0.0; 4],
+        });
+        post(&mut sim, 0, -10.0);
+        post(&mut sim, 1, 10.0);
+        let mut native = UnitSpec::trooper(2, Vec3::ZERO);
+        native.controller = Controller::Ai;
+        sim.add_native_team_with_posts(
+            2,
+            vec![native],
+            vec![NativeSpawnPost {
+                count: 1,
+                nodes: vec![(Vec3::new(0.0, 0.0, 10.0), 1.25)],
+            }],
+        );
+        sim.populate_native_teams();
+        assert_eq!(sim.cps.len(), 2);
+        assert_eq!(sim.alive_units().count(), 1);
+        let h = sim.handle(0);
+        assert_eq!(sim.unit(h).unwrap().spec.pos, Vec3::new(0.0, 0.0, 10.0));
+        assert!(!sim.admit_native(2), "authored capacity is full");
+        let tickets = [0, 1].map(|t| sim.battle.teams[t].tickets());
+        let waves = sim.waves.clone();
+        sim.kill_environment(h, crate::sim::DeathCause::DeathRegion);
+        assert_eq!([0, 1].map(|t| sim.battle.teams[t].tickets()), tickets);
+        assert_eq!(sim.waves, waves);
+        let wave = &mut sim.native_teams[0].waves;
+        wave.wave = 1;
+        wave.timer = wave.interval;
+        sim.tick = sim.units[0].respawn_at.unwrap();
+        sim.step(&[]);
+        let reborn = sim.unit(sim.handle(0)).unwrap();
+        assert!(reborn.alive && reborn.gen != h.gen);
+        assert_eq!(reborn.spec.pos, Vec3::new(0.0, 0.0, 10.0));
+        assert_eq!(reborn.spec.yaw, 1.25);
+        assert_eq!([0, 1].map(|t| sim.battle.teams[t].tickets()), tickets);
+        for cp in &mut sim.cps {
+            cp.owner = Some(0);
+        }
+        let mut domination = None;
+        assert_eq!(
+            crate::cp::tick_domination(
+                &sim.cps,
+                &mut domination,
+                crate::battle::BF2_DOMINATION_DEFEAT_SECS
+                    + crate::battle::BF2_DOMINATION_DITTY_SECS,
+                2
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn native_only_posts_require_capacity_and_nodes_and_hash_their_inputs() {
+        let mut native = UnitSpec::trooper(2, Vec3::ZERO);
+        native.controller = Controller::Ai;
+        for (count, nodes) in [(0, vec![(Vec3::ZERO, 0.0)]), (1, Vec::new())] {
+            let mut sim = Sim::empty(4);
+            sim.add_native_team_with_posts(
+                2,
+                vec![native.clone()],
+                vec![NativeSpawnPost { count, nodes }],
+            );
+            sim.populate_native_teams();
+            assert_eq!(sim.alive_units().count(), 0);
+        }
+        let with = |posts| {
+            let mut sim = Sim::empty(4);
+            sim.add_native_team_with_posts(2, Vec::new(), posts);
+            sim.hash()
+        };
+        let mut ordinary = Sim::empty(4);
+        ordinary.add_native_team(2, Vec::new());
+        assert_eq!(ordinary.hash(), with(Vec::new()));
+        assert_ne!(
+            with(vec![NativeSpawnPost {
+                count: 1,
+                nodes: vec![(Vec3::ZERO, 0.0)]
+            }]),
+            with(vec![NativeSpawnPost {
+                count: 1,
+                nodes: vec![(Vec3::X, 0.0)]
+            }])
+        );
     }
 
     #[test]

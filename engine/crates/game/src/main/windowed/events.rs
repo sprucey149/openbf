@@ -261,7 +261,6 @@ impl winit::application::ApplicationHandler for App {
                 let mut hud: Option<ui::hud::HudModel> = None;
                 let mut spawn: Option<ui::spawn::SpawnModel> = None;
                 // A death camera or a dead rider's held seat view is up.
-                let mut death_view = false;
                 let icons = self.current_icons();
                 let mut menu: Option<ui::menu::MenuModel> = None;
                 let edges = if self.walk.is_some() {
@@ -422,7 +421,7 @@ impl winit::application::ApplicationHandler for App {
                             ),
                             team_size_off: walk.conquest_defaults.is_none(),
                             fov_scale: walk.fov_scale,
-                            fov_deg: walk.fov_y().to_degrees(),
+                            base_fov_deg: game::walk::chase_fov_y().to_degrees(),
                             music_volume: walk
                                 .music
                                 .as_ref()
@@ -586,7 +585,7 @@ impl winit::application::ApplicationHandler for App {
                                 ),
                                 team_size_off: walk.conquest_defaults.is_none(),
                                 fov_scale: walk.fov_scale,
-                                fov_deg: walk.fov_y().to_degrees(),
+                                base_fov_deg: game::walk::chase_fov_y().to_degrees(),
                                 music_volume: walk
                                     .music
                                     .as_ref()
@@ -971,7 +970,6 @@ impl winit::application::ApplicationHandler for App {
                     // are the sim's (card SPSEL), moved by the pad bits.
                     spawn =
                         spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
-                    death_view = walk.death_cam.is_some() || walk.holds_seat_view();
                     let camera = self.fx.shake.apply(walk.camera());
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
@@ -1178,14 +1176,7 @@ impl winit::application::ApplicationHandler for App {
                                     self.frame_seconds,
                                 );
                                 if !hud_hidden && !native_pause {
-                                    // The death camera and the spawn screen
-                                    // own the death: the egui banner is only
-                                    // for launches with neither.
-                                    let m = ui::hud::HudModel {
-                                        dead: model.dead && spawn.is_none() && !death_view,
-                                        ..model.clone()
-                                    };
-                                    ui::hud::draw_hud(ctx, &m);
+                                    ui::hud::draw_hud(ctx, &model);
                                     if let Some(s) = &spawn {
                                         // The PS2's screen is the HUD pass's;
                                         // without one the panel stands in.

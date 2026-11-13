@@ -155,6 +155,16 @@ pub struct Settings {
     pub last_teams: Option<[String; 2]>,
 }
 
+impl Settings {
+    pub fn reset_graphics(&mut self) {
+        let defaults = Self::default();
+        self.fov_scale = defaults.fov_scale;
+        self.viewpoint = defaults.viewpoint;
+        self.fps_counter = defaults.fps_counter;
+        self.low_power_resolution = defaults.low_power_resolution;
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -254,7 +264,10 @@ impl Profile {
     pub fn load_from(path: &Path) -> Profile {
         match std::fs::read_to_string(path) {
             Ok(txt) => match ron::from_str::<Profile>(&txt) {
-                Ok(p) => p,
+                Ok(mut p) => {
+                    p.settings.fov_scale = crate::walk::clamp_fov_scale(p.settings.fov_scale);
+                    p
+                }
                 Err(e) => {
                     eprintln!(
                         "profile {} unreadable ({e}); starting fresh",

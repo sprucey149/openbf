@@ -248,8 +248,12 @@ pub fn turret_scope_camera(look: &core::sim::SeatLook, fov_y: f32) -> Camera {
 /// The FOV option's range (profile `Settings::fov_scale`, the pause menu):
 /// a multiplier on the PS2 angle, 1.0 = the PS2's framing. The result is
 /// held under [`MAX_FOV_Y`] so a BF2 map at the top of the range stays sane.
-pub const FOV_SCALE_RANGE: (f32, f32) = (0.75, 2.0);
-pub const MAX_FOV_Y: f32 = 100.0 * std::f32::consts::PI / 180.0;
+pub use ui::menu::FOV_SCALE_RANGE;
+pub const MAX_FOV_Y: f32 = ui::menu::MAX_FOV_DEG * std::f32::consts::PI / 180.0;
+
+pub fn clamp_fov_scale(scale: f32) -> f32 {
+    ui::menu::clamp_fov_scale(chase_fov_y().to_degrees(), scale)
+}
 
 /// A target box to draw: transform, magnet highlight, health fraction.
 #[derive(Debug, Clone, Copy)]
@@ -270,7 +274,8 @@ pub struct WeaponHud {
     pub key: String,
     /// The weapon class's own name.
     pub class: String,
-    /// The class is a BF2 disc's (`ui::hud::HudWeapon::bf2`).
+    /// Uses BF2's HUD key resolution, including BF1 vehicle counterparts
+    /// (`ui::hud::HudWeapon::bf2`).
     pub bf2: bool,
     /// The class's `IconTexture` (BF1's HUD sheet), for a weapon with no BF2
     /// mesh to show.
@@ -396,6 +401,16 @@ impl Cries {
 pub const LOW_HEALTH_THRESHOLD: f32 = 0.3;
 
 impl ClassVisual {
+    /// BF2's hero namespace always uses its own models and animation banks,
+    /// including when a BF1 mission selects that playable kit.
+    pub fn asset_game<'a>(&self, map_game: &'a str) -> &'a str {
+        if self.name.split('_').nth(1) == Some("hero") {
+            "bf2"
+        } else {
+            map_game
+        }
+    }
+
     pub fn from_roster_with_held(c: &crate::roster::ClassRoster) -> Self {
         Self {
             held_hud: c.held.iter().map(|h| (h.slot, h.hud.clone())).collect(),

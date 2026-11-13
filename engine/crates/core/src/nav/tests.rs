@@ -997,6 +997,48 @@ fn culling_a_corner_search_changes_no_corner() {
     assert!(detours > 50, "corners walked: {detours}");
 }
 
+#[test]
+fn corner_box_cull_matches_scalar_edges() {
+    let coords = [
+        -f32::MAX,
+        -1.0e30,
+        -10.0,
+        -0.0,
+        0.0,
+        f32::from_bits(1),
+        10.0,
+        1.0e30,
+        f32::MAX,
+        f32::INFINITY,
+        f32::NAN,
+    ];
+    let compare = |centre: Vec2, reach: f32, lo: Vec2, hi: Vec2| {
+        let candidate = DetourCand::new(centre, reach, 0);
+        let bounds = Vec4::new(lo.x, lo.y, -hi.x, -hi.y);
+        let want = centre.x + reach < lo.x
+            || centre.x - reach > hi.x
+            || centre.y + reach < lo.y
+            || centre.y - reach > hi.y;
+        assert_eq!(candidate.extent.cmplt(bounds).any(), want);
+    };
+    for x in coords {
+        for z in coords {
+            let centre = Vec2::new(x, z);
+            for reach in [0.0, 1.0, 1.0e30, f32::MAX, f32::INFINITY] {
+                let lo = centre - Vec2::splat(reach);
+                let hi = centre + Vec2::splat(reach);
+                for corner in [lo, hi, Vec2::new(lo.x, hi.y), Vec2::new(hi.x, lo.y)] {
+                    compare(centre, reach, corner, corner);
+                }
+                for edge in coords {
+                    let (lo, hi) = cull_box(Vec2::new(edge, -edge), Vec2::new(-edge, edge));
+                    compare(centre, reach, lo, hi);
+                }
+            }
+        }
+    }
+}
+
 /// The box check in front of `barrier_stop` changes no answer: every barrier's
 /// own test, over random legs, gives the same bits.
 #[test]
@@ -1076,11 +1118,7 @@ fn of_equal_crossings_the_lowest_index_is_nearest() {
     ]);
     let (a, b) = (Vec2::ZERO, Vec2::new(0.0, -10.0));
     let mut cand: Vec<DetourCand> = (0..2u16)
-        .map(|index| DetourCand {
-            centre: g.barriers[index as usize].centre,
-            reach: 10.0,
-            index,
-        })
+        .map(|index| DetourCand::new(g.barriers[index as usize].centre, 10.0, index))
         .collect();
     cand.sort_unstable_by(|p, q| p.centre.x.total_cmp(&q.centre.x));
     assert_eq!(cand[0].index, 1, "the walk meets the higher index first");

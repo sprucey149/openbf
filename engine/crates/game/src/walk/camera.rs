@@ -669,7 +669,7 @@ impl WalkSim {
     /// [`chase_fov_y`] is it for the third-person FOV at S = 1, on every map.
     /// The seat cameras take it too (card VSEAT, PROVISIONAL).
     pub fn fov_y(&self) -> f32 {
-        let k = self.fov_scale.clamp(FOV_SCALE_RANGE.0, FOV_SCALE_RANGE.1);
+        let k = clamp_fov_scale(self.fov_scale);
         if let Some(degrees) = self.guided_fov().or_else(|| self.flyer_fov()) {
             let (s, c) = core::fmath::sin_cos(degrees.to_radians() * 0.5);
             return (2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0) * k).min(MAX_FOV_Y);

@@ -592,7 +592,14 @@ pub(super) fn make_walk_with_counts(
         if let Some(m) = &b.mission {
             walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
             let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
-            game::native_teams::install(&mut walk, &layout, &b.classes_dir, assets_dir, m);
+            game::native_teams::install(
+                &mut walk,
+                &layout,
+                &b.classes_dir,
+                assets_dir,
+                m,
+                &scene.manifest,
+            );
             walk.sound_levels = m.sound_levels();
             walk.space_round = m.space_assault.as_ref().map(|d| {
                 let mut round = game::space_assault::SpaceRound::new(d);
@@ -899,12 +906,6 @@ pub(super) fn hud_model(
             .mount
             .and_then(|m| walk.sim.vehicle(m.vehicle))
             .map(|v| (v.health.cur, v.health.max)),
-        // A human waits for no spawn wave (card SSELA): its timer only.
-        respawn_in: (!me.alive).then(|| {
-            me.respawn_at.map_or(0.0, |t| {
-                t.saturating_sub(walk.sim.tick) as f32 / core::TICK_HZ as f32
-            })
-        }),
         team_points: walk
             .sim
             .space_team_points()
@@ -997,11 +998,9 @@ pub(super) fn spawn_model(
     if (me.alive && !alive_screen) || walk.sim.outcome.is_some() {
         return None;
     }
-    // The death camera holds the screen until the spawn map opens (playtest
-    // A7, issue #128): no panel over the body. Space maps keep theirs, and a
-    // dead rider's held seat view (no death camera) keeps the waiting panel.
+    // Ground death views wait for the native spawn map, including a dead
+    // rider's held seat camera. No legacy waiting panel covers either view.
     if !me.alive
-        && walk.death_cam.is_some()
         && !walk.space_battle()
         && walk.sim.spawn_screens
         && walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Accepted)
@@ -1481,10 +1480,10 @@ mod tests {
         assert_eq!(rules.respawn_ticks, None);
     }
 
-    /// A dead rider whose seat view is held runs no death camera, so he keeps
-    /// the waiting panel and its countdown instead of a bare frozen view.
+    /// A held seat view keeps the waiting panel in space. On ground the
+    /// native spawn map is the first menu after death.
     #[test]
-    fn a_death_with_no_death_camera_keeps_the_waiting_panel() {
+    fn death_without_a_camera_keeps_the_waiting_panel_only_in_space() {
         use core::sim::SpawnStage;
         let flat = core::heightfield::Heightfield {
             size: 2,
@@ -1503,6 +1502,11 @@ mod tests {
         walk.step_tick(&[core::sim::PadState::default()]);
         assert_eq!(walk.sim.spawn_stage[0], SpawnStage::Accepted);
         walk.death_cam = None;
+        assert!(spawn_model(&walk, &feed).is_none());
+
+        walk.sim
+            .landing_regions
+            .push(core::region::Region::sphere(glam::Vec3::ZERO, 10.0));
         assert!(matches!(
             spawn_model(&walk, &feed).and_then(|m| m.screen),
             Some(ui::spawn::SpawnScreen::Waiting)

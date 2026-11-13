@@ -566,6 +566,47 @@ fn plan(s: &Sim, b: UnitHandle, v: VehicleHandle, ai: &mut FlyerAi) {
 }
 
 #[test]
+fn an_authored_transport_keeps_its_route_when_its_hull_would_graze_a_wall() {
+    use crate::collision::{Body, CollisionWorld, HullPart, Layers, Shape};
+
+    let (mut sim, _, handle) = bf2_world();
+    sim.space_assault = Some(crate::sim::SpaceAssault::new(180));
+    sim.flyer_paths[0].classes.push((TRANSPORT_CLASS, 1));
+    sim.flyer_params[0].as_mut().unwrap().follower.class_id = TRANSPORT_CLASS;
+    sim.hull_parts = vec![Some(std::sync::Arc::from(vec![HullPart::new(
+        glam::Mat4::IDENTITY,
+        Shape::Sphere { radius: 5.0 },
+        Layers::VEHICLE,
+    )]))];
+    sim.collision = CollisionWorld::new(
+        vec![Body::with_layers(
+            glam::Mat4::from_translation(Vec3::new(4.5, 30.0, 50.0)),
+            Shape::Box {
+                half: Vec3::new(1.5, 5.0, 20.0),
+            },
+            Layers::FLYER,
+        )],
+        Vec::new(),
+    );
+    let start = Vec3::new(0.0, 30.0, 0.0);
+    let leg = [
+        start - Vec3::Z * 50.0,
+        start,
+        start + Vec3::Z * 100.0,
+        start + Vec3::Z * 150.0,
+    ];
+    assert!(curve_clear(&sim, &leg, handle));
+    let craft = sim.vehicle(handle).unwrap();
+    assert!(!transport_curve_clear(&sim, craft, &leg));
+    sim.flyer_params[0].as_mut().unwrap().follower.class_id = 0;
+    assert!(transport_curve_clear(
+        &sim,
+        sim.vehicle(handle).unwrap(),
+        &leg
+    ));
+}
+
+#[test]
 fn a_space_flag_draws_no_pilot() {
     let (mut s, b, v, goal) = hop_world();
     s.install_ctf(one_flag(true, goal));
@@ -1380,4 +1421,139 @@ fn a_class_without_flyer_vs_flyer_takes_no_free_burst() {
         assert!(!free_burst(&s, b, &p, &mut ai));
     }
     assert_eq!(ai.burst_in, 0.0);
+}
+
+#[test]
+fn a_transport_pilot_requests_landing_on_a_fresh_press_inside_the_region() {
+    let (mut s, b, v) = world(true, true);
+    s.flyer_params[0].as_mut().unwrap().follower.class_id = admission::TRANSPORT_CLASS;
+    let center = s.vehicle(v).unwrap().pos;
+    s.space_assault = Some(crate::sim::SpaceAssault::new(180));
+    s.flyer_paths.push(FlyerPath {
+        classes: vec![(TRANSPORT_CLASS, 1)],
+        ..FlyerPath::default()
+    });
+    s.landing_regions.push(Region::sphere(center, 20.0));
+    s.blast_setup.push(Some(crate::vehicle::BlastSetup {
+        explosion: None,
+        sphere_centre: Vec3::ZERO,
+        sphere_radius: 5.0,
+    }));
+    assert!(s.enter_vehicle(b, v, 0));
+    let mount = s.unit(b).unwrap().mount.unwrap();
+    for (offset, held, requests) in [
+        (18.0, false, false),
+        (10.0, true, false),
+        (10.0, false, true),
+    ] {
+        let craft = s.vehicle_mut(v).unwrap();
+        craft.pos = center + Vec3::X * offset;
+        craft.flyer.phase = FlightPhase::Flying;
+        craft.flyer.jump_was_down = held;
+        let mut state = AiState::default();
+        drive(&s, b, mount, &mut state, NavTick::default());
+        assert_eq!(state.ride.unwrap().flyer.unwrap().takeoff, requests);
+    }
+}
+
+fn transport_world() -> (Sim, UnitHandle, UnitHandle, UnitHandle, VehicleHandle) {
+    let (mut s, pilot, spare) = world(true, true);
+    s.space_assault = Some(crate::sim::SpaceAssault::new(180));
+    s.flyer_params[0].as_mut().unwrap().follower.class_id = TRANSPORT_CLASS;
+    s.seat_setup[0].as_mut().unwrap().boardable = vec![true; 3];
+    let hangar = Vec3::new(0.0, 5.0, 200.0);
+    post(&mut s, "enemy hangar", hangar, Some(1));
+    post(&mut s, "home hangar", Vec3::ZERO, Some(0));
+    s.landing_regions = vec![
+        Region::sphere(Vec3::ZERO, 35.0),
+        Region::sphere(hangar, 35.0),
+    ];
+    s.flyer_paths.push(FlyerPath {
+        nodes: vec![Vec3::new(0.0, 6.0, 60.0), hangar],
+        classes: vec![(TRANSPORT_CLASS, 1)],
+        ..FlyerPath::default()
+    });
+    let v = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: Some(0),
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::new(0.0, 5.0, 105.0),
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![
+            SeatKind::Pilot,
+            SeatKind::Passenger(0),
+            SeatKind::Passenger(1),
+        ],
+    });
+    s.vehicle_mut(spare).unwrap().pos = Vec3::X * 900.0;
+    assert!(s.seat_unit(pilot, v, 0));
+    let cargo = s
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    assert_eq!(crate::ai::ride::claim_seat(&s, cargo, v), Some(1));
+    assert!(s.seat_unit(cargo, v, 1));
+    let human = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+    assert!(s.seat_unit(human, v, 2));
+    {
+        let c = s.vehicle_mut(v).unwrap();
+        c.flyer.initialized = true;
+        c.flyer.phase = FlightPhase::Flying;
+        c.flyer.lift = 1.0;
+    }
+    (s, pilot, cargo, human, v)
+}
+
+#[test]
+fn transport_cargo_waits_in_friendly_hangars_and_with_a_human_pilot() {
+    for (human_driving, region) in [(false, 0), (true, 1)] {
+        let (mut guard, pilot, cargo, human, v) = transport_world();
+        let pos = guard.landing_regions[region].center;
+        let craft = guard.vehicle_mut(v).unwrap();
+        craft.pos = pos;
+        craft.flyer.phase = FlightPhase::Landed;
+        if human_driving {
+            guard.unseat_unit(pilot);
+            guard.unseat_unit(human);
+            assert!(guard.seat_unit(human, v, 0));
+        }
+        guard.step(&[]);
+        assert!(
+            guard.unit(cargo).unwrap().mount.is_some(),
+            "cargo left with human_driving={human_driving} at region {region}"
+        );
+    }
+}
+
+#[test]
+fn a_space_transport_lands_while_following_a_curve_and_unloads_only_ai_cargo() {
+    let (mut s, pilot, cargo, human, v) = transport_world();
+    let mut landing = false;
+    let mut unloaded = false;
+    for _ in 0..20 * crate::TICK_HZ {
+        s.step(&[]);
+        let c = s.vehicle(v).expect("transport survived");
+        landing |= c.flyer.phase == FlightPhase::Landing;
+        if s.unit(cargo).unwrap().mount.is_none() {
+            assert_eq!(c.flyer.phase, FlightPhase::Landed);
+            assert!(s.landing_regions[1].contains(c.pos));
+            assert!(s.unit(cargo).unwrap().soldier.grounded);
+            assert_eq!(c.seats[0].occupant, Some(pilot));
+            assert_eq!(c.seats[2].occupant, Some(human));
+            unloaded = true;
+            break;
+        }
+    }
+    assert!(
+        landing && unloaded,
+        "phase {:?}, position {:?}",
+        s.vehicle(v).unwrap().flyer.phase,
+        s.vehicle(v).unwrap().pos
+    );
 }

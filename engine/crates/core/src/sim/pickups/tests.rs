@@ -65,39 +65,43 @@ fn sim(bf2: bool) -> Sim {
 
 #[test]
 fn hero_refuses_health_items_and_wastes_buffs_but_keeps_energy_and_ammo() {
-    let mut s = sim(true);
-    s.heroes = Some(crate::sim::heroes::Heroes::new([Some(1), None]));
-    let h = s
-        .spawn(&UnitSpec {
-            class: 1,
-            ..UnitSpec::trooper(0, Vec3::ZERO)
-        })
-        .unwrap();
-    let ui = h.index as usize;
-    s.units[ui].health.cur = 100.0;
-    lay(&mut s, H100, Vec3::ZERO);
-    step(&mut s, 1);
-    assert_eq!(s.unit(h).unwrap().health.cur, 100.0);
-    assert_eq!(
-        s.pickups.len(),
-        1,
-        "a refused health item stays on the ground"
-    );
-    s.pickups.clear();
-    lay(&mut s, OFFENSE, Vec3::ZERO);
-    step(&mut s, 1);
-    assert!(s.pickups.is_empty(), "a hero still consumes the buff item");
-    assert_eq!(s.unit(h).unwrap().buffs.offense.0, 0.0);
-    s.units[ui].soldier.energy = 0.0;
-    lay(&mut s, ENERGY, Vec3::ZERO);
-    step(&mut s, 1);
-    assert!(s.pickups.is_empty());
-    assert!(s.unit(h).unwrap().soldier.energy > 0.0);
-    s.units[ui].weapon.spare = 0;
-    lay(&mut s, AMMO, Vec3::ZERO);
-    step(&mut s, 1);
-    assert!(s.pickups.is_empty());
-    assert!(s.unit(h).unwrap().weapon.spare > 0);
+    use crate::soldier::GroundRules;
+    for rules in [GroundRules::Bf1, GroundRules::Bf2] {
+        let mut s = sim(true);
+        s.ground_rules = rules;
+        s.heroes = Some(crate::sim::heroes::Heroes::new([Some(1), None]));
+        let h = s
+            .spawn(&UnitSpec {
+                class: 1,
+                ..UnitSpec::trooper(0, Vec3::ZERO)
+            })
+            .unwrap();
+        let ui = h.index as usize;
+        s.units[ui].health.cur = 100.0;
+        lay(&mut s, H100, Vec3::ZERO);
+        step(&mut s, 1);
+        assert_eq!(s.unit(h).unwrap().health.cur, 100.0);
+        assert_eq!(
+            s.pickups.len(),
+            1,
+            "a refused health item stays on the ground"
+        );
+        s.pickups.clear();
+        lay(&mut s, OFFENSE, Vec3::ZERO);
+        step(&mut s, 1);
+        assert!(s.pickups.is_empty(), "a hero still consumes the buff item");
+        assert_eq!(s.unit(h).unwrap().buffs.offense.0, 0.0);
+        s.units[ui].soldier.energy = 0.0;
+        lay(&mut s, ENERGY, Vec3::ZERO);
+        step(&mut s, 1);
+        assert!(s.pickups.is_empty());
+        assert!(s.unit(h).unwrap().soldier.energy > 0.0);
+        s.units[ui].weapon.spare = 0;
+        lay(&mut s, AMMO, Vec3::ZERO);
+        step(&mut s, 1);
+        assert!(s.pickups.is_empty());
+        assert!(s.unit(h).unwrap().weapon.spare > 0);
+    }
 }
 
 /// A trooper that always drops `item`.

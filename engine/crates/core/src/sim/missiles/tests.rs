@@ -675,3 +675,26 @@ fn a_targetable_fuselage_is_hit_instead_of_the_empty_space_at_its_enclosing_sphe
         assert_eq!(s.vehicle(h).unwrap().health.cur < 500.0, targetable);
     }
 }
+
+#[test]
+fn heavy_infantry_rockets_never_guide_a_player_shot_at_a_soldier() {
+    use crate::soldier::GroundRules;
+    for rules in [GroundRules::Bf1, GroundRules::Bf2] {
+        for space in [false, true] {
+            let (mut s, me, enemy, wc) = scene(40.0);
+            s.ground_rules = rules;
+            if space {
+                s.space_assault = Some(crate::sim::SpaceAssault::new(180));
+            }
+            s.weapon_classes[wc].name = "rep_weap_inf_torpedo_launcher".into();
+            hold(&mut s, AimTarget::Unit(enemy));
+            s.magnet[0] = Some(AimTarget::Unit(enemy));
+            dwell(&mut s, 40);
+            let weapon = &s.units[me.index as usize].weapon;
+            assert_eq!(weapon.lock_target, None, "{rules:?} space {space}");
+            assert_eq!(weapon.lock_held, 0.0);
+            fire(&mut s);
+            assert!(s.bolts.iter().all(|b| b.missile.unwrap().target.is_none()));
+        }
+    }
+}

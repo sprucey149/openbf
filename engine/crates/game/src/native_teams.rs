@@ -2,7 +2,7 @@
 
 use crate::walk::WalkSim;
 
-const NATIVE_SIDES: [&str; 5] = ["ewk", "wok", "gun", "geo", "des"];
+const NATIVE_SIDES: [&str; 6] = ["ewk", "wok", "gun", "geo", "des", "gam"];
 
 pub fn native_side(
     classes_dir: &std::path::Path,
@@ -29,6 +29,7 @@ pub fn install(
     classes_dir: &std::path::Path,
     assets_dir: &std::path::Path,
     mission: &crate::mission::MissionDef,
+    world: &crate::assets::Manifest,
 ) {
     if mission.local_teams.is_empty() {
         return;
@@ -136,7 +137,12 @@ pub fn install(
             team,
             crate::walk::TeamTemplate::from_roster(&roster, &table[0], visuals),
         );
-        walk.sim.add_native_team(team, members);
+        let posts = if faction == "gam" {
+            native_spawn_posts(world, layout, mission, authored.team)
+        } else {
+            Vec::new()
+        };
+        walk.sim.add_native_team_with_posts(team, members, posts);
     }
     if walk.native_teams.is_empty() {
         return;
@@ -181,4 +187,48 @@ pub fn install(
             alive
         );
     }
+}
+
+/// Jabba's invisible NPC posts own spawn paths and capacity without a capture
+/// region. They stay outside ObjectiveConquest's post roster and HUD markers.
+fn native_spawn_posts(
+    world: &crate::assets::Manifest,
+    layout: &crate::layout::MapLayout,
+    mission: &crate::mission::MissionDef,
+    team: u8,
+) -> Vec<core::sim::NativeSpawnPost> {
+    use crate::layout::{PROP_ALLY_COUNT, PROP_CAPTURE_REGION, PROP_SPAWN_PATH, PROP_TEAM};
+    world
+        .instances
+        .iter()
+        .filter_map(|inst| {
+            if !inst
+                .class
+                .eq_ignore_ascii_case("com_bldg_invisible_controlzone")
+                || mission
+                    .killed
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&inst.name))
+            {
+                return None;
+            }
+            let prop = |key| {
+                inst.props
+                    .iter()
+                    .rev()
+                    .find(|p| p.0 == key)
+                    .map(|p| p.1.as_str())
+            };
+            if prop(PROP_TEAM)?.trim().parse::<u8>().ok()? != team
+                || prop(PROP_CAPTURE_REGION).is_some()
+            {
+                return None;
+            }
+            let path = layout.path(prop(PROP_SPAWN_PATH)?)?;
+            Some(core::sim::NativeSpawnPost {
+                count: prop(PROP_ALLY_COUNT)?.trim().parse().ok()?,
+                nodes: path.nodes.iter().map(|node| (node.pos, node.yaw)).collect(),
+            })
+        })
+        .collect()
 }

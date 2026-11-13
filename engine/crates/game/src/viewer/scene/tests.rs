@@ -507,7 +507,7 @@ fn render_options_switch_live_without_reuploading_the_scene() {
                     ui::menu::SettingsPage::Graphics,
                 )),
                 fov_scale: 1.0,
-                fov_deg: 52.0,
+                base_fov_deg: 52.0,
                 assist_intensity: 1.0,
                 team_size_pct: 100,
                 reinforcements_pct: 100,

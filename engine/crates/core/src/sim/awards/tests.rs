@@ -431,6 +431,85 @@ fn earned_medals_unlock_at_veteran_for_one_life_and_at_legendary_for_every_life(
 }
 
 #[test]
+fn recent_awards_survive_death_but_partial_progress_resets() {
+    use crate::sim::buffs::WAR_HERO_MEDAL;
+
+    let award = usize::from(WAR_HERO_MEDAL);
+    for (age, carries) in [(AWARD_DEATH_WINDOW, true), (AWARD_DEATH_WINDOW + 1, false)] {
+        let (mut s, player, _) = rifleman();
+        let mut counts = [0; MEDAL_THRESHOLDS.len()];
+        counts[award] = 3;
+        s.install_medal_career(player, counts);
+        s.score_medal_points(player, 36);
+        s.medal_progress(player, 0, 5);
+        s.tick = age;
+        if carries {
+            s.kill_environment(player, crate::sim::DeathCause::Blast);
+        } else {
+            s.unit_killed(player, None);
+        }
+
+        // Eligibility is sampled on death, even if the player waits on the
+        // spawn screen until after the window has passed.
+        s.tick += AWARD_DEATH_WINDOW;
+        let index = player.index as usize;
+        s.replace_respawned_unit(index, s.units[index].spec.clone(), None);
+        let next = s.handle(index);
+        assert_eq!(
+            s.medal_effect(s.unit(next).unwrap(), WAR_HERO_MEDAL),
+            carries
+        );
+        s.medal_progress(next, 0, 1);
+        assert_eq!(s.medal_counts().unwrap()[0], 0);
+        s.score_medal_points(next, 36);
+        assert_eq!(
+            s.medal_counts().unwrap()[award],
+            if carries { 4 } else { 5 }
+        );
+
+        if carries {
+            // Carryover keeps the original activation time.
+            s.kill_environment(next, crate::sim::DeathCause::Blast);
+            s.replace_respawned_unit(index, s.units[index].spec.clone(), None);
+            assert!(!s.medal_effect(&s.units[index], WAR_HERO_MEDAL));
+        }
+    }
+}
+
+#[test]
+fn medal_requirements_follow_career_rank_at_every_match_difficulty() {
+    use crate::skill::Difficulty;
+    use crate::weapon::HealthType;
+
+    let ranks = [(0, 36, 12), (31, 36, 12), (32, 27, 9), (64, 27, 9)];
+    for (difficulty, (count, score, kills)) in Difficulty::ALL
+        .into_iter()
+        .flat_map(|difficulty| ranks.map(|rank| (difficulty, rank)))
+    {
+        let (mut s, player, _) = rifleman();
+        s.difficulty = difficulty;
+        let counts = [count; MEDAL_THRESHOLDS.len()];
+        s.install_medal_career(player, counts);
+        let rifle = s.unit(player).unwrap().weapon_class;
+        s.weapon_classes[rifle].medals_type = Some(1);
+        s.score_medal_points(player, score - 1);
+        for _ in 0..kills - 1 {
+            s.medal_weapon_hit(player, rifle, HealthType::Person, true, false);
+        }
+        let before = s.medal_counts().unwrap();
+        assert_eq!((before[1], before[8]), (count, count), "{difficulty:?}");
+        s.score_medal_points(player, 1);
+        s.medal_weapon_hit(player, rifle, HealthType::Person, true, false);
+        s.medal_slice(player, HealthType::Vehicle);
+        let after = s.medal_counts().unwrap();
+        assert_eq!(
+            (after[1], after[3], after[8]),
+            (count + 1, count + 1, count + 1)
+        );
+    }
+}
+
+#[test]
 fn career_award_bonuses_can_be_disabled_while_progress_continues() {
     use crate::sim::buffs::{GUARDIAN, GUARDIAN_MEDAL, WAR_HERO, WAR_HERO_MEDAL};
     use crate::weapon::HealthType;

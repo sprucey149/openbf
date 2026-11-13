@@ -177,6 +177,7 @@ impl Default for AiState {
             last_think: 0,
             wake: 0,
             items: super::items::ItemSeek::default(),
+            supply: crate::ai::supply::SupplyState::default(),
             melee: None,
             target_cp: None,
             squad: None,
@@ -239,6 +240,7 @@ impl AiState {
             melee.hash_into(eat);
         }
         self.items.hash_into(eat);
+        self.supply.hash_into(eat);
         self.jet.hash_into(eat);
         eat(&self.target_cp.unwrap_or(u32::MAX).to_le_bytes());
         match self.target {

@@ -372,8 +372,7 @@ impl Sim {
             }
             gathered += 1;
             let t = type_slot(u.health.health_type);
-            let hero = self.ground_rules == crate::soldier::GroundRules::Bf2
-                && self.hero_class(u.team) == Some(u.spec.class);
+            let hero = self.hero_class(u.team) == Some(u.spec.class);
             let classes = &self.weapon_classes;
             let u = &mut self.units[ui];
             // PS2 0x369770 refuses SetHeroClass health unless its caller

@@ -41,7 +41,9 @@
 //! So a runner who turns about is followed as he goes, and the lead swings
 //! to his other side at no more than [`LEAD_MAX_RATE`]: the reticle's path
 //! bends, it never jumps. The slowdown, term 2's gain, timer and fall-off
-//! and the player's own-motion share of term 1 are the PS2's.
+//! are the PS2's. During firing both shooter and lead motion use the same
+//! full rate, so travelling together cancels (issue #164).
+//! measure: controller tracking in all four shooter/target motion cases.
 //!
 //! OURS, the sniper's follow (playtest 2026-11-05 C5: "aim assist should
 //! follow moving targets a little"; [`AssistEnv::follow`]). A sniper lines
@@ -79,8 +81,10 @@ pub fn speed_cap(turn_rate: f32) -> f32 {
 }
 
 /// Aim sticks in [-1, 1], post-deadzone. `yaw`/`pitch` are modified in place
-/// by [`apply`]; `move_mag` is |move stick| (BF1 reads the axis written to
-/// entity+0x64 — axis identity pending PCSX2 confirmation, report §8.3).
+/// by [`apply`]; `move_mag` is the length of both move axes, capped at one.
+/// This is a port deviation: BF1 reads only the axis written to entity+0x64
+/// (axis identity pending PCSX2 confirmation, report §8.3).
+/// measure: controller strafe and diagonal tracking against the original game.
 ///
 /// SIGN CONVENTION: `yaw` is POSITIVE-LEFT (turning toward -lat). This is
 /// forced by the physics of term 1 — strafing along +lat makes the target
@@ -129,9 +133,9 @@ pub struct AssistEnv {
     /// rate-matches in full while the pull's timer is live; `None` = the
     /// PS2's term 1 (unless `follow` applies).
     pub lead_vel: Option<Vec3>,
-    /// OURS (the module doc's sniper follow): the share of the lead point's
-    /// sideways motion term 1 matches while the pull is not live and Auto
-    /// Aim is on; 0 = the PS2's term 1.
+    /// OURS (the module doc's sniper follow): the share of relative sideways
+    /// motion term 1 matches while the pull is not live and Auto Aim is on;
+    /// 0 = the PS2's term 1. measure: scoped controller crossing-target play.
     pub follow: f32,
     /// The yaw stick a full push delivers on this pad (`LOOK_SCALE` for a
     /// human pad, 1 for a raw one): the weight reads the push before it.
@@ -149,6 +153,20 @@ pub struct AssistState {
 /// the press ([`AssistEnv::follow`]). PROVISIONAL. measure: a controller
 /// playtest, scoped on a crossing runner at 50 and 100 m.
 pub const SNIPER_FOLLOW: f32 = 0.5;
+
+/// OURS, PROVISIONAL: sniper assist stays full through half its nominal
+/// range, then all three terms fade linearly to zero at LockOnRange.
+/// measure: scoped controller tracking at 50, 64, 96, 120 and 128 m.
+pub const SNIPER_FADE_START: f32 = 0.5;
+
+/// The sniper's shared range taper, including the acquisition bounds fringe.
+/// Sniper magnets are a port addition; this does not alter ordinary weapons.
+pub(crate) fn sniper_range_scale(distance: f32, range: f32) -> f32 {
+    if range <= 0.0 {
+        return 0.0;
+    }
+    ((1.0 - distance / range) / (1.0 - SNIPER_FADE_START)).clamp(0.0, 1.0)
+}
 
 /// OURS: the time constant of the lead's low-pass on the target's velocity
 /// (s): a runner who turns about swings the lead over about this long.
@@ -199,7 +217,8 @@ impl Lead {
 }
 
 /// One tick of FUN_0025fea8, given a valid magnet target. `intensity` = 1.0
-/// is PS2-authentic; the caller skips this entirely when no target exists.
+/// gives the full configured port assist; the caller skips this entirely when
+/// no target exists.
 pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState, intensity: f32) {
     // Weight from how hard the player is already steering (1 - |yaw push|),
     // the push read before the pad's look scale. [ours] floor: BF1 skips
@@ -226,11 +245,11 @@ pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState
     }
 
     // Term 1: velocity tracking (yaw only, rate-matched, no dt). With the
-    // lead (ours), the target's own motion is taken out of it and matched in
-    // full, the player's own share left as the PS2's - only while the pull
-    // is live (fire within MAGNET_TIMER_SECS, [ours] 2026-10-29). Not
-    // pulling, a scoped sniper matches `follow` of it ([ours] C5), or the
-    // PS2's share where that is larger (a forward push).
+    // lead (ours), match full relative velocity while the pull is live
+    // (fire within MAGNET_TIMER_SECS). Not pulling, a scoped sniper matches
+    // `follow` of relative motion ([ours] C5), or the PS2's share where
+    // that is larger (either movement axis).
+    // measure: controller tracking on crossing and co-moving targets.
     let fwd_dist = (env.target_center - env.self_pos).dot(env.aim_fwd);
     let pulling = env.armed && st.magnet_timer > 0.0;
     let share = match pulling {
@@ -246,8 +265,11 @@ pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState
             (sticks.move_mag.abs() * w * GAIN * lat_vel) / (fwd_dist * r)
         }
         Some((v, k)) => {
-            let own = sticks.move_mag.abs() * GAIN * env.self_vel.dot(env.lat);
-            w * (own - k * v.dot(env.lat)) / (fwd_dist * r)
+            // Match relative motion with the same weight on shooter and
+            // lead: travelling together must not drift the reticle. The
+            // firing extension already follows a still shooter's target in
+            // full; it must also compensate the moving shooter's view.
+            w * k * (env.self_vel - v).dot(env.lat) / (fwd_dist * r)
         }
     };
     sticks.yaw += track.clamp(-cap, cap) * intensity;
@@ -526,6 +548,32 @@ mod tests {
         let mut late = still;
         apply(DT, &mut late, &e, &mut st, 1.0);
         assert_eq!(late.yaw, 0.0, "timer out: the PS2's term 1");
+    }
+
+    #[test]
+    fn firing_tracking_matches_relative_motion_in_all_four_cases() {
+        for (own, target) in [(0.0, 0.0), (5.0, 0.0), (0.0, 5.0), (5.0, 5.0)] {
+            let mut e = env();
+            e.armed = true;
+            e.fire_held = true;
+            e.self_vel = Vec3::X * own;
+            e.target_vel = Vec3::X * target;
+            e.lead_vel = Some(e.target_vel);
+            for movement in [0.0, 1.0] {
+                let mut s = Sticks {
+                    move_mag: movement,
+                    yaw: 0.0,
+                    pitch: 0.0,
+                };
+                apply(DT, &mut s, &e, &mut AssistState::default(), 1.0);
+                let want = (own - target) / (20.0 * e.turn_rate);
+                assert!(
+                    (s.yaw - want).abs() < EPS,
+                    "own {own} target {target} move {movement}: {} vs {want}",
+                    s.yaw
+                );
+            }
+        }
     }
 
     /// [ours] C5: a scoped sniper (`follow`) matches its share of the lead

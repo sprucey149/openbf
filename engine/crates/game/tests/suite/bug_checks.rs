@@ -177,7 +177,6 @@ fn hud_model(dead: bool) -> ui::hud::HudModel {
         target: None,
         reticle_y: 0.5,
         dead,
-        respawn_in: None,
         outcome: None,
         countdown: None,
         round_end: None,

@@ -172,6 +172,7 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
             view: [50.0; 4],
         }],
         vehicles: Vec::new(),
+        structures: Vec::new(),
         droids: std::collections::HashMap::new(),
     });
     a.walk = Some((walk, render::MeshHandle::default()));
@@ -575,4 +576,62 @@ fn a_seated_or_flying_player_keeps_the_fixed_stick_scale() {
     assert_eq!(stick_full(&r, false), fixed);
     r.feed(0.3, 0.0);
     assert_eq!(stick_full(&r, false), fixed);
+}
+
+#[test]
+fn ground_vehicle_death_waits_without_the_egui_spawn_placeholder() {
+    use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    let mut walk = WalkSim::new(42, glam::Vec3::ZERO, None);
+    walk.sim.spawn_screens = true;
+    let hull = walk.sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Hover,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: glam::Vec3::new(0.0, 2.0, 0.0),
+        yaw: 0.0,
+        max_health: 100.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    let mut seat = game::vehicle_class::SeatSpec::new(SeatKind::Pilot);
+    seat.track_center = Some([0.0, 4.0, -6.0]);
+    seat.track_offset = Some([0.0; 3]);
+    walk.vehicle_seats = vec![vec![seat]];
+    walk.vehicle_tops = vec![Some(2.0)];
+    assert!(walk.sim.seat_unit(walk.player, hull, 0));
+    walk.step_tick(&[PadState::default()]);
+    let camera = walk.camera().position;
+    walk.sim.destroy_vehicle(hull, None);
+    walk.step_tick(&[PadState::default()]);
+    assert!(walk.holds_seat_view());
+    assert!(walk.death_cam.is_none());
+    assert_eq!(walk.camera().position, camera);
+    let feed = game::event_feed::EventFeed::default();
+    let waiting = spawn_model(&walk, &feed);
+    if let Some(model) = &waiting {
+        let ctx = ui::egui::Context::default();
+        for _ in 0..2 {
+            let output = ctx.run(Default::default(), |ctx| ui::spawn::draw_spawn(ctx, model));
+            for shape in output.shapes {
+                if let ui::egui::Shape::Text(text) = shape.shape {
+                    println!("waiting panel: {}", text.galley.text());
+                }
+            }
+        }
+    }
+    assert!(
+        waiting.is_none(),
+        "no legacy panel before the native spawn map"
+    );
+    for _ in 0..4 * core::TICK_HZ + 2 {
+        walk.step_tick(&[PadState::default()]);
+    }
+    assert_eq!(walk.camera().position, camera);
+    assert_eq!(walk.sim.spawn_stage[0], core::sim::SpawnStage::Map);
+    assert!(matches!(
+        spawn_model(&walk, &feed).unwrap().page,
+        Some(ui::spawn_draw::SpawnPage::Map { .. })
+    ));
 }

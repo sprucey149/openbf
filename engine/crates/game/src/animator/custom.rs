@@ -201,12 +201,16 @@ pub fn for_mission(classes_dir: &Path, mission: &MissionDef) -> Result<Descripto
             mission.map
         );
     }
+    for_loads(classes_dir, &mission.class_load_order)
+}
+
+fn for_loads(classes_dir: &Path, loads: &[crate::mission::SideClassLoad]) -> Result<Descriptors> {
     let root = classes_dir
         .parent()
         .ok_or_else(|| anyhow!("classes directory has no asset root"))?;
     let mut sets: BTreeMap<String, ComboSet> = BTreeMap::new();
     let mut descriptors = Descriptors::default();
-    for load in &mission.class_load_order {
+    for load in loads {
         let side = load.side.to_ascii_lowercase();
         if !sets.contains_key(&side) {
             let path = root.join("side_bf2/combos").join(format!("{side}.ron"));
@@ -242,7 +246,27 @@ pub fn for_mission(classes_dir: &Path, mission: &MissionDef) -> Result<Descripto
 
 /// Apply the selected hero defaults after resolving the original mission table.
 pub fn for_hero(classes_dir: &Path, mission: &MissionDef, hero: &str) -> Result<Descriptors> {
-    let mut descriptors = for_mission(classes_dir, mission)?;
+    let mut descriptors = if mission.source_game.eq_ignore_ascii_case("bf1") {
+        // [ours] BF1's chosen identities use the BF2 hero sublevels, in
+        // mission team order. BF1 infantry never registers BF2 descriptors.
+        let loads: Vec<_> = mission
+            .heroes
+            .iter()
+            .map(|(_, name)| crate::mission::SideClassLoad {
+                side: name.split('_').next().unwrap_or("").into(),
+                request: name.clone(),
+            })
+            .collect();
+        if loads.is_empty() {
+            bail!(
+                "{}: missing BF1 hero assignments; regenerate missions",
+                mission.map
+            );
+        }
+        for_loads(classes_dir, &loads)?
+    } else {
+        for_mission(classes_dir, mission)?
+    };
     if hero.eq_ignore_ascii_case("rep_hero_aalya") {
         // [ours] Aayla keeps Hero Assault's unadjusted third-attack pose on every map.
         if let Some(upper) = descriptors

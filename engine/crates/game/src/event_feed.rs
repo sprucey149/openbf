@@ -1027,7 +1027,7 @@ impl EventFeed {
                         };
                         self.say(text, relation(v.team), tick);
                     }
-                    if shooter == viewer && points > 0 && !sim.hero_unit(k) {
+                    if shooter == viewer && points > 0 {
                         positive += points as u32;
                     }
                 }
@@ -1106,7 +1106,7 @@ impl EventFeed {
                     let u = &sim.units[unit.index as usize];
                     let hero = sim.hero_unit(u);
                     self.round.score(unit, points::FLAG_CAPTURE, hero);
-                    if unit == viewer && !hero {
+                    if unit == viewer {
                         positive += points::FLAG_CAPTURE as u32;
                     }
                     if let Some(last) = self.last_flag_carriers.get_mut(usize::from(flag)) {
@@ -1136,9 +1136,7 @@ impl EventFeed {
                         } else {
                             points::CAPTURE_ASSIST
                         };
-                        if !sim.hero_unit(&sim.units[viewer.index as usize]) {
-                            positive += points as u32;
-                        }
+                        positive += points as u32;
                     }
                     // Every soldier's share, for the stats pages (issue #50).
                     for i in 0..sim.units.len() {

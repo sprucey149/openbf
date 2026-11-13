@@ -329,6 +329,7 @@ fn setting_sound(
 fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
     use ui::menu::MenuAction;
     match action {
+        MenuAction::Denied => Some(MenuSound::Error),
         MenuAction::SetMusic(_) | MenuAction::Resume | MenuAction::Quit | MenuAction::ClosePage => {
             None
         }
@@ -774,7 +775,6 @@ impl App {
         } else if let Some((page, cursor)) = front.settings {
             let icons = self.current_icons();
             let settings = &self.profile.settings;
-            let k = settings.fov_scale;
             let mut model = ui::menu::MenuModel {
                 assist_intensity: settings.assist_intensity,
                 difficulty: game::shell_ia::ia_level(settings.difficulty),
@@ -787,8 +787,8 @@ impl App {
                     settings.team_size_pct,
                     settings.reinforcement_pct,
                 ),
-                fov_scale: k,
-                fov_deg: (game::walk::chase_fov_y() * k).to_degrees(),
+                fov_scale: settings.fov_scale,
+                base_fov_deg: game::walk::chase_fov_y().to_degrees(),
                 music_volume: settings.music_volume,
                 rumble_strength: settings.rumble_strength,
                 rumble_on_fire: settings.rumble_on_fire,
@@ -834,7 +834,11 @@ impl App {
                 result
             } else {
                 let result = ui::menu::navigate(&model, input);
-                if let Some(sound) = setting_sound(&model, input, result.0)
+                if let Some(sound) = result
+                    .1
+                    .contains(&ui::menu::MenuAction::Denied)
+                    .then_some(MenuSound::Error)
+                    .or_else(|| setting_sound(&model, input, result.0))
                     .or_else(|| result.1.first().copied().and_then(shell_click_sound))
                 {
                     front.cue(sound);
@@ -863,6 +867,9 @@ impl App {
                         career_awards_disabled: !self.profile.settings.career_awards,
                         rc_flight_controls: self.profile.settings.flight_controls
                             == input::FlightControls::RcMode2,
+                        fov_scale: self.profile.settings.fov_scale,
+                        first_person: self.profile.settings.viewpoint.is_first(),
+                        low_power_resolution: self.profile.settings.low_power_resolution,
                         ..model
                     });
         } else {
@@ -1109,9 +1116,9 @@ impl App {
             }
             MenuAction::SetAiCap(c) => s.team_size_pct = c,
             MenuAction::SetReinforcements(c) => s.reinforcement_pct = c,
-            MenuAction::SetFov(k) => {
-                s.fov_scale = k.clamp(game::walk::FOV_SCALE_RANGE.0, game::walk::FOV_SCALE_RANGE.1)
-            }
+            MenuAction::SetFov(k) => s.fov_scale = game::walk::clamp_fov_scale(k),
+            MenuAction::ResetGraphics => s.reset_graphics(),
+            MenuAction::Denied => return,
             MenuAction::SetCareerAwards(on) => s.career_awards = on,
             MenuAction::SetRumble(v) => s.rumble_strength = v.clamp(0.0, 1.0),
             MenuAction::ToggleRumbleOnFire => s.rumble_on_fire = !s.rumble_on_fire,

@@ -1023,6 +1023,16 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
     order.sort_by_key(|c| std::cmp::Reverse(hud.elems[*c].z_order));
     for r in order {
         let e = &hud.elems[r];
+        // The countdowns' children sit at the right edge of the 4:3 frame,
+        // but their groups have a small negative X origin. Keep the whole
+        // group with the minimap when widening the viewport.
+        let anchor_x = if e.name.eq_ignore_ascii_case("VictoryTimerGroup")
+            || e.name.eq_ignore_ascii_case("DefeatTimerGroup")
+        {
+            1.0
+        } else {
+            e.pos.x / FRAME_W
+        };
         let (screen, parent) = match e.window_pos {
             // A projected world point (the reticle): the element's origin is
             // that window pixel.
@@ -1036,7 +1046,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
             None => (
                 Screen {
                     origin: [
-                        OVERFILL[0].0 * box_w + anchor_shift(e.pos.x / FRAME_W, size),
+                        OVERFILL[0].0 * box_w + anchor_shift(anchor_x, size),
                         OVERFILL[1].0 * size[1],
                     ],
                     scale,
