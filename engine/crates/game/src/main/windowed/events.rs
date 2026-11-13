@@ -444,7 +444,7 @@ impl winit::application::ApplicationHandler for App {
                             cursor: self.pause_menu.cursor,
                             page: Some(self.pause_menu.page),
                             popup: self.pause_menu.confirm,
-                            restart_available: false,
+                            restart_available: self.current.is_some(),
                             texts: game::pause::texts(&self.feed),
                             respawn_label: game::pause::respawn_label(walk, &self.feed),
                             in_shell: None,

@@ -1387,3 +1387,29 @@ The port follows these in `ui::shell_feel` (pulse, flashy, music, hold repeat), 
 lists, the Instant Action clicks), `ui::shell_ia` (the stack pulse, the info text), `ui::shell_ps2` (Training focus)
 and `game::pause::pause_sound`. Not applied, the port having no such screen: Audio Options' Output Mode and its PS2
 defaults, Game Options' Tool Tips, the profile and keyboard screens.
+
+
+## 2026-11-13 Restart Mission row restored
+
+The maintainer's original/port pause-menu pair shows Restart Mission between
+Respawn and Quit on the PS2 and absent from the port. The existing row,
+confirmation and reload path were present, but `windowed/events.rs` supplied
+`restart_available: false`. The model now offers it whenever `App::current`
+holds an Instant Action mission. `App::restart_round` requeues that mission
+before the remaining playlist; the ordinary `start_battle` path calls
+`battle::open_spawn_screens`, which enables side selection again. Direct launches without a current playlist mission do not advertise an
+unsupported restart.
+
+At source `6a9099f3` plus the one-line model change:
+`cargo test --manifest-path engine/Cargo.toml -p ui --lib menu::game_menu_tests`
+passed 9 tests, including row order, restart confirmation and pointer dispatch.
+`cargo test --manifest-path engine/Cargo.toml --release -p game --bin game restart`
+passed 1 test (53 filtered out), preserving the current mission and playlist
+order. The maintainer subsequently playtested the change and confirmed that it works.
+
+The release game build passed. Packing succeeded with 28,750 files, but the
+running playtest executable prevented replacing `dist/openbf.exe`. The complete
+packed build was staged at `dist/openbf-restart-staged.exe` (1,958,134,991 bytes).
+After confirming the fix, the maintainer requested deleting that staged executable
+and committing the change without another rebuild.
+The profile and playtest files were not changed.
