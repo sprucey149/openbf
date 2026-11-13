@@ -27,7 +27,7 @@ impl Default for FlightLimits {
 }
 
 impl Sim {
-    pub(super) fn flyer_region_coverage(&self, vehicle: &crate::vehicle::Vehicle) -> (bool, bool) {
+    pub(crate) fn flyer_region_coverage(&self, vehicle: &crate::vehicle::Vehicle) -> (bool, bool) {
         let sphere = self
             .blast_setup
             .get(vehicle.class as usize)
@@ -237,10 +237,16 @@ impl Sim {
                 crash_random,
             );
             let row = super::flyer_contact::FlyerRow::of(p);
+            // The BF2 spline follower runs in Flying only. Give a permitted
+            // landing toggle to the flight state machine before it advances
+            // the spline and consumes the button edge (B2 FUN_00202880).
+            let landing_requested =
+                v.input.jump && !v.flyer.jump_was_down && env.permits_bf2_landing();
             if p.bf2
                 && !v.input.human
                 && v.flyer.phase == FlightPhase::Flying
                 && v.flyer.ai.curve.is_some()
+                && !landing_requested
             {
                 let time = self.tick as f32 * dt;
                 let ground_map = self.ground_flyer_map;
@@ -393,6 +399,38 @@ mod tests {
         let pilot = sim.spawn(&pilot(0, pos)).unwrap();
         assert!(sim.seat_unit(pilot, h, 0));
         (sim, h)
+    }
+
+    #[test]
+    fn a_bot_spline_yields_to_an_eligible_landing_request() {
+        use crate::region::Region;
+
+        for eligible in [false, true] {
+            let (mut sim, h) = world_with(UnitSpec::trooper);
+            sim.flyer_params[0].as_mut().unwrap().bf2 = true;
+            let pos = Vec3::new(0.0, 10.0, 0.0);
+            let region_center = if eligible { pos } else { pos + 50.0 * Vec3::X };
+            sim.landing_regions
+                .push(Region::sphere(region_center, 15.0));
+            let craft = sim.vehicle_mut(h).unwrap();
+            craft.pos = pos;
+            craft.flyer.phase = FlightPhase::Flying;
+            craft.flyer.ai.curve = Some([pos - Vec3::Z, pos, pos + Vec3::Z, pos + 2.0 * Vec3::Z]);
+            craft.input.jump = true;
+
+            sim.tick_flyers(crate::TICK_DT);
+
+            let expected = if eligible {
+                FlightPhase::Landing
+            } else {
+                FlightPhase::Flying
+            };
+            assert_eq!(
+                sim.vehicle(h).unwrap().flyer.phase,
+                expected,
+                "eligible={eligible}"
+            );
+        }
     }
 
     /// The energy award (Endurance) refills the flyer its holder pilots at

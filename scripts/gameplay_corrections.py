@@ -521,13 +521,19 @@ def script_facts(scripts, name, game):
     """What the mission generator reads from one script, as table JSON (the same loader, the same call fold)."""
     import gen_missions as missions
 
-    def calls(body):
-        return missions.calls40(missions.undump40(body)) if game == "bf1" else missions.calls50(missions.undump50(body))
-    sequence = calls(scripts[name])
-    common = scripts.get(name.replace("_ass", "_cmn")) if name.endswith("_ass") else None
-    if common is not None:
-        sequence = calls(common) + sequence
-    facts = missions.facts_from_calls(sequence)
+    if game == "bf1":
+        facts = missions.facts_from_calls(missions.calls40(missions.undump40(scripts[name])))
+    else:
+        mission = missions.undump50(scripts[name])
+        mode = missions.mission_mode(name)
+        if mode in ("ass", "1flag"):
+            shared_name = name.rsplit("_", 1)[0] + "_cmn"
+            common_body = scripts.get(shared_name)
+            common = missions.undump50(common_body) if common_body is not None else None
+            calls = missions.mission_calls50(mission, common)
+            facts = missions.startup_mission_facts50(calls, mission, common)
+        else:
+            facts = missions.facts_from_calls(missions.calls50(mission))
     capture = facts.get("ai_capture") or {}
     facts["ai_capture"] = {f"{key[0]}/{key[1]}": value for key, value in capture.items()}
     return json.loads(json.dumps(facts))

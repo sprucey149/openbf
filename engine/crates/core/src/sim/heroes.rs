@@ -609,6 +609,7 @@ impl Sim {
         }
         let h = UnitHandle { index: member, gen };
         if alive {
+            self.carry_medals_into_hero(h);
             let t = &mut self.battle.teams[usize::from(team.min(1))];
             if slot.is_some() {
                 t.alive_players = t.alive_players.saturating_sub(1);

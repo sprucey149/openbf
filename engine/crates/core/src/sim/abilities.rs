@@ -68,14 +68,13 @@ impl Sim {
         let affected = !targets.is_empty();
         for target in targets {
             let u = &self.units[target];
-            let hero = self.ground_rules == crate::soldier::GroundRules::Bf2
-                && self.hero_class(u.team) == Some(u.spec.class);
+            let hero = self.hero_class(u.team) == Some(u.spec.class);
             if !hero {
                 self.units[target].buffs.apply_ability(ability, owner);
             }
         }
-        let hero = self.ground_rules == crate::soldier::GroundRules::Bf2
-            && self.hero_class(self.units[i].team) == Some(self.units[i].spec.class);
+        let caster = &self.units[i];
+        let hero = self.hero_class(caster.team) == Some(caster.spec.class);
         if affected && ability.self_on_hit && ability.friends && !hero {
             self.units[i].buffs.apply_ability(ability, owner);
         }

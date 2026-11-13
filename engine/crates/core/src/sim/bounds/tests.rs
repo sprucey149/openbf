@@ -154,6 +154,59 @@ fn hub_floors_are_walked_from_the_posts() {
     assert_eq!(s.kill_floor, Some(10.0 - KILL_FLOOR_DROP));
 }
 
+#[test]
+fn trench_votes_keep_the_approach_hub_on_its_deck() {
+    let deck = |x: f32, height: f32, half_width: f32| {
+        Body::new(
+            Mat4::from_translation(Vec3::new(x, height - 0.25, 0.0)),
+            Shape::Box {
+                half: Vec3::new(half_width, 0.25, 8.0),
+            },
+        )
+    };
+    let mut sim = Sim::empty(7);
+    sim.collision =
+        CollisionWorld::new(vec![deck(-5.0, 3.5, 7.0), deck(5.0, 0.0, 7.0)], Vec::new());
+    let hub = |x, z, arcs| Hub {
+        pos: Vec3::new(x, 1.0, z),
+        radius: 2.0,
+        arcs,
+    };
+    let arc = |a, b| Arc {
+        a,
+        b,
+        type_mask: 1,
+        flags: 0,
+    };
+    sim.nav = Some(
+        NavGraph::new(
+            vec![
+                hub(-8.0, 0.0, vec![0]),
+                hub(0.0, 0.0, vec![0, 1, 2]),
+                hub(7.0, -3.0, vec![1]),
+                hub(7.0, 3.0, vec![2]),
+            ],
+            vec![arc(0, 1), arc(1, 2), arc(1, 3)],
+            RouteTable::empty(4),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    sim.add_cp(
+        sphere_cp("approach", Vec3::new(-8.0, 3.5, 0.0), 2.0, false),
+        Some(0),
+    );
+
+    assert_eq!(sim.nav_floor(1), Some(3.5));
+    for h in [2, 3] {
+        assert_eq!(sim.nav_floor(h), Some(0.0));
+        assert!(sim.arc_walkable(h - 1, 1, VOTE_TOL));
+    }
+    assert!(!sim.arc_unwalkable(0, 0));
+    assert!(!sim.arc_unwalkable(0, 1));
+}
+
 /// On a deck, on the ramp and a step down a hull are on the level; the
 /// hidden floor under a deck or under the bridge is off it.
 #[test]

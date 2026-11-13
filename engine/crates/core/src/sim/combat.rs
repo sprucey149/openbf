@@ -773,6 +773,7 @@ impl Sim {
         if victim_team < 2 {
             self.battle.on_death(victim_team as usize, victim_is_player);
         }
+        self.note_medal_death(h);
         self.class_change_life_ended(h);
         // Phase D: the squad rules for a death, both of them.
         crate::squad::on_unit_died(self, h);
@@ -898,6 +899,7 @@ impl Sim {
         if team < 2 {
             self.battle.on_death(team as usize, is_player);
         }
+        self.note_medal_death(h);
         self.class_change_life_ended(h);
         crate::squad::on_unit_died(self, h);
         self.unseat_unit(h);

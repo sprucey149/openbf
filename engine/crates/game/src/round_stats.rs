@@ -463,9 +463,13 @@ pub fn screens(
                     name: t(&format!("game.awards.medal.{key}"), en),
                     count,
                     level: t(level_key, level_label),
-                    info: t(&format!("game.awards.medalinfo.{key}"), "%s")
-                        .replacen("%s", &needed.to_string(), 1)
-                        .replace("\\'", "'"),
+                    info: if key == "warhero" {
+                        format!("Earn {needed} points in one life to increase damage.")
+                    } else {
+                        t(&format!("game.awards.medalinfo.{key}"), "%s")
+                            .replacen("%s", &needed.to_string(), 1)
+                            .replace("\\'", "'")
+                    },
                 }
             })
             .collect(),
@@ -675,6 +679,49 @@ mod tests {
             row.personal[4]
         );
         assert!(row.personal[5].1.starts_with('W'), "{:?}", row.personal[5]);
+    }
+
+    #[test]
+    fn career_medal_descriptions_follow_rank_at_every_match_difficulty() {
+        use core::skill::Difficulty;
+
+        let mut w = walk();
+        let unit = |i| format!("U{i}");
+        let text = |key: &str, fallback: &str| match key {
+            "game.awards.medalinfo.endurance" => "Earn %s points in one life.".to_owned(),
+            _ => fallback.to_owned(),
+        };
+        let names = names_for(&unit, &text);
+        let ranks = [(31, 36, 12), (32, 27, 9)];
+        for (difficulty, (count, war_hero, endurance)) in Difficulty::ALL
+            .into_iter()
+            .flat_map(|difficulty| ranks.map(|rank| (difficulty, rank)))
+        {
+            w.sim.difficulty = difficulty;
+            let career = crate::profile::Career {
+                medals: [count; core::sim::MEDAL_THRESHOLDS.len()],
+                ..Default::default()
+            };
+            let stats = screens(&w.sim, &RoundStats::default(), w.player, &career, &names);
+            let info = |name| {
+                stats
+                    .career
+                    .medals
+                    .iter()
+                    .find(|m| m.name == name)
+                    .unwrap()
+                    .info
+                    .as_str()
+            };
+            assert_eq!(
+                info("War Hero"),
+                format!("Earn {war_hero} points in one life to increase damage.")
+            );
+            assert_eq!(
+                info("Endurance"),
+                format!("Earn {endurance} points in one life.")
+            );
+        }
     }
 
     #[test]

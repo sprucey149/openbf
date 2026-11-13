@@ -6,6 +6,15 @@ use std::path::PathBuf;
 fn load(key: &str, mission: &str) -> WalkSim {
     let root = PathBuf::from(std::env::var_os("TUSKEN_ASSETS").expect("TUSKEN_ASSETS owned bake"));
     let missions = PathBuf::from(std::env::var_os("TUSKEN_MISSIONS").expect("TUSKEN_MISSIONS"));
+    load_from(&root, &missions, key, mission)
+}
+
+fn load_from(
+    root: &std::path::Path,
+    missions: &std::path::Path,
+    key: &str,
+    mission: &str,
+) -> WalkSim {
     let mission =
         game::mission::MissionDef::load(&missions.join(format!("{mission}.ron"))).unwrap();
     let (scene, report) = game::assets::load_battle_scene(&root.join(key), "con").unwrap();
@@ -37,6 +46,146 @@ fn load(key: &str, mission: &str) -> WalkSim {
     make_walk(&scene, &setup).expect("ordinary Conquest fixture")
 }
 
+#[test]
+fn gamorrean_resolver_requires_matching_game_and_class() {
+    let dir = std::env::temp_dir().join(format!("openbf-gamorrean-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let class = "gam_inf_gamorreanguard";
+    let file = dir.join("bf2_gam.ron");
+    std::fs::write(
+        &file,
+        r#"[(name: "gam_inf_gamorreanguard", kind: "entc", base: "soldier", props: [])]"#,
+    )
+    .unwrap();
+    assert_eq!(
+        game::native_teams::native_side(&dir, "bf2", class),
+        Some(("gam", file))
+    );
+    assert!(game::native_teams::native_side(&dir, "bf1", class).is_none());
+    assert!(game::native_teams::native_side(&dir, "bf2", "absent_guard").is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "requires GAMORREAN_ASSETS owned overlay and GAMORREAN_MISSIONS"]
+fn gamorrean_spawn_posts_are_separate_from_conquest_objectives() {
+    let root = PathBuf::from(std::env::var_os("GAMORREAN_ASSETS").expect("owned Gamorrean bake"));
+    let missions = PathBuf::from(std::env::var_os("GAMORREAN_MISSIONS").expect("mission input"));
+    let (scene, _) = game::assets::load_battle_scene(&root.join("bf2_tat3"), "con").unwrap();
+    assert_eq!(
+        scene
+            .manifest
+            .instances
+            .iter()
+            .filter(|i| i.class == "com_bldg_invisible_controlzone" && i.name.starts_with("npccp"))
+            .count(),
+        2
+    );
+    for era in ["bf2_tat3_con", "bf2_tat3_con_cw"] {
+        let mission =
+            game::mission::MissionDef::load(&missions.join(format!("{era}.ron"))).unwrap();
+        assert_eq!(mission.posts.len(), 5);
+        let mut layout = game::layout::MapLayout::from_manifest(&scene.manifest);
+        layout.apply_mission(&mission);
+        assert_eq!(layout.cps.len(), 5, "only the five conquest objectives");
+        assert!(layout.cps.iter().all(|cp| cp.team != 3));
+        for path in ["NPC_PATH", "npc_spawn_small"] {
+            assert!(!layout.path(path).unwrap().nodes.is_empty());
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires GAMORREAN_ASSETS owned overlay and GAMORREAN_MISSIONS"]
+fn gamorreans_gcw_spawn_with_stock_melee_audio_and_hostility() {
+    gamorreans("bf2_tat3_con");
+}
+
+#[test]
+#[ignore = "requires GAMORREAN_ASSETS owned overlay and GAMORREAN_MISSIONS"]
+fn gamorreans_cw_spawn_with_stock_melee_audio_and_hostility() {
+    gamorreans("bf2_tat3_con_cw");
+}
+
+fn gamorreans(era: &str) {
+    let root = PathBuf::from(std::env::var_os("GAMORREAN_ASSETS").expect("owned Gamorrean bake"));
+    let missions = PathBuf::from(std::env::var_os("GAMORREAN_MISSIONS").expect("mission input"));
+    let body = root.join("side_bf2/locals/soldiers/gam_inf_gamorreanguard.glb");
+    let axe = root.join("side_bf2/locals/weapons/gam_inf_weap_axe.glb");
+    assert!(root.join("classes/bf2_gam.ron").is_file());
+    assert!(body.is_file() && axe.is_file(), "fresh body and axe bakes");
+    game::assets::load_glb(&axe).expect("actual held axe model consumption");
+    let asset = game::assets::load_visual_skinned_glb(&body).unwrap();
+    assert!(!asset.clips.is_empty(), "actual animated model consumption");
+    assert!(asset.skeleton.index_of("hp_weapons").is_some());
+    assert!(game::soldier_vis::SoldierVisuals::load_rig(
+        &root.join("side_bf2/locals"),
+        "gam_inf_gamorreanguard",
+        &asset
+    )
+    .is_some());
+    let mut walk = load_from(&root, &missions, "bf2_tat3", era);
+    let native: Vec<_> = walk
+        .sim
+        .alive_units()
+        .filter(|(_, u)| u.team == 2)
+        .collect();
+    assert_eq!(native.len(), 2, "{era}: actual guards at launch");
+    assert!(walk.sim.hostile(2, 0) && walk.sim.hostile(0, 2));
+    assert!(walk.sim.hostile(2, 1) && walk.sim.hostile(1, 2));
+    assert_eq!(
+        walk.sim.cps.len(),
+        5,
+        "native posts do not enter conquest objectives"
+    );
+    let template = walk.native_teams.get(&2).unwrap();
+    assert_eq!(template.faction, "gam");
+    let class = &template.classes[0];
+    assert_eq!(class.name, "gam_inf_gamorreanguard");
+    assert_eq!(class.geometry.as_deref(), Some("gam_inf_gamorreanguard"));
+    assert_eq!(class.weapon_geometry.as_deref(), Some("gam_inf_weap_axe"));
+    assert_eq!(class.anim.bank_of("gam_weap_inf_axe"), "human_sabre");
+    assert_eq!(class.cries.hurt.as_deref(), Some("gam_hurt"));
+    assert_eq!(class.cries.death.as_deref(), Some("gam_die"));
+    let mission = game::mission::MissionDef::load(&missions.join(format!("{era}.ron"))).unwrap();
+    let sounds = game::sounds::SoundLib::load_for(&root.join("bf2_tat3"), &mission).unwrap();
+    for name in ["gam_hurt", "gam_die", "gam_chatter"] {
+        assert!(sounds.has(name), "{era}: sound {name}");
+        let path = sounds.take_path(name, 0).expect("guard audio sample");
+        assert!(pak::is_file(path), "guard audio sample exists");
+    }
+    for (_, guard) in &native {
+        let weapon = &walk.sim.weapon_classes[guard.weapon_class];
+        assert!(weapon.saber.as_ref().is_some_and(|s| !s.clips.is_empty()));
+        let (scene, _) = game::assets::load_battle_scene(&root.join("bf2_tat3"), "con").unwrap();
+        let layout = game::layout::MapLayout::from_manifest(&scene.manifest);
+        assert!(
+            ["NPC_PATH", "npc_spawn_small"].iter().any(|path| layout
+                .path(path)
+                .unwrap()
+                .nodes
+                .iter()
+                .any(|node| node.pos == guard.spec.pos && node.yaw == guard.spec.yaw)),
+            "authored invisible native post path"
+        );
+    }
+    println!(
+        "{era}: 2 guards, stock melee, mutual hostility; {} body clips",
+        asset.clips.len()
+    );
+    let mut replay = load_from(&root, &missions, "bf2_tat3", era);
+    for tick in 1..=300 {
+        walk.step_tick(&[PadState::default()]);
+        replay.step_tick(&[PadState::default()]);
+        assert_eq!(walk.sim.hash(), replay.sim.hash(), "{era} tick {tick}");
+        println!("guard parity {era} {tick} {:016x}", walk.sim.hash());
+    }
+    assert!(
+        !walk.native_teams.is_empty(),
+        "native roster survives stepping"
+    );
+}
+
 fn dune(era: &str) -> WalkSim {
     let w = load("tat1", era);
     let root = PathBuf::from(std::env::var_os("TUSKEN_ASSETS").unwrap());
@@ -45,9 +194,8 @@ fn dune(era: &str) -> WalkSim {
     assert!(root
         .join("side_bf1/locals/soldiers/tat_inf_tusken.glb")
         .is_file());
-    let manifest: game::assets::Manifest = ron::from_str(
-        &pak::read_to_string(root.join("tat1/manifest.ron")).unwrap(),
-    ).unwrap();
+    let manifest: game::assets::Manifest =
+        ron::from_str(&pak::read_to_string(root.join("tat1/manifest.ron")).unwrap()).unwrap();
     let layout = game::layout::MapLayout::from_manifest(&manifest);
     for name in ["cp1", "cp3"] {
         let post = layout.cps.iter().find(|cp| cp.name == name).unwrap();
@@ -133,9 +281,13 @@ fn park(w: &mut WalkSim) {
 }
 
 fn controlled_tick(w: &mut WalkSim) {
-    for u in &mut w.sim.units { u.controller = core::unit::Controller::Idle; }
+    for u in &mut w.sim.units {
+        u.controller = core::unit::Controller::Idle;
+    }
     w.sim.step(&[PadState::default()]);
-    for u in &mut w.sim.units { u.controller = core::unit::Controller::Idle; }
+    for u in &mut w.sim.units {
+        u.controller = core::unit::Controller::Idle;
+    }
 }
 
 fn stand(w: &mut WalkSim, unit: usize, pos: glam::Vec3) {

@@ -200,6 +200,7 @@ impl SoldierVisuals {
     /// their team's first class's asset; a team with no model at all keeps
     /// the marker box.
     ///
+    /// BF2 hero kits retain their own bank on BF1 maps. For infantry,
     /// `game` is the MAP's source game — the same disc `game::roster` took
     /// the classes off, so the `GeometryName` a class carries is looked up in
     /// the side bake that holds it. Both discs bake all four sides, and the
@@ -230,19 +231,21 @@ impl SoldierVisuals {
         } else {
             game.to_owned()
         };
-        let plan = DrawPlan::of(teams);
+        let plan = DrawPlan::for_game(teams, &side_game);
         let mut cache: HashMap<String, Option<TextureHandle>> = HashMap::new();
         let bodies = plan
             .bodies
             .iter()
-            .map(|geometry| {
-                Self::load_body(Some(&mut *r), assets_dir, &side_game, geometry, &mut cache)
+            .zip(&plan.body_games)
+            .map(|(geometry, game)| {
+                Self::load_body(Some(&mut *r), assets_dir, game, geometry, &mut cache)
             })
             .collect();
         let weapons: Vec<WeaponAsset> = plan
             .weapons
             .iter()
-            .map(|wg| Self::load_weapon(Some(&mut *r), assets_dir, &side_game, wg, &mut cache))
+            .zip(&plan.weapon_games)
+            .map(|(wg, game)| Self::load_weapon(Some(&mut *r), assets_dir, game, wg, &mut cache))
             .collect();
         let flash = if native {
             None
@@ -259,16 +262,20 @@ impl SoldierVisuals {
                 teams,
                 &mut cache,
             );
-            if s.bf2 {
+            if teams
+                .iter()
+                .flat_map(|t| &t.classes)
+                .any(|c| c.asset_game(game) == "bf2")
+            {
                 s.load_sabers(Some(&mut *r), assets_dir, teams);
             }
         }
         // Each class's skins over its body's parts (card USKN).
-        let side = assets_dir.join(format!("side_{side_game}"));
         for (team, t) in teams.iter().enumerate() {
             let mut rows = Vec::new();
             let mut low_rows = Vec::new();
             for (k, c) in t.classes.iter().enumerate() {
+                let side = assets_dir.join(format!("side_{}", c.asset_game(&side_game)));
                 let body = s.per_class[team].get(k).and_then(|d| d.body);
                 let groups = body.map_or(&[][..], |b| s.assets[b].groups.as_slice());
                 let row: Vec<Option<TextureHandle>> = groups
@@ -363,24 +370,30 @@ impl SoldierVisuals {
     /// The animators without a renderer (a census, a test): every body's
     /// skeleton, clips and sets, every hand weapon's nodes; nothing to draw.
     pub fn load_cpu(assets_dir: &Path, game: &str, teams: &[TeamTemplate; 2]) -> Self {
-        let plan = DrawPlan::of(teams);
+        let plan = DrawPlan::for_game(teams, game);
         let mut cache = HashMap::new();
         let bodies = plan
             .bodies
             .iter()
-            .map(|geometry| Self::load_body(None, assets_dir, game, geometry, &mut cache))
+            .zip(&plan.body_games)
+            .map(|(geometry, game)| Self::load_body(None, assets_dir, game, geometry, &mut cache))
             .collect();
         let weapons: Vec<WeaponAsset> = plan
             .weapons
             .iter()
-            .map(|wg| Self::load_weapon(None, assets_dir, game, wg, &mut cache))
+            .zip(&plan.weapon_games)
+            .map(|(wg, game)| Self::load_weapon(None, assets_dir, game, wg, &mut cache))
             .collect();
         let mut s = Self::assemble(plan, teams, bodies, weapons, None);
         s.bf2 = game.eq_ignore_ascii_case("bf2");
         s.fp = super::first_person::FirstPersonVisuals::load(
             None, assets_dir, game, teams, &mut cache,
         );
-        if s.bf2 {
+        if teams
+            .iter()
+            .flat_map(|t| &t.classes)
+            .any(|c| c.asset_game(game) == "bf2")
+        {
             s.load_sabers(None, assets_dir, teams);
         }
         s

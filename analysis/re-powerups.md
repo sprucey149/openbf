@@ -602,3 +602,47 @@ primary/held/infinite reserves, BF1 exclusion, full units, energy/buff-only item
 blocked paths, alternative candidates, disappearing items, droid exclusion and all retained hash fields.
 Shared validation results are in `re-build-zones.md` section 10. No new live PCSX2 comparison or full-round
 sweep is claimed.
+
+## 13. Local bot supply deployment (#165, 2026-11-13)
+
+[O] Static source trace, not a fresh original-game play comparison.
+Re-read BF2 `FUN_002d6828` (B2:261417–261436): a repair/pilot-class
+recipient search runs at five-second intervals over friendly/neutral
+objects within 75 m, excluding the giver. The soldier exclusion at
+B2:261518–261531 rejects AI soldiers. `FUN_002d71a0`
+(B2:261739–261786) gathers up to ten pickups within 15 m and records health
+and ammo coverage separately. `FUN_002d72d8` (B2:261791–261846) combines
+those flags with the target's missing health and weapon reserve need.
+`FUN_002d7510` (B2:261876–261925) requests a dispenser release once upon
+lining up; its repair-tool branch can keep firing. The update's service
+range includes a five-metre test (B2:262009), not a five-metre search.
+
+BF1 has the same nearby-item suppression in `FUN_00256b30`
+(B1:174064–174116) and separate need flags in `FUN_00256c78`
+(B1:174117–174170); `FUN_00256fe8` (B1:174249–174361) walks into service
+range and invokes the release helper `FUN_00256ea0`. Section 7.1 retains
+an earlier live observation of an original BF1 pilot dropping a dual pack.
+The original game was also checked at PC addresses 0x0062e300,
+0x0062ec20, 0x0062edd0, 0x0062ef50 and 0x0062f080; these confirm the
+recipient exclusion, radius, separate flags and one-release behavior.
+
+The port deliberately extends support to **self and AI allies** as
+requested by the maintainer. It uses a local search within 5 m, followed
+by an ordinary secondary-channel tap; it does not divert engineers from
+their objectives for a 75 m service walk. It waits for no known enemy,
+three seconds after a hit, a grounded standing posture and no urgent
+movement or other active weapon action. Selection/aim and subsequent release/collection each get two seconds,
+and a press starts a five-second retry interval. Those scheduling choices
+are OURS and PROVISIONAL: measure matched original supply interruptions,
+release distances and live ally pickup success before tuning them.
+
+Health and ammo use the shared pickup need flags, including hero-health
+and dispenser-ammo exclusions. Existing accessible pickups within 15 m
+suppress each supplied resource independently; wall/floor accessibility is
+an explicit port extension of the original radius-only mask. Same-tick
+recipient claims yield by unit index before a press. Self drops aim at the authored downward pitch limit and take a short
+clear approach to collect the released pack; ally drops use the dispenser's authored launch speed and the existing low
+arc solver. Finite ammunition, release delay, pickup flight/contact and
+pool/refund rules remain with the shared weapon/pickup pipeline. No new
+weapons or supplies are added to any arsenal. Fresh original-game supply
+captures and live port acceptance remain unchecked.

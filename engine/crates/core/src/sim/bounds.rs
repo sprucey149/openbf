@@ -17,7 +17,8 @@
 //! the first front to reach a hub sets it. A hub no arc reaches from a post stays
 //! unresolved and nothing here judges a unit against it. Then every hub
 //! hears all its resolved neighbours — the first front may have walked UNDER
-//! a walkway's hub — and the floor most of them walk to wins. Over the 32
+//! a walkway's hub — and the floor most of them walk to wins unless a
+//! lower floor would only remove outgoing walks. In the original census of 32
 //! maps 3,018 of 3,086 hubs resolve. The same walk says which arcs no
 //! soldier can walk ([`Sim::arc_unwalkable`]: 57 arc directions over the 32
 //! maps), and card TGAP's wall test adds the arcs a soldier walking round
@@ -293,7 +294,9 @@ impl Sim {
         // from a lower deck passes beneath a walkway's hub). So every hub
         // then hears all its resolved neighbours: each walks to it, and the
         // floor most of them arrive at wins (within [`VOTE_TOL`]; a tie
-        // keeps what the hub has). A few rounds, until nothing moves.
+        // keeps what the hub has). Keep an upper floor when it serves all
+        // the lower candidate's outgoing walks and at least one more.
+        // A few rounds, until nothing moves.
         for _ in 0..VOTE_ROUNDS {
             let mut moved = false;
             for h in 0..n {
@@ -302,22 +305,27 @@ impl Sim {
                 }
                 let Some(hub) = g.hub(h as u16) else { continue };
                 let to = Vec2::new(hub.pos.x, hub.pos.z);
-                let mut votes: Vec<f32> = Vec::new();
-                for arc in &g.arcs {
-                    if !arc.touches(h as u16) || arc.type_mask & (1 << SOLDIER) == 0 {
-                        continue;
-                    }
-                    let o = arc.other(h as u16);
-                    let (Some(ho), Some(fo)) = (g.hub(o), self_floor(&floors, o)) else {
-                        continue;
-                    };
-                    let jump = arc.flags & (crate::nav::Arc::JUMP | crate::nav::Arc::JET_JUMP) != 0;
-                    if let Some(f) = self.trace_floor(Vec3::new(ho.pos.x, fo, ho.pos.z), to, jump) {
-                        votes.push(f);
-                    }
-                }
+                let neighbors = || {
+                    g.arcs.iter().filter_map(|arc| {
+                        if !arc.touches(h as u16) || arc.type_mask & (1 << SOLDIER) == 0 {
+                            return None;
+                        }
+                        let o = arc.other(h as u16);
+                        let ho = g.hub(o)?;
+                        let floor = self_floor(&floors, o)?;
+                        let jump =
+                            arc.flags & (crate::nav::Arc::JUMP | crate::nav::Arc::JET_JUMP) != 0;
+                        Some((ho.xz(), floor, jump))
+                    })
+                };
+                let votes: Vec<_> = neighbors()
+                    .filter_map(|(pos, floor, jump)| {
+                        self.trace_floor(Vec3::new(pos.x, floor, pos.y), to, jump)
+                    })
+                    .collect();
                 let support = |f: f32| votes.iter().filter(|v| (**v - f).abs() <= VOTE_TOL).count();
-                let mine = support(floors[h]);
+                let current = floors[h];
+                let mine = support(current);
                 let best = votes.iter().copied().map(|f| (support(f), f)).fold(
                     None,
                     |acc: Option<(usize, f32)>, c| match acc {
@@ -326,10 +334,38 @@ impl Sim {
                     },
                 );
                 if let Some((count, f)) = best {
-                    if count > mine && (f - floors[h]).abs() > VOTE_TOL {
-                        floors[h] = f;
-                        moved = true;
+                    if count <= mine || (f - current).abs() <= VOTE_TOL {
+                        continue;
                     }
+                    if f < current {
+                        // A trench can send several votes beneath its own
+                        // approach deck. Walk the outgoing arcs from each
+                        // floor: the lower vote cannot improve connectivity
+                        // when it only disconnects part of the route.
+                        // measure: recheck the rule against original bot
+                        // routes over multi-level approaches.
+                        let mut loses_arc = false;
+                        let mut gains_arc = false;
+                        for (dest, floor, jump) in neighbors() {
+                            let reaches = |height| {
+                                self.trace_floor(Vec3::new(to.x, height, to.y), dest, jump)
+                                    .is_some_and(|y| (y - floor).abs() <= VOTE_TOL)
+                            };
+                            match (reaches(current), reaches(f)) {
+                                (true, false) => loses_arc = true,
+                                (false, true) => {
+                                    gains_arc = true;
+                                    break;
+                                }
+                                _ => (),
+                            }
+                        }
+                        if loses_arc && !gains_arc {
+                            continue;
+                        }
+                    }
+                    floors[h] = f;
+                    moved = true;
                 }
             }
             if !moved {

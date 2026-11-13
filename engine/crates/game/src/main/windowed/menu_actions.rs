@@ -22,6 +22,7 @@ pub(super) fn persist_setting(
             session.con_mult = walk.reinforcement_pct as i32;
         }
         MenuAction::SetFov(_) => profile.settings.fov_scale = walk.fov_scale,
+        MenuAction::ResetGraphics => profile.settings.reset_graphics(),
         MenuAction::SetMusic(v) => profile.settings.music_volume = v,
         MenuAction::SetDifficulty(v) => {
             profile.settings.difficulty = game::shell_ia::port_difficulty(v);

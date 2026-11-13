@@ -179,7 +179,6 @@ fn capture_hud() {
             .unwrap();
         let dead = HudModel {
             dead: true,
-            respawn_in: Some(3.0),
             ..base()
         };
         frame(

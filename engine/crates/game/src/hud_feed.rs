@@ -503,6 +503,27 @@ fn place_secondary_cutters(hud: &mut Hud, has_bf2_mesh: impl Fn(&str) -> bool) {
     }
 }
 
+/// Fit the shared chaingun art into the port's orthographic weapon rows.
+/// Measured at 640×480 on Geonosis: the lower row has 95 px between the ammo
+/// badge and the end of the backdrop, while the authored mesh spans 107 px.
+/// The offsets are HUD frame pixels, so the gap scales with the HUD.
+fn place_vehicle_chaingun(hud: &mut Hud) {
+    for (name, offset, scale) in [
+        ("player1weapon1mesh", glam::Vec3::new(0.0, -1.1, 0.0), 1.0),
+        ("player1weapon2mesh", glam::Vec3::new(27.0, 4.5, 0.0), 0.8),
+    ] {
+        if let Some(pose) = hud.find(name).and_then(|i| {
+            hud.elems[i]
+                .mesh_info
+                .iter_mut()
+                .find(|pose| pose.mesh == "hud_vehicle_chaingun")
+        }) {
+            pose.pos += offset;
+            pose.scale *= scale;
+        }
+    }
+}
+
 mod grenade;
 
 /// The HUD's own art (`hud_*`) composites by its sheets' alpha
@@ -652,6 +673,7 @@ impl HudView {
                 .get(name)
                 .is_some_and(|path| path.parent() == Some(bf2_weapons.as_path()))
         });
+        place_vehicle_chaingun(&mut hud);
         if let Some(thermal) = mesh_files
             .get("hud_thermaldetonator")
             .and_then(|path| load_mesh(path).ok())

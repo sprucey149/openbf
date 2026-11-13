@@ -576,6 +576,8 @@ pub fn ray_heightfield(
 /// lie to be the hit (m), and the longest level run it bisects in one piece.
 const TERRAIN_RAY_TOL: f32 = 0.1;
 const TERRAIN_RAY_PIECE: f32 = 3.0;
+/// Extra height samples allowed for a long ray's first bounds check.
+const TERRAIN_RAY_WIDE_VERTICES: u32 = 192;
 
 /// BF2's own terrain segment test (card GRNP, `analysis/re-grenades.md`
 /// §13.2 [O]; B2 `FUN_00256b58` -> `FUN_0055fb38` -> `FUN_0055f940` ->
@@ -605,9 +607,29 @@ pub fn ray_terrain_ps2(hf: &Heightfield, cutters: &[Cutter], a: Vec3, b: Vec3) -
         (hf.height_at(a.x, a.z) - a.y) / delta.y
     } else {
         let mut clear = !under(a);
+        if delta.x.abs().max(delta.z.abs()) > TERRAIN_RAY_PIECE * 32.0
+            && terrain_segment_stays_on_side(hf, a, b, delta, clear)
+        {
+            return None;
+        }
         terrain_march(hf, a, b, &mut clear)
     };
     (f < 1.0 && !is_cut_by(cutters, a + delta * f)).then_some(f)
+}
+
+#[cold]
+fn terrain_segment_stays_on_side(
+    hf: &Heightfield,
+    a: Vec3,
+    b: Vec3,
+    delta: Vec3,
+    clear: bool,
+) -> bool {
+    let span = delta.x.abs().max(delta.z.abs());
+    // Spend at most one vertex read for four ordinary pieces, once.
+    let budget = ((span / (TERRAIN_RAY_PIECE * 4.0)) as u32).min(TERRAIN_RAY_WIDE_VERTICES);
+    hf.segment_wide_bounds(a, b, budget)
+        .is_some_and(|(low, high)| a.y.min(b.y) >= high || (!clear && a.y.max(b.y) < low))
 }
 
 /// Keep the original rounding on normal segments. Halve before adding if the sum overflows.
@@ -812,6 +834,36 @@ mod tests {
             ray_terrain_ps2(&hf, &[], a.with_y(9.0), b.with_y(9.0)),
             None
         );
+    }
+
+    #[test]
+    fn retail_terrain_ray_matches_the_march_across_many_cells() {
+        let hf = Heightfield {
+            size: 17,
+            unit: 4000.0,
+            offset_x: 0.0,
+            offset_z: 0.0,
+            heights: (0..17 * 17).map(|i| (i * 17 % 43) as f32).collect(),
+        };
+        let mut hits = 0;
+        let mut skips = 0;
+        for z in [-80.0, 200.0, 19_000.0] {
+            for (start_y, end_y) in [(50.0, 60.0), (50.0, -5.0), (-5.0, 50.0), (-5.0, -3.0)] {
+                let from = Vec3::new(-1000.0, start_y, z);
+                let to = Vec3::new(63_990.0, end_y, z + 4000.0);
+                for (a, b) in [(from, to), (to, from)] {
+                    let mut clear = a.y >= hf.height_at(a.x, a.z);
+                    skips += usize::from(terrain_segment_stays_on_side(&hf, a, b, b - a, clear));
+                    let old = terrain_march(&hf, a, b, &mut clear);
+                    let want = (old < 1.0).then(|| old.to_bits());
+                    let got = ray_terrain_ps2(&hf, &[], a, b).map(f32::to_bits);
+                    assert_eq!(got, want, "{a} -> {b}");
+                    hits += usize::from(got.is_some());
+                }
+            }
+        }
+        assert_eq!(skips, 12);
+        assert!(hits > 0);
     }
 
     #[test]

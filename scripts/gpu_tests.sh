@@ -9,7 +9,7 @@
 #   scripts/gpu_tests.sh --game FILTER # ignored game suite GPU tests
 #   scripts/gpu_tests.sh --game --include-ignored FILTER # include ordinary game suite tests
 #   scripts/gpu_tests.sh --game-lib [--include-ignored] [CARGO_ARGS] # serial game lib
-#   scripts/gpu_tests.sh --battle-launch # owned Hero Assault shell launch checks
+#   scripts/gpu_tests.sh --battle-launch [FILTER] # owned Hunt / Hero Assault shell launch checks
 #   scripts/gpu_tests.sh --render [CARGO_ARGS] # only the render crate's GPU tests
 #   scripts/gpu_tests.sh --hit-feedback # issue #104 captures on fresh side bakes
 #   scripts/gpu_tests.sh --hud-item-layer # issue #114 real-content weapon overlap
@@ -37,7 +37,8 @@ if [ "${1:-}" = "--game" ]; then
 fi
 
 if [ "${1:-}" = "--battle-launch" ]; then
-  exec cargo test --release -p game --bin game windowed::tests::assault:: -- --ignored --test-threads=1 --nocapture
+  shift
+  exec cargo test --release -p game --bin game "${1:-windowed::tests::assault::}" -- --ignored --test-threads=1 --nocapture
 fi
 
 if [ "${1:-}" = "--game-lib" ]; then

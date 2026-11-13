@@ -9,10 +9,15 @@
 use super::state::Sim;
 use crate::unit::{Unit, UnitHandle};
 use crate::weapon::HealthType;
+use crate::TICK_HZ;
 
 /// BF2 medal IDs in simulation order (B2 medal table at 0x62c560).
 pub const MEDAL_THRESHOLDS: [u32; 9] = [6, 12, 4, 1, 6, 8, 12, 24, 36];
 pub type MedalCounts = [u32; MEDAL_THRESHOLDS.len()];
+
+/// An award still carries through a death at exactly 30 seconds from its
+/// activation (BF2 FUN_00360028, B2:357312–357320).
+const AWARD_DEATH_WINDOW: u64 = 30 * TICK_HZ as u64;
 
 /// Green, Veteran, Elite and Legendary (B2 FUN_0035fc28).
 pub fn medal_level(count: u32) -> usize {
@@ -38,15 +43,19 @@ pub(super) struct MedalCareer {
     counts: MedalCounts,
     progress: MedalCounts,
     earned: u16,
+    activated_at: [Option<u64>; MEDAL_THRESHOLDS.len()],
+    carry_on_respawn: u16,
+    preserve_on_respawn: bool,
     bonuses: bool,
 }
 
 impl MedalCareer {
-    fn add(&mut self, life: UnitHandle, medal: usize, amount: u32) {
+    fn add(&mut self, life: UnitHandle, medal: usize, amount: u32, tick: u64) {
         if self.life != life {
             self.life = life;
             self.progress.fill(0);
             self.earned = 0;
+            self.activated_at.fill(None);
         }
         let bit = 1 << medal;
         if self.earned & bit != 0 {
@@ -57,6 +66,9 @@ impl MedalCareer {
         if self.progress[medal] == threshold {
             self.counts[medal] = self.counts[medal].saturating_add(1);
             self.earned |= bit;
+            if self.bonuses && (4..64).contains(&self.counts[medal]) {
+                self.activated_at[medal] = Some(tick);
+            }
         }
     }
 
@@ -81,6 +93,20 @@ impl MedalCareer {
         eat(&self.earned.to_le_bytes());
         for n in self.counts.into_iter().chain(self.progress) {
             eat(&n.to_le_bytes());
+        }
+        for (medal, tick) in self.activated_at.into_iter().enumerate() {
+            if let Some(tick) = tick {
+                eat(b"MEDAL_ACTIVATED");
+                eat(&[medal as u8]);
+                eat(&tick.to_le_bytes());
+            }
+        }
+        if self.carry_on_respawn != 0 {
+            eat(b"MEDAL_DEATH_CARRY");
+            eat(&self.carry_on_respawn.to_le_bytes());
+        }
+        if self.preserve_on_respawn {
+            eat(b"MEDAL_HERO_TRANSITION");
         }
         if !self.bonuses {
             eat(b"MEDAL_BONUSES_OFF");
@@ -135,6 +161,9 @@ impl Sim {
                 counts,
                 progress: [0; MEDAL_THRESHOLDS.len()],
                 earned: 0,
+                activated_at: [None; MEDAL_THRESHOLDS.len()],
+                carry_on_respawn: 0,
+                preserve_on_respawn: false,
                 bonuses: true,
             });
         }
@@ -153,6 +182,14 @@ impl Sim {
         career.bonuses = enabled;
         let i = career.life.index as usize;
         if self.units.get(i).is_some_and(|u| u.is_player && u.alive) {
+            if enabled && self.units[i].gen == career.life.gen {
+                for (medal, activated) in career.activated_at.iter_mut().enumerate() {
+                    if career.earned & (1 << medal) != 0 && (4..64).contains(&career.counts[medal])
+                    {
+                        activated.get_or_insert(self.tick);
+                    }
+                }
+            }
             self.award_fixup(i);
             self.sync_award_buffs(i);
         }
@@ -160,6 +197,49 @@ impl Sim {
 
     pub fn medal_counts(&self) -> Option<MedalCounts> {
         self.medal_career.as_ref().map(|career| career.counts)
+    }
+
+    // A living hero accept changes the body, but does not end the medal life.
+    pub(super) fn carry_medals_into_hero(&mut self, life: UnitHandle) {
+        if let Some(career) = self.medal_career.as_mut().filter(|c| c.life == life) {
+            career.preserve_on_respawn = true;
+        }
+    }
+
+    pub(super) fn note_medal_death(&mut self, life: UnitHandle) {
+        let Some(career) = self.medal_career.as_mut().filter(|c| c.life == life) else {
+            return;
+        };
+        career.carry_on_respawn = 0;
+        if career.bonuses {
+            for (medal, activated) in career.activated_at.iter().enumerate() {
+                if activated
+                    .is_some_and(|tick| self.tick.saturating_sub(tick) <= AWARD_DEATH_WINDOW)
+                {
+                    career.carry_on_respawn |= 1 << medal;
+                }
+            }
+        }
+    }
+
+    pub(in crate::sim) fn respawn_medals(&mut self, old: UnitHandle, new: UnitHandle) {
+        if let Some(career) = self.medal_career.as_mut().filter(|c| c.life == old) {
+            if std::mem::take(&mut career.preserve_on_respawn) {
+                career.life = new;
+            } else {
+                let carry = std::mem::take(&mut career.carry_on_respawn);
+                if carry != 0 {
+                    career.life = new;
+                    career.earned &= carry;
+                    for medal in 0..career.progress.len() {
+                        if carry & (1 << medal) == 0 {
+                            career.progress[medal] = 0;
+                            career.activated_at[medal] = None;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn medal_progress(&mut self, life: UnitHandle, medal: usize, amount: u32) {
@@ -172,7 +252,10 @@ impl Sim {
                 .get(life.index as usize)
                 .is_some_and(|u| u.is_player && u.gen == life.gen)
         {
-            self.medal_career.as_mut().unwrap().add(life, medal, amount);
+            self.medal_career
+                .as_mut()
+                .unwrap()
+                .add(life, medal, amount, self.tick);
         }
     }
 

@@ -40,6 +40,29 @@ pub fn weapon_hud(db: &ClassDb, weapon: &str) -> crate::walk::WeaponHud {
     }
 }
 
+/// BF2's vehicle weapon art on BF1 maps, under the shared HUD rule.
+/// The counterpart supplies only its HUD key; class identity and ammunition
+/// still come from the mounted gun. The existing icon remains a fallback
+/// when the counterpart's art is unavailable.
+pub fn vehicle_weapon_hud(
+    db: &ClassDb,
+    bf2: Option<&ClassDb>,
+    weapon: &str,
+) -> crate::walk::WeaponHud {
+    let mut hud = weapon_hud(db, weapon);
+    if !db.is_bf2() {
+        let counterpart = crate::normalize::vehicles::twin_row(weapon)
+            .and_then(|row| row.twin)
+            .unwrap_or(weapon);
+        if let Some(bf2) = bf2.filter(|db| db.get(counterpart).is_some()) {
+            let canonical = weapon_hud(bf2, counterpart);
+            hud.key = canonical.key;
+            hud.bf2 = true;
+        }
+    }
+    hud
+}
+
 /// A weapon's keys as one charge stage sees them (issue #29): the chain's,
 /// base first, cut at the stage's end; the last of a key wins.
 pub(super) struct ListSrc<'a> {

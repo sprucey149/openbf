@@ -205,12 +205,8 @@ pub fn apply_menu_action(
                 m.volume = v.clamp(crate::music::VOLUME_RANGE.0, crate::music::VOLUME_RANGE.1);
             }
         }
-        MenuAction::SetFov(k) => {
-            walk.fov_scale = k.clamp(
-                crate::walk::FOV_SCALE_RANGE.0,
-                crate::walk::FOV_SCALE_RANGE.1,
-            )
-        }
+        MenuAction::SetFov(k) => walk.fov_scale = crate::walk::clamp_fov_scale(k),
+        MenuAction::ResetGraphics => walk.fov_scale = crate::profile::Settings::default().fov_scale,
         // The pad sampler takes the profile's value; the aim assist reads
         // the push before it. Space battles keep 1.0.
         MenuAction::SetPadLookSensitivity(v) => {
@@ -221,6 +217,7 @@ pub fn apply_menu_action(
         // Restart reloads the playlist row. Both are the caller's (App state).
         MenuAction::Quit
         | MenuAction::Restart
+        | MenuAction::Denied
         | MenuAction::SetDifficulty(_)
         | MenuAction::SetEffectsVolume(_)
         | MenuAction::SetDialogueVolume(_)
@@ -281,6 +278,9 @@ pub fn pause_sound(
     }
     if actions.contains(&MenuAction::ClosePage) {
         return Some(MenuSound::Exit);
+    }
+    if actions.contains(&MenuAction::Denied) {
+        return Some(MenuSound::Error);
     }
     if !actions.is_empty() {
         return Some(MenuSound::Accept);

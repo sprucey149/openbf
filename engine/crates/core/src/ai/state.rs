@@ -215,6 +215,8 @@ pub struct AiState {
     pub last_think: u64,
     pub wake: u8,
     pub items: super::items::ItemSeek,
+    /// Local health/ammo deployment (#165); default state adds no hash bytes.
+    pub supply: super::supply::SupplyState,
     pub melee: Option<super::melee::MeleeBrain>,
     pub target_cp: Option<u32>,
     /// The squad this unit is in (Phase B): the key of the objective it shares

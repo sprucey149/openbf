@@ -60,7 +60,6 @@ fn model() -> ui::hud::HudModel {
         }),
         reticle_y: game::walk::ps2_reticle_y("bf1"),
         dead: false,
-        respawn_in: None,
         outcome: None,
         countdown: None,
         round_end: None,

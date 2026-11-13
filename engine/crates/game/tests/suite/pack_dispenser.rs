@@ -183,3 +183,74 @@ fn both_games_keep_every_pack_slot_and_deliver_health_and_ammo() {
         assert_eq!(weapons.len(), 4);
     }
 }
+
+#[test]
+fn every_stock_support_bot_uses_and_collects_its_own_pack() {
+    let root = game::assets::baked_root();
+    // This acceptance fixture needs the actual class collision boxes and
+    // authored soldier pitch limits, not a larger synthetic pickup volume.
+    if !root.join("classes/bf1_all.ron").exists() || !root.join("classes/bf2_all.ron").exists() {
+        eprintln!("SKIP: both games baked class data is required");
+        return;
+    }
+    let mut tested = 0;
+    for (source, census) in [
+        ("bf1", include_str!("../data/weapon_slots_bf1.txt")),
+        ("bf2", include_str!("../data/weapon_slots_bf2.txt")),
+    ] {
+        let db =
+            load_classdb(&root.join("classes"), source, &["all", "imp", "rep", "cis"]).unwrap();
+        for line in census.lines().filter(|l| l.contains("powerup_dispenser")) {
+            let name = line.split_whitespace().next().unwrap();
+            let roster = ClassRoster::build(&db, name, 1, None).unwrap();
+            let mut s = Sim::empty(19);
+            s.ground_rules = if source == "bf2" {
+                core::soldier::GroundRules::Bf2
+            } else {
+                core::soldier::GroundRules::Bf1
+            };
+            s.heightfield = Some(Heightfield {
+                size: 2,
+                unit: 400.0,
+                offset_x: 200.0,
+                offset_z: 200.0,
+                heights: vec![0.0; 4],
+            });
+            let class = roster.register(&mut s, &mut Vec::new());
+            let bot = s
+                .spawn(&class.spec(0, Vec3::ZERO, 0.0, Controller::Ai, 0, 0))
+                .unwrap();
+            let u = &mut s.units[bot.index as usize];
+            u.health.cur = 1.0;
+            if u.weapon.spare != core::weapon::SPARE_INFINITE {
+                u.weapon.spare = 0;
+            }
+            let primary = u.weapon_class;
+            let mut drops = 0;
+            let mut gains = 0;
+            for _ in 0..120 {
+                s.step(&[]);
+                drops += s
+                    .events
+                    .iter()
+                    .filter(|e| matches!(e, Event::ItemDropped { .. }))
+                    .count();
+                gains += s.events.iter().filter(|e| matches!(e, Event::ItemTaken { unit, health: true, .. } if *unit == bot)).count();
+            }
+            assert_eq!(drops, 1, "{source} {name}");
+            let u = s.unit(bot).unwrap();
+            assert_eq!(
+                gains, 1,
+                "{source} {name}: pos {:?}, pitch {}, supply {:?}, pickups {:?}",
+                u.soldier.pos, u.soldier.pitch, u.ai.supply, s.pickups
+            );
+            assert_eq!(
+                s.unit(bot).unwrap().weapon_class,
+                primary,
+                "{source} {name}"
+            );
+            tested += 1;
+        }
+    }
+    assert_eq!(tested, 20);
+}

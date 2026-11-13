@@ -67,10 +67,28 @@ impl Heightfield {
         if ax.abs_diff(bx) > 1 || az.abs_diff(bz) > 1 {
             return None;
         }
+        self.vertex_bounds(ax.min(bx), az.min(bz), ax.max(bx) + 1, az.max(bz) + 1)
+    }
+
+    /// Bounds for a long segment's clamped vertex rectangle, when its size
+    /// fits `budget`. Smaller rectangles use the ordinary march's check.
+    pub(crate) fn segment_wide_bounds(&self, a: Vec3, b: Vec3, budget: u32) -> Option<(f32, f32)> {
+        let (ax, az, _, _) = self.cell(a.x, a.z);
+        let (bx, bz, _, _) = self.cell(b.x, b.z);
+        let (dx, dz) = (ax.abs_diff(bx), az.abs_diff(bz));
+        // A single clamped sample is cheaper to answer in the march.
+        if (dx == 0 && dz == 0) || dx >= budget || dz >= budget || (dx + 2) * (dz + 2) > budget {
+            return None;
+        }
+        self.vertex_bounds(ax.min(bx), az.min(bz), ax.max(bx) + 1, az.max(bz) + 1)
+    }
+
+    #[inline]
+    fn vertex_bounds(&self, min_x: u32, min_z: u32, max_x: u32, max_z: u32) -> Option<(f32, f32)> {
         let mut low = f32::INFINITY;
         let mut high = f32::NEG_INFINITY;
-        for z in az.min(bz)..=az.max(bz) + 1 {
-            for x in ax.min(bx)..=ax.max(bx) + 1 {
+        for z in min_z..=max_z {
+            for x in min_x..=max_x {
                 let h = self.h(x, z);
                 if !h.is_finite() {
                     return None;

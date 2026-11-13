@@ -1434,13 +1434,26 @@ spa6 one-flag, seed 7, 5400 ticks, foot samples every 2 s from 20 s on:
 
 Assault is unchanged at 52 takeoffs and 4 lethal impacts. `the_space_walk_draws_no_hub_the_route_table_cuts_off` holds the rule.
 
-### Why they crowd: Hub56's floor (not fixed)
+### Why they crowded at the hangar approach
 
 On spa6, team 0's foot goals land on hub index 47 (`Hub56`, (-440, -1313), radius 2) in 96 of the 2 s samples, and the bots circle 24 to 58 m short of it. Both games aim at the hub's centre: `FUN_002a9150` (217205) draws 40 points with `FUN_002ea128` (262790), which is centre + random direction × max(r − 10, 0), and falls back to ±100 m only when no hub was found.
 
 The route table is right: from hub 40 (`Hub49`) row 0 is arc 37 to hub 46 (`Hub55`), then arc 39 to 47. The port's floor resolution is wrong (`Sim::resolve_nav_floors`). The breadth-first walk gives `Hub55` the deck at 0.54. `Hub56` and `Hub57` lie across a 7 m trench whose floor is -2.1 to -2.7, so they resolve to -2.11 and -2.12. They then out-vote `Hub55` onto the hidden floor under the deck (-2.13). The follower rejects the leg to `Hub55` as off the unit's level, the chooser takes a random other arc (`any_other_arc`), and the bots loop through the `Hub50`..`Hub53` spur. That loop is the crowd.
 
-`measure:` on the PS2 how its soldiers reach `Hub56` across the trench. Then fix the vote, which is OURS and applies to every map.
+The floor vote now checks walks leaving both candidates before lowering
+a hub. The deck stays when the lower floor loses a reachable neighbour
+and gains none. At Hub55, the deck can reach Hub49 and both trench
+neighbours. The lower surface can reach only the trench neighbours.
+Both approaches on Space Mygeeto Assault, one on Space Felucia Assault
+and two on Space Hoth Assault keep their decks. One-flag's locked doors
+still block the approach.
+
+In two 300-second Normal Assault runs with matched inputs (seeds 7
+and 42), the closest sampled Republic bots to Hub56 went from 13.0–13.1 m
+to 2.8–2.9 m. The CIS approach had the same failure and went from
+15.1–16.0 m to 2.6–3.9 m. Those bots approached on the upper deck.
+The floor vote is the port's load-time heuristic. `measure:` the
+original bots' approach to Hub56 and movement across the trench.
 
 ### Difficulty (not fixed)
 

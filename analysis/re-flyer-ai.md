@@ -56,7 +56,11 @@ to **200 m forward and 1 m up**. Landing-hint queries run no more frequently
 than **every 3 s**. The query argument `0x50` has not been confirmed as a
 distance and must not be described as an 80 m radius. The chosen hint is
 reserved and refreshed while approaching. The agent waits for the flyer's
-physical state to report landed before entering its next state.
+physical state to report landed before entering its next state. A permitted
+BF2 AI landing request now goes through that flight state machine before
+the ordinary follower advances the spline (`FUN_00202880`). Previously
+the follower consumed the input edge while leaving the craft in flight.
+Stock transport approach selection and unloading remain separate.
 
 BF1's `FlyGotoHelper` (`0x251460` through `0x2518d0`) accepts a planned
 destination, an explicit path, or a direct destination. While travelling it

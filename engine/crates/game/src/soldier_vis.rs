@@ -221,8 +221,11 @@ pub struct ClassDraw {
 pub struct DrawPlan {
     /// Distinct soldier `GeometryName`s, in first-use order.
     pub bodies: Vec<String>,
+    /// Source game beside each body, including BF2 heroes on BF1 maps.
+    pub body_games: Vec<String>,
     /// Distinct primary-weapon `GeometryName`s, in first-use order.
     pub weapons: Vec<String>,
+    pub weapon_games: Vec<String>,
     /// `per_class[team][class]`, index-aligned with `TeamTemplate::classes`.
     pub per_class: [Vec<ClassDraw>; 2],
     /// `held[team][class]`: the class's other slots' models (card WHELD),
@@ -233,28 +236,46 @@ pub struct DrawPlan {
 /// A class's other slots and the hand model each draws (`None` = none).
 pub type HeldDraws = Vec<(u8, Option<usize>)>;
 
-pub(super) fn intern_name(names: &mut Vec<String>, name: Option<&str>) -> Option<usize> {
-    let name = name?;
-    Some(names.iter().position(|x| x == name).unwrap_or_else(|| {
-        names.push(name.to_owned());
-        names.len() - 1
-    }))
-}
-
 impl DrawPlan {
     pub fn of(teams: &[TeamTemplate; 2]) -> Self {
+        Self::for_game(teams, "")
+    }
+
+    /// Ordinary classes use the map's bank; BF2 hero kits keep their source.
+    pub fn for_game(teams: &[TeamTemplate; 2], game: &str) -> Self {
         let mut plan = Self::default();
         for (i, t) in teams.iter().enumerate() {
             for c in &t.classes {
+                let game = c.asset_game(game);
                 let draw = ClassDraw {
-                    body: intern_name(&mut plan.bodies, c.geometry.as_deref()),
-                    weapon: intern_name(&mut plan.weapons, c.weapon_geometry.as_deref()),
+                    body: intern_model(
+                        &mut plan.bodies,
+                        &mut plan.body_games,
+                        game,
+                        c.geometry.as_deref(),
+                    ),
+                    weapon: intern_model(
+                        &mut plan.weapons,
+                        &mut plan.weapon_games,
+                        game,
+                        c.weapon_geometry.as_deref(),
+                    ),
                 };
                 plan.per_class[i].push(draw);
                 let held = c
                     .held_models
                     .iter()
-                    .map(|(s, g)| (*s, intern_name(&mut plan.weapons, g.as_deref())))
+                    .map(|(s, g)| {
+                        (
+                            *s,
+                            intern_model(
+                                &mut plan.weapons,
+                                &mut plan.weapon_games,
+                                game,
+                                g.as_deref(),
+                            ),
+                        )
+                    })
                     .collect();
                 plan.held[i].push(held);
             }
@@ -278,6 +299,27 @@ impl DrawPlan {
         )?;
         self.weapons.get(w).map(String::as_str)
     }
+}
+
+/// A shared spelling in two games is two assets, with independent rigs/textures.
+pub(super) fn intern_model(
+    names: &mut Vec<String>,
+    games: &mut Vec<String>,
+    game: &str,
+    name: Option<&str>,
+) -> Option<usize> {
+    let name = name?;
+    Some(
+        names
+            .iter()
+            .zip(games.iter())
+            .position(|(n, g)| n == name && g == game)
+            .unwrap_or_else(|| {
+                names.push(name.into());
+                games.push(game.into());
+                names.len() - 1
+            }),
+    )
 }
 
 /// The model index of class slot `slot`: a held slot's own entry (which may

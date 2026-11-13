@@ -18,7 +18,7 @@
 //! PS2 waits out a thrown or tumbling body, §3.3); the item lands by a floor
 //! ray, with no wall contact; the touch is tested every tick for every unit
 //! (the PS2 needs one of the two to move, §5.7); a weapon's reserve cap is
-//! the reserve it spawned with. The dispenser weapon's skip (§5.4) is not built.
+//! the reserve it spawned with. Supply dispensers cannot be refilled (§5.4).
 
 use super::state::{DeathCause, Event, Sim};
 use crate::fmath;
@@ -359,21 +359,25 @@ impl Sim {
     }
 
     pub(crate) fn item_needed(&self, u: &Unit, c: &ItemClass) -> bool {
+        let (health, ammo) = self.item_needs(u, c);
+        health || ammo
+    }
+
+    /// Separate gains so support AI can suppress health and ammo independently.
+    pub(crate) fn item_needs(&self, u: &Unit, c: &ItemClass) -> (bool, bool) {
         if !matches!(u.health.health_type, HealthType::Person | HealthType::Droid) {
-            return false;
+            return (false, false);
         }
-        let hero =
-            self.ground_rules == GroundRules::Bf2 && self.hero_class(u.team) == Some(u.spec.class);
-        if !hero && c.health > 0.0 && u.health.cur < u.health.max {
-            return true;
-        }
+        let hero = self.hero_class(u.team) == Some(u.spec.class);
+        let health = !hero && c.health > 0.0 && u.health.cur < u.health.max;
         let lacks = |slot, class: usize, state: &WeaponState| {
             let wc = &self.weapon_classes[class];
             needs_clips(state, wc, reserve_cap(&u.spec, slot, wc, state))
         };
-        c.ammo > 0
+        let ammo = c.ammo > 0
             && (lacks(u.weapon_slot, u.weapon_class, &u.weapon)
-                || u.held.iter().any(|w| lacks(w.slot, w.class, &w.state)))
+                || u.held.iter().any(|w| lacks(w.slot, w.class, &w.state)));
+        (health, ammo)
     }
 
     /// Register an item class (one entry per name) and return its index.
@@ -475,8 +479,7 @@ impl Sim {
             {
                 continue;
             }
-            let hero = self.ground_rules == GroundRules::Bf2
-                && self.hero_class(u.team) == Some(u.spec.class);
+            let hero = self.hero_class(u.team) == Some(u.spec.class);
             let classes = &self.weapon_classes;
             let u = &mut self.units[ui];
             let health = !hero && c.health != 0.0 && u.health.cur < u.health.max;

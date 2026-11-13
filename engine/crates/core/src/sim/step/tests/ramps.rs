@@ -79,3 +79,46 @@ fn check_ramp_jump(rules: GroundRules, deg: f32, sprint: bool, jump_tick: u32, m
         "{context}: clearance {clearance}, before {before:?}, after {after:?}"
     );
 }
+
+/// The walkable face overtakes an ascending foot in one step. The same
+/// slope over a lower route is clear when the foot starts below its plane.
+#[test]
+fn an_uphill_jump_stays_on_its_side_of_a_stacked_ramp() {
+    for (under, start_y) in [(false, 0.55), (true, 0.25)] {
+        let positions = [
+            [-2.0, 0.0, 1.0],
+            [2.0, 0.0, 1.0],
+            [2.0, 1.0, -1.0],
+            [-2.0, 1.0, -1.0],
+        ];
+        let world = CollisionWorld::new(
+            vec![Body::new(
+                Mat4::IDENTITY,
+                Shape::Mesh(trimesh(&positions, &[0, 1, 2, 0, 2, 3]).unwrap()),
+            )],
+            Vec::new(),
+        );
+        let from = Capsule {
+            base: Vec3::new(0.0, start_y, 0.0),
+            height: 1.9,
+            radius: 0.5,
+        };
+        let to = Capsule {
+            base: from.base + Vec3::new(0.0, 0.025, -0.4),
+            ..from
+        };
+        let mut soldier = crate::soldier::Soldier::new(to.base);
+        soldier.stance = Stance::Jump;
+        soldier.grounded = false;
+        soldier.vel = (to.base - from.base) / TICK_DT;
+        let original_vy = soldier.vel.y;
+        resolve_soldier_walls(&world, &mut soldier, from, to, true);
+        if under {
+            assert_eq!(soldier.pos.y, to.base.y);
+            assert_eq!(soldier.vel.y, original_vy);
+        } else {
+            assert!(soldier.pos.y >= 0.5 - 0.5 * soldier.pos.z, "{soldier:?}");
+            assert!(soldier.vel.y > original_vy, "{soldier:?}");
+        }
+    }
+}

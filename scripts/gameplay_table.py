@@ -182,7 +182,8 @@ def mission_facts(value):
             raise ValueError("invalid Lua team number")
         return v
 
-    numeric_fields = {"attacking", "numbots", "ai_view", "ai_snipe", "fly", "bird_count"}
+    numeric_fields = {"attacking", "numbots", "ai_view", "ai_snipe", "fly", "bird_count",
+                      "fly_min", "fly_ai_min", "fly_ai_max", "particle_lod_bias"}
     numeric_maps = {"units", "tickets", "ai_aggr"}
     name_maps = {"names", "heroes"}
     name_lists = {"death_regions", "posts", "killed", "layers"}

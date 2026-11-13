@@ -31,7 +31,8 @@ pub enum PausePage {
 
 mod settings;
 pub use settings::{
-    draw_fps_counter, rumble_level, ControlContext, FpsCounter, SettingsPage, RUMBLE_LEVELS,
+    clamp_fov_scale, draw_fps_counter, rumble_level, ControlContext, FpsCounter, SettingsPage,
+    FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
 };
 
 /// A Yes/No popup over the menu; it opens on No (both games' pause menus).
@@ -105,10 +106,9 @@ pub struct MenuModel {
     /// Team size row would do nothing there, so it is shown greyed with the
     /// reason ([`row_locked`]).
     pub team_size_off: bool,
-    /// The FOV option (a multiplier on the PS2 camera's angle) and the
-    /// vertical FOV it gives, in degrees, for the label.
+    /// The FOV multiplier and the unzoomed chase camera angle in degrees.
     pub fov_scale: f32,
-    pub fov_deg: f32,
+    pub base_fov_deg: f32,
     /// The music volume, 0..1 (1 = the disc record's own gain, 0 = off).
     pub music_volume: f32,
     pub rumble_strength: f32,
@@ -171,6 +171,8 @@ pub enum MenuAction {
     SetAiCap(u32),
     SetReinforcements(u32),
     SetFov(f32),
+    ResetGraphics,
+    Denied,
     SetMusic(f32),
     SetRumble(f32),
     ToggleRumbleOnFire,
@@ -276,6 +278,7 @@ pub enum Row {
     EffectsVolume,
     DialogueVolume,
     GraphicsQuality,
+    ResetGraphics,
     FpsCounter,
     Assist,
     AiCap,
@@ -403,6 +406,7 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
         Row::Restart => MenuAction::RequestRestart,
         Row::FlightControls => MenuAction::ToggleFlightControls,
         Row::FpsCounter => MenuAction::SetFpsCounter(m.fps_counter.toggled()),
+        Row::ResetGraphics => MenuAction::ResetGraphics,
         Row::CareerAwards => MenuAction::SetCareerAwards(m.career_awards_disabled),
         Row::Rumble => {
             let next = (rumble_level(m.rumble_strength) + 1) % RUMBLE_LEVELS.len();
@@ -616,10 +620,20 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
             actions.push(MenuAction::SetReinforcements(pct));
         }
         Row::Fov if input.left || input.right => {
-            let d = if input.right { 0.05 } else { -0.05 };
-            actions.push(MenuAction::SetFov(
-                ((m.fov_scale + d) * 20.0).round() / 20.0,
-            ));
+            let current = clamp_fov_scale(m.base_fov_deg, m.fov_scale);
+            // Step along the existing 5% grid, with a partial step at the cap.
+            let ticks = current * 20.0;
+            let next_tick = if input.right {
+                (ticks + 1e-5).floor() + 1.0
+            } else {
+                (ticks - 1e-5).ceil() - 1.0
+            };
+            let next = clamp_fov_scale(m.base_fov_deg, next_tick / 20.0);
+            actions.push(if next == current {
+                MenuAction::Denied
+            } else {
+                MenuAction::SetFov(next)
+            });
         }
         Row::Difficulty if input.left || input.right => {
             let d = if input.right { 1 } else { -1 };
@@ -1033,7 +1047,14 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
                 .into(),
             ),
         ),
-        Row::Fov => ("Field of view".into(), Some(format!("{:.0}°", m.fov_deg))),
+        Row::Fov => (
+            "Field of view".into(),
+            Some(format!(
+                "{:.0}°",
+                (m.base_fov_deg * clamp_fov_scale(m.base_fov_deg, m.fov_scale)).min(MAX_FOV_DEG)
+            )),
+        ),
+        Row::ResetGraphics => ("Reset to Defaults".into(), None),
         Row::Music => (
             "Music volume".into(),
             Some(if m.music_volume <= 0.0 {

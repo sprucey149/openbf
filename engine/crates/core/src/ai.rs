@@ -114,6 +114,7 @@ pub mod snipe;
 mod stall;
 mod state;
 mod steer;
+mod supply;
 pub mod tactic;
 pub mod team;
 pub(crate) mod think_memo;

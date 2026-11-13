@@ -58,6 +58,7 @@ impl SettingsPage {
                 GraphicsQuality,
                 LowPowerResolution,
                 FpsCounter,
+                ResetGraphics,
             ],
             Self::Controls => &[Settings(Self::KeyboardMouse), Settings(Self::Gamepad)],
             Self::KeyboardMouse => &[
@@ -109,6 +110,23 @@ impl FpsCounter {
             Self::Off => Self::On,
             Self::On => Self::Off,
         }
+    }
+}
+
+pub const FOV_SCALE_RANGE: (f32, f32) = (0.75, 2.0);
+pub const MAX_FOV_DEG: f32 = 100.0;
+
+pub fn clamp_fov_scale(base_degrees: f32, scale: f32) -> f32 {
+    let (min, max) = FOV_SCALE_RANGE;
+    let max = if base_degrees > 0.0 {
+        (MAX_FOV_DEG / base_degrees).clamp(min, max)
+    } else {
+        max
+    };
+    if scale.is_finite() {
+        scale.clamp(min, max)
+    } else {
+        1.0_f32.clamp(min, max)
     }
 }
 

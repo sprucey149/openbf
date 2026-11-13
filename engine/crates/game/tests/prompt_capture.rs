@@ -94,7 +94,7 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         population_note: Default::default(),
         team_size_off: false,
         fov_scale: 1.0,
-        fov_deg: 37.7,
+        base_fov_deg: 37.7,
         music_volume: 1.0,
         mouse_sensitivity: 1.0,
         pad_look_sensitivity: 1.0,

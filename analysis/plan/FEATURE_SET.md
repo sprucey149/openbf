@@ -92,7 +92,9 @@ and LAN are decisions for later work, not current tasks.
   change and retain the original-game measurements for comparison and rollback.
 - Awards & medals: **KEEP (BF2 system)** — earn permanent unlocks through
   play. Career award bonuses can be disabled while earning and stats
-  continue. The session award cheats remain available.
+  continue. At 32 career medals in a category, its requirement drops
+  to 75% on every match difficulty. The session award cheats remain
+  available.
 - Classes: **hybrid unlock**. In-battle: BF2-style score unlock for special classes, every
   battle. Meta: cumulative usage/feats (elite-rifle-style graduated criteria) lower the
   in-battle threshold over time → eventually permanently unlocked.

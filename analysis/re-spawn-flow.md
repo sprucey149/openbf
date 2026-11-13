@@ -419,7 +419,8 @@ C7 / C12 narrowed (folded in below).
   a suicide, a world death or a hero class). The spawn map opening replays phase 1 from the camera at the death with no
   killer and no body to follow. No spawn panel is drawn while it runs; the minimap stays and no reticle shows (the BF2
   HUD's dead state). The port's tick is 30 Hz, the PS2's update rate, so the per-update weights carry over. Space maps
-  keep the chase camera and the waiting panel.
+  keep the chase camera and the waiting panel. Ground deaths, including a held
+  closed-hull seat view, show no legacy waiting panel before the native map opens.
 - Not traced: the point a mounted killer is looked at (BF2 vehicle `+0xd0`, BF1 `+0x100`); the port uses the
   vehicle's origin (PROVISIONAL).
 

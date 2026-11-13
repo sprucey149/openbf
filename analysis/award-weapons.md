@@ -201,12 +201,21 @@ Only a player slices; bots never do, on either game.
 
 The local ground player earns BF2's medals from weapon kills, vehicle
 weak-point hits, slices, sniper headshots and positive score events.
-The thresholds fall to three quarters at Elite. Veteran and Elite
-bonuses last for the life that earns them. Legendary bonuses apply on
-later lives. Profile counts drive the career stats. The battle feed
+The thresholds fall to three quarters at Elite career rank
+(32 medals in that category), independently of match difficulty
+(`FUN_0035fcc8`, B2:357127). An activated Veteran or Elite bonus
+survives a death within 30 seconds of its activation. The spawn delay
+does not change that decision (`FUN_00360028`, B2:357312–357320).
+An unearned requirement starts fresh after death. Legendary bonuses
+apply on later lives. Profile counts drive the career stats. The battle feed
 reports each medal as it is earned. Both games' troop kits share the
 unlock and replacement rules, including the BF1 award matches in
 section 3.
+
+Openbf counts points earned as a hero toward the same score medals as
+infantry points. A living player's hero swap preserves the medal life.
+BF2 excludes hero points from that medal path
+(`FUN_003616f0`, B2:358376–358399).
 
 The port's Career award bonuses setting defaults to On. Off leaves the
 player's ordinary weapons and stats in effect while career medals and

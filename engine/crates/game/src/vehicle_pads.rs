@@ -850,6 +850,9 @@ pub fn install_with_objective(
                 .collect()
         })
         .collect();
+    let bf2_hud = (game == "bf1")
+        .then(|| crate::roster::load_classdb(classes_dir, "bf2", &f).ok())
+        .flatten();
     b.weapon_hud = b
         .seats
         .iter()
@@ -858,7 +861,7 @@ pub fn install_with_objective(
                 .map(|seat| {
                     seat.weapons
                         .iter()
-                        .map(|w| crate::roster::weapon_hud(&db, &w.class))
+                        .map(|w| crate::roster::vehicle_weapon_hud(&db, bf2_hud.as_ref(), &w.class))
                         .collect()
                 })
                 .collect()

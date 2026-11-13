@@ -5,6 +5,8 @@ use ui::shell::{Group, ListCursor, Page};
 
 #[path = "ui_sharp/cutter.rs"]
 mod cutter;
+#[path = "ui_sharp/playtest.rs"]
+mod playtest;
 
 const VEHICLE_SHEETS: [&str; 3] = ["droidfighter_icon", "jedi_starfighter_icon", "gunship_icon"];
 
@@ -556,7 +558,7 @@ fn capture_battle_pause_theme() {
             team_size_pct: 100,
             reinforcements_pct: 100,
             fov_scale: 1.0,
-            fov_deg: 60.0,
+            base_fov_deg: 60.0,
             music_volume: 0.6,
             mouse_sensitivity: 1.0,
             pad_look_sensitivity: 1.0,

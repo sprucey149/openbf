@@ -42,7 +42,6 @@ fn hud() -> ui::hud::HudModel {
         reticle_y: 0.5,
         // The spawn screen owns the death message while it is up.
         dead: false,
-        respawn_in: None,
         outcome: None,
         countdown: None,
         round_end: None,

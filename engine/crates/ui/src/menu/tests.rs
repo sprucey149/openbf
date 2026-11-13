@@ -4,7 +4,7 @@ use super::*;
 fn graphics_fov_uses_degrees_and_fps_is_a_toggle() {
     let mut menu = MenuModel {
         page: Some(PausePage::Settings(SettingsPage::Graphics)),
-        fov_deg: 51.8,
+        base_fov_deg: 51.8,
         fov_scale: 1.0,
         ..Default::default()
     };
@@ -23,6 +23,36 @@ fn graphics_fov_uses_degrees_and_fps_is_a_toggle() {
     assert_eq!(
         step(&menu, row, true),
         vec![MenuAction::SetFpsCounter(FpsCounter::Off)]
+    );
+}
+
+#[test]
+fn graphics_fov_caps_old_values_and_reverses_in_one_step() {
+    let menu = MenuModel {
+        page: Some(PausePage::Settings(SettingsPage::Graphics)),
+        base_fov_deg: 52.06,
+        fov_scale: 2.0,
+        ..Default::default()
+    };
+    let row = rows(&menu).iter().position(|r| *r == Row::Fov).unwrap();
+    let cap = clamp_fov_scale(menu.base_fov_deg, menu.fov_scale);
+    assert_eq!(row_text(&menu, Row::Fov).1.as_deref(), Some("100°"));
+    assert_eq!(step(&menu, row, true), vec![MenuAction::Denied]);
+    assert_eq!(step(&menu, row, false), vec![MenuAction::SetFov(1.9)]);
+    let below_cap = MenuModel {
+        fov_scale: 1.9,
+        ..menu.clone()
+    };
+    assert_eq!(step(&below_cap, row, true), vec![MenuAction::SetFov(cap)]);
+    let minimum = MenuModel {
+        fov_scale: FOV_SCALE_RANGE.0,
+        ..menu
+    };
+    assert_eq!(step(&minimum, row, false), vec![MenuAction::Denied]);
+    assert_eq!(step(&minimum, row, true), vec![MenuAction::SetFov(0.8)]);
+    assert_eq!(
+        press(&minimum, Row::ResetGraphics),
+        Some(MenuAction::ResetGraphics)
     );
 }
 
@@ -124,7 +154,7 @@ fn model() -> MenuModel {
         population_note: Default::default(),
         team_size_off: false,
         fov_scale: 1.0,
-        fov_deg: 37.7,
+        base_fov_deg: 37.7,
         music_volume: 1.0,
         mouse_sensitivity: 1.0,
         pad_look_sensitivity: 1.0,
@@ -677,7 +707,7 @@ fn back_resumes_from_every_pause_row() {
 #[test]
 fn the_value_arrows_clear_their_labels() {
     let mut m = model();
-    m.fov_deg = 120.0;
+    m.base_fov_deg = 80.0;
     m.fov_scale = 1.25;
     // Each value its own text.
     (m.mouse_sensitivity, m.pad_look_sensitivity) = (2.5, 0.7);

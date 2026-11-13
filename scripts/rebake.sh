@@ -416,6 +416,7 @@ if want side; then
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gam gam_inf_gamorreanguard gam_inf_weap_axe "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" snw hot_inf_wampa hot_inf_weap_l_smash,hot_inf_weap_r_smash,hot_inf_weap_head_smash "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle,des_weap_inf_fusioncutter "$A2"
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
@@ -551,7 +552,7 @@ if want classes; then
   for side in ewk wok geo des gun gar; do
     "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
   done
-  for side in ewk wok geo des gun snw; do
+  for side in ewk wok geo des gun snw gam; do
     "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
   done
   # BF2's building turrets (card VTUR2): their PROPs; each map bake pulls the

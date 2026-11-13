@@ -124,7 +124,7 @@ pub use input::{
 };
 pub use lock_on::{LockOn, LockTarget};
 pub use look::{LookPreview, MOUSE_STEER};
-pub use native_teams::AllySpawn;
+pub use native_teams::{AllySpawn, NativeSpawnPost};
 pub use pickups::{
     DropTable, ItemClass, Pickup, BODY_AHEAD, BODY_RADIUS, DROP_HEIGHT, DROP_SIDE_SPEED,
     ITEM_GRAVITY, ITEM_POOL_DEFAULT, LIFE_END, MAX_DROPS, TAKE_AGE,

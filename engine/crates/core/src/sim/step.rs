@@ -50,6 +50,35 @@ fn resolve_soldier_walls(
         soldier.vel -= normal * into.min(0.0);
         to.base = soldier.pos;
     }
+    // A jump rising into a slope can cross it before the downward floor
+    // probe has risen above it. Use the approach segment to distinguish a
+    // ramp in the way from an already overhead deck. OURS: a foot ray
+    // approximates the original lower sphere contact (BF1 FUN_00163658).
+    // trace: the original BF1 Bespin tunnel-to-platform jump.
+    if in_air && soldier.stance == Stance::Jump && soldier.vel.y > 0.0 {
+        let delta = to.base - from.base;
+        let length = delta.length();
+        if delta.x != 0.0 || delta.z != 0.0 {
+            let start = from.base + Vec3::Y * crate::soldier::FLOOR_CONTACT_GAP;
+            if let Some(hit) = collision.ray_with(
+                start,
+                delta / length,
+                length,
+                crate::collision::Layers::SOLDIER,
+                crate::collision::HullFilter::Static,
+            ) {
+                let n = hit.normal;
+                let approach = soldier.vel.dot(n);
+                if n.y > crate::soldier::FLOOR_MIN_NY && n.y < 1.0 && approach < 0.0 {
+                    let t = hit.t / length;
+                    let rest = delta * (1.0 - t);
+                    soldier.pos = start + delta * t + rest - n * rest.dot(n).min(0.0);
+                    soldier.vel -= n * approach;
+                    to.base = soldier.pos;
+                }
+            }
+        }
+    }
     let drop = if in_air { STEP_HEIGHT - AIR_STEP } else { 0.0 };
     let low = |c: Capsule| Capsule {
         base: c.base - Vec3::Y * drop,

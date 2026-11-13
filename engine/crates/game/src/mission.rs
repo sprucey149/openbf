@@ -82,7 +82,7 @@ pub struct MissionDef {
     /// Hunt-only population by difficulty, including the player.
     #[serde(default)]
     pub hunt_combatants: Option<[[u32; 2]; 4]>,
-    /// `SetHeroClass(team, class)` from the BF2 PS2 mission (Lua team numbers).
+    /// PS2 `SetHeroClass` in Lua team order; BF1 identities use BF2 playable kits.
     #[serde(default)]
     pub heroes: Vec<(u8, String)>,
     /// Every BF2 `ReadDataFile("SIDE\\...", ...)` resource request with its

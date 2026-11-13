@@ -454,6 +454,8 @@ fn upload(
 /// OURS: loading-bus gain matched to the PS2 captures on Bespin and Hoth.
 /// measure: the original loading bus and SPU2 output gain directly.
 const LOADING_OUTPUT_DB: f32 = -8.5;
+// A 70% linear gain for the coordinate tracking cues.
+const TRACKING_GAIN_DB: f32 = -3.0980394;
 
 pub(super) struct Cues {
     vertical: Option<audio::SoundData>,
@@ -504,7 +506,7 @@ impl Cues {
                     &self.horizontal
                 };
                 self.tracking = source.as_ref().and_then(|s| {
-                    audio.play_voice(s, LOADING_OUTPUT_DB + 20.0 * 0.7_f32.log10(), 1.0, 0.0)
+                    audio.play_voice(s, LOADING_OUTPUT_DB + TRACKING_GAIN_DB, 1.0, 0.0)
                 });
             }
             None => {}
@@ -522,10 +524,6 @@ pub(super) struct Loading {
     pub shown: bool,
     pub cues: Option<Cues>,
 }
-
-#[cfg(test)]
-#[path = "loading_tests.rs"]
-mod tests;
 
 /// Use the input layer's existing unified/raw HID filtering on loading too:
 /// one physical controller exposed twice must not turn one press into a skip.
@@ -695,4 +693,9 @@ impl super::App {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    include!("loading/tests.rs");
 }

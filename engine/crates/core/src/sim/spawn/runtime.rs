@@ -998,7 +998,8 @@ impl Sim {
         spec: UnitSpec,
         placement: Option<Vec3>,
     ) {
-        let gen = self.units[i].gen + 1;
+        let old = self.handle(i);
+        let gen = old.gen + 1;
         let mut unit = spec.build(gen, &self.weapon_classes);
         // An AI respawn re-derives the tier's skill (D2): a difficulty change
         // between deaths reaches the bot at its next life, and a bot never
@@ -1021,6 +1022,7 @@ impl Sim {
             index: i as u32,
             gen,
         };
+        self.respawn_medals(old, h);
         // The respawned unit keeps its player slot.
         if let Some(slot) = self.units[i].spec.player_slot {
             let slot = usize::from(slot);

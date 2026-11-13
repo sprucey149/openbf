@@ -731,6 +731,17 @@ def load_ps2(game, script):
     return undump40(body) if body[4] == 0x40 else undump50(body)
 
 
+def load_donor_script(game, script):
+    """Read bytecode from the fingerprinted donor's own mission data."""
+    if game not in GAMEPLAY_REFERENCES:
+        return None
+    from gameplay_missions import SOURCE_SCRIPTS
+    body = SOURCE_SCRIPTS.get(game, {}).get(script.lower())
+    if body is None:
+        return None
+    return undump40(body) if game == "bf1" else undump50(body)
+
+
 # ===========================================================  PC .lua scanning
 
 FACTION = {
@@ -1350,6 +1361,28 @@ class Mission:
 # `reinforcements = -1` (every space script): no ticket count. The round ends on points.
 NO_TICKET_LIMIT = 999999
 
+# BF1's authored identities with BF2's playable kits. The snow Luke model
+# uses BF2's pilot outfit. See analysis/re-bf1-conquest-heroes.md.
+BF1_HERO_CLASSES = {
+    "all_inf_lukeskywalker": "all_hero_luke_jedi",
+    "all_inf_lukeskywalkersnow": "all_hero_luke_pilot",
+    "imp_inf_darthvader": "imp_hero_darthvader",
+    "rep_inf_macewindu": "rep_hero_macewindu",
+    "cis_inf_countdooku": "cis_hero_countdooku",
+}
+
+
+def mission_heroes(game, mode, facts):
+    heroes = sorted(facts.get("heroes", {}).items())
+    if game != "bf1":
+        return heroes
+    if mode != "con":
+        return []
+    try:
+        return [(team, BF1_HERO_CLASSES[name.lower()]) for team, name in heroes]
+    except KeyError as exc:
+        raise ValueError(f"unmapped BF1 hero class: {exc.args[0]}") from exc
+
 
 def mission_mode(script):
     """The mode a mission script runs, defaulting to Conquest."""
@@ -1454,8 +1487,10 @@ def space_templates50():
     """The attacker-keyed point table and the internal-system points out of
     objectivespaceassault.luac, and LinkedShields' two defaults out of
     linkedshields.luac (analysis/re-space-assault.md)."""
-    osa = load_ps2("bf2", "objectivespaceassault")
+    osa = load_ps2("bf2", "objectivespaceassault") or load_donor_script("bf2", "objectivespaceassault")
     linked = load_ps2("bf2", "linkedshields")
+    donor_shields = linked is None
+    linked = linked or load_donor_script("bf2", "linkedshields")
     if osa is None or linked is None:
         return None
     globs = {}
@@ -1463,7 +1498,12 @@ def space_templates50():
     internal = next(k for k in osa.protos[3].k if isinstance(k, float))
     lglobs = {}
     calls50(linked, globs=lglobs, recurse=False)
-    return globs["gSpaceAssaultSystems_template"], internal, lglobs["LinkedShields"]
+    shield_defaults = lglobs["LinkedShields"]
+    if donor_shields:
+        # The PS2 default is 1,000. PC and Xbox author 10,000. Explicit
+        # per-ship values still take precedence (analysis/re-space-assault.md).
+        shield_defaults["addShield"] = 1000.0
+    return globs["gSpaceAssaultSystems_template"], internal, shield_defaults
 
 
 def space_facts50(calls, chunks):
@@ -1580,6 +1620,7 @@ def bf1_hunt(key, planet, era):
     m.teams = [(d["names"][army], d["units"][army], NO_TICKET_LIMIT),
                (faction, d["units"][native], NO_TICKET_LIMIT)]
     m.classes = [d["classes"][army], d["classes"][native]]
+    m.heroes = []
     m.class_load_order = d.get("class_load_order", [])
     m.local_teams = []
     m.attacking = 1
@@ -1595,6 +1636,22 @@ def bf1_hunt(key, planet, era):
                            for row in getattr(m, field) if row[0] in team_map])
     m.death_drains = []
     return m
+
+
+def mission_calls50(mission, common=None):
+    """Evaluate the shared setup and mission with the same global bindings."""
+    shared = {}
+    calls = calls50(common, globs=shared) if common is not None else []
+    return calls + calls50(mission, globs=shared)
+
+
+def startup_mission_facts50(calls, mission, common=None):
+    """Keep deferred space-object mutations out of the initial world."""
+    callbacks = callback_protos50(mission)
+    if common is not None:
+        callbacks |= callback_protos50(common)
+    return facts_from_calls(c for c in calls if c.prototype not in callbacks
+                            or c.name not in ("KillObject", "SetProperty", "SetObjectTeam"))
 
 
 def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
@@ -1623,11 +1680,7 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
 
     f = load_ps2(game, ps2_name)
     has_ps2_source = f is not None
-    if f is None and game in GAMEPLAY_REFERENCES:
-        from gameplay_missions import SOURCE_SCRIPTS
-        body = SOURCE_SCRIPTS.get(game, {}).get(ps2_name.lower())
-        if body is not None:
-            f = undump40(body) if game == "bf1" else undump50(body)
+    f = f or load_donor_script(game, ps2_name)
     m.checked = has_ps2_source
     if f is None:
         m.prov.append("every value (no PS2 script %s.luac to check against)"
@@ -1635,28 +1688,25 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
         ps2 = None
         d = pc
     else:
-        calls = calls40(f) if game == "bf1" else calls50(f)
-        # spa6..spa9: the map's setup is in `<map>_cmn`, run by `ScriptCB_DoFile`.
-        common = load_ps2(game, ps2_name.replace("_ass", "_cmn").replace("_1flag", "_cmn")) \
-            if ps2_name.endswith(("_ass", "_1flag")) and any(ps2_name.startswith(p) for p in ("spa6", "spa7", "spa8", "spa9")) else None
-        if common is None and game in GAMEPLAY_REFERENCES and ps2_name.endswith(("_ass", "_1flag")):
-            from gameplay_missions import SOURCE_SCRIPTS
-            body = SOURCE_SCRIPTS.get(game, {}).get(ps2_name.replace("_ass", "_cmn").replace("_1flag", "_cmn").lower())
-            if body is not None:
-                common = undump50(body)
-        if common is not None:
-            shared = {}
-            common_calls = calls50(common, globs=shared)
-            calls = common_calls + calls50(f, globs=shared)
-        if mission_mode(ps2_name) in ("ass", "1flag"):
-            callbacks = callback_protos50(f) | (callback_protos50(common) if common is not None else set())
-            if mission_mode(ps2_name) == "ass":
+        mode = mission_mode(ps2_name)
+        if mode in ("ass", "1flag"):
+            # spa6..spa9 share their setup through ScriptCB_DoFile.
+            shared_name = ps2_name.rsplit("_", 1)[0] + "_cmn"
+            common = load_ps2(game, shared_name) if ps2_name.startswith(("spa6", "spa7", "spa8", "spa9")) else None
+            common = common or load_donor_script(game, shared_name)
+            calls = mission_calls50(f, common)
+            if mode == "ass":
                 m.space = space_facts50(calls, [p for p in (common, f) if p is not None])
-            elif mission_mode(ps2_name) == "1flag":
+                if m.space is None:
+                    raise ValueError(f"{game}/{ps2_name}: missing Space Assault templates")
+            else:
                 m.ctf = ctf_facts50(f)
-            calls = [c for c in calls if c.prototype not in callbacks
-                     or c.name not in ("KillObject", "SetProperty", "SetObjectTeam")]
-        ps2 = facts_from_calls(calls)
+                if m.ctf is None:
+                    raise ValueError(f"{game}/{ps2_name}: missing One-Flag CTF objective")
+            ps2 = startup_mission_facts50(calls, f, common)
+        else:
+            calls = calls40(f) if game == "bf1" else calls50(f)
+            ps2 = facts_from_calls(calls)
         if mission_mode(ps2_name) == "hunt":
             m.hunt = hunt_facts(calls)
         d = ps2
@@ -1689,7 +1739,7 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
                for i in range((ps2 or {}).get("bird_count", 0))]
     m.sound = (ps2 or {}).get("sound", [])
     m.shots = (ps2 or {}).get("shots", [])
-    m.heroes = sorted((ps2 or {}).get("heroes", {}).items()) if game == "bf2" else []
+    m.heroes = mission_heroes(game, mission_mode(ps2_name), ps2 or {})
     m.class_load_order = (ps2 or {}).get("class_load_order", []) if game == "bf2" else []
     # Card MAIS: the script's AI knobs (the PS2 bytecode only).
     p2 = ps2 or {}

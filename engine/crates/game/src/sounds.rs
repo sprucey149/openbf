@@ -30,6 +30,7 @@
 mod mixing;
 pub use mixing::{attenuation, bus_table, ears_3d, mixer_pair, side};
 
+mod bf1_heroes;
 mod hero;
 mod playback;
 mod walker;
@@ -352,9 +353,13 @@ impl Bank {
     }
 
     fn import_props(&mut self, source: &Bank, mut pending: Vec<u32>) {
+        self.import_props_with(source, &mut pending, false);
+    }
+
+    fn import_props_with(&mut self, source: &Bank, pending: &mut Vec<u32>, missing_only: bool) {
         let mut imported = Vec::new();
         while let Some(hash) = pending.pop() {
-            if imported.contains(&hash) {
+            if imported.contains(&hash) || (missing_only && self.props.contains_key(&hash)) {
                 continue;
             }
             imported.push(hash);
@@ -692,6 +697,12 @@ impl SoundLib {
             [f[0].as_str(), f[1].as_str()],
             &mission.sound_levels(),
         );
+        if mission.source_game.eq_ignore_ascii_case("bf1") && mission.mode == "con" {
+            lib.import_bf1_heroes(
+                map_dir,
+                mission.heroes.iter().map(|(_, name)| name.as_str()),
+            );
+        }
         Some(lib)
     }
 
@@ -712,6 +723,14 @@ impl SoundLib {
     pub fn for_walk(&mut self, map_dir: &Path, walk: &crate::walk::WalkSim) {
         let f = [0, 1].map(|t| walk.teams[t].faction.as_str());
         self.for_battle(map_dir, f, &walk.sound_levels);
+        if let Some(heroes) = &walk.sim.heroes {
+            let names = heroes
+                .classes
+                .iter()
+                .enumerate()
+                .filter_map(|(team, class)| Some(walk.teams[team].class((*class)?).name.as_str()));
+            self.import_bf1_heroes(map_dir, names);
+        }
     }
 
     /// Decode every take the battle can play (card HITCH): each sample of
