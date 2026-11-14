@@ -642,3 +642,216 @@ fn simultaneous_atte_rounds(difference: f32, first_hits: bool, later_hit: bool) 
         );
     }
 }
+
+mod non_wind_up_loops {
+    use core::sim::{buttons, Event, PadState};
+    use core::vehicle::{VehicleHandle, VehicleSpec};
+
+    #[test]
+    fn non_wind_up_weapon_ignores_inherited_chaingun_style_and_keeps_fire_loop() {
+        let (mut w, _) = super::walker_battle::battle(&game::assets::baked_root()).unwrap();
+        let class = w
+            .vehicle_classes
+            .iter()
+            .position(|c| c == "rep_walk_atte")
+            .unwrap();
+        let (i, v) = w
+            .sim
+            .vehicles
+            .iter()
+            .enumerate()
+            .find(|(_, v)| v.alive && v.class as usize == class)
+            .unwrap();
+        let h = VehicleHandle {
+            index: i as u32,
+            gen: v.gen,
+        };
+        assert!(w.sim.seat_unit(w.player, h, 0));
+        let gun = w.sim.seat_setup[class].as_ref().unwrap().guns[0]
+            .as_ref()
+            .unwrap()
+            .weapons[0]
+            .class;
+        assert!(w.sim.weapon_classes[gun].wind_up <= 0.0);
+        w.sim.weapon_classes[gun].fire_loop_sound = None;
+        w.walker_shot_styles.insert(
+            gun,
+            game::walker_shots::Style {
+                fire_sound: Some("inherited_chaingun_fire".into()),
+                fire_fade: [0.0, 0.0],
+                spin: Some(game::walker_shots::SpinSound {
+                    name: "inherited_chaingun_spin".into(),
+                    pitch: 1.0,
+                    fade: [0.0, 0.0],
+                }),
+            },
+        );
+        for _ in 0..30 {
+            w.step_tick(&[PadState {
+                buttons: buttons::FIRE,
+                ..Default::default()
+            }]);
+            assert!(
+                game::walker_shots::voices(&w)
+                    .iter()
+                    .all(|v| v.class != gun),
+                "non-wind-up weapon emitted inherited style loop"
+            );
+            assert!(
+                game::walker_shots::loops(&w)
+                    .iter()
+                    .all(|l| l.1 != gun),
+                "non-wind-up weapon emitted inherited loop entry"
+            );
+        }
+
+        w.sim.weapon_classes[gun].fire_loop_sound = Some("beam_fire_loop".into());
+        let mut saw_fire_loop = false;
+        for _ in 0..30 {
+            w.step_tick(&[PadState {
+                buttons: buttons::FIRE,
+                ..Default::default()
+            }]);
+            if game::walker_shots::voices(&w)
+                .iter()
+                .any(|v| v.class == gun && !v.spin && v.name == "beam_fire_loop")
+            {
+                saw_fire_loop = true;
+                break;
+            }
+        }
+        assert!(
+            saw_fire_loop,
+            "non-wind-up FireLoopSound weapon should still loop while firing"
+        );
+    }
+
+    #[test]
+    fn snailtank_and_vwing_hold_fire_without_chaingun_loop() {
+        let root = game::assets::baked_root();
+        let pad_spec = |build: &game::vehicle_pads::PadBuild, vehicle_name: &str| {
+            build
+                .pads
+                .iter()
+                .flat_map(|p| {
+                    p.classes.iter().flatten().map(|c| VehicleSpec {
+                        pos: p.pos,
+                        yaw: p.yaw,
+                        ..c.spec.clone()
+                    })
+                })
+                .find(|s| build.classes[s.class as usize] == vehicle_name)
+        };
+        let load_case = |map_key: &str, layer: &str, vehicle_name: &str| {
+            if layer == "con" {
+                let team_prefix = vehicle_name.split('_').next().unwrap_or("");
+                let mut missions = super::super::seat_camera::missions_of(map_key);
+                missions.sort_by_key(|m| !m.factions().iter().any(|f| f == team_prefix));
+                let (mut m, spec) = missions
+                    .into_iter()
+                    .find_map(|mission| {
+                        let m =
+                            super::super::seat_camera::map(&root.join(map_key), &mission.factions())?;
+                        let spec = pad_spec(&m.build, vehicle_name)?;
+                        Some((m, spec))
+                    })
+                    .unwrap_or_else(|| panic!("missing {vehicle_name} on {map_key}"));
+                m.walk.walker_shot_styles = m.build.walker_shot_styles.clone();
+                return (m.walk, spec);
+            }
+            let dir = root.join(map_key);
+            let mut scene = game::assets::load_scene(&dir).expect("load scene");
+            scene.apply_mode_layer(layer);
+            let mut walk = game::walk::WalkSim::new(1, glam::Vec3::ZERO, scene.heightfield());
+            walk.sim.ground_rules = core::soldier::GroundRules::for_game(&scene.manifest.source_game);
+            scene.install_collision(&mut walk.sim);
+            let factions = ["rep", "cis"].map(str::to_owned);
+            let build = game::vehicle_pads::install(
+                &mut walk.sim,
+                &scene.manifest,
+                &dir,
+                &root.join("classes"),
+                &factions,
+            )
+            .expect("install vehicle pads");
+            let spec = pad_spec(&build, vehicle_name)
+                .unwrap_or_else(|| panic!("missing {vehicle_name} on {map_key}"));
+            walk.walker_shot_styles = build.walker_shot_styles;
+            (walk, spec)
+        };
+
+        for (map_key, layer, vehicle_name, expected_fire_sound) in [
+            (
+                "bf2_fel1",
+                "con",
+                "cis_tread_snailtank",
+                "cis_weap_tread_snailtank_cannon_fire",
+            ),
+            (
+                "bf2_spa3",
+                "ass",
+                "rep_fly_vwing",
+                "rep_weap_fly_vwing_cannon_fire",
+            ),
+        ] {
+            let (mut walk, spec) = load_case(map_key, layer, vehicle_name);
+            let h = walk.sim.spawn_vehicle(&spec);
+            let player = walk.player;
+            assert!(walk.sim.seat_unit(player, h, 0));
+            if walk.sim.vehicle(h).unwrap().kind == core::vehicle::VehicleKind::Flyer {
+                walk.sim.cheats.invincible = true;
+                let v = walk.sim.vehicle_mut(h).unwrap();
+                v.pos = glam::Vec3::new(0.0, 2000.0, 0.0);
+                v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
+            }
+            let weapon = walk.sim.seat_setup[spec.class as usize]
+                .as_ref()
+                .unwrap()
+                .guns[0]
+                .as_ref()
+                .unwrap()
+                .weapons[0]
+                .class;
+            let wc = &walk.sim.weapon_classes[weapon];
+            assert_eq!(wc.wind_up, 0.0, "{vehicle_name} primary must not wind up");
+            assert_eq!(wc.fire_sound.as_deref(), Some(expected_fire_sound));
+            assert!(
+                game::walker_shots::style(&walk, weapon).is_none(),
+                "{vehicle_name} primary should not keep an inherited wind-up style"
+            );
+
+            let mut shot_ticks = 0usize;
+            for tick in 0..180 {
+                walk.step_tick(&[PadState {
+                    buttons: buttons::FIRE,
+                    ..Default::default()
+                }]);
+                let voices = game::walker_shots::voices(&walk);
+                assert!(
+                    voices.is_empty(),
+                    "{vehicle_name} emitted unexpected loop voice at tick {tick}: {:?}",
+                    voices.iter().map(|v| (v.name, v.spin)).collect::<Vec<_>>()
+                );
+                let loops = game::walker_shots::loops(&walk);
+                assert!(
+                    loops.is_empty(),
+                    "{vehicle_name} emitted unexpected loop entry at tick {tick}"
+                );
+                if walk.sim.events.iter().any(|e| {
+                    matches!(e, Event::Shot { unit, weapon_class, .. }
+                        if *unit == player && *weapon_class as usize == weapon)
+                }) {
+                    shot_ticks += 1;
+                }
+            }
+            let phase = walk.sim.vehicle(h).map(|v| v.flyer.phase);
+            let ws = &walk.sim.vehicle(h).unwrap().guns[0].as_ref().unwrap().weapons[0];
+            assert!(
+                shot_ticks >= 2,
+                "expected >= 2 shot cycles while holding fire on {vehicle_name}, got {shot_ticks} (phase={phase:?}, overheated={}, heat={})",
+                ws.overheated,
+                ws.heat,
+            );
+        }
+    }
+}

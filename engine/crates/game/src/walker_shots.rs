@@ -140,12 +140,14 @@ pub fn loops(walk: &WalkSim) -> Vec<(UnitHandle, usize, &str, glam::Vec3)> {
         .collect()
 }
 
-/// Every seated walker and flyer gun's loop voices this tick. A gun that
-/// winds up keeps its fire loop to the ticks it fires on (bit 0 of its
-/// weapon +0x144 set and the spin timer +0x140 run out, B2 `FUN_0032e8c0`
-/// starting it through `FUN_0032fec8`) and fades it out once released; the
-/// spin motor runs from the press to the end of the wind-down. A gun that
-/// does not wind up loops while its trigger holds a firing weapon.
+/// Every seated walker, flyer, and hover gun's loop voices this tick. A gun
+/// that winds up (`wind_up > 0`) keeps its chaingun fire loop (`0x2298cae8` or
+/// `FireLoopSound`) to the ticks it fires on (bit 0 of its weapon +0x144 set
+/// and the spin timer +0x140 run out, B2 `FUN_0032e8c0` starting it through
+/// `FUN_0032fec8`) and fades it out once released; the spin motor runs from the
+/// press to the end of the wind-down. A gun that does not wind up ignores
+/// inherited wind-up style loops (`0x2298cae8` / `0xca333e94`) and loops only
+/// `FireLoopSound` while its trigger holds a firing weapon.
 pub fn voices(walk: &WalkSim) -> Vec<Voice<'_>> {
     let mut out = Vec::new();
     for (h, u) in walk.sim.alive_units() {
@@ -175,15 +177,8 @@ pub fn voices(walk: &WalkSim) -> Vec<Voice<'_>> {
             let Some(wc) = walk.sim.weapon_classes.get(w.class) else {
                 continue;
             };
-            let style = style(walk, w.class);
-            let Some(name) = style
-                .and_then(|s| s.fire_sound.as_deref())
-                .or(wc.fire_loop_sound.as_deref())
-            else {
-                continue;
-            };
             let pos = frame(walk, h, w.class, s.last_turn).map_or(v.pos, |m| m.w_axis.truncate());
-            let fire = |ramp: Ramp| Voice {
+            let voice = |name, ramp: Ramp| Voice {
                 unit: h,
                 class: w.class,
                 spin: false,
@@ -193,25 +188,33 @@ pub fn voices(walk: &WalkSim) -> Vec<Voice<'_>> {
                 ramp,
             };
             if wc.wind_up <= 0.0 {
-                let live = s.fire_cmd > 0
-                    && s.shots_fired > 0
-                    && !s.overheated
-                    && s.reload_timer <= 0.0
-                    && s.active;
-                if live {
-                    out.push(fire(Ramp::Rise(0.0)));
+                if let Some(name) = wc.fire_loop_sound.as_deref() {
+                    let live = s.fire_cmd > 0
+                        && s.shots_fired > 0
+                        && !s.overheated
+                        && s.reload_timer <= 0.0
+                        && s.active;
+                    if live {
+                        out.push(voice(name, Ramp::Rise(0.0)));
+                    }
                 }
                 continue;
             }
             if s.state != FireState::Firing || !s.active {
                 continue;
             }
-            let fade = style.map_or([0.0; 2], |s| s.fire_fade);
+            let style = style(walk, w.class);
             let engaged = !s.spin_down;
-            if engaged && s.spin <= 0.0 {
-                out.push(fire(Ramp::Rise(fade[0])));
-            } else if !engaged {
-                out.push(fire(Ramp::Fall(fade[1])));
+            if let Some(name) = style
+                .and_then(|s| s.fire_sound.as_deref())
+                .or(wc.fire_loop_sound.as_deref())
+            {
+                let fade = style.map_or([0.0; 2], |s| s.fire_fade);
+                if engaged && s.spin <= 0.0 {
+                    out.push(voice(name, Ramp::Rise(fade[0])));
+                } else if !engaged {
+                    out.push(voice(name, Ramp::Fall(fade[1])));
+                }
             }
             let Some(spin) = style.and_then(|s| s.spin.as_ref()) else {
                 continue;
@@ -237,7 +240,7 @@ pub fn voices(walk: &WalkSim) -> Vec<Voice<'_>> {
                 spin: true,
                 name: &spin.name,
                 pitch: (1.0 - f) * from + f * to,
-                ..fire(ramp)
+                ..voice(&spin.name, ramp)
             });
         }
     }

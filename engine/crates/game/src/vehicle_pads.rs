@@ -1083,7 +1083,11 @@ pub fn install_for_mission(
             continue;
         }
         for w in setup.guns.iter().flatten().flat_map(|g| &g.weapons) {
-            let name = &sim.weapon_classes[w.class].name;
+            let wc = &sim.weapon_classes[w.class];
+            if wc.wind_up <= 0.0 {
+                continue;
+            }
+            let name = &wc.name;
             let f = |h: u32, or: f32| db.prop_hash_f32(name, h).unwrap_or(or);
             let style = crate::walker_shots::Style {
                 fire_sound: db.prop_hash(name, 0x2298cae8).map(str::to_owned),
