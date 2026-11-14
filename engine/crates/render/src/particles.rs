@@ -20,6 +20,9 @@
 //!   through points, each with its half-width and U; the side vector
 //!   `normalize(((P − prev) + (next − P)) × (P − eye))`, camera up when that
 //!   is zero (§6.5, B1 `FUN_0047df68`), `P + side` at V 0, `P − side` at V 1;
+//! - [`ParticleShape::ShadedRibbon`] — STREAK: the same strip with each
+//!   point's own particle colour (B1 `FUN_0047e108` keeps the colour with the
+//!   point it hands `FUN_0047df68`);
 //! - [`ParticleShape::Beam`] — a command post hologram's column (card CPHOL):
 //!   the "lightbeam" renderer's eye-facing fan, `crate::light_beam`.
 //!
@@ -80,6 +83,12 @@ pub enum ParticleShape {
     Ribbon {
         /// (point, half-width, U).
         points: Vec<(Vec3, f32, f32)>,
+    },
+    /// A ribbon whose points carry their own RGBA bytes; the draw's `color`
+    /// is not read.
+    ShadedRibbon {
+        /// (point, half-width, U, RGBA bytes).
+        points: Vec<(Vec3, f32, f32, [u8; 4])>,
     },
     /// Shared native modes 4/5: rounded head, tapered body and the
     /// nose-on mirrored cap, using the laser ribbon's UVs and alpha.
@@ -308,6 +317,20 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
                 let b = vtx(p0 - sides[i - 1], [u0, 1.0], color);
                 let c = vtx(p1 + sides[i], [u1, 0.0], color);
                 let e = vtx(p1 - sides[i], [u1, 1.0], color);
+                out.extend([a, b, c, c, b, e]);
+            }
+        }
+        ParticleShape::ShadedRibbon { points } => {
+            let line: Vec<_> = points.iter().map(|&(p, w, u, _)| (p, w, u)).collect();
+            let sides = ribbon_sides(&line, camera.position, up);
+            for i in 1..points.len() {
+                let (p0, _, u0, c0) = points[i - 1];
+                let (p1, _, u1, c1) = points[i];
+                let (c0, c1) = (c0.map(gs_unit), c1.map(gs_unit));
+                let a = vtx(p0 + sides[i - 1], [u0, 0.0], c0);
+                let b = vtx(p0 - sides[i - 1], [u0, 1.0], c0);
+                let c = vtx(p1 + sides[i], [u1, 0.0], c1);
+                let e = vtx(p1 - sides[i], [u1, 1.0], c1);
                 out.extend([a, b, c, c, b, e]);
             }
         }
@@ -612,6 +635,29 @@ mod tests {
         );
         assert_eq!(v.len(), 12, "two segments");
         assert_eq!(v[0].color, [1.0; 4]);
+    }
+
+    /// A STREAK's points keep their own particle's colour: a newborn,
+    /// transparent head does not hide the older, opaque trail (B1
+    /// `FUN_0047e108` stores the colour with the point it hands
+    /// `FUN_0047df68`).
+    #[test]
+    fn a_shaded_ribbon_colours_each_point_by_its_own_particle() {
+        let cam = Camera::default();
+        let points = vec![
+            (Vec3::new(-1.0, 0.0, -5.0), 0.1, 0.0, [255, 255, 255, 255]),
+            (Vec3::new(0.0, 0.0, -5.0), 0.1, 0.5, [255, 255, 255, 128]),
+            (Vec3::new(1.0, 0.0, -5.0), 0.1, 1.0, [255, 255, 255, 0]),
+        ];
+        let d = ParticleDraw {
+            color: [0; 4],
+            ..draw(ParticleShape::ShadedRibbon { points }, Vec3::ZERO)
+        };
+        let v = particle_vertices(&d, &cam);
+        assert_eq!(v.len(), 12, "two segments");
+        assert_eq!(v[0].color, [1.0; 4]);
+        assert_eq!(v[2].color[3], gs_unit(128));
+        assert_eq!(v[11].color[3], 0.0);
     }
 
     /// Card WTHR: a streak is a strip from its head (its alpha) to its tail

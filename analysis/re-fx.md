@@ -265,6 +265,12 @@ Offsets: T = template, S = Spawner (T+0x7c), I = emitter instance, N = emitter-p
 - [V] **6.5 SPARK** is a camera-facing ribbon of 3 points: tail `pos − vel·L`, mid, head `pos`, L =
   SparkLength·sizeMul, half-width size′ (244993–245033). **STREAK** is a camera-facing ribbon through the emitter's
   particles in spawn order, half-width size′, U = the particle's rotation value (543776–544007); fewer than 3 → nothing.
+  Each point keeps its own particle's colour: B1 `FUN_0047e108` stores the colour beside the position, width and U it
+  hands `FUN_0047df68` for the next segment (B1:544412-544419). [L] 2026-11-14, BF2 YAV1 slot 8: the speeder's
+  `com_sfx_vehiclesmoke_speeder` (`Smoketrail` STREAK, alpha 0 at birth, faded out by 0.45 s) is the trail behind a
+  bike at 56/80 health (`DamageStartPercent 75` / `DamageStopPercent 35`); set to 80/80 in RAM, the trail stops. The
+  port drew the whole ribbon in the newest particle's colour, so the trail ended in a hard cut;
+  `render::ParticleShape::ShadedRibbon` now carries each point's bytes.
 - [V] **6.6 GEOMETRY** draws the model (table 0x69c678) at the particle, scaled by size (no sizeMul), turned about Y by
   the raw rotation in radians, under the emitter node matrix; missing model → nothing (245036–245124).
 - [V][O] **6.7 GS state** (**asm**, records written only by `FUN_004b02f0`, 0x4b034c–0x4b04cc): {ALPHA word, TEST, PRIM}
