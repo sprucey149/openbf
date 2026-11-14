@@ -240,7 +240,15 @@ impl WalkerRig {
     }
 
     fn pose_sampled(&self, w: &WalkerState, simulation: bool) -> Pose {
-        let entry = self.entries.get(usize::from(w.anim));
+        // Entry 4 binds no clip (FUN_0025ea48 skips the player for it,
+        // B2:178211): the walker that has just played death01 out still
+        // holds its last frame until the next update removes it.
+        let anim = if w.anim == core::vehicle::walker::ANIM_NONE {
+            core::vehicle::walker::ANIM_DEATH
+        } else {
+            w.anim
+        };
+        let entry = self.entries.get(usize::from(anim));
         let sample = |layer: usize| {
             let c = entry.and_then(|e| e[layer]).map(|k| &self.clips[k])?;
             Some(if simulation {
@@ -529,6 +537,57 @@ mod tests {
             let palette = rig.flyer_palette(lift, None).unwrap();
             assert!((palette[0].w_axis.x - x).abs() < 1e-5);
         }
+    }
+
+    /// The tick death01 plays out the walker records entry 4, which binds
+    /// no clip, and is removed only by the next update: that frame draws
+    /// death01's last pose, not the bind (the tauntaun stood up for it).
+    #[test]
+    fn entry_four_holds_death01s_last_frame() {
+        let mut r = rig(false);
+        let death = Clip {
+            name: "death01".into(),
+            fps: 30.0,
+            frames: 2,
+            tracks: vec![
+                None,
+                None,
+                Some(vec![
+                    BoneXform {
+                        rotation: Quat::IDENTITY,
+                        translation: Vec3::Y,
+                    },
+                    BoneXform {
+                        rotation: Quat::from_rotation_x(1.2),
+                        translation: Vec3::Y,
+                    },
+                ]),
+                None,
+            ],
+        };
+        r.clips.push(death);
+        let d = r.clips.len() - 1;
+        r.entries = vec![
+            [Some(0), None, None],
+            [None; 3],
+            [None; 3],
+            [Some(d), None, None],
+            [None; 3],
+        ];
+        let w = WalkerState {
+            anim: core::vehicle::walker::ANIM_NONE,
+            clip_time: 1.0 / 30.0,
+            dead: true,
+            ..Default::default()
+        };
+        let held = r.pose(&w).0[2].rotation;
+        assert!((angle_x(held) - 1.2).abs() < 1e-4, "{held:?}");
+        let ended = WalkerState {
+            anim: core::vehicle::walker::ANIM_DEATH,
+            ..w.clone()
+        };
+        assert_eq!(r.pose(&ended).0[2].rotation, held);
+        assert_eq!(r.palette_for_sim(&w, 1.0), r.palette_for_sim(&ended, 1.0));
     }
 
     #[test]
