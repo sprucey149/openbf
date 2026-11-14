@@ -358,6 +358,11 @@ impl SoundLib {
         self.play_by_hash(audio, fnv1a_lowercase(name), pos, listener)
     }
 
+    /// Age menu playback intervals without advancing delayed battle layers.
+    pub fn advance_menu_clock(&mut self, elapsed: f32) {
+        self.menu_now += elapsed;
+    }
+
     /// A 2-D one-shot by name (a menu click): its pitch, gain, bus and
     /// `PlayInterval` as any start; played when there is a mixer. Returns
     /// what started.
@@ -755,11 +760,13 @@ impl SoundLib {
         // The start's gates, in the PS2's order (B1 `FUN_0046bf10`): the
         // interval's clock (re-armed whatever the draw says), then the
         // probability.
-        if self.next_ok.get(&hash).is_some_and(|t| self.now < *t) {
+        let menu = p.bus == super::SHELLFX;
+        let now = if menu { self.menu_now } else { self.now };
+        if self.next_ok.get(&hash).is_some_and(|t| now < *t) {
             return;
         }
         if let Some((interval, dev)) = p.play_interval {
-            let next = self.now + interval + self.spread(dev);
+            let next = now + interval + self.spread(dev);
             self.next_ok.insert(hash, next);
         }
         if p.play_probability.is_some_and(|pr| pr < self.next_rand()) {
@@ -794,7 +801,7 @@ impl SoundLib {
             pos,
             bus: self.bus_of(&p),
             flat: p.flat,
-            menu: p.bus == super::SHELLFX,
+            menu,
         });
     }
 

@@ -52,8 +52,14 @@ fn missions() -> Vec<MissionDef> {
     paths.iter().map(|p| MissionDef::load(p).unwrap()).collect()
 }
 
+fn assets() -> PathBuf {
+    std::env::var_os("OPENBF_BF1_HERO_ASSETS")
+        .map(PathBuf::from)
+        .unwrap_or_else(game::assets::baked_root)
+}
+
 fn battle(m: &MissionDef) -> (Sim, [TeamTemplate; 2], [u8; 2]) {
-    let root = game::assets::baked_root();
+    let root = assets();
     let f = m.factions();
     let (mut rosters, _) = FactionRoster::pair(
         &root.join("classes"),
@@ -97,6 +103,7 @@ fn battle(m: &MissionDef) -> (Sim, [TeamTemplate; 2], [u8; 2]) {
         hero
     });
     let mut sim = Sim::empty(166);
+    sim.ground_rules = core::soldier::GroundRules::for_game(&m.source_game);
     let mut names = Vec::new();
     let teams = std::array::from_fn(|team| {
         sim.classes[team] = rosters[team]
@@ -121,24 +128,36 @@ fn battle(m: &MissionDef) -> (Sim, [TeamTemplate; 2], [u8; 2]) {
 #[test]
 #[ignore = "requires owned generated missions and BF1/BF2 bake"]
 fn bf1_heroes_all_assignments_assets_and_audio() {
-    let root = game::assets::baked_root();
+    let root = assets();
     let mut count = 0;
+    let mut added = 0;
     let mut names = std::collections::BTreeSet::new();
     for m in missions()
         .into_iter()
         .filter(|m| m.source_game == "bf1" && m.mode == "con")
     {
         let (sim, teams, heroes) = battle(&m);
-        let mut walk = WalkSim::with_teams(sim, None, Vec3::ZERO, teams, None);
+        let mut walk = WalkSim::with_teams(sim, Some(flat_ground()), Vec3::ZERO, teams, None);
         walk.sound_levels = m.sound_levels();
         let teams = &walk.teams;
         let lib = game::sounds::SoundLib::load_for(&root.join(&m.map), &m).expect("sound bank");
         let mut live = game::sounds::SoundLib::load(&root.join(&m.map)).unwrap();
-        live.for_walk(&root.join(&m.map), &walk);
+        let table = live.for_walk(&root.join(&m.map), &walk);
         let f = m.factions();
         let levels = game::foley::sublevels(&root.join(&m.map), [&f[0], &f[1]], &m.sound_levels());
-        let foley =
+        let native =
             game::foley::Table::load(&root.join(&m.map), &levels).expect("native map foley");
+        let mut foley =
+            game::foley::Foley::load(&root.join(&m.map), &walk, table).expect("battle foley");
+        foley.who = game::foley::Who::InReach;
+        let view = game::foley::View::of(&walk.camera(), 16.0 / 9.0);
+        assert_eq!(native.start, foley.table.start);
+        assert_eq!(native.groups.len(), foley.table.groups.len());
+        for (original, loaded) in native.groups.iter().zip(&foley.table.groups) {
+            assert_eq!(original.name, loaded.name);
+            assert!(loaded.rows.starts_with(&original.rows));
+            added += loaded.rows.len() - original.rows.len();
+        }
         for (team, hero) in heroes.into_iter().enumerate() {
             let c = teams[team].class(hero);
             assert_eq!(c.asset_game("bf1"), "bf2");
@@ -147,30 +166,59 @@ fn bf1_heroes_all_assignments_assets_and_audio() {
                 0.0
             );
             let audio = &c.cries.hero;
-            let surface = game::foley::Surface::start(&foley, c.foley_class);
-            if let Some((group, row)) = surface.row {
-                let row = &foley.groups[group].rows[row];
-                for sound in [
-                    row.walk_left,
-                    row.walk_right,
-                    row.run_left,
-                    row.run_right,
-                    row.jump,
-                    row.land,
-                ]
-                .into_iter()
-                .filter(|h| *h != 0)
-                {
-                    assert!(
-                        lib.audio_of(sound).is_some(),
-                        "{} {} foley {sound:08x}",
-                        m.map,
-                        c.name
-                    );
-                }
-            } else {
-                eprintln!("HERO_FOLEY_GAP {} {} {:08x}", m.map, c.name, c.foley_class);
+            let surface = game::foley::Surface::start(&foley.table, c.foley_class);
+            let (group, row) = surface
+                .row
+                .unwrap_or_else(|| panic!("{} {} foley row", m.map, c.name));
+            let row = &foley.table.groups[group].rows[row];
+            for sound in [
+                row.walk_left,
+                row.walk_right,
+                row.run_left,
+                row.run_right,
+                row.jump,
+                row.land,
+            ] {
+                let path = live
+                    .take_path_by_hash(sound, 0)
+                    .unwrap_or_else(|| panic!("{} {} foley {sound:08x}", m.map, c.name));
+                assert_eq!(lib.take_path_by_hash(sound, 0), Some(path.clone()));
+                assert!(audio::decode(&path).unwrap().frames() > 0);
             }
+            let expected = [row.walk_left, row.jump, row.land];
+            let spec = walk.sim.classes[team][usize::from(hero)].spec(
+                team as u8,
+                Vec3::ZERO,
+                0.0,
+                Controller::Ai,
+                hero,
+                0,
+            );
+            let actor = walk.sim.spawn(&spec).unwrap();
+            let mut hashes = Vec::new();
+            use core::soldier::Stance;
+            for (stance, grounded) in [
+                (Stance::Stand, true),
+                (Stance::Jump, false),
+                (Stance::Stand, true),
+            ] {
+                let soldier = &mut walk.sim.unit_mut(actor).unwrap().soldier;
+                soldier.pos = Vec3::ZERO;
+                soldier.stance = stance;
+                soldier.grounded = grounded;
+                soldier.vel = if grounded { Vec3::NEG_Z } else { Vec3::ZERO };
+                foley.tick(&walk, &view, |sound| {
+                    if sound.unit == actor.index {
+                        hashes.push(sound.hash);
+                    }
+                });
+            }
+            assert!(
+                hashes.starts_with(&expected),
+                "{} {} movement events {hashes:?}, expected {expected:?}",
+                m.map,
+                c.name,
+            );
             for sound in [
                 &audio.offer,
                 &audio.spawned,
@@ -253,6 +301,7 @@ fn bf1_heroes_all_assignments_assets_and_audio() {
             count += 1;
         }
     }
+    eprintln!("HERO_FOLEY {count} assignments, {added} added surface rows");
     assert_eq!(count, 56);
     assert_eq!(names.len(), 12);
 }
@@ -301,7 +350,7 @@ fn bf1_heroes_player_offer_and_optional_ai_use_existing_manager() {
 }
 
 fn player_and_ai_life(m: &MissionDef, expected: [&str; 2]) -> u64 {
-    let root = game::assets::baked_root();
+    let root = assets();
     let mut reversed = FactionRoster {
         faction: m.teams[1].faction.clone(),
         classes: Vec::new(),
@@ -376,7 +425,7 @@ fn player_and_ai_life(m: &MissionDef, expected: [&str; 2]) -> u64 {
 #[test]
 #[ignore = "headless GPU; requires owned generated missions and BF1/BF2 bake"]
 fn bf1_heroes_headless_bodies_and_weapons() {
-    let root = game::assets::baked_root();
+    let root = assets();
     let mut renderer = render::Renderer::new_headless(320, 240).expect("headless GPU");
     let mut names = std::collections::BTreeSet::new();
     for m in missions()
@@ -491,6 +540,86 @@ fn bf1_heroes_headless_bodies_and_weapons() {
         );
     }
     assert_eq!(names.len(), 12);
+}
+
+#[test]
+#[ignore = "headless GPU; requires a full owned BF1/BF2 bake"]
+fn bf1_heroes_first_person_uses_bf2_assets() {
+    let root = assets();
+    let mut renderer = render::Renderer::new_headless(320, 240).unwrap();
+    let mut checked = std::collections::BTreeSet::new();
+    let out = std::env::var_os("OPENBF_TEST_ARTIFACTS").map(PathBuf::from);
+    for m in missions()
+        .into_iter()
+        .filter(|m| m.source_game == "bf1" && m.mode == "con")
+    {
+        let (_, teams, heroes) = battle(&m);
+        for (team, hero) in heroes.into_iter().enumerate() {
+            let class = teams[team].class(hero);
+            if !checked.insert(class.name.clone()) {
+                continue;
+            }
+            let name = class.name.clone();
+            let has_arms = class.first_person.is_some();
+            let weapon = class.first_person_weapon.geometry.is_some();
+            let (sim, teams, _) = battle(&m);
+            let spec = sim.classes[team][usize::from(hero)].spec(
+                team as u8,
+                Vec3::ZERO,
+                0.0,
+                Controller::Player { slot: 0 },
+                hero,
+                0,
+            );
+            let mut walk = WalkSim::with_teams_seat(
+                sim,
+                Some(flat_ground()),
+                Vec3::ZERO,
+                teams,
+                None,
+                team as u8,
+            );
+            let player = walk.sim.spawn(&spec).unwrap();
+            walk.player = player;
+            walk.sim.unit_mut(player).unwrap().first_person = true;
+            let mut vis =
+                game::soldier_vis::SoldierVisuals::load(&mut renderer, &root, "bf1", &walk.teams);
+            // Let the authored hands-down and draw clips finish before capture.
+            for _ in 0..60 {
+                vis.update(&walk, core::TICK_DT);
+            }
+            assert!(walk.shows_first_person_arms());
+            assert!(vis.fp.classes[team][usize::from(hero)].bf2);
+            let camera = walk.camera();
+            let (arms, gun) = vis.first_person_draws(&walk, &camera);
+            assert_eq!(!arms.is_empty(), has_arms, "{name} arms");
+            assert_eq!(!gun.is_empty(), has_arms && weapon, "{name} weapon");
+            if has_arms {
+                renderer
+                    .render_frame(&camera, &gun, &arms, [0.0, 0.0, 0.0, 1.0], None)
+                    .unwrap();
+                let (pixels, width, height) = renderer.capture_rgba().unwrap();
+                assert!(
+                    pixels.chunks_exact(4).any(|p| p[..3] != [0, 0, 0]),
+                    "{name} visible"
+                );
+                if let Some(out) = &out {
+                    std::fs::create_dir_all(out).unwrap();
+                    std::fs::write(
+                        out.join(format!("{name}-first-person.png")),
+                        render::encode_png(&pixels, width, height).unwrap(),
+                    )
+                    .unwrap();
+                }
+                eprintln!(
+                    "HERO_FIRST_PERSON {name}: {} arm draws, {} weapon draws",
+                    arms.len(),
+                    gun.len()
+                );
+            }
+        }
+    }
+    assert_eq!(checked.len(), 12);
 }
 
 fn flat_ground() -> core::heightfield::Heightfield {

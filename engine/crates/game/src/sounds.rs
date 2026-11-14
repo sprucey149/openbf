@@ -584,9 +584,11 @@ struct LoopRequest {
 pub struct SoundLib {
     /// Layers waiting for their delay.
     timers: Vec<Timer>,
-    /// Seconds of [`SoundLib::tick`] so far: the `PlayInterval` clock.
+    /// Battle sound time, advanced by simulation ticks.
     now: f32,
-    /// Property -> the time its `PlayInterval` lets it start again.
+    /// Menu sound time, advanced by window frames even while paused.
+    menu_now: f32,
+    /// Property -> its next permitted start on its bus's clock.
     next_ok: HashMap<u32, f32>,
     /// (property, take) -> the time the take's own lock ends (card UCALL).
     take_ok: HashMap<(u32, usize), f32>,
@@ -719,18 +721,22 @@ impl SoundLib {
         self.foreign = crate::foley::foreign_armies(map_dir, factions, named);
     }
 
-    /// [`SoundLib::for_battle`] for `walk`'s teams and mission.
-    pub fn for_walk(&mut self, map_dir: &Path, walk: &crate::walk::WalkSim) {
+    /// [`SoundLib::for_battle`] for `walk`'s teams and mission. Returns the BF1
+    /// foley table with any selected BF2 hero rows added.
+    pub fn for_walk(
+        &mut self,
+        map_dir: &Path,
+        walk: &crate::walk::WalkSim,
+    ) -> Option<crate::foley::Table> {
         let f = [0, 1].map(|t| walk.teams[t].faction.as_str());
         self.for_battle(map_dir, f, &walk.sound_levels);
-        if let Some(heroes) = &walk.sim.heroes {
-            let names = heroes
-                .classes
-                .iter()
-                .enumerate()
-                .filter_map(|(team, class)| Some(walk.teams[team].class((*class)?).name.as_str()));
-            self.import_bf1_heroes(map_dir, names);
-        }
+        let heroes = walk.sim.heroes.as_ref()?;
+        let names = heroes
+            .classes
+            .iter()
+            .enumerate()
+            .filter_map(|(team, class)| Some(walk.teams[team].class((*class)?).name.as_str()));
+        self.import_bf1_heroes(map_dir, names)
     }
 
     /// Decode every take the battle can play (card HITCH): each sample of
@@ -819,6 +825,7 @@ impl SoundLib {
             map_stream_files: m.files.into_iter().collect(),
             timers: Vec::new(),
             now: 0.0,
+            menu_now: 0.0,
             next_ok: HashMap::new(),
             take_ok: HashMap::new(),
             indexed,
@@ -1529,13 +1536,18 @@ impl SoundLib {
         Some(samples[samples.len() - 1].0)
     }
 
+    fn one_shot_pitch(&self, start: &Start) -> f32 {
+        let rate = if start.menu { 1.0 } else { self.rate_mul };
+        (start.pitch * rate).max(0.05)
+    }
+
     fn mix(&mut self, audio: &mut audio::Audio, starts: &[Start], listener: &Listener) -> bool {
         let mut any = false;
         for s in starts {
             if self.sound(audio, &s.path).is_err() {
                 continue;
             }
-            let pitch = (s.pitch * self.rate_mul).max(0.05);
+            let pitch = self.one_shot_pitch(s);
             let ears = s.ears(listener);
             let (db, pan) = mixer_pair(ears);
             let bus = if s.menu {

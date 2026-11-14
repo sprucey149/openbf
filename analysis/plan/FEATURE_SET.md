@@ -287,6 +287,9 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 - In MP/splitscreen: host-only control (see Saves, sessions & host authority).
 
 ### Saves, sessions & host authority (added 2026-08-30)
+- **Profile selection.** Start opens the local profile list with the last used name selected.
+  Players can create, select and delete profiles. The existing single save imports once.
+  Settings, control bindings, career stats and unlocks are scoped to the selected profile.
 - **Autosave everywhere.** Each user profile autosaves continuously: career stats and
   award/unlock progression in every mode, single-player or multiplayer. Story campaign
   autosaves at mission/checkpoint boundaries. Galactic Conquest autosaves after every

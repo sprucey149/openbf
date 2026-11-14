@@ -1,9 +1,8 @@
 //! Player profile: settings + career stats, autosaved everywhere (PLAN §Saves,
 //! sessions & host authority: "each user profile autosaves continuously").
-//! v0 = one RON file; awards/unlock progression and per-mode stats grow in
-//! here (P8). Cheats are deliberately NOT persisted (session-scoped by design).
+//! The profile catalog stores each player separately. Cheats remain session-scoped.
 //!
-//! Location: `$OPENBF_PROFILE` (tests/dev override) else `profile.ron` in
+//! Location: `$OPENBF_PROFILE` (single-file tests/dev override) else `profiles.ron` in
 //! [`data_dir`], `openbf_data/` beside the game file (the maintainer, 2026-10-21: on every
 //! OS, nothing in %APPDATA% or ~/.config).
 //! Saves are atomic (write `.tmp`, rename).
@@ -11,6 +10,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+mod store;
+pub use store::{valid_name_char, List, Store, NAME_LIMIT};
 
 fn yes() -> bool {
     true
@@ -238,6 +240,8 @@ pub struct Profile {
     pub name: String,
     pub settings: Settings,
     pub career: Career,
+    #[serde(skip)]
+    slot: Option<store::Slot>,
 }
 
 impl Profile {
@@ -259,7 +263,7 @@ impl Profile {
         match std::fs::read_to_string(path) {
             Ok(txt) => match ron::from_str::<Profile>(&txt) {
                 Ok(mut p) => {
-                    p.settings.fov_scale = crate::walk::clamp_fov_scale(p.settings.fov_scale);
+                    p.normalize();
                     p
                 }
                 Err(e) => {
@@ -275,6 +279,10 @@ impl Profile {
         }
     }
 
+    fn normalize(&mut self) {
+        self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
+    }
+
     fn fresh() -> Profile {
         Profile {
             name: std::env::var("USER").unwrap_or_else(|_| "player".into()),
@@ -284,19 +292,16 @@ impl Profile {
 
     /// Atomic save.
     pub fn save(&self) -> Result<()> {
-        self.save_to(&Self::path())
+        if let Some(slot) = &self.slot {
+            slot.save(self)
+        } else {
+            self.save_to(&Self::path())
+        }
     }
 
     /// Atomically save to an explicit file.
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
-        }
-        let txt = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
-        let tmp = path.with_extension("ron.tmp");
-        std::fs::write(&tmp, txt).with_context(|| tmp.display().to_string())?;
-        std::fs::rename(&tmp, path).with_context(|| path.display().to_string())?;
-        Ok(())
+        write_ron(self, path)
     }
 
     /// Fold a finished (or abandoned) round's player stats into the career.
@@ -319,6 +324,17 @@ impl Profile {
         self.career.hits += hits;
         self.career.captures += captures;
     }
+}
+
+fn write_ron(value: &impl Serialize, path: &Path) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+    }
+    let txt = ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::default())?;
+    let tmp = path.with_extension("ron.tmp");
+    std::fs::write(&tmp, txt).with_context(|| tmp.display().to_string())?;
+    std::fs::rename(&tmp, path).with_context(|| path.display().to_string())?;
+    Ok(())
 }
 
 fn bounded_team_pct<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {

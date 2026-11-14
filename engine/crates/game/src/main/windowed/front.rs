@@ -14,6 +14,9 @@ use super::{App, Camera};
 use ui::menu::{ControlContext, PausePage, SettingsPage};
 use ui::shell_feel::MenuSound;
 
+#[path = "front/profiles.rs"]
+mod profiles;
+
 /// The BF2 PS2 shell's front screens (card BSHLA, `ui::shell_ps2`): Press
 /// START, the Main Menu, Singleplayer and Options over the background
 /// movie, with the shell music; Instant Action opens the PS2's screen
@@ -21,6 +24,8 @@ use ui::shell_feel::MenuSound;
 /// its shell form).
 pub(super) struct FrontShell {
     menus: ui::shell_ps2::ShellMenus,
+    picker: Option<ui::shell_ps2::profiles::Picker>,
+    name_input: profiles::NameInput,
     movie: Option<game::shell_movie::ShellMovie>,
     /// Built at the first frame with a renderer.
     view: Option<game::hud_feed::HudView>,
@@ -236,6 +241,8 @@ impl FrontShell {
             .and_then(|sl| sl.stream_takes(ui::shell_ps2::MUSIC));
         FrontShell {
             menus: ui::shell_ps2::ShellMenus::new(&text),
+            picker: None,
+            name_input: Default::default(),
             movie,
             view: None,
             ia: None,
@@ -268,13 +275,13 @@ impl FrontShell {
         self.menus.cues.play(s);
     }
 
-    /// Play the clicks asked for this frame, and keep the sound library's
-    /// clock (its `PlayInterval`s) on the shell's.
+    /// Play this frame's cues on the shell's clock.
     fn play_cues(&mut self, audio: Option<&mut audio::Audio>, dt: f32) {
         let cues = self.menus.cues.take();
         let Some(sl) = self.sounds.as_mut() else {
             return;
         };
+        sl.advance_menu_clock(dt);
         sl.tick(dt, glam::Vec3::ZERO, &mut Vec::new());
         let mut audio = audio;
         for s in cues {
@@ -649,13 +656,28 @@ impl App {
             self.renderer.as_ref().map(|r| r.size()),
             front.view.as_ref(),
         ) {
-            if !front.ia_open && front.settings.is_none() && self.controls.is_none() {
+            if !front.ia_open
+                && front.settings.is_none()
+                && self.controls.is_none()
+                && front.picker.is_none()
+            {
                 if let Some(row) = view.shell_row_at(&front.menus, point, [w as f32, h as f32]) {
                     front.menus.focus_row(row);
                     input.confirm |= click;
                 } else if click {
                     start |= view.shell_prompt_at(&front.menus, point, [w as f32, h as f32]);
                 }
+            }
+        }
+        if let (Some((point, true)), Some(renderer)) = (pointer, self.renderer.as_ref()) {
+            let picker = front.picker.is_some();
+            let main = front.menus.page == ui::shell_ps2::Page::Main
+                && !front.ia_open
+                && front.settings.is_none()
+                && self.controls.is_none();
+            if self.profile_store.is_some() && (picker || main) {
+                let (w, h) = renderer.size();
+                input.back |= ui::shell_ps2::profiles::back_at(point, [w as f32, h as f32], picker);
             }
         }
         let mut launch = None;
@@ -870,7 +892,17 @@ impl App {
                         low_power_resolution: self.profile.settings.low_power_resolution,
                         ..model
                     });
-        } else {
+        } else if !self.step_profiles(
+            &mut front,
+            profiles::FrameInput {
+                menu: input,
+                start,
+                edges,
+                dt,
+                pointer,
+                wheel,
+            },
+        ) {
             match front.menus.step(input, start, dt) {
                 Some(ui::shell_ps2::ShellCommand::InstantAction) => {
                     match front.ia.as_mut() {
@@ -932,7 +964,10 @@ impl App {
                 }
             }
         }
-        front.menus.covered = front.ia_open || front.settings.is_some() || self.controls.is_some();
+        front.menus.covered = front.ia_open
+            || front.settings.is_some()
+            || self.controls.is_some()
+            || front.picker.is_some();
         let movie_name = front.menus.movie();
         let mut has_movie = false;
         if let Some(m) = front.movie.as_mut() {
@@ -964,7 +999,9 @@ impl App {
                 match ia {
                     Some(ia) => v.update_instant(&front.menus, ia, movie_shown, [w, h]),
                     None => {
-                        if let Some(model) = controls_model
+                        if let Some(picker) = front.picker.as_ref() {
+                            v.update_shell_profiles(&front.menus, has_movie, picker, [w, h]);
+                        } else if let Some(model) = controls_model
                             .as_ref()
                             .or(settings_model.as_ref())
                             .filter(|_| native_options)

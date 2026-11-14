@@ -479,6 +479,7 @@ struct App {
     /// What it holds this battle's frames to, read from the display once.
     dyn_res_budget_ms: Option<f32>,
     profile: game::profile::Profile,
+    profile_store: Option<game::profile::Store>,
     round_recorded: bool,
     /// Previous frame's menu-relevant buttons (edge detection).
     prev_menu_buttons: u32,
@@ -658,7 +659,11 @@ fn run_app(event_loop: winit::event_loop::EventLoop<()>, app: &mut App) -> Resul
 pub(super) fn run_windowed(v: ViewerArgs) -> Result<()> {
     let event_loop = winit::event_loop::EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    let profile = game::profile::Profile::load_or_default();
+    let profile = if std::env::var_os("OPENBF_PROFILE").is_some() {
+        game::profile::Profile::load_or_default()
+    } else {
+        game::profile::Store::new(game::profile::data_dir()).for_direct_launch()?
+    };
     let (gilrs, pad_warning) = open_pads(&profile.settings.controller_bindings);
     let setup = BattleSetup::from_args(&v, v.seed)?;
     let audio = audio::Audio::new();
@@ -743,6 +748,7 @@ impl App {
             dyn_res: game::dyn_res::DynRes::default(),
             dyn_res_budget_ms: None,
             profile,
+            profile_store: None,
             round_recorded: false,
             fx: game::fx::Fx::default(),
             weather: None,
@@ -1144,15 +1150,16 @@ impl App {
         walk.sim
             .set_career_award_bonuses(self.profile.settings.career_awards);
         walk.blend = game::render_blend::Blend::from_env();
-        self.foley = game::foley::Foley::load(&scene.dir, &walk);
         self.engines = game::engine_sound::EngineSounds::new(&scene.dir, &walk);
         self.ambience =
             game::ambience::Ambience::load(&scene.manifest, &scene.dir, &setup.classes_dir);
-        if let Some(sl) = self.sounds.as_mut() {
-            sl.for_walk(&scene.dir, &walk);
+        let foley_table = self.sounds.as_mut().and_then(|sl| {
+            let table = sl.for_walk(&scene.dir, &walk);
             preload_sounds(sl);
             sl.rate_mul = self.cheats.sfx_rate();
-        }
+            table
+        });
+        self.foley = game::foley::Foley::load(&scene.dir, &walk, foley_table);
         self.blackbox = start_blackbox(scene, &walk, &self.mode, setup, self.sounds.as_mut());
         self.matchlog = start_matchlog(scene, &walk, &self.mode, setup);
         self.feed = game::event_feed::EventFeed::for_walk(
@@ -1506,6 +1513,9 @@ impl App {
                         now |= bit;
                     }
                 }
+                if matches!(self.screen, Screen::Shell) && pad.is_pressed(Button::East) {
+                    now |= game::kbm::MENU_EAST;
+                }
                 // The shell's Back is Triangle, as its help line shows
                 // (re-bf2-shell §3.4), and the stats pages' (issue #50);
                 // Circle too, as everywhere else.
@@ -1641,7 +1651,14 @@ impl App {
 pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()> {
     let event_loop = winit::event_loop::EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    let profile = game::profile::Profile::load_or_default();
+    let profile_store = std::env::var_os("OPENBF_PROFILE")
+        .is_none()
+        .then(|| game::profile::Store::new(game::profile::data_dir()));
+    let profile = if profile_store.is_some() {
+        game::profile::Profile::default()
+    } else {
+        game::profile::Profile::load_or_default()
+    };
     let (gilrs, pad_warning) = open_pads(&profile.settings.controller_bindings);
     let audio = audio::Audio::new();
     let setup = BattleSetup {
@@ -1680,6 +1697,7 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
         audio,
         profile,
     );
+    app.profile_store = profile_store;
     app.frame_profile = frame_profile;
     app.autopilot = autopilot;
     app.quit_at = quit_at;

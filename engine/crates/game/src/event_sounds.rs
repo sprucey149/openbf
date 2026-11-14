@@ -823,15 +823,13 @@ pub fn sound_names(
 impl SoundLog {
     pub fn new(map_dir: &std::path::Path, walk: &WalkSim) -> SoundLog {
         let names = sound_names(map_dir, walk);
-        let mut foley = crate::foley::Foley::load(map_dir, walk);
+        let mut lib = crate::sounds::SoundLib::load(map_dir);
+        let table = lib.as_mut().and_then(|sl| sl.for_walk(map_dir, walk));
+        let mut foley = crate::foley::Foley::load(map_dir, walk, table);
         if std::env::var("SOUND_LOG_WHO").as_deref() == Ok("reach") {
             if let Some(f) = foley.as_mut() {
                 f.who = crate::foley::Who::InReach;
             }
-        }
-        let mut lib = crate::sounds::SoundLib::load(map_dir);
-        if let Some(sl) = lib.as_mut() {
-            sl.for_walk(map_dir, walk);
         }
         SoundLog {
             csv: String::from("tick,src,name,unit,dist\n"),

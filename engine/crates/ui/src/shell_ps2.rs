@@ -5,8 +5,8 @@
 //!
 //! - **Title** (`ifs_start`): `logo` at the top, the `shell_main` movie and
 //!   "Press START Button To Begin" pulsing; only Start advances (§2 row 3;
-//!   the keyboard's Enter is the port's Start). The legal / logo screens and
-//!   the profile flow are skipped (§9.1, §9.3).
+//!   the keyboard's Enter is the port's Start). The windowed shell opens
+//!   the profile picker here (§9.3). The legal / logo screens are skipped.
 //! - **Main Menu** (`ifs_main`): logo + stack 10 units lower than the
 //!   others: Singleplayer, **Multiplayer in its slot but disabled** (the
 //!   PS2's own dimmed style: label grey 110, focus skips it, §3.3 - the port
@@ -42,6 +42,8 @@
 //! the window's centre (the movie pillarboxed, never stretched: §9.9), a
 //! left-justified stack keeps its offset from the box's left edge, the help
 //! lines their offsets from the window's edges.
+
+pub mod profiles;
 
 use crate::hud_draw::{run_width, Ctx};
 use crate::hud_tree::HAlign;
@@ -423,6 +425,16 @@ impl ShellMenus {
             _ => {}
         }
         None
+    }
+
+    /// Enter the main stack after a profile is selected.
+    pub fn profile_selected(&mut self) {
+        self.main.focus = self.main.first();
+        self.go(Page::Main);
+    }
+
+    pub fn profile_cancelled(&mut self) {
+        self.go(Page::Title);
     }
 
     /// The movie property the page plays (§4).

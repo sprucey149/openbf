@@ -1,9 +1,13 @@
 //! BF2 sound dependencies of the playable kits selected by BF1 missions.
 
 use super::{note_indexed, note_music, read_index, Bank, SoundLib};
-use crate::{classdb::fnv1a_lowercase as hash, roster};
+use crate::{classdb::fnv1a_lowercase as hash, foley::Table, roster};
 use manifest::combo::{ComboField, ComboKeyword};
-use std::{collections::BTreeSet, path::Path};
+use manifest::FoleyRow;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 fn combo_sounds(fields: &[ComboField], names: &mut BTreeSet<u32>) {
     for field in fields {
@@ -21,15 +25,16 @@ impl SoundLib {
         &mut self,
         map: &Path,
         heroes: impl Iterator<Item = &'a str>,
-    ) {
-        let Some(root) = map.parent() else { return };
+    ) -> Option<Table> {
+        let root = map.parent()?;
         let bf1 = pak::read_to_string(map.join("manifest.ron"))
             .ok()
             .and_then(|s| ron::from_str::<manifest::ManifestHead>(&s).ok())
             .is_some_and(|m| m.source_game.eq_ignore_ascii_case("bf1"));
         if !bf1 {
-            return;
+            return None;
         }
+        let mut classes = BTreeSet::new();
         let mut sources = BTreeSet::new();
         let mut names = BTreeSet::new();
         for hero in heroes {
@@ -50,6 +55,9 @@ impl SoundLib {
                 eprintln!("hero audio {hero}: BF2 class data unavailable");
                 continue;
             };
+            if let Some(name) = db.prop(hero, "FoleyFXClass") {
+                classes.insert(hash(name));
+            }
             // Property values are factual dependency names. Only values which
             // resolve to sound definitions below are imported, never a whole
             // donor infantry bank. Follow weapon/ordnance/base dependencies.
@@ -81,7 +89,7 @@ impl SoundLib {
             }
         }
         if sources.is_empty() {
-            return;
+            return None;
         }
         if let Some(core) = &mut self.core {
             for source in sources {
@@ -142,5 +150,123 @@ impl SoundLib {
                     .or_insert_with(|| path.to_string_lossy().into_owned());
             }
         }
+        self.import_hero_foley(map, root, classes)
+    }
+
+    fn import_hero_foley(
+        &mut self,
+        map: &Path,
+        root: &Path,
+        classes: BTreeSet<u32>,
+    ) -> Option<Table> {
+        let mut table = Table::load(map, &self.levels)?;
+        let clone_trooper = hash("rep_inf_trooper");
+        let cw_heroes = ["rep_inf_soldier", "cis_inf_soldier", "npc_inf_small"].map(hash);
+        let selected: Vec<_> = classes
+            .into_iter()
+            .filter(|class| cw_heroes.contains(class))
+            .collect();
+        if selected.is_empty() {
+            return Some(table);
+        }
+        // The row names encode the material even when the surface group is
+        // called terrain_foley or points to a differently named material.
+        let names = crate::foley::names();
+        let material = |row: &FoleyRow| {
+            names
+                .get(&row.walk_left)?
+                .rsplit_once("_walk_")?
+                .1
+                .strip_suffix("_left")
+        };
+        let donors = [
+            ("bf2_geo1", "geo1cw"),
+            ("bf2_fel1", "fel1cw"),
+            ("bf2_kas2", "kas2cw"),
+            ("bf2_dag1", "dag1cw"),
+            ("bf2_end1", "end1gcw"),
+        ];
+        let donors: Vec<_> = donors
+            .into_iter()
+            .filter_map(|(name, level)| {
+                let dir = root.join(name);
+                let table = Table::load(&dir, &[hash(level)])?;
+                Some((dir.join("sounds"), table))
+            })
+            .collect();
+        let mut banks = BTreeMap::new();
+        for group in &mut table.groups {
+            // Use the BF1 clone's actual surface audio as the local control.
+            // It also supplies the same surface if BF2 lacks that family.
+            let Some(native) = group
+                .rows
+                .iter()
+                .find(|row| row.class == clone_trooper)
+                .cloned()
+            else {
+                continue;
+            };
+            for &class in &selected {
+                if group
+                    .rows
+                    .iter()
+                    .any(|row| row.class == class || row.class == 0)
+                {
+                    continue;
+                }
+                let found = material(&native).and_then(|surface| {
+                    donors.iter().find_map(|(dir, donor)| {
+                        let row = donor
+                            .groups
+                            .iter()
+                            .flat_map(|g| &g.rows)
+                            .find(|r| r.class == class && material(r) == Some(surface))?;
+                        let bank = banks.entry(dir).or_insert_with(|| Bank::load(dir));
+                        self.import_foley_row(bank.as_ref()?, row).then_some(row)
+                    })
+                });
+                let row = found.cloned().unwrap_or_else(|| FoleyRow {
+                    class,
+                    ..native.clone()
+                });
+                group.rows.push(row);
+            }
+        }
+        Some(table)
+    }
+
+    fn import_foley_row(&mut self, bank: &Bank, row: &FoleyRow) -> bool {
+        let mut needed = Vec::new();
+        for sound in [
+            row.walk_left,
+            row.walk_right,
+            row.run_left,
+            row.run_right,
+            row.jump,
+            row.land,
+            row.roll,
+            row.prone,
+            row.squat,
+            row.stand,
+            row.body_fall,
+        ]
+        .into_iter()
+        .filter(|sound| *sound != 0)
+        {
+            match self.find(sound) {
+                Some((prop, _)) if super::audible(&prop) => {}
+                Some(_) => return false,
+                None if bank.props.get(&sound).is_some_and(super::audible) => needed.push(sound),
+                None => return false,
+            }
+        }
+        let Some(core) = &mut self.core else {
+            return needed.is_empty();
+        };
+        let mut imports = needed.clone();
+        core.import_props_with(bank, &mut imports, true);
+        needed
+            .into_iter()
+            .all(|hash| core.props.contains_key(&hash))
     }
 }

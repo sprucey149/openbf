@@ -111,7 +111,7 @@
 //!                                 ticks run under `targeted_tick`, for callgrind's
 //!                                 --toggle-collect (same work, another symbol)
 //!   OPENBF_PROFILE=<file>         the profile file (default
-//!                                 openbf_data/profile.ron beside the game)
+//!                                 openbf_data/profiles.ron beside the game)
 //!   OPENBF_ADAPTER=igpu|dgpu|<name>  the GPU (default: high performance)
 //!   OPENBF_GPU_TIMING=1           GPU ms per section of the frame (timestamp
 //!                                 queries; `--bench` prints them, the

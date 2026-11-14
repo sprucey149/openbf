@@ -87,11 +87,28 @@ locally owned data and missions generated into an owned output folder.
 They do not certify a packaged Instant Action round, live controller
 acceptance, animation feel, audio mix or an original-game comparison.
 
-[V, bounded port gap] The first owned-data census found no selectable
-native BF1 foley row for Mace or Dooku on the 14 CW missions. With the
-varied roster the same bake reports 27 of 28 CW assignments without a
-native row. Jango on Kamino and the GCW assignments resolve. Original
-fallback behavior and the port's CW hero movement foley remain open.
-Both Luke arms loaded on a fresh mixed bake in the earlier integration.
-Live first-person presentation and weapon models across bake profiles
-remain open.
+### Movement sounds and first-person models
+
+The PS2 lookup uses the class's `FoleyFXClass` and the current surface
+group (BF1 `FUN_00368238`, B1:355545–355575, BF2 `FUN_0044eca8`,
+B2:511525–511535). A missing row keeps the last one and an unset row
+plays nothing (BF1 `FUN_00204fd8`, B1:115840). The owned PS2-based BF1
+bake lacked a selectable starting row for 27 of 28 Clone Wars hero
+assignments. The GCW kits and Jango on Kamino already resolve.
+
+[D] For the cross-game hero kits, keep native rows first. Fill missing
+Clone Wars hero rows from BF2's authored sound families and match the
+surface material of the BF1 clone-trooper row. The material can differ
+from the surface group name. For example, the BF1 Yavin Arena terrain
+group names water sounds. Where a BF2 family lacks a matching surface
+or playable samples, use the native clone row for that surface. This
+covers cases such as snow on Rhen Var. The runtime imports the selected
+sample dependencies and does not require a new bake. This is a port
+choice for BF2 kits on BF1 maps.
+
+The owned PS2, PC, Xbox and mixed bake checks resolve movement audio
+for all 56 assignments. Headless captures render the authored
+first-person arms of both Luke outfits, Han, Boba, Jango and Chewbacca.
+The four firearm kits also draw their first-person weapons. The other
+six hero kits have no authored first-person arms. Live play and the
+audio mix remain unchecked.

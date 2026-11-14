@@ -385,6 +385,7 @@ fn lib() -> SoundLib {
     SoundLib {
         timers: Vec::new(),
         now: 0.0,
+        menu_now: 0.0,
         next_ok: HashMap::new(),
         take_ok: HashMap::new(),
         map: Bank {
@@ -1445,4 +1446,64 @@ fn a_bf1_core_bank_imports_the_buff_sounds() {
     }
     let (rage, _) = lib.find_named("buff_rage_effect").unwrap();
     assert!(rage.looping && rage.gain == 0.5 && rage.max_distance == 30.0);
+}
+
+#[test]
+fn pause_click_interval_advances_without_aging_battle_sounds() {
+    let mut sl = lib();
+    let select = ui::shell_feel::MenuSound::Select.name();
+    let props = [
+        SoundProp {
+            bus: SHELLFX,
+            flat: true,
+            pitch: 1.5,
+            play_interval: Some((0.1, 0.0)),
+            ..prop(select, 1)
+        },
+        SoundProp {
+            play_interval: Some((0.1, 0.0)),
+            ..prop("test_battle", 1)
+        },
+    ];
+    sl.map.props.extend(merge_props(props.into()));
+    let battle = sl.play_2d(None, "test_battle");
+    assert_eq!(battle.len(), 1);
+    let first = sl.play_2d(None, select);
+    assert_eq!(first.len(), 1);
+    assert!(first[0].menu);
+    assert!(sl.play_2d(None, select).is_empty());
+
+    sl.rate_mul = 0.3;
+    assert_eq!(sl.one_shot_pitch(&first[0]), 1.5);
+    assert_eq!(sl.one_shot_pitch(&battle[0]), battle[0].pitch * 0.3);
+
+    // In a paused frame only the menu clock advances.
+    sl.advance_menu_clock(0.05);
+    assert!(sl.play_2d(None, select).is_empty());
+    sl.advance_menu_clock(0.2);
+    assert_eq!(sl.play_2d(None, select).len(), 1);
+    assert!(sl.play_2d(None, "test_battle").is_empty());
+}
+
+#[test]
+fn pause_click_intervals_from_the_bf2_battle_bank() {
+    let root = crate::assets::baked_root();
+    if !root.join("bf2_cor1/sounds/sounds.ron").is_file() {
+        eprintln!("no baked BF2 Coruscant bank: skipped");
+        return;
+    }
+    let mut sl = SoundLib::load(&root.join("bf2_cor1")).unwrap();
+    let select = ui::shell_feel::MenuSound::Select.name();
+    let (prop, _) = sl.find_named(select).unwrap();
+    let (interval, _) = prop.play_interval.expect("baked navigation click interval");
+    assert_eq!(prop.bus, SHELLFX);
+    assert!(interval > 0.0);
+    assert_eq!(sl.play_2d(None, select).len(), 1);
+    sl.advance_menu_clock(interval * 0.5);
+    assert!(sl.play_2d(None, select).is_empty());
+    for _ in 0..2 {
+        sl.advance_menu_clock(interval + 0.05);
+        assert_eq!(sl.play_2d(None, select).len(), 1);
+    }
+    assert_eq!(sl.now, 0.0);
 }

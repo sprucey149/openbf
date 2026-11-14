@@ -121,6 +121,9 @@ impl winit::application::ApplicationHandler for App {
         if self.loading_window_event(&event) {
             return;
         }
+        if self.profile_keyboard(&event) {
+            return;
+        }
         self.sync_binding_context();
         if self.capture_keyboard(&event) {
             if let WindowEvent::KeyboardInput { event, .. } = &event {
@@ -268,6 +271,9 @@ impl winit::application::ApplicationHandler for App {
                 } else {
                     0
                 };
+                if let Some(sounds) = self.sounds.as_mut() {
+                    sounds.advance_menu_clock(elapsed);
+                }
                 if self.walk.is_some() && self.controls.is_none() && edges & 64 != 0 {
                     if !self.pause_menu.class_picker {
                         self.paused = !self.paused;
@@ -455,9 +461,16 @@ impl winit::application::ApplicationHandler for App {
                         };
                         const ADJUST: u32 =
                             game::kbm::MENU_ADJUST_LEFT | game::kbm::MENU_ADJUST_RIGHT;
-                        let adjust = (edges
-                            | self.pause_repeat.step(self.prev_menu_buttons & ADJUST, dt))
-                            & ADJUST;
+                        const PAGE: u32 = game::kbm::MENU_L1 | game::kbm::MENU_R1;
+                        let adjust = edges
+                            | self
+                                .pause_repeat
+                                .step(self.prev_menu_buttons & (ADJUST | PAGE), dt);
+                        let page_right = match adjust & PAGE {
+                            game::kbm::MENU_L1 => Some(false),
+                            game::kbm::MENU_R1 => Some(true),
+                            _ => None,
+                        };
                         // The D-pad's and arrows' presses: a step is not a Morse key.
                         let input = ui::menu::MenuInput {
                             up: edges & 1 != 0,
@@ -499,10 +512,8 @@ impl winit::application::ApplicationHandler for App {
                         } else {
                             None
                         };
-                        let (cursor, actions) = match target.filter(|_| !rows_input.back) {
-                            Some(hit) => ui::pause_draw::click(&mut model, hit),
-                            None => ui::menu::navigate(&model, rows_input),
-                        };
+                        let (cursor, actions) =
+                            game::pause::navigate(&mut model, rows_input, target, page_right);
                         let click = game::pause::pause_sound(rows_input, from, cursor, &actions);
                         if let (Some(c), Some(sl)) = (click, self.sounds.as_mut()) {
                             sl.play_2d(self.audio.as_mut(), c.name());

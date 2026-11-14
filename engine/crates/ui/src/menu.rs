@@ -542,6 +542,20 @@ pub fn step(m: &MenuModel, index: usize, right: bool) -> Vec<MenuAction> {
     .1
 }
 
+/// A shoulder button takes ten ordinary steps on a numeric setting.
+pub fn page_step(m: &MenuModel, right: bool) -> Vec<MenuAction> {
+    navigate_steps(
+        m,
+        MenuInput {
+            left: !right,
+            right,
+            ..Default::default()
+        },
+        StepSize::Page,
+    )
+    .1
+}
+
 /// The egui id of row `index`'s ◀ (`right` false) or ▶ widget.
 pub fn step_id(index: usize, right: bool) -> egui::Id {
     egui::Id::new(("menu_step", index, right))
@@ -550,6 +564,16 @@ pub fn step_id(index: usize, right: bool) -> egui::Id {
 /// Apply controller input to the cursor/values; returns actions to perform
 /// and the new cursor.
 pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
+    navigate_steps(m, input, StepSize::Single)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepSize {
+    Single,
+    Page,
+}
+
+fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Vec<MenuAction>) {
     let rows = rows(m);
     let n = rows.len();
     let mut cursor = m.cursor.min(n - 1);
@@ -570,7 +594,7 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     }
     if let Some(picker) = &m.class_choices {
         let n = picker.tabs.len();
-        if n > 0 && (input.left || input.right) {
+        if step == StepSize::Single && n > 0 && (input.left || input.right) {
             let tab = if input.right {
                 (picker.tab + 1) % n
             } else {
@@ -585,48 +609,65 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     if input.down {
         cursor = (cursor + 1) % n;
     }
-    if m.popup.is_some() && (input.left || input.right) {
+    if step == StepSize::Single && m.popup.is_some() && (input.left || input.right) {
         cursor = 1 - cursor;
     }
     if input.confirm {
+        if row_locked(m, rows[cursor]).is_some() {
+            return (cursor, vec![MenuAction::Denied]);
+        }
         if let Some(a) = press(m, rows[cursor]) {
             return (cursor, vec![a]);
         }
     }
+    let steps = if step == StepSize::Page { 10 } else { 1 };
+    let delta = if input.right {
+        steps as f32
+    } else {
+        -(steps as f32)
+    };
+    let single = step == StepSize::Single;
+    let adjust = input.left || input.right;
     match rows[cursor] {
-        row if row_locked(m, row).is_some() => {}
-        Row::Assist if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        row if row_locked(m, row).is_some() => {
+            if !single && is_value_row(row) {
+                actions.push(MenuAction::Denied);
+            }
+        }
+        Row::Assist if adjust => {
             actions.push(MenuAction::SetAssist(
-                ((m.assist_intensity + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+                ((m.assist_intensity + delta / 10.0) * 10.0)
+                    .round()
+                    .clamp(0.0, 10.0)
+                    / 10.0,
             ));
         }
-        Row::AiCap if input.left || input.right => {
+        Row::AiCap if adjust => {
             let pct = if input.right {
                 m.team_size_pct
-                    .saturating_add(10)
+                    .saturating_add(steps * 10)
                     .min(crate::population::MAX_TEAM_PCT)
             } else {
-                m.team_size_pct.saturating_sub(10).max(10)
+                m.team_size_pct.saturating_sub(steps * 10).max(10)
             };
             actions.push(MenuAction::SetAiCap(pct));
         }
-        Row::Reinforcements if input.left || input.right => {
+        Row::Reinforcements if adjust => {
             let pct = if input.right {
-                m.reinforcements_pct.saturating_add(10).min(500)
+                m.reinforcements_pct.saturating_add(steps * 10).min(500)
             } else {
-                m.reinforcements_pct.saturating_sub(10).max(10)
+                m.reinforcements_pct.saturating_sub(steps * 10).max(10)
             };
             actions.push(MenuAction::SetReinforcements(pct));
         }
-        Row::Fov if input.left || input.right => {
+        Row::Fov if adjust => {
             let current = clamp_fov_scale(m.base_fov_deg, m.fov_scale);
             // Step along the existing 5% grid, with a partial step at the cap.
             let ticks = current * 20.0;
             let next_tick = if input.right {
-                (ticks + 1e-5).floor() + 1.0
+                (ticks + 1e-5).floor() + delta
             } else {
-                (ticks - 1e-5).ceil() - 1.0
+                (ticks - 1e-5).ceil() + delta
             };
             let next = clamp_fov_scale(m.base_fov_deg, next_tick / 20.0);
             actions.push(if next == current {
@@ -635,29 +676,28 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
                 MenuAction::SetFov(next)
             });
         }
-        Row::Difficulty if input.left || input.right => {
+        Row::Difficulty if single && adjust => {
             let d = if input.right { 1 } else { -1 };
             actions.push(MenuAction::SetDifficulty((m.difficulty + d).clamp(1, 4)));
         }
-        Row::EffectsVolume | Row::DialogueVolume if input.left || input.right => {
+        Row::EffectsVolume | Row::DialogueVolume if adjust => {
             let effects = rows[cursor] == Row::EffectsVolume;
             let level = if effects {
                 m.effects_volume
             } else {
                 m.dialogue_volume
             };
-            let d = if input.right { 1.0 } else { -1.0 };
-            let level = ((level * 10.0).round() + d).clamp(0.0, 10.0) / 10.0;
+            let level = ((level * 10.0).round() + delta).clamp(0.0, 10.0) / 10.0;
             actions.push(if effects {
                 MenuAction::SetEffectsVolume(level)
             } else {
                 MenuAction::SetDialogueVolume(level)
             });
         }
-        Row::FpsCounter if input.left || input.right => {
+        Row::FpsCounter if single && adjust => {
             actions.push(MenuAction::SetFpsCounter(m.fps_counter.toggled()));
         }
-        Row::Rumble if input.left || input.right => {
+        Row::Rumble if single && adjust => {
             let i = rumble_level(m.rumble_strength);
             let next = if input.right {
                 (i + 1).min(RUMBLE_LEVELS.len() - 1)
@@ -668,44 +708,42 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
                 actions.push(MenuAction::SetRumble(RUMBLE_LEVELS[next].0));
             }
         }
-        Row::Music if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        Row::Music if adjust => {
             actions.push(MenuAction::SetMusic(
-                ((m.music_volume + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+                ((m.music_volume + delta / 10.0) * 10.0)
+                    .round()
+                    .clamp(0.0, 10.0)
+                    / 10.0,
             ));
         }
-        Row::MouseSensitivity if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        Row::MouseSensitivity if adjust => {
             let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
             actions.push(MenuAction::SetMouseSensitivity(
-                (((m.mouse_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+                (((m.mouse_sensitivity + delta / 10.0) * 10.0).round() / 10.0).clamp(lo, hi),
             ));
         }
-        Row::PadLookSensitivity if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        Row::PadLookSensitivity if adjust => {
             let (lo, hi) = PAD_LOOK_SENSITIVITY_RANGE;
             actions.push(MenuAction::SetPadLookSensitivity(
-                (((m.pad_look_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+                (((m.pad_look_sensitivity + delta / 10.0) * 10.0).round() / 10.0).clamp(lo, hi),
             ));
         }
-        Row::FlightControls if input.left || input.right => {
-            actions.push(MenuAction::ToggleFlightControls)
-        }
-        Row::CareerAwards if input.left || input.right => {
+        Row::FlightControls if single && adjust => actions.push(MenuAction::ToggleFlightControls),
+        Row::CareerAwards if single && adjust => {
             actions.push(MenuAction::SetCareerAwards(input.right));
         }
-        Row::InvertY if input.confirm || input.left || input.right => {
+        Row::InvertY if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleInvertY)
         }
-        Row::LowPowerResolution if input.confirm || input.left || input.right => {
+        Row::LowPowerResolution if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleLowPowerResolution)
         }
         // Cross steps on too, beside the left stick and A / D: a paused D-pad's
         // Left / Right are the Morse keys (`game::pause::rows_input`).
-        Row::InputIcons if input.confirm || input.left || input.right => {
+        Row::InputIcons if single && (input.confirm || adjust) => {
             actions.push(MenuAction::CycleInputIcons(if input.left { -1 } else { 1 }))
         }
-        Row::Viewpoint if input.confirm || input.left || input.right => {
+        Row::Viewpoint if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleViewpoint)
         }
         _ => {}

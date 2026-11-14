@@ -78,6 +78,8 @@ pub const MENU_ADJUST_RIGHT: u32 = 2048;
 /// North (Triangle / Y) as held, so a Triangle already down when the pause
 /// menu opens is no Back edge. Never returned as an edge itself.
 pub const MENU_NORTH: u32 = 4096;
+/// Circle / B, separately from Back, for the profile keyboard symbols page.
+pub const MENU_EAST: u32 = 8192;
 
 /// A frame's menu edges from the held bits. With `north_backs` (the ground
 /// pause menu, as BF2's ifs_pausemenu) North's own fresh press is Back (32).

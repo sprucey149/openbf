@@ -433,8 +433,8 @@ impl Foley {
     }
 
     /// The battle's foley, when the map has a table for it.
-    pub fn load(map_dir: &Path, walk: &WalkSim) -> Option<Foley> {
-        let table = Table::load(map_dir, &battle_levels(map_dir, walk));
+    pub fn load(map_dir: &Path, walk: &WalkSim, table: Option<Table>) -> Option<Foley> {
+        let table = table.or_else(|| Table::load(map_dir, &battle_levels(map_dir, walk)));
         let droidekas = droideka::Feet::load(map_dir, walk);
         if table.is_none() && droidekas.is_empty() {
             return None;

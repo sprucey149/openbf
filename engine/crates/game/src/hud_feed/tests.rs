@@ -155,3 +155,70 @@ fn a_launchers_dwell_fills_the_ring_on_foot() {
     w.sim.units[i].weapon.lock_held = 0.25;
     assert_eq!(weapon_gauge(&w).ring, 0.25);
 }
+
+#[test]
+#[ignore = "requires a GPU adapter and the BF2 HUD bake"]
+fn profile_picker_renders_native_menu_pages() {
+    use ui::shell_ps2::{
+        profiles::{Page, Picker, Target},
+        ShellMenus,
+    };
+
+    let assets = crate::assets::baked_root();
+    let mut menus = ShellMenus::new(&|_, fallback| fallback.to_owned());
+    menus.covered = true;
+    let mut picker = Picker::new(
+        vec![(0, "Player 1".into()), (1, "Rebel Pilot".into())],
+        Some(1),
+    );
+    let out = std::env::var_os("OPENBF_PROFILE_CAPTURE").map(std::path::PathBuf::from);
+
+    for size in [[640, 480], [1280, 720], [640, 800]] {
+        let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+        let mut view = HudView::for_renderer(&assets, &r).unwrap();
+        for (label, page, focus) in [
+            ("list", Page::List, Target::Profile(1)),
+            (
+                "name",
+                Page::Name {
+                    text: "Rebel Pilot".into(),
+                    symbols: false,
+                    suggested: false,
+                },
+                Target::Key(0),
+            ),
+            (
+                "difficulty",
+                Page::Difficulty("Rebel Pilot".into()),
+                Target::Difficulty(1),
+            ),
+            ("delete", Page::Delete(1), Target::No),
+        ] {
+            picker.page = page;
+            picker.set_focus(focus);
+            view.update_shell_profiles(&menus, false, &picker, size);
+            assert!(
+                view.drawn_sheets().count() >= 4,
+                "{label} did not draw menu art"
+            );
+            r.render_with_overlay(
+                &render::Camera::default(),
+                &[],
+                [0.0, 0.0, 0.0, 1.0],
+                Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+            )
+            .unwrap();
+            let (rgba, w, h) = r.capture_rgba().unwrap();
+            assert!(
+                rgba.chunks_exact(4).filter(|p| p[0] > 120).count() > 700,
+                "{label} was blank"
+            );
+            if let Some(dir) = &out {
+                image::RgbaImage::from_raw(w, h, rgba)
+                    .unwrap()
+                    .save(dir.join(format!("profile-{label}-{w}x{h}.png")))
+                    .unwrap();
+            }
+        }
+    }
+}

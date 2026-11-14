@@ -873,6 +873,24 @@ impl HudView {
         self.install_frame(frame);
     }
 
+    pub fn update_shell_profiles(
+        &mut self,
+        menus: &ui::shell_ps2::ShellMenus,
+        movie: bool,
+        picker: &ui::shell_ps2::profiles::Picker,
+        size: [u32; 2],
+    ) {
+        let movie = movie && (self.movie.is_some() || self.movie_frame.is_some());
+        self.install_frame(ui::hud_draw::draw_shell_profiles(
+            &self.hud,
+            &self.art,
+            menus,
+            movie,
+            picker,
+            size.map(|v| v as f32),
+        ));
+    }
+
     /// The shared options panel drawn over the shell movie.
     pub fn update_shell_options(
         &mut self,
