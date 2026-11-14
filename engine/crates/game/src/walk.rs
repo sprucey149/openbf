@@ -1260,12 +1260,32 @@ impl WalkSim {
         }
     }
 
-    /// Does the player's flight layout swap the sticks against the
-    /// soldier's? BF2's flyer pilot table does; BF1's flyer seats keep the
-    /// soldier's (`input::bf1_flyer_sticks`). Guided ordnance keeps the
-    /// swapped Classic steering.
-    pub fn flight_sticks_swapped(&self) -> bool {
-        self.sim.ground_rules == core::soldier::GroundRules::Bf2 || !self.player_pilots_flyer()
+    /// Classic keeps translation on the left for aircraft that can stop,
+    /// reverse and strafe; continuously flying aircraft steer with the left.
+    /// Select by supported motion capabilities, never by map or class name.
+    pub fn map_flight_sticks(
+        &self,
+        pilot: input::FlightControls,
+        pad: PadState,
+    ) -> Option<PadState> {
+        let layout = self.flight_controls(pilot)?;
+        let hover = self
+            .sim
+            .unit(self.player)
+            .and_then(|u| u.mount)
+            .and_then(|m| self.sim.vehicle(m.vehicle))
+            .and_then(|v| self.sim.flyer_params.get(v.class as usize))
+            .and_then(Option::as_ref)
+            .is_some_and(|p| {
+                // Only the BF1 flight model implements continuous lateral translation
+                // (core::vehicle::flyer::fly); BF2 uses this axis for roll.
+                !p.bf2 && p.min_speed < 0.0 && p.mid_speed == 0.0 && p.strafe_speed > 0.0
+            });
+        Some(if hover {
+            layout.map_hover_sticks(pad)
+        } else {
+            layout.map_sticks(pad)
+        })
     }
 
     /// The magnet target when it is a unit (draw order of `target_draws`;

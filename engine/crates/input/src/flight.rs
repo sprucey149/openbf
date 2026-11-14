@@ -19,16 +19,7 @@ impl FlightControls {
     /// Remap the sampled controller axes to the sim's roll, throttle, yaw
     /// and pitch channels. The right stick's look scaling comes off here.
     pub fn map_sticks(self, pad: PadState) -> PadState {
-        self.map_sticks_for(pad, true)
-    }
-
-    /// [`Self::map_sticks`] for a game whose flyer table swaps the sticks
-    /// (`swapped`, BF2) or keeps the soldier's (BF1, [`bf1_flyer_sticks`]).
-    pub fn map_sticks_for(self, pad: PadState, swapped: bool) -> PadState {
-        let classic = match swapped {
-            true => flyer_sticks(pad),
-            false => bf1_flyer_sticks(pad),
-        };
+        let classic = flyer_sticks(pad);
         match self {
             Self::Classic => classic,
             Self::RcMode2 => PadState {
@@ -38,15 +29,34 @@ impl FlightControls {
             },
         }
     }
+
+    /// Hover-capable aircraft translate on the left stick and aim on the right.
+    /// RC Mode 2 remains an explicit pilot preference for either flight model.
+    pub fn map_hover_sticks(self, pad: PadState) -> PadState {
+        if self == Self::RcMode2 {
+            return self.map_sticks(pad);
+        }
+        let unscaled =
+            |a: i16| PadState::quantize((PadState::axis(a) / LOOK_SCALE).clamp(-1.0, 1.0));
+        PadState {
+            rx: unscaled(pad.rx),
+            ry: unscaled(pad.ry),
+            ..pad
+        }
+    }
 }
 
-/// BF2's classic flight: the left stick pitches and turns, the right throttles
-/// and rolls. BF2's default table for a flyer pilot swaps the two sticks' functions
+/// Classic for forward-flying aircraft: left pitches/turns, right throttles/rolls.
+/// Hovering aircraft instead use [`FlightControls::map_hover_sticks`].
+/// BF2's default table for a flyer pilot swaps the two sticks' functions
 /// against the soldier's and the ground vehicle's (BF2 0x600ee0 words 16..19, 32 33 30
 /// 31, against 30 31 32 33 at 0x600e40, read back by `FUN_004333a0`). The look
 /// stick's own [`LOOK_SCALE`] comes off: a flyer's stick reaches 1, and BF2's rate
 /// blend runs over 0.7 to 1.
-/// Only the controller's axes: the keyboard's walk keys are merged after this.
+/// This layout applies to every source map (maintainer, 2026-11-14), a named
+/// difference from the measured BF1 MAF table for forward-flying aircraft.
+/// Only controller axes are mapped;
+/// keyboard walk keys are merged after this.
 pub fn flyer_sticks(pad: PadState) -> PadState {
     let unscaled = |a: i16| PadState::quantize((PadState::axis(a) / LOOK_SCALE).clamp(-1.0, 1.0));
     PadState {
@@ -58,28 +68,53 @@ pub fn flyer_sticks(pad: PadState) -> PadState {
     }
 }
 
-/// BF1's flight: the left stick throttles and rolls, the right pitches and
-/// turns, as on foot. BF1's controller reads its sticks through table
-/// `*controller` (`FUN_0034c5f8`, words 16..19 of the 0x50-byte table at
-/// controller + 0x100). BF1 ships a swapped third table (ELF 0x519210, words
-/// 16..19 = 20 21 18 19), but no flyer seat selects it. [L] BF1 BES1 save
-/// states (`analysis/re-flyer.md`): the index at 0x642e5c is 1 while piloting
-/// the MAF and in both of its turret seats, and 0 on foot. Table 1 holds
-/// 18 19 20 21, the soldier's order. Only the right stick's [`LOOK_SCALE`]
-/// comes off.
-pub fn bf1_flyer_sticks(pad: PadState) -> PadState {
-    let unscaled = |a: i16| PadState::quantize((PadState::axis(a) / LOOK_SCALE).clamp(-1.0, 1.0));
-    PadState {
-        rx: unscaled(pad.rx),
-        ry: unscaled(pad.ry),
-        ..pad
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::sim::buttons;
+
+    #[test]
+    fn hovering_classic_moves_on_left_and_aims_on_right() {
+        let pad = PadState {
+            lx: 17000,
+            ly: -23000,
+            rx: PadState::quantize(LOOK_SCALE),
+            ry: PadState::quantize(-LOOK_SCALE),
+            buttons: buttons::FIRE,
+            ..Default::default()
+        };
+        let mapped = FlightControls::Classic.map_hover_sticks(pad);
+        assert_eq!(
+            (mapped.lx, mapped.ly, mapped.buttons),
+            (pad.lx, pad.ly, pad.buttons)
+        );
+        assert!(PadState::axis(mapped.rx) > 0.999);
+        assert!(PadState::axis(mapped.ry) < -0.999);
+        assert_eq!(
+            FlightControls::RcMode2.map_hover_sticks(pad),
+            FlightControls::RcMode2.map_sticks(pad)
+        );
+    }
+
+    #[test]
+    fn default_layout_reserves_the_left_stick_for_steering() {
+        let left = FlightControls::default().map_sticks(PadState {
+            lx: PadState::quantize(0.75),
+            ly: PadState::quantize(-0.5),
+            ..Default::default()
+        });
+        assert_eq!((left.lx, left.ly), (0, 0), "no throttle or roll");
+        assert!((PadState::axis(left.rx) - 0.75).abs() < 1e-4);
+        assert!((PadState::axis(left.ry) + 0.5).abs() < 1e-4);
+        let right = FlightControls::default().map_sticks(PadState {
+            rx: PadState::quantize(LOOK_SCALE),
+            ry: PadState::quantize(-LOOK_SCALE),
+            ..Default::default()
+        });
+        assert_eq!((right.rx, right.ry), (0, 0), "no steering");
+        assert!(PadState::axis(right.lx) > 0.999);
+        assert!(PadState::axis(right.ly) < -0.999);
+    }
 
     #[test]
     fn a_flyer_pilots_sticks_swap_and_reach_full() {
@@ -96,26 +131,6 @@ mod tests {
         assert!((PadState::axis(f.lx) - 1.0).abs() < 1e-3);
         assert!((PadState::axis(f.ly) + 0.5).abs() < 1e-3);
         assert_eq!(f.buttons, pad.buttons);
-    }
-
-    #[test]
-    fn a_bf1_flyer_pilot_keeps_the_soldiers_sticks() {
-        let pad = PadState {
-            lx: PadState::quantize(1.0),
-            ly: PadState::quantize(-1.0),
-            rx: PadState::quantize(LOOK_SCALE),
-            ry: PadState::quantize(-LOOK_SCALE / 2.0),
-            buttons: buttons::FIRE,
-            ..PadState::default()
-        };
-        let f = FlightControls::Classic.map_sticks_for(pad, false);
-        assert_eq!((f.lx, f.ly), (pad.lx, pad.ly));
-        assert!((PadState::axis(f.rx) - 1.0).abs() < 1e-3);
-        assert!((PadState::axis(f.ry) + 0.5).abs() < 1e-3);
-        assert_eq!(f.buttons, pad.buttons);
-        let rc = FlightControls::RcMode2.map_sticks_for(pad, false);
-        assert_eq!((rc.lx, rc.ly, rc.rx), (f.lx, f.ry, f.rx));
-        assert_eq!(rc.ry, -f.ly);
     }
 
     #[test]

@@ -511,7 +511,7 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             if m.rc_flight_controls {
                 "Left stick controls yaw and throttle. Right stick controls roll and pitch."
             } else {
-                "Left stick controls yaw and pitch. Right stick controls roll and throttle."
+                "Left stick moves or steers. Right stick aims in hovercraft; rolls and throttles in fighters."
             }
             .to_owned(),
         ),
