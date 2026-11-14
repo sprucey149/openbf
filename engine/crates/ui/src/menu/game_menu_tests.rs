@@ -378,3 +378,32 @@ fn career_awards_can_be_set_with_confirm_or_the_value_arrows() {
         vec![MenuAction::SetCareerAwards(true)]
     );
 }
+
+/// Issue #168/#170: Game Options ends with Player name, showing the
+/// selected profile's name; it is read-only everywhere, since profiles own
+/// their (unique) names.
+#[test]
+fn the_player_name_row_shows_the_profile_name_read_only() {
+    let battle = MenuModel {
+        page: Some(PausePage::Settings(SettingsPage::Game)),
+        player_name: "Ann".into(),
+        ..ground()
+    };
+    assert_eq!(rows(&battle).last(), Some(&Row::PlayerName));
+    assert_eq!(
+        row_text(&battle, Row::PlayerName),
+        ("Player name".to_owned(), Some("Ann".to_owned()))
+    );
+    assert_eq!(press(&battle, Row::PlayerName), None);
+    assert!(row_locked(&battle, Row::PlayerName).is_some());
+    let shell = MenuModel {
+        in_shell: Some(String::new()),
+        ..at(&battle, Row::PlayerName)
+    };
+    assert!(row_locked(&shell, Row::PlayerName).is_some());
+    assert_eq!(
+        navigate(&shell, input(|i| i.confirm = true)).1,
+        vec![MenuAction::Denied],
+        "a locked row answers with the denied sound"
+    );
+}

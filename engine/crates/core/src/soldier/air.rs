@@ -1,6 +1,7 @@
 //! Knockback, take-off, the jet pack and steering in the air.
 
 use super::*;
+use crate::fmath::FloatExt;
 
 impl Soldier {
     /// The tumble, the get-up and a corpse (card KNOCK, §2-§4): no stick; on
@@ -23,7 +24,7 @@ impl Soldier {
             Stance::Tumble => c.acceleration * KNOCK_BRAKE_SHARE * TUMBLE_BRAKE,
             Stance::GetUp => c.acceleration * KNOCK_BRAKE_SHARE * GETUP_BRAKE,
             _ => {
-                let k = t.min(1.0) * t.min(1.0);
+                let k = t.fmin(1.0) * t.fmin(1.0);
                 if bf1 {
                     c.acceleration * KNOCK_BRAKE_SHARE * k
                 } else {
@@ -152,7 +153,7 @@ impl Soldier {
     /// BF2's flinch: every input, the trigger included, is locked for
     /// `secs` (a longer lock already running is kept).
     fn flinch(&mut self, secs: f32) {
-        self.lock_timer = self.lock_timer.max(secs);
+        self.lock_timer = self.lock_timer.fmax(secs);
         self.lock_hard = true;
         self.fire_lock = true;
     }
@@ -253,13 +254,13 @@ impl Soldier {
         if self.fuel < c.jet_fuel_min_border || !self.pay_stamina(c.jet_energy_drain, c) {
             return false;
         }
-        self.fuel = (self.fuel - c.jet_fuel_initial).max(0.0);
+        self.fuel = (self.fuel - c.jet_fuel_initial).fmax(0.0);
         let (fwd_in, strafe_in) = stick;
         let (sy, cy) = fmath::sin_cos(self.yaw);
         let f = Vec3::new(-sy, 0.0, -cy);
         let r = Vec3::new(cy, 0.0, -sy);
         let dir = (r * (strafe_in * JET_KICK_STRAFE)
-            + f * fwd_in.max(JET_KICK_BACK)
+            + f * fwd_in.fmax(JET_KICK_BACK)
             + Vec3::Y * JET_KICK_LIFT)
             .normalize();
         // The PS2 uses the controller vector without normalising it. Zero
@@ -422,7 +423,7 @@ impl Soldier {
                 if let Some(motion) = c.motion_target.filter(|m| m.weight > 0.0) {
                     // Native cases 4/8/9 replace the stick acceleration;
                     // this output is neither a velocity cap nor a lerp.
-                    let weight = motion.weight.min(1.0);
+                    let weight = motion.weight.fmin(1.0);
                     self.vel +=
                         t1 * (motion.forward * weight * dt) + t2 * (motion.strafe * weight * dt);
                 } else {
@@ -435,9 +436,9 @@ impl Soldier {
                 let a = c.acceleration * BF1_ACCEL * air * dt;
                 let raise = |cur: f32, tgt: f32, stick: f32| -> f32 {
                     if stick > 0.0 && cur < tgt {
-                        (cur + a).min(tgt)
+                        (cur + a).fmin(tgt)
                     } else if stick < 0.0 && tgt < cur {
-                        (cur - a).max(tgt)
+                        (cur - a).fmax(tgt)
                     } else {
                         cur
                     }
@@ -459,7 +460,7 @@ impl Soldier {
     /// JUNI jump eligibility no longer depends on this timer.
     pub(super) fn touch_down(&mut self, rules: GroundRules) {
         if rules == GroundRules::Bf1 && self.air_time > 0.0 {
-            self.stand_age = self.stand_age.max(5.0);
+            self.stand_age = self.stand_age.fmax(5.0);
         }
         self.grounded = true;
         self.air_time = 0.0;

@@ -20,7 +20,7 @@ fn class(hover: bool) -> SoldierConstants {
         ..Default::default()
     }
 }
-fn sim(hover: bool) -> (Sim, UnitHandle) {
+pub(crate) fn sim(hover: bool) -> (Sim, UnitHandle) {
     let mut sim = Sim::empty(42);
     sim.heightfield = Some(Heightfield {
         size: 2,

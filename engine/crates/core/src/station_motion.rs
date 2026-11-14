@@ -2,6 +2,8 @@
 //! by the sim (collision bodies and blast sphere follow the yaw) and the viewer (the drawn pose). Outside `sim` so the
 //! golden scenes, which place droids but build no Sim, do not link `core::sim` (`engine/goldens/deps.toml`).
 
+use crate::fmath::FloatExt;
+
 /// Per-station LCG from B1 FUN_002a9750 (§6).
 fn lcg(x: u32) -> u32 {
     x.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f)
@@ -87,7 +89,7 @@ impl StationMotion {
         eat(&[self.state]);
         eat(&self.rng.to_le_bytes());
         for v in [self.timer, self.sign, self.wobble_freq, self.yaw] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 }

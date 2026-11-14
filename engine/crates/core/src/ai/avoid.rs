@@ -63,6 +63,7 @@
 use super::state::{NavTick, Round, SteerPick};
 use super::steer::{floor_ahead, rotate_xz, stop_ahead, wall_ahead, StopKind};
 use super::{FAN_STEP, PROBE_DIST};
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::sim::Sim;
 use glam::{Vec2, Vec3};
@@ -184,7 +185,7 @@ fn standing<'a>(
 /// past a side); 0 or less inside it.
 fn foot_dist(f: &nav::Barrier, p: Vec2) -> f32 {
     let d = p - f.centre;
-    (d.dot(f.axes[0]).abs() - f.half.x).max(d.dot(f.axes[1]).abs() - f.half.y)
+    (d.dot(f.axes[0]).abs() - f.half.x).fmax(d.dot(f.axes[1]).abs() - f.half.y)
 }
 
 /// Rule 5's other half: is the point `p` under a standing vehicle — in its
@@ -220,7 +221,7 @@ fn foot_ahead(
 ) -> Option<(Vec3, SteerPick)> {
     let pos = u.soldier.pos;
     let a = Vec2::new(pos.x, pos.z);
-    let reach = dist.min(FOOT_LOOK);
+    let reach = dist.fmin(FOOT_LOOK);
     let b = a + Vec2::new(want.x, want.z) * reach;
     let seen = crate::unit::SOLDIER_RADIUS + FOOT_CLEAR;
     let boards = u.ai.ride.and_then(|r| r.board).map(|h| h.index as usize);
@@ -236,7 +237,7 @@ fn foot_ahead(
         // side and away from it the footprint is behind.
         let near = foot_dist(&f, a);
         let r = if near < seen {
-            (near - FOOT_NEARER).max(0.0)
+            (near - FOOT_NEARER).fmax(0.0)
         } else {
             seen
         };
@@ -338,7 +339,7 @@ fn pick_heading(
     }
     if rd.live() {
         // The nearest the bot has been since it met the obstacle.
-        rd.meet = rd.meet.min(dist.max(f32::MIN_POSITIVE));
+        rd.meet = rd.meet.fmin(dist.fmax(f32::MIN_POSITIVE));
     }
     // The probe is the STEPPED capsule (`Capsule::stepped`): a kerb is not a
     // wall, and the wall pass asks the same shape.
@@ -354,7 +355,7 @@ fn pick_heading(
     let aim_y = aim.y;
     let level = |d: Vec3, y0: f32| {
         let at = pos + d * PROBE_DIST + Vec3::Y * PROBE_DIST;
-        sim.ground_point_under(at, false) <= y0.max(aim_y) + CLIMB_MAX
+        sim.ground_point_under(at, false) <= y0.fmax(aim_y) + CLIMB_MAX
     };
     let follow = |mut dir: Vec3, s: i8, y0: f32| {
         for _ in 0..CORNER_TURNS {
@@ -403,7 +404,7 @@ fn pick_heading(
                 // nearer the aim point than the bot has been since it met
                 // the obstacle. Until then it goes on along the obstacle,
                 // and round its end when the wall beside it stops.
-                let reach = dist.min(LEAVE_LOOK);
+                let reach = dist.fmin(LEAVE_LOOK);
                 let free = sim
                     .collision
                     .wall_sweep(&cap, want, reach)
@@ -450,12 +451,12 @@ fn pick_heading(
             };
         }
         let near = if rd.best > 0.0 {
-            dist.min(rd.best)
+            dist.fmin(rd.best)
         } else {
             dist
         };
         *rd = Round {
-            meet: near.max(f32::MIN_POSITIVE),
+            meet: near.fmax(f32::MIN_POSITIVE),
             y0: pos.y,
             best: rd.best,
             aim: rd.aim,
@@ -524,7 +525,7 @@ fn look_ahead(
         return None;
     }
     let (lo, hi) = (body.aabb.min, body.aabb.max);
-    let r = 0.5 * (hi.x - lo.x).max(hi.z - lo.z);
+    let r = 0.5 * (hi.x - lo.x).fmax(hi.z - lo.z);
     let pos = u.soldier.pos;
     let c = Vec3::new(0.5 * (lo.x + hi.x), pos.y, 0.5 * (lo.z + hi.z));
     let to = Vec3::new(c.x - pos.x, 0.0, c.z - pos.z);
@@ -544,8 +545,8 @@ fn look_ahead(
         lean.signum()
     };
     // (Inside the grown disc the heading is along its rim.)
-    let sin = (grown / len).min(1.0);
-    let cos = (1.0 - sin * sin).max(0.0).sqrt();
+    let sin = (grown / len).fmin(1.0);
+    let cos = (1.0 - sin * sin).fmax(0.0).sqrt();
     let h = d * cos + perp * (s * sin);
     // `want` already clears the disc: the sweep met a corner the disc holds.
     if want.dot(d) <= cos {

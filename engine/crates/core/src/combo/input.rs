@@ -1,6 +1,7 @@
 //! Native eight-event input history, B2 0033f908/0033fb80/0033fe38.
 
 use super::timing::add;
+use crate::fmath::FloatExt;
 
 #[derive(Debug, Clone)]
 pub(super) struct ButtonEvent {
@@ -135,7 +136,7 @@ impl ButtonHistory {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(&[self.held, self.events.len() as u8]);
         for event in &self.events {
-            eat(&event.time.to_bits().to_le_bytes());
+            eat(&event.time.hash_bits().to_le_bytes());
             eat(&[event.button, event.flags]);
         }
     }

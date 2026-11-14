@@ -40,6 +40,7 @@
 //!
 
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::weapon::WeaponState;
 use glam::Vec3;
 
@@ -208,7 +209,7 @@ impl Turn {
         dt: f32,
     ) -> ((f32, f32), (f32, f32)) {
         let slew = |r: f32, t: f32, f: f32| match self.slew {
-            Slew::Exp => r + (t - r) * (f * dt).min(1.0),
+            Slew::Exp => r + (t - r) * (f * dt).fmin(1.0),
             Slew::Linear => super::hover::slew(r, t, f, dt),
         };
         let ry = slew(rate.0, -stick.0 * self.yaw_speed, self.yaw_filter);
@@ -572,13 +573,13 @@ pub struct GunState {
 impl GunState {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         for v in [self.look.0, self.look.1, self.aim.0, self.aim.1] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         // Hashed only off their no-[`Turn`] values, so a vehicle's gun
         // hashes as before card VTURL.
         if self.rate != (0.0, 0.0) || self.rel != self.aim {
             for v in [self.rate.0, self.rate.1, self.rel.0, self.rel.1] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
         eat(&[self.weapons.len() as u8]);
@@ -588,7 +589,7 @@ impl GunState {
         // Hashed only when set, so an unzoomed gun hashes as before VTURZ.
         if let Some(z) = self.zoom {
             eat(&[0x5a]);
-            eat(&z.to_bits().to_le_bytes());
+            eat(&z.hash_bits().to_le_bytes());
         }
     }
 }

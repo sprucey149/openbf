@@ -11,6 +11,7 @@
 //! the CORE.LVL bank (`SoundLib::load_shell`).
 
 use super::{App, Camera};
+use core::fmath::FloatExt;
 use ui::menu::{ControlContext, PausePage, SettingsPage};
 use ui::shell_feel::MenuSound;
 
@@ -23,12 +24,12 @@ mod profiles;
 /// (`ui::shell`) and Game / Audio Options the settings page (`ui::menu` in
 /// its shell form).
 pub(super) struct FrontShell {
-    menus: ui::shell_ps2::ShellMenus,
+    pub(super) menus: ui::shell_ps2::ShellMenus,
     picker: Option<ui::shell_ps2::profiles::Picker>,
     name_input: profiles::NameInput,
-    movie: Option<game::shell_movie::ShellMovie>,
+    pub(super) movie: Option<game::shell_movie::ShellMovie>,
     /// Built at the first frame with a renderer.
-    view: Option<game::hud_feed::HudView>,
+    pub(super) view: Option<game::hud_feed::HudView>,
     /// The Instant Action screen: built at its first Enter, kept (with its
     /// playlist and session options) for the process, as the PS2 keeps
     /// `gPickedMapList` (§1.3).
@@ -48,11 +49,17 @@ pub(super) struct FrontShell {
     /// from the clock, menuref §9.3.9).
     music_rng: u64,
     /// A held D-pad arm's repeat (menuref: 0.62 s, then every 0.167 s).
-    repeat: ui::shell_feel::HoldRepeat,
+    pub(super) repeat: ui::shell_feel::HoldRepeat,
     /// The music level was raised from off: the take of the moment again.
     music_replay: bool,
     /// A page of the port's own covered the screen last frame.
     was_covered: bool,
+    /// Issue #168: Multiplayer's Host Game or Join Game page is up.
+    pub(super) mp: Option<super::lobby::MpPage>,
+    /// A text box had the keyboard last frame: the menu keys wait.
+    pub(super) text_focus: bool,
+    /// Game Options' Player name box is open: the text and its refusal.
+    name_edit: Option<(String, Option<String>)>,
 }
 
 pub(super) struct Controls {
@@ -260,6 +267,9 @@ impl FrontShell {
             repeat: Default::default(),
             music_replay: false,
             was_covered: false,
+            mp: None,
+            text_focus: false,
+            name_edit: None,
         }
     }
 
@@ -276,7 +286,7 @@ impl FrontShell {
     }
 
     /// Play this frame's cues on the shell's clock.
-    fn play_cues(&mut self, audio: Option<&mut audio::Audio>, dt: f32) {
+    pub(super) fn play_cues(&mut self, audio: Option<&mut audio::Audio>, dt: f32) {
         let cues = self.menus.cues.take();
         let Some(sl) = self.sounds.as_mut() else {
             return;
@@ -347,7 +357,7 @@ fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
 impl App {
     /// Session Options were left (`push_prefs`): AI Difficulty is the
     /// profile's tier, saved.
-    fn keep_session_prefs(&mut self, options: &ui::shell::SessionOptions) {
+    pub(super) fn keep_session_prefs(&mut self, options: &ui::shell::SessionOptions) {
         self.profile.settings.difficulty = game::shell_ia::port_difficulty(options.difficulty);
         self.profile.settings.team_size_pct = options.con_numbots as u32;
         self.profile.settings.reinforcement_pct = options.con_mult as u32;
@@ -638,6 +648,19 @@ impl App {
             back: edges & 32 != 0,
         };
         let mut start = edges & 64 != 0;
+        // A text box has the keyboard (issue #168): its Backspace is not
+        // Back; Up and Down still move between the rows.
+        if front.name_edit.is_some() {
+            input = ui::menu::MenuInput::default();
+            start = false;
+        } else if front.text_focus {
+            input = ui::menu::MenuInput {
+                up: input.up,
+                down: input.down,
+                ..Default::default()
+            };
+            start = false;
+        }
         if front.view.is_none() {
             if let Some(r) = &self.renderer {
                 front.view = game::hud_feed::HudView::for_renderer(&self.assets_dir, r)
@@ -650,7 +673,7 @@ impl App {
         // Hover acts only on fresh pointer motion or a click (`Pointer`).
         let wheel = self.shell_pointer.take_wheel();
         let pointer = self.shell_pointer.take_frame();
-        let click = pointer.is_some_and(|(_, c)| c);
+        let click = pointer.is_some_and(|(_, c)| c) && front.name_edit.is_none();
         if let (Some((point, _)), Some((w, h)), Some(view)) = (
             pointer,
             self.renderer.as_ref().map(|r| r.size()),
@@ -659,6 +682,7 @@ impl App {
             if !front.ia_open
                 && front.settings.is_none()
                 && self.controls.is_none()
+                && front.mp.is_none()
                 && front.picker.is_none()
             {
                 if let Some(row) = view.shell_row_at(&front.menus, point, [w as f32, h as f32]) {
@@ -684,70 +708,20 @@ impl App {
         let mut quit = false;
         let mut settings_model = None;
         let mut controls_model = None;
-        let stack_frame = !front.ia_open && self.controls.is_none() && front.settings.is_none();
+        let stack_frame = !front.ia_open
+            && self.controls.is_none()
+            && front.settings.is_none()
+            && front.mp.is_none();
+        let mut mp_done = None;
         if !stack_frame {
             front.menus.tick(dt);
         }
-        if let Some(ia) = front.ia.as_mut().filter(|_| front.ia_open) {
-            let mut ia_input = ui::shell::IaInput {
-                menu: input,
-                l1: edges & game::kbm::MENU_L1 != 0,
-                r1: edges & game::kbm::MENU_R1 != 0,
-            };
-            if wheel != 0.0 {
-                let lines = if wheel > 0.0 {
-                    -(wheel.round().max(1.0) as isize)
-                } else {
-                    (-wheel).round().max(1.0) as isize
-                };
-                let point = self.shell_pointer.pos();
-                let size = self.renderer.as_ref().map(|r| r.size());
-                ia.scroll_pointer(point, size.map(|(w, h)| [w as f32, h as f32]), lines);
-            }
-            let pointer = if wheel != 0.0 && !click {
-                None
-            } else {
-                pointer
-            };
-            if let (Some((point, _)), Some((w, h))) =
-                (pointer, self.renderer.as_ref().map(|r| r.size()))
-            {
-                if let Some(target) = front
-                    .view
-                    .as_ref()
-                    .and_then(|view| view.instant_target(ia, point, [w as f32, h as f32]))
-                {
-                    if ia.focus_pointer(target) {
-                        ia_input.menu.confirm |= click
-                            && !matches!(
-                                target,
-                                ui::shell::PointerTarget::Option(..)
-                                    | ui::shell::PointerTarget::ScrollLeft(..)
-                                    | ui::shell::PointerTarget::ScrollRight(..)
-                                    | ui::shell::PointerTarget::ScrollOption(..)
-                            );
-                        if click {
-                            match target {
-                                ui::shell::PointerTarget::ScrollLeft(delta) => {
-                                    ia.scroll_left(delta);
-                                }
-                                ui::shell::PointerTarget::ScrollRight(delta) => {
-                                    ia.scroll_right(delta);
-                                }
-                                ui::shell::PointerTarget::ScrollOption(delta) => {
-                                    ia.scroll_option(delta);
-                                }
-                                ui::shell::PointerTarget::Option(_, right) => {
-                                    ia_input.menu.left |= !right;
-                                    ia_input.menu.right |= right;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-            match ia.step(ia_input, dt) {
+        if front.mp.is_some() {
+            mp_done = self.step_mp(&mut front, input, dt);
+        } else if let Some(ia) = front.ia.as_mut().filter(|_| front.ia_open) {
+            let view = front.view.as_ref();
+            let command = self.step_instant(view, ia, input, edges, wheel, pointer, click, dt);
+            match command {
                 Some(ui::shell::IaCommand::Back) => front.ia_open = false,
                 Some(ui::shell::IaCommand::Launch(rows)) => launch = Some((rows, ia.options)),
                 Some(ui::shell::IaCommand::Prefs) => {
@@ -803,6 +777,8 @@ impl App {
                 effects_volume: settings.effects_volume,
                 dialogue_volume: settings.dialogue_volume,
                 fps_counter: ui::menu::FpsCounter::from_index(settings.fps_counter),
+                network_meter: settings.network_meter,
+                player_name: self.profile.name.clone(),
                 team_size_pct: settings.team_size_pct,
                 reinforcements_pct: settings.reinforcement_pct,
                 population_note: game::conquest_defaults::menu_note(
@@ -820,6 +796,7 @@ impl App {
                 rc_flight_controls: settings.flight_controls == input::FlightControls::RcMode2,
                 invert_y: settings.invert_y,
                 low_power_resolution: settings.low_power_resolution,
+                auto_quality: settings.auto_quality,
                 input_icons_label: settings.input_icons.label(),
                 icons,
                 first_person: settings.viewpoint.is_first(),
@@ -890,6 +867,7 @@ impl App {
                         fov_scale: self.profile.settings.fov_scale,
                         first_person: self.profile.settings.viewpoint.is_first(),
                         low_power_resolution: self.profile.settings.low_power_resolution,
+                        auto_quality: self.profile.settings.auto_quality,
                         ..model
                     });
         } else if !self.step_profiles(
@@ -924,6 +902,14 @@ impl App {
                 }
                 Some(ui::shell_ps2::ShellCommand::Settings(page)) => {
                     front.settings = Some((PausePage::Settings(page), 0));
+                }
+                Some(ui::shell_ps2::ShellCommand::HostGame) => {
+                    front.mp = Some(super::lobby::MpPage::host());
+                }
+                Some(ui::shell_ps2::ShellCommand::JoinGame) => {
+                    front.mp = Some(super::lobby::MpPage::join(
+                        self.profile.settings.recent_hosts.clone(),
+                    ));
                 }
                 Some(ui::shell_ps2::ShellCommand::Quit) => quit = true,
                 None => {}
@@ -967,6 +953,7 @@ impl App {
         front.menus.covered = front.ia_open
             || front.settings.is_some()
             || self.controls.is_some()
+            || front.mp.is_some()
             || front.picker.is_some();
         let movie_name = front.menus.movie();
         let mut has_movie = false;
@@ -989,6 +976,8 @@ impl App {
         let icons = self.current_icons();
         let mut control_clicked = None;
         let mut setting_clicked = Vec::new();
+        let mut pending_mp = None;
+        let mut pending_name = None;
         if let (Some(r), Some(overlay), Some(window)) =
             (&mut self.renderer, &mut self.overlay, &self.window)
         {
@@ -1020,7 +1009,17 @@ impl App {
                 }
             }
             let warning = self.pad_warning.as_deref();
+            let mp = &mut front.mp;
+            let name_edit = &mut front.name_edit;
+            let mut mp_draw = None;
+            let mut name_done = None;
             let paint = overlay.begin(window, |ctx| {
+                if let Some(page) = mp.as_mut() {
+                    mp_draw = Some(super::lobby::draw_mp(ctx, page));
+                }
+                if let Some((name, error)) = name_edit.as_mut() {
+                    name_done = ui::lobby::draw_name_box(ctx, name, error.as_deref());
+                }
                 ui::menu::draw_fps_counter(
                     ctx,
                     ui::menu::FpsCounter::from_index(self.profile.settings.fps_counter),
@@ -1047,6 +1046,13 @@ impl App {
                     ui::hud::draw_pad_warning(ctx, w);
                 }
             });
+            front.text_focus = mp_draw.is_some_and(|d| d.text_focus);
+            if let Some(d) = mp_draw {
+                pending_mp = Some(d);
+            }
+            if let Some(keep) = name_done {
+                pending_name = Some(keep);
+            }
             let view = &mut front.view;
             if let Err(e) = r.render_with_overlay(
                 &Camera::default(),
@@ -1066,6 +1072,12 @@ impl App {
         if let Some(sound) = control_clicked.and_then(|row| self.activate_control_row(row)) {
             front.cue(sound);
         }
+        if let Some(d) = pending_mp {
+            mp_done = mp_done.or_else(|| self.after_mp_draw(&mut front, d));
+        }
+        if let Some(keep) = pending_name {
+            self.close_name_box(&mut front, keep);
+        }
         for action in setting_clicked {
             if let Some(s) = shell_click_sound(action) {
                 front.cue(s);
@@ -1074,7 +1086,10 @@ impl App {
         }
         // A page of the port's own closed: the screen under it is entered
         // again (its exit click, its entrance).
-        let covered = front.ia_open || front.settings.is_some() || self.controls.is_some();
+        let covered = front.ia_open
+            || front.settings.is_some()
+            || self.controls.is_some()
+            || front.mp.is_some();
         if front.was_covered && !covered {
             front.menus.uncover();
         }
@@ -1090,6 +1105,108 @@ impl App {
         }
         if let Some((rows, options)) = launch {
             self.start_playlist(rows, options);
+        }
+        if let Some(done) = mp_done {
+            self.mp_done(done);
+        }
+    }
+
+    /// One frame of an Instant Action screen's presses: the pad and keys,
+    /// the wheel and the pointer (the shell's and the LAN lobby's).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn step_instant(
+        &self,
+        view: Option<&game::hud_feed::HudView>,
+        ia: &mut ui::shell::InstantAction,
+        input: ui::menu::MenuInput,
+        edges: u32,
+        wheel: f32,
+        pointer: Option<([f32; 2], bool)>,
+        click: bool,
+        dt: f32,
+    ) -> Option<ui::shell::IaCommand> {
+        let mut ia_input = ui::shell::IaInput {
+            menu: input,
+            l1: edges & game::kbm::MENU_L1 != 0,
+            r1: edges & game::kbm::MENU_R1 != 0,
+        };
+        if wheel != 0.0 {
+            let lines = if wheel > 0.0 {
+                -(wheel.round().fmax(1.0) as isize)
+            } else {
+                (-wheel).round().fmax(1.0) as isize
+            };
+            let point = self.shell_pointer.pos();
+            let size = self.renderer.as_ref().map(|r| r.size());
+            ia.scroll_pointer(point, size.map(|(w, h)| [w as f32, h as f32]), lines);
+        }
+        let pointer = if wheel != 0.0 && !click {
+            None
+        } else {
+            pointer
+        };
+        if let (Some((point, _)), Some((w, h))) =
+            (pointer, self.renderer.as_ref().map(|r| r.size()))
+        {
+            if let Some(target) =
+                view.and_then(|view| view.instant_target(ia, point, [w as f32, h as f32]))
+            {
+                if ia.focus_pointer(target) {
+                    ia_input.menu.confirm |= click
+                        && !matches!(
+                            target,
+                            ui::shell::PointerTarget::Option(..)
+                                | ui::shell::PointerTarget::ScrollLeft(..)
+                                | ui::shell::PointerTarget::ScrollRight(..)
+                                | ui::shell::PointerTarget::ScrollOption(..)
+                        );
+                    if click {
+                        match target {
+                            ui::shell::PointerTarget::ScrollLeft(delta) => {
+                                ia.scroll_left(delta);
+                            }
+                            ui::shell::PointerTarget::ScrollRight(delta) => {
+                                ia.scroll_right(delta);
+                            }
+                            ui::shell::PointerTarget::ScrollOption(delta) => {
+                                ia.scroll_option(delta);
+                            }
+                            ui::shell::PointerTarget::Option(_, right) => {
+                                ia_input.menu.left |= !right;
+                                ia_input.menu.right |= right;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        ia.step(ia_input, dt)
+    }
+
+    /// Game Options' Player name box closed: `keep` saves a valid name
+    /// (`net::msg::valid_name`), else the box stays with why.
+    fn close_name_box(&mut self, front: &mut FrontShell, keep: bool) {
+        let Some((name, _)) = front.name_edit.take() else {
+            return;
+        };
+        if !keep {
+            front.cue(MenuSound::Exit);
+            return;
+        }
+        let name = name.trim().to_owned();
+        if !net::msg::valid_name(&name) {
+            front.name_edit = Some((
+                name,
+                Some("A name is 1 to 24 characters, not only spaces".into()),
+            ));
+            front.cue(MenuSound::Error);
+            return;
+        }
+        front.cue(MenuSound::Accept);
+        self.profile.name = name;
+        if let Err(e) = self.profile.save() {
+            eprintln!("profile autosave failed: {e:#}");
         }
     }
 
@@ -1137,6 +1254,11 @@ impl App {
                 return;
             }
             MenuAction::ToggleCheat(_) => return,
+            MenuAction::EditPlayerName => {
+                front.name_edit =
+                    Some((game::netplay::lobby::player_name(&self.profile.name), None));
+                return;
+            }
             MenuAction::SetDifficulty(v) => {
                 s.difficulty = game::shell_ia::port_difficulty(v);
                 if let Some(ia) = front.ia.as_mut() {
@@ -1146,6 +1268,8 @@ impl App {
             MenuAction::SetEffectsVolume(v) => s.effects_volume = v.clamp(0.0, 1.0),
             MenuAction::SetDialogueVolume(v) => s.dialogue_volume = v.clamp(0.0, 1.0),
             MenuAction::SetFpsCounter(v) => s.fps_counter = v as u8,
+            MenuAction::SetNetworkMeter(on) => s.network_meter = on,
+            MenuAction::SetAutoQuality(on) => s.auto_quality = on,
             MenuAction::SetAssist(v) => {
                 s.assist_intensity = game::profile::clamp_assist_intensity(v)
             }

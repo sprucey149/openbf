@@ -2,13 +2,14 @@
 
 use crate::skin::{BoneXform, Clip, Pose, Skeleton};
 use core::fmath;
+use core::fmath::FloatExt;
 use glam::Quat;
 
 // Native shortest-path slerp and its near-linear/normalisation thresholds
 // (B2 53a3e8). Transcendentals use the sim's portable implementation.
 pub(crate) fn quat_slerp(a: Quat, b: Quat, t: f32) -> Quat {
     let dot = a.dot(b);
-    let cosine = dot.abs().min(1.0);
+    let cosine = dot.abs().fmin(1.0);
     let (wa, mut wb) = if 1.0 - cosine < 0.0001 {
         (1.0 - t, t)
     } else {

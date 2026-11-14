@@ -51,7 +51,7 @@ fn post(s: &mut Sim, name: &str, at: Vec3, owner: Option<u8>) {
 }
 
 /// Flat ground, a far enemy post, a bot at the origin and a landed fighter.
-fn world(bf2: bool, flyer_bots: bool) -> (Sim, UnitHandle, VehicleHandle) {
+pub(crate) fn world(bf2: bool, flyer_bots: bool) -> (Sim, UnitHandle, VehicleHandle) {
     let mut s = Sim::empty(3);
     if bf2 {
         s.ground_rules = crate::soldier::GroundRules::Bf2;

@@ -1,5 +1,6 @@
 //! Static prop effects at their baked hardpoint frames, including repeat delays.
 use super::{EffectDef, Era, Frame, Fx, Lcg, Library, LiveEffect};
+use core::fmath::FloatExt;
 use glam::{Mat3, Mat4, Vec3};
 use std::sync::Arc;
 
@@ -145,8 +146,8 @@ impl Attached {
                 self.live = None;
                 match self.delay {
                     Some([lo, hi]) => {
-                        let lo = lo.trunc().max(0.0);
-                        self.wait = lo + self.rng.float() * (hi - lo).max(0.0);
+                        let lo = lo.trunc().fmax(0.0);
+                        self.wait = lo + self.rng.float() * (hi - lo).fmax(0.0);
                     }
                     None => self.finished = true,
                 }
@@ -192,7 +193,7 @@ fn view_fade(
             .flatten()?;
         let begin = lighting.near_scene_range?[1];
         (begin.is_finite() && begin >= 0.0).then_some(render::FarFade {
-            begin: begin.min(reach.world),
+            begin: begin.fmin(reach.world),
             end: reach.world,
         })
     })

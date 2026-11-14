@@ -26,6 +26,7 @@
 //! running mount has a foot down on few ticks of a stride (BF2's tauntaun:
 //! median 14 m/s at 20 m/s), so its planted foot is the 10th percentile.
 //! Each phase also prints the speed it settles at (its second half).
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::{buttons, PadState, Sim};
 use core::unit::UnitSpec;

@@ -27,6 +27,7 @@ fn stack(title: &str, labels: &[&str], left: bool, y_add: f32) -> Stack {
         focus: 0,
         left,
         y_add,
+        note: None,
     }
 }
 

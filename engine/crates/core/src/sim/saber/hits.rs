@@ -1,6 +1,7 @@
 //! Actual posed blade queries against soldiers and destructible hurt primitives.
 
 use super::*;
+use crate::fmath::FloatExt;
 use crate::{
     collision::Layers,
     hero_weapon::BladeSegment,
@@ -60,7 +61,7 @@ impl Sim {
                 continue;
             };
             let previous = clip
-                .sample((state.runtime.time - TICK_DT).max(0.0), edge)
+                .sample((state.runtime.time - TICK_DT).fmax(0.0), edge)
                 .unwrap_or(current);
             let length = attack.length.map_or(blade.length, |n| {
                 if attack.length_from_edge {
@@ -102,10 +103,10 @@ impl Sim {
                 if bubble.is_none() && prims.is_none() {
                     continue;
                 }
-                let travel = (start - old_start).length().max((end - old_end).length());
+                let travel = (start - old_start).length().fmax((end - old_end).length());
                 // [ours] Linear samples of the baked endpoints; the native
                 // subframe bone evaluator is not part of the core rig.
-                let steps = (travel / 0.5).ceil().max(1.0) as usize;
+                let steps = (travel / 0.5).ceil().fmax(1.0) as usize;
                 let touched = (0..=steps).find_map(|step| {
                     let fraction = step as f32 / steps as f32;
                     let a = old_start.lerp(start, fraction);
@@ -145,8 +146,8 @@ impl Sim {
                 if state.already_hit(attack, target) {
                     continue;
                 }
-                let travel = (start - old_start).length().max((end - old_end).length());
-                let steps = (travel / 0.5).ceil().max(1.0) as usize;
+                let travel = (start - old_start).length().fmax((end - old_end).length());
+                let steps = (travel / 0.5).ceil().fmax(1.0) as usize;
                 let touched = (0..=steps).find_map(|step| {
                     let fraction = step as f32 / steps as f32;
                     let a = old_start.lerp(start, fraction);
@@ -175,8 +176,8 @@ impl Sim {
                 if state.already_hit(attack, target) {
                     continue;
                 }
-                let travel = (start - old_start).length().max((end - old_end).length());
-                let steps = (travel / 0.5).ceil().max(1.0) as usize;
+                let travel = (start - old_start).length().fmax((end - old_end).length());
+                let steps = (travel / 0.5).ceil().fmax(1.0) as usize;
                 let touched = (0..=steps).find_map(|step| {
                     let fraction = step as f32 / steps as f32;
                     let a = old_start.lerp(start, fraction);

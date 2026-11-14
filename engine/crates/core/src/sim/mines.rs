@@ -4,6 +4,7 @@
 
 use super::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::mine::{Detonation, Mine};
 use crate::projectile::Target;
 use crate::sticky::{Anchor, Surface};
@@ -172,7 +173,7 @@ impl Sim {
         } else {
             1.0
         };
-        (damage * health_type.map_or(1.0, |h| scales[h as usize]) * ff).max(0.0)
+        (damage * health_type.map_or(1.0, |h| scales[h as usize]) * ff).fmax(0.0)
     }
 
     pub(super) fn damage_item(
@@ -323,7 +324,7 @@ impl Sim {
                             m.flight.vel =
                                 crate::mine::rebound(m.flight.vel, normal, c.friction, c.rebound);
                             m.flight.pos =
-                                point + normal * self.push_off_room(point, normal).min(0.01);
+                                point + normal * self.push_off_room(point, normal).fmin(0.01);
                         }
                     }
                 }
@@ -346,7 +347,7 @@ impl Sim {
                             && u.soldier.vel.dot(d) >= 0.0;
                         triggered |= c.contact_trigger && {
                             let cap = u.capsule();
-                            let r = cap.radius.min(cap.height * 0.5);
+                            let r = cap.radius.fmin(cap.height * 0.5);
                             let p = Vec3::new(
                                 cap.base.x,
                                 clamp_axis(

@@ -5,6 +5,7 @@
 //! find them by name), and `texture_tier` / `capture_display_ps2`, which set the process-wide texture tier
 //! (`game::assets::set_texture_tier`) that `cargo test` would share across every test here.
 //! A new test file goes in this directory with a `mod` line below.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 mod all_maps_load;
 mod ambience_ps2;

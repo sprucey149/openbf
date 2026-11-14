@@ -32,6 +32,7 @@
 //! is its own. Its distance is the class `MaxDistance`.
 
 use crate::assets::Scene;
+use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 use manifest::foliage_bin::Record;
 use manifest::{FoliageKind, LeafLayout, ManifestLeafClass};
@@ -64,13 +65,13 @@ fn vine(
     let norm = |v: Vec3| v * (1.0 / (v.x * v.x + v.y * v.y + v.z * v.z).sqrt());
     let (mut pos, mut dir) = (pos, dir);
     let f = (k as f32 + 1.0) * 0.25;
-    let mut size = (mn + rng.unit() * (mx - mn)) * f.min(1.0);
+    let mut size = (mn + rng.unit() * (mx - mn)) * f.fmin(1.0);
     out.push((pos, size));
     let [lo, hi] = g.vine_run;
     let mut run = (rng.unit() * (hi - lo) as f32 + lo as f32) as i32;
     run = run.min(k);
     while run != 0 {
-        let fs = ((k as f32 + 1.0) * 0.25).min(1.0);
+        let fs = ((k as f32 + 1.0) * 0.25).fmin(1.0);
         k -= 1;
         run -= 1;
         let (a, b) = (rng.unit(), rng.unit());
@@ -195,9 +196,9 @@ fn bound(sprites: &[LeafSprite], s: f32) -> f32 {
         .iter()
         .map(|p| {
             let h = p.size * 0.5;
-            (Vec3::new(p.pos.x, p.pos.y * s, p.pos.z) - c).length() + (h * s).max(h)
+            (Vec3::new(p.pos.x, p.pos.y * s, p.pos.z) - c).length() + (h * s).fmax(h)
         })
-        .fold(0.0, f32::max)
+        .fold(0.0, core::fmath::max)
 }
 
 /// An object's matrix from its frame's up axis and origin (§5): right =
@@ -273,7 +274,7 @@ pub fn attach_reach(m: &manifest::Manifest, class: &str) -> Option<f32> {
                 .find(|g| g.name.eq_ignore_ascii_case(&a.class))
                 .map(|g| g.max_distance)
         })
-        .reduce(f32::min)
+        .reduce(core::fmath::min)
 }
 
 /// Every leaf object of the manifest: attached to a placed prop (world

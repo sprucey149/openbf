@@ -27,6 +27,8 @@
 //! is the conquest script's own ([`ScriptBleed`], card ANNC2), which is not
 //! the sim's drain during a last stand.
 
+use crate::fmath::FloatExt;
+
 /// The PS2's faction order, 1-based on the disc: All, Imp, Rep, CIS (RE §2.1).
 pub const FACTIONS: [&str; 4] = ["all", "imp", "rep", "cis"];
 /// The factions as a post's `VO_<L>_<S><Event>` property spells them.
@@ -208,14 +210,14 @@ impl VoiceQueue {
     /// pending line is tried at once). The voice is then busy for that length
     /// and [`VOICE_GAP_SECS`]. Returns the line that started.
     pub fn step(&mut self, dt: f32, mut start: impl FnMut(&Line) -> Option<f32>) -> Option<Line> {
-        self.remaining = (self.remaining - dt).max(0.0);
+        self.remaining = (self.remaining - dt).fmax(0.0);
         if self.remaining <= 0.0 {
             self.speaker = None;
         }
         while self.remaining <= 0.0 && !self.pending.is_empty() {
             let line = self.pending.remove(0);
             if let Some(secs) = start(&line) {
-                self.remaining = secs.max(0.0) + VOICE_GAP_SECS;
+                self.remaining = secs.fmax(0.0) + VOICE_GAP_SECS;
                 self.speaker = line.speaker;
                 return Some(line);
             }
@@ -243,7 +245,7 @@ impl VoiceQueue {
     /// A line started outside the queue's own pick (tests; chatter that is
     /// already playing): the voice is busy for `secs`.
     pub fn playing(&mut self, secs: f32) {
-        self.remaining = secs.max(0.0);
+        self.remaining = secs.fmax(0.0);
     }
 
     pub fn is_idle(&self) -> bool {

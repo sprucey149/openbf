@@ -51,6 +51,7 @@ use super::gunner::Look;
 use super::route::{advance_route, mark_abandoned, progress, set_waypoint, sub_point, Refresh};
 use super::state::{AiState, NavTick, RideState, SteerPick};
 use super::{ARRIVE_MIN_RADIUS, DRIVE_STUCK_BAIL, SIDESTEP_OFFSET};
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::perception;
 use crate::sim::{PadState, Sim};
@@ -225,7 +226,7 @@ pub fn sticks(
             route_left,
             target,
         );
-        (thr.max(0.0), -st)
+        (thr.fmax(0.0), -st)
     } else {
         let (thr, _, turn) = steer(dt, k, 0.0, m, goal, route_left, target);
         (thr, turn)

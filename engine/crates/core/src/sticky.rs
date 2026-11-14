@@ -8,6 +8,7 @@
 //! `bf2` follows its disc; a BF1 class fielded on a BF2 map is set to it by
 //! [`crate::weapon::Thrown::throw_as_bf2`].
 
+use crate::fmath::FloatExt;
 use crate::unit::UnitHandle;
 use crate::vehicle::VehicleHandle;
 use crate::weapon::ExplosionClass;
@@ -190,7 +191,7 @@ fn bounce_with(v: Vec3, n: Vec3, rebound: f32, friction: f32, gain: f32) -> Opti
         return None;
     }
     let vt = v - n * vn;
-    let f = (-vn * friction * gain / vt.length()).min(1.0);
+    let f = (-vn * friction * gain / vt.length()).fmin(1.0);
     Some(vt * (1.0 - f) - n * (vn * rebound))
 }
 
@@ -284,7 +285,7 @@ impl Sticky {
         } else {
             self.vel.y += self.gravity * dt;
         }
-        self.pos += self.vel * dt.min(self.life);
+        self.pos += self.vel * dt.fmin(self.life);
     }
 
     fn rest(&mut self) {
@@ -365,7 +366,7 @@ impl Sticky {
         for v in [
             self.pos.x, self.pos.y, self.pos.z, self.vel.x, self.vel.y, self.vel.z, self.life,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&[self.armed as u8, self.bounces, self.moving as u8]);
         eat(&self.owner.index.to_le_bytes());
@@ -377,8 +378,8 @@ impl Sticky {
         eat(&self.owner.gen.to_le_bytes());
         if let Some((charge, age, player)) = self.direct {
             eat(b"STICKY_DIRECT");
-            eat(&charge.to_bits().to_le_bytes());
-            eat(&age.to_bits().to_le_bytes());
+            eat(&charge.hash_bits().to_le_bytes());
+            eat(&age.hash_bits().to_le_bytes());
             eat(&[u8::from(player)]);
         }
         eat(&[u8::from(self.touched.is_some())]);
@@ -397,7 +398,7 @@ impl Sticky {
             eat(&index.to_le_bytes());
             eat(&generation.to_le_bytes());
             for v in [local.x, local.y, local.z] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
         if let Some(id) = self.warning_id {

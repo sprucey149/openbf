@@ -1,3 +1,4 @@
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 use crate::fmath;
@@ -405,7 +406,7 @@ impl Droideka {
             self.water,
             self.shield.points,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.prev_buttons.to_le_bytes());
     }

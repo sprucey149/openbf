@@ -1,6 +1,7 @@
 //! The chase, eye, seat and turret cameras of a walk, with the view pull, field of view and see-through rules.
 
 use super::*;
+use core::fmath::FloatExt;
 
 /// How long the seat view is held after the player dies in a vehicle (BF2: 4 s).
 pub const DEATH_VIEW_HOLD: f32 = 4.0;
@@ -133,7 +134,7 @@ impl WalkSim {
             if let Some(t) =
                 core::collision::ray_heightfield(h, cutters, from, track / len, len, 0.25)
             {
-                f = f.min(t / len);
+                f = f.fmin(t / len);
             }
         }
         from + track * f
@@ -205,7 +206,7 @@ impl WalkSim {
         let pull = me.soldier.pos + Vec3::Y * CAMERA_PULL_Y;
         let (position, mut track) =
             self.settle_camera(CamKind::Soldier, pull, position, None, None);
-        let body = me.soldier.pos + Vec3::Y * CAMERA_SIGHT_BODY_Y.min(center.y - me.soldier.pos.y);
+        let body = me.soldier.pos + Vec3::Y * CAMERA_SIGHT_BODY_Y.fmin(center.y - me.soldier.pos.y);
         track.sights = [center, body];
         let cam = Camera {
             position: position + self.cam_exit.unwrap_or(Vec3::ZERO),
@@ -410,7 +411,13 @@ impl WalkSim {
             self.backdrop = None;
         }
         if let Some(b) = self.backdrop.as_mut() {
-            b.follow(self.sim.spawn_stage.first().copied().unwrap_or_default());
+            b.follow(
+                self.sim
+                    .spawn_stage
+                    .get(usize::from(self.local_slot))
+                    .copied()
+                    .unwrap_or_default(),
+            );
         }
     }
 
@@ -518,7 +525,7 @@ impl WalkSim {
         let (dir, len) = ((end - base).normalize_or_zero(), (end - base).length());
         let cutters = &self.sim.collision.cutters;
         match core::collision::ray_heightfield(h, cutters, base, dir, len, 0.25) {
-            Some(t) => base + dir * (t - CAMERA_TERRAIN_GAP).max(0.0),
+            Some(t) => base + dir * (t - CAMERA_TERRAIN_GAP).fmax(0.0),
             None => end,
         }
     }
@@ -631,7 +638,7 @@ impl WalkSim {
         };
         // In at once, back out at the PS2's rate (`step_cam_pull`).
         let f = if self.same_cam_track(&track) {
-            raw.min(self.cam_pull)
+            raw.fmin(self.cam_pull)
         } else {
             raw
         };
@@ -645,7 +652,7 @@ impl WalkSim {
                 if let Some(t) =
                     core::collision::ray_heightfield(h, cutters, target, dir, len, 0.25)
                 {
-                    position = target + dir * (t - CAMERA_TERRAIN_GAP).max(0.0);
+                    position = target + dir * (t - CAMERA_TERRAIN_GAP).fmax(0.0);
                 }
             }
             let y = h.height_at(position.x, position.z);
@@ -655,9 +662,9 @@ impl WalkSim {
                 .is_cut(Vec3::new(position.x, y, position.z))
             {
                 position.y = if position.y >= y {
-                    position.y.max(y + CAMERA_TERRAIN_GAP)
+                    position.y.fmax(y + CAMERA_TERRAIN_GAP)
                 } else {
-                    position.y.min(y - CAMERA_TERRAIN_GAP)
+                    position.y.fmin(y - CAMERA_TERRAIN_GAP)
                 };
             }
         }
@@ -672,7 +679,7 @@ impl WalkSim {
         let k = clamp_fov_scale(self.fov_scale);
         if let Some(degrees) = self.guided_fov().or_else(|| self.flyer_fov()) {
             let (s, c) = core::fmath::sin_cos(degrees.to_radians() * 0.5);
-            return (2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0) * k).min(MAX_FOV_Y);
+            return (2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0) * k).fmin(MAX_FOV_Y);
         }
         let mut fov = self.walker_fovs().map_or_else(chase_fov_y, |(third, _)| {
             let (s, c) = core::fmath::sin_cos(third.to_radians() * 0.5);
@@ -688,7 +695,7 @@ impl WalkSim {
                 / half(third.to_radians());
             fov = 2.0 * core::fmath::atan2(half(fov) * eased, self.zoom_s);
         }
-        (fov * k).min(MAX_FOV_Y)
+        (fov * k).fmin(MAX_FOV_Y)
     }
 
     /// The (third-person, zoomed) FOVs in degrees the zoom eases between:

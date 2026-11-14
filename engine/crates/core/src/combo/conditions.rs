@@ -83,7 +83,7 @@ pub(super) fn last_window(state: &Field, clip: f32, duration: f32) -> f32 {
         .filter(|g| matches!(g.keyword, K::If | K::Or))
         .filter_map(|g| g.find(K::TimeEnd))
         .map(|end| time(end, 0, clip, duration))
-        .fold(duration, f32::max)
+        .fold(duration, crate::fmath::max)
 }
 
 #[derive(Clone, Copy)]

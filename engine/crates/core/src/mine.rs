@@ -1,6 +1,7 @@
 //! Placed explosives: mines, time bombs and detpacks (issue #43,
 //! `analysis/re-grenades.md` sections 5 and 9).
 
+use crate::fmath::FloatExt;
 use crate::sticky::{Anchor, Sticky};
 use crate::unit::UnitHandle;
 use crate::weapon::{ExplosionClass, HealthType, PropSource};
@@ -18,7 +19,7 @@ pub fn fall(pos: &mut Vec3, vel: &mut Vec3, gravity: f32, dt: f32) {
 pub fn rebound(vel: Vec3, n: Vec3, friction: f32, rebound: f32) -> Vec3 {
     let vn = vel.dot(n);
     let vt = vel - n * vn;
-    let f = (-vn * friction * (rebound + 1.0) / vt.length()).min(1.0);
+    let f = (-vn * friction * (rebound + 1.0) / vt.length()).fmin(1.0);
     vt * (1.0 - f) - n * (vn * rebound)
 }
 
@@ -172,7 +173,7 @@ impl Mine {
             self.anchor_rotation.z,
             self.anchor_rotation.w,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&[u8::from(self.triggered)]);
     }

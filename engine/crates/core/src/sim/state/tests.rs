@@ -263,13 +263,16 @@ fn a_squad_command_is_part_of_the_hash_and_no_command_costs_nothing() {
     // the hash eats the per-team bot rows (`Sim::team_rows`).
     // 2026-10-29 moved it on purpose, 26e385b8a5a49460 -> 5573f2b603ed95f4:
     // every human's spawn tick is kept (`focus_born`, the untargeted second).
+    // 2026-11-13 (#168) moved it on purpose, 5573f2b603ed95f4 ->
+    // 71dabcfadf689bff: not the format - glam's `scalar-math`, so every CPU
+    // runs the same f32 operations (LAN_MULTIPLAYER.md §7).
     let mut sim = Sim::new(42);
     for _ in 0..100 {
         sim.step(&[PadState::default()]);
     }
     assert_eq!(
         format!("{:016x}", sim.hash()),
-        "5573f2b603ed95f4",
+        "71dabcfadf689bff",
         "the command-free hash format moved"
     );
 
@@ -592,6 +595,8 @@ fn htgtw_vehicle_magnet_hash_is_distinct_from_unit_and_none() {
 }
 
 mod hash_bolts;
+
+mod static_digest;
 
 /// Card DTEAM with DPRX: a human proxy counts toward its team's humans, so
 /// its team's bots take the surplus row as they would for a player.

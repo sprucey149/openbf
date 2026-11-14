@@ -2,6 +2,7 @@
 //! roll drives the same craft motion for humans and bots.
 
 use super::{approach, side_roll, FlyerParams, FlyerState};
+use crate::fmath::FloatExt;
 use crate::sim::buttons;
 use crate::vehicle::HoverInput;
 use glam::{Quat, Vec3};
@@ -70,9 +71,9 @@ impl PilotManeuvers {
             return None;
         }
 
-        self.double_window = (self.double_window - dt).max(0.0);
+        self.double_window = (self.double_window - dt).fmax(0.0);
         if was_down & 1 != 0 {
-            self.tap_hold = (self.tap_hold + dt).min(MAX_TAP_HOLD + dt);
+            self.tap_hold = (self.tap_hold + dt).fmin(MAX_TAP_HOLD + dt);
             if down & 1 == 0 {
                 if self.tap_hold <= MAX_TAP_HOLD + f32::EPSILON {
                     self.double_window = DOUBLE_PRESS_WINDOW;
@@ -80,7 +81,7 @@ impl PilotManeuvers {
                 self.tap_hold = 0.0;
             }
         }
-        self.direction_window = (self.direction_window - dt).max(0.0);
+        self.direction_window = (self.direction_window - dt).fmax(0.0);
         if edges & 2 != 0 && can_reverse {
             self.clear_gesture();
             return Some(Maneuver::Reverse {
@@ -106,7 +107,7 @@ impl PilotManeuvers {
             input.strafe
         };
         let pitch = input.pitch;
-        if turn.abs().max(pitch.abs()) <= DIRECTION_THRESHOLD {
+        if turn.abs().fmax(pitch.abs()) <= DIRECTION_THRESHOLD {
             return None;
         }
         let reversing = self.reversing;
@@ -133,9 +134,9 @@ impl PilotManeuvers {
         if self != Self::default() {
             eat(b"FM");
             eat(&[self.input, self.held, u8::from(self.reversing)]);
-            eat(&self.tap_hold.to_bits().to_le_bytes());
-            eat(&self.double_window.to_bits().to_le_bytes());
-            eat(&self.direction_window.to_bits().to_le_bytes());
+            eat(&self.tap_hold.hash_bits().to_le_bytes());
+            eat(&self.double_window.hash_bits().to_le_bytes());
+            eat(&self.direction_window.hash_bits().to_le_bytes());
         }
     }
 }
@@ -159,8 +160,8 @@ impl FlightReversal {
     pub(super) fn hash_into(self, eat: &mut impl FnMut(&[u8])) {
         if self != Self::default() {
             eat(b"FR");
-            eat(&self.angle.to_bits().to_le_bytes());
-            eat(&self.target.to_bits().to_le_bytes());
+            eat(&self.angle.hash_bits().to_le_bytes());
+            eat(&self.target.hash_bits().to_le_bytes());
             eat(&[u8::from(self.settling)]);
         }
     }

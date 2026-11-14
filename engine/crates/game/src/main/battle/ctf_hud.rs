@@ -1,4 +1,5 @@
 use super::*;
+use core::fmath::FloatExt;
 
 fn visible(
     sim: &core::sim::Sim,
@@ -23,9 +24,9 @@ pub(super) fn marker_screen(view_proj: glam::Mat4, pos: glam::Vec3) -> ([f32; 2]
     // signed divide would mirror it to the wrong edge. |w| keeps the sign of
     // the view-space x/y so the clamped marker points toward the target
     // (`re-hud-map.md` §5, `FUN_00179c10`).
-    let w = clip.w.abs().max(1.0e-4);
+    let w = clip.w.abs().fmax(1.0e-4);
     let (mut x, mut y) = (clip.x / w, -clip.y / w);
-    let bound = x.abs().max(y.abs());
+    let bound = x.abs().fmax(y.abs());
     const EDGE: f32 = 0.9;
     let on_screen = clip.w > 0.0 && bound <= EDGE;
     if !on_screen && bound > 0.0 {

@@ -80,7 +80,7 @@ mod tests {
             let shape: Vec<usize> = l.groups.iter().map(|g| g.rows.len()).collect();
             assert_eq!(shape, vec![rows; groups], "{sub}");
             // The file survives a round trip through its reader's type.
-            let text = ron::ser::to_string_pretty(&t, ron::ser::PrettyConfig::default()).unwrap();
+            let text = ron::ser::to_string_pretty(&t, crate::pretty()).unwrap();
             assert_eq!(ron::from_str::<FoleyRon>(&text).unwrap(), t);
         }
     }

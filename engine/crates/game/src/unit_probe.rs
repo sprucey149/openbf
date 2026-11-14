@@ -9,6 +9,7 @@
 //! indices — so a ring of rows allocates nothing per sample.
 
 use core::ai::{SteerPick, StopKind};
+use core::fmath::FloatExt;
 use core::perception::Foe;
 use core::sim::Sim;
 use core::unit::{Unit, UnitHandle};
@@ -325,7 +326,7 @@ impl Probe {
         // metres below it, -1 unknown.
         let level = match sim.level_at(p) {
             core::sim::Level::On => 0.0,
-            core::sim::Level::Off(d) => d.max(0.01),
+            core::sim::Level::Off(d) => d.fmax(0.01),
             core::sim::Level::Unknown => -1.0,
         };
         let r = u.ai.route();

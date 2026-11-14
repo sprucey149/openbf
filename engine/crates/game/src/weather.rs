@@ -40,6 +40,7 @@
 //!   §5) is left out: the flags are the last drawn view's.
 
 use crate::fx::emitter::Lcg;
+use core::fmath::FloatExt;
 use glam::Vec3;
 use manifest::{Manifest, ManifestPrecipitation, ManifestRegion, ManifestWind};
 use render::{Camera, ParticleDraw, ParticleShape, Renderer, TextureHandle};
@@ -103,7 +104,7 @@ impl Precip {
             color: m.color,
             alpha: m.alpha_min_max,
             // (int)(density + density range), §2.2.
-            count: (m.particle_density + m.particle_density_range).max(0.0) as usize,
+            count: (m.particle_density + m.particle_density_range).fmax(0.0) as usize,
             velocity: m.velocity,
             velocity_range: m.velocity_range,
             streak_seconds: m.streak_length * 0.033_333_335,
@@ -433,7 +434,7 @@ impl View {
             return false;
         }
         let side =
-            |along: f32, tan: f32| along.abs() <= d.max(0.0) * tan + r * (1.0 + tan * tan).sqrt();
+            |along: f32, tan: f32| along.abs() <= d.fmax(0.0) * tan + r * (1.0 + tan * tan).sqrt();
         side(v.dot(self.x), self.tan_h) && side(v.dot(self.y), self.tan_v)
     }
 
@@ -542,11 +543,11 @@ pub fn cell_walk(p: &Precip, view: &View, shadows: &[Shadow]) -> CellWalk {
                 let up = up_row[k];
                 let v = match (prev.1, up.1) {
                     (true, true) => {
-                        (up.0 + SHADOW_REACH * step.x).max(prev.0 + SHADOW_REACH * step.z)
+                        (up.0 + SHADOW_REACH * step.x).fmax(prev.0 + SHADOW_REACH * step.z)
                     }
                     (true, false) => up.0 + step.x,
                     (false, true) => prev.0 + step.z,
-                    (false, false) => (up.0 + step.x).min(prev.0 + step.z),
+                    (false, false) => (up.0 + step.x).fmin(prev.0 + step.z),
                 };
                 let mut open = true;
                 if v < far {
@@ -768,7 +769,7 @@ impl Weather {
         self.clock += REROLL_RATE * dt;
         if self.clock > REROLL_AT {
             // Every 0.5 s each particle steps toward a new random extreme.
-            let c = self.clock.min(1.0);
+            let c = self.clock.fmin(1.0);
             let rng = &mut self.rng;
             let mut sign = || {
                 if rng.step() & 0x8000_0000 != 0 {
@@ -829,7 +830,7 @@ impl Weather {
             let rgb = streak_rgb(p.color).map(|b| f32::from(b) / 255.0);
             // The PS2's pixel as an angle; at least one of the output's.
             let width = (2.0 * view.tan_v * PS2_ASPECT / PS2_WIDTH)
-                .max(2.0 * view.tan_v / height_px.max(1.0));
+                .fmax(2.0 * view.tan_v / height_px.fmax(1.0));
             for (index, cell_alpha) in &walk.cells {
                 let c = cell_centre(*index);
                 let lines = self

@@ -500,7 +500,7 @@ fn a_sniper_headshot_lights_the_critical_mark() {
         ..core::weapon::WeaponClass::bf2_rifle()
     };
     assert!(!core::weapon::WeaponClass::bf2_rifle().ai_distance_table());
-    s.sim.weapon_classes = vec![core::weapon::WeaponClass::bf2_rifle(), sniper];
+    s.sim.weapon_classes = vec![core::weapon::WeaponClass::bf2_rifle(), sniper].into();
     let (rifle, sniper) = (0, 1);
     let crit = |shooter, victim, weapon_class| Event::CriticalHit {
         shooter,
@@ -586,7 +586,8 @@ fn a_rocket_on_a_weak_spot_lights_the_critical_mark() {
         named("rep_weap_inf_rocket_launcher", Some(2)),
         named("rep_weap_inf_emp_launcher", Some(-1)),
         named("all_weap_inf_torpedo_launcher", None),
-    ];
+    ]
+    .into();
     let (rifle, sniper, rocket, emp, bf1_rocket) = (0, 1, 2, 3, 4);
     let crit = |shooter, victim, weapon_class| Event::CriticalHit {
         shooter,
@@ -1156,6 +1157,39 @@ fn the_heavy_blast_cannon_has_its_own_name_and_line() {
     assert_eq!(feed.weapon_name("geo_weap_award_blast_cannon"), None);
 }
 
+/// A LAN guest (local slot 1) keeps its own medals: the flush, the opening
+/// counts, the HUD lines and the stats page read slot 1's career, never the
+/// host's slot 0; a joiner not yet seated (no career) flushes nothing.
+#[test]
+fn a_lan_guest_reads_and_saves_its_own_slots_medals() {
+    let mut walk = crate::walk::WalkSim::new(7, Vec3::ZERO, None);
+    let player = walk.player;
+    let host = [9, 9, 9, 9, 9, 9, 9, 9, 9];
+    let mut guest = [0; 9];
+    guest[8] = 3;
+    walk.sim.install_slot_medal_career(0, player, host);
+    walk.sim.install_slot_medal_career(1, player, guest);
+    walk.set_local_slot(1);
+    let mut profile = crate::profile::Profile::default();
+    profile.career.medals = guest;
+    assert!(!walk.flush_career_progress(&mut profile), "nothing changed");
+    assert_eq!(profile.career.medals, guest, "not the host's medals");
+    let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
+    feed.set_opening_medals(&walk);
+    assert_eq!(feed.round().opening_medals, Some(guest));
+    let mut seen = guest;
+    feed.note_medals(&walk.sim, player, walk.local_slot, &mut seen);
+    assert!(
+        feed.take().is_empty(),
+        "the host's medals are not announced"
+    );
+    assert_eq!(seen, guest);
+    // A joiner whose slot has no career yet keeps its saved medals.
+    walk.set_local_slot(2);
+    assert!(!walk.flush_career_progress(&mut profile));
+    assert_eq!(profile.career.medals, guest);
+}
+
 #[test]
 fn medals_earned_without_bonuses_are_announced_and_flushed_to_the_career() {
     let mut walk = crate::walk::WalkSim::new(7, Vec3::ZERO, None);
@@ -1170,7 +1204,7 @@ fn medals_earned_without_bonuses_are_announced_and_flushed_to_the_career() {
     walk.sim.score_medal_points(player, 36);
     let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
     feed.round.opening_medals = Some(seen);
-    feed.note_medals(&walk.sim, player, &mut seen);
+    feed.note_medals(&walk.sim, player, 0, &mut seen);
     let messages = feed.take();
     assert_eq!(messages.last().unwrap().text, "War Hero");
     assert_eq!(messages.last().unwrap().color, [32, 223, 223]);
@@ -1183,7 +1217,7 @@ fn medals_earned_without_bonuses_are_announced_and_flushed_to_the_career() {
     // Final stats still see an award after profile autosave when the HUD's
     // notification path has already advanced its seen counts.
     seen = profile.career.medals;
-    feed.note_medals(&walk.sim, player, &mut seen);
+    feed.note_medals(&walk.sim, player, 0, &mut seen);
     let stats = crate::round_stats::screens(
         &walk.sim,
         feed.round(),
@@ -1219,7 +1253,7 @@ fn the_medal_name_precedes_a_newly_active_bonus() {
         walk.sim.install_medal_career(player, seen);
         walk.sim.score_medal_points(player, 36);
         let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
-        feed.note_medals(&walk.sim, player, &mut seen);
+        feed.note_medals(&walk.sim, player, 0, &mut seen);
         let messages = feed.take();
         let messages: Vec<_> = messages
             .iter()
@@ -1231,7 +1265,7 @@ fn the_medal_name_precedes_a_newly_active_bonus() {
             expected.push(("Award: Damage Increase", [223, 223, 32]));
         }
         assert_eq!(messages, expected, "{career_count} previous medals");
-        feed.note_medals(&walk.sim, player, &mut seen);
+        feed.note_medals(&walk.sim, player, 0, &mut seen);
         assert!(feed.take().is_empty());
     }
 }

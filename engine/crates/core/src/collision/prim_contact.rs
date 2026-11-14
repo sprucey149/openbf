@@ -29,7 +29,7 @@ pub fn bounding_radius(parts: &[HullPart]) -> f32 {
             let (at, reach) = part_sphere(part);
             at.distance(center) + reach
         })
-        .fold(0.0, f32::max)
+        .fold(0.0, crate::fmath::max)
 }
 
 fn part_sphere(part: &HullPart) -> (Vec3, f32) {

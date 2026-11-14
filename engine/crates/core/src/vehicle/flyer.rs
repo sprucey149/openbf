@@ -9,6 +9,7 @@
 use super::hover::{quat_x, quat_z, HoverInput};
 use super::Vehicle;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use glam::{Quat, Vec3};
 
 mod maneuver;
@@ -185,9 +186,9 @@ impl FlyerParams {
     pub fn speeds(&self, in_landing_region: bool) -> [f32; 3] {
         if self.bf2 && in_landing_region {
             [
-                (self.min_speed * 0.2).min(10.0),
-                self.mid_speed.min(20.0),
-                self.max_speed.min(60.0),
+                (self.min_speed * 0.2).fmin(10.0),
+                self.mid_speed.fmin(20.0),
+                self.max_speed.fmin(60.0),
             ]
         } else {
             [self.min_speed, self.mid_speed, self.max_speed]
@@ -205,7 +206,7 @@ impl FlyerParams {
         } else {
             start * top
         };
-        let t = ((speed - floor) / (top.max(self.boost_speed) - floor)).max(0.0);
+        let t = ((speed - floor) / (top.fmax(self.boost_speed) - floor)).fmax(0.0);
         low + t * (high - low)
     }
 }
@@ -445,10 +446,10 @@ impl FlyerAi {
         }
         eat(&[self.agent as u8, self.pursuit as u8, self.wedges]);
         if self.relocate_in != 0.0 {
-            eat(&self.relocate_in.to_bits().to_le_bytes());
+            eat(&self.relocate_in.hash_bits().to_le_bytes());
         }
         if self.burst_in != 0.0 {
-            eat(&self.burst_in.to_bits().to_le_bytes());
+            eat(&self.burst_in.hash_bits().to_le_bytes());
         }
         if self.fire_held {
             eat(&[1]);
@@ -472,7 +473,7 @@ impl FlyerAi {
             eat(&until.to_le_bytes());
         }
         for x in self.anchor.to_array() {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
         for tick in [
             self.probe_at,
@@ -488,7 +489,7 @@ impl FlyerAi {
             Some(v) => {
                 eat(&[1]);
                 for x in v.to_array() {
-                    eat(&x.to_bits().to_le_bytes());
+                    eat(&x.hash_bits().to_le_bytes());
                 }
             }
             None => eat(&[0]),
@@ -513,10 +514,10 @@ impl FlyerAi {
             eat(&[c.reverse as u8]);
         }
         for x in [self.t, self.factor, self.escape] {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
         for x in self.roll {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
     }
 }
@@ -592,14 +593,14 @@ impl FlyerState {
             self.energy,
             self.level_time,
         ] {
-            eat(&value.to_bits().to_le_bytes());
+            eat(&value.hash_bits().to_le_bytes());
         }
         if let Some(t) = self.leaving {
-            eat(&t.to_bits().to_le_bytes());
+            eat(&t.hash_bits().to_le_bytes());
         }
         if self.phase == FlightPhase::Falling || self.phase == FlightPhase::Crashed {
             for value in [self.crash_timer, self.crash_roll, self.crash_roll_target] {
-                eat(&value.to_bits().to_le_bytes());
+                eat(&value.hash_bits().to_le_bytes());
             }
         }
         if self.phase == FlightPhase::Flying
@@ -615,7 +616,7 @@ impl FlyerState {
                 self.strafe_vertical,
                 self.roll_delta,
             ] {
-                eat(&value.to_bits().to_le_bytes());
+                eat(&value.hash_bits().to_le_bytes());
             }
         }
         if let Some(d) = self.damager {
@@ -682,7 +683,7 @@ pub fn untilted(v: &Vehicle) -> Quat {
 }
 
 fn approach(current: f32, target: f32, delta: f32) -> f32 {
-    current + (target - current).clamp(-delta.max(0.0), delta.max(0.0))
+    current + (target - current).clamp(-delta.fmax(0.0), delta.fmax(0.0))
 }
 
 fn filtered(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
@@ -728,7 +729,7 @@ const CRASH_VELOCITY_SPIN: f32 = 0.015625;
 fn restore_energy(s: &mut FlyerState, p: &FlyerParams, dt: f32) {
     if s.initialized {
         s.energy = (s.energy + p.energy_auto_restore * dt).clamp(0.0, p.energy_max);
-        if s.energy >= 20.0_f32.min(p.energy_max) {
+        if s.energy >= 20.0_f32.fmin(p.energy_max) {
             s.drained = false;
         }
     }
@@ -850,7 +851,7 @@ fn side_strafe(s: &mut FlyerState, p: &FlyerParams) {
     } else {
         1.0
     };
-    let toward = |now: f32, want: f32, down: f32, up: f32| want.min(now + up).max(now - down);
+    let toward = |now: f32, want: f32, down: f32, up: f32| want.fmin(now + up).fmax(now - down);
     let a = p.acceleration;
     s.strafe_speed = toward(
         s.strafe_speed,
@@ -961,7 +962,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             if toggle && s.lift > 0.75 {
                 s.phase = FlightPhase::Landing;
             } else if clearance > p.landed_height + p.takeoff_height {
-                s.lift = (s.lift + dt / p.takeoff_time.max(dt)).min(1.0);
+                s.lift = (s.lift + dt / p.takeoff_time.fmax(dt)).fmin(1.0);
                 if s.lift >= 1.0 {
                     s.phase = FlightPhase::Flying;
                     if p.bf2 {
@@ -981,10 +982,10 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             if toggle && s.lift < cancel_at {
                 s.phase = FlightPhase::Takeoff;
             } else {
-                s.lift = (s.lift - dt / p.landing_time.max(dt)).max(0.0);
+                s.lift = (s.lift - dt / p.landing_time.fmax(dt)).fmax(0.0);
                 // OURS: the sweep stops an origin 1 cm off the surface, so a class
                 // whose number is smaller than that must still be able to touch down.
-                if clearance < p.landed_height.max(TOUCHDOWN_MIN)
+                if clearance < p.landed_height.fmax(TOUCHDOWN_MIN)
                     && (frame * Vec3::Y).dot(normal) > 0.9375
                 {
                     if env.ground.is_some_and(|g| g.can_land) {
@@ -995,7 +996,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
                 }
             }
         }
-        FlightPhase::Falling => s.lift = (s.lift - dt * 0.2).max(0.0),
+        FlightPhase::Falling => s.lift = (s.lift - dt * 0.2).fmax(0.0),
         FlightPhase::Crashed => {}
     }
     if !input.human || !p.bf2 {
@@ -1106,7 +1107,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             s.level_time = if input.pitch.abs() > 0.1 || input.turn.abs() > 0.1 {
                 0.01
             } else {
-                (s.level_time + dt).min(1.0)
+                (s.level_time + dt).fmin(1.0)
             };
         }
         if env.in_landing_region {
@@ -1129,7 +1130,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         if proximity < 1.0 && toward * vel.dot(forward) <= 0.0 {
             let correction = if away.dot(up) > 0.0 { -toward } else { toward };
             let correction =
-                (correction / (p.pitch_rate * dt).max(f32::MIN_POSITIVE)).clamp(-1.0, 1.0);
+                (correction / (p.pitch_rate * dt).fmax(f32::MIN_POSITIVE)).clamp(-1.0, 1.0);
             pitch = correction + (pitch - correction) * proximity * proximity;
         }
     }
@@ -1137,7 +1138,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     let mut turn_rate = p.turn_rate;
     if p.bf2 {
         // BF2 blends the smaller rate into each full-axis rate over .7..1.
-        let shared = pitch_rate.min(turn_rate);
+        let shared = pitch_rate.fmin(turn_rate);
         pitch_rate = shared + (pitch_rate - shared) * ((pitch.abs() - 0.7) / 0.3).clamp(0.0, 1.0);
         turn_rate =
             shared + (turn_rate - shared) * ((input.turn.abs() - 0.7) / 0.3).clamp(0.0, 1.0);
@@ -1177,9 +1178,9 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             }
         }
         FlightPhase::Takeoff | FlightPhase::Landing => {
-            let height_factor = (clearance / p.takeoff_height.max(f32::MIN_POSITIVE)).min(1.0);
+            let height_factor = (clearance / p.takeoff_height.fmax(f32::MIN_POSITIVE)).fmin(1.0);
             let level = if p.bf2 { p.level_damp } else { p.level_filter };
-            let pitch_level = s.omega.x * (1.0 - level * (1.0 - s.lift) * dt).max(0.0)
+            let pitch_level = s.omega.x * (1.0 - level * (1.0 - s.lift) * dt).fmax(0.0)
                 + level * forward.dot(normal) * 0.5 * (1.0 - s.lift);
             s.omega.x = filtered(pitch_level, pitch_target * s.lift, p.pitch_filter, dt);
             s.omega.y = filtered(s.omega.y, turn_target * height_factor, p.turn_filter, dt);
@@ -1197,12 +1198,12 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             let free = 1.0 - s.lift;
             if vel.x * vel.x + vel.z * vel.z > 1.0 {
                 s.omega.x -= p.level_filter * up.dot(vel.normalize()) * free;
-                let blend = (p.pitch_filter * s.lift * dt).min(1.0);
+                let blend = (p.pitch_filter * s.lift * dt).fmin(1.0);
                 s.omega.x += (pitch_target * 0.5 - s.omega.x) * blend;
             }
-            let blend = (p.turn_filter * s.lift * dt).min(1.0);
+            let blend = (p.turn_filter * s.lift * dt).fmin(1.0);
             s.omega.y += (turn_target * 0.5 - s.omega.y) * blend;
-            let blend = (p.level_filter * (s.lift * 0.75 + 0.25) * dt).min(1.0);
+            let blend = (p.level_filter * (s.lift * 0.75 + 0.25) * dt).fmin(1.0);
             *vel += (cruise_velocity - *vel) * blend;
             vel.y -= 9.8 * free * dt;
             s.omega += forward.cross(*vel) * CRASH_VELOCITY_SPIN * free * dt;
@@ -1222,7 +1223,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             let response = p.level_filter * (s.lift * 0.75 + 0.25);
             *vel += (cruise_velocity - *vel) * (response * dt).clamp(0.0, 1.0);
             vel.y -= 9.8 * (1.0 - s.lift) * dt;
-            s.omega *= (1.0 - p.level_filter * dt * 0.25).max(0.0);
+            s.omega *= (1.0 - p.level_filter * dt * 0.25).fmax(0.0);
         }
         FlightPhase::Landed | FlightPhase::Crashed => unreachable!(),
     }
@@ -1231,7 +1232,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     // boost. Takeoff alone also divides by TurnRate (B1:85954;
     // B2:117113,118231,118641,118758).
     let bank_speed = if p.bf2 {
-        p.max_speed.max(p.boost_speed)
+        p.max_speed.fmax(p.boost_speed)
     } else {
         p.max_speed
     };
@@ -1240,7 +1241,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     } else {
         bank_speed
     };
-    let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.max(f32::MIN_POSITIVE);
+    let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.fmax(f32::MIN_POSITIVE);
     let mut pitch_tilt =
         throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.z * p.bank_angle;
     if s.reversal.active() {
@@ -1267,7 +1268,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     if p.bf2 {
         // Not `clamp`: a mission may set one end past the other's default,
         // and PS2's two tests do not panic. Its upper test goes first.
-        pos.y = pos.y.max(env.min_height - 0.2).min(env.max_height + 0.2);
+        pos.y = pos.y.fmax(env.min_height - 0.2).fmin(env.max_height + 0.2);
     }
     *rot = (frame * quat_z(s.tilt_roll) * quat_x(s.tilt_pitch)).normalize();
 }
@@ -1307,7 +1308,7 @@ fn roll_step(
             * fmath::sin_cos(phase * 0.43).0;
     s[0] += (goal - s[0]) * (f.roll_turn_factor * dt).clamp(0.0, 1.0);
     let error = s[0] - s[1];
-    let tolerance = f.roll_tolerance * (s[3].abs() / f.roll_speed.max(f32::MIN_POSITIVE) + 1.0);
+    let tolerance = f.roll_tolerance * (s[3].abs() / f.roll_speed.fmax(f32::MIN_POSITIVE) + 1.0);
     let target = if error.abs() < tolerance {
         -f.roll_acceleration * if s[3] < 0.0 { -1.0 } else { 1.0 }
     } else {
@@ -1358,10 +1359,10 @@ pub fn spline_step(v: &mut Vehicle, p: &FlyerParams, ground_map: bool, time: f32
     let rate = if length == 0.0 {
         1.0
     } else {
-        (base * ai.factor / length).min(1.05)
+        (base * ai.factor / length).fmin(1.05)
     };
     let (_, ahead) = curve_at(&curve, (ai.t + rate * f.roll_look_ahead).clamp(0.0, 1.0));
-    ai.t = (ai.t + rate * dt).min(1.0);
+    ai.t = (ai.t + rate * dt).fmin(1.0);
     let heading = fmath::atan2(ahead.x, ahead.z);
     let mut turn = heading - ai.heading.unwrap_or(heading);
     let pi = core::f32::consts::PI;

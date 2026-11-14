@@ -5,6 +5,7 @@
 //! tests — follow, hold, release — live here.
 
 use super::state::AiState;
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 // Only for `CmdState::goal`'s docs, which link `Route`.
@@ -71,7 +72,7 @@ impl CmdState {
     pub fn hash_into(self, eat: &mut impl FnMut(&[u8])) {
         eat(&[1]);
         for v in [self.goal.x, self.goal.y, self.goal.z] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.far_ticks.to_le_bytes());
         eat(&self.roll.to_le_bytes());

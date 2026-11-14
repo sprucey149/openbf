@@ -86,7 +86,7 @@ fn scene() -> (Sim, UnitHandle, UnitHandle) {
     let mut sim = Sim::empty(71);
     sim.heightfield = Some(flat_ground());
     sim.ground_rules = crate::soldier::GroundRules::Bf2;
-    sim.weapon_classes = vec![saber(program(vec![])), WeaponClass::bf1_rifle()];
+    sim.weapon_classes = vec![saber(program(vec![])), WeaponClass::bf1_rifle()].into();
     let defender = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
     let shooter = sim
         .spawn(&UnitSpec {

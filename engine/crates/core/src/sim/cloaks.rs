@@ -3,6 +3,7 @@
 
 use super::{Event, Sim};
 use crate::cloak::CloakState;
+use crate::fmath::FloatExt;
 
 impl Sim {
     pub(super) fn cloak_input(
@@ -40,6 +41,7 @@ impl Sim {
             else {
                 continue;
             };
+            let stamina_cheat = self.unit_cheats(i).infinite_stamina;
             let u = &mut self.units[i];
             if !u.alive || u.mount.is_some() {
                 u.cloak = CloakState::default();
@@ -72,15 +74,15 @@ impl Sim {
             if u.cloak.active {
                 if u.soldier.energy_depleted || u.soldier.energy <= 0.0 {
                     u.cloak.release(0.0);
-                } else if !(self.cheats.infinite_stamina && u.is_player) {
-                    u.soldier.energy = (u.soldier.energy - c.energy_drain * dt).max(0.0);
+                } else if !(stamina_cheat && u.is_player) {
+                    u.soldier.energy = (u.soldier.energy - c.energy_drain * dt).fmax(0.0);
                     if u.soldier.energy == 0.0 {
                         u.soldier.energy_depleted = true;
                         u.cloak.release(0.0);
                     }
                 }
             }
-            u.cloak.linger = (u.cloak.linger - dt).max(0.0);
+            u.cloak.linger = (u.cloak.linger - dt).fmax(0.0);
             let concealed = u.cloak.active || u.cloak.linger > 0.0;
             let target = if concealed {
                 c.concealment(u.soldier.vel.length_squared())
@@ -96,7 +98,7 @@ impl Sim {
             if u.cloak.active && c.flicker > 0.0 {
                 u.cloak.flicker_left -= dt;
                 if u.cloak.flicker_left <= 0.0 {
-                    u.cloak.strength = (u.cloak.strength - c.flicker).max(0.0);
+                    u.cloak.strength = (u.cloak.strength - c.flicker).fmax(0.0);
                     let [lo, hi] = c.flicker_interval;
                     u.cloak.flicker_left = if hi > lo {
                         lo + self.lcg.unit() * (hi - lo)

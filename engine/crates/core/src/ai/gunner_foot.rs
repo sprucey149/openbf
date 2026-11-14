@@ -28,6 +28,7 @@ use super::{
 use crate::autoturret::Turret;
 use crate::collision::lead_point;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::perception::{self, Contact};
 use crate::remote::Droid;
 use crate::sim::{buttons, PadState, Sim};
@@ -74,6 +75,7 @@ pub(super) fn finish(pad: &mut PadState, mode: GunMode) {
                 my,
                 fire_lag,
                 pick,
+                view_lag: _,
             } = pad;
             *rx = plan.rx;
             *ry = plan.ry;
@@ -150,7 +152,7 @@ pub(super) fn track_error(sim: &Sim, st: &mut AiState, skill: &crate::skill::Ski
             let think_dt = THINK_PERIOD as f32 / crate::TICK_HZ as f32;
             st.err -= think_dt * skill.err_decay;
             if st.err_pos != Vec3::ZERO {
-                st.err += ERR_GROWTH * (p - st.err_pos).length() / top.max(0.1);
+                st.err += ERR_GROWTH * (p - st.err_pos).length() / top.fmax(0.1);
             }
             st.err = st.err.clamp(skill.err_floor, ERR_MAX);
             st.err_pos = p;
@@ -382,7 +384,7 @@ pub(super) fn run(
             let range = (at - eye).length();
             // The cone a shot can leave in: the weapon's spread as it is now
             // (a sniper's AI table, the posture, the recoil) round the aim.
-            let spread = weapon.yaw_spread(wc).max(weapon.pitch_spread(wc));
+            let spread = weapon.yaw_spread(wc).fmax(weapon.pitch_spread(wc));
             friend_in_line(
                 sim,
                 me,
@@ -472,7 +474,7 @@ pub(super) fn run(
                 let thrown_out_of_range =
                     throw.is_some_and(|gc| !reaches || range >= gc.ai_range[2]);
                 let cone_out_of_range = wc.emitter.as_ref().is_some_and(|emitter| {
-                    emitter.is_cone() && range >= wc.shot_range().min(wc.ai_range[2])
+                    emitter.is_cone() && range >= wc.shot_range().fmin(wc.ai_range[2])
                 });
                 if thrown_out_of_range || cone_out_of_range {
                     close_on = enemy.filter(|e| e.mount.is_none()).map(|e| e.soldier.pos);
@@ -609,9 +611,9 @@ pub(super) fn charge(
             return;
         }
         let draw = unit_unit(me.index, sim.tick, me.gen, SALT_CHARGE);
-        let frac = CHARGE_MIN + (skill.charge_hi - CHARGE_MIN).max(0.0) * draw;
+        let frac = CHARGE_MIN + (skill.charge_hi - CHARGE_MIN).fmax(0.0) * draw;
         let ticks = (frac * wc.max_pressed_time * crate::TICK_HZ as f32).round();
-        st.charge_until = sim.tick + (ticks.max(1.0) as u64);
+        st.charge_until = sim.tick + (ticks.fmax(1.0) as u64);
     }
     if st.charge_until > 0 {
         if sim.tick < st.charge_until || friend_in_line {
@@ -763,7 +765,7 @@ fn friend_on_line(
     // its widest clearance of the eye, plus what a unit at
     // [`LINE_WALK_BOUND`] walks before the shot is there; a missile's
     // walked term is longer, so it asks every unit.
-    let wide = reach + LINE_CLEAR + spread.max(0.0) * reach + 1.0;
+    let wide = reach + LINE_CLEAR + spread.fmax(0.0) * reach + 1.0;
     let bound = match late {
         None => wide,
         Some((wind, speed)) if wind < 0.1 && speed > 20.0 => {
@@ -781,7 +783,7 @@ fn friend_on_line(
         let c = o.capsule();
         let (lo, hi) = (
             c.base.y + c.radius,
-            c.base.y + (c.height - c.radius).max(c.radius),
+            c.base.y + (c.height - c.radius).fmax(c.radius),
         );
         // The nearest points of the ray and the (vertical) axis: the ray's
         // parameter for the axis' middle, the axis point at that height, and
@@ -797,7 +799,7 @@ fn friend_on_line(
         }
         let off = q - (eye + dir * t);
         let walked = late.map_or(0.0, |(wind, speed)| {
-            own * wind + o.soldier.vel.length() * (wind + t / speed.max(1.0))
+            own * wind + o.soldier.vel.length() * (wind + t / speed.fmax(1.0))
         });
         if off.length() < LINE_CLEAR + spread * t + walked {
             best = Some((t, if off.dot(right) > 0.0 { -1 } else { 1 }));
@@ -941,7 +943,7 @@ pub(super) fn seen_aim(
     };
     // The cap is the shooter's skill's, under the tier's override (Elite).
     let cap = sim.skill_of(u).err_cap;
-    let moving = e.soldier.vel.length() / e.consts.max_speed.max(0.1);
+    let moving = e.soldier.vel.length() / e.consts.max_speed.fmax(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
         let vis = e.cloak.visibility();
         let r = radius(1.0, 1.0, st.err, moving, vis, cap);
@@ -992,7 +994,7 @@ fn swept_lead(rel: Vec3, vel: Vec3, own: Vec3, speed: f32, first: f32) -> Vec3 {
     // <= speed n dt: the intercept time of the point a tick behind `start`,
     // rounded up to whole ticks.
     let n = lead_point(start - vel * dt, vel, speed)
-        .map_or(1.0, |p| (p.length() / (speed * dt)).ceil().max(1.0));
+        .map_or(1.0, |p| (p.length() / (speed * dt)).ceil().fmax(1.0));
     start + vel * (dt * (n - 1.0))
 }
 
@@ -1075,7 +1077,7 @@ pub(super) fn droid_aim(
         return aim;
     };
     let cap = sim.aim_err_cap(u);
-    let moving = d.vel.length() / c.max_speed.max(0.1);
+    let moving = d.vel.length() / c.max_speed.fmax(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
         let r = radius(1.0, 1.0, st.err, moving, 1.0, cap);
         return aim + bf1_error_dir(sim, me) * r;
@@ -1133,7 +1135,7 @@ pub(super) fn turret_aim(
 /// [`stance_factor`], `err` its block's error, `moving` its speed over its
 /// MaxSpeed, `cap` the skill's.
 pub(crate) fn radius(size: f32, stance: f32, err: f32, moving: f32, vis: f32, cap: f32) -> f32 {
-    size * (3.0 - 2.0 * vis) * (err * stance * (1.0 + ERR_SPEED_TERM * moving)).min(cap)
+    size * (3.0 - 2.0 * vis) * (err * stance * (1.0 + ERR_SPEED_TERM * moving)).fmin(cap)
 }
 
 /// What a target's stance does to its error, inside the cap (B2
@@ -1183,7 +1185,7 @@ fn error_vector(sim: &Sim, me: UnitHandle, e: &Unit, off: Vec3, d: f32, wc: &Wea
 
 fn bubble(sim: &Sim, me: UnitHandle, human: bool, mut off: Vec3, d: f32, wc: &WeaponClass) -> Vec3 {
     off *= wc.ai_bubble_size;
-    off.y = off.y.max(0.0);
+    off.y = off.y.fmax(0.0);
     if sim.unit(me).is_some_and(|u| carries_human(sim, u)) {
         return Vec3::ZERO;
     }
@@ -1192,7 +1194,7 @@ fn bubble(sim: &Sim, me: UnitHandle, human: bool, mut off: Vec3, d: f32, wc: &We
     if !human {
         off *= ERR_BOT_SCALE;
     }
-    off * (d / wc.ai_bubble_dist + 0.5).min(wc.ai_bubble_clamp)
+    off * (d / wc.ai_bubble_dist + 0.5).fmin(wc.ai_bubble_clamp)
 }
 
 /// Is `u` a human, or riding a vehicle a human rides (B2 `FUN_002a7fd8`:
@@ -1393,11 +1395,11 @@ pub(crate) fn burst_len(
     let draw = unit_unit(me.index, tick, me.gen, SALT_BURST);
     match rules {
         crate::soldier::GroundRules::Bf2 => {
-            ((min + draw * (max - min).max(0.0) * skill.burst_t) as u8).max(2)
+            ((min + draw * (max - min).fmax(0.0) * skill.burst_t) as u8).max(2)
         }
         // (At least one: a burst of none is the port's "between bursts".)
         crate::soldier::GroundRules::Bf1 => {
-            ((min + (draw * (max - min + 1.0).max(1.0)).floor()).min(max.max(min)) as u8).max(1)
+            ((min + (draw * (max - min + 1.0).fmax(1.0)).floor()).fmin(max.fmax(min)) as u8).max(1)
         }
     }
 }
@@ -1415,7 +1417,7 @@ pub(crate) fn pause_ticks(
     };
     (factor * wc.barrage_delay * crate::TICK_HZ as f32)
         .round()
-        .max(0.0) as u64
+        .fmax(0.0) as u64
 }
 
 /// One tick of the D9 aim tracker (RE §4.2; B2 `FUN_002a83e0`, B1

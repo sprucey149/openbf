@@ -1,0 +1,11 @@
+# One math path on every CPU (analysis/plan/LAN_MULTIPLAYER.md §7). LLVM lowers f32::max/min per CPU and
+# x86 and ARM disagree on a +0.0/-0.0 tie and on which NaN comes back, so an Apple Silicon player's sim
+# parts from an x86 player's. `core::fmath` has x86's answer as plain comparisons. Test code is exempt
+# (lib.rs and main.rs `cfg_attr(test, ...)`, and the example and integration-test roots); `core::fmath::tests` checks this file
+# matches core/clippy.toml.
+disallowed-methods = [
+    { path = "f32::max", reason = "differs between x86 and ARM on signed zeros and NaN: use `x.fmax(y)` (core::fmath::FloatExt) or `fmath::max` (analysis/plan/LAN_MULTIPLAYER.md §7)" },
+    { path = "f32::min", reason = "differs between x86 and ARM on signed zeros and NaN: use `x.fmin(y)` (core::fmath::FloatExt) or `fmath::min` (analysis/plan/LAN_MULTIPLAYER.md §7)" },
+    { path = "f64::max", reason = "differs between x86 and ARM on signed zeros and NaN: use `x.fmax(y)` (core::fmath::FloatExt) or `fmath::max` (analysis/plan/LAN_MULTIPLAYER.md §7)" },
+    { path = "f64::min", reason = "differs between x86 and ARM on signed zeros and NaN: use `x.fmin(y)` (core::fmath::FloatExt) or `fmath::min` (analysis/plan/LAN_MULTIPLAYER.md §7)" },
+]

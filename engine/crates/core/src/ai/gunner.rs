@@ -33,6 +33,7 @@ use super::state::AiState;
 use super::AIM_TOLERANCE;
 use crate::collision::lead_point;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::perception;
 use crate::sim::{buttons, PadState, Sim};
 use crate::unit::UnitHandle;
@@ -150,7 +151,7 @@ pub(super) fn aim(
         .mount
         .and_then(|m| sim.vehicle(m.vehicle))
         .map(|v| v.pos + s.rot * s.gun.pivot);
-    let reach = s.gun.aimer.yaw_rate.min(s.gun.aimer.pitch_rate) * crate::TICK_DT;
+    let reach = s.gun.aimer.yaw_rate.fmin(s.gun.aimer.pitch_rate) * crate::TICK_DT;
     let shot = centre.zip(point).is_some_and(|(c, p)| {
         let cos_tol = fmath::sin_cos(AIM_TOLERANCE).1;
         let to = |q: glam::Vec3| (q - s.muzzle).normalize_or_zero();
@@ -325,7 +326,7 @@ fn turn_stick(t: &gun::Turn, look: (f32, f32), want: Option<(f32, f32)>, pad: &m
             gun::Slew::Exp => gap.abs() * filter,
             gun::Slew::Linear => (2.0 * filter * gap.abs()).sqrt(),
         };
-        let rate = brake.min(gap.abs() / dt).copysign(gap);
+        let rate = brake.fmin(gap.abs() / dt).copysign(gap);
         if speed > 0.0 {
             (rate / speed).clamp(-1.0, 1.0)
         } else {

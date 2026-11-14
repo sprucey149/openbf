@@ -22,6 +22,7 @@
 
 use super::state::{DeathCause, Event, Sim};
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::soldier::GroundRules;
 use crate::unit::{Unit, UnitHandle, UnitSpec};
 use crate::weapon::{HealthType, ShotSpec, WeaponClass, WeaponState, SPARE_INFINITE};
@@ -170,7 +171,7 @@ impl Pickup {
             self.pos.x, self.pos.y, self.pos.z, self.vel.x, self.vel.y, self.vel.z, self.yaw,
             self.life,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 }
@@ -239,12 +240,12 @@ fn touches(u: &Unit, p: &Pickup, c: &ItemClass) -> bool {
     let (si, ci) = fmath::sin_cos(p.yaw);
     let d = axis - p.pos;
     let local = Vec3::new(d.x * ci - d.z * si, d.y, d.x * si + d.z * ci) - c.centre;
-    let dx = (local.x.abs() - c.half.x).max(0.0);
-    let dz = (local.z.abs() - c.half.z).max(0.0);
+    let dx = (local.x.abs() - c.half.x).fmax(0.0);
+    let dz = (local.z.abs() - c.half.z).fmax(0.0);
     // The capsule's axis runs from one radius over the feet to one under the
     // head; the vertical gap between that span and the box.
     let (lo, hi) = (local.y + BODY_RADIUS, local.y + BODY_HEIGHT - BODY_RADIUS);
-    let dy = (lo - c.half.y).max(-c.half.y - hi).max(0.0);
+    let dy = (lo - c.half.y).fmax(-c.half.y - hi).fmax(0.0);
     dx * dx + dy * dy + dz * dz <= BODY_RADIUS * BODY_RADIUS
 }
 
@@ -484,12 +485,12 @@ impl Sim {
             let u = &mut self.units[ui];
             let health = !hero && c.health != 0.0 && u.health.cur < u.health.max;
             if health {
-                u.health.cur = (u.health.cur + c.health).min(u.health.max);
+                u.health.cur = (u.health.cur + c.health).fmin(u.health.max);
             }
             let ammo = give_ammo(classes, u, c.ammo);
             let energy = c.energy > 0.0 && u.soldier.energy < u.consts.energy_bar;
             if energy {
-                u.soldier.energy = (u.soldier.energy + c.energy).min(u.consts.energy_bar);
+                u.soldier.energy = (u.soldier.energy + c.energy).fmin(u.consts.energy_bar);
             }
             // A buff item is always taken (§5.5); the timer and its number
             // are replaced only by a longer timer.

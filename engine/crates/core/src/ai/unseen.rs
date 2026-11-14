@@ -18,6 +18,7 @@
 //! state's reset, which are.
 
 use super::state::{AiState, MoverState};
+use crate::fmath::FloatExt;
 use crate::nav::{self, NavGraph};
 use crate::sim::Sim;
 use crate::unit::{Controller, UnitHandle};
@@ -113,7 +114,7 @@ fn hub_spot(sim: &Sim, g: &NavGraph, h: u16, pos: Vec3) -> Option<Vec3> {
     if (centre - pos).length() > REACH || nav::xz_dist(centre, pos) < MIN_MOVE {
         return None;
     }
-    let ring = RINGS.iter().filter(|&&d| d <= hub.radius.max(RINGS[0]));
+    let ring = RINGS.iter().filter(|&&d| d <= hub.radius.fmax(RINGS[0]));
     std::iter::once(centre)
         .chain(ring.flat_map(|&d| {
             (0..8).map(move |k| {

@@ -1,6 +1,7 @@
 //! The whole-state hash the replay gates read.
 
 use super::*;
+use crate::fmath::FloatExt;
 
 impl Sim {
     /// FNV-1a-64 over the sim state, bit-exact.
@@ -13,7 +14,16 @@ impl Sim {
             }
         };
         eat(&self.tick.to_le_bytes());
-        if let Some(career) = &self.medal_career {
+        // Slot 0's career where the single player's always was; another
+        // slot's (issue #168) adds bytes only once it is installed.
+        for (slot, career) in self.medal_careers.iter().enumerate() {
+            let Some(career) = career else {
+                continue;
+            };
+            if slot != 0 {
+                eat(b"SLOT_MEDAL_CAREER");
+                eat(&(slot as u32).to_le_bytes());
+            }
             career.hash_into(&mut eat);
         }
         if !self.mission_ai.allow_blind_jet_jumps {
@@ -108,7 +118,7 @@ impl Sim {
                 {
                     eat(b"RIDER_LAYERS");
                     for blend in v.walker.layer_blend {
-                        eat(&blend.to_bits().to_le_bytes());
+                        eat(&blend.hash_bits().to_le_bytes());
                     }
                 }
             }
@@ -181,12 +191,12 @@ impl Sim {
             g.hash_into(&mut eat);
         }
         for t in &self.battle.teams {
-            eat(&t.reinforcements.to_bits().to_le_bytes());
+            eat(&t.reinforcements.hash_bits().to_le_bytes());
             eat(&t.alive_players.to_le_bytes());
             eat(&t.alive_ai.to_le_bytes());
         }
         for w in &self.waves {
-            eat(&w.timer.to_bits().to_le_bytes());
+            eat(&w.timer.hash_bits().to_le_bytes());
             eat(&w.wave.to_le_bytes());
             eat(&w.next_slot.to_le_bytes());
         }
@@ -316,14 +326,14 @@ impl Sim {
         }
         if let Some((t, secs)) = self.domination {
             eat(&[t]);
-            eat(&secs.to_bits().to_le_bytes());
+            eat(&secs.hash_bits().to_le_bytes());
         }
         eat(&[self.outcome.unwrap_or(255)]);
         // The doors (DR2): nothing at all when there are none.
         if !self.doors.is_empty() {
             eat(&(self.doors.len() as u32).to_le_bytes());
             for d in &self.doors {
-                eat(&d.open.to_bits().to_le_bytes());
+                eat(&d.open.hash_bits().to_le_bytes());
             }
             if self.doors.iter().any(|d| d.locked) {
                 for d in &self.doors {
@@ -336,7 +346,7 @@ impl Sim {
             eat(&(self.hazards.len() as u32).to_le_bytes());
             for z in &self.hazards {
                 for v in [z.pos.x, z.pos.y, z.pos.z, z.radius] {
-                    eat(&v.to_bits().to_le_bytes());
+                    eat(&v.hash_bits().to_le_bytes());
                 }
                 eat(&z.since.to_le_bytes());
                 eat(&z.until.to_le_bytes());
@@ -359,7 +369,7 @@ impl Sim {
             }
             if let Some(health) = t.down {
                 eat(&(i as u32).to_le_bytes());
-                eat(&health.to_bits().to_le_bytes());
+                eat(&health.hash_bits().to_le_bytes());
             }
         }
         // The items on the field (PWUP): nothing at all when there are none.
@@ -415,7 +425,7 @@ impl Sim {
                 .filter(|(_, a)| a.magnet_timer > 0.0)
             {
                 eat(&(slot as u64).to_le_bytes());
-                eat(&a.magnet_timer.to_bits().to_le_bytes());
+                eat(&a.magnet_timer.hash_bits().to_le_bytes());
             }
         }
         // The lead's state (ours): nothing while no slot has one.

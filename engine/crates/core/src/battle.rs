@@ -22,6 +22,8 @@
 //! 0.1875 / 0.5625 / 0.75 tickets/s by post value, live RAM on NAB1) and is
 //! NOT ported: the sim plays BF2's rule on every map.
 
+use crate::fmath::FloatExt;
+
 /// BF2 conquest bleed constants (ObjectiveConquest.lua via re-tickets-spawn.md).
 pub const BF2_BLEED_TICKETS_PER_SEC: f32 = 1.0 / 3.0;
 /// Seconds a team may hold zero CPs before losing outright (defeatTimerSeconds):
@@ -60,7 +62,7 @@ impl TeamState {
 
     /// Whole reinforcements still available.
     pub fn tickets(&self) -> u32 {
-        self.reinforcements.max(0.0) as u32
+        self.reinforcements.fmax(0.0) as u32
     }
 
     /// The enforceable form of the invariant: AI never push live count
@@ -131,12 +133,12 @@ impl Battle {
         // (analysis/re-tickets-spawn.md §0 and §4, both [V]). `tickets()`
         // clamps on READ, but `Sim::hash` eats the raw field, so an unfloored
         // pool hashes a state neither disc can hold.
-        t.reinforcements = (t.reinforcements - 1.0).max(0.0);
+        t.reinforcements = (t.reinforcements - 1.0).fmax(0.0);
         debug_assert!(t.invariant_holds() || self.death_drain != [[0; 2]; 2]);
         for (paying, &n) in self.death_drain[team].iter().enumerate() {
             if n > 0 {
                 let p = &mut self.teams[paying];
-                p.reinforcements = (p.reinforcements - n as f32).max(0.0);
+                p.reinforcements = (p.reinforcements - n as f32).fmax(0.0);
             }
         }
     }
@@ -181,7 +183,7 @@ impl Battle {
         let mut shed = [0u32; 2];
         for (i, t) in self.teams.iter_mut().enumerate() {
             if t.bleed_per_sec > 0.0 && t.reinforcements > 0.0 {
-                t.reinforcements = (t.reinforcements - t.bleed_per_sec * dt).max(0.0);
+                t.reinforcements = (t.reinforcements - t.bleed_per_sec * dt).fmax(0.0);
             }
             while t.alive() > t.tickets().max(t.alive_players) && t.alive_ai > 0 {
                 t.alive_ai -= 1;

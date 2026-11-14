@@ -48,6 +48,7 @@
 use crate::sounds::Handed;
 use crate::unit_probe::Probe;
 use crate::walk::WalkSim;
+use core::fmath::FloatExt;
 use core::sim::{AimTarget, DeathCause, Event, PadState, Sim};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -77,9 +78,19 @@ pub use rotating::PREVIOUS;
 /// left stick as gilrs reports it, before the deadzone and the range scale
 /// (`stick_raw`), and the travel the game took as a full push on each axis
 /// that tick (`stick_full`): a pad that walks slowly shows a peak under 0.9
-/// there.
+/// there. 17 (#168): a LAN round's net meter every 0.5 s (`net`).
 /// An older file still reads.
-pub const SCHEMA: u32 = 16;
+pub const SCHEMA: u32 = 17;
+/// Net meter rows kept (60 s at 2 Hz).
+const NET_ROWS: usize = 120;
+
+/// One net meter sample (schema 17, [`Snapshot::net`]): presentation
+/// figures, never part of the sim or its hash.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetRow {
+    pub tick: u64,
+    pub meter: crate::netplay::NetMeter,
+}
 /// Ticks between two unit frames (0.5 s).
 pub const UNIT_PERIOD: u64 = core::TICK_HZ as u64 / 2;
 /// Ticks between two world frames (2 s).
@@ -680,6 +691,10 @@ pub struct Snapshot {
     /// schema 10 and with nobody to follow.
     #[serde(default)]
     pub session: Option<session::Session>,
+    /// Issue #168 (schema 17): a LAN round's net meter, oldest first, 0.5 s
+    /// apart, the last 60 s. Empty in single player.
+    #[serde(default)]
+    pub net: Vec<NetRow>,
 }
 
 /// One unit's reasons ([`Snapshot::why`]).
@@ -753,6 +768,8 @@ pub struct Ring {
     session: session::Tally,
     /// The human's raw left stick and its full-push travel this tick (#142).
     stick: ([f32; 2], [f32; 2]),
+    /// A LAN round's net meter rows (#168).
+    net: VecDeque<NetRow>,
 }
 
 /// A stick value to three places (the pad's own resolution is ~1/256).
@@ -838,6 +855,7 @@ impl Ring {
                 ..Focus::default()
             },
             alarm: Alarm::default(),
+            net: VecDeque::new(),
             hitches: None,
             session: session::Tally::default(),
             stick: ([0.0; 2], [0.0; 2]),
@@ -882,7 +900,7 @@ impl Ring {
                 }
             };
             self.sounding
-                .push(tick + (h.secs * core::TICK_HZ as f32).ceil().max(1.0) as u64);
+                .push(tick + (h.secs * core::TICK_HZ as f32).ceil().fmax(1.0) as u64);
             if self.sounds.len() == SOUNDS_MAX {
                 self.sounds.pop_front();
             }
@@ -962,7 +980,10 @@ impl Ring {
                     ..
                 } if shooter.is_some_and(human) || rides_human(vehicle) => {
                     let v_now = sim.vehicle(vehicle);
-                    v = vec![r2(damage), r2(v_now.map_or(0.0, |x| x.health.cur.max(0.0)))];
+                    v = vec![
+                        r2(damage),
+                        r2(v_now.map_or(0.0, |x| x.health.cur.fmax(0.0))),
+                    ];
                     (
                         Ev::VehicleHit,
                         shooter.map_or(-1, |s| s.index as i32),
@@ -1443,6 +1464,7 @@ impl Ring {
             ("hitches", "the windowed game's frame record (card HITCH): frames, the seconds they span, p50 / p99 / worst ms (a frame = its start to the next frame's start), over = frames longer than limit_ms past the battle's first settle_s seconds, per_min of them, made_frames = frames that made GPU objects; slow = the newest frames over limit_ms, worst = the longest past settle_s; a row: t (s since the battle's first frame), tick, ms, laps (the frame's phases in order: sim = the ticks with their hook, update, draws, render = render_frame with its image wait acquire_ms, other = the time outside them), ticks run, ai_ms / hook_ms (inside sim), gpu_ms (with OPENBF_GPU_TIMING=1, a frame or two old), made (kind, label, bytes of each GPU object made)"),
             ("why", "card WHY (schema 9): per unit slot (id, gen), its last 8 reasons oldest first: tick, doing = the behaviour entered (or, fail true, the one it was in when its walk failed), why = the code (recover is entered for a failed-walk code), arc = the nav arc a failed leg walked (-1 none), fail = a failed walk, not a change. Behaviour codes: off_level grenade pickup snipe_spot guard_spot seen hit memory claim order arrived goal_changed target_lost safe recovered claim_ended seated idle set_out. Failed-walk codes (a progress window that failed, by the mover's books): wall (slid or fanned off a wall) rim (a level-edge barrier) body (going round a body) round_spent (the going-round allowance spent) ledge (no floor ahead) boxed (every way shut, backed off) off_graph (no hop: a straight walk) no_gain (the way open, no nearer: pushed, jammed) oscillation (back and forth at its waypoint, card ARCM) driving (a driver's window) return_failed (a lost bot's walk back) gave_up (the goal given up) pinned (sent off along the floor) recycled"),
             ("session", "card DPRX (schema 10): the whole battle's tally of the human (headless: the proxy): subject, unit, team, from/to ticks, kills, deaths (incl. environmental), shots (presses), hits (on enemies, one per victim per tick), lives [spawn tick, end tick] (open: the last still alive), alive_ticks, foot_ticks, dist_m (ground path on foot), moving_ticks (> 0.5 m/s), strafe_ticks/strafe_starts (sideways > 1 m/s and > forward), crouch_/prone_ ticks and starts, engage = seconds from first sight (within 60 m, 40 deg of the aim, clear line) to the first hit on that enemy, engage_dropped = sightings never hit (5 s unseen); scripts/human_profile.py reads it"),
+            ("net", "issue #168 (schema 17): a LAN round's net meter every 0.5 s, the last 60 s, oldest first: tick (confirmed), then the meter: host, slot, ping_ms (+-ping_var_ms), delay_ticks/delay_ms (inputs sent, not stepped), queue_depth/starved/slack_ms (the host's queue for this player: depth at the last close, starvations, how early the latest input arrived), dilation (input clock), buffered/buffer_target/buffer_level/jitter_ticks (the jitter buffer), loss_pct, resends, bytes_in_s/bytes_out_s, hash_tick/hash_age_s/desyncs (the last hash report), predict_mode/predict_depth/predict_ms/corrections (local prediction), tick, mode, peers (the host's view of each guest). Presentation only: none of it is in the sim hash"),
             ("focus", "what the human looked at when it was written: unit slot, how it was picked, the eye, the view direction, the world point under the reticle"),
         ] {
             legend.insert(k.to_owned(), v.to_owned());
@@ -1492,6 +1514,7 @@ impl Ring {
                 .and_then(|h| h.try_lock().ok().map(|r| r.hitches())),
             session: (self.session.out.unit >= 0 && !self.session.out.subject.is_empty())
                 .then(|| self.session.out.clone()),
+            net: self.net.iter().cloned().collect(),
             why: self
                 .whys
                 .iter()
@@ -1581,7 +1604,7 @@ pub fn sound_digest(snap: &Snapshot, span: Option<f32>) -> String {
             .iter()
             .map(|&(n, k, g)| format!("{} x{k} ({g:.2})", name(n)))
             .collect();
-        let near = rows.iter().map(|r| r.dist).fold(f32::MAX, f32::min);
+        let near = rows.iter().map(|r| r.dist).fold(f32::MAX, core::fmath::min);
         // Starts of ONE take add up sample for sample; different takes do not.
         let one = rows
             .iter()
@@ -1657,7 +1680,7 @@ fn focus_of(walk: &WalkSim) -> Focus {
         .map(|(t, _)| t);
     let terrain = sim.terrain_ray(eye, dir, REACH, 0.5);
     let dist = match (world, terrain) {
-        (Some(a), Some(b)) => a.min(b),
+        (Some(a), Some(b)) => a.fmin(b),
         (a, b) => a.or(b).unwrap_or(-1.0),
     };
     let reticle = sim.reticle_pick.first().copied().flatten();
@@ -1674,7 +1697,7 @@ fn focus_of(walk: &WalkSim) -> Focus {
             .filter_map(|(h, u)| {
                 let to = u.aim_point() - eye;
                 let d = to.length();
-                let c = to.dot(dir) / d.max(1e-3);
+                let c = to.dot(dir) / d.fmax(1e-3);
                 (d < 200.0 && c >= cos_min).then_some((h, c))
             })
             .max_by(|a, b| a.1.total_cmp(&b.1))
@@ -1862,6 +1885,22 @@ impl BlackBox {
     /// The frame record its snapshots carry (card HITCH; None = none).
     pub fn frame_record(&mut self, rec: Option<Arc<Mutex<crate::frame_profile::Record>>>) {
         locked(&self.ring).hitches = rec;
+    }
+
+    /// A LAN round's net meter at the confirmed `tick` (#168): kept every
+    /// 0.5 s ([`Snapshot::net`]).
+    pub fn net(&mut self, tick: u64, meter: &crate::netplay::NetMeter) {
+        let mut r = locked(&self.ring);
+        if r.net.back().is_some_and(|b| tick < b.tick + UNIT_PERIOD) {
+            return;
+        }
+        if r.net.len() >= NET_ROWS {
+            r.net.pop_front();
+        }
+        r.net.push_back(NetRow {
+            tick,
+            meter: meter.clone(),
+        });
     }
 
     /// The commander said `line`.

@@ -1,5 +1,6 @@
 use super::arsenal::reach;
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::perception::los_seat;
 use crate::sim::Sim;
 use crate::unit::UnitHandle;
@@ -52,7 +53,7 @@ pub(super) fn dps(wc: &WeaponClass, kind: u32) -> f32 {
     {
         dmg += splash(e, k);
     }
-    let delay = (0.5 * (wc.shot_delay[0] + wc.shot_delay[1])).max(1e-3);
+    let delay = (0.5 * (wc.shot_delay[0] + wc.shot_delay[1])).fmax(1e-3);
     let salvo = wc.shots_per_salvo.max(1) as f32;
     let rounds = wc.rounds_per_clip as f32;
     if wc.reload_time <= 0.0 || wc.rounds_per_clip == 0 {
@@ -145,7 +146,7 @@ pub(crate) fn choose(
             best_in |= take;
             take
         } else {
-            let far = reach(wc).max(max);
+            let far = reach(wc).fmax(max);
             !best_in && far * far > foe.d2 && by_rule
         };
         if take {
@@ -241,7 +242,7 @@ fn armed_ahead(sim: &Sim, h: VehicleHandle, own: Option<u32>, e: &Eyes) -> Optio
         let to = centre - e.eye;
         let d2 = to.length_squared();
         let view = (20.0 * radius + 30.0) * e.view_mult * 2.0;
-        let far = view.min(e.reach);
+        let far = view.fmin(e.reach);
         if to.dot(e.nose) <= 0.0 || d2 >= far * far {
             continue;
         }
@@ -294,7 +295,7 @@ pub(super) fn think(
         .iter()
         .take(2)
         .map(|w| reach(&sim.weapon_classes[w.class]))
-        .fold(0.0f32, f32::max);
+        .fold(0.0f32, crate::fmath::max);
     let nose = s.rot * Vec3::Z;
     let tier = sim.unit_tier(u);
     let eyes = Eyes {

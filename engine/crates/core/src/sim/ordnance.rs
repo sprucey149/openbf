@@ -6,6 +6,7 @@
 use super::input::{buttons, PadState};
 use super::state::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::projectile::{Bolt, Shooter};
 use crate::soldier::{GroundRules, Stance};
 use crate::sticky::{self, Anchor, Contact, Sticky, Surface};
@@ -106,7 +107,7 @@ impl Sim {
                 u.held[k].state.set_posture(
                     wc,
                     stance,
-                    PadState::axis(p.ly).abs().max(PadState::axis(p.lx).abs()),
+                    PadState::axis(p.ly).abs().fmax(PadState::axis(p.lx).abs()),
                     false,
                 );
             }
@@ -683,11 +684,11 @@ impl Sim {
             .collision
             .ray_with(start, n, len, Layers::ORDNANCE, HullFilter::All)
         {
-            t = t.min(h.t);
+            t = t.fmin(h.t);
         }
         if let Some(hf) = self.heightfield.as_ref() {
             if let Some(f) = ray_terrain_ps2(hf, &self.collision.cutters, start, start + n * len) {
-                t = t.min(len * f);
+                t = t.fmin(len * f);
             }
         }
         if t < len {

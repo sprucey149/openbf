@@ -64,7 +64,7 @@ fn scene() -> (Sim, UnitHandle, UnitHandle) {
         },
         ..Default::default()
     };
-    sim.weapon_classes = vec![primary, thrown];
+    sim.weapon_classes = vec![primary, thrown].into();
     let owner = sim
         .spawn(&UnitSpec {
             slots: vec![SlotSpec {

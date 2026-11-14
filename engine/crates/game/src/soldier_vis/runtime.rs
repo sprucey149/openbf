@@ -438,6 +438,7 @@ impl SoldierVisuals {
             own_model: Default::default(),
             outlines: Default::default(),
             lod_view: Default::default(),
+            muted_shot: None,
             low_skins: Default::default(),
             assets,
             weapons,
@@ -692,6 +693,23 @@ impl SoldierVisuals {
     /// [`SoldierVisuals::update`] reads the last tick's shots itself; a frame
     /// that steps several ticks calls this after each
     /// (`WalkSim::advance_with`) so an earlier tick's shot still flashes.
+    /// Issue #168: the local unit's shot at a confirmed tick (tick, unit
+    /// index) whose feedback a LAN peer's prediction already gave
+    /// ([`SoldierVisuals::predicted_shot`]); None clears it.
+    pub fn mute_shot(&mut self, shot: Option<(u64, u32)>) {
+        self.muted_shot = shot;
+    }
+
+    /// Issue #168: a LAN peer's predicted own shot: unit `unit`'s muzzle
+    /// flash (and its first-person fire clip) starts now, at the confirmed
+    /// tick `tick` the frame draws.
+    pub fn predicted_shot(&mut self, unit: u32, gen: u32, tick: u64, weapon_class: usize) {
+        if let Some(v) = self.units.get_mut(unit as usize).filter(|v| v.gen == gen) {
+            v.shot_tick = Some(tick);
+            v.shot_class = Some(weapon_class);
+        }
+    }
+
     pub fn note_shots(&mut self, walk: &WalkSim) {
         self.note_throws(walk);
         // A melee throw's clip starts at the trigger: the saber leaves
@@ -783,7 +801,7 @@ impl SoldierVisuals {
             ) else {
                 continue;
             };
-            if v.gen == u.gen {
+            if v.gen == u.gen && self.muted_shot != Some((walk.sim.tick, unit.index)) {
                 v.shot_tick = Some(walk.sim.tick);
                 v.shot_class = Some(*weapon_class as usize);
                 v.shot_ordinal =

@@ -8,6 +8,7 @@ use crate::unit::UnitSpec;
 use crate::weapon::WeaponClass;
 
 mod jet;
+mod predict;
 mod ramps;
 mod scratch;
 

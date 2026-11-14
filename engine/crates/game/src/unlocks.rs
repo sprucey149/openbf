@@ -230,7 +230,19 @@ pub fn set_player_gate(walk: &mut crate::walk::WalkSim, points: i32, career: &Ca
 /// its silhouette all read it. `[ours]` The `all` cheat
 /// (`Cheats::all_classes`, card CHEAT2) makes every class free.
 pub fn apply_costs(walk: &mut crate::walk::WalkSim, career: &Career) {
-    let free = walk.sim.cheats.all_classes;
+    apply_slot_costs(walk, 0, &|u: &Unlockable| u.kills(career));
+}
+
+/// Issue #168: player slot `slot`'s cost of every class on both teams, its
+/// counters' kills from `kills` (a lockstep peer's profile,
+/// `netplay::PlayerProfile::unlock_kills`); the slot's own `all` cheat
+/// ([`core::sim::Sim::cheats_for_slot`]) makes every class free.
+pub fn apply_slot_costs(
+    walk: &mut crate::walk::WalkSim,
+    slot: usize,
+    kills: &dyn Fn(&Unlockable) -> u32,
+) {
+    let free = walk.sim.cheats_for_slot(slot).all_classes;
     for team in 0..2u8 {
         let t = usize::from(team);
         let costs = walk.teams[t]
@@ -239,10 +251,18 @@ pub fn apply_costs(walk: &mut crate::walk::WalkSim, career: &Career) {
             .zip(&walk.sim.classes[t])
             .map(|(v, c)| match free {
                 true => 0,
-                false => class_cost(&v.name, c.unlock_points, career),
+                false => class_cost_by(&v.name, c.unlock_points, kills),
             })
             .collect();
-        walk.sim.set_spawn_costs(0, team, costs);
+        walk.sim.set_spawn_costs(slot, team, costs);
+    }
+}
+
+/// [`class_cost`] with each counter's kills from `kills`.
+pub fn class_cost_by(class: &str, authored: u32, kills: &dyn Fn(&Unlockable) -> u32) -> u32 {
+    match of_class(class) {
+        Some(u) => effective_cost(authored, kills(u)),
+        None => authored,
     }
 }
 

@@ -1,5 +1,6 @@
 //! Stock source-layout parity, independent of edition-specific mesh/font art.
 //! Opt in with four real HUD_LAYOUT_ASSETS roots and owned HUD_LAYOUT_OUT.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 use std::{collections::BTreeMap, path::Path};
 use ui::hud_tree::{Elem, Hud, Kind};
 #[path = "support/hud_layout.rs"]

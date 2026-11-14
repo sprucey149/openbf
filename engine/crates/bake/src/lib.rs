@@ -61,13 +61,21 @@ pub mod xbox_icons;
 
 pub mod detail;
 
+/// The layout of every RON file the bake writes: ron's default pretty layout
+/// with LF line endings on every OS. ron's own default is CRLF on Windows, which
+/// made a Windows bake differ byte for byte from a Linux or macOS bake of the
+/// same discs (issue #168: LAN players compare their copies).
+pub fn pretty() -> ron::ser::PrettyConfig {
+    ron::ser::PrettyConfig::default().new_line("\n")
+}
+
 /// Write a RON artifact the way every bake output is written: `to_string_pretty`
-/// with `PrettyConfig::default()`. The seven call sites had this open-coded, and
+/// with [`pretty`]. The seven call sites had this open-coded, and
 /// the config is what makes the file byte-reproducible — one place to change it,
 /// and one place a reader has to look to know what the shipped RON's shape is.
 pub fn write_ron<T: serde::Serialize>(path: &std::path::Path, value: &T) -> anyhow::Result<()> {
     use anyhow::Context;
-    let text = ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::default())?;
+    let text = ron::ser::to_string_pretty(value, pretty())?;
     // A fresh tree has no output directories yet (card PACK: `bake classes` into an empty assets_baked/).
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
@@ -176,4 +184,22 @@ pub(crate) const BAKED_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../
 #[cfg(test)]
 pub(crate) fn baked_root_has_data() -> bool {
     std::fs::read_dir(BAKED_ROOT).is_ok_and(|mut d| d.next().is_some())
+}
+
+#[cfg(test)]
+mod pretty_tests {
+    /// Every bake output is LF on every OS: ron's own default writes CRLF on
+    /// Windows, so a Windows bake would differ from a Linux or macOS one.
+    #[test]
+    fn bake_ron_writes_lf_on_every_os() {
+        assert_eq!(super::pretty().new_line, "\n");
+        let text = ron::ser::to_string_pretty(&(vec![1, 2], "a\r\nb"), super::pretty()).unwrap();
+        assert!(text.contains('\n') && !text.contains('\r'), "{text:?}");
+        let dir = std::env::temp_dir().join(format!("openbf_bake_lf_{}", std::process::id()));
+        let path = dir.join("x.ron");
+        super::write_ron(&path, &vec![(1, "x"), (2, "y")]).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(bytes.contains(&b'\n') && !bytes.contains(&b'\r'));
+    }
 }

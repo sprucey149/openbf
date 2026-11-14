@@ -51,6 +51,7 @@ use crate::animator::{Animator, ClassAnim, Rig};
 use crate::assets::SkinnedAsset;
 use crate::viewer::turret_pose as tp;
 use crate::walk::{TeamTemplate, WalkSim};
+use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 use render::{
     ParticleDraw, ParticleShape, Renderer, SkinnedDrawCmd, SkinnedMeshHandle, TextureHandle,
@@ -518,7 +519,7 @@ impl SeatClock {
             let turned = (yaw - c.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
                 - std::f32::consts::PI;
             let secs = tick.saturating_sub(c.tick).max(1) as f32 * core::TICK_DT;
-            c.stick = (turned / (secs * yaw_rate.max(1e-3))).clamp(-1.0, 1.0);
+            c.stick = (turned / (secs * yaw_rate.fmax(1e-3))).clamp(-1.0, 1.0);
             (c.tick, c.yaw, c.prev, c.cur) = (tick, yaw, c.cur, held);
         }
         *c
@@ -713,6 +714,9 @@ pub struct SoldierVisuals {
     outlines: [Vec<Option<Outline>>; 2],
     /// Reused per-camera selection scratch; never read by the simulation.
     lod_view: lod::View,
+    /// Issue #168: a LAN peer's own shot at this tick (tick, unit index)
+    /// whose flash the prediction already started; not started again.
+    muted_shot: Option<(u64, u32)>,
     low_skins: [Vec<Vec<Option<TextureHandle>>>; 2],
     pub assets: Vec<SoldierAsset>,
     pub weapons: Vec<WeaponAsset>,

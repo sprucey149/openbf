@@ -671,7 +671,7 @@ pub fn bake_weapon(
     let nodes = weapon_nodes(&chunks, &m.name);
     std::fs::write(
         manifest::weapon_nodes_path(out, &m.name),
-        ron::ser::to_string_pretty(&nodes, ron::ser::PrettyConfig::default())?,
+        ron::ser::to_string_pretty(&nodes, crate::pretty())?,
     )?;
     Ok(BakedWeapon {
         name: m.name.clone(),

@@ -28,6 +28,7 @@
 //! record uses (0x48: Cs·As + Cd, depth tested, no depth write, unfogged).
 
 use super::emitter::{Lcg, SEED_XOR};
+use core::fmath::FloatExt;
 use glam::Vec3;
 use render::{Camera, ParticleDraw, ParticleShape, TextureHandle};
 
@@ -326,7 +327,7 @@ fn shape(from: Vec3, to: Vec3, p: Params, seed_a: u32, seed_b: u32) -> Option<Sh
         }
         w -= p.width / (n as f32 + 1.0);
     }
-    pts.push((to, w.max(0.0), 0));
+    pts.push((to, w.fmax(0.0), 0));
     Some(Shape { pts, branches })
 }
 
@@ -360,7 +361,7 @@ fn triangles(
             side * pts[i].1
         })
         .collect();
-    let tex = texture_size.max(1e-6);
+    let tex = texture_size.fmax(1e-6);
     let rgb = [color[0], color[1], color[2]];
     let alpha = |i: usize| -> u8 { (f32::from(pts[i].2) * fade) as u8 };
     let mut tris = Vec::with_capacity((n - 1) * 6);

@@ -1,5 +1,6 @@
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::mission::SpaceAssaultDef;
+use core::fmath::FloatExt;
 use core::sim::{
     CriticalSystem, FrigateTurrets, LinkedTurretSet, ShieldGroup, Sim, SpaceAssault, Station,
 };
@@ -143,7 +144,7 @@ impl Flash {
             self.left = 1.0;
         }
         self.last = value;
-        let shown = self.left.max(0.0);
+        let shown = self.left.fmax(0.0);
         if self.left > 0.0 {
             self.left -= dt;
         }
@@ -211,7 +212,7 @@ impl SpaceHud {
             };
             let (mut cur, mut max) = (0.0, 0.0);
             for s in &parts {
-                cur += s.health.cur.max(0.0);
+                cur += s.health.cur.fmax(0.0);
                 max += s.health.max;
             }
             let fraction = if max > 0.0 { cur / max } else { 0.0 };

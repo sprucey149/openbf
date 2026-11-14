@@ -20,6 +20,7 @@ mod seat_switch;
 use super::input::{buttons, PadState};
 use super::state::{Event, Sim};
 use crate::collision::{HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::projectile::{Bolt, Shooter};
 use crate::unit::{Controller, UnitHandle};
 use crate::vehicle::gun::{self, GunSetup, GunState, AIM_RAY};
@@ -212,7 +213,7 @@ impl Sim {
     fn aim_point(&self, eye: Vec3, dir: Vec3, riders: &[UnitHandle], own: VehicleHandle) -> Vec3 {
         let mut t = AIM_RAY;
         if let Some(h) = self.terrain_ray(eye, dir, t, 0.5) {
-            t = t.min(h);
+            t = t.fmin(h);
         }
         // A building turret's ray passes its own building (the PS2's
         // excludes the owner entity, `ray_past`).
@@ -225,14 +226,14 @@ impl Sim {
             HullFilter::except(Some(own)),
             [building, None],
         ) {
-            t = t.min(h.t);
+            t = t.fmin(h.t);
         }
         for (h, u) in self.alive_units() {
             if riders.contains(&h) {
                 continue;
             }
             if let Some(hit) = u.capsule().ray_hit(eye, dir, t) {
-                t = t.min(hit);
+                t = t.fmin(hit);
             }
         }
         eye + dir * t

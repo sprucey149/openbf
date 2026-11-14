@@ -3,6 +3,7 @@
 //! and menu keys. OURS (public pull request #1); rules in `analysis/plan/FEATURE_SET.md`, Platform & meta
 //! (Keyboard + mouse).
 
+use core::fmath::FloatExt;
 use core::sim::{buttons, PadState, LOOK_UNIT};
 use winit::event::{KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -501,7 +502,7 @@ impl Kbm {
         };
         let last_read = if moved { self.flyer.counts } else { (0.0, 0.0) };
         let scale = f64::from(self.sensitivity) / FLYER_COUNTS_PER_SECOND_AT_FULL;
-        let top = FLYER_RATE_TOP / scale.max(f64::MIN_POSITIVE);
+        let top = FLYER_RATE_TOP / scale.fmax(f64::MIN_POSITIVE);
         let step = |axis: HeldRate, counts: f64| {
             axis.after(counts / FLYER_READ_SECONDS, FLYER_READ_SECONDS, top)
         };

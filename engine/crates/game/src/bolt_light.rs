@@ -16,6 +16,7 @@
 //!
 //! Render-only: it reads the heightfield and the lights, never the sim.
 
+use core::fmath::FloatExt;
 use core::heightfield::Heightfield;
 use glam::Vec3;
 use render::{
@@ -43,7 +44,7 @@ pub fn height_factor(dy: f32, r: f32) -> f32 {
     if r <= 0.0 {
         return 0.0;
     }
-    (1.0 - dy * dy / (r * r)).max(0.0)
+    (1.0 - dy * dy / (r * r)).fmax(0.0)
 }
 
 /// The light's rank on a patch `d2` (squared) metres away, `e2` (squared)
@@ -55,7 +56,7 @@ fn rank(l: &OmniLight, d2: f32, e2: f32) -> f32 {
     if r2 < 4.0 * d2 {
         s *= r2 / (4.0 * d2);
     }
-    s / (e2 / 3600.0).max(1.0)
+    s / (e2 / 3600.0).fmax(1.0)
 }
 
 /// The patch (px, pz)'s box: min and max corners.
@@ -64,8 +65,8 @@ fn patch_box(hf: &Heightfield, px: u32, pz: u32) -> (Vec3, Vec3) {
     for iz in pz * PATCH_CELLS..=((pz + 1) * PATCH_CELLS).min(hf.size - 1) {
         for ix in px * PATCH_CELLS..=((px + 1) * PATCH_CELLS).min(hf.size - 1) {
             let h = hf.heights[(iz * hf.size + ix) as usize];
-            lo = lo.min(h);
-            hi = hi.max(h);
+            lo = lo.fmin(h);
+            hi = hi.fmax(h);
         }
     }
     let side = PATCH_CELLS as f32 * hf.unit;
@@ -99,8 +100,8 @@ pub fn gather(lights: &[OmniLight], hf: &Heightfield, eye: Vec3) -> TerrainLight
         let l = &lights[i];
         let r = l.radius;
         let span = |v: f32, off: f32| {
-            let lo = cell(v - r, off).max(0.0) as u32;
-            let hi = (cell(v + r, off).max(0.0) as u32).min(per_side - 1);
+            let lo = cell(v - r, off).fmax(0.0) as u32;
+            let hi = (cell(v + r, off).fmax(0.0) as u32).min(per_side - 1);
             lo..=hi
         };
         let e2 = l.pos.distance_squared(eye);

@@ -31,8 +31,8 @@ pub enum PausePage {
 
 mod settings;
 pub use settings::{
-    clamp_fov_scale, draw_fps_counter, rumble_level, ControlContext, FpsCounter, SettingsPage,
-    FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
+    clamp_fov_scale, draw_fps_counter, draw_fps_counter_note, rumble_level, ControlContext,
+    FpsCounter, SettingsPage, FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
 };
 
 /// A Yes/No popup over the menu; it opens on No (both games' pause menus).
@@ -96,6 +96,10 @@ pub struct MenuModel {
     pub effects_volume: f32,
     pub dialogue_volume: f32,
     pub fps_counter: FpsCounter,
+    /// Issue #168: the LAN net meter overlay (F7).
+    pub network_meter: bool,
+    /// Issue #168: the name other players see (Game Options' Player name).
+    pub player_name: String,
 
     /// Team size percentage (the historical action name is SetAiCap).
     pub team_size_pct: u32,
@@ -120,6 +124,9 @@ pub struct MenuModel {
     pub rc_flight_controls: bool,
     pub invert_y: bool,
     pub low_power_resolution: bool,
+    /// Automatic quality (LAN §8b.2): the render scale follows the frame
+    /// times; Low power resolution is then locked ([`row_locked`]).
+    pub auto_quality: bool,
     /// The Button prompts row's value and the footer's names.
     pub input_icons_label: &'static str,
     pub icons: crate::input_icons::Icons,
@@ -166,6 +173,10 @@ pub enum MenuAction {
     SetEffectsVolume(f32),
     SetDialogueVolume(f32),
     SetFpsCounter(FpsCounter),
+    /// Issue #168: the net meter overlay on or off.
+    SetNetworkMeter(bool),
+    /// Issue #168: the shell's Player name row opens its text box.
+    EditPlayerName,
     EditBindings(SettingsPage, ControlContext),
     /// Map-relative team size percentage, 10..=[`crate::population::MAX_TEAM_PCT`].
     SetAiCap(u32),
@@ -182,6 +193,8 @@ pub enum MenuAction {
     ToggleFlightControls,
     ToggleInvertY,
     ToggleLowPowerResolution,
+    /// Automatic quality on or off (LAN §8b.2).
+    SetAutoQuality(bool),
     /// The Button prompts row, a step on (+1) or back (-1) through its choices.
     CycleInputIcons(i32),
     ToggleViewpoint,
@@ -278,8 +291,13 @@ pub enum Row {
     EffectsVolume,
     DialogueVolume,
     GraphicsQuality,
+    /// Automatic quality (LAN §8b.2).
+    AutoQuality,
     ResetGraphics,
     FpsCounter,
+    NetworkMeter,
+    /// Issue #168: the LAN player name (edited in the shell only).
+    PlayerName,
     Assist,
     AiCap,
     Reinforcements,
@@ -406,6 +424,9 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
         Row::Restart => MenuAction::RequestRestart,
         Row::FlightControls => MenuAction::ToggleFlightControls,
         Row::FpsCounter => MenuAction::SetFpsCounter(m.fps_counter.toggled()),
+        Row::NetworkMeter => MenuAction::SetNetworkMeter(!m.network_meter),
+        Row::AutoQuality => MenuAction::SetAutoQuality(!m.auto_quality),
+        Row::PlayerName if row_locked(m, row).is_none() => MenuAction::EditPlayerName,
         Row::ResetGraphics => MenuAction::ResetGraphics,
         Row::CareerAwards => MenuAction::SetCareerAwards(m.career_awards_disabled),
         Row::Rumble => {
@@ -462,6 +483,11 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             "Vibrates when you take a hit, your vehicle takes damage, or your ship collides."
                 .into(),
         ),
+        Row::AutoQuality => Some(
+            "When frames run long, the 3D view draws at a lower resolution so the game keeps \
+             up; it sharpens again when there is time. Menus and the HUD stay sharp."
+                .to_owned(),
+        ),
         Row::CareerAwards => Some(
             "Use earned weapons and stat bonuses. Medals and career stats still count when off."
                 .to_owned(),
@@ -492,9 +518,15 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
 pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
     match row {
         Row::GraphicsQuality => Some("Normal is the current graphics preset."),
+        Row::LowPowerResolution if m.auto_quality => {
+            Some("Automatic quality sets the resolution. Turn it off to choose.")
+        }
         Row::Cheats if m.cheats.is_empty() => {
             Some("Cheats are available while a battle is paused.")
         }
+        // The name is the selected profile's (issue #170): one place to
+        // choose it keeps every name on this computer unique.
+        Row::PlayerName => Some("Your profile's name. Choose or create a profile after Start."),
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team size is fixed in this battle: it has no map team sizes to scale.")
         }
@@ -515,6 +547,8 @@ pub(crate) fn is_value_row(row: Row) -> bool {
             | Row::EffectsVolume
             | Row::DialogueVolume
             | Row::FpsCounter
+            | Row::NetworkMeter
+            | Row::AutoQuality
             | Row::Rumble
             | Row::MouseSensitivity
             | Row::PadLookSensitivity
@@ -696,6 +730,12 @@ fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Ve
         }
         Row::FpsCounter if single && adjust => {
             actions.push(MenuAction::SetFpsCounter(m.fps_counter.toggled()));
+        }
+        Row::AutoQuality if single && adjust => {
+            actions.push(MenuAction::SetAutoQuality(!m.auto_quality));
+        }
+        Row::NetworkMeter if single && adjust => {
+            actions.push(MenuAction::SetNetworkMeter(!m.network_meter));
         }
         Row::Rumble if single && adjust => {
             let i = rumble_level(m.rumble_strength);
@@ -1059,6 +1099,12 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
         Row::DialogueVolume => ("Dialogue Volume".into(), volume(m.dialogue_volume)),
         Row::GraphicsQuality => ("Graphics quality".into(), Some("Normal".into())),
         Row::FpsCounter => ("FPS counter".into(), Some(m.fps_counter.label().into())),
+        Row::PlayerName => ("Player name".into(), Some(m.player_name.clone())),
+        Row::AutoQuality => ("Automatic quality".into(), on_off(m.auto_quality)),
+        Row::NetworkMeter => (
+            "Network meter".into(),
+            Some(if m.network_meter { "On" } else { "Off" }.into()),
+        ),
         Row::Cheats => (m.texts.cheats.clone(), None),
         Row::Restart => (m.texts.restart.clone(), None),
         Row::PageBack => ("Back".into(), None),
@@ -1238,7 +1284,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     let rows = rows(m);
                     let has_help = rows.iter().any(|r| {
-                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble)
+                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble | Row::AutoQuality)
                             || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;
@@ -1281,7 +1327,9 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                     }
                                     match row {
                                         Row::InvertY => actions.push(MenuAction::ToggleInvertY),
-                                        Row::LowPowerResolution => {
+                                        Row::LowPowerResolution
+                                            if row_locked(m, *row).is_none() =>
+                                        {
                                             actions.push(MenuAction::ToggleLowPowerResolution)
                                         }
                                         Row::InputIcons => {

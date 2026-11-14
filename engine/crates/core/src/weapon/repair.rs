@@ -2,6 +2,7 @@
 //! rebuild and build. Follows `analysis/re-build-zones.md` (card TBLD).
 
 use super::{pf, FireState, PropSource, WeaponClass, WeaponState};
+use crate::fmath::FloatExt;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Repair {
@@ -45,7 +46,7 @@ impl WeaponState {
         } else {
             0
         };
-        self.refire_accum = (self.refire_accum - dt).max(0.0);
+        self.refire_accum = (self.refire_accum - dt).fmax(0.0);
         if !held || blocked || !self.active {
             self.state = FireState::Idle;
             return false;

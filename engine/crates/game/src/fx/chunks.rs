@@ -7,6 +7,7 @@ use super::emitter::Frame;
 use super::{Era, FxAssets, Lcg, Library, LiveEffect};
 use crate::{classdb::ClassDb, walk::WalkSim};
 use core::collision::{HullFilter, Layers, Shape};
+use core::fmath::FloatExt;
 use core::sim::{Event, Sim};
 use glam::{Mat3, Mat4, Quat, Vec3};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -339,7 +340,7 @@ fn floor_fraction(sim: &Sim, from: Vec3, reach: f32, rays: HullFilter) -> Option
         .ray_down_with(from, reach, rays)
         .map(|(y, _)| (from.y - y) / reach);
     match (terrain, body) {
-        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), Some(b)) => Some(a.fmin(b)),
         (a, b) => a.or(b),
     }
 }
@@ -1189,7 +1190,7 @@ fn launch_velocity(
         v += dir * speed;
     } else {
         if distance2 > 1.0 {
-            v += dir * ((15.0 + 15.0 * rng.float()) / radius.max(0.001));
+            v += dir * ((15.0 + 15.0 * rng.float()) / radius.fmax(0.001));
         }
         if leaf {
             v *= 0.25;

@@ -273,6 +273,7 @@ fn serve_finish_replaces_seat_input() {
         my: 6,
         fire_lag: 7,
         pick: Some(crate::sim::ScreenPick::Post(0)),
+        view_lag: 0,
     };
     crate::ai::brain::finish_pad(&sim, me, &st, Some(plan), &mut pad);
     assert_eq!(

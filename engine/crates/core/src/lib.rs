@@ -1,5 +1,7 @@
 //! Deterministic simulation core: fixed-step loop, seeded RNG, replay,
 //! gameplay. No wall-clock reads inside sim logic (PLAN.md determinism spine).
+// Test code may use f32::max/min; the sim may not (clippy.toml, LAN_MULTIPLAYER.md §7).
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod ai;
 pub mod aim_assist;
@@ -12,6 +14,7 @@ pub mod collision;
 pub mod combo;
 pub mod commander;
 pub mod cp;
+pub mod digest;
 pub mod door;
 pub mod droideka;
 pub mod emitter;
@@ -33,6 +36,7 @@ pub mod region;
 pub mod remote;
 pub mod rng;
 pub mod route_patch;
+pub mod shared;
 pub mod sim;
 pub mod skill;
 pub mod soldier;

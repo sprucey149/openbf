@@ -136,6 +136,8 @@
 //! 4 / 14 / 17 at Easy / Medium / Hard (shown Easy / Normal / Elite),
 //! human-team teammates 6 / 11 / 11.
 
+use crate::fmath::FloatExt;
+
 /// The four host difficulty tiers (PLAN §Saves: host authority), ordered
 /// easiest first (the arena's head-to-head takes the lower of two).
 ///
@@ -525,12 +527,12 @@ impl Skill {
             // output is the EE's `max.s` against zero, and the consumer takes
             // a float. Commit 1 of this phase shipped `as i32 as f32` and the
             // "1 m below skill 12, then 0" rows with it; both are wrong.
-            err_floor: lerp(1.6, 0.4).max(0.0),
-            err_cap: lerp(2.2, 1.2).max(0.0),
-            err_cap_flyer: lerp(4.0, 1.2).max(0.0),
+            err_floor: lerp(1.6, 0.4).fmax(0.0),
+            err_cap: lerp(2.2, 1.2).fmax(0.0),
+            err_cap_flyer: lerp(4.0, 1.2).fmax(0.0),
             burst_t: t,
             pause_mult: 1.5 - 0.8 * t,
-            tap_x: (1.0 - lerp(0.1, 0.9)).max(0.0),
+            tap_x: (1.0 - lerp(0.1, 0.9)).fmax(0.0),
             charge_hi: t,
             grenade_chance: t,
             dodge_chance: lerp(0.0, 0.2),

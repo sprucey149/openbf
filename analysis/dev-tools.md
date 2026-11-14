@@ -83,6 +83,15 @@ The F9 save notice appears over the spawn and pause menus after the write finish
   (its row type, `game/src/unit_probe.rs`, stays — the sweep's `UNIT_SAMPLES` shares it). On with dev mode, which is on by
   default (`OPENBF_DEV=0` turns both off); `OPENBF_BLACKBOX=0` turns only the black box off.
 
+## LAN desync reports (issue #168)
+When a LAN game reports a desync, both machines write
+`<black box folder>/desync/desync-<map>-<seed>-r<round>-s<slot>-t<tick>-<host|guest>.json`
+(`game::netplay::desync`; `OPENBF_BLACKBOX_DIR` moves the folder). Read them with
+`game --desync-report HOST.json [GUEST.json] [--assets DIR] [--missions DIR] [--no-resim]`: it prints both
+hashes, builds and OS/CPU, the static digest by group, the first tick and state group where the two sides'
+per-tick rows differ, and re-simulates the round from the report's setup and bundles to say which side this
+build agrees with. `game --net-soak --perturb-at T --report-dir DIR` makes a pair on purpose.
+
 ## Profiling tools on this machine (the maintainer, 2026-10-21)
 `perf` 7.2 and `valgrind` 3.27 (callgrind, massif, dhat) are installed; `samply`, `heaptrack` and `flamegraph` are not.
 Flat profile of a release binary: `perf record -F 499 -o <file> -- <bin>`, then `perf report --no-children --sort symbol

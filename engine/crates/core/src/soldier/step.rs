@@ -1,6 +1,7 @@
 //! One soldier tick on foot: `Soldier::step_looking`.
 
 use super::*;
+use crate::fmath::FloatExt;
 
 impl Soldier {
     /// The ground mover's sprint transition, also sampled by a human's
@@ -52,7 +53,7 @@ impl Soldier {
 
         self.time_in_stance += dt;
         self.stand_age += dt;
-        self.lock_timer = (self.lock_timer - dt).max(0.0);
+        self.lock_timer = (self.lock_timer - dt).fmax(0.0);
         if self.lock_timer <= 0.0 {
             self.lock_hard = false;
             self.fire_lock = false;
@@ -61,7 +62,7 @@ impl Soldier {
         // before the stance switch (B2:160108-160116), on every map (BF1
         // recharged it in them too).
         if !self.stance.jetting() {
-            self.fuel = (self.fuel + c.jet_fuel_recharge * dt).min(1.0);
+            self.fuel = (self.fuel + c.jet_fuel_recharge * dt).fmin(1.0);
         }
         // BF1 hard lock (FUN_00205cc8 t<10 band): movement + turn frozen.
         let frozen = self.look_frozen();
@@ -211,7 +212,7 @@ impl Soldier {
             if self.stance == Stance::Sprint {
                 // Ramp MaxSpeed -> MaxSpeed*ControlSpeed[sprint].fwd over
                 // SprintAccelerateTime (BF2 FUN_00240bf8 case 3).
-                let t = (self.time_in_stance / c.sprint_accelerate_time).min(1.0);
+                let t = (self.time_in_stance / c.sprint_accelerate_time).fmin(1.0);
                 c.max_speed * (1.0 + (ctl[0] - 1.0) * t)
             } else {
                 c.max_speed * ctl[0]
@@ -322,7 +323,7 @@ impl Soldier {
                         Vec3::new(-sy, 0.0, -cy) * fwd_in + Vec3::new(cy, 0.0, -sy) * strafe_in;
                     if direction.length_squared() > 0.0 {
                         jet_aim.0 = fmath::atan2(-direction.x, -direction.z);
-                        jet_stick = (direction.length().min(1.0), 0.0);
+                        jet_stick = (direction.length().fmin(1.0), 0.0);
                     }
                 }
             }
@@ -367,7 +368,7 @@ impl Soldier {
         // floor, and in the air by the game's rule.
         let accel = c.acceleration
             * match self.stance {
-                Stance::Roll => ctl[0].max(ctl[1]), // 0.02
+                Stance::Roll => ctl[0].fmax(ctl[1]), // 0.02
                 _ if self.grounded => rules.slope_control(n.y),
                 _ => rules.air_control(),
             }

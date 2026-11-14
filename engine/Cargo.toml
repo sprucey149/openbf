@@ -21,7 +21,14 @@ license = "MIT"
 
 # Locked stack (PLAN.md Part B). Versions match the maintainer's existing wgpu projects.
 [workspace.dependencies]
-glam = "0.30"
+# `scalar-math`: one math path for every CPU (analysis/plan/LAN_MULTIPLAYER.md §7). glam's default SIMD
+# code adds a Quat product's or a dot product's lanes in a different order on SSE2 (x86) and NEON (ARM),
+# so an Apple Silicon or ARM player's sim drifts from an x86 player's by an ULP within two ticks (XDET,
+# 2026-11-13: `AimBlock::think_scaled`'s Quat multiply and normalise). With plain f32 code every CPU
+# runs the same IEEE operations in the same order: Linux, Windows and aarch64 agree on every XDET line.
+# It applies to every crate that links glam (core, bake, render, ui, game). `core` refuses to build
+# without it (`core::fmath`'s alignment assertion).
+glam = { version = "0.30", features = ["scalar-math"] }
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 wgpu = "27"

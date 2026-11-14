@@ -1245,6 +1245,7 @@ dependencies = [
  "ktx2",
  "manifest",
  "mungefs",
+ "net",
  "pak",
  "render",
  "resvg",
@@ -2201,6 +2202,11 @@ dependencies = [
 [[package]]
 name = "net"
 version = "0.1.0"
+dependencies = [
+ "core",
+ "serde",
+ "zstd",
+]
 
 [[package]]
 name = "nix"

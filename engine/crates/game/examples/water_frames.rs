@@ -19,6 +19,7 @@
 //!    alternated over five rounds; and the step alone.
 //! 4. The ocean's amplitude — the disc's own, unnormalised (`re-water.md`
 //!    §3a, queue OCB); this prints what the port draws.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

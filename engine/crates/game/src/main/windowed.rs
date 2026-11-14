@@ -13,6 +13,7 @@ use super::battle::{
 };
 use super::{BattleSetup, ViewerArgs};
 use anyhow::Result;
+use core::fmath::FloatExt;
 use core::sim::PadState;
 use game::viewer::{camera_from, upload_unit_cube, SceneGpu, CLEAR, GOLDEN_CAM};
 use game::walk::WalkSim;
@@ -37,6 +38,9 @@ fn start_take(
         .ok()
 }
 /// Start the sounds of the tick the sim just stepped (`game::event_sounds`).
+/// `muted`: a LAN peer's own unit whose fire sound this tick the prediction
+/// already played (issue #168).
+#[allow(clippy::too_many_arguments)]
 fn play_event_sounds(
     audio: &mut audio::Audio,
     sl: &mut game::sounds::SoundLib,
@@ -45,6 +49,7 @@ fn play_event_sounds(
     effects: &[(String, glam::Vec3)],
     aspect: f32,
     walk: &WalkSim,
+    muted: Option<u32>,
 ) {
     let listener = game::event_sounds::listener(walk);
     game::event_sounds::each_off_handle(walk, listener.pos, |name, pos| {
@@ -52,7 +57,11 @@ fn play_event_sounds(
     });
     // A human's shots and empty clicks, which share a weapon's handle.
     let mut asks = Vec::new();
-    game::event_sounds::weapon_asks(walk, |a| asks.push(a));
+    game::event_sounds::weapon_asks(walk, |a| {
+        if a.click || Some(a.unit) != muted {
+            asks.push(a);
+        }
+    });
     sl.play_weapon_voices(audio, &asks, &listener);
     // The hurt and death cries, one voice per unit (card UCRY).
     let mut asks = Vec::new();
@@ -289,7 +298,7 @@ fn rain_splashes(
             .map(|(t, _)| t);
         let ground = sim.terrain_ray(top, down, 100.0, 0.5);
         let t = match (body, ground) {
-            (Some(a), Some(b)) => a.min(b),
+            (Some(a), Some(b)) => a.fmin(b),
             (a, b) => a.or(b)?,
         };
         Some(top + down * t)
@@ -338,20 +347,38 @@ mod menu_actions;
 use menu_actions::{apply_pause_action, resolve_direct_settings};
 #[path = "windowed/idle.rs"]
 mod idle;
+/// The LAN session (issue #168).
+#[path = "windowed/lan.rs"]
+mod lan;
+/// The multiplayer pages and the lobby (issue #168).
+#[path = "windowed/lobby.rs"]
+mod lobby;
 #[path = "windowed/mouse.rs"]
 mod mouse;
 #[path = "windowed/spawn_feedback.rs"]
 mod spawn_feedback;
+#[path = "windowed/tick_hook.rs"]
+mod tick_hook;
+pub(super) use lan::run_lan;
 
 enum Screen {
     Shell,
     Loading,
     Battle,
+    /// Issue #168: a LAN session without a round yet (connecting, or the
+    /// host waiting for players).
+    NetWait,
+    /// Issue #168: a LAN session between rounds (the lobby, the results'
+    /// ready check), or a guest connecting from Join Game.
+    Lobby,
 }
 
 #[path = "windowed/loading.rs"]
 mod loading;
 use loading::Loading;
+/// The round's CPU side on the loading worker (LAN §10.5).
+#[path = "windowed/round_prep.rs"]
+mod round_prep;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SpawnTarget {
@@ -476,6 +503,16 @@ struct App {
     frame_seconds: f32,
     /// Low Power Resolution's controller (`game::dyn_res`).
     dyn_res: game::dyn_res::DynRes,
+    /// Automatic quality's governor (LAN §8b.2, `game::quality_governor`)
+    /// and the graphics tiers it steps (none yet, issues #93 and #128).
+    governor: game::quality_governor::Governor,
+    tiers: game::quality_governor::NoTiers,
+    /// The governor's note for the fps counter and the net meter, while it
+    /// drives a battle.
+    quality_note: Option<String>,
+    /// This platform waits for the window's image in the acquire (the
+    /// governor's CPU-bound rule can trust the frame's busy time).
+    acquire_seen: bool,
     /// What it holds this battle's frames to, read from the display once.
     dyn_res_budget_ms: Option<f32>,
     profile: game::profile::Profile,
@@ -483,6 +520,10 @@ struct App {
     round_recorded: bool,
     /// Previous frame's menu-relevant buttons (edge detection).
     prev_menu_buttons: u32,
+    /// The in-battle scoreboard's hold (Select / View, Tab; LAN §5b).
+    score_hold: ui::scoreboard::Hold,
+    /// The other players' names over their heads (LAN §5b).
+    name_tags: game::name_tags::NameTags,
     /// Separate from menu/D-pad state; reset when the sampled controller changes.
     gameplay_stick: GameplayStick<gilrs::GamepadId>,
     /// The left stick's learned travel (#142); reset with `gameplay_stick`.
@@ -544,6 +585,10 @@ struct App {
     /// A connected pad's dead camera stick / FIRE (`input::log_pads`), shown
     /// on every screen until a pad that resolves replaces it (card PADM).
     pad_warning: Option<String>,
+    /// Issue #168: the LAN session; `None` in single player.
+    netplay: Option<lan::NetplaySession>,
+    /// Issue #168: a LAN round's end screens were left (the lobby next).
+    net_round_over: bool,
     last: std::time::Instant,
 }
 
@@ -746,6 +791,10 @@ impl App {
             frame_profile: None,
             frame_seconds: 0.0,
             dyn_res: game::dyn_res::DynRes::default(),
+            governor: Default::default(),
+            tiers: game::quality_governor::NoTiers,
+            quality_note: None,
+            acquire_seen: false,
             dyn_res_budget_ms: None,
             profile,
             profile_store: None,
@@ -763,6 +812,8 @@ impl App {
             snapshot_requested: false,
             snapshot_notice: None,
             prev_menu_buttons: 0,
+            score_hold: Default::default(),
+            name_tags: Default::default(),
             gameplay_stick: GameplayStick::default(),
             stick_range: input::StickRange::default(),
             stick_sample: ([0.0; 2], [0.0; 2]),
@@ -795,6 +846,8 @@ impl App {
             deka_vis: Default::default(),
             gilrs,
             pad_warning,
+            netplay: None,
+            net_round_over: false,
             last: std::time::Instant::now(),
         }
     }
@@ -975,18 +1028,60 @@ impl App {
     /// Shell → loading screen (BF1 sequence + beep), then the battle of
     /// `row`; `false` when its map is not baked.
     fn begin_loading(&mut self, row: ui::shell::Launch) -> bool {
+        let (key, mode) = (row.key.clone(), row.mode.subst().to_owned());
+        self.begin_loading_key(&key, mode, Some(row))
+    }
+
+    /// What the round build reads, taken now (`round_prep::RoundJob`): the
+    /// row's armies, the Session Options, the profile's seed and tier, and a
+    /// LAN round's setup with this peer's slot.
+    fn round_job(
+        &self,
+        key: &str,
+        mode: &str,
+        row: Option<&ui::shell::Launch>,
+    ) -> round_prep::RoundJob {
+        round_prep::RoundJob {
+            missions_dir: self.missions_dir.clone(),
+            assets_dir: self.assets_dir.clone(),
+            name: key.to_owned(),
+            mode: mode.to_owned(),
+            row_armies: row.map_or_else(
+                || ["all".to_owned(), "imp".to_owned()],
+                |r| r.armies.clone(),
+            ),
+            session: self.session,
+            seed: 42u32.wrapping_add(self.profile.career.rounds),
+            difficulty: self.profile.settings.difficulty,
+            net: self
+                .netplay
+                .as_ref()
+                .and_then(|n| Some((n.loading.clone()?, n.peer.local_slot))),
+        }
+    }
+
+    /// [`App::begin_loading`] by map key and mode (`row`: the playlist row,
+    /// none for a LAN round, issue #168).
+    fn begin_loading_key(
+        &mut self,
+        key: &str,
+        mode: String,
+        row: Option<ui::shell::Launch>,
+    ) -> bool {
         // The shell music stops with the shell.
         if let Some(f) = self.front.as_mut() {
             f.stop_music();
         }
         let maps = game::assets::discover_maps(&self.assets_dir);
-        let Some((name, _, dir)) = maps.into_iter().find(|(k, ..)| *k == row.key) else {
-            eprintln!("playlist: {} is not baked; skipped", row.key);
+        let Some((name, _, dir)) = maps.into_iter().find(|(k, ..)| *k == key) else {
+            eprintln!("playlist: {key} is not baked; skipped");
             return false;
         };
-        let mode = row.mode.subst().to_owned();
-        // The measured CPU parse overlaps playback; upload/setup stay here.
-        let worker = match loading::prepare(dir, mode.clone()) {
+        // The CPU parse and the round's CPU side (the walk, the sounds and
+        // the CPU-only resources) overlap playback on the worker; the GPU
+        // upload and the single-player installs stay here (LAN §10.5).
+        let job = self.round_job(key, &mode, row.as_ref());
+        let worker = match loading::prepare_round(dir, mode.clone(), Some(job)) {
             Ok(worker) => worker,
             Err(e) => {
                 eprintln!("loading worker: {e:#}");
@@ -998,14 +1093,14 @@ impl App {
             .overlay
             .as_ref()
             .map_or_else(loading::Display::default, |overlay| {
-                loading::Display::load(&self.assets_dir, &row.key, overlay.ctx())
+                loading::Display::load(&self.assets_dir, key, overlay.ctx())
             });
         println!(
             "loading: presentation_assets_ms={:.3}",
             art_started.elapsed().as_secs_f64() * 1000.0
         );
         self.mode = mode;
-        self.current = Some(row);
+        self.current = row;
         // The launch edge was already drained by the shell. Seed held raw pad
         // codes too: a held accept (including an unbound button) is not new.
         self.seed_loading_pads();
@@ -1032,8 +1127,22 @@ impl App {
     /// the event thread at the explicitly timed final boundary.
     fn redraw_loading(&mut self) -> Result<()> {
         self.pump_loading_pads();
+        // A LAN round enters as soon as it is built: the host's barrier and
+        // the guests' clocks do not wait on the presentation (issue #168).
+        self.net_idle();
+        // The session's events may have ended this loading (the lobby, a
+        // newer round's loading, the waiting screen): that screen is drawn
+        // next, with the session still polled there.
+        if !matches!(self.screen, Screen::Loading) {
+            return Ok(());
+        }
+        let net = self.netplay.is_some();
         let Some(l) = self.loading.as_mut() else {
-            self.init_shell();
+            if self.netplay.is_some() {
+                self.net_to_lobby(None);
+            } else {
+                self.init_shell();
+            }
             return Ok(());
         };
         if let Some(result) = l.worker.poll() {
@@ -1050,9 +1159,12 @@ impl App {
         let elapsed = l.started.elapsed();
         let time = l.playback.time(elapsed);
         let frame = l.display.sample(time);
-        let finish =
+        let finish = if net {
+            l.shown && l.ready.is_some()
+        } else {
             l.playback
-                .can_enter(elapsed, l.display.duration(), l.shown, l.ready.is_some());
+                .can_enter(elapsed, l.display.duration(), l.shown, l.ready.is_some())
+        };
         let prompt = l.playback.prompt(elapsed);
         if let (Some(audio), Some(cues)) = (&mut self.audio, &mut l.cues) {
             cues.update(
@@ -1112,6 +1224,12 @@ impl App {
         if let Some(r) = self.renderer.as_mut() {
             r.clear_scene();
         }
+        // A LAN round that cannot be built here: the host is told (so its
+        // barrier does not wait) and the lobby waits for the next.
+        if self.netplay.is_some() {
+            self.net_round_failed("This round could not be built here".into());
+            return;
+        }
         self.current = None;
         if !self.next_round() {
             self.init_shell();
@@ -1126,8 +1244,39 @@ impl App {
         scene: &game::assets::Scene,
         setup: Option<&BattleSetup>,
     ) -> Result<(WalkSim, MeshHandle)> {
+        self.battle_resources_for(renderer, scene, setup, None, None)
+    }
+
+    /// [`App::battle_resources`]; `net`: a LAN round's setup and the local
+    /// slot (issue #168): the walk is every peer's build
+    /// (`round_setup::build_round`) and nothing local is written into its
+    /// sim (cheats, career, assist, look and handicap come from the setup).
+    fn battle_resources_for(
+        &mut self,
+        renderer: &mut Renderer,
+        scene: &game::assets::Scene,
+        setup: Option<&BattleSetup>,
+        net: Option<(&game::netplay::RoundSetup, u8)>,
+        built: Option<(WalkSim, round_prep::Extras)>,
+    ) -> Result<(WalkSim, MeshHandle)> {
+        let laps = std::time::Instant::now();
         let setup = setup.unwrap_or(&self.setup);
-        let mut walk = make_walk(scene, setup)?;
+        let (mut walk, extras) = match (built, net) {
+            (Some((walk, extras)), _) => (walk, Some(extras)),
+            (None, Some((round, local))) => (
+                super::round_setup::build_round(
+                    scene,
+                    round,
+                    &self.missions_dir,
+                    &self.assets_dir,
+                    local,
+                )?,
+                None,
+            ),
+            (None, None) => (make_walk(scene, setup)?, None),
+        };
+        let walk_ms = laps.elapsed().as_secs_f64() * 1000.0;
+        let lockstep = net.is_some();
         let cube = upload_unit_cube(renderer)?;
         self.fx_quad = game::viewer::upload_billboard_quad(renderer).ok();
         self.fx_sprite = game::viewer::upload_fx_sprite(renderer).ok();
@@ -1144,44 +1293,69 @@ impl App {
             }
         }
         // `[ours]` The session's cheats, whatever the setup says (CHEAT2).
-        self.cheats.install(&mut walk.sim);
-        walk.sim
-            .install_medal_career(walk.player, self.profile.career.medals);
-        walk.sim
-            .set_career_award_bonuses(self.profile.settings.career_awards);
+        if !lockstep {
+            self.cheats.install(&mut walk.sim);
+            walk.sim
+                .install_medal_career(walk.player, self.profile.career.medals);
+            walk.sim
+                .set_career_award_bonuses(self.profile.settings.career_awards);
+        }
         walk.blend = game::render_blend::Blend::from_env();
-        self.engines = game::engine_sound::EngineSounds::new(&scene.dir, &walk);
-        self.ambience =
-            game::ambience::Ambience::load(&scene.manifest, &scene.dir, &setup.classes_dir);
-        let foley_table = self.sounds.as_mut().and_then(|sl| {
-            let table = sl.for_walk(&scene.dir, &walk);
-            preload_sounds(sl);
+        let cpu = std::time::Instant::now();
+        match extras {
+            // Loaded and decoded on the loading worker (`round_prep`).
+            Some(x) => {
+                // Its levels are set in `start_battle`.
+                self.sounds = x.sounds;
+                self.foley = x.foley;
+                self.engines = x.engines;
+                self.ambience = x.ambience;
+                self.feed = x.feed;
+                // The worker built the feed before the single-player
+                // career above: its opening medals are read again.
+                self.feed.set_opening_medals(&walk);
+                self.fx = x.fx;
+                self.weather = x.weather;
+            }
+            None => {
+                self.engines = game::engine_sound::EngineSounds::new(&scene.dir, &walk);
+                self.ambience =
+                    game::ambience::Ambience::load(&scene.manifest, &scene.dir, &setup.classes_dir);
+                let foley_table = self.sounds.as_mut().and_then(|sl| {
+                    let table = sl.for_walk(&scene.dir, &walk);
+                    preload_sounds(sl);
+                    table
+                });
+                self.foley = game::foley::Foley::load(&scene.dir, &walk, foley_table);
+                self.feed = game::event_feed::EventFeed::for_walk(
+                    &self.assets_dir,
+                    &scene.manifest.source_game,
+                    &walk,
+                );
+                self.fx = game::fx::Fx::for_walk(
+                    &self.assets_dir,
+                    &scene.dir,
+                    &scene.manifest.source_game,
+                    &walk,
+                );
+                self.fx.set_water(&scene.manifest);
+                self.fx.set_scene_effects(scene);
+                self.weather = game::weather::Weather::load(
+                    &scene.manifest,
+                    &self.assets_dir,
+                    &scene.dir,
+                    WEATHER_SEED,
+                );
+            }
+        }
+        if let Some(sl) = self.sounds.as_mut() {
             sl.rate_mul = self.cheats.sfx_rate();
-            table
-        });
-        self.foley = game::foley::Foley::load(&scene.dir, &walk, foley_table);
+        }
+        let cpu_ms = cpu.elapsed().as_secs_f64() * 1000.0;
         self.blackbox = start_blackbox(scene, &walk, &self.mode, setup, self.sounds.as_mut());
         self.matchlog = start_matchlog(scene, &walk, &self.mode, setup);
-        self.feed = game::event_feed::EventFeed::for_walk(
-            &self.assets_dir,
-            &scene.manifest.source_game,
-            &walk,
-        );
-        self.fx = game::fx::Fx::for_walk(
-            &self.assets_dir,
-            &scene.dir,
-            &scene.manifest.source_game,
-            &walk,
-        );
-        self.fx.set_water(&scene.manifest);
-        self.fx.set_scene_effects(scene);
+        let gpu = std::time::Instant::now();
         self.fx.preload(renderer);
-        self.weather = game::weather::Weather::load(
-            &scene.manifest,
-            &self.assets_dir,
-            &scene.dir,
-            WEATHER_SEED,
-        );
         self.soldier_vis = Some(game::soldier_vis::SoldierVisuals::for_walk(
             renderer,
             &self.assets_dir,
@@ -1206,17 +1380,26 @@ impl App {
         // What the battle can show later, behind the loading (card HITCH).
         self.vehicle_vis.preload(renderer, &walk.sim);
         self.bolts.preload(renderer, &walk);
-        walk.sim.assist_intensity = self.profile.settings.assist_intensity;
-        walk.sim.pad_look_sensitivity =
-            walk.pad_look_for_battle(self.profile.settings.pad_look_sensitivity);
+        if !lockstep {
+            walk.sim.assist_intensity = self.profile.settings.assist_intensity;
+            walk.sim.pad_look_sensitivity =
+                walk.pad_look_for_battle(self.profile.settings.pad_look_sensitivity);
+        }
         walk.fov_scale = self.profile.settings.fov_scale;
         if let Some(m) = walk.music.as_mut() {
             m.volume = game::music::volume_from_env(self.profile.settings.music_volume);
         }
         // THE MAINTAINER'S RULE: the aim assist is the PLAYER'S switch — no difficulty
         // tier reads it (the PS2 BF2's Elite clears it, RE §9.3; not ours).
-        walk.sim.assist_armed = self.profile.settings.aim_assist;
-        walk.sim.team_handicap_on = self.profile.settings.team_handicap_on;
+        if !lockstep {
+            walk.sim.assist_armed = self.profile.settings.aim_assist;
+            walk.sim.team_handicap_on = self.profile.settings.team_handicap_on;
+        }
+        println!(
+            "loading: event_thread walk_ms={walk_ms:.3} cpu_resources_ms={cpu_ms:.3} \
+             visuals_ms={:.3}",
+            gpu.elapsed().as_secs_f64() * 1000.0
+        );
         Ok((walk, cube))
     }
 
@@ -1231,9 +1414,57 @@ impl App {
         let gpu = super::battle::upload_battle_scene(renderer, &scene, &prepared.load)?;
         let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
         let setup_started = std::time::Instant::now();
-        self.sounds = game::sounds::SoundLib::load(&scene.dir);
-        self.sync_audio_levels();
+        let round = prepared.round;
+        if round.is_none() {
+            self.sounds = game::sounds::SoundLib::load(&scene.dir);
+            self.sync_audio_levels();
+        }
         self.music_voice = None;
+        // A LAN round (issue #168) is the host's setup, built alike on every peer.
+        let net_round = self.netplay.as_mut().and_then(|n| n.loading.take());
+        let local_slot = self.netplay.as_ref().map_or(0, |n| n.peer.local_slot);
+        let (setup, teams, built) = match round {
+            Some(r) => {
+                println!("loading: worker {}", r.laps);
+                (r.setup, r.teams, Some((r.walk, r.extras)))
+            }
+            None => {
+                let (setup, teams) = self.serial_setup(&name, net_round.as_ref())?;
+                (setup, teams, None)
+            }
+        };
+        // Release the renderer field borrow while installing the other App resources.
+        let mut renderer = self.renderer.take().expect("loaded renderer");
+        let resources = self.battle_resources_for(
+            &mut renderer,
+            &scene,
+            Some(&setup),
+            net_round.as_ref().map(|r| (r, local_slot)),
+            built,
+        );
+        self.renderer = Some(renderer);
+        let (mut walk, cube) = resources?;
+        self.sync_audio_levels();
+        match self.netplay.as_mut() {
+            // `build_round` opened the screens and seated the humans.
+            Some(n) => n.round_built(&mut walk),
+            None => super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref()),
+        }
+        self.enter_battle(name, teams, setup, walk, cube, gpu);
+        println!(
+            "loading: upload_ms={upload_ms:.3} setup_ms={:.3}",
+            setup_started.elapsed().as_secs_f64() * 1000.0
+        );
+        Ok(())
+    }
+
+    /// The shell's or a LAN round's setup, built on the event thread (a
+    /// loading without a round job).
+    fn serial_setup(
+        &self,
+        name: &str,
+        net_round: Option<&game::netplay::RoundSetup>,
+    ) -> Result<(BattleSetup, [String; 2])> {
         // The mission whose pair was picked (Republic against CIS runs the
         // map's Clone Wars script), the player's army on its own team there;
         // a cross-era pair runs the map's default mission (card ERAM).
@@ -1242,94 +1473,34 @@ impl App {
             || ["all".to_owned(), "imp".to_owned()],
             |r| r.armies.clone(),
         );
-        let armies = [row_armies[0].as_str(), row_armies[1].as_str()];
-        let pick = game::mission::pick(&self.missions_dir, &name, &self.mode, armies);
-        let player_team = pick.as_ref().map_or(0, |p| p.player_team);
-        let mut teams = armies.map(str::to_string);
-        if player_team == 1 {
-            teams.swap(0, 1);
-        }
-        let mission_file = pick.as_ref().and_then(|p| super::file_name(&p.path));
-        match &pick {
-            Some(p) => println!(
-                "mission: {} for {} against {} ({}), the player on team {}",
-                p.path.display(),
-                armies[0],
-                armies[1],
-                if p.own {
-                    "its own pair"
-                } else {
-                    "a cross-era pair"
-                },
-                player_team + 1
+        match net_round {
+            Some(round) => {
+                super::round_setup::battle_setup(round, &self.missions_dir, &self.assets_dir)
+            }
+            None => super::round_setup::shell_setup(
+                &self.missions_dir,
+                &self.assets_dir,
+                name,
+                &self.mode,
+                &row_armies,
+                &self.session,
+                42u32.wrapping_add(self.profile.career.rounds),
+                self.profile.settings.difficulty,
             ),
-            None => println!("mission: none for {name} {}", self.mode),
         }
-        let mut mission = pick.map(|p| p.mission);
-        anyhow::ensure!(
-            !matches!(self.mode.as_str(), "eli" | "hunt") || mission.is_some(),
-            "Hero Assault and Hunt require a mission"
-        );
-        anyhow::ensure!(
-            mission.as_ref().is_none_or(|m| m.mode == self.mode),
-            "mission mode differs from {}",
-            self.mode
-        );
-        let assault = mission.as_ref().is_some_and(|m| m.is_hero_assault());
-        let hunt = self.mode == "hunt";
-        if let Some(m) = mission.as_mut().filter(|_| assault) {
-            m.ai_alive_cap = self.session.ass_numbots.max(0) as u32;
-        }
-        let space = self.mode == "ass";
-        let setup = BattleSetup {
-            seed: 42u32.wrapping_add(self.profile.career.rounds),
-            // The shell round takes the PROFILE's tier (no CLI flag here);
-            // Session Options' AI Difficulty writes it.
-            difficulty: self.profile.settings.difficulty,
-            spawn: (0.0, 0.0),
-            spawn_set: false,
-            targets: false,
-            // Map-relative team size, including the human.
-            ai: None,
-            // Explicit CLI cap is separate from the percentage setting.
-            ai_cap: space.then_some(self.session.ass_numbots.max(0) as u32),
-            team_size_pct: (!assault && !space && !hunt).then_some(self.session.con_numbots as u32),
-            // Calibrated map tickets, scaled by the shell percentage.
-            tickets: 250,
-            tickets_set: false,
-            ticket_pct: if assault || space || hunt {
-                100
-            } else {
-                self.session.con_mult.max(10) as u32
-            },
-            time_limit: if hunt {
-                self.session.hun_timer.max(1) as u32
-            } else if assault || space {
-                0
-            } else {
-                self.session.con_timer.max(0) as u32
-            },
-            space_score_limit: self.session.ass_score.max(1) as u32,
-            cheats: core::sim::Cheats::default(),
-            teams: Some(teams.clone()),
-            classes_dir: self.assets_dir.join("classes"),
-            mission,
-            mission_file,
-            player_team,
-            heroes: game::heroes::rules(&self.session),
-            dlc_heroes: self.session.dlc_heroes,
-            score_limit: if hunt {
-                self.session.hun_score.max(1) as u32
-            } else {
-                self.session.ass_score.max(0) as u32
-            },
-        };
-        // Release the renderer field borrow while installing the other App resources.
-        let mut renderer = self.renderer.take().expect("loaded renderer");
-        let resources = self.battle_resources(&mut renderer, &scene, Some(&setup));
-        self.renderer = Some(renderer);
-        let (mut walk, cube) = resources?;
-        super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
+    }
+
+    /// The built battle in play: the profile's last battle, the App's
+    /// battle state, the first frame next.
+    fn enter_battle(
+        &mut self,
+        name: String,
+        teams: [String; 2],
+        setup: BattleSetup,
+        walk: WalkSim,
+        cube: MeshHandle,
+        gpu: SceneGpu,
+    ) {
         self.profile.settings.last_map = Some(name);
         self.profile.settings.last_mode = Some(self.mode.clone());
         self.profile.settings.last_teams = Some(teams);
@@ -1350,16 +1521,13 @@ impl App {
         self.screen = Screen::Battle;
         self.sync_grab();
         self.start_frame_record();
-        println!(
-            "loading: upload_ms={upload_ms:.3} setup_ms={:.3}",
-            setup_started.elapsed().as_secs_f64() * 1000.0
-        );
-        Ok(())
     }
 
     /// A battle's first frame is next: the frame record starts over and the
     /// black box writes it into its snapshots (card HITCH).
     fn start_frame_record(&mut self) {
+        // The governor keeps the level it learned and warms up again.
+        self.governor.restart();
         if let Some(p) = self.frame_profile.as_mut() {
             p.reset();
             if let Some(bb) = self.blackbox.as_mut() {
@@ -1390,7 +1558,13 @@ impl App {
     }
 
     fn game_audio_paused(&self) -> bool {
-        self.in_battle() && self.paused
+        self.frozen()
+    }
+
+    /// The battle's clock is stopped: paused in single player. A LAN round
+    /// never stops (issue #168): its pause menu overlays a running battle.
+    fn frozen(&self) -> bool {
+        self.in_battle() && self.paused && self.netplay.is_none()
     }
 
     /// Pause or resume the game's mixer bus to match [`App::game_audio_paused`].
@@ -1418,8 +1592,12 @@ impl App {
         }
     }
 
-    /// Battle → shell (records the round).
+    /// Battle → shell (records the round). A LAN session ends with it
+    /// (issue #168).
     fn leave_battle(&mut self) {
+        if let Some(n) = self.netplay.take() {
+            n.shutdown();
+        }
         self.rumble_effect = None;
         self.rumble_tick = Default::default();
         self.blackbox_exit();
@@ -1649,6 +1827,16 @@ impl App {
 
 /// Shell entry: window + shell screen; battles start from the menu.
 pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()> {
+    let (event_loop, mut app) = shell_app(assets_dir, missions_dir)?;
+    run_app(event_loop, &mut app)
+}
+
+/// The shell's event loop and App, not yet running (the shell's and a LAN
+/// launch's start).
+fn shell_app(
+    assets_dir: PathBuf,
+    missions_dir: PathBuf,
+) -> Result<(winit::event_loop::EventLoop<()>, App)> {
     let event_loop = winit::event_loop::EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
     let profile_store = std::env::var_os("OPENBF_PROFILE")
@@ -1701,7 +1889,7 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
     app.frame_profile = frame_profile;
     app.autopilot = autopilot;
     app.quit_at = quit_at;
-    run_app(event_loop, &mut app)
+    Ok((event_loop, app))
 }
 
 #[path = "windowed/tests.rs"]

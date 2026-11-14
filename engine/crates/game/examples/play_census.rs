@@ -40,6 +40,7 @@
 //!   (`CENSUS_RAYS=x,y,z`): one spot in detail.
 //!
 //! Threads: `SWEEP_THREADS`, default 4. It only reads the bake.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::{buttons, Event, PadState};
 use core::unit::UnitHandle;

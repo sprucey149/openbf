@@ -111,6 +111,9 @@ pub struct Settings {
     /// 0 = off, 1 = on. Older profiles may store 2, which also enables it.
     #[serde(default)]
     pub fps_counter: u8,
+    /// Issue #168: the LAN net meter overlay (F7 toggles it too).
+    #[serde(default)]
+    pub network_meter: bool,
     /// Controller feedback strength. Zero turns it off.
     #[serde(default = "one", deserialize_with = "rumble_setting")]
     pub rumble_strength: f32,
@@ -128,6 +131,11 @@ pub struct Settings {
     /// (`game::dyn_res`), the HUD at full size. Off by default.
     #[serde(default)]
     pub low_power_resolution: bool,
+    /// Automatic quality (LAN §8b.2, `game::quality_governor`): the world's
+    /// render scale follows the frame times. On by default; off keeps
+    /// Low Power Resolution's choice.
+    #[serde(default = "yes")]
+    pub auto_quality: bool,
     #[serde(default)]
     pub viewpoint: crate::viewpoint::Viewpoint,
     #[serde(default, deserialize_with = "keyboard_bindings")]
@@ -151,6 +159,10 @@ pub struct Settings {
     pub last_map: Option<String>,
     pub last_mode: Option<String>,
     pub last_teams: Option<[String; 2]>,
+    /// Issue #168: the LAN hosts last joined, newest first
+    /// (`netplay::lobby::remember_host`).
+    #[serde(default)]
+    pub recent_hosts: Vec<String>,
 }
 
 impl Settings {
@@ -159,7 +171,9 @@ impl Settings {
         self.fov_scale = defaults.fov_scale;
         self.viewpoint = defaults.viewpoint;
         self.fps_counter = defaults.fps_counter;
+        self.network_meter = defaults.network_meter;
         self.low_power_resolution = defaults.low_power_resolution;
+        self.auto_quality = defaults.auto_quality;
     }
 }
 
@@ -176,12 +190,14 @@ impl Default for Settings {
             effects_volume: 1.0,
             dialogue_volume: 1.0,
             fps_counter: 0,
+            network_meter: false,
             rumble_strength: 1.0,
             rumble_on_fire: false,
             mouse_sensitivity: 1.0,
             pad_look_sensitivity: 1.0,
             invert_y: false,
             low_power_resolution: false,
+            auto_quality: true,
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
@@ -194,6 +210,7 @@ impl Default for Settings {
             last_map: None,
             last_mode: None,
             last_teams: None,
+            recent_hosts: Vec::new(),
         }
     }
 }
@@ -721,5 +738,26 @@ mod tests {
         let high = serialized.replace("team_size_pct:100", "team_size_pct:500");
         let loaded: super::Settings = ron::from_str(&high).unwrap();
         assert_eq!(loaded.team_size_pct, ui::population::MAX_TEAM_PCT);
+    }
+
+    /// Issue #168: the recent LAN hosts and the player name survive a save
+    /// and a load; a profile from before them loads with none.
+    #[test]
+    fn recent_hosts_and_the_player_name_persist() {
+        let dir = std::env::temp_dir().join(format!("openbf_recent_{}", std::process::id()));
+        let path = dir.join("profile.ron");
+        let mut p = Profile {
+            name: "Ann".into(),
+            ..Default::default()
+        };
+        crate::netplay::lobby::remember_host(&mut p.settings.recent_hosts, "10.0.0.2");
+        crate::netplay::lobby::remember_host(&mut p.settings.recent_hosts, "studio-pc:40000");
+        p.save_to(&path).unwrap();
+        let back = Profile::load_from(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(back.name, "Ann");
+        assert_eq!(back.settings.recent_hosts, ["studio-pc:40000", "10.0.0.2"]);
+        let old: Settings = ron::from_str("(assist_intensity: 0.5)").unwrap();
+        assert!(old.recent_hosts.is_empty());
     }
 }

@@ -38,6 +38,7 @@ pub fn medal_threshold(medal: usize, count: u32) -> u32 {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct MedalCareer {
     life: UnitHandle,
     counts: MedalCounts,
@@ -153,40 +154,100 @@ fn bit(t: i8) -> u16 {
 }
 
 impl Sim {
-    /// Initialize the local player's career from the saved profile.
+    /// Initialize a player's career from the saved profile: the career of
+    /// the player slot `life` holds (slot 0 for a unit without one, the
+    /// single player's).
     pub fn install_medal_career(&mut self, life: UnitHandle, counts: MedalCounts) {
-        if !self.space_round() {
-            self.medal_career = Some(MedalCareer {
-                life,
-                counts,
-                progress: [0; MEDAL_THRESHOLDS.len()],
-                earned: 0,
-                activated_at: [None; MEDAL_THRESHOLDS.len()],
-                carry_on_respawn: 0,
-                preserve_on_respawn: false,
-                bonuses: true,
-            });
+        let slot = self
+            .units
+            .get(life.index as usize)
+            .and_then(|u| u.spec.player_slot)
+            .map_or(0, usize::from);
+        self.install_slot_medal_career(slot, life, counts);
+    }
+
+    /// Issue #168: initialize player slot `slot`'s career, whose life is
+    /// `life`, from that player's profile (LAN §4.1). Nothing in a space
+    /// round, as for the single player.
+    pub fn install_slot_medal_career(
+        &mut self,
+        slot: usize,
+        life: UnitHandle,
+        counts: MedalCounts,
+    ) {
+        if self.space_round() {
+            return;
+        }
+        if self.medal_careers.len() <= slot {
+            self.medal_careers.resize_with(slot + 1, || None);
+        }
+        self.medal_careers[slot] = Some(MedalCareer {
+            life,
+            counts,
+            progress: [0; MEDAL_THRESHOLDS.len()],
+            earned: 0,
+            activated_at: [None; MEDAL_THRESHOLDS.len()],
+            carry_on_respawn: 0,
+            preserve_on_respawn: false,
+            bonuses: true,
+        });
+    }
+
+    /// Issue #168: drop player slot `slot`'s career (a player who left).
+    pub fn remove_slot_medal_career(&mut self, slot: usize) {
+        if let Some(c) = self.medal_careers.get_mut(slot) {
+            *c = None;
         }
     }
 
-    /// Whether earned career medals can grant weapons and stat bonuses.
-    pub fn career_award_bonuses(&self) -> bool {
-        self.medal_career.as_ref().is_some_and(|c| c.bonuses)
+    fn career(&self, slot: usize) -> Option<&MedalCareer> {
+        self.medal_careers.get(slot).and_then(Option::as_ref)
     }
 
-    /// Apply the bonus preference while continuing to record progress.
+    /// The career of unit `u`'s player slot.
+    fn career_of(&self, u: &Unit) -> Option<&MedalCareer> {
+        self.career(usize::from(u.spec.player_slot?))
+    }
+
+    /// Whether slot 0's earned career medals can grant weapons and stat
+    /// bonuses ([`Sim::slot_career_award_bonuses`]).
+    pub fn career_award_bonuses(&self) -> bool {
+        self.slot_career_award_bonuses(0)
+    }
+
+    /// Whether player slot `slot`'s earned career medals can grant weapons
+    /// and stat bonuses.
+    pub fn slot_career_award_bonuses(&self, slot: usize) -> bool {
+        self.career(slot).is_some_and(|c| c.bonuses)
+    }
+
+    /// Slot 0's [`Sim::set_slot_career_award_bonuses`].
     pub fn set_career_award_bonuses(&mut self, enabled: bool) {
-        let Some(career) = self.medal_career.as_mut().filter(|c| c.bonuses != enabled) else {
+        self.set_slot_career_award_bonuses(0, enabled);
+    }
+
+    /// Apply player slot `slot`'s bonus preference while continuing to
+    /// record progress.
+    pub fn set_slot_career_award_bonuses(&mut self, slot: usize, enabled: bool) {
+        let tick = self.tick;
+        let Some(career) = self
+            .medal_careers
+            .get_mut(slot)
+            .and_then(Option::as_mut)
+            .filter(|c| c.bonuses != enabled)
+        else {
             return;
         };
         career.bonuses = enabled;
         let i = career.life.index as usize;
+        let life_gen = career.life.gen;
         if self.units.get(i).is_some_and(|u| u.is_player && u.alive) {
-            if enabled && self.units[i].gen == career.life.gen {
+            if enabled && self.units[i].gen == life_gen {
+                let career = self.medal_careers[slot].as_mut().unwrap();
                 for (medal, activated) in career.activated_at.iter_mut().enumerate() {
                     if career.earned & (1 << medal) != 0 && (4..64).contains(&career.counts[medal])
                     {
-                        activated.get_or_insert(self.tick);
+                        activated.get_or_insert(tick);
                     }
                 }
             }
@@ -195,35 +256,47 @@ impl Sim {
         }
     }
 
+    /// Slot 0's medal counts ([`Sim::slot_medal_counts`]).
     pub fn medal_counts(&self) -> Option<MedalCounts> {
-        self.medal_career.as_ref().map(|career| career.counts)
+        self.slot_medal_counts(0)
+    }
+
+    /// Player slot `slot`'s medal counts, when it has a career.
+    pub fn slot_medal_counts(&self, slot: usize) -> Option<MedalCounts> {
+        self.career(slot).map(|career| career.counts)
+    }
+
+    /// The careers whose current life is `life`, in slot order.
+    fn careers_of_life(&mut self, life: UnitHandle) -> impl Iterator<Item = &mut MedalCareer> {
+        self.medal_careers
+            .iter_mut()
+            .flatten()
+            .filter(move |c| c.life == life)
     }
 
     // A living hero accept changes the body, but does not end the medal life.
     pub(super) fn carry_medals_into_hero(&mut self, life: UnitHandle) {
-        if let Some(career) = self.medal_career.as_mut().filter(|c| c.life == life) {
+        for career in self.careers_of_life(life) {
             career.preserve_on_respawn = true;
         }
     }
 
     pub(super) fn note_medal_death(&mut self, life: UnitHandle) {
-        let Some(career) = self.medal_career.as_mut().filter(|c| c.life == life) else {
-            return;
-        };
-        career.carry_on_respawn = 0;
-        if career.bonuses {
-            for (medal, activated) in career.activated_at.iter().enumerate() {
-                if activated
-                    .is_some_and(|tick| self.tick.saturating_sub(tick) <= AWARD_DEATH_WINDOW)
-                {
-                    career.carry_on_respawn |= 1 << medal;
+        let tick = self.tick;
+        for career in self.careers_of_life(life) {
+            career.carry_on_respawn = 0;
+            if career.bonuses {
+                for (medal, activated) in career.activated_at.iter().enumerate() {
+                    if activated.is_some_and(|t| tick.saturating_sub(t) <= AWARD_DEATH_WINDOW) {
+                        career.carry_on_respawn |= 1 << medal;
+                    }
                 }
             }
         }
     }
 
     pub(in crate::sim) fn respawn_medals(&mut self, old: UnitHandle, new: UnitHandle) {
-        if let Some(career) = self.medal_career.as_mut().filter(|c| c.life == old) {
+        for career in self.careers_of_life(old) {
             if std::mem::take(&mut career.preserve_on_respawn) {
                 career.life = new;
             } else {
@@ -242,20 +315,26 @@ impl Sim {
         }
     }
 
+    /// Progress toward `medal` for the career following unit slot
+    /// `life.index` (the first in slot order: a slot's unit index is its
+    /// own while it holds the slot), when that unit is a player of `life`'s
+    /// generation.
     fn medal_progress(&mut self, life: UnitHandle, medal: usize, amount: u32) {
-        if self
-            .medal_career
-            .as_ref()
-            .is_some_and(|c| c.life.index == life.index)
-            && self
-                .units
-                .get(life.index as usize)
-                .is_some_and(|u| u.is_player && u.gen == life.gen)
+        if !self
+            .units
+            .get(life.index as usize)
+            .is_some_and(|u| u.is_player && u.gen == life.gen)
         {
-            self.medal_career
-                .as_mut()
-                .unwrap()
-                .add(life, medal, amount, self.tick);
+            return;
+        }
+        let tick = self.tick;
+        if let Some(career) = self
+            .medal_careers
+            .iter_mut()
+            .flatten()
+            .find(|c| c.life.index == life.index)
+        {
+            career.add(life, medal, amount, tick);
         }
     }
 
@@ -283,7 +362,7 @@ impl Sim {
         killed: bool,
         critical: bool,
     ) {
-        if self.medal_career.is_none() {
+        if self.medal_careers.iter().all(Option::is_none) {
             return;
         }
         match self.weapon_classes.get(class).and_then(|w| w.medals_type) {
@@ -310,8 +389,8 @@ impl Sim {
         if !u.is_player || self.space_round() {
             return 0;
         }
-        let c = &self.cheats;
-        let mut bits = self.medal_career.as_ref().map_or(0, |c| c.bits(u.gen));
+        let c = self.cheats_of(u);
+        let mut bits = self.career_of(u).map_or(0, |c| c.bits(u.gen));
         if c.all_awards {
             bits |= WEAPON_MEDALS;
         }
@@ -335,6 +414,17 @@ impl Sim {
     /// PS2 tests a class flag, so every Hero Assault class counts.
     pub fn medal_effect(&self, u: &Unit, medal: u16) -> bool {
         self.award_bits(u) & (1 << medal) != 0 && !self.hero_unit(u)
+    }
+
+    /// The cheats of vehicle `v`'s pilot (its pilot seat's rider): the
+    /// session's when no one holds the seat, as when cheats were one set.
+    pub(super) fn pilot_cheats(&self, v: &crate::vehicle::Vehicle) -> super::state::Cheats {
+        v.seats
+            .first()
+            .filter(|s| s.kind == crate::vehicle::SeatKind::Pilot)
+            .and_then(|s| s.occupant)
+            .and_then(|o| self.units.get(o.index as usize).filter(|u| u.gen == o.gen))
+            .map_or(self.cheats, |u| self.cheats_of(u))
     }
 
     /// Does the driver of vehicle slot `i` (its pilot seat's rider) have the

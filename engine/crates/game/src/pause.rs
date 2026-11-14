@@ -222,6 +222,8 @@ pub fn apply_menu_action(
         | MenuAction::SetEffectsVolume(_)
         | MenuAction::SetDialogueVolume(_)
         | MenuAction::SetFpsCounter(_)
+        | MenuAction::SetNetworkMeter(_)
+        | MenuAction::EditPlayerName
         | MenuAction::EditBindings(..)
         | MenuAction::SetRumble(_)
         | MenuAction::ToggleRumbleOnFire
@@ -229,6 +231,7 @@ pub fn apply_menu_action(
         | MenuAction::ToggleFlightControls
         | MenuAction::ToggleInvertY
         | MenuAction::ToggleLowPowerResolution
+        | MenuAction::SetAutoQuality(_)
         | MenuAction::CycleInputIcons(_)
         | MenuAction::ToggleViewpoint => {}
     }

@@ -10,13 +10,16 @@
 //! top of it, [`Sim::resolve_spawn_seats`], card LLEG); and the headless
 //! referees' [`Sim::vacate_player_slot`]; the human's spawn screens (card
 //! SSELA: [`SpawnStage`], [`SideChoice`], [`Sim::open_spawn_screens`]); the
-//! live class change at a friendly post (issue #28, `spawn/class_change.rs`).
+//! live class change at a friendly post (issue #28, `spawn/class_change.rs`);
+//! a human joining or leaving a running round (issue #168, `spawn/humans.rs`:
+//! [`Sim::join_human`], [`Sim::leave_human`]).
 //! Runtime methods live in `spawn/runtime.rs`; spawn and class regressions
 //! live in `spawn/tests.rs`, with screen regressions in `spawn/tests/screens.rs`.
 
 use super::input::buttons;
 #[cfg(any(test, doc))]
 use super::state::Sim;
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 /// Which spawn screen a human slot has up (card SSELA; the PS2's spawn
@@ -177,7 +180,7 @@ impl SpawnWaves {
     }
 
     pub fn slots(&self) -> u32 {
-        (self.delay / self.interval).round().max(1.0) as u32
+        (self.delay / self.interval).round().fmax(1.0) as u32
     }
 
     pub fn cur_slot(&self) -> u32 {
@@ -214,7 +217,7 @@ impl SpawnWaves {
     pub fn countdown(&self, slot: (u32, u32)) -> f32 {
         let ahead = self.ahead(slot) + 1;
         let into_slot = self.timer - self.cur_slot() as f32 * self.interval;
-        (ahead as f32 * self.interval - into_slot).max(0.0)
+        (ahead as f32 * self.interval - into_slot).fmax(0.0)
     }
 }
 
@@ -261,6 +264,8 @@ pub fn walker_point(pos: Vec3, rot: glam::Quat, (local, angle): (Vec3, f32)) -> 
 }
 
 mod class_change;
+mod humans;
+pub use humans::{JoinError, MAX_PLAYER_SLOTS};
 mod runtime;
 
 #[cfg(test)]

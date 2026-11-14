@@ -1,6 +1,7 @@
 //! Turning a tick's sim events into live effects.
 
 use super::*;
+use core::fmath::FloatExt;
 
 impl Fx {
     /// [`Fx::ingest`] over the sim itself.
@@ -306,7 +307,7 @@ impl Fx {
                     let w = setup.map_or(0.0, |b| b.sphere_radius);
                     self.puffs.push(Puff {
                         pos: *pos + Vec3::Y * (w * 0.5),
-                        kind: Kind::Blast((w * 1.5).max(BLAST_MIN_SIZE)),
+                        kind: Kind::Blast((w * 1.5).fmax(BLAST_MIN_SIZE)),
                         team: 0,
                         age: 0.0,
                     });

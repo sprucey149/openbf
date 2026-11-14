@@ -1,3 +1,9 @@
 # Shell scripts keep LF on every checkout: Git for Windows would otherwise write CRLF, and bash
 # refuses a script with CRs (scripts/pack.py runs rebake.sh under Git Bash, card WIN).
 *.sh text eol=lf
+# The game's sources keep LF in the repository and on every checkout, whatever core.autocrlf says:
+# the LAN build id hashes uncommitted changes, so the same commit must read clean on Linux, Windows
+# and macOS (engine/crates/game/build.rs, issue #168).
+engine/crates/** text=auto eol=lf
+engine/Cargo.toml text eol=lf
+engine/Cargo.lock text eol=lf

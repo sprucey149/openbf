@@ -173,10 +173,7 @@ pub fn bake_companion(lvl: &Path, model: &str, out: &Path) -> Result<usize> {
         c.part = first + k;
     }
     let path = manifest::cloth::path(out, model);
-    std::fs::write(
-        path,
-        ron::ser::to_string_pretty(&cloths, ron::ser::PrettyConfig::default())?,
-    )?;
+    std::fs::write(path, ron::ser::to_string_pretty(&cloths, crate::pretty())?)?;
     Ok(cloths.len())
 }
 

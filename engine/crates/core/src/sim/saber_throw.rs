@@ -3,6 +3,7 @@
 
 use super::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::hero_weapon::{SaberFlight, SaberThrow};
 use crate::projectile::{building_hit, Hit, Target};
 use crate::TICK_DT;
@@ -116,7 +117,7 @@ impl Sim {
                 ray_terrain_ps2(hf, &self.collision.cutters, pos, pos + direction * distance)
             })
             .map_or(distance, |fraction| distance * fraction);
-        let outgoing = world.min(ground) / data.velocity;
+        let outgoing = world.fmin(ground) / data.velocity;
         let flight = SaberFlight {
             pos,
             velocity: direction * data.velocity,
@@ -196,7 +197,7 @@ impl Sim {
                             flight.turn_back(
                                 after.w_axis.truncate(),
                                 before_angle + (flight.angle - before_angle) * fraction,
-                                step_dt.max(0.0) * (1.0 - fraction),
+                                step_dt.fmax(0.0) * (1.0 - fraction),
                             );
                             break;
                         }
@@ -403,7 +404,7 @@ impl Sim {
     ) {
         let Some(u) = self.unit(victim) else { return };
         let friendly = u.team == self.units[i].team;
-        if (u.is_player && self.cheats.invincible)
+        if (u.is_player && self.cheats_of(u).invincible)
             || (u.is_player && friendly && !self.units[i].is_player)
         {
             return;

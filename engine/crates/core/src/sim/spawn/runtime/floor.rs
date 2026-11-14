@@ -1,4 +1,5 @@
 //! Bounded capsule-clear floor floods and paths used by spawn and navigation checks.
+use crate::fmath::FloatExt;
 #[cfg(doc)]
 use crate::sim::spawn::PEN_CELLS;
 
@@ -89,7 +90,7 @@ impl Sim {
         if seen.contains(&key) {
             return None;
         }
-        let base = Vec3::new(a.x, a.y.max(f), a.z);
+        let base = Vec3::new(a.x, a.y.fmax(f), a.z);
         let cap = Capsule {
             base,
             height,
@@ -163,7 +164,7 @@ impl Sim {
         use std::cmp::Reverse;
         let start = Vec2::new(from.x, from.z);
         let line = to - start;
-        let len2 = line.length_squared().max(1e-6);
+        let len2 = line.length_squared().fmax(1e-6);
         let off_line = |p: Vec2| {
             let t = ((p - start).dot(line) / len2).clamp(0.0, 1.0);
             (p - (start + line * t)).length()

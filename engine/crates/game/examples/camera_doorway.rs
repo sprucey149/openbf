@@ -7,6 +7,7 @@
 //!
 //! `boom` is the drawn camera's distance from the pull point, `ideal` the
 //! unpulled one, `f` the stored track fraction, `raw` this frame's.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 use anyhow::{Context, Result};
 use core::sim::{buttons, PadState, Sim, SpawnStage};
 use game::assets::Scene;

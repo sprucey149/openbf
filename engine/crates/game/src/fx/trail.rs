@@ -3,6 +3,7 @@
 //! distinct. The `TrailEffect` rules are `analysis/re-fx.md` §14.
 
 use super::{Frame, Fx};
+use core::fmath::FloatExt;
 use core::projectile::Bolt;
 use core::sim::{Event, Sim};
 use core::sticky::Sticky;
@@ -47,7 +48,7 @@ impl Rounds {
                         .push_back(*id);
                     continue;
                 }
-                let pos = b.pos + b.vel * core::TICK_DT.min(b.remaining.max(0.0));
+                let pos = b.pos + b.vel * core::TICK_DT.fmin(b.remaining.fmax(0.0));
                 previous
                     .entry((
                         crate::bolt_vis::key(b),

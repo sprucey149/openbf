@@ -7,6 +7,7 @@ use super::{
     mover::MoveRequest,
     state::AiState,
 };
+use crate::fmath::FloatExt;
 use crate::{
     collision::{HullFilter, Layers},
     fmath, nav, perception,
@@ -73,7 +74,7 @@ impl JetState {
         eat(&[u8::from(self.flight.is_some())]);
         if let Some(f) = self.flight {
             for v in [f.goal.x, f.goal.y, f.goal.z, f.kick.x, f.kick.y, f.kick.z] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
             eat(&[
                 u8::from(f.height.is_some()),
@@ -83,7 +84,7 @@ impl JetState {
                 u8::from(f.stop),
             ]);
             if let Some(h) = f.height {
-                eat(&h.to_bits().to_le_bytes());
+                eat(&h.hash_bits().to_le_bytes());
             }
             eat(&f.since.to_le_bytes());
         }
@@ -283,8 +284,8 @@ pub(super) fn run(
             let probe = graph.hubs[arc.a as usize]
                 .pos
                 .y
-                .max(graph.hubs[arc.b as usize].pos.y)
-                .max(s.pos.y);
+                .fmax(graph.hubs[arc.b as usize].pos.y)
+                .fmax(s.pos.y);
             let mut goal = r.waypoint;
             let floor = sim.ground_under(Vec3::new(goal.x, probe, goal.z), false);
             if floor > -300.0 {
@@ -378,4 +379,4 @@ pub(super) fn run(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

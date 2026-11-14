@@ -21,6 +21,7 @@ use super::awards::endurance_rate;
 use super::state::{DeathCause, Event, Sim};
 use crate::collision::NO_GROUND;
 use crate::collision::{CollisionWorld, HullFilter, Layers, Shape};
+use crate::fmath::FloatExt;
 use crate::heightfield::Heightfield;
 use crate::unit::SOLDIER_RADIUS;
 use crate::unit::{Controller, UnitHandle};
@@ -158,7 +159,7 @@ impl WalkerWorld for WorldContacts<'_> {
                 HullFilter::Static,
             ) {
                 let t = h.t;
-                best = Some(best.map_or(t, |b| b.min(t)));
+                best = Some(best.map_or(t, |b| b.fmin(t)));
             }
         }
         best

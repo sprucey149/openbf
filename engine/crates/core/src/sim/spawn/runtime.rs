@@ -8,6 +8,7 @@ use super::{
 use crate::aim_assist::AssistState;
 use crate::battle::SpawnOutcome;
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::sim::input::{buttons, PadState, ScreenPick};
 use crate::sim::state::{Event, Sim};
 use crate::unit::{Controller, SpawnPost, Unit, UnitHandle, UnitSpec};
@@ -190,7 +191,7 @@ impl Sim {
         let mut last = y;
         over.find(|&f| {
             let new = f > last;
-            last = last.max(f);
+            last = last.fmax(f);
             new && self.floor_reach(at(f), PEN_CELLS) >= PEN_CELLS
         })
     }
@@ -616,7 +617,8 @@ impl Sim {
     /// counts it against the `alive < tickets` ticket rule for the whole
     /// round because it never dies, and [`Sim::apply_team_handicap`] reads
     /// `is_player` over `units` to decide which side is the human's. The game
-    /// binary never calls this.
+    /// binary calls it only through [`Sim::leave_human`] (issue #168, a
+    /// multiplayer leave).
     ///
     /// Not a death: `Battle::on_death` spends a reinforcement and this does
     /// not — the unit is being un-spawned, so only the live count moves. The
@@ -647,10 +649,10 @@ impl Sim {
 
     /// Grow the per-slot tables (`players`, `assist`, `magnet`,
     /// `reticle_pick`, `spawn_choice`, `prev_spawn_bits`, `held_eaten`,
-    /// `spawn_post_choice`)
+    /// `spawn_post_choice`, `target_hints`)
     /// so `slot` is addressable. They are
     /// kept the same length so a slot index is valid in all of them.
-    fn reserve_slot(&mut self, slot: usize) {
+    pub(in crate::sim) fn reserve_slot(&mut self, slot: usize) {
         if self.players.len() <= slot {
             self.players.resize(slot + 1, None);
         }
@@ -676,6 +678,9 @@ impl Sim {
         self.side_choice.resize(n, SideChoice::Team1);
         self.class_carousel.resize(n, Carousel::default());
         self.class_ammo.resize(n, Vec::new());
+        if self.target_hints.len() < n {
+            self.target_hints.resize_with(n, Default::default);
+        }
     }
 
     /// Card SSELA: put human slot `slot` behind the spawn screens - the game
@@ -769,7 +774,7 @@ impl Sim {
                     })
                     .count() as u32;
                 let share = cap * class_share(c) / parts;
-                (share - alive as f32).max(0.0) + floor
+                (share - alive as f32).fmax(0.0) + floor
             })
             .collect()
     }

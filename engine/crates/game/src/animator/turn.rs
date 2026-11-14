@@ -4,6 +4,7 @@
 
 use super::{aim, AnimInput, Animator, Body, Game, Move, Rig, Special};
 use crate::skin::Clip;
+use core::fmath::FloatExt;
 use std::f32::consts::{FRAC_PI_8, PI, TAU};
 
 const TURN_RIGHT: [f32; 3] = [FRAC_PI_8, FRAC_PI_8, 0.471_238_9];
@@ -53,7 +54,7 @@ impl Animator {
         };
         if let Some(target) = target {
             let rest = wrap(target - self.twist);
-            self.twist += rest * (1.0 - TWIST_KEEP.powf(30.0 * dt.max(0.0)));
+            self.twist += rest * (1.0 - TWIST_KEEP.powf(30.0 * dt.fmax(0.0)));
         }
         self.twist = wrap(self.twist);
         let r = &mut self.roll;

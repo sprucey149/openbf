@@ -22,6 +22,7 @@ mod walker_view;
 use crate::camera_collide::CameraBlockers;
 use crate::layout::{CommandPostDef, MapLayout};
 use core::cp::CpDef;
+use core::fmath::FloatExt;
 use core::heightfield::Heightfield;
 use core::region::Region;
 use core::sim::{PadState, Sim};
@@ -679,8 +680,16 @@ pub struct WalkSim {
     /// Humans per team at the last tick (`refill_after_side_change`).
     pub(crate) human_teams: Option<[u32; 2]>,
     pending_class_kills: std::collections::BTreeMap<String, u32>,
-    /// The local player's unit — player SLOT 0 (`Sim::players[0]`).
+    /// The local player's unit: player slot [`WalkSim::local_slot`]
+    /// (`Sim::players[local_slot]`).
     pub player: UnitHandle,
+    /// The local player's slot (issue #168): 0 in single player and on a LAN
+    /// host, the slot the host gave a guest. Set with
+    /// [`WalkSim::set_local_slot`].
+    pub local_slot: u8,
+    /// The lockstep round's per-slot game state (issue #168,
+    /// [`crate::netplay::RoundState`]); empty in single player.
+    pub netplay: crate::netplay::RoundState,
     /// Pending menu input, retained across render frames with no sim tick.
     respawn_requested: bool,
     pub teams: [TeamTemplate; 2],
@@ -863,7 +872,11 @@ impl WalkSim {
         // terrain first — under a heightfield more than TERRAIN_BURY above
         // y = 0 the player would otherwise be placed at NO_GROUND.
         let spawn = match &sim.heightfield {
-            Some(h) => Vec3::new(spawn.x, spawn.y.max(h.height_at(spawn.x, spawn.z)), spawn.z),
+            Some(h) => Vec3::new(
+                spawn.x,
+                spawn.y.fmax(h.height_at(spawn.x, spawn.z)),
+                spawn.z,
+            ),
             None => spawn,
         };
         let player = sim
@@ -878,6 +891,8 @@ impl WalkSim {
         Self {
             sim,
             player,
+            local_slot: 0,
+            netplay: Default::default(),
             conquest_defaults: None,
             team_size_pct: 100,
             reinforcement_pct: 100,
@@ -1223,7 +1238,37 @@ impl WalkSim {
     /// The magnet target when it is a unit (draw order of `target_draws`;
     /// a vehicle magnet draws no unit marker). Slot 0 — what the HUD draws.
     pub fn magnet(&self) -> Option<UnitHandle> {
-        self.sim.magnet_at(0).and_then(core::sim::AimTarget::unit)
+        self.sim
+            .magnet_at(usize::from(self.local_slot))
+            .and_then(core::sim::AimTarget::unit)
+    }
+
+    /// Make player slot `slot` the local player (issue #168): the camera,
+    /// the HUD and the profile's career follow it. Until the slot holds a
+    /// unit (a guest joining mid-round) the view keeps the current one.
+    pub fn set_local_slot(&mut self, slot: u8) {
+        self.local_slot = slot;
+        if let Some(Some(h)) = self.sim.players.get(usize::from(slot)) {
+            self.player = *h;
+        }
+    }
+
+    /// One lockstep tick (issue #168): `bundle`'s pads by player slot (a
+    /// slot it does not list gets the default pad), stepped like a tick of
+    /// [`WalkSim::advance_with`] (the render blend's pose first, `each`
+    /// after). Its session commands must already be applied
+    /// (`crate::netplay::step` does both).
+    pub fn step_bundle(&mut self, bundle: &net::TickBundle, each: impl FnOnce(&mut WalkSim)) {
+        let top = bundle.pads.last().map_or(0, |p| usize::from(p.0) + 1);
+        let mut pads = vec![PadState::default(); top.max(self.sim.players.len())];
+        for (slot, pad) in &bundle.pads {
+            pads[usize::from(*slot)] = *pad;
+        }
+        let mut blend = std::mem::take(&mut self.blend);
+        blend.before_tick(self);
+        self.blend = blend;
+        self.step_tick(&pads);
+        each(self);
     }
 
     /// Advance the fixed-tick sim by a real frame's dt (A5: 30 Hz, accumulator
@@ -1244,7 +1289,7 @@ impl WalkSim {
         pads: &[PadState],
         mut each: impl FnMut(&mut WalkSim),
     ) -> u32 {
-        self.accum = (self.accum + real_dt).min(core::MAX_FRAME_ACCUM_SECS);
+        self.accum = (self.accum + real_dt).fmin(core::MAX_FRAME_ACCUM_SECS);
         let mut ticks = 0;
         let mut pads = std::borrow::Cow::Borrowed(pads);
         while self.accum >= core::TICK_DT {
@@ -1266,6 +1311,13 @@ impl WalkSim {
     /// the frame is into the next tick (`render_blend::fraction`).
     pub fn accum(&self) -> f32 {
         self.accum
+    }
+
+    /// A lockstep peer (issue #168) steps bundles instead of
+    /// [`WalkSim::advance_with`]: its playback's fraction toward the next
+    /// tick (0..1) stands in for the accumulator's, for the render blend.
+    pub fn set_frame_fraction(&mut self, f: f32) {
+        self.accum = f.clamp(0.0, 1.0) * core::TICK_DT;
     }
 
     /// Write the pose blended between the last two ticks in, for the frame's
@@ -1293,7 +1345,8 @@ impl WalkSim {
     }
 
     /// One fixed tick (also the headless/replay entry — no accumulator).
-    /// `pads` is indexed by player slot; slot 0 is [`WalkSim::player`].
+    /// `pads` is indexed by player slot; slot [`WalkSim::local_slot`] is
+    /// [`WalkSim::player`].
     pub fn step_tick(&mut self, pads: &[PadState]) {
         let old_mount = self.sim.unit(self.player).and_then(|u| u.mount);
         let old_camera = self.camera();
@@ -1303,10 +1356,11 @@ impl WalkSim {
         let killer_before = self.killer_of(self.player);
         if std::mem::take(&mut self.respawn_requested) {
             let mut requested = pads.to_vec();
-            if requested.is_empty() {
-                requested.push(PadState::default());
+            let local = usize::from(self.local_slot);
+            if requested.len() <= local {
+                requested.resize(local + 1, PadState::default());
             }
-            requested[0].buttons |= core::sim::buttons::RESPAWN;
+            requested[local].buttons |= core::sim::buttons::RESPAWN;
             self.sim.step(&requested);
         } else {
             self.sim.step(pads);
@@ -1315,7 +1369,7 @@ impl WalkSim {
         // (`Sim::respawn_slot`): follow it, or every `sim.unit(self.player)`
         // reads None from the first death on (zoom, sprint latch, scope body,
         // music, commander, black box).
-        if let Some(Some(h)) = self.sim.players.first() {
+        if let Some(Some(h)) = self.sim.players.get(usize::from(self.local_slot)) {
             self.player = *h;
         }
         self.refill_after_side_change();
@@ -1360,7 +1414,7 @@ impl WalkSim {
         if me.is_some_and(|u| u.alive && u.mount.is_some()) {
             self.seat_view_timer = camera::DEATH_VIEW_HOLD;
         } else if self.seat_view_timer > 0.0 {
-            self.seat_view_timer = (self.seat_view_timer - core::TICK_DT).max(0.0);
+            self.seat_view_timer = (self.seat_view_timer - core::TICK_DT).fmax(0.0);
         }
         self.seat_view = self.next_seat_view();
         // The squad's answers to this tick's orders join the voice queue;
@@ -1377,7 +1431,9 @@ impl WalkSim {
 
     fn track_class_kills(&mut self, kills_before: u32) {
         let Some(me) = self.sim.units.get(self.player.index as usize).filter(|u| {
-            u.gen == self.player.gen && u.spec.player_slot == Some(0) && u.kills > kills_before
+            u.gen == self.player.gen
+                && u.spec.player_slot == Some(self.local_slot)
+                && u.kills > kills_before
         }) else {
             return;
         };
@@ -1404,11 +1460,17 @@ impl WalkSim {
         changed
     }
 
+    /// The local player's career medal counts: player slot
+    /// [`WalkSim::local_slot`]'s, when it has a career (a LAN guest's own,
+    /// never the host's slot 0; none for a joiner not yet seated).
+    pub fn local_medal_counts(&self) -> Option<core::sim::MedalCounts> {
+        self.sim.slot_medal_counts(usize::from(self.local_slot))
+    }
+
     pub fn flush_career_progress(&mut self, profile: &mut crate::profile::Profile) -> bool {
         let mut changed = self.flush_class_kills(profile);
         if let Some(counts) = self
-            .sim
-            .medal_counts()
+            .local_medal_counts()
             .filter(|c| *c != profile.career.medals)
         {
             profile.career.medals = counts;

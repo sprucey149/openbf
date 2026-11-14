@@ -30,6 +30,7 @@ mod aim;
 mod flyer;
 mod walker;
 pub use aim::AimerSpec;
+use core::fmath::FloatExt;
 pub(crate) use flyer::flyer_exhaust;
 pub use flyer::{FlyerClass, FlyerExhaust};
 pub use walker::{WalkerClass, WALKER_BASES};
@@ -1060,11 +1061,11 @@ pub fn blast_sphere(db: &ClassDb, class: &str, sphr: Option<[f32; 4]>) -> ([f32;
         } else {
             a
         };
-        w = w.max(dist([n[0], n[1], n[2]]) + e);
+        w = w.fmax(dist([n[0], n[1], n[2]]) + e);
     }
     if let Some(h) = HoverClass::from_db(db, class) {
         for s in h.springs() {
-            w = w.max(dist(s.pos.to_array()) + s.radius);
+            w = w.fmax(dist(s.pos.to_array()) + s.radius);
         }
     }
     ([cx, cy, cz], w)
@@ -1175,7 +1176,7 @@ pub fn slice_time(db: &ClassDb, class: &str) -> f32 {
         .map_or(default, |row| row.2);
     db.prop(class, "TimeRequiredToEject")
         .and_then(|v| v.trim().parse::<f32>().ok())
-        .map_or(twin, |t| t.max(0.0))
+        .map_or(twin, |t| t.fmax(0.0))
 }
 
 /// `[ours]` A BF1 flyer's `PilotSkillRepairScale` is its BF2 twin's (the
@@ -1208,7 +1209,7 @@ pub fn repair_scale(db: &ClassDb, class: &str) -> f32 {
             .find(|(bf1, _)| bf1.eq_ignore_ascii_case(class))
             .map_or(default, |row| row.1);
     }
-    prop_float(db, class, "PilotSkillRepairScale").map_or(default, |s| s.max(0.0))
+    prop_float(db, class, "PilotSkillRepairScale").map_or(default, |s| s.fmax(0.0))
 }
 
 /// `[ours]` The vehicle classes whose weak spot deals x4 on a ground map

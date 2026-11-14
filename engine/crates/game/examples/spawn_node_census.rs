@@ -41,6 +41,7 @@
 //! of `spawn_node_census_accepted.txt` beside this file covers (`NEW`), then
 //! the total with the accepted and new counts. Exit 0.
 //! `SPNC_RULE=before` prints the BEFORE column's failures instead.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::ai::{first_leg, floor_walked, HUB_LEVEL_TOL};
 use core::sim::Sim;

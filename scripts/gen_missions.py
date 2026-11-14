@@ -1499,7 +1499,11 @@ def space_templates50():
     linkedshields.luac (analysis/re-space-assault.md)."""
     osa = load_ps2("bf2", "objectivespaceassault") or load_donor_script("bf2", "objectivespaceassault")
     linked = load_ps2("bf2", "linkedshields")
-    donor_shields = linked is None
+    # A fingerprinted PC or Xbox BF2 (its correction table is loaded) authors
+    # its own default: the rule stays the PS2's whichever copy supplied the
+    # script (issue #168: an Xbox copy's spa6-spa9 regenerated shields ten
+    # times faster than a PS2 copy's).
+    donor_shields = linked is None or "bf2" in GAMEPLAY_REFERENCES
     linked = linked or load_donor_script("bf2", "linkedshields")
     if osa is None or linked is None:
         return None

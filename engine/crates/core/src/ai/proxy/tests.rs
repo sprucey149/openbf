@@ -716,6 +716,9 @@ fn the_proxy_reads_the_frozen_rows() {
 /// and at Elite: a pin on everything the proxy's brain runs. It moves with
 /// any change to the code a proxy runs (`ai::legacy_think`), the physics
 /// and the weapons included; such a move is declared and explained.
+/// 2026-11-13 (#168): glam's `scalar-math` (one math path on every CPU,
+/// LAN_MULTIPLAYER.md §7) moved Easy 67abfedaa0631084 -> 7efc85cee4eb5f2a and
+/// Elite e3f2d3c9099e44c4 -> 8350aa51d0876ce8.
 #[test]
 fn an_all_proxy_skirmish_keeps_its_hash() {
     let run = |d: Difficulty| {
@@ -741,7 +744,7 @@ fn an_all_proxy_skirmish_keeps_its_hash() {
     let got = [run(Difficulty::Easy), run(Difficulty::Elite)];
     assert_eq!(
         got.map(|h| format!("{h:016x}")),
-        ["67abfedaa0631084", "e3f2d3c9099e44c4"],
+        ["7efc85cee4eb5f2a", "8350aa51d0876ce8"],
         "the all-proxy skirmish moved"
     );
 }

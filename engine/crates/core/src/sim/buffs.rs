@@ -3,6 +3,7 @@
 //! a longer incoming timer replaces both (`analysis/re-officer-abilities.md`).
 
 use super::Sim;
+use crate::fmath::FloatExt;
 use crate::unit::UnitHandle;
 use crate::weapon::{Ability, DamageDesc};
 
@@ -38,7 +39,7 @@ impl Buffs {
             &mut self.poison,
         ] {
             if b.0 > 0.0 && b.0 <= 300.0 {
-                b.0 = (b.0 - dt).max(0.0);
+                b.0 = (b.0 - dt).fmax(0.0);
             }
         }
     }
@@ -92,7 +93,7 @@ impl Buffs {
             self.defense.0,
             self.defense.1,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         if self.regeneration.0 > 0.0 || self.poison.0 > 0.0 {
             eat(b"ability");
@@ -102,7 +103,7 @@ impl Buffs {
                 self.poison.0,
                 self.poison.1,
             ] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
             if self.poison.0 > 0.0 {
                 if let Some(h) = self.poisoned_by {
@@ -175,7 +176,7 @@ impl Sim {
             let u = &mut self.units[i];
             // Inside a hull his health is what he boarded with, either way.
             if !sealed && u.buffs.regeneration.0 > 0.0 {
-                u.health.cur = (u.health.cur + u.buffs.regeneration.1 * dt).min(u.health.max);
+                u.health.cur = (u.health.cur + u.buffs.regeneration.1 * dt).fmin(u.health.max);
             }
             if u.buffs.poison.0 <= 0.0 {
                 u.buffs.poisoned_by = None;
@@ -188,7 +189,7 @@ impl Sim {
             let damage = u.buffs.poison.1 * dt;
             let victim = self.handle(i);
             let scale = self.buff_scale(attacker, victim);
-            let invincible = self.units[i].is_player && self.cheats.invincible;
+            let invincible = self.units[i].is_player && self.unit_cheats(i).invincible;
             let now = self.tick;
             let u = &mut self.units[i];
             if !invincible {

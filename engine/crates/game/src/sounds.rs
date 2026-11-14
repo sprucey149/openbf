@@ -28,6 +28,7 @@
 //! product and floor as other positional starts; preparation needs no mixer.
 
 mod mixing;
+use core::fmath::FloatExt;
 pub use mixing::{attenuation, bus_table, ears_3d, mixer_pair, side};
 
 mod bf1_heroes;
@@ -118,7 +119,7 @@ pub struct MusicTrack {
 
 /// A level 0..1 in decibels for the mixer, floored at -60 dB.
 pub fn level_db(level: f32) -> f32 {
-    20.0 * level.max(0.001).log10()
+    20.0 * level.fmax(0.001).log10()
 }
 
 /// The takes of every stream the bake did not decode, by (stream, segment):
@@ -755,17 +756,12 @@ impl SoundLib {
         }
         paths.sort();
         paths.dedup();
+        paths.retain(|p| !self.cache.contains_key(p));
         let (mut n, mut bytes) = (0, 0u64);
-        for path in paths {
-            if self.cache.contains_key(&path) {
-                continue;
-            }
-            // A take that will not decode stays out, as at its first play.
-            if let Ok(data) = audio::decode(&path) {
-                n += 1;
-                bytes += data.frames() as u64 * 8;
-                self.cache.insert(path, data);
-            }
+        for (path, data) in decode_all(paths) {
+            n += 1;
+            bytes += data.frames() as u64 * 8;
+            self.cache.insert(path, data);
         }
         (n, bytes, t0.elapsed().as_secs_f32() * 1000.0)
     }
@@ -1034,7 +1030,7 @@ impl SoundLib {
         } else {
             ears_3d(gain, side(listener, pos))
         };
-        Some((ears, (p.pitch * pitch_factor).max(0.1)))
+        Some((ears, (p.pitch * pitch_factor).fmax(0.1)))
     }
 
     /// User gain multipliers over the source game's bus mix.
@@ -1113,8 +1109,8 @@ impl SoundLib {
                 continue;
             };
             let inputs = crate::engine_sound::Inputs {
-                speed: r.vel.length() / c.top_speed().max(0.001),
-                health: r.health / c.health.max(0.001),
+                speed: r.vel.length() / c.top_speed().fmax(0.001),
+                health: r.health / c.health.fmax(0.001),
                 timer: r.age,
                 ..Default::default()
             };
@@ -1264,7 +1260,7 @@ impl SoundLib {
                 self.mix(audio, &starts, listener);
                 let secs = starts.first().map_or(0.0, |s| {
                     let len = self.cache.get(&s.path).map_or(0.0, |d| d.duration_secs());
-                    len / (s.pitch * self.rate_mul).max(0.05)
+                    len / (s.pitch * self.rate_mul).fmax(0.05)
                 });
                 self.ambient.insert(
                     h.index,
@@ -1278,7 +1274,7 @@ impl SoundLib {
                 self.ambient.remove(&h.index);
                 continue;
             }
-            let rate = f64::from((p.pitch * self.rate_mul).max(0.05));
+            let rate = f64::from((p.pitch * self.rate_mul).fmax(0.05));
             if let Some(AmbientVoice::Loop(v)) = self.ambient.get_mut(&h.index) {
                 if let Some(v) = v {
                     v.set(db, rate, pan, core::TICK_DT);
@@ -1519,7 +1515,7 @@ impl SoundLib {
     }
 
     fn pick_sample(&mut self, samples: &[(u32, f32)]) -> Option<u32> {
-        let total: f32 = samples.iter().map(|s| s.1.max(0.0)).sum();
+        let total: f32 = samples.iter().map(|s| s.1.fmax(0.0)).sum();
         if samples.is_empty() {
             return None;
         }
@@ -1528,7 +1524,7 @@ impl SoundLib {
         }
         let mut r = self.next_rand() * total;
         for (id, w) in samples {
-            r -= w.max(0.0);
+            r -= w.fmax(0.0);
             if r <= 0.0 {
                 return Some(*id);
             }
@@ -1538,7 +1534,7 @@ impl SoundLib {
 
     fn one_shot_pitch(&self, start: &Start) -> f32 {
         let rate = if start.menu { 1.0 } else { self.rate_mul };
-        (start.pitch * rate).max(0.05)
+        (start.pitch * rate).fmax(0.05)
     }
 
     fn mix(&mut self, audio: &mut audio::Audio, starts: &[Start], listener: &Listener) -> bool {
@@ -1599,5 +1595,38 @@ fn decode_noted(path: &Path) -> anyhow::Result<audio::SoundData> {
     }
     Ok(data)
 }
+/// Decode `paths` on up to [`DECODE_THREADS`] threads, leaving a core for the
+/// window and one for the net thread (LAN §10.5). A take that will not
+/// decode stays out, as at its first play. Only the sound cache reads the
+/// result; the order it is returned in does not matter.
+fn decode_all(paths: Vec<PathBuf>) -> Vec<(PathBuf, audio::SoundData)> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get().saturating_sub(2))
+        .clamp(1, DECODE_THREADS);
+    let decode = |chunk: &[PathBuf]| -> Vec<(PathBuf, audio::SoundData)> {
+        chunk
+            .iter()
+            .filter_map(|p| Some((p.clone(), audio::decode(p).ok()?)))
+            .collect()
+    };
+    if threads == 1 || paths.len() < 2 {
+        return decode(&paths);
+    }
+    let size = paths.len().div_ceil(threads);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = paths
+            .chunks(size)
+            .map(|chunk| (chunk, s.spawn(move || decode(chunk))))
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|(chunk, h)| h.join().unwrap_or_else(|_| decode(chunk)))
+            .collect()
+    })
+}
+
+/// The most threads [`SoundLib::preload`] decodes on.
+const DECODE_THREADS: usize = 4;
+
 #[cfg(test)]
 mod tests;

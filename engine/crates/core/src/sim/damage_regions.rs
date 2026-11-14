@@ -82,7 +82,7 @@ impl Sim {
                 if !dr.region.touches_sphere(centre, radius) {
                     continue;
                 }
-                if u.is_player && self.cheats.invincible {
+                if u.is_player && self.cheats_of(u).invincible {
                     continue;
                 }
                 let h = self.handle(i);

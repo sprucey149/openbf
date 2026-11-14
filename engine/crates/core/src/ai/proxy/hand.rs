@@ -16,6 +16,7 @@ use crate::ai::draw::unit_dir;
 use crate::ai::THINK_PERIOD;
 use crate::collision::lead_point;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::unit::{Unit, UnitHandle};
 use glam::Vec3;
 
@@ -52,14 +53,14 @@ impl Hand {
 
     /// The aim error (rad) `secs` after first sight.
     pub fn error_at(&self, secs: f32) -> f32 {
-        let k = fmath::exp(-secs.max(0.0) / self.settle.max(1e-3));
-        self.floor + (self.acquire - self.floor).max(0.0) * k
+        let k = fmath::exp(-secs.fmax(0.0) / self.settle.fmax(1e-3));
+        self.floor + (self.acquire - self.floor).fmax(0.0) * k
     }
 
     /// Feed into the sim hash.
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         for v in [self.floor, self.acquire, self.settle, self.up] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 }
@@ -92,7 +93,7 @@ pub fn aim(
 /// The angle (rad) the aim may be off and still fire, at `range` m: the
 /// body's width, capped at the bot's tolerance.
 pub fn tolerance(range: f32) -> f32 {
-    (ON_BODY / range.max(1.0)).min(crate::ai::AIM_TOLERANCE)
+    (ON_BODY / range.fmax(1.0)).fmin(crate::ai::AIM_TOLERANCE)
 }
 
 /// Is a held trigger still down at this `heat`?

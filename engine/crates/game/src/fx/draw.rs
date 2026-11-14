@@ -36,6 +36,7 @@
 //! camera (the first view) for every view.
 
 use super::emitter::{hsv_to_rgb, Era, Particle};
+use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 use manifest::{FxBlend, FxEmitter, FxType};
 use render::{ParticleDraw, ParticleShape, TextureHandle};
@@ -54,7 +55,7 @@ pub fn far_distance_with_bias(bounding_radius: f32, bias: f32) -> f32 {
     } else {
         50.0
     };
-    base + bias.max(0.0)
+    base + bias.fmax(0.0)
 }
 
 /// The keep table (`DAT_00518408`) and the fade table (`DAT_00518448`), by
@@ -95,8 +96,8 @@ pub fn view_terms_with_bias(d: f32, bounding_radius: f32, zoom: f32, bias: f32) 
     } else {
         1.0
     };
-    let denom = (far.min(90.0 + bias.max(0.0)) - 20.0).max(1.0);
-    let lod = ((d - bounding_radius - 20.0) * 4.0 / denom).max(0.0);
+    let denom = (far.fmin(90.0 + bias.fmax(0.0)) - 20.0).fmax(1.0);
+    let lod = ((d - bounding_radius - 20.0) * 4.0 / denom).fmax(0.0);
     let level = (lod as usize).min(3);
     let frac = if lod < 3.0 { 1.0 - lod.fract() } else { 1.0 };
     ViewTerms {

@@ -1,6 +1,7 @@
 //! The PS2 Ray area is a bounded angular slab, with retained Hold targets.
 
 use super::*;
+use crate::fmath::FloatExt;
 use crate::unit::Controller;
 
 /// B2 0032c408 case3; radius is the target's collision bounding sphere.
@@ -33,11 +34,11 @@ fn area_score(
         0.0
     };
     let over = vertical - radius;
-    let vertical_score = over.max(0.0) * over * (4.0 / (height * height)) * 2.2857144 - 1.2857144;
+    let vertical_score = over.fmax(0.0) * over * (4.0 / (height * height)) * 2.2857144 - 1.2857144;
     Some(
         (distance / (power.range * power.range) * 2.2857144 - 1.2857144)
-            .max(sideways)
-            .max(vertical_score),
+            .fmax(sideways)
+            .fmax(vertical_score),
     )
 }
 

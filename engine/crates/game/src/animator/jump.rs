@@ -3,6 +3,7 @@
 
 use super::{AnimInput, Body, Game, Rig, Special};
 use crate::skin::Clip;
+use core::fmath::FloatExt;
 
 pub(super) const BLEND_UPDATES: f32 = 30.0;
 const JUMP_POSE_SECONDS: f32 = 0.3;
@@ -38,7 +39,7 @@ impl Jump {
             *self = Self::default();
             return stance;
         }
-        let dt = dt.max(0.0);
+        let dt = dt.fmax(0.0);
         if let Some(elapsed) = &mut self.exit_elapsed {
             *elapsed += dt;
             if *elapsed >= EXIT_BLEND_SECONDS {
@@ -102,7 +103,7 @@ impl Jump {
 
     pub(super) fn fade_factor(&self) -> f32 {
         self.exit_elapsed
-            .map_or(1.0, |elapsed| (elapsed / EXIT_BLEND_SECONDS).min(1.0))
+            .map_or(1.0, |elapsed| (elapsed / EXIT_BLEND_SECONDS).fmin(1.0))
     }
 
     pub(super) fn fading(&self) -> bool {

@@ -60,6 +60,15 @@ pub fn take() -> RayCost {
     }
 }
 
+/// Add `rays` (a think thread's, `sim::think_pool`) to this thread's count.
+pub(crate) fn add(rays: RayCost) {
+    let mine = take().plus(rays);
+    QUERIES.with(|c| c.set(mine.queries));
+    MESH_CASTS.with(|c| c.set(mine.mesh_casts));
+    TRIANGLES.with(|c| c.set(mine.triangles));
+    WORST.with(|c| c.set(mine.worst));
+}
+
 /// The world queries counted so far, the count going on.
 pub fn queries() -> u32 {
     QUERIES.with(Cell::get)

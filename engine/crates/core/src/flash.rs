@@ -15,6 +15,7 @@
 //! muzzle flash makes no light (PCSX2 knock-ins agree), and
 //! `MuzzleFlashEffect` is an `fx__` effect (card FXP3's).
 
+use crate::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 
 /// Flash keys (fnv over byte|0x20, re-muzzle-flash §1 [O]).
@@ -169,7 +170,7 @@ impl MuzzleFlashLook {
             return None;
         }
         let a = f32::from(self.color[3]);
-        let alpha = a.min(2.0 * a * t) as u8;
+        let alpha = a.fmin(2.0 * a * t) as u8;
         (alpha > 0).then_some([self.color[0], self.color[1], self.color[2], alpha])
     }
 }

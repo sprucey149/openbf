@@ -19,6 +19,7 @@ const FIRE: PadState = PadState {
     my: 0,
     fire_lag: 0,
     pick: None,
+    view_lag: 0,
 };
 
 /// The first soldier class of a game that passes `test`.

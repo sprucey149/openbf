@@ -1,6 +1,7 @@
 //! Cosmetic BF2 hit poses on every map. B2 FUN_00280e38:203467-203508,
 //! FUN_0027caf0:200920-200929, FUN_0027dfe0:201979-202008.
 use super::*;
+use core::fmath::FloatExt;
 use core::sim::{Event, Sim};
 
 /// Circular order used by BF2's directional draw.
@@ -145,8 +146,8 @@ impl Reaction {
             self.direction = Direction::default();
         }
         self.was_dead = i.dead;
-        let weight = 0.5 * self.clock.min(1.0);
-        self.clock = (self.clock - 8.0 * dt).max(0.0);
+        let weight = 0.5 * self.clock.fmin(1.0);
+        self.clock = (self.clock - 8.0 * dt).fmax(0.0);
         self.overlay = None;
         if weight <= 0.0
             || i.dead

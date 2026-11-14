@@ -16,7 +16,8 @@ fn actual_hero_force_looks_follow_the_referenced_ordnance_chain() {
             name: name.into(),
             ..Default::default()
         })
-        .to_vec();
+        .to_vec()
+        .into();
     let state = State::load(&db, &sim);
     assert_eq!(
         state.looks[0].lightning.as_deref(),

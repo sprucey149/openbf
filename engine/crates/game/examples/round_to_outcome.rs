@@ -507,6 +507,7 @@
 //! columns): reversals, path / net, spacing, team kills, contact, map use.
 //! `BOT_SAMPLES_SECS=<n>` stops the rows after n seconds of the round (the
 //! PS2's samples are 3 to 9 minutes long). It only READS the sim.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::PadState;
 use game::walk::WalkSim;

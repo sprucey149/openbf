@@ -16,9 +16,11 @@
 //! ray ([`crate::collision::ray_heightfield`]) without the lerp where a cell's
 //! corners already decide it, and says how far along the ray that holds.
 
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 /// Row-major (z * size + x) grid of world-space heights.
+#[derive(Clone)]
 pub struct Heightfield {
     /// Grid vertices per side.
     pub size: u32,
@@ -93,18 +95,18 @@ impl Heightfield {
                 if !h.is_finite() {
                     return None;
                 }
-                low = low.min(h);
-                high = high.max(h);
+                low = low.fmin(h);
+                high = high.fmax(h);
             }
         }
-        let scale = high.abs().max(low.abs());
+        let scale = high.abs().fmax(low.abs());
         // Each corner difference is bounded by twice scale. Leave room
         // for both differences, both products and both additions to round.
         // A difference that can overflow must still use the original lerp.
         if scale > f32::MAX * 0.5 {
             return None;
         }
-        let rounding = (8.0 * f32::EPSILON * scale).max(f32::MIN_POSITIVE);
+        let rounding = (8.0 * f32::EPSILON * scale).fmax(f32::MIN_POSITIVE);
         Some((low - rounding, high + rounding))
     }
 
@@ -223,8 +225,8 @@ impl<'a> HeightProbe<'a> {
                 hf.h(ix, iz + 1),
                 hf.h(ix + 1, iz + 1),
             ];
-            let lo = c.iter().copied().fold(f32::INFINITY, f32::min);
-            let hi = c.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let lo = c.iter().copied().fold(f32::INFINITY, crate::fmath::min);
+            let hi = c.iter().copied().fold(f32::NEG_INFINITY, crate::fmath::max);
             // A few ulps of the lerp's rounding, with room to spare.
             let m = 1e-3 + 1e-5 * (lo.abs() + hi.abs());
             (self.cell, self.lo, self.hi) = ((ix, iz), lo - m, hi + m);
@@ -258,7 +260,7 @@ impl<'a> HeightProbe<'a> {
                 f32::INFINITY
             }
         };
-        run = run.min(side(fx, ix, dir.x)).min(side(fz, iz, dir.z));
+        run = run.fmin(side(fx, ix, dir.x)).fmin(side(fz, iz, dir.z));
         (above, if gap > 0.0 && run > 0.0 { run } else { 0.0 })
     }
 }

@@ -1,5 +1,6 @@
 use super::state::Sim;
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::projectile::{Bolt, Hit, Shooter, Target};
 use glam::Vec3;
 
@@ -34,7 +35,7 @@ impl Beam {
             self.len,
             self.charge,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.shooter.owner.index.to_le_bytes());
         eat(&self.shooter.owner.gen.to_le_bytes());
@@ -63,7 +64,7 @@ impl Sim {
     pub(super) fn fly_bolts(&mut self, dt: f32) {
         let first = self.cast_beams(dt);
         let count = self.beams.len();
-        self.sweep_bolts(dt);
+        self.sweep_bolts(dt, first..first + count);
         let mut done = Vec::new();
         for (i, b) in self.bolts.iter_mut().enumerate() {
             if b.advance(dt) {
@@ -180,7 +181,13 @@ impl Sim {
                 b.hulls,
             );
             next.charge = charge;
-            let bodies = bodies.get_or_insert_with(|| self.sweep_bodies());
+            // A lagged shooter's chain goes on through the volumes it
+            // saw (`lag_comp`).
+            let bodies = bodies.get_or_insert_with(|| {
+                self.rewound_for(b.owner)
+                    .cloned()
+                    .unwrap_or_else(|| self.sweep_bodies())
+            });
             self.sweep_bolt(bodies, &mut next, dt, &passed);
             next.advance(dt);
             b = next;

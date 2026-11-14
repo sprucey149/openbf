@@ -2,6 +2,7 @@
 //! UI models already face the camera; the battle model's yaw offset does not apply.
 
 use super::*;
+use core::fmath::FloatExt;
 
 #[derive(Default)]
 pub(super) struct Preview {
@@ -34,7 +35,7 @@ impl DroidekaVisuals {
         let clock = self.preview.clocks.entry((team, class)).or_default();
         let duration = c.duration[usize::from(core::droideka::IDLE)];
         *clock = if duration > 0.0 {
-            (*clock + dt.max(0.0)).rem_euclid(duration)
+            (*clock + dt.fmax(0.0)).rem_euclid(duration)
         } else {
             0.0
         };

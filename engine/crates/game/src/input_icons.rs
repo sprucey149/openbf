@@ -8,6 +8,7 @@
 //! frame pays for a table lookup only. Sources and licences:
 //! `assets/input_icons/README.md`.
 
+use core::fmath::FloatExt;
 use serde::{Deserialize, Serialize};
 use ui::input_icons::{IconSet, Icons, PadButton};
 use winit::event::{ElementState, WindowEvent};
@@ -367,7 +368,7 @@ pub fn rasterize(sheet: &str, px: u32) -> Option<(Vec<u8>, u32, u32)> {
     let mut pixmap = resvg::tiny_skia::Pixmap::new(big, big)?;
     let ink = tree.root().abs_stroke_bounding_box();
     let side = big as f32;
-    let k = side * ICON_FILL / ink.width().max(ink.height());
+    let k = side * ICON_FILL / ink.width().fmax(ink.height());
     let at = |start: f32, len: f32| (side - len * k) * 0.5 - start * k;
     resvg::render(
         &tree,

@@ -1,6 +1,7 @@
 use super::*;
 use crate::vehicle_class::SeatSpec;
 use core::fmath;
+use core::fmath::FloatExt;
 use core::soldier::GroundRules;
 use core::vehicle::hover::{quat_x, quat_y};
 use core::vehicle::{Vehicle, VehicleHandle, VehicleKind};
@@ -200,7 +201,7 @@ impl WalkSim {
             .and_then(Option::as_ref)
             .map_or(0.0, |p| {
                 let region = self.sim.landing_regions.iter().any(|r| r.contains(v.pos));
-                p.speeds(region)[2].max(p.boost_speed)
+                p.speeds(region)[2].fmax(p.boost_speed)
             });
         section.speed_fraction(v.vel.dot(v.rot * Vec3::Z), top)
     }

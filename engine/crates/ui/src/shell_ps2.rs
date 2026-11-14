@@ -8,15 +8,18 @@
 //!   the keyboard's Enter is the port's Start). The windowed shell opens
 //!   the profile picker here (§9.3). The legal / logo screens are skipped.
 //! - **Main Menu** (`ifs_main`): logo + stack 10 units lower than the
-//!   others: Singleplayer, **Multiplayer in its slot but disabled** (the
-//!   PS2's own dimmed style: label grey 110, focus skips it, §3.3 - the port
-//!   has no online play), Splitscreen disabled (until card SSCR), Options,
+//!   others: Singleplayer, Multiplayer (issue #168: LAN play), Splitscreen
+//!   disabled (until card SSCR; the PS2's own dimmed style: label grey 110,
+//!   focus skips it, §3.3), Options,
 //!   then `[ours]` **Quit Game**, which exits. The PC's `ifs_main` ends in a
 //!   quit row ("Exit To Windows") that the PS2 hides (`re-bf2-menus.md`,
 //!   ifs_main list order); the port shows it with its own label.
 //! - **Singleplayer** (`ifs_sp`, left-justified, `shell_sub_left`): Rise of
 //!   the Empire and Galactic Conquest disabled (no port mode yet), Instant
 //!   Action live; Training and Space Overview hidden (§9.5).
+//! - `[ours]` **Multiplayer** (issue #168, `LAN_MULTIPLAYER.md` §4): LAN
+//!   Host Game and LAN Join Game live, Online dimmed with
+//!   [`TEXT_ONLINE_NOTE`] under the stack (no dedicated server exists).
 //!
 //! The stack's geometry is the frames' [M] rule (§3.2), not the Lua's
 //! left-justify formula (which does not reproduce them, §3.2 [H]): labels
@@ -111,6 +114,8 @@ pub enum Page {
     Main,
     Singleplayer,
     Options,
+    /// `[ours]` issue #168.
+    Multiplayer,
 }
 
 /// Every button the port shows; the label is the disc's text.
@@ -128,6 +133,10 @@ pub enum RowId {
     AudioOptions,
     GraphicsOptions,
     Controls,
+    /// `[ours]` Multiplayer's rows (issue #168).
+    LanHost,
+    LanJoin,
+    Online,
 }
 
 impl RowId {
@@ -148,6 +157,10 @@ impl RowId {
             RowId::AudioOptions => ("ifs.SoundOpt.title", "Audio Options"),
             RowId::GraphicsOptions => ("openbf.graphicsoptions", "Graphics Options"),
             RowId::Controls => ("ifs.controls.Vehicle_Unit", "Controls"),
+            // Our own keys (issue #168).
+            RowId::LanHost => ("openbf.mp.lanhost", "LAN: Host Game"),
+            RowId::LanJoin => ("openbf.mp.lanjoin", "LAN: Join Game"),
+            RowId::Online => ("openbf.mp.online", "Online"),
         }
     }
 }
@@ -157,6 +170,11 @@ pub const TEXT_PROMPT: (&str, &str) = ("ifs.start.press_start", "Press START But
 pub const TEXT_MAIN: (&str, &str) = ("ifs.main.title", "Main Menu");
 pub const TEXT_BACK: (&str, &str) = ("common.back", "Back");
 pub const TEXT_SELECT: (&str, &str) = ("common.select", "Select");
+/// Why the Multiplayer page's Online row is dimmed (issue #168).
+pub const TEXT_ONLINE_NOTE: (&str, &str) = (
+    "openbf.mp.online_note",
+    "Online play needs a dedicated server \u{2014} not available yet",
+);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackRow {
@@ -174,6 +192,8 @@ pub struct Stack {
     pub left: bool,
     /// The container's extra y (the main menu's 10).
     pub y_add: f32,
+    /// `[ours]` a line drawn under the stack (Multiplayer's Online note).
+    pub note: Option<String>,
 }
 
 impl Stack {
@@ -203,6 +223,9 @@ pub enum ShellCommand {
     /// Singleplayer → Instant Action: today's IA setup (until card BSHLB).
     InstantAction,
     Settings(crate::menu::SettingsPage),
+    /// Multiplayer → LAN: Host Game / Join Game (issue #168).
+    HostGame,
+    JoinGame,
     /// Back on the title screen, or the main menu's Quit Game row (`[ours]`:
     /// the PS2 has no way out).
     Quit,
@@ -215,6 +238,7 @@ pub struct ShellMenus {
     pub main: Stack,
     pub singleplayer: Stack,
     pub options: Stack,
+    pub multiplayer: Stack,
     pub prompt: String,
     pub back: String,
     pub select: String,
@@ -250,6 +274,7 @@ impl ShellMenus {
                 focus: 0,
                 left,
                 y_add,
+                note: None,
             };
             s.focus = s.first();
             s
@@ -258,13 +283,25 @@ impl ShellMenus {
         let sp_title = text(k, e);
         let (k, e) = RowId::Options.key();
         let opt_title = text(k, e);
+        let (k, e) = RowId::Multiplayer.key();
+        let mut multiplayer = stack(
+            text(k, e),
+            vec![
+                row(RowId::LanHost, true),
+                row(RowId::LanJoin, true),
+                row(RowId::Online, false),
+            ],
+            true,
+            0.0,
+        );
+        multiplayer.note = Some(text(TEXT_ONLINE_NOTE.0, TEXT_ONLINE_NOTE.1));
         ShellMenus {
             page: Page::Title,
             main: stack(
                 text(TEXT_MAIN.0, TEXT_MAIN.1),
                 vec![
                     row(RowId::Singleplayer, true),
-                    row(RowId::Multiplayer, false),
+                    row(RowId::Multiplayer, true),
                     row(RowId::Splitscreen, false),
                     row(RowId::Options, true),
                     row(RowId::QuitGame, true),
@@ -293,6 +330,7 @@ impl ShellMenus {
                 true,
                 0.0,
             ),
+            multiplayer,
             prompt: text(TEXT_PROMPT.0, TEXT_PROMPT.1),
             back: text(TEXT_BACK.0, TEXT_BACK.1),
             select: text(TEXT_SELECT.0, TEXT_SELECT.1),
@@ -310,6 +348,7 @@ impl ShellMenus {
             Page::Main => Some(&self.main),
             Page::Singleplayer => Some(&self.singleplayer),
             Page::Options => Some(&self.options),
+            Page::Multiplayer => Some(&self.multiplayer),
         }
     }
 
@@ -319,6 +358,7 @@ impl ShellMenus {
             Page::Main => Some(&mut self.main),
             Page::Singleplayer => Some(&mut self.singleplayer),
             Page::Options => Some(&mut self.options),
+            Page::Multiplayer => Some(&mut self.multiplayer),
         }
     }
 
@@ -408,6 +448,9 @@ impl ShellMenus {
         match row {
             RowId::Singleplayer => self.go(Page::Singleplayer),
             RowId::Options => self.go(Page::Options),
+            RowId::Multiplayer => self.go(Page::Multiplayer),
+            RowId::LanHost => return Some(ShellCommand::HostGame),
+            RowId::LanJoin => return Some(ShellCommand::JoinGame),
             RowId::InstantAction => return Some(ShellCommand::InstantAction),
             RowId::GameOptions => {
                 return Some(ShellCommand::Settings(crate::menu::SettingsPage::Game))
@@ -441,7 +484,7 @@ impl ShellMenus {
     pub fn movie(&self) -> &'static str {
         match self.page {
             Page::Title | Page::Main => MOVIE_MAIN,
-            Page::Singleplayer | Page::Options => MOVIE_SUB,
+            Page::Singleplayer | Page::Options | Page::Multiplayer => MOVIE_SUB,
         }
     }
 
@@ -604,6 +647,15 @@ impl Ctx<'_> {
             let t = m.on_page - ROW_REVEAL * (k + 1) as f32;
             self.flashy_row(&s, &row, t, lh);
         }
+        if let (Some(note), Some(last)) = (&stack.note, lay.rows.last()) {
+            let t = m.on_page - ROW_REVEAL * (stack.rows.len() + 1) as f32;
+            let a = flashy(t).text_a;
+            if a > 0.0 {
+                let at = (last[0] + 4.0, last[3] + ROW_PITCH - ROW_H + 6.0);
+                let style = ([DIMMED_GREY + 60.0; 3], UNSELECTED_TEXT.1 * a);
+                self.label(&s, BUTTON_FONT, note, at, HAlign::Left, style);
+            }
+        }
         self.help(size, false, Prompt::Back, &m.back);
         self.help(size, true, Prompt::Accept, &m.select);
     }
@@ -750,11 +802,11 @@ mod tests {
         i
     }
 
-    /// Acceptance 2 of card BSHLA: Multiplayer sits in its PS2 slot,
-    /// disabled, and focus skips it both ways (§3.3: the PS2 skips its
-    /// dimmed Splitscreen the same way).
+    /// Acceptance 2 of card BSHLA, updated for issue #168: Multiplayer sits
+    /// in its PS2 slot and is live; the dimmed Splitscreen is skipped both
+    /// ways (§3.3).
     #[test]
-    fn main_menu_skips_the_disabled_multiplayer() {
+    fn main_menu_skips_the_disabled_splitscreen() {
         let mut m = menus();
         assert_eq!(m.step(MenuInput::default(), true, 0.1), None);
         assert_eq!(m.page, Page::Main);
@@ -769,17 +821,20 @@ mod tests {
                 RowId::QuitGame
             ]
         );
-        let mp = &m.main.rows[1];
-        assert!(!mp.enabled, "Multiplayer is present and disabled");
+        assert!(m.main.rows[1].enabled, "Multiplayer is live (issue #168)");
+        assert!(!m.main.rows[2].enabled, "Splitscreen is disabled");
         assert_eq!(m.main.focus, 0);
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.main.rows[m.main.focus].id, RowId::Multiplayer);
         m.step(press(|i| i.down = true), false, 0.1);
         assert_eq!(
             m.main.rows[m.main.focus].id,
             RowId::Options,
-            "Down skips it"
+            "Down skips Splitscreen"
         );
         m.step(press(|i| i.up = true), false, 0.1);
-        assert_eq!(m.main.rows[m.main.focus].id, RowId::Singleplayer, "and Up");
+        assert_eq!(m.main.rows[m.main.focus].id, RowId::Multiplayer, "and Up");
+        m.step(press(|i| i.up = true), false, 0.1);
         // Wrapping: Up from Singleplayer lands on Quit Game, Down from Quit
         // Game on Singleplayer.
         m.step(press(|i| i.up = true), false, 0.1);
@@ -787,7 +842,7 @@ mod tests {
         m.step(press(|i| i.down = true), false, 0.1);
         assert_eq!(m.main.rows[m.main.focus].id, RowId::Singleplayer);
         // A confirm never lands on a disabled row.
-        m.main.focus = 1;
+        m.main.focus = 2;
         assert_eq!(m.step(press(|i| i.confirm = true), false, 0.1), None);
         assert_eq!(m.page, Page::Main);
     }
@@ -876,7 +931,7 @@ mod tests {
             ((y0 + y1) * 0.5) * (480.0 / 448.0),
         ];
         assert_eq!(row_at(&font, &m, p, [640.0, 480.0]), Some(3));
-        let [x0, y0, x1, y1] = layout.rows[1];
+        let [x0, y0, x1, y1] = layout.rows[2];
         let p = [
             ((x0 + x1) * 0.5) * 1.25,
             ((y0 + y1) * 0.5) * (480.0 / 448.0),
@@ -932,8 +987,8 @@ mod tests {
             .iter()
             .filter(|v| v.color[..3].iter().all(|c| (c - grey).abs() < 1e-4))
             .count();
-        let glyphs = "MultiplayerSplitscreen".len();
-        assert_eq!(dimmed, 4 * glyphs, "Multiplayer and Splitscreen dimmed");
+        let glyphs = "Splitscreen".len();
+        assert_eq!(dimmed, 4 * glyphs, "Splitscreen dimmed");
         let sheets: Vec<&str> = f.batches.iter().map(|b| b.texture.as_str()).collect();
         for p in [
             "logo",
@@ -968,6 +1023,8 @@ mod tests {
         );
         m.step(press(|i| i.back = true), false, 0.1);
         assert_eq!(m.page, Page::Main);
+        // Down: Multiplayer (issue #168), then Options past Splitscreen.
+        m.step(press(|i| i.down = true), false, 0.1);
         m.step(press(|i| i.down = true), false, 0.1);
         m.step(confirm, false, 0.1);
         assert_eq!(m.page, Page::Options);
@@ -1027,11 +1084,12 @@ mod tests {
         assert!(m.cues.take().is_empty(), "Cross does nothing on the title");
         m.step(MenuInput::default(), true, 0.2);
         assert_eq!(m.cues.take(), [S::Accept]);
-        // Options, Quit Game, Singleplayer (the wrap), Options.
-        for _ in 0..4 {
+        // Multiplayer, Options, Quit Game, Singleplayer (the wrap),
+        // Multiplayer, Options.
+        for _ in 0..6 {
             m.step(press(|i| i.down = true), false, 0.2);
         }
-        assert_eq!(m.cues.take(), [S::Select; 4], "every press, the wrap too");
+        assert_eq!(m.cues.take(), [S::Select; 6], "every press, the wrap too");
         m.step(press(|i| i.confirm = true), false, 0.2);
         assert_eq!(m.page, Page::Options);
         assert_eq!(m.cues.take(), [S::Accept]);
@@ -1073,7 +1131,8 @@ mod tests {
                 && (v.color[2] - b).abs() < 1e-4
         };
         let label: Vec<_> = f.verts.iter().filter(focused).collect();
-        assert_eq!(label.len(), 4 * "Options".len());
+        // Down from Singleplayer: Multiplayer (issue #168).
+        assert_eq!(label.len(), 4 * "Multiplayer".len());
         assert!(label.iter().all(|v| (v.color[3] - a).abs() < 1e-4));
         let white_bar = f
             .verts
@@ -1147,5 +1206,67 @@ mod tests {
         m.step(press(|i| i.confirm = true), false, 0.1);
         assert_eq!(m.page, Page::Singleplayer);
         assert_eq!(m.singleplayer.focus, 0);
+    }
+
+    /// Issue #168: Main → Multiplayer offers LAN Host Game and Join Game;
+    /// Online is shown dimmed with its note, never focused; Back returns to
+    /// the main menu.
+    #[test]
+    fn multiplayer_offers_lan_host_and_join_and_a_dimmed_online_row() {
+        let mut m = menus();
+        let confirm = press(|i| i.confirm = true);
+        m.step(MenuInput::default(), true, 0.1);
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::Multiplayer);
+        assert_eq!(m.movie(), MOVIE_SUB);
+        let rows: Vec<_> = m
+            .multiplayer
+            .rows
+            .iter()
+            .map(|r| (r.id, r.label.as_str(), r.enabled))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (RowId::LanHost, "LAN: Host Game", true),
+                (RowId::LanJoin, "LAN: Join Game", true),
+                (RowId::Online, "Online", false),
+            ]
+        );
+        assert_eq!(
+            m.multiplayer.note.as_deref(),
+            Some("Online play needs a dedicated server \u{2014} not available yet")
+        );
+        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::HostGame));
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::JoinGame));
+        // Down from Join wraps past the dimmed Online row to Host.
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.multiplayer.rows[m.multiplayer.focus].id, RowId::LanHost);
+        assert!(!m.focus_row(2), "Online cannot take the pointer's focus");
+        m.step(press(|i| i.back = true), false, 0.1);
+        assert_eq!(m.page, Page::Main);
+    }
+
+    /// The Online note is drawn under the Multiplayer stack once revealed.
+    #[test]
+    fn the_online_note_is_drawn_on_the_multiplayer_page() {
+        let mut m = menus();
+        m.page = Page::Multiplayer;
+        m.step(MenuInput::default(), false, 5.0);
+        let f = frame(m);
+        let note = ([DIMMED_GREY + 60.0; 3].map(|c| c / 255.0), ());
+        let lit = f
+            .verts
+            .iter()
+            .filter(|v| {
+                v.color[..3]
+                    .iter()
+                    .zip(note.0)
+                    .all(|(c, n)| (c - n).abs() < 1e-4)
+            })
+            .count();
+        assert!(lit >= 4 * "Online".len(), "note glyphs drawn: {lit}");
     }
 }

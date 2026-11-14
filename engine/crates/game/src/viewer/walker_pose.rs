@@ -25,6 +25,7 @@
 //! the world path's passes, lighting and specular (`super::vehicles`).
 
 use crate::skin::{Clip, Pose, Skeleton};
+use core::fmath::FloatExt;
 use core::vehicle::walker::WalkerState;
 use glam::{Mat4, Quat, Vec3};
 
@@ -146,9 +147,9 @@ impl WalkerRig {
             let Some(lp) = sample(layer) else { continue };
             for (k, _) in mask.iter().enumerate().filter(|(_, &m)| m) {
                 pose.0[k] = if simulation {
-                    crate::sim_pose::blend(pose.0[k], lp.0[k], weight.min(1.0))
+                    crate::sim_pose::blend(pose.0[k], lp.0[k], weight.fmin(1.0))
                 } else {
-                    pose.0[k].blend(lp.0[k], weight.min(1.0))
+                    pose.0[k].blend(lp.0[k], weight.fmin(1.0))
                 };
             }
         }

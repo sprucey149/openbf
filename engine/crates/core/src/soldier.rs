@@ -40,6 +40,7 @@
 //! - prone pitch clamp +-0.4 rad: BF1 FUN_00205cc8.
 
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::sim::{buttons, PadState};
 use glam::{Vec2, Vec3};
 
@@ -264,13 +265,13 @@ impl SoldierConstants {
         set("RollSpeedFactor", &mut c.roll_speed_factor);
         set("SprintAccelerateTime", &mut c.sprint_accelerate_time);
         set("EnergyBar", &mut c.energy_bar);
-        c.energy_bar = c.energy_bar.max(0.0);
-        c.energy_recover_threshold = c.energy_recover_threshold.min(c.energy_bar);
+        c.energy_bar = c.energy_bar.fmax(0.0);
+        c.energy_recover_threshold = c.energy_recover_threshold.fmin(c.energy_bar);
         set("EnergyOverheat", &mut c.energy_recover_threshold);
         set("EnergyMinSprint", &mut c.energy_recover_threshold);
-        c.energy_recover_threshold = c.energy_recover_threshold.max(0.0);
+        c.energy_recover_threshold = c.energy_recover_threshold.fmax(0.0);
         // FUN_001e1cb8 B2:92481-92493 raises the maximum for a larger threshold.
-        c.energy_bar = c.energy_bar.max(c.energy_recover_threshold);
+        c.energy_bar = c.energy_bar.fmax(c.energy_recover_threshold);
         set("EnergyRestore", &mut c.energy_restore);
         set("EnergyRestoreIdle", &mut c.energy_restore_idle);
         set("EnergyDrainSprint", &mut c.energy_drain_sprint);
@@ -326,10 +327,10 @@ impl SoldierConstants {
         }
         -self
             .energy_cost_jump
-            .max(self.energy_cost_jump_sprint)
-            .max(self.energy_cost_roll)
-            .max(self.jet_energy_drain)
-            .max(0.0)
+            .fmax(self.energy_cost_jump_sprint)
+            .fmax(self.energy_cost_roll)
+            .fmax(self.jet_energy_drain)
+            .fmax(0.0)
     }
 }
 
@@ -852,7 +853,7 @@ impl Soldier {
     /// own order: the clocks advance, then the lock and the tap are read.
     pub fn stance_tap_after(&self, dt: f32) -> Option<Stance> {
         let held = self.prev_buttons & buttons::ROLL_STANCE != 0;
-        if held || (self.lock_timer - dt).max(0.0) > 0.0 {
+        if held || (self.lock_timer - dt).fmax(0.0) > 0.0 {
             return None;
         }
         Self::stance_tap_target(self.stance, self.time_in_stance + dt)
@@ -864,7 +865,7 @@ impl Soldier {
     pub fn jump_stands_after(&self, dt: f32) -> bool {
         matches!(self.stance, Stance::Crouch | Stance::Prone)
             && self.prev_buttons & buttons::JUMP == 0
-            && (self.lock_timer - dt).max(0.0) <= 0.0
+            && (self.lock_timer - dt).fmax(0.0) <= 0.0
             && self.time_in_stance + dt > CROUCH_RISE_WAIT
     }
 
@@ -918,7 +919,7 @@ impl Soldier {
     fn pay_jump(&mut self, c: &SoldierConstants, fwd_axis: Vec2) -> bool {
         let fwd = Vec2::new(self.vel.x, self.vel.z).dot(fwd_axis);
         let cost = if fwd > c.max_speed + 1e-4 {
-            c.energy_cost_jump.max(c.energy_cost_jump_sprint)
+            c.energy_cost_jump.fmax(c.energy_cost_jump_sprint)
         } else {
             c.energy_cost_jump
         };
@@ -956,7 +957,7 @@ impl Soldier {
         self.energy -= cost;
         if self.energy < 0.0 {
             self.energy_depleted = true;
-            self.energy = self.energy.max(c.energy_floor());
+            self.energy = self.energy.fmax(c.energy_floor());
         }
         true
     }
@@ -1113,7 +1114,7 @@ impl Soldier {
                 self.floor_overlap = fresh;
             } else {
                 self.floor_overlap =
-                    (self.floor_overlap * floor_n.y * floor_n.y - approach * dt).min(fresh);
+                    (self.floor_overlap * floor_n.y * floor_n.y - approach * dt).fmin(fresh);
                 lost = floor_n.y < rules.climb_min_ny()
                     && self.floor_overlap <= 0.0
                     && approach * dt > FLOOR_LOSS_MOVE;
@@ -1166,7 +1167,7 @@ impl Soldier {
                 }
             }
             if (self.pos.y - from_y).abs() < WEDGE_MAX_DY {
-                self.vel.y = self.vel.y.max(0.0);
+                self.vel.y = self.vel.y.fmax(0.0);
                 self.ground_n = Vec3::Y;
                 self.touch_down(rules);
                 return;
@@ -1217,7 +1218,7 @@ impl Soldier {
             self.floor_overlap,
             self.knock_draw,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&[
             self.stance as u8,
@@ -1240,12 +1241,12 @@ impl Soldier {
         if let Some(v) = self.platform_vel {
             eat(b"SOLDIER_DECK");
             for c in [v.x, v.y, v.z] {
-                eat(&c.to_bits().to_le_bytes());
+                eat(&c.hash_bits().to_le_bytes());
             }
         }
         if self.fuel != 0.0 {
             eat(b"SOLDIER_FUEL");
-            eat(&self.fuel.to_bits().to_le_bytes());
+            eat(&self.fuel.hash_bits().to_le_bytes());
         }
         if self.jump_animation.is_some() || self.jump_animation_serial != 0 {
             eat(b"HERO_JUMP");

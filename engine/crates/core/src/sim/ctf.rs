@@ -18,6 +18,7 @@
 //! - Enemy flag carried to home capture region scores 1 point.
 //! - Friendly unit touching dropped team flag immediately returns it to home (Touch Return).
 
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 use super::state::{Event, Sim};
@@ -246,7 +247,7 @@ impl CtfState {
         for f in &self.flags {
             eat(&[f.team]);
             for coord in f.current_pos.to_array() {
-                eat(&coord.to_bits().to_le_bytes());
+                eat(&coord.hash_bits().to_le_bytes());
             }
             match f.status {
                 FlagStatus::AtHome => eat(&[0]),
@@ -260,8 +261,8 @@ impl CtfState {
                     pickup_cooldown,
                 } => {
                     eat(&[2]);
-                    eat(&timer.to_bits().to_le_bytes());
-                    eat(&pickup_cooldown.to_bits().to_le_bytes());
+                    eat(&timer.hash_bits().to_le_bytes());
+                    eat(&pickup_cooldown.hash_bits().to_le_bytes());
                 }
             }
         }
@@ -368,7 +369,7 @@ impl Sim {
                     mut timer,
                     mut pickup_cooldown,
                 } => {
-                    pickup_cooldown = (pickup_cooldown - dt).max(0.0);
+                    pickup_cooldown = (pickup_cooldown - dt).fmax(0.0);
                     timer -= dt;
 
                     let out_of_bounds = self.kill_floor.is_some_and(|kf| flag.current_pos.y < kf)

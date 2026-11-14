@@ -1,5 +1,6 @@
 use super::{emitter::Frame, Fx};
 use crate::{classdb::ClassDb, soldier_vis::WaterFeet, walk::WalkSim};
+use core::fmath::FloatExt;
 use glam::{Mat3, Vec3};
 use std::collections::HashMap;
 
@@ -102,7 +103,7 @@ impl Fx {
             let period = 1.0 / (0.3 * speed_squared + 4.0);
             if self.water_contact.ripple_clock > period {
                 self.water_contact.ripple_clock =
-                    (self.water_contact.ripple_clock - period).min(period);
+                    (self.water_contact.ripple_clock - period).fmin(period);
                 if speed_squared > 0.0 {
                     let at = s.pos + s.vel * 0.03;
                     if let Some(height) = walk.sim.still_water_under(s.pos) {

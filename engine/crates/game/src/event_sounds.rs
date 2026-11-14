@@ -72,12 +72,12 @@ pub fn each_off_handle(walk: &WalkSim, ears: Vec3, play: impl FnMut(&str, Vec3))
 /// leave in one update, so "the pull's first" is this tick's first of the
 /// unit's weapon, which `fired` keeps.
 fn shot_sound<'a>(
-    walk: &'a WalkSim,
+    sim: &'a core::sim::Sim,
     fired: &mut Vec<(core::unit::UnitHandle, u32)>,
     unit: core::unit::UnitHandle,
     weapon_class: u32,
 ) -> Option<&'a str> {
-    let wc = &walk.sim.weapon_classes[weapon_class as usize];
+    let wc = &sim.weapon_classes[weapon_class as usize];
     let first = !fired.contains(&(unit, weapon_class));
     if first {
         fired.push((unit, weapon_class));
@@ -87,8 +87,8 @@ fn shot_sound<'a>(
         .filter(|_| fire_sound_starts(first, wc))
 }
 
-fn human(walk: &WalkSim, unit: core::unit::UnitHandle) -> bool {
-    walk.sim.unit(unit).is_some_and(|u| u.is_player)
+fn human(sim: &core::sim::Sim, unit: core::unit::UnitHandle) -> bool {
+    sim.unit(unit).is_some_and(|u| u.is_player)
 }
 
 /// This tick's starts on a human's weapon handle (B1 +0xf4, B2 +0xd8), in
@@ -96,17 +96,27 @@ fn human(walk: &WalkSim, unit: core::unit::UnitHandle) -> bool {
 /// stops what the handle still sounds (`FUN_00355768` 1 -> `FUN_00355968`;
 /// re-weapon-sounds.md 7.3), so a pistol's 1 s tail cannot hide it, and one
 /// handle holds one click however fast the trigger is mashed.
-pub fn weapon_asks(walk: &WalkSim, mut ask: impl FnMut(crate::sounds::WeaponAsk)) {
+pub fn weapon_asks(walk: &WalkSim, ask: impl FnMut(crate::sounds::WeaponAsk)) {
+    weapon_asks_of(&walk.sim, &walk.sim.events, ask);
+}
+
+/// [`weapon_asks`] for `events` of `sim` (issue #168: a LAN peer's
+/// predicted own shots, made into fire sounds before they are confirmed).
+pub fn weapon_asks_of(
+    sim: &core::sim::Sim,
+    events: &[Event],
+    mut ask: impl FnMut(crate::sounds::WeaponAsk),
+) {
     let hash = crate::classdb::fnv1a_lowercase;
     let mut fired = Vec::new();
-    for e in &walk.sim.events {
+    for e in events {
         match *e {
             Event::FireEmpty {
                 unit,
                 weapon_class,
                 pos,
             } => {
-                if let Some(n) = &walk.sim.weapon_classes[weapon_class as usize].empty_sound {
+                if let Some(n) = &sim.weapon_classes[weapon_class as usize].empty_sound {
                     ask(crate::sounds::WeaponAsk {
                         unit: unit.index,
                         weapon_class,
@@ -121,8 +131,8 @@ pub fn weapon_asks(walk: &WalkSim, mut ask: impl FnMut(crate::sounds::WeaponAsk)
                 weapon_class,
                 origin,
                 ..
-            } if human(walk, unit) => {
-                if let Some(n) = shot_sound(walk, &mut fired, unit, weapon_class) {
+            } if human(sim, unit) => {
+                if let Some(n) = shot_sound(sim, &mut fired, unit, weapon_class) {
                     ask(crate::sounds::WeaponAsk {
                         unit: unit.index,
                         weapon_class,
@@ -410,8 +420,8 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 weapon_class,
                 origin,
                 ..
-            } if handles || !human(walk, *unit) => {
-                if let Some(n) = shot_sound(walk, &mut fired, *unit, *weapon_class) {
+            } if handles || !human(&walk.sim, *unit) => {
+                if let Some(n) = shot_sound(&walk.sim, &mut fired, *unit, *weapon_class) {
                     play(n, *origin);
                 }
             }

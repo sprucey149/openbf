@@ -1178,6 +1178,7 @@ fn the_post_choice_is_hashed_and_replays() {
 }
 
 mod class_change;
+mod humans;
 mod screens;
 mod walker_placement;
 

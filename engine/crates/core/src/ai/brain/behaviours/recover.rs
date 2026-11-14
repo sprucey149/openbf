@@ -7,6 +7,7 @@ use crate::ai::{
     PROBE_DIST, RECYCLE_AFTER, RECYCLE_ROAM, RETURN_ARRIVE, RETURN_ARRIVE_DY, RETURN_PLANS,
     SHUT_PROBE_UP, SHUT_RECYCLE, STUCK_PROGRESS, STUCK_WINDOW,
 };
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::sim::Sim;
 use crate::unit::Unit;
@@ -257,7 +258,7 @@ pub(in crate::ai) fn join_arc_floor(sim: &Sim, u: &Unit, st: &mut AiState) {
     let (Some(from_y), Some(to_y)) = (sim.nav_floor(entry), sim.nav_floor(r.next_hub)) else {
         return;
     };
-    if from_y.min(to_y) - pos.y <= crate::sim::BOUND_DROP + crate::ai::HUB_LEVEL_TOL
+    if from_y.fmin(to_y) - pos.y <= crate::sim::BOUND_DROP + crate::ai::HUB_LEVEL_TOL
         || (from_y - to_y).abs() > crate::ai::HUB_LEVEL_TOL
     {
         return;

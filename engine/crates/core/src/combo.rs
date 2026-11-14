@@ -3,6 +3,7 @@
 //! 0x306c48 deflect, 0x307a80 states. Named clip durations come from the bake.
 //! Native eight-event FIFO and state clocks follow 0x33cda8/0x33f908.
 
+use crate::fmath::FloatExt;
 use manifest::combo::{ComboDef, ComboField as Field, ComboKeyword as K};
 
 mod conditions;
@@ -180,7 +181,7 @@ impl ComboRuntime {
                 }
             }
         }
-        let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
+        let dt = if dt.is_finite() { dt.fmax(0.0) } else { 0.0 };
         let held = ((input.buttons & 0x3f) << 1) as u8;
         let held = held | if held & 6 == 6 { 0x80 } else { 0 };
         self.history.update(self.clock, held);
@@ -331,7 +332,7 @@ impl ComboRuntime {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(&(self.state as u64).to_le_bytes());
         for value in [self.time, self.clock, self.start] {
-            eat(&value.to_bits().to_le_bytes());
+            eat(&value.hash_bits().to_le_bytes());
         }
         for value in [self.state_serial, self.chain_serial] {
             eat(&value.to_le_bytes());
@@ -345,7 +346,7 @@ impl ComboRuntime {
         eat(&[self.retro.is_some() as u8]);
         if let Some(r) = &self.retro {
             eat(&(r.state as u64).to_le_bytes());
-            eat(&r.duration.to_bits().to_le_bytes());
+            eat(&r.duration.hash_bits().to_le_bytes());
         }
     }
 }
@@ -399,7 +400,7 @@ fn duration(state: &Field, clip: f32) -> f32 {
     // 0030a480 resolves the default clip length into unsigned hundredths.
     state.find(K::Duration).map_or_else(
         || ee_mul((ee_mul(clip, 100.0) as i32).clamp(0, 1022) as f32, 0.01),
-        |f| time(f, 0, clip, clip).max(0.0),
+        |f| time(f, 0, clip, clip).fmax(0.0),
     )
 }
 

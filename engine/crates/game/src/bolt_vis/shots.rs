@@ -1,6 +1,7 @@
 //! Match this tick's shot events to fresh rounds once, preserving salvo order.
 
 use crate::walk::WalkSim;
+use core::fmath::FloatExt;
 use core::projectile::{Bolt, ShotFlight};
 use core::sim::Event;
 use core::unit::UnitHandle;
@@ -109,7 +110,7 @@ fn launch_error(b: &Bolt, shot: &Shot) -> Option<(f32, f32)> {
     // Shell gravity was applied before that move, after the Shot event.
     let origin = b.pos - b.vel * b.age;
     let initial = (b.vel + Vec3::Y * (b.gravity * b.age)).normalize_or_zero();
-    let tolerance = (8.0 * f32::EPSILON * shot.origin.abs().max_element()).max(1e-3);
+    let tolerance = (8.0 * f32::EPSILON * shot.origin.abs().max_element()).fmax(1e-3);
     // Resolve exact/nearest launch directions before tolerant alternatives.
     // An earlier almost-parallel round may already have struck this tick.
     (origin.abs_diff_eq(shot.origin, tolerance) && initial.abs_diff_eq(shot.dir, 1e-5)).then_some((
