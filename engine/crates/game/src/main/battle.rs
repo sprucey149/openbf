@@ -9,6 +9,10 @@
 mod ctf_hud;
 use ctf_hud::{hud_hints, marker_screen};
 
+#[path = "battle/vehicle_start.rs"]
+mod vehicle_start;
+use vehicle_start::seat_player_in_vehicle;
+
 use super::BattleSetup;
 use anyhow::Result;
 use game::viewer::{upload_scene, SceneGpu};
@@ -451,17 +455,19 @@ pub(super) fn make_walk_with_counts(
     // Percentages use the map's combatant slots. A bench's explicit counts
     // win, then --ai; legacy CLI launches without percentages use authored
     // mission counts.
-    let ai_counts = counts.or(if hunt {
-        Some([walk.sim.ai_limit(0), walk.sim.ai_limit(1)])
-    } else if let Some(n) = b.ai {
-        Some([n; 2])
-    } else if let Some(d) = resolved {
-        Some(d.initial_ai(b.player_team))
-    } else {
-        b.mission
-            .as_ref()
-            .map(|m| [m.initial_ai(0, seat == 0), m.initial_ai(1, seat == 1)])
-    });
+    let ai_counts = counts
+        .or(if hunt {
+            Some([walk.sim.ai_limit(0), walk.sim.ai_limit(1)])
+        } else if let Some(n) = b.ai {
+            Some([n; 2])
+        } else if let Some(d) = resolved {
+            Some(d.initial_ai(b.player_team))
+        } else {
+            b.mission
+                .as_ref()
+                .map(|m| [m.initial_ai(0, seat == 0), m.initial_ai(1, seat == 1)])
+        })
+        .or_else(|| b.vehicle.is_some().then_some([0, 0]));
     let mut vehicle_classes: Vec<String> = Vec::new();
     let mut layout = game::layout::MapLayout::from_battle_manifest(&scene.manifest, hunt);
     if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
@@ -702,6 +708,9 @@ pub(super) fn make_walk_with_counts(
         &vehicle_classes,
         b.mission.as_ref().and_then(|m| m.era.as_deref()),
     ));
+    if let Some(query) = b.vehicle.as_deref() {
+        seat_player_in_vehicle(&mut walk, query)?;
+    }
     Ok(walk)
 }
 
@@ -1262,6 +1271,7 @@ mod tests {
             teams: None,
             classes_dir: dir.join("absent_sides"),
             mission: None,
+            vehicle: None,
             mission_file: None,
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
@@ -1323,6 +1333,7 @@ mod tests {
             teams: None,
             classes_dir: assets.join("classes"),
             mission: None,
+            vehicle: None,
             mission_file: None,
             player_team: 1,
             heroes: Some(core::sim::heroes::HeroRules::default()),
@@ -1457,6 +1468,7 @@ mod tests {
                 teams: Some(mission.factions()),
                 classes_dir: assets.join("classes"),
                 mission: Some(mission.clone()),
+                vehicle: None,
                 mission_file: None,
                 player_team: 0,
                 heroes: game::heroes::rules(&session),

@@ -1275,6 +1275,7 @@ mod tests {
             teams: None,
             classes_dir: Default::default(),
             mission: None,
+            vehicle: None,
             mission_file: None,
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),

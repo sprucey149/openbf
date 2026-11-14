@@ -1118,48 +1118,71 @@ impl Sim {
             }) {
                 continue;
             }
-            let class = pad.def.class_for(pad.team).expect("wants_spawn");
-            let mut spec = class.spec.clone();
-            spec.home_team = pad.team;
-            spec.spawn_pad = Some(pi as u32);
-            spec.yaw = pad.def.yaw;
-            // B1:240463-240510 rays down through the pad from 1 m over it to
-            // 1 m under it and puts the vehicle on the hit, else at the pad's
-            // own point (re-vehicle-rest §1). A flyer's constructor then adds
-            // its class's LandedHeight, and nothing moves it while it is
-            // landed (§2, §3; card VREST). PROVISIONAL: the ray is blind to
-            // the hulls (the PS2's meets a landed flyer's body), and a hover
-            // or walker keeps the soldier's ground probe to any depth — the
-            // PS2 creates it in the air over 14 of 215 pads and it falls to
-            // the same place (§1).
-            let p = pad.def.pos;
-            spec.pos = match class.landed_height {
-                Some(lh) => {
-                    let g = self.floor_point_under_static(p, p.y + PAD_RAY);
-                    let y = if (p.y - PAD_RAY..=p.y + PAD_RAY).contains(&g) {
-                        g
-                    } else {
-                        p.y
-                    };
-                    Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
-                }
-                None => {
-                    let g = self.ground_under_with(p, false, HullFilter::Static);
-                    if g > NO_GROUND {
-                        Vec3::new(p.x, g, p.z)
-                    } else {
-                        p
-                    }
-                }
-            };
-            let h = self.spawn_vehicle(&spec);
-            self.vehicle_pads[pi].spawned(h);
+            let team = self.vehicle_pads[pi].team;
+            self.spawn_from_pad(pi, team);
         }
     }
 
+    /// Spawn a vehicle from pad `pi` for `team` immediately, registering it
+    /// on the pad. Used by `tick_vehicle_pads` and `--vehicle` CLI startup.
+    pub fn spawn_from_pad(&mut self, pi: usize, team: Option<u8>) -> Option<VehicleHandle> {
+        let pad = self.vehicle_pads.get(pi)?;
+        let class = pad.def.class_for(team)?;
+        let live = pad
+            .vehicles
+            .iter()
+            .filter(|v| self.vehicle(v.handle).is_some())
+            .count();
+        if live >= pad.def.spawn_count.max(1) as usize || self.pad_box_taken_for(pi, team) {
+            return None;
+        }
+        let mut spec = class.spec.clone();
+        spec.home_team = team;
+        spec.spawn_pad = Some(pi as u32);
+        spec.yaw = pad.def.yaw;
+        // B1:240463-240510 rays down through the pad from 1 m over it to
+        // 1 m under it and puts the vehicle on the hit, else at the pad's
+        // own point (re-vehicle-rest §1). A flyer's constructor then adds
+        // its class's LandedHeight, and nothing moves it while it is
+        // landed (§2, §3; card VREST). PROVISIONAL: the ray is blind to
+        // the hulls (the PS2's meets a landed flyer's body), and a hover
+        // or walker keeps the soldier's ground probe to any depth — the
+        // PS2 creates it in the air over 14 of 215 pads and it falls to
+        // the same place (§1).
+        let p = pad.def.pos;
+        let landed_height = class.landed_height;
+        spec.pos = match landed_height {
+            Some(lh) => {
+                let g = self.floor_point_under_static(p, p.y + PAD_RAY);
+                let y = if (p.y - PAD_RAY..=p.y + PAD_RAY).contains(&g) {
+                    g
+                } else {
+                    p.y
+                };
+                Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
+            }
+            None => {
+                let g = self.ground_under_with(p, false, HullFilter::Static);
+                if g > NO_GROUND {
+                    Vec3::new(p.x, g, p.z)
+                } else {
+                    p
+                }
+            }
+        };
+        let h = self.spawn_vehicle(&spec);
+        self.vehicle_pads[pi].team = team;
+        self.vehicle_pads[pi].spawned(h);
+        Some(h)
+    }
+
     fn pad_box_taken(&self, pi: usize) -> bool {
+        self.pad_box_taken_for(pi, self.vehicle_pads[pi].team)
+    }
+
+    fn pad_box_taken_for(&self, pi: usize, team: Option<u8>) -> bool {
         let pad = &self.vehicle_pads[pi];
-        let Some((lo, hi)) = pad.def.class_for(pad.team).and_then(|class| class.vis_box) else {
+        let Some((lo, hi)) = pad.def.class_for(team).and_then(|class| class.vis_box) else {
             return false;
         };
         let (centre, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);

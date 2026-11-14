@@ -610,6 +610,22 @@ fn a_pad_spawns_at_once_then_respawns_after_spawn_time() {
     assert!(n.abs_diff(10 * TICKS_PER_S) <= 1, "respawn after {n} ticks");
 }
 
+#[test]
+fn immediate_pad_spawns_preserve_capacity_and_failed_request_state() {
+    let mut s = Sim::empty(1);
+    let pi = s.add_vehicle_pad(pad(Some(1), None));
+    assert!(s.spawn_from_pad(pi, Some(1)).is_some());
+    assert!(s.spawn_from_pad(pi, Some(0)).is_none());
+    assert_eq!(s.vehicle_pads[pi].team, Some(1));
+    assert_eq!(s.vehicle_pads[pi].vehicles.len(), 1);
+    assert_eq!(s.alive_vehicles().count(), 1);
+    let empty = s.add_vehicle_pad(pad(Some(1), None));
+    s.vehicle_pads[empty].def.classes[0] = None;
+    assert!(s.spawn_from_pad(empty, Some(0)).is_none());
+    assert_eq!(s.vehicle_pads[empty].team, Some(1));
+    assert!(s.vehicle_pads[empty].vehicles.is_empty());
+}
+
 /// Card VREST (re-vehicle-rest §1-§3): a flyer is created at the first
 /// surface within 1 m of its pad — else at the pad's own point — plus
 /// its class's LandedHeight, and stays there; a hover's pad still finds

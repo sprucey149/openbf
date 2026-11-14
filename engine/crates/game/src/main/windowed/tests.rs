@@ -19,6 +19,7 @@ pub(super) fn setup(cap: Option<u32>) -> BattleSetup {
         teams: None,
         classes_dir: PathBuf::new(),
         mission: None,
+        vehicle: None,
         mission_file: None,
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
