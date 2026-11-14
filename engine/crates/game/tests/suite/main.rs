@@ -66,6 +66,7 @@ mod roster;
 mod route_patch;
 mod sbd;
 mod seat_camera;
+mod atte_rear_arc;
 mod self_turrets;
 mod shell_layout;
 mod skinned_glb;

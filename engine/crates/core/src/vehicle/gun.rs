@@ -144,7 +144,7 @@ pub struct Turn {
 }
 
 /// The limits the PS2's tick clamps to; outside them it wraps
-/// (B2:189323-189385, B1:137478-137520).
+/// (B2:189323-189385, B1:137252-137303).
 const CLAMP_LO: f32 = -3.1416926;
 const CLAMP_HI: f32 = 3.1414928;
 
@@ -172,8 +172,11 @@ impl Turn {
         };
         let (y, p) = (rad(yaw_deg), rad(pitch_deg));
         let wraps = |l: [f32; 2]| !(CLAMP_LO < l[0] && l[1] < CLAMP_HI);
-        let yaw_positive = slew == Slew::Linear
-            && y[0] > 0.0
+        // A rear arc (0 < lo <= 180° <= hi < 360°) keeps a [0, 2π) domain
+        // and clamps on both discs: BF1 sets E+0x114c in the YawLimits
+        // setter (B1:138731-138752) and clamps under it (B1:137186-137192,
+        // 137276-137303). BF1 rep_walk_atte's 3rd seat (120..230) is one.
+        let yaw_positive = y[0] > 0.0
             && y[0] <= std::f32::consts::PI
             && y[1] >= std::f32::consts::PI
             && y[1] < std::f32::consts::TAU;
