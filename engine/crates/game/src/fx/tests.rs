@@ -4,6 +4,59 @@ mod jet;
 mod resupply;
 mod turret;
 
+#[test]
+fn sibling_emitters_share_view_terms_without_merging_independent_roots() {
+    for era in [Era::Bf1, Era::Bf2] {
+        let mut root = one_shot_emitter();
+        root.bounding_radius = 25.0;
+        root.sibling = Some(Box::new(one_shot_emitter()));
+        let def = Arc::new(EffectDef::new(
+            1,
+            None,
+            vec![root, one_shot_emitter()],
+            era,
+            &mut Lcg(1),
+        ));
+        let mut live = LiveEffect::new(def, Frame::at(Vec3::Z * 100.0), &mut Lcg(2));
+        live.advance(0.01);
+        let mut draws = Vec::new();
+        live.draws(Vec3::ZERO, Vec3::Z, &mut |_| None, &mut draws);
+        assert_eq!(
+            draws.len(),
+            2,
+            "the sibling shares 500 m; the independent root keeps 50 m"
+        );
+    }
+}
+
+#[test]
+fn hailfire_purple_glow_survives_the_rockets_flight() {
+    let root = crate::assets::baked_root();
+    let lib = Library::load(&root, &root.join("bf2_geo1"), "bf2", &["cis", "rep"]);
+    let def = lib
+        .get("com_sfx_weap_rockettrail_purple")
+        .expect("purple rocket trail")
+        .clone();
+    let mut live = LiveEffect::new(def, Frame::at(Vec3::Z * 10.0), &mut Lcg(3));
+    for tick in 1..=90 {
+        live.frame.pos.z = 10.0 + tick as f32 * 4.0;
+        live.advance(core::TICK_DT);
+        let mut draws = Vec::new();
+        live.draws(Vec3::ZERO, Vec3::Z, &mut |_| None, &mut draws);
+        assert!(
+            draws.iter().any(|d| d.additive
+                && d.color[2] > d.color[0]
+                && d.color[0] > d.color[1]
+                && d.color[3] > 0),
+            "purple glow lost at {} m, tick {tick}",
+            live.frame.pos.z
+        );
+    }
+    live.stop();
+    live.advance(1.1);
+    assert!(live.is_dead(), "the stopped rocket must retire its effect");
+}
+
 /// One finite white particle, with no motion, child, sound or asset lookup.
 pub(super) fn one_shot_emitter() -> FxEmitter {
     let zero = manifest::FxRange(0.0, 0.0);

@@ -625,7 +625,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/blackbox.rs` 2694 — dev-mode playtest history and rotating snapshots on F9, quit, panic and stuck alarm; read-only on the sim and excluded from its hash · `BlackBox`, `Snapshot`, `Meta`, `on`, `write_rotating`, `read`, `SoundRow`, `sound_digest`. `blackbox::SCHEMA` owns schema age and supported older reads; module header owns history/build diagnostics; operation in `analysis/dev-tools.md`.
 - `game/src/blackbox/rotating.rs` 173 — serialized snapshot file rotation shared by the hotkey writer and panic hook, with same-thread recursion protection and filesystem regression tests · `write`, `PREVIOUS`.
 - `game/src/blackbox/session.rs` 323 — Card DPRX: the black box's MATCH-LONG tally of one subject - the human, or in a headless round the sweep's human proxy (`core::ai::proxy`). The rings
-- `game/src/fx.rs` 1416 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
+- `game/src/fx.rs` 1468 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
 - `game/src/fx/space_dust.rs` 284 — PS2 `SpaceDust` flight streaks: the baked scope, 80-sample bank, speed-scaled spawn rate, backward drift, depth fade and additive capped ribbons · `SpaceDust`, `Fx::advance_space_dust`; `analysis/re-space-assault.md` § SpaceDust and takeoff plume implementation.
 - `game/src/fx/flyer_spray.rs` 380 — flyer exhaust attachments and ground plumes at takeoff, BF2 landing approach and BF1 touchdown · `Fx::follow_flyer_exhaust`, `Fx::flyer_spray`.
 - `game/src/fx/sky.rs` 128 — dome-attached decorative effects, authored hardpoints and rotation.
@@ -1126,7 +1126,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `core/src/emitter.rs` 481 — the emitter ordnance query law: one instant cone-and-chain hit per shot.
 - `core/src/missile.rs` 603 — missile class data, flight law and lock target.
-- `core/src/sim/beam.rs` 275 — beam ordnance: a held ray cast as a per-tick round; `fly_bolts`; a PassThrough beam's chain through what it strikes on a ground round (`Sim::pierce_beam`, `Sim::beam_pierces`).
+- `core/src/sim/beam.rs` 312 — beam ordnance: a held ray cast as a per-tick round; `fly_bolts`; a PassThrough beam's chain through what it strikes on a ground round (`Sim::pierce_beam`, `Sim::beam_pierces`).
 - `core/src/sim/beam/tests.rs` 222 — beam scene tests, PassThrough through soldiers and a hull, a wall, space.
 - `core/src/sim/burn.rs` 47 — an emitter's ignite and burn effects, over the one `hero_weapon::Burn`.
 - `core/src/sim/burn/tests.rs` 229 — emitter burn scene tests.
@@ -1147,7 +1147,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/src/fx/arc.rs` 528 — emitter lightning arcs between a shot's links.
 - `game/src/fx/flame.rs` 110 — burn effects on a burning unit's bones and flame shots.
 - `game/src/fx/flame/tests.rs` 127 — burn effect and flame shot tests.
-- `game/src/fx/tests.rs` 893 — particle effect behaviour tests.
+- `game/src/fx/tests.rs` 946 — particle effect behaviour tests.
 - `game/src/roster/secondary_tests.rs` 118 — secondary ordnance roster tests against the BF2 class bake.
 
 - `game/src/fx/turret.rs` 53 — portable turret damage-band effects and lifecycle · `Fx::follow_turrets`.
@@ -1207,3 +1207,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `game/examples/space_sweep.rs` 368 — headless multi-map Space Assault sweep across `bf2_spa1..9` reporting outcome, points, destroyed stations, shot-down flyers and crashes.
 - `game/tests/space_playtest_fixes.rs` 1311 — regression checks for capital hull `ShieldLarge` impacts and sounds, flyer collision/death ODF sounds and mounted listener, `SetParticleLODBias` far fade, interpolated missile trails, and hangar shield ordnance collision.
+
+- `game/tests/suite/hailfire_feedback.rs` 79 -- Vehicle feedback regression tests.
+
+- `game/tests/suite/spider_feedback.rs` 160 -- Vehicle feedback regression tests.

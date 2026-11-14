@@ -215,7 +215,7 @@ impl Sim {
     /// driven hover keeps the eye too: which drivers have the E+0x2a0 the
     /// branch tests (B2:132335-132342) is not traced.
     #[allow(clippy::too_many_arguments)]
-    fn chase_ray_origin(
+    pub(super) fn chase_ray_origin(
         &self,
         m: crate::vehicle::Mount,
         g: &GunSetup,
@@ -241,7 +241,7 @@ impl Sim {
     /// The first surface or soldier along the camera ray, else its end —
     /// past the seat's own vehicle's hull (card VHULL) and a building
     /// turret's own building (card TURR).
-    fn aim_point(&self, eye: Vec3, dir: Vec3, riders: &[UnitHandle], own: VehicleHandle) -> Vec3 {
+    pub(super) fn aim_point(&self, eye: Vec3, dir: Vec3, riders: &[UnitHandle], own: VehicleHandle) -> Vec3 {
         let mut t = AIM_RAY;
         if let Some(h) = self.terrain_ray(eye, dir, t, 0.5) {
             t = t.min(h);
@@ -551,7 +551,7 @@ impl Sim {
                 let origin = point.map_or(origin, |p| {
                     pos + rot * g.shot_point(k, Some(p), st.aim, fixed_guns)
                 });
-                let (fwd, right, up) = if g.turn.is_none() && !fixed_guns && w.fire_points.len() > 1 {
+                let (fwd, right, up) = if g.turn.is_none() && !fixed_guns && !w.fire_points.is_empty() {
                     ring_aim(&g, w.fire_limits.get(point.unwrap_or(0)), rot, origin, target, fwd)
                 } else {
                     (fwd, right, up)
@@ -663,7 +663,7 @@ impl Sim {
 /// the shot leaves along the line from its point to `target`, inside that
 /// barrel's aimer chain's limits (`GunWeapon::fire_limits`, else the seat's
 /// weapon aimer's); the port's one aim per seat has no per-aimer lag.
-fn ring_aim(
+pub(super) fn ring_aim(
     g: &GunSetup,
     limits: Option<&[[f32; 2]; 2]>,
     rot: Quat,

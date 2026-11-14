@@ -1032,7 +1032,7 @@ pub fn install_for_mission(
     {
         if !matches!(
             db.engine_base(&b.classes[class]).and_then(vehicle_kind),
-            Some(VehicleKind::Walker | VehicleKind::Flyer)
+            Some(VehicleKind::Walker | VehicleKind::Flyer | VehicleKind::Hover)
         ) {
             continue;
         }

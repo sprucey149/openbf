@@ -169,18 +169,21 @@ pub struct EffectDef {
     pub hash: u32,
     pub name: Option<String>,
     pub emitters: Vec<FxEmitter>,
+    /// Siblings share the root emitter's scene record and view terms.
+    view_roots: Vec<usize>,
     era: Era,
     /// Empty for BF2 (every particle its own seed).
     caches: Vec<Vec<Variant>>,
     children: Vec<Option<Arc<EffectDef>>>,
 }
 
-fn flatten(e: &FxEmitter, out: &mut Vec<FxEmitter>) {
+fn flatten(e: &FxEmitter, out: &mut Vec<FxEmitter>, roots: &mut Vec<usize>, root: usize) {
     let mut own = e.clone();
     let sibling = own.sibling.take();
     out.push(own);
+    roots.push(root);
     if let Some(s) = sibling {
-        flatten(&s, out);
+        flatten(&s, out, roots, root);
     }
 }
 
@@ -192,6 +195,13 @@ impl EffectDef {
         era: Era,
         rng: &mut Lcg,
     ) -> Self {
+        let mut flattened = Vec::new();
+        let mut view_roots = Vec::new();
+        for em in &emitters {
+            let root = flattened.len();
+            flatten(em, &mut flattened, &mut view_roots, root);
+        }
+        let emitters = flattened;
         // S+0x128: a per-spawner random set at construction.
         let caches = match era {
             Era::Bf1 => emitters
@@ -205,10 +215,14 @@ impl EffectDef {
             .enumerate()
             .map(|(i, em)| {
                 em.geometry.child.as_ref().map(|child| {
-                    let mut emitters = Vec::new();
-                    flatten(child, &mut emitters);
                     let hash = hash.wrapping_add(i as u32 + 1);
-                    Arc::new(Self::new(hash, None, emitters, era, &mut Lcg(hash)))
+                    Arc::new(Self::new(
+                        hash,
+                        None,
+                        vec![*child.clone()],
+                        era,
+                        &mut Lcg(hash),
+                    ))
                 })
             })
             .collect();
@@ -216,6 +230,7 @@ impl EffectDef {
             hash,
             name,
             emitters,
+            view_roots,
             era,
             caches,
             children,
@@ -276,14 +291,10 @@ impl Library {
             };
             for e in set.effects {
                 effects.entry(e.hash).or_insert_with(|| {
-                    let mut emitters = Vec::new();
-                    for em in &e.emitters {
-                        flatten(em, &mut emitters);
-                    }
                     Arc::new(EffectDef::new(
                         e.hash,
                         e.name.clone(),
-                        emitters,
+                        e.emitters.clone(),
                         effect_era,
                         rng,
                     ))
@@ -592,7 +603,8 @@ impl LiveEffect {
                 continue;
             }
             let em = &self.def.emitters[i];
-            let terms = draw::view_terms_with_bias(d, em.bounding_radius, zoom, bias);
+            let root = &self.def.emitters[self.def.view_roots[i]];
+            let terms = draw::view_terms_with_bias(d, root.bounding_radius, zoom, bias);
             if terms.fade <= 0.0 {
                 continue;
             }
