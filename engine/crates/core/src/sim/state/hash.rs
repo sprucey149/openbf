@@ -99,7 +99,7 @@ impl Sim {
                                     {
                                         let count = weapon.fire_points.len();
                                         if count > 1 {
-                                            let next = state.shots_fired % count as u64;
+                                            let next = state.turns() % count as u64;
                                             if next != 0 {
                                                 eat(b"FLYER_MUZZLE");
                                                 eat(&(seat as u32).to_le_bytes());
@@ -131,9 +131,6 @@ impl Sim {
         }
         for tow in &self.tow_cables {
             tow.hash_into(&mut eat);
-        }
-        for fall in &self.tow_falls {
-            fall.hash_into(&mut eat);
         }
         // HASH: a live bolt carries its predictive hit and historical shooter.
         // Empty fixtures keep their pins; live-bolt replays need a sim re-baseline.

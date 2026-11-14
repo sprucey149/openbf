@@ -228,17 +228,6 @@ pub(super) fn fired_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
             db,
             class: ord_name,
         });
-        let look = ord.impact.get_or_insert_with(ImpactLook::default);
-        look.terrain = None;
-        look.water = None;
-        for slot in [
-            &mut look.soft,
-            &mut look.rigid,
-            &mut look.building,
-            &mut look.shield,
-        ] {
-            slot.clone_from(&beam.impact);
-        }
         ord.beam = Some(beam);
     }
     if db

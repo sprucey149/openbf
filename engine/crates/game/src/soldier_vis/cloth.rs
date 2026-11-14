@@ -1,4 +1,5 @@
-//! Per-wearer cloth state and dynamic ordinary meshes. Only companions opt in.
+//! Per-wearer cloth state and dynamic ordinary meshes. A soldier whose bake
+//! wrote a cloth companion opts in; any other keeps its rigid cloth parts.
 
 use super::*;
 use crate::cloth::{Definition, State};
@@ -71,10 +72,16 @@ impl SoldierVisuals {
                 }
                 _ => model_of(&u.soldier),
             };
-            let palette = sa
-                .asset
-                .skeleton
-                .palette(&v.animator.pose(&sa.asset.skeleton).locals());
+            let compute = || -> std::sync::Arc<[Mat4]> {
+                let pose = v.animator.pose(&sa.asset.skeleton);
+                sa.asset.skeleton.palette(&pose.locals()).into()
+            };
+            let (posed_for, memo) = v.palette.get_or_init(|| (body, compute()));
+            let palette = if *posed_for == body {
+                memo.clone()
+            } else {
+                compute()
+            };
             let globals: Vec<_> = palette
                 .iter()
                 .zip(&sa.asset.skeleton.global_bind)

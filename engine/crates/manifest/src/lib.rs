@@ -809,13 +809,34 @@ pub struct ManifestVehicle {
     pub vis_box: Option<([f32; 3], [f32; 3])>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flyer: Option<ManifestFlyer>,
+    /// A hover class drawn posed (card VPOSE, `analysis/re-vehicle-pose.md`
+    /// 7): its skin, written when the class has a `FinAnimation` or names a
+    /// turret, aimer or barrel node. `None` = drawn rigid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hover: Option<ManifestHover>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestFlyer {
     pub bank: String,
     pub skin: String,
+    /// The bank's `takeoff` clip's frames; 0 when it has none.
     pub frames: u16,
+    /// The fins clip (`analysis/re-vehicle-pose.md` 6): `FinAnimation`'s
+    /// value, else the bank's `fins`, named in the skin GLB as written.
+    /// Posed only when the bank has no `takeoff` clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fin: Option<String>,
+}
+
+/// A posed hover's skin (`walkers/<skin>.glb`) and its `FinAnimation` clip,
+/// named in that GLB by the value as authored; `None` when the class has
+/// none or its bank lacks it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestHover {
+    pub skin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fin: Option<String>,
 }
 
 /// What a walker's integrator reads from its bake (card WALK,
@@ -1203,6 +1224,22 @@ pub struct SoldierLod {
     /// PS2 model+0xa8: total strip indices, not the decoded vertex count.
     pub high_count: u32,
     pub sphere: [f32; 4],
+}
+
+/// The subfolder of a classes folder that holds each class file's
+/// [`DamageLoad`] list, under the class file's own name.
+pub const DAMAGE_ORDER_DIR: &str = "load_order";
+
+/// One class definition that sets damage-slot keys, as a side or shared LVL
+/// holds it (`classes/load_order/<class file>`, `bake::classes::damage_load_order`):
+/// the PS2 creates a read file's classes in this order (re-hover §13.12).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DamageLoad {
+    /// The `lvl_` sub-level hash that holds it; `None` at the top level.
+    pub sub: Option<u32>,
+    pub class: String,
+    /// Its damage-slot rows, (key hash, raw value), in file order.
+    pub rows: Vec<(u32, String)>,
 }
 
 /// One munged gameplay class: its name, the chunk it came from, its BASE and

@@ -101,6 +101,8 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         rc_flight_controls: false,
         invert_y: false,
         low_power_resolution: false,
+        terrain_lod: false,
+        scene_softness: false,
         input_icons_label: label,
         icons,
         first_person: false,

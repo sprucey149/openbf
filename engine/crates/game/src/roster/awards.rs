@@ -186,6 +186,7 @@ pub(super) fn sound_as(selected: &mut WeaponClass, native: &WeaponClass) {
     selected.reload_sound.clone_from(&native.reload_sound);
     selected.empty_sound.clone_from(&native.empty_sound);
     selected.change_sound.clone_from(&native.change_sound);
+    selected.overheat_sound.clone_from(&native.overheat_sound);
     selected
         .ordnance
         .ordnance_sound

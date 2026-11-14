@@ -327,26 +327,46 @@ pub fn bolt_draw(
         glow_texture: textures[1],
         core_color: [255, 255, 255, (fade.clamp(0.0, 1.0) * 255.0) as u8],
         glow_color: look.glow_bytes(age, fade),
+        beam: None,
     }
 }
 
+/// One beam's draw (B1 `FUN_002758e0`, B2 `FUN_00312438`;
+/// `analysis/re-hover-camera.md` 6): both ribbons over the reach plus 1 m
+/// about its middle (`analysis/re-ordnance-kinds.md` 9b), from `muzzle` when
+/// a scoped shot draws one off its ray, untapered and unfaded, the core in
+/// the class's beam colour and the glow in its `LaserGlowColor`. A bolt look (no
+/// [`LaserLook::beam`]) is drawn as the BF2 beam ctor's would be.
 pub fn beam_draw(
     look: &LaserLook,
     beam: &core::sim::Beam,
     textures: [Option<TextureHandle>; 2],
     muzzle: Option<Vec3>,
 ) -> BoltDraw {
-    let head = beam.origin + beam.dir * (beam.len + 0.5);
-    let (dir, len) = muzzle.map_or((beam.dir, beam.len + 1.0), |muzzle| {
-        let path = head - muzzle;
-        (path.normalize_or(beam.dir), path.length())
+    let b = look.beam.clone().unwrap_or(core::laser::BeamLook {
+        color: [255; 4],
+        glow_width: look.width * core::laser::BEAM_GLOW_WIDTH,
+        glow_texture: None,
+        glow_additive: false,
     });
-    let look = LaserLook {
-        length: len,
-        glow_length: len,
-        ..look.clone()
-    };
-    bolt_draw(&look, head, dir, len, 0.0, 1.0, textures)
+    let far = beam.origin + beam.dir * (beam.len + 0.5);
+    let near = muzzle.unwrap_or(beam.origin - beam.dir * 0.5);
+    let path = far - near;
+    BoltDraw {
+        head: near,
+        dir: -path.normalize_or(beam.dir),
+        core_len: path.length(),
+        glow_len: path.length(),
+        width: look.width,
+        core_texture: textures[0],
+        glow_texture: textures[1],
+        core_color: b.color,
+        glow_color: look.glow_color,
+        beam: Some(render::BeamRibbons {
+            glow_width: b.glow_width,
+            glow_additive: b.glow_additive,
+        }),
+    }
 }
 
 /// The texture a `LaserTexture` name draws with (lower-cased, as baked).
@@ -373,9 +393,7 @@ pub struct BoltVis {
 }
 
 fn visual_look(walk: &WalkSim, class: usize) -> Option<&LaserLook> {
-    crate::walker_shots::style(walk, class)
-        .and_then(|s| s.tracer.as_ref())
-        .or_else(|| walk.sim.weapon_classes.get(class)?.ordnance.laser.as_ref())
+    walk.sim.weapon_classes.get(class)?.ordnance.laser.as_ref()
 }
 
 impl BoltVis {
@@ -483,11 +501,7 @@ impl BoltVis {
         for (bolt_index, b) in sim.bolts.iter().enumerate() {
             // A missile with a model is `SoldierVisuals`' (card UORD), and a
             // look-less round has no ribbon: neither is this module's.
-            if look(b.weapon_class).is_none()
-                || modelled(walk, b)
-                || crate::walker_shots::style(walk, b.weapon_class)
-                    .is_some_and(|s| s.tracer.is_some())
-            {
+            if look(b.weapon_class).is_none() || modelled(walk, b) {
                 continue;
             }
             let k = key(b);
@@ -575,7 +589,6 @@ impl BoltVis {
             });
         }
         self.same_tick_hits(walk, &shots, &mut struck);
-        self.walker_tracers(walk, &shots, &mut struck);
     }
 
     /// The tick's bolts that the sim spawned and resolved inside the one
@@ -585,59 +598,6 @@ impl BoltVis {
     /// its impact like any other (re-bolt §4) and, on BF2, lights the ground
     /// there (§5.2): each `Shot` of the tick with a struck `Impact` on its
     /// ray within one step becomes a remnant.
-    fn walker_tracers(&mut self, walk: &WalkSim, shots: &Shots, struck: &mut Struck) {
-        for shot in &shots.events {
-            let class = shot.class;
-            // Geometry owns the shot's draw, including walker cannons that
-            // also author a tracer. Match the ordinary bolt path's priority.
-            if walk.sim.weapon_classes[class].ordnance.geometry.is_some() {
-                continue;
-            }
-            let Some(style) =
-                crate::walker_shots::style(walk, class).filter(|s| s.tracer.is_some())
-            else {
-                continue;
-            };
-            let ordinal = crate::walker_shots::ordinal(walk, shot.unit, class, shot.event);
-            if !crate::walker_shots::visible(walk, class, ordinal) {
-                continue;
-            }
-            let start = shot.muzzle(walk).unwrap_or(shot.origin);
-            let impact = if shot.bolt.is_none() {
-                let step = walk.sim.weapon_classes[class].ordnance.velocity * core::TICK_DT;
-                struck.take_to(
-                    shot.origin,
-                    shot.dir,
-                    step,
-                    class,
-                    shot.flight.map(|f| f.end),
-                )
-            } else {
-                None
-            };
-            let end = shot
-                .flight
-                .map(|f| f.end)
-                .or_else(|| shot.bolt.map(|i| walk.sim.bolts[i].end))
-                .or_else(|| impact.map(|h| h.0))
-                .unwrap_or(shot.origin + shot.dir * style.tracer.as_ref().unwrap().length);
-            let delta = end - start;
-            let direction = delta.try_normalize().unwrap_or(shot.dir);
-            let len = delta.length().fmin(style.tracer.as_ref().unwrap().length);
-            self.remnants.push(Remnant {
-                class,
-                head: start + direction * len,
-                dir: direction,
-                len,
-                age: 0.0,
-                fade: 1.0,
-                timer: 0.0,
-                terrain: false,
-                prev: start,
-            });
-        }
-    }
-
     fn same_tick_hits(&mut self, walk: &WalkSim, shots: &Shots, struck: &mut Struck) {
         let sim = &walk.sim;
         for shot in &shots.events {
@@ -651,10 +611,7 @@ impl BoltVis {
             let Some(w) = sim.weapon_classes.get(class) else {
                 continue;
             };
-            if w.ordnance.laser.is_none()
-                || w.ordnance.velocity <= 0.0
-                || crate::walker_shots::style(walk, class).is_some_and(|s| s.tracer.is_some())
-            {
+            if w.ordnance.laser.is_none() || w.ordnance.velocity <= 0.0 {
                 continue;
             }
             let step = w.ordnance.velocity * core::TICK_DT;
@@ -782,6 +739,10 @@ impl BoltVis {
                 .texture
                 .as_deref()
                 .and_then(|n| self.texture(r, &texture_name(n)));
+            let beam_glow = match look.beam.as_ref().and_then(|b| b.glow_texture.as_deref()) {
+                Some(n) => self.texture(r, &texture_name(n)),
+                None => glow,
+            };
             let muzzle = walk
                 .sim
                 .unit(walk.player)
@@ -802,7 +763,7 @@ impl BoltVis {
                         })
                         .unwrap_or_else(|| beam.origin - u.aim_frame().2 * (2.0 * width))
                 });
-            out.push(beam_draw(look, beam, [core, glow], muzzle));
+            out.push(beam_draw(look, beam, [core, beam_glow], muzzle));
         }
         for tow in &walk.sim.tow_cables {
             out.extend(tow.points.windows(2).filter_map(|segment| {
@@ -821,6 +782,7 @@ impl BoltVis {
                     glow_texture: None,
                     core_color: [37, 37, 38, 255],
                     glow_color: [0; 4],
+                    beam: None,
                 })
             }));
         }

@@ -237,6 +237,10 @@ The unit test `walk::walker_view::tests::camera_matches_paused_geonosis_main_gun
 
 `WarmUpSound` (`rep_weap_walk_atte_chaingun_spin` on the AT-TE rear gun) is authored on the same guns but is deliberately not read: the sim has no spin-up phase, and firing starts on the first held tick. Playing it on an invented trigger would misreport the original, so the field is not carried; this remains a known gap.
 
+Update 2026-11-13: the streak presentation above was a port invention and is gone. On the PS2 each round draws as its primary ordnance's own bolt (`com_weap_veh_chaingun_ord`: `com_sfx_laser_orange`, LaserLength 45, FadeOutTime 0.25, LightColor `255 224 160 150`, LightRadius 3, so BF2 lights the ground under it), and `SecondaryOrdnanceName` `com_weap_veh_chaingun_tracer` is a `beam` (width 0.05, Range 40) that the sim already launches on rounds 1, 4, 7, ... and `BoltVis` already draws with the beam's own look. The port hid every regular round and drew a 40 m streak every third round, so the gun showed the same two streaks, a gap, and no light. `walker_shots::Style` now carries only the fire sound; `walker_shots::turn` replaces `ordinal` and also counts the barrels that passed their turn. The sim now has the spin phase (`wind_up` / `wind_down`, see `re-blaster-damage.md` §3.1), but `WarmUpSound` is still not played.
+
+Update 2026-11-13 (second playtest): the rear gun still drew leftover streaks and fired "from the left weapon" when turned right. The seat has no `TurretNodeName`, so `GunSetup::pivot` was the second barrel's fire point and the sim turned both barrels about it; the drawn rig turns each barrel about its own aimer (`aimer_Rgun_1` (-0.834, 4.97, -6.096), axes turned pi; `aimer_Rgun_2` (0.819, 4.97, -6.096); `analysis/re-turret-draw.md` 2.3). Turned 1 rad, the first barrel's rounds and their tracer beam left 2.9 m from the drawn barrel, beside the other one. `GunWeapon::fire_pivots` now holds each barrel's own aimer node (filled by `vehicle_pads::fire_ring` when no aimer carries another, cleared on seats with a turret node), and `GunSetup::muzzle_about` turns the point about it. Still left: the drawn aimers converge on the aim point while the sim's per-barrel aim is parallel, about 0.37 m apart at 1 rad. The fire loop now plays only with rounds and the spin motor is played (`re-blaster-damage.md` §3.1). Tests: `walker_gun_aim::an_atte_gatling_round_leaves_from_the_barrel_drawn_firing_it`, `a_pressed_atte_gatling_gun_plays_its_fire_loop_only_with_its_rounds`.
+
 ### Armed-seat HUD
 
 `hud_feed::armed_seat` reports a live mounted player whose seat has a weapon. `weapon_rows` then returns the seat's own rows (icon, key, clip fill, rounds or heat from `Vehicle::guns`) instead of hiding the HUD when mounted, and `main/battle.rs` shows the reticle for such a seat. Empty passenger seats keep the previous HUD behavior.
@@ -296,3 +300,107 @@ Checks: four Geonosis control tests including the AI-pilot case passed, render-b
 The release was rebuilt and packed with the current assets and missions. Verified 24,003 paths/sizes, the executable prefix and 79 walker/mission payloads; the replacement succeeded after a transient Windows sharing error. `dist/openbf.exe` was updated; `dist/openbf_data` metadata was unchanged. Receipt: `engine/artifacts/walker67/shake-repro/pack-receipt.json`.
 
 The maintainer confirmed on 2026-10-30 that the installed build works. The heading-filter follow-up was reviewed and rebased onto `55fb5a3` before the requested commit; the filter logic was consolidated and one extra per-frame pose clone removed.
+
+
+## Spider Walker aim and destruction follow-up, 2026-11-13
+
+Scope authorized by the maintainer on `feature/vehicle-parity`: the Geonosis
+Spider's shots below the reticle and a check of its apparent pre-explosion
+animation. Starting revision `1f07b8858a2aff3d5215a43033a4a950b6c1ac99`, with the
+existing vehicle-parity edits retained. No issue, ownership claim, commit, push or
+PR was created by this follow-up.
+
+### Report and cause
+
+Read `dist/openbf_data/playtest/last.json` first: BF2 GEO1 Conquest, seed 420,
+build `1f07b8858a2a+dirty`, tick 10283; human unit 0 in vehicle 6, seat 0.
+The matching real-data reproduction found the Spider's lower cannon 6.186 m off
+the reticle's terrain target at a settled look of yaw 0, pitch -0.12 radians.
+The lower cannon and upper beam have one fire point apiece, about 6.1 m apart
+vertically. `Sim::seat_gun` applied barrel-to-target convergence only to rings
+with multiple fire points, so the lower gun fired parallel to the other gun's
+line. One fire point now receives the same convergence calculation. Sustained
+beams also retain this calculation during their per-tick fire-point update;
+previously that update replaced their corrected launch direction with the
+seat's shared direction. No gameplay numbers, animation durations or baked
+assets change.
+
+This extends the existing per-barrel aiming approximation described by
+`ring_aim`: separate authored limits and a common camera target, without adding
+per-aimer lag state. Original node writers use each weapon's target and aimer
+frame (`re-turret-draw.md` 2.3 and `re-walker-nodes.md` 3). The native firing
+screenshots below support the observed convergence, not an exact transient
+turn-rate comparison.
+
+### Original-game evidence and destruction finding
+
+[O] New local BF2 PS2 observation, SLUS-21240 v2.01, disc CRC `02f4b541`,
+ROM SHA1 `b385edc89d053ca8238b47c6549e78f45eb88ca4`. User save slot 10
+(`2026-11-13 20:02:58` local) was read and converted to a separate compatible
+copy with the `pcsx2-state` skill; the original save was untouched. Tracking run
+`01M7BKC2CFCPYWFG7Y0FWESW9X`; local artifacts in
+`engine/artifacts/spider-parity/` include the state, EE dumps and screenshots.
+
+- Native firing: `ps2-slot10.png`, `ps2-fire.png` (R1 held 30 video frames),
+  `ps2-beam.png` (L1 held 30 frames). Each firing trial restored slot 10.
+  The upper red beam reaches the reticle in the native game.
+- Spider entity `0x1ce8db0`, vtable `0x61f850`, class `0x1ae8950`.
+  The class's animation pointer table at K+0x670 points to `0x1ae7c30`;
+  entry 3 points to `0x1aea510` and its duration at +0x0c is zero.
+  The local BF2 bake likewise has no duration-bearing `death01` clip.
+- Controlled idle-death intervention: clear the health alive bit at
+  E+0x228 (`0x2b` to `0x23`), then advance the native game. This is a forced
+  death condition, not a natural damage/kill timing measurement. After one
+  video frame E+0x21e8 remains 0; after five it is 4, E+0x2190 is `0x1a`
+  (dead and both explosion latches). `ps2-death-35.png` shows flying chunks.
+- This agrees with BF2 `FUN_0025ce68` (176956-177030: the immediate first
+  explosion) and `FUN_0025f4a0` (179231-179307: final explosion and chunks at
+  animation entry 4). Locomotion `FUN_0025d5e0` (177925-177952) lets an active
+  step finish before the death transition; that behavior already exists in
+  the port. No artificial collapse clip or delay is added. The BF1 bank has
+  a death clip, so the zero-duration finding and regression are BF2-specific.
+
+Focused check results and remaining acceptance follow below.
+
+
+### Focused checks and limits
+
+Runtime source was built with `cargo rustc --manifest-path engine/Cargo.toml
+-p game --test suite -- -C extra-filename=-spider`. A simultaneous existing
+suite process locked the ordinary Windows test executable, so this follow-up
+used a separate output name. After the final fixture correction, the original
+`seat_camera.rs` and `walker_gun_aim.rs` modules were also compiled into a small
+local harness against those same Cargo-built libraries, avoiding another game
+build-stamp rebuild. Reproduction command and exact library paths are retained
+in `engine/artifacts/spider-parity/compile-suite.py`; no harness source is
+published. `source-receipt.json` records the final source SHA256s and base.
+
+- `python engine/artifacts/spider-parity/compile-suite.py`: passed for the final
+  formatted source. The fixture disables random spread only for its alignment
+  measurement; runtime weapon spread remains authored. Its target includes map
+  and other-vehicle occlusion, rather than assuming every aim ray hits terrain.
+- `engine/artifacts/spider-parity/spider-suite.exe walker_gun_aim:: --nocapture`:
+  **8 passed**, including the existing AT-TE and camera regressions; 72 gunner
+  seats checked. Spider: 24 shots and 111 live-beam samples across BF1/BF2
+  Geonosis and three look directions meet the reticle (shot axis within 0.25 m
+  of the target; live beam endpoint within 1% of screen height/width).
+- Post-format rerun `.../spider-suite.exe walker_gun_aim::spider --nocapture`:
+  **2 passed**. BF2 idle destruction: 2 simulation ticks; killed halfway through
+  a walk clip: 16 ticks. These are port fixtures, not measured PS2 durations.
+- `cargo test --manifest-path engine/Cargo.toml -p core --lib sim::beam::tests
+  -- --test-threads=1`: **8 passed**. The same current core test executable's
+  `sim::guns::tests` and `vehicle::walker::tests` filters: **28 + 15 passed**.
+- Focused rustfmt and `git diff --check`: passed. The size-report script's exact
+  embedded Python was run with the installed `python` (Git Bash's `python3`
+  resolves to the Windows Store alias): map coverage passes, existing stale
+  counts reported. Touched runtime files: guns 845 lines, beam 312 lines.
+- `python scripts/check_provisional.py` still reports the pre-existing
+  `vehicle/gun.rs` eye-offset comment without a replacement measurement; no new
+  provisional value was introduced by this follow-up.
+
+Unchecked: full alignment acceptance, GPU captures of this change, manual
+playtest of a rebuilt port, and a natural lethal-hit PS2 walking-death timing
+trace. No packed executable was rebuilt, and no full vehicle-parity acceptance
+is claimed. All save states, captures, RAM and test binaries remain local.
+
+Commit preparation: the two Spider regressions now live in `game/tests/suite/spider_feedback.rs` (selectors `spider_feedback::`), isolating them from the concurrently edited AT-TE test module. The maintainer confirmed the result works and authorized committing this chat's fixes. Other staged vehicle-parity and AT-TE edits remain outside this commit.

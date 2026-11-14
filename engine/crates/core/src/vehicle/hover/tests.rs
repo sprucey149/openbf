@@ -24,6 +24,7 @@ pub(crate) fn skiff() -> HoverParams {
         omega_z_damp: 1.0,
     };
     HoverParams {
+        mass: 1.0,
         set_altitude: 1.0,
         gravity_scale: 4.0,
         acceleration: 5.0,
@@ -57,6 +58,7 @@ pub(crate) fn skiff() -> HoverParams {
         collision_scale: [30.0, 0.0, 0.0],
         bf1_ai: false,
         random_spring: true,
+        floats_on_water: true,
         springs: vec![
             spring([-1.8, -0.7, 1.7], 2.0, -1.0, -1.0),
             spring([1.8, -0.7, 1.7], 2.0, -1.0, 1.0),
@@ -153,6 +155,54 @@ fn settled(p: &HoverParams) -> Vehicle {
 
 fn close(a: f32, b: f32, tol: f32) -> bool {
     (a - b).abs() <= tol
+}
+
+/// Deep water over a far lakebed: the surface at y = 0 over every cell, the
+/// ground 40 m down.
+struct Lake;
+
+impl ContactSource for Lake {
+    fn sphere_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
+        FLAT.sphere_contacts(c + Vec3::Y * 40.0, r, out);
+    }
+
+    fn hull_contacts(&self, b: &HullBody, pos: Vec3, rot: Mat3, out: &mut Vec<Contact>) {
+        FLAT.hull_contacts(b, pos + Vec3::Y * 40.0, rot, out);
+    }
+
+    fn water_under(&self, _at: Vec3) -> Option<f32> {
+        Some(0.0)
+    }
+}
+
+/// §4 S3: a spring sphere sunk d into the water compresses min(d / length,
+/// 1), as one sunk d into flat ground does, so a hover rests on a lake at the
+/// height it rests on ground at the surface's level. With `FloatsOnWater` 0
+/// it sinks to the bed.
+#[test]
+fn a_hover_rests_on_water_as_on_ground_at_its_level() {
+    let p = skiff();
+    let mut ground = vehicle(Vec3::new(0.0, 3.0, 0.0), 0.0);
+    run(&mut ground, &p, &FLAT, 1800);
+    let mut v = vehicle(Vec3::new(0.0, 3.0, 0.0), 0.0);
+    for _ in 0..1800 {
+        step(&mut v, &p, &Lake, DT);
+    }
+    assert!(
+        close(v.pos.y, ground.pos.y, 1e-3),
+        "water {} ground {}",
+        v.pos.y,
+        ground.pos.y
+    );
+    let sinks = HoverParams {
+        floats_on_water: false,
+        ..skiff()
+    };
+    let mut v = vehicle(Vec3::new(0.0, 3.0, 0.0), 0.0);
+    for _ in 0..1800 {
+        step(&mut v, &sinks, &Lake, DT);
+    }
+    assert!(v.pos.y < -30.0, "{}", v.pos.y);
 }
 
 /// §6.5a: gravity weighted by g — 9.8·(GS + (1 − GS)·g). The skiff (GS 4)
@@ -302,12 +352,12 @@ fn set_altitude_zero_drops_g_after_the_drive() {
     v.hover.g = 29.0 / 30.0;
     drive(&mut v, &tread, DT);
     assert_eq!(v.hover.g, 0.0);
-    springs(&mut v, &tread, DT);
+    springs(&mut v, &tread, |_| None, DT);
     assert_eq!(v.hover.g, 0.0, "airborne: g = 0 after the tick");
     let mut v = vehicle(Vec3::new(0.0, 50.0, 0.0), 0.0);
     v.hover.g = 29.0 / 30.0;
     drive(&mut v, &skiff(), DT);
-    springs(&mut v, &skiff(), DT);
+    springs(&mut v, &skiff(), |_| None, DT);
     assert!(close(v.hover.g, 28.0 / 30.0, 1e-6), "{}", v.hover.g);
 }
 
@@ -363,7 +413,7 @@ fn spring_force_matches_the_hand_number() {
     p.springs.truncate(1);
     let mut v = vehicle(Vec3::ZERO, 0.0);
     v.hover.compress[0] = 0.5;
-    springs(&mut v, &p, DT);
+    springs(&mut v, &p, |_| None, DT);
     assert!(close(v.vel.y, 0.5 * 5.0 * DT, 1e-7));
     // OXSF −1 · OmegaXSpring 4 · c; OZSF −1 · OmegaZSpring 6 · c.
     assert!(close(v.hover.omega.x, -0.5 * 4.0 * DT, 1e-7));
@@ -374,12 +424,12 @@ fn spring_force_matches_the_hand_number() {
     let mut v = vehicle(Vec3::ZERO, 0.0);
     v.vel.y = -2.0;
     v.hover.compress[0] = 0.5;
-    springs(&mut v, &p, DT);
+    springs(&mut v, &p, |_| None, DT);
     assert!(close(v.vel.y, -2.0 + 5.0 * DT, 1e-6), "{}", v.vel.y);
     // Untouched: nothing but the decay.
     let mut v = vehicle(Vec3::ZERO, 0.0);
     v.hover.g = 0.02;
-    springs(&mut v, &p, DT);
+    springs(&mut v, &p, |_| None, DT);
     assert_eq!((v.vel, v.hover.g), (Vec3::ZERO, 0.0));
 }
 
@@ -543,6 +593,7 @@ fn fighter_tank(hull: Vec<HullBody>) -> HoverParams {
         collision_threshold: [5.0, 2.5, 0.0],
         collision_scale: [1.5, 0.0, 0.0],
         random_spring: true,
+        floats_on_water: true,
         springs: vec![
             spring(-1.8, 1.7, -1.0),
             spring(1.8, 1.7, -1.0),
@@ -985,5 +1036,40 @@ fn bike_jump_leaves_the_ground_and_lands() {
         v.hover.g > 0.0 && close(v.pos.y, y0, 0.5),
         "at {} vs {y0}",
         v.pos.y
+    );
+}
+
+/// A driven hover's aim ray starts on the chase camera's line (B2
+/// B2:132440-132461). The BARC (`TrackCenter` 0 2.5 -6, no offset, eye 0 1 0)
+/// casts from 2.5 m over its origin, not from its eye 1 m up; the IFT-X
+/// (0 2 -5, offset 0 0.5 6, `TiltValue` 7) casts along the line through its
+/// camera, at its eye's depth.
+#[test]
+fn a_driven_hovers_aim_ray_leaves_the_chase_camera() {
+    let v = vehicle(Vec3::new(10.0, 3.0, -4.0), 0.0);
+    let fwd = v.rot * Vec3::Z;
+    let barc = ChaseSection {
+        center: Vec3::new(0.0, 2.5, -6.0),
+        offset: Vec3::ZERO,
+        tilt: 5.0 * 0.017_453_294,
+        mount: None,
+    };
+    let eye = v.pos + v.rot * Vec3::new(0.0, 1.0, 0.0);
+    let o = barc.ray_origin(&v, 0.0, eye, fwd);
+    assert!(o.distance(v.pos + Vec3::new(0.0, 2.5, 0.0)) < 1e-4, "{o}");
+    let ift = ChaseSection {
+        center: Vec3::new(0.0, 2.0, -5.0),
+        offset: Vec3::new(0.0, 0.5, 6.0),
+        tilt: 7.0 * 0.017_453_294,
+        mount: None,
+    };
+    let o = ift.ray_origin(&v, 0.0, eye, fwd);
+    let cam = ift.camera(&v, 0.0);
+    let off = o - cam;
+    assert!(off.cross(fwd).length() < 1e-4, "{off}");
+    assert!((o - eye).dot(fwd).abs() < 1e-4);
+    assert!(
+        cam.y > o.y - 1e-4 && (cam - v.pos).dot(fwd) < -10.0,
+        "{cam}"
     );
 }

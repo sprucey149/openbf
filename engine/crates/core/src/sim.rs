@@ -64,8 +64,10 @@ mod guided;
 mod guns;
 mod hero_bodies;
 pub mod heroes;
+mod hover_pairs;
 mod input;
 pub mod lag_comp;
+mod landing;
 mod lock_on;
 mod look;
 mod mines;
@@ -81,6 +83,7 @@ mod repair;
 mod rider_health_tests;
 mod round;
 mod round_rules;
+mod run_over;
 mod saber;
 mod saber_throw;
 mod seats;
@@ -105,7 +108,7 @@ pub use awards::{
     medal_level, medal_threshold, MedalCounts, DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL,
     MEDAL_THRESHOLDS, TECHNICIAN_MEDAL, WEAPON_MEDALS,
 };
-pub use beam::Beam;
+pub use beam::{Beam, SeatBeam};
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};
 pub use bounds::{
     Level, ReturnPath, BOUND_DROP, KILL_FLOOR_DROP, LEVEL_HUBS, LEVEL_RISE, UNDER_MAP_SPEED,
@@ -150,15 +153,15 @@ pub use spawn::{
 };
 pub use state::{
     omni_radius_for, AssistProfile, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats,
-    Sim, TickCost, UnitCost, BLAST_AGE, HAZARD_RADIUS, LETHAL_LANDING_SPEED, OUTCOME_DRAW,
-    SNIPE_SUITABILITY_DEFAULT, STATIC_DIGEST_GROUPS,
+    Sim, TickCost, UnitCost, BLAST_AGE, HAZARD_RADIUS, OUTCOME_DRAW, SNIPE_SUITABILITY_DEFAULT,
+    STATIC_DIGEST_GROUPS,
 };
 pub use stations::{
     Station, StationAnim, StationClass, StationDamageEffect, StationMotion,
     DELAY_DEFAULT as STATION_DELAY_DEFAULT, GATHER_MAX as STATION_GATHER_MAX,
 };
 pub use target_hints::{TargetHint, TargetHints};
-pub use tow::{TowCable, TowFall};
+pub use tow::TowCable;
 pub use weak_lock::{GROUND_WEAK_SPOT_FACTOR, HEAVY_WALKER_WEAK_SPOT_FACTOR};
 
 #[cfg(test)]

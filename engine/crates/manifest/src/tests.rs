@@ -302,6 +302,7 @@ fn full_manifest() -> Manifest {
                 threshold: 50.0,
                 intensity: 50.0,
             }),
+            softness: Some(60.0),
         },
         sky: Some(ManifestSky {
             texture: Some("tat1sky".into()),
@@ -644,6 +645,11 @@ fn full_vehicles() -> VehicleManifest {
                 bank: "fighter".into(),
                 skin: "fighter".into(),
                 frames: 3,
+                fin: Some("all_snowspeeder_9pose".into()),
+            }),
+            hover: Some(ManifestHover {
+                skin: "rep_hover_fightertank".into(),
+                fin: Some("rep_fightertank_9pose".into()),
             }),
             walker: Some(ManifestWalker {
                 bank: "imp_walk_atst".into(),
@@ -1039,7 +1045,8 @@ fn vehicle_manifest_field_order_is_the_wire_format() {
             "vis_min_y",
             "walker",
             "vis_box",
-            "flyer"
+            "flyer",
+            "hover"
         ]
     );
 }

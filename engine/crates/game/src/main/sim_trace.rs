@@ -328,6 +328,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("classes"),
             mission,
+            vehicle: None,
             mission_file: mission_file.as_ref().map(|p| p.display().to_string()),
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),

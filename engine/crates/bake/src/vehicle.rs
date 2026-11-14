@@ -184,12 +184,16 @@ impl Index {
         let m = &self.models[&name.to_ascii_lowercase()];
         let mut out = m.clone();
         if !m.bone_space {
+            let mut bones = Vec::new();
             if let Some(skel) = self.render_skel_of(name, geometry) {
                 if let Some(p) = crate::bind_pose::pose_bnam(m, skel).map_err(|e| anyhow!(e))? {
                     out = p;
                 }
+                if bnam_bound(m, skel) {
+                    bones = bnam_joints(m, skel);
+                }
             }
-            return Ok((out, Vec::new()));
+            return Ok((out, bones));
         }
         let skel = self
             .render_skel_of(name, geometry)
@@ -275,6 +279,32 @@ impl Index {
     }
 }
 
+/// Whether a model that is not `bone_space` hangs a segment from a bone of
+/// `skel` by `BNAM` (`crate::bind_pose`'s second rule): its draw then follows
+/// that bone's node-table entry, as the PS2's vehicle draw reads the table per
+/// segment (`analysis/re-vehicle-pose.md` 0.1). BF1's skiff
+/// (`all_hover_skiff`, map-local in TAT1) stores its guns and rudders so.
+fn bnam_bound(m: &Model, skel: &mungefs::skel::Skeleton) -> bool {
+    m.segments
+        .iter()
+        .any(|s| s.bone.as_deref().is_some_and(|b| skel.index_of(b).is_some()))
+}
+
+/// Each vertex's bone for a [`bnam_bound`] model, segment by segment: its
+/// `BNAM` bone, else the skeleton's root, which no fin clip, turret or aimer
+/// writes (re-vehicle-pose 4.4: every fin rig holds `dummyroot` at the
+/// identity), so an unbound segment stays where it is stored, in model space.
+fn bnam_joints(m: &Model, skel: &mungefs::skel::Skeleton) -> Vec<Vec<usize>> {
+    let root = skel.bones.iter().position(|b| b.parent.is_none()).unwrap_or(0);
+    m.segments
+        .iter()
+        .map(|s| {
+            let b = s.bone.as_deref().and_then(|b| skel.index_of(b)).unwrap_or(root);
+            vec![b; s.positions.len()]
+        })
+        .collect()
+}
+
 /// A geometry's top LOD model (LOD0, else LOD1, LOD2, LOWD, else its first).
 fn top_lod(ix: &Index, geometry: &str) -> Option<String> {
     let lods = ix.lods(geometry)?;
@@ -298,6 +328,68 @@ fn animation_name(e: &mungefs::entity::EntityClass) -> String {
         .unwrap_or_default()
 }
 
+/// A flyer's fins clip (`analysis/re-vehicle-pose.md` 6): `AnimationName`
+/// sets the bank and its `fins` clip (BF2 FUN_002120e8 B2:125378-125388;
+/// BF1 FUN_001e06c0 B1:90135-90140); a later `FinAnimation` replaces it
+/// with its own value's clip, none when the bank lacks it, and is ignored
+/// before any bank (BF2 FUN_0020fd58 B2:125093-125105; BF1 FUN_001df3f0
+/// B1:89954-89962). Named as the skin GLB names it.
+fn flyer_fin(
+    e: &mungefs::entity::EntityClass,
+    bank: &mungefs::anim::AnimBank<'_>,
+) -> Option<String> {
+    let fin_key = mungefs::fnv1a_lowercase("FinAnimation");
+    let mut fin = None;
+    let mut banked = false;
+    for p in &e.props {
+        if p.key_hash == PROP_ANIMATION_NAME {
+            banked = true;
+            fin = bank.clip("fins").map(|_| "fins".to_owned());
+        } else if p.key_hash == fin_key && banked {
+            let value = p.value.trim();
+            fin = bank.clip(value).map(|_| value.to_owned());
+        }
+    }
+    fin
+}
+
+/// Card VPOSE (`analysis/re-vehicle-pose.md` 7.1): a hover class whose
+/// nodes move - a `FinAnimation`, or a turret, aimer or barrel node - gets a
+/// skin of its top LOD, with the fin clip from its `AnimationName` bank (the
+/// later of two tracks on one bone kept, 4.3).
+fn bake_hover(
+    e: &mungefs::entity::EntityClass,
+    ix: &Index,
+    geometry: &str,
+    out: &Path,
+    skinned: &mut Vec<String>,
+    banks: &[mungefs::anim::AnimBank<'_>],
+) -> Result<Option<manifest::ManifestHover>> {
+    let value = |name: &str| {
+        let key = mungefs::fnv1a_lowercase(name);
+        e.props
+            .iter()
+            .find(|p| p.key_hash == key && !p.value.trim().is_empty())
+            .map(|p| p.value.trim().to_owned())
+    };
+    let posed = ["TurretNodeName", "AimerNodeName", "BarrelNodeName"]
+        .iter()
+        .any(|n| value(n).is_some());
+    let bank_name = animation_name(e);
+    let bank = banks
+        .iter()
+        .find(|b| b.name.eq_ignore_ascii_case(&bank_name));
+    let fin = value("FinAnimation").filter(|f| bank.is_some_and(|b| b.clip_index(f).is_some()));
+    if !posed && fin.is_none() {
+        return Ok(None);
+    }
+    let skin = bake_skin(ix, geometry, out, skinned, "hover", |sk| {
+        let entries: Vec<(&str, bool)> = fin.iter().map(|f| (f.as_str(), false)).collect();
+        crate::walker::skin_glb_of(sk, bank, &entries, &[""], |_, _| {})
+    })?;
+    Ok(skin.map(|skin| manifest::ManifestHover { skin, fin }))
+}
+
 fn bake_skin(
     ix: &Index,
     geometry: &str,
@@ -310,7 +402,10 @@ fn bake_skin(
     let Some((t, sk)) = top
         .as_deref()
         .and_then(|t| Some((t, ix.skel_of(t, geometry)?)))
-        .filter(|(t, _)| ix.models[&t.to_ascii_lowercase()].bone_space)
+        .filter(|(t, sk)| {
+            let m = &ix.models[&t.to_ascii_lowercase()];
+            m.bone_space || bnam_bound(m, ix.render_skel_of(t, geometry).unwrap_or(sk))
+        })
     else {
         return Ok(None);
     };
@@ -478,24 +573,35 @@ pub fn bake_vehicles(
             let bank = banks
                 .iter()
                 .find(|b| b.name.eq_ignore_ascii_case(&bank_name));
-            if let Some((bank, clip)) = bank.and_then(|b| Some((b, b.clip("takeoff")?))) {
+            let takeoff = bank.and_then(|b| b.clip("takeoff"));
+            let fin = bank.and_then(|b| flyer_fin(e, b));
+            if let Some(bank) = bank.filter(|_| takeoff.is_some() || fin.is_some()) {
+                let entries: Vec<(&str, bool)> = takeoff
+                    .map(|_| "takeoff")
+                    .into_iter()
+                    .chain(fin.as_deref())
+                    .map(|n| (n, false))
+                    .collect();
                 let skin = bake_skin(&ix, geometry, out, &mut skinned, "flyer", |sk| {
-                    crate::walker::skin_glb_of(
-                        sk,
-                        Some(bank),
-                        &[("takeoff", false)],
-                        &[""],
-                        |_, _| {},
-                    )
+                    crate::walker::skin_glb_of(sk, Some(bank), &entries, &[""], |_, _| {})
                 })?;
                 skin.map(|skin| manifest::ManifestFlyer {
                     bank: bank_name,
                     skin,
-                    frames: clip.frames,
+                    frames: takeoff.map_or(0, |c| c.frames),
+                    fin,
                 })
             } else {
                 None
             }
+        } else {
+            None
+        };
+        let hover = if ["hover", "treaded", "commandhover"]
+            .iter()
+            .any(|b| e.base.eq_ignore_ascii_case(b))
+        {
+            bake_hover(e, &ix, geometry, out, &mut skinned, &banks)?
         } else {
             None
         };
@@ -507,6 +613,7 @@ pub fn bake_vehicles(
             walker,
             flyer,
             vis_box,
+            hover,
         });
     }
 

@@ -5,9 +5,9 @@ use super::WeaponState;
 use crate::fmath::FloatExt;
 
 use super::{
-    pair, pf, Falloff, OrdBlend, OrdKind, OrdnanceClass, PropSource, WeaponClass, DEG,
-    HASH_ZOOM_SPREAD, SNIPER_LOCK_ON_ANGLE, SNIPER_LOCK_ON_RANGE, TARGET_SOLDIER_KINDS,
-    TIGHT_HOLD_CAP, TIGHT_HOLD_SECS, TIGHT_HOLD_SECS_AI,
+    pair, pf, pf_hash, Falloff, OrdBlend, OrdKind, OrdnanceClass, OverheatSound, PropSource,
+    WeaponClass, DEG, HASH_ZOOM_SPREAD, SNIPER_LOCK_ON_ANGLE, SNIPER_LOCK_ON_RANGE,
+    TARGET_SOLDIER_KINDS, TIGHT_HOLD_CAP, TIGHT_HOLD_SECS, TIGHT_HOLD_SECS_AI,
 };
 
 impl WeaponClass {
@@ -136,6 +136,8 @@ impl WeaponClass {
             shots_per_salvo: 1,
             salvo_delay: [0.0, 0.0],
             initial_salvo_delay: 0.0,
+            wind_up: 0.0,
+            wind_down: 0.0,
             pitch_spread: 0.25 * DEG,
             yaw_spread: 0.25 * DEG,
             shot_tilts: Vec::new(),
@@ -194,6 +196,7 @@ impl WeaponClass {
             reload_sound: Some("all_weap_inf_reload_med".into()),
             empty_sound: Some("com_weap_inf_ammo_empty".into()),
             change_sound: Some("all_weap_inf_equip_med".into()),
+            overheat_sound: None,
             // re-muzzle-flash §2's BF1 Alliance rifle row.
             thrown: None,
             offhand_weapon: false,
@@ -299,6 +302,7 @@ impl WeaponClass {
             reload_sound: Some("com_weap_inf_reload_med".into()),
             empty_sound: Some("com_weap_inf_ammo_empty".into()),
             change_sound: Some("com_weap_inf_equip_med".into()),
+            overheat_sound: None,
             // `com_weap_inf_rifle`'s ScoreForMedalsType (the rifle award).
             medals_type: Some(1),
             // re-muzzle-flash §2's BF2 Republic rifle row.
@@ -524,6 +528,12 @@ impl WeaponClass {
         if let Some(v) = pf(src, "InitialSalvoDelay") {
             w.initial_salvo_delay = v;
         }
+        if let Some(v) = pf_hash(src, 0x44ed_eee4) {
+            w.wind_up = v;
+        }
+        if let Some(v) = pf_hash(src, 0x9eca_c3a1) {
+            w.wind_down = v;
+        }
         // Legacy MaxSpread: pitch = 0.025·v, yaw = 0.05·v (NOT deg→rad).
         if let Some(v) = pf(src, "MaxSpread") {
             w.pitch_spread = 0.025 * v;
@@ -569,12 +579,17 @@ impl WeaponClass {
         if let Some(v) = pf(src, "SpreadLimit") {
             w.spread_limit = v * DEG;
         }
-        w.fire_sound = src.prop("FireSound").map(|s| s.trim().to_owned());
-        w.fire_loop_sound = src.prop("FireLoopSound").map(|s| s.trim().to_owned());
+        let sound = |key: &str| src.prop(key).and_then(sound_ref);
+        w.fire_sound = sound("FireSound");
+        w.fire_loop_sound = sound("FireLoopSound");
         w.muzzle_effect = src.prop("MuzzleFlashEffect").map(|s| s.trim().to_owned());
-        w.reload_sound = src.prop("ReloadSound").map(|s| s.trim().to_owned());
-        w.empty_sound = src.prop("FireEmptySound").map(|s| s.trim().to_owned());
-        w.change_sound = src.prop("WeaponChangeSound").map(|s| s.trim().to_owned());
+        w.reload_sound = sound("ReloadSound");
+        w.empty_sound = sound("FireEmptySound");
+        w.change_sound = sound("WeaponChangeSound");
+        w.overheat_sound = sound("OverheatSound").map(|name| OverheatSound {
+            name,
+            pitch: pf(src, "OverheatSoundPitch").unwrap_or(1.0),
+        });
         w
     }
 
@@ -680,5 +695,31 @@ impl WeaponClass {
                     && (n.ends_with("rocket_launcher") || n.ends_with("torpedo_launcher"))
             }
         }
+    }
+}
+
+/// A weapon's sound reference by name (`analysis/re-weapon-sounds.md` 3.1):
+/// its first word. A value `"<name> defer"` (second token 0x1A01FB3B) names
+/// the same sound, resolved at its first use (B1 `FUN_00355328`,
+/// B1:342811-342816). BF1's `com_weap_bldg_gunturret` (the skiff's three
+/// guns) and BF2's `com_weap_turret_fire_small` carry it on `FireSound`;
+/// before this their shots asked for "<name> defer" and played nothing.
+fn sound_ref(value: &str) -> Option<String> {
+    value.split_whitespace().next().map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_deferred_sound_names_its_first_word() {
+        assert_eq!(
+            super::sound_ref("com_weap_turret_fire Defer").as_deref(),
+            Some("com_weap_turret_fire")
+        );
+        assert_eq!(
+            super::sound_ref(" rep_weap_inf_rifle_fire ").as_deref(),
+            Some("rep_weap_inf_rifle_fire")
+        );
+        assert_eq!(super::sound_ref("  "), None);
     }
 }

@@ -23,8 +23,10 @@
 //!   rectangle, the port keeps a wider margin. An instance AABB is only the
 //!   broad phase: Mos Eisley's buildings are concave, and their bounding
 //!   boxes swallow whole streets.
+//! - A BF2 soldier's camera is pulled in by vehicles too, as the PS2's rays
+//!   meet BF2's vehicle layer (`WalkSim::vehicle_pull`); BF1's do not.
 //! - SMALL props (health / ammo droids, gun emplacements, columns, lamps)
-//!   without that marker and every vehicle never pull the camera: while one
+//!   without that marker and every other vehicle never pull the camera: while one
 //!   stands in the camera's sight of the player, or holds the camera, it is drawn
 //!   see-through ([`CameraBlockers::see_through`], [`see_through_vehicles`]:
 //!   an ordered dither at [`SEE_THROUGH_OPACITY`], hidden outright with the

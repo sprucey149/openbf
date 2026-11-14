@@ -69,7 +69,6 @@ impl Sim {
             melee_lcg: _,
             melee_lcg_active: _,
             tow_cables: _,
-            tow_falls: _,
             spawn_choice: _,
             prev_spawn_bits: _,
             held_eaten: _,
@@ -179,6 +178,9 @@ impl Sim {
             landing_regions,
             flyer_paths,
             seat_setup,
+            hover_chase,
+            walker_chase,
+            seat_chase,
             blast_setup,
             // Drawn only: the game's smoke and fire on a damaged vehicle.
             vehicle_damage_effects: _,
@@ -243,6 +245,7 @@ impl Sim {
         group("vehicles", &mut |f| {
             f.debug_sim(&(hover_params, walker_params, flyer_params, flight_limits));
             f.debug_sim(&(landing_regions, flyer_paths, seat_setup, blast_setup));
+            f.debug_sim(&(hover_chase, walker_chase, seat_chase));
             f.debug_sim(&(slice_time, repair_scale));
             f.debug_sim(&(weak_spot_factor, missile_target_points));
             f.count(hull_parts.len());

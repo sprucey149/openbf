@@ -35,7 +35,7 @@
 //! (§6.9) pushes along E's up row for a time that grows with the speed.
 //!
 //! PROVISIONAL (re-hover §11.7 and ours): the jitter's RNG; the trample (§6.12, not built); the other body's
-//! damage factor (1); masses (1.0); the depth correction between contacts of
+//! damage factor (1); missing model mass metadata; the depth correction between contacts of
 //! one query ([`contacts`]); bodies are the CollisionWorld's SOLDIER subset
 //! (the port has no vehicle subset yet, card VSUB); a hull box or cylinder
 //! against a building is parry's exact contact (FUN_0016bf10's box branch is
@@ -44,8 +44,9 @@
 //! built yet: a hull box or cylinder against the TERRAIN (§13.5's corner and
 //! rim rules; no shipped hover has one in its terrain subset), the water
 //! float (§4 S3, card HWAT), the AI's boost (I5's AI branch, card VAI), the
-//! tread scroll (§6.18), the no-spring branch (§6.4), vehicle-vs-vehicle
-//! contacts (K4 / the class-8 branch of K7).
+//! tread scroll (§6.18), the no-spring branch (§6.4). Hover/treaded pairs
+//! run through `sim::hover_pairs` between contacts and springs (§13.15);
+//! contacts with other vehicle physics classes remain unimplemented.
 //!
 //! Which bodies meet the world (re-hover §13, card HHUL): the spring spheres
 //! meet the terrain and the buildings; [`HoverParams::hull`] holds the
@@ -132,6 +133,9 @@ pub struct HullBody {
 /// (constructor defaults, then the ODF). SETUP data: never hashed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoverParams {
+    /// Model vis-box volume + 0.0001 (BF2 FUN_00212b38, B2:125779-125782).
+    /// The physics constructor's 1.0 is retained when no model is installed.
+    pub mass: f32,
     pub set_altitude: f32,
     pub gravity_scale: f32,
     pub acceleration: f32,
@@ -174,6 +178,9 @@ pub struct HoverParams {
     pub bf1_ai: bool,
     /// The ×(0.9 + 0.1·u) spring jitter (K+0xe90, default on).
     pub random_spring: bool,
+    /// `FloatsOnWater` (BF2 K+0xe76, ctor 1): the spring points also press
+    /// on the water surface (§4 S3). BF1 has no flag and always floats.
+    pub floats_on_water: bool,
     /// At most [`MAX_SPRINGS`].
     pub springs: Vec<Spring>,
     /// The non-spring bodies that meet the world (§13.2).
@@ -435,8 +442,104 @@ pub fn quat_z(a: f32) -> Quat {
 /// E's untilted frame U = M·E, M = Rz(−roll)·Rx(−pitch) (§6.2), as a
 /// rotation: columns right, up, fwd.
 fn untilted(v: &Vehicle) -> Mat3 {
+    Mat3::from_quat(untilted_rot(v))
+}
+
+/// [`untilted`] as a rotation: the body frame the hover's camera hangs on
+/// (B2 `FUN_00220d68` B2:135389-135404, B1 B1:100694-100696).
+pub fn untilted_rot(v: &Vehicle) -> Quat {
     let h = &v.hover;
-    Mat3::from_quat(v.rot * quat_x(-h.tilt_pitch) * quat_z(-h.tilt_roll))
+    v.rot * quat_x(-h.tilt_pitch) * quat_z(-h.tilt_roll)
+}
+
+/// A hover pilot's BODY camera section as the aim ray reads it
+/// (`analysis/re-hover-camera.md` §2.1): `TrackCenter` on the body,
+/// `TrackOffset` in the view (x right, y up, z back), the view the aim
+/// tilted down by `TiltValue` (radians).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChaseSection {
+    pub center: Vec3,
+    pub offset: Vec3,
+    pub tilt: f32,
+    /// A walker gunner seat's `MountPos` (model space): with no turret node
+    /// its aim frame, and so its camera, stands there (B2 `FUN_0026cea0`
+    /// B2:188710); `None` = the model's origin.
+    pub mount: Option<Vec3>,
+}
+
+impl ChaseSection {
+    /// The chase camera's ideal place, before any pull or lag (B2
+    /// `FUN_001ce948`: E·`TrackCenter` + the tilted view's rows ·
+    /// `TrackOffset`, B2:132376-132439), on the frame the drawn camera hangs on.
+    pub fn camera(&self, v: &Vehicle, look_pitch: f32) -> Vec3 {
+        self.camera_on(v.pos, untilted_rot(v), (0.0, look_pitch))
+    }
+
+    /// [`ChaseSection::camera`] on the body frame `frame` at `pos`, the view
+    /// turned to the aim (`aim` = model-frame yaw, pitch up): `frame`·
+    /// `TrackCenter` + the tilted view's rows · `TrackOffset`. The walker
+    /// builds its view from its aim direction E+0x350 and the body's up row
+    /// before the same tilt and the same FUN_001ce948 (B2 FUN_00261208).
+    pub fn camera_on(&self, pos: Vec3, frame: Quat, aim: (f32, f32)) -> Vec3 {
+        let view = frame
+            * quat_y(aim.0)
+            * quat_x(-aim.1)
+            * quat_y(std::f32::consts::PI)
+            * quat_x(-self.tilt);
+        pos + frame * self.center + view * self.offset
+    }
+
+    /// Where a driven hover's aim ray starts in the chase view (B2
+    /// `FUN_0021b470`, B2:132440-132461): the camera's ideal place carried
+    /// along the aim direction `dir` to the depth of the eye `eye`
+    /// (E+0x340), cam + dir·((eye − cam)·dir). The ray, 512 m along `dir`
+    /// from there (B2:132474-132477), so passes through the camera and the
+    /// shots meet what the reticle covers.
+    pub fn ray_origin(&self, v: &Vehicle, look_pitch: f32, eye: Vec3, dir: Vec3) -> Vec3 {
+        let cam = self.camera(v, look_pitch);
+        cam + dir * (eye - cam).dot(dir)
+    }
+
+    /// A driven walker's [`ChaseSection::ray_origin`] (B2 FUN_00261208: the
+    /// camera FUN_001ce948 on E+0x120 with the aim's view, carried along
+    /// the aim E+0x350 to the eye E+0x340's depth into E+0x3c0, then the
+    /// 512 m ray FUN_00161c60 from there): the walker's own frame, not the
+    /// hover's untilted one, and the view turned by the aim's yaw as well.
+    pub fn walker_ray_origin(&self, v: &Vehicle, aim: (f32, f32), eye: Vec3, dir: Vec3) -> Vec3 {
+        let cam = self.camera_on(v.pos, v.rot, aim);
+        cam + dir * (eye - cam).dot(dir)
+    }
+
+    /// A player gunner's [`ChaseSection::ray_origin`]: the turret's chase
+    /// camera, `TrackCenter` on its aim frame and `TrackOffset` in the view
+    /// (the aim tilted down by `TiltValue`; x right, y up, z back), carried
+    /// along the aim `dir` to the eye's depth, then the 512 m ray from there
+    /// (B2 FUN_0026cea0: the view from the aim T+0xf0 and the aim frame's up
+    /// row T+0x1d0, B2:189181-189217, the camera FUN_001ce948 on the aim
+    /// frame T+0x1c0, B2:188973, 189240, into T+0x160, B2:189241-189258, the
+    /// ray B2:189275; B1 FUN_00223850 B1:137707-137842, FUN_001b5850). So
+    /// the camera lies on the ray and the reticle covers what the guns hit.
+    /// The aim frame is the gun's look at `at` in the vehicle's frame, the
+    /// frame the port's drawn gunner camera hangs on.
+    pub fn gunner_ray_origin(
+        &self,
+        v: &Vehicle,
+        at: Vec3,
+        look: (f32, f32),
+        eye: Vec3,
+        dir: Vec3,
+    ) -> Vec3 {
+        let [x, y, z] = super::gun::frame(look);
+        let (s, c) = fmath::sin_cos(self.tilt);
+        let forward = z * c - y * s;
+        let up = y * c + z * s;
+        let local = at + x * self.center.x + y * self.center.y + z * self.center.z
+            - x * self.offset.x
+            + up * self.offset.y
+            - forward * self.offset.z;
+        let cam = v.pos + v.rot * local;
+        cam + dir * (eye - cam).dot(dir)
+    }
 }
 
 /// §5.2, the player controller's timer (pad only): +dt while the RAW look
@@ -491,7 +594,7 @@ pub fn slew(w: f32, target: f32, turn_filter: f32, dt: f32) -> f32 {
 pub fn step(v: &mut Vehicle, p: &HoverParams, world: &impl ContactSource, dt: f32) -> Vec<Impact> {
     drive(v, p, dt);
     let impacts = contacts(v, p, world);
-    springs(v, p, dt);
+    springs(v, p, |at| world.water_under(at), dt);
     impacts
 }
 
@@ -644,12 +747,30 @@ fn jump(v: &mut Vehicle, p: &HoverParams, e_fwd: Vec3, dt: f32) {
     }
 }
 
-/// The tick's spring loop and g decay (§3 T3-T5, §4 S4-S5): each point's
-/// compression from this tick's contacts pushes the body along E's up row and
-/// torques ω, then is cleared. The water float (S3) is not built.
-pub fn springs(v: &mut Vehicle, p: &HoverParams, dt: f32) {
-    let up = v.rot * Vec3::Y;
+/// The tick's spring loop and g decay (§3 T3-T5, §4 S3-S5): each point's
+/// sphere first presses on the water surface `water` gives under its centre
+/// (B2 FUN_0021f5d0 B2:134256-134278, B1 FUN_001ee040 B1:99590-99613), then
+/// its compression from this tick's contacts and the water pushes the body
+/// along E's up row and torques ω, then is cleared.
+pub fn springs(v: &mut Vehicle, p: &HoverParams, water: impl Fn(Vec3) -> Option<f32>, dt: f32) {
+    let e = Mat3::from_quat(v.rot);
+    let up = e.y_axis;
     for (i, sp) in p.springs.iter().enumerate().take(MAX_SPRINGS) {
+        if p.floats_on_water {
+            let centre = v.pos + e * sp.pos;
+            if let Some(h) = water(centre) {
+                let d = (h - (centre.y - sp.radius)) / sp.length;
+                if d > 0.0 {
+                    v.hover.compress[i] = v.hover.compress[i].max(d.min(1.0));
+                    if d > 1.0 && v.vel.y < 0.0 {
+                        v.vel.y *= 0.5;
+                        v.vel.x *= 0.9;
+                        v.vel.z *= 0.9;
+                        v.hover.omega *= 0.9;
+                    }
+                }
+            }
+        }
         let mut c = v.hover.compress[i];
         if c > 0.0 {
             if p.random_spring {
@@ -689,6 +810,11 @@ pub trait ContactSource {
     /// A hull body at the world pose `pos`, `rot` (shape space → world),
     /// against the layers its flags name.
     fn hull_contacts(&self, body: &HullBody, pos: Vec3, rot: Mat3, out: &mut Vec<Contact>);
+    /// The water surface (level + bob) over a wet cell at `at`, as
+    /// FUN_005613c8 gives it; `None` off the water.
+    fn water_under(&self, _at: Vec3) -> Option<f32> {
+        None
+    }
 }
 
 /// A sphere against the terrain (§13.5, B2 FUN_0016c6c0 kind 0 / B1

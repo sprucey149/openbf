@@ -72,6 +72,7 @@ struct FilterDest {
 /// The pass's per-renderer state.
 pub(crate) struct FilterState {
     pub filter: Option<FrameFilter>,
+    softness: f32,
     rows_pipeline: wgpu::RenderPipeline,
     pipeline: wgpu::RenderPipeline,
     rows_bgl: wgpu::BindGroupLayout,
@@ -156,6 +157,7 @@ impl FilterState {
         );
         Self {
             filter: None,
+            softness: 0.0,
             rows_pipeline,
             pipeline,
             rows_bgl,
@@ -175,11 +177,26 @@ impl Renderer {
         self.filter.filter = filter;
     }
 
+    pub fn set_softness(&mut self, strength: Option<f32>) {
+        self.softness.softness = strength
+            .filter(|v| v.is_finite())
+            .unwrap_or(0.0)
+            .clamp(0.0, 128.0)
+            / 128.0;
+    }
+
+    pub(crate) fn softness_wanted(&mut self) -> bool {
+        Self::filter_state_wanted(&mut self.softness)
+    }
+
     /// Whether this frame runs the filter: one set with a gain, and a
     /// target it can copy.
     pub(crate) fn filter_wanted(&mut self) -> bool {
-        let f = &mut self.filter;
-        let want = f.filter.is_some_and(|p| p.intensity >= 1.0);
+        Self::filter_state_wanted(&mut self.filter)
+    }
+
+    fn filter_state_wanted(f: &mut FilterState) -> bool {
+        let want = f.softness > 0.0 || f.filter.is_some_and(|p| p.intensity >= 1.0);
         if want && !f.copyable {
             if !f.warned {
                 eprintln!("frame filter: the window surface cannot be copied; no filter pass");
@@ -192,26 +209,58 @@ impl Renderer {
 
     /// Upload the parameters and (re)build the copy for a `w`×`h` target.
     pub(crate) fn prepare_filter(&mut self, w: u32, h: u32) {
-        let f = &mut self.filter;
-        let Some(p) = f.filter else { return };
-        self.queue
-            .write_buffer(&f.params_buf, 0, bytemuck::cast_slice(&params(&p, h)));
+        Self::prepare_filter_state(
+            &self.device,
+            &self.queue,
+            self.format,
+            &mut self.filter,
+            w,
+            h,
+        );
+    }
+
+    pub(crate) fn prepare_softness(&mut self, w: u32, h: u32) {
+        Self::prepare_filter_state(
+            &self.device,
+            &self.queue,
+            self.format,
+            &mut self.softness,
+            w,
+            h,
+        );
+    }
+
+    fn prepare_filter_state(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        f: &mut FilterState,
+        w: u32,
+        h: u32,
+    ) {
+        let p = f.filter.unwrap_or(FrameFilter {
+            threshold: 0.0,
+            intensity: 0.0,
+        });
+        let mut words = params(&p, h);
+        words[3] = f.softness;
+        queue.write_buffer(&f.params_buf, 0, bytemuck::cast_slice(&words));
         if matches!(&f.dest, Some(d) if (d.w, d.h) == (w, h)) {
             return;
         }
         // The copy carries a view without the sRGB suffix: `textureLoad`
         // through it returns the display bytes as stored.
-        let display = self.format.remove_srgb_suffix();
+        let display = format.remove_srgb_suffix();
         let copy = crate::resources::texture_2d(
-            &self.device,
+            device,
             "frame filter source",
             [w, h],
-            self.format,
+            format,
             wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             &[display],
         );
         let rows = crate::resources::texture_2d(
-            &self.device,
+            device,
             "frame filter rows",
             [w, h],
             ROWS_FORMAT,
@@ -225,7 +274,7 @@ impl Renderer {
         });
         let rows_view = rows.create_view(&wgpu::TextureViewDescriptor::default());
         let rows_bg = crate::made::bind_group(
-            &self.device,
+            device,
             &wgpu::BindGroupDescriptor {
                 label: Some("frame filter rows bg"),
                 layout: &f.rows_bgl,
@@ -237,7 +286,7 @@ impl Renderer {
             },
         );
         let bg = crate::made::bind_group(
-            &self.device,
+            device,
             &wgpu::BindGroupDescriptor {
                 label: Some("frame filter bg"),
                 layout: &f.bgl,
@@ -268,7 +317,24 @@ impl Renderer {
         src: &wgpu::Texture,
         view: &wgpu::TextureView,
     ) -> u32 {
-        let f = &self.filter;
+        Self::filter_state_pass(&self.filter, encoder, src, view)
+    }
+
+    pub(crate) fn softness_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        src: &wgpu::Texture,
+        view: &wgpu::TextureView,
+    ) -> u32 {
+        Self::filter_state_pass(&self.softness, encoder, src, view)
+    }
+
+    fn filter_state_pass(
+        f: &FilterState,
+        encoder: &mut wgpu::CommandEncoder,
+        src: &wgpu::Texture,
+        view: &wgpu::TextureView,
+    ) -> u32 {
         let Some(d) = &f.dest else {
             return 0;
         };

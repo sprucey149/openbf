@@ -88,7 +88,25 @@ pub(crate) struct GpuTexture {
     /// Texture view + sampler baked into one bind group at upload time; draw-time
     /// cost is a single set_bind_group.
     pub bind_group: wgpu::BindGroup,
+    views: Views,
+    params: [f32; PARAMS_LEN],
+    params_buf: wgpu::Buffer,
 }
+
+/// What a texture's bind group binds besides its params, kept so
+/// [`GpuTexture::instance`] can bind the same pixels under its own params.
+#[derive(Clone)]
+struct Views {
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    detail: Option<wgpu::TextureView>,
+    display: wgpu::TextureView,
+}
+
+/// `MaterialParams` in `shader.wgsl`: detail, scroll, then the UV offset.
+const PARAMS_LEN: usize = 12;
+/// The byte offset of `MaterialParams::offset`.
+const OFFSET_AT: u64 = 32;
 
 pub(crate) fn mip_extent(base: u32, level: u32) -> u32 {
     (base >> level).max(1)
@@ -145,7 +163,7 @@ impl GpuTexture {
             Some(d) => (d.scale, 1.0),
             None => (1.0, 0.0),
         };
-        let params: [f32; 8] = [
+        let params: [f32; PARAMS_LEN] = [
             detail_scale,
             detail_strength,
             f32::from(u8::from(!desc.srgb)),
@@ -154,34 +172,75 @@ impl GpuTexture {
             desc.scroll[1],
             desc.uv_scale[0],
             desc.uv_scale[1],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
         ];
+        let views = Views {
+            view,
+            sampler,
+            detail: detail_view,
+            display: display_view,
+        };
+        Ok(Self::bind(device, layout, desc.label, views, params))
+    }
+
+    fn bind(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        label: Option<&str>,
+        views: Views,
+        params: [f32; PARAMS_LEN],
+    ) -> Self {
         let params_buf = crate::made::buffer_init(
             device,
             &wgpu::util::BufferInitDescriptor {
-                label: desc.label,
+                label,
                 contents: bytemuck::cast_slice(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
 
         let bind_group = crate::made::bind_group(
             device,
             &wgpu::BindGroupDescriptor {
-                label: desc.label,
+                label,
                 layout,
                 entries: &[
-                    bindings::texture_view(0, &view),
-                    bindings::sampler(1, &sampler),
+                    bindings::texture_view(0, &views.view),
+                    bindings::sampler(1, &views.sampler),
                     // No detail map: bind the base view (never sampled, but
                     // WebGPU requires every binding to be filled).
-                    bindings::texture_view(2, detail_view.as_ref().unwrap_or(&view)),
+                    bindings::texture_view(2, views.detail.as_ref().unwrap_or(&views.view)),
                     bindings::entire_buffer(3, &params_buf),
-                    bindings::texture_view(4, &display_view),
+                    bindings::texture_view(4, &views.display),
                 ],
             },
         );
 
-        Ok(Self { bind_group })
+        Self {
+            bind_group,
+            views,
+            params,
+            params_buf,
+        }
+    }
+
+    /// The same pixels under params of their own, so one draw's UV offset
+    /// ([`Self::set_uv_offset`]) leaves every other draw of the texture alone.
+    pub fn instance(&self, device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+        Self::bind(device, layout, None, self.views.clone(), self.params)
+    }
+
+    /// Shift every UV this texture is sampled at by `offset`, after its
+    /// scroll (`material_uv` in `shader.wgsl`).
+    pub fn set_uv_offset(&mut self, queue: &wgpu::Queue, offset: [f32; 2]) {
+        if self.params[8..10] == offset {
+            return;
+        }
+        self.params[8..10].copy_from_slice(&offset);
+        queue.write_buffer(&self.params_buf, OFFSET_AT, bytemuck::cast_slice(&offset));
     }
 }
 

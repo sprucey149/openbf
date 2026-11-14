@@ -18,10 +18,6 @@ use crate::weapon::DamageDesc;
 use crate::TICK_HZ;
 use glam::Vec3;
 
-// Only for `kill_environment`'s docs, which link `LETHAL_LANDING_SPEED`.
-#[cfg(doc)]
-use super::state::LETHAL_LANDING_SPEED;
-
 /// The head prim's HitLocation factor (`Sim::hit_scale` says whose hits
 /// get it): both games' hard-coded default {head prim, x3.0}, BF2
 /// `FUN_002517e8`, BF1 `FUN_0020e2e0` (`analysis/re-ai-difficulty.md` §9.2).
@@ -934,8 +930,7 @@ impl Sim {
     /// slots, an instant kill with no killer and no cheat check (BF1
     /// `FUN_002af1c0` / `FUN_002af0d0`, BF2 `FUN_00371148` / `FUN_00370fd8`).
     /// BF1 tests the feet, as here; BF2 tests the collision sphere (not
-    /// built). The lethal-landing rule is [`LETHAL_LANDING_SPEED`]
-    /// (PROVISIONAL, card SLAND).
+    /// built).
     pub fn kill_environment(&mut self, h: UnitHandle, cause: DeathCause) {
         let Some(u) = self.unit(h) else {
             return;

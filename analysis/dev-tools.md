@@ -52,6 +52,8 @@ The F9 save notice appears over the spawn and pause menus after the write finish
 - **When the maintainer reports damage or firing that feels wrong** ("it only took half his health", "I fired two at once"): read
   the event rows (`--events`). Since schema 8 they carry each of his shots (`#n fired <weapon>`) and every hit he deals
   or takes: the damage, the victim's health after it, and direct (with the round's flight time) or blast.
+  Schema 17 also records `fall_damage`: `a` is the human victim, and `v` holds damage and remaining health.
+  The reader prints these as landing damage; they carry no attacker or weapon credit.
 - **When a controller walks slowly, will not sprint or roll** (#142): the human rows carry the left stick as gilrs
   gave it (`stick_raw`, schema 16) next to the scaled `lx`/`ly`, and `stick_full`, the travel the game took as a full
   push on each axis that tick (`input::StickRange`: the pad's own learned peak per axis for a soldier on foot in a
@@ -123,3 +125,35 @@ Its commands can launch the emulator, load a user-supplied save state,
 send controller input, capture frames and read emulated memory.
 Use the adapter's local setup instructions. The port black box
 records port-side play and simulation evidence.
+
+
+## Start in a vehicle from the CLI
+
+`--vehicle <class-or-substring>` enables walk mode and puts the player in
+seat 0 of a matching vehicle. It works without `--ai` or `--mission`; that
+standalone form loads the map's vehicle pads and starts no AI wave. An explicit
+mission or AI count retains its usual roster and battle setup.
+
+Headless diagnostic from the repository root, using the local baked map:
+
+```powershell
+cargo run --manifest-path engine/Cargo.toml -p game -- --map engine/assets_baked/bf2_geo1 --vehicle hailfire --headless --seconds 1
+```
+
+For interactive inspection, omit `--headless --seconds 1`. Use the full class
+name, such as `cis_tread_hailfire`, to select a specific variant. Matching is
+case-insensitive: an exact class wins across existing vehicles and spawn pads;
+otherwise the selector prefers the player's team, then neutral/owner-compatible
+choices. An unavailable exact class does not silently select a different variant.
+
+The shortcut can use an existing seat or create a pad-defined vehicle. Full or
+blocked pads are skipped, and an unsuccessful request leaves their team and
+spawn records unchanged. If no candidate can be used, the error lists the map's
+classes. This is a developer startup shortcut, not a change to ordinary in-game
+boarding rules. Automated checks use headless simulation and never open a window.
+
+On Windows/MSVC the game executable reserves an 8 MiB main-thread stack for
+unoptimized winit startup; this does not increase simulation stack use or change
+fixed-tick rules. Regression tests live in
+`core::sim::vehicles::tests::immediate_pad_spawns_preserve_capacity_and_failed_request_state`
+and `game::main::battle::vehicle_start::tests`.

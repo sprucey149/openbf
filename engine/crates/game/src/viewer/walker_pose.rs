@@ -46,10 +46,14 @@ pub struct WalkerRig {
     /// Per leg pair: the bones its layers move.
     masks: Vec<Vec<bool>>,
     bone_root: Option<usize>,
+    /// A posed hover's `FinAnimation` clip (card VPOSE).
+    fin: Option<usize>,
 }
 
 impl WalkerRig {
-    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>) -> Self {
+    /// A flyer's rig: its `takeoff` clip and its fins clip by name
+    /// (`manifest::ManifestFlyer::fin`), if the bake found them.
+    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
         let flyer = manifest::ManifestWalker {
             bank: String::new(),
             clips: Vec::new(),
@@ -57,14 +61,79 @@ impl WalkerRig {
             skin: None,
             layer_bones: Vec::new(),
         };
-        Self::new(skeleton, clips, &flyer)
+        let fin = fin.and_then(|f| clips.iter().position(|c| c.name.eq_ignore_ascii_case(f)));
+        Self {
+            fin,
+            ..Self::new(skeleton, clips, &flyer)
+        }
     }
 
-    pub fn flyer_palette(&self, lift: f32) -> Option<Vec<Mat4>> {
-        let clip = self
+    /// A hover's rig (card VPOSE, `analysis/re-vehicle-pose.md` 7): its
+    /// `FinAnimation` clip by name, if the bake found one.
+    pub fn new_hover(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
+        Self::new_flyer(skeleton, clips, fin)
+    }
+
+    /// The fin nine-pose (re-vehicle-pose 4.3): the clip at frame `a` and
+    /// frame `b`, each slerped between its keys, blended by `c`; the bind
+    /// with no clip or no numbers yet.
+    fn fin_palette(&self, nine: Option<super::turret_pose::NinePose>) -> Vec<Mat4> {
+        let pose = match (self.fin.map(|k| &self.clips[k]), nine) {
+            (Some(clip), Some(n)) => clip
+                .sample(&self.skeleton, n.a, false)
+                .blend(&clip.sample(&self.skeleton, n.b, false), n.c),
+            _ => Pose::bind(&self.skeleton),
+        };
+        self.skeleton.palette(&pose.locals())
+    }
+
+    /// A hover's nodes now: the fin pose, then its turret, aimer and barrel
+    /// writers from its seats' guns (re-vehicle-pose 2.3).
+    pub fn hover_nodes(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        let fins = self.bind_nodes(&self.fin_palette(nine));
+        self.aim.pose(&self.skeleton, &fins, v)
+    }
+
+    /// A hover's joint palette now ([`Self::hover_nodes`]).
+    pub fn hover_palette(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        self.hover_palette_kicked(v, nine, &super::walker_aim::at_rest)
+    }
+
+    /// [`Self::hover_palette`] with each barrel slid back by `kick`.
+    pub fn hover_palette_kicked(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        self.aimed(self.fin_palette(nine), v, kick)
+    }
+
+    /// A flyer's pose (BF2 FUN_00201300 B2:114581-114690, BF1 FUN_001d8620
+    /// B1:84287-84335): while its bank is set, a class with a `takeoff`
+    /// clip plays it at its `lift` and never its fins; else the fins clip's
+    /// nine-pose at `nine` ([`super::turret_pose::flyer_nine`]); else drawn
+    /// rigid.
+    pub fn flyer_palette(
+        &self,
+        lift: f32,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Option<Vec<Mat4>> {
+        let Some(clip) = self
             .clips
             .iter()
-            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))?;
+            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))
+        else {
+            return self.fin.map(|_| self.fin_palette(nine));
+        };
         let frame = lift.clamp(0.0, 1.0) * clip.frames.saturating_sub(1) as f32;
         Some(
             self.skeleton
@@ -72,8 +141,12 @@ impl WalkerRig {
         )
     }
 
-    pub fn flyer_nodes(&self, lift: f32) -> Option<Vec<Mat4>> {
-        Some(self.bind_nodes(&self.flyer_palette(lift)?))
+    pub fn flyer_nodes(
+        &self,
+        lift: f32,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Option<Vec<Mat4>> {
+        Some(self.bind_nodes(&self.flyer_palette(lift, nine)?))
     }
 
     /// Bone nodes in bind space (`palette * global_bind`).
@@ -116,6 +189,7 @@ impl WalkerRig {
             entries,
             masks,
             bone_root,
+            fin: None,
         }
     }
 
@@ -219,9 +293,28 @@ impl WalkerRig {
     }
 
     pub fn aimed_palette(&self, v: &core::vehicle::Vehicle, root_scale: f32) -> Vec<Mat4> {
-        let palette = self.palette(&v.walker, root_scale);
+        self.aimed_palette_kicked(v, root_scale, &super::walker_aim::at_rest)
+    }
+
+    /// [`Self::aimed_palette`] with each barrel slid back by `kick`.
+    pub fn aimed_palette_kicked(
+        &self,
+        v: &core::vehicle::Vehicle,
+        root_scale: f32,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        self.aimed(self.palette(&v.walker, root_scale), v, kick)
+    }
+
+    /// `palette` with the seats' turret, aimer and barrel writers applied.
+    fn aimed(
+        &self,
+        palette: Vec<Mat4>,
+        v: &core::vehicle::Vehicle,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
         let walk = self.bind_nodes(&palette);
-        let now = self.aim.pose(&self.skeleton, &walk, v);
+        let now = self.aim.pose_kicked(&self.skeleton, &walk, v, kick);
         now.iter()
             .enumerate()
             .map(|(n, m)| {
@@ -386,9 +479,9 @@ mod tests {
                 },
             ])],
         };
-        let rig = WalkerRig::new_flyer(skeleton, vec![clip]);
+        let rig = WalkerRig::new_flyer(skeleton, vec![clip], None);
         for (lift, x) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
-            let palette = rig.flyer_palette(lift).unwrap();
+            let palette = rig.flyer_palette(lift, None).unwrap();
             assert!((palette[0].w_axis.x - x).abs() < 1e-5);
         }
     }

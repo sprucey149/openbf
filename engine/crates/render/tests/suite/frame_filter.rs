@@ -14,6 +14,81 @@ use render::{box_side, Camera, DrawCmd, FrameFilter, Renderer};
 use crate::common;
 use common::{upload_tex, view_quad};
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn softness_blends_display_colours_after_the_brightness_filter() {
+    for (w, h) in [(96, 448), (96, 1080)] {
+        let mut r = Renderer::new_headless(w, h).unwrap();
+        let mut seed = 2345u32;
+        let pixels: Vec<u8> = (0..32 * 32 * 4)
+            .map(|i| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                if i % 4 == 3 {
+                    255
+                } else {
+                    (seed >> 16) as u8
+                }
+            })
+            .collect();
+        let tex = upload_tex(&mut r, 32, 32, &pixels, "softness noise");
+        let quad = view_quad(&mut r, -3.0);
+        let draws = [DrawCmd::textured(quad, tex, Mat4::IDENTITY)];
+        r.render(&Camera::default(), &draws, [0.0, 0.0, 0.0, 1.0])
+            .unwrap();
+        let unfiltered = r.capture_rgba().unwrap().0;
+        r.set_frame_filter(Some(FrameFilter {
+            threshold: 50.0,
+            intensity: 50.0,
+        }));
+        r.render(&Camera::default(), &draws, [0.0, 0.0, 0.0, 1.0])
+            .unwrap();
+        let base = r.capture_rgba().unwrap().0;
+        r.set_softness(Some(60.0));
+        r.render(&Camera::default(), &draws, [0.0, 0.0, 0.0, 1.0])
+            .unwrap();
+        let soft = r.capture_rgba().unwrap().0;
+        let n = box_side(h) as i32;
+        let at = |x: i32, y: i32, c: usize| {
+            let x = x.clamp(0, w as i32 - 1) as u32;
+            let y = y.clamp(0, h as i32 - 1) as u32;
+            f32::from(base[((y * w + x) * 4) as usize + c])
+        };
+        let mut worst = 0.0f32;
+        let mut changed = 0;
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                for c in 0..3 {
+                    let mut sum = 0.0;
+                    for dy in 0..n {
+                        for dx in 0..n {
+                            sum += at(x - n / 2 + dx, y - n / 2 + dy, c);
+                        }
+                    }
+                    let original = at(x, y, c);
+                    let want = original + (sum / (n * n) as f32 - original) * (60.0 / 128.0);
+                    let got = f32::from(soft[((y as u32 * w + x as u32) * 4) as usize + c]);
+                    worst = worst.max((got - want).abs());
+                    changed += usize::from(got != original);
+                }
+            }
+        }
+        assert!(
+            worst <= 2.0,
+            "{h} lines: {worst} display levels off the softness model"
+        );
+        assert!(changed > 100);
+        r.set_softness(None);
+        r.render(&Camera::default(), &draws, [0.0, 0.0, 0.0, 1.0])
+            .unwrap();
+        assert_eq!(r.capture_rgba().unwrap().0, base);
+        r.set_softness(Some(60.0));
+        r.clear_scene();
+        r.render(&Camera::default(), &draws, [0.0, 0.0, 0.0, 1.0])
+            .unwrap();
+        assert_eq!(r.capture_rgba().unwrap().0, unfiltered);
+    }
+}
+
 /// Render the noise sheet off and on at `w`×`h` and return the worst
 /// level the pass is off the n × n model, and how many channels it lifted.
 fn pass_against_model(w: u32, h: u32) -> (f32, usize) {

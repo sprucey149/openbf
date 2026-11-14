@@ -1352,3 +1352,34 @@ fn local_damage_flash_filters_rearms_expires_and_cannot_follow_another_life() {
     happen(&mut s, &[hit(me, 10.0, 100.0)]);
     assert_eq!(s.feed.damage_flash(s.sim.tick, me), 80.0 / 255.0);
 }
+
+#[test]
+fn a_landing_flashes_red_without_a_shooter_or_hit_credit() {
+    let mut s = scene();
+    let me = s.me;
+    let u = s.sim.unit_mut(me).unwrap();
+    u.soldier.pos.y = 10.0;
+    u.soldier.grounded = false;
+    let before = u.health.cur;
+    for _ in 0..90 {
+        s.sim.step(&[PadState::default()]);
+        s.feed.tick(&s.sim, me);
+        if s.sim
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::FallDamage { victim, .. } if *victim == me))
+        {
+            assert!(s.sim.unit(me).unwrap().health.cur < before);
+            assert!(s.feed.damage_flash(s.sim.tick, me) > 0.0);
+            assert!(s.feed.take_ambush().is_empty());
+            assert_eq!(s.feed.battle.hits, 0);
+            assert!(!s
+                .sim
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Hit { .. } | Event::Kill { .. })));
+            return;
+        }
+    }
+    panic!("the landing must damage the player and flash");
+}

@@ -30,6 +30,7 @@ mod look;
 mod pickups;
 mod scene;
 pub mod stations;
+mod treads;
 pub mod turret_fall;
 pub mod turret_pose;
 mod upload;
@@ -57,6 +58,6 @@ pub use upload::{
     upload_unit_cube, SkinnedPart, SubmeshPart, DETAIL_UV_SCALE,
 };
 pub use vehicles::{
-    find_model, find_texture, flyer_rigs, model_tops, walker_rigs, ModelSource, TexSource,
-    VehicleSides, VehicleVisuals,
+    find_model, find_texture, flyer_rigs, hover_rigs, model_tops, walker_rigs, ModelSource,
+    TexSource, VehicleSides, VehicleVisuals,
 };

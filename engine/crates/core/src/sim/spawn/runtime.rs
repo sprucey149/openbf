@@ -232,14 +232,16 @@ impl Sim {
     /// The live command walkers `team` may spawn at, in vehicle order: a
     /// walker whose class authors spawn points and whose team is `team` — its
     /// pad's, from the spawn to the kill (re-command-walker-post §3 [O]: no
-    /// ally, no capture). Destroyed, it is gone from here at once; the pad's
-    /// next walker is here again.
+    /// ally, no capture). Destroyed, it is gone from here at once, dying
+    /// walker and all; the pad's next walker is here again.
     pub fn command_walkers(
         &self,
         team: u8,
     ) -> impl Iterator<Item = (crate::vehicle::VehicleHandle, &crate::vehicle::Vehicle)> {
         self.alive_vehicles().filter(move |(_, v)| {
-            v.team == Some(team) && !self.class_spawn_points(v.class).is_empty()
+            v.team == Some(team)
+                && v.health.alive()
+                && !self.class_spawn_points(v.class).is_empty()
         })
     }
 

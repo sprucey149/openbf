@@ -19,6 +19,22 @@ pub struct Beam {
     pub life: f32,
     pub len: f32,
     pub follow: bool,
+    /// The seat gun that fired it, whose fire point it rides.
+    pub seat: Option<SeatBeam>,
+}
+
+/// A seat-fired beam's fire point (B2 `FUN_00311b50`, B2:303059: the firing
+/// weapon's fire point nearest the spawn, held at +0x114; the update
+/// `FUN_00311d00` re-reads origin and direction from it every frame while
+/// the weapon stands, B2:303166-303185).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeatBeam {
+    pub mount: crate::vehicle::Mount,
+    /// The firing weapon's index in its seat.
+    pub weapon: u8,
+    /// Which of the weapon's `fire_points` it left; `None` = the seat's
+    /// muzzle along its aim.
+    pub point: Option<u8>,
 }
 
 impl Beam {
@@ -40,11 +56,22 @@ impl Beam {
         eat(&self.shooter.owner.index.to_le_bytes());
         eat(&self.shooter.owner.gen.to_le_bytes());
         eat(&(self.shooter.weapon_class as u64).to_le_bytes());
+        if let Some(s) = self.seat {
+            eat(&s.mount.vehicle.index.to_le_bytes());
+            eat(&s.mount.vehicle.gen.to_le_bytes());
+            eat(&[s.mount.seat, s.weapon, s.point.map_or(u8::MAX, |p| p)]);
+        }
     }
 }
 
 impl Sim {
     pub(super) fn launch_round(&mut self, round: Bolt, follow: bool) {
+        self.launch_round_from(round, follow, None);
+    }
+
+    /// [`Self::launch_round`] of a seat's gun: a beam rides the seat's fire
+    /// point.
+    pub(super) fn launch_round_from(&mut self, round: Bolt, follow: bool, seat: Option<SeatBeam>) {
         let Some(class) = &self.weapon_classes[round.weapon_class].ordnance.beam else {
             self.bolts.push(round);
             return;
@@ -58,6 +85,7 @@ impl Sim {
             life: class.life,
             len: 0.0,
             follow,
+            seat,
         });
     }
 
@@ -96,10 +124,12 @@ impl Sim {
         let first = self.bolts.len();
         for k in 0..self.beams.len() {
             let beam = self.beams[k];
-            let (origin, dir) = if beam.follow {
-                self.beam_frame(beam)
-            } else {
-                (beam.origin, beam.dir)
+            let (origin, dir) = match beam.seat {
+                Some(s) => self
+                    .seat_beam_frame(s, beam.shooter.owner)
+                    .unwrap_or((beam.origin, beam.dir)),
+                None if beam.follow => self.beam_frame(beam),
+                None => (beam.origin, beam.dir),
             };
             let ord = &self.weapon_classes[beam.shooter.weapon_class].ordnance;
             let range = ord.beam.as_ref().map_or(0.0, |c| c.range);
@@ -218,6 +248,61 @@ impl Sim {
             beam.life -= dt;
         }
         self.beams.retain(|b| b.life > 0.0);
+    }
+
+    /// A seat beam's fire point now: the weapon's fire point, or the
+    /// seat's muzzle, on the vehicle as it stands, along the gun's aim.
+    /// A pilot's barrel keeps converging on the camera's target, including
+    /// a one-point ring below the seat's other weapon.
+    /// `None` once the vehicle or its gun is gone: the beam keeps its ray.
+    fn seat_beam_frame(&self, s: SeatBeam, owner: crate::unit::UnitHandle) -> Option<(Vec3, Vec3)> {
+        let v = self.vehicle(s.mount.vehicle).filter(|v| v.alive)?;
+        let seat = usize::from(s.mount.seat);
+        let g = self
+            .seat_setup
+            .get(v.class as usize)?
+            .as_ref()?
+            .guns
+            .get(seat)?
+            .as_ref()?;
+        let st = v.guns.get(seat)?.as_ref()?;
+        let fixed = g.pilot && v.kind == crate::vehicle::VehicleKind::Flyer;
+        let local = g.shot_point(
+            usize::from(s.weapon),
+            s.point.map(usize::from),
+            st.aim,
+            fixed,
+        );
+        let dir = (v.rot * crate::vehicle::gun::dir(st.aim.0, st.aim.1)).normalize_or_zero();
+        let origin = v.pos + v.rot * local;
+        let weapon = g.weapons.get(usize::from(s.weapon))?;
+        let dir = if g.turn.is_none() && !fixed && !weapon.fire_points.is_empty() {
+            let view = v.rot * crate::vehicle::gun::dir(st.look.0, st.look.1);
+            let eye = v.pos + v.rot * g.ray_eye(st.look, st.zoom.is_some());
+            let eye = self.chase_ray_origin(
+                s.mount,
+                g,
+                self.unit(owner).map(|_| owner.index as usize),
+                st.look,
+                st.zoom.is_some(),
+                eye,
+                view,
+            );
+            let riders: Vec<_> = v.seats.iter().filter_map(|s| s.occupant).collect();
+            let target = self.aim_point(eye, view, &riders, s.mount.vehicle);
+            super::guns::ring_aim(
+                g,
+                weapon.fire_limits.get(usize::from(s.point.unwrap_or(0))),
+                v.rot,
+                origin,
+                target,
+                dir,
+            )
+            .0
+        } else {
+            dir
+        };
+        Some((origin, dir))
     }
 
     fn beam_frame(&self, beam: Beam) -> (Vec3, Vec3) {

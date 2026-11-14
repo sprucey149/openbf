@@ -1,6 +1,6 @@
 //! What the sim IS, and how it is hashed: the [`Sim`] struct with its
 //! counters ([`NavStats`]), cheats ([`Cheats`]) and per-tick output
-//! ([`Event`], [`DeathCause`]) and the fall rule ([`LETHAL_LANDING_SPEED`]);
+//! ([`Event`], [`DeathCause`]);
 //! the constructors ([`Sim::empty`], [`Sim::new`]); the queries — a unit by
 //! handle, the ground under a point ([`Sim::ground_under`]), the terrain ray;
 //! [`omni_radius_for`]; and [`Sim::hash`], what every replay gate compares.
@@ -22,15 +22,6 @@ use crate::rng::SimRng;
 use crate::unit::{Unit, UnitHandle, UnitSpec};
 use crate::weapon::WeaponClass;
 use glam::Vec3;
-
-/// PROVISIONAL (ours): a soldier that lands at or beyond this DOWNWARD speed
-/// dies unless its class has zero collision damage — 25 m/s, about a 17 m drop at the soldier's g = 18
-/// (`core::soldier::GRAVITY`). Both games deal landing damage by a law the
-/// port does not have yet — (approach − CollisionThreshold)² × CollisionScale
-/// per class (`analysis/re-soldier-ground.md` §4; cards SLAND, DTHR) — so this
-/// is a single lethal-speed cut-off, not a damage model. It is also what makes
-/// [`crate::collision::NO_GROUND`] mean what it says — nothing catches you.
-pub const LETHAL_LANDING_SPEED: f32 = 25.0;
 
 /// [`Event::Hit`]'s `age` for a blast's hit: no round flew to the victim.
 /// A bolt that lands in its first update strikes at age 0 (`Bolt::advance`;
@@ -275,8 +266,6 @@ pub struct Sim {
     /// Immutable setup for querying animated walker tow collision.
     pub tow_frames: Option<std::sync::Arc<dyn crate::vehicle::tow::TowFrames>>,
     pub tow_cables: Vec<super::TowCable>,
-    /// Falling walkers remain in building collision until their clip ends.
-    pub tow_falls: Vec<super::TowFall>,
     pub heightfield: Option<Heightfield>,
     /// The map's baked model collision (`coll` meshes, `prim` primitives,
     /// terrain cutters). Empty = heightfield-only, as before. An INPUT like the
@@ -390,6 +379,18 @@ pub struct Sim {
     /// SETUP data like `weapon_classes`, NOT hashed. A vehicle whose class
     /// has none, or is past the end, stands still (`Sim::tick_hovers`).
     pub hover_params: Vec<Option<crate::vehicle::hover::HoverParams>>,
+    /// Per vehicle CLASS, a hover pilot seat's camera section, where a
+    /// player's aim ray starts (`ChaseSection::ray_origin`) — `None` for a
+    /// class that is not a hover. SETUP data, NOT hashed.
+    pub hover_chase: Vec<Option<crate::vehicle::hover::ChaseSection>>,
+    /// Per vehicle CLASS, a walker pilot seat's camera section, where a
+    /// player's aim ray starts (`ChaseSection::walker_ray_origin`) — `None`
+    /// for a class that is not a walker. SETUP data, NOT hashed.
+    pub walker_chase: Vec<Option<crate::vehicle::hover::ChaseSection>>,
+    /// Per vehicle CLASS, per seat, the seat's camera section, where a
+    /// player gunner's aim ray starts (`ChaseSection::gunner_ray_origin`).
+    /// SETUP data, NOT hashed.
+    pub seat_chase: Vec<Vec<Option<crate::vehicle::hover::ChaseSection>>>,
     /// Per vehicle CLASS, the walker numbers (card WALK) — `None` for a
     /// class that is not a walker. SETUP data, NOT hashed. A walker whose
     /// class has none stands still (`Sim::tick_walkers`).
@@ -1093,7 +1094,6 @@ impl Sim {
             hero_rider_frames: None,
             tow_frames: None,
             tow_cables: Vec::new(),
-            tow_falls: Vec::new(),
             heightfield: None,
             collision: CollisionWorld::default(),
             doors: Vec::new(),
@@ -1121,6 +1121,9 @@ impl Sim {
             vehicle_pads: Vec::new(),
             building_turrets: Vec::new(),
             hover_params: Vec::new(),
+            hover_chase: Vec::new(),
+            walker_chase: Vec::new(),
+            seat_chase: Vec::new(),
             flyer_params: Vec::new(),
             flight_limits: super::flyers::FlightLimits::default(),
             landing_regions: Vec::new(),

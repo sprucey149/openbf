@@ -116,7 +116,7 @@ fn a_walker_section_keeps_its_aimer_camera_and_seat_keys() {
     assert_eq!(gun.eye_point_offset, Some([1.0, 2.0, 3.0]));
     assert_eq!(
         (pilot.track_center, gun.track_center),
-        (None, Some([0.0, 3.0, -7.0]))
+        (Some([0.0, 9.0, 0.0]), Some([0.0, 3.0, -7.0]))
     );
     assert_eq!(
         (pilot.third_person_fov, gun.third_person_fov),
@@ -263,8 +263,9 @@ fn spring_point_defaults_follow_the_lever_arm() {
 }
 
 /// The setter's slot pointer: a Start with no Effect is overwritten by
-/// the next Start; a Start resets Stop; chunk-section props never reach
-/// a slot; the band is `stop < f ≤ start`.
+/// the next Start; a Start resets Stop; a `CHUNKSECTION` closes nothing, so
+/// the rows after it still fill slots (B2 FUN_00214600 B2:126998, B2
+/// FUN_0026a340 B2:186058); the band is `stop < f ≤ start`.
 #[test]
 fn damage_slots_follow_the_setters_pointer() {
     let props: Vec<(u32, String)> = [
@@ -298,8 +299,9 @@ fn damage_slots_follow_the_setters_pointer() {
     db.load(&path).unwrap();
     let _ = std::fs::remove_file(&path);
     let fx = damage_effects(&db, "t_hover");
-    assert_eq!(fx.len(), 2, "{fx:#?}");
     let pct = |p: f32| p * 0.01;
+    assert_eq!(fx.len(), 3, "{fx:#?}");
+    assert_eq!((fx[2].start, fx[2].effect.as_str()), (pct(40.0), "chunkfx"));
     assert_eq!((fx[0].start, fx[0].stop), (pct(60.0), pct(20.0)));
     assert_eq!(fx[0].effect, "vehiclespark");
     assert_eq!(fx[0].attach.as_deref(), Some("hp_damage_1"));

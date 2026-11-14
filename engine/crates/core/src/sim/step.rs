@@ -9,7 +9,7 @@
 //! `step/tests.rs` and `step/tests/`.
 
 use super::input::{buttons, PadState};
-use super::state::{Call, DeathCause, Event, Sim, LETHAL_LANDING_SPEED};
+use super::state::{Call, DeathCause, Event, Sim};
 use crate::ai;
 use crate::collision::{Capsule, AIR_STEP, STEP_HEIGHT};
 use crate::fmath::FloatExt;
@@ -311,10 +311,11 @@ impl Sim {
                 (fy, n) = self.ground_under_falling(s.pos, from.base.y);
             }
             let vy = s.vel.y;
+            let landing_damage = super::landing::damage(&u.consts, s.vel, n, s.yaw);
             s.resolve_ground(TICK_DT, fy, n, from.base.y, self.ground_rules);
             let (lift, radius) = super::soldier_blast_sphere(s.stance);
             let centre = s.pos + Vec3::Y * lift;
-            if vy <= -LETHAL_LANDING_SPEED
+            if (!grounded && s.grounded && landing_damage >= u.health.cur)
                 || self.kill_floor.is_some_and(|floor| s.pos.y < floor)
                 || self.death_regions.iter().any(|r| r.contains(s.pos))
                 || self
@@ -564,7 +565,7 @@ impl Sim {
         // The hulls where their vehicles are (card VHULL): a caller may have
         // moved one, or installed a new world, since the last tick.
         self.sync_hulls();
-        self.sync_tow_falls();
+        self.sync_dying_walkers();
         // Existing hero lives drain before this tick's replacements/spawns.
         self.tick_hero_health(dt);
         // A press a prompt answered stays out of play until released.
@@ -1298,6 +1299,7 @@ impl Sim {
             // (The jets too, card JETP: `Stance::airborne`.)
             let in_air = !s0.grounded && s0.stance.airborne();
             let to = self.units[i].capsule();
+            self.vehicle_impacts(i, &to);
             self.units[i].wall_push = resolve_soldier_walls(
                 &self.collision,
                 &mut self.units[i].soldier,
@@ -1347,11 +1349,15 @@ impl Sim {
                     (fy, fnrm, floor_owner) =
                         self.ground_contact(s1.pos, false, from.base.y, AIR_STEP);
                 }
-                let vy_before = s1.vel.y;
+                let velocity_before = s1.vel;
+                let vy_before = velocity_before.y;
                 let rules = self.ground_rules;
                 self.units[i]
                     .soldier
                     .resolve_ground(dt, fy, fnrm, from.base.y, rules);
+                if self.units[i].soldier.grounded {
+                    self.units[i].stood_on = floor_owner;
+                }
                 if rules == GroundRules::Bf2
                     && self.units[i].alive
                     && (carried || floor_owner.is_some())
@@ -1359,18 +1365,11 @@ impl Sim {
                     self.touch_deck(i, floor_owner);
                 }
                 let landed = self.units[i].alive && !was_grounded && self.units[i].soldier.grounded;
-                // A hard landing UNDER THE MAP kills, cheat or not (card
-                // KFLR, `sim/bounds.rs`); any other one at the lethal
-                // speed is the fall it was.
                 if landed && self.lands_under_the_map(self.units[i].soldier.pos, vy_before) {
                     let h = self.handle(i);
                     self.kill_environment(h, DeathCause::UnderMap);
-                } else if landed
-                    && vy_before <= -LETHAL_LANDING_SPEED
-                    && !self.units[i].consts.collision_damage_immune
-                {
-                    let h = self.handle(i);
-                    self.kill_environment(h, DeathCause::Fall);
+                } else if landed {
+                    self.landing_damage(i, velocity_before, fnrm);
                 }
             }
             if corpse {

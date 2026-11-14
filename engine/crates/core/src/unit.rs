@@ -357,6 +357,9 @@ pub struct Unit {
     pub wall_push: Vec3,
     /// The flyer he stands on (`crate::sim` deck carry), `None` off one.
     pub deck: Option<Deck>,
+    /// The vehicle whose hull he last stood on (B2 soldier +0x480): it deals
+    /// him no impact damage (`Sim::vehicle_impacts`).
+    pub stood_on: Option<crate::vehicle::VehicleHandle>,
     /// Tick this unit last FIRED, `u64::MAX` for never. Perception's hearing
     /// reads it (`crate::perception::scan`): a shot inside `HEAR_RADIUS`
     /// since the listener's last think puts the shooter in its memory with no
@@ -656,6 +659,21 @@ impl Unit {
                 u8::from(self.consts.collision_damage_immune),
                 u8::from(self.spec.consts.collision_damage_immune),
             ]);
+        }
+        for (i, c) in [&self.consts, &self.spec.consts].into_iter().enumerate() {
+            if c.collision_threshold != [10.0, 3.0, 0.0]
+                || c.collision_damage_scale != [1.0, 0.0, 0.0]
+            {
+                eat(b"COLLISION_DAMAGE");
+                eat(&[i as u8]);
+                for value in c
+                    .collision_threshold
+                    .into_iter()
+                    .chain(c.collision_damage_scale)
+                {
+                    eat(&value.to_bits().to_le_bytes());
+                }
+            }
         }
         eat(&[
             self.alive as u8,
@@ -1391,6 +1409,7 @@ impl UnitSpec {
             capture_posts: self.capture_posts,
             wall_push: Vec3::ZERO,
             deck: None,
+            stood_on: None,
             body: false,
             drop_due: false,
             chunk_mark: false,

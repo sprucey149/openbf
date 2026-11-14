@@ -84,3 +84,24 @@ fn a_still_material_is_identical_at_any_time() {
         );
     }
 }
+
+/// A tread's offset (`game::viewer::treads`): a texture instance shifted by
+/// half a width shows the base's stripes swapped, a whole width brings it
+/// back, and the base handle it was made from does not move.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_texture_instance_offsets_alone() {
+    let mut r = headless();
+    let (mesh, base) = striped_quad(&mut r, [0.0, 0.0]);
+    let tread = r.add_texture_instance(base).expect("instance");
+    let still = frame(&mut r, mesh, base);
+    assert_eq!(still, frame(&mut r, mesh, tread), "a fresh instance is the base");
+
+    r.set_texture_uv_offset(tread, [0.5, 0.0]);
+    let half = frame(&mut r, mesh, tread);
+    assert_ne!(still, half, "the offset did not move the instance");
+    assert_eq!(still, frame(&mut r, mesh, base), "the offset moved the base");
+
+    r.set_texture_uv_offset(tread, [1.0, 0.0]);
+    assert_eq!(still, frame(&mut r, mesh, tread), "a whole width did not return");
+}

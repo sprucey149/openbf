@@ -313,6 +313,74 @@ fn bf2_speederbike_boost_energy_and_jump() {
     assert_eq!(t.jump.speed_factor, 0.3, "the ctor default");
 }
 
+/// BF2's tread scroll (`analysis/re-hover.md` §6.18): the disc's two
+/// treaded classes, through the whole class parse; no BF1 class has any.
+#[test]
+fn bf2_treads_are_the_authored_segments_and_rates() {
+    let mut db = ClassDb::default();
+    if !load_from(&mut db, "bf2", "SIDE/CIS.LVL", "cis2") {
+        return;
+    }
+    let treads = |c: &str| {
+        HoverClass::from_db(&db, c)
+            .expect("a hover")
+            .treads
+            .list()
+            .to_vec()
+    };
+    let snail = treads("cis_tread_snailtank");
+    assert_eq!(snail.len(), 1);
+    assert_eq!(snail[0].segment, "cis_tank_tread_tracks");
+    assert_eq!(
+        (snail[0].veloc, snail[0].omega),
+        ([0.0, -0.8333333], [0.0, 0.0])
+    );
+    let hail = treads("cis_tread_hailfire");
+    let rows: Vec<_> = hail
+        .iter()
+        .map(|t| (t.segment.as_str(), t.veloc, t.omega))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("wheel_left", [0.4, 0.0], [-1.1, 0.0]),
+            ("wheel_right", [0.4, 0.0], [1.1, 0.0]),
+        ]
+    );
+    let mut bf1 = ClassDb::default();
+    if load(&mut bf1, "SIDE/CIS.LVL", "cis1") {
+        let h = HoverClass::from_db(&bf1, "cis_tread_hailfire").expect("a hover");
+        assert!(h.treads.list().is_empty());
+    }
+}
+
+/// The snail tank authors its five damage bands after its eight
+/// `CHUNKSECTION`s; a chunk section closes nothing (B2 FUN_00214600
+/// B2:126998, B2 FUN_0026a340 B2:186058), so all five are the hull's.
+#[test]
+fn bf2_damage_rows_after_chunk_sections_are_the_hulls() {
+    let mut db = ClassDb::default();
+    if !load_from(&mut db, "bf2", "SIDE/CIS.LVL", "cis2-dmg") {
+        return;
+    }
+    let pct = |p: f32| p * 0.01;
+    let got: Vec<_> = damage_effects(&db, "cis_tread_snailtank")
+        .into_iter()
+        .map(|d| (d.start, d.stop, d.effect, d.attach.unwrap_or_default()))
+        .collect();
+    let row = |a: f32, b: f32, e: &str, n: &str| (pct(a), pct(b), e.to_owned(), n.to_owned());
+    assert_eq!(
+        got,
+        [
+            row(60.0, 20.0, "com_sfx_vehiclespark", "hp_damage2"),
+            row(70.0, 20.0, "com_sfx_vehiclespark", "hp_damage3"),
+            row(70.0, 20.0, "com_sfx_vehiclespark", "hp_damage2"),
+            row(50.0, 0.0, "com_sfx_vehiclesmoke", "hp_damage1"),
+            row(5.0, 0.0, "com_sfx_vehicleflame", "hp_damage1"),
+        ]
+    );
+}
+
 /// Card VDTH (`analysis/re-vehicle-death.md` §3 [O]): the sphere a blast
 /// measures each BF1 vehicle class by — `max(modl SPHR r, the farthest
 /// AddSpringBody / ODF collision primitive)` about the SPHR centre — against
@@ -606,4 +674,172 @@ fn heavy_walkers_take_x4_on_their_weak_spots() {
     let _ = std::fs::remove_dir_all(&tmp);
     assert_eq!(weak_spot_factor(&db, "kas2_walk_spider_local"), heavy);
     assert_eq!(weak_spot_factor(&db, "kas2_walk_atst_local"), plain);
+}
+
+/// Every side hover's `AddSpringBody` spheres in its hull, each as
+/// `(radius, soldier, vehicle, ordnance)`, by class (`analysis/re-hover.md`
+/// §13.8), from the baked side vehicles and their class files.
+fn spring_hulls(game: &str) -> Vec<(String, Vec<(f32, bool, bool, bool)>)> {
+    use core::collision::{Layers, Shape};
+    let root = game::assets::baked_root();
+    let mut out = Vec::new();
+    let mut db = ClassDb::default();
+    let Ok(classes) = std::fs::read_dir(root.join("classes")) else {
+        return out;
+    };
+    let mut files: Vec<_> = classes
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(&format!("{game}_")))
+        })
+        .collect();
+    files.sort();
+    for f in &files {
+        db.load(f).unwrap();
+    }
+    let Ok(sides) = std::fs::read_dir(root.join(format!("side_{game}")).join("vehicles")) else {
+        return out;
+    };
+    let mut sides: Vec<_> = sides.flatten().map(|e| e.path()).collect();
+    sides.sort();
+    for dir in sides {
+        let Ok(text) = std::fs::read_to_string(dir.join("vehicles.ron")) else {
+            continue;
+        };
+        let vm: manifest::VehicleManifest = ron::from_str(&text).unwrap();
+        for v in &vm.vehicles {
+            let k = &v.class;
+            let Some(entry) = k.geometry.as_deref().and_then(|g| {
+                vm.collision
+                    .iter()
+                    .find(|e| e.geometry.eq_ignore_ascii_case(g))
+            }) else {
+                continue;
+            };
+            let cg = game::assets::load_collision_geom(&dir, entry).unwrap();
+            let parts = game::assets::spring_hull_parts(&db, &k.name, &cg, &k.collision);
+            let spheres = HoverClass::from_db(&db, &k.name)
+                .map(|h| {
+                    let subsets = h.spring_subsets(
+                        &cg.mesh
+                            .iter()
+                            .map(|_| "collisionmesh".to_owned())
+                            .chain(cg.prims.iter().map(|p| p.name.to_ascii_lowercase()))
+                            .collect::<Vec<_>>(),
+                    );
+                    h.springs()
+                        .iter()
+                        .zip(subsets)
+                        .map(|(s, [a, b, c])| (s.radius, a, b, c))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let built: Vec<_> = parts
+                .iter()
+                .map(|p| match p.shape {
+                    Shape::Sphere { radius } => (
+                        radius,
+                        p.layers.contains(Layers::SOLDIER),
+                        p.layers.contains(Layers::VEHICLE),
+                        p.layers.contains(Layers::ORDNANCE),
+                    ),
+                    _ => panic!("a spring part is a sphere"),
+                })
+                .collect();
+            let kept: Vec<_> = spheres
+                .iter()
+                .copied()
+                .filter(|s| s.1 || s.2 || s.3)
+                .collect();
+            assert_eq!(built, kept, "{}", k.name);
+            if !spheres.is_empty() {
+                out.push((k.name.clone(), spheres));
+            }
+        }
+    }
+    out
+}
+
+/// The spheres a hover keeps in its soldier, vehicle and ordnance subsets
+/// are the ones PCSX2 RAM holds (`analysis/re-hover.md` §13.8: BF2 slot 8
+/// and the `water_fidelity` state on Kashyyyk, the `yavin-slot10` state, BF1
+/// `bf1_geo1_sbd_reference`). A class whose collision lines come after its
+/// springs drops them; one with none keeps all three.
+#[test]
+fn hover_spring_spheres_join_the_subsets_ram_shows() {
+    let ram: [(&str, &str, &[f32], bool); 8] = [
+        ("bf2", "rep_hover_barcspeeder", &[1.4; 3], true),
+        ("bf2", "all_hover_combatspeeder", &[1.75; 6], true),
+        (
+            "bf2",
+            "cis_tread_snailtank",
+            &[2.0, 2.0, 1.0, 1.0, 1.0, 0.75],
+            true,
+        ),
+        ("bf2", "rep_hover_fightertank", &[2.3; 4], false),
+        ("bf2", "imp_hover_fightertank", &[2.3; 4], false),
+        ("bf2", "imp_hover_speederbike", &[1.4; 3], false),
+        ("bf2", "cis_hover_stap", &[3.0; 3], false),
+        ("bf1", "cis_tread_hailfire", &[4.0, 3.5, 3.5], false),
+    ];
+    for game in ["bf2", "bf1"] {
+        let all = spring_hulls(game);
+        if all.is_empty() {
+            eprintln!("SKIP: no baked {game} side vehicles");
+            continue;
+        }
+        for (g, class, radii, kept) in ram.iter().filter(|r| r.0 == game) {
+            let (_, spheres) = all
+                .iter()
+                .find(|(n, _)| n == class)
+                .unwrap_or_else(|| panic!("{g} {class} has springs"));
+            let got: Vec<f32> = spheres.iter().map(|s| s.0).collect();
+            assert_eq!(got, radii.to_vec(), "{class}");
+            for s in spheres {
+                assert_eq!((s.1, s.2, s.3), (*kept, *kept, *kept), "{class}");
+            }
+        }
+    }
+}
+
+/// re-hover §13.12: on the PS2's KAS2 the guided-rocket ordnance that loads
+/// after the BARC writes its `DamageEffectScale 1` into the BARC's last slot
+/// (its 20 % flame), and the CIS vehicles loaded later keep their own (read
+/// from a KAS2 save state).
+#[test]
+fn kas2_load_order_writes_the_rocket_scale_into_the_barcs_last_flame() {
+    let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+    let dir = root.join("assets_baked/classes");
+    let mut db = ClassDb::default();
+    for side in ["bf2_rep.ron", "bf2_cis.ron", "bf2_ingame.ron"] {
+        let p = dir.join(side);
+        if !p.exists() || !dir.join("load_order").join(side).exists() {
+            eprintln!("SKIP: {} or its load order not present", p.display());
+            return;
+        }
+        db.load(&p).expect("load");
+    }
+    let mission = game::mission::MissionDef::load(&root.join("missions/bf2_kas2_con_cw.ron"))
+        .expect("mission");
+    let bands = |db: &ClassDb, class: &str| -> Vec<(String, f32, f32)> {
+        damage_effects(db, class)
+            .iter()
+            .map(|d| (d.effect.clone(), d.scale, d.inherit_velocity))
+            .collect()
+    };
+    let barc_alone = bands(&db, "rep_hover_barcspeeder");
+    assert_eq!(
+        barc_alone[4],
+        ("com_sfx_vehicleflame".to_owned(), 0.2, 0.75)
+    );
+    let stap = bands(&db, "cis_hover_stap");
+    let snail = bands(&db, "cis_tread_snailtank");
+    db.replay_damage_loads(&dir, "bf2", &mission.class_load_order);
+    let barc = bands(&db, "rep_hover_barcspeeder");
+    assert_eq!(barc[4], ("com_sfx_vehicleflame".to_owned(), 1.0, 0.75));
+    assert_eq!(barc[..4], barc_alone[..4]);
+    assert_eq!(bands(&db, "cis_hover_stap"), stap);
+    assert_eq!(bands(&db, "cis_tread_snailtank"), snail);
 }

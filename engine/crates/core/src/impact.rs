@@ -23,6 +23,8 @@ pub const HASH_IMPACT_SHIELD: u32 = 0x4bc6_c22f;
 pub const HASH_IMPACT_SHIELD_SMALL: u32 = 0x8fc7_9ebe;
 pub const HASH_IMPACT_SHIELD_LARGE: u32 = 0xf73e_c52a;
 pub const HASH_TRAIL_EFFECT: u32 = 0x7e71_e2c6;
+/// `ImpactEffect`, the beam setter's one impact slot (B2:291502).
+pub const HASH_BEAM_IMPACT: u32 = 0x1172_7a92;
 /// The explosion class's keys.
 pub const HASH_EFFECT: u32 = 0x6e6e_8d54;
 pub const HASH_WATER_EFFECT: u32 = 0x8773_3801;
@@ -32,6 +34,15 @@ pub const WATER_BLAST_DEPTH: f32 = 0.3;
 pub const SPLASH_LIFT: f32 = 0.02;
 /// `SoundProperty` on an explosion class (re-weapon-sounds.md §4.1).
 pub const HASH_SOUND_PROPERTY: u32 = 0xf350_b4e5;
+/// The explosion class's camera shake keys (B1 setter `FUN_0026f528`
+/// +0x68..+0x74, B2 setter `FUN_0030bb88` +0x78..+0x84: `Shake` B2:287635,
+/// `ShakeRadiusInner` B2:287800, `ShakeRadius` = `ShakeRadiusOuter`
+/// B2:287589-287593 / B2:287703-287712, `ShakeLength` B2:287715).
+pub const HASH_SHAKE: u32 = 0xbd8b_b2f5;
+pub const HASH_SHAKE_RADIUS_INNER: u32 = 0x4954_490d;
+pub const HASH_SHAKE_RADIUS: u32 = 0xd634_b283;
+pub const HASH_SHAKE_RADIUS_OUTER: u32 = 0x1253_99a6;
+pub const HASH_SHAKE_LENGTH: u32 = 0x25b7_87e5;
 
 /// BF2's explosion keeps at most five `Effect` rows and detonates one at
 /// random (B2 `FUN_0030bb88` +0xa4, `FUN_0030c8f8` B2:300201–300232).
@@ -109,6 +120,38 @@ impl ImpactLook {
         }
     }
 
+    /// An OrdnanceBeam's: its setter's one `ImpactEffect` (B1 `FUN_00275bd0`
+    /// class +0x94, B2 `FUN_00312838` class +0xdc), spawned at the beam's end
+    /// on every update it strikes something (B1:196819, B2:291073), with the
+    /// ordnance base's `TrailEffect`. No bullet ctor default and no
+    /// per-surface key: the beam's setter never reaches the bullet's. Water
+    /// shows none: the user's PS2 capture of BF2 Kashyyyk (2026-11-12) draws
+    /// the IFT-X beam's effect on the ground and none on the water; the
+    /// original's ray flags for water are not traced.
+    pub fn beam<'a>(props: impl IntoIterator<Item = (u32, &'a str)>) -> Self {
+        let mut effect = None;
+        let mut trail = None;
+        for (h, v) in props {
+            let v = Some(v.trim().to_owned()).filter(|s| !s.is_empty());
+            match h {
+                HASH_BEAM_IMPACT => effect = v,
+                HASH_TRAIL_EFFECT => trail = v,
+                _ => {}
+            }
+        }
+        Self {
+            soft: effect.clone(),
+            rigid: effect.clone(),
+            building: effect.clone(),
+            terrain: effect.clone(),
+            water: None,
+            shield: effect.clone(),
+            shield_large: effect,
+            trail,
+            explosion: None,
+        }
+    }
+
     /// The ctor, then `props` (the class chain, parent first, each class's
     /// in file order).
     pub fn replay<'a>(props: impl IntoIterator<Item = (u32, &'a str)>, bf2: bool) -> Self {
@@ -138,12 +181,38 @@ impl ImpactLook {
 /// or below the water + 0.3 m (B1 `FUN_002701a0` B1:193761–193807).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExplosionLook {
+    /// The explosion class's name, lowercase: its debris
+    /// (`game::fx::chunks::Chunks::blast`) goes off with it.
+    pub class: String,
     pub effects: Vec<String>,
     pub water_effect: Option<String>,
     /// `SoundProperty`: played once per explosion, at the blast, whatever
     /// else it does (B1 `FUN_002701a0` 193760, B2 `FUN_0030c8f8` 300192).
     pub sound: Option<String>,
     pub radius_outer: f32,
+    pub shake: Shake,
+}
+
+/// An explosion class's camera shake (`analysis/re-vehicle-death.md` §1):
+/// the ctor's 0 / 0 / 0 and `ShakeLength` 0.5 (B2 `FUN_0030b2f8`
+/// B2:286978-286985; B1 `FUN_0026ed88` B1:192894).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shake {
+    pub amount: f32,
+    pub inner: f32,
+    pub outer: f32,
+    pub length: f32,
+}
+
+impl Default for Shake {
+    fn default() -> Self {
+        Self {
+            amount: 0.0,
+            inner: 0.0,
+            outer: 0.0,
+            length: 0.5,
+        }
+    }
 }
 
 impl ExplosionLook {
@@ -174,6 +243,24 @@ impl ExplosionLook {
                 // `"<name> defer"`: the second token only says when the PS2
                 // resolves the name (re-weapon-sounds.md §3.1).
                 HASH_SOUND_PROPERTY => l.sound = v.split_whitespace().next().map(str::to_owned),
+                HASH_SHAKE
+                | HASH_SHAKE_RADIUS_INNER
+                | HASH_SHAKE_RADIUS
+                | HASH_SHAKE_RADIUS_OUTER
+                | HASH_SHAKE_LENGTH => {
+                    if let Some(x) = v
+                        .split_whitespace()
+                        .next()
+                        .and_then(|t| t.parse::<f32>().ok())
+                    {
+                        *match h {
+                            HASH_SHAKE => &mut l.shake.amount,
+                            HASH_SHAKE_RADIUS_INNER => &mut l.shake.inner,
+                            HASH_SHAKE_LENGTH => &mut l.shake.length,
+                            _ => &mut l.shake.outer,
+                        } = x;
+                    }
+                }
                 _ => {}
             }
         }
@@ -184,6 +271,28 @@ impl ExplosionLook {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A beam spawns its one `ImpactEffect` on every surface but water
+    /// (B2:291073, the PS2 capture), and takes no bullet default or
+    /// per-surface key.
+    #[test]
+    fn a_beam_has_one_impact_for_every_surface() {
+        let l = ImpactLook::beam([
+            (HASH_BEAM_IMPACT, "com_sfx_weap_beam_exp"),
+            (HASH_IMPACT_WATER, "com_sfx_watersplash_md"),
+        ]);
+        for s in [
+            Surface::Soldier,
+            Surface::Vehicle,
+            Surface::Building,
+            Surface::Terrain,
+            Surface::Shield,
+            Surface::ShieldLarge,
+        ] {
+            assert_eq!(l.effect(s), Some("com_sfx_weap_beam_exp"), "{s:?}");
+        }
+        assert_eq!(l.effect(Surface::Water), None);
+    }
 
     #[test]
     fn surface_keys_replay_over_the_ctor() {
@@ -204,6 +313,38 @@ mod tests {
         // BF2 never reads ImpactEffectShield: its ctor's small impact stands.
         let l = ImpactLook::replay([(HASH_IMPACT_SHIELD, "x")], true);
         assert_eq!(l.effect(Surface::Shield), Some("com_sfx_shieldimpact_sm"));
+    }
+
+    /// `cis_tread_snailtank_exp` authors Shake 1, ShakeLength 1,
+    /// ShakeRadius 35; its inner stays the ctor's 0.
+    #[test]
+    fn the_shake_keys_over_the_ctor() {
+        assert_eq!(ExplosionLook::default().shake.length, 0.5);
+        let l = ExplosionLook::replay(
+            [
+                (HASH_SHAKE, "1.0"),
+                (HASH_SHAKE_LENGTH, "1.0"),
+                (HASH_SHAKE_RADIUS, "35.0"),
+            ],
+            true,
+        );
+        assert_eq!(
+            l.shake,
+            Shake {
+                amount: 1.0,
+                inner: 0.0,
+                outer: 35.0,
+                length: 1.0
+            }
+        );
+        let l = ExplosionLook::replay(
+            [
+                (HASH_SHAKE_RADIUS_OUTER, "8"),
+                (HASH_SHAKE_RADIUS_INNER, "2"),
+            ],
+            false,
+        );
+        assert_eq!((l.shake.inner, l.shake.outer), (2.0, 8.0));
     }
 
     #[test]

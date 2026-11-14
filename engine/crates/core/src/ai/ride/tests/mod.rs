@@ -409,6 +409,8 @@ fn arm_gunner_seat(s: &mut Sim) {
                 infinite: true,
                 reserve_clips: 0,
                 fire_points: Vec::new(),
+                fire_limits: Vec::new(),
+                fire_pivots: Vec::new(),
             }],
             fire_point: Vec3::new(0.0, 0.9, 4.2),
             pivot: Vec3::new(0.0, 0.8, 3.3),
@@ -418,6 +420,8 @@ fn arm_gunner_seat(s: &mut Sim) {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
+            weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         }),
     ];

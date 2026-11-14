@@ -54,6 +54,7 @@ const PAD_HOLD_RISE: f32 = 4.0;
 struct WorldContacts<'a> {
     heightfield: Option<&'a Heightfield>,
     collision: &'a CollisionWorld,
+    water: Option<crate::water::Plane<'a>>,
 }
 
 impl WorldContacts<'_> {
@@ -127,6 +128,10 @@ impl ContactSource for WorldContacts<'_> {
             self.buildings(shape, to_world, out);
         }
     }
+
+    fn water_under(&self, at: Vec3) -> Option<f32> {
+        self.water.as_ref().and_then(|w| w.under(at))
+    }
 }
 
 /// The walker's terrain ray step (m): FUN_0055fb38's own march is untraced
@@ -186,6 +191,10 @@ impl WalkerWorld for WorldContacts<'_> {
     fn building_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
         self.buildings(Shape::Sphere { radius: r }, Mat4::from_translation(c), out);
     }
+
+    fn terrain_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
+        self.terrain(c, r, out);
+    }
 }
 
 impl Sim {
@@ -225,7 +234,8 @@ impl Sim {
     /// [`Sim::hull_parts`] at `pos` and the drawn heading (a walker's legs,
     /// `walker::legs_rot`, as `game::viewer::vehicles` draws it; else `rot`),
     /// rigid — PROVISIONAL: a walker's animated prims stay at the bind pose.
-    /// A dead slot, or a class with no parts, has none.
+    /// A dead slot, or a class with no parts, has none; nor has a dying
+    /// walker posed by the tow frames (`Sim::sync_dying_walkers`).
     pub(crate) fn sync_hull(&mut self, i: usize) {
         let Some(v) = self.vehicles.get(i) else {
             return;
@@ -238,7 +248,7 @@ impl Sim {
             .hull_parts
             .get(v.class as usize)
             .and_then(|p| p.clone())
-            .filter(|_| v.alive);
+            .filter(|_| v.alive && self.dying_walker_bodies(v).is_none());
         match parts {
             Some(parts) => {
                 let rot = if v.kind == crate::vehicle::VehicleKind::Walker {
@@ -618,25 +628,25 @@ impl Sim {
     /// (§5); it does not gather the dying vehicle itself, nor
     /// the riders of a dying building turret (the PS2's turret path is not
     /// read; they die in the loop below either way).
+    ///
+    /// A walker does not go at once: it dies in place, plays its death clip
+    /// and only then throws its chunks ([`walker::WalkerDeath`],
+    /// [`Sim::start_walker_death`]).
     pub fn destroy_vehicle(&mut self, h: VehicleHandle, killer: Option<UnitHandle>) {
         let Some(v) = self.vehicle(h) else {
             return;
         };
+        if v.kind == VehicleKind::Walker
+            && self
+                .walker_params
+                .get(v.class as usize)
+                .is_some_and(Option::is_some)
+        {
+            self.start_walker_death(h, killer);
+            return;
+        }
         let (class, pos, vel, team) = (v.class, v.pos, v.vel, v.team);
-        // Each rider with where he sits (`rider_pose`), so he dies there.
-        let seated = |kind: fn(SeatKind) -> bool| -> Vec<(UnitHandle, Vec3)> {
-            v.seats
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| kind(s.kind))
-                .filter_map(|(i, s)| Some((s.occupant?, self.rider_pose(v, i as u8).0)))
-                .collect()
-        };
-        let mut riders = seated(|k| matches!(k, SeatKind::Gunner(_)));
-        riders.extend(seated(|k| matches!(k, SeatKind::Passenger(_))));
-        let pilot_seat = seated(|k| k == SeatKind::Pilot).first().copied();
-        let pilot = pilot_seat.map(|(u, _)| u);
-        riders.extend(pilot_seat);
+        let (riders, pilot) = self.riders_in_death_order(v);
         self.space_flyer_destroyed(h, killer);
         if self.vehicles[h.index as usize].kind == VehicleKind::Flyer {
             self.vehicles[h.index as usize].flyer.phase = FlightPhase::Crashed;
@@ -653,6 +663,12 @@ impl Sim {
             .get(class as usize)
             .and_then(|b| b.as_ref())
             .and_then(|b| b.explosion.clone());
+        self.events.push(Event::VehicleExplosion {
+            vehicle: h,
+            class,
+            pos,
+            last: false,
+        });
         if let Some(e) = exp {
             self.explode_from(
                 &e,
@@ -662,6 +678,34 @@ impl Sim {
                 Some(super::blast::BlastSource::Vehicle(h)),
             );
         }
+        self.kill_riders(riders, killer);
+        self.remove_vehicle(h);
+        // A building turret falls to its wreck or pad (card TBLD).
+        self.fell_building_turret(h);
+    }
+
+    /// Every rider of `v` with where he sits (`rider_pose`), so he dies
+    /// there, in the death function's order: turret seats, passenger seats,
+    /// then the driver's (re-vehicle-death §10); and the driver alone.
+    fn riders_in_death_order(&self, v: &Vehicle) -> (Vec<(UnitHandle, Vec3)>, Option<UnitHandle>) {
+        let seated = |kind: fn(SeatKind) -> bool| -> Vec<(UnitHandle, Vec3)> {
+            v.seats
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| kind(s.kind))
+                .filter_map(|(i, s)| Some((s.occupant?, self.rider_pose(v, i as u8).0)))
+                .collect()
+        };
+        let mut riders = seated(|k| matches!(k, SeatKind::Gunner(_)));
+        riders.extend(seated(|k| matches!(k, SeatKind::Passenger(_))));
+        let pilot_seat = seated(|k| k == SeatKind::Pilot).first().copied();
+        riders.extend(pilot_seat);
+        (riders, pilot_seat.map(|(u, _)| u))
+    }
+
+    /// Kill each rider where he sits, with the vehicle's last-damage record
+    /// (re-vehicle-death §10): a kill of `killer`, or a death with no killer.
+    fn kill_riders(&mut self, riders: Vec<(UnitHandle, Vec3)>, killer: Option<UnitHandle>) {
         for (u, at) in riders {
             if let Some(r) = self.unit_mut(u) {
                 r.soldier.pos = at;
@@ -677,9 +721,121 @@ impl Sim {
                 None => self.kill_environment(u, DeathCause::VehicleDestroyed),
             }
         }
+    }
+
+    /// A walker's hull pool ran out ([`walker::WalkerDeath`]): its death
+    /// function kills the riders (the health slot +0xc ahead of FUN_0025ce68,
+    /// B2:179015-179018; B1:130333-130336 ahead of FUN_00218ac8), marks the
+    /// walker dead and detonates `ExplosionName` at `ExplosionOffset`. The
+    /// walker stays in the world, empty and solid, finishes the clip in hand
+    /// and plays death01; [`Sim::finish_walker_death`] ends it.
+    fn start_walker_death(&mut self, h: VehicleHandle, killer: Option<UnitHandle>) {
+        let Some(v) = self.vehicle(h) else {
+            return;
+        };
+        if v.walker.dead {
+            return;
+        }
+        let (riders, _) = self.riders_in_death_order(v);
+        if let Some(v) = self.vehicle_mut(h) {
+            v.walker.dead = true;
+            v.walker.killer = killer;
+            v.health.cur = v.health.cur.min(0.0);
+        }
+        self.space_flyer_destroyed(h, killer);
+        self.kill_riders(riders, killer);
+        self.walker_blast(h, false);
+    }
+
+    /// FUN_0025f4a0's dead branch at entry 4 (B2:179231-179307; B1:130521-
+    /// 130588): the vehicle-kill award and the chunks
+    /// ([`Event::VehicleDestroyed`]), the final blast, then the walker is
+    /// gone.
+    pub(super) fn finish_walker_death(&mut self, h: VehicleHandle) {
+        let Some(v) = self.vehicle(h) else {
+            return;
+        };
+        let (class, pos, vel, killer) = (v.class, v.pos, v.vel, v.walker.killer);
+        self.events.push(Event::VehicleDestroyed {
+            vehicle: h,
+            class,
+            pos,
+            vel,
+            killer,
+        });
+        self.walker_blast(h, true);
         self.remove_vehicle(h);
-        // A building turret falls to its wreck or pad (card TBLD).
-        self.fell_building_turret(h);
+    }
+
+    /// The explosion class `class` detonates at its death
+    /// ([`Event::VehicleExplosion`]): `ExplosionName`, or for a walker's
+    /// `last` blast its `FinalExplosion` when it names one
+    /// ([`walker::WalkerDeath`]).
+    pub fn vehicle_explosion(
+        &self,
+        class: u32,
+        last: bool,
+    ) -> Option<&crate::weapon::ExplosionClass> {
+        let name = self
+            .blast_setup
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .and_then(|b| b.explosion.as_ref());
+        let fin = self
+            .walker_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .and_then(|p| p.death.final_explosion.as_ref())
+            .filter(|_| last);
+        fin.or(name)
+    }
+
+    /// One of a dying walker's two blasts ([`walker::WalkerDeath`]): the
+    /// first is `ExplosionName` at `ExplosionOffset`, the `last` one
+    /// `FinalExplosion` (else `ExplosionName`) at `FinalExplosionOffset`,
+    /// each through the walker's frame. Both carry the destroyer as their
+    /// attacker, with his team: their desc is the vehicle's record.
+    fn walker_blast(&mut self, h: VehicleHandle, last: bool) {
+        let Some(v) = self.vehicle(h) else {
+            return;
+        };
+        let (class, killer) = (v.class, v.walker.killer);
+        let Some(death) = self
+            .walker_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .map(|p| &p.death)
+        else {
+            return;
+        };
+        let offset = if last {
+            death.final_offset
+        } else {
+            death.offset
+        };
+        let exp = self.vehicle_explosion(class, last).cloned();
+        let at = v.pos + v.rot * offset;
+        self.events.push(Event::VehicleExplosion {
+            vehicle: h,
+            class,
+            pos: at,
+            last,
+        });
+        let team = killer.and_then(|k| {
+            self.units
+                .get(k.index as usize)
+                .filter(|u| u.gen == k.gen)
+                .map(|u| u.team)
+        });
+        if let Some(e) = exp {
+            self.explode_from(
+                &e,
+                at,
+                killer,
+                team,
+                Some(super::blast::BlastSource::Vehicle(h)),
+            );
+        }
     }
 
     /// Remove a vehicle (the PS2 leaves no wreck, §6), releasing every rider
@@ -756,10 +912,32 @@ impl Sim {
             let world = WorldContacts {
                 heightfield: self.heightfield.as_ref(),
                 collision: &self.collision,
+                water: self.water_level.map(|level| crate::water::Plane {
+                    level: level
+                        + if self.water_oscillates {
+                            crate::water::bob(self.tick as f32 * crate::TICK_DT)
+                        } else {
+                            0.0
+                        },
+                    mask: self.water_mask.as_ref(),
+                }),
             };
             let from = v.pos;
-            let impacts = hover::step(&mut self.vehicles[i], p, &world, dt);
+            let held_up = v.rot * Vec3::Y;
+            hover::drive(&mut self.vehicles[i], p, dt);
+            let mut impacts = hover::contacts(&mut self.vehicles[i], p, &world);
+            super::hover_pairs::contacts(
+                &mut self.vehicles,
+                i,
+                p,
+                &self.hover_params,
+                &self.hull_parts,
+                &self.collision,
+                &mut impacts,
+            );
+            hover::springs(&mut self.vehicles[i], p, |at| world.water_under(at), dt);
             let (threshold, scale) = (p.collision_threshold, p.collision_scale);
+            self.hold_pilot_aim(i, held_up);
             self.vehicle_regen(i, dt);
             self.keep_out(i, from);
             self.ground_traffic(i, from);
@@ -773,6 +951,30 @@ impl Sim {
             for im in impacts {
                 self.impact_vehicle(h, im.normal_speed, im.n_up, im.n_fwd, threshold, scale, 1.0);
             }
+        }
+    }
+
+    /// re-hover §5.1 I10-I11: the drive's own pitch this tick comes off the
+    /// pilot's aim pitch (`aimPitch -= oldUp . E'.fwd`, B2:131896-131935), so
+    /// the aim holds its world direction while the body tips, then the aim is
+    /// clamped to `PitchLimits` again. PS2 RAM (KAS2, the IFT-X parked on a
+    /// slope 11 deg nose up): every hover's aim direction E+0x350 is level.
+    fn hold_pilot_aim(&mut self, i: usize, held_up: Vec3) {
+        let v = &self.vehicles[i];
+        let Some(a) = self
+            .seat_setup
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .and_then(|s| s.guns.first())
+            .and_then(Option::as_ref)
+            .filter(|g| g.pilot && g.turn.is_none())
+            .map(|g| g.aimer)
+        else {
+            return;
+        };
+        let fwd = v.rot * Vec3::Z;
+        if let Some(Some(st)) = self.vehicles[i].guns.first_mut() {
+            st.look.1 = (st.look.1 - held_up.dot(fwd)).clamp(a.pitch[0], a.pitch[1]);
         }
     }
 
@@ -810,7 +1012,24 @@ impl Sim {
             let world = WorldContacts {
                 heightfield: self.heightfield.as_ref(),
                 collision: &self.collision,
+                water: self.water_level.map(|level| crate::water::Plane {
+                    level: level
+                        + if self.water_oscillates {
+                            crate::water::bob(self.tick as f32 * crate::TICK_DT)
+                        } else {
+                            0.0
+                        },
+                    mask: self.water_mask.as_ref(),
+                }),
             };
+            if walker::death_finished(v) {
+                let h = VehicleHandle {
+                    index: i as u32,
+                    gen: v.gen,
+                };
+                self.finish_walker_death(h);
+                continue;
+            }
             let from = v.pos;
             walker::step(&mut self.vehicles[i], p, &world, dt);
             self.vehicle_regen(i, dt);
@@ -900,48 +1119,71 @@ impl Sim {
             }) {
                 continue;
             }
-            let class = pad.def.class_for(pad.team).expect("wants_spawn");
-            let mut spec = class.spec.clone();
-            spec.home_team = pad.team;
-            spec.spawn_pad = Some(pi as u32);
-            spec.yaw = pad.def.yaw;
-            // B1:240463-240510 rays down through the pad from 1 m over it to
-            // 1 m under it and puts the vehicle on the hit, else at the pad's
-            // own point (re-vehicle-rest §1). A flyer's constructor then adds
-            // its class's LandedHeight, and nothing moves it while it is
-            // landed (§2, §3; card VREST). PROVISIONAL: the ray is blind to
-            // the hulls (the PS2's meets a landed flyer's body), and a hover
-            // or walker keeps the soldier's ground probe to any depth — the
-            // PS2 creates it in the air over 14 of 215 pads and it falls to
-            // the same place (§1).
-            let p = pad.def.pos;
-            spec.pos = match class.landed_height {
-                Some(lh) => {
-                    let g = self.floor_point_under_static(p, p.y + PAD_RAY);
-                    let y = if (p.y - PAD_RAY..=p.y + PAD_RAY).contains(&g) {
-                        g
-                    } else {
-                        p.y
-                    };
-                    Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
-                }
-                None => {
-                    let g = self.ground_under_with(p, false, HullFilter::Static);
-                    if g > NO_GROUND {
-                        Vec3::new(p.x, g, p.z)
-                    } else {
-                        p
-                    }
-                }
-            };
-            let h = self.spawn_vehicle(&spec);
-            self.vehicle_pads[pi].spawned(h);
+            let team = self.vehicle_pads[pi].team;
+            self.spawn_from_pad(pi, team);
         }
     }
 
+    /// Spawn a vehicle from pad `pi` for `team` immediately, registering it
+    /// on the pad. Used by `tick_vehicle_pads` and `--vehicle` CLI startup.
+    pub fn spawn_from_pad(&mut self, pi: usize, team: Option<u8>) -> Option<VehicleHandle> {
+        let pad = self.vehicle_pads.get(pi)?;
+        let class = pad.def.class_for(team)?;
+        let live = pad
+            .vehicles
+            .iter()
+            .filter(|v| self.vehicle(v.handle).is_some())
+            .count();
+        if live >= pad.def.spawn_count.max(1) as usize || self.pad_box_taken_for(pi, team) {
+            return None;
+        }
+        let mut spec = class.spec.clone();
+        spec.home_team = team;
+        spec.spawn_pad = Some(pi as u32);
+        spec.yaw = pad.def.yaw;
+        // B1:240463-240510 rays down through the pad from 1 m over it to
+        // 1 m under it and puts the vehicle on the hit, else at the pad's
+        // own point (re-vehicle-rest §1). A flyer's constructor then adds
+        // its class's LandedHeight, and nothing moves it while it is
+        // landed (§2, §3; card VREST). PROVISIONAL: the ray is blind to
+        // the hulls (the PS2's meets a landed flyer's body), and a hover
+        // or walker keeps the soldier's ground probe to any depth — the
+        // PS2 creates it in the air over 14 of 215 pads and it falls to
+        // the same place (§1).
+        let p = pad.def.pos;
+        let landed_height = class.landed_height;
+        spec.pos = match landed_height {
+            Some(lh) => {
+                let g = self.floor_point_under_static(p, p.y + PAD_RAY);
+                let y = if (p.y - PAD_RAY..=p.y + PAD_RAY).contains(&g) {
+                    g
+                } else {
+                    p.y
+                };
+                Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
+            }
+            None => {
+                let g = self.ground_under_with(p, false, HullFilter::Static);
+                if g > NO_GROUND {
+                    Vec3::new(p.x, g, p.z)
+                } else {
+                    p
+                }
+            }
+        };
+        let h = self.spawn_vehicle(&spec);
+        self.vehicle_pads[pi].team = team;
+        self.vehicle_pads[pi].spawned(h);
+        Some(h)
+    }
+
     fn pad_box_taken(&self, pi: usize) -> bool {
+        self.pad_box_taken_for(pi, self.vehicle_pads[pi].team)
+    }
+
+    fn pad_box_taken_for(&self, pi: usize, team: Option<u8>) -> bool {
         let pad = &self.vehicle_pads[pi];
-        let Some((lo, hi)) = pad.def.class_for(pad.team).and_then(|class| class.vis_box) else {
+        let Some((lo, hi)) = pad.def.class_for(team).and_then(|class| class.vis_box) else {
             return false;
         };
         let (centre, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);

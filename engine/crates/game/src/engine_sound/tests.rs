@@ -879,3 +879,86 @@ fn stock_arc170_maneuvers_spend_energy_and_play_one_authored_sound_each() {
         assert!((v.rot * Vec3::Z).z * heading > 0.9, "{kind:?}: {v:?}");
     }
 }
+
+/// Card VSN2 (re-vehicle-sounds §3.3, §3.5, §4): a vehicle class with the
+/// two one-shots and no `EngineSound` record (the kaadu, the tauntaun)
+/// still runs its instance, crying at boarding and at the run-down's end.
+#[test]
+fn a_recordless_walker_cries_at_boarding_and_after_its_run_down() {
+    use core::vehicle::{SeatKind, VehicleSpec};
+    let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+    walk.vehicle_engines = vec![Some(EngineClass {
+        record: String::new(),
+        turn_on: Some("tauntaunstart".into()),
+        turning_off: None,
+        turn_off: Some("tauntaunstop".into()),
+        turn_off_time: 3.0,
+        takeoff: None,
+        land: None,
+        roll: None,
+        reversal: None,
+        boost: Vec::new(),
+    })];
+    let mount = walk.sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Walker,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        max_health: 400.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    let mut mixer = EngineSounds::default();
+    let mut voices = Vec::new();
+    let mut tick = |walk: &WalkSim, mixer: &mut EngineSounds| {
+        mixer.tick(walk, |_, _| None, &mut voices);
+        mixer
+            .take_jet_shots()
+            .into_iter()
+            .map(|s| (s.kind, s.name))
+            .collect::<Vec<_>>()
+    };
+    assert!(tick(&walk, &mut mixer).is_empty(), "empty: off, silent");
+    assert!(walk.sim.seat_unit(walk.player, mount, 0));
+    assert_eq!(
+        tick(&walk, &mut mixer),
+        [(JetShotKind::TurnOn, "tauntaunstart".to_owned())]
+    );
+    assert!(tick(&walk, &mut mixer).is_empty());
+    walk.sim.vehicle_mut(mount).unwrap().seats[0].occupant = None;
+    let mut cries = Vec::new();
+    for t in 0..4 * core::TICK_HZ {
+        for s in tick(&walk, &mut mixer) {
+            cries.push((t, s));
+        }
+    }
+    assert_eq!(cries.len(), 1, "{cries:?}");
+    assert_eq!(cries[0].1, (JetShotKind::TurnOff, "tauntaunstop".to_owned()));
+    let at = cries[0].0 as f32 * core::TICK_DT;
+    assert!((at - 3.0).abs() <= 2.0 * core::TICK_DT, "{at}");
+}
+
+/// The baked tauntaun and kaadu classes name their cries (data-gated).
+#[test]
+fn baked_animal_mounts_name_their_cries() {
+    let classes = crate::assets::baked_root().join("classes");
+    for (game, side, class, on, off) in [
+        ("bf2", "all", "all_walk_tauntaun", "tauntaunstart", "tauntaunstop"),
+        ("bf1", "all", "all_walk_tauntaun", "tauntaunstart", "tauntaunstop"),
+    ] {
+        let Ok(db) = crate::roster::load_classdb(&classes, game, &[side]) else {
+            eprintln!("SKIP: {game} classes not baked");
+            continue;
+        };
+        let e = EngineClass::from_db(&db, class).expect("an instance with no record");
+        assert!(e.record.is_empty(), "{game}");
+        assert_eq!(
+            (e.turn_on.as_deref(), e.turn_off.as_deref()),
+            (Some(on), Some(off)),
+            "{game}"
+        );
+    }
+}

@@ -137,6 +137,24 @@ pub fn droid_icon(db: &ClassDb, remote: &str) -> ClassIcon {
     icon
 }
 
+/// B2 FUN_003a5940:388779-388817 dims an inactive map object halfway
+/// toward RGB 64. A live gun's refire progress supplies its firing pulse
+/// (FUN_003a68d0:389118-389127), rather than a separate blink clock.
+fn turret_color(v: &core::vehicle::Vehicle, team: [u8; 3]) -> [u8; 3] {
+    if !v.seats.iter().any(|s| s.occupant.is_some()) {
+        return team.map(|c| ((u16::from(c) + 64 + 1) / 2) as u8);
+    }
+    let pulse = v
+        .guns
+        .iter()
+        .flatten()
+        .flat_map(|g| &g.weapons)
+        .filter(|w| w.state == core::weapon::FireState::Firing && w.refire_time > 0.0)
+        .map(|w| (1.0 - w.refire_accum / w.refire_time).clamp(0.0, 1.0))
+        .fold(0.0, f32::max);
+    team.map(|c| (f32::from(c) * (1.0 - pulse) + 255.0 * pulse + 0.5) as u8)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MapStatic {
     /// The map's own `textures` directory (the image's sheet).
@@ -157,6 +175,8 @@ pub struct MapStatic {
     pub soldiers: Vec<ClassIcon>,
     /// By `Vehicle::class`.
     pub vehicles: Vec<ClassIcon>,
+    /// Health-bearing placed objects: icon and registered command-post role.
+    pub structures: Vec<(ClassIcon, bool)>,
     /// A remote droid's icon by its `Droid::weapon_class`: the droid
     /// class's own `MapTexture` / `MapScale` (`troop_icon` 1.0 on both discs,
     /// `analysis/re-remote-droid.md` §8).
@@ -316,6 +336,18 @@ impl MapStatic {
         let sheet_dir = scene.dir.join("textures");
         Self {
             droids,
+            structures: walk
+                .sim
+                .station_classes
+                .iter()
+                .map(|c| {
+                    (
+                        ClassIcon::of(&db, &c.name),
+                        db.engine_base(&c.name)
+                            .is_some_and(|b| b.eq_ignore_ascii_case("commandpost")),
+                    )
+                })
+                .collect(),
             image: image_of(&sheet_dir, &m.map),
             sheet_dir,
             bounds: mapbounds(m).map(bounds_of),
@@ -403,7 +435,7 @@ impl MapStatic {
                 || last_shot.is_some_and(|t| sim.tick.saturating_sub(t) <= firing)
         };
         let clock = sim.tick as f32 / core::TICK_HZ as f32;
-        let posts = sim
+        let mut posts: Vec<_> = sim
             .cps
             .iter()
             .map(|cp| {
@@ -427,7 +459,39 @@ impl MapStatic {
                 }
             })
             .collect();
+        // A command walker's registered post replaces its ordinary vehicle
+        // marker (BF2 FUN_003a6a48, re-command-walker-post §5): always
+        // visible, clamped to the rim, including an enemy or our own mount.
+        posts.extend(self.command_posts(walk).into_iter().map(|(_, icon)| icon));
         let mut units = Vec::new();
+        for station in &sim.stations {
+            if station.destroyed || !station.health.alive() {
+                continue;
+            }
+            let Some((class, post)) = self.structures.get(station.class as usize) else {
+                continue;
+            };
+            let Some(texture) = class.texture.clone() else {
+                continue;
+            };
+            if !post && station.team.is_some_and(|t| t != own) && !detected(station.pos, None) {
+                continue;
+            }
+            let f = station.transform.z_axis;
+            let icon = MapIcon {
+                pos: [station.pos.x, station.pos.z],
+                texture,
+                scale: class.scale,
+                color: rel(station.team),
+                heading: Some(heading([f.x, f.z])),
+                number: None,
+            };
+            if *post {
+                posts.push(icon);
+            } else {
+                units.push(icon);
+            }
+        }
         for (i, u) in sim.units.iter().enumerate() {
             // The player's own body shows while his droid flies.
             let own_body = i == walk.player.index as usize && flown.is_none();
@@ -482,7 +546,14 @@ impl MapStatic {
         }
         for (i, v) in sim.vehicles.iter().enumerate() {
             let own_ride = me.mount.is_some_and(|m| m.vehicle.index as usize == i);
-            if !v.alive || own_ride {
+            if !v.alive
+                || own_ride
+                || sim
+                    .walker_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|p| !p.spawn_points.is_empty())
+            {
                 continue;
             }
             let Some((icon, texture)) = self
@@ -492,7 +563,15 @@ impl MapStatic {
             else {
                 continue;
             };
-            if v.team != Some(own) && !detected(v.pos, None) {
+            // Neutral objects bypass the detector (B2 FUN_003a64b8,
+            // 389022-389035); the map disc still clips their icons.
+            let firing = v
+                .guns
+                .iter()
+                .flatten()
+                .flat_map(|g| &g.weapons)
+                .any(|w| w.state == core::weapon::FireState::Firing);
+            if v.team.is_some_and(|t| t != own) && !firing && !detected(v.pos, None) {
                 continue;
             }
             let f = v.rot * Vec3::Z;
@@ -500,7 +579,11 @@ impl MapStatic {
                 pos: [v.pos.x, v.pos.z],
                 texture,
                 scale: icon.scale,
-                color: rel(v.team),
+                color: if v.kind == core::vehicle::VehicleKind::Turret {
+                    turret_color(v, rel(v.team))
+                } else {
+                    rel(v.team)
+                },
                 heading: Some(heading([f.x, f.z])),
                 number: None,
             });
@@ -547,46 +630,44 @@ impl MapStatic {
         }
     }
 
-    /// The spawn map page's minimap (card SSELB, re-hud-map §1-§3): the
-    /// Spawn view of [`MapStatic::model`]'s posts plus the team's live
-    /// command walkers - each a post on the PS2 (Hoth's AT-ATs: `atat_icon`
-    /// 3.5 [M]) - and the ring on the slot's pick (`Sim::spawn_post_selected`).
-    pub fn spawn_model(&self, walk: &WalkSim, slot: usize) -> MapModel {
+    /// Live command walkers are posts on every map view. Keep their IDs
+    /// beside their icons so the spawn ring uses the same ordering.
+    fn command_posts(&self, walk: &WalkSim) -> Vec<(core::unit::SpawnPost, MapIcon)> {
         let sim = &walk.sim;
-        let me = &sim.units[walk.player.index as usize];
-        let mut map = self.model(walk);
-        let pick = sim.spawn_post_selected(slot);
-        let mut select = match pick {
-            Some(core::unit::SpawnPost::Post(i)) => Some(usize::from(i)),
-            _ => None,
-        };
-        for (post, pos) in sim.player_spawn_posts(me.team) {
-            let core::unit::SpawnPost::Walker(h) = post else {
-                continue;
-            };
-            let Some((icon, texture)) = sim
-                .vehicle(h)
-                .and_then(|v| self.vehicles.get(v.class as usize))
-                .and_then(|c| Some((c, c.texture.clone()?)))
-            else {
-                continue;
-            };
-            let heading = sim.vehicle(h).map(|v| {
+        let own = sim.units[walk.player.index as usize].team;
+        sim.command_walkers(0)
+            .chain(sim.command_walkers(1))
+            .filter_map(|(h, v)| {
+                let icon = self.vehicles.get(v.class as usize)?;
                 let f = v.rot * Vec3::Z;
-                heading([f.x, f.z])
-            });
-            if pick == Some(post) {
-                select = Some(map.posts.len());
-            }
-            map.posts.push(MapIcon {
-                pos: [pos.x, pos.z],
-                texture,
-                scale: icon.scale,
-                color: FRIEND,
-                heading,
-                number: None,
-            });
-        }
+                Some((
+                    core::unit::SpawnPost::Walker(h),
+                    MapIcon {
+                        pos: [v.pos.x, v.pos.z],
+                        texture: icon.texture.clone()?,
+                        scale: icon.scale,
+                        color: if v.team == Some(own) { FRIEND } else { ENEMY },
+                        heading: Some(heading([f.x, f.z])),
+                        number: None,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Spawn view of the same registered posts, with a ring on the sim's
+    /// selected friendly post (re-command-walker-post §5).
+    pub fn spawn_model(&self, walk: &WalkSim, slot: usize) -> MapModel {
+        let map = self.model(walk);
+        let select = match walk.sim.spawn_post_selected(slot) {
+            Some(core::unit::SpawnPost::Post(i)) => Some(usize::from(i)),
+            Some(post @ core::unit::SpawnPost::Walker(_)) => self
+                .command_posts(walk)
+                .iter()
+                .position(|(p, _)| *p == post)
+                .map(|i| walk.sim.cps.len() + i),
+            None => None,
+        };
         map.spawn_view(select)
     }
 }
@@ -1201,3 +1282,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "minimap/command_tests.rs"]
+mod command_tests;

@@ -685,21 +685,41 @@ fn db_of(defs: &[ClassDef]) -> ClassDb {
     db
 }
 
-#[test]
-fn ground_rules_throw_no_explosion_debris_for_a_class_without_chunks() {
+fn blast_db() -> ClassDb {
     let named = |name: &str, base: &str, props: &[(&str, &str)]| ClassDef {
         name: name.into(),
         base: base.into(),
         ..class(props)
     };
-    let db = db_of(&[
+    db_of(&[
         named("tur_x", "turret", &[("ExplosionDestruct", "tur_x_exp")]),
         named(
             "tur_x_exp",
             "explosion",
-            &[("ChunkGeometryName", "tur_x_chunk"), ("NumChunks", "9")],
+            &[
+                ("ChunkBounciness", "0.9"),
+                ("ChunkGeometryName", "tur_x_chunk"),
+                ("ChunkTerrainCollisions", "10"),
+                ("ChunkTrailEffect", "trail"),
+                ("NumChunks", "12"),
+                ("ChunkSpeed", "10.0 13.0"),
+                ("PushRadius", "5.0"),
+            ],
         ),
-    ]);
+        named(
+            "tur_y_exp",
+            "tur_x_exp",
+            &[("ChunkSpeed", "-1 -1"), ("ChunkStartDistance", "2.0")],
+        ),
+    ])
+}
+
+/// A vehicle's death throws its own pieces only, on both ground and space
+/// rules; its explosion's debris goes off with the explosion
+/// ([`Chunks::blast`]), `NumChunks` of them, at most 10 (B2:288248).
+#[test]
+fn a_death_throws_its_own_pieces_and_the_explosion_its_debris() {
+    let db = blast_db();
     let mut walk = WalkSim::new(1, Vec3::ZERO, None);
     walk.vehicle_classes = vec!["tur_x".into()];
     walk.sim.events.push(Event::VehicleDestroyed {
@@ -709,11 +729,112 @@ fn ground_rules_throw_no_explosion_debris_for_a_class_without_chunks() {
         vel: Vec3::ZERO,
         killer: None,
     });
-    for (space, pieces) in [(false, 0), (true, 9)] {
+    for space in [false, true] {
         let mut c = Chunks::load_for(&db, &["tur_x".into()], &[], Era::Bf2, space);
         c.tick(&walk, None);
-        assert_eq!(c.len(), pieces, "space {space}");
+        assert_eq!(c.len(), 0, "space {space}");
+        c.blast("TUR_X_EXP", Vec3::Y * 10.0, None);
+        assert_eq!(c.len(), 10, "space {space}");
     }
+}
+
+/// §6.1 with no impact normal: a set `ChunkSpeed` range throws each piece at
+/// U(min, max) along normalize(2(½ − U), U + ½, 2(½ − U)), from the blast's
+/// own point; the template keeps no bounce whatever the class authors
+/// before its `ChunkGeometryName`, and the class's other numbers.
+#[test]
+fn explosion_debris_flies_up_and_out_within_its_speed_range() {
+    let c = Chunks::load_for(&blast_db(), &[], &[], Era::Bf2, false);
+    let b = &c.blasts["tur_x_exp"];
+    assert_eq!(
+        (b.count, b.speed, b.start, b.push_radius),
+        (10, [10.0, 13.0], 0.0, 5.0)
+    );
+    assert_eq!((b.spec.bounce, b.spec.stick, b.spec.budget), (0.0, 0.0, 10));
+    assert_eq!(b.spec.trails, vec![("trail".to_string(), None)]);
+    let mut c = c;
+    let at = Vec3::new(3.0, 10.0, -4.0);
+    c.blast("tur_x_exp", at, None);
+    for p in c.live.iter().flatten() {
+        let speed = p.vel.length();
+        assert!((10.0..=13.0).contains(&speed), "{speed}");
+        let dir = p.vel / speed;
+        assert!(
+            dir.y > 0.0 && dir.y * 2.0 >= dir.x.abs().max(dir.z.abs()) * 0.5,
+            "{dir}"
+        );
+        assert_eq!(p.pos, at);
+        assert!(p.blast);
+    }
+}
+
+/// With no speed range the pieces fly at U(1, 2)·PushRadius along
+/// normalize(2(½ − U), 4(U + 1), 2(½ − U)), starting `ChunkStartDistance`
+/// out along it; the child keeps its parent's template.
+#[test]
+fn explosion_debris_without_a_range_rides_the_push_radius() {
+    let mut c = Chunks::load_for(&blast_db(), &[], &[], Era::Bf2, false);
+    let at = Vec3::new(3.0, 10.0, -4.0);
+    c.blast("tur_y_exp", at, None);
+    assert_eq!(c.len(), 10);
+    for p in c.live.iter().flatten() {
+        let speed = p.vel.length();
+        assert!((5.0..=10.0).contains(&speed), "{speed}");
+        let dir = p.vel / speed;
+        assert!(dir.y >= 4.0 / 4.5_f32.hypot(1.0) * 0.99, "{dir}");
+        assert!((p.pos - (at + dir * 2.0)).length() < 1e-4);
+    }
+}
+
+/// Explosion debris rests 5 s on both rules: settling starts its timer 5 s
+/// short of the piece's life (B2:83830-83835).
+#[test]
+fn explosion_debris_rests_five_seconds() {
+    for space in [false, true] {
+        let mut c = Chunks::load_for(&blast_db(), &[], &[], Era::Bf2, space);
+        let walk = flat();
+        c.blast("tur_x_exp", Vec3::Y * 0.6, None);
+        let mut rest = vec![None; c.len()];
+        for _ in 0..3000 {
+            c.tick(&walk, None);
+            for (r, p) in rest.iter_mut().zip(c.live.iter().flatten()) {
+                if r.is_none() && !p.moving {
+                    *r = Some(p.life() - p.timer);
+                }
+            }
+            if rest.iter().all(Option::is_some) {
+                break;
+            }
+        }
+        assert!(
+            rest.iter()
+                .all(|r| r.is_some_and(|r| (r - BLAST_REST).abs() < 0.05)),
+            "space {space}: {rest:?}"
+        );
+    }
+}
+
+/// The BARC's `rep_hover_speederbike_exp` (BF2 side rep): 8 `com_smallchunk1`
+/// at 10–13 m/s from the blast point, spun 4 4 4 with the
+/// `com_sfx_chunktrail_xs` trail and no bounce.
+#[test]
+#[ignore = "requires the baked BF2 classes and common models"]
+fn real_barc_explosion_throws_eight_small_chunks() {
+    let root = crate::assets::baked_root();
+    let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep"]).unwrap();
+    let c = Chunks::load_for(&db, &[], &[root.join("common_bf2/models")], Era::Bf2, false);
+    let b = &c.blasts["rep_hover_speederbike_exp"];
+    assert_eq!(
+        (b.count, b.speed, b.start, b.push_radius),
+        (8, [10.0, 13.0], 0.0, 5.0)
+    );
+    assert_eq!(b.spec.model, "com_smallchunk1");
+    assert_eq!(b.spec.omega, Vec3::splat(4.0));
+    assert_eq!(
+        b.spec.trails,
+        vec![("com_sfx_chunktrail_xs".to_string(), None)]
+    );
+    assert_eq!(b.spec.bounce, 0.0);
 }
 
 #[test]

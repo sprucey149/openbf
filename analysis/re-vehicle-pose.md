@@ -157,6 +157,26 @@ tank's fin-posed `dummyroot`, is harmless because the clip holds `dummyroot` at 
   within 0.01 on every row, within 1e-3 on 75-100 % per node (lowest the BARC's right gun 3/4, the bike's gun 143/182) -
   BF2 writes aimer nodes at draw time only, so a save state between the think and the draw sees one update of motion.
   Barrels (BF2 A+0x110 + 0x40 i): their parent's rotation on every row. Output `replay_aimer_veh.txt`.
+- [L] A vehicle barrel recoils by re-turret-draw 2.3's law (2026-11-14, BF2 MYG1, the user's slot-8 state with the
+  player in the AAT's turret seat, a converted copy in a private emucap PCSX2). The AAT's table entries `Main_Gun` and
+  `recoil_3` point at the aimer object's A+0xd0 and A+0x110 (A = 0x1ab7220). Its class record's slot 0 holds
+  `recoil_3` with `BarrelRecoil` 0.75 (class+0xc), and the barrel state is A+0x214 (the update's loop at MIPS
+  0x3027f0-0x30282c, minus 4 dt each video frame). At rest the barrel sits at (0, 0.0274, 1.3811) in the aimer's
+  frame. With the state written to 1.0, four frames later the state was 0.8667 and the barrel sat at z 0.7311, a slide
+  of 0.65 = 0.8667 x 0.75. After a real shot the state was 0.0667 and the slide 0.05. The rotation stays the aimer's.
+  BF2's AAT authors `recoil_3` before the turret's `WeaponName`, and the setters write it into the aimer of the
+  current WEAPONSECTION (B2 FUN_00270540 B2:191043, index from B2:190865), so it is the launcher's barrel.
+- [L] The AT-ST's passenger seat (2026-11-14, BF2, the user's slot-8 state with the player in TURRET1, a converted
+  copy in a private emucap PCSX2). The section has no `TurretNodeName`; `MountPos` (0xf2aa4a90, "0 8 0") writes the
+  turret's bind position K+0x7f0 (B2 FUN_00270540 B2:190883-190888, class K = 0x19e0100) and key 0x865061fc ("1")
+  sets K+0x84c. The turret object T = 0x1c2d4a0 (T+0x27c = K) holds its node at T+0x200 = the identity at (0, 8, 0)
+  and its aim frame at T+0x1c0 at the walker's world origin + (0, 8, 0) (walker y 10.587, aim frame y 18.587). The
+  aim frame's z row (0.3385, -0.0412, -0.9401) is the owner's E+0x350, which in model space is yaw 0, pitch -2.3616
+  deg = the walker's aim E+0x50c / +0x510 (-1.3e-6, -0.04122) - B2 FUN_0026cea0 B2:188899-188939 takes the owner's
+  direction when K+0x84c is set. The camera section K+0x790 (B2 FUN_001d0328) holds EyePointOffset 0 0 0 at +0x0,
+  TrackCenter 0 0 0 at +0x10, TrackOffset 0 1 5 at +0x20 and TiltValue 0.157 rad at +0x5c: `EyePointOffset` writes
+  the TrackCenter too (B2:78787-78794, B1 FUN_001b6168 B1:59571-59578) and the section authors no TrackCenter. On
+  screen the view sits over the AT-ST's head, looking ahead.
 - [L] The card's acceptance number: the BF2 Mygeeto fighter tank's turret (`ref/states/bf2_myg1_cp2_cp1_con_post1_
   spawn.p2s`, yaw -0.0584, PitchTurnFactor 0) turns `turret_y` (bind (0, 1.7932, -2.8576) under bone_root) by 3.35
   deg; `hp_active` (bind (0, 0.658, -3.010)) through it lands at (+0.0089, 0.6581, -3.0098) - the gunner's RAM place
@@ -301,7 +321,22 @@ riders hung at `L x bind(parent) x O` (`soldier_vis::rider_now`).
    fighter tank's turret_y), the same tick.
 4. **Fix** `HoverNine::START` to p = y = 0 (section 0.6); the nine-pose numbers stay "never driven" until the first
    piloted step.
-5. Not in this card: walkers' and flyers' posed nodes (card VPOSW: the AT-ST's head and guns, the AT-AT's head, the
+5. **Map-local hovers** (2026-11-14): BF1 TAT1's skiff (`tat_hover_skiff`, model `all_hover_skiff`) is in the map
+   LVL, not a side LVL. `scripts/rebake.sh` bakes `TAT/TAT1.LVL` as the side `side_bf1/vehicles/tat1`, and
+   `VehicleSides::load` reads its seats from the map's own `classes.ron` when there is no `classes/bf1_tat1.ron`.
+   Its model is not bone_space: each segment is stored in the frame of the bone its BNAM names (`bind_pose.rs`).
+   The skin then binds each vertex to its segment's BNAM bone, or to the root when a segment names none
+   (`bake/src/vehicle.rs` `bnam_joints`). The same rule skins six other BF1 side models, not yet checked by eye:
+   all_fly_kwing, imp_fly_trooptrans, all_hover_hovernaut, cis_hover_mtt, cis_hover_stap, cis_tread_hailfire.
+   Checked by eye (`pose_render` `POSE_RIDE` + `POSE_RIDE_SEAT`): the rudders and levers swing with the turn
+   input, and gun and gunl turn and pitch with their seat's look, with the gunner riding them.
+   The side guns' nodes are bound at +-90 degrees of yaw, and the seat's muzzle turned the model-frame fire point
+   by the look on top of that, so a `gunl` shot left from (1.40, 0.91, -0.94), 1.3 m from the drawn barrel tip
+   (2.33, 0.91, 0.01). `vehicle_pads::rest_on_turret_node` now carries a hover's fire points back by the turret node's
+   bind rotation (section 2.3: the node is rebuilt along the look at its bind origin). All three guns then fire
+   from their bind tips at rest (`seat_stills` shot rows). The flyers' backward-bound nodes (`towcablegun`,
+   `turret_rearcannon`, `aimer_tailgun_y`) are left as they were until card VPOSF poses them.
+6. Not in this card: walkers' and flyers' posed nodes (card VPOSW: the AT-ST's head and guns, the AT-AT's head, the
    one-man AT-ST, the AT-TE, the spider; card VPOSF: the gunships' turrets, the snowspeeder's flaps and tow gun), the
    hailfire's suspension.
 

@@ -57,8 +57,80 @@ impl ClassProps for BakedClass {
 pub fn bake_classes(lvl_path: &str, out_ron: &str) -> Result<Vec<BakedClass>> {
     let buf = crate::gameplay::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let classes = read_classes(&buf, &CLASS_TAGS, MalformedClass::Strict)?;
-    crate::write_ron(std::path::Path::new(out_ron), &classes)?;
+    let out = std::path::Path::new(out_ron);
+    crate::write_ron(out, &classes)?;
+    if let (Some(dir), Some(file)) = (out.parent(), out.file_name()) {
+        let order = damage_load_order(&buf)?;
+        crate::write_ron(&dir.join(DAMAGE_ORDER_DIR).join(file), &order)?;
+    }
     Ok(classes)
+}
+
+pub use manifest::DAMAGE_ORDER_DIR;
+
+/// The property keys BF2's damageable setter `FUN_0026a340` writes through
+/// its damage-slot pointer `DAT_005fd2c0` (B2:186058-186096, 186129-186167,
+/// 186306-186313, 186362-186400): `DamageStartPercent`, `DamageStopPercent`,
+/// `DamageEffect`, `DamageEffectScale`, `DamageInheritVelocity`,
+/// `DamageAttachPoint`, and two keys known only by hash (slot +0x10 and +0x28).
+pub const DAMAGE_SLOT_KEYS: [u32; 8] = [
+    0x0618_2385,
+    0x37fe_5ca9,
+    0xae2b_fdd1,
+    0x57ce_6c85,
+    0xd06d_0b7c,
+    0xca69_8181,
+    0xdd5c_94da,
+    0x27cd_02e8,
+];
+
+/// Every class definition in `buf` that sets a damage-slot key, in file
+/// order with repeats, each with the sub-level that holds it (`None` at the
+/// top level, loaded with the file) and its damage-slot rows in order. The PS2 creates a file's classes in this
+/// order when a mission reads it, so the setter's slot pointer, a global it
+/// never resets between classes, can carry from one class into the next
+/// (re-hover §13.12).
+pub fn damage_load_order(buf: &[u8]) -> Result<Vec<manifest::DamageLoad>> {
+    let inner = mungefs::open(buf).map_err(|e| anyhow!("{e}"))?;
+    let mut out = Vec::new();
+    let mut take = |c: &mungefs::Chunk, sub: Option<u32>| -> Result<()> {
+        if !CLASS_TAGS.contains(&&c.tag) {
+            return Ok(());
+        }
+        let e = mungefs::entity::EntityClass::parse(c).map_err(|e| anyhow!("{e}"))?;
+        let rows: Vec<(u32, String)> = e
+            .props
+            .into_iter()
+            .filter(|p| DAMAGE_SLOT_KEYS.contains(&p.key_hash))
+            .map(|p| (p.key_hash, p.value))
+            .collect();
+        if !rows.is_empty() {
+            out.push(manifest::DamageLoad {
+                sub,
+                class: e.name,
+                rows,
+            });
+        }
+        Ok(())
+    };
+    for c in mungefs::chunks(inner) {
+        let c = c.map_err(|e| anyhow!("{e}"))?;
+        if &c.tag != b"lvl_" {
+            take(&c, None)?;
+            continue;
+        }
+        for sub in c.children() {
+            let sub = sub.map_err(|e| anyhow!("{e}"))?;
+            if mungefs::CONTENT_TAGS.contains(&&sub.tag) {
+                take(&sub, None)?;
+                continue;
+            }
+            for inner in sub.children() {
+                take(&inner.map_err(|e| anyhow!("{e}"))?, Some(sub.tag_u32()))?;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Only selected class parse errors differ; container errors always propagate.

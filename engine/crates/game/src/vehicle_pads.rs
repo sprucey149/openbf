@@ -200,6 +200,12 @@ pub struct PadBuild {
     pub seats: Vec<Vec<vehicle_class::SeatSpec>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub flyer_exhaust: Vec<Vec<FlyerExhaust>>,
+    /// Each hover class's `WaterEffect` (BF2 K+0xca4, BF1 K+0x26b4), the
+    /// wake it keeps on the water under it; parallel to `classes`.
+    pub hover_water: Vec<Option<String>>,
+    /// Each hover class's tread scroll (BF2 K+0xf9c, [`vehicle_class::tread`]);
+    /// parallel to `classes`, empty for a class with none.
+    pub hover_treads: Vec<Vec<vehicle_class::tread::Tread>>,
     pub weapon_hud: Vec<Vec<Vec<crate::walk::WeaponHud>>>,
     /// Each class's `EngineSound` and `TurnOffTime` (card VSND), parallel
     /// to `classes`; filled by [`install`].
@@ -584,9 +590,25 @@ pub fn install_with_objective(
     factions: &[String; 2],
     space: Option<(&crate::mission::SpaceAssaultDef, u32)>,
 ) -> anyhow::Result<PadBuild> {
+    install_for_mission(sim, m, map_dir, classes_dir, factions, space, &[])
+}
+
+/// [`install_with_objective`] for a mission that names its class loads
+/// (`MissionDef::class_load_order`): its damage slots then take the rows
+/// later classes write into them on the PS2 ([`ClassDb::replay_damage_loads`]).
+pub fn install_for_mission(
+    sim: &mut core::sim::Sim,
+    m: &Manifest,
+    map_dir: &std::path::Path,
+    classes_dir: &std::path::Path,
+    factions: &[String; 2],
+    space: Option<(&crate::mission::SpaceAssaultDef, u32)>,
+    loads: &[crate::mission::SideClassLoad],
+) -> anyhow::Result<PadBuild> {
     let mut db = ClassDb::default();
     db.load_map(map_dir)?;
     let game = m.source_game.to_ascii_lowercase();
+    db.replay_damage_loads(classes_dir, &game, loads);
     let f: Vec<&str> = factions.iter().map(String::as_str).collect();
     let map = map_dir
         .file_name()
@@ -671,6 +693,14 @@ pub fn install_with_objective(
         .iter()
         .map(|c| {
             vehicle_class::HoverClass::from_db(&db, c).map(|h| core::vehicle::hover::HoverParams {
+                // PROVISIONAL only when absent: retain constructor mass 1.
+                // measure: carry canonical vis-boxes for map-local/older bakes.
+                mass: vis_boxes
+                    .get(&c.to_ascii_lowercase())
+                    .map_or(1.0, |(min, max)| {
+                        let size = Vec3::from(*max) - Vec3::from(*min);
+                        size.x * size.y * size.z + 0.0001
+                    }),
                 bf1_ai: game == "bf1",
                 hull: hover_hull_from(m, map_dir, &sides, c, &h),
                 ..h.params()
@@ -690,6 +720,13 @@ pub fn install_with_objective(
                 let mut params = w.params(walkers.get(&name));
                 params.spawn_sphere_centre =
                     spheres.get(&name).map(|&[x, y, z, _]| Vec3::new(x, y, z));
+                // A name the db lacks leaves class+0xd90 at 0: the death
+                // falls back to ExplosionName (B2:179248-179252).
+                params.death.final_explosion = w
+                    .final_explosion
+                    .as_deref()
+                    .filter(|e| !db.chain(e).is_empty())
+                    .map(|e| explosion_class(&db, e));
                 params
             })
         })
@@ -722,6 +759,12 @@ pub fn install_with_objective(
         .iter()
         .map(|c| vehicle_class::VehicleSoundClass::from_db(&db, c))
         .collect();
+    for (class, sound) in b.classes.iter().zip(&mut b.sounds) {
+        if let Some((_, _, geometry)) = class_collision(m, map_dir, &sides, class) {
+            sound.walker_steps =
+                crate::engine_sound::walker::Class::from_db(&db, class, &geometry.prims);
+        }
+    }
     b.labels = b
         .classes
         .iter()
@@ -729,6 +772,70 @@ pub fn install_with_objective(
             db.prop(c, "Label")
                 .map(|l| l.trim().to_owned())
                 .filter(|l| !l.is_empty())
+        })
+        .collect();
+    sim.hover_chase = sim
+        .hover_params
+        .iter()
+        .zip(&b.seats)
+        .map(|(h, ring)| {
+            h.as_ref()?;
+            let seat = ring.first();
+            let s = crate::walk::FlyerSection::hover(seat, sim.ground_rules);
+            Some(core::vehicle::hover::ChaseSection {
+                center: s.center,
+                offset: s.offset,
+                tilt: s.tilt,
+                mount: None,
+            })
+        })
+        .collect();
+    sim.walker_chase = sim
+        .walker_params
+        .iter()
+        .zip(&b.seats)
+        .map(|(w, ring)| {
+            w.as_ref()?;
+            let s = ring.first()?;
+            let c = crate::walk::walker_section(s);
+            Some(core::vehicle::hover::ChaseSection {
+                center: c.0,
+                offset: c.1,
+                tilt: c.2.to_radians(),
+                mount: None,
+            })
+        })
+        .collect();
+    sim.seat_chase = b
+        .classes
+        .iter()
+        .zip(&b.seats)
+        .map(|(class, ring)| {
+            let flying = matches!(
+                db.engine_base(class).and_then(vehicle_kind),
+                Some(VehicleKind::Flyer | VehicleKind::Hover)
+            );
+            ring.iter()
+                .map(|s| {
+                    Some(if flying {
+                        let f = crate::walk::FlyerSection::gunner(Some(s));
+                        core::vehicle::hover::ChaseSection {
+                            center: f.center,
+                            offset: f.offset,
+                            tilt: f.tilt,
+                            mount: None,
+                        }
+                    } else {
+                        let c = crate::walk::walker_section(s);
+                        core::vehicle::hover::ChaseSection {
+                            center: c.0,
+                            offset: c.1,
+                            tilt: c.2.to_radians(),
+                            mount: s.mount_pos.map(Vec3::from),
+                        }
+                    })
+                })
+                .collect()
         })
         .collect();
     // Each class's death explosion and blast sphere (card VDTH).
@@ -762,6 +869,27 @@ pub fn install_with_objective(
                     .get(&c.to_ascii_lowercase())
                     .map_or(&[], Vec::as_slice),
             )
+        })
+        .collect();
+    b.hover_treads = b
+        .classes
+        .iter()
+        .map(|c| {
+            vehicle_class::HoverClass::from_db(&db, c)
+                .map(|h| h.treads.list().to_vec())
+                .unwrap_or_default()
+        })
+        .collect();
+    b.hover_water = b
+        .classes
+        .iter()
+        .map(|c| {
+            db.engine_base(c)
+                .filter(|base| vehicle_class::HOVER_BASES.contains(base))
+                .and_then(|_| db.prop(c, "WaterEffect"))
+                .map(str::trim)
+                .filter(|e| !e.is_empty())
+                .map(str::to_owned)
         })
         .collect();
     sim.vehicle_damage_effects =
@@ -822,6 +950,7 @@ pub fn install_with_objective(
         |c| vehicle_class::is_turret(&db, c),
         |c| crate::assets::hit_locations(&db, c),
         |c| crate::assets::added_weak_parts(&db, c),
+        |c, cg, collision| crate::assets::spring_hull_parts(&db, c, cg, collision),
     );
     sim.sync_hulls();
     sim.missile_target_points = b
@@ -878,14 +1007,30 @@ pub fn install_with_objective(
             let hp = nodes.get(&c.to_ascii_lowercase()).unwrap_or(&empty);
             let building = vehicle_class::is_turret(&db, c);
             let walker = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Walker);
+            let hover = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Hover);
             setup.guns = ring
                 .iter()
                 .map(|s| {
                     let mut g = seat_gun(sim, &db, s, hp)?;
-                    if (building || walker) && !g.pilot {
+                    if !g.pilot {
                         turret_law(&mut g, s, game == "bf2");
+                        if hover {
+                            rest_on_turret_node(&mut g, s, hp);
+                        }
                         if building {
                             g.gunner = gunner_seat(m, c, s, game == "bf2");
+                        }
+                        if walker {
+                            // The aim frame stands on the turret's bind
+                            // position, which `MountPos` writes when no
+                            // later `TurretNodeName` does (B2:188710): the
+                            // AT-ST passenger's eye, ray and camera hang 8 m
+                            // up, not at the feet. PS2 RAM (BF2 AT-ST): the
+                            // aim frame is the walker's origin + (0, 8, 0).
+                            if let Some(p) = s.mount_pos {
+                                g.pivot = Vec3::from(p);
+                            }
+                            g.follows_owner = game == "bf2" && s.follows_owner;
                         }
                         if walker && !g.framed {
                             if let Some(axes) = s
@@ -899,7 +1044,15 @@ pub fn install_with_objective(
                                         .normalize();
                             }
                         }
+                    } else if hover {
+                        // The hover's eye E+0x340 is its matrix on the BODY
+                        // section's `EyePointOffset` from the model's origin
+                        // (B2:132251 `FUN_001ce880`), not from the gun: the
+                        // IFT-X's pivot is its right cannon, and its crosshair
+                        // ray ran out of that gun.
+                        g.eye = s.eye_point_offset.map_or(Vec3::ZERO, Vec3::from) - g.pivot;
                     } else if walker {
+                        g.eye = s.eye_point_offset.map_or(Vec3::ZERO, Vec3::from) - g.pivot;
                         g.aimer = aimer(
                             s.aimer_yaw_limits.or(s.yaw_limits),
                             s.aimer_pitch_limits.or(s.pitch_limits),
@@ -945,33 +1098,29 @@ pub fn install_with_objective(
     {
         if !matches!(
             db.engine_base(&b.classes[class]).and_then(vehicle_kind),
-            Some(VehicleKind::Walker | VehicleKind::Flyer)
+            Some(VehicleKind::Walker | VehicleKind::Flyer | VehicleKind::Hover)
         ) {
             continue;
         }
         for w in setup.guns.iter().flatten().flat_map(|g| &g.weapons) {
-            let name = &sim.weapon_classes[w.class].name;
-            let tracer = db.prop(name, "SecondaryOrdnanceName").map(|c| {
-                let mut look = core::laser::LaserLook::replay(crate::roster::chain_props(&db, c));
-                let range = db.prop_f32(c, "Range").unwrap_or(40.0);
-                look.length = range;
-                look.glow_length = range;
-                look.blur_length = range;
-                look
-            });
-            let frequency = db
-                .prop_f32(name, "SecondaryOrdnancePeriod")
-                .unwrap_or(1.0)
-                .fmax(1.0) as u64;
-            let fire_sound = db.prop_hash(name, 0x2298cae8).map(str::to_owned);
-            b.walker_shot_styles.insert(
-                w.class,
-                crate::walker_shots::Style {
-                    tracer,
-                    frequency,
-                    fire_sound,
-                },
-            );
+            let wc = &sim.weapon_classes[w.class];
+            if wc.wind_up <= 0.0 {
+                continue;
+            }
+            let name = &wc.name;
+            let f = |h: u32, or: f32| db.prop_hash_f32(name, h).unwrap_or(or);
+            let style = crate::walker_shots::Style {
+                fire_sound: db.prop_hash(name, 0x2298cae8).map(str::to_owned),
+                fire_fade: [f(0x674fc158, 0.0), f(0x0f1ca143, 0.0)],
+                spin: db
+                    .prop_hash(name, 0xca333e94)
+                    .map(|n| crate::walker_shots::SpinSound {
+                        name: n.to_owned(),
+                        pitch: f(0x1a2034be, 1.0),
+                        fade: [f(0x22e5153c, 0.0), f(0x25820dbf, 0.0)],
+                    }),
+            };
+            b.walker_shot_styles.insert(w.class, style);
         }
     }
     Ok(b)
@@ -1189,6 +1338,7 @@ pub fn hull_parts(
         turret,
         |_| Vec::new(),
         |_| Vec::new(),
+        |_, _, _| Vec::new(),
     )
 }
 
@@ -1200,6 +1350,11 @@ fn hull_parts_from(
     turret: impl Fn(&str) -> bool,
     hit_locations: impl Fn(&str) -> Vec<(String, f32)>,
     added: impl Fn(&str) -> Vec<core::collision::HullPart>,
+    springs: impl Fn(
+        &str,
+        &crate::assets::CollisionGeom,
+        &[(String, String)],
+    ) -> Vec<core::collision::HullPart>,
 ) -> Vec<Option<std::sync::Arc<[core::collision::HullPart]>>> {
     classes
         .iter()
@@ -1220,6 +1375,7 @@ fn hull_parts_from(
             if !parts.is_empty() {
                 parts.extend(added(c));
             }
+            parts.extend(springs(c, &cg, &k.collision));
             (!parts.is_empty()).then(|| parts.into())
         })
         .collect()
@@ -1280,7 +1436,7 @@ pub fn seat_gun(
             .find(|h| h.name.eq_ignore_ascii_case(n.trim()))
             .map(|h| Vec3::from(h.pos))
     };
-    let weapons: Vec<GunWeapon> = s
+    let mut weapons: Vec<GunWeapon> = s
         .weapons
         .iter()
         .take(MAX_SEAT_WEAPONS)
@@ -1305,22 +1461,14 @@ pub fn seat_gun(
                     }
                 },
             };
+            let (fire_points, fire_limits, fire_pivots) = fire_ring(s, weapon, node);
             Some(GunWeapon {
                 class,
                 infinite: w.ammo < 1,
                 reserve_clips: (w.ammo - 1).max(0) as u32,
-                fire_points: s
-                    .aimers
-                    .iter()
-                    .filter(|a| a.weapon == weapon)
-                    .flat_map(|a| {
-                        if a.fire_points.is_empty() {
-                            node(&a.node).into_iter().collect::<Vec<_>>()
-                        } else {
-                            a.fire_points.iter().filter_map(|n| node(n)).collect()
-                        }
-                    })
-                    .collect(),
+                fire_points,
+                fire_limits,
+                fire_pivots,
             })
         })
         .collect();
@@ -1328,6 +1476,11 @@ pub fn seat_gun(
         return None;
     }
     let turret = s.turret_node.as_deref().and_then(node);
+    if turret.is_some() {
+        for w in &mut weapons {
+            w.fire_pivots.clear();
+        }
+    }
     let fire_point = s
         .fire_point
         .as_deref()
@@ -1351,12 +1504,88 @@ pub fn seat_gun(
         turn: None,
         framed: false,
         aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: (pilot && (s.aimer_pitch_limits.is_some() || s.aimer_yaw_limits.is_some()))
+            .then(|| {
+                self::aimer(
+                    s.aimer_yaw_limits,
+                    s.aimer_pitch_limits,
+                    s.aimer_yaw_rate,
+                    s.aimer_pitch_rate,
+                )
+            }),
+        follows_owner: false,
         gunner: None,
     })
 }
 
-/// A building turret's gun under the PS2's MountedTurret law (card VTURL,
-/// `analysis/re-turret-draw.md` 2.2, 2.3 [O]; `core::vehicle::gun::Turn`):
+/// A seat weapon's fire ring (`analysis/re-blaster-damage.md` 3.1): every
+/// barrel of its firing aimers, in order, and the aim limits each barrel
+/// turns within (model frame, radians). A turn-only aimer (`lgun_x` before
+/// the IFT-X's `lgun_y`) carries the firing aimer after it, so the two
+/// aimers' ranges add: `lgun_x`'s pitch -30..90 with `lgun_y`'s yaw -30..15.
+/// Each barrel's pivot is its firing aimer's node when no aimer carries
+/// another; otherwise none, and the seat's pivot turns them.
+fn fire_ring(
+    s: &vehicle_class::SeatSpec,
+    weapon: usize,
+    node: impl Fn(&str) -> Option<Vec3>,
+) -> (Vec<Vec3>, Vec<[[f32; 2]; 2]>, Vec<Vec3>) {
+    let d = std::f32::consts::PI / 180.0;
+    let lim = |l: [f32; 2]| [l[0].min(l[1]) * d, l[0].max(l[1]) * d];
+    let add = |a: [[f32; 2]; 2], b: [[f32; 2]; 2]| {
+        [
+            [a[0][0] + b[0][0], a[0][1] + b[0][1]],
+            [a[1][0] + b[1][0], a[1][1] + b[1][1]],
+        ]
+    };
+    let (mut points, mut limits, mut pivots) = (Vec::new(), Vec::new(), Vec::new());
+    let mut carried = [[0.0; 2]; 2];
+    let mut lone = true;
+    // The aimers named before the section's WeaponName are the first
+    // weapon's on the PS2: WeaponName starts no aimer (B2 FUN_00270540
+    // B2:190899 -> LAB_00270bb4 stores only the class). OURS: they join the
+    // ring only where the weapon has no ring and the seat no
+    // `FirePointName` (BF2's AT-ST passenger, whose rocket otherwise left
+    // from the model's origin under the ground); trace: the AT-AT's
+    // aimer_head and the seats whose ring is their fire point.
+    let stranded = weapon == 0
+        && s.fire_point.is_none()
+        && !s
+            .aimers
+            .iter()
+            .any(|a| a.weapon == weapon && !a.muzzles().is_empty());
+    for a in s
+        .aimers
+        .iter()
+        .filter(|a| a.weapon == weapon || (stranded && a.weapon == usize::MAX))
+    {
+        let own = [lim(a.yaw), lim(a.pitch)];
+        if a.no_fire {
+            carried = add(carried, own);
+            lone = false;
+            continue;
+        }
+        let pivot = node(&a.node).filter(|_| carried == [[0.0; 2]; 2]);
+        for p in a.muzzles().into_iter().filter_map(&node) {
+            points.push(p);
+            limits.push(add(carried, own));
+            pivots.push(pivot);
+        }
+        carried = [[0.0; 2]; 2];
+    }
+    let pivots = if lone && pivots.iter().all(Option::is_some) {
+        pivots.into_iter().flatten().collect()
+    } else {
+        Vec::new()
+    };
+    (points, limits, pivots)
+}
+
+/// A gunner seat's gun under the PS2's MountedTurret law (card VTURL,
+/// `analysis/re-turret-draw.md` 2.2, 2.3 [O]; `core::vehicle::gun::Turn`).
+/// Every TURRET section is one MountedTurret, a building's or a vehicle's
+/// (B2 `FUN_00270540`; the IFT-X gunner's camera hangs on its `turret_y`
+/// node, `analysis/re-hover-camera.md`):
 /// the look by `YawLimits` / `PitchLimits` (turret pitch + = nose down),
 /// the full-stick speeds and filters (class defaults 2.0 / 0.5 / 10, BF1
 /// exponential, BF2 linear), and the aimer from the `Aimer*` keys (defaults
@@ -1386,16 +1615,61 @@ pub fn turret_law(g: &mut GunSetup, s: &vehicle_class::SeatSpec, bf2: bool) {
     g.framed = s.turret_node.is_some();
 }
 
+/// A framed seat's fire points as they sit with the look at (0, 0) (card
+/// VPOSE, `analysis/re-turret-draw.md` 2.2, `re-vehicle-pose.md` 2.3): the
+/// PS2 rebuilds the `TurretNodeName` node each update with +Z along the look,
+/// at its bind origin (`core::vehicle::gun::turret_node`), so a fire point
+/// under it keeps its offset in the node's own frame. [`GunSetup::muzzle`]
+/// turns a framed seat's points from rest by the aim, so a node bound turned
+/// has its points carried back here by its bind rotation. Of every baked
+/// turret node, only BF1's skiff `gunl` / `gunr` (bound at +-90 degrees of
+/// yaw) on a hover are bound turned; before this a side gun's shot left
+/// 1.3 m behind its drawn barrel. Hovers only: the backward-bound
+/// `towcablegun`, `turret_rearcannon`, `turret_rear_aimer_y` and
+/// `aimer_tailgun_y` are flyers' and walkers' nodes that the port does not
+/// pose by this law yet (`re-vehicle-pose.md` 8, cards VPOSW / VPOSF).
+fn rest_on_turret_node(g: &mut GunSetup, s: &vehicle_class::SeatSpec, hp: &[ManifestHardpoint]) {
+    if !g.framed {
+        return;
+    }
+    let Some(node) = s
+        .turret_node
+        .as_deref()
+        .and_then(|n| hp.iter().find(|h| h.name.eq_ignore_ascii_case(n.trim())))
+    else {
+        return;
+    };
+    let Some(axes) = node.axes else {
+        return;
+    };
+    let unbind = glam::Quat::from_mat3(&glam::Mat3::from_cols_array_2d(&axes))
+        .normalize()
+        .inverse();
+    let pivot = Vec3::from(node.pos);
+    let rest = |p: Vec3| pivot + unbind * (p - pivot);
+    g.fire_point = rest(g.fire_point);
+    for w in &mut g.weapons {
+        for p in &mut w.fire_points {
+            *p = rest(*p);
+        }
+    }
+}
+
+/// Explosion class `e` with its look.
+fn explosion_class(db: &ClassDb, e: &str) -> ExplosionClass {
+    ExplosionClass {
+        look: crate::roster::explosion_look(db, e).unwrap_or_default(),
+        ..ExplosionClass::from_props(&crate::roster::ClassSrc { db, class: e })
+    }
+}
+
 /// A class's [`BlastSetup`] (card VDTH): its `ExplosionName` class read as
 /// an [`ExplosionClass`], and [`vehicle_class::blast_sphere`] over the baked
 /// SPHR `sphr`.
 pub fn blast_setup(db: &ClassDb, class: &str, sphr: Option<[f32; 4]>) -> BlastSetup {
     let explosion = vehicle_class::explosion_name(db, class)
         .filter(|e| !db.chain(e).is_empty())
-        .map(|e| ExplosionClass {
-            look: crate::roster::explosion_look(db, &e).unwrap_or_default(),
-            ..ExplosionClass::from_props(&crate::roster::ClassSrc { db, class: &e })
-        });
+        .map(|e| explosion_class(db, &e));
     let (c, w) = vehicle_class::blast_sphere(db, class, sphr);
     BlastSetup {
         explosion,

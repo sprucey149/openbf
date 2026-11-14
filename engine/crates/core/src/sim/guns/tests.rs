@@ -158,6 +158,8 @@ fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup 
             infinite: true,
             reserve_clips: 0,
             fire_points: Vec::new(),
+            fire_limits: Vec::new(),
+            fire_pivots: Vec::new(),
         }],
         fire_point: Vec3::from(fire),
         pivot: Vec3::from(pivot),
@@ -172,6 +174,8 @@ fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup 
         turn: None,
         framed: false,
         aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: None,
+        follows_owner: false,
         gunner: None,
     }
 }

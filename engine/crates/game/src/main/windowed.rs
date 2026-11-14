@@ -96,6 +96,8 @@ fn play_event_sounds(
     sl.play_repair_loops(audio, &walk.sim, &listener);
     sl.play_shield_loops(audio, &walk.sim, &listener);
     sl.walker_fire_loops(audio, walk, &listener);
+    sl.play_overheat_loops(audio, &walk.sim, &listener);
+    sl.play_turret_sounds(audio, walk, &listener);
     sl.guided_loops(audio, &walk.sim, &listener);
     sl.play_hero_blades(audio, walk, &listener);
     sl.play_hero_samples(
@@ -1368,6 +1370,7 @@ impl App {
             &self.assets_dir,
             &walk.vehicle_geometry,
         );
+        self.vehicle_vis.set_treads(walk.hover_treads.clone());
         let lit_chunks = self.vehicle_vis.load_chunks(
             renderer,
             scene,
@@ -1867,6 +1870,7 @@ fn shell_app(
         teams: None,
         classes_dir: assets_dir.join("classes"),
         mission: None,
+        vehicle: None,
         mission_file: None,
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),

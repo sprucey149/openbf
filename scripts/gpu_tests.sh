@@ -75,8 +75,9 @@ if [ "${1:-}" = "--ui-sharp" ]; then
 fi
 
 if [ "${1:-}" = "--render" ]; then
-    shift
-    exec cargo test -p render "$@" -- --ignored --test-threads=1
+  shift
+  exec cargo test -p render "$@" -- --ignored --test-threads=1
 fi
+
 cargo test -p render -- --ignored --test-threads=1
 exec "$ROOT/scripts/goldens.sh" --check

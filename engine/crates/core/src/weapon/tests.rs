@@ -1122,3 +1122,88 @@ fn an_empty_thrown_weapon_stays_idle_and_clicks() {
     assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
     assert_eq!(w.state, FireState::Idle);
 }
+
+fn spin_class() -> WeaponClass {
+    WeaponClass {
+        shot_delay: [0.05, 0.05],
+        wind_up: 0.35,
+        wind_down: 1.25,
+        ..WeaponClass::default()
+    }
+}
+
+fn spin_ticks(w: &mut WeaponState, c: &WeaponClass, ticks: usize, held: bool) -> Vec<usize> {
+    let mut lcg = GameLcg::new(1);
+    let mut shots = Vec::new();
+    (0..ticks)
+        .filter(|_| {
+            shots.clear();
+            w.update(DT30, c, fi(held, true), &mut lcg, &mut shots);
+            !shots.is_empty()
+        })
+        .collect()
+}
+
+/// B2 `FUN_0032e758` / `FUN_0032e8c0` / `FUN_0032ef58`: a held chaingun
+/// fires nothing for its 0.35 s wind-up, then at its cadence; released it
+/// winds down for 1.25 s, through which a fresh press fires nothing, and
+/// then winds up again. Mutation: `spin` never set at the trigger -> the
+/// first round on the press's tick.
+#[test]
+fn a_chaingun_winds_up_before_its_first_round_and_down_after_its_last() {
+    let c = spin_class();
+    let mut w = WeaponState::new(&c, true, 0);
+    let fired = spin_ticks(&mut w, &c, 30, true);
+    let first = fired[0] as f32 * DT30;
+    assert!((0.35..0.35 + 2.0 * DT30).contains(&first), "{fired:?}");
+    assert!(fired.len() >= 8, "{fired:?}");
+    assert!(spin_ticks(&mut w, &c, 1, false).is_empty());
+    assert!((w.spin - (1.25 - DT30)).abs() < 1e-4 || (w.spin - 1.25).abs() < 1e-4, "{}", w.spin);
+    let again = spin_ticks(&mut w, &c, 90, true);
+    let first = again[0] as f32 * DT30;
+    assert!(first >= 1.25 + 0.35 - 2.0 * DT30, "{again:?}");
+}
+
+/// B2 `FUN_0032ef58`: let go mid wind-up and the gun winds down as far as
+/// it had wound up, `wind_down · (wind_up − left) / wind_up`, `left` after
+/// the release tick's own spin (the update runs before the check).
+#[test]
+fn a_chaingun_released_mid_wind_up_winds_down_as_far_as_it_got() {
+    let c = spin_class();
+    let mut w = WeaponState::new(&c, true, 0);
+    assert!(spin_ticks(&mut w, &c, 5, true).is_empty());
+    let left = w.spin - DT30;
+    spin_ticks(&mut w, &c, 1, false);
+    let want = 1.25 * (0.35 - left) / 0.35;
+    assert!((w.spin - want).abs() < 1e-4, "{} vs {want}", w.spin);
+    assert!(w.spin_down);
+}
+
+/// B2's shot loop (B2:311290-311335): a barrel the [`Ring`] blocks passes
+/// its turn without a round, ammunition or heat, and the next barrel's turn
+/// follows. Mutation: the ring gate dropped -> both barrels fire.
+#[test]
+fn a_blocked_barrel_passes_its_turn_without_firing() {
+    let c = WeaponClass {
+        shot_delay: [0.1, 0.1],
+        heat_per_shot: 0.01,
+        ..WeaponClass::default()
+    };
+    let mut w = WeaponState::new(&c, true, 0);
+    let mut lcg = GameLcg::new(1);
+    let mut shots = Vec::new();
+    let ring = Ring { len: 2, open: 0b10 };
+    let mut fired_on = Vec::new();
+    for _ in 0..60 {
+        shots.clear();
+        let before = w.turns();
+        w.update_ring(DT30, &c, fi(true, true), Some(ring), &mut lcg, &mut shots);
+        if !shots.is_empty() {
+            fired_on.push(before + (w.turns() - before) - 1);
+        }
+    }
+    assert!(w.shots_fired >= 8, "{}", w.shots_fired);
+    assert!(w.passed + 1 >= w.shots_fired && w.passed <= w.shots_fired, "{} {}", w.passed, w.shots_fired);
+    assert!(fired_on.iter().all(|t| t % 2 == 1), "{fired_on:?}");
+    assert_eq!(w.last_turn % 2, 1);
+}

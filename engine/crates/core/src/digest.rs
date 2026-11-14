@@ -96,9 +96,11 @@ impl Fnv64 {
 /// game's presentation does): `effects` and `sound` of
 /// `impact::ExplosionLook`, `texture` of `laser::LaserLook`, `effect` of a
 /// force power and of `autoturret::DamageEffect`, `damage_effects`, the
-/// weapon, ordnance, mine and pickup sound names and the droideka shield's.
-pub const PRESENTATION_FIELDS: [&str; 15] = [
+/// weapon, ordnance, mine and pickup sound names (a weapon's
+/// `overheat_sound` with its pitch) and the droideka shield's.
+pub const PRESENTATION_FIELDS: [&str; 16] = [
     "fire_sound",
+    "overheat_sound",
     "reload_sound",
     "empty_sound",
     "change_sound",

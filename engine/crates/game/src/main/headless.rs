@@ -202,6 +202,14 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
     use core::sim::Event;
     for e in events {
         let line = match e {
+            Event::FallDamage {
+                victim,
+                damage,
+                health_left,
+            } => format!(
+                "{tick},fall_damage,{},,{damage:.3}:{health_left:.3}\n",
+                victim.index
+            ),
             Event::ForceHit {
                 owner,
                 weapon_class,
@@ -434,6 +442,13 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 killer.map_or(String::new(), |s| s.index.to_string()),
                 vehicle.index
             ),
+            // `a` the vehicle, the value 1 for a walker's final blast.
+            Event::VehicleExplosion { vehicle, last, .. } => format!(
+                "{tick},vehicle_explosion,{},,{}
+",
+                vehicle.index,
+                u8::from(*last)
+            ),
             // `a` the droid, `b` its team, the value the chunks' scale.
             Event::DroidBurst {
                 unit, team, scale, ..
@@ -557,6 +572,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
     let mut vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
     let mut vehicle_vis =
         game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
+    vehicle_vis.set_treads(walk.hover_treads.clone());
     let mut deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
     let cube = upload_unit_cube(&mut r)?;
     let mut tick = game::bench::Samples::default();
@@ -757,6 +773,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
         let mut vehicle_vis =
             game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
+        vehicle_vis.set_treads(walk.hover_treads.clone());
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
         let quad = game::viewer::upload_billboard_quad(&mut r)?;
         let sprite = game::viewer::upload_fx_sprite(&mut r).ok();

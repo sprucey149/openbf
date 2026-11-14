@@ -480,6 +480,11 @@ fn a_seated_gunner_is_drawn_at_his_seat() {
                         weapons: Vec::new(),
                         zoom: None,
                     });
+                let secs = ticks.max(1) as f32 * core::TICK_DT;
+                g.rate = (
+                    core::vehicle::gun::wrap(look.0 - g.look.0) / secs,
+                    (look.1 - g.look.1) / secs,
+                );
                 g.look = look;
                 g.aim = look;
             }

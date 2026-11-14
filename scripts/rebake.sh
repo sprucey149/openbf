@@ -491,6 +491,9 @@ if want side; then
   # BF1 SIDE/GUN: Naboo Plains' missions read it (nab1c/nab1i/nab1c_h.luac)
   # and three NAB1 pads key its gun_walk_kaadu for the defenders (card KAAD).
   "$BAKE" vehicle "$(ci "$B1" SIDE/GUN.LVL)" "$OUT/side_bf1/vehicles/gun"
+  # BF1 TAT1's own skiff (tat_hover_skiff): its skin and FinAnimation clip, so the rudders, levers and three guns pose
+  # as the PS2 draws them (analysis/re-vehicle-pose.md 1). Its seats come from the map bake's classes.ron.
+  "$BAKE" vehicle "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/side_bf1/vehicles/tat1"
   "$BAKE" vehicle "$(ci "$B2" SIDE/ALL.LVL)" "$OUT/side_bf2/vehicles/all" ${DS2_ALL:+"$DS2_ALL"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/IMP.LVL)" "$OUT/side_bf2/vehicles/imp" ${DS2_IMP:+"$DS2_IMP"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/REP.LVL)" "$OUT/side_bf2/vehicles/rep" ${DS2_REP:+"$DS2_REP"}

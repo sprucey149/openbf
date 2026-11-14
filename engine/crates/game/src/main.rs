@@ -47,6 +47,7 @@
 //!     --events <file.csv>         with --walk-replay: dump sim events
 //!     --cheat <list>              dev cheats: invincible,ammo,clip,run,all (comma list)
 //!     --spawn x,z                 explicit walk spawn (otherwise mission/post start)
+//!     --vehicle <name>            start walk seated in a matching vehicle class
 //!     --headless                  no window; render offscreen
 //!     --capture-frame <out.png>   headless-render one frame to PNG
 //!     --hud                       headless: paint the HUD onto captures (walk mode)
@@ -233,6 +234,7 @@ struct ViewerArgs {
     teams: Option<[String; 2]>,
     classes: Option<PathBuf>,
     mission: Option<PathBuf>,
+    vehicle: Option<String>,
     walk_replay: Option<PathBuf>,
     capture_series: Option<(u64, PathBuf)>,
     /// `--capture-orbit <frames>,<dir>`: headless, one PNG per frame of a
@@ -387,6 +389,7 @@ fn main() -> Result<()> {
                 teams: None,
                 classes: None,
                 mission: None,
+                vehicle: None,
                 walk_replay: None,
                 capture_series: None,
                 capture_orbit: None,
@@ -441,6 +444,10 @@ fn main() -> Result<()> {
                     }
                     "--mission" => {
                         v.mission = Some(PathBuf::from(it.next().context("--mission <file>")?))
+                    }
+                    "--vehicle" => {
+                        v.vehicle = Some(it.next().context("--vehicle <name>")?.to_string());
+                        v.walk = true;
                     }
                     "--events" => {
                         v.events = Some(PathBuf::from(it.next().context("--events <file>")?))
@@ -603,6 +610,7 @@ struct BattleSetup {
     teams: Option<[String; 2]>,
     classes_dir: PathBuf,
     mission: Option<game::mission::MissionDef>,
+    vehicle: Option<String>,
     /// The mission's file name, for the black box header (card ERAM).
     mission_file: Option<String>,
     /// The sim team the player's army sits on: 1 when the shell picked a
@@ -681,6 +689,7 @@ impl BattleSetup {
                 .filter(|_| !own_seat)
                 .or_else(|| mission.as_ref().map(|m| m.factions())),
             mission,
+            vehicle: v.vehicle.clone(),
             mission_file: mission_file.as_deref().and_then(file_name),
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),

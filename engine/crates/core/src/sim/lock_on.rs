@@ -93,15 +93,19 @@ impl Sim {
                 let st = self
                     .stations
                     .get(usize::from(s))
-                    .filter(|st| !st.destroyed)?;
-                let sa = self.space_assault.as_ref()?;
-                let lockable = sa.lock_on.contains(&s);
-                let known = lockable
-                    || sa.critical.iter().any(|c| c.station == s)
-                    || sa.shields.iter().any(|g| g.objects.contains(&s));
-                if !known {
-                    return None;
-                }
+                    .filter(|st| !st.destroyed && st.health.max > 0.0 && st.health.alive())?;
+                let lockable = if let Some(sa) = &self.space_assault {
+                    let lockable = sa.lock_on.contains(&s);
+                    if !lockable
+                        && !sa.critical.iter().any(|c| c.station == s)
+                        && !sa.shields.iter().any(|g| g.objects.contains(&s))
+                    {
+                        return None;
+                    }
+                    lockable
+                } else {
+                    false
+                };
                 Some(LockProbe {
                     pos: st.sphere_centre,
                     aim: st.sphere_centre,
@@ -312,7 +316,7 @@ impl Sim {
     }
 
     pub(super) fn acquire_flyer_pick(&mut self, slot: usize, ph: UnitHandle) {
-        let Some(own) = self.flyer_of(ph) else {
+        let Some(own) = self.unit(ph).and_then(|u| u.mount).map(|m| m.vehicle) else {
             return;
         };
         let Some(gun) = self.lock_gun(ph) else {

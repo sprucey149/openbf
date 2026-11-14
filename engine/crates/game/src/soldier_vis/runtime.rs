@@ -4,7 +4,7 @@ mod animation;
 
 use super::{
     drawn, fire_point, held_or_primary, model_of, part_groups, part_spec, rider_now, seat_now,
-    with_spec, ClassDraw, DrawPlan, FlashModel, HoverClock, NativeDraw, SeatClock, SoldierAsset,
+    turn_number, with_spec, ClassDraw, DrawPlan, FlashModel, NativeDraw, SeatClock, SoldierAsset,
     SoldierVisuals, UnitVisual, WeaponAsset, CORPSE_SECS,
 };
 use crate::animator::{AnimInput, Animator, ClassAnim, Rig};
@@ -149,6 +149,11 @@ impl SoldierVisuals {
             crate::viewer::walker_rigs(&scene.manifest, assets_dir, &walk.vehicle_geometry)
         } else {
             walk.walker_rigs.clone()
+        });
+        vis.set_hover_rigs(if walk.hover_rigs.is_empty() {
+            crate::viewer::hover_rigs(&scene.manifest, assets_dir, &walk.vehicle_geometry)
+        } else {
+            walk.hover_rigs.clone()
         });
         vis.outlines = std::array::from_fn(|t| {
             (0..walk.sim.classes[t].len())
@@ -324,47 +329,18 @@ impl SoldierVisuals {
         self.walker_rigs = rigs;
     }
 
-    /// Bring every hover's rider numbers to this tick: one drive update of
-    /// the tick's length per tick while it has a pilot, with his input
-    /// (`tp::HoverNine::step`); a fresh vehicle starts at the PS2's -1.
+    /// Each posed hover class's rig (`viewer::hover_rigs`): a rider on a
+    /// turret or fin node rides it as it turns (card VPOSE).
+    pub fn set_hover_rigs(
+        &mut self,
+        rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
+    ) {
+        self.hover_rigs = rigs;
+    }
+
+    /// Bring every hover's rider numbers to this tick ([`tp::HoverClocks`]).
     fn step_hover_nines(&mut self, walk: &WalkSim) {
-        let tick = walk.sim.tick;
-        let vs = &walk.sim.vehicles;
-        self.hover_nine.resize(vs.len(), None);
-        for (slot, v) in vs.iter().enumerate() {
-            if !v.alive || v.kind != core::vehicle::VehicleKind::Hover {
-                self.hover_nine[slot] = None;
-                continue;
-            }
-            let fresh = HoverClock {
-                gen: v.gen,
-                tick,
-                nine: tp::HoverNine::START,
-            };
-            let c = self.hover_nine[slot].get_or_insert(fresh);
-            if c.gen != v.gen {
-                *c = fresh;
-            }
-            let piloted = v.pilot_seat().is_some_and(|s| s.occupant.is_some());
-            if piloted {
-                let no_strafe = walk
-                    .sim
-                    .hover_params
-                    .get(v.class as usize)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|p| p.strafe_speed < 1e-4);
-                let i = v.input;
-                for _ in 0..tick.saturating_sub(c.tick).min(30) {
-                    c.nine = c.nine.step(
-                        [i.throttle, i.strafe, i.turn],
-                        no_strafe,
-                        self.bf2,
-                        core::TICK_DT,
-                    );
-                }
-            }
-            c.tick = tick;
-        }
+        self.hover_nine.step(&walk.sim, self.bf2);
     }
 
     /// The animators without a renderer (a census, a test): every body's
@@ -457,7 +433,8 @@ impl SoldierVisuals {
             turrets: Vec::new(),
             bf2: false,
             walker_rigs: Vec::new(),
-            hover_nine: Vec::new(),
+            hover_rigs: Vec::new(),
+            hover_nine: Default::default(),
             cloth_meshes: HashMap::new(),
             fp: Default::default(),
         }
@@ -805,7 +782,7 @@ impl SoldierVisuals {
                 v.shot_tick = Some(walk.sim.tick);
                 v.shot_class = Some(*weapon_class as usize);
                 v.shot_ordinal =
-                    crate::walker_shots::ordinal(walk, *unit, *weapon_class as usize, event);
+                    crate::walker_shots::turn(walk, *unit, *weapon_class as usize, event);
             }
         }
     }
@@ -873,7 +850,14 @@ impl SoldierVisuals {
                     .vehicle(mount.vehicle)
                     .filter(|v| v.kind == core::vehicle::VehicleKind::Walker)
                     .and_then(|_| {
-                        rider_now(&self.walker_rigs, &self.hover_nine, walk, mount, self.bf2)
+                        rider_now(
+                            &self.walker_rigs,
+                            &self.hover_rigs,
+                            &self.hover_nine,
+                            walk,
+                            mount,
+                            self.bf2,
+                        )
                     })
                     .map_or(m, |r| r.model),
                 (Some(_), None) => continue,
@@ -1218,6 +1202,11 @@ impl SoldierVisuals {
         let now = walk.sim.tick as f64 * f64::from(core::TICK_DT);
         let mut out = Vec::new();
         for (i, u) in walk.sim.units.iter().enumerate() {
+            // Mounted guns never call the weapon render slot on PS2
+            // (re-muzzle-flash §5, B2 FUN_00239bb0:155363-155377).
+            if u.mount.is_some() {
+                continue;
+            }
             let (Some(v), Some(Some(p))) = (self.units.get(i), points.get(i)) else {
                 continue;
             };

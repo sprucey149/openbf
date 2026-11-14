@@ -363,3 +363,147 @@ fn a_new_clip_or_vehicle_never_interpolates_an_unrelated_clock() {
     blend.restore(&mut walk);
     assert_eq!(walk.sim.hash(), hash);
 }
+
+fn aat_turret() -> Vec<SeatSpec> {
+    specs(&[
+        ("FLYERSECTION", "TURRET1"),
+        ("TurretNodeName", "cube5"),
+        ("BarrelNodeName", "barrel"),
+        ("BarrelRecoil", "0.75"),
+        ("FirePointName", "hp_pilot"),
+        ("WeaponName", "test_launcher"),
+        ("AimerNodeName", "mouth"),
+        ("AimerPitchLimits", "-30 90"),
+        ("AimerYawLimits", "0 0"),
+    ])
+}
+
+#[test]
+fn a_barrel_authored_before_its_weapon_is_that_weapons_aimers() {
+    let seats = aat_turret();
+    let gunner = &seats[1];
+    assert_eq!(gunner.aimers.len(), 1);
+    let a = &gunner.aimers[0];
+    assert_eq!((a.node.as_str(), a.weapon), ("mouth", 0));
+    assert_eq!(a.barrels, vec![("barrel".to_string(), 0.75)]);
+    assert_eq!(a.muzzles(), vec!["hp_pilot"]);
+}
+
+#[test]
+fn a_fired_vehicle_barrel_slides_back_by_its_state_times_its_recoil() {
+    let r = rig(aat_turret());
+    let mut v = vehicle();
+    aim(&mut v, 1, 0.4, 0.2);
+    let barrel = r.skeleton.index_of("barrel").unwrap();
+    let mouth = r.skeleton.index_of("mouth").unwrap();
+    let node = |state: f32| {
+        let kick = move |seat: usize, weapon: usize, point: u64, len: u64| {
+            if (seat, weapon, point, len) == (1, 0, 0, 1) {
+                state
+            } else {
+                0.0
+            }
+        };
+        let p = r.aimed_palette_kicked(&v, 1.0, &kick);
+        (
+            p[barrel] * r.skeleton.global_bind[barrel],
+            p[mouth] * r.skeleton.global_bind[mouth],
+        )
+    };
+    let (rest, aimer) = node(0.0);
+    assert_eq!(
+        r.aimed_palette(&v, 1.0)[barrel] * r.skeleton.global_bind[barrel],
+        rest
+    );
+    for (state, slide) in [(1.0, 0.75), (0.5, 0.375), (-3.0, 0.0)] {
+        let (kicked, _) = node(state);
+        let moved = kicked.w_axis.truncate() - rest.w_axis.truncate();
+        let back = -aimer.z_axis.truncate().normalize() * slide;
+        assert!(moved.abs_diff_eq(back, 1e-5), "{state}: {moved} vs {back}");
+        assert!(kicked.z_axis.abs_diff_eq(aimer.z_axis, 1e-6));
+    }
+}
+
+#[test]
+#[ignore = "requires local disc bakes"]
+fn real_aat_turret_and_side_gun_barrels_recoil_when_fired() {
+    let root = game::assets::baked_root();
+    let (scene, _) = game::assets::load_battle_scene(&root.join("bf2_myg1"), "con").unwrap();
+    let mut db = game::classdb::ClassDb::default();
+    db.load(&root.join("classes/bf2_cis.ron")).unwrap();
+    let geometry = db
+        .prop("cis_hover_aat", "GeometryName")
+        .unwrap()
+        .to_string();
+    let rigs = game::viewer::hover_rigs(&scene.manifest, &root, &[Some(geometry)]);
+    let rig = rigs[0].as_ref().expect("cis_hover_aat rig");
+    let mut v = vehicle();
+    aim(&mut v, 0, 0.1, 0.05);
+    aim(&mut v, 1, 0.6, 0.2);
+    let at = |kick: &dyn Fn(usize, usize, u64, u64) -> f32, name: &str| {
+        let n = rig.skeleton.index_of(name).unwrap();
+        (rig.hover_palette_kicked(&v, None, kick)[n] * rig.skeleton.global_bind[n])
+            .w_axis
+            .truncate()
+    };
+    for (seat, point, len, barrel, recoil) in [
+        (1, 0, 1, "recoil_3", 0.75),
+        (0, 0, 2, "recoil_1", 0.25),
+        (0, 1, 2, "recoil_2", 0.25),
+    ] {
+        let rest = at(&|_, _, _, _| 0.0, barrel);
+        let fired = at(
+            &move |s, w, p, l| {
+                if (s, w, p, l) == (seat, 0, point, len) {
+                    1.0
+                } else {
+                    0.0
+                }
+            },
+            barrel,
+        );
+        assert!(
+            (rest.distance(fired) - recoil).abs() < 1e-4,
+            "{barrel}: {}",
+            rest.distance(fired)
+        );
+    }
+}
+
+/// BF2's AT-ST passenger section, as authored: its aimer keys come before
+/// the weapon, `MountPos` places the turret and key 0x865061fc makes it
+/// look along the walker.
+#[test]
+fn the_atst_passenger_seat_reads_its_mount_its_eye_and_its_early_aimer() {
+    let def = |extra: &[(&str, &str)]| {
+        let mut p = vec![
+            ("WALKERSECTION", "TURRET1"),
+            ("TrackCenter", "0.0 9.25 -3.0"),
+            ("EyePointOffset", "0.0 0.0 0.0"),
+            ("TrackOffset", "0.0 1.0 5.0"),
+            ("AimerYawLimits", "0 0"),
+            ("AimerPitchLimits", "0 0"),
+            ("AimerNodeName", "aimer_Reargun"),
+            ("WeaponName", "test_guided_rocket"),
+        ];
+        p.extend_from_slice(extra);
+        specs(&p)
+    };
+    let seats = def(&[]);
+    let s = &seats[1];
+    assert_eq!(s.mount_pos, None);
+    assert!(!s.follows_owner);
+    assert_eq!(s.eye_point_offset, Some([0.0; 3]));
+    assert_eq!(s.track_center, Some([0.0; 3]));
+    assert_eq!(s.aimers.len(), 1);
+    let a = &s.aimers[0];
+    assert_eq!(
+        (a.node.as_str(), a.yaw, a.pitch),
+        ("aimer_Reargun", [0.0; 2], [0.0; 2])
+    );
+    let seats = def(&[("MountPos", "0.0 8.0 0.0")]);
+    assert_eq!(seats[1].mount_pos, Some([0.0, 8.0, 0.0]));
+    let mut props = vec![("WALKERSECTION", "TURRET1"), ("MountPos", "0 8 0")];
+    props.push(("TurretNodeName", "cube5"));
+    assert_eq!(specs(&props)[1].mount_pos, None);
+}

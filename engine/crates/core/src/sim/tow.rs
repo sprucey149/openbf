@@ -8,7 +8,7 @@ use crate::fmath::FloatExt;
 use crate::projectile::Shooter;
 use crate::vehicle::gun;
 use crate::vehicle::tow::{TowClass, TowPrimitive};
-use crate::vehicle::{walker, Mount, Vehicle, VehicleHandle};
+use crate::vehicle::{Mount, Vehicle, VehicleHandle};
 use glam::Vec3;
 
 const CHORDS: usize = 10;
@@ -49,36 +49,6 @@ pub struct TowCable {
     flight: Flight,
     /// Current sampled world-space polyline for rendering.
     pub points: Vec<Vec3>,
-}
-
-/// A fallen walker plays the authored death clip after its hull and crew
-/// leave the live vehicle set. Its posed collision is queried as a building.
-#[derive(Clone)]
-pub struct TowFall {
-    vehicle: Vehicle,
-    started: u64,
-    duration: f32,
-}
-
-impl TowFall {
-    fn age(&self, tick: u64) -> f32 {
-        tick.saturating_sub(self.started) as f32 * crate::TICK_DT
-    }
-
-    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
-        eat(b"TOW_FALL");
-        eat(&self.started.to_le_bytes());
-        eat(&self.duration.hash_bits().to_le_bytes());
-        self.vehicle.hash_into(eat);
-    }
-
-    pub fn pose(&self, tick: u64) -> Vehicle {
-        let mut vehicle = self.vehicle.clone();
-        vehicle.walker.anim = walker::ANIM_DEATH;
-        vehicle.walker.clip_time = self.age(tick).fmin(self.duration);
-        vehicle.walker.layer_blend.fill(0.0);
-        vehicle
-    }
 }
 
 impl TowCable {
@@ -243,19 +213,33 @@ impl Sim {
         ))
     }
 
-    pub(super) fn sync_tow_falls(&mut self) {
-        if self.tow_falls.is_empty() {
+    /// A dying walker's posed collision ([`crate::vehicle::walker::WalkerDeath`]): the death
+    /// function moves its collider to the building list and FUN_00261208
+    /// keeps posing it until entry 4 (`analysis/re-tow-cable.md`). Where the
+    /// tow frames pose a class, those bodies stand in for its rigid hull
+    /// ([`Sim::dying_walker_bodies`]); any other class keeps the hull.
+    pub(super) fn sync_dying_walkers(&mut self) {
+        self.collision.clear_falling_walkers();
+        if self.tow_frames.is_none() {
             return;
         }
-        self.tow_falls
-            .retain(|fall| fall.age(self.tick) < fall.duration);
-        self.collision.clear_falling_walkers();
-        if let Some(frames) = &self.tow_frames {
-            for fall in &self.tow_falls {
-                self.collision
-                    .add_falling_walker(frames.fallen_bodies(&fall.pose(self.tick)));
-            }
+        let bodies: Vec<_> = self
+            .vehicles
+            .iter()
+            .filter_map(|v| self.dying_walker_bodies(v))
+            .collect();
+        for b in bodies {
+            self.collision.add_falling_walker(b);
         }
+    }
+
+    /// The posed bodies of a dead walker, when the tow frames have any.
+    pub(super) fn dying_walker_bodies(&self, v: &Vehicle) -> Option<Vec<crate::collision::Body>> {
+        if !v.alive || v.kind != crate::vehicle::VehicleKind::Walker || !v.walker.dead {
+            return None;
+        }
+        let bodies = self.tow_frames.as_ref()?.fallen_bodies(v);
+        (!bodies.is_empty()).then_some(bodies)
     }
 
     pub(super) fn fly_tow_cables(&mut self, dt: f32) {
@@ -456,39 +440,9 @@ impl Sim {
             let team = (!bf2).then_some(shooter.team);
             self.damage_vehicle_by(target, &desc, 1.0, Some(owner), team, Some(dir));
         }
-        let alive = self.vehicle(target).is_some();
-        if !alive {
-            self.record_tow_fall(target);
-        }
-        alive
-    }
-
-    fn record_tow_fall(&mut self, target: VehicleHandle) {
-        let Some(vehicle) = self.vehicles.get(target.index as usize).filter(|v| {
-            v.gen == target.gen && !v.alive && v.kind == crate::vehicle::VehicleKind::Walker
-        }) else {
-            return;
-        };
-        let Some(clip) = self
-            .walker_params
-            .get(vehicle.class as usize)
-            .and_then(Option::as_ref)
-            .and_then(|p| p.clips.get(usize::from(walker::ANIM_DEATH)))
-            .and_then(Option::as_ref)
-            .filter(|c| c.duration > 0.0)
-        else {
-            return;
-        };
-        let fall = TowFall {
-            vehicle: vehicle.clone(),
-            started: self.tick,
-            duration: clip.duration,
-        };
-        if let Some(frames) = &self.tow_frames {
-            self.collision
-                .add_falling_walker(frames.fallen_bodies(&fall.pose(self.tick)));
-        }
-        self.tow_falls.push(fall);
+        // A walker the wraps killed is dying (`Sim::destroy_vehicle`): the
+        // link ends there.
+        self.vehicle(target).is_some_and(|v| v.health.alive())
     }
 }
 

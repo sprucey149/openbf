@@ -101,6 +101,7 @@ pub(super) fn shell_setup(
         teams: Some(teams.clone()),
         classes_dir: assets_dir.join("classes"),
         mission,
+        vehicle: None,
         mission_file,
         player_team,
         heroes: game::heroes::rules(session),

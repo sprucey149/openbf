@@ -137,6 +137,10 @@ pub struct Settings {
     #[serde(default = "yes")]
     pub auto_quality: bool,
     #[serde(default)]
+    pub terrain_lod: bool,
+    #[serde(default)]
+    pub scene_softness: bool,
+    #[serde(default)]
     pub viewpoint: crate::viewpoint::Viewpoint,
     #[serde(default, deserialize_with = "keyboard_bindings")]
     pub keyboard_bindings: crate::kbm::Bindings,
@@ -197,6 +201,8 @@ impl Default for Settings {
             pad_look_sensitivity: 1.0,
             invert_y: false,
             low_power_resolution: false,
+            terrain_lod: false,
+            scene_softness: false,
             auto_quality: true,
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
@@ -399,6 +405,27 @@ pub fn clamp_pad_look(v: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_options_default_off_and_survive_profile_roundtrips() {
+        let old: Settings = ron::from_str("(assist_intensity: 0.7)").unwrap();
+        assert!(!old.terrain_lod && !old.scene_softness);
+        assert!(!Settings::default().terrain_lod && !Settings::default().scene_softness);
+        for terrain_lod in [false, true] {
+            for scene_softness in [false, true] {
+                let settings = Settings {
+                    terrain_lod,
+                    scene_softness,
+                    ..Default::default()
+                };
+                let back: Settings = ron::from_str(&ron::to_string(&settings).unwrap()).unwrap();
+                assert_eq!(
+                    (back.terrain_lod, back.scene_softness),
+                    (terrain_lod, scene_softness)
+                );
+            }
+        }
+    }
 
     #[test]
     fn loaded_aim_assist_intensity_stays_in_range() {

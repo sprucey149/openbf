@@ -96,6 +96,8 @@ fn mounted_fixture(
                 infinite: true,
                 reserve_clips: 0,
                 fire_points: Vec::new(),
+                fire_limits: Vec::new(),
+                fire_pivots: Vec::new(),
             }],
             fire_point: Vec3::ZERO,
             pivot: Vec3::ZERO,
@@ -108,6 +110,8 @@ fn mounted_fixture(
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
+            weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         })],
     })];
@@ -958,20 +962,14 @@ fn a_bullet_with_a_model_draws_as_its_model() {
 }
 
 #[test]
-fn a_modelled_walker_round_does_not_also_draw_its_tracer() {
+fn a_modelled_walker_round_draws_only_as_its_model() {
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
     let (mut w, mut b) = missile_round(5);
     w.ordnance.geometry = Some("com_weap_inf_grenadethermal_ord".into());
     let class = walk.sim.add_weapon_class(w);
     b.weapon_class = class;
-    walk.walker_shot_styles.insert(
-        class,
-        crate::walker_shots::Style {
-            tracer: Some(core::laser::LaserLook::default()),
-            fire_sound: None,
-            frequency: 1,
-        },
-    );
+    walk.walker_shot_styles
+        .insert(class, crate::walker_shots::Style::default());
     walk.sim.events.push(Event::Shot {
         unit: b.owner,
         weapon_class: class as u32,
@@ -1032,12 +1030,18 @@ fn a_missile_draws_as_its_model_not_as_a_ribbon() {
     assert_eq!(vis.tracked[0].class, class);
 }
 
+/// The PS2's beam draw (B2 `FUN_00312438`): from the muzzle over exactly
+/// its length, the core at `LaserWidth`, the glow at 2.5 x in the
+/// `LaserGlowColor`, the core in `BeamColor`.
 #[test]
 fn a_beam_draws_from_its_origin_to_what_it_struck() {
-    let look = core::laser::LaserLook {
-        width: 0.1,
-        ..Default::default()
-    };
+    let look = core::laser::LaserLook::replay_beam(
+        [
+            (core::laser::HASH_LASER_WIDTH, "0.1"),
+            (core::laser::HASH_LASER_GLOW_COLOR, "92 136 250 100"),
+        ],
+        true,
+    );
     let beam = core::sim::Beam {
         shooter: core::projectile::Shooter {
             owner: core::unit::UnitHandle { index: 0, gen: 0 },
@@ -1052,10 +1056,16 @@ fn a_beam_draws_from_its_origin_to_what_it_struck() {
         life: 0.1,
         len: 40.0,
         follow: true,
+        seat: None,
     };
     let d = beam_draw(&look, &beam, [None, None], None);
-    assert_eq!(d.head, Vec3::new(40.5, 1.0, 0.0));
-    assert_eq!(d.dir, Vec3::X);
+    assert_eq!(d.head, Vec3::new(-0.5, 1.0, 0.0));
+    assert!(d.dir.abs_diff_eq(Vec3::NEG_X, 1e-6), "{:?}", d.dir);
     assert_eq!((d.core_len, d.glow_len), (41.0, 41.0));
     assert!((d.width - 0.1).abs() < 1e-7);
+    assert_eq!(d.core_color, [255; 4]);
+    assert_eq!(d.glow_color, [92, 136, 250, 100]);
+    let ribbons = d.beam.expect("a beam's ribbons");
+    assert!((ribbons.glow_width - 0.25).abs() < 1e-6);
+    assert!(!ribbons.glow_additive, "BF2's glow blends NORMAL");
 }

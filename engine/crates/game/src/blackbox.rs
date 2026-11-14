@@ -78,9 +78,10 @@ pub use rotating::PREVIOUS;
 /// left stick as gilrs reports it, before the deadzone and the range scale
 /// (`stick_raw`), and the travel the game took as a full push on each axis
 /// that tick (`stick_full`): a pad that walks slowly shows a peak under 0.9
-/// there. 17 (#168): a LAN round's net meter every 0.5 s (`net`).
+/// there. 17 (#168): a LAN round's net meter every 0.5 s (`net`). 18: a
+/// human's fall damage (`fall_damage`).
 /// An older file still reads.
-pub const SCHEMA: u32 = 17;
+pub const SCHEMA: u32 = 18;
 /// Net meter rows kept (60 s at 2 Hz).
 const NET_ROWS: usize = 120;
 
@@ -420,6 +421,7 @@ pub enum Ev {
     /// = [damage, b's health after it, the round's age in s: -1 for a
     /// blast] (schema 8; a blast was 0 before schema 11).
     Hit,
+    FallDamage,
     /// Bot a, stalled, moved on where no human saw it (card UNSN): at its
     /// new spot; `v` = where it stood.
     Relocate,
@@ -973,6 +975,14 @@ impl Ring {
                         at(victim),
                     )
                 }
+                Event::FallDamage {
+                    victim,
+                    damage,
+                    health_left,
+                } if human(victim) => {
+                    v = vec![r2(damage), r2(health_left)];
+                    (Ev::FallDamage, victim.index as i32, -1, -1, at(victim))
+                }
                 Event::VehicleHit {
                     shooter,
                     vehicle,
@@ -1457,7 +1467,7 @@ impl Ring {
             ("frames", "every alive unit every 0.5 s, oldest first; keys below"),
             ("human", "the player: every 0.5 s, then every tick for the last 5 s; lx/ly/rx/ry sticks -32767..32767; buttons bits 1 fire 2 jump 4 roll/stance 8 sprint 16 zoom 32 reload 64 action 128 switch 256 secondary fire 512-4096 squad follow / hold / at ease / move out 8192 / 16384 spawn class next / prev 32768 switch secondary 65536-524288 spawn post up / down / left / right 1048576 spawn accept 2097152 spawn back 4194304 pause-menu respawn 8388608 mouse aim (aim assist off); mx/my the mouse look the tick took, 1/65536 rad (mx + turns right, my + looks up), 0 = none or a controller; edges the buttons taken as presses this tick; combo the saber combo state after it (name hash, 0 none)"),
             ("world", "every 2 s: tickets, bleed/s, alive, posts (owner -1 neutral, cap charge and cap_team its team, neutral the neutralise charge, inside the counting units per team, times CaptureTime / NeutralizeTime), vehicles (kind 0 hover 1 walker 2 flyer 3 turret; riders by seat), doors (0 shut..1 open)"),
-            ("events", "kill: a killer b victim c the killer's weapon in hand (a seat gun's or a thrown grenade's kill reads as it); death_region/fall/rider_death/blast/kill_floor/under_map/lost/recycle: a unit; spawn/despawn: a unit; captured/neutralized/saved: a post b team; vehicle_lost: a vehicle b killer c class; order: a slot b kind c bots; voice: text; stuck: a unit b body (a no-progress run reached 3 s); shot: the human a fired weapon c; hit: a hit b (one of them the human), c a's weapon in hand, v = damage, b's health after, the round's age (-1 = a blast; schema < 11: 0 = a blast or a first-update bolt); vehicle_hit (schema 12): a (-1 a collision) damaged vehicle or building turret b (the human a or a rider of b), c a's weapon in hand, v = damage, b's health at the tick's end (0 = destroyed)"),
+            ("events", "kill: a killer b victim c the killer's weapon in hand (a seat gun's or a thrown grenade's kill reads as it); death_region/fall/rider_death/blast/kill_floor/under_map/lost/recycle: a unit; spawn/despawn: a unit; captured/neutralized/saved: a post b team; vehicle_lost: a vehicle b killer c class; order: a slot b kind c bots; voice: text; stuck: a unit b body (a no-progress run reached 3 s); shot: the human a fired weapon c; fall_damage (schema 18): a human victim, v = damage, health after; hit: a hit b (one of them the human), c a's weapon in hand, v = damage, b's health after, the round's age (-1 = a blast; schema < 11: 0 = a blast or a first-update bolt); vehicle_hit (schema 12): a (-1 a collision) damaged vehicle or building turret b (the human a or a rider of b), c a's weapon in hand, v = damage, b's health at the tick's end (0 = destroyed)"),
             ("trails", "each unit's last 10 s of positions at 4 Hz, oldest first, ending at its own tick: header.trail_tick for a unit alive then, earlier for one that died (its slot not yet respawned); gen is that life's generation"),
             ("header", "build_commit / build_dirty: the commit the BINARY was built from (the code that ran); commit / dirty: the checkout's HEAD when the battle started; build_time: the executable's mtime, s since the epoch"),
             ("sounds", "every one-shot the mixer was handed in the last 60 s, oldest first: tick, name (names.sounds: the property), take (names.takes: the file under the baked root), gain (linear, the level by distance included), ears (what each ear got [left, right]: the gain x the bus, a 3-D sound split by the PS2's per-ear law, card MIXH), pitch (playback rate), dist (m from the listener, 0 = a 2-D line), voices (one-shots still sounding by their length + engine loops), secs (the take's length at that pitch). Not in it: the engine loops themselves and the music"),

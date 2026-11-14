@@ -8,6 +8,7 @@ impl Fx {
     pub fn ingest_sim(&mut self, sim: &Sim) {
         use core::sim::Event;
         self.tick = sim.tick;
+        self.shake_blasts.clear();
         self.follow_turrets(sim);
         self.follow_station_damage(sim);
         self.follow_vehicle_damage(sim);
@@ -292,14 +293,17 @@ impl Fx {
                         age: 0.0,
                     }),
                 },
-                Event::VehicleDestroyed { class, pos, .. } => {
+                Event::VehicleExplosion {
+                    class, pos, last, ..
+                } => {
                     let setup = sim
                         .blast_setup
                         .get(*class as usize)
                         .and_then(|b| b.as_ref());
                     if baked {
-                        // Where the sim detonates it (`Sim::destroy_vehicle`).
-                        if let Some(x) = setup.and_then(|b| b.explosion.as_ref()) {
+                        // Where the sim detonates it (`Sim::destroy_vehicle`,
+                        // a walker's two blasts `Sim::walker_blast`).
+                        if let Some(x) = sim.vehicle_explosion(*class, *last) {
                             self.explode(&x.look, *pos, sim.water_under(*pos));
                         }
                         continue;

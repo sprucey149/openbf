@@ -387,8 +387,8 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
 | engine on / off | pilot seat; turn-on fade; `TurnOffTime` run-down | - | VSND |
 | `TurnOnSound` / `TurnOffSound` (kaadu, tauntaun cries) | on boarding / after the run-down | nothing | VSN2 |
 | walker steps, `HydraulicSound` | per foot, by the height rule | nothing | VSN2 |
-| turret whir | two looping voices by turn rate | nothing | VSN2 |
-| `TurretActivateSound` / `Deactivate` | a turret seat gets / loses its pilot | nothing | VSN2 |
+| turret whir | two looping voices by turn rate | nothing (since 10c: ported) | VSN2 |
+| `TurretActivateSound` / `Deactivate` | a turret seat gets / loses its pilot | nothing (since 10c: ported) | VSN2 |
 | `VehicleCollisionSound` | hover: with collision damage; walker: vehicle contact | nothing | VSN2 |
 | jet pack and droideka engine, BF2 cockpit chatter, `BoostSound`, flyers' take-off / land | the same component | nothing at the time; since added (section 4) | notes (USND, post-alpha flyers) |
 
@@ -412,10 +412,28 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
   the BAKED NAB1 records and the port's `factors` (the fixed timer rule of 6.2): AAT 3940 / 3957, STAP 6013 / 6027,
   fighter tank 9421 / 9435 = 19,374 of 19,419 layer-ticks within 0.002 - the disc's own number
   (`engine_sound::tests::the_ps2s_multipliers_replay_through_the_baked_records`).
-- **Not ported**: the turn-on's and turn-off's one-shots, steps, whir, collision (card VSN2); flyers, the droideka
+- **Not ported**: the turn-on's and turn-off's one-shots, steps, collision (card VSN2; the whir: 10c); flyers, the droideka
   and the jet pack feed nothing; the property's `PitchDev` / `GainDev` and `ReverbGain` on a layer; the 39-voice
   limit (every engine inside its mute distance plays); BF2's layer start drawn once (the port redraws the deviation
   each update, BF1's rule, for both games); `boost`, `revs`, `height`, `strain` (no disc record has a graph on them).
+
+### 10c. Turret whir and gunner one-shots (2026-11-14, branch feature/vehicle-parity)
+
+- `game/src/sounds/turret.rs` ports section 8 for every seat with a turn law and any `Turret*Sound` key (a
+  vehicle's TURRETn or a building turret's): each tick, the pitch axis and then the yaw axis by section 8.2. The
+  "moved" test is the look's `(int)(angle * 100)` on BF1 (B1:137306-137310) and `* 1000` on BF2 (B2:188702-188706).
+  It also plays the activate / deactivate one-shot when the seat's occupant changes and holds `TurretAmbientSound`
+  while it has one (8.3). Nothing plays for a vehicle whose health is 0 (the owner-flag test of 8.3).
+- Keys: `vehicle_class::TurretSounds`, the first word of each value (BF1 writes `defer` after some).
+- PROVISIONAL: the PS2 passes both the slewed rate and the max rate times 1 / the zoom while zoomed
+  (B1:137196-137233). The port's seat turn reads no zoom, so the share r is the PS2's unzoomed one.
+- The skiff's guns fired silently in the port: their weapon `com_weap_bldg_gunturret` authors `FireSound`
+  `"com_weap_turret_fire Defer"`, and the port asked for the whole string. The PS2 resolves a `"<name> defer"`
+  value as `<name>` at first use (`re-weapon-sounds.md` 3.1, B1:342811-342816). `core::weapon::class` now reads
+  every weapon sound by its first word. Of 379 baked `FireSound` values, two carry the word: this one and BF2's
+  `com_weap_turret_fire_small defer`. Before the fix `seat_stills` logged 0 starts for all three seats, 1 after.
+- Not checked against a live PS2 log: section 8.4's start times. The skiff (TAT1, `turret_whir_*_lp` 0.7,
+  `vehicle_equip`, `droid_fx7_hum` on TURRET2 and TURRET3) was only heard in the port.
 
 ## 11. Checks run
 

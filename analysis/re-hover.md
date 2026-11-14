@@ -126,7 +126,8 @@ keep their offsets. Also used here [V]:
   speeder bikes 0.3).
 - **Jump** — +0xf88 (0), +0xf8c (0), +0xf90 (0), +0xf94 (0.3), +0xf98 (0). The two BF2 speeder bikes author 0.1,
   0.35, 50, 0.4, 100.
-- **Tread UV scroll** — count +0xf9c (hailfire 2, snailtank 1); scales +0xfb0/+0xfc0/+0xfd0/+0xfe0.
+- **Tread UV scroll** — count +0xf9c (hailfire 2, snailtank 1); segment MNAM hashes +0xfa0; scales +0xfb0/+0xfc0/+0xfd0/+0xfe0
+  (§6.18).
 - **Landing effect** — g threshold +0xcd4 = 0.9.
 - **Aim** — +0x684 = 1.0 (aim yaw rate); aim-yaw clamp +0x690/+0x694 = 0/0. Neither setter writes these two (§12).
 
@@ -167,7 +168,7 @@ T6  aim ray, effect slots, engine sound, rider matrices   B2:132916-133467  (no 
 ```
 S1  sph = FUN_00168cd0(E+0x70, K[+0xe94+32i])    B2:134938-134940   (the point's collision sphere; null → return)
 S2  wsph = FUN_00160258(sph, E+0x120)            B2:134941          (world centre at wsph+0x30, uses the TILTED E)
-S3  if K+0xe76:                                   B2:134942          (water float, default on)
+S3  if K+0xe76:                                   B2:134942          (water float, default on; built, §13.14)
       r = radius(sph)                             B2:134943
       if FUN_005613c8(centre, &h):               B2:134944          (h = water LAYR height + bob, only over a wet cell)
         d = h - (centre.y - r)                    B2:134945-134946
@@ -204,7 +205,7 @@ I8  aimPitch += pit·pitchRate·30·dt·z;  aimYaw −= trn·yawRate·30·dt·z 
 I9  FUN_0021d8b8(dt, thr, str, trn, E, &boost)                           B2:132580  (§6)
 I10 aimYaw −= oldRight·E'.fwd; aimPitch −= oldUp·E'.fwd  (the vehicle's own turn this tick)   B2:132570-132577, 132581-132606
 I11 aimYaw = clamp(aimYaw, K+0x690, K+0x694); aimPitch = clamp(aimPitch, PitchLimits)            B2:132607-132620
-I12 water wake effect (FUN_005613c8, +0.02 m)                            B2:132628-132700  (not physics)
+I12 water wake effect (FUN_005613c8, +0.02 m)                            B2:132628-132700  (not physics; built, §13.14)
 ```
 
 ### 5.2 The player controller FUN_002b0548 (B2:234571) — what fills E+0x2dc.. and E+0x360 [V][O]
@@ -331,7 +332,25 @@ Next tick, §6.2's U = mat(q'), but §6.11's q = quat(T·mat(q')). So each tick'
 **6.17 Effects and sound** (B2:134602-134741). A landing effect (FUN_0043ceb0) fires when g rises past its previous
 value while g ≤ K+0xcd4 = 0.9. Engine sound: FUN_0044c650 / FUN_00441350. Pilot anim blend: E+0x54c / E+0x550.
 
-**6.18 Tread UV scroll** (B2:134742-134797): for i < K+0xf9c, uv += dt·(vF·scale + ω.yaw·scale), wrapped to [0, 1).
+**6.18 Tread UV scroll** (B2:134057-134109): for i < K+0xf9c, u_i += dt·(vF·K[0xfb0+4i] + ω.yaw·K[0xfd0+4i]) and
+v_i += dt·(vF·K[0xfc0+4i] + ω.yaw·K[0xfe0+4i]), each brought back by one when below 0 or above 1. u_i is E+0x5a8+4i,
+v_i E+0x5b8+4i; vF = E+0x4c0 · E+0x140 (velocity along the tilted model +z), ω.yaw = E+0x4d4. [V]
+- **Props** (setter `FUN_002223a0`): an unnamed select (hash 0x1a6593db, value strtol − 1, B2:136514-136516) picks
+  slot i, reset to 0 by the constructor and the derive (B2:135947, B2:136122); `WheelTexture` (0x80841697) writes the
+  MNAM hash to +0xfa0+4i and raises the count to i+1 (B2:137081-137090); `WheelVelocToU` / `WheelVelocToV` /
+  `WheelOmegaToU` / `WheelOmegaToV` (0x4b8c0d9f / 0x4c8c0f32 / 0xba991e3d / 0xb7991984) write +0xfb0 / +0xfc0 /
+  +0xfd0 / +0xfe0 at slot i. The derive copies the count and the tables (B2:136276-136281). The names are the FNV
+  hashes; only the select's name is not known.
+- **Authored** (LVL scan): `cis_tread_snailtank` slot 1 `cis_tank_tread_tracks`, VelocToV −0.8333333, OmegaToV 0;
+  BF2 `cis_tread_hailfire` slot 1 `wheel_left` VelocToU 0.4 OmegaToU −1.1, slot 2 `wheel_right` 0.4 / 1.1. No BF1
+  class authors any.
+- **Draw** (`FUN_0021a968`, B2:131113-131151): per tread, the model segment whose MNAM hash (segment +0x7c,
+  `FUN_0057dce0`) is K+0xfa0+4i gets a UV block (param 0x3f0d728a) with words 1-4 = identity when unset and words 5, 6
+  = u_i, v_i; the segment draw takes that block in place of its material's (B2:711237-711239, 711303-711336).
+- **RAM (2026-11-13, BF2 Kashyyyk, maintainer's save state 8 in a private PCSX2 of the same build):** five snail tanks
+  hold K = 0x1acff50; E+0x5a8 stays 0 on all; a bot reversing at vF = −8.0 m/s raises E+0x5b8 by ≈0.25 per ~35 ms
+  update (≈7/s against the formula's 6.67/s), one driving on at +9 to +10 m/s lowers it, the parked ones stay put. The
+  port: `game::vehicle_class::tread`, `game::viewer::treads`.
 
 **6.19** (B2:134798-134800): if SetAltitude ≤ 0: g = 0.
 
@@ -469,8 +488,7 @@ Some other bodies return early (an IsA test against DAT_006894f8 / DAT_00689960,
    - The hull: K7-K9.
    - Impact damage (VDMG's `Sim::impact_vehicle`, no production caller yet) is dealt only for other vehicles and
      bottomed spring spheres (§0.5). A hull prim against terrain or a building deals none.
-3. **Water float** (§4 S3): LAYR height + bob from the map's water. PROVISIONAL until built; the skiff's maps have no
-   water.
+3. **Water float** (§4 S3): LAYR height + bob from the map's water. Built 2026-11-13 (§13.14).
 4. BF2-only paths, driven by the class data: boost + energy (§6.3, §6.7, §6.10), the speeder-bike jump (§6.9), the
    tread scroll (§6.18).
 5. The pad timer E+0x360 (§5.2) belongs to the driver's input state. FUN_003eef38's two bits are set only by the
@@ -855,3 +873,381 @@ cap, then the opposite rim point.
   - the cylinder / box terrain rules were not checked instruction by instruction (no shipped hover uses them);
   - the walkers' building layer (VSUB confirms);
   - where the contact pass sits in the frame (unchanged, §2).
+
+### 13.8 The spring spheres in the soldier, vehicle and ordnance subsets (2026-11-12) [V][O]
+
+**The question.** Soldiers stop well clear of the PS2 BARC speeder (`rep_hover_barcspeeder`, BF2 Kashyyyk); in the port
+they walked into its drawn model. Which bodies does a hover's soldier subset hold?
+
+**The rule [V].**
+- An `AddSpringBody` sphere joins the class model with MASK 0 (BF2 `FUN_00169df8` → `FUN_00167048`, B2:137624-137625).
+  MASK 0 ORs the body's bit into the terrain, building, vehicle, soldier and ordnance subsets (+0x120, +0x118, +0x110,
+  +0x108, +0x128; B2:5928-5966), not into targetable (+0x138). BF1 adds it through `FUN_001676b0` (B1:101878), which ORs
+  it into the same five (B1 +0x94..+0xa4).
+- The setter then names it on the building and terrain lines only (§13.2 step 3).
+- A later `SoldierCollision` / `VehicleCollision` / `OrdnanceCollision` line replaces that layer's subset with its
+  accumulator (B2 `FUN_00216378` B2:128046, `FUN_002160a8` B2:127917, `FUN_00216288` B2:128003). A sphere stays in it
+  only if such a line named it; `none` / `clear` empties it; a name no body has writes nothing.
+- `VehicleCollisionOnly` is read only by `FUN_0022f6e8` (B2:145579; callers B2:99279, 146959). The hover setter
+  `FUN_002223a0` (B2:136318) never calls it, so it does not apply to hovers.
+
+**PCSX2 RAM [O]** (read from copies of the states' `eeMemory.bin`; the class model found from its `SpringBody1` body,
+name hash at body+0x40):
+
+| state | class (by springs) | bodies | soldier | vehicle | ordnance | spheres kept |
+|---|---|---|---|---|---|---|
+| user slot 8, Kashyyyk | `rep_hover_barcspeeder` (3 × r 1.4) | 9 prims, mesh, 3 springs | 0x1e3f | 0x1dc0 | 0x1e3f | all three, in all three |
+| user slot 8, Kashyyyk | `rep_hover_fightertank` (4 × r 2.3) | 7 prims, mesh, 4 springs | 0x80 | 0x40 | 0x8c | none |
+| `water_fidelity`, Kashyyyk | `cis_tread_snailtank` (r 2, 2, 1, 1, 1, 0.75) | 12 prims, mesh, 6 springs | 0x7f00f | 0x7efb0 | 0x7f04f | all six |
+| `water_fidelity`, Kashyyyk | `cis_hover_stap` (3 × r 3) | 2 prims, mesh, 3 springs | 0x4 | 0x3 | 0x4 | none |
+| `yavin-slot10/original` | `all_hover_combatspeeder` (6 × r 1.75) | 11 prims, mesh, 6 springs | 0x3f81f | 0x3f7e0 | 0x3f81f | all six |
+| `yavin-slot10/original` | `imp_hover_speederbike` (3 × r 1.4) | 3 prims, mesh, 3 springs | 0x8 | 0x6 | 0x8 | none |
+| `bf1_geo1_sbd_reference` (BF1) | `cis_tread_hailfire` (r 4, 3.5, 3.5) | 2 prims, mesh, 3 springs | 0x4 | 0x2 | 0x4 | none |
+
+So the BARC's soldier set is its six small `-so-` prims (MASK 0x11), the mesh, and three 1.4 m spheres at (0, 0.7, 1.5)
+and (±0.5, 0.7, −1.0): 3.8 m wide and 5.4 m long, round the 2 m × 6 m bike. The ordnance set is the same, so a bolt
+meets the spheres too (bolts test a vehicle's ordnance subset, re-collision-layers §9).
+
+**The port before.** VHULL's hull held the geometry's mesh and prims only (`game::assets::hull_parts`); card VSUB's
+item 3 (these spheres) was never built. A soldier met the mesh, which a capsule already inside does not push out of.
+
+**Built.** `HoverClass::spring_subsets` replays the class's PROP order (GeometryName resets the accumulators; each
+spring joins all three; a later line keeps it only if named), and `game::assets::spring_hull_parts` adds each kept
+sphere to the hull (`vehicle_pads` hull build) in the layers it keeps, its FLYER flag following the class's
+`flyer_uses_vehicle` like every other body. The test `hover_spring_spheres_join_the_subsets_ram_shows` replays every
+baked side hover and checks the seven classes above against RAM.
+
+Census of the replay (all baked side hovers): kept in all three on BF2 `rep_hover_barcspeeder`,
+`all_hover_combatspeeder`, `all_hover_bos_combatspeeder`, `cis_tread_snailtank`; BF1 `all_hover_combatspeeder`,
+`all_hover_hovernaut`, `tat_hover_landspeeder`, `cis_hover_aat`. Dropped on every other. The BF1 four follow from
+B1:101878 and their class lines; no BF1 state with them was available to read [D for those four].
+
+### 13.9 A moving vehicle running a soldier over (2026-11-12) [V]
+
+There is no separate run-over rule. The soldier's own collision response, BF2 `FUN_0023cfd0` (B2:154856; BF1
+`FUN_00202f38`, B1:114097), handles a contact with a vehicle body like any other:
+1. The other body's layer is read from its collision object. For a vehicle (BF2 layer 8, BF1 layer 4) the soldier's
+   velocity is cut to its vertical part, and the vehicle entity's velocity (its vtable +0x4c, BF1 +0x48) is subtracted
+   (B2:155038-155052, B1:114213-114223).
+2. The closing speed is that relative velocity along the contact normal (B2:155056-155063). If it closes
+   (B2:155086), the soldier class's landing law runs on it: threshold T0 + T1·(up·n) + T2·(fwd·n), damage =
+   excess² × (S0 + S1·(up·n) + S2·(fwd·n)) (B2:155145-155153; BF1 B1:114285-114296). This is the law of
+   re-soldier-ground §4 / re-kill-floor §2.4; the soldier defaults are T (10, 3, 0), S (1, 0, 0).
+3. The damage is multiplied by the vehicle class's factor, class vtable slot +0x40 (B2:155157; BF1 +0x3c,
+   B1:114297). For a hover class both are `return 1.0`: BF2 vtable 0x61c9d8 (set by the class ctor `FUN_00221a20`,
+   B2:135934) slot +0x40 = `0x26bcb8`; BF1 vtable 0x5313c0 slot +0x3c = `0x222c80`.
+4. The damage descriptor names the vehicle entity and its team (B2:154937-154947) and is dealt by `FUN_001e0900`
+   (B2:155179).
+5. BF2 only: a soldier is not damaged by the vehicle he last stood on (soldier +0x480, B2:155086-155113). The field is
+   set when a contact with a vehicle has n.y over 0.6 (B2:155449-155520) and cleared by a ground contact with anything
+   else. BF1's response has no such field.
+6. Another soldier's contact deals none: BF2 unless its model byte +2 is set (B2:155121), BF1 always (B1:114269).
+
+So a BARC at 20 m/s hitting a standing trooper side-on closes at 20 m/s against a threshold of 10: 100 damage. At its
+ForwardSpeed the hit is lethal. The push out of the vehicle is the same response's wall push.
+
+**Built** (`core::sim::run_over`, called before the soldier's wall pass): each hover hull whose soldier subset the
+soldier's capsule penetrates (`CollisionWorld::soldier_hull_contacts`) deals that damage; `Unit::stood_on` is the
+soldier +0x480 (the floor owner after the ground pass). Test `a_moving_hover_runs_a_soldier_over`: 100 at 20 m/s, none
+at 8 m/s, none from the stood-on hover.
+
+**Not traced / ours:**
+- Who the PS2 credits for a vehicle entity's damage. The port credits the hover's driver (seat 0) and applies the
+  bolt friendly-fire rule with the vehicle's team; a driverless hover's kill is recorded as collision (fall) damage.
+- Only hovers deal it in the port. The walker and flyer class factors (their class vtables' slot +0x40) were not read.
+- The port tests the soldier's capsule at the start of his wall pass against the hulls' poses of the previous tick;
+  the PS2's swept soldier test (re-soldier-walls §5.3) is not read.
+
+### 13.10 The pilot's turn never ramped: the port's look-stick scale (2026-11-12) [V][D]
+
+**The question.** The PS2's BARC turns much faster than the port's.
+
+**What the PS2 does.** A pad driver's yaw rate is PitchRate + (base − PitchRate)·timer (§6.10), the timer +dt while
+turn² + pitch² ≥ 0.9 on the stick words, else 0 (B2 `FUN_002b0548`, B2:222556-222568; §5.2). A full throw gives a
+stick word of 1.0 and BF2 applies no sensitivity (`re-look-ramp.md` §1 [M], §2). The BARC: SpinRate 2, TurnRate 5,
+PitchRate 0.5, TurnFilter 5, so a full stick turns at 0.5 rad/s and climbs to 2..5 rad/s (by speed) over 1 s.
+
+**The port before.** `input::look_axis` scales the right stick by `LOOK_SCALE` 0.8 (ours, the soldier camera's
+feel) and the look sensitivity. In a hover the stick word topped out at 0.8: 0.64 < 0.9, so the timer never ran and
+the BARC turned at 0.8 × PitchRate = 0.4 rad/s for as long as the stick was held. The sim's own law was right:
+`examples/hover_drive` (a full pad stick) turns the BARC at 3.13 rad/s after the ramp. A flyer's sticks already undid
+the scale (`input::flyer_sticks`).
+
+**Built.** `WalkSim::pad_look_for_seat`: in any vehicle seat the right stick reaches 1 at a full throw (the
+sensitivity setting and `LOOK_SCALE` apply on foot only). A gunner's aimer, at its rates × stick, turns 1.25× faster
+than before for the same reason.
+
+### 13.11 Shots under the reticle: where a driven hover's aim ray starts (2026-11-12) [V][O]
+
+**The question.** The port's BARC bolts land under the reticle on a near wall; the PS2's land on it.
+
+**What the PS2 does** (B2 `FUN_0021b470`):
+- The eye E+0x340 = E · the BODY section's `EyePointOffset` (B2:132251), the aim E+0x350.
+- No driver (E+0x330 < 0, B2:132256), or no E+0x2a0 (B2:132335-132342), or E+0x3e0 set, or a first-person view
+  (the camera's mode +0x1b8 == 2, B2:132343-132373): the ray starts at the eye (B2:132462-132472).
+- Otherwise (a player in the chase view): the view frame is built from the aim and E's up row and tilted by the
+  section's tilt (`FUN_001ce9b8`: +0x5c, × 0.4 in split screen), the chase camera's ideal place is
+  E·`TrackCenter` + that frame · `TrackOffset` (`FUN_001ce948`, B2:132376-132439), and the ray starts at
+  cam + aim·((eye − cam)·aim) (B2:132440-132461): on the camera's line, at the eye's depth.
+- The ray runs 512 m along the aim past the hover itself (`FUN_00161c60`, B2:132474-132477); E+0x3d0 = its hit, the
+  point the guns' aimers chase.
+- The reticle is the point 1024 m along the aim through the drawn camera (`re-seat-hud.md` §1), so from the camera's
+  line the ray's hit is on the reticle at any range.
+
+**The port before.** The ray started at the eye. The BARC's eye is 1 m over its origin and its camera (TrackCenter
+0 2.5 −6, no offset) 2.5 m over it, so a bolt aimed at the eye ray's hit met a wall 20 m off about 1.5 m (4°) under the
+reticle.
+
+**Built.** `core::vehicle::hover::ChaseSection` (`camera`, `ray_origin`) and `Sim::hover_chase` per class (from
+`FlyerSection::hover`, the section the drawn camera uses, on the same untilted frame); `Sim::chase_ray_origin` starts
+a player pilot's ray there unless zoomed. Test `a_driven_hovers_aim_ray_leaves_the_chase_camera`.
+
+**Not traced / ours:** which drivers have E+0x2a0 (a bot's driven hover keeps the eye); which of E+0x3e0 / the view
+mode a zoom sets (the port takes the eye when zoomed). The PS2 builds the frame on the tilted E and last tick's pose;
+the port uses the drawn camera's untilted frame and this tick's pose (the reticle is drawn from it).
+
+### 13.12 The low-health fire: DamageEffectScale and the slot pointer (2026-11-12) [V][L]
+
+**The question.** The PS2's burning BARC shows a tall wall of flame; the port's shows small flecks.
+
+**What the PS2 does.**
+- The damageable setter `FUN_0026a340` keeps up to 10 slots at class+0x33c (0x30 bytes each, B2:186058-186096):
+  +0 start %, +4 stop %, +8 `DamageEffect` (name hash, B2:186306-186313), +0x20 `DamageEffectScale` (default 1.0,
+  B2:186159-186167), +0x24 `DamageInheritVelocity`, +0x28 the attach point.
+- The runtime `FUN_001e0c98` (B2:91280-91410) creates the effect when health enters the band; if the effect class's
+  type byte is 1 it multiplies the instance's emitter Size (instance +0xd0 → +0x18) by the scale (`FUN_00376d98`,
+  through every sibling, `FUN_003779b0`) and sets +0x1c to the inherit factor (`FUN_00376e10`).
+- A ParticleEmitter class (factory 0xcebb215f = "ParticleEmitter", B2:500619-500625) is type 1 (`FUN_003742a0`,
+  B2:359155; its Size +0x50 defaults to 1.0). The instance's emitters exist from creation (B2:360636-360640), so the
+  multiply lands.
+- Emitter +0x18 scales each new particle's size (`FUN_00379518`: size × it) and the position transformer's velocity
+  and acceleration (`FUN_0037ac88` param 2), not the size transformer (`FUN_0037b038`).
+
+So by the decomp the PS2 draws a slot's effect at `DamageEffectScale` × its authored size, which is what
+`game::fx::vehicle_damage` does.
+
+**What RAM shows** [L] (user slot 8, KAS2, a burning BARC; class K = 0x19eaf80, name hash at K+0x14, the slot
+pointers at K+0x33c, each slot a 0x30-byte heap block):
+- BF2 hashes names with `c | 0x20` (`FUN_00539308`, B2:655951-655962), so `_` folds to 0x7f;
+  `com_sfx_vehicleflame` = 0x7586efa4.
+- The BARC's five slots: spark 70→50 % s0.4, smoke 50→10 % s0.4, flame 10→0 % s0.2, smoke 30→0 % s0.4, and
+  **flame 20→0 % at scale 1.0**. Its ODF (SIDE/REP.LVL) authors 0.2 there.
+- `FUN_0026a340` allocates a slot only on `DamageStartPercent` and points the global `DAT_005fd2c0` at it
+  (B2:186058-186096). Every other damage row writes through that pointer (Stop B2:186136-186155, Scale B2:186159-186167,
+  Effect B2:186306-186313, the +0x10 vector B2:186362-186372, Attach B2:186375-186381, Inherit B2:186392-186400, the
+  +0x28 key B2:186127-186134). Nothing resets the pointer between classes.
+- `com_weap_veh_guided_rocket_ord` and `com_weap_award_rocket_launcher_ord` (and `com_weap_veh_fly_guided_rocket_ord`)
+  author `DamageEffectScale 1` and `DamageInheritVelocity 0.75` with no Start. They are the only such classes on
+  either disc, all in BF2's side LVLs (scan of every LVL). They write into the last slot of the class created before
+  them.
+- Load order that reproduces RAM exactly: `ingame.lvl`, then each `ReadDataFile` of a side file (KAS2's script:
+  rep, cis, wok, tur) creates its requested sub-levels' classes **in the file's order**, and a class that already
+  exists is not created again. In REP.LVL the BARC's sub-level comes before the soldiers' that carry the rocket
+  ordnance, so the ordnance clobbers the BARC's 20 % flame. With argument order, or with repeats re-applied, the STAP
+  and the snail tank would be clobbered too; in RAM they keep their own (STAP flames 0.75, inherit 0; snail tank flame
+  1.0, inherit 0).
+
+So below 20 % the PS2's BARC burns at five times the authored size. That is the large fire in the screenshots.
+
+**Built.** `bake::classes::damage_load_order` writes `classes/load_order/<file>` beside each class file: every
+class definition that sets a damage-slot key, in file order with repeats, with its `lvl_` sub-level hash and damage
+rows (`manifest::DamageLoad`). `ClassDb::replay_damage_loads` replays a BF2 mission's `class_load_order` (runs of one
+side = one call) and records the rows that land in another class's slots; `vehicle_class::damage_effects` applies
+them after each def's own rows. `vehicle_pads::install_for_mission` runs it for a battle. Test
+`kas2_load_order_writes_the_rocket_scale_into_the_barcs_last_flame`.
+
+**Not traced / ours:** whether a read with no sub-level list (`ingame.lvl`) creates the classes inside its sub-levels
+(the replay assumes it does; `com_bldg_inf_defenseturret`, the only damage class there, is in RAM); the 10-slot cap
+counts only a class's own Starts, not slots copied from its parent (B2:185914 copies the pointers); BF1 is not
+replayed (no orphan rows on its disc); a damage row in a non-BODY scope counts toward the port's Start ordinals only
+when `damage_effects` reads that scope.
+
+### 13.13 The turn lag: the hover camera's move tension is 12 (2026-11-12) [V][L]
+
+**The question.** Turning hard on the PS2, the BARC slides beside the reticle; in the port it stays under it.
+
+**What the PS2 does.**
+- The aim yaw E+0x554 cannot lead the hull on a hover: the stick moves it (B2:131893-131894), the hull's turn is
+  taken back out (B2:131912-131921), and it is clamped to K+0x690..K+0x694 (B2:131922-131928), which the hover ctor
+  sets to 0 (B2:135973-135974) and no hover property writes. Only the aim pitch moves.
+- The camera `FUN_00220d68` calls the chase law `FUN_001cef68` with dt, 1.0, 1.0 and the BODY section K+0xc00
+  (B2:135439). The view slerps by `exp(−AimTension·dt)` (section +0x58, B2:77840-77843); the eye eases toward its
+  ideal per view axis by `1 − exp(−MoveTension·dt)` (+0x40..+0x54 by axis and sign, B2:78052-78097), as
+  `flyer_camera::lag_eye` does.
+- **The hover class ctor `FUN_00221a20` sets that BODY section's six move tensions to 12 and its aim tension to
+  FLT_MAX** (B2:136004-136011), over the generic section ctor's 30 and 1000 (`FUN_001ce800`, B2:77125-77132). BF1's
+  hover ctor sets the same six to 12 and its aim tension to 30 (B1:101081-101087). `MoveTension` / `AimTension` in a
+  class's ODF replace them (setter `FUN_001d0328`, B2:78762-78800); the BARC authors neither.
+- RAM, the BARC's section (K = 0x19eaf80, K+0xc40..+0xc58): 12 ×6, then 0x7f7fffff.
+- Two save states fit the law with k = 12, the camera updating after the hull's move, and nothing else:
+  - slot 8, 40 m/s straight: the camera 8.713 m behind the hull in its frame (ideal 6, so 2.713 of lag; the law
+    gives 2.711);
+  - slot 9, full stick standing (ω.yaw 2.0, the stick timer 1): the camera at (0.800, 2.514, −5.861) in the hull's
+    frame, the bike 7.4° off the view's centre (the law gives (0.791, 2.5, −5.866)). At 30 it would be 0.232 m, 2.2°.
+
+**The port before.** `FlyerSection::hover` took the generic section's 30 and an aim tension of 1000, so the camera
+caught the hull 2.5 times faster than the PS2's, and a turn left the bike about 2-3° off-centre instead of 7-9°.
+
+**Built.** `FlyerSection::hover(seat, rules)` defaults the move tensions to 12 and the aim tension to none (BF2) or
+30 (BF1). Test `a_hovers_camera_trails_a_turn_and_a_run_as_the_ps2s_does` drives the port's camera through both save
+states' motions and lands within 0.02 m of RAM.
+
+**Not traced:** the 8-vs-9 difference in the y offset (2.514 vs 2.5) is the hull's small vertical speed, not checked.
+
+### 13.14 Over water: the float and the wake (2026-11-13) [V][O]
+
+The decomp has been renumbered since §4 and §5.1 were written; the lines below are the current ones.
+
+**The question.** Over the KAS2 lake the PS2's BARC rides on the water with a wake under it; the port's sinks into
+the water and leaves no wake.
+
+**The float (§4 S3).**
+- The PS2: in each spring point, when the class's K+0xe76 is set and the water query `FUN_005613c8` finds a wet cell
+  under the sphere's world centre, d = h − (centre.y − r) (B2:134257-134261). Then the compression is
+  max(c_i, min(d / len_i, 1)) (B2:134262-134267). Past a full spring with the hull falling, v.y halves and v.x, v.z
+  and ω take 0.9 (B2:134268-134278). The water presses on the spring exactly as the ground would, at its own level.
+- K+0xe76 is `FloatsOnWater` (fnv 0xefb6b10a, setter B2:137349-137352, strtol != 0, ctor 1). In the BF2 data only
+  the snail tank sets it to 0. BF1 has the same law with no gate (`FUN_001ee040`, B1:99590-99613).
+- The port before: S3 was never built, so a hover over water fell through to the lakebed.
+- Built: `core::vehicle::hover::springs` takes the water under each spring centre (`ContactSource::water_under`,
+  the sim's `water::Plane`), gated by `HoverParams::floats_on_water` (`FloatsOnWater`, default on). Test
+  `a_hover_rests_on_water_as_on_ground_at_its_level`: after 30 s a hover on water at 0 rests within 1 mm of one on
+  ground at 0. With the float off it sinks below −30.
+- RAM, save state 8 (2026-11-13, the BARC at speed on the lake): hull y 1.2655, water level 1.0, bob 0.059, so the
+  hull rides 0.207 m above the surface. The port's on-water rest height equals its on-ground rest height by the law.
+  The ground rest height is not re-measured against the PS2 here.
+
+**The wake (§5.1 I12).**
+- The PS2: each hover update asks `FUN_005613c8` for the surface under the hull's position. Over water it writes
+  E+0x600 = (x, h + 0.02, z). With no live instance and a class `WaterEffect` (K+0xca4, fnv 0x87733801, setter
+  B2:137100-137102), it creates one (E+0x5f8 instance, E+0x5fc id) and plays it tracking E+0x600 with world axes
+  (`FUN_004522a0(inst, E+0x600, 1)`; B2:131944-132003). Off water it stops the instance (vtable +0x28,
+  B2:132005-132027). There is no height or speed gate. BF1 `FUN_001ea9f8` does the same on the surface itself, with
+  no +0.02 (B1:97566-97618; class WaterEffect K+0x26b4, B1:101992-101994).
+- `WakeEffect` (K+0xca0, fnv 0x26d7a21c, B2:136585-136587) is a different effect: it plays at the class's wake points
+  (count K+0xcc8) while |thrust| + |strafe| > 0.01 (B2:132497-132530). The BARC has no wake points and names
+  `dustwake`, which no BF2 effect file holds, so it never plays.
+- RAM, save state 8: the BARC's class K+0xca4 = 0x69f2e933 (`com_sfx_waterwake_sm`), K+0xca0 = 0xe6c135ed
+  (`dustwake`). The live instance at E+0x5f8 sits at (x, 1.079, z) = 1.0 + 0.059 + 0.02.
+- The port before: no hover read `WaterEffect`.
+- Built: `vehicle_pads` reads each hover class's `WaterEffect`. `game::fx::hover_water` keeps one instance per live
+  hover over water at (x, surface + 0.02, z) (BF1: + 0), and stops it on land or at death. Test
+  `a_hover_keeps_its_wake_on_the_water_under_it_and_drops_it_on_land` uses save state 8's numbers.
+- **Not traced:** the velocity a tracked effect inherits (the port gives 0).
+
+### 13.15 Hover and treaded vehicle pairs (STAP, 2026-11-13)
+
+Scope: the current `feature/vehicle-parity` branch, source
+`72d7d0c331bc` plus this working-tree change. Fix solid contacts between
+hover, treaded and commandhover vehicles using their existing authored
+subsets. No class-name exceptions. Walker/flyer pair response is outside
+this change; this is not ground-vehicle parity acceptance.
+
+**Original-game evidence.** The maintainer's BF2 Kashyyyk slot 8 has SHA-256
+`4959006b7f51f750050e77249dd08203e5745fd7c1cf25f805569e8b710888a6`.
+Its stored screenshot and the paused installed PCSX2 show the STAP above
+the armored tank droid. Reading the state's EE memory gives the live human
+STAP at E `0x1d07f90`, K `0x1a4f840`, class hash `0xbae4d86a`, position
+(104.189, 3.221, 124.600). The nearby snail tank is E `0x1d114f0`, K
+`0x1acfe40`, hash `0x51fbd467`, position (104.747, 1.709, 121.635).
+The local receipt and screenshot are under `engine/artifacts/stap-collision/`;
+original game data stays untracked. The automated PCSX2 build rejected
+restoring the newer native save state; no moving-pair trajectory comparison
+is claimed from that adapter.
+
+**Port evidence.** `dist/openbf_data/playtest/last.json` is a Kashyyyk CW
+exit snapshot at tick 2112, seed 389. Its build is `0831363a0d78+dirty`,
+with checkout `72d7d0c331bc`, so it is not evidence for the new source.
+`WorldContacts` queried static world bodies; the separate traffic pass
+excluded hover/hover pairs and changed translation only for AI drivers.
+Both class hulls already carried their VEHICLE subset. The STAP names
+`p_sphere` and `p_sphere1` for vehicle contacts; its drawing/collision mesh
+is not a substitute for them.
+
+**Response, re-read in the current local BF2 listing.**
+`FUN_0021fd98`, B2:134589-134590, handles another physics-class-8 body
+before the spring hook at B2:134593-134600. Thus even a spring sphere
+against another hover is solid: it does not compress as suspension.
+The relative normal speed drives damage and response. B2:134657-134711
+sets friction 0.25, restitution 0.125 and scales the normal impulse by the
+two speed-weighted masses. B2:134827 delegates full separation to
+`FUN_00169668`. Collision meshes remain targets, not moving primitives
+(§13.1). These are behavioral descriptions, not copied implementation.
+
+**Mass correction to §7.0.** The physics constructor initializes mass to
+1, but `FUN_00212b38` overwrites it at B2:125778-125782 with the product
+of the model vis-box's three full dimensions plus 0.0001. Slot 8's
+E+0x78 agrees: STAP 11.062572, BARC 24.668806, fighter tank 652.253601,
+snail tank 302.695404. `vehicle_pads` now computes the same number from
+the existing baked `vis_box`; no new manifest or rebake is required.
+The gameplay correction pipeline already preserves canonical model bounds
+(`bake::gameplay::rebuild::model_bounds`).
+
+**Implementation.** `sim::hover_pairs` runs between static contacts and
+springs, queries each moving primitive against another live hover's
+VEHICLE subset, applies full-depth separation and relative-velocity
+friction/impulse, and sends impacts through the existing damage path.
+The same code runs for human, AI and empty vehicles. Own hulls, removed
+vehicles and bodies outside either subset cannot participate. Stable slot
+and part ordering is retained. There are no new gameplay state fields.
+
+**Remaining measurement.** A missing vis-box (older side bakes and a map's
+own skiff metadata) still falls back to constructor mass 1: measure and
+carry those missing canonical model bounds. Other-body damage factor 1
+remains provisional; measure PS2 moving-pair trajectories,
+per-body damage factors and constrained multi-contact response. The existing
+per-query depth correction and Parry narrowphase remain approximations.
+Full 34-map rounds, high-speed crossing trajectories and gameplay feel
+remain unchecked. A source-only pass is not alignment acceptance.
+
+**Checks on this working tree (2026-11-13).**
+
+- `cargo check --manifest-path engine/Cargo.toml -p game --tests`: passed.
+- `cargo test --manifest-path engine/Cargo.toml -p core --lib hover_pair -- --nocapture`:
+  seven passed: separation/suspension, subsets and removal, moving-frame
+  response, primitive/mesh targets, human/AI/empty seats, damage and mass.
+- The resulting core test executable, filters `vehicle::`,
+  `sim::vehicles::`, `sim::traffic::`, `sim::state::tests`: 74 + 34 + 6 + 26
+  passed. The 100-tick fixture remains `5573f2b603ed95f4`.
+- `cargo test --manifest-path engine/Cargo.toml -p game --test suite kashyyyk_hover_vehicle_pairs -- --nocapture`:
+  passed with all four actual baked classes. Each meets the parked tank
+  above ground instead of falling through it; a forced 40 m/s side crossing
+  differs from the no-target trajectory. These are CPU regression fixtures,
+  not matched original-game trajectories. The installed masses match the
+  four slot-8 measurements within 0.001.
+- The resulting game suite executable, filters `vehicle_pads::` and
+  `vehicle_class::`: 9 + 15 passed, including the new data-backed test.
+  Total focused coverage: 171 passed.
+- `cargo build --manifest-path engine/Cargo.toml --release -p game`: passed.
+  Release `--sim-hash 100` retains the pin. A 30-second headless KAS2 CW
+  run, seed 42, completed 900 ticks; snapshot
+  `engine/artifacts/playtest/headless/bf2_kas2_con_42.json`. This is a smoke
+  test, not round completion or original-game parity.
+- `python scripts/check_provisional.py` and `git diff --check`: passed.
+  Direct rustfmt checks passed for the new modules and formatted touched
+  files; whole-package formatting still reports pre-existing differences.
+- `fmath::` has eight passes and one existing failure: its game-input
+  scanner rejects `main/windowed/loading.rs`'s test-module declaration
+  with an intervening `#[path]`. The same declaration is present at HEAD;
+  it was not changed here. Do not call the full math referee green.
+- `py -3.11 scripts/gates.py --groups alignment --out engine/artifacts/stap-collision/alignment`
+  cannot start: `engine/artifacts/loop/gates.toml` is absent. The independent
+  alignment source roots are also not configured for this run. Alignment
+  acceptance remains unchecked. The size-report shell's `python3` resolves
+  to the Windows Store alias here; new modules are all below 1,500 lines
+  and have explicit crate-map rows.
+
+Local test build: `dist/openbf-stap-collision.exe`, packed from the release
+binary and current local caches with `game --write-pack` (28,827 files).
+`scripts/pack.py --game-bin ...` first tried a full rebake because of a
+stale cache stamp; it was stopped during bake compilation. No fresh bake
+provenance is claimed. `engine/artifacts/stap-collision/build.json` records
+the candidate's size and SHA-256. The existing `dist/openbf.exe` was not
+replaced. This candidate is private game data, not a Git or PR artifact.
+The packed candidate also reproduced `5573f2b603ed95f4` and completed
+10-second and 30-second headless Kashyyyk CW runs from its embedded assets.
+Their logs/snapshots are retained under `engine/artifacts/stap-collision/`.
+
+Maintainer acceptance (2026-11-13): the maintainer tested the candidate
+and confirmed that the reported STAP collision problem was fixed.
+This accepts that reported case, not the unchecked broader parity gates.

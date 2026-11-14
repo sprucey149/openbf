@@ -66,9 +66,10 @@ pub struct VehiclePose {
     pub alive: bool,
     pub pos: Vec3,
     pub rot: Quat,
-    /// `GunState::look` and `GunState::aim` per seat (None = an unarmed
-    /// seat): the aimer is what a building turret's gun draws along.
-    pub looks: Vec<Option<[(f32, f32); 2]>>,
+    /// `GunState::look`, `GunState::aim` and `GunState::rate` per seat
+    /// (None = an unarmed seat): the aimer is what a building turret's gun
+    /// draws along, the rate what its gunner's nine-pose leans by.
+    pub looks: Vec<Option<[(f32, f32); 3]>>,
     /// `WalkerState::aim_yaw` / `aim_pitch`.
     pub aim: (f32, f32),
     pub walker: Option<WalkerPose>,
@@ -127,7 +128,7 @@ impl VehiclePose {
             looks: v
                 .guns
                 .iter()
-                .map(|g| g.as_ref().map(|g| [g.look, g.aim]))
+                .map(|g| g.as_ref().map(|g| [g.look, g.aim, g.rate]))
                 .collect(),
             aim: (v.walker.aim_yaw, v.walker.aim_pitch),
             flyer_lift: (v.kind == core::vehicle::VehicleKind::Flyer).then_some(v.flyer.lift),
@@ -147,8 +148,8 @@ impl VehiclePose {
         v.pos = self.pos;
         v.rot = self.rot;
         for (g, l) in v.guns.iter_mut().zip(&self.looks) {
-            if let (Some(g), Some([l, a])) = (g.as_mut(), l) {
-                (g.look, g.aim) = (*l, *a);
+            if let (Some(g), Some([l, a, r])) = (g.as_mut(), l) {
+                (g.look, g.aim, g.rate) = (*l, *a, *r);
             }
         }
         (v.walker.aim_yaw, v.walker.aim_pitch) = self.aim;
@@ -180,7 +181,11 @@ impl VehiclePose {
         }
         for (l, pl) in o.looks.iter_mut().zip(&prev.looks) {
             if let (Some(l), Some(pl)) = (l.as_mut(), pl) {
-                *l = [lerp_look(pl[0], l[0], t), lerp_look(pl[1], l[1], t)];
+                *l = [
+                    lerp_look(pl[0], l[0], t),
+                    lerp_look(pl[1], l[1], t),
+                    (mix(pl[2].0, l[2].0, t), mix(pl[2].1, l[2].1, t)),
+                ];
             }
         }
         o.aim = lerp_look(prev.aim, o.aim, t);
@@ -538,6 +543,9 @@ pub struct Blend {
     spare: Pose,
     /// The tick's own pose while [`Blend::apply`] has a blend written in.
     saved: Option<Pose>,
+    /// The share of the way from the last tick's start to its end the
+    /// written blend stands at (None: no blend is written in).
+    shown: Option<f32>,
     /// Whether it blends: off by default (headless runs draw ticks), on in
     /// the windowed game unless `OPENBF_RENDER_BLEND=0` ([`Blend::from_env`]).
     pub on: bool,
@@ -643,11 +651,13 @@ impl Blend {
         }
         shown.write(walk);
         self.saved = Some(cur);
+        self.shown = Some(t);
         true
     }
 
     /// Write the tick's own pose back (a no-op when none is blended in).
     pub fn restore(&mut self, walk: &mut WalkSim) {
+        self.shown = None;
         if let Some(cur) = self.saved.take() {
             cur.write(walk);
         }
@@ -656,6 +666,13 @@ impl Blend {
     /// Whether a blended pose is written in now.
     pub fn applied(&self) -> bool {
         self.saved.is_some()
+    }
+
+    /// The sim time the walk's pose stands at now, in ticks: the last
+    /// tick's own `tick`, or `tick - 1 + t` while a blend `t` of the way into
+    /// it is written in.
+    pub fn shown_at(&self, tick: u64) -> f64 {
+        tick as f64 - self.shown.map_or(0.0, |t| 1.0 - f64::from(t))
     }
 
     pub fn preview(&mut self, walk: &mut WalkSim, look: LookPreview) {
@@ -730,9 +747,19 @@ fn stabilized_walker(walk: &WalkSim) -> Option<core::vehicle::VehicleHandle> {
 /// preview is drawn whole. A controller's on foot is drawn the frame's share
 /// of the way into the next tick's turn (all of it with the blend off), so
 /// the aim moves smoothly; [`Blend::stamp`] fires a press there.
+/// The share of the way from the last tick to this one a frame draws at:
+/// [`fraction`] with the blend on, 1 (the tick itself) with it off.
+pub fn share(walk: &WalkSim) -> f32 {
+    if walk.blend.on {
+        fraction(walk)
+    } else {
+        1.0
+    }
+}
+
 pub fn blend_in_looking(walk: &mut WalkSim, look: &PadState) {
     let mut preview = walk.sim.look_preview(walk.player, look);
-    let share = if walk.blend.on { fraction(walk) } else { 1.0 };
+    let share = share(walk);
     walk.blend.drawn = None;
     let stick = !look.has_look() && !look.mouse_aim();
     if let (true, Some(LookPreview::Foot { unit, yaw, pitch })) = (stick, preview.as_mut()) {
@@ -909,7 +936,9 @@ mod tests {
         me(&mut w).pos = Vec3::new(2.0, 0.5, 4.0);
         me(&mut w).yaw = -3.0;
         w.cam_place = Some((1.8, Vec3::new(0.0, 0.0, 4.0)));
+        assert_eq!(b.shown_at(9), 9.0);
         assert!(b.apply(&mut w, 0.5));
+        assert_eq!(b.shown_at(9), 8.5);
         assert!(me(&mut w).pos.abs_diff_eq(Vec3::new(1.5, 0.25, 3.0), 1e-6));
         assert_eq!(w.cam_place, Some((1.8, Vec3::new(0.0, 0.0, 3.6))));
         let half = std::f32::consts::PI;
@@ -923,6 +952,7 @@ mod tests {
         assert_eq!(me(&mut w).yaw, -3.0);
         assert_eq!(w.cam_place, Some((1.8, Vec3::new(0.0, 0.0, 4.0))));
         assert!(!b.applied());
+        assert_eq!(b.shown_at(9), 9.0);
     }
 
     #[test]
@@ -1034,22 +1064,23 @@ mod tests {
     }
 
     #[test]
-    fn a_guns_aimer_is_drawn_between_its_ticks() {
-        let pose = |look: f32, aim: f32| Pose {
+    fn a_guns_aimer_and_rate_are_drawn_between_its_ticks() {
+        let pose = |look: f32, aim: f32, rate: f32| Pose {
             vehicles: vec![VehiclePose {
                 gen: 1,
                 alive: true,
                 pos: Vec3::ZERO,
                 rot: Quat::IDENTITY,
-                looks: vec![None, Some([(look, 0.0), (aim, 0.2)])],
+                looks: vec![None, Some([(look, 0.0), (aim, 0.2), (rate, 0.0)])],
                 aim: (0.0, 0.0),
                 walker: None,
                 flyer_lift: None,
             }],
             ..Pose::default()
         };
-        let mid = blend(&pose(0.0, 0.1), &pose(0.2, 0.3), 0.5);
-        let [l, a] = mid.vehicles[0].looks[1].unwrap();
+        let mid = blend(&pose(0.0, 0.1, -2.0), &pose(0.2, 0.3, 1.0), 0.5);
+        let [l, a, r] = mid.vehicles[0].looks[1].unwrap();
+        assert!((r.0 + 0.5).abs() < 1e-6, "{r:?}");
         assert!((l.0 - 0.1).abs() < 1e-6, "{l:?}");
         assert!(
             (a.0 - 0.2).abs() < 1e-6 && (a.1 - 0.2).abs() < 1e-6,

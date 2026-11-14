@@ -33,15 +33,15 @@ fn baked_flyer_takeoff_clips_move_the_models() {
                 .frames
                 > 1
         );
-        let rig = WalkerRig::new_flyer(asset.skeleton, asset.clips);
+        let rig = WalkerRig::new_flyer(asset.skeleton, asset.clips, None);
         let (landed, _) = skin(
-            &rig.flyer_palette(0.0).unwrap(),
+            &rig.flyer_palette(0.0, None).unwrap(),
             &mesh.positions,
             &mesh.normals,
             &joints,
         );
         let (flying, _) = skin(
-            &rig.flyer_palette(1.0).unwrap(),
+            &rig.flyer_palette(1.0, None).unwrap(),
             &mesh.positions,
             &mesh.normals,
             &joints,
@@ -52,6 +52,68 @@ fn baked_flyer_takeoff_clips_move_the_models() {
             .filter(|(a, b)| glam::Vec3::from(**a).distance(glam::Vec3::from(**b)) > 0.01)
             .count();
         assert!(moved > 100, "{model}: only {moved} vertices moved");
+    }
+}
+
+#[test]
+fn baked_snowspeeder_fins_move_its_flaps_by_speed_and_turn() {
+    use game::viewer::turret_pose::fin_pose;
+    use game::viewer::walker_pose::{skin, WalkerRig};
+    let root = game::assets::baked_root();
+    for game in ["bf1", "bf2"] {
+        let dir = root.join(format!("side_{game}/vehicles/all"));
+        let Ok(text) = std::fs::read_to_string(dir.join("vehicles.ron")) else {
+            assert!(std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none());
+            continue;
+        };
+        let model = "all_fly_snowspeeder";
+        assert!(
+            text.contains("fin: Some(\"all_snowspeeder_9pose\")"),
+            "{game}: the snowspeeder's fins clip is not baked"
+        );
+        let (mesh, joints) =
+            game::assets::load_glb_joints(&dir.join("models").join(format!("{model}.glb")))
+                .unwrap();
+        let asset =
+            game::assets::load_skinned_glb(&dir.join("walkers").join(format!("{model}.glb")))
+                .unwrap();
+        let rig = WalkerRig::new_flyer(asset.skeleton, asset.clips, Some("all_snowspeeder_9pose"));
+        let speeds = [20.0, 30.0, 40.0];
+        let at = |turn, speed| {
+            skin(
+                &rig.flyer_palette(1.0, Some(fin_pose(turn, speed, speeds)))
+                    .unwrap(),
+                &mesh.positions,
+                &mesh.normals,
+                &joints,
+            )
+            .0
+        };
+        let moved = |a: &[[f32; 3]], b: &[[f32; 3]]| {
+            a.iter()
+                .zip(b)
+                .filter(|(a, b)| glam::Vec3::from(**a).distance(glam::Vec3::from(**b)) > 0.01)
+                .count()
+        };
+        let cruise = at(0.0, 30.0);
+        let bind = skin(
+            &rig.skeleton
+                .palette(&game::skin::Pose::bind(&rig.skeleton).locals()),
+            &mesh.positions,
+            &mesh.normals,
+            &joints,
+        )
+        .0;
+        assert_eq!(moved(&cruise, &bind), 0, "{game}: frame 4 is the bind");
+        for speed in [0.0, 40.0] {
+            let n = moved(&cruise, &at(0.0, speed));
+            assert!(n > 20, "{game} speed {speed}: only {n} vertices moved");
+        }
+        for speed in [0.0, 30.0, 40.0] {
+            let (right, left) = (at(1.0, speed), at(-1.0, speed));
+            assert!(moved(&at(0.0, speed), &right) > 0, "{game} speed {speed}");
+            assert!(moved(&right, &left) > 0, "{game} speed {speed}");
+        }
     }
 }
 

@@ -4,14 +4,18 @@ use game::walk::{ClassVisual, TeamTemplate, WalkSim};
 use glam::Vec3;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub fn battle(root: &Path) -> Result<(WalkSim, game::assets::Scene)> {
-    let map = root.join("bf2_geo1");
-    let (scene, _) = game::assets::load_battle_scene(&map, "con")?;
+    battle_on(root, "bf2_geo1", "bf2_geo1_con")
+}
+
+pub fn battle_on(root: &Path, map: &str, mission: &str) -> Result<(WalkSim, game::assets::Scene)> {
+    let (scene, _) = game::assets::load_battle_scene(&root.join(map), "con")?;
     let mission = game::mission::MissionDef::load(
         &root
             .parent()
             .context("assets root")?
-            .join("missions/bf2_geo1_con.ron"),
+            .join(format!("missions/{mission}.ron")),
     )?;
     let (rosters, _) = game::roster::FactionRoster::pair(
         &root.join("classes"),

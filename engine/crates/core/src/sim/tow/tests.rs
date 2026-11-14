@@ -1,4 +1,5 @@
 use super::*;
+use crate::vehicle::walker;
 use crate::collision::{Body, Shape};
 use crate::vehicle::tow::TowFrames;
 use glam::Mat4;
@@ -97,6 +98,8 @@ fn a_full_ground_cable_releases_then_damages_on_separate_updates() {
                 turn: None,
                 framed: false,
                 aimer_bind: Quat::IDENTITY,
+                weapon_aimer: None,
+                follows_owner: false,
                 gunner: None,
             })],
         })];
@@ -200,7 +203,7 @@ fn a_full_ground_cable_releases_then_damages_on_separate_updates() {
 }
 
 #[test]
-fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
+fn detached_wraps_damage_per_occupied_seat_then_the_walker_dies_in_place() {
     use crate::unit::UnitSpec;
     use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
     use crate::weapon::HealthType;
@@ -304,11 +307,18 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
     let _ = oracle.unit();
     assert_eq!(s.melee_lcg.state(), oracle.state());
     assert!(!s.step_full_tow(&mut cable, crate::TICK_DT));
-    assert!(s.vehicle(target).is_none());
-    assert_eq!(s.tow_falls.len(), 1);
-    let pose = s.tow_falls[0].pose(s.tick + u64::from(crate::TICK_HZ));
-    assert_eq!(pose.walker.anim, walker::ANIM_DEATH);
-    assert_eq!(pose.walker.clip_time, 1.0);
+    let dying = s.vehicle(target).expect("a dying walker stays in the world");
+    assert!(dying.walker.dead && !dying.health.alive());
+    assert!(s
+        .events
+        .iter()
+        .any(|e| matches!(e, Event::VehicleExplosion { vehicle, last: false, .. } if *vehicle == target)));
+    assert!(!s
+        .events
+        .iter()
+        .any(|e| matches!(e, Event::VehicleDestroyed { .. })));
+    s.sync_hulls();
+    s.sync_dying_walkers();
     let ray = |s: &Sim, y, filter| {
         s.collision
             .ray_with(Vec3::Y * y, Vec3::Z, 15.0, Layers::ORDNANCE, filter)
@@ -318,13 +328,32 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
     assert!(falling_hit.owner.is_none());
     assert!(ray(&s, 0.0, HullFilter::Hulls).is_none());
 
-    s.tick += u64::from(crate::TICK_HZ);
-    s.sync_tow_falls();
+    for _ in 0..crate::TICK_HZ {
+        s.tick_walkers(crate::TICK_DT);
+    }
+    s.sync_dying_walkers();
+    let v = s.vehicle(target).unwrap();
+    assert_eq!(v.walker.anim, walker::ANIM_DEATH);
+    assert!((v.walker.clip_time - 1.0).abs() < 1e-4);
     assert!(ray(&s, 0.0, HullFilter::Static).is_none());
     assert!(ray(&s, 4.0, HullFilter::Static).is_some());
-    s.tick += u64::from(crate::TICK_HZ);
-    s.sync_tow_falls();
-    assert!(s.tow_falls.is_empty());
+    s.events.clear();
+    let mut ticks = crate::TICK_HZ;
+    while s.vehicle(target).is_some() && ticks < 3 * crate::TICK_HZ {
+        s.tick_walkers(crate::TICK_DT);
+        ticks += 1;
+    }
+    assert!(s.vehicle(target).is_none());
+    assert!((61..=62).contains(&ticks), "{ticks}");
+    assert!(s
+        .events
+        .iter()
+        .any(|e| matches!(e, Event::VehicleExplosion { last: true, .. })));
+    assert!(s
+        .events
+        .iter()
+        .any(|e| matches!(e, Event::VehicleDestroyed { vehicle, .. } if *vehicle == target)));
+    s.sync_dying_walkers();
     assert!(ray(&s, 4.0, HullFilter::Static).is_none());
 }
 

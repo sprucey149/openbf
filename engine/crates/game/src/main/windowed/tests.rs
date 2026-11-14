@@ -19,6 +19,7 @@ pub(super) fn setup(cap: Option<u32>) -> BattleSetup {
         teams: None,
         classes_dir: PathBuf::new(),
         mission: None,
+        vehicle: None,
         mission_file: None,
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
@@ -172,6 +173,7 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
             view: [50.0; 4],
         }],
         vehicles: Vec::new(),
+        structures: Vec::new(),
         droids: std::collections::HashMap::new(),
     });
     a.walk = Some((walk, render::MeshHandle::default()));
