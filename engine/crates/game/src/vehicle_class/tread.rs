@@ -4,7 +4,8 @@
 //! into class K at the slot a select prop last chose (B2:136815-137250); the
 //! constructor and the derive copy reset that slot to 0 (B2:135947,
 //! B2:136122) and the derive copies the count and the four tables
-//! (B2:136276-136281). BF1 has no such props.
+//! (B2:136276-136281). BF1 has no such props; [`Treads::bf1`] supplies
+//! its fixed ground-hover wheel law.
 
 use super::h;
 
@@ -37,6 +38,25 @@ pub struct Treads {
 }
 
 impl Treads {
+    /// BF1 FUN_001ec768, B1:99414-99450: every SetAltitude <= 0 hover
+    /// scrolls these two segment names with fixed rates. BF1 has no wheel
+    /// props; the names' hashes are 0xe75b2a14 and 0xe8744041.
+    pub fn bf1() -> Self {
+        let mut out = Self::default();
+        for (i, (segment, sign)) in [("wheel_left", 1.0), ("wheel_right", -1.0)]
+            .into_iter()
+            .enumerate()
+        {
+            out.slots[i] = Tread {
+                segment: segment.into(),
+                veloc: [0.5172535, 0.0],
+                omega: [sign * 2.75 * 0.5172535, 0.0],
+            };
+        }
+        out.count = 2;
+        out
+    }
+
     /// The derive copy: the tables and count stay, the select slot is 0.
     pub fn derive(&mut self) {
         self.select = 0;
@@ -122,6 +142,25 @@ pub fn delta(t: &Tread, forward_speed: f32, yaw_rate: f32, dt: f32) -> [f32; 2] 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bf1_fixed_wheels_move_together_forward_and_oppose_in_a_turn() {
+        let t = super::Treads::bf1();
+        assert_eq!(super::h(&t.list()[0].segment), 0xe75b2a14);
+        assert_eq!(super::h(&t.list()[1].segment), 0xe8744041);
+        let left = &t.list()[0];
+        let right = &t.list()[1];
+        assert_eq!(
+            super::delta(left, 4.0, 0.0, 1.0),
+            super::delta(right, 4.0, 0.0, 1.0)
+        );
+        assert!((super::delta(left, 4.0, 0.0, 1.0)[0] - 2.069014).abs() < 1e-6);
+        assert_eq!(
+            super::delta(left, 0.0, 1.0, 1.0)[0],
+            -super::delta(right, 0.0, 1.0, 1.0)[0]
+        );
+        assert_eq!(super::delta(left, 0.0, 0.0, 1.0), [0.0; 2]);
+    }
+
     use super::*;
 
     fn props(list: &[(&str, &str)]) -> Treads {

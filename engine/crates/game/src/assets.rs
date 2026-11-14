@@ -1213,11 +1213,17 @@ pub fn spring_hull_parts(
         .chain(cg.prims.iter().map(|p| p.name.to_ascii_lowercase()))
         .collect();
     let flyer_vehicle = class_collision.iter().any(|(k, _)| k == FLYER_USES_VEHICLE);
+    let terrain = |j: usize| {
+        hover
+            .terrain_bodies
+            .contains(&crate::vehicle_class::spring_body_name(j))
+    };
     hover
         .springs()
         .iter()
         .zip(hover.spring_subsets(&bodies))
-        .filter_map(|(s, [soldier, vehicle, ordnance])| {
+        .enumerate()
+        .filter_map(|(j, (s, [soldier, vehicle, ordnance]))| {
             let flyer = if flyer_vehicle { vehicle } else { soldier };
             let layers = [
                 (soldier, Layers::SOLDIER),
@@ -1229,11 +1235,14 @@ pub fn spring_hull_parts(
             .filter(|(on, _)| *on)
             .fold(Layers::NONE, |all, (_, l)| all | l);
             (layers != Layers::NONE).then(|| {
+                // The sphere's place in the TerrainCollision subset, which a
+                // vehicle pair's suspension kick reads (`core::sim::hover_pairs`).
                 HullPart::new(
                     glam::Mat4::from_translation(s.pos),
                     Shape::Sphere { radius: s.radius },
                     layers,
                 )
+                .with_flyer_subsets(false, terrain(j))
             })
         })
         .collect()

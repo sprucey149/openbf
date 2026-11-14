@@ -122,9 +122,19 @@ pub struct WalkerAim {
     seats: Vec<SeatSpec>,
     turret: Vec<Option<usize>>,
     rest_turrets: bool,
+    suspension: Option<(crate::vehicle_class::SuspensionNodes, f32)>,
 }
 
 impl WalkerAim {
+    pub fn with_suspension(
+        mut self,
+        nodes: crate::vehicle_class::SuspensionNodes,
+        rest: f32,
+    ) -> Self {
+        self.suspension = Some((nodes, rest));
+        self
+    }
+
     /// Draw each turret node along its seat's look even before anyone has
     /// aimed it. The MountedTurret writes its node every tick from its yaw
     /// and pitch, which start at 0 and stay where the last gunner left them
@@ -202,6 +212,7 @@ impl WalkerAim {
             seats,
             turret,
             rest_turrets: false,
+            suspension: None,
         }
     }
 
@@ -248,6 +259,40 @@ impl WalkerAim {
         } else {
             walk[n]
         };
+        // BF1 FUN_001ea2b8 B1:96656-96852, BF2 FUN_0021a968:
+        // the centre slides on model Y; each arm looks from its fixed bind
+        // origin toward model X=0 at its own height plus the suspension bob.
+        // The left arm uses (-forward, up, right), the right (forward, up,
+        // -right). Slot 5's two Hailfires confirm both bases. These
+        // overwrite model-space nodes, before the guns.
+        if let Some((nodes, rest)) = &self.suspension {
+            let named =
+                |name: &Option<String>| name.as_deref().and_then(|s| skel.index_of(s)) == Some(n);
+            let s = v.hover.suspension.map_or(*rest, |b| b.s);
+            if named(&nodes.centre) {
+                m.w_axis = (skel.global_bind[n].w_axis.truncate() + Vec3::Y * s).extend(1.0);
+            } else if nodes.centre.is_some() && (named(&nodes.left) || named(&nodes.right)) {
+                let origin = skel.global_bind[n].w_axis.truncate();
+                let forward = Vec3::new(-origin.x, s, 0.0).normalize_or_zero();
+                let right = Vec3::Y.cross(forward).normalize_or_zero();
+                let up = forward.cross(right);
+                // A degenerate authored arm has no usable look direction.
+                // OURS: keep its bind; trace: a class with an arm on X=0.
+                if right.length_squared() > 0.0 {
+                    let (x, y, z) = if named(&nodes.left) {
+                        (-forward, up, right)
+                    } else {
+                        (forward, up, -right)
+                    };
+                    m = Mat4::from_cols(
+                        x.extend(0.0),
+                        y.extend(0.0),
+                        z.extend(0.0),
+                        origin.extend(1.0),
+                    );
+                }
+            }
+        }
         match self.writers.get(n).and_then(Option::as_ref) {
             Some(Writer::Turret { seat, pitch_factor }) => {
                 let gun = v.guns.get(*seat).and_then(Option::as_ref);
@@ -379,6 +424,57 @@ fn limited_look(spec: &SeatSpec, look: (f32, f32)) -> (f32, f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn suspension_moves_the_centre_and_aims_each_arm_at_the_axle_height() {
+        use super::*;
+        use crate::vehicle_class::SuspensionNodes;
+        let names = ["root", "centre", "armL", "armR", "child"];
+        let skel = Skeleton::new(
+            names.map(str::to_owned).to_vec(),
+            vec![None, Some(0), Some(0), Some(0), Some(1)],
+            [
+                Vec3::ZERO,
+                Vec3::Y * 3.0,
+                Vec3::new(2.5, 2.0, 0.5),
+                Vec3::new(-2.5, 2.0, 0.5),
+                Vec3::Z,
+            ]
+            .map(Mat4::from_translation)
+            .to_vec(),
+        );
+        let aim = WalkerAim::new(&skel, vec![]).with_suspension(
+            SuspensionNodes {
+                centre: Some("centre".into()),
+                left: Some("armL".into()),
+                right: Some("armR".into()),
+            },
+            -0.125,
+        );
+        let mut s = sim();
+        let rest = aim.pose(&skel, &skel.global_bind, &s.vehicles[0]);
+        assert_eq!(rest[1].w_axis.y, 2.875);
+        assert_eq!(rest[4].w_axis.y, 2.875, "the child follows its centre");
+        for (n, axle) in [
+            (2, -rest[2].x_axis.truncate()),
+            (3, rest[3].x_axis.truncate()),
+        ] {
+            let target = Vec3::new(0.0, 1.875, 0.5);
+            let direction = (target - rest[n].w_axis.truncate()).normalize();
+            assert!(axle.abs_diff_eq(direction, 1e-6));
+            assert!((rest[n].determinant() - 1.0).abs() < 1e-6);
+            assert_eq!(rest[n].w_axis, skel.global_bind[n].w_axis);
+        }
+        s.vehicles[0].hover.suspension = Some(core::vehicle::hover::Suspension {
+            s: -0.4,
+            v: 0.0,
+            t: -0.5,
+        });
+        let sunk = aim.pose(&skel, &skel.global_bind, &s.vehicles[0]);
+        assert_eq!(sunk[1].w_axis.y, 2.6);
+        assert_ne!(sunk[2], rest[2]);
+        assert_ne!(sunk[3], rest[3]);
+    }
+
     use super::BarrelKicks;
     use core::vehicle::gun::GunState;
     use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};

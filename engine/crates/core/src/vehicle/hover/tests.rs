@@ -2,6 +2,48 @@
 //! and the TAT1 skiff by hand (§9), on a flat plane and a wall.
 
 use super::*;
+
+#[test]
+fn suspension_rests_kicks_clamps_and_settles() {
+    let p = SuspensionParams {
+        min: -0.5,
+        rest: -0.125,
+    };
+    let mut s = Suspension::new(&p);
+    s.step(&p, crate::TICK_DT);
+    assert_eq!(s.s, p.rest);
+    s.kick(&p, -2.0, true);
+    s.step(&p, crate::TICK_DT);
+    assert!(s.s < p.rest);
+    for _ in 0..300 {
+        s.step(&p, crate::TICK_DT);
+        assert!((p.min..=0.0).contains(&s.s));
+    }
+    assert!((s.s - p.rest).abs() < 1e-5);
+    let mut rising = Suspension::new(&p);
+    rising.kick(&p, -2.0, false);
+    assert_eq!(rising.v, 2.0);
+    assert_eq!(rising.t, 0.25);
+}
+
+#[test]
+fn suspension_state_changes_the_vehicle_hash() {
+    let mut v = vehicle(Vec3::ZERO, 0.0);
+    let hash = |v: &Vehicle| {
+        let mut bytes = Vec::new();
+        v.hover.hash_into(&mut |b| bytes.extend_from_slice(b));
+        bytes
+    };
+    let before = hash(&v);
+    v.hover.suspension = Some(Suspension::new(&SuspensionParams {
+        min: -0.5,
+        rest: -0.125,
+    }));
+    assert_ne!(hash(&v), before);
+    let rest = hash(&v);
+    v.hover.suspension.as_mut().unwrap().v = 1.0;
+    assert_ne!(hash(&v), rest);
+}
 use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
 use crate::weapon::HealthType;
 
@@ -65,6 +107,7 @@ pub(crate) fn skiff() -> HoverParams {
             spring([0.0, 0.3, -2.0], 3.0, 2.0, 0.0),
         ],
         hull: Vec::new(),
+        suspension: None,
     }
 }
 
@@ -601,6 +644,7 @@ fn fighter_tank(hull: Vec<HullBody>) -> HoverParams {
             spring(1.4, -2.3, 1.2),
         ],
         hull,
+        suspension: None,
         ..skiff()
     }
 }

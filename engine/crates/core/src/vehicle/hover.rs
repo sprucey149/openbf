@@ -185,6 +185,98 @@ pub struct HoverParams {
     pub springs: Vec<Spring>,
     /// The non-spring bodies that meet the world (§13.2).
     pub hull: Vec<HullBody>,
+    /// `SuspensionNodeName`'s bob ([`Suspension`]); `None` when the class
+    /// names no node (K+0x27a4 / K+0xe2c = 0, the constructors' value).
+    pub suspension: Option<SuspensionParams>,
+}
+
+/// The two numbers of a class's `SuspensionNodeName` bob (B1 K+0x279c /
+/// +0x27a0, B2 K+0xe24 / +0xe28; keys 0xf0856c5d and 0x8eda7a09, names not
+/// known, setters B1:102200 / B1:102010; both 0 in the constructors,
+/// B1:101104-101109, B2:136026-136027). Only the hailfire authors them
+/// (-0.5 / -0.125 on both discs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SuspensionParams {
+    /// The lowest the body sinks (K+0x279c), metres along the model's y.
+    pub min: f32,
+    /// Where it rests (K+0x27a0).
+    pub rest: f32,
+}
+
+/// The body's bob on its suspension (`analysis/re-hover.md` §6.20): `s`
+/// (E+0x61c / BF2 E+0x4ec), metres the `SuspensionNodeName` node sits
+/// below its bind, its speed `v` (E+0x620 / E+0x4f0) and the stop `t`
+/// (E+0x618 / E+0x4e8). The constructor sets s and t to the rest and v
+/// to 0 (B1:96269-96273); [`HoverState::suspension`] is `None` until the
+/// first step or kick, which starts from those.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Suspension {
+    pub s: f32,
+    pub v: f32,
+    pub t: f32,
+}
+
+impl Suspension {
+    pub fn new(p: &SuspensionParams) -> Self {
+        Self {
+            s: p.rest,
+            v: 0.0,
+            t: p.rest,
+        }
+    }
+
+    /// One update (BF1 FUN_001ea9f8 B1:97146-97203, BF2 FUN_0021b470
+    /// B2:131574-131617, the same code): a spring of 205 and damping 6.5
+    /// toward the rest, held to [min, 0]; then the stop: below the rest it
+    /// is a floor, at or above a ceiling, and each time it holds (or the
+    /// body turns back past it) it moves to the mirror of `s` about the
+    /// rest and a falling speed is zeroed.
+    pub fn step(&mut self, p: &SuspensionParams, dt: f32) {
+        self.v += ((self.s - p.rest) * -205.0 - self.v * 6.5) * dt;
+        self.s += self.v * dt;
+        if 0.0 < self.s {
+            self.s = 0.0;
+            self.v = 0.0;
+        }
+        if self.s < p.min {
+            self.s = p.min;
+            self.v = 0.0;
+        }
+        let (s, t) = (self.s, self.t);
+        if t < p.rest {
+            if t <= s {
+                if self.v <= 0.0 {
+                    return;
+                }
+            } else {
+                self.s = t;
+            }
+        } else if s <= t {
+            if 0.0 <= self.v {
+                return;
+            }
+        } else {
+            self.s = t;
+        }
+        self.t = (p.rest + p.rest) - self.s;
+        if self.v < 0.0 {
+            self.v = 0.0;
+        }
+    }
+
+    /// A contact's kick (BF1 FUN_001ee708 B1:100046-100072, BF2
+    /// B2:134773-134800): `k` is the contact's normal speed times the
+    /// body's up · the normal. A body in the class's TerrainCollision
+    /// subset pushes the node down by it, any other body up; the stop then
+    /// goes to the bottom (falling) or to the bottom's mirror (rising).
+    pub fn kick(&mut self, p: &SuspensionParams, k: f32, terrain: bool) {
+        self.v = if terrain { self.v + k } else { self.v - k };
+        self.t = if self.v <= 0.0 {
+            p.min
+        } else {
+            (p.rest + p.rest) - p.min
+        };
+    }
 }
 
 /// §6.9's five class fields (K+0xf88..+0xf98), constructor defaults
@@ -340,6 +432,9 @@ pub struct HoverState {
     pub jump_timer: f32,
     /// A bot driver's state; hashed only once a bot has driven.
     pub ai: HoverAi,
+    /// The `SuspensionNodeName` bob; `None` for a class with none and
+    /// before the first update of one that has it. Hashed when `Some`.
+    pub suspension: Option<Suspension>,
 }
 
 impl Default for HoverState {
@@ -358,6 +453,7 @@ impl Default for HoverState {
             jumping: false,
             jump_timer: 0.0,
             ai: HoverAi::default(),
+            suspension: None,
         }
     }
 }
@@ -385,6 +481,16 @@ impl HoverState {
         if self.ai != HoverAi::default() {
             self.ai.hash_into(eat);
         }
+        if let Some(s) = self.suspension {
+            for x in [s.s, s.v, s.t] {
+                eat(&x.hash_bits().to_le_bytes());
+            }
+        }
+    }
+
+    /// The class's bob, started at the rest the first time it is asked.
+    pub fn suspension_mut(&mut self, p: &SuspensionParams) -> &mut Suspension {
+        self.suspension.get_or_insert_with(|| Suspension::new(p))
     }
 
     /// FUN_001e1fc0: the pool refills by `x`; at [`ENERGY_RECOVER`] or more
@@ -871,6 +977,31 @@ fn each_contact(
     }
 }
 
+/// After a K7 response, the suspension's kick (§6.20; B1:100040-100075,
+/// B2:134770-134800): only while the body moves faster than a hundredth of
+/// ForwardSpeed (the test squares both: `|v|² > ForwardSpeed² · 1e-4`), on
+/// the velocity the response left. `k` is the contact's normal speed
+/// before the response times the body's up · the normal; `terrain`, the
+/// body's place in the class's TerrainCollision subset. A spring sphere's
+/// own contact returns before this (B1:99893-99950), so on the ground the
+/// hailfire's bob holds at its rest.
+pub fn kick_suspension(v: &mut Vehicle, p: &HoverParams, k: f32, terrain: bool) {
+    let Some(sp) = &p.suspension else {
+        return;
+    };
+    if p.forward_speed * p.forward_speed * 0.0001 < v.vel.length_squared() {
+        v.hover.suspension_mut(sp).kick(sp, k, terrain);
+    }
+}
+
+/// Each update, the suspension's spring ([`Suspension::step`]) for a class
+/// that names its node.
+pub fn suspend(v: &mut Vehicle, p: &HoverParams, dt: f32) {
+    if let Some(sp) = &p.suspension {
+        v.hover.suspension_mut(sp).step(sp, dt);
+    }
+}
+
 /// The contact pass (§7, FUN_0021fd98 against static world bodies, v_other
 /// = 0): spring spheres through the hook and K5, then the hull bodies
 /// through K7-K9, each body queried after the one before has pushed the
@@ -931,6 +1062,7 @@ pub fn contacts(v: &mut Vehicle, p: &HoverParams, world: &impl ContactSource) ->
                     vt -= vt * (mu * j / l).fmin(1.0);
                 }
                 v.vel = vt + n * (j + s);
+                kick_suspension(v, p, s * n.dot(up), hb.terrain);
             }
             // K8
             if p.set_altitude <= 0.0 && n.y > 0.5 {

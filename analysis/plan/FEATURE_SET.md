@@ -36,7 +36,9 @@ and LAN are decisions for later work, not current tasks.
   [soldier rulebook](../gameplay-normalization.md) defines the shared infantry scale.
   The [vehicle rulebook](../vehicle-normalization.md) defines BF2 numbers for matched
   ground hulls and guns, family scaling for BF1-only hulls, and the authored differences
-  in projectile motion, kits, and flyer rules.
+  in projectile motion, kits, and flyer rules. The BF1 Hailfire retains its
+  BF1 homing launcher and spider cannon (maintainer, 2026-11-14); the vehicle
+  rulebook records its damage conversion.
 - **Droidekas** sprint only as a ball, on the shared bar, and the ball jump spends that bar too.
 
 ### Movement & feel

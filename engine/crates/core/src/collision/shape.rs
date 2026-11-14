@@ -672,6 +672,16 @@ pub struct HullPart {
     /// [`Body::hit_mult`] of the body placed from this part.
     pub hit_mult: f32,
     pub flyer_part: bool,
+    /// In the class's TerrainCollision subset: a flyer's terrain contact
+    /// tests these, and a hover's spring spheres carry it for the
+    /// suspension kick (`crate::vehicle::hover::kick_suspension`). A
+    /// hover's model parts carry false: every shipped hover authors
+    /// `AddSpringBody`, which names its sphere on the TerrainCollision line,
+    /// so the subset holds only what lines name, and no line names a model
+    /// body there (the BF2 fighter tanks' `p_cube1` is BuildingCollision).
+    /// OURS: a class with no line at all keeps every body in the subset
+    /// (B1 FUN_001676b0); none ships with a suspension. trace: the class
+    /// scan, if one ever does.
     pub terrain_part: bool,
 }
 

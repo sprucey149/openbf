@@ -5,6 +5,37 @@ use crate::vehicle::{SeatKind, VehicleSpec};
 use crate::weapon::HealthType;
 use glam::Quat;
 
+#[test]
+fn a_vehicle_contact_kicks_only_an_enabled_suspension_with_the_parts_sign() {
+    let (_, _, _, mut p) = pair();
+    p.suspension = Some(crate::vehicle::hover::SuspensionParams {
+        min: -0.5,
+        rest: -0.125,
+    });
+    for terrain in [true, false] {
+        let mut v = spec(0, Vec3::ZERO).build(1);
+        v.vel = Vec3::NEG_Y * 10.0;
+        respond(&mut v, &p, Vec3::ZERO, p.mass, 0.1, Vec3::Y, terrain);
+        assert_eq!(
+            v.hover.suspension.unwrap().v,
+            if terrain { -10.0 } else { 10.0 }
+        );
+    }
+    let mut still = spec(0, Vec3::ZERO).build(1);
+    respond(&mut still, &p, Vec3::ZERO, p.mass, 0.1, Vec3::Y, true);
+    assert!(
+        still.hover.suspension.is_none(),
+        "a stationary overlap supplies no kick"
+    );
+    p.suspension = None;
+    still.vel = Vec3::NEG_Y * 10.0;
+    respond(&mut still, &p, Vec3::ZERO, p.mass, 0.1, Vec3::Y, true);
+    assert!(
+        still.hover.suspension.is_none(),
+        "ordinary hovers keep their old state"
+    );
+}
+
 fn spec(class: u32, pos: Vec3) -> VehicleSpec {
     VehicleSpec {
         kind: VehicleKind::Hover,
@@ -59,13 +90,13 @@ fn hover_pairs_use_relative_velocity_and_speed_weighted_default_masses() {
     let (_, _, _, p) = pair();
     let mut v = spec(0, Vec3::ZERO).build(1);
     v.vel = Vec3::new(-10.0, 3.0, 0.0);
-    let hit = respond(&mut v, &p, Vec3::X * 2.0, 1.0, 0.25, Vec3::X);
+    let hit = respond(&mut v, &p, Vec3::X * 2.0, 1.0, 0.25, Vec3::X, false);
     assert_eq!(hit.normal_speed, -12.0);
     assert!((v.vel.x - 0.125).abs() < 1e-6);
     assert!((v.vel.y - 0.46875).abs() < 1e-6);
     assert_eq!(v.pos, Vec3::X * 0.25);
     v.vel = Vec3::X * 2.0;
-    respond(&mut v, &p, Vec3::X * 2.0, 1.0, 0.25, Vec3::X);
+    respond(&mut v, &p, Vec3::X * 2.0, 1.0, 0.25, Vec3::X, false);
     assert_eq!(v.vel, Vec3::X * 2.0, "co-moving hulls must not brake");
 }
 
@@ -203,7 +234,7 @@ fn hover_pairs_account_for_the_other_hulls_model_mass() {
     p.mass = 11.062_572;
     let mut v = spec(0, Vec3::ZERO).build(1);
     v.vel = Vec3::NEG_Y * 2.0;
-    respond(&mut v, &p, Vec3::ZERO, 302.695_4, 0.1, Vec3::Y);
+    respond(&mut v, &p, Vec3::ZERO, 302.695_4, 0.1, Vec3::Y, false);
     assert!(
         v.vel.y > 0.2 && v.vel.y < 0.25,
         "light STAP bounces off the heavy tank"
@@ -211,7 +242,7 @@ fn hover_pairs_account_for_the_other_hulls_model_mass() {
     let mut tank = spec(0, Vec3::ZERO).build(1);
     p.mass = 302.695_4;
     tank.vel = Vec3::NEG_Y * 2.0;
-    respond(&mut tank, &p, Vec3::ZERO, 11.062_572, 0.1, Vec3::Y);
+    respond(&mut tank, &p, Vec3::ZERO, 11.062_572, 0.1, Vec3::Y, false);
     assert!(
         tank.vel.y < -1.8,
         "the reciprocal contact must retain the mass difference"

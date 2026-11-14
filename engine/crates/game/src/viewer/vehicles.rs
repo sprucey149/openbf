@@ -146,6 +146,8 @@ pub struct VehicleVisuals {
     texture_cache_hits: usize,
 }
 
+type HoverVisual = (Option<String>, crate::vehicle_class::SuspensionNodes, f32);
+
 /// One side's baked vehicles: its directory and geometry → LOD0 model.
 struct Side {
     dir: PathBuf,
@@ -157,9 +159,8 @@ struct Side {
     walkers: HashMap<String, manifest::ManifestWalker>,
     /// LOD0 model (lowercase) → its flyer's fins clip, if any.
     flyers: HashMap<String, Option<String>>,
-    /// LOD0 model (lowercase) → its posed hover's `FinAnimation` clip
-    /// (card VPOSE).
-    hovers: HashMap<String, Option<String>>,
+    /// LOD0 model (lowercase) → fin clip, suspension nodes and rest.
+    hovers: HashMap<String, HoverVisual>,
     walker_seats: HashMap<String, Vec<crate::vehicle_class::SeatSpec>>,
 }
 
@@ -264,8 +265,19 @@ impl VehicleSides {
                             hovers: m
                                 .vehicles
                                 .iter()
-                                .filter_map(|v| v.hover.as_ref())
-                                .map(|h| (h.skin.to_ascii_lowercase(), h.fin.clone()))
+                                .filter_map(|v| {
+                                    let h = v.hover.as_ref()?;
+                                    let c = crate::vehicle_class::HoverClass::from_db(
+                                        &db,
+                                        &v.class.name,
+                                    )
+                                    .unwrap_or_default();
+                                    let rest = c.params().suspension.map_or(0.0, |p| p.rest);
+                                    Some((
+                                        h.skin.to_ascii_lowercase(),
+                                        (h.fin.clone(), c.suspension, rest),
+                                    ))
+                                })
                                 .collect(),
                             dir,
                         })
@@ -868,15 +880,16 @@ enum Rigged {
     Hover,
 }
 
-/// The rig of side model `model` from its skin GLB: a walker's, a posed
-/// hover's or a flyer's, each with the seats of the class that names it.
+/// A side model's skinned rig, with its class's seats and suspension.
 fn side_rig(side: &Side, model: &str, a: SkinnedAsset) -> WalkerRig {
     let name = model.to_ascii_lowercase();
     let seats = || side.walker_seats.get(&name).cloned().unwrap_or_default();
     if let Some(w) = side.walkers.get(&name) {
         WalkerRig::new(a.skeleton, a.clips, w).with_seats(seats())
-    } else if let Some(fin) = side.hovers.get(&name) {
-        WalkerRig::new_hover(a.skeleton, a.clips, fin.as_deref()).with_seats(seats())
+    } else if let Some((fin, nodes, rest)) = side.hovers.get(&name) {
+        WalkerRig::new_hover(a.skeleton, a.clips, fin.as_deref())
+            .with_seats(seats())
+            .with_suspension(nodes.clone(), *rest)
     } else {
         let fin = side.flyers.get(&name).cloned().flatten();
         WalkerRig::new_flyer(a.skeleton, a.clips, fin.as_deref()).with_seats(seats())

@@ -483,12 +483,17 @@ fn shared_classes_keep_separate_damage_rules() {
     };
     let hailfire = gun("cis_tread_hailfire", 1);
     let spider = gun("cis_walk_spider", 1);
-    assert_same_gun(
-        "Hailfire",
-        &hailfire,
-        &bf2_ground_gun(&bf2, "cis_weap_tread_hailfire_chaingun"),
+    // The maintainer chose the BF1 kit: retain its native fire/heat behavior,
+    // using the ordinary BF1 damage conversion to the shared health scale.
+    assert_eq!(hailfire.shot_delay, [0.225; 2]);
+    assert_eq!(hailfire.heat_per_shot, 0.395);
+    assert_eq!(hailfire.heat_recover_rate, 0.4);
+    assert_eq!(hailfire.ordnance.max_damage, 400.0);
+    assert_eq!(
+        hailfire.ordnance.scales[HealthType::Person as usize],
+        BF1_SCALE
     );
-    assert_eq!(hailfire.ordnance.max_damage, 50.0);
+    assert!((hailfire.ordnance.explosion.as_ref().unwrap().damage - 400.0).abs() < 1e-4);
     assert_eq!(spider.ordnance.max_damage, 250.0);
     assert_eq!(hailfire.ordnance.velocity, spider.ordnance.velocity);
     let mut space = core::sim::Sim::new(42);
@@ -516,7 +521,15 @@ fn shared_classes_keep_separate_damage_rules() {
         .explosion
         .unwrap();
     assert_eq!(impact.damage, 0.0);
-    assert_eq!(impact.look, body.look);
+    assert_eq!(impact.look.class, "openbf_bf1_gunturret_impact_exp");
+    assert_eq!(body.look.class, "com_weap_bldg_gunturret_exp");
+    assert_eq!(
+        impact.look,
+        core::impact::ExplosionLook {
+            class: impact.look.class.clone(),
+            ..body.look.clone()
+        }
+    );
     assert_eq!(
         body.damage * body.scales[HealthType::Person as usize],
         25.0 * BF1_SCALE
@@ -542,4 +555,49 @@ fn the_pass_never_reaches_bf2_data() {
             assert_eq!(now.get(row.class), Some(def), "{}", row.class);
         }
     }
+}
+
+#[test]
+fn bf1_hailfire_keeps_its_homing_clip_and_reload() {
+    if dir().is_none() {
+        return;
+    }
+    let bf1 = all_classes("bf1", false);
+    let seats = game::vehicle_class::seats(&bf1, "cis_tread_hailfire");
+    let gun = weapon_from_db(&bf1, &seats[0].weapons[0].class).unwrap();
+    assert_eq!(gun.rounds_per_clip, 5);
+    assert_eq!(gun.reload_time, 2.5);
+    assert_eq!(gun.shot_delay, [0.25; 2]);
+    let missile = gun.ordnance.missile.as_ref().unwrap();
+    assert_eq!(missile.turn_rate, 8.0);
+    assert_eq!(missile.waver_turn, 2.25);
+    assert!(!missile.ramps);
+    let mut state = core::weapon::WeaponState::new(&gun, true, 32);
+    let mut rng = core::lcg::GameLcg::new(42);
+    let mut shots = Vec::new();
+    for tick in 0..=120 {
+        let held = [0, 9, 18, 27, 36, 60, 120].contains(&tick);
+        state.update(
+            core::TICK_DT,
+            &gun,
+            core::weapon::FireInput {
+                held,
+                ..Default::default()
+            },
+            &mut rng,
+            &mut shots,
+        );
+        if tick == 36 || tick == 60 {
+            assert_eq!(shots.len(), 5, "tick {tick}");
+        }
+    }
+    assert_eq!(
+        shots.len(),
+        6,
+        "the next clip becomes available after reload"
+    );
+    let bf2 = all_classes("bf2", false);
+    let other = weapon_from_db(&bf2, "cis_weap_tread_hailfire_missile").unwrap();
+    assert_eq!((other.rounds_per_clip, other.reload_time), (16, 4.0));
+    assert_eq!(other.ordnance.missile.unwrap().turn_rate, 0.0);
 }

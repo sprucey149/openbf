@@ -151,8 +151,26 @@ pub struct HoverClass {
     /// The soldier, vehicle and ordnance lines and the `AddSpringBody`
     /// spheres in PROP order, for [`Self::spring_subsets`].
     spring_steps: Vec<SpringStep>,
-    /// BF2's tread scroll ([`tread`]); empty on every BF1 class.
+    /// Tread scroll: BF2's properties or BF1's fixed ground-hover law.
     pub treads: tread::Treads,
+    /// `SuspensionNodeName` and its arms (the hailfire's), which the draw
+    /// poses from the sim's bob (`core::vehicle::hover::Suspension`).
+    pub suspension: SuspensionNodes,
+    /// The bob's two numbers, K+0x279c / +0x27a0 (B2 +0xe24 / +0xe28).
+    suspension_numbers: core::vehicle::hover::SuspensionParams,
+}
+
+/// The nodes a class's suspension moves (B1 K+0x27a4 / +0x27a8 / +0x27ac,
+/// setters B1:102163-102180 / B1:102056 / B1:101818-101837; BF2 K+0xe2c /
+/// +0xe30 / +0xe34, B2:137311-137331): the body's node and the two arms,
+/// as authored. The setters also keep each node's model-space bind
+/// position (K+0x27b0 / +0x27c0 / +0x27d0), which the draw looks up
+/// here by name in the rig.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SuspensionNodes {
+    pub centre: Option<String>,
+    pub left: Option<String>,
+    pub right: Option<String>,
 }
 
 /// One PROP of [`HoverClass::spring_subsets`]'s replay.
@@ -171,10 +189,21 @@ enum SpringStep {
 /// The [`SpringStep::Line`] index of each subset key.
 const SPRING_STEP_KEYS: [&str; 3] = ["SoldierCollision", "VehicleCollision", "OrdnanceCollision"];
 
+/// The suspension's bottom and rest (`SuspensionParams`), by hash: their
+/// names are not known (B1:102200, B1:102010; B2 FUN_002223a0).
+const SUSPENSION_MIN: u32 = 0xf085_6c5d;
+const SUSPENSION_REST: u32 = 0x8eda_7a09;
+
 /// `SetSpringBody` (re-hover §13.2): a spring on an existing primitive.
 const SET_SPRING_BODY: u32 = 0x577b_739e;
 /// The name [`HoverClass`] lists an `AddSpringBody` sphere under.
 const SPRING_BODY: &str = "springbody";
+
+/// Spring `j`'s (from 0) name in [`HoverClass::terrain_bodies`] /
+/// [`HoverClass::building_bodies`].
+pub fn spring_body_name(j: usize) -> String {
+    format!("{SPRING_BODY}{}", j + 1)
+}
 
 /// One `TerrainCollision` / `BuildingCollision` line (B2 FUN_00216198 /
 /// FUN_00215fb8): the layer's accumulator gains the body, or empties.
@@ -228,6 +257,7 @@ impl Default for HoverClass {
                 springs: Vec::new(),
                 bf1_ai: false,
                 hull: Vec::new(),
+                suspension: None,
             },
             lift_spring: 5.0,
             lift_damp: 2.0,
@@ -237,6 +267,11 @@ impl Default for HoverClass {
             building_bodies: Vec::new(),
             spring_steps: Vec::new(),
             treads: tread::Treads::default(),
+            suspension: SuspensionNodes::default(),
+            suspension_numbers: core::vehicle::hover::SuspensionParams {
+                min: 0.0,
+                rest: 0.0,
+            },
         }
     }
 }
@@ -344,6 +379,10 @@ impl HoverClass {
             c.building_bodies.clear();
             c.spring_steps.clear();
             c.treads.derive();
+            // The derive copy keeps the bottom and the three names but not
+            // the rest (B1:101297-101300, B2:136246-136249): a child that
+            // authors no rest of its own takes the constructor's 0.
+            c.suspension_numbers.rest = d.suspension_numbers.rest;
             c.motion.velocity_spring = d.motion.velocity_spring;
             c.motion.velocity_damp = d.motion.velocity_damp;
             c.motion.omega_x_spring = d.motion.omega_x_spring;
@@ -355,6 +394,9 @@ impl HoverClass {
                     c.set(k, v);
                 }
             }
+        }
+        if !db.is_bf2() && c.motion.set_altitude <= 0.0 {
+            c.treads = tread::Treads::bf1();
         }
         Some(c)
     }
@@ -435,7 +477,14 @@ impl HoverClass {
     /// bodies: [`Self::hull`] needs the geometry's primitives
     /// (`vehicle_pads::install` fills them in).
     pub fn params(&self) -> HoverParams {
-        self.motion.clone()
+        HoverParams {
+            suspension: self
+                .suspension
+                .centre
+                .is_some()
+                .then_some(self.suspension_numbers),
+            ..self.motion.clone()
+        }
     }
 
     /// The authored spring points in property order.
@@ -460,7 +509,7 @@ impl HoverClass {
         let mut names: Vec<String> = bodies.to_vec();
         let mut acc: [Vec<String>; 3] = Default::default();
         let mut out: Vec<[bool; 3]> = Vec::new();
-        let spring = |j: usize| format!("{SPRING_BODY}{}", j + 1);
+        let spring = spring_body_name;
         for step in &self.spring_steps {
             match step {
                 SpringStep::Geometry => acc.iter_mut().for_each(Vec::clear),
@@ -490,6 +539,31 @@ impl HoverClass {
     fn set(&mut self, k: u32, v: &str) {
         if self.treads.set(k, v) {
             return;
+        }
+        let name = || Some(v.trim().to_owned());
+        if k == h("SuspensionNodeName") {
+            self.suspension.centre = name();
+            return;
+        }
+        if k == h("SuspensionLeftArmNodeName") {
+            self.suspension.left = name();
+            return;
+        }
+        if k == h("SuspensionRightArmNodeName") {
+            self.suspension.right = name();
+            return;
+        }
+        let numbers: [(u32, &mut f32); 2] = [
+            (SUSPENSION_MIN, &mut self.suspension_numbers.min),
+            (SUSPENSION_REST, &mut self.suspension_numbers.rest),
+        ];
+        for (key, slot) in numbers {
+            if k == key {
+                if let Some(x) = float(v) {
+                    *slot = x;
+                }
+                return;
+            }
         }
         if k == h("NoRandomSpring") {
             self.motion.random_spring = false;

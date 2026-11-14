@@ -54,6 +54,16 @@ pub struct WalkerRig {
 }
 
 impl WalkerRig {
+    /// The hover's separately written suspension nodes (re-vehicle-pose 6).
+    pub fn with_suspension(
+        mut self,
+        nodes: crate::vehicle_class::SuspensionNodes,
+        rest: f32,
+    ) -> Self {
+        self.aim = self.aim.with_suspension(nodes, rest);
+        self
+    }
+
     /// A flyer's rig: its `takeoff` clip and its fins clip by name
     /// (`manifest::ManifestFlyer::fin`), if the bake found them.
     pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {

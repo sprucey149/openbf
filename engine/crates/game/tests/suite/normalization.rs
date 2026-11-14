@@ -635,6 +635,7 @@ fn bf1_changes_stay_inside_the_rules() {
         [
             "openbf_bf1_gunturret_impact_exp",
             "openbf_bf1_hailfire_cannon",
+            "openbf_bf1_hailfire_cannon_exp",
             "openbf_bf1_hailfire_cannon_ord",
             "openbf_bf1_mtt_cannon",
             "openbf_bf1_mtt_cannon_ord",

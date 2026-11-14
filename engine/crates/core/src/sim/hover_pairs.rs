@@ -68,6 +68,7 @@ pub(super) fn contacts(
                     other_mass,
                     depth,
                     normal,
+                    part.terrain_part,
                 ));
             }
         }
@@ -76,7 +77,10 @@ pub(super) fn contacts(
 
 /// K4 bypasses the spring hook, even when the participating part is a spring
 /// sphere. K7 uses relative velocity and the speed-weighted mass ratio;
-/// K9 separates by the entire depth.
+/// K9 separates by the entire depth. The suspension's kick follows the
+/// response (`hover::kick_suspension`; BF1 takes this path for a vehicle
+/// other, B1:99887-99888, then the shared response and kick); `terrain` is
+/// the part's place in the class's TerrainCollision subset.
 fn respond(
     v: &mut Vehicle,
     p: &HoverParams,
@@ -84,6 +88,7 @@ fn respond(
     mass: f32,
     depth: f32,
     n: Vec3,
+    terrain: bool,
 ) -> Impact {
     let up = v.rot * Vec3::Y;
     let forward = v.rot * Vec3::Z;
@@ -110,6 +115,7 @@ fn respond(
             tangent -= tangent * (mu * impulse / length).min(1.0);
         }
         v.vel = tangent + n * (impulse + speed) + other;
+        crate::vehicle::hover::kick_suspension(v, p, speed * n.dot(up), terrain);
     }
     if p.set_altitude <= 0.0 && n.y > 0.5 {
         v.hover.g = 1.0;

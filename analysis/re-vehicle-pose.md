@@ -492,10 +492,11 @@ BARC's doubled dummyroot is static, so there both rules score the same.
   turret entry to 1e-4 and the aimer to 0.004 (`game/tests/maf.rs`). The port now draws a flyer's turret node from
   look (0, 0) before anyone aims it (`WalkerAim::writing_turrets_at_rest`). Hovers and walkers still keep the bind
   until aimed; `measure:` a never-manned BF1 skiff's `gunl` / `gunr`.
-- [V] The hailfire droid's draw re-aims three nodes named by `SuspensionNodeName` / `SuspensionLeftArmNodeName` /
-  `SuspensionRightArmNodeName` (FNV 0xe534c2cb / 0xabb24116 / 0x580b459f; BF1 K+0x27a4..0x27ac, B1:96879-96983;
-  BF2 B2:131396-131580); only `cis_tread_hailfire` authors them (CIS_HailFire_Droid_center, armL, armR) - on no
-  showcase map. The look-at they build is not read [H].
+- [V][L] The Hailfire centre and suspension arms now use the separate node
+  writers and spring state in `re-hover.md` 6.20. Both slot 5 Hailfires'
+  three matrices match the port within 2.3841858e-7. BF1's hardcoded wheel
+  texture scroll is connected to the renderer.
+
 
 ## 7. For the port (card VPOSE build)
 What exists: hovers drawn rigid (`viewer/vehicles.rs`); a building turret's per-node parts and node laws
@@ -544,7 +545,7 @@ riders hung at `L x bind(parent) x O` (`soldier_vis::rider_now`).
   (`re-walker-nodes.md`): the parent's own table entry, read at the vehicle's own table offset.
 - BF1's in-place writes can land in a model's SHARED bind matrices when a node's first entry is the bind pointer
   (AGENT_A A4) - whether any class shows it on screen was not looked for.
-- The hailfire's suspension look-at (section 6); the BF1 STAP's and the hovernaut's posed hp nodes draw nothing.
+- The BF1 STAP's and the hovernaut's posed hp nodes draw nothing.
 - BF2 writes aimer nodes at draw time only (AGENT_A A2, a range-limited grep, [D]); the RAM's 0.01 residuals agree.
 - The constructor pose's untracked-bone translations (AGENT_B B4q): no fin rig has an untracked bone, so it does not
   arise for the five clips.

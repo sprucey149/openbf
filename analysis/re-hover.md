@@ -354,6 +354,43 @@ v_i E+0x5b8+4i; vF = E+0x4c0 · E+0x140 (velocity along the tilted model +z), ω
 
 **6.19** (B2:134798-134800): if SetAltitude ≤ 0: g = 0.
 
+**6.20 Hailfire suspension and BF1 wheels** (2026-11-14, [V][L][O] UNAUDITED).
+SuspensionNodeName and the left/right arm names select three nodes. Numeric
+properties 0xf0856c5d / 0x8eda7a09 set minimum displacement and rest; both
+games' Hailfire authors -0.5 / -0.125 metres. BF1 FUN_001ea9f8,
+B1:97146-97203, advances a spring toward rest with stiffness 205 and damping
+6.5, clamps displacement between minimum and zero, and mirrors its moving
+stop about rest at reversals. BF2 FUN_0021b470, B2:131574-131617, uses the
+same update. BF1 FUN_001ee708, B1:100040-100075, and BF2 FUN_0021fd98,
+B2:134770-134800, kick the spring after a hull contact response, only when
+the resulting hull speed exceeds one hundredth of ForwardSpeed.
+TerrainCollision parts add the incoming normal speed projected on body up;
+other parts subtract it. Ground spring contacts return before this kick.
+
+The draw (BF1 FUN_001ea2b8, B1:96656-96852) slides the centre on model Y.
+Each arm keeps its bind origin and looks toward X=0 at its own bind height
+plus displacement, retaining its bind Z. With forward toward that point,
+right = normalize(Y cross forward), up = forward cross right: the left
+arm's columns are (-forward, up, right), the right's (forward, up, -right).
+The port writes these before resolving descendants and gun nodes.
+
+The maintainer's BF1 slot 5 (SHA-256
+`e64b0b2c0615576665509d827bbdd29f8ba72a8374f4a3b44b88548aaaba2bf2`)
+holds two Hailfires at E=0x1ed88c0 / 0x1edab00, K=0x179d680. Both have
+s=-0.125. Their three model-space matrices match the port's baked battle
+rig: centre exact, maximum arm entry error 2.3841858e-7. This checks a
+retained pose, not dynamic collision motion. Private receipt:
+`engine/artifacts/hailfire-bf1/native.json`.
+
+BF1 FUN_001ec768, B1:99414-99450, advances hardcoded wheel U offsets when
+SetAltitude <= 0: dt * 0.5172535 * (forward speed +/- 2.75 * yaw rate),
+plus for wheel_left and minus for wheel_right. FUN_001ea2b8,
+B1:96914-96946, applies them to segment hashes 0xe75b2a14 / 0xe8744041.
+BF1 has no WheelTexture properties, so reading only BF2's properties left
+its wheels stationary. Treads::bf1 now supplies this law to the existing
+per-vehicle tread texture instances.
+
+
 ## 7. Contact — FUN_0021fd98(E+0x10 → E, contact, other, list) [V][O]
 
 **7.0 Wiring.**

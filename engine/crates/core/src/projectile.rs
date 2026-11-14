@@ -9,7 +9,7 @@
 //! is the AI's shot PREDICTION. Complete bit-exact bolt replay serialization
 //! is owned here by `Bolt::hash_into` (card HASH).
 
-use crate::collision::{ray_heightfield, Capsule, CollisionWorld, HullFilter, Layers};
+use crate::collision::{ray_heightfield_front, Capsule, CollisionWorld, HullFilter, Layers};
 use crate::fmath::FloatExt;
 use crate::heightfield::Heightfield;
 use crate::unit::UnitHandle;
@@ -393,7 +393,7 @@ impl Bolt {
         let mut hit = Hit::None;
         if let Some(hf) = hf {
             if let Some(t) =
-                ray_heightfield(hf, &world.cutters, origin, dir, total, TERRAIN_RAY_STEP)
+                ray_heightfield_front(hf, &world.cutters, origin, dir, total, TERRAIN_RAY_STEP)
             {
                 if t < best_t {
                     best_t = t;

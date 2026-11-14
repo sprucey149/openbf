@@ -1,7 +1,7 @@
 # Ground vehicle and anti-vehicle normalization
 
 BF1 ground battles take BF2’s health and weapon numbers for equivalent vehicles
-and turrets. A fighter tank has 8,000 HP in both games. Its light cannon takes
+and turrets, with the approved BF1 Hailfire kit exception below. A fighter tank has 8,000 HP in both games. Its light cannon takes
 two clean hits to kill a 400-HP trooper at full damage, up from one on the previous
 BF1 scale. A rocket that reaches full damage takes 1,500 HP off a hull, up from 600.
 A speeder bike has 80 HP, down from 600. This is a deliberate port rule.
@@ -13,6 +13,10 @@ The stock BF1 Imperial and CIS tap shells use the original 3 s shell default
 for their missing lifetime key. The BF2 taps author 8 s. This is a retained
 motion difference alongside the shared damage numbers. The focused expiry
 witness is in [ordnance kinds §6](re-ordnance-kinds.md#6-the-shell-and-the-mortar-launcher-vo-h3-3-4).
+
+The historical measurement tables below predate the 2026-11-14 BF1 Hailfire
+kit exception. Their Hailfire weapon rows are historical, not current values;
+the current kit and its focused checks are in `analysis/hailfire-bf1.md`.
 
 ## Rules in the loader
 
@@ -49,10 +53,13 @@ witness is in [ordnance kinds §6](re-ordnance-kinds.md#6-the-shell-and-the-mort
    1.0. A fully charged shot interpolates to 1,800 direct damage. The BF1
    Geonosis turret supplied Damage 400 where the ray reads MaxDamage and used the default
    20. It now reads 400 at full charge. The ray’s sweep gathers soldiers,
-   and hulls take no damage from that sweep. The Hailfire and spider had
-   shared the same BF1 gun. The Hailfire now takes the BF2 chaingun’s
-   50 damage, 0.05-second shot delay and heat values. The spider keeps its
-   STAP-cannon numbers. The BF2 ground seat loader also corrects a pre-existing
+   and hulls take no damage from that sweep. The Hailfire and spider share a BF1 gun on disc. The
+   maintainer's 2026-11-14 decision retains the BF1 Hailfire kit: R1's
+   five-round homing missile (0.25 s delay, 2.5 s reload, TurnRate 8) and
+   L1's spider cannon (0.225 s delay, native heat). Its cannon, round and
+   blast use isolated copies so the spider's STAP normalization cannot
+   rewrite them. They use ordinary BF1 person/shield conversion (x4/3
+   scales), retaining native hull damage and 8,000 hull HP. The BF2 ground seat loader also corrects a pre-existing
    class read. It took the first MaxDamage entry, 0, in the inherited
    chaingun ordnance. The original setter processes the second entry, 50,
    last. The ground seat now uses 50. Its 0.1 armor scale yields 5 against
@@ -92,8 +99,8 @@ Sim::space_round().
   80 m/s BF2 missile with zero authored turn rate. The on-foot BF1 torpedo
   retains flat 40 m/s flight and the authored waver on the relevant classes.
   BF2 rockets accelerate from 20 to 100 m/s. Compare impact damage by age.
-  The BF1 Hailfire missile keeps its authored seat ammo supply, even though
-  its magazine size and reload come from BF2.
+  The BF1 Hailfire missile keeps its authored seat ammo supply, five-round
+  magazine and 2.5-second reload (approved kit exception, 2026-11-14).
 - **Impact push.** BF1’s fighter tank light cannons, AAT light cannon, AT-ST
   head blasters, spider blaster and combat speeder light gun keep their
   authored push where the BF2 counterpart has no damaging blast. The
