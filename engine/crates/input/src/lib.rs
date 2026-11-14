@@ -40,7 +40,7 @@ use gilrs::Button;
 
 mod flight;
 
-pub use flight::{flyer_sticks, FlightControls};
+pub use flight::{bf1_flyer_sticks, flyer_sticks, FlightControls};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Mapping {

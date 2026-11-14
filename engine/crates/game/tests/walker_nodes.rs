@@ -45,6 +45,7 @@ fn vehicle() -> Vehicle {
 fn aim(v: &mut Vehicle, seat: usize, yaw: f32, pitch: f32) {
     v.guns.resize_with(2, || None);
     v.guns[seat] = Some(GunState {
+        target: None,
         look: (yaw, pitch),
         aim: (yaw, pitch),
         rate: (0.0, 0.0),

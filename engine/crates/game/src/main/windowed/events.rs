@@ -467,12 +467,15 @@ impl winit::application::ApplicationHandler for App {
                                         self.profile.settings.pad_look_sensitivity,
                                     )
                                 };
+                                let sticks_swapped = walk.flight_sticks_swapped();
                                 let pad = self.sample_pad(look, on_foot && !space);
                                 if let Some(bb) = self.blackbox.as_mut() {
                                     bb.stick(self.stick_sample.0, self.stick_sample.1);
                                 }
                                 let pad = match controls {
-                                    Some(layout) => self.kbm.flyer_pad(layout.map_sticks(pad)),
+                                    Some(layout) => self.kbm.flyer_pad(
+                                        layout.map_sticks_for(pad, sticks_swapped),
+                                    ),
                                     None => self.kbm.pad(pad),
                                 };
                                 game::pause::resume_pad(&mut self.resume_gate, pad)

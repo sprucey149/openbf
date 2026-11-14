@@ -285,9 +285,11 @@ impl Index {
 /// segment (`analysis/re-vehicle-pose.md` 0.1). BF1's skiff
 /// (`all_hover_skiff`, map-local in TAT1) stores its guns and rudders so.
 fn bnam_bound(m: &Model, skel: &mungefs::skel::Skeleton) -> bool {
-    m.segments
-        .iter()
-        .any(|s| s.bone.as_deref().is_some_and(|b| skel.index_of(b).is_some()))
+    m.segments.iter().any(|s| {
+        s.bone
+            .as_deref()
+            .is_some_and(|b| skel.index_of(b).is_some())
+    })
 }
 
 /// Each vertex's bone for a [`bnam_bound`] model, segment by segment: its
@@ -295,11 +297,19 @@ fn bnam_bound(m: &Model, skel: &mungefs::skel::Skeleton) -> bool {
 /// writes (re-vehicle-pose 4.4: every fin rig holds `dummyroot` at the
 /// identity), so an unbound segment stays where it is stored, in model space.
 fn bnam_joints(m: &Model, skel: &mungefs::skel::Skeleton) -> Vec<Vec<usize>> {
-    let root = skel.bones.iter().position(|b| b.parent.is_none()).unwrap_or(0);
+    let root = skel
+        .bones
+        .iter()
+        .position(|b| b.parent.is_none())
+        .unwrap_or(0);
     m.segments
         .iter()
         .map(|s| {
-            let b = s.bone.as_deref().and_then(|b| skel.index_of(b)).unwrap_or(root);
+            let b = s
+                .bone
+                .as_deref()
+                .and_then(|b| skel.index_of(b))
+                .unwrap_or(root);
             vec![b; s.positions.len()]
         })
         .collect()
@@ -575,7 +585,12 @@ pub fn bake_vehicles(
                 .find(|b| b.name.eq_ignore_ascii_case(&bank_name));
             let takeoff = bank.and_then(|b| b.clip("takeoff"));
             let fin = bank.and_then(|b| flyer_fin(e, b));
-            if let Some(bank) = bank.filter(|_| takeoff.is_some() || fin.is_some()) {
+            let posed = e.props.iter().any(|p| {
+                ["TurretNodeName", "AimerNodeName", "BarrelNodeName"]
+                    .iter()
+                    .any(|n| p.key_hash == mungefs::fnv1a_lowercase(n))
+            });
+            if takeoff.is_some() || fin.is_some() || posed {
                 let entries: Vec<(&str, bool)> = takeoff
                     .map(|_| "takeoff")
                     .into_iter()
@@ -583,7 +598,7 @@ pub fn bake_vehicles(
                     .map(|n| (n, false))
                     .collect();
                 let skin = bake_skin(&ix, geometry, out, &mut skinned, "flyer", |sk| {
-                    crate::walker::skin_glb_of(sk, Some(bank), &entries, &[""], |_, _| {})
+                    crate::walker::skin_glb_of(sk, bank, &entries, &[""], |_, _| {})
                 })?;
                 skin.map(|skin| manifest::ManifestFlyer {
                     bank: bank_name,

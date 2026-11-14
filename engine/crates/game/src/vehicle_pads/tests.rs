@@ -269,7 +269,11 @@ fn a_turret_node_bound_turned_fires_from_its_drawn_barrel() {
     }];
     rest_on_turret_node(&mut g, &s, &hp);
     let q = std::f32::consts::FRAC_PI_2;
-    assert!(g.muzzle((q, 0.0)).distance(fire) < 1e-3, "{:?}", g.muzzle((q, 0.0)));
+    assert!(
+        g.muzzle((q, 0.0)).distance(fire) < 1e-3,
+        "{:?}",
+        g.muzzle((q, 0.0))
+    );
     let m = g.muzzle((65f32.to_radians(), 0.0));
     assert!(m.z > 0.3 && m.x > pivot.x, "{m:?}");
 }

@@ -515,6 +515,7 @@ fn a_seated_rider_is_drawn_on_his_vehicle() {
                     let g = setup.as_ref().and_then(|st| st.guns.get(s))?.as_ref()?;
                     let (look, rel, aim) = g.rest();
                     Some(core::vehicle::gun::GunState {
+                        target: None,
                         look,
                         aim,
                         rate: (0.0, 0.0),

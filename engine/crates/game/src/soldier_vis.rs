@@ -667,6 +667,11 @@ fn rider_now<'a>(
         .and_then(Option::as_deref)
         .filter(|_| hover);
     let hover_node = |name: &str| {
+        if v.kind == VehicleKind::Flyer {
+            let r = walk.flyer_rigs.get(class)?.as_deref()?;
+            let n = r.skeleton.index_of(name)?;
+            return Some(r.flyer_aimed_nodes(v, tp::flyer_nine(&walk.sim, v))[n]);
+        }
         let r = hover_rig?;
         let n = r.skeleton.index_of(name)?;
         Some(r.hover_nodes(v, nine.map(tp::HoverNine::pose))[n])

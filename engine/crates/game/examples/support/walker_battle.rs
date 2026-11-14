@@ -19,7 +19,7 @@ pub fn battle_on(root: &Path, map: &str, mission: &str) -> Result<(WalkSim, game
     )?;
     let (rosters, _) = game::roster::FactionRoster::pair(
         &root.join("classes"),
-        "bf2",
+        &mission.source_game,
         [
             mission.teams[0].faction.as_str(),
             mission.teams[1].faction.as_str(),
@@ -27,7 +27,11 @@ pub fn battle_on(root: &Path, map: &str, mission: &str) -> Result<(WalkSim, game
         Some(&mission),
     )?;
     let mut sim = Sim::empty(42);
-    sim.ground_rules = core::soldier::GroundRules::Bf2;
+    sim.ground_rules = if mission.source_game == "bf1" {
+        core::soldier::GroundRules::Bf1
+    } else {
+        core::soldier::GroundRules::Bf2
+    };
     for (team, definition) in mission.teams.iter().enumerate() {
         sim.battle.teams[team] = core::battle::TeamState::new(definition.tickets);
     }

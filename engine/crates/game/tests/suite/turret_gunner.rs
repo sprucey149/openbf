@@ -473,6 +473,7 @@ fn a_seated_gunner_is_drawn_at_his_seat() {
                 }
                 let g =
                     v.guns[usize::from(seat)].get_or_insert_with(|| core::vehicle::gun::GunState {
+                        target: None,
                         look,
                         aim: look,
                         rate: (0.0, 0.0),

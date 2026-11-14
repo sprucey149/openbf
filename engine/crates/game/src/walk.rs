@@ -1260,6 +1260,14 @@ impl WalkSim {
         }
     }
 
+    /// Does the player's flight layout swap the sticks against the
+    /// soldier's? BF2's flyer pilot table does; BF1's flyer seats keep the
+    /// soldier's (`input::bf1_flyer_sticks`). Guided ordnance keeps the
+    /// swapped Classic steering.
+    pub fn flight_sticks_swapped(&self) -> bool {
+        self.sim.ground_rules == core::soldier::GroundRules::Bf2 || !self.player_pilots_flyer()
+    }
+
     /// The magnet target when it is a unit (draw order of `target_draws`;
     /// a vehicle magnet draws no unit marker). Slot 0 — what the HUD draws.
     pub fn magnet(&self) -> Option<UnitHandle> {

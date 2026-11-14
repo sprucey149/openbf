@@ -187,6 +187,7 @@ impl Sim {
                 let g = setup.guns.get(s)?.as_ref()?;
                 let (look, rel, aim) = g.rest();
                 Some(GunState {
+                    target: None,
                     look,
                     aim,
                     rate: (0.0, 0.0),
@@ -273,6 +274,19 @@ impl Sim {
             return eye;
         }
         match v.kind {
+            VehicleKind::Flyer => match self
+                .seat_chase
+                .get(class)
+                .and_then(|r| r.first())
+                .copied()
+                .flatten()
+            {
+                Some(c) => {
+                    let cam = c.camera_on(v.pos, crate::vehicle::flyer::untilted(v), (0.0, 0.0));
+                    cam + dir * (eye - cam).dot(dir)
+                }
+                None => eye,
+            },
             VehicleKind::Hover => match self.hover_chase.get(class).copied().flatten() {
                 Some(c) => c.ray_origin(v, look.1, eye, dir),
                 None => eye,
@@ -431,6 +445,12 @@ impl Sim {
             self.aim_point(eye, dir, &riders, m.vehicle)
         });
         let pivot = pos + rot * g.pivot;
+        let target_model = rot.inverse() * (target - pos);
+        st.target = (flyer
+            || g.weapons
+                .iter()
+                .any(|w| g.point_aim(w, 0, target_model).is_some()))
+        .then_some(target_model);
         let mut reach = None;
         if g.turn.is_some() {
             // The PS2's aimer, in the turret's aim frame or the model's. It
@@ -576,7 +596,7 @@ impl Sim {
             let was_reloading = ws.reloading();
             let ring = reach
                 .filter(|_| !fixed_guns)
-                .and_then(|(want, rel)| ring_reach(&g, w, want, rel, dt));
+                .and_then(|(want, rel)| ring_reach(&g, w, want, rel, dt, st.target));
             let turn0 = ws.turns();
             ws.update_ring(dt, wc, input, ring, &mut self.lcg, &mut shots);
             let reload_began = !was_reloading && ws.reloading();
@@ -615,7 +635,7 @@ impl Sim {
                     .then(|| (turn % w.fire_points.len() as u64) as usize);
                 let own_aim = point
                     .filter(|_| g.turn.is_some() && !fixed_guns)
-                    .and_then(|p| barrel_aim(&g, w, p, st.look, st.rel));
+                    .and_then(|p| barrel_aim(&g, w, p, st.look, st.rel, st.target));
                 let origin = point.map_or(origin, |p| {
                     pos + rot * g.shot_point(k, Some(p), own_aim.unwrap_or(st.aim), fixed_guns)
                 });
@@ -623,7 +643,10 @@ impl Sim {
                     let d = (rot * gun::dir(aim.0, aim.1)).normalize();
                     let right = d.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
                     (d, right, right.cross(d).normalize())
-                } else if g.turn.is_none() && !fixed_guns && !w.fire_points.is_empty() {
+                } else if g.turn.is_none()
+                    && !w.fire_points.is_empty()
+                    && (!fixed_guns || point.is_some_and(|p| w.fire_limits.get(p).is_some()))
+                {
                     ring_aim(
                         &g,
                         w.fire_limits.get(point.unwrap_or(0)),
@@ -760,6 +783,7 @@ fn ring_reach(
     want: Vec3,
     rel: (f32, f32),
     dt: f32,
+    target: Option<Vec3>,
 ) -> Option<crate::weapon::Ring> {
     if !ring_differs(w) || w.fire_limits.len() != w.fire_points.len() || w.fire_points.len() > 32 {
         return None;
@@ -775,6 +799,9 @@ fn ring_reach(
         .iter()
         .enumerate()
         .fold(0u32, |m, (p, [ly, lp])| {
+            if let Some((_, open)) = target.and_then(|t| g.point_aim(w, p, t)) {
+                return if open { m | 1 << p } else { m };
+            }
             let rest = (rel.0.clamp(ly[0], ly[1]), rel.1.clamp(lp[0], lp[1]));
             let (y, pt) = free.chase(rest, want, dt);
             if inside(*ly, y) && inside(*lp, pt) {
@@ -814,13 +841,17 @@ fn ring_span(g: &GunSetup) -> Option<gun::Aimer> {
 /// angles in the aimer's base frame, `rel`, held inside that barrel's
 /// aimer's limits (`GunWeapon::fire_limits`) - `None` where the ring's
 /// barrels share their limits and fire along the seat's aim.
-fn barrel_aim(
+pub(super) fn barrel_aim(
     g: &GunSetup,
     w: &gun::GunWeapon,
     p: usize,
     look: (f32, f32),
     rel: (f32, f32),
+    target: Option<Vec3>,
 ) -> Option<(f32, f32)> {
+    if let Some((aim, _)) = target.and_then(|t| g.point_aim(w, p, t)) {
+        return Some(aim);
+    }
     if !ring_differs(w) {
         return None;
     }

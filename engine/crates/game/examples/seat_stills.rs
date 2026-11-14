@@ -58,6 +58,24 @@ fn main() -> Result<()> {
         gen: walk.sim.vehicles[slot].gen,
     };
     let player = walk.player;
+    // Optional airborne fixture for inspecting flyer gunners without a pilot.
+    if std::env::var_os("SEAT_STILLS_FLYING").is_some() {
+        let v = walk.sim.vehicle_mut(h).unwrap();
+        v.pos.y += 40.0;
+        v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
+        v.flyer.lift = 1.0;
+        walk.sim.flyer_params[index] = None;
+        for s in [2, 3] {
+            if s != seat && s < walk.sim.vehicles[slot].seats.len() as u8 {
+                let team = walk.sim.unit(player).unwrap().team;
+                let rider = walk
+                    .sim
+                    .spawn(&core::unit::UnitSpec::trooper(team, Vec3::ZERO))
+                    .context("cannot spawn fixture rider")?;
+                walk.sim.seat_unit(rider, h, s);
+            }
+        }
+    }
     anyhow::ensure!(walk.sim.seat_unit(player, h, seat), "cannot board");
     for _ in 0..30 {
         walk.step_tick(&[PadState::default()]);
@@ -69,13 +87,16 @@ fn main() -> Result<()> {
     let mut soldiers = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &root, &scene, &walk);
     let mut bolts = game::bolt_vis::BoltVis::new(&root, &scene.manifest.source_game);
     let mut sounds = game::sounds::SoundLib::load(&root.join(&map));
-    for (name, ry, fire) in [
-        ("level", 0i16, false),
-        ("up", 32767, false),
-        ("down", -32767, false),
-        ("fire", 0, true),
+    for (name, rx, ry, fire) in [
+        ("level", 0i16, 0i16, false),
+        ("up", 0, 32767, false),
+        ("down", 0, -32767, false),
+        ("left", -32767, 0, false),
+        ("right", 32767, 0, false),
+        ("fire", 0, 0, true),
     ] {
         let pad = PadState {
+            rx,
             ry,
             ..Default::default()
         };
@@ -102,7 +123,9 @@ fn main() -> Result<()> {
                         a.hash,
                         a.pos.distance(ears),
                         starts.len(),
-                        starts.first().map(|(_, s)| (s.gain, s.path.display().to_string()))
+                        starts
+                            .first()
+                            .map(|(_, s)| (s.gain, s.path.display().to_string()))
                     );
                 }
             }
@@ -134,6 +157,19 @@ fn main() -> Result<()> {
             look.map(|g| (g.look.0.to_degrees(), g.look.1.to_degrees())),
             look.map(|g| (g.aim.0.to_degrees(), g.aim.1.to_degrees())),
         );
+        if let Some(rig) = walk.flyer_rigs.get(index).and_then(Option::as_ref) {
+            let posed = rig.flyer_aimed_nodes(v, None);
+            for point in [
+                "hp_turret_left",
+                "hp_turret_right",
+                "hp_gunner1",
+                "hp_gunner2",
+            ] {
+                if let Some(n) = rig.skeleton.index_of(point) {
+                    println!("{name}: posed {point} {:?}", posed[n].w_axis.truncate());
+                }
+            }
+        }
         let skinned = soldiers.draws(&walk);
         let mut draws = gpu.view_draws(&walk.sim, walk.player);
         draws.extend(soldiers.weapon_draws(&walk));

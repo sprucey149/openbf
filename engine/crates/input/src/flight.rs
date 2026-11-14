@@ -19,7 +19,16 @@ impl FlightControls {
     /// Remap the sampled controller axes to the sim's roll, throttle, yaw
     /// and pitch channels. The right stick's look scaling comes off here.
     pub fn map_sticks(self, pad: PadState) -> PadState {
-        let classic = flyer_sticks(pad);
+        self.map_sticks_for(pad, true)
+    }
+
+    /// [`Self::map_sticks`] for a game whose flyer table swaps the sticks
+    /// (`swapped`, BF2) or keeps the soldier's (BF1, [`bf1_flyer_sticks`]).
+    pub fn map_sticks_for(self, pad: PadState, swapped: bool) -> PadState {
+        let classic = match swapped {
+            true => flyer_sticks(pad),
+            false => bf1_flyer_sticks(pad),
+        };
         match self {
             Self::Classic => classic,
             Self::RcMode2 => PadState {
@@ -31,12 +40,12 @@ impl FlightControls {
     }
 }
 
-/// Classic flight: the left stick pitches and turns, the right throttles
-/// and rolls. Both games' default tables for a flyer swap the two sticks' functions
+/// BF2's classic flight: the left stick pitches and turns, the right throttles
+/// and rolls. BF2's default table for a flyer pilot swaps the two sticks' functions
 /// against the soldier's and the ground vehicle's (BF2 0x600ee0 words 16..19, 32 33 30
-/// 31, against 30 31 32 33 at 0x600e40; BF1 file offset 0x3ba210; read back by BF2
-/// `FUN_004333a0`, BF1 `FUN_0034a7e8`). The look stick's own [`LOOK_SCALE`] comes
-/// off: a flyer's stick reaches 1, and BF2's rate blend runs over 0.7 to 1.
+/// 31, against 30 31 32 33 at 0x600e40, read back by `FUN_004333a0`). The look
+/// stick's own [`LOOK_SCALE`] comes off: a flyer's stick reaches 1, and BF2's rate
+/// blend runs over 0.7 to 1.
 /// Only the controller's axes: the keyboard's walk keys are merged after this.
 pub fn flyer_sticks(pad: PadState) -> PadState {
     let unscaled = |a: i16| PadState::quantize((PadState::axis(a) / LOOK_SCALE).clamp(-1.0, 1.0));
@@ -45,6 +54,24 @@ pub fn flyer_sticks(pad: PadState) -> PadState {
         ly: unscaled(pad.ry),
         rx: pad.lx,
         ry: pad.ly,
+        ..pad
+    }
+}
+
+/// BF1's flight: the left stick throttles and rolls, the right pitches and
+/// turns, as on foot. BF1's controller reads its sticks through table
+/// `*controller` (`FUN_0034c5f8`, words 16..19 of the 0x50-byte table at
+/// controller + 0x100). BF1 ships a swapped third table (ELF 0x519210, words
+/// 16..19 = 20 21 18 19), but no flyer seat selects it. [L] BF1 BES1 save
+/// states (`analysis/re-flyer.md`): the index at 0x642e5c is 1 while piloting
+/// the MAF and in both of its turret seats, and 0 on foot. Table 1 holds
+/// 18 19 20 21, the soldier's order. Only the right stick's [`LOOK_SCALE`]
+/// comes off.
+pub fn bf1_flyer_sticks(pad: PadState) -> PadState {
+    let unscaled = |a: i16| PadState::quantize((PadState::axis(a) / LOOK_SCALE).clamp(-1.0, 1.0));
+    PadState {
+        rx: unscaled(pad.rx),
+        ry: unscaled(pad.ry),
         ..pad
     }
 }
@@ -69,6 +96,26 @@ mod tests {
         assert!((PadState::axis(f.lx) - 1.0).abs() < 1e-3);
         assert!((PadState::axis(f.ly) + 0.5).abs() < 1e-3);
         assert_eq!(f.buttons, pad.buttons);
+    }
+
+    #[test]
+    fn a_bf1_flyer_pilot_keeps_the_soldiers_sticks() {
+        let pad = PadState {
+            lx: PadState::quantize(1.0),
+            ly: PadState::quantize(-1.0),
+            rx: PadState::quantize(LOOK_SCALE),
+            ry: PadState::quantize(-LOOK_SCALE / 2.0),
+            buttons: buttons::FIRE,
+            ..PadState::default()
+        };
+        let f = FlightControls::Classic.map_sticks_for(pad, false);
+        assert_eq!((f.lx, f.ly), (pad.lx, pad.ly));
+        assert!((PadState::axis(f.rx) - 1.0).abs() < 1e-3);
+        assert!((PadState::axis(f.ry) + 0.5).abs() < 1e-3);
+        assert_eq!(f.buttons, pad.buttons);
+        let rc = FlightControls::RcMode2.map_sticks_for(pad, false);
+        assert_eq!((rc.lx, rc.ly, rc.rx), (f.lx, f.ry, f.rx));
+        assert_eq!(rc.ry, -f.ly);
     }
 
     #[test]

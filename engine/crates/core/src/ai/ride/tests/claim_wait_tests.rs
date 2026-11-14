@@ -419,6 +419,7 @@ fn cwait_extension_preserves_progress_aim_rng_events_and_bailout() {
         s.seat_setup[0].as_mut().unwrap().guns[0] = Some(gun);
         s.vehicle_mut(vh).unwrap().guns.resize_with(2, || None);
         s.vehicle_mut(vh).unwrap().guns[0] = Some(crate::vehicle::gun::GunState {
+            target: None,
             look: (0.0, 0.0),
             aim: (0.0, 0.0),
             rate: (0.0, 0.0),

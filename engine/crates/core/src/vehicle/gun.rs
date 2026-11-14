@@ -462,6 +462,39 @@ impl Rig {
 }
 
 impl GunSetup {
+    /// Independent, model-frame aimers aim their own muzzle line at one
+    /// shared target (the LAAT and MAF wing beams). Solve the offset line,
+    /// including a barrel tip displaced from its aimer's pivot.
+    pub fn point_aim(&self, w: &GunWeapon, p: usize, target: Vec3) -> Option<((f32, f32), bool)> {
+        if self.pilot
+            || self.turn.is_none()
+            || self.framed
+            || self.aimer_bind != glam::Quat::IDENTITY
+        {
+            return None;
+        }
+        let pivot = *w.fire_pivots.get(p)?;
+        let off = *w.fire_points.get(p)? - pivot;
+        let v = target - pivot;
+        let z2 = v.length_squared() - off.x * off.x - off.y * off.y;
+        let z = z2.fmax(0.0).sqrt();
+        let h = (off.y * off.y + z * z).sqrt();
+        let pitch = fmath::asin((v.y / h.fmax(f32::MIN_POSITIVE)).clamp(-1.0, 1.0))
+            - fmath::atan2(off.y, z);
+        let (s, c) = fmath::sin_cos(pitch);
+        let mut yaw = fmath::atan2(v.x, v.z) - fmath::atan2(off.x, z * c - off.y * s);
+        let [ly, lp] = *w.fire_limits.get(p)?;
+        if ly[1] > std::f32::consts::PI && yaw < ly[0] {
+            yaw += std::f32::consts::TAU;
+        } else if ly[0] < -std::f32::consts::PI && yaw > ly[1] {
+            yaw -= std::f32::consts::TAU;
+        }
+        let inside = |l: [f32; 2], a: f32| l[0] == l[1] || (l[0] <= a && a <= l[1]);
+        Some((
+            (yaw.clamp(ly[0], ly[1]), pitch.clamp(lp[0], lp[1])),
+            z2 >= 0.0 && inside(ly, yaw) && inside(lp, pitch),
+        ))
+    }
     /// The yaw the barrel has in the bind pose — the fire point's heading
     /// from the pivot (BF1's skiff: 0 for the nose gun, about +90° for
     /// `gunl`). 0 when the fire point sits on the pivot's vertical.
@@ -616,6 +649,9 @@ pub fn turned(p: Vec3, pivot: Vec3, yaw: f32, pitch: f32) -> Vec3 {
 /// A seat's gun at run time — hashed.
 #[derive(Clone, Debug)]
 pub struct GunState {
+    /// The shared aim point, in the vehicle's model frame, for independent
+    /// mounted aimers. Kept so beams and drawn nodes use the same target.
+    pub target: Option<Vec3>,
     /// The camera's (yaw, pitch), model frame.
     pub look: (f32, f32),
     /// The aimer's (yaw, pitch), model frame.
@@ -635,6 +671,12 @@ pub struct GunState {
 
 impl GunState {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        if let Some(t) = self.target {
+            eat(&[0x74]);
+            for v in t.to_array() {
+                eat(&v.hash_bits().to_le_bytes());
+            }
+        }
         for v in [self.look.0, self.look.1, self.aim.0, self.aim.1] {
             eat(&v.hash_bits().to_le_bytes());
         }
@@ -660,6 +702,32 @@ impl GunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mounted_shared_target_is_part_of_the_simulation_hash() {
+        let mut g = GunState {
+            target: None,
+            look: (0.0, 0.0),
+            aim: (0.0, 0.0),
+            rate: (0.0, 0.0),
+            rel: (0.0, 0.0),
+            weapons: Vec::new(),
+            zoom: None,
+        };
+        let hash = |g: &GunState| {
+            let mut bytes = Vec::new();
+            g.hash_into(&mut |b| bytes.extend_from_slice(b));
+            bytes
+        };
+        let none = hash(&g);
+        g.target = Some(Vec3::ZERO);
+        assert_ne!(none, hash(&g));
+        let zero = hash(&g);
+        for target in [Vec3::X, Vec3::Y, Vec3::Z] {
+            g.target = Some(target);
+            assert_ne!(zero, hash(&g));
+        }
+    }
 
     const DEG: f32 = std::f32::consts::PI / 180.0;
 

@@ -231,7 +231,8 @@ impl VehicleSides {
                                     .walker
                                     .as_ref()
                                     .and_then(|w| w.skin.as_ref())
-                                    .or(v.hover.as_ref().map(|h| &h.skin))?;
+                                    .or(v.hover.as_ref().map(|h| &h.skin))
+                                    .or(v.flyer.as_ref().map(|f| &f.skin))?;
                                 Some((
                                     skin.to_ascii_lowercase(),
                                     crate::vehicle_class::seats(&db, &v.class.name),
@@ -360,8 +361,9 @@ pub fn find_model(
     if let Some(found) = sides.0.iter().enumerate().find_map(|(i, s)| {
         let model = s.models.get(&key)?;
         let name = model.to_ascii_lowercase();
-        let posed =
-            s.walkers.contains_key(&name) || s.flyers.contains_key(&name) || s.hovers.contains_key(&name);
+        let posed = s.walkers.contains_key(&name)
+            || s.flyers.contains_key(&name)
+            || s.hovers.contains_key(&name);
         posed.then(|| ModelSource::Side(i, model.clone()))
     }) {
         return Some(found);
@@ -575,7 +577,7 @@ impl VehicleVisuals {
             let palette = class.skin.as_ref().and_then(|sk| {
                 if v.kind == core::vehicle::VehicleKind::Flyer {
                     let nine = super::turret_pose::flyer_nine(sim, v);
-                    return sk.rig.flyer_palette(v.flyer.lift, nine);
+                    return Some(sk.rig.flyer_aimed_palette(v, nine, &kick));
                 }
                 if v.kind == core::vehicle::VehicleKind::Hover {
                     let nine = self
@@ -877,7 +879,7 @@ fn side_rig(side: &Side, model: &str, a: SkinnedAsset) -> WalkerRig {
         WalkerRig::new_hover(a.skeleton, a.clips, fin.as_deref()).with_seats(seats())
     } else {
         let fin = side.flyers.get(&name).cloned().flatten();
-        WalkerRig::new_flyer(a.skeleton, a.clips, fin.as_deref())
+        WalkerRig::new_flyer(a.skeleton, a.clips, fin.as_deref()).with_seats(seats())
     }
 }
 

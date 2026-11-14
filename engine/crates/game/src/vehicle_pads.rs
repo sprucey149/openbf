@@ -816,9 +816,14 @@ pub fn install_for_mission(
                 Some(VehicleKind::Flyer | VehicleKind::Hover)
             );
             ring.iter()
-                .map(|s| {
+                .enumerate()
+                .map(|(seat, s)| {
                     Some(if flying {
-                        let f = crate::walk::FlyerSection::gunner(Some(s));
+                        let f = if seat == 0 {
+                            crate::walk::FlyerSection::of(Some(s), sim.ground_rules)
+                        } else {
+                            crate::walk::FlyerSection::gunner(Some(s))
+                        };
                         core::vehicle::hover::ChaseSection {
                             center: f.center,
                             offset: f.offset,
@@ -1008,14 +1013,21 @@ pub fn install_for_mission(
             let building = vehicle_class::is_turret(&db, c);
             let walker = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Walker);
             let hover = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Hover);
+            let flyer = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Flyer);
             setup.guns = ring
                 .iter()
                 .map(|s| {
                     let mut g = seat_gun(sim, &db, s, hp)?;
                     if !g.pilot {
                         turret_law(&mut g, s, game == "bf2");
-                        if hover {
+                        if hover || flyer {
                             rest_on_turret_node(&mut g, s, hp);
+                        }
+                        if flyer {
+                            if let Some(p) = s.mount_pos {
+                                g.pivot = Vec3::from(p);
+                                g.framed = true;
+                            }
                         }
                         if building {
                             g.gunner = gunner_seat(m, c, s, game == "bf2");
@@ -1418,7 +1430,8 @@ pub fn side_vehicle_files(
 /// registered in `sim` (once per name), its `FirePointName` and
 /// `TurretNodeName` found among the class's nodes `hp`, its aimer from the
 /// PS2's defaults overridden by the seat's limits (degrees → radians) and
-/// rates. `None` for a seat with no weapon the db can build.
+/// rates. Unarmed mounted gunner sections retain their look state (the
+/// gunship's standing passenger); failed weapon lookups still return `None`.
 ///
 /// PROVISIONAL: a seat with no `FirePointName` (BF1 YAV1's tower turret,
 /// HOT1's hoth turret) fires from the class's `hp_fire` node — the name the
@@ -1472,7 +1485,11 @@ pub fn seat_gun(
             })
         })
         .collect();
-    if weapons.is_empty() {
+    if weapons.is_empty()
+        && !(matches!(s.kind, vehicle_class::SeatKind::Gunner(_))
+            && s.weapons.is_empty()
+            && s.mount_pos.is_some())
+    {
         return None;
     }
     let turret = s.turret_node.as_deref().and_then(node);
@@ -1624,10 +1641,8 @@ pub fn turret_law(g: &mut GunSetup, s: &vehicle_class::SeatSpec, bf2: bool) {
 /// has its points carried back here by its bind rotation. Of every baked
 /// turret node, only BF1's skiff `gunl` / `gunr` (bound at +-90 degrees of
 /// yaw) on a hover are bound turned; before this a side gun's shot left
-/// 1.3 m behind its drawn barrel. Hovers only: the backward-bound
-/// `towcablegun`, `turret_rearcannon`, `turret_rear_aimer_y` and
-/// `aimer_tailgun_y` are flyers' and walkers' nodes that the port does not
-/// pose by this law yet (`re-vehicle-pose.md` 8, cards VPOSW / VPOSF).
+/// 1.3 m behind its drawn barrel. Flyers use the same correction now that
+/// their seat nodes are posed too, including the gunship's ball turrets.
 fn rest_on_turret_node(g: &mut GunSetup, s: &vehicle_class::SeatSpec, hp: &[ManifestHardpoint]) {
     if !g.framed {
         return;

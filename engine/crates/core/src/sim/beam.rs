@@ -267,15 +267,19 @@ impl Sim {
             .as_ref()?;
         let st = v.guns.get(seat)?.as_ref()?;
         let fixed = g.pilot && v.kind == crate::vehicle::VehicleKind::Flyer;
-        let local = g.shot_point(
-            usize::from(s.weapon),
-            s.point.map(usize::from),
-            st.aim,
-            fixed,
-        );
-        let dir = (v.rot * crate::vehicle::gun::dir(st.aim.0, st.aim.1)).normalize_or_zero();
-        let origin = v.pos + v.rot * local;
         let weapon = g.weapons.get(usize::from(s.weapon))?;
+        // A mounted beam keeps following the aimer that emitted it, including
+        // a paired wing weapon's asymmetric per-emitter limits.
+        let aim = s
+            .point
+            .filter(|_| g.turn.is_some() && !fixed)
+            .and_then(|p| {
+                super::guns::barrel_aim(g, weapon, usize::from(p), st.look, st.rel, st.target)
+            })
+            .unwrap_or(st.aim);
+        let local = g.shot_point(usize::from(s.weapon), s.point.map(usize::from), aim, fixed);
+        let dir = (v.rot * crate::vehicle::gun::dir(aim.0, aim.1)).normalize_or_zero();
+        let origin = v.pos + v.rot * local;
         let dir = if g.turn.is_none() && !fixed && !weapon.fire_points.is_empty() {
             let view = v.rot * crate::vehicle::gun::dir(st.look.0, st.look.1);
             let eye = v.pos + v.rot * g.ray_eye(st.look, st.zoom.is_some());

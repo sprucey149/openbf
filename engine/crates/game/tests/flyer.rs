@@ -2,6 +2,477 @@ use game::classdb::{fnv1a_lowercase as h, ClassDb};
 use game::vehicle_class::FlyerClass;
 use std::path::PathBuf;
 
+#[path = "../examples/support/walker_battle.rs"]
+mod seat_fixture;
+
+#[test]
+fn laat_pilot_cannons_meet_the_chase_reticle_at_finite_range() {
+    use core::sim::{buttons, Event, PadState};
+    use glam::{Mat4, Quat, Vec3};
+    let root = game::assets::baked_root();
+    if !root.join("bf1_bes1/manifest.ron").is_file() {
+        return;
+    }
+    // At 35 m the elevated pilot camera asks for more than the authored
+    // cannon's 20-degree pitch travel. These targets are inside that arc.
+    for distance in [60.0, 120.0] {
+        let (mut walk, _) = seat_fixture::battle_on(&root, "bf1_bes1", "bf1_bes1_con_cw").unwrap();
+        let class = walk
+            .vehicle_classes
+            .iter()
+            .position(|c| c == "rep_fly_gunship")
+            .unwrap();
+        let slot = walk
+            .sim
+            .vehicles
+            .iter()
+            .position(|v| v.alive && v.class as usize == class)
+            .unwrap();
+        let handle = core::vehicle::VehicleHandle {
+            index: slot as u32,
+            gen: walk.sim.vehicles[slot].gen,
+        };
+        walk.sim.flyer_params[class] = None;
+        walk.sim.heightfield = None;
+        walk.sim.collision = Default::default();
+        walk.sim.vehicle_pads.clear();
+        for (i, v) in walk.sim.vehicles.iter_mut().enumerate() {
+            if i != slot {
+                v.alive = false;
+            }
+        }
+        for (i, u) in walk.sim.units.iter_mut().enumerate() {
+            if i != walk.player.index as usize {
+                u.alive = false;
+            }
+        }
+        let pos = Vec3::new(0.0, 100.0, 0.0);
+        let frame = Quat::from_rotation_x(0.45);
+        let v = walk.sim.vehicle_mut(handle).unwrap();
+        v.pos = pos;
+        v.rot = frame;
+        v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
+        v.flyer.lift = 1.0;
+        walk.sim.collision.push_body(core::collision::Body::new(
+            Mat4::from_rotation_translation(frame, pos + frame * Vec3::Z * distance),
+            core::collision::Shape::Box {
+                half: Vec3::new(200.0, 200.0, 0.5),
+            },
+        ));
+        assert!(walk.sim.seat_unit(walk.player, handle, 0));
+        for _ in 0..60 {
+            walk.step_tick(&[PadState::default()]);
+        }
+        let look = walk.sim.seat_look(walk.player).unwrap();
+        let section = walk.sim.seat_chase[class][0].unwrap();
+        let cam = section.camera_on(pos, frame, (0.0, 0.0));
+        assert!(
+            (look.eye - cam).cross(look.view).length() < 0.001,
+            "pilot ray must pass through chase camera"
+        );
+        let local_eye = frame.inverse() * (look.eye - pos);
+        let target = look.eye + look.view * (distance - 0.5 - local_eye.z);
+        let mut shots = 0;
+        let mut outlets = std::collections::BTreeSet::new();
+        for _ in 0..30 {
+            walk.step_tick(&[PadState {
+                buttons: buttons::FIRE,
+                ..Default::default()
+            }]);
+            for event in &walk.sim.events {
+                if let Event::Shot { origin, dir, .. } = event {
+                    let miss = (target - *origin).cross(*dir).length();
+                    assert!(miss < 0.1, "LAAT cannon misses {distance}m reticle by {miss}m; origin {origin:?}, dir {dir:?}, target {target:?}");
+                    outlets.insert(((frame.inverse() * (*origin - pos)).x > 0.0) as u8);
+                    shots += 1;
+                }
+            }
+        }
+        assert!(shots >= 2);
+        assert_eq!(outlets.len(), 2);
+    }
+}
+
+#[test]
+fn laat_and_maf_beams_converge_on_the_same_finite_reticle_target() {
+    use core::sim::{buttons, PadState};
+    use glam::{Mat4, Vec3};
+    let root = game::assets::baked_root();
+    if !root.join("bf1_bes1/manifest.ron").is_file() {
+        return;
+    }
+    for (name, outlets) in [
+        ("rep_fly_gunship", ["wing_turret_2", "wing_turret_1"]),
+        ("cis_fly_maf", ["hp_laser2", "hp_laser1"]),
+    ] {
+        for distance in [35.0, 120.0] {
+            let (mut walk, _) =
+                seat_fixture::battle_on(&root, "bf1_bes1", "bf1_bes1_con_cw").unwrap();
+            let class = walk.vehicle_classes.iter().position(|c| c == name).unwrap();
+            let slot = walk
+                .sim
+                .vehicles
+                .iter()
+                .position(|v| v.alive && v.class as usize == class)
+                .unwrap();
+            let handle = core::vehicle::VehicleHandle {
+                index: slot as u32,
+                gen: walk.sim.vehicles[slot].gen,
+            };
+            walk.sim.flyer_params[class] = None;
+            walk.sim.heightfield = None;
+            walk.sim.collision = Default::default();
+            walk.sim.vehicle_pads.clear();
+            for (i, v) in walk.sim.vehicles.iter_mut().enumerate() {
+                if i != slot {
+                    v.alive = false;
+                }
+            }
+            for (i, u) in walk.sim.units.iter_mut().enumerate() {
+                if i != walk.player.index as usize {
+                    u.alive = false;
+                }
+            }
+            {
+                let v = walk.sim.vehicle_mut(handle).unwrap();
+                v.pos = Vec3::new(0.0, 100.0, 0.0);
+                v.rot = glam::Quat::IDENTITY;
+                v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
+                v.flyer.lift = 1.0;
+            }
+            walk.sim.collision.push_body(core::collision::Body::new(
+                Mat4::from_translation(Vec3::new(0.0, 100.0, distance)),
+                core::collision::Shape::Box {
+                    half: Vec3::new(200.0, 200.0, 0.5),
+                },
+            ));
+            assert!(walk.sim.seat_unit(walk.player, handle, 1));
+            for _ in 0..60 {
+                walk.step_tick(&[PadState::default()]);
+            }
+            let rig = walk.flyer_rigs[class].as_ref().unwrap().clone();
+            let mut seen = std::collections::BTreeSet::new();
+            let mut together = false;
+            for _ in 0..45 {
+                walk.step_tick(&[PadState {
+                    buttons: buttons::FIRE,
+                    rx: 512,
+                    ..Default::default()
+                }]);
+                let v = walk.sim.vehicle(handle).unwrap();
+                let target = v.guns[1]
+                    .as_ref()
+                    .unwrap()
+                    .target
+                    .expect("one shared target");
+                assert!(
+                    (target.z - (distance - 0.5)).abs() < 0.01,
+                    "{name} {distance}m fixture must hit finite wall; target {target:?}, look {:?}",
+                    v.guns[1].as_ref().unwrap().look
+                );
+                let target = v.pos + v.rot * target;
+                let nodes = rig.flyer_aimed_nodes(v, None);
+                let mut count = 0;
+                for beam in walk.sim.beams.iter().filter(|b| {
+                    b.seat
+                        .is_some_and(|s| s.mount.vehicle == handle && s.mount.seat == 1)
+                }) {
+                    let p = beam.seat.unwrap().point.unwrap() as usize;
+                    seen.insert(p);
+                    count += 1;
+                    let miss = (target - beam.origin).cross(beam.dir).length();
+                    assert!(
+                        miss < 0.03,
+                        "{name} {distance}m emitter {p} misses reticle by {miss}m"
+                    );
+                    let end = beam.origin + beam.dir * beam.len;
+                    assert!(
+                        end.distance(target) < 0.05,
+                        "{name} emitter {p} hit {:?} instead of {target:?}",
+                        end
+                    );
+                    let node = rig
+                        .skeleton
+                        .index_of(outlets[p])
+                        .expect("drawn outlet node");
+                    let drawn = v.pos + v.rot * nodes[node].w_axis.truncate();
+                    assert!(
+                        drawn.distance(beam.origin) < 0.05,
+                        "{name} emitter {p}: drawn outlet {drawn:?}, beam {:?}",
+                        beam.origin
+                    );
+                }
+                together |= count == 2;
+            }
+            assert_eq!(seen, [0, 1].into_iter().collect());
+            assert!(together, "{name} must converge both beams together");
+        }
+    }
+}
+
+#[test]
+fn gunship_wing_beams_fire_together_and_respect_each_sides_arc() {
+    use core::sim::{buttons, PadState};
+    let root = game::assets::baked_root();
+    if !root.join("bf1_bes1/manifest.ron").is_file() {
+        return;
+    }
+    for game in ["bf1", "bf2"] {
+        let mut db = ClassDb::disc();
+        db.load(&root.join(format!("classes/{game}_rep.ron")))
+            .unwrap();
+        let seats = game::vehicle_class::seats(&db, "rep_fly_gunship");
+        assert_eq!(
+            seats[1].weapons.len(),
+            1,
+            "{game} wing section is one weapon"
+        );
+        assert_eq!(
+            seats[1]
+                .aimers
+                .iter()
+                .filter(|a| a.weapon == 0 && !a.node.is_empty())
+                .count(),
+            2
+        );
+    }
+    let (mut walk, _) = seat_fixture::battle_on(&root, "bf1_bes1", "bf1_bes1_con_cw").unwrap();
+    let class = walk
+        .vehicle_classes
+        .iter()
+        .position(|c| c == "rep_fly_gunship")
+        .unwrap();
+    let slot = walk
+        .sim
+        .vehicles
+        .iter()
+        .position(|v| v.alive && v.class as usize == class)
+        .unwrap();
+    let handle = core::vehicle::VehicleHandle {
+        index: slot as u32,
+        gen: walk.sim.vehicles[slot].gen,
+    };
+    walk.sim.flyer_params[class] = None;
+    walk.sim.heightfield = None;
+    walk.sim.collision = Default::default();
+    walk.sim.vehicle_mut(handle).unwrap().pos.y += 40.0;
+    walk.sim.vehicle_mut(handle).unwrap().flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
+    assert!(walk.sim.seat_unit(walk.player, handle, 1));
+    walk.sim.arm(slot);
+    let setup = walk.sim.seat_setup[class].as_ref().unwrap().guns[1]
+        .as_ref()
+        .unwrap();
+    assert_eq!(setup.weapons.len(), 1);
+    assert_eq!(setup.weapons[0].fire_points.len(), 2);
+    assert_ne!(
+        setup.weapons[0].fire_points[0],
+        setup.weapons[0].fire_points[1]
+    );
+    for (degrees, expected) in [(0.0f32, vec![0, 1]), (-70.0, vec![0]), (70.0, vec![1])] {
+        walk.sim.beams.clear();
+        let yaw = degrees.to_radians();
+        {
+            let state = walk.sim.vehicle_mut(handle).unwrap().guns[1]
+                .as_mut()
+                .unwrap();
+            state.look = (yaw, 0.0);
+            state.aim = (yaw, 0.0);
+            state.rel = (yaw, 0.0);
+            for w in &mut state.weapons {
+                w.heat = 0.0;
+            }
+        }
+        for _ in 0..60 {
+            walk.step_tick(&[PadState::default()]);
+        }
+        let mut points = std::collections::BTreeSet::new();
+        let mut simultaneous = false;
+        for _ in 0..30 {
+            walk.step_tick(&[PadState {
+                buttons: buttons::FIRE,
+                ..Default::default()
+            }]);
+            let mut current = std::collections::BTreeSet::new();
+            let v = walk.sim.vehicle(handle).unwrap();
+            for beam in walk.sim.beams.iter().filter(|b| {
+                b.seat
+                    .is_some_and(|s| s.mount.vehicle == handle && s.mount.seat == 1)
+            }) {
+                let p = beam
+                    .seat
+                    .unwrap()
+                    .point
+                    .expect("wing beam retains its emitter");
+                points.insert(p);
+                current.insert(p);
+                let local = v.rot.inverse() * (beam.origin - v.pos);
+                let setup = walk.sim.seat_setup[class].as_ref().unwrap().guns[1]
+                    .as_ref()
+                    .unwrap();
+                let outlet = setup.weapons[0].fire_points[p as usize];
+                assert!(
+                    local.distance(outlet) < 0.01,
+                    "beam is off wing outlet: {local:?} / {outlet:?}"
+                );
+                let dir = v.rot.inverse() * beam.dir;
+                let beam_yaw = dir.x.atan2(dir.z).to_degrees();
+                assert!(
+                    (beam_yaw - degrees).abs() < 2.0,
+                    "wing beam points away from aim: {beam_yaw} / {degrees}"
+                );
+            }
+            simultaneous |= current.len() == 2;
+        }
+        assert_eq!(
+            points.into_iter().collect::<Vec<_>>(),
+            expected,
+            "look {degrees} deg"
+        );
+        if degrees == 0.0 {
+            assert!(simultaneous, "both beams must exist together");
+        }
+    }
+}
+
+#[test]
+fn bf1_gunship_ball_glass_riders_beam_outlets_and_passenger_look() {
+    use core::sim::{buttons, PadState};
+    use glam::Vec3;
+    let root = game::assets::baked_root();
+    if !root.join("bf1_bes1/manifest.ron").is_file() {
+        assert!(std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none());
+        return;
+    }
+    let (mut walk, _) = seat_fixture::battle_on(&root, "bf1_bes1", "bf1_bes1_con_cw").unwrap();
+    let class = walk
+        .vehicle_classes
+        .iter()
+        .position(|c| c == "rep_fly_gunship")
+        .unwrap();
+    let slot = walk
+        .sim
+        .vehicles
+        .iter()
+        .position(|v| v.alive && v.class as usize == class)
+        .unwrap();
+    let handle = core::vehicle::VehicleHandle {
+        index: slot as u32,
+        gen: walk.sim.vehicles[slot].gen,
+    };
+    walk.sim.flyer_params[class] = None;
+    let rig = walk.flyer_rigs[class]
+        .as_ref()
+        .expect("rebake the BF1 Republic vehicles")
+        .clone();
+    let model = root.join("side_bf1/vehicles/rep/models/rep_la_at_gunship.glb");
+    let (mesh, joints) = game::assets::load_glb_joints(&model).unwrap();
+    assert!(
+        !joints.is_empty(),
+        "the gunship must carry its bone assignments"
+    );
+    assert!(mesh
+        .submeshes
+        .iter()
+        .any(|s| s.2.eq_ignore_ascii_case("REP_LA_AT_BALLS") && s.3 == render::DrawLayer::Blend));
+    assert!(mesh
+        .submeshes
+        .iter()
+        .any(|s| s.2.eq_ignore_ascii_case("REP_LA_AT_BALLS") && s.3 == render::DrawLayer::Opaque));
+    for (seat, point, rider, yaw) in [
+        (2, "hp_turret_right", "hp_gunner2", -0.8),
+        (3, "hp_turret_left", "hp_gunner1", 0.8),
+    ] {
+        assert!(walk.sim.seat_unit(walk.player, handle, seat));
+        walk.sim.arm(slot);
+        walk.sim.vehicle_mut(handle).unwrap().flyer.phase =
+            core::vehicle::flyer::FlightPhase::Flying;
+        let node = rig.skeleton.index_of(point).unwrap();
+        let passenger = rig.skeleton.index_of(rider).unwrap();
+        let before = rig.flyer_aimed_nodes(walk.sim.vehicle(handle).unwrap(), None);
+        {
+            let v = walk.sim.vehicle_mut(handle).unwrap();
+            let gun = v.guns[seat as usize].as_mut().unwrap();
+            gun.look = (yaw, 0.2);
+            gun.aim = gun.look;
+        }
+        let v = walk.sim.vehicle(handle).unwrap();
+        let now = rig.flyer_aimed_nodes(v, None);
+        assert!(
+            before[node].w_axis.distance(now[node].w_axis) > 0.01,
+            "{point} did not turn"
+        );
+        assert!(
+            before[passenger].w_axis.distance(now[passenger].w_axis) > 0.01,
+            "{rider} did not follow the ball"
+        );
+        let setup = walk.sim.seat_setup[class].as_ref().unwrap().guns[seat as usize]
+            .as_ref()
+            .unwrap();
+        let state = v.guns[seat as usize].as_ref().unwrap();
+        let origin = setup.shot_point(0, setup.next_point(0, 0), state.aim, false);
+        let drawn = now[node].w_axis.truncate();
+        assert!(
+            origin.distance(drawn) < 0.01,
+            "seat {seat}: beam {origin:?}, drawn outlet {drawn:?}"
+        );
+        let mut beams = 0;
+        for _ in 0..20 {
+            walk.step_tick(&[PadState {
+                buttons: buttons::FIRE,
+                ..Default::default()
+            }]);
+            let v = walk.sim.vehicle(handle).unwrap();
+            let posed = rig.flyer_aimed_nodes(v, None);
+            let outlet = v.pos + v.rot * posed[node].w_axis.truncate();
+            for beam in walk.sim.beams.iter().filter(|b| {
+                b.shooter.owner == walk.player && b.seat.is_some_and(|s| s.mount.seat == seat)
+            }) {
+                assert!(
+                    beam.origin.distance(outlet) < 0.03,
+                    "seat {seat}: live beam {:?}, outlet {outlet:?}",
+                    beam.origin
+                );
+                beams += 1;
+            }
+        }
+        assert!(beams > 0, "seat {seat} never fired its beam");
+        walk.sim.unseat_unit(walk.player);
+    }
+    assert!(walk.sim.seat_unit(walk.player, handle, 4));
+    let before = walk.camera();
+    for _ in 0..30 {
+        walk.step_tick(&[PadState {
+            rx: i16::MAX,
+            ry: i16::MAX,
+            ..Default::default()
+        }]);
+    }
+    let after = walk.camera();
+    assert!(
+        before.forward().distance(after.forward()) > 0.1,
+        "standing passenger view is fixed"
+    );
+    let v = walk.sim.vehicle(handle).unwrap();
+    let local = v.rot.inverse() * (after.position - v.pos);
+    assert!(
+        local.distance(Vec3::new(1.5, -0.75, 1.75)) < 0.05,
+        "passenger mount camera {local:?}"
+    );
+    assert!(v.guns[4].as_ref().unwrap().weapons.is_empty());
+    walk.step_tick(&[PadState {
+        buttons: buttons::FIRE,
+        ..Default::default()
+    }]);
+    assert!(
+        !walk
+            .sim
+            .events
+            .iter()
+            .any(|e| matches!(e, core::sim::Event::Shot { .. })),
+        "unarmed passenger fired"
+    );
+}
+
 #[test]
 fn baked_flyer_takeoff_clips_move_the_models() {
     use game::viewer::walker_pose::{skin, WalkerRig};

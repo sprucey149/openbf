@@ -688,6 +688,15 @@ pub struct SeatSpec {
     /// +0x1bc when the zoom flag is set; the Controllable's default is 48).
     pub first_person_fov: Option<f32>,
     pub weapons: Vec<SeatWeapon>,
+    /// Explicit WEAPONSECTION selects an existing slot; repeating WeaponName
+    /// there rewrites that slot without starting another weapon or aimer.
+    /// `WeaponSection = N` is slot N - 1 of the seat's weapons, whichever
+    /// WeaponName made it: BF2's X-wing and TIE fighter name their cannon
+    /// before `WeaponSection = 1` and author the rest of its aimers after it.
+    /// A section past the last slot leaves the aimers on the last weapon, as
+    /// before sections were read (every BF2 class's gun setup unchanged,
+    /// 2026-11-14 census).
+    weapon_section: Option<usize>,
     /// Card VTUR (§5, §9): `FirePointName` (the node a bolt leaves),
     /// `TurretNodeName` (the node the aimer turns), `YawLimits` /
     /// `PitchLimits` (degrees, "lo hi") and `YawRate` / `PitchRate` (rad/s).
@@ -836,6 +845,7 @@ impl SeatSpec {
             boost_fov: None,
             first_person_fov: None,
             weapons: Vec::new(),
+            weapon_section: None,
             fire_point: None,
             turret_node: None,
             mount_pos: None,
@@ -878,7 +888,7 @@ impl SeatSpec {
     fn set(&mut self, k: u32, v: &str) {
         // A seat-level aimer authored before WeaponName (AT-AT's head)
         // turns the rig but belongs to no weapon fire ring.
-        let weapon = self.weapons.len().checked_sub(1).unwrap_or(usize::MAX);
+        let weapon = self.current_weapon().unwrap_or(usize::MAX);
         if k == h("NextAimer") {
             self.aimers.push(AimerSpec::new("", weapon));
         } else if k == h("AimerNodeName") {
@@ -967,8 +977,18 @@ impl SeatSpec {
             self.boost_fov = float(v);
         } else if k == h("FirstPersonFOV") {
             self.first_person_fov = v.trim().parse().ok();
+        } else if k == h("WeaponSection") {
+            self.weapon_section = v
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|s| s.checked_sub(1))
+                .filter(|s| *s < MAX_SEAT_WEAPONS);
         } else if k == h("WeaponName") {
-            if self.weapons.len() < MAX_SEAT_WEAPONS {
+            let existing = self.weapon_section.filter(|&s| s < self.weapons.len());
+            if let Some(weapon) = existing {
+                self.weapons[weapon].class = v.trim().to_string();
+            } else if self.weapons.len() < MAX_SEAT_WEAPONS {
                 self.weapons.push(SeatWeapon {
                     class: v.trim().to_string(),
                     ammo: 0,
@@ -979,7 +999,9 @@ impl SeatSpec {
                     _ => self.aimers.push(AimerSpec::new("", weapon)),
                 }
             }
-        } else if k == h("FirePointName") {
+        } else if k == h("FirePointName") || k == 0x2e5375da {
+            // BF1's left ball gun uses this alias; its setter joins the
+            // FirePointName write (FUN_0026e260, B1:192366-192408).
             self.fire_point = Some(v.trim().to_string());
         } else if k == h("TurretNodeName") {
             self.turret_node = Some(v.trim().to_string());
@@ -1029,12 +1051,22 @@ impl SeatSpec {
                 b.1 = if k == h("BarrelLength") { 0.25 * x } else { x };
             }
         } else if k == h("WeaponAmmo") {
-            if let (Some(w), Ok(a)) = (self.weapons.last_mut(), v.trim().parse()) {
+            let weapon = self.current_weapon();
+            if let (Some(w), Ok(a)) = (
+                weapon.and_then(|i| self.weapons.get_mut(i)),
+                v.trim().parse(),
+            ) {
                 w.ammo = a;
             }
         } else {
             self.turret_sounds.set(k, v);
         }
+    }
+
+    fn current_weapon(&self) -> Option<usize> {
+        self.weapon_section
+            .filter(|&s| s < self.weapons.len())
+            .or_else(|| self.weapons.len().checked_sub(1))
     }
 }
 

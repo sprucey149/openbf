@@ -70,6 +70,7 @@ fn main() -> Result<()> {
         .iter()
         .map(|_| {
             Some(core::vehicle::gun::GunState {
+                target: None,
                 look: (0.0, 0.0),
                 aim: (0.0, 0.0),
                 rate: (0.0, 0.0),

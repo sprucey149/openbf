@@ -121,9 +121,29 @@ pub struct WalkerAim {
     writers: Vec<Option<Writer>>,
     seats: Vec<SeatSpec>,
     turret: Vec<Option<usize>>,
+    rest_turrets: bool,
 }
 
 impl WalkerAim {
+    /// Draw each turret node along its seat's look even before anyone has
+    /// aimed it. The MountedTurret writes its node every tick from its yaw
+    /// and pitch, which start at 0 and stay where the last gunner left them
+    /// (re-turret-draw 2.2). [L] BF1 BES1 (`analysis/re-vehicle-pose.md` 6):
+    /// a parked MAF's `turret_rearcannon`, bound facing -Z, is drawn facing
+    /// +Z with an identity rotation, and a manned one keeps its last
+    /// look after its gunner leaves. Only flyers take this, the class
+    /// measured; hovers' and walkers' turrets keep their bind until aimed
+    /// (measure: a never-manned skiff's `gunl` / `gunr` in a BF1 TAT1 state).
+    /// Only a turret whose limits hold a yaw and pitch of 0, as the MAF's
+    /// do: BF2's snowspeeder `towcablegun` (yaw 115..245) keeps its
+    /// backward bind until aimed, since whether the PS2 clamps a never-manned
+    /// turret's 0 into its limits is unread (trace: the turret tick's clamp,
+    /// B2:189319-189385, on an empty seat).
+    pub fn writing_turrets_at_rest(mut self) -> Self {
+        self.rest_turrets = true;
+        self
+    }
+
     pub fn new(skel: &Skeleton, seats: Vec<SeatSpec>) -> Self {
         let mut writers = vec![None; skel.len()];
         let turret: Vec<_> = seats
@@ -181,6 +201,7 @@ impl WalkerAim {
             writers,
             seats,
             turret,
+            rest_turrets: false,
         }
     }
 
@@ -229,30 +250,36 @@ impl WalkerAim {
         };
         match self.writers.get(n).and_then(Option::as_ref) {
             Some(Writer::Turret { seat, pitch_factor }) => {
-                if let Some(g) = v
-                    .guns
-                    .get(*seat)
-                    .and_then(Option::as_ref)
-                    .filter(|g| g.look != (0.0, 0.0) || g.aim != (0.0, 0.0))
-                {
-                    let look = limited_look(&self.seats[*seat], g.look);
+                let gun = v.guns.get(*seat).and_then(Option::as_ref);
+                let look = match gun {
+                    Some(g) if g.look != (0.0, 0.0) || g.aim != (0.0, 0.0) => Some(g.look),
+                    _ if self.rest_turrets
+                        && limited_look(&self.seats[*seat], (0.0, 0.0)) == (0.0, 0.0) =>
+                    {
+                        Some((0.0, 0.0))
+                    }
+                    _ => None,
+                };
+                if let Some(look) = look {
+                    let look = limited_look(&self.seats[*seat], look);
                     m = turret_node(&carried, look.0, -look.1 * pitch_factor);
                 }
             }
             Some(Writer::Aimer { seat, yaw, pitch }) => {
-                if let Some(g) = v
-                    .guns
-                    .get(*seat)
-                    .and_then(Option::as_ref)
-                    .filter(|g| g.look != (0.0, 0.0) || g.aim != (0.0, 0.0))
+                if let Some(g) =
+                    v.guns.get(*seat).and_then(Option::as_ref).filter(|g| {
+                        g.target.is_some() || g.look != (0.0, 0.0) || g.aim != (0.0, 0.0)
+                    })
                 {
                     let spec = &self.seats[*seat];
                     let pivot = self.turret[*seat]
                         .or_else(|| spec.aimers.first().and_then(|a| skel.index_of(&a.node)))
                         .map_or(Vec3::ZERO, |k| skel.global_bind[k].w_axis.truncate());
                     let eye = pivot + Vec3::from(spec.eye_point_offset.unwrap_or([0.0; 3]));
-                    let target = eye
-                        + core::vehicle::gun::dir(g.aim.0, g.aim.1) * core::vehicle::gun::AIM_RAY;
+                    let target = g.target.unwrap_or_else(|| {
+                        eye + core::vehicle::gun::dir(g.aim.0, g.aim.1)
+                            * core::vehicle::gun::AIM_RAY
+                    });
                     let frame = self.turret[*seat].map_or(carried, |t| {
                         let tp = skel.parents[t].map_or(Mat4::IDENTITY, |k| {
                             self.resolve(k, skel, walk, v, kick, now)
@@ -328,8 +355,10 @@ fn kick_ring(skel: &Skeleton, spec: &SeatSpec, weapon: usize) -> Vec<Option<usiz
 }
 
 fn clamp_yaw(mut angle: f32, limits: [f32; 2]) -> f32 {
-    if limits[1] > std::f32::consts::PI && angle < 0.0 {
+    if limits[1] > std::f32::consts::PI && angle < limits[0] {
         angle += std::f32::consts::TAU;
+    } else if limits[0] < -std::f32::consts::PI && angle > limits[1] {
+        angle -= std::f32::consts::TAU;
     }
     angle.clamp(limits[0], limits[1])
 }
@@ -373,6 +402,7 @@ mod tests {
         v.guns = vec![
             None,
             Some(GunState {
+                target: None,
                 look: (0.0, 0.0),
                 aim: (0.0, 0.0),
                 rate: (0.0, 0.0),

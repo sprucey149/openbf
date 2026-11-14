@@ -118,6 +118,7 @@ fn turret_markers_dim_empty_and_flash_with_the_occupied_guns_refire_progress() {
     weapon.refire_time = 1.0;
     weapon.refire_accum = 0.25;
     v.guns = vec![Some(core::vehicle::gun::GunState {
+        target: None,
         look: (0.0, 0.0),
         aim: (0.0, 0.0),
         rel: (0.0, 0.0),

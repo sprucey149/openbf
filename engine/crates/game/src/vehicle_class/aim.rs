@@ -82,7 +82,8 @@ impl AimerSpec {
     }
 
     pub(super) fn set(&mut self, k: u32, v: &str) {
-        if k == h("FirePointName") {
+        if k == h("FirePointName") || k == 0x2e5375da {
+            // Both keys name the barrel's fire point on BF1 (B1:192366-192408).
             self.fire_points.push(v.trim().into());
             self.slot().fire_point = Some(v.trim().into());
         } else if k == h("NextBarrel") {

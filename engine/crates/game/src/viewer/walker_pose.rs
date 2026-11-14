@@ -48,6 +48,9 @@ pub struct WalkerRig {
     bone_root: Option<usize>,
     /// A posed hover's `FinAnimation` clip (card VPOSE).
     fin: Option<usize>,
+    /// A flyer's: its turret nodes are drawn along the seat's look from the
+    /// start ([`super::walker_aim::WalkerAim::writing_turrets_at_rest`]).
+    flyer: bool,
 }
 
 impl WalkerRig {
@@ -64,6 +67,7 @@ impl WalkerRig {
         let fin = fin.and_then(|f| clips.iter().position(|c| c.name.eq_ignore_ascii_case(f)));
         Self {
             fin,
+            flyer: true,
             ..Self::new(skeleton, clips, &flyer)
         }
     }
@@ -71,7 +75,10 @@ impl WalkerRig {
     /// A hover's rig (card VPOSE, `analysis/re-vehicle-pose.md` 7): its
     /// `FinAnimation` clip by name, if the bake found one.
     pub fn new_hover(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
-        Self::new_flyer(skeleton, clips, fin)
+        Self {
+            flyer: false,
+            ..Self::new_flyer(skeleton, clips, fin)
+        }
     }
 
     /// The fin nine-pose (re-vehicle-pose 4.3): the clip at frame `a` and
@@ -149,6 +156,28 @@ impl WalkerRig {
         Some(self.bind_nodes(&self.flyer_palette(lift, nine)?))
     }
 
+    /// A flyer's animated base followed by its mounted seats' node writers.
+    /// The gunship has moving turrets even without a takeoff or fins clip.
+    pub fn flyer_aimed_palette(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        let base = self
+            .flyer_palette(v.flyer.lift, nine)
+            .unwrap_or_else(|| self.skeleton.palette(&Pose::bind(&self.skeleton).locals()));
+        self.aimed(base, v, kick)
+    }
+
+    pub fn flyer_aimed_nodes(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        self.bind_nodes(&self.flyer_aimed_palette(v, nine, &super::walker_aim::at_rest))
+    }
+
     /// Bone nodes in bind space (`palette * global_bind`).
     fn bind_nodes(&self, palette: &[Mat4]) -> Vec<Mat4> {
         palette
@@ -190,6 +219,7 @@ impl WalkerRig {
             masks,
             bone_root,
             fin: None,
+            flyer: false,
         }
     }
 
@@ -283,7 +313,12 @@ impl WalkerRig {
     }
 
     pub fn with_seats(mut self, seats: Vec<crate::vehicle_class::SeatSpec>) -> Self {
-        self.aim = super::walker_aim::WalkerAim::new(&self.skeleton, seats);
+        let aim = super::walker_aim::WalkerAim::new(&self.skeleton, seats);
+        self.aim = if self.flyer {
+            aim.writing_turrets_at_rest()
+        } else {
+            aim
+        };
         self
     }
 

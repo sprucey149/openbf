@@ -1,5 +1,35 @@
 use super::*;
 
+#[test]
+fn repeated_weapon_name_in_one_section_keeps_both_aimers_on_one_weapon() {
+    let mut seat = SeatSpec::new(SeatKind::Gunner(0));
+    for (k, v) in [
+        ("WeaponSection", "1"),
+        ("WeaponName", "wing"),
+        ("AimerNodeName", "right"),
+        ("NextAimer", "-"),
+        ("WeaponName", "wing"),
+        ("AimerNodeName", "left"),
+        ("WeaponAmmo", "7"),
+        ("WeaponSection", "2"),
+        ("WeaponName", "other"),
+        ("WeaponSection", "1"),
+        ("WeaponAmmo", "3"),
+    ] {
+        seat.set(h(k), v);
+    }
+    assert_eq!(seat.weapons.len(), 2);
+    assert_eq!(seat.weapons[0].ammo, 3);
+    assert_eq!(seat.weapons[1].ammo, 0);
+    let aimers: Vec<_> = seat
+        .aimers
+        .iter()
+        .filter(|a| !a.node.is_empty())
+        .map(|a| (a.node.as_str(), a.weapon))
+        .collect();
+    assert_eq!(aimers, [("right", 0), ("left", 0)]);
+}
+
 fn fixture_db(tag: &str, defs: Vec<ClassDef>) -> ClassDb {
     let path = std::env::temp_dir().join(format!("openbf-{tag}-{}.ron", std::process::id()));
     std::fs::write(&path, ron::to_string(&defs).unwrap()).unwrap();

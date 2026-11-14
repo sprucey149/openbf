@@ -367,6 +367,7 @@ fn gunner(
             veh.guns.resize(seat + 1, None);
         }
         veh.guns[seat] = Some(core::vehicle::gun::GunState {
+            target: None,
             look: (y, look.1),
             aim,
             rate: (0.0, 0.0),
