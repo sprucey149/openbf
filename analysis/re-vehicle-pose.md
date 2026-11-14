@@ -321,7 +321,22 @@ riders hung at `L x bind(parent) x O` (`soldier_vis::rider_now`).
    fighter tank's turret_y), the same tick.
 4. **Fix** `HoverNine::START` to p = y = 0 (section 0.6); the nine-pose numbers stay "never driven" until the first
    piloted step.
-5. Not in this card: walkers' and flyers' posed nodes (card VPOSW: the AT-ST's head and guns, the AT-AT's head, the
+5. **Map-local hovers** (2026-11-14): BF1 TAT1's skiff (`tat_hover_skiff`, model `all_hover_skiff`) is in the map
+   LVL, not a side LVL. `scripts/rebake.sh` bakes `TAT/TAT1.LVL` as the side `side_bf1/vehicles/tat1`, and
+   `VehicleSides::load` reads its seats from the map's own `classes.ron` when there is no `classes/bf1_tat1.ron`.
+   Its model is not bone_space: each segment is stored in the frame of the bone its BNAM names (`bind_pose.rs`).
+   The skin then binds each vertex to its segment's BNAM bone, or to the root when a segment names none
+   (`bake/src/vehicle.rs` `bnam_joints`). The same rule skins six other BF1 side models, not yet checked by eye:
+   all_fly_kwing, imp_fly_trooptrans, all_hover_hovernaut, cis_hover_mtt, cis_hover_stap, cis_tread_hailfire.
+   Checked by eye (`pose_render` `POSE_RIDE` + `POSE_RIDE_SEAT`): the rudders and levers swing with the turn
+   input, and gun and gunl turn and pitch with their seat's look, with the gunner riding them.
+   The side guns' nodes are bound at +-90 degrees of yaw, and the seat's muzzle turned the model-frame fire point
+   by the look on top of that, so a `gunl` shot left from (1.40, 0.91, -0.94), 1.3 m from the drawn barrel tip
+   (2.33, 0.91, 0.01). `vehicle_pads::rest_on_turret_node` now carries a hover's fire points back by the turret node's
+   bind rotation (section 2.3: the node is rebuilt along the look at its bind origin). All three guns then fire
+   from their bind tips at rest (`seat_stills` shot rows). The flyers' backward-bound nodes (`towcablegun`,
+   `turret_rearcannon`, `aimer_tailgun_y`) are left as they were until card VPOSF poses them.
+6. Not in this card: walkers' and flyers' posed nodes (card VPOSW: the AT-ST's head and guns, the AT-AT's head, the
    one-man AT-ST, the AT-TE, the spider; card VPOSF: the gunships' turrets, the snowspeeder's flaps and tow gun), the
    hailfire's suspension.
 

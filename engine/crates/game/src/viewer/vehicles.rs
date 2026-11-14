@@ -215,11 +215,14 @@ impl VehicleSides {
                 match ron::from_str::<manifest::VehicleManifest>(&text) {
                     Ok(m) => {
                         let mut db = crate::classdb::ClassDb::default();
-                        let _ = db.load(
-                            &assets_dir
-                                .join("classes")
-                                .join(format!("{game}_{}.ron", m.source)),
-                        );
+                        let side_classes = assets_dir
+                            .join("classes")
+                            .join(format!("{game}_{}.ron", m.source));
+                        // A map LVL's own vehicles (TAT1's skiff) keep their
+                        // seats in the map's class file, not a side's.
+                        if db.load(&side_classes).is_err() {
+                            let _ = db.load_map(&assets_dir.join(&m.source));
+                        }
                         let walker_seats = m
                             .vehicles
                             .iter()
@@ -338,9 +341,11 @@ impl VehicleSides {
     }
 }
 
-/// A `GeometryName`'s LOD0 model: the map's own bake first (its
-/// `geometries` row, else the name itself, among its `models`), then the
-/// first side that bakes that geometry.
+/// A `GeometryName`'s LOD0 model: a side's posed copy first (a skin the
+/// PS2's node table moves, card VPOSE; TAT1's own skiff is baked as side
+/// `tat1` for it), then the map's own bake (its `geometries` row, else the
+/// name itself, among its `models`), then the first side that bakes that
+/// geometry.
 pub fn find_model(
     m: &manifest::Manifest,
     sides: &VehicleSides,
@@ -352,6 +357,15 @@ pub fn find_model(
         .iter()
         .find(|g| g.name.eq_ignore_ascii_case(&key))
         .map_or(key.as_str(), lod0);
+    if let Some(found) = sides.0.iter().enumerate().find_map(|(i, s)| {
+        let model = s.models.get(&key)?;
+        let name = model.to_ascii_lowercase();
+        let posed =
+            s.walkers.contains_key(&name) || s.flyers.contains_key(&name) || s.hovers.contains_key(&name);
+        posed.then(|| ModelSource::Side(i, model.clone()))
+    }) {
+        return Some(found);
+    }
     if let Some(k) = m.models.iter().find(|k| k.eq_ignore_ascii_case(want)) {
         return Some(ModelSource::Map(k.clone()));
     }

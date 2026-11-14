@@ -1014,6 +1014,9 @@ pub fn install_for_mission(
                     let mut g = seat_gun(sim, &db, s, hp)?;
                     if !g.pilot {
                         turret_law(&mut g, s, game == "bf2");
+                        if hover {
+                            rest_on_turret_node(&mut g, s, hp);
+                        }
                         if building {
                             g.gunner = gunner_seat(m, c, s, game == "bf2");
                         }
@@ -1610,6 +1613,46 @@ pub fn turret_law(g: &mut GunSetup, s: &vehicle_class::SeatSpec, bf2: bool) {
         s.aimer_pitch_rate,
     );
     g.framed = s.turret_node.is_some();
+}
+
+/// A framed seat's fire points as they sit with the look at (0, 0) (card
+/// VPOSE, `analysis/re-turret-draw.md` 2.2, `re-vehicle-pose.md` 2.3): the
+/// PS2 rebuilds the `TurretNodeName` node each update with +Z along the look,
+/// at its bind origin (`core::vehicle::gun::turret_node`), so a fire point
+/// under it keeps its offset in the node's own frame. [`GunSetup::muzzle`]
+/// turns a framed seat's points from rest by the aim, so a node bound turned
+/// has its points carried back here by its bind rotation. Of every baked
+/// turret node, only BF1's skiff `gunl` / `gunr` (bound at +-90 degrees of
+/// yaw) on a hover are bound turned; before this a side gun's shot left
+/// 1.3 m behind its drawn barrel. Hovers only: the backward-bound
+/// `towcablegun`, `turret_rearcannon`, `turret_rear_aimer_y` and
+/// `aimer_tailgun_y` are flyers' and walkers' nodes that the port does not
+/// pose by this law yet (`re-vehicle-pose.md` 8, cards VPOSW / VPOSF).
+fn rest_on_turret_node(g: &mut GunSetup, s: &vehicle_class::SeatSpec, hp: &[ManifestHardpoint]) {
+    if !g.framed {
+        return;
+    }
+    let Some(node) = s
+        .turret_node
+        .as_deref()
+        .and_then(|n| hp.iter().find(|h| h.name.eq_ignore_ascii_case(n.trim())))
+    else {
+        return;
+    };
+    let Some(axes) = node.axes else {
+        return;
+    };
+    let unbind = glam::Quat::from_mat3(&glam::Mat3::from_cols_array_2d(&axes))
+        .normalize()
+        .inverse();
+    let pivot = Vec3::from(node.pos);
+    let rest = |p: Vec3| pivot + unbind * (p - pivot);
+    g.fire_point = rest(g.fire_point);
+    for w in &mut g.weapons {
+        for p in &mut w.fire_points {
+            *p = rest(*p);
+        }
+    }
 }
 
 /// Explosion class `e` with its look.

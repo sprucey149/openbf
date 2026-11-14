@@ -11,7 +11,9 @@
 //! level for a third of a second. Frames:
 //! `<out_dir>/<class>_s<seat>_{level,up,down,fire}.png`. Each prints the camera's
 //! place in the vehicle's frame, its pitch against the vehicle's, the FOV and
-//! the seat's look.
+//! the seat's look; each shot of the fire pass prints its origin and
+//! direction in the vehicle's frame, and each human fire sound it asks
+//! (`event_sounds::weapon_asks`) what the map's bank starts for it.
 #[path = "support/walker_battle.rs"]
 mod walker_battle;
 use anyhow::{anyhow, Context, Result};
@@ -27,7 +29,12 @@ fn main() -> Result<()> {
             .context("seat_stills <out_dir> [mission] [class] [seat]")?,
     );
     let mission = args.next().unwrap_or_else(|| "bf2_kas2_con_cw".into());
-    let map = mission.splitn(3, '_').take(2).collect::<Vec<_>>().join("_");
+    let words = if mission.starts_with("bf") { 2 } else { 1 };
+    let map = mission
+        .splitn(3, '_')
+        .take(words)
+        .collect::<Vec<_>>()
+        .join("_");
     let class = args
         .next()
         .unwrap_or_else(|| "rep_hover_fightertank".into());
@@ -61,6 +68,7 @@ fn main() -> Result<()> {
         game::viewer::VehicleVisuals::load(&mut r, &scene, &root, &walk.vehicle_geometry);
     let mut soldiers = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &root, &scene, &walk);
     let mut bolts = game::bolt_vis::BoltVis::new(&root, &scene.manifest.source_game);
+    let mut sounds = game::sounds::SoundLib::load(&root.join(&map));
     for (name, ry, fire) in [
         ("level", 0i16, false),
         ("up", 32767, false),
@@ -82,6 +90,32 @@ fn main() -> Result<()> {
         for _ in 0..if fire { 10 } else { 4 } {
             walk.step_tick(&[release]);
             soldiers.update(&walk, core::TICK_DT);
+            bolts.update(&walk, core::TICK_DT);
+            if let Some(sl) = sounds.as_mut() {
+                let mut asks = Vec::new();
+                game::event_sounds::weapon_asks(&walk, |a| asks.push(a));
+                let ears = game::event_sounds::listener(&walk).pos;
+                for a in &asks {
+                    let starts = sl.weapon_voices(std::slice::from_ref(a), ears);
+                    println!(
+                        "{name}: fire sound {:08x} at {:.1} m from the ears: {} started {:?}",
+                        a.hash,
+                        a.pos.distance(ears),
+                        starts.len(),
+                        starts.first().map(|(_, s)| (s.gain, s.path.display().to_string()))
+                    );
+                }
+            }
+            let v = &walk.sim.vehicles[slot];
+            for e in &walk.sim.events {
+                if let core::sim::Event::Shot { origin, dir, .. } = e {
+                    println!(
+                        "{name}: shot from {:.3?} along {:.3?} in the vehicle frame",
+                        v.rot.inverse() * (*origin - v.pos),
+                        v.rot.inverse() * *dir
+                    );
+                }
+            }
         }
         let shots = bolts.draws(&mut r, &walk);
         println!("{name}: {} bolt draws", shots.len());

@@ -26,7 +26,9 @@
 //! (a fit of the PS2's zoomed projection).
 //! `POSE_RIDE=<vehicle class>,<soldier geometry>,<the vehicle's 16 matrix words as the PS2's RAM holds them>[,throttle,
 //! strafe,turn]` (card VRIDE) spawns that class at the matrix (rows X, Y, Z, origin), seats a soldier of that body as its
-//! pilot, holds the inputs for 3 s (the nine-pose settles) and draws the vehicle and its rider as a battle does.
+//! pilot, holds the inputs for 3 s (the nine-pose and a hover's fins settle: the vehicle draws step each tick) and draws the vehicle and its rider as a battle does.
+//! `POSE_RIDE_SEAT=<seat>,<look_yaw>,<look_pitch>` (degrees, the port's seat angles) seats him in that seat instead,
+//! its gun held at that look, so a vehicle's turret nodes can be seen turned from outside.
 //! The map's precipitation is drawn at its setup state (card WTHR; `PXC_WEATHER=0` leaves it out, `WEATHER_VECTOR`
 //! / `WEATHER_DT` / `WEATHER_ONLY` are the card's frame test, see below).
 use anyhow::{anyhow, Result};
@@ -484,8 +486,14 @@ fn ride_draws(
         .sim
         .spawn_vehicle(&core::vehicle::VehicleSpec { pos, ..pad });
     let player = walk.player;
-    if !walk.sim.seat_unit(player, h, 0) {
-        return Err(anyhow!("the pilot seat would not take him"));
+    let look: Option<(u8, f32, f32)> = std::env::var("POSE_RIDE_SEAT").ok().and_then(|s| {
+        let w: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        (w.len() == 3).then(|| (w[0] as u8, w[1].to_radians(), w[2].to_radians()))
+    });
+    let seat = look.map_or(0, |l| l.0);
+    walk.sim.arm(h.index as usize);
+    if !walk.sim.seat_unit(player, h, seat) {
+        return Err(anyhow!("seat {seat} would not take him"));
     }
     let input = ride.input;
     let mut vis = game::soldier_vis::SoldierVisuals::load(
@@ -499,12 +507,19 @@ fn ride_draws(
         assets,
         &walk.vehicle_geometry,
     ));
+    let mut vv = game::viewer::VehicleVisuals::load(r, scene, assets, &walk.vehicle_geometry);
     for _ in 0..90 {
         let v = walk.sim.vehicle_mut(h).unwrap();
         (v.pos, v.rot) = (pos, rot);
         (v.input.throttle, v.input.strafe, v.input.turn) = (input[0], input[1], input[2]);
+        if let Some((s, yaw, pitch)) = look {
+            if let Some(g) = v.guns.get_mut(s as usize).and_then(Option::as_mut) {
+                (g.look, g.aim) = ((yaw, pitch), (yaw, pitch));
+            }
+        }
         walk.sim.tick += 1;
         vis.update(&walk, core::TICK_DT);
+        vv.draws(r, &walk.sim, &[]);
     }
     let drawn = vis.drawn(&walk);
     println!(
@@ -512,6 +527,5 @@ fn ride_draws(
         drawn.len(),
         drawn.first().map(|d| d.1.w_axis.truncate())
     );
-    let mut vv = game::viewer::VehicleVisuals::load(r, scene, assets, &walk.vehicle_geometry);
     Ok((vv.draws(r, &walk.sim, &[]), vis.draws(&walk)))
 }

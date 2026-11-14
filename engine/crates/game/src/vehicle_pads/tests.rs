@@ -234,3 +234,42 @@ fn atk_is_team_one_and_def_is_team_two() {
     assert_eq!(class_key_team(k("ClassCISDef"), &cw), Some(1));
     assert_eq!(class_key_team(k("ClassRepAtk"), &cw), Some(0));
 }
+
+/// BF1's skiff `gunl` (the baked nodes, rounded): the node is bound at +90
+/// degrees of yaw, so its fire point 0.94 m along the node's +Z lies along
+/// the model's +x. With the look at 90 degrees the shot leaves the bind
+/// pose's `hp_firel`, not 1.3 m behind it (the seat's point turned by the
+/// look on top of the node's bind yaw).
+#[test]
+fn a_turret_node_bound_turned_fires_from_its_drawn_barrel() {
+    let fire = Vec3::new(2.334, 0.911, 0.006);
+    let pivot = Vec3::new(1.392, 0.815, -0.001);
+    let mut g = GunSetup {
+        weapons: Vec::new(),
+        fire_point: fire,
+        pivot,
+        eye: Vec3::ZERO,
+        aimer: Aimer::default(),
+        pilot: false,
+        turn: None,
+        framed: false,
+        aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: None,
+        follows_owner: false,
+        gunner: None,
+    };
+    let mut s = vehicle_class::SeatSpec::new(vehicle_class::SeatKind::Gunner(0));
+    s.turret_node = Some("gunl".into());
+    s.yaw_limits = Some([65.0, 115.0]);
+    turret_law(&mut g, &s, false);
+    let hp = [ManifestHardpoint {
+        name: "gunl".into(),
+        pos: pivot.into(),
+        axes: Some([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]),
+    }];
+    rest_on_turret_node(&mut g, &s, &hp);
+    let q = std::f32::consts::FRAC_PI_2;
+    assert!(g.muzzle((q, 0.0)).distance(fire) < 1e-3, "{:?}", g.muzzle((q, 0.0)));
+    let m = g.muzzle((65f32.to_radians(), 0.0));
+    assert!(m.z > 0.3 && m.x > pivot.x, "{m:?}");
+}

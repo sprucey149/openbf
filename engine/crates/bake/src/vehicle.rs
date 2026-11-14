@@ -184,12 +184,16 @@ impl Index {
         let m = &self.models[&name.to_ascii_lowercase()];
         let mut out = m.clone();
         if !m.bone_space {
+            let mut bones = Vec::new();
             if let Some(skel) = self.render_skel_of(name, geometry) {
                 if let Some(p) = crate::bind_pose::pose_bnam(m, skel).map_err(|e| anyhow!(e))? {
                     out = p;
                 }
+                if bnam_bound(m, skel) {
+                    bones = bnam_joints(m, skel);
+                }
             }
-            return Ok((out, Vec::new()));
+            return Ok((out, bones));
         }
         let skel = self
             .render_skel_of(name, geometry)
@@ -273,6 +277,32 @@ impl Index {
         }
         Ok(())
     }
+}
+
+/// Whether a model that is not `bone_space` hangs a segment from a bone of
+/// `skel` by `BNAM` (`crate::bind_pose`'s second rule): its draw then follows
+/// that bone's node-table entry, as the PS2's vehicle draw reads the table per
+/// segment (`analysis/re-vehicle-pose.md` 0.1). BF1's skiff
+/// (`all_hover_skiff`, map-local in TAT1) stores its guns and rudders so.
+fn bnam_bound(m: &Model, skel: &mungefs::skel::Skeleton) -> bool {
+    m.segments
+        .iter()
+        .any(|s| s.bone.as_deref().is_some_and(|b| skel.index_of(b).is_some()))
+}
+
+/// Each vertex's bone for a [`bnam_bound`] model, segment by segment: its
+/// `BNAM` bone, else the skeleton's root, which no fin clip, turret or aimer
+/// writes (re-vehicle-pose 4.4: every fin rig holds `dummyroot` at the
+/// identity), so an unbound segment stays where it is stored, in model space.
+fn bnam_joints(m: &Model, skel: &mungefs::skel::Skeleton) -> Vec<Vec<usize>> {
+    let root = skel.bones.iter().position(|b| b.parent.is_none()).unwrap_or(0);
+    m.segments
+        .iter()
+        .map(|s| {
+            let b = s.bone.as_deref().and_then(|b| skel.index_of(b)).unwrap_or(root);
+            vec![b; s.positions.len()]
+        })
+        .collect()
 }
 
 /// A geometry's top LOD model (LOD0, else LOD1, LOD2, LOWD, else its first).
@@ -372,7 +402,10 @@ fn bake_skin(
     let Some((t, sk)) = top
         .as_deref()
         .and_then(|t| Some((t, ix.skel_of(t, geometry)?)))
-        .filter(|(t, _)| ix.models[&t.to_ascii_lowercase()].bone_space)
+        .filter(|(t, sk)| {
+            let m = &ix.models[&t.to_ascii_lowercase()];
+            m.bone_space || bnam_bound(m, ix.render_skel_of(t, geometry).unwrap_or(sk))
+        })
     else {
         return Ok(None);
     };
