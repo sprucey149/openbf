@@ -4,7 +4,7 @@
 use super::WeaponState;
 
 use super::{
-    pair, pf, Falloff, OrdBlend, OrdKind, OrdnanceClass, PropSource, WeaponClass, DEG,
+    pair, pf, pf_hash, Falloff, OrdBlend, OrdKind, OrdnanceClass, PropSource, WeaponClass, DEG,
     HASH_ZOOM_SPREAD, SNIPER_LOCK_ON_ANGLE, SNIPER_LOCK_ON_RANGE, TARGET_SOLDIER_KINDS,
     TIGHT_HOLD_CAP, TIGHT_HOLD_SECS, TIGHT_HOLD_SECS_AI,
 };
@@ -135,6 +135,8 @@ impl WeaponClass {
             shots_per_salvo: 1,
             salvo_delay: [0.0, 0.0],
             initial_salvo_delay: 0.0,
+            wind_up: 0.0,
+            wind_down: 0.0,
             pitch_spread: 0.25 * DEG,
             yaw_spread: 0.25 * DEG,
             shot_tilts: Vec::new(),
@@ -522,6 +524,12 @@ impl WeaponClass {
         }
         if let Some(v) = pf(src, "InitialSalvoDelay") {
             w.initial_salvo_delay = v;
+        }
+        if let Some(v) = pf_hash(src, 0x44ed_eee4) {
+            w.wind_up = v;
+        }
+        if let Some(v) = pf_hash(src, 0x9eca_c3a1) {
+            w.wind_down = v;
         }
         // Legacy MaxSpread: pitch = 0.025·v, yaw = 0.05·v (NOT deg→rad).
         if let Some(v) = pf(src, "MaxSpread") {

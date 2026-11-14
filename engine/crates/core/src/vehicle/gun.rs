@@ -273,6 +273,11 @@ pub struct GunWeapon {
     pub fire_points: Vec<Vec3>,
     /// Each fire point's aim limits, model frame: [yaw, pitch] in radians.
     pub fire_limits: Vec<[[f32; 2]; 2]>,
+    /// Each fire point's own aimer node, model space: the PS2 turns a
+    /// barrel with the aimer that carries it (`analysis/re-turret-draw.md`
+    /// 2.3), so the AT-TE's rear barrels swing about `aimer_Rgun_1` and
+    /// `aimer_Rgun_2`, not about each other. Empty = the seat's pivot.
+    pub fire_pivots: Vec<Vec3>,
 }
 
 /// A seat's guns — SETUP data per class, like `SeatSetup`, NOT hashed.
@@ -474,11 +479,15 @@ impl GunSetup {
 
     /// Where the seat's camera ray leaves, model space: the zoomed eye while
     /// the seat is zoomed (card VTURZ: the shot goes where the scope's
-    /// centre looks), else the port's PROVISIONAL eye - `EyePointOffset`
-    /// turned by the look's yaw alone.
+    /// centre looks); a pilot's eye E+0x340, the BODY's `EyePointOffset` on
+    /// the vehicle's matrix, not turned by the aim (hover B2:132251, walker
+    /// B2 FUN_00261208, both `FUN_001ce880` on E+0x120); else the port's
+    /// PROVISIONAL eye - `EyePointOffset` turned by the look's yaw alone.
     pub fn ray_eye(&self, look: (f32, f32), zoomed: bool) -> Vec3 {
         if zoomed {
             self.scope_eye(look)
+        } else if self.pilot {
+            self.pivot + self.eye
         } else {
             self.pivot + turned(self.eye, Vec3::ZERO, look.0, 0.0)
         }
@@ -525,14 +534,20 @@ impl GunSetup {
 
     /// [`GunSetup::muzzle`] for another of the seat's bind-pose points.
     pub fn muzzle_from(&self, point: Vec3, aim: (f32, f32)) -> Vec3 {
+        self.muzzle_about(point, self.pivot, aim)
+    }
+
+    /// [`GunSetup::muzzle_from`] for a barrel turned about its own aimer's
+    /// `pivot`.
+    pub fn muzzle_about(&self, point: Vec3, pivot: Vec3, aim: (f32, f32)) -> Vec3 {
         let rest = if self.aimer_bind != glam::Quat::IDENTITY {
-            self.pivot + self.aimer_bind.inverse() * (point - self.pivot)
+            pivot + self.aimer_bind.inverse() * (point - pivot)
         } else if self.turn.is_some() {
             point
         } else {
-            turned(point, self.pivot, -self.bind_yaw(), 0.0)
+            turned(point, pivot, -self.bind_yaw(), 0.0)
         };
-        turned(rest, self.pivot, aim.0, aim.1)
+        turned(rest, pivot, aim.0, aim.1)
     }
 
     /// The barrel of `weapon`'s fire ring its next shot leaves from, after
@@ -546,10 +561,20 @@ impl GunSetup {
     /// fire ring (`GunWeapon::fire_points`) turned with the aim, else the
     /// seat's fire point. A flyer pilot's guns do not turn: his points stay
     /// where the model binds them.
-    pub fn shot_point(&self, weapon: usize, point: Option<usize>, aim: (f32, f32), fixed: bool) -> Vec3 {
-        match point.and_then(|p| self.weapons.get(weapon)?.fire_points.get(p)) {
-            Some(&p) if fixed => p,
-            Some(&p) => self.muzzle_from(p, aim),
+    pub fn shot_point(
+        &self,
+        weapon: usize,
+        point: Option<usize>,
+        aim: (f32, f32),
+        fixed: bool,
+    ) -> Vec3 {
+        let w = self.weapons.get(weapon);
+        match point.and_then(|p| Some((*w?.fire_points.get(p)?, p))) {
+            Some((p, _)) if fixed => p,
+            Some((p, k)) => match w.and_then(|w| w.fire_pivots.get(k)) {
+                Some(&pivot) => self.muzzle_about(p, pivot, aim),
+                None => self.muzzle_from(p, aim),
+            },
             None => self.muzzle(aim),
         }
     }

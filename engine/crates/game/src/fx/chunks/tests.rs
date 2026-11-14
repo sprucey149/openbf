@@ -746,7 +746,10 @@ fn a_death_throws_its_own_pieces_and_the_explosion_its_debris() {
 fn explosion_debris_flies_up_and_out_within_its_speed_range() {
     let c = Chunks::load_for(&blast_db(), &[], &[], Era::Bf2, false);
     let b = &c.blasts["tur_x_exp"];
-    assert_eq!((b.count, b.speed, b.start, b.push_radius), (10, [10.0, 13.0], 0.0, 5.0));
+    assert_eq!(
+        (b.count, b.speed, b.start, b.push_radius),
+        (10, [10.0, 13.0], 0.0, 5.0)
+    );
     assert_eq!((b.spec.bounce, b.spec.stick, b.spec.budget), (0.0, 0.0, 10));
     assert_eq!(b.spec.trails, vec![("trail".to_string(), None)]);
     let mut c = c;
@@ -756,7 +759,10 @@ fn explosion_debris_flies_up_and_out_within_its_speed_range() {
         let speed = p.vel.length();
         assert!((10.0..=13.0).contains(&speed), "{speed}");
         let dir = p.vel / speed;
-        assert!(dir.y > 0.0 && dir.y * 2.0 >= dir.x.abs().max(dir.z.abs()) * 0.5, "{dir}");
+        assert!(
+            dir.y > 0.0 && dir.y * 2.0 >= dir.x.abs().max(dir.z.abs()) * 0.5,
+            "{dir}"
+        );
         assert_eq!(p.pos, at);
         assert!(p.blast);
     }
@@ -801,7 +807,8 @@ fn explosion_debris_rests_five_seconds() {
             }
         }
         assert!(
-            rest.iter().all(|r| r.is_some_and(|r| (r - BLAST_REST).abs() < 0.05)),
+            rest.iter()
+                .all(|r| r.is_some_and(|r| (r - BLAST_REST).abs() < 0.05)),
             "space {space}: {rest:?}"
         );
     }
@@ -817,10 +824,16 @@ fn real_barc_explosion_throws_eight_small_chunks() {
     let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep"]).unwrap();
     let c = Chunks::load_for(&db, &[], &[root.join("common_bf2/models")], Era::Bf2, false);
     let b = &c.blasts["rep_hover_speederbike_exp"];
-    assert_eq!((b.count, b.speed, b.start, b.push_radius), (8, [10.0, 13.0], 0.0, 5.0));
+    assert_eq!(
+        (b.count, b.speed, b.start, b.push_radius),
+        (8, [10.0, 13.0], 0.0, 5.0)
+    );
     assert_eq!(b.spec.model, "com_smallchunk1");
     assert_eq!(b.spec.omega, Vec3::splat(4.0));
-    assert_eq!(b.spec.trails, vec![("com_sfx_chunktrail_xs".to_string(), None)]);
+    assert_eq!(
+        b.spec.trails,
+        vec![("com_sfx_chunktrail_xs".to_string(), None)]
+    );
     assert_eq!(b.spec.bounce, 0.0);
 }
 

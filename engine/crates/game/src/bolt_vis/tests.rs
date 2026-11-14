@@ -97,6 +97,7 @@ fn mounted_fixture(
                 reserve_clips: 0,
                 fire_points: Vec::new(),
                 fire_limits: Vec::new(),
+                fire_pivots: Vec::new(),
             }],
             fire_point: Vec3::ZERO,
             pivot: Vec3::ZERO,
@@ -960,20 +961,14 @@ fn a_bullet_with_a_model_draws_as_its_model() {
 }
 
 #[test]
-fn a_modelled_walker_round_does_not_also_draw_its_tracer() {
+fn a_modelled_walker_round_draws_only_as_its_model() {
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
     let (mut w, mut b) = missile_round(5);
     w.ordnance.geometry = Some("com_weap_inf_grenadethermal_ord".into());
     let class = walk.sim.add_weapon_class(w);
     b.weapon_class = class;
-    walk.walker_shot_styles.insert(
-        class,
-        crate::walker_shots::Style {
-            tracer: Some(core::laser::LaserLook::default()),
-            fire_sound: None,
-            frequency: 1,
-        },
-    );
+    walk.walker_shot_styles
+        .insert(class, crate::walker_shots::Style::default());
     walk.sim.events.push(Event::Shot {
         unit: b.owner,
         weapon_class: class as u32,

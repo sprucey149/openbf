@@ -130,12 +130,14 @@ fn atte_cycles_both_ai_held_guns_and_each_seat_fires_its_authored_weapon() {
         );
         if seat == 2 {
             let style = game::walker_shots::style(&w, expected).unwrap();
-            assert_eq!(style.frequency, 3);
+            assert_eq!(
+                w.sim.weapon_classes[expected].secondary.as_ref().map(|s| s.period),
+                Some(3)
+            );
             assert_eq!(
                 style.fire_sound.as_deref(),
                 Some("rep_weap_walk_atte_chaingun_fire")
             );
-            assert!(style.tracer.is_some());
             let left = game::walker_shots::frame(&w, w.player, expected, 0)
                 .unwrap()
                 .w_axis
@@ -145,7 +147,7 @@ fn atte_cycles_both_ai_held_guns_and_each_seat_fires_its_authored_weapon() {
                 .w_axis
                 .truncate();
             assert!(left.distance(right) > 0.1);
-            assert!(!game::walker_shots::loops(&w).is_empty());
+            assert!(!game::walker_shots::voices(&w).is_empty());
             let look = w.sim.seat_look(w.player).unwrap();
 
             assert!(

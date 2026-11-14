@@ -27,9 +27,10 @@
 //!   landing switch its time graphs to wind-up and wind-down and play `TakeoffSound`
 //!   and `LandSound` ([`JetShot`]).
 //!
-//! [`walker`] supplies animated footstep one-shots through the same queue.
-//! Not here (card VSN2): the vehicles' `TurnOnSound` / `TurnOffSound`,
-//! leg hydraulics, the turret whir, collision.
+//! [`walker`] supplies animated footstep one-shots through the same queue,
+//! and every vehicle instance its `TurnOnSound` / `TurningOffSound` /
+//! `TurnOffSound` (card VSN2), a class with no record included.
+//! Not here (card VSN2): leg hydraulics, the turret whir, collision.
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::walk::WalkSim;
@@ -150,8 +151,16 @@ pub fn flyer_speed_divisor(p: &core::vehicle::flyer::FlyerParams, in_landing_reg
 /// A vehicle class's engine keys.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineClass {
-    /// `EngineSound`: the record's name.
+    /// `EngineSound`: the record's name; empty for a class with only the
+    /// one-shots (the kaadu, the tauntaun: `analysis/re-vehicle-sounds.md`
+    /// §4, the instance runs without a record).
     pub record: String,
+    /// `TurnOnSound`, `TurningOffSound` and `TurnOffSound`: the one-shots on
+    /// the instance's handle at its turn-on, the run-down's start and its
+    /// end (§3.3, §3.5).
+    pub turn_on: Option<String>,
+    pub turning_off: Option<String>,
+    pub turn_off: Option<String>,
     /// `TurnOffTime`, seconds of run-down after the pilot leaves.
     pub turn_off_time: f32,
     /// A flyer's `TakeoffSound` (or `WindUpSound`, the same slot).
@@ -194,12 +203,12 @@ impl BoostEntry {
 }
 
 impl EngineClass {
-    /// `class`'s `EngineSound` and `TurnOffTime`, if it names a record.
+    /// `class`'s engine block, if it names a record or a turn-on or
+    /// turn-off one-shot.
     pub fn from_db(db: &ClassDb, class: &str) -> Option<EngineClass> {
-        let record = db.prop(class, "EngineSound")?.trim().to_owned();
-        if record.is_empty() {
-            return None;
-        }
+        let record = db
+            .prop(class, "EngineSound")
+            .map_or(String::new(), |r| r.trim().to_owned());
         let time = db.prop(class, "TurnOffTime");
         let sound = |keys: &[&str]| {
             keys.iter()
@@ -207,8 +216,17 @@ impl EngineClass {
                 .map(|v| v.split_whitespace().next().unwrap_or("").to_owned())
                 .find(|v| !v.is_empty())
         };
+        let turn_on = sound(&["TurnOnSound"]);
+        let turning_off = sound(&["TurningOffSound"]);
+        let turn_off = sound(&["TurnOffSound"]);
+        if record.is_empty() && turn_on.is_none() && turning_off.is_none() && turn_off.is_none() {
+            return None;
+        }
         Some(EngineClass {
             record,
+            turn_on,
+            turning_off,
+            turn_off,
             turn_off_time: time
                 .and_then(|t| t.trim().parse().ok())
                 .unwrap_or(TURN_OFF_TIME),
@@ -468,7 +486,7 @@ impl EngineSounds {
             let Some(ec) = walk.vehicle_engines.get(class).and_then(|e| e.as_ref()) else {
                 continue;
             };
-            let hash = fnv1a_lowercase(&ec.record);
+            let hash = (!ec.record.is_empty()).then(|| fnv1a_lowercase(&ec.record));
             let drive = match v.kind {
                 VehicleKind::Hover => match walk.sim.hover_params.get(class) {
                     Some(Some(p)) => Drive::Hover {
@@ -491,15 +509,20 @@ impl EngineSounds {
                 },
                 _ => continue,
             };
-            let (Some(rec), true) = (record(hash, &self.levels), v.alive) else {
+            if !v.alive {
                 continue;
-            };
+            }
+            let rec = hash.and_then(|h| record(h, &self.levels));
+            if hash.is_some() && rec.is_none() {
+                continue;
+            }
             let i = i as u32;
             live.push(i);
             let e = self.instances.entry(i).or_default();
             if e.0 != v.gen {
                 *e = (v.gen, Instance::default());
             }
+            let (was_on, was_off) = (e.1.on, e.1.turning_off);
             let m = Motion::of(v);
             let seed = &mut self.seed;
             e.1.update(
@@ -507,12 +530,36 @@ impl EngineSounds {
                 drive,
                 ec.turn_off_time,
                 &m,
-                &rec.layers,
+                rec.map_or(&[][..], |r| &r.layers[..]),
                 || {
                     *seed = seed.wrapping_mul(0x0019_660D).wrapping_add(0x3C6E_F35F);
                     (*seed >> 8) as f32 / 16_777_216.0
                 },
             );
+            for (kind, name) in [
+                (
+                    JetShotKind::TurnOn,
+                    e.1.on && !e.1.turning_off && (!was_on || was_off),
+                    &ec.turn_on,
+                ),
+                (
+                    JetShotKind::TurningOff,
+                    was_on && !was_off && (e.1.turning_off || !e.1.on),
+                    &ec.turning_off,
+                ),
+                (JetShotKind::TurnOff, was_on && !e.1.on, &ec.turn_off),
+            ]
+            .into_iter()
+            .filter(|(_, now, _)| *now)
+            .filter_map(|(kind, _, name)| Some((kind, name.as_ref()?)))
+            {
+                self.shots.push(JetShot {
+                    unit: i,
+                    kind,
+                    name: name.clone(),
+                    pos: v.pos,
+                });
+            }
             if e.1.wind_began {
                 let (kind, name) = match e.1.wind {
                     Wind::Up => (JetShotKind::Takeoff, &ec.takeoff),
@@ -556,9 +603,9 @@ impl EngineSounds {
             count.piloted += usize::from(m.piloted);
             count.on += usize::from(e.1.on);
             count.turning_off += usize::from(e.1.on && e.1.turning_off);
-            if !e.1.on {
+            let (true, Some(rec), Some(hash)) = (e.1.on, rec, hash) else {
                 continue;
-            }
+            };
             for (k, l) in rec
                 .layers
                 .iter()

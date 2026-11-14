@@ -690,7 +690,10 @@ fn spring_hulls(game: &str) -> Vec<(String, Vec<(f32, bool, bool, bool)>)> {
     let mut files: Vec<_> = classes
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&format!("{game}_"))))
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(&format!("{game}_")))
+        })
         .collect();
     files.sort();
     for f in &files {
@@ -709,7 +712,9 @@ fn spring_hulls(game: &str) -> Vec<(String, Vec<(f32, bool, bool, bool)>)> {
         for v in &vm.vehicles {
             let k = &v.class;
             let Some(entry) = k.geometry.as_deref().and_then(|g| {
-                vm.collision.iter().find(|e| e.geometry.eq_ignore_ascii_case(g))
+                vm.collision
+                    .iter()
+                    .find(|e| e.geometry.eq_ignore_ascii_case(g))
             }) else {
                 continue;
             };
@@ -743,7 +748,11 @@ fn spring_hulls(game: &str) -> Vec<(String, Vec<(f32, bool, bool, bool)>)> {
                     _ => panic!("a spring part is a sphere"),
                 })
                 .collect();
-            let kept: Vec<_> = spheres.iter().copied().filter(|s| s.1 || s.2 || s.3).collect();
+            let kept: Vec<_> = spheres
+                .iter()
+                .copied()
+                .filter(|s| s.1 || s.2 || s.3)
+                .collect();
             assert_eq!(built, kept, "{}", k.name);
             if !spheres.is_empty() {
                 out.push((k.name.clone(), spheres));
@@ -763,7 +772,12 @@ fn hover_spring_spheres_join_the_subsets_ram_shows() {
     let ram: [(&str, &str, &[f32], bool); 8] = [
         ("bf2", "rep_hover_barcspeeder", &[1.4; 3], true),
         ("bf2", "all_hover_combatspeeder", &[1.75; 6], true),
-        ("bf2", "cis_tread_snailtank", &[2.0, 2.0, 1.0, 1.0, 1.0, 0.75], true),
+        (
+            "bf2",
+            "cis_tread_snailtank",
+            &[2.0, 2.0, 1.0, 1.0, 1.0, 0.75],
+            true,
+        ),
         ("bf2", "rep_hover_fightertank", &[2.3; 4], false),
         ("bf2", "imp_hover_fightertank", &[2.3; 4], false),
         ("bf2", "imp_hover_speederbike", &[1.4; 3], false),
@@ -816,7 +830,10 @@ fn kas2_load_order_writes_the_rocket_scale_into_the_barcs_last_flame() {
             .collect()
     };
     let barc_alone = bands(&db, "rep_hover_barcspeeder");
-    assert_eq!(barc_alone[4], ("com_sfx_vehicleflame".to_owned(), 0.2, 0.75));
+    assert_eq!(
+        barc_alone[4],
+        ("com_sfx_vehicleflame".to_owned(), 0.2, 0.75)
+    );
     let stap = bands(&db, "cis_hover_stap");
     let snail = bands(&db, "cis_tread_snailtank");
     db.replay_damage_loads(&dir, "bf2", &mission.class_load_order);

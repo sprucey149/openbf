@@ -27,7 +27,7 @@ impl Default for FlightLimits {
 }
 
 impl Sim {
-    pub(crate) fn flyer_region_coverage(&self, vehicle: &crate::vehicle::Vehicle) -> (bool, bool) {
+    pub fn flyer_region_coverage(&self, vehicle: &crate::vehicle::Vehicle) -> (bool, bool) {
         let sphere = self
             .blast_setup
             .get(vehicle.class as usize)

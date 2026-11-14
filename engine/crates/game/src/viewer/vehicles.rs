@@ -153,7 +153,8 @@ struct Side {
     /// LOD0 model (lowercase) → the walker record that names it as its
     /// skin (card WSKN).
     walkers: HashMap<String, manifest::ManifestWalker>,
-    flyers: HashSet<String>,
+    /// LOD0 model (lowercase) → its flyer's fins clip, if any.
+    flyers: HashMap<String, Option<String>>,
     /// LOD0 model (lowercase) → its posed hover's `FinAnimation` clip
     /// (card VPOSE).
     hovers: HashMap<String, Option<String>>,
@@ -252,7 +253,7 @@ impl VehicleSides {
                                 .vehicles
                                 .iter()
                                 .filter_map(|v| v.flyer.as_ref())
-                                .map(|f| f.skin.to_ascii_lowercase())
+                                .map(|f| (f.skin.to_ascii_lowercase(), f.fin.clone()))
                                 .collect(),
                             hovers: m
                                 .vehicles
@@ -310,7 +311,7 @@ impl VehicleSides {
                         models,
                         textures,
                         walkers: HashMap::new(),
-                        flyers: HashSet::new(),
+                        flyers: HashMap::new(),
                         hovers: HashMap::new(),
                         walker_seats: HashMap::new(),
                     });
@@ -551,7 +552,8 @@ impl VehicleVisuals {
                 .map(|&(_, o)| render::Fade::see_through(visibility_opacity(walker, o)));
             let palette = class.skin.as_ref().and_then(|sk| {
                 if v.kind == core::vehicle::VehicleKind::Flyer {
-                    return sk.rig.flyer_palette(v.flyer.lift);
+                    let nine = super::turret_pose::flyer_nine(sim, v);
+                    return sk.rig.flyer_palette(v.flyer.lift, nine);
                 }
                 if v.kind == core::vehicle::VehicleKind::Hover {
                     let nine = self
@@ -646,7 +648,10 @@ impl VehicleVisuals {
                     shadow.append_volume(m * node, sun * length, &mut self.shadow_triangles);
                 }
             }
-            let treads = self.treads.get(v.class as usize).map_or(&[][..], Vec::as_slice);
+            let treads = self
+                .treads
+                .get(v.class as usize)
+                .map_or(&[][..], Vec::as_slice);
             let textures: Vec<Option<TextureHandle>> = if treads.is_empty() {
                 Vec::new()
             } else {
@@ -849,7 +854,8 @@ fn side_rig(side: &Side, model: &str, a: SkinnedAsset) -> WalkerRig {
     } else if let Some(fin) = side.hovers.get(&name) {
         WalkerRig::new_hover(a.skeleton, a.clips, fin.as_deref()).with_seats(seats())
     } else {
-        WalkerRig::new_flyer(a.skeleton, a.clips)
+        let fin = side.flyers.get(&name).cloned().flatten();
+        WalkerRig::new_flyer(a.skeleton, a.clips, fin.as_deref())
     }
 }
 
@@ -871,7 +877,7 @@ fn skinned_rigs(
             let path = sides.dir(i).join("walkers").join(format!("{model}.glb"));
             let ours = match kind {
                 Rigged::Walker => side.walkers.contains_key(&name),
-                Rigged::Flyer => side.flyers.contains(&name),
+                Rigged::Flyer => side.flyers.contains_key(&name),
                 Rigged::Hover => side.hovers.contains_key(&name),
             };
             if !ours {
@@ -942,7 +948,7 @@ fn upload_class(
             (owned, joints) = (mesh, j);
             // Card WSKN: a walker model with its bones and a baked skin.
             let walker = sides.0[i].walkers.get(&model.to_ascii_lowercase());
-            let flyer = sides.0[i].flyers.contains(&model.to_ascii_lowercase());
+            let flyer = sides.0[i].flyers.contains_key(&model.to_ascii_lowercase());
             let hover = sides.0[i].hovers.get(&model.to_ascii_lowercase());
             if !joints.is_empty() && (walker.is_some() || flyer || hover.is_some()) {
                 let path = dir.join("walkers").join(format!("{model}.glb"));
@@ -1143,7 +1149,7 @@ mod texture_cache_tests {
             dir: name.into(),
             models: HashMap::new(),
             walkers: HashMap::new(),
-            flyers: HashSet::new(),
+            flyers: HashMap::new(),
             hovers: HashMap::new(),
             walker_seats: HashMap::new(),
             textures: ["shared".to_owned()].into_iter().collect(),
@@ -1354,7 +1360,7 @@ mod local_light_tests {
                 group: None,
             }],
             skin: Some(Skin {
-                rig: WalkerRig::new_flyer(skeleton, vec![clip]),
+                rig: WalkerRig::new_flyer(skeleton, vec![clip], None),
                 positions,
                 normals,
                 uvs,

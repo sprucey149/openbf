@@ -213,6 +213,15 @@ pub struct BuildingSphere {
     pub foot: bool,
 }
 
+/// A `TerrainCollision` primitive that no leg pair claims (§16, card WCON),
+/// in the model's frame: the tauntaun's and the kaadu's `p_collision`. Every
+/// other walker class lists only its feet there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainSphere {
+    pub pos: Vec3,
+    pub radius: f32,
+}
+
 /// A walker class's numbers (`game::vehicle_class::WalkerClass`: the ctor
 /// defaults FUN_00263160, then the ODF through the setter's conversions,
 /// §11). Angles in radians; the turn speeds are HALF-angle rates.
@@ -252,6 +261,8 @@ pub struct WalkerParams {
     /// The anim table's 11 fixed entries; `None` where the bank lacks one.
     pub clips: Vec<Option<Clip>>,
     pub building: Vec<BuildingSphere>,
+    /// The body prims that meet the terrain ([`TerrainSphere`]).
+    pub terrain: Vec<TerrainSphere>,
     /// A `commandwalker`'s post (card CWSP, `analysis/re-command-walker-post.md`
     /// §4 [O]): its class's `SpawnPointLocation`s as (position in the
     /// walker's frame, the turn about up in radians), in PROP order. Empty
@@ -325,6 +336,7 @@ impl Default for WalkerParams {
             leg_pairs: Vec::new(),
             clips: Vec::new(),
             building: Vec::new(),
+            terrain: Vec::new(),
             spawn_points: Vec::new(),
             spawn_sphere_centre: None,
             death: WalkerDeath::default(),
@@ -517,6 +529,8 @@ pub trait WalkerWorld {
     fn terrain_segment(&self, from: Vec3, to: Vec3) -> Option<f32>;
     /// Every building contact of a sphere (class 0x10, §9 C7).
     fn building_contacts(&self, centre: Vec3, radius: f32, out: &mut Vec<Contact>);
+    /// The terrain contact of a sphere (class 0x40 B1 / 0x80 B2, §16).
+    fn terrain_contacts(&self, centre: Vec3, radius: f32, out: &mut Vec<Contact>);
 }
 
 /// The drawn model's rotation: the body turned by the legs' 2h — FUN_0025f050
@@ -525,14 +539,16 @@ pub fn legs_rot(v: &Vehicle) -> glam::Quat {
     (v.rot * quat_y(v.walker.leg_angle())).normalize()
 }
 
-/// One tick of one walker (§2's order): input and locomotion, the aim, the
-/// fall, the body task (probes, legs), then the building contacts.
+/// One tick of one walker (§13.1's order): input and locomotion, the aim,
+/// the fall, the contacts (the collision world's key-10 task), then the body
+/// task (probes, legs).
 ///
 /// A dead walker's body task returns once the death clip has handed over to
 /// entry 4, and skips the legs before that (FUN_00261208 B1 and B3,
 /// B2:180697-180711, 180833-180835).
 pub fn step(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld, dt: f32) {
     input(v, p, dt);
+    contacts(v, p, world);
     if death_finished(v) {
         return;
     }
@@ -542,7 +558,6 @@ pub fn step(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld, dt: f32
     if !v.walker.dead {
         legs(v, p, world, dt);
     }
-    contacts(v, p, world);
 }
 
 /// Dead with death01 played out (E+0x2190 bit 2 and E+0x21e8 == 4): the
@@ -1042,12 +1057,35 @@ pub fn legs(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld, dt: f32
     }
 }
 
+/// The walker's contact callback (B1 FUN_00217d50, B2 FUN_0025c2b0).
+///
+/// §16: a body prim's terrain contact, which no leg pair claims (B1
+/// FUN_00231b00, B1:147006-147025; B2 FUN_002a1aa0), sets v.y = 0
+/// (B1:128994) and moves the body by normal × depth (B1 FUN_00168ff0,
+/// B1:7578-7617; B2 FUN_00169668, B2:177284-177313, 177601). BF2 also sets
+/// the supported bit there, BF1 does not; nothing in the port reads the bit
+/// past the locomotion's `since_supported`, which has no reader.
+///
 /// §9 C7: the class's building spheres against the world's buildings. A
 /// foot on a face no steeper than n.y 0.2 stands on it (v.y = 0); anything
 /// else is pushed out horizontally (PROVISIONAL distance: the horizontal
 /// move that clears the depth along n, at most 2·depth·|n_xz|).
 pub fn contacts(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld) {
     let mut found = Vec::new();
+    for sp in &p.terrain {
+        found.clear();
+        let at = v.pos;
+        world.terrain_contacts(at + v.rot * sp.pos, sp.radius, &mut found);
+        for c in &found {
+            let depth = c.depth - (v.pos - at).dot(c.normal);
+            if depth <= 0.0 {
+                continue;
+            }
+            v.vel.y = 0.0;
+            v.walker.supported = true;
+            v.pos += c.normal * depth;
+        }
+    }
     for sp in &p.building {
         found.clear();
         let at = v.pos;

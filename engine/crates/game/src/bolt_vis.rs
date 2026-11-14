@@ -392,9 +392,7 @@ pub struct BoltVis {
 }
 
 fn visual_look(walk: &WalkSim, class: usize) -> Option<&LaserLook> {
-    crate::walker_shots::style(walk, class)
-        .and_then(|s| s.tracer.as_ref())
-        .or_else(|| walk.sim.weapon_classes.get(class)?.ordnance.laser.as_ref())
+    walk.sim.weapon_classes.get(class)?.ordnance.laser.as_ref()
 }
 
 impl BoltVis {
@@ -502,11 +500,7 @@ impl BoltVis {
         for (bolt_index, b) in sim.bolts.iter().enumerate() {
             // A missile with a model is `SoldierVisuals`' (card UORD), and a
             // look-less round has no ribbon: neither is this module's.
-            if look(b.weapon_class).is_none()
-                || modelled(walk, b)
-                || crate::walker_shots::style(walk, b.weapon_class)
-                    .is_some_and(|s| s.tracer.is_some())
-            {
+            if look(b.weapon_class).is_none() || modelled(walk, b) {
                 continue;
             }
             let k = key(b);
@@ -594,7 +588,6 @@ impl BoltVis {
             });
         }
         self.same_tick_hits(walk, &shots, &mut struck);
-        self.walker_tracers(walk, &shots, &mut struck);
     }
 
     /// The tick's bolts that the sim spawned and resolved inside the one
@@ -604,59 +597,6 @@ impl BoltVis {
     /// its impact like any other (re-bolt §4) and, on BF2, lights the ground
     /// there (§5.2): each `Shot` of the tick with a struck `Impact` on its
     /// ray within one step becomes a remnant.
-    fn walker_tracers(&mut self, walk: &WalkSim, shots: &Shots, struck: &mut Struck) {
-        for shot in &shots.events {
-            let class = shot.class;
-            // Geometry owns the shot's draw, including walker cannons that
-            // also author a tracer. Match the ordinary bolt path's priority.
-            if walk.sim.weapon_classes[class].ordnance.geometry.is_some() {
-                continue;
-            }
-            let Some(style) =
-                crate::walker_shots::style(walk, class).filter(|s| s.tracer.is_some())
-            else {
-                continue;
-            };
-            let ordinal = crate::walker_shots::ordinal(walk, shot.unit, class, shot.event);
-            if !crate::walker_shots::visible(walk, class, ordinal) {
-                continue;
-            }
-            let start = shot.muzzle(walk).unwrap_or(shot.origin);
-            let impact = if shot.bolt.is_none() {
-                let step = walk.sim.weapon_classes[class].ordnance.velocity * core::TICK_DT;
-                struck.take_to(
-                    shot.origin,
-                    shot.dir,
-                    step,
-                    class,
-                    shot.flight.map(|f| f.end),
-                )
-            } else {
-                None
-            };
-            let end = shot
-                .flight
-                .map(|f| f.end)
-                .or_else(|| shot.bolt.map(|i| walk.sim.bolts[i].end))
-                .or_else(|| impact.map(|h| h.0))
-                .unwrap_or(shot.origin + shot.dir * style.tracer.as_ref().unwrap().length);
-            let delta = end - start;
-            let direction = delta.try_normalize().unwrap_or(shot.dir);
-            let len = delta.length().min(style.tracer.as_ref().unwrap().length);
-            self.remnants.push(Remnant {
-                class,
-                head: start + direction * len,
-                dir: direction,
-                len,
-                age: 0.0,
-                fade: 1.0,
-                timer: 0.0,
-                terrain: false,
-                prev: start,
-            });
-        }
-    }
-
     fn same_tick_hits(&mut self, walk: &WalkSim, shots: &Shots, struck: &mut Struck) {
         let sim = &walk.sim;
         for shot in &shots.events {
@@ -670,10 +610,7 @@ impl BoltVis {
             let Some(w) = sim.weapon_classes.get(class) else {
                 continue;
             };
-            if w.ordnance.laser.is_none()
-                || w.ordnance.velocity <= 0.0
-                || crate::walker_shots::style(walk, class).is_some_and(|s| s.tracer.is_some())
-            {
+            if w.ordnance.laser.is_none() || w.ordnance.velocity <= 0.0 {
                 continue;
             }
             let step = w.ordnance.velocity * core::TICK_DT;

@@ -238,10 +238,11 @@ impl ClassDb {
                         cur = (*n < 10).then(|| (name.clone(), *n));
                         *n += 1;
                     } else if let Some((owner, i)) = cur.as_ref().filter(|c| c.0 != name) {
-                        self.damage_patches
-                            .entry(owner.clone())
-                            .or_default()
-                            .push((*i, *k, v.clone()));
+                        self.damage_patches.entry(owner.clone()).or_default().push((
+                            *i,
+                            *k,
+                            v.clone(),
+                        ));
                     }
                 }
             }

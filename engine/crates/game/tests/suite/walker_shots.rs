@@ -68,7 +68,7 @@ fn atat_rounds_alternate_animated_barrels_without_a_muzzle_flash_and_walk_has_st
             for (event, e) in w.sim.events.iter().enumerate() {
                 if matches!(e, core::sim::Event::Shot { unit, weapon_class, .. } if *unit == w.player && *weapon_class as usize == weapon)
                 {
-                    let shot = game::walker_shots::ordinal(&w, w.player, weapon, event);
+                    let shot = game::walker_shots::turn(&w, w.player, weapon, event);
                     let name = if slot == head_slot {
                         if shot % 2 == 0 {
                             "hp_fire_Lgun"
@@ -148,20 +148,7 @@ fn atat_rounds_alternate_animated_barrels_without_a_muzzle_flash_and_walk_has_st
 fn scene() -> (WalkSim, usize) {
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
     let class = walk.sim.unit(walk.player).unwrap().weapon_class;
-    let look = core::laser::LaserLook {
-        length: 100.0,
-        glow_length: 100.0,
-        blur_length: 100.0,
-        ..core::laser::LaserLook::rifle()
-    };
-    walk.walker_shot_styles.insert(
-        class,
-        game::walker_shots::Style {
-            tracer: Some(look),
-            fire_sound: None,
-            frequency: 1,
-        },
-    );
+    walk.sim.weapon_classes[class].ordnance.laser = Some(core::laser::LaserLook::rifle());
     walk.sim.events.clear();
     (walk, class)
 }
@@ -264,41 +251,6 @@ fn bolt(walk: &WalkSim, class: usize, direction: Vec3) -> Bolt {
     b
 }
 
-fn trace(with_old_bolt: bool) -> (Vec3, Vec3) {
-    let (mut walk, class) = scene();
-    if with_old_bolt {
-        let mut old = bolt(&walk, class, Vec3::X);
-        old.advance(0.1);
-        walk.sim.bolts.push(old);
-    }
-    walk.sim.bolts.push(bolt(&walk, class, Vec3::Z));
-    walk.sim.events.push(Event::Shot {
-        unit: walk.player,
-        weapon_class: class as u32,
-        origin: Vec3::ZERO,
-        dir: Vec3::Z,
-    });
-    let mut vis = BoltVis::default();
-    vis.track(&walk);
-    let lines = vis.lines();
-    assert_eq!(lines.len(), 1);
-    lines[0]
-}
-
-#[test]
-fn a_new_tracer_uses_its_own_endpoint_while_an_older_round_is_flying() {
-    let control = trace(false);
-    assert!(
-        control.1.abs_diff_eq(Vec3::Z * 100.0, 0.001),
-        "control {control:?}"
-    );
-    let actual = trace(true);
-    assert!(
-        actual.1.abs_diff_eq(Vec3::Z * 100.0, 0.001),
-        "actual {actual:?}"
-    );
-}
-
 #[path = "../../examples/support/walker_battle.rs"]
 mod walker_battle;
 use core::sim::{buttons, PadState};
@@ -375,9 +327,12 @@ fn a_secondary_atte_shot_uses_its_own_fire_point_after_the_primary_has_fired_mor
     assert!(actual.abs_diff_eq(expected,0.001),"actual {actual:?}, expected secondary {expected:?}, primary {wrong:?}, counts primary={primary_count} secondary={count}");
 }
 
+/// A round draws to an impact on its own ray only: another shooter's
+/// nearby parallel impact is not its end.
 #[test]
-fn another_shooters_nearby_parallel_impact_cannot_take_the_new_tracer() {
+fn another_shooters_nearby_parallel_impact_cannot_take_the_round() {
     let (mut w, class) = scene();
+    w.sim.weapon_classes[class].ordnance.velocity = 1000.0;
     w.sim.events = vec![
         Event::Shot {
             unit: w.player,
@@ -395,7 +350,7 @@ fn another_shooters_nearby_parallel_impact_cannot_take_the_new_tracer() {
     ];
     let mut vis = BoltVis::default();
     vis.track(&w);
-    assert!(vis.lines()[0].1.abs_diff_eq(Vec3::Z * 100.0, 0.001));
+    assert!(vis.lines().is_empty(), "{:?}", vis.lines());
 }
 
 #[test]
@@ -420,9 +375,8 @@ fn two_identical_shots_cannot_both_take_one_impact() {
     let mut vis = BoltVis::default();
     vis.track(&w);
     let lines = vis.lines();
-    assert_eq!(lines.len(), 2);
+    assert_eq!(lines.len(), 1);
     assert!(lines[0].1.abs_diff_eq(Vec3::Z * 10.0, 0.001));
-    assert!(lines[1].1.abs_diff_eq(Vec3::Z * 100.0, 0.001));
 }
 
 #[test]
@@ -473,46 +427,41 @@ fn almost_parallel_or_neighboring_shots_keep_their_own_impact_endpoints() {
 
 #[test]
 fn recorded_identical_shots_keep_their_own_first_flight_endpoints() {
-    for tracer in [false, true] {
-        let (mut w, class) = scene();
-        w.sim.tick = 1;
-        w.sim.weapon_classes[class].ordnance.velocity = 1000.0;
-        if !tracer {
-            w.walker_shot_styles.clear();
-        }
-        for (event, distance) in [10.0, 5.0].into_iter().enumerate() {
-            w.sim.events.push(Event::Shot {
-                unit: w.player,
-                weapon_class: class as u32,
-                origin: Vec3::ZERO,
-                dir: Vec3::Z,
-            });
-            w.sim.shot_flights.push(ShotFlight {
-                shot: VisualShot { tick: 0, event },
-                end: Vec3::Z * distance,
-            });
-        }
-        for distance in [10.0, 5.0] {
-            w.sim.events.push(Event::Impact {
-                pos: Vec3::Z * distance,
-                dir: Vec3::Z,
-                weapon_class: class as u32,
-                surface: core::impact::Surface::Building,
-                vehicle: None,
-            });
-        }
-        let hash = w.sim.hash();
-        let mut vis = BoltVis::default();
-        vis.track(&w);
-        assert_eq!(w.sim.hash(), hash);
-        let lines = vis.lines();
-        assert_eq!(lines.len(), 2);
-        for (actual, distance) in lines.iter().zip([10.0, 5.0]) {
-            assert!(
-                actual.1.abs_diff_eq(Vec3::Z * distance, 0.001),
-                "recorded first-flight endpoint was reassigned"
-            );
-        }
+    let (mut w, class) = scene();
+    w.sim.tick = 1;
+    w.sim.weapon_classes[class].ordnance.velocity = 1000.0;
+    for (event, distance) in [10.0, 5.0].into_iter().enumerate() {
+        w.sim.events.push(Event::Shot {
+            unit: w.player,
+            weapon_class: class as u32,
+            origin: Vec3::ZERO,
+            dir: Vec3::Z,
+        });
+        w.sim.shot_flights.push(ShotFlight {
+            shot: VisualShot { tick: 0, event },
+            end: Vec3::Z * distance,
+        });
+    }
+    for distance in [10.0, 5.0] {
+        w.sim.events.push(Event::Impact {
+            pos: Vec3::Z * distance,
+            dir: Vec3::Z,
+            weapon_class: class as u32,
+            surface: core::impact::Surface::Building,
+            vehicle: None,
+        });
+    }
+    let hash = w.sim.hash();
+    let mut vis = BoltVis::default();
+    vis.track(&w);
+    assert_eq!(w.sim.hash(), hash);
+    let lines = vis.lines();
+    assert_eq!(lines.len(), 2);
+    for (actual, distance) in lines.iter().zip([10.0, 5.0]) {
+        assert!(
+            actual.1.abs_diff_eq(Vec3::Z * distance, 0.001),
+            "recorded first-flight endpoint was reassigned"
+        );
     }
 }
 
@@ -611,7 +560,6 @@ fn simultaneous_atte_rounds(difference: f32, first_hits: bool, later_hit: bool) 
         })
         .collect();
     let impact = origin + directions[0] * 2.0;
-    let survivor_end = w.sim.bolts[1].end;
     if first_hits {
         w.sim.bolts.remove(0);
         w.sim.shot_flights[0].end = impact;
@@ -622,18 +570,6 @@ fn simultaneous_atte_rounds(difference: f32, first_hits: bool, later_hit: bool) 
             surface: core::impact::Surface::Building,
             vehicle: None,
         });
-        let look = core::laser::LaserLook {
-            length: 1000.0,
-            ..core::laser::LaserLook::rifle()
-        };
-        w.walker_shot_styles.insert(
-            gun,
-            game::walker_shots::Style {
-                tracer: Some(look),
-                fire_sound: None,
-                frequency: 1,
-            },
-        );
     }
     assert!(expected[0].distance(expected[1]) > 0.1);
     let mut visual =
@@ -645,22 +581,33 @@ fn simultaneous_atte_rounds(difference: f32, first_hits: bool, later_hit: bool) 
     let hash = w.sim.hash();
     vis.track(&w);
     assert_eq!(w.sim.hash(), hash);
-    for ((start, _), expected) in vis.lines().iter().zip(&expected) {
-        assert!(
-            start.abs_diff_eq(*expected, 0.001),
-            "distinct salvo muzzle {start:?} != {expected:?}"
-        );
-    }
-    assert_eq!(vis.lines().len(), 2);
+    let lines = vis.lines();
+    assert_eq!(lines.len(), 2);
+    let from = |muzzle: Vec3| {
+        lines
+            .iter()
+            .find(|(start, _)| start.abs_diff_eq(muzzle, 0.001))
+            .unwrap_or_else(|| panic!("no round from {muzzle:?}: {lines:?}"))
+            .1
+    };
     if first_hits {
         // Only the almost-parallel second round survived. Each tracer still
         // owns its barrel and its own live/removed endpoint.
         assert!(
-            vis.lines()[0].1.abs_diff_eq(impact, 0.001),
+            from(expected[0]).abs_diff_eq(impact, 0.001),
             "removed first tracer used surviving second endpoint"
         );
-        assert!(vis.lines()[1].1.abs_diff_eq(survivor_end, 0.001));
+        assert!(
+            from(expected[1]).distance(impact) > 1.0,
+            "the surviving round took the impact"
+        );
         return;
+    }
+    for ((start, _), expected) in lines.iter().zip(&expected) {
+        assert!(
+            start.abs_diff_eq(*expected, 0.001),
+            "distinct salvo muzzle {start:?} != {expected:?}"
+        );
     }
     w.sim.events.clear();
     w.sim.shot_flights.clear();

@@ -770,6 +770,7 @@ mod tests {
                     reserve_clips: 0,
                     fire_points: Vec::new(),
                     fire_limits: Vec::new(),
+                    fire_pivots: Vec::new(),
                 }],
                 fire_point: Vec3::Y,
                 pivot: Vec3::Y,

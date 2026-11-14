@@ -109,7 +109,11 @@ mod tests {
         let h = barc(&mut walk, Vec3::new(-45.2, 1.2655, 86.6));
         fx.follow_hover_water(&walk);
         fx.follow_hover_water(&walk);
-        let wakes: Vec<_> = fx.live.iter().filter(|e| e.hover_water == Some(h)).collect();
+        let wakes: Vec<_> = fx
+            .live
+            .iter()
+            .filter(|e| e.hover_water == Some(h))
+            .collect();
         assert_eq!(wakes.len(), 1);
         let surface = walk.sim.water_under(Vec3::ZERO).unwrap();
         assert_eq!(wakes[0].frame.pos, Vec3::new(-45.2, surface + 0.02, 86.6));

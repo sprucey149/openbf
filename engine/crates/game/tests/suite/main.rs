@@ -76,6 +76,7 @@ mod squad_vehicle_maps;
 mod station_destruction;
 mod station_draw;
 mod turret_damage;
+mod walker_gun_aim;
 mod turret_enter;
 mod turret_fall;
 mod turret_gunner;
@@ -111,6 +112,6 @@ mod sniper_assist;
 mod sniper_scope;
 mod space_assault;
 mod spawn_lineup_clear;
-
 mod hailfire_feedback;
+
 mod spider_feedback;

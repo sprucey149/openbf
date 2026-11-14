@@ -50,7 +50,9 @@ pub struct WalkerRig {
 }
 
 impl WalkerRig {
-    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>) -> Self {
+    /// A flyer's rig: its `takeoff` clip and its fins clip by name
+    /// (`manifest::ManifestFlyer::fin`), if the bake found them.
+    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
         let flyer = manifest::ManifestWalker {
             bank: String::new(),
             clips: Vec::new(),
@@ -58,17 +60,17 @@ impl WalkerRig {
             skin: None,
             layer_bones: Vec::new(),
         };
-        Self::new(skeleton, clips, &flyer)
+        let fin = fin.and_then(|f| clips.iter().position(|c| c.name.eq_ignore_ascii_case(f)));
+        Self {
+            fin,
+            ..Self::new(skeleton, clips, &flyer)
+        }
     }
 
     /// A hover's rig (card VPOSE, `analysis/re-vehicle-pose.md` 7): its
     /// `FinAnimation` clip by name, if the bake found one.
     pub fn new_hover(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
-        let fin = fin.and_then(|f| clips.iter().position(|c| c.name.eq_ignore_ascii_case(f)));
-        Self {
-            fin,
-            ..Self::new_flyer(skeleton, clips)
-        }
+        Self::new_flyer(skeleton, clips, fin)
     }
 
     /// The fin nine-pose (re-vehicle-pose 4.3): the clip at frame `a` and
@@ -104,11 +106,23 @@ impl WalkerRig {
         self.aimed(self.fin_palette(nine), v)
     }
 
-    pub fn flyer_palette(&self, lift: f32) -> Option<Vec<Mat4>> {
-        let clip = self
+    /// A flyer's pose (BF2 FUN_00201300 B2:114581-114690, BF1 FUN_001d8620
+    /// B1:84287-84335): while its bank is set, a class with a `takeoff`
+    /// clip plays it at its `lift` and never its fins; else the fins clip's
+    /// nine-pose at `nine` ([`super::turret_pose::flyer_nine`]); else drawn
+    /// rigid.
+    pub fn flyer_palette(
+        &self,
+        lift: f32,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Option<Vec<Mat4>> {
+        let Some(clip) = self
             .clips
             .iter()
-            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))?;
+            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))
+        else {
+            return self.fin.map(|_| self.fin_palette(nine));
+        };
         let frame = lift.clamp(0.0, 1.0) * clip.frames.saturating_sub(1) as f32;
         Some(
             self.skeleton
@@ -116,8 +130,12 @@ impl WalkerRig {
         )
     }
 
-    pub fn flyer_nodes(&self, lift: f32) -> Option<Vec<Mat4>> {
-        Some(self.bind_nodes(&self.flyer_palette(lift)?))
+    pub fn flyer_nodes(
+        &self,
+        lift: f32,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Option<Vec<Mat4>> {
+        Some(self.bind_nodes(&self.flyer_palette(lift, nine)?))
     }
 
     /// Bone nodes in bind space (`palette * global_bind`).
@@ -435,9 +453,9 @@ mod tests {
                 },
             ])],
         };
-        let rig = WalkerRig::new_flyer(skeleton, vec![clip]);
+        let rig = WalkerRig::new_flyer(skeleton, vec![clip], None);
         for (lift, x) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
-            let palette = rig.flyer_palette(lift).unwrap();
+            let palette = rig.flyer_palette(lift, None).unwrap();
             assert!((palette[0].w_axis.x - x).abs() < 1e-5);
         }
     }

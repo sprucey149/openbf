@@ -188,7 +188,12 @@ fn a_hover_rests_on_water_as_on_ground_at_its_level() {
     for _ in 0..1800 {
         step(&mut v, &p, &Lake, DT);
     }
-    assert!(close(v.pos.y, ground.pos.y, 1e-3), "water {} ground {}", v.pos.y, ground.pos.y);
+    assert!(
+        close(v.pos.y, ground.pos.y, 1e-3),
+        "water {} ground {}",
+        v.pos.y,
+        ground.pos.y
+    );
     let sinks = HoverParams {
         floats_on_water: false,
         ..skiff()
@@ -1061,5 +1066,8 @@ fn a_driven_hovers_aim_ray_leaves_the_chase_camera() {
     let off = o - cam;
     assert!(off.cross(fwd).length() < 1e-4, "{off}");
     assert!((o - eye).dot(fwd).abs() < 1e-4);
-    assert!(cam.y > o.y - 1e-4 && (cam - v.pos).dot(fwd) < -10.0, "{cam}");
+    assert!(
+        cam.y > o.y - 1e-4 && (cam - v.pos).dot(fwd) < -10.0,
+        "{cam}"
+    );
 }

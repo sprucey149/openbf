@@ -32,7 +32,9 @@
 
 use super::{float, floats, h, scoped, Scope};
 use crate::classdb::ClassDb;
-use core::vehicle::walker::{flags, BuildingSphere, Clip, LegPair, WalkerParams, ANIM_COUNT};
+use core::vehicle::walker::{
+    flags, BuildingSphere, Clip, LegPair, TerrainSphere, WalkerParams, ANIM_COUNT,
+};
 use glam::Vec3;
 
 /// Engine bases that construct the walker (re-vehicles §2).
@@ -177,6 +179,8 @@ pub struct WalkerClass {
     pub leg_pairs: Vec<LegPairNames>,
     /// `BuildingCollision` prims, in PROP order.
     pub building: Vec<String>,
+    /// `TerrainCollision` prims, in PROP order.
+    pub terrain: Vec<String>,
     /// Is the engine base `commandwalker` — does the class own a post?
     pub command: bool,
     /// The post's `SpawnPointCount` (0 until authored).
@@ -198,6 +202,7 @@ impl Default for WalkerClass {
             animation: None,
             leg_pairs: Vec::new(),
             building: Vec::new(),
+            terrain: Vec::new(),
             command: false,
             spawn_point_count: 0,
             final_explosion: None,
@@ -463,6 +468,8 @@ impl WalkerClass {
             }
         } else if k == h("BuildingCollision") {
             self.building.push(v.trim().to_owned());
+        } else if k == h("TerrainCollision") {
+            self.terrain.push(v.trim().to_owned());
         } else if k == h("ExplosionOffset") {
             // class+0xd80 (B2:183135); the death's first blast.
             if let Some([x, y, z]) = floats::<3>(v) {
@@ -524,6 +531,22 @@ impl WalkerClass {
                 foot: foot_bones.iter().any(|b| b.eq_ignore_ascii_case(&p.bone)),
             })
             .collect();
+        let claimed = |n: &str| {
+            self.leg_pairs
+                .iter()
+                .flat_map(|lp| lp.feet.iter().flatten())
+                .any(|f| f.eq_ignore_ascii_case(n))
+        };
+        let terrain = self
+            .terrain
+            .iter()
+            .filter(|n| !claimed(n))
+            .filter_map(|n| prim(n))
+            .map(|p| TerrainSphere {
+                pos: Vec3::from(p.pos),
+                radius: p.radius,
+            })
+            .collect();
         let clips = (0..ANIM_COUNT)
             .map(|i| {
                 let c = bake?.clips.get(i)?.as_ref()?;
@@ -542,6 +565,7 @@ impl WalkerClass {
             leg_pairs,
             clips,
             building,
+            terrain,
             spawn_points: self.spawn_points.clone(),
             ..self.motion.clone()
         }
@@ -872,6 +896,64 @@ mod tests {
             (kaadu.motion.max_speed - want).abs() < 5e-3,
             "the table's fallback"
         );
+    }
+
+    /// Card WCON (re-walker §16): of every walker class only the tauntaun
+    /// and the kaadu list a body prim, `p_collision`, in TerrainCollision
+    /// beside their feet; the feet stay the legs' own.
+    #[test]
+    fn only_the_animal_mounts_carry_a_body_prim_onto_the_terrain() {
+        for (game, side, class, want) in [
+            (
+                "bf1",
+                "all",
+                "all_walk_tauntaun",
+                Some(([0.0, 1.515, 0.0], 1.5)),
+            ),
+            (
+                "bf2",
+                "all",
+                "all_walk_tauntaun",
+                Some(([0.0, 1.515, 0.0], 1.5)),
+            ),
+            ("bf1", "gun", "gun_walk_kaadu", Some(([0.0, 0.5, 0.0], 0.5))),
+            ("bf1", "imp", "imp_walk_atst", None),
+            ("bf2", "imp", "imp_walk_atat", None),
+        ] {
+            let Some(db) = game_db(game) else {
+                eprintln!("SKIP: class RONs not baked");
+                return;
+            };
+            let ron = format!(
+                "{}/../../assets_baked/side_{game}/vehicles/{side}/vehicles.ron",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let Ok(text) = pak::read_to_string(&ron) else {
+                eprintln!("SKIP: {ron} not baked");
+                continue;
+            };
+            let vm: manifest::VehicleManifest = ron::from_str(&text).expect("vehicles.ron");
+            let bake = vm
+                .vehicles
+                .into_iter()
+                .find(|v| v.class.name.eq_ignore_ascii_case(class))
+                .and_then(|v| v.walker)
+                .expect(class);
+            let p = WalkerClass::from_db(&db, class)
+                .expect(class)
+                .params(Some(&bake));
+            match want {
+                Some((pos, r)) => {
+                    assert_eq!(p.terrain.len(), 1, "{game} {class}: {:?}", p.terrain);
+                    let t = p.terrain[0];
+                    assert!(
+                        (t.pos - Vec3::from(pos)).length() < 2e-3 && (t.radius - r).abs() < 1e-5,
+                        "{game} {class}: {t:?}"
+                    );
+                }
+                None => assert!(p.terrain.is_empty(), "{game} {class}: {:?}", p.terrain),
+            }
+        }
     }
 
     /// Card CWSP (re-command-walker-post §1): the two command walkers' six

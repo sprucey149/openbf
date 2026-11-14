@@ -190,6 +190,10 @@ impl WalkerWorld for WorldContacts<'_> {
     fn building_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
         self.buildings(Shape::Sphere { radius: r }, Mat4::from_translation(c), out);
     }
+
+    fn terrain_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
+        self.terrain(c, r, out);
+    }
 }
 
 impl Sim {
@@ -682,10 +686,7 @@ impl Sim {
     /// Every rider of `v` with where he sits (`rider_pose`), so he dies
     /// there, in the death function's order: turret seats, passenger seats,
     /// then the driver's (re-vehicle-death §10); and the driver alone.
-    fn riders_in_death_order(
-        &self,
-        v: &Vehicle,
-    ) -> (Vec<(UnitHandle, Vec3)>, Option<UnitHandle>) {
+    fn riders_in_death_order(&self, v: &Vehicle) -> (Vec<(UnitHandle, Vec3)>, Option<UnitHandle>) {
         let seated = |kind: fn(SeatKind) -> bool| -> Vec<(UnitHandle, Vec3)> {
             v.seats
                 .iter()
@@ -769,7 +770,11 @@ impl Sim {
     /// ([`Event::VehicleExplosion`]): `ExplosionName`, or for a walker's
     /// `last` blast its `FinalExplosion` when it names one
     /// ([`walker::WalkerDeath`]).
-    pub fn vehicle_explosion(&self, class: u32, last: bool) -> Option<&crate::weapon::ExplosionClass> {
+    pub fn vehicle_explosion(
+        &self,
+        class: u32,
+        last: bool,
+    ) -> Option<&crate::weapon::ExplosionClass> {
         let name = self
             .blast_setup
             .get(class as usize)

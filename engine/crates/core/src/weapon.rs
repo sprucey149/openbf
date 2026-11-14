@@ -289,6 +289,12 @@ pub struct WeaponClass {
     pub shots_per_salvo: u32,
     pub salvo_delay: [f32; 2],
     pub initial_salvo_delay: f32,
+    /// BF2's spin before the first round and after the last (class +0x2ac /
+    /// +0x2b0, keys 0x44edeee4 / 0x9ecac3a1, names uncracked; read as plain
+    /// floats, default 0, by the setter at B2:312605). The chaingun's 0.35 s
+    /// and 1.25 s ([`WeaponState::spin`]). 0 on every BF1 class.
+    pub wind_up: f32,
+    pub wind_down: f32,
     /// Radians.
     pub pitch_spread: f32,
     pub yaw_spread: f32,
@@ -509,6 +515,8 @@ impl Default for WeaponClass {
             shots_per_salvo: 1,
             salvo_delay: [0.0, 0.0],
             initial_salvo_delay: 0.0,
+            wind_up: 0.0,
+            wind_down: 0.0,
             pitch_spread: 0.0,
             yaw_spread: 0.0,
             shot_tilts: Vec::new(),
@@ -702,9 +710,49 @@ pub struct WeaponState {
     /// missile homes only when [`WeaponState::locked`] says so at the press.
     pub lock_target: Option<crate::missile::MissileTarget>,
     pub lock_held: f32,
+    /// BF2's spin timer (weapon +0x140) and whether it winds down
+    /// (`spin_down`: the PS2's +0x144 bit 0 cleared while the firing state
+    /// holds; false again once it ends, so a state entered without a
+    /// trigger fires as before). The timer is set to the class's
+    /// [`WeaponClass::wind_up`] at every trigger
+    /// (B2 `FUN_0032e758`, B2:311176-311178), no round leaves while it runs
+    /// (`FUN_0032e8c0`, B2:311243-311258, 311357-311377), and the last
+    /// round's end winds it down for [`WeaponClass::wind_down`]
+    /// (`FUN_0032ef58`, B2:311513-311580). 0 and never running on a class
+    /// that authors neither.
+    pub spin: f32,
+    pub spin_down: bool,
+    /// The fire ring's turns a barrel passed without firing (re-turret-draw
+    /// 2.3): the ring's cursor is [`Self::turns`].
+    pub passed: u64,
+    /// The ring turn the latest round left on ([`Self::turns`] then).
+    /// Draw-only (which barrel the drawn bolt leaves): NOT hashed.
+    pub last_turn: u64,
+}
+
+/// Which barrels of a weapon's fire ring may fire this tick (bit `p` of
+/// `open` for point `p` of `len`): B2's shot loop fires a round only from
+/// an aimer whose turn this tick stayed inside its limits, and a blocked
+/// one passes its turn to the next barrel (B2 `FUN_00302d58` /
+/// `FUN_00301d28` in `FUN_0032e8c0`, B2:311290-311335).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ring {
+    pub len: u8,
+    pub open: u32,
+}
+
+impl Ring {
+    pub fn opens(&self, turn: u64) -> bool {
+        self.len == 0 || self.open >> (turn % u64::from(self.len)) & 1 == 1
+    }
 }
 
 impl WeaponState {
+    /// The fire ring's cursor: every turn taken, fired or passed.
+    pub fn turns(&self) -> u64 {
+        self.shots_fired + self.passed
+    }
+
     pub fn count_secondary_round(&mut self) -> u32 {
         self.secondary_rounds = self.secondary_rounds.wrapping_add(1);
         self.secondary_rounds
@@ -747,6 +795,10 @@ impl WeaponState {
                 .saturating_add(reserve_clips.saturating_mul(class.rounds_per_clip)),
             lock_target: None,
             lock_held: 0.0,
+            spin: 0.0,
+            spin_down: false,
+            passed: 0,
+            last_turn: 0,
         }
     }
 
@@ -961,6 +1013,31 @@ impl WeaponState {
         self.refire_time = lcg.uniform(c.shot_delay[0], c.shot_delay[1]);
         self.salvo_counter = c.salvo_count;
         self.salvo_timer = c.initial_salvo_delay;
+        self.spin_down = false;
+        self.spin = c.wind_up;
+    }
+
+    /// B2 `FUN_0032ef58`: the firing state may return to idle. A running
+    /// spin holds it; a release mid wind-up turns it into a wind-down as far
+    /// along as the wind-up got; the cycle's end starts the full wind-down.
+    fn spin_finished(&mut self, c: &WeaponClass, blocked: bool, cheats: (bool, bool)) -> bool {
+        if self.spin > 0.0 {
+            if !self.spin_down && !self.fire_predicate(c) {
+                self.spin_down = true;
+                self.spin = c.wind_down * (c.wind_up - self.spin) / c.wind_up;
+            }
+            return false;
+        }
+        if !self.spin_down && !self.cycle_finished(c, blocked, cheats) {
+            return false;
+        }
+        if !self.spin_down && c.wind_down > 0.0 {
+            self.spin_down = true;
+            self.spin = c.wind_down;
+            return false;
+        }
+        self.spin_down = false;
+        true
     }
 
     /// FUN_002891c0: the firing state may return to idle.
@@ -981,6 +1058,20 @@ impl WeaponState {
         dt: f32,
         c: &WeaponClass,
         input: FireInput,
+        lcg: &mut GameLcg,
+        shots: &mut Vec<ShotSpec>,
+    ) {
+        self.update_ring(dt, c, input, None, lcg, shots);
+    }
+
+    /// [`Self::update`] for a weapon whose fire ring's barrels may be
+    /// blocked ([`Ring`]).
+    pub fn update_ring(
+        &mut self,
+        dt: f32,
+        c: &WeaponClass,
+        input: FireInput,
+        ring: Option<Ring>,
         lcg: &mut GameLcg,
         shots: &mut Vec<ShotSpec>,
     ) {
@@ -1065,11 +1156,11 @@ impl WeaponState {
             // and heat; the ammunition is the weapon's (§3).
             let sc = c.stage(self.stage());
             let first = shots.len();
-            self.fire_cycle(dt, sc, blocked, cheats, lcg, shots);
+            self.fire_cycle(dt, sc, blocked, cheats, ring, lcg, shots);
             for s in &mut shots[first..] {
                 s.stage = self.stage;
             }
-            if self.cycle_finished(sc, blocked, cheats) {
+            if self.spin_finished(sc, blocked, cheats) {
                 self.state = FireState::Idle;
                 self.stage = 0;
                 if !no_reload && !c.infinite_ammo() && self.active && self.clip < c.ammo_per_shot {
@@ -1102,6 +1193,7 @@ impl WeaponState {
         c: &WeaponClass,
         blocked: bool,
         (infinite_ammo, no_reload): (bool, bool),
+        ring: Option<Ring>,
         lcg: &mut GameLcg,
         shots: &mut Vec<ShotSpec>,
     ) {
@@ -1110,6 +1202,18 @@ impl WeaponState {
         }
         let mut dt_left = dt;
         if dt_left <= FIRE_EPS {
+            return;
+        }
+        if self.spin > 0.0 {
+            self.spin = (self.spin - dt_left).max(0.0);
+            let span = if self.spin_down {
+                self.salvo_counter = 0;
+                c.wind_down
+            } else {
+                c.wind_up
+            };
+            self.refire_accum =
+                (self.refire_time * (span - self.spin) / span).clamp(0.0, self.refire_time);
             return;
         }
         loop {
@@ -1139,6 +1243,11 @@ impl WeaponState {
                                 self.salvo_counter = 0;
                                 break;
                             }
+                            if ring.is_some_and(|r| !r.opens(self.turns())) {
+                                self.passed += 1;
+                                continue;
+                            }
+                            self.last_turn = self.turns();
                             shots.push(ShotSpec {
                                 tilt: c
                                     .shot_tilts
@@ -1215,6 +1324,15 @@ impl WeaponState {
         eat(&[self.state as u8, self.overheated as u8, self.human as u8]);
         if self.free_reload {
             eat(b"FREE");
+        }
+        if self.spin != 0.0 {
+            eat(b"SPIN");
+            eat(&self.spin.to_bits().to_le_bytes());
+            eat(&[self.spin_down as u8]);
+        }
+        if self.passed != 0 {
+            eat(b"PASS");
+            eat(&self.passed.to_le_bytes());
         }
         if self.tilt_index != 0 {
             eat(b"tilt");

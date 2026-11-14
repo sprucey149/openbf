@@ -183,6 +183,43 @@ per-tick tail: spread recovery + timers (vtbl update)
   yaw -30..15 from `lgun_y`), so the two cannons meet at the crosshair. Deviations:
   the seat has one aim, so every point turns about the seat's pivot, not its own
   aimer's; a barrel's aim has no rate lag.
+- The barrel gate [V] (2026-11-13): the aimer tick (MIPS 0x3021f8, missing from the export) stores
+  B2 `FUN_00302a10`'s answer in aimer byte +0x28 (`sb v0, 40(s2)` at 0x3027d4 after the call at
+  0x3027cc). `FUN_00302a10` steps the aimer's pitch +0x40 / yaw +0x48 at its rates and returns 0
+  when it had to clamp either to its limits (an axis of equal limits never fails; B2:281616-281665).
+  The shot loop (`FUN_0032e8c0`, B2:311290-311335) fires a round only when `FUN_00302d58` (aimer
+  +0x28 or class +0x119) and `FUN_0032f208` (the round itself) pass; ammo (`FUN_00303890`) and heat
+  (`FUN_001e2010`) are paid only then, and `FUN_00301d28` moves to the next barrel either way. So a
+  barrel turned past its reach holds its fire and the ring's other barrels keep theirs (the AT-TE's
+  rear gun past 35 deg to a side fires its outer barrel alone, PS2 playtest 2026-11-13). Port:
+  `sim::guns::ring_reach` -> `weapon::Ring`, `WeaponState::passed` / `turns`. Deviation: the seat's
+  one shared aim, so each barrel steps from that aim inside its limits toward the seat's target.
+- Wind-up / wind-down [V] (keys 0x44edeee4 -> class +0x2ac, 0x9ecac3a1 -> +0x2b0, plain floats,
+  default 0, B2:312605). Fire enter `FUN_0032e758` sets +0x144 bit 0 and the timer +0x140 to the
+  wind-up (B2:311176-311178). `FUN_0032e8c0`: while the timer runs no round leaves; the tick's dt
+  drains it (floored at 0) and the refire accumulator becomes refire x (span - timer) / span, span
+  the wind-up (bit set) or the wind-down (bit clear, salvo counter cleared). The done-check
+  `FUN_0032ef58`: a release while winding up turns the timer into wind-down x (up - timer) / up;
+  the cycle's end clears the bit and starts the full wind-down, the state held while it runs.
+  Authors: `com_weap_veh_chaingun` 0.35 / 1.25, `com_weap_veh_fly_chaingun` 0.25 / 1.25,
+  `com_weap_inf_chaingun` 0.5 / 1.5. Port: `WeaponClass::wind_up` / `wind_down`,
+  `WeaponState::spin` / `spin_down`. PS2 check (slot 9, Geonosis AT-TE rear gun): released 12
+  frames, then pressed again, the rounds came back 84-96 frames after the press, i.e. the press
+  waits out the 1.25 s wind-down and then the full 0.35 s wind-up.
+- Spin and fire-loop sounds [V] (B2; ctor defaults B2 ~312401-312410: +0x2bc = 1.0, the fades 0).
+  Spin motor +0x2b4 (key 0xca333e94): `FUN_0032fa98` starts it at the trigger when the wind-up is
+  above 0, at gain 0 and pitch +0x2bc (0x1a2034be); `FUN_0032fbc8` while bit 0 is set lerps the
+  pitch from +0x2bc to 1.0 by the wind-up's progress and raises the gain over +0x2c0
+  (0x22e5153c); while winding down it lerps the pitch back from 1.0 to +0x2bc and lowers the gain
+  over +0x2c4 (0x25820dbf) once the timer is at or below +0x2c4. Fire loop +0x2c8 (0x2298cae8):
+  `FUN_0032fec8`, called from `FUN_0032e8c0` only with bit 0 set and the timer run out, starts it;
+  `FUN_0032ffd8` fades it in over +0x2d0 (0x674fc158) and out over +0x2d4 (0x0f1ca143) once bit 0
+  clears. Wind-down sound +0x2d8 (0x940f9407, `FUN_00330178`): not authored on the AT-TE rear
+  gun, not played. Rear gun: spin `rep_weap_walk_atte_chaingun_spin` pitch 0.35 fades 0.2 / 0.2,
+  fire `rep_weap_walk_atte_chaingun_fire` fades 0.2 / 0.1. Port: `walker_shots::voices` (walker
+  seats; the flyer chainguns keep the plain fire loop), `sounds/walker.rs` ramps the gains. Before,
+  the port played the fire loop whenever the trigger was held, so a press inside the wind-down
+  sounded like firing with no rounds (playtest 2026-11-13).
 - Refire time: BF1 = ShotDelay (min 0.01, parser-clamped). BF2 = **uniform
   random in [ShotDelayMin, ShotDelayMax]** re-rolled per trigger event
   (FUN_0032e758/FUN_0032edf8); a single ODF value sets min=max (deterministic).
@@ -553,7 +590,7 @@ The impact handler reaches TakeDamage through the hit prim's owner interface
 | SalvoDelay | 0xd76f37db | +0x234 (single) | **+0x298/+0x29c min/max** | |
 | InitialSalvoDelay | 0xc8388d9d | +0x238 | +0x2a0 | |
 | (salvo tilt count / entries) | 0xa4dfafc0 / 0xa4120aa8 | +0x23c ptr,+0x240 n | +0x2a4/+0x2a8 | pairs deg→rad, cycled per shot |
-| (BF2 only: wind-up? / wind-down?) | 0x44edeee4 / 0x9ecac3a1 | — | +0x2ac / +0x2b0 | pre/post-fire timers in fire cycle; names uncracked |
+| (BF2 only: wind-up? / wind-down?) | 0x44edeee4 / 0x9ecac3a1 | — | +0x2ac / +0x2b0 | the spin before the first round and after the last (§3.1); names uncracked |
 | (BF2 only: secondary/tracer ordnance) | 0x6e364fc1 / 0xdddb253a | — | +0x2ec class ptr | spawned per shot alongside primary |
 | (BF2 only, unread) | 0x7236488b, 0x1a2034be, 0x0f1ca143, 0x25820dbf, 0x22e5153c, 0x82e86218, 0x4225631d, 0x01a333e4, ... | — | +0x2e4,+0x2bc,+0x2d4,+0x2c4,+0x2c0,+0x2f0,... | uncracked names, rifle values 0 |
 

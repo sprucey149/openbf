@@ -571,6 +571,7 @@ enum LoopSource {
     /// and the aura's kind.
     Buff(core::unit::UnitHandle, usize),
     WalkerFire(core::unit::UnitHandle, usize),
+    WalkerSpin(core::unit::UnitHandle, usize),
 }
 
 struct LoopRequest {
@@ -621,6 +622,8 @@ pub struct SoundLib {
     /// hashes of different things and may collide.
     cache: HashMap<PathBuf, audio::SoundData>,
     loops: HashMap<LoopSource, Option<audio::Voice>>,
+    /// Each walker gun voice's level, for its fades (`sounds/walker.rs`).
+    walker_gains: HashMap<LoopSource, f32>,
     /// The world's emitters sounding, by index into
     /// `crate::ambience::Ambience::emitters` ([`SoundLib::ambient_voices`]).
     ambient: HashMap<usize, AmbientVoice>,
@@ -825,6 +828,7 @@ impl SoundLib {
             music_takes,
             cache: HashMap::new(),
             loops: HashMap::new(),
+            walker_gains: HashMap::new(),
             ambient: HashMap::new(),
             cries: HashMap::new(),
             boosts: HashMap::new(),

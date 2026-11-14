@@ -788,6 +788,51 @@ pub fn install_for_mission(
             })
         })
         .collect();
+    sim.walker_chase = sim
+        .walker_params
+        .iter()
+        .zip(&b.seats)
+        .map(|(w, ring)| {
+            w.as_ref()?;
+            let s = ring.first()?;
+            let c = crate::walk::walker_section(s);
+            Some(core::vehicle::hover::ChaseSection {
+                center: c.0,
+                offset: c.1,
+                tilt: c.2.to_radians(),
+            })
+        })
+        .collect();
+    sim.seat_chase = b
+        .classes
+        .iter()
+        .zip(&b.seats)
+        .map(|(class, ring)| {
+            let flying = matches!(
+                db.engine_base(class).and_then(vehicle_kind),
+                Some(VehicleKind::Flyer | VehicleKind::Hover)
+            );
+            ring.iter()
+                .map(|s| {
+                    Some(if flying {
+                        let f = crate::walk::FlyerSection::gunner(Some(s));
+                        core::vehicle::hover::ChaseSection {
+                            center: f.center,
+                            offset: f.offset,
+                            tilt: f.tilt,
+                        }
+                    } else {
+                        let c = crate::walk::walker_section(s);
+                        core::vehicle::hover::ChaseSection {
+                            center: c.0,
+                            offset: c.1,
+                            tilt: c.2.to_radians(),
+                        }
+                    })
+                })
+                .collect()
+        })
+        .collect();
     // Each class's death explosion and blast sphere (card VDTH).
     // A building turret's model is the map's (or its game's common bake's),
     // not a side's: its sphere is that model's, as a station's is
@@ -987,6 +1032,7 @@ pub fn install_for_mission(
                         // ray ran out of that gun.
                         g.eye = s.eye_point_offset.map_or(Vec3::ZERO, Vec3::from) - g.pivot;
                     } else if walker {
+                        g.eye = s.eye_point_offset.map_or(Vec3::ZERO, Vec3::from) - g.pivot;
                         g.aimer = aimer(
                             s.aimer_yaw_limits.or(s.yaw_limits),
                             s.aimer_pitch_limits.or(s.pitch_limits),
@@ -1038,27 +1084,19 @@ pub fn install_for_mission(
         }
         for w in setup.guns.iter().flatten().flat_map(|g| &g.weapons) {
             let name = &sim.weapon_classes[w.class].name;
-            let tracer = db.prop(name, "SecondaryOrdnanceName").map(|c| {
-                let mut look = core::laser::LaserLook::replay(crate::roster::chain_props(&db, c));
-                let range = db.prop_f32(c, "Range").unwrap_or(40.0);
-                look.length = range;
-                look.glow_length = range;
-                look.blur_length = range;
-                look
-            });
-            let frequency = db
-                .prop_f32(name, "SecondaryOrdnancePeriod")
-                .unwrap_or(1.0)
-                .max(1.0) as u64;
-            let fire_sound = db.prop_hash(name, 0x2298cae8).map(str::to_owned);
-            b.walker_shot_styles.insert(
-                w.class,
-                crate::walker_shots::Style {
-                    tracer,
-                    frequency,
-                    fire_sound,
-                },
-            );
+            let f = |h: u32, or: f32| db.prop_hash_f32(name, h).unwrap_or(or);
+            let style = crate::walker_shots::Style {
+                fire_sound: db.prop_hash(name, 0x2298cae8).map(str::to_owned),
+                fire_fade: [f(0x674fc158, 0.0), f(0x0f1ca143, 0.0)],
+                spin: db
+                    .prop_hash(name, 0xca333e94)
+                    .map(|n| crate::walker_shots::SpinSound {
+                        name: n.to_owned(),
+                        pitch: f(0x1a2034be, 1.0),
+                        fade: [f(0x22e5153c, 0.0), f(0x25820dbf, 0.0)],
+                    }),
+            };
+            b.walker_shot_styles.insert(w.class, style);
         }
     }
     Ok(b)
@@ -1374,7 +1412,7 @@ pub fn seat_gun(
             .find(|h| h.name.eq_ignore_ascii_case(n.trim()))
             .map(|h| Vec3::from(h.pos))
     };
-    let weapons: Vec<GunWeapon> = s
+    let mut weapons: Vec<GunWeapon> = s
         .weapons
         .iter()
         .take(MAX_SEAT_WEAPONS)
@@ -1399,13 +1437,14 @@ pub fn seat_gun(
                     }
                 },
             };
-            let (fire_points, fire_limits) = fire_ring(s, weapon, node);
+            let (fire_points, fire_limits, fire_pivots) = fire_ring(s, weapon, node);
             Some(GunWeapon {
                 class,
                 infinite: w.ammo < 1,
                 reserve_clips: (w.ammo - 1).max(0) as u32,
                 fire_points,
                 fire_limits,
+                fire_pivots,
             })
         })
         .collect();
@@ -1413,6 +1452,11 @@ pub fn seat_gun(
         return None;
     }
     let turret = s.turret_node.as_deref().and_then(node);
+    if turret.is_some() {
+        for w in &mut weapons {
+            w.fire_pivots.clear();
+        }
+    }
     let fire_point = s
         .fire_point
         .as_deref()
@@ -1454,11 +1498,13 @@ pub fn seat_gun(
 /// turns within (model frame, radians). A turn-only aimer (`lgun_x` before
 /// the IFT-X's `lgun_y`) carries the firing aimer after it, so the two
 /// aimers' ranges add: `lgun_x`'s pitch -30..90 with `lgun_y`'s yaw -30..15.
+/// Each barrel's pivot is its firing aimer's node when no aimer carries
+/// another; otherwise none, and the seat's pivot turns them.
 fn fire_ring(
     s: &vehicle_class::SeatSpec,
     weapon: usize,
     node: impl Fn(&str) -> Option<Vec3>,
-) -> (Vec<Vec3>, Vec<[[f32; 2]; 2]>) {
+) -> (Vec<Vec3>, Vec<[[f32; 2]; 2]>, Vec<Vec3>) {
     let d = std::f32::consts::PI / 180.0;
     let lim = |l: [f32; 2]| [l[0].min(l[1]) * d, l[0].max(l[1]) * d];
     let add = |a: [[f32; 2]; 2], b: [[f32; 2]; 2]| {
@@ -1467,21 +1513,30 @@ fn fire_ring(
             [a[1][0] + b[1][0], a[1][1] + b[1][1]],
         ]
     };
-    let (mut points, mut limits) = (Vec::new(), Vec::new());
+    let (mut points, mut limits, mut pivots) = (Vec::new(), Vec::new(), Vec::new());
     let mut carried = [[0.0; 2]; 2];
+    let mut lone = true;
     for a in s.aimers.iter().filter(|a| a.weapon == weapon) {
         let own = [lim(a.yaw), lim(a.pitch)];
         if a.no_fire {
             carried = add(carried, own);
+            lone = false;
             continue;
         }
+        let pivot = node(&a.node).filter(|_| carried == [[0.0; 2]; 2]);
         for p in a.muzzles().into_iter().filter_map(&node) {
             points.push(p);
             limits.push(add(carried, own));
+            pivots.push(pivot);
         }
         carried = [[0.0; 2]; 2];
     }
-    (points, limits)
+    let pivots = if lone && pivots.iter().all(Option::is_some) {
+        pivots.into_iter().flatten().collect()
+    } else {
+        Vec::new()
+    };
+    (points, limits, pivots)
 }
 
 /// A gunner seat's gun under the PS2's MountedTurret law (card VTURL,

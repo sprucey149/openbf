@@ -21,6 +21,9 @@ impl WalkerWorld for Flat {
         (to.y < 0.0 && from.y >= 0.0).then(|| from.y / (from.y - to.y))
     }
     fn building_contacts(&self, _: Vec3, _: f32, _: &mut Vec<Contact>) {}
+    fn terrain_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
+        out.extend(crate::vehicle::hover::terrain_sphere(c.y, r, 0.0, Vec3::Y));
+    }
 }
 
 /// A clip of `frames` frames whose root runs linearly to `z`.
@@ -78,6 +81,7 @@ pub(crate) fn atst() -> WalkerParams {
         }],
         clips,
         building: Vec::new(),
+        terrain: Vec::new(),
         spawn_points: Vec::new(),
         spawn_sphere_centre: None,
         death: WalkerDeath::default(),
@@ -442,4 +446,102 @@ fn energy_drain_and_refill_follow_the_pool() {
     assert!(!w.exhausted);
     w.refill(500.0, 80.0);
     assert_eq!(w.energy, 80.0);
+}
+
+/// A plane of slope φ (radians) falling along +x: y = −x·tan φ.
+struct Slope(f32);
+
+impl Slope {
+    fn h(&self, x: f32) -> f32 {
+        -x * self.0.tan()
+    }
+}
+
+impl WalkerWorld for Slope {
+    fn has_terrain(&self) -> bool {
+        true
+    }
+    fn ground_below(&self, o: Vec3, len: f32) -> Option<f32> {
+        let d = o.y - self.h(o.x);
+        (0.0..=len).contains(&d).then_some(d)
+    }
+    fn terrain_segment(&self, _: Vec3, _: Vec3) -> Option<f32> {
+        None
+    }
+    fn building_contacts(&self, _: Vec3, _: f32, _: &mut Vec<Contact>) {}
+    fn terrain_contacts(&self, c: Vec3, r: f32, out: &mut Vec<Contact>) {
+        let n = Vec3::new(self.0.sin(), self.0.cos(), 0.0);
+        out.extend(crate::vehicle::hover::terrain_sphere(
+            c.y,
+            r,
+            self.h(c.x),
+            n,
+        ));
+    }
+}
+
+/// The tauntaun's feet and its `p_collision` (re-walker §16): radius 1.5 at
+/// (0, 1.515, 0), the bottom 1.5 cm over the origin.
+fn tauntaun() -> WalkerParams {
+    WalkerParams {
+        leg_pairs: vec![LegPair {
+            feet: [
+                Vec3::new(0.32716453, 0.28195924, -0.39845613),
+                Vec3::new(-0.32716453, 0.28195924, -0.39845613),
+            ],
+        }],
+        terrain: vec![TerrainSphere {
+            pos: Vec3::new(0.0, 1.5154285, 0.0),
+            radius: 1.5,
+        }],
+        ..atst()
+    }
+}
+
+#[test]
+fn a_body_sphere_holds_a_one_pair_walker_on_its_bottom_not_the_legs_slack() {
+    let p = tauntaun();
+    let mut v = walker(&p);
+    v.pos.y = -LIFT_SLACK;
+    for _ in 0..30 {
+        step(&mut v, &p, &Flat, DT);
+    }
+    assert!((v.pos.y + 0.0154285).abs() < 1e-4, "{}", v.pos.y);
+    assert_eq!(v.vel.y, 0.0);
+    let feet_only = WalkerParams {
+        terrain: Vec::new(),
+        ..tauntaun()
+    };
+    let mut v = walker(&feet_only);
+    v.pos.y = -LIFT_SLACK;
+    for _ in 0..30 {
+        step(&mut v, &feet_only, &Flat, DT);
+    }
+    assert!((v.pos.y + LIFT_SLACK).abs() < 1e-5, "{}", v.pos.y);
+}
+
+#[test]
+fn a_parked_body_sphere_walker_creeps_down_a_slope_at_0_98_sin_phi() {
+    let p = tauntaun();
+    for deg in [5.0f32, 10.0, 14.0] {
+        let phi = deg.to_radians();
+        let w = Slope(phi);
+        let mut v = walker(&p);
+        v.pos.y = w.h(0.0);
+        for _ in 0..60 {
+            step(&mut v, &p, &w, DT);
+        }
+        let x0 = v.pos.x;
+        let y0 = v.pos.y;
+        for _ in 0..90 {
+            step(&mut v, &p, &w, DT);
+        }
+        let d = Vec3::new(v.pos.x - x0, v.pos.y - y0, 0.0).length() / (90.0 * DT);
+        let want = LEG_GRAVITY * DT * phi.sin();
+        assert!(v.pos.x > x0, "{deg}°: it slides down the fall line");
+        assert!(
+            (d / want - 1.0).abs() < 0.02,
+            "{deg}°: {d} m/s, want {want}"
+        );
+    }
 }

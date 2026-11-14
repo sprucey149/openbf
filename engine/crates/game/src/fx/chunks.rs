@@ -1199,14 +1199,12 @@ fn slot_spec(
                     .map(|d| d.join(format!("{model}.glb")))
                     .find(|p| pak::is_file(p))?;
                 let mesh = crate::assets::load_glb(&file).ok()?;
-                let (mut lo, mut hi) =
-                    (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+                let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
                 for &v in &mesh.positions {
                     lo = lo.min(Vec3::from(v));
                     hi = hi.max(Vec3::from(v));
                 }
-                (!mesh.positions.is_empty())
-                    .then_some(((lo + hi) * 0.5, (hi - lo).length() * 0.5))
+                (!mesh.positions.is_empty()).then_some(((lo + hi) * 0.5, (hi - lo).length() * 0.5))
             });
             let (centre, radius) = match *bound {
                 Some((c, r)) => (c, r),

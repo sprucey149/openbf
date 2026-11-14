@@ -18,7 +18,7 @@ pub(super) struct Shot {
 
 impl Shot {
     pub fn muzzle(&self, walk: &WalkSim) -> Option<Vec3> {
-        let ordinal = crate::walker_shots::ordinal(walk, self.unit, self.class, self.event);
+        let ordinal = crate::walker_shots::turn(walk, self.unit, self.class, self.event);
         crate::walker_shots::frame(walk, self.unit, self.class, ordinal)
             .map(|m| m.w_axis.truncate())
     }

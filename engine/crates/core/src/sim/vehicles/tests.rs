@@ -1441,7 +1441,11 @@ fn a_moving_hover_runs_a_soldier_over() {
         s.vehicle_impacts(i, &cap);
         before - s.units[i].health.cur
     };
-    assert!((hit(20.0, false) - 100.0).abs() < 1e-3, "{}", hit(20.0, false));
+    assert!(
+        (hit(20.0, false) - 100.0).abs() < 1e-3,
+        "{}",
+        hit(20.0, false)
+    );
     assert_eq!(hit(8.0, false), 0.0);
     assert_eq!(hit(20.0, true), 0.0);
 }

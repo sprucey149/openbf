@@ -89,7 +89,7 @@ impl Sim {
                                     {
                                         let count = weapon.fire_points.len();
                                         if count > 1 {
-                                            let next = state.shots_fired % count as u64;
+                                            let next = state.turns() % count as u64;
                                             if next != 0 {
                                                 eat(b"FLYER_MUZZLE");
                                                 eat(&(seat as u32).to_le_bytes());

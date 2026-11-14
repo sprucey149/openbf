@@ -276,7 +276,7 @@ impl Sim {
                 s.mount,
                 g,
                 self.unit(owner).map(|_| owner.index as usize),
-                st.look.1,
+                st.look,
                 st.zoom.is_some(),
                 eye,
                 view,

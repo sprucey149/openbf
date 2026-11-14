@@ -645,6 +645,7 @@ fn full_vehicles() -> VehicleManifest {
                 bank: "fighter".into(),
                 skin: "fighter".into(),
                 frames: 3,
+                fin: Some("all_snowspeeder_9pose".into()),
             }),
             hover: Some(ManifestHover {
                 skin: "rep_hover_fightertank".into(),

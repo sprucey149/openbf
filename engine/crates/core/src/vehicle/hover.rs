@@ -467,9 +467,21 @@ impl ChaseSection {
     /// `FUN_001ce948`: E·`TrackCenter` + the tilted view's rows ·
     /// `TrackOffset`, B2:132376-132439), on the frame the drawn camera hangs on.
     pub fn camera(&self, v: &Vehicle, look_pitch: f32) -> Vec3 {
-        let frame = untilted_rot(v);
-        let view = frame * quat_x(-look_pitch) * quat_y(std::f32::consts::PI) * quat_x(-self.tilt);
-        v.pos + frame * self.center + view * self.offset
+        self.camera_on(v.pos, untilted_rot(v), (0.0, look_pitch))
+    }
+
+    /// [`ChaseSection::camera`] on the body frame `frame` at `pos`, the view
+    /// turned to the aim (`aim` = model-frame yaw, pitch up): `frame`·
+    /// `TrackCenter` + the tilted view's rows · `TrackOffset`. The walker
+    /// builds its view from its aim direction E+0x350 and the body's up row
+    /// before the same tilt and the same FUN_001ce948 (B2 FUN_00261208).
+    pub fn camera_on(&self, pos: Vec3, frame: Quat, aim: (f32, f32)) -> Vec3 {
+        let view = frame
+            * quat_y(aim.0)
+            * quat_x(-aim.1)
+            * quat_y(std::f32::consts::PI)
+            * quat_x(-self.tilt);
+        pos + frame * self.center + view * self.offset
     }
 
     /// Where a driven hover's aim ray starts in the chase view (B2
@@ -480,6 +492,47 @@ impl ChaseSection {
     /// shots meet what the reticle covers.
     pub fn ray_origin(&self, v: &Vehicle, look_pitch: f32, eye: Vec3, dir: Vec3) -> Vec3 {
         let cam = self.camera(v, look_pitch);
+        cam + dir * (eye - cam).dot(dir)
+    }
+
+    /// A driven walker's [`ChaseSection::ray_origin`] (B2 FUN_00261208: the
+    /// camera FUN_001ce948 on E+0x120 with the aim's view, carried along
+    /// the aim E+0x350 to the eye E+0x340's depth into E+0x3c0, then the
+    /// 512 m ray FUN_00161c60 from there): the walker's own frame, not the
+    /// hover's untilted one, and the view turned by the aim's yaw as well.
+    pub fn walker_ray_origin(&self, v: &Vehicle, aim: (f32, f32), eye: Vec3, dir: Vec3) -> Vec3 {
+        let cam = self.camera_on(v.pos, v.rot, aim);
+        cam + dir * (eye - cam).dot(dir)
+    }
+
+    /// A player gunner's [`ChaseSection::ray_origin`]: the turret's chase
+    /// camera, `TrackCenter` on its aim frame and `TrackOffset` in the view
+    /// (the aim tilted down by `TiltValue`; x right, y up, z back), carried
+    /// along the aim `dir` to the eye's depth, then the 512 m ray from there
+    /// (B2 FUN_0026cea0: the view from the aim T+0xf0 and the aim frame's up
+    /// row T+0x1d0, B2:189181-189217, the camera FUN_001ce948 on the aim
+    /// frame T+0x1c0, B2:188973, 189240, into T+0x160, B2:189241-189258, the
+    /// ray B2:189275; B1 FUN_00223850 B1:137707-137842, FUN_001b5850). So
+    /// the camera lies on the ray and the reticle covers what the guns hit.
+    /// The aim frame is the gun's look at `at` in the vehicle's frame, the
+    /// frame the port's drawn gunner camera hangs on.
+    pub fn gunner_ray_origin(
+        &self,
+        v: &Vehicle,
+        at: Vec3,
+        look: (f32, f32),
+        eye: Vec3,
+        dir: Vec3,
+    ) -> Vec3 {
+        let [x, y, z] = super::gun::frame(look);
+        let (s, c) = fmath::sin_cos(self.tilt);
+        let forward = z * c - y * s;
+        let up = y * c + z * s;
+        let local = at + x * self.center.x + y * self.center.y + z * self.center.z
+            - x * self.offset.x
+            + up * self.offset.y
+            - forward * self.offset.z;
+        let cam = v.pos + v.rot * local;
         cam + dir * (eye - cam).dot(dir)
     }
 }

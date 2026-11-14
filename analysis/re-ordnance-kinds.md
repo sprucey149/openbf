@@ -1037,6 +1037,8 @@ collides. This fixes hit accounting, bot hit notification and saber billing.
 inherits the mortar and names `com_weap_inf_grenadethermal_ord` as geometry.
 The walker tracer path previously submitted a second draw despite the ordinary
 bolt path preferring geometry. Both paths now apply that same geometry priority.
+(2026-11-13: the walker tracer path is removed; walker rounds take the ordinary
+bolt path and the secondary tracer its beam path, see `walker-aim-67.md`.)
 Auto-turret launcher locks use the turret's unique ID and live centre; both the
 held lock and missile flight state hash that ID with a distinct target tag.
 

@@ -820,7 +820,13 @@ pub struct ManifestVehicle {
 pub struct ManifestFlyer {
     pub bank: String,
     pub skin: String,
+    /// The bank's `takeoff` clip's frames; 0 when it has none.
     pub frames: u16,
+    /// The fins clip (`analysis/re-vehicle-pose.md` 6): `FinAnimation`'s
+    /// value, else the bank's `fins`, named in the skin GLB as written.
+    /// Posed only when the bank has no `takeoff` clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fin: Option<String>,
 }
 
 /// A posed hover's skin (`walkers/<skin>.glb`) and its `FinAnimation` clip,

@@ -764,7 +764,7 @@ impl SoldierVisuals {
                 v.shot_tick = Some(walk.sim.tick);
                 v.shot_class = Some(*weapon_class as usize);
                 v.shot_ordinal =
-                    crate::walker_shots::ordinal(walk, *unit, *weapon_class as usize, event);
+                    crate::walker_shots::turn(walk, *unit, *weapon_class as usize, event);
             }
         }
     }

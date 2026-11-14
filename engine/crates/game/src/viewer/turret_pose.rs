@@ -276,6 +276,46 @@ impl HoverNine {
     }
 }
 
+/// A flyer's fins numbers (`analysis/re-vehicle-pose.md` 6; BF2
+/// FUN_00201300 B2:114651-114690, BF1 FUN_001d8620 B1:84302-84333): `t` is
+/// the turn axis (BF2 E+0x2e4, BF1 E+0x308: the port's `HoverInput::turn`),
+/// and `s` the forward speed in the flyer's frame (BF2 E+0x600, written by
+/// FUN_0020bff8 B2:122129) placed on MinSpeed / MidSpeed / MaxSpeed in
+/// -1 .. 1, BF2's three capped in a landing region (FUN_00202c50/88/c0,
+/// `FlyerParams::speeds`):
+///
+/// ```text
+/// s = -1 at or below MinSpeed, (v - Mid) / (Mid - Min) below Mid,
+///     1 at or above MaxSpeed, else (v - Mid) / (Max - Mid)
+/// a = t + 4    b = t + (s > 0 ? 1 : 7)    c = |s|
+/// ```
+///
+/// The pose has no pilot gate: a parked flyer, at rest, is at `s = -1`.
+pub fn flyer_nine(sim: &core::sim::Sim, v: &core::vehicle::Vehicle) -> Option<NinePose> {
+    let p = sim.flyer_params.get(v.class as usize)?.as_ref()?;
+    let speeds = p.speeds(sim.flyer_region_coverage(v).0);
+    Some(fin_pose(v.input.turn, v.vel.dot(v.rot * Vec3::Z), speeds))
+}
+
+/// [`flyer_nine`]'s law at turn `t`, forward speed `speed` and the class's
+/// `[min, mid, max]` speeds.
+pub fn fin_pose(t: f32, speed: f32, [min, mid, max]: [f32; 3]) -> NinePose {
+    let s = if speed <= min {
+        -1.0
+    } else if speed < mid {
+        (speed - mid) / (mid - min)
+    } else if speed >= max {
+        1.0
+    } else {
+        (speed - mid) / (max - mid)
+    };
+    NinePose {
+        a: t + 4.0,
+        b: t + if s > 0.0 { 1.0 } else { 7.0 },
+        c: s.abs(),
+    }
+}
+
 /// Per `Sim::vehicles` slot, each live hover's [`HoverNine`]: one drive
 /// update of the tick's length per tick while it has a pilot, with his input;
 /// a fresh vehicle starts at [`HoverNine::START`]. The rider's pose and the
@@ -588,6 +628,23 @@ impl super::SceneGpu {
 mod tests {
     use super::*;
     use manifest::ManifestRigNode;
+
+    #[test]
+    fn flyer_fins_place_the_speed_on_min_mid_max_and_lean_with_the_turn() {
+        let speeds = [20.0, 30.0, 40.0];
+        let at = |t, v| {
+            let n = fin_pose(t, v, speeds);
+            [n.a, n.b, n.c]
+        };
+        assert_eq!(at(0.0, 0.0), [4.0, 7.0, 1.0]);
+        assert_eq!(at(0.0, 20.0), [4.0, 7.0, 1.0]);
+        assert_eq!(at(0.0, 25.0), [4.0, 7.0, 0.5]);
+        assert_eq!(at(0.0, 30.0), [4.0, 7.0, 0.0]);
+        assert_eq!(at(0.0, 35.0), [4.0, 1.0, 0.5]);
+        assert_eq!(at(0.0, 50.0), [4.0, 1.0, 1.0]);
+        assert_eq!(at(-1.0, 40.0), [3.0, 0.0, 1.0]);
+        assert_eq!(at(1.0, 0.0), [5.0, 8.0, 1.0]);
+    }
 
     fn node(name: &str, parent: Option<u32>, at: [f32; 3]) -> ManifestRigNode {
         ManifestRigNode {

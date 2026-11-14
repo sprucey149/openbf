@@ -85,6 +85,7 @@ fn setup_weapons_and_seats(sim: &mut Sim) {
                     reserve_clips: 0,
                     fire_points: Vec::new(),
                     fire_limits: Vec::new(),
+                    fire_pivots: Vec::new(),
                 },
                 GunWeapon {
                     class: c1,
@@ -92,6 +93,7 @@ fn setup_weapons_and_seats(sim: &mut Sim) {
                     reserve_clips: 4,
                     fire_points: Vec::new(),
                     fire_limits: Vec::new(),
+                    fire_pivots: Vec::new(),
                 },
             ],
             fire_point: Vec3::Z,

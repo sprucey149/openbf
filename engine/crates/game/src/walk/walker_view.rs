@@ -34,6 +34,16 @@ pub fn camera_on_frame(
     (target, camera)
 }
 
+/// A walker seat's chase section: `TrackCenter`, `TrackOffset` and
+/// `TiltValue` (degrees), the port's defaults where the seat authors none.
+pub fn walker_section(seat: &SeatSpec) -> (Vec3, Vec3, f32) {
+    (
+        Vec3::from(seat.track_center.unwrap_or([0.0, 2.0, 0.0])),
+        Vec3::from(seat.track_offset.unwrap_or([0.0, 1.0, 8.0])),
+        seat.tilt_value.unwrap_or(0.0),
+    )
+}
+
 impl WalkSim {
     pub fn load_walker_views(&mut self, manifest: &manifest::Manifest, root: &std::path::Path) {
         self.walker_rigs = crate::viewer::walker_rigs(manifest, root, &self.vehicle_geometry);
@@ -118,13 +128,11 @@ impl WalkSim {
                     -look.1,
                 )
         };
-        let (_, cam) = camera_on_frame(
-            frame,
-            Vec3::from(seat.track_center.unwrap_or([0.0, 2.0, 0.0])),
-            Vec3::from(seat.track_offset.unwrap_or([0.0, 1.0, 8.0])),
-            seat.tilt_value.unwrap_or(0.0),
-            self.fov_y(),
-        );
+        let (center, offset, tilt) = walker_section(seat);
+        let (_, mut cam) = camera_on_frame(frame, center, offset, tilt, self.fov_y());
+        if mount.seat == 0 {
+            cam.position += model.transform_point3(center) - frame.transform_point3(center);
+        }
         // The pilot's pull point by the walker's model, a gunner's his own
         // turret's fixed point, each on the frame the camera hangs on.
         let height = if mount.seat == 0 {

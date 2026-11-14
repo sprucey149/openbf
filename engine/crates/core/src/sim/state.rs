@@ -361,6 +361,14 @@ pub struct Sim {
     /// player's aim ray starts (`ChaseSection::ray_origin`) — `None` for a
     /// class that is not a hover. SETUP data, NOT hashed.
     pub hover_chase: Vec<Option<crate::vehicle::hover::ChaseSection>>,
+    /// Per vehicle CLASS, a walker pilot seat's camera section, where a
+    /// player's aim ray starts (`ChaseSection::walker_ray_origin`) — `None`
+    /// for a class that is not a walker. SETUP data, NOT hashed.
+    pub walker_chase: Vec<Option<crate::vehicle::hover::ChaseSection>>,
+    /// Per vehicle CLASS, per seat, the seat's camera section, where a
+    /// player gunner's aim ray starts (`ChaseSection::gunner_ray_origin`).
+    /// SETUP data, NOT hashed.
+    pub seat_chase: Vec<Vec<Option<crate::vehicle::hover::ChaseSection>>>,
     /// Per vehicle CLASS, the walker numbers (card WALK) — `None` for a
     /// class that is not a walker. SETUP data, NOT hashed. A walker whose
     /// class has none stands still (`Sim::tick_walkers`).
@@ -1058,6 +1066,8 @@ impl Sim {
             building_turrets: Vec::new(),
             hover_params: Vec::new(),
             hover_chase: Vec::new(),
+            walker_chase: Vec::new(),
+            seat_chase: Vec::new(),
             flyer_params: Vec::new(),
             flight_limits: super::flyers::FlightLimits::default(),
             landing_regions: Vec::new(),

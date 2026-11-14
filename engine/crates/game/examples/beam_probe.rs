@@ -48,12 +48,23 @@ fn main() -> Result<()> {
     for _ in 0..30 {
         walk.step_tick(&[down]);
     }
-    if let Some(setup) = walk.sim.seat_setup.get(walk.sim.vehicles[slot].class as usize).and_then(Option::as_ref) {
+    if let Some(setup) = walk
+        .sim
+        .seat_setup
+        .get(walk.sim.vehicles[slot].class as usize)
+        .and_then(Option::as_ref)
+    {
         for (k, g) in setup.guns.iter().enumerate() {
             if let Some(g) = g {
-                println!("seat {k}: fire_point {:?} pivot {:?}", g.fire_point, g.pivot);
+                println!(
+                    "seat {k}: fire_point {:?} pivot {:?}",
+                    g.fire_point, g.pivot
+                );
                 for w in &g.weapons {
-                    println!("   {} points {:?}", walk.sim.weapon_classes[w.class].name, w.fire_points);
+                    println!(
+                        "   {} points {:?}",
+                        walk.sim.weapon_classes[w.class].name, w.fire_points
+                    );
                 }
             }
         }
@@ -61,7 +72,11 @@ fn main() -> Result<()> {
     let mut fx = game::fx::Fx::for_walk(&root, &scene.dir, &scene.manifest.source_game, &walk);
     for k in 0..ticks {
         let held = std::env::var("PROBE_HOLD").map_or(2, |v| v.parse().unwrap_or(2));
-        let fire = if std::env::var("PROBE_SECONDARY").is_ok() { buttons::SECONDARY_FIRE } else { buttons::FIRE };
+        let fire = if std::env::var("PROBE_SECONDARY").is_ok() {
+            buttons::SECONDARY_FIRE
+        } else {
+            buttons::FIRE
+        };
         let pad = PadState {
             rx: 20000,
             buttons: if k < held { fire } else { 0 },
@@ -81,7 +96,13 @@ fn main() -> Result<()> {
             .collect();
         let v = &walk.sim.vehicles[slot];
         for e in &walk.sim.events {
-            if let Event::Shot { origin, weapon_class, dir, .. } = e {
+            if let Event::Shot {
+                origin,
+                weapon_class,
+                dir,
+                ..
+            } = e
+            {
                 println!(
                     "{k:3} shot {} from {:.2?} along {:.3?} in the hover",
                     walk.sim.weapon_classes[*weapon_class as usize].name,
@@ -90,7 +111,11 @@ fn main() -> Result<()> {
                 );
             }
         }
-        let muzzle = v.guns.get(seat as usize).and_then(Option::as_ref).map(|g| g.aim);
+        let muzzle = v
+            .guns
+            .get(seat as usize)
+            .and_then(Option::as_ref)
+            .map(|g| g.aim);
         for b in &walk.sim.beams {
             println!(
                 "{k:3} beam from {:.2?} ({:.2?} in the hover) dir {:.3?} len {:.1} life {:.2} follow {}",

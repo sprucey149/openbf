@@ -1583,6 +1583,7 @@ pub use death_camera::DeathCam;
 pub use flyer_camera::{
     guided_section, FlyerCam, FlyerSection, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE,
 };
+pub use walker_view::walker_section;
 
 #[cfg(test)]
 mod tests;

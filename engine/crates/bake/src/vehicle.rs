@@ -298,6 +298,31 @@ fn animation_name(e: &mungefs::entity::EntityClass) -> String {
         .unwrap_or_default()
 }
 
+/// A flyer's fins clip (`analysis/re-vehicle-pose.md` 6): `AnimationName`
+/// sets the bank and its `fins` clip (BF2 FUN_002120e8 B2:125378-125388;
+/// BF1 FUN_001e06c0 B1:90135-90140); a later `FinAnimation` replaces it
+/// with its own value's clip, none when the bank lacks it, and is ignored
+/// before any bank (BF2 FUN_0020fd58 B2:125093-125105; BF1 FUN_001df3f0
+/// B1:89954-89962). Named as the skin GLB names it.
+fn flyer_fin(
+    e: &mungefs::entity::EntityClass,
+    bank: &mungefs::anim::AnimBank<'_>,
+) -> Option<String> {
+    let fin_key = mungefs::fnv1a_lowercase("FinAnimation");
+    let mut fin = None;
+    let mut banked = false;
+    for p in &e.props {
+        if p.key_hash == PROP_ANIMATION_NAME {
+            banked = true;
+            fin = bank.clip("fins").map(|_| "fins".to_owned());
+        } else if p.key_hash == fin_key && banked {
+            let value = p.value.trim();
+            fin = bank.clip(value).map(|_| value.to_owned());
+        }
+    }
+    fin
+}
+
 /// Card VPOSE (`analysis/re-vehicle-pose.md` 7.1): a hover class whose
 /// nodes move - a `FinAnimation`, or a turret, aimer or barrel node - gets a
 /// skin of its top LOD, with the fin clip from its `AnimationName` bank (the
@@ -515,20 +540,23 @@ pub fn bake_vehicles(
             let bank = banks
                 .iter()
                 .find(|b| b.name.eq_ignore_ascii_case(&bank_name));
-            if let Some((bank, clip)) = bank.and_then(|b| Some((b, b.clip("takeoff")?))) {
+            let takeoff = bank.and_then(|b| b.clip("takeoff"));
+            let fin = bank.and_then(|b| flyer_fin(e, b));
+            if let Some(bank) = bank.filter(|_| takeoff.is_some() || fin.is_some()) {
+                let entries: Vec<(&str, bool)> = takeoff
+                    .map(|_| "takeoff")
+                    .into_iter()
+                    .chain(fin.as_deref())
+                    .map(|n| (n, false))
+                    .collect();
                 let skin = bake_skin(&ix, geometry, out, &mut skinned, "flyer", |sk| {
-                    crate::walker::skin_glb_of(
-                        sk,
-                        Some(bank),
-                        &[("takeoff", false)],
-                        &[""],
-                        |_, _| {},
-                    )
+                    crate::walker::skin_glb_of(sk, Some(bank), &entries, &[""], |_, _| {})
                 })?;
                 skin.map(|skin| manifest::ManifestFlyer {
                     bank: bank_name,
                     skin,
-                    frames: clip.frames,
+                    frames: takeoff.map_or(0, |c| c.frames),
+                    fin,
                 })
             } else {
                 None

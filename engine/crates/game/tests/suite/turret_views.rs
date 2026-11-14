@@ -740,6 +740,7 @@ fn fixture_walk(first: Option<f32>) -> game::walk::WalkSim {
             reserve_clips: 0,
             fire_points: Vec::new(),
             fire_limits: Vec::new(),
+            fire_pivots: Vec::new(),
         }],
         fire_point: Vec3::Z,
         pivot: Vec3::ZERO,

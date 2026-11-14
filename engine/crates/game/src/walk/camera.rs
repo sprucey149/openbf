@@ -589,9 +589,11 @@ impl WalkSim {
     /// Pull a camera wanted at `desired` looking at `target` in along the
     /// track until the world's big models are
     /// [`crate::camera_collide::CAMERA_RADIUS`] clear of it (`own_instance`,
-    /// a gunner's building, excepted; props and vehicles never pull, they
-    /// are seen through, [`WalkSim::camera_see_through`]; a shorter track at
-    /// once, a longer one at the PS2's return rate), then
+    /// a gunner's building, excepted; props never pull, they are seen
+    /// through, [`WalkSim::camera_see_through`]; vehicles pull a BF2
+    /// soldier's camera, [`WalkSim::vehicle_pull`], and are seen through
+    /// otherwise; a shorter track at once, a longer one at the PS2's return
+    /// rate), then
     /// in short of the terrain sheet where the track crosses it
     /// (the sheet is a surface, met from above or below; a cutter's hole is
     /// none), then keep it [`CAMERA_TERRAIN_GAP`] off the sheet on the side
@@ -620,6 +622,11 @@ impl WalkSim {
                 |i| self.station_pose(i),
                 &self.sim.doors,
             )
+        };
+        let raw = if self.vehicles_pull(kind) {
+            raw.min(self.vehicle_pull(target, desired, own_vehicle))
+        } else {
+            raw
         };
         let track = Track {
             kind,
@@ -662,6 +669,54 @@ impl WalkSim {
             }
         }
         (position, track)
+    }
+
+    /// Do vehicles pull this camera in? BF2's soldier camera casts its
+    /// rays with mask 0x98 (`analysis/re-aim-assist.md` 10.6, B2
+    /// `FUN_001cef68`): terrain 0x80, building 0x10 and 0x08, the layer
+    /// BF2's vehicles collide on (`re-hover.md` 13, B2:2785-2788). BF1's
+    /// 0x48 is building 8 and terrain 0x40, and its vehicles are layer 4:
+    /// its camera passes through them.
+    pub(super) fn vehicles_pull(&self, kind: CamKind) -> bool {
+        kind == CamKind::Soldier && self.sim.ground_rules == core::soldier::GroundRules::Bf2
+    }
+
+    /// The fraction of the track from `target` to `desired` clear of every
+    /// vehicle hull but `own`'s: the PS2's five parallel rays (the centre's
+    /// and four moved along the camera's right and up rows, B1
+    /// `FUN_001b58f0` B1:59447-59626; B2 `FUN_001cef68` the same), against
+    /// the hulls' ordnance bodies,
+    /// stopping [`crate::camera_collide::CAMERA_RADIUS`] short as the
+    /// world's models do (the port's margin for the near plane's corners).
+    pub(super) fn vehicle_pull(
+        &self,
+        target: Vec3,
+        desired: Vec3,
+        own: Option<core::vehicle::VehicleHandle>,
+    ) -> f32 {
+        let track = desired - target;
+        let len = track.length();
+        if len < 1e-3 {
+            return 1.0;
+        }
+        let dir = track / len;
+        let right = dir.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
+        let up = right.cross(dir);
+        let r = crate::camera_collide::CAMERA_RADIUS;
+        let filter = core::collision::HullFilter::HullsExcept([own, None]);
+        [Vec3::ZERO, right + up, right - up, up - right, -right - up]
+            .into_iter()
+            .filter_map(|o| {
+                self.sim.collision.ray_with(
+                    target + o * r,
+                    dir,
+                    len,
+                    core::collision::Layers::ORDNANCE,
+                    filter,
+                )
+            })
+            .map(|h| ((h.t - r) / len).clamp(0.0, 1.0))
+            .fold(1.0, f32::min)
     }
 
     /// The chase camera's vertical FOV: the PS2's, times the player's option.
@@ -751,16 +806,20 @@ impl WalkSim {
             .iter()
             .enumerate()
             .filter(|(_, v)| v.alive);
-        let vehicles = crate::camera_collide::see_through_vehicles(
-            &self.sim.collision,
-            alive.map(|(i, v)| core::vehicle::VehicleHandle {
-                index: i as u32,
-                gen: v.gen,
-            }),
-            cam.position,
-            &sights,
-            t.own_vehicle,
-        );
+        let vehicles = if self.vehicles_pull(t.kind) {
+            Vec::new()
+        } else {
+            crate::camera_collide::see_through_vehicles(
+                &self.sim.collision,
+                alive.map(|(i, v)| core::vehicle::VehicleHandle {
+                    index: i as u32,
+                    gen: v.gen,
+                }),
+                cam.position,
+                &sights,
+                t.own_vehicle,
+            )
+        };
         crate::camera_collide::SeeThrough { props, vehicles }
     }
 
