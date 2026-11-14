@@ -389,7 +389,7 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
 | walker steps, `HydraulicSound` | per foot, by the height rule | nothing | VSN2 |
 | turret whir | two looping voices by turn rate | nothing (since 10c: ported) | VSN2 |
 | `TurretActivateSound` / `Deactivate` | a turret seat gets / loses its pilot | nothing (since 10c: ported) | VSN2 |
-| `VehicleCollisionSound` | hover: with collision damage; walker: vehicle contact | nothing | VSN2 |
+| `VehicleCollisionSound` | hover: with collision damage; walker: vehicle contact | nothing (since 10d: ported) | VSN2 |
 | jet pack and droideka engine, BF2 cockpit chatter, `BoostSound`, flyers' take-off / land | the same component | nothing at the time; since added (section 4) | notes (USND, post-alpha flyers) |
 
 ### 10b. What the port does after VSND (main 79eac42, 2026-10-03)
@@ -412,7 +412,7 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
   the BAKED NAB1 records and the port's `factors` (the fixed timer rule of 6.2): AAT 3940 / 3957, STAP 6013 / 6027,
   fighter tank 9421 / 9435 = 19,374 of 19,419 layer-ticks within 0.002 - the disc's own number
   (`engine_sound::tests::the_ps2s_multipliers_replay_through_the_baked_records`).
-- **Not ported**: the turn-on's and turn-off's one-shots, steps, collision (card VSN2; the whir: 10c); flyers, the droideka
+- **Not ported**: the turn-on's and turn-off's one-shots, steps, collision (card VSN2; the whir: 10c; collision: 10d); flyers, the droideka
   and the jet pack feed nothing; the property's `PitchDev` / `GainDev` and `ReverbGain` on a layer; the 39-voice
   limit (every engine inside its mute distance plays); BF2's layer start drawn once (the port redraws the deviation
   each update, BF1's rule, for both games); `boost`, `revs`, `height`, `strain` (no disc record has a graph on them).
@@ -434,6 +434,21 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
   `com_weap_turret_fire_small defer`. Before the fix `seat_stills` logged 0 starts for all three seats, 1 after.
 - Not checked against a live PS2 log: section 8.4's start times. The skiff (TAT1, `turret_whir_*_lp` 0.7,
   `vehicle_equip`, `droid_fx7_hum` on TURRET2 and TURRET3) was only heard in the port.
+
+### 10d. Hover and walker collision sounds (2026-11-14, branch feature/vehicle-parity)
+
+- `core::sim::Event::VehicleCollision` ports section 9.2 for hovers and walkers; `game/src/event_sounds.rs` plays
+  the class's `VehicleCollisionSound` at the vehicle's position, and nothing when the class has none (B1:354138-354145).
+- Hover: `Sim::impact_vehicle` emits it when the contact's damage (times the other body's factor) is above 0, before
+  the damage is dealt (B1:99722-99762, damage B1:99794; B2 `FUN_0021f978` B2:134406-134448, the same branch).
+- Walker: `Sim::ground_traffic` emits it for the moving walker on each contact with a walker or hover whose relative
+  velocity closes along the normal (B1:128782-128855; B2 `FUN_0025c2b0` B2:176639-176719 - the 0.7071 test there
+  only sets a flag). OURS: that sweep is the port's only walker/vehicle contact, so a walker against a flyer and the
+  other body's side of a contact play nothing. measure: whether the PS2 runs the other body's callback for the same
+  contact.
+- Flyers already played it through `Event::FlyerImpact` on every closing contact. The user's BES1 runs of
+  2026-11-14 (`engine/artifacts/playtest/last.json`) logged 12 `com_veh_collision_lg` starts at gain 0.59, ears
+  about 0.29.
 
 ## 11. Checks run
 

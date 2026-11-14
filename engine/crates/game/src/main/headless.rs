@@ -520,6 +520,9 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 vehicle.index,
                 u8::from(*lethal)
             ),
+            Event::VehicleCollision { vehicle, .. } => {
+                format!("{tick},vehicle_collision,{},,\n", vehicle.index)
+            }
         };
         csv.push_str(&line);
     }

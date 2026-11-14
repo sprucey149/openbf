@@ -371,6 +371,18 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                     .unwrap_or("com_veh_collision_lg");
                 play(sound, *pos);
             }
+            // The class's VehicleCollisionSound only: FUN_00366858 plays
+            // block+0x34 (B1:354138-354145), nothing stands in for it.
+            Event::VehicleCollision { vehicle, pos } => {
+                if let Some(s) = walk
+                    .sim
+                    .vehicle(*vehicle)
+                    .and_then(|v| walk.vehicle_sounds.get(v.class as usize))
+                    .and_then(|s| s.collision_sound.as_deref())
+                {
+                    play(s, *pos);
+                }
+            }
             Event::VehicleHit {
                 vehicle, damage, ..
             } if *damage > 0.0 => {

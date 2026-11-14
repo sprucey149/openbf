@@ -597,6 +597,11 @@ impl Sim {
         if d <= 0.0 {
             return 0.0;
         }
+        // The collision sound before the damage (B1:99762, then
+        // FUN_001bc8e0 at B1:99794).
+        if let Some(pos) = self.vehicle(h).map(|v| v.pos) {
+            self.events.push(Event::VehicleCollision { vehicle: h, pos });
+        }
         self.damage_vehicle(h, &collision_desc(d), 1.0, None)
     }
 

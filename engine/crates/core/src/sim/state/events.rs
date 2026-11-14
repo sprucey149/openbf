@@ -404,6 +404,18 @@ pub enum Event {
         damage: f32,
         lethal: bool,
     },
+    /// A hover's or walker's contact that plays its class's
+    /// `VehicleCollisionSound` at `pos`, the vehicle's position
+    /// (`FUN_00366858`, B1:354138; re-vehicle-sounds §9 item 2). A hover
+    /// emits it when a contact's collision damage comes out positive, before
+    /// the damage is dealt (B1 FUN_001ee3e0, B1:99722-99762). A walker emits
+    /// it on any closing contact with another vehicle, before the damage
+    /// threshold (B1 FUN_00217d50, B1:128782-128856). Flyers have
+    /// [`Event::FlyerImpact`].
+    VehicleCollision {
+        vehicle: crate::vehicle::VehicleHandle,
+        pos: Vec3,
+    },
     HitLanded {
         shooter: UnitHandle,
         team: Option<u8>,

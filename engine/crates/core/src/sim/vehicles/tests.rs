@@ -442,6 +442,11 @@ fn collision_damage_is_raw_and_can_kill() {
     assert!(s.events.is_empty(), "under the threshold: no event");
     // Side-on (n·up = 0) at 15 m/s: (−15 + 5)² × 1 = 100.
     assert_eq!(s.impact_vehicle(v, -15.0, 0.0, 0.0, t, sc, 1.0), 100.0);
+    assert!(
+        matches!(s.events.first(), Some(Event::VehicleCollision { vehicle, pos })
+            if *vehicle == v && *pos == s.vehicle(v).unwrap().pos),
+        "the collision sound before the damage (B1:99762, 99794)"
+    );
     assert!(s.events.contains(&Event::VehicleHit {
         shooter: None,
         vehicle: v,

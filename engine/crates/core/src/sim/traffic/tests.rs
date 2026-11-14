@@ -93,6 +93,40 @@ fn contact_world() -> (Sim, VehicleHandle, VehicleHandle) {
     (s, a, b)
 }
 
+fn collisions(s: &Sim, v: VehicleHandle) -> usize {
+    s.events
+        .iter()
+        .filter(|e| matches!(e, crate::sim::Event::VehicleCollision { vehicle, .. } if *vehicle == v))
+        .count()
+}
+
+/// B1 FUN_00217d50 (B1:128782-128855): a walker's contact with a vehicle
+/// plays the collision sound when the velocity relative to it closes along
+/// the normal; a hover sweeping into the walker plays none here.
+#[test]
+fn a_walker_closing_on_a_vehicle_plays_the_collision_sound() {
+    let (mut s, a, b) = contact_world();
+    s.sync_hulls();
+    s.vehicle_mut(a).unwrap().vel = Vec3::Z;
+    s.vehicle_mut(a).unwrap().pos = Vec3::Z * 10.0;
+    s.ground_traffic(a.index as usize, Vec3::Z);
+    assert_eq!(collisions(&s, a), 1);
+    s.events.clear();
+    s.sync_hulls();
+    s.vehicle_mut(b).unwrap().vel = Vec3::Z * 2.0;
+    let from = s.vehicle(a).unwrap().pos;
+    s.vehicle_mut(a).unwrap().pos = from + Vec3::Z * 3.0;
+    s.ground_traffic(a.index as usize, from);
+    assert_eq!(collisions(&s, a), 0, "the hover pulls away faster");
+    s.events.clear();
+    s.sync_hulls();
+    let from = s.vehicle(b).unwrap().pos;
+    s.vehicle_mut(b).unwrap().vel = -Vec3::Z;
+    s.vehicle_mut(b).unwrap().pos = from - Vec3::Z * 3.0;
+    s.ground_traffic(b.index as usize, from);
+    assert_eq!(collisions(&s, b), 0, "a hover's sound is its damage branch's");
+}
+
 #[test]
 fn traffic_hold_requires_real_contact_refreshes_and_expires_on_fixed_ticks() {
     let (mut s, a, b) = contact_world();
