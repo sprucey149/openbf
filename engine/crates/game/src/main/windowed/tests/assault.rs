@@ -34,6 +34,7 @@ fn start(a: &mut App, name: &str) -> anyhow::Result<()> {
             scene,
             load,
             cpu_ms: 0.0,
+            round: None,
         },
     )
 }

@@ -3,6 +3,7 @@
 
 use super::Sim;
 use crate::collision::{HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::vehicle::flyer::{self, FlightPhase, FlyerEnvironment, LandingSurface};
 use crate::vehicle::{SeatKind, VehicleHandle, VehicleKind};
 use glam::Vec3;
@@ -33,7 +34,7 @@ impl Sim {
             .get(vehicle.class as usize)
             .and_then(Option::as_ref);
         let center = sphere.map_or(vehicle.pos, |s| vehicle.pos + vehicle.rot * s.sphere_centre);
-        let radius = sphere.map_or(0.0, |s| s.sphere_radius.max(0.0));
+        let radius = sphere.map_or(0.0, |s| s.sphere_radius.fmax(0.0));
         self.landing_coverage(center, radius)
     }
 
@@ -151,13 +152,14 @@ impl Sim {
                 && (v.pos.y < floor || v.pos.y > ceiling);
             let outside = !v.is_empty() && (band || self.boundary.outside(v.pos.x, v.pos.z));
             let human = v.input.human;
+            let spared = human && self.pilot_cheats(v).invincible;
             let handle = VehicleHandle {
                 index: i as u32,
                 gen: v.gen,
             };
             let left = outside.then(|| v.flyer.leaving.unwrap_or(time) - dt);
             self.vehicles[i].flyer.leaving = left;
-            if left.is_some_and(|t| t < 0.0) && !(human && self.cheats.invincible) {
+            if left.is_some_and(|t| t < 0.0) && !spared {
                 gone.push(handle);
             }
         }
@@ -353,7 +355,7 @@ impl Sim {
             None => return,
         };
         let health = &mut self.vehicles[i].health;
-        health.cur = (health.cur + rate * dt).min(health.max);
+        health.cur = (health.cur + rate * dt).fmin(health.max);
     }
 }
 

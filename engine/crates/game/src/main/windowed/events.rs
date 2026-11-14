@@ -1,12 +1,51 @@
 //! Native window lifecycle and event dispatch for the application.
 
-use super::spawn_feedback::{draw_snapshot_notice, Selection};
+use super::spawn_feedback::draw_snapshot_notice;
+use super::tick_hook::{TickHook, TickState};
 use super::{
-    apply_pause_action, autopilot_pad, hud_model, hud_title, load_and_upload, mouse, note_sounds,
-    play_ambience, play_event_sounds, rain_splashes, record_round, spawn_model, start_take,
-    stats_pages, tracked_velocity, walk_draws, window_attributes, window_size_env, App, Arc,
-    DrawCmd, PadState, Renderer, Screen, CLEAR,
+    apply_pause_action, autopilot_pad, hud_model, hud_title, lan, load_and_upload, mouse,
+    note_sounds, rain_splashes, record_round, spawn_model, start_take, stats_pages,
+    tracked_velocity, walk_draws, window_attributes, window_size_env, App, Arc, DrawCmd, PadState,
+    Renderer, Screen, CLEAR,
 };
+use core::fmath::FloatExt;
+
+/// The in-battle scoreboard of `walk` (LAN §5b, `game::round_stats::scoreboard`):
+/// a LAN round names its humans by their session names and gives them a
+/// ping; single player has no Ping column.
+fn scoreboard_model(
+    walk: &game::walk::WalkSim,
+    feed: &game::event_feed::EventFeed,
+    titles: [String; 2],
+    net: Option<&lan::NetplaySession>,
+) -> ui::scoreboard::Scoreboard {
+    use ui::scoreboard::Ping;
+    let sim = &walk.sim;
+    let roster = net.map(|n| n.roster()).unwrap_or_default();
+    let unit = |i: usize| {
+        sim.units[i]
+            .spec
+            .player_slot
+            .filter(|_| net.is_some())
+            .and_then(|s| roster.iter().find(|p| p.slot == s))
+            .map_or_else(|| feed.unit_name(sim, sim.handle(i)), |p| p.name.clone())
+    };
+    let ping = |slot: u8| match roster.iter().find(|p| p.slot == slot) {
+        Some(p) => p.ping_ms.map_or(Ping::Host, Ping::Ms),
+        None => Ping::None,
+    };
+    let ping: Option<&dyn Fn(u8) -> Ping> = net.map(|_| &ping as &dyn Fn(u8) -> Ping);
+    game::round_stats::scoreboard(sim, feed.round(), walk.player, &unit, titles, ping)
+}
+
+/// The drawn view back after the draw lists: a LAN peer's prediction and
+/// blend, or the single-player blend (issue #168).
+fn draw_out(netplay: &mut Option<lan::NetplaySession>, walk: &mut game::walk::WalkSim) {
+    match netplay.as_mut() {
+        Some(n) => n.view.draw_out(walk),
+        None => walk.blend_out(),
+    }
+}
 
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -31,8 +70,12 @@ impl winit::application::ApplicationHandler for App {
         }
         self.focused = window.has_focus();
         let Some(map) = self.map.clone() else {
-            // Shell start: no map yet.
-            self.init_shell();
+            // Shell start: no map yet; a LAN launch waits for its round.
+            if self.netplay.is_some() {
+                self.screen = Screen::NetWait;
+            } else {
+                self.init_shell();
+            }
             self.window = Some(window);
             self.renderer = Some(renderer);
             self.last = std::time::Instant::now();
@@ -121,6 +164,9 @@ impl winit::application::ApplicationHandler for App {
         if self.loading_window_event(&event) {
             return;
         }
+        if self.profile_keyboard(&event) {
+            return;
+        }
         self.sync_binding_context();
         if self.capture_keyboard(&event) {
             if let WindowEvent::KeyboardInput { event, .. } = &event {
@@ -172,6 +218,24 @@ impl winit::application::ApplicationHandler for App {
                     },
                 ..
             } => self.snapshot_requested = self.blackbox.is_some(),
+            // F7: the LAN net meter (issue #168; also Options → Network meter).
+            WindowEvent::KeyboardInput {
+                event:
+                    winit::event::KeyEvent {
+                        physical_key:
+                            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F7),
+                        state: winit::event::ElementState::Pressed,
+                        repeat: false,
+                        ..
+                    },
+                ..
+            } => {
+                let s = &mut self.profile.settings;
+                s.network_meter = !s.network_meter;
+                if let Err(e) = self.profile.save() {
+                    eprintln!("profile autosave failed: {e:#}");
+                }
+            }
             WindowEvent::KeyboardInput {
                 event:
                     winit::event::KeyEvent {
@@ -188,7 +252,7 @@ impl winit::application::ApplicationHandler for App {
                     // The system's key repeat steps the arrows, never a
                     // confirm or a back; the shell repeats a held arrow at
                     // the PS2's rate itself (`ui::shell_feel::HoldRepeat`).
-                    let shell = matches!(self.screen, Screen::Shell);
+                    let shell = matches!(self.screen, Screen::Shell | Screen::Lobby);
                     if !repeat || (bit < 16 && !shell) {
                         self.keys_tapped |= bit;
                     }
@@ -203,22 +267,24 @@ impl winit::application::ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 let elapsed = self.last.elapsed().as_secs_f32();
-                let dt = elapsed.min(0.1);
+                let dt = elapsed.fmin(0.1);
                 self.last = std::time::Instant::now();
                 if matches!(self.screen, Screen::Loading) {
                     self.frame_seconds = 0.0;
                 } else if self.frame_seconds == 0.0 {
                     self.frame_seconds = elapsed;
                 } else {
-                    self.frame_seconds += (elapsed - self.frame_seconds) * (elapsed * 3.0).min(1.0);
+                    self.frame_seconds +=
+                        (elapsed - self.frame_seconds) * (elapsed * 3.0).fmin(1.0);
                 }
                 self.sync_audio_levels();
                 // The renderer's animation clock, for UV-scrolling materials
                 // (a map's water). Wrapped so `uv + velocity * time` keeps
                 // its f32 precision in a long session — see Renderer::time.
+                let frozen = self.frozen();
                 if let Some(r) = self.renderer.as_mut() {
                     (r.time, r.water_time) = render::advance_clocks(r.time, r.water_time, dt);
-                    if matches!(self.screen, Screen::Battle) && !self.paused {
+                    if matches!(self.screen, Screen::Battle) && !frozen {
                         let atmo = r.atmosphere_time.unwrap_or(0.0) + f64::from(dt);
                         r.atmosphere_time = Some(atmo);
                     }
@@ -237,6 +303,28 @@ impl winit::application::ApplicationHandler for App {
                     }
                     return;
                 }
+                if matches!(self.screen, Screen::Lobby) {
+                    if let Err(error) = self.redraw_lobby(dt) {
+                        eprintln!("render: {error:#}");
+                        event_loop.exit();
+                        return;
+                    }
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
+                    return;
+                }
+                if matches!(self.screen, Screen::NetWait) {
+                    if let Err(error) = self.redraw_net_wait() {
+                        eprintln!("render: {error:#}");
+                        event_loop.exit();
+                        return;
+                    }
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
+                    return;
+                }
                 if matches!(self.screen, Screen::Loading) {
                     if let Err(error) = self.redraw_loading() {
                         eprintln!("render: {error:#}");
@@ -249,6 +337,20 @@ impl winit::application::ApplicationHandler for App {
                     return;
                 }
 
+                // Issue #168: the LAN session's events before the battle
+                // frame borrows the walk (a new round leaves for loading).
+                if self.netplay.is_some() {
+                    self.net_idle();
+                    if !matches!(self.screen, Screen::Battle) {
+                        if let Some(w) = &self.window {
+                            w.request_redraw();
+                        }
+                        return;
+                    }
+                    if self.netplay.as_ref().is_some_and(|n| n.ended_done()) {
+                        self.quit_clicked = true;
+                    }
+                }
                 if let Some(p) = self.frame_profile.as_mut() {
                     p.begin();
                 }
@@ -268,6 +370,9 @@ impl winit::application::ApplicationHandler for App {
                 } else {
                     0
                 };
+                if let Some(sounds) = self.sounds.as_mut() {
+                    sounds.advance_menu_clock(elapsed);
+                }
                 if self.walk.is_some() && self.controls.is_none() && edges & 64 != 0 {
                     if !self.pause_menu.class_picker {
                         self.paused = !self.paused;
@@ -387,6 +492,23 @@ impl winit::application::ApplicationHandler for App {
                         }
                     }
                     let pad = self.profile.settings.viewpoint.stamp(pad);
+                    // The scoreboard is held on Select / View or Tab (its
+                    // battle bit; never with the seat chord, LAN §5b).
+                    {
+                        use core::sim::buttons as b;
+                        self.score_hold.step(
+                            pad.buttons & b::SPAWN_CLASS_PREV != 0,
+                            pad.buttons & b::SWITCH_WEAPON != 0,
+                            dt,
+                        );
+                    }
+                    // A LAN round: the pad is neutral while paused (the sim
+                    // runs on), and carries a confirmed Respawn (issue #168).
+                    let paused_now = self.paused;
+                    let pad = match self.netplay.as_mut() {
+                        Some(n) => n.frame_pad(pad, paused_now),
+                        None => pad,
+                    };
                     let paused = self.paused;
                     let (walk, cube) = self.walk.as_mut().unwrap();
                     // A FIRE press fires where the reticle was drawn.
@@ -396,7 +518,9 @@ impl winit::application::ApplicationHandler for App {
                     if paused && binding_menu {
                         // The controls editor consumed the frame's menu input above.
                     } else if paused {
-                        if !self.audio.as_ref().is_some_and(|a| a.game_paused()) {
+                        if self.netplay.is_none()
+                            && !self.audio.as_ref().is_some_and(|a| a.game_paused())
+                        {
                             if let Some(sl) = self.sounds.as_mut() {
                                 sl.stop_loops();
                             }
@@ -405,7 +529,10 @@ impl winit::application::ApplicationHandler for App {
                             class_picker_available: false,
                             bindings: None,
                             class_choices: self.pause_menu.class_picker_model(walk),
-                            cheats: walk.sim.cheats.entries().to_vec(),
+                            cheats: match self.netplay.as_mut() {
+                                Some(n) => n.cheat_entries(walk),
+                                None => walk.sim.cheats.entries().to_vec(),
+                            },
                             assist_intensity: walk.sim.assist_intensity,
                             difficulty: game::shell_ia::ia_level(self.profile.settings.difficulty),
                             effects_volume: self.profile.settings.effects_volume,
@@ -413,13 +540,17 @@ impl winit::application::ApplicationHandler for App {
                             fps_counter: ui::menu::FpsCounter::from_index(
                                 self.profile.settings.fps_counter,
                             ),
+                            network_meter: self.profile.settings.network_meter,
+                            player_name: self.profile.name.clone(),
                             team_size_pct: walk.team_size_pct,
                             reinforcements_pct: walk.reinforcement_pct,
                             population_note: game::conquest_defaults::menu_note(
                                 walk.team_size_pct,
                                 walk.reinforcement_pct,
                             ),
-                            team_size_off: walk.conquest_defaults.is_none(),
+                            // A guest's battle size is the host's (issue #168).
+                            team_size_off: walk.conquest_defaults.is_none()
+                                || self.netplay.as_ref().is_some_and(|n| !n.is_host()),
                             fov_scale: walk.fov_scale,
                             base_fov_deg: game::walk::chase_fov_y().to_degrees(),
                             music_volume: walk
@@ -437,6 +568,7 @@ impl winit::application::ApplicationHandler for App {
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             terrain_lod: self.profile.settings.terrain_lod,
                             scene_softness: self.profile.settings.scene_softness,
+                            auto_quality: self.profile.settings.auto_quality,
                             input_icons_label: self.profile.settings.input_icons.label(),
                             icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
@@ -457,9 +589,16 @@ impl winit::application::ApplicationHandler for App {
                         };
                         const ADJUST: u32 =
                             game::kbm::MENU_ADJUST_LEFT | game::kbm::MENU_ADJUST_RIGHT;
-                        let adjust = (edges
-                            | self.pause_repeat.step(self.prev_menu_buttons & ADJUST, dt))
-                            & ADJUST;
+                        const PAGE: u32 = game::kbm::MENU_L1 | game::kbm::MENU_R1;
+                        let adjust = edges
+                            | self
+                                .pause_repeat
+                                .step(self.prev_menu_buttons & (ADJUST | PAGE), dt);
+                        let page_right = match adjust & PAGE {
+                            game::kbm::MENU_L1 => Some(false),
+                            game::kbm::MENU_R1 => Some(true),
+                            _ => None,
+                        };
                         // The D-pad's and arrows' presses: a step is not a Morse key.
                         let input = ui::menu::MenuInput {
                             up: edges & 1 != 0,
@@ -501,20 +640,26 @@ impl winit::application::ApplicationHandler for App {
                         } else {
                             None
                         };
-                        let (cursor, actions) = match target.filter(|_| !rows_input.back) {
-                            Some(hit) => ui::pause_draw::click(&mut model, hit),
-                            None => ui::menu::navigate(&model, rows_input),
-                        };
+                        let (cursor, actions) =
+                            game::pause::navigate(&mut model, rows_input, target, page_right);
                         let click = game::pause::pause_sound(rows_input, from, cursor, &actions);
                         if let (Some(c), Some(sl)) = (click, self.sounds.as_mut()) {
                             sl.play_2d(self.audio.as_mut(), c.name());
                         }
                         // The PS2 matcher runs beside the menu on the same
                         // edges (the cursor wiggle while typing is authentic).
-                        if let Some(line) = (self.pause_menu.page == ui::menu::PausePage::Cheats)
-                            .then(|| self.cheats.feed(input, &mut walk.sim))
-                            .flatten()
-                        {
+                        let on_cheats = self.pause_menu.page == ui::menu::PausePage::Cheats;
+                        let word_line = match self.netplay.as_mut().filter(|_| on_cheats) {
+                            // A LAN round: the word goes to the host (issue #168).
+                            Some(n) => self
+                                .cheats
+                                .word(input)
+                                .map(|w| n.morse_word(w, walk, &mut self.cheats)),
+                            None => on_cheats
+                                .then(|| self.cheats.feed(input, &mut walk.sim))
+                                .flatten(),
+                        };
+                        if let Some(line) = word_line {
                             if let Some(sl) = self.sounds.as_mut() {
                                 sl.rate_mul = self.cheats.sfx_rate();
                                 sl.play_2d(
@@ -538,6 +683,18 @@ impl winit::application::ApplicationHandler for App {
                                 binding_menu = true;
                             }
                             self.restart_clicked |= a == ui::menu::MenuAction::Restart;
+                            if self.netplay.as_mut().is_some_and(|n| {
+                                n.pause_action(
+                                    walk,
+                                    a,
+                                    &mut self.paused,
+                                    &mut self.pause_menu,
+                                    &mut self.profile,
+                                    &mut self.session,
+                                )
+                            }) {
+                                continue;
+                            }
                             quit |= apply_pause_action(
                                 walk,
                                 a,
@@ -571,11 +728,16 @@ impl winit::application::ApplicationHandler for App {
                                 fps_counter: ui::menu::FpsCounter::from_index(
                                     self.profile.settings.fps_counter,
                                 ),
+                                network_meter: self.profile.settings.network_meter,
+                                player_name: self.profile.name.clone(),
                                 class_choices: self.pause_menu.class_picker_model(walk),
                                 cursor: self.pause_menu.cursor,
                                 page: model.page.map(|_| self.pause_menu.page),
                                 popup: self.pause_menu.confirm,
-                                cheats: walk.sim.cheats.entries().to_vec(),
+                                cheats: match self.netplay.as_mut() {
+                                    Some(n) => n.cheat_entries(walk),
+                                    None => walk.sim.cheats.entries().to_vec(),
+                                },
                                 assist_intensity: walk.sim.assist_intensity,
                                 team_size_pct: walk.team_size_pct,
                                 reinforcements_pct: walk.reinforcement_pct,
@@ -583,7 +745,8 @@ impl winit::application::ApplicationHandler for App {
                                     walk.team_size_pct,
                                     walk.reinforcement_pct,
                                 ),
-                                team_size_off: walk.conquest_defaults.is_none(),
+                                team_size_off: walk.conquest_defaults.is_none()
+                                    || self.netplay.as_ref().is_some_and(|n| !n.is_host()),
                                 fov_scale: walk.fov_scale,
                                 base_fov_deg: game::walk::chase_fov_y().to_degrees(),
                                 music_volume: walk
@@ -601,12 +764,15 @@ impl winit::application::ApplicationHandler for App {
                                 low_power_resolution: self.profile.settings.low_power_resolution,
                                 terrain_lod: self.profile.settings.terrain_lod,
                                 scene_softness: self.profile.settings.scene_softness,
+                                auto_quality: self.profile.settings.auto_quality,
                                 input_icons_label: self.profile.settings.input_icons.label(),
                                 first_person: self.profile.settings.viewpoint.is_first(),
                                 ..model
                             });
                         }
-                    } else {
+                    }
+                    // A LAN round steps on under its pause menu (issue #168).
+                    if !paused || self.netplay.is_some() {
                         // Each stepped tick's events are read in the hook,
                         // once: a frame steps no tick (every other one at
                         // 60 Hz), one or several, and `Sim::events` keeps
@@ -616,103 +782,130 @@ impl winit::application::ApplicationHandler for App {
                             let (w, h) = r.size();
                             w as f32 / h.max(1) as f32
                         });
-                        // The class screen's unlocks read the player's
-                        // points as the feed has scored them (card SSELB,
-                        // re-spawn-flow §4.3) and its career's costs (UNLK3).
-                        let points = self.feed.stats(&walk.sim, walk.player).points;
-                        game::unlocks::set_player_gate(walk, points, &self.profile.career);
+                        if self.netplay.is_none() {
+                            // The class screen's unlocks read the player's
+                            // points as the feed has scored them (card SSELB,
+                            // re-spawn-flow §4.3) and its career's costs
+                            // (UNLK3). A LAN round gates every slot itself
+                            // (`netplay::gate`).
+                            let points = self.feed.stats(&walk.sim, walk.player).points;
+                            game::unlocks::set_player_gate(walk, points, &self.profile.career);
+                        }
                         // Station serving is observed for every sim tick, even when a
                         // frame catches up several ticks before posing the scene.
                         if let Some(gpu) = self.gpu.as_mut() {
                             gpu.step_stations(&walk.sim);
                         }
-                        let mut tick_pad = pad;
-                        let mut selection = Selection::read(walk);
-                        let mut medals_seen = self.profile.career.medals;
-                        let mut previous_mount = walk.sim.unit(walk.player).and_then(|u| u.mount);
-                        let ticks = walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
-                            let hook_t0 = std::time::Instant::now();
-                            if let Some(gpu) = self.gpu.as_mut() {
-                                gpu.step_stations(&walk.sim);
-                            }
-                            self.fx.ingest_posed(walk, self.soldier_vis.as_ref());
-                            let effect_sounds = self.fx.take_sounds();
-                            let buff_loops = self.fx.buff_loops(&walk.sim);
-                            if let Some(vis) = self.soldier_vis.as_mut() {
-                                vis.note_shots(walk);
-                                let mut points = vis.fire_points(walk);
-                                self.deka_vis.fire_points(&walk.sim, &mut points);
-                                self.bolts.set_fire_points(points);
-                            }
-                            self.bolts.track(walk);
-                            if let (Some(audio), Some(sl)) =
-                                (self.audio.as_mut(), self.sounds.as_mut())
-                            {
-                                let next = Selection::read(walk);
-                                if let Some(cue) =
-                                    selection.movement_cue(next, walk.sim.ground_rules)
-                                {
-                                    sl.play_2d(Some(audio), cue);
+                        let mut st = TickState::new(walk, self.profile.career.medals, pad, aspect);
+                        let mut hook = TickHook {
+                            gpu: self.gpu.as_mut(),
+                            fx: &mut self.fx,
+                            soldier_vis: self.soldier_vis.as_mut(),
+                            deka_vis: &mut self.deka_vis,
+                            bolts: &mut self.bolts,
+                            audio: self.audio.as_mut(),
+                            sounds: self.sounds.as_mut(),
+                            foley: self.foley.as_mut(),
+                            engines: &mut self.engines,
+                            ambience: &self.ambience,
+                            blackbox: self.blackbox.as_mut(),
+                            rumble_strength: self.profile.settings.rumble_strength,
+                            rumble_on_fire: self.profile.settings.rumble_on_fire,
+                            rumble_tick: &mut self.rumble_tick,
+                            gilrs: self.gilrs.as_mut(),
+                            active_pad: &self.active_pad,
+                            rumble_effect: &mut self.rumble_effect,
+                            matchlog: self.matchlog.as_mut(),
+                            frame_profile: self.frame_profile.as_mut(),
+                        };
+                        let feed = &mut self.feed;
+                        match self.netplay.as_mut() {
+                            Some(n) => {
+                                let catching_up = n.catching_up();
+                                if catching_up {
+                                    n.banner = Some((
+                                        format!(
+                                            "Catching up with the battle: tick {}",
+                                            n.peer.next_tick()
+                                        ),
+                                        std::time::Instant::now(),
+                                    ));
                                 }
-                                selection = next;
-                                play_event_sounds(
-                                    audio,
-                                    sl,
-                                    self.foley.as_mut(),
-                                    &mut self.engines,
-                                    &effect_sounds,
-                                    aspect,
+                                // Every frame's pad joins the input clock's
+                                // open tick: the mouse's motion and the
+                                // presses are taken now, and a FIRE press's
+                                // lag is the open input tick's share.
+                                // Sim first (LAN §8b.1): the frame's whole
+                                // wall time, so a late frame steps every
+                                // bundle that came due before it draws.
+                                let report = n.view.frame(
+                                    &mut n.peer,
+                                    &mut n.link,
+                                    elapsed.fmin(1.0),
+                                    pad,
                                     walk,
+                                    Some(feed),
+                                    |w, _, f, muted| {
+                                        if let Some(f) = f.filter(|_| !catching_up) {
+                                            hook.tick(w, f, &mut st, true, muted);
+                                        }
+                                    },
                                 );
-                                // The auras' loops (the War Hero's crackle).
-                                let listener = game::event_sounds::listener(walk);
-                                sl.play_buff_loops(audio, &buff_loops, &listener);
-                                play_ambience(audio, sl, &self.ambience, walk);
-                            }
-                            game::heroes::tick(walk, &mut self.feed);
-                            self.feed
-                                .note_medals(&walk.sim, walk.player, &mut medals_seen);
-                            if let Some(bb) = self.blackbox.as_mut() {
-                                stuck_alarm |= bb.tick(walk, Some(tick_pad));
-                                note_sounds(bb, self.sounds.as_mut(), walk.sim.tick);
-                            }
-                            let strength = self.profile.settings.rumble_strength;
-                            if strength > 0.0 {
-                                if let Some(pulse) = self.rumble_tick.pulse(
-                                    &walk.sim,
-                                    walk.player,
-                                    previous_mount,
-                                    self.profile.settings.rumble_on_fire,
-                                ) {
-                                    if let Some(g) = self.gilrs.as_mut() {
-                                        if let Some((id, _)) =
-                                            input::active_gamepad(g, &self.active_pad)
-                                        {
-                                            self.rumble_effect =
-                                                input::rumble(g, id, pulse, strength);
+                                self.kbm.consumed(&pad, 1);
+                                walk.blend.consumed(1);
+                                n.update_meter(Some(walk), report.ticks);
+                                if let Some(bb) = self.blackbox.as_mut() {
+                                    bb.net(walk.sim.tick, &n.meter);
+                                }
+                                // Own shot feedback from the prediction, at once.
+                                let shots = n.view.shots();
+                                if !shots.is_empty() {
+                                    if let (Some(psim), Some(audio), Some(sl)) = (
+                                        n.view.predictor.sim(),
+                                        self.audio.as_mut(),
+                                        self.sounds.as_mut(),
+                                    ) {
+                                        let events: Vec<core::sim::Event> = shots
+                                            .iter()
+                                            .map(|s| core::sim::Event::Shot {
+                                                unit: s.unit,
+                                                weapon_class: s.weapon_class,
+                                                origin: s.origin,
+                                                dir: s.dir,
+                                            })
+                                            .collect();
+                                        let mut asks = Vec::new();
+                                        game::event_sounds::weapon_asks_of(psim, &events, |a| {
+                                            asks.push(a)
+                                        });
+                                        let listener = game::event_sounds::listener(walk);
+                                        sl.play_weapon_voices(audio, &asks, &listener);
+                                    }
+                                    if let Some(vis) = self.soldier_vis.as_mut() {
+                                        for s in shots {
+                                            let wc = s.weapon_class as usize;
+                                            if !walk.sim.is_item_gun(wc) {
+                                                vis.predicted_shot(
+                                                    s.unit.index,
+                                                    s.unit.gen,
+                                                    walk.sim.tick,
+                                                    wc,
+                                                );
+                                            }
                                         }
                                     }
                                 }
                             }
-                            previous_mount = walk.sim.unit(walk.player).and_then(|u| u.mount);
-                            if let Some(m) = self.matchlog.as_mut() {
-                                m.tick(&walk.sim, &tick_pad);
-                                if walk.sim.outcome.is_some() && !m.written() {
-                                    if let Some(p) = m.write(&walk.sim, "outcome") {
-                                        println!("matchlog: wrote {}", p.display());
-                                    }
-                                }
+                            None => {
+                                let ticks =
+                                    walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
+                                        hook.tick(walk, feed, &mut st, false, false)
+                                    });
+                                self.kbm.consumed(&pad, ticks);
+                                walk.blend.consumed(ticks);
                             }
-                            if let Some(p) = self.frame_profile.as_mut() {
-                                let hook = hook_t0.elapsed().as_secs_f64() * 1000.0;
-                                p.tick(walk.sim.ai_wall_ms, hook, &walk.sim.tick_cost, |u| {
-                                    game::frame_profile::unit_name(walk, u)
-                                });
-                            }
-                            tick_pad.clear_once();
-                        });
-                        self.kbm.consumed(&pad, ticks);
-                        walk.blend.consumed(ticks);
+                        }
+                        stuck_alarm |= st.stuck_alarm;
                         if walk.flush_career_progress(&mut self.profile) {
                             if let Err(e) = self.profile.save() {
                                 eprintln!("profile autosave failed: {e:#}");
@@ -836,7 +1029,12 @@ impl winit::application::ApplicationHandler for App {
                     // pose blended between its last two ticks (card RINT):
                     // the camera, units and vehicles drawn at the display's
                     // rate. Restored below, before anything else reads it.
-                    game::render_blend::blend_in_looking(walk, &look);
+                    match self.netplay.as_mut() {
+                        // Issue #168: the look over every pending input, then
+                        // the predicted local pose (`netplay::view`).
+                        Some(n) => n.view.draw_in(walk),
+                        None => game::render_blend::blend_in_looking(walk, &look),
+                    }
                     let pending = walk
                         .class_picker
                         .as_mut()
@@ -935,7 +1133,10 @@ impl winit::application::ApplicationHandler for App {
                         if let (Some(cue), Some(sounds)) = (cue, self.sounds.as_mut()) {
                             sounds.play_2d(self.audio.as_mut(), cue.name());
                         }
-                        if done {
+                        if done && self.netplay.is_some() {
+                            // A LAN round: the lobby's ready check (issue #168).
+                            self.net_round_over = true;
+                        } else if done {
                             self.quit_clicked = true;
                             self.round_over = true;
                         }
@@ -948,6 +1149,9 @@ impl winit::application::ApplicationHandler for App {
                     }
                     if walk.sim.outcome.is_some() && !self.outcome_reported {
                         self.outcome_reported = true;
+                        if let Some(n) = self.netplay.as_mut() {
+                            n.round_decided();
+                        }
                         println!("{}", hud_title(walk));
                     }
                     if walk.sim.outcome.is_some() && !self.round_recorded {
@@ -1002,6 +1206,7 @@ impl winit::application::ApplicationHandler for App {
                     }
                 }
 
+                let frozen = self.frozen();
                 if let (Some(r), Some(gpu)) = (&mut self.renderer, &mut self.gpu) {
                     gpu.apply_render_options(
                         r,
@@ -1082,7 +1287,7 @@ impl winit::application::ApplicationHandler for App {
                         .and_then(|s| s.page.as_ref())
                         .filter(|_| self.hud_view.is_some() && !self.cheats.hud_hidden);
                     if let Some(vis) = self.soldier_vis.as_ref() {
-                        let step = if self.paused { 0.0 } else { dt };
+                        let step = if frozen { 0.0 } else { dt };
                         let (body, gun) = self.spawn_preview.draws_live(
                             r,
                             vis,
@@ -1109,7 +1314,7 @@ impl winit::application::ApplicationHandler for App {
                     // The tick's own pose back (card RINT): the menu's
                     // actions and the next tick read it.
                     if let Some((walk, _)) = self.walk.as_mut() {
-                        walk.blend_out();
+                        draw_out(&mut self.netplay, walk);
                     }
                     let hud_hidden = self.cheats.hud_hidden;
                     let pad_warning = self.pad_warning.clone();
@@ -1123,7 +1328,7 @@ impl winit::application::ApplicationHandler for App {
                     // hides it. It is fed either way — a model's event
                     // lines are handed over once. Paused, its fades hold.
                     let (w, h) = r.size();
-                    let hud_dt = if self.paused { 0.0 } else { dt };
+                    let hud_dt = if frozen { 0.0 } else { dt };
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
                             hv.set_icons(icons);
@@ -1145,36 +1350,139 @@ impl winit::application::ApplicationHandler for App {
                         p.lap("draws_ms");
                     }
                     // Low Power Resolution scales the world while the HUD draws at window resolution.
-                    let scale = if self.profile.settings.low_power_resolution && self.walk.is_some()
-                    {
+                    // Automatic quality (LAN §8b.2, `game::quality_governor`)
+                    // when on; off, Low Power Resolution's own choice. Both
+                    // move only the renderer, never the sim.
+                    let auto = self.profile.settings.auto_quality;
+                    let low_power = self.profile.settings.low_power_resolution;
+                    let in_battle = self.walk.is_some();
+                    let budget = (in_battle && (auto || low_power)).then(|| {
                         let window = &self.window;
-                        let budget = *self.dyn_res_budget_ms.get_or_insert_with(|| {
+                        *self.dyn_res_budget_ms.get_or_insert_with(|| {
                             game::dyn_res::display_budget_ms(
                                 window
                                     .as_ref()
                                     .and_then(|w| w.current_monitor())
                                     .and_then(|m| m.refresh_rate_millihertz()),
                             )
-                        });
-                        self.dyn_res.frame(dt * 1000.0, budget)
-                    } else {
-                        self.dyn_res = game::dyn_res::DynRes::default();
-                        self.dyn_res_budget_ms = None;
-                        1.0
+                        })
+                    });
+                    let scale = match budget {
+                        Some(budget) if auto => {
+                            use game::quality_governor::TierHook;
+                            self.dyn_res = game::dyn_res::DynRes::default();
+                            let tiers = self.tiers.steps();
+                            // A joiner replaying the round is busy by design:
+                            // its frames say nothing about the GPU.
+                            let replaying = self.netplay.as_ref().is_some_and(|n| n.catching_up());
+                            // The frame's own work is its time less the last
+                            // wait for the window's image, once this platform
+                            // has shown it waits there (a frame with time to
+                            // spare under vsync does);
+                            // where it never does, the governor is told
+                            // nothing and treats every slow frame as the
+                            // GPU's (`quality_governor`, CPU-bound rule).
+                            let wait = r.acquire_ms() as f32;
+                            self.acquire_seen |= wait > 2.0;
+                            let busy = self
+                                .acquire_seen
+                                .then(|| (elapsed * 1000.0 - wait).fmax(0.0));
+                            let q = if replaying || frozen {
+                                self.governor.quality(tiers)
+                            } else {
+                                self.governor.frame(elapsed * 1000.0, busy, budget, tiers)
+                            };
+                            self.tiers.apply(q.tier_down);
+                            self.quality_note = Some(q.label());
+                            q.scale
+                        }
+                        Some(budget) => {
+                            self.governor = Default::default();
+                            self.quality_note = None;
+                            self.dyn_res.frame(dt * 1000.0, budget)
+                        }
+                        None => {
+                            if !auto {
+                                self.governor = Default::default();
+                            }
+                            self.quality_note = None;
+                            self.dyn_res = game::dyn_res::DynRes::default();
+                            self.dyn_res_budget_ms = None;
+                            1.0
+                        }
                     };
                     r.set_world_scale(scale);
                     let mut binding_click = None;
+                    let net_meter = self
+                        .netplay
+                        .as_ref()
+                        .filter(|_| self.profile.settings.network_meter)
+                        .map(|n| n.meter.clone());
+                    let net_banner = self
+                        .netplay
+                        .as_ref()
+                        .and_then(|n| n.banner_text().map(str::to_owned));
+                    // Not on the spawn screens (Select is the previous
+                    // class there), under the menu or at the round's end.
+                    let scoreboard = match (&self.walk, &hud) {
+                        (Some((walk, _)), Some(model))
+                            if self.score_hold.shown()
+                                && spawn.is_none()
+                                && menu.is_none()
+                                && model.round_end.is_none() =>
+                        {
+                            Some(scoreboard_model(
+                                walk,
+                                &self.feed,
+                                model.team_names.clone(),
+                                self.netplay.as_ref(),
+                            ))
+                        }
+                        _ => None,
+                    };
+                    // A LAN round: the other players' names over their
+                    // heads, seen from this camera (LAN §5b).
+                    let name_tags = match (&self.walk, &self.netplay, &hud) {
+                        (Some((walk, _)), Some(n), Some(model))
+                            if spawn.is_none() && model.round_end.is_none() =>
+                        {
+                            let roster = n.roster();
+                            let name = |slot: u8| {
+                                roster
+                                    .iter()
+                                    .find(|p| p.slot == slot)
+                                    .map(|p| p.name.clone())
+                            };
+                            let tags = self.name_tags.update(
+                                &walk.sim,
+                                walk.player,
+                                camera.position,
+                                dt,
+                                &name,
+                            );
+                            Some((tags, camera.view_proj(w as f32 / h.max(1) as f32)))
+                        }
+                        _ => {
+                            self.name_tags.clear();
+                            None
+                        }
+                    };
                     let result = match (&mut self.overlay, &self.window, hud) {
                         (Some(overlay), Some(window), Some(model)) => {
                             let mut clicked: Vec<ui::menu::MenuAction> = Vec::new();
                             let paint = overlay.begin(window, |ctx| {
-                                ui::menu::draw_fps_counter(
+                                ui::menu::draw_fps_counter_note(
                                     ctx,
                                     ui::menu::FpsCounter::from_index(
                                         self.profile.settings.fps_counter,
                                     ),
                                     self.frame_seconds,
+                                    self.quality_note.as_deref(),
                                 );
+                                if let Some((tags, vp)) = name_tags.as_ref().filter(|_| !hud_hidden)
+                                {
+                                    lan::draw_name_tags(ctx, tags, *vp);
+                                }
                                 if !hud_hidden && !native_pause {
                                     ui::hud::draw_hud(ctx, &model);
                                     if let Some(s) = &spawn {
@@ -1211,6 +1519,15 @@ impl winit::application::ApplicationHandler for App {
                                 if let Some(saved) = snapshot_notice {
                                     draw_snapshot_notice(ctx, saved);
                                 }
+                                if let Some(m) = &net_meter {
+                                    lan::draw_meter(ctx, m, self.quality_note.as_deref());
+                                }
+                                if let Some(t) = &net_banner {
+                                    lan::draw_banner(ctx, t);
+                                }
+                                if let Some(b) = &scoreboard {
+                                    ui::scoreboard::draw_scoreboard(ctx, b);
+                                }
                             });
                             let (n, bytes) = paint.texture_uploads();
                             if n > 0 {
@@ -1234,6 +1551,18 @@ impl winit::application::ApplicationHandler for App {
                                         ));
                                     }
                                     self.restart_clicked |= a == ui::menu::MenuAction::Restart;
+                                    if self.netplay.as_mut().is_some_and(|n| {
+                                        n.pause_action(
+                                            walk,
+                                            a,
+                                            &mut self.paused,
+                                            &mut self.pause_menu,
+                                            &mut self.profile,
+                                            &mut self.session,
+                                        )
+                                    }) {
+                                        continue;
+                                    }
                                     self.quit_clicked |= apply_pause_action(
                                         walk,
                                         a,
@@ -1289,13 +1618,16 @@ impl winit::application::ApplicationHandler for App {
                 }
                 // Without a renderer the draw window above is skipped.
                 if let Some((walk, _)) = self.walk.as_mut() {
-                    walk.blend_out();
+                    draw_out(&mut self.netplay, walk);
                 }
                 if let (Some(at), Some((walk, _))) = (self.quit_at, self.walk.as_ref()) {
                     self.quit_clicked |= walk.sim.tick >= at;
                 }
                 if std::mem::take(&mut self.restart_clicked) {
                     self.restart_round();
+                }
+                if std::mem::take(&mut self.net_round_over) && self.netplay.is_some() {
+                    self.net_round_finished();
                 }
                 if self.quit_clicked {
                     self.quit_clicked = false;

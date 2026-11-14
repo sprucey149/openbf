@@ -464,7 +464,7 @@ fn covered_at_a(sim: &Sim) -> Vec<u32> {
 #[test]
 fn a_covered_position_is_a_candidate_past_the_nearest_open_ones() {
     let (mut sim, h, e) = two_hub_scene();
-    let mut all = sim.positions.positions.clone();
+    let mut all = sim.positions.positions.to_vec();
     let stats = sim.positions.stats;
     for k in 0..40 {
         let a = k as f32 / 40.0 * std::f32::consts::TAU;
@@ -764,7 +764,7 @@ fn a_walk_ended_short_of_the_position_held_is_not_its_arrival() {
 fn the_timer_from_cover_takes_only_cover() {
     let enemy = Vec3::new(0.0, 0.0, -25.0);
     let (mut sim, h, e) = crate_scene(Vec3::new(0.3, 0.0, 0.3), enemy);
-    let mut all = sim.positions.positions.clone();
+    let mut all = sim.positions.positions.to_vec();
     let stats = sim.positions.stats;
     let mut q = all[all.len() - 1];
     q.pos = Vec3::new(5.0, 0.0, 0.0);

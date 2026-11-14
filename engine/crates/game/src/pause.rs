@@ -222,6 +222,8 @@ pub fn apply_menu_action(
         | MenuAction::SetEffectsVolume(_)
         | MenuAction::SetDialogueVolume(_)
         | MenuAction::SetFpsCounter(_)
+        | MenuAction::SetNetworkMeter(_)
+        | MenuAction::EditPlayerName
         | MenuAction::EditBindings(..)
         | MenuAction::SetRumble(_)
         | MenuAction::ToggleRumbleOnFire
@@ -231,6 +233,7 @@ pub fn apply_menu_action(
         | MenuAction::ToggleTerrainLod
         | MenuAction::ToggleSceneSoftness
         | MenuAction::ToggleLowPowerResolution
+        | MenuAction::SetAutoQuality(_)
         | MenuAction::CycleInputIcons(_)
         | MenuAction::ToggleViewpoint => {}
     }
@@ -254,11 +257,32 @@ pub fn rows_input(
     }
 }
 
+/// Resolve one pause input. A pointer action or an ordinary menu edge wins
+/// when it lands in the same frame as a shoulder step.
+pub fn navigate(
+    model: &mut ui::menu::MenuModel,
+    input: ui::menu::MenuInput,
+    target: Option<ui::pause_draw::Target>,
+    page_right: Option<bool>,
+) -> (usize, Vec<ui::menu::MenuAction>) {
+    if let Some(hit) = target.filter(|_| !input.back) {
+        return ui::pause_draw::click(model, hit);
+    }
+    if let Some(right) = page_right {
+        if !input.back && !input.confirm && !input.left && !input.right && !input.up && !input.down
+        {
+            return (model.cursor, ui::menu::page_step(model, right));
+        }
+    }
+    ui::menu::navigate(model, input)
+}
+
 /// The pause menu's click for one frame (menuref "In battle" and its sound
 /// table): Back resumes with the exit click (from a popup too, playtest A3);
 /// a sub-page's Back row exit (the PS2's sub-page Triangle); Cross on No
 /// cancel, on any other row accept; a move select; a value step accept (as
-/// Game Options). Start's accept on opening is the caller's.
+/// Game Options). Music adjustments are silent. Start's accept on opening
+/// is the caller's.
 pub fn pause_sound(
     input: ui::menu::MenuInput,
     from: usize,
@@ -285,7 +309,10 @@ pub fn pause_sound(
         return Some(MenuSound::Error);
     }
     if !actions.is_empty() {
-        return Some(MenuSound::Accept);
+        return actions
+            .iter()
+            .any(|a| !matches!(a, MenuAction::SetMusic(_)))
+            .then_some(MenuSound::Accept);
     }
     (from != to).then_some(MenuSound::Select)
 }
@@ -293,8 +320,11 @@ pub fn pause_sound(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ui::menu::{MenuAction, MenuInput};
     use ui::shell_feel::MenuSound;
+    use ui::{
+        menu::{rows, MenuAction, MenuInput, MenuModel, Row, SettingsPage},
+        pause_draw::Target,
+    };
 
     #[test]
     fn respawn_stays_in_the_active_round_menu_while_the_player_is_dead() {
@@ -575,5 +605,153 @@ mod tests {
         walk.sim.space_assault = Some(core::sim::SpaceAssault::new(180));
         assert_eq!(set(&mut walk, 1.3, &mut paused, &mut menu), 1.0);
         assert_eq!(walk.pad_look_for_battle(0.5), 1.0);
+    }
+
+    fn at(model: &mut MenuModel, row: Row) -> usize {
+        model.cursor = rows(model).iter().position(|r| *r == row).unwrap();
+        model.cursor
+    }
+
+    #[test]
+    fn pause_shoulder_steps_share_bounds_and_yield_to_back_and_clicks() {
+        let mut m = MenuModel {
+            page: Some(PausePage::Settings(SettingsPage::KeyboardMouse)),
+            mouse_sensitivity: 1.0,
+            ..Default::default()
+        };
+        let row = at(&mut m, Row::MouseSensitivity);
+        let idle = MenuInput::default();
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(true)).1,
+            [MenuAction::SetMouseSensitivity(2.0)]
+        );
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(false)).1,
+            [MenuAction::SetMouseSensitivity(0.1)]
+        );
+        let click = Target::Step { row, right: true };
+        assert_eq!(
+            navigate(&mut m, idle, Some(click), Some(true)).1,
+            [MenuAction::SetMouseSensitivity(1.1)]
+        );
+        let back = MenuInput { back: true, ..idle };
+        assert_eq!(
+            navigate(&mut m, back, Some(click), Some(false)).1,
+            [MenuAction::ClosePage]
+        );
+
+        m.page = Some(PausePage::Settings(SettingsPage::Graphics));
+        m.base_fov_deg = 60.0;
+        m.fov_scale = 100.0 / 60.0;
+        let fov = at(&mut m, Row::Fov);
+        let (_, actions) = navigate(&mut m, idle, None, Some(true));
+        assert_eq!(actions, [MenuAction::Denied]);
+        assert_eq!(
+            pause_sound(idle, fov, fov, &actions),
+            Some(MenuSound::Error)
+        );
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(false)).1,
+            [MenuAction::SetFov(1.2)]
+        );
+        at(&mut m, Row::ResetGraphics);
+        assert!(navigate(&mut m, idle, None, Some(true)).1.is_empty());
+
+        m.page = Some(PausePage::Settings(SettingsPage::Gamepad));
+        m.assist_intensity = 0.5;
+        at(&mut m, Row::Assist);
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(true)).1,
+            [MenuAction::SetAssist(1.0)]
+        );
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(false)).1,
+            [MenuAction::SetAssist(0.0)]
+        );
+    }
+
+    #[test]
+    fn pause_cues_match_pointer_and_pad_actions() {
+        let idle = MenuInput::default();
+        let confirm = MenuInput {
+            confirm: true,
+            ..idle
+        };
+        let right = MenuInput {
+            right: true,
+            ..idle
+        };
+        for (mut m, row, input, cue) in [
+            (
+                MenuModel {
+                    page: Some(PausePage::Main),
+                    ..Default::default()
+                },
+                Row::Options,
+                confirm,
+                Some(MenuSound::Accept),
+            ),
+            (
+                MenuModel {
+                    popup: Some(Popup::Quit),
+                    ..Default::default()
+                },
+                Row::No,
+                confirm,
+                Some(MenuSound::Cancel),
+            ),
+            (
+                MenuModel {
+                    popup: Some(Popup::Quit),
+                    ..Default::default()
+                },
+                Row::Yes,
+                confirm,
+                Some(MenuSound::Accept),
+            ),
+            (
+                MenuModel {
+                    page: Some(PausePage::Options),
+                    ..Default::default()
+                },
+                Row::PageBack,
+                confirm,
+                Some(MenuSound::Exit),
+            ),
+            (
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Audio)),
+                    music_volume: 0.5,
+                    ..Default::default()
+                },
+                Row::Music,
+                right,
+                None,
+            ),
+            (
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Graphics)),
+                    ..Default::default()
+                },
+                Row::GraphicsQuality,
+                confirm,
+                Some(MenuSound::Error),
+            ),
+        ] {
+            let from = at(&mut m, row);
+            let target = if input.right {
+                Target::Step {
+                    row: from,
+                    right: true,
+                }
+            } else {
+                Target::Row(from)
+            };
+            let (to, pad) = navigate(&mut m, input, None, None);
+            let (hit, mouse) = navigate(&mut m, idle, Some(target), None);
+            assert_eq!((hit, &mouse), (to, &pad), "{row:?}");
+            assert_eq!(pause_sound(input, from, to, &pad), cue, "{row:?}");
+            assert_eq!(pause_sound(idle, from, hit, &mouse), cue, "{row:?}");
+        }
     }
 }

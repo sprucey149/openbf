@@ -40,7 +40,7 @@ fn scene(config: Emitter) -> (Sim, UnitHandle) {
         },
         ..WeaponClass::default()
     };
-    sim.weapon_classes = vec![weapon];
+    sim.weapon_classes = vec![weapon].into();
     let player = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
     sim.units[player.index as usize].soldier.energy = 100.0;
     (sim, player)

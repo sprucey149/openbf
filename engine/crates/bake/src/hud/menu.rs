@@ -166,7 +166,7 @@ pub(super) fn bake(dir: &Path, source: &[Font], fingerprint: &str, explicit: boo
     for (mut font, mut distance) in roles {
         font.pages = names.clone();
         distance.pages = names.clone();
-        let pretty = ron::ser::PrettyConfig::default();
+        let pretty = crate::pretty();
         payloads.push((
             format!("{}.sdf.ron", font.name),
             ron::ser::to_string_pretty(&distance, pretty.clone())?.into_bytes(),

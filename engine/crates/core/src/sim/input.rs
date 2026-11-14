@@ -7,6 +7,7 @@
 use super::state::Sim;
 use crate::aim_assist::{self, AssistEnv, AssistState, Lead, Sticks};
 use crate::collision::lead_point;
+use crate::fmath::FloatExt;
 use crate::perception;
 use crate::unit::{SpawnPost, UnitHandle};
 use crate::vehicle::VehicleHandle;
@@ -127,6 +128,17 @@ pub struct PadState {
     /// bot and every log written before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pick: Option<ScreenPick>,
+    /// [ours] (issue #168, `analysis/plan/LAN_MULTIPLAYER.md` §6, lag
+    /// compensation): how many ticks behind the confirmed sim this pad's
+    /// player was looking when he made it, stamped by the LAN host as it
+    /// closes the tick (`net::scheduler`), at most
+    /// [`crate::sim::lag_comp::VIEW_LAG_CAP`]. A shot from it is tested
+    /// against the hit volumes that many ticks back
+    /// ([`crate::sim::lag_comp`]). 0: no compensation - single player, a
+    /// bot, every log written before it - and exactly the old path. Not a
+    /// once-only field: a repeated pad keeps it.
+    #[serde(default, skip_serializing_if = "zero_u8")]
+    pub view_lag: u8,
 }
 
 /// A mouse click's choice on a spawn screen, carried in the pad so a replay
@@ -839,17 +851,18 @@ impl Sim {
         let speed = ord.velocity;
         let mut kept = None;
         let sniper = weapon.is_sniper_rifle();
+        let profile = self.assist_profile(slot);
         let instant_sniper = sniper
             && matches!(m, AimTarget::Unit(_))
             && (ord.beam.is_some() || crate::unit::fast_round(speed));
-        let (lead, lead_vel) = if self.assist_lead_on && instant_sniper {
+        let (lead, lead_vel) = if profile.lead_on && instant_sniper {
             // The beam sweeps its full range on the shot tick, and fast
             // rounds meet the soldier where he was at the press. Aim at
             // the interpolated body, clearing flight lead from the last gun.
             let offset = t.vel * -crate::unit::HUMAN_SHOT_LAG;
             kept = Some((m, Lead { vel: t.vel, offset }));
             (Some(center + offset), Some(t.vel))
-        } else if self.assist_lead_on {
+        } else if profile.lead_on {
             // OURS (`core::aim_assist`'s lead): the low-passed velocity times
             // the round's flight from where it leaves (the fire point, the
             // scope point scoped), plus the drop a falling round makes up.
@@ -888,7 +901,7 @@ impl Sim {
                     return v * -crate::unit::HUMAN_SHOT_LAG;
                 }
                 lead_point(center - from, v, speed).map_or(Vec3::ZERO, |rel| {
-                    let secs = rel.length() / speed.max(1e-3);
+                    let secs = rel.length() / speed.fmax(1e-3);
                     rel - (center - from) + v * ahead + Vec3::Y * (0.5 * fall * secs * secs)
                 })
             });
@@ -905,7 +918,7 @@ impl Sim {
         let mut sticks = Sticks {
             move_mag: glam::Vec2::new(PadState::axis(pad.lx), PadState::axis(pad.ly))
                 .length()
-                .min(1.0),
+                .fmin(1.0),
             yaw: -PadState::axis(pad.rx),
             pitch: PadState::axis(pad.ry),
         };
@@ -925,7 +938,7 @@ impl Sim {
             zoom_factor: p.zoom.map(|z| z.divisor),
             lock_on_range: weapon.lock_on_range,
             fire_held: pad.pressed(buttons::FIRE),
-            armed: self.assist_armed,
+            armed: profile.armed,
             lead_vel,
             // OURS (C5): a scoped sniper rifle follows a share of its magnet
             // before the press (`aim_assist::SNIPER_FOLLOW`).
@@ -935,10 +948,10 @@ impl Sim {
             },
             // A full push, after the pad's sensitivity, as far as the
             // stick can go.
-            look_scale: (LOOK_SCALE * self.pad_look_sensitivity).min(1.0),
+            look_scale: (LOOK_SCALE * profile.pad_look_sensitivity).fmin(1.0),
         };
         let mut st = self.assist.get(slot).copied().unwrap_or_default();
-        let mut intensity = self.assist_intensity;
+        let mut intensity = profile.intensity;
         if p.mount.is_none() && weapon.rocket_launcher() && matches!(m, AimTarget::Unit(_)) {
             intensity *= 0.5;
         }

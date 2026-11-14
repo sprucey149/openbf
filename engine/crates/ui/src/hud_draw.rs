@@ -962,6 +962,26 @@ pub fn draw_shell_options(
     ctx.out
 }
 
+/// The shell background and the profile picker painted with the BF2 atlas.
+pub fn draw_shell_profiles(
+    hud: &Hud,
+    art: &HudArt,
+    menus: &crate::shell_ps2::ShellMenus,
+    movie: bool,
+    profiles: &crate::shell_ps2::profiles::Picker,
+    size: [f32; 2],
+) -> HudFrame {
+    let mut ctx = Ctx {
+        hud,
+        art,
+        out: HudFrame::default(),
+        menu_fonts: true,
+    };
+    ctx.shell_page(menus, movie, size);
+    crate::shell_ps2::profiles::draw(&mut ctx, profiles, size);
+    ctx.out
+}
+
 pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
     let mut ctx = Ctx {
         hud,

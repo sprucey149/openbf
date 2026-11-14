@@ -101,6 +101,57 @@ fn graphics_quality_is_fixed_at_normal_in_shell_and_pause() {
     }
 }
 
+/// Automatic quality (LAN §8b.2) is a Graphics row that toggles; while it
+/// is on, Low power resolution is greyed with the reason and takes no step.
+#[test]
+fn automatic_quality_toggles_and_locks_low_power_resolution() {
+    for in_shell in [None, Some(String::new())] {
+        let mut menu = MenuModel {
+            page: Some(PausePage::Settings(SettingsPage::Graphics)),
+            in_shell,
+            auto_quality: true,
+            ..Default::default()
+        };
+        let at = |m: &MenuModel, r: Row| rows(m).iter().position(|x| *x == r).unwrap();
+        assert_eq!(
+            at(&menu, Row::AutoQuality) + 1,
+            at(&menu, Row::LowPowerResolution)
+        );
+        assert_eq!(
+            row_text(&menu, Row::AutoQuality),
+            ("Automatic quality".into(), Some("ON".into()))
+        );
+        assert_eq!(
+            press(&menu, Row::AutoQuality),
+            Some(MenuAction::SetAutoQuality(false))
+        );
+        assert_eq!(
+            step(&menu, at(&menu, Row::AutoQuality), true),
+            vec![MenuAction::SetAutoQuality(false)]
+        );
+        assert!(row_help(&menu, Row::AutoQuality).is_some());
+        let low = at(&menu, Row::LowPowerResolution);
+        assert!(row_locked(&menu, Row::LowPowerResolution).is_some());
+        assert!(step(&menu, low, true).is_empty());
+        menu.cursor = low;
+        let confirm = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert_eq!(navigate(&menu, confirm).1, vec![MenuAction::Denied]);
+        menu.auto_quality = false;
+        assert_eq!(row_locked(&menu, Row::LowPowerResolution), None);
+        assert_eq!(
+            navigate(&menu, confirm).1,
+            vec![MenuAction::ToggleLowPowerResolution]
+        );
+        assert_eq!(
+            press(&menu, Row::AutoQuality),
+            Some(MenuAction::SetAutoQuality(true))
+        );
+    }
+}
+
 #[test]
 fn rc_flight_controls_can_be_changed_in_shell_ground_and_space_options() {
     for (in_shell, page) in [

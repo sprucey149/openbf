@@ -1,5 +1,6 @@
 use super::{emitter::Frame, Fx};
 use core::collision::{HullFilter, Layers};
+use core::fmath::FloatExt;
 use core::sim::Sim;
 use core::vehicle::{flyer::FlightPhase, VehicleHandle, VehicleKind};
 use glam::Vec3;
@@ -152,7 +153,7 @@ impl Fx {
                     .map(|hit| hit.t);
                 let terrain = sim.terrain_ray(origin, Vec3::NEG_Y, 1024.0, 0.5);
                 let distance = match (body, terrain) {
-                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (Some(a), Some(b)) => Some(a.fmin(b)),
                     (a, b) => a.or(b),
                 };
                 distance.map(|d| origin - Vec3::Y * d)

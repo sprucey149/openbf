@@ -4,6 +4,7 @@
 use super::{explosion_class, fired_ordnance, weapon_from_db, weapon_hud, ClassDb, ClassSrc};
 use crate::walk::{DroidHud, WeaponHud};
 use anyhow::{Context, Result};
+use core::fmath::FloatExt;
 use core::remote::{Destruct, DroidClass, RemoteWeapon, Salvo};
 use core::weapon::{OrdnanceClass, PropSource, WeaponClass};
 
@@ -88,7 +89,7 @@ pub(super) fn droid_hud(db: &ClassDb, weapon: &str) -> Option<DroidHud> {
         blaster: bf2_row(weapon_hud(db, blaster), BLASTER_HUD),
         destruct: destruct.map(|(_, name)| bf2_row(weapon_hud(db, name), DESTRUCT_HUD)),
         destruct_rounds: destruct.and_then(|(clips, name)| {
-            let rounds = db.prop_f32(name, "RoundsPerClip").unwrap_or(1.0).max(0.0) as u32;
+            let rounds = db.prop_f32(name, "RoundsPerClip").unwrap_or(1.0).fmax(0.0) as u32;
             (clips > 0).then_some(clips * rounds)
         }),
     })

@@ -1,4 +1,5 @@
 use super::state::Sim;
+use crate::fmath::FloatExt;
 use crate::unit::{Controller, UnitHandle};
 use crate::vehicle::{VehicleHandle, VehicleKind};
 use crate::weapon::{DamageDesc, OrdnanceClass};
@@ -42,9 +43,9 @@ impl SpaceBalance {
         if !self.started {
             return;
         }
-        eat(&self.fighter_at.to_bits().to_le_bytes());
-        eat(&self.system_at.to_bits().to_le_bytes());
-        eat(&self.seed.to_bits().to_le_bytes());
+        eat(&self.fighter_at.hash_bits().to_le_bytes());
+        eat(&self.system_at.hash_bits().to_le_bytes());
+        eat(&self.seed.hash_bits().to_le_bytes());
         eat(&self.nudge_human.to_le_bytes());
         eat(&self.nudge_enemy.to_le_bytes());
         eat(&self.fighter_kills.to_le_bytes());
@@ -112,7 +113,7 @@ impl Sim {
 
     fn balance_uniform(&mut self, low: f32, high: f32) -> f32 {
         let r = (self.rng.next_rand() >> 8) as f32 * (1.0 / 8_388_608.0);
-        low + (high.max(low) - low) * r
+        low + (high.fmax(low) - low) * r
     }
 
     fn balance_percent(&mut self) -> f32 {
@@ -343,15 +344,15 @@ impl Sim {
                     c.reload_time,
                 )
             };
-            best = best.max(rate.max(per_shot + per_shot));
+            best = best.fmax(rate.fmax(per_shot + per_shot));
         }
         if best <= 0.0 {
             return;
         }
         let damage = if shield > 0.0 {
             (best * SHIELD_DAMAGE_FACTOR)
-                .min(SHIELD_DAMAGE_CAP)
-                .min(shield)
+                .fmin(SHIELD_DAMAGE_CAP)
+                .fmin(shield)
         } else {
             best
         };

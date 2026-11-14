@@ -38,6 +38,7 @@
 
 use super::state::AiState;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::sim::{buttons, PadState, Sim};
 use crate::unit::{Unit, UnitHandle};
 use crate::vehicle::{VehicleHandle, VehicleKind};
@@ -127,7 +128,7 @@ impl FixState {
         if let Some(c) = self.cur {
             c.target.hash_into(eat);
             eat(&c.since.to_le_bytes());
-            eat(&c.best.to_bits().to_le_bytes());
+            eat(&c.best.hash_bits().to_le_bytes());
             eat(&c.progress_at.to_le_bytes());
         }
         if let Some((t, at)) = self.left {

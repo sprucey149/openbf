@@ -84,14 +84,15 @@ mod tests {
             ..Default::default()
         };
         frame(&mut menus, &mut pointer, down);
-        assert_eq!(menus.stack().unwrap().focus, 3, "keyboard moves to row 3");
+        // Row 1 is Multiplayer (enabled for LAN play, issue #168).
+        assert_eq!(menus.stack().unwrap().focus, 1, "keyboard moves to row 1");
         // The cursor stays over row 0: idle frames, and a repeat of the same spot.
         frame(&mut menus, &mut pointer, MenuInput::default());
         pointer.moved_to([100.0, 200.0]);
         frame(&mut menus, &mut pointer, MenuInput::default());
         assert_eq!(
             menus.stack().unwrap().focus,
-            3,
+            1,
             "idle pointer reset the focus"
         );
         // Confirm opens the row the keyboard chose.
@@ -100,7 +101,7 @@ mod tests {
             ..Default::default()
         };
         frame(&mut menus, &mut pointer, confirm);
-        assert_eq!(menus.page, Page::Options);
+        assert_eq!(menus.page, Page::Multiplayer);
     }
 
     #[test]

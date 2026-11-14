@@ -25,6 +25,7 @@
 //! Timings use wall clock deliberately: this measures the machine, not the
 //! sim, and nothing here feeds the deterministic sim state.
 
+use core::fmath::FloatExt;
 use std::time::Duration;
 
 /// A set of timings in milliseconds, summarised by percentile.
@@ -61,12 +62,12 @@ impl Samples {
         }
         let mut v = self.ms.clone();
         v.sort_by(f64::total_cmp);
-        let rank = (q * v.len() as f64).ceil().max(1.0) as usize;
+        let rank = (q * v.len() as f64).ceil().fmax(1.0) as usize;
         v[rank.min(v.len()) - 1]
     }
 
     pub fn max(&self) -> f64 {
-        self.ms.iter().copied().fold(0.0, f64::max)
+        self.ms.iter().copied().fold(0.0, core::fmath::max)
     }
 }
 
@@ -462,7 +463,7 @@ impl Report {
                 self.frame.pct(0.99),
                 self.frame.max(),
                 self.frame.len(),
-                1000.0 / self.frame.mean().max(1e-6)
+                1000.0 / self.frame.mean().fmax(1e-6)
             );
         }
         let (gpu, frames) = self.gpu.means();

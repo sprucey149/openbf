@@ -1095,7 +1095,7 @@ pub(crate) fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
         .iter()
         .filter(|h| !sim.weapon_locked(u, h.class))
         .map(|h| range(h.class));
-    held.fold(range(u.weapon_class), f32::max) + FIGHT_BEYOND
+    held.fold(range(u.weapon_class), crate::fmath::max) + FIGHT_BEYOND
 }
 
 /// Card TEAM: the guard position of a bot with the Cover role, while no

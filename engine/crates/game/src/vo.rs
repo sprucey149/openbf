@@ -16,6 +16,7 @@
 //! Its draws are its own: no sim state moves.
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
+use core::fmath::FloatExt;
 use core::sim::{Event, Sim};
 use glam::Vec3;
 
@@ -220,7 +221,7 @@ pub fn class_lines(db: &ClassDb, class: &str) -> VoLines {
     VoLines {
         entries,
         unit_type: num("VOUnitType").map_or(0, |v| v.clamp(0.0, 255.0) as u8),
-        radius: num("VORadius").map_or(VO_RADIUS, |v| v.max(0.0)),
+        radius: num("VORadius").map_or(VO_RADIUS, |v| v.fmax(0.0)),
     }
 }
 
@@ -439,7 +440,7 @@ const SIDE_COS: f32 = 0.7071;
 pub fn context(subject: &Body, object: Option<&Body>) -> u32 {
     let Some(o) = object else { return 0 };
     let d = o.pos - subject.pos;
-    let dist = d.length().max(0.1);
+    let dist = d.length().fmax(0.1);
     let mut w = 0u32;
     if d.y > 3.0 && d.y / dist > 0.25 {
         w |= ABOVE;

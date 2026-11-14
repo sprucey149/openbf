@@ -2,6 +2,7 @@
 //! (`analysis/re-officer-abilities.md`).
 
 use super::{pf, PropSource};
+use crate::fmath::FloatExt;
 
 /// `[ours]` Poison damages at two thirds of the disc's rate (the MagnaGuard's
 /// 30/s for 15 s becomes 20/s): at the full rate it killed too fast in play.
@@ -26,12 +27,12 @@ impl Ability {
     pub fn from_props(src: &dyn PropSource) -> Option<Self> {
         let pair = |timer, value, default| {
             (
-                pf(src, timer).unwrap_or(0.0).max(0.0),
+                pf(src, timer).unwrap_or(0.0).fmax(0.0),
                 pf(src, value).unwrap_or(default),
             )
         };
         let ability = Self {
-            radius: pf(src, "Radius").unwrap_or(0.0).max(0.0),
+            radius: pf(src, "Radius").unwrap_or(0.0).fmax(0.0),
             friends: pf(src, "AffectFriends").unwrap_or(1.0) != 0.0,
             enemies: pf(src, "AffectEnemies").unwrap_or(1.0) != 0.0,
             self_on_hit: src

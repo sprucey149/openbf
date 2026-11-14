@@ -16,7 +16,8 @@ fn moving_attack() -> (Sim, UnitHandle) {
             vec![],
             vec![field(K::VelocityZ, vec![V::Number(12.0)], vec![])],
         ),
-    ]))];
+    ]))]
+    .into();
     let owner = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
     sim.step(&[PadState {
         buttons: buttons::FIRE,

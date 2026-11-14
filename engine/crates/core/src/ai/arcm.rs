@@ -25,6 +25,7 @@
 //!   STUCK".
 
 use super::state::AiState;
+use crate::fmath::FloatExt;
 use crate::TICK_HZ;
 use glam::{Vec2, Vec3};
 
@@ -89,11 +90,11 @@ impl Osc {
             0 if d > self.ext + OSC_AMP => 1,
             0 if d < self.ext - OSC_AMP => -1,
             1 => {
-                self.ext = self.ext.max(d);
+                self.ext = self.ext.fmax(d);
                 return false;
             }
             -1 => {
-                self.ext = self.ext.min(d);
+                self.ext = self.ext.fmin(d);
                 return false;
             }
             _ => return false,
@@ -155,7 +156,7 @@ impl ArcmState {
         }
         let o = &self.osc;
         for v in [o.key.x, o.key.y, o.ext, o.best] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&[o.dir as u8]);
         for t in o.turns {

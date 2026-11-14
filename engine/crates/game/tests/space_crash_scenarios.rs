@@ -6,6 +6,7 @@
 //! - Takeoff collision obstacle destruction and Falling -> Crashed instant transition on hull contact.
 //! - Camera crash detach rate (0.25) and death view hold (4.0s).
 //! - Blackbox `FlyerRow` phase progression (Flying -> Falling -> Crashed).
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::collision::{Body, CollisionWorld, HullPart, Layers, Shape};
 use core::sim::{Event, PadState, Sim};

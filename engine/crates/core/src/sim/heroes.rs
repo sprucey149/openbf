@@ -3,6 +3,7 @@
 //! lose health with game time and regain it from enemy kills.
 
 use super::{buttons, Event, PadState, Sim};
+use crate::fmath::FloatExt;
 use crate::unit::{Controller, Unit, UnitHandle};
 use crate::TICK_HZ;
 
@@ -206,13 +207,13 @@ impl Heroes {
         eat(&[u8::from(self.rules.ai_candidates)]);
         eat(&self.rules.health.streak_bounds);
         for gain in self.rules.health.heal_gains {
-            eat(&gain.to_bits().to_le_bytes());
+            eat(&gain.hash_bits().to_le_bytes());
         }
         eat(&self
             .rules
             .health
             .time_drain_per_second
-            .to_bits()
+            .hash_bits()
             .to_le_bytes());
         for t in &self.teams {
             eat(&[u8::from(t.unlocked)]);
@@ -310,7 +311,7 @@ impl Sim {
         let gain = health_rules.heal_gains[bucket];
         state.kill_streak = state.kill_streak.wrapping_add(1);
         let health = &mut self.units[killer.index as usize].health;
-        health.cur = (health.cur + gain).min(health.max);
+        health.cur = (health.cur + gain).fmin(health.max);
     }
 
     /// A registered member may be dead behind the spawn screen. A departed

@@ -1,6 +1,7 @@
 //! Pickups, stations, drop tables and item pools read from the class db.
 
 use super::*;
+use core::fmath::FloatExt;
 
 /// A `powerupitem` class's box (`analysis/re-powerups.md` §2.3): the bounds
 /// of its model, read from the PS2's RAM — (model, half extents, centre).
@@ -57,7 +58,7 @@ pub fn item_class_from_db(db: &ClassDb, item: &str) -> Option<ItemClass> {
     Some(ItemClass {
         name: name.to_ascii_lowercase(),
         health: f("SoldierHealth").unwrap_or(0.0),
-        ammo: f("SoldierAmmo").unwrap_or(0.0).max(0.0) as u32,
+        ammo: f("SoldierAmmo").unwrap_or(0.0).fmax(0.0) as u32,
         energy: f("SoldierEnergy").unwrap_or(0.0),
         offense: (
             f("BuffOffenseTimer").unwrap_or(0.0),
@@ -105,7 +106,7 @@ pub(crate) fn station_class_of(db: &ClassDb, name: &str) -> Option<StationClass>
         (health[0], health[2]) = (h, h);
     }
     if let Some(a) = f("SoldierAmmo") {
-        let a = a.max(0.0) as u32;
+        let a = a.fmax(0.0) as u32;
         (ammo[0], ammo[2]) = (a, a);
     }
     for (i, t) in TYPES.iter().enumerate() {
@@ -113,7 +114,7 @@ pub(crate) fn station_class_of(db: &ClassDb, name: &str) -> Option<StationClass>
             health[i] = h;
         }
         if let Some(a) = f(&format!("{t}Ammo")) {
-            ammo[i] = a.max(0.0) as u32;
+            ammo[i] = a.fmax(0.0) as u32;
         }
     }
     Some(StationClass {

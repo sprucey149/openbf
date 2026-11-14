@@ -628,7 +628,57 @@ fn capture_loading_overlap_and_setup() {
             hash,
             "worker path must preserve initial gameplay state"
         );
-        receipts.push(serde_json::json!({"map":key,"cpu_parse_ms":cpu_ms,"ready_wall_ms":ready_ms,"frames_while_pending":frames_pending,"upload_setup_ms":event_boundary_ms,"initial_hash":format!("{hash:016x}")}));
+        // The round's CPU side on the worker (LAN §10.5): the same tick-0
+        // sim, and the event thread's share of the boundary measured again.
+        let mut b = app(root.clone());
+        let mut r = a.renderer.take().unwrap();
+        r.clear_scene();
+        b.renderer = Some(r);
+        b.overlay = a.overlay.take();
+        b.mode = "con".into();
+        b.current = Some(row(key, ui::shell::Mode::Con));
+        let job = b.round_job(key, "con", b.current.as_ref());
+        let mut worker = prepare_round(root.join(key), "con".into(), Some(job)).unwrap();
+        let mut frames_round = 0;
+        let started = Instant::now();
+        let prepared = loop {
+            if let Some(result) = worker.poll() {
+                break result.unwrap();
+            }
+            let overlay = b.overlay.as_mut().unwrap();
+            let paint = overlay.begin_headless([1280, 720], 1.0, |ctx| {
+                let frame = display.sample(Duration::ZERO);
+                display.draw(ctx, key, Duration::ZERO, frame.as_ref(), false);
+            });
+            b.renderer
+                .as_mut()
+                .unwrap()
+                .render_with_overlay(
+                    &render::Camera::default(),
+                    &[],
+                    [0.0, 0.0, 0.0, 1.0],
+                    Some(&mut |dev, q, enc, view, size| {
+                        overlay.paint(&paint, dev, q, enc, view, size)
+                    }),
+                )
+                .unwrap();
+            frames_round += 1;
+        };
+        let round_ready_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let laps = prepared.round.as_ref().map(|r| r.laps.clone());
+        let boundary = Instant::now();
+        b.start_battle(key.into(), prepared).unwrap();
+        let worker_boundary_ms = boundary.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(
+            b.walk.as_ref().unwrap().0.sim.hash(),
+            hash,
+            "the round built on the worker must equal the serial build"
+        );
+        println!(
+            "{key}: event-thread boundary serial={event_boundary_ms:.1} ms \
+             worker={worker_boundary_ms:.1} ms ({laps:?})"
+        );
+        receipts.push(serde_json::json!({"map":key,"cpu_parse_ms":cpu_ms,"ready_wall_ms":ready_ms,"frames_while_pending":frames_pending,"upload_setup_ms":event_boundary_ms,"initial_hash":format!("{hash:016x}"),"worker_ready_wall_ms":round_ready_ms,"worker_frames_while_pending":frames_round,"worker_upload_setup_ms":worker_boundary_ms,"worker_laps":laps}));
     }
     let (full_ms, full_hash) = hoth_team_screen_time(&root, false);
     let (skip_ms, skip_hash) = hoth_team_screen_time(&root, true);

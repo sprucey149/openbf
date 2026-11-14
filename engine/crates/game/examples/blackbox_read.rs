@@ -34,6 +34,7 @@
 //! - `--replay-spot [id]`: one line for a headless follow-up on a unit's spot
 //!   (the focus unit by default): the map, seed, tick and place, and the
 //!   `round_to_outcome` command that looks at it.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use game::blackbox::{Ev, EventRow, Frame, Snapshot};
 use game::unit_probe::{Probe, Steer, Stop};

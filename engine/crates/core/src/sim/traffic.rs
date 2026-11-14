@@ -6,6 +6,7 @@
 //! measure: PS2 opposing/crossing/stationary contacts and original pair response.
 
 use super::Sim;
+use crate::fmath::FloatExt;
 use crate::unit::Controller;
 use crate::vehicle::{Vehicle, VehicleHandle, VehicleKind};
 use glam::Vec3;
@@ -120,7 +121,7 @@ impl Sim {
                 let v = &mut self.vehicles[i];
                 // Retain a tiny spatial gap so contact round-off cannot alternate
                 // between penetration and a missed cast. Uses the existing tolerance.
-                let safe = (first - crate::collision::SWEEP_CONTACT_DIST / step.length()).max(0.0);
+                let safe = (first - crate::collision::SWEEP_CONTACT_DIST / step.length()).fmax(0.0);
                 v.pos = from + step * safe;
                 v.vel.x = 0.0;
                 v.vel.z = 0.0;
@@ -145,7 +146,7 @@ impl Sim {
             return goal;
         }
         let dir = flat / distance;
-        let reach = distance.min(crate::ai::walker_drive::ROUTE_REACH);
+        let reach = distance.fmin(crate::ai::walker_drive::ROUTE_REACH);
         let mut nearest: Option<(f32, VehicleHandle)> = None;
         for (other, o) in self.alive_vehicles() {
             if h == other || !self.traffic_pair(h, other) || (o.pos - v.pos).dot(dir) <= 0.0 {
@@ -180,7 +181,7 @@ impl Sim {
         // This is a steering direction, not an arrival node. Keep it outside
         // the walker's 4 m arrival branch: close bypass targets let the plain
         // law walk while facing sideways (and reverse the authored turn factor).
-        v.pos + away.normalize_or_zero() * away.length().max(crate::ai::walker_drive::ROUTE_REACH)
+        v.pos + away.normalize_or_zero() * away.length().fmax(crate::ai::walker_drive::ROUTE_REACH)
     }
 }
 

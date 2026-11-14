@@ -856,6 +856,11 @@ attack (mode 0xe).
   the port's rectangles. The line condition is BF2 B2:265077–265083 / BF1 B1:177127–177134. The default is on
   (BF2 `FUN_002a4030`, B2:225626); `SetAllowBlindJetJumps` (B2:32255–32264) changes it. The canonical stock
   mission correction disables it for `bf1_kam1` and `bf2_kam1`, including retained mission files, across sources.
+- [ours] BF1 Kamino's discretionary hops and hover attacks also check the
+  deck to the goal and along the expected runout. In the Jango check, the
+  horizontal momentum outlasted the jet and carried him over the deck rim.
+  Authored jet links retain their gap-crossing behavior. Measure the original
+  hover release and landing checks before replacing this guard.
 - The tactical sky query is separate from ordinary sight. BF2 B2:265074 / BF1 B1:177125 cast 40 m upward and
   exclude the requesting soldier. Their 0x9a / 0x4e masks select soldier, vehicle, building and terrain objects
   (re-collision-layers §5); these object masks are **not** per-body subset masks. The port reads terrain,

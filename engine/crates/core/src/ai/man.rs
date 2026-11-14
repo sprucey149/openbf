@@ -64,6 +64,7 @@ use super::{
     MAN_SEEN_NEAR, MAN_UNREACHED_CLOSED, THINK_PERIOD,
 };
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::perception;
 use crate::sim::{PadState, Sim};
@@ -170,7 +171,7 @@ pub fn hittable(
         let d = (p - muzzle).length();
         let reach = wc
             .shot_range()
-            .min(perception::view_distance(o.soldier.stance, view));
+            .fmin(perception::view_distance(o.soldier.stance, view));
         if d <= reach {
             let theirs = o.mount.map(|m| {
                 let b = sim.vehicle(m.vehicle).and_then(|t| t.instance);

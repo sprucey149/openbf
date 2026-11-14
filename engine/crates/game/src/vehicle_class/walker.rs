@@ -32,6 +32,7 @@
 
 use super::{float, floats, h, scoped, Scope};
 use crate::classdb::ClassDb;
+use core::fmath::FloatExt;
 use core::vehicle::walker::{
     flags, BuildingSphere, Clip, LegPair, TerrainSphere, WalkerParams, ANIM_COUNT,
 };
@@ -220,7 +221,7 @@ fn tan_prop(deg: f32) -> f32 {
         0.0
     } else {
         let (s, c) =
-            core::fmath::sin_cos((deg.abs() * std::f32::consts::PI / 180.0).min(ANGLE_CAP));
+            core::fmath::sin_cos((deg.abs() * std::f32::consts::PI / 180.0).fmin(ANGLE_CAP));
         s / c
     }
 }

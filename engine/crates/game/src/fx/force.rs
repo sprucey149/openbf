@@ -9,6 +9,7 @@ use super::{
     Fx, Library,
 };
 use crate::classdb::{fnv1a_lowercase as hash, ClassDb};
+use core::fmath::FloatExt;
 use core::{
     sim::{Event, Sim},
     unit::UnitHandle,
@@ -179,7 +180,7 @@ impl State {
             let Some(sheet) = bolt.def.texture.as_deref().and_then(&mut texture) else {
                 continue;
             };
-            let fade = (2.0 * bolt.left / bolt.def.fade_time.unwrap_or(1.0)).min(1.0)
+            let fade = (2.0 * bolt.left / bolt.def.fade_time.unwrap_or(1.0)).fmin(1.0)
                 * (bolt.strength * 0.5 + 0.5);
             let width = bolt.strength * 0.7 + 0.3;
             let mut color = bolt.def.color.unwrap_or([255.0; 4]).map(byte);

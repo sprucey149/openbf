@@ -37,6 +37,7 @@
 //! recipients over their retained Hold/Follow order, WGORD).
 
 use crate::ai::route::{self, Refresh};
+use crate::fmath::FloatExt;
 use crate::unit::UnitHandle;
 use glam::Vec3;
 
@@ -169,9 +170,9 @@ impl CommandKind {
             }
             CommandKind::Hold(p) => {
                 out[0] = 2;
-                out[1..5].copy_from_slice(&p.x.to_bits().to_le_bytes());
-                out[5..9].copy_from_slice(&p.y.to_bits().to_le_bytes());
-                out[9..13].copy_from_slice(&p.z.to_bits().to_le_bytes());
+                out[1..5].copy_from_slice(&p.x.hash_bits().to_le_bytes());
+                out[5..9].copy_from_slice(&p.y.hash_bits().to_le_bytes());
+                out[9..13].copy_from_slice(&p.z.hash_bits().to_le_bytes());
             }
         }
         out

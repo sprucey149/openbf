@@ -16,15 +16,17 @@ pub(super) enum Selection {
 impl Selection {
     pub(super) fn read(walk: &WalkSim) -> Self {
         let sim = &walk.sim;
-        let stage = sim.spawn_stage.first().copied().unwrap_or_default();
+        // The local player's screens (slot 0 in single player).
+        let slot = usize::from(walk.local_slot);
+        let stage = sim.spawn_stage.get(slot).copied().unwrap_or_default();
         if !sim.spawn_screens && stage != SpawnStage::Alive {
             return Self::Closed;
         }
         match stage {
-            SpawnStage::Side => Self::Side(sim.side_choice[0]),
-            SpawnStage::Map => Self::Post(sim.spawn_post_choice[0]),
+            SpawnStage::Side => Self::Side(sim.side_choice.get(slot).copied().unwrap_or_default()),
+            SpawnStage::Map => Self::Post(sim.spawn_post_choice.get(slot).copied().flatten()),
             SpawnStage::Class | SpawnStage::Alive => {
-                Self::Class(stage, sim.spawn_class_choice(0, walk.player_team()))
+                Self::Class(stage, sim.spawn_class_choice(slot, walk.player_team()))
             }
             SpawnStage::Accepted => Self::Closed,
         }

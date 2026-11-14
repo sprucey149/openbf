@@ -21,6 +21,7 @@ use super::{
     HUB_LEVEL_TOL, LEG_LEAD, LEVEL_HUB_NEAR, LEVEL_HUB_REACH, LEVEL_HUB_TRIES, SIDESTEP_TICKS,
     STUCK_PROGRESS, STUCK_WINDOW,
 };
+use crate::fmath::FloatExt;
 use crate::nav::{self, NavGraph};
 use crate::sim::Sim;
 use crate::unit::UnitHandle;
@@ -288,7 +289,7 @@ const WALKER_CORNER_LATERAL_RADII: f32 = 3.0;
 pub(super) fn walk_floor(sim: &Sim, from: Vec3, to: Vec2) -> Option<f32> {
     let start = Vec2::new(from.x, from.z);
     let len = (to - start).length();
-    let steps = (len / POST_POINT_STEP).ceil().max(1.0) as u32;
+    let steps = (len / POST_POINT_STEP).ceil().fmax(1.0) as u32;
     let mut y = from.y;
     for i in 1..=steps {
         let p = start + (to - start) * (i as f32 / steps as f32);
@@ -403,7 +404,7 @@ pub(super) fn post_point(
     }
     let c = Vec2::new(cp.def.pos.x, cp.def.pos.z);
     let to = Vec2::new(from.x, from.z) - c;
-    let reach = to.length().min(region.radius());
+    let reach = to.length().fmin(region.radius());
     let n = (reach / POST_POINT_STEP) as u32;
     (1..=n)
         .find_map(|i| stands(c + to.normalize_or_zero() * (i as f32 * POST_POINT_STEP)))
@@ -560,7 +561,7 @@ fn corner_arrive(sim: &Sim, me: UnitHandle, min_arrive: f32) -> f32 {
         .and_then(|m| sim.vehicle(m.vehicle))
         .is_some_and(|v| v.kind == crate::vehicle::VehicleKind::Hover);
     if hover {
-        CORNER_ARRIVE.max(min_arrive)
+        CORNER_ARRIVE.fmax(min_arrive)
     } else {
         CORNER_ARRIVE
     }
@@ -611,7 +612,7 @@ pub(super) fn leg_point(r: &Route, pos: Vec3, speed: f32) -> Vec3 {
     let Some((a, dir, len, along, _)) = line_from(r, seg_from(r), pos) else {
         return sp;
     };
-    let t = along.max(0.0) + speed + LEG_LEAD;
+    let t = along.fmax(0.0) + speed + LEG_LEAD;
     if t >= len {
         return sp;
     }
@@ -1138,7 +1139,7 @@ fn hub_reached(sim: &Sim, g: &NavGraph, r: &crate::ai::Route, pos: Vec3, min_arr
     let level = sim
         .nav_floor(r.next_hub)
         .is_none_or(|f| (f - pos.y).abs() <= HUB_LEVEL_TOL);
-    if d <= ARRIVE_MIN_RADIUS.max(min_arrive) && level {
+    if d <= ARRIVE_MIN_RADIUS.fmax(min_arrive) && level {
         return true;
     }
     // A unit that has spent a stuck window on this leg and stands inside the

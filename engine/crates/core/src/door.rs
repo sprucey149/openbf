@@ -39,6 +39,7 @@
 //! What it does NOT drive, recorded so it is not re-derived: the room portal
 //! (§2 hop 6, visibility).
 
+use crate::fmath::FloatExt;
 use glam::{Mat4, Quat, Vec3};
 
 /// One `AnimationTrigger` sphere, in world space.
@@ -112,9 +113,9 @@ impl Door {
         }
         let step = dt * 30.0 / f32::from(self.frames.max(2) - 1);
         let next = if occupied {
-            (self.open + step).min(1.0)
+            (self.open + step).fmin(1.0)
         } else {
-            (self.open - step).max(0.0)
+            (self.open - step).fmax(0.0)
         };
         let changed = next != self.open;
         self.open = next;
@@ -124,7 +125,7 @@ impl Door {
     /// The latch's edge this tick, if any, updating it (the disc's order:
     /// the edge follows the parameter's move in the same tick).
     pub fn edge(&mut self, occupied: bool, dt: f32) -> Option<Edge> {
-        let empty_secs = (self.empty_secs.unwrap_or(500.0) + dt).min(500.0);
+        let empty_secs = (self.empty_secs.unwrap_or(500.0) + dt).fmin(500.0);
         self.empty_secs = Some(if occupied { 0.0 } else { empty_secs });
         match (occupied, self.latch) {
             (true, _) if self.locked => (empty_secs > 3.0).then_some(Edge::Locked),

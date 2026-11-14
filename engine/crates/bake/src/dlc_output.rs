@@ -220,7 +220,7 @@ pub(super) fn install(
                 {
                     alias(name, &names);
                 }
-                ron::ser::to_string_pretty(&skins, ron::ser::PrettyConfig::default())?.into_bytes()
+                ron::ser::to_string_pretty(&skins, crate::pretty())?.into_bytes()
             } else {
                 bytes
             };

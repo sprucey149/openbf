@@ -8,6 +8,7 @@
 //! 5. Capture region delivery, team point scoring, and score limit victory.
 //! 6. Bot objective AI steering: seeking neutral flag and delivering to enemy base.
 //! 7. Space CTF HUD status: 3D hint markers and capture score counters.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::{CtfState, FlagStatus, Sim, SPACE_CARRIED_OFFSET};
 use core::unit::{Controller, UnitHandle, UnitSpec};

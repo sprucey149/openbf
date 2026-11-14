@@ -11,6 +11,8 @@
 //! which.
 
 use super::shape::{Aabb, Body, Cutter, HullPart};
+use crate::fmath::FloatExt;
+use crate::shared::Shared;
 use crate::vehicle::VehicleHandle;
 use glam::Vec3;
 
@@ -104,11 +106,14 @@ fn indexable(a: &Aabb) -> bool {
 ///   generation (`bodies` is private). A world built any other way
 ///   ([`CollisionWorld::default`], or one pushed to afterwards) has a grid
 ///   whose stamp no longer matches, and then every query scans every body
-///   exactly as before.
+///   exactly as before. The world keeps the live stamp
+///   ([`CollisionWorld`]'s `grid_for`): a mover's move re-stamps it there,
+///   so the grid itself is never written after it is built and a cloned
+///   world shares it (issue #168).
 ///
 /// Y is not indexed: the maps are wide and short, and the exact AABB test
 /// that follows is 3D anyway.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct BodyGrid {
     /// The [`CollisionWorld`] generation this grid was built for; any other
     /// generation (and `None`, the default) is stale.
@@ -155,10 +160,10 @@ impl BodyGrid {
             if !indexable(a) {
                 continue;
             }
-            lo_x = lo_x.min(a.min.x);
-            hi_x = hi_x.max(a.max.x);
-            lo_z = lo_z.min(a.min.z);
-            hi_z = hi_z.max(a.max.z);
+            lo_x = lo_x.fmin(a.min.x);
+            hi_x = hi_x.fmax(a.max.x);
+            lo_z = lo_z.fmin(a.min.z);
+            hi_z = hi_z.fmax(a.max.z);
         }
         if !(lo_x <= hi_x && lo_z <= hi_z) {
             // Nothing placeable: one empty cell, everyone in `everywhere`.
@@ -176,8 +181,8 @@ impl BodyGrid {
         }
         let (span_x, span_z) = (hi_x - lo_x, hi_z - lo_z);
         let cell = BROADPHASE_CELL
-            .max(span_x / BROADPHASE_MAX_SIDE as f32)
-            .max(span_z / BROADPHASE_MAX_SIDE as f32);
+            .fmax(span_x / BROADPHASE_MAX_SIDE as f32)
+            .fmax(span_z / BROADPHASE_MAX_SIDE as f32);
         let inv_cell = 1.0 / cell;
         let nx = (((span_x * inv_cell).floor() as usize) + 1).min(BROADPHASE_MAX_SIDE);
         let nz = (((span_z * inv_cell).floor() as usize) + 1).min(BROADPHASE_MAX_SIDE);
@@ -243,18 +248,18 @@ impl BodyGrid {
     }
 
     /// The cells an XZ footprint covers, or `None` when this grid must not
-    /// serve the query: it was built for another generation (stale), it has
-    /// no cells, or a coordinate is not finite. The caller then scans
-    /// everything, exactly as before the grid existed.
+    /// serve the query: it is not `live` (stamped for another generation:
+    /// stale), it has no cells, or a coordinate is not finite. The caller
+    /// then scans everything, exactly as before the grid existed.
     fn cells_for(
         &self,
-        generation: u64,
+        live: bool,
         min_x: f32,
         max_x: f32,
         min_z: f32,
         max_z: f32,
     ) -> Option<CellRange> {
-        if self.built_for != Some(generation) || self.nx == 0 || self.nz == 0 {
+        if !live || self.nx == 0 || self.nz == 0 {
             return None;
         }
         if !(min_x.is_finite() && max_x.is_finite() && min_z.is_finite() && max_z.is_finite()) {
@@ -310,19 +315,19 @@ impl BodyGrid {
                 (0.0, 1.0)
             } else {
                 let (a, b) = ((low - from.z) / dz, (high - from.z) / dz);
-                (a.min(b), a.max(b))
+                (a.fmin(b), a.fmax(b))
             };
             t0 = t0.clamp(0.0, 1.0);
             t1 = t1.clamp(0.0, 1.0);
             let (xa, xb) = (from.x + dx * t0, from.x + dx * t1);
             let x0 = cell_of(
-                xa.min(xb) - SEGMENT_MARGIN,
+                xa.fmin(xb) - SEGMENT_MARGIN,
                 self.min_x,
                 self.inv_cell,
                 self.nx,
             );
             let x1 = cell_of(
-                xa.max(xb) + SEGMENT_MARGIN,
+                xa.fmax(xb) + SEGMENT_MARGIN,
                 self.min_x,
                 self.inv_cell,
                 self.nx,
@@ -392,6 +397,7 @@ impl HullFilter {
 }
 
 /// One live vehicle's hull: its class's [`HullPart`]s placed at its pose.
+#[derive(Clone)]
 struct Hull {
     owner: VehicleHandle,
     bodies: Vec<Body>,
@@ -412,17 +418,22 @@ struct Hull {
 /// current. A push leaves the grid stale — every query falls back to the full
 /// scan, which costs speed and not correctness — until
 /// [`CollisionWorld::rebuild_broadphase`].
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CollisionWorld {
-    /// The placed bodies.
-    bodies: Vec<Body>,
+    /// The placed bodies. Shared with a clone ([`Shared`]); an edit (a door
+    /// or a station turning, `move_body`) copies them first if they are.
+    bodies: Shared<Vec<Body>>,
     pub cutters: Vec<Cutter>,
     /// Bumped by every edit to `bodies`; `grid` serves only the generation it
     /// was built for.
     generation: u64,
     /// The broad phase over `bodies`, built by [`CollisionWorld::new`]. Empty
     /// or stale = every query scans every body, as it did before it existed.
-    grid: BodyGrid,
+    /// Never written after it is built (shared with a clone).
+    grid: Shared<BodyGrid>,
+    /// The generation `grid` serves: its build's, re-stamped by a mover's
+    /// move inside its envelope. Any other generation is stale.
+    grid_for: Option<u64>,
     /// The movers: (body index, envelope), ascending by index. The grid files
     /// each under its envelope instead of its current AABB.
     envelopes: Vec<(u32, Aabb)>,
@@ -439,6 +450,44 @@ pub struct CollisionWorld {
 }
 
 impl CollisionWorld {
+    /// Issue #168: feed the map's collision to the static digest
+    /// (`Sim::static_digest`'s "collision" group): every placed body, the
+    /// cutters, the movers' envelopes and the station and building-turret
+    /// bindings. The broad phase is derived; the vehicles' hulls and the
+    /// falling walkers are live state (their parts are in the "vehicles"
+    /// group, the vehicles in `Sim::hash`).
+    pub(crate) fn feed_digest(
+        &self,
+        f: &mut crate::digest::Fnv64,
+        meshes: &mut super::shape::MeshDigests,
+    ) {
+        let CollisionWorld {
+            bodies,
+            cutters,
+            generation: _,
+            grid: _,
+            grid_for: _,
+            envelopes,
+            hulls: _,
+            falling_walkers: _,
+            stations,
+            turrets,
+        } = self;
+        f.count(bodies.len());
+        for b in bodies {
+            b.feed_digest(f, meshes);
+        }
+        f.count(cutters.len());
+        for c in cutters {
+            f.f32s(&c.sphere);
+            f.count(c.planes.len());
+            for p in &c.planes {
+                f.f32s(&p.to_array());
+            }
+        }
+        f.debug(&(envelopes, stations, turrets));
+    }
+
     /// The world, with its broad phase built — what
     /// `game::assets::Scene::collision_world` returns and what every query
     /// wants. Callers can also start with [`Self::default`] and add bodies
@@ -471,16 +520,29 @@ impl CollisionWorld {
             .collect();
         let grid = BodyGrid::build(&bodies, &envelopes, 0);
         CollisionWorld {
-            bodies,
+            bodies: Shared::new(bodies),
             cutters,
             generation: 0,
-            grid,
+            grid_for: grid.built_for,
+            grid: Shared::new(grid),
             envelopes,
             hulls: Vec::new(),
             falling_walkers: Vec::new(),
             stations: std::collections::BTreeMap::new(),
             turrets: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Issue #168: does this world still share its placed bodies and broad
+    /// phase with `other` (a clone neither has moved a body in since)?
+    pub fn shares_static_with(&self, other: &CollisionWorld) -> bool {
+        Shared::ptr_eq(&self.bodies, &other.bodies) && Shared::ptr_eq(&self.grid, &other.grid)
+    }
+
+    /// Issue #168: does this world still share its broad phase with `other`
+    /// (no rebuild since the clone)?
+    pub fn grid_shared_with(&self, other: &CollisionWorld) -> bool {
+        Shared::ptr_eq(&self.grid, &other.grid)
     }
 
     /// The placed bodies, in the order every query's tie-break is defined on.
@@ -546,11 +608,11 @@ impl CollisionWorld {
         let mut largest = None::<f32>;
         for b in self.bodies.iter().filter(|b| b.instance == Some(instance)) {
             let r = ((b.aabb.max - b.aabb.min) * 0.5).length_squared();
-            largest = Some(largest.map_or(r, |l: f32| l.max(r)));
+            largest = Some(largest.map_or(r, |l: f32| l.fmax(r)));
             let inside =
                 point.cmpge(b.aabb.min - margin).all() && point.cmple(b.aabb.max + margin).all();
             if inside {
-                struck = Some(struck.map_or(r, |s: f32| s.min(r)));
+                struck = Some(struck.map_or(r, |s: f32| s.fmin(r)));
             }
         }
         struck.or(largest)
@@ -679,11 +741,11 @@ impl CollisionWorld {
                 moved.aabb.min.cmpge(e.min).all() && moved.aabb.max.cmple(e.max).all()
             });
         self.bodies[i] = moved;
-        let was_live = self.grid.built_for == Some(self.generation);
+        let was_live = self.grid_for == Some(self.generation);
         self.generation += 1;
         if inside && was_live {
             // Filed under its envelope already: the grid is still a superset.
-            self.grid.built_for = Some(self.generation);
+            self.grid_for = Some(self.generation);
         } else if !inside {
             self.rebuild_broadphase();
         }
@@ -757,6 +819,17 @@ impl CollisionWorld {
         }
     }
 
+    /// Issue #168 (lag compensation): every live hull's owner and pose, in
+    /// slot order.
+    pub fn hull_poses(&self) -> impl Iterator<Item = (VehicleHandle, glam::Mat4)> + '_ {
+        self.hulls.iter().map(|h| (h.owner, h.pose))
+    }
+
+    /// The pose `owner`'s hull is placed at, if it has one (an exact handle).
+    pub fn hull_pose(&self, owner: VehicleHandle) -> Option<glam::Mat4> {
+        self.hulls.iter().find(|h| h.owner == owner).map(|h| h.pose)
+    }
+
     /// The hull bodies of `owner`, or none (an exact handle).
     pub fn hull(&self, owner: VehicleHandle) -> &[Body] {
         self.hulls
@@ -776,7 +849,9 @@ impl CollisionWorld {
     pub fn rebuild_broadphase(&mut self) {
         self.envelopes
             .retain(|(i, _)| (*i as usize) < self.bodies.len());
-        self.grid = BodyGrid::build(&self.bodies, &self.envelopes, self.generation);
+        let grid = BodyGrid::build(&self.bodies, &self.envelopes, self.generation);
+        self.grid_for = grid.built_for;
+        self.grid = Shared::new(grid);
     }
 
     /// The bodies whose world AABB can meet a query with the XZ footprint
@@ -794,9 +869,13 @@ impl CollisionWorld {
         hulls: HullFilter,
         f: impl FnMut(&'a Body),
     ) {
-        let cells = self
-            .grid
-            .cells_for(self.generation, min_x, max_x, min_z, max_z);
+        let cells = self.grid.cells_for(
+            self.grid_for == Some(self.generation),
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+        );
         self.visit_cells(
             cells,
             [min_x, max_x, min_z, max_z],
@@ -824,11 +903,15 @@ impl CollisionWorld {
     ) {
         let to = from + dir * len;
         let m = SEGMENT_MARGIN;
-        let (min_x, max_x) = (from.x.min(to.x) - m, from.x.max(to.x) + m);
-        let (min_z, max_z) = (from.z.min(to.z) - m, from.z.max(to.z) + m);
-        let cells = self
-            .grid
-            .cells_for(self.generation, min_x, max_x, min_z, max_z);
+        let (min_x, max_x) = (from.x.fmin(to.x) - m, from.x.fmax(to.x) + m);
+        let (min_z, max_z) = (from.z.fmin(to.z) - m, from.z.fmax(to.z) + m);
+        let cells = self.grid.cells_for(
+            self.grid_for == Some(self.generation),
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+        );
         // Past this length the walk's own rounding nears the margin, and the
         // box it would have read is the whole map anyway.
         let walkable = (to - from).length_squared() < SEGMENT_MAX_WALK * SEGMENT_MAX_WALK;
@@ -1002,7 +1085,7 @@ mod tests {
 
     impl CollisionWorld {
         fn grid_is_live(&self) -> bool {
-            self.grid.built_for == Some(self.generation)
+            self.grid_for == Some(self.generation)
         }
     }
 
@@ -1211,7 +1294,7 @@ mod tests {
         };
         let mut local_hits = 0;
         for (x, z) in [(0.0, 0.0), (-90.0, 40.0), (150.0, -150.0), (1e5, 1e5)] {
-            let r = w.grid.cells_for(w.generation, x, x, z, z).unwrap();
+            let r = w.grid.cells_for(w.grid_is_live(), x, x, z, z).unwrap();
             let mut expected = Vec::new();
             w.grid.gather(r, &mut expected);
             expected.sort_unstable();

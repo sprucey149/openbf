@@ -2,6 +2,7 @@
 
 #[cfg(doc)]
 use super::WeaponState;
+use crate::fmath::FloatExt;
 
 use super::{
     pair, pf, pf_hash, Falloff, OrdBlend, OrdKind, OrdnanceClass, PropSource, WeaponClass, DEG,
@@ -82,9 +83,9 @@ impl WeaponClass {
         } else {
             TIGHT_HOLD_SECS_AI
         };
-        (secs * net.max(0.0))
-            .min(self.spread_limit)
-            .min(TIGHT_HOLD_CAP)
+        (secs * net.fmax(0.0))
+            .fmin(self.spread_limit)
+            .fmin(TIGHT_HOLD_CAP)
     }
 
     /// BF1 `all_weap_inf_rifle` + `all_weap_inf_rifle_ord` (SIDE/ALL.LVL,
@@ -354,10 +355,10 @@ impl WeaponClass {
             w.rounds_per_clip = if v < 1.0 { 0 } else { v as u32 };
         }
         if let Some(v) = pf(src, "AmmoPerShot") {
-            w.ammo_per_shot = v.max(0.0) as u32;
+            w.ammo_per_shot = v.fmax(0.0) as u32;
         }
         if let Some(v) = pf(src, "ReloadTime") {
-            w.reload_time = v.max(0.01);
+            w.reload_time = v.fmax(0.01);
         }
         if let Some(v) = pf(src, "TriggerSingle") {
             w.trigger_single = v != 0.0;
@@ -444,7 +445,7 @@ impl WeaponClass {
         // FUN_00277d30); only the mortars write ExtremeRange, and they have
         // no magnet (LockOnRange 0).
         w.extreme_range = match pf(src, "ExtremeRange") {
-            Some(v) => v.max(w.lock_on_range),
+            Some(v) => v.fmax(w.lock_on_range),
             None if Self::ordnance_name(src).is_some() => {
                 w.ordnance.velocity * w.ordnance.life_span
             }
@@ -511,13 +512,13 @@ impl WeaponClass {
             w.heat_threshold = v;
         }
         if let Some(p) = pair(src, "ShotDelay") {
-            w.shot_delay = [p[0].max(0.01), p[1].max(p[0].max(0.01))];
+            w.shot_delay = [p[0].fmax(0.01), p[1].fmax(p[0].fmax(0.01))];
         }
         if let Some(v) = pf(src, "SalvoCount") {
-            w.salvo_count = v.max(0.0) as u32;
+            w.salvo_count = v.fmax(0.0) as u32;
         }
         if let Some(v) = pf(src, "ShotsPerSalvo") {
-            w.shots_per_salvo = v.max(0.0) as u32;
+            w.shots_per_salvo = v.fmax(0.0) as u32;
         }
         if let Some(p) = pair(src, "SalvoDelay") {
             w.salvo_delay = p;
@@ -667,7 +668,7 @@ impl WeaponClass {
         if self.ordnance.scales[3] > 0.0 {
             self.target_kind |= 1 << 3;
         }
-        self.extreme_range = self.extreme_range.max(self.lock_on_range);
+        self.extreme_range = self.extreme_range.fmax(self.lock_on_range);
     }
 
     /// An infantry rocket launcher: the weapons whose vehicle critical hits

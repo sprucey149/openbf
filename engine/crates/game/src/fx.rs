@@ -65,6 +65,7 @@ mod vehicle_damage;
 mod water_contact;
 
 use crate::walk::WalkSim;
+use core::fmath::FloatExt;
 use core::impact::{ExplosionLook, Surface, SPLASH_LIFT, WATER_BLAST_DEPTH};
 use core::sim::Sim;
 use core::unit::UnitHandle;
@@ -1040,7 +1041,7 @@ impl Fx {
                 if look.radius_outer <= 0.0 {
                     return false;
                 }
-                let s = (look.radius_outer * 0.5).min(0.4);
+                let s = (look.radius_outer * 0.5).fmin(0.4);
                 self.water.spawn((3.0 + s, s), Vec3::new(pos.x, w, pos.z));
                 let Some(name) = &look.water_effect else {
                     return false;

@@ -10,6 +10,7 @@
 //! is owned here by `Bolt::hash_into` (card HASH).
 
 use crate::collision::{ray_heightfield, Capsule, CollisionWorld, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::heightfield::Heightfield;
 use crate::unit::UnitHandle;
 use glam::Vec3;
@@ -147,7 +148,7 @@ impl Bolt {
             self.end.y,
             self.end.z,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.owner.index.to_le_bytes());
         eat(&self.owner.gen.to_le_bytes());
@@ -217,7 +218,7 @@ impl Bolt {
         }
         if self.hit_mult != 1.0 {
             eat(b"HITMULT");
-            eat(&self.hit_mult.to_bits().to_le_bytes());
+            eat(&self.hit_mult.hash_bits().to_le_bytes());
         }
         if let Some(m) = self.missile {
             eat(b"MSL");
@@ -233,14 +234,14 @@ impl Bolt {
                 m.phases[0],
                 m.phases[1],
             ] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
             // Launch already encodes the initial desired heading. Add only
             // learned state, preserving the hash stream of unguided rounds.
             if m.desired.to_array().map(f32::to_bits) != m.launch.to_array().map(f32::to_bits) {
                 eat(b"MSLAIM");
                 for v in m.desired.to_array() {
-                    eat(&v.to_bits().to_le_bytes());
+                    eat(&v.hash_bits().to_le_bytes());
                 }
             }
             match m.target {
@@ -272,7 +273,7 @@ impl Bolt {
         }
         if let Some(damage) = self.fat {
             eat(b"FAT");
-            eat(&damage.to_bits().to_le_bytes());
+            eat(&damage.hash_bits().to_le_bytes());
         }
     }
 
@@ -474,7 +475,7 @@ impl Bolt {
     /// strikes at age 0 with its full damage (PCSX2 BF2 shotgun at 3 m:
     /// 65 a pellet, never the falloff's 48.3; `re-ordnance-kinds.md` §7).
     pub fn advance(&mut self, dt: f32) -> bool {
-        let step = dt.min(self.remaining.max(0.0));
+        let step = dt.fmin(self.remaining.fmax(0.0));
         self.pos += self.vel * step;
         self.remaining -= dt;
         let over = self.remaining <= 0.0;

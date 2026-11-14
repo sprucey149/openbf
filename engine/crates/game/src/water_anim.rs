@@ -157,6 +157,7 @@
 //! no eye to pick cells by), so no path draws water past the far pass. The
 //! first step takes that plane out of the draw list for good.
 
+use core::fmath::FloatExt;
 use std::f32::consts::TAU;
 use std::ops::{Add, Mul, Range, Sub};
 use std::sync::OnceLock;
@@ -713,11 +714,11 @@ pub fn lattice_cells(positions: &[[f32; 3]], indices: &[u32]) -> Option<Lattice>
             .collect::<Option<_>>()?;
         let (mut x0, mut x1, mut z0, mut z1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
         for v in &p {
-            (x0, x1) = (x0.min(v[0]), x1.max(v[0]));
-            (z0, z1) = (z0.min(v[2]), z1.max(v[2]));
+            (x0, x1) = (x0.fmin(v[0]), x1.fmax(v[0]));
+            (z0, z1) = (z0.fmin(v[2]), z1.fmax(v[2]));
         }
         let side = x1 - x0;
-        let eps = 1e-4 * side.max(1.0);
+        let eps = 1e-4 * side.fmax(1.0);
         if side <= 0.0 || (z1 - z0 - side).abs() > eps {
             return None;
         }
@@ -826,7 +827,7 @@ pub fn flat_far_diffuse(
     let wet = water.wet.as_ref()?;
     let [near, far] = lighting.near_scene_range.map(|r| [r[1], r[2]])?;
     let patch = cfg.patch_divisions?;
-    let decimation = cfg.lod_decimation?.min(patch[0]).min(patch[1]).max(1.0);
+    let decimation = cfg.lod_decimation?.fmin(patch[0]).fmin(patch[1]).fmax(1.0);
     if !wet.cell_size.is_finite()
         || wet.cell_size <= 0.0
         || !near.is_finite()
@@ -1095,8 +1096,12 @@ pub fn cells_in_range(
 /// `origin`, on the plane at `y` — a radial distance, as the port's far cull
 /// takes it (`viewer::far_cull`), where the PS2 clips by frustum planes.
 fn distance_to_cell(eye: Vec3, origin: [f32; 2], cell: f32, y: f32) -> f32 {
-    let dx = (origin[0] - eye.x).max(eye.x - (origin[0] + cell)).max(0.0);
-    let dz = (origin[1] - eye.z).max(eye.z - (origin[1] + cell)).max(0.0);
+    let dx = (origin[0] - eye.x)
+        .fmax(eye.x - (origin[0] + cell))
+        .fmax(0.0);
+    let dz = (origin[1] - eye.z)
+        .fmax(eye.z - (origin[1] + cell))
+        .fmax(0.0);
     Vec3::new(dx, eye.y - y, dz).length()
 }
 

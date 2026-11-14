@@ -17,6 +17,7 @@
 //!   the PS2's exact shape is not transcribed.
 
 use crate::fmath::sin_cos;
+use crate::fmath::FloatExt;
 use crate::weapon::EmitterOrdnance;
 use glam::Vec3;
 
@@ -212,7 +213,7 @@ fn hit_all(
     if n <= 0.0 {
         return;
     }
-    let each = floor_damage.max(damage / n);
+    let each = floor_damage.fmax(damage / n);
     shot.hits.extend(valid.into_iter().map(|(index, _)| Hit {
         index,
         damage: each,

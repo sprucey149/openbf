@@ -1,3 +1,4 @@
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 use super::{
@@ -307,7 +308,7 @@ impl DroidekaClass {
     /// The maintainer's count of ball jumps on a full bar in live play.
     pub fn ball_jump_cost(&self, sprinting: bool) -> f32 {
         let cost = if sprinting {
-            self.energy_cost_jump.max(self.energy_cost_jump_sprint)
+            self.energy_cost_jump.fmax(self.energy_cost_jump_sprint)
         } else {
             self.energy_cost_jump
         };
@@ -325,8 +326,8 @@ impl DroidekaClass {
     pub(super) fn ball_energy_floor(&self) -> f32 {
         -self.share_of_bar(
             self.energy_cost_jump
-                .max(self.energy_cost_jump_sprint)
-                .max(0.0),
+                .fmax(self.energy_cost_jump_sprint)
+                .fmax(0.0),
         )
     }
 

@@ -23,6 +23,7 @@
 //! D12 human-damage multiplier is retired (card DRETIRE, the maintainer 2026-10-28). So
 //! the tier's danger to a human is (holders at once) x (their hit chance).
 
+use crate::fmath::FloatExt;
 use crate::sim::Sim;
 use crate::skill::Difficulty;
 use crate::unit::{Controller, UnitHandle};
@@ -166,8 +167,8 @@ pub(crate) fn short_of(
     let b = governed(sim, bot, human).filter(|_| !holds(sim, bot, human))?;
     let back = Vec3::new(eye.x - feet.x, 0.0, eye.z - feet.z);
     let d = back.length();
-    let pull = (b.miss + GRENADE_SHORT).min(0.5 * d);
-    Some(back / d.max(1e-3) * pull)
+    let pull = (b.miss + GRENADE_SHORT).fmin(0.5 * d);
+    Some(back / d.fmax(1e-3) * pull)
 }
 
 /// How well `bot` is placed to take one of `human`'s tokens (lower is
@@ -197,7 +198,7 @@ fn placed(sim: &Sim, bot: UnitHandle, human: UnitHandle) -> Option<f32> {
     let to = c - eye;
     let d = to.length();
     // Already aiming at him: up to half the distance off.
-    let aim = b.ai.aim_dir.dot(to / d.max(1e-3)).clamp(0.0, 1.0);
+    let aim = b.ai.aim_dir.dot(to / d.fmax(1e-3)).clamp(0.0, 1.0);
     Some(d * (1.0 - 0.5 * aim))
 }
 

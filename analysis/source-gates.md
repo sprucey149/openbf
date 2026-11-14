@@ -71,21 +71,25 @@ solid, which has not been looked at.
 
 ## Bytes per source
 
-Table and instruction file sizes measured November 3, 2026. The PC TAT3 locator adds 56 bytes to the BF2 PC table.
+Table sizes measured November 13, 2026 (whole-grid fills, issue #168); instruction sizes November 3. The PC TAT3 locator
+adds 56 bytes to the BF2 PC table.
 
 | Source | Table | Instructions |
 |---|---:|---:|
-| bf1-pc | 2,076,951 | 515,828 |
-| bf1-xbox | 1,471,153 | 317,793 |
-| bf2-xbox | 1,077,861 | 407,605 |
-| bf2-pc | 1,924,166 | 585,269 |
+| bf1-pc | 2,076,127 | 515,828 |
+| bf1-xbox | 1,470,376 | 317,793 |
+| bf2-xbox | 1,079,558 | 407,605 |
+| bf2-pc | 1,924,154 | 585,269 |
 
 The table includes names, classes, world records, height rows and height fills. These tables replace 2.6 MB of unique private
 collision plus navigation, skeleton and animation files, which no build reads any more.
 
 ## Per map
 
-"Heights" counts height rows one cell past the line at most. "Fills" counts rectangles of ground the 512 m aim ray can read beyond that.
+"Heights" counts height rows one cell past the line at most. "Fills" counts rectangles of the rest of the simulation grid:
+since 2026-11-13 (issue #168) they cover the whole grid of a map with a boundary, because nothing in the simulation keeps a
+soldier or ground vehicle inside the boundary (it bounds only flyers and remote droids). They were limited to 512 m past the
+line before; Hoth, Rhen Var and both Yavins differed past that.
 "Instructions" is the bytes of that map's own lists; shared side and common lists are extra. "Round" records the
 earlier comparison of every tick of one full round
 with the PS2-source build: seed 42, Normal, Conquest, default era. The wider checks below are separate. "No model"
@@ -97,16 +101,16 @@ records original unresolved instances before shared-resource lookup and recovery
 | bf1_bes2 | 0 | 0 | 4,259 | match, 14,750 ticks |  | 128 | 5 | 64,249 | match, 14,750 ticks | 58 |
 | bf1_end1 | 259 | 1703 | 41,034 | match, 15,578 ticks |  | 264 | 1703 | 3,926 | match, 15,578 ticks |  |
 | bf1_geo1 | 0 | 0 | 39,579 | match, 18,880 ticks |  | 0 | 0 | 61,270 | match, 18,880 ticks |  |
-| bf1_hot1 | 194 | 5378 | 12,293 | match, 15,962 ticks |  | 272 | 5378 | 15,472 | match, 15,962 ticks |  |
+| bf1_hot1 | 194 | 9454 | 12,293 | match, 15,962 ticks |  | 272 | 9454 | 15,472 | match, 15,962 ticks |  |
 | bf1_kam1 | 0 | 0 | 0 | match, 11,534 ticks |  | 0 | 0 | 0 | match, 11,534 ticks |  |
 | bf1_kas1 | 75 | 0 | 881 | match, 13,969 ticks |  | 75 | 0 | 1,850 | match, 13,969 ticks | 16 |
 | bf1_kas2 | 351 | 0 | 1,613 | match, 11,803 ticks |  | 353 | 0 | 3,592 | match, 11,803 ticks |  |
 | bf1_nab1 | 72 | 0 | 3,077 | match, 14,688 ticks |  | 72 | 0 | 3,610 | match, 14,688 ticks |  |
 | bf1_nab2 | 221 | 29 | 3,810 | match, 13,635 ticks |  | 221 | 29 | 7,136 | match, 13,635 ticks |  |
-| bf1_rhn1 | 10 | 57 | 58,129 | match, 14,191 ticks | 39 | 172 | 83 | 77,315 | match, 14,191 ticks | 93 |
-| bf1_rhn2 | 11 | 0 | 28,982 | match, 10,973 ticks | 6 | 52 | 94 | 36,781 | match, 10,973 ticks | 12 |
+| bf1_rhn1 | 10 | 60 | 58,129 | match, 14,191 ticks | 39 | 172 | 87 | 77,315 | match, 14,191 ticks | 93 |
+| bf1_rhn2 | 11 | 0 | 28,982 | match, 10,973 ticks | 6 | 52 | 99 | 36,781 | match, 10,973 ticks | 12 |
 | bf1_tat2 | 0 | 14 | 5,332 | match, 14,227 ticks |  | 0 | 14 | 28,192 | match, 14,227 ticks |  |
-| bf1_yav1 | 76 | 853 | 4,160 | match, 11,546 ticks |  | 76 | 853 | 4,200 | match, 11,546 ticks |  |
+| bf1_yav1 | 76 | 1331 | 4,160 | match, 11,546 ticks |  | 76 | 1331 | 4,200 | match, 11,546 ticks |  |
 | bf1_yav2 | 0 | 0 | 1,839 | match, 12,456 ticks |  | 0 | 0 | 1,839 | match, 12,456 ticks |  |
 | tat1 | 31 | 0 | 4,071 | match, 14,961 ticks |  | 31 | 0 | 7,831 | match, 14,961 ticks |  |
 
@@ -128,7 +132,7 @@ records original unresolved instances before shared-resource lookup and recovery
 | bf2_tan1 | 0 | 0 | 1,034 | match, 11,899 ticks |  |
 | bf2_tat3 | 0 | 0 | 117,151 | match, 10,937 ticks | 1 |
 | bf2_uta1 | 0 | 0 | 19,477 | match, 14,171 ticks |  |
-| bf2_yav1 | 76 | 853 | 3,210 | match, 12,651 ticks |  |
+| bf2_yav1 | 76 | 1331 | 3,210 | match, 12,651 ticks |  |
 | tat2 | 0 | 0 | 21,382 | match, 12,208 ticks |  |
 
 ## Kashyyyk Islands gameplay water coverage

@@ -19,6 +19,7 @@ use crate::animator::{ActionKind, Body, Move, Special};
 use crate::assets::{load_skinned_glb, Scene};
 use crate::viewer::{look_at, overview_bounds, upload_scene, upload_skinned, SceneGpu};
 use anyhow::{anyhow, Context, Result};
+use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, Renderer, SkinnedDrawCmd};
 use std::path::Path;
@@ -145,7 +146,7 @@ fn map_centroid(scene: &Scene) -> Vec3 {
 fn ground_stand(scene: &Scene, focus: Vec3) -> Vec3 {
     let ground = scene
         .heightfield()
-        .map_or(focus.y, |h| h.height_at(focus.x, focus.z).max(focus.y));
+        .map_or(focus.y, |h| h.height_at(focus.x, focus.z).fmax(focus.y));
     Vec3::new(focus.x, ground, focus.z)
 }
 
@@ -240,7 +241,7 @@ pub fn ground_view(scene: &Scene) -> (Camera, Vec3) {
     let cam = Camera {
         position: eye,
         yaw: (-d.x).atan2(-d.z),
-        pitch: d.y.atan2(flat.max(1e-3)),
+        pitch: d.y.atan2(flat.fmax(1e-3)),
         ..Camera::default()
     };
     (cam, stand)
@@ -321,11 +322,11 @@ pub fn vantage_camera(scene: &Scene) -> Camera {
 
     let max_tan = VANTAGE_MAX_PITCH_DEG.to_radians().tan();
     let mut dist = 0.55 * o.radius;
-    let mut eye_y = o.center.y + (0.18 * o.radius).max(18.0);
+    let mut eye_y = o.center.y + (0.18 * o.radius).fmax(18.0);
     for _ in 0..VANTAGE_PUSH_PASSES {
         let p = o.center + dir * dist;
         if let Some(f) = floor_at(p.x, p.z) {
-            eye_y = eye_y.max(f);
+            eye_y = eye_y.fmax(f);
         }
         // The XZ distance this height needs to look down no steeper than the
         // cap. Shorter than `dist` on an unlifted map, so it breaks at once
@@ -341,7 +342,7 @@ pub fn vantage_camera(scene: &Scene) -> Camera {
     // above the ground wins over the cap wherever a map makes the two
     // disagree.
     if let Some(f) = floor_at(eye.x, eye.z) {
-        eye_y = eye_y.max(f);
+        eye_y = eye_y.fmax(f);
     }
     eye.y = eye_y;
     look_at(eye, o.center)
@@ -1030,7 +1031,7 @@ pub fn loadscreen_sheet(assets_dir: &Path, game: &str) -> Result<(Vec<u8>, u32, 
         for y in 0..CELL {
             for x in 0..CELL {
                 // Fit the still into the cell, letterboxed, nearest sample.
-                let scale = (tex.width as f32 / CELL as f32).max(tex.height as f32 / CELL as f32);
+                let scale = (tex.width as f32 / CELL as f32).fmax(tex.height as f32 / CELL as f32);
                 let (sw, sh) = (
                     (tex.width as f32 / scale) as u32,
                     (tex.height as f32 / scale) as u32,

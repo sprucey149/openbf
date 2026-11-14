@@ -23,6 +23,7 @@ use super::lock_on::{
 };
 use super::state::Sim;
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::missile::MissileTarget;
 use crate::perception;
 use crate::unit::UnitHandle;
@@ -408,7 +409,7 @@ impl Sim {
             };
             eat(&i.to_le_bytes());
             eat(&g.to_le_bytes());
-            eat(&state.lose.to_bits().to_le_bytes());
+            eat(&state.lose.hash_bits().to_le_bytes());
         }
     }
 }

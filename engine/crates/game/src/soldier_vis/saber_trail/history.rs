@@ -1,6 +1,7 @@
 //! Native eight-sample origin/direction history (B2 45c6f0/45c940),
 //! Hermite evaluation (45dbb8/45dd08), and the 45c308 draw defaults.
 
+use core::fmath::FloatExt;
 use glam::Vec3;
 use std::collections::VecDeque;
 
@@ -88,11 +89,11 @@ impl History {
                     }
                     next.velocity = velocity * 2.0 - prev.velocity;
                     next.angular = at_next;
-                    next.distance = (speed(prev.velocity, next.velocity).max(speed(
+                    next.distance = (speed(prev.velocity, next.velocity).fmax(speed(
                         prev.velocity + prev.angular,
                         next.velocity + next.angular,
                     )) * dt)
-                        .max(0.001);
+                        .fmax(0.001);
                 }
             }
         }
@@ -175,7 +176,7 @@ impl History {
                         let alpha = ((LIFE - age) / (LIFE - FULL_AGE)).clamp(0.0, 1.0);
                         alpha * alpha
                     }
-                } * (distance / FADE_DISTANCE).min(1.0);
+                } * (distance / FADE_DISTANCE).fmin(1.0);
                 let origin = hermite(a.origin, b.origin, a.velocity, b.velocity, dt, u);
                 let direction = hermite(a.direction, b.direction, a.angular, b.angular, dt, u);
                 let color = [rgb[0], rgb[1], rgb[2], (fade * 255.0) as u8];

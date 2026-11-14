@@ -32,13 +32,19 @@ pub struct RoutePatches {
     /// Per blockable group, the fnv1a (lower-case) hashes of its arc names.
     groups: Vec<Vec<u32>>,
     /// `1 << groups.len()` inflated XOR patches, indexed by the blocked-group
-    /// mask; record 0 is all open.
-    records: Vec<Vec<u8>>,
+    /// mask; record 0 is all open. Shared with a cloned sim (issue #168):
+    /// never written once parsed.
+    records: crate::shared::Shared<Vec<Vec<u8>>>,
     /// The blocked-group mask now XORed onto the table (the PS2's +0x2c).
     mask: u32,
 }
 
 impl RoutePatches {
+    /// Issue #168: does this set share its records with `other` (a clone)?
+    pub(crate) fn shares_records_with(&self, other: &RoutePatches) -> bool {
+        crate::shared::Shared::ptr_eq(&self.records, &other.records)
+    }
+
     /// Parse the bake's `nav/plnp_<key>.bin` (`u16 recordCount`, then per
     /// record `u32 len` + `len` bytes) against the manifest's group hashes.
     pub fn parse(groups: Vec<Vec<u32>>, bytes: &[u8]) -> Result<RoutePatches, String> {
@@ -74,7 +80,7 @@ impl RoutePatches {
         }
         Ok(RoutePatches {
             groups,
-            records,
+            records: records.into(),
             mask: 0,
         })
     }

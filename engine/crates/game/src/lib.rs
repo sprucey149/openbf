@@ -1,4 +1,6 @@
 //! Game library: asset loading + viewer wiring. The binary is the CLI.
+// Test code may use f32::max/min; the sim may not (clippy.toml, LAN_MULTIPLAYER.md §7).
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 pub mod alloc_count;
 pub mod ambience;
 pub mod animator;
@@ -46,11 +48,14 @@ pub mod matchlog;
 pub mod minimap;
 pub mod mission;
 pub mod music;
+pub mod name_tags;
 pub mod native_teams;
+pub mod netplay;
 pub mod normalize;
 pub mod pause;
 pub mod point_light;
 pub mod profile;
+pub mod quality_governor;
 pub mod render_blend;
 mod repair_feedback;
 pub mod roster;

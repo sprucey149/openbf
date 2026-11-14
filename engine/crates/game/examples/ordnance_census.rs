@@ -49,6 +49,7 @@
 //!
 //! must equal `[ordnance] footer` in `engine/artifacts/loop/gates.toml`, and
 //! `new` must be 0. 16 threads at most (a map each).
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 use core::collision::{ray_terrain_ps2, HullFilter, Layers};
 
 use core::nav::{Locus, Mover};

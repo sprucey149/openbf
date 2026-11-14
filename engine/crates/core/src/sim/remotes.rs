@@ -5,6 +5,7 @@
 
 use super::{buttons, Event, PadState, Sim};
 use crate::collision::{Capsule, HullFilter};
+use crate::fmath::FloatExt;
 use crate::projectile::{Bolt, Shooter};
 use crate::remote::{
     Droid, DroidClass, DroidEnd, StrikeRun, BOT_BLAST, BOT_CROWD, BOT_FIGHT, BOT_FLIGHT, BOT_GUARD,
@@ -277,7 +278,7 @@ impl Sim {
                 target,
                 d.blaster
                     .yaw_spread(blaster)
-                    .max(d.blaster.pitch_spread(blaster)),
+                    .fmax(d.blaster.pitch_spread(blaster)),
             );
         let pad = PadState {
             ly: PadState::quantize(forward),
@@ -308,7 +309,7 @@ impl Sim {
                 .as_ref();
             2.0 * s.spread + shell.map_or(0.0, |e| e.damage_outer)
         });
-        burst.max(own).max(salvo)
+        burst.fmax(own).fmax(salvo)
     }
 
     fn droid_enemies(&self, d: &Droid) -> impl Iterator<Item = Vec3> + '_ {
@@ -336,8 +337,8 @@ impl Sim {
             let charge_time = r.destruct.as_ref().map(|x| x.charge_time);
             let owner = self
                 .unit(d.owner)
-                .map(|u| (u.is_player, u.look_scale(), u.controller));
-            let Some((is_player, look, controller)) = owner else {
+                .map(|u| (u.is_player, u.look_scale(), u.controller, self.cheats_of(u)));
+            let Some((is_player, look, controller, owner_cheats)) = owner else {
                 // [ours] The owner died: the droid vanishes, no explosion.
                 self.droid_gone(&d, DroidEnd::OwnerDied);
                 continue;
@@ -382,7 +383,7 @@ impl Sim {
             let outside = d.controlled && self.boundary.outside(d.pos.x, d.pos.z);
             if d.tick_leaving(outside, time, dt)
                 && end.is_none()
-                && !(self.cheats.invincible && controller != Controller::Ai)
+                && !(owner_cheats.invincible && controller != Controller::Ai)
             {
                 end = Some(DroidEnd::Destroyed);
             }
@@ -518,7 +519,7 @@ impl Sim {
             let t = hf.height_at(d.pos.x, d.pos.z) + RADIUS;
             if d.pos.y < t && !self.collision.is_cut(d.pos) {
                 d.pos.y = t;
-                d.vel.y = d.vel.y.max(0.0);
+                d.vel.y = d.vel.y.fmax(0.0);
             }
         }
         if self.collision.is_empty() {

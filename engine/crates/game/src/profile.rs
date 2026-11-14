@@ -1,9 +1,8 @@
 //! Player profile: settings + career stats, autosaved everywhere (PLAN §Saves,
 //! sessions & host authority: "each user profile autosaves continuously").
-//! v0 = one RON file; awards/unlock progression and per-mode stats grow in
-//! here (P8). Cheats are deliberately NOT persisted (session-scoped by design).
+//! The profile catalog stores each player separately. Cheats remain session-scoped.
 //!
-//! Location: `$OPENBF_PROFILE` (tests/dev override) else `profile.ron` in
+//! Location: `$OPENBF_PROFILE` (single-file tests/dev override) else `profiles.ron` in
 //! [`data_dir`], `openbf_data/` beside the game file (the maintainer, 2026-10-21: on every
 //! OS, nothing in %APPDATA% or ~/.config).
 //! Saves are atomic (write `.tmp`, rename).
@@ -11,6 +10,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+mod store;
+pub use store::{valid_name_char, List, Store, NAME_LIMIT};
 
 fn yes() -> bool {
     true
@@ -109,6 +111,9 @@ pub struct Settings {
     /// 0 = off, 1 = on. Older profiles may store 2, which also enables it.
     #[serde(default)]
     pub fps_counter: u8,
+    /// Issue #168: the LAN net meter overlay (F7 toggles it too).
+    #[serde(default)]
+    pub network_meter: bool,
     /// Controller feedback strength. Zero turns it off.
     #[serde(default = "one", deserialize_with = "rumble_setting")]
     pub rumble_strength: f32,
@@ -126,6 +131,11 @@ pub struct Settings {
     /// (`game::dyn_res`), the HUD at full size. Off by default.
     #[serde(default)]
     pub low_power_resolution: bool,
+    /// Automatic quality (LAN §8b.2, `game::quality_governor`): the world's
+    /// render scale follows the frame times. On by default; off keeps
+    /// Low Power Resolution's choice.
+    #[serde(default = "yes")]
+    pub auto_quality: bool,
     #[serde(default)]
     pub terrain_lod: bool,
     #[serde(default)]
@@ -153,6 +163,10 @@ pub struct Settings {
     pub last_map: Option<String>,
     pub last_mode: Option<String>,
     pub last_teams: Option<[String; 2]>,
+    /// Issue #168: the LAN hosts last joined, newest first
+    /// (`netplay::lobby::remember_host`).
+    #[serde(default)]
+    pub recent_hosts: Vec<String>,
 }
 
 impl Settings {
@@ -161,7 +175,9 @@ impl Settings {
         self.fov_scale = defaults.fov_scale;
         self.viewpoint = defaults.viewpoint;
         self.fps_counter = defaults.fps_counter;
+        self.network_meter = defaults.network_meter;
         self.low_power_resolution = defaults.low_power_resolution;
+        self.auto_quality = defaults.auto_quality;
     }
 }
 
@@ -178,6 +194,7 @@ impl Default for Settings {
             effects_volume: 1.0,
             dialogue_volume: 1.0,
             fps_counter: 0,
+            network_meter: false,
             rumble_strength: 1.0,
             rumble_on_fire: false,
             mouse_sensitivity: 1.0,
@@ -186,6 +203,7 @@ impl Default for Settings {
             low_power_resolution: false,
             terrain_lod: false,
             scene_softness: false,
+            auto_quality: true,
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
@@ -198,6 +216,7 @@ impl Default for Settings {
             last_map: None,
             last_mode: None,
             last_teams: None,
+            recent_hosts: Vec::new(),
         }
     }
 }
@@ -244,6 +263,8 @@ pub struct Profile {
     pub name: String,
     pub settings: Settings,
     pub career: Career,
+    #[serde(skip)]
+    slot: Option<store::Slot>,
 }
 
 impl Profile {
@@ -265,7 +286,7 @@ impl Profile {
         match std::fs::read_to_string(path) {
             Ok(txt) => match ron::from_str::<Profile>(&txt) {
                 Ok(mut p) => {
-                    p.settings.fov_scale = crate::walk::clamp_fov_scale(p.settings.fov_scale);
+                    p.normalize();
                     p
                 }
                 Err(e) => {
@@ -281,6 +302,10 @@ impl Profile {
         }
     }
 
+    fn normalize(&mut self) {
+        self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
+    }
+
     fn fresh() -> Profile {
         Profile {
             name: std::env::var("USER").unwrap_or_else(|_| "player".into()),
@@ -290,19 +315,16 @@ impl Profile {
 
     /// Atomic save.
     pub fn save(&self) -> Result<()> {
-        self.save_to(&Self::path())
+        if let Some(slot) = &self.slot {
+            slot.save(self)
+        } else {
+            self.save_to(&Self::path())
+        }
     }
 
     /// Atomically save to an explicit file.
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
-        }
-        let txt = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
-        let tmp = path.with_extension("ron.tmp");
-        std::fs::write(&tmp, txt).with_context(|| tmp.display().to_string())?;
-        std::fs::rename(&tmp, path).with_context(|| path.display().to_string())?;
-        Ok(())
+        write_ron(self, path)
     }
 
     /// Fold a finished (or abandoned) round's player stats into the career.
@@ -325,6 +347,17 @@ impl Profile {
         self.career.hits += hits;
         self.career.captures += captures;
     }
+}
+
+fn write_ron(value: &impl Serialize, path: &Path) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+    }
+    let txt = ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::default())?;
+    let tmp = path.with_extension("ron.tmp");
+    std::fs::write(&tmp, txt).with_context(|| tmp.display().to_string())?;
+    std::fs::rename(&tmp, path).with_context(|| path.display().to_string())?;
+    Ok(())
 }
 
 fn bounded_team_pct<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -732,5 +765,26 @@ mod tests {
         let high = serialized.replace("team_size_pct:100", "team_size_pct:500");
         let loaded: super::Settings = ron::from_str(&high).unwrap();
         assert_eq!(loaded.team_size_pct, ui::population::MAX_TEAM_PCT);
+    }
+
+    /// Issue #168: the recent LAN hosts and the player name survive a save
+    /// and a load; a profile from before them loads with none.
+    #[test]
+    fn recent_hosts_and_the_player_name_persist() {
+        let dir = std::env::temp_dir().join(format!("openbf_recent_{}", std::process::id()));
+        let path = dir.join("profile.ron");
+        let mut p = Profile {
+            name: "Ann".into(),
+            ..Default::default()
+        };
+        crate::netplay::lobby::remember_host(&mut p.settings.recent_hosts, "10.0.0.2");
+        crate::netplay::lobby::remember_host(&mut p.settings.recent_hosts, "studio-pc:40000");
+        p.save_to(&path).unwrap();
+        let back = Profile::load_from(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(back.name, "Ann");
+        assert_eq!(back.settings.recent_hosts, ["studio-pc:40000", "10.0.0.2"]);
+        let old: Settings = ron::from_str("(assist_intensity: 0.5)").unwrap();
+        assert!(old.recent_hosts.is_empty());
     }
 }

@@ -41,6 +41,7 @@
 
 use crate::animator::Animator;
 use crate::soldier_vis::{Outline, SoldierVisuals};
+use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, SkinnedDrawCmd};
 use ui::spawn_draw::SpawnPage;
@@ -292,9 +293,9 @@ pub fn lineup_fit(aspect: f32, tan_v: f32, outline: &Outline) -> LineupFit {
         for &at in &places {
             let feet = fit.feet(at);
             for [x, z] in &points {
-                let depth = (feet.z - z * fit.scale).max(feet.z * 0.25);
+                let depth = (feet.z - z * fit.scale).fmax(feet.z * 0.25);
                 let seen = (feet.x + x * fit.scale) / depth;
-                out = (out.0.min(seen), out.1.max(seen));
+                out = (out.0.fmin(seen), out.1.fmax(seen));
             }
         }
         out
@@ -538,7 +539,7 @@ impl Preview {
             }
             let (from, t) = match &mut self.slide {
                 Some((from, t)) => {
-                    *t = (*t + dt * SLIDE_RATE).min(1.0);
+                    *t = (*t + dt * SLIDE_RATE).fmin(1.0);
                     (*from, *t)
                 }
                 None => (pick, 1.0),

@@ -6,6 +6,7 @@
 
 use crate::classdb::ClassDb;
 use crate::walk::WalkSim;
+use core::fmath::FloatExt;
 use glam::Vec3;
 use manifest::{Manifest, ManifestRegion};
 use std::collections::HashMap;
@@ -63,12 +64,12 @@ pub fn carrier_marker(
         let offset = if carrier == viewer {
             Vec3::new(0.0, 0.3, -0.2 * radius)
         } else {
-            Vec3::Y * (0.7 * radius).min(4.0)
+            Vec3::Y * (0.7 * radius).fmin(4.0)
         };
         Some((vehicle.pos + vehicle.rot * offset, friendly))
     } else {
         Some((
-            unit.soldier.pos + Vec3::Y * (0.7 * unit.capsule().height).min(4.0),
+            unit.soldier.pos + Vec3::Y * (0.7 * unit.capsule().height).fmin(4.0),
             friendly,
         ))
     }
@@ -198,7 +199,7 @@ pub fn bounds_of(r: &ManifestRegion) -> ([f32; 2], f32) {
     } else {
         (r.rotation[0][0] * r.size[0], r.rotation[2][2] * r.size[2])
     };
-    ([r.translation[0], r.translation[2]], hx.max(hz))
+    ([r.translation[0], r.translation[2]], hx.fmax(hz))
 }
 
 /// The Small view's pointer turn (re-hud-map §2.2 [M], every BF2 state's
@@ -367,8 +368,8 @@ impl MapStatic {
         let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
         for cp in &walk.sim.cps {
             for (a, v) in [cp.def.pos.x, cp.def.pos.z].into_iter().enumerate() {
-                lo[a] = lo[a].min(v);
-                hi[a] = hi[a].max(v);
+                lo[a] = lo[a].fmin(v);
+                hi[a] = hi[a].fmax(v);
             }
         }
         if lo[0] > hi[0] {
@@ -377,7 +378,7 @@ impl MapStatic {
         let half = [0, 1].map(|a| (hi[a] - lo[a]) * 0.5 + 100.0);
         (
             [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5],
-            half[0].max(half[1]),
+            half[0].fmax(half[1]),
         )
     }
 
@@ -705,8 +706,8 @@ fn still_map(scene: &crate::assets::Scene, eye: Vec3, yaw: f32, numbered: bool) 
         let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
         for p in &posts {
             for a in 0..2 {
-                lo[a] = lo[a].min(p.pos[a]);
-                hi[a] = hi[a].max(p.pos[a]);
+                lo[a] = lo[a].fmin(p.pos[a]);
+                hi[a] = hi[a].fmax(p.pos[a]);
             }
         }
         if posts.is_empty() {
@@ -715,7 +716,7 @@ fn still_map(scene: &crate::assets::Scene, eye: Vec3, yaw: f32, numbered: bool) 
         let half = [0, 1].map(|a| (hi[a] - lo[a]) * 0.5 + 100.0);
         (
             [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5],
-            half[0].max(half[1]),
+            half[0].fmax(half[1]),
         )
     });
     MapModel {

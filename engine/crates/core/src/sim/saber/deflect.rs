@@ -1,6 +1,7 @@
 //! PS2 melee block acceptance and projectile redirection (0x0033e8b8).
 
 use super::*;
+use crate::fmath::FloatExt;
 use crate::lcg::GameLcg;
 use crate::projectile::{Bolt, Shooter};
 use crate::unit::UnitHandle;
@@ -212,7 +213,7 @@ impl Sim {
             .as_mut()
             .unwrap()
             .deflect_precision = if beam {
-            ((precision - TICK_DT).min(1.0) - (TICK_DT + TICK_DT)).max(0.0)
+            ((precision - TICK_DT).fmin(1.0) - (TICK_DT + TICK_DT)).fmax(0.0)
         } else {
             0.0
         };

@@ -27,6 +27,7 @@ use super::{
 };
 use crate::cp::CommandPost;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::sim::{buttons, PadState, Sim};
 use crate::soldier::Stance;
@@ -248,7 +249,7 @@ pub(super) fn run(
             // Card BNDS: a lost bot does not walk further down.
             // Card RETW: ...but down to the point of its floor walk.
             let low = match ret {
-                Some(_) => pos.y.min(gp.y) - LOST_DOWN,
+                Some(_) => pos.y.fmin(gp.y) - LOST_DOWN,
                 // OURS: a stale hold on a distant lower floor can pull a
                 // soldier off an active route after contact ends.
                 // measure: Citadel's archived shelf and native hold behavior (#108).
@@ -261,7 +262,7 @@ pub(super) fn run(
                 {
                     pos.y - LOST_DOWN
                 }
-                None => pos.y.min(gp.y) - LEDGE_DROP,
+                None => pos.y.fmin(gp.y) - LEDGE_DROP,
             };
             // The PS2's contact side-step (`FUN_0026aba8`) offsets the move
             // TARGET 5 m along the path perpendicular while it lasts; ours does

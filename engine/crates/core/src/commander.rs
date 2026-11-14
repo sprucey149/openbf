@@ -52,6 +52,7 @@
 //!   never the shared LCG, which `think` may not touch either.
 
 use crate::collision::STEP_HEIGHT;
+use crate::fmath::FloatExt;
 use crate::nav::Mover;
 use crate::sim::Sim;
 use crate::soldier::Stance;
@@ -261,7 +262,7 @@ impl TeamPlan {
                 Some((p, m)) => {
                     eat(&[1, *m]);
                     for v in p.to_array() {
-                        eat(&v.to_bits().to_le_bytes());
+                        eat(&v.hash_bits().to_le_bytes());
                     }
                 }
                 None => eat(&[0]),
@@ -326,7 +327,7 @@ pub fn draw_post(rules: GoalRules, team: u8, posts: &[DrawPost], r: f32) -> Opti
             GoalRules::Bf1 if team == 0 => p.atk as f32,
             GoalRules::Bf1 => p.def as f32,
         };
-        w.max(0.0)
+        w.fmax(0.0)
     };
     let pass = |friendly: bool| -> Option<u32> {
         let ok = |p: &DrawPost| p.open && p.friendly == friendly && weight(p) > 0.0;
@@ -785,7 +786,7 @@ pub fn defend_cap(alive: usize, quiet: u64, share: f32) -> usize {
 /// 0.7) holds what it has with more of its men. 1.0 (the default) is
 /// [`DEFEND_SHARE`].
 pub fn defend_share(aggr: f32) -> f32 {
-    (DEFEND_SHARE / aggr.max(DEFEND_SHARE)).min(1.0)
+    (DEFEND_SHARE / aggr.fmax(DEFEND_SHARE)).fmin(1.0)
 }
 
 /// Card DEFS, rule 3: the distance inside which an enemy threatens a post -
@@ -795,10 +796,10 @@ pub fn threat_radius(sim: &Sim) -> f32 {
     let mut far = 0.0f32;
     for (i, a) in sim.cps.iter().enumerate() {
         for b in &sim.cps[i + 1..] {
-            far = far.max(crate::nav::xz_dist(a.def.pos, b.def.pos));
+            far = far.fmax(crate::nav::xz_dist(a.def.pos, b.def.pos));
         }
     }
-    (THREAT_FRAC * far).max(THREAT_RADIUS_MIN)
+    (THREAT_FRAC * far).fmax(THREAT_RADIUS_MIN)
 }
 
 /// Card DEFS, rule 3 (and card TURR's defence clause): is post `cp` under

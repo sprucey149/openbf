@@ -5,6 +5,7 @@ use super::self_turrets::{
 use super::Sim;
 use crate::ai::flyer_weapons::{choose, object_foe};
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::perception::{in_cone, los_seat};
 use crate::vehicle::flyer::{
     FlightPhase, PilotThreat, PilotThreats, ThreatObject, THREAT_FORCED, THREAT_SEEN, THREAT_SLOTS,
@@ -111,7 +112,7 @@ impl Sim {
                     nose: Vec3::Z,
                     human: false,
                     relative: BUILDING_RELATIVE,
-                    radius: s.sphere_radius.max(s.radius),
+                    radius: s.sphere_radius.fmax(s.radius),
                     hull: None,
                     instance: s.instance,
                 })

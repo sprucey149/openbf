@@ -47,6 +47,7 @@
 //!   must not read them again.
 //! - **An identical line is one line** while the first is still up.
 
+use core::fmath::FloatExt;
 use core::projectile::Target;
 use core::sim::{AimTarget, Event, Sim};
 use core::unit::UnitHandle;
@@ -464,6 +465,11 @@ pub struct EventFeed {
     battle: crate::profile::BattleStats,
     /// Every soldier's round, for the stats pages (issue #50).
     round: crate::round_stats::RoundStats,
+    /// The last read tick's positive scores by unit (issue #168): what
+    /// [`EventFeed::tick`] returns for its viewer, kept for every unit so a
+    /// lockstep peer credits every human's medal points alike
+    /// ([`EventFeed::positive_points`]).
+    credits: Vec<(UnitHandle, u32)>,
     /// The four order names, up / down / right / left.
     order_labels: [String; 4],
     driver_labels: [String; 4],
@@ -511,6 +517,7 @@ impl EventFeed {
             last_flag_carriers: Vec::new(),
             viewer: None,
             round: Default::default(),
+            credits: Vec::new(),
             battle: Default::default(),
             order: None,
         }
@@ -524,7 +531,7 @@ impl EventFeed {
             &walk.post_keys,
         );
         feed.space_round = walk.space_round.clone();
-        feed.round.opening_medals = walk.sim.medal_counts();
+        feed.set_opening_medals(walk);
         feed.classes = [0, 1].map(|t| {
             walk.teams[t]
                 .classes
@@ -623,13 +630,24 @@ impl EventFeed {
         self.texts.award_bonus(medal, award)
     }
 
+    /// The round's opening career medals: `walk`'s local slot's now (the
+    /// "medals this match" list counts from them). Called again once the
+    /// careers are installed after the feed was built.
+    pub fn set_opening_medals(&mut self, walk: &crate::walk::WalkSim) {
+        self.round.medal_slot = usize::from(walk.local_slot);
+        self.round.opening_medals = walk.local_medal_counts();
+    }
+
+    /// Medals player slot `slot` (the viewer's) earned since `seen`.
     pub fn note_medals(
         &mut self,
         sim: &Sim,
         viewer: UnitHandle,
+        slot: u8,
         seen: &mut core::sim::MedalCounts,
     ) {
-        let Some(counts) = sim.medal_counts() else {
+        let slot = usize::from(slot);
+        let Some(counts) = sim.slot_medal_counts(slot) else {
             return;
         };
         use crate::round_stats::{CAREER_MEDAL_ORDER, MEDAL_NAMES};
@@ -642,7 +660,7 @@ impl EventFeed {
             // on activation (FUN_00360200). The HUD admits one line at a time.
             let name = self.screen_text(&format!("game.awards.medal.{key}"), label);
             self.say(name, message_color::MEDAL, sim.tick);
-            if !sim.career_award_bonuses()
+            if !sim.slot_career_award_bonuses(slot)
                 || core::sim::medal_level(counts[id]) == 0
                 || core::sim::medal_level(seen[id]) == 3
             {
@@ -877,6 +895,7 @@ impl EventFeed {
         }
         self.seen = Some(tick);
         self.viewer = Some(viewer.index as usize);
+        self.credits.clear();
         self.last_flag_carriers
             .resize(sim.ctf.as_ref().map_or(0, |ctf| ctf.flags.len()), None);
         // CTF drops a dead carrier's flag after combat on this tick.
@@ -1030,6 +1049,9 @@ impl EventFeed {
                     if shooter == viewer && points > 0 {
                         positive += points as u32;
                     }
+                    if points > 0 {
+                        self.credits.push((shooter, points as u32));
+                    }
                 }
                 Event::CriticalHit {
                     shooter,
@@ -1109,6 +1131,7 @@ impl EventFeed {
                     if unit == viewer {
                         positive += points::FLAG_CAPTURE as u32;
                     }
+                    self.credits.push((unit, points::FLAG_CAPTURE as u32));
                     if let Some(last) = self.last_flag_carriers.get_mut(usize::from(flag)) {
                         *last = None;
                     }
@@ -1143,6 +1166,12 @@ impl EventFeed {
                         if let Some(first) = self.capture_credit(sim, sim.handle(i), cp, team) {
                             let u = &sim.units[i];
                             self.round.capture(i, first, sim.hero_unit(u));
+                            let points = if first {
+                                points::CAPTURE
+                            } else {
+                                points::CAPTURE_ASSIST
+                            };
+                            self.credits.push((sim.handle(i), points as u32));
                         }
                     }
                 }
@@ -1377,7 +1406,7 @@ impl EventFeed {
                     // Bit 59: a droid's id is no other kind's.
                     id: (1 << 59) | id,
                     name,
-                    health_fraction: (d.health / max.max(1e-6)).clamp(0.0, 1.0),
+                    health_fraction: (d.health / max.fmax(1e-6)).clamp(0.0, 1.0),
                     relation,
                     team0: false,
                     shield: None,
@@ -1390,7 +1419,7 @@ impl EventFeed {
                     // Bit 60: a turret's id is no other kind's.
                     id: (1 << 60) | id,
                     name: self.texts.line(AUTO_TURRET),
-                    health_fraction: (t.health / max.max(1e-6)).clamp(0.0, 1.0),
+                    health_fraction: (t.health / max.fmax(1e-6)).clamp(0.0, 1.0),
                     relation,
                     team0: false,
                     shield: None,
@@ -1420,7 +1449,7 @@ impl EventFeed {
                         .get(usize::from(s.class))
                         .cloned()
                         .unwrap_or_default(),
-                    health_fraction: (s.health.cur / s.health.max.max(1e-6)).clamp(0.0, 1.0),
+                    health_fraction: (s.health.cur / s.health.max.fmax(1e-6)).clamp(0.0, 1.0),
                     relation: match s.team {
                         None => 0,
                         Some(t) if t == me.team => 1,
@@ -1441,7 +1470,7 @@ impl EventFeed {
                         .get(t.spec.class as usize)
                         .cloned()
                         .unwrap_or_default(),
-                    health_fraction: (h / t.spec.max_health.max(1e-6)).clamp(0.0, 1.0),
+                    health_fraction: (h / t.spec.max_health.fmax(1e-6)).clamp(0.0, 1.0),
                     relation: 0,
                     team0: true,
                     shield: None,
@@ -1472,7 +1501,7 @@ impl EventFeed {
             if s.destroyed || s.health.max <= 0.0 {
                 continue;
             }
-            let (c, r) = (s.sphere_centre, s.sphere_radius.max(0.5));
+            let (c, r) = (s.sphere_centre, s.sphere_radius.fmax(0.5));
             let along = (c - pos).dot(dir);
             if along <= 0.0 || along > range + r || best.is_some_and(|(b, _)| b <= along) {
                 continue;
@@ -1526,6 +1555,16 @@ impl EventFeed {
     /// Every soldier's round so far (`crate::round_stats`).
     pub fn round(&self) -> &crate::round_stats::RoundStats {
         &self.round
+    }
+
+    /// The positive points unit `who` scored on the last read tick, by the
+    /// same rules [`EventFeed::tick`] sums for its viewer (issue #168: every
+    /// human's medal points on every peer).
+    pub fn positive_points(&self, who: UnitHandle) -> u32 {
+        self.credits
+            .iter()
+            .filter(|(h, _)| *h == who)
+            .fold(0u32, |n, (_, p)| n.saturating_add(*p))
     }
 
     /// Team `team`'s soldier class `class`'s name, as the spawn screen's.

@@ -6,6 +6,7 @@
 //! bakes (the PS2's weapon icons are the weapons' own models, `re-hud.md` §1.2).
 
 use anyhow::{Context, Result};
+use core::fmath::FloatExt;
 use render::hud::{HudBatch, HudPass, HudTexture, HudVertex};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -584,8 +585,8 @@ fn batch_height(verts: &[HudVertex], indices: &[u32], first: u32, count: u32) ->
     let (lo, hi) = indices[first..first + count]
         .iter()
         .map(|i| verts[*i as usize].pos[1])
-        .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
-    (hi - lo).max(0.0)
+        .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.fmin(y), hi.fmax(y)));
+    (hi - lo).fmax(0.0)
 }
 
 impl HudView {
@@ -873,6 +874,24 @@ impl HudView {
         self.install_frame(frame);
     }
 
+    pub fn update_shell_profiles(
+        &mut self,
+        menus: &ui::shell_ps2::ShellMenus,
+        movie: bool,
+        picker: &ui::shell_ps2::profiles::Picker,
+        size: [u32; 2],
+    ) {
+        let movie = movie && (self.movie.is_some() || self.movie_frame.is_some());
+        self.install_frame(ui::hud_draw::draw_shell_profiles(
+            &self.hud,
+            &self.art,
+            menus,
+            movie,
+            picker,
+            size.map(|v| v as f32),
+        ));
+    }
+
     /// The shared options panel drawn over the shell movie.
     pub fn update_shell_options(
         &mut self,
@@ -1012,10 +1031,10 @@ impl HudView {
             .map(|(_, b)| *b)
             .reduce(|a, b| {
                 [
-                    a[0].min(b[0]),
-                    a[1].min(b[1]),
-                    a[2].max(b[2]),
-                    a[3].max(b[3]),
+                    a[0].fmin(b[0]),
+                    a[1].fmin(b[1]),
+                    a[2].fmax(b[2]),
+                    a[3].fmax(b[3]),
                 ]
             })
     }

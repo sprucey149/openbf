@@ -2,6 +2,7 @@
 //! Sources and shared weapon rules are documented in the parent module.
 
 use super::{pf, PropSource};
+use crate::fmath::FloatExt;
 
 // ── Ordnance ──────────────────────────────────────────────────────────────
 
@@ -445,7 +446,7 @@ impl ExplosionClass {
 
     /// Half-side of the gather box (§2 step 3): max(DamageOuter, PushOuter).
     pub fn gather_radius(&self) -> f32 {
-        self.damage_outer.max(self.push_outer)
+        self.damage_outer.fmax(self.push_outer)
     }
 }
 

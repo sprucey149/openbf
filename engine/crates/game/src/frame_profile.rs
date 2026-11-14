@@ -30,6 +30,7 @@
 //! outside a battle).
 //! Wall clock: it measures the machine, nothing here reaches the sim.
 
+use core::fmath::FloatExt;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write;
@@ -390,12 +391,12 @@ impl Record {
     pub fn push(&mut self, row: FrameRow) {
         self.frames += 1;
         self.seconds += f64::from(row.ms) / 1000.0;
-        let bin = ((row.ms.max(0.0) * BINS_PER_MS as f32) as usize).min(self.hist.len() - 1);
+        let bin = ((row.ms.fmax(0.0) * BINS_PER_MS as f32) as usize).min(self.hist.len() - 1);
         self.hist[bin] += 1;
         let settled = row.t >= SETTLE_S;
         if settled {
             self.settled += f64::from(row.ms) / 1000.0;
-            self.worst_ms = self.worst_ms.max(row.ms);
+            self.worst_ms = self.worst_ms.fmax(row.ms);
             self.made_frames += u32::from(!row.made.is_empty());
             self.files += row.files;
             self.file_frames += u32::from(row.files > 0);
@@ -452,7 +453,7 @@ impl Record {
 
     /// The ms under which a share `q` of the frames fall (a bin's top).
     fn quantile(&self, q: f64) -> f32 {
-        let want = (self.frames as f64 * q).ceil().max(1.0) as u64;
+        let want = (self.frames as f64 * q).ceil().fmax(1.0) as u64;
         let mut seen = 0u64;
         for (i, n) in self.hist.iter().enumerate() {
             seen += u64::from(*n);
@@ -620,7 +621,7 @@ impl FrameProfile {
             row.cpu_ms = sched.0.saturating_sub(self.sched.0) as f32 / 1e6;
             row.queued_ms = sched.1.saturating_sub(self.sched.1) as f32 / 1e6;
             let other = row.ms - row.laps.iter().map(|l| l.1).sum::<f32>();
-            row.laps.push(("other".to_owned(), other.max(0.0)));
+            row.laps.push(("other".to_owned(), other.fmax(0.0)));
             if let Some(r) = &self.record {
                 locked(r).push(row);
             }

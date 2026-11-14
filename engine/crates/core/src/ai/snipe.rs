@@ -26,6 +26,7 @@
 use super::state::{AiState, HoldState, SnipeState};
 use super::{HOLD_ENDGAME, HOLD_MOVE_PERIOD, HOLD_SPACING};
 use crate::commander::HINT_SNIPE;
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::perception;
 use crate::sim::Sim;
@@ -346,10 +347,10 @@ pub fn lane_far(sim: &Sim, u: &Unit, p: Vec3) -> (f32, f32, Option<Vec3>) {
         .chain(u.held.iter().map(|w| w.class))
         .filter(|&c| !sim.weapon_locked(u, c))
         .filter_map(|c| perception::scope_reach(sim, &sim.weapon_classes[c], share))
-        .fold(0.0f32, f32::max);
+        .fold(0.0f32, crate::fmath::max);
     let sight = perception::view_distance(Stance::Stand, tier.view_mult)
-        .max(scope)
-        .min(2.0 * sim.mission_ai.snipe_suitability);
+        .fmax(scope)
+        .fmin(2.0 * sim.mission_ai.snipe_suitability);
     let eye = p + Vec3::Y * crate::unit::muzzle_height(Stance::Stand);
     let enemy_post = |i: usize| sim.cps[i].owner != Some(u.team);
     let mut pts: Vec<Vec3> = Vec::new();

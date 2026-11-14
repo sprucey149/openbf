@@ -1,3 +1,4 @@
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 use super::input::{buttons, PadState};
@@ -230,7 +231,7 @@ impl Sim {
                 || self.damage_regions.iter().any(|r| {
                     r.region.touches_sphere(
                         capsule.base + Vec3::Y * (0.5 * capsule.height),
-                        capsule.radius.max(0.5 * capsule.height),
+                        capsule.radius.fmax(0.5 * capsule.height),
                     )
                 })
                 || deka.water_tick(crate::TICK_DT, depth, class) > 0.0
@@ -301,7 +302,7 @@ impl Sim {
             // disc latches: OURS, measure: the maintainer's live ball sprint.
             boost: human && pad.pressed(buttons::SPRINT),
             human,
-            free_sprint: u.is_player && self.cheats.infinite_stamina,
+            free_sprint: u.is_player && self.cheats_of(u).infinite_stamina,
             cramped,
         })
     }
@@ -399,7 +400,7 @@ impl Sim {
 
     pub(super) fn droideka_world_damage(&mut self, i: usize, amount: f32, cause: DeathCause) {
         let h = self.handle(i);
-        if self.units[i].is_player && self.cheats.invincible && cause.cheat_spares() {
+        if self.units[i].is_player && self.unit_cheats(i).invincible && cause.cheat_spares() {
             return;
         }
         let u = &mut self.units[i];

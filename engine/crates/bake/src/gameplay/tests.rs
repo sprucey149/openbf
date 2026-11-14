@@ -175,6 +175,35 @@ fn height_rejection_is_atomic_and_bounds_include_edges() {
     assert_eq!(ground.raw[8 * 16 + 11], 2);
 }
 
+/// Nothing keeps a soldier inside the boundary (issue #168), so a fill may set
+/// any sample of the grid, however far past the line; never off the grid, and
+/// never on a map without a boundary.
+#[test]
+fn height_fills_reach_the_whole_grid_of_a_bounded_map() {
+    let (_, mut file, _) = fixture();
+    let raw = flat_terrain();
+    let mut ground = mungefs::terrain::Terrain::parse(&first(&raw)).unwrap();
+    // The fixture's 16-sample grid of cell 1 runs x -8..7 and z -7..8.
+    file.terrain[0].height_samples.clear();
+    file.terrain[0].height_fills = vec![[-8.0, -7.0, 16.0, 1.0, 1.0], [7.0, 8.0, 1.0, 1.0, 1.5]];
+    terrain::apply(&file.terrain[0], &mut ground).unwrap();
+    assert!(ground.raw[..16].iter().all(|&v| v == 2));
+    assert_eq!(ground.raw[15 * 16 + 15], 3);
+    for fill in [[7.0, 0.0, 2.0, 1.0, 1.0], [-9.0, 0.0, 1.0, 1.0, 1.0]] {
+        let mut fresh = mungefs::terrain::Terrain::parse(&first(&raw)).unwrap();
+        file.terrain[0].height_fills = vec![fill];
+        assert!(terrain::apply(&file.terrain[0], &mut fresh).is_err());
+        assert!(fresh.raw.iter().all(|&v| v == 0));
+    }
+    let mut fresh = mungefs::terrain::Terrain::parse(&first(&raw)).unwrap();
+    file.terrain[0].height_fills = vec![[0.0, 0.0, 1.0, 1.0, 1.0]];
+    file.terrain[0].boundaries.clear();
+    assert!(terrain::apply(&file.terrain[0], &mut fresh)
+        .unwrap_err()
+        .to_string()
+        .contains("without a boundary"));
+}
+
 #[test]
 fn terrain_query_window_rejects_noncentered_sizes_without_mutating_heights() {
     let (_, mut file, _) = fixture();

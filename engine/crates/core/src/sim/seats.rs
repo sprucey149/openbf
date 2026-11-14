@@ -76,6 +76,7 @@ use super::input::{buttons, PadState};
 use super::state::Sim;
 use crate::ai::{route, SHUT_PROBE_UP};
 use crate::collision::{HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::soldier::Stance;
 use crate::unit::{Controller, UnitHandle};
 use crate::vehicle::flyer::FlightPhase;
@@ -501,7 +502,7 @@ impl Sim {
     pub fn enter_target(&self, u: UnitHandle) -> Option<(VehicleHandle, u8)> {
         let unit = self.unit(u).filter(|x| x.mount.is_none())?;
         let cap = unit.capsule();
-        let (centre, r_self) = (cap.center(), cap.radius.max(cap.height * 0.5));
+        let (centre, r_self) = (cap.center(), cap.radius.fmax(cap.height * 0.5));
         let (aim, _, _) = unit.aim_frame();
         let eye = unit.muzzle();
         let mut best: Option<(f32, VehicleHandle, u8)> = None;
@@ -886,7 +887,7 @@ impl Sim {
             .ray_with(from, dir, len, Layers::SOLDIER, hulls)
             .map(|h| h.t);
         let t = match (terrain, world) {
-            (Some(a), Some(b)) => a.min(b),
+            (Some(a), Some(b)) => a.fmin(b),
             (a, b) => a.or(b)?,
         };
         Some(t / len)
@@ -1065,4 +1066,4 @@ impl Sim {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

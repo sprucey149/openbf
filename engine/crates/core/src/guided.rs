@@ -2,6 +2,7 @@
 //! end reasons and replay state. Follows `analysis/re-guided-rockets.md` (card
 //! GUIDED).
 
+use crate::fmath::FloatExt;
 use crate::unit::UnitHandle;
 use crate::vehicle::flyer::{self, Flight, FlightPhase, FlyerEnvironment, FlyerParams, FlyerState};
 use crate::vehicle::hover::{quat_x, quat_y, quat_z, HoverInput};
@@ -94,7 +95,7 @@ impl GuidedClass {
     }
 
     pub fn top_speed(&self) -> f32 {
-        self.flight.boost_speed.max(self.flight.max_speed)
+        self.flight.boost_speed.fmax(self.flight.max_speed)
     }
 }
 
@@ -249,7 +250,7 @@ impl GuidedRocket {
                 self.spent.map_or(0.0, |(_, t)| t),
             ])
         {
-            eat(&value.to_bits().to_le_bytes());
+            eat(&value.hash_bits().to_le_bytes());
         }
         self.flyer.hash_into(eat);
         eat(&self.prev_buttons.to_le_bytes());

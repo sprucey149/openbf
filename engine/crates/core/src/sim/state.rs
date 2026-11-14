@@ -13,6 +13,7 @@ use crate::collision::{
     CollisionWorld, FOOT_RADIUS, FOOT_RING, FOOT_RING_DIRS, NO_GROUND, STEP_HEIGHT, TERRAIN_BURY,
 };
 use crate::cp::CommandPost;
+use crate::fmath::FloatExt;
 use crate::heightfield::Heightfield;
 use crate::lcg::GameLcg;
 use crate::projectile::Bolt;
@@ -41,7 +42,9 @@ pub const OUTCOME_DRAW: u8 = 2;
 /// all-awards. Toggled from the pause menu's rows or its Morse words
 /// (`game::cheats`); the game keeps them for the session and copies them
 /// into each battle's `Sim`. They apply to PLAYER units only (the PS2 gates
-/// on a human controller). Not hashed and not in the input log.
+/// on a human controller), each through its player slot's set
+/// ([`Sim::cheats_of`]: the slot's own, else the session's). Not hashed and
+/// not in the input log.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cheats {
     pub invincible: bool,
@@ -161,6 +164,22 @@ impl Cheats {
     }
 }
 
+/// Issue #168: one player slot's aim-assist settings, the four session
+/// fields [`Sim::assist_intensity`], [`Sim::pad_look_sensitivity`],
+/// [`Sim::assist_armed`] and [`Sim::assist_lead_on`] for one slot
+/// ([`Sim::assist_profile`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AssistProfile {
+    /// [`Sim::assist_intensity`].
+    pub intensity: f32,
+    /// [`Sim::pad_look_sensitivity`].
+    pub pad_look_sensitivity: f32,
+    /// [`Sim::assist_armed`].
+    pub armed: bool,
+    /// [`Sim::assist_lead_on`].
+    pub lead_on: bool,
+}
+
 /// Card HOLD: a live explosive lying on the ground — a landed grenade — that
 /// bots within its `radius` get warned of and run clear of (`crate::ai`
 /// `think`; the PS2's grenade warning, re-grenades.md §7.4: every AI unit
@@ -198,6 +217,7 @@ pub const NEED_GUNNER_CHANCE: f32 = 0.3;
 /// other difficulties.
 pub const GRENADE_WARN_DELAY: (f32, f32) = (0.6, 1.3);
 
+#[derive(Clone)]
 pub struct Sim {
     pub tick: u64,
     /// The round's difficulty tier (PLAN §Saves: host authority). SIM STATE —
@@ -260,7 +280,9 @@ pub struct Sim {
     /// hashed — when there are any, so a map with no door (every BF1 map, the
     /// fixtures) hashes exactly as before the doors existed.
     pub doors: Vec<crate::door::Door>,
-    pub weapon_classes: Vec<WeaponClass>,
+    /// The weapon classes: SETUP data, not hashed. Issue #168: shared with a
+    /// clone ([`crate::shared::Shared`]); written only at setup.
+    pub weapon_classes: crate::shared::Shared<Vec<WeaponClass>>,
     /// Per-team soldier CLASS tables, index-aligned with what
     /// `UnitSpec::class` names (`game::roster::FactionRoster` fills them from
     /// the mission's mix, else the faction's default list). SETUP data like
@@ -452,8 +474,20 @@ pub struct Sim {
     pub station_wreck_collision: Vec<Vec<crate::collision::HullPart>>,
     pub station_live_collision: Vec<Vec<crate::collision::HullPart>>,
     pub battle: Battle,
+    /// The session's cheats: what every player slot without its own set
+    /// ([`Sim::slot_cheats`]) plays under. Single player installs only this,
+    /// so slot 0 reads it as it always did.
     pub cheats: Cheats,
-    pub(super) medal_career: Option<super::awards::MedalCareer>,
+    /// Issue #168 (LAN, `analysis/plan/LAN_MULTIPLAYER.md` §5): a player
+    /// slot's own cheats, indexed by slot; `None` (and every slot past the
+    /// end) plays under [`Sim::cheats`]. Read through
+    /// [`Sim::cheats_for_slot`], written by [`Sim::set_slot_cheats`]. Like
+    /// `cheats`, an INPUT every peer applies on the same tick: not hashed.
+    pub slot_cheats: Vec<Option<Cheats>>,
+    /// Each player slot's medal career, indexed by slot
+    /// ([`Sim::install_slot_medal_career`]). Slot 0's hashes exactly where
+    /// the single career did; another slot's adds bytes only once installed.
+    pub(super) medal_careers: Vec<Option<super::awards::MedalCareer>>,
     /// BF1 DAT_00517508 / BF2 DAT_005fcbe0: the profile's friendly-fire
     /// percent x 0.01, 100 in every instant-action battle state read (326
     /// states, both games; re-blaster-damage.md section 6.3). A bot's shot
@@ -469,6 +503,12 @@ pub struct Sim {
     pub pad_look_sensitivity: f32,
     /// Term-3 gate (SP Auto Aim option); default on.
     pub assist_armed: bool,
+    /// Issue #168: a player slot's own aim-assist profile, indexed by slot;
+    /// `None` (and every slot past the end) reads the session fields
+    /// (`assist_intensity`, `pad_look_sensitivity`, `assist_armed`,
+    /// `assist_lead_on`). Read through [`Sim::assist_profile`]. An INPUT
+    /// like those fields: not hashed.
+    pub slot_assist: Vec<Option<AssistProfile>>,
     /// Aim-assist state per player slot (parallel to `players`).
     pub assist: Vec<AssistState>,
     /// OURS: the aim assist's lead on the magnet (`core::aim_assist::Lead`);
@@ -506,7 +546,9 @@ pub struct Sim {
     /// slot: slot `s` is driven by `pads[s]`. A slot whose entry is `None` has
     /// no unit; a slot past the end of the `pads` slice idles that tick.
     pub players: Vec<Option<UnitHandle>>,
-    pub target_hints: [super::target_hints::TargetHints; 4],
+    /// The flyer target hints per player slot (parallel to `players`, grown
+    /// by `sync_slot_tables`). Not hashed: rebuilt from the sim each tick.
+    pub target_hints: Vec<super::target_hints::TargetHints>,
     pub cps: Vec<CommandPost>,
     /// Zero-CP domination timer: (dominating team, seconds).
     pub domination: Option<(u8, f32)>,
@@ -602,6 +644,16 @@ pub struct Sim {
         super::input::PadState,
         crate::ai::NavTick,
     )>,
+    /// Issue #168: the pad each AI unit's last think made, by unit index,
+    /// which [`Sim::step_predicted`] replays in place of a think. Derived
+    /// from hashed state (the think is a function of it), so NOT hashed.
+    pub(super) ai_pads: Vec<super::input::PadState>,
+    /// Issue #168, lag compensation ([`super::lag_comp`]): the hit volumes
+    /// of the last steps' ends. Derived from hashed state, so NOT hashed.
+    pub(super) hit_history: super::lag_comp::HitHistory,
+    /// Each unit's [`super::input::PadState::view_lag`] this tick (0 for a
+    /// bot), by unit index. An input, like the pads: not hashed.
+    pub(super) view_lags: Vec<u8>,
     /// The map's authored planning graph (`core::nav`), when it ships one.
     /// An INPUT like the heightfield and the collision world: immutable during
     /// the round and NOT part of [`Sim::hash`]. `None` = the AI walks straight
@@ -632,6 +684,10 @@ pub struct Sim {
     /// Bot census: the round's think wall times. A measurement of the
     /// machine like `tick_cost`: never read by the sim, not hashed.
     pub think_hist: crate::ai::census::ThinkHist,
+    /// Issue #168 (§8b): how many threads the bots' thinks may use
+    /// ([`super::think_pool`]; 1 = the serial pass). How fast, never what:
+    /// every count gives the same tick, so it is not hashed.
+    pub think_threads: usize,
     /// Phase B: the two teams' objective plans (`core::commander`). SIM STATE
     /// — hashed, replay-exact, re-made one team per tick.
     pub commander: [crate::commander::TeamPlan; 2],
@@ -1041,7 +1097,7 @@ impl Sim {
             heightfield: None,
             collision: CollisionWorld::default(),
             doors: Vec::new(),
-            weapon_classes: vec![WeaponClass::bf1_rifle()],
+            weapon_classes: vec![WeaponClass::bf1_rifle()].into(),
             classes: [Vec::new(), Vec::new()],
             test_rosters: [None; 2],
             heroes: None,
@@ -1105,11 +1161,13 @@ impl Sim {
             station_live_collision: Vec::new(),
             battle: Battle::new([250, 250]),
             cheats: Cheats::default(),
-            medal_career: None,
+            slot_cheats: Vec::new(),
+            medal_careers: Vec::new(),
             friendly_fire_scale: 1.0,
             assist_intensity: 1.0,
             pad_look_sensitivity: 1.0,
             assist_armed: true,
+            slot_assist: Vec::new(),
             assist: Vec::new(),
             assist_lead_on: true,
             assist_lead: Vec::new(),
@@ -1122,7 +1180,7 @@ impl Sim {
             press_edges: Vec::new(),
             shot_flights: Vec::new(),
             players: Vec::new(),
-            target_hints: Default::default(),
+            target_hints: Vec::new(),
             cps: Vec::new(),
             domination: None,
             outcome: None,
@@ -1151,6 +1209,9 @@ impl Sim {
             positions: Default::default(),
             unit_grid: Default::default(),
             ai_updates: Vec::new(),
+            ai_pads: Vec::new(),
+            hit_history: Default::default(),
+            view_lags: Vec::new(),
             nav: None,
             flank: Default::default(),
             nav_stats: NavStats::default(),
@@ -1158,6 +1219,7 @@ impl Sim {
             tick_cost: TickCost::default(),
             bot_census: Default::default(),
             think_hist: Default::default(),
+            think_threads: super::think_pool::default_think_threads(),
             commander: [
                 crate::commander::TeamPlan::new(0),
                 crate::commander::TeamPlan::new(1),
@@ -1229,10 +1291,75 @@ impl Sim {
     /// on foot and in a seat (the PS2 asks for a human controller).
     pub(crate) fn ammo_cheats(&self, i: usize) -> (bool, bool) {
         let player = self.units[i].is_player;
-        (
-            player && self.cheats.infinite_ammo,
-            player && self.cheats.no_reload,
-        )
+        let c = self.unit_cheats(i);
+        (player && c.infinite_ammo, player && c.no_reload)
+    }
+
+    /// The cheats player slot `slot` plays under: its own set
+    /// ([`Sim::set_slot_cheats`]), else the session's [`Sim::cheats`]. Single
+    /// player sets no slot's, so slot 0 reads `cheats` as it always did.
+    pub fn cheats_for_slot(&self, slot: usize) -> Cheats {
+        self.slot_cheats
+            .get(slot)
+            .copied()
+            .flatten()
+            .unwrap_or(self.cheats)
+    }
+
+    /// Give player slot `slot` its own cheats (`Some`), or put it back on the
+    /// session's (`None`). The multiplayer `SetSlotCheats` command (LAN §5).
+    pub fn set_slot_cheats(&mut self, slot: usize, cheats: Option<Cheats>) {
+        if self.slot_cheats.len() <= slot {
+            if cheats.is_none() {
+                return;
+            }
+            self.slot_cheats.resize(slot + 1, None);
+        }
+        self.slot_cheats[slot] = cheats;
+    }
+
+    /// The cheats unit `u` would play under: its player slot's
+    /// ([`Sim::cheats_for_slot`]); a unit with no slot reads the session's,
+    /// so every caller still gates on `is_player` (or the controller) as it
+    /// did when the cheats were one global set.
+    pub fn cheats_of(&self, u: &Unit) -> Cheats {
+        match u.spec.player_slot {
+            Some(slot) => self.cheats_for_slot(usize::from(slot)),
+            None => self.cheats,
+        }
+    }
+
+    /// [`Sim::cheats_of`] unit index `i`.
+    pub(crate) fn unit_cheats(&self, i: usize) -> Cheats {
+        self.cheats_of(&self.units[i])
+    }
+
+    /// Player slot `slot`'s aim-assist profile: its own
+    /// ([`Sim::set_slot_assist`]), else the session fields.
+    pub fn assist_profile(&self, slot: usize) -> AssistProfile {
+        self.slot_assist
+            .get(slot)
+            .copied()
+            .flatten()
+            .unwrap_or(AssistProfile {
+                intensity: self.assist_intensity,
+                pad_look_sensitivity: self.pad_look_sensitivity,
+                armed: self.assist_armed,
+                lead_on: self.assist_lead_on,
+            })
+    }
+
+    /// Give player slot `slot` its own aim-assist profile (`Some`), or put it
+    /// back on the session fields (`None`): a guest's profile settings
+    /// (LAN §4.1), applied on the same tick on every peer.
+    pub fn set_slot_assist(&mut self, slot: usize, profile: Option<AssistProfile>) {
+        if self.slot_assist.len() <= slot {
+            if profile.is_none() {
+                return;
+            }
+            self.slot_assist.resize(slot + 1, None);
+        }
+        self.slot_assist[slot] = profile;
     }
 
     fn item_weapon_class(&mut self, wc: &WeaponClass) -> usize {
@@ -1387,7 +1514,7 @@ impl Sim {
         let probe = if rising {
             feet.y
         } else {
-            (feet.y + step).max(from_y)
+            (feet.y + step).fmax(from_y)
         };
         self.floor_contact(feet, probe, crate::collision::HullFilter::All, true)
     }
@@ -1395,7 +1522,7 @@ impl Sim {
     /// [`Sim::ground_under_n`] as ONE ray, with no foot ring
     /// ([`Sim::ground_point_under`] with the floor's normal).
     pub fn ground_point_under_n(&self, feet: Vec3, from_y: f32) -> (f32, Vec3) {
-        let probe = (feet.y + STEP_HEIGHT).max(from_y);
+        let probe = (feet.y + STEP_HEIGHT).fmax(from_y);
         self.floor_under(feet, probe, crate::collision::HullFilter::All, false)
     }
 
@@ -1404,14 +1531,14 @@ impl Sim {
     /// DOWN in the air asks when the whole step found a face he cannot stand
     /// on (card JARC, `Sim::step` 3a').
     pub fn ground_under_falling(&self, feet: Vec3, from_y: f32) -> (f32, Vec3) {
-        let probe = (feet.y + crate::collision::AIR_STEP).max(from_y);
+        let probe = (feet.y + crate::collision::AIR_STEP).fmax(from_y);
         self.floor_under(feet, probe, crate::collision::HullFilter::All, true)
     }
 
     /// The floor under the point `p` for ONE down ray from no lower than
     /// `from_y`: where a falling item lands (card PWUP).
     pub(super) fn floor_point_under(&self, p: Vec3, from_y: f32) -> f32 {
-        let probe = (p.y + STEP_HEIGHT).max(from_y);
+        let probe = (p.y + STEP_HEIGHT).fmax(from_y);
         self.floor_under(p, probe, crate::collision::HullFilter::All, false)
             .0
     }
@@ -1522,7 +1649,7 @@ impl Sim {
                         }
                     }
                     return match best {
-                        Some((y, n, owner)) => ((y - lift).max(hit.0), n, owner),
+                        Some((y, n, owner)) => ((y - lift).fmax(hit.0), n, owner),
                         None => hit,
                     };
                 }
@@ -1548,7 +1675,9 @@ impl Sim {
 
 mod events;
 pub use events::*;
+mod digest;
 mod hash;
+pub use digest::STATIC_DIGEST_GROUPS;
 
 #[cfg(test)]
 mod tests;

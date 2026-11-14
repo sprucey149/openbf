@@ -7,6 +7,7 @@
 //! bolt an omni light (re-bolt §5.2 [O], card FXBL); BF1 parses them and
 //! never reads them (§5.1).
 
+use crate::fmath::FloatExt;
 use crate::weapon::{HASH_FALLOFF_DURATION, HASH_FALLOFF_START};
 
 /// Laser keys (fnv over byte|0x20, `analysis/re-bolt.md` §1 [O]).
@@ -178,12 +179,12 @@ impl LaserLook {
             HASH_LASER_WIDTH => self.width = f().unwrap_or(0.0),
             HASH_LASER_LENGTH => {
                 let v = f().unwrap_or(0.0);
-                self.length = v.min(LASER_MAX_LENGTH);
-                self.glow_length = (3.0 * v).min(LASER_MAX_LENGTH);
-                self.blur_length = (15.0 * v).min(LASER_MAX_LENGTH);
+                self.length = v.fmin(LASER_MAX_LENGTH);
+                self.glow_length = (3.0 * v).fmin(LASER_MAX_LENGTH);
+                self.blur_length = (15.0 * v).fmin(LASER_MAX_LENGTH);
             }
-            HASH_GLOW_LENGTH => self.glow_length = f().unwrap_or(0.0).min(LASER_MAX_LENGTH),
-            HASH_BLUR_LENGTH => self.blur_length = f().unwrap_or(0.0).min(LASER_MAX_LENGTH),
+            HASH_GLOW_LENGTH => self.glow_length = f().unwrap_or(0.0).fmin(LASER_MAX_LENGTH),
+            HASH_BLUR_LENGTH => self.blur_length = f().unwrap_or(0.0).fmin(LASER_MAX_LENGTH),
             HASH_LASER_TEXTURE => self.texture = Some(value.trim().to_owned()),
             HASH_LASER_GLOW_COLOR => colour_bytes(value, &mut self.glow_color),
             HASH_END_LASER_GLOW_COLOR => colour_bytes(value, &mut self.end_glow_color),
@@ -255,7 +256,7 @@ impl LaserLook {
     /// How long the drawn length may grow: max(LaserLength, GlowLength,
     /// BlurLength) (the spawn's cap, re-bolt §4).
     pub fn cap(&self) -> f32 {
-        self.length.max(self.glow_length).max(self.blur_length)
+        self.length.fmax(self.glow_length).fmax(self.blur_length)
     }
 
     /// BF2's End fade of `from` toward `to` at `age` seconds of flight (the
@@ -281,7 +282,7 @@ impl LaserLook {
     pub fn glow_bytes(&self, age: f32, fade: f32) -> [u8; 4] {
         let mut g = self.end_fade(self.glow_color, self.end_glow_color, age);
         if fade < 1.0 {
-            g = g.map(|b| (f32::from(b) * fade.max(0.0)) as u8);
+            g = g.map(|b| (f32::from(b) * fade.fmax(0.0)) as u8);
         }
         g
     }

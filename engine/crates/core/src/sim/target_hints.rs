@@ -1,5 +1,6 @@
 use super::lock_on::{lock_score, LockTarget};
 use super::state::Sim;
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 const MAX_RECORDS: usize = 64;
@@ -32,7 +33,14 @@ impl TargetHints {
 }
 
 impl Sim {
+    /// Every player slot's hint list, in slot order. The lists grow with
+    /// `players` (a caller may assign `players` without
+    /// [`Sim::sync_slot_tables`]); a list past the last slot is kept.
     pub(super) fn tick_target_hints(&mut self) {
+        if self.target_hints.len() < self.players.len() {
+            self.target_hints
+                .resize_with(self.players.len(), Default::default);
+        }
         let mut hints = std::mem::take(&mut self.target_hints);
         for (slot, list) in hints.iter_mut().enumerate() {
             self.update_target_hints(list, slot);
@@ -83,7 +91,7 @@ impl Sim {
                     return false;
                 }
             }
-            r.point = p.pos + p.up * (p.radius * LIFT_FACTOR).min(LIFT_MAX);
+            r.point = p.pos + p.up * (p.radius * LIFT_FACTOR).fmin(LIFT_MAX);
             r.friendly = self.relation_to(team, p.team) >= 0;
             true
         });
@@ -113,7 +121,7 @@ impl Sim {
             if let Some((target, p)) = best.and_then(|(_, t)| Some((t, self.lock_probe(t)?))) {
                 hints.records.push(TargetHint {
                     target,
-                    point: p.pos + p.up * (p.radius * LIFT_FACTOR).min(LIFT_MAX),
+                    point: p.pos + p.up * (p.radius * LIFT_FACTOR).fmin(LIFT_MAX),
                     friendly: self.relation_to(team, p.team) >= 0,
                     visible: false,
                     timer: 0.0,
@@ -147,6 +155,9 @@ mod tests {
             vehicle: crate::vehicle::VehicleHandle,
         ) -> bool {
             let target = LockTarget::Aim(crate::sim::input::AimTarget::Vehicle(vehicle));
+            if self.target_hints.is_empty() {
+                self.target_hints.push(TargetHints::default());
+            }
             self.target_hints[0].records.push(TargetHint {
                 target,
                 point: Vec3::ZERO,
@@ -157,5 +168,81 @@ mod tests {
             });
             self.on_a_hint_list(target)
         }
+    }
+
+    fn fighter(s: &mut Sim, team: u8, pos: Vec3) -> crate::vehicle::VehicleHandle {
+        use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+        s.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(team),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: crate::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        })
+    }
+
+    /// Issue #168: a human in slot 2 (no one in 0 and 1) gets his own hint
+    /// list, and only his: the lists are per slot, not the first four.
+    #[test]
+    fn a_third_slots_pilot_gets_his_own_target_hints() {
+        use crate::unit::UnitSpec;
+        use crate::vehicle::gun::{Aimer, GunSetup, GunWeapon};
+        let mut s = Sim::empty(1);
+        s.flyer_params = vec![Some(crate::vehicle::flyer::FlyerParams::default())];
+        let w = &mut s.weapon_classes[0];
+        w.target_kind = super::super::lock_on::VEHICLE_KIND_BIT;
+        w.target_lock_max = 1000.0;
+        w.target_lock_lose = 1100.0;
+        s.seat_setup = vec![Some(crate::vehicle::SeatSetup {
+            radius: 5.0,
+            body_active: vec![],
+            boardable: vec![true],
+            exit_drop: 10.0,
+            ai_size: 1,
+            guns: vec![Some(GunSetup {
+                weapons: vec![GunWeapon {
+                    class: 0,
+                    infinite: true,
+                    reserve_clips: 0,
+                    fire_points: Vec::new(),
+                    fire_limits: Vec::new(),
+                    fire_pivots: Vec::new(),
+                }],
+                fire_point: Vec3::ZERO,
+                pivot: Vec3::ZERO,
+                eye: Vec3::ZERO,
+                aimer: Aimer::default(),
+                pilot: true,
+                turn: None,
+                framed: false,
+                aimer_bind: glam::Quat::IDENTITY,
+                weapon_aimer: None,
+                follows_owner: false,
+                gunner: None,
+            })],
+        })];
+        let own = fighter(&mut s, 0, Vec3::ZERO);
+        let p = s
+            .spawn(&UnitSpec::player_in_slot(2, 0, Vec3::ZERO))
+            .unwrap();
+        assert!(s.seat_unit(p, own, 0));
+        assert_eq!(s.players.len(), 3);
+        assert!(s.target_hints.len() >= 3, "grown with the slot tables");
+        let (pos, dir) = s.flyer_ray(p);
+        let foe = fighter(&mut s, 1, pos + dir * 200.0);
+        s.tick_target_hints();
+        let target = LockTarget::Aim(crate::sim::input::AimTarget::Vehicle(foe));
+        let listed: Vec<bool> = s
+            .target_hints
+            .iter()
+            .map(|l| l.records().iter().any(|r| r.target == target))
+            .collect();
+        assert_eq!(listed, [false, false, true]);
+        assert!(s.on_a_hint_list(target));
     }
 }

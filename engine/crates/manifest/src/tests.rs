@@ -1045,7 +1045,8 @@ fn vehicle_manifest_field_order_is_the_wire_format() {
             "vis_min_y",
             "walker",
             "vis_box",
-            "flyer"
+            "flyer",
+            "hover"
         ]
     );
 }

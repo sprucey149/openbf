@@ -29,6 +29,7 @@
 #[cfg(test)]
 mod projectile_tests;
 mod walker;
+use core::fmath::FloatExt;
 pub use walker::WalkerPose;
 
 use crate::walk::WalkSim;
@@ -73,6 +74,128 @@ pub struct VehiclePose {
     pub aim: (f32, f32),
     pub walker: Option<WalkerPose>,
     pub flyer_lift: Option<f32>,
+}
+
+impl UnitPose {
+    /// `u`'s drawn pose now.
+    pub fn of(u: &core::unit::Unit) -> Self {
+        UnitPose {
+            gen: u.gen,
+            alive: u.alive,
+            seat: u.mount.map(|m| (m.vehicle.index, m.seat)),
+            pos: u.soldier.pos,
+            yaw: u.soldier.yaw,
+            pitch: u.soldier.pitch,
+            choked: u.choked.map(|c| c.age),
+            melee: u.weapon.melee.as_ref().and_then(|m| {
+                m.pose().map(|(name, time, _)| {
+                    (
+                        core::hero_weapon::sound_hash(name),
+                        m.block_animation.is_some(),
+                        time,
+                    )
+                })
+            }),
+        }
+    }
+
+    /// Write this pose's drawn values into `u`.
+    pub fn write_to(&self, u: &mut core::unit::Unit) {
+        u.soldier.pos = self.pos;
+        u.soldier.yaw = self.yaw;
+        u.soldier.pitch = self.pitch;
+        if let (Some(choked), Some(age)) = (&mut u.choked, self.choked) {
+            choked.age = age;
+        }
+        if let (Some(m), Some((_, block, time))) = (&mut u.weapon.melee, self.melee) {
+            if block {
+                m.block_animation_time = time;
+            } else {
+                m.runtime.time = time;
+            }
+        }
+    }
+}
+
+impl VehiclePose {
+    /// `v`'s drawn pose now (`sim` holds its walker parameters).
+    pub fn of(sim: &core::sim::Sim, v: &core::vehicle::Vehicle) -> Self {
+        VehiclePose {
+            gen: v.gen,
+            alive: v.alive,
+            pos: v.pos,
+            rot: v.rot,
+            looks: v
+                .guns
+                .iter()
+                .map(|g| g.as_ref().map(|g| [g.look, g.aim, g.rate]))
+                .collect(),
+            aim: (v.walker.aim_yaw, v.walker.aim_pitch),
+            flyer_lift: (v.kind == core::vehicle::VehicleKind::Flyer).then_some(v.flyer.lift),
+            walker: (v.kind == core::vehicle::VehicleKind::Walker).then(|| {
+                WalkerPose::capture(
+                    v,
+                    sim.walker_params
+                        .get(v.class as usize)
+                        .and_then(Option::as_ref),
+                )
+            }),
+        }
+    }
+
+    /// Write this pose's drawn values into `v`.
+    pub fn write_to(&self, v: &mut core::vehicle::Vehicle) {
+        v.pos = self.pos;
+        v.rot = self.rot;
+        for (g, l) in v.guns.iter_mut().zip(&self.looks) {
+            if let (Some(g), Some([l, a, r])) = (g.as_mut(), l) {
+                (g.look, g.aim, g.rate) = (*l, *a, *r);
+            }
+        }
+        (v.walker.aim_yaw, v.walker.aim_pitch) = self.aim;
+        if let Some(lift) = self.flyer_lift {
+            v.flyer.lift = lift;
+        }
+        if let Some(p) = &self.walker {
+            p.write(v);
+        }
+    }
+
+    /// The pose `t` of the way from `prev` to `self` (`self` when the two
+    /// cannot blend: a new vehicle, a death, a teleport).
+    pub fn toward(&self, prev: &VehiclePose, t: f32) -> VehiclePose {
+        let mut o = self.clone();
+        o.blend_from(prev, t);
+        o
+    }
+
+    /// [`VehiclePose::toward`] in place.
+    fn blend_from(&mut self, prev: &VehiclePose, t: f32) {
+        let o = self;
+        if !vehicle_blendable(prev, o) {
+            return;
+        }
+        o.pos = mix3(prev.pos, o.pos, t);
+        if prev.rot != o.rot {
+            o.rot = prev.rot.slerp(o.rot, t);
+        }
+        for (l, pl) in o.looks.iter_mut().zip(&prev.looks) {
+            if let (Some(l), Some(pl)) = (l.as_mut(), pl) {
+                *l = [
+                    lerp_look(pl[0], l[0], t),
+                    lerp_look(pl[1], l[1], t),
+                    (mix(pl[2].0, l[2].0, t), mix(pl[2].1, l[2].1, t)),
+                ];
+            }
+        }
+        o.aim = lerp_look(prev.aim, o.aim, t);
+        if let (Some(current), Some(previous)) = (&mut o.flyer_lift, prev.flyer_lift) {
+            *current = mix(previous, *current, t);
+        }
+        if let (Some(o), Some(p)) = (o.walker.as_mut(), prev.walker.as_ref()) {
+            o.blend(p, t);
+        }
+    }
 }
 
 /// One remote droid's or auto-turret's drawn pose, matched across ticks by its id.
@@ -130,49 +253,14 @@ impl Pose {
     /// but a vehicle's looks).
     pub fn capture_into(&mut self, walk: &WalkSim) {
         self.units.clear();
-        self.units.extend(walk.sim.units.iter().map(|u| UnitPose {
-            gen: u.gen,
-            alive: u.alive,
-            seat: u.mount.map(|m| (m.vehicle.index, m.seat)),
-            pos: u.soldier.pos,
-            yaw: u.soldier.yaw,
-            pitch: u.soldier.pitch,
-            choked: u.choked.map(|c| c.age),
-            melee: u.weapon.melee.as_ref().and_then(|m| {
-                m.pose().map(|(name, time, _)| {
-                    (
-                        core::hero_weapon::sound_hash(name),
-                        m.block_animation.is_some(),
-                        time,
-                    )
-                })
-            }),
-        }));
+        self.units.extend(walk.sim.units.iter().map(UnitPose::of));
         self.vehicles.clear();
-        self.vehicles.extend(walk.sim.vehicles.iter().map(|v| {
-            VehiclePose {
-                gen: v.gen,
-                alive: v.alive,
-                pos: v.pos,
-                rot: v.rot,
-                looks: v
-                    .guns
-                    .iter()
-                    .map(|g| g.as_ref().map(|g| [g.look, g.aim, g.rate]))
-                    .collect(),
-                aim: (v.walker.aim_yaw, v.walker.aim_pitch),
-                flyer_lift: (v.kind == core::vehicle::VehicleKind::Flyer).then_some(v.flyer.lift),
-                walker: (v.kind == core::vehicle::VehicleKind::Walker).then(|| {
-                    WalkerPose::capture(
-                        v,
-                        walk.sim
-                            .walker_params
-                            .get(v.class as usize)
-                            .and_then(Option::as_ref),
-                    )
-                }),
-            }
-        }));
+        self.vehicles.extend(
+            walk.sim
+                .vehicles
+                .iter()
+                .map(|v| VehiclePose::of(&walk.sim, v)),
+        );
         self.droids.clear();
         self.droids.extend(walk.sim.droids.iter().map(|d| ItemPose {
             id: d.id,
@@ -240,35 +328,10 @@ impl Pose {
     /// Write this pose into the walk (slots past either length untouched).
     pub fn write(&self, walk: &mut WalkSim) {
         for (u, p) in walk.sim.units.iter_mut().zip(&self.units) {
-            u.soldier.pos = p.pos;
-            u.soldier.yaw = p.yaw;
-            u.soldier.pitch = p.pitch;
-            if let (Some(choked), Some(age)) = (&mut u.choked, p.choked) {
-                choked.age = age;
-            }
-            if let (Some(m), Some((_, block, time))) = (&mut u.weapon.melee, p.melee) {
-                if block {
-                    m.block_animation_time = time;
-                } else {
-                    m.runtime.time = time;
-                }
-            }
+            p.write_to(u);
         }
         for (v, p) in walk.sim.vehicles.iter_mut().zip(&self.vehicles) {
-            v.pos = p.pos;
-            v.rot = p.rot;
-            for (g, l) in v.guns.iter_mut().zip(&p.looks) {
-                if let (Some(g), Some([l, a, r])) = (g.as_mut(), l) {
-                    (g.look, g.aim, g.rate) = (*l, *a, *r);
-                }
-            }
-            (v.walker.aim_yaw, v.walker.aim_pitch) = p.aim;
-            if let Some(lift) = p.flyer_lift {
-                v.flyer.lift = lift;
-            }
-            if let Some(p) = &p.walker {
-                p.write(v);
-            }
+            p.write_to(v);
         }
         for (d, p) in walk.sim.droids.iter_mut().zip(&self.droids) {
             if d.id == p.id {
@@ -371,41 +434,19 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
             let start = p
                 .choked
                 .filter(|old| old <= age)
-                .unwrap_or((*age - core::TICK_DT).max(0.0));
+                .unwrap_or((*age - core::TICK_DT).fmax(0.0));
             *age = mix(start, *age, t);
         }
         if let Some((key, block, time)) = &mut o.melee {
             let start = p
                 .melee
                 .filter(|old| old.0 == *key && old.1 == *block && old.2 <= *time)
-                .map_or((*time - core::TICK_DT).max(0.0), |old| old.2);
+                .map_or((*time - core::TICK_DT).fmax(0.0), |old| old.2);
             *time = mix(start, *time, t);
         }
     }
     for (o, p) in out.vehicles.iter_mut().zip(&prev.vehicles) {
-        if !vehicle_blendable(p, o) {
-            continue;
-        }
-        o.pos = mix3(p.pos, o.pos, t);
-        if p.rot != o.rot {
-            o.rot = p.rot.slerp(o.rot, t);
-        }
-        for (l, pl) in o.looks.iter_mut().zip(&p.looks) {
-            if let (Some(l), Some(pl)) = (l.as_mut(), pl) {
-                *l = [
-                    lerp_look(pl[0], l[0], t),
-                    lerp_look(pl[1], l[1], t),
-                    (mix(pl[2].0, l[2].0, t), mix(pl[2].1, l[2].1, t)),
-                ];
-            }
-        }
-        o.aim = lerp_look(p.aim, o.aim, t);
-        if let (Some(current), Some(previous)) = (&mut o.flyer_lift, p.flyer_lift) {
-            *current = mix(previous, *current, t);
-        }
-        if let (Some(o), Some(p)) = (o.walker.as_mut(), p.walker.as_ref()) {
-            o.blend(p, t);
-        }
+        o.blend_from(p, t);
     }
     blend_items(&prev.droids, &mut out.droids, t);
     blend_items(&prev.turrets, &mut out.turrets, t);
@@ -729,6 +770,59 @@ pub fn blend_in_looking(walk: &mut WalkSim, look: &PadState) {
             walk.blend.drawn = Some(share);
         }
     }
+    walk.blend_in();
+    if let Some(p) = preview {
+        let mut blend = std::mem::take(&mut walk.blend);
+        blend.preview(walk, p);
+        walk.blend = blend;
+    }
+}
+
+/// Issue #168 (LAN §6): the look a lockstep peer draws - `sim`'s aim for
+/// `h` folded over `pads` (the inputs sent and not yet stepped, then the
+/// input tick still open, last), [`Sim::look_preview_over`]. A held stick in
+/// the open tick turns only `share` of its tick (the input clock's phase),
+/// as [`blend_in_looking`] draws a stick in single player. Returns the
+/// preview and the share a stick drew (for [`Blend::stamp`]'s fire lag).
+///
+/// [`Sim::look_preview_over`]: core::sim::Sim::look_preview_over
+pub fn folded_look(
+    sim: &core::sim::Sim,
+    h: core::unit::UnitHandle,
+    pads: &[PadState],
+    share: f32,
+) -> (Option<LookPreview>, Option<f32>) {
+    let mut preview = sim.look_preview_over(h, pads);
+    let Some((open, done)) = pads.split_last() else {
+        return (preview, None);
+    };
+    let stick = !open.has_look() && !open.mouse_aim();
+    let mut drawn = None;
+    if let (true, Some(LookPreview::Foot { unit, yaw, pitch })) = (stick, preview.as_mut()) {
+        let before = match sim.look_preview_over(h, done) {
+            Some(LookPreview::Foot {
+                unit: u,
+                yaw,
+                pitch,
+            }) if u == *unit => Some((yaw, pitch)),
+            _ => sim
+                .units
+                .get(*unit)
+                .map(|u| (u.soldier.yaw, u.soldier.pitch)),
+        };
+        if let Some((y0, p0)) = before {
+            *yaw = y0 + (*yaw - y0) * share;
+            *pitch = p0 + (*pitch - p0) * share;
+            drawn = Some(share);
+        }
+    }
+    (preview, drawn)
+}
+
+/// [`blend_in_looking`] with a preview already made ([`folded_look`]): the
+/// blend in, then the preview over it; `drawn` is the stick share it drew.
+pub fn blend_in_previewed(walk: &mut WalkSim, preview: Option<LookPreview>, drawn: Option<f32>) {
+    walk.blend.drawn = drawn;
     walk.blend_in();
     if let Some(p) = preview {
         let mut blend = std::mem::take(&mut walk.blend);

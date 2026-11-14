@@ -3,6 +3,7 @@
 //! The ordinary member's score is staged to the manager threshold, then the
 //! real offer/accept path runs. This is presentation evidence, not earning
 //! acceptance. All class physics, weapons, poses and cloth are live.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use anyhow::{anyhow, Context, Result};
 use game::{soldier_vis::SoldierVisuals, walk::WalkSim};

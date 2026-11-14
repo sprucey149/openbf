@@ -100,6 +100,7 @@
 //! All of this is OURS (engineering, no RE): the thresholds are the
 //! census's, and a verdict about what the PS2 does with the same wall goes
 //! through a card (JWAL, WTUN, VCOL, LEAK2).
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::collision::{Layers, Shape, NO_GROUND, TERRAIN_BURY, WALKABLE_MIN_NY};
 use core::nav::{Locus, Mover};

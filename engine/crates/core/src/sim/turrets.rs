@@ -10,6 +10,7 @@ use crate::autoturret::{
     LOOK_SPREAD, THINK, VIEW,
 };
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::projectile::Shooter;
 use crate::unit::UnitHandle;
 use crate::weapon::{FireInput, HealthType};
@@ -32,15 +33,15 @@ impl Sim {
         }
         let to = self.units[i].capsule();
         let delta = to.base - from.base;
-        let steps = (delta.length() / (to.radius * 0.5)).ceil().max(1.0) as usize;
+        let steps = (delta.length() / (to.radius * 0.5)).ceil().fmax(1.0) as usize;
         let mut push = Vec3::ZERO;
         for step in 0..steps {
             let mut at = from.base + delta * ((step + 1) as f32 / steps as f32) + push;
             for t in self.turrets.iter().filter(|t| t.alive() && t.landed) {
                 let centre = t.centre();
-                let r = to.radius.min(to.height * 0.5);
+                let r = to.radius.fmin(to.height * 0.5);
                 let lo = at.y + r;
-                let hi = lo + (to.height - 2.0 * r).max(0.0);
+                let hi = lo + (to.height - 2.0 * r).fmax(0.0);
                 let y = centre.y.clamp(lo, hi);
                 let dy = centre.y - y;
                 let radius = r + crate::autoturret::RADIUS;
@@ -67,7 +68,7 @@ impl Sim {
         self.units[i].wall_push += push;
         if let Some(normal) = push.try_normalize() {
             let vel = &mut self.units[i].soldier.vel;
-            *vel -= normal * vel.dot(normal).min(0.0);
+            *vel -= normal * vel.dot(normal).fmin(0.0);
         }
     }
 
@@ -196,7 +197,7 @@ impl Sim {
         if n.y > LAND_NY {
             t.land(point, n);
         } else {
-            t.bounce(c, point, n, self.push_off_room(point, n).min(0.01));
+            t.bounce(c, point, n, self.push_off_room(point, n).fmin(0.01));
         }
     }
 
@@ -221,7 +222,7 @@ impl Sim {
         // Card TKFIX (ours): no shot through a friend on foot, as a bot's.
         let fire = t.fighting
             && point.is_some_and(|p| {
-                let spread = t.gun.yaw_spread(wc).max(t.gun.pitch_spread(wc));
+                let spread = t.gun.yaw_spread(wc).fmax(t.gun.pitch_spread(wc));
                 t.on_target(p)
                     && p.distance(t.muzzle()) <= reach
                     && !crate::ai::item_line_blocked(

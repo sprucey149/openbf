@@ -3,6 +3,7 @@
 //! §12 (the port's own gates, card B2ITEM).
 
 use super::state::AiState;
+use crate::fmath::FloatExt;
 use crate::perception;
 use crate::sim::Sim;
 use crate::soldier::GroundRules;
@@ -53,7 +54,7 @@ impl ItemSeek {
             eat(&d.until.to_le_bytes());
             for p in [d.origin, d.item, d.past] {
                 for f in p.to_array() {
-                    eat(&f.to_bits().to_le_bytes());
+                    eat(&f.hash_bits().to_le_bytes());
                 }
             }
         }

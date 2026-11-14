@@ -7,6 +7,7 @@
 use super::super::shape::{isometry_of, Aabb, Body, Capsule, Layers, Shape};
 use super::super::world::{CollisionWorld, HullFilter};
 use super::super::{point, vector, Isometry, TriMesh, WALKABLE_MIN_NY};
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 /// PROVISIONAL (ours): capsule-vs-world push-out passes per tick.
@@ -62,7 +63,7 @@ pub const SWEEP_CONTACT_DIST: f32 = 1e-3;
 /// "below the step where the capsule is" (card SKIRT, [`ledge_contact`]).
 fn top_in_disc(t: [Vec3; 3], c: Vec3, r: f32) -> Option<f32> {
     let mut best: Option<f32> = None;
-    let mut take = |y: f32| best = Some(best.map_or(y, |b: f32| b.max(y)));
+    let mut take = |y: f32| best = Some(best.map_or(y, |b: f32| b.fmax(y)));
     let d2 = |p: Vec3| (p.x - c.x) * (p.x - c.x) + (p.z - c.z) * (p.z - c.z);
     for p in t {
         if d2(p) <= r * r {
@@ -136,7 +137,7 @@ fn cannot_beat_contact(
 ) -> bool {
     let positive = bounds.maxs - query.mins;
     let negative = query.maxs - bounds.mins;
-    positive.min().min(negative.min()) < depth - SWEEP_CONTACT_DIST
+    positive.min().fmin(negative.min()) < depth - SWEEP_CONTACT_DIST
 }
 
 /// The deepest contact between the capsule (`cap_shape` placed by the WORLD
@@ -317,7 +318,7 @@ fn ledge_contact(
         |c: parry3d::query::Contact| (Vec3::new(c.normal2.x, c.normal2.y, c.normal2.z), -c.dist);
     match &body.shape {
         Shape::Mesh(mesh) => {
-            let step_top = full.base.y + super::super::STEP_HEIGHT.min(full.height * 0.5);
+            let step_top = full.base.y + super::super::STEP_HEIGHT.fmin(full.height * 0.5);
             let query = local_query_aabb(full.aabb(), body);
             let mut best: Option<parry3d::query::Contact> = None;
             for i in mesh.bvh().intersect_aabb(&query) {
@@ -329,7 +330,7 @@ fn ledge_contact(
                 let top = [tri.a, tri.b, tri.c]
                     .iter()
                     .map(|p| body.to_world.transform_point3(Vec3::new(p.x, p.y, p.z)).y)
-                    .fold(f32::MIN, f32::max);
+                    .fold(f32::MIN, crate::fmath::max);
                 if top <= step_top {
                     continue; // below the step: a kerb, climbed, not a wall
                 }
@@ -398,7 +399,7 @@ fn ledge_escape(body: &Body, full: &Capsule) -> Option<(Vec3, f32)> {
     if up.y < 0.9999 {
         return None; // not upright
     }
-    let lift = super::super::STEP_HEIGHT.min(full.height * 0.5);
+    let lift = super::super::STEP_HEIGHT.fmin(full.height * 0.5);
     if body.aabb.max.y - full.base.y <= lift {
         return None; // the top is within the step: the ground query's
     }
@@ -1036,7 +1037,7 @@ impl CollisionWorld {
                     return;
                 }
                 let size = body.aabb.max - body.aabb.min;
-                if 0.5 * size.x.max(size.z) > max_half {
+                if 0.5 * size.x.fmax(size.z) > max_half {
                     return;
                 }
                 let hit = body.shape.with_parry(&mut |s| {
@@ -1200,7 +1201,7 @@ fn deepened_by_step(
     dir: Vec3,
     dist: f32,
 ) -> Option<(f32, Vec3)> {
-    let depth = |c: Option<parry3d::query::Contact>| c.map_or(0.0, |c| (-c.dist).max(0.0));
+    let depth = |c: Option<parry3d::query::Contact>| c.map_or(0.0, |c| (-c.dist).fmax(0.0));
     let pen0 = depth(start);
     let out = |c: parry3d::query::Contact| Vec3::new(c.normal2.x, c.normal2.y, c.normal2.z);
     let (pen1, n) = if pen0 > SWEEP_CONTACT_DIST {
@@ -1208,7 +1209,7 @@ fn deepened_by_step(
         (pen0 - dist * dir.dot(n), n)
     } else {
         let c = end()?;
-        ((-c.dist).max(0.0), out(c))
+        ((-c.dist).fmax(0.0), out(c))
     };
     (pen1 > pen0 + SWEEP_CONTACT_DIST).then_some((pen1, n))
 }

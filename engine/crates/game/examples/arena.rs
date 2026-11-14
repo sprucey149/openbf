@@ -68,6 +68,7 @@
 //! does — and a different seed prints a different fight. The `#[cfg(test)]`
 //! module at the bottom pins that in process; `game/Cargo.toml` declares this
 //! example with `test = true` so `cargo test` runs it.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::{PadState, Sim};
 use core::skill::Difficulty;

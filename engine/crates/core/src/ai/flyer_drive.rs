@@ -42,6 +42,7 @@
 
 mod admission;
 mod transport;
+use crate::fmath::FloatExt;
 pub(crate) use admission::commit as commit_plan;
 pub use admission::{has_transport_paths, TRANSPORT_CLASS};
 pub(crate) use transport::{at_destination as transport_destination, uses_authored_transport};
@@ -160,7 +161,7 @@ pub(crate) fn draw(tick: u64, me: UnitHandle, salt: u32) -> f32 {
 
 /// FUN_00235dc8: a speed as a share of MaxSpeed.
 fn normalized(speed: f32, max: f32) -> f32 {
-    (speed / max.max(f32::MIN_POSITIVE)).clamp(0.0, 1.0)
+    (speed / max.fmax(f32::MIN_POSITIVE)).clamp(0.0, 1.0)
 }
 
 /// FUN_00235e00: the throttle for a share of MaxSpeed.
@@ -184,24 +185,24 @@ pub fn throttle_for(share: f32, p: &FlyerParams) -> f32 {
 /// FUN_001dcbf0's speed share, for a mover asking for 1.0.
 pub fn speed_share(to_goal: Vec3, forward: Vec3, p: &FlyerParams) -> f32 {
     let distance = to_goal.length();
-    let direction = to_goal / distance.max(f32::MIN_POSITIVE);
+    let direction = to_goal / distance.fmax(f32::MIN_POSITIVE);
     let aligned = direction.dot(forward);
-    let mut share = (aligned.max(0.9) - 0.9) * 9.999998;
+    let mut share = (aligned.fmax(0.9) - 0.9) * 9.999998;
     let max = p.max_speed;
     let reach = max * 3.0;
     let near = if distance >= max {
-        distance.min(reach)
+        distance.fmin(reach)
     } else {
         max
     };
-    let blend = (near - max) / (reach - max).max(f32::MIN_POSITIVE) * 0.7 + 0.3;
+    let blend = (near - max) / (reach - max).fmax(f32::MIN_POSITIVE) * 0.7 + 0.3;
     // UNCONFIRMED: the order's forward vector is taken as the goal direction.
-    share *= blend + (1.0 - blend) * (2.0 * aligned.max(0.5) - 1.0);
+    share *= blend + (1.0 - blend) * (2.0 * aligned.fmax(0.5) - 1.0);
     let floor = normalized(SLOW_FLOOR, max);
     if share < 1.0 {
-        share = share.max(floor);
+        share = share.fmax(floor);
     }
-    share.max(normalized(SPEED_FLOOR, max))
+    share.fmax(normalized(SPEED_FLOOR, max))
 }
 
 /// BF1's flyer form of FUN_00232b78: yaw from the goal in the full body frame, each
@@ -235,7 +236,7 @@ pub fn stick_to(p: &FlyerParams, m: &Body, goal: Vec3) -> (f32, f32) {
 fn ground(sim: &Sim, x: f32, z: f32, floor: f32) -> f32 {
     sim.heightfield
         .as_ref()
-        .map_or(floor, |hf| hf.height_at(x, z).max(floor))
+        .map_or(floor, |hf| hf.height_at(x, z).fmax(floor))
 }
 
 /// FUN_001dc700: lift `goal` to clear the ground ahead. Five samples of the
@@ -251,7 +252,7 @@ fn lift_goal(
 ) -> (Vec3, Option<f32>) {
     let pos = v.pos;
     let [floor, ceiling] = sim.flight_limits.ai;
-    let reach = (v.vel.length() * 1.5).max(1.0);
+    let reach = (v.vel.length() * 1.5).fmax(1.0);
     let forward = v.rot * Vec3::Z;
     let sample = |angle: f32, length: f32| {
         let (sin, cos) = crate::fmath::sin_cos(angle);
@@ -266,10 +267,10 @@ fn lift_goal(
     let quarter = core::f32::consts::FRAC_PI_4;
     let half = core::f32::consts::FRAC_PI_2;
     let mut high = sample(0.0, reach)
-        .max(sample(quarter, reach * 0.7))
-        .max(sample(-quarter, reach * 0.7))
-        .max(sample(half, reach * 0.5))
-        .max(sample(-half, reach * 0.5));
+        .fmax(sample(quarter, reach * 0.7))
+        .fmax(sample(-quarter, reach * 0.7))
+        .fmax(sample(half, reach * 0.5))
+        .fmax(sample(-half, reach * 0.5));
     let radius = sim
         .seat_setup
         .get(v.class as usize)
@@ -286,38 +287,38 @@ fn lift_goal(
     ) {
         let top = (origin.y + forward.y * hit.t) + radius;
         let rise = top - pos.y;
-        let fraction = (hit.t / reach).max(f32::MIN_POSITIVE);
-        high = high.max(if rise > 0.0 {
+        let fraction = (hit.t / reach).fmax(f32::MIN_POSITIVE);
+        high = high.fmax(if rise > 0.0 {
             rise / fraction + pos.y
         } else {
             top
         });
         slow = Some(normalized(SLOW_FLOOR, p.max_speed));
     }
-    high = high.max(ground(sim, pos.x, pos.z, floor));
+    high = high.fmax(ground(sim, pos.x, pos.z, floor));
     let flat = Vec3::new(goal.x - pos.x, 0.0, goal.z - pos.z).length();
     let raised = pos.y + flat * (high + TERRAIN_CLEARANCE - pos.y) / reach;
     let arrival = {
-        let edge = (2.0 * v.vel.length() / p.turn_rate.max(f32::MIN_POSITIVE)).max(2.0);
+        let edge = (2.0 * v.vel.length() / p.turn_rate.fmax(f32::MIN_POSITIVE)).fmax(2.0);
         let distance = (goal - pos).length();
         let d = if distance >= 1.0 {
-            distance.min(edge)
+            distance.fmin(edge)
         } else {
             1.0
         };
-        (d - 1.0) / (edge - 1.0).max(f32::MIN_POSITIVE)
+        (d - 1.0) / (edge - 1.0).fmax(f32::MIN_POSITIVE)
     };
     let lifted = goal.y + (raised - goal.y) * arrival;
     let mut out = goal;
     if lifted > out.y {
         out.y = lifted;
     }
-    out.y = out.y.min(ceiling);
+    out.y = out.y.fmin(ceiling);
     // OURS: the law above asks for its whole rise over the look-ahead L, so a slow
     // craft or one a few metres low aims at the ceiling, overshoots by tens of metres,
     // and dives back. Height is taken at a steady slope unless the ground is close.
     let danger = pos.y < high + GROUND_DANGER;
-    let band = flat.max(reach) * if danger { CLIMB_SLOPE_LOW } else { CLIMB_SLOPE };
+    let band = flat.fmax(reach) * if danger { CLIMB_SLOPE_LOW } else { CLIMB_SLOPE };
     out.y = out.y.clamp(pos.y - band, pos.y + band);
     (out, slow)
 }
@@ -360,7 +361,7 @@ fn ctf_curve(v: &Vehicle, goal: Vec3) -> [Vec3; 4] {
     let forward = v.rot * Vec3::Z;
     let to = goal - v.pos;
     let dist = to.length();
-    let step = dist.min(200.0);
+    let step = dist.fmin(200.0);
     let dir = if dist > 1e-3 { to / dist } else { forward };
     let mid = v.pos + dir * (step * 0.5);
     let end = v.pos + dir * step;
@@ -385,7 +386,7 @@ fn attack_goal(sim: &Sim, v: &Vehicle, ai: &mut FlyerAi, seen: Option<Vec3>) -> 
         ai.run = None;
     }
     let point = ai.run?;
-    let reach = (v.vel.length() * 0.6).max(25.0);
+    let reach = (v.vel.length() * 0.6).fmax(25.0);
     let flat = Vec3::new(point.x - v.pos.x, 0.0, point.z - v.pos.z).length();
     // Past the turning room, however far below: a target under the nose is a dive.
     if flat < reach {
@@ -396,7 +397,7 @@ fn attack_goal(sim: &Sim, v: &Vehicle, ai: &mut FlyerAi, seen: Option<Vec3>) -> 
     let ahead = v.pos + v.rot * Vec3::Z * reach;
     let floor = ground(sim, ahead.x, ahead.z, sim.flight_limits.ai[0]) + ATTACK_FLOOR;
     let band = flat * ATTACK_SLOPE;
-    let y = point.y.max(floor).clamp(v.pos.y - band, v.pos.y + band);
+    let y = point.y.fmax(floor).clamp(v.pos.y - band, v.pos.y + band);
     Some(Vec3::new(point.x, y, point.z))
 }
 
@@ -436,7 +437,7 @@ fn avoid_goal(
             )
             .is_some();
         if blocked {
-            let side = flat.cross(Vec3::Y) * AVOID_REACH.max(p.max_speed * 2.0);
+            let side = flat.cross(Vec3::Y) * AVOID_REACH.fmax(p.max_speed * 2.0);
             ai.avoid = Some([v.pos + side, v.pos]);
         }
     }
@@ -598,7 +599,7 @@ fn bf1_sticks(
     };
     let [ahead, strafe, _, _] = hover_drive::steer(&k, &body, &order, Some(goal));
     let share = speed_share(goal - pos, forward, p);
-    let share = slow.map_or(share, |s| share.min(s));
+    let share = slow.map_or(share, |s| share.fmin(s));
     let throttle = throttle_for(share, p);
     [ahead * throttle, strafe * throttle, turn, pitch]
 }
@@ -782,7 +783,7 @@ fn loiter(v: &Vehicle, p: &FlyerParams, ai: &mut FlyerAi) {
             .try_normalize()
             .unwrap_or(Vec3::Z);
         let right = Vec3::Y.cross(forward);
-        let radius = p.mid_speed.max(SLOW_FLOOR) * 2.0;
+        let radius = p.mid_speed.fmax(SLOW_FLOOR) * 2.0;
         let center = v.pos + right * radius;
         ai.goal = Some(center);
         [
@@ -1123,4 +1124,4 @@ pub(super) fn drive(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

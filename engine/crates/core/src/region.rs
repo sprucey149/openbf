@@ -15,6 +15,7 @@
 //! - every test is STRICT (`<`). The engine's axis-aligned fast paths (enums
 //!   5–8) give identical results and are not replicated.
 
+use crate::fmath::FloatExt;
 use glam::{Mat3, Vec3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,7 +130,7 @@ impl Region {
                 let l = self.to_local(c);
                 let radial = (l.x * l.x + l.z * l.z).sqrt() - self.size.x;
                 let axial = l.y.abs() - self.size.y;
-                let (a, b) = (radial.max(0.0), axial.max(0.0));
+                let (a, b) = (radial.fmax(0.0), axial.fmax(0.0));
                 a * a + b * b < r * r
             }
         }
@@ -157,7 +158,7 @@ impl Region {
     /// Nominal footprint radius (placement/AI heuristics).
     pub fn radius(&self) -> f32 {
         match self.shape {
-            Shape::Box => self.size.x.max(self.size.z),
+            Shape::Box => self.size.x.fmax(self.size.z),
             Shape::Sphere => self.w,
             Shape::Cylinder => self.size.x,
         }

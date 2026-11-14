@@ -5,6 +5,7 @@
 //! [`crate::emitter`] law instead of a [`crate::projectile::Bolt`].
 
 use super::{pf, pf_hash, PropSource, DEG};
+use crate::fmath::FloatExt;
 
 /// `Push` (the same key an explosion authors): how hard each body hit is
 /// shoved. 0 = no push at all (the BF1 arc caster; it must not draw).
@@ -85,20 +86,20 @@ impl EmitterOrdnance {
     /// B1:198836-199273; B2 `FUN_00315f78` B2:305952-307007).
     pub fn from_props(src: &dyn PropSource, bf2: bool) -> Self {
         Self {
-            cone_length: pf(src, "ConeLength").unwrap_or(0.0).max(0.0),
-            cone_angle: pf(src, "ConeAngle").unwrap_or(0.0).max(0.0) * DEG,
-            max_targets: pf(src, "MaxTargets").unwrap_or(1.0).max(1.0) as u32,
-            jump_deduction: pf(src, "JumpDeduction").unwrap_or(0.0).max(0.0),
+            cone_length: pf(src, "ConeLength").unwrap_or(0.0).fmax(0.0),
+            cone_angle: pf(src, "ConeAngle").unwrap_or(0.0).fmax(0.0) * DEG,
+            max_targets: pf(src, "MaxTargets").unwrap_or(1.0).fmax(1.0) as u32,
+            jump_deduction: pf(src, "JumpDeduction").unwrap_or(0.0).fmax(0.0),
             damage_threshold: pf(src, "DamageThreshold").unwrap_or(0.0),
-            max_jump_distance: pf(src, "MaxJumpDistance").unwrap_or(0.0).max(0.0),
-            first_radius: pf(src, "FirstRadius").unwrap_or(0.0).max(0.0),
+            max_jump_distance: pf(src, "MaxJumpDistance").unwrap_or(0.0).fmax(0.0),
+            first_radius: pf(src, "FirstRadius").unwrap_or(0.0).fmax(0.0),
             push: pf_hash(src, HASH_PUSH).unwrap_or(0.0),
             lightning: src.prop_hash(HASH_LIGHTNING).map(|s| s.trim().to_owned()),
-            bolts: pf_hash(src, HASH_BOLTS).map_or(1, |n| n.max(0.0) as u32),
+            bolts: pf_hash(src, HASH_BOLTS).map_or(1, |n| n.fmax(0.0) as u32),
             affect_friends: pf_hash(src, HASH_AFFECT_FRIENDS).unwrap_or(1.0) != 0.0,
             affect_enemies: pf_hash(src, HASH_AFFECT_ENEMIES).unwrap_or(1.0) != 0.0,
             hit_all: pf_hash(src, HASH_HIT_ALL).unwrap_or(0.0) != 0.0,
-            radius: pf(src, "Radius").unwrap_or(0.0).max(0.0),
+            radius: pf(src, "Radius").unwrap_or(0.0).fmax(0.0),
             effect: src.prop_hash(HASH_EFFECT).map(|s| s.trim().to_owned()),
             burn: BurnClass {
                 time: pf_hash(src, HASH_BURN_TIME).unwrap_or(0.0),

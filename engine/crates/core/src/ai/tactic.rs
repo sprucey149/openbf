@@ -49,6 +49,7 @@
 //! slice).
 
 mod cover;
+use crate::fmath::FloatExt;
 pub use cover::{sector_bit, sector_pair};
 
 use crate::fmath;
@@ -152,10 +153,11 @@ pub struct TableStats {
 /// The map's positions, indexed by an [`CELL`] m grid.
 #[derive(Debug, Clone, Default)]
 pub struct PositionTable {
-    /// Sorted by grid cell (x, then z), then source order.
-    pub positions: Vec<Position>,
+    /// Sorted by grid cell (x, then z), then source order. Shared with a
+    /// cloned sim, like `cells` (issue #168: built once, never written).
+    pub positions: crate::shared::Shared<Vec<Position>>,
     /// Per occupied cell, the run of `positions` in it.
-    cells: std::collections::BTreeMap<(i32, i32), (u32, u32)>,
+    cells: crate::shared::Shared<std::collections::BTreeMap<(i32, i32), (u32, u32)>>,
     pub stats: TableStats,
 }
 
@@ -646,7 +648,7 @@ fn span(me: crate::unit::UnitHandle, tick: u64, salt: u32, (lo, hi): (u64, u64))
 fn band(sim: &Sim, tk: &Tick) -> (f32, f32) {
     let [lo, opt, max] = tk.wc.ai_range;
     let view = crate::perception::view_distance(crate::soldier::Stance::Stand, tk.tier.view_mult)
-        .max(
+        .fmax(
             crate::perception::scope_reach(
                 sim,
                 tk.wc,
@@ -655,8 +657,8 @@ fn band(sim: &Sim, tk: &Tick) -> (f32, f32) {
             .unwrap_or(0.0),
         );
     (
-        opt.min(lo + 3.0) - BAND_GROW,
-        opt.max(max - 10.0).min(view - 10.0) + BAND_GROW,
+        opt.fmin(lo + 3.0) - BAND_GROW,
+        opt.fmax(max - 10.0).fmin(view - 10.0) + BAND_GROW,
     )
 }
 
@@ -708,7 +710,7 @@ pub(super) fn choose(
     let mut near = Vec::new();
     t.within(
         pos,
-        SEARCH.min(wc.ai_range[2].max(inner + BAND_GROW)),
+        SEARCH.fmin(wc.ai_range[2].fmax(inner + BAND_GROW)),
         &mut near,
     );
     // On the bot's storey, and walkable onto: a floor more than a step off
@@ -808,7 +810,7 @@ pub(super) fn choose(
     let near_seg = |p: Vec3, (a, b): (Vec3, Vec3)| {
         let (a, b, p) = (xz(a), xz(b), xz(p));
         let ab = b - a;
-        let k = ((p - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+        let k = ((p - a).dot(ab) / ab.length_squared().fmax(1e-6)).clamp(0.0, 1.0);
         (a + ab * k).distance(p) < LINE
     };
     // Card HYST (The Last of Us' rule): from inside the band, a walk that
@@ -819,7 +821,7 @@ pub(super) fn choose(
     let closes = |p: Vec3| {
         let closing = me_to_aim - nav::xz_dist(p, aim);
         me_to_aim <= outer
-            && closing > CLOSING.max(CLOSING_SHARE * me_to_aim)
+            && closing > CLOSING.fmax(CLOSING_SHARE * me_to_aim)
             && closing > 0.5 * nav::xz_dist(pos, p)
     };
     // The first filter position `i` fails (1 ..= 8), else 0.
@@ -924,7 +926,7 @@ pub(super) fn choose(
                 cover += 0.2;
             }
         }
-        let cover = f32::min(cover, 1.0);
+        let cover = crate::fmath::min(cover, 1.0);
         let near_term = (1.0 - nav::xz_dist(pos, q.pos) / SEARCH).clamp(0.0, 1.0);
         let other = if others.is_empty() {
             0.0
@@ -1011,7 +1013,7 @@ pub(super) fn choose(
 /// lip, a step up from the bot on its ramp, was walked at off the ramp's
 /// edge and slid under (the maintainer's Kamino scene, kam_bldg_pod2).
 fn no_drop(sim: &Sim, from: Vec3, to: Vec3) -> bool {
-    let (top, low) = (from.y.max(to.y), from.y.min(to.y) - STEP);
+    let (top, low) = (from.y.fmax(to.y), from.y.fmin(to.y) - STEP);
     (1..4).all(|k| {
         let s = from.lerp(to, k as f32 / 4.0);
         sim.ground_point_under(Vec3::new(s.x, top, s.z), false) >= low

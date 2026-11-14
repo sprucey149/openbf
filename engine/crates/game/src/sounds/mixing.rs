@@ -1,6 +1,7 @@
 //! Distance attenuation, stereo conversion and authored mixer bus gains.
 
 use super::{fnv1a_lowercase, level_db, Listener, SoundProp, Vec3, LISTENER_ROLLOFF, SHELLFX};
+use core::fmath::FloatExt;
 
 /// A 3-D sound's level 0..1 at `dist` metres from the listener: the PS2's
 /// function (B1 `FUN_0044cac8`, B2 `FUN_005407e8`, the same on both; `[O]`
@@ -18,7 +19,7 @@ pub fn attenuation(dist: f32, p: &SoundProp) -> f32 {
     let level = |x: f32, r: f32| {
         let den = x * k + r;
         if den > 0.0 {
-            ((r - x) / den).max(0.0)
+            ((r - x) / den).fmax(0.0)
         } else {
             0.0
         }

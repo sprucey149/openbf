@@ -8,6 +8,7 @@
 
 use super::Sim;
 use crate::collision::{Capsule, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::soldier::{GroundRules, Stance};
 use crate::unit::Deck;
 use crate::vehicle::{VehicleHandle, VehicleKind};
@@ -44,7 +45,7 @@ impl Sim {
             s.stance,
             Stance::Stand | Stance::Crouch | Stance::Prone | Stance::Sprint
         );
-        let let_go = upright && !s.grounded && s.air_time.min(s.time_in_stance) >= DECK_LET_GO;
+        let let_go = upright && !s.grounded && s.air_time.fmin(s.time_in_stance) >= DECK_LET_GO;
         let Some((pose, vel, up_y)) = live.filter(|_| !let_go && s.platform_vel.is_some()) else {
             self.leave_deck(i);
             return;
@@ -138,7 +139,7 @@ impl Sim {
         else {
             return;
         };
-        let keep = ((hit.t - from.radius).max(0.0) / len).min(1.0);
+        let keep = ((hit.t - from.radius).fmax(0.0) / len).fmin(1.0);
         let back = (to.base - from.base) * (1.0 - keep);
         let s = &mut self.units[i].soldier;
         s.pos.x -= back.x;

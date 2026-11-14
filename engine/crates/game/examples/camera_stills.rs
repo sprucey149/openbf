@@ -9,6 +9,7 @@
 //! Frames: `<out_dir>/<prefix>_{droid_inside,droid_between,frame_bf1,frame_bf2}.png`
 //! (prefix `after` by default). Each prints the camera's place against the
 //! soldier's feet, its pitch and FOV, and what it sees through.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 use anyhow::{anyhow, Context, Result};
 use core::sim::{buttons, PadState, Sim, SpawnStage};
 use game::walk::{ClassVisual, TeamTemplate, WalkSim};

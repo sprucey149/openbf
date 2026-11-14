@@ -348,13 +348,16 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         (Sim::new(seed), "fixture".to_owned())
     };
     // Provision each recorded local player slot on the same setup. Map mode
-    // already owns slot 0; additional slots use the same team/start position.
+    // already owns slot 0; each additional slot is its own player slot
+    // (`UnitSpec::player_in_slot`: the slot's controller and its
+    // `Sim::players` entry agree), a live soldier on team 0 at the same start
+    // so the log's pads drive it from the first tick.
     let slots = log.as_ref().map_or(1, InputLog::slot_count);
     let start = sim.units.first().map(|u| u.soldier.pos).unwrap_or_default();
     for slot in 1..slots {
-        let mut spec = core::unit::UnitSpec::player(0, start);
-        spec.controller = core::unit::Controller::Player { slot: slot as u8 };
-        if sim.spawn(&spec).is_none() {
+        let spec = core::unit::UnitSpec::player_in_slot(slot as u8, 0, start);
+        let h = sim.spawn(&spec);
+        if h.is_none() || sim.players.get(slot).copied().flatten() != h {
             bail!("cannot provision input slot {slot}");
         }
     }

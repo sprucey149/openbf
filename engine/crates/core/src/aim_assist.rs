@@ -53,6 +53,7 @@
 //! pull is not live, under the Auto Aim option as the pull is; every other
 //! weapon still follows nothing it is not shooting at.
 
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 /// Constants from FUN_0025fea8 (EE float literals, exact).
@@ -77,7 +78,7 @@ pub const W_FLOOR: f32 = 0.1;
 /// The clamp on the tracking and pull terms in stick units: one stick unit
 /// turns `turn_rate` (both divided by the zoom alike).
 pub fn speed_cap(turn_rate: f32) -> f32 {
-    (ASSIST_SPEED_X_BF1 * BF1_TURN_RATE / turn_rate.max(1e-3)).min(1.0)
+    (ASSIST_SPEED_X_BF1 * BF1_TURN_RATE / turn_rate.fmax(1e-3)).fmin(1.0)
 }
 
 /// Aim sticks in [-1, 1], post-deadzone. `yaw`/`pitch` are modified in place
@@ -210,7 +211,7 @@ impl Lead {
     pub(crate) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         for v in [self.vel, self.offset] {
             for c in v.to_array() {
-                eat(&c.to_bits().to_le_bytes());
+                eat(&c.hash_bits().to_le_bytes());
             }
         }
     }
@@ -223,8 +224,8 @@ pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState
     // Weight from how hard the player is already steering (1 - |yaw push|),
     // the push read before the pad's look scale. [ours] floor: BF1 skips
     // the pull and tracking at w = 0 (a full push).
-    let push = (sticks.yaw.abs() / env.look_scale.max(1e-3)).min(1.0);
-    let w = (1.0 - push).max(W_FLOOR);
+    let push = (sticks.yaw.abs() / env.look_scale.fmax(1e-3)).fmin(1.0);
+    let w = (1.0 - push).fmax(W_FLOOR);
 
     // Sticky slowdown (blend toward no-op as intensity drops below 1).
     let slow = 1.0 + (SLOWDOWN - 1.0) * intensity;
@@ -256,7 +257,7 @@ pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState
         true => env.lead_vel.map(|v| (v, 1.0)),
         false => (env.armed && env.follow > 0.0).then(|| {
             let ps2 = sticks.move_mag.abs() * GAIN;
-            (env.lead_vel.unwrap_or(env.target_vel), env.follow.max(ps2))
+            (env.lead_vel.unwrap_or(env.target_vel), env.follow.fmax(ps2))
         }),
     };
     let track = match share {

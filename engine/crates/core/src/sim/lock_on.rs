@@ -1,6 +1,7 @@
 use super::input::{buttons, cone_score, AimTarget, PadState};
 use super::state::Sim;
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::missile::MissileTarget;
 use crate::perception;
 use crate::unit::{Controller, UnitHandle};
@@ -58,7 +59,7 @@ pub(super) struct LockProbe {
 
 pub(super) fn lock_score(off: Vec3, dir: Vec3) -> f32 {
     let mut d2 = off.length_squared();
-    let dot = off.normalize_or_zero().dot(dir).max(0.1);
+    let dot = off.normalize_or_zero().dot(dir).fmax(0.1);
     if dot > 0.998 {
         d2 *= 1e-8;
     }
@@ -227,7 +228,7 @@ impl Sim {
                 };
                 if targeted {
                     let d = (b.pos - flyer_pos).length();
-                    nearest_incoming = Some(nearest_incoming.map_or(d, |min| min.min(d)));
+                    nearest_incoming = Some(nearest_incoming.map_or(d, |min| min.fmin(d)));
                 }
             }
             state.incoming_missile = nearest_incoming.is_some();
@@ -279,7 +280,7 @@ impl Sim {
                     .target
                     .and_then(|t| self.lock_dwell_limit(h, own, k, t, ray));
                 state.charging[k] = limit.is_some();
-                state.held[k] = limit.map_or(0.0, |l| (state.held[k] + dt).min(l));
+                state.held[k] = limit.map_or(0.0, |l| (state.held[k] + dt).fmin(l));
             }
             self.lock_on[slot] = state;
         }
@@ -510,7 +511,7 @@ impl Sim {
                 LockTarget::Aim(AimTarget::Station(s)) => eat(&s.to_le_bytes()),
             }
             for held in state.held {
-                eat(&held.to_bits().to_le_bytes());
+                eat(&held.hash_bits().to_le_bytes());
             }
         }
     }

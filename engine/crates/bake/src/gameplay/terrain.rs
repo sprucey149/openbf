@@ -58,10 +58,10 @@ fn supports_play(polygon: &[[f32; 2]], x: f32, z: f32, unit: f32) -> bool {
             .any(|(a, b)| touches_box(*a, *b, x, z, unit))
 }
 
-/// How far past the boundary a query from inside it can read terrain: the hover gun's aim ray.
-const HEIGHT_REACH: f32 = 512.0;
-
-/// Apply only approved samples playable ground can read, and fills that a query from inside the bounds can read.
+/// Apply only approved samples playable ground can read, and fills over the rest of the grid of a map with a
+/// boundary: nothing in the simulation keeps a soldier or ground vehicle inside the boundary (it bounds only
+/// flyers and remote droids), and every query off the grid clamps onto its edge, so the whole grid is read
+/// (issue #168). A record without a boundary authorizes no fill.
 /// Coordinates are world X/Z so a larger donor grid cannot shift the correction.
 /// A smaller canonical query grid is returned separately so its offsets preserve
 /// float32 simulation interpolation. Render-only corrections have their own grid.
@@ -136,18 +136,15 @@ pub(super) fn apply(t: &Terrain, terrain: &mut mungefs::terrain::Terrain) -> Res
         }
         set(x, z, y)?;
     }
+    let bounded = t.boundaries.iter().any(|p| p.len() >= 3);
     for &[x0, z0, columns, rows, y] in &t.height_fills {
+        if !bounded {
+            bail!("refusing a terrain height fill on a map without a boundary");
+        }
         for row in 0..rows as u32 {
             for column in 0..columns as u32 {
                 let x = x0 + column as f32 * t.grid_unit;
                 let z = z0 + row as f32 * t.grid_unit;
-                if !t
-                    .boundaries
-                    .iter()
-                    .any(|p| p.len() >= 3 && supports_play(p, x, z, HEIGHT_REACH))
-                {
-                    bail!("refusing a terrain height fill past what a query from inside the bounds can read");
-                }
                 set(x, z, y)?;
             }
         }

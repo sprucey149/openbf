@@ -190,7 +190,7 @@ fn bound(sprites: &[GrassSprite]) -> f32 {
     sprites
         .iter()
         .map(|s| (s.pos - c).length() + s.width)
-        .fold(0.0, f32::max)
+        .fold(0.0, core::fmath::max)
 }
 
 /// A patch's matrix at (x, z) on `ground` (see the module doc).

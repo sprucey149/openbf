@@ -4,6 +4,7 @@
 use super::{Sound, View, Who, REACH};
 use crate::{assets::SkinnedAsset, classdb::ClassDb, walk::WalkSim};
 use core::droideka::{Form, STATES};
+use core::fmath::FloatExt;
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 const BONES: [&str; 3] = ["bone_l_leg2", "bone_r_leg2", "bone_b_leg2"];
@@ -18,8 +19,8 @@ struct Curve {
 impl Curve {
     fn at(&self, time: f32) -> [f32; 3] {
         let f = (time * self.fps)
-            .max(0.0)
-            .min((self.heights.len() - 1) as f32);
+            .fmax(0.0)
+            .fmin((self.heights.len() - 1) as f32);
         let a = f as usize;
         let b = (a + 1).min(self.heights.len() - 1);
         std::array::from_fn(|i| {

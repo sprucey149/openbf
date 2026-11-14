@@ -9,6 +9,7 @@
 //! to the hashes. Non-finite/out-of-range floats are errors, never aliases.
 
 use super::Sim;
+use crate::fmath::FloatExt;
 use std::io::{self, Write};
 
 /// Version-1 quantization contract, in world metres, health points, capture
@@ -22,7 +23,8 @@ pub const FULL_BYTE_LIMIT: usize = 64 * 1024 * 1024;
 
 const OFFSET: u64 = 0xcbf29ce484222325;
 const PRIME: u64 = 0x100000001b3;
-const GROUPS: [&str; 5] = ["units", "rng", "score", "posts", "timers"];
+/// The five group names, in row order.
+pub const GROUPS: [&str; 5] = ["units", "rng", "score", "posts", "timers"];
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -41,13 +43,17 @@ fn quantize(value: f32, quantum: f32) -> io::Result<i32> {
 struct Group {
     hash: u64,
     raw: Option<String>,
+    /// Floats feed their exact bits instead of their quantized value
+    /// ([`exact_group_hashes`]).
+    exact: bool,
 }
 
 impl Group {
-    fn new(full: bool) -> Self {
+    fn new(full: bool, exact: bool) -> Self {
         Self {
             hash: OFFSET,
             raw: full.then(String::new),
+            exact,
         }
     }
     fn field(&mut self, bytes: &[u8], value: impl std::fmt::Display) {
@@ -72,7 +78,11 @@ impl Group {
         self.field(&v.to_le_bytes(), v);
     }
     fn float(&mut self, v: f32, q: f32) -> io::Result<()> {
-        self.i32(quantize(v, q)?);
+        if self.exact {
+            self.u32(v.hash_bits());
+        } else {
+            self.i32(quantize(v, q)?);
+        }
         Ok(())
     }
     fn count(&mut self, n: usize) -> io::Result<()> {
@@ -81,9 +91,9 @@ impl Group {
     }
 }
 
-fn groups(sim: &Sim, full: bool) -> io::Result<[Group; 5]> {
+fn groups(sim: &Sim, full: bool, exact: bool) -> io::Result<[Group; 5]> {
     let [mut units, mut rng, mut score, mut posts, mut timers] =
-        std::array::from_fn(|_| Group::new(full));
+        std::array::from_fn(|_| Group::new(full, exact));
     units.count(sim.units.len())?;
     for (id, u) in sim.units.iter().enumerate() {
         units.count(id)?;
@@ -132,6 +142,17 @@ fn groups(sim: &Sim, full: bool) -> io::Result<[Group; 5]> {
     Ok([units, rng, score, posts, timers])
 }
 
+/// The five groups' hashes ([`GROUPS`] order) with the SHASH v1 fields and
+/// order, but every float fed as its exact `f32` bits instead of its
+/// quantized value: a lockstep desync is a bit difference, and quantizing
+/// would hide one smaller than a quantum (a 1 cm nudge under the 6.25 cm
+/// position quantum). The LAN desync reports keep these per tick (issue
+/// #168, LAN §4.7). Never fails: only counts over `u32::MAX` could, and
+/// those hash as 0.
+pub fn exact_group_hashes(sim: &Sim) -> [u64; 5] {
+    groups(sim, false, true).map_or([0; 5], |g| g.map(|g| g.hash))
+}
+
 /// Streaming text writer. It only borrows the sim immutably. The caller owns
 /// buffering; `finish` flushes and propagates delayed I/O failures.
 pub struct TraceWriter<W: Write> {
@@ -176,7 +197,7 @@ impl<W: Write> TraceWriter<W> {
     /// Emit the state after a completed tick. Tick 1 is after log frame 0.
     pub fn write_tick(&mut self, sim: &Sim) -> io::Result<()> {
         use std::fmt::Write;
-        let groups = groups(sim, self.full)?;
+        let groups = groups(sim, self.full, false)?;
         let mut row = sim.tick.to_string();
         for group in &groups {
             write!(row, " {:016x}", group.hash).unwrap();

@@ -10,6 +10,7 @@
 //! ([`Sim::kick_and_push`]).
 
 use super::state::Sim;
+use crate::fmath::FloatExt;
 use crate::projectile::Target;
 use crate::soldier::Stance;
 use crate::unit::UnitHandle;
@@ -365,7 +366,7 @@ pub fn knock_falloff(d: f32, w: f32, outer: f32) -> f32 {
     if outer <= 0.0 {
         return 0.0;
     }
-    (1.0 - (d - w * 0.5).max(0.0) / outer).max(0.0)
+    (1.0 - (d - w * 0.5).fmax(0.0) / outer).fmax(0.0)
 }
 
 impl Sim {
@@ -399,7 +400,7 @@ impl Sim {
         // Card DPRX: a proxy is a human victim; the cheat is a player's only.
         let (victim_team, victim_is_player, victim_cheats) = (v.team, v.is_human(), v.is_player);
         let friendly = team.is_some_and(|team| self.allied(team, victim_team));
-        if (victim_cheats && self.cheats.invincible)
+        if (victim_cheats && self.cheats_of(v).invincible)
             || (victim_is_player && friendly && !attacker_is_player)
         {
             return;

@@ -11,6 +11,7 @@
 
 use super::{aim, move_rate, wrap, ActionKind, AnimInput, Animator, Body, Move, Rig};
 use crate::skin::{Clip, Pose, Skeleton};
+use core::fmath::FloatExt;
 use glam::{Quat, Vec3};
 use std::collections::BTreeMap;
 
@@ -119,7 +120,7 @@ impl Census {
             *self.legs.entry(format!("{m:?}")).or_default() += 1;
             if moving && !m.moving() {
                 self.standing += 1;
-                self.standing_max = self.standing_max.max(input.speed());
+                self.standing_max = self.standing_max.fmax(input.speed());
             }
             let vc = a.lower_clip().and_then(|c| rig.clip_speed(c));
             if let (true, Some(vc)) = (m.moving() && a.action().is_none_or(|(_, legs)| !legs), vc) {
@@ -165,14 +166,14 @@ impl Census {
             row.updates += 1;
             if r.updates >= 9 {
                 row.late += 1;
-                row.late_max = row.late_max.max(off);
+                row.late_max = row.late_max.fmax(off);
                 row.late_sum += f64::from(off);
             }
         }
         if let Some(gap) = r.ended {
             let row = &mut self.rolls[RollRow::of(a.travel())];
             row.ended += 1;
-            row.end_max = row.end_max.max(gap.to_degrees().abs());
+            row.end_max = row.end_max.fmax(gap.to_degrees().abs());
         }
         // The first update at or past 0.5 s after a roll (30 updates a
         // second, as the round steps them).
@@ -182,7 +183,7 @@ impl Census {
             let tw = a.twist().to_degrees().abs();
             self.after += 1;
             self.after_over += u64::from(tw > 10.0);
-            self.after_max = self.after_max.max(tw);
+            self.after_max = self.after_max.fmax(tw);
         }
         if moving && a.action().is_some() {
             *self

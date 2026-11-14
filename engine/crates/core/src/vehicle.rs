@@ -41,6 +41,7 @@ pub mod hover;
 pub mod tow;
 pub mod walker;
 
+use crate::fmath::FloatExt;
 use crate::unit::UnitHandle;
 use crate::weapon::{Health, HealthType};
 use glam::{Quat, Vec3};
@@ -272,7 +273,7 @@ impl Vehicle {
             self.pos.x, self.pos.y, self.pos.z, self.vel.x, self.vel.y, self.vel.z, self.rot.x,
             self.rot.y, self.rot.z, self.rot.w,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         self.input.hash_into(eat);
         self.hover.hash_into(eat);
@@ -291,8 +292,8 @@ impl Vehicle {
             eat(&i.to_le_bytes());
             eat(&g.to_le_bytes());
         }
-        eat(&self.health.cur.to_bits().to_le_bytes());
-        eat(&self.health.max.to_bits().to_le_bytes());
+        eat(&self.health.cur.hash_bits().to_le_bytes());
+        eat(&self.health.max.hash_bits().to_le_bytes());
         if !self.guns.is_empty() {
             eat(b"G");
             for g in &self.guns {
@@ -305,7 +306,7 @@ impl Vehicle {
         if let Some(p) = self.stuck_at {
             eat(&[0x5a]);
             for v in [p.x, p.y, p.z] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
         if self.yield_until != 0 {
@@ -320,7 +321,7 @@ impl Vehicle {
         }
         if self.slice != 0.0 {
             eat(&[0x5c]);
-            eat(&self.slice.to_bits().to_le_bytes());
+            eat(&self.slice.hash_bits().to_le_bytes());
         }
         if let Some((u, t)) = self.slice_hold {
             eat(&[0x5d]);
@@ -495,7 +496,7 @@ pub fn impact_damage(
         return 0.0;
     }
     let s = normal_speed + t;
-    (s * s * (scale[0] + scale[1] * n_up + scale[2] * n_fwd)).max(0.0)
+    (s * s * (scale[0] + scale[1] * n_up + scale[2] * n_fwd)).fmax(0.0)
 }
 
 /// The descriptor a collision deals its damage through: all seven HealthType

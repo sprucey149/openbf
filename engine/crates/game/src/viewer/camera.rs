@@ -4,6 +4,7 @@
 //! overview camera, the orbit and the gallery.
 
 use crate::assets::Scene;
+use core::fmath::FloatExt;
 use glam::{Mat3, Mat4, Vec3};
 
 /// TAT1 golden/default camera pose (x, y, z, yaw°, pitch°): dune overlook
@@ -132,7 +133,7 @@ pub fn overview_bounds(scene: &Scene) -> Option<Overview> {
     }
     Some(Overview {
         center: (lo + hi) * 0.5,
-        radius: ((hi - lo) * 0.5).length().max(10.0),
+        radius: ((hi - lo) * 0.5).length().fmax(10.0),
     })
 }
 

@@ -3,6 +3,7 @@
 //! Follows `analysis/re-fx.md` §15.
 
 use super::Fx;
+use core::fmath::FloatExt;
 use glam::Vec3;
 use render::{ParticleDraw, ParticleShape, TextureHandle};
 
@@ -116,7 +117,7 @@ fn surface_ring(
     if q < 0.0 {
         return Vec::new();
     }
-    let mut p = (q * (1.0 / 3.0) * life).min(1.0);
+    let mut p = (q * (1.0 / 3.0) * life).fmin(1.0);
     let mut water = look.water;
     let mut direction = Vec3::X;
     let mut horizontal_speed = 0.0;
@@ -126,7 +127,7 @@ fn surface_ring(
         if speed <= 0.0 {
             return Vec::new();
         }
-        p *= (speed * (2.0 / 3.0)).min(1.0);
+        p *= (speed * (2.0 / 3.0)).fmin(1.0);
         let horizontal = Vec3::new(velocity.x, 0.0, velocity.z);
         horizontal_speed = horizontal.length();
         direction = horizontal.try_normalize().unwrap_or(Vec3::X);
@@ -155,13 +156,13 @@ fn surface_ring(
                     let delta = relative * (1.0 - facing);
                     (2.0 - relative) * (1.0 - delta * delta)
                 };
-                amplitude *= shape.max(0.0);
+                amplitude *= shape.fmax(0.0);
             }
             let amp = amplitude * (2.0 - amplitude) * 0.3;
             let alpha = (amplitude * 255.0).clamp(0.0, 255.0) as u8;
             let n = Vec3::new(amp * SLOPE * c, flat, amp * SLOPE * s).normalize();
-            let inner = (n.x * l.x + n.z * l.z - n.y * l.y).max(0.0);
-            let outer = (-n.dot(l)).max(0.0);
+            let inner = (n.x * l.x + n.z * l.z - n.y * l.y).fmax(0.0);
+            let outer = (-n.dot(l)).fmax(0.0);
             let shade = |d| {
                 if velocity.is_some() {
                     look.wake_shade(water, d, alpha)

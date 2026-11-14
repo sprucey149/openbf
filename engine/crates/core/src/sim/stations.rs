@@ -16,6 +16,7 @@
 //! until seat guns have reserves. Gather order is unit slots then vehicles,
 //! capped at the PS2's 64 entities. BF2 regeneration eligibility is not built.
 
+use crate::fmath::FloatExt;
 pub use crate::station_motion::StationMotion;
 
 use super::pickups::give_ammo;
@@ -183,9 +184,9 @@ impl Station {
         self.motion.hash_into(eat);
         eat(&[self.class, self.serving as u8]);
         eat(&[u8::from(self.destroyed)]);
-        eat(&self.health.cur.to_bits().to_le_bytes());
+        eat(&self.health.cur.hash_bits().to_le_bytes());
         for v in [self.pos.x, self.pos.y, self.pos.z, self.radius, self.timer] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 }
@@ -202,7 +203,7 @@ pub(super) fn give_health(h: &mut Health, amount: f32) -> bool {
     if amount == 0.0 || (h.cur >= h.max && amount > 0.0) {
         return false;
     }
-    let new = (h.cur + amount).min(h.max);
+    let new = (h.cur + amount).fmin(h.max);
     let changed = new != h.cur;
     h.cur = new;
     changed

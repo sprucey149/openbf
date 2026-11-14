@@ -30,6 +30,7 @@
 
 mod barriers;
 
+use crate::fmath::FloatExt;
 use glam::{Vec2, Vec3, Vec4};
 
 pub mod flank;
@@ -227,8 +228,9 @@ pub struct RouteTable {
     pub hub_count: usize,
     pub types: usize,
     /// Indexed `t * hub_count + hub`; each element holds that hub's rows back
-    /// to back.
-    rows: Vec<Vec<u8>>,
+    /// to back. Shared with a cloned sim (issue #168); a route patch writes
+    /// it copy-on-write.
+    rows: crate::shared::Shared<Vec<Vec<u8>>>,
 }
 
 impl RouteTable {
@@ -277,7 +279,7 @@ impl RouteTable {
         Ok(RouteTable {
             hub_count,
             types,
-            rows,
+            rows: rows.into(),
         })
     }
 
@@ -286,7 +288,7 @@ impl RouteTable {
         RouteTable {
             hub_count,
             types,
-            rows,
+            rows: rows.into(),
         }
     }
 
@@ -295,7 +297,7 @@ impl RouteTable {
         RouteTable {
             hub_count,
             types: TYPE_COUNT,
-            rows: vec![Vec::new(); TYPE_COUNT * hub_count],
+            rows: vec![Vec::new(); TYPE_COUNT * hub_count].into(),
         }
     }
 
@@ -313,6 +315,11 @@ impl RouteTable {
         }
         let w = self.hub_count;
         self.rows[ty * w + hub].get(k * w..(k + 1) * w)
+    }
+
+    /// Issue #168: does this table share its rows with `other` (a clone)?
+    pub fn shares_rows_with(&self, other: &RouteTable) -> bool {
+        crate::shared::Shared::ptr_eq(&self.rows, &other.rows)
     }
 
     /// Row `k` of `hub` for type `ty`, for a `plnp` patch to XOR onto.
@@ -508,11 +515,11 @@ pub struct NavGraph {
     /// "can this unit reach that post at all" O(1) instead of a BFS per post
     /// per think. `comp[t][h] == comp[t][k]` iff [`NavGraph::route_bfs`] can
     /// get from `h` to `k`.
-    comp: Vec<Vec<u32>>,
+    comp: crate::shared::Shared<Vec<Vec<u32>>>,
     /// Per hub, its arcs sorted by ARC INDEX — the deterministic expansion
     /// order of `route_bfs`, built from EVERY arc that touches the hub (a hub
     /// has only eight slots; the arc list is the whole truth).
-    adj: Vec<Vec<u16>>,
+    adj: crate::shared::Shared<Vec<Vec<u16>>>,
 }
 
 /// One node of [`NavGraph::detour`]'s A\* while it runs: its point, the cost
@@ -666,6 +673,69 @@ impl DetourSearch<'_> {
 }
 
 impl NavGraph {
+    /// Issue #168: does this graph share its route rows and derived tables
+    /// with `other` (a clone)? The rest of the graph is small and copied.
+    pub fn shares_tables_with(&self, other: &NavGraph) -> bool {
+        let patches = match (&self.patches, &other.patches) {
+            (Some(a), Some(b)) => a.shares_records_with(b),
+            (a, b) => a.is_none() && b.is_none(),
+        };
+        self.routes.shares_rows_with(&other.routes)
+            && crate::shared::Shared::ptr_eq(&self.comp, &other.comp)
+            && crate::shared::Shared::ptr_eq(&self.adj, &other.adj)
+            && patches
+    }
+
+    /// Issue #168: feed everything the sim reads of this graph to the
+    /// static digest (`Sim::static_digest`'s "nav" group). Every field is
+    /// named, so a new one must be placed here; the route table goes in as
+    /// its raw rows (its `Debug` text would be megabytes), and `comp` / `adj`
+    /// are derived from `arcs`.
+    pub(crate) fn feed_digest(&self, f: &mut crate::digest::Fnv64) {
+        let NavGraph {
+            hubs,
+            arcs,
+            routes,
+            barriers,
+            barrier_names,
+            hints,
+            snipe_hints_need_floor,
+            hub_discs,
+            floor_join_arcs,
+            floor_support_arcs,
+            floor_escapes,
+            floor_approaches,
+            jet_landing_wall,
+            wall_approach_props,
+            separation_wall,
+            separation_sweep,
+            floor_seam,
+            hop_support_areas,
+            hop_takeoff_keepout,
+            attack_takeoff_keepout,
+            hop_landing_areas,
+            hop_roof_areas,
+            defend_hint_hub,
+            patches,
+            comp: _,
+            adj: _,
+        } = self;
+        f.debug(&(hubs, arcs, barriers, barrier_names, hints));
+        f.debug(&(snipe_hints_need_floor, hub_discs, floor_join_arcs));
+        f.debug(&(floor_support_arcs, floor_escapes, floor_approaches));
+        f.debug(&(jet_landing_wall, wall_approach_props, separation_wall));
+        f.debug(&(separation_sweep, floor_seam, hop_support_areas));
+        f.debug(&(hop_takeoff_keepout, attack_takeoff_keepout));
+        f.debug(&(hop_landing_areas, hop_roof_areas, defend_hint_hub, patches));
+        f.count(routes.hub_count);
+        f.count(routes.types);
+        f.count(routes.rows.len());
+        for row in &routes.rows {
+            f.count(row.len());
+            f.eat(row);
+        }
+    }
+
     /// Build the graph and its derived caches. `None` when there are no hubs
     /// (BF2 KAM1 ships an EMPTY `plan` chunk) — a graph with nothing to route
     /// on is the same as no graph at all.
@@ -719,8 +789,8 @@ impl NavGraph {
             hop_roof_areas: Vec::new(),
             defend_hint_hub: None,
             patches: None,
-            comp: Vec::new(),
-            adj,
+            comp: Default::default(),
+            adj: adj.into(),
         };
         g.comp = (0..TYPE_COUNT).map(|t| g.components(t)).collect();
         Some(g)
@@ -911,7 +981,7 @@ impl NavGraph {
                 continue;
             };
             if let Some((t, out)) = arc_reach(ha, hb, pos) {
-                let d = out.max(0.0);
+                let d = out.fmax(0.0);
                 if near.is_none_or(|(bd, _, _)| d < bd) {
                     near = Some((d, i as u16, t.clamp(0.0, 1.0)));
                 }
@@ -1392,7 +1462,7 @@ impl NavGraph {
                 continue;
             }
             if let Some(e) = br.entry_t(a, b) {
-                t = t.min(e);
+                t = t.fmin(e);
             }
         }
         t
@@ -1466,7 +1536,7 @@ impl NavGraph {
         } else {
             Vec2::X
         };
-        let band = len.max(DETOUR_BAND_MIN);
+        let band = len.fmax(DETOUR_BAND_MIN);
         // Every segment tried joins points inside the band, so a barrier whose
         // circle lies wholly outside it cannot be crossed. (A leg that is not
         // finite has no band to speak of: see `cull_box`.)
@@ -1487,7 +1557,7 @@ impl NavGraph {
             })
             .collect();
         cand.sort_unstable_by(|p, q| p.centre.x.total_cmp(&q.centre.x));
-        let max_reach = cand.iter().fold(0.0, |m: f32, c| m.max(c.reach));
+        let max_reach = cand.iter().fold(0.0, |m: f32, c| m.fmax(c.reach));
         let mut s = DetourSearch {
             g: self,
             cand,

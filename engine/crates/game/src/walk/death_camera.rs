@@ -10,6 +10,7 @@
 
 use super::*;
 use core::fmath;
+use core::fmath::FloatExt;
 use core::sim::{Event, SpawnStage};
 
 /// Phase 1's ease-in: the weight is the timer over this (BF2 0x5fc51c, BF1 0x517484).
@@ -142,7 +143,12 @@ impl WalkSim {
         }
         // Only a death in play: at the level start the player is not on the
         // field yet.
-        let stage = self.sim.spawn_stage.first().copied().unwrap_or_default();
+        let stage = self
+            .sim
+            .spawn_stage
+            .get(usize::from(self.local_slot))
+            .copied()
+            .unwrap_or_default();
         if !matches!(stage, SpawnStage::Accepted | SpawnStage::Alive) {
             return;
         }
@@ -167,7 +173,12 @@ impl WalkSim {
             self.death_cam = None;
             return;
         }
-        let stage = self.sim.spawn_stage.first().copied().unwrap_or_default();
+        let stage = self
+            .sim
+            .spawn_stage
+            .get(usize::from(self.local_slot))
+            .copied()
+            .unwrap_or_default();
         if d.stage == SpawnStage::Accepted && stage == SpawnStage::Map {
             d.replay();
         }
@@ -185,14 +196,14 @@ impl WalkSim {
         }
         let (weight, from, target) = match d.killer.filter(|_| d.timer > KILLER_AFTER) {
             Some(k) => {
-                let w = ((d.timer - KILLER_AFTER) * KILLER_EASE_RATE).min(1.0);
+                let w = ((d.timer - KILLER_AFTER) * KILLER_EASE_RATE).fmin(1.0);
                 // A killer gone keeps phase 1's points at phase 2's weight.
                 match self.killer_point(k) {
                     Some(p) => (w, d.look, p),
                     None => (w, d.fixed, d.look),
                 }
             }
-            None => ((d.timer / EASE_IN).min(1.0), d.fixed, d.look),
+            None => ((d.timer / EASE_IN).fmin(1.0), d.fixed, d.look),
         };
         let mut dir = (target - from).normalize_or_zero();
         if dir == Vec3::ZERO {
@@ -200,7 +211,7 @@ impl WalkSim {
         }
         let f = self
             .death_cast(from + Vec3::Y * CAST_SPLIT, -dir)
-            .min(self.death_cast(from - Vec3::Y * CAST_SPLIT, -dir));
+            .fmin(self.death_cast(from - Vec3::Y * CAST_SPLIT, -dir));
         let goal_eye = from - dir * (CAST * f - 1.0);
         d.eye += (goal_eye - d.eye) * weight;
         d.rot = crate::sim_pose::quat_slerp(d.rot, look_rotation(dir), weight);
@@ -235,7 +246,7 @@ impl WalkSim {
             let cutters = &self.sim.collision.cutters;
             core::collision::ray_heightfield(h, cutters, origin, dir, CAST, 0.25)
         });
-        terrain.map_or(models, |t| models.min(t / CAST))
+        terrain.map_or(models, |t| models.fmin(t / CAST))
     }
 }
 

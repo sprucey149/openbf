@@ -53,6 +53,7 @@ mod shots;
 
 use crate::bolt_light::OmniLight;
 use crate::walk::WalkSim;
+use core::fmath::FloatExt;
 use core::laser::LaserLook;
 use core::projectile::Hit;
 use glam::Vec3;
@@ -315,12 +316,12 @@ pub fn bolt_draw(
     fade: f32,
     textures: [Option<TextureHandle>; 2],
 ) -> BoltDraw {
-    let len = len.min(look.cap()).max(0.0);
+    let len = len.fmin(look.cap()).fmax(0.0);
     BoltDraw {
         head,
         dir,
-        core_len: len.min(look.length),
-        glow_len: len.min(look.glow_length),
+        core_len: len.fmin(look.length),
+        glow_len: len.fmin(look.glow_length),
         width: look.half_width(fade),
         core_texture: textures[0],
         glow_texture: textures[1],
@@ -524,7 +525,7 @@ impl BoltVis {
             };
             let full = (b.end - spawn).length();
             let frac = if full > 0.0 {
-                ((b.pos - spawn).length() / full).min(1.0)
+                ((b.pos - spawn).length() / full).fmin(1.0)
             } else {
                 1.0
             };
@@ -802,7 +803,7 @@ impl BoltVis {
             };
             let flown = (t.head - t.start).length();
             out.push(OmniLight {
-                pos: t.head - t.dir * (t.step * 0.5).min(flown * 0.5),
+                pos: t.head - t.dir * (t.step * 0.5).fmin(flown * 0.5),
                 rgb,
                 radius,
             });

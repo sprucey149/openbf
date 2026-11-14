@@ -1,5 +1,6 @@
 //! Issue #114: owned-source, headless presentation regressions.
 //! UI_SHARP_ASSETS and UI_SHARP_OUT are mandatory; never writes shared bakes.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 use std::path::PathBuf;
 use ui::shell::{Group, ListCursor, Page};
 

@@ -53,6 +53,13 @@ pub fn sector_pair(d: Vec2) -> u16 {
     (1 << (x.floor() as usize % DIRS)) | (1 << (x.ceil() as usize % DIRS))
 }
 impl PositionTable {
+    /// Issue #168: does this table share its positions and cells with
+    /// `other` (a clone)?
+    pub fn shares_with(&self, other: &PositionTable) -> bool {
+        crate::shared::Shared::ptr_eq(&self.positions, &other.positions)
+            && crate::shared::Shared::ptr_eq(&self.cells, &other.cells)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.positions.is_empty()
     }
@@ -88,8 +95,8 @@ impl PositionTable {
             a = b;
         }
         Self {
-            positions,
-            cells,
+            positions: positions.into(),
+            cells: cells.into(),
             stats,
         }
     }

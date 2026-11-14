@@ -2,6 +2,7 @@
 //! Independent hostile natives can take posts; only the armies pay tickets and decide the outcome.
 
 use super::{Sim, SpawnWaves};
+use crate::fmath::FloatExt;
 use crate::unit::{Controller, UnitSpec};
 use glam::Vec3;
 use std::collections::VecDeque;
@@ -22,7 +23,7 @@ pub struct NativeSpawnPost {
     pub nodes: Vec<(Vec3, f32)>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct NativeTeam {
     team: u8,
     pending: VecDeque<UnitSpec>,
@@ -223,7 +224,7 @@ impl Sim {
         for entry in &self.native_teams {
             eat(&[entry.team]);
             eat(&(entry.pending.len() as u32).to_le_bytes());
-            eat(&entry.waves.timer.to_bits().to_le_bytes());
+            eat(&entry.waves.timer.hash_bits().to_le_bytes());
             eat(&entry.waves.wave.to_le_bytes());
             eat(&entry.waves.next_slot.to_le_bytes());
             if !entry.spawn_posts.is_empty() {
@@ -234,7 +235,7 @@ impl Sim {
                     eat(&(post.nodes.len() as u32).to_le_bytes());
                     for (pos, yaw) in &post.nodes {
                         for value in [pos.x, pos.y, pos.z, *yaw] {
-                            eat(&value.to_bits().to_le_bytes());
+                            eat(&value.hash_bits().to_le_bytes());
                         }
                     }
                 }

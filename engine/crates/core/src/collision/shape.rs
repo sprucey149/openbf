@@ -6,6 +6,7 @@
 //! the four world queries obeys the mask.
 
 use super::{vector, Isometry, TriMesh, STEP_HEIGHT};
+use crate::fmath::FloatExt;
 use crate::vehicle::VehicleHandle;
 use glam::{Mat3, Mat4, Quat, Vec3, Vec4};
 use std::sync::Arc;
@@ -22,7 +23,7 @@ pub struct Capsule {
 
 impl Capsule {
     pub(super) fn segment(&self) -> (Vec3, Vec3) {
-        let r = self.radius.min(self.height * 0.5);
+        let r = self.radius.fmin(self.height * 0.5);
         (
             self.base + Vec3::Y * r,
             self.base + Vec3::Y * (self.height - r),
@@ -67,7 +68,7 @@ impl Capsule {
     /// PROVISIONAL (ours). The PS2's step/slope rule is untraced — HOLD 13,
     /// which is why this changes WHICH CAPSULE is asked and not `STEP_HEIGHT`.
     pub fn stepped(&self) -> Capsule {
-        let lift = STEP_HEIGHT.min(self.height * 0.5);
+        let lift = STEP_HEIGHT.fmin(self.height * 0.5);
         Capsule {
             base: self.base + Vec3::Y * lift,
             height: self.height - lift,
@@ -141,10 +142,10 @@ impl Capsule {
     /// `Capsule::new_y` is centred on the origin with its segment ±half_height
     /// along Y, so the placement is the segment midpoint (`base + h/2·Y`).
     pub(super) fn to_parry(self) -> (parry3d::shape::Capsule, Isometry) {
-        let r = self.radius.min(self.height * 0.5);
+        let r = self.radius.fmin(self.height * 0.5);
         let half = (self.height - 2.0 * r) * 0.5;
         (
-            parry3d::shape::Capsule::new_y(half.max(0.0), r),
+            parry3d::shape::Capsule::new_y(half.fmax(0.0), r),
             Isometry::translation(self.base.x, self.base.y + self.height * 0.5, self.base.z),
         )
     }
@@ -231,8 +232,8 @@ impl Aabb {
             if n > f {
                 std::mem::swap(&mut n, &mut f);
             }
-            t0 = t0.max(n);
-            t1 = t1.min(f);
+            t0 = t0.fmax(n);
+            t1 = t1.fmin(f);
             if t0 > t1 {
                 return false;
             }
@@ -373,7 +374,7 @@ fn ray_cylinder(
         s0 = (-b - sq) / a;
         s1 = (-b + sq) / a;
     }
-    let (t_in, t_out) = (y0.max(s0), y1.min(s1));
+    let (t_in, t_out) = (y0.fmax(s0), y1.fmin(s1));
     if t_in > t_out || t_out < 0.0 {
         return None;
     }
@@ -464,6 +465,7 @@ impl std::ops::BitOr for Layers {
 }
 
 /// One placed piece of world geometry.
+#[derive(Clone)]
 pub struct Body {
     /// World-space bounds — the broad phase.
     pub aabb: Aabb,
@@ -734,7 +736,86 @@ impl HullPart {
 
 /// A terrain cutter: a convex volume the terrain is punched out of. See
 /// `mungefs::terrain::Cutter`.
-#[derive(Default)]
+/// Issue #168: the per-mesh digests already taken in one static digest, by
+/// the mesh's `Arc` address (a cache key only: the digest is of the mesh's
+/// contents, so the address never reaches it).
+pub(crate) type MeshDigests = std::collections::BTreeMap<usize, u64>;
+
+/// Feed `shape` to the static digest: a primitive's sizes, a mesh's own
+/// digest over its vertex and triangle data (taken once per shared mesh).
+pub(crate) fn feed_shape_digest(
+    shape: &Shape,
+    f: &mut crate::digest::Fnv64,
+    meshes: &mut MeshDigests,
+) {
+    match shape {
+        Shape::Mesh(m) => {
+            let digest = *meshes.entry(Arc::as_ptr(m) as usize).or_insert_with(|| {
+                let mut d = crate::digest::Fnv64::new();
+                d.count(m.vertices().len());
+                for v in m.vertices() {
+                    d.f32s(&[v.x, v.y, v.z]);
+                }
+                d.count(m.indices().len());
+                for t in m.indices() {
+                    for &k in t {
+                        d.u32(k);
+                    }
+                }
+                d.finish()
+            });
+            f.eat(b"M");
+            f.u64(digest);
+        }
+        Shape::Sphere { radius } => {
+            f.eat(b"S");
+            f.f32(*radius);
+        }
+        Shape::Cylinder {
+            radius,
+            half_height,
+        } => {
+            f.eat(b"C");
+            f.f32s(&[*radius, *half_height]);
+        }
+        Shape::Box { half } => {
+            f.eat(b"B");
+            f.f32s(&half.to_array());
+        }
+    }
+}
+
+impl Body {
+    /// Feed this body to the static digest (its parry isometry is
+    /// `to_world`'s, and `aabb` / `to_local` follow from it and the shape).
+    pub(crate) fn feed_digest(&self, f: &mut crate::digest::Fnv64, meshes: &mut MeshDigests) {
+        f.f32s(&self.to_world.to_cols_array());
+        feed_shape_digest(&self.shape, f, meshes);
+        f.eat(&[
+            self.layers.0,
+            u8::from(self.closed),
+            u8::from(self.flyer_part),
+        ]);
+        f.f32(self.hit_mult);
+        f.debug(&(self.owner, self.instance));
+    }
+}
+
+impl HullPart {
+    /// Feed this part to the static digest (`closed` follows from the shape).
+    pub(crate) fn feed_digest(&self, f: &mut crate::digest::Fnv64, meshes: &mut MeshDigests) {
+        f.f32s(&self.local.to_cols_array());
+        feed_shape_digest(&self.shape, f, meshes);
+        f.eat(&[
+            self.layers.0,
+            u8::from(self.flyer_part),
+            u8::from(self.terrain_part),
+        ]);
+        f.f32(self.hit_mult);
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct Cutter {
     /// `(radius, cx, cy, cz)` bounding sphere from the `CUTR INFO` — a cheap
     /// reject before the planes. All zeroes = no bound (test the planes).

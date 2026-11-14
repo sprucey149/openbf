@@ -43,6 +43,11 @@ impl Boundary {
         let inside = |s: &Vec<Edge>| s.iter().all(|e| (x - e.x) * e.nx + (z - e.z) * e.nz <= 0.0);
         !self.shapes.is_empty() && !self.shapes.iter().any(inside)
     }
+
+    /// Does the map have a boundary at all?
+    pub fn is_empty(&self) -> bool {
+        self.shapes.is_empty()
+    }
 }
 
 /// The seconds a controllable lives outside: BF1 10, BF2 6.5 (`re-boundary.md`

@@ -53,6 +53,7 @@
 mod class;
 
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::lcg::GameLcg;
 use glam::Vec3;
 
@@ -918,7 +919,7 @@ impl WeaponState {
 
     /// Effective half-angles at fire time (vtbl+0x44 / +0x40).
     pub fn pitch_spread(&self, c: &WeaponClass) -> f32 {
-        self.spread.max(0.0) + self.posture_base + c.pitch_spread
+        self.spread.fmax(0.0) + self.posture_base + c.pitch_spread
     }
     /// `max(spreadState, 0) + postureBase + <the YawSpread slot>`
     /// (B2:323416 / B1:211316). The AI sniper table occupies that last slot
@@ -927,7 +928,7 @@ impl WeaponState {
     /// (`analysis/re-ai-sniper.md` §2; the same document's §4.2 corrects
     /// `re-blaster-damage.md` §4.3, which said otherwise).
     pub fn yaw_spread(&self, c: &WeaponClass) -> f32 {
-        self.spread.max(0.0) + self.posture_base + self.ai_dispersion.unwrap_or(c.yaw_spread)
+        self.spread.fmax(0.0) + self.posture_base + self.ai_dispersion.unwrap_or(c.yaw_spread)
     }
 
     /// SetPostureSpread (BF1 FUN_002889b0 / BF2 0x32e438), called by the
@@ -1093,7 +1094,7 @@ impl WeaponState {
         if !self.overheated {
             self.overheated = self.heat >= 1.0;
         }
-        self.heat = (self.heat - dt * c.heat_recover_rate).max(0.0);
+        self.heat = (self.heat - dt * c.heat_recover_rate).fmax(0.0);
         if self.overheated {
             self.overheated = c.heat_threshold < self.heat;
         }
@@ -1170,12 +1171,12 @@ impl WeaponState {
         } else {
             // Idle: the accumulator still saturates toward the period so
             // cycle_finished/trigger semantics stay consistent.
-            self.refire_accum = (self.refire_accum + dt).min(self.refire_time);
+            self.refire_accum = (self.refire_accum + dt).fmin(self.refire_time);
         }
 
         // Per-tick spread recovery (FUN_00288930 / FUN_0032e200).
         let floor = Self::spread_floor(c, self.human, self.spread_mult);
-        self.spread = (self.spread - dt * c.spread_recover_rate).max(floor);
+        self.spread = (self.spread - dt * c.spread_recover_rate).fmax(floor);
     }
 
     /// Where the spread state rests: the PS2's floor (a human's
@@ -1267,7 +1268,7 @@ impl WeaponState {
                         }
                         // Spread grows once per salvo, capped at SpreadLimit.
                         self.spread = (self.spread + self.spread_mult * c.spread_per_shot)
-                            .min(c.spread_limit);
+                            .fmin(c.spread_limit);
                         self.salvo_counter = self.salvo_counter.saturating_sub(1);
                         self.salvo_timer += lcg.uniform(c.salvo_delay[0], c.salvo_delay[1]);
                         if self.salvo_counter < 1 || 0.0 < self.salvo_timer {
@@ -1301,7 +1302,7 @@ impl WeaponState {
             self.reload_timer,
             self.heat,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         // `stage` follows from `charge` (hashed above) and the class.
         eat(&self.salvo_counter.to_le_bytes());
@@ -1364,7 +1365,7 @@ impl WeaponState {
                     eat(&s.to_le_bytes());
                 }
             }
-            eat(&self.lock_held.to_bits().to_le_bytes());
+            eat(&self.lock_held.hash_bits().to_le_bytes());
         }
     }
 }

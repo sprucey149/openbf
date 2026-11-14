@@ -13,7 +13,11 @@ const R: f32 = 5.0;
 
 /// A skiff-like hover (pilot + 3 gunners) `at`, facing −Z (yaw π), on flat
 /// ground; the player at the origin facing −Z.
-fn world(at: Vec3, home_team: Option<u8>, neutral: bool) -> (Sim, UnitHandle, VehicleHandle) {
+pub(crate) fn world(
+    at: Vec3,
+    home_team: Option<u8>,
+    neutral: bool,
+) -> (Sim, UnitHandle, VehicleHandle) {
     let mut s = Sim::empty(1);
     s.heightfield = Some(flat_ground());
     s.hover_params = vec![Some(skiff())];

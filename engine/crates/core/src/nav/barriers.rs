@@ -1,6 +1,7 @@
 //! Authored barrier containment, crossing and silhouette geometry.
 
 use super::{Barrier, Vec2};
+use crate::fmath::FloatExt;
 
 impl Barrier {
     pub fn stops(&self, ty: usize) -> bool {
@@ -71,8 +72,8 @@ impl Barrier {
             if lo > hi {
                 std::mem::swap(&mut lo, &mut hi);
             }
-            t0 = t0.max(lo);
-            t1 = t1.min(hi);
+            t0 = t0.fmax(lo);
+            t1 = t1.fmin(hi);
             if t0 > t1 {
                 return None;
             }

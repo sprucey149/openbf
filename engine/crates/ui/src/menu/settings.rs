@@ -50,16 +50,25 @@ impl SettingsPage {
     pub(super) fn rows(self) -> &'static [Row] {
         use Row::*;
         match self {
-            Self::Game => &[Difficulty, AiCap, Reinforcements, CareerAwards, Cheats],
+            Self::Game => &[
+                Difficulty,
+                AiCap,
+                Reinforcements,
+                CareerAwards,
+                Cheats,
+                PlayerName,
+            ],
             Self::Audio => &[Music, EffectsVolume, DialogueVolume],
             Self::Graphics => &[
                 Viewpoint,
                 Fov,
                 GraphicsQuality,
+                AutoQuality,
                 LowPowerResolution,
                 TerrainLod,
                 SceneSoftness,
                 FpsCounter,
+                NetworkMeter,
                 ResetGraphics,
             ],
             Self::Controls => &[Settings(Self::KeyboardMouse), Settings(Self::Gamepad)],
@@ -142,10 +151,26 @@ pub fn rumble_level(strength: f32) -> usize {
 
 /// An optional top-left counter, in display coordinates and outside the sim.
 pub fn draw_fps_counter(ctx: &egui::Context, mode: FpsCounter, seconds: f32) {
+    draw_fps_counter_note(ctx, mode, seconds, None);
+}
+
+/// [`draw_fps_counter`] with a note after the rate, such as the automatic
+/// quality's render scale ("60 FPS · res 85%").
+pub fn draw_fps_counter_note(
+    ctx: &egui::Context,
+    mode: FpsCounter,
+    seconds: f32,
+    note: Option<&str>,
+) {
     if mode == FpsCounter::Off || !seconds.is_finite() || seconds <= 0.0 {
         return;
     }
-    let text = egui::RichText::new(format!("{:.0} FPS", seconds.recip())).monospace();
+    let rate = format!("{:.0} FPS", seconds.recip());
+    let text = egui::RichText::new(match note {
+        Some(n) => format!("{rate} · {n}"),
+        None => rate,
+    })
+    .monospace();
     egui::Area::new(egui::Id::new("fps_counter"))
         .interactable(false)
         .anchor(Align2::LEFT_TOP, egui::vec2(8.0, 8.0))

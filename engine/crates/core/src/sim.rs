@@ -13,11 +13,14 @@
 //! contact under the new feet; then the hovers and their riders; 3b unit
 //! separation; 3c environmental death: the kill floor, the death regions) → 4
 //! weapon cycles (a soldier's channels, switches and held weapons first, card
-//! GREN) → bolt spawns (predictive raycast) and throws → 5 bolt flight →
+//! GREN) → bolt spawns (predictive raycast) and throws → 4' a lagged LAN
+//! player's new bolts swept through the volumes he saw (`lag_comp`) → 5 bolt flight →
 //! impacts → damage/death → 5b the thrown grenades (fuse, flight, sweep,
 //! blast) → 5c the pickups (flight, life, the touch; card PWUP) → 5c' the health / ammo
 //! droids' passes (card PWST) → 6 command posts → bleed → domination → outcome → 7 the
-//! vehicle pads (follow, decay, spawn); tick++.
+//! vehicle pads (follow, decay, spawn); tick++; the tick's hit volumes kept
+//! for lag compensation. `Sim::step_predicted` (LAN prediction,
+//! presentation only) is the same tick with no bot think.
 //! Events for the tick are left in `events`.
 //!
 //! ## Where the code lives
@@ -29,7 +32,8 @@
 //! `vehicles` owns vehicle slots and pads; `doors` advances door bodies and events; `seats` handles entry, exit and
 //! drivers; `blast` applies area damage; `bounds` defines the playable level;
 //! `ordnance` handles weapon channels, throws and grenade flight; `pickups`
-//! owns dropped items; `trace` writes the optional observational state stream; `stations` runs health/ammo droids. Public types are
+//! owns dropped items; `trace` writes the optional observational state stream; `stations` runs health/ammo droids;
+//! `lag_comp` keeps the hit-volume history and compensates a LAN player's shots. Public types are
 //! re-exported here; shared test fixtures stay in this facade.
 
 mod abilities;
@@ -62,6 +66,7 @@ mod hero_bodies;
 pub mod heroes;
 mod hover_pairs;
 mod input;
+pub mod lag_comp;
 mod landing;
 mod lock_on;
 mod look;
@@ -90,6 +95,7 @@ mod state;
 mod stations;
 mod step;
 mod target_hints;
+pub mod think_pool;
 mod tow;
 pub mod trace;
 mod traffic;
@@ -141,10 +147,14 @@ pub use space_assault::{
     UNMANNED_FLYER_POINTS,
 };
 pub use space_balance::SpaceBalance;
-pub use spawn::{ClassAmmo, ClassRefusal, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING};
+pub use spawn::{
+    ClassAmmo, ClassRefusal, JoinError, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING,
+    MAX_PLAYER_SLOTS,
+};
 pub use state::{
-    omni_radius_for, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats, Sim, TickCost,
-    UnitCost, BLAST_AGE, HAZARD_RADIUS, OUTCOME_DRAW, SNIPE_SUITABILITY_DEFAULT,
+    omni_radius_for, AssistProfile, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats,
+    Sim, TickCost, UnitCost, BLAST_AGE, HAZARD_RADIUS, OUTCOME_DRAW, SNIPE_SUITABILITY_DEFAULT,
+    STATIC_DIGEST_GROUPS,
 };
 pub use stations::{
     Station, StationAnim, StationClass, StationDamageEffect, StationMotion,
@@ -153,6 +163,9 @@ pub use stations::{
 pub use target_hints::{TargetHint, TargetHints};
 pub use tow::TowCable;
 pub use weak_lock::{GROUND_WEAK_SPOT_FACTOR, HEAVY_WALKER_WEAK_SPOT_FACTOR};
+
+#[cfg(test)]
+mod xdet_tests;
 
 #[cfg(test)]
 mod tests {

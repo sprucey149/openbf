@@ -1,6 +1,7 @@
 //! BF2 close mode 7 (PS2 0x2dac80), through ordinary movement and fire input.
 
 use super::draw::{unit_rand, unit_unit};
+use crate::fmath::FloatExt;
 use crate::{
     sim::Sim,
     soldier::Stance,
@@ -39,7 +40,7 @@ impl MeleeBrain {
             Some(p) => {
                 eat(&[1]);
                 for n in p.to_array() {
-                    eat(&n.to_bits().to_le_bytes());
+                    eat(&n.hash_bits().to_le_bytes());
                 }
             }
             None => eat(&[0]),

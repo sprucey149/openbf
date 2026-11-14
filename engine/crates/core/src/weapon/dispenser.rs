@@ -2,6 +2,7 @@
 //! pack dispensers (issue #46) and, through `MineClass`, mines and packs.
 
 use super::{pair, pf, PropSource, Thrown, WeaponClass, WeaponState};
+use crate::fmath::FloatExt;
 use crate::sim::ItemClass;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,7 +24,7 @@ impl<I> Dispenser<I> {
         Thrown::apply(w, src, bf2);
         w.shot_delay = pair(src, "ShotDelay")
             .unwrap_or([0.125; 2])
-            .map(|v| v.max(0.0));
+            .map(|v| v.fmax(0.0));
         let thrown = w.thrown.as_mut().unwrap();
         thrown.shot_elevate = 0.0;
         thrown.hand = bf2.then_some(Dispenser::BF2_HAND);
@@ -35,7 +36,7 @@ impl<I> Dispenser<I> {
                 pf(src, "MinStrength").unwrap_or(0.3),
                 pf(src, "MaxStrength").unwrap_or(1.0),
             ],
-            max_items: pf(src, "MaxItems").unwrap_or(0.0).max(0.0) as u32,
+            max_items: pf(src, "MaxItems").unwrap_or(0.0).fmax(0.0) as u32,
         }
     }
 
