@@ -409,6 +409,7 @@ fn lib() -> SoundLib {
         cache: HashMap::new(),
         loops: HashMap::new(),
         walker_gains: HashMap::new(),
+        turret_whirs: HashMap::new(),
         ambient: HashMap::new(),
         cries: HashMap::new(),
         boosts: HashMap::new(),

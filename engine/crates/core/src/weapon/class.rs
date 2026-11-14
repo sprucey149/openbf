@@ -579,14 +579,15 @@ impl WeaponClass {
         if let Some(v) = pf(src, "SpreadLimit") {
             w.spread_limit = v * DEG;
         }
-        w.fire_sound = src.prop("FireSound").map(|s| s.trim().to_owned());
-        w.fire_loop_sound = src.prop("FireLoopSound").map(|s| s.trim().to_owned());
+        let sound = |key: &str| src.prop(key).and_then(sound_ref);
+        w.fire_sound = sound("FireSound");
+        w.fire_loop_sound = sound("FireLoopSound");
         w.muzzle_effect = src.prop("MuzzleFlashEffect").map(|s| s.trim().to_owned());
-        w.reload_sound = src.prop("ReloadSound").map(|s| s.trim().to_owned());
-        w.empty_sound = src.prop("FireEmptySound").map(|s| s.trim().to_owned());
-        w.change_sound = src.prop("WeaponChangeSound").map(|s| s.trim().to_owned());
-        w.overheat_sound = src.prop("OverheatSound").map(|s| OverheatSound {
-            name: s.trim().to_owned(),
+        w.reload_sound = sound("ReloadSound");
+        w.empty_sound = sound("FireEmptySound");
+        w.change_sound = sound("WeaponChangeSound");
+        w.overheat_sound = sound("OverheatSound").map(|name| OverheatSound {
+            name,
             pitch: pf(src, "OverheatSoundPitch").unwrap_or(1.0),
         });
         w
@@ -694,5 +695,31 @@ impl WeaponClass {
                     && (n.ends_with("rocket_launcher") || n.ends_with("torpedo_launcher"))
             }
         }
+    }
+}
+
+/// A weapon's sound reference by name (`analysis/re-weapon-sounds.md` 3.1):
+/// its first word. A value `"<name> defer"` (second token 0x1A01FB3B) names
+/// the same sound, resolved at its first use (B1 `FUN_00355328`,
+/// B1:342811-342816). BF1's `com_weap_bldg_gunturret` (the skiff's three
+/// guns) and BF2's `com_weap_turret_fire_small` carry it on `FireSound`;
+/// before this their shots asked for "<name> defer" and played nothing.
+fn sound_ref(value: &str) -> Option<String> {
+    value.split_whitespace().next().map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_deferred_sound_names_its_first_word() {
+        assert_eq!(
+            super::sound_ref("com_weap_turret_fire Defer").as_deref(),
+            Some("com_weap_turret_fire")
+        );
+        assert_eq!(
+            super::sound_ref(" rep_weap_inf_rifle_fire ").as_deref(),
+            Some("rep_weap_inf_rifle_fire")
+        );
+        assert_eq!(super::sound_ref("  "), None);
     }
 }

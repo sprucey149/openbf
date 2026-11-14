@@ -35,6 +35,7 @@ mod bf1_heroes;
 mod hero;
 pub mod overheat;
 mod playback;
+mod turret;
 mod walker;
 
 use crate::classdb::fnv1a_lowercase;
@@ -576,6 +577,11 @@ enum LoopSource {
     WalkerSpin(core::unit::UnitHandle, usize),
     /// A weapon's overheat loop ([`overheat`]), by unit and weapon class.
     Overheat(core::unit::UnitHandle, usize),
+    /// A turret seat's whirs and ambient loop ([`turret`]), by vehicle slot,
+    /// generation and seat.
+    TurretYaw(u32, u32, u8),
+    TurretPitch(u32, u32, u8),
+    TurretAmbient(u32, u32, u8),
 }
 
 struct LoopRequest {
@@ -630,6 +636,7 @@ pub struct SoundLib {
     loops: HashMap<LoopSource, Option<audio::Voice>>,
     /// Each walker gun voice's level, for its fades (`sounds/walker.rs`).
     walker_gains: HashMap<LoopSource, f32>,
+    turret_whirs: HashMap<turret::SeatKey, turret::Whir>,
     /// The world's emitters sounding, by index into
     /// `crate::ambience::Ambience::emitters` ([`SoundLib::ambient_voices`]).
     ambient: HashMap<usize, AmbientVoice>,
@@ -835,6 +842,7 @@ impl SoundLib {
             cache: HashMap::new(),
             loops: HashMap::new(),
             walker_gains: HashMap::new(),
+            turret_whirs: HashMap::new(),
             ambient: HashMap::new(),
             cries: HashMap::new(),
             boosts: HashMap::new(),

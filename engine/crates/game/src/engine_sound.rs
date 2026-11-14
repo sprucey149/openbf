@@ -30,7 +30,8 @@
 //! [`walker`] supplies animated footstep one-shots through the same queue,
 //! and every vehicle instance its `TurnOnSound` / `TurningOffSound` /
 //! `TurnOffSound` (card VSN2), a class with no record included.
-//! Not here (card VSN2): leg hydraulics, the turret whir, collision.
+//! Not here (card VSN2): leg hydraulics, collision. The turret whir and its
+//! gunner one-shots are `sounds::turret`.
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::walk::WalkSim;

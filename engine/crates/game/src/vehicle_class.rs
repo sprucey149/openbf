@@ -740,6 +740,7 @@ pub struct SeatSpec {
     /// A second `AimerNodeName` was read: later aimer keys are its.
     aimer_second: bool,
     pub aimers: Vec<AimerSpec>,
+    pub turret_sounds: TurretSounds,
 }
 
 /// A seat's pose key: the clip `human_<name>`, and whether it is a nine-pose.
@@ -858,6 +859,7 @@ impl SeatSpec {
             aimer_pitch_rate: None,
             aimer_second: false,
             aimers: Vec::new(),
+            turret_sounds: TurretSounds::default(),
         }
     }
 
@@ -1030,6 +1032,68 @@ impl SeatSpec {
             if let (Some(w), Ok(a)) = (self.weapons.last_mut(), v.trim().parse()) {
                 w.ammo = a;
             }
+        } else {
+            self.turret_sounds.set(k, v);
+        }
+    }
+}
+
+/// A MountedTurret section's sounds (`analysis/re-vehicle-sounds.md` 8; the
+/// turret class setter B1 `FUN_00225f08`, B2 `FUN_00270770`): the two whir
+/// loops and their low pitch, the one-shots a new or departing gunner
+/// starts and the loop held while the seat has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TurretSounds {
+    /// `TurretYawSound` (0x1fa43b99, B1 K+0x116c) and `TurretPitchSound`
+    /// (0x28f016d2, K+0x1178).
+    pub yaw: Option<String>,
+    pub pitch: Option<String>,
+    /// `TurretYawSoundPitch` (0x1503f425, K+0x1174) and
+    /// `TurretPitchSoundPitch` (0x4ed7a4d0, K+0x1180): the voice's pitch at
+    /// rest over the property's, 0.8 from the class constructor
+    /// (B1 `FUN_00225cd8` B1:138677-138680).
+    pub yaw_low: f32,
+    pub pitch_low: f32,
+    /// `TurretActivateSound` (0xe9d0fb69, K+0x1184) and
+    /// `TurretDeactivateSound` (0xf84aa204, K+0x1194).
+    pub activate: Option<String>,
+    pub deactivate: Option<String>,
+    /// `TurretAmbientSound` (0x8e5da6e8, K+0x118c). `TurretStartSound`
+    /// (0x8822cb3c, K+0x119c) is stored and played by nothing.
+    pub ambient: Option<String>,
+}
+
+impl Default for TurretSounds {
+    fn default() -> Self {
+        Self {
+            yaw: None,
+            pitch: None,
+            yaw_low: 0.8,
+            pitch_low: 0.8,
+            activate: None,
+            deactivate: None,
+            ambient: None,
+        }
+    }
+}
+
+impl TurretSounds {
+    fn set(&mut self, k: u32, v: &str) {
+        let name = || v.split_whitespace().next().map(str::to_owned);
+        if k == h("TurretYawSound") {
+            self.yaw = name();
+        } else if k == h("TurretPitchSound") {
+            self.pitch = name();
+        } else if k == h("TurretYawSoundPitch") {
+            self.yaw_low = float(v).unwrap_or(self.yaw_low);
+        } else if k == h("TurretPitchSoundPitch") {
+            self.pitch_low = float(v).unwrap_or(self.pitch_low);
+        } else if k == h("TurretActivateSound") {
+            self.activate = name();
+        } else if k == h("TurretDeactivateSound") {
+            self.deactivate = name();
+        } else if k == h("TurretAmbientSound") {
+            self.ambient = name();
         }
     }
 }
