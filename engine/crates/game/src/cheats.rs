@@ -8,6 +8,17 @@
 use core::sim::{Cheats, Sim};
 use ui::menu::{MenuInput, MorseCheats};
 
+/// `[ours]` The original's display and sound cheat words (re-cheat-codes.md):
+/// `hud` hides the HUD, `slow` plays positional sound effects at 0.3x pitch,
+/// and `80s`, `at` and `alias` have no effect in openbf yet. They are
+/// soft-locked (the maintainer, November 13, 2026): the code stays, but
+/// while [`WORDS_LOCKED`] is set no word toggles anything, in single player
+/// or multiplayer, until the maintainer decides what to do with them.
+pub const LOCKED_WORDS: [&str; 5] = ["hud", "slow", "80s", "at", "alias"];
+
+/// The soft lock on [`LOCKED_WORDS`]; clear it to give the words back.
+pub const WORDS_LOCKED: bool = true;
+
 #[derive(Debug, Clone, Default)]
 pub struct Session {
     /// The flags each battle's `Sim` gets ([`Self::install`]).
@@ -36,6 +47,13 @@ impl Session {
         Some(self.apply_word(word, sim))
     }
 
+    /// One paused frame's D-pad edges into the Morse buffers: the word
+    /// recognised, if any, without applying it (a LAN round sends it to the
+    /// host instead, issue #168).
+    pub fn word(&mut self, input: MenuInput) -> Option<&'static str> {
+        self.morse.feed(input)
+    }
+
     /// Toggle the cheat a recognised word names; the confirmation line.
     pub fn apply_word(&mut self, word: &str, sim: &mut Sim) -> String {
         let on = |b: bool| if b { "on" } else { "off" };
@@ -49,6 +67,9 @@ impl Session {
                 .find(|e| e.0 == id)
                 .map_or(id, |e| e.1);
             return format!("cheat {word}: {label} {}", on(self.flags.is_on(id)));
+        }
+        if WORDS_LOCKED && LOCKED_WORDS.contains(&word) {
+            return format!("cheat {word}: not available yet");
         }
         match word {
             "cheat" => {
@@ -209,6 +230,7 @@ mod tests {
         let mut s = Session::default();
         let mut first = Sim::empty(1);
         press(&mut s, &mut first, &dpad("sos"));
+        // `hud` is soft-locked (`WORDS_LOCKED`): it toggles nothing.
         press(&mut s, &mut first, &dpad("hud"));
         // A pause-menu row in the first battle.
         first.cheats.toggle("clip");
@@ -216,12 +238,27 @@ mod tests {
         let mut second = Sim::empty(2);
         s.install(&mut second);
         assert!(second.cheats.invincible && second.cheats.no_reload);
-        assert!(s.hud_hidden);
+        assert!(!s.hud_hidden, "a locked word changes nothing");
         s.end();
         let mut third = Sim::empty(3);
         third.cheats.all_classes = true;
         s.install(&mut third);
         assert_eq!(third.cheats, Cheats::default());
         assert!(!s.hud_hidden && !s.sfx_slow);
+    }
+
+    /// Every soft-locked word answers "not available yet" and leaves the
+    /// session and the sim alone.
+    #[test]
+    fn locked_words_toggle_nothing() {
+        let mut s = Session::default();
+        let mut sim = Sim::empty(1);
+        for w in LOCKED_WORDS {
+            let line = s.apply_word(w, &mut sim);
+            assert_eq!(line, format!("cheat {w}: not available yet"));
+        }
+        assert!(!s.hud_hidden && !s.sfx_slow);
+        assert_eq!(s.sfx_rate(), 1.0);
+        assert_eq!(sim.cheats, Cheats::default());
     }
 }

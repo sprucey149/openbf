@@ -2,6 +2,7 @@
 //! burst), flight step, drain and replay state. Follows
 //! `analysis/re-remote-droid.md` (card REMOTE); the bots' droid rules are card DROIDAI.
 
+use crate::fmath::FloatExt;
 use crate::unit::UnitHandle;
 use crate::weapon::{
     pair, pf, pf_hash, ExplosionClass, HealthType, PropSource, WeaponClass, WeaponState, DEG,
@@ -201,9 +202,9 @@ impl Salvo {
             yaw: h(0x3186fbfe, 0.0) * DEG,
             pitch: pf_hash(src, 0x8339fb35).map_or(std::f32::consts::FRAC_PI_2, |v| v * DEG),
             distance: h(0xecdb9d1d, 100.0),
-            count: pf(src, "SalvoCount").unwrap_or(1.0).max(1.0) as u32,
-            delay: pf(src, "SalvoDelay").unwrap_or(0.0).max(0.0),
-            initial: pf(src, "InitialSalvoDelay").unwrap_or(0.0).max(0.0),
+            count: pf(src, "SalvoCount").unwrap_or(1.0).fmax(1.0) as u32,
+            delay: pf(src, "SalvoDelay").unwrap_or(0.0).fmax(0.0),
+            initial: pf(src, "InitialSalvoDelay").unwrap_or(0.0).fmax(0.0),
             spread: h(0xebd81a5e, 0.0),
             shell: Box::new(shell),
         }
@@ -240,7 +241,7 @@ pub struct Destruct {
 impl Destruct {
     pub fn from_props(src: &dyn PropSource) -> Self {
         Self {
-            charge_time: pf(src, "MaxPressedTime").unwrap_or(0.0).max(0.0),
+            charge_time: pf(src, "MaxPressedTime").unwrap_or(0.0).fmax(0.0),
             charge_sound: name(src, "ChargeSound"),
             salvo: None,
             burst: None,
@@ -405,7 +406,7 @@ impl Droid {
         let level = |d: Vec3| (d - n * d.dot(n)).normalize_or(d);
         let fwd = level(Vec3::new(-sy, 0.0, -cy));
         let right = level(Vec3::new(cy, 0.0, -sy));
-        let cap = c.acceleration * k * n.y.max(0.0) * dt;
+        let cap = c.acceleration * k * n.y.fmax(0.0) * dt;
         let along = |v: Vec3, d: Vec3, want: f32| d * (want - v.dot(d)).clamp(-cap, cap);
         self.vel += along(self.vel, fwd, forward * c.max_speed);
         self.vel += along(self.vel, right, strafe * c.max_strafe_speed);
@@ -434,7 +435,7 @@ impl Droid {
 
     /// Seconds of its [`LIFETIME`] left.
     pub fn time_left(&self) -> f32 {
-        (LIFETIME - self.age).max(0.0)
+        (LIFETIME - self.age).fmax(0.0)
     }
 
     /// [ours] Age one tick: `Expired` on the tick it reaches [`LIFETIME`].
@@ -452,7 +453,7 @@ impl Droid {
         eat(&(self.weapon_class as u64).to_le_bytes());
         for v in [self.pos, self.vel, self.up, self.up_vel] {
             for x in v.to_array() {
-                eat(&x.to_bits().to_le_bytes());
+                eat(&x.hash_bits().to_le_bytes());
             }
         }
         for v in [
@@ -463,15 +464,15 @@ impl Droid {
             self.idle,
             self.charge.unwrap_or(-1.0),
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         // Only while outside or adrift, so a flight inside the map over ground
         // hashes as it always has.
         if let Some(t) = self.leaving {
-            eat(&t.to_bits().to_le_bytes());
+            eat(&t.hash_bits().to_le_bytes());
         }
         if self.adrift > 0.0 {
-            eat(&self.adrift.to_bits().to_le_bytes());
+            eat(&self.adrift.hash_bits().to_le_bytes());
         }
         eat(&self.prev_buttons.to_le_bytes());
         self.blaster.hash_into(eat);
@@ -495,10 +496,10 @@ impl StrikeRun {
         eat(&[self.team]);
         eat(&(self.weapon_class as u64).to_le_bytes());
         for x in self.target.to_array() {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
         eat(&self.left.to_le_bytes());
-        eat(&self.timer.to_bits().to_le_bytes());
+        eat(&self.timer.hash_bits().to_le_bytes());
     }
 }
 

@@ -4,6 +4,8 @@
 //! damage = 20% of health left. BF2 FUN_0045e7f0 B2:521848-521895
 //! sets an immediate onset and a fade across the entire lifetime.
 //! trace: PCSX2 T2 for shake/rumble and any resulting aim motion.
+use core::fmath::FloatExt;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Flash {
     pub alpha: u8,
@@ -15,7 +17,7 @@ impl Flash {
         if health_left <= 0.0 || damage <= 0.02 * health_left {
             return None;
         }
-        let scale = (damage / (0.2 * health_left)).min(1.0);
+        let scale = (damage / (0.2 * health_left)).fmin(1.0);
         Some(Self {
             alpha: (32.0 + 96.0 * scale) as u8,
             duration: 0.15 + 0.15 * scale,

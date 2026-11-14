@@ -1,6 +1,7 @@
 //! Hero sample handles: looping weapon hum and the soldier's breathing.
 
 use super::{Cry, Listener, LoopRequest, LoopSource, SoundLib, Start};
+use core::fmath::FloatExt;
 use core::unit::UnitHandle;
 use glam::Vec3;
 
@@ -117,7 +118,7 @@ impl SoundLib {
                 &mut starts,
             );
             if let Some(first) = starts.first() {
-                let pitch = (first.pitch * self.rate_mul).max(0.05);
+                let pitch = (first.pitch * self.rate_mul).fmax(0.05);
                 let secs = self.voice_secs(&first.path).unwrap_or(0.0) / pitch;
                 self.hero_voices.insert(
                     key,

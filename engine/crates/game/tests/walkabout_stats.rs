@@ -23,6 +23,7 @@
 //!   UPDATE_GOLDENS=1 cargo test -p game --test walkabout_stats -- --ignored
 //! The hook that proves it: `OPENBF_TEST_DROP_TEXTURE=<name>` makes the scene
 //! upload skip that one texture, and the panels that see it fail.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

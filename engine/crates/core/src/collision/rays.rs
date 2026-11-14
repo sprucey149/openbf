@@ -7,6 +7,7 @@
 use super::shape::{Aabb, Body, Cutter, Layers};
 use super::world::{CollisionWorld, HullFilter};
 use super::{point, vector, WALKABLE_MIN_NY};
+use crate::fmath::FloatExt;
 use crate::heightfield::{HeightProbe, Heightfield};
 use crate::vehicle::VehicleHandle;
 use glam::Vec3;
@@ -103,7 +104,7 @@ impl CollisionWorld {
             // farther, less a margin: a hit a rounding nearer than the best
             // can lie in a box that rounds to just past it (BF2 Tatooine 3's
             // hub 54, one bit of a floor).
-            let limit = best.map_or(max_len, |b| (b.0 + BOX_MARGIN).min(max_len));
+            let limit = best.map_or(max_len, |b| (b.0 + BOX_MARGIN).fmin(max_len));
             let a = &body.aabb;
             if origin.x < a.min.x
                 || origin.x > a.max.x
@@ -130,7 +131,7 @@ impl CollisionWorld {
                 };
                 let t = from + hit.time_of_impact;
                 if pass == 0 {
-                    reach = reach.min(t + RAY_DOWN_SEEK);
+                    reach = reach.fmin(t + RAY_DOWN_SEEK);
                 }
                 let n = body
                     .to_world
@@ -255,7 +256,7 @@ impl CollisionWorld {
             }
             // Only a nearer hit can replace the best, so look no farther,
             // less a margin ([`Self::ray_down_with`]).
-            let reach = best.map_or(max_t, |b| (b.0 + BOX_MARGIN).min(max_t));
+            let reach = best.map_or(max_t, |b| (b.0 + BOX_MARGIN).fmin(max_t));
             if !body.aabb.overlaps(&seg) || !body.aabb.hits_ray(origin, dir, reach) {
                 return;
             }
@@ -537,7 +538,7 @@ pub fn ray_heightfield(
     let slack = 0.05 + 1e-5 * (origin.abs().element_sum() + max_t);
     let mut probe = HeightProbe::new(hf);
     while t < max_t {
-        t = (t + step).min(max_t);
+        t = (t + step).fmin(max_t);
         let p = origin + dir * t;
         let (above, run) = probe.side(p, dir, slack);
         if above != prev_above {
@@ -561,8 +562,8 @@ pub fn ray_heightfield(
         prev_above = above;
         // The samples the probe vouches for keep this side: step past them.
         let end = t + run;
-        while t < max_t && (t + step).min(max_t) <= end {
-            t = (t + step).min(max_t);
+        while t < max_t && (t + step).fmin(max_t) <= end {
+            t = (t + step).fmin(max_t);
             prev_t = t;
         }
         if t >= max_t {
@@ -607,7 +608,7 @@ pub fn ray_terrain_ps2(hf: &Heightfield, cutters: &[Cutter], a: Vec3, b: Vec3) -
         (hf.height_at(a.x, a.z) - a.y) / delta.y
     } else {
         let mut clear = !under(a);
-        if delta.x.abs().max(delta.z.abs()) > TERRAIN_RAY_PIECE * 32.0
+        if delta.x.abs().fmax(delta.z.abs()) > TERRAIN_RAY_PIECE * 32.0
             && terrain_segment_stays_on_side(hf, a, b, delta, clear)
         {
             return None;
@@ -625,11 +626,11 @@ fn terrain_segment_stays_on_side(
     delta: Vec3,
     clear: bool,
 ) -> bool {
-    let span = delta.x.abs().max(delta.z.abs());
+    let span = delta.x.abs().fmax(delta.z.abs());
     // Spend at most one vertex read for four ordinary pieces, once.
     let budget = ((span / (TERRAIN_RAY_PIECE * 4.0)) as u32).min(TERRAIN_RAY_WIDE_VERTICES);
     hf.segment_wide_bounds(a, b, budget)
-        .is_some_and(|(low, high)| a.y.min(b.y) >= high || (!clear && a.y.max(b.y) < low))
+        .is_some_and(|(low, high)| a.y.fmin(b.y) >= high || (!clear && a.y.fmax(b.y) < low))
 }
 
 /// Keep the original rounding on normal segments. Halve before adding if the sum overflows.
@@ -668,13 +669,13 @@ fn terrain_march(hf: &Heightfield, a: Vec3, b: Vec3, clear: &mut bool) -> f32 {
         // A long segment can have a moving sample even when its other
         // axis is clamped to the terrain's edge. For a small rectangle of
         // cells, every midpoint stays inside its conservative height bounds.
-        if d.x.abs().max(d.z.abs()) > TERRAIN_RAY_PIECE * 2.0 {
+        if d.x.abs().fmax(d.z.abs()) > TERRAIN_RAY_PIECE * 2.0 {
             if let Some((low, high)) = hf.segment_cell_bounds(a, b) {
-                if a.y.min(b.y) >= high {
+                if a.y.fmin(b.y) >= high {
                     *clear = true;
                     return 1.0;
                 }
-                if !*clear && a.y.max(b.y) < low {
+                if !*clear && a.y.fmax(b.y) < low {
                     return 1.0;
                 }
             }
@@ -742,7 +743,7 @@ pub fn lead_point(d: Vec3, v: Vec3, s: f32) -> Option<Vec3> {
         let t1 = (-b - sq) / (2.0 * a);
         let t2 = (-b + sq) / (2.0 * a);
         match (t1 > 0.0, t2 > 0.0) {
-            (true, true) => t1.min(t2),
+            (true, true) => t1.fmin(t2),
             (true, false) => t1,
             (false, true) => t2,
             _ => return None,

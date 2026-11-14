@@ -8,6 +8,7 @@ use super::{buttons, PadState, Sim};
 use crate::autoturret::{Aim, AIM_CONE, FIGHT_MARGIN, LOOK_EVERY, LOOK_SPREAD, THINK, VIEW};
 use crate::collision::HullFilter;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::vehicle::{gun, Mount, VehicleHandle};
 use glam::Vec3;
 
@@ -74,7 +75,7 @@ impl SelfPilot {
         }
         eat(&self.next_think.to_le_bytes());
         eat(&self.thinks.to_le_bytes());
-        eat(&self.look.to_bits().to_le_bytes());
+        eat(&self.look.hash_bits().to_le_bytes());
         eat(&self.shots.to_le_bytes());
         eat(&self.pause_until.to_le_bytes());
         eat(&[self.visible.map_or(u8::MAX, |v| v)]);
@@ -118,7 +119,7 @@ pub(super) fn threat_score(
     let mut visual = 100 - (key as f32 * 0.0016666667) as i32;
     if human {
         let angle = f32::from(skill.max(1) - 1) * 0.05263158 * 0.7;
-        let floor = (angle * 2.0 - 1.0).max(0.0);
+        let floor = (angle * 2.0 - 1.0).fmax(0.0);
         visual = (visual as f32 * ((facing - 0.6) * 2.5).clamp(floor, 1.0)) as i32;
     } else {
         visual /= 2;
@@ -150,7 +151,7 @@ impl Sim {
             * self.ai_tier(team).view_mult
             * ARMED_VIEW_FACTOR
             * if human { HUMAN_VIEW_FACTOR } else { 1.0 };
-        VIEW.max(seen.min(max_range))
+        VIEW.fmax(seen.fmin(max_range))
     }
 
     fn self_lead(&self, a: Aim, at: Vec3, eye: Vec3, speed: f32) -> Vec3 {
@@ -218,18 +219,18 @@ impl Sim {
             .filter_map(|o| self.unit(o))
             .any(|o| o.is_human());
         let cap = self.enemy_skill_of(pilot.team).err_cap_flyer;
-        let moving = v.vel.length() / params.max_speed.max(0.1);
+        let moving = v.vel.length() / params.max_speed.fmax(0.1);
         let r =
             crate::ai::gunner_foot::radius(params.aim_box, 1.0, pilot.aim.err, moving, 1.0, cap);
         let wc = &self.weapon_classes[class];
         let mut off = p.aim_block.dir * r * wc.ai_bubble_size;
         if v.flyer.phase != crate::vehicle::flyer::FlightPhase::Flying {
-            off.y = off.y.max(0.0);
+            off.y = off.y.fmax(0.0);
         }
         if !human {
             off *= AIM_ERROR_AGAINST_BOT;
         }
-        off * (d / wc.ai_bubble_dist + 0.5).min(wc.ai_bubble_clamp)
+        off * (d / wc.ai_bubble_dist + 0.5).fmin(wc.ai_bubble_clamp)
     }
 
     fn self_foe(&self, a: Aim, team: u8) -> Option<(Vec3, Vec3, bool, i32)> {
@@ -564,7 +565,7 @@ impl Sim {
         let heat = st.weapons.first().map_or(0.0, |w| w.heat);
         let spread = st.weapons.first().map_or(0.0, |w| {
             let wc = &self.weapon_classes[class];
-            w.yaw_spread(wc).max(w.pitch_spread(wc))
+            w.yaw_spread(wc).fmax(w.pitch_spread(wc))
         });
         let unlimited = w.infinite || self.weapon_classes[class].infinite_ammo();
         let eye = pos + rot * g.muzzle(aim);

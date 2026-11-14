@@ -30,7 +30,7 @@ impl Sim {
                 continue;
             }
             let h = self.handle(i);
-            if self.units[i].is_player && self.cheats.invincible {
+            if self.units[i].is_player && self.unit_cheats(i).invincible {
                 continue;
             }
             let u = &mut self.units[i];

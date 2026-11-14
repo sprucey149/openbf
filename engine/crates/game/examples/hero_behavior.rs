@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 use anyhow::{anyhow, Result};
 use core::sim::{buttons, PadState};
 use game::{class_picker::ClassPicker, soldier_vis::SoldierVisuals, walk::WalkSim};

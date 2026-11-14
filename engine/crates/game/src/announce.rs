@@ -14,6 +14,7 @@ use crate::walk::WalkSim;
 use core::announcer::{
     faction_index, Announcer, BattleLines, Line, PostEvent, PostLines, ScriptBleed, VoiceQueue,
 };
+use core::fmath::FloatExt;
 use core::sim::Sim;
 use core::unit::UnitHandle;
 
@@ -135,7 +136,7 @@ pub fn chatter_level(dist: f32) -> f32 {
     if dist >= 150.0 {
         0.0
     } else {
-        7.0 / (7.0 + 3.0 * (dist - 7.0).max(0.0))
+        7.0 / (7.0 + 3.0 * (dist - 7.0).fmax(0.0))
     }
 }
 

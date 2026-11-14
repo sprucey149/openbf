@@ -34,6 +34,7 @@
 
 mod build;
 
+use core::fmath::FloatExt;
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
@@ -179,7 +180,7 @@ impl Holo {
         self.clock += dt;
         self.flicker_clock += dt;
         self.fade_clock += dt;
-        self.pop += (1.0 - self.pop) * (dt + dt).min(0.8);
+        self.pop += (1.0 - self.pop) * (dt + dt).fmin(0.8);
         if rng.unit() < self.pop_clock * c.pop_rate * 0.5 {
             let r = rng.unit();
             if r < 0.8 {
@@ -408,7 +409,7 @@ fn flare_parameters(h: &Holo, c: &HoloClass, origin: Vec3, eye: Vec3) -> Option<
     }
     let r0 = c.base_width * 0.5;
     let r1 = c.size * 0.4 * h.fade * h.pop;
-    let g = v.y / d2.sqrt().max(r0);
+    let g = v.y / d2.sqrt().fmax(r0);
     let g2 = g * g;
     let g4 = g2 * g2;
     let g8 = g4 * g4;
@@ -534,7 +535,7 @@ fn draw_holo(
             length: c.height,
             r0: c.base_width * 0.5,
             r1: c.size * 0.8 * 0.5 * h.fade * h.pop,
-            soft: (0.2 * c.height).min(1.0),
+            soft: (0.2 * c.height).fmin(1.0),
             visible: c.visible,
             view: None,
             gs_rgb: if bf1 { 0.5 } else { 1.0 },

@@ -1,6 +1,7 @@
 //! The hub a unit routes from: waypoints, drawn points on a hub, floors and levels.
 
 use super::*;
+use crate::fmath::FloatExt;
 
 /// A hub waypoint: its XZ with `y` from the ground under it AT THE UNIT'S OWN
 /// LEVEL (`from_y`), falling back to the ground at the hub's AUTHORED height.
@@ -106,7 +107,7 @@ pub(super) fn hub_point(
     let (Some(h), Some(floor)) = (g.hub(hub), sim.nav_floor(hub)) else {
         return centre;
     };
-    let r = (h.radius - inset).max(0.0);
+    let r = (h.radius - inset).fmax(0.0);
     if r <= 0.0 {
         return centre;
     }

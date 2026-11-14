@@ -28,6 +28,7 @@
 
 use super::{Game, BF1_UPDATES};
 use crate::skin::{Pose, Skeleton};
+use core::fmath::FloatExt;
 use glam::Quat;
 
 /// The aim's limits from the legs (rad): `FUN_0022bdf0` / `FUN_00280158`.
@@ -125,13 +126,13 @@ impl Aim {
                         self.timer = ALERT_HELD;
                     }
                 }
-                self.timer = (self.timer - s.dt).max(-1.0);
+                self.timer = (self.timer - s.dt).fmax(-1.0);
             }
             Game::Bf2 => {
                 self.timer = if s.arm {
                     ALERT_FRESH
                 } else {
-                    (self.timer - s.dt).max(0.0)
+                    (self.timer - s.dt).fmax(0.0)
                 };
             }
         }
@@ -167,9 +168,9 @@ impl Aim {
         if game != Game::Bf1 {
             1.0
         } else if t > ALERT_HELD {
-            (1.2 - 2.0 * (t - ALERT_HELD)).min(1.0)
+            (1.2 - 2.0 * (t - ALERT_HELD)).fmin(1.0)
         } else if t <= 0.0 && t > -AIM_RAMP {
-            (0.2 - 2.0 * t).min(1.0)
+            (0.2 - 2.0 * t).fmin(1.0)
         } else {
             1.0
         }
@@ -199,7 +200,7 @@ impl Aim {
         let k = match s.game {
             _ if self.fresh => 1.0,
             Game::Bf1 => 1.0 - 0.85f32.powf(s.dt * BF1_UPDATES),
-            Game::Bf2 => (4.5 * s.dt).min(1.0),
+            Game::Bf2 => (4.5 * s.dt).fmin(1.0),
         };
         self.eased.0 += (to.0 - self.eased.0) * k;
         self.eased.1 += (to.1 - self.eased.1) * k;
@@ -216,7 +217,7 @@ impl Aim {
                 (self.torso, self.head) = if s.prone {
                     (1.0, 0.0)
                 } else {
-                    ((2.0 * a - 1.0).max(0.0), (1.0 - 2.0 * a).max(0.0))
+                    ((2.0 * a - 1.0).fmax(0.0), (1.0 - 2.0 * a).fmax(0.0))
                 };
             }
             Game::Bf2 => {

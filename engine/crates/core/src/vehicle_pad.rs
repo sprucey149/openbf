@@ -28,6 +28,7 @@
 //! takes the branch the PS2 takes when a vehicle is inside that list, or the
 //! list is empty.
 
+use crate::fmath::FloatExt;
 use crate::vehicle::{VehicleHandle, VehicleSpec};
 use glam::Vec3;
 
@@ -178,13 +179,13 @@ impl VehiclePad {
             self.armed as u8,
             self.vehicles.len() as u8,
         ]);
-        eat(&self.countdown.to_bits().to_le_bytes());
+        eat(&self.countdown.hash_bits().to_le_bytes());
         for v in &self.vehicles {
             eat(&v.handle.index.to_le_bytes());
             eat(&v.handle.gen.to_le_bytes());
             eat(&[v.spawned_team.unwrap_or(u8::MAX)]);
-            eat(&v.idle.to_bits().to_le_bytes());
-            eat(&v.tick.to_bits().to_le_bytes());
+            eat(&v.idle.hash_bits().to_le_bytes());
+            eat(&v.tick.hash_bits().to_le_bytes());
         }
     }
 }

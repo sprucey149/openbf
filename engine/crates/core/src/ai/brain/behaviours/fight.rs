@@ -14,6 +14,7 @@ use crate::ai::{
     ROLL_LEAD, ROLL_PAST, ROLL_REACH, SIDESTEP_TICKS, STAND_CROUCH, STAND_SHARE,
 };
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::perception::{self, Contact};
 use crate::sim::Sim;
@@ -253,8 +254,8 @@ fn ring_point(sim: &Sim, tk: &Tick, target: Vec3) -> Option<Vec3> {
     let [min, opt, max] = wc.ai_range;
     let d = nav::xz_dist(pos, target);
     let (lo, hi) = (
-        (opt - 0.2 * (opt - min)).min(d),
-        (opt + 0.2 * (max - opt)).min(d),
+        (opt - 0.2 * (opt - min)).fmin(d),
+        (opt + 0.2 * (max - opt)).fmin(d),
     );
     let draw = |k: u32| unit_unit(me.index, sim.tick, me.gen, SALT_CIRCLE ^ k);
     (0..4u32).find_map(|k| {
@@ -276,7 +277,7 @@ fn ring_point(sim: &Sim, tk: &Tick, target: Vec3) -> Option<Vec3> {
                         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))?;
                     let hub = g.hub(i)?;
                     let (sb, cb) = fmath::sin_cos(draw(2 * k + 10) * std::f32::consts::TAU);
-                    let r = hub.radius.min(HOLD_SPOT_RADIUS) * draw(2 * k + 11).sqrt();
+                    let r = hub.radius.fmin(HOLD_SPOT_RADIUS) * draw(2 * k + 11).sqrt();
                     Vec3::new(hub.pos.x + cb * r, pos.y, hub.pos.z + sb * r)
                 }
                 None => q,
@@ -464,7 +465,7 @@ pub(in crate::ai) fn react(
 /// no metre of the way inside a mission death region?
 pub(in crate::ai) fn react_ok(sim: &Sim, u: &Unit, p: Vec3) -> bool {
     let from = u.soldier.pos;
-    let n = nav::xz_dist(from, p).ceil().max(1.0) as u32;
+    let n = nav::xz_dist(from, p).ceil().fmax(1.0) as u32;
     stand_ok(sim, u, from, p)
         && !sim.level_at(p).is_off()
         && (1..=n).all(|k| {
@@ -569,7 +570,7 @@ pub(crate) fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
         .iter()
         .filter(|h| !sim.weapon_locked(u, h.class))
         .map(|h| range(h.class));
-    held.fold(range(u.weapon_class), f32::max) + FIGHT_BEYOND
+    held.fold(range(u.weapon_class), crate::fmath::max) + FIGHT_BEYOND
 }
 
 pub(in crate::ai) fn hold_upkeep(

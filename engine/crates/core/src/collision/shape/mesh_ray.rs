@@ -1,6 +1,7 @@
 //! Mesh rays retain parry's best-first traversal and triangle intersections.
 //! Only the ray's reciprocals are shared between the BVH's bounding boxes.
 
+use crate::fmath::FloatExt;
 use parry3d::partitioning::BvhNode;
 use parry3d::query::{Ray, RayCast, RayIntersection};
 use parry3d::shape::{FeatureId, TriMesh};
@@ -66,8 +67,8 @@ impl RayBounds {
                 if a > b {
                     std::mem::swap(&mut a, &mut b);
                 }
-                near = near.max(a);
-                far = far.min(b);
+                near = near.fmax(a);
+                far = far.fmin(b);
                 if near > far {
                     return f32::MAX;
                 }

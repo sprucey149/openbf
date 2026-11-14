@@ -15,6 +15,7 @@
 //! testable against the PS2's rows on its own.
 
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::lcg::GameLcg;
 use crate::unit::UnitHandle;
 use crate::vehicle::VehicleHandle;
@@ -228,7 +229,7 @@ impl Missile {
         dt: f32,
         lcg: &mut GameLcg,
     ) -> Vec3 {
-        self.ramp = (self.ramp + dt * c.ramp_k).min(1.0);
+        self.ramp = (self.ramp + dt * c.ramp_k).fmin(1.0);
         let turn = self.ramp * c.turn_rate;
         if turn > 0.0 {
             if let Some(p) = aim {
@@ -252,7 +253,7 @@ impl Missile {
             self.phases[1] += 2.0 * dt * rate * lcg.unit();
         }
         if c.speed_ramps() {
-            self.speed = (self.speed + c.acceleration * dt).min(self.top);
+            self.speed = (self.speed + c.acceleration * dt).fmin(self.top);
         }
         self.dir * self.speed
     }
@@ -265,7 +266,7 @@ fn rotate_toward(dir: &mut Vec3, desired: Vec3, by: f32) {
     let axis = dir.cross(desired);
     let sin = axis.length();
     if sin * sin > 1e-8 {
-        rotate(dir, axis / sin, by.min(sin));
+        rotate(dir, axis / sin, by.fmin(sin));
     }
 }
 

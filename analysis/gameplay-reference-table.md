@@ -161,10 +161,9 @@ properties are explicitly preserved and remain unmeasured.
 
 Height corrections include **all** differing grid vertices inside a PS2 boundary,
 including terrain under objects and cutters. They are absolute heights, never
-platform deltas. Missing boundaries do not authorize a correction. The generator
-leaves outside samples alone. A terrain triangle crossing the boundary may still
-read an uncorrected outside vertex; the comparison must report that edge case
-instead of claiming exact in-bounds queries from matching interior vertices.
+platform deltas. Missing boundaries do not authorize a correction. Samples past
+the line one cell are corrected as height fills (below), so the whole simulation
+grid of a map with a boundary holds the PS2's heights.
 
 Changed collision meshes, navigation resources, skeletons and root motion leave as instruction
 lists over the player's own file, in `<game>-<platform>-programs.json` beside each table. Nothing else
@@ -184,10 +183,12 @@ writes the lists and `bake::gameplay::program` applies them.
 The generator applies each list and compares it with the reference before keeping it, and the bake refuses a result
 whose SHA-256 differs from the table's row, so a list cannot quietly substitute donor geometry.
 
-Height fills cover ground past the one-cell line that a query from inside the bounds can still read. The reach is the
-hover gun's 512 m aim ray, tested as a square around each grid sample, so it is a little generous at the corners.
-Each fill is a rectangle of one height; BF2 Yavin 1's 8,283 such rows take 853. BF1 tables hold many more (Hoth 5,378
-rectangles, Endor 1,703; about 240 KB a table, against about 26 KB for BF2's).
+Height fills cover the rest of the simulation grid past the one-cell line, on a map with a boundary. Nothing in the
+simulation keeps a soldier or ground vehicle inside the boundary (it bounds only flyers and remote droids), and a
+query off the grid clamps onto its edge, so the whole grid is read (issue #168, 2026-11-13; the fills stopped at the
+hover gun's 512 m aim ray before, and PC and Xbox Hoth, Rhen Var and both Yavins simulated donor ground past it).
+The same numbers were already published as render heights, which now cover only a larger donor's border.
+Each fill is a rectangle of one height; Yavin 1's 16,734 such rows take 1,331, BF1 Hoth's 10,640 take 9,454.
 
 The exporter decodes the lists, reads the ones its name check skips field by field, and caps what may be written or moved
 outright per table. A region name passes only as a shadow

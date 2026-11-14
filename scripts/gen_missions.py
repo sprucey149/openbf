@@ -1371,6 +1371,16 @@ BF1_HERO_CLASSES = {
     "cis_inf_countdooku": "cis_hero_countdooku",
 }
 
+# Deliberate Conquest choices. Key by faction because the original scripts
+# can place either side in team 1. See analysis/re-bf1-conquest-heroes.md.
+BF1_CONQUEST_HERO_OVERRIDES = {
+    ("bf1_bes2", "gcw"): {"all": "all_hero_hansolo_tat", "imp": "imp_hero_bobafett"},
+    ("bf1_kam1", "cw"): {"rep": "rep_hero_obiwan", "cis": "cis_hero_jangofett"},
+    ("bf1_kas1", "cw"): {"rep": "rep_hero_yoda"},
+    ("bf1_kas2", "gcw"): {"all": "all_hero_chewbacca"},
+    ("bf1_nab2", "cw"): {"rep": "rep_hero_obiwan", "cis": "cis_hero_darthmaul"},
+}
+
 
 def mission_heroes(game, mode, facts):
     heroes = sorted(facts.get("heroes", {}).items())
@@ -1489,7 +1499,11 @@ def space_templates50():
     linkedshields.luac (analysis/re-space-assault.md)."""
     osa = load_ps2("bf2", "objectivespaceassault") or load_donor_script("bf2", "objectivespaceassault")
     linked = load_ps2("bf2", "linkedshields")
-    donor_shields = linked is None
+    # A fingerprinted PC or Xbox BF2 (its correction table is loaded) authors
+    # its own default: the rule stays the PS2's whichever copy supplied the
+    # script (issue #168: an Xbox copy's spa6-spa9 regenerated shields ten
+    # times faster than a PS2 copy's).
+    donor_shields = linked is None or "bf2" in GAMEPLAY_REFERENCES
     linked = linked or load_donor_script("bf2", "linkedshields")
     if osa is None or linked is None:
         return None
@@ -1739,7 +1753,6 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
                for i in range((ps2 or {}).get("bird_count", 0))]
     m.sound = (ps2 or {}).get("sound", [])
     m.shots = (ps2 or {}).get("shots", [])
-    m.heroes = mission_heroes(game, mission_mode(ps2_name), ps2 or {})
     m.class_load_order = (ps2 or {}).get("class_load_order", []) if game == "bf2" else []
     # Card MAIS: the script's AI knobs (the PS2 bytecode only).
     p2 = ps2 or {}
@@ -1806,6 +1819,12 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
             fac = HUNT_FACTIONS.get(fac, fac)
         m.teams.append((fac, pick("units", t, "units", 20 if game == "bf2" else 25),
                         pick("tickets", t, "tickets", 150 if game == "bf2" else 200)))
+
+    mode = mission_mode(ps2_name)
+    m.heroes = mission_heroes(game, mode, ps2 or {})
+    if game == "bf1" and mode == "con":
+        overrides = BF1_CONQUEST_HERO_OVERRIDES.get((key, era), {})
+        m.heroes = [(team, overrides.get(m.teams[team - 1][0], hero)) for team, hero in m.heroes]
 
     # --- the per-team class MIX, in the order the script names it (BF1
     # AddUnitClass call order, BF2 SetupTeams slot-table order).  The counts

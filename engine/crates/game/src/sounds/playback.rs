@@ -7,6 +7,7 @@ use super::{
 use crate::classdb::fnv1a_lowercase;
 use anyhow::{Context, Result};
 use core::announcer::Line;
+use core::fmath::FloatExt;
 use glam::Vec3;
 use std::path::{Path, PathBuf};
 
@@ -27,7 +28,7 @@ impl SoundLib {
             return false;
         };
         let (db, pan) = mixer_pair(ears);
-        let rate = f64::from((rate * self.rate_mul).max(0.05));
+        let rate = f64::from((rate * self.rate_mul).fmax(0.05));
         if let Some(voice) = self.loops.get_mut(&request.source) {
             if let Some(voice) = voice {
                 voice.set(db, rate, pan, core::TICK_DT);
@@ -144,7 +145,7 @@ impl SoundLib {
     pub fn voice_take(&mut self, name: &str) -> Option<(PathBuf, f32, f32)> {
         let (p, core) = self.find_named(name)?;
         let path = self.file_take(&p, core)?;
-        let secs = self.voice_secs(&path)? / p.pitch.max(0.05);
+        let secs = self.voice_secs(&path)? / p.pitch.fmax(0.05);
         Some((path, p.gain, secs))
     }
 
@@ -162,7 +163,7 @@ impl SoundLib {
     pub(super) fn prepare_voice(&mut self, name: &str) -> Option<Handed> {
         let (p, core) = self.find_named(name)?;
         let path = self.file_take(&p, core)?;
-        let pitch = p.pitch.max(0.05);
+        let pitch = p.pitch.fmax(0.05);
         let secs = self.voice_secs(&path)? / pitch;
         let a = p.gain * self.bus_of(&p);
         Some(Handed {
@@ -203,7 +204,7 @@ impl SoundLib {
         let hash = line_hash(name);
         let (p, _) = self.find(hash)?;
         let path = self.take_path_by_hash(hash, nth)?;
-        let pitch = (p.pitch * self.rate_mul).max(0.05);
+        let pitch = (p.pitch * self.rate_mul).fmax(0.05);
         let secs = self.voice_secs(&path)? / pitch;
         let dist = (pos - listener.pos).length();
         let gain = p.gain * attenuation(dist, &p);
@@ -308,7 +309,7 @@ impl SoundLib {
         }
         Ok(Line {
             name: name.to_owned(),
-            key: (level * self.bus_of(&p)).min(CHATTER_KEY_MAX),
+            key: (level * self.bus_of(&p)).fmin(CHATTER_KEY_MAX),
             mode_3d: true,
             take: u8::try_from(take).ok(),
             at: Some(pos),
@@ -324,7 +325,7 @@ impl SoundLib {
             return self.voice_take(&line.name).map(|t| t.2);
         };
         let hash = line_hash(&line.name);
-        let pitch = self.find(hash)?.0.pitch.max(0.05);
+        let pitch = self.find(hash)?.0.pitch.fmax(0.05);
         let path = self.take_path_by_hash(hash, usize::from(nth))?;
         Some(self.voice_secs(&path)? / pitch)
     }
@@ -356,6 +357,11 @@ impl SoundLib {
         listener: &Listener,
     ) -> bool {
         self.play_by_hash(audio, fnv1a_lowercase(name), pos, listener)
+    }
+
+    /// Age menu playback intervals without advancing delayed battle layers.
+    pub fn advance_menu_clock(&mut self, elapsed: f32) {
+        self.menu_now += elapsed;
     }
 
     /// A 2-D one-shot by name (a menu click): its pitch, gain, bus and
@@ -420,7 +426,7 @@ impl SoundLib {
         self.start(hash, pos, ears, out);
         // A cry is one sample-bank property with no layers: one start at most.
         if let Some(s) = out.get(from) {
-            let (path, pitch) = (s.path.clone(), s.pitch.max(0.05));
+            let (path, pitch) = (s.path.clone(), s.pitch.fmax(0.05));
             let secs = self.decoded(&path).map_or(0.0, |d| d.duration_secs());
             let ends = self.now + secs / pitch;
             self.cries.insert(unit, Cry { ends, shot: None });
@@ -476,7 +482,7 @@ impl SoundLib {
         listener: &Listener,
     ) -> Option<audio::Shot> {
         self.sound(audio, &s.path).ok()?;
-        let pitch = (s.pitch * self.rate_mul).max(0.05);
+        let pitch = (s.pitch * self.rate_mul).fmax(0.05);
         let ears = s.ears(listener);
         let (db, pan) = mixer_pair(ears);
         let shot = audio.play_shot(&self.cache[&s.path], db, f64::from(pitch), pan);
@@ -508,7 +514,7 @@ impl SoundLib {
         let mut out = Vec::new();
         self.start(fnv1a_lowercase(name), pos, ears, &mut out);
         let s = out.pop()?;
-        let (path, pitch) = (s.path.clone(), s.pitch.max(0.05));
+        let (path, pitch) = (s.path.clone(), s.pitch.fmax(0.05));
         let secs = self.decoded(&path).map_or(0.0, |d| d.duration_secs());
         let ends = self.now + secs / pitch;
         self.boosts.insert(vehicle, Cry { ends, shot: None });
@@ -565,7 +571,7 @@ impl SoundLib {
             }
             for s in starts {
                 if held {
-                    let pitch = (s.pitch * self.rate_mul).max(0.05);
+                    let pitch = (s.pitch * self.rate_mul).fmax(0.05);
                     let secs = self.decoded(&s.path).map_or(0.0, |d| d.duration_secs());
                     self.weapon_handles.entry(key).or_default().push(Cry {
                         ends: now + secs / pitch,
@@ -623,7 +629,7 @@ impl SoundLib {
             let from = out.len();
             self.start(hash, pos, ears, &mut out);
             if let Some(s) = out.get(from) {
-                let (path, pitch) = (s.path.clone(), (s.pitch * self.rate_mul).max(0.05));
+                let (path, pitch) = (s.path.clone(), (s.pitch * self.rate_mul).fmax(0.05));
                 let secs = self.decoded(&path).map_or(0.0, |d| d.duration_secs());
                 self.station_voices.insert(
                     station,
@@ -755,11 +761,13 @@ impl SoundLib {
         // The start's gates, in the PS2's order (B1 `FUN_0046bf10`): the
         // interval's clock (re-armed whatever the draw says), then the
         // probability.
-        if self.next_ok.get(&hash).is_some_and(|t| self.now < *t) {
+        let menu = p.bus == super::SHELLFX;
+        let now = if menu { self.menu_now } else { self.now };
+        if self.next_ok.get(&hash).is_some_and(|t| now < *t) {
             return;
         }
         if let Some((interval, dev)) = p.play_interval {
-            let next = self.now + interval + self.spread(dev);
+            let next = now + interval + self.spread(dev);
             self.next_ok.insert(hash, next);
         }
         if p.play_probability.is_some_and(|pr| pr < self.next_rand()) {
@@ -794,7 +802,7 @@ impl SoundLib {
             pos,
             bus: self.bus_of(&p),
             flat: p.flat,
-            menu: p.bus == super::SHELLFX,
+            menu,
         });
     }
 

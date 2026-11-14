@@ -1,5 +1,6 @@
 //! Console controller feedback from the local pilot's or soldier's tick.
 
+use core::fmath::FloatExt;
 use core::sim::{Event, Sim};
 use core::{unit::UnitHandle, vehicle::Mount};
 use input::RumbleMotor;
@@ -90,11 +91,11 @@ fn damage_pulse(damage: f32, remaining: f32, maximum: f32) -> Option<Pulse> {
     }
     // B2 FUN_001dfb38, 91413–91420 and FUN_00433b28. The small
     // DualShock motor is binary (FUN_0059e950); the large one is analog.
-    let share = (damage / maximum).min(2.0);
+    let share = (damage / maximum).fmin(2.0);
     Some([
         motor(1.0, (1000.0 * share).round() as u32),
         motor(
-            (1.4 * share).min(1.0),
+            (1.4 * share).fmin(1.0),
             (1000.0 * share / 1.2).round() as u32,
         ),
     ])

@@ -220,3 +220,32 @@ fn a_beam_hashes_only_while_it_lives() {
     s.beams.clear();
     assert_eq!(s.hash(), before);
 }
+
+/// Issue #168 lag compensation: a lagged shooter's beam, and its piercing
+/// chain, sweep the volumes his view lag back; with no lag, the present.
+#[test]
+fn a_lagged_beam_meets_the_soldiers_where_its_shooter_saw_them() {
+    let strike = |lag: u8| {
+        let (mut s, class, owner) = scene();
+        let line = line_of_troopers(&mut s, &[10.0, 20.0]);
+        // Two ticks with the troopers on the line, then they step off it.
+        for _ in 0..2 {
+            s.tick += 1;
+            s.record_hit_frame();
+        }
+        for t in &line {
+            s.units[t.index as usize].soldier.pos.z = 3.0;
+        }
+        s.tick += 1;
+        s.record_hit_frame();
+        s.view_lags = vec![0; s.units.len()];
+        s.view_lags[owner.index as usize] = lag;
+        open(&mut s, class, owner, false);
+        run(&mut s, 1);
+        struck(&s)
+    };
+    let (s, _, _) = scene();
+    let first = s.units.len() as u32;
+    assert_eq!(strike(3), [first, first + 1], "both, as they stood");
+    assert_eq!(strike(0), Vec::<u32>::new(), "the line is empty now");
+}

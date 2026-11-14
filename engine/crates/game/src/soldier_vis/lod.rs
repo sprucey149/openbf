@@ -2,6 +2,7 @@
 //! No model loads, skin remapping, or allocations after the view scratch warms up.
 use super::{SoldierVisuals, CORPSE_SECS};
 use crate::walk::WalkSim;
+use core::fmath::FloatExt;
 use glam::{Vec3, Vec4};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -114,18 +115,18 @@ fn heap_key(bf2: bool, p: Vec3, radius: f32, zoom: f32, frustum: (f32, f32, f32)
         return -depth - (p.x.abs() + p.y.abs()) * 0.5 + radius;
     }
     let (near, tan_x, tan_y) = frustum;
-    let mut key = (radius * zoom).powi(2) / p.length_squared().max(1.0);
-    let scaled = (radius * zoom).max(f32::EPSILON);
+    let mut key = (radius * zoom).powi(2) / p.length_squared().fmax(1.0);
+    let scaled = (radius * zoom).fmax(f32::EPSILON);
     for cut in [
         near - depth,
         (p.x.abs() - depth * tan_x) / (1.0 + tan_x * tan_x).sqrt(),
         (p.y.abs() - depth * tan_y) / (1.0 + tan_y * tan_y).sqrt(),
     ] {
         if cut > 0.0 {
-            key *= (1.0 - cut / scaled).max(0.0).powi(2);
+            key *= (1.0 - cut / scaled).fmax(0.0).powi(2);
         }
     }
-    key.min(100.0)
+    key.fmin(100.0)
 }
 
 impl SoldierVisuals {

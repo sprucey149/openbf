@@ -54,6 +54,7 @@ use super::route::{advance_route, progress, sub_point};
 use super::state::{AiState, HoverOut, NavTick, RideState, SteerPick};
 use super::{DRIVE_STUCK_BAIL, HOVER_ARRIVE_FACTOR};
 use crate::collision::{HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::sim::{PadState, Sim};
 use crate::unit::UnitHandle;
@@ -180,9 +181,9 @@ fn unit(v: Vec3) -> Vec3 {
 /// u = clamp(t · k, ±1) by sign, then u·|u| (0x2a47c0-0x2a4830).
 pub(crate) fn shaped(t: f32, k: f32) -> f32 {
     let u = if t < 0.0 {
-        (t * k).max(-1.0)
+        (t * k).fmax(-1.0)
     } else if t > 0.0 {
-        (t * k).min(1.0)
+        (t * k).fmin(1.0)
     } else {
         0.0
     };
@@ -304,9 +305,9 @@ pub fn sticks(
     // H6
     if k.moving_turn_only && o.bit4 && turn.abs() > EPS {
         thr = if thr >= 0.0 {
-            thr.max(TURN_ONLY_FLOOR)
+            thr.fmax(TURN_ONLY_FLOOR)
         } else {
-            thr.min(-TURN_ONLY_FLOOR)
+            thr.fmin(-TURN_ONLY_FLOOR)
         };
     }
     thr *= factor;

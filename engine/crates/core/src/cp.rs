@@ -34,6 +34,7 @@
 //! 16 / 36 (class defaults 10 / 6).
 
 use crate::battle::{Battle, BF2_BLEED_TICKETS_PER_SEC, BF2_DOMINATION_DEFEAT_SECS};
+use crate::fmath::FloatExt;
 use crate::region::Region;
 use glam::Vec3;
 
@@ -266,8 +267,8 @@ impl CommandPost {
 
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(&[self.owner.unwrap_or(255), self.capture_team.unwrap_or(255)]);
-        eat(&self.capture.to_bits().to_le_bytes());
-        eat(&self.neutral.to_bits().to_le_bytes());
+        eat(&self.capture.hash_bits().to_le_bytes());
+        eat(&self.neutral.hash_bits().to_le_bytes());
     }
 }
 

@@ -31,8 +31,8 @@ pub enum PausePage {
 
 mod settings;
 pub use settings::{
-    clamp_fov_scale, draw_fps_counter, rumble_level, ControlContext, FpsCounter, SettingsPage,
-    FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
+    clamp_fov_scale, draw_fps_counter, draw_fps_counter_note, rumble_level, ControlContext,
+    FpsCounter, SettingsPage, FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
 };
 
 /// A Yes/No popup over the menu; it opens on No (both games' pause menus).
@@ -96,6 +96,10 @@ pub struct MenuModel {
     pub effects_volume: f32,
     pub dialogue_volume: f32,
     pub fps_counter: FpsCounter,
+    /// Issue #168: the LAN net meter overlay (F7).
+    pub network_meter: bool,
+    /// Issue #168: the name other players see (Game Options' Player name).
+    pub player_name: String,
 
     /// Team size percentage (the historical action name is SetAiCap).
     pub team_size_pct: u32,
@@ -120,6 +124,9 @@ pub struct MenuModel {
     pub rc_flight_controls: bool,
     pub invert_y: bool,
     pub low_power_resolution: bool,
+    /// Automatic quality (LAN §8b.2): the render scale follows the frame
+    /// times; Low power resolution is then locked ([`row_locked`]).
+    pub auto_quality: bool,
     /// The Button prompts row's value and the footer's names.
     pub input_icons_label: &'static str,
     pub icons: crate::input_icons::Icons,
@@ -166,6 +173,10 @@ pub enum MenuAction {
     SetEffectsVolume(f32),
     SetDialogueVolume(f32),
     SetFpsCounter(FpsCounter),
+    /// Issue #168: the net meter overlay on or off.
+    SetNetworkMeter(bool),
+    /// Issue #168: the shell's Player name row opens its text box.
+    EditPlayerName,
     EditBindings(SettingsPage, ControlContext),
     /// Map-relative team size percentage, 10..=[`crate::population::MAX_TEAM_PCT`].
     SetAiCap(u32),
@@ -182,6 +193,8 @@ pub enum MenuAction {
     ToggleFlightControls,
     ToggleInvertY,
     ToggleLowPowerResolution,
+    /// Automatic quality on or off (LAN §8b.2).
+    SetAutoQuality(bool),
     /// The Button prompts row, a step on (+1) or back (-1) through its choices.
     CycleInputIcons(i32),
     ToggleViewpoint,
@@ -278,8 +291,13 @@ pub enum Row {
     EffectsVolume,
     DialogueVolume,
     GraphicsQuality,
+    /// Automatic quality (LAN §8b.2).
+    AutoQuality,
     ResetGraphics,
     FpsCounter,
+    NetworkMeter,
+    /// Issue #168: the LAN player name (edited in the shell only).
+    PlayerName,
     Assist,
     AiCap,
     Reinforcements,
@@ -406,6 +424,9 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
         Row::Restart => MenuAction::RequestRestart,
         Row::FlightControls => MenuAction::ToggleFlightControls,
         Row::FpsCounter => MenuAction::SetFpsCounter(m.fps_counter.toggled()),
+        Row::NetworkMeter => MenuAction::SetNetworkMeter(!m.network_meter),
+        Row::AutoQuality => MenuAction::SetAutoQuality(!m.auto_quality),
+        Row::PlayerName if row_locked(m, row).is_none() => MenuAction::EditPlayerName,
         Row::ResetGraphics => MenuAction::ResetGraphics,
         Row::CareerAwards => MenuAction::SetCareerAwards(m.career_awards_disabled),
         Row::Rumble => {
@@ -462,6 +483,11 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             "Vibrates when you take a hit, your vehicle takes damage, or your ship collides."
                 .into(),
         ),
+        Row::AutoQuality => Some(
+            "When frames run long, the 3D view draws at a lower resolution so the game keeps \
+             up; it sharpens again when there is time. Menus and the HUD stay sharp."
+                .to_owned(),
+        ),
         Row::CareerAwards => Some(
             "Use earned weapons and stat bonuses. Medals and career stats still count when off."
                 .to_owned(),
@@ -492,9 +518,15 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
 pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
     match row {
         Row::GraphicsQuality => Some("Normal is the current graphics preset."),
+        Row::LowPowerResolution if m.auto_quality => {
+            Some("Automatic quality sets the resolution. Turn it off to choose.")
+        }
         Row::Cheats if m.cheats.is_empty() => {
             Some("Cheats are available while a battle is paused.")
         }
+        // The name is the selected profile's (issue #170): one place to
+        // choose it keeps every name on this computer unique.
+        Row::PlayerName => Some("Your profile's name. Choose or create a profile after Start."),
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team size is fixed in this battle: it has no map team sizes to scale.")
         }
@@ -515,6 +547,8 @@ pub(crate) fn is_value_row(row: Row) -> bool {
             | Row::EffectsVolume
             | Row::DialogueVolume
             | Row::FpsCounter
+            | Row::NetworkMeter
+            | Row::AutoQuality
             | Row::Rumble
             | Row::MouseSensitivity
             | Row::PadLookSensitivity
@@ -542,6 +576,20 @@ pub fn step(m: &MenuModel, index: usize, right: bool) -> Vec<MenuAction> {
     .1
 }
 
+/// A shoulder button takes ten ordinary steps on a numeric setting.
+pub fn page_step(m: &MenuModel, right: bool) -> Vec<MenuAction> {
+    navigate_steps(
+        m,
+        MenuInput {
+            left: !right,
+            right,
+            ..Default::default()
+        },
+        StepSize::Page,
+    )
+    .1
+}
+
 /// The egui id of row `index`'s ◀ (`right` false) or ▶ widget.
 pub fn step_id(index: usize, right: bool) -> egui::Id {
     egui::Id::new(("menu_step", index, right))
@@ -550,6 +598,16 @@ pub fn step_id(index: usize, right: bool) -> egui::Id {
 /// Apply controller input to the cursor/values; returns actions to perform
 /// and the new cursor.
 pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
+    navigate_steps(m, input, StepSize::Single)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepSize {
+    Single,
+    Page,
+}
+
+fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Vec<MenuAction>) {
     let rows = rows(m);
     let n = rows.len();
     let mut cursor = m.cursor.min(n - 1);
@@ -570,7 +628,7 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     }
     if let Some(picker) = &m.class_choices {
         let n = picker.tabs.len();
-        if n > 0 && (input.left || input.right) {
+        if step == StepSize::Single && n > 0 && (input.left || input.right) {
             let tab = if input.right {
                 (picker.tab + 1) % n
             } else {
@@ -585,48 +643,65 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     if input.down {
         cursor = (cursor + 1) % n;
     }
-    if m.popup.is_some() && (input.left || input.right) {
+    if step == StepSize::Single && m.popup.is_some() && (input.left || input.right) {
         cursor = 1 - cursor;
     }
     if input.confirm {
+        if row_locked(m, rows[cursor]).is_some() {
+            return (cursor, vec![MenuAction::Denied]);
+        }
         if let Some(a) = press(m, rows[cursor]) {
             return (cursor, vec![a]);
         }
     }
+    let steps = if step == StepSize::Page { 10 } else { 1 };
+    let delta = if input.right {
+        steps as f32
+    } else {
+        -(steps as f32)
+    };
+    let single = step == StepSize::Single;
+    let adjust = input.left || input.right;
     match rows[cursor] {
-        row if row_locked(m, row).is_some() => {}
-        Row::Assist if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        row if row_locked(m, row).is_some() => {
+            if !single && is_value_row(row) {
+                actions.push(MenuAction::Denied);
+            }
+        }
+        Row::Assist if adjust => {
             actions.push(MenuAction::SetAssist(
-                ((m.assist_intensity + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+                ((m.assist_intensity + delta / 10.0) * 10.0)
+                    .round()
+                    .clamp(0.0, 10.0)
+                    / 10.0,
             ));
         }
-        Row::AiCap if input.left || input.right => {
+        Row::AiCap if adjust => {
             let pct = if input.right {
                 m.team_size_pct
-                    .saturating_add(10)
+                    .saturating_add(steps * 10)
                     .min(crate::population::MAX_TEAM_PCT)
             } else {
-                m.team_size_pct.saturating_sub(10).max(10)
+                m.team_size_pct.saturating_sub(steps * 10).max(10)
             };
             actions.push(MenuAction::SetAiCap(pct));
         }
-        Row::Reinforcements if input.left || input.right => {
+        Row::Reinforcements if adjust => {
             let pct = if input.right {
-                m.reinforcements_pct.saturating_add(10).min(500)
+                m.reinforcements_pct.saturating_add(steps * 10).min(500)
             } else {
-                m.reinforcements_pct.saturating_sub(10).max(10)
+                m.reinforcements_pct.saturating_sub(steps * 10).max(10)
             };
             actions.push(MenuAction::SetReinforcements(pct));
         }
-        Row::Fov if input.left || input.right => {
+        Row::Fov if adjust => {
             let current = clamp_fov_scale(m.base_fov_deg, m.fov_scale);
             // Step along the existing 5% grid, with a partial step at the cap.
             let ticks = current * 20.0;
             let next_tick = if input.right {
-                (ticks + 1e-5).floor() + 1.0
+                (ticks + 1e-5).floor() + delta
             } else {
-                (ticks - 1e-5).ceil() - 1.0
+                (ticks - 1e-5).ceil() + delta
             };
             let next = clamp_fov_scale(m.base_fov_deg, next_tick / 20.0);
             actions.push(if next == current {
@@ -635,29 +710,34 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
                 MenuAction::SetFov(next)
             });
         }
-        Row::Difficulty if input.left || input.right => {
+        Row::Difficulty if single && adjust => {
             let d = if input.right { 1 } else { -1 };
             actions.push(MenuAction::SetDifficulty((m.difficulty + d).clamp(1, 4)));
         }
-        Row::EffectsVolume | Row::DialogueVolume if input.left || input.right => {
+        Row::EffectsVolume | Row::DialogueVolume if adjust => {
             let effects = rows[cursor] == Row::EffectsVolume;
             let level = if effects {
                 m.effects_volume
             } else {
                 m.dialogue_volume
             };
-            let d = if input.right { 1.0 } else { -1.0 };
-            let level = ((level * 10.0).round() + d).clamp(0.0, 10.0) / 10.0;
+            let level = ((level * 10.0).round() + delta).clamp(0.0, 10.0) / 10.0;
             actions.push(if effects {
                 MenuAction::SetEffectsVolume(level)
             } else {
                 MenuAction::SetDialogueVolume(level)
             });
         }
-        Row::FpsCounter if input.left || input.right => {
+        Row::FpsCounter if single && adjust => {
             actions.push(MenuAction::SetFpsCounter(m.fps_counter.toggled()));
         }
-        Row::Rumble if input.left || input.right => {
+        Row::AutoQuality if single && adjust => {
+            actions.push(MenuAction::SetAutoQuality(!m.auto_quality));
+        }
+        Row::NetworkMeter if single && adjust => {
+            actions.push(MenuAction::SetNetworkMeter(!m.network_meter));
+        }
+        Row::Rumble if single && adjust => {
             let i = rumble_level(m.rumble_strength);
             let next = if input.right {
                 (i + 1).min(RUMBLE_LEVELS.len() - 1)
@@ -668,44 +748,42 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
                 actions.push(MenuAction::SetRumble(RUMBLE_LEVELS[next].0));
             }
         }
-        Row::Music if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        Row::Music if adjust => {
             actions.push(MenuAction::SetMusic(
-                ((m.music_volume + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+                ((m.music_volume + delta / 10.0) * 10.0)
+                    .round()
+                    .clamp(0.0, 10.0)
+                    / 10.0,
             ));
         }
-        Row::MouseSensitivity if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        Row::MouseSensitivity if adjust => {
             let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
             actions.push(MenuAction::SetMouseSensitivity(
-                (((m.mouse_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+                (((m.mouse_sensitivity + delta / 10.0) * 10.0).round() / 10.0).clamp(lo, hi),
             ));
         }
-        Row::PadLookSensitivity if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
+        Row::PadLookSensitivity if adjust => {
             let (lo, hi) = PAD_LOOK_SENSITIVITY_RANGE;
             actions.push(MenuAction::SetPadLookSensitivity(
-                (((m.pad_look_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+                (((m.pad_look_sensitivity + delta / 10.0) * 10.0).round() / 10.0).clamp(lo, hi),
             ));
         }
-        Row::FlightControls if input.left || input.right => {
-            actions.push(MenuAction::ToggleFlightControls)
-        }
-        Row::CareerAwards if input.left || input.right => {
+        Row::FlightControls if single && adjust => actions.push(MenuAction::ToggleFlightControls),
+        Row::CareerAwards if single && adjust => {
             actions.push(MenuAction::SetCareerAwards(input.right));
         }
-        Row::InvertY if input.confirm || input.left || input.right => {
+        Row::InvertY if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleInvertY)
         }
-        Row::LowPowerResolution if input.confirm || input.left || input.right => {
+        Row::LowPowerResolution if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleLowPowerResolution)
         }
         // Cross steps on too, beside the left stick and A / D: a paused D-pad's
         // Left / Right are the Morse keys (`game::pause::rows_input`).
-        Row::InputIcons if input.confirm || input.left || input.right => {
+        Row::InputIcons if single && (input.confirm || adjust) => {
             actions.push(MenuAction::CycleInputIcons(if input.left { -1 } else { 1 }))
         }
-        Row::Viewpoint if input.confirm || input.left || input.right => {
+        Row::Viewpoint if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleViewpoint)
         }
         _ => {}
@@ -1021,6 +1099,12 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
         Row::DialogueVolume => ("Dialogue Volume".into(), volume(m.dialogue_volume)),
         Row::GraphicsQuality => ("Graphics quality".into(), Some("Normal".into())),
         Row::FpsCounter => ("FPS counter".into(), Some(m.fps_counter.label().into())),
+        Row::PlayerName => ("Player name".into(), Some(m.player_name.clone())),
+        Row::AutoQuality => ("Automatic quality".into(), on_off(m.auto_quality)),
+        Row::NetworkMeter => (
+            "Network meter".into(),
+            Some(if m.network_meter { "On" } else { "Off" }.into()),
+        ),
         Row::Cheats => (m.texts.cheats.clone(), None),
         Row::Restart => (m.texts.restart.clone(), None),
         Row::PageBack => ("Back".into(), None),
@@ -1200,7 +1284,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     let rows = rows(m);
                     let has_help = rows.iter().any(|r| {
-                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble)
+                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble | Row::AutoQuality)
                             || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;
@@ -1243,7 +1327,9 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                     }
                                     match row {
                                         Row::InvertY => actions.push(MenuAction::ToggleInvertY),
-                                        Row::LowPowerResolution => {
+                                        Row::LowPowerResolution
+                                            if row_locked(m, *row).is_none() =>
+                                        {
                                             actions.push(MenuAction::ToggleLowPowerResolution)
                                         }
                                         Row::InputIcons => {

@@ -37,7 +37,7 @@ AI opt-in, audio and remaining original-game comparisons.
 ## Deliberate port choices
 
 [D] Following the [canonical hero decision](plan/FEATURE_SET.md#heroes),
-BF1 identities use BF2's playable kits and the existing hero manager:
+BF1 Conquest uses BF2's playable kits and the existing hero manager:
 killable heroes, health drain and kill healing, player offers and the
 optional AI eligibility switch. This does not import BF1 invincibility or
 automatic NPC spawning. BF2 HUD applies on these maps too.
@@ -56,33 +56,59 @@ automatic NPC spawning. BF2 HUD applies on these maps too.
   weapons and first-person bank. BF2 saber bindings and textures load on
   BF1 maps. Force effects add BF2 layers after existing native layers.
 - BF1 battles import missing sound dependencies for the selected hero
-  kits from BF2 Geonosis (Mace/Dooku), Jabba's Palace (Jedi Luke) and
-  Hoth (pilot Luke/Vader). Existing BF1 definitions retain priority.
+  kits from the BF2 maps that use them. Existing BF1 definitions retain priority.
   Imported sample paths and stream/music records retain their source.
   Thus coincident BF1 sound names can keep their native presentation.
 
-The five-name conversion is applied after the canonical mission overlay,
-so supported source combinations share the assignments. Unknown BF1 hero
-names fail generation rather than choosing a substitute. BF1 Hunt
-adaptations explicitly discard the source encounter's Conquest heroes.
-BF2 Hunt and Hero Assault retain their separate roster paths.
+The stock identity conversion and the faction-specific choices below apply
+after the canonical mission overlay. Supported source combinations share
+the assignments. Unknown BF1 hero names fail generation. Hunt and Hero
+Assault have their own roster paths.
+
+### BF1 map-specific matchups
+
+The maintainer approved five Conquest matchups for variety using base-game
+BF2 kits. The mission generator keys the changes by map, era and faction.
+The other 23 BF1 Conquest missions keep their original hero identities.
+
+- Bespin: Cloud City, Galactic Civil War — Han Solo and Boba Fett.
+- Kamino: Tipoca City, Clone Wars — Obi-Wan Kenobi and Jango Fett.
+- Kashyyyk: Islands, Clone Wars — Yoda and Count Dooku.
+- Kashyyyk: Docks, Galactic Civil War — Chewbacca and Darth Vader.
+- Naboo: Theed, Clone Wars — Obi-Wan Kenobi and Darth Maul.
 
 ## Verification boundary
 
-The focused checks enumerate all 56 assignments, retain infantry, load all
-five BF2 bodies and animation banks, resolve sound takes/themes and stage
+The focused checks enumerate all 56 assignments, retain infantry, load the
+12 BF2 bodies and animation banks, resolve sound takes/themes and stage
 the shared manager's player offer/accept and optional AI path. Headless
-GPU checks cover body/hilt/blade asset submission. These checks require
+GPU checks cover bodies, held weapons and blade submission. These checks require
 locally owned data and missions generated into an owned output folder.
 They do not certify a packaged Instant Action round, live controller
 acceptance, animation feel, audio mix or an original-game comparison.
 
-[V, bounded port gap] The owned-data census finds no selectable native
-BF1 foley row for Mace or Dooku on the 14 CW missions (28 assignments).
-Their keys are `rep_inf_soldier` / `cis_inf_soldier`; the cached BF1 hero
-classes use the same keys. GCW hero foley rows resolve. This slice does not
-invent movement sounds or claim that the originals were silent; the original
-fallback and the port's missing CW hero movement foley remain to be traced.
-Both Luke classes' inherited first-person models are absent from the local
-bake; the other three kits author none. First-person bank selection is
-implemented, but first-person presentation remains unchecked.
+### Movement sounds and first-person models
+
+The PS2 lookup uses the class's `FoleyFXClass` and the current surface
+group (BF1 `FUN_00368238`, B1:355545–355575, BF2 `FUN_0044eca8`,
+B2:511525–511535). A missing row keeps the last one and an unset row
+plays nothing (BF1 `FUN_00204fd8`, B1:115840). The owned PS2-based BF1
+bake lacked a selectable starting row for 27 of 28 Clone Wars hero
+assignments. The GCW kits and Jango on Kamino already resolve.
+
+[D] For the cross-game hero kits, keep native rows first. Fill missing
+Clone Wars hero rows from BF2's authored sound families and match the
+surface material of the BF1 clone-trooper row. The material can differ
+from the surface group name. For example, the BF1 Yavin Arena terrain
+group names water sounds. Where a BF2 family lacks a matching surface
+or playable samples, use the native clone row for that surface. This
+covers cases such as snow on Rhen Var. The runtime imports the selected
+sample dependencies and does not require a new bake. This is a port
+choice for BF2 kits on BF1 maps.
+
+The owned PS2, PC, Xbox and mixed bake checks resolve movement audio
+for all 56 assignments. Headless captures render the authored
+first-person arms of both Luke outfits, Han, Boba, Jango and Chewbacca.
+The four firearm kits also draw their first-person weapons. The other
+six hero kits have no authored first-person arms. Live play and the
+audio mix remain unchecked.

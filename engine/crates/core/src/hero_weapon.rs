@@ -2,6 +2,7 @@
 //! uses the emitter parser's half-angle cosine (B2 FUN_003156e0).
 
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::weapon::{PropSource, DEG};
 use glam::{Mat4, Vec3};
 
@@ -89,9 +90,9 @@ impl ForceChannel {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"FORCE");
         eat(&[u8::from(self.acquired)]);
-        eat(&self.target_score.to_bits().to_le_bytes());
-        eat(&self.elapsed.to_bits().to_le_bytes());
-        eat(&self.retarget.to_bits().to_le_bytes());
+        eat(&self.target_score.hash_bits().to_le_bytes());
+        eat(&self.elapsed.hash_bits().to_le_bytes());
+        eat(&self.retarget.hash_bits().to_le_bytes());
         match self.target {
             Some(h) => {
                 eat(&[1]);
@@ -155,8 +156,8 @@ pub struct Burn {
 impl Burn {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"BURN");
-        eat(&self.left.to_bits().to_le_bytes());
-        eat(&self.damage_per_second.to_bits().to_le_bytes());
+        eat(&self.left.hash_bits().to_le_bytes());
+        eat(&self.damage_per_second.hash_bits().to_le_bytes());
         eat(&self.owner.index.to_le_bytes());
         eat(&self.owner.gen.to_le_bytes());
         eat(&[self.team]);
@@ -176,7 +177,7 @@ impl ForcePower {
                 Some(_) => fmath::sin_cos(checked::number(ord, "ConeAngle", None)? * (DEG * 0.5)).1,
                 None => f32::from_bits(0x3f5db22d),
             },
-            max_targets: checked::number(ord, "MaxTargets", Some(5.0))?.max(0.0) as usize,
+            max_targets: checked::number(ord, "MaxTargets", Some(5.0))?.fmax(0.0) as usize,
             push: checked::number(ord, "Push", Some(0.0))?,
             affect_friends: checked::number(ord, "AffectFriends", Some(1.0))? != 0.0,
             affect_enemies: checked::number(ord, "AffectEnemies", Some(1.0))? != 0.0,
@@ -235,7 +236,7 @@ impl ForcePower {
         let delta = target - from;
         let distance = delta.length();
         let cosine = if distance < 2.5 {
-            self.cone_cos.min(0.1)
+            self.cone_cos.fmin(0.1)
         } else {
             self.cone_cos
         };
@@ -298,7 +299,7 @@ impl SaberThrow {
         if !speed.is_finite() || speed < 0.0 {
             return None;
         }
-        let step = (0.5 / speed).min(0.0333);
+        let step = (0.5 / speed).fmin(0.0333);
         let pieces = seconds / step;
         let limit = MAX_THROW_SUBSTEPS as f32;
         if !pieces.is_finite() || !(-limit..limit).contains(&pieces) {
@@ -344,7 +345,7 @@ impl SaberFlight {
                 self.angle,
             ])
         {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         for v in self
             .basis
@@ -352,7 +353,7 @@ impl SaberFlight {
             .into_iter()
             .chain(self.spin_axis.to_array())
         {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&(self.blade_class as u64).to_le_bytes());
         eat(&[u8::from(self.returning)]);
@@ -385,8 +386,8 @@ impl SaberFlight {
     /// shrink as the PS2's own cut does (FUN_0031d658), so the return scales
     /// by the seconds really flown and always ends.
     pub fn turn_back(&mut self, pos: Vec3, angle: f32, unspent_of_tick: f32) {
-        let unspent = self.remaining.max(0.0) + unspent_of_tick.max(0.0);
-        self.outbound_seconds = (self.outbound_seconds - unspent).max(0.0);
+        let unspent = self.remaining.fmax(0.0) + unspent_of_tick.fmax(0.0);
+        self.outbound_seconds = (self.outbound_seconds - unspent).fmax(0.0);
         self.remaining = 0.0;
         self.return_age = 0.0;
         self.returning = true;
@@ -463,7 +464,7 @@ impl SaberClip {
 
     pub fn sample(&self, seconds: f32, edge: usize) -> Option<BladeSegment> {
         let last = self.frames.len().checked_sub(1)?;
-        let frame = (seconds.max(0.0) * 30.0).min(last as f32);
+        let frame = (seconds.fmax(0.0) * 30.0).fmin(last as f32);
         let index = frame as usize;
         let a = *self.frames[index].get(edge)?;
         let b = self.frames[(index + 1).min(last)].get(edge)?;
@@ -605,36 +606,36 @@ impl MeleeState {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"MELEE");
         self.runtime.hash_into(eat);
-        eat(&self.deflect_precision.to_bits().to_le_bytes());
+        eat(&self.deflect_precision.hash_bits().to_le_bytes());
         for value in self
             .retained_thrust
             .into_iter()
             .chain([self.current_thrust_forward])
         {
-            eat(&value.to_bits().to_le_bytes());
+            eat(&value.hash_bits().to_le_bytes());
         }
         if let Some(animation) = &self.block_animation {
             eat(b"BLOCK_POSE");
             eat(&(animation.len() as u32).to_le_bytes());
             eat(animation.as_bytes());
-            eat(&self.block_animation_time.to_bits().to_le_bytes());
+            eat(&self.block_animation_time.hash_bits().to_le_bytes());
         }
         eat(&[u8::from(self.gravity_done), u8::from(self.catch_pending)]);
         eat(&[u8::from(self.movement_active)]);
-        eat(&self.movement_weight.to_bits().to_le_bytes());
+        eat(&self.movement_weight.hash_bits().to_le_bytes());
         for n in self
             .previous_position
             .to_array()
             .into_iter()
             .chain([self.previous_yaw, self.previous_pitch])
         {
-            eat(&n.to_bits().to_le_bytes());
+            eat(&n.hash_bits().to_le_bytes());
         }
         eat(&(self.hit.len() as u32).to_le_bytes());
         for cache in &self.hit {
             eat(&cache.record.to_le_bytes());
             eat(&cache.id.to_le_bytes());
-            eat(&cache.end.to_bits().to_le_bytes());
+            eat(&cache.end.hash_bits().to_le_bytes());
             eat(&(cache.victims.len() as u32).to_le_bytes());
             for victim in &cache.victims {
                 hash_target(victim, eat);

@@ -795,8 +795,7 @@ mod tests {
             let text = std::fs::read_to_string(&f).expect("read");
             let parsed: SoundsRon =
                 ron::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
-            let again =
-                ron::ser::to_string_pretty(&parsed, ron::ser::PrettyConfig::default()).unwrap();
+            let again = ron::ser::to_string_pretty(&parsed, crate::pretty()).unwrap();
             assert_eq!(again, text, "{} re-serializes differently", f.display());
             checked += 1;
         }
@@ -859,7 +858,7 @@ mod tests {
                 music: vec![],
                 triggers: vec![],
             },
-            ron::ser::PrettyConfig::default(),
+            crate::pretty(),
         )
         .unwrap();
         let old: OldRon = ron::from_str(&text).expect("old reader on new file");

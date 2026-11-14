@@ -3,6 +3,7 @@
 //!   scenario,tick,time_s,event,damage,dist_m,cum_damage,victim_hp
 //! Scenarios reproduce analysis/re-blaster-damage.md §8/§9 numbers inside the
 //! full sim (fire cycle + bolt flight + TakeDamage), not the unit tests.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::{buttons, Event, PadState, Sim};
 use core::unit::{Controller, UnitSpec};

@@ -19,6 +19,7 @@ input = { path = "../input" }
 render = { path = "../render" }
 ui = { path = "../ui" }
 audio = { path = "../audio" }
+net = { path = "../net" }
 glam.workspace = true
 winit.workspace = true
 # The menu cursor is an SVG, rendered at the display's size at startup (no fonts or images needed).

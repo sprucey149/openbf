@@ -2,6 +2,7 @@
 //! energy, visibility and damage paths serve human and bot casters.
 
 use super::{Event, Sim};
+use crate::fmath::FloatExt;
 use crate::hero_weapon::{Burn, ForceKind, ForcePower};
 use crate::unit::UnitHandle;
 use crate::weapon::{DamageDesc, FireState};
@@ -107,7 +108,7 @@ impl Sim {
         };
         let friendly = victim.team == self.units[i].team;
         let caster_is_player = self.units[i].is_player;
-        if (victim.is_player && self.cheats.invincible)
+        if (victim.is_player && self.cheats_of(victim).invincible)
             || (victim.is_player && friendly && !caster_is_player)
         {
             return;
@@ -120,7 +121,7 @@ impl Sim {
         let friendly_fire = self.friendly_fire_scale;
         // The area-effect weapon supplies its own damage, retaining health
         // type and friendly-fire handling through the common descriptor.
-        desc.damage = desc.damage.max(0.0);
+        desc.damage = desc.damage.fmax(0.0);
         let victim = self.unit_mut(target).unwrap();
         let take = |health: &mut crate::weapon::Health| {
             health.take_damage(&desc, multiplier, friendly, friendly_fire)
@@ -255,7 +256,7 @@ impl Sim {
         let mut damage = desc.damage;
         if emitter.hit_all && !targets.is_empty() {
             damage = (damage / targets.len() as f32)
-                .max(self.weapon_classes[class].ordnance.charged(0.0).damage);
+                .fmax(self.weapon_classes[class].ordnance.charged(0.0).damage);
         }
         let mut origin = from;
         let mut previous_distance = 0.0;
@@ -329,7 +330,7 @@ impl Sim {
                                 let left = victim
                                     .burn
                                     .map_or(0.0, |b| b.left)
-                                    .max(emitter.burn_seconds);
+                                    .fmax(emitter.burn_seconds);
                                 victim.burn = Some(Burn {
                                     left,
                                     damage_per_second: emitter.burn_damage_per_second,
@@ -451,7 +452,7 @@ impl Sim {
                 .get(burn.owner.index as usize)
                 .filter(|u| u.gen == burn.owner.gen)
                 .is_some_and(|u| u.is_player);
-            if (self.units[i].is_player && self.cheats.invincible)
+            if (self.units[i].is_player && self.unit_cheats(i).invincible)
                 || (self.units[i].is_player && friendly && !owner_is_player)
             {
                 continue;

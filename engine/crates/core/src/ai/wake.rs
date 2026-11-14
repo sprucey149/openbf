@@ -15,6 +15,7 @@
 //! Deterministic: every test reads the sim as it stood after the last step.
 
 use super::state::AiState;
+use crate::fmath::FloatExt;
 use crate::perception;
 use crate::sim::Sim;
 use crate::unit::{Unit, UnitHandle};
@@ -84,7 +85,7 @@ fn new_in_sight(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState) -> bool {
         let p = o.capsule().center();
         let off = p - eye;
         let d2 = off.dot(off);
-        let vd = perception::view_distance(o.soldier.stance, tier.view_mult).min(SIGHT);
+        let vd = perception::view_distance(o.soldier.stance, tier.view_mult).fmin(SIGHT);
         d2 < vd * vd
             && perception::in_cone(view, off, d2, sim.omni_radius)
             && perception::los_seat(

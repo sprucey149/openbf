@@ -6,6 +6,7 @@
 //! `--dist <m>` the camera distance (default 4.5) — shrink it to inspect
 //! grip/orientation — and `--yaw <deg>` the model's yaw (default 180, facing
 //! the camera; 90 shows the profile).
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use glam::{Mat4, Vec3};
 use render::{Camera, Renderer, SkinnedDrawCmd};

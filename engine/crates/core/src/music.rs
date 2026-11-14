@@ -23,6 +23,8 @@
 //! screen's interval override (RE 3.10), the capture / hero / script music
 //! (RE 3.14).
 
+use crate::fmath::FloatExt;
+
 /// Seconds between the end of a take and the first frame its Music counts as
 /// stopped. PROVISIONAL: measured, not read - BF1 Naboo's `cis_nab_amb_middle`
 /// starts its next take 30.29 and 30.27 s after the last one's audio ends
@@ -208,7 +210,7 @@ impl Music {
                 } else {
                     1.0
                 };
-                self.gain -= step * self.fade_from.max(f32::EPSILON);
+                self.gain -= step * self.fade_from.fmax(f32::EPSILON);
                 if self.gain <= 0.0 {
                     self.cut();
                     return true;
@@ -233,7 +235,7 @@ impl Music {
             }
         }
         if self.phase == Phase::FadingIn {
-            self.gain = (self.elapsed / self.def.fade_in).min(1.0);
+            self.gain = (self.elapsed / self.def.fade_in).fmin(1.0);
             if self.gain >= 1.0 {
                 self.phase = Phase::Playing;
             }

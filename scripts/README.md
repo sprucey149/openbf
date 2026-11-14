@@ -52,6 +52,7 @@ not a complete alignment acceptance result.
 |---|---|
 | `gates.py`, `gates_selftest.py`, `gates_history.py` | run the gates and compare them with the stored values; test the shortcuts; replay a golden skip rule over history |
 | `sim_gates.sh`, `gpu_tests.sh`, `goldens.sh` | sim referees, GPU referees, golden pictures |
+| `xdet.sh` | the cross-platform determinism check: core's hash battery and pins on Linux, Windows (Wine) and aarch64 (qemu), compared line for line |
 | `round_goldens.py` | pinned whole-round sim hashes for Space Assault, space one-flag CTF and the ground proxy maps at every tier. Run with `gates.py --groups rounds` using the maintainer checkout’s gate config, pins and local bakes. Missing inputs fail and `--bless` prints new pins. |
 | `bot_census.py` | the bot rework's tables from round_to_outcome stderr: `census A [B]` (recycles, relocations, stand20, Recover, B12, kills, flips, D1, levers, think cost, with seed noise), `compare BASE CAND` (a candidate block against a base block, inside or outside the two-block noise band), `dc ERR` (proxy-gate wins per tier, side and map with Wilson intervals), `timing FILE` (the think-cost budget check on alternating pinned runs), `selftest` |
 | `gpu_tests.sh --render`, `--game FILTER`, `--game-lib [CARGO_ARGS]`, `--ui-sharp`, `--hud-item-layer` | headless serial GPU checks. Add `--include-ignored` before the filter to run both ordinary and ignored suite or library cases. All GPU checks use `--test-threads=1`. |

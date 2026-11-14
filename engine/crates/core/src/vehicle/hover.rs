@@ -56,6 +56,7 @@
 
 use super::Vehicle;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::lcg::GameLcg;
 use glam::{Mat3, Quat, Vec3};
 
@@ -231,7 +232,7 @@ pub struct HoverInput {
 impl HoverInput {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         for x in [self.throttle, self.strafe, self.turn, self.pitch] {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
         eat(&[self.human as u8, self.boost as u8, self.jump as u8]);
     }
@@ -291,11 +292,11 @@ impl HoverAi {
         let [a, b] = self.leg.unwrap_or([Vec3::NAN; 2]);
         for v in [self.fwd0, a, b, self.anchor] {
             for x in v.to_array() {
-                eat(&x.to_bits().to_le_bytes());
+                eat(&x.hash_bits().to_le_bytes());
             }
         }
         for x in [self.still, self.best, self.far] {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
     }
 }
@@ -370,7 +371,7 @@ impl HoverState {
         .into_iter()
         .chain(self.compress)
         {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
         eat(&self.jitter.to_le_bytes());
         eat(&[self.drained as u8, self.boosting as u8, self.jumping as u8]);
@@ -449,7 +450,7 @@ pub fn untilted_rot(v: &Vehicle) -> Quat {
 /// stick shaping — `Sim`'s seat pass passes `full`), else 0, capped at 1.
 pub fn ramp_stick_timer(st: &mut HoverState, full: bool, dt: f32) {
     st.stick_timer = if full {
-        (st.stick_timer + dt).min(1.0)
+        (st.stick_timer + dt).fmin(1.0)
     } else {
         0.0
     };
@@ -481,9 +482,9 @@ pub fn yaw_target(p: &HoverParams, inp: &HoverInput, timer: f32, v_fwd: f32, spe
 pub fn slew(w: f32, target: f32, turn_filter: f32, dt: f32) -> f32 {
     let step = turn_filter * dt;
     if w < target {
-        (w + step).min(target)
+        (w + step).fmin(target)
     } else {
-        (w - step).max(target)
+        (w - step).fmax(target)
     }
 }
 
@@ -514,19 +515,19 @@ pub fn drive(v: &mut Vehicle, p: &HoverParams, dt: f32) {
     // 6.2
     let u = untilted(v);
     let (right, up, fwd) = (u.x_axis, u.y_axis, u.z_axis);
-    let m = thr.abs().max(str_.abs());
+    let m = thr.abs().fmax(str_.abs());
     let g = v.hover.g;
     let boost = energy(v, p, dt);
 
     // 6.5a gravity, weighted by the ground factor.
     v.vel.y += (p.gravity_scale + (1.0 - p.gravity_scale) * g) * -GRAVITY * dt;
     // 6.5b the level spring (no LevelDamp on this branch).
-    let ls = (p.level_spring * dt).min(1.0);
+    let ls = (p.level_spring * dt).fmin(1.0);
     v.hover.omega.x += fwd.y * fwd.y.abs() * ls;
     v.hover.omega.z -= right.y * right.y.abs() * ls;
 
     // 6.7 velocity matching; boosting, BoostAcceleration toward BoostSpeed.
-    let s = g * up.y.max(0.0) * dt;
+    let s = g * up.y.fmax(0.0) * dt;
     let a_s = if boost {
         p.boost_acceleration
     } else {
@@ -641,7 +642,7 @@ fn jump(v: &mut Vehicle, p: &HoverParams, e_fwd: Vec3, dt: f32) {
     }
     h.jump_timer += dt;
     let f = (v_fwd - start) / (p.forward_speed - start);
-    let f = if f >= 0.0 { f.min(1.0) } else { 0.0 };
+    let f = if f >= 0.0 { f.fmin(1.0) } else { 0.0 };
     if h.jump_timer < (1.0 - f) * j.time_min + f * j.time_max {
         v.vel += v.rot * Vec3::Y * (j.force * dt);
     } else {
@@ -665,7 +666,7 @@ pub fn springs(v: &mut Vehicle, p: &HoverParams, dt: f32) {
             let h = &mut v.hover;
             h.g = 1.0;
             let push = c * sp.velocity_spring * p.velocity_spring
-                - (1.0 - c) * sp.velocity_damp * p.velocity_damp * v.vel.dot(up).min(0.0);
+                - (1.0 - c) * sp.velocity_damp * p.velocity_damp * v.vel.dot(up).fmin(0.0);
             v.vel += up * push * dt;
             h.omega.x += (c * sp.omega_x_spring * p.omega_x_spring
                 - (1.0 - c) * h.omega.x * sp.omega_x_damp * p.omega_x_damp)
@@ -676,7 +677,7 @@ pub fn springs(v: &mut Vehicle, p: &HoverParams, dt: f32) {
         }
         v.hover.compress[i] = 0.0;
     }
-    v.hover.g = (v.hover.g - dt).max(0.0);
+    v.hover.g = (v.hover.g - dt).fmax(0.0);
 }
 
 /// A sphere pressed `depth` into the world along the unit `normal` (out of
@@ -769,8 +770,8 @@ pub fn contacts(v: &mut Vehicle, p: &HoverParams, world: &impl ContactSource) ->
             // The hook FUN_0021f508: only a floor-like normal compresses.
             let nu = n.dot(up);
             if nu > 0.5 && n.y > 0.5 {
-                let ci = sp.length.min(c.depth * nu) / sp.length;
-                v.hover.compress[i] = v.hover.compress[i].max(ci);
+                let ci = sp.length.fmin(c.depth * nu) / sp.length;
+                v.hover.compress[i] = v.hover.compress[i].fmax(ci);
             }
             // K5: within the spring's length the contact is the spring's.
             if c.depth <= sp.length {
@@ -798,7 +799,7 @@ pub fn contacts(v: &mut Vehicle, p: &HoverParams, world: &impl ContactSource) ->
             // K7, a static other body: no damage (§0.5).
             if s < 0.0 && v.alive {
                 let mu = if p.set_altitude == 0.0 {
-                    let a = n.dot(up).max(0.0);
+                    let a = n.dot(up).fmax(0.0);
                     (1.0 - a * a * a * a) * HULL_FRICTION
                 } else {
                     HULL_FRICTION
@@ -807,7 +808,7 @@ pub fn contacts(v: &mut Vehicle, p: &HoverParams, world: &impl ContactSource) ->
                 let mut vt = v.vel - n * s;
                 let l = vt.length();
                 if l > 0.0 {
-                    vt -= vt * (mu * j / l).min(1.0);
+                    vt -= vt * (mu * j / l).fmin(1.0);
                 }
                 v.vel = vt + n * (j + s);
             }

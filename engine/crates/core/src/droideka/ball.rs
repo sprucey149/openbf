@@ -1,3 +1,4 @@
+use crate::fmath::FloatExt;
 use glam::Vec3;
 
 use super::{
@@ -14,7 +15,7 @@ impl Droideka {
     pub(super) fn tick_sprint(&mut self, dt: f32, input: &Input, c: &DroidekaClass) {
         if self.boosting && !input.free_sprint {
             self.shield.points =
-                (self.shield.points - c.ball_sprint_drain() * dt).max(c.ball_energy_floor());
+                (self.shield.points - c.ball_sprint_drain() * dt).fmax(c.ball_energy_floor());
         }
         if input.human && self.shield.points <= 0.0 {
             self.sprint_spent = true;
@@ -40,7 +41,7 @@ impl Droideka {
         }
         self.shield.points -= cost;
         if self.shield.points <= 0.0 {
-            self.shield.points = self.shield.points.max(floor);
+            self.shield.points = self.shield.points.fmax(floor);
             self.sprint_spent = true;
         }
         true

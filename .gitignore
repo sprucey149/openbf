@@ -19,3 +19,11 @@ dist/
 
 # Written by the export (card PACK): data and build output stay local
 /error.log
+
+# Written by the export (card PACK): data and build output stay local
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+*.swp
+*~

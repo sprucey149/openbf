@@ -31,6 +31,8 @@ pub(super) fn persist_setting(
         MenuAction::SetEffectsVolume(v) => profile.settings.effects_volume = v.clamp(0.0, 1.0),
         MenuAction::SetDialogueVolume(v) => profile.settings.dialogue_volume = v.clamp(0.0, 1.0),
         MenuAction::SetFpsCounter(v) => profile.settings.fps_counter = v as u8,
+        MenuAction::SetNetworkMeter(on) => profile.settings.network_meter = on,
+        MenuAction::SetAutoQuality(on) => profile.settings.auto_quality = on,
         MenuAction::SetCareerAwards(on) => profile.settings.career_awards = on,
         MenuAction::SetRumble(v) => profile.settings.rumble_strength = v.clamp(0.0, 1.0),
         MenuAction::ToggleRumbleOnFire => {

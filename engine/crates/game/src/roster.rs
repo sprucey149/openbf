@@ -21,6 +21,7 @@ mod remotes;
 #[cfg(test)]
 mod secondary_tests;
 mod turrets;
+use core::fmath::FloatExt;
 pub use remotes::{BLASTER_HUD, DESTRUCT_HUD};
 
 use crate::classdb::{ClassDb, WeaponSlot};
@@ -1282,7 +1283,7 @@ impl ClassRoster {
             // counterpart's cost (BF1 authors none).
             unlock_points: db
                 .prop_f32(class, "PointsToUnlock")
-                .map(|p| p.max(0.0) as u32)
+                .map(|p| p.fmax(0.0) as u32)
                 .or_else(|| {
                     (!db.is_bf2())
                         .then(|| crate::unlocks::bf1_cost(class))

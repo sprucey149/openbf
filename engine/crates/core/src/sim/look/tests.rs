@@ -358,3 +358,40 @@ fn a_log_with_fire_lags_replays_to_the_same_sim() {
     };
     assert_ne!(run(&plain), run(&log), "the lags moved the shots");
 }
+
+/// Issue #168 (LAN §6): a lockstep peer's camera shows the aim its pending
+/// inputs will leave. The preview folded over several pads - mouse looks,
+/// held sticks and a mix, past the pitch limit - is the aim stepping those
+/// pads leaves, and folding writes nothing.
+#[test]
+fn the_folded_preview_is_what_stepping_the_pads_does() {
+    let runs: [&[PadState]; 4] = [
+        &[mouse(0.3, -0.1), mouse(-2.0, 3.0), mouse(0.05, 0.02)],
+        &[stick(0.3, -0.2, 0), stick(-0.5, 0.1, 0), stick(0.9, 0.9, 0)],
+        &[mouse(0.2, 0.1), stick(0.4, -0.3, 0), mouse(-0.1, 0.4)],
+        &[mouse(0.0, 2.5), mouse(0.0, 2.5), stick(0.0, -1.0, 0)],
+    ];
+    for pads in runs {
+        let mut s = foot();
+        let h = s.handle(0);
+        let before = s.hash();
+        let preview = s.look_preview_over(h, pads);
+        assert_eq!(s.hash(), before, "folding wrote into the sim");
+        for pad in pads {
+            s.step(&[*pad]);
+        }
+        match preview {
+            Some(LookPreview::Foot { unit, yaw, pitch }) => {
+                assert_eq!(unit, 0);
+                assert_eq!((yaw, pitch), aim(&s), "{pads:?}");
+            }
+            other => panic!("{pads:?}: {other:?}"),
+        }
+    }
+    // One pad folds to the plain preview; none folds to nothing.
+    let s = foot();
+    let h = s.handle(0);
+    let pad = mouse(0.4, 0.2);
+    assert_eq!(s.look_preview_over(h, &[pad]), s.look_preview(h, &pad));
+    assert_eq!(s.look_preview_over(h, &[]), None);
+}

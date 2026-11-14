@@ -8,6 +8,22 @@
 //!     [--mode <name>] [--mission <file.ron>] [--state-hashes]
 //!     --trace-full               include quantized tuples (64 MiB cap)
 //!   --replay <log.ron>            run an input log, print final hash
+//!   --net-soak [flags]            LAN lockstep soak: several peers in one
+//!                                 process on a real map over a simulated
+//!                                 network; JSON summary (main/net_soak.rs)
+//!   --static-digest [flags]       a LAN round's static gameplay digest by
+//!                                 group per map and mode, JSON lines
+//!                                 (main/static_digest.rs)
+//!   --net-host [flags]            LAN soak across machines, the host side,
+//!                                 headless over real UDP (main/net_real.rs)
+//!   --net-join <addr[:port]>      the same soak, a guest
+//!   --lan-host [flags]            the windowed game hosting a LAN Instant
+//!                                 Action round at once (no menus; flags in
+//!                                 main/windowed/lan.rs)
+//!   --lan-join <addr[:port]>      the windowed game joining that round
+//!   --desync-report FILE [FILE]   read LAN desync reports: the first tick and
+//!                                 group that differ, and a re-simulation
+//!                                 (main/desync_report.rs)
 //!   (no args) | --shell           BF2-style instant-action shell (windowed)
 //!     --assets <dir>              baked maps root (default assets_baked)
 //!     --missions <dir>            mission RONs (default missions)
@@ -111,7 +127,7 @@
 //!                                 ticks run under `targeted_tick`, for callgrind's
 //!                                 --toggle-collect (same work, another symbol)
 //!   OPENBF_PROFILE=<file>         the profile file (default
-//!                                 openbf_data/profile.ron beside the game)
+//!                                 openbf_data/profiles.ron beside the game)
 //!   OPENBF_ADAPTER=igpu|dgpu|<name>  the GPU (default: high performance)
 //!   OPENBF_GPU_TIMING=1           GPU ms per section of the frame (timestamp
 //!                                 queries; `--bench` prints them, the
@@ -150,6 +166,8 @@
 //!                                 hash after every tick for capture comparisons
 //!   OPENBF_WALK_FEET_Y=<metres>    with --walk-replay: start at an explicit
 //!                                 floor height for indoor capture scripts
+// Test code may use f32::max/min; the sim may not (clippy.toml, LAN_MULTIPLAYER.md §7).
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 // Split by queue SPL2 (2026-09-23, a pure move). This file keeps the CLI:
 // `main`, the flag parsers, and `ViewerArgs` and `BattleSetup`, which every
@@ -160,10 +178,20 @@
 // `#[path]`.
 #[path = "main/battle.rs"]
 mod battle;
+#[path = "main/desync_report.rs"]
+mod desync_report;
 #[path = "main/headless.rs"]
 mod headless;
+#[path = "main/net_real.rs"]
+mod net_real;
+#[path = "main/net_soak.rs"]
+mod net_soak;
+#[path = "main/round_setup.rs"]
+mod round_setup;
 #[path = "main/sim_trace.rs"]
 mod sim_trace;
+#[path = "main/static_digest.rs"]
+mod static_digest;
 #[path = "main/timed_battle.rs"]
 mod timed_battle;
 #[path = "main/windowed.rs"]
@@ -298,6 +326,13 @@ fn main() -> Result<()> {
         }
         "--aim-replay" => headless::run_aim_replay(&args[1..]),
         "--sim-trace" => sim_trace::run(&args[1..]),
+        "--net-soak" => net_soak::run(&args[1..]),
+        "--static-digest" => static_digest::run(&args[1..]),
+        "--net-host" => net_real::host(&args[1..]),
+        "--net-join" => net_real::join(&args[1..]),
+        "--lan-host" => windowed::run_lan(&args[1..], true),
+        "--lan-join" => windowed::run_lan(&args[1..], false),
+        "--desync-report" => desync_report::run(&args[1..]),
         "--sim-hash" => {
             let n: u64 = it
                 .next()

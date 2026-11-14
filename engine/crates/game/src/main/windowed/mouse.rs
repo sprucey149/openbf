@@ -93,11 +93,14 @@ impl App {
                 button: winit::event::MouseButton::Left,
                 state: winit::event::ElementState::Pressed,
                 ..
-            } if matches!(self.screen, Screen::Shell) || (self.in_battle() && !self.can_grab()) => {
+            } if matches!(self.screen, Screen::Shell | Screen::Lobby)
+                || (self.in_battle() && !self.can_grab()) =>
+            {
                 self.shell_pointer.click();
             }
             WindowEvent::MouseWheel { delta, .. }
-                if matches!(self.screen, Screen::Shell) || (self.in_battle() && self.paused) =>
+                if matches!(self.screen, Screen::Shell | Screen::Lobby)
+                    || (self.in_battle() && self.paused) =>
             {
                 let dy = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => *y,

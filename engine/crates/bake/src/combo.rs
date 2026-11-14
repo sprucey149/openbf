@@ -242,6 +242,7 @@ pub fn baked_combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
     let mut set = combos_from_lvl(buf)?;
     for combo in &mut set.combos {
         compatibility::vader_terminal_target(combo);
+        compatibility::vader_deflect_frame_flags(combo);
     }
     Ok(set)
 }

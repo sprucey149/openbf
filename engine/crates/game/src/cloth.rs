@@ -3,6 +3,7 @@
 //! (`analysis/re-cloth.md` §3–4). No state enters the gameplay sim or RNG.
 
 use anyhow::{bail, Context, Result};
+use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};
 use manifest::cloth::Cloth;
 
@@ -166,12 +167,12 @@ impl State {
         if !dt.is_finite() || dt <= 0.0 {
             return;
         }
-        let dt = dt.min(0.039);
+        let dt = dt.fmin(0.039);
         let world = model * def.frame(globals);
         let origin = world.transform_point3(Vec3::ZERO);
         let velocity = ((origin - self.origin) / dt).clamp_length_max(10.0);
         let accel =
-            ((velocity - self.velocity) / dt).clamp_length_max(def.raw.max_acceleration.max(0.0));
+            ((velocity - self.velocity) / dt).clamp_length_max(def.raw.max_acceleration.fmax(0.0));
         self.origin = origin;
         self.velocity = velocity;
         // Presentation scales (the spawn line-up) do not scale gravity.

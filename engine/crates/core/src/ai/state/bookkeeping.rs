@@ -4,6 +4,7 @@ use super::{
     AiState, ArmState, Behaviour, FightState, FlankState, MoverState, NavState, RoleState, Route,
     SnipeBook, SteerPick, TposState, Vec3, WalkAsk, ERR_NO_TARGET,
 };
+use crate::fmath::FloatExt;
 
 #[cfg(doc)]
 use super::StallState;
@@ -286,7 +287,7 @@ impl AiState {
         eat(&[self.burst, self.strafe_side as u8, self.want_stance]);
         if let Some((at, hub)) = self.wander {
             for c in at.to_array() {
-                eat(&c.to_bits().to_le_bytes());
+                eat(&c.hash_bits().to_le_bytes());
             }
             eat(&hub.to_le_bytes());
         }
@@ -303,7 +304,7 @@ impl AiState {
         match self.dispersion {
             Some(d) => {
                 eat(&[1]);
-                eat(&d.to_bits().to_le_bytes());
+                eat(&d.hash_bits().to_le_bytes());
             }
             None => eat(&[0]),
         }
@@ -319,7 +320,7 @@ impl AiState {
             self.err_pos.y,
             self.err_pos.z,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         // Optional extensions add no bytes when absent, preserving command-free
         // replay pins (brief D6/addendum 3). Each extension carries a tag.

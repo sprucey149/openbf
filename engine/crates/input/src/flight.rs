@@ -24,7 +24,7 @@ impl FlightControls {
             Self::Classic => classic,
             Self::RcMode2 => PadState {
                 ly: classic.ry,
-                ry: classic.ly,
+                ry: -classic.ly,
                 ..classic
             },
         }
@@ -88,9 +88,11 @@ mod tests {
         assert_eq!(rc.toggled(), classic);
         let f = rc.map_sticks(pad);
         let c = flyer_sticks(pad);
-        assert_eq!((f.lx, f.ly, f.rx, f.ry), (c.lx, pad.ly, pad.lx, c.ly));
+        assert_eq!((f.lx, f.ly, f.rx), (c.lx, pad.ly, pad.lx));
         assert!((PadState::axis(f.lx) + 1.0).abs() < 1e-4);
-        assert!((PadState::axis(f.ry) - 1.0).abs() < 1e-4);
+        assert!(PadState::axis(f.ry) < -0.9999);
+        let pulled_back = rc.map_sticks(PadState { ry: -pad.ry, ..pad });
+        assert!(PadState::axis(pulled_back.ry) > 0.9999);
         assert_eq!(f.buttons, pad.buttons);
         assert_eq!(rc.map_sticks(PadState::default()), PadState::default());
     }

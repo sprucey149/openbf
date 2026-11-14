@@ -19,6 +19,7 @@
 
 use crate::ai::{AiState, THINK_PERIOD};
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::sim::Sim;
 use crate::skill::Tier;
 use crate::soldier::Stance;
@@ -175,7 +176,7 @@ impl Contact {
         eat(&self.first_seen.to_le_bytes());
         eat(&self.last_seen.to_le_bytes());
         for v in [self.last_pos.x, self.last_pos.y, self.last_pos.z] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&[
             self.seen_now as u8,
@@ -380,7 +381,7 @@ pub fn sight(sim: &Sim, u: &crate::unit::Unit, stance: Stance, tier: &Tier) -> f
     else {
         return plain;
     };
-    plain.max(r * view_distance(stance, 1.0) / view_distance(Stance::Stand, 1.0))
+    plain.fmax(r * view_distance(stance, 1.0) / view_distance(Stance::Stand, 1.0))
 }
 
 /// The view cone (RE §9.1, exactly): everything inside `omni_radius` is seen
@@ -543,7 +544,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             cand.push((d2, (1, d.id), Foe::Droid(d.id), d.pos));
         }
     }
-    let turret_reach = turret_view_distance(tier.view_mult).min(scan_radius(sim, u));
+    let turret_reach = turret_view_distance(tier.view_mult).fmin(scan_radius(sim, u));
     for t in &sim.turrets {
         if !sim.hostile(u.team, t.team) || !t.alive() || !turret_admitted(sim, u, t) {
             continue;
@@ -656,7 +657,7 @@ fn scan_radius(sim: &Sim, u: &crate::unit::Unit) -> f32 {
         .iter()
         .filter(|h| !sim.weapon_locked(u, h.class))
         .map(|h| range(h.class));
-    held.fold(range(u.weapon_class), f32::max) + 5.0 * u.consts.max_speed
+    held.fold(range(u.weapon_class), crate::fmath::max) + 5.0 * u.consts.max_speed
 }
 
 /// Whether `h` is still there to be remembered: a live unit, droid or turret.
@@ -834,9 +835,9 @@ fn hear(st: &mut AiState, h: Foe, tick: u64, pos: Vec3, told: bool) -> bool {
 /// to [`SEARCH_CAP`], times [`SEARCH_KNOWN`] when it already held a record
 /// of him. 20 m is 21 ticks, 40 m 33, 60 m 45, 75 m and beyond 54.
 pub fn search_ticks(dist: f32, known: bool) -> u64 {
-    let full = (SEARCH_BASE + SEARCH_PER_M * dist.max(0.0))
+    let full = (SEARCH_BASE + SEARCH_PER_M * dist.fmax(0.0))
         .round()
-        .min(SEARCH_CAP as f32);
+        .fmin(SEARCH_CAP as f32);
     let t = if known {
         (full * SEARCH_KNOWN).round()
     } else {

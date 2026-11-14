@@ -7,6 +7,7 @@
 
 use super::state::{Event, Sim, OUTCOME_DRAW};
 use crate::cp::{self, CommandPost, CpChange, CpDef};
+use crate::fmath::FloatExt;
 use crate::TICK_HZ;
 
 /// The Instant Action reinforcement option (`con_mult`, 10..500 %, default
@@ -31,7 +32,7 @@ impl Sim {
         self.domination.map(|(t, secs)| {
             (
                 t,
-                (crate::battle::BF2_DOMINATION_DEFEAT_SECS - secs).max(0.0),
+                (crate::battle::BF2_DOMINATION_DEFEAT_SECS - secs).fmax(0.0),
             )
         })
     }

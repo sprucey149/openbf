@@ -8,6 +8,7 @@
 use super::state::{DeathCause, Event, Sim};
 use crate::collision::{HullFilter, Layers};
 use crate::droideka::{self, Sphere};
+use crate::fmath::FloatExt;
 use crate::impact::Surface;
 use crate::projectile::{Bolt, Hit, Target};
 use crate::soldier::Stance;
@@ -38,10 +39,20 @@ type SweptUnit = (
 );
 type SweptDeka = (UnitHandle, Vec<Sphere>, Option<Sphere>, Vec3);
 
-/// The bodies a tick's bolt sweep tests ([`Sim::sweep_bodies`]).
+/// The bodies a tick's bolt sweep tests ([`Sim::sweep_bodies`]), or a past
+/// tick's ([`super::lag_comp::HitHistory`]).
+#[derive(Clone)]
 pub(super) struct SweepBodies {
     units: Vec<SweptUnit>,
     dekas: Vec<SweptDeka>,
+    /// `None`: the hulls are tested where they are, in the collision world.
+    /// A past tick's: each hull's pose then (issue #168, lag compensation),
+    /// tested by moving the ray into where the hull is now.
+    pub(super) hulls: Option<Vec<(VehicleHandle, glam::Mat4)>>,
+    /// Each live unit with a body and the point a fat ray tests
+    /// ([`Sim::fat_point`]), in `alive_units` order: a lagged fat ray's
+    /// rewound passes meet these (issue #168).
+    pub(super) fat: Vec<(UnitHandle, Vec3)>,
 }
 
 /// Is `t` one of `passed`? A droideka's shield and body are one entity:
@@ -69,15 +80,23 @@ impl Sim {
     /// [`crate::unit::HUMAN_SHOT_LAG`] back along his velocity, a fast
     /// round its age further (OURS: where the window drew him,
     /// [`crate::unit::human_meet_lag`]).
-    pub(super) fn sweep_bolts(&mut self, dt: f32) {
+    ///
+    /// `beams` are this tick's beam rounds (`Sim::fly_bolts`): one whose
+    /// shooter's pad has a lag sweeps the volumes that far back
+    /// ([`super::lag_comp`]).
+    pub(super) fn sweep_bolts(&mut self, dt: f32, beams: std::ops::Range<usize>) {
         if self.bolts.is_empty() {
             return;
         }
         self.sweep_fat_rays(dt);
         let bodies = self.sweep_bodies();
         let mut bolts = std::mem::take(&mut self.bolts);
-        for b in bolts.iter_mut() {
-            self.sweep_bolt(&bodies, b, dt, &[]);
+        for (k, b) in bolts.iter_mut().enumerate() {
+            let rewound = beams
+                .contains(&k)
+                .then(|| self.rewound_for(b.owner))
+                .flatten();
+            self.sweep_bolt(rewound.unwrap_or(&bodies), b, dt, &[]);
         }
         self.bolts = bolts;
     }
@@ -85,30 +104,41 @@ impl Sim {
     /// What [`Self::sweep_bolts`] meets this tick: the live soldiers' bolt
     /// prims and the droidekas' spheres.
     pub(super) fn sweep_bodies(&self) -> SweepBodies {
-        let dekas: Vec<SweptDeka> = self
-            .alive_units()
-            .filter(|(_, u)| u.droideka.is_some())
-            .map(|(h, u)| {
+        let (mut units, mut dekas, mut fat) = (Vec::new(), Vec::new(), Vec::new());
+        for (h, u) in self.alive_units() {
+            if u.droideka.is_some() {
                 let back = -u.soldier.vel * crate::unit::HUMAN_SHOT_LAG;
-                (h, u.droideka_spheres(), u.droideka_shield(), back)
-            })
-            .collect();
-        let units: Vec<SweptUnit> = self
-            .alive_units()
-            .filter(|(_, u)| u.droideka.is_none())
-            .filter_map(|(h, u)| {
-                // A rider is met only in an exposed seat, where he sits and
-                // moving as his vehicle does; an enclosed one has no body.
-                let p = self.hero_body_prims(h.index as usize)?;
-                let (min, max) = p.bounds();
-                let rides = u.mount.map(|m| m.vehicle);
-                let vel = rides
-                    .and_then(|v| self.vehicle(v))
-                    .map_or(u.soldier.vel, |v| v.vel);
-                Some((h, rides, p, min, max, vel))
-            })
-            .collect();
-        SweepBodies { units, dekas }
+                dekas.push((h, u.droideka_spheres(), u.droideka_shield(), back));
+                if let Some(body) = self.hero_body_prims(h.index as usize) {
+                    fat.push((h, Self::fat_point(u, body.pos)));
+                }
+                continue;
+            }
+            // A rider is met only in an exposed seat, where he sits and
+            // moving as his vehicle does; an enclosed one has no body.
+            let Some(p) = self.hero_body_prims(h.index as usize) else {
+                continue;
+            };
+            fat.push((h, Self::fat_point(u, p.pos)));
+            let (min, max) = p.bounds();
+            let rides = u.mount.map(|m| m.vehicle);
+            let vel = rides
+                .and_then(|v| self.vehicle(v))
+                .map_or(u.soldier.vel, |v| v.vel);
+            units.push((h, rides, p, min, max, vel));
+        }
+        SweepBodies {
+            units,
+            dekas,
+            hulls: None,
+            fat,
+        }
+    }
+
+    /// The point of unit `u` a fat ray tests: its aim point moved with its
+    /// body (`body` is its bolt prims' position).
+    pub(super) fn fat_point(u: &Unit, body: Vec3) -> Vec3 {
+        u.aim_point() + body - u.soldier.pos
     }
 
     /// One bolt's sweep for [`Self::sweep_bolts`], passing everything in
@@ -135,7 +165,7 @@ impl Sim {
         if ord.fat_ray.is_some() || (ord.is_tracer() && ord.explosion.is_none()) {
             return;
         }
-        let step = dt.min(b.remaining.max(0.0));
+        let step = dt.fmin(b.remaining.fmax(0.0));
         let speed = b.vel.length();
         if step <= 0.0 || speed <= 0.0 {
             return;
@@ -245,18 +275,62 @@ impl Sim {
             }
         }
         if let Some(filter) = b.hulls.hulls_only() {
-            let hull =
-                world.ray_past_owners(from, dir, reach, Layers::ORDNANCE, filter, [None; 2], |v| {
-                    seen(Target::Vehicle(v))
-                });
-            if let Some(r) = hull {
-                if let Some(v) = r.owner.filter(|_| r.t < reach) {
-                    reach = r.t;
-                    hit = Some(Target::Vehicle(v));
-                    // Any round on a weak part takes its vehicle
-                    // class's weak-spot factor, locked or not; any
-                    // other body its own.
-                    mult = super::weak_lock::struck_factor(r.hit_mult, ground(v));
+            match &bodies.hulls {
+                None => {
+                    let hull = world.ray_past_owners(
+                        from,
+                        dir,
+                        reach,
+                        Layers::ORDNANCE,
+                        filter,
+                        [None; 2],
+                        |v| seen(Target::Vehicle(v)),
+                    );
+                    if let Some(r) = hull {
+                        if let Some(v) = r.owner.filter(|_| r.t < reach) {
+                            reach = r.t;
+                            hit = Some(Target::Vehicle(v));
+                            // Any round on a weak part takes its vehicle
+                            // class's weak-spot factor, locked or not; any
+                            // other body its own.
+                            mult = super::weak_lock::struck_factor(r.hit_mult, ground(v));
+                        }
+                    }
+                }
+                // A past tick's hulls (lag compensation): each hull still
+                // in the world, met where it stood then - the ray moved by
+                // where it is now times the inverse of where it was.
+                Some(poses) => {
+                    for &(v, then) in poses {
+                        if !filter.admits(Some(v)) || seen(Target::Vehicle(v)) {
+                            continue;
+                        }
+                        let Some(now) = world.hull_pose(v) else {
+                            continue;
+                        };
+                        let bits = |m: &glam::Mat4| m.to_cols_array().map(f32::to_bits);
+                        let (o, d) = if bits(&now) == bits(&then) {
+                            (from, dir)
+                        } else {
+                            let m = now * then.inverse();
+                            (m.transform_point3(from), m.transform_vector3(dir))
+                        };
+                        let only = HullFilter::Only(v);
+                        let r = world.ray_past_owners(
+                            o,
+                            d,
+                            reach,
+                            Layers::ORDNANCE,
+                            only,
+                            [None; 2],
+                            |_| false,
+                        );
+                        if let Some(r) = r.filter(|r| r.t < reach) {
+                            reach = r.t;
+                            hit = Some(Target::Vehicle(v));
+                            mult = super::weak_lock::struck_factor(r.hit_mult, ground(v));
+                        }
+                    }
                 }
             }
         }
@@ -276,7 +350,7 @@ impl Sim {
 
     /// The rule of [`Self::bolt_spares`] for a shot with no bolt (an emitter).
     pub(super) fn shot_spares(&self, team: u8, shooter_is_player: bool, victim: &Unit) -> bool {
-        (victim.is_player && self.cheats.invincible)
+        (victim.is_player && self.cheats_of(victim).invincible)
             || (victim.is_human() && self.allied(team, victim.team) && !shooter_is_player)
     }
 
@@ -866,7 +940,7 @@ impl Sim {
         let Some(u) = self.unit(h) else {
             return;
         };
-        if u.is_player && self.cheats.invincible && cause.cheat_spares() {
+        if u.is_player && self.cheats_of(u).invincible && cause.cheat_spares() {
             return;
         }
         self.space_unit_killed(h, None);

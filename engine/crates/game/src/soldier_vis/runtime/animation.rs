@@ -43,7 +43,7 @@ impl SoldierVisuals {
             if !u.alive {
                 v.dead_for += dt;
             }
-            if fired.contains(&(i as u32)) {
+            if fired.contains(&(i as u32)) && self.muted_shot != Some((walk.sim.tick, i as u32)) {
                 v.shot_tick = Some(walk.sim.tick);
             }
             if u.droideka.is_some() {

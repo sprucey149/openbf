@@ -7,6 +7,7 @@
 
 mod bookkeeping;
 use crate::ai::{arcm, fix, items, jet, why};
+use crate::fmath::FloatExt;
 pub use bookkeeping::NavTick;
 
 use super::command::CmdState;
@@ -174,14 +175,14 @@ impl Route {
             self.from.x,
             self.from.y,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.stuck_ticks.to_le_bytes());
         eat(&self.stuck_run.to_le_bytes());
         eat(&[self.sidestep as u8, self.source as u8]);
         for c in &self.detour {
-            eat(&c.x.to_bits().to_le_bytes());
-            eat(&c.y.to_bits().to_le_bytes());
+            eat(&c.x.hash_bits().to_le_bytes());
+            eat(&c.y.hash_bits().to_le_bytes());
         }
         eat(&[self.detour_len, self.detour_at]);
     }
@@ -467,7 +468,7 @@ impl RoleState {
         eat(&self.since.to_le_bytes());
         eat(&self.at.to_le_bytes());
         for v in [self.look.x, self.look.y, self.look.z] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 }
@@ -513,19 +514,19 @@ impl SnipeBook {
         eat(&self.next.to_le_bytes());
         if let Some(l) = self.left {
             for v in [l.x, l.y, l.z] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
         if let Some(c) = self.cur {
             eat(&[c.mask, u8::from(c.arrived)]);
             eat(&c.lane_at.to_le_bytes());
             for v in [c.spot.x, c.spot.y, c.spot.z, c.lane] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
             // Eaten only when set: a spot without a lane point hashes as it did.
             if c.look != Vec3::ZERO {
                 for v in [c.look.x, c.look.y, c.look.z] {
-                    eat(&v.to_bits().to_le_bytes());
+                    eat(&v.hash_bits().to_le_bytes());
                 }
             }
         }
@@ -611,16 +612,16 @@ impl StallState {
             self.at.x, self.at.y, self.at.z, self.lo.x, self.lo.y, self.lo.z, self.hi.x, self.hi.y,
             self.hi.z,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.ticks.to_le_bytes());
         for v in [self.pin.x, self.pin.y, self.pin.z] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&[self.fails]);
         if let Some(w) = self.walked {
             for v in [w.x, w.y, w.z] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
     }
@@ -982,7 +983,7 @@ impl Round {
     /// nearest it got to it, the window's anchor, the allowance spent).
     pub fn end(&mut self) {
         let best = match (self.best > 0.0, self.meet > 0.0) {
-            (true, true) => self.best.min(self.meet),
+            (true, true) => self.best.fmin(self.meet),
             (true, false) => self.best,
             _ => self.meet,
         };
@@ -1007,7 +1008,7 @@ impl MoverState {
             self.heading.x,
             self.heading.z,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.give_up.to_le_bytes());
         if let Some(arc) = self.jumped {
@@ -1022,7 +1023,7 @@ impl MoverState {
                 r.meet, r.best, r.y0, r.aim.x, r.aim.y, r.aim.z, r.anchor.x, r.anchor.y,
                 r.anchor.z, r.dir.x, r.dir.z,
             ] {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
             // (Card OBSV: only when a footprint is being passed.)
             if r.foot != 0 {
@@ -1182,7 +1183,7 @@ impl TposState {
             eat(&t.to_le_bytes());
         }
         for v in self.stand.to_array().into_iter().chain([self.best]) {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.best_at.to_le_bytes());
     }
@@ -1273,7 +1274,7 @@ impl HoldState {
             self.look.y,
             self.look.z,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.until.to_le_bytes());
         eat(&self.shuffle_at.to_le_bytes());
@@ -1289,7 +1290,7 @@ impl LostState {
         eat(&self.since.to_le_bytes());
         eat(&self.jump_after.to_le_bytes());
         eat(&self.window.to_le_bytes());
-        eat(&self.ref_dist.to_bits().to_le_bytes());
+        eat(&self.ref_dist.hash_bits().to_le_bytes());
         // Eaten only when set: every spell before card VMESH hashes as it did.
         if self.shut {
             eat(&[1]);
@@ -1303,7 +1304,7 @@ impl LostState {
         if let Some(dir) = self.escape_heading {
             eat(&[7]);
             for v in dir.to_array() {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
         if self.replan_after_escape {
@@ -1324,7 +1325,7 @@ impl LostState {
             eat(&[4, self.plans, self.path.len, self.path_at]);
             for p in &self.path.pts[..usize::from(self.path.len)] {
                 for v in p.to_array() {
-                    eat(&v.to_bits().to_le_bytes());
+                    eat(&v.hash_bits().to_le_bytes());
                 }
             }
         }
@@ -1440,26 +1441,26 @@ impl RideState {
         if let Some(s) = self.sticks {
             eat(&[6]);
             for x in s {
-                eat(&x.to_bits().to_le_bytes());
+                eat(&x.hash_bits().to_le_bytes());
             }
         }
         if let Some((anchor, ticks)) = self.walker_progress {
             eat(b"WALKER_PROGRESS");
-            eat(&anchor.x.to_bits().to_le_bytes());
-            eat(&anchor.y.to_bits().to_le_bytes());
+            eat(&anchor.x.hash_bits().to_le_bytes());
+            eat(&anchor.y.hash_bits().to_le_bytes());
             eat(&ticks.to_le_bytes());
         }
         // ...and a hover's (card VDROP); its `ai` is hashed on the vehicle.
         if let Some(h) = self.hover {
             eat(&[7]);
             for x in h.sticks {
-                eat(&x.to_bits().to_le_bytes());
+                eat(&x.hash_bits().to_le_bytes());
             }
         }
         if let Some(f) = self.flyer {
             eat(&[12, f.takeoff as u8]);
             for x in f.sticks {
-                eat(&x.to_bits().to_le_bytes());
+                eat(&x.hash_bits().to_le_bytes());
             }
         }
         // Card TURR: only a bot a turret was closed to, or one in its seat.
@@ -1476,13 +1477,13 @@ impl RideState {
             }
             if let Some(p) = m.look {
                 for v in [p.x, p.y, p.z] {
-                    eat(&v.to_bits().to_le_bytes());
+                    eat(&v.hash_bits().to_le_bytes());
                 }
             }
             if let Some(p) = m.aim {
                 eat(&[10]);
                 for v in [p.x, p.y, p.z] {
-                    eat(&v.to_bits().to_le_bytes());
+                    eat(&v.hash_bits().to_le_bytes());
                 }
             }
         }

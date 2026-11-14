@@ -48,6 +48,7 @@
 use super::hover::{quat_y, Contact};
 use super::Vehicle;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use glam::{Mat3, Vec3};
 
 /// The anim table's fixed entries (FUN_002663e0; re-walker §5).
@@ -395,7 +396,7 @@ impl WalkerState {
             self.since_supported,
             self.energy,
         ] {
-            eat(&x.to_bits().to_le_bytes());
+            eat(&x.hash_bits().to_le_bytes());
         }
         eat(&[
             self.anim,
@@ -424,7 +425,7 @@ impl WalkerState {
         self.energy -= x;
         if self.energy < 0.0 {
             self.exhausted = true;
-            self.energy = self.energy.max(ENERGY_MIN);
+            self.energy = self.energy.fmax(ENERGY_MIN);
         }
         true
     }
@@ -435,7 +436,7 @@ impl WalkerState {
         self.energy += x;
         if ENERGY_RECOVER <= self.energy {
             self.exhausted = false;
-            self.energy = self.energy.min(max);
+            self.energy = self.energy.fmin(max);
         }
     }
 
@@ -504,11 +505,11 @@ pub fn input(v: &mut Vehicle, p: &WalkerParams, dt: f32) {
     let fwd = if a < -0.25 {
         -1.0
     } else if a < -0.18 {
-        inp.throttle.min(0.0)
+        inp.throttle.fmin(0.0)
     } else if a > 0.25 {
         1.0
     } else if a > 0.18 {
-        inp.throttle.max(0.0)
+        inp.throttle.fmax(0.0)
     } else {
         inp.throttle
     };
@@ -521,14 +522,14 @@ pub fn input(v: &mut Vehicle, p: &WalkerParams, dt: f32) {
     let f_max = if inp.turn >= 0.0 || max_ <= 0.0 {
         1.0
     } else {
-        ((max_ - w.aim_yaw).max(0.0) / max_).clamp(0.0, 1.0)
+        ((max_ - w.aim_yaw).fmax(0.0) / max_).clamp(0.0, 1.0)
     };
     let f_min = if inp.turn <= 0.0 || min_ >= 0.0 {
         1.0
     } else {
-        ((w.aim_yaw - min_).max(0.0) / -min_).clamp(0.0, 1.0)
+        ((w.aim_yaw - min_).fmax(0.0) / -min_).clamp(0.0, 1.0)
     };
-    let f = f_min.min(f_max);
+    let f = f_min.fmin(f_max);
     if turn_speed < yaw_rate {
         yaw_rate = f * yaw_rate + (1.0 - f) * turn_speed;
     }
@@ -823,9 +824,9 @@ fn play(v: &mut Vehicle, p: &WalkerParams, dt: f32) -> f32 {
     };
     let t0 = w.clip_time;
     let t1 = if w.reversed {
-        (t0 - dt).max(0.0)
+        (t0 - dt).fmax(0.0)
     } else {
-        (t0 + dt).min(c.duration)
+        (t0 + dt).fmin(c.duration)
     };
     w.clip_time = t1;
     (c.z_at(t1) - c.z_at(t0)) * p.root_scale
@@ -899,11 +900,11 @@ fn pair_support(
             None => -l,
         };
     }
-    let (lo, hi) = (h[0].min(h[1]), h[0].max(h[1]));
+    let (lo, hi) = (h[0].fmin(h[1]), h[0].fmax(h[1]));
     let s = if p.roll {
         (h[0] + h[1]) * 0.5
     } else if hi > l * 0.5 {
-        lo + (hi - lo) * ((hi - l * 0.5) / (SUPPORT_BLEND * l)).min(1.0)
+        lo + (hi - lo) * ((hi - l * 0.5) / (SUPPORT_BLEND * l)).fmin(1.0)
     } else {
         lo
     };
@@ -927,7 +928,7 @@ pub fn legs(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld, dt: f32
     for (b, &(_, d)) in v.walker.layer_blend.iter_mut().zip(&pairs) {
         *b += ((-LAYER_GAIN * d).clamp(-1.0, 1.0) - *b) * LAYER_RATE;
     }
-    let max_s = pairs.iter().fold(-1.0f32, |m, &(s, _)| m.max(s));
+    let max_s = pairs.iter().fold(-1.0f32, |m, &(s, _)| m.fmax(s));
     let avg_d = pairs.iter().map(|&(_, d)| d).sum::<f32>() / pairs.len() as f32;
     let g = -LEG_GRAVITY;
     if pairs.len() == 1 {
@@ -947,7 +948,7 @@ pub fn legs(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld, dt: f32
                 v.walker.pitch =
                     (v.walker.pitch + PITCH_STEP * delta).clamp(-PITCH_CLAMP, PITCH_CLAMP);
             }
-            let lift = (pairs[0].0.max(-LIFT_SLACK) + pairs[1].0.max(-LIFT_SLACK)) * 0.5;
+            let lift = (pairs[0].0.fmax(-LIFT_SLACK) + pairs[1].0.fmax(-LIFT_SLACK)) * 0.5;
             if lift != 0.0 {
                 v.pos.y += lift;
                 v.vel.y = 0.0;
@@ -1000,7 +1001,7 @@ pub fn contacts(v: &mut Vehicle, p: &WalkerParams, world: &impl WalkerWorld) {
             if l < 1e-4 {
                 continue;
             }
-            let dist = (2.0 * depth * l).min(depth / l);
+            let dist = (2.0 * depth * l).fmin(depth / l);
             v.pos += nh / l * dist;
         }
     }

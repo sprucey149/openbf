@@ -8,6 +8,7 @@
 //! also read process environment.
 
 use crate::assets::Scene;
+use core::fmath::FloatExt;
 use glam::Vec3;
 use render::Renderer;
 
@@ -170,7 +171,7 @@ pub fn water_look(
                 .far_scene_range
                 .filter(|f| f.is_finite())
                 .unwrap_or(DEFAULT_FAR_SCENE_RANGE))
-            .max(c)
+            .fmax(c)
         }
     });
     let gated_on = source_game == "bf1" || cfg.is_some_and(|c| c.ocean || c.specular_enable);
@@ -270,7 +271,7 @@ pub fn speckle_frames(t: f32, fps: f32, n: usize) -> (usize, usize, f32) {
     if n == 0 {
         return (0, 0, 0.0);
     }
-    let f = (t * fps).max(0.0);
+    let f = (t * fps).fmax(0.0);
     let i = (f.floor() as usize) % n;
     (i, (i + 1) % n, f - f.floor())
 }
@@ -455,7 +456,7 @@ pub fn far_cull_from(lighting: &manifest::ManifestLighting) -> Option<FarCull> {
         .far_scene_range
         .filter(|f| f.is_finite())
         .unwrap_or(DEFAULT_FAR_SCENE_RANGE)
-        .max(terrain);
+        .fmax(terrain);
     Some(FarCull { terrain, world })
 }
 
@@ -600,7 +601,7 @@ impl LodBands {
             LodMode::Ps2 => ps2,
             LodMode::ClassicPlus | LodMode::Off => {
                 let plus = CLASSIC_PLUS_LOD_FACTOR * self.end;
-                leaf_reach.map_or(plus, |r| plus.min(r).max(ps2))
+                leaf_reach.map_or(plus, |r| plus.fmin(r).fmax(ps2))
             }
         }
     }
@@ -639,8 +640,8 @@ pub fn lod_bands(lighting: &manifest::ManifestLighting) -> Option<LodBands> {
     let [_, begin, end] = lighting.near_scene_range?;
     let far = lighting.far_scene_range.unwrap_or(DEFAULT_FAR_SCENE_RANGE);
     let ok = |v: f32| v.is_finite() && v > 0.0;
-    (ok(begin) && ok(end) && ok(far) && far > begin.min(end)).then_some(LodBands {
-        begin: begin.min(end),
+    (ok(begin) && ok(end) && ok(far) && far > begin.fmin(end)).then_some(LodBands {
+        begin: begin.fmin(end),
         end,
     })
 }

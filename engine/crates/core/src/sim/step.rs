@@ -12,6 +12,7 @@ use super::input::{buttons, PadState};
 use super::state::{Call, DeathCause, Event, Sim, LETHAL_LANDING_SPEED};
 use crate::ai;
 use crate::collision::{Capsule, AIR_STEP, STEP_HEIGHT};
+use crate::fmath::FloatExt;
 use crate::projectile::TERRAIN_RAY_STEP;
 use crate::soldier::{GroundRules, Stance};
 use crate::unit::Controller;
@@ -44,10 +45,10 @@ fn resolve_soldier_walls(
     if let Some((t, normal)) = collision.ceiling_sweep(&from, &to) {
         let delta = to.base - from.base;
         let rest = delta * (1.0 - t);
-        let slide = rest - normal * rest.dot(normal).min(0.0);
+        let slide = rest - normal * rest.dot(normal).fmin(0.0);
         soldier.pos = from.base + delta * t + slide;
         let into = soldier.vel.dot(normal);
-        soldier.vel -= normal * into.min(0.0);
+        soldier.vel -= normal * into.fmin(0.0);
         to.base = soldier.pos;
     }
     // A jump rising into a slope can cross it before the downward floor
@@ -72,7 +73,7 @@ fn resolve_soldier_walls(
                 if n.y > crate::soldier::FLOOR_MIN_NY && n.y < 1.0 && approach < 0.0 {
                     let t = hit.t / length;
                     let rest = delta * (1.0 - t);
-                    soldier.pos = start + delta * t + rest - n * rest.dot(n).min(0.0);
+                    soldier.pos = start + delta * t + rest - n * rest.dot(n).fmin(0.0);
                     soldier.vel -= n * approach;
                     to.base = soldier.pos;
                 }
@@ -219,7 +220,7 @@ impl Sim {
         u.soldier.pos = approach;
         u.wall_push += push;
         let normal = push.normalize_or_zero();
-        u.soldier.vel -= normal * u.soldier.vel.dot(normal).min(0.0);
+        u.soldier.vel -= normal * u.soldier.vel.dot(normal).fmin(0.0);
     }
 
     fn keep_floor_seam_side(&mut self, i: usize, from: Capsule, seam: crate::nav::FloorSeam) {
@@ -532,6 +533,29 @@ impl Sim {
     /// which is not an error (a splitscreen player who has not joined, a net
     /// peer whose packet has not arrived).
     pub fn step(&mut self, pads: &[PadState]) {
+        self.step_with(pads, false);
+    }
+
+    /// Issue #168 (LAN prediction, `analysis/plan/LAN_MULTIPLAYER.md` §6):
+    /// [`Sim::step`] with the bots' AI not run. PRESENTATION ONLY: a peer
+    /// steps a clone of its confirmed sim over its own pending inputs with
+    /// this, to draw its own soldier ahead of the round trip. It is never
+    /// called on a confirmed sim — the lockstep sim, the replay and every
+    /// hash run [`Sim::step`] — and nothing it produces feeds back.
+    ///
+    /// The difference: no commander plan, no turret offers, no team board,
+    /// no hit tokens and no bot `think`; each live AI unit replays the pad
+    /// its last think made (`Sim::ai_pads`), and its AI state stays as that
+    /// think left it. No wall clock is read (`ai_wall_ms`, the census and the
+    /// slow-frame think cost keep their last values). Everything else - the
+    /// humans' pads, movement, weapons, bolts, damage, posts - runs exactly
+    /// as in `step`, so the local player's own soldier moves as the confirmed
+    /// step will move him whenever the bots leave him alone.
+    pub fn step_predicted(&mut self, pads: &[PadState]) {
+        self.step_with(pads, true);
+    }
+
+    fn step_with(&mut self, pads: &[PadState], predicted: bool) {
         let dt = TICK_DT;
         // The rays since the last step were not the sim's (the chase camera's).
         crate::collision::cost::take();
@@ -643,19 +667,20 @@ impl Sim {
         self.squad_pass(pads);
 
         // Card HITCH: the AI's wall time (the frame recorder's; no sim input).
-        let ai_t0 = std::time::Instant::now();
+        // A predicted step reads no clock.
+        let ai_t0 = (!predicted).then(std::time::Instant::now);
         // 1. The COMMANDER (Phase B), before anyone thinks, so the think loop
         //    below reads the plan made this same tick. One team per tick at
         //    most: team t plans when the tick reaches its `next_plan_tick`,
         //    which starts at t and advances by `PLAN_PERIOD`.
         for t in 0..2u8 {
-            if self.tick >= self.commander[usize::from(t)].next_plan_tick {
+            if !predicted && self.tick >= self.commander[usize::from(t)].next_plan_tick {
                 crate::commander::plan(self, t);
             }
         }
         // 1a'. Card TURR: the turret offers (`ai::man`), after the plan and
         //      before the thinks, so a bot handed one walks to it this tick.
-        if !self.vehicles.is_empty() {
+        if !predicted && !self.vehicles.is_empty() {
             crate::ai::man::offer_pass(self);
         }
 
@@ -674,279 +699,316 @@ impl Sim {
         // 1a. Every BF2 unit's own aim-error block (card CLSE2), before the
         //     think that reads it.
         self.aim_blocks();
-        // 1a''. Card TEAM: the team board's roles, before the thinks.
-        crate::ai::team::board(self);
-        // 1a'''. Card TOKN: the human players' hit tokens, before the thinks.
-        crate::ai::tokn::deal(self);
         let mut ai_updates = std::mem::take(&mut self.ai_updates);
         ai_updates.clear();
-        // Card TEAM: the unit grid answers "who is near" for the thinks, which
-        // read a sim no one moves until the write-back.
-        self.unit_grid.build(&self.units);
-        // The bot that took longest, and the rays it cast (the slow-frame log).
-        let mut worst_think: Option<crate::sim::UnitCost> = None;
-        let space = self.space_round();
-        crate::ai::think_memo::during_thinks(|| {
+        // Issue #168: the bots a predicted step replays (index, generation,
+        // seat), for the seat check below; `ai_updates` serves a real step.
+        let mut replayed: Vec<(usize, u32, Option<crate::vehicle::Mount>)> = Vec::new();
+        if predicted {
+            self.ai_pads.resize(self.units.len(), PadState::default());
             for (i, u) in self.units.iter().enumerate() {
                 if u.alive && u.controller == Controller::Ai {
-                    let mut st = u.ai;
-                    let think_t0 = std::time::Instant::now();
-                    let queries_before = crate::collision::cost::queries();
-                    let (p, mut nt) = ai::think(self, self.handle(i), &mut st);
-                    let elapsed = think_t0.elapsed();
-                    let ms = elapsed.as_secs_f32() * 1000.0;
-                    // Bot census: the call's wall time (a measurement of the
-                    // machine, read only by `think_hist` below).
-                    nt.think_ns = u32::try_from(elapsed.as_nanos()).unwrap_or(u32::MAX);
-                    if worst_think.is_none_or(|w| ms > w.ms) {
-                        worst_think = Some(crate::sim::UnitCost {
-                            unit: i as u32,
-                            ms,
-                            ray_queries: crate::collision::cost::queries() - queries_before,
-                        });
-                    }
-                    ai_updates.push((i, u.gen, u.mount, st, p, nt));
+                    unit_pads[i] = self.ai_pads[i];
+                    replayed.push((i, u.gen, u.mount));
                 }
             }
-        });
-        #[cfg(feature = "brain-shadow")]
-        let live_ai_elapsed = ai_t0.elapsed();
-        #[cfg(feature = "brain-shadow")]
-        crate::collision::cost::preserve(|| {
-            crate::ai::think_memo::during_thinks(|| {
-                for (i, _, _, st, pad, nt) in &ai_updates {
-                    ai::verify_shadow(self, *i, st, *pad, *nt);
-                }
-            });
-        });
-        self.unit_grid.clear();
-        #[cfg(not(feature = "brain-shadow"))]
-        let live_ai_elapsed = ai_t0.elapsed();
-        self.ai_wall_ms = live_ai_elapsed.as_secs_f32() * 1000.0;
-        self.tick_cost.worst_think = worst_think;
-        let mut recycled: Vec<(usize, DeathCause)> = Vec::new();
-        // Card UNSN: the bots moved on unseen this tick, and where to.
-        let mut relocated: Vec<(usize, Vec3)> = Vec::new();
-        // Card TPOS: positions taken this tick, granted in unit-index order.
-        let mut granted: Vec<glam::Vec3> = Vec::new();
-        // WGCAL/WGOUT/WGNXT: wait-start, first and later post departures.
-        // Sources publish in unit order after every write-back.
-        // Publish only after every scratch AiState has been written back, so
-        // neither index ordering can erase a receiver's pending target.
-        let mut wait_calls = Vec::new();
-        // Bot census: the humans each team has and the rows teams 0..3
-        // play, for its groups (below).
-        let (census_humans, census_rows) = if space {
-            ([0; 2], [self.difficulty; 4])
         } else {
-            (
-                self.humans_per_team(),
-                [0u8, 1, 2, 3].map(|t| self.difficulty_of(t)),
-            )
-        };
-        for (i, _, mount, mut st, p, nt) in ai_updates.iter().copied() {
-            // Bot census (diagnostic OUTPUT, not hashed): think cost always,
-            // the target and lever counts on ground rounds, by the unit's
-            // row and whether a hostile team has a human.
-            let proxy = self.units[i].proxy_human.is_some();
-            self.think_hist.add(&nt, proxy);
-            if !space {
-                let team = self.units[i].team;
-                let vs_human =
-                    (0..2u8).any(|t| census_humans[usize::from(t)] > 0 && self.hostile(team, t));
-                let row = census_rows
-                    .get(usize::from(team))
-                    .copied()
-                    .unwrap_or_else(|| self.difficulty_of(team));
-                self.bot_census
-                    .add(row, vs_human, proxy, mount.is_none(), &nt);
+            // 1a''. Card TEAM: the team board's roles, before the thinks.
+            crate::ai::team::board(self);
+            // 1a'''. Card TOKN: the human players' hit tokens, before the thinks.
+            crate::ai::tokn::deal(self);
+            // Card TEAM: the unit grid answers "who is near" for the thinks, which
+            // read a sim no one moves until the write-back.
+            self.unit_grid.build(&self.units);
+            // The bot that took longest, and the rays it cast (the slow-frame log).
+            let mut worst_think: Option<crate::sim::UnitCost> = None;
+            let space = self.space_round();
+            // Issue #168 (§8b): the thinks run on `think_threads` threads in
+            // fixed partitions (`think_pool`); each reads only this unmoved
+            // sim, and the results come back in unit-index order, so the
+            // write-back below is the serial pass's for any thread count.
+            let jobs: Vec<usize> = (0..self.units.len())
+                .filter(|&i| {
+                    let u = &self.units[i];
+                    u.alive && u.controller == Controller::Ai
+                })
+                .collect();
+            let threads = super::think_pool::threads_for(self.think_threads, jobs.len());
+            let sim: &Self = self;
+            let thought = super::think_pool::run(&jobs, threads, |&i| {
+                let u = &sim.units[i];
+                let mut st = u.ai;
+                let think_t0 = std::time::Instant::now();
+                let queries_before = crate::collision::cost::queries();
+                let (p, mut nt) = ai::think(sim, sim.handle(i), &mut st);
+                let elapsed = think_t0.elapsed();
+                // Bot census: the call's wall time (a measurement of the
+                // machine, read only by `think_hist` below).
+                nt.think_ns = u32::try_from(elapsed.as_nanos()).unwrap_or(u32::MAX);
+                let cost = crate::sim::UnitCost {
+                    unit: i as u32,
+                    ms: elapsed.as_secs_f32() * 1000.0,
+                    ray_queries: crate::collision::cost::queries() - queries_before,
+                };
+                ((i, u.gen, u.mount, st, p, nt), cost)
+            });
+            for (update, cost) in thought {
+                if worst_think.is_none_or(|w| cost.ms > w.ms) {
+                    worst_think = Some(cost);
+                }
+                ai_updates.push(update);
             }
-            if self.ground_rules == GroundRules::Bf1 {
-                if let Some(w) = st.ride.and_then(|r| r.pickup) {
-                    let previous = self.units[i].ai.ride.and_then(|r| r.pickup);
-                    if w.started == Some(self.tick)
-                        && previous.is_some_and(|old| {
-                            old.vehicle == w.vehicle
-                                && old.seated == w.seated
-                                && old.started.is_none()
-                        })
-                    {
-                        wait_calls.push((self.handle(i), w.vehicle, w.seated));
+            #[cfg(feature = "brain-shadow")]
+            let live_ai_elapsed = ai_t0.map(|t| t.elapsed()).unwrap_or_default();
+            #[cfg(feature = "brain-shadow")]
+            crate::collision::cost::preserve(|| {
+                crate::ai::think_memo::during_thinks(|| {
+                    for (i, _, _, st, pad, nt) in &ai_updates {
+                        ai::verify_shadow(self, *i, st, *pad, *nt);
                     }
-                    if w.post_departure == Some(self.tick)
-                        && previous.is_some_and(|old| {
-                            old.vehicle == w.vehicle
-                                && old.seated == w.seated
-                                && old.post_departure != w.post_departure
-                        })
-                    {
-                        wait_calls.push((self.handle(i), w.vehicle, w.seated));
+                });
+            });
+            self.unit_grid.clear();
+            #[cfg(not(feature = "brain-shadow"))]
+            let live_ai_elapsed = ai_t0.map(|t| t.elapsed()).unwrap_or_default();
+            self.ai_wall_ms = live_ai_elapsed.as_secs_f32() * 1000.0;
+            self.tick_cost.worst_think = worst_think;
+            let mut recycled: Vec<(usize, DeathCause)> = Vec::new();
+            // Card UNSN: the bots moved on unseen this tick, and where to.
+            let mut relocated: Vec<(usize, Vec3)> = Vec::new();
+            // Card TPOS: positions taken this tick, granted in unit-index order.
+            let mut granted: Vec<glam::Vec3> = Vec::new();
+            // WGCAL/WGOUT/WGNXT: wait-start, first and later post departures.
+            // Sources publish in unit order after every write-back.
+            // Publish only after every scratch AiState has been written back, so
+            // neither index ordering can erase a receiver's pending target.
+            let mut wait_calls = Vec::new();
+            // Bot census: the humans each team has and the rows teams 0..3
+            // play, for its groups (below).
+            let (census_humans, census_rows) = if space {
+                ([0; 2], [self.difficulty; 4])
+            } else {
+                (
+                    self.humans_per_team(),
+                    [0u8, 1, 2, 3].map(|t| self.difficulty_of(t)),
+                )
+            };
+            for (i, _, mount, mut st, p, nt) in ai_updates.iter().copied() {
+                // Bot census (diagnostic OUTPUT, not hashed): think cost always,
+                // the target and lever counts on ground rounds, by the unit's
+                // row and whether a hostile team has a human.
+                let proxy = self.units[i].proxy_human.is_some();
+                self.think_hist.add(&nt, proxy);
+                if !space {
+                    let team = self.units[i].team;
+                    let vs_human = (0..2u8)
+                        .any(|t| census_humans[usize::from(t)] > 0 && self.hostile(team, t));
+                    let row = census_rows
+                        .get(usize::from(team))
+                        .copied()
+                        .unwrap_or_else(|| self.difficulty_of(team));
+                    self.bot_census
+                        .add(row, vs_human, proxy, mount.is_none(), &nt);
+                }
+                if self.ground_rules == GroundRules::Bf1 {
+                    if let Some(w) = st.ride.and_then(|r| r.pickup) {
+                        let previous = self.units[i].ai.ride.and_then(|r| r.pickup);
+                        if w.started == Some(self.tick)
+                            && previous.is_some_and(|old| {
+                                old.vehicle == w.vehicle
+                                    && old.seated == w.seated
+                                    && old.started.is_none()
+                            })
+                        {
+                            wait_calls.push((self.handle(i), w.vehicle, w.seated));
+                        }
+                        if w.post_departure == Some(self.tick)
+                            && previous.is_some_and(|old| {
+                                old.vehicle == w.vehicle
+                                    && old.seated == w.seated
+                                    && old.post_departure != w.post_departure
+                            })
+                        {
+                            wait_calls.push((self.handle(i), w.vehicle, w.seated));
+                        }
+                        if w.departed
+                            && previous.is_some_and(|old| {
+                                old.vehicle == w.vehicle && old.seated == w.seated && !old.departed
+                            })
+                        {
+                            wait_calls.push((self.handle(i), w.vehicle, w.seated));
+                        }
                     }
-                    if w.departed
-                        && previous.is_some_and(|old| {
-                            old.vehicle == w.vehicle && old.seated == w.seated && !old.departed
-                        })
-                    {
-                        wait_calls.push((self.handle(i), w.vehicle, w.seated));
+                }
+                ai::tactic::grant(&self.positions, self.tick, &mut st, &mut granted);
+                self.nav_stats.cover_ticks += u64::from(st.role.post.is_some());
+                self.nav_stats.flank_ticks += u64::from(st.flank.route.is_some());
+                self.nav_stats.overwatch_ticks +=
+                    u64::from(st.behaviour == ai::Behaviour::Overwatch);
+                self.units[i].ai = st;
+                // Card BNDS: a bot off the level with no way back is given up
+                // here, in the write-back's fixed order — and (card RCYC) one
+                // on it that made no net progress.
+                if nt.recycle != 0 {
+                    recycled.push((i, DeathCause::Lost));
+                } else if nt.stalled != 0 {
+                    recycled.push((i, DeathCause::Stalled));
+                    self.nav_stats.flank_stalled +=
+                        u64::from(self.units[i].ai.flank.route.is_some());
+                } else if let Some(b) = nt.relocate {
+                    relocated.push((i, Vec3::from_array(b.map(f32::from_bits))));
+                }
+                if self.units[i].mount.is_some() {
+                    self.nav_stats.ai_drive_ticks += 1;
+                }
+                unit_pads[i] = p;
+                // Issue #168: kept for `step_predicted` (not hashed: the next
+                // think replaces it).
+                if self.ai_pads.len() <= i {
+                    self.ai_pads.resize(i + 1, PadState::default());
+                }
+                self.ai_pads[i] = p;
+                self.nav_stats.bfs_fallbacks += u64::from(nt.bfs);
+                self.nav_stats.straight_fallbacks += u64::from(nt.straight);
+                self.nav_stats.flank_legs += u64::from(nt.flank);
+                self.nav_stats.stuck_max = self.nav_stats.stuck_max.max(nt.stuck_run);
+                // Card ARCM: a closing counts against the arc for the team.
+                if let Some(a) = nt.closed_arc {
+                    self.nav_stats.arcs_closed += 1;
+                    let team = self.units[i].team;
+                    if self.note_arc_closed(team, a, i as u32) {
+                        self.nav_stats.arcs_shunned += 1;
                     }
                 }
-            }
-            ai::tactic::grant(&self.positions, self.tick, &mut st, &mut granted);
-            self.nav_stats.cover_ticks += u64::from(st.role.post.is_some());
-            self.nav_stats.flank_ticks += u64::from(st.flank.route.is_some());
-            self.nav_stats.overwatch_ticks += u64::from(st.behaviour == ai::Behaviour::Overwatch);
-            self.units[i].ai = st;
-            // Card BNDS: a bot off the level with no way back is given up
-            // here, in the write-back's fixed order — and (card RCYC) one
-            // on it that made no net progress.
-            if nt.recycle != 0 {
-                recycled.push((i, DeathCause::Lost));
-            } else if nt.stalled != 0 {
-                recycled.push((i, DeathCause::Stalled));
-                self.nav_stats.flank_stalled += u64::from(self.units[i].ai.flank.route.is_some());
-            } else if let Some(b) = nt.relocate {
-                relocated.push((i, Vec3::from_array(b.map(f32::from_bits))));
-            }
-            if self.units[i].mount.is_some() {
-                self.nav_stats.ai_drive_ticks += 1;
-            }
-            unit_pads[i] = p;
-            self.nav_stats.bfs_fallbacks += u64::from(nt.bfs);
-            self.nav_stats.straight_fallbacks += u64::from(nt.straight);
-            self.nav_stats.flank_legs += u64::from(nt.flank);
-            self.nav_stats.stuck_max = self.nav_stats.stuck_max.max(nt.stuck_run);
-            // Card ARCM: a closing counts against the arc for the team.
-            if let Some(a) = nt.closed_arc {
-                self.nav_stats.arcs_closed += 1;
-                let team = self.units[i].team;
-                if self.note_arc_closed(team, a, i as u32) {
-                    self.nav_stats.arcs_shunned += 1;
-                }
-            }
-            self.nav_stats.shun_round += u64::from(nt.shun_round);
-            self.nav_stats.tokn_aimed_off += u64::from(nt.tokn_off);
-            self.nav_stats.shun_kept += u64::from(nt.shun_kept);
-            for w in ai::why::fail_codes(&nt) {
-                if let Some(n) = w.fail_index().and_then(|i| self.nav_stats.fails.get_mut(i)) {
-                    *n += 1;
-                }
-            }
-            self.nav_stats.detoured_legs += u64::from(nt.detoured);
-            self.nav_stats.blocked_ticks += u64::from(nt.blocked);
-            self.nav_stats.level_rejected += u64::from(nt.level_rejected);
-            self.nav_stats.level_unrouted += u64::from(nt.level_unrouted);
-            self.nav_stats.sweep_hits += u64::from(nt.sweep_hits);
-            self.nav_stats.unroutable_objectives += u64::from(nt.unroutable);
-            self.nav_stats.unreachable_dwell_max =
-                self.nav_stats.unreachable_dwell_max.max(nt.dwell);
-            self.nav_stats.contacts_max = self.nav_stats.contacts_max.max(nt.contacts);
-            self.nav_stats.heard_contacts += u64::from(nt.heard);
-            self.nav_stats.told_contacts += u64::from(nt.told);
-            self.nav_stats.line_held += u64::from(nt.line_held);
-            self.nav_stats.tpos_queries += u64::from(nt.tpos_query != 0);
-            self.nav_stats.tpos_ceiling += u64::from(nt.tpos_query == 2);
-            for (b, n) in self.nav_stats.tpos_ev.iter_mut().take(16).enumerate() {
-                *n += u64::from(nt.tpos_ev >> b & 1);
-            }
-            for (n, f) in self.nav_stats.tpos_funnel.iter_mut().zip(nt.tpos_funnel) {
-                *n += u64::from(f);
-            }
-            self.nav_stats.tpos_flips += u64::from(nt.tpos_hyst & ai::tactic::HY_FLIP != 0);
-            self.nav_stats.tpos_kept += u64::from(nt.tpos_hyst & ai::tactic::HY_KEPT != 0);
-            // Card HYST: the early thinks, and what they changed (the WHY
-            // log's row of this tick, if the think wrote one).
-            if nt.wake != 0 {
-                for (b, n) in self.nav_stats.wakes.iter_mut().enumerate() {
-                    *n += u64::from(nt.wake >> b & 1);
-                }
-                if let Some(r) = self.units[i]
-                    .ai
-                    .why
-                    .last()
-                    .filter(|r| r.tick == self.tick && !r.failed)
-                {
-                    if let Some(n) = self.nav_stats.wake_why.get_mut(r.why as usize) {
+                self.nav_stats.shun_round += u64::from(nt.shun_round);
+                self.nav_stats.tokn_aimed_off += u64::from(nt.tokn_off);
+                self.nav_stats.shun_kept += u64::from(nt.shun_kept);
+                for w in ai::why::fail_codes(&nt) {
+                    if let Some(n) = w.fail_index().and_then(|i| self.nav_stats.fails.get_mut(i)) {
                         *n += 1;
                     }
                 }
-            }
-            self.nav_stats.tpos_ev[16] += u64::from(
-                nt.tpos_query == 2 && nt.tpos_ev & crate::ai::tactic::EV_PICK_COVERED == 0,
-            );
-            // Card UCALL: the think's combat calls; on BF2 only the
-            // tracker's take, BF2's AcquiredTarget line (card UVO2,
-            // `FUN_002cde30` B2:255580).
-            if nt.acquired != 0 {
-                self.events.push(Event::Call {
-                    unit: self.handle(i),
-                    call: Call::Acquired,
-                });
-            }
-            if self.ground_rules != crate::soldier::GroundRules::Bf2 {
-                let unit = self.handle(i);
-                if nt.heard_turn != 0 {
+                self.nav_stats.detoured_legs += u64::from(nt.detoured);
+                self.nav_stats.blocked_ticks += u64::from(nt.blocked);
+                self.nav_stats.level_rejected += u64::from(nt.level_rejected);
+                self.nav_stats.level_unrouted += u64::from(nt.level_unrouted);
+                self.nav_stats.sweep_hits += u64::from(nt.sweep_hits);
+                self.nav_stats.unroutable_objectives += u64::from(nt.unroutable);
+                self.nav_stats.unreachable_dwell_max =
+                    self.nav_stats.unreachable_dwell_max.max(nt.dwell);
+                self.nav_stats.contacts_max = self.nav_stats.contacts_max.max(nt.contacts);
+                self.nav_stats.heard_contacts += u64::from(nt.heard);
+                self.nav_stats.told_contacts += u64::from(nt.told);
+                self.nav_stats.line_held += u64::from(nt.line_held);
+                self.nav_stats.tpos_queries += u64::from(nt.tpos_query != 0);
+                self.nav_stats.tpos_ceiling += u64::from(nt.tpos_query == 2);
+                for (b, n) in self.nav_stats.tpos_ev.iter_mut().take(16).enumerate() {
+                    *n += u64::from(nt.tpos_ev >> b & 1);
+                }
+                for (n, f) in self.nav_stats.tpos_funnel.iter_mut().zip(nt.tpos_funnel) {
+                    *n += u64::from(f);
+                }
+                self.nav_stats.tpos_flips += u64::from(nt.tpos_hyst & ai::tactic::HY_FLIP != 0);
+                self.nav_stats.tpos_kept += u64::from(nt.tpos_hyst & ai::tactic::HY_KEPT != 0);
+                // Card HYST: the early thinks, and what they changed (the WHY
+                // log's row of this tick, if the think wrote one).
+                if nt.wake != 0 {
+                    for (b, n) in self.nav_stats.wakes.iter_mut().enumerate() {
+                        *n += u64::from(nt.wake >> b & 1);
+                    }
+                    if let Some(r) = self.units[i]
+                        .ai
+                        .why
+                        .last()
+                        .filter(|r| r.tick == self.tick && !r.failed)
+                    {
+                        if let Some(n) = self.nav_stats.wake_why.get_mut(r.why as usize) {
+                            *n += 1;
+                        }
+                    }
+                }
+                self.nav_stats.tpos_ev[16] += u64::from(
+                    nt.tpos_query == 2 && nt.tpos_ev & crate::ai::tactic::EV_PICK_COVERED == 0,
+                );
+                // Card UCALL: the think's combat calls; on BF2 only the
+                // tracker's take, BF2's AcquiredTarget line (card UVO2,
+                // `FUN_002cde30` B2:255580).
+                if nt.acquired != 0 {
                     self.events.push(Event::Call {
-                        unit,
-                        call: Call::Heard,
+                        unit: self.handle(i),
+                        call: Call::Acquired,
                     });
                 }
-                // Card UTALK: the trooper's "follow me" (issued with chance
-                // 0.3) as it sets out, "move out" as it arrives.
-                let issued = match nt.trooper {
-                    crate::ai::NavTick::SET_OUT => {
-                        let draw =
-                            crate::ai::unit_unit(unit.index, self.tick, 0, crate::ai::SALT_FOLLOW);
-                        (draw < super::state::FOLLOW_CHANCE).then_some(Call::Follow)
+                if self.ground_rules != crate::soldier::GroundRules::Bf2 {
+                    let unit = self.handle(i);
+                    if nt.heard_turn != 0 {
+                        self.events.push(Event::Call {
+                            unit,
+                            call: Call::Heard,
+                        });
                     }
-                    crate::ai::NavTick::ARRIVED => Some(Call::MoveOut),
-                    _ => None,
-                };
-                if let Some(call) = issued.filter(|_| self.units[i].mount.is_none()) {
-                    self.events.push(Event::Call { unit, call });
+                    // Card UTALK: the trooper's "follow me" (issued with chance
+                    // 0.3) as it sets out, "move out" as it arrives.
+                    let issued = match nt.trooper {
+                        crate::ai::NavTick::SET_OUT => {
+                            let draw = crate::ai::unit_unit(
+                                unit.index,
+                                self.tick,
+                                0,
+                                crate::ai::SALT_FOLLOW,
+                            );
+                            (draw < super::state::FOLLOW_CHANCE).then_some(Call::Follow)
+                        }
+                        crate::ai::NavTick::ARRIVED => Some(Call::MoveOut),
+                        _ => None,
+                    };
+                    if let Some(call) = issued.filter(|_| self.units[i].mount.is_none()) {
+                        self.events.push(Event::Call { unit, call });
+                    }
+                }
+                if let Some(n) = self.nav_stats.man_codes.get_mut(usize::from(nt.man)) {
+                    *n += u64::from(nt.man != 0);
+                }
+                match nt.claim {
+                    crate::ai::NavTick::CLAIM_NEW => self.nav_stats.ai_claims += 1,
+                    crate::ai::NavTick::CLAIM_GIVEUP => self.nav_stats.ai_claim_giveups += 1,
+                    crate::ai::NavTick::CLAIM_LOST => self.nav_stats.ai_claim_lost += 1,
+                    _ => {}
+                }
+                // `think` takes `&Sim`, so a unit whose order is over — a follower
+                // or a holder whose leader is gone, or has been beyond LEAVE_DIST
+                // for LEAVE_TICKS of thinks — reports it and the ORDER IS ENDED HERE, inside
+                // `Sim::step`'s fixed order, like every other write-back, so a
+                // release is replay-exact.
+                if nt.released != 0 {
+                    self.units[i].command = None;
+                    self.units[i].ai.cmd = None;
+                    self.nav_stats.releases += 1;
                 }
             }
-            if let Some(n) = self.nav_stats.man_codes.get_mut(usize::from(nt.man)) {
-                *n += u64::from(nt.man != 0);
+            for (i, cause) in recycled {
+                let h = self.handle(i);
+                self.kill_environment(h, cause);
             }
-            match nt.claim {
-                crate::ai::NavTick::CLAIM_NEW => self.nav_stats.ai_claims += 1,
-                crate::ai::NavTick::CLAIM_GIVEUP => self.nav_stats.ai_claim_giveups += 1,
-                crate::ai::NavTick::CLAIM_LOST => self.nav_stats.ai_claim_lost += 1,
-                _ => {}
-            }
-            // `think` takes `&Sim`, so a unit whose order is over — a follower
-            // or a holder whose leader is gone, or has been beyond LEAVE_DIST
-            // for LEAVE_TICKS of thinks — reports it and the ORDER IS ENDED HERE, inside
-            // `Sim::step`'s fixed order, like every other write-back, so a
-            // release is replay-exact.
-            if nt.released != 0 {
-                self.units[i].command = None;
-                self.units[i].ai.cmd = None;
-                self.nav_stats.releases += 1;
-            }
-        }
-        for (i, cause) in recycled {
-            let h = self.handle(i);
-            self.kill_environment(h, cause);
-        }
-        self.relocate_unseen(relocated);
-        for (pilot, vehicle, seated) in wait_calls {
-            // Recycled units and stale seating tenures cannot issue a call.
-            if self.unit(pilot).is_some_and(|u| {
-                u.alive
-                    && u.controller == Controller::Ai
-                    && u.mount.is_some_and(|m| m.vehicle == vehicle && m.seat == 0)
-                    && u.ai
-                        .ride
-                        .and_then(|r| r.pickup)
-                        .is_some_and(|w| w.vehicle == vehicle && w.seated == seated)
-            }) && self.vehicle(vehicle).is_some_and(|v| {
-                matches!(
-                    v.kind,
-                    crate::vehicle::VehicleKind::Hover | crate::vehicle::VehicleKind::Walker
-                ) && v.seats.first().is_some_and(|s| s.occupant == Some(pilot))
-            }) {
-                self.need_gunner_call(pilot, vehicle);
+            self.relocate_unseen(relocated);
+            for (pilot, vehicle, seated) in wait_calls {
+                // Recycled units and stale seating tenures cannot issue a call.
+                if self.unit(pilot).is_some_and(|u| {
+                    u.alive
+                        && u.controller == Controller::Ai
+                        && u.mount.is_some_and(|m| m.vehicle == vehicle && m.seat == 0)
+                        && u.ai
+                            .ride
+                            .and_then(|r| r.pickup)
+                            .is_some_and(|w| w.vehicle == vehicle && w.seated == seated)
+                }) && self.vehicle(vehicle).is_some_and(|v| {
+                    matches!(
+                        v.kind,
+                        crate::vehicle::VehicleKind::Hover | crate::vehicle::VehicleKind::Walker
+                    ) && v.seats.first().is_some_and(|s| s.occupant == Some(pilot))
+                }) {
+                    self.need_gunner_call(pilot, vehicle);
+                }
             }
         }
 
@@ -970,7 +1032,11 @@ impl Sim {
         // happens after the thinks: a foot cloak/repair press must not become
         // a new seat's gun trigger (nor its movement become driving input).
         // Same-seat updates still reach the weapon's ordinary carry state.
-        for &(i, gen, mount, _, _, _) in &ai_updates {
+        let seated = ai_updates
+            .iter()
+            .map(|&(i, gen, mount, _, _, _)| (i, gen, mount))
+            .chain(replayed);
+        for (i, gen, mount) in seated {
             let u = &self.units[i];
             if u.gen != gen || u.controller != Controller::Ai || u.mount != mount {
                 unit_pads[i] = PadState::default();
@@ -1151,7 +1217,7 @@ impl Sim {
                     if pad_i.pressed(buttons::FIRE) && !human_saber {
                         pad_i.buttons &= !buttons::SPRINT;
                     }
-                    let stamina_cheat = self.cheats.infinite_stamina;
+                    let stamina_cheat = self.unit_cheats(i).infinite_stamina;
                     let mut consts = self.units[i].consts;
                     consts.hero =
                         self.hero_class(self.units[i].team) == Some(self.units[i].spec.class);
@@ -1393,7 +1459,9 @@ impl Sim {
         self.tick_soldier_water();
         self.tick_damage_regions();
         self.saber_hits();
-        // 4. Weapons → bolts.
+        // 4. Weapons → bolts. Each player's view lag first (issue #168).
+        self.take_view_lags(&unit_pads);
+        let first_bolt = self.bolts.len();
         let mut shots = Vec::new();
         // A lagged press: its unit and the turned aim, put back after it fires.
         let mut turned: Option<(usize, (f32, f32))> = None;
@@ -1434,7 +1502,7 @@ impl Sim {
                     w.state.salvo_counter = 0;
                 }
             }
-            let move_mag = PadState::axis(p.ly).abs().max(PadState::axis(p.lx).abs());
+            let move_mag = PadState::axis(p.ly).abs().fmax(PadState::axis(p.lx).abs());
             let stance_idx = match self.units[i].soldier.stance {
                 Stance::Stand => 0,
                 Stance::Crouch => 1,
@@ -1599,6 +1667,9 @@ impl Sim {
         if let Some((j, aim)) = turned.take() {
             self.put_aim(j, aim);
         }
+        // 4'. Lag compensation (issue #168): a lagged player's new bolts fly
+        //     their first ticks through the volumes he saw. No lag: nothing.
+        self.compensate_new_bolts(first_bolt, dt);
 
         // 5. Bolt flight + impacts (in spawn order): first what each bolt
         //    passes through on this tick's flight (issue #41).
@@ -1649,6 +1720,9 @@ impl Sim {
         self.grenade_calls();
         self.tick_cost.rays = crate::collision::cost::take();
         self.tick += 1;
+        // Issue #168: this tick's hit volumes, for lag compensation (not
+        // hashed; read by no step without a lagged pad).
+        self.record_hit_frame();
     }
 }
 
@@ -1741,13 +1815,13 @@ impl Sim {
         });
         if !under {
             if let Some(t) = self.terrain_ray(start, d, best, TERRAIN_RAY_STEP) {
-                best = best.min(t);
+                best = best.fmin(t);
             }
         }
         let own = crate::collision::HullFilter::except(u.mount.map(|m| m.vehicle));
         let layer = crate::collision::Layers::ORDNANCE;
         if let Some(h) = self.collision.ray_with(start, d, best, layer, own) {
-            best = best.min(h.t);
+            best = best.fmin(h.t);
         }
         let me = self.handle(i);
         // A human sees the others `HUMAN_SHOT_LAG` behind (OURS, as his
@@ -1762,7 +1836,7 @@ impl Sim {
                 let mut cap = o.capsule();
                 cap.base -= o.soldier.vel * lag;
                 if let Some(t) = cap.ray_hit(start, d, best) {
-                    best = best.min(t);
+                    best = best.fmin(t);
                 }
             }
         }
@@ -1838,7 +1912,7 @@ impl Sim {
         });
         if !under {
             if let Some(t) = self.terrain_ray(far, d, best, TERRAIN_RAY_STEP) {
-                best = best.min(t);
+                best = best.fmin(t);
                 hit = true;
             }
         }
@@ -1846,7 +1920,7 @@ impl Sim {
         let own = crate::collision::HullFilter::except(u.mount.map(|m| m.vehicle));
         let layer = crate::collision::Layers::ORDNANCE;
         if let Some(h) = self.collision.ray_with(far, d, best, layer, own) {
-            best = best.min(h.t);
+            best = best.fmin(h.t);
             hit = true;
         }
         hit.then_some(AIM_RAY_LENGTH + best)

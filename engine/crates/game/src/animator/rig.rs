@@ -1,6 +1,7 @@
 //! The animation rig: clip sets, the body and action slots, blend times, and the player that advances a clip.
 
 use super::*;
+use core::fmath::FloatExt;
 
 /// A soldier's baked sets over his asset's skeleton and clips.
 #[derive(Debug, Clone)]
@@ -518,7 +519,7 @@ impl Rig {
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(name))
         });
-        to.map_or(new.blend_in.min(old.blend_out), |(_, t)| *t)
+        to.map_or(new.blend_in.fmin(old.blend_out), |(_, t)| *t)
     }
 }
 
@@ -607,7 +608,7 @@ impl Player {
         }
         let cur = factor
             * if self.blend > 0.0 {
-                (self.secs / self.blend).min(1.0)
+                (self.secs / self.blend).fmin(1.0)
             } else {
                 1.0
             };

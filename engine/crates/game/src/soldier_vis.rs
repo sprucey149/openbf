@@ -758,6 +758,9 @@ pub struct SoldierVisuals {
     outlines: [Vec<Option<Outline>>; 2],
     /// Reused per-camera selection scratch; never read by the simulation.
     lod_view: lod::View,
+    /// Issue #168: a LAN peer's own shot at this tick (tick, unit index)
+    /// whose flash the prediction already started; not started again.
+    muted_shot: Option<(u64, u32)>,
     low_skins: [Vec<Vec<Option<TextureHandle>>>; 2],
     pub assets: Vec<SoldierAsset>,
     pub weapons: Vec<WeaponAsset>,

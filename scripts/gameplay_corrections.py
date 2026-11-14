@@ -3,9 +3,11 @@
 
 No executable, bytecode or artwork enters the public JSON. Gameplay height rows are
 restricted to authored playable boundary polygons and the corners of the grid cells those
-polygons reach; gameplay fills reach only as far as an in-bound query can (HEIGHT_REACH).
-Separate render-only heights cover the full donor grid, including visible distant terrain,
-without changing the heightfield the simulation reads. Changed collision, skeleton, navigation and root motion leave as instructions
+polygons reach; gameplay fills cover every other differing sample of the simulation grid,
+because nothing in the simulation keeps a soldier or ground vehicle inside the boundary
+(issue #168: it bounds only flyers and remote droids). A map with no boundary polygon gets
+no gameplay heights. Separate render-only heights cover the donor-only border of a larger
+donor drawing grid, without changing the heightfield the simulation reads. Changed collision, skeleton, navigation and root motion leave as instructions
 over the player's own donor file, in a sibling programs table (gameplay_programs.py).
 """
 from __future__ import annotations
@@ -27,8 +29,6 @@ from version_terrain_play import Grid, in_polygon
 
 SCHEMA = 2
 REGION_SETTING = re.compile(r"shadow[0-9]* ?[a-z0-9 =,.]*")
-# How far past the boundary an in-bound query can read terrain: the hover gun's aim ray (AIM_RAY in the sim).
-HEIGHT_REACH = 512.0
 # The BF1 console common turret's stop cue includes a loader qualifier. PC
 # omits this whole property, so retaining only donor hashes loses the cue.
 # Keep this measured token pair, without treating arbitrary prose as data.
@@ -214,17 +214,22 @@ def water_grid(terrain):
 def water_mask_record(reference, donor, polygons):
     grid, cell, half, height, cells = water_grid(reference)
     donor_grid, _, donor_half, donor_height, donor_cells = water_grid(donor)
-    if half != donor_half or height != donor_height or grid <= donor_grid or grid % donor_grid or not all(donor_cells):
-        raise ValueError("water mask correction needs a coarser, entirely wet donor with the same extent and height")
+    if half != donor_half or height != donor_height or grid < donor_grid or grid % donor_grid:
+        raise ValueError("water mask correction needs a donor grid with the same extent and height")
+    split = grid // donor_grid
+    # The donor's cells on the reference grid: the correction only dries them.
+    wet = [donor_cells[(i // grid // split) * donor_grid + i % grid // split] for i in range(grid * grid)]
+    if any(cells[i] and not wet[i] for i in range(grid * grid)):
+        raise ValueError("water mask correction cannot wet a donor cell")
     runs = []
     for z in range(grid):
         x = 0
         while x < grid:
-            if cells[z * grid + x]:
+            if cells[z * grid + x] or not wet[z * grid + x]:
                 x += 1
                 continue
             start = x
-            while x < grid and not cells[z * grid + x]:
+            while x < grid and not cells[z * grid + x] and wet[z * grid + x]:
                 if not all(in_bounds(polygons, ix * cell - half[0], iz * cell - half[1])
                            for ix in (x, x + 1) for iz in (z, z + 1)):
                     raise ValueError("dry water correction reaches outside the playable bounds")
@@ -470,7 +475,7 @@ def terrain_record(loc, reference, donor, polygons):
     if not a["heightfield"] or not b["heightfield"]:
         return None, {"changed_inside": 0, "changed_outside": 0, "missing_boundary": False}
     ga, gb = Grid(a), Grid(b)
-    samples, reach, inside, outside = [], [], 0, 0
+    samples, fills, inside, outside = [], [], 0, 0
     for iz in range(ga.n):
         for ix in range(ga.n):
             x, z = ga.world(ix, iz)
@@ -488,17 +493,20 @@ def terrain_record(loc, reference, donor, polygons):
                 inside += 1
             else:
                 outside += 1
-                if supports_bounds(polygons, x, z, HEIGHT_REACH):
-                    reach.append([x, z, y])
-    render_fills, render_summary = render_height_fills(reference, donor, samples + reach)
+                # The simulation reads the whole grid: a soldier or ground
+                # vehicle may walk on past the boundary, and every query off
+                # the grid clamps onto its edge (issue #168).
+                if polygons:
+                    fills.append([x, z, y])
+    render_fills, render_summary = render_height_fills(reference, donor, samples + fills)
     ac, bc = cutters(reference), cutters(donor)
-    summary = {"changed_inside": inside, "changed_outside": outside, "changed_in_reach": len(reach), "missing_boundary": not bool(polygons), "render": render_summary}
-    if not samples and not reach and not render_fills and ac == bc and ga.n == gb.n:
+    summary = {"changed_inside": inside, "changed_outside": outside, "changed_filled": len(fills), "missing_boundary": not bool(polygons), "render": render_summary}
+    if not samples and not fills and not render_fills and ac == bc and ga.n == gb.n:
         return None, summary
     out = {**loc, "grid_size": ga.n, "grid_unit": ga.unit, "height_scale": a["height_scale"],
            "height_samples": samples, "boundaries": polygons}
-    if reach:
-        out["height_fills"] = height_fills(reach, ga.unit)
+    if fills:
+        out["height_fills"] = height_fills(fills, ga.unit)
     if render_fills:
         out["render_height_fills"] = render_fills
         out["render_grid_size"] = gb.n
@@ -673,9 +681,12 @@ def generate(reference_root, donor_root, out, program_out, *, reference_census=N
                 report["maps"][file] = summary
                 if target:
                     row.setdefault("terrain", []).append(target)
-                if game == "bf1" and file == "kas/kas1.lvl":
+                # Kashyyyk Islands: an entirely wet coarser donor grid. Naboo
+                # Theed: PC and Xbox wet two plaza cells the PS2 keeps dry
+                # (issue #168).
+                if game == "bf1" and file in ("kas/kas1.lvl", "nab/nab2.lvl"):
                     if "water_mask" in row:
-                        raise ValueError("multiple Kashyyyk Islands water corrections")
+                        raise ValueError(f"multiple {file} water corrections")
                     row["water_mask"] = water_mask_record(payload, other[2], polygon)
             elif tag in {b"PATH", b"path", b"plan", b"plnp", b"skel", b"zaa_"}:
                 if tag == b"zaa_":

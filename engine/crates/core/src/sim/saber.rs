@@ -4,6 +4,7 @@
 use super::{buttons, PadState, Sim};
 use crate::combo::{self, ComboInput};
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::soldier::{SoldierConstants, Stance};
 use crate::TICK_DT;
 use glam::Vec3;
@@ -58,7 +59,7 @@ impl Sim {
             let forward = PadState::axis(pad.ly);
             let strafe = PadState::axis(pad.lx);
             state.remember_thrust(&class.combo, forward, strafe);
-            let thrust = (forward * forward + strafe * strafe).sqrt().min(1.0);
+            let thrust = (forward * forward + strafe * strafe).sqrt().fmin(1.0);
             let angle = fmath::atan2(-strafe, forward).to_degrees();
             let (sy, cy) = fmath::sin_cos(u.soldier.yaw);
             let mut buttons = 0;

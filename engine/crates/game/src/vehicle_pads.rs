@@ -29,6 +29,7 @@
 //! how the PS2 gates a building's seat by team is untraced).
 
 mod flight;
+use core::fmath::FloatExt;
 pub use flight::flight_paths;
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
@@ -402,7 +403,7 @@ pub fn build(
             spawn_time: f("SpawnTime", SPAWN_TIME),
             decay_time: f("DecayTime", DECAY_TIME),
             spawn_count: if bf2 {
-                f("SpawnCount", 1.0).max(1.0) as u32
+                f("SpawnCount", 1.0).fmax(1.0) as u32
             } else {
                 1
             },
@@ -969,7 +970,7 @@ pub fn install_with_objective(
             let frequency = db
                 .prop_f32(name, "SecondaryOrdnancePeriod")
                 .unwrap_or(1.0)
-                .max(1.0) as u64;
+                .fmax(1.0) as u64;
             let fire_sound = db.prop_hash(name, 0x2298cae8).map(str::to_owned);
             b.walker_shot_styles.insert(
                 w.class,
@@ -1463,7 +1464,7 @@ pub fn seat_setup(
             h.springs()
                 .iter()
                 .map(|s| s.pos.length() + s.radius)
-                .fold(0.0f32, f32::max)
+                .fold(0.0f32, core::fmath::max)
         })
         .filter(|r| *r > 0.0)
         .unwrap_or(VEHICLE_RADIUS);
@@ -1499,7 +1500,7 @@ fn aimer(
     pitch_rate: Option<f32>,
 ) -> Aimer {
     let d = std::f32::consts::PI / 180.0;
-    let lim = |l: [f32; 2]| [l[0].min(l[1]) * d, l[0].max(l[1]) * d];
+    let lim = |l: [f32; 2]| [l[0].fmin(l[1]) * d, l[0].fmax(l[1]) * d];
     let mut aimer = Aimer::default();
     if let Some(l) = yaw_limits {
         aimer.yaw = lim(l);

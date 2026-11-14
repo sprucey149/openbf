@@ -46,9 +46,29 @@ fn straight_curve(from: Vec3, forward: Vec3, dir: Vec3, step: f32) -> [Vec3; 4] 
 }
 
 impl Sim {
-    fn human_ride(&self) -> Option<&Vehicle> {
-        let human = self.players.first().copied().flatten()?;
-        self.vehicle(self.unit(human)?.mount?.vehicle)
+    /// The vehicle a human rides that is nearest `from` (a flyer only when
+    /// `flyer`), with that human's team. Every player slot is asked in slot
+    /// order and a tie keeps the lower slot, so with one human this is
+    /// that human's ride (issue #168: the single player's rule, for any
+    /// number of humans).
+    fn human_ride(&self, from: Vec3, flyer: bool) -> Option<(&Vehicle, u8)> {
+        let mut best: Option<(f32, &Vehicle, u8)> = None;
+        for h in self.players.iter().flatten() {
+            let Some(u) = self.unit(*h) else {
+                continue;
+            };
+            let Some(v) = u.mount.and_then(|m| self.vehicle(m.vehicle)) else {
+                continue;
+            };
+            if flyer && v.kind != VehicleKind::Flyer {
+                continue;
+            }
+            let d2 = v.pos.distance_squared(from);
+            if best.is_none_or(|(b, _, _)| d2 < b) {
+                best = Some((d2, v, u.team));
+            }
+        }
+        best.map(|(_, v, team)| (v, team))
     }
 
     pub(crate) fn flyer_seek_curve(
@@ -62,7 +82,7 @@ impl Sim {
         if !p.bf2 || !p.follower.flyer_vs_flyer || !seeks_human(me) {
             return false;
         }
-        let Some(human) = self.human_ride() else {
+        let Some((human, _)) = self.human_ride(v.pos, false) else {
             return false;
         };
         let to = human.pos - v.pos;
@@ -81,10 +101,7 @@ impl Sim {
     }
 
     pub(crate) fn tick_flyer_seek(&mut self, dt: f32) {
-        let Some(human) = self.human_ride() else {
-            return;
-        };
-        if human.kind != VehicleKind::Flyer {
+        if self.human_ride(Vec3::ZERO, true).is_none() {
             return;
         }
         for idx in 0..self.vehicles.len() {
@@ -121,20 +138,13 @@ impl Sim {
         if self.tick as f32 * crate::TICK_DT < RELOCATE_AFTER_SECS {
             return;
         }
-        let Some((human_pos, human_rot)) = self.human_ride().map(|h| (h.pos, h.rot)) else {
-            return;
-        };
-        let Some(human_team) = self
-            .players
-            .first()
-            .copied()
-            .flatten()
-            .and_then(|h| self.unit(h))
-            .map(|u| u.team)
-        else {
-            return;
-        };
         let Some(v) = self.vehicle(handle) else {
+            return;
+        };
+        let Some((human_pos, human_rot, human_team)) = self
+            .human_ride(v.pos, true)
+            .map(|(h, team)| (h.pos, h.rot, team))
+        else {
             return;
         };
         let Some(p) = self

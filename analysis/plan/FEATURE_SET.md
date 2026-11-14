@@ -101,6 +101,9 @@ and LAN are decisions for later work, not current tasks.
 
 ### Heroes
 - **Playable heroes (BF2) AND AI-controlled heroes (BF1 presence), both on all content.**
+- **BF1 Conquest rosters.** Five approved map-and-era matchups add variety
+  with existing BF2 kits. The [assignment record](../re-bf1-conquest-heroes.md#bf1-map-specific-matchups)
+  lists those choices and the original rosters.
 - Heroes are **killable, always** — no BF1 invincibility ("you see a hero and you just run
   away — no fun").
 - Health (maintainer, 2026-10-30 — supersedes the September no-time-drain rule):
@@ -284,6 +287,9 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 - In MP/splitscreen: host-only control (see Saves, sessions & host authority).
 
 ### Saves, sessions & host authority (added 2026-08-30)
+- **Profile selection.** Start opens the local profile list with the last used name selected.
+  Players can create, select and delete profiles. The existing single save imports once.
+  Settings, control bindings, career stats and unlocks are scoped to the selected profile.
 - **Autosave everywhere.** Each user profile autosaves continuously: career stats and
   award/unlock progression in every mode, single-player or multiplayer. Story campaign
   autosaves at mission/checkpoint boundaries. Galactic Conquest autosaves after every
@@ -394,7 +400,8 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 - Input: **controller first**; PS2 default mapping, full remap; on-screen keyboard for text entry.
   **Flight controls** defaults to Classic. RC Mode 2 is an opt-in layout for
   controller pilots, with yaw and throttle on the left stick and roll and pitch
-  on the right. The profile saves the choice.
+  on the right. Pull the right stick back to pitch up and push it forward to
+  pitch down. The profile saves the choice.
   BF2 aircraft with authored stunts use the contextual roll button followed
   by a direction. Double-tap it before steering to reverse. Keyboard pilots
   can use Left Alt plus direction or Caps Lock for a reversal.

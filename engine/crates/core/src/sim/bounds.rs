@@ -88,6 +88,7 @@
 
 use super::state::Sim;
 use crate::collision::{Layers, NO_GROUND, STEP_HEIGHT};
+use crate::fmath::FloatExt;
 use crate::nav::{Mover, SOLDIER};
 use glam::{Vec2, Vec3};
 use std::collections::VecDeque;
@@ -252,7 +253,7 @@ impl Sim {
                     if y <= NO_GROUND {
                         continue;
                     }
-                    lowest = lowest.min(y);
+                    lowest = lowest.fmin(y);
                     let Some(h) = g.unit_hub_on(p, Mover::new(SOLDIER, true), &|_| true) else {
                         continue;
                     };
@@ -373,7 +374,7 @@ impl Sim {
             }
         }
         for f in floors.iter().filter(|f| !f.is_nan()) {
-            lowest = lowest.min(*f);
+            lowest = lowest.fmin(*f);
         }
         if lowest.is_finite() {
             self.kill_floor = Some(lowest - KILL_FLOOR_DROP);
@@ -571,7 +572,7 @@ impl Sim {
     fn walk_floor_line(&self, from: Vec3, to: Vec2, jump: bool) -> Option<f32> {
         let start = Vec2::new(from.x, from.z);
         let len = (to - start).length();
-        let steps = (len / TRACE_STEP).ceil().max(1.0) as u32;
+        let steps = (len / TRACE_STEP).ceil().fmax(1.0) as u32;
         let step = len / steps as f32;
         let mut y = from.y;
         let mut gap = 0.0f32;
@@ -667,7 +668,7 @@ impl Sim {
         for (i, hub) in g.hubs.iter().enumerate() {
             let Some(f) = floor(i) else { continue };
             let d =
-                ((hub.xz() - p).length() - hub.radius).max(0.0) + LEVEL_RISE * (f - pos.y).abs();
+                ((hub.xz() - p).length() - hub.radius).fmax(0.0) + LEVEL_RISE * (f - pos.y).abs();
             let mut cand = (d, i as u16);
             for slot in &mut near {
                 if cand.0 < slot.0 {
@@ -779,7 +780,7 @@ impl Sim {
             let t = line.dot(offset) / line.length_squared();
             (0.0..=1.0).contains(&t)
                 && (offset - line * t).length_squared()
-                    <= crate::fmath::square(a.radius.min(b.radius))
+                    <= crate::fmath::square(a.radius.fmin(b.radius))
                 && (feet.y - (ay + (by - ay) * t)).abs() <= BOUND_DROP
                 && (self.floor_point_under_static(feet, feet.y + STEP_HEIGHT) - feet.y).abs()
                     <= STEP_HEIGHT
@@ -870,7 +871,7 @@ impl Sim {
             .enumerate()
             .filter_map(|(i, h)| {
                 let f = self.nav_floor(i as u16)?;
-                let r = h.radius.max(RETURN_HUB_RADIUS);
+                let r = h.radius.fmax(RETURN_HUB_RADIUS);
                 ((h.xz() - p0).length() <= RETURN_RANGE + r && f >= low).then_some((h.xz(), r, f))
             })
             .collect();
@@ -906,8 +907,8 @@ impl Sim {
         let guess = |p: Vec3| {
             let q = Vec2::new(p.x, p.z);
             hubs.iter()
-                .map(|&(h, r, _)| ((h - q).length() - r).max(0.0))
-                .fold(f32::INFINITY, f32::min)
+                .map(|&(h, r, _)| ((h - q).length() - r).fmax(0.0))
+                .fold(f32::INFINITY, crate::fmath::min)
         };
         // A cell is a column and a storey of it (2 m bands), so a floor
         // under a deck is a cell of its own.
@@ -1028,7 +1029,7 @@ impl Sim {
     fn return_clear(&self, p: Vec3, n: Vec3, f: f32) -> bool {
         let d = Vec3::new(n.x - p.x, 0.0, n.z - p.z);
         let len = d.length();
-        let chest = Vec3::new(p.x, p.y.max(f) + RETURN_CHEST, p.z);
+        let chest = Vec3::new(p.x, p.y.fmax(f) + RETURN_CHEST, p.z);
         self.collision
             .ray(
                 chest,
@@ -1059,8 +1060,8 @@ impl Sim {
     /// at `b`'s floor?
     pub fn floor_line(&self, a: Vec3, b: Vec3) -> bool {
         let d = Vec2::new(b.x - a.x, b.z - a.z);
-        let steps = (d.length() / RETURN_CELL).ceil().max(1.0) as u32;
-        let low = a.y.min(b.y) - crate::ai::LOST_DOWN;
+        let steps = (d.length() / RETURN_CELL).ceil().fmax(1.0) as u32;
+        let low = a.y.fmin(b.y) - crate::ai::LOST_DOWN;
         let mut p = a;
         for i in 1..=steps {
             let t = i as f32 / steps as f32;
@@ -1083,7 +1084,7 @@ impl Sim {
             return true;
         }
         let body = crate::collision::Capsule {
-            base: Vec3::new(a.x, a.y.max(b.y), a.z),
+            base: Vec3::new(a.x, a.y.fmax(b.y), a.z),
             height: crate::unit::capsule_height(crate::soldier::Stance::Stand),
             radius: crate::unit::SOLDIER_RADIUS - RETURN_SLACK,
         };

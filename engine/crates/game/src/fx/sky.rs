@@ -1,4 +1,5 @@
 use super::{emitter::Frame, props::Attached, FxAssets, Library};
+use core::fmath::FloatExt;
 use glam::{Mat3, Mat4, Vec3};
 use render::{Camera, ParticleDraw, ParticleShape};
 
@@ -22,8 +23,8 @@ pub(super) fn load(scene: &crate::assets::Scene, library: &Library) -> Vec<SkyEf
             let radius = mesh
                 .positions
                 .iter()
-                .map(|p| p[0].abs().max(p[2].abs()))
-                .fold(0.0f32, f32::max);
+                .map(|p| p[0].abs().fmax(p[2].abs()))
+                .fold(0.0f32, core::fmath::max);
             (radius > 0.001).then_some(1000.0 / radius)
         })
         .unwrap_or(1.0);
@@ -33,8 +34,8 @@ pub(super) fn load(scene: &crate::assets::Scene, library: &Library) -> Vec<SkyEf
             let Some(def) = library.get(&effect.effect) else {
                 continue;
             };
-            let lo = effect.parameter.unwrap_or(0.0).max(0.0);
-            let hi = effect.max_delay.unwrap_or(lo).max(lo);
+            let lo = effect.parameter.unwrap_or(0.0).fmax(0.0);
+            let hi = effect.max_delay.unwrap_or(lo).fmax(lo);
             let frame = Frame {
                 pos: Vec3::from(effect.pos),
                 rot: Mat3::from_cols_array_2d(&effect.axes),

@@ -3,6 +3,7 @@
 //! emitter traversal; these particles affect drawing, never simulation state.
 
 use super::{Era, Frame, FxAssets, Lcg, LiveEffect};
+use core::fmath::FloatExt;
 use glam::{Mat3, Vec3};
 use render::ParticleDraw;
 
@@ -37,7 +38,7 @@ pub(super) fn path(age: f32, mut at: impl FnMut(f32) -> Option<Vec3>) -> Option<
             step -= sample - age;
             sample = age;
         }
-        let dt = step.min(sample);
+        let dt = step.fmin(sample);
         now += dt;
         let Some(pos) = at(sample) else { break };
         timer -= dt;

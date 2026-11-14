@@ -4,6 +4,7 @@
 
 use crate::ai::hover_drive::shaped;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::remote::{look_frame, name, tilted};
 use crate::unit::UnitHandle;
 use crate::vehicle::gun::wrap;
@@ -286,7 +287,7 @@ impl Turret {
         eat(&(self.weapon_class as u64).to_le_bytes());
         for v in [self.pos, self.vel, self.up] {
             for x in v.to_array() {
-                eat(&x.to_bits().to_le_bytes());
+                eat(&x.hash_bits().to_le_bytes());
             }
         }
         for v in [
@@ -298,7 +299,7 @@ impl Turret {
             self.age,
             self.think,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         eat(&self.thinks.to_le_bytes());
         match self.target {

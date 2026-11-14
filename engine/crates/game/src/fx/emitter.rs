@@ -57,6 +57,7 @@
 //! halving — PS2 budgets the port lifts (FEEL_NOTES). BF2's clamp of
 //! MaxParticles to 128 is kept (it shapes how long an effect runs).
 
+use core::fmath::FloatExt;
 use glam::{Mat3, Vec3};
 use manifest::{
     FxColorNode, FxColorOp, FxEmitter, FxPositionNode, FxPositionOp, FxRange, FxScalarNode,
@@ -238,7 +239,7 @@ pub fn position_chain(
     for (i, n) in nodes.iter().enumerate() {
         let l = n.lifetime;
         let u = progress(t, l);
-        let um = u.min(1.0);
+        let um = u.fmin(1.0);
         let h = um * l * 0.5;
         let a = Vec3::from(n.value);
         pos += vel * h;
@@ -345,7 +346,7 @@ pub fn color_chain(nodes: &[FxColorNode], mut c: [f32; 4], mut t: f32) -> [f32; 
             let d = n.value[k];
             *ch = match n.op {
                 FxColorOp::None => *ch,
-                FxColorOp::Move => (*ch + d * u.min(1.0)).clamp(0.0, 1.0),
+                FxColorOp::Move => (*ch + d * u.fmin(1.0)).clamp(0.0, 1.0),
                 FxColorOp::Reach => {
                     if u >= 1.0 {
                         d

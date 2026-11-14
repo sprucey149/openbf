@@ -5,6 +5,8 @@
 
 use super::input::AimTarget;
 use super::state::Sim;
+use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::missile::MissileTarget;
 use crate::projectile::{Bolt, Hit};
 use crate::unit::Controller;
@@ -18,17 +20,31 @@ impl Sim {
     /// the press, in [`Bolt::fire`]. Soldiers and hulls are
     /// [`Sim::sweep_bolts`].
     pub(super) fn probe_flight(&mut self, k: usize, dt: f32) {
-        let b = &self.bolts[k];
+        let hulls = self.bolts[k].hulls;
+        if let Some((hit, end, remaining)) = self.chord_hit(&self.bolts[k], dt, hulls) {
+            let b = &mut self.bolts[k];
+            (b.hit, b.end, b.remaining) = (hit, end, remaining);
+        }
+    }
+
+    /// What `b` meets of the world under `hulls` along this tick's chord
+    /// ([`Self::probe_flight`]'s ray): the hit, its point and the flight
+    /// left; `None` when it meets nothing (or has already struck).
+    pub(super) fn chord_hit(
+        &self,
+        b: &Bolt,
+        dt: f32,
+        hulls: HullFilter,
+    ) -> Option<(Hit, Vec3, f32)> {
         if b.hit != Hit::None {
-            return;
+            return None;
         }
         let speed = b.vel.length();
         if speed <= 1e-4 {
-            return;
+            return None;
         }
-        let (pos, dir, step) = (b.pos, b.vel / speed, dt.min(b.remaining.max(0.0)));
+        let (pos, dir, step) = (b.pos, b.vel / speed, dt.fmin(b.remaining.fmax(0.0)));
         let who = b.shooter();
-        let hulls = b.hulls;
         // `Bolt::fire`'s rays: a rider's round passes his own building.
         let probe = Bolt::fire(
             pos,
@@ -41,10 +57,7 @@ impl Sim {
             &self.collision,
             hulls,
         );
-        if probe.hit != Hit::None {
-            let b = &mut self.bolts[k];
-            (b.hit, b.end, b.remaining) = (probe.hit, probe.end, probe.remaining);
-        }
+        (probe.hit != Hit::None).then_some((probe.hit, probe.end, probe.remaining))
     }
 
     /// Where a missile's target is this tick (`re-ordnance-kinds.md` §4.4):

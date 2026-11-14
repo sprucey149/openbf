@@ -23,6 +23,7 @@
 //! full throttle with the boost button (the top speed and the
 //! energy it leaves), 26-30 s full throttle, the jump button held 27.0-27.4 s
 //! (the highest the body rises over its ground-probe rest, and the energy).
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::{buttons, PadState, Sim};
 use core::unit::UnitSpec;

@@ -47,6 +47,7 @@
 use crate::assets::Scene;
 use core::collision::{CollisionWorld, HullFilter, Layers};
 use core::door::Door;
+use core::fmath::FloatExt;
 use core::vehicle::VehicleHandle;
 use glam::{Mat4, Quat, Vec3};
 use std::collections::HashMap;
@@ -95,7 +96,7 @@ pub fn ease_pull(stored: f32, raw: f32, dt: f32) -> f32 {
     if raw < stored {
         raw
     } else if raw == 1.0 || stored + PULL_RETURN_STEP < raw {
-        raw.min(stored + dt * PULL_RETURN_RATE)
+        raw.fmin(stored + dt * PULL_RETURN_RATE)
     } else {
         stored
     }
@@ -177,8 +178,8 @@ impl Aabb {
             if n > f {
                 std::mem::swap(&mut n, &mut f);
             }
-            t0 = t0.max(n);
-            t1 = t1.min(f);
+            t0 = t0.fmax(n);
+            t1 = t1.fmin(f);
             if t0 > t1 {
                 return false;
             }
@@ -515,7 +516,7 @@ impl CameraBlockers {
                 continue;
             }
             if let Some(hit) = b.sweep(b.pose_inv(&live, doors), target, dir, t, CAMERA_RADIUS) {
-                t = t.min(hit);
+                t = t.fmin(hit);
             }
         }
         t / len
@@ -539,7 +540,7 @@ impl CameraBlockers {
     ) -> Vec<(u32, f32)> {
         let mut out: Vec<(u32, f32)> = Vec::new();
         let mut list = |ii: u32, opacity: f32| match out.iter_mut().find(|(i, _)| *i == ii) {
-            Some(listed) => listed.1 = listed.1.min(opacity),
+            Some(listed) => listed.1 = listed.1.fmin(opacity),
             None => out.push((ii, opacity)),
         };
         for b in self.blockers.iter().filter(|b| b.prop) {
@@ -698,7 +699,7 @@ impl Blocker {
                 .positions
                 .iter()
                 .map(|p| (p.x * p.x + p.z * p.z).sqrt())
-                .fold(0.0f32, f32::max);
+                .fold(0.0f32, core::fmath::max);
             let spun = Aabb {
                 min: Vec3::new(-reach, mesh.local.min.y, -reach),
                 max: Vec3::new(reach, mesh.local.max.y, reach),
@@ -713,11 +714,11 @@ impl Blocker {
         let scale = [Vec3::X, Vec3::Y, Vec3::Z]
             .map(|v| inv.transform_vector3(v).length())
             .into_iter()
-            .fold(0.0f32, f32::max);
+            .fold(0.0f32, core::fmath::max);
         // The model's horizontal extents at the instance's scale.
         let ext = mesh.local.max - mesh.local.min;
         let footprint =
-            (ext.x * m.x_axis.truncate().length()).max(ext.z * m.z_axis.truncate().length());
+            (ext.x * m.x_axis.truncate().length()).fmax(ext.z * m.z_axis.truncate().length());
         Blocker {
             world,
             inv,
@@ -820,15 +821,15 @@ fn camera_meets_hull(body: &core::collision::Body, eye: Vec3) -> bool {
         * [Vec3::X, Vec3::Y, Vec3::Z]
             .map(|a| body.to_local.transform_vector3(a).length())
             .into_iter()
-            .fold(0.0f32, f32::max);
+            .fold(0.0f32, core::fmath::max);
     match &body.shape {
         Shape::Sphere { radius: r } => p.length_squared() <= ((r + radius) * (r + radius)),
         Shape::Cylinder {
             radius: r,
             half_height,
         } => {
-            let radial = ((p.x * p.x + p.z * p.z).sqrt() - r).max(0.0);
-            let vertical = (p.y.abs() - half_height).max(0.0);
+            let radial = ((p.x * p.x + p.z * p.z).sqrt() - r).fmax(0.0);
+            let vertical = (p.y.abs() - half_height).fmax(0.0);
             radial * radial + vertical * vertical <= radius * radius
         }
         Shape::Box { half } => {

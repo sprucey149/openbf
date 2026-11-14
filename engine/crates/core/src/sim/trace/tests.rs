@@ -60,7 +60,7 @@ fn replay_600_ticks_and_one_pad_byte_first_divergence() {
 #[test]
 fn selected_fields_change_only_their_group() {
     let baseline = fixture();
-    let hashes = |s: &Sim| groups(s, false).unwrap().map(|g| g.hash);
+    let hashes = |s: &Sim| groups(s, false, false).unwrap().map(|g| g.hash);
     let before = hashes(&baseline);
     let check = |s: Sim, group: usize| {
         let after = hashes(&s);
@@ -133,13 +133,13 @@ fn quantization_and_wire_hash_have_independent_known_answers() {
         assert!(quantize(bad, POSITION_QUANTUM).is_err());
     }
     // Standard FNV-1a reference vector: bytes "hello".
-    let mut g = Group::new(false);
+    let mut g = Group::new(false, false);
     for byte in b"hello" {
         g.u8(*byte);
     }
     assert_eq!(g.hash, 0xa430d84680aabd0b);
     // u32 0x6c6c6568 followed by u8 'o' must be the same bytes.
-    let mut g = Group::new(false);
+    let mut g = Group::new(false, false);
     g.u32(0x6c6c6568);
     g.u8(b'o');
     assert_eq!(g.hash, 0xa430d84680aabd0b);
@@ -165,13 +165,47 @@ fn original_hash_pins_without_tracing() {
     // Card DTEAM (2026-10-28) moved both: one human against none, so the
     // hash eats the per-team bot rows (`Sim::team_rows`). 2026-10-29 moved
     // both again: every human's spawn tick is kept (`focus_born`).
+    // 2026-11-13 (#168) moved both: glam's `scalar-math`, one math path on
+    // every CPU (LAN_MULTIPLAYER.md §7); 5573f2b603ed95f4 -> 71dabcfadf689bff,
+    // 5c5458c8927f122b -> abcec91efdcf4c93.
     let mut sim = Sim::new(42);
     for _ in 0..100 {
         sim.step(&[PadState::default()]);
     }
-    assert_eq!(sim.hash(), 0x5573_f2b6_03ed_95f4);
+    assert_eq!(sim.hash(), 0x71da_bcfa_df68_9bff);
     for _ in 100..600 {
         sim.step(&[PadState::default()]);
     }
-    assert_eq!(sim.hash(), 0x5c54_58c8_927f_122b);
+    assert_eq!(sim.hash(), 0xabce_c91e_fdcf_4c93);
+}
+
+/// The desync rows' exact groups (issue #168): a nudge under the position
+/// quantum moves the exact `units` group alone, while the quantized SHASH
+/// row does not see it.
+#[test]
+fn exact_groups_see_a_sub_quantum_nudge_in_units_only() {
+    let mut sim = fixture();
+    sim.step(&[PadState::default()]);
+    let row = |s: &Sim| {
+        let mut t = TraceWriter::new(Vec::new(), "m", 42, false).unwrap();
+        t.write_tick(s).unwrap();
+        String::from_utf8(t.finish().unwrap()).unwrap()
+    };
+    // On a grid line, then nudged by 1 cm: the same quantized integer
+    // either way (a quantum is 6.25 cm).
+    let i = sim.units.iter().position(|u| u.alive).unwrap();
+    let x = sim.units[i].soldier.pos.x;
+    sim.units[i].soldier.pos.x = (x / POSITION_QUANTUM).round() * POSITION_QUANTUM;
+    let base = (exact_group_hashes(&sim), row(&sim));
+    sim.units[i].soldier.pos.x += 0.01;
+    let after = exact_group_hashes(&sim);
+    assert_eq!(row(&sim), base.1, "the quantized row cannot see 1 cm");
+    assert_ne!(after[0], base.0[0], "the exact units group does");
+    assert_eq!(after[1..], base.0[1..], "and nothing else moves");
+    assert_eq!(GROUPS[0], "units");
+    assert_eq!(
+        exact_group_hashes(&sim),
+        after,
+        "the same state, the same row"
+    );
 }

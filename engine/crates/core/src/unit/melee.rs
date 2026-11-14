@@ -3,6 +3,7 @@
 //! that radius, and preserve the supplied length. No headshot multiplier.
 
 use super::{ray_sphere, ray_upright_cylinder, ray_yawed_box, BoltPrims, Stance, Vec3};
+use crate::fmath::FloatExt;
 
 impl BoltPrims {
     pub fn melee_hit(&self, start: Vec3, direction: Vec3, length: f32, radius: f32) -> bool {
@@ -48,11 +49,11 @@ impl BoltPrims {
             ))
         };
         let nearest = |a: Option<f32>, b: Option<f32>| match (a, b) {
-            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), Some(b)) => Some(a.fmin(b)),
             (a, b) => a.or(b),
         };
         let s = self.scale;
-        let head = 0.17 * s.max(1.0);
+        let head = 0.17 * s.fmax(1.0);
         match self.stance {
             Stance::Prone | Stance::Roll | Stance::Dead => nearest(
                 sphere(Vec3::new(0.0, 0.28 * s, 0.75 * s), head),

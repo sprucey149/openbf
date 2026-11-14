@@ -426,8 +426,7 @@ mod tests {
             let text = std::fs::read_to_string(&f).expect("read");
             let parsed: LoadScreen =
                 ron::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
-            let again =
-                ron::ser::to_string_pretty(&parsed, ron::ser::PrettyConfig::default()).unwrap();
+            let again = ron::ser::to_string_pretty(&parsed, crate::pretty()).unwrap();
             assert_eq!(again, text, "{} re-serializes differently", f.display());
             checked += 1;
         }

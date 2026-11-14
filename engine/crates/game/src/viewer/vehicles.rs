@@ -24,6 +24,7 @@ use super::upload::{upload_cpu_texture, upload_submeshes, upload_texture_file};
 use super::walker_pose::{skin, WalkerRig};
 use crate::assets::{load_glb, load_glb_joints, load_skinned_glb, CpuMesh, Scene, SkinnedAsset};
 use anyhow::Result;
+use core::fmath::FloatExt;
 use glam::Mat4;
 use render::{
     DrawCmd, DrawLayer, LightPath, MeshData, MeshHandle, Renderer, TextureHandle, Vertex,
@@ -158,7 +159,7 @@ pub enum TexSource {
 
 fn visibility_opacity(walker: bool, opacity: f32) -> f32 {
     if walker {
-        opacity.max(crate::camera_collide::SEE_THROUGH_OPACITY)
+        opacity.fmax(crate::camera_collide::SEE_THROUGH_OPACITY)
     } else {
         opacity
     }
@@ -861,7 +862,7 @@ pub fn model_tops(
             let glb = find_glb_path(dir, &model);
             let mesh = load_glb(&glb).ok()?;
             mesh.vis_top
-                .or_else(|| mesh.positions.iter().map(|p| p[1]).reduce(f32::max))
+                .or_else(|| mesh.positions.iter().map(|p| p[1]).reduce(core::fmath::max))
         })
         .collect()
 }

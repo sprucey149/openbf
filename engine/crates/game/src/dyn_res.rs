@@ -11,6 +11,8 @@
 //! No part of this reaches the sim: it reads the wall clock and moves only the
 //! renderer's target size.
 
+use core::fmath::FloatExt;
+
 /// The fractions of the window a battle can draw at, largest first. PROVISIONAL,
 /// measure: where a handheld's panel starts to look soft, and whether its GPU
 /// needs lower. 0.7 takes 39% off the GPU's frame on this PC's Intel GPU at 1080p
@@ -62,7 +64,7 @@ pub fn display_budget_ms(millihertz: Option<u32>) -> f32 {
     millihertz
         .filter(|&mhz| mhz > 0)
         .map_or(FASTEST_BUDGET_MS, |mhz| {
-            FASTEST_BUDGET_MS.max(1.0e6 / mhz as f32)
+            FASTEST_BUDGET_MS.fmax(1.0e6 / mhz as f32)
         })
 }
 
@@ -91,7 +93,7 @@ impl DynRes {
         } else {
             self.ewma_ms + (dt_ms - self.ewma_ms) * EWMA
         };
-        self.hold_s = (self.hold_s - dt).max(0.0);
+        self.hold_s = (self.hold_s - dt).fmax(0.0);
         if let Some(p) = &mut self.probing_s {
             *p += dt;
         }
@@ -115,7 +117,7 @@ impl DynRes {
             self.step += 1;
             if self.probing_s.take().is_some() {
                 self.failures += 1;
-                let hold = (1..self.failures).fold(HOLD_S, |h, _| (h * 2.0).min(HOLD_MAX_S));
+                let hold = (1..self.failures).fold(HOLD_S, |h, _| (h * 2.0).fmin(HOLD_MAX_S));
                 self.hold_s = hold;
             }
             self.changed();

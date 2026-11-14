@@ -74,9 +74,16 @@ pub struct RoundStats {
     pub units: Vec<UnitRound>,
     /// Career totals at battle creation, before the profile autosaves.
     pub(crate) opening_medals: Option<MedalCounts>,
+    /// The player slot whose career they are (the local player's).
+    pub(crate) medal_slot: usize,
 }
 
 impl RoundStats {
+    /// The local player's career medals when the round opened.
+    pub fn opening_medals(&self) -> Option<MedalCounts> {
+        self.opening_medals
+    }
+
     fn unit(&mut self, i: usize) -> &mut UnitRound {
         if self.units.len() <= i {
             self.units.resize(i + 1, UnitRound::default());
@@ -257,6 +264,51 @@ pub struct Names<'a> {
     pub sides: [&'a str; 2],
 }
 
+/// The in-battle scoreboard (LAN §5b, [`ui::scoreboard`]): Team Stats'
+/// soldiers and numbers (the same units, points, kills and deaths as
+/// [`screens`]), named by `unit`, each human's ping by its player slot
+/// (`ping`, `None` outside multiplayer), the viewer's team on the left.
+pub fn scoreboard(
+    sim: &Sim,
+    round: &RoundStats,
+    viewer: UnitHandle,
+    unit: &dyn Fn(usize) -> String,
+    titles: [String; 2],
+    ping: Option<&dyn Fn(u8) -> ui::scoreboard::Ping>,
+) -> ui::scoreboard::Scoreboard {
+    use ui::scoreboard::{Ping, ScoreRow, ScoreTeam, Scoreboard};
+    let none = UnitRound::default();
+    let viewer_team = sim
+        .units
+        .get(viewer.index as usize)
+        .map_or(0, |u| u.team.min(1));
+    let [t0, t1] = titles;
+    let mut teams = [t0, t1].map(|title| ScoreTeam {
+        title,
+        ..ScoreTeam::default()
+    });
+    for (i, u) in sim.units.iter().enumerate() {
+        if u.team > 1 || u.gen == 0 {
+            continue;
+        }
+        let r = round.units.get(i).unwrap_or(&none);
+        let slot = u.spec.player_slot;
+        teams[usize::from(u.team)].rows.push(ScoreRow {
+            name: unit(i),
+            points: r.points,
+            kills: r.kills,
+            deaths: u.deaths as i32,
+            ping: match (slot, ping) {
+                (Some(s), Some(p)) => p(s),
+                _ => Ping::None,
+            },
+            human: slot.is_some(),
+            me: i == viewer.index as usize,
+        });
+    }
+    Scoreboard::new(teams, viewer_team, ping.is_some())
+}
+
 /// Medal IDs in the career screen's column order.
 pub const MEDAL_NAMES: [(&str, &str); 9] = [
     ("gunslinger", "Gunslinger"),
@@ -309,7 +361,8 @@ pub fn screens(
     let label = |key: &str, en: &str| t(key, en);
     let with_count = |i: usize, n: u32| format!("{} ({n})", (names.unit)(i));
     let match_medals = || {
-        let Some((opening, current)) = round.opening_medals.zip(sim.medal_counts()) else {
+        let current = sim.slot_medal_counts(round.medal_slot);
+        let Some((opening, current)) = round.opening_medals.zip(current) else {
             return Vec::new();
         };
         MEDAL_NAMES
@@ -522,6 +575,66 @@ mod tests {
             text,
             sides: ["imp", "all"],
         }
+    }
+
+    /// The in-battle scoreboard reads Team Stats' numbers: the same rows
+    /// and order, the viewer's team left, a ping for humans only.
+    #[test]
+    fn the_scoreboard_rows_match_team_stats_with_pings() {
+        use ui::scoreboard::Ping;
+        let w = walk();
+        let sim = &w.sim;
+        let foe = (0..sim.units.len())
+            .find(|&i| sim.units[i].team == 1)
+            .map(|i| sim.handle(i))
+            .unwrap();
+        let mut r = RoundStats::default();
+        r.kill(sim, w.player, foe);
+        let unit = |i: usize| format!("U{i}");
+        let text = |_: &str, en: &str| en.to_owned();
+        let pages = screens(
+            sim,
+            &r,
+            w.player,
+            &Default::default(),
+            &names_for(&unit, &text),
+        );
+        let ping = |slot: u8| Ping::Ms(40 + u32::from(slot));
+        let titles = ["A".to_string(), "B".to_string()];
+        let b = scoreboard(sim, &r, w.player, &unit, titles.clone(), Some(&ping));
+        assert!(b.ping_column);
+        for (team, list) in b.teams.iter().zip(&pages.lists) {
+            let got: Vec<_> = team
+                .rows
+                .iter()
+                .map(|r| (&r.name, r.points, r.kills, r.deaths))
+                .collect();
+            let want: Vec<_> = list
+                .rows
+                .iter()
+                .map(|r| (&r.name, r.points, r.kills, r.deaths))
+                .collect();
+            assert_eq!(got, want);
+        }
+        let me = b.teams[0]
+            .rows
+            .iter()
+            .find(|r| r.me)
+            .expect("viewer row, left");
+        assert!(me.human && me.ping == Ping::Ms(40));
+        assert!(b
+            .teams
+            .iter()
+            .flat_map(|t| &t.rows)
+            .filter(|r| !r.human)
+            .all(|r| r.ping == Ping::None));
+        let single = scoreboard(sim, &r, w.player, &unit, titles, None);
+        assert!(!single.ping_column);
+        assert!(single
+            .teams
+            .iter()
+            .flat_map(|t| &t.rows)
+            .all(|r| r.ping == Ping::None));
     }
 
     /// Kills, team kills, a suicide and a capture score as the viewer's feed

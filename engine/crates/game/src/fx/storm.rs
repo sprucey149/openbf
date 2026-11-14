@@ -1,4 +1,5 @@
 use super::{force, Camera, Lcg, Library, Vec3};
+use core::fmath::FloatExt;
 use manifest::{Manifest, ManifestLightning};
 use render::{srgb_decode, srgb_encode, Lighting};
 
@@ -39,7 +40,7 @@ impl Storm {
     }
 
     fn interval(rng: &mut Lcg, [min, max]: [f32; 2]) -> f64 {
-        f64::from(min + (max - min) * rng.float()).max(0.001)
+        f64::from(min + (max - min) * rng.float()).fmax(0.001)
     }
 
     pub(super) fn advance(&mut self, time: f64, camera: &Camera, library: Option<&Library>) {
@@ -47,7 +48,7 @@ impl Storm {
             *self = Self::new(self.config.clone());
         }
         loop {
-            let event = self.next_flash.min(self.next_bolt);
+            let event = self.next_flash.fmin(self.next_bolt);
             if event > time {
                 break;
             }
@@ -134,6 +135,6 @@ impl Storm {
         for fog in [&mut light.fog, &mut light.water_fog].into_iter().flatten() {
             fog.color = [dome; 3];
         }
-        Some((light, dome / rest.max(f32::EPSILON)))
+        Some((light, dome / rest.fmax(f32::EPSILON)))
     }
 }

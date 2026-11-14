@@ -70,6 +70,7 @@
 //!   `Sim::difficulty.tier()`). `FROZEN_TIERS` copies the column, but no
 //!   rule reads the copy.
 
+use crate::fmath::FloatExt;
 use crate::sim::Sim;
 use crate::skill::{Difficulty, Skill, Tier};
 use crate::unit::Unit;
@@ -228,7 +229,7 @@ impl Profile {
             eat(&[0x43, c]);
         }
         if self.mend > 0.0 {
-            eat(&self.mend.to_bits().to_le_bytes());
+            eat(&self.mend.hash_bits().to_le_bytes());
         }
         if self.picks {
             eat(&[0x50]);
@@ -239,7 +240,7 @@ impl Profile {
             .iter()
             .chain([self.grenade, self.view_mult].iter())
         {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 }
@@ -359,14 +360,14 @@ pub fn skill_over(level: u8) -> Skill {
     }
     let t = f32::from(level.min(SKILL_MAX) - 1) / 19.0;
     let lerp = |a: f32, b: f32| a + (b - a) * t;
-    k.spread_mult = lerp(3.0, 1.0).max(0.0);
-    k.dispersion_mult = lerp(2.0, 0.0).max(0.0);
+    k.spread_mult = lerp(3.0, 1.0).fmax(0.0);
+    k.dispersion_mult = lerp(2.0, 0.0).fmax(0.0);
     k.aim_accel = 0.8 + 13.2 * t * t * t;
     k.aim_damping = lerp(0.8, 2.4);
     k.err_decay = lerp(0.1, 1.1);
-    k.err_floor = lerp(1.6, 0.4).max(0.0);
-    k.err_cap = lerp(2.2, 1.2).max(0.0);
-    k.err_cap_flyer = lerp(4.0, 1.2).max(0.0);
+    k.err_floor = lerp(1.6, 0.4).fmax(0.0);
+    k.err_cap = lerp(2.2, 1.2).fmax(0.0);
+    k.err_cap_flyer = lerp(4.0, 1.2).fmax(0.0);
     k
 }
 

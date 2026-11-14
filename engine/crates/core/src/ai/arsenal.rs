@@ -44,6 +44,7 @@ use super::brain::Tick;
 use super::draw::{unit_unit, SALT_ARM, SALT_NUMBER};
 use super::state::{AiState, ArmState};
 use crate::autoturret::Turret;
+use crate::fmath::FloatExt;
 use crate::remote::{Droid, DroidClass};
 use crate::sim::{buttons, Sim};
 use crate::soldier::GroundRules;
@@ -254,9 +255,9 @@ pub(super) fn score(wc: &WeaponClass, kind: u32) -> f32 {
     let rounds = wc.rounds_per_clip as f32;
     if wc.thrown.is_some() {
         let t = wc.shot_delay[0] + wc.reload_time;
-        return rounds.max(1.0) * dmg / if t > 0.0 { t } else { 1.0 };
+        return rounds.fmax(1.0) * dmg / if t > 0.0 { t } else { 1.0 };
     }
-    let delay = (0.5 * (wc.shot_delay[0] + wc.shot_delay[1])).max(1e-3);
+    let delay = (0.5 * (wc.shot_delay[0] + wc.shot_delay[1])).fmax(1e-3);
     let salvo = wc.shots_per_salvo.max(1) as f32;
     if wc.reload_time <= 0.0 || wc.rounds_per_clip == 0 {
         salvo * dmg / delay
@@ -365,7 +366,7 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
             let fallback = if c.class.force.is_some() || c.class.saber_throw.is_some() {
                 max
             } else {
-                max.max(c.class.shot_range())
+                max.fmax(c.class.shot_range())
             };
             !in_range && ask.d2 < fallback * fallback && by_rule
         };
@@ -436,8 +437,8 @@ pub(super) fn sidearm(
     // its MaxRange (`gunner_foot`, card CLSE4), so a pistol kept to 40 m
     // would stand silent from 24 m.
     let keep = RIFLE_BACK
-        .min(pistol.class.ai_range[2])
-        .min(pistol.class.shot_range());
+        .fmin(pistol.class.ai_range[2])
+        .fmin(pistol.class.shot_range());
     // Never drawn past that reach either: a BF1 rifle's MinRange (20-32 m)
     // is wider than a pistol's, and the rifle fires there (the trigger asks
     // no MinRange).
@@ -871,7 +872,7 @@ pub(super) fn reach(class: &WeaponClass) -> f32 {
             .as_ref()
             .map(|p| p.velocity * p.outbound_seconds)
     });
-    physical.map_or(class.ai_range[2], |r| r.min(class.ai_range[2]))
+    physical.map_or(class.ai_range[2], |r| r.fmin(class.ai_range[2]))
 }
 
 pub(super) fn armed<'a>(sim: &'a Sim, u: &'a Unit, st: &AiState) -> Armed<'a> {
@@ -907,7 +908,7 @@ pub(super) fn armed<'a>(sim: &'a Sim, u: &'a Unit, st: &AiState) -> Armed<'a> {
 /// un-reduced A is used, as on the PS2.
 pub(super) fn lob(s: f32, g: f32, d: Vec3) -> (f32, f32, bool) {
     if g.abs() < 1e-6 {
-        return (0.0, d.length() / s.max(1e-3), true);
+        return (0.0, d.length() / s.fmax(1e-3), true);
     }
     let mut a = s * s + g * d.y;
     let disc = a * a - g * g * d.length_squared();
@@ -915,7 +916,7 @@ pub(super) fn lob(s: f32, g: f32, d: Vec3) -> (f32, f32, bool) {
     if ok {
         a -= disc.sqrt();
     }
-    let t2 = (2.0 * a / (g * g)).max(0.0);
+    let t2 = (2.0 * a / (g * g)).fmax(0.0);
     (-0.5 * g * t2, t2.sqrt(), ok)
 }
 
@@ -986,7 +987,7 @@ pub(super) fn lob_aim(
         && Vec3::new(lead.x, 0.0, lead.z).length() > gc.ai_range[0]
         && (0..4).all(|k| crate::perception::los(sim, at(k as f32), at(k as f32 + 1.0)))
         && (clearance == 0.0 || !friend_near(sim, u, origin + lead, t + FRIEND_LEAD, clearance));
-    (eye + dir * d.length().max(1.0), ok)
+    (eye + dir * d.length().fmax(1.0), ok)
 }
 
 #[cfg(test)]

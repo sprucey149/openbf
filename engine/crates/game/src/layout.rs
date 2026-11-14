@@ -11,6 +11,7 @@
 use crate::assets::Manifest;
 use crate::mission::MissionDef;
 use core::announcer::{self, PostEvent, PostLines};
+use core::fmath::FloatExt;
 use core::nav::{Arc, Barrier, EscapeHeadings, FloorEscape, Hint, Hub, NavGraph, RouteTable};
 use core::region::Region;
 use core::route_patch::RoutePatches;
@@ -189,7 +190,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
         .map(|b| {
             let axis = |row: [f32; 3], fallback: Vec2| {
                 let v = Vec3::from(row);
-                let len = v.length().max(1e-6);
+                let len = v.length().fmax(1e-6);
                 let xz = Vec2::new(v.x, v.z);
                 let n = xz.length();
                 if n > 1e-6 {
@@ -1683,7 +1684,7 @@ impl MapLayout {
                     .unwrap_or(100),
                 ai_spawn_weight: prop(&inst.props, PROP_AI_SPAWN_WEIGHT)
                     .and_then(|s| s.trim().parse::<f32>().ok())
-                    .map_or(core::cp::AI_SPAWN_WEIGHT_DEFAULT, |w| w.max(0.0)),
+                    .map_or(core::cp::AI_SPAWN_WEIGHT_DEFAULT, |w| w.fmax(0.0)),
                 value_atk: faction_values(&inst.props, &PROP_VALUE_ATK),
                 value_def: faction_values(&inst.props, &PROP_VALUE_DEF),
                 major: inst.class.contains("major"),

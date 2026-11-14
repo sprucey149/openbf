@@ -762,6 +762,12 @@ pc 143 a literal `shell_menu_accept`); Triangle = exit (main.f14 pc 2; sub-pages
 suicide / restart popups: yes = accept, no = cancel (main.f3-f6 pc 19/25, f5 pc 14/24). Moves = the stack / listbox
 click. [V]
 
+In openbf, pause-menu clicks use elapsed window time for their authored
+play intervals. Battle sound delays use simulation ticks. The positional
+slow-sound cheat leaves menu click pitch alone. In pause settings, shoulder
+buttons take ten steps on numeric sliders. This extends the original Audio
+Options and Instant Action shortcut to the port's shared settings rows.
+
 **Stats screens (end of battle)**: `ifs_teamstats` Enter = exit (main.f9 pc 12), Cross = `shell_menu_enter`
 (main.f11 pc 21), Left/Right = select (main.f18/f19 pc 7); personal / career / award the same pattern. [V]
 

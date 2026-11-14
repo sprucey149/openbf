@@ -27,6 +27,7 @@
 
 use super::state::Sim;
 use crate::collision::{Aabb, HullPart};
+use crate::fmath::FloatExt;
 use crate::vehicle::gun::Rig;
 use crate::vehicle::{VehicleHandle, VehicleSpec};
 use crate::weapon::HealthType;
@@ -241,7 +242,7 @@ impl Sim {
         let (Some(before), true) = (t.down, amount > 0.0 && amount.is_finite()) else {
             return 0.0;
         };
-        let after = (before + amount).min(t.spec.max_health);
+        let after = (before + amount).fmin(t.spec.max_health);
         t.down = Some(after);
         if after >= t.spec.max_health {
             self.raise_building_turret(usize::from(i));

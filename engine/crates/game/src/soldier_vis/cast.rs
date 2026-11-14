@@ -4,6 +4,7 @@ use crate::{
     animator::{aim::AimKind, ClassAnim},
     skin::Clip,
 };
+use core::fmath::FloatExt;
 use glam::Vec2;
 
 pub(super) fn animation<'a>(
@@ -126,9 +127,9 @@ impl CastClock {
                 crate::hero_blades::clip_for(clips, &class.family, bank, animation, layer)
             })
             .map(|clip| clip.frames.saturating_sub(1) as f32 / 30.0)
-            .reduce(f32::max)?;
+            .reduce(core::fmath::max)?;
         if age <= end || holding && class.custom.upper(animation).final_frame {
-            Some((source, age.min(end)))
+            Some((source, age.fmin(end)))
         } else {
             self.clear();
             None

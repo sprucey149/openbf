@@ -4,6 +4,7 @@
 
 use super::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
+use crate::fmath::FloatExt;
 use crate::projectile::Shooter;
 use crate::vehicle::gun;
 use crate::vehicle::tow::{TowClass, TowPrimitive};
@@ -23,7 +24,7 @@ struct Anchor {
     tangent: Vec3,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Flight {
     Flying {
         pos: Vec3,
@@ -40,7 +41,7 @@ enum Flight {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TowCable {
     mount: Mount,
     shooter: Shooter,
@@ -52,6 +53,7 @@ pub struct TowCable {
 
 /// A fallen walker plays the authored death clip after its hull and crew
 /// leave the live vehicle set. Its posed collision is queried as a building.
+#[derive(Clone)]
 pub struct TowFall {
     vehicle: Vehicle,
     started: u64,
@@ -66,14 +68,14 @@ impl TowFall {
     pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"TOW_FALL");
         eat(&self.started.to_le_bytes());
-        eat(&self.duration.to_bits().to_le_bytes());
+        eat(&self.duration.hash_bits().to_le_bytes());
         self.vehicle.hash_into(eat);
     }
 
     pub fn pose(&self, tick: u64) -> Vehicle {
         let mut vehicle = self.vehicle.clone();
         vehicle.walker.anim = walker::ANIM_DEATH;
-        vehicle.walker.clip_time = self.age(tick).min(self.duration);
+        vehicle.walker.clip_time = self.age(tick).fmin(self.duration);
         vehicle.walker.layer_blend.fill(0.0);
         vehicle
     }
@@ -109,7 +111,7 @@ impl TowCable {
                     .chain(vel.to_array())
                     .chain([*life])
                 {
-                    eat(&x.to_bits().to_le_bytes());
+                    eat(&x.hash_bits().to_le_bytes());
                 }
             }
             Flight::Latched { target, anchors } | Flight::Detached { target, anchors } => {
@@ -131,7 +133,7 @@ impl TowCable {
                         .into_iter()
                         .chain(anchor.tangent.to_array())
                     {
-                        eat(&x.to_bits().to_le_bytes());
+                        eat(&x.hash_bits().to_le_bytes());
                     }
                 }
             }
@@ -281,7 +283,7 @@ impl Sim {
         match &mut cable.flight {
             Flight::Flying { pos, vel, life } => {
                 let from = *pos;
-                let len = vel.length() * dt.min(*life);
+                let len = vel.length() * dt.fmin(*life);
                 let dir = vel.normalize_or_zero();
                 let end = from + dir * len;
                 let mut stop = self
@@ -290,7 +292,7 @@ impl Sim {
                     .map_or(len, |hit| hit.t);
                 if let Some(hf) = &self.heightfield {
                     if let Some(t) = ray_terrain_ps2(hf, &self.collision.cutters, from, end) {
-                        stop = stop.min(t * len);
+                        stop = stop.fmin(t * len);
                     }
                 }
                 let mut latch = None;

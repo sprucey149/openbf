@@ -9,6 +9,7 @@
 
 mod world;
 use super::{foliage, grass, leaf, look, stations, turret_fall, turret_pose, upload};
+use core::fmath::FloatExt;
 pub use world::upload_scene;
 
 use super::camera::instance_matrix;
@@ -713,8 +714,8 @@ fn upload_sky(
             let radius = cpu
                 .positions
                 .iter()
-                .map(|p| p[0].abs().max(p[2].abs()))
-                .fold(0.0f32, f32::max);
+                .map(|p| p[0].abs().fmax(p[2].abs()))
+                .fold(0.0f32, core::fmath::max);
             if radius > 1e-3 {
                 SKY_SHELL_RADIUS / radius
             } else {
@@ -954,7 +955,7 @@ fn upload_atmosphere(
             rotation: config.rotation.unwrap_or(0.1),
             height: config.height.unwrap_or(16.0),
             size: config.particle_size.unwrap_or(28.0),
-            density: config.particle_density.unwrap_or(30.0).max(0.0) as u32,
+            density: config.particle_density.unwrap_or(30.0).fmax(0.0) as u32,
             display_gain,
             ground: Box::new(move |x, z| ground.as_ref().map_or(0.0, |g| g.height_at(x, z))),
         };
@@ -974,7 +975,7 @@ fn upload_atmosphere(
     let dust = super::dust::load(scene, |name| atmosphere_texture(r, scene, cache, name))?;
     r.set_dust(dust);
     r.set_sun_flare(scene.manifest.sun_flare.as_ref().map(|s| render::SunFlare {
-        distance: (scene.manifest.lighting.far_scene_range.unwrap_or(2000.0) * 0.9).min(2000.0),
+        distance: (scene.manifest.lighting.far_scene_range.unwrap_or(2000.0) * 0.9).fmin(2000.0),
         display_gain,
         angle: s.angle,
         color: s.color,

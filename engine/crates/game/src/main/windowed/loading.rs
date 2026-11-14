@@ -1,5 +1,6 @@
-//! Loading presentation, raw button edges and one owned CPU scene worker.
-//! No renderer, simulation tick or surface operation runs on the worker.
+//! Loading presentation, raw button edges and one owned CPU worker: the
+//! scene parse, then the round's CPU side (`super::round_prep`). No renderer,
+//! simulation tick or surface operation runs on the worker.
 
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -142,16 +143,35 @@ pub(super) struct Prepared {
     pub scene: game::assets::Scene,
     pub load: game::assets::BattleLoad,
     pub cpu_ms: f64,
+    /// The round's CPU side, built after the parse on the same worker
+    /// (`super::round_prep`); `None` when the loading asked for the scene
+    /// alone, and the event thread builds the round as before.
+    pub round: Option<super::round_prep::PreparedRound>,
 }
 
+/// The scene alone (the tests' event-thread build).
+#[cfg(test)]
 pub(super) fn prepare(dir: PathBuf, mode: String) -> anyhow::Result<Worker<Prepared>> {
+    prepare_round(dir, mode, None)
+}
+
+/// [`prepare`], then the round's CPU side on the same worker when `job` is
+/// given (`super::round_prep`, LAN §10.5).
+pub(super) fn prepare_round(
+    dir: PathBuf,
+    mode: String,
+    job: Option<super::round_prep::RoundJob>,
+) -> anyhow::Result<Worker<Prepared>> {
     Worker::spawn(move || {
         let started = Instant::now();
         let (scene, load) = game::assets::load_battle_scene(&dir, &mode)?;
+        let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let round = job.map(|j| j.build(&scene)).transpose()?;
         Ok(Prepared {
             scene,
             load,
-            cpu_ms: started.elapsed().as_secs_f64() * 1000.0,
+            cpu_ms,
+            round,
         })
     })
 }

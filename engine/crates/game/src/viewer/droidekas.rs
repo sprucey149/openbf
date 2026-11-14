@@ -12,6 +12,7 @@ use crate::assets::{load_glb_joints, load_skinned_glb, Scene};
 use aim::GunAim;
 use anyhow::Result;
 use core::droideka::{Droideka, DroidekaClass, ROLLING};
+use core::fmath::FloatExt;
 use core::vehicle::walker::WalkerState;
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, ParticleDraw, ParticleShape, Renderer, TextureHandle};
@@ -129,7 +130,7 @@ pub fn bubble_color(game: &str) -> [u8; 4] {
 
 pub fn bubble_scale(on: bool, t: f32) -> Option<f32> {
     if on {
-        let s = (t / BUBBLE_GROW).min(1.0);
+        let s = (t / BUBBLE_GROW).fmin(1.0);
         Some(if s < 0.94 {
             s * 1.127_659_6
         } else {

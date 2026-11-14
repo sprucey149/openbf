@@ -1,5 +1,6 @@
 //! BF2 transport approach and cargo deployment at a hostile hangar.
 
+use crate::fmath::FloatExt;
 use super::{
     chords_clear, hull_radius, FlightPhase, FlyerAi, Sim, Vec3, Vehicle, VehicleHandle, VehicleKind,
 };
@@ -76,7 +77,7 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         if (center - v.pos).dot(forward) <= 0.0 {
             continue;
         }
-        let width = region.size.x.max(region.size.z);
+        let width = region.size.x.fmax(region.size.z);
         // Carry a straight approach through the doorway before descending.
         let points = [region.basis.x_axis, region.basis.z_axis];
         let mut entries = [points[0], -points[0], points[1], -points[1]]
@@ -109,7 +110,7 @@ pub(super) fn departure(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut 
         return false;
     };
     let radius = hull_radius(sim, v);
-    let width = region.size.x.max(region.size.z);
+    let width = region.size.x.fmax(region.size.z);
     let center = Vec3::new(region.center.x, v.pos.y, region.center.z);
     let [x, z] = [region.basis.x_axis, region.basis.z_axis];
     for axis in [x, -x, z, -z] {
@@ -139,7 +140,7 @@ fn leg(
     radius: f32,
 ) -> bool {
     let forward = v.rot * Vec3::Z;
-    let behind = (end - v.pos).length().min(super::CONNECT_BEHIND);
+    let behind = (end - v.pos).length().fmin(super::CONNECT_BEHIND);
     let curve = [v.pos - forward * behind, v.pos, end, after];
     let points: [Vec3; super::HOP_SAMPLES + 1] = std::array::from_fn(|k| {
         crate::vehicle::flyer::curve_at(&curve, k as f32 / super::HOP_SAMPLES as f32).0

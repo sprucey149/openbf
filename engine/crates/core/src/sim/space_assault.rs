@@ -1,5 +1,6 @@
 use super::building_turrets::TurretFall;
 use super::state::{Event, Sim};
+use crate::fmath::FloatExt;
 use crate::unit::{Controller, UnitHandle};
 use crate::vehicle::VehicleHandle;
 
@@ -108,8 +109,8 @@ impl SpaceAssault {
             eat(&p.to_le_bytes());
         }
         for g in &self.shields {
-            eat(&g.shield.to_bits().to_le_bytes());
-            eat(&g.rate.to_bits().to_le_bytes());
+            eat(&g.shield.hash_bits().to_le_bytes());
+            eat(&g.rate.hash_bits().to_le_bytes());
             eat(&[u8::from(g.all_down)]);
         }
         for t in &self.turrets {
@@ -488,7 +489,7 @@ impl Sim {
         for &(station, add) in &sa.regen {
             if let Some(s) = self.stations.get_mut(usize::from(station)) {
                 if !s.destroyed && s.health.cur < s.health.max {
-                    s.health.cur = (s.health.cur + dt * add).min(s.health.max);
+                    s.health.cur = (s.health.cur + dt * add).fmin(s.health.max);
                 }
             }
         }

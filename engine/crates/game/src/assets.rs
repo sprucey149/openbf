@@ -3,6 +3,7 @@
 
 mod mesh;
 mod render_ground;
+use core::fmath::FloatExt;
 pub use mesh::{load_glb, load_glb_joints, load_skinned_glb, CpuSkinnedMesh, SkinnedAsset};
 mod visual_clips;
 pub use visual_clips::load_visual_skinned_glb;
@@ -277,8 +278,8 @@ impl CpuMesh {
         let mut hi = f32::NEG_INFINITY;
         for &v in idx {
             let uv = self.uvs.get(v as usize)?;
-            lo = lo.min(uv[1]);
-            hi = hi.max(uv[1]);
+            lo = lo.fmin(uv[1]);
+            hi = hi.fmax(uv[1]);
         }
         (lo <= hi).then_some((lo, hi))
     }

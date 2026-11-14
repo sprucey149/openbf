@@ -1,5 +1,6 @@
 use super::Sim;
 use crate::collision::{bounding_radius, Body, HullFilter, HullPart, Layers, Shape};
+use crate::fmath::FloatExt;
 use crate::vehicle::flyer::{FlightPhase, FlyerParams};
 use crate::vehicle::{collision_desc, impact_damage, VehicleHandle, VehicleKind};
 use glam::{Mat3, Mat4, Quat, Vec3};
@@ -256,13 +257,13 @@ impl Sim {
         let mut damage = impact_damage(along, n.dot(up), n.dot(forward), row.threshold, row.scale);
         if row.bf2 {
             if phase == FlightPhase::Flying {
-                damage += (-n).dot(forward).max(0.0) * NOSE_DAMAGE * max_health;
+                damage += (-n).dot(forward).fmax(0.0) * NOSE_DAMAGE * max_health;
             }
             if let Some(o) = other {
                 if o.flyer && !row.command {
                     damage = FLYER_VS_FLYER_DAMAGE * max_health;
                 } else {
-                    damage = damage.min(o.max_health * OTHER_DAMAGE_LIMIT);
+                    damage = damage.fmin(o.max_health * OTHER_DAMAGE_LIMIT);
                 }
             }
         }
@@ -313,7 +314,7 @@ impl Sim {
         let sliding = relative - n * along;
         let speed = sliding.length();
         let kept = if speed > 0.0 {
-            1.0 - (impulse * FRICTION / speed).min(1.0)
+            1.0 - (impulse * FRICTION / speed).fmin(1.0)
         } else {
             1.0
         };
@@ -334,7 +335,7 @@ impl Sim {
 
 fn jolted(rot: Quat, vel: Vec3, n: Vec3) -> Quat {
     let (up, forward) = (rot * Vec3::Y, rot * Vec3::Z);
-    let turn = (vel.length() * JOLT_PER_SPEED + JOLT_BASE).min(1.0);
+    let turn = (vel.length() * JOLT_PER_SPEED + JOLT_BASE).fmin(1.0);
     let mut aim = forward * (1.0 - turn * JOLT_TURN) + n * (turn * JOLT_TURN);
     if vel != Vec3::ZERO {
         aim += vel.normalize() * JOLT_TURN;

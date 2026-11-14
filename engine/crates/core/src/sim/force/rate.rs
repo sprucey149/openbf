@@ -63,7 +63,8 @@ mod tests {
                 animation: None,
             }),
             ..Default::default()
-        }];
+        }]
+        .into();
         let caster = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
         sim.spawn(&UnitSpec::trooper(1, Vec3::NEG_Z * 3.0)).unwrap();
         let owner = caster.index as usize;

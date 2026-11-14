@@ -221,8 +221,9 @@ The look and the order stay the PS2's; the content follows the port's features (
 2. **Title (Press START): kept** - logo, `shell_main`, the pulsing prompt; Start on a pad, Enter on a keyboard (the
    PS2 takes Start only). The attract movie after 30 s idle: kept if the movie is baked (it is two segments of the
    same file), else not built.
-3. **Profile flow: skipped** - the port autosaves one profile (PLAN §Saves); the difficulty question is the Session
-   Options' AI difficulty. SSCR decides per-player profiles.
+3. **Profile flow:** Start opens the named profile list. Create opens the name keyboard and then difficulty.
+   The port offers its four difficulty tiers and autosaves the profile. Main Menu Back returns to the list.
+   See Saves, sessions & host authority for progression and multiplayer ownership.
 4. **Main Menu**: Singleplayer; **Multiplayer in its PS2 slot, dimmed (`enabled: false` in data), skipped by focus**
    (§3.3 - the PS2's own disabled style, so the maintainer's "focus skips it or confirm does nothing" is settled as "focus
    skips it", FEEL_NOTES line in the build); Splitscreen dimmed until SSCR; Options.

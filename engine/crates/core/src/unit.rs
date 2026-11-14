@@ -6,6 +6,7 @@
 use crate::ai::AiState;
 use crate::collision::Capsule;
 use crate::fmath;
+use crate::fmath::FloatExt;
 use crate::soldier::{GroundRules, Soldier, SoldierConstants, Stance};
 use crate::weapon::{Health, HealthType, WeaponClass, WeaponState};
 use glam::Vec3;
@@ -520,7 +521,7 @@ impl Unit {
     }
 
     pub fn look_scale(&self) -> f32 {
-        self.zoom.map_or(1.0, |z| 1.0 / z.value.max(1.0))
+        self.zoom.map_or(1.0, |z| 1.0 / z.value.fmax(1.0))
     }
 
     /// The point the scope looks from and the scoped shot leaves (§10.2
@@ -663,7 +664,7 @@ impl Unit {
             self.skill,
         ]);
         self.soldier.hash_into(eat);
-        eat(&self.health.cur.to_bits().to_le_bytes());
+        eat(&self.health.cur.hash_bits().to_le_bytes());
         self.weapon.hash_into(eat);
         self.ai.hash_into(eat);
         self.aim.hash_into(eat);
@@ -682,14 +683,14 @@ impl Unit {
             post.hash_into(eat);
         }
         for v in [self.wall_push.x, self.wall_push.y, self.wall_push.z] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
         if let Some(d) = self.deck {
             eat(b"DECK");
             eat(&d.vehicle.index.to_le_bytes());
             eat(&d.vehicle.gen.to_le_bytes());
             for v in d.pose.to_cols_array().into_iter().chain(d.vel.to_array()) {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
         if self.body {
@@ -747,8 +748,8 @@ impl Unit {
         }
         if let Some(choked) = self.choked {
             eat(b"CHOKED");
-            eat(&choked.left.to_bits().to_le_bytes());
-            eat(&choked.age.to_bits().to_le_bytes());
+            eat(&choked.left.hash_bits().to_le_bytes());
+            eat(&choked.age.hash_bits().to_le_bytes());
         }
         if let Some(burn) = self.burn {
             burn.hash_into(eat);
@@ -759,8 +760,8 @@ impl Unit {
         }
         if let Some(z) = self.zoom {
             eat(&[0x5a, z.step, z.scope as u8]);
-            eat(&z.value.to_bits().to_le_bytes());
-            eat(&z.divisor.to_bits().to_le_bytes());
+            eat(&z.value.hash_bits().to_le_bytes());
+            eat(&z.divisor.hash_bits().to_le_bytes());
         }
         if self.first_person {
             eat(b"FP");
@@ -846,10 +847,10 @@ impl BoltPrims {
 
     /// The prims' reach around `pos`: (lower corner, upper corner).
     pub fn bounds(&self) -> (Vec3, Vec3) {
-        let r = 1.2 * self.scale.max(1.0);
+        let r = 1.2 * self.scale.fmax(1.0);
         (
             self.pos - Vec3::new(r, 0.0, r),
-            self.pos + Vec3::new(r, 2.1 * self.scale.max(1.0), r),
+            self.pos + Vec3::new(r, 2.1 * self.scale.fmax(1.0), r),
         )
     }
 
@@ -860,7 +861,7 @@ impl BoltPrims {
         let fwd = Vec3::new(-sy, 0.0, -cy);
         let right = Vec3::new(cy, 0.0, -sy);
         let at = |x: f32, y: f32, z: f32| self.pos + right * x + Vec3::Y * y + fwd * z;
-        let head_r = 0.17 * s.max(1.0);
+        let head_r = 0.17 * s.fmax(1.0);
         let mut best: Option<(f32, HitZone)> = None;
         let mut take = |t: Option<f32>, z: HitZone| {
             if let Some(t) = t.filter(|t| *t <= max_t && best.is_none_or(|b| *t < b.0)) {
@@ -966,10 +967,10 @@ pub(crate) fn ray_upright_cylinder(o: Vec3, d: Vec3, c: Vec3, r: f32, hh: f32) -
         (f32::NEG_INFINITY, f32::INFINITY)
     } else {
         let (a0, a1) = ((lo - o.y) / d.y, (hi - o.y) / d.y);
-        (a0.min(a1), a0.max(a1))
+        (a0.fmin(a1), a0.fmax(a1))
     };
-    let (enter, exit) = (t0.max(s0), t1.min(s1));
-    (enter <= exit && exit >= 0.0).then(|| enter.max(0.0))
+    let (enter, exit) = (t0.fmax(s0), t1.fmin(s1));
+    (enter <= exit && exit >= 0.0).then(|| enter.fmax(0.0))
 }
 
 /// A box of half extents `half` (along `right`, up, `fwd`) centred `c`.
@@ -995,10 +996,10 @@ pub(crate) fn ray_yawed_box(
             continue;
         }
         let (a, b) = ((-half[k] - lo[k]) / ld[k], (half[k] - lo[k]) / ld[k]);
-        enter = enter.max(a.min(b));
-        exit = exit.min(a.max(b));
+        enter = enter.fmax(a.fmin(b));
+        exit = exit.fmin(a.fmax(b));
     }
-    (enter <= exit && exit >= 0.0).then(|| enter.max(0.0))
+    (enter <= exit && exit >= 0.0).then(|| enter.fmax(0.0))
 }
 
 /// A droid class's chunk death (card DROIDDEATH, `analysis/re-droid-death.md`;
@@ -1187,7 +1188,7 @@ impl AimBlock {
         self.budget = (self.budget + 0.5 * d).clamp(0.0, Self::BUDGET_MAX);
         let delta = (self.vel - vel).length();
         self.vel = vel;
-        self.add(crate::ai::ERR_GROWTH * delta / top.max(0.1), floor);
+        self.add(crate::ai::ERR_GROWTH * delta / top.fmax(0.1), floor);
         self.axis = (self.axis + jolt).normalize_or_zero();
         let (s, c) = fmath::sin_cos(dt);
         let turn = glam::Quat::from_xyzw(self.axis.x * s, self.axis.y * s, self.axis.z * s, c);
@@ -1205,14 +1206,14 @@ impl AimBlock {
     /// the floor, and the 2 m cap.
     fn add(&mut self, mut x: f32, floor: f32) {
         if x > 0.0 {
-            x = x.min(self.budget);
+            x = x.fmin(self.budget);
             self.budget -= x;
         }
         self.err += x;
         self.err = if self.err < floor {
             floor
         } else {
-            self.err.min(crate::ai::ERR_MAX)
+            self.err.fmin(crate::ai::ERR_MAX)
         };
     }
 
@@ -1233,7 +1234,7 @@ impl AimBlock {
             q.z,
             q.w,
         ] {
-            eat(&v.to_bits().to_le_bytes());
+            eat(&v.hash_bits().to_le_bytes());
         }
     }
 
@@ -1243,7 +1244,7 @@ impl AimBlock {
         if self.from != Vec3::ZERO {
             eat(b"AIM_FROM");
             for v in self.from.to_array() {
-                eat(&v.to_bits().to_le_bytes());
+                eat(&v.hash_bits().to_le_bytes());
             }
         }
     }

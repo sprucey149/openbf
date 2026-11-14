@@ -5,6 +5,7 @@
 use super::input::buttons;
 use super::{Event, Sim};
 use crate::collision::HullFilter;
+use crate::fmath::FloatExt;
 use crate::projectile::Target;
 use crate::unit::{Controller, Unit};
 use crate::vehicle::{VehicleHandle, VehicleKind, SLICE_RESERVE};
@@ -44,7 +45,7 @@ impl Sim {
             && !blocked
             && u.is_player
             && u.soldier.energy < cost
-            && !self.cheats.infinite_stamina
+            && !self.cheats_of(u).infinite_stamina
             && self.pressed_now(i, button);
         let u = &mut self.units[i];
         let state = match held_slot {
@@ -219,7 +220,7 @@ impl Sim {
     fn fire_repair(&mut self, i: usize, class: usize, target: Target) {
         let repair = self.weapon_classes[class].repair.unwrap();
         let cost = self.weapon_classes[class].heat_per_shot * self.units[i].consts.energy_bar;
-        if !(self.units[i].is_player && self.cheats.infinite_stamina) {
+        if !(self.units[i].is_player && self.unit_cheats(i).infinite_stamina) {
             if self.units[i].soldier.energy < cost {
                 return;
             }
@@ -252,7 +253,7 @@ impl Sim {
                     };
                     let before = v.health.cur;
                     v.health.cur = (v.health.cur + repair.health[v.health.health_type as usize])
-                        .min(v.health.max);
+                        .fmin(v.health.max);
                     (v.pos, v.health.cur - before)
                 }
             }
@@ -273,7 +274,7 @@ impl Sim {
                 let (gain, max) = (repair.health[c.health_type as usize], c.body.max_health);
                 let t = &mut self.turrets[k];
                 let before = t.health;
-                t.health = (t.health + gain).min(max);
+                t.health = (t.health + gain).fmin(max);
                 (t.centre(), t.health - before)
             }
             Target::Unit(_)
@@ -361,7 +362,7 @@ impl Sim {
         if amount <= 0.0 || !amount.is_finite() {
             return;
         }
-        s.health.cur = (s.health.cur + amount).min(s.health.max);
+        s.health.cur = (s.health.cur + amount).fmin(s.health.max);
         if !s.destroyed || s.health.cur < s.health.max {
             return;
         }

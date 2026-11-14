@@ -663,7 +663,7 @@ pub const MAN_LEFT_CLOSED: u64 = 20 * crate::TICK_HZ as u64;
 pub const MAN_UNREACHED_CLOSED: u64 = 60 * crate::TICK_HZ as u64;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The fixtures the parts' test modules share; each part's own tests
     //! live beside its code, in that part's `mod tests`.
     use crate::nav::{self, Arc, Hub, NavGraph, RouteTable};
@@ -812,7 +812,7 @@ mod tests {
         /// whatever their own draw (`None`: the draw, and the weapon's
         /// band): the tests of the gunner, the mover and the held position
         /// script a shooter that keeps its place ([`all_stand`]).
-        pub(super) static STYLE: std::cell::Cell<Option<(bool, bool)>> =
+        pub(crate) static STYLE: std::cell::Cell<Option<(bool, bool)>> =
             const { std::cell::Cell::new(None) };
     }
 
@@ -846,7 +846,7 @@ mod tests {
 
     /// A sim with the L graph, flat ground and one post in a capture sphere at
     /// hub 2. The AI unit starts at hub 0.
-    pub(super) fn l_sim() -> (Sim, UnitHandle) {
+    pub(crate) fn l_sim() -> (Sim, UnitHandle) {
         use crate::cp::CpDef;
         use crate::heightfield::Heightfield;
         use crate::region::Region;

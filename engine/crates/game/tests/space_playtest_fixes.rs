@@ -6,6 +6,7 @@
 //! 3. Space `SetParticleLODBias` (`3000.0` / `15000.0`) far-fade extension for small `bounding_radius`
 //!    missile flares (`com_sfx_weap_rockettrail`), smooth `LiveEffect::advance` burst path interpolation
 //!    at `350 m/s`, and `render_blend` pose capture for trail-only non-laser ordnance.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::collision::{CollisionWorld, HullFilter};
 use core::impact::{ImpactLook, Surface};

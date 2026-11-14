@@ -36,6 +36,7 @@
 //! the post models' own collision is in the world, then
 //! `Scene::collision_world`. No GPU and no sim stepping — nothing here can move
 //! a replay hash or a golden.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::sim::Sim;
 use glam::Vec3;

@@ -352,7 +352,7 @@ impl Ctx<'_> {
     }
 
     /// `border_3_pieces` as nine parts: fixed corners, stretched edges.
-    fn bordered(&mut self, s: &Screen, [x0, y0, x1, y1]: [f32; 4]) {
+    pub(crate) fn bordered(&mut self, s: &Screen, [x0, y0, x1, y1]: [f32; 4]) {
         let (c, t) = (BORDER_UNITS, BORDER_TEXELS / 64.0);
         let xs = [x0, x0 + c, x1 - c, x1];
         let ys = [y0, y0 + c, y1 - c, y1];

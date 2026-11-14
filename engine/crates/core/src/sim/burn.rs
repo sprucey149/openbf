@@ -1,4 +1,5 @@
 use super::Sim;
+use crate::fmath::FloatExt;
 use crate::hero_weapon::Burn;
 use crate::unit::UnitHandle;
 
@@ -32,7 +33,7 @@ impl Sim {
         if u.droideka.is_some() {
             return;
         }
-        let left = u.burn.map_or(0.0, |b| b.left).max(time);
+        let left = u.burn.map_or(0.0, |b| b.left).fmax(time);
         u.burn = Some(Burn {
             left,
             damage_per_second,

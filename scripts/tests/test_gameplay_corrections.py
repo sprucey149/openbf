@@ -328,13 +328,29 @@ class ExportCorrectionTests(unittest.TestCase):
         skeleton = [{'name': 's', 'bones': [[0, [0] * 12]] * 601}]
         self.assertTrue(any('skeleton bones' in p for p in self.program_problems(skeleton=skeleton)))
 
-    def test_height_fill_reach_is_the_aim_ray(self):
+    def test_height_fills_cover_the_simulation_grid_and_no_further(self):
+        # correction() has a 64-cell grid of unit 1: x and z run from -32 to 31 (z from -31 to 32).
         data = correction()
         terrain = data['files'][0]['terrain'][0]
-        terrain['height_fills'] = [[100, 0, 4, 4, 2.5]]
+        terrain['height_fills'] = [[-32, -31, 64, 64, 2.5]]
         self.assertEqual(export.generated_data_problems(self.path, c.encoded(data)), [])
-        terrain['height_fills'] = [[5000, 0, 1, 1, 2.5]]
+        for fill in ([-33, 0, 1, 1, 2.5], [31, 0, 2, 1, 2.5], [0, 32, 1, 2, 2.5], [0.5, 0, 1, 1, 2.5], [5000, 0, 1, 1, 2.5]):
+            terrain['height_fills'] = [fill]
+            self.assertTrue(any('height fill' in p for p in export.generated_data_problems(self.path, c.encoded(data))), fill)
+        terrain['height_fills'] = [[0, 0, 1, 1, 2.5]]
+        terrain['boundaries'] = []
+        terrain['height_samples'] = []
         self.assertTrue(any('height fill' in p for p in export.generated_data_problems(self.path, c.encoded(data))))
+
+    def test_every_differing_sample_past_the_line_is_a_gameplay_fill(self):
+        # Nothing keeps a soldier inside the boundary (issue #168), so the whole grid is corrected.
+        loc = {'scope': [], 'name': 'ground', 'ordinal': 0}
+        polygon = [[(-8, -8), (8, -8), (8, 8), (-8, 8)]]
+        row, report = c.terrain_record(loc, terrain(6), terrain(4), polygon)
+        self.assertEqual(report['changed_filled'], 231)
+        filled = sum(f[2] * f[3] for f in row['height_fills'])
+        self.assertEqual(filled + len(row['height_samples']), 16 * 16)
+        self.assertNotIn('render_height_fills', row)
 
     def test_a_region_setting_holds_only_shadow_numbers(self):
         data = correction()

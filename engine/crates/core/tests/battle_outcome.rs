@@ -17,6 +17,7 @@
 //!
 //! These are MEASUREMENTS, not a fix: per the queue item, a failure here is
 //! reported (first tick + path) for the lead to rule on, never patched.
+#![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use core::battle::{Battle, SpawnOutcome, BF2_BLEED_TICKETS_PER_SEC};
 use core::cp::CpDef;

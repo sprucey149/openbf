@@ -80,6 +80,7 @@ use super::{
     BOARD_BLOCK, BOARD_FRESH, BOARD_GIVEUP, BOARD_PAD_BF1, BOARD_PAD_BF2, BOARD_SEEK, BOARD_SLACK,
     BOARD_TRIP, GUNNER_WAIT, OTHER_FLOOR, RIDE_GAIN, VEHICLE_NOTIFY_RADIUS,
 };
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::sim::{PadState, Sim, ENTER_REACH};
 use crate::soldier::GroundRules;
@@ -206,7 +207,7 @@ fn reach_test(sim: &Sim, u: &Unit, vh: VehicleHandle) -> Option<(f32, f32)> {
         BOARD_PAD_BF1
     };
     let cap = u.capsule();
-    let reach = radius + cap.radius.max(cap.height * 0.5) + pad;
+    let reach = radius + cap.radius.fmax(cap.height * 0.5) + pad;
     Some((cap.center().distance_squared(v.pos), reach))
 }
 
