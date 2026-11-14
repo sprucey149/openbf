@@ -96,6 +96,7 @@ fn play_event_sounds(
     sl.play_repair_loops(audio, &walk.sim, &listener);
     sl.play_shield_loops(audio, &walk.sim, &listener);
     sl.walker_fire_loops(audio, walk, &listener);
+    sl.play_overheat_loops(audio, &walk.sim, &listener);
     sl.guided_loops(audio, &walk.sim, &listener);
     sl.play_hero_blades(audio, walk, &listener);
     sl.play_hero_samples(

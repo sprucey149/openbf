@@ -33,6 +33,7 @@ pub use mixing::{attenuation, bus_table, ears_3d, mixer_pair, side};
 
 mod bf1_heroes;
 mod hero;
+pub mod overheat;
 mod playback;
 mod walker;
 
@@ -573,6 +574,8 @@ enum LoopSource {
     Buff(core::unit::UnitHandle, usize),
     WalkerFire(core::unit::UnitHandle, usize),
     WalkerSpin(core::unit::UnitHandle, usize),
+    /// A weapon's overheat loop ([`overheat`]), by unit and weapon class.
+    Overheat(core::unit::UnitHandle, usize),
 }
 
 struct LoopRequest {

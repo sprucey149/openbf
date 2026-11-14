@@ -5,9 +5,9 @@ use super::WeaponState;
 use crate::fmath::FloatExt;
 
 use super::{
-    pair, pf, pf_hash, Falloff, OrdBlend, OrdKind, OrdnanceClass, PropSource, WeaponClass, DEG,
-    HASH_ZOOM_SPREAD, SNIPER_LOCK_ON_ANGLE, SNIPER_LOCK_ON_RANGE, TARGET_SOLDIER_KINDS,
-    TIGHT_HOLD_CAP, TIGHT_HOLD_SECS, TIGHT_HOLD_SECS_AI,
+    pair, pf, pf_hash, Falloff, OrdBlend, OrdKind, OrdnanceClass, OverheatSound, PropSource,
+    WeaponClass, DEG, HASH_ZOOM_SPREAD, SNIPER_LOCK_ON_ANGLE, SNIPER_LOCK_ON_RANGE,
+    TARGET_SOLDIER_KINDS, TIGHT_HOLD_CAP, TIGHT_HOLD_SECS, TIGHT_HOLD_SECS_AI,
 };
 
 impl WeaponClass {
@@ -196,6 +196,7 @@ impl WeaponClass {
             reload_sound: Some("all_weap_inf_reload_med".into()),
             empty_sound: Some("com_weap_inf_ammo_empty".into()),
             change_sound: Some("all_weap_inf_equip_med".into()),
+            overheat_sound: None,
             // re-muzzle-flash §2's BF1 Alliance rifle row.
             thrown: None,
             offhand_weapon: false,
@@ -301,6 +302,7 @@ impl WeaponClass {
             reload_sound: Some("com_weap_inf_reload_med".into()),
             empty_sound: Some("com_weap_inf_ammo_empty".into()),
             change_sound: Some("com_weap_inf_equip_med".into()),
+            overheat_sound: None,
             // `com_weap_inf_rifle`'s ScoreForMedalsType (the rifle award).
             medals_type: Some(1),
             // re-muzzle-flash §2's BF2 Republic rifle row.
@@ -583,6 +585,10 @@ impl WeaponClass {
         w.reload_sound = src.prop("ReloadSound").map(|s| s.trim().to_owned());
         w.empty_sound = src.prop("FireEmptySound").map(|s| s.trim().to_owned());
         w.change_sound = src.prop("WeaponChangeSound").map(|s| s.trim().to_owned());
+        w.overheat_sound = src.prop("OverheatSound").map(|s| OverheatSound {
+            name: s.trim().to_owned(),
+            pitch: pf(src, "OverheatSoundPitch").unwrap_or(1.0),
+        });
         w
     }
 

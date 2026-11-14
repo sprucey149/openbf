@@ -146,6 +146,35 @@ pub const TIGHT_HOLD_CAP: f32 = 6.0 * DEG;
 /// no disc class authors one).
 pub const HASH_ZOOM_SPREAD: [u32; 3] = [0x5BC0_137F, 0x67BF_C1D7, 0x7D9D_A8BD];
 
+/// `OverheatSound` (B1 class+0x130, B2 +0x164) and `OverheatSoundPitch`
+/// (B1 +0x138, B2 +0x16c; the class ctor's 1.0, B2 `FUN_00327e98`
+/// B2:307305). The weapon's idle state starts the loop on its handle when
+/// it is entered overheated (B1 `FUN_00284a58` B1:208452-208468, B2
+/// `FUN_003269f8` B2:306172-306192), sets its rate every update while the
+/// overheat holds and stops it the update the overheat clears (B1
+/// `FUN_00284b80` B1:208499-208509, B2 `FUN_00326b28` B2:306225-306236). Played for every unit, at the
+/// owner's position (`analysis/re-weapon-sounds.md` §5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverheatSound {
+    pub name: String,
+    pub pitch: f32,
+}
+
+impl OverheatSound {
+    /// The loop's rate over its sound's own: `OverheatSoundPitch` the update
+    /// it starts, then ((1 - f) x pitch + f) with f = HeatThreshold / heat,
+    /// rising to 1 as the heat falls to the threshold. BF2 reads f as
+    /// (max - thr) / (max - cur) of its heat component, the same at max 1
+    /// (`analysis/re-heat-hud.md` §3).
+    pub fn rate(&self, starting: bool, threshold: f32, heat: f32) -> f32 {
+        if starting || heat <= 0.0 {
+            return self.pitch;
+        }
+        let f = threshold / heat;
+        (1.0 - f) * self.pitch + f
+    }
+}
+
 /// One charge stage of a [`WeaponClass`]: from `threshold` (the charge it
 /// must exceed) the shot is `class`'s; `index` is its own entry in
 /// `Sim::weapon_classes` (`usize::MAX` until registered), which its rounds
@@ -327,6 +356,10 @@ pub struct WeaponClass {
     pub reload_sound: Option<String>,
     pub empty_sound: Option<String>,
     pub change_sound: Option<String>,
+    /// The loop played while the weapon sits overheated
+    /// ([`OverheatSound`]); `None` on a class that authors no
+    /// `OverheatSound`.
+    pub overheat_sound: Option<OverheatSound>,
     /// The muzzle flash's look (card FXMF, `analysis/re-muzzle-flash.md`):
     /// render-only, replayed from the class chain by the class loader.
     /// `None` = none drawn (a sabre, a thrown weapon, a test class).
@@ -535,6 +568,7 @@ impl Default for WeaponClass {
             reload_sound: None,
             empty_sound: None,
             change_sound: None,
+            overheat_sound: None,
             flash: None,
             thrown: None,
             offhand_weapon: false,
@@ -669,7 +703,8 @@ pub struct WeaponState {
     /// release edge, 0 idle.
     pub fire_cmd: i32,
     /// This update began in [`FireState::Idle`]. Only [`Self::press_clicks`]
-    /// reads it, after the update that wrote it, so it stays out of the hash.
+    /// and [`Self::entered_idle`] read it, after the update that wrote it, so
+    /// it stays out of the hash.
     began_idle: bool,
     pub remote_press: u8,
     pub force_channel: Option<crate::hero_weapon::ForceChannel>,
@@ -904,6 +939,12 @@ impl WeaponState {
 
     pub fn reloading(&self) -> bool {
         self.reload_timer > 0.0
+    }
+
+    /// The last update ended a fire cycle: it began firing and ends idle,
+    /// the update the PS2 enters its idle state (B1 `FUN_00284a58`).
+    pub fn entered_idle(&self) -> bool {
+        !self.began_idle && self.state == FireState::Idle
     }
 
     /// A charge weapon's charge while the trigger is held, 0..1; `None` when it
