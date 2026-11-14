@@ -66,6 +66,27 @@ Sim::space_round().
 
 ## Named remaining differences
 
+- **Combat speeder paired fire (checked 2026-11-14).** The V-25
+  (`all_hover_combatspeeder`) exists in both games. BF1 authors
+  `ShotsPerSalvo = 2` for the pilot's `cannon1` blasters and `missile`;
+  their BF2 twins use one. The shared rule deliberately sets both BF1
+  weapons to one, so consecutive shots alternate their two muzzle points.
+  This is the salvo override in `normalize/vehicles.rs`, rather than a
+  class-load collision or a muzzle-ring fault. The maintainer confirmed
+  BF2 precedence for shared vehicles; keep this pattern. [V] Original BF1
+  slot 10, SLUS-20898 / CRC 503BF9E1, converted into a separate emucap
+  state: R1 held 8 frames shows both blaster bolts together; independently
+  restoring, waiting 180 frames for reload and holding L1 8 frames shows
+  both missile launches together. Local captures are
+  `engine/artifacts/v25-reference-primary.png` and
+  `engine/artifacts/v25-reference-secondary.png` (game data, not committed).
+  Static mechanics: [blaster damage](re-blaster-damage.md) lists the BF2
+  cannon constructor `FUN_003304e0`'s one-shot default (B2:312370 onward)
+  and the per-projectile ring advance `FUN_00301d28` / BF1 `FUN_0026d198`
+  (see that note's multi-barrel ring evidence). Port source checked at
+  `504729a74dc1` plus the existing dirty vehicle-parity tree; black box
+  `last.json`, tat1/con, exit tick 564, identifies the same dirty build.
+  No gameplay code changed. BF2 emulator firing comparison remains unchecked.
 - **Projectile behavior.** Guns retain BF1 art, sounds, speed, lifetime and
   blast radii. The fighter-tank secondary is a 40 m/s BF1 bullet and an
   80 m/s BF2 missile with zero authored turn rate. The on-foot BF1 torpedo
