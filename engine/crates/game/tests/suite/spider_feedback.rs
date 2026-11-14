@@ -158,3 +158,65 @@ fn spider_death_has_no_collapse_clip_but_finishes_the_current_step() {
         eprintln!("{key}: walking={walking}, destruction after {end} ticks");
     }
 }
+
+/// The Spider's beam is drawn from its turret's barrel as the turret turns
+/// (playtest 2026-11-14, both Geonosis maps: "the beam is not following the
+/// piece that shoots it, instead coming from the air"). The PS2 re-reads a
+/// seat beam's origin from its fire point every frame (B2 `FUN_00311d00`).
+/// The sim's origin is the seat's rest point: on BF2 it stays put, on BF1 it
+/// swings the other way, 2.6 m off the barrel at 0.6 rad. Mutation:
+/// `walker_shots::beam_muzzle` returning `Beam::origin` -> both maps fail.
+#[test]
+fn spider_beam_leaves_the_turned_turret() {
+    for key in ["bf1_geo1", "bf2_geo1"] {
+        let (mut m, spec) = spider_map(key);
+        let h = m.walk.sim.spawn_vehicle(&spec);
+        let player = m.walk.player;
+        assert!(m.walk.sim.seat_unit(player, h, 0));
+        let mut samples = 0;
+        for yaw in [0.6f32, -0.5] {
+            let w = &mut m.walk.sim.vehicle_mut(h).unwrap().walker;
+            (w.aim_yaw, w.aim_pitch) = (yaw, -0.1);
+            for _ in 0..60 {
+                m.walk.step_tick(&[PadState::default()]);
+            }
+            for button in [buttons::FIRE, buttons::SECONDARY_FIRE] {
+                for _ in 0..10 {
+                    m.walk.step_tick(&[PadState {
+                        buttons: button,
+                        ..Default::default()
+                    }]);
+                }
+                let v = m.walk.sim.vehicle(h).unwrap().clone();
+                for b in m
+                    .walk
+                    .sim
+                    .beams
+                    .iter()
+                    .filter(|b| b.shooter.owner == player)
+                {
+                    let muzzle = game::walker_shots::beam_muzzle(&m.walk, b).unwrap();
+                    let barrel =
+                        game::walker_shots::frame(&m.walk, player, b.shooter.weapon_class, 0)
+                            .unwrap()
+                            .w_axis
+                            .truncate();
+                    assert!(
+                        muzzle.distance(barrel) < 1e-4,
+                        "{key}: {muzzle} vs {barrel}"
+                    );
+                    let local = v.rot.inverse() * (muzzle - v.pos);
+                    assert!(
+                        local.x * yaw.signum() > 1.0,
+                        "{key}, aim {yaw}: barrel at {local}"
+                    );
+                    samples += 1;
+                }
+                for _ in 0..90 {
+                    m.walk.step_tick(&[PadState::default()]);
+                }
+            }
+        }
+        assert!(samples >= 2, "{key}: {samples} beam samples");
+    }
+}

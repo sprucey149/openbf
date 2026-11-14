@@ -762,7 +762,8 @@ impl BoltVis {
                             (*p - beam.origin).cross(beam.dir).length_squared() >= width * width
                         })
                         .unwrap_or_else(|| beam.origin - u.aim_frame().2 * (2.0 * width))
-                });
+                })
+                .or_else(|| crate::walker_shots::beam_muzzle(walk, beam));
             out.push(beam_draw(look, beam, [core, beam_glow], muzzle));
         }
         for tow in &walk.sim.tow_cables {

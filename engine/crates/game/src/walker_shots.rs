@@ -129,6 +129,21 @@ pub fn frame(walk: &WalkSim, unit: UnitHandle, class: usize, shot: u64) -> Optio
     Some(Mat4::from_rotation_translation(v.rot, v.pos) * rig.node_now(v, scale, name)?)
 }
 
+/// Where a walker seat's beam leaves its drawn barrel: the firing weapon's
+/// fire point on the animated model, as the PS2 re-reads the beam's origin
+/// from that fire point every frame (B2 `FUN_00311d00`, B2:303166-303185).
+/// The sim's `Beam::origin` is the seat's rest-pose point, which neither
+/// turns with the turret nor rides the walk (playtest 2026-11-14, the Spider
+/// on both Geonosis maps: "the beam is not following the piece that shoots
+/// it"). `None` once its gunner left that seat.
+pub fn beam_muzzle(walk: &WalkSim, beam: &core::sim::Beam) -> Option<glam::Vec3> {
+    let s = beam.seat?;
+    let owner = beam.shooter.owner;
+    (walk.sim.unit(owner)?.mount? == s.mount).then_some(())?;
+    let point = u64::from(s.point.unwrap_or(0));
+    frame(walk, owner, beam.shooter.weapon_class, point).map(|m| m.w_axis.truncate())
+}
+
 /// The fire loops sounding at full or rising level this tick, by unit,
 /// weapon class, sound and place ([`voices`] without the spin motors and
 /// the fading loops).
