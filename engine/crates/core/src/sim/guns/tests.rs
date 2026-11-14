@@ -175,6 +175,7 @@ fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup 
         framed: false,
         aimer_bind: glam::Quat::IDENTITY,
         weapon_aimer: None,
+        follows_owner: false,
         gunner: None,
     }
 }

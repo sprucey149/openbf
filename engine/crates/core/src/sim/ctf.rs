@@ -545,6 +545,7 @@ mod tests {
                 framed: false,
                 aimer_bind: glam::Quat::IDENTITY,
                 weapon_aimer: None,
+                follows_owner: false,
                 gunner: None,
             })],
         })];

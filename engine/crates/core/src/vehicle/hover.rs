@@ -460,6 +460,10 @@ pub struct ChaseSection {
     pub center: Vec3,
     pub offset: Vec3,
     pub tilt: f32,
+    /// A walker gunner seat's `MountPos` (model space): with no turret node
+    /// its aim frame, and so its camera, stands there (B2 `FUN_0026cea0`
+    /// B2:188710); `None` = the model's origin.
+    pub mount: Option<Vec3>,
 }
 
 impl ChaseSection {

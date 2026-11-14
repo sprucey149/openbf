@@ -126,6 +126,7 @@ pub struct VehicleVisuals {
     posed: std::collections::HashMap<usize, PosedMeshes<u32>>,
     /// Each hover's fin numbers (card VPOSE), stepped with the sim.
     hover_nines: super::turret_pose::HoverClocks,
+    kicks: super::walker_aim::BarrelKicks,
     /// Each class's treads ([`Self::set_treads`]) and each hover's offsets.
     treads: Vec<Vec<Tread>>,
     tread_clocks: super::treads::TreadClocks,
@@ -420,6 +421,7 @@ impl VehicleVisuals {
             shadow_triangles: Vec::new(),
             posed: Default::default(),
             hover_nines: Default::default(),
+            kicks: Default::default(),
             treads: Vec::new(),
             tread_clocks: Default::default(),
             tick_share: 1.0,
@@ -539,6 +541,7 @@ impl VehicleVisuals {
         self.hover_nines
             .step(sim, sim.ground_rules == core::soldier::GroundRules::Bf2);
         self.tread_clocks.step(sim, &self.treads);
+        self.kicks.step(sim);
         // A dying walker is still live: it draws its death clip.
         let live = sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive);
         for (slot, v) in live {
@@ -550,6 +553,10 @@ impl VehicleVisuals {
                 .iter()
                 .find(|(h, _)| h.index as usize == slot && h.gen == v.gen)
                 .map(|&(_, o)| render::Fade::see_through(visibility_opacity(walker, o)));
+            let kicks = &self.kicks;
+            let kick = |seat: usize, weapon: usize, point: u64, len: u64| {
+                kicks.state(sim.tick, slot, v.gen, seat, weapon, point, len)
+            };
             let palette = class.skin.as_ref().and_then(|sk| {
                 if v.kind == core::vehicle::VehicleKind::Flyer {
                     let nine = super::turret_pose::flyer_nine(sim, v);
@@ -560,7 +567,7 @@ impl VehicleVisuals {
                         .hover_nines
                         .get(slot, v.gen)
                         .map(super::turret_pose::HoverNine::pose);
-                    return Some(sk.rig.hover_palette(v, nine));
+                    return Some(sk.rig.hover_palette_kicked(v, nine, &kick));
                 }
                 if !walker {
                     return None;
@@ -570,7 +577,7 @@ impl VehicleVisuals {
                     .get(v.class as usize)
                     .and_then(Option::as_ref)
                     .map_or(1.0, |p| p.root_scale);
-                Some(sk.rig.aimed_palette(v, scale))
+                Some(sk.rig.aimed_palette_kicked(v, scale, &kick))
             });
             let posed = match (&class.skin, &palette) {
                 (Some(skin), Some(palette)) => {

@@ -1052,6 +1052,7 @@ fn a_driven_hovers_aim_ray_leaves_the_chase_camera() {
         center: Vec3::new(0.0, 2.5, -6.0),
         offset: Vec3::ZERO,
         tilt: 5.0 * 0.017_453_294,
+        mount: None,
     };
     let eye = v.pos + v.rot * Vec3::new(0.0, 1.0, 0.0);
     let o = barc.ray_origin(&v, 0.0, eye, fwd);
@@ -1060,6 +1061,7 @@ fn a_driven_hovers_aim_ray_leaves_the_chase_camera() {
         center: Vec3::new(0.0, 2.0, -5.0),
         offset: Vec3::new(0.0, 0.5, 6.0),
         tilt: 7.0 * 0.017_453_294,
+        mount: None,
     };
     let o = ift.ray_origin(&v, 0.0, eye, fwd);
     let cam = ift.camera(&v, 0.0);

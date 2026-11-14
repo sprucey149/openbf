@@ -310,6 +310,12 @@ pub struct GunSetup {
     /// (`PitchLimits`, re-hover §5.1 I11). The IFT-X looks over -8..25 deg and
     /// its cannons turn over -30..90 deg (`analysis/re-hover-camera.md`).
     pub weapon_aimer: Option<Aimer>,
+    /// The seat looks along its owner's eye (BF2 key 0x865061fc, K+0x84c):
+    /// the turret tick takes the owner's E+0x350 direction into model space
+    /// instead of its own angles (B2 `FUN_0026cea0` B2:188899-188939). PS2
+    /// RAM (BF2 AT-ST, passenger seated): that direction is the walker's aim
+    /// (E+0x50c, E+0x510) to 1e-6 rad.
+    pub follows_owner: bool,
     /// A building turret's drawn gunner: where his body stands
     /// ([`GunnerSeat`]); `None` = at the model's origin.
     pub gunner: Option<GunnerSeat>,
@@ -711,6 +717,7 @@ mod tests {
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
             weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         };
         let b = g.bind_yaw();
@@ -760,6 +767,7 @@ mod tests {
             framed: false,
             aimer_bind: glam::Quat::from_rotation_y(std::f32::consts::PI),
             weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         };
         let aim = g.aim_of((0.0, 0.0), (0.0, 0.0));

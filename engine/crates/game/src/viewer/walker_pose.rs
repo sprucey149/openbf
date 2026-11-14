@@ -103,7 +103,17 @@ impl WalkerRig {
         v: &core::vehicle::Vehicle,
         nine: Option<super::turret_pose::NinePose>,
     ) -> Vec<Mat4> {
-        self.aimed(self.fin_palette(nine), v)
+        self.hover_palette_kicked(v, nine, &super::walker_aim::at_rest)
+    }
+
+    /// [`Self::hover_palette`] with each barrel slid back by `kick`.
+    pub fn hover_palette_kicked(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        self.aimed(self.fin_palette(nine), v, kick)
     }
 
     /// A flyer's pose (BF2 FUN_00201300 B2:114581-114690, BF1 FUN_001d8620
@@ -282,13 +292,28 @@ impl WalkerRig {
     }
 
     pub fn aimed_palette(&self, v: &core::vehicle::Vehicle, root_scale: f32) -> Vec<Mat4> {
-        self.aimed(self.palette(&v.walker, root_scale), v)
+        self.aimed_palette_kicked(v, root_scale, &super::walker_aim::at_rest)
+    }
+
+    /// [`Self::aimed_palette`] with each barrel slid back by `kick`.
+    pub fn aimed_palette_kicked(
+        &self,
+        v: &core::vehicle::Vehicle,
+        root_scale: f32,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        self.aimed(self.palette(&v.walker, root_scale), v, kick)
     }
 
     /// `palette` with the seats' turret, aimer and barrel writers applied.
-    fn aimed(&self, palette: Vec<Mat4>, v: &core::vehicle::Vehicle) -> Vec<Mat4> {
+    fn aimed(
+        &self,
+        palette: Vec<Mat4>,
+        v: &core::vehicle::Vehicle,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
         let walk = self.bind_nodes(&palette);
-        let now = self.aim.pose(&self.skeleton, &walk, v);
+        let now = self.aim.pose_kicked(&self.skeleton, &walk, v, kick);
         now.iter()
             .enumerate()
             .map(|(n, m)| {

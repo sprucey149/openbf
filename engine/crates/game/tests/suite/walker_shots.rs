@@ -855,3 +855,97 @@ mod non_wind_up_loops {
         }
     }
 }
+
+/// BF2's AT-ST passenger seat has no turret node: its aim frame stands on
+/// `MountPos` 0 8 0 and looks along the walker's aim (key 0x865061fc). PS2
+/// RAM (an AT-ST passenger state): the aim frame at the walker's origin +
+/// (0, 8, 0) along the walker's aim, TrackCenter 0 0 0 and TrackOffset 0 1 5.
+#[test]
+#[ignore = "requires local BF2 Hoth assets"]
+fn atst_passenger_looks_from_over_the_walker_and_fires_its_rocket_forward() {
+    let root = game::assets::baked_root();
+    let (mut w, _) = walker_battle::battle_on(&root, "bf2_hot1", "bf2_hot1_con").unwrap();
+    let class = w
+        .vehicle_classes
+        .iter()
+        .position(|c| c == "imp_walk_atst_snow")
+        .unwrap();
+    let mut spec = w
+        .sim
+        .vehicle_pads
+        .iter()
+        .find_map(|pad| {
+            let class_spec = pad
+                .def
+                .classes
+                .iter()
+                .flatten()
+                .find(|c| c.spec.class as usize == class)?;
+            let mut spec = class_spec.spec.clone();
+            spec.pos = pad.def.pos;
+            spec.yaw = pad.def.yaw;
+            Some(spec)
+        })
+        .unwrap();
+    spec.home_team = Some(w.sim.unit(w.player).unwrap().team);
+    let h = w.sim.spawn_vehicle(&spec);
+    let g = w.sim.seat_setup[class].as_ref().unwrap().guns[1]
+        .clone()
+        .unwrap();
+    assert_eq!(g.pivot, Vec3::new(0.0, 8.0, 0.0));
+    assert!(g.follows_owner);
+    let seat = &w.vehicle_seats[class][1];
+    assert_eq!(seat.track_center, Some([0.0, 0.0, 0.0]));
+    assert_eq!(seat.track_offset, Some([0.0, 1.0, 5.0]));
+    assert!(w.sim.seat_unit(w.player, h, 1));
+    let i = h.index as usize;
+    w.sim.vehicles[i].walker.aim_pitch = -0.0412;
+    for _ in 0..120 {
+        w.step_tick(&[PadState::default()]);
+    }
+    let v = w.sim.vehicle(h).unwrap().clone();
+    let look = v.guns[1].as_ref().unwrap().look;
+    assert_eq!(look, (v.walker.aim_yaw, v.walker.aim_pitch));
+    let cam = w.camera();
+    let up = cam.position - v.pos;
+    let fwd = v.rot * Vec3::Z;
+    eprintln!("camera {:?} above {} ahead {}", up, up.y, up.dot(fwd));
+    let down = 9f32.to_radians() + 0.0412;
+    let (sin, cos) = down.sin_cos();
+    assert!(
+        (up.y - (8.0 + 5.0 * sin + cos)).abs() < 0.01,
+        "camera {} above the walker",
+        up.y
+    );
+    assert!(
+        (up.dot(fwd) + 5.0 * cos - sin).abs() < 0.01,
+        "camera {} along",
+        up.dot(fwd)
+    );
+    let mut rocket = None;
+    for _ in 0..90 {
+        w.step_tick(&[PadState {
+            buttons: buttons::FIRE,
+            ..Default::default()
+        }]);
+        if let Some(r) = w.sim.guided.iter().find(|r| r.owner == w.player) {
+            rocket = Some((r.pos, r.vel, r.rot));
+            break;
+        }
+    }
+    let (pos, vel, rot) = rocket.expect("the passenger launched a rocket");
+    let v = w.sim.vehicle(h).unwrap();
+    let local = v.rot.inverse() * (pos - v.pos);
+    let dir = v.rot.inverse() * (rot * Vec3::Z);
+    eprintln!("rocket at {local:?} vel {vel:?} heading {dir:?}");
+    let reargun = Vec3::new(-1.4377458, 6.727805, 1.3313735);
+    let spawn = Vec3::new(2.0, -3.0, 11.0);
+    assert!(
+        local.abs_diff_eq(reargun + spawn, 0.01),
+        "rocket leaves {local:?}, not aimer_Reargun + the spawn offset"
+    );
+    assert!(
+        dir.z > 0.95 && dir.y > -0.2,
+        "rocket heads {dir:?} in the walker's frame"
+    );
+}

@@ -116,7 +116,7 @@ fn a_walker_section_keeps_its_aimer_camera_and_seat_keys() {
     assert_eq!(gun.eye_point_offset, Some([1.0, 2.0, 3.0]));
     assert_eq!(
         (pilot.track_center, gun.track_center),
-        (None, Some([0.0, 3.0, -7.0]))
+        (Some([0.0, 9.0, 0.0]), Some([0.0, 3.0, -7.0]))
     );
     assert_eq!(
         (pilot.third_person_fov, gun.third_person_fov),

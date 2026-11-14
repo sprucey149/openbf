@@ -99,6 +99,7 @@ fn a_full_ground_cable_releases_then_damages_on_separate_updates() {
                 framed: false,
                 aimer_bind: Quat::IDENTITY,
                 weapon_aimer: None,
+                follows_owner: false,
                 gunner: None,
             })],
         })];

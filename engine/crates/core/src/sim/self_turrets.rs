@@ -787,6 +787,7 @@ mod tests {
                 framed: true,
                 aimer_bind: Quat::IDENTITY,
                 weapon_aimer: None,
+                follows_owner: false,
                 gunner: None,
             })],
         })];

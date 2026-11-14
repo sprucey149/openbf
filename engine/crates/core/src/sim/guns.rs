@@ -258,7 +258,11 @@ impl Sim {
                 .flatten();
             return match section.filter(|_| framed) {
                 Some(c) => {
-                    let at = if g.framed { g.pivot } else { Vec3::ZERO };
+                    let at = if g.framed {
+                        g.pivot
+                    } else {
+                        c.mount.unwrap_or(Vec3::ZERO)
+                    };
                     c.gunner_ray_origin(v, at, look, eye, dir)
                 }
                 None => eye,
@@ -406,8 +410,14 @@ impl Sim {
             };
             st.look.1 = (st.look.1 + ry * a.pitch_rate * dt).clamp(a.pitch[0], a.pitch[1]);
         }
-        if p.has_look() && !walker && !flyer {
+        if p.has_look() && !walker && !flyer && !g.follows_owner {
             st.look = super::look::seat_look(&g, st.look, p.look(), st.zoom);
+        }
+        if g.follows_owner {
+            // After the turn law, as the PS2 swaps the direction in after
+            // its angles (B2 `FUN_0026cea0` B2:188899): the walker's aim.
+            let w = &self.vehicles[vi].walker;
+            st.look = (w.aim_yaw, w.aim_pitch);
         }
 
         // The camera ray and the aimer (zoomed, from the zoomed eye). A bot

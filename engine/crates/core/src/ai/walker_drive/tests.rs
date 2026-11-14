@@ -597,6 +597,7 @@ fn command_drop_hub_exits_for_tickets_or_last_crew() {
                 framed: false,
                 aimer_bind: glam::Quat::IDENTITY,
                 weapon_aimer: None,
+                follows_owner: false,
                 gunner: None,
             })];
             for i in 1..alive {
@@ -1130,6 +1131,7 @@ fn endgame_walker_crews_board_at_most_once_each_in_two_minutes() {
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
             weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         })];
         let mut crew = vec![first];

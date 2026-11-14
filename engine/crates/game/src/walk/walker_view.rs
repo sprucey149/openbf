@@ -103,6 +103,17 @@ impl WalkSim {
         let model = Mat4::from_rotation_translation(v.rot, v.pos);
         let frame = if mount.seat == 0 {
             model * crate::viewer::turret_pose::turret_node(&Mat4::IDENTITY, look.0, -look.1)
+        } else if let Some(mount) = seat.mount_pos.filter(|_| seat.turret_node.is_none()) {
+            // No turret node: the aim frame stands on `MountPos` (B2:188710),
+            // and the camera section hangs off it (re-turret-draw 4). PS2
+            // RAM (BF2 AT-ST passenger): TrackCenter 0 0 0, TrackOffset 0 1 5,
+            // the aim frame at the walker's origin + (0, 8, 0).
+            model
+                * crate::viewer::turret_pose::turret_node(
+                    &Mat4::from_translation(Vec3::from(mount)),
+                    look.0,
+                    -look.1,
+                )
         } else if let Some(rig) = self
             .walker_rigs
             .get(v.class as usize)

@@ -785,6 +785,7 @@ pub fn install_for_mission(
                 center: s.center,
                 offset: s.offset,
                 tilt: s.tilt,
+                mount: None,
             })
         })
         .collect();
@@ -800,6 +801,7 @@ pub fn install_for_mission(
                 center: c.0,
                 offset: c.1,
                 tilt: c.2.to_radians(),
+                mount: None,
             })
         })
         .collect();
@@ -820,6 +822,7 @@ pub fn install_for_mission(
                             center: f.center,
                             offset: f.offset,
                             tilt: f.tilt,
+                            mount: None,
                         }
                     } else {
                         let c = crate::walk::walker_section(s);
@@ -827,6 +830,7 @@ pub fn install_for_mission(
                             center: c.0,
                             offset: c.1,
                             tilt: c.2.to_radians(),
+                            mount: s.mount_pos.map(Vec3::from),
                         }
                     })
                 })
@@ -1011,6 +1015,18 @@ pub fn install_for_mission(
                         turret_law(&mut g, s, game == "bf2");
                         if building {
                             g.gunner = gunner_seat(m, c, s, game == "bf2");
+                        }
+                        if walker {
+                            // The aim frame stands on the turret's bind
+                            // position, which `MountPos` writes when no
+                            // later `TurretNodeName` does (B2:188710): the
+                            // AT-ST passenger's eye, ray and camera hang 8 m
+                            // up, not at the feet. PS2 RAM (BF2 AT-ST): the
+                            // aim frame is the walker's origin + (0, 8, 0).
+                            if let Some(p) = s.mount_pos {
+                                g.pivot = Vec3::from(p);
+                            }
+                            g.follows_owner = game == "bf2" && s.follows_owner;
                         }
                         if walker && !g.framed {
                             if let Some(axes) = s
@@ -1493,6 +1509,7 @@ pub fn seat_gun(
                     s.aimer_pitch_rate,
                 )
             }),
+        follows_owner: false,
         gunner: None,
     })
 }
@@ -1520,7 +1537,24 @@ fn fire_ring(
     let (mut points, mut limits, mut pivots) = (Vec::new(), Vec::new(), Vec::new());
     let mut carried = [[0.0; 2]; 2];
     let mut lone = true;
-    for a in s.aimers.iter().filter(|a| a.weapon == weapon) {
+    // The aimers named before the section's WeaponName are the first
+    // weapon's on the PS2: WeaponName starts no aimer (B2 FUN_00270540
+    // B2:190899 -> LAB_00270bb4 stores only the class). OURS: they join the
+    // ring only where the weapon has no ring and the seat no
+    // `FirePointName` (BF2's AT-ST passenger, whose rocket otherwise left
+    // from the model's origin under the ground); trace: the AT-AT's
+    // aimer_head and the seats whose ring is their fire point.
+    let stranded = weapon == 0
+        && s.fire_point.is_none()
+        && !s
+            .aimers
+            .iter()
+            .any(|a| a.weapon == weapon && !a.muzzles().is_empty());
+    for a in s
+        .aimers
+        .iter()
+        .filter(|a| a.weapon == weapon || (stranded && a.weapon == usize::MAX))
+    {
         let own = [lim(a.yaw), lim(a.pitch)];
         if a.no_fire {
             carried = add(carried, own);

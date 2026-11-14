@@ -251,6 +251,8 @@ enum Scope {
 
 const SLOW_OFFSET: u32 = 0x5dbc_abb0;
 const FAST_OFFSET: u32 = 0x8d0c_fc36;
+const MOUNT_POS: u32 = 0xf2aa_4a90;
+const FOLLOWS_OWNER: u32 = 0x8650_61fc;
 const FAST_FOV: u32 = 0xaaa6_d95c;
 
 fn h(name: &str) -> u32 {
@@ -690,6 +692,16 @@ pub struct SeatSpec {
     /// `PitchLimits` (degrees, "lo hi") and `YawRate` / `PitchRate` (rad/s).
     pub fire_point: Option<String>,
     pub turret_node: Option<String>,
+    /// `MountPos` (0xf2aa4a90, x y z): writes the turret's bind position,
+    /// the field `TurretNodeName` also writes (K+0x7f0, B2 `FUN_00270540`
+    /// B2:190883-190888), so the later of the two wins. The turret tick
+    /// builds its aim frame there (B2 `FUN_0026cea0` B2:188710): the AT-ST's
+    /// passenger seat has no turret node and authors 0 8 0.
+    pub mount_pos: Option<[f32; 3]>,
+    /// Key 0x865061fc (BF2 K+0x84c, B2:191006-191009): the turret takes its
+    /// direction from its owner's eye (E+0x350) instead of its own angles
+    /// (B2 `FUN_0026cea0` B2:188899-188939). On BF2's AT-ST passenger seat.
+    pub follows_owner: bool,
     pub yaw_limits: Option<[f32; 2]>,
     pub pitch_limits: Option<[f32; 2]>,
     pub yaw_rate: Option<f32>,
@@ -824,6 +836,8 @@ impl SeatSpec {
             weapons: Vec::new(),
             fire_point: None,
             turret_node: None,
+            mount_pos: None,
+            follows_owner: false,
             yaw_limits: None,
             pitch_limits: None,
             yaw_rate: None,
@@ -867,10 +881,35 @@ impl SeatSpec {
         } else if k == h("AimerNodeName") {
             match self.aimers.last_mut() {
                 Some(a) if a.unnamed() && a.weapon == weapon => a.name(v),
-                _ => self.aimers.push(AimerSpec::new(v, weapon)),
+                _ => {
+                    // The section's first aimer takes the aimer limits
+                    // authored before it: every aimer key lands in the
+                    // current section's aimer (B2 FUN_00270540 B2:191043),
+                    // whatever its order. Only BF2's AT-ST passenger seat
+                    // authors them first (0 0 / 0 0, then aimer_Reargun).
+                    let mut a = AimerSpec::new(v, weapon);
+                    if self.aimers.is_empty() {
+                        a.yaw = self.aimer_yaw_limits.unwrap_or(a.yaw);
+                        a.pitch = self.aimer_pitch_limits.unwrap_or(a.pitch);
+                    }
+                    self.aimers.push(a);
+                }
             }
         } else if let Some(a) = self.aimers.last_mut() {
             a.set(k, v);
+        } else if k == h("BarrelNodeName") {
+            // Both setters write every aimer key into the aimer of the
+            // current WEAPONSECTION (B1 FUN_00225cd8 B1:138820, B2
+            // FUN_00270540 B2:191043; the index starts at 0 and only
+            // WEAPONSECTION moves it, B1:138882, B2:190865), so a barrel
+            // authored before the section's WeaponName (BF2's AAT turret:
+            // recoil_3, then hp_cannon_1) is that weapon's aimer's. OURS:
+            // only a barrel starts that aimer here; trace: the other aimer
+            // keys authored before a WeaponName (the census moves 12 seats'
+            // fire rings and the AT-ST's aimer_Reargun limits with them).
+            let mut a = AimerSpec::new("", weapon);
+            a.set(k, v);
+            self.aimers.push(a);
         }
         if k == h("PilotType") {
             if let Some(t) = PilotType::parse(v) {
@@ -889,7 +928,14 @@ impl SeatSpec {
         } else if k == h("IsPilotExposed") {
             self.pilot_exposed = float(v).is_none_or(|x| x != 0.0);
         } else if k == h("EyePointOffset") {
+            // One key, two fields: the camera section's setter stores the
+            // eye and the TrackCenter both (B1 FUN_001b6168 B1:59571-59578,
+            // B2 FUN_001d0328 B2:78787-78794), so a TrackCenter authored
+            // before it is lost.
             self.eye_point_offset = floats::<3>(v);
+            if self.eye_point_offset.is_some() {
+                self.track_center = self.eye_point_offset;
+            }
         } else if k == h("TrackCenter") {
             self.track_center = floats::<3>(v);
         } else if k == h("TrackOffset") {
@@ -924,12 +970,21 @@ impl SeatSpec {
                     class: v.trim().to_string(),
                     ammo: 0,
                 });
-                self.aimers.push(AimerSpec::new("", self.weapons.len() - 1));
+                let weapon = self.weapons.len() - 1;
+                match self.aimers.last_mut() {
+                    Some(a) if a.unnamed() && a.weapon == usize::MAX => a.weapon = weapon,
+                    _ => self.aimers.push(AimerSpec::new("", weapon)),
+                }
             }
         } else if k == h("FirePointName") {
             self.fire_point = Some(v.trim().to_string());
         } else if k == h("TurretNodeName") {
             self.turret_node = Some(v.trim().to_string());
+            self.mount_pos = None;
+        } else if k == MOUNT_POS {
+            self.mount_pos = floats::<3>(v);
+        } else if k == FOLLOWS_OWNER {
+            self.follows_owner = float(v).is_some_and(|x| x != 0.0);
         } else if k == h("YawLimits") {
             self.yaw_limits = floats::<2>(v);
         } else if k == h("PitchLimits") {
