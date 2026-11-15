@@ -1547,8 +1547,8 @@ fn fire_ring(
     let mut carried = [[0.0; 2]; 2];
     let mut lone = true;
     // The aimers named before the section's WeaponName are the first
-    // weapon's on the PS2: WeaponName starts no aimer (B2 FUN_00270540
-    // B2:190899 -> LAB_00270bb4 stores only the class). OURS: they join the
+    // weapon's on the PS2. WeaponName sets the weapon class
+    // (B2 FUN_00270540, B2:190899). OURS: the aimers join the
     // ring only where the weapon has no ring and the seat no
     // `FirePointName` (BF2's AT-ST passenger, whose rocket otherwise left
     // from the model's origin under the ground); trace: the AT-AT's

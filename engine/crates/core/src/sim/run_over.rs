@@ -27,7 +27,7 @@ impl Sim {
     /// to unit `i`. Run before the soldier's wall pass pushes him out.
     pub(super) fn vehicle_impacts(&mut self, i: usize, cap: &Capsule) {
         let u = &self.units[i];
-        if !u.alive || u.is_player && self.cheats.invincible {
+        if !u.alive || u.is_player && self.cheats_of(u).invincible {
             return;
         }
         for (vh, normal) in self.collision.soldier_hull_contacts(cap) {

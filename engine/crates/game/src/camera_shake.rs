@@ -36,8 +36,7 @@ pub const MAX_SHAKES: usize = 4;
 /// Radians per unit of summed shake at `r` = ±1 (B2:64114-64124).
 const TURN: f32 = 0.1;
 
-/// Passes of the explode's player loop (B2:288298 `uVar5 < 2`, B1:193893
-/// `iVar5` 1..0).
+/// The explosion's player loop runs twice (B2:288298, B1:193893).
 const PASSES: usize = 2;
 
 pub struct CameraShake {

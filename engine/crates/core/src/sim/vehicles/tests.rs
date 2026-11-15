@@ -1471,3 +1471,29 @@ fn a_moving_hover_runs_a_soldier_over() {
     assert_eq!(hit(8.0, false), 0.0);
     assert_eq!(hit(20.0, true), 0.0);
 }
+
+#[test]
+fn driverless_hover_impact_honors_slot_invincibility() {
+    let (mut sim, player, hover) = parked(true);
+    let vehicle = sim.vehicle_mut(hover).unwrap();
+    vehicle.pos = Vec3::new(0.0, 0.0, -3.2);
+    vehicle.vel = Vec3::Z * 20.0;
+    sim.sync_hulls();
+
+    let index = player.index as usize;
+    let capsule = sim.units[index].capsule();
+    let before = sim.units[index].health.cur;
+    sim.set_slot_cheats(
+        0,
+        Some(crate::sim::Cheats {
+            invincible: true,
+            ..Default::default()
+        }),
+    );
+    sim.vehicle_impacts(index, &capsule);
+    assert_eq!(sim.units[index].health.cur, before);
+
+    sim.set_slot_cheats(0, None);
+    sim.vehicle_impacts(index, &capsule);
+    assert!(sim.units[index].health.cur < before);
+}

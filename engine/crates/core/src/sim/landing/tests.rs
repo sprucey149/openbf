@@ -103,6 +103,40 @@ fn fatal_falls_immunity_and_player_cheat_keep_their_bookkeeping() {
 }
 
 #[test]
+fn lethal_landing_honors_slot_invincibility_and_credits_the_force_attacker() {
+    let mut sim = Sim::empty(43);
+    let victim = sim
+        .spawn(&UnitSpec::player_in_slot(1, 0, Vec3::ZERO))
+        .unwrap();
+    let attacker = sim.spawn(&UnitSpec::trooper(1, Vec3::X * 2.0)).unwrap();
+    sim.unit_mut(victim).unwrap().soldier.grounded = false;
+    sim.note_forced_move(victim, Some(attacker));
+    sim.set_slot_cheats(
+        1,
+        Some(crate::sim::Cheats {
+            invincible: true,
+            ..Default::default()
+        }),
+    );
+    let before = sim.unit(victim).unwrap().health.cur;
+    let velocity = -Vec3::Y * 50.0;
+    sim.landing_damage(victim.index as usize, velocity, Vec3::Y);
+    assert_eq!(sim.unit(victim).unwrap().health.cur, before);
+    assert!(sim.events.is_empty());
+
+    sim.set_slot_cheats(1, None);
+    sim.landing_damage(victim.index as usize, velocity, Vec3::Y);
+    assert!(sim.unit(victim).is_none());
+    assert_eq!(sim.unit(attacker).unwrap().kills, 1);
+    assert!(sim.events.iter().any(|event| matches!(
+        event, Event::ForcedDeath { unit, cause: DeathCause::Fall } if *unit == victim
+    )));
+    assert!(sim.events.iter().any(|event| matches!(
+        event, Event::FallDamage { victim: unit, .. } if *unit == victim
+    )));
+}
+
+#[test]
 fn authored_parameters_are_hashed_for_active_and_respawn_state() {
     let mut sim = Sim::empty(43);
     let h = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();

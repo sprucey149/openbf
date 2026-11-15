@@ -47,7 +47,7 @@ impl Sim {
 
     pub(super) fn landing_damage(&mut self, i: usize, velocity: Vec3, normal: Vec3) {
         let u = &self.units[i];
-        if !u.alive || u.is_player && self.cheats.invincible {
+        if !u.alive || u.is_player && self.cheats_of(u).invincible {
             return;
         }
         let amount = damage(&u.consts, velocity, normal, u.soldier.yaw);
