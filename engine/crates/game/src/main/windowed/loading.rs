@@ -18,13 +18,13 @@ const FALLBACK_STEP: Duration = Duration::from_secs(1);
 pub(super) struct Playback {
     prompt_until: Option<Duration>,
     skipped_at: Option<Duration>,
-    /// A LAN round's loading (issue #168): presses neither prompt nor skip,
-    /// so every peer plays its whole presentation.
+    /// A LAN guest's loading (issue #168): presses neither prompt nor skip;
+    /// only the host's skip ends its presentation early.
     no_skip: bool,
 }
 
 impl Playback {
-    /// A LAN round's playback: no press shortens it.
+    /// A LAN guest's playback: no press shortens it.
     pub(super) fn no_skip() -> Self {
         Self {
             no_skip: true,
@@ -41,6 +41,15 @@ impl Playback {
             self.prompt_until = None;
         } else {
             self.prompt_until = Some(elapsed + SKIP_WINDOW);
+        }
+    }
+
+    /// The LAN host skipped for everyone (issue #168): the presentation
+    /// ends now, as a skip of this screen's own would end it.
+    pub(super) fn host_skipped(&mut self, elapsed: Duration) {
+        if self.skipped_at.is_none() {
+            self.skipped_at = Some(elapsed);
+            self.prompt_until = None;
         }
     }
 
@@ -90,7 +99,8 @@ pub(super) enum Next {
 ///
 /// Single player enters at the end of its presentation. A LAN join enters
 /// as soon as it is built (it catches up from the log). A LAN round start
-/// plays its whole presentation, installs and holds until the start; one
+/// plays its presentation (cut short on every peer when the host skips:
+/// `presented` is then true), installs and holds until the start; one
 /// that hears `Start` first (the barrier's timeout went on without it)
 /// installs as soon as it is built and shows at once.
 pub(super) fn next(

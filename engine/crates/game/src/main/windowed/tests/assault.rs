@@ -293,3 +293,30 @@ fn shell_assault_rejects_bad_launches_and_keeps_partial_heroes() {
         }
     }
 }
+
+/// A single-player battle names the human in the kill feed and the stats by
+/// his profile (the wiring in `battle_resources_for`, not just the helper):
+/// fails if the `set_player_names` call there is removed.
+#[test]
+#[ignore = "owned Conquest assets and headless GPU; scripts/gpu_tests.sh --battle-launch"]
+fn a_single_player_battle_names_the_human_by_his_profile() {
+    let Some(root) = std::env::var_os("OPENBF_ASSAULT_ROOT").map(PathBuf::from) else {
+        eprintln!("SKIP: set OPENBF_ASSAULT_ROOT to an owned engine fixture");
+        return;
+    };
+    let mut a = app(&root);
+    a.mode = "con".into();
+    a.profile.name = "Dawg".into();
+    let mission =
+        game::mission::MissionDef::load(&root.join("missions").join("bf1_nab2_con.ron")).unwrap();
+    a.current = Some(ui::shell::Launch {
+        key: "bf1_nab2".into(),
+        game: ui::shell::Game::Bf1,
+        mode: ui::shell::Mode::Con,
+        armies: mission.factions(),
+        label: "bf1_nab2".into(),
+    });
+    start(&mut a, "bf1_nab2").unwrap_or_else(|e| panic!("bf1_nab2: {e:#}"));
+    let walk = &a.walk.as_ref().unwrap().0;
+    assert_eq!(a.feed.unit_name(&walk.sim, walk.player), "Dawg");
+}

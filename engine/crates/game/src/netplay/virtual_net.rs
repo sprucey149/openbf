@@ -35,6 +35,10 @@
 //!   presentation and the build), so a test can give every peer its own.
 //!   [`Node::loaded_at`], [`Node::playing_at`] and [`Node::first_step`]
 //!   record when it built, when it first played and its first stepped tick.
+//!   With [`Node::build_floor_ms`] the build alone takes that long: once the
+//!   host skips the loading screen ([`VirtualNet::host_skip`],
+//!   [`Peer::loading_skipped`]) the node builds at its floor (or at once if
+//!   past it) instead of at the end of `load_ms`.
 //! - Heroes (opt-in, [`VirtualNet::heroes`]): the scripted pads also accept
 //!   hero offers and hold block now and then ([`scripted_hero_pad`]), so a
 //!   human plays a saber hero whose swings and blocks are predicted and
@@ -278,8 +282,13 @@ pub struct Node {
     pub build_ms: Vec<f64>,
     /// Virtual ms from a `LoadRound` to its build (module rules).
     pub load_ms: u64,
-    /// A build waiting out [`Node::load_ms`]: when, the setup, joining.
-    pending_build: Option<(Micros, RoundSetup, bool)>,
+    /// The build alone within [`Node::load_ms`], in virtual ms: a host skip
+    /// ends the loading no earlier (module rules). `None`: a skip does not
+    /// shorten it.
+    pub build_floor_ms: Option<u64>,
+    /// A build waiting out [`Node::load_ms`]: when, the setup, joining,
+    /// and when its `LoadRound` came.
+    pending_build: Option<(Micros, RoundSetup, bool, Micros)>,
     /// The last round's build, first playing frame and first stepped tick
     /// (with its virtual time).
     pub loaded_at: Option<Micros>,
@@ -309,6 +318,11 @@ pub struct Node {
 }
 
 impl Node {
+    /// A build is waiting out its loading time.
+    pub fn loading(&self) -> bool {
+        self.pending_build.is_some()
+    }
+
     fn new(
         name: &str,
         token: u64,
@@ -337,6 +351,7 @@ impl Node {
             catch_up: Vec::new(),
             build_ms: Vec::new(),
             load_ms: 0,
+            build_floor_ms: None,
             pending_build: None,
             loaded_at: None,
             playing_at: None,
@@ -515,8 +530,16 @@ impl VirtualNet {
         } else {
             // Its loading screen: no frame of the old round meanwhile.
             n.walk = None;
-            n.pending_build = Some((self.now + Micros::from_millis(n.load_ms), setup, joining));
+            let due = self.now + Micros::from_millis(n.load_ms);
+            n.pending_build = Some((due, setup, joining, self.now));
         }
+    }
+
+    /// The host skips its round start's loading screen for everyone
+    /// ([`Peer::skip_loading`]). Returns whether the skip went out.
+    pub fn host_skip(&mut self) -> bool {
+        let n = &mut self.nodes[0];
+        n.peer.skip_loading(&mut n.link)
     }
 
     /// The host issues a game command.
@@ -586,8 +609,16 @@ impl VirtualNet {
             let n = &mut self.nodes[i];
             n.next_frame = n.next_frame + n.frame;
             n.frames += 1;
+            // The host skipped: the build is due at its floor.
+            if let (Some(floor), Some((at, .., from))) =
+                (n.build_floor_ms, n.pending_build.as_mut())
+            {
+                if n.peer.loading_skipped() {
+                    *at = (*at).min(*from + Micros::from_millis(floor));
+                }
+            }
             if n.pending_build.as_ref().is_some_and(|(at, ..)| now >= *at) {
-                let (_, setup, joining) = n.pending_build.take().expect("due build");
+                let (_, setup, joining, _) = n.pending_build.take().expect("due build");
                 self.build_node(i, &setup, joining);
             }
             let n = &mut self.nodes[i];

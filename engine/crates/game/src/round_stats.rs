@@ -695,6 +695,35 @@ mod tests {
         assert!(board.iter().any(|r| r.name == "Kai" && r.human));
     }
 
+    /// A single-player round's stats pages and scoreboard name the human by
+    /// his profile (the maintainer saw "PLAYER 1" on Team Stats) and keep
+    /// his row marked human, so Team Stats draws it bold.
+    #[test]
+    fn single_player_rounds_name_the_human_by_his_profile() {
+        let w = walk();
+        let sim = &w.sim;
+        let mut feed = crate::event_feed::EventFeed::default();
+        feed.set_player_names([(0, "Dawg")]);
+        let r = RoundStats::default();
+        let unit = |i: usize| feed.unit_name(sim, sim.handle(i));
+        let text = |_: &str, en: &str| en.to_owned();
+        let pages = screens(
+            sim,
+            &r,
+            w.player,
+            &Default::default(),
+            &names_for(&unit, &text),
+        );
+        let rows: Vec<_> = pages.lists.iter().flat_map(|l| &l.rows).collect();
+        let me = rows.iter().find(|r| r.me).expect("the player's row");
+        assert_eq!(me.name, "Dawg");
+        assert!(me.human);
+        assert!(rows.iter().all(|r| !r.name.starts_with("Player ")));
+        let board = scoreboard(sim, &r, w.player, &unit, ["A".into(), "B".into()], None);
+        let board: Vec<_> = board.teams.iter().flat_map(|t| &t.rows).collect();
+        assert!(board.iter().any(|r| r.name == "Dawg" && r.human));
+    }
+
     /// Kills, team kills, a suicide and a capture score as the viewer's feed
     /// scores them; Nemesis and Bait name the other with the count; the
     /// awards name the most; a tie goes to the first unit.

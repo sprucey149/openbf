@@ -139,6 +139,25 @@ fn play_ambience(
     }
 }
 
+/// `[ours]` The name the kill feed, the scoreboard and the stats pages give
+/// the single player's soldier (slot 0): his profile's name, where the
+/// original shows "Player %d". It passes the same filter as a LAN name
+/// (trimmed, at most `net::msg::MAX_NAME_CHARS`, `net::msg::valid_name`).
+/// `None` in a LAN round, whose humans are named from the session, or for a
+/// name the filter refuses, which keeps the "Player 1" fallback.
+/// Presentation only.
+fn single_player_name(lockstep: bool, profile_name: &str) -> Option<String> {
+    if lockstep {
+        return None;
+    }
+    let name: String = profile_name
+        .trim()
+        .chars()
+        .take(net::msg::MAX_NAME_CHARS)
+        .collect();
+    net::msg::valid_name(&name).then_some(name)
+}
+
 /// The playtest black box for the battle about to start — dev mode only
 /// (`game::blackbox`, card BLKB); `None` in normal play.
 fn start_blackbox(
@@ -1280,8 +1299,9 @@ impl App {
         self.clear_loading_input();
         let cues = (self.audio.is_some() && display.sample(std::time::Duration::ZERO).is_some())
             .then(|| loading::Cues::load(&self.assets_dir));
-        // A LAN round's presentation plays whole on every peer (issue #168).
-        let playback = if self.netplay.is_some() {
+        // Only the LAN host skips, for everyone (issue #168); a guest's
+        // presses do nothing.
+        let playback = if self.netplay.as_ref().is_some_and(|n| !n.is_host()) {
             loading::Playback::no_skip()
         } else {
             loading::Playback::default()
@@ -1307,9 +1327,10 @@ impl App {
     /// the event thread at the explicitly timed final boundary.
     ///
     /// A LAN round start (issue #168, `lan.rs` module rules) has the same
-    /// minimum and no skip; at its end the battle is installed behind the
-    /// last image (`Loaded` goes out) and shown at the host's start. A join
-    /// or a rejoin enters as soon as it is built.
+    /// minimum; only the host skips it, for every peer. At its end the
+    /// battle is installed behind the last image (`Loaded` goes out) and
+    /// shown at the host's start. A join or a rejoin enters as soon as it
+    /// is built.
     fn redraw_loading(&mut self) -> Result<()> {
         self.pump_loading_pads();
         // The host's `Start` (and every other session event) first.
@@ -1349,6 +1370,20 @@ impl App {
             }
         }
         let elapsed = l.started.elapsed();
+        // The host's skip goes to every guest; a guest's ends with it.
+        if let Some(n) = self.netplay.as_mut() {
+            if n.peer.is_host() {
+                if l.playback.skipped() && n.peer.skip_loading(&mut n.link) {
+                    println!(
+                        "loading: host skipped for everyone round={}",
+                        n.peer.round_id()
+                    );
+                }
+            } else if n.peer.loading_skipped() && !l.playback.skipped() {
+                l.playback.host_skipped(elapsed);
+                println!("loading: the host skipped round={}", n.peer.round_id());
+            }
+        }
         let time = l.playback.time(elapsed);
         let frame = l.display.sample(time);
         let presented =
@@ -1612,6 +1647,11 @@ impl App {
                     WEATHER_SEED,
                 );
             }
+        }
+        // A single-player round names its human by the profile, as a LAN
+        // round does by the session names (`lan::net_names_to_feed`).
+        if let Some(name) = single_player_name(lockstep, &self.profile.name) {
+            self.feed.set_player_names([(0, name.as_str())]);
         }
         if let Some(sl) = self.sounds.as_mut() {
             sl.rate_mul = self.cheats.sfx_rate();

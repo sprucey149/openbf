@@ -1110,6 +1110,144 @@ fn netplay_a_guest_stuck_loading_enters_behind_without_holding_the_start() {
     assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
 }
 
+/// The host skips the loading screen for everyone (issue #168): four
+/// peers whose presentation is 4 s and whose builds alone take 0.3 to
+/// 1.5 s (one 80 ms away). The host skips at 200 ms: every peer ends its
+/// presentation, none plays before its own build or the slowest one's,
+/// all well before the full presentation, together and from tick 0.
+#[test]
+fn netplay_a_host_skip_ends_every_loading_screen_together() {
+    let (mut v, gs) = loading_round(33, 4_000, &[(4_000, 15.0), (4_000, 16.7), (4_000, 7.0)]);
+    for (i, floor) in [300, 600, 1_500, 900].into_iter().enumerate() {
+        v.nodes[i].build_floor_ms = Some(floor);
+    }
+    let launched = v.now;
+    assert!(!v.run_until(200, |_| false));
+    assert!(v.host_skip(), "the host's skip goes out");
+    assert!(!v.host_skip(), "once a round");
+    let all = |v: &VirtualNet| v.nodes.iter().all(|n| n.first_step.is_some());
+    assert!(v.run_until(10_000, all), "every peer plays");
+    let slowest = v.nodes.iter().filter_map(|n| n.loaded_at).max().unwrap();
+    assert!(slowest >= launched + Micros::from_millis(1_500));
+    let playing: Vec<Micros> = v.nodes.iter().map(|n| n.playing_at.unwrap()).collect();
+    for n in &v.nodes {
+        let at = n.playing_at.unwrap();
+        let floor = Micros::from_millis(n.build_floor_ms.unwrap());
+        assert!(n.peer.loading_skipped(), "{} heard the skip", n.name);
+        assert!(
+            at >= launched + floor && at >= slowest,
+            "{} played at {at:?} (launched {launched:?}, its build {floor:?}, the slowest {slowest:?})",
+            n.name
+        );
+        assert!(
+            at < launched + Micros::from_millis(3_000),
+            "{} played at {at:?}: the skip ended its 4 s presentation",
+            n.name
+        );
+        assert_eq!(n.first_step.unwrap().0, 0, "{} plays from tick 0", n.name);
+        assert!(n.build_error.is_none());
+    }
+    let spread = playing
+        .iter()
+        .max()
+        .unwrap()
+        .saturating_sub(*playing.iter().min().unwrap());
+    assert!(
+        spread <= Micros::from_millis(34),
+        "the peers began {} ms apart: {playing:?}",
+        spread.as_millis_f64()
+    );
+    assert_eq!(gs.len(), 3);
+    assert!(v.run_until(3_000, |v| v.nodes.iter().all(|n| n.peer.next_tick() >= 60)));
+    assert!(v.checker.checks > 0);
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+}
+
+/// A guest cannot skip a LAN loading screen: its skip sends nothing, and
+/// every peer plays its whole presentation.
+#[test]
+fn netplay_a_guest_cannot_skip_the_loading_screen() {
+    let (mut v, gs) = loading_round(34, 1_500, &[(2_000, 15.0), (1_000, 16.7)]);
+    for n in &mut v.nodes {
+        n.build_floor_ms = Some(100);
+    }
+    let launched = v.now;
+    assert!(!v.run_until(200, |_| false));
+    for g in &gs {
+        let n = &mut v.nodes[*g];
+        assert!(!n.peer.skip_loading(&mut n.link), "{} cannot skip", n.name);
+    }
+    let all = |v: &VirtualNet| v.nodes.iter().all(|n| n.first_step.is_some());
+    assert!(v.run_until(10_000, all), "every peer plays");
+    for n in &v.nodes {
+        assert!(!n.peer.loading_skipped(), "{} was not skipped", n.name);
+        let at = n.playing_at.unwrap();
+        assert!(
+            at >= launched + Micros::from_millis(2_000),
+            "{} played at {at:?}, before the slowest presentation",
+            n.name
+        );
+        assert_eq!(n.first_step.unwrap().0, 0);
+    }
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+}
+
+/// A skip that names another round (the one before, or one not loaded) is
+/// stale: no guest ends its presentation. The current round's is heard
+/// (the control).
+#[test]
+fn netplay_a_skip_of_another_round_is_ignored() {
+    let (mut v, gs) = loading_round(35, 500, &[(500, 15.0), (500, 16.7)]);
+    let all = |v: &VirtualNet| v.nodes.iter().all(|n| n.first_step.is_some());
+    assert!(v.run_until(5_000, all));
+    let old = v.nodes[0].peer.round_id();
+    // A skip after `Start` (the round already running) is ignored too.
+    let started_skip = net::HostCommand::Notice {
+        slot: None,
+        data: super::peer::PeerNotice::SkipLoading { round_id: old }.encode(),
+    };
+    Link::host(&mut v.nodes[0].link, started_skip);
+    assert!(!v.run_until(300, |v| gs
+        .iter()
+        .any(|g| v.nodes[*g].peer.loading_skipped())));
+    let mut s = setup();
+    for g in &gs {
+        s.humans.push(seat(v.nodes[*g].peer.local_slot));
+    }
+    for n in &mut v.nodes {
+        n.load_ms = 3_000;
+        n.build_floor_ms = Some(100);
+    }
+    v.host_load(&s);
+    let new = v.nodes[0].peer.round_id();
+    assert_ne!(old, new);
+    let loading = |v: &VirtualNet| gs.iter().all(|g| v.nodes[*g].peer.round_id() == new);
+    assert!(v.run_until(1_000, loading), "the guests load the new round");
+    // The checker compares ticks, not rounds: no peer steps the old one
+    // now, so the new round's start over.
+    v.checker = Default::default();
+    let skip = |round_id| net::HostCommand::Notice {
+        slot: None,
+        data: super::peer::PeerNotice::SkipLoading { round_id }.encode(),
+    };
+    for round_id in [old, new.wrapping_add(1), 0] {
+        Link::host(&mut v.nodes[0].link, skip(round_id));
+    }
+    assert!(!v.run_until(300, |v| gs
+        .iter()
+        .any(|g| v.nodes[*g].peer.loading_skipped())));
+    for g in &gs {
+        assert!(v.nodes[*g].loading(), "still in its presentation");
+    }
+    // The control: this round's skip ends theirs.
+    Link::host(&mut v.nodes[0].link, skip(new));
+    assert!(v.run_until(300, |v| gs
+        .iter()
+        .all(|g| v.nodes[*g].peer.loading_skipped())));
+    assert!(v.run_until(5_000, all));
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+}
+
 /// One peer of [`netplay_udp_peers_with_different_loads_start_together`].
 struct UdpPeer<L> {
     peer: Peer,

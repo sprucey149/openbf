@@ -86,6 +86,13 @@
 //!   screen), and only then sends inputs and steps bundles. A peer built
 //!   after the moment (the barrier's timeout started without it) plays at
 //!   once, behind.
+//! - The host may skip a round start's loading screen for everyone
+//!   ([`Peer::skip_loading`], [`PeerNotice::SkipLoading`] on the reliable
+//!   notice channel, after its `LoadRound`): each peer's
+//!   [`Peer::loading_skipped`] ends its presentation early. It removes only
+//!   the presentation's minimum: every peer still reports `Loaded` when
+//!   built, and the start still waits for all of them. A guest cannot skip;
+//!   a skip of another round, of a join or after the start is stale.
 //! - Another round's messages are stale: the host takes its new round's id
 //!   at [`Peer::host_load`] (a `Built` or a desync of the old round is
 //!   dropped) and steps no bundle before the new round starts.
@@ -174,6 +181,9 @@ pub enum PeerNotice {
     /// The host asks for this guest's rows at check `tick` of round
     /// `round_id` (`Msg::DesyncHashes`), before it knows whose game parted.
     SendRows { round_id: u32, tick: u32 },
+    /// The host skipped round `round_id`'s loading screen: every peer ends
+    /// its presentation now (module rules).
+    SkipLoading { round_id: u32 },
 }
 
 impl PeerNotice {
@@ -366,6 +376,9 @@ pub struct PeerStats {
     pub catch_up_frames: u32,
     /// Desync reports written.
     pub desync_reports: u32,
+    /// Loading screens the host skipped for everyone: sent (the host) or
+    /// heard (a guest).
+    pub loading_skips: u32,
 }
 
 /// A guest as the host knows it.
@@ -439,6 +452,8 @@ pub struct Peer {
     corrections: u32,
     /// The host: this round is being ended (module rules).
     abandoned: bool,
+    /// The host skipped this round's loading screen (module rules).
+    loading_skipped: bool,
     /// The host: each guest's last desync's differing groups.
     desync_groups: BTreeMap<u8, Vec<&'static str>>,
     /// Notices raised outside [`Peer::poll`], given out by the next one.
@@ -534,6 +549,7 @@ impl Peer {
             trust_from: 0,
             corrections: 0,
             abandoned: false,
+            loading_skipped: false,
             desync_groups: BTreeMap::new(),
             deferred: Vec::new(),
             stats: PeerStats::default(),
@@ -650,6 +666,7 @@ impl Peer {
         self.trust_from = 0;
         self.corrections = 0;
         self.abandoned = false;
+        self.loading_skipped = false;
     }
 
     /// The host: its corrections this round (module rules).
@@ -717,6 +734,32 @@ impl Peer {
             }
         }
         out
+    }
+
+    /// The host skips its round start's loading screen for everyone
+    /// (module rules): every guest is told to end its presentation. Once a
+    /// round, and only before the start; a guest's call does nothing.
+    /// Returns whether the skip went out.
+    pub fn skip_loading<L: Link>(&mut self, link: &mut L) -> bool {
+        let loading = matches!(self.mode, Mode::Loading | Mode::Waiting);
+        if !self.host || self.loading_skipped || self.started || self.round_id == 0 || !loading {
+            return false;
+        }
+        self.loading_skipped = true;
+        self.stats.loading_skips += 1;
+        let round_id = self.round_id;
+        link.host(HostCommand::Notice {
+            slot: None,
+            data: PeerNotice::SkipLoading { round_id }.encode(),
+        });
+        true
+    }
+
+    /// The host skipped this round start's loading screen (module rules):
+    /// the caller ends its presentation now. The build and the start are
+    /// unchanged.
+    pub fn loading_skipped(&self) -> bool {
+        self.loading_skipped
     }
 
     fn maybe_start<L: Link>(&mut self, link: &mut L) {
@@ -1032,6 +1075,15 @@ impl Peer {
                                 .map_or_else(String::new, |r| format!("{:016x}", r[0])),
                             rows: self.rows_before(tick),
                         });
+                    }
+                }
+                Some(PeerNotice::SkipLoading { round_id }) => {
+                    // Another round's, a join's or one after the start is
+                    // stale.
+                    let loading = matches!(self.mode, Mode::Loading | Mode::Waiting);
+                    if round_id == self.round_id && !self.joining && !self.started && loading {
+                        self.loading_skipped = true;
+                        self.stats.loading_skips += 1;
                     }
                 }
                 None => out.push(Notice::Message(b)),

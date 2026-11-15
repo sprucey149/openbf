@@ -996,3 +996,20 @@ fn the_shell_opens_fullscreen_first_then_in_the_last_profiles_mode() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A single-player battle names slot 0 by the profile; a LAN round leaves it
+/// to the session names; a blank profile name keeps the "Player 1" fallback.
+#[test]
+fn single_player_rounds_take_the_profiles_name() {
+    assert_eq!(single_player_name(false, "Dawg").as_deref(), Some("Dawg"));
+    assert_eq!(single_player_name(false, "  Kai ").as_deref(), Some("Kai"));
+    assert_eq!(single_player_name(true, "Dawg"), None);
+    assert_eq!(single_player_name(false, "   "), None);
+    // The LAN name filter: at most 24 characters, no control characters.
+    let long = "A".repeat(40);
+    assert_eq!(
+        single_player_name(false, &long).map(|n| n.chars().count()),
+        Some(net::msg::MAX_NAME_CHARS)
+    );
+    assert_eq!(single_player_name(false, "Da\u{7}wg"), None);
+}

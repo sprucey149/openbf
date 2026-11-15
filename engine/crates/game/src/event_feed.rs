@@ -434,10 +434,11 @@ pub struct EventFeed {
     /// built without a walk.
     classes: [Vec<String>; 2],
     native_classes: std::collections::BTreeMap<u8, Vec<String>>,
-    /// `[ours]` A LAN round's human names by player slot (issue #168): the
-    /// session's unique names, the ones the lobby and the name tags show.
-    /// Presentation only, never read by the sim. Empty in single player,
-    /// where a human is the PS2's "Player 1".
+    /// `[ours]` The human names by player slot: a LAN round's session
+    /// names (issue #168), the ones the lobby and the name tags show, or the
+    /// single player's profile name (the original shows "Player %d").
+    /// Presentation only, never read by the sim. A slot with no name falls
+    /// back to "Player N".
     player_names: std::collections::BTreeMap<u8, String>,
     /// The vehicle and building-turret classes' names, by `Vehicle::class`
     /// ([`Texts::class_name`], else the class's `Label`, else its ODF name).
@@ -833,7 +834,8 @@ impl EventFeed {
         &self.posts
     }
 
-    /// `[ours]` Names the humans of a LAN round by slot (issue #168): each
+    /// `[ours]` Names the humans by slot: a LAN round's session names
+    /// (issue #168) or the single player's profile name. Each
     /// `(slot, name)` replaces that slot's name; a slot not given keeps the
     /// one it had, so a player who left still has his name on the stats
     /// pages. Presentation only.
@@ -845,9 +847,9 @@ impl EventFeed {
         }
     }
 
-    /// The name a line gives unit `h`: a human's LAN session name
-    /// ([`EventFeed::set_player_names`]), else "Player 1" (the PS2's
-    /// `Player %d`); an AI the team's next name in the order its AI units
+    /// The name a line gives unit `h`: a human's name
+    /// ([`EventFeed::set_player_names`]: the LAN session name or the single
+    /// player's profile name), else "Player N" (the original's `Player %d`); an AI the team's next name in the order its AI units
     /// are made (unit order, `crate::bot_names`): the same unit keeps it
     /// through its respawns.
     pub fn unit_name(&self, sim: &Sim, h: UnitHandle) -> String {

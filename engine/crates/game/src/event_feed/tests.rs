@@ -1422,3 +1422,21 @@ fn lan_lines_name_the_humans_by_their_session_names() {
     s.feed.set_player_names([(0, "the maintainer")]);
     assert_eq!(s.feed.unit_name(&s.sim, guest), "Kai");
 }
+
+/// The maintainer's end-of-round Team Stats read "PLAYER 1": a
+/// single-player round names its human by the profile (slot 0), in the
+/// kill feed as in a LAN round.
+#[test]
+fn single_player_lines_name_the_human_by_his_profile() {
+    let mut s = scene();
+    let (me, r0) = (s.me, s.rebels[0]);
+    let bot = s.feed.unit_name(&s.sim, r0);
+    s.feed.set_player_names([(0, "Dawg")]);
+    let kill = |shooter, victim| Event::Kill { shooter, victim };
+    let said = |lines: Vec<HudMessage>| lines.into_iter().map(|l| l.text).collect::<Vec<_>>();
+    assert_eq!(
+        said(happen(&mut s, &[kill(r0, me)])),
+        [format!("{bot} killed Dawg")]
+    );
+    assert_eq!(s.feed.unit_name(&s.sim, me), "Dawg");
+}

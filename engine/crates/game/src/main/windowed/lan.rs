@@ -29,10 +29,13 @@
 //!   (the host left, kicked, fell behind, rejected, timed out) shows a
 //!   centred banner for [`ENDED_SECS`] and returns to the shell.
 //! - A round start (not a join or a rejoin) is one moment everywhere: each
-//!   peer plays at least its loading presentation (no skip in a LAN round),
-//!   builds and reports `Loaded`, and holds its last image until the
-//!   host's `Start` names tick 0 ([`NetplaySession::start_at`]); then every
-//!   screen goes to the battle together. A peer still building then (the
+//!   peer plays at least its loading presentation, builds and reports
+//!   `Loaded`, and holds its last image until the host's `Start` names
+//!   tick 0 ([`NetplaySession::start_at`]); then every screen goes to the
+//!   battle together. Only the host skips the presentation (the
+//!   single-player two presses), and its skip ends every peer's
+//!   (`Peer::skip_loading`); the build and the start are unchanged. A
+//!   guest's presses do nothing. A peer still building then (the
 //!   barrier's timeout) enters when built, behind its spawn screen. Joins
 //!   enter as soon as they are built and catch up.
 //! - Between rounds every peer waits in the lobby (`lobby.rs`): a round's

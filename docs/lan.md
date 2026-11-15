@@ -72,9 +72,11 @@ verdict:
    networks.
 5. Build the playlist on the Instant Action screen. Guests see it update as
    you edit it. Then start.
-   - Everyone goes to the loading screen together. In a LAN game the loading
-     screen cannot be skipped. When the slowest player has loaded, every
-     screen goes to the battle at the same moment.
+   - Everyone goes to the loading screen together. Only the host can skip
+     it, the same way as in single player (press the skip button twice
+     within 3 seconds), and the skip ends the loading screen for every
+     player. Guests cannot skip. When the slowest player has loaded, every
+     screen goes to the battle at the same moment, skipped or not.
 6. The player list (top right) shows everyone's ping, team and whether they
    are ready. Press **Square** (Xbox **X**, keyboard **Space**) to move into
    it, **Up / Down** to pick a player, and **Accept** twice to remove one.
