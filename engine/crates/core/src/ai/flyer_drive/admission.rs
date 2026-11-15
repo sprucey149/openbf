@@ -154,8 +154,7 @@ pub(crate) fn commit(sim: &Sim, handle: VehicleHandle, mut ai: FlyerAi) -> Flyer
                 .get(v.class as usize)
                 .and_then(Option::as_ref)
             {
-                let leave = v.flyer.ai.cursor.map(|old| old.path);
-                connect(sim, v, handle, p, &mut ai, leave);
+                loiter(v, p, &mut ai);
             } else {
                 ai.cursor = None;
                 ai.curve = None;

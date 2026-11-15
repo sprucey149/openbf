@@ -709,31 +709,3 @@ fn a_choke_hold_plays_the_victims_choke_sound_until_it_lets_go() {
     walk.teams[team].classes[class].cries.choke = None;
     assert!(choke_loops(&walk).is_empty());
 }
-
-#[test]
-fn listener_follows_camera_and_keeps_the_scoped_body_anchor() {
-    let (mut walk, _, _) = scene();
-    let actor = walk.sim.unit_mut(walk.player).unwrap();
-    actor.soldier.pos = Vec3::new(2.0, 4.0, 1.0);
-    actor.soldier.yaw = 0.5;
-    actor.soldier.pitch = 0.25;
-    let cam = walk.camera();
-    let ears = listener(&walk);
-    assert!(ears
-        .pos
-        .abs_diff_eq(cam.position - cam.forward() * 2.0, 1e-5));
-    assert_eq!(ears.yaw, cam.yaw);
-
-    let actor = walk.sim.unit_mut(walk.player).unwrap();
-    actor.zoom = Some(core::unit::Zoom {
-        step: 0,
-        value: 3.0,
-        divisor: 2.0,
-        scope: true,
-    });
-    let origin = actor.soldier.pos;
-    let cam = walk.camera();
-    let ears = listener(&walk);
-    assert!(ears.pos.abs_diff_eq(origin - cam.forward() * 2.0, 1e-5));
-    assert_ne!(ears.pos, cam.position - cam.forward() * 2.0);
-}

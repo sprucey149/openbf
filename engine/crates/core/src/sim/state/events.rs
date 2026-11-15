@@ -111,10 +111,6 @@ pub enum Event {
         /// Health actually restored, zero for a slice pulse.
         amount: f32,
     },
-    /// A seat switch would remove a gunner holding a live tow cable.
-    TowSeatLocked {
-        unit: UnitHandle,
-    },
     Shot {
         unit: UnitHandle,
         /// The weapon class that fired: the unit's own on foot, the seat

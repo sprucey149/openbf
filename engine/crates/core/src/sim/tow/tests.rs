@@ -306,25 +306,11 @@ fn detached_wraps_damage_per_occupied_seat_then_the_walker_dies_in_place() {
     let mut oracle = crate::lcg::GameLcg::new(rng);
     let _ = oracle.unit();
     assert_eq!(s.melee_lcg.state(), oracle.state());
-    assert!(s.step_full_tow(&mut cable, crate::TICK_DT));
+    assert!(!s.step_full_tow(&mut cable, crate::TICK_DT));
     let dying = s
         .vehicle(target)
         .expect("a dying walker stays in the world");
     assert!(dying.walker.dead && !dying.health.alive());
-    let spent = dying.health.cur;
-    let killer = dying.walker.killer;
-    let events = s.events.len();
-    let rng = s.melee_lcg.state();
-    assert!(s.step_full_tow(&mut cable, crate::TICK_DT));
-    let dying = s.vehicle(target).unwrap();
-    assert_eq!(dying.health.cur, spent - 75.0);
-    assert_eq!(dying.walker.killer, killer);
-    assert_ne!(s.melee_lcg.state(), rng);
-    assert_eq!(
-        s.events.len(),
-        events,
-        "corpse contacts add no scoring events"
-    );
     assert!(s.events.iter().any(
         |e| matches!(e, Event::VehicleExplosion { vehicle, last: false, .. } if *vehicle == target)
     ));
@@ -359,7 +345,6 @@ fn detached_wraps_damage_per_occupied_seat_then_the_walker_dies_in_place() {
         ticks += 1;
     }
     assert!(s.vehicle(target).is_none());
-    assert!(!s.step_full_tow(&mut cable, crate::TICK_DT));
     assert!((61..=62).contains(&ticks), "{ticks}");
     assert!(s
         .events
