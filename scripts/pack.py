@@ -58,6 +58,7 @@ import tempfile
 from pathlib import Path
 
 import input_scan
+import pack_cache
 import visual_packs
 from console_input import pc_game
 
@@ -237,7 +238,7 @@ def need(tool, why):
 
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
 BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
-               "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "scripts/restore_audio.py", "engine/crates/audio/src",
+               "scripts/global_sound_cache.py", "scripts/pack_cache.py", "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "scripts/restore_audio.py", "engine/crates/audio/src",
                "engine/crates/bake/src/effect_names.txt", "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
 MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py",
                   "scripts/gameplay_missions.py", "engine/crates/manifest/data/gameplay/corrections-v1")
@@ -328,12 +329,13 @@ def restored_music_matches(path, rate, frames, size):
     )
 
 
-def missing_music():
+def missing_music(include_global=True):
     """Referenced retail bodies and restored takes missing from the cached bake."""
     out = []
     baked = Path(BAKED)
     indexes = list(baked.glob("*/sounds/streams/streams.ron"))
-    indexes += list(baked.glob("audio/global_*/global.ron"))
+    if include_global:
+        indexes += list(baked.glob("audio/global_*/global.ron"))
     indexes += list(baked.glob("*/shell/sounds/streams/streams.ron"))
     for idx in indexes:
         text = idx.read_text(encoding="utf-8")
@@ -444,7 +446,7 @@ def map_texture_sources(baked, base_labels=None):
     return maps
 
 
-def source_report(root, baked, missions, images, plan, extracted_used=(), images_used=(), rebaked=None, pc_roots=None, warnings=()):
+def source_report(root, baked, missions, images, plan, extracted_used=(), images_used=(), rebaked=None, pc_roots=None, warnings=(), images_verified=()):
     """Only successful pack steps establish which inputs were consumed. `rebaked` is what the bake did this run: None
     for nothing, "all", or a list of groups. "cached" means an input of the bake packed, not read this run: the bake's
     stamp holds its path, so a bake made without it would have been made again."""
@@ -469,8 +471,10 @@ def source_report(root, baked, missions, images, plan, extracted_used=(), images
         if image:
             selected.add(Path(image).resolve())
             used = game in images_used
-            note(image, f'{game} requested PS2 image', 'used' if used else 'cached',
-                 'extracted successfully this run' if used else 'not read or verified this run; cached extraction used')
+            note(image, f'{game} requested PS2 image', 'used' if used or game in images_verified else 'cached',
+                 'extracted successfully this run' if used else
+                 'content verified this run; verified extraction reused' if game in images_verified else
+                 'not read or verified this run; cached extraction used')
         gameplay = (plan.get('games', {}).get(game) or {}).get('gameplay') or {}
         platform = gameplay_labels.get(gameplay.get('kind'))
         if platform:
@@ -610,14 +614,20 @@ def main():
     named_pc = resolve_pc_roots(a.pc_dir, a.pc1 or os.environ.get("PC1"), a.pc2 or os.environ.get("PC2"))
     roots = [a.iso_dir] if a.iso_dir else input_scan.default_roots(ROOT)
     plan = input_scan.scan(roots, {"bf1": a.iso1, "bf2": a.iso2}, named_pc, EXTRACTED, a.iso_dir)
-    print("\n".join(input_scan.summary_lines(plan)))
-    input_scan.write_summary(plan, out)
-    print(f"Input summary: {out}.inputs.txt")
-    if plan["refusals"]:
-        message = "pack: " + "\npack: ".join(plan["refusals"])
-        sys.exit(message.encode("utf-8", "backslashreplace").decode("utf-8"))
-    if a.scan_only:
-        return
+    with pack_cache.outputs_locked((out, os.path.join(os.path.dirname(out), ".openbf-pack"))):
+        print("\n".join(input_scan.summary_lines(plan)))
+        input_scan.write_summary(plan, out)
+        print(f"Input summary: {out}.inputs.txt")
+        if plan["refusals"]:
+            message = "pack: " + "\npack: ".join(plan["refusals"])
+            sys.exit(message.encode("utf-8", "backslashreplace").decode("utf-8"))
+        if a.scan_only:
+            return
+        with pack_cache.outputs_locked((EXTRACTED, BAKED, MISSIONS)):
+            build(a, out, plan, packs, visual_report)
+
+
+def build(a, out, plan, packs, visual_report):
     try:
         menu_font = menu_font_input(a.menu_font_core)
     except ValueError as error:
@@ -638,8 +648,6 @@ def main():
         bake_inputs["menu_font_core"] = menu_font
     bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
     bake_inputs["audio_restoration"] = not a.retail_audio
-    for g, image, _ in input_scan.discs_to_extract(plan):
-        bake_inputs["xbox_" + g] = image
     if plan["dlc"]["used"]:
         bake_inputs["dlc"] = plan["dlc"]["path"]
         if plan["dlc"]["donor"]:
@@ -655,10 +663,14 @@ def main():
         bake = os.path.join(os.path.dirname(game), "bake" + EXE)
         if not os.path.isfile(bake):
             bake = os.path.join(TARGET, "release", "bake" + EXE)
+        if not os.path.isfile(bake):
+            need("cargo", "the standalone bake tool")
+            run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
         print(f"   using existing game binary: {game}")
     else:
         need("cargo", "the Rust toolchain, https://rustup.rs")
-        run(["cargo", "build", "--release", "-p", "bake", "-p", "game"], cwd=ENGINE)
+        run(["cargo", "build", "--release", "-p", "game"], cwd=ENGINE)
+        run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
         bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
 
     step("2/6 the discs")
@@ -667,17 +679,20 @@ def main():
             print(f"   {g}: larger textures from the PC install ({pc_roots[g]})")
         if g in GAMEPLAY_TREES:
             continue
-        # An extraction from before the executable came along is finished by running it again: only that file is written.
-        if os.path.isfile(ci_path(lvl_root(g), "CORE.LVL")) and (disc_executable(g) or not image):
-            print(f"   {g}: already extracted ({lvl_root(g)})")
-            if not disc_executable(g):
-                print(f"   {g}: no {GAME_ELF[g]} above it and no disc to take it from: foliage uses the numbers shipped with the source")
-            continue
-        run([bake, "extract-iso", image, os.path.join(EXTRACTED, g, "lvl")])
-        images_used.add(g)
+        if image:
+            if pack_cache.extract_image(bake, "extract-iso", image, os.path.join(EXTRACTED, g, "lvl"), run):
+                images_used.add(g)
+            # A selected image's verified extraction takes precedence over an
+            # unattested legacy sound/ tree, even when that tree still exists.
+            bake_inputs[g + "_image"] = json.loads(Path(EXTRACTED, g, "lvl.image.json").read_text())["identity"]
+        elif not disc_executable(g):
+            print(f"   {g}: no disc executable: foliage uses the numbers shipped with the source")
     for g, image, tree in input_scan.discs_to_extract(plan):
-        # The Xbox twin of extract-iso: a file already there at its size is left alone, so a second run costs little.
-        run([bake, input_scan.XBOX_EXTRACT, image, os.path.dirname(os.path.dirname(tree))])
+        destination = Path(tree).parent.parent
+        pack_cache.extract_image(bake, input_scan.XBOX_EXTRACT, image, destination, run)
+        receipt = destination.with_name(destination.name + ".image.json")
+        bake_inputs["xbox_" + g] = json.loads(receipt.read_text(encoding="utf-8"))["identity"]
+    bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
 
     step("3/6 the Lua scripts")
     lua_root = console_lua_root()
@@ -708,16 +723,21 @@ def main():
     for name in ("OPENBF_GAMEPLAY_CORRECTIONS", "OPENBF_GAMEPLAY_SOURCE_BF1", "OPENBF_GAMEPLAY_SOURCE_BF2"):
         mission_env.pop(name, None)
     space = os.environ.get("OPENBF_BAKE_SPACE", "1") != "0"
+    bake_inputs["space"] = space
     mission_inputs = {"console_lua": lua_root, "corrections": correction_args, "table_only": table_only, "space": space}
     why = stale(MISSION_STAMP, MISSION_INPUTS, mission_inputs) if have and not tracked else None
-    if have and (tracked or (not pc_roots and not a.rebake and why is None)):
+    if have and (tracked or (not a.rebake and not pc_roots and why is None)):
         print(f"   already there ({MISSIONS})")
     else:
         if why:
             print(f"   making the missions again: {why}")
-        command = [sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"),
-                   "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS, "--hunt"]
-        run(command + (["--space"] if space else []) + correction_args + table_only_args, env=mission_env)
+        Path(MISSION_STAMP).unlink(missing_ok=True)
+        os.makedirs(os.path.dirname(MISSIONS), exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="missions-", dir=os.path.dirname(MISSIONS)) as staging:
+            command = [sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"),
+                       "--ps2-only", "--lua-root", lua_root, "--out", staging, "--hunt"]
+            run(command + (["--space"] if space else []) + correction_args + table_only_args, env=mission_env)
+            pack_cache.replace_tree(staging, MISSIONS)
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:
@@ -729,6 +749,15 @@ def main():
     for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE", "OPENBF_AUDIO_RESTORE_SCRIPT"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
+    for g, image in images.items():
+        bake_env[f"OPENBF_IMAGE_BF{g[-1]}"] = "1" if image else "0"
+    bake_env["OPENBF_BAKE_BIN"] = bake.replace("\\", "/")
+    bake_env["REBAKE_OUT"] = BAKED.replace("\\", "/")
+    bake_env["OPENBF_GLOBAL_CACHE"] = os.path.join(EXTRACTED, "global-sound-cache")
+    bake_env["OPENBF_GLOBAL_FRESH"] = "1" if a.rebake else "0"
+    global_result = os.path.join(EXTRACTED, "global-sound-result.json")
+    bake_env["OPENBF_GLOBAL_RESULT"] = global_result
+    bake_env["OPENBF_SKIP_GLOBAL_SOUND"] = "1"
     if menu_font_core:
         bake_env["OPENBF_MENU_FONT_CORE"] = menu_font_core.replace("\\", "/")
     bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again
@@ -745,17 +774,20 @@ def main():
         if not a.retail_audio:
             print("   restoring audio locally during the bake")
         Path(BAKE_STAMP).unlink(missing_ok=True)
+        if os.path.isdir(BAKED):
+            shutil.rmtree(BAKED)
+        os.makedirs(BAKED, exist_ok=True)
         run([bash, os.path.join(ROOT, "scripts", "rebake.sh")], **({"env": bake_env} if bake_env else {}))
         rebaked = "all"
         extracted_used.update(("bf1", "bf2"))
     else:
         print(f"   already baked ({BAKED}); --rebake bakes again")
-        missing = missing_music()
+        missing = missing_music(include_global=False)
         if n := len(missing):
             print(f"   {n} music files missing or incomplete: rebaking the sound groups")
             need("ffmpeg", "the bake encodes speech and effects to OGG")
             Path(BAKE_STAMP).unlink(missing_ok=True)
-            groups = ["sounds", "global-sound"]
+            groups = ["sounds"]
             if any("shell" in Path(path).parts for path in missing):
                 groups.append("common")
             run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), *groups],
@@ -769,6 +801,13 @@ def main():
             run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "side"], **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
             rebaked = (rebaked or []) + ["side"]
+    # Always plan both units, including a warm pack whose broad stamp matches.
+    # The helper verifies and materializes the complete cached result before packing.
+    bake_env["OPENBF_SKIP_GLOBAL_SOUND"] = "0"
+    Path(global_result).unlink(missing_ok=True)
+    run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "global-sound"], env=bake_env)
+    global_actions = json.loads(Path(global_result).read_text(encoding="utf-8"))
+    extracted_used.update(row["game"] for row in global_actions if row["action"] == "rebuilt")
     left = missing_music()
     if left:
         sys.exit(f"pack: {len(left)} music files missing or incomplete after the bake, e.g. {left[0]}")
@@ -828,8 +867,9 @@ def main():
     print("\n".join(pack_summary(out, pak, split)))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
-                           pc_roots=pc_roots, warnings=warnings)
+                           pc_roots=pc_roots, warnings=warnings, images_verified={g for g, image in images.items() if image})
     report["visual_packs"] = visual_report
+    report["global_sound"] = global_actions
     report["audio_restoration"] = not a.retail_audio
     if menu_font_core:
         report["inputs"].append(dict(path=menu_font_core, label="optional PS2 BF2 menu font source",

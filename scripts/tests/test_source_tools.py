@@ -298,6 +298,7 @@ class PackTests(unittest.TestCase):
             )
             restored = directory / 'music_restored/sample_4000/00000003_00000004_10.flac'
             self.assertEqual(pack.missing_music(), [str(restored)])
+            self.assertEqual(pack.missing_music(include_global=False), [])
             restored.parent.mkdir(parents=True)
             restored.write_bytes(b'broken')
             self.assertEqual(pack.missing_music(), [str(restored)])
@@ -346,7 +347,8 @@ class PackTests(unittest.TestCase):
                 (baked / 'classes').mkdir(parents=True)
                 (baked / 'classes/bf1_all.ron').touch()
                 missions.mkdir()
-                (missions / 'one.ron').touch()
+                (missions / 'one.ron').write_text('tracked mission')
+                (root / 'iso').mkdir()
                 (root / 'scripts').mkdir()
                 (root / 'scripts/rebake.sh').write_text('BF2_MAPS="MUS/MUS1"\n')
                 for game, lvls in pack.LUA.items():
@@ -366,6 +368,11 @@ class PackTests(unittest.TestCase):
                 def run(command, **kwargs):
                     if '--write-pack' in command:
                         Path(command[2]).write_bytes(b'packed')
+                    elif command[-1] == 'global-sound':
+                        result = Path(kwargs['env']['OPENBF_GLOBAL_RESULT'])
+                        action = 'rebuilt' if rebake else 'reused'
+                        rows = [{'game': game, 'action': action} for game in pack.LUA]
+                        result.write_text(__import__('json').dumps(rows))
                 values = dict(ROOT=str(root), ENGINE=str(engine), EXTRACTED=str(root / 'extracted'),
                               BAKED=str(baked), MISSIONS=str(missions), TARGET=str(target),
                               BAKE_STAMP=str(root / 'extracted/bake.sha'),
@@ -386,6 +393,7 @@ class PackTests(unittest.TestCase):
                 # Read every run: their bytes key the console Lua cache.
                 self.assertEqual({r['status'] for r in extracted}, {'used'})
                 self.assertTrue(out.is_file())
+                self.assertEqual((missions / 'one.ron').read_text(), 'tracked mission')
 
     def test_map_sources_preserve_base_and_alternative_file_spelling(self):
         with tempfile.TemporaryDirectory() as temp:

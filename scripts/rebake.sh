@@ -143,8 +143,8 @@ S1="$E/bf1/sound/DATA/_LVL_PS2"
 S2="$E/bf2/sound/DATA/_LVL_PS2"
 # scripts/pack.py extracts each disc whole into lvl/ (bake extract-iso): the
 # sound LVLs are then beside the rest.
-{ [ -d "$S1" ] && [ -z "${OPENBF_BF1_TREE:-}" ]; } || S1="$B1"
-{ [ -d "$S2" ] && [ -z "${OPENBF_BF2_TREE:-}" ]; } || S2="$B2"
+{ [ -d "$S1" ] && [ -z "${OPENBF_BF1_TREE:-}" ] && [ "${OPENBF_IMAGE_BF1:-0}" != 1 ]; } || S1="$B1"
+{ [ -d "$S2" ] && [ -z "${OPENBF_BF2_TREE:-}" ] && [ "${OPENBF_IMAGE_BF2:-0}" != 1 ]; } || S2="$B2"
 OUT="${REBAKE_OUT:-$ROOT/engine/assets_baked}"
 
 # Classic-plus tier 2: the PC install the scan chose (or one named on the command
@@ -222,9 +222,13 @@ DS2_ALL="$(side_donors bf2 all)"; DS2_IMP="$(side_donors bf2 imp)"
 DS2_REP="$(side_donors bf2 rep)"; DS2_CIS="$(side_donors bf2 cis)"
 
 cd "$ROOT/engine"
+if [ -z "${OPENBF_BAKE_BIN:-}" ]; then
+  : # scratch_bake removes the next exact line when it supplies a binary.
 cargo build -p bake --release
+fi
 BAKE="${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/bake"
 [ -f "$BAKE.exe" ] && BAKE="$BAKE.exe"
+BAKE="${OPENBF_BAKE_BIN:-$BAKE}"
 
 SEL=(${WANT_GROUPS[@]+"${WANT_GROUPS[@]}"})
 want() {
@@ -642,7 +646,7 @@ if want sounds; then
   done
   "$BAKE" sound-names "$OUT/classes" "$LUA_PATHS" ${SOUND_DIRS[@]+"${SOUND_DIRS[@]}"}
 fi
-if want global-sound; then
+if want global-sound && [ "${OPENBF_SKIP_GLOBAL_SOUND:-0}" != 1 ]; then
   # The sound BOTH games keep outside the per-map banks (the maintainer's unified sound
   # plan, PLAN Log 2026-09-08 (b); analysis/re-sound-global.md §5):
   #  (i)  BF2 SOUND/GLOBAL.LVL — 29 mono VO streams. Music stays streamed.
@@ -654,13 +658,7 @@ if want global-sound; then
   # content and is left out). Both write <id>.ogg keyed by SEGMENT ID — the
   # only name that data has.
   echo "== global VO streams =="
-  clean "$OUT/audio/global_bf1" "$OUT/audio/global_bf2"
-  SND1="$(ci "$S1" SOUND)"
-  SND2="$(ci "$S2" SOUND)"
-  REF1=$(ls "$SND1"/*.[Ll][Vv][Ll] | grep -viE '/(cw|gcw|test)\.lvl$' | paste -sd, -)
-  REF2=$(ls "$SND2"/*.[Ll][Vv][Ll] | grep -viE '/global\.lvl$' | paste -sd, -)
-  "$BAKE" global-sound "$(ci "$S1" SOUND/CW.LVL),$(ci "$S1" SOUND/GCW.LVL)" "$OUT/audio/global_bf1" "$REF1"
-  "$BAKE" global-sound "$(ci "$S2" SOUND/GLOBAL.LVL)" "$OUT/audio/global_bf2" "$REF2"
+  "$PYTHON" "$ROOT/scripts/global_sound_cache.py" --bake "$BAKE" --bf1 "$S1" --bf2 "$S2" --out "$OUT"
 fi
 if want load; then
   echo "== load screens =="
