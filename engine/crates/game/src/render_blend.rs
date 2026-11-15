@@ -701,6 +701,14 @@ impl Blend {
                     let f = (v.rot.inverse() * t.rot) * Vec3::Z;
                     look.0 += core::fmath::atan2(f.x, f.z);
                 }
+                // A flyer or hover gunner's camera is the tick's chase state
+                // (`WalkSim::next_cam_gunner`) blended between ticks, which
+                // a mouse's look reaches only at the frame a tick steps: it
+                // turns with the preview's own turn on the aim frame, as the
+                // drawn turret does (playtest 2026-11-14, BF1 RHN1 AAT
+                // gunner at 74 fps: the camera stepped 0.96 / 1.44 deg a
+                // frame under a turret turning 1.17, `examples/aat_turret_jitter.rs`).
+                let gunner = walk.gunner_aim_frame();
                 if let Some(v) = walk.sim.vehicles.get_mut(vehicle) {
                     if let Some(Some(g)) = v.guns.get_mut(seat) {
                         g.look = look;
@@ -708,6 +716,9 @@ impl Blend {
                     if walker {
                         (v.walker.aim_yaw, v.walker.aim_pitch) = look;
                     }
+                }
+                if let (Some(from), Some((_, _, to))) = (gunner, walk.gunner_aim_frame()) {
+                    walk.turn_gunner_camera(from, to);
                 }
             }
         }

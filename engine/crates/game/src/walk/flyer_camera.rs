@@ -391,6 +391,31 @@ impl WalkSim {
         ))
     }
 
+    /// The player's flyer or hover gunner aim frame now, the frame his
+    /// camera hangs on ([`WalkSim::flyer_gunner_camera`]); `None` off such a
+    /// seat or zoomed.
+    pub(crate) fn gunner_aim_frame(&self) -> Option<(VehicleHandle, u8, Mat4)> {
+        let (_, handle, seat, _, frame) = self.flyer_gunner()?;
+        Some((handle, seat, frame))
+    }
+
+    /// Carry the held gunner camera of `from`'s seat from aim frame `from`
+    /// to `to`: its eye and view turn with the frame about the gun's pivot,
+    /// the chase's own lag behind the frame kept.
+    pub(crate) fn turn_gunner_camera(&mut self, from: (VehicleHandle, u8, Mat4), to: Mat4) {
+        let (handle, seat, from) = from;
+        let Some(c) = self
+            .cam_gunner
+            .as_mut()
+            .filter(|c| c.vehicle == handle && c.seat == seat)
+        else {
+            return;
+        };
+        let turn = to * from.inverse();
+        c.eye = turn.transform_point3(c.eye);
+        c.rot = (frame_rotation(turn) * c.rot).normalize();
+    }
+
     fn gunner_settled(
         &self,
         v: &Vehicle,

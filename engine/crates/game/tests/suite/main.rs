@@ -37,6 +37,7 @@ mod glb_material;
 mod global_sound;
 mod guided_rockets;
 mod gun_smooth;
+mod gunner_mouse_camera;
 mod gunner_snipe;
 mod hero_ai;
 mod hero_assault;
