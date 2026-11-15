@@ -21,9 +21,12 @@ recompiles and re-packs):
      and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
      inside itself first, then for openbf.pak beside it; the two must stay together.
 
-Optional prepared packs: unzip under visual_packs/<pack-name>/pack.json, then run
-the normal command. Remove the pack folder and run again to revert. See
-docs/visual-packs.md for formats, compatibility checks and --visual-packs <dir>.
+Optional prepared packs: unzip under visual_packs/, then run the normal command.
+Each pack has pack.json; named mod folders may group packs recursively, for example
+visual_packs/upscaled_textures/endor/pack.json. Discovery stops at each pack root,
+so its payload/preview subfolders are not separate packs. Remove a pack or mod
+folder and run again to revert. --visual-packs <dir> selects a lookup folder or a
+pack itself. See docs/visual-packs.md for formats and compatibility checks.
 
 The bake restores retail audio locally by default. --retail-audio keeps the
 retail audio encode and original music streams.
@@ -594,7 +597,7 @@ def main():
     ap.add_argument("--game-bin", default=None, help="use an already compiled game binary (skips step 1 cargo build)")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
-    ap.add_argument("--visual-packs", default=None, help="folder containing optional pack directories (default: repo-root visual_packs/)")
+    ap.add_argument("--visual-packs", default=None, help="prepared pack folder or recursive lookup of packs/bundles (default: repo-root visual_packs/; discovery stops at pack.json)")
     ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
     a = ap.parse_args()
     try:

@@ -208,6 +208,160 @@ class Formats(unittest.TestCase):
         with self.assertRaises(ValueError): glb(mesh()[:-1])
 
 
+class Bundles(unittest.TestCase):
+    setUp = Packs.setUp
+    write_manifest = Packs.write_manifest
+    resolve = Packs.resolve
+
+    def move_pack(self, name='upscaled_textures/endor'):
+        folder = self.lookup/name
+        folder.parent.mkdir(parents=True, exist_ok=True)
+        self.folder.rename(folder)
+        self.folder = folder
+
+    def add_pack(self, name, target):
+        folder = self.lookup/name
+        folder.mkdir(parents=True)
+        stock = self.baked/target
+        stock.parent.mkdir(parents=True, exist_ok=True)
+        stock.write_bytes(texture())
+        manifest = dict(version=1, replacements=[dict(file='wall.ktx2', targets=[dict(path=target, sha256=[vp.digest(stock)])])])
+        (folder/'pack.json').write_text(json.dumps(manifest))
+        (folder/'wall.ktx2').write_bytes(texture(color=120))
+        return folder
+
+    def snapshot(self):
+        # Check bytes and metadata: discovery/resolution must not rewrite inputs or bake files.
+        return {path.relative_to(self.root).as_posix():
+                (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns)
+                for path in self.root.rglob('*') if path.is_file() and not path.is_symlink()}
+
+    def test_recursive_bundles_sibling_mod_hashes_and_unchanged_inputs(self):
+        self.move_pack()
+        shared = self.add_pack('upscaled_textures/shared/foliage', 'common/textures/foliage.ktx2')
+        sibling = self.add_pack('other_mod', 'bf2_uta1/textures/sky.ktx2')
+        (self.lookup/'upscaled_textures/preview.zip').write_bytes(b'zip')
+        (self.lookup/'upscaled_textures/tools/empty').mkdir(parents=True)
+        before = self.snapshot()
+        with mock.patch.object(vp, 'digest', wraps=vp.digest) as digest:
+            entries, report = self.resolve()
+        names = ['other_mod', 'upscaled_textures/endor', 'upscaled_textures/shared/foliage']
+        self.assertEqual([p['name'] for p in report['packs']], names)
+        self.assertEqual([p['pack'] for p in report['targets']], names)
+        self.assertEqual(report['counts'], dict(packs=3, installed=3, missing=0, hash_mismatch=0, originals_hashed=3, ignored=2))
+        for folder in (self.folder, shared, sibling):
+            target = next(t for t in report['targets'] if t['pack'] == folder.relative_to(self.lookup).as_posix())
+            self.assertEqual(target['replacement_sha256'], vp.digest(folder/'wall.ktx2'))
+            self.assertEqual(target['stock_sha256'], vp.digest(self.baked/target['path']))
+            manifest = next(p for p in report['packs'] if p['name'] == target['pack'])
+            self.assertEqual(manifest['manifest_sha256'], vp.digest(folder/'pack.json'))
+            self.assertEqual(sum(c.args[0] == (self.baked/target['path']).resolve() for c in digest.call_args_list), 1)
+        self.assertEqual({r['path'] for r in report['ignored']}, {'upscaled_textures/preview.zip', 'upscaled_textures/tools'})
+        self.assertEqual((entries, report), self.resolve())
+        self.assertEqual(self.snapshot(), before)
+
+    def test_selected_pack_folder_is_itself_a_pack(self):
+        self.move_pack()
+        packs, report = vp.discover(self.folder, explicit=True)
+        entries = vp.resolve(packs, report, self.baked)
+        self.assertEqual([p['name'] for p in report['packs']], ['endor'])
+        self.assertEqual(report['targets'][0]['pack'], 'endor')
+        self.assertEqual(entries, [['assets_baked/'+self.name, str((self.folder/'wall.ktx2').resolve())]])
+
+    def test_manifest_root_owns_payload_and_preview_descendants(self):
+        self.move_pack()
+        payload = self.folder/'payload'
+        payload.mkdir()
+        (self.folder/'wall.ktx2').rename(payload/'wall.ktx2')
+        self.manifest['replacements'][0]['file'] = 'payload/wall.ktx2'
+        self.write_manifest()
+        (payload/'pack.json').write_text('not an implicit pack')
+        preview = self.folder/'previews/nested'
+        preview.mkdir(parents=True)
+        (preview/'pack.json').write_text('{')
+        (preview/'wall.ktx2').write_bytes(b'preview')
+        entries, report = self.resolve()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(report['counts']['packs'], 1)
+        self.assertEqual({r['path'] for r in report['ignored']}, {
+            'upscaled_textures/endor/payload/pack.json',
+            'upscaled_textures/endor/previews/nested/pack.json',
+            'upscaled_textures/endor/previews/nested/wall.ktx2'})
+
+    def test_nested_broken_manifest_names_exact_bundle_path_before_scan(self):
+        self.move_pack('upscaled_textures/maps/endor')
+        for raw in ('{', '{}', '{"version":true,"replacements":[]}',
+                    '{"version":1,"replacements":[{"file":"wall.ktx2","targets":[]}]}'):
+            with self.subTest(raw=raw):
+                (self.folder/'pack.json').write_text(raw)
+                with mock.patch.object(sys, 'argv', ['pack.py', '--visual-packs', str(self.lookup)]), \
+                     mock.patch.object(pack.input_scan, 'scan') as scan:
+                    with self.assertRaisesRegex(SystemExit, 'upscaled_textures/maps/endor/pack.json:.*fix or remove'):
+                        pack.main()
+                    scan.assert_not_called()
+
+    def test_nested_matching_conflict_names_both_packs_and_hashes_once(self):
+        self.move_pack()
+        self.add_pack('another_mod/shared', self.name)
+        before = self.snapshot()
+        with mock.patch.object(vp, 'digest', wraps=vp.digest) as digest:
+            with self.assertRaisesRegex(vp.PackError, 'duplicate matching target .*another_mod/shared and upscaled_textures/endor'):
+                self.resolve()
+        self.assertEqual(sum(c.args[0] == self.stock.resolve() for c in digest.call_args_list), 1)
+        self.assertEqual(self.snapshot(), before)
+        # A different accepted stock variant is skipped, rather than treated as a conflict.
+        self.manifest['replacements'][0]['targets'][0]['sha256'] = ['f'*64]
+        self.write_manifest()
+        entries, report = self.resolve()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(report['counts']['hash_mismatch'], 1)
+        self.assertEqual(report['counts']['originals_hashed'], 1)
+        self.assertIn('upscaled_textures/endor', report['warnings'][0])
+
+    def test_nested_paths_cannot_escape_the_pack_into_bundle_or_sibling(self):
+        self.move_pack()
+        outside = self.lookup/'upscaled_textures/outside.ktx2'
+        outside.write_bytes(texture())
+        for file in ('../outside.ktx2', '/outside.ktx2', 'C:/outside.ktx2', 'payload\\wall.ktx2'):
+            with self.subTest(file=file):
+                self.manifest['replacements'][0]['file'] = file
+                self.write_manifest()
+                with self.assertRaisesRegex(vp.PackError, 'upscaled_textures/endor/pack.json:.*unsafe relative path'):
+                    vp.discover(self.lookup)
+        self.manifest['replacements'][0]['file'] = 'wall.ktx2'
+        self.write_manifest()
+        (self.folder/'wall.ktx2').unlink()
+        (self.folder/'wall.ktx2').symlink_to(outside)
+        with self.assertRaisesRegex(vp.PackError, 'upscaled_textures/endor/pack.json:.*escapes'):
+            vp.discover(self.lookup)
+        (self.folder/'wall.ktx2').unlink()
+        (self.folder/'wall.ktx2').write_bytes(texture())
+        (self.folder/'pack.json').unlink()
+        external_manifest = self.root/'outside.json'
+        external_manifest.write_text(json.dumps(self.manifest))
+        (self.folder/'pack.json').symlink_to(external_manifest)
+        with self.assertRaisesRegex(vp.PackError, 'upscaled_textures/endor/pack.json:.*escapes'):
+            vp.discover(self.lookup)
+
+    def test_symlink_directories_are_not_followed_outside_or_in_cycles(self):
+        self.move_pack()
+        external = self.root/'external'
+        external.mkdir()
+        (external/'pack.json').write_text('{')
+        bundle = self.lookup/'upscaled_textures'
+        (bundle/'outside').symlink_to(external, target_is_directory=True)
+        (bundle/'cycle').symlink_to(self.lookup, target_is_directory=True)
+        (bundle/'alias').symlink_to(self.folder, target_is_directory=True)
+        (self.folder/'preview-link').symlink_to(external, target_is_directory=True)
+        (self.folder/'self-link').symlink_to(self.folder, target_is_directory=True)
+        entries, report = self.resolve()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(report['counts']['packs'], 1)
+        self.assertEqual({r['path'] for r in report['ignored']}, {
+            'upscaled_textures/outside', 'upscaled_textures/cycle', 'upscaled_textures/alias',
+            'upscaled_textures/endor/preview-link', 'upscaled_textures/endor/self-link'})
+
+
 @unittest.skipUnless(os.environ.get('OPENBF_PACK_TOOL'), 'build pak example and set OPENBF_PACK_TOOL for native integration')
 class NativeInstall(unittest.TestCase):
     setUp = Packs.setUp
@@ -251,13 +405,25 @@ class NativeInstall(unittest.TestCase):
 class PackScriptInstall(unittest.TestCase):
     setUp = Packs.setUp
     write_manifest = Packs.write_manifest
+    move_pack = Bundles.move_pack
+    add_pack = Bundles.add_pack
 
     def test_cached_bake_install_error_remove_and_sources(self):
+        self.cached_bake_case()
+
+    def test_cached_bake_nested_bundle_install_error_remove_and_sources(self):
+        self.cached_bake_case(bundle=True)
+
+    def cached_bake_case(self, bundle=False):
         # Exercise pack.py's complete orchestration with extraction/baking mocked at the cache boundary.
         # The pack writer, payload resolver, install, cache files and .sources.json stay real.
         self.lookup.rename(self.root/'visual_packs')
         self.lookup = self.root/'visual_packs'
         self.folder = self.lookup/'prepared pack'
+        if bundle:
+            self.move_pack()
+            self.add_pack('upscaled_textures/shared/foliage', 'common/textures/foliage.ktx2')
+            sibling = self.add_pack('other_mod', 'bf2_uta1/textures/sky.ktx2')
         (self.baked/'classes').mkdir()
         (self.baked/'classes/bf1_all.ron').write_text('unchanged class data')
         missions = self.root/'missions'; missions.mkdir(); (missions/'one.ron').write_text('unchanged mission')
@@ -268,9 +434,16 @@ class PackScriptInstall(unittest.TestCase):
         plan = dict(games={g: dict(gameplay=dict(kind='xbox-disc', path='local input', tree='cached tree'), visual=[]) for g in ('bf1', 'bf2')},
                     refusals=[], dlc=dict(used=False), found=[])
         out = self.root/'dist/openbf'
-        def build():
+        def snapshot():
+            return {str(p): (p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns)
+                    for root in (self.lookup, self.baked, missions) for p in root.rglob('*') if p.is_file()}
+        def build(selected=None):
+            before = snapshot()
             with contextlib.ExitStack() as stack:
-                stack.enter_context(mock.patch.object(sys, 'argv', ['pack.py', '--game-bin', os.environ['OPENBF_GAME_BIN'], '--out', str(out)]))
+                args = ['pack.py', '--game-bin', os.environ['OPENBF_GAME_BIN'], '--out', str(out)]
+                if selected is not None:
+                    args += ['--visual-packs', str(selected)]
+                stack.enter_context(mock.patch.object(sys, 'argv', args))
                 stack.enter_context(mock.patch.dict(os.environ, {}, clear=True))
                 stack.enter_context(mock.patch.object(pack, 'GAMEPLAY_TREES', {}))
                 for name, value in dict(ROOT=str(self.root), BAKED=str(self.baked), MISSIONS=str(missions)).items():
@@ -286,16 +459,36 @@ class PackScriptInstall(unittest.TestCase):
                 pack.main()
                 commands = [c.args[0] for c in runner.call_args_list]
                 self.assertTrue(all(c[0] == 'strip' or '--write-pack' in c for c in commands), commands)
+            self.assertEqual(snapshot(), before)
         build()
         source = Path(str(out)+'.sources.json')
         report = json.loads(source.read_text())['visual_packs']
-        self.assertEqual(report['counts']['installed'], 1)
+        self.assertEqual(report['counts']['installed'], 3 if bundle else 1)
         self.assertIn('replacement_sha256', report['targets'][0])
+        if bundle:
+            self.assertEqual([p['name'] for p in report['packs']],
+                             ['other_mod', 'upscaled_textures/endor', 'upscaled_textures/shared/foliage'])
+            build()
+            self.assertEqual(json.loads(source.read_text())['visual_packs'], report)
+            build(selected=self.folder)
+            direct = json.loads(source.read_text())['visual_packs']
+            self.assertEqual(direct['counts']['installed'], 1)
+            self.assertEqual(direct['targets'][0]['pack'], 'endor')
+            build()
         before = out.read_bytes(), source.read_bytes()
         self.manifest['replacements'] *= 2; self.write_manifest()
         with self.assertRaisesRegex(SystemExit, 'duplicate matching target'): build()
         self.assertEqual((out.read_bytes(), source.read_bytes()), before)
-        (self.folder/'pack.json').unlink()
+        if bundle:
+            # Removing the named mod removes all its components while the sibling remains.
+            (self.lookup/'upscaled_textures').rename(self.root/'removed_mod')
+            build()
+            remaining = json.loads(source.read_text())['visual_packs']
+            self.assertEqual(remaining['counts']['installed'], 1)
+            self.assertEqual(remaining['targets'][0]['pack'], 'other_mod')
+            sibling.rename(self.root/'removed_sibling')
+        else:
+            (self.folder/'pack.json').unlink()
         build()
         self.assertEqual(json.loads(source.read_text())['visual_packs']['counts']['installed'], 0)
         self.assertEqual(self.stock.read_bytes(), texture())

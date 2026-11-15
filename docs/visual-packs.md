@@ -7,19 +7,50 @@ normal build:
 python3 scripts/pack.py
 ```
 
-The layout must be `visual_packs/<pack-name>/pack.json`, with that pack's prepared
-payload files below its own folder. Remove the pack folder and run the same
+Each prepared pack has a `pack.json`, with its payload files below that manifest's
+own folder. Packs can be direct children of `visual_packs/` or grouped recursively
+inside a named mod folder. For example:
+
+```text
+visual_packs/
+  upscaled_textures/
+    endor/
+      pack.json
+      textures/bark.ktx2
+    shared/
+      foliage/
+        pack.json
+        textures/leaves.ktx2
+  another_mod/
+    pack.json
+    textures/wall.ktx2
+```
+
+The grouping folders need no manifest. Each component is authored independently;
+its payload paths stay relative to its own manifest, even after moving the whole
+mod folder. Existing `visual_packs/<pack-name>/pack.json` layouts still work.
+Remove a component or the whole named mod folder and run the same
 command to revert. The cached stock bake stays intact; adding, editing or removing
 a pack does not require `--rebake`. An absent or empty `visual_packs/` keeps stock
 packaging. This changes the packaged game; development runs reading the stock
 bake continue to use that bake.
 
-Use `--visual-packs <dir>` for a different folder containing pack directories.
+Use `--visual-packs <dir>` for a different folder containing packs or bundles,
+or select a prepared pack folder itself, such as
+`--visual-packs visual_packs/upscaled_textures/endor`.
 Relative option paths are relative to your current directory; the default is
 always relative to the repository. An explicitly named folder must exist.
-Archives, preview images, authoring tools and directories without `pack.json`
-are ignored and reported. A pack manifest is required to be valid, even if it
-would match no assets. Ordinary builds need no network service, AI tool, Blender,
+Discovery stops at every folder containing `pack.json`: that manifest owns its
+whole subtree. Payload or preview descendants are never searched for additional
+packs, even if they contain a `pack.json`. Put separately authored components
+beside a pack root or below a manifest-free grouping folder.
+
+Archives, preview images, authoring tools, symlink directories and directory trees
+containing no packs are ignored and reported. Grouping folders containing a
+discovered pack are not reported as ignored. Directory symlinks are never followed
+during discovery below the selected lookup folder, including links back into that
+tree. A discovered pack manifest is required to be valid, even if it would match
+no assets. Ordinary builds need no network service, AI tool, Blender,
 Pillow or additional executable to install prepared packs.
 
 The build matches exact baked asset paths and accepted stock SHA256 hashes.
@@ -32,8 +63,11 @@ Errors stop before replacing the existing packaged game.
 
 `<output>.sources.json` records each installed or skipped target, stock path,
 accepted and actual stock hash, replacement digest, pack name, manifest digest,
-ignored material and counts. Console output gives a short summary. Pack matching
-and validation run again on every build, including a cached bake. Only named,
+ignored material and counts. Console output gives a short summary. Pack names
+use stable forward-slash paths relative to the lookup folder, such as
+`upscaled_textures/endor`; a directly selected pack uses its own folder name,
+such as `endor`. Malformed manifests identify the exact component's `pack.json`.
+Matching and validation run again on every build, including a cached bake. Only named,
 present originals are hashed, once per path. Do not edit inputs during a build.
 
 ## Pack manifest v1

@@ -1,5 +1,6 @@
 """Drop-in presentation pack discovery and source substitutions; never edits a bake."""
 import hashlib
+import os
 from pathlib import Path
 import re
 import stat
@@ -57,7 +58,7 @@ def target_kind(name):
 
 
 def discover(lookup, explicit=False):
-    """Parse manifests before expensive builds. Non-pack material is reported, never installed."""
+    """Find pack roots recursively; a manifest owns its whole subtree, never implicit subpacks."""
     root = Path(lookup).expanduser().absolute()
     report = dict(schema=1, lookup=str(root), explicit=explicit, packs=[], ignored=[], targets=[], warnings=[])
     if not root.exists():
@@ -65,23 +66,28 @@ def discover(lookup, explicit=False):
             raise PackError(f'--visual-packs {root}: folder is missing; create it or omit the option')
         return [], report
     if not root.is_dir():
-        raise PackError(f'{root}: visual pack lookup must be a directory containing pack folders')
+        raise PackError(f'{root}: visual pack lookup must be a pack or a directory containing pack folders')
     packs = []
-    try:
-        for folder in sorted(root.iterdir()):
-            manifest = folder / 'pack.json'
-            if folder.is_symlink() or not folder.is_dir() or not (manifest.exists() or manifest.is_symlink()):
-                report['ignored'].append(dict(path=folder.name, reason='expected a pack directory with pack.json; archives, previews and tools are not installed'))
-                continue
+
+    def label(path):
+        # A directly selected pack has no relative component: use its own folder name.
+        return path.relative_to(root).as_posix() if path != root else root.name
+
+    def ignored(path, reason):
+        report['ignored'].append(dict(path=label(path), reason=reason))
+
+    def read_pack(folder):
+        manifest_name = f'{label(folder)}/pack.json'
+        try:
             manifest = child(folder, 'pack.json')
             doc = json_object(manifest.read_text(encoding='utf-8'))
-            fields(doc, ('version', 'replacements'), manifest)
+            fields(doc, ('version', 'replacements'), 'manifest')
             if type(doc['version']) is not int or doc['version'] != 1 or not isinstance(doc['replacements'], list) or not doc['replacements']:
-                raise PackError(f'{manifest}: expected version 1 and a nonempty replacements array')
-            pack = dict(name=folder.name, root=folder, replacements=[])
+                raise PackError('expected version 1 and a nonempty replacements array')
+            pack = dict(name=label(folder), root=folder, replacements=[])
             used = {'pack.json'}
             for index, row in enumerate(doc['replacements']):
-                where = f'{manifest}: replacements[{index}]'
+                where = f'replacements[{index}]'
                 fields(row, ('file', 'targets'), where)
                 file = relative(row['file'])
                 source = child(folder, file)
@@ -100,12 +106,46 @@ def discover(lookup, explicit=False):
                     targets.append(dict(path=name, sha256=[h.lower() for h in hashes], kind=kind))
                 pack['replacements'].append(dict(file=file, source=source, targets=targets))
                 used.add(file)
-            # Walk without following directory symlinks. Extra artwork/tools are informational only.
-            for path in sorted(folder.rglob('*')):
-                if not path.is_dir() and path.relative_to(folder).as_posix() not in used:
-                    report['ignored'].append(dict(path=path.relative_to(root).as_posix(), reason='not named by pack.json; not installed'))
-            report['packs'].append(dict(name=folder.name, manifest_sha256=digest(manifest)))
+            # Inventory extras, but never discover packs inside a manifest-bearing root.
+            def walk_error(error):
+                raise error
+            for parent, dirs, files in os.walk(folder, followlinks=False, onerror=walk_error):
+                dirs.sort()
+                for directory in dirs[:]:
+                    path = Path(parent) / directory
+                    if path.is_symlink():
+                        dirs.remove(directory)
+                        ignored(path, 'symlink directory; not followed or installed')
+                for file in sorted(files):
+                    path = Path(parent) / file
+                    if path.relative_to(folder).as_posix() not in used:
+                        ignored(path, 'not named by pack.json; not installed')
+            report['packs'].append(dict(name=label(folder), manifest_sha256=digest(manifest)))
             packs.append(pack)
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+            raise PackError(f'{manifest_name}: {error}') from error
+
+    def visit(folder):
+        if folder != root and folder.is_symlink():
+            ignored(folder, 'symlink; not followed or installed')
+        elif not folder.is_dir():
+            ignored(folder, 'expected a pack directory with pack.json; archives, previews and tools are not installed')
+        elif (folder / 'pack.json').exists() or (folder / 'pack.json').is_symlink():
+            read_pack(folder)
+        else:
+            before, ignored_before = len(packs), len(report['ignored'])
+            try:
+                for path in sorted(folder.iterdir()):
+                    visit(path)
+            except OSError as error:
+                raise PackError(f'{label(folder)}: cannot read bundle directory: {error}') from error
+            if folder != root and len(packs) == before:
+                # Report a nonpack subtree once, but never call a containing bundle ignored.
+                del report['ignored'][ignored_before:]
+                ignored(folder, 'no pack.json found; not installed')
+
+    try:
+        visit(root)
     except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
         raise PackError(f'visual packs: {error}; fix or remove the pack folder and run pack.py again') from error
     return packs, report
