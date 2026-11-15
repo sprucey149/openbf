@@ -253,6 +253,7 @@ fn a_prim_on_the_aimer_node_turns_with_the_gun() {
     let q = std::f32::consts::FRAC_PI_2;
     let p = 30.0f32.to_radians();
     s.vehicle_mut(h).unwrap().guns = vec![Some(crate::vehicle::gun::GunState {
+        target: None,
         look: (q, 0.0),
         aim: (q, p),
         rate: (0.0, 0.0),

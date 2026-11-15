@@ -207,13 +207,29 @@ tables at ELF 0x600e40, stride 0x50, copied by B2:493336-493354). Words 16..19
 are the two sticks' functions, read back by `FUN_004333a0`: 30 31 32 33 in every
 section but the flyer's, which holds 32 33 30 31 at 0x600ee0. So a flyer pilot's
 left stick does what a soldier's right stick does (pitch and turn), and the right
-stick throttle and roll. BF1's three tables (file offset 0x3ba190, stride 0x50, its
-reader `FUN_0034a7e8`, functions 18..21) hold the same swap in the third. Static
-reading only: [H] BF1's third section is the flyer's by analogy with BF2, its
-selector not opened. `input::FlightControls` uses those axes for the Classic
-setting. The port also offers RC Mode 2 for pilots, with yaw and throttle on
-the left stick and roll and pitch on the right. Guided ordnance uses Classic
-steering. The keyboard and mouse keep walk keys for throttle and roll and
+stick throttle and roll. BF1's three tables (ELF 0x519170, stride 0x50, copied
+into the controller at +0x100 by `FUN_0034cb48`; functions 18..21 at words
+16..19) hold the same swap in the third, but **the measured BF1 MAF seats do not select it**
+(corrected 2026-11-14; this said [H] "the third is the flyer's by analogy").
+`FUN_0034c5f8` reads the sticks through table `*controller`. [L] In three BF1
+BES1 save states (riding the MAF as pilot, in its copilot turret, in its rear
+turret) that index, at 0x642e5c, is 1. After leaving the MAF on foot it is 0.
+Table 1 holds 18 19 20 21, the soldier's order, so the measured BF1 MAF's
+left stick throttles and strafes and its right stick pitches and turns.
+Those MAF states do not establish the mapping of every BF1 flyer.
+The port's Classic default keeps movement on the left: aircraft with authored
+negative minimum speed, zero cruise speed and positive lateral speed, whose
+active flight model supports continuous strafe, use
+left-stick translation and right-stick aim. Continuously flying aircraft use
+left-stick yaw/pitch and right-stick throttle/roll. This capability rule applies
+on every source map, without per-class exceptions. BF2's roll channel is not
+continuous strafe, even when a side class retains a StrafeSpeed property. The maintainer clarified
+this distinction after the first uniform-swap implementation broke LAAT/i and
+MAF translation (2026-11-14). `WalkSim::map_flight_sticks` selects the mapping
+before keyboard/mouse merge; physics and simulation input channels do not change.
+RC Mode 2 remains opt-in, with yaw and
+throttle on the left and roll and pitch on the right. Guided ordnance uses
+Classic steering. The keyboard and mouse keep walk keys for throttle and roll and
 the mouse for pitch and turn (held rate below). The PS2's options screen can
 change its function table.
 
@@ -235,7 +251,10 @@ The port runs it in `game/src/kbm.rs` (`HeldRate`, `Kbm::flyer_pad`), outside th
 Pilot aim follows the **untilted aircraft forward**, not an independently
 accumulated pitch. BF1 `FUN_001dbbd8` and BF2 `FUN_00209758` remove the
 visual roll/pitch, store the resulting forward vector, and cast a 512 m
-aim ray from the eye (B1:86920 onward; B2:120741–120805). With the port's
+aim ray. For an unzoomed player, its origin is the ideal chase camera
+projected along forward to the eye's depth (current B1:86915–86933;
+B2:120299–120320), followed by the collision cast (B1:86948–86953;
+B2:120335–120340). With the port's
 rotation order this is pilot relative look `(0, tilt_pitch)`; gun aimers
 still follow the target through their own limits, and gunners retain
 independent seat aiming.

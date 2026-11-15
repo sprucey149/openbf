@@ -129,12 +129,9 @@ pub struct SoldierConstants {
     /// BF2 grenade release scales the class hand offset by `SkeletonRootScale`
     /// (FUN_00337b80, B2:329765–329795), independently of collision scale.
     pub skeleton_root_scale: f32,
-    /// All three authored `CollisionScale` damage terms are zero. The game
-    /// loader replays the class chain. PS2 collision damage multiplies by
-    /// these terms (BF1 FUN_00202f38:114478–114540; BF2
-    /// FUN_0023cfd0:155769–155866), so a landing cannot hurt this class.
-    /// Positive scales still use the port's provisional lethal-speed rule.
     pub collision_damage_immune: bool,
+    pub collision_threshold: [f32; 3],
+    pub collision_damage_scale: [f32; 3],
     /// The jet (card JETP, `analysis/re-jetpack.md` §2): `JetJump`, the kick's
     /// size at the jet's start (engine default 7.0).
     pub jet_jump: f32,
@@ -203,6 +200,8 @@ impl Default for SoldierConstants {
             collision_scale: 1.0,
             skeleton_root_scale: 1.0,
             collision_damage_immune: false,
+            collision_threshold: [10.0, 3.0, 0.0],
+            collision_damage_scale: [1.0, 0.0, 0.0],
             jet_jump: 7.0,
             jet_push: 14.0,
             jet_acceleration: 20.0,

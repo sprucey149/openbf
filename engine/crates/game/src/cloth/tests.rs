@@ -1,5 +1,78 @@
 use super::*;
 
+/// Step every cloth of one baked wearer through idle, a run and a second
+/// stance while its model frame moves; the pins must follow their bones and
+/// the free vertices stay finite. Returns (cloths, pose updates, moved).
+fn exercise(
+    side: &std::path::Path,
+    geometry: &str,
+    set: impl Fn(&crate::animator::Rig) -> usize,
+) -> (usize, usize, usize) {
+    let asset =
+        crate::assets::load_skinned_glb(&side.join("soldiers").join(format!("{geometry}.glb")))
+            .unwrap();
+    let raw: Vec<Cloth> =
+        ron::from_str(&pak::read_to_string(manifest::cloth::path(side, geometry)).unwrap())
+            .unwrap();
+    let rig = crate::soldier_vis::SoldierVisuals::load_rig(side, geometry, &asset).unwrap();
+    let set = set(&rig);
+    let (mut count, mut frames, mut moved) = (0, 0, 0);
+    for cloth in raw {
+        assert!(cloth.part < asset.mesh.submeshes.len());
+        let def = Definition::new(cloth, &asset.skeleton).unwrap();
+        let mut state = State::new(&def, Mat4::IDENTITY, &asset.skeleton.global_bind, 7);
+        let mut displacement = 0.0f32;
+        for i in 0..180 {
+            let body = match i / 60 {
+                0 => crate::animator::Body::Feet(0, crate::animator::Move::Idle),
+                1 => crate::animator::Body::Feet(0, crate::animator::Move::RunForward),
+                _ => crate::animator::Body::Feet(1, crate::animator::Move::Idle),
+            };
+            let pose = rig.still((&asset.clips, &asset.skeleton), set, body, None, i as f32);
+            let palette = asset.skeleton.palette(&pose.locals());
+            let globals: Vec<_> = palette
+                .iter()
+                .zip(&asset.skeleton.global_bind)
+                .map(|(p, b)| *p * *b)
+                .collect();
+            let t = i as f32 / 30.0;
+            let model =
+                Mat4::from_translation(Vec3::new(t * 0.3, 0., 0.)) * Mat4::from_rotation_y(t * 0.4);
+            state.step(&def, model, &globals, 1. / 30.);
+            for (p, expected) in state.positions.iter().zip(def.pin_positions(&globals)) {
+                assert!(p.distance(expected) < 1e-4, "{}: pin drift", def.raw.name);
+            }
+            assert!(state
+                .vertices(&def, &globals)
+                .iter()
+                .all(|v| Vec3::from(v.position).is_finite()));
+            for (p, rest) in state
+                .positions
+                .iter()
+                .zip(&def.raw.positions)
+                .skip(def.raw.pinned)
+            {
+                displacement = displacement.max(p.distance(Vec3::from(*rest)));
+            }
+            frames += 1;
+        }
+        assert!(
+            displacement < 1000.,
+            "{}: runaway {displacement}",
+            def.raw.name
+        );
+        moved += usize::from(displacement > 0.01);
+        count += 1;
+        eprintln!(
+            "{geometry} / {}: {} vertices, {} pins, max displacement {displacement:.3}m",
+            def.raw.name,
+            def.raw.positions.len(),
+            def.raw.pinned
+        );
+    }
+    (count, frames, moved)
+}
+
 #[test]
 fn every_hero_cloth_keeps_live_pins_and_finite_moving_geometry() {
     #[derive(serde::Deserialize)]
@@ -25,81 +98,49 @@ fn every_hero_cloth_keeps_live_pins_and_finite_moving_geometry() {
     let mut seen = std::collections::HashSet::new();
     let (mut count, mut frames, mut moved) = (0, 0, 0);
     for hero in heroes.heroes {
-        if !seen.insert(hero.geometry.clone()) {
+        if !seen.insert(hero.geometry.clone())
+            || !pak::exists(manifest::cloth::path(&side, &hero.geometry))
+        {
             continue;
         }
-        let asset = crate::assets::load_skinned_glb(
-            &side.join("soldiers").join(format!("{}.glb", hero.geometry)),
-        )
-        .unwrap();
-        let raw: Vec<Cloth> = ron::from_str(
-            &pak::read_to_string(manifest::cloth::path(&side, &hero.geometry)).unwrap(),
-        )
-        .unwrap();
-        let rig =
-            crate::soldier_vis::SoldierVisuals::load_rig(&side, &hero.geometry, &asset).unwrap();
         let anim = crate::roster::class_anim(&db, &hero.class, &db.weapon_slots(&hero.class));
-        let set = rig.weapon_set(
-            &anim.family,
-            anim.banks.first().map_or("rifle", |(_, b)| b.as_str()),
-        );
-        for cloth in raw {
-            assert!(cloth.part < asset.mesh.submeshes.len());
-            let def = Definition::new(cloth, &asset.skeleton).unwrap();
-            let mut state = State::new(&def, Mat4::IDENTITY, &asset.skeleton.global_bind, 7);
-            let mut displacement = 0.0f32;
-            for i in 0..180 {
-                let body = match i / 60 {
-                    0 => crate::animator::Body::Feet(0, crate::animator::Move::Idle),
-                    1 => crate::animator::Body::Feet(0, crate::animator::Move::RunForward),
-                    _ => crate::animator::Body::Feet(1, crate::animator::Move::Idle),
-                };
-                let pose = rig.still((&asset.clips, &asset.skeleton), set, body, None, i as f32);
-                let palette = asset.skeleton.palette(&pose.locals());
-                let globals: Vec<_> = palette
-                    .iter()
-                    .zip(&asset.skeleton.global_bind)
-                    .map(|(p, b)| *p * *b)
-                    .collect();
-                let t = i as f32 / 30.0;
-                let model = Mat4::from_translation(Vec3::new(t * 0.3, 0., 0.))
-                    * Mat4::from_rotation_y(t * 0.4);
-                state.step(&def, model, &globals, 1. / 30.);
-                for (p, expected) in state.positions.iter().zip(def.pin_positions(&globals)) {
-                    assert!(p.distance(expected) < 1e-4, "{}: pin drift", def.raw.name);
-                }
-                assert!(state
-                    .vertices(&def, &globals)
-                    .iter()
-                    .all(|v| Vec3::from(v.position).is_finite()));
-                for (p, rest) in state
-                    .positions
-                    .iter()
-                    .zip(&def.raw.positions)
-                    .skip(def.raw.pinned)
-                {
-                    displacement = displacement.max(p.distance(Vec3::from(*rest)));
-                }
-                frames += 1;
-            }
-            assert!(
-                displacement < 1000.,
-                "{}: runaway {displacement}",
-                def.raw.name
-            );
-            moved += usize::from(displacement > 0.01);
-            count += 1;
-            eprintln!(
-                "{} / {}: {} vertices, {} pins, max displacement {displacement:.3}m",
-                hero.geometry,
-                def.raw.name,
-                def.raw.positions.len(),
-                def.raw.pinned
-            );
-        }
+        let (c, f, m) = exercise(&side, &hero.geometry, |rig| {
+            rig.weapon_set(
+                &anim.family,
+                anim.banks.first().map_or("rifle", |(_, b)| b.as_str()),
+            )
+        });
+        count += c;
+        frames += f;
+        moved += m;
     }
     assert!(count > 0 && moved > 0);
     eprintln!("hero cloths: {count}, pose updates {frames}, moved {moved}");
+}
+
+/// The troops' cloth (the Hoth snowtroopers' skirt, the clone capes) is live,
+/// not only the heroes': the soldier bake writes a companion for every
+/// wearer, and every cloth in every companion moves.
+#[test]
+fn every_baked_cloth_companion_steps_live() {
+    let side = crate::assets::baked_root().join("side_bf2");
+    if !pak::exists(manifest::cloth::path(&side, "imp_inf_snowtrooper")) {
+        eprintln!("SKIP: the BF2 snowtrooper's cloth is not baked");
+        return;
+    }
+    let (mut count, mut frames, mut moved) = (0, 0, 0);
+    for path in pak::read_dir(side.join("soldiers")).unwrap() {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let Some(geometry) = name.strip_suffix(".cloths.ron") else {
+            continue;
+        };
+        let (c, f, m) = exercise(&side, geometry, |rig| rig.weapon_set("human", "rifle"));
+        count += c;
+        frames += f;
+        moved += m;
+    }
+    assert!(count > 0 && moved == count, "{moved} of {count} moved");
+    eprintln!("baked cloths: {count}, pose updates {frames}, moved {moved}");
 }
 
 fn sheet() -> Cloth {

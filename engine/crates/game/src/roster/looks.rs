@@ -34,21 +34,27 @@ pub fn flash_look(db: &ClassDb, weapon: &str) -> MuzzleFlashLook {
 /// chain's PROPs replayed parent first, each class's in file order, through
 /// the setters — `LaserLength` resets `GlowLength` / `BlurLength`, so the
 /// order is the value. `None` unless the chain ends at the engine's `bolt`
-/// or `laser` label (or a beam). The root look stops at the first
+/// or `laser` label, or a `beam`, whose own setter it replays
+/// ([`LaserLook::replay_beam`]). The root look stops at the first
 /// `NextCharge`; the renderer currently uses one look for all charges.
 pub fn laser_look(db: &ClassDb, ordnance: &str) -> Option<LaserLook> {
     let base = db.engine_base(ordnance)?;
-    if !["bolt", "laser", "beam"]
-        .iter()
-        .any(|b| base.eq_ignore_ascii_case(b))
+    let beam = base.eq_ignore_ascii_case("beam");
+    if !beam
+        && !["bolt", "laser"]
+            .iter()
+            .any(|b| base.eq_ignore_ascii_case(b))
     {
         return None;
     }
-    Some(LaserLook::replay(
-        chain_props(db, ordnance)
-            .into_iter()
-            .take_while(|(hash, _)| *hash != super::weapon_db::NEXT_CHARGE),
-    ))
+    let props = chain_props(db, ordnance)
+        .into_iter()
+        .take_while(|(hash, _)| *hash != super::weapon_db::NEXT_CHARGE);
+    Some(if beam {
+        LaserLook::replay_beam(props, db.is_bf2())
+    } else {
+        LaserLook::replay(props)
+    })
 }
 
 /// Engine labels whose setter chains into the bullet base that reads the
@@ -75,14 +81,16 @@ pub(crate) fn chain_props<'a>(db: &'a ClassDb, class: &str) -> Vec<(u32, &'a str
 }
 
 /// An ordnance class's impact effects (card FXP3, [`core::impact`]): the
-/// bullet base's surface slots (ctor defaults, then the chain), its
-/// `TrailEffect` and its `ExplosionName` class's look. `None` when the class
-/// is not in the db.
+/// bullet base's surface slots (ctor defaults, then the chain), or a beam's
+/// one `ImpactEffect` ([`ImpactLook::beam`]), its `TrailEffect` and its
+/// `ExplosionName` class's look. `None` when the class is not in the db.
 pub fn impact_look(db: &ClassDb, ordnance: &str) -> Option<ImpactLook> {
     let base = db.engine_base(ordnance)?;
     let bf2 = db.is_bf2();
     let mut l = ImpactLook::replay(chain_props(db, ordnance), bf2);
-    if !BULLET_BASES.iter().any(|b| base.eq_ignore_ascii_case(b)) {
+    if base.eq_ignore_ascii_case("beam") {
+        l = ImpactLook::beam(chain_props(db, ordnance));
+    } else if !BULLET_BASES.iter().any(|b| base.eq_ignore_ascii_case(b)) {
         // Only the ordnance base's TrailEffect applies.
         l = ImpactLook {
             trail: l.trail,
@@ -164,10 +172,10 @@ pub(crate) fn explosion_class(db: &ClassDb, name: &str) -> Option<ExplosionClass
 /// when the class is not in the db.
 pub fn explosion_look(db: &ClassDb, explosion: &str) -> Option<ExplosionLook> {
     db.get(explosion)?;
-    Some(ExplosionLook::replay(
-        chain_props(db, explosion),
-        db.is_bf2(),
-    ))
+    Some(ExplosionLook {
+        class: explosion.trim().to_ascii_lowercase(),
+        ..ExplosionLook::replay(chain_props(db, explosion), db.is_bf2())
+    })
 }
 
 pub(super) fn capitalise(s: &str) -> String {

@@ -44,7 +44,8 @@
 //! [`Layers::FLYER`], which the class rule sets to the soldier subset or,
 //! with `flyer_uses_vehicle`, the vehicle subset.
 //! Walker/hover traffic uses the named SOLDIER-subset surrogate
-//! in `traffic`; ordinary ground contacts still use [`HullFilter::Static`].
+//! in `traffic`; hover/treaded pairs use their VEHICLE subsets in
+//! `vehicle_pairs`. Terrain/building contacts use [`HullFilter::Static`].
 //! Also pending: the building/terrain subsets (nothing queries them), and
 //! the acquisition mask discrepancy: the PS2 aim-assist acquisition ray
 //! passes flag 0 and tests ALL bodies (RE §4, `FUN_00223850`), while
@@ -144,11 +145,14 @@ mod prim_contact;
 mod rays;
 mod shape;
 mod traffic;
+mod vehicle_pairs;
 mod walls;
 mod world;
 
 pub use prim_contact::{bounding_radius, PrimContact};
-pub use rays::{is_cut_by, lead_point, ray_heightfield, ray_terrain_ps2, RayHit};
+pub use rays::{
+    is_cut_by, lead_point, ray_heightfield, ray_heightfield_front, ray_terrain_ps2, RayHit,
+};
 pub(crate) use shape::MeshDigests;
 pub use shape::{trimesh, Aabb, Body, Capsule, Cutter, HullPart, Layers, Shape};
 pub use walls::{SWEEP_CONTACT_DIST, WALL_ITERATIONS};

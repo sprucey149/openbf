@@ -7,10 +7,15 @@
 //! A new test file goes in this directory with a `mod` line below.
 #![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
+#[path = "../../examples/support/walker_battle.rs"]
+#[allow(dead_code)]
+mod walker_battle;
+
 mod all_maps_load;
 mod ambience_ps2;
 mod announcer_ps2;
 mod atmosphere;
+mod atte_rear_arc;
 mod auto_turret_damage;
 mod auto_turrets;
 mod award_weapons;
@@ -24,23 +29,28 @@ mod class_dbs;
 mod cloaking;
 mod collision;
 mod collision_immunity;
+mod command_walker_map;
 mod coruscant_turret_contact;
 mod donor_materials;
 mod droideka_preview;
 mod event_messages;
 mod flag_hud;
+mod flyer_controls;
 mod flyer_decks;
 mod glb_material;
 mod global_sound;
 mod guided_rockets;
 mod gun_smooth;
+mod gunner_mouse_camera;
 mod gunner_snipe;
+mod hailfire_feedback;
 mod hero_ai;
 mod hero_assault;
 mod hero_audio;
 mod hero_combo;
 mod hero_vs_turret;
 mod heroes;
+mod hoth_object_hud;
 mod hud_layout;
 mod hunt_play;
 mod jet_bots;
@@ -71,6 +81,7 @@ mod skinned_glb;
 mod skirt_climb;
 mod sound_sublevels;
 mod space_ctf_visuals;
+mod spider_feedback;
 mod squad_orders_ps2;
 mod squad_vehicle_maps;
 mod station_destruction;
@@ -92,6 +103,7 @@ mod vehicle_normalization;
 mod vehicle_pads;
 mod vehicle_rider;
 mod walker_enter;
+mod walker_gun_aim;
 mod walker_shots;
 mod water_anim;
 mod water_floor;

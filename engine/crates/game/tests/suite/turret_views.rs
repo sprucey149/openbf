@@ -739,6 +739,8 @@ fn fixture_walk(first: Option<f32>) -> game::walk::WalkSim {
             infinite: true,
             reserve_clips: 0,
             fire_points: Vec::new(),
+            fire_limits: Vec::new(),
+            fire_pivots: Vec::new(),
         }],
         fire_point: Vec3::Z,
         pivot: Vec3::ZERO,
@@ -747,6 +749,8 @@ fn fixture_walk(first: Option<f32>) -> game::walk::WalkSim {
         pilot: false,
         framed: false,
         aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: None,
+        follows_owner: false,
         gunner: None,
         turn: Some(Turn::from_class(
             None,

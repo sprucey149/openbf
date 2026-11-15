@@ -336,3 +336,146 @@ and blended with ALPHA 0x44 per layer.
 - B3: the 0x108 precondition.
 - E1: the default-set edge.
 - B5: its weakest link is recorded in §2 and §11.
+
+## 13. Kashyyyk's rough-looking ground (2026-11-12 inspection)
+
+The maintainer compared a sharp, granular ground surface in the port with a
+softer BF2 PS2 screenshot. This investigation changes no runtime or baked input.
+The latest snapshot is `dist/openbf_data/playtest/last.json`, seed 370, tick 854,
+build `d187903231bd+dirty`; its camera is (142.45, 16.09, -77.09), yaw -2.08,
+pitch -0.85 radians. It provides the port-side spot, not a matched PS2 pose.
+
+**Confirmed inputs.** The owned PS2 KAS2.LVL contains `kas2_main_1` and
+`kas2_main_2` at 512 by 512, `kas2_main_3` at 256 by 256, and `kas2_detail`
+at 256 by 256. Dumping these with the current `bake tex-dump` decoder and
+comparing their RGBA pixels with mip 0 of the installed KTX2 files gives exact
+equality for all four. The manifest has no tier-2 alternatives, consistent with
+the pack's source receipt. This rules out a different cached texture or a PC
+replacement for those four sheets; it does not independently audit the decoder.
+
+The perceived relief is painted colour/contrast. The terrain path in
+`render/src/shader.wgsl::shade_unfogged` multiplies texture colour by COLR and
+the detail signal; it does not run a PBR normal/roughness material or displace
+the heightfield from those texture values. `kas2_detail`'s alpha is 39..194,
+mean 125.072, standard deviation 24.995. The existing `2*alpha/255` modulation
+can therefore range from 0.306 to 1.522 while remaining nearly neutral on
+average. The manifest's 64 m patch and the binding's scale 8 repeat it every
+8 m. This explains extra local grain, not new geometry.
+
+**Controlled port captures.** Using the existing release game and the same
+camera, captures at 1264 by 926 with DTLX enabled and disabled show that disabling
+the detail signal reduces fine grain but leaves the larger raised-looking ridges
+in the base texture. The disabled case uses a scratch manifest; its other inputs
+are shared read-only with the current bake. A 632 by 463 capture also demonstrates
+the resolution-dependent change in fine texture. These are renderer diagnostics,
+not a pixel-matched PS2 comparison or an exact emulation of PS2 display resolution.
+
+**Confirmed presentation difference.** The owned KAS2.LVL's DATA records author
+Softness(1) at file offset 0x14a74c and SoftnessParam(60) at 0x14a764.
+`FUN_00586578` in the current `SWBFRNT2.ELF-decomp.c:706554–706870` builds
+the half-resolution softening image and composites it over the frame; lines
+706833–706839 use the softness parameter in ALPHA 0x64. As established in
+`re-glow.md` §4, the blend weight is 60/128 = 46.875%. This softens texture
+contrast as well as edges. The port deliberately omits that legacy softness;
+`re-glow.md` §7 records the presentation difference. Its DomeInfo brightness
+filter and HDR bloom are different operations and do not replace this pass.
+
+The omitted softening and higher-resolution presentation are supported
+contributors to the sharper, rockier appearance. The original detail signal
+also adds contrast, but disabling it alone is not an adequate explanation or
+fix. Assigning a percentage of the screenshot difference to each term, or
+excluding additional PS2 texture-residency/LOD differences, requires a fresh
+matched-camera PS2 capture. No Kashyyyk-specific brightness/detail tune was
+introduced, and `dist/openbf.exe` was not changed for this inspection.
+
+Local, ignored evidence is under `engine/artifacts/kas2-roughness/`:
+`detail-on.png`, `detail-off.png`, `half-resolution.png`, `detail-alpha.png`,
+`texture-stats.json`, `source-texture-info.json`, the disc texture dumps and
+the two inspection scripts. The render command is
+`game.exe --map engine/assets_baked/bf2_kas2 --headless --cam 142.45,16.09,-77.09,-119.175,-48.701 --size 1264x926 --capture-frame <out.png>`;
+the no-detail case substitutes the scratch map directory there.
+
+## 14. Requested softness preview (2026-11-12)
+
+The maintainer requested applying the softening so he could inspect it. The
+sky parser now retains Softness and SoftnessParam, the lighting manifest
+appends an optional `softness` field, and the bake writes the authored strength
+only while the enable is nonzero. Old manifests default to no softening.
+The targeted Kashyyyk rebake writes `softness: Some(60.0)`. This playtest update
+rebakes Kashyyyk only; other existing manifests retain their previous look.
+
+The renderer blends the finished scene with a low-pass copy in display colour,
+using strength/128. It runs after brightness filtering/bloom and before the
+overlay, so the HUD and menus remain sharp. Clearing the scene also clears
+softness. The initial preview was enabled by default; the follow-up in §15
+changes this to explicit opt-in without changing the manifest or profile.
+
+**[H] PROVISIONAL kernel approximation; replace: matched-camera PS2 knockout
+captures of FUN_00586578's exact sampling sequence.** This preview reuses the
+existing resolution-scaled separable box filter (height/224 pixels, bounded by
+the existing filter cap), rather than reproducing the GS's half-resolution
+resample grid and its additional subpixel blur taps. The authored 60/128 blend
+strength is exact; the blur kernel is not a claim of pixel-equivalent PS2
+emulation. The original investigation's remaining LOD/residency questions stay
+open. No texture pixels or geometry were tuned to fit the photograph.
+
+At the section-13 camera, `softness-off.png` and `softness-on.png` are captures
+from the same rebuilt game and freshly baked map, selected only with the
+environment override. Both were inspected. Mean RGB changes by
+(-0.0122, -0.0122, -0.0055) display levels; mean horizontal neighboring-channel
+difference falls from 5.9032 to 4.5020, about 23.7%. There are 1,065,241 changed
+pixels. These measure this view's softening, not a PS2 match score.
+
+Checks on base d1879032 plus local edits:
+
+- `cargo check -p game -p bake`: passed.
+- The serial headless renderer run passed all 85 GPU referees, including the
+  display-space softness formula and existing frame-filter/world-scale/HUD
+  overlay ordering checks. Its wrapper was edited during that run and returned
+  a shell error after the tests; the clean focused command below returned 0.
+- `bash scripts/gpu_tests.sh --render softness_blends_display_colours_after_the_brightness_filter`:
+  1 passed, including off/on/off byte equality and scene-clear state at 448 and
+  1080 lines. The script now forwards an optional render test filter.
+- `cargo test -p mungefs --lib sky::tests`: 3 passed.
+- `cargo test -p manifest --lib`: 24 passed, including the new lighting-field
+  round trip; the concurrent vehicle work's field-order test expected no
+  `hover` field and failed. No change to that unrelated fixture was made here.
+- `cargo build --release -p game -p bake`: passed.
+- `bake.exe map extracted/bf2/lvl/DATA/_LVL_PS2/KAS/KAS2.LVL engine/assets_baked/bf2_kas2`:
+  completed (81 models, 61 textures, 285 instances). The original texture
+  inputs remain unchanged; the new authored lighting metadata is included.
+- `git diff --check`: passed. Full alignment acceptance remains unmeasured.
+
+The release game packed the current assets and missions into
+`dist/openbf-softness-staged.exe` (28,740 files). After validating the pack
+footer it replaced `dist/openbf.exe` (1,957,903,484 bytes). Profile and playtest
+files were preserved, and the profile hash was unchanged across replacement.
+
+## 15. Retained as an opt-in experiment (2026-11-12)
+
+After inspecting the preview, the maintainer requested retaining the current
+scene-wide filter disabled by default for future contributor investigation.
+`OPENBF_SOFTNESS=1` is now the only enabling value. An absent variable, `0`,
+or any other value leaves the pass off. The authored manifest strength remains
+available, but does not activate the renderer by itself. No terrain-only
+alternative was added.
+
+For an opt-in playtest from the repository root in PowerShell:
+
+```powershell
+$env:OPENBF_SOFTNESS = '1'
+& .\dist\openbf.exe
+```
+
+Remove that environment variable to return to the default. There is no saved
+profile option or menu entry. Maps need the optional baked lighting `softness`
+value; Kashyyyk's current bake retains 60. Old bakes without the field have no
+effect even when the variable is set.
+
+The implementation lives in `mungefs::sky` (the two authored keys),
+`bake::lighting` (enabled authored strength), `ManifestLighting::softness`,
+`game::viewer::look::apply_lighting` (the opt-in gate), and `render::filter`
+plus `filter.wgsl` (display-space blend). `frame::submit` places it after the
+scene effects and before the overlay. The existing softness GPU regression
+checks the formula, reset and scene clearing. The exact PS2 kernel and source
+LOD questions in §§13–14 are still open; this is a dormant investigation aid.

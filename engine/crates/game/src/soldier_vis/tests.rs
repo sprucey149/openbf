@@ -2,6 +2,7 @@ use super::*;
 
 mod combo_aim;
 mod hero_behavior;
+mod seat_clock;
 
 /// Card USKN: a part takes its class's override of the group its
 /// texture is listed under; parts in no group, and classes with no

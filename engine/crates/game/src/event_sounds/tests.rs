@@ -216,6 +216,8 @@ fn seat_gun_contact_uses_seat_weapon() {
                 infinite: true,
                 reserve_clips: 0,
                 fire_points: Vec::new(),
+                fire_limits: Vec::new(),
+                fire_pivots: Vec::new(),
             }],
             fire_point: Vec3::new(0.0, 1.0, 2.0),
             pivot: Vec3::Y,
@@ -225,6 +227,8 @@ fn seat_gun_contact_uses_seat_weapon() {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
+            weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         })],
     })];
@@ -633,6 +637,33 @@ fn air_expiry_uses_the_fired_class_expire_sound_once_at_the_final_position() {
         weapon_class: held as u32,
     }];
     assert!(sounds(&walk).is_empty());
+}
+
+/// A hover's or walker's VehicleCollision plays the class's
+/// VehicleCollisionSound at the vehicle and nothing when the class has none
+/// (FUN_00366858 plays block+0x34, B1:354138-354145).
+#[test]
+fn vehicle_collision_plays_only_the_class_sound() {
+    use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    let (mut walk, _, _) = scene();
+    let at = Vec3::new(3.0, 1.0, -4.0);
+    let vehicle = walk.sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Hover,
+        class: 0,
+        home_team: Some(0),
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: at,
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    walk.sim.events = vec![Event::VehicleCollision { vehicle, pos: at }];
+    walk.vehicle_sounds = vec![crate::vehicle_class::VehicleSoundClass::default()];
+    assert!(sounds(&walk).is_empty(), "no class sound, no stand-in");
+    walk.vehicle_sounds[0].collision_sound = Some("hover_hit".into());
+    assert_eq!(sounds(&walk), vec![("hover_hit".to_owned(), at)]);
 }
 
 /// Issue #173: a Force Choke's hold plays the victim class's `ChokeSound` on

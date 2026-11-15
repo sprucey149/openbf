@@ -265,6 +265,12 @@ Offsets: T = template, S = Spawner (T+0x7c), I = emitter instance, N = emitter-p
 - [V] **6.5 SPARK** is a camera-facing ribbon of 3 points: tail `pos − vel·L`, mid, head `pos`, L =
   SparkLength·sizeMul, half-width size′ (244993–245033). **STREAK** is a camera-facing ribbon through the emitter's
   particles in spawn order, half-width size′, U = the particle's rotation value (543776–544007); fewer than 3 → nothing.
+  Each point keeps its own particle's colour: B1 `FUN_0047e108` stores the colour beside the position, width and U it
+  hands `FUN_0047df68` for the next segment (B1:544412-544419). [L] 2026-11-14, BF2 YAV1 slot 8: the speeder's
+  `com_sfx_vehiclesmoke_speeder` (`Smoketrail` STREAK, alpha 0 at birth, faded out by 0.45 s) is the trail behind a
+  bike at 56/80 health (`DamageStartPercent 75` / `DamageStopPercent 35`); set to 80/80 in RAM, the trail stops. The
+  port drew the whole ribbon in the newest particle's colour, so the trail ended in a hard cut;
+  `render::ParticleShape::ShadedRibbon` now carries each point's bytes.
 - [V] **6.6 GEOMETRY** draws the model (table 0x69c678) at the particle, scaled by size (no sizeMul), turned about Y by
   the raw rotation in radians, under the emitter node matrix; missing model → nothing (245036–245124).
 - [V][O] **6.7 GS state** (**asm**, records written only by `FUN_004b02f0`, 0x4b034c–0x4b04cc): {ALPHA word, TEST, PRIM}
@@ -623,3 +629,105 @@ Not matched:
   `[00,00,00,a7]`), but the map bake dropped alpha from any sheet no MASK/BLEND segment names, so it drew a red sheet.
   The map bake now keeps the alpha of every texture a GEOMETRY model names (`fx_model_named`), and the side/common
   effect bake keeps it for all its model sheets.
+
+
+## 17. Hailfire purple trail sibling visibility (2026-11-13) [V][M] UNAUDITED
+
+The maintainer reported that Hailfire secondary rockets lose their purple glow
+after a short flight. The supplied BF2 PS2 slot 8 was saved during the reference
+image. Scope: rocket presentation and the separately reported missing player
+Hailfire gatling sound on `feature/vehicle-parity`, base
+`1f07b8858a2aff3d5215a43033a4a950b6c1ac99` plus the existing dirty parity work.
+No issue or public ownership update was made; other agents' AT-TE changes are
+retained. The latest port black box was read first: BF2 GEO1, seed 424, build
+`1f07b8858a2a+dirty`, tick 149, no stored firing events. It does not capture the
+reported Hailfire firing interval, so the source state and real-data tests supply
+the firing evidence.
+
+### Shared scene view terms, not a short-lived flare
+
+The ordnance names `com_sfx_weap_rockettrail_purple`. Its root smoke emitter
+has BoundingRadius 25; its spark and attached flare siblings author 5. All
+three emit indefinitely while the projectile exists. The flare particles have
+short individual lives and are replaced continuously.
+
+The previous port flattened that sibling chain and independently computed each
+emitter's view terms. The root therefore used the 500 m render class while its
+purple siblings faded at 40-50 m. Native rendering chooses the scene record's
+class once and traverses its sibling instances under the same view terms:
+BF2 `FUN_00377620`, lines 361315-361398 (one `FUN_0037a090` setup followed by
+sibling traversal through `FUN_00375210`); `FUN_0037a090`, lines 362718-362810,
+computes the fade and density terms. This corrects the implication in the
+port description that every flattened sibling owns an independent distance
+fade. Independent top-level emitters still have independent scene records.
+
+Read-only RAM in the converted user slot 8, SLUS-21240 v2.01, CRC `02f4b541`,
+ROM SHA1 `b385edc89d053ca8238b47c6549e78f45eb88ca4`:
+
+- Root template `0x1647380`, sibling `0x1647550`, flare `0x1647720`.
+  Root radius 25 and class `0x682290`; siblings radius 5, class `0x682250`.
+  Render-class distance at +0x1c is respectively 500 and 50 m.
+- Scene wrapper `0x1b93cb0` points at the root instance `0x1b9bc20` through
+  +0xd0, and its +0xc0 is the ROOT's `0x682290`. The sibling instances hang
+  from the instance's +0x34; they do not run separate scene culling calls.
+- `engine/artifacts/hailfire-glow/ps2-slot8.png` and `ps2-30.png` preserve
+  the native purple rockets before and after 30 advanced video frames.
+  EE dumps are `native-0/ee.bin` and `native-30/ee.bin`. No emulated memory
+  was changed. The original slot 8 was untouched; compatibility conversion
+  wrote a separate local state. Tracking run: `01M7BNJAVCG1RX52QXYVD0WXQ5`.
+
+`EffectDef` now retains each flattened emitter's root index. Drawing uses that
+root's view terms for the sibling chain; child-effect construction keeps its
+own root groups. Authored particle lifetimes, colours, bounds and missile
+motion remain unchanged. This applies the native sibling rule to effects
+sharing that mechanism, not only one named rocket.
+
+### Hailfire gatling audio
+
+The Hailfire is a treaded hover. The seat weapon fire-loop collector and its
+style loader admitted only walkers and flyers, so its inherited
+`rep_weap_inf_chaingun_fire` loop never reached the mixer. Both filters now
+also admit hover vehicles. This composes with the concurrent AT-TE spin/fade
+implementation in `walker_shots::voices`; its implementation is retained.
+The new real-map regression fires from the player seat, checks a baked and
+decodable bank take, verifies nonzero gain at the drawn camera, and checks
+that the fire-loop request ends on release. No gain or weapon timing value
+was changed by this follow-up.
+
+Focused validation and remaining acceptance are recorded below.
+
+
+### Checks and handoff
+
+- `cargo test --manifest-path engine/Cargo.toml -p game --lib fx:: --
+  --test-threads=1`: **118 passed, 5 ignored**. Includes the new native-group
+  regression (siblings share the root range; an independent root keeps its
+  own range), real purple trail draws on every sampled tick from 14 to 370 m,
+  retirement after Stop, existing trail identity, child and resupply tests.
+- `cargo test --manifest-path engine/Cargo.toml -p game --test suite
+  hailfire_feedback -- --nocapture`: **1 passed**. The real Geonosis Hailfire
+  requests its firing loop while the player holds FIRE; its baked take
+  exists and decodes, and the loop gain is positive at the player camera.
+  Releasing the trigger ends the unfaded fire-loop requests. This is a
+  headless decoder/mixer-input check, not a physical-speaker audition.
+- Same Cargo-built suite executable, `walker_gun_aim:: --test-threads=1
+  --nocapture`: **7 passed, 1 failed** on the shared tree. Spider aiming and
+  death regressions pass. The AT-TE gunner test at look `(2.7915928, -0.08)`
+  observes barrel sides `{true}` where it expects two; rerunning
+  `walker_gun_aim::an_atte_gunners_bolts_land_under_his_reticle --exact
+  --nocapture` reproduces it. The concurrent AT-TE gun/audio source is still
+  changing, so this follow-up does not claim combined vehicle acceptance.
+  Logs: `combined-walker-tests.txt`, `atte-shared-failure.txt` under the
+  local artifact directory. This follow-up's audio changes only extend the
+  two vehicle-kind filters to Hover; AT-TE projectile code is not edited.
+- Focused rustfmt and diff-whitespace checks pass. Updated crate-map rows;
+  FX facade remains below 1,500 lines. `source-receipt.json` records source
+  hashes from the shared dirty tree after the Hailfire checks.
+
+No copyrighted state, RAM dump, capture, baked audio or test binary is staged.
+No packed EXE rebuild or manual port playtest is claimed. Full alignment,
+new GPU/golden images and full vehicle parity remain unchecked. The native
+emulator generation was stopped after the read-only comparison. The user's
+original slot 8 remains unchanged.
+
+The maintainer confirmed these Hailfire changes work and authorized their commit on 2026-11-13. Other vehicle-parity and AT-TE edits remain outside this commit.

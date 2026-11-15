@@ -803,6 +803,10 @@ PLAN locks BF2 handling for ground vehicles. **BF2's code with BF1's data is nei
   0.5, ForwardTurnSpeed 0.8, YawLimits ±90°, PitchLimits −35 / 40°, flags 0, 1, 3, 4, the angles 87 / 88 / 89°,
   StompThreshold 0.5) and MaxSpeed = z·30/N = 19.54, which BF2's clock plays at ×(N − 1)/N = ×0.9. No boost: it never
   had one.
+- **The driver's aim stays BF2's.** BF1's W3/W6 (§13.3) clamp the aim yaw to YawLimits and turn the stick's excess into a
+  slow body turn, so on the PS2 a BF1 AT-TE driver cannot look behind (playtest 2026-11-14, states 5-7). BF2's I7-I16
+  never clamp the aim yaw, so the port's camera swings round while the body follows. Kept as BF2's on 2026-11-14.
+  Seat guns are not body values: BF1's rear arcs clamp like BF2's (`gun::Turn::from_class`).
 - **The other way,** if the maintainer wants BF1's pace under BF2's handling: MaxSpeed = z·TEMP_AnimationSpeed·30/N on every
   BF1-map walker (AT-ST 6.48, AT-AT 2.22, AT-TE 2.80) and no boost. One switch in the build.
 

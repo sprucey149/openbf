@@ -37,6 +37,8 @@ const WATER_TINT: [f32; 4] = [0.16, 0.28, 0.34, 1.0];
 /// GPU-uploaded scene: a static draw list the renderer consumes every frame.
 pub struct SceneGpu {
     pub draws: Vec<DrawCmd>,
+    pub(super) terrain_lod: Option<TerrainLod>,
+    pub(super) softness: Option<f32>,
     /// (class, count) skipped for having no drawable model — for one-time logging.
     pub skipped: Vec<(String, usize)>,
     /// Draws that resolved NO texture and fell back to a flat colour, as
@@ -159,7 +161,39 @@ impl SpeckleAnim {
     }
 }
 
+pub(super) struct TerrainLod {
+    detailed: std::ops::Range<usize>,
+    sheet: usize,
+    near: f32,
+    far: f32,
+    detailed_far: Option<f32>,
+    enabled: bool,
+}
+
 impl SceneGpu {
+    pub fn set_terrain_lod(&mut self, enabled: bool) {
+        let Some(lod) = self.terrain_lod.as_mut() else {
+            return;
+        };
+        if lod.enabled == enabled {
+            return;
+        }
+        for draw in &mut self.draws[lod.detailed.clone()] {
+            draw.cull = if enabled {
+                Some(lod.near)
+            } else {
+                lod.detailed_far
+            };
+        }
+        self.draws[lod.sheet].cull = Some(if enabled { lod.far } else { 0.0 });
+        lod.enabled = enabled;
+    }
+
+    pub fn apply_render_options(&mut self, r: &mut Renderer, terrain_lod: bool, softness: bool) {
+        self.set_terrain_lod(terrain_lod);
+        r.set_softness(if softness { self.softness } else { None });
+    }
+
     pub fn pose_ctf(&mut self, sim: &core::sim::Sim, player: core::unit::UnitHandle) {
         for (ii, range) in &self.instance_draws {
             if self.flag_instances.contains(ii) {

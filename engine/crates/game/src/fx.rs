@@ -51,6 +51,7 @@ pub mod emitter;
 mod flame;
 mod flyer_spray;
 mod force;
+mod hover_water;
 mod jet;
 mod props;
 mod repair;
@@ -169,18 +170,21 @@ pub struct EffectDef {
     pub hash: u32,
     pub name: Option<String>,
     pub emitters: Vec<FxEmitter>,
+    /// Siblings share the root emitter's scene record and view terms.
+    view_roots: Vec<usize>,
     era: Era,
     /// Empty for BF2 (every particle its own seed).
     caches: Vec<Vec<Variant>>,
     children: Vec<Option<Arc<EffectDef>>>,
 }
 
-fn flatten(e: &FxEmitter, out: &mut Vec<FxEmitter>) {
+fn flatten(e: &FxEmitter, out: &mut Vec<FxEmitter>, roots: &mut Vec<usize>, root: usize) {
     let mut own = e.clone();
     let sibling = own.sibling.take();
     out.push(own);
+    roots.push(root);
     if let Some(s) = sibling {
-        flatten(&s, out);
+        flatten(&s, out, roots, root);
     }
 }
 
@@ -192,6 +196,13 @@ impl EffectDef {
         era: Era,
         rng: &mut Lcg,
     ) -> Self {
+        let mut flattened = Vec::new();
+        let mut view_roots = Vec::new();
+        for em in &emitters {
+            let root = flattened.len();
+            flatten(em, &mut flattened, &mut view_roots, root);
+        }
+        let emitters = flattened;
         // S+0x128: a per-spawner random set at construction.
         let caches = match era {
             Era::Bf1 => emitters
@@ -205,10 +216,14 @@ impl EffectDef {
             .enumerate()
             .map(|(i, em)| {
                 em.geometry.child.as_ref().map(|child| {
-                    let mut emitters = Vec::new();
-                    flatten(child, &mut emitters);
                     let hash = hash.wrapping_add(i as u32 + 1);
-                    Arc::new(Self::new(hash, None, emitters, era, &mut Lcg(hash)))
+                    Arc::new(Self::new(
+                        hash,
+                        None,
+                        vec![*child.clone()],
+                        era,
+                        &mut Lcg(hash),
+                    ))
                 })
             })
             .collect();
@@ -216,6 +231,7 @@ impl EffectDef {
             hash,
             name,
             emitters,
+            view_roots,
             era,
             caches,
             children,
@@ -276,14 +292,10 @@ impl Library {
             };
             for e in set.effects {
                 effects.entry(e.hash).or_insert_with(|| {
-                    let mut emitters = Vec::new();
-                    for em in &e.emitters {
-                        flatten(em, &mut emitters);
-                    }
                     Arc::new(EffectDef::new(
                         e.hash,
                         e.name.clone(),
-                        emitters,
+                        e.emitters.clone(),
                         effect_era,
                         rng,
                     ))
@@ -432,6 +444,7 @@ pub struct LiveEffect {
     station: Option<(usize, usize)>,
     vehicle: Option<(VehicleHandle, usize)>,
     flyer_exhaust: Option<(VehicleHandle, usize)>,
+    hover_water: Option<VehicleHandle>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -484,6 +497,7 @@ impl LiveEffect {
             station: None,
             vehicle: None,
             flyer_exhaust: None,
+            hover_water: None,
             burn: None,
             float: None,
         };
@@ -590,7 +604,8 @@ impl LiveEffect {
                 continue;
             }
             let em = &self.def.emitters[i];
-            let terms = draw::view_terms_with_bias(d, em.bounding_radius, zoom, bias);
+            let root = &self.def.emitters[self.def.view_roots[i]];
+            let terms = draw::view_terms_with_bias(d, root.bounding_radius, zoom, bias);
             if terms.fade <= 0.0 {
                 continue;
             }
@@ -793,6 +808,11 @@ pub struct Fx {
     sky: Vec<sky::SkyEffect>,
     storm: Option<storm::Storm>,
     pub particle_lod_bias: f32,
+    /// The local player's camera shake ([`crate::camera_shake`]), fed by
+    /// this tick's blasts in [`Fx::ingest`].
+    pub shake: crate::camera_shake::CameraShake,
+    /// This tick's blasts with a shake, and where, until [`Fx::ingest`].
+    shake_blasts: Vec<(Vec3, core::impact::Shake)>,
 }
 
 impl std::fmt::Debug for Fx {
@@ -1009,8 +1029,13 @@ impl Fx {
     /// Detonate an explosion class's look at `pos` (B1 FUN_002701a0
     /// B1:193756–193807): its `Effect` — BF2 one of its rows at random (B2
     /// FUN_0030c8f8), or at or below `water` + 0.3 m its `WaterEffect` on the
-    /// surface, and only with a damage radius. False when nothing spawned.
+    /// surface, and only with a damage radius. Its debris is thrown either
+    /// way (B2:287993-288244). False when no effect spawned.
     pub fn explode(&mut self, look: &ExplosionLook, pos: Vec3, water: Option<f32>) -> bool {
+        self.chunks.blast(&look.class, pos, self.library.as_ref());
+        if look.shake.outer > 0.0 {
+            self.shake_blasts.push((pos, look.shake));
+        }
         let (spawned, pos) = match water.filter(|w| pos.y <= w + WATER_BLAST_DEPTH) {
             Some(w) => {
                 if look.radius_outer <= 0.0 {
@@ -1283,7 +1308,9 @@ impl Fx {
     /// Read this tick's sim events into effects.
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
+        self.shake_player(walk);
         self.follow_flyer_exhaust(walk);
+        self.follow_hover_water(walk);
         self.soldier_water(walk);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
@@ -1293,6 +1320,31 @@ impl Fx {
                 .effect
                 .as_deref()
         });
+    }
+
+    /// This tick's blasts shake the local player's camera, measured from
+    /// the object he controls: his vehicle when seated, else his soldier,
+    /// each by its blast sphere; none while dead (B2:288300-288322). Then
+    /// one camera update of a tick: the PS2's camera ran once per 30 Hz
+    /// frame. OURS: a gunner measures from the vehicle he rides, where the
+    /// PS2 asks his controlled turret. trace: B2:288305 vtable +0x24.
+    fn shake_player(&mut self, walk: &WalkSim) {
+        let sim = &walk.sim;
+        let from = sim.unit(walk.player).filter(|u| u.alive).map(|u| {
+            match sim.seat_of(walk.player).and_then(|(h, _)| sim.vehicle(h)) {
+                Some(v) => (v.pos, sim.vehicle_blast_sphere(v).1),
+                None => (
+                    u.soldier.pos,
+                    core::sim::soldier_blast_sphere(u.soldier.stance).1,
+                ),
+            }
+        });
+        for (pos, shake) in std::mem::take(&mut self.shake_blasts) {
+            if let Some((at, w)) = from {
+                self.shake.blast(&shake, at.distance(pos), w);
+            }
+        }
+        self.shake.tick(core::TICK_DT);
     }
 
     pub fn update(&mut self, dt: f32) {

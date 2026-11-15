@@ -12,6 +12,7 @@ pub mod bolt_light;
 pub mod bolt_vis;
 pub mod bot_names;
 pub mod camera_collide;
+pub mod camera_shake;
 pub mod capture_feed;
 pub mod cheats;
 pub mod class_picker;

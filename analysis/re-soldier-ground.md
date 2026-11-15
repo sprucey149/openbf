@@ -355,7 +355,7 @@ The KAM1 ramp walk of §2.4 on the landed code: 22 of 24 ramp ticks grounded, 0 
   155769–155866, class+0x7dc / +0x7e8).
   - The threshold = T0 + T1·(up·n) + T2·(fwd·n); the BF1 defaults are (10, 3, 0), FUN_0020d238 121824–121839. So a
     flat landing starts to hurt at 13 m/s, a ~4.7 m drop.
-  - The port uses a PROVISIONAL 25 m/s cut-off (`sim/state.rs` `LETHAL_LANDING_SPEED`) for classes with nonzero collision damage. Authored zero-scale immunity is retained (§8); the positive-scale damage law remains SLAND debt.
+  - The port now applies this law on landing (§9), replacing the earlier 25 m/s lethal-only shortcut. Authored zero-scale immunity is retained (§8).
 - **Steep faces lift.** 0 ≤ n.y ≤ 0.6 contacts push out along the true normal (§1.3); the port's wall pass pushes
   horizontally only. Noted on SLAND; no card.
 - **BF1 AI half rate.** An unimportant soldier (< 10 m/s, > 45 m from the camera, off screen: FUN_00236508) skips an
@@ -701,3 +701,89 @@ and respawn-state hashes, partial/ordered class overrides and owned class
 loads. Original-game landing traces and the nonzero-scale collision-damage
 model remain unchecked; the old 25 m/s policy must not be described as the
 PS2 damage formula.
+
+## 9. Partial landing damage and the local red flash (2026-11-12)
+
+**[O] Primary-code reading; no new PS2 landing capture.** The maintainer reported
+a Kashyyyk platform drop doing no damage, while the PS2 takes a little health and
+flashes red. The port still had only the 25 m/s lethal cutoff from §8: all smaller
+falls were completely harmless. `dist/openbf_data/playtest/prev3.json`, seed 362,
+build `840cb04a6d0a+dirty`, records the player falling from approximately
+(24.89, 26.81, -97.27) at tick 1296 to (30.73, 16.76, -98.11) at tick 1323,
+still at 400 health. That snapshot predates base `e159484de718`; its build identity,
+rather than the checkout field in the header, is the relevant source revision.
+
+Re-read in the current local BF2 export, `SWBFRNT2.ELF-decomp.c`:
+
+- `FUN_00250488:168734–168742` initializes CollisionThreshold to (10, 3, 0)
+  and CollisionScale to (1, 0, 0).
+- `FUN_0023cfd0:155130–155153` evaluates both vectors against the body up and
+  forward rows dotted with the contact normal. For approach speed `a = -v·n`,
+  threshold `t = T0 + T1(up·n) + T2(forward·n)` and scale
+  `s = S0 + S1(up·n) + S2(forward·n)`, damage is `(a-t)^2 s` only when `a>t`
+  and the result is positive.
+- `FUN_0023cfd0:155160–155179` fills the damage scales with ones and sends
+  the resulting damage through the normal damage dispatch. The previously read
+  BF1 twin and vector setters are cited in §§4 and 8.
+- The existing red flash follows the ordinary damage callback's post-damage
+  health test (`game/src/hit_flash.rs`, BF2 `FUN_001dfb38:91408–91437` in the
+  older export): damage must exceed 2% of health left. No attacker direction is
+  needed for this flash.
+
+Implementation: preserve the complete authored vectors, including partial class
+overrides; retain their active and respawn values in the simulation hash; calculate
+damage from velocity immediately before floor resolution; apply it once when an
+airborne soldier lands. The airborne body basis uses world up and yaw forward.
+The class's all-zero scale and the player's invincibility cheat still suppress
+ordinary landing damage. Death regions, the kill floor and hard under-map deaths
+keep their separate rules. The recovery preview uses the same damage calculation
+to reject fatal descents. Lethal falls use unattributed damage-death bookkeeping.
+
+A dedicated FallDamage event sends actual health loss and remaining health to
+the existing red flash, without inventing a shooter or awarding a hit. Black box
+schema 17 records `fall_damage` with the victim and those two numbers; the reader
+and headless event CSV understand it. This is scoped to landings: the PS2's full
+wall-contact damage and moving-contact relative velocities are not implemented
+by this change.
+
+The owned-map regression starts from tick 1320's last airborne segment at
+(30.02, 18.41, -98.15), with velocity (6.9, -17.4, 0.6) inferred from the rounded
+tick 1319 and 1320 positions. It verifies one survivable hit on the actual baked
+platform and a red flash from that event. This is a bounded reconstruction, not
+an exact replay of the missing velocity history. Fresh frame-matched PS2 damage
+magnitude and whole-round balance acceptance remain unchecked.
+
+### 9.1 Checks on base e159484de718 with local edits
+
+- `cargo check -p game --tests --examples`: passed, including the new event's
+  exhaustive headless CSV consumer and the black-box reader.
+- `cargo test -p core --lib sim::landing`: 4 passed.
+- `cargo test -p core --lib -- --skip fmath::tests::no_std_transcendentals_in_game_sim_inputs --quiet`:
+  2,241 passed, 2 ignored, 1 filtered. The unfiltered run exposed three old
+  fixed-cutoff fixtures, now adjusted to truly lethal damage, plus the existing
+  loading-screen annotation failure below.
+- `bash scripts/gpu_tests.sh --game-lib --release landing`: 6 passed, including
+  a real simulated fall routed through EventFeed with no fake attacker or hit
+  credit. The class-vector override test also passed independently in that
+  release test executable (1 passed).
+- `cargo test --release -p game --test fall_damage -- --ignored --test-threads=1 --nocapture`:
+  1 passed. The reconstructed Kashyyyk landing dealt 35.32843 health damage,
+  left 364.67157/400 health and armed the red flash. The existing missing
+  `deathregion2` manifest warning was printed during mission setup.
+- `git diff --check`: passed. No baked asset schema or input changed for this
+  fix; it consumes the existing class properties at runtime.
+
+The excluded referee rejects `main/windowed/loading.rs` because its trailing
+test module has a `#[path = "loading_tests.rs"]` annotation between `#[cfg(test)]`
+and `mod tests;`. That annotation is already in base e159484de718; neither it
+nor the referee was changed here. No complete alignment, full-round or fresh
+PS2 comparison acceptance is claimed. Concurrent vehicle work in the shared
+checkout was preserved; the checks describe the tree at each command's run.
+
+Local handoff: `cargo build --release -p game` passed. The rebuilt game packed
+the current `engine/assets_baked` and `engine/missions` with `--write-pack` into
+`dist/openbf-fall-damage-staged.exe` (28,740 files). After checking the archive
+footer, that staged file replaced `dist/openbf.exe` (1,957,897,851 bytes).
+`dist/openbf_data` was preserved, including its playtest files; the profile's
+SHA-256 remained `611d2e339329dcc42848947d7927edef577e63039d1bf34c6fdc1e3fb6613dc6`
+across replacement. No asset rebake was needed for these runtime changes.

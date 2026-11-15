@@ -91,6 +91,7 @@ impl Fx {
             crate::render_blend::blend_in_looking(walk, look);
         }
         self.follow_flyer_exhaust(walk);
+        self.follow_hover_water(walk);
         if let Some(vis) = vis {
             vis.update(walk, dt);
             let (muzzles, jets, burns) = (

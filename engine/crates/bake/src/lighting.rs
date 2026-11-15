@@ -322,6 +322,12 @@ pub fn lighting_from(sky: Option<&Sky>, lights: Option<&Lights>, bf2: bool) -> M
         near_scene_range: sky.and_then(|s| s.info.near_scene_range),
         far_scene_range: sky.and_then(|s| s.info.far_scene_range),
         filter: sky.and_then(|s| filter_from(s.dome.as_ref()?)),
+        softness: sky.and_then(|s| {
+            let d = s.dome.as_ref()?;
+            let strength = d.softness_param?;
+            (d.softness.unwrap_or(0.0) != 0.0 && strength.is_finite())
+                .then_some(strength.clamp(0.0, 128.0))
+        }),
     }
 }
 

@@ -36,7 +36,9 @@
 //! **BF1 overrides (card ELFR, 2026-09-29):** where BF1's ELF segment rule
 //! (`analysis/re-material-flags.md` §0.4 [V]) contradicts the census on a
 //! Normal word with neither 0x02 nor 0x04 (OPAQUE, no test) or a Scroll word
-//! with 0x04 (BLEND), the ELF wins — [`bf1_elf_verdict`]; the GLB's
+//! with 0x04 (BLEND), the ELF wins — [`bf1_elf_verdict`]; Normal words with
+//! 0x04 and without 0x02 also blend (the BF1 gunship canopy, 2026-11-14).
+//! The GLB's
 //! `extras.rule` says `"elf"` there. PCSX2 walkabout pairs settled both.
 //!
 //! **BF2 override (sprint, 2026-11-01):** BF2's draw is the same on the point
@@ -121,13 +123,20 @@ pub fn bf1_elf_rule_enabled() -> bool {
 ///   histogram (YAV1's temple and BES1's control-room holo panels,
 ///   `scanlines` 0x415).
 ///
-/// The other §0.6 disagreements are not taken here: a Normal 0x04 word
-/// (`kam_crate`'s 0x05 body) stays the census's, and so does every 0x02
-/// word (the leaves/bamboo 0x07 MASK agree already).
+/// - a Normal-class word with 0x04 and without 0x02 blends too. The BF1
+///   gunship canopy (0x05, sharing its sheet with opaque trim) exposed the
+///   histogram's false opaque verdict. The ELF Normal draw composites it
+///   (`analysis/re-material-flags.md` §2), confirmed in the user's slot 6/7.
+///   Every 0x02 word retains the existing verdict (leaves/bamboo 0x07 MASK).
 pub fn bf1_elf_verdict(flags: u32) -> Option<AlphaMode> {
     match Bf1Class::of(flags) {
         Bf1Class::Normal if flags & crate::detail::ALPHA_IS_MEANINGFUL == 0 => {
             Some(AlphaMode::Opaque)
+        }
+        Bf1Class::Normal
+            if flags & crate::detail::ALPHA_IS_MEANINGFUL == crate::detail::TRANSPARENT =>
+        {
+            Some(AlphaMode::Blend)
         }
         Bf1Class::Scroll if flags & crate::detail::TRANSPARENT != 0 => Some(AlphaMode::Blend),
         _ => None,
@@ -1120,8 +1129,9 @@ mod tests {
             verdict_with(0x414, &bf1("Scroll"), Some(&ramp), true),
             (AlphaMode::Blend, Rule::Modulation)
         );
-        // Not ruled here: the leaves' 0x07 MASK, `kam_crate`'s 0x05 body,
-        // Scroll without 0x04, Specular, and a segment with no texture.
+        // A Normal translucent word blends even when the histogram has
+        // many opaque texels (the gunship canopy shares its sheet with trim).
+        // The leaves' 0x07 MASK, Scroll without 0x04 and Specular stay as before.
         let leaves = stats(0.2, 0.4, 255);
         assert_eq!(
             verdict_with(0x07, &normal, Some(&leaves), true),
@@ -1129,7 +1139,7 @@ mod tests {
         );
         assert_eq!(
             verdict_with(0x05, &normal, Some(&stats(0.55, 0.05, 255)), true),
-            (AlphaMode::Opaque, Rule::Mask)
+            (AlphaMode::Blend, Rule::Elf)
         );
         assert_eq!(
             verdict_with(0x410, &bf1("Scroll"), Some(&lines), true),
@@ -1213,7 +1223,7 @@ mod tests {
         assert_eq!(verdict(0x1_0007, &bf2, Some(&bladder)).0, AlphaMode::Mask);
         assert_eq!(
             verdict(0x85, &bf1("Normal"), Some(&bladder)).0,
-            AlphaMode::Opaque
+            AlphaMode::Blend
         );
         assert_eq!(verdict(0x85, &bf2, None), (AlphaMode::Opaque, Rule::None));
     }
@@ -1243,8 +1253,8 @@ mod tests {
         // sheet (37 % of the golden). The old OR has 0x04 set, so D7 keeps it.
         assert_eq!(
             verdict(0x04, &bf1("Normal"), Some(&stats(0.896, 0.02, 255))).0,
-            AlphaMode::Opaque,
-            "the rule itself is unchanged: this draw is still OPAQUE"
+            AlphaMode::Blend,
+            "the ELF override now also composites Normal translucent words"
         );
         assert!(
             keep_alpha(true, 0x04, false, false, false),

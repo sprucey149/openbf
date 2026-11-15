@@ -656,6 +656,7 @@ impl Renderer {
         // The DomeInfo frame filter (card BFLT, `filter.rs`): its own
         // full-screen pipeline over a copy of the finished 3D frame.
         let filter = crate::filter::FilterState::new(&device, format, copyable);
+        let softness = crate::filter::FilterState::new(&device, format, copyable);
         let particle_blur =
             crate::particle_blur::ParticleBlur::new(&device, format, &globals_bgl, &texture_bgl);
         let heat_character_mask = PipelineDesc {
@@ -829,6 +830,7 @@ impl Renderer {
                 ..Default::default()
             },
             filter,
+            softness,
             sun_flare: None,
             bloom,
             particle_blur,

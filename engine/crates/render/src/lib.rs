@@ -96,7 +96,7 @@ mod texture;
 mod world_scale;
 
 pub use bloom::Bloom;
-pub use bolt::{BoltDraw, RibbonVertex};
+pub use bolt::{BeamRibbons, BoltDraw, RibbonVertex};
 pub use camera::Camera;
 pub use capture::{encode_png, encode_png_rgb};
 pub use device::HEADLESS_FORMAT;
@@ -420,6 +420,7 @@ pub struct Renderer {
     /// The DomeInfo frame filter (`filter.rs`, card BFLT): its pipeline,
     /// this map's values ([`Renderer::set_frame_filter`]) and the frame copy.
     filter: filter::FilterState,
+    softness: filter::FilterState,
     sun_flare: Option<sun_flare::State>,
     bloom: bloom::BloomState,
     particle_blur: particle_blur::ParticleBlur,
@@ -520,6 +521,7 @@ impl Renderer {
         self.set_sky_particles(Vec::new());
         self.set_terrain_lights(Default::default());
         self.set_frame_filter(None);
+        self.set_softness(None);
         self.set_bloom(None);
         self.set_leaf_fall(Vec::new(), None, None);
         self.lighting = Lighting::default();

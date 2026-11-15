@@ -111,7 +111,7 @@ fn track(
         if let Some(q) = prev {
             let d = q.angle_between(b).to_degrees();
             series.push(d);
-            if k >= 60 {
+            if k >= 70 {
                 let jump = d > JUMP && last < HOLD;
                 if k < 120 {
                     out.still_worst = out.still_worst.max(d);

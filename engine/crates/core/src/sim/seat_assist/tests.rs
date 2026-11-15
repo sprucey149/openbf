@@ -28,6 +28,8 @@ fn test_gun(slew: Slew, filter: f32) -> GunSetup {
             infinite: true,
             reserve_clips: 0,
             fire_points: Vec::new(),
+            fire_limits: Vec::new(),
+            fire_pivots: Vec::new(),
         }],
         fire_point: Vec3::new(0.0, 2.0, 1.5),
         pivot: Vec3::new(0.0, 2.0, 0.0),
@@ -47,6 +49,8 @@ fn test_gun(slew: Slew, filter: f32) -> GunSetup {
         )),
         framed: true,
         aimer_bind: Quat::IDENTITY,
+        weapon_aimer: None,
+        follows_owner: false,
         gunner: None,
     }
 }

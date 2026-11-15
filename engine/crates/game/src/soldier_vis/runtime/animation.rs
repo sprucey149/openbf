@@ -1,8 +1,8 @@
 //! Advance soldier animators from the current simulation state.
 
 use super::{
-    drawn, rider_now, seat_now, tp, AnimInput, ClassAnim, Mat4, Rig, SeatClock, SoldierAsset,
-    SoldierVisuals, UnitVisual, WalkSim,
+    drawn, rider_now, seat_now, tp, turn_number, AnimInput, ClassAnim, Mat4, Rig, SeatClock,
+    SoldierAsset, SoldierVisuals, UnitVisual, WalkSim,
 };
 
 impl SoldierVisuals {
@@ -53,25 +53,26 @@ impl SoldierVisuals {
             // vehicle that does (card VRIDE): hung at the seat's hardpoint,
             // posed by the seat's clip.
             v.seat_model = None;
-            let tick = walk.sim.tick;
+            let at = walk.blend.shown_at(walk.sim.tick);
             // A full-circle seat's yaw number: BF2 the yaw rate over the
             // turn speed (B2:189542-189546), BF1 the raw stick
             // (B1:137715-137719, T+0x78), which turns the yaw against its
             // sign on the PS2 as the port's `rx` does: -rate / speed.
             let bf2 = self.bf2;
-            let turn = |c: SeatClock| if bf2 { c.stick } else { -c.stick };
-            let rider = u
-                .mount
-                .filter(|_| u.alive)
-                .and_then(|m| rider_now(&self.walker_rigs, &self.hover_nine, walk, m, self.bf2));
+            let turn = |n: f32| if bf2 { n } else { -n };
+            let rider = u.mount.filter(|_| u.alive).and_then(|m| {
+                rider_now(
+                    &self.walker_rigs,
+                    &self.hover_rigs,
+                    &self.hover_nine,
+                    walk,
+                    m,
+                    self.bf2,
+                )
+            });
             if let Some(r) = rider {
-                let c = SeatClock::advance(
-                    &mut v.seat_clock,
-                    tick,
-                    r.look.0,
-                    r.yaw_rate,
-                    Mat4::IDENTITY,
-                );
+                let c = SeatClock::advance(&mut v.seat_clock, at, r.look.0, Mat4::IDENTITY);
+                let n = turn_number(r.rate, c, r.yaw_rate);
                 v.seat_model = Some(r.model);
                 let Some(pose) = &r.seat.pilot_pose else {
                     continue;
@@ -82,7 +83,7 @@ impl SoldierVisuals {
                         None => tp::nine_pose(
                             -r.look.1,
                             r.look.0,
-                            turn(c),
+                            turn(n),
                             r.seat.pitch_limits,
                             r.seat.yaw_limits,
                         ),
@@ -116,10 +117,11 @@ impl SoldierVisuals {
                 continue;
             };
             let held = s.hang.parent.map_or(Mat4::IDENTITY, |p| s.now[p]);
-            let c = SeatClock::advance(&mut v.seat_clock, tick, s.look.0, s.yaw_rate, held);
+            let c = SeatClock::advance(&mut v.seat_clock, at, s.look.0, held);
+            let n = turn_number(s.rate, c, s.yaw_rate);
             let mut now = s.now;
             if let (true, Some(p)) = (s.lags, s.hang.parent) {
-                now[p] = c.prev;
+                now[p] = c.held;
             }
             v.seat_model = Some(s.hang.matrix(s.model, &now));
             let Some(pose) = &s.seat.pilot_pose else {
@@ -130,7 +132,7 @@ impl SoldierVisuals {
                     tp::nine_pose(
                         -s.look.1,
                         s.look.0,
-                        turn(c),
+                        turn(n),
                         s.seat.pitch_limits,
                         s.seat.yaw_limits,
                     )

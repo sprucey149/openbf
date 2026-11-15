@@ -124,6 +124,8 @@ pub struct MenuModel {
     pub rc_flight_controls: bool,
     pub invert_y: bool,
     pub low_power_resolution: bool,
+    pub terrain_lod: bool,
+    pub scene_softness: bool,
     /// Automatic quality (LAN §8b.2): the render scale follows the frame
     /// times; Low power resolution is then locked ([`row_locked`]).
     pub auto_quality: bool,
@@ -197,6 +199,8 @@ pub enum MenuAction {
     ToggleFlightControls,
     ToggleInvertY,
     ToggleLowPowerResolution,
+    ToggleTerrainLod,
+    ToggleSceneSoftness,
     /// Automatic quality on or off (LAN §8b.2).
     SetAutoQuality(bool),
     /// Issue #172: the Display mode row's choice.
@@ -357,6 +361,8 @@ pub enum Row {
     FlightControls,
     InvertY,
     LowPowerResolution,
+    TerrainLod,
+    SceneSoftness,
     InputIcons,
     Quit,
     /// The Game Menu's Options and Cheats rows.
@@ -559,7 +565,7 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             if m.rc_flight_controls {
                 "Left stick controls yaw and throttle. Right stick controls roll and pitch."
             } else {
-                "Left stick controls yaw and pitch. Right stick controls roll and throttle."
+                "Left stick moves or steers. Right stick aims in hovercraft; rolls and throttles in fighters."
             }
             .to_owned(),
         ),
@@ -839,6 +845,12 @@ fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Ve
         }
         Row::InvertY if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleInvertY)
+        }
+        Row::TerrainLod if single && (input.confirm || adjust) => {
+            actions.push(MenuAction::ToggleTerrainLod)
+        }
+        Row::SceneSoftness if single && (input.confirm || adjust) => {
+            actions.push(MenuAction::ToggleSceneSoftness)
         }
         Row::LowPowerResolution if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleLowPowerResolution)
@@ -1310,6 +1322,8 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
                 .into(),
             ),
         ),
+        Row::TerrainLod => ("Distant Terrain".into(), on_off(m.terrain_lod)),
+        Row::SceneSoftness => ("Scene Softness".into(), on_off(m.scene_softness)),
         Row::InvertY => ("Invert Mouse Y".into(), on_off(m.invert_y)),
         Row::LowPowerResolution => (
             "Low Power Resolution".into(),
@@ -1456,6 +1470,8 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         actions.push(a);
                                     }
                                     match row {
+                                        Row::TerrainLod => actions.push(MenuAction::ToggleTerrainLod),
+                                        Row::SceneSoftness => actions.push(MenuAction::ToggleSceneSoftness),
                                         Row::InvertY => actions.push(MenuAction::ToggleInvertY),
                                         Row::LowPowerResolution
                                             if row_locked(m, *row).is_none() =>

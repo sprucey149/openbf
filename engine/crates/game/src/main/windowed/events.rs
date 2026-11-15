@@ -512,7 +512,7 @@ impl winit::application::ApplicationHandler for App {
                                 let look = if controls.is_some() {
                                     1.0
                                 } else {
-                                    walk.pad_look_for_battle(
+                                    walk.pad_look_for_seat(
                                         self.profile.settings.pad_look_sensitivity,
                                     )
                                 };
@@ -521,7 +521,17 @@ impl winit::application::ApplicationHandler for App {
                                     bb.stick(self.stick_sample.0, self.stick_sample.1);
                                 }
                                 let pad = match controls {
-                                    Some(layout) => self.kbm.flyer_pad(layout.map_sticks(pad)),
+                                    Some(_) => self.kbm.flyer_pad(
+                                        self.walk
+                                            .as_ref()
+                                            .expect("battle walk")
+                                            .0
+                                            .map_flight_sticks(
+                                                self.profile.settings.flight_controls,
+                                                pad,
+                                            )
+                                            .expect("flight controls selected"),
+                                    ),
                                     None => self.kbm.pad(pad),
                                 };
                                 game::pause::resume_pad(&mut self.resume_gate, pad)
@@ -615,6 +625,8 @@ impl winit::application::ApplicationHandler for App {
                                 == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
+                            terrain_lod: self.profile.settings.terrain_lod,
+                            scene_softness: self.profile.settings.scene_softness,
                             auto_quality: self.profile.settings.auto_quality,
                             window_mode: self.display.shown(self.profile.settings.window_mode),
                             exclusive_fullscreen: self.display.exclusive,
@@ -624,7 +636,7 @@ impl winit::application::ApplicationHandler for App {
                             cursor: self.pause_menu.cursor,
                             page: Some(self.pause_menu.page),
                             popup: self.pause_menu.confirm,
-                            restart_available: false,
+                            restart_available: self.current.is_some(),
                             texts: game::pause::texts(&self.feed),
                             respawn_label: game::pause::respawn_label(walk, &self.feed),
                             in_shell: None,
@@ -826,6 +838,8 @@ impl winit::application::ApplicationHandler for App {
                                     == input::FlightControls::RcMode2,
                                 invert_y: self.profile.settings.invert_y,
                                 low_power_resolution: self.profile.settings.low_power_resolution,
+                                terrain_lod: self.profile.settings.terrain_lod,
+                                scene_softness: self.profile.settings.scene_softness,
                                 auto_quality: self.profile.settings.auto_quality,
                                 window_mode: self.display.shown(self.profile.settings.window_mode),
                                 input_icons_label: self.profile.settings.input_icons.label(),
@@ -1158,6 +1172,8 @@ impl winit::application::ApplicationHandler for App {
                     // see-through (`game::camera_collide`).
                     see = walk.camera_see_through();
                     if let Some(r) = self.renderer.as_mut() {
+                        self.vehicle_vis
+                            .set_tick_share(game::render_blend::share(walk));
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
                         extra.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
                         self.deka_vis.eye = Some(walk.camera().position);
@@ -1246,7 +1262,7 @@ impl winit::application::ApplicationHandler for App {
                     // are the sim's (card SPSEL), moved by the pad bits.
                     spawn =
                         spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
-                    let camera = walk.camera();
+                    let camera = self.fx.shake.apply(walk.camera());
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
                     {
@@ -1286,6 +1302,11 @@ impl winit::application::ApplicationHandler for App {
 
                 let frozen = self.frozen();
                 if let (Some(r), Some(gpu)) = (&mut self.renderer, &mut self.gpu) {
+                    gpu.apply_render_options(
+                        r,
+                        self.profile.settings.terrain_lod,
+                        self.profile.settings.scene_softness,
+                    );
                     // The water moves on the renderer's clock (queue OC).
                     if let Err(e) = gpu.animate_water_live(r, camera.position) {
                         eprintln!("water: {e:#}");

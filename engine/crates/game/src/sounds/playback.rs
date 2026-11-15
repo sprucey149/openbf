@@ -131,7 +131,7 @@ impl SoundLib {
         });
     }
 
-    fn play_loop_set(
+    pub(super) fn play_loop_set(
         &mut self,
         audio: &mut audio::Audio,
         listener: &Listener,

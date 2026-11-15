@@ -1,5 +1,6 @@
 //! Disc-authored cloth beside a soldier GLB. Older bakes keep their rigid
 //! skinned fallback; a companion opts only its listed parts into simulation.
+//! Written for every soldier that wears cloth, absent for one that wears none.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

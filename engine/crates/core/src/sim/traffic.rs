@@ -86,19 +86,32 @@ impl Sim {
             }
             sim.collision
                 .ground_hull_cast(h, other, step)
-                .map(|(fraction, _)| (fraction, other))
+                .map(|(fraction, n)| (fraction, other, n))
         };
         let best = (0..self.vehicles.len())
-            .filter_map(|j| contact(self, j).map(|(fraction, _)| fraction))
+            .filter_map(|j| contact(self, j).map(|(fraction, _, _)| fraction))
             .min_by(f32::total_cmp);
         let ai = self.ground_ai_pilot(h);
         if let Some(first) = best {
             for j in 0..self.vehicles.len() {
-                let Some((fraction, other)) = contact(self, j) else {
+                let Some((fraction, other, n)) = contact(self, j) else {
                     continue;
                 };
                 if fraction > first {
                     continue;
+                }
+                // The walker's collision sound: a vehicle on the other side
+                // and a closing velocity relative to it (B1 FUN_00217d50,
+                // B1:128782, 128786-128819, 128855; re-vehicle-sounds §9).
+                // OURS: the contact is this sweep's, the only walker/vehicle
+                // contact the port has, so only the moving walker plays it.
+                // measure: whether the PS2 also calls the other body's
+                // callback for the same contact.
+                let (a, b) = (&self.vehicles[i], &self.vehicles[j]);
+                if a.kind == VehicleKind::Walker && (a.vel - b.vel).dot(n) < 0.0 {
+                    let pos = a.pos;
+                    self.events
+                        .push(super::Event::VehicleCollision { vehicle: h, pos });
                 }
                 // Decide BOTH priorities before altering either velocity.
                 let (a, b) = (&self.vehicles[i], &self.vehicles[j]);

@@ -483,6 +483,18 @@ pub fn lowres_enabled() -> bool {
 /// drawn sheets take it.
 const DEFAULT_LOW_RES_MAX_DISTANCE: f32 = 2000.0;
 
+pub fn terrain_lod_range(
+    enabled: bool,
+    available: bool,
+    lighting: &manifest::ManifestLighting,
+    sky: Option<&manifest::ManifestSky>,
+) -> Option<(f32, f32)> {
+    if !enabled || !available {
+        return None;
+    }
+    lowres_range(far_cull_from(lighting), lighting, sky)
+}
+
 /// Where the `LOWR` sheet is drawn: `(near, far)` metres from the eye, or
 /// `None` when this map draws none.
 ///
@@ -702,6 +714,10 @@ pub fn apply_lighting(r: &mut Renderer, scene: &Scene) {
     r.lighting.glow_gain = tune.map_or(1.0, |t| t.glow_gain);
     r.set_far_range(m.lighting.far_scene_range.unwrap_or(0.0));
     r.set_frame_filter(frame_filter_from(&m.lighting));
+    r.set_softness(match std::env::var("OPENBF_SOFTNESS").as_deref() {
+        Ok("1") => m.lighting.softness,
+        _ => None,
+    });
     r.set_bloom(m.hdr.map(|h| bloom_from(h, tune)));
     r.set_character_light_regions(if m.source_game == "bf2" {
         m.regions

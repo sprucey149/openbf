@@ -353,6 +353,7 @@ fn flyer_scrape_death_and_hurt_events_play_odf_sounds_and_listener_tracks_flyer_
         hurt_sound: Some("imp_fly_hurt".to_owned()),
         death_sound: Some("imp_weap_ord_exp_lg".to_owned()),
         cockpit_sound: None,
+        walker_steps: None,
     }];
 
     // Mount player in the distant flyer and verify listener moves from hangar origin to flyer camera.

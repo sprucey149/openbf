@@ -19,6 +19,7 @@ pub(super) fn setup(cap: Option<u32>) -> BattleSetup {
         teams: None,
         classes_dir: PathBuf::new(),
         mission: None,
+        vehicle: None,
         mission_file: None,
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
@@ -151,6 +152,7 @@ fn spawn_pointer_hovers_selects_and_accepts_side_and_map_rows() {
             view: [50.0; 4],
         }],
         vehicles: Vec::new(),
+        structures: Vec::new(),
         droids: std::collections::HashMap::new(),
     });
     a.walk = Some((walk, render::MeshHandle::default()));

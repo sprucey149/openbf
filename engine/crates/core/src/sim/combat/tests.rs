@@ -421,8 +421,6 @@ fn a_death_region_kills_through_the_invincibility_cheat() {
     assert!(s.unit(p).is_none(), "the death region killed him");
 }
 
-/// PROVISIONAL `LETHAL_LANDING_SPEED`: a 30 m drop lands at ~33 m/s and
-/// kills; a 2 m drop lands at ~8.5 m/s and does not.
 #[test]
 fn a_long_fall_kills_and_a_short_one_does_not() {
     fn drop_from(height: f32) -> (bool, u32) {
@@ -439,7 +437,7 @@ fn a_long_fall_kills_and_a_short_one_does_not() {
         }
         (s.unit(h).is_none(), s.battle.teams[1].tickets())
     }
-    assert_eq!(drop_from(30.0), (true, 249), "a 30 m fall is lethal");
+    assert_eq!(drop_from(60.0), (true, 249), "a 60 m fall is lethal");
     assert_eq!(drop_from(2.0), (false, 250), "a 2 m fall is not");
 }
 
@@ -462,7 +460,7 @@ fn authored_zero_collision_damage_survives_landings_but_not_death_regions() {
                 let h = sim.spawn(&spec).unwrap();
                 {
                     let u = sim.unit_mut(h).unwrap();
-                    u.soldier.pos.y = 30.0;
+                    u.soldier.pos.y = 60.0;
                     u.soldier.grounded = false;
                 }
                 let mut falls = 0;

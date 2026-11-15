@@ -99,7 +99,15 @@ pub fn bake_soldier_anims(
             .or_default() |= alpha;
     }
     let cloth_names: Vec<String> = cloths.iter().map(|c| c.name.clone()).collect();
-    sm.segments.extend(cloths.into_iter().map(|c| c.segment));
+    let first_cloth = sm.segments.len();
+    let mut physics = Vec::with_capacity(cloths.len());
+    for (k, c) in cloths.into_iter().enumerate() {
+        physics.push(manifest::cloth::Cloth {
+            part: first_cloth + k,
+            ..c.physics
+        });
+        sm.segments.push(c.segment);
+    }
     // Keep the source body's cloth part indices stable. The separately
     // attached tentacles are appended after those parts, never between them.
     crate::dlc_attachment::append_fisto_tentacles(inner, &mut sm)?;
@@ -385,6 +393,15 @@ pub fn bake_soldier_anims(
     }
     let glb = skinned_to_glb(&sm, &clips)?;
     std::fs::write(out.join("soldiers").join(format!("{}.glb", m.name)), glb)?;
+    // Every wearer steps its cloth, not only heroes: the PS2 builds an
+    // EntityCloth for each name on the soldier's gmod list at spawn
+    // (FUN_00234a68, re-cloth 2) and steps it while drawn (re-cloth 4).
+    let companion = manifest::cloth::path(out, &m.name);
+    if physics.is_empty() {
+        crate::remove_optional_file(&companion)?;
+    } else {
+        crate::write_ron(&companion, &physics)?;
+    }
     let render_path = out
         .join("soldiers")
         .join(format!("{}.render-clips.glb", m.name));

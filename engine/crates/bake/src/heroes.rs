@@ -135,7 +135,6 @@ pub fn bake_heroes(disc: &Path, out: &Path) -> Result<HeroBake> {
                 None,
             )
             .with_context(|| format!("hero {} ({geometry})", c.name))?;
-            crate::cloth::bake_companion(&source.1, &geometry, out)?;
             println!(
                 "hero {}: {} bones, {} clips, cloths {:?}",
                 c.name, baked.bones, baked.clips, baked.cloths

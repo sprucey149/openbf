@@ -105,4 +105,11 @@ fn main() {
     println!("cargo:rustc-env=OPENBF_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=OPENBF_BUILD_DIRTY={}", u8::from(dirty));
     println!("cargo:rustc-env=OPENBF_BUILD_DIFF={diff}");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        // Windows defaults to a 1 MB main-thread stack; unoptimized dev builds
+        // of winit + App::resumed + make_walk exceed 1 MB. Match Linux's 8 MB.
+        println!("cargo:rustc-link-arg-bin=game=/STACK:8388608");
+    }
 }

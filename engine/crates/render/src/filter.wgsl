@@ -9,7 +9,6 @@
 // averages n of those along y, two texels a sample.
 struct FilterParams {
     // x = threshold (0..1 of a display byte 255), y = gain (Intensity/128),
-    // z = the box's side in pixels, w unused.
     p: vec4<f32>,
 };
 @group(0) @binding(0) var t_frame: texture_2d<f32>;
@@ -74,6 +73,10 @@ fn fs_filter(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let px = vec2<i32>(pos.xy);
     let n = i32(fp.p.z);
     let low = box_sum(t_rows, px, vec2<i32>(0, 1), px.y - n / 2, n) / f32(n);
+    if fp.p.w > 0.0 {
+        let original = textureLoad(t_disp, px, 0).rgb;
+        return vec4<f32>(f_srgb_to_linear(mix(original, low, fp.p.w)), 1.0);
+    }
     let add = fp.p.y * max(low - vec3<f32>(fp.p.x), vec3<f32>(0.0));
     // Below the threshold the pixel is left as it was, bit for bit.
     if all(add == vec3<f32>(0.0)) {

@@ -46,10 +46,27 @@ pub struct WalkerRig {
     /// Per leg pair: the bones its layers move.
     masks: Vec<Vec<bool>>,
     bone_root: Option<usize>,
+    /// A posed hover's `FinAnimation` clip (card VPOSE).
+    fin: Option<usize>,
+    /// A flyer's: its turret nodes are drawn along the seat's look from the
+    /// start ([`super::walker_aim::WalkerAim::writing_turrets_at_rest`]).
+    flyer: bool,
 }
 
 impl WalkerRig {
-    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>) -> Self {
+    /// The hover's separately written suspension nodes (re-vehicle-pose 6).
+    pub fn with_suspension(
+        mut self,
+        nodes: crate::vehicle_class::SuspensionNodes,
+        rest: f32,
+    ) -> Self {
+        self.aim = self.aim.with_suspension(nodes, rest);
+        self
+    }
+
+    /// A flyer's rig: its `takeoff` clip and its fins clip by name
+    /// (`manifest::ManifestFlyer::fin`), if the bake found them.
+    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
         let flyer = manifest::ManifestWalker {
             bank: String::new(),
             clips: Vec::new(),
@@ -57,14 +74,83 @@ impl WalkerRig {
             skin: None,
             layer_bones: Vec::new(),
         };
-        Self::new(skeleton, clips, &flyer)
+        let fin = fin.and_then(|f| clips.iter().position(|c| c.name.eq_ignore_ascii_case(f)));
+        Self {
+            fin,
+            flyer: true,
+            ..Self::new(skeleton, clips, &flyer)
+        }
     }
 
-    pub fn flyer_palette(&self, lift: f32) -> Option<Vec<Mat4>> {
-        let clip = self
+    /// A hover's rig (card VPOSE, `analysis/re-vehicle-pose.md` 7): its
+    /// `FinAnimation` clip by name, if the bake found one.
+    pub fn new_hover(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
+        Self {
+            flyer: false,
+            ..Self::new_flyer(skeleton, clips, fin)
+        }
+    }
+
+    /// The fin nine-pose (re-vehicle-pose 4.3): the clip at frame `a` and
+    /// frame `b`, each slerped between its keys, blended by `c`; the bind
+    /// with no clip or no numbers yet.
+    fn fin_palette(&self, nine: Option<super::turret_pose::NinePose>) -> Vec<Mat4> {
+        let pose = match (self.fin.map(|k| &self.clips[k]), nine) {
+            (Some(clip), Some(n)) => clip
+                .sample(&self.skeleton, n.a, false)
+                .blend(&clip.sample(&self.skeleton, n.b, false), n.c),
+            _ => Pose::bind(&self.skeleton),
+        };
+        self.skeleton.palette(&pose.locals())
+    }
+
+    /// A hover's nodes now: the fin pose, then its turret, aimer and barrel
+    /// writers from its seats' guns (re-vehicle-pose 2.3).
+    pub fn hover_nodes(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        let fins = self.bind_nodes(&self.fin_palette(nine));
+        self.aim.pose(&self.skeleton, &fins, v)
+    }
+
+    /// A hover's joint palette now ([`Self::hover_nodes`]).
+    pub fn hover_palette(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        self.hover_palette_kicked(v, nine, &super::walker_aim::at_rest)
+    }
+
+    /// [`Self::hover_palette`] with each barrel slid back by `kick`.
+    pub fn hover_palette_kicked(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        self.aimed(self.fin_palette(nine), v, kick)
+    }
+
+    /// A flyer's pose (BF2 FUN_00201300 B2:114581-114690, BF1 FUN_001d8620
+    /// B1:84287-84335): while its bank is set, a class with a `takeoff`
+    /// clip plays it at its `lift` and never its fins; else the fins clip's
+    /// nine-pose at `nine` ([`super::turret_pose::flyer_nine`]); else drawn
+    /// rigid.
+    pub fn flyer_palette(
+        &self,
+        lift: f32,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Option<Vec<Mat4>> {
+        let Some(clip) = self
             .clips
             .iter()
-            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))?;
+            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))
+        else {
+            return self.fin.map(|_| self.fin_palette(nine));
+        };
         let frame = lift.clamp(0.0, 1.0) * clip.frames.saturating_sub(1) as f32;
         Some(
             self.skeleton
@@ -72,8 +158,34 @@ impl WalkerRig {
         )
     }
 
-    pub fn flyer_nodes(&self, lift: f32) -> Option<Vec<Mat4>> {
-        Some(self.bind_nodes(&self.flyer_palette(lift)?))
+    pub fn flyer_nodes(
+        &self,
+        lift: f32,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Option<Vec<Mat4>> {
+        Some(self.bind_nodes(&self.flyer_palette(lift, nine)?))
+    }
+
+    /// A flyer's animated base followed by its mounted seats' node writers.
+    /// The gunship has moving turrets even without a takeoff or fins clip.
+    pub fn flyer_aimed_palette(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        let base = self
+            .flyer_palette(v.flyer.lift, nine)
+            .unwrap_or_else(|| self.skeleton.palette(&Pose::bind(&self.skeleton).locals()));
+        self.aimed(base, v, kick)
+    }
+
+    pub fn flyer_aimed_nodes(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        self.bind_nodes(&self.flyer_aimed_palette(v, nine, &super::walker_aim::at_rest))
     }
 
     /// Bone nodes in bind space (`palette * global_bind`).
@@ -116,6 +228,8 @@ impl WalkerRig {
             entries,
             masks,
             bone_root,
+            fin: None,
+            flyer: false,
         }
     }
 
@@ -126,7 +240,15 @@ impl WalkerRig {
     }
 
     fn pose_sampled(&self, w: &WalkerState, simulation: bool) -> Pose {
-        let entry = self.entries.get(usize::from(w.anim));
+        // Entry 4 binds no clip (FUN_0025ea48 skips the player for it,
+        // B2:178211): the walker that has just played death01 out still
+        // holds its last frame until the next update removes it.
+        let anim = if w.anim == core::vehicle::walker::ANIM_NONE {
+            core::vehicle::walker::ANIM_DEATH
+        } else {
+            w.anim
+        };
+        let entry = self.entries.get(usize::from(anim));
         let sample = |layer: usize| {
             let c = entry.and_then(|e| e[layer]).map(|k| &self.clips[k])?;
             Some(if simulation {
@@ -209,7 +331,12 @@ impl WalkerRig {
     }
 
     pub fn with_seats(mut self, seats: Vec<crate::vehicle_class::SeatSpec>) -> Self {
-        self.aim = super::walker_aim::WalkerAim::new(&self.skeleton, seats);
+        let aim = super::walker_aim::WalkerAim::new(&self.skeleton, seats);
+        self.aim = if self.flyer {
+            aim.writing_turrets_at_rest()
+        } else {
+            aim
+        };
         self
     }
 
@@ -219,9 +346,28 @@ impl WalkerRig {
     }
 
     pub fn aimed_palette(&self, v: &core::vehicle::Vehicle, root_scale: f32) -> Vec<Mat4> {
-        let palette = self.palette(&v.walker, root_scale);
+        self.aimed_palette_kicked(v, root_scale, &super::walker_aim::at_rest)
+    }
+
+    /// [`Self::aimed_palette`] with each barrel slid back by `kick`.
+    pub fn aimed_palette_kicked(
+        &self,
+        v: &core::vehicle::Vehicle,
+        root_scale: f32,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
+        self.aimed(self.palette(&v.walker, root_scale), v, kick)
+    }
+
+    /// `palette` with the seats' turret, aimer and barrel writers applied.
+    fn aimed(
+        &self,
+        palette: Vec<Mat4>,
+        v: &core::vehicle::Vehicle,
+        kick: super::walker_aim::Kick,
+    ) -> Vec<Mat4> {
         let walk = self.bind_nodes(&palette);
-        let now = self.aim.pose(&self.skeleton, &walk, v);
+        let now = self.aim.pose_kicked(&self.skeleton, &walk, v, kick);
         now.iter()
             .enumerate()
             .map(|(n, m)| {
@@ -386,11 +532,62 @@ mod tests {
                 },
             ])],
         };
-        let rig = WalkerRig::new_flyer(skeleton, vec![clip]);
+        let rig = WalkerRig::new_flyer(skeleton, vec![clip], None);
         for (lift, x) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
-            let palette = rig.flyer_palette(lift).unwrap();
+            let palette = rig.flyer_palette(lift, None).unwrap();
             assert!((palette[0].w_axis.x - x).abs() < 1e-5);
         }
+    }
+
+    /// The tick death01 plays out the walker records entry 4, which binds
+    /// no clip, and is removed only by the next update: that frame draws
+    /// death01's last pose, not the bind (the tauntaun stood up for it).
+    #[test]
+    fn entry_four_holds_death01s_last_frame() {
+        let mut r = rig(false);
+        let death = Clip {
+            name: "death01".into(),
+            fps: 30.0,
+            frames: 2,
+            tracks: vec![
+                None,
+                None,
+                Some(vec![
+                    BoneXform {
+                        rotation: Quat::IDENTITY,
+                        translation: Vec3::Y,
+                    },
+                    BoneXform {
+                        rotation: Quat::from_rotation_x(1.2),
+                        translation: Vec3::Y,
+                    },
+                ]),
+                None,
+            ],
+        };
+        r.clips.push(death);
+        let d = r.clips.len() - 1;
+        r.entries = vec![
+            [Some(0), None, None],
+            [None; 3],
+            [None; 3],
+            [Some(d), None, None],
+            [None; 3],
+        ];
+        let w = WalkerState {
+            anim: core::vehicle::walker::ANIM_NONE,
+            clip_time: 1.0 / 30.0,
+            dead: true,
+            ..Default::default()
+        };
+        let held = r.pose(&w).0[2].rotation;
+        assert!((angle_x(held) - 1.2).abs() < 1e-4, "{held:?}");
+        let ended = WalkerState {
+            anim: core::vehicle::walker::ANIM_DEATH,
+            ..w.clone()
+        };
+        assert_eq!(r.pose(&ended).0[2].rotation, held);
+        assert_eq!(r.palette_for_sim(&w, 1.0), r.palette_for_sim(&ended, 1.0));
     }
 
     #[test]

@@ -87,6 +87,8 @@ mod key {
     pub const INTENSITY: u32 = 0x8563_e50a; // "Intensity"
     pub const FILTER: u32 = 0xc7e1_6877; // "Filter"
     pub const THRESHOLD: u32 = 0x4939_f3f8; // "Threshold"
+    pub const SOFTNESS: u32 = 0x8958_bcda;
+    pub const SOFTNESS_PARAM: u32 = 0xfef8_2e0b;
     pub const OFFSET: u32 = 0x14c8_d3ca; // "Offset"
     pub const MOVEMENT_SCALE: u32 = 0xfd58_fbfa; // "MovementScale"
     pub const MAX_DISTANCE: u32 = 0xe691_5cf6; // "MaxDistance"
@@ -225,6 +227,8 @@ pub struct DomeInfo {
     pub filter: Option<f32>,
     pub threshold: Option<f32>,
     pub intensity: Option<f32>,
+    pub softness: Option<f32>,
+    pub softness_param: Option<f32>,
     pub models: Vec<DomeModel>,
     pub low_res_terrain: Option<LowResTerrain>,
     /// `TerrainEnable` as stored — authored only as 0, on BF1 KAM1 and BES1.
@@ -313,6 +317,8 @@ impl Sky {
                 dome.filter = next.filter.or(dome.filter);
                 dome.threshold = next.threshold.or(dome.threshold);
                 dome.intensity = next.intensity.or(dome.intensity);
+                dome.softness = next.softness.or(dome.softness);
+                dome.softness_param = next.softness_param.or(dome.softness_param);
                 dome.models.extend(next.models);
                 dome.low_res_terrain = next.low_res_terrain.or(dome.low_res_terrain);
                 dome.terrain_enable = next.terrain_enable.or(dome.terrain_enable);
@@ -385,6 +391,8 @@ fn parse_dome(node: &ConfigNode, unknown: &mut Vec<(u32, Vec<f32>)>) -> DomeInfo
             key::INTENSITY => d.intensity = c.f32(0),
             key::FILTER => d.filter = c.f32(0),
             key::THRESHOLD => d.threshold = c.f32(0),
+            key::SOFTNESS => d.softness = c.f32(0),
+            key::SOFTNESS_PARAM => d.softness_param = c.f32(0),
             key::DOME_MODEL => {
                 let mut m = DomeModel::default();
                 for k in &c.children {
@@ -546,6 +554,8 @@ mod tests {
             ("Intensity", key::INTENSITY),
             ("Filter", key::FILTER),
             ("Threshold", key::THRESHOLD),
+            ("Softness", key::SOFTNESS),
+            ("SoftnessParam", key::SOFTNESS_PARAM),
             ("OffSet", key::OFFSET),
             ("Stars", key::STARS),
             ("NumStars", key::NUM_STARS),

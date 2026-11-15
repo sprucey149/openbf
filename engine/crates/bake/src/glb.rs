@@ -262,6 +262,11 @@ fn write_model(
         if let Some(v) = seg.uv_scroll() {
             mat["extras"]["uv_scroll"] = json!(v);
         }
+        // The segment's MNAM: BF2 finds a hover's tread segment by it
+        // (`FUN_0057dce0` compares segment +0x7c, B2:701187-701212).
+        if let Some(g) = &seg.group {
+            mat["extras"]["group"] = json!(g);
+        }
         let glow = if vertex_light {
             glow_path(seg, hdr)
         } else {

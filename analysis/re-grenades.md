@@ -719,8 +719,9 @@ bodies after the terrain (model floors: not measured here); the down limit of th
 
 ### 13.4 The build (card GRNP, 2026-10-06, main fdff50d) [V, M]
 
-- The port's sweep now takes this terrain ray (`core::collision::ray_terrain_ps2`) on every map; bolts and the camera
-  keep the exact crossing.
+- The port's sweep now takes this terrain ray (`core::collision::ray_terrain_ps2`) on every map. Bolts retain
+  crossing precision but, since the 2026-11-14 BF1 Hailfire follow-up, reject underside exits
+  (`ray_heightfield_front`). The camera keeps the two-sided crossing. See `hailfire-bf1.md`.
 - [V] The sweep's length is |second - first| + 0.2 FROM THE PULLED-BACK ORIGIN (B2 `FUN_00320de8` 313836-313919: the
   origin is first - 0.1 dir and `FUN_00161c60` gets *(decompiler detail omitted)*), so the ray ends 0.1 m past the new position. The
   port ran it 0.2 m past (+0.3): that was §13.2's "port's own sweep" difference — one more contact on the level throw.

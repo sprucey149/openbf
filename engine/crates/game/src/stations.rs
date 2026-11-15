@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub(crate) fn is_destructible_building(base: &str) -> bool {
-    base.eq_ignore_ascii_case("destructablebuilding")
+    // A command post can own finite building health too (Hoth's generator).
+    // add_stations rejects command posts without positive finite MaxHealth.
+    base.eq_ignore_ascii_case("destructablebuilding") || base.eq_ignore_ascii_case("commandpost")
 }
 
 pub(crate) fn is_station_base(base: &str) -> bool {

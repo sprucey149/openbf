@@ -38,6 +38,7 @@ fn load_from(
         teams: Some(mission.factions()),
         classes_dir: root.join("classes"),
         mission: Some(mission),
+        vehicle: None,
         mission_file: None,
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),

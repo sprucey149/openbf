@@ -4,18 +4,22 @@ use game::walk::{ClassVisual, TeamTemplate, WalkSim};
 use glam::Vec3;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub fn battle(root: &Path) -> Result<(WalkSim, game::assets::Scene)> {
-    let map = root.join("bf2_geo1");
-    let (scene, _) = game::assets::load_battle_scene(&map, "con")?;
+    battle_on(root, "bf2_geo1", "bf2_geo1_con")
+}
+
+pub fn battle_on(root: &Path, map: &str, mission: &str) -> Result<(WalkSim, game::assets::Scene)> {
+    let (scene, _) = game::assets::load_battle_scene(&root.join(map), "con")?;
     let mission = game::mission::MissionDef::load(
         &root
             .parent()
             .context("assets root")?
-            .join("missions/bf2_geo1_con.ron"),
+            .join(format!("missions/{mission}.ron")),
     )?;
     let (rosters, _) = game::roster::FactionRoster::pair(
         &root.join("classes"),
-        "bf2",
+        &mission.source_game,
         [
             mission.teams[0].faction.as_str(),
             mission.teams[1].faction.as_str(),
@@ -23,7 +27,11 @@ pub fn battle(root: &Path) -> Result<(WalkSim, game::assets::Scene)> {
         Some(&mission),
     )?;
     let mut sim = Sim::empty(42);
-    sim.ground_rules = core::soldier::GroundRules::Bf2;
+    sim.ground_rules = if mission.source_game == "bf1" {
+        core::soldier::GroundRules::Bf1
+    } else {
+        core::soldier::GroundRules::Bf2
+    };
     for (team, definition) in mission.teams.iter().enumerate() {
         sim.battle.teams[team] = core::battle::TeamState::new(definition.tickets);
     }
@@ -83,4 +91,41 @@ pub fn battle(root: &Path) -> Result<(WalkSim, game::assets::Scene)> {
     }
     anyhow::ensure!(walk.sim.spawn_stage[0] == SpawnStage::Accepted, "no spawn");
     Ok((walk, scene))
+}
+
+/// Derives the baked map directory name from a mission script name (`bf1_rhn1_con_cw` -> `bf1_rhn1`).
+#[allow(dead_code)]
+pub fn map_of(mission: &str) -> String {
+    let words = if mission.starts_with("bf") { 2 } else { 1 };
+    mission.split('_').take(words).collect::<Vec<_>>().join("_")
+}
+
+/// Starts a battle on `mission`, finds the first live `class` vehicle, and seats the player in `seat`.
+#[allow(dead_code)]
+pub fn board_vehicle(
+    root: &Path,
+    mission: &str,
+    class: &str,
+    seat: u8,
+) -> Result<(WalkSim, game::assets::Scene, core::vehicle::VehicleHandle)> {
+    let map = map_of(mission);
+    let (mut walk, scene) = battle_on(root, &map, mission)?;
+    let index = walk
+        .vehicle_classes
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(class))
+        .with_context(|| format!("{class} not on {map}"))?;
+    let slot = walk
+        .sim
+        .vehicles
+        .iter()
+        .position(|v| v.alive && v.class as usize == index)
+        .context("no live vehicle")?;
+    let handle = core::vehicle::VehicleHandle {
+        index: slot as u32,
+        gen: walk.sim.vehicles[slot].gen,
+    };
+    let player = walk.player;
+    anyhow::ensure!(walk.sim.seat_unit(player, handle, seat), "cannot board");
+    Ok((walk, scene, handle))
 }

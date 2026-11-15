@@ -176,6 +176,12 @@ At that research baseline, the port had no filter. Applied offline to the port's
 **NAB1 −7.3 → +10.5 and BES2 −1.0 → +8.8 overshoot** (the port is already too bright in their bright areas — other terms).
 
 ## 4. Softness (both games) [V]
+
+2026-11-12 update: the maintainer requested a playtest preview. Rebaked maps can
+now retain the authored strength and use a native-resolution box approximation
+before the HUD; Kashyyyk was refreshed. It is disabled by default and requires
+`OPENBF_SOFTNESS=1`. Exact GS sampling remains unimplemented.
+See `re-terrain-lighting.md` §14 for the preview, evidence and limitations.
 Every map of both games authors `Softness(1) SoftnessParam(60)` (SPA 30, FEL1 65, GAL1 0). The pass (B1 FUN_004a21f8,
 B2 FUN_00586578) blends the frame with a blurred half-res copy by P/128 (ALPHA 0x64, 564669): a softening at 480 lines,
 brightness-neutral in the mean. **Not a port target** (COMPARISON_RULES: sharpness). It does confound pixel measurements

@@ -36,7 +36,9 @@ and LAN are decisions for later work, not current tasks.
   [soldier rulebook](../gameplay-normalization.md) defines the shared infantry scale.
   The [vehicle rulebook](../vehicle-normalization.md) defines BF2 numbers for matched
   ground hulls and guns, family scaling for BF1-only hulls, and the authored differences
-  in projectile motion, kits, and flyer rules.
+  in projectile motion, kits, and flyer rules. The BF1 Hailfire retains its
+  BF1 homing launcher and spider cannon (maintainer, 2026-11-14); the vehicle
+  rulebook records its damage conversion.
 - **Snipers (2026-11-14, ours).** One rule on both games' maps: the army sniper rifle does
   280, so a head hit (x3) kills any non-hero and no body hit kills a full-health soldier of
   300 or more; the award beam rifle does 560; every army sniper rifle zooms x2 then x8, the
@@ -447,7 +449,13 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 
 ### Platform & meta
 - Input: **controller first**; PS2 default mapping, full remap; on-screen keyboard for text entry.
-  **Flight controls** defaults to Classic. RC Mode 2 is an opt-in layout for
+  **Flight controls** defaults to Classic on every source map: left stick
+  moves the aircraft. In aircraft that can stop, reverse and strafe, left X/Y
+  translates sideways/forward and right X/Y aims yaw/pitch. In continuously
+  flying aircraft left X/Y steers yaw/pitch and right X/Y rolls/throttles.
+  Select by supported motion capabilities, not map or individual class
+  (maintainer, 2026-11-14).
+  RC Mode 2 is an opt-in layout for
   controller pilots, with yaw and throttle on the left stick and roll and pitch
   on the right. Pull the right stick back to pitch up and push it forward to
   pitch down. The profile saves the choice.
@@ -455,7 +463,7 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   by a direction. Double-tap it before steering to reverse. Keyboard pilots
   can use Left Alt plus direction or Caps Lock for a reversal.
   - Keyboard + mouse (2026-10-25, the public repo's pull request #1) is supported as a
-    deliberate deviation. Controller play is unchanged. The mouse aims by angle (`PadState::mx`/`my`,
+    deliberate deviation. Controller play follows the default layout above. The mouse aims by angle (`PadState::mx`/`my`,
     `core/src/sim/look.rs`), under pointer lock, without aim assist; the bindings are one table in `game/src/kbm.rs`.
     Sensitivity and invert-Y are profile settings. A flyer's pilot is the exception: the mouse reaches the sim as ordinary sticks, by the PC's held rate (`re-flyer.md`).
   - The keyboard + mouse rules (moved from `AGENTS.md`, 2026-11-02):

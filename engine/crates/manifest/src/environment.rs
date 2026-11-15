@@ -672,6 +672,8 @@ pub struct ManifestLighting {
     /// `[O]`). `None` = no pass, and for a manifest baked before card BFLT.
     #[serde(default)]
     pub filter: Option<ManifestFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f32>,
 }
 
 /// The PS2's DomeInfo frame filter, as authored: over the finished 3D frame,
@@ -716,6 +718,7 @@ impl Default for ManifestLighting {
             sun_static: false,
             light2: None,
             filter: None,
+            softness: None,
         }
     }
 }

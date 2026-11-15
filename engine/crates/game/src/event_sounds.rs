@@ -346,14 +346,18 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 let x = sticky.as_ref().and_then(|s| s.explosion.as_ref());
                 boom(x.map(|x| &x.look), *pos, &mut play);
             }
-            Event::VehicleDestroyed { class, pos, .. } => {
-                let setup = walk.sim.blast_setup.get(*class as usize);
-                let x = setup.and_then(|b| b.as_ref()?.explosion.as_ref());
+            // The death blast, and with the death itself (the first blast)
+            // the class's DeathSound, as a unit's starts with its kill.
+            Event::VehicleExplosion {
+                class, pos, last, ..
+            } => {
+                let x = walk.sim.vehicle_explosion(*class, *last);
                 boom(x.map(|x| &x.look), *pos, &mut play);
                 if let Some(s) = walk
                     .vehicle_sounds
                     .get(*class as usize)
                     .and_then(|s| s.death_sound.as_deref())
+                    .filter(|_| !*last)
                 {
                     play(s, *pos);
                 }
@@ -366,6 +370,18 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                     .and_then(|s| s.collision_sound.as_deref())
                     .unwrap_or("com_veh_collision_lg");
                 play(sound, *pos);
+            }
+            // The class's VehicleCollisionSound only: FUN_00366858 plays
+            // block+0x34 (B1:354138-354145), nothing stands in for it.
+            Event::VehicleCollision { vehicle, pos } => {
+                if let Some(s) = walk
+                    .sim
+                    .vehicle(*vehicle)
+                    .and_then(|v| walk.vehicle_sounds.get(v.class as usize))
+                    .and_then(|s| s.collision_sound.as_deref())
+                {
+                    play(s, *pos);
+                }
             }
             Event::VehicleHit {
                 vehicle, damage, ..

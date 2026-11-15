@@ -175,7 +175,6 @@ pub fn bake(lvl: &Path, ingame: &Path, out: &Path, pc: Option<&Path>) -> Result<
         {
             bail!("{hero}: missing playable animations/weapon combo");
         }
-        crate::cloth::bake_companion(lvl, &geometry, side)?;
         result.heroes.push(HeroAssets {
             class: hero.into(),
             geometry: geometry.clone(),

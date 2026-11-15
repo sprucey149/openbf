@@ -31,7 +31,10 @@ impl Fx {
                 walk.flyer_rigs
                     .get(v.class as usize)?
                     .as_ref()?
-                    .flyer_nodes(v.flyer.lift)
+                    .flyer_nodes(
+                        v.flyer.lift,
+                        crate::viewer::turret_pose::flyer_nine(&walk.sim, v),
+                    )
             })
             .collect();
         let frame = |vehicle_index: usize,
@@ -239,6 +242,7 @@ mod tests {
         walk.flyer_rigs = vec![Some(std::sync::Arc::new(WalkerRig::new_flyer(
             skeleton,
             vec![clip],
+            None,
         )))];
         walk.flyer_exhaust = vec![vec![crate::vehicle_pads::FlyerExhaust {
             effect: "com_sfx_exhaust_jedistarfighter".into(),

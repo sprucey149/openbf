@@ -871,7 +871,8 @@ mod tests {
         assert!(sim
             .recovery_descent(sim.unit(h).unwrap(), Vec3::Z)
             .is_none());
-        let (sim, h) = elevated_bot(25.0);
+        let (mut sim, h) = elevated_bot(25.0);
+        sim.unit_mut(h).unwrap().health.cur = 100.0;
         assert!(sim
             .recovery_descent(sim.unit(h).unwrap(), Vec3::Z)
             .is_none());

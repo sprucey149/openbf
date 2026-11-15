@@ -109,6 +109,12 @@ impl SkyEffect {
                         *half *= self.scale;
                     }
                 }
+                ParticleShape::ShadedRibbon { points } => {
+                    for (pos, half, _, _) in points {
+                        *pos = matrix.transform_point3(*pos);
+                        *half *= self.scale;
+                    }
+                }
                 ParticleShape::Mesh { tris }
                 | ParticleShape::SolidMesh { tris }
                 | ParticleShape::CutoutMesh { tris } => {

@@ -144,7 +144,7 @@ pub struct Turn {
 }
 
 /// The limits the PS2's tick clamps to; outside them it wraps
-/// (B2:189323-189385, B1:137478-137520).
+/// (B2:189323-189385, B1:137252-137303).
 const CLAMP_LO: f32 = -3.1416926;
 const CLAMP_HI: f32 = 3.1414928;
 
@@ -172,8 +172,11 @@ impl Turn {
         };
         let (y, p) = (rad(yaw_deg), rad(pitch_deg));
         let wraps = |l: [f32; 2]| !(CLAMP_LO < l[0] && l[1] < CLAMP_HI);
-        let yaw_positive = slew == Slew::Linear
-            && y[0] > 0.0
+        // A rear arc (0 < lo <= 180° <= hi < 360°) keeps a [0, 2π) domain
+        // and clamps on both discs: BF1 sets E+0x114c in the YawLimits
+        // setter (B1:138731-138752) and clamps under it (B1:137186-137192,
+        // 137276-137303). BF1 rep_walk_atte's 3rd seat (120..230) is one.
+        let yaw_positive = y[0] > 0.0
             && y[0] <= std::f32::consts::PI
             && y[1] >= std::f32::consts::PI
             && y[1] < std::f32::consts::TAU;
@@ -272,6 +275,13 @@ pub struct GunWeapon {
     /// Otherwise the spare clips (`WeaponState::new`'s).
     pub reserve_clips: u32,
     pub fire_points: Vec<Vec3>,
+    /// Each fire point's aim limits, model frame: [yaw, pitch] in radians.
+    pub fire_limits: Vec<[[f32; 2]; 2]>,
+    /// Each fire point's own aimer node, model space: the PS2 turns a
+    /// barrel with the aimer that carries it (`analysis/re-turret-draw.md`
+    /// 2.3), so the AT-TE's rear barrels swing about `aimer_Rgun_1` and
+    /// `aimer_Rgun_2`, not about each other. Empty = the seat's pivot.
+    pub fire_pivots: Vec<Vec3>,
 }
 
 /// A seat's guns — SETUP data per class, like `SeatSetup`, NOT hashed.
@@ -298,6 +308,18 @@ pub struct GunSetup {
     /// else its base is the model frame.
     pub framed: bool,
     pub aimer_bind: glam::Quat,
+    /// A pilot seat's weapon aimer when the seat authors one (`AimerPitchLimits`
+    /// / `AimerYawLimits` / rates of its first aimer): the guns chase the look's
+    /// aim point inside these limits while the look itself keeps [`Self::aimer`]
+    /// (`PitchLimits`, re-hover §5.1 I11). The IFT-X looks over -8..25 deg and
+    /// its cannons turn over -30..90 deg (`analysis/re-hover-camera.md`).
+    pub weapon_aimer: Option<Aimer>,
+    /// The seat looks along its owner's eye (BF2 key 0x865061fc, K+0x84c):
+    /// the turret tick takes the owner's E+0x350 direction into model space
+    /// instead of its own angles (B2 `FUN_0026cea0` B2:188899-188939). PS2
+    /// RAM (BF2 AT-ST, passenger seated): that direction is the walker's aim
+    /// (E+0x50c, E+0x510) to 1e-6 rad.
+    pub follows_owner: bool,
     /// A building turret's drawn gunner: where his body stands
     /// ([`GunnerSeat`]); `None` = at the model's origin.
     pub gunner: Option<GunnerSeat>,
@@ -443,6 +465,34 @@ impl Rig {
 }
 
 impl GunSetup {
+    /// Independent, model-frame aimers aim their own muzzle line at one
+    /// shared target (the LAAT and MAF wing beams). Solve the offset line,
+    /// including a barrel tip displaced from its aimer's pivot.
+    pub fn point_aim(&self, w: &GunWeapon, p: usize, target: Vec3) -> Option<((f32, f32), bool)> {
+        if self.pilot
+            || self.turn.is_none()
+            || self.framed
+            || self.aimer_bind != glam::Quat::IDENTITY
+        {
+            return None;
+        }
+        let pivot = *w.fire_pivots.get(p)?;
+        let off = *w.fire_points.get(p)? - pivot;
+        let v = target - pivot;
+        let z2 = v.length_squared() - off.x * off.x - off.y * off.y;
+        let z = z2.fmax(0.0).sqrt();
+        let h = (off.y * off.y + z * z).sqrt();
+        let pitch = fmath::asin((v.y / h.fmax(f32::MIN_POSITIVE)).clamp(-1.0, 1.0))
+            - fmath::atan2(off.y, z);
+        let (s, c) = fmath::sin_cos(pitch);
+        let yaw = fmath::atan2(v.x, v.z) - fmath::atan2(off.x, z * c - off.y * s);
+        let [ly, lp] = *w.fire_limits.get(p)?;
+        let yaw = wrap_angle(yaw, ly);
+        Some((
+            (yaw.clamp(ly[0], ly[1]), pitch.clamp(lp[0], lp[1])),
+            z2 >= 0.0 && within(ly, yaw) && within(lp, pitch),
+        ))
+    }
     /// The yaw the barrel has in the bind pose — the fire point's heading
     /// from the pivot (BF1's skiff: 0 for the nose gun, about +90° for
     /// `gunl`). 0 when the fire point sits on the pivot's vertical.
@@ -467,11 +517,15 @@ impl GunSetup {
 
     /// Where the seat's camera ray leaves, model space: the zoomed eye while
     /// the seat is zoomed (card VTURZ: the shot goes where the scope's
-    /// centre looks), else the port's PROVISIONAL eye - `EyePointOffset`
-    /// turned by the look's yaw alone.
+    /// centre looks); a pilot's eye E+0x340, the BODY's `EyePointOffset` on
+    /// the vehicle's matrix, not turned by the aim (hover B2:132251, walker
+    /// B2 FUN_00261208, both `FUN_001ce880` on E+0x120); else the port's
+    /// PROVISIONAL eye - `EyePointOffset` turned by the look's yaw alone.
     pub fn ray_eye(&self, look: (f32, f32), zoomed: bool) -> Vec3 {
         if zoomed {
             self.scope_eye(look)
+        } else if self.pilot {
+            self.pivot + self.eye
         } else {
             self.pivot + turned(self.eye, Vec3::ZERO, look.0, 0.0)
         }
@@ -513,14 +567,54 @@ impl GunSetup {
     /// fire point is turned as it is (card TURR: Mygeeto's barrel 1.28 m
     /// to the side was moved onto the axis, 0.9 m off at 20 m).
     pub fn muzzle(&self, aim: (f32, f32)) -> Vec3 {
+        self.muzzle_from(self.fire_point, aim)
+    }
+
+    /// [`GunSetup::muzzle`] for another of the seat's bind-pose points.
+    pub fn muzzle_from(&self, point: Vec3, aim: (f32, f32)) -> Vec3 {
+        self.muzzle_about(point, self.pivot, aim)
+    }
+
+    /// [`GunSetup::muzzle_from`] for a barrel turned about its own aimer's
+    /// `pivot`.
+    pub fn muzzle_about(&self, point: Vec3, pivot: Vec3, aim: (f32, f32)) -> Vec3 {
         let rest = if self.aimer_bind != glam::Quat::IDENTITY {
-            self.pivot + self.aimer_bind.inverse() * (self.fire_point - self.pivot)
+            pivot + self.aimer_bind.inverse() * (point - pivot)
         } else if self.turn.is_some() {
-            self.fire_point
+            point
         } else {
-            turned(self.fire_point, self.pivot, -self.bind_yaw(), 0.0)
+            turned(point, pivot, -self.bind_yaw(), 0.0)
         };
-        turned(rest, self.pivot, aim.0, aim.1)
+        turned(rest, pivot, aim.0, aim.1)
+    }
+
+    /// The barrel of `weapon`'s fire ring its next shot leaves from, after
+    /// `shots_fired` shots (re-blaster-damage 3.1).
+    pub fn next_point(&self, weapon: usize, shots_fired: u64) -> Option<usize> {
+        let n = self.weapons.get(weapon)?.fire_points.len() as u64;
+        (n > 0).then(|| (shots_fired % n) as usize)
+    }
+
+    /// Where a weapon's shot leaves, model space: the barrel `point` of its
+    /// fire ring (`GunWeapon::fire_points`) turned with the aim, else the
+    /// seat's fire point. A flyer pilot's guns do not turn: his points stay
+    /// where the model binds them.
+    pub fn shot_point(
+        &self,
+        weapon: usize,
+        point: Option<usize>,
+        aim: (f32, f32),
+        fixed: bool,
+    ) -> Vec3 {
+        let w = self.weapons.get(weapon);
+        match point.and_then(|p| Some((*w?.fire_points.get(p)?, p))) {
+            Some((p, _)) if fixed => p,
+            Some((p, k)) => match w.and_then(|w| w.fire_pivots.get(k)) {
+                Some(&pivot) => self.muzzle_about(p, pivot, aim),
+                None => self.muzzle_from(p, aim),
+            },
+            None => self.muzzle(aim),
+        }
     }
 }
 
@@ -535,6 +629,22 @@ pub fn dir(yaw: f32, pitch: f32) -> Vec3 {
 pub fn angles(d: Vec3) -> (f32, f32) {
     let h = (d.x * d.x + d.z * d.z).sqrt();
     (fmath::atan2(d.x, d.z), fmath::atan2(d.y, h))
+}
+
+/// Turn `angle` by ±τ to bring it into the arc `[limits[0], limits[1]]` when
+/// that arc extends past ±π.
+pub fn wrap_angle(mut angle: f32, limits: [f32; 2]) -> f32 {
+    if limits[1] > std::f32::consts::PI && angle < limits[0] {
+        angle += std::f32::consts::TAU;
+    } else if limits[0] < -std::f32::consts::PI && angle > limits[1] {
+        angle -= std::f32::consts::TAU;
+    }
+    angle
+}
+
+/// Whether `angle` lies within `limits` (an equal-limit axis never fails).
+pub fn within(limits: [f32; 2], angle: f32) -> bool {
+    limits[0] == limits[1] || (limits[0] <= angle && angle <= limits[1])
 }
 
 /// Turn `p` (model space) about `pivot` by (yaw, pitch): pitch about the
@@ -553,6 +663,9 @@ pub fn turned(p: Vec3, pivot: Vec3, yaw: f32, pitch: f32) -> Vec3 {
 /// A seat's gun at run time — hashed.
 #[derive(Clone, Debug)]
 pub struct GunState {
+    /// The shared aim point, in the vehicle's model frame, for independent
+    /// mounted aimers. Kept so beams and drawn nodes use the same target.
+    pub target: Option<Vec3>,
     /// The camera's (yaw, pitch), model frame.
     pub look: (f32, f32),
     /// The aimer's (yaw, pitch), model frame.
@@ -572,6 +685,12 @@ pub struct GunState {
 
 impl GunState {
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        if let Some(t) = self.target {
+            eat(&[0x74]);
+            for v in t.to_array() {
+                eat(&v.hash_bits().to_le_bytes());
+            }
+        }
         for v in [self.look.0, self.look.1, self.aim.0, self.aim.1] {
             eat(&v.hash_bits().to_le_bytes());
         }
@@ -597,6 +716,32 @@ impl GunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mounted_shared_target_is_part_of_the_simulation_hash() {
+        let mut g = GunState {
+            target: None,
+            look: (0.0, 0.0),
+            aim: (0.0, 0.0),
+            rate: (0.0, 0.0),
+            rel: (0.0, 0.0),
+            weapons: Vec::new(),
+            zoom: None,
+        };
+        let hash = |g: &GunState| {
+            let mut bytes = Vec::new();
+            g.hash_into(&mut |b| bytes.extend_from_slice(b));
+            bytes
+        };
+        let none = hash(&g);
+        g.target = Some(Vec3::ZERO);
+        assert_ne!(none, hash(&g));
+        let zero = hash(&g);
+        for target in [Vec3::X, Vec3::Y, Vec3::Z] {
+            g.target = Some(target);
+            assert_ne!(zero, hash(&g));
+        }
+    }
 
     const DEG: f32 = std::f32::consts::PI / 180.0;
 
@@ -654,6 +799,8 @@ mod tests {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
+            weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         };
         let b = g.bind_yaw();
@@ -702,6 +849,8 @@ mod tests {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::from_rotation_y(std::f32::consts::PI),
+            weapon_aimer: None,
+            follows_owner: false,
             gunner: None,
         };
         let aim = g.aim_of((0.0, 0.0), (0.0, 0.0));

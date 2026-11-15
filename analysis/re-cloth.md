@@ -184,6 +184,12 @@ NEVER / FB_ONLY = no Z write (0x51001); HardEdge = alpha test on (0x5000b). The 
   as rigid-skinned geometry in its GLB (pins on their bones, free vertices on the nearest pin's bone, in bind space
   v . XFRM . Bind(PRNT)); drawn two-sided with the DATA texture.
 - **CLOTH2** (new, M1, 4, deps CLOTH): the step of 4 on the CPU with a per-frame vertex upload, the PS2's constants.
+- **Troop cloth** (2026-11-12): the step reached heroes only, because only the hero bake wrote the physics companion
+  (`<model>.cloths.ron`). The soldier bake now writes it for every wearer, as FUN_00234a68 builds a cloth for every
+  soldier whose gmod lists one (2). The BF2 troop bodies that wear cloth on the disc are `imp_inf_snowtrooper` (the
+  skirt) and `rep_inf_arctrooper`, `rep_inf_clonecommander`, `rep_inf_ep3heavytrooper` and `rep_inf_ep3sniper` (capes).
+  No other troop or local body in the bake has a cloth list. Every other baked soldier file is byte-identical to the
+  previous bake, and the hero companions too.
 
 ## 9. Checks run
 

@@ -115,6 +115,9 @@ struct MaterialParams {
     // `uv + 0.0 * time` is exactly `uv` and no other draw's output moves.
     // zw = the mesh-UV multiplier, read ONLY by `fs_speckle` (1 elsewhere).
     scroll: vec4<f32>,
+    // xy = a UV offset the draw sets each frame (a tread's scroll,
+    // `game::viewer::treads`); zero on every other texture.
+    offset: vec4<f32>,
 };
 @group(1) @binding(3) var<uniform> material: MaterialParams;
 
@@ -427,7 +430,7 @@ const MASK_CUTOFF: f32 = 0.753;
 
 // Surfaces and their bloom mask share the same material clock.
 fn material_uv(uv: vec2<f32>) -> vec2<f32> {
-    return uv + material.scroll.xy * globals.material_time;
+    return uv + material.scroll.xy * globals.material_time + material.offset.xy;
 }
 
 // MASK draws: the disc's cutout materials (leaves, bamboo, banners, grates).

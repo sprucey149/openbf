@@ -359,20 +359,20 @@ pub fn emitter_draws(
         FxType::Streak => {
             let mut sorted: Vec<&Particle> = particles.iter().collect();
             sorted.sort_by_key(|p| p.idx);
-            let mut points: Vec<(Vec3, f32, f32)> = Vec::new();
+            let mut points: Vec<(Vec3, f32, f32, [u8; 4])> = Vec::new();
             for p in &sorted {
                 if let Some(last) = points.last() {
                     if last.0.distance_squared(p.pos) < 0.1 {
                         continue;
                     }
                 }
-                points.push((p.pos, p.size * m, p.rot));
+                points.push((p.pos, p.size * m, p.rot, bytes(p, 1.0)));
             }
             if points.len() >= 3 {
                 let newest = sorted[sorted.len() - 1];
                 push(
                     out,
-                    ParticleShape::Ribbon { points },
+                    ParticleShape::ShadedRibbon { points },
                     origin,
                     bytes(newest, 1.0),
                 );

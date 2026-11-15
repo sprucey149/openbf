@@ -131,6 +131,11 @@ pub enum Event {
         from: Vec3,
         to: Vec3,
     },
+    FallDamage {
+        victim: UnitHandle,
+        damage: f32,
+        health_left: f32,
+    },
     Hit {
         /// Presentation metadata only: a direct contact that plays the hit
         /// pose and sets the death side: a round (including a zero-damage
@@ -387,8 +392,9 @@ pub enum Event {
         dir: Option<Vec3>,
     },
     /// A vehicle's hull pool ran out and it is gone this tick, no wreck
-    /// (re-vehicles §6, [`Sim::destroy_vehicle`]). The game layer reads the
-    /// class's `ExplosionName` and chunks from `class`; `pos` / `vel` are the
+    /// (re-vehicles §6, [`Sim::destroy_vehicle`]); a walker is gone when its
+    /// death clip ends (`Sim::finish_walker_death`). The game layer reads the
+    /// chunks from `class` (the blast is [`Event::VehicleExplosion`]); `pos` / `vel` are the
     /// hull's at death (the chunks inherit `vel`).
     VehicleDestroyed {
         vehicle: crate::vehicle::VehicleHandle,
@@ -396,6 +402,17 @@ pub enum Event {
         pos: Vec3,
         vel: Vec3,
         killer: Option<UnitHandle>,
+    },
+    /// A dying vehicle's death blast went off at `pos`: the class's
+    /// `ExplosionName`, or with `last` a walker's second blast at the end of
+    /// its death clip (`FinalExplosion`, else `ExplosionName` again;
+    /// `core::vehicle::walker::WalkerDeath`). The game layer draws and plays
+    /// the explosion from this.
+    VehicleExplosion {
+        vehicle: crate::vehicle::VehicleHandle,
+        class: u32,
+        pos: Vec3,
+        last: bool,
     },
     /// A flyer met a surface, obstacle or other craft (SWBFRNT2.ELF-decomp.c lines 121808-121845, 121913-121930).
     /// Emitted for impact sound, sparks, camera jolt and controller feedback on non-lethal scrape or lethal crash.
@@ -406,6 +423,18 @@ pub enum Event {
         speed: f32,
         damage: f32,
         lethal: bool,
+    },
+    /// A hover's or walker's contact that plays its class's
+    /// `VehicleCollisionSound` at `pos`, the vehicle's position
+    /// (`FUN_00366858`, B1:354138; re-vehicle-sounds §9 item 2). A hover
+    /// emits it when a contact's collision damage comes out positive, before
+    /// the damage is dealt (B1 FUN_001ee3e0, B1:99722-99762). A walker emits
+    /// it on any closing contact with another vehicle, before the damage
+    /// threshold (B1 FUN_00217d50, B1:128782-128856). Flyers have
+    /// [`Event::FlyerImpact`].
+    VehicleCollision {
+        vehicle: crate::vehicle::VehicleHandle,
+        pos: Vec3,
     },
     HitLanded {
         shooter: UnitHandle,
@@ -515,7 +544,6 @@ pub enum Call {
 pub enum DeathCause {
     /// Inside one of the mission's `AddDeathRegion` volumes.
     DeathRegion,
-    /// Landed at or beyond [`LETHAL_LANDING_SPEED`].
     Fall,
     /// Riding a vehicle destroyed by no attacker (a crash into the world,
     /// [`Sim::destroy_vehicle`]); a destroyer's riders are his kills.

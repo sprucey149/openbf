@@ -531,6 +531,37 @@ pub fn ray_heightfield(
     max_t: f32,
     step: f32,
 ) -> Option<f32> {
+    ray_heightfield_sided(hf, cutters, origin, dir, max_t, step, false)
+}
+
+/// A bolt's terrain ray: crossing out of the underside is not an impact.
+/// The BF1 Hailfire's unnamed secondary fires at its root, which can lie
+/// below the terrain. Its native shot passes out through the sheet; the
+/// old two-sided ray stopped it beneath the vehicle. The PS2 terrain
+/// test only bisects an above-to-below piece (`ray_terrain_ps2`, B2
+/// FUN_0055f940; analysis/re-grenades.md 13.2). Keep the existing march's
+/// precision here; the camera still uses the two-sided sheet above.
+pub fn ray_heightfield_front(
+    hf: &Heightfield,
+    cutters: &[Cutter],
+    origin: Vec3,
+    dir: Vec3,
+    max_t: f32,
+    step: f32,
+) -> Option<f32> {
+    ray_heightfield_sided(hf, cutters, origin, dir, max_t, step, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ray_heightfield_sided(
+    hf: &Heightfield,
+    cutters: &[Cutter],
+    origin: Vec3,
+    dir: Vec3,
+    max_t: f32,
+    step: f32,
+    front_only: bool,
+) -> Option<f32> {
     let mut t = 0.0f32;
     let mut prev_t = 0.0f32;
     let mut prev_above = origin.y - hf.height_at(origin.x, origin.z) >= 0.0;
@@ -553,7 +584,7 @@ pub fn ray_heightfield(
             } else {
                 mid
             };
-            if !is_cut_by(cutters, origin + dir * hit) {
+            if (!front_only || prev_above) && !is_cut_by(cutters, origin + dir * hit) {
                 return Some(hit);
             }
             // Cut here: no sheet to cross, keep marching.
@@ -1295,6 +1326,26 @@ mod tests {
         let t = ray_heightfield(&hf, &[], Vec3::new(0.0, -1.0, 0.0), d, 10.0, 0.1)
             .expect("crosses out");
         assert!((t - 2f32.sqrt()).abs() < 0.2, "{t}");
+    }
+
+    #[test]
+    fn bolt_terrain_ray_passes_the_underside_but_still_hits_the_next_hill() {
+        let hf = slope();
+        let up = Vec3::new(0.0, 1.0, -1.0).normalize();
+        let under = Vec3::new(0.0, -1.0, 0.0);
+        assert!(ray_heightfield_front(&hf, &[], under, up, 10.0, 0.1).is_none());
+        // Start below the flat ground, climb out, then strike the ramp.
+        let from = Vec3::new(0.0, -1.0, -10.0);
+        let toward = Vec3::new(0.0, 0.2, 1.0).normalize();
+        let sheet = ray_heightfield(&hf, &[], from, toward, 30.0, 0.1).unwrap();
+        let front = ray_heightfield_front(&hf, &[], from, toward, 30.0, 0.1).unwrap();
+        assert!(sheet < 6.0, "the camera sees the outward crossing: {sheet}");
+        assert!((front - 11.25 * 1.04_f32.sqrt()).abs() < 0.2, "{front}");
+        let above = Vec3::new(0.0, 5.0, -10.0);
+        assert_eq!(
+            ray_heightfield_front(&hf, &[], above, Vec3::Z, 30.0, 0.5),
+            ray_heightfield(&hf, &[], above, Vec3::Z, 30.0, 0.5)
+        );
     }
 
     /// A crossing inside a cutter is not a crossing — there is no sheet there.

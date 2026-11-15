@@ -229,9 +229,10 @@ pub fn nine_pose(
 /// A hover's rider numbers (card VRIDE, `analysis/re-vehicle-riders.md` 4.1
 /// [O]): the drive smooths the throttle into `p` and the turn into `y` at
 /// rate 5 a second while the hover has a pilot (B1 `FUN_001ec768`
-/// B1:99598-99626, B2 `FUN_0021d8b8` B2:134693-134723), both -1 from the
-/// constructor (B1:96488-96490, B2:130953-130955) and left as they are when
-/// he leaves. A nine-pose pilot seat (the speeder bikes, the BARC) is posed
+/// B1:99598-99626, B2 `FUN_0021d8b8` B2:134693-134723), both 0 from the
+/// constructor (B1:96395-96396, B2:130826-130827; it writes -1 only to a, b
+/// and c: `analysis/re-vehicle-pose.md` 0.6) and left as they are when he
+/// leaves. A nine-pose pilot seat (the speeder bikes, the BARC) is posed
 /// by [`HoverNine::pose`]. Visual only: the sim never reads them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HoverNine {
@@ -241,7 +242,7 @@ pub struct HoverNine {
 
 impl HoverNine {
     /// The constructor's numbers.
-    pub const START: HoverNine = HoverNine { p: -1.0, y: -1.0 };
+    pub const START: HoverNine = HoverNine { p: 0.0, y: 0.0 };
 
     /// One drive update of `dt` seconds with the pilot's throttle, strafe
     /// and turn (the PS2's signs, the port's `HoverInput`). The turn the
@@ -272,6 +273,112 @@ impl HoverNine {
             b: self.y + if self.p > 0.0 { 1.0 } else { 7.0 },
             c: self.p.abs(),
         }
+    }
+}
+
+/// A flyer's fins numbers (`analysis/re-vehicle-pose.md` 6; BF2
+/// FUN_00201300 B2:114651-114690, BF1 FUN_001d8620 B1:84302-84333): `t` is
+/// the turn axis (BF2 E+0x2e4, BF1 E+0x308: the port's `HoverInput::turn`),
+/// and `s` the forward speed in the flyer's frame (BF2 E+0x600, written by
+/// FUN_0020bff8 B2:122129) placed on MinSpeed / MidSpeed / MaxSpeed in
+/// -1 .. 1, BF2's three capped in a landing region (FUN_00202c50/88/c0,
+/// `FlyerParams::speeds`):
+///
+/// ```text
+/// s = -1 at or below MinSpeed, (v - Mid) / (Mid - Min) below Mid,
+///     1 at or above MaxSpeed, else (v - Mid) / (Max - Mid)
+/// a = t + 4    b = t + (s > 0 ? 1 : 7)    c = |s|
+/// ```
+///
+/// The pose has no pilot gate: a parked flyer, at rest, is at `s = -1`.
+pub fn flyer_nine(sim: &core::sim::Sim, v: &core::vehicle::Vehicle) -> Option<NinePose> {
+    let p = sim.flyer_params.get(v.class as usize)?.as_ref()?;
+    let speeds = p.speeds(sim.flyer_region_coverage(v).0);
+    Some(fin_pose(v.input.turn, v.vel.dot(v.rot * Vec3::Z), speeds))
+}
+
+/// [`flyer_nine`]'s law at turn `t`, forward speed `speed` and the class's
+/// `[min, mid, max]` speeds.
+pub fn fin_pose(t: f32, speed: f32, [min, mid, max]: [f32; 3]) -> NinePose {
+    let s = if speed <= min {
+        -1.0
+    } else if speed < mid {
+        (speed - mid) / (mid - min)
+    } else if speed >= max {
+        1.0
+    } else {
+        (speed - mid) / (max - mid)
+    };
+    NinePose {
+        a: t + 4.0,
+        b: t + if s > 0.0 { 1.0 } else { 7.0 },
+        c: s.abs(),
+    }
+}
+
+/// Per `Sim::vehicles` slot, each live hover's [`HoverNine`]: one drive
+/// update of the tick's length per tick while it has a pilot, with his input;
+/// a fresh vehicle starts at [`HoverNine::START`]. The rider's pose and the
+/// hover's own fins read the same numbers (card VPOSE).
+#[derive(Clone, Debug, Default)]
+pub struct HoverClocks(Vec<Option<HoverClock>>);
+
+#[derive(Clone, Copy, Debug)]
+struct HoverClock {
+    gen: u32,
+    tick: u64,
+    nine: HoverNine,
+}
+
+impl HoverClocks {
+    /// Bring every hover's numbers to `sim`'s tick.
+    pub fn step(&mut self, sim: &core::sim::Sim, bf2: bool) {
+        let tick = sim.tick;
+        let vs = &sim.vehicles;
+        self.0.resize(vs.len(), None);
+        for (slot, v) in vs.iter().enumerate() {
+            if !v.alive || v.kind != core::vehicle::VehicleKind::Hover {
+                self.0[slot] = None;
+                continue;
+            }
+            let fresh = HoverClock {
+                gen: v.gen,
+                tick,
+                nine: HoverNine::START,
+            };
+            let c = self.0[slot].get_or_insert(fresh);
+            if c.gen != v.gen {
+                *c = fresh;
+            }
+            let piloted = v.pilot_seat().is_some_and(|s| s.occupant.is_some());
+            if piloted {
+                let no_strafe = sim
+                    .hover_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|p| p.strafe_speed < 1e-4);
+                let i = v.input;
+                for _ in 0..tick.saturating_sub(c.tick).min(30) {
+                    c.nine = c.nine.step(
+                        [i.throttle, i.strafe, i.turn],
+                        no_strafe,
+                        bf2,
+                        core::TICK_DT,
+                    );
+                }
+            }
+            c.tick = tick;
+        }
+    }
+
+    /// Slot `slot`'s numbers, when they were stepped for generation `gen`.
+    pub fn get(&self, slot: usize, gen: u32) -> Option<HoverNine> {
+        self.0
+            .get(slot)
+            .copied()
+            .flatten()
+            .filter(|c| c.gen == gen)
+            .map(|c| c.nine)
     }
 }
 
@@ -521,6 +628,23 @@ impl super::SceneGpu {
 mod tests {
     use super::*;
     use manifest::ManifestRigNode;
+
+    #[test]
+    fn flyer_fins_place_the_speed_on_min_mid_max_and_lean_with_the_turn() {
+        let speeds = [20.0, 30.0, 40.0];
+        let at = |t, v| {
+            let n = fin_pose(t, v, speeds);
+            [n.a, n.b, n.c]
+        };
+        assert_eq!(at(0.0, 0.0), [4.0, 7.0, 1.0]);
+        assert_eq!(at(0.0, 20.0), [4.0, 7.0, 1.0]);
+        assert_eq!(at(0.0, 25.0), [4.0, 7.0, 0.5]);
+        assert_eq!(at(0.0, 30.0), [4.0, 7.0, 0.0]);
+        assert_eq!(at(0.0, 35.0), [4.0, 1.0, 0.5]);
+        assert_eq!(at(0.0, 50.0), [4.0, 1.0, 1.0]);
+        assert_eq!(at(-1.0, 40.0), [3.0, 0.0, 1.0]);
+        assert_eq!(at(1.0, 0.0), [5.0, 8.0, 1.0]);
+    }
 
     fn node(name: &str, parent: Option<u32>, at: [f32; 3]) -> ManifestRigNode {
         ManifestRigNode {

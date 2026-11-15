@@ -144,6 +144,7 @@ fn set_look(s: &mut Scene) {
         v.guns.resize(1, None);
     }
     let g = v.guns[0].get_or_insert_with(|| core::vehicle::gun::GunState {
+        target: None,
         look,
         aim: look,
         rate: (0.0, 0.0),

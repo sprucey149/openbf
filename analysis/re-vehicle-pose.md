@@ -1,6 +1,193 @@
 # OPUS RE (loop lane 2, 2026-10-22, card VPOSE) - [O] UNAUDITED
 # RE: a vehicle's own posed nodes - the node table, its turret and aimer nodes, the FinAnimation nine-pose
 
+## BF1 Republic gunship follow-up, 2026-11-14
+
+The maintainer's Bespin Platforms report was reproduced from the supplied
+SLUS-20898 / CRC 503BF9E1 slots 5 (pilot), 6 (ball gunner), and 7 (standing
+passenger). Each was imported to a separate emucap-compatible file; the user's
+states were unchanged. Slot 6 plus 12 frames holding R1 shows the beam leaving
+the ball's forward outlet. Slot 7 shows a standing rider behind a transparent
+ball containing another rider. Local reference captures:
+`engine/artifacts/laat-ref-s{5,6,7}.png` and `laat-ref-s6-beam.png`.
+These and the converted states are game data and stay out of Git.
+
+Four gaps in the port were involved:
+
+- The gunship has posed seat nodes without a takeoff/fins clip. The flyer
+  bake used to require one of those clips before writing a rig, and the draw
+  applied only those clips. It now also bakes rigs for authored seat nodes,
+  applies the existing turret/aimer/barrel writers after the base animation,
+  and places riders on the resulting nodes. This follows the MountedTurret
+  node law (`FUN_00223850`, B1:137537-137635 in the earlier export, section 2.3
+  here) and rider attachment (`FUN_0023e028`, `re-vehicle-riders.md` 2.1).
+- The canopy's Normal material word is 0x05, its opaque trim's 0x01; both
+  share `REP_LA_AT_BALLS`. The histogram called both opaque. The existing BF1
+  ELF override now also blends Normal 0x04 words without 0x02, independently
+  of that histogram (`re-material-flags.md` 0.4 / 2, Normal draw
+  `FUN_004cf6f0`, earlier-export B1:594346-594373). No threshold changed.
+- TURRET4 has no weapon but supplies a mounted view: `MountPos` is
+  (1.5, -0.75, 1.75), with yaw -95..-60 degrees and pitch -10..20 degrees
+  in the original turret convention. It now retains the same look state
+  and camera law as armed gunner sections, with no weapon installed.
+  The camera uses the mount frame (`FUN_00225988`, current B1:138523-138530;
+  mounted view-frame law in `re-turret-draw.md` 2.2 / 4).
+- The left ball names its fire point with key 0x2e5375da, an alias that the
+  original aimer setter joins to the `FirePointName` write (`FUN_0026e260`,
+  current B1:192366-192408). Both the seat and aimer readers now accept it.
+  Flyer fire points also receive the turret-bind rotation correction, so
+  they rotate about the same pivot as the drawn outlet.
+
+Source baseline: `941937c10612` on `feature/vehicle-parity`; the report's
+`last.json` identifies that clean build, bf1_bes1/con, exit tick 3618.
+Validation uses `cargo test -p bake --lib alpha::tests` (15 passing), the
+data-backed `cargo test -p game --test flyer bf1_gunship_ball` (passing),
+and headless `seat_stills` with `SEAT_STILLS_FLYING=1` for seats 2, 3 and 4
+on `bf1_bes1_con_cw` (18 captures, level/up/down/left/right/fire).
+The test requires transparent glass plus opaque trim, verifies both rider
+anchors turn with their balls, both live beams stay within 0.03 m of their
+posed outlets over 20 firing ticks, and the unarmed passenger's view turns
+while its mount remains fixed. Port captures under `engine/artifacts/laat-port/`
+were inspected: rider visible through the canopy, standing pose and side view,
+both ball seats' aiming and firing. These are behavior checks, not matched
+camera/pixel comparisons; exact PS2 camera easing and moving-flight comparisons
+remain unchecked. Only the BF1 Republic vehicle side was rebaked locally;
+the general bake corrections reach other assets when their groups are rebaked.
+
+Final checks: 75 tests passed (15 bake alpha, 7 flyer integration, 21 vehicle
+class, 7 vehicle pad, 6 skeletal pose, 18 flyer camera, and one headless GPU
+flyer-draw regression through `scripts/gpu_tests.sh --game-lib --include-ignored
+viewer::vehicles::local_light_tests::flyer_draw_changes_with_takeoff_lift`).
+Four additional flyer tests remain ignored for their separate owned-input
+fixtures. `cargo build --release -p game --bin game --example seat_stills`
+passed. The rebuilt game completed a one-second headless Clone Wars Bespin
+startup with `--mission engine/missions/bf1_bes1_con_cw.ron --vehicle
+rep_fly_gunship`, correctly seating the player; this is a startup check, not
+round acceptance. `git diff --check` passed. The live size report was generated;
+its map check miscompares Windows backslashes with the map's slash paths, so
+it cannot validate this checkout. A separate check resolved all eight touched
+source rows and matched their live line counts in `engine/CRATES.md`.
+Concurrent changes to the shared flyer's resting-turret writers appeared
+after that verification; they were preserved, and the gunship integration
+test passed again against the combined source tree.
+
+
+## Gunship wing-gunner fire ring, 2026-11-14
+
+The next report concerned seat 2 (TURRET1, the wing gunner), not the two
+ball seats checked above. Its black box is the dirty `941937c10612` build,
+diff `912edcabcd4682cc`, bf1_bes1/con, exit tick 1235. Weapon 52 fires two
+events at the same origin at ticks 958, 1045, 1069 and 1208: two shots were
+being sent through one wing emitter.
+
+Both games author one `WeaponSection = 1`, `ShotsPerSalvo = 2`, and two
+aimers for `rep_weap_fly_gunship_wing`. The right wing's yaw range is
+-160..20 degrees; the left wing's is -20..160. A repeated `WeaponName`
+after `NextAimer` writes the same weapon slot. [V] BF1 `FUN_00225f08`,
+current B1:138714-138730, writes the class into the slot selected by
+`DAT_00517a88`; `WeaponSection` changes that cursor, B1:138880-138884.
+The loader instead appended a second weapon and assigned its aimer to
+secondary fire. Primary fire therefore had two rounds but one point and
+no differing-arc ring to gate.
+
+`SeatSpec` now honors explicit weapon-section selection, including ammo
+writes, so the repeated name retains one weapon with both aimers. The
+existing `ring_reach` gate admits both in the overlap, or the reachable
+side alone outside it. Ongoing mounted beams also retain their own
+fire-ring point's limited aim instead of reverting to the seat's shared
+aim (`Sim::seat_beam_frame`). This is the same rule for both source games;
+no normalization override or asset rebake is involved.
+
+Evidence: the supplied original dual-wing screenshot; a new headless
+emucap replay of slot 5, R2 to the co-pilot, then R1, saved locally as
+`engine/artifacts/laat-wing-ref-fire.png` (one beam in the stored sideward
+view). The new `gunship_wing_beams_fire_together_and_respect_each_sides_arc`
+test checks both games' authored classes, then drives the BF1 Bespin
+seat forward and at +/-70 degrees. It requires two simultaneous beams
+forward, right only at negative yaw, left only at positive yaw, distinct
+origins within 0.01 m of the wing outlets, and directions within 2 degrees
+of the requested yaw. A parser regression also covers returning to an
+earlier section for an ammo write. Original analog-angle measurements
+remain unchecked; the emulator input capability exposes no analog axes.
+
+Validation for this follow-up: 58 passing tests (28 `core` mounted guns,
+9 `core` beams, 13 game vehicle-class parsing, 8 flyer integration); four
+separate owned-input flyer fixtures remain ignored. Commands used
+`cargo test -p core sim::guns::tests`, `cargo test -p core sim::beam::tests`,
+`cargo test -p game --lib vehicle_class::tests` and
+`cargo test -p game --test flyer`, all with `--manifest-path engine/Cargo.toml`.
+The release game and `seat_stills` rebuilt. An airborne headless seat-1
+capture (`engine/artifacts/laat-wing-port/rep_fly_gunship_s1_fire.png`) was
+inspected: two simultaneous beams from the two wings. Its shot log has
+separate local origins (-8.436, -0.366, -1.432) and
+(8.571, -0.366, -1.432). No renderer/golden files changed. Concurrent
+flight-control edits initially failed the game build with a borrow spanning
+`sample_pad`; capturing the stick-swap flag before that mutable call repaired
+the borrow without changing its selected value. Those other edits were kept.
+
+## Paired beam convergence and pilot cannon aim, 2026-11-14
+
+The maintainer next reported separated LAAT wing impacts, the same fault on
+MAF wing beams, and pilot cannon impacts below the reticle. The pilot report's
+black box is dirty `941937c10612`, diff `5313795671d8410d`, bf1_bes1/con,
+exit tick 1805; the supplied PS2 and port screenshots show the discrepancy.
+
+Each independent mounted aimer now solves its own offset muzzle line against
+one shared finite target, rather than sharing the first aimer's direction.
+That target is retained in deterministic gun state and hashed; emission,
+continuous beam updates and the drawn aimer nodes read the same point.
+Per-emitter yaw/pitch limits still select the reachable beam(s). On the MAF,
+the left aimer's -20..280-degree range also exposed a draw wrapping error:
+a valid small negative angle was converted to nearly 360 degrees and clamped
+to 280. Equivalent-angle conversion now occurs only outside the authored
+range, with the symmetric correction for a range extending below -180.
+
+The pilot problem was camera parallax plus missing per-muzzle convergence,
+not a spread adjustment. [V] BF1 `FUN_001dbbd8`, current B1:86915-86933,
+and BF2 `FUN_00209758`, current B2:120299-120320, project the ideal chase
+camera along the pilot's untilted forward direction to the eye's depth.
+Their subsequent 512 m casts find the target (B1:86948-86953,
+B2:120335-120340). The port omitted that projection for flyer pilots and
+excluded their fire rings from per-point aim. It now installs the pilot's
+matching chase section (including BF2's camera tilt), projects the ray, and
+aims authored pilot aimers from their own outlets within their own limits.
+Muzzles retain their authored flyer positions. Fixed missile aimers keep
+their zero travel; no spread or weapon class numbers were changed.
+
+Data-backed `game --test flyer` checks passed: both LAAT cannon outlets meet
+the chase reticle within 0.1 m at 60 and 120 m with the aircraft pitched down;
+LAAT and MAF paired beams meet a common wall target at 35 and 120 m while
+panning, each line within 0.03 m of the target, its hit within 0.05 m and its
+rendered outlet within 0.05 m of the beam origin. The 35 m pilot fixture is
+outside the LAAT cannons' authored 20-degree pitch travel and is therefore
+not a reachable-target acceptance case. The existing arc-selection and
+ball/rider/passenger checks also pass (10 flyer tests, four unrelated owned
+fixtures ignored), as does the other contributor's original-PS2 MAF rear-node
+comparison (`game --test maf`, one test). These are stationary-aircraft
+geometry checks; original moving-flight camera lag and analog-angle sweeps
+remain unchecked. Source baseline remains `941937c10612` with the combined
+uncommitted vehicle-parity work preserved.
+
+Final combined-tree checks for this follow-up: 68 passed (28 core gun
+simulation, 11 core gun state/math, nine core beams, ten flyer integration,
+one MAF PS2 comparison, seven vehicle-pad setup, one barrel-recoil draw,
+and one headless GPU flyer-draw regression). Commands: `cargo test
+--manifest-path engine/Cargo.toml -p core --lib` with filters
+`sim::guns::tests`, `vehicle::gun::tests`, and `sim::beam::tests`;
+`cargo test --manifest-path engine/Cargo.toml -p game --test flyer --test maf`;
+game `--lib vehicle_pads::tests` and `--lib viewer::walker_aim::tests`;
+`scripts/gpu_tests.sh --game-lib --include-ignored
+viewer::vehicles::local_light_tests::flyer_draw_changes_with_takeoff_lift`.
+`cargo build --release --manifest-path engine/Cargo.toml -p game --bin game
+--example seat_stills` and `git diff --check` passed. Touched Rust sources
+were formatted individually; workspace-wide `cargo fmt --check` also reports
+unrelated formatting differences in unchanged files. The broader core
+`--lib fmath::tests` selection passed 12 and failed two checks in unchanged
+code: signed-zero std max/min agreement and the minimap test-module scanner.
+The core transcendental and wall-clock referees pass. Initial Windows `bash`
+lacked Cargo; the GPU command passed through Git Bash. No assets or captures
+were staged, and no original-state files were changed.
+
 **The questions** (card VPOSE, from card VRIDE's RE: `re-vehicle-riders.md` 5, 2.2). The port draws every hover
 rigid in its bind pose (`game/src/viewer/vehicles.rs`): a fighter tank's turret never turns with its gunner's aim
 and a speeder bike's vanes never move. What does the PS2 draw? (1) Which of a vehicle's nodes move, and by which
@@ -157,6 +344,26 @@ tank's fin-posed `dummyroot`, is harmless because the clip holds `dummyroot` at 
   within 0.01 on every row, within 1e-3 on 75-100 % per node (lowest the BARC's right gun 3/4, the bike's gun 143/182) -
   BF2 writes aimer nodes at draw time only, so a save state between the think and the draw sees one update of motion.
   Barrels (BF2 A+0x110 + 0x40 i): their parent's rotation on every row. Output `replay_aimer_veh.txt`.
+- [L] A vehicle barrel recoils by re-turret-draw 2.3's law (2026-11-14, BF2 MYG1, the user's slot-8 state with the
+  player in the AAT's turret seat, a converted copy in a private emucap PCSX2). The AAT's table entries `Main_Gun` and
+  `recoil_3` point at the aimer object's A+0xd0 and A+0x110 (A = 0x1ab7220). Its class record's slot 0 holds
+  `recoil_3` with `BarrelRecoil` 0.75 (class+0xc), and the barrel state is A+0x214 (the update's loop at MIPS
+  0x3027f0-0x30282c, minus 4 dt each video frame). At rest the barrel sits at (0, 0.0274, 1.3811) in the aimer's
+  frame. With the state written to 1.0, four frames later the state was 0.8667 and the barrel sat at z 0.7311, a slide
+  of 0.65 = 0.8667 x 0.75. After a real shot the state was 0.0667 and the slide 0.05. The rotation stays the aimer's.
+  BF2's AAT authors `recoil_3` before the turret's `WeaponName`, and the setters write it into the aimer of the
+  current WEAPONSECTION (B2 FUN_00270540 B2:191043, index from B2:190865), so it is the launcher's barrel.
+- [L] The AT-ST's passenger seat (2026-11-14, BF2, the user's slot-8 state with the player in TURRET1, a converted
+  copy in a private emucap PCSX2). The section has no `TurretNodeName`; `MountPos` (0xf2aa4a90, "0 8 0") writes the
+  turret's bind position K+0x7f0 (B2 FUN_00270540 B2:190883-190888, class K = 0x19e0100) and key 0x865061fc ("1")
+  sets K+0x84c. The turret object T = 0x1c2d4a0 (T+0x27c = K) holds its node at T+0x200 = the identity at (0, 8, 0)
+  and its aim frame at T+0x1c0 at the walker's world origin + (0, 8, 0) (walker y 10.587, aim frame y 18.587). The
+  aim frame's z row (0.3385, -0.0412, -0.9401) is the owner's E+0x350, which in model space is yaw 0, pitch -2.3616
+  deg = the walker's aim E+0x50c / +0x510 (-1.3e-6, -0.04122) - B2 FUN_0026cea0 B2:188899-188939 takes the owner's
+  direction when K+0x84c is set. The camera section K+0x790 (B2 FUN_001d0328) holds EyePointOffset 0 0 0 at +0x0,
+  TrackCenter 0 0 0 at +0x10, TrackOffset 0 1 5 at +0x20 and TiltValue 0.157 rad at +0x5c: `EyePointOffset` writes
+  the TrackCenter too (B2:78787-78794, B1 FUN_001b6168 B1:59571-59578) and the section authors no TrackCenter. On
+  screen the view sits over the AT-ST's head, looking ahead.
 - [L] The card's acceptance number: the BF2 Mygeeto fighter tank's turret (`ref/states/bf2_myg1_cp2_cp1_con_post1_
   spawn.p2s`, yaw -0.0584, PitchTurnFactor 0) turns `turret_y` (bind (0, 1.7932, -2.8576) under bone_root) by 3.35
   deg; `hp_active` (bind (0, 0.658, -3.010)) through it lands at (+0.0089, 0.6581, -3.0098) - the gunner's RAM place
@@ -274,10 +481,22 @@ BARC's doubled dummyroot is static, so there both rules score the same.
   1 : 7), c = |s|, turn the raw turn axis (BF1 E+0x308, BF2 E+0x2e4), s the speed setpoint placed on MinSpeed / MidSpeed
   / MaxSpeed in [-1, 1] (B1:84525-84557, B2:115336-115384; BF2's getters scale and cap the three speeds while E+0x668 is
   set). [L] The snowspeeder's bank has no takeoff clip, so its flaps pose by this law.
-- [V] The hailfire droid's draw re-aims three nodes named by `SuspensionNodeName` / `SuspensionLeftArmNodeName` /
-  `SuspensionRightArmNodeName` (FNV 0xe534c2cb / 0xabb24116 / 0x580b459f; BF1 K+0x27a4..0x27ac, B1:96879-96983;
-  BF2 B2:131396-131580); only `cis_tread_hailfire` authors them (CIS_HailFire_Droid_center, armL, armR) - on no
-  showcase map. The look-at they build is not read [H].
+- [L] BF1's MAF (`cis_fly_maf`, BES1; the maintainer's three save states of 2026-11-14 read from their
+  `eeMemory.bin`, the flyer's table at E+0x1ce0, primary vtable 0x5308f0). TURRET2's `turret_rearcannon` is
+  bound facing -Z, but its entry is always built along the gunner's look at its bind origin. A parked MAF that
+  nobody turned shows an identity rotation, so the cannon faces forward over the hull. After its gunner leaves, the
+  node keeps his last look (read live, 90 frames after leaving the seat). `PitchTurnFactor` 0: the node only yaws.
+  `aimer_rearcannon` hangs 3.42 m ahead of it and pitches within -10..10 deg. Its two barrels share one RAM matrix
+  for every MAF (the class's bind storage, section 8's in-place note), so they are written by whichever MAF was
+  drawn last; the port poses each MAF's own. The port's rows at the gunner's look (yaw -4.98 deg) match the
+  turret entry to 1e-4 and the aimer to 0.004 (`game/tests/maf.rs`). The port now draws a flyer's turret node from
+  look (0, 0) before anyone aims it (`WalkerAim::writing_turrets_at_rest`). Hovers and walkers still keep the bind
+  until aimed; `measure:` a never-manned BF1 skiff's `gunl` / `gunr`.
+- [V][L] The Hailfire centre and suspension arms now use the separate node
+  writers and spring state in `re-hover.md` 6.20. Both slot 5 Hailfires'
+  three matrices match the port within 2.3841858e-7. BF1's hardcoded wheel
+  texture scroll is connected to the renderer.
+
 
 ## 7. For the port (card VPOSE build)
 What exists: hovers drawn rigid (`viewer/vehicles.rs`); a building turret's per-node parts and node laws
@@ -301,7 +520,22 @@ riders hung at `L x bind(parent) x O` (`soldier_vis::rider_now`).
    fighter tank's turret_y), the same tick.
 4. **Fix** `HoverNine::START` to p = y = 0 (section 0.6); the nine-pose numbers stay "never driven" until the first
    piloted step.
-5. Not in this card: walkers' and flyers' posed nodes (card VPOSW: the AT-ST's head and guns, the AT-AT's head, the
+5. **Map-local hovers** (2026-11-14): BF1 TAT1's skiff (`tat_hover_skiff`, model `all_hover_skiff`) is in the map
+   LVL, not a side LVL. `scripts/rebake.sh` bakes `TAT/TAT1.LVL` as the side `side_bf1/vehicles/tat1`, and
+   `VehicleSides::load` reads its seats from the map's own `classes.ron` when there is no `classes/bf1_tat1.ron`.
+   Its model is not bone_space: each segment is stored in the frame of the bone its BNAM names (`bind_pose.rs`).
+   The skin then binds each vertex to its segment's BNAM bone, or to the root when a segment names none
+   (`bake/src/vehicle.rs` `bnam_joints`). The same rule skins six other BF1 side models, not yet checked by eye:
+   all_fly_kwing, imp_fly_trooptrans, all_hover_hovernaut, cis_hover_mtt, cis_hover_stap, cis_tread_hailfire.
+   Checked by eye (`pose_render` `POSE_RIDE` + `POSE_RIDE_SEAT`): the rudders and levers swing with the turn
+   input, and gun and gunl turn and pitch with their seat's look, with the gunner riding them.
+   The side guns' nodes are bound at +-90 degrees of yaw, and the seat's muzzle turned the model-frame fire point
+   by the look on top of that, so a `gunl` shot left from (1.40, 0.91, -0.94), 1.3 m from the drawn barrel tip
+   (2.33, 0.91, 0.01). `vehicle_pads::rest_on_turret_node` now carries a hover's fire points back by the turret node's
+   bind rotation (section 2.3: the node is rebuilt along the look at its bind origin). All three guns then fire
+   from their bind tips at rest (`seat_stills` shot rows). The flyers' backward-bound nodes (`towcablegun`,
+   `turret_rearcannon`, `aimer_tailgun_y`) are left as they were until card VPOSF poses them.
+6. Not in this card: walkers' and flyers' posed nodes (card VPOSW: the AT-ST's head and guns, the AT-AT's head, the
    one-man AT-ST, the AT-TE, the spider; card VPOSF: the gunships' turrets, the snowspeeder's flaps and tow gun), the
    hailfire's suspension.
 
@@ -311,7 +545,7 @@ riders hung at `L x bind(parent) x O` (`soldier_vis::rider_now`).
   (`re-walker-nodes.md`): the parent's own table entry, read at the vehicle's own table offset.
 - BF1's in-place writes can land in a model's SHARED bind matrices when a node's first entry is the bind pointer
   (AGENT_A A4) - whether any class shows it on screen was not looked for.
-- The hailfire's suspension look-at (section 6); the BF1 STAP's and the hovernaut's posed hp nodes draw nothing.
+- The BF1 STAP's and the hovernaut's posed hp nodes draw nothing.
 - BF2 writes aimer nodes at draw time only (AGENT_A A2, a range-limited grep, [D]); the RAM's 0.01 residuals agree.
 - The constructor pose's untracked-bone translations (AGENT_B B4q): no fin rig has an untracked bone, so it does not
   arise for the five clips.

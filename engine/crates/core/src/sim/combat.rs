@@ -18,10 +18,6 @@ use crate::weapon::DamageDesc;
 use crate::TICK_HZ;
 use glam::Vec3;
 
-// Only for `kill_environment`'s docs, which link `LETHAL_LANDING_SPEED`.
-#[cfg(doc)]
-use super::state::LETHAL_LANDING_SPEED;
-
 /// The head prim's HitLocation factor (`Sim::hit_scale` says whose hits
 /// get it): both games' hard-coded default {head prim, x3.0}, BF2
 /// `FUN_002517e8`, BF1 `FUN_0020e2e0` (`analysis/re-ai-difficulty.md` §9.2).
@@ -819,11 +815,18 @@ impl Sim {
         killer: Option<UnitHandle>,
         cause: DeathCause,
     ) {
-        self.space_unit_killed(h, killer);
+        // Issue #173 [ours]: a fall after an attacker's choke, push, pull,
+        // shove or blast is his kill (`sim/fall_credit.rs`).
+        let forced = if killer.is_none() {
+            self.forced_attacker(h, cause)
+        } else {
+            None
+        };
         // A placed self-piloted gun has no soldier to credit. Its distinct
         // shot identity is retained on Hit/Shot, but never a player Kill:
         // HUD and round statistics require an actual unit for that event.
-        let killer = killer.filter(|k| k.index != u32::MAX);
+        let killer = killer.or(forced).filter(|k| k.index != u32::MAX);
+        self.space_unit_killed(h, killer);
         // An exposed rider dies where he sits and leaves a corpse there (B1
         // FUN_001ffec0, re-vehicle-death 10.3); one inside the hull leaves none.
         let seated_body = self.units[h.index as usize]
@@ -862,7 +865,12 @@ impl Sim {
         self.unseat_unit(h);
         self.units[h.index as usize].forced_by = None;
         match killer {
-            Some(k) => self.credit_kill(h, k, victim_team),
+            Some(k) => {
+                self.credit_kill(h, k, victim_team);
+                if forced.is_some() {
+                    self.events.push(Event::ForcedDeath { unit: h, cause });
+                }
+            }
             None => self.events.push(Event::EnvDeath { unit: h, cause }),
         }
     }
@@ -951,8 +959,7 @@ impl Sim {
     /// slots, an instant kill with no killer and no cheat check (BF1
     /// `FUN_002af1c0` / `FUN_002af0d0`, BF2 `FUN_00371148` / `FUN_00370fd8`).
     /// BF1 tests the feet, as here; BF2 tests the collision sphere (not
-    /// built). The lethal-landing rule is [`LETHAL_LANDING_SPEED`]
-    /// (PROVISIONAL, card SLAND).
+    /// built).
     pub fn kill_environment(&mut self, h: UnitHandle, cause: DeathCause) {
         let Some(u) = self.unit(h) else {
             return;

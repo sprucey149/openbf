@@ -722,8 +722,14 @@ pub struct WalkSim {
     pub guided_tops: Vec<Option<f32>>,
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub flyer_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
+    /// Each posed hover class's rig ([`crate::viewer::hover_rigs`], card VPOSE).
+    pub hover_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub flyer_exhaust: Vec<Vec<crate::vehicle_pads::FlyerExhaust>>,
+    /// Each vehicle class's hover `WaterEffect` ([`crate::vehicle_pads::PadBuild::hover_water`]).
+    pub hover_water: Vec<Option<String>>,
+    /// Each vehicle class's tread scroll ([`crate::vehicle_pads::PadBuild::hover_treads`]).
+    pub hover_treads: Vec<Vec<crate::vehicle_class::tread::Tread>>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
     /// Each vehicle class's seats' rider hangs, parallel to `vehicle_seats`
     /// (visual only, card VRIDE): read by `crate::soldier_vis`.
@@ -942,9 +948,12 @@ impl WalkSim {
             guided_tops: Vec::new(),
             walker_rigs: Vec::new(),
             flyer_rigs: Vec::new(),
+            hover_rigs: Vec::new(),
             vehicle_weapon_hud: Vec::new(),
             walker_shot_styles: Default::default(),
             flyer_exhaust: Vec::new(),
+            hover_water: Vec::new(),
+            hover_treads: Vec::new(),
             vehicle_riders: Vec::new(),
             vehicle_engines: Vec::new(),
             vehicle_sounds: Vec::new(),
@@ -1279,6 +1288,22 @@ impl WalkSim {
         }
     }
 
+    /// The right stick's scale for the player's seat now. On foot it is the
+    /// battle's look sensitivity over [`input::LOOK_SCALE`] (ours, the
+    /// soldier camera's feel). In any vehicle seat the stick reaches 1 at a
+    /// full throw, as the PS2's does (`re-look-ramp.md` §1 [M]: BF2's stick
+    /// word is 1.0 at a full throw and the game applies no sensitivity),
+    /// so the full-stick timer (turn² + pitch² ≥ 0.9, B2 `FUN_002b0548`,
+    /// `re-hover.md` §5.2) runs and a hover turns at its TurnRate rather
+    /// than its PitchRate. A flyer's own sticks undo the scale the same way
+    /// (`input::flyer_sticks`).
+    pub fn pad_look_for_seat(&self, value: f32) -> f32 {
+        match self.player_on_foot() {
+            true => self.pad_look_for_battle(value),
+            false => 1.0 / input::LOOK_SCALE,
+        }
+    }
+
     /// Is the player piloting a flyer or controlling a guided rocket?
     pub fn player_controls_flyer(&self) -> bool {
         self.flight_controls(input::FlightControls::Classic)
@@ -1296,6 +1321,34 @@ impl WalkSim {
                 .controlled_guided(self.player)
                 .map(|_| input::FlightControls::Classic)
         }
+    }
+
+    /// Classic keeps translation on the left for aircraft that can stop,
+    /// reverse and strafe; continuously flying aircraft steer with the left.
+    /// Select by supported motion capabilities, never by map or class name.
+    pub fn map_flight_sticks(
+        &self,
+        pilot: input::FlightControls,
+        pad: PadState,
+    ) -> Option<PadState> {
+        let layout = self.flight_controls(pilot)?;
+        let hover = self
+            .sim
+            .unit(self.player)
+            .and_then(|u| u.mount)
+            .and_then(|m| self.sim.vehicle(m.vehicle))
+            .and_then(|v| self.sim.flyer_params.get(v.class as usize))
+            .and_then(Option::as_ref)
+            .is_some_and(|p| {
+                // Only the BF1 flight model implements continuous lateral translation
+                // (core::vehicle::flyer::fly); BF2 uses this axis for roll.
+                !p.bf2 && p.min_speed < 0.0 && p.mid_speed == 0.0 && p.strafe_speed > 0.0
+            });
+        Some(if hover {
+            layout.map_hover_sticks(pad)
+        } else {
+            layout.map_sticks(pad)
+        })
     }
 
     /// The magnet target when it is a unit (draw order of `target_draws`;
@@ -1352,9 +1405,12 @@ impl WalkSim {
             vehicle_tops: self.vehicle_tops.clone(),
             guided_tops: self.guided_tops.clone(),
             walker_rigs: self.walker_rigs.clone(),
+            hover_rigs: self.hover_rigs.clone(),
             flyer_rigs: self.flyer_rigs.clone(),
             walker_shot_styles: self.walker_shot_styles.clone(),
             flyer_exhaust: self.flyer_exhaust.clone(),
+            hover_water: self.hover_water.clone(),
+            hover_treads: self.hover_treads.clone(),
             vehicle_weapon_hud: self.vehicle_weapon_hud.clone(),
             vehicle_riders: self.vehicle_riders.clone(),
             vehicle_engines: self.vehicle_engines.clone(),
@@ -1433,9 +1489,12 @@ impl WalkSim {
             vehicle_tops: _,
             guided_tops: _,
             walker_rigs: _,
+            hover_rigs: _,
             flyer_rigs: _,
             walker_shot_styles: _,
             flyer_exhaust: _,
+            hover_water: _,
+            hover_treads: _,
             vehicle_weapon_hud: _,
             vehicle_riders: _,
             vehicle_engines: _,
@@ -1851,7 +1910,10 @@ mod death_camera;
 mod flyer_camera;
 pub use camera::{CamOwner, Handover, DEATH_VIEW_HOLD};
 pub use death_camera::DeathCam;
-pub use flyer_camera::{guided_section, FlyerCam, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE};
+pub use flyer_camera::{
+    guided_section, FlyerCam, FlyerSection, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE,
+};
+pub use walker_view::walker_section;
 
 #[cfg(test)]
 mod tests;

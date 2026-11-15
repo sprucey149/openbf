@@ -228,8 +228,14 @@ holds three handles (B1 +0xf0 / +0xf4 / +0xf8; B2 +0xd4 / +0xd8 / +0xdc), moved 
 5. **[V] Fire loop, overheat.** `FireSound` on handle +0xf4 (a class with `FireSoundStop`, class+0x13c, stops the
    voice still playing there first, 208765-208770) and `FireLoopSound` on handle +0xf0 at the shot (B1
    `FUN_00284c70` 208774-208779), the loop stopped by `FUN_00284d80`; `OverheatSound` on handle +0xf0 with pitch x
-   `OverheatSoundPitch` when the weapon overheats (`FUN_00284a58` 208675-208689) - the census's unnamed loop
-   0x0FB06B34 (74 starts) [D]. The ten per-weapon movement keys (class+0x140.., `FUN_00284e50`) have no banked
+   `OverheatSoundPitch` when the weapon overheats (`FUN_00284a58` 208452-208468) - the census's unnamed loop
+   0x0FB06B34 (74 starts) [D]. Both are idle-state slots: the entry starts it when the weapon comes back to idle
+   overheated (state 7; B2 `FUN_003269f8` 306172-306192, state 5); the update sets its rate to ((1 - f) x
+   `OverheatSoundPitch` + f) x base with f = HeatThreshold / heat (`FUN_00284b80` 208499-208507; B2 `FUN_00326b28`
+   306225-306233 reads f = (max - thr) / (max - cur), the same at max 1) and stops it once the overheat clears
+   (208509; B2 306236). No stop sound in BF1. All 133 baked classes with `OverheatSound` author pitch 0.5 [D];
+   the ctor's default is 1.0 (B2 `FUN_00327e98` 307305). Port: `core::weapon::OverheatSound`,
+   `game/src/sounds/overheat.rs` (2026-11-14). The ten per-weapon movement keys (class+0x140.., `FUN_00284e50`) have no banked
    sample (`re-foley.md`).
 6. **[V] `ChangeModeSound`** (0xc77178c1) is in neither ELF (`constscan.py`: no raw word, no `lui`, no immediate; the
    control hash is found). The sound on Square and R2 is `WeaponChangeSound`.
@@ -300,7 +306,7 @@ plain property.
 | `ReloadSound` | every unit; BF1 +0.3 s | at once | WSND |
 | grenade contact | three keys | `CollisionOtherSound` (GREN) | - |
 | `OrdnanceSound` | looping voice on the bolt, doppler | key read, not played | WHUM |
-| `ChargeSound`, `FireLoopSound`, `OverheatSound` | loops on the weapon's handle | nothing | WHUM |
+| `ChargeSound`, `FireLoopSound`, `OverheatSound` | loops on the weapon's handle | `OverheatSound` at the owner while idle overheated (`SoundLib::play_overheat_loops`); the other two: the walker and repair loops only | WHUM |
 
 ## 10. Checks run
 

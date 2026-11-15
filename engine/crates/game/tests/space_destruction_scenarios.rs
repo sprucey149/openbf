@@ -71,6 +71,7 @@ fn make_test_mesh(texture_name: &str) -> CpuMesh {
         spec: vec![None],
         light: vec![LightPath::Lit],
         scroll: vec![[0.0, 0.0]],
+        groups: Vec::new(),
         sphere: None,
         vis_top: None,
         render_grid: None,

@@ -604,6 +604,10 @@ impl Renderer {
         if filter {
             self.prepare_filter(width, height);
         }
+        let softness = self.softness_wanted();
+        if softness {
+            self.prepare_softness(width, height);
+        }
 
         // Acquire the frame's color view.
         let acquire = std::time::Instant::now();
@@ -1284,6 +1288,12 @@ impl Renderer {
             draw_calls += self.filter_pass(&mut encoder, frame_texture, &view);
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "filter");
+            }
+        }
+        if softness && !ab.skips("softness") {
+            draw_calls += self.softness_pass(&mut encoder, frame_texture, &view);
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "softness");
             }
         }
         if let Some(depth) = full_depth {

@@ -48,6 +48,18 @@ pub struct BoltDraw {
     /// Vertex bytes as the PS2 computes them (before the GS halving).
     pub core_color: [u8; 4],
     pub glow_color: [u8; 4],
+    /// An OrdnanceBeam's draw instead of a bolt's (B1 `FUN_002758e0`, B2
+    /// `FUN_00312438`; `analysis/re-hover-camera.md` 6).
+    pub beam: Option<BeamRibbons>,
+}
+
+/// A beam's ribbons: both run from the muzzle `head` to `head − dir·len`
+/// with no taper, the core at half-width `width` and the glow at
+/// `glow_width`, the glow ADDITIVE (BF1) or NORMAL (BF2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeamRibbons {
+    pub glow_width: f32,
+    pub glow_additive: bool,
 }
 
 /// One vertex of a ribbon's triangle list.
@@ -209,7 +221,7 @@ pub(crate) fn identity_instance() -> GrassInstance {
 }
 
 /// One bolt's two ribbons for `camera`, core then glow: (vertices, sheet,
-/// glow). `particles::build` sorts them among the particles, far to near.
+/// additive). `particles::build` sorts them among the particles, far to near.
 pub(crate) fn bolt_vertices(
     b: &BoltDraw,
     camera: &Camera,
@@ -218,17 +230,25 @@ pub(crate) fn bolt_vertices(
     let right = camera.right();
     let w = b.width;
     [false, true].map(|glow| {
-        let (s, p, len, tex, col) = if glow {
-            (
+        let (s, p, len, tex, col) = match (glow, b.beam) {
+            (true, Some(beam)) => (
+                beam.glow_width,
+                beam.glow_width,
+                b.glow_len,
+                b.glow_texture,
+                b.glow_color,
+            ),
+            (true, None) => (
                 w * GLOW_WIDTH,
                 w * GLOW_WIDTH * GLOW_TAIL,
                 b.glow_len,
                 b.glow_texture,
                 b.glow_color,
-            )
-        } else {
-            (w, w * CORE_TAIL, b.core_len, b.core_texture, b.core_color)
+            ),
+            (false, Some(_)) => (w, w, b.core_len, b.core_texture, b.core_color),
+            (false, None) => (w, w * CORE_TAIL, b.core_len, b.core_texture, b.core_color),
         };
+        let additive = glow && b.beam.is_none_or(|beam| beam.glow_additive);
         let rgb = [gs_unit(col[0]), gs_unit(col[1]), gs_unit(col[2])];
         let verts = ribbon(
             b.head,
@@ -247,7 +267,7 @@ pub(crate) fn bolt_vertices(
             up: 0.0,
         })
         .collect();
-        (verts, tex, glow)
+        (verts, tex, additive)
     })
 }
 
@@ -322,6 +342,54 @@ mod tests {
         assert!(m.iter().filter(|v| v.alpha != 200).all(|v| v.alpha == 150));
         let r = ribbon(h, 0.5, tail, 0.25, Vec3::new(0.0, 0.0, 5.0), Vec3::X, 200);
         assert_eq!(r.len(), 12, "cap + mirrored cap, no body");
+    }
+
+    /// A beam's ribbons keep their half-widths from the muzzle to the end
+    /// (B2 `FUN_00312438`), and its glow blends as its game says.
+    #[test]
+    fn a_beam_keeps_its_widths_and_its_glow_blend() {
+        let mut b = BoltDraw {
+            head: Vec3::ZERO,
+            dir: Vec3::NEG_X,
+            core_len: 10.0,
+            glow_len: 10.0,
+            width: 0.4,
+            core_texture: None,
+            glow_texture: None,
+            core_color: [255; 4],
+            glow_color: [92, 136, 250, 100],
+            beam: Some(BeamRibbons {
+                glow_width: 1.0,
+                glow_additive: false,
+            }),
+        };
+        let cam = Camera {
+            position: Vec3::new(5.0, 0.0, 20.0),
+            yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            fov_y: 1.0,
+            near: 0.1,
+            far: 100.0,
+        };
+        let half = |v: &[GrassVertex], x: f32| {
+            v.iter()
+                .filter(|p| (p.position[0] - x).abs() < 1e-4)
+                .map(|p| p.position[1].abs())
+                .fold(0.0f32, f32::max)
+        };
+        let [(core, _, core_add), (glow, _, glow_add)] = bolt_vertices(&b, &cam);
+        assert!((half(&core, 10.0) - 0.4).abs() < 1e-4, "the core keeps w");
+        assert!(
+            (half(&glow, 10.0) - 1.0).abs() < 1e-4,
+            "the glow keeps 2.5 w"
+        );
+        assert!(!core_add && !glow_add);
+        b.beam = Some(BeamRibbons {
+            glow_width: 1.0,
+            glow_additive: true,
+        });
+        assert!(bolt_vertices(&b, &cam)[1].2, "BF1's beam glow adds");
     }
 
     /// A bolt at len 0 draws only its caps (a degenerate body), and the GS

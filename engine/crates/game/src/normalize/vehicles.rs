@@ -12,7 +12,9 @@
 //!   clip, reload, a missile's turn rate and a beam's pass-through. The
 //!   round keeps BF1's look, sound, speed, life span and blast radii. A gun
 //!   slot BF2 has and BF1 does not is not added. The weak spots are
-//!   `assets::BF1_WEAK_SPOTS`.
+//!   `assets::BF1_WEAK_SPOTS`. The BF1 Hailfire is an approved exception:
+//!   its five-round homing launcher and spider cannon retain BF1 behavior
+//!   and use the ordinary BF1 damage conversion, rather than BF2 guns.
 //! - V2, vehicles only one game has: health by the twin family's ratio
 //!   ([`HEALTH`]); their guns keep the soldier rule's x4/3 and do
 //!   [`VEHICLE_FACTOR`] more to vehicles ([`VEHICLE_FACTOR_CLASSES`]).
@@ -187,6 +189,11 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         "openbf_bf1_hailfire_cannon_ord",
     ),
     (
+        "openbf_bf1_hailfire_cannon_ord",
+        "cis_weap_walk_spider_cannon_exp",
+        "openbf_bf1_hailfire_cannon_exp",
+    ),
+    (
         "cis_hover_mtt",
         "cis_weap_fly_maf_cannon",
         "openbf_bf1_mtt_cannon",
@@ -314,13 +321,8 @@ pub const TWINS: &[Twin] = &[
     Twin::new("cis_weap_walk_spider_cannon", Some("cis_weap_hover_stap_cannon"), "ShotDelay 0.25, SalvoCount 1, ShotsPerSalvo 1, SalvoDelay 0, InitialSalvoDelay 0, HeatPerShot 0.15, HeatRecoverRate 0.28, HeatThreshold 0.05, RoundsPerClip 0, ReloadTime 0"),
     Twin::new("cis_weap_walk_spider_cannon_ord", Some("cis_weap_hover_stap_cannon_ord"), "MaxDamage 250, PersonScale 1, AnimalScale 1, DroidScale 1, VehicleScale 0.1, BuildingScale 0.1, ShieldScale 1, 0xa74561b2 0.75, 0xee08d1ba 0.5, 0x955f71e9 100"),
     Twin::new("cis_weap_walk_spider_cannon_exp", None, "MaxDamage 0"),
-    // Hailfire: its own chaingun numbers on BF1's shared spider cannon.
-    Twin::new("openbf_bf1_hailfire_cannon", Some("cis_weap_tread_hailfire_chaingun"), "ShotDelay 0.05, SalvoCount 1, ShotsPerSalvo 1, SalvoDelay 0, InitialSalvoDelay 0, HeatPerShot 0.03, HeatRecoverRate 0.35, HeatThreshold 0.2, RoundsPerClip 0, ReloadTime 0"),
-    Twin::new("openbf_bf1_hailfire_cannon_ord", Some("cis_weap_tread_hailfire_chaingun_ord"), "MaxDamage 50, PersonScale 1, AnimalScale 1, DroidScale 1, VehicleScale 0.1, BuildingScale 0.1, ShieldScale 0.1"),
-    // Hailfire: missiles.
-    Twin::new("cis_weap_tread_hailfire_missile", Some("cis_weap_tread_hailfire_missile"), "ShotDelay 0.25, SalvoCount 1, ShotsPerSalvo 1, SalvoDelay 0.05, InitialSalvoDelay 0, HeatPerShot 0, HeatRecoverRate 0, HeatThreshold 0, RoundsPerClip 16, ReloadTime 4"),
-    Twin::new("cis_weap_tread_hailfire_missile_ord", Some("cis_weap_tread_hailfire_missile_ord"), "MaxDamage 1500, PersonScale 1, AnimalScale 1, DroidScale 1, VehicleScale 1, BuildingScale 1, ShieldScale 1, TurnRate 0"),
-    Twin::new("cis_weap_tread_hailfire_missile_exp", Some("cis_weap_tread_hailfire_missile_exp"), "MaxDamage 300, PersonScale 1, AnimalScale 1, DroidScale 1, VehicleScale 0, BuildingScale 0, ShieldScale 1"),
+    // The BF1 Hailfire retains its own kit; its isolated cannon, ordnance
+    // and explosion use the ordinary BF1 damage conversion.
     // Combat speeder: light blaster, BF2's cannon.
     Twin::new("all_weap_hover_combatspeeder_cannon1", Some("all_weap_hover_combatspeeder_cannon"), "ShotDelay 0.15, SalvoCount 1, ShotsPerSalvo 1, SalvoDelay 0, InitialSalvoDelay 0, HeatPerShot 0.125, HeatRecoverRate 0.5, HeatThreshold 0.05, RoundsPerClip 0, ReloadTime 0"),
     Twin::new("all_weap_hover_combatspeeder_cannon1_ord", Some("all_weap_hover_combatspeeder_cannon_ord"), "MaxDamage 150, PersonScale 1, AnimalScale 1, DroidScale 1, VehicleScale 0.1, BuildingScale 0.1, ShieldScale 1, 0xa74561b2 0.75, 0xee08d1ba 0.5, 0x955f71e9 100"),

@@ -50,6 +50,12 @@ pub(super) fn persist_setting(
         MenuAction::ToggleFlightControls => {
             profile.settings.flight_controls = profile.settings.flight_controls.toggled()
         }
+        MenuAction::ToggleTerrainLod => {
+            profile.settings.terrain_lod = !profile.settings.terrain_lod
+        }
+        MenuAction::ToggleSceneSoftness => {
+            profile.settings.scene_softness = !profile.settings.scene_softness
+        }
         MenuAction::ToggleInvertY => profile.settings.invert_y = !profile.settings.invert_y,
         MenuAction::ToggleLowPowerResolution => {
             profile.settings.low_power_resolution = !profile.settings.low_power_resolution
