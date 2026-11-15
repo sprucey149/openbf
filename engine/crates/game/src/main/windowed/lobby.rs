@@ -226,9 +226,9 @@ impl TestRun {
     }
 }
 
-/// The Host page's help lines (LAN §5b): this machine's addresses, looked
+/// The Host page's endpoints (LAN §5b, #181), looked
 /// up again every few seconds (two UDP connects, nothing sent).
-fn host_help(port: u16) -> Vec<String> {
+fn host_addresses(port: Option<u16>) -> Vec<String> {
     use std::sync::Mutex;
     type Found = Option<(Instant, Vec<(std::net::Ipv4Addr, bool)>)>;
     static ADDRS: Mutex<Found> = Mutex::new(None);
@@ -240,7 +240,7 @@ fn host_help(port: u16) -> Vec<String> {
         *cache = Some((Instant::now(), reach::local_ipv4s()));
     }
     let addrs = cache.as_ref().map(|c| c.1.clone()).unwrap_or_default();
-    reach::host_help(&addrs, port)
+    reach::host_addresses(&addrs, port)
 }
 
 /// The broadcast targets: the limited broadcast, and the /24 directed
@@ -305,22 +305,12 @@ pub(super) fn draw_mp(ctx: &ui::egui::Context, page: &mut MpPage) -> ui::lobby::
             if let Some(m) = &h.message {
                 lines.push((m.clone(), Color32::from_rgb(255, 160, 120)));
             }
-            let port = h.parsed_port().unwrap_or(net::DEFAULT_PORT);
-            for l in host_help(port) {
+            for l in host_addresses(h.parsed_port()) {
                 lines.push((l, Color32::from_rgb(170, 210, 255)));
             }
-            lines.push(help);
             let cursor = h.cursor;
             let focus = std::mem::take(&mut h.focus_text);
-            ui::lobby::draw_page(
-                ctx,
-                "LAN: Host Game",
-                &rows,
-                cursor,
-                h.text_mut(),
-                focus,
-                &lines,
-            )
+            ui::lobby::draw_host_page(ctx, &rows, cursor, h.text_mut(), focus, &lines)
         }
         MpPage::Join(j) => {
             let rows = j.page.rows();
@@ -440,6 +430,7 @@ impl App {
             MpPage::Host(h) => {
                 if let Some(i) = d.clicked {
                     h.cursor = i;
+                    h.focus_text = h.row_ids().get(i) == Some(&ui::lobby::HostRow::Port);
                 }
                 (h.step(press).map(MpDone::Host), h.take_clicks())
             }
@@ -1212,6 +1203,10 @@ fn host_roster(n: &NetplaySession) -> Vec<LobbyPlayer> {
     }))
     .collect()
 }
+
+#[cfg(test)]
+#[path = "lobby/host_layout_tests.rs"]
+mod host_layout_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

@@ -473,6 +473,160 @@ pub struct PageDraw {
 /// The focused row's bar: the native stack's white bar, faint.
 const FOCUS_BG: crate::typography::Tint = ([255.0; 3], 0.14);
 
+/// Host-only compact form (#181). Keep the heading and endpoint/error
+/// readouts outside the scrolling settings, within a TV's 5% safe inset.
+/// The shared row reveal rule lets keys/pad reach every expanded cheat;
+/// an unchanged cursor leaves wheel scrolling alone.
+pub fn draw_host_page(
+    ctx: &egui::Context,
+    rows: &[PageRow],
+    cursor: usize,
+    text: Option<&mut String>,
+    focus: bool,
+    lines: &[(String, Color32)],
+) -> PageDraw {
+    let mut out = PageDraw::default();
+    let mut text = text;
+    let screen = ctx.content_rect();
+    let safe = screen.shrink(screen.height() * 0.05);
+    let inset = egui_units(ctx, 10.0);
+    let width = egui_units(ctx, 480.0).min(safe.width() - 2.0 * inset);
+    let gap = egui_units(ctx, 4.0);
+    let pitch = egui_units(ctx, 28.0);
+    egui::Area::new(egui::Id::new("lan_host_page"))
+        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        .constrain_to(safe)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(Color32::from_black_alpha(200))
+                .inner_margin(inset)
+                .corner_radius(6.0)
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.spacing_mut().item_spacing.y = gap;
+                    // Labels must leave row clicks to the form, rather than
+                    // taking them for egui's text selection.
+                    ui.style_mut().interaction.selectable_labels = false;
+                    ui.visuals_mut().clip_rect_margin = 0.0;
+                    let title = ui.vertical_centered(|ui| {
+                        ui.label(egui_text(ctx, &TITLE, tint::TITLE, "LAN: Host Game"));
+                    });
+                    let footer: Vec<_> = lines
+                        .iter()
+                        .map(|(line, color)| {
+                            ui.painter()
+                                .layout(line.clone(), egui_font(ctx, &BODY), *color, width)
+                        })
+                        .collect();
+                    let footer_height: f32 = footer.iter().map(|g| g.size().y + gap).sum();
+                    let room = safe.height()
+                        - 2.0 * inset
+                        - title.response.rect.height()
+                        - gap
+                        - footer_height;
+                    let shown = ((room + gap) / pitch).floor().max(1.0) as usize;
+                    let height = shown.min(rows.len()) as f32 * pitch - gap;
+                    let state_id = egui::Id::new("lan_host_rows_state");
+                    let offset_id = egui::Id::new("lan_host_rows_offset");
+                    let state = (cursor, rows.len(), shown);
+                    let before = ctx.data_mut(|d| {
+                        let before = d.get_temp::<(usize, usize, usize)>(state_id);
+                        d.insert_temp(state_id, state);
+                        before
+                    });
+                    let mut area = egui::ScrollArea::vertical()
+                        .id_salt("lan_host_rows")
+                        .max_height(height)
+                        .min_scrolled_height(height)
+                        .auto_shrink([false, true]);
+                    if before != Some(state) {
+                        let offset = ctx.data(|d| d.get_temp::<f32>(offset_id)).unwrap_or(0.0);
+                        let mut view = crate::scroll::ScrollView::at(offset / pitch);
+                        let pointer =
+                            ctx.input(|i| i.pointer.any_down() || i.pointer.any_released());
+                        view.reveal(
+                            cursor,
+                            rows.len(),
+                            shown,
+                            if pointer { 0 } else { crate::scroll::MARGIN },
+                        );
+                        area = area.vertical_scroll_offset(view.target() * pitch);
+                    }
+                    let list = area.show(ui, |ui| {
+                        for (i, row) in rows.iter().enumerate() {
+                            let focused = i == cursor;
+                            let fg = if !row.enabled {
+                                tint::DIMMED
+                            } else if focused {
+                                tint::SELECTED
+                            } else {
+                                tint::UNSELECTED
+                            };
+                            let (rect, hit) = ui.allocate_exact_size(
+                                Vec2::new(ui.available_width(), pitch - gap),
+                                egui::Sense::click(),
+                            );
+                            if focused {
+                                ui.painter().rect_filled(rect, 3.0, egui_color(FOCUS_BG));
+                            }
+                            let rect = rect.shrink2(Vec2::new(gap, 0.0));
+                            let split = rect.left() + rect.width() * 0.63;
+                            let label_rect = egui::Rect::from_min_max(
+                                rect.min,
+                                egui::pos2(split - gap, rect.bottom()),
+                            );
+                            let mut label_ui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .id_salt(("host_label", i))
+                                    .max_rect(label_rect)
+                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                            );
+                            label_ui.label(egui_text(ctx, &BODY, fg, &row.label));
+                            let value_rect =
+                                egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
+                            let mut value_ui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .id_salt(("host_value", i))
+                                    .max_rect(value_rect)
+                                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                            );
+                            if let (true, Some(t)) = (row.text && focused, text.as_deref_mut()) {
+                                let r = value_ui.add(
+                                    egui::TextEdit::singleline(t)
+                                        .font(egui_font(ctx, &BODY))
+                                        .margin(Vec2::new(gap, 0.0))
+                                        .desired_width(value_rect.width()),
+                                );
+                                if focus {
+                                    r.request_focus();
+                                }
+                                if r.lost_focus()
+                                    && value_ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                {
+                                    out.submitted = true;
+                                }
+                                out.text_focus |= r.has_focus();
+                            } else if let Some(v) = &row.value {
+                                value_ui.label(egui_text(ctx, &BODY, fg, v));
+                            }
+                            if row.enabled
+                                && !(row.text && focused)
+                                && hit.clicked_by(egui::PointerButton::Primary)
+                            {
+                                out.clicked = Some(i);
+                            }
+                        }
+                    });
+                    ctx.data_mut(|d| d.insert_temp(offset_id, list.state.offset.y));
+                    for galley in footer {
+                        let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+                        ui.painter().galley(rect.min, galley, Color32::WHITE);
+                    }
+                });
+        });
+    out
+}
+
 /// Draws a page: `title`, `rows` with `cursor` focused, the text box of
 /// the focused text row bound to `text` (given the keyboard when `focus`),
 /// then `lines` (status, help).

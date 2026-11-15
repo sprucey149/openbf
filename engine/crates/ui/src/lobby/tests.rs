@@ -1,4 +1,4 @@
-//! The LAN pages' models (issue #168).
+//! The LAN pages' models and headless Host geometry (issues #168, #181).
 
 use super::*;
 
@@ -13,6 +13,208 @@ const CHEATS: [(&str, &str); 3] = [
     ("ammo", "Infinite ammo"),
     ("stamina", "Infinite stamina"),
 ];
+
+/// Inspect egui's painted glyph geometry, including its actual clipping rect.
+#[test]
+fn host_layout_keeps_heading_addresses_and_selected_rows_in_bounds() {
+    for size in [
+        [1920.0, 1080.0],
+        [1280.0, 720.0],
+        [800.0, 600.0],
+        [640.0, 480.0],
+    ] {
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size.into());
+        let safe = screen.shrink(size[1] * 0.05);
+        let mut h = HostSetup::new(&CHEATS, 37450);
+        h.cheats = [
+            "invincible",
+            "ammo",
+            "clip",
+            "stamina",
+            "classes",
+            "awards",
+            "damage",
+            "guardian",
+            "endurance",
+            "technician",
+        ]
+        .into_iter()
+        .map(|id| (id, crate::menu::cheat_text(id).unwrap().0, true))
+        .collect();
+        let lines = vec![
+            (
+                "LAN Address: 192.168.255.254:65535".into(),
+                Color32::LIGHT_BLUE,
+            ),
+            (
+                "VPN Address: 100.127.255.254:65535".into(),
+                Color32::LIGHT_BLUE,
+            ),
+        ];
+        for expanded in [false, true] {
+            h.cheats_allowed = expanded;
+            for cursor in 0..h.rows().len() {
+                h.cursor = cursor;
+                let rows = h.rows();
+                let mut output = egui::FullOutput::default();
+                for _ in 0..4 {
+                    output = ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            draw_host_page(ctx, &rows, cursor, h.text_mut(), false, &lines);
+                        },
+                    );
+                }
+                for want in [
+                    "LAN: Host Game",
+                    lines[0].0.as_str(),
+                    lines[1].0.as_str(),
+                    rows[cursor].label.trim(),
+                ] {
+                    let shape = output
+                        .shapes
+                        .iter()
+                        .find_map(|c| match &c.shape {
+                            egui::Shape::Text(t) if t.galley.text().trim() == want => {
+                                Some((c.clip_rect, t))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| panic!("missing {want}"));
+                    let bounds = shape.1.visual_bounding_rect();
+                    assert!(
+                        safe.contains_rect(bounds),
+                        "{size:?} {want}: {bounds:?}, safe {safe:?}"
+                    );
+                    assert!(
+                        shape.0.contains_rect(bounds),
+                        "{size:?} {want}: clipped {bounds:?} by {:?}",
+                        shape.0
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn host_frame(
+    ctx: &egui::Context,
+    h: &mut HostSetup,
+    events: Vec<egui::Event>,
+) -> (egui::FullOutput, PageDraw) {
+    let rows = h.rows();
+    let cursor = h.cursor;
+    let focus = std::mem::take(&mut h.focus_text);
+    let mut draw = PageDraw::default();
+    let output = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 480.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            draw = draw_host_page(ctx, &rows, cursor, h.text_mut(), focus, &[]);
+        },
+    );
+    (output, draw)
+}
+
+#[test]
+fn host_layout_port_focus_editing_submission_and_mouse_access() {
+    let ctx = egui::Context::default();
+    let mut h = HostSetup::new(&CHEATS, 37450);
+    h.cheats_allowed = true;
+    for _ in 0..4 {
+        host_frame(&ctx, &mut h, vec![]);
+    }
+    let (output, _) = host_frame(&ctx, &mut h, vec![]);
+    let point = output
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Text(t) if t.galley.text() == "UDP Port" => {
+                Some(t.visual_bounding_rect().center())
+            }
+            _ => None,
+        })
+        .unwrap();
+    host_frame(
+        &ctx,
+        &mut h,
+        vec![
+            egui::Event::PointerMoved(point),
+            egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+        ],
+    );
+    let (_, draw) = host_frame(
+        &ctx,
+        &mut h,
+        vec![egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }],
+    );
+    assert_eq!(
+        draw.clicked,
+        Some(1),
+        "an unfocused port row can be selected with the mouse"
+    );
+    // The same menu edge used by both keys and the pad arrives on Port.
+    h.step(press(|i| i.down = true));
+    let (_, draw) = host_frame(&ctx, &mut h, vec![]);
+    assert!(draw.text_focus);
+    h.port.clear();
+    let (_, draw) = host_frame(&ctx, &mut h, vec![egui::Event::Text("65535".into())]);
+    assert_eq!(h.port, "65535");
+    assert!(draw.text_focus);
+    let (_, draw) = host_frame(
+        &ctx,
+        &mut h,
+        vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }],
+    );
+    assert!(draw.submitted && !draw.text_focus);
+    for _ in 0..2 {
+        host_frame(&ctx, &mut h, vec![]);
+    }
+    h.step(press(|i| i.up = true));
+    h.step(press(|i| i.down = true));
+    assert!(host_frame(&ctx, &mut h, vec![]).1.text_focus);
+    let (_, draw) = host_frame(
+        &ctx,
+        &mut h,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }],
+    );
+    assert!(
+        !draw.text_focus && !draw.submitted,
+        "Escape returns the menu's input"
+    );
+}
 
 /// Host Game's defaults (8 players, the default port, cheats Off, lag
 /// compensation on); max players holds to 2..=16; the per-cheat rows show
