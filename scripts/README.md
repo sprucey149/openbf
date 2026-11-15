@@ -14,6 +14,12 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | `scratch_bake.sh`, `cmp_bake.sh` | bake into a scratch tree, and compare it byte for byte |
 | `world_fingerprint.py` | hash baked gameplay inputs, independently of texture and asset resolution |
 
+Prepared presentation packs are optional: unzip a pack to
+`visual_packs/<pack-name>/pack.json` at the repository root and run the normal
+`python3 scripts/pack.py`. Remove that pack folder and run the same command to
+restore stock content from the cached bake. `--visual-packs <dir>` selects a
+different pack lookup folder. See [formats and author requirements](../docs/visual-packs.md).
+
 ## Same game on every source
 
 | script | what it does |
