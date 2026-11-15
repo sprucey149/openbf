@@ -57,6 +57,11 @@ impl Sim {
                 continue;
             };
             let displaced = self.vehicles[m.vehicle.index as usize].seats[seat as usize].occupant;
+            // The live link belongs to the firing seat (B2 FUN_0024b4d0).
+            if self.tow_seat_locked(h) || displaced.is_some_and(|bot| self.tow_seat_locked(bot)) {
+                self.events.push(Event::TowSeatLocked { unit: h });
+                continue;
+            }
             if let Some(bot) = displaced {
                 self.vehicles[m.vehicle.index as usize].seats[seat as usize].occupant = None;
                 self.units[bot.index as usize].mount = None;

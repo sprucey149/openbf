@@ -1114,6 +1114,13 @@ impl EventFeed {
                         tick,
                     );
                 }
+                Event::TowSeatLocked { unit } if unit == viewer => {
+                    self.say(
+                        "Seat switch available when the tow cable releases".into(),
+                        message_color::OWN,
+                        tick,
+                    );
+                }
                 Event::Shot { unit, .. } if unit == viewer => {
                     self.battle.shots = self.battle.shots.saturating_add(1);
                 }

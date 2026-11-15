@@ -369,12 +369,22 @@ pub struct PathCursor {
     pub reverse: bool,
 }
 
+/// The target and direction an openbf tow crew keeps throughout its pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TowRun {
+    pub target: super::VehicleHandle,
+    pub clockwise: bool,
+    pub opening_shot: bool,
+}
+
 /// What an AI pilot keeps between ticks. BF1 fields drive the sticks; BF2
 /// fields drive [`spline_step`], which writes the pose as the PS2 does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlyerAi {
     pub trick: Option<Vec3>,
     pub channel: u8,
+    /// The walker a tow crew is circling and its chosen turn direction.
+    pub tow_run: Option<TowRun>,
     pub armed_target: Option<super::VehicleHandle>,
     pub armed_station: Option<u16>,
     pub threat_thinks: u32,
@@ -456,6 +466,16 @@ impl FlyerAi {
         }
         if self.channel != 0 {
             eat(&[self.channel]);
+        }
+        if let Some(tow) = self.tow_run {
+            eat(&[
+                b'T',
+                b'W',
+                u8::from(tow.clockwise),
+                u8::from(tow.opening_shot),
+            ]);
+            eat(&tow.target.index.to_le_bytes());
+            eat(&tow.target.gen.to_le_bytes());
         }
         if let Some(t) = self.armed_target {
             eat(&t.index.to_le_bytes());

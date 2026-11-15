@@ -6,9 +6,10 @@ use super::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
 use crate::fmath::FloatExt;
 use crate::projectile::Shooter;
+use crate::unit::UnitHandle;
 use crate::vehicle::gun;
 use crate::vehicle::tow::{TowClass, TowPrimitive};
-use crate::vehicle::{Mount, Vehicle, VehicleHandle};
+use crate::vehicle::{Mount, Vehicle, VehicleHandle, VehicleKind};
 use glam::Vec3;
 
 const CHORDS: usize = 10;
@@ -158,6 +159,111 @@ fn nearest(prims: &[TowPrimitive], from: Vec3, dir: Vec3, len: f32) -> Option<(u
 }
 
 impl Sim {
+    pub(crate) fn live_tow_target(&self, source: VehicleHandle) -> Option<VehicleHandle> {
+        self.tow_cables.iter().find_map(|c| match c.flight {
+            Flight::Latched { target, .. } if c.mount.vehicle == source => Some(target),
+            _ => None,
+        })
+    }
+
+    fn live_tow_on(&self, source: VehicleHandle) -> bool {
+        self.tow_cables
+            .iter()
+            .any(|c| c.mount.vehicle == source && !c.tripped())
+    }
+
+    pub(crate) fn tow_walkers(
+        &self,
+        team: u8,
+        from: Vec3,
+        range: f32,
+    ) -> impl Iterator<Item = (VehicleHandle, &Vehicle)> {
+        self.alive_vehicles().filter(move |(_, v)| {
+            v.kind == VehicleKind::Walker
+                && v.health.alive()
+                && v.team
+                    .or(v.home_team)
+                    .is_some_and(|t| self.hostile(team, t))
+                && from.distance_squared(v.pos) <= range * range
+        })
+    }
+
+    pub(crate) fn tow_leg_aim(
+        &self,
+        unit: UnitHandle,
+        sight: &super::SeatLook,
+        class: TowClass,
+    ) -> Option<Vec3> {
+        let driver = self.unit(unit)?;
+        let mount = driver.mount?;
+        let craft = self.vehicle(mount.vehicle)?;
+        if craft.flyer.phase != crate::vehicle::flyer::FlightPhase::Flying
+            || self.live_tow_on(mount.vehicle)
+        {
+            return None;
+        }
+        let frames = self.tow_frames.as_ref()?;
+        let (yaw_limits, pitch_limits, yaw_wrap) = sight
+            .gun
+            .turn
+            .map_or((sight.gun.aimer.yaw, sight.gun.aimer.pitch, false), |t| {
+                (t.yaw, t.pitch, t.yaw_wrap)
+            });
+        self.tow_walkers(driver.team, sight.muzzle, class.initial_length)
+            .flat_map(|(target, walker)| {
+                frames
+                    .primitives(walker)
+                    .into_iter()
+                    .filter_map(move |part| {
+                        part.leg.map(|_| (target, part.frame.w_axis.truncate()))
+                    })
+            })
+            .filter(|&(target, at)| {
+                let range = sight.muzzle.distance(at);
+                let (yaw, pitch) = gun::angles(sight.rot.inverse() * (at - sight.eye));
+                let yaw = gun::wrap_angle(yaw, yaw_limits);
+                range <= class.initial_length
+                    && (yaw_wrap || (yaw_limits[0]..=yaw_limits[1]).contains(&yaw))
+                    && (pitch_limits[0]..=pitch_limits[1]).contains(&pitch)
+                    && crate::perception::los_past(
+                        self,
+                        sight.muzzle,
+                        at,
+                        HullFilter::Except([Some(mount.vehicle), Some(target)]),
+                    )
+            })
+            .min_by(|(_, a), (_, b)| {
+                a.distance_squared(sight.muzzle)
+                    .total_cmp(&b.distance_squared(sight.muzzle))
+            })
+            .map(|(_, at)| at)
+    }
+
+    pub(super) fn bot_tow_shot(
+        &self,
+        mount: Mount,
+        team: u8,
+        from: Vec3,
+        dir: Vec3,
+        class: TowClass,
+    ) -> bool {
+        !self.live_tow_on(mount.vehicle)
+            && self
+                .tow_head_contact(mount.vehicle, from, dir, class.initial_length)
+                .1
+                .and_then(|(h, _)| self.vehicle(h))
+                .and_then(|v| v.team.or(v.home_team))
+                .is_some_and(|t| self.hostile(team, t))
+    }
+
+    pub(crate) fn tow_seat_locked(&self, unit: UnitHandle) -> bool {
+        self.unit(unit).and_then(|u| u.mount).is_some_and(|mount| {
+            self.tow_cables
+                .iter()
+                .any(|c| !c.tripped() && c.mount == mount && c.shooter.owner == unit)
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn fire_tow(
         &mut self,
@@ -176,11 +282,7 @@ impl Sim {
             dir,
         });
         // The PS2 stores the active link on the firing controllable.
-        if self
-            .tow_cables
-            .iter()
-            .any(|c| c.mount.vehicle == mount.vehicle && !c.tripped())
-        {
+        if self.live_tow_on(mount.vehicle) {
             return;
         }
         self.tow_cables.push(TowCable {
@@ -251,6 +353,71 @@ impl Sim {
         self.tow_cables = cables;
     }
 
+    fn tow_head_contact(
+        &self,
+        source: VehicleHandle,
+        from: Vec3,
+        dir: Vec3,
+        len: f32,
+    ) -> (f32, Option<(VehicleHandle, Anchor)>) {
+        let mut stop = self
+            .collision
+            .ray_with(from, dir, len, Layers::ORDNANCE, HullFilter::Static)
+            .map_or(len, |hit| hit.t);
+        if let Some(hf) = &self.heightfield {
+            let end = from + dir * len;
+            if let Some(t) = ray_terrain_ps2(hf, &self.collision.cutters, from, end) {
+                stop = stop.fmin(t * len);
+            }
+        }
+        let mut latch = None;
+        if let Some(frames) = &self.tow_frames {
+            for (i, v) in self
+                .vehicles
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| v.alive && v.health.alive())
+            {
+                let h = VehicleHandle {
+                    index: i as u32,
+                    gen: v.gen,
+                };
+                if h == source {
+                    continue;
+                }
+                let parts = frames.primitives(v);
+                if parts.is_empty() {
+                    if let Some(hit) = self
+                        .collision
+                        .ray_with(from, dir, stop, Layers::ORDNANCE, HullFilter::Only(h))
+                        .filter(|hit| hit.t < stop)
+                    {
+                        stop = hit.t;
+                        latch = None;
+                    }
+                    continue;
+                }
+                if let Some((prim, t)) = nearest(&parts, from, dir, stop).filter(|(_, t)| *t < stop)
+                {
+                    stop = t;
+                    let p = &parts[prim];
+                    let local = p.frame.inverse();
+                    latch = p.leg.map(|_| {
+                        (
+                            h,
+                            Anchor {
+                                prim,
+                                at: local.transform_point3(from + dir * t),
+                                tangent: Vec3::ZERO,
+                            },
+                        )
+                    });
+                }
+            }
+        }
+        (stop, latch)
+    }
+
     fn fly_tow(&mut self, cable: &mut TowCable, dt: f32) -> bool {
         if cable.tripped()
             || matches!(&cable.flight, Flight::Latched { anchors, .. } if anchors.len() == WRAPS)
@@ -270,56 +437,7 @@ impl Sim {
                 let len = vel.length() * dt.fmin(*life);
                 let dir = vel.normalize_or_zero();
                 let end = from + dir * len;
-                let mut stop = self
-                    .collision
-                    .ray_with(from, dir, len, Layers::ORDNANCE, HullFilter::Static)
-                    .map_or(len, |hit| hit.t);
-                if let Some(hf) = &self.heightfield {
-                    if let Some(t) = ray_terrain_ps2(hf, &self.collision.cutters, from, end) {
-                        stop = stop.fmin(t * len);
-                    }
-                }
-                let mut latch = None;
-                if let Some(frames) = &self.tow_frames {
-                    for (i, v) in self.vehicles.iter().enumerate().filter(|(_, v)| v.alive) {
-                        let h = VehicleHandle {
-                            index: i as u32,
-                            gen: v.gen,
-                        };
-                        if h == cable.mount.vehicle {
-                            continue;
-                        }
-                        let parts = frames.primitives(v);
-                        if parts.is_empty() {
-                            if let Some(hit) = self
-                                .collision
-                                .ray_with(from, dir, stop, Layers::ORDNANCE, HullFilter::Only(h))
-                                .filter(|hit| hit.t < stop)
-                            {
-                                stop = hit.t;
-                                latch = None;
-                            }
-                            continue;
-                        }
-                        if let Some((prim, t)) =
-                            nearest(&parts, from, dir, stop).filter(|(_, t)| *t < stop)
-                        {
-                            stop = t;
-                            let p = &parts[prim];
-                            let local = p.frame.inverse();
-                            latch = p.leg.map(|_| {
-                                (
-                                    h,
-                                    Anchor {
-                                        prim,
-                                        at: local.transform_point3(from + dir * t),
-                                        tangent: Vec3::ZERO,
-                                    },
-                                )
-                            });
-                        }
-                    }
-                }
+                let (stop, latch) = self.tow_head_contact(cable.mount.vehicle, from, dir, len);
                 if let Some((target, anchor)) =
                     latch.filter(|_| (from + dir * stop).distance(muzzle) <= limit)
                 {
@@ -438,11 +556,22 @@ impl Sim {
         for owner in seats {
             // BF2 state 3 forces a friendly-fire scale of one.
             let team = (!bf2).then_some(shooter.team);
-            self.damage_vehicle_by(target, &desc, 1.0, Some(owner), team, Some(dir));
+            let ff = self.friendly_fire_scale;
+            match self.vehicle_mut(target) {
+                Some(v) if v.walker.dead => {
+                    // Detached wraps keep following and damaging the posed
+                    // walker until removal (B2 FUN_00323178:315871–316062).
+                    // Its death blast and kill credit already have an owner.
+                    v.health
+                        .take_damage(&desc, 1.0, team.is_some() && v.team == team, ff);
+                }
+                Some(_) => {
+                    self.damage_vehicle_by(target, &desc, 1.0, Some(owner), team, Some(dir));
+                }
+                None => return false,
+            }
         }
-        // A walker the wraps killed is dying (`Sim::destroy_vehicle`): the
-        // link ends there.
-        self.vehicle(target).is_some_and(|v| v.health.alive())
+        self.vehicle(target).is_some()
     }
 }
 

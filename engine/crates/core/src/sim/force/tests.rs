@@ -493,3 +493,46 @@ fn emitter_hits_are_not_direct_and_saber_hits_are() {
     sim.hero_damage(player.index as usize, target, desc, Vec3::NEG_Z);
     assert_eq!(direct(&sim), Some(true));
 }
+
+#[test]
+fn emitter_and_bot_share_vehicle_cover_and_allow_the_vehicle_endpoint() {
+    use crate::collision::{HullPart, Layers, Shape};
+    use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    use glam::Mat4;
+
+    let (mut sim, player) = scene(emitter());
+    let victim = victim(&mut sim, 9.0, 0.0);
+    let y = sim.unit(player).unwrap().muzzle().y;
+    sim.hull_parts = vec![Some(
+        vec![HullPart::new(
+            Mat4::IDENTITY,
+            Shape::Sphere { radius: 1.8 },
+            Layers::ORDNANCE,
+        )]
+        .into(),
+    )];
+    sim.weapon_classes[0].ordnance.scales = [1.0; 7];
+    let cover = sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Hover,
+        class: 0,
+        home_team: Some(1),
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::new(0.0, y, -4.0),
+        yaw: 0.0,
+        max_health: 300.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+
+    assert!(!sim.force_emitter_can_reach_unit(player, victim));
+    sim.fire_force(player.index as usize, 0, 1.0);
+    assert_eq!(sim.unit(victim).unwrap().health.cur, 300.0);
+    assert!(sim.vehicle(cover).unwrap().health.cur < 300.0);
+
+    sim.vehicle_mut(cover).unwrap().pos.x += 8.0;
+    sim.sync_hulls();
+    assert!(sim.force_emitter_can_reach_unit(player, victim));
+    sim.fire_force(player.index as usize, 0, 1.0);
+    assert!(sim.unit(victim).unwrap().health.cur < 300.0);
+}

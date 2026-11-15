@@ -1241,3 +1241,24 @@ fn a_seat_gun_with_counted_clips_stops_when_they_are_spent() {
     assert_eq!(shots.len(), 12, "the loaded clip and one more: {shots:?}");
     assert_eq!(reloads.len(), 1);
 }
+
+#[test]
+fn live_tow_holds_its_firing_seat_until_the_cable_leaves() {
+    use crate::vehicle::tow::TowClass;
+
+    let (mut sim, player, craft) = world(false);
+    assert!(sim.seat_unit(player, craft, 1));
+    sim.weapon_classes[0].ordnance.tow = Some(TowClass {
+        initial_length: 60.0,
+        length: 60.0,
+    });
+    sim.seat_gun(player.index as usize, &pad(buttons::FIRE));
+    assert_eq!(sim.tow_cables.len(), 1);
+    sim.switch_pass(&[pad(buttons::SWITCH_WEAPON)]);
+    assert_eq!(sim.unit(player).unwrap().mount.unwrap().seat, 1);
+    assert!(sim.events.contains(&Event::TowSeatLocked { unit: player }));
+
+    sim.tow_cables.clear();
+    sim.switch_pass(&[pad(buttons::SWITCH_WEAPON)]);
+    assert_eq!(sim.unit(player).unwrap().mount.unwrap().seat, 2);
+}

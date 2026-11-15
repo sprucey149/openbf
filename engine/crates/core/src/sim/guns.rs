@@ -379,6 +379,11 @@ impl Sim {
                     .and_then(|m| m.aim)
             })
             .flatten();
+        let bot_aim = bot_aim.or_else(|| {
+            let class = g.weapons.first().filter(|_| ai)?.class;
+            let tow = self.weapon_classes.get(class)?.ordnance.tow?;
+            self.tow_leg_aim(h, &self.seat_look(h)?, tow)
+        });
         self.drive_seat_gun(m, g, p, Some(i), bot_aim);
     }
 
@@ -588,6 +593,13 @@ impl Sim {
                 _ => false,
             };
             let wc = &self.weapon_classes[w.class];
+            let tow_track = ai && held && wc.ordnance.tow.is_some();
+            let held = held
+                && (!tow_track
+                    || wc
+                        .ordnance
+                        .tow
+                        .is_some_and(|class| self.bot_tow_shot(m, team, origin, fwd, class)));
             let ws = &mut st.weapons[k];
             // A seat stands still: the class's standing, unmoving spread.
             ws.set_posture(wc, 0, 0.0, false);
@@ -702,11 +714,11 @@ impl Sim {
                     // goes only at a contact this bot's perception holds.
                     if held {
                         debug_assert!(
-                            perceived,
+                            perceived || tow_track,
                             "AI rider {driver:?} fired at an unperceived target at tick {}",
                             self.tick
                         );
-                        if !perceived {
+                        if !perceived && !tow_track {
                             self.nav_stats.unperceived_shots += 1;
                         }
                     } else {
