@@ -155,10 +155,11 @@ pub mod points {
 /// table), with the disc's text as the fallback when no bake is at hand.
 #[derive(Debug, Clone)]
 pub struct Texts {
-    /// BF2's table: the lines, the team names, the soldier names.
-    bf2: Option<HudLocl>,
+    /// BF2's table: the lines, the team names, the soldier names (shared:
+    /// a feed's copy shares it).
+    bf2: Option<std::sync::Arc<HudLocl>>,
     /// The map's own game's table: its post names.
-    map: Option<HudLocl>,
+    map: Option<std::sync::Arc<HudLocl>>,
     /// The map is a BF1 map: its names are upper case on the disc.
     bf1_map: bool,
 }
@@ -229,12 +230,12 @@ impl Texts {
     /// `source_game`. Missing tables fall back to the built-in lines.
     pub fn load(assets_dir: &Path, source_game: &str) -> Self {
         let bf1_map = source_game.eq_ignore_ascii_case("bf1");
-        let bf2 = read_locl(&assets_dir.join("common_bf2"));
+        let bf2 = read_locl(&assets_dir.join("common_bf2")).map(std::sync::Arc::new);
         if bf2.is_none() {
             eprintln!("hud: no baked text table (bake common); names fall back");
         }
         let map = if bf1_map {
-            read_locl(&assets_dir.join("common_bf1"))
+            read_locl(&assets_dir.join("common_bf1")).map(std::sync::Arc::new)
         } else {
             bf2.clone()
         };
@@ -433,6 +434,12 @@ pub struct EventFeed {
     /// built without a walk.
     classes: [Vec<String>; 2],
     native_classes: std::collections::BTreeMap<u8, Vec<String>>,
+    /// `[ours]` The human names by player slot: a LAN round's session
+    /// names (issue #168), the ones the lobby and the name tags show, or the
+    /// single player's profile name (the original shows "Player %d").
+    /// Presentation only, never read by the sim. A slot with no name falls
+    /// back to "Player N".
+    player_names: std::collections::BTreeMap<u8, String>,
     /// The vehicle and building-turret classes' names, by `Vehicle::class`
     /// ([`Texts::class_name`], else the class's `Label`, else its ODF name).
     vehicles: Vec<String>,
@@ -482,6 +489,99 @@ impl Default for EventFeed {
     }
 }
 
+/// The LAN host's self-check (issue #168, `crate::netplay::selfcheck`): the
+/// feed scores every tick (round points, medal credits, heroes), so a
+/// replayed round carries its own. Each field is named in both (a new one
+/// must be decided here).
+impl EventFeed {
+    /// A copy that reads the same ticks the same way: the scoring state
+    /// and the names. The lines and marks not yet shown are left out (the
+    /// copy's are never shown).
+    pub fn checkpoint(&self) -> EventFeed {
+        EventFeed {
+            texts: self.texts.clone(),
+            space_round: self.space_round.clone(),
+            space_hud: Default::default(),
+            space_tick: self.space_tick,
+            teams: self.teams.clone(),
+            sides: self.sides.clone(),
+            posts: self.posts.clone(),
+            classes: self.classes.clone(),
+            native_classes: self.native_classes.clone(),
+            player_names: self.player_names.clone(),
+            vehicles: self.vehicles.clone(),
+            stations: self.stations.clone(),
+            out: Vec::new(),
+            ambush: Vec::new(),
+            damage_flash: None,
+            critical: None,
+            body: None,
+            recent: self.recent.clone(),
+            seen: self.seen,
+            owners: self.owners.clone(),
+            inside: self.inside.clone(),
+            last_flag_carriers: self.last_flag_carriers.clone(),
+            viewer: self.viewer,
+            battle: self.battle,
+            round: self.round.clone(),
+            credits: self.credits.clone(),
+            order_labels: self.order_labels.clone(),
+            driver_labels: self.driver_labels.clone(),
+            order: self.order,
+        }
+    }
+
+    /// This feed becomes `replayed`'s, the same round's replayed to this
+    /// tick: from the replay, the scoring state (the round's stats, the
+    /// medal credits, the battle's totals the career records, the posts'
+    /// owners and capture regions, the flag carriers, the tick read);
+    /// kept, what is shown (the lines not yet taken, the hit marks, the
+    /// one-line rule's memory, the order cross, the space HUD) and the
+    /// names. The replay's own lines are dropped: the round's lines were
+    /// shown once already.
+    pub fn adopt(&mut self, replayed: EventFeed) {
+        let EventFeed {
+            texts: _,
+            space_round: _,
+            space_hud: _,
+            space_tick: _,
+            teams: _,
+            sides: _,
+            posts: _,
+            classes: _,
+            native_classes: _,
+            player_names: _,
+            vehicles: _,
+            stations: _,
+            out: _,
+            ambush: _,
+            damage_flash: _,
+            critical: _,
+            body: _,
+            recent: _,
+            seen,
+            owners,
+            inside,
+            last_flag_carriers,
+            viewer,
+            battle,
+            round,
+            credits,
+            order_labels: _,
+            driver_labels: _,
+            order: _,
+        } = replayed;
+        self.seen = seen;
+        self.owners = owners;
+        self.inside = inside;
+        self.last_flag_carriers = last_flag_carriers;
+        self.viewer = viewer;
+        self.battle = battle;
+        self.round = round;
+        self.credits = credits;
+    }
+}
+
 impl EventFeed {
     /// A feed for a battle of `factions` over posts with the key paths
     /// `post_keys` (`Sim::cps` order).
@@ -497,6 +597,7 @@ impl EventFeed {
             posts: post_keys.iter().map(|k| texts.post_name(k)).collect(),
             classes: [Vec::new(), Vec::new()],
             native_classes: Default::default(),
+            player_names: Default::default(),
             vehicles: Vec::new(),
             stations: Vec::new(),
             order_labels: ORDER_LABELS.map(|l| texts.order_label(l)),
@@ -532,14 +633,29 @@ impl EventFeed {
         );
         feed.space_round = walk.space_round.clone();
         feed.set_opening_medals(walk);
+        let hunt = walk.sim.is_hunt();
         feed.classes = [0, 1].map(|t| {
-            walk.teams[t]
-                .classes
+            let classes = &walk.teams[t].classes;
+            let names: Vec<String> = classes
                 .iter()
                 .map(|c| {
                     feed.texts
                         .class_name(&c.name)
                         .unwrap_or_else(|| c.label.clone())
+                })
+                .collect();
+            // Hunt: a native faction's classes share one text ("Ewok"), so
+            // a repeated name takes the class's own Hunt label
+            // (`roster::HUNT_CLASS_LABELS`, issue #161).
+            names
+                .iter()
+                .zip(classes)
+                .map(|(name, c)| {
+                    let repeated = names.iter().filter(|n| *n == name).count() > 1;
+                    match crate::roster::hunt_class_label(&c.name) {
+                        Some(label) if hunt && repeated => label.to_owned(),
+                        _ => name.clone(),
+                    }
                 })
                 .collect()
         });
@@ -718,8 +834,22 @@ impl EventFeed {
         &self.posts
     }
 
-    /// The name a line gives unit `h`: "Player 1" for a human (the PS2's
-    /// `Player %d`); an AI the team's next name in the order its AI units
+    /// `[ours]` Names the humans by slot: a LAN round's session names
+    /// (issue #168) or the single player's profile name. Each
+    /// `(slot, name)` replaces that slot's name; a slot not given keeps the
+    /// one it had, so a player who left still has his name on the stats
+    /// pages. Presentation only.
+    pub fn set_player_names<'a>(&mut self, names: impl IntoIterator<Item = (u8, &'a str)>) {
+        for (slot, name) in names {
+            if self.player_names.get(&slot).map(String::as_str) != Some(name) {
+                self.player_names.insert(slot, name.to_owned());
+            }
+        }
+    }
+
+    /// The name a line gives unit `h`: a human's name
+    /// ([`EventFeed::set_player_names`]: the LAN session name or the single
+    /// player's profile name), else "Player N" (the original's `Player %d`); an AI the team's next name in the order its AI units
     /// are made (unit order, `crate::bot_names`): the same unit keeps it
     /// through its respawns.
     pub fn unit_name(&self, sim: &Sim, h: UnitHandle) -> String {
@@ -733,7 +863,11 @@ impl EventFeed {
             return name.clone();
         }
         match u.spec.player_slot {
-            Some(slot) => format!("Player {}", u32::from(slot) + 1),
+            Some(slot) => self
+                .player_names
+                .get(&slot)
+                .cloned()
+                .unwrap_or_else(|| format!("Player {}", u32::from(slot) + 1)),
             None => {
                 let k = sim.units[..i]
                     .iter()

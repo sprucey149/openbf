@@ -153,6 +153,9 @@ pub enum ScreenPick {
     Post(u16),
     /// A command walker's post ([`SpawnPost::Walker`]).
     Walker { index: u32, gen: u32 },
+    /// Issue #128: a class screen's soldier, by the team's raw class index
+    /// (the line-up's [`crate::sim::Sim::spawn_class_indices`] entry).
+    Class(u8),
 }
 
 impl ScreenPick {
@@ -170,7 +173,7 @@ impl ScreenPick {
     /// The spawn-map post picked, `None` for a side row.
     pub fn spawn_post(self) -> Option<SpawnPost> {
         match self {
-            ScreenPick::Side(_) => None,
+            ScreenPick::Side(_) | ScreenPick::Class(_) => None,
             ScreenPick::Post(i) => Some(SpawnPost::Post(i)),
             ScreenPick::Walker { index, gen } => {
                 Some(SpawnPost::Walker(VehicleHandle { index, gen }))
@@ -178,14 +181,14 @@ impl ScreenPick {
         }
     }
 
-    /// The side row picked, `None` for a post.
+    /// The side row picked, `None` for a post or a class.
     pub fn side(self) -> Option<super::spawn::SideChoice> {
         use super::spawn::SideChoice;
         match self {
             ScreenPick::Side(0) => Some(SideChoice::Team1),
             ScreenPick::Side(1) => Some(SideChoice::Team2),
             ScreenPick::Side(_) => Some(SideChoice::Auto),
-            ScreenPick::Post(_) | ScreenPick::Walker { .. } => None,
+            ScreenPick::Post(_) | ScreenPick::Walker { .. } | ScreenPick::Class(_) => None,
         }
     }
 }
@@ -398,11 +401,11 @@ pub(super) struct Candidate {
     pub(super) r: f32,
     /// Where the LOS ray aims.
     pub(super) aim: Vec3,
-    vel: Vec3,
+    pub(super) vel: Vec3,
     /// The assist's target radius (a soldier's capsule, a vehicle's bounds).
     assist_r: f32,
     /// The assist's target centre.
-    assist_ctr: Vec3,
+    pub(super) assist_ctr: Vec3,
     /// A vehicle's hull and a turret's building, which the LOS ray passes.
     pub(super) hull: Option<VehicleHandle>,
     pub(super) building: Option<u32>,
@@ -448,7 +451,41 @@ impl Steer {
 /// better.
 /// What [`Sim::assisted`] returns: the assisted pad, the slot's timer after
 /// it and its lead (`None`: the lead is off).
-type Assisted = (PadState, AssistState, Option<(AimTarget, Lead)>);
+pub(super) type Assisted = (PadState, AssistState, Option<(AimTarget, Lead)>);
+
+/// What [`Sim::assist_lead_point`] returns: the point the pull aims at, the
+/// velocity term 1 matches while the pull is live, the lead to keep.
+pub(super) type LeadPoint = (Option<Vec3>, Option<Vec3>, Option<(AimTarget, Lead)>);
+
+/// What [`Sim::assist_lead_point`] reads.
+pub(super) struct LeadAsk<'a> {
+    pub(super) slot: usize,
+    pub(super) m: AimTarget,
+    /// The target's assist centre and velocity.
+    pub(super) center: Vec3,
+    pub(super) vel: Vec3,
+    /// Where the round leaves (the lead's flight starts there) and the
+    /// aim ray's eye (the PS2's lead's origin).
+    pub(super) from: Vec3,
+    pub(super) eye: Vec3,
+    pub(super) ord: &'a crate::weapon::OrdnanceClass,
+    pub(super) lead_on: bool,
+    /// A sniper rifle: a fast round's lead is cleared at once.
+    pub(super) sniper: bool,
+}
+
+/// OURS (issue #164): the speed the assist leads a round of `ord` by. A
+/// beam crosses its whole `Range` in the one tick it is cast (`Sim`'s beam
+/// casting fires a bolt of `range / dt`), and its sweep rewinds the soldiers
+/// by that speed (`unit::human_meet_lag`), so its lead is that speed's, not
+/// the ordnance's `Velocity` (unauthored on BF2's award beam: 150 m/s,
+/// which led a crossing runner metres ahead); a bolt's is its `Velocity`.
+pub(super) fn lead_speed(ord: &crate::weapon::OrdnanceClass) -> f32 {
+    match &ord.beam {
+        Some(b) => b.range / crate::TICK_DT,
+        None => ord.velocity,
+    }
+}
 
 pub(crate) fn cone_score(r: f32, slope: f32, maxd: f32, pos: Vec3, dir: Vec3, ctr: Vec3) -> f32 {
     let v = ctr - pos;
@@ -628,22 +665,47 @@ impl Sim {
         let droid = self
             .controlled_droid(ph)
             .map(|d| (d.muzzle(), d.aim_frame().0, d.weapon_class));
-        let c = &self.weapon_classes[droid.map_or(p.weapon_class, |d| d.2)];
-        let (er, lor, angle) = (c.extreme_range, c.lock_on_range, c.lock_on_angle);
-        // A heavy launcher may help aim an unguided shot at infantry at
-        // half strength. Keep its authored guidance kinds separate: only
-        // this passive magnet gains soldier kinds (issue #164).
-        let kind_bits = if p.mount.is_none() && c.rocket_launcher() {
-            c.target_kind | TARGET_SOLDIER_KINDS
-        } else {
-            c.target_kind
+        // OURS (issue #164): a human gunner in a building turret takes his
+        // magnet along the seat's camera ray with the seat's first weapon,
+        // on the turret magnet's own reach, cone and kinds (`seat_magnet`;
+        // the weapon's authored Target* bits are left as they are).
+        let seat = droid.is_none().then(|| self.gunner_turret(ph)).flatten();
+        let class = match (droid, seat) {
+            (Some(d), _) => d.2,
+            (None, Some(s)) => s.class,
+            (None, None) => p.weapon_class,
         };
-        let team_bits = c.target_team;
+        let c = &self.weapon_classes[class];
+        let (er, lor, angle, kind_bits, team_bits) = match seat {
+            Some(_) => {
+                let s = super::seat_assist::seat_magnet(c);
+                (c.extreme_range.fmax(s.reach), s.reach, s.angle, s.kinds, 1)
+            }
+            None => {
+                // A heavy launcher may help aim an unguided shot at infantry
+                // at half strength. Keep its authored guidance kinds
+                // separate: only this passive magnet gains soldier kinds
+                // (issue #164).
+                let kind_bits = if p.mount.is_none() && c.rocket_launcher() {
+                    c.target_kind | TARGET_SOLDIER_KINDS
+                } else {
+                    c.target_kind
+                };
+                (
+                    c.extreme_range,
+                    c.lock_on_range,
+                    c.lock_on_angle,
+                    kind_bits,
+                    c.target_team,
+                )
+            }
+        };
         // The cone is centred on the reticle's ray (`re-aim-assist.md`
         // §10.5), not on the view's centre.
-        let (pos, dir) = match droid {
-            Some((muzzle, aim, _)) => (muzzle, aim),
-            None => p.aim_ray(self.ground_rules, self.views()),
+        let (pos, dir) = match (droid, seat) {
+            (Some((muzzle, aim, _)), _) => (muzzle, aim),
+            (None, Some(s)) => (s.eye, s.view),
+            (None, None) => p.aim_ray(self.ground_rules, self.views()),
         };
         let own = p.mount.map(|m| m.vehicle);
         let own_building = own.and_then(|h| self.vehicle(h)).and_then(|v| v.instance);
@@ -729,7 +791,7 @@ impl Sim {
                     continue;
                 }
                 if (u.ctr - mid).abs().cmpgt(Vec3::splat(er + u.r)).any()
-                    || (droid.is_none() && p.in_aim_box(u.ctr))
+                    || (droid.is_none() && seat.is_none() && p.in_aim_box(u.ctr))
                 {
                     continue;
                 }
@@ -847,72 +909,29 @@ impl Sim {
         let cap = p.capsule();
         let center = t.assist_ctr;
         let weapon = &self.weapon_classes[p.weapon_class];
-        let ord = &weapon.ordnance;
-        let speed = ord.velocity;
-        let mut kept = None;
         let sniper = weapon.is_sniper_rifle();
         let profile = self.assist_profile(slot);
-        let instant_sniper = sniper
-            && matches!(m, AimTarget::Unit(_))
-            && (ord.beam.is_some() || crate::unit::fast_round(speed));
-        let (lead, lead_vel) = if profile.lead_on && instant_sniper {
-            // The beam sweeps its full range on the shot tick, and fast
-            // rounds meet the soldier where he was at the press. Aim at
-            // the interpolated body, clearing flight lead from the last gun.
-            let offset = t.vel * -crate::unit::HUMAN_SHOT_LAG;
-            kept = Some((m, Lead { vel: t.vel, offset }));
-            (Some(center + offset), Some(t.vel))
-        } else if profile.lead_on {
-            // OURS (`core::aim_assist`'s lead): the low-passed velocity times
-            // the round's flight from where it leaves (the fire point, the
-            // scope point scoped), plus the drop a falling round makes up.
-            // The sweep meets the target where a tick left it: the flight's
-            // last tick is met where it began, on average half a tick short
-            // of the flight (term 1 carries the reticle along with the
-            // target through the tick's move); a soldier is met
-            // `HUMAN_SHOT_LAG` back, where the human sees him.
-            let ahead = -0.5 * crate::TICK_DT
-                - match m {
-                    AimTarget::Unit(_) => crate::unit::HUMAN_SHOT_LAG,
-                    AimTarget::Vehicle(_)
-                    | AimTarget::Turret(_)
-                    | AimTarget::Droid(_)
-                    | AimTarget::Station(_) => 0.0,
-                };
-            let from = if p.scope_path() {
-                p.scope_point(self.ground_rules)
-            } else {
-                p.fire_point()
-            };
-            let fall = if ord.kind == crate::weapon::OrdKind::Shell {
-                ord.gravity * crate::weapon::SHELL_G
-            } else {
-                0.0
-            };
-            let mut l = match self.assist_lead.get(slot).copied().flatten() {
-                Some((held, l)) if held == m => l,
-                _ => Lead::start(t.vel),
-            };
-            // A fast round meets a soldier where he was at the press
-            // (`unit::human_meet_lag`): no flight to lead.
-            let instant = matches!(m, AimTarget::Unit(_)) && crate::unit::fast_round(speed);
-            let eased = l.step(dt, t.vel, |v| {
-                if instant {
-                    return v * -crate::unit::HUMAN_SHOT_LAG;
-                }
-                lead_point(center - from, v, speed).map_or(Vec3::ZERO, |rel| {
-                    let secs = rel.length() / speed.fmax(1e-3);
-                    rel - (center - from) + v * ahead + Vec3::Y * (0.5 * fall * secs * secs)
-                })
-            });
-            kept = Some((m, l));
-            (Some(center + l.offset), Some(t.vel + eased))
+        // The lead-on lead leaves where the round does (the fire point, the
+        // scope point scoped); the PS2's from the eye.
+        let from = if p.scope_path() {
+            p.scope_point(self.ground_rules)
         } else {
-            // Ballistic lead (FUN_0026d3f0, flat-fire branch — bolts have no
-            // gravity).
-            let lead = lead_point(center - eye, t.vel, speed).map(|rel| eye + rel);
-            (lead, None)
+            p.fire_point()
         };
+        let (lead, lead_vel, kept) = self.assist_lead_point(
+            &LeadAsk {
+                slot,
+                m,
+                center,
+                vel: t.vel,
+                from,
+                eye,
+                ord: &weapon.ordnance,
+                lead_on: profile.lead_on,
+                sniper,
+            },
+            dt,
+        );
         // Sign bridge: aim_assist yaw stick is POSITIVE-LEFT (BF1 f2
         // semantics); our rx is positive-right.
         let mut sticks = Sticks {
@@ -937,6 +956,9 @@ impl Sim {
             // (`re-zoom.md` §6).
             zoom_factor: p.zoom.map(|z| z.divisor),
             lock_on_range: weapon.lock_on_range,
+            // OURS (issue #164): a sniper rifle's terms all fade on its one
+            // curve below, not the pull on the PS2's as well.
+            range_falloff: !sniper,
             fire_held: pad.pressed(buttons::FIRE),
             armed: profile.armed,
             lead_vel,
@@ -956,8 +978,12 @@ impl Sim {
             intensity *= 0.5;
         }
         if sniper {
-            intensity *=
-                aim_assist::sniper_range_scale((center - eye).length(), weapon.lock_on_range);
+            let reach = weapon.lock_on_range;
+            let full = match weapon.assist_full_range {
+                f if f > 0.0 => f,
+                _ => aim_assist::SNIPER_FADE_START * reach,
+            };
+            intensity *= aim_assist::sniper_range_scale((center - eye).length(), full, reach);
         }
         aim_assist::apply(dt, &mut sticks, &env, &mut st, intensity);
         let out = if intensity <= 0.0 {
@@ -970,6 +996,84 @@ impl Sim {
             }
         };
         Some((out, st, kept))
+    }
+
+    /// The point the assist's pull aims at for `ask` (the lead), the
+    /// velocity term 1 matches while the pull is live (`None`: the PS2's
+    /// term 1), and the slot's lead to keep (`None`: the lead is off).
+    /// Shared by the soldier's assist and a building turret gunner's
+    /// (`Sim::seat_assisted`).
+    pub(super) fn assist_lead_point(&self, ask: &LeadAsk, dt: f32) -> LeadPoint {
+        let ord = ask.ord;
+        let speed = lead_speed(ord);
+        let mut kept = None;
+        let instant_sniper =
+            ask.sniper && matches!(ask.m, AimTarget::Unit(_)) && crate::unit::fast_round(speed);
+        let (lead, lead_vel) = if ask.lead_on && instant_sniper {
+            // The beam sweeps its full range on the shot tick, and fast
+            // rounds meet the soldier where he was at the press. Aim at
+            // the interpolated body, clearing flight lead from the last gun.
+            let offset = ask.vel * -crate::unit::HUMAN_SHOT_LAG;
+            kept = Some((
+                ask.m,
+                Lead {
+                    vel: ask.vel,
+                    offset,
+                },
+            ));
+            (Some(ask.center + offset), Some(ask.vel))
+        } else if ask.lead_on {
+            // OURS (`core::aim_assist`'s lead): the low-passed velocity times
+            // the round's flight from where it leaves (the fire point, the
+            // scope point scoped), plus the drop a falling round makes up.
+            // The sweep meets the target where a tick left it: the flight's
+            // last tick is met where it began, on average half a tick short
+            // of the flight (term 1 carries the reticle along with the
+            // target through the tick's move); a soldier is met
+            // `HUMAN_SHOT_LAG` back, where the human sees him.
+            let ahead = -0.5 * crate::TICK_DT
+                - match ask.m {
+                    AimTarget::Unit(_) => crate::unit::HUMAN_SHOT_LAG,
+                    AimTarget::Vehicle(_)
+                    | AimTarget::Turret(_)
+                    | AimTarget::Droid(_)
+                    | AimTarget::Station(_) => 0.0,
+                };
+            let fall = if ord.kind == crate::weapon::OrdKind::Shell {
+                ord.gravity * crate::weapon::SHELL_G
+            } else {
+                0.0
+            };
+            let mut l = match self.assist_lead.get(ask.slot).copied().flatten() {
+                Some((held, l)) if held == ask.m => l,
+                _ => Lead::start(ask.vel),
+            };
+            // A fast round meets a soldier where he was at the press
+            // (`unit::human_meet_lag`): no flight to lead.
+            let instant = matches!(ask.m, AimTarget::Unit(_)) && crate::unit::fast_round(speed);
+            let eased = l.step(dt, ask.vel, |v| {
+                if instant {
+                    return v * -crate::unit::HUMAN_SHOT_LAG;
+                }
+                lead_point(ask.center - ask.from, v, speed).map_or(Vec3::ZERO, |rel| {
+                    let secs = rel.length() / speed.fmax(1e-3);
+                    rel - (ask.center - ask.from) + v * ahead + Vec3::Y * (0.5 * fall * secs * secs)
+                })
+            });
+            kept = Some((ask.m, l));
+            (Some(ask.center + l.offset), Some(ask.vel + eased))
+        } else {
+            // Ballistic lead (FUN_0026d3f0, flat-fire branch — bolts have no
+            // gravity). OURS (issue #164): a beam by `lead_speed` here too,
+            // not by its ordnance `Velocity`. No shipped beam authors one
+            // (the 150 m/s is the port's default, no PS2 value), and by it
+            // the award beam's still stick hit 1 of 60 at 80 m, the reticle
+            // dragged off the runner (60 of 60 by `lead_speed`). A bolt's
+            // lead is the PS2's exactly.
+            let lead = lead_point(ask.center - ask.eye, ask.vel, speed).map(|rel| ask.eye + rel);
+            (lead, None)
+        };
+        (lead, lead_vel, kept)
     }
 
     /// The buttons unit `unit` pressed this tick (held now, not last tick);

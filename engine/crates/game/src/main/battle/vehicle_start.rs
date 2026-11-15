@@ -238,6 +238,8 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            netplay_rows: false,
+            opening_humans: [0; 2],
             score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         let walk = super::super::make_walk(&scene, &setup).unwrap();

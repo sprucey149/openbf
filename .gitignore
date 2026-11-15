@@ -27,3 +27,6 @@ Thumbs.db
 desktop.ini
 *.swp
 *~
+
+# Written by the export (card PACK): data and build output stay local
+/visual_packs/

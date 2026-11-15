@@ -341,75 +341,58 @@ fn fixture_archive(d: &Path, body: &[u8], flags: u64) -> Archive {
 }
 
 #[test]
-fn uncompressed_and_legacy_deflate_archives_remain_readable() {
+fn uncompressed_archives_read_and_non_zstd_compression_is_refused() {
     let d = scratch("legacy");
     let raw = vec![b'a'; 200_000];
-    let old = fixture_archive(&d, &raw, 0);
-    let (off, len) = old.get("a").unwrap();
-    assert_eq!(old.read(off, len).unwrap(), raw);
-    let mut body = (raw.len() as u32).to_le_bytes().to_vec();
-    let mut encoder = flate2::write::DeflateEncoder::new(&mut body, flate2::Compression::fast());
-    encoder.write_all(&raw).unwrap();
-    encoder.finish().unwrap();
+    let plain = fixture_archive(&d, &raw, 0);
+    let (off, len) = plain.get("a").unwrap();
+    assert_eq!(plain.read(off, len).unwrap(), raw);
+    // An older pack's raw-Deflate entry: compressed, without the zstd bit. The
+    // body is a real raw Deflate stream of "aaaa" (zlib, wbits -15), which the
+    // old reader decoded; it is now refused.
+    let mut body = 4u32.to_le_bytes().to_vec();
+    body.extend([0x4b, 0x4c, 0x4c, 0x4c, 0x04, 0x00]);
     let old = fixture_archive(&d, &body, COMPRESSED_FLAG);
     let (off, len) = old.get("a").unwrap();
-    assert_eq!(old.read(off, len).unwrap(), raw);
+    let err = old.read(off, len).unwrap_err();
+    assert!(err.to_string().contains("without zstd"), "{err}");
     let _ = std::fs::remove_dir_all(d);
 }
 
 #[test]
 fn malformed_compressed_bodies_are_bounded_and_rejected() {
     let d = scratch("compressed_bad");
-    for zstd in [false, true] {
-        let raw = vec![42; 200_000];
-        let mut body = (raw.len() as u32).to_le_bytes().to_vec();
-        if zstd {
-            zstd::stream::copy_encode(raw.as_slice(), &mut body, 3).unwrap();
-        } else {
-            let mut encoder =
-                flate2::write::DeflateEncoder::new(&mut body, flate2::Compression::fast());
-            encoder.write_all(&raw).unwrap();
-            encoder.finish().unwrap();
-        }
-        let flags = COMPRESSED_FLAG | if zstd { ZSTD_FLAG } else { 0 };
-        for end in 5..body.len() {
-            let archive = fixture_archive(&d, &body[..end], flags);
-            let (off, len) = archive.get("a").unwrap();
-            assert!(
-                archive.read(off, len).is_err(),
-                "accepted truncated body {end}, zstd={zstd}"
-            );
-        }
-        let mut trailing = body.clone();
-        trailing.push(0);
-        let archive = fixture_archive(&d, &trailing, flags);
+    let raw = vec![42; 200_000];
+    let mut body = (raw.len() as u32).to_le_bytes().to_vec();
+    zstd::stream::copy_encode(raw.as_slice(), &mut body, 3).unwrap();
+    let flags = COMPRESSED_FLAG | ZSTD_FLAG;
+    for end in 5..body.len() {
+        let archive = fixture_archive(&d, &body[..end], flags);
         let (off, len) = archive.get("a").unwrap();
         assert!(
             archive.read(off, len).is_err(),
-            "accepted trailing byte, zstd={zstd}"
-        );
-        // Declared-size bombs do not reserve the advertised 4 GiB before reading a tiny stream.
-        let tiny = vec![7];
-        let mut huge = u32::MAX.to_le_bytes().to_vec();
-        if zstd {
-            zstd::stream::copy_encode(tiny.as_slice(), &mut huge, 3).unwrap();
-        } else {
-            let mut encoder =
-                flate2::write::DeflateEncoder::new(&mut huge, flate2::Compression::fast());
-            encoder.write_all(&tiny).unwrap();
-            encoder.finish().unwrap();
-        }
-        let archive = fixture_archive(&d, &huge, flags);
-        let (off, len) = archive.get("a").unwrap();
-        assert!(archive.read(off, len).is_err());
-        body[..4].copy_from_slice(&0u32.to_le_bytes());
-        let archive = fixture_archive(&d, &body, flags);
-        let (off, len) = archive.get("a").unwrap();
-        assert!(
-            archive.read(off, len).is_err(),
-            "expanded beyond advertised size, zstd={zstd}"
+            "accepted truncated body {end}"
         );
     }
+    let mut trailing = body.clone();
+    trailing.push(0);
+    let archive = fixture_archive(&d, &trailing, flags);
+    let (off, len) = archive.get("a").unwrap();
+    assert!(archive.read(off, len).is_err(), "accepted trailing byte");
+    // Declared-size bombs do not reserve the advertised 4 GiB before reading a tiny stream.
+    let tiny = vec![7];
+    let mut huge = u32::MAX.to_le_bytes().to_vec();
+    zstd::stream::copy_encode(tiny.as_slice(), &mut huge, 3).unwrap();
+    let archive = fixture_archive(&d, &huge, flags);
+    let (off, len) = archive.get("a").unwrap();
+    assert!(archive.read(off, len).is_err());
+    body[..4].copy_from_slice(&0u32.to_le_bytes());
+    let archive = fixture_archive(&d, &body, flags);
+    let (off, len) = archive.get("a").unwrap();
+    assert!(
+        archive.read(off, len).is_err(),
+        "expanded beyond advertised size"
+    );
     let _ = std::fs::remove_dir_all(d);
 }
 
@@ -511,5 +494,37 @@ fn a_single_file_cannot_be_allowed_past_the_windows_limit() {
             .contains("4 GiB")
     );
     const { assert!(SINGLE_FILE_LIMIT < WINDOWS_EXE_LIMIT) };
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn replacement_sources_validate_before_mutation() {
+    let d = scratch("replacements");
+    let stock = d.join("stock");
+    let replacement = d.join("replacement");
+    std::fs::write(&stock, b"stock").unwrap();
+    std::fs::write(&replacement, b"replacement").unwrap();
+    let original = vec![("assets_baked/a.ktx2".to_string(), stock.clone())];
+    let mapping = d.join("mapping.json");
+    for names in [
+        vec!["assets_baked/a.ktx2", "missing"],
+        vec!["assets_baked/a.ktx2", "assets_baked/a.ktx2"],
+        vec!["assets_baked/../a.ktx2"],
+    ] {
+        let rows: Vec<_> = names.iter().map(|name| (name, &replacement)).collect();
+        std::fs::write(&mapping, serde_json::to_vec(&rows).unwrap()).unwrap();
+        let mut entries = original.clone();
+        assert!(replace_sources(&mut entries, &mapping).is_err());
+        assert_eq!(entries, original);
+    }
+    std::fs::write(
+        &mapping,
+        serde_json::to_vec(&vec![("assets_baked/a.ktx2", &replacement)]).unwrap(),
+    )
+    .unwrap();
+    let mut entries = original;
+    replace_sources(&mut entries, &mapping).unwrap();
+    assert_eq!(entries[0].1, replacement);
+    assert_eq!(std::fs::read(stock).unwrap(), b"stock");
     let _ = std::fs::remove_dir_all(d);
 }

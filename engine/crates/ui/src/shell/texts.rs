@@ -288,7 +288,7 @@ impl IaTexts {
                     v.con_numbots
                 } as u32;
                 vec![
-                    Piece::Text("Team size: ".into()),
+                    Piece::Text("Team Size: ".into()),
                     Piece::Left,
                     Piece::Text(format!(" {pct}% ")),
                     Piece::Right,

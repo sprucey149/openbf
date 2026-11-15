@@ -254,6 +254,17 @@ pub struct Sim {
     /// round; what it gates reaches the hash through tickets. (Its twin, the
     /// human damage multiplier, was retired by card DRETIRE.)
     pub team_handicap_on: bool,
+    /// Card DTEAM, issue #171 option C [ours] PROVISIONAL: a networked
+    /// round (LAN) at Hard or Elite gives both teams' bots the host row
+    /// whatever the head count, as the PS2's netplay does (BF2
+    /// `FUN_002a8300` is false for every team in netplay, so both teams
+    /// take the enemy table {4, 14, 17}; `analysis/re-ai-difficulty.md`
+    /// §2.1). Easy and Normal LAN rounds and single player keep the DTEAM
+    /// rule ([`crate::skill::Difficulty::lan_even_rows`]). Set by the round
+    /// build before the opening wave spawns (`BattleSetup::netplay_rows`).
+    /// An INPUT, constant for a round; what it decides reaches the hash
+    /// through the per-team rows. measure: the #171 2v1 band.
+    pub netplay_rows: bool,
     pub rng: SimRng,
     pub lcg: GameLcg,
     /// Native DAT_0073d868, separate from weapon-spread DAT_0073d870.
@@ -530,8 +541,12 @@ pub struct Sim {
     /// What each player slot's crosshair picks, with its relation (−1
     /// enemy, 0 team 0, 1 friend): the PS2's K+0x30 / K+0x40, which the HUD
     /// reticle colours by (`analysis/re-aim-assist.md` §3.7, card RETC) and
-    /// the target readout shows (card HTGT). Written by `acquire_magnet`;
-    /// NOT hashed while nothing in the sim reads it.
+    /// the target readout shows (card HTGT). Written by `acquire_magnet`
+    /// and the lock acquisition each tick inside `step`. The sim reads it
+    /// too: a human's Force Choke prefers the reticle's pick
+    /// (`force::choke`), and a shot past the aim ray's reach converges on
+    /// it (`Sim::beyond_reach`). NOT hashed: it is derived each tick from
+    /// hashed state, so peers agree on it (issue #173 asks whether to hash it).
     pub reticle_pick: Vec<Option<(super::input::AimTarget, i8)>>,
     pub events: Vec<Event>,
     /// Each human's buttons that went down this tick, by unit index, taken
@@ -1031,7 +1046,18 @@ impl Sim {
     /// stored, so a human joining, leaving or changing team is in the next
     /// read; the skill reaches a bot at its next spawn ([`Sim::bot_skill`]).
     pub fn team_rows(&self) -> [crate::skill::TeamSkill; 2] {
-        crate::skill::team_skill(self.difficulty, self.humans_per_team())
+        let humans = if self.netplay_rows && self.difficulty.lan_even_rows() {
+            [0, 0]
+        } else {
+            self.humans_per_team()
+        };
+        // Issue #171: a space round keeps the 2026-11-03 rule (option A is
+        // measured on the ground only, `skill::team_skill_space`).
+        if self.space_round() {
+            crate::skill::team_skill_space(self.difficulty, humans)
+        } else {
+            crate::skill::team_skill(self.difficulty, humans)
+        }
     }
 
     /// The integer skill a bot of team `team` spawns with: the base skill
@@ -1084,6 +1110,7 @@ impl Sim {
             omni_radius: 10.0,
             ground_rules: crate::soldier::GroundRules::Bf2,
             team_handicap_on: true,
+            netplay_rows: false,
             rng: SimRng::new(seed),
             // Independent generator; decorrelated seed so the two streams
             // don't start on the same word.

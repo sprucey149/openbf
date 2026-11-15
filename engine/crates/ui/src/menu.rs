@@ -32,7 +32,7 @@ pub enum PausePage {
 mod settings;
 pub use settings::{
     clamp_fov_scale, draw_fps_counter, draw_fps_counter_note, rumble_level, ControlContext,
-    FpsCounter, SettingsPage, FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
+    FpsCounter, SettingsPage, WindowMode, FOV_SCALE_RANGE, MAX_FOV_DEG, RUMBLE_LEVELS,
 };
 
 /// A Yes/No popup over the menu; it opens on No (both games' pause menus).
@@ -129,6 +129,10 @@ pub struct MenuModel {
     /// Automatic quality (LAN §8b.2): the render scale follows the frame
     /// times; Low power resolution is then locked ([`row_locked`]).
     pub auto_quality: bool,
+    /// Issue #172: the Display mode row's value, and whether this display
+    /// can take Exclusive (not on Wayland; the row steps past it).
+    pub window_mode: WindowMode,
+    pub exclusive_fullscreen: bool,
     /// The Button prompts row's value and the footer's names.
     pub input_icons_label: &'static str,
     pub icons: crate::input_icons::Icons,
@@ -199,13 +203,23 @@ pub enum MenuAction {
     ToggleSceneSoftness,
     /// Automatic quality on or off (LAN §8b.2).
     SetAutoQuality(bool),
+    /// Issue #172: the Display mode row's choice.
+    SetWindowMode(WindowMode),
     /// The Button prompts row, a step on (+1) or back (-1) through its choices.
     CycleInputIcons(i32),
     ToggleViewpoint,
     Quit,
 }
 
-pub const MOUSE_SENSITIVITY_RANGE: (f32, f32) = (0.1, 5.0);
+/// OURS: mouse sensitivity, shown as a percentage in 5 % steps. 1.0 (100 %) is
+/// the default; on foot it turns as 2.8 did before 2026-11-14 (the game's
+/// on-foot look factor), so this range is the old 0.1 to 5.0 over 2.8,
+/// rounded out to 5 % to 200 %.
+/// measure: whether playtesters reach either end of the range in play.
+pub const MOUSE_SENSITIVITY_RANGE: (f32, f32) = (0.05, 2.0);
+
+/// One step of the mouse sensitivity row.
+pub const MOUSE_SENSITIVITY_STEP: f32 = 0.05;
 
 /// OURS: the controller look sensitivity, a factor on the right stick before
 /// the sim reads it. 1.0 is the stick as it was (`core::sim::LOOK_SCALE`); from
@@ -213,6 +227,30 @@ pub const MOUSE_SENSITIVITY_RANGE: (f32, f32) = (0.1, 5.0);
 /// only reach it earlier in the stick's travel. measure: the maintainer's pad
 /// feel check at both ends, BF2 rifleman on foot and a hover tank's turret.
 pub const PAD_LOOK_SENSITIVITY_RANGE: (f32, f32) = (0.5, 1.5);
+
+/// Issue #172: this OS's one fullscreen key (`mac`: macOS). Every
+/// player-facing line that names the key reads it here.
+pub fn fullscreen_key_name(mac: bool) -> &'static str {
+    if mac {
+        "Control+Command+F"
+    } else {
+        "F11"
+    }
+}
+
+/// The Display mode row's help: what each mode does and this OS's one
+/// fullscreen key ([`fullscreen_key_name`]).
+pub fn window_mode_hint(exclusive_available: bool, mac: bool) -> String {
+    let modes = if exclusive_available {
+        "Fullscreen covers the screen at the desktop's resolution. Exclusive switches the \
+         monitor to its own video mode."
+    } else {
+        "Fullscreen covers the screen at the desktop's resolution. Exclusive is not available \
+         on this display."
+    };
+    let key = fullscreen_key_name(mac);
+    format!("{modes} {key} switches between fullscreen and a maximized window at any time.")
+}
 
 #[cfg(test)]
 mod class_picker_tests;
@@ -233,7 +271,12 @@ pub fn draw_controls(
                 .fill(Color32::from_black_alpha(220))
                 .inner_margin(egui::Margin::same(18))
                 .show(ui, |ui| {
-                    ui.heading("CONTROLS");
+                    ui.label(crate::typography::egui_text(
+                        ctx,
+                        &crate::typography::TITLE,
+                        crate::typography::tint::TITLE,
+                        "Controls",
+                    ));
                     ui.label(if capture {
                         "Press and release a control · Hold to cancel"
                     } else {
@@ -297,6 +340,8 @@ pub enum Row {
     GraphicsQuality,
     /// Automatic quality (LAN §8b.2).
     AutoQuality,
+    /// Issue #172: Windowed / Fullscreen / Exclusive.
+    WindowMode,
     ResetGraphics,
     FpsCounter,
     NetworkMeter,
@@ -451,7 +496,7 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
 /// after the percentage.
 pub fn population_row(m: &MenuModel, row: Row) -> Option<(&'static str, String)> {
     match row {
-        Row::AiCap => Some(("Team size", format!("{}%", m.team_size_pct))),
+        Row::AiCap => Some(("Team Size", format!("{}%", m.team_size_pct))),
         Row::Reinforcements => Some(("Reinforcements", format!("{}%", m.reinforcements_pct))),
         _ => None,
     }
@@ -485,10 +530,19 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             }
         }),
         Row::Difficulty if m.in_shell.is_none() => Some("Changes apply from the next round.".into()),
+        Row::Cheat(k) => m
+            .cheats
+            .get(k)
+            .and_then(|(id, _, _)| cheat_text(id))
+            .map(|(_, help)| help.to_owned()),
         Row::Rumble => Some(
             "Vibrates when you take a hit, your vehicle takes damage, or your ship collides."
                 .into(),
         ),
+        Row::WindowMode => Some(window_mode_hint(
+            m.exclusive_fullscreen,
+            cfg!(target_os = "macos"),
+        )),
         Row::AutoQuality => Some(
             "When frames run long, the 3D view draws at a lower resolution so the game keeps \
              up; it sharpens again when there is time. Menus and the HUD stay sharp."
@@ -534,7 +588,7 @@ pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
         // choose it keeps every name on this computer unique.
         Row::PlayerName => Some("Your profile's name. Choose or create a profile after Start."),
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
-            Some("Team size is fixed in this battle: it has no map team sizes to scale.")
+            Some("Team Size is fixed in this battle: it has no map team sizes to scale.")
         }
         _ => None,
     }
@@ -555,6 +609,7 @@ pub(crate) fn is_value_row(row: Row) -> bool {
             | Row::FpsCounter
             | Row::NetworkMeter
             | Row::AutoQuality
+            | Row::WindowMode
             | Row::Rumble
             | Row::MouseSensitivity
             | Row::PadLookSensitivity
@@ -740,6 +795,14 @@ fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Ve
         Row::AutoQuality if single && adjust => {
             actions.push(MenuAction::SetAutoQuality(!m.auto_quality));
         }
+        // Cross steps on too, as Button prompts.
+        Row::WindowMode if single && (input.confirm || adjust) => {
+            let dir = if input.left { -1 } else { 1 };
+            let next = m.window_mode.cycled(dir, m.exclusive_fullscreen);
+            if next != m.window_mode {
+                actions.push(MenuAction::SetWindowMode(next));
+            }
+        }
         Row::NetworkMeter if single && adjust => {
             actions.push(MenuAction::SetNetworkMeter(!m.network_meter));
         }
@@ -764,8 +827,10 @@ fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Ve
         }
         Row::MouseSensitivity if adjust => {
             let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
+            // Steps a sensitivity holds: 20 a unit for 5 %.
+            let per = (1.0 / MOUSE_SENSITIVITY_STEP).round();
             actions.push(MenuAction::SetMouseSensitivity(
-                (((m.mouse_sensitivity + delta / 10.0) * 10.0).round() / 10.0).clamp(lo, hi),
+                (((m.mouse_sensitivity + delta / per) * per).round() / per).clamp(lo, hi),
             ));
         }
         Row::PadLookSensitivity if adjust => {
@@ -824,20 +889,27 @@ enum RowKind {
     Locked,
 }
 
-/// The value's width between a value row's arrows, so the arrows line up.
-const STEP_VALUE_WIDTH: f32 = 112.0;
-/// A pause-menu row's least width: the longest label, the arrows and the value.
-const MENU_ROW_WIDTH: f32 = 460.0;
+/// The value's width between a value row's arrows, so the arrows line up
+/// (shell units: it follows the text's size, `crate::typography`).
+const STEP_VALUE_WIDTH: f32 = 100.0;
+/// A pause-menu row's least width: the longest label, the arrows and the
+/// value (shell units).
+const MENU_ROW_WIDTH: f32 = 480.0;
+/// A plain row's least width and a step arrow's (shell units).
+const PLAIN_ROW_WIDTH: f32 = 300.0;
+const STEP_ARROW_WIDTH: f32 = 20.0;
 
-/// The height of a row's 18-point text: a value row's arrows and value keep
+/// The height of a row's text ([`crate::typography::ITEM`]): a value row's arrows and value keep
 /// to it, so every row has the same pitch ([`RowList`]).
 fn text_height(ui: &egui::Ui) -> f32 {
-    ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(18.0)))
+    let font = crate::typography::egui_font(ui.ctx(), &crate::typography::ITEM);
+    ui.fonts_mut(|f| f.row_height(&font))
 }
 
 /// One ◀ or ▶ of a value row: a click steps the row.
 fn step_arrow(ui: &mut egui::Ui, id: egui::Id, glyph: &str) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(24.0, text_height(ui)), egui::Sense::hover());
+    let w = crate::typography::egui_units(ui.ctx(), STEP_ARROW_WIDTH);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, text_height(ui)), egui::Sense::hover());
     let r = ui.interact(rect, id, egui::Sense::click());
     let color = if r.hovered() {
         Color32::from_rgb(255, 214, 102)
@@ -848,7 +920,7 @@ fn step_arrow(ui: &mut egui::Ui, id: egui::Id, glyph: &str) -> egui::Response {
         rect.center(),
         Align2::CENTER_CENTER,
         glyph,
-        egui::FontId::proportional(18.0),
+        crate::typography::egui_font(ui.ctx(), &crate::typography::ITEM),
         color,
     );
     r
@@ -880,21 +952,36 @@ fn menu_row(
         .inner_margin(egui::Margin::symmetric(10, 6))
         .corner_radius(3.0)
         .show(ui, |ui| {
-            ui.set_min_width(if kind == RowKind::Plain {
-                360.0
-            } else {
-                MENU_ROW_WIDTH
-            });
+            ui.set_min_width(crate::typography::egui_units(
+                ui.ctx(),
+                if kind == RowKind::Plain {
+                    PLAIN_ROW_WIDTH
+                } else {
+                    MENU_ROW_WIDTH
+                },
+            ));
             ui.horizontal(|ui| {
                 label = Some(
                     ui.add(
-                        egui::Label::new(RichText::new(text).size(18.0).color(text_color))
-                            .sense(egui::Sense::click()),
+                        egui::Label::new(
+                            RichText::new(text)
+                                .font(crate::typography::egui_font(
+                                    ui.ctx(),
+                                    &crate::typography::ITEM,
+                                ))
+                                .color(text_color),
+                        )
+                        .sense(egui::Sense::click()),
                     ),
                 );
                 if let Some(v) = value {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let v = RichText::new(v).size(18.0).color(value_color).strong();
+                        let v = RichText::new(v)
+                            .font(crate::typography::egui_font(
+                                ui.ctx(),
+                                &crate::typography::ITEM,
+                            ))
+                            .color(value_color);
                         let RowKind::Steps(index) = kind else {
                             ui.label(v);
                             return;
@@ -904,7 +991,8 @@ fn menu_row(
                         {
                             stepped = Some(true);
                         }
-                        ui.add_sized([STEP_VALUE_WIDTH, text_height(ui)], egui::Label::new(v));
+                        let w = crate::typography::egui_units(ui.ctx(), STEP_VALUE_WIDTH);
+                        ui.add_sized([w, text_height(ui)], egui::Label::new(v));
                         if step_arrow(ui, step_id(index, false), "◀")
                             .clicked_by(egui::PointerButton::Primary)
                         {
@@ -927,10 +1015,10 @@ fn menu_row(
 
 /// The height the panel's frame and the window's edge take from the row list.
 const PANEL_MARGINS: f32 = 60.0;
-/// The space under the rows for the footer line.
-const FOOTER_ROOM: f32 = 30.0;
-/// The space under the rows kept for the help: see [`row_help`].
-const HELP_ROOM: f32 = 70.0;
+/// The space under the rows for the footer line, in body lines.
+const FOOTER_LINES: f32 = 3.0;
+/// The space under the rows kept for the help ([`row_help`]), in body lines.
+const HELP_LINES: f32 = 4.5;
 
 /// The pause menu's scrolling rows, in whole rows: a list too long for the
 /// window shows only rows that fit, so none is ever cut at its edge. The cursor
@@ -949,10 +1037,6 @@ impl RowList {
     /// A first guess at [`Self::pitch`], for the first frame: 18-point text,
     /// a row's margins and the gap.
     const FIRST_PITCH: f32 = 36.0;
-    /// How long a scroll must rest (seconds) before the list settles on a row:
-    /// a slow trackpad's small steps add up instead of each being undone.
-    const SETTLE_AFTER: f64 = 0.25;
-
     fn pitch_id() -> egui::Id {
         egui::Id::new("pause_rows_pitch")
     }
@@ -963,10 +1047,6 @@ impl RowList {
 
     fn offset_id() -> egui::Id {
         egui::Id::new("pause_rows_offset")
-    }
-
-    fn scrolled_id() -> egui::Id {
-        egui::Id::new("pause_rows_scrolled")
     }
 
     /// `room` is the height free for the list; at least one row shows.
@@ -983,29 +1063,33 @@ impl RowList {
             .unwrap_or(Self::FIRST_PITCH);
         let shown = (((room + gap) / pitch).floor() as usize).clamp(1, rows.max(1));
         let state = (page.0, page.1, cursor, shown);
-        let moved = ctx.data_mut(|d| {
-            let changed = d.get_temp(Self::state_id()) != Some(state);
+        let before = ctx.data_mut(|d| {
+            let before = d.get_temp::<(Option<usize>, u8, usize, usize)>(Self::state_id());
             d.insert_temp(Self::state_id(), state);
-            changed
+            before
         });
-        let offset = if moved {
-            Some(first_row(cursor, shown, rows) as f32 * pitch)
-        } else {
-            let (busy, now) = ctx.input(|i| {
-                (
-                    i.smooth_scroll_delta != Vec2::ZERO || i.pointer.any_down(),
-                    i.time,
-                )
-            });
-            if busy {
-                ctx.data_mut(|d| d.insert_temp(Self::scrolled_id(), now));
+        // The shared rule (`crate::scroll`): a new page shows its selection,
+        // a key-moved selection keeps a row of margin, a clicked one leaves
+        // the list where it is; the wheel scrolls smoothly and is never
+        // undone.
+        let offset = match before {
+            Some(b) if b == state => None,
+            Some((p0, p1, _, _)) if (p0, p1) == (page.0, page.1) => {
+                let now = ctx
+                    .data(|d| d.get_temp::<f32>(Self::offset_id()))
+                    .unwrap_or(0.0)
+                    / pitch;
+                let mut v = crate::scroll::ScrollView::at(now);
+                let pointer = ctx.input(|i| i.pointer.any_down() || i.pointer.any_released());
+                let margin = if pointer { 0 } else { crate::scroll::MARGIN };
+                v.reveal(cursor, rows, shown, margin);
+                (v.target() != now).then(|| v.target() * pitch)
             }
-            let rested = ctx
-                .data(|d| d.get_temp::<f64>(Self::scrolled_id()))
-                .is_none_or(|at| now - at >= Self::SETTLE_AFTER);
-            ctx.data(|d| d.get_temp::<f32>(Self::offset_id()))
-                .map(|at| (at / pitch).round() * pitch)
-                .filter(|_| !busy && rested)
+            _ => {
+                let mut v = crate::scroll::ScrollView::default();
+                v.reveal(cursor, rows, shown, crate::scroll::MARGIN);
+                Some(v.target() * pitch)
+            }
         };
         Self {
             pitch,
@@ -1048,24 +1132,76 @@ impl RowList {
     }
 }
 
-/// The first row of a list of `rows` showing `shown`, with `cursor` as near the
-/// middle as the ends allow.
-pub(crate) fn first_row(cursor: usize, shown: usize, rows: usize) -> usize {
-    cursor
-        .saturating_sub(shown / 2)
-        .min(rows.saturating_sub(shown))
+/// A toggle's value, spelled one way everywhere.
+pub fn on_off(on: bool) -> &'static str {
+    if on {
+        "On"
+    } else {
+        "Off"
+    }
+}
+
+/// A faction key's name on our screens: the roster keys (`rep`, `cis`,
+/// `all`, `imp`) as the players know them, any other key in Title Case.
+pub fn faction_name(key: &str) -> String {
+    match key.to_ascii_lowercase().as_str() {
+        "rep" => "Republic".into(),
+        "cis" => "CIS".into(),
+        "all" => "Rebels".into(),
+        "imp" => "Empire".into(),
+        other => {
+            let mut c = other.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect()) // typography: a key's first letter, not a role's case
+                .unwrap_or_default()
+        }
+    }
+}
+
+/// A cheat's row label and its help line, by its id
+/// (`core::sim::Cheats::entries`): Title Case like every other row, the
+/// code word and the detail in the help line.
+pub fn cheat_text(id: &str) -> Option<(&'static str, &'static str)> {
+    Some(match id {
+        "invincible" => ("Invincibility", "You take no damage. Cheat code: sos."),
+        "ammo" => ("Infinite Ammo", "Weapons never run out. Cheat code: ammo."),
+        "clip" => ("No Reloading", "Weapons never reload. Cheat code: clip."),
+        "stamina" => (
+            "Infinite Stamina",
+            "Sprint and roll without tiring. Cheat code: run.",
+        ),
+        "classes" => (
+            "Unlock All Classes",
+            "Every class can be picked. Cheat code: all.",
+        ),
+        "awards" => (
+            "Award Weapons",
+            "Every award weapon replaces its standard weapon.",
+        ),
+        "damage" => ("War Hero", "The War Hero medal: your damage is 1.5 times."),
+        "guardian" => ("Guardian", "The Guardian medal: damage to you is halved."),
+        "endurance" => (
+            "Endurance",
+            "The Endurance medal: energy refills 1.5 times as fast.",
+        ),
+        "technician" => (
+            "Technician",
+            "The Technician medal: your vehicle repairs itself.",
+        ),
+        _ => return None,
+    })
 }
 
 /// A row's label and value as drawn.
 pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
     let volume = |level: f32| Some(format!("{:.0}%", level * 100.0));
-    let on_off = |on: bool| Some(if on { "ON" } else { "off" }.to_owned());
+    let on_off = |on: bool| Some(on_off(on).to_owned());
     match row {
         Row::Binding(i) => {
             let (name, value) = &m.bindings.as_ref().unwrap().labels[i];
             (name.clone(), (!value.is_empty()).then(|| value.clone()))
         }
-        Row::ClassPicker => ("Change class / hero (testing)".into(), None),
+        Row::ClassPicker => ("Change Class / Hero (Testing)".into(), None),
         Row::ClassBack => ("Back".into(), None),
         Row::ClassChoice(k) => (
             m.class_choices
@@ -1092,7 +1228,8 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
         ),
         // The Cheats page is titled: its rows need no prefix.
         Row::Cheat(k) => {
-            let (_, label, on) = m.cheats[k];
+            let (id, label, on) = m.cheats[k];
+            let label = cheat_text(id).map_or(label, |(l, _)| l);
             match m.page {
                 Some(_) => (label.into(), on_off(on)),
                 None => (format!("Cheat: {label}"), on_off(on)),
@@ -1109,19 +1246,17 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
         ),
         Row::EffectsVolume => ("Sound Effects Volume".into(), volume(m.effects_volume)),
         Row::DialogueVolume => ("Dialogue Volume".into(), volume(m.dialogue_volume)),
-        Row::GraphicsQuality => ("Graphics quality".into(), Some("Normal".into())),
-        Row::FpsCounter => ("FPS counter".into(), Some(m.fps_counter.label().into())),
-        Row::PlayerName => ("Player name".into(), Some(m.player_name.clone())),
-        Row::AutoQuality => ("Automatic quality".into(), on_off(m.auto_quality)),
-        Row::NetworkMeter => (
-            "Network meter".into(),
-            Some(if m.network_meter { "On" } else { "Off" }.into()),
-        ),
+        Row::GraphicsQuality => ("Graphics Quality".into(), Some("Normal".into())),
+        Row::FpsCounter => ("FPS Counter".into(), Some(m.fps_counter.label().into())),
+        Row::PlayerName => ("Player Name".into(), Some(m.player_name.clone())),
+        Row::AutoQuality => ("Automatic Quality".into(), on_off(m.auto_quality)),
+        Row::WindowMode => ("Display Mode".into(), Some(m.window_mode.label().into())),
+        Row::NetworkMeter => ("Network Meter".into(), on_off(m.network_meter)),
         Row::Cheats => (m.texts.cheats.clone(), None),
         Row::Restart => (m.texts.restart.clone(), None),
         Row::PageBack => ("Back".into(), None),
         Row::Assist => (
-            "Aim assist intensity".into(),
+            "Aim Assist Intensity".into(),
             Some(format!("{:.1}", m.assist_intensity)),
         ),
         Row::AiCap | Row::Reinforcements => {
@@ -1129,7 +1264,7 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
             (label.into(), Some(value))
         }
         Row::InputIcons => (
-            "Button prompts".into(),
+            "Button Prompts".into(),
             Some(m.input_icons_label.to_owned()),
         ),
         Row::Viewpoint => (
@@ -1144,7 +1279,7 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
             ),
         ),
         Row::Fov => (
-            "Field of view".into(),
+            "Field of View".into(),
             Some(format!(
                 "{:.0}°",
                 (m.base_fov_deg * clamp_fov_scale(m.base_fov_deg, m.fov_scale)).min(MAX_FOV_DEG)
@@ -1152,42 +1287,32 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
         ),
         Row::ResetGraphics => ("Reset to Defaults".into(), None),
         Row::Music => (
-            "Music volume".into(),
+            "Music Volume".into(),
             Some(if m.music_volume <= 0.0 {
-                "off".into()
+                "Off".into()
             } else {
                 format!("{:.0}%", m.music_volume * 100.0)
             }),
         ),
         Row::CareerAwards => (
-            "Career award bonuses".into(),
-            Some(
-                if m.career_awards_disabled {
-                    "Off"
-                } else {
-                    "On"
-                }
-                .into(),
-            ),
+            "Career Award Bonuses".into(),
+            on_off(!m.career_awards_disabled),
         ),
         Row::Rumble => (
-            "Controller rumble".into(),
+            "Controller Rumble".into(),
             Some(RUMBLE_LEVELS[rumble_level(m.rumble_strength)].1.into()),
         ),
-        Row::RumbleOnFire => (
-            "Rumble on fire".into(),
-            Some(if m.rumble_on_fire { "On" } else { "Off" }.into()),
-        ),
+        Row::RumbleOnFire => ("Rumble on Fire".into(), on_off(m.rumble_on_fire)),
         Row::MouseSensitivity => (
-            "Mouse sensitivity".into(),
-            Some(format!("{:.1}", m.mouse_sensitivity)),
+            "Mouse Sensitivity".into(),
+            Some(format!("{:.0}%", m.mouse_sensitivity * 100.0)),
         ),
         Row::PadLookSensitivity => (
-            "Controller look sensitivity".into(),
+            "Controller Look Sensitivity".into(),
             Some(format!("{:.1}", m.pad_look_sensitivity)),
         ),
         Row::FlightControls => (
-            "Flight controls".into(),
+            "Flight Controls".into(),
             Some(
                 if m.rc_flight_controls {
                     "RC Mode 2"
@@ -1197,15 +1322,15 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
                 .into(),
             ),
         ),
-        Row::TerrainLod => ("Distant terrain".into(), on_off(m.terrain_lod)),
-        Row::SceneSoftness => ("Scene softness".into(), on_off(m.scene_softness)),
-        Row::InvertY => ("Invert mouse Y".into(), on_off(m.invert_y)),
+        Row::TerrainLod => ("Distant Terrain".into(), on_off(m.terrain_lod)),
+        Row::SceneSoftness => ("Scene Softness".into(), on_off(m.scene_softness)),
+        Row::InvertY => ("Invert Mouse Y".into(), on_off(m.invert_y)),
         Row::LowPowerResolution => (
-            "Low power resolution".into(),
+            "Low Power Resolution".into(),
             on_off(m.low_power_resolution),
         ),
         Row::Quit if m.page.is_some() => (m.texts.quit.clone(), None),
-        Row::Quit => ("Quit to desktop".into(), None),
+        Row::Quit => ("Quit to Desktop".into(), None),
     }
 }
 
@@ -1213,7 +1338,7 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
 /// page's own, or the flat list's.
 pub(crate) fn menu_title(m: &MenuModel) -> &str {
     if m.class_choices.is_some() {
-        return "CHANGE CLASS / HERO";
+        return "Change Class / Hero";
     }
     if let Some(bindings) = &m.bindings {
         return bindings.title;
@@ -1223,7 +1348,7 @@ pub(crate) fn menu_title(m: &MenuModel) -> &str {
         Some(PausePage::Options) => &m.texts.options,
         Some(PausePage::Cheats) => &m.texts.cheats,
         Some(PausePage::Settings(page)) => page.title(),
-        None => m.in_shell.as_deref().unwrap_or("PAUSED"),
+        None => m.in_shell.as_deref().unwrap_or("Paused"),
     }
 }
 
@@ -1238,7 +1363,7 @@ pub(crate) fn popup_prompt(m: &MenuModel) -> Option<&str> {
 
 /// Which list the rows are (a page or a popup), so a new one starts at its
 /// cursor's place.
-fn list_key(m: &MenuModel) -> u8 {
+pub(crate) fn list_key(m: &MenuModel) -> u8 {
     match (m.popup, m.page) {
         (Some(p), _) => 1 + p as u8,
         (None, None | Some(PausePage::Main)) => 0,
@@ -1261,20 +1386,22 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            RichText::new(menu_title(m))
-                                .size(28.0)
-                                .color(Color32::WHITE)
-                                .strong(),
+                            crate::typography::egui_text(
+                                ctx,
+                                &crate::typography::TITLE,
+                                crate::typography::tint::TITLE,
+                                menu_title(m),
+                            ),
                         );
                         if let Some(o) = &m.outcome_line {
-                            ui.label(RichText::new(o).size(16.0).color(Color32::LIGHT_GRAY));
+                            ui.label(crate::typography::egui_text(ctx, &crate::typography::BODY, crate::typography::tint::HELP, o));
                         }
                     });
                     ui.add_space(8.0);
                     if let Some(prompt) = popup_prompt(m) {
                         // The flat list (space battles) keeps its own line.
                         match m.page {
-                            Some(_) => ui.label(RichText::new(prompt).size(16.0).color(Color32::WHITE)),
+                            Some(_) => ui.label(crate::typography::egui_text(ctx, &crate::typography::BODY, crate::typography::tint::BODY, prompt)),
                             None if matches!(m.popup, Some(Popup::Respawn)) => {
                                 ui.label("Do you really wish to kill your current player?")
                             }
@@ -1298,15 +1425,18 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     let rows = rows(m);
                     let has_help = rows.iter().any(|r| {
-                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble | Row::AutoQuality)
+                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls | Row::Rumble | Row::AutoQuality | Row::WindowMode)
                             || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;
                     let room = ctx.content_rect().height()
                         - PANEL_MARGINS
                         - ui.min_rect().height()
-                        - FOOTER_ROOM
-                        - if has_help { HELP_ROOM } else { 0.0 };
+                        - crate::typography::egui_units(
+                            ctx,
+                            crate::typography::BODY.line
+                                * (FOOTER_LINES + if has_help { HELP_LINES } else { 0.0 }),
+                        );
                     let gap = ui.spacing().item_spacing.y;
                     let list = RowList::for_frame(
                         ctx,
@@ -1351,6 +1481,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         Row::InputIcons => {
                                             actions.push(MenuAction::CycleInputIcons(1))
                                         }
+                                        Row::WindowMode => actions.extend(step(m, i, true)),
                                         Row::Viewpoint => actions.push(MenuAction::ToggleViewpoint),
                                         _ => {}
                                     }
@@ -1365,24 +1496,29 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     if has_help {
                         ui.add_space(6.0);
                         ui.scope(|ui| {
-                            ui.set_min_height(60.0);
+                            ui.set_min_height(crate::typography::egui_units(
+                                ctx,
+                                crate::typography::BODY.line * HELP_LINES,
+                            ));
                             let help = hovered_help
                                 .or_else(|| rows.get(m.cursor).and_then(|r| row_help(m, *r)));
                             if let Some(help) = help {
-                                ui.label(RichText::new(help).size(15.0).color(Color32::LIGHT_GRAY));
+                                ui.label(crate::typography::egui_text(ctx, &crate::typography::BODY, crate::typography::tint::HELP, &help));
                             }
                         });
                     }
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(if m.class_choices.is_some() {
-                            "Up/Down choose · Left/Right tabs · Enter select · Esc back".to_owned()
-                        } else {
-                            m.icons.menu_footer()
-                        })
-                            .size(12.0)
-                            .color(Color32::GRAY),
-                    );
+                    let footer = if m.class_choices.is_some() {
+                        "Up/Down choose · Left/Right tabs · Enter select · Esc back".to_owned()
+                    } else {
+                        m.icons.menu_footer()
+                    };
+                    ui.label(crate::typography::egui_text(
+                        ctx,
+                        &crate::typography::BODY,
+                        crate::typography::tint::NOTE,
+                        &footer,
+                    ));
                 });
         });
     actions

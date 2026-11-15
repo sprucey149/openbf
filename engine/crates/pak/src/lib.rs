@@ -16,8 +16,8 @@
 //! index:  u32 count, then per entry: u16 path length, path (UTF-8, '/'-separated, "<name>/<rel>"), u64 offset, u64 length
 //! footer: b"OPENBFPK", u64 pack start, u64 index offset, u64 index length      (32 bytes, the file's last)
 //! ```
-//! Length bit 63 marks compression; bit 62 selects zstd (otherwise legacy raw Deflate). The body begins with a
-//! u32 uncompressed length. Unflagged entries retain the original layout and remain directly seekable.
+//! Length bit 63 marks compression, and a compressed entry also carries bit 62 (zstd, the only codec). The body
+//! begins with a u32 uncompressed length. Unflagged entries are stored as they are and remain directly seekable.
 //!
 //! Offsets are from the start of the file. The pack start is where the executable proper ends, so re-packing a packed
 //! binary copies only the executable. [`PAK_NAME`] has the same layout with no executable bytes: its pack start is 0.
@@ -197,57 +197,70 @@ impl Archive {
         let expected = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
         // Do not reserve from the advertised length: a corrupt header must not allocate gigabytes.
         // Read at most one byte past it, so a bad stream cannot expand without a bound either.
+        if raw_len & ZSTD_FLAG == 0 {
+            return Err(bad(
+                "compressed entry without zstd (an older pack; build the game again)",
+            ));
+        }
         let mut out = Vec::new();
-        if raw_len & ZSTD_FLAG != 0 {
-            let mut decoder = zstd::stream::read::Decoder::with_buffer(&buf[4..])?.single_frame();
-            decoder.window_log_max(27)?;
-            decoder
-                .by_ref()
-                .take(expected as u64 + 1)
-                .read_to_end(&mut out)?;
-            if !decoder.finish().is_empty() {
-                return Err(bad("trailing compressed data"));
-            }
-        } else {
-            // Legacy Deflate packs remain readable. Require the end marker as well as the length;
-            // Read's EOF alone also accepts a truncated raw Deflate stream.
-            let mut decoder = flate2::Decompress::new(false);
-            let mut block = [0u8; 65536];
-            loop {
-                let before_in = decoder.total_in();
-                let before_out = decoder.total_out();
-                let room = expected
-                    .saturating_sub(out.len())
-                    .saturating_add(1)
-                    .min(block.len());
-                let status = decoder
-                    .decompress(
-                        &buf[4 + before_in as usize..],
-                        &mut block[..room],
-                        flate2::FlushDecompress::None,
-                    )
-                    .map_err(|e| bad(&format!("invalid Deflate stream: {e}")))?;
-                let written = (decoder.total_out() - before_out) as usize;
-                out.extend_from_slice(&block[..written]);
-                if out.len() > expected {
-                    break;
-                }
-                if status == flate2::Status::StreamEnd {
-                    if decoder.total_in() as usize != buf.len() - 4 {
-                        return Err(bad("trailing compressed data"));
-                    }
-                    break;
-                }
-                if decoder.total_in() == before_in && written == 0 {
-                    return Err(bad("truncated Deflate stream"));
-                }
-            }
+        let mut decoder = zstd::stream::read::Decoder::with_buffer(&buf[4..])?.single_frame();
+        decoder.window_log_max(27)?;
+        decoder
+            .by_ref()
+            .take(expected as u64 + 1)
+            .read_to_end(&mut out)?;
+        if !decoder.finish().is_empty() {
+            return Err(bad("trailing compressed data"));
         }
         if out.len() != expected {
             return Err(bad("decompressed length mismatch"));
         }
         Ok(out)
     }
+}
+
+/// Substitute source files for existing archive names using a JSON array of `[name, file]` pairs.
+/// Validate the complete mapping before changing entries. Return the changed indices.
+/// This never adds archive entries or edits sources.
+pub fn replace_sources(
+    entries: &mut [(String, PathBuf)],
+    mapping: &Path,
+) -> io::Result<Vec<usize>> {
+    let replacements: Vec<(String, PathBuf)> = serde_json::from_reader(File::open(mapping)?)
+        .map_err(|e| bad(&format!("replacement mapping: {e}")))?;
+    let mut positions = BTreeMap::new();
+    for (index, (name, _)) in entries.iter().enumerate() {
+        if positions.insert(name.as_str(), index).is_some() {
+            return Err(bad(&format!("duplicate archive entry {name:?}")));
+        }
+    }
+    let mut changes = BTreeMap::new();
+    for (name, source) in replacements {
+        if name.contains(['\\', ':', '\0'])
+            || name
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+        {
+            return Err(bad(&format!("unsafe replacement archive path {name:?}")));
+        }
+        let index = *positions
+            .get(name.as_str())
+            .ok_or_else(|| bad(&format!("replacement archive entry does not exist: {name}")))?;
+        if !source.is_file() {
+            return Err(bad(&format!(
+                "replacement source is not a file: {}",
+                source.display()
+            )));
+        }
+        if changes.insert(index, source).is_some() {
+            return Err(bad(&format!("duplicate replacement for {name}")));
+        }
+    }
+    let changed = changes.keys().copied().collect();
+    for (index, source) in changes {
+        entries[index].1 = source;
+    }
+    Ok(changed)
 }
 
 /// [`write_pack_at`] with the standard rule: [`PAK_NAME`] beside `out`, at [`SINGLE_FILE_LIMIT`].

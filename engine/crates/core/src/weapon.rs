@@ -278,6 +278,17 @@ pub struct WeaponClass {
     /// box's half-side and the cone's length. See [`WeaponClass::from_props`]
     /// for the order-free rule the port uses.
     pub extreme_range: f32,
+    /// OURS, PROVISIONAL (issue #164, the maintainer's playtest of
+    /// 2026-11-14: snipers need a much longer assist on big open maps): the
+    /// distance a sniper rifle's aim assist keeps full strength to. Past it
+    /// the slowdown, the follow and the pull fade together, in a straight
+    /// line, to nothing at `lock_on_range`, the round's own reach
+    /// ([`WeaponClass::give_sniper_assist`], `aim_assist::sniper_range_scale`).
+    /// 0 = none (every weapon but a sniper rifle; a sniper that authors its
+    /// own `LockOnRange` fades from half of it). Not an ODF key.
+    /// measure: scoped controller play on a crossing runner at 100, 150,
+    /// 200 and 250 m on a large map.
+    pub assist_full_range: f32,
     /// The AI's range triple, m (card FGHT, `analysis/re-soldier-ai.md` 4.2,
     /// 4.5): `MinRange`, `OptimalRange`, `MaxRange`. A bot fights a target
     /// inside `max + 10`, stands to shoot inside the middle of the band and
@@ -535,6 +546,7 @@ impl Default for WeaponClass {
             target_lock_lose: TARGET_LOCK_LOSE_DEFAULT,
             lock_on_angle: 0.0,
             extreme_range: 0.0,
+            assist_full_range: 0.0,
             ai_range: [0.0, 30.0, 60.0],
             barrage: [3, 6],
             barrage_delay: 2.0,
@@ -591,8 +603,11 @@ impl Default for WeaponClass {
     }
 }
 
-/// [`WeaponClass::give_sniper_assist`]'s reach for a sniper that authors no
-/// `MaxRange` (none on the discs): the discs' sniper `MaxRange`.
+/// [`WeaponClass::give_sniper_assist`]'s full-strength distance
+/// (`assist_full_range`) for a sniper whose `MaxRange` (`ai_range[2]`) is 0
+/// (every disc sniper authors 128, itself or by its base): the discs' sniper
+/// `MaxRange`. The magnet's reach is the round's
+/// (`WeaponClass::round_reach`), not this.
 pub const SNIPER_LOCK_ON_RANGE: f32 = 128.0;
 /// [`WeaponClass::give_sniper_assist`]'s cone for a sniper that authors no
 /// `LockOnAngle` (none on the discs): the discs' sniper `LockOnAngle`, 1°.

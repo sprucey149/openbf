@@ -193,7 +193,7 @@ fn ia_screens() -> Vec<(&'static str, ui::shell::InstantAction)> {
     out.push(("ia_planet_list", m.clone()));
     let hoth = at(&m, "Hoth (bf2)");
     m.map_list.at = hoth;
-    m.map_list.top = hoth + 1 - ui::shell::LIST_ROWS;
+    m.map_list.view = ui::scroll::ScrollView::at((hoth + 1 - ui::shell::LIST_ROWS) as f32);
     out.push(("ia_planet_hoth", m.clone()));
     m.picked_map = MapPick::One(hoth);
     m.state = State::Mode;
@@ -317,7 +317,10 @@ fn the_hero_options_page_shows_the_scroll_arrow_when_needed() {
         ia.options.dlc_heroes = false;
         ia.page = ui::shell::Page::Group(
             ui::shell::Group::Hero,
-            ui::shell::ListCursor { at: 0, top: cursor },
+            ui::shell::ListCursor {
+                at: 0,
+                view: ui::scroll::ScrollView::at(cursor as f32),
+            },
         );
         let (rgba, w, h) = ia_screen(&ia, [1280, 720]);
         if let Some(dir) = std::env::var_os("IA_OUT").map(std::path::PathBuf::from) {

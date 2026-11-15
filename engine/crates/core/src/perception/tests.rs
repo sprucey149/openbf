@@ -243,19 +243,21 @@ fn a_still_sniper_sees_out_to_its_tiers_share_of_its_rifles_range() {
     for (d, want) in [
         (Difficulty::Easy, [true, false, false, false]),
         (Difficulty::Normal, [true, true, false, false]),
-        (Difficulty::Hard, [true, true, true, true]),
-        (Difficulty::Elite, [true, true, true, true]),
+        // Issue #171 lever (b): Hard and Elite see Normal's 96 m.
+        (Difficulty::Hard, [true, true, false, false]),
+        (Difficulty::Elite, [true, true, false, false]),
     ] {
         let got = [48.0, 80.0, 110.0, 120.0].map(|at| sees(d, at));
         assert_eq!(got, want, "{d:?}");
     }
     assert!(sees(Difficulty::Normal, 94.0), "Normal: 94 m < 96 m");
-    assert!(!sees(Difficulty::Hard, 130.0), "Hard: 130 m > 128 m");
-    // Crouching at Hard: 128 x 46 / 49 = 120 m.
-    let (s, a) = scene(Difficulty::Hard, 115.0, Stance::Crouch);
-    assert!(seen(&s, a), "a crouching enemy at 115 m");
-    let (s, a) = scene(Difficulty::Hard, 125.0, Stance::Crouch);
-    assert!(!seen(&s, a), "but not at 125 m");
+    assert!(sees(Difficulty::Hard, 94.0), "Hard: 94 m < 96 m");
+    assert!(!sees(Difficulty::Hard, 100.0), "Hard: 100 m > 96 m");
+    // Crouching at Hard: 96 x 46 / 49 = 90 m.
+    let (s, a) = scene(Difficulty::Hard, 85.0, Stance::Crouch);
+    assert!(seen(&s, a), "a crouching enemy at 85 m");
+    let (s, a) = scene(Difficulty::Hard, 95.0, Stance::Crouch);
+    assert!(!seen(&s, a), "but not at 95 m");
     // Walking, it sees as anyone does.
     let (mut s, a) = scene(Difficulty::Hard, 80.0, Stance::Stand);
     s.units[a.index as usize].soldier.vel = Vec3::new(3.0, 0.0, 0.0);
@@ -264,13 +266,13 @@ fn a_still_sniper_sees_out_to_its_tiers_share_of_its_rifles_range() {
     let (mut s, a) = scene(Difficulty::Hard, 80.0, Stance::Stand);
     s.units[a.index as usize].weapon_class = 0;
     assert!(!seen(&s, a), "not with a plain rifle");
-    // The mission's view multiplier shortens the scope too: 128 x 0.5.
-    let (mut s, a) = scene(Difficulty::Hard, 70.0, Stance::Stand);
+    // The mission's view multiplier shortens the scope too: 96 x 0.5.
+    let (mut s, a) = scene(Difficulty::Hard, 52.0, Stance::Stand);
     s.mission_ai.set_view_mult(0.5);
-    assert!(!seen(&s, a), "70 m > 64 m at x 0.5");
-    let (mut s, a) = scene(Difficulty::Hard, 60.0, Stance::Stand);
+    assert!(!seen(&s, a), "52 m > 48 m at x 0.5");
+    let (mut s, a) = scene(Difficulty::Hard, 45.0, Stance::Stand);
     s.mission_ai.set_view_mult(0.5);
-    assert!(seen(&s, a), "60 m < 64 m at x 0.5");
+    assert!(seen(&s, a), "45 m < 48 m at x 0.5");
     // A proxy at Easy sees as Hard does.
     let (mut s, a) = scene(Difficulty::Easy, 120.0, Stance::Stand);
     s.units[a.index as usize].proxy_human = Some(crate::ai::proxy::Strength::Average.profile());

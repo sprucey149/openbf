@@ -32,9 +32,7 @@
 //! Hor+: the stack and the panel keep their place relative to the centre,
 //! a left help line to the left edge, a right one to the right edge.
 
-use crate::hud_draw::{
-    anchor_shift, color, frame_scale, run_width, Ctx, Quad, Run, Screen, OVERFILL,
-};
+use crate::hud_draw::{anchor_shift, color, frame_scale, Ctx, Quad, Screen, OVERFILL};
 use crate::hud_tree::{HAlign, FRAME_H, FRAME_W};
 use crate::input_icons::Prompt;
 use glam::{Mat4, Vec3};
@@ -61,48 +59,26 @@ pub(crate) fn item_pieces(last: bool) -> [&'static str; 3] {
     }
 }
 
-/// The menu buttons' font (`gMenuButtonFont`, `re-bf2-shell.md` §3.1).
-pub const BUTTON_FONT: &str = "gamefont_large";
-/// The help lines' and the class panel's font: their measured widths fit
-/// `gamefont_small`'s advances × [`SMALL_STRETCH`].
-pub const SMALL_FONT: &str = "gamefont_small";
-/// Menu labels are drawn 1.087 × the font's advances across, 1:1 down
-/// (`re-bf2-shell.md` §3.2 [M]).
-pub const LABEL_STRETCH: f32 = 1.087;
-/// `gamefont_small`'s labels a little wider: the class panel's lines and
-/// the help lines' ink is 1.0-1.04 × that of a 1.087 run (seven texts of
-/// `s0_team1` / `s4_class`, `lead_tmp/sselb/tools/ink.py`, [M]).
-pub const SMALL_STRETCH: f32 = 1.11;
-
-/// gTitleTextColor / alpha (`re-bf2-shell.md` §3.1 [V]).
-pub const TITLE_TEXT: ([f32; 3], f32) = ([246.0, 235.0, 20.0], 0.8);
-/// gSelectedTextColor / alpha.
-pub const SELECTED_TEXT: ([f32; 3], f32) = ([138.0, 160.0, 244.0], 0.6);
-/// gUnselectedTextColor / alpha.
-pub const UNSELECTED_TEXT: ([f32; 3], f32) = ([240.0, 240.0, 240.0], 0.6);
-/// gHelptextTextColor / alpha.
-pub const HELP_TEXT: ([f32; 3], f32) = ([240.0, 240.0, 240.0], 0.8);
+use crate::typography::{tint, BODY, HELP, ITEM, LIST, TEXT_INSET, TITLE};
+pub use crate::typography::{ROW_H, ROW_PITCH};
 
 /// The side select's stack [M] (`s0_team1.png`): the bar's outer edges
 /// across, the title bar's top, a row's height and pitch (the font's 22 +
 /// gButtonHeightPad 6, + gButtonGutter 4: `re-bf2-shell.md` §3.2).
 pub const SIDE_STACK_X: [f32; 2] = [257.6, 488.8];
 pub const SIDE_STACK_TOP: f32 = 188.5;
-pub const ROW_H: f32 = 28.0;
-pub const ROW_PITCH: f32 = 32.0;
 /// How opaque the button pieces are drawn: the bar over the dimmed
 /// backdrop reads (66, 72, 73) where the sheet is (113, 127, 138) at 0.82
 /// over about 26 ([M] `s0_team1.png`, a fit: PROVISIONAL).
 pub const PIECE_ALPHA: f32 = 0.6;
 
 /// The class panel [M] (`s4_class.png`): the title tab's edges and the
-/// box's, the text's left edge, its first line's top and the line pitch
-/// (`gamefont_small`'s 18).
+/// box's, the text's left edge and its first line's top (lines are
+/// [`BODY`]'s pitch).
 pub const CLASS_TAB: [f32; 4] = [234.4, 98.0, 488.8, 122.0];
 pub const CLASS_BOX: [f32; 4] = [232.8, 127.0, 491.2, 351.0];
 pub const CLASS_TEXT_X: f32 = 242.0;
 pub const CLASS_TEXT_TOP: f32 = 133.0;
-pub const CLASS_LINE: f32 = 18.0;
 /// `border_3_pieces`' corners: texels of the 64 × 64 sheet and units on
 /// screen (`[ours]` read off the sheet: the rounded border fits in 16).
 const BORDER_TEXELS: f32 = 16.0;
@@ -122,11 +98,6 @@ pub const ICON_GAP: f32 = 12.4;
 /// ink is 2-3 px lower than the line's middle on both frames.
 pub const HELP_DROP: f32 = 2.5;
 
-/// The spawn map's texts: the legend and the objective [M] (Hoth's
-/// `s3_after_auto`: five runs' ink widths give 1.38-1.41 display px per
-/// texel of `gamefont_tiny`, its cap 8 texels = the frames' 7-8 rows).
-pub const MAP_FONT: &str = "gamefont_tiny";
-pub const MAP_STRETCH: f32 = 1.10;
 /// `player1mapkey` + its `player1mapkey_spawnonly` child's Position, in
 /// viewport fractions of the HUD tree (the layout [V]).
 pub const LEGEND_AT: [f32; 2] = [0.142071, 0.682009 + 0.069934];
@@ -158,7 +129,6 @@ pub const LEGEND_ICON_RGB: [f32; 3] = [1.0, 86.0, 213.0];
 pub const OBJECTIVE_AT: [f32; 2] = [0.533743, 0.055098];
 pub const OBJECTIVE_WIDTH: f32 = 0.399926;
 pub const OBJECTIVE_INSET: [f32; 2] = [9.0, 9.0];
-pub const OBJECTIVE_TEXT: ([f32; 3], f32) = ([222.0, 222.0, 74.0], 1.0);
 
 /// What one spawn screen shows; every text already in the player's
 /// language (the game reads the disc's table).
@@ -273,63 +243,6 @@ impl Ctx<'_> {
         );
     }
 
-    /// One text run in the shell's units; skips missing fonts.
-    pub(crate) fn label(
-        &mut self,
-        s: &Screen,
-        font: &str,
-        text: &str,
-        at: (f32, f32),
-        h_align: HAlign,
-        style: ([f32; 3], f32),
-    ) {
-        self.label_scaled(s, font, text, at, h_align, style, 1.0);
-    }
-
-    /// [`Ctx::label`] with the glyphs `ky` × their height down from `at`.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn label_scaled(
-        &mut self,
-        s: &Screen,
-        font: &str,
-        text: &str,
-        at: (f32, f32),
-        h_align: HAlign,
-        (rgb, alpha): ([f32; 3], f32),
-        ky: f32,
-    ) {
-        let role = font;
-        let Some(font) = self.font(role) else {
-            return;
-        };
-        self.run(
-            NONE,
-            &Mat4::IDENTITY,
-            s,
-            font,
-            &Run {
-                text,
-                at,
-                h_align,
-                scale: [
-                    match role {
-                        BUTTON_FONT => LABEL_STRETCH,
-                        MAP_FONT => MAP_STRETCH,
-                        _ => SMALL_STRETCH,
-                    },
-                    ky,
-                ],
-                color: color(rgb, alpha),
-                additive: false,
-                shadow: false,
-            },
-        );
-    }
-
-    fn line_height(&self, font: &str) -> f32 {
-        self.font(font).map_or(18.0, |f| f32::from(f.line_height))
-    }
-
     /// A bar of three pieces: two square ends of the row's height, the
     /// centre stretched between them.
     pub(crate) fn bar(&mut self, s: &Screen, rect: [f32; 4], pieces: [&str; 3]) {
@@ -401,14 +314,13 @@ impl Ctx<'_> {
             icon,
             1.0,
         );
-        let lh = self.line_height(SMALL_FONT);
         let (x, align) = if right {
             (ix - ICON_GAP, HAlign::Right)
         } else {
             (ix + ICON[0] + ICON_GAP, HAlign::Left)
         };
-        let at = (x, HELP_Y - lh * 0.5 + HELP_DROP);
-        self.label(&s, SMALL_FONT, text, at, align, HELP_TEXT);
+        let at = (x, HELP_Y - HELP.size * 0.5 + HELP_DROP);
+        self.text(&s, &HELP, text, at, align, tint::HELP);
     }
 
     /// The veil that leaves [`crate::spawn::BACKDROP_DIM`] of the
@@ -444,7 +356,7 @@ impl Ctx<'_> {
             } => {
                 let s = screen_at(size, Anchor::Centre);
                 let [x0, x1] = SIDE_STACK_X;
-                let lh = self.line_height(BUTTON_FONT);
+                let lh = TITLE.size;
                 let cx = (x0 + x1) * 0.5;
                 let row = |k: usize| {
                     let y = SIDE_STACK_TOP + ROW_PITCH * k as f32;
@@ -453,24 +365,17 @@ impl Ctx<'_> {
                 let r = row(0);
                 self.bar(&s, r, TITLE_PIECES);
                 let mid = r[1] + (ROW_H - lh) * 0.5;
-                self.label(
-                    &s,
-                    BUTTON_FONT,
-                    title,
-                    (cx, mid),
-                    HAlign::Center,
-                    TITLE_TEXT,
-                );
+                self.text(&s, &TITLE, title, (cx, mid), HAlign::Center, tint::TITLE);
                 for (k, text) in rows.iter().enumerate() {
                     let r = row(k + 1);
                     self.bar(&s, r, item_pieces(k + 1 == rows.len()));
                     let style = if k == *selected {
-                        SELECTED_TEXT
+                        tint::SELECTED
                     } else {
-                        UNSELECTED_TEXT
+                        tint::UNSELECTED
                     };
-                    let mid = r[1] + (ROW_H - lh) * 0.5;
-                    self.label(&s, BUTTON_FONT, text, (cx, mid), HAlign::Center, style);
+                    let mid = r[1] + (ROW_H - ITEM.size) * 0.5;
+                    self.text(&s, &ITEM, text, (cx, mid), HAlign::Center, style);
                 }
                 self.help(size, true, Prompt::SpawnAccept, select);
             }
@@ -488,14 +393,13 @@ impl Ctx<'_> {
             } => {
                 let s = screen_at(size, Anchor::Centre);
                 self.bar(&s, CLASS_TAB, TITLE_PIECES);
-                let lh = self.line_height(SMALL_FONT);
-                let [x0, y0, x1, y1] = CLASS_TAB;
-                let at = ((x0 + x1) * 0.5, y0 + (y1 - y0 - lh) * 0.5);
-                self.label(&s, SMALL_FONT, title, at, HAlign::Center, TITLE_TEXT);
+                self.text_in(&s, &TITLE, title, CLASS_TAB, tint::TITLE);
                 self.bordered(&s, CLASS_BOX);
+                let room = CLASS_BOX[2] - TEXT_INSET - CLASS_TEXT_X;
                 for (k, line) in lines.iter().enumerate() {
-                    let at = (CLASS_TEXT_X, CLASS_TEXT_TOP + CLASS_LINE * k as f32);
-                    self.label(&s, SMALL_FONT, line, at, HAlign::Left, ([255.0; 3], 1.0));
+                    let at = (CLASS_TEXT_X, CLASS_TEXT_TOP + BODY.line * k as f32);
+                    let line = self.ellipsized(&BODY, line, room);
+                    self.text(&s, &BODY, &line, at, HAlign::Left, tint::BODY);
                 }
                 self.help(size, false, Prompt::SpawnBack, back);
                 self.help(size, true, Prompt::SpawnAccept, accept);
@@ -504,20 +408,11 @@ impl Ctx<'_> {
     }
 }
 
-/// The objective in capitals, broken at words to its list's width.
+/// The objective, broken at words to its list's width.
 fn objective_lines(font: &manifest::hud::HudFont, text: &str) -> Vec<String> {
     let width = OBJECTIVE_WIDTH * FRAME_W - OBJECTIVE_INSET[0];
-    let mut lines: Vec<String> = Vec::new();
-    for word in text.to_uppercase().split_whitespace() {
-        match lines.last_mut() {
-            Some(l) if run_width(font, &format!("{l} {word}"), MAP_STRETCH, false) <= width => {
-                l.push(' ');
-                l.push_str(word);
-            }
-            _ => lines.push(word.to_owned()),
-        }
-    }
-    lines
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    crate::typography::wrap(font, &LIST, &flat, width)
 }
 
 /// The HUD tree's mapping (`crate::hud_draw::draw`'s root screen) for an
@@ -559,7 +454,7 @@ impl Ctx<'_> {
         );
         let pad = self.art.icons.sheet(Prompt::DPad);
         self.sheet(&s, rect(LEGEND_PAD), full, pad, 1.0);
-        let lh = self.line_height(MAP_FONT);
+        let lh = LIST.size;
         for (text, [x, y, alpha]) in texts.iter().zip(LEGEND_TEXT) {
             let (mut x0, mut y0) = at(x, y);
             y0 += LEGEND_DROP;
@@ -571,31 +466,23 @@ impl Ctx<'_> {
                 x0 += lh + INLINE_ICON_GAP;
                 text = rest;
             }
-            let upper = text.to_uppercase();
-            self.label(
-                &s,
-                MAP_FONT,
-                &upper,
-                (x0, y0),
-                HAlign::Left,
-                ([255.0; 3], alpha),
-            );
+            self.text(&s, &LIST, text, (x0, y0), HAlign::Left, ([255.0; 3], alpha));
         }
     }
 
     /// The mission's objective, word-wrapped to its list's width.
     fn objective(&mut self, size: [f32; 2], text: &str) {
-        let Some(font) = self.art.fonts.get(MAP_FONT) else {
+        let Some(font) = self.face(LIST.face) else {
             return;
         };
         let s = tree_screen(size, OBJECTIVE_AT[0]);
         let lines = objective_lines(font, text);
-        let pitch = f32::from(font.line_height);
+        let pitch = LIST.line;
         let x = OBJECTIVE_AT[0] * FRAME_W + OBJECTIVE_INSET[0];
         let y = OBJECTIVE_AT[1] * FRAME_H + OBJECTIVE_INSET[1];
         for (k, line) in lines.iter().enumerate() {
             let at = (x, y + pitch * k as f32);
-            self.label(&s, MAP_FONT, line, at, HAlign::Left, OBJECTIVE_TEXT);
+            self.text(&s, &LIST, line, at, HAlign::Left, tint::OBJECTIVE);
         }
     }
 }
@@ -626,11 +513,79 @@ pub fn side_row_at(point: [f32; 2], size: [f32; 2], row_count: usize) -> Option<
     None
 }
 
+/// Issue #128: the help line a pointer can press - the right one accepts
+/// ("Select", "Select Character"), the left one backs ("Back").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Help {
+    Accept,
+    Back,
+}
+
+/// `[ours]` The help line's pointer box past its icon and label, in the
+/// shell's units: a little to each side, and down and up from the line's
+/// middle. measure: live clicks on the help lines.
+pub const HELP_PAD: [f32; 2] = [4.0, 12.0];
+
+/// The window point of the middle of a help line's icon (left or `right`)
+/// in a `size` window ([`Ctx::help`]'s layout).
+pub fn help_icon_point(size: [f32; 2], right: bool) -> [f32; 2] {
+    let (a, ix) = if right {
+        (Anchor::Right, SAFE_X[1] - ICON[0])
+    } else {
+        (Anchor::Left, SAFE_X[0])
+    };
+    screen_at(size, a).map(Vec3::new(ix + ICON[0] * 0.5, HELP_Y, 0.0))
+}
+
+/// Which of `page`'s help lines holds the window point `point` of a `size`
+/// window: its icon and label as [`Ctx::help`] lays them out, `font` the
+/// label's (`None`: a label of eight units a letter), padded by
+/// [`HELP_PAD`]. The spawn map has no help line of its own.
+pub fn help_at(
+    font: Option<&manifest::hud::HudFont>,
+    page: &SpawnPage,
+    point: [f32; 2],
+    size: [f32; 2],
+) -> Option<Help> {
+    let lines: Vec<(bool, &str, Help)> = match page {
+        SpawnPage::Side { select, .. } => vec![(true, select.as_str(), Help::Accept)],
+        SpawnPage::Class { back, accept, .. } => vec![
+            (false, back.as_str(), Help::Back),
+            (true, accept.as_str(), Help::Accept),
+        ],
+        SpawnPage::Map { .. } => Vec::new(),
+    };
+    lines.into_iter().find_map(|(right, text, help)| {
+        let width = font.map_or(8.0 * text.chars().count() as f32, |f| {
+            crate::typography::width(f, &HELP, text)
+        });
+        let (a, x0, x1) = if right {
+            let ix = SAFE_X[1] - ICON[0];
+            (Anchor::Right, ix - ICON_GAP - width, ix + ICON[0])
+        } else {
+            let ix = SAFE_X[0];
+            (Anchor::Left, ix, ix + ICON[0] + ICON_GAP + width)
+        };
+        let s = screen_at(size, a);
+        let sx = (point[0] - s.origin[0]) / s.scale[0];
+        let sy = (point[1] - s.origin[1]) / s.scale[1];
+        let inside =
+            sx >= x0 - HELP_PAD[0] && sx <= x1 + HELP_PAD[0] && (sy - HELP_Y).abs() <= HELP_PAD[1];
+        inside.then_some(help)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    const BUTTON_FONT: &str = "gamefont_large";
+    const SMALL_FONT: &str = "gamefont_small";
+    const MAP_FONT: &str = "gamefont_tiny";
     use crate::hud_draw::{HudArt, HudFrame};
     use crate::hud_tree::Hud;
+    use crate::typography::tint::{
+        SELECTED as SELECTED_TEXT, TITLE as TITLE_TEXT, UNSELECTED as UNSELECTED_TEXT,
+    };
     use manifest::hud::{HudFont, HudGlyph, HudLayout};
 
     /// A font whose every printable glyph is 10 wide, 12 tall.
@@ -939,7 +894,8 @@ mod tests {
         );
         // The PS2 frame's two lines; a 10-texel font breaks it there too.
         let lines = objective_lines(&art.fonts[MAP_FONT], "Capture all the Command Posts");
-        assert_eq!(lines, ["CAPTURE ALL THE", "COMMAND POSTS"]);
+        // Broken as the capitals are wide; drawn in capitals by the role.
+        assert_eq!(lines, ["Capture all the", "Command Posts"]);
     }
 
     /// PR #102's spawn-map click lands where the post is drawn whatever

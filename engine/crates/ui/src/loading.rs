@@ -1,9 +1,7 @@
 //! BF1's 4:3 loading display. The scan and zoom share one wall-clock sample
 //! with the audio. The shell may keep the final image up while loading.
 
-use egui::{
-    pos2, vec2, Align2, Color32, FontId, Pos2, Rect, RichText, TextureHandle, TextureId, Vec2,
-};
+use egui::{pos2, vec2, Align2, Color32, FontId, Pos2, Rect, TextureHandle, TextureId, Vec2};
 use std::time::Duration;
 
 const FULL: Rect = Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0));
@@ -346,8 +344,10 @@ fn draw_label(painter: &egui::Painter, center: Pos2, scale: f32, label: Option<&
         }
         return;
     }
-    let galley =
-        painter.layout_no_wrap("LOADING".into(), FontId::proportional(21.0 * scale), color);
+    // The stamp is artwork (the BF1 loading screen's printed label, drawn
+    // from its bitmap font above), not menu text.
+    let stamp = FontId::proportional(21.0 * scale); // typography: artwork
+    let galley = painter.layout_no_wrap("LOADING".into(), stamp, color);
     let offset = rotation * (galley.size() * 0.5);
     painter.add(egui::epaint::TextShape::new(center - offset, galley, color).with_angle(-0.15));
 }
@@ -399,11 +399,12 @@ pub fn draw_loading_with_skip(
     egui::Area::new(egui::Id::new("loading_caption"))
         .anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -24.0))
         .show(ctx, |ui| {
-            ui.label(
-                RichText::new(format!("{caption}   {}/{}", step + 1, steps.max(1)))
-                    .size(18.0)
-                    .color(Color32::from_rgb(120, 190, 255)),
-            );
+            ui.label(crate::typography::egui_text(
+                ctx,
+                &crate::typography::BODY,
+                crate::typography::tint::CAPTION,
+                &format!("{caption}   {}/{}", step + 1, steps.max(1)),
+            ));
         });
     draw_skip(&painter, screen, prompt);
 }
@@ -414,7 +415,7 @@ fn draw_skip(painter: &egui::Painter, screen: Rect, prompt: bool) {
         // as well as in the right pillarbox. No Area fade changes its deadline.
         let text = painter.layout_no_wrap(
             "Press any button to skip".into(),
-            FontId::proportional(18.0),
+            crate::typography::egui_font(painter.ctx(), &crate::typography::BODY),
             Color32::WHITE,
         );
         let bottom_right = screen.right_bottom() - vec2(12.0, 12.0);

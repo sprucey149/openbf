@@ -262,10 +262,6 @@ pub struct HumanSeat {
     pub profile: PlayerProfile,
 }
 
-fn awards_default() -> bool {
-    true
-}
-
 /// Everything every peer needs to build the identical round (LAN §4.3).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RoundSetup {
@@ -282,8 +278,7 @@ pub struct RoundSetup {
     /// The cheats guests may ask for ([`super::cheat_bits`] order).
     pub cheat_policy: u32,
     /// The host's award policy (LAN §5b): each player's own earned awards
-    /// apply; false: nobody's. On by default, as in single player.
-    #[serde(default = "awards_default")]
+    /// apply; false: nobody's.
     pub awards: bool,
     pub humans: Vec<HumanSeat>,
     /// The Instant Action playlist row this round plays.

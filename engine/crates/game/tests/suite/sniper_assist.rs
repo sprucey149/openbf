@@ -71,7 +71,16 @@ fn every_sniper_rifle_and_only_those_gets_a_magnet() {
         println!("{game}: {names:?}");
         assert_eq!(names, want, "{game} sniper rifles");
         for w in snipers {
-            assert_eq!(w.lock_on_range, 128.0, "{} range", w.name);
+            // Full strength to MaxRange, the magnet out to the round's reach
+            // (issue #164): 300 m for a bolt, 500 m for the award beam.
+            assert_eq!(w.assist_full_range, 128.0, "{} full range", w.name);
+            let reach = if w.ordnance.beam.is_some() {
+                500.0
+            } else {
+                300.0
+            };
+            assert_eq!(w.round_reach(), reach, "{} round", w.name);
+            assert_eq!(w.lock_on_range, reach, "{} range", w.name);
             assert_eq!(w.lock_on_angle, core::weapon::DEG, "{} angle", w.name);
             assert_eq!(w.target_team, 1, "{} enemies only", w.name);
             assert_eq!(w.target_kind & 0x1f, 0b1111);
@@ -159,9 +168,10 @@ fn sniper(game: &str, weapon: &str) -> Option<WeaponClass> {
 }
 
 /// A BF1 and a BF2 sniper rifle on a controller take an enemy soldier at
-/// 50 m and at 120 m as the magnet, scoped and not.
+/// 50, 120 and 250 m as the magnet, scoped and not (issue #164: out to the
+/// round's reach).
 #[test]
-fn a_sniper_on_a_controller_takes_a_magnet_at_50_and_120_m() {
+fn a_sniper_on_a_controller_takes_a_magnet_at_50_120_and_250_m() {
     for (game, weapon) in [
         ("bf1", "all_weap_inf_sniperrifle"),
         ("bf1", "imp_weap_inf_sniperrifle"),
@@ -172,7 +182,7 @@ fn a_sniper_on_a_controller_takes_a_magnet_at_50_and_120_m() {
             eprintln!("SKIP: no baked classes");
             return;
         };
-        for dist in [50.0, 120.0] {
+        for dist in [50.0, 120.0, 250.0] {
             for scoped in [false, true] {
                 let (mut s, e) = range(&w, game, dist, scoped);
                 s.step(&[PadState::default()]);
@@ -183,10 +193,11 @@ fn a_sniper_on_a_controller_takes_a_magnet_at_50_and_120_m() {
                 );
             }
         }
-        // Past the rifle's reach (128 m + the target's radius): none.
-        let (mut s, _) = range(&w, game, 140.0, false);
+        // Past the round's reach (plus the target's radius): none.
+        let past = w.lock_on_range + 12.0;
+        let (mut s, _) = range(&w, game, past, false);
         s.step(&[PadState::default()]);
-        assert_eq!(s.magnet_at(0), None, "{weapon} at 140 m");
+        assert_eq!(s.magnet_at(0), None, "{weapon} at {past} m");
     }
 }
 

@@ -23,6 +23,7 @@ impl Soldier {
             }
             Stance::Stand
                 if held
+                    && !self.choke_locked()
                     && Self::sprint_predicate(fwd, strafe, false)
                     && self.sprint_start_speed(c, rules)
                     && !self.energy_depleted
@@ -31,6 +32,16 @@ impl Soldier {
                 Stance::Sprint
             }
             stance => stance,
+        }
+    }
+
+    /// A landing's light lock. A Force Choke's release lock still running
+    /// keeps its longer time (and its trigger hold) instead (issue #173).
+    fn landing_lock(&mut self, c: &SoldierConstants) {
+        if self.choke_locked() {
+            self.lock_timer = self.lock_timer.fmax(c.soft_lock);
+        } else {
+            self.lock_timer = c.soft_lock;
         }
     }
 
@@ -57,6 +68,7 @@ impl Soldier {
         if self.lock_timer <= 0.0 {
             self.lock_hard = false;
             self.fire_lock = false;
+            self.choke_lock = false;
         }
         // Jet fuel (card JETP): BF2 recharges it outside the jet stances,
         // before the stance switch (B2:160108-160116), on every map (BF1
@@ -103,7 +115,7 @@ impl Soldier {
             Stance::Jump | Stance::Fall => {
                 if self.grounded && !first_air {
                     self.set_stance(Stance::Stand);
-                    self.lock_timer = c.soft_lock;
+                    self.landing_lock(c);
                 }
             }
             // A jet lands on the floor with the light lock, whatever its
@@ -111,7 +123,7 @@ impl Soldier {
             Stance::Jet | Stance::Hover => {
                 if self.grounded {
                     self.set_stance(Stance::Stand);
-                    self.lock_timer = c.soft_lock;
+                    self.landing_lock(c);
                 }
             }
             Stance::Stand | Stance::Crouch | Stance::Prone | Stance::Sprint => {
@@ -351,7 +363,7 @@ impl Soldier {
             // FUN_00240bf8 cases 4 / 8, B2:160614-160618), its kick added to
             // the velocity the NEXT move takes, as the jump's is.
             self.fly_ceiling(dt, env.ceiling);
-            if env.human && jump_edge {
+            if env.human && jump_edge && !self.choke_locked() {
                 self.jet_on(c, (fwd_in, strafe_in));
             } else if !env.human && self.stance == Stance::Jump && self.lock_timer <= 0.0 {
                 if let Some(jet) = env.bot_jet.filter(|j| !j.stop) {

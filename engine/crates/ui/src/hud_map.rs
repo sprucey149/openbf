@@ -494,6 +494,7 @@ impl Ctx<'_> {
                         color: color([255.0; 3], a),
                         additive: false,
                         shadow: false,
+                        tracking: 0.0,
                     },
                 );
             }

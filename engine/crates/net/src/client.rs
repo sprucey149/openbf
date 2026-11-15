@@ -30,7 +30,7 @@ use crate::packet::{
     decode_bundles_head, decode_bundles_rest, encode_inputs, parse_chunks, parse_header,
     raw_conn_id, Chunk, DropCounts, DropReason, CHUNK_OVERHEAD, PROTOCOL,
 };
-use crate::{Micros, DROP_AFTER, DROP_AFTER_LOADING, HEARTBEAT, TROUBLE_AFTER};
+use crate::{Micros, DROP_AFTER, DROP_AFTER_LOADING, HEARTBEAT, START_LEAD_MAX, TROUBLE_AFTER};
 use core::sim::PadState;
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
@@ -106,8 +106,12 @@ pub enum ClientEvent {
         setup: Vec<u8>,
         roster: Vec<RosterEntry>,
     },
+    /// The round starts. `begin_in_us`: the host's lead less half the
+    /// round trip, so this game leaves its loading screen when the host's
+    /// does.
     Start {
         round_id: u32,
+        begin_in_us: u32,
     },
     Bundle(TickBundle),
     /// The host's hash differed from ours at `tick`; `host_build` and
@@ -311,7 +315,12 @@ impl ClientCore {
 
     /// This peer's `Sim::hash` after `tick` (every 30 ticks).
     pub fn report_hash(&mut self, tick: u32, hash: u64) {
-        self.send(Msg::HashReport { tick, hash });
+        let round_id = self.round_id;
+        self.send(Msg::HashReport {
+            round_id,
+            tick,
+            hash,
+        });
     }
 
     /// Our per-tick hash rows around the desync at `tick` (LAN §4.7), for
@@ -577,23 +586,36 @@ impl ClientCore {
                     Err(_) => self.drops.bad_message += 1,
                 }
             }
-            Msg::Start { round_id } => {
+            Msg::Start { round_id, lead_us } => {
                 if round_id == self.round_id && self.awaiting_start {
                     self.awaiting_start = false;
-                    self.events.push_back(ClientEvent::Start { round_id });
+                    let half_rtt = u32::try_from(self.conn.rtt.srtt.max(0) / 2).unwrap_or(u32::MAX);
+                    // The host never sends more than START_LEAD_MAX; a bad
+                    // value must not hold this guest on its loading screen.
+                    let lead_us = lead_us.min(u32::try_from(START_LEAD_MAX.0).unwrap_or(u32::MAX));
+                    self.events.push_back(ClientEvent::Start {
+                        round_id,
+                        begin_in_us: lead_us.saturating_sub(half_rtt),
+                    });
                 }
             }
             Msg::Desync {
+                round_id,
                 tick,
                 host_hash,
                 build,
                 target,
-            } => self.events.push_back(ClientEvent::Desync {
-                tick,
-                host_hash,
-                host_build: build,
-                host_target: target,
-            }),
+            } => {
+                // Another round's check is stale (the round moved on).
+                if round_id == self.round_id {
+                    self.events.push_back(ClientEvent::Desync {
+                        tick,
+                        host_hash,
+                        host_build: build,
+                        host_target: target,
+                    });
+                }
+            }
             Msg::Leave => self.end(
                 ClientState::Disconnected(DisconnectReason::HostLeft),
                 ClientEvent::Disconnected(DisconnectReason::HostLeft),
@@ -716,5 +738,28 @@ mod tests {
         assert_eq!(n, 1);
         assert_eq!(c.take_bundles(Micros(10), &body), Err(()));
         assert!(c.live.is_empty());
+    }
+
+    /// A Start whose lead is beyond what any host sends is clamped to
+    /// START_LEAD_MAX, so a bad value cannot hold a guest on its loading
+    /// screen for minutes.
+    #[test]
+    fn client_clamps_a_starts_lead_to_the_maximum() {
+        let host: SocketAddr = "10.0.0.1:1".parse().unwrap();
+        let mut c = ClientCore::new(ClientConfig::new("b", "Guest", 1), host, Micros::ZERO);
+        c.round_id = 7;
+        c.awaiting_start = true;
+        c.take_message(Msg::Start {
+            round_id: 7,
+            lead_us: u32::MAX,
+        });
+        let begin = std::iter::from_fn(|| c.poll_event()).find_map(|e| match e {
+            ClientEvent::Start { begin_in_us, .. } => Some(begin_in_us),
+            _ => None,
+        });
+        assert!(
+            begin.is_some_and(|b| u64::from(b) <= START_LEAD_MAX.0),
+            "{begin:?}"
+        );
     }
 }

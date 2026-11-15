@@ -1535,11 +1535,15 @@ fn the_baked_weapons_zoom_as_the_ps2s_do() {
     for (game, db, weapon, want, scope) in [
         ("bf1", &bf1, "all_weap_inf_rifle", rifle, false),
         ("bf1", &bf1, "all_weap_inf_sniperrifle", sniper, true),
-        ("bf1", &bf1, "imp_weap_inf_sniperrifle", six, true),
+        // Every army sniper rifle zooms x2 then x8 (the shared rule); the
+        // award beam keeps its one x6 step.
+        ("bf1", &bf1, "imp_weap_inf_sniperrifle", sniper, true),
+        ("bf1", &bf1, "rep_weap_inf_sniperrifle", sniper, true),
         ("bf1", &bf1, "all_weap_inf_shotgun", two, false),
         ("bf1", &bf1, "all_weap_inf_thermaldetonator", none, false),
         ("bf2", &bf2, "rep_weap_inf_rifle", rifle, false),
         ("bf2", &bf2, "rep_weap_inf_sniper_rifle", sniper, true),
+        ("bf2", &bf2, "rep_weap_award_sniper_rifle", six, true),
         ("bf2", &bf2, "rep_weap_inf_thermaldetonator", none, false),
     ] {
         let w = game::roster::weapon_from_db(db, weapon).expect(weapon);
@@ -1581,11 +1585,14 @@ fn sniper_primaries_hit_the_ai_distance_table() {
     let Some(dir) = classes_dir() else { return };
     let bf1 = game::roster::load_classdb(&dir, "bf1", &FOUR).expect("bf1 db");
     let bf2 = game::roster::load_classdb(&dir, "bf2", &FOUR).expect("bf2 db");
-    // `imp_weap_inf_sniperrifle` ships ZoomMax exactly 6.0: it is in the
-    // table only because the PS2 test is `6.0 <= zoom`.
+    // `imp_weap_inf_sniperrifle` shipped ZoomMax exactly 6.0 and now takes
+    // BF2's 8.0 (the shared rule); the award beam rifle keeps 6.0 and is in
+    // the table only because the PS2 test is `6.0 <= zoom`.
     for (db, weapon, zoom) in [
         (&bf1, "all_weap_inf_sniperrifle", 8.0),
-        (&bf1, "imp_weap_inf_sniperrifle", 6.0),
+        (&bf1, "imp_weap_inf_sniperrifle", 8.0),
+        (&bf1, "rep_weap_inf_sniperrifle", 8.0),
+        (&bf2, "rep_weap_award_sniper_rifle", 6.0),
         (&bf2, "rep_weap_inf_sniper_rifle", 8.0),
         (&bf2, "cis_weap_inf_sniper_rifle", 8.0),
     ] {

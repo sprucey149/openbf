@@ -127,6 +127,20 @@ pub struct CommandPost {
     /// `FUN_003573f8`; re-cp-capture.md 4). Set from the mission, never
     /// changed after setup, so it is not part of the hash.
     pub ai_capture_ban: u8,
+    /// Hunt (issue #161): the post class's `SwitchClassRadius` (m; 0 =
+    /// none), the reach of BF2's second near-a-post scan, which takes any
+    /// same-team object within its class's radius that the soldier faces
+    /// (B2 `FUN_001f8548` 109236-109289: a 30 m gather, the class field
+    /// +0x338). BF2's control zones author 5 m; a BF2 class without one
+    /// keeps the original's -1 (no reach); a BF1 post takes `[ours]` 5 m
+    /// (`game::walk::HUNT_SWITCH_CLASS_RADIUS`). Set by the battle setup
+    /// in Hunt only, never changed after it, so it is not part of the hash.
+    pub switch_class_radius: f32,
+    /// Hunt: does the layout author this post's capture region? BF2's Hunt
+    /// posts have none (the sim stands in an 8 m sphere for the AI), so the
+    /// first scan's players-inside test never holds for them in the
+    /// original. Setup-only like [`Self::switch_class_radius`].
+    pub capture_authored: bool,
 }
 
 /// The `AISpawnWeight` a post is constructed with (BF2; a command walker's
@@ -160,6 +174,8 @@ impl CommandPost {
             nav_hub: None,
             ai_spawn_weight: AI_SPAWN_WEIGHT_DEFAULT,
             ai_capture_ban: 0,
+            switch_class_radius: 0.0,
+            capture_authored: true,
         }
     }
 

@@ -885,6 +885,7 @@ mod tests {
             walk.sim.units[index].choked = Some(core::hero_weapon::Choked {
                 left: 5.0,
                 age: 0.0,
+                hold: None,
             });
             let mut prev = Pose::capture(&walk);
             walk.sim.units[index].choked.as_mut().unwrap().age = core::TICK_DT;

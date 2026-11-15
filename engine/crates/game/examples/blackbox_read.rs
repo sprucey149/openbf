@@ -322,7 +322,25 @@ fn event_line(snap: &Snapshot, e: &EventRow) -> String {
                     _ => "blast, or a bolt that struck in its first update".into(),
                 },
                 v(1)
-            )
+            ) + &match (e.v.get(3), e.v.get(4)) {
+                // Schema 18: the multipliers the hit carried.
+                (Some(&d), Some(&t)) if d != 1.0 || t != 1.0 => {
+                    format!("  [dealt x{d}, taken x{t}]")
+                }
+                _ => String::new(),
+            }
+        }
+        Ev::Cheats => {
+            let who = if e.a < 0 {
+                "session".to_owned()
+            } else {
+                format!("slot {}", e.a)
+            };
+            if e.text.is_empty() {
+                format!("{who} cheats: all off")
+            } else {
+                format!("{who} cheats now: {}", e.text)
+            }
         }
         Ev::VehicleHit => {
             let v = |i: usize| e.v.get(i).copied().unwrap_or(0.0);
@@ -458,6 +476,27 @@ fn header(snap: &Snapshot) -> String {
         "SNAPSHOT  reason: {}  | schema {}",
         h.reason, snap.schema
     );
+    // Schema 18 (#173): a capture with a cheat on says so first, so its
+    // damage is never read as a rule bug.
+    if snap.schema >= 18 {
+        if h.cheats.is_empty() {
+            let _ = writeln!(s, "  cheats: none");
+        } else {
+            let now: Vec<String> = h
+                .cheats_now
+                .iter()
+                .map(|(k, v)| format!("{k} [{}]", v.join(", ")))
+                .collect();
+            let _ = writeln!(
+                s,
+                "  CHEATS ON during this capture: {}  | at the write: {}",
+                h.cheats.join(", "),
+                now.join("; ")
+            );
+        }
+    } else {
+        let _ = writeln!(s, "  cheats: not recorded (schema < 18)");
+    }
     let built = if h.meta.build_time > 0 {
         format!("{} UTC", utc(h.meta.build_time))
     } else {

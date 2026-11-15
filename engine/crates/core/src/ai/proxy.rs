@@ -59,7 +59,8 @@
 //! - a manned building turret's view (`ai::man::hittable`, `Sim::ai_tier`
 //!   of the gunner's team);
 //! - the level curve under its error cap at a droid or a turret
-//!   (`Skill::from_level` in [`frozen_err_cap`]);
+//!   (`Skill::from_level` in [`frozen_err_cap`], at the frozen rule's
+//!   level, [`frozen_team_skill`]);
 //! - when a proxy faces another human (two proxies, or a proxy against a
 //!   player): the focus switch and token budget against that human
 //!   (`dfocus::on_against`, `tokn::budget`), which follow the proxy's
@@ -72,7 +73,7 @@
 
 use crate::fmath::FloatExt;
 use crate::sim::Sim;
-use crate::skill::{Difficulty, Skill, Tier};
+use crate::skill::{Difficulty, Skill, TeamSkill, Tier};
 use crate::unit::Unit;
 use glam::Vec3;
 
@@ -270,6 +271,7 @@ pub const FROZEN_TIERS: [Tier; 4] = [
         picks: false,
         mend: 0.0,
         hunts: false,
+        sniper_disp_floor: 0.0,
     },
     // Normal
     Tier {
@@ -286,6 +288,7 @@ pub const FROZEN_TIERS: [Tier; 4] = [
         picks: false,
         mend: 0.0,
         hunts: false,
+        sniper_disp_floor: 0.0,
     },
     // Hard
     Tier {
@@ -302,6 +305,7 @@ pub const FROZEN_TIERS: [Tier; 4] = [
         picks: false,
         mend: 0.35,
         hunts: false,
+        sniper_disp_floor: 0.0,
     },
     // Elite
     Tier {
@@ -318,8 +322,54 @@ pub const FROZEN_TIERS: [Tier; 4] = [
         picks: true,
         mend: 0.35,
         hunts: true,
+        sniper_disp_floor: 0.0,
     },
 ];
+
+/// [ours] Issue #171: the DTEAM rule frozen for the proxy's own row, as it
+/// stood on 2026-11-03 (issue #86): per surplus human Easy 0, Normal -1
+/// (floor 14), Hard -2 and Elite -1 (floor 11), the team playing the row
+/// that skill falls in. The proxy reads [`FROZEN_TIERS`] at this row
+/// ([`Sim::proxy_row`]), so a change to the live DTEAM rule moves the bots
+/// and not the stand-in human. replace: when the maintainer recalibrates
+/// the proxy against a live playtest, with the proxy gate re-run.
+pub fn frozen_row(host: Difficulty, humans: [u8; 2], team: u8) -> Difficulty {
+    frozen_team_skill(host, humans, team).tier
+}
+
+/// [ours] Issue #171: [`frozen_row`] with the integer skill the frozen rule
+/// gives the team (the level a proxy's error cap reads,
+/// [`frozen_err_cap`]), so the live DTEAM spawn skill (`Sim::bot_skill`,
+/// the proxy's `Unit::skill`) does not reach the stand-in human either.
+pub fn frozen_team_skill(host: Difficulty, humans: [u8; 2], team: u8) -> TeamSkill {
+    let even = TeamSkill {
+        tier: host,
+        level: host.base_skill(),
+    };
+    let Some(t) = (team < 2).then_some(usize::from(team)) else {
+        return even;
+    };
+    let (per, floor) = match host {
+        Difficulty::Easy => (0, 14),
+        Difficulty::Normal => (1, 14),
+        Difficulty::Hard => (2, 11),
+        Difficulty::Elite => (1, 11),
+    };
+    let surplus = humans[t]
+        .saturating_sub(humans[1 - t])
+        .min(crate::skill::SURPLUS_CAP);
+    if surplus == 0 {
+        return even;
+    }
+    let level = host
+        .base_skill()
+        .saturating_sub(per * surplus)
+        .max(floor.min(host.base_skill()));
+    TeamSkill {
+        tier: host.row_for(level),
+        level,
+    }
+}
 
 /// [`FROZEN_TIERS`]' row for tier `d`.
 pub fn frozen_tier(d: Difficulty) -> Tier {
@@ -518,7 +568,7 @@ impl Sim {
             // The frozen row (`FROZEN_TIERS`), its view under the mission's
             // as `Sim::ai_tier` does, then the profile over it.
             Some(p) => {
-                let mut tier = frozen_tier(self.difficulty_of(u.team));
+                let mut tier = frozen_tier(self.proxy_row(u.team));
                 tier.view_mult *= self.mission_ai.view_mult;
                 p.over(tier, self.mission_ai.view_mult)
             }
@@ -527,12 +577,41 @@ impl Sim {
     }
 
     /// Unit `u`'s error cap at a droid or a turret: its integer skill's
-    /// under its team's tier, or a proxy's frozen one ([`frozen_err_cap`]).
+    /// under its team's tier, or a proxy's frozen one ([`frozen_err_cap`] at
+    /// the frozen rule's row AND level, [`Sim::proxy_skill`]; never the
+    /// proxy's live spawn skill `u.skill`).
     pub fn aim_err_cap(&self, u: &Unit) -> f32 {
-        let d = self.difficulty_of(u.team);
         match u.proxy_human {
-            Some(_) => frozen_err_cap(d, u.skill),
-            None => d.skill_at(u.skill).err_cap,
+            Some(_) => {
+                let s = self.proxy_skill(u.team);
+                frozen_err_cap(s.tier, s.level)
+            }
+            None => self.difficulty_of(u.team).skill_at(u.skill).err_cap,
+        }
+    }
+
+    /// The row a proxy on team `team` reads [`FROZEN_TIERS`] at: the team's
+    /// [`Sim::team_difficulty`] override, else [`frozen_row`] (the DTEAM
+    /// rule as frozen for the proxy, issue #171).
+    pub fn proxy_row(&self, team: u8) -> Difficulty {
+        self.proxy_skill(team).tier
+    }
+
+    /// The row and level a proxy on team `team` reads: the team's
+    /// [`Sim::team_difficulty`] override at its base skill (as
+    /// [`Sim::bot_skill`] gives it), else [`frozen_team_skill`].
+    pub fn proxy_skill(&self, team: u8) -> TeamSkill {
+        match self
+            .team_difficulty
+            .get(usize::from(team))
+            .copied()
+            .flatten()
+        {
+            Some(d) => TeamSkill {
+                tier: d,
+                level: d.base_skill(),
+            },
+            None => frozen_team_skill(self.difficulty, self.humans_per_team(), team),
         }
     }
 
@@ -562,11 +641,18 @@ impl Sim {
 /// Card DPRX's difficulty targets: the proxy team's win rate with a GOOD
 /// proxy, averaged over both sides of each map (the maintainer, 2026-10-29).
 /// `(tier, low, high)` as fractions; `high` 1.0 = no ceiling.
+///
+/// Issue #171 PROPOSED, NOT APPROVED: Hard 55-70 % (was 45-60 %) and Elite
+/// 40-55 % (was 25-40 %), the bands pre-registered on 2026-11-14 for the
+/// maintainer's "make Hard and Elite somewhat easier". They follow the
+/// proposal so the difficulty check reads the #171 settings against it;
+/// The maintainer must approve them (or this commit is dropped with the
+/// levers). Easy and Normal unchanged.
 pub const TARGETS: [(Difficulty, f32, f32); 4] = [
     (Difficulty::Easy, 0.90, 1.0),
     (Difficulty::Normal, 0.77, 0.90),
-    (Difficulty::Hard, 0.45, 0.60),
-    (Difficulty::Elite, 0.25, 0.40),
+    (Difficulty::Hard, 0.55, 0.70),
+    (Difficulty::Elite, 0.40, 0.55),
 ];
 
 /// The target band of tier `d`.

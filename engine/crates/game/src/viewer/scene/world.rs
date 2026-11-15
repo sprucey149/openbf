@@ -576,7 +576,8 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         };
         if !uploaded.contains_key(model) {
             let mut parts = Vec::new();
-            let cpu = &scene.meshes[model];
+            let presentation = crate::assets::presentation::load_model(scene, model)?;
+            let cpu = presentation.as_ref().unwrap_or(&scene.meshes[model]);
             for (k, (mesh, mat, layer, _)) in upload_submeshes(r, cpu)?.into_iter().enumerate() {
                 let tex = match mat {
                     Some(m) => get_material_texture(

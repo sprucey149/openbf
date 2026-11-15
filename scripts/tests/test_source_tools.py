@@ -285,6 +285,31 @@ class BotTests(unittest.TestCase):
 
 
 class PackTests(unittest.TestCase):
+    def test_missing_restored_music_is_detected_even_with_the_retail_body(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(pack, 'BAKED', temporary):
+            directory = Path(temporary) / 'audio/global_bf1'
+            (directory / 'music').mkdir(parents=True)
+            (directory / 'music/sample_4000.bin').touch()
+            (directory / 'global.ron').write_text(
+                '(streams: [(name_hash: 3, source: "sample.lvl", channels: 2,'
+                ' block_size: 16384, data_offset: 16384, bytes: 128, baked: false,'
+                ' segments: [(id: 4, frequency: 44100, offset: 16, size: 32,'
+                ' frames: 28, restored_bytes: 45)])])'
+            )
+            restored = directory / 'music_restored/sample_4000/00000003_00000004_10.flac'
+            self.assertEqual(pack.missing_music(), [str(restored)])
+            restored.parent.mkdir(parents=True)
+            restored.write_bytes(b'broken')
+            self.assertEqual(pack.missing_music(), [str(restored)])
+            restored.write_bytes(b'fLaC')
+            self.assertEqual(pack.missing_music(), [str(restored)])
+            layout = (44100 << 44) | (1 << 41) | (15 << 36) | 28
+            header = b'fLaC\0\0\0\x22' + bytes(10) + layout.to_bytes(8, 'big') + bytes(17)
+            restored.write_bytes(header)
+            self.assertEqual(pack.missing_music(), [str(restored)])
+            restored.write_bytes(header + bytes(2))
+            self.assertEqual(pack.missing_music(), [])
+
     def test_sources_distinguish_reads_cache_optional_and_unknown(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

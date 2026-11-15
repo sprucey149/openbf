@@ -26,8 +26,13 @@ pub const MAGIC: [u8; 4] = *b"OBF1";
 /// view tick and bundle pads their `view_lag` (lag compensation). 3: the
 /// host status's slack. 4: bundle pads name the input they consumed. 5: desync
 /// reports (`Desync` carries the host's hash, build and target; a guest
-/// answers with `DesyncHashes`).
-pub const PROTOCOL: u16 = 5;
+/// answers with `DesyncHashes`). 6: a pad's spawn-screen pick can name a
+/// class screen's soldier (pick tag 4, `ScreenPick::Class`; issue #128).
+/// 7: `HashReport` and `Desync` name their round, so a report still in
+/// flight when the next round loads is dropped instead of compared.
+/// 8: `Start` carries the lead to tick 0, so every peer leaves its loading
+/// screen at one moment.
+pub const PROTOCOL: u16 = 8;
 /// The largest datagram either side sends or accepts.
 pub const MAX_DATAGRAM: usize = 1200;
 pub const HEADER_LEN: usize = 18;

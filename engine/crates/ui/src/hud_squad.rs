@@ -166,6 +166,7 @@ fn label(text: &str, at: (f32, f32), h_align: HAlign, alpha: f32) -> Run<'_> {
         color: color([255.0; 3], alpha),
         additive: false,
         shadow: true,
+        tracking: 0.0,
     }
 }
 

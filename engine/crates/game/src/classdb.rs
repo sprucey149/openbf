@@ -115,6 +115,9 @@ impl ClassDb {
                     }
                     crate::normalize::apply(&mut d);
                 }
+                if !self.disc {
+                    crate::normalize::shared_rules(&mut d);
+                }
                 self.classes.insert(d.name.clone(), d);
                 added += 1;
             }

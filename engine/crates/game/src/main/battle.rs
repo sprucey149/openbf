@@ -189,8 +189,14 @@ fn team_templates(
                         c.max_health *= f32::from(health[team]) / 100.0;
                     }
                     let uc = c.register(sim, &mut names);
+                    // The speed the weapon fires at: a charge stage's, as
+                    // `WeaponClass::shot_ordnance` takes it (the BF1 spear's
+                    // root says 5 m/s, its throw leaves at 25), the root's
+                    // beside it when they differ.
+                    let fired = c.weapon.shot_ordnance();
+                    let root = c.weapon.ordnance.velocity;
                     println!(
-                        "team {} class {}: {} — min {} — {} HP, {:.1} m/s, {} ({} dmg, {} m/s bolts){}",
+                        "team {} class {}: {} — min {} — {} HP, {:.1} m/s, {} ({} dmg, {} m/s {}{}){}",
                         r.faction,
                         c.class,
                         c.label,
@@ -199,8 +205,18 @@ fn team_templates(
                         c.consts.max_speed,
                         c.weapon.name,
                         // What a hit takes off a soldier.
-                        c.weapon.ordnance.max_damage * c.weapon.ordnance.scales[0],
-                        c.weapon.ordnance.velocity,
+                        fired.damage * fired.scales[0],
+                        fired.velocity,
+                        if c.weapon.thrown.is_some() || c.weapon.ordnance.sticky.is_some() {
+                            "thrown"
+                        } else {
+                            "bolts"
+                        },
+                        if (fired.velocity - root).abs() > 1e-3 {
+                            format!(", root {root} m/s")
+                        } else {
+                            String::new()
+                        },
                         if c.jet { "  [jet pack]" } else { "" }
                     );
                     table.push(uc);
@@ -348,6 +364,8 @@ pub(super) fn make_walk_with_counts(
     // The tier is set BEFORE `setup_conquest` spawns anyone: every bot takes
     // its skill at spawn (D2).
     sim.difficulty = b.difficulty;
+    // A LAN round's rows (issue #171 option C), before anyone spawns too.
+    sim.netplay_rows = b.netplay_rows;
     // BF1 has no 10 m omni in the view cone (RE §9.1); BF2 does.
     sim.omni_radius = core::sim::omni_radius_for(&scene.manifest.source_game);
     scene.install_water(&mut sim);
@@ -527,6 +545,14 @@ pub(super) fn make_walk_with_counts(
     if let Some(counts) = ai_counts {
         walk.add_posts(&layout);
         if hunt {
+            // Class change at your own posts (issue #161): each post's
+            // class radius, from the map's shared and own classes.
+            let posts = game::walk::hunt_post_classes(
+                &b.classes_dir,
+                &scene.dir,
+                &scene.manifest.source_game,
+            )?;
+            walk.set_hunt_class_change(&layout, &posts, &scene.manifest.source_game);
             for team in 0..2 {
                 anyhow::ensure!(
                     !walk.sim.spawn_points(team).is_empty(),
@@ -592,7 +618,13 @@ pub(super) fn make_walk_with_counts(
             }
             Err(e) => eprintln!("vehicle pads unavailable ({e:#})"),
         }
+        // A LAN round's other humans are seated after this wave
+        // (`round_setup::build_round`), but its bots take their skill now:
+        // they count for the DTEAM rows while it spawns (issue #171).
+        let seated = walk.sim.extra_humans;
+        walk.sim.extra_humans = [0, 1].map(|t| seated[t].saturating_add(b.opening_humans[t]));
         walk.opening_wave(counts, !b.spawn_set);
+        walk.sim.extra_humans = seated;
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.
         if let Some(m) = &b.mission {
@@ -855,16 +887,8 @@ pub(super) fn hud_model(
         .is_leaving(walk.player)
         .then(|| feed.leaving_text());
     let reticle =
-        (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk)).then(
-            || {
-                walk.sim
-                    .reticle_pick
-                    .first()
-                    .copied()
-                    .flatten()
-                    .map_or(0, |(_, rel)| rel)
-            },
-        );
+        (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk))
+            .then(|| game::hud_feed::reticle_relation(&walk.sim, slot));
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
@@ -1152,6 +1176,31 @@ mod tests {
         assert!(left[0] < 0.0, "{left:?}");
     }
 
+    /// Issue #173, through the HUD model: a LAN guest's view (slot 1) with
+    /// nothing under his own aim is not red while the host's (slot 0) aim
+    /// is on an enemy. The same fixture on slot 0 is red.
+    #[test]
+    fn hud_reticle_colours_from_the_views_own_slot() {
+        use core::sim::AimTarget;
+        let mut walk = WalkSim::new(1, glam::Vec3::ZERO, None);
+        let enemy = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(
+                1,
+                glam::Vec3::new(0.0, 0.0, -20.0),
+            ))
+            .unwrap();
+        walk.sim.reticle_pick = vec![Some((AimTarget::Unit(enemy), -1)), None];
+        let mut feed = game::event_feed::EventFeed::default();
+        let player = walk.player.index as usize;
+        walk.sim.units[player].spec.player_slot = Some(1);
+        let guest = hud_model(&walk, &mut feed, 16.0 / 9.0).reticle;
+        assert_eq!(guest, Some(0), "the guest's reticle is not red");
+        walk.sim.units[player].spec.player_slot = Some(0);
+        let host = hud_model(&walk, &mut feed, 16.0 / 9.0).reticle;
+        assert_eq!(host, Some(-1), "the host's reticle is red");
+    }
+
     #[test]
     fn renamed_conquest_and_optional_mission_views_keep_existing_launch_paths() {
         let dir = std::env::temp_dir().join(format!("openbf-launch-alias-{}", std::process::id()));
@@ -1276,6 +1325,8 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            netplay_rows: false,
+            opening_humans: [0; 2],
             score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         let mut walk = make_walk(&scene, &setup).unwrap();
@@ -1338,6 +1389,8 @@ mod tests {
             player_team: 1,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            netplay_rows: false,
+            opening_humans: [0; 2],
             score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         // Resolve missions independently of the bake location.
@@ -1473,6 +1526,8 @@ mod tests {
                 player_team: 0,
                 heroes: game::heroes::rules(&session),
                 dlc_heroes: false,
+                netplay_rows: false,
+                opening_humans: [0; 2],
                 score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
             };
             walks.push(make_walk(&scene, &setup).unwrap());

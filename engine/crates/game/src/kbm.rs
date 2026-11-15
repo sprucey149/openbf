@@ -10,7 +10,23 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
 pub const RAD_PER_COUNT: f64 = 0.0006;
+/// OURS (the maintainer, 2026-11-14, after the first LAN playtest): the
+/// on-foot factor on mouse look. Mouse sensitivity 1.0, the stored and shown
+/// default, turns a soldier on foot as 2.8 did before (the playtester's own
+/// setting). Vehicles, turrets and starfighters keep factor 1.0, so their
+/// look at the default is what it always was
+/// (`control_layout::look_scale`).
+/// measure: maintainer and playtester feel at 100 % on foot, on Windows, Linux
+/// and macOS mice. replace: a per-device calibration if raw counts differ.
+pub const ON_FOOT_LOOK_SCALE: f64 = 2.8;
 pub const FLYER_COUNTS_PER_SECOND_AT_FULL: f64 = 2048.0;
+/// OURS: on macOS a Control press waits this long before the battle sees it,
+/// so Control+Command+F (the system's fullscreen key) never rolls the soldier
+/// when Control goes down first (the maintainer, 2026-11-14: one fullscreen key
+/// per OS, live in battle). A shorter Control tap still rolls, at its release.
+/// measure: the gap between Control and Command in a two-finger chord on a
+/// Mac keyboard, and whether 0.1 s of roll delay is felt.
+pub const MAC_CHORD_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 const FLYER_HOLD_AFTER: f64 = 0.1;
 const FLYER_HOLD_FROM: f64 = 1.0;
 const FLYER_RATE_TOP: f64 = 1.1;
@@ -180,10 +196,66 @@ pub struct Bindings {
     pub table: Vec<(Trigger, Bind)>,
 }
 
+/// Issue #172: F11 switches fullscreen before any binding sees it.
+pub const FULLSCREEN_KEY: Trigger = Trigger::Key(KeyCode::F11);
+
+/// This build runs on macOS (its fullscreen key is Control+Command+F).
+pub const MAC: bool = cfg!(target_os = "macos");
+
+/// Issue #172: why F11 holds no action, worded for the OS (`mac`): F11 is
+/// the fullscreen key on Windows and Linux, and stays reserved on macOS,
+/// whose key is Control+Command+F, so a profile moved between OSes stays
+/// valid.
+pub fn f11_note(mac: bool) -> String {
+    let key = ui::menu::fullscreen_key_name(mac);
+    if mac {
+        format!("F11 is reserved ({key} switches fullscreen)")
+    } else {
+        format!("{key} switches fullscreen")
+    }
+}
+
+/// Issue #172: a key the Controls page refuses to bind on this OS (`mac`),
+/// with the line it shows: F11 everywhere, and Command on macOS, which
+/// [`Kbm::key`] keeps for the system's shortcuts.
+pub fn reserved_key(t: Trigger, mac: bool) -> Option<String> {
+    if t == FULLSCREEN_KEY {
+        return Some(format!("{}; choose another key", f11_note(mac)));
+    }
+    if mac && matches!(t, Trigger::Key(KeyCode::SuperLeft | KeyCode::SuperRight)) {
+        return Some("Command is kept for system shortcuts on macOS; choose another key".into());
+    }
+    None
+}
+
 impl Bindings {
-    /// Saved layouts may change triggers/order, not the supported action set.
+    /// Issue #172: a layout from before F11 switched fullscreen moves its
+    /// F11 action to a free default key (the action's own first); the
+    /// legacy layout has no editor, and must stay complete. Some(trigger)
+    /// when it moved.
+    pub fn free_fullscreen_key(&mut self) -> Option<Trigger> {
+        let at = self.table.iter().position(|(t, _)| *t == FULLSCREEN_KEY)?;
+        let bind = self.table[at].1;
+        let defaults = Self::pc_default().table;
+        let own = defaults.iter().filter(|(_, b)| *b == bind).map(|(t, _)| *t);
+        let free = own.chain(defaults.iter().map(|(t, _)| *t)).find(|t| {
+            !self.table.iter().any(|(used, _)| used == t)
+                && (!matches!(t, Trigger::WheelUp | Trigger::WheelDown) || bind.walk == (0, 0))
+        })?;
+        self.table[at].0 = free;
+        Some(free)
+    }
+
+    /// Saved layouts may change triggers/order, not the supported action set:
+    /// the stock table's, or the one before settings version 1 (a remap
+    /// saved then keeps its shape).
     pub fn is_valid(&self) -> bool {
-        let mut remaining = Self::pc_default().table;
+        [Self::pc_default(), Self::pc_default_v0()]
+            .into_iter()
+            .any(|stock| self.fits(stock.table))
+    }
+
+    fn fits(&self, mut remaining: Vec<(Trigger, Bind)>) -> bool {
         if self.table.len() != remaining.len() {
             return false;
         }
@@ -243,7 +315,97 @@ impl Bindings {
         true
     }
 
+    /// The stock table (settings version 1, the maintainer's choice after the
+    /// first LAN playtest, 2026-11-14: Right mouse zooms, the wheel switches
+    /// weapons, Left Ctrl rolls). Several triggers may share an action, and
+    /// the first one is what the Controls page shows
+    /// (`control_layout::keyboard_defaults`): every shown default works on a
+    /// three-button mouse, and the thumb buttons are extras. Vehicles and
+    /// starfighters do not play this table: see [`Bindings::vehicle_default`].
     pub fn pc_default() -> Bindings {
+        use buttons as b;
+        use KeyCode as K;
+        use Trigger::{Key, Mouse};
+        Bindings {
+            table: vec![
+                (Key(K::KeyW), Bind::walk(0, 1, b::SPAWN_POST_UP)),
+                (Key(K::KeyS), Bind::walk(0, -1, b::SPAWN_POST_DOWN)),
+                (Key(K::KeyA), Bind::walk(-1, 0, b::SPAWN_POST_LEFT)),
+                (Key(K::KeyD), Bind::walk(1, 0, b::SPAWN_POST_RIGHT)),
+                (Mouse(MouseButton::Left), Bind::bits(b::FIRE)),
+                // Middle mouse first, so the shown default works on any mouse;
+                // the back thumb button too.
+                (Mouse(MouseButton::Middle), Bind::bits(b::SECONDARY_FIRE)),
+                (Mouse(MouseButton::Back), Bind::bits(b::SECONDARY_FIRE)),
+                (Mouse(MouseButton::Right), Bind::bits(b::ZOOM)),
+                (Key(K::KeyZ), Bind::bits(b::ZOOM)),
+                (Key(K::Space), Bind::bits(b::JUMP | b::SPAWN_ACCEPT)),
+                (Key(K::Enter), Bind::bits(b::SPAWN_ACCEPT)),
+                (Key(K::NumpadEnter), Bind::bits(b::SPAWN_ACCEPT)),
+                (Key(K::Backspace), Bind::bits(b::SPAWN_BACK)),
+                (Key(K::ControlLeft), Bind::bits(b::ROLL_STANCE)),
+                (Key(K::KeyC), Bind::bits(b::ROLL_STANCE)),
+                (Key(K::ShiftLeft), Bind::bits(b::SPRINT)),
+                (Key(K::KeyR), Bind::bits(b::RELOAD)),
+                // The pad's Triangle: use, and the class screens' back
+                // (issue #28: it opens and closes the class change at a post).
+                (Key(K::KeyE), Bind::bits(b::ACTION | b::SPAWN_BACK)),
+                (
+                    Trigger::WheelDown,
+                    Bind::bits(b::SWITCH_WEAPON | b::SPAWN_CLASS_NEXT),
+                ),
+                (
+                    Trigger::WheelUp,
+                    Bind::bits(b::SWITCH_WEAPON | b::SPAWN_CLASS_PREV),
+                ),
+                (
+                    Key(K::KeyQ),
+                    Bind::bits(b::SWITCH_WEAPON | b::SPAWN_CLASS_NEXT),
+                ),
+                (Key(K::Tab), Bind::bits(b::SPAWN_CLASS_PREV)),
+                // G first, as above; the forward thumb button too.
+                (Key(K::KeyG), Bind::bits(b::SWITCH_SECONDARY)),
+                (Mouse(MouseButton::Forward), Bind::bits(b::SWITCH_SECONDARY)),
+                (Key(K::KeyV), Bind::bits(b::VIEW_TOGGLE)),
+                (Key(K::AltLeft), Bind::bits(b::FLYER_TRICK)),
+                (Key(K::CapsLock), Bind::bits(b::FLYER_REVERSE)),
+                (
+                    Key(K::ArrowUp),
+                    Bind::bits(b::SQUAD_MOVE_OUT | b::SPAWN_POST_UP),
+                ),
+                (
+                    Key(K::ArrowDown),
+                    Bind::bits(b::SQUAD_HOLD | b::SPAWN_POST_DOWN),
+                ),
+                (
+                    Key(K::ArrowLeft),
+                    Bind::bits(b::SQUAD_AT_EASE | b::SPAWN_POST_LEFT | b::HERO_ACCEPT),
+                ),
+                (
+                    Key(K::ArrowRight),
+                    Bind::bits(b::SQUAD_FOLLOW | b::SPAWN_POST_RIGHT | b::HERO_DECLINE),
+                ),
+                (Key(K::F1), Bind::bits(b::SQUAD_FOLLOW | b::HERO_ACCEPT)),
+                (Key(K::F2), Bind::bits(b::SQUAD_HOLD | b::HERO_DECLINE)),
+                (Key(K::F3), Bind::bits(b::SQUAD_AT_EASE)),
+                (Key(K::F4), Bind::bits(b::SQUAD_MOVE_OUT)),
+            ],
+        }
+    }
+
+    /// What a vehicle or a starfighter without a layout of its own plays
+    /// while the profile keeps the stock table: the stock table from before
+    /// settings version 1 (Right mouse secondary fire, Middle mouse and Z
+    /// zoom), so the 2026-11-14 infantry defaults leave the vehicles'
+    /// controls (their own contributor's area) as they were.
+    pub fn vehicle_default() -> Bindings {
+        Self::pc_default_v0()
+    }
+
+    /// The stock table before settings version 1 (2026-11-14), frozen: what
+    /// a profile from before then holds when the player never changed it,
+    /// and the table vehicles and starfighters keep ([`Bindings::vehicle_default`]).
+    pub fn pc_default_v0() -> Bindings {
         use buttons as b;
         use KeyCode as K;
         use Trigger::{Key, Mouse};
@@ -327,6 +489,10 @@ impl Default for Bindings {
 pub struct Kbm {
     pub bindings: Bindings,
     pub sensitivity: f32,
+    /// The control context's factor on mouse look ([`ON_FOOT_LOOK_SCALE`] on
+    /// foot, 1.0 in a vehicle or starfighter; [`Kbm::swap_context`]). The
+    /// default 1.0 is the raw scale.
+    pub look_scale: f64,
     pub invert_y: bool,
     held: Vec<Trigger>,
     taps: u32,
@@ -336,7 +502,28 @@ pub struct Kbm {
     mouse_aim: bool,
     want_grab: bool,
     grabbed: bool,
+    /// Issue #172: `grabbed` may not be the system's after a display mode
+    /// change; the next sync sends a lock or a release either way.
+    grab_stale: bool,
     flyer: FlyerMouse,
+    /// macOS's chord rule ([`Kbm::key`]): Command is the system's modifier.
+    mac: MacChords,
+}
+
+/// macOS: Command (either Super key) belongs to the system's shortcuts, so a
+/// key pressed while it is down never reaches the bindings, and a Control
+/// press waits [`MAC_CHORD_WAIT`] for a Command that would make it part of
+/// Control+Command+F. Off on other OSes.
+#[derive(Debug, Default)]
+struct MacChords {
+    on: bool,
+    /// The Super keys held.
+    command: u8,
+    /// Keys held since a Command chord took them; they reach the bindings
+    /// only after they are released and pressed again.
+    swallowed: Vec<Trigger>,
+    /// A Control press waiting for a possible Command.
+    waiting: Option<(Trigger, std::time::Instant)>,
 }
 
 impl Default for Kbm {
@@ -344,6 +531,7 @@ impl Default for Kbm {
         Kbm {
             bindings: Bindings::default(),
             sensitivity: 1.0,
+            look_scale: 1.0,
             invert_y: false,
             held: Vec::new(),
             taps: 0,
@@ -352,16 +540,34 @@ impl Default for Kbm {
             mouse_aim: false,
             want_grab: false,
             grabbed: false,
+            grab_stale: false,
             flyer: FlyerMouse::default(),
+            mac: MacChords {
+                on: MAC,
+                ..MacChords::default()
+            },
         }
     }
 }
 
 impl Kbm {
+    /// The profile's mouse settings. The bindings belong to the control
+    /// context ([`Kbm::swap_context`] with `control_layout::context_bindings`),
+    /// so a settings change never installs the on-foot table in a vehicle.
     pub fn follow(&mut self, settings: &crate::profile::Settings) {
         self.sensitivity = settings.mouse_sensitivity;
         self.invert_y = settings.invert_y;
-        self.set_bindings(&settings.keyboard_bindings);
+    }
+
+    /// Enter a control context: its bindings and look factor. Held keys and
+    /// buttons stay held (a trigger held across getting into or out of a
+    /// vehicle reads through the new table); only latched taps are dropped.
+    pub fn swap_context(&mut self, bindings: &Bindings, look_scale: f64) {
+        self.look_scale = look_scale;
+        if &self.bindings != bindings {
+            self.taps = 0;
+            self.bindings.clone_from(bindings);
+        }
     }
 
     pub fn set_bindings(&mut self, bindings: &Bindings) {
@@ -385,6 +591,86 @@ impl Kbm {
         }
     }
 
+    /// A keyboard key in battle. Off macOS it is [`Kbm::press`]; on macOS the
+    /// chord rule ([`MacChords`]) runs first.
+    pub fn key(&mut self, code: KeyCode, down: bool, now: std::time::Instant) {
+        let t = Trigger::Key(code);
+        if !self.mac.on {
+            self.press(t, down);
+            return;
+        }
+        if matches!(code, KeyCode::SuperLeft | KeyCode::SuperRight) {
+            if down {
+                self.mac.command = self.mac.command.saturating_add(1);
+                // Control was the chord's first key: it never rolls.
+                if let Some((waiting, _)) = self.mac.waiting.take() {
+                    self.mac.swallowed.push(waiting);
+                }
+            } else {
+                self.mac.command = self.mac.command.saturating_sub(1);
+            }
+            return;
+        }
+        if down {
+            // A key repeat changes nothing (a held or waiting key stays so).
+            if self.mac.swallowed.contains(&t)
+                || self.held.contains(&t)
+                || self.mac.waiting.is_some_and(|(w, _)| w == t)
+            {
+                return;
+            }
+            if self.mac.command > 0 {
+                self.mac.swallowed.push(t);
+            } else if matches!(code, KeyCode::ControlLeft | KeyCode::ControlRight) {
+                self.chord_due(now);
+                // The other Control key is still waiting: no Command joined
+                // it, so it goes down now rather than being lost.
+                if let Some((other, _)) = self.mac.waiting.take() {
+                    self.press(other, true);
+                }
+                self.mac.waiting = Some((t, now));
+            } else {
+                self.press(t, true);
+            }
+            return;
+        }
+        if let Some(i) = self.mac.swallowed.iter().position(|s| *s == t) {
+            self.mac.swallowed.swap_remove(i);
+        } else if self.mac.waiting.is_some_and(|(w, _)| w == t) {
+            // A quick Control tap: it rolls now, at its release.
+            self.mac.waiting = None;
+            self.tap(t);
+        } else {
+            self.press(t, false);
+        }
+    }
+
+    /// A key let go outside battle input (for example while the Controls
+    /// page captures a binding): it goes through [`Kbm::key`], so a
+    /// Command, waiting or swallowed key leaves no chord state behind.
+    pub fn key_released(&mut self, code: KeyCode, now: std::time::Instant) {
+        self.key(code, false, now);
+    }
+
+    /// macOS: a waiting Control press that no Command joined in
+    /// [`MAC_CHORD_WAIT`] goes down now.
+    pub fn chord_due(&mut self, now: std::time::Instant) {
+        if let Some((t, at)) = self.mac.waiting {
+            if now.saturating_duration_since(at) >= MAC_CHORD_WAIT {
+                self.mac.waiting = None;
+                self.press(t, true);
+            }
+        }
+    }
+
+    /// Turn the macOS chord rule on or off (it follows the build's OS).
+    pub fn set_mac_chords(&mut self, on: bool) {
+        self.mac = MacChords {
+            on,
+            ..MacChords::default()
+        };
+    }
+
     pub fn tap(&mut self, t: Trigger) {
         self.press(t, true);
         self.press(t, false);
@@ -398,6 +684,11 @@ impl Kbm {
     /// one wins until a tick takes it).
     pub fn set_pick(&mut self, pick: core::sim::ScreenPick) {
         self.pick = Some(pick);
+    }
+
+    /// The spawn-screen pick waiting for the next tick, if any.
+    pub fn pending_pick(&self) -> Option<core::sim::ScreenPick> {
+        self.pick
     }
 
     pub fn wheel(&mut self, dy: f32) {
@@ -421,7 +712,7 @@ impl Kbm {
                         ..
                     },
                 ..
-            } => self.press(Trigger::Key(*code), state.is_pressed()),
+            } => self.key(*code, state.is_pressed(), std::time::Instant::now()),
             WindowEvent::MouseInput { state, button, .. } => {
                 if self.grabbed || !state.is_pressed() {
                     self.press(Trigger::Mouse(*button), state.is_pressed());
@@ -441,7 +732,7 @@ impl Kbm {
         if !self.grabbed {
             return;
         }
-        let k = RAD_PER_COUNT * f64::from(self.sensitivity);
+        let k = RAD_PER_COUNT * f64::from(self.sensitivity) * self.look_scale;
         let up = if self.invert_y { dy } else { -dy };
         self.pending.0 += dx * k;
         self.pending.1 += up * k;
@@ -525,6 +816,7 @@ impl Kbm {
     }
 
     fn merge(&mut self, pad: PadState) -> PadState {
+        self.chord_due(std::time::Instant::now());
         if pad.rx != 0 || pad.ry != 0 {
             self.mouse_aim = false;
         }
@@ -574,6 +866,8 @@ impl Kbm {
     }
 
     pub fn release_keys(&mut self) {
+        let on = self.mac.on;
+        self.set_mac_chords(on);
         self.held.clear();
         self.taps = 0;
         self.pick = None;
@@ -583,11 +877,17 @@ impl Kbm {
         self.grabbed
     }
 
+    /// A click asked for the pointer and the next sync takes it.
+    pub fn wants_grab(&self) -> bool {
+        self.want_grab
+    }
+
     pub fn click_in(&mut self) {
         self.want_grab = true;
     }
 
     pub fn sync_grab(&mut self, window: &Window, allowed: bool) {
+        let stale = self.grab_stale;
         let was_grabbed = self.grabbed;
         if let Err(e) = self.sync_grab_with(allowed, |mode| window.set_cursor_grab(mode)) {
             eprintln!("mouse: cannot update the pointer grab ({e})");
@@ -600,12 +900,14 @@ impl Kbm {
                 size.height / 2,
             ));
         }
-        if was_grabbed != self.grabbed {
+        if was_grabbed != self.grabbed || stale {
             window.set_cursor_visible(!self.grabbed);
         }
     }
 
-    fn sync_grab_with<E>(
+    /// [`Kbm::sync_grab`]'s rule with the window's grab call given as
+    /// `grab` (the window, or a test standing in for it).
+    pub fn sync_grab_with<E>(
         &mut self,
         allowed: bool,
         mut grab: impl FnMut(CursorGrabMode) -> Result<(), E>,
@@ -614,9 +916,11 @@ impl Kbm {
             self.want_grab = false;
         }
         let want = self.want_grab && allowed;
-        if want == self.grabbed {
+        if want == self.grabbed && !self.grab_stale {
             return Ok(());
         }
+        // One try: a failed request is not repeated every frame.
+        self.grab_stale = false;
         if want {
             // A failed request stays free until the next click.
             self.want_grab = false;
@@ -628,6 +932,15 @@ impl Kbm {
             self.clear_grab();
         }
         Ok(())
+    }
+
+    /// Issue #172: a display mode change may drop the system's grab while
+    /// this still holds it, or keep it while this has let go. The next sync
+    /// always sends one: a lock if the player had the pointer and play
+    /// allows it, else a release (a pause menu never keeps a stale lock).
+    pub fn forget_grab(&mut self) {
+        self.clear_grab();
+        self.grab_stale = true;
     }
 
     fn clear_grab(&mut self) {

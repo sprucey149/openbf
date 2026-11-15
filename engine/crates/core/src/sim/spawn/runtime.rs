@@ -1131,9 +1131,10 @@ impl Sim {
     }
 
     /// PR #102's mouse pick for slot `s` ([`PadState::pick`]): a side row on
-    /// the side screen, or a post on the spawn map that is one of the slot's
-    /// team's spawn posts this tick. Elsewhere it does nothing. The click
-    /// selects only; its double click's accept is the pad's `SPAWN_ACCEPT`.
+    /// the side screen, a post on the spawn map that is one of the slot's
+    /// team's spawn posts this tick, or (issue #128) a class the class screen
+    /// shows the slot. Elsewhere it does nothing. The pick selects only; the
+    /// click that spawns adds the pad's `SPAWN_ACCEPT`.
     fn spawn_screen_pick(&mut self, s: usize, pick: ScreenPick) {
         match self.spawn_stage[s] {
             SpawnStage::Side => {
@@ -1152,7 +1153,18 @@ impl Sim {
                     self.spawn_post_choice[s] = Some(post);
                 }
             }
-            SpawnStage::Class | SpawnStage::Alive | SpawnStage::Accepted => {}
+            SpawnStage::Class | SpawnStage::Alive => {
+                let ScreenPick::Class(class) = pick else {
+                    return;
+                };
+                let team = self.players[s]
+                    .and_then(|h| self.units.get(h.index as usize))
+                    .map_or(0, |u| u.team);
+                if self.spawn_class_available(s, team, usize::from(class)) {
+                    self.spawn_choice[s] = class;
+                }
+            }
+            SpawnStage::Accepted => {}
         }
     }
 

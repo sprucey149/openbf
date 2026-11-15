@@ -39,6 +39,11 @@ and LAN are decisions for later work, not current tasks.
   in projectile motion, kits, and flyer rules. The BF1 Hailfire retains its
   BF1 homing launcher and spider cannon (maintainer, 2026-11-14); the vehicle
   rulebook records its damage conversion.
+- **Snipers (2026-11-14, ours).** One rule on both games' maps: the army sniper rifle does
+  280, so a head hit (x3) kills any non-hero and no body hit kills a full-health soldier of
+  300 or more; the award beam rifle does 560; every army sniper rifle zooms x2 then x8, the
+  beam rifle one x6 step. The Tusken sniper keeps 200 and its own zoom
+  ([soldier rulebook](../gameplay-normalization.md)).
 - **Droidekas** sprint only as a ball, on the shared bar, and the ball jump spends that bar too.
 
 ### Movement & feel
@@ -83,6 +88,18 @@ and LAN are decisions for later work, not current tasks.
 - Aim assist **on foot**: **BF1 passive magnetism only** — no BF2 square-button X lock-on.
   Intensity slider. `RE:` BF1 magnetism math + constants (top priority). Vehicles, flyers
   and space aim differently (§Vehicles & space).
+- **(The maintainer, LAN playtest 2026-11-14, issue #164) Controller assist reach.** OURS,
+  PROVISIONAL. A sniper rifle's assist (only weapons in the sniper table) is full to its
+  MaxRange (`WeaponClass::assist_full_range`, 128 m), then its slowdown, follow and pull fade
+  together to nothing at the round's own reach (300 m bolt, 500 m award beam). The PS2's
+  LockOnRange fade on the pull is not applied to these weapons, so the fades do not stack.
+  A beam is led by its range per tick, the speed its sweep is judged at. A human on a pad
+  in a building turret gets a turret assist out to the round's reach (full to three
+  quarters of it), with a damped pull that follows the lead. BF1's PS2 building guns
+  author no magnet, so this is a deliberate addition. A zoomed building turret turns at
+  its rates over the zoom divisor, as a soldier does. Bots and the mouse are unchanged.
+  measure: controller play at long range on a large map, scoped and in turrets
+  (`analysis/re-aim-assist.md` §10.10).
 
 ### Combat
 - SBD weapons (2026-10-27, issue #27): BF2's wrist blaster, tri-shot and wrist
@@ -118,6 +135,16 @@ and LAN are decisions for later work, not current tasks.
 - Push flinch (maintainer, 2026-11-05): a saber or Force push that neither throws nor
   tumbles locks input for **1/3 s on the ground and 1/2 s in the air**, shorter than
   BF2's 0.5 s and 1.0 s (`core::soldier::BF2_FLINCH_*`).
+- Fall-death kill credit (maintainer, 2026-11-14, #173): a death from landing damage, the
+  kill floor, a death region or a landing under the map is credited to the attacker who
+  last choked, Force-pushed or -pulled, saber- or emitter-shoved or blast-threw the
+  victim, as a kill (`Unit::forced_by`, `Sim::kill_environment`). A move that leaves him
+  standing records nothing; a friend counts only where friendly fire would have hurt the
+  victim (never a bot's throw of its own team's human), as a team kill. The credit lapses
+  once he has been back in control (on his feet, or flying his own jets) for 0.5 s, or
+  10 s after the move, or when he boards a vehicle (`FORCED_GRACE`, `FORCED_MAX`, [ours]
+  PROVISIONAL, measure: plans). Water, lava and damage regions stay world deaths; his own
+  blast never credits. The originals credit no fall (a named deviation).
 
 ### AI
 
@@ -138,6 +165,13 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   values and tuning knobs; neither original's decision code is ported. Four
   difficulties (Easy/Normal/Hard/Elite) on a three-layer model: symmetric
   competence, per-HUMAN pressure, team handicap only against bot-only teams.
+  Named deviations from that line (all [ours] PROVISIONAL): card DTEAM's weaker
+  bots for a team with more humans (2026-10-28), and the #171 proposals awaiting
+  The maintainer (2026-11-14): Hard/Elite allies keep the host row with a skill
+  cut, LAN Hard/Elite rounds give both teams the host row, Hard/Elite bot snipers
+  Normal's scope reach, Elite bot snipers Normal's dispersion floor, a focusing
+  bot yields to a much nearer enemy bot
+  (`engine/artifacts/loop/FEEL_NOTES.md`, the #171 entry).
   Squad commands: follow / hold / disperse / clear, ≤ 6 bots within 20 m of the
   player. Design, evidence and phases: Log "AI decision". Space AI (P8) will be
   the same architecture.
@@ -214,6 +248,21 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   clone commander says "damn" when the flag drops — optional VO filter noted); needs a
   fun pass before it matters.
 - Hunt & Hero Assault: **KEEP** + rule-mixing per Architecture #6.
+  Hunt matches the original games (the maintainer, 2026-11-14; issue #161). Named
+  openbf choices:
+  - Each BF1 Hunt adaptation fields its planet's BF2 Hunt roster and unit counts, with
+    BF1's class for the same unit: Endor scout troopers against Ewok troopers and scouts,
+    Geonosis clone sharpshooters, Kashyyyk BF2's MagnaGuard (built from BF2's side; BF1
+    has none) against Wookiee mechanics and warriors, Naboo Plains super battle droids
+    against Gungan defenders and soldiers, Mos Eisley Tuskens against Jawas. BF1 Theed
+    and the Dune Sea have no BF2 Hunt and keep their native encounters.
+  - BF1 Hunt Ewoks throw BF2's Ewok spear and rock; BF1's were AI-only weapons. Their
+    repair tool stays BF1's.
+  - Class change works at your own posts in Hunt by BF2's near-a-post rule; a BF2 post
+    whose class has no class-change radius gives none, as in the original. Every BF1 post
+    (BF1 has no class change) takes BF2's control-zone 5 m.
+  - The Hunt class screen gives each native class its own name where the text tables
+    share one ("Ewok Warrior", "Ewok Scout").
 - BF1 Historical Campaigns: **DROP** (it is essentially curated conquest battles in movie
   order with narration stills/VO between; per the maintainer's rule that's not worth keeping —
   narration assets still get baked, revivable).
@@ -434,8 +483,28 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
       so the drawn view is where the next tick's aim lands. A controller on foot gets the same (2026-10-29): the view
       draws the frame's share of the turn the next tick's look step takes under the held stick, the aim assist included,
       and a FIRE press carries that share (`PadState::fire_lag`) so its tick fires part way into the turn, where it was drawn.
-    - Bindings are one table (`game/src/kbm.rs`, `Bindings::pc_default`). Pointer lock follows the battle: it is taken on a
-      click, and freed on pause, in the shell and spawn screens, on focus loss and on exit.
+    - Bindings are one table (`game/src/kbm.rs`, `Bindings::pc_default`), and each context (infantry, vehicle,
+      starfighter) may save a layout of its own (`game/src/control_layout.rs`). The stock on-foot table (2026-11-14, the
+      maintainer's choice after the first LAN playtest, from a playtester's own remap) is Left mouse fire, Middle mouse
+      secondary fire, Right mouse zoom, Space jump, Left Ctrl roll / stance, Left Shift sprint, R reload, E use, mouse
+      wheel next weapon and G next secondary weapon. Every shown default works on a three-button mouse; the back and
+      forward thumb buttons also fire the secondary and switch the secondary weapon, and Z, C and Q stay as extra keys.
+      Vehicles and starfighters keep the table from before it (Right mouse secondary fire, Middle mouse or Z zoom;
+      `Bindings::vehicle_default`, `control_layout::fallback`, `control_layout::context_bindings`). Getting into or out
+      of a vehicle swaps the table without letting go of held keys (`Kbm::swap_context`). Mouse sensitivity defaults to
+      1.0, shown as 100 %, in 5 % steps from 5 % to 200 % (`ui::menu::MOUSE_SENSITIVITY_RANGE`). On foot, look is
+      multiplied by `kbm::ON_FOOT_LOOK_SCALE` (2.8), so 100 % turns as the old 2.8 did; in a vehicle, a turret or a
+      starfighter the factor is 1.0 and 100 % turns as before (`control_layout::look_scale`). A dev-phase migration,
+      slated for removal before v1 (`Settings::migrate_dev_v0`), carries a profile from before settings version 1: an
+      untouched stock table takes the new one, and a chosen sensitivity v becomes v / 2.8. The mouse look
+      reads raw device counts (`DeviceEvent::MouseMotion`): on Windows and Linux X11 the display scale and the system
+      pointer speed do not change it. measure: Wayland's unaccelerated deltas under fractional scaling, and macOS, whose
+      deltas are accelerated points, so the default may feel different there. Pointer lock follows the battle: it is taken on a
+      click, and freed on pause, in the shell and spawn screens, on focus loss and on exit. A mouse player's spawn takes it
+      back with no click (2026-11-14, the maintainer's request after the first LAN playtest, #128): mouse look had the
+      pointer as he went behind the spawn screens, or the pointer accepted a spawn screen. A controller player's spawn
+      leaves it free, so a stray mouse move never marks his pad mouse-aimed and turns his aim assist off. Focus lost on
+      the way still waits for a click.
 - Splitscreen co-op: **KEEP** for later (M5, before PACK; local — one sim, N cameras, N input devices, no netcode; NOT
   part of the multiplayer hold; card SSCR). Not current scope.
 - LAN: client-server UDP, **cap 16**, bots server-side. Internet matchmaking: DROP. Held until the maintainer says (M7).

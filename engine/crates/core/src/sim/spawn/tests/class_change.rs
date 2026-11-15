@@ -66,7 +66,7 @@ fn testing_picker_keeps_the_original_hero_out_of_bot_spawns() {
 /// origin, team 1's at x = 100, a neutral one at x = -100 (each a sphere
 /// of 8 m). Slot 0's human (class 0, team 0) stands 4 m south of team 0's
 /// post facing it; a team-0 bot stands beside him, also facing it.
-fn change_sim(rules: GroundRules) -> Sim {
+pub(super) fn change_sim(rules: GroundRules) -> Sim {
     let mut s = Sim::empty(11);
     s.ground_rules = rules;
     s.heightfield = Some(flat_ground());
@@ -110,7 +110,7 @@ fn change_sim(rules: GroundRules) -> Sim {
     s
 }
 
-fn me(s: &Sim) -> &crate::unit::Unit {
+pub(super) fn me(s: &Sim) -> &crate::unit::Unit {
     &s.units[s.players[0].unwrap().index as usize]
 }
 
@@ -351,4 +351,82 @@ fn a_class_change_replays() {
         s.hash()
     };
     assert_eq!(run(), run());
+}
+
+// ---- Issue #161: class change at your own posts in Hunt -----------------
+
+/// [`change_sim`] in a Hunt round: its posts count no occupants
+/// ([`Sim::counts_in_cp`]), which the plain rule needs.
+fn hunt_sim() -> Sim {
+    let mut s = change_sim(GroundRules::Bf2);
+    s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::hunt(50, [8, 8], [1, 1]));
+    s
+}
+
+/// The playtest (2026-11-14): the use button at his own post did nothing in
+/// Hunt. Inside a post's authored region, spawnable by his team, he changes
+/// class in place; the post still counts no occupants, captures nothing and
+/// bleeds no one.
+#[test]
+fn hunt_player_changes_class_inside_own_post() {
+    let mut s = hunt_sim();
+    assert!(s.is_hunt());
+    assert!(!s.counts_in_cp(0, 0), "Hunt posts count no occupants");
+    assert_eq!(s.class_change_post(0), Some(0));
+    let tickets = s.battle.teams.map(|t| t.tickets());
+    change_to(&mut s, 1);
+    assert!(me(&s).alive);
+    assert_eq!(me(&s).weapon_class, 1);
+    assert_eq!(s.battle.teams.map(|t| t.tickets()), tickets);
+    s.update_cps(1.0);
+    assert_eq!(s.cps[0].owner, Some(0));
+    assert_eq!(s.cps[0].capture, 0.0);
+    assert_eq!(s.battle.teams[1].bleed_per_sec, 0.0);
+}
+
+/// BF2's Hunt posts author no capture region (the sim's sphere is the
+/// AI's): the first scan never holds, and the second takes the post
+/// class's `SwitchClassRadius` (5 m for BF2's control zones) from a post
+/// his team owns, facing it. Enemy and neutral posts and bots still refuse.
+#[test]
+fn hunt_posts_without_a_region_take_their_class_radius() {
+    let mut s = hunt_sim();
+    for cp in &mut s.cps {
+        cp.capture_authored = false;
+    }
+    assert_eq!(s.class_change_post(0), None, "no radius: no reach");
+    for cp in &mut s.cps {
+        cp.switch_class_radius = 5.0;
+    }
+    assert_eq!(s.class_change_post(0), Some(0), "4 m from his post");
+    place(&mut s, Vec3::new(0.0, 0.0, 5.5), 0.0);
+    assert_eq!(
+        s.class_change_post(0),
+        None,
+        "past 5 m, still in the sphere"
+    );
+    place(&mut s, Vec3::new(0.0, 0.0, 4.0), std::f32::consts::PI);
+    assert_eq!(s.class_change_post(0), None, "facing away");
+    for x in [100.0, -100.0] {
+        place(&mut s, Vec3::new(x, 0.0, 4.0), 0.0);
+        assert_eq!(s.class_change_post(0), None, "post at x = {x}");
+    }
+    place(&mut s, Vec3::new(0.0, 0.0, 4.0), 0.0);
+    assert_eq!(s.class_change_post(1), None, "a bot never qualifies");
+    change_to(&mut s, 1);
+    assert_eq!(me(&s).weapon_class, 1);
+}
+
+/// Hero Assault, the other deathmatch, keeps no class change at a post.
+#[test]
+fn hero_assault_still_refuses_a_class_change_at_a_post() {
+    let mut s = change_sim(GroundRules::Bf2);
+    s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::new(50, [8, 8]));
+    for cp in &mut s.cps {
+        cp.switch_class_radius = 5.0;
+    }
+    assert!(!s.is_hunt());
+    assert_eq!(s.class_change_post(0), None);
+    tap(&mut s, buttons::ACTION);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Accepted);
 }

@@ -76,6 +76,10 @@ pub struct HudArt {
     pub sheet_aspect: HashMap<String, f32>,
     /// The control prompts' icons (`crate::input_icons`).
     pub icons: crate::input_icons::Icons,
+    /// The screen of the Instant Action backdrop's centre device, in shell
+    /// units, measured on this copy's art (`crate::shell_ia::device_screen`);
+    /// `None` keeps the PS2 art's ([`crate::shell_ia::DEVICE_SCREEN`]).
+    pub instant_device: Option<[f32; 4]>,
 }
 
 impl HudArt {
@@ -227,7 +231,9 @@ pub(crate) struct Ctx<'a> {
     pub(crate) hud: &'a Hud,
     pub(crate) art: &'a HudArt,
     pub(crate) out: HudFrame,
-    pub(crate) menu_fonts: bool,
+    /// Window pixels outside this box are cut away (a scrolling list's
+    /// window); applies to axis-aligned quads.
+    pub(crate) clip: Option<[f32; 4]>,
 }
 
 /// A textured quad in element-local frame pixels.
@@ -260,6 +266,8 @@ pub(crate) struct Run<'a> {
     /// alpha — [H] the bitmap style's numbers (`re-hud.md` §2.2) — and every
     /// glyph [`SHADOW_SPACING`] further on.
     pub(crate) shadow: bool,
+    /// Shell units added after every glyph (a text role's tracking).
+    pub(crate) tracking: f32,
 }
 
 const HINT_SCALE_FAR: f32 = 0.25;
@@ -271,6 +279,45 @@ const LOCK_SCALE_FAR: f32 = 0.1;
 const LOCK_CORNER_MIN: f32 = 0.9;
 const LOCK_CORNER_MAX: f32 = 1.4;
 const LOCK_CORNER_FIXED: f32 = 1.2;
+
+type Corner = (f32, f32, f32, f32);
+
+/// A window-space quad (corners x0y0, x1y0, x1y1, x0y1 with their uvs) cut
+/// to `clip`: `None` when it is not axis-aligned (left whole), `Some(None)`
+/// when nothing of it is inside.
+fn clip_quad(q: [Corner; 4], [cx0, cy0, cx1, cy1]: [f32; 4]) -> Option<Option<[Corner; 4]>> {
+    let eq = |a: f32, b: f32| (a - b).abs() < 1.0e-3;
+    if !(eq(q[0].1, q[1].1) && eq(q[2].1, q[3].1) && eq(q[0].0, q[3].0) && eq(q[1].0, q[2].0)) {
+        return None;
+    }
+    let (x0, x1, y0, y1) = (q[0].0, q[1].0, q[0].1, q[3].1);
+    let (u0, u1, v0, v1) = (q[0].2, q[1].2, q[0].3, q[3].3);
+    let cut = |a: f32, b: f32, lo: f32, hi: f32| {
+        let (mn, mx) = (a.min(b).max(lo), a.max(b).min(hi));
+        (mn < mx).then(|| (a.clamp(mn, mx), b.clamp(mn, mx)))
+    };
+    let lerp = |a: f32, b: f32, ta: f32, tb: f32, t: f32| {
+        if (b - a).abs() < 1.0e-6 {
+            ta
+        } else {
+            ta + (t - a) / (b - a) * (tb - ta)
+        }
+    };
+    let Some((nx0, nx1)) = cut(x0, x1, cx0, cx1) else {
+        return Some(None);
+    };
+    let Some((ny0, ny1)) = cut(y0, y1, cy0, cy1) else {
+        return Some(None);
+    };
+    let (nu0, nu1) = (lerp(x0, x1, u0, u1, nx0), lerp(x0, x1, u0, u1, nx1));
+    let (nv0, nv1) = (lerp(y0, y1, v0, v1, ny0), lerp(y0, y1, v0, v1, ny1));
+    Some(Some([
+        (nx0, ny0, nu0, nv0),
+        (nx1, ny0, nu1, nv0),
+        (nx1, ny1, nu1, nv1),
+        (nx0, ny1, nu0, nv1),
+    ]))
+}
 
 impl<'a> Ctx<'a> {
     pub(crate) fn quad(&mut self, elem: usize, m: &Mat4, s: &Screen, q: &Quad<'_>) {
@@ -288,12 +335,23 @@ impl<'a> Ctx<'a> {
             &[(0.0, q.color)]
         };
         for (off, col) in passes {
+            let mut placed = corners.map(|(x, y, u, v)| {
+                let p = m.transform_point3(Vec3::new(x, y, 0.0)) + Vec3::new(*off, *off, 0.0);
+                let w = s.map(p);
+                (w[0], w[1], u, v)
+            });
+            if let Some(clip) = self.clip {
+                match clip_quad(placed, clip) {
+                    Some(Some(cut)) => placed = cut,
+                    Some(None) => continue,
+                    None => {}
+                }
+            }
             let first = self.out.indices.len() as u32;
             let base = self.out.verts.len() as u32;
             let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-            for (x, y, u, v) in corners {
-                let p = m.transform_point3(Vec3::new(x, y, 0.0)) + Vec3::new(*off, *off, 0.0);
-                let w = s.map(p);
+            for (wx, wy, u, v) in placed {
+                let w = [wx, wy];
                 b = [
                     b[0].min(w[0]),
                     b[1].min(w[1]),
@@ -486,7 +544,7 @@ impl<'a> Ctx<'a> {
             }
             Kind::Bitmap | Kind::BarBitmap => self.bitmap(i, e, &m, s, alpha),
             Kind::BarSegmented => self.segmented(i, e, &m, s, alpha),
-            Kind::Text => self.text(i, e, &m, s, alpha),
+            Kind::Text => self.elem_text(i, e, &m, s, alpha),
             Kind::MultiLineText => self.multiline(i, e, &m, s, alpha),
             Kind::Model3D => self.model(i, e, parent, s, alpha),
             Kind::Map => self.map(i, e, parent, s, alpha),
@@ -635,7 +693,7 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn text(&mut self, i: usize, e: &Elem, m: &Mat4, s: &Screen, alpha: f32) {
+    fn elem_text(&mut self, i: usize, e: &Elem, m: &Mat4, s: &Screen, alpha: f32) {
         let Some(font) = self.art.fonts.get(&e.font) else {
             return;
         };
@@ -658,16 +716,14 @@ impl<'a> Ctx<'a> {
                 color: color(self.hud.drawn(i), alpha),
                 additive: e.additive,
                 shadow: false,
+                tracking: 0.0,
             },
         );
     }
 
-    pub(crate) fn font(&self, role: &str) -> Option<&'a HudFont> {
-        if self.menu_fonts {
-            self.art.menu_font(role)
-        } else {
-            self.art.fonts.get(role)
-        }
+    /// The menu face's metric set for `face` (`crate::typography`).
+    pub(crate) fn face(&self, face: crate::typography::Face) -> Option<&'a HudFont> {
+        self.art.menu_font(face.role())
     }
 
     pub(crate) fn run(&mut self, i: usize, m: &Mat4, s: &Screen, font: &HudFont, r: &Run<'_>) {
@@ -678,7 +734,8 @@ impl<'a> Ctx<'a> {
             .collect();
         let [kx, ky] = r.scale;
         let spacing = if r.shadow { SHADOW_SPACING } else { 0.0 };
-        let width = run_width(font, r.text, kx, r.shadow);
+        let width = run_width(font, r.text, kx, r.shadow)
+            + r.tracking * r.text.chars().filter(|c| has_glyph(font, *c)).count() as f32;
         let left = r.at.0
             + match r.h_align {
                 HAlign::Left => 0.0,
@@ -754,7 +811,7 @@ impl<'a> Ctx<'a> {
                         self.out.boxes.push((i, bounds));
                     }
                 }
-                pen += (f32::from(g.advance) + spacing) * kx;
+                pen += (f32::from(g.advance) + spacing) * kx + r.tracking;
             }
         }
     }
@@ -809,6 +866,7 @@ impl<'a> Ctx<'a> {
                     color: color([0, 1, 2].map(|c| line.color[c] * tint[c]), a),
                     additive: e.additive,
                     shadow: ml.shadow,
+                    tracking: 0.0,
                 },
             );
         }
@@ -929,6 +987,10 @@ impl<'a> Ctx<'a> {
     }
 }
 
+fn has_glyph(font: &HudFont, c: char) -> bool {
+    font.glyphs.iter().any(|g| u32::from(g.code) == c as u32)
+}
+
 /// How wide [`Ctx::run`] lays `text` out: the glyphs' advances (and the
 /// Shadow style's spacing) times `kx`.
 pub(crate) fn run_width(font: &HudFont, text: &str, kx: f32, shadow: bool) -> f32 {
@@ -955,7 +1017,7 @@ pub fn draw_shell_options(
         hud,
         art,
         out: HudFrame::default(),
-        menu_fonts: true,
+        clip: None,
     };
     ctx.shell_page(menus, movie, size);
     crate::pause_draw::draw_stack(&mut ctx, model, animation, size);
@@ -975,7 +1037,7 @@ pub fn draw_shell_profiles(
         hud,
         art,
         out: HudFrame::default(),
-        menu_fonts: true,
+        clip: None,
     };
     ctx.shell_page(menus, movie, size);
     crate::shell_ps2::profiles::draw(&mut ctx, profiles, size);
@@ -987,7 +1049,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         hud,
         art,
         out: HudFrame::default(),
-        menu_fonts: hud.shell.is_some(),
+        clip: None,
     };
     if let Some((menus, movie)) = &hud.shell {
         ctx.shell_page(menus, *movie, size);
@@ -1155,13 +1217,14 @@ mod tests {
                     color: [0.5, 0.6, 0.7, 0.8],
                     additive: false,
                     shadow,
+                    tracking: 0.0,
                 };
                 let draw = |art| {
                     let mut ctx = Ctx {
                         hud: &hud,
                         art,
                         out: HudFrame::default(),
-                        menu_fonts: false,
+                        clip: None,
                     };
                     ctx.run(
                         0,
@@ -1330,7 +1393,7 @@ mod tests {
                 hud,
                 art: &art,
                 out: HudFrame::default(),
-                menu_fonts: false,
+                clip: None,
             };
             ctx.mesh(0, "m", &Mat4::IDENTITY, &screen, [1.0; 4], false);
             ctx.out.verts[0].uv

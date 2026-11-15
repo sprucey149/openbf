@@ -80,6 +80,7 @@ impl SoldierVisuals {
             if usize::from(u.team) == team && usize::from(u.spec.class) == class {
                 *v = UnitVisual {
                     gen: u.gen,
+                    body: v.body,
                     ..Default::default()
                 };
             }
@@ -792,10 +793,23 @@ impl SoldierVisuals {
         if self.units.len() < n {
             self.units.resize_with(n, UnitVisual::default);
         }
-        for (v, u) in self.units.iter_mut().zip(&walk.sim.units) {
-            if v.gen != u.gen {
+        for (i, u) in walk.sim.units.iter().enumerate() {
+            let body = (u.team, u.spec.class, self.asset_index(u.team, u.spec.class));
+            let v = &mut self.units[i];
+            // A new life starts over; so does a class or body change on the
+            // same life (a hero accept keeps the generation, issue #168: the
+            // old body's clip numbers past the new one's clips). A unit that
+            // changed that way while off the field draws nothing until it
+            // respawns: a dead soldier who accepts a hero offer loses his
+            // corpse at the accept, before its fade (every lookup here poses
+            // the unit's current class; keeping the old body's corpse needs
+            // them to pose the visual's own `body` instead).
+            if v.gen != u.gen || v.body != Some(body) {
+                let same_life = v.gen == u.gen && v.body.is_some();
                 *v = UnitVisual {
                     gen: u.gen,
+                    body: Some(body),
+                    gone: same_life && !u.alive,
                     ..Default::default()
                 };
             }

@@ -57,7 +57,7 @@ impl App {
         self.walk.is_some() && matches!(self.screen, Screen::Battle)
     }
 
-    fn can_grab(&self) -> bool {
+    pub(super) fn can_grab(&self) -> bool {
         self.focused
             && self.in_battle()
             && !self.paused
@@ -69,6 +69,58 @@ impl App {
                             && walk.sim.spawn_stage.get(slot) != Some(&core::sim::SpawnStage::Alive)
                     })
             })
+    }
+
+    /// The focused player of a round in play is behind the spawn screens:
+    /// dead (the death camera, the spawn pages), not yet on the field, or on
+    /// a post's class screen (issue #28). The pause menu does not count.
+    fn on_spawn_screen(&self) -> bool {
+        self.focused
+            && self.in_battle()
+            && self.walk.as_ref().is_some_and(|(walk, _)| {
+                walk.sim.outcome.is_none()
+                    && !walk.sim.unit(walk.player).is_some_and(|u| {
+                        let slot = u.spec.player_slot.map_or(0, usize::from);
+                        u.alive
+                            && walk.sim.spawn_stage.get(slot) != Some(&core::sim::SpawnStage::Alive)
+                    })
+            })
+    }
+
+    /// Issue #128: whether this frame hands mouse look back after a spawn.
+    /// The spawn screens free the pointer for their own clicks; once the
+    /// player is on the field again the grab returns without the click that
+    /// would otherwise take it (`Kbm::click_in`), so no click is eaten and
+    /// none fires: the spawn's own press came while the pointer was free.
+    /// Only a mouse player's spawn does it: mouse look had the pointer as he
+    /// went behind the screens, or the pointer accepted the spawn
+    /// ([`App::note_pointer_spawn`]). A controller player's spawn leaves the
+    /// pointer free, so a stray mouse move never takes his aim
+    /// (`buttons::MOUSE_AIM` turns the aim assist off).
+    /// Focus loss or leaving the round forgets it; a pause keeps it.
+    fn regrab_after_spawn(&mut self, allowed: bool) -> bool {
+        if self.on_spawn_screen() {
+            if !self.behind_spawn_screens {
+                // This sync runs before the grab is let go (`App::sync_grab`).
+                self.behind_spawn_screens = true;
+                self.spawn_regrab |= self.kbm.grabbed() || self.kbm.wants_grab();
+            }
+            return false;
+        }
+        self.behind_spawn_screens = false;
+        if !self.focused || !self.in_battle() {
+            self.spawn_regrab = false;
+            return false;
+        }
+        allowed && std::mem::take(&mut self.spawn_regrab)
+    }
+
+    /// Issue #128: the pointer accepted a spawn screen, so the spawn hands
+    /// mouse look back ([`App::regrab_after_spawn`]).
+    pub(super) fn note_pointer_spawn(&mut self) {
+        if self.on_spawn_screen() {
+            self.spawn_regrab = true;
+        }
     }
 
     pub(super) fn release_mouse(&mut self) {
@@ -103,8 +155,12 @@ impl App {
                     || (self.in_battle() && self.paused) =>
             {
                 let dy = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
-                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 32.0) as f32,
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => {
+                        ui::scroll::wheel_lines(*y, 0.0, ui::scroll::PX_PER_LINE)
+                    }
+                    winit::event::MouseScrollDelta::PixelDelta(p) => {
+                        ui::scroll::wheel_lines(0.0, p.y as f32, ui::scroll::PX_PER_LINE)
+                    }
                 };
                 self.shell_pointer.wheel(dy);
             }
@@ -124,6 +180,9 @@ impl App {
 
     pub(super) fn sync_grab(&mut self) {
         let allowed = self.can_grab();
+        if self.regrab_after_spawn(allowed) {
+            self.kbm.click_in();
+        }
         if let Some(w) = &self.window {
             self.kbm.sync_grab(w, allowed);
         }
@@ -198,6 +257,168 @@ mod tests {
         walk.sim.spawn_stage[0] = core::sim::SpawnStage::Accepted;
         walk.sim.units[walk.player.index as usize].alive = false;
         assert!(!a.can_grab(), "death and spawn screens");
+    }
+
+    /// The battle the spawn tests play: the walk's sim on the screens.
+    fn battle() -> App {
+        let mut a = app();
+        a.screen = Screen::Battle;
+        a.walk = Some((
+            game::walk::WalkSim::new(42, glam::Vec3::ZERO, None),
+            render::MeshHandle::default(),
+        ));
+        a
+    }
+
+    /// The window's grab call, as `App::sync_grab` makes it.
+    fn window_grab(a: &mut App) {
+        let allowed = a.can_grab();
+        a.kbm.sync_grab_with(allowed, |_| Ok::<_, ()>(())).unwrap();
+    }
+
+    fn frame(a: &mut App) {
+        a.sync_grab();
+        window_grab(a);
+    }
+
+    fn set(a: &mut App, alive: bool, stage: core::sim::SpawnStage) {
+        let walk = &mut a.walk.as_mut().unwrap().0;
+        walk.sim.units[walk.player.index as usize].alive = alive;
+        walk.sim.spawn_stage[0] = stage;
+    }
+
+    /// Issue #128: a mouse player's spawn hands mouse look straight back.
+    /// Behind the spawn screens the pointer is free; on the field again the
+    /// grab comes back with no click, so mouse motion turns the view at once,
+    /// and the release of the click that spawned fires nothing. A focus loss
+    /// on the way still waits for the player's click.
+    #[test]
+    fn a_spawn_hands_mouse_look_back_without_a_click() {
+        use core::sim::{PadState, SpawnStage};
+        let mut a = battle();
+        // He plays with the mouse: a click took the pointer.
+        set(&mut a, true, SpawnStage::Accepted);
+        a.kbm.click_in();
+        frame(&mut a);
+        assert!(a.kbm.grabbed());
+        for life in 0..3 {
+            // Dead behind the class screen: the pointer is the menus'.
+            set(&mut a, false, SpawnStage::Class);
+            frame(&mut a);
+            assert!(!a.kbm.grabbed(), "life {life}: free on the spawn screen");
+            a.mouse_window_event(&WindowEvent::MouseInput {
+                device_id: winit::event::DeviceId::dummy(),
+                state: winit::event::ElementState::Pressed,
+                button: winit::event::MouseButton::Left,
+            });
+            // The accept spawns him.
+            set(&mut a, true, SpawnStage::Accepted);
+            frame(&mut a);
+            assert!(
+                a.kbm.grabbed(),
+                "life {life}: mouse look back with no click"
+            );
+            a.mouse_window_event(&WindowEvent::MouseInput {
+                device_id: winit::event::DeviceId::dummy(),
+                state: winit::event::ElementState::Released,
+                button: winit::event::MouseButton::Left,
+            });
+            assert_eq!(
+                a.kbm.pad(PadState::default()).buttons & !core::sim::buttons::MOUSE_AIM,
+                0,
+                "life {life}: the spawn click's release fires nothing"
+            );
+            a.kbm.motion(40.0, 0.0);
+            let pad = a.kbm.pad(PadState::default());
+            assert_ne!(pad.mx, 0, "life {life}: the mouse turns the view");
+            a.kbm.consumed(&pad, 1);
+        }
+        // Away from the window while he spawns: back on the field, the
+        // player's click takes the pointer, as at any return to the window.
+        set(&mut a, false, SpawnStage::Map);
+        frame(&mut a);
+        a.mouse_window_event(&WindowEvent::Focused(false));
+        window_grab(&mut a);
+        set(&mut a, true, SpawnStage::Accepted);
+        frame(&mut a);
+        a.mouse_window_event(&WindowEvent::Focused(true));
+        frame(&mut a);
+        assert!(!a.kbm.grabbed(), "focus came back on the field");
+        // Pausing alive keeps the click-to-resume rule.
+        a.kbm.click_in();
+        frame(&mut a);
+        assert!(a.kbm.grabbed());
+        a.paused = true;
+        frame(&mut a);
+        a.paused = false;
+        frame(&mut a);
+        assert!(!a.kbm.grabbed(), "a pause is not a spawn");
+    }
+
+    /// Issue #128 (the maintainer plays on a controller): a controller
+    /// player's spawn, his first or any later one, leaves the pointer free,
+    /// so a stray mouse move neither turns his view nor marks his pad
+    /// mouse-aimed (which would switch off his aim assist).
+    #[test]
+    fn a_controller_players_spawn_leaves_the_pointer_free() {
+        use core::sim::{buttons::MOUSE_AIM, PadState, SpawnStage};
+        let mut a = battle();
+        set(&mut a, false, SpawnStage::Side);
+        frame(&mut a);
+        for life in 0..3 {
+            for stage in [SpawnStage::Map, SpawnStage::Class] {
+                set(&mut a, false, stage);
+                frame(&mut a);
+            }
+            // The pad's accept spawns him.
+            set(&mut a, true, SpawnStage::Accepted);
+            frame(&mut a);
+            frame(&mut a);
+            assert!(!a.kbm.grabbed(), "life {life}: the pointer stays free");
+            a.kbm.motion(40.0, 0.0);
+            let pad = a.kbm.pad(PadState::default());
+            assert_eq!((pad.mx, pad.buttons & MOUSE_AIM), (0, 0), "life {life}");
+            a.kbm.consumed(&pad, 1);
+            set(&mut a, false, SpawnStage::Class);
+            frame(&mut a);
+        }
+    }
+
+    /// Issue #128: a pointer accept on the spawn screens marks a mouse
+    /// player, so even his first spawn of the round, with no click ever
+    /// taken by mouse look, hands mouse look over.
+    #[test]
+    fn a_pointer_accepted_first_spawn_takes_the_pointer() {
+        use core::sim::SpawnStage;
+        let mut a = battle();
+        set(&mut a, false, SpawnStage::Side);
+        frame(&mut a);
+        // The side screen's first team (selected) under the pointer, clicked
+        // once the screen has settled: an accept.
+        let size = [640.0, 480.0];
+        let row = ui::spawn_draw::window_point(
+            [
+                (ui::spawn_draw::SIDE_STACK_X[0] + ui::spawn_draw::SIDE_STACK_X[1]) * 0.5,
+                ui::spawn_draw::SIDE_STACK_TOP + ui::spawn_draw::ROW_PITCH + 10.0,
+            ],
+            size,
+        );
+        a.shell_pointer.moved_to(row);
+        a.step_spawn_pointer_at(1.0, None);
+        a.shell_pointer.click();
+        a.step_spawn_pointer_at(1.0, None);
+        assert_ne!(
+            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
+            0,
+            "the click accepts"
+        );
+        for stage in [SpawnStage::Map, SpawnStage::Class] {
+            set(&mut a, false, stage);
+            frame(&mut a);
+        }
+        set(&mut a, true, SpawnStage::Accepted);
+        frame(&mut a);
+        assert!(a.kbm.grabbed(), "mouse look back with no click");
     }
 
     #[test]

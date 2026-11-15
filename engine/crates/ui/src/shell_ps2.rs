@@ -48,14 +48,13 @@
 
 pub mod profiles;
 
-use crate::hud_draw::{run_width, Ctx};
+use crate::hud_draw::Ctx;
 use crate::hud_tree::HAlign;
 use crate::input_icons::Prompt;
 use crate::menu::MenuInput;
 use crate::shell_feel::{flashy, Cues, MenuSound, Pulse};
-use crate::spawn_draw::{
-    BUTTON_FONT, LABEL_STRETCH, ROW_H, ROW_PITCH, SELECTED_TEXT, TITLE_TEXT, UNSELECTED_TEXT,
-};
+use crate::spawn_draw::{ROW_H, ROW_PITCH};
+use crate::typography::{tint, ITEM, TITLE};
 use manifest::hud::HudFont;
 
 /// `gDefaultButtonScreenRelativeY` 0.6 of the 448-line screen (§3.1 [V]).
@@ -77,7 +76,7 @@ pub const LEFT_X: f32 = 34.4;
 pub const BAR_PAD: f32 = 134.2;
 /// A dimmed button's label grey (`ShowHideVerticalButtons` f7 pc 266-289
 /// [V]: 110 instead of 255).
-pub const DIMMED_GREY: f32 = 110.0;
+pub use crate::typography::tint::DIMMED_GREY;
 /// An unfocused row's bar tint (`FUN_00381858` B2 380175-380178: 150 grey
 /// unless the text style is `selected`, re-bf2-menus §5 [V]).
 pub const UNFOCUSED_BAR: f32 = 150.0;
@@ -513,7 +512,7 @@ pub struct StackLayout {
 pub fn stack_layout(font: &HudFont, stack: &Stack) -> StackLayout {
     let widest = std::iter::once(stack.title.as_str())
         .chain(stack.rows.iter().map(|r| r.label.as_str()))
-        .map(|t| run_width(font, t, LABEL_STRETCH, false))
+        .map(|t| crate::typography::width(font, &ITEM, t))
         .fold(0.0, f32::max);
     let w = widest + BAR_PAD;
     let x0 = if stack.left {
@@ -577,7 +576,7 @@ pub fn prompt_at(font: &HudFont, menus: &ShellMenus, point: [f32; 2], size: [f32
     let box_w = 4.0 / 3.0 * size[1];
     let x = (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0);
     let y = point[1] / (size[1] / 448.0);
-    let width = run_width(font, &menus.prompt, LABEL_STRETCH, false);
+    let width = crate::typography::width(font, &ITEM, &menus.prompt);
     let x0 = 256.0 - width * 0.5;
     x >= x0 - 6.0
         && x <= x0 + width + 6.0
@@ -603,17 +602,16 @@ impl Ctx<'_> {
             self.sheet(&centre, LOGO, full, "logo", 1.0);
         }
         let Some(stack) = m.stack() else {
-            let (rgb, _) = UNSELECTED_TEXT;
+            let (rgb, _) = tint::UNSELECTED;
             let at = (256.0, PROMPT_TOP);
             let style = (rgb, m.prompt_alpha());
-            self.label(&centre, BUTTON_FONT, &m.prompt, at, HAlign::Center, style);
+            self.text(&centre, &ITEM, &m.prompt, at, HAlign::Center, style);
             return;
         };
-        let Some(font) = self.font(BUTTON_FONT) else {
+        let Some(font) = self.face(ITEM.face) else {
             return;
         };
         let lay = stack_layout(font, stack);
-        let lh = f32::from(font.line_height);
         let s = if stack.left {
             screen_at(size, Anchor::Left)
         } else {
@@ -624,18 +622,19 @@ impl Ctx<'_> {
             pieces: crate::spawn_draw::TITLE_PIECES,
             bar: ([255.0; 3], crate::spawn_draw::PIECE_ALPHA),
             text: &stack.title,
-            style: TITLE_TEXT,
+            style: tint::TITLE,
+            title: true,
         };
-        self.flashy_row(&s, &title, m.on_page, lh);
+        self.flashy_row(&s, &title, m.on_page);
         let pulse = m.pulse.alpha();
         for (k, (row, r)) in stack.rows.iter().zip(&lay.rows).enumerate() {
-            let grey = ([UNFOCUSED_BAR; 3], UNSELECTED_TEXT.1);
+            let grey = ([UNFOCUSED_BAR; 3], tint::UNSELECTED.1);
             let (bar, style) = if !row.enabled {
-                (grey, ([DIMMED_GREY; 3], UNSELECTED_TEXT.1))
+                (grey, tint::DIMMED)
             } else if k == stack.focus {
-                (([255.0; 3], pulse), (SELECTED_TEXT.0, pulse))
+                (([255.0; 3], pulse), (tint::SELECTED.0, pulse))
             } else {
-                (grey, UNSELECTED_TEXT)
+                (grey, tint::UNSELECTED)
             };
             let row = FlashyRow {
                 rect: *r,
@@ -643,17 +642,18 @@ impl Ctx<'_> {
                 bar,
                 text: &row.label,
                 style,
+                title: false,
             };
             let t = m.on_page - ROW_REVEAL * (k + 1) as f32;
-            self.flashy_row(&s, &row, t, lh);
+            self.flashy_row(&s, &row, t);
         }
         if let (Some(note), Some(last)) = (&stack.note, lay.rows.last()) {
             let t = m.on_page - ROW_REVEAL * (stack.rows.len() + 1) as f32;
             let a = flashy(t).text_a;
             if a > 0.0 {
                 let at = (last[0] + 4.0, last[3] + ROW_PITCH - ROW_H + 6.0);
-                let style = ([DIMMED_GREY + 60.0; 3], UNSELECTED_TEXT.1 * a);
-                self.label(&s, BUTTON_FONT, note, at, HAlign::Left, style);
+                let style = (tint::NOTE.0, tint::NOTE.1 * a);
+                self.text(&s, &ITEM, note, at, HAlign::Left, style);
             }
         }
         self.help(size, false, Prompt::Back, &m.back);
@@ -664,13 +664,7 @@ impl Ctx<'_> {
     /// (re-bf2-menus §5 [V]): the bar's middle wipes out, a `cursor` square
     /// sweeps across the text box, the text pops up about its centre line
     /// and fades in.
-    pub(crate) fn flashy_row(
-        &mut self,
-        s: &crate::hud_draw::Screen,
-        row: &FlashyRow<'_>,
-        t: f32,
-        lh: f32,
-    ) {
+    pub(crate) fn flashy_row(&mut self, s: &crate::hud_draw::Screen, row: &FlashyRow<'_>, t: f32) {
         let f = flashy(t);
         let [x0, y0, x1, y1] = row.rect;
         let Some(out) = f.bar else {
@@ -679,11 +673,13 @@ impl Ctx<'_> {
         let caps = 2.0 * (y1 - y0);
         let right = x0 + caps + (x1 - x0 - caps).max(0.0) * out;
         self.bar_tinted(s, [x0, y0, right, y1], row.pieces, row.bar);
+        let style = if row.title { &TITLE } else { &ITEM };
+        let lh = style.size;
+        // Text wider than its bar ends in an ellipsis, never a smaller size.
+        let text = self.ellipsized(style, row.text, x1 - x0 - 2.0 * (y1 - y0));
         let (cx, top) = ((x0 + x1) * 0.5, y0 + (ROW_H - lh) * 0.5);
         if let Some(across) = f.square {
-            let w = self
-                .font(BUTTON_FONT)
-                .map_or(0.0, |font| run_width(font, row.text, LABEL_STRETCH, false));
+            let w = self.text_width(style, &text);
             let x = cx - w * 0.5 + w * across;
             let rect = [x, top, x + lh, top + lh];
             let full = [0.0, 0.0, 1.0, 1.0];
@@ -693,16 +689,8 @@ impl Ctx<'_> {
             return;
         }
         let at = (cx, top + lh * (1.0 - f.text_h) * 0.5);
-        let style = (row.style.0, row.style.1 * f.text_a);
-        self.label_scaled(
-            s,
-            BUTTON_FONT,
-            row.text,
-            at,
-            HAlign::Center,
-            style,
-            f.text_h,
-        );
+        let tint = (row.style.0, row.style.1 * f.text_a);
+        self.text_popped(s, style, &text, at, HAlign::Center, tint, f.text_h);
     }
 }
 
@@ -714,11 +702,15 @@ pub(crate) struct FlashyRow<'a> {
     pub(crate) bar: ([f32; 3], f32),
     pub(crate) text: &'a str,
     pub(crate) style: ([f32; 3], f32),
+    /// The title bar ([`TITLE`]) rather than a row ([`ITEM`]).
+    pub(crate) title: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    const BUTTON_FONT: &str = "gamefont_large";
+    use crate::typography::tint::SELECTED as SELECTED_TEXT;
 
     #[test]
     fn shell_draw_and_pointer_share_menu_metrics_at_all_capture_sizes() {
@@ -787,9 +779,10 @@ mod tests {
             hud: &hud,
             art: &art,
             out: Default::default(),
-            menu_fonts: true,
+            clip: None,
         };
-        assert_eq!(ctx.font(BUTTON_FONT).unwrap().name, "menu_gamefont_large");
+        let face = ctx.face(crate::typography::ITEM.face).unwrap();
+        assert_eq!(face.name, "menu_gamefont_large");
     }
 
     fn menus() -> ShellMenus {

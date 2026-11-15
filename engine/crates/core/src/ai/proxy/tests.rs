@@ -99,14 +99,15 @@ fn the_flag_survives_a_respawn() {
     assert_eq!(sim.units[i].proxy_human, Some(Strength::Average.profile()));
 }
 
-/// The targets: the maintainer's table, each tier's band below the one
-/// before it, and the verdict reads the band.
+/// The targets: the maintainer's table (Hard and Elite as proposed by
+/// issue #171, pending his approval), each tier's band below the one before
+/// it, and the verdict reads the band.
 #[test]
 fn the_targets_are_the_maintainers_and_fall_by_tier() {
     assert_eq!(target(Difficulty::Easy), (0.90, 1.0));
     assert_eq!(target(Difficulty::Normal), (0.77, 0.90));
-    assert_eq!(target(Difficulty::Hard), (0.45, 0.60));
-    assert_eq!(target(Difficulty::Elite), (0.25, 0.40));
+    assert_eq!(target(Difficulty::Hard), (0.55, 0.70));
+    assert_eq!(target(Difficulty::Elite), (0.40, 0.55));
     for w in TARGETS.windows(2) {
         assert!(w[1].1 < w[0].1 && w[1].2 <= w[0].2);
     }
@@ -119,8 +120,8 @@ fn the_targets_are_the_maintainers_and_fall_by_tier() {
     for (d, lo, hi) in [
         (Difficulty::Easy, 90, 100),
         (Difficulty::Normal, 77, 90),
-        (Difficulty::Hard, 45, 60),
-        (Difficulty::Elite, 25, 40),
+        (Difficulty::Hard, 55, 70),
+        (Difficulty::Elite, 40, 55),
     ] {
         assert!(passes(d, lo, 100) && passes(d, hi, 100), "{d:?}");
         assert!(!passes(d, lo - 1, 100) && !passes(d, hi + 1, 100), "{d:?}");
@@ -672,8 +673,9 @@ fn the_proxy_reads_the_frozen_rows() {
         let (mut sim, a, b) = field(d);
         sim.set_proxy(a, Some(p));
         let u = sim.unit(a).unwrap();
-        // (The proxy's team takes its DTEAM row: one human more.)
-        let row_d = sim.difficulty_of(u.team);
+        // (The proxy reads its frozen DTEAM row, issue #171: one human more.)
+        let row_d = sim.proxy_row(u.team);
+        assert_eq!(row_d, frozen_row(d, sim.humans_per_team(), u.team), "{d:?}");
         let frozen = frozen_tier(row_d);
         let mut row = frozen;
         row.view_mult *= sim.mission_ai.view_mult;
@@ -682,7 +684,31 @@ fn the_proxy_reads_the_frozen_rows() {
             p.over(row, sim.mission_ai.view_mult),
             "{d:?}"
         );
-        assert_eq!(sim.aim_err_cap(u), frozen_err_cap(row_d, u.skill), "{d:?}");
+        // The error cap at a droid or a turret: the frozen rule's level as
+        // written out here (one surplus human: Easy 14, Normal 16, Hard 18,
+        // Elite 19), never the proxy's live spawn skill, which is set to an
+        // odd value below.
+        let (want_row, want_level) = match d {
+            Difficulty::Easy => (Difficulty::Easy, 14),
+            Difficulty::Normal => (Difficulty::Easy, 16),
+            Difficulty::Hard => (Difficulty::Normal, 18),
+            Difficulty::Elite => (Difficulty::Normal, 19),
+        };
+        assert_eq!(row_d, want_row, "{d:?}");
+        let want_cap = FROZEN_TIERS[match want_row {
+            Difficulty::Easy => 0,
+            Difficulty::Normal => 1,
+            Difficulty::Hard => 2,
+            Difficulty::Elite => 3,
+        }]
+        .err_cap
+        .unwrap_or_else(|| Skill::from_level(want_level).err_cap);
+        assert_eq!(sim.aim_err_cap(u), want_cap, "{d:?}");
+        for odd in [3, 11, 20] {
+            let mut v = u.clone();
+            v.skill = odd;
+            assert_eq!(sim.aim_err_cap(&v), want_cap, "{d:?} spawn skill {odd}");
+        }
         // The Cover role: the proxy's frozen row whatever the live row says;
         // a bot follows the live row.
         let bot_u = sim.unit(b).unwrap();
@@ -719,6 +745,12 @@ fn the_proxy_reads_the_frozen_rows() {
 /// 2026-11-13 (#168): glam's `scalar-math` (one math path on every CPU,
 /// LAN_MULTIPLAYER.md §7) moved Easy 67abfedaa0631084 -> 7efc85cee4eb5f2a and
 /// Elite e3f2d3c9099e44c4 -> 8350aa51d0876ce8.
+/// 2026-11-14 (#171, the DTEAM ally offset Elite -1 -> -2, floor 18) moved
+/// Elite 8350aa51d0876ce8 -> 09c5292876cd883b: the scene's later bots spawn
+/// while the first proxy already counts as a human, so their spawn skill (18,
+/// was 19) is the DTEAM row's; the proxies' brains are unchanged. The Elite
+/// offset -3 (floor 17) then moved it 09c5292876cd883b -> 0f21523a29eb72b6
+/// the same way (spawn skill 17).
 #[test]
 fn an_all_proxy_skirmish_keeps_its_hash() {
     let run = |d: Difficulty| {
@@ -744,7 +776,7 @@ fn an_all_proxy_skirmish_keeps_its_hash() {
     let got = [run(Difficulty::Easy), run(Difficulty::Elite)];
     assert_eq!(
         got.map(|h| format!("{h:016x}")),
-        ["7efc85cee4eb5f2a", "8350aa51d0876ce8"],
+        ["7efc85cee4eb5f2a", "0f21523a29eb72b6"],
         "the all-proxy skirmish moved"
     );
 }

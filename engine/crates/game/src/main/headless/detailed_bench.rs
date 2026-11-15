@@ -316,9 +316,11 @@ fn render(
             game::weather::STILL_SEED,
         ),
         holos: game::holo::Holos::default(),
-        overlay: v
-            .hud
-            .then(|| ui::overlay::EguiOverlay::headless(r.device(), render::HEADLESS_FORMAT)),
+        overlay: v.hud.then(|| {
+            let o = ui::overlay::EguiOverlay::headless(r.device(), render::HEADLESS_FORMAT);
+            ui::typography::face::install(o.ctx(), &game::hud_feed::menu_face(assets));
+            o
+        }),
         hud_view: v.hud.then(|| load_hud_view(assets, &r)).flatten(),
         feed: game::event_feed::EventFeed::for_walk(assets, &scene.manifest.source_game, walk),
     };

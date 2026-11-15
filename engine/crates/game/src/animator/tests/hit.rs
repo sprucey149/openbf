@@ -168,6 +168,8 @@ fn splash_keeps_the_last_direct_hits_death_side() {
         damage: 1.0,
         health_left: 50.0,
         age: 0.0,
+        dealt: 1.0,
+        taken: 1.0,
     };
     walk.sim.events = vec![hit(true, Vec3::X), hit(false, Vec3::Z)];
     a.note_hit(&walk.sim, 0);
@@ -190,6 +192,8 @@ fn hit_events_are_read_once_rearm_and_leave_sim_hash_unchanged() {
         damage: 0.0,
         health_left,
         age,
+        dealt: 1.0,
+        taken: 1.0,
     };
     walk.sim.events = vec![event(core::sim::BLAST_AGE, 100.0), event(0.0, 100.0)];
     let before = walk.sim.hash();
@@ -305,6 +309,8 @@ fn a_restarted_sim_with_an_earlier_tick_still_flinches() {
         damage: 0.0,
         health_left: 100.0,
         age: 0.0,
+        dealt: 1.0,
+        taken: 1.0,
     }];
     walk.sim.tick = 500;
     a.note_hit(&walk.sim, 0);

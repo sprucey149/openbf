@@ -15,6 +15,13 @@
 //!   --out FILE: also write the summary there
 //!   --predict: every peer also runs the local prediction each frame (as
 //!     the window does) and the summary reports its cost and depth
+//!   --draw: with --predict, every peer also draws each frame as the window
+//!     does (render blend, predicted local pose swapped in and out) and
+//!     its sim's hash must be unchanged by it (`draw.changed`)
+//!   --heroes: heroes unlock after 1 s, any human may get the offer and it
+//!     comes back at once; the scripted pads accept it and swing and
+//!     block (`scripted_hero_pad`), and some human must have swung or
+//!     blocked as a hero (`hero_frames`, `melee_frames` per peer)
 //!   --peer-assets A,B,..  --peer-missions M,N,..: each peer loads its own
 //!     copy of the game (node 0 = the host takes the first entry, guest i
 //!     the i-th; guests past the list cycle through entries 1..), e.g. a
@@ -24,6 +31,16 @@
 //!   --perturb-at T: the instrument check; at host tick T guest 1's sim is
 //!     nudged (a unit moved 1 cm), so the run must report mismatches and a
 //!     desync (and that guest rejoins); exits non-zero like any failure
+//!   --perturb-host T: at host tick T the host's own sim is nudged the same
+//!     way: the host's self-check must find its game parted and correct it
+//!     (`host_corrections` 1), no guest may be told of a desync, rejoin or
+//!     leave for the lobby, and no hash may differ after the correction
+//!     (mismatches before it are the nudge's and expected)
+//!   --check-thread: the host's self-check runs as the window's does (a
+//!     worker thread: from its checkpoint, or loading the map again,
+//!     `round_setup::rebuilder`, without one) instead of inline; the run
+//!     then depends on wall time. `host_check` in the summary gives each
+//!     check's wall time and where its replay started
 //! Events are at host ticks; a time past --ticks is skipped. The last
 //! guest joins mid-round, guest 1 asks for cheats, guest 2 is cut and
 //! reconnects (with 2 or fewer guests the roles fold onto the ones there).
@@ -59,7 +76,11 @@ pub(super) struct SoakArgs {
     pub budget: usize,
     pub out: Option<PathBuf>,
     pub perturb_at: Option<u32>,
+    pub perturb_host: Option<u32>,
+    pub check_thread: bool,
     pub predict: bool,
+    pub draw: bool,
+    pub heroes: bool,
     pub peer_assets: Vec<PathBuf>,
     pub peer_missions: Vec<PathBuf>,
     pub report_dir: Option<PathBuf>,
@@ -88,7 +109,11 @@ impl Default for SoakArgs {
             budget: 300,
             out: None,
             perturb_at: None,
+            perturb_host: None,
+            check_thread: false,
             predict: false,
+            draw: false,
+            heroes: false,
             peer_assets: Vec::new(),
             peer_missions: Vec::new(),
             report_dir: None,
@@ -127,7 +152,11 @@ impl SoakArgs {
                 "--budget" => a.budget = val()?.parse()?,
                 "--out" => a.out = Some(val()?.into()),
                 "--perturb-at" => a.perturb_at = Some(val()?.parse()?),
+                "--perturb-host" => a.perturb_host = Some(val()?.parse()?),
+                "--check-thread" => a.check_thread = true,
                 "--predict" => a.predict = true,
+                "--draw" => a.draw = true,
+                "--heroes" => a.heroes = true,
                 "--peer-assets" => a.peer_assets = val()?.split(',').map(PathBuf::from).collect(),
                 "--peer-missions" => {
                     a.peer_missions = val()?.split(',').map(PathBuf::from).collect()
@@ -137,6 +166,7 @@ impl SoakArgs {
             }
         }
         anyhow::ensure!((2..=16).contains(&a.peers), "--peers wants 2..=16");
+        anyhow::ensure!(!a.draw || a.predict, "--draw wants --predict");
         anyhow::ensure!(
             a.peer_missions.is_empty() || a.peer_missions.len() == a.peer_assets.len(),
             "--peer-missions wants one entry per --peer-assets entry"
@@ -250,6 +280,8 @@ fn stats_ms(v: &[f64]) -> serde_json::Value {
 pub(super) fn run(args: &[String]) -> Result<()> {
     let mut a = SoakArgs::parse(args)?;
     let perturbed = a.perturb_at;
+    let host_perturbed = a.perturb_host;
+    let mut host_nudged: Option<u32> = None;
     let wall = std::time::Instant::now();
     let dir = a.assets.join(&a.map);
     let (scene, load) = game::assets::load_battle_scene(&dir, &a.mode)
@@ -292,6 +324,14 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         },
     );
     vnet.predict = a.predict;
+    if a.check_thread {
+        vnet.set_host_rebuild(Some(super::round_setup::rebuilder(
+            a.assets.clone(),
+            a.missions.clone(),
+        )));
+    }
+    vnet.draw = a.draw;
+    vnet.heroes = a.heroes;
     let guests = a.peers - 1;
     let late = guests; // node index of the mid-round joiner
     let starters = if guests >= 2 { guests - 1 } else { guests };
@@ -309,11 +349,21 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             .all(|n| n.peer.local_slot != 0)),
         "guests were not welcomed"
     );
+    let mut session = ui::shell::SessionOptions::default();
+    if a.heroes {
+        // Unlock by timer after 1 s, any eligible human, offered again at
+        // once after the hero is gone.
+        session.heroes = true;
+        session.hero_unlock = 5;
+        session.hero_unlock_val = 1;
+        session.hero_assign = 7;
+        session.hero_respawn = 0;
+    }
     let mut setup = RoundSetup::instant_action(
         &a.map,
         &a.mode,
         armies.clone(),
-        &ui::shell::SessionOptions::default(),
+        &session,
         &game::profile::Profile::default(),
     );
     let stamina = u32::from(cheat_index("stamina").expect("stamina"));
@@ -350,6 +400,9 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     // The guest tick the perturbation's nudge first shows in.
     let mut nudged_tick: Option<u32> = None;
     let target = a.ticks;
+    // The host's self-checks' wall time (ms), as they finish.
+    let mut check_started: Option<std::time::Instant> = None;
+    let mut check_wall_ms: Vec<f64> = Vec::new();
     let limit_ms = u64::from(target) * 34 + 120_000;
     let mut ms = 0u64;
     while vnet.host_tick() < target && ms < limit_ms {
@@ -402,6 +455,15 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 }
             }
         }
+        if a.perturb_host.is_some_and(|p| t >= p) {
+            if let Some(w) = vnet.nodes[0].walk.as_mut() {
+                if let Some(u) = w.sim.units.iter_mut().find(|u| u.alive) {
+                    u.soldier.pos.x += 0.01;
+                    a.perturb_host = None;
+                    host_nudged = Some(vnet.nodes[0].peer.next_tick());
+                }
+            }
+        }
         if !done[5] && t >= a.rejoin_at {
             done[5] = true;
             vnet.reconnect(cut, scripted_profile(cut as u8).encode());
@@ -409,6 +471,14 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         }
         vnet.step();
         ms += 1;
+        match (vnet.nodes[0].peer.checking(), check_started) {
+            (true, None) => check_started = Some(std::time::Instant::now()),
+            (false, Some(t)) => {
+                check_wall_ms.push((t.elapsed().as_secs_f64() * 1e4).round() / 10.0);
+                check_started = None;
+            }
+            _ => {}
+        }
         if ms.is_multiple_of(33) {
             if let Some(w) = vnet.nodes[0].walk.as_ref() {
                 if cheat_sample.is_none() && vnet.host_tick() >= a.deny_at.max(a.request_at) + 30 {
@@ -451,6 +521,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             .all(|n| n.peer.next_tick() >= last)
     });
     a.perturb_at = perturbed;
+    a.perturb_host = host_perturbed;
     // Desync rows' cost (`netplay::desync::row_of`, every stepped tick of a
     // lockstep round): 300 rows of the host's final state.
     let row_us = vnet.nodes[0].walk.as_ref().map(|w| {
@@ -474,7 +545,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         cut,
         asker,
         cheat_sample,
-        (row_us, nudged_tick),
+        (row_us, nudged_tick, host_nudged),
+        &check_wall_ms,
     )
 }
 
@@ -491,7 +563,8 @@ fn summarize(
     cut_node: usize,
     asker_node: usize,
     cheat_sample: Option<(u32, u32)>,
-    (row_us, nudged_tick): (Option<f64>, Option<u32>),
+    (row_us, nudged_tick, host_nudged): (Option<f64>, Option<u32>, Option<u32>),
+    check_wall_ms: &[f64],
 ) -> Result<()> {
     let cut = usize::from(vnet.nodes[cut_node].peer.local_slot);
     let asker = vnet.nodes[asker_node].peer.local_slot;
@@ -566,7 +639,9 @@ fn summarize(
                 "predict_ms": stats_ms(&n.predict_ms),
                 "predict_depth": stats_ms(&n.predict_depth.iter().map(|d| f64::from(*d)).collect::<Vec<_>>()),
                 "predict_off_frames": n.predict_off,
-                "predict_corrections": n.predictor.as_ref().map_or(0, |p| p.stats.corrections),
+                "predict_corrections": n.view.as_ref().map_or(0, |v| v.predictor.stats.corrections),
+                "hero_frames": n.hero_frames,
+                "melee_frames": n.melee_frames,
                 "catch_up": cu,
                 "bytes_out_per_s": (n.bytes_out as f64 / secs).round(),
                 "bytes_in_per_s": (n.bytes_in as f64 / secs).round(),
@@ -578,11 +653,59 @@ fn summarize(
     let checks = &vnet.checker;
     let joiner_moved = joiner.map_or(0.0, |j| j.1);
     let mut failures = Vec::new();
-    if checks.mismatch_count > 0 {
+    let corrected_from = host.peer.trusted_from();
+    let lobby_moves = vnet
+        .nodes
+        .iter()
+        .flat_map(|n| n.log.iter())
+        .filter(|(_, l)| l.contains("DesyncAgain") || l.contains("LeftRound"))
+        .count();
+    let guest_builds: usize = vnet.nodes[1..].iter().map(|n| n.builds.len()).sum();
+    if a.perturb_host.is_some() {
+        // The nudge's own mismatches come before the correction.
+        if host.peer.stats.host_divergences != 1 || host.peer.corrections() != 1 {
+            failures.push(format!(
+                "{} host corrections, want 1",
+                host.peer.stats.host_divergences
+            ));
+        }
+        if checks
+            .last_mismatch_tick
+            .is_some_and(|t| t >= corrected_from)
+        {
+            failures.push(format!(
+                "a hash mismatch at tick {:?}, after the correction at {corrected_from}",
+                checks.last_mismatch_tick
+            ));
+        }
+        if lobby_moves > 0 {
+            failures.push(format!("{lobby_moves} lobby moves"));
+        }
+        if host.peer.stats.host_check_failures > 0 {
+            failures.push(format!(
+                "{} self-checks without a verdict",
+                host.peer.stats.host_check_failures
+            ));
+        }
+    } else if checks.mismatch_count > 0 {
         failures.push(format!("{} hash mismatches", checks.mismatch_count));
     }
     if desyncs > 0 {
         failures.push(format!("{desyncs} desync events"));
+    }
+    let draws = &vnet.draws;
+    if draws.changed > 0 {
+        failures.push(format!(
+            "{} drawn frames changed the sim's hash",
+            draws.changed
+        ));
+    }
+    if a.draw && draws.swapped == 0 {
+        failures.push("no frame drew the predicted local pose".to_owned());
+    }
+    let melee_frames: u64 = vnet.nodes.iter().map(|n| n.melee_frames).sum();
+    if a.heroes && melee_frames == 0 {
+        failures.push("no human hero swung or blocked".to_owned());
     }
     if !digests_equal {
         failures.push("static digests differ".to_owned());
@@ -639,6 +762,27 @@ fn summarize(
         "mismatches": checks.mismatch_count,
         "first_mismatches": checks.mismatches,
         "desync_events": desyncs,
+        "host_divergences": vnet.nodes[0].peer.stats.host_divergences,
+        "host_check": {
+            "checks": host.peer.stats.host_checks,
+            "corrections": host.peer.corrections(),
+            "corrected_from": corrected_from,
+            "last_mismatch_tick": checks.last_mismatch_tick,
+            "lobby_moves": lobby_moves,
+            "guest_builds": guest_builds,
+            "perturbed_host": a.perturb_host,
+            "perturbed_host_tick": host_nudged,
+            "failures": host.peer.stats.host_check_failures,
+            "checkpoints": host.peer.stats.checkpoints,
+            "checkpoint_tick": host.peer.checkpoint_tick(),
+            "last_check_tick": host.peer.stats.last_check_tick,
+            "last_check_from": host.peer.stats.last_check_from,
+            "last_check_ticks": host.peer.stats.last_check_ticks,
+            "check_wall_ms": check_wall_ms,
+        },
+        "draw": { "frames": draws.frames, "swapped": draws.swapped, "changed": draws.changed, "first_changed": draws.first_changed },
+        "heroes": a.heroes,
+        "melee_frames": melee_frames,
         "static_digest": host_digest.map(|d| format!("{d:016x}")),
         "static_digests_equal": digests_equal,
         "joins": joins,

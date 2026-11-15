@@ -140,6 +140,7 @@ impl TickHook<'_> {
         }
         st.previous_mount = walk.sim.unit(walk.player).and_then(|u| u.mount);
         if let Some(m) = self.matchlog.as_deref_mut() {
+            m.follow_slot(walk.local_slot);
             m.tick(&walk.sim, &st.tick_pad);
             if walk.sim.outcome.is_some() && !m.written() {
                 if let Some(p) = m.write(&walk.sim, "outcome") {

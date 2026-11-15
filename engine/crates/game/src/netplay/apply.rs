@@ -89,6 +89,10 @@ pub fn install_humans(walk: &mut WalkSim, setup: &RoundSetup) -> anyhow::Result<
     };
     walk.sim.cheats = core::sim::Cheats::default();
     walk.sim.team_handicap_on = setup.team_handicap;
+    // Issue #171 option C: the LAN rows (`Difficulty::lan_even_rows`). The
+    // game's round build sets it before the opening wave
+    // (`BattleSetup::netplay_rows`); this keeps a walk built elsewhere LAN.
+    walk.sim.netplay_rows = true;
     let mut seats: Vec<_> = setup.humans.iter().collect();
     seats.sort_by_key(|h| h.slot);
     for h in seats {
@@ -102,6 +106,30 @@ pub fn install_humans(walk: &mut WalkSim, setup: &RoundSetup) -> anyhow::Result<
     let local = walk.local_slot;
     walk.set_local_slot(local);
     Ok(())
+}
+
+/// The humans [`install_humans`] will seat besides slot 0, per team, when
+/// slot 0 plays on `host_team`: the same seat order (by slot) and the same
+/// auto-team rule as [`core::sim::Sim::join_human`] (a seat without a team
+/// takes team 1 only while it has fewer humans than team 0). The round
+/// build counts them for the opening wave (issue #171), which spawns
+/// before they are seated: a bot takes its skill at spawn.
+pub fn joining_humans(setup: &RoundSetup, host_team: u8) -> [u8; 2] {
+    let mut seated = [0u8; 2];
+    seated[usize::from(host_team.min(1))] = 1;
+    let mut joining = [0u8; 2];
+    let mut seats: Vec<_> = setup.humans.iter().filter(|h| h.slot != 0).collect();
+    seats.sort_by_key(|h| h.slot);
+    for h in seats {
+        let team = usize::from(
+            h.team
+                .filter(|t| *t < 2)
+                .unwrap_or_else(|| u8::from(seated[1] < seated[0])),
+        );
+        seated[team] = seated[team].saturating_add(1);
+        joining[team] = joining[team].saturating_add(1);
+    }
+    joining
 }
 
 /// Apply one session command before its tick's step (every peer alike).

@@ -1,16 +1,38 @@
 //! The BF2 profile picker, name keyboard, difficulty and delete confirmation.
 
 use crate::{
-    hud_draw::{run_width, Ctx, Screen},
+    hud_draw::{Ctx, Screen},
     hud_tree::{HAlign, FRAME_H, FRAME_W},
     input_icons::{pad_sheet, IconSet, PadButton, Prompt},
-    spawn_draw::{
-        item_pieces, BUTTON_FONT, HELP_Y, LABEL_STRETCH, ROW_H, ROW_PITCH, SAFE_X, SELECTED_TEXT,
-        SMALL_FONT, SMALL_STRETCH, TITLE_PIECES, TITLE_TEXT, UNSELECTED_TEXT,
-    },
+    scroll::{ScrollView, MARGIN},
+    spawn_draw::{item_pieces, HELP_Y, ROW_H, ROW_PITCH, SAFE_X, TITLE_PIECES},
+    typography::{tint, BODY, ITEM, TEXT_INSET, TITLE},
 };
 
 const SHOWN: usize = 5;
+/// The list window "Pick a Profile" draws its names in: five rows of the
+/// font's height + 6 (28) and 30 more, 170 tall (`ifs_login` main.f44;
+/// `[M]` `profile_pick.png`: the window's border 106..288 px, 99..269
+/// units).
+const LIST_WINDOW: [f32; 4] = [104.0, 98.0, 408.0, 268.0];
+/// The names inside it: the list 260 wide in the 295-wide window, so
+/// 17.5 / 295 of the window in from either side, and from half of the 30
+/// below its top, one row of 28 after another.
+const LIST_IN: f32 = 18.0;
+const LIST_PAD: f32 = 15.0;
+const LIST_ROW: f32 = 28.0;
+/// The name keyboard's box, and the typed name's field inside it, clear of
+/// the box's border line as the frame's field is (`profile_name.png`).
+const NAME_BOX: [f32; 4] = [24.0, 134.0, 488.0, 341.0];
+/// OURS: 12 in from the box's sides and 6 below its top, 22 tall. `[M]`
+/// `profile_name.png`: the frame's field outline runs 40..600 px across and
+/// 93..143 px down inside the box's border at 27..612 px and 82 px, so
+/// about 10 units in from each side and the top, 47 units tall.
+/// measure: fit the field to the frame's insets and height with the box.
+const NAME_FIELD: [f32; 4] = [36.0, 140.0, 476.0, 162.0];
+/// "Create" just below the window, inset as the frame's bar is (`[M]`
+/// `profile_pick.png`: 296..326 px down, from 137 px across).
+const CREATE: [f32; 4] = [110.0, 276.0, 402.0, 304.0];
 const COLUMNS: usize = 13;
 const KEYS: [&str; 2] = [
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
@@ -54,7 +76,8 @@ pub struct Picker {
     pub page: Page,
     pub focus: Target,
     pub message: Option<String>,
-    first: usize,
+    /// The name list's view ([`crate::scroll`]).
+    view: ScrollView,
 }
 
 impl Picker {
@@ -64,7 +87,7 @@ impl Picker {
             page: Page::List,
             focus: Target::Create,
             message: None,
-            first: 0,
+            view: ScrollView::default(),
         };
         if let Some(index) = picker
             .names
@@ -73,15 +96,45 @@ impl Picker {
             .or_else(|| (!picker.names.is_empty()).then_some(0))
         {
             picker.set_focus(Target::Profile(index));
+            picker.view.snap();
         }
         picker
     }
 
+    /// Focus `target` from the keys or the pad: the list scrolls as little
+    /// as keeps it a row inside the window.
     pub fn set_focus(&mut self, target: Target) {
+        self.focus_with(target, MARGIN);
+    }
+
+    /// Focus `target` under the pointer: the list stays where it is (a row
+    /// the window cuts comes fully in).
+    pub fn point_focus(&mut self, target: Target) {
+        self.focus_with(target, 0);
+    }
+
+    fn focus_with(&mut self, target: Target, margin: usize) {
         self.focus = target;
         if let Target::Profile(i) = target {
-            self.first = self.first.min(i).max((i + 1).saturating_sub(SHOWN));
+            self.view.reveal(i, self.names.len(), SHOWN, margin);
         }
+    }
+
+    /// The wheel: `lines` (> 0 up) scroll the names, not the focus.
+    pub fn wheel(&mut self, lines: f32) {
+        if matches!(self.page, Page::List) {
+            self.view.wheel(lines, self.names.len(), SHOWN);
+        }
+    }
+
+    /// Ease the list's view over `dt` seconds.
+    pub fn advance(&mut self, dt: f32) {
+        self.view.advance(dt);
+    }
+
+    /// The first name at least partly shown.
+    fn first(&self) -> usize {
+        self.view.first()
     }
 
     pub fn selected(&self) -> Option<(u64, &str)> {
@@ -156,7 +209,7 @@ impl Picker {
         }
         let current = match self.focus {
             Target::Profile(i) => i,
-            _ => self.first,
+            _ => self.first(),
         };
         let next = current
             .saturating_add_signed(direction * SHOWN as isize)
@@ -237,23 +290,31 @@ impl Picker {
         };
         match &self.page {
             Page::List => {
-                for (offset, (_, name)) in
-                    self.names.iter().skip(self.first).take(SHOWN).enumerate()
-                {
+                let [left, top, right, _] = LIST_WINDOW;
+                let offset = self.view.offset();
+                let list_row = |i: f32| {
+                    let y = top + LIST_PAD + i * LIST_ROW;
+                    [left + LIST_IN, y, right - LIST_IN, y + LIST_ROW]
+                };
+                for k in self.view.visible(self.names.len(), SHOWN) {
                     push(
-                        row(offset),
-                        Target::Profile(self.first + offset),
-                        name.clone(),
+                        list_row(k as f32 - offset),
+                        Target::Profile(k),
+                        self.names[k].1.clone(),
                     );
                 }
-                if self.first > 0 {
-                    push([415.0, 100.0, 449.0, 128.0], Target::Previous, "^".into());
+                let arrow = |[_, y0, _, y1]: [f32; 4]| [415.0, y0, 449.0, y1];
+                if offset > 0.01 {
+                    push(arrow(list_row(0.0)), Target::Previous, "^".into());
                 }
-                if self.first + SHOWN < self.names.len() {
-                    push([415.0, 228.0, 449.0, 256.0], Target::Next, "v".into());
+                if offset + (SHOWN as f32) < self.names.len() as f32 - 0.01 {
+                    push(
+                        arrow(list_row((SHOWN - 1) as f32)),
+                        Target::Next,
+                        "v".into(),
+                    );
                 }
-                let [x, y, w, h] = row(SHOWN);
-                push([x, y + 6.0, w, h + 6.0], Target::Create, "Create".into());
+                push(CREATE, Target::Create, "Create".into());
                 if self.selected().is_some() {
                     push(
                         [369.0, 366.0, 497.0, 394.0],
@@ -322,7 +383,11 @@ impl Picker {
         self.layout()
             .into_iter()
             .find_map(|([x0, y0, x1, y1], target, _)| {
-                (x >= x0 && x <= x1 && y >= y0 && y <= y1).then_some(target)
+                // A name counts only inside the list's window.
+                let window = LIST_WINDOW[1] + LIST_PAD;
+                let shown = !matches!(target, Target::Profile(_))
+                    || (window..=window + SHOWN as f32 * LIST_ROW).contains(&y);
+                (shown && x >= x0 && x <= x1 && y >= y0 && y <= y1).then_some(target)
             })
     }
 }
@@ -360,26 +425,13 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
         Page::Difficulty(_) => ("Select Difficulty", 104.0, 408.0, 122.0),
         Page::Delete(_) => ("Delete Profile", 104.0, 408.0, 122.0),
     };
-    ctx.bar(&s, [left, top, right, top + 28.0], TITLE_PIECES);
-    ctx.label(
-        &s,
-        BUTTON_FONT,
-        title,
-        (256.0, top + 2.0),
-        HAlign::Center,
-        TITLE_TEXT,
-    );
+    let bar = [left, top, right, top + ROW_H];
+    ctx.bar(&s, bar, TITLE_PIECES);
+    ctx.text_in(&s, &TITLE, title, bar, tint::TITLE);
     if let Page::Name { text, .. } = &picker.page {
-        ctx.bordered(&s, [24.0, 134.0, 488.0, 341.0]);
-        ctx.bar(&s, [left, 136.0, right, 160.0], item_pieces(false));
-        ctx.label(
-            &s,
-            SMALL_FONT,
-            text,
-            (256.0, 140.0),
-            HAlign::Center,
-            SELECTED_TEXT,
-        );
+        ctx.bordered(&s, NAME_BOX);
+        ctx.bar(&s, NAME_FIELD, item_pieces(false));
+        ctx.text_in(&s, &ITEM, text, NAME_FIELD, tint::SELECTED);
     }
     if let Page::Delete(id) = picker.page {
         let name = picker
@@ -387,26 +439,35 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
             .iter()
             .find(|(key, _)| *key == id)
             .map_or("", |(_, name)| name.as_str());
-        ctx.label(
+        let line = [104.0, 166.0, 408.0, 166.0 + BODY.size];
+        ctx.text_in(
             &s,
-            SMALL_FONT,
+            &BODY,
             &format!("Delete {name}?"),
-            (256.0, 166.0),
-            HAlign::Center,
-            UNSELECTED_TEXT,
+            line,
+            tint::UNSELECTED,
         );
     }
-    if matches!(picker.page, Page::List) {
-        ctx.bordered(&s, [left, 98.0, right, 263.0]);
+    let list = matches!(picker.page, Page::List);
+    if list {
+        ctx.bordered(&s, LIST_WINDOW);
     }
+    // The names scroll inside the window: cut them at its rows.
+    let [_, wy0] = s.map(glam::Vec3::new(0.0, LIST_WINDOW[1] + LIST_PAD, 0.0));
+    let [_, wy1] = s.map(glam::Vec3::new(
+        0.0,
+        LIST_WINDOW[1] + LIST_PAD + SHOWN as f32 * LIST_ROW,
+        0.0,
+    ));
     for (rect, target, text) in picker.layout() {
         let focused = target == picker.focus;
-        let style = if focused {
-            SELECTED_TEXT
-        } else {
-            UNSELECTED_TEXT
-        };
         let name = matches!(target, Target::Profile(_));
+        ctx.clip = name.then_some([f32::MIN, wy0, f32::MAX, wy1]);
+        let style = if focused {
+            tint::SELECTED
+        } else {
+            tint::UNSELECTED
+        };
         if (focused || !name) && !matches!(target, Target::Key(_)) {
             ctx.bar_tinted(
                 &s,
@@ -420,7 +481,7 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
         } else if focused {
             ctx.bordered(&s, rect);
         }
-        let font = if matches!(
+        let role = if matches!(
             target,
             Target::Key(_)
                 | Target::Cancel
@@ -429,9 +490,9 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
                 | Target::Symbols
                 | Target::Delete
         ) {
-            SMALL_FONT
+            &BODY
         } else {
-            BUTTON_FONT
+            &ITEM
         };
         let icon = match target {
             Target::Delete => Some(ctx.art.icons.sheet(Prompt::Done)),
@@ -455,34 +516,16 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
         } else {
             ((rect[0] + rect[2]) * 0.5, HAlign::Center)
         };
-        if let Some(glyphs) = ctx.font(font) {
-            let stretch = if font == BUTTON_FONT {
-                LABEL_STRETCH
-            } else {
-                SMALL_STRETCH
-            };
-            let width = run_width(glyphs, &text, stretch, false).max(1.0);
-            let height = f32::from(glyphs.line_height).max(1.0);
-            let margin = if icon.is_some() { 32.0 } else { 20.0 };
-            let scale = ((rect[2] - rect[0] - margin) / width)
-                .min((rect[3] - rect[1] - 4.0) / height)
-                .min(1.0);
-            let y = (rect[1] + rect[3] - height * scale) * 0.5;
-            let mut text_screen = s;
-            text_screen.origin[0] += x * s.scale[0] * (1.0 - scale);
-            text_screen.scale[0] *= scale;
-            ctx.label_scaled(&text_screen, font, &text, (x, y), align, style, scale);
-        }
+        // Never smaller: a name wider than its row ends in an ellipsis.
+        let margin = if icon.is_some() { 32.0 } else { 20.0 };
+        let text = ctx.ellipsized(role, &text, rect[2] - rect[0] - margin + 2.0 * TEXT_INSET);
+        let y = (rect[1] + rect[3] - role.size) * 0.5;
+        ctx.text(&s, role, &text, (x, y), align, style);
     }
+    ctx.clip = None;
     if let Some(message) = &picker.message {
-        ctx.label(
-            &s,
-            SMALL_FONT,
-            message,
-            (256.0, 343.0),
-            HAlign::Center,
-            TITLE_TEXT,
-        );
+        let line = [24.0, 343.0, 488.0, 343.0 + BODY.size];
+        ctx.text_in(&s, &BODY, message, line, tint::TITLE);
     }
     let height = FRAME_H * s.scale[1];
     let bottom = s.origin[1] + height;
@@ -502,7 +545,7 @@ mod tests {
             Some(12),
         );
         assert_eq!(pick.selected(), Some((12, "Player 12")));
-        assert_eq!(pick.first, 8);
+        assert_eq!(pick.first(), 8);
         pick.page_list(-1);
         assert_eq!(pick.selected(), Some((7, "Player 7")));
         for size in [[640.0, 480.0], [1920.0, 1080.0], [600.0, 900.0]] {
@@ -517,6 +560,51 @@ mod tests {
         assert_eq!(pick.focus, Target::Create);
         pick.move_focus(0, 1);
         assert_eq!(pick.focus, Target::Profile(0));
+    }
+
+    /// The names sit inside the list window, clear of its border line (the
+    /// line is drawn 0.5-2.5 units inside the window's edge), and Create
+    /// sits below it.
+    #[test]
+    fn profile_rows_fit_inside_the_list_window() {
+        let pick = Picker::new((0..7).map(|i| (i, format!("Player {i}"))).collect(), None);
+        let [wx0, wy0, wx1, wy1] = LIST_WINDOW;
+        let mut names = 0;
+        for ([x0, y0, x1, y1], target, _) in pick.layout() {
+            match target {
+                Target::Profile(_) => {
+                    names += 1;
+                    for (side, gap) in [
+                        ("left", x0 - wx0),
+                        ("top", y0 - wy0),
+                        ("right", wx1 - x1),
+                        ("bottom", wy1 - y1),
+                    ] {
+                        assert!(gap >= 4.0, "{target:?}: {side} gap {gap}");
+                    }
+                }
+                Target::Create => assert!(y0 >= wy1 + 4.0, "Create at {y0}"),
+                _ => {}
+            }
+        }
+        assert_eq!(names, SHOWN);
+        // The name keyboard: the typed name's field and the keys' row of
+        // buttons inside the box, the field above the first key row.
+        let [bx0, by0, bx1, by1] = NAME_BOX;
+        let [fx0, fy0, fx1, fy1] = NAME_FIELD;
+        assert!(fx0 - bx0 >= 4.0 && fy0 - by0 >= 4.0 && bx1 - fx1 >= 4.0);
+        let mut pick = pick;
+        pick.edit_name("Player 1".into());
+        for ([x0, y0, x1, y1], target, _) in pick.layout() {
+            if matches!(target, Target::Symbols) {
+                continue;
+            }
+            assert!(
+                x0 - bx0 >= 4.0 && bx1 - x1 >= 4.0 && by1 - y1 >= 4.0,
+                "{target:?}"
+            );
+            assert!(y0 >= fy1, "{target:?} under the name field");
+        }
     }
 
     #[test]

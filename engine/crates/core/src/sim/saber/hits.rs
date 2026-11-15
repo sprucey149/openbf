@@ -232,7 +232,7 @@ impl Sim {
             struck = true;
             if let Target::Unit(h) = target {
                 if attack.push != 0.0 {
-                    self.hero_knock(h, direction, attack.push);
+                    self.hero_knock(h, direction, attack.push, owner);
                 }
             }
         }

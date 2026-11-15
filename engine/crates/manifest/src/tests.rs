@@ -710,6 +710,7 @@ fn head_reads_a_full_manifest() {
 fn a_manifest_missing_every_defaulted_field_still_loads() {
     let old = r#"(
     map: "tat1",
+    source_game: "bf1",
     terrain_name: Some("tat1"),
     sky_name: None,
     terrain_glb: None,
@@ -722,7 +723,6 @@ fn a_manifest_missing_every_defaulted_field_still_loads() {
 )"#;
     let m: Manifest = ron::from_str(old).expect("pre-P4 manifest must still load");
     assert_eq!(m.map, "tat1");
-    // source_game defaults to bf1: every bake that predates the field was BF1.
     assert_eq!(m.source_game, "bf1");
     assert!(m.transparent.is_empty());
     assert!(m.texture_tiers.is_empty());
@@ -741,6 +741,16 @@ fn a_manifest_missing_every_defaulted_field_still_loads() {
     assert_eq!(m.lighting.source, "default");
     // A head parse of the same old text agrees.
     assert_eq!(head_of(old).source_game, "bf1");
+}
+
+/// A manifest without `source_game` is refused: every bake writes it, and a
+/// guessed game would label a broken BF2 manifest BF1.
+#[test]
+fn a_manifest_without_its_source_game_is_refused() {
+    let text = r#"(map: "tat1", terrain_name: None, sky_name: None, terrain_glb: None,
+        models: [], textures: [], classes: [], geometries: [], regions: [], instances: [])"#;
+    assert!(ron::from_str::<Manifest>(text).is_err());
+    assert!(ron::from_str::<ManifestHead>(r#"(map: "tat1")"#).is_err());
 }
 
 /// The same for the nested types' own defaults, which the manifest-level

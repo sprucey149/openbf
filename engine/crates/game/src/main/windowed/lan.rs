@@ -28,17 +28,32 @@
 //! - Joins, leaves, refusals and desyncs are HUD lines; a session that ends
 //!   (the host left, kicked, fell behind, rejected, timed out) shows a
 //!   centred banner for [`ENDED_SECS`] and returns to the shell.
+//! - A round start (not a join or a rejoin) is one moment everywhere: each
+//!   peer plays at least its loading presentation, builds and reports
+//!   `Loaded`, and holds its last image until the host's `Start` names
+//!   tick 0 ([`NetplaySession::start_at`]); then every screen goes to the
+//!   battle together. Only the host skips the presentation (the
+//!   single-player two presses), and its skip ends every peer's
+//!   (`Peer::skip_loading`); the build and the start are unchanged. A
+//!   guest's presses do nothing. A peer still building then (the
+//!   barrier's timeout) enters when built, behind its spawn screen. Joins
+//!   enter as soon as they are built and catch up.
 //! - Between rounds every peer waits in the lobby (`lobby.rs`): a round's
 //!   end, a copy that plays differently (§4.3: the host benches that guest
 //!   and tells it which group differs; a mid-round joiner's build is
 //!   checked too), a map a mid-round joiner lacks, a round a
-//!   guest could not build or a second desync within 5 minutes (§4.7). A
+//!   guest could not build or a guest's second desync in one round (within
+//!   5 minutes, §4.7). A
 //!   guest that leaves a round on its own tells the host, which benches it
 //!   so its barrier and seat do not wait.
 //!   The host ends a decided round with `EndRound` and keeps the round's
 //!   ready check ([`NetplaySession::round_decided`]).
 //! - A desync rejoin rebuilds the round in play: the abandoned copy is not
 //!   recorded into the career (the rebuilt one is, at its outcome).
+//! - The host checks its own game first on a desync (`netplay::selfcheck`,
+//!   a worker thread with its own copy of the map,
+//!   `round_setup::rebuilder`): a host game that parted is corrected in
+//!   place and the guests play on; a second in one round ends it.
 
 use super::{App, Screen};
 use anyhow::{bail, Context, Result};
@@ -239,6 +254,9 @@ pub(super) struct NetplaySession {
     pub profile: PlayerProfile,
     /// The round the loading screen is building.
     pub loading: Option<RoundSetup>,
+    /// The round's start (`Notice::Started`): when it was heard and how
+    /// long after that tick 0 begins. Every peer's loading screen ends then.
+    pub start: Option<(Instant, f64)>,
     /// The host started its round.
     started: bool,
     pub meter: NetMeter,
@@ -262,6 +280,10 @@ pub(super) struct NetplaySession {
     /// The round id of the last `LoadRound` (a joining one with the same
     /// id is a rejoin of the round in play).
     round_in_play: Option<u32>,
+    /// Every human's session name this peer has heard, by slot: the
+    /// rounds' seats, the joins and the roster (issue #168). Kept after a
+    /// player leaves, for his lines and the stats pages. Presentation only.
+    names: std::collections::BTreeMap<u8, String>,
 }
 
 impl NetplaySession {
@@ -300,7 +322,13 @@ impl NetplaySession {
         );
         let content = game::netplay::ContentManifest::scan(&args.assets);
         let link = NetLink::Host(NetSession::host(config, transport));
-        let mut n = Self::with(args, profile, link, Peer::host(), status);
+        let mut peer = Peer::host();
+        // Its self-check rebuilds rounds as every peer does (module rules).
+        peer.rebuild = Some(super::super::round_setup::rebuilder(
+            args.assets.clone(),
+            args.missions.clone(),
+        ));
+        let mut n = Self::with(args, profile, link, peer, status);
         n.lobby.content = content;
         n.lobby.max_players = max_players;
         n.lobby.lag_comp = lag_comp;
@@ -344,6 +372,7 @@ impl NetplaySession {
             args,
             profile,
             loading: None,
+            start: None,
             started: false,
             meter: NetMeter::default(),
             banner: None,
@@ -357,7 +386,16 @@ impl NetplaySession {
             status,
             lobby: Default::default(),
             round_in_play: None,
+            names: Default::default(),
         }
+    }
+
+    /// When this peer's loading screen ends for the round's start (module
+    /// rules): `Start` heard plus its wait. None before `Start`.
+    pub fn start_at(&self) -> Option<Instant> {
+        // The wait is a `u32` of microseconds over 1e6: never negative.
+        self.start
+            .map(|(heard, wait)| heard + std::time::Duration::from_secs_f64(wait))
     }
 
     pub fn is_host(&self) -> bool {
@@ -491,13 +529,34 @@ impl NetplaySession {
         self.peer
             .guests()
             .get(&slot)
-            .map_or_else(|| format!("Player {slot}"), |g| g.name.clone())
+            .map(|g| g.name.clone())
+            .or_else(|| self.names.get(&slot).cloned())
+            .unwrap_or_else(|| format!("Player {}", u32::from(slot) + 1))
+    }
+
+    /// Every human's session name this peer has heard, by slot (the kill
+    /// feed's and the stats pages' names, issue #168).
+    pub fn names(&self) -> &std::collections::BTreeMap<u8, String> {
+        &self.names
+    }
+
+    /// Learns the names of the roster as it stands (the host's own, or
+    /// the one the host last sent).
+    fn learn_names(&mut self) {
+        for p in self.roster() {
+            if self.names.get(&p.slot) != Some(&p.name) {
+                self.names.insert(p.slot, p.name);
+            }
+        }
     }
 
     /// One frame of the session's events: the rounds to build, the lines
     /// to show, the end.
     pub fn poll(&mut self) -> Vec<NetAction> {
         let mut out = Vec::new();
+        // Before this frame's notices: a guest who leaves now keeps the
+        // name the roster gave him.
+        self.learn_names();
         for n in self.peer.poll(&mut self.link) {
             match n {
                 Notice::Welcome { slot } => {
@@ -514,7 +573,11 @@ impl NetplaySession {
                         setup.mode,
                         if joining { " (joining)" } else { "" }
                     );
+                    self.start = None;
                     let rejoin = note_load(&mut self.round_in_play, round_id, joining);
+                    for h in &setup.humans {
+                        self.names.insert(h.slot, h.name.clone());
+                    }
                     out.push(NetAction::Load { setup, rejoin });
                 }
                 Notice::Rejected { reason, detail } => {
@@ -541,6 +604,7 @@ impl NetplaySession {
                     name,
                     reconnect,
                 } => {
+                    self.names.insert(slot, name.clone());
                     out.push(NetAction::Line(format!(
                         "{name} {}",
                         if reconnect { "reconnected" } else { "joined" }
@@ -637,6 +701,32 @@ impl NetplaySession {
                 Notice::DesyncAgain { tick } => out.push(NetAction::ToLobby(format!(
                     "Out of sync with the host again at tick {tick}; you join the next round"
                 ))),
+                Notice::HostDiverged { tick, .. } => {
+                    let line = if self.is_host() {
+                        format!("Your game fell out of sync at tick {tick} and was corrected")
+                    } else {
+                        "The host's game was corrected".to_owned()
+                    };
+                    self.banner = Some((line.clone(), Instant::now()));
+                    out.push(NetAction::Line(line));
+                }
+                Notice::RoundAbandoned { detail, .. } => {
+                    if !detail.is_empty() {
+                        println!("lan: round ended: {detail}");
+                    }
+                    let line = if self.is_host() {
+                        "Your game could not be kept in sync; the round ends".to_owned()
+                    } else {
+                        "The host's game could not be kept in sync; the round ends".to_owned()
+                    };
+                    self.banner = Some((line.clone(), Instant::now()));
+                    // Every peer stepped `EndRound`: the round's results,
+                    // as when it is decided (the host's ready check).
+                    out.push(NetAction::RoundOver(line));
+                }
+                Notice::SelfCheckFailed { tick, detail } => {
+                    println!("lan: the self-check at tick {tick} gave no verdict: {detail}");
+                }
                 Notice::LeftRound { slot, why, groups } => {
                     if !self.is_host() {
                         continue;
@@ -656,11 +746,11 @@ impl NetplaySession {
                             self.bench(
                                 slot,
                                 GameNotice::BackToLobby(format!(
-                                    "Your game parted from the host's twice in 5 minutes{parted}"
+                                    "Your game parted from the host's twice within 5 minutes{parted}"
                                 )),
                             );
                             format!(
-                                "{who} fell out of sync twice in 5 minutes{parted}; they wait in the lobby"
+                                "{who} fell out of sync twice within 5 minutes{parted}; they wait in the lobby"
                             )
                         }
                     };
@@ -674,7 +764,9 @@ impl NetplaySession {
                 Notice::Chat { slot, text } => {
                     out.push(NetAction::Line(format!("{}: {text}", self.name_of(slot))))
                 }
-                Notice::Started => {}
+                Notice::Started { begin_in_s } => {
+                    self.start = Some((Instant::now(), begin_in_s));
+                }
             }
         }
         out
@@ -689,6 +781,7 @@ impl NetplaySession {
     /// to build here.
     pub fn host_start(&mut self, setup: &RoundSetup) -> Result<RoundSetup> {
         self.started = true;
+        self.start = None;
         let bytes = self.peer.host_load(&mut self.link, setup);
         RoundSetup::decode(&bytes)
     }
@@ -1076,12 +1169,15 @@ pub(super) enum NetAction {
     Ended(String),
     /// Back to the lobby with this line (benched by the host).
     ToLobby(String),
+    /// The round ended without being decided (the host abandoned it): to
+    /// the lobby's results with this line, as after a decided round.
+    RoundOver(String),
 }
 
 /// Draws the net meter panel (top right, under the FPS counter's corner);
 /// `quality`: automatic quality's note (LAN §8b.2), its last line.
 pub(super) fn draw_meter(ctx: &ui::egui::Context, m: &NetMeter, quality: Option<&str>) {
-    use ui::egui::{Align2, Area, Color32, Frame, Id, Label, Margin, RichText, TextWrapMode};
+    use ui::egui::{Align2, Area, Color32, Frame, Id, Label, Margin, TextWrapMode};
     Area::new(Id::new("net_meter"))
         .interactable(false)
         .anchor(Align2::RIGHT_TOP, ui::egui::vec2(-8.0, 8.0))
@@ -1093,8 +1189,13 @@ pub(super) fn draw_meter(ctx: &ui::egui::Context, m: &NetMeter, quality: Option<
                     let quality = quality.map(|q| format!("quality: {q}"));
                     for line in m.lines().into_iter().chain(quality) {
                         ui.add(
-                            Label::new(RichText::new(line).monospace().size(12.0))
-                                .wrap_mode(TextWrapMode::Extend),
+                            Label::new(ui::typography::egui_text(
+                                ctx,
+                                &ui::typography::READOUT,
+                                ui::typography::tint::HELP,
+                                &line,
+                            ))
+                            .wrap_mode(TextWrapMode::Extend),
                         );
                     }
                 });
@@ -1109,7 +1210,7 @@ pub(super) fn draw_name_tags(
     tags: &[game::name_tags::NameTag],
     view_proj: glam::Mat4,
 ) {
-    use ui::egui::{Align2, Color32, FontId, Id, LayerId, Order};
+    use ui::egui::{Align2, Color32, Id, LayerId, Order};
     let screen = ctx.content_rect();
     let painter = ctx.layer_painter(LayerId::new(Order::Background, Id::new("name_tags")));
     let [enemy, _, friend] = ui::hud::RETICLE_COLORS;
@@ -1122,18 +1223,19 @@ pub(super) fn draw_name_tags(
         let rgb = if t.friend { friend } else { enemy };
         let a = (t.alpha * 255.0).round() as u8;
         let pos = screen.min + ui::egui::vec2(x, y);
-        let font = FontId::proportional(15.0);
+        let font = ui::typography::egui_font(ctx, &ui::typography::LIST);
+        let name = ui::typography::LIST.case.apply(&t.name);
         painter.text(
             pos + ui::egui::vec2(1.0, 1.0),
             Align2::CENTER_BOTTOM,
-            &t.name,
+            &name,
             font.clone(),
             Color32::from_black_alpha(a / 2 + a / 4),
         );
         painter.text(
             pos,
             Align2::CENTER_BOTTOM,
-            &t.name,
+            &name,
             font,
             Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a),
         );
@@ -1142,7 +1244,7 @@ pub(super) fn draw_name_tags(
 
 /// Draws a centred banner (a desync, the session's end).
 pub(super) fn draw_banner(ctx: &ui::egui::Context, text: &str) {
-    use ui::egui::{Align2, Area, Color32, Frame, Id, Margin, RichText};
+    use ui::egui::{Align2, Area, Color32, Frame, Id, Margin};
     Area::new(Id::new("net_banner"))
         .interactable(false)
         .anchor(Align2::CENTER_CENTER, ui::egui::vec2(0.0, -80.0))
@@ -1151,11 +1253,12 @@ pub(super) fn draw_banner(ctx: &ui::egui::Context, text: &str) {
                 .fill(Color32::from_black_alpha(200))
                 .inner_margin(Margin::symmetric(18, 10))
                 .show(ui, |ui| {
-                    ui.label(
-                        RichText::new(text)
-                            .size(22.0)
-                            .color(Color32::from_rgb(255, 210, 120)),
-                    );
+                    ui.label(ui::typography::egui_text(
+                        ctx,
+                        &ui::typography::ITEM,
+                        ui::typography::tint::TITLE,
+                        text,
+                    ));
                 });
         });
 }
@@ -1187,6 +1290,13 @@ impl App {
                     println!("lan: {text}");
                     self.net_to_lobby(Some(text));
                 }
+                NetAction::RoundOver(text) => {
+                    println!("lan: {text}");
+                    self.net_round_finished();
+                    if let Some(n) = self.netplay.as_mut() {
+                        n.lobby.say(text);
+                    }
+                }
                 NetAction::Ended(text) => {
                     println!("lan: session ended: {text}");
                     if let Some(n) = self.netplay.as_mut() {
@@ -1200,6 +1310,17 @@ impl App {
         // The guests' lobby follows the host in a battle too (its roster,
         // the decided round's ready check).
         self.host_publish();
+        self.net_names_to_feed();
+    }
+
+    /// The kill feed and the stats pages name every human by his session
+    /// name, on every peer (issue #168). Presentation only: the sim never
+    /// sees a name.
+    pub(super) fn net_names_to_feed(&mut self) {
+        if let Some(n) = self.netplay.as_ref() {
+            let names = n.names().iter().map(|(slot, name)| (*slot, name.as_str()));
+            self.feed.set_player_names(names);
+        }
     }
 
     /// A round to build: the battle in play (if any) goes, the loading
@@ -1218,6 +1339,7 @@ impl App {
         let mode = setup.mode.clone();
         if let Some(n) = self.netplay.as_mut() {
             n.loading = Some(setup);
+            n.lobby.roster_nav.release();
         }
         if !self.begin_loading_key(&key, mode, None) {
             // The lobby waits for the next round (the host benches a joiner
@@ -1315,12 +1437,14 @@ impl App {
                 ui::egui::CentralPanel::default().show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(120.0);
-                        ui.heading(status.as_str());
+                        use ui::typography::{egui_text, tint, BODY, HELP, TITLE};
+                        ui.label(egui_text(ctx, &TITLE, tint::TITLE, &status));
                         if !guests.is_empty() {
-                            ui.label(format!("Players here: {}", guests.join(", ")));
+                            let line = format!("Players here: {}", guests.join(", "));
+                            ui.label(egui_text(ctx, &BODY, tint::UNSELECTED, &line));
                         }
                         ui.add_space(12.0);
-                        ui.label("Back leaves.");
+                        ui.label(egui_text(ctx, &HELP, tint::HELP, "Back leaves."));
                     });
                 });
                 if let Some(t) = &ended {
@@ -1344,6 +1468,64 @@ mod tests {
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// Second review of issue #168: a round the host abandons (its game
+    /// parted twice) takes everyone from the battle to the lobby's results,
+    /// as a decided round does: the host's ready check runs, the guest is
+    /// ready by itself, and the playlist's end brings everyone back to the
+    /// setup screen. Nobody is left frozen in the battle.
+    #[test]
+    fn lan_an_abandoned_round_takes_everyone_to_the_results() {
+        use super::super::lobby::tests::{lobby_pair, run};
+        let (mut host, mut guest) = lobby_pair();
+        // Both in a battle when the host gives the round up.
+        host.screen = Screen::Battle;
+        guest.screen = Screen::Battle;
+        {
+            let n = host.netplay.as_mut().unwrap();
+            n.peer.abandon_round(&mut n.link, "parted twice".into());
+        }
+        let start = Instant::now();
+        while start.elapsed().as_secs_f32() < 5.0
+            && !(matches!(host.screen, Screen::Lobby) && matches!(guest.screen, Screen::Lobby))
+        {
+            for a in [&mut *host, &mut *guest] {
+                if matches!(a.screen, Screen::Battle) {
+                    a.net_idle();
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(4));
+        }
+        assert!(
+            matches!(host.screen, Screen::Lobby),
+            "the host stayed in the battle"
+        );
+        assert!(
+            matches!(guest.screen, Screen::Lobby),
+            "the guest stayed in the battle"
+        );
+        let h = host.netplay.as_mut().unwrap();
+        assert!(matches!(h.lobby.phase, LobbyPhase::Results { .. }));
+        assert!(h.lobby.ready.contains(&0), "the host left its results");
+        for a in [&mut *host, &mut *guest] {
+            let lines = a.netplay.as_mut().unwrap().lobby.lines();
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("could not be kept in sync")),
+                "{lines:?}"
+            );
+        }
+        // The guest is ready at the results; the ready check completes.
+        run(&mut host, &mut guest, |h, _| {
+            h.netplay.as_ref().unwrap().lobby.phase == LobbyPhase::Choosing
+        });
+        for mut a in [host, guest] {
+            if let Some(n) = a.netplay.take() {
+                n.shutdown();
+            }
+        }
     }
 
     /// Only a joining load of the round already in play is a rejoin (its

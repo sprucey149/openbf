@@ -18,11 +18,22 @@ const FALLBACK_STEP: Duration = Duration::from_secs(1);
 pub(super) struct Playback {
     prompt_until: Option<Duration>,
     skipped_at: Option<Duration>,
+    /// A LAN guest's loading (issue #168): presses neither prompt nor skip;
+    /// only the host's skip ends its presentation early.
+    no_skip: bool,
 }
 
 impl Playback {
+    /// A LAN guest's playback: no press shortens it.
+    pub(super) fn no_skip() -> Self {
+        Self {
+            no_skip: true,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn press(&mut self, elapsed: Duration) {
-        if self.skipped_at.is_some() {
+        if self.no_skip || self.skipped_at.is_some() {
             return;
         }
         if self.prompt(elapsed) {
@@ -30,6 +41,15 @@ impl Playback {
             self.prompt_until = None;
         } else {
             self.prompt_until = Some(elapsed + SKIP_WINDOW);
+        }
+    }
+
+    /// The LAN host skipped for everyone (issue #168): the presentation
+    /// ends now, as a skip of this screen's own would end it.
+    pub(super) fn host_skipped(&mut self, elapsed: Duration) {
+        if self.skipped_at.is_none() {
+            self.skipped_at = Some(elapsed);
+            self.prompt_until = None;
         }
     }
 
@@ -57,6 +77,57 @@ impl Playback {
         ready: bool,
     ) -> bool {
         shown && ready && self.done(elapsed, duration)
+    }
+}
+
+/// What a loading frame does after drawing (issue #168 for a LAN round).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Next {
+    /// Keep drawing.
+    Draw,
+    /// Enter the battle now.
+    Enter,
+    /// A LAN round start: install the battle and hold the last image.
+    Hold,
+    /// A LAN round start: show the held battle (the host's start).
+    Show,
+}
+
+/// The loading gate. `net`: a LAN round's (a join or a rejoin, the start
+/// moment once `Start` is heard); `presented`: [`Playback::can_enter`];
+/// `built`: drawn once and the CPU side ready; `held`: a battle is held.
+///
+/// Single player enters at the end of its presentation. A LAN join enters
+/// as soon as it is built (it catches up from the log). A LAN round start
+/// plays its presentation (cut short on every peer when the host skips:
+/// `presented` is then true), installs and holds until the start; one
+/// that hears `Start` first (the barrier's timeout went on without it)
+/// installs as soon as it is built and shows at once.
+pub(super) fn next(
+    net: Option<(bool, Option<Instant>)>,
+    presented: bool,
+    built: bool,
+    held: bool,
+    now: Instant,
+) -> Next {
+    let go = |b| if b { Next::Enter } else { Next::Draw };
+    match net {
+        None => go(presented),
+        Some((true, _)) => go(built),
+        Some((false, start)) if held => {
+            if start.is_some_and(|t| now >= t) {
+                Next::Show
+            } else {
+                Next::Draw
+            }
+        }
+        Some((false, start)) => {
+            if presented || (built && start.is_some()) {
+                Next::Hold
+            } else {
+                Next::Draw
+            }
+        }
     }
 }
 
@@ -543,6 +614,9 @@ pub(super) struct Loading {
     pub ready: Option<Prepared>,
     pub shown: bool,
     pub cues: Option<Cues>,
+    /// A LAN round start's installed battle, held behind the last image
+    /// until the host's start (issue #168).
+    pub held: Option<super::Held>,
 }
 
 /// Use the input layer's existing unified/raw HID filtering on loading too:

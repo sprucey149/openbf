@@ -374,21 +374,19 @@ fn a_human_surplus_lowers_its_own_teams_bots_at_their_next_spawn() {
     );
     assert_eq!(even.difficulty_of(0), D::Hard);
     assert_eq!(even.bot_skill(0), 20);
-    // 1v0 at Hard: team 0's bots play the Normal row at 18, team 1 Hard.
+    // 1v0 at Hard: team 0's bots play the Hard row at 18 (issue #171
+    // option A), team 1 Hard at 20.
     let mut s = make([1, 0]);
     assert_ne!(s.hash(), make([0, 0]).hash(), "a surplus is hashed");
     assert_eq!(s.hash(), make([2, 1]).hash(), "2v1 is 1v0");
-    assert_ne!(make([3, 0]).hash(), make([2, 0]).hash());
     assert_eq!(make([3, 0]).hash(), make([4, 0]).hash(), "the cap");
+    assert_eq!(make([2, 0]).hash(), make([1, 0]).hash(), "Hard's floor 18");
     let a0 = s.spawn(&bot(0)).unwrap();
     let a1 = s.spawn(&bot(1)).unwrap();
     assert_eq!(s.unit(a0).unwrap().skill, 18);
     assert_eq!(s.unit(a1).unwrap().skill, 20, "the enemy keeps the row");
-    assert_eq!(
-        (s.difficulty_of(0), s.difficulty_of(1)),
-        (D::Normal, D::Hard)
-    );
-    // Hard's extra (the 1.2 m error cap) is off on the surplus team only.
+    assert_eq!((s.difficulty_of(0), s.difficulty_of(1)), (D::Hard, D::Hard));
+    // The surplus team's own skill curve is a step looser.
     assert!(s.difficulty_of(0).skill_at(18).err_cap > 1.2);
     assert_eq!(s.difficulty_of(1).skill_at(20).err_cap, 1.2);
     // Who shoots at team 1 is team 0's row; at team 0, team 1's.
@@ -404,12 +402,12 @@ fn a_human_surplus_lowers_its_own_teams_bots_at_their_next_spawn() {
     let b0 = s.spawn(&bot(0)).unwrap();
     assert_eq!(s.unit(b0).unwrap().skill, 20);
     // He changes team (to 0): 2v0 counts him with the stand-in, team 0's
-    // next bot drops to 16 on the Easy row.
+    // next bot drops to Hard's floor 18 and keeps the Hard row.
     s.units[h.index as usize].team = 0;
     assert_eq!(s.humans_per_team(), [2, 0]);
     let c0 = s.spawn(&bot(0)).unwrap();
-    assert_eq!(s.unit(c0).unwrap().skill, 16);
-    assert_eq!(s.difficulty_of(0), D::Easy);
+    assert_eq!(s.unit(c0).unwrap().skill, 18);
+    assert_eq!(s.difficulty_of(0), D::Hard);
     // An arena override still wins over the rule.
     s.team_difficulty = [Some(D::Hard), None];
     assert_eq!((s.difficulty_of(0), s.bot_skill(0)), (D::Hard, 20));
@@ -646,4 +644,83 @@ fn shared_sprint_keeps_hero_energy_nonnegative_but_soldiers_take_debt() {
             assert!(u.soldier.energy < 0.0);
         }
     }
+}
+
+/// Issue #171 option C: a networked round at Hard or Elite gives both teams
+/// the host row whatever the head count, and hashes as the even round does;
+/// at Easy and Normal it keeps the DTEAM rule and hashes as the same head
+/// count in single player.
+#[test]
+fn a_netplay_round_gives_both_teams_the_host_row() {
+    use crate::skill::Difficulty as D;
+    for d in D::ALL {
+        let make = |extra: [u8; 2], net: bool| {
+            let mut s = Sim::empty(4);
+            s.difficulty = d;
+            s.extra_humans = extra;
+            s.netplay_rows = net;
+            s
+        };
+        let even = matches!(d, D::Hard | D::Elite);
+        assert_eq!(d.lan_even_rows(), even, "{d:?}");
+        for extra in [[1, 0], [2, 1], [3, 0], [0, 2]] {
+            let s = make(extra, true);
+            let like = if even {
+                make([0, 0], false)
+            } else {
+                make(extra, false)
+            };
+            assert_eq!(s.team_rows(), like.team_rows(), "{d:?} {extra:?}");
+            if even {
+                assert_eq!((s.difficulty_of(0), s.difficulty_of(1)), (d, d));
+            }
+            assert_eq!(s.hash(), like.hash(), "{d:?} {extra:?}");
+        }
+    }
+    // Normal 2v1 keeps the surplus team's drop (16 on the Easy row).
+    let mut s = Sim::empty(4);
+    s.difficulty = D::Normal;
+    s.extra_humans = [2, 1];
+    s.netplay_rows = true;
+    assert_eq!(s.team_rows()[0].level, 16);
+    assert_eq!(s.team_rows()[0].tier, D::Easy);
+}
+
+/// Issue #171: a space round keeps the 2026-11-03 DTEAM rule (option A is
+/// measured on the ground only): the same rule the proxy's frozen row
+/// copies, and a ground round of the same head count takes option A.
+#[test]
+fn a_space_round_keeps_the_pre_171_team_rule() {
+    use crate::skill::Difficulty as D;
+    for d in D::ALL {
+        for extra in [[1, 0], [2, 0], [3, 0], [2, 1], [0, 1], [1, 1]] {
+            let mut s = Sim::empty(4);
+            s.difficulty = d;
+            s.extra_humans = extra;
+            let ground = s.team_rows();
+            assert_eq!(
+                ground,
+                crate::skill::team_skill(d, extra),
+                "{d:?} {extra:?}"
+            );
+            s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+            assert!(s.space_round());
+            let space = s.team_rows();
+            for t in 0..2u8 {
+                assert_eq!(
+                    space[usize::from(t)],
+                    crate::ai::proxy::frozen_team_skill(d, extra, t),
+                    "{d:?} {extra:?} team {t}"
+                );
+            }
+        }
+    }
+    // Hard 1v0 in space: allies 18 on the Normal row (on the ground: 18 on
+    // the Hard row).
+    let mut s = Sim::empty(4);
+    s.difficulty = D::Hard;
+    s.extra_humans = [1, 0];
+    s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    assert_eq!(s.team_rows()[0].tier, D::Normal);
+    assert_eq!(s.team_rows()[0].level, 18);
 }

@@ -1064,7 +1064,34 @@ impl Sim {
                 self.reticle_pick[slot] = None;
                 continue;
             }
-            if self.unit(ph).is_none_or(|u| u.mount.is_some()) {
+            if self.unit(ph).is_none() {
+                self.acquire_flyer_pick(slot, ph);
+                continue;
+            }
+            if self.unit(ph).is_some_and(|u| u.mount.is_some()) {
+                // OURS (issue #164): a building turret's gunner has the
+                // turret's own assist toward last tick's magnet, then this
+                // tick's acquisition (`seat_assist`). Any other seat holds
+                // no magnet: the one kept from on foot is dropped on
+                // mounting, and a seat that is no flyer's keeps no stale
+                // reticle pick either (a flyer's is written next).
+                if self.gunner_turret(ph).is_some() {
+                    let p = unit_pads[ph.index as usize];
+                    if let Some(m) = self.magnet[slot].filter(|_| !p.mouse_aim()) {
+                        unit_pads[ph.index as usize] = self.apply_seat_assist(slot, ph, m, &p, dt);
+                    } else {
+                        self.assist_lead[slot] = None;
+                    }
+                    let steer = super::input::Steer::of(&p);
+                    self.acquire_magnet_steering(slot, ph, p.pressed(buttons::FIRE), steer);
+                    continue;
+                }
+                self.magnet[slot] = None;
+                self.assist_lead[slot] = None;
+                if let Some(h) = self.magnet_hidden.get_mut(slot) {
+                    *h = 0;
+                }
+                self.reticle_pick[slot] = None;
                 self.acquire_flyer_pick(slot, ph);
                 continue;
             }
@@ -1191,6 +1218,12 @@ impl Sim {
             // Some(was_grounded) when the soldier stepped: his floor contact
             // resolves AFTER the wall pass (card STHOP).
             let mut stepped: Option<bool> = None;
+            // A choke caught him off the floor: the hold keeps him still in
+            // the air (no gravity, no floor) until it lets go (issue #173).
+            let air_hold = self.units[i]
+                .choked
+                .and_then(|c| c.hold)
+                .filter(|_| self.units[i].alive);
             match self.units[i].controller {
                 _ if corpse => {
                     stepped = Some(self.units[i].soldier.grounded);
@@ -1198,6 +1231,11 @@ impl Sim {
                     self.units[i]
                         .soldier
                         .step(dt, &PadState::default(), &consts, rules);
+                }
+                _ if air_hold.is_some() => {
+                    let u = &mut self.units[i];
+                    u.soldier.pos = air_hold.unwrap_or(u.soldier.pos);
+                    u.soldier.vel = Vec3::ZERO;
                 }
                 Controller::Pacer { vel, period } => {
                     let next = self.units[i].soldier.pos + vel * dt;
@@ -1460,6 +1498,9 @@ impl Sim {
 
         self.tick_soldier_water();
         self.tick_damage_regions();
+        // Issue #173 [ours]: after this tick's fall, kill-floor and region
+        // deaths, the forced moves that no longer count are dropped.
+        self.expire_forced_moves();
         self.saber_hits();
         // 4. Weapons → bolts. Each player's view lag first (issue #168).
         self.take_view_lags(&unit_pads);

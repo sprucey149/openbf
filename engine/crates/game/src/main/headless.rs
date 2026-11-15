@@ -401,7 +401,13 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 )
             }
             Event::TimeUp { winner } => format!("{tick},time_up,{winner},,\n"),
-            Event::EnvDeath { unit, cause } => {
+            // Issue #173: a credited fall's cause, after its kill line.
+            Event::EnvDeath { unit, cause } | Event::ForcedDeath { unit, cause } => {
+                let kind = if matches!(e, Event::ForcedDeath { .. }) {
+                    "forced_death"
+                } else {
+                    "envdeath"
+                };
                 let what = match cause {
                     core::sim::DeathCause::Suicide => "suicide",
                     core::sim::DeathCause::HeroExhausted => "hero_exhausted",
@@ -416,7 +422,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                     core::sim::DeathCause::Water => "water",
                     core::sim::DeathCause::DamageRegion => "damage_region",
                 };
-                format!("{tick},envdeath,{},,{what}\n", unit.index)
+                format!("{tick},{kind},{},,{what}\n", unit.index)
             }
             Event::Relocated { unit, to, .. } => format!(
                 "{tick},relocated,{},,{:.2}:{:.2}:{:.2}\n",
@@ -796,9 +802,11 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             game::weather::STILL_SEED,
         );
         let holos = game::holo::Holos::default();
-        let overlay = v
-            .hud
-            .then(|| ui::overlay::EguiOverlay::headless(r.device(), render::HEADLESS_FORMAT));
+        let overlay = v.hud.then(|| {
+            let o = ui::overlay::EguiOverlay::headless(r.device(), render::HEADLESS_FORMAT);
+            ui::typography::face::install(o.ctx(), &game::hud_feed::menu_face(&assets_dir));
+            o
+        });
         let hud_view = v.hud.then(|| load_hud_view(&assets_dir, &r)).flatten();
         // Sim tick of the last HUD frame: the fades run on the sim's clock.
         let mut hud_tick: Option<u64> = None;
@@ -1298,6 +1306,8 @@ mod tests {
                     age: 0.0,
                     health_left: 100.0,
                     dir: Vec3::X,
+                    dealt: 1.0,
+                    taken: 1.0,
                 });
                 let hash = sim.hash();
                 reference.tick(&sim, player);

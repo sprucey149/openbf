@@ -467,14 +467,15 @@ fn a_sniper_takes_its_pistol_close_in_and_the_rifle_past_its_reach() {
 }
 
 /// 2026-10-29 (long-range bot sniping, by tier): a sniper standing still
-/// fires its rifle as far as its tier's scope sees - Hard at 80 m and 110 m
-/// (inside its 128 m `MaxRange`), not at 140 m; Normal (96 m) at 80 m, not
-/// at 110 m; Easy (the plain 49 m) not at 80 m.
+/// fires its rifle as far as its tier's scope sees - Hard (Normal's 96 m
+/// since issue #171) at 80 m, not at 110 m or 140 m; Normal (96 m) at 80 m,
+/// not at 110 m; Easy (the plain 49 m) not at 80 m.
 #[test]
 fn a_still_sniper_fires_as_far_as_its_tiers_scope_sees() {
     use crate::skill::Difficulty;
+    // Issue #171 lever (b): Hard sees Normal's 96 m.
     let (got, [r, _]) = shots_at_tier(&[(80.0, 8), (110.0, 8), (140.0, 8)], 20.0, Difficulty::Hard);
-    assert_eq!(got, vec![Some(r), Some(r), None], "Hard");
+    assert_eq!(got, vec![Some(r), None, None], "Hard");
     let (got, [r, _]) = shots_at_tier(&[(80.0, 8), (110.0, 8)], 20.0, Difficulty::Normal);
     assert_eq!(got, vec![Some(r), None], "Normal");
     let (got, _) = shots_at_tier(&[(80.0, 8)], 20.0, Difficulty::Easy);

@@ -22,6 +22,18 @@ fn one() -> f32 {
     1.0
 }
 
+/// The settings version this build writes. A profile without the field is
+/// version 0. 1 (2026-11-14): the keyboard and mouse defaults the maintainer
+/// chose after the first LAN playtest ([`Settings::migrate`]).
+pub const SETTINGS_VERSION: u32 = 1;
+
+/// The mouse sensitivity a new profile starts at: 1.0, shown as 100 %. On
+/// foot it turns as 2.8 did before 2026-11-14 (the playtester's own setting,
+/// `kbm::ON_FOOT_LOOK_SCALE`). The look reads raw mouse counts
+/// (`DeviceEvent::MouseMotion`, `kbm::Kbm::motion`), so the display scale and
+/// the system pointer speed do not change it on Windows or Linux.
+pub const MOUSE_SENSITIVITY_DEFAULT: f32 = 1.0;
+
 // Keep a syntactically valid RON field intact until its typed parse completes:
 // one malformed custom layout must not discard the rest of the profile.
 fn bindings_or_default<'de, D, T>(
@@ -52,6 +64,40 @@ where
     Ok(ron::from_str(raw.get_ron()).unwrap_or_default())
 }
 
+/// Issue #172: the display mode as its variant name. A profile without one, or
+/// with a mode this build does not know, opens fullscreen (Borderless); the rest
+/// of the profile stands.
+mod window_mode {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use ui::menu::WindowMode;
+
+    pub fn serialize<S: Serializer>(mode: &WindowMode, s: S) -> Result<S::Ok, S::Error> {
+        let i = WindowMode::ALL.iter().position(|m| m == mode).unwrap_or(0);
+        s.serialize_unit_variant("WindowMode", i as u32, name(*mode))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<WindowMode, D::Error> {
+        let raw = Box::<ron::value::RawValue>::deserialize(d)?;
+        let text = raw.get_ron().trim();
+        Ok(WindowMode::ALL
+            .into_iter()
+            .find(|m| name(*m) == text)
+            .unwrap_or(WindowMode::Borderless))
+    }
+
+    fn name(mode: WindowMode) -> &'static str {
+        match mode {
+            WindowMode::Windowed => "Windowed",
+            WindowMode::Borderless => "Borderless",
+            WindowMode::Exclusive => "Exclusive",
+        }
+    }
+}
+
+fn borderless() -> ui::menu::WindowMode {
+    ui::menu::WindowMode::Borderless
+}
+
 fn keyboard_bindings<'de, D>(deserializer: D) -> Result<crate::kbm::Bindings, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -76,6 +122,9 @@ where
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
+    /// [`SETTINGS_VERSION`] when saved; 0 for a profile from before it.
+    #[serde(default)]
+    pub settings_version: u32,
     /// BF1 aim-assist intensity slider (1.0 = PS2-authentic).
     #[serde(default = "one", deserialize_with = "assist_intensity_setting")]
     pub assist_intensity: f32,
@@ -108,7 +157,7 @@ pub struct Settings {
     pub effects_volume: f32,
     #[serde(default = "one")]
     pub dialogue_volume: f32,
-    /// 0 = off, 1 = on. Older profiles may store 2, which also enables it.
+    /// 0 = off, 1 = on.
     #[serde(default)]
     pub fps_counter: u8,
     /// Issue #168: the LAN net meter overlay (F7 toggles it too).
@@ -119,6 +168,8 @@ pub struct Settings {
     pub rumble_strength: f32,
     #[serde(default)]
     pub rumble_on_fire: bool,
+    /// 1.0 (100 %) is the default ([`MOUSE_SENSITIVITY_DEFAULT`]); the range is
+    /// `ui::menu::MOUSE_SENSITIVITY_RANGE`.
     #[serde(default = "one")]
     pub mouse_sensitivity: f32,
     /// The controller's look sensitivity on the right stick
@@ -142,6 +193,16 @@ pub struct Settings {
     pub scene_softness: bool,
     #[serde(default)]
     pub viewpoint: crate::viewpoint::Viewpoint,
+    /// Issue #172: Windowed (maximized), Borderless or Exclusive fullscreen.
+    /// The game launches fullscreen: a new profile starts Borderless, and so
+    /// does a saved profile without the field (older than #172). Only a mode the
+    /// player chose and saved (Windowed or Exclusive) is kept.
+    /// Not part of Reset graphics: that never switches the display.
+    #[serde(default = "borderless", with = "window_mode")]
+    pub window_mode: ui::menu::WindowMode,
+    /// The fullscreen kind the fullscreen key returns to from a window.
+    #[serde(default = "borderless", with = "window_mode")]
+    pub last_fullscreen: ui::menu::WindowMode,
     #[serde(default, deserialize_with = "keyboard_bindings")]
     pub keyboard_bindings: crate::kbm::Bindings,
     #[serde(default, deserialize_with = "controller_bindings")]
@@ -155,14 +216,11 @@ pub struct Settings {
     /// Which icons the control prompts draw; Auto follows the device in use.
     #[serde(default, deserialize_with = "input_icons_or_auto")]
     pub input_icons: crate::input_icons::IconChoice,
-    /// Map-relative population and reinforcement settings. Legacy absolute caps are ignored.
+    /// Map-relative population and reinforcement settings.
     #[serde(default = "hundred", deserialize_with = "bounded_team_pct")]
     pub team_size_pct: u32,
     #[serde(default = "hundred", deserialize_with = "percent_setting")]
     pub reinforcement_pct: u32,
-    pub last_map: Option<String>,
-    pub last_mode: Option<String>,
-    pub last_teams: Option<[String; 2]>,
     /// Issue #168: the LAN hosts last joined, newest first
     /// (`netplay::lobby::remember_host`).
     #[serde(default)]
@@ -170,6 +228,75 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Bring a profile saved by an older build up to [`SETTINGS_VERSION`],
+    /// once.
+    pub fn migrate(&mut self) {
+        if self.settings_version < 1 {
+            self.migrate_dev_v0();
+        }
+        self.settings_version = self.settings_version.max(SETTINGS_VERSION);
+    }
+
+    /// DEV-PHASE MIGRATION, slated for removal before v1 (the maintainer
+    /// drops every backward-compatibility path at v1). Settings version 0 to
+    /// 1 (2026-11-14):
+    /// - a keyboard table that is exactly the old stock one, with no infantry
+    ///   layout of its own, takes the new stock table (vehicles and
+    ///   starfighters keep their controls, `control_layout::fallback`);
+    /// - mouse sensitivity moves to the new scale, where on foot it is
+    ///   multiplied by `kbm::ON_FOOT_LOOK_SCALE`: the old default 1.0 stays
+    ///   1.0 (and takes the new, faster on-foot default), and any value the
+    ///   player chose, v, becomes v / 2.8 so it turns on foot as before. In a
+    ///   vehicle or starfighter (factor 1.0) a chosen value turns 2.8 times
+    ///   slower than it did.
+    fn migrate_dev_v0(&mut self) {
+        if self.keyboard_bindings == crate::kbm::Bindings::pc_default_v0()
+            && self.keyboard_layouts.infantry.is_empty()
+        {
+            self.keyboard_bindings = crate::kbm::Bindings::pc_default();
+        }
+        if self.mouse_sensitivity != 1.0 {
+            let (lo, hi) = crate::kbm::SENSITIVITY_RANGE;
+            self.mouse_sensitivity =
+                (self.mouse_sensitivity / crate::kbm::ON_FOOT_LOOK_SCALE as f32).clamp(lo, hi);
+        }
+    }
+
+    /// Issue #172: F11 switches fullscreen before any binding sees it, so a
+    /// profile that bound it would lose that action without a word. The
+    /// legacy keyboard layout moves the action to a free default key
+    /// ([`crate::kbm::Bindings::free_fullscreen_key`]); a context layout
+    /// keeps F11 on disk, its editor shows the action unassigned and asks
+    /// for a key before it saves. Both are reported here. Returns the
+    /// contexts whose layout binds F11.
+    pub fn free_fullscreen_key(&mut self) -> Vec<ui::menu::ControlContext> {
+        use crate::kbm::FULLSCREEN_KEY;
+        use ui::menu::ControlContext;
+        if let Some(to) = self.keyboard_bindings.free_fullscreen_key() {
+            eprintln!(
+                "profile: {}; its keyboard action moved to {}",
+                crate::kbm::f11_note(crate::kbm::MAC),
+                crate::control_layout::keyboard_name(to)
+            );
+        }
+        let bound: Vec<_> = [
+            ControlContext::Infantry,
+            ControlContext::Vehicle,
+            ControlContext::Starfighter,
+        ]
+        .into_iter()
+        .filter(|&c| self.keyboard_layouts.get(c).contains(&FULLSCREEN_KEY))
+        .collect();
+        for c in &bound {
+            eprintln!(
+                "profile: {}; the {c:?} keyboard layout's F11 action is unassigned \
+                 until it gets another key in Controls",
+                crate::kbm::f11_note(crate::kbm::MAC)
+            );
+        }
+        bound
+    }
+
     pub fn reset_graphics(&mut self) {
         let defaults = Self::default();
         self.fov_scale = defaults.fov_scale;
@@ -184,6 +311,7 @@ impl Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            settings_version: SETTINGS_VERSION,
             assist_intensity: 1.0,
             difficulty: core::skill::Difficulty::default(),
             aim_assist: true,
@@ -197,7 +325,7 @@ impl Default for Settings {
             network_meter: false,
             rumble_strength: 1.0,
             rumble_on_fire: false,
-            mouse_sensitivity: 1.0,
+            mouse_sensitivity: MOUSE_SENSITIVITY_DEFAULT,
             pad_look_sensitivity: 1.0,
             invert_y: false,
             low_power_resolution: false,
@@ -205,6 +333,10 @@ impl Default for Settings {
             scene_softness: false,
             auto_quality: true,
             viewpoint: crate::viewpoint::Viewpoint::default(),
+            // The maintainer, 2026-11-14: a new profile, and a first launch,
+            // play fullscreen; the fullscreen key leaves it maximized.
+            window_mode: ui::menu::WindowMode::Borderless,
+            last_fullscreen: ui::menu::WindowMode::Borderless,
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
             keyboard_layouts: Default::default(),
@@ -213,9 +345,6 @@ impl Default for Settings {
             input_icons: crate::input_icons::IconChoice::default(),
             team_size_pct: 100,
             reinforcement_pct: 100,
-            last_map: None,
-            last_mode: None,
-            last_teams: None,
             recent_hosts: Vec::new(),
         }
     }
@@ -267,18 +396,31 @@ pub struct Profile {
     slot: Option<store::Slot>,
 }
 
+/// A loaded mouse sensitivity, kept on the menu's row: an out-of-range or
+/// non-finite value (a hand edit, or a value saved before the 100 % scale)
+/// can never turn the view many times too fast.
+fn clamp_mouse_sensitivity(value: f32) -> f32 {
+    let (lo, hi) = crate::kbm::SENSITIVITY_RANGE;
+    if value.is_finite() {
+        value.clamp(lo, hi)
+    } else {
+        MOUSE_SENSITIVITY_DEFAULT
+    }
+}
+
 impl Profile {
-    pub fn path() -> PathBuf {
-        if let Some(p) = std::env::var_os("OPENBF_PROFILE") {
-            return PathBuf::from(p);
-        }
-        data_dir().join("profile.ron")
+    /// The single-file dev override (`$OPENBF_PROFILE`), when set. Players'
+    /// profiles live in the catalog ([`Store`]); there is no other single
+    /// file.
+    pub fn path() -> Option<PathBuf> {
+        std::env::var_os("OPENBF_PROFILE").map(PathBuf::from)
     }
 
-    /// Load the profile, or a fresh default one (also when the file is
-    /// unreadable — a corrupt profile must never block play; it is backed up).
+    /// Load the `$OPENBF_PROFILE` profile, or a fresh default one (also when
+    /// the file is unreadable — a corrupt profile must never block play; it
+    /// is backed up).
     pub fn load_or_default() -> Profile {
-        Self::load_from(&Self::path())
+        Self::path().map_or_else(Profile::fresh, |p| Self::load_from(&p))
     }
 
     /// Load from an explicit file, with the same recovery as the default path.
@@ -303,7 +445,10 @@ impl Profile {
     }
 
     fn normalize(&mut self) {
+        self.settings.migrate();
+        self.settings.mouse_sensitivity = clamp_mouse_sensitivity(self.settings.mouse_sensitivity);
         self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
+        self.settings.free_fullscreen_key();
     }
 
     fn fresh() -> Profile {
@@ -313,13 +458,26 @@ impl Profile {
         }
     }
 
-    /// Atomic save.
+    /// Atomic save: to the profile's catalog slot, else to the
+    /// `$OPENBF_PROFILE` dev file. A profile with neither (the shell's
+    /// default before a profile is picked) has nowhere to go, so nothing is
+    /// written.
     pub fn save(&self) -> Result<()> {
-        if let Some(slot) = &self.slot {
-            slot.save(self)
-        } else {
-            self.save_to(&Self::path())
+        self.save_with(Self::path().as_deref())
+    }
+
+    /// [`Profile::save`] with the dev override passed in.
+    fn save_with(&self, dev: Option<&Path>) -> Result<()> {
+        match (&self.slot, dev) {
+            (Some(slot), _) => slot.save(self),
+            (None, Some(path)) => self.save_to(path),
+            (None, None) => Ok(()),
         }
+    }
+
+    /// The profile saves somewhere ([`Profile::save`] writes a file).
+    pub fn persists(&self) -> bool {
+        self.slot.is_some() || Self::path().is_some()
     }
 
     /// Atomically save to an explicit file.
@@ -405,6 +563,48 @@ pub fn clamp_pad_look(v: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A2: a profile with no catalog slot (the shell's default before a
+    /// profile is picked, where F11 on the title screen used to save) writes
+    /// no single-file `profile.ron` beside the game, and leaves one that is
+    /// already there untouched.
+    #[test]
+    fn an_unslotted_profile_saves_nowhere_and_leaves_profile_ron_alone() {
+        // `save_with(None)` is `save()` without the `OPENBF_PROFILE` dev
+        // override, so the test holds in a shell that exports it.
+        let legacy = data_dir().join("profile.ron");
+        let blank = Profile::default();
+        assert!(blank.slot.is_none());
+        let _ = std::fs::remove_file(&legacy);
+        blank.save_with(None).unwrap();
+        assert!(
+            !legacy.exists(),
+            "a blank profile was written to {}",
+            legacy.display()
+        );
+        std::fs::create_dir_all(data_dir()).unwrap();
+        std::fs::write(&legacy, "(name: \"Tester\")").unwrap();
+        blank.save_with(None).unwrap();
+        let kept = std::fs::read_to_string(&legacy).unwrap();
+        let _ = std::fs::remove_file(&legacy);
+        assert_eq!(kept, "(name: \"Tester\")");
+    }
+
+    /// The dev override still saves the single file it names.
+    #[test]
+    fn the_dev_override_still_saves_its_own_file() {
+        let dir = std::env::temp_dir().join(format!("openbf-dev-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dev.ron");
+        let p = Profile {
+            name: "dev".into(),
+            ..Default::default()
+        };
+        p.save_with(Some(&path)).unwrap();
+        let back = Profile::load_from(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(back.name, "dev");
+    }
 
     #[test]
     fn render_options_default_off_and_survive_profile_roundtrips() {
@@ -498,6 +698,86 @@ mod tests {
         }
     }
 
+    /// Issue #172: a legacy keyboard layout that bound F11 moves that action
+    /// to a free default key on load and stays valid; others are untouched.
+    #[test]
+    fn a_legacy_f11_binding_moves_to_a_free_key() {
+        use crate::kbm::{Bindings, FULLSCREEN_KEY};
+        let mut s = Settings::default();
+        assert!(s.free_fullscreen_key().is_empty());
+        assert_eq!(s.keyboard_bindings, Bindings::default());
+        let was = s.keyboard_bindings.table[0].0;
+        s.keyboard_bindings.table[0].0 = FULLSCREEN_KEY;
+        assert!(s.keyboard_bindings.is_valid());
+        assert!(s.free_fullscreen_key().is_empty());
+        assert_eq!(
+            s.keyboard_bindings.table[0].0, was,
+            "its own default was free"
+        );
+        assert!(s.keyboard_bindings.is_valid());
+        assert!(!s
+            .keyboard_bindings
+            .table
+            .iter()
+            .any(|(t, _)| *t == FULLSCREEN_KEY));
+    }
+
+    /// The maintainer, 2026-11-14: a new profile plays fullscreen
+    /// (Borderless), and F11 takes it back to Borderless after a window.
+    #[test]
+    fn a_new_profile_starts_fullscreen() {
+        use ui::menu::WindowMode;
+        let s = Settings::default();
+        assert_eq!(s.window_mode, WindowMode::Borderless);
+        assert_eq!(s.last_fullscreen, WindowMode::Borderless);
+        assert_eq!(
+            Profile::default().settings.window_mode,
+            WindowMode::Borderless
+        );
+    }
+
+    /// Issue #172: the display mode and the last fullscreen kind round-trip;
+    /// a profile from before them launches fullscreen, a saved Windowed stays
+    /// windowed, and a mode this build does not know costs nothing else.
+    #[test]
+    fn the_window_mode_round_trips_and_older_profiles_open_fullscreen() {
+        use ui::menu::WindowMode;
+        for mode in WindowMode::ALL {
+            let s = Settings {
+                window_mode: mode,
+                last_fullscreen: WindowMode::Exclusive,
+                ..Default::default()
+            };
+            let text = ron::to_string(&s).unwrap();
+            let back: Settings = ron::from_str(&text).unwrap();
+            assert_eq!(back.window_mode, mode, "{text}");
+            assert_eq!(back.last_fullscreen, WindowMode::Exclusive);
+        }
+        let old: Settings = ron::from_str("(assist_intensity: 0.7)").unwrap();
+        assert_eq!(old.window_mode, WindowMode::Borderless);
+        assert_eq!(old.last_fullscreen, WindowMode::Borderless);
+        assert_eq!(old.assist_intensity, 0.7);
+        let named: Settings =
+            ron::from_str("(assist_intensity: 0.7, window_mode: Borderless)").unwrap();
+        assert_eq!(named.window_mode, WindowMode::Borderless);
+        let chosen: Settings =
+            ron::from_str("(assist_intensity: 0.7, window_mode: Windowed)").unwrap();
+        assert_eq!(chosen.window_mode, WindowMode::Windowed);
+        for value in ["Kiosk", "3", "\"Borderless\"", "Exclusive(0)"] {
+            let newer: Settings =
+                ron::from_str(&format!("(assist_intensity: 0.7, window_mode: {value})"))
+                    .unwrap_or_else(|e| panic!("{value}: {e}"));
+            assert_eq!(newer.window_mode, WindowMode::Borderless, "{value}");
+            assert_eq!(newer.assist_intensity, 0.7, "{value}");
+        }
+        let mut reset = Settings {
+            window_mode: WindowMode::Borderless,
+            ..Default::default()
+        };
+        reset.reset_graphics();
+        assert_eq!(reset.window_mode, WindowMode::Borderless);
+    }
+
     /// Every name a profile may hold loads as the row it names today
     /// (the maintainer, 2026-10-28: Easy 14, Normal 17, Hard 20, Elite 20+extras):
     /// "easy" Easy, "normal" Normal, "hard" Hard, "elite" Elite (an "elite"
@@ -555,6 +835,179 @@ mod tests {
         assert_eq!(s.controller_bindings, input::Mapping::default());
     }
 
+    /// `settings` as a build from before [`SETTINGS_VERSION`] saved it, read
+    /// back as the game loads a profile.
+    #[test]
+    fn a_loaded_mouse_sensitivity_stays_on_the_slider() {
+        let (lo, hi) = crate::kbm::SENSITIVITY_RANGE;
+        for (saved, want) in [
+            (2.8, hi),
+            (9.0, hi),
+            (0.0, lo),
+            (-1.0, lo),
+            (f32::NAN, 1.0),
+            (0.65, 0.65),
+        ] {
+            let mut p = Profile {
+                name: "p".into(),
+                settings: Settings {
+                    mouse_sensitivity: saved,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            p.normalize();
+            assert_eq!(p.settings.mouse_sensitivity, want, "saved {saved}");
+        }
+    }
+
+    fn saved_by_an_older_build(settings: Settings) -> Profile {
+        let profile = Profile {
+            name: "p".into(),
+            settings,
+            ..Default::default()
+        };
+        let text = ron::to_string(&profile).unwrap();
+        let old = text.replacen("settings_version:1,", "", 1);
+        assert_ne!(old, text, "the fixture drops the version");
+        let mut loaded: Profile = ron::from_str(&old).unwrap();
+        assert_eq!(loaded.settings.settings_version, 0);
+        loaded.normalize();
+        loaded
+    }
+
+    fn old_stock() -> Settings {
+        Settings {
+            keyboard_bindings: crate::kbm::Bindings::pc_default_v0(),
+            mouse_sensitivity: 1.0,
+            ..Default::default()
+        }
+    }
+
+    /// 2026-11-14: a profile that kept the old stock keyboard and the old
+    /// 1.0 sensitivity takes the new defaults once (1.0 now reads 100 % and
+    /// turns on foot as 2.8 did), and keeps them.
+    #[test]
+    fn an_untouched_older_profile_takes_the_new_keyboard_and_mouse_defaults() {
+        use crate::kbm::Bindings;
+        let p = saved_by_an_older_build(old_stock());
+        assert_eq!(p.settings.keyboard_bindings, Bindings::pc_default());
+        assert_eq!(p.settings.mouse_sensitivity, 1.0);
+        assert_eq!(p.settings.settings_version, SETTINGS_VERSION);
+        assert_eq!(p.settings, Settings::default());
+        // Saved now, it round-trips and never migrates again.
+        let text = ron::to_string(&p).unwrap();
+        let mut again: Profile = ron::from_str(&text).unwrap();
+        again.normalize();
+        assert_eq!(again, p);
+        // A version-1 player's choice is never rescaled again.
+        let mut chosen = p.clone();
+        chosen.settings.mouse_sensitivity = 0.5;
+        let mut back: Profile = ron::from_str(&ron::to_string(&chosen).unwrap()).unwrap();
+        back.normalize();
+        assert_eq!(back.settings.mouse_sensitivity, 0.5);
+    }
+
+    /// 2026-11-14: a remapped keyboard or a layout of his own stays exactly as
+    /// saved, the old table's shape stays valid, and a sensitivity he set
+    /// keeps its on-foot feel on the new scale (v / 2.8).
+    #[test]
+    fn a_customised_older_profile_keeps_its_controls() {
+        use crate::kbm::{Bindings, Trigger};
+        use winit::keyboard::KeyCode;
+        let mut remapped = old_stock();
+        assert!(remapped
+            .keyboard_bindings
+            .remap(0, Trigger::Key(KeyCode::KeyP)));
+        assert!(remapped.keyboard_bindings.is_valid());
+        remapped.mouse_sensitivity = 1.7;
+        let p = saved_by_an_older_build(remapped.clone());
+        assert_eq!(p.settings.keyboard_bindings, remapped.keyboard_bindings);
+        let feel = |v: f32| f64::from(v) * crate::kbm::ON_FOOT_LOOK_SCALE;
+        assert!((feel(p.settings.mouse_sensitivity) - 1.7).abs() < 1e-5);
+        // The stock table with a vehicle layout of its own still migrates;
+        // the vehicle layout is kept.
+        let mut vehicle = old_stock();
+        let layout: Vec<_> = crate::control_layout::keyboard_defaults(
+            ui::menu::ControlContext::Vehicle,
+            &Bindings::pc_default_v0(),
+        )
+        .into_iter()
+        .flatten()
+        .collect();
+        vehicle
+            .keyboard_layouts
+            .set(ui::menu::ControlContext::Vehicle, layout.clone());
+        let p = saved_by_an_older_build(vehicle);
+        assert_eq!(p.settings.keyboard_bindings, Bindings::pc_default());
+        assert_eq!(p.settings.keyboard_layouts.vehicle, layout);
+    }
+
+    /// 2026-11-14: the playtester's own profile (the old stock table, his
+    /// infantry layout with the thumb buttons, 2.8): his layout and table load
+    /// as saved, his 2.8 reads 1.0 (100 %) with the same on-foot feel, and his
+    /// vehicles keep the old table.
+    #[test]
+    fn the_playtesters_profile_is_untouched() {
+        use crate::control_layout as layout;
+        use crate::kbm::{Bindings, Trigger};
+        use ui::menu::ControlContext;
+        use winit::event::MouseButton as M;
+        use winit::keyboard::KeyCode as K;
+        use Trigger::{Key, Mouse};
+        let infantry = vec![
+            Key(K::KeyW),
+            Key(K::KeyS),
+            Key(K::KeyA),
+            Key(K::KeyD),
+            Mouse(M::Left),
+            Mouse(M::Back),
+            Mouse(M::Right),
+            Key(K::Space),
+            Key(K::ControlLeft),
+            Key(K::ShiftLeft),
+            Key(K::KeyR),
+            Key(K::KeyE),
+            Trigger::WheelDown,
+            Mouse(M::Forward),
+            Key(K::ArrowUp),
+            Key(K::ArrowDown),
+            Key(K::ArrowLeft),
+            Key(K::ArrowRight),
+            Key(K::KeyV),
+        ];
+        let mut his = Settings {
+            keyboard_bindings: Bindings::pc_default_v0(),
+            mouse_sensitivity: 2.8,
+            ..Default::default()
+        };
+        his.keyboard_layouts
+            .set(ControlContext::Infantry, infantry.clone());
+        let p = saved_by_an_older_build(his.clone());
+        his.settings_version = SETTINGS_VERSION;
+        his.mouse_sensitivity = 1.0;
+        assert_eq!(p.settings, his);
+        let s = &p.settings;
+        assert!(layout::keyboard(ControlContext::Infantry, &s.keyboard_layouts.infantry).is_some());
+        for context in [ControlContext::Vehicle, ControlContext::Starfighter] {
+            assert_eq!(
+                layout::fallback(Some(context), &s.keyboard_bindings),
+                Bindings::pc_default_v0()
+            );
+        }
+        // The new infantry default is his layout with Middle mouse and G in
+        // place of the thumb buttons, so it works on any mouse.
+        let stock: Vec<_> =
+            layout::keyboard_defaults(ControlContext::Infantry, &Bindings::default())
+                .into_iter()
+                .flatten()
+                .collect();
+        let mut want = infantry.clone();
+        want[5] = Mouse(M::Middle);
+        want[13] = Key(K::KeyG);
+        assert_eq!(stock, want);
+    }
+
     #[test]
     fn career_awards_default_on_and_an_off_profile_keeps_its_medals() {
         let settings: Settings = ron::from_str("(assist_intensity: 1.0)").unwrap();
@@ -565,18 +1018,6 @@ mod tests {
         profile.career.medals[1] = 64;
         let saved = ron::to_string(&profile).unwrap();
         assert_eq!(ron::from_str::<Profile>(&saved).unwrap(), profile);
-    }
-
-    #[test]
-    fn retired_graphics_quality_preserves_the_low_power_preference() {
-        for preset in [1, 2] {
-            let saved = format!("(graphics_quality: {preset}, low_power_resolution: true)");
-            let settings: Settings = ron::from_str(&saved).unwrap();
-            assert!(settings.low_power_resolution);
-            assert!(!ron::to_string(&settings)
-                .unwrap()
-                .contains("graphics_quality"));
-        }
     }
 
     #[test]
@@ -616,7 +1057,6 @@ mod tests {
         original.record_round(Some(true), 12, 3, 240, 90, 2);
         original.settings.mouse_sensitivity = 1.7;
         original.settings.invert_y = true;
-        original.settings.last_map = Some("tat2".into());
         original
             .settings
             .keyboard_bindings
@@ -724,7 +1164,6 @@ mod tests {
         let mut p = Profile::load_from(&path);
         assert_eq!(p.career, Career::default());
         p.settings.assist_intensity = 0.7;
-        p.settings.last_map = Some("tat2".into());
         p.record_round(Some(true), 12, 3, 240, 90, 2);
         p.career.class_kills.insert("all_inf_officer".into(), 7);
         p.career.class_kills.insert("all_inf_wookiee".into(), 5);
@@ -742,15 +1181,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
-    fn legacy_absolute_cap_does_not_become_a_percent() {
+    fn a_profile_saved_with_the_removed_last_battle_fields_still_loads() {
         let serialized = ron::to_string(&super::Settings::default()).unwrap();
-        assert!(serialized.contains("team_size_pct:100,"));
-        let legacy = serialized
-            .replace("team_size_pct:100,", "")
-            .replace("reinforcement_pct:100,", "")
-            .replace("last_map:None", "ai_alive_cap:Some(16),last_map:None");
-        let loaded: super::Settings = ron::from_str(&legacy).unwrap();
-        assert_eq!((loaded.team_size_pct, loaded.reinforcement_pct), (100, 100));
+        assert!(serialized.ends_with(')'));
+        let old = format!(
+            "{},last_map:Some(\"tat2\"),last_mode:Some(\"con\"),last_teams:Some((\"cis\",\"rep\")))",
+            serialized[..serialized.len() - 1].trim_end_matches(',')
+        );
+        let loaded: super::Settings = ron::from_str(&old).unwrap();
+        assert_eq!(loaded, super::Settings::default());
+        assert!(!ron::to_string(&loaded).unwrap().contains("last_map"));
     }
     #[test]
     fn saved_percentages_are_bounded_before_the_menu_reads_them() {

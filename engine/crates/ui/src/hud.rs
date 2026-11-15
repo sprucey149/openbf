@@ -8,7 +8,7 @@
 //! round timer, the pad warning.
 
 use crate::hud_tree::{EventValue, Hud, INFINITE};
-use egui::{Align2, Color32, FontId, Frame, RichText, Vec2};
+use egui::{Align2, Color32, Frame, RichText, Vec2};
 
 /// The held weapon as the HUD shows it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -76,7 +76,7 @@ pub fn add_leaving_line(layout: &mut manifest::hud::HudLayout) {
         children: vec![
             node("textstyle", vec![s("Shadow")]),
             node("textalignment", vec![s("Center"), s("Center")]),
-            node("textfont", vec![s("gamefont_large")]),
+            node("textfont", vec![s("gamefont_large")]), // typography: HUD tree
             node("Position", vec![n(0.5), n(0.5), n(0.0), s("Viewport")]),
             node("zorder", vec![n(5.0)]),
             node("eventtext", vec![s("player1.leaving")]),
@@ -949,11 +949,12 @@ pub fn draw_pad_warning(ctx: &egui::Context, text: &str) {
         .show(ctx, |ui| {
             panel().show(ui, |ui| {
                 ui.set_max_width(640.0);
-                ui.label(
-                    RichText::new(text)
-                        .font(FontId::proportional(15.0))
-                        .color(Color32::from_rgb(255, 120, 90)),
-                );
+                ui.label(crate::typography::egui_text(
+                    ctx,
+                    &crate::typography::BODY,
+                    crate::typography::tint::WARNING,
+                    text,
+                ));
             });
         });
 }
@@ -1011,33 +1012,34 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
             .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 12.0))
             .show(ctx, |ui| {
                 panel().show(ui, |ui| {
-                    ui.label(
-                        RichText::new(format!("{}:{:02}", secs / 60, secs % 60))
-                            .font(FontId::monospace(18.0))
-                            .color(Color32::WHITE),
-                    );
+                    ui.label(crate::typography::egui_text(
+                        ctx,
+                        &crate::typography::ITEM,
+                        crate::typography::tint::BODY,
+                        &format!("{}:{:02}", secs / 60, secs % 60),
+                    ));
                 });
             });
     }
 
     // Center banner for a round without the native round-end presentation.
-    let banner = match m.outcome {
-        Some(2) => Some(("TIME UP — BOTH TEAMS WIN".to_string(), Color32::WHITE)),
-        Some(w) => Some((
-            format!(
-                "ROUND OVER — {} WINS",
-                m.team_names[usize::from(w.min(1))].to_uppercase()
-            ),
-            TEAM_COLORS[usize::from(w.min(1))],
-        )),
-        None => None,
-    };
+    let banner = round_banner(m.outcome, &m.team_names).map(|text| {
+        let color = match m.outcome {
+            Some(w) if w != 2 => TEAM_COLORS[usize::from(w.min(1))],
+            _ => Color32::WHITE,
+        };
+        (text, color)
+    });
     if let Some((text, color)) = banner {
         egui::Area::new(egui::Id::new("hud_banner"))
             .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -40.0))
             .show(ctx, |ui| {
                 panel().show(ui, |ui| {
-                    ui.label(RichText::new(text).size(30.0).color(color).strong());
+                    ui.label(
+                        RichText::new(text)
+                            .font(crate::typography::egui_font(ctx, &crate::typography::TITLE))
+                            .color(color),
+                    );
                 });
             });
     }
@@ -1075,8 +1077,36 @@ mod leaving_tests {
     }
 }
 
+/// The centre banner of a round without the native round-end screen.
+pub fn round_banner(outcome: Option<u8>, team_names: &[String; 2]) -> Option<String> {
+    match outcome? {
+        2 => Some("Time Up — Both Teams Win".to_string()),
+        w => Some(format!(
+            "Round Over — {} Wins",
+            crate::menu::faction_name(&team_names[usize::from(w.min(1))])
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_round_banner_names_the_winner_as_players_know_it() {
+        let names = ["rep".to_string(), "cis".to_string()];
+        assert_eq!(
+            round_banner(Some(0), &names).as_deref(),
+            Some("Round Over — Republic Wins")
+        );
+        assert_eq!(
+            round_banner(Some(1), &names).as_deref(),
+            Some("Round Over — CIS Wins")
+        );
+        assert_eq!(round_banner(None, &names), None);
+        assert_eq!(crate::menu::faction_name("all"), "Rebels");
+        assert_eq!(crate::menu::faction_name("imp"), "Empire");
+        assert_eq!(crate::menu::faction_name("gun"), "Gun");
+    }
+
     use super::*;
 
     fn model() -> HudModel {

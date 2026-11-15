@@ -4,6 +4,8 @@
 //! only a window uses: event sounds, the pause menu's actions and cheat words,
 //! the profile autosave and the title-bar line.
 
+#[path = "windowed/display.rs"]
+mod display;
 #[path = "windowed/events.rs"]
 mod events;
 
@@ -95,6 +97,7 @@ fn play_event_sounds(
     }
     sl.play_repair_loops(audio, &walk.sim, &listener);
     sl.play_shield_loops(audio, &walk.sim, &listener);
+    sl.play_choke_loops(audio, &game::event_sounds::choke_loops(walk), &listener);
     sl.walker_fire_loops(audio, walk, &listener);
     sl.play_overheat_loops(audio, &walk.sim, &listener);
     sl.play_turret_sounds(audio, walk, &listener);
@@ -136,6 +139,25 @@ fn play_ambience(
             );
         }
     }
+}
+
+/// `[ours]` The name the kill feed, the scoreboard and the stats pages give
+/// the single player's soldier (slot 0): his profile's name, where the
+/// original shows "Player %d". It passes the same filter as a LAN name
+/// (trimmed, at most `net::msg::MAX_NAME_CHARS`, `net::msg::valid_name`).
+/// `None` in a LAN round, whose humans are named from the session, or for a
+/// name the filter refuses, which keeps the "Player 1" fallback.
+/// Presentation only.
+fn single_player_name(lockstep: bool, profile_name: &str) -> Option<String> {
+    if lockstep {
+        return None;
+    }
+    let name: String = profile_name
+        .trim()
+        .chars()
+        .take(net::msg::MAX_NAME_CHARS)
+        .collect();
+    net::msg::valid_name(&name).then_some(name)
 }
 
 /// The playtest black box for the battle about to start — dev mode only
@@ -243,14 +265,19 @@ fn window_size_env() -> Option<(u32, u32)> {
 }
 
 /// The window opens maximized (playtest A5), restoring to 1280x720
-/// logical; a forced size opens at exactly that size, not maximized.
-fn window_attributes(want: Option<(u32, u32)>) -> winit::window::WindowAttributes {
+/// logical, in the saved fullscreen mode if any (issue #172); a forced size
+/// opens at exactly that size, windowed and not maximized.
+fn window_attributes(
+    want: Option<(u32, u32)>,
+    fullscreen: Option<winit::window::Fullscreen>,
+) -> winit::window::WindowAttributes {
     let base = winit::window::Window::default_attributes().with_title("openbf");
     match want {
         Some((w, h)) if w > 0 && h > 0 => base.with_inner_size(winit::dpi::PhysicalSize::new(w, h)),
         _ => base
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720))
-            .with_maximized(true),
+            .with_maximized(true)
+            .with_fullscreen(fullscreen),
     }
 }
 
@@ -378,54 +405,168 @@ enum Screen {
 #[path = "windowed/loading.rs"]
 mod loading;
 use loading::Loading;
+
+/// A LAN round start's battle, installed while its loading screen holds the
+/// last image (issue #168, `lan.rs` module rules): shown at the host's start.
+struct Held {
+    setup: BattleSetup,
+    walk: WalkSim,
+    cube: MeshHandle,
+    gpu: SceneGpu,
+    /// When the install finished.
+    at: std::time::Instant,
+}
+
 /// The round's CPU side on the loading worker (LAN §10.5).
 #[path = "windowed/round_prep.rs"]
 mod round_prep;
 
+/// What a pointer is over on a spawn screen (or what the screen has picked).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SpawnTarget {
     Side(usize),
     Post(core::unit::SpawnPost),
+    /// Issue #128: a line-up soldier, by raw class index.
+    Class(u8),
 }
 
-#[derive(Debug, Default, Clone)]
-struct SpawnClickTracker {
-    last_target: Option<SpawnTarget>,
-    last_pos: [f32; 2],
-    timer: f32,
-    prev_stage: Option<core::sim::SpawnStage>,
-}
-
-impl SpawnClickTracker {
-    fn step(&mut self, dt: f32) {
-        self.timer += dt;
-    }
-
-    fn check_double_click(&mut self, target: SpawnTarget, pos: [f32; 2]) -> bool {
-        const DOUBLE_CLICK_TIME: f32 = 0.45;
-        const DOUBLE_CLICK_DIST: f32 = 25.0;
-
-        let is_double = self.last_target == Some(target) && self.timer <= DOUBLE_CLICK_TIME && {
-            let dx = pos[0] - self.last_pos[0];
-            let dy = pos[1] - self.last_pos[1];
-            (dx * dx + dy * dy) <= DOUBLE_CLICK_DIST * DOUBLE_CLICK_DIST
-        };
-
-        if is_double {
-            self.last_target = None;
-            self.timer = f32::INFINITY;
-            true
-        } else {
-            self.last_target = Some(target);
-            self.last_pos = pos;
-            self.timer = 0.0;
-            false
+impl SpawnTarget {
+    fn pick(self) -> core::sim::ScreenPick {
+        match self {
+            SpawnTarget::Side(row) => core::sim::ScreenPick::Side(row.min(2) as u8),
+            SpawnTarget::Post(post) => core::sim::ScreenPick::post(post),
+            SpawnTarget::Class(class) => core::sim::ScreenPick::Class(class),
         }
     }
 
+    /// The target a waiting pick stands for.
+    fn of_pick(pick: core::sim::ScreenPick) -> Self {
+        match pick {
+            core::sim::ScreenPick::Side(row) => SpawnTarget::Side(usize::from(row)),
+            core::sim::ScreenPick::Class(class) => SpawnTarget::Class(class),
+            post => SpawnTarget::Post(post.spawn_post().expect("a post pick")),
+        }
+    }
+}
+
+/// Issue #128: what one pointer frame does on a spawn screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpawnPointerAct {
+    /// Select the target (the next pad's pick).
+    Pick(SpawnTarget),
+    /// The screen's accept, with the target's pick when a row was clicked.
+    Accept(Option<SpawnTarget>),
+    /// The screen's back.
+    Back,
+}
+
+/// `[ours]` A screen takes no accept or back by pointer this soon after it
+/// opened: the second click of a double click that left the last screen
+/// only selects on this one. measure: live mouse play on the spawn screens.
+const SPAWN_SCREEN_SETTLE: f32 = 0.45;
+
+/// Issue #128, the shell's pointer model on the spawn screens: fresh motion
+/// over a row selects it where `hover_picks` (the side rows and the map's
+/// posts; not the class line-up, whose ring turns under the pointer); a
+/// click selects the row under it, and a click on the row already selected
+/// (a single click after hovering, or a double click's second) accepts it.
+/// A click on a help line accepts or backs. `settled`: the screen has been
+/// up [`SPAWN_SCREEN_SETTLE`].
+fn spawn_pointer_act(
+    hover_picks: bool,
+    over: Option<SpawnTarget>,
+    selected: Option<SpawnTarget>,
+    help: Option<ui::spawn_draw::Help>,
+    click: bool,
+    settled: bool,
+) -> Option<SpawnPointerAct> {
+    if click && settled {
+        match help {
+            Some(ui::spawn_draw::Help::Accept) => return Some(SpawnPointerAct::Accept(None)),
+            Some(ui::spawn_draw::Help::Back) => return Some(SpawnPointerAct::Back),
+            None => {}
+        }
+    }
+    let over = over?;
+    match (click, Some(over) == selected) {
+        (true, true) if settled => Some(SpawnPointerAct::Accept(Some(over))),
+        (true, _) => Some(SpawnPointerAct::Pick(over)),
+        (false, false) if hover_picks => Some(SpawnPointerAct::Pick(over)),
+        (false, _) => None,
+    }
+}
+
+/// How long the spawn screen in front has been up, and its last click.
+#[derive(Debug, Default, Clone)]
+struct SpawnClickTracker {
+    /// Seconds since [`Self::prev_stage`] opened.
+    open: f32,
+    prev_stage: Option<core::sim::SpawnStage>,
+    /// The last click's pick, where it was, and the seconds since.
+    last: Option<(SpawnTarget, [f32; 2], f32)>,
+    /// The last pick sent in a pad and the seconds since, until the sim
+    /// shows it ([`Self::sent`]).
+    sent: Option<(SpawnTarget, f32)>,
+}
+
+/// `[ours]` How long a sent pick the sim does not show yet stays the
+/// selection a click accepts: longer than a LAN round trip, short enough
+/// that a pick the sim refused is soon forgotten. measure: VPN playtests.
+const SENT_PICK_WAIT: f32 = 1.0;
+
+impl SpawnClickTracker {
+    fn step(&mut self, dt: f32) {
+        self.open += dt;
+        if let Some((_, _, t)) = &mut self.last {
+            *t += dt;
+        }
+        if let Some((_, t)) = &mut self.sent {
+            *t += dt;
+        }
+    }
+
+    /// A pick went out in the next pad.
+    fn send(&mut self, target: SpawnTarget) {
+        self.sent = Some((target, 0.0));
+    }
+
+    /// The last pick sent while the sim, which shows `shown`, has not taken
+    /// it yet. On a LAN the pad's pick is gone from the window
+    /// (`Kbm::consumed`) a round trip before the host's ticks show it, and
+    /// a click on the row just picked must still accept it. Forgotten once
+    /// the sim shows it, after [`SENT_PICK_WAIT`], and on a new screen.
+    fn sent(&mut self, shown: Option<SpawnTarget>) -> Option<SpawnTarget> {
+        let (target, t) = self.sent?;
+        if Some(target) == shown || t > SENT_PICK_WAIT {
+            self.sent = None;
+            return None;
+        }
+        Some(target)
+    }
+
+    fn settled(&self) -> bool {
+        self.open >= SPAWN_SCREEN_SETTLE
+    }
+
+    /// A click at `pos` that is a double click's second: the first click's
+    /// pick, even where the line-up has slid another soldier under it.
+    fn double(&self, pos: [f32; 2]) -> Option<SpawnTarget> {
+        const DOUBLE_CLICK_TIME: f32 = 0.45;
+        const DOUBLE_CLICK_DIST: f32 = 25.0;
+        let (target, at, t) = self.last?;
+        let (dx, dy) = (pos[0] - at[0], pos[1] - at[1]);
+        (t <= DOUBLE_CLICK_TIME && dx * dx + dy * dy <= DOUBLE_CLICK_DIST * DOUBLE_CLICK_DIST)
+            .then_some(target)
+    }
+
+    fn clicked(&mut self, target: Option<SpawnTarget>, pos: [f32; 2]) {
+        self.last = target.map(|t| (t, pos, 0.0));
+    }
+
     fn clear(&mut self) {
-        self.last_target = None;
-        self.timer = f32::INFINITY;
+        self.open = 0.0;
+        self.last = None;
+        self.sent = None;
     }
 }
 
@@ -515,8 +656,11 @@ struct App {
     /// This platform waits for the window's image in the acquire (the
     /// governor's CPU-bound rule can trust the frame's busy time).
     acquire_seen: bool,
-    /// What it holds this battle's frames to, read from the display once.
+    /// What it holds this battle's frames to, read from the display once
+    /// (again after a display mode change, issue #172).
     dyn_res_budget_ms: Option<f32>,
+    /// Issue #172: the display mode's keys and requests.
+    display: display::Display,
     profile: game::profile::Profile,
     profile_store: Option<game::profile::Store>,
     round_recorded: bool,
@@ -526,6 +670,9 @@ struct App {
     score_hold: ui::scoreboard::Hold,
     /// The other players' names over their heads (LAN §5b).
     name_tags: game::name_tags::NameTags,
+    /// The window's inner size, display scale and frame size last logged
+    /// (`events.rs`, `note_window_size`).
+    window_note: Option<(u32, u32, f64, (u32, u32))>,
     /// Separate from menu/D-pad state; reset when the sampled controller changes.
     gameplay_stick: GameplayStick<gilrs::GamepadId>,
     /// The left stick's learned travel (#142); reset with `gameplay_stick`.
@@ -550,6 +697,12 @@ struct App {
     spawn_clicks: SpawnClickTracker,
     kbm: game::kbm::Kbm,
     focused: bool,
+    /// Issue #128: the focused player is behind the spawn screens as a
+    /// mouse player (mouse look had the pointer as he went behind them, or
+    /// the pointer accepted); the spawn takes the pointer back.
+    spawn_regrab: bool,
+    /// The last grab sync found the focused player behind the spawn screens.
+    behind_spawn_screens: bool,
     /// The PS2 shell's front screens (`None` until the shell first draws).
     front: Option<FrontShell>,
     /// One click of L3 sprints (`input::SprintLatch`).
@@ -755,6 +908,10 @@ impl App {
     ) -> Self {
         let mut kbm = game::kbm::Kbm::default();
         kbm.follow(&profile.settings);
+        kbm.swap_context(
+            &game::control_layout::context_bindings(None, &profile.settings),
+            game::control_layout::look_scale(None),
+        );
         // `--cheat` starts the session with its flags.
         let cheats = game::cheats::Session::new(setup.cheats);
         Self {
@@ -798,6 +955,7 @@ impl App {
             quality_note: None,
             acquire_seen: false,
             dyn_res_budget_ms: None,
+            display: Default::default(),
             profile,
             profile_store: None,
             round_recorded: false,
@@ -816,6 +974,7 @@ impl App {
             prev_menu_buttons: 0,
             score_hold: Default::default(),
             name_tags: Default::default(),
+            window_note: None,
             gameplay_stick: GameplayStick::default(),
             stick_range: input::StickRange::default(),
             stick_sample: ([0.0; 2], [0.0; 2]),
@@ -829,6 +988,8 @@ impl App {
             shell_pointer: ui::cursor::Pointer::default(),
             spawn_clicks: SpawnClickTracker::default(),
             focused: true,
+            spawn_regrab: false,
+            behind_spawn_screens: false,
             kbm,
             front: None,
             sprint_latch: input::SprintLatch::default(),
@@ -854,9 +1015,10 @@ impl App {
         }
     }
 
-    /// A click on the spawn screens: the pick goes into the next tick's pad
-    /// (`Kbm::set_pick`, the sim applies it, `PadState::pick`), and a double
-    /// click adds the screens' accept. The window writes no sim state.
+    /// The pointer on the spawn screens ([`spawn_pointer_act`]): a pick goes
+    /// into the next tick's pad (`Kbm::set_pick`, the sim applies it,
+    /// `PadState::pick`), an accept or back as the screens' own bits. The
+    /// window writes no sim state.
     fn step_spawn_pointer(&mut self, dt: f32) {
         let scale = self
             .hud_view
@@ -866,9 +1028,10 @@ impl App {
     }
 
     /// [`App::step_spawn_pointer`] with the spawn map drawn at the Map
-    /// element's `map_scale` (`None`: no HUD pass draws the map, so a click
-    /// there picks no post).
+    /// element's `map_scale` (`None`: no HUD pass draws the map, so the
+    /// pointer finds no post there).
     fn step_spawn_pointer_at(&mut self, dt: f32, map_scale: Option<glam::Vec3>) {
+        use core::sim::{buttons, SideChoice, SpawnStage};
         self.spawn_clicks.step(dt);
         if self.paused {
             return;
@@ -887,75 +1050,104 @@ impl App {
             self.spawn_clicks.prev_stage = Some(stage);
             self.spawn_clicks.clear();
         }
-        if stage == core::sim::SpawnStage::Accepted {
-            self.spawn_clicks.clear();
+        if stage == SpawnStage::Accepted {
             return;
         }
         let Some((pos, click)) = self.shell_pointer.take_frame() else {
             return;
         };
-        if !click {
-            return;
-        }
         let size = self.renderer.as_ref().map_or([640.0, 480.0], |r| {
             let (w, h) = r.size();
             [w as f32, h as f32]
         });
-
-        match stage {
-            core::sim::SpawnStage::Side => {
-                if let Some(row) = ui::spawn_draw::side_row_at(pos, size, 3) {
-                    let double = self
-                        .spawn_clicks
-                        .check_double_click(SpawnTarget::Side(row), pos);
-                    self.kbm
-                        .set_pick(core::sim::ScreenPick::Side(row.min(2) as u8));
-                    if double {
-                        self.kbm.tap_bits(core::sim::buttons::SPAWN_ACCEPT);
-                        if let Some(sl) = self.sounds.as_mut() {
-                            sl.play_2d(
-                                self.audio.as_mut(),
-                                ui::shell_feel::MenuSound::Accept.name(),
-                            );
-                        }
-                    } else if let Some(sl) = self.sounds.as_mut() {
-                        sl.play_2d(
-                            self.audio.as_mut(),
-                            ui::shell_feel::MenuSound::Select.name(),
-                        );
-                    }
-                }
-            }
-            core::sim::SpawnStage::Map => {
-                if let (Some(minimap), Some(scale)) = (&walk.minimap, map_scale) {
-                    let map = minimap.spawn_model(walk, slot);
-                    let posts = walk.sim.player_spawn_posts(team);
-                    if let Some(post) =
+        let (over, selected) = match stage {
+            SpawnStage::Side => (
+                ui::spawn_draw::side_row_at(pos, size, 3).map(SpawnTarget::Side),
+                walk.sim.side_choice.get(slot).map(|c| {
+                    SpawnTarget::Side(match c {
+                        SideChoice::Team1 => 0,
+                        SideChoice::Team2 => 1,
+                        SideChoice::Auto => 2,
+                    })
+                }),
+            ),
+            SpawnStage::Map => {
+                let over = match (&walk.minimap, map_scale) {
+                    (Some(minimap), Some(scale)) => {
+                        let map = minimap.spawn_model(walk, slot);
+                        let posts = walk.sim.player_spawn_posts(team);
                         ui::hud_map::hit_spawn_post(&map, scale, &posts, pos, size, 28.0)
-                    {
-                        let double = self
-                            .spawn_clicks
-                            .check_double_click(SpawnTarget::Post(post), pos);
-                        self.kbm.set_pick(core::sim::ScreenPick::post(post));
-                        if double {
-                            self.kbm.tap_bits(core::sim::buttons::SPAWN_ACCEPT);
-                            if let Some(sl) = self.sounds.as_mut() {
-                                sl.play_2d(
-                                    self.audio.as_mut(),
-                                    ui::shell_feel::MenuSound::Accept.name(),
-                                );
-                            }
-                        } else if let Some(sl) = self.sounds.as_mut() {
-                            sl.play_2d(
-                                self.audio.as_mut(),
-                                ui::shell_feel::MenuSound::Select.name(),
-                            );
-                        }
                     }
-                }
+                    _ => None,
+                };
+                (
+                    over.map(SpawnTarget::Post),
+                    walk.sim.spawn_post_selected(slot).map(SpawnTarget::Post),
+                )
             }
-            core::sim::SpawnStage::Class | core::sim::SpawnStage::Alive => {}
-            core::sim::SpawnStage::Accepted => {}
+            SpawnStage::Class | SpawnStage::Alive => (
+                self.spawn_preview
+                    .class_at(pos, size)
+                    .map(SpawnTarget::Class),
+                walk.sim
+                    .spawn_class_choice(slot, team)
+                    .map(|c| SpawnTarget::Class(c as u8)),
+            ),
+            SpawnStage::Accepted => return,
+        };
+        let over = match click {
+            true => self.spawn_clicks.double(pos).or(over),
+            false => over,
+        };
+        // A pick still waiting for its tick, or sent and not yet shown by
+        // the sim, is the selection the player sees next.
+        let sent = self.spawn_clicks.sent(selected);
+        let selected = self
+            .kbm
+            .pending_pick()
+            .map(SpawnTarget::of_pick)
+            .or(sent)
+            .or(selected);
+        let help = self
+            .hud_view
+            .as_ref()
+            .filter(|_| click && !self.cheats.hud_hidden)
+            .and_then(|v| v.spawn_help_at(pos, size));
+        let hover_picks = matches!(stage, SpawnStage::Side | SpawnStage::Map);
+        let settled = self.spawn_clicks.settled();
+        let act = spawn_pointer_act(hover_picks, over, selected, help, click, settled);
+        if click {
+            let picked = match act {
+                Some(SpawnPointerAct::Pick(target)) => Some(target),
+                _ => None,
+            };
+            self.spawn_clicks.clicked(picked, pos);
+        }
+        let Some(act) = act else {
+            return;
+        };
+        let sound = match act {
+            SpawnPointerAct::Pick(target) => {
+                self.kbm.set_pick(target.pick());
+                self.spawn_clicks.send(target);
+                click.then_some(ui::shell_feel::MenuSound::Select)
+            }
+            SpawnPointerAct::Accept(target) => {
+                if let Some(target) = target {
+                    self.kbm.set_pick(target.pick());
+                    self.spawn_clicks.send(target);
+                }
+                self.kbm.tap_bits(buttons::SPAWN_ACCEPT);
+                self.note_pointer_spawn();
+                Some(ui::shell_feel::MenuSound::Accept)
+            }
+            SpawnPointerAct::Back => {
+                self.kbm.tap_bits(buttons::SPAWN_BACK);
+                Some(ui::shell_feel::MenuSound::Exit)
+            }
+        };
+        if let (Some(sound), Some(sl)) = (sound, self.sounds.as_mut()) {
+            sl.play_2d(self.audio.as_mut(), sound.name());
         }
     }
 
@@ -1109,15 +1301,23 @@ impl App {
         self.clear_loading_input();
         let cues = (self.audio.is_some() && display.sample(std::time::Duration::ZERO).is_some())
             .then(|| loading::Cues::load(&self.assets_dir));
+        // Only the LAN host skips, for everyone (issue #168); a guest's
+        // presses do nothing.
+        let playback = if self.netplay.as_ref().is_some_and(|n| !n.is_host()) {
+            loading::Playback::no_skip()
+        } else {
+            loading::Playback::default()
+        };
         self.loading = Some(Loading {
             map_name: name,
             started: std::time::Instant::now(),
-            playback: Default::default(),
+            playback,
             display,
             worker,
             ready: None,
             shown: false,
             cues,
+            held: None,
         });
         self.screen = Screen::Loading;
         self.sync_grab();
@@ -1127,10 +1327,15 @@ impl App {
     /// Poll CPU work and paint independently of the presentation clock. A skip
     /// keeps drawing until CPU data is ready. GPU upload and setup still block
     /// the event thread at the explicitly timed final boundary.
+    ///
+    /// A LAN round start (issue #168, `lan.rs` module rules) has the same
+    /// minimum; only the host skips it, for every peer. At its end the
+    /// battle is installed behind the last image (`Loaded` goes out) and
+    /// shown at the host's start. A join or a rejoin enters as soon as it
+    /// is built.
     fn redraw_loading(&mut self) -> Result<()> {
         self.pump_loading_pads();
-        // A LAN round enters as soon as it is built: the host's barrier and
-        // the guests' clocks do not wait on the presentation (issue #168).
+        // The host's `Start` (and every other session event) first.
         self.net_idle();
         // The session's events may have ended this loading (the lobby, a
         // newer round's loading, the waiting screen): that screen is drawn
@@ -1138,7 +1343,15 @@ impl App {
         if !matches!(self.screen, Screen::Loading) {
             return Ok(());
         }
-        let net = self.netplay.is_some();
+        // A session that ended has no start to wait for: its battle shows
+        // the banner and leaves, as a running one does.
+        let net = self.netplay.as_ref().map(|n| {
+            let start = match n.ended {
+                Some(_) => Some(std::time::Instant::now()),
+                None => n.start_at(),
+            };
+            (n.peer.joining(), start)
+        });
         let Some(l) = self.loading.as_mut() else {
             if self.netplay.is_some() {
                 self.net_to_lobby(None);
@@ -1159,14 +1372,32 @@ impl App {
             }
         }
         let elapsed = l.started.elapsed();
+        // The host's skip goes to every guest; a guest's ends with it.
+        if let Some(n) = self.netplay.as_mut() {
+            if n.peer.is_host() {
+                if l.playback.skipped() && n.peer.skip_loading(&mut n.link) {
+                    println!(
+                        "loading: host skipped for everyone round={}",
+                        n.peer.round_id()
+                    );
+                }
+            } else if n.peer.loading_skipped() && !l.playback.skipped() {
+                l.playback.host_skipped(elapsed);
+                println!("loading: the host skipped round={}", n.peer.round_id());
+            }
+        }
         let time = l.playback.time(elapsed);
         let frame = l.display.sample(time);
-        let finish = if net {
-            l.shown && l.ready.is_some()
-        } else {
+        let presented =
             l.playback
-                .can_enter(elapsed, l.display.duration(), l.shown, l.ready.is_some())
-        };
+                .can_enter(elapsed, l.display.duration(), l.shown, l.ready.is_some());
+        let next = loading::next(
+            net,
+            presented,
+            l.shown && l.ready.is_some(),
+            l.held.is_some(),
+            std::time::Instant::now(),
+        );
         let prompt = l.playback.prompt(elapsed);
         if let (Some(audio), Some(cues)) = (&mut self.audio, &mut l.cues) {
             cues.update(
@@ -1195,7 +1426,7 @@ impl App {
                 return Err(e.into());
             }
         }
-        if finish {
+        if next == loading::Next::Enter {
             let mut l = self.finish_loading().expect("loading round");
             let prepared = l.ready.take().expect("ready CPU scene");
             println!(
@@ -1207,15 +1438,84 @@ impl App {
                 eprintln!("failed to start {}: {e:#}", l.map_name);
                 self.loading_failed();
             }
+        } else if next == loading::Next::Hold {
+            self.hold_battle();
+        } else if next == loading::Next::Show {
+            self.show_held();
         } else if let Some(l) = self.loading.as_mut() {
             l.shown = true;
         }
         Ok(())
     }
 
+    /// A LAN round start's presentation is over: the battle is installed
+    /// (`Loaded` goes out) and held behind the last image.
+    fn hold_battle(&mut self) {
+        let Some(l) = self.loading.as_mut() else {
+            return;
+        };
+        let prepared = l.ready.take().expect("ready CPU scene");
+        let name = l.map_name.clone();
+        println!(
+            "loading: cpu_parse_ms={:.3} presentation_wall_ms={:.3}",
+            prepared.cpu_ms,
+            l.started.elapsed().as_secs_f64() * 1000.0
+        );
+        match self.install_battle(name.clone(), prepared) {
+            Ok((setup, walk, cube, gpu)) => {
+                if let Some(l) = self.loading.as_mut() {
+                    l.held = Some(Held {
+                        setup,
+                        walk,
+                        cube,
+                        gpu,
+                        at: std::time::Instant::now(),
+                    });
+                }
+            }
+            Err(e) => {
+                eprintln!("failed to start {name}: {e:#}");
+                self.finish_loading();
+                self.loading_failed();
+            }
+        }
+    }
+
+    /// The host's start: the held battle is shown and its first frame steps
+    /// tick 0's bundle. A press made during the hold stays quarantined.
+    fn show_held(&mut self) {
+        let Some(held) = self.loading.as_mut().and_then(|l| l.held.take()) else {
+            return;
+        };
+        let l = self.finish_loading().expect("loading round");
+        let now = std::time::Instant::now();
+        if let Some(n) = self.netplay.as_mut() {
+            n.peer.begin_play();
+            let late = n.start_at().map_or(0.0, |t| {
+                now.saturating_duration_since(t).as_secs_f64() * 1000.0
+            });
+            let lead = n.start.map_or(0.0, |(_, w)| w * 1000.0);
+            println!(
+                "loading: net hold_ms={:.3} presentation_wall_ms={:.3} start_lead_ms={lead:.3} \
+                 start_late_ms={late:.3}",
+                now.saturating_duration_since(held.at).as_secs_f64() * 1000.0,
+                now.saturating_duration_since(l.started).as_secs_f64() * 1000.0,
+            );
+        }
+        self.enter_battle(held.setup, held.walk, held.cube, held.gpu);
+        self.net_names_to_feed();
+    }
+
     fn finish_loading(&mut self) -> Option<Loading> {
         let mut l = self.loading.take()?;
         l.cues = None;
+        // A held battle that is not shown (the lobby, a newer round) goes
+        // with its scene.
+        if l.held.take().is_some() {
+            if let Some(r) = self.renderer.as_mut() {
+                r.clear_scene();
+            }
+        }
         self.loading_edges.quarantine();
         self.loading_pad_blocked = self.any_pad_button_down();
         self.clear_loading_input();
@@ -1350,6 +1650,11 @@ impl App {
                 );
             }
         }
+        // A single-player round names its human by the profile, as a LAN
+        // round does by the session names (`lan::net_names_to_feed`).
+        if let Some(name) = single_player_name(lockstep, &self.profile.name) {
+            self.feed.set_player_names([(0, name.as_str())]);
+        }
         if let Some(sl) = self.sounds.as_mut() {
             sl.rate_mul = self.cheats.sfx_rate();
         }
@@ -1408,6 +1713,20 @@ impl App {
 
     /// Load the map + build the battle with the shell's settings.
     fn start_battle(&mut self, name: String, prepared: loading::Prepared) -> Result<()> {
+        let (setup, walk, cube, gpu) = self.install_battle(name, prepared)?;
+        self.enter_battle(setup, walk, cube, gpu);
+        // The new round's feed names its humans from the first tick.
+        self.net_names_to_feed();
+        Ok(())
+    }
+
+    /// [`App::start_battle`] up to the battle's first frame: the upload, the
+    /// resources and a LAN round's `round_built` (its `Loaded`).
+    fn install_battle(
+        &mut self,
+        name: String,
+        prepared: loading::Prepared,
+    ) -> Result<(BattleSetup, WalkSim, MeshHandle, SceneGpu)> {
         let renderer = self
             .renderer
             .as_mut()
@@ -1426,14 +1745,14 @@ impl App {
         // A LAN round (issue #168) is the host's setup, built alike on every peer.
         let net_round = self.netplay.as_mut().and_then(|n| n.loading.take());
         let local_slot = self.netplay.as_ref().map_or(0, |n| n.peer.local_slot);
-        let (setup, teams, built) = match round {
+        let (setup, built) = match round {
             Some(r) => {
                 println!("loading: worker {}", r.laps);
-                (r.setup, r.teams, Some((r.walk, r.extras)))
+                (r.setup, Some((r.walk, r.extras)))
             }
             None => {
-                let (setup, teams) = self.serial_setup(&name, net_round.as_ref())?;
-                (setup, teams, None)
+                let setup = self.serial_setup(&name, net_round.as_ref())?;
+                (setup, None)
             }
         };
         // Release the renderer field borrow while installing the other App resources.
@@ -1453,12 +1772,11 @@ impl App {
             Some(n) => n.round_built(&mut walk),
             None => super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref()),
         }
-        self.enter_battle(name, teams, setup, walk, cube, gpu);
         println!(
             "loading: upload_ms={upload_ms:.3} setup_ms={:.3}",
             setup_started.elapsed().as_secs_f64() * 1000.0
         );
-        Ok(())
+        Ok((setup, walk, cube, gpu))
     }
 
     /// The shell's or a LAN round's setup, built on the event thread (a
@@ -1467,7 +1785,7 @@ impl App {
         &self,
         name: &str,
         net_round: Option<&game::netplay::RoundSetup>,
-    ) -> Result<(BattleSetup, [String; 2])> {
+    ) -> Result<BattleSetup> {
         // The mission whose pair was picked (Republic against CIS runs the
         // map's Clone Wars script), the player's army on its own team there;
         // a cross-era pair runs the map's default mission (card ERAM).
@@ -1493,20 +1811,9 @@ impl App {
         }
     }
 
-    /// The built battle in play: the profile's last battle, the App's
+    /// The built battle in play: the profile autosave, the App's
     /// battle state, the first frame next.
-    fn enter_battle(
-        &mut self,
-        name: String,
-        teams: [String; 2],
-        setup: BattleSetup,
-        walk: WalkSim,
-        cube: MeshHandle,
-        gpu: SceneGpu,
-    ) {
-        self.profile.settings.last_map = Some(name);
-        self.profile.settings.last_mode = Some(self.mode.clone());
-        self.profile.settings.last_teams = Some(teams);
+    fn enter_battle(&mut self, setup: BattleSetup, walk: WalkSim, cube: MeshHandle, gpu: SceneGpu) {
         if let Err(e) = self.profile.save() {
             eprintln!("profile autosave failed: {e:#}");
         }
@@ -1754,11 +2061,11 @@ impl App {
 
     fn refresh_context_bindings(&mut self) {
         let settings = &self.profile.settings;
-        let keyboard = self.binding_context.and_then(|context| {
-            game::control_layout::keyboard(context, settings.keyboard_layouts.get(context))
-        });
-        self.kbm
-            .set_bindings(keyboard.as_ref().unwrap_or(&settings.keyboard_bindings));
+        let keyboard = game::control_layout::context_bindings(self.binding_context, settings);
+        self.kbm.swap_context(
+            &keyboard,
+            game::control_layout::look_scale(self.binding_context),
+        );
         self.context_gamepad = self.binding_context.and_then(|context| {
             game::control_layout::gamepad(context, settings.gamepad_layouts.get(context))
         });
@@ -1834,6 +2141,22 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
     run_app(event_loop, &mut app)
 }
 
+/// The shell's profile before one is picked: the defaults, opening in the
+/// display mode of the profile the picker will offer first (a first launch,
+/// with no profile yet, opens fullscreen like a new profile).
+pub(super) fn shell_profile(store: &game::profile::Store) -> game::profile::Profile {
+    let mut profile = game::profile::Profile::default();
+    match store.last_window_mode() {
+        Ok(Some((mode, last))) => {
+            profile.settings.window_mode = mode;
+            profile.settings.last_fullscreen = last;
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("profiles: {e:#}"),
+    }
+    profile
+}
+
 /// The shell's event loop and App, not yet running (the shell's and a LAN
 /// launch's start).
 fn shell_app(
@@ -1845,10 +2168,9 @@ fn shell_app(
     let profile_store = std::env::var_os("OPENBF_PROFILE")
         .is_none()
         .then(|| game::profile::Store::new(game::profile::data_dir()));
-    let profile = if profile_store.is_some() {
-        game::profile::Profile::default()
-    } else {
-        game::profile::Profile::load_or_default()
+    let profile = match &profile_store {
+        Some(store) => shell_profile(store),
+        None => game::profile::Profile::load_or_default(),
     };
     let (gilrs, pad_warning) = open_pads(&profile.settings.controller_bindings);
     let audio = audio::Audio::new();
@@ -1875,6 +2197,8 @@ fn shell_app(
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
         dlc_heroes: false,
+        netplay_rows: false,
+        opening_humans: [0; 2],
         score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
     };
     let autopilot = game::dev::on() && std::env::var("OPENBF_AUTOPILOT").is_ok_and(|v| v == "1");

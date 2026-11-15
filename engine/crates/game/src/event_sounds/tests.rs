@@ -665,3 +665,47 @@ fn vehicle_collision_plays_only_the_class_sound() {
     walk.vehicle_sounds[0].collision_sound = Some("hover_hit".into());
     assert_eq!(sounds(&walk), vec![("hover_hit".to_owned(), at)]);
 }
+
+/// Issue #173: a Force Choke's hold plays the victim class's `ChokeSound` on
+/// him, at his position, for as long as it holds him, and nothing once it
+/// lets go, he dies, or for a class that names no choke sound.
+#[test]
+fn a_choke_hold_plays_the_victims_choke_sound_until_it_lets_go() {
+    let (mut walk, _, _) = scene();
+    let victim = walk
+        .sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -6.0)))
+        .unwrap();
+    let team = usize::from(walk.sim.unit(victim).unwrap().team);
+    let class = usize::from(walk.sim.unit(victim).unwrap().spec.class);
+    walk.teams[team].classes[class].cries.choke = Some("impmaleforcechoke".into());
+    assert!(choke_loops(&walk).is_empty(), "no hold, no voice");
+
+    walk.sim.unit_mut(victim).unwrap().choked = Some(core::hero_weapon::Choked {
+        left: 0.5,
+        ..Default::default()
+    });
+    let at = walk.sim.unit(victim).unwrap().soldier.pos;
+    assert_eq!(
+        choke_loops(&walk),
+        vec![(victim, "impmaleforcechoke".to_owned(), at + Vec3::Y)]
+    );
+    // It follows him (a hold in the air keeps its own position).
+    walk.sim.unit_mut(victim).unwrap().soldier.pos.y += 2.0;
+    assert_eq!(choke_loops(&walk)[0].2, at + Vec3::Y * 3.0);
+
+    // Released: silent.
+    walk.sim.unit_mut(victim).unwrap().choked = None;
+    assert!(choke_loops(&walk).is_empty());
+
+    // Held but dead: silent.
+    let u = walk.sim.unit_mut(victim).unwrap();
+    u.choked = Some(Default::default());
+    u.alive = false;
+    assert!(choke_loops(&walk).is_empty());
+
+    // A class with no ChokeSound stays silent while held.
+    walk.sim.units[victim.index as usize].alive = true;
+    walk.teams[team].classes[class].cries.choke = None;
+    assert!(choke_loops(&walk).is_empty());
+}

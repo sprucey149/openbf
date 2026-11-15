@@ -99,14 +99,18 @@ impl Animator {
         self.twist = constrain(self.twist);
         let mv = match self.legs.mv {
             m @ (Move::TurnLeft | Move::TurnRight) => {
-                let len = self.lower.slot.map_or(0.0, |l| {
-                    let f = clips[l.clip].frames.max(2) as f32;
-                    let frames = match rig.game {
-                        Game::Bf1 => f,
-                        Game::Bf2 => f - 1.0,
-                    };
-                    frames / 30.0
-                });
+                let len = self
+                    .lower
+                    .slot
+                    .and_then(|l| clips.get(l.clip))
+                    .map_or(0.0, |c| {
+                        let f = c.frames.max(2) as f32;
+                        let frames = match rig.game {
+                            Game::Bf1 => f,
+                            Game::Bf2 => f - 1.0,
+                        };
+                        frames / 30.0
+                    });
                 if len > 0.0 {
                     self.twist += self.turn / len * dt;
                 }

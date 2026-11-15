@@ -59,12 +59,14 @@ fn award_damage_keeps_bf2s_advantage_over_its_base() {
     let (Some(bf1), Some(bf2)) = (db("bf1"), db("bf2")) else {
         return;
     };
-    // (medal, award to a person, base to a person): BF2's disc.
+    // (medal, award to a person, base to a person): BF2's disc values, except
+    // the sniper pair, which is the shared rule (`normalize::SHARED_RULES`).
     let disc = |side: &str, t: i8| match (t, side) {
         (0, _) => (150.0, 60.0),
         (1, "imp") => (150.0, 70.0),
         (1, _) => (150.0, 80.0),
-        (4, _) => (600.0, 300.0),
+        // The maintainer 2026-11-14: 280 and the award x2 over it.
+        (4, _) => (560.0, 280.0),
         (5, _) => (85.0, 65.0),
         _ => unreachable!(),
     };
@@ -458,19 +460,20 @@ fn a_bf1_award_rifle_is_bf2s() {
 }
 
 /// The beam rifle and the Heavy Blast Cannon on BF1 kits: a held beam takes
-/// BF2's 600 off a body, and each award bolt that lands 113.33.
+/// 560 off a body (BF2's x2 over the rifle's 280), and each award bolt that
+/// lands 113.33.
 #[test]
 fn bf1_snipers_and_pilots_fire_bf2s_awards() {
     let Some(bf1) = db("bf1") else { return };
     let mut r = range(&bf1, "all_inf_marksman", "imp_inf_storm_trooper", 10.0);
-    assert_eq!(r.shoot(), [300.0], "the shared sniper rifle");
+    assert_eq!(r.shoot(), [280.0], "the shared sniper rifle");
     r.sim.cheats.all_awards = true;
     r.sim.step(&[pad(0)]);
     assert_eq!(r.in_hand(), "all_weap_award_sniper_rifle");
     let beam: f32 = r.shoot().iter().sum();
-    // 600 over the beam's 0.15 s: the fifth tick's share overshoots a
-    // little, as on BF2 maps.
-    assert!((600.0..=667.0).contains(&beam), "beam took {beam}");
+    // 560 over the beam's 0.15 s: the fifth tick's share overshoots a
+    // little (about 622), as on BF2 maps.
+    assert!((560.0..=623.0).contains(&beam), "beam took {beam}");
 
     let mut r = range(&bf1, "all_inf_pilot", "imp_inf_storm_trooper", 5.0);
     r.sim.cheats.all_awards = true;

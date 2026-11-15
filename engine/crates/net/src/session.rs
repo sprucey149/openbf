@@ -64,6 +64,12 @@ pub enum HostCommand {
         tick: u32,
         hash: u64,
     },
+    /// [`HostCore::tell_desync`].
+    TellDesync {
+        slot: u8,
+        tick: u32,
+        host_hash: u64,
+    },
     Kick {
         slot: u8,
         ban: bool,
@@ -137,6 +143,11 @@ impl SessionCore for HostCore {
                 self.issue_command(c);
             }
             HostCommand::ReportHash { tick, hash } => self.report_hash(tick, hash),
+            HostCommand::TellDesync {
+                slot,
+                tick,
+                host_hash,
+            } => self.tell_desync(slot, tick, host_hash),
             HostCommand::Kick { slot, ban } => self.kick(slot, ban),
             HostCommand::Bench(slot) => {
                 self.bench(slot);

@@ -45,6 +45,9 @@ pub struct StatRow {
     pub posts: i32,
     /// The viewer's own row.
     pub me: bool,
+    /// `[ours]` A human player's row (the viewer's too; never a bot's):
+    /// Team Stats draws its name bold, in its usual colour (issue #168).
+    pub human: bool,
     /// The Personal Stats lines: label and value; a blank pair keeps its
     /// line's pitch.
     pub personal: Vec<(String, String)>,

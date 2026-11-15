@@ -259,14 +259,53 @@ impl Cmd {
     }
 }
 
-/// A list's focused row and its first shown row.
+/// A list's focused row and its view ([`crate::scroll`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ListCursor {
     pub at: usize,
-    pub top: usize,
+    pub view: crate::scroll::ScrollView,
 }
 
 impl ListCursor {
+    /// Focus on `at`, the view at the top.
+    pub fn new(at: usize) -> Self {
+        Self {
+            at,
+            view: Default::default(),
+        }
+    }
+
+    /// The first row the view rests on (where it is heading).
+    pub fn top(&self) -> usize {
+        self.view.target().round() as usize
+    }
+
+    /// The first shown row, fractional (rows are drawn this far up).
+    pub fn offset(&self) -> f32 {
+        self.view.offset()
+    }
+
+    /// Rows hidden above / below a window of `shown` rows of `n`, where the
+    /// view is heading (the scroll arrows).
+    pub fn more(&self, n: usize, shown: usize) -> (bool, bool) {
+        let o = self.view.target();
+        (o > 0.01, o < crate::scroll::max_offset(n, shown) - 0.01)
+    }
+
+    /// The row a point `dy` units below the window's top hits, rows
+    /// `row_h` apart, if it lies inside the window of `shown`.
+    pub fn row_at(&self, dy: f32, row_h: f32, shown: usize, n: usize) -> Option<usize> {
+        if dy < 0.0 || dy >= row_h * shown as f32 || row_h <= 0.0 {
+            return None;
+        }
+        let k = (dy / row_h + self.view.offset()).floor() as usize;
+        (k < n).then_some(k)
+    }
+
+    /// Ease the view over `dt` seconds.
+    pub fn advance(&mut self, dt: f32) {
+        self.view.advance(dt);
+    }
     /// Move by `step` rows over `live` (each row's enabled flag), no wrap;
     /// `[ours]` dimmed rows are skipped (§7); `shown` rows are visible.
     fn step(&mut self, live: &[bool], step: isize, shown: usize) -> bool {
@@ -323,35 +362,32 @@ impl ListCursor {
 
     /// The first live row (or 0), shown.
     fn first(live: &[bool], shown: usize) -> ListCursor {
-        let mut c = ListCursor {
-            at: live.iter().position(|l| *l).unwrap_or(0),
-            top: 0,
-        };
+        let mut c = ListCursor::new(live.iter().position(|l| *l).unwrap_or(0));
         c.show(live.len(), shown);
+        c.view.snap();
         c
     }
 
+    /// Keep the focus in view after a key or pad move: a row of margin,
+    /// never recentred.
     pub(crate) fn show(&mut self, n: usize, shown: usize) {
-        if self.at < self.top {
-            self.top = self.at;
-        }
-        if self.at >= self.top + shown {
-            self.top = self.at + 1 - shown;
-        }
-        self.top = self.top.min(n.saturating_sub(shown));
+        self.view.reveal(self.at, n, shown, crate::scroll::MARGIN);
     }
-    /// Scroll `top` by `delta` rows without moving `at`.
-    /// `delta` > 0 scrolls down (higher top, showing later items).
-    /// `delta` < 0 scrolls up (lower top, showing earlier items).
-    pub fn scroll(&mut self, total_rows: usize, shown: usize, delta: isize) -> bool {
-        let max_top = total_rows.saturating_sub(shown);
-        let new_top = (self.top as isize + delta).clamp(0, max_top as isize) as usize;
-        if new_top != self.top {
-            self.top = new_top;
-            true
-        } else {
-            false
-        }
+
+    /// Keep the pointer's focus in view: the list stays put unless the
+    /// window cuts the row.
+    pub(crate) fn show_pointed(&mut self, n: usize, shown: usize) {
+        self.view.reveal(self.at, n, shown, 0);
+    }
+
+    /// Scroll the view by `delta` rows (> 0 down, showing later rows)
+    /// without moving `at`; whether it moved past a row.
+    pub fn scroll(&mut self, total_rows: usize, shown: usize, delta: f32) -> bool {
+        // Whether it crossed a row: a trackpad's small steps click once a row.
+        let before = self.view.target().round();
+        self.view
+            .wheel(-delta / crate::scroll::WHEEL_ROWS, total_rows, shown);
+        self.view.target().round() != before
     }
 }
 
@@ -440,7 +476,7 @@ impl InstantAction {
     /// Put the mouse focus on a visible, enabled row. Keyboard/controller
     /// input still uses the same cursors and confirmation path.
     /// Scroll the active or left list (Planet / Mode / Era) by `delta` rows.
-    pub fn scroll_left(&mut self, delta: isize) -> bool {
+    pub fn scroll_left(&mut self, delta: f32) -> bool {
         let (len, shown) = match self.state {
             State::Mode => (self.mode_rows().len(), LIST_ROWS),
             State::Era => (self.side_rows().len(), ERA_ROWS),
@@ -458,7 +494,7 @@ impl InstantAction {
     }
 
     /// Scroll the playlist by `delta` rows.
-    pub fn scroll_right(&mut self, delta: isize) -> bool {
+    pub fn scroll_right(&mut self, delta: f32) -> bool {
         let moved = self
             .play_list
             .scroll(self.playlist.len() + 1, LIST_ROWS, delta);
@@ -469,11 +505,13 @@ impl InstantAction {
     }
 
     /// Scroll the session options group list by `delta` rows.
-    pub fn scroll_option(&mut self, delta: isize) -> bool {
+    pub fn scroll_option(&mut self, delta: f32) -> bool {
         if let Page::Group(g, mut cur) = self.page {
             let moved = cur.scroll(self.options.rows(g).len(), OPTION_ROWS, delta);
+            // A trackpad's fraction of a row moves the view without
+            // crossing a row: keep it, only the click waits for a row.
+            self.page = Page::Group(g, cur);
             if moved {
-                self.page = Page::Group(g, cur);
                 self.click(MenuSound::Select);
             }
             moved
@@ -487,9 +525,9 @@ impl InstantAction {
         &mut self,
         point: Option<[f32; 2]>,
         size: Option<[f32; 2]>,
-        delta: isize,
+        delta: f32,
     ) -> bool {
-        if delta == 0 {
+        if delta == 0.0 || !delta.is_finite() {
             return false;
         }
         match self.page {
@@ -521,25 +559,27 @@ impl InstantAction {
             PointerTarget::Map(k) if self.map_rows().get(k).is_some_and(|r| r.enabled) => {
                 self.state = State::Map;
                 self.map_list.at = k;
-                self.map_list.show(self.map_rows().len(), LIST_ROWS);
+                self.map_list.show_pointed(self.map_rows().len(), LIST_ROWS);
                 true
             }
             PointerTarget::Mode(k) if self.mode_rows().get(k).is_some_and(|r| r.enabled) => {
                 self.state = State::Mode;
                 self.mode_list.at = k;
-                self.mode_list.show(self.mode_rows().len(), LIST_ROWS);
+                self.mode_list
+                    .show_pointed(self.mode_rows().len(), LIST_ROWS);
                 true
             }
             PointerTarget::Era(k) if self.side_rows().get(k).is_some_and(|r| r.enabled) => {
                 self.state = State::Era;
                 self.era_list.at = k;
-                self.era_list.show(self.side_rows().len(), ERA_ROWS);
+                self.era_list.show_pointed(self.side_rows().len(), ERA_ROWS);
                 true
             }
             PointerTarget::Playlist(k) if k <= self.playlist.len() => {
                 self.state = State::Playlist;
                 self.play_list.at = k;
-                self.play_list.show(self.playlist.len() + 1, LIST_ROWS);
+                self.play_list
+                    .show_pointed(self.playlist.len() + 1, LIST_ROWS);
                 true
             }
             PointerTarget::Overview(k)
@@ -554,7 +594,7 @@ impl InstantAction {
                     let rows = self.options.rows(g);
                     if rows.get(k).is_some_and(|o| self.options.option_enabled(*o)) {
                         cur.at = k;
-                        cur.show(rows.len(), OPTION_ROWS);
+                        cur.show_pointed(rows.len(), OPTION_ROWS);
                         self.page = Page::Group(g, cur);
                         return true;
                     }

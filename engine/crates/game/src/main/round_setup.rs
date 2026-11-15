@@ -17,8 +17,8 @@ use std::path::Path;
 /// The shell's battle for map `name` in `mode` with the playlist row's
 /// `row_armies` (`App::start_battle`): the mission picked for the pair, the
 /// player's army on its team there, and the Session Options' population,
-/// tickets, timers, score limits and hero rules. Returns the setup and the
-/// teams as the battle orders them.
+/// tickets, timers, score limits and hero rules. The setup's `teams` hold
+/// the armies as the battle orders them.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn shell_setup(
     missions_dir: &Path,
@@ -29,7 +29,7 @@ pub(super) fn shell_setup(
     session: &ui::shell::SessionOptions,
     seed: u32,
     difficulty: core::skill::Difficulty,
-) -> Result<(BattleSetup, [String; 2])> {
+) -> Result<BattleSetup> {
     let armies = [row_armies[0].as_str(), row_armies[1].as_str()];
     let pick = game::mission::pick(missions_dir, name, mode, armies);
     let player_team = pick.as_ref().map_or(0, |p| p.player_team);
@@ -98,7 +98,7 @@ pub(super) fn shell_setup(
         },
         space_score_limit: session.ass_score.max(1) as u32,
         cheats: core::sim::Cheats::default(),
-        teams: Some(teams.clone()),
+        teams: Some(teams),
         classes_dir: assets_dir.join("classes"),
         mission,
         vehicle: None,
@@ -106,13 +106,15 @@ pub(super) fn shell_setup(
         player_team,
         heroes: game::heroes::rules(session),
         dlc_heroes: session.dlc_heroes,
+        netplay_rows: false,
+        opening_humans: [0; 2],
         score_limit: if hunt {
             session.hun_score.max(1) as u32
         } else {
             session.ass_score.max(0) as u32
         },
     };
-    Ok((setup, teams))
+    Ok(setup)
 }
 
 /// A LAN round's [`BattleSetup`]: [`shell_setup`] with the host's values.
@@ -120,11 +122,11 @@ pub(super) fn battle_setup(
     round: &RoundSetup,
     missions_dir: &Path,
     assets_dir: &Path,
-) -> Result<(BattleSetup, [String; 2])> {
+) -> Result<BattleSetup> {
     let session = round
         .options
         .to_session(ui::shell::SessionOptions::default());
-    shell_setup(
+    let mut setup = shell_setup(
         missions_dir,
         assets_dir,
         &round.map,
@@ -133,7 +135,12 @@ pub(super) fn battle_setup(
         &session,
         round.seed,
         round.difficulty,
-    )
+    )?;
+    // Issue #171 option C: the LAN rows from the opening wave on, and the
+    // opening wave counts every round-start human, not only slot 0.
+    setup.netplay_rows = true;
+    setup.opening_humans = game::netplay::joining_humans(round, setup.player_team);
+    Ok(setup)
 }
 
 /// Every peer's round build: the battle, the shell's spawn screens for
@@ -146,12 +153,43 @@ pub(super) fn build_round(
     local_slot: u8,
 ) -> Result<WalkSim> {
     round.env.check_local()?;
-    let (setup, _) = battle_setup(round, missions_dir, assets_dir)?;
+    let setup = battle_setup(round, missions_dir, assets_dir)?;
     let mut walk = super::battle::make_walk(scene, &setup)?;
     super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
     walk.local_slot = local_slot;
     game::netplay::install_humans(&mut walk, round)?;
     Ok(walk)
+}
+
+/// A LAN host's self-check build (`game::netplay::selfcheck`), on a worker
+/// thread: the round's map loaded from `assets_dir` again (the window's own
+/// copy stays where it is), [`build_round`], and the event feed the window
+/// makes for it (`round_prep`). A dropped check stops it between those
+/// stages.
+pub(super) fn rebuilder(
+    assets_dir: std::path::PathBuf,
+    missions_dir: std::path::PathBuf,
+) -> game::netplay::Rebuild {
+    use game::netplay::selfcheck::Stop;
+    game::netplay::Rebuild::Thread(std::sync::Arc::new(
+        move |round: &RoundSetup, local, stop: &Stop| {
+            let dir = assets_dir.join(&round.map);
+            let (scene, load) = game::assets::load_battle_scene(&dir, &round.mode)?;
+            if let Some((path, Err(error))) = load.common {
+                anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
+            }
+            stop.check()?;
+            let walk = build_round(&scene, round, &missions_dir, &assets_dir, local)?;
+            stop.check()?;
+            let mut feed = game::event_feed::EventFeed::for_walk(
+                &assets_dir,
+                &scene.manifest.source_game,
+                &walk,
+            );
+            feed.set_opening_medals(&walk);
+            Ok((walk, Some(feed)))
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -237,8 +275,8 @@ mod tests {
             );
             let lan = battle_setup(&back, missions, assets);
             match (shell, lan) {
-                (Ok((a, ta)), Ok((b, tb))) => {
-                    assert_eq!(ta, tb, "{map} {mode}");
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(a.teams, b.teams, "{map} {mode}");
                     assert_eq!(summary(&a), summary(&b), "{map} {mode}");
                     if missions.is_dir() && mode == "con" {
                         assert!(a.mission_file.is_some(), "{map}: no mission picked");
@@ -247,6 +285,98 @@ mod tests {
                 (Err(a), Err(b)) => assert_eq!(format!("{a:#}"), format!("{b:#}")),
                 (a, b) => panic!("{map} {mode}: {:?} vs {:?}", a.is_ok(), b.is_ok()),
             }
+        }
+    }
+
+    /// Issue #171 through the real LAN build (`build_round`): every opening
+    /// bot spawns at the row its team plays once every round-start human is
+    /// seated. A Hard or Elite 2v1 gives both teams the host row (option C:
+    /// the host's team's opening bots at 20, not the surplus skill); at Normal
+    /// the DTEAM rule counts every human, not only slot 0, the host: a 1v1
+    /// (the guest on the auto team) has no surplus, and a 2v1 with the host
+    /// alone gives the surplus to the other side.
+    #[test]
+    fn a_lan_2v1_round_takes_its_rows_before_the_opening_wave() {
+        use core::skill::{Difficulty as D, TeamSkill};
+        let missions = Path::new("../../missions");
+        let assets = game::assets::baked_root();
+        let dir = assets.join("bf1_nab2");
+        if !dir.join("manifest.ron").exists() || !missions.is_dir() {
+            eprintln!("SKIP: no real bake or missions");
+            return;
+        }
+        let (scene, _) = game::assets::load_battle_scene(&dir, "con").unwrap();
+        // (tier, the joiners: on the host's team / the other team / auto).
+        let cases = [
+            (D::Hard, [1, 1, 0]),
+            (D::Elite, [1, 1, 0]),
+            (D::Normal, [1, 1, 0]),
+            (D::Normal, [0, 0, 1]),
+            (D::Normal, [0, 2, 0]),
+        ];
+        for (d, [with_host, against, auto]) in cases {
+            let mut host = game::profile::Profile::default();
+            host.settings.difficulty = d;
+            let mut round = RoundSetup::instant_action(
+                "bf1_nab2",
+                "con",
+                ["all".into(), "imp".into()],
+                &ui::shell::SessionOptions::default(),
+                &host,
+            );
+            let seat = |slot: u8, team: Option<u8>| HumanSeat {
+                slot,
+                name: format!("P{slot}"),
+                team,
+                cheats: 0,
+                profile: PlayerProfile::default(),
+            };
+            round.humans.push(seat(0, None));
+            let ht = battle_setup(&round, missions, &assets).unwrap().player_team;
+            let mut slot = 1;
+            for (n, team) in [(with_host, Some(ht)), (against, Some(1 - ht)), (auto, None)] {
+                for _ in 0..n {
+                    round.humans.push(seat(slot, team));
+                    slot += 1;
+                }
+            }
+            let case = format!("{d:?} {with_host}/{against}/{auto}");
+            let walk = build_round(&scene, &round, missions, &assets, 0).unwrap();
+            let sim = &walk.sim;
+            let humans = sim.humans_per_team();
+            // An auto seat joins team 1 only while it has fewer humans.
+            let mut want_humans = [0u8; 2];
+            want_humans[usize::from(ht)] = 1 + with_host;
+            want_humans[usize::from(1 - ht)] = against;
+            for _ in 0..auto {
+                want_humans[usize::from(want_humans[1] < want_humans[0])] += 1;
+            }
+            assert_eq!(humans, want_humans, "{case}");
+            assert!(sim.netplay_rows, "{case}");
+            let host_row = TeamSkill {
+                tier: d,
+                level: d.base_skill(),
+            };
+            let want = if d.lan_even_rows() {
+                [host_row; 2]
+            } else {
+                core::skill::team_skill(d, humans)
+            };
+            assert_eq!(sim.team_rows(), want, "{case}");
+            let mut seen = [0; 2];
+            for u in sim
+                .units
+                .iter()
+                .filter(|u| u.alive && u.team < 2 && u.controller == core::unit::Controller::Ai)
+            {
+                let t = usize::from(u.team);
+                seen[t] += 1;
+                // Under the old wiring the opening wave saw the host alone
+                // (and, before that, no LAN flag): its bots took the
+                // surplus row the seated humans no longer give.
+                assert_eq!(u.skill, want[t].level, "{case} team {t}");
+            }
+            assert!(seen[0] > 0 && seen[1] > 0, "{case}: opening bots {seen:?}");
         }
     }
 }

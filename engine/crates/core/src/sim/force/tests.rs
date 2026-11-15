@@ -323,6 +323,9 @@ mod choke_review;
 #[path = "choke_tests.rs"]
 mod choke_tests;
 
+#[path = "fall_credit_tests.rs"]
+mod fall_credit_tests;
+
 #[test]
 fn a_force_push_throws_a_soldier_and_only_hurts_a_droideka() {
     let (mut sim, player) = scene(emitter());

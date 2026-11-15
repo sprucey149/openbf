@@ -73,7 +73,7 @@ pub fn host_help(addrs: &[(Ipv4Addr, bool)], port: u16) -> Vec<String> {
     vec![
         format!("Other players join with your address: {list}"),
         "If Windows asks, allow openbf on Private and Public networks".to_owned(),
-        "Tailscale/WireGuard: hosts don't appear in the LAN list \u{2014} use Join by address"
+        "Tailscale/WireGuard: hosts don't appear in the LAN list \u{2014} use Join by Address"
             .to_owned(),
         "ZeroTier/WireGuard: your VPN address may be missing above \u{2014} read it in the VPN app"
             .to_owned(),
@@ -179,7 +179,7 @@ mod tests {
             "Other players join with your address: 192.168.1.20, 100.101.7.9 (Tailscale)"
         );
         assert!(lines[1].contains("Private and Public"));
-        assert!(lines[2].contains("Join by address"));
+        assert!(lines[2].contains("Join by Address"));
         assert!(lines[3].contains("ZeroTier") && lines[3].contains("VPN app"));
         assert!(host_help(&addrs[..1], 40000)[0].ends_with("192.168.1.20:40000"));
         assert!(host_help(&[], net::DEFAULT_PORT)[0].contains("none found"));

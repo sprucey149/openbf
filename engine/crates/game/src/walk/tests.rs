@@ -1403,3 +1403,57 @@ fn a_space_map_death_keeps_the_chase_camera() {
     run_ticks(&mut w, PadState::default(), 30);
     assert!(w.death_cam.is_none());
 }
+
+/// Second review of issue #168: a LAN host's correction leaves its career
+/// as it would have been. Its class kills since the last flush are the live
+/// walk's; a replay counts its own from where it started (here the round's
+/// start, kills already flushed among them) and must not credit them again.
+/// The sim (and its medal counts) and the feed's scoring are the replay's;
+/// the feed's lines not yet shown are the live one's, never the replay's.
+#[test]
+fn a_host_correction_leaves_the_career_totals_unchanged() {
+    let mut live = WalkSim::new(3, Vec3::ZERO, Some(flat_ground()));
+    for _ in 0..30 {
+        live.step_tick(&[PadState::default()]);
+    }
+    let mut profile = crate::profile::Profile::default();
+    profile
+        .career
+        .class_kills
+        .insert("rep_inf_rifleman".into(), 3);
+    live.pending_class_kills
+        .insert("rep_inf_rifleman".into(), 2);
+    // Without a correction.
+    let mut plain = profile.clone();
+    let mut kept = live.checkpoint();
+    kept.pending_class_kills = live.pending_class_kills.clone();
+    kept.flush_career_progress(&mut plain);
+    // With one: the replay, the same game, counted all five kills.
+    let mut replay = live.checkpoint();
+    assert!(
+        replay.pending_class_kills.is_empty(),
+        "a checkpoint counts none"
+    );
+    replay
+        .pending_class_kills
+        .insert("rep_inf_rifleman".into(), 5);
+    replay.step_tick(&[PadState::default()]);
+    live.step_tick(&[PadState::default()]);
+    let hash = replay.sim.hash();
+    assert_eq!(hash, live.sim.hash(), "the copy steps as the walk does");
+    live.adopt_round(replay);
+    assert_eq!(live.sim.hash(), hash);
+    let mut corrected = profile.clone();
+    live.flush_career_progress(&mut corrected);
+    assert_eq!(corrected.career.class_kills, plain.career.class_kills);
+    assert_eq!(corrected.career.class_kills["rep_inf_rifleman"], 5);
+    assert_eq!(corrected.career.medals, plain.career.medals);
+    // The feed: the replay's lines are dropped, the live one's stay.
+    let mut feed = crate::event_feed::EventFeed::default();
+    feed.say("live".into(), [255; 3], 1);
+    let mut replayed = feed.checkpoint();
+    replayed.say("replayed".into(), [255; 3], 2);
+    feed.adopt(replayed);
+    let lines: Vec<String> = feed.take().into_iter().map(|m| m.text).collect();
+    assert_eq!(lines, ["live"]);
+}

@@ -332,6 +332,9 @@ impl Sim {
         let pilot = v.seats[usize::from(seat)].kind == SeatKind::Pilot;
         let ground = matches!(v.kind, VehicleKind::Hover | VehicleKind::Walker);
         self.units[u.index as usize].mount = Some(Mount { vehicle: vh, seat });
+        // Issue #173 [ours]: a rider is back in control; a forced move on
+        // foot no longer counts (`sim/fall_credit.rs`).
+        self.units[u.index as usize].forced_by = None;
         // A rider leaves his foot stance: the PS2 seats him in its rider
         // state (BF1 state 12, re-turret-collision 3.2) and a drawn gunner
         // is drawn in the seat's pose. A seated unit never steps, so a

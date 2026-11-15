@@ -75,21 +75,47 @@ impl Sim {
     /// players-inside mask, cp+0x74), the post spawnable by his team
     /// (`FUN_00356880`), and facing it (`CLASS_CHANGE_FACING`). Enemy and
     /// neutral posts never qualify; neither does a bot.
+    ///
+    /// Hunt (issue #161) takes [`Self::hunt_class_change_near`] for the
+    /// capture count, which no Hunt post keeps. Hero Assault, the other
+    /// deathmatch, keeps no class change.
     pub fn class_change_post(&self, i: usize) -> Option<usize> {
         let u = self.units.get(i)?;
         if !u.alive || !matches!(u.controller, Controller::Player { .. }) || u.mount.is_some() {
             return None;
         }
+        let hunt = self.is_hunt();
         let (fwd, _, _) = u.aim_frame();
         (0..self.cps.len()).find(|&ci| {
             let cp = &self.cps[ci];
             let to = cp.def.pos - u.soldier.pos;
             let d = to.length();
-            self.counts_in_cp(i, ci)
-                && cp.spawnable_by(u.team)
-                && d > 1e-4
-                && fwd.dot(to / d) > CLASS_CHANGE_FACING
+            let near = if hunt {
+                self.hunt_class_change_near(i, ci, d)
+            } else {
+                self.counts_in_cp(i, ci) && cp.spawnable_by(u.team)
+            };
+            near && d > 1e-4 && fwd.dot(to / d) > CLASS_CHANGE_FACING
         })
+    }
+
+    /// Hunt: is unit `i` near enough to post `ci` (at `d` m) to change
+    /// class there? The PS2's two scans (B2 `FUN_001f8548` 109161-109290),
+    /// without the capture count Hunt's posts never keep
+    /// ([`Self::counts_in_cp`]): (1) inside the post's AUTHORED capture
+    /// region with the post spawnable by his team (the BF1 adaptations'
+    /// posts keep their regions), or (2) within the post class's
+    /// `SwitchClassRadius` of a post his team owns (BF2's Hunt posts, which
+    /// author no region; a BF1 post's is `[ours]` 5 m). The caller tests the facing, which both scans
+    /// share. A post the mission killed is not in the sim at all.
+    fn hunt_class_change_near(&self, i: usize, ci: usize, d: f32) -> bool {
+        let u = &self.units[i];
+        let cp = &self.cps[ci];
+        let inside = cp.capture_authored
+            && cp.def.capture.contains(u.soldier.pos)
+            && cp.spawnable_by(u.team);
+        let close = d < cp.switch_class_radius && cp.owner == Some(u.team);
+        inside || close
     }
 
     /// Step 0a, after the spawn screens: a use-button edge (`ACTION`, the

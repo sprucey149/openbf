@@ -18,9 +18,8 @@
 //!   post's nodes.
 
 use crate::input_icons::Prompt;
-use egui::{Align2, Color32, FontId, Frame, RichText, Vec2};
-
-use crate::hud::TEAM_COLORS;
+use crate::typography::{self, tint, TextStyle, Tint, BODY, HELP, ITEM, TITLE};
+use egui::{Align2, Color32, Frame, RichText, Vec2};
 
 #[derive(Debug, Clone, Default)]
 pub struct SpawnPost {
@@ -100,6 +99,12 @@ pub struct SpawnModel {
     pub icons: crate::input_icons::Icons,
 }
 
+/// One label of this panel: `text` in `style`'s face, size and case and
+/// `tint` ([`crate::typography`]).
+fn text(ctx: &egui::Context, style: &TextStyle, tint: Tint, text: &str) -> RichText {
+    typography::egui_text(ctx, style, tint, text)
+}
+
 /// The side select (card SSELA placeholder): the three rows, the highlighted
 /// one marked.
 fn draw_side(ctx: &egui::Context, rows: &[String; 3], selected: usize) {
@@ -112,33 +117,19 @@ fn draw_side(ctx: &egui::Context, rows: &[String; 3], selected: usize) {
                 .corner_radius(6.0)
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            RichText::new("SELECT A TEAM")
-                                .font(FontId::proportional(26.0))
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
+                        ui.label(text(ctx, &TITLE, tint::TITLE, "Select a Team"));
                         ui.add_space(10.0);
                         for (i, r) in rows.iter().enumerate() {
-                            let color = match i {
-                                0 | 1 if i == selected => TEAM_COLORS[i],
-                                _ if i == selected => Color32::WHITE,
-                                _ => Color32::from_gray(150),
+                            let colour = match i {
+                                0 | 1 if i == selected => tint::TEAMS[i],
+                                _ if i == selected => tint::BODY,
+                                _ => tint::UNSELECTED,
                             };
                             let mark = if i == selected { "▶ " } else { "   " };
-                            ui.label(
-                                RichText::new(format!("{mark}{}", r.to_uppercase()))
-                                    .size(19.0)
-                                    .color(color)
-                                    .strong(),
-                            );
+                            ui.label(text(ctx, &ITEM, colour, &format!("{mark}{r}")));
                         }
                         ui.add_space(10.0);
-                        ui.label(
-                            RichText::new("D-pad up / down  ·  X select")
-                                .size(12.0)
-                                .color(Color32::GRAY),
-                        );
+                        ui.label(text(ctx, &HELP, tint::NOTE, "D-pad up / down  ·  X select"));
                     });
                 });
         });
@@ -152,10 +143,10 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
     }
     let team = usize::from(m.player_team.min(1));
     let title = match &m.screen {
-        Some(SpawnScreen::Class) => "SELECT CLASS",
-        _ => "SELECT SPAWN POINT",
+        Some(SpawnScreen::Class) => "Select Class",
+        _ => "Select Spawn Point",
     };
-    let accent = TEAM_COLORS[team];
+    let accent = tint::TEAMS[team];
 
     // Dim the backdrop behind the screen to the PS2's 0.51.
     egui::Area::new(egui::Id::new("spawn_dim"))
@@ -180,22 +171,18 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                 .corner_radius(6.0)
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            RichText::new(title)
-                                .font(FontId::proportional(26.0))
-                                .color(accent)
-                                .strong(),
-                        );
+                        ui.label(text(ctx, &TITLE, tint::TITLE, title));
                         ui.add_space(2.0);
-                        ui.label(
-                            RichText::new(format!(
-                                "{}  ·  {} reinforcements",
-                                m.team_names[team].to_uppercase(),
+                        ui.label(text(
+                            ctx,
+                            &HELP,
+                            tint::HELP,
+                            &format!(
+                                "{}  ·  {} Reinforcements",
+                                crate::menu::faction_name(&m.team_names[team]),
                                 m.tickets[team]
-                            ))
-                            .size(13.0)
-                            .color(Color32::LIGHT_GRAY),
-                        );
+                            ),
+                        ));
                     });
                     ui.add_space(12.0);
 
@@ -206,83 +193,62 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                         ui.vertical_centered(|ui| {
                             ui.horizontal(|ui| {
                                 for (i, c) in m.classes.iter().enumerate() {
-                                    let picked = i == pick;
-                                    ui.label(
-                                        RichText::new(c.to_uppercase())
-                                            .size(if picked { 16.0 } else { 14.0 })
-                                            .color(if picked {
-                                                accent
-                                            } else {
-                                                Color32::from_gray(150)
-                                            })
-                                            .strong(),
-                                    );
+                                    let colour = if i == pick { accent } else { tint::UNSELECTED };
+                                    ui.label(text(ctx, &BODY, colour, c));
                                     if i + 1 < m.classes.len() {
-                                        ui.label(
-                                            RichText::new("·").size(14.0).color(Color32::DARK_GRAY),
-                                        );
+                                        ui.label(text(ctx, &BODY, tint::DIMMED, "·"));
                                     }
                                 }
                             });
-                            ui.label(
-                                RichText::new(if m.screen.is_some() {
-                                    format!(
-                                        "On the class screen: {} left / right or {}",
-                                        m.icons.text(Prompt::DPad),
-                                        m.icons.class_keys()
-                                    )
-                                } else {
-                                    format!("{} to change class", m.icons.class_keys())
-                                })
-                                .size(12.0)
-                                .color(Color32::GRAY),
-                            );
+                            let hint = if m.screen.is_some() {
+                                format!(
+                                    "On the class screen: {} left / right or {}",
+                                    m.icons.text(Prompt::DPad),
+                                    m.icons.class_keys()
+                                )
+                            } else {
+                                format!("{} to change class", m.icons.class_keys())
+                            };
+                            ui.label(text(ctx, &HELP, tint::NOTE, &hint));
                         });
                         ui.add_space(10.0);
                     }
 
                     if m.posts.is_empty() {
-                        ui.label(
-                            RichText::new("no friendly command post — spawning at the fallback")
-                                .size(15.0)
-                                .color(Color32::from_rgb(230, 180, 80)),
-                        );
+                        ui.label(text(
+                            ctx,
+                            &BODY,
+                            tint::WARNING,
+                            "No friendly command post — spawning at the fallback",
+                        ));
                     }
                     let sel = m.selected.map(|s| s.min(m.posts.len().saturating_sub(1)));
                     if sel.is_none() && !m.posts.is_empty() {
-                        ui.label(
-                            RichText::new("ANY POST — push the D-pad toward one to pick it")
-                                .size(13.0)
-                                .color(Color32::from_gray(170)),
-                        );
+                        ui.label(text(
+                            ctx,
+                            &HELP,
+                            tint::NOTE,
+                            "Any Post — push the D-pad toward one to pick it",
+                        ));
                     }
                     for (i, p) in m.posts.iter().enumerate() {
                         let picked = Some(i) == sel;
-                        let (mark, name_color) = if picked {
+                        let (mark, name_colour) = if picked {
                             ("▶", accent)
                         } else {
-                            ("  ", Color32::from_gray(210))
+                            ("  ", tint::HELP)
                         };
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(mark).size(16.0).color(accent));
-                            ui.label(
-                                RichText::new(p.name.to_uppercase())
-                                    .size(17.0)
-                                    .color(name_color)
-                                    .strong(),
-                            );
-                            ui.label(
-                                RichText::new(format!("{:.0} m", p.distance))
-                                    .size(13.0)
-                                    .color(Color32::GRAY),
-                            );
+                            ui.label(text(ctx, &BODY, accent, mark));
+                            ui.label(text(ctx, &ITEM, name_colour, &p.name));
+                            ui.label(text(
+                                ctx,
+                                &BODY,
+                                tint::NOTE,
+                                &format!("{:.0} m", p.distance),
+                            ));
                             if p.contested {
-                                ui.label(
-                                    RichText::new("UNDER ATTACK")
-                                        .size(13.0)
-                                        .color(Color32::from_rgb(240, 90, 60))
-                                        .strong(),
-                                );
+                                ui.label(text(ctx, &BODY, tint::WARNING, "Under Attack"));
                             }
                         });
                     }
@@ -292,48 +258,39 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                     ui.add_space(8.0);
                     let prompt = match &m.screen {
                         Some(SpawnScreen::Map) => Some(format!(
-                            "{}  SELECT COMMAND POST",
+                            "{}  Select Command Post",
                             m.icons.symbol(Prompt::SpawnAccept)
                         )),
                         Some(SpawnScreen::Class) => Some(format!(
-                            "{}  SELECT CHARACTER    {}  BACK",
+                            "{}  Select Character    {}  Back",
                             m.icons.symbol(Prompt::SpawnAccept),
                             m.icons.symbol(Prompt::SpawnBack)
                         )),
                         _ => None,
                     };
                     ui.vertical_centered(|ui| match (prompt, m.countdown) {
-                        (Some(p), _) => ui.label(
-                            RichText::new(p)
-                                .font(FontId::proportional(22.0))
-                                .color(accent)
-                                .strong(),
-                        ),
-                        (None, Some(s)) => ui.label(
-                            RichText::new(format!("SPAWNING IN {}", s.ceil().max(1.0) as u32))
-                                .font(FontId::proportional(22.0))
-                                .color(Color32::WHITE)
-                                .strong(),
-                        ),
-                        (None, None) => ui.label(
-                            RichText::new("SPAWNING…")
-                                .font(FontId::proportional(22.0))
-                                .color(accent)
-                                .strong(),
-                        ),
+                        (Some(p), _) => ui.label(text(ctx, &ITEM, accent, &p)),
+                        (None, Some(s)) => ui.label(text(
+                            ctx,
+                            &ITEM,
+                            tint::BODY,
+                            &format!("Spawning in {}", s.ceil().max(1.0) as u32),
+                        )),
+                        (None, None) => ui.label(text(ctx, &ITEM, accent, "Spawning…")),
                     });
                     ui.add_space(4.0);
                     ui.vertical_centered(|ui| {
                         // The pick goes by direction on the map (the PS2's
                         // spawn map), not down the list: up = north (-z).
-                        ui.label(
-                            RichText::new(format!(
+                        ui.label(text(
+                            ctx,
+                            &HELP,
+                            tint::NOTE,
+                            &format!(
                                 "{}: pick the post that way on the map",
                                 m.icons.text(Prompt::DPad)
-                            ))
-                            .size(12.0)
-                            .color(Color32::GRAY),
-                        );
+                            ),
+                        ));
                     });
                 });
         });
@@ -498,7 +455,7 @@ mod tests {
                 .shapes
                 .iter()
                 .any(|clipped| {
-                    matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "ASSAULT GUNNER")
+                    matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text().eq_ignore_ascii_case("ASSAULT GUNNER"))
                 })
         };
         assert!(draws_class(SpawnScreen::Class));

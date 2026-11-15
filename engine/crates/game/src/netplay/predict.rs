@@ -10,7 +10,12 @@
 //!   bundle pad (once-only fields cleared), and the bots replay their last
 //!   think. Nothing predicted is ever written into the confirmed sim except
 //!   between [`Predictor::swap_in`] and [`Predictor::swap_out`], which put
-//!   the drawn values back bit for bit.
+//!   the drawn values back bit for bit: `swap_in` keeps the confirmed unit
+//!   and the vehicle it writes whole, and `swap_out` puts them back whole,
+//!   so no field a drawn pose writes can stay behind (issue #168: a saber
+//!   hero's melee clock, written by a predicted swing over an idle unit and
+//!   not restored by the idle pose, parted the hero's own game from the
+//!   others).
 //! - When a new confirmed tick lands the copy is cloned again from it and
 //!   stepped over the inputs still pending; a frame that only sent a new
 //!   input steps the copy it has one more tick.
@@ -289,12 +294,13 @@ impl ShotLedger {
     }
 }
 
-/// What [`Predictor::swap_in`] overwrote.
+/// What [`Predictor::swap_in`] overwrote: the confirmed unit and the
+/// vehicle it wrote, whole (module rules).
 #[derive(Clone, Debug)]
 struct Saved {
     index: usize,
-    unit: UnitPose,
-    vehicle: Option<(usize, VehiclePose)>,
+    unit: core::unit::Unit,
+    vehicle: Option<(usize, core::vehicle::Vehicle)>,
 }
 
 /// The local prediction (module rules).
@@ -661,15 +667,13 @@ impl Predictor {
         if let Some((_, v)) = drawn.vehicle.as_mut() {
             v.pos += dp;
         }
-        let vehicle = drawn.vehicle.as_ref().and_then(|(i, _)| {
-            walk.sim
-                .vehicles
-                .get(*i)
-                .map(|v| (*i, VehiclePose::of(&walk.sim, v)))
-        });
+        let vehicle = drawn
+            .vehicle
+            .as_ref()
+            .and_then(|(i, _)| walk.sim.vehicles.get(*i).map(|v| (*i, v.clone())));
         self.saved = Some(Saved {
             index: drawn.index,
-            unit: confirmed,
+            unit: u.clone(),
             vehicle,
         });
         drawn.unit.write_to(&mut walk.sim.units[drawn.index]);
@@ -687,11 +691,11 @@ impl Predictor {
             return;
         };
         if let Some(u) = walk.sim.units.get_mut(s.index) {
-            s.unit.write_to(u);
+            *u = s.unit;
         }
         if let Some((i, v)) = s.vehicle {
             if let Some(dst) = walk.sim.vehicles.get_mut(i) {
-                v.write_to(dst);
+                *dst = v;
             }
         }
     }

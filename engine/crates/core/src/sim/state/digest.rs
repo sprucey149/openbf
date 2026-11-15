@@ -64,6 +64,9 @@ impl Sim {
             tick: _,
             difficulty: _,
             team_difficulty: _,
+            // Issue #171: every LAN peer sets it in `install_humans`; what
+            // it decides reaches `Sim::hash` through the team rows.
+            netplay_rows: _,
             rng: _,
             lcg: _,
             melee_lcg: _,

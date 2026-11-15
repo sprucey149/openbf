@@ -320,6 +320,7 @@ dependencies = [
  "anyhow",
  "kira",
  "pak",
+ "symphonia",
 ]
 
 [[package]]
@@ -333,6 +334,7 @@ name = "bake"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "audio",
  "glam",
  "gltf",
  "ktx2",
@@ -2679,7 +2681,7 @@ dependencies = [
 name = "pak"
 version = "0.1.0"
 dependencies = [
- "flate2",
+ "serde_json",
  "zstd",
 ]
 

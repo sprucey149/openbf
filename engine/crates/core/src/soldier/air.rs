@@ -177,10 +177,46 @@ impl Soldier {
     }
 
     /// A hold takes him out of whatever he was doing, a throw's state included.
+    /// A prone soldier is stood up at once, with no get-up: the hold's pose
+    /// replaces the body straight away (issue #173). [ours: the original
+    /// stands a prone soldier up and does not hold him]
     pub fn catch_upright(&mut self) {
         if self.stance != Stance::Stand {
             self.set_stance(Stance::Stand);
         }
+    }
+
+    /// A hold that catches him off the floor keeps him where he is: still,
+    /// in the fall state, with his jet cut off and its tank emptied, so he
+    /// drops when the hold ends (issue #173, the maintainer's rule). [ours]
+    pub fn catch_in_air(&mut self) {
+        // The jet pack cuts off whatever he was doing (a jump or a fall
+        // included): the tank refills by the usual rule after the release.
+        self.fuel = 0.0;
+        if self.stance != Stance::Fall {
+            self.set_stance(Stance::Fall);
+        }
+        self.vel = Vec3::ZERO;
+    }
+
+    /// The lock a choke leaves: the original's stand-up out of the choke
+    /// state sets its transition timer to 0.5 s with flags 0x1c00
+    /// (B2 `FUN_00246850`, the 0xe case, B2:161864-161867). While it runs
+    /// the jump, crouch and sprint commands (flag 0x800, B2:159428-159433)
+    /// and the triggers (0x1000, B2:159434-159440) are held off; walking and
+    /// turning stay free. The port's stance lock and trigger lock carry it
+    /// (a longer lock already running is kept). Flag 0x400's x1.7
+    /// acceleration is not modelled, as for the port's other soft locks.
+    pub fn choke_release_lock(&mut self) {
+        self.lock_timer = self.lock_timer.fmax(CHOKE_RELEASE_LOCK);
+        self.fire_lock = true;
+        self.choke_lock = true;
+    }
+
+    /// A Force Choke's release lock is running (flag 0x800 of the original's
+    /// stand-up: no jump, crouch or sprint, the air's jet tap included).
+    pub fn choke_locked(&self) -> bool {
+        self.choke_lock && self.lock_timer > 0.0
     }
 
     /// A death's kick: [`DEATH_KICK`] m/s along `dir` (§3).

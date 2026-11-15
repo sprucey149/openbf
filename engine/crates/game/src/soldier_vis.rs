@@ -448,6 +448,8 @@ impl FlashModel {
 #[derive(Default)]
 pub struct UnitVisual {
     pub gen: u32,
+    /// The team, class and body asset it was posed for (`sync_units`).
+    body: Option<(u8, u8, Option<usize>)>,
     pub animator: Animator,
     /// The animator's palette since its last step, with the asset it was
     /// posed for. A frame asks for it many times (the draws, the weapons, the

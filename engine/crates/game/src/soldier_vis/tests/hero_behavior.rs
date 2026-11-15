@@ -390,6 +390,7 @@ fn test_choke_victim_has_animation() {
     walk.sim.units[victim.index as usize].choked = Some(core::hero_weapon::Choked {
         left: 0.5,
         age: 0.5,
+        hold: None,
     });
     vis.update(&walk, 1.0 / 60.0);
 
@@ -406,7 +407,9 @@ fn test_choke_victim_has_animation() {
         .pose(&sa.asset.skeleton);
     assert_eq!(pose.0, sample.0, "BF2 victim should match human_choking");
 
-    // BF1 soldier has no human_choking clip; verify status_pose falls back to flail:
+    // A body without any choking clip (an older bake that predates the
+    // borrowed human_choking; current bakes lend it to BF1 bodies) falls
+    // back to the flail:
     let bf1_clip = sa
         .asset
         .clips

@@ -499,6 +499,10 @@ pub struct Soldier {
     /// The get-up's lock also holds the trigger (§2: the PS2 clears the
     /// trigger bytes while S+0xc0c runs).
     pub fire_lock: bool,
+    /// The running lock is a Force Choke's release lock
+    /// ([`Soldier::choke_release_lock`]): it also holds off the sprint and
+    /// the air's jump / jet tap, and a landing does not shorten it.
+    pub choke_lock: bool,
     /// Jet fuel, 0..1 (card JETP; BF2 s+0xb90, BF1 s+0xc6c): spawned at
     /// [`Soldier::spawn_fuel`], recharged outside the jet stances, spent by
     /// a jet's start and its seconds (re-jetpack.md §5.1).
@@ -750,6 +754,9 @@ pub const GETUP_MAX: f32 = 1.0;
 /// at most 2 updates more. Half an update under 52, so the float countdown
 /// lets go on update 52 and not 53.
 pub const GETUP_LOCK: f32 = 51.5 / 30.0;
+/// The lock a Force Choke leaves when it lets go ([`Soldier::choke_release_lock`]):
+/// BF2's stand-up out of the choke state, 0.5 s (B2 `FUN_00246850` 0xe case, B2:161864-161867).
+pub const CHOKE_RELEASE_LOCK: f32 = 0.5;
 /// A death kicks the body this much along the hit (B1 FUN_00200f90,
 /// DAT_00517878; BF2 FUN_002395a8's literal; §3 [M] 5.0 +- 0.15 m/s).
 pub const DEATH_KICK: f32 = 5.0;
@@ -783,6 +790,7 @@ impl Soldier {
             knock_draw: 0.0,
             knock_rules: KNOCK_RULES,
             fire_lock: false,
+            choke_lock: false,
             fuel: 0.0,
             drown_in: 3 * crate::TICK_HZ,
             jump_animation: None,
@@ -1226,7 +1234,9 @@ impl Soldier {
             self.fire_lock as u8,
         ]);
         // These latches carry history that energy and lock duration do not.
-        let latches = u8::from(self.energy_depleted) | (u8::from(self.lock_hard) << 1);
+        let latches = u8::from(self.energy_depleted)
+            | (u8::from(self.lock_hard) << 1)
+            | (u8::from(self.choke_lock) << 2);
         if latches != 0 {
             eat(b"SOLDIER_LATCH");
             eat(&[latches]);

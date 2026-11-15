@@ -58,7 +58,6 @@ pub(super) struct Extras {
 /// The built round (module rules).
 pub(super) struct PreparedRound {
     pub setup: BattleSetup,
-    pub teams: [String; 2],
     pub walk: WalkSim,
     pub extras: Extras,
     /// The worker's laps, for the `loading:` line.
@@ -71,16 +70,16 @@ fn ms(t: Instant) -> f64 {
 
 impl RoundJob {
     /// The setup and the walk, exactly as `App::start_battle` built them.
-    pub fn walk(&self, scene: &game::assets::Scene) -> Result<(BattleSetup, [String; 2], WalkSim)> {
+    pub fn walk(&self, scene: &game::assets::Scene) -> Result<(BattleSetup, WalkSim)> {
         use super::super::round_setup::{battle_setup, build_round, shell_setup};
         match &self.net {
             Some((round, local)) => {
-                let (setup, teams) = battle_setup(round, &self.missions_dir, &self.assets_dir)?;
+                let setup = battle_setup(round, &self.missions_dir, &self.assets_dir)?;
                 let walk = build_round(scene, round, &self.missions_dir, &self.assets_dir, *local)?;
-                Ok((setup, teams, walk))
+                Ok((setup, walk))
             }
             None => {
-                let (setup, teams) = shell_setup(
+                let setup = shell_setup(
                     &self.missions_dir,
                     &self.assets_dir,
                     &self.name,
@@ -91,7 +90,7 @@ impl RoundJob {
                     self.difficulty,
                 )?;
                 let walk = super::make_walk(scene, &setup)?;
-                Ok((setup, teams, walk))
+                Ok((setup, walk))
             }
         }
     }
@@ -117,7 +116,7 @@ impl RoundJob {
             };
             (built, sounds)
         });
-        let (setup, teams, walk) = built?;
+        let (setup, walk) = built?;
         let walk_ms = ms(started);
         let rest = Instant::now();
         let source_game = scene.manifest.source_game.clone();
@@ -189,7 +188,6 @@ impl RoundJob {
         );
         Ok(PreparedRound {
             setup,
-            teams,
             walk,
             extras: Extras {
                 sounds,
@@ -265,7 +263,7 @@ mod tests {
             let j = job(map, net);
             let serial = {
                 let t = Instant::now();
-                let (_, _, w) = j.walk(&scene).unwrap();
+                let (_, w) = j.walk(&scene).unwrap();
                 println!("{map}: serial round build {:.1} ms", ms(t));
                 w
             };

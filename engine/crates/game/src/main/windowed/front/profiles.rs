@@ -65,6 +65,7 @@ impl App {
         };
 
         front.menus.tick(dt);
+        pick.advance(dt);
         let editing = matches!(pick.page, Page::Name { .. });
         let name_input = std::mem::take(&mut front.name_input);
         if editing {
@@ -107,10 +108,14 @@ impl App {
         if x != 0 || y != 0 {
             pick.move_focus(x, y);
         }
-        if edges & game::kbm::MENU_L1 != 0 || wheel > 0.0 {
+        // L1 / R1 page the focus; the wheel scrolls the names, not the focus.
+        if edges & game::kbm::MENU_L1 != 0 {
             pick.page_list(-1);
-        } else if edges & game::kbm::MENU_R1 != 0 || wheel < 0.0 {
+        } else if edges & game::kbm::MENU_R1 != 0 {
             pick.page_list(1);
+        }
+        if wheel != 0.0 {
+            pick.wheel(wheel);
         }
         let mut action = if editing && start {
             Some(Target::Accept)
@@ -128,7 +133,7 @@ impl App {
                     target,
                     Target::Delete | Target::Previous | Target::Next | Target::Symbols
                 ) {
-                    pick.set_focus(target);
+                    pick.point_focus(target);
                 }
                 if click {
                     action = Some(target);
@@ -255,6 +260,8 @@ impl App {
         match result {
             Ok(Some(profile)) => {
                 self.profile = profile;
+                super::super::display::hold_window_mode(&mut self.display.held, &mut self.profile);
+                self.apply_window_mode();
                 self.kbm.follow(&self.profile.settings);
                 self.kbm.release_keys();
                 self.refresh_context_bindings();
@@ -424,6 +431,65 @@ mod tests {
         step(&mut app, &mut front, confirm, false, 0);
         assert_eq!(app.profile.name, "Pilot");
         assert_eq!(app.profile.career.kills, 25);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A2 wiring: F11 on the title screen, before any profile is picked,
+    /// writes nothing and reaches the profile created next.
+    #[test]
+    fn a_title_screen_window_mode_reaches_the_profile_created_next() {
+        use ui::menu::WindowMode;
+        let dir =
+            std::env::temp_dir().join(format!("openbf-profile-picker-mode-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let store = Store::new(dir.clone());
+        let mut app = App::new(
+            PathBuf::new(),
+            PathBuf::new(),
+            super::super::super::tests::setup(None),
+            None,
+            None,
+            None,
+            Default::default(),
+        );
+        app.profile_store = Some(store.clone());
+        assert!(!app.profile.persists());
+
+        // A first launch is fullscreen; F11 on the title screen leaves it.
+        assert_eq!(app.profile.settings.window_mode, WindowMode::Borderless);
+        app.set_window_mode(WindowMode::Windowed);
+        assert_eq!(app.display.held, Some(WindowMode::Windowed));
+        assert!(!dir.join("profile.ron").exists());
+        assert!(store.list().unwrap().names.is_empty());
+
+        let mut front = FrontShell::new(&dir);
+        let confirm = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        let step = |app: &mut App, front: &mut FrontShell, menu: MenuInput, start| {
+            assert!(app.step_profiles(
+                front,
+                FrameInput {
+                    menu,
+                    start,
+                    ..Default::default()
+                }
+            ));
+        };
+        step(&mut app, &mut front, MenuInput::default(), true);
+        step(&mut app, &mut front, confirm, false);
+        front.name_input.text = "Pilot".into();
+        step(&mut app, &mut front, confirm, true);
+        step(&mut app, &mut front, confirm, false);
+        assert_eq!(app.profile.name, "Pilot");
+        assert_eq!(app.display.held, None);
+        assert_eq!(app.profile.settings.window_mode, WindowMode::Windowed);
+        let (id, _) = store.list().unwrap().names[0].clone();
+        let saved = store.select(id).unwrap();
+        assert_eq!(saved.settings.window_mode, WindowMode::Windowed);
+        assert_eq!(saved.settings.last_fullscreen, WindowMode::Borderless);
+        assert!(!dir.join("profile.ron").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

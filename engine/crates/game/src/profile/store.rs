@@ -191,6 +191,20 @@ impl Store {
         })
     }
 
+    /// The display mode and last fullscreen kind of the profile the shell
+    /// would offer first (the last one picked, else the first): the window
+    /// opens in it before any profile is picked. `None` with no profile.
+    pub fn last_window_mode(&self) -> Result<Option<(ui::menu::WindowMode, ui::menu::WindowMode)>> {
+        self.access(|c| {
+            let mode = c
+                .last
+                .and_then(|id| c.profiles.get(&id))
+                .or_else(|| c.profiles.values().next())
+                .map(|p| (p.settings.window_mode, p.settings.last_fullscreen));
+            Ok((mode, false))
+        })
+    }
+
     /// Direct map launches have no picker. Use the last profile, or make
     /// the default named profile if there is no save yet.
     pub fn for_direct_launch(&self) -> Result<Profile> {

@@ -210,7 +210,7 @@ mod tests {
         barriers: Vec<ManifestBarrier>,
     ) -> Manifest {
         let mut m: Manifest = ron::from_str(&format!(
-            "(map: \"{name}\", terrain_name: None, sky_name: None, terrain_glb: None, models: [], \
+            "(map: \"{name}\", source_game: \"bf2\", terrain_name: None, sky_name: None, terrain_glb: None, models: [], \
              textures: [], classes: [], geometries: [], regions: [], instances: [])"
         ))
         .expect("a bare manifest");

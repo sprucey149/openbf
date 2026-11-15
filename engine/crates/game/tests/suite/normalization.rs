@@ -7,7 +7,7 @@ use core::weapon::{DamageDesc, ExplosionClass, Health, HealthType, OrdnanceClass
 use game::classdb::{fnv1a_lowercase, ClassDb, ClassDef};
 use game::normalize::{
     health_row, is_infantry_damage, vehicles, BF1_SCALE, HEALTH, KEYS, PERSON_DAMAGE,
-    REFERENCE_HEALTH,
+    REFERENCE_HEALTH, SHARED_RULES,
 };
 use game::roster::{load_classdb, weapon_from_db, ClassRoster, ClassSrc, FactionRoster};
 use std::path::PathBuf;
@@ -326,7 +326,7 @@ fn equivalent_weapons_deal_equal_person_damage() {
         (
             "imp_weap_inf_sniperrifle_ord",
             "imp_weap_inf_sniper_rifle_ord",
-            300.0,
+            280.0,
         ),
         (
             "rep_weap_inf_thermaldetonator_exp",
@@ -363,6 +363,36 @@ fn equivalent_weapons_deal_equal_person_damage() {
             "all_weap_inf_sniperrifle",
             "all_weap_inf_sniper_rifle",
             "ShotDelay",
+        ),
+        (
+            "imp_weap_inf_sniperrifle",
+            "imp_weap_inf_sniper_rifle",
+            "ZoomMin",
+        ),
+        (
+            "imp_weap_inf_sniperrifle",
+            "imp_weap_inf_sniper_rifle",
+            "ZoomMax",
+        ),
+        (
+            "rep_weap_inf_sniperrifle",
+            "rep_weap_inf_sniper_rifle",
+            "ZoomMin",
+        ),
+        (
+            "rep_weap_inf_sniperrifle",
+            "rep_weap_inf_sniper_rifle",
+            "ZoomMax",
+        ),
+        (
+            "all_weap_inf_sniperrifle",
+            "all_weap_inf_sniper_rifle",
+            "ZoomMax",
+        ),
+        (
+            "cis_weap_inf_sniperrifle",
+            "cis_weap_inf_sniper_rifle",
+            "ZoomMax",
         ),
         (
             "all_weap_inf_torpedo_launcher_exp",
@@ -484,7 +514,8 @@ fn hits_to_kill_are_pinned() {
             "imp_inf_rifleman",
             7,
         ),
-        // Sniper rifle on a trooper, then a sniper.
+        // Sniper rifle on a trooper, then a sniper: no body hit kills a
+        // full-health soldier (the maintainer 2026-11-14).
         (
             "imp_weap_inf_sniperrifle",
             "all_inf_soldier",
@@ -497,7 +528,7 @@ fn hits_to_kill_are_pinned() {
             "all_inf_marksman",
             "imp_weap_inf_sniper_rifle",
             "all_inf_sniper",
-            1,
+            2,
         ),
         // Shotgun pellets on a trooper.
         (
@@ -599,10 +630,11 @@ fn hits_to_kill_are_pinned() {
     );
 }
 
-/// BF2 is the reference: none of its classes change, so no space unit or
-/// weapon does.
+/// BF2 is the reference: none of its classes change but the maintainer's
+/// own rows ([`SHARED_RULES`], the sniper rifles), so no space unit or other weapon
+/// does.
 #[test]
-fn bf2_class_files_are_untouched() {
+fn bf2_classes_change_only_by_ours() {
     if dir().is_none() {
         return;
     }
@@ -610,9 +642,103 @@ fn bf2_class_files_are_untouched() {
     let names = sorted_names(&disc);
     assert!(names.len() > 900, "{} BF2 classes", names.len());
     assert_eq!(names, sorted_names(&now));
+    let mut changed = Vec::new();
     for name in names {
-        assert_eq!(now.get(&name), disc.get(&name), "{name}");
+        if now.get(&name) != disc.get(&name) {
+            assert!(
+                SHARED_RULES.iter().any(|r| pattern_matches(r.class, &name)),
+                "{name} changed"
+            );
+            changed.push(name);
+        }
     }
+    assert_eq!(
+        changed,
+        [
+            "com_weap_award_sniper_rifle_ord",
+            "com_weap_inf_sniper_rifle_ord"
+        ]
+    );
+}
+
+/// The maintainer 2026-11-14: a sniper's head hit kills any non-hero in one
+/// shot, its body hit never kills a full-health soldier, and the award beam
+/// keeps BF2's x2 over the rifle. Body and head hits (x3) to kill each kind
+/// of soldier, on either game's classes.
+#[test]
+fn sniper_hits_to_kill_every_kind_of_soldier() {
+    let Some(dir) = dir() else { return };
+    let bf1 = load_classdb(&dir, "bf1", &SIDES).unwrap();
+    let bf2 = load_classdb(&dir, "bf2", &SIDES).unwrap();
+    let shot = |db: &ClassDb, weapon: &str| {
+        weapon_from_db(db, weapon)
+            .unwrap()
+            .ordnance
+            .damage_desc(0.0, false)
+    };
+    let hits = |desc: &DamageDesc, db: &ClassDb, class: &str, head: bool| {
+        let c = ClassRoster::build(db, class, 0, None).unwrap();
+        let mut h = Health::new(c.max_health, c.health_type);
+        // A head hit is x3 in both games (`core::sim::combat::HEADSHOT_SCALE`).
+        let mult = if head { 3.0 } else { 1.0 };
+        let mut n = 0;
+        while h.alive() {
+            assert!(h.take_damage(desc, mult, false, 1.0) > 0.0, "no damage");
+            n += 1;
+        }
+        (c.max_health, n)
+    };
+    let rifle1 = shot(&bf1, "imp_weap_inf_sniperrifle");
+    let rifle2 = shot(&bf2, "imp_weap_inf_sniper_rifle");
+    let award = shot(&bf2, "imp_weap_award_sniper_rifle");
+    assert_eq!(
+        rifle1.damage * rifle1.scales[HealthType::Person as usize],
+        280.0
+    );
+    assert_eq!(
+        rifle2.damage * rifle2.scales[HealthType::Person as usize],
+        280.0
+    );
+    assert_eq!(
+        award.damage * award.scales[HealthType::Person as usize],
+        560.0
+    );
+    // (game, class, health, rifle body hits, award body hits)
+    let mut rows = Vec::new();
+    for (db, class, health, body, award_body) in [
+        (&bf2, "all_inf_rifleman", 400.0, 2, 1),
+        (&bf2, "all_inf_rocketeer", 550.0, 2, 1),
+        (&bf2, "all_inf_sniper", 300.0, 2, 1),
+        (&bf2, "imp_inf_dark_trooper", 300.0, 2, 1),
+        (&bf2, "rep_inf_ep3_jettrooper", 300.0, 2, 1),
+        (&bf2, "all_inf_wookiee", 800.0, 3, 2),
+        (&bf1, "imp_inf_storm_trooper", 400.0, 2, 1),
+        (&bf1, "imp_inf_shock_trooper", 550.0, 2, 1),
+        (&bf1, "all_inf_marksman", 300.0, 2, 1),
+        (&bf1, "imp_inf_dark_trooper", 300.0, 2, 1),
+        (&bf1, "rep_inf_jet_trooper", 300.0, 2, 1),
+        // BF1's Wookiee is the smuggler (its HealthRow is the warrior's 800).
+        (&bf1, "all_inf_smuggler", 800.0, 3, 2),
+    ] {
+        assert!(
+            db.get(class).is_some() || db.resolve(class).is_some(),
+            "{class}: not in this data"
+        );
+        let rifle = if std::ptr::eq(db, &bf1) {
+            &rifle1
+        } else {
+            &rifle2
+        };
+        let (h, b) = hits(rifle, db, class, false);
+        let (_, head) = hits(rifle, db, class, true);
+        let (_, ab) = hits(&award, db, class, false);
+        let (_, ahead) = hits(&award, db, class, true);
+        assert_eq!(h, health, "{class} health");
+        assert_eq!((b, head), (body, 1), "{class}: rifle body, head");
+        assert_eq!((ab, ahead), (award_body, 1), "{class}: award body, head");
+        rows.push(class);
+    }
+    assert_eq!(rows.len(), 12, "{rows:?}");
 }
 
 /// Only soldiers, pickups, the rows of the key table, the vehicle pass's

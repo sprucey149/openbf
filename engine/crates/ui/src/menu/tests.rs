@@ -14,7 +14,8 @@ fn graphics_fov_uses_degrees_and_fps_is_a_toggle() {
         press(&menu, Row::FpsCounter),
         Some(MenuAction::SetFpsCounter(FpsCounter::On))
     );
-    menu.fps_counter = FpsCounter::from_index(2);
+    assert_eq!(FpsCounter::from_index(2), FpsCounter::Off);
+    menu.fps_counter = FpsCounter::from_index(1);
     assert_eq!(row_text(&menu, Row::FpsCounter).1.as_deref(), Some("On"));
     let row = rows(&menu)
         .iter()
@@ -119,7 +120,7 @@ fn automatic_quality_toggles_and_locks_low_power_resolution() {
         );
         assert_eq!(
             row_text(&menu, Row::AutoQuality),
-            ("Automatic quality".into(), Some("ON".into()))
+            ("Automatic Quality".into(), Some("On".into()))
         );
         assert_eq!(
             press(&menu, Row::AutoQuality),
@@ -345,9 +346,9 @@ fn the_pause_rows_show_whole_at_any_window() {
                     );
                     let label = match row {
                         Row::Respawn => Some("Respawn"),
-                        Row::FlightControls => Some("Flight controls"),
-                        Row::InputIcons => Some("Button prompts"),
-                        Row::Quit => Some("Quit to desktop"),
+                        Row::FlightControls => Some("Flight Controls"),
+                        Row::InputIcons => Some("Button Prompts"),
+                        Row::Quit => Some("Quit to Desktop"),
                         _ => None,
                     };
                     if let Some(label) = label {
@@ -397,17 +398,23 @@ fn a_scrolled_list_moves_and_settles_on_a_row() {
     }
 }
 
-/// A tall window shows the whole list, with nothing left to scroll.
+/// Text follows the window's height (`crate::typography`), so a taller
+/// window shows the same rows, larger; the selected row is always whole.
 #[test]
-fn a_tall_window_shows_every_pause_row() {
+fn a_taller_window_shows_the_same_pause_rows() {
     let mut m = model();
     m.cursor = rows(&m).iter().position(|r| *r == Row::InputIcons).unwrap();
+    let mut seen = Vec::new();
     for h in [900.0, 1080.0] {
         let (_, whole, _) = settled_text(&m, [1920.0, h]);
-        for label in ["Resume", "Flight controls", "Respawn", "Quit to desktop"] {
-            assert!(whole.iter().any(|t| t == label), "{h}: {label}");
-        }
+        assert!(
+            whole.iter().any(|t| t == "Button Prompts"),
+            "{h}: {whole:?}"
+        );
+        seen.push(whole.len());
     }
+    // The panel's fixed margins are a smaller share of a taller window.
+    assert!(seen[1] >= seen[0] && seen[1] <= seen[0] + 5, "{seen:?}");
 }
 
 /// The row says what it is for, in both menus.
@@ -434,7 +441,7 @@ fn team_size_row_explains_averages_and_greys_where_it_cannot_act() {
     assert_eq!(row_help(&m, Row::Fov), None);
     assert_eq!(
         population_row(&m, Row::AiCap),
-        Some(("Team size", "100%".into()))
+        Some(("Team Size", "100%".into()))
     );
     assert_eq!(
         population_row(&m, Row::Reinforcements),
@@ -488,7 +495,7 @@ fn a_battle_without_team_sizes_greys_the_team_size_row() {
     };
     assert_eq!(navigate(&m, down).0, at + 1);
     let (_, whole, _) = settled_text(&m, [1280.0, 900.0]);
-    assert!(whole.iter().any(|t| t == "Team size"), "{whole:?}");
+    assert!(whole.iter().any(|t| t == "Team Size"), "{whole:?}");
     let reason = row_locked(&m, Row::AiCap).unwrap();
     assert!(whole.iter().any(|t| t == reason), "{whole:?}");
 }
@@ -546,11 +553,15 @@ fn the_mouse_rows_step_the_sensitivity_and_toggle_invert() {
         left: true,
         ..Default::default()
     };
-    assert_eq!(go(&m, right), vec![MenuAction::SetMouseSensitivity(1.1)]);
-    m.mouse_sensitivity = 0.1;
-    assert_eq!(go(&m, left), vec![MenuAction::SetMouseSensitivity(0.1)]);
-    m.mouse_sensitivity = 5.0;
-    assert_eq!(go(&m, right), vec![MenuAction::SetMouseSensitivity(5.0)]);
+    assert_eq!(go(&m, right), vec![MenuAction::SetMouseSensitivity(1.05)]);
+    assert_eq!(go(&m, left), vec![MenuAction::SetMouseSensitivity(0.95)]);
+    m.mouse_sensitivity = 0.05;
+    assert_eq!(go(&m, left), vec![MenuAction::SetMouseSensitivity(0.05)]);
+    m.mouse_sensitivity = 2.0;
+    assert_eq!(go(&m, right), vec![MenuAction::SetMouseSensitivity(2.0)]);
+    // A value off the 5 % grid (a migrated one) snaps onto it.
+    m.mouse_sensitivity = 0.607;
+    assert_eq!(go(&m, right), vec![MenuAction::SetMouseSensitivity(0.65)]);
     m.cursor = at(&m, Row::InvertY);
     let confirm = MenuInput {
         confirm: true,
@@ -756,31 +767,32 @@ fn back_resumes_from_every_pause_row() {
 }
 
 /// A value row's arrows sit clear of its label and inside the panel, on the
-/// longest label too.
+/// longest label too (each row selected, so the list shows it).
 #[test]
 fn the_value_arrows_clear_their_labels() {
     let mut m = model();
     m.base_fov_deg = 80.0;
     m.fov_scale = 1.25;
     // Each value its own text.
-    (m.mouse_sensitivity, m.pad_look_sensitivity) = (2.5, 0.7);
+    (m.mouse_sensitivity, m.pad_look_sensitivity) = (1.5, 0.7);
     m.reinforcements_pct = 150;
-    let ctx = egui::Context::default();
-    let mut out = None;
-    for _ in 0..4 {
-        out = Some(menu_frame(&ctx, &m, [1280.0, 1080.0], Vec::new()));
-    }
-    let out = out.unwrap();
-    let text_rect = |want: &str| {
-        out.shapes.iter().find_map(|c| match &c.shape {
-            egui::Shape::Text(t) if t.galley.text() == want => Some(t.visual_bounding_rect()),
-            _ => None,
-        })
-    };
     for (i, row) in rows(&m).into_iter().enumerate() {
         if !is_value_row(row) {
             continue;
         }
+        m.cursor = i;
+        let ctx = egui::Context::default();
+        let mut out = None;
+        for _ in 0..4 {
+            out = Some(menu_frame(&ctx, &m, [1280.0, 1080.0], Vec::new()));
+        }
+        let out = out.unwrap();
+        let text_rect = |want: &str| {
+            out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == want => Some(t.visual_bounding_rect()),
+                _ => None,
+            })
+        };
         let (label, value) = row_text(&m, row);
         let label = text_rect(&label).unwrap_or_else(|| panic!("{row:?} label"));
         let value = text_rect(&value.unwrap()).unwrap_or_else(|| panic!("{row:?} value"));
@@ -808,7 +820,7 @@ fn render_options_toggle_from_shell_and_pause_options() {
             (Row::SceneSoftness, MenuAction::ToggleSceneSoftness),
         ] {
             m.cursor = rows(&m).iter().position(|r| *r == row).unwrap();
-            assert_eq!(row_text(&m, row).1.as_deref(), Some("off"));
+            assert_eq!(row_text(&m, row).1.as_deref(), Some("Off"));
             for input in [
                 MenuInput {
                     confirm: true,
@@ -828,7 +840,102 @@ fn render_options_toggle_from_shell_and_pause_options() {
         }
         m.terrain_lod = true;
         m.scene_softness = true;
-        assert_eq!(row_text(&m, Row::TerrainLod).1.as_deref(), Some("ON"));
-        assert_eq!(row_text(&m, Row::SceneSoftness).1.as_deref(), Some("ON"));
+        assert_eq!(row_text(&m, Row::TerrainLod).1.as_deref(), Some("On"));
+        assert_eq!(row_text(&m, Row::SceneSoftness).1.as_deref(), Some("On"));
+    }
+}
+
+/// Issue #172: Display mode is the Graphics page's first row; Left / Right
+/// and Cross cycle Windowed, Fullscreen and Exclusive, past Exclusive where
+/// the display cannot do it.
+#[test]
+fn graphics_display_mode_cycles_and_skips_unavailable_exclusive() {
+    use WindowMode::*;
+    assert_eq!(Windowed.cycled(1, true), Borderless);
+    assert_eq!(Borderless.cycled(1, true), Exclusive);
+    assert_eq!(Exclusive.cycled(1, true), Windowed);
+    assert_eq!(Windowed.cycled(-1, true), Exclusive);
+    assert_eq!(Borderless.cycled(1, false), Windowed);
+    assert_eq!(Windowed.cycled(-1, false), Borderless);
+    // A profile saved on a display with Exclusive steps off it.
+    assert_eq!(Exclusive.cycled(-1, false), Borderless);
+    assert_eq!(Exclusive.cycled(1, false), Windowed);
+    for in_shell in [None, Some(String::new())] {
+        let mut menu = MenuModel {
+            page: Some(PausePage::Settings(SettingsPage::Graphics)),
+            in_shell,
+            exclusive_fullscreen: true,
+            ..Default::default()
+        };
+        let at = rows(&menu)
+            .iter()
+            .position(|r| *r == Row::WindowMode)
+            .unwrap();
+        assert_eq!(rows(&menu)[at + 1], Row::Viewpoint);
+        assert!(is_value_row(Row::WindowMode));
+        assert_eq!(row_locked(&menu, Row::WindowMode), None);
+        assert_eq!(
+            row_text(&menu, Row::WindowMode),
+            ("Display Mode".into(), Some("Windowed".into()))
+        );
+        assert_eq!(
+            step(&menu, at, true),
+            vec![MenuAction::SetWindowMode(Borderless)]
+        );
+        assert_eq!(
+            step(&menu, at, false),
+            vec![MenuAction::SetWindowMode(Exclusive)]
+        );
+        menu.cursor = at;
+        let confirm = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            navigate(&menu, confirm).1,
+            vec![MenuAction::SetWindowMode(Borderless)]
+        );
+        assert!(row_help(&menu, Row::WindowMode)
+            .unwrap()
+            .contains("Exclusive switches"));
+        menu.exclusive_fullscreen = false;
+        assert_eq!(
+            step(&menu, at, false),
+            vec![MenuAction::SetWindowMode(Borderless)]
+        );
+        assert!(row_help(&menu, Row::WindowMode)
+            .unwrap()
+            .contains("not available"));
+    }
+}
+
+/// Issue #172: F11 / Alt+Enter leave a window for the last fullscreen kind
+/// and any fullscreen for a window.
+#[test]
+fn display_mode_toggle_returns_to_the_last_fullscreen_kind() {
+    use WindowMode::*;
+    assert_eq!(Windowed.toggled(Windowed), Borderless);
+    assert_eq!(Windowed.toggled(Borderless), Borderless);
+    assert_eq!(Windowed.toggled(Exclusive), Exclusive);
+    assert_eq!(Borderless.toggled(Exclusive), Windowed);
+    assert_eq!(Exclusive.toggled(Borderless), Windowed);
+}
+
+/// The Display row names exactly this OS's one fullscreen key:
+/// Control+Command+F on macOS, F11 elsewhere; never Alt+Enter.
+#[test]
+fn the_display_row_names_each_oss_fullscreen_keys() {
+    for exclusive in [false, true] {
+        let mac = super::window_mode_hint(exclusive, true);
+        let other = super::window_mode_hint(exclusive, false);
+        for hint in [&mac, &other] {
+            assert!(hint.contains("maximized window"), "{hint}");
+            assert!(!hint.contains("Alt+Enter"), "{hint}");
+            assert!(!hint.contains("Option"), "{hint}");
+        }
+        assert!(mac.contains("Control+Command+F"), "{mac}");
+        assert!(!mac.contains("F11"), "{mac}");
+        assert!(other.contains("F11"), "{other}");
+        assert!(!other.contains("Command"), "{other}");
     }
 }

@@ -767,7 +767,13 @@ impl Sim {
         age: f32,
         dir: Vec3,
     ) -> bool {
+        // The hit's buff factors as they are now, before this tick's
+        // `tick_buffs` (later in the step) can reset a dead unit's buffs.
+        let dealt = attacker
+            .and_then(|a| self.units.get(a.index as usize).filter(|u| u.gen == a.gen))
+            .map_or(1.0, |u| u.buffs.dealt());
         let u = &mut self.units[victim.index as usize];
+        let taken = u.buffs.taken();
         if damage > 0.0 {
             u.cloak.strength = 0.0;
         }
@@ -782,6 +788,8 @@ impl Sim {
                 age,
                 health_left: u.health.cur,
                 dir,
+                dealt,
+                taken,
             });
         }
         if killed {
@@ -807,11 +815,18 @@ impl Sim {
         killer: Option<UnitHandle>,
         cause: DeathCause,
     ) {
-        self.space_unit_killed(h, killer);
+        // Issue #173 [ours]: a fall after an attacker's choke, push, pull,
+        // shove or blast is his kill (`sim/fall_credit.rs`).
+        let forced = if killer.is_none() {
+            self.forced_attacker(h, cause)
+        } else {
+            None
+        };
         // A placed self-piloted gun has no soldier to credit. Its distinct
         // shot identity is retained on Hit/Shot, but never a player Kill:
         // HUD and round statistics require an actual unit for that event.
-        let killer = killer.filter(|k| k.index != u32::MAX);
+        let killer = killer.or(forced).filter(|k| k.index != u32::MAX);
+        self.space_unit_killed(h, killer);
         // An exposed rider dies where he sits and leaves a corpse there (B1
         // FUN_001ffec0, re-vehicle-death 10.3); one inside the hull leaves none.
         let seated_body = self.units[h.index as usize]
@@ -848,40 +863,51 @@ impl Sim {
         // Phase D: the squad rules for a death, both of them.
         crate::squad::on_unit_died(self, h);
         self.unseat_unit(h);
+        self.units[h.index as usize].forced_by = None;
         match killer {
             Some(k) => {
-                let killer_team = self
-                    .units
-                    .get(k.index as usize)
-                    .filter(|s| s.gen == k.gen)
-                    .map(|s| s.team);
-                self.nav_stats.unit_kills += 1;
-                if k == h {
-                    self.nav_stats.self_kills += 1;
-                } else if killer_team.is_some_and(|team| self.allied(team, victim_team)) {
-                    self.nav_stats.team_kills += 1;
+                self.credit_kill(h, k, victim_team);
+                if forced.is_some() {
+                    self.events.push(Event::ForcedDeath { unit: h, cause });
                 }
-                if k != h && killer_team.is_some_and(|team| self.hostile(team, victim_team)) {
-                    self.heal_hero_kill(k);
-                }
-                self.deathmatch_kill(k, victim_team);
-                // The PS2 credits the member, alive or dead (B1 FUN_00297440:
-                // a destroyed vehicle's riders die after its destroyer may
-                // have, re-vehicle-death 10.5): this life's slot by generation.
-                if let Some(s) = self
-                    .units
-                    .get_mut(k.index as usize)
-                    .filter(|s| s.gen == k.gen)
-                {
-                    s.kills += 1;
-                }
-                self.events.push(Event::Kill {
-                    shooter: k,
-                    victim: h,
-                });
             }
             None => self.events.push(Event::EnvDeath { unit: h, cause }),
         }
+    }
+
+    /// The kill credit of `k` for the death of `h` (a member of
+    /// `victim_team`): the navigation counters, a hero's kill heal, the
+    /// deathmatch score, `k`'s kill count and [`Event::Kill`].
+    fn credit_kill(&mut self, h: UnitHandle, k: UnitHandle, victim_team: u8) {
+        let killer_team = self
+            .units
+            .get(k.index as usize)
+            .filter(|s| s.gen == k.gen)
+            .map(|s| s.team);
+        self.nav_stats.unit_kills += 1;
+        if k == h {
+            self.nav_stats.self_kills += 1;
+        } else if killer_team.is_some_and(|team| self.allied(team, victim_team)) {
+            self.nav_stats.team_kills += 1;
+        }
+        if k != h && killer_team.is_some_and(|team| self.hostile(team, victim_team)) {
+            self.heal_hero_kill(k);
+        }
+        self.deathmatch_kill(k, victim_team);
+        // The PS2 credits the member, alive or dead (B1 FUN_00297440:
+        // a destroyed vehicle's riders die after its destroyer may
+        // have, re-vehicle-death 10.5): this life's slot by generation.
+        if let Some(s) = self
+            .units
+            .get_mut(k.index as usize)
+            .filter(|s| s.gen == k.gen)
+        {
+            s.kills += 1;
+        }
+        self.events.push(Event::Kill {
+            shooter: k,
+            victim: h,
+        });
     }
 
     /// The death block of a dead unit's body (card KNOCK, re-knockback §3: B1
@@ -915,11 +941,14 @@ impl Sim {
         }
     }
 
-    /// The ONE environmental death path: a mission death region, or a lethal
-    /// landing. It does to the unit, the battle and the spawn waves exactly
-    /// what a bolt kill does — respawn timer, wave slot, alive count, one
-    /// ticket — and emits [`Event::EnvDeath`] so the HUD and audio can tell
-    /// the two apart. A dead or stale handle is a no-op. The `invincible`
+    /// The ONE environmental death path: a mission death region, the kill
+    /// floor, a lethal landing and the like. It does to the unit, the battle
+    /// and the spawn waves exactly what a bolt kill does — respawn timer,
+    /// wave slot, alive count, one ticket — and emits [`Event::EnvDeath`]
+    /// so the HUD and audio can tell the two apart. Issue #173 [ours]: a
+    /// fall-type death after a forced move (`sim/fall_credit.rs`) is the
+    /// attacker's kill instead: [`Event::Kill`] through the kill credit,
+    /// then [`Event::ForcedDeath`] with the cause. A dead or stale handle is a no-op. The `invincible`
     /// cheat spares the player from the causes that are ordinary damage on
     /// the PS2 ([`DeathCause::cheat_spares`]: a landing, a blast) and from
     /// nothing else: a death region, the kill floor, a landing under the map
@@ -938,7 +967,10 @@ impl Sim {
         if u.is_player && self.cheats_of(u).invincible && cause.cheat_spares() {
             return;
         }
-        self.space_unit_killed(h, None);
+        // Issue #173 [ours]: a fall after an attacker's choke, push, pull,
+        // shove or blast is his kill (`sim/fall_credit.rs`).
+        let credited = self.forced_attacker(h, cause);
+        self.space_unit_killed(h, credited);
         let Some(u) = self.unit(h) else {
             return;
         };
@@ -976,7 +1008,14 @@ impl Sim {
             // Recycles remove the actor instead of leaving a dead owner.
             self.retire_saber_flights(h.index as usize);
         }
-        self.events.push(Event::EnvDeath { unit: h, cause });
+        self.units[h.index as usize].forced_by = None;
+        match credited {
+            Some(k) => {
+                self.credit_kill(h, k, team);
+                self.events.push(Event::ForcedDeath { unit: h, cause });
+            }
+            None => self.events.push(Event::EnvDeath { unit: h, cause }),
+        }
     }
 }
 

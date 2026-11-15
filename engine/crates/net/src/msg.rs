@@ -125,16 +125,24 @@ pub enum Msg {
         static_digest: u64,
         hash0: u64,
     },
+    /// The round starts: its tick 0 begins `lead_us` after the host sent
+    /// this (every peer leaves its loading screen then).
     Start {
         round_id: u32,
+        lead_us: u32,
     },
+    /// A guest's `Sim::hash` after `tick` of round `round_id` (a report of
+    /// another round is stale and dropped).
     HashReport {
+        round_id: u32,
         tick: u32,
         hash: u64,
     },
-    /// The host's hash differed from this guest's at `tick` (LAN §4.7);
-    /// `build` and `target` (OS and CPU) are the host's, for the report.
+    /// The host's hash differed from this guest's at `tick` of round
+    /// `round_id` (LAN §4.7); `build` and `target` (OS and CPU) are the
+    /// host's, for the report.
     Desync {
+        round_id: u32,
         tick: u32,
         host_hash: u64,
         build: String,
@@ -247,22 +255,30 @@ impl Msg {
                 w.u64(*static_digest);
                 w.u64(*hash0);
             }
-            Msg::Start { round_id } => {
+            Msg::Start { round_id, lead_us } => {
                 w.u8(8);
                 w.var((*round_id).into());
+                w.var((*lead_us).into());
             }
-            Msg::HashReport { tick, hash } => {
+            Msg::HashReport {
+                round_id,
+                tick,
+                hash,
+            } => {
                 w.u8(9);
+                w.var((*round_id).into());
                 w.var((*tick).into());
                 w.u64(*hash);
             }
             Msg::Desync {
+                round_id,
                 tick,
                 host_hash,
                 build,
                 target,
             } => {
                 w.u8(10);
+                w.var((*round_id).into());
                 w.var((*tick).into());
                 w.u64(*host_hash);
                 w.str(build);
@@ -383,12 +399,15 @@ impl Msg {
             },
             8 => Msg::Start {
                 round_id: r.var32()?,
+                lead_us: r.var32()?,
             },
             9 => Msg::HashReport {
+                round_id: r.var32()?,
                 tick: r.var32()?,
                 hash: r.u64()?,
             },
             10 => Msg::Desync {
+                round_id: r.var32()?,
                 tick: r.var32()?,
                 host_hash: r.u64()?,
                 build: r.str(MAX_BUILD)?,

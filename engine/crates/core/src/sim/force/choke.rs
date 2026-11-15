@@ -52,9 +52,6 @@ impl Sim {
             return None;
         }
         let body_position = self.hero_body_prims(target.index as usize)?.pos;
-        if !crate::perception::los(self, self.units[i].soldier.pos, body_position) {
-            return None;
-        }
         let caster = &self.units[i];
         let (from, frame) = if caster.is_human() {
             self.human_shot(i)
@@ -62,7 +59,14 @@ impl Sim {
             (caster.muzzle(), caster.aim_frame())
         };
         let (lift, radius) = super::super::blast::soldier_blast_sphere(victim.soldier.stance);
-        let delta = body_position + Vec3::Y * lift - from;
+        let centre = body_position + Vec3::Y * lift;
+        // B2 0x32c408 tests sight from the weapon fire point to the target's
+        // collision-sphere centre, the same two points it scores. A feet-to-feet
+        // ray lost standing targets behind any curb, step or rise (#173).
+        if !crate::perception::los(self, from, centre) {
+            return None;
+        }
+        let delta = centre - from;
         let score = area_score(delta, frame, radius, power, height)?;
         let preferred = match caster.controller {
             Controller::Player { slot } => self
@@ -221,19 +225,41 @@ impl Sim {
                     let victim = &mut self.units[target.index as usize];
                     // Like a knock, the hold is soldier state: a droideka only
                     // takes the damage (`Sim::hero_knock`). [ours]
+                    // Issue #173, the maintainer's rule [ours]: a soldier on
+                    // the floor - standing, crouching, prone or anything
+                    // else - is stood up into the hold at once; one caught
+                    // in an air stance (jump, fall, throw, jet) is held where
+                    // he is, his jet cut off, and drops when it ends. The
+                    // original holds only a standing or crouching soldier
+                    // (B2 `FUN_00239850`).
                     if victim.mount.is_none()
                         && victim.droideka.is_none()
-                        && (victim.choked.is_some()
-                            || !matches!(
-                                victim.soldier.stance,
-                                crate::soldier::Stance::Jump
-                                    | crate::soldier::Stance::Fall
-                                    | crate::soldier::Stance::Dead
-                            ))
+                        && victim.soldier.stance != crate::soldier::Stance::Dead
                     {
-                        victim.choked.get_or_insert_with(Default::default).left = 0.5;
-                        victim.soldier.catch_upright();
+                        let first = victim.choked.is_none();
+                        // By the stance first: a floor stance a few ticks off
+                        // a kerb's edge is still a floor victim; only the air's
+                        // own stances (and a tumble off the floor) are held
+                        // where they are.
+                        let stance = victim.soldier.stance;
+                        let in_air = stance.airborne()
+                            || (stance == crate::soldier::Stance::Tumble
+                                && !victim.soldier.grounded);
+                        let hold = victim.choked.get_or_insert_with(Default::default);
+                        hold.left = 0.5;
+                        if first && in_air {
+                            hold.hold = Some(victim.soldier.pos);
+                        }
+                        if hold.hold.is_some() {
+                            victim.soldier.catch_in_air();
+                        } else {
+                            victim.soldier.catch_upright();
+                        }
                         victim.soldier.yaw = crate::fmath::atan2(-direction.x, -direction.z);
+                        // Issue #173 [ours]: a fall after the hold is the
+                        // caster's kill (refreshed while it holds).
+                        let caster = self.handle(i);
+                        self.note_forced_move(target, Some(caster));
                     }
                 }
             }

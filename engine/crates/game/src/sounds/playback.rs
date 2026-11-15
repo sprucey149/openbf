@@ -89,6 +89,27 @@ impl SoundLib {
         });
     }
 
+    /// The Force Choke voices ([`crate::event_sounds::choke_loops`]): each
+    /// starts when a hold takes a soldier, follows him and stops when it lets
+    /// him go.
+    pub fn play_choke_loops(
+        &mut self,
+        audio: &mut audio::Audio,
+        loops: &[(core::unit::UnitHandle, String, Vec3)],
+        listener: &Listener,
+    ) {
+        let requests = loops.iter().map(|(unit, name, pos)| LoopRequest {
+            source: LoopSource::Choke(*unit),
+            sound: fnv1a_lowercase(name),
+            pos: *pos,
+            gain: 1.0,
+            pitch: 1.0,
+        });
+        self.play_loop_set(audio, listener, requests, |k| {
+            matches!(k, LoopSource::Choke(..))
+        });
+    }
+
     /// The auras' looping sounds (`crate::fx::Fx::buff_loops`): each starts
     /// with its aura and stops with it. The property holds its own gain and
     /// distances (`buff_rage_effect`: 0.5, 15 to 30 m, looping).

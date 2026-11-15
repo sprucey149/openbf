@@ -105,8 +105,8 @@ impl Sim {
     /// first weapon on FIRE and has no weapon switch, so the PS2's switch
     /// cancel is the seat switch's pilot change (`Sim::unseat_unit`). Only
     /// a building turret (a [`gun::Turn`]) zooms: a vehicle's turret seat is
-    /// not read. PROVISIONAL (not read): the look's turn is not divided by
-    /// the zoom's divisor as a soldier's is.
+    /// not read. OURS: the look's turn is divided by the zoom's divisor as
+    /// a soldier's is ([`Sim::seat_turn`]).
     pub(super) fn tick_seat_zoom(&mut self, i: usize, press: bool, throttle: f32) {
         if !matches!(self.units[i].controller, Controller::Player { .. }) {
             return;
@@ -142,7 +142,7 @@ impl Sim {
 
     /// `u`'s seat zoom as the camera takes it (card VTURZ): the turret's
     /// zoom value; `step` 0 at `ZoomMin`, else 1, and the divisor that
-    /// step's (the seat's turn does not read it); `scope` is set (the view is
+    /// step's (the seat's turn reads it, [`Sim::seat_turn`]); `scope` is set (the view is
     /// the eye point's, along the look).
     pub fn seat_zoom(&self, u: UnitHandle) -> Option<crate::unit::Zoom> {
         let m = self.unit(u)?.mount?;
@@ -161,6 +161,27 @@ impl Sim {
             divisor: wc.zoom_at(step).1,
             scope: true,
         })
+    }
+
+    /// A building turret's turn law as seat `g`'s gunner turns it this
+    /// tick. OURS (issue #164; card VTURZ left it PROVISIONAL, not read on
+    /// the PS2): zoomed, a human gunner's turn and pitch rates are divided
+    /// by the first weapon's zoom turn divisor at the zoom's step, as a
+    /// zoomed soldier's are (`re-zoom.md` §6), so a 15x scope does not swing
+    /// at the unzoomed rate. A bot's turret is never zoomed, and `ai` keeps
+    /// it on the class's rates. measure: the original's zoomed turret turn
+    /// rate (BF1 `com_bldg_gunturret`, ZoomMax 15) in PCSX2.
+    pub(super) fn seat_turn(&self, g: &GunSetup, zoom: Option<f32>, ai: bool) -> Option<gun::Turn> {
+        let mut t = g.turn?;
+        let wc = g.weapons.first().map(|w| &self.weapon_classes[w.class]);
+        if let (Some(z), Some(wc), false) = (zoom, wc, ai) {
+            let div = wc.zoom_at(u8::from(z != wc.zoom_min)).1;
+            if div > 0.0 {
+                t.yaw_speed /= div;
+                t.pitch_speed /= div;
+            }
+        }
+        Some(t)
     }
 
     /// The gun setup of `u`'s seat, if it has one.
@@ -406,7 +427,7 @@ impl Sim {
         let ry = PadState::axis(p.ry);
         let walker = g.pilot && self.vehicles[vi].kind == VehicleKind::Walker;
         let flyer = g.pilot && self.vehicles[vi].kind == VehicleKind::Flyer;
-        if let Some(t) = g.turn {
+        if let Some(t) = self.seat_turn(&g, st.zoom, ai) {
             (st.look, st.rate) = t.step(st.look, st.rate, (rx, ry), dt);
         } else if walker {
             let w = &self.vehicles[vi].walker;

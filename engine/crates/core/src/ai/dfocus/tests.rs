@@ -310,14 +310,16 @@ fn a_focuser_knows_its_fellows_bearings() {
 
 /// In play, with real perception: a bot with a nearer enemy soldier in front
 /// keeps shooting him at Normal, and at Hard turns to the human it sees -
-/// but never through a wall.
+/// but never through a wall, and (issue #171 lever L1) not while the nearer
+/// soldier is at half the human's distance or nearer: then it holds the
+/// human's token and keeps the near one.
 #[test]
 fn in_play_hard_turns_to_the_human_but_not_through_a_wall() {
-    let run = |d: Difficulty, wall: bool| {
+    let run = |d: Difficulty, wall: bool, decoy_z: f32| {
         let (mut sim, human, bots) = field(d, &[]);
         let b = bot(&mut sim, 40.0, 0);
         let decoy = sim
-            .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, -37.0)))
+            .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, -decoy_z)))
             .expect("decoy");
         for h in [human, decoy] {
             let u = sim.unit_mut(h).expect("alive");
@@ -339,9 +341,14 @@ fn in_play_hard_turns_to_the_human_but_not_through_a_wall() {
         let u = sim.unit(b).expect("alive");
         (u.ai.target == Some(human.into()), holds(&sim, b, human))
     };
-    assert_eq!(run(Difficulty::Normal, false), (false, false));
-    assert_eq!(run(Difficulty::Hard, false), (true, true));
-    assert_eq!(run(Difficulty::Hard, true), (false, false), "a wall");
+    assert_eq!(run(Difficulty::Normal, false, 37.0), (false, false));
+    assert_eq!(run(Difficulty::Hard, false, 37.0), (false, true), "3 m: L1");
+    assert_eq!(
+        run(Difficulty::Hard, false, 15.0),
+        (true, true),
+        "25 m of 40"
+    );
+    assert_eq!(run(Difficulty::Hard, true, 37.0), (false, false), "a wall");
 }
 
 #[test]
@@ -368,4 +375,50 @@ fn a_proxy_gets_the_same_focus_grace_as_a_player() {
     sim.unit_mut(human).unwrap().alive = false;
     upkeep(&mut sim);
     assert!(sim.focus_born.is_empty(), "dead handles expire");
+}
+
+/// Issue #171 lever L1: a Hard or Elite focuser that sees an enemy bot at
+/// half the human's distance or nearer lets the focus go (the census FAR
+/// test); one farther than that, or a proxy focuser (frozen), keeps it.
+#[test]
+fn a_focuser_yields_to_a_bot_at_half_the_humans_distance() {
+    for d in [Difficulty::Hard, Difficulty::Elite] {
+        assert!(yields_at(d), "{d:?}");
+        for (bot_z, yields) in [(20.0, true), (18.0, true), (10.0, false), (5.0, false)] {
+            let (mut sim, human, bots) = field(d, &[30.0]);
+            let b = bots[0];
+            // An enemy bot of the focuser: team 0, between them.
+            let near = sim
+                .spawn(&UnitSpec {
+                    controller: Controller::Ai,
+                    ..UnitSpec::trooper(0, Vec3::new(0.0, 0.0, -bot_z))
+                })
+                .expect("near bot");
+            sees(&mut sim, b, human);
+            let (tick, at) = (sim.tick, sim.unit(near).expect("alive").capsule().center());
+            sim.unit_mut(b).expect("alive").ai.contacts[1] = Some(Contact {
+                handle: near.into(),
+                first_seen: tick,
+                last_seen: tick,
+                last_pos: at,
+                seen_now: true,
+                heard: false,
+                told: false,
+            });
+            deal(&mut sim);
+            assert!(holds(&sim, b, human), "{d:?} {bot_z}: holds the token");
+            let st = sim.unit(b).expect("alive").ai;
+            let want = (!yields).then_some(human);
+            assert_eq!(pick(&sim, b, &st), want, "{d:?} bot at {bot_z} m");
+            // A proxy focuser keeps the frozen rule (no yield).
+            sim.set_proxy(b, Some(crate::ai::proxy::Strength::Good.profile()));
+            let st = sim.unit(b).expect("alive").ai;
+            if crate::ai::dfocus::focuses_as(&sim, sim.unit(b).expect("alive")) {
+                assert_eq!(pick(&sim, b, &st), Some(human), "{d:?} proxy");
+            }
+        }
+    }
+    for d in [Difficulty::Easy, Difficulty::Normal] {
+        assert!(!yields_at(d), "{d:?}");
+    }
 }
