@@ -80,8 +80,7 @@ struct IndexStream {
     /// Byte offset of the stream's data in that file.
     #[serde(default)]
     data_offset: u64,
-    /// False for the stereo music streams: indexed, never decoded (the maintainer's
-    /// decision — music stays streamed).
+    /// False for stereo music, which stays streamed.
     baked: bool,
     segments: Vec<IndexSegment>,
     #[serde(default)]
@@ -102,6 +101,8 @@ struct IndexSegment {
     offset: u64,
     #[serde(default)]
     size: usize,
+    #[serde(default)]
+    restored_bytes: u64,
 }
 
 /// A `Music` record ready to play (card AMBM): its times, and each take of
@@ -122,9 +123,8 @@ pub fn level_db(level: f32) -> f32 {
     20.0 * level.fmax(0.001).log10()
 }
 
-/// The takes of every stream the bake did not decode, by (stream, segment):
-/// each streams from the copy of its ADPCM the bake wrote under the index's
-/// own directory `dir` ([`manifest::music_body`]).
+/// The streaming takes by (stream, segment). A restored file and the retail
+/// ADPCM body use the same timing and cue coordinates.
 fn note_music(g: &GlobalRon, dir: &Path, out: &mut HashMap<(u32, u32), audio::StreamTake>) {
     for s in g
         .streams
@@ -135,7 +135,18 @@ fn note_music(g: &GlobalRon, dir: &Path, out: &mut HashMap<(u32, u32), audio::St
         for seg in &s.segments {
             out.entry((s.name_hash, seg.id))
                 .or_insert_with(|| audio::StreamTake {
-                    path: path.clone(),
+                    path: (seg.restored_bytes > 0)
+                        .then(|| {
+                            dir.join(manifest::restored_music_take(
+                                &s.source,
+                                s.data_offset,
+                                s.name_hash,
+                                seg.id,
+                                seg.offset,
+                            ))
+                        })
+                        .filter(|restored| pak::is_file(restored))
+                        .unwrap_or_else(|| path.clone()),
                     offset: seg.offset,
                     size: seg.size,
                     format: s.format,
@@ -158,7 +169,7 @@ fn audible(p: &SoundProp) -> bool {
 /// Why a definition that names stream segments makes no sound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Silence {
-    /// Its takes are music segments: indexed, never decoded (the maintainer's decision).
+    /// Its takes are handled by the music streamer.
     Music,
     /// The index knows the segment; no OGG was written for it.
     Unbaked,
@@ -169,9 +180,8 @@ pub enum Silence {
 /// What [`SoundLib::census`] counts, over the map bank's distinct properties.
 /// The last three partition the definitions that name stream segments and
 /// resolve to no file, and they are what queue item VO measured:
-/// `music` is by design (the maintainer's decision — the stereo music streams are
-/// indexed, never decoded), `unbaked` is a segment the index knows and the
-/// bake skipped, and `cut` names a take that is in NO stream on the disc.
+/// The music streamer handles `music`. The bake skipped the indexed segment
+/// for `unbaked`. No stream on the disc carries `cut`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Census {
     /// Distinct properties in the map's own bank.

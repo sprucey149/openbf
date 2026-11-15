@@ -268,6 +268,7 @@ pub fn bake_sounds_with_donor(
     let mut samples: Vec<(u32, String)> = Vec::new();
     let mut seen: HashSet<u32> = HashSet::new();
     let mut bank_list = Vec::new();
+    let mut restore = crate::audio_restore::AudioRestore::from_env("effects");
     for b in &banks {
         bank_list.push((b.name_hash, b.samples.len()));
         let bank_dir = out.join(format!("{:08x}", b.name_hash));
@@ -297,7 +298,10 @@ pub fn bake_sounds_with_donor(
                     b.name_hash
                 );
             };
-            let pcm = crate::adpcm::decode_bank_sample(format, data_slice);
+            let mut pcm = crate::adpcm::decode_bank_sample(format, data_slice);
+            restore
+                .apply(rate, &mut pcm)
+                .with_context(|| format!("restore sample {:08x}", s.id_hash))?;
             let wav = crate::adpcm::wav_mono_s16(rate, &pcm);
             let rel = format!("{:08x}/{:08x}.wav", b.name_hash, s.id_hash);
             std::fs::write(out.join(&rel), wav)?;
@@ -310,7 +314,10 @@ pub fn bake_sounds_with_donor(
                 continue;
             }
             if let Some(&(format, rate, _, data_slice)) = donor_samples.get(&s.id_hash) {
-                let pcm = crate::adpcm::decode_bank_sample(format, data_slice);
+                let mut pcm = crate::adpcm::decode_bank_sample(format, data_slice);
+                restore
+                    .apply(rate, &mut pcm)
+                    .with_context(|| format!("restore donor sample {:08x}", s.id_hash))?;
                 let rel = format!("{:08x}/{:08x}.wav", b.name_hash, s.id_hash);
                 std::fs::write(out.join(&rel), crate::adpcm::wav_mono_s16(rate, &pcm))?;
                 seen.insert(s.id_hash);
@@ -329,6 +336,8 @@ pub fn bake_sounds_with_donor(
             samples.push((s.id_hash, rel));
         }
     }
+
+    restore.finish()?;
 
     // Properties with inheritance flattened (template chain via `inherit`).
     let core = match core_lvl {

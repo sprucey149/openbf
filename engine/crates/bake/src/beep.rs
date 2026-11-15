@@ -73,7 +73,7 @@ pub fn bake_beep_with_path(
         } else {
             return Err(anyhow!("global bank has no local data and no common.bnk"));
         };
-    let pcm = crate::adpcm::decode_bank_sample(format, raw_bytes);
+    let mut pcm = crate::adpcm::decode_bank_sample(format, raw_bytes);
     if pcm.len() != expected_frames {
         return Err(anyhow!(
             "decoded {} frames, info says {}",
@@ -81,6 +81,9 @@ pub fn bake_beep_with_path(
             expected_frames
         ));
     }
+    let mut restoration = crate::audio_restore::AudioRestore::from_env("effects");
+    restoration.apply(native, &mut pcm)?;
+    restoration.finish()?;
     let pitched = |p: f64| (native as f64 * p).round() as u32;
     let outputs = vec![
         ("ui_load_lp".to_string(), native, pcm.clone()),

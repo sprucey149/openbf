@@ -1,6 +1,6 @@
 //! Streamed music (card AMBM): a take of a PS2 stream is decoded block by
 //! block from the bake's byte-for-byte ADPCM stream bodies through `pak`
-//! while it plays (the maintainer: music stays streamed).
+//! while it plays. Restored packs stream lossless takes with the same timing.
 //!
 //! A take is SPU2 ADPCM (16-byte blocks of 28 frames, `bake::adpcm`'s
 //! recipe). A mono take is one run. A stereo take is laid out in the
@@ -279,23 +279,82 @@ impl kira::sound::streaming::Decoder for TakeDecoder {
     }
 }
 
+#[cfg(feature = "backend")]
+enum MusicHandle {
+    Authored(kira::sound::streaming::StreamingSoundHandle<std::io::Error>),
+    Restored(kira::sound::streaming::StreamingSoundHandle<kira::sound::FromFileError>),
+}
+
+#[cfg(feature = "backend")]
+struct PackedMusic {
+    inner: pak::Reader,
+    bytes: u64,
+}
+
+#[cfg(feature = "backend")]
+impl std::io::Read for PackedMusic {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+#[cfg(feature = "backend")]
+impl std::io::Seek for PackedMusic {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+#[cfg(feature = "backend")]
+impl symphonia::core::io::MediaSource for PackedMusic {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.bytes)
+    }
+}
+
+#[cfg(feature = "backend")]
+fn restored_data(
+    take: &StreamTake,
+) -> anyhow::Result<kira::sound::streaming::StreamingSoundData<kira::sound::FromFileError>> {
+    let mut inner = pak::open(&take.path)?;
+    let bytes = inner.seek(SeekFrom::End(0))?;
+    inner.rewind()?;
+    let resource = PackedMusic { inner, bytes };
+    let data = kira::sound::streaming::StreamingSoundData::from_media_source(resource)?;
+    let expected_duration =
+        std::time::Duration::from_secs_f64(take.frames() as f64 / f64::from(take.frequency.max(1)));
+    anyhow::ensure!(
+        data.num_frames() == take.frames() && data.duration() == expected_duration,
+        "restored music {} has different timing from the retail cue",
+        take.path.display()
+    );
+    Ok(data)
+}
+
 /// A playing take. Stops when dropped.
 pub struct MusicVoice {
     #[cfg(feature = "backend")]
-    inner: kira::sound::streaming::StreamingSoundHandle<std::io::Error>,
+    inner: MusicHandle,
 }
 
 impl MusicVoice {
     /// The level (0 = unity) reached over `secs`.
     pub fn set_volume(&mut self, volume_db: f32, secs: f32) {
         #[cfg(feature = "backend")]
-        self.inner.set_volume(
-            volume_db,
-            kira::Tween {
+        {
+            let tween = kira::Tween {
                 duration: std::time::Duration::from_secs_f32(secs.max(0.0)),
                 ..Default::default()
-            },
-        );
+            };
+            match &mut self.inner {
+                MusicHandle::Authored(inner) => inner.set_volume(volume_db, tween),
+                MusicHandle::Restored(inner) => inner.set_volume(volume_db, tween),
+            }
+        }
         #[cfg(not(feature = "backend"))]
         {
             let _ = (volume_db, secs);
@@ -306,7 +365,10 @@ impl MusicVoice {
 impl Drop for MusicVoice {
     fn drop(&mut self) {
         #[cfg(feature = "backend")]
-        self.inner.stop(kira::Tween::default());
+        match &mut self.inner {
+            MusicHandle::Authored(inner) => inner.stop(kira::Tween::default()),
+            MusicHandle::Restored(inner) => inner.stop(kira::Tween::default()),
+        }
     }
 }
 
@@ -322,6 +384,19 @@ impl crate::Audio {
         #[cfg(feature = "backend")]
         {
             use kira::sound::streaming::StreamingSoundData;
+            if take.path.extension().is_some_and(|ext| ext == "flac") {
+                let mut data = restored_data(&take)?.volume(volume_db);
+                if looping {
+                    data = data.loop_region(..);
+                }
+                let inner = self
+                    .game
+                    .play(data)
+                    .map_err(|e| anyhow::anyhow!("music stream: {e}"))?;
+                return Ok(MusicVoice {
+                    inner: MusicHandle::Restored(inner),
+                });
+            }
             let reader = TakeReader::open(take)?;
             let mut data = StreamingSoundData::from_decoder(TakeDecoder(reader)).volume(volume_db);
             if looping {
@@ -331,7 +406,9 @@ impl crate::Audio {
                 .game
                 .play(data)
                 .map_err(|e| anyhow::anyhow!("music stream: {e}"))?;
-            Ok(MusicVoice { inner })
+            Ok(MusicVoice {
+                inner: MusicHandle::Authored(inner),
+            })
         }
         #[cfg(not(feature = "backend"))]
         {
@@ -344,6 +421,107 @@ impl crate::Audio {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "backend")]
+    #[test]
+    fn restored_music_keeps_exact_odd_rate_and_cue_length() {
+        const PROBE: &str = "OPENBF_PACKED_MUSIC_TEST";
+        const VIRTUAL_DIR: &str = "openbf-packed-music-test";
+        let packed_probe = std::env::var_os(PROBE).is_some();
+        let mut take = StreamTake {
+            path: PathBuf::from(VIRTUAL_DIR).join("take.flac"),
+            offset: 0,
+            size: 512,
+            format: 1,
+            channels: 2,
+            substreams: 1,
+            interleave: 0,
+            frequency: 48_001,
+            block_size: 16_384,
+        };
+        if packed_probe {
+            assert!(pak::mount(std::path::Path::new(VIRTUAL_DIR), VIRTUAL_DIR));
+            assert!(pak::packed());
+            let data = restored_data(&take).unwrap().loop_region(..);
+            assert_eq!(data.num_frames(), 448);
+            let mut mixer = kira::AudioManager::<kira::backend::mock::MockBackend>::new(
+                kira::AudioManagerSettings::default(),
+            )
+            .unwrap();
+            let handle = mixer.play(data).unwrap();
+            for _ in 0..32 {
+                mixer.backend_mut().on_start_processing();
+                mixer.backend_mut().process();
+            }
+            assert_ne!(handle.state(), kira::sound::PlaybackState::Stopped);
+            return;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("openbf-flac-{}-{stamp}.flac", std::process::id()));
+        let result = std::process::Command::new("ffmpeg")
+            .args([
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48001",
+                "-af",
+                "atrim=end_sample=448",
+                "-ac",
+                "2",
+                "-c:a",
+                "flac",
+            ])
+            .arg(&path)
+            .status();
+        if result
+            .as_ref()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            eprintln!("SKIP: ffmpeg is unavailable");
+            return;
+        }
+        assert!(result.unwrap().success());
+        take.path = path;
+        let exe = std::env::current_exe().unwrap();
+        let packed = take
+            .path
+            .with_extension(format!("probe{}", std::env::consts::EXE_SUFFIX));
+        pak::write_pack(
+            &exe,
+            &packed,
+            &[(format!("{VIRTUAL_DIR}/take.flac"), take.path.clone())],
+        )
+        .unwrap();
+        let probe = std::process::Command::new(&packed)
+            .env(PROBE, "1")
+            .args([
+                "--exact",
+                "stream::tests::restored_music_keeps_exact_odd_rate_and_cue_length",
+            ])
+            .output()
+            .unwrap();
+        std::fs::remove_file(&packed).unwrap();
+        assert!(
+            probe.status.success() && String::from_utf8_lossy(&probe.stdout).contains("1 passed"),
+            "packed FLAC probe failed: {} {}",
+            String::from_utf8_lossy(&probe.stdout),
+            String::from_utf8_lossy(&probe.stderr)
+        );
+        assert_eq!(restored_data(&take).unwrap().num_frames(), 448);
+        take.frequency = 48_000;
+        assert!(restored_data(&take).is_err());
+        take.frequency = 48_001;
+        take.size = 480;
+        assert!(restored_data(&take).is_err());
+        std::fs::remove_file(take.path).unwrap();
+    }
 
     /// One ADPCM block of filter 0, shift 0 whose 28 nibbles are all `n`.
     fn block(n: u8) -> [u8; 16] {

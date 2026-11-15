@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+audio = { path = "../audio", default-features = false }
 mungefs = { path = "../mungefs" }
 manifest = { path = "../manifest" }
 glam.workspace = true

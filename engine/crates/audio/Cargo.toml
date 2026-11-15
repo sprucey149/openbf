@@ -9,9 +9,10 @@ license.workspace = true
 # (installed on the build box 2026-08-30); `--no-default-features` builds the
 # silent no-op API on boxes without them.
 default = ["backend"]
-backend = ["dep:kira"]
+backend = ["dep:kira", "dep:symphonia"]
 
 [dependencies]
 kira = { workspace = true, optional = true }
+symphonia = { version = "0.5", default-features = false, optional = true }
 anyhow = { workspace = true }
 pak = { path = "../pak" }

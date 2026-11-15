@@ -713,7 +713,7 @@ class Pack(unittest.TestCase):
             self.assertIn(line, printed)
         self.assertEqual(self.out.with_name('game.inputs.txt').read_text().strip(), printed[:printed.index('Input summary')].strip())
 
-    def full_run(self, xbox_on, xbox_only=False, before=None):
+    def full_run(self, xbox_on, xbox_only=False, before=None, extra=()):
         """pack.main end to end with the tools stubbed: what it runs and what it tells rebake.sh."""
         root = self.top
         if before:
@@ -755,7 +755,7 @@ class Pack(unittest.TestCase):
         values = dict(ROOT=str(root), ENGINE=str(engine), EXTRACTED=str(root / 'extracted'), BAKED=str(baked),
                       MISSIONS=str(missions), TARGET=str(target), BAKE_STAMP=str(root / 'extracted/bake.sha'),
                       MISSION_STAMP=str(root / 'extracted/mission.sha'))
-        args = ['pack.py', '--iso-dir', str(self.iso), '--out', str(self.out)]
+        args = ['pack.py', '--iso-dir', str(self.iso), '--out', str(self.out), *extra]
         with mock.patch.multiple(pack, **values), mock.patch.object(sys, 'argv', args), mock.patch.object(pack, 'need'), \
                 mock.patch.object(pack, 'run', side_effect=run), mock.patch.object(pack, 'find_bash', return_value='bash'), \
                 mock.patch.object(pack, 'stale', return_value=None), mock.patch.object(pack, 'inputs_hash', return_value='hash'), \
@@ -789,6 +789,19 @@ class Pack(unittest.TestCase):
         self.assertEqual(sorted(Path(call[3]).parent.name for call in calls if call[1:2] == ['extract-iso']), ['bf1', 'bf2'])
         for game in pack.LUA:
             self.assertTrue((self.top / 'extracted' / game / 'lvl' / pack.GAME_ELF[game]).is_file())
+
+    def test_pack_enables_local_audio_restoration_by_default(self):
+        _, env, _, _ = self.full_run(False)
+        self.assertEqual(env['OPENBF_AUDIO_RESTORE_SCRIPT'], (self.top / 'scripts/restore_audio.py').as_posix())
+        report = json.loads(Path(str(self.out) + '.sources.json').read_text())
+        self.assertTrue(report['audio_restoration'])
+
+    def test_retail_audio_clears_an_inherited_restore_script(self):
+        with mock.patch.dict(os.environ, {'OPENBF_AUDIO_RESTORE_SCRIPT': '/other/script.py'}):
+            _, env, _, _ = self.full_run(False, extra=['--retail-audio'])
+        self.assertNotIn('OPENBF_AUDIO_RESTORE_SCRIPT', env)
+        report = json.loads(Path(str(self.out) + '.sources.json').read_text())
+        self.assertFalse(report['audio_restoration'])
 
     def test_a_whole_extraction_is_left_alone(self):
         calls, _, _, _ = self.full_run(False, before=lambda root: self.old_extraction(root, elf=True))

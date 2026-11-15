@@ -254,6 +254,21 @@ pub fn music_body(source: &str, data_offset: u64) -> String {
     format!("music/{}_{data_offset:x}.bin", stem.to_ascii_lowercase())
 }
 
+/// A locally restored, lossless music take. Scope is the stream index folder.
+pub fn restored_music_take(
+    source: &str,
+    data_offset: u64,
+    stream: u32,
+    segment: u32,
+    offset: u64,
+) -> String {
+    let stem = source.rsplit_once('.').map_or(source, |(stem, _)| stem);
+    format!(
+        "music_restored/{}_{data_offset:x}/{stream:08x}_{segment:08x}_{offset:x}.flac",
+        stem.to_ascii_lowercase()
+    )
+}
+
 /// A BF2 `door` class's rig, baked from its ODF (`AnimationTrigger`,
 /// `AnimationName`, `Animation`), its model's `skel` and the named clip of
 /// its `zaa_` bank (`analysis/re-bf2-doors.md` §2 hops 2–5, §3 hops 7–9).

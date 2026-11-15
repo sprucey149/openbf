@@ -13,10 +13,9 @@
 //! So the bake walks the streams' `info`, decodes the segments some `snd_`
 //! script actually references, and writes one OGG per SEGMENT ID — the id is
 //! the only name the data has (0 of 6,457 ids are preimageable, §2). The two
-//! stereo MUSIC streams (630 MB) are NOT decoded: the maintainer's decision is that
-//! music stays streamed, so they are only indexed — name, block size, and
-//! each segment's absolute offset in the LVL, which is what a runtime
-//! streamer needs to seek.
+//! stereo music streams are normally indexed and copied for original streaming.
+//! A pack-selected restoration also emits lossless, seekable takes, keeping
+//! the original stream and cue coordinates.
 //!
 //! Output (`bake global-sound <lvl[,lvl]> <outdir> [ref.lvl,...]`):
 //!   <outdir>/<stream hash>/<segment id>.ogg
@@ -49,10 +48,17 @@ pub struct SegmentRon {
     /// Decoded PCM frames of those bytes (`size/16*28`). The disc's own frame
     /// field counts the padded run instead; see `mungefs::stream`.
     pub frames: usize,
+    /// Byte count of the pack's lossless restored take, when present.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub restored_bytes: u64,
 }
 
 fn is_default_one(v: &u32) -> bool {
     *v <= 1
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -70,7 +76,7 @@ pub struct StreamRon {
     /// Byte offset of the `data` payload within that file.
     pub data_offset: usize,
     pub bytes: usize,
-    /// False for the music streams: indexed, never decoded.
+    /// False for the music streams: playback uses the stream and cue index.
     pub baked: bool,
     pub segments: Vec<SegmentRon>,
     #[serde(default, skip_serializing_if = "is_default_one")]
@@ -181,6 +187,9 @@ pub fn bake_global_sound(
     let mut claimed: HashSet<u32> = HashSet::new();
     let mut unreferenced = 0usize;
     let mut ron_streams = Vec::new();
+    let restore_music =
+        !opts.index_only && std::env::var_os("OPENBF_AUDIO_RESTORE_SCRIPT").is_some();
+    let mut music_worker = crate::audio_restore::AudioRestore::from_env("music");
     for (si, (src, s)) in streams.iter().enumerate() {
         let baked = s.channels == 1;
         let mut segs = Vec::new();
@@ -197,6 +206,7 @@ pub fn bake_global_sound(
                 offset: g.offset,
                 size: g.size,
                 frames,
+                restored_bytes: 0,
             });
             if !baked || g.alias_of.is_some() {
                 continue;
@@ -225,7 +235,7 @@ pub fn bake_global_sound(
         if !baked && !opts.index_only {
             write_music_body(out, src, s.data_file_offset as u64, s.data)?;
         }
-        ron_streams.push(StreamRon {
+        let mut stream = StreamRon {
             name_hash: s.name_hash,
             source: src.clone(),
             channels: s.channels,
@@ -239,8 +249,13 @@ pub fn bake_global_sound(
             // Only IMA streams use this field. Omitting it on PS2 retains
             // the pre-PC streams.ron/global.ron bytes.
             interleave: if s.format == 5 { s.interleave } else { 0 },
-        });
+        };
+        if restore_music && !baked && (s.block_size > 0 || s.format == 5) {
+            crate::music_restore::stream(out, &mut stream, &mut music_worker)?;
+        }
+        ron_streams.push(stream);
     }
+    music_worker.finish()?;
     if opts.limit > 0 {
         jobs.truncate(opts.limit);
     }
@@ -280,6 +295,12 @@ pub fn bake_global_sound(
         unreferenced,
     };
     crate::write_ron(&out.join(&opts.index), &ron)?;
+    if !opts.index_only && !restore_music {
+        let restored = out.join("music_restored");
+        if restored.is_dir() {
+            std::fs::remove_dir_all(&restored).with_context(|| restored.display().to_string())?;
+        }
+    }
     Ok(ron)
 }
 
@@ -315,8 +336,8 @@ pub const MAP_INDEX: &str = "streams.ron";
 ///
 /// Same walk and the same rules as [`bake_global_sound`] — the LVL is its own
 /// reference set (only segments its `snd_` names are encoded), mono streams
-/// are decoded to OGG, stereo MUSIC streams are indexed and never decoded
-/// (the maintainer's decision, PLAN Log 2026-09-08 (b)) — writing [`MAP_INDEX`].
+/// are decoded to OGG, and stereo music stays streamed through entries in
+/// [`MAP_INDEX`].
 pub fn bake_map_streams(sound_lvl: &str, outdir: &Path) -> Result<GlobalSoundRon> {
     let src = sound_lvl.to_string();
     let opts = Options {
@@ -351,35 +372,45 @@ fn encode_all(
     let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..n.min(jobs.len().max(1)) {
-            scope.spawn(|| loop {
-                let i = cursor.fetch_add(1, Ordering::Relaxed);
-                let Some(j) = jobs.get(i) else { return };
-                let (_, stream) = &streams[j.stream];
-                let seg = &stream.segments[j.seg];
-                let r = (|| -> Result<()> {
-                    let adpcm = stream
-                        .segment_adpcm(seg)
-                        .with_context(|| format!("segment {:08x} outside its data", j.id))?;
-                    let pcm = if stream.format == 5 {
-                        crate::adpcm::decode_ima(adpcm)
-                    } else {
-                        crate::adpcm::decode(adpcm)
-                    };
-                    // The serial is the segment id: reproducible, and an OGG
-                    // taken out of the tree still says which segment it is.
-                    let ogg = crate::ogg::encode_mono(&pcm, j.rate, opts.quality, j.id)?;
-                    std::fs::write(out.join(&j.rel), ogg).with_context(|| j.rel.clone())?;
-                    Ok(())
-                })();
-                match r {
-                    Ok(()) => {
-                        results.lock().unwrap().push((j.id, j.rel.clone()));
-                        let d = done.fetch_add(1, Ordering::Relaxed) + 1;
-                        if d.is_multiple_of(500) {
-                            eprintln!("global-sound: {d}/{} segments encoded", jobs.len());
+            scope.spawn(|| {
+                let mut restore = crate::audio_restore::AudioRestore::from_env("dialogue");
+                loop {
+                    let i = cursor.fetch_add(1, Ordering::Relaxed);
+                    let Some(j) = jobs.get(i) else { break };
+                    let (_, stream) = &streams[j.stream];
+                    let seg = &stream.segments[j.seg];
+                    let r = (|| -> Result<()> {
+                        let adpcm = stream
+                            .segment_adpcm(seg)
+                            .with_context(|| format!("segment {:08x} outside its data", j.id))?;
+                        let mut pcm = if stream.format == 5 {
+                            crate::adpcm::decode_ima(adpcm)
+                        } else {
+                            crate::adpcm::decode(adpcm)
+                        };
+                        restore.apply(j.rate, &mut pcm)?;
+                        // The serial is the segment id: reproducible, and an OGG
+                        // taken out of the tree still says which segment it is.
+                        let ogg = crate::ogg::encode_mono(&pcm, j.rate, opts.quality, j.id)?;
+                        std::fs::write(out.join(&j.rel), ogg).with_context(|| j.rel.clone())?;
+                        Ok(())
+                    })();
+                    match r {
+                        Ok(()) => {
+                            results.lock().unwrap().push((j.id, j.rel.clone()));
+                            let d = done.fetch_add(1, Ordering::Relaxed) + 1;
+                            if d.is_multiple_of(500) {
+                                eprintln!("global-sound: {d}/{} segments encoded", jobs.len());
+                            }
                         }
+                        Err(e) => errors.lock().unwrap().push(format!("{:08x}: {e:#}", j.id)),
                     }
-                    Err(e) => errors.lock().unwrap().push(format!("{:08x}: {e:#}", j.id)),
+                }
+                if let Err(e) = restore.finish() {
+                    errors
+                        .lock()
+                        .unwrap()
+                        .push(format!("finish voice restoration: {e:#}"));
                 }
             });
         }
@@ -527,8 +558,8 @@ mod tests {
         assert_eq!(emt.bytes, 425_984);
         let adpcm: usize = emt.segments.iter().map(|g| g.size).sum();
         assert_eq!(adpcm, 380_384);
-        // Every other stream is the map/era MUSIC: stereo, indexed, never
-        // decoded — so the whole encode is those 9 segments.
+        // The other streams carry stereo map or era music. The retail test
+        // encodes only these nine dialogue segments.
         assert!(r
             .streams
             .iter()

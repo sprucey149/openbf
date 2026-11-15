@@ -88,7 +88,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/dlc_attachment.rs` 106 — Fisto's separate head tentacles folded into his body with their own joints.
 - `bake/src/dlc_output.rs` 383 — temporary DLC staging, texture aliases and installation without retail asset replacement.
 - `bake/src/main.rs` 754 — the CLI, one subcommand per bake (`map`, `common`, `soldier`, `vehicle`, `effects`, `sounds`, …)
-- `bake/src/lib.rs` 205 — module roots, the RON layout every bake output uses (LF on every OS) · `pretty`, `write_ron`
+- `bake/src/lib.rs` 206 — module roots, the RON layout every bake output uses (LF on every OS) · `pretty`, `write_ron`
 - `bake/src/gameplay.rs` 484 — apply a reviewed PS2 gameplay correction set before decoding a donor LVL; PS2 content is returned verbatim
 - `bake/src/gameplay/program.rs` 518 — the correction set's collision, skeleton and animation-bank programs · `Programs`
 - `bake/src/gameplay/rebuild.rs` 613 — rebuild corrected class chunks from the table · `chunk`
@@ -166,13 +166,16 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/door.rs` 463 — BF2 door rigs: triggers, collision/draw motion and sounds · `rigs`, `rig`, `DoorSpec`; clip/transform rules and caveats in the module header (`analysis/re-bf2-doors.md`, [O]).
 - `bake/src/foliage.rs` 770 — terrain foliage placement/tint, path props and grasspatch bake → `foliage.bin` · `bake`, `place`, `tint`, `path_props`, `rng_table`, `grass_class`, `grass_atlas`; ELF-table dependency and arithmetic in the module header (`analysis/re-foliage.md`).
 - `bake/src/foliage/tests.rs` 509 — the placement and tint against instances read out of the PS2's RAM (the height is `game::viewer::foliage`'s); the ELF table and grass atlas, the grass class, the path props
-- `bake/src/sounds.rs` 922 — SOUND LVL bank/property/stream bake → WAVs and `sounds.ron` · `bake_sounds`; per-sublevel inheritance and engine-graph resolution in `read_sublevels` / `engines`; stream outputs in the module header.
+- `bake/src/sounds.rs` 930 — SOUND LVL bank/property/stream bake → WAVs and `sounds.ron` · `bake_sounds`; per-sublevel inheritance and engine-graph resolution in `read_sublevels` / `engines`; stream outputs in the module header.
+- `bake/src/audio_restore.rs` 151 — optional persistent Python PCM worker for bank tasks and voice encoder threads; little-endian requests, exact-size responses, EOF status checks and child cleanup · `AudioRestore`.
+- `bake/src/audio_restore/tests.rs` 176 — synthetic worker protocol, reuse, disabled-byte stability and child lifecycle checks.
 - `bake/src/foley.rs` 87 — the LVL's foley tables → `<map>/sounds/foley.ron` (card FOLY; written by `bake sounds`) · `table`, `write`
 - `bake/src/sound_names.rs` 367 — names for hashed sound properties · `build_dictionary`
-- `bake/src/global_sound.rs` 584 — GLOBAL VO, per-map streams · `bake_global_sound`
+- `bake/src/music_restore.rs` 123 — restore decoded music and write seekable frame-exact FLAC cues.
+- `bake/src/global_sound.rs` 615 — retail and restored voice and music indexes.
 - `bake/src/adpcm.rs` 239 — SPU2 ADPCM decode · `decode`
 - `bake/src/ogg.rs` 281 — Vorbis with a reproducible serial · `encode_mono`
-- `bake/src/beep.rs` 147 — the BF1 loading beep · `bake_beep`
+- `bake/src/beep.rs` 150 — BF1 loading beep, optionally restored before the authored pitch variants · `bake_beep`
 - `bake/src/hud.rs` 463 — common HUD layouts, fonts, sheets and localised text bake · `bake_hud`, `bake_fonts`, `bake_locl`; `bake_common` integration and spawn-screen resources in the module/API docs (`analysis/re-hud.md`).
 - `bake/src/hud/art.rs` 232 — validate larger donor sheets and bake sharper UI-only frame, button and HUD art (#114).
 - `bake/src/hud/art/filter.rs` 126 — bounded cubic reconstruction of selected small UI sheets with alpha-aware filtering (#114).
@@ -822,7 +825,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `input/src/flight.rs` 97 — Classic and RC Mode 2 controller axes · `FlightControls`, `flyer_sticks`; remaps the sampled sticks before the keyboard and mouse merge.
 - `audio/src/lib.rs` 486 — kira playback through the master limiter; a looping voice with settable gain, rate and pan; a one-shot that can be cut (card UCRY); the game bus the pause menu pauses (menu clicks play on `Bus::Menu`) · `Audio`, `Voice`, `Shot`, `Bus`, `Audio::set_game_paused`, `Audio::clear_game_bus`, `Audio::play_oneshot_on`, `PAUSE_FADE_SECS`
 - `audio/src/limiter.rs` 170 — master lookahead limiter · `Limiter`; stereo linking, full-scale behavior and PROVISIONAL timing constants in the module header/API docs (MIXH).
-- `audio/src/stream.rs` 520 — streamed SPU2 ADPCM music over `pak::open` and kira · `StreamTake`, `TakeReader`, `MusicVoice`, `Audio::play_stream`; stereo block layout in the module header; baked body paths: `manifest::music_body`.
+- `audio/src/stream.rs` 698 — retail ADPCM and restored FLAC over the same streaming controls.
 - `net/src/lib.rs` 179 — crate root and rules (`analysis/plan/LAN_MULTIPLAYER.md`); time and timeouts · `Micros`, `Clock`, `RealClock`, `SharedClock`, `TICK_HZ`, `HEARTBEAT`, `TROUBLE_AFTER`, `DROP_AFTER`, `DROP_AFTER_LOADING`, `BARRIER_TIMEOUT`, `RESERVE_FOR`, `fresh_u64`, `fresh_conn_id`
 - `net/src/wire.rs` 261 — range-checked byte codec: LE integers, varints, zigzag, length-prefixed bytes · `Writer`, `Reader`, `WireError`
 - `net/src/packet.rs` 513 — datagram header (`OBF1`, protocol, connection id, seq, ack + 32 ack bits), chunk framing, the inputs and bundles stream bodies, the host status (depth, starvations, slack, the last closed tick's consumed input), drop counters · `Header`, `Chunk`, `PacketWriter`, `parse_header`, `parse_chunks`, `encode_inputs` (each input's view tick after its pad), `ViewedPad`, `encode_bundles`, `DropCounts`, `MAX_DATAGRAM` (1200), `PROTOCOL` (6: a class screen's pick on the pad; 7: hash reports and desync notices name their round; changelog at the constant), `DEFAULT_PORT` (37450)

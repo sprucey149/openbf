@@ -21,6 +21,9 @@ recompiles and re-packs):
      and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
      inside itself first, then for openbf.pak beside it; the two must stay together.
 
+The bake restores retail audio locally by default. --retail-audio keeps the
+retail audio encode and original music streams.
+
 A readable source summary and <output>.sources.json list inputs read this run,
 unused optional inputs and stored map-local texture provenance. Cached data is
 labelled separately; unsupported inputs are never claimed as consumed.
@@ -226,7 +229,8 @@ def need(tool, why):
 
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
 BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
-               "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "engine/crates/bake/src/effect_names.txt", "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
+               "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "scripts/restore_audio.py", "engine/crates/audio/src",
+               "engine/crates/bake/src/effect_names.txt", "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
 MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py",
                   "scripts/gameplay_missions.py", "engine/crates/manifest/data/gameplay/corrections-v1")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
@@ -299,19 +303,53 @@ def missing_shadows():
     return []
 
 
+def restored_music_matches(path, rate, frames, size):
+    """Check the FLAC STREAMINFO written by the audio bake."""
+    try:
+        with path.open("rb") as file:
+            header = file.read(43)
+            if os.fstat(file.fileno()).st_size != size:
+                return False
+    except FileNotFoundError:
+        return False
+    if len(header) != 43 or header[:4] != b"fLaC" or header[4] & 0x7f or header[5:8] != b"\0\0\x22":
+        return False
+    layout = int.from_bytes(header[18:26], "big")
+    return (layout >> 44, (layout >> 41) & 7, (layout >> 36) & 31, layout & ((1 << 36) - 1)) == (
+        rate, 1, 15, frames
+    )
+
+
 def missing_music():
-    """Music bodies a stream index names but the bake has not written (an assets_baked from before card PACK)."""
+    """Referenced retail bodies and restored takes missing from the cached bake."""
     out = []
-    for idx in glob.glob(os.path.join(BAKED, "*/sounds/streams/streams.ron")) + \
-            glob.glob(os.path.join(BAKED, "audio/global_*/global.ron")):
-        text = open(idx, encoding="utf-8").read()
-        d = os.path.dirname(idx)
-        # source: "x.lvl", channels: N, block_size: N, data_offset: N, bytes: N, baked: false
-        for m in re.finditer(r'source:\s*"([^"]+)",[^)]*?data_offset:\s*(\d+),\s*bytes:\s*\d+,\s*baked:\s*false', text):
-            stem = m.group(1).rsplit(".", 1)[0].lower()
-            body = os.path.join(d, "music", f"{stem}_{int(m.group(2)):x}.bin")
-            if not os.path.isfile(body):
-                out.append(body)
+    baked = Path(BAKED)
+    indexes = list(baked.glob("*/sounds/streams/streams.ron"))
+    indexes += list(baked.glob("audio/global_*/global.ron"))
+    indexes += list(baked.glob("*/shell/sounds/streams/streams.ron"))
+    for idx in indexes:
+        text = idx.read_text(encoding="utf-8")
+        header = (r'name_hash:\s*(\d+),\s*source:\s*"([^"]+)",[^)]*?'
+                  r'data_offset:\s*(\d+),\s*bytes:\s*\d+,\s*baked:\s*false')
+        for stream in re.finditer(header, text):
+            name, source, offset = stream.groups()
+            stem = source.rsplit(".", 1)[0].lower()
+            body = idx.parent / "music" / f"{stem}_{int(offset):x}.bin"
+            if not body.is_file():
+                out.append(str(body))
+            segments = ron_array(text[stream.end():], "segments")
+            for cue in re.finditer(r'\(([^()]*)\)', segments):
+                record = cue[1]
+                size = re.search(r'\brestored_bytes:\s*(\d+)', record)
+                if not size or not int(size[1]):
+                    continue
+                ident = int(re.search(r'\bid:\s*(\d+)', record)[1])
+                start = int(re.search(r'\boffset:\s*(\d+)', record)[1])
+                take = idx.parent / "music_restored" / body.stem / f"{int(name):08x}_{ident:08x}_{start:x}.flac"
+                rate = int(re.search(r'\bfrequency:\s*(\d+)', record)[1])
+                frames = int(re.search(r'\bframes:\s*(\d+)', record)[1])
+                if not restored_music_matches(take, rate, frames, int(size[1])):
+                    out.append(str(take))
     return out
 
 
@@ -551,6 +589,7 @@ def main():
     ap.add_argument("--game-bin", default=None, help="use an already compiled game binary (skips step 1 cargo build)")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
+    ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
     a = ap.parse_args()
     out = os.path.abspath(a.out)
     if out.startswith(os.path.join(ENGINE, "")) or os.path.isdir(out):
@@ -585,6 +624,7 @@ def main():
     if menu_font_core:
         bake_inputs["menu_font_core"] = menu_font
     bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
+    bake_inputs["audio_restoration"] = not a.retail_audio
     for g, image, _ in input_scan.discs_to_extract(plan):
         bake_inputs["xbox_" + g] = image
     if plan["dlc"]["used"]:
@@ -673,13 +713,15 @@ def main():
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE"):
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE", "OPENBF_AUDIO_RESTORE_SCRIPT"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
     if menu_font_core:
         bake_env["OPENBF_MENU_FONT_CORE"] = menu_font_core.replace("\\", "/")
     bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again
     bake_env["OPENBF_PYTHON"] = sys.executable.replace("\\", "/")  # `python3` is not there on every Windows install
+    if not a.retail_audio:
+        bake_env["OPENBF_AUDIO_RESTORE_SCRIPT"] = str(Path(ROOT, "scripts", "restore_audio.py")).replace("\\", "/")
     bake_env["OPENBF_CONSOLE_LUA_ROOT"] = lua_root.replace("\\", "/")
     baked = os.path.isfile(os.path.join(BAKED, "classes", "bf1_all.ron"))
     why = stale(BAKE_STAMP, BAKE_INPUTS, bake_inputs) if baked else None
@@ -687,34 +729,46 @@ def main():
         if why and not a.rebake:
             print(f"   baking again: the bake in {BAKED} was {why}")
         need("ffmpeg", "the bake encodes speech and effects to OGG")
+        if not a.retail_audio:
+            print("   restoring audio locally during the bake")
+        Path(BAKE_STAMP).unlink(missing_ok=True)
         run([bash, os.path.join(ROOT, "scripts", "rebake.sh")], **({"env": bake_env} if bake_env else {}))
         rebaked = "all"
         extracted_used.update(("bf1", "bf2"))
-        os.makedirs(EXTRACTED, exist_ok=True)
-        with open(BAKE_STAMP, "w") as fh:
-            fh.write(inputs_hash(BAKE_INPUTS, bake_inputs) + "\n")
     else:
         print(f"   already baked ({BAKED}); --rebake bakes again")
-        n = len(missing_music())
-        if n:
-            print(f"   {n} music streams not copied out yet: rebaking the sound groups")
+        missing = missing_music()
+        if n := len(missing):
+            print(f"   {n} music files missing or incomplete: rebaking the sound groups")
             need("ffmpeg", "the bake encodes speech and effects to OGG")
-            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "sounds", "global-sound"],
+            Path(BAKE_STAMP).unlink(missing_ok=True)
+            groups = ["sounds", "global-sound"]
+            if any("shell" in Path(path).parts for path in missing):
+                groups.append("common")
+            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), *groups],
                 **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
-            rebaked = ["sounds", "global-sound"]
+            rebaked = groups
         if missing_shadows():
             print("   no BF1 vehicle shadows in this bake: rebaking the sides")
+            Path(BAKE_STAMP).unlink(missing_ok=True)
             need("ffmpeg", "the bake encodes speech and effects to OGG")
             run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "side"], **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
             rebaked = (rebaked or []) + ["side"]
     left = missing_music()
     if left:
-        sys.exit(f"pack: {len(left)} music streams still missing after the bake, e.g. {left[0]}")
+        sys.exit(f"pack: {len(left)} music files missing or incomplete after the bake, e.g. {left[0]}")
     left = missing_shadows()
     if left:
         sys.exit(f"pack: the BF1 sides were baked without vehicle shadows, e.g. {left[0]}")
+
+    if rebaked is not None:
+        os.makedirs(EXTRACTED, exist_ok=True)
+        stamp = Path(BAKE_STAMP)
+        next_stamp = stamp.with_suffix(".new")
+        next_stamp.write_text(inputs_hash(BAKE_INPUTS, bake_inputs) + "\n", encoding="utf-8")
+        next_stamp.replace(stamp)
 
     warnings = check_foliage(bake, plan)
 
@@ -749,6 +803,7 @@ def main():
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
                            pc_roots=pc_roots, warnings=warnings)
+    report["audio_restoration"] = not a.retail_audio
     if menu_font_core:
         report["inputs"].append(dict(path=menu_font_core, label="optional PS2 BF2 menu font source",
             present=True, status="used" if rebaked == "all" else "cached",

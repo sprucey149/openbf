@@ -243,6 +243,13 @@ if [ -L "$OUT" ] && { want side || want dlc; } && { [ -n "$OPENBF_DLC_DIR" ] || 
   echo "rebake: $OUT is a link to other assets; set REBAKE_OUT to a folder of your own" >&2; exit 2
 fi
 
+# A direct audio rebake can replace only some restored outputs. Let the next
+# pack resynchronize all groups before it records a consistent output.
+if [ "$OUT" = "$ROOT/engine/assets_baked" ] && [ "${OPENBF_INPUTS_CHOSEN:-0}" != 1 ] &&
+   { want sounds || want global-sound || want common || want side || want dlc || want beep; }; then
+  "$PYTHON" -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)' "$ROOT/extracted/bake_inputs.sha256"
+fi
+
 # Every other ground map, baked to assets_baked/<game>_<lvl> (the LVL name,
 # not the world name inside it: BF1 and BF2 both ship "hoth", "yavin1", ...).
 # Space (SPA*) follows below; OPENBF_BAKE_SPACE=0 leaves it out.
@@ -635,8 +642,8 @@ fi
 if want global-sound; then
   # The sound BOTH games keep outside the per-map banks (the maintainer's unified sound
   # plan, PLAN Log 2026-09-08 (b); analysis/re-sound-global.md §5):
-  #  (i)  BF2 SOUND/GLOBAL.LVL — 29 mono VO streams. Its two stereo MUSIC
-  #       streams (630 MB) are indexed, never decoded: music stays streamed.
+  #  (i)  BF2 SOUND/GLOBAL.LVL — 29 mono VO streams. Music stays streamed.
+  #       The restored bake adds lossless cues at the indexed sample rates.
   #  (ii) BF1 SOUND/CW.LVL + GCW.LVL — the four VO streams, including the
   #       nine-command tactical chatter the per-map banks never carried.
   # Only segments a shipped `snd_` script names are encoded, so every per-map
