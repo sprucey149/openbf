@@ -6,8 +6,7 @@ use game::classdb::ClassDb;
 use game::vehicle_class::FlyerClass;
 use glam::Vec3;
 
-#[path = "../../examples/support/walker_battle.rs"]
-mod battle;
+use super::walker_battle as battle;
 
 fn flight(params: &FlyerParams, controller: PadState) -> Vehicle {
     let mut walk = game::walk::WalkSim::new(42, Vec3::ZERO, None);

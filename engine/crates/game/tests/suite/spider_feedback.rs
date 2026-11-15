@@ -1,16 +1,8 @@
 //! Spider Walker barrel convergence and BF2 destruction regressions.
 
-use super::seat_camera::{map, missions_of};
+use super::seat_camera::{map, missions_of, terrain_hit};
 use core::sim::{buttons, Event, PadState};
 use core::vehicle::VehicleSpec;
-use glam::Vec3;
-
-fn terrain_hit(sim: &core::sim::Sim, from: Vec3, dir: Vec3) -> Option<Vec3> {
-    let hf = sim.heightfield.as_ref()?;
-    (1..6000)
-        .map(|k| from + dir * (k as f32 * 0.05))
-        .find(|p| p.y < hf.height_at(p.x, p.z))
-}
 
 /// The Spider's lower cannon and upper beam have one barrel each, six
 /// metres apart. Each must meet the same aim point, as the PS2 does.

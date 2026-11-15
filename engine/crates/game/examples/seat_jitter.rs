@@ -17,31 +17,15 @@ use render::Renderer;
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mission = args.next().unwrap_or_else(|| "bf2_kas2_con_cw".into());
-    let map = mission.splitn(3, '_').take(2).collect::<Vec<_>>().join("_");
     let class = args
         .next()
         .unwrap_or_else(|| "rep_hover_fightertank".into());
     let seat: u8 = args.next().map_or(Ok(1), |s| s.parse())?;
     let hz: f32 = args.next().map_or(Ok(144.0), |s| s.parse())?;
     let root = game::assets::baked_root();
-    let (mut walk, scene) = walker_battle::battle_on(&root, &map, &mission)?;
-    let index = walk
-        .vehicle_classes
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(&class))
-        .with_context(|| format!("{class} not on {map}"))?;
-    let slot = walk
-        .sim
-        .vehicles
-        .iter()
-        .position(|v| v.alive && v.class as usize == index)
-        .context("no live vehicle of the class")?;
-    let h = core::vehicle::VehicleHandle {
-        index: slot as u32,
-        gen: walk.sim.vehicles[slot].gen,
-    };
+    let (mut walk, scene, h) = walker_battle::board_vehicle(&root, &mission, &class, seat)?;
+    let slot = h.index as usize;
     let player = walk.player;
-    anyhow::ensure!(walk.sim.seat_unit(player, h, seat), "cannot board");
     for _ in 0..30 {
         walk.step_tick(&[PadState::default()]);
     }

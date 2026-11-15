@@ -7,17 +7,10 @@
 //! gun's eye, off the drawn camera, and the guns met the ground where that
 //! ray did, off the reticle and short of it.
 
-use super::seat_camera::{map, missions_of};
+use super::seat_camera::{map, missions_of, terrain_hit};
 use core::sim::{buttons, Event, PadState};
 use core::vehicle::VehicleSpec;
 use glam::Vec3;
-
-fn terrain_hit(sim: &core::sim::Sim, from: Vec3, dir: Vec3) -> Option<Vec3> {
-    let hf = sim.heightfield.as_ref()?;
-    (1..6000)
-        .map(|k| from + dir * (k as f32 * 0.05))
-        .find(|p| p.y < hf.height_at(p.x, p.z))
-}
 
 /// The pilot's drawn camera stands on his aim ray, and his front guns'
 /// bolts meet where that ray meets the ground. Mutation: the walker back on

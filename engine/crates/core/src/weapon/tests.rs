@@ -1158,7 +1158,11 @@ fn a_chaingun_winds_up_before_its_first_round_and_down_after_its_last() {
     assert!((0.35..0.35 + 2.0 * DT30).contains(&first), "{fired:?}");
     assert!(fired.len() >= 8, "{fired:?}");
     assert!(spin_ticks(&mut w, &c, 1, false).is_empty());
-    assert!((w.spin - (1.25 - DT30)).abs() < 1e-4 || (w.spin - 1.25).abs() < 1e-4, "{}", w.spin);
+    assert!(
+        (w.spin - (1.25 - DT30)).abs() < 1e-4 || (w.spin - 1.25).abs() < 1e-4,
+        "{}",
+        w.spin
+    );
     let again = spin_ticks(&mut w, &c, 90, true);
     let first = again[0] as f32 * DT30;
     assert!(first >= 1.25 + 0.35 - 2.0 * DT30, "{again:?}");
@@ -1203,7 +1207,12 @@ fn a_blocked_barrel_passes_its_turn_without_firing() {
         }
     }
     assert!(w.shots_fired >= 8, "{}", w.shots_fired);
-    assert!(w.passed + 1 >= w.shots_fired && w.passed <= w.shots_fired, "{} {}", w.passed, w.shots_fired);
+    assert!(
+        w.passed + 1 >= w.shots_fired && w.passed <= w.shots_fired,
+        "{} {}",
+        w.passed,
+        w.shots_fired
+    );
     assert!(fired_on.iter().all(|t| t % 2 == 1), "{fired_on:?}");
     assert_eq!(w.last_turn % 2, 1);
 }

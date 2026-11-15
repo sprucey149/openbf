@@ -127,7 +127,7 @@ pub fn bf1_elf_rule_enabled() -> bool {
 ///   gunship canopy (0x05, sharing its sheet with opaque trim) exposed the
 ///   histogram's false opaque verdict. The ELF Normal draw composites it
 ///   (`analysis/re-material-flags.md` §2), confirmed in the user's slot 6/7.
-/// Every 0x02 word retains the existing verdict (leaves/bamboo 0x07 MASK).
+///   Every 0x02 word retains the existing verdict (leaves/bamboo 0x07 MASK).
 pub fn bf1_elf_verdict(flags: u32) -> Option<AlphaMode> {
     match Bf1Class::of(flags) {
         Bf1Class::Normal if flags & crate::detail::ALPHA_IS_MEANINGFUL == 0 => {

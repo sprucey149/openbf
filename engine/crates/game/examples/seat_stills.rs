@@ -29,34 +29,16 @@ fn main() -> Result<()> {
             .context("seat_stills <out_dir> [mission] [class] [seat]")?,
     );
     let mission = args.next().unwrap_or_else(|| "bf2_kas2_con_cw".into());
-    let words = if mission.starts_with("bf") { 2 } else { 1 };
-    let map = mission
-        .splitn(3, '_')
-        .take(words)
-        .collect::<Vec<_>>()
-        .join("_");
+    let map = walker_battle::map_of(&mission);
     let class = args
         .next()
         .unwrap_or_else(|| "rep_hover_fightertank".into());
     let seat: u8 = args.next().map_or(Ok(0), |s| s.parse())?;
     std::fs::create_dir_all(&out)?;
     let root = game::assets::baked_root();
-    let (mut walk, scene) = walker_battle::battle_on(&root, &map, &mission)?;
-    let index = walk
-        .vehicle_classes
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(&class))
-        .with_context(|| format!("{class} not on {map}: {:?}", walk.vehicle_classes))?;
-    let slot = walk
-        .sim
-        .vehicles
-        .iter()
-        .position(|v| v.alive && v.class as usize == index)
-        .context("no live vehicle of the class")?;
-    let h = core::vehicle::VehicleHandle {
-        index: slot as u32,
-        gen: walk.sim.vehicles[slot].gen,
-    };
+    let (mut walk, scene, h) = walker_battle::board_vehicle(&root, &mission, &class, seat)?;
+    let slot = h.index as usize;
+    let index = walk.sim.vehicles[slot].class as usize;
     let player = walk.player;
     // Optional airborne fixture for inspecting flyer gunners without a pilot.
     if std::env::var_os("SEAT_STILLS_FLYING").is_some() {
@@ -76,7 +58,6 @@ fn main() -> Result<()> {
             }
         }
     }
-    anyhow::ensure!(walk.sim.seat_unit(player, h, seat), "cannot board");
     for _ in 0..30 {
         walk.step_tick(&[PadState::default()]);
     }

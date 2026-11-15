@@ -501,7 +501,8 @@ fn render_options_switch_live_without_reuploading_the_scene() {
             .unwrap();
         }
         let mut overlay = ui::overlay::EguiOverlay::headless(r.device(), render::HEADLESS_FORMAT);
-        for (w, h) in [(640, 480)] {
+        let (w, h) = (640, 480);
+        {
             let mut model = ui::menu::MenuModel {
                 page: Some(ui::menu::PausePage::Settings(
                     ui::menu::SettingsPage::Graphics,

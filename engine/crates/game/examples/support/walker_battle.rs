@@ -92,3 +92,40 @@ pub fn battle_on(root: &Path, map: &str, mission: &str) -> Result<(WalkSim, game
     anyhow::ensure!(walk.sim.spawn_stage[0] == SpawnStage::Accepted, "no spawn");
     Ok((walk, scene))
 }
+
+/// Derives the baked map directory name from a mission script name (`bf1_rhn1_con_cw` -> `bf1_rhn1`).
+#[allow(dead_code)]
+pub fn map_of(mission: &str) -> String {
+    let words = if mission.starts_with("bf") { 2 } else { 1 };
+    mission.split('_').take(words).collect::<Vec<_>>().join("_")
+}
+
+/// Starts a battle on `mission`, finds the first live `class` vehicle, and seats the player in `seat`.
+#[allow(dead_code)]
+pub fn board_vehicle(
+    root: &Path,
+    mission: &str,
+    class: &str,
+    seat: u8,
+) -> Result<(WalkSim, game::assets::Scene, core::vehicle::VehicleHandle)> {
+    let map = map_of(mission);
+    let (mut walk, scene) = battle_on(root, &map, mission)?;
+    let index = walk
+        .vehicle_classes
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(class))
+        .with_context(|| format!("{class} not on {map}"))?;
+    let slot = walk
+        .sim
+        .vehicles
+        .iter()
+        .position(|v| v.alive && v.class as usize == index)
+        .context("no live vehicle")?;
+    let handle = core::vehicle::VehicleHandle {
+        index: slot as u32,
+        gen: walk.sim.vehicles[slot].gen,
+    };
+    let player = walk.player;
+    anyhow::ensure!(walk.sim.seat_unit(player, handle, seat), "cannot board");
+    Ok((walk, scene, handle))
+}

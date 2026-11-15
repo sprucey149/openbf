@@ -1,5 +1,6 @@
 use super::{Listener, LoopRequest, LoopSource, SoundLib};
 use crate::walker_shots::Ramp;
+use core::fmath::FloatExt;
 impl SoundLib {
     /// The seated walker and flyer guns' fire loops and spin motors
     /// ([`crate::walker_shots::voices`]), each fading at its own rate.
@@ -21,13 +22,13 @@ impl SoundLib {
             let gain = match (v.ramp, was) {
                 (Ramp::Rise(t), g) => {
                     if t > 0.0 {
-                        (g.unwrap_or(0.0) + dt / t).min(1.0)
+                        (g.unwrap_or(0.0) + dt / t).fmin(1.0)
                     } else {
                         1.0
                     }
                 }
                 (Ramp::Hold, Some(g)) => g,
-                (Ramp::Fall(t), Some(g)) if t > 0.0 => (g - dt / t).max(0.0),
+                (Ramp::Fall(t), Some(g)) if t > 0.0 => (g - dt / t).fmax(0.0),
                 _ => 0.0,
             };
             if gain <= 0.0 && !matches!(v.ramp, Ramp::Rise(_)) {

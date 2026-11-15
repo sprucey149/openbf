@@ -104,15 +104,16 @@ mod tests {
     use core::weapon::OverheatSound;
 
     fn aat_cannon() -> WeaponClass {
-        let mut wc = WeaponClass::default();
-        wc.heat_per_shot = 0.15;
-        wc.heat_recover_rate = 0.25;
-        wc.heat_threshold = 0.2;
-        wc.overheat_sound = Some(OverheatSound {
-            name: "com_weap_energy_depleted".into(),
-            pitch: 0.5,
-        });
-        wc
+        WeaponClass {
+            heat_per_shot: 0.15,
+            heat_recover_rate: 0.25,
+            heat_threshold: 0.2,
+            overheat_sound: Some(OverheatSound {
+                name: "com_weap_energy_depleted".into(),
+                pitch: 0.5,
+            }),
+            ..WeaponClass::default()
+        }
     }
 
     #[test]

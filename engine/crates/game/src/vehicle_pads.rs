@@ -774,20 +774,31 @@ pub fn install_for_mission(
                 .filter(|l| !l.is_empty())
         })
         .collect();
+    let flyer_chase = |f: crate::walk::FlyerSection| core::vehicle::hover::ChaseSection {
+        center: f.center,
+        offset: f.offset,
+        tilt: f.tilt,
+        mount: None,
+    };
+    let walker_chase = |s: &vehicle_class::SeatSpec, mount| {
+        let c = crate::walk::walker_section(s);
+        core::vehicle::hover::ChaseSection {
+            center: c.0,
+            offset: c.1,
+            tilt: c.2.to_radians(),
+            mount,
+        }
+    };
     sim.hover_chase = sim
         .hover_params
         .iter()
         .zip(&b.seats)
         .map(|(h, ring)| {
             h.as_ref()?;
-            let seat = ring.first();
-            let s = crate::walk::FlyerSection::hover(seat, sim.ground_rules);
-            Some(core::vehicle::hover::ChaseSection {
-                center: s.center,
-                offset: s.offset,
-                tilt: s.tilt,
-                mount: None,
-            })
+            Some(flyer_chase(crate::walk::FlyerSection::hover(
+                ring.first(),
+                sim.ground_rules,
+            )))
         })
         .collect();
     sim.walker_chase = sim
@@ -796,14 +807,7 @@ pub fn install_for_mission(
         .zip(&b.seats)
         .map(|(w, ring)| {
             w.as_ref()?;
-            let s = ring.first()?;
-            let c = crate::walk::walker_section(s);
-            Some(core::vehicle::hover::ChaseSection {
-                center: c.0,
-                offset: c.1,
-                tilt: c.2.to_radians(),
-                mount: None,
-            })
+            Some(walker_chase(ring.first()?, None))
         })
         .collect();
     sim.seat_chase = b
@@ -824,20 +828,9 @@ pub fn install_for_mission(
                         } else {
                             crate::walk::FlyerSection::gunner(Some(s))
                         };
-                        core::vehicle::hover::ChaseSection {
-                            center: f.center,
-                            offset: f.offset,
-                            tilt: f.tilt,
-                            mount: None,
-                        }
+                        flyer_chase(f)
                     } else {
-                        let c = crate::walk::walker_section(s);
-                        core::vehicle::hover::ChaseSection {
-                            center: c.0,
-                            offset: c.1,
-                            tilt: c.2.to_radians(),
-                            mount: s.mount_pos.map(Vec3::from),
-                        }
+                        walker_chase(s, s.mount_pos.map(Vec3::from))
                     })
                 })
                 .collect()
@@ -953,9 +946,7 @@ pub fn install_for_mission(
         &sides,
         &b.classes,
         |c| vehicle_class::is_turret(&db, c),
-        |c| crate::assets::hit_locations(&db, c),
-        |c| crate::assets::added_weak_parts(&db, c),
-        |c, cg, collision| crate::assets::spring_hull_parts(&db, c, cg, collision),
+        Some(&db),
     );
     sim.sync_hulls();
     sim.missile_target_points = b
@@ -1348,9 +1339,7 @@ pub fn hull_parts(
         &side_vehicle_files(map_dir, game),
         classes,
         turret,
-        |_| Vec::new(),
-        |_| Vec::new(),
-        |_, _, _| Vec::new(),
+        None,
     )
 }
 
@@ -1360,13 +1349,7 @@ fn hull_parts_from(
     sides: &[(std::path::PathBuf, manifest::VehicleManifest)],
     classes: &[String],
     turret: impl Fn(&str) -> bool,
-    hit_locations: impl Fn(&str) -> Vec<(String, f32)>,
-    added: impl Fn(&str) -> Vec<core::collision::HullPart>,
-    springs: impl Fn(
-        &str,
-        &crate::assets::CollisionGeom,
-        &[(String, String)],
-    ) -> Vec<core::collision::HullPart>,
+    db: Option<&ClassDb>,
 ) -> Vec<Option<std::sync::Arc<[core::collision::HullPart]>>> {
     classes
         .iter()
@@ -1376,18 +1359,21 @@ fn hull_parts_from(
             }
             let (dir, k, entry) = class_collision(m, map_dir, sides, c)?;
             let cg = crate::assets::load_collision_geom(dir, &entry).ok()?;
+            let hits = db.map_or_else(Vec::new, |d| crate::assets::hit_locations(d, c));
             let mut parts = if m.source_game.eq_ignore_ascii_case("bf2")
                 && vehicle_kind(&k.base) == Some(VehicleKind::Flyer)
             {
-                crate::assets::bf2_flyer_hull_parts(&cg, &k.collision, &hit_locations(c))
+                crate::assets::bf2_flyer_hull_parts(&cg, &k.collision, &hits)
             } else {
-                crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c))
+                crate::assets::hull_parts(&cg, &k.collision, &hits)
             };
             // After the model's own, so their order (and indices) stay.
-            if !parts.is_empty() {
-                parts.extend(added(c));
+            if let Some(d) = db {
+                if !parts.is_empty() {
+                    parts.extend(crate::assets::added_weak_parts(d, c));
+                }
+                parts.extend(crate::assets::spring_hull_parts(d, c, &cg, &k.collision));
             }
-            parts.extend(springs(c, &cg, &k.collision));
             (!parts.is_empty()).then(|| parts.into())
         })
         .collect()
@@ -1548,7 +1534,12 @@ fn fire_ring(
     node: impl Fn(&str) -> Option<Vec3>,
 ) -> (Vec<Vec3>, Vec<[[f32; 2]; 2]>, Vec<Vec3>) {
     let d = std::f32::consts::PI / 180.0;
-    let lim = |l: [f32; 2]| [l[0].min(l[1]) * d, l[0].max(l[1]) * d];
+    let lim = |l: [f32; 2]| {
+        [
+            core::fmath::FloatExt::fmin(l[0], l[1]) * d,
+            core::fmath::FloatExt::fmax(l[0], l[1]) * d,
+        ]
+    };
     let add = |a: [[f32; 2]; 2], b: [[f32; 2]; 2]| {
         [
             [a[0][0] + b[0][0], a[0][1] + b[0][1]],

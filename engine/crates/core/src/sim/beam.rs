@@ -289,8 +289,7 @@ impl Sim {
                 self.unit(owner).map(|_| owner.index as usize),
                 st.look,
                 st.zoom.is_some(),
-                eye,
-                view,
+                (eye, view),
             );
             let riders: Vec<_> = v.seats.iter().filter_map(|s| s.occupant).collect();
             let target = self.aim_point(eye, view, &riders, s.mount.vehicle);

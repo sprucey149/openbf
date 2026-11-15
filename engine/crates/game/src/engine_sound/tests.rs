@@ -936,7 +936,10 @@ fn a_recordless_walker_cries_at_boarding_and_after_its_run_down() {
         }
     }
     assert_eq!(cries.len(), 1, "{cries:?}");
-    assert_eq!(cries[0].1, (JetShotKind::TurnOff, "tauntaunstop".to_owned()));
+    assert_eq!(
+        cries[0].1,
+        (JetShotKind::TurnOff, "tauntaunstop".to_owned())
+    );
     let at = cries[0].0 as f32 * core::TICK_DT;
     assert!((at - 3.0).abs() <= 2.0 * core::TICK_DT, "{at}");
 }
@@ -946,8 +949,20 @@ fn a_recordless_walker_cries_at_boarding_and_after_its_run_down() {
 fn baked_animal_mounts_name_their_cries() {
     let classes = crate::assets::baked_root().join("classes");
     for (game, side, class, on, off) in [
-        ("bf2", "all", "all_walk_tauntaun", "tauntaunstart", "tauntaunstop"),
-        ("bf1", "all", "all_walk_tauntaun", "tauntaunstart", "tauntaunstop"),
+        (
+            "bf2",
+            "all",
+            "all_walk_tauntaun",
+            "tauntaunstart",
+            "tauntaunstop",
+        ),
+        (
+            "bf1",
+            "all",
+            "all_walk_tauntaun",
+            "tauntaunstart",
+            "tauntaunstop",
+        ),
     ] {
         let Ok(db) = crate::roster::load_classdb(&classes, game, &[side]) else {
             eprintln!("SKIP: {game} classes not baked");

@@ -631,7 +631,7 @@ impl WalkSim {
             )
         };
         let raw = if self.vehicles_pull(kind) {
-            raw.min(self.vehicle_pull(target, desired, own_vehicle))
+            raw.fmin(self.vehicle_pull(target, desired, own_vehicle))
         } else {
             raw
         };
@@ -723,7 +723,7 @@ impl WalkSim {
                 )
             })
             .map(|h| ((h.t - r) / len).clamp(0.0, 1.0))
-            .fold(1.0, f32::min)
+            .fold(1.0, core::fmath::FloatExt::fmin)
     }
 
     /// The chase camera's vertical FOV: the PS2's, times the player's option.

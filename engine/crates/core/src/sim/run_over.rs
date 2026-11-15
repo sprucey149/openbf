@@ -16,11 +16,10 @@
 //! `FUN_00202f38` (B1:114213-114297, vehicle layer 4, hover factor
 //! `0x222c80` = 1.0) has no such exception.
 
-use super::{DeathCause, Sim};
+use super::Sim;
 use crate::collision::Capsule;
 use crate::soldier::GroundRules;
 use crate::vehicle::VehicleKind;
-use crate::weapon::DamageDesc;
 use glam::Vec3;
 
 impl Sim {
@@ -37,7 +36,9 @@ impl Sim {
             if !u.alive || deck {
                 continue;
             }
-            let Some(v) = self.vehicle(vh).filter(|v| v.alive && v.kind == VehicleKind::Hover)
+            let Some(v) = self
+                .vehicle(vh)
+                .filter(|v| v.alive && v.kind == VehicleKind::Hover)
             else {
                 continue;
             };
@@ -52,13 +53,11 @@ impl Sim {
                 .and_then(|d| self.unit(d))
                 .is_some_and(|d| d.is_player);
             let victim = self.handle(i);
-            let desc = DamageDesc {
-                damage: amount,
-                scales: [1.0; 7],
-                shield_scale: 1.0,
-            };
+            let desc = super::landing::env_damage_desc(amount);
             let damage = match team {
-                Some(team) => self.shot_strikes_unit(team, driver_is_player, victim, &desc, 1.0, false),
+                Some(team) => {
+                    self.shot_strikes_unit(team, driver_is_player, victim, &desc, 1.0, false)
+                }
                 None => self
                     .unit_mut(victim)
                     .map(|v| v.health.take_damage(&desc, 1.0, false, 1.0)),
@@ -71,13 +70,7 @@ impl Sim {
                     self.finish_unit_damage(victim, Some(driver), damage, 0.0, -normal);
                 }
                 None => {
-                    let u = &mut self.units[i];
-                    if damage > 0.0 {
-                        u.cloak.strength = 0.0;
-                    }
-                    if !u.health.alive() {
-                        self.unit_killed_with_cause(victim, None, DeathCause::Fall);
-                    }
+                    self.finish_uncredited_collision(i, victim, damage);
                 }
             }
         }

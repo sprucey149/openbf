@@ -22,30 +22,13 @@ fn main() -> Result<()> {
             .context("aat_flicker <out_dir> [mission] [class] [seat] [frames]")?,
     );
     let mission = args.next().unwrap_or_else(|| "bf1_rhn1_con_cw".into());
-    let map = mission.splitn(3, '_').take(2).collect::<Vec<_>>().join("_");
     let class = args.next().unwrap_or_else(|| "cis_hover_aat".into());
     let seat: u8 = args.next().map_or(Ok(0), |s| s.parse())?;
     let frames: usize = args.next().map_or(Ok(8), |s| s.parse())?;
     std::fs::create_dir_all(&out)?;
     let root = game::assets::baked_root();
-    let (mut walk, scene) = walker_battle::battle_on(&root, &map, &mission)?;
-    let index = walk
-        .vehicle_classes
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(&class))
-        .context("class")?;
-    let slot = walk
-        .sim
-        .vehicles
-        .iter()
-        .position(|v| v.alive && v.class as usize == index)
-        .context("no live vehicle")?;
-    let h = core::vehicle::VehicleHandle {
-        index: slot as u32,
-        gen: walk.sim.vehicles[slot].gen,
-    };
-    let player = walk.player;
-    anyhow::ensure!(walk.sim.seat_unit(player, h, seat), "cannot board");
+    let (mut walk, scene, h) = walker_battle::board_vehicle(&root, &mission, &class, seat)?;
+    let slot = h.index as usize;
     for _ in 0..60 {
         walk.step_tick(&[PadState::default()]);
     }

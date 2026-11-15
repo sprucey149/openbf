@@ -485,17 +485,12 @@ impl GunSetup {
         let pitch = fmath::asin((v.y / h.fmax(f32::MIN_POSITIVE)).clamp(-1.0, 1.0))
             - fmath::atan2(off.y, z);
         let (s, c) = fmath::sin_cos(pitch);
-        let mut yaw = fmath::atan2(v.x, v.z) - fmath::atan2(off.x, z * c - off.y * s);
+        let yaw = fmath::atan2(v.x, v.z) - fmath::atan2(off.x, z * c - off.y * s);
         let [ly, lp] = *w.fire_limits.get(p)?;
-        if ly[1] > std::f32::consts::PI && yaw < ly[0] {
-            yaw += std::f32::consts::TAU;
-        } else if ly[0] < -std::f32::consts::PI && yaw > ly[1] {
-            yaw -= std::f32::consts::TAU;
-        }
-        let inside = |l: [f32; 2], a: f32| l[0] == l[1] || (l[0] <= a && a <= l[1]);
+        let yaw = wrap_angle(yaw, ly);
         Some((
             (yaw.clamp(ly[0], ly[1]), pitch.clamp(lp[0], lp[1])),
-            z2 >= 0.0 && inside(ly, yaw) && inside(lp, pitch),
+            z2 >= 0.0 && within(ly, yaw) && within(lp, pitch),
         ))
     }
     /// The yaw the barrel has in the bind pose — the fire point's heading
@@ -634,6 +629,22 @@ pub fn dir(yaw: f32, pitch: f32) -> Vec3 {
 pub fn angles(d: Vec3) -> (f32, f32) {
     let h = (d.x * d.x + d.z * d.z).sqrt();
     (fmath::atan2(d.x, d.z), fmath::atan2(d.y, h))
+}
+
+/// Turn `angle` by ±τ to bring it into the arc `[limits[0], limits[1]]` when
+/// that arc extends past ±π.
+pub fn wrap_angle(mut angle: f32, limits: [f32; 2]) -> f32 {
+    if limits[1] > std::f32::consts::PI && angle < limits[0] {
+        angle += std::f32::consts::TAU;
+    } else if limits[0] < -std::f32::consts::PI && angle > limits[1] {
+        angle -= std::f32::consts::TAU;
+    }
+    angle
+}
+
+/// Whether `angle` lies within `limits` (an equal-limit axis never fails).
+pub fn within(limits: [f32; 2], angle: f32) -> bool {
+    limits[0] == limits[1] || (limits[0] <= angle && angle <= limits[1])
 }
 
 /// Turn `p` (model space) about `pivot` by (yaw, pitch): pitch about the

@@ -131,7 +131,10 @@ fn atte_cycles_both_ai_held_guns_and_each_seat_fires_its_authored_weapon() {
         if seat == 2 {
             let style = game::walker_shots::style(&w, expected).unwrap();
             assert_eq!(
-                w.sim.weapon_classes[expected].secondary.as_ref().map(|s| s.period),
+                w.sim.weapon_classes[expected]
+                    .secondary
+                    .as_ref()
+                    .map(|s| s.period),
                 Some(3)
             );
             assert_eq!(

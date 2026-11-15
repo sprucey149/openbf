@@ -96,7 +96,9 @@ fn contact_world() -> (Sim, VehicleHandle, VehicleHandle) {
 fn collisions(s: &Sim, v: VehicleHandle) -> usize {
     s.events
         .iter()
-        .filter(|e| matches!(e, crate::sim::Event::VehicleCollision { vehicle, .. } if *vehicle == v))
+        .filter(
+            |e| matches!(e, crate::sim::Event::VehicleCollision { vehicle, .. } if *vehicle == v),
+        )
         .count()
 }
 
@@ -124,7 +126,11 @@ fn a_walker_closing_on_a_vehicle_plays_the_collision_sound() {
     s.vehicle_mut(b).unwrap().vel = -Vec3::Z;
     s.vehicle_mut(b).unwrap().pos = from - Vec3::Z * 3.0;
     s.ground_traffic(b.index as usize, from);
-    assert_eq!(collisions(&s, b), 0, "a hover's sound is its damage branch's");
+    assert_eq!(
+        collisions(&s, b),
+        0,
+        "a hover's sound is its damage branch's"
+    );
 }
 
 #[test]

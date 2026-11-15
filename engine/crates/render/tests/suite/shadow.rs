@@ -1,6 +1,17 @@
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, LightPath, MeshData, Renderer, ShadowMesh};
 
+fn capture_shadowed(
+    r: &mut Renderer,
+    camera: &Camera,
+    draws: &[DrawCmd],
+    triangles: &[[f32; 3]],
+) -> Vec<u8> {
+    r.set_shadow_triangles(triangles);
+    r.render(camera, draws, [0.; 4]).unwrap();
+    r.capture_rgba().unwrap().0
+}
+
 fn cube() -> ShadowMesh {
     ShadowMesh::new(
         &[
@@ -69,12 +80,8 @@ fn capped_box_shadows_match_projected_plane_inside_and_outside() {
             },
         ),
     ] {
-        r.set_shadow_triangles(&[]);
-        r.render(&camera, &[draw], [0.; 4]).unwrap();
-        let (base, _, _) = r.capture_rgba().unwrap();
-        r.set_shadow_triangles(&triangles);
-        r.render(&camera, &[draw], [0.; 4]).unwrap();
-        let (shadow, _, _) = r.capture_rgba().unwrap();
+        let base = capture_shadowed(&mut r, &camera, &[draw], &[]);
+        let shadow = capture_shadowed(&mut r, &camera, &[draw], &triangles);
         let inv = camera.view_proj(1.).inverse();
         let mut expected = 0;
         let mut actual = 0;
@@ -114,9 +121,7 @@ fn capped_box_shadows_match_projected_plane_inside_and_outside() {
         // Overlapping volumes shade once; no stale frame after clearing.
         let mut twice = triangles.clone();
         twice.extend_from_slice(&triangles);
-        r.set_shadow_triangles(&twice);
-        r.render(&camera, &[draw], [0.; 4]).unwrap();
-        assert_eq!(r.capture_rgba().unwrap().0, shadow);
+        assert_eq!(capture_shadowed(&mut r, &camera, &[draw], &twice), shadow);
         // Submission is per frame: entering a shell/preview leaves no old shadow.
         r.render(&camera, &[draw], [0.; 4]).unwrap();
         assert_eq!(r.capture_rgba().unwrap().0, base);
@@ -172,12 +177,8 @@ fn a_box_does_not_flicker_under_its_own_shadow() {
             far: 40.,
             ..Default::default()
         };
-        r.set_shadow_triangles(&[]);
-        r.render(&camera, &draws, [0.; 4]).unwrap();
-        let (base, _, _) = r.capture_rgba().unwrap();
-        r.set_shadow_triangles(&triangles);
-        r.render(&camera, &draws, [0.; 4]).unwrap();
-        let (shadow, _, _) = r.capture_rgba().unwrap();
+        let base = capture_shadowed(&mut r, &camera, &draws, &[]);
+        let shadow = capture_shadowed(&mut r, &camera, &draws, &triangles);
         let (mut tops, mut top_dark, mut sides, mut side_dark) = (0, 0, 0, 0);
         for (b, s) in base.chunks(4).zip(shadow.chunks(4)) {
             let dark = s[0] + 10 < b[0] || s[1] + 10 < b[1];

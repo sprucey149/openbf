@@ -1,5 +1,4 @@
-#[path = "../../examples/support/walker_battle.rs"]
-mod walker_battle;
+use super::walker_battle;
 use core::sim::{AimTarget, PadState};
 use glam::Vec3;
 

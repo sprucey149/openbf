@@ -669,21 +669,7 @@ impl Sim {
             .get(class as usize)
             .and_then(|b| b.as_ref())
             .and_then(|b| b.explosion.clone());
-        self.events.push(Event::VehicleExplosion {
-            vehicle: h,
-            class,
-            pos,
-            last: false,
-        });
-        if let Some(e) = exp {
-            self.explode_from(
-                &e,
-                pos,
-                pilot,
-                team,
-                Some(super::blast::BlastSource::Vehicle(h)),
-            );
-        }
+        self.detonate_vehicle(h, class, pos, false, (pilot, team), exp);
         self.kill_riders(riders, killer);
         self.remove_vehicle(h);
         // A building turret falls to its wreck or pad (card TBLD).
@@ -746,7 +732,7 @@ impl Sim {
         if let Some(v) = self.vehicle_mut(h) {
             v.walker.dead = true;
             v.walker.killer = killer;
-            v.health.cur = v.health.cur.min(0.0);
+            v.health.cur = v.health.cur.fmin(0.0);
         }
         self.space_flyer_destroyed(h, killer);
         self.kill_riders(riders, killer);
@@ -821,23 +807,35 @@ impl Sim {
         };
         let exp = self.vehicle_explosion(class, last).cloned();
         let at = v.pos + v.rot * offset;
-        self.events.push(Event::VehicleExplosion {
-            vehicle: h,
-            class,
-            pos: at,
-            last,
-        });
         let team = killer.and_then(|k| {
             self.units
                 .get(k.index as usize)
                 .filter(|u| u.gen == k.gen)
                 .map(|u| u.team)
         });
+        self.detonate_vehicle(h, class, at, last, (killer, team), exp);
+    }
+
+    fn detonate_vehicle(
+        &mut self,
+        h: VehicleHandle,
+        class: u32,
+        pos: Vec3,
+        last: bool,
+        (attacker, team): (Option<UnitHandle>, Option<u8>),
+        exp: Option<crate::weapon::ExplosionClass>,
+    ) {
+        self.events.push(Event::VehicleExplosion {
+            vehicle: h,
+            class,
+            pos,
+            last,
+        });
         if let Some(e) = exp {
             self.explode_from(
                 &e,
-                at,
-                killer,
+                pos,
+                attacker,
                 team,
                 Some(super::blast::BlastSource::Vehicle(h)),
             );

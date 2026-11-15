@@ -239,9 +239,7 @@ impl Sim {
         team: u8,
     ) -> impl Iterator<Item = (crate::vehicle::VehicleHandle, &crate::vehicle::Vehicle)> {
         self.alive_vehicles().filter(move |(_, v)| {
-            v.team == Some(team)
-                && v.health.alive()
-                && !self.class_spawn_points(v.class).is_empty()
+            v.team == Some(team) && v.health.alive() && !self.class_spawn_points(v.class).is_empty()
         })
     }
 

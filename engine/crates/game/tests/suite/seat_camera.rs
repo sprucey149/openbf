@@ -56,6 +56,13 @@ pub(super) fn map(dir: &std::path::Path, factions: &[String; 2]) -> Option<Map> 
     Some(Map { walk, build })
 }
 
+pub(super) fn terrain_hit(sim: &Sim, from: Vec3, dir: Vec3) -> Option<Vec3> {
+    let hf = sim.heightfield.as_ref()?;
+    (1..6000)
+        .map(|k| from + dir * (k as f32 * 0.05))
+        .find(|p| p.y < hf.height_at(p.x, p.z))
+}
+
 /// The sheet's height at (x, z), `None` over a cutter's hole.
 fn sheet(sim: &Sim, p: Vec3) -> Option<f32> {
     let y = sim.heightfield.as_ref()?.height_at(p.x, p.z);

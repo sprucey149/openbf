@@ -75,7 +75,7 @@ impl Sim {
         let (pos, rot) = (v.pos, v.rot);
         let view = (rot * gun::dir(look.0, look.1)).normalize();
         let eye = pos + rot * gun.ray_eye(look, zoomed);
-        let eye = self.chase_ray_origin(m, &gun, Some(u.index as usize), look, zoomed, eye, view);
+        let eye = self.chase_ray_origin(m, &gun, Some(u.index as usize), look, zoomed, (eye, view));
         let scope_eye = pos + rot * gun.scope_eye(look);
         Some(SeatLook {
             look,
@@ -227,7 +227,6 @@ impl Sim {
     /// camera (`ChaseSection::gunner_ray_origin`) where the drawn camera
     /// hangs on the gun's aim frame: a building turret's or a walker's,
     /// flyer's or hover's gunner seat.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn chase_ray_origin(
         &self,
         m: crate::vehicle::Mount,
@@ -235,8 +234,7 @@ impl Sim {
         driver: Option<usize>,
         look: (f32, f32),
         zoomed: bool,
-        eye: Vec3,
-        dir: Vec3,
+        (eye, dir): (Vec3, Vec3),
     ) -> Vec3 {
         let player =
             driver.is_some_and(|i| matches!(self.units[i].controller, Controller::Player { .. }));
@@ -441,7 +439,7 @@ impl Sim {
         let target = bot_aim.unwrap_or_else(|| {
             let eye = pos + rot * g.ray_eye(st.look, st.zoom.is_some());
             let dir = rot * gun::dir(st.look.0, st.look.1);
-            let eye = self.chase_ray_origin(m, &g, driver, st.look, st.zoom.is_some(), eye, dir);
+            let eye = self.chase_ray_origin(m, &g, driver, st.look, st.zoom.is_some(), (eye, dir));
             self.aim_point(eye, dir, &riders, m.vehicle)
         });
         let pivot = pos + rot * g.pivot;
@@ -793,7 +791,6 @@ fn ring_reach(
         pitch: [f32::MIN, f32::MAX],
         ..g.aimer
     };
-    let inside = |l: [f32; 2], v: f32| l[0] == l[1] || (l[0] <= v && v <= l[1]);
     let open = w
         .fire_limits
         .iter()
@@ -804,7 +801,7 @@ fn ring_reach(
             }
             let rest = (rel.0.clamp(ly[0], ly[1]), rel.1.clamp(lp[0], lp[1]));
             let (y, pt) = free.chase(rest, want, dt);
-            if inside(*ly, y) && inside(*lp, pt) {
+            if gun::within(*ly, y) && gun::within(*lp, pt) {
                 m | 1 << p
             } else {
                 m
@@ -830,7 +827,7 @@ fn ring_span(g: &GunSetup) -> Option<gun::Aimer> {
     let mut a = g.aimer;
     let span = |i: usize| {
         w.fire_limits.iter().fold([f32::MAX, f32::MIN], |s, l| {
-            [s[0].min(l[i][0]), s[1].max(l[i][1])]
+            [s[0].fmin(l[i][0]), s[1].fmax(l[i][1])]
         })
     };
     (a.yaw, a.pitch) = (span(0), span(1));

@@ -76,14 +76,12 @@ pub fn turn(walk: &WalkSim, unit: UnitHandle, class: usize, event: usize) -> u64
                 .get(m.seat as usize)?
                 .as_ref()?;
             let slot = setup.weapons.iter().position(|w| w.class == class)?;
-            Some(
-                v.guns
-                    .get(m.seat as usize)?
-                    .as_ref()?
-                    .weapons
-                    .get(slot)
-                    .map(|w| w.last_turn + 1)?,
-            )
+            v.guns
+                .get(m.seat as usize)?
+                .as_ref()?
+                .weapons
+                .get(slot)
+                .map(|w| w.last_turn + 1)
         })
         .unwrap_or(1);
     let after=walk.sim.events.iter().skip(event+1).filter(|e|matches!(e,Event::Shot {unit:u,weapon_class,..} if *u==unit && *weapon_class as usize==class)).count() as u64;

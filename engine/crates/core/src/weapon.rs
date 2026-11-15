@@ -1198,7 +1198,7 @@ impl WeaponState {
             // and heat; the ammunition is the weapon's (§3).
             let sc = c.stage(self.stage());
             let first = shots.len();
-            self.fire_cycle(dt, sc, blocked, cheats, ring, lcg, shots);
+            self.fire_cycle(dt, sc, (blocked, cheats), ring, lcg, shots);
             for s in &mut shots[first..] {
                 s.stage = self.stage;
             }
@@ -1233,12 +1233,12 @@ impl WeaponState {
         &mut self,
         dt: f32,
         c: &WeaponClass,
-        blocked: bool,
-        (infinite_ammo, no_reload): (bool, bool),
+        gates: (bool, (bool, bool)),
         ring: Option<Ring>,
         lcg: &mut GameLcg,
         shots: &mut Vec<ShotSpec>,
     ) {
+        let (blocked, (infinite_ammo, no_reload)) = gates;
         if !self.active {
             self.salvo_counter = 0;
         }
@@ -1247,7 +1247,7 @@ impl WeaponState {
             return;
         }
         if self.spin > 0.0 {
-            self.spin = (self.spin - dt_left).max(0.0);
+            self.spin = (self.spin - dt_left).fmax(0.0);
             let span = if self.spin_down {
                 self.salvo_counter = 0;
                 c.wind_down

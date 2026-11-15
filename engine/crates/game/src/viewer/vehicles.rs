@@ -584,7 +584,7 @@ impl VehicleVisuals {
                 .map(|&(_, o)| render::Fade::see_through(visibility_opacity(walker, o)));
             let kicks = &self.kicks;
             let kick = |seat: usize, weapon: usize, point: u64, len: u64| {
-                kicks.state(sim.tick, slot, v.gen, seat, weapon, point, len)
+                kicks.state(sim.tick, (slot, v.gen), seat, weapon, point, len)
             };
             let palette = class.skin.as_ref().and_then(|sk| {
                 if v.kind == core::vehicle::VehicleKind::Flyer {

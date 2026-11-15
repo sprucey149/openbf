@@ -10,7 +10,7 @@ fn ps2(rows: [[f32; 4]; 4]) -> Mat4 {
 fn report(name: &str, port: &Mat4, ps2: &Mat4) -> f32 {
     let d = (0..4)
         .map(|c| (port.col(c) - ps2.col(c)).abs().max_element())
-        .fold(0.0, f32::max);
+        .fold(0.0, core::fmath::FloatExt::fmax);
     println!(
         "{name}: |d| {d:.4}\n  port {:?}\n  ps2  {:?}",
         port.to_cols_array_2d(),

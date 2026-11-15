@@ -85,7 +85,13 @@ pub(super) fn axis(
         (true, true) => p,
         (true, false) => pitch,
     };
-    let over = |x: f32| if x > f32::MIN_POSITIVE { x } else { f32::MIN_POSITIVE };
+    let over = |x: f32| {
+        if x > f32::MIN_POSITIVE {
+            x
+        } else {
+            f32::MIN_POSITIVE
+        }
+    };
     Some(Axis {
         gain: (r * gain).clamp(0.0, 1.0) / over(gain),
         pitch: p / over(pitch),
@@ -117,17 +123,29 @@ fn seats(walk: &WalkSim) -> Vec<Seat<'_>> {
         let Some(specs) = walk.vehicle_seats.get(v.class as usize) else {
             continue;
         };
-        let Some(setup) = sim.seat_setup.get(v.class as usize).and_then(Option::as_ref) else {
+        let Some(setup) = sim
+            .seat_setup
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+        else {
             continue;
         };
         for (s, spec) in specs.iter().enumerate() {
             let t = &spec.turret_sounds;
-            if t.yaw.is_none() && t.pitch.is_none() && t.activate.is_none() && t.deactivate.is_none()
+            if t.yaw.is_none()
+                && t.pitch.is_none()
+                && t.activate.is_none()
+                && t.deactivate.is_none()
                 && t.ambient.is_none()
             {
                 continue;
             }
-            let Some(turn) = setup.guns.get(s).and_then(Option::as_ref).and_then(|g| g.turn) else {
+            let Some(turn) = setup
+                .guns
+                .get(s)
+                .and_then(Option::as_ref)
+                .and_then(|g| g.turn)
+            else {
                 continue;
             };
             let Some(state) = v.guns.get(s).and_then(Option::as_ref) else {
@@ -157,7 +175,12 @@ impl SoundLib {
     /// tick the sim just stepped, at each turret's owner (B1:137307-137310
     /// pass its matrix's position). A seat first seen this tick starts from
     /// its own look and no gunner, as the PS2's constructor leaves T+0x3d4.
-    pub fn play_turret_sounds(&mut self, audio: &mut audio::Audio, walk: &WalkSim, listener: &Listener) {
+    pub fn play_turret_sounds(
+        &mut self,
+        audio: &mut audio::Audio,
+        walk: &WalkSim,
+        listener: &Listener,
+    ) {
         let mut live = std::collections::HashSet::new();
         let mut keep = HashMap::new();
         let mut shots: Vec<(String, glam::Vec3)> = Vec::new();
@@ -206,7 +229,11 @@ impl SoundLib {
                 }
             }
             if seat.pilot != w.pilot {
-                let shot = if seat.pilot.is_some() { &s.activate } else { &s.deactivate };
+                let shot = if seat.pilot.is_some() {
+                    &s.activate
+                } else {
+                    &s.deactivate
+                };
                 if let Some(name) = shot {
                     shots.push((name.clone(), seat.pos));
                 }
@@ -232,7 +259,9 @@ impl SoundLib {
         self.loops.retain(|k, _| {
             !matches!(
                 k,
-                LoopSource::TurretYaw(..) | LoopSource::TurretPitch(..) | LoopSource::TurretAmbient(..)
+                LoopSource::TurretYaw(..)
+                    | LoopSource::TurretPitch(..)
+                    | LoopSource::TurretAmbient(..)
             ) || live.contains(k)
         });
         for (name, pos) in shots {
@@ -260,7 +289,10 @@ mod tests {
     #[test]
     fn a_resting_axis_fades_by_forty_percent_an_update_then_stops() {
         let mut a = axis(None, true, 1.0, 1.0, 0.7, 1.0, 1.0);
-        assert!(axis(None, false, 0.0, 1.0, 0.7, 1.0, 1.0).is_none(), "nothing playing");
+        assert!(
+            axis(None, false, 0.0, 1.0, 0.7, 1.0, 1.0).is_none(),
+            "nothing playing"
+        );
         let mut steps = 0;
         let mut gains = Vec::new();
         while let Some(x) = a {

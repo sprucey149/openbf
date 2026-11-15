@@ -867,7 +867,7 @@ pub fn springs(v: &mut Vehicle, p: &HoverParams, water: impl Fn(Vec3) -> Option<
             if let Some(h) = water(centre) {
                 let d = (h - (centre.y - sp.radius)) / sp.length;
                 if d > 0.0 {
-                    v.hover.compress[i] = v.hover.compress[i].max(d.min(1.0));
+                    v.hover.compress[i] = v.hover.compress[i].fmax(d.fmin(1.0));
                     if d > 1.0 && v.vel.y < 0.0 {
                         v.vel.y *= 0.5;
                         v.vel.x *= 0.9;

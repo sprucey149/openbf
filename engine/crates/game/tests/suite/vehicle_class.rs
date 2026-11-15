@@ -676,10 +676,12 @@ fn heavy_walkers_take_x4_on_their_weak_spots() {
     assert_eq!(weak_spot_factor(&db, "kas2_walk_atst_local"), plain);
 }
 
+type SpringHull = (String, Vec<(f32, bool, bool, bool)>);
+
 /// Every side hover's `AddSpringBody` spheres in its hull, each as
 /// `(radius, soldier, vehicle, ordnance)`, by class (`analysis/re-hover.md`
 /// §13.8), from the baked side vehicles and their class files.
-fn spring_hulls(game: &str) -> Vec<(String, Vec<(f32, bool, bool, bool)>)> {
+fn spring_hulls(game: &str) -> Vec<SpringHull> {
     use core::collision::{Layers, Shape};
     let root = game::assets::baked_root();
     let mut out = Vec::new();

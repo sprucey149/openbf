@@ -88,7 +88,7 @@ impl State {
             }
             false
         };
-        self.low = Some(low.min(h));
+        self.low = Some(core::fmath::FloatExt::fmin(low, h));
         step
     }
 }

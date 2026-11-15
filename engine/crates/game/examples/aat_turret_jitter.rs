@@ -24,7 +24,6 @@ fn yaw_pitch(m: &Mat4) -> (f32, f32) {
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mission = args.next().unwrap_or_else(|| "bf1_rhn1_con_cw".into());
-    let map = mission.splitn(3, '_').take(2).collect::<Vec<_>>().join("_");
     let class = args.next().unwrap_or_else(|| "cis_hover_aat".into());
     let seat: u8 = args.next().map_or(Ok(0), |s| s.parse())?;
     let hz: f32 = args.next().map_or(Ok(144.0), |s| s.parse())?;
@@ -34,23 +33,9 @@ fn main() -> Result<()> {
     let ragged = mode.contains("ragged");
     let spin = mode.contains("spin");
     let root = game::assets::baked_root();
-    let (mut walk, scene) = walker_battle::battle_on(&root, &map, &mission)?;
-    let index = walk
-        .vehicle_classes
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(&class))
-        .with_context(|| format!("{class} not on {map}"))?;
-    let slot = walk
-        .sim
-        .vehicles
-        .iter()
-        .position(|v| v.alive && v.class as usize == index)
-        .context("no live vehicle of the class")?;
-    let h = core::vehicle::VehicleHandle {
-        index: slot as u32,
-        gen: walk.sim.vehicles[slot].gen,
-    };
-    let player = walk.player;
+    let (mut walk, scene, h) = walker_battle::board_vehicle(&root, &mission, &class, seat)?;
+    let slot = h.index as usize;
+    let index = walk.sim.vehicles[slot].class as usize;
     for (i, sp) in walk.vehicle_seats[index].iter().enumerate() {
         println!(
             "seat {i}: {:?} aimers {:?} aim_tension {:?} move_tension {:?}",
@@ -63,7 +48,6 @@ fn main() -> Result<()> {
             sp.move_tension
         );
     }
-    anyhow::ensure!(walk.sim.seat_unit(player, h, seat), "cannot board");
     if std::env::var_os("AAT_BOT_PILOT").is_some() && seat != 0 {
         let free = |walk: &game::walk::WalkSim| {
             (0..walk.sim.units.len()).find(|&i| {
@@ -124,29 +108,20 @@ fn main() -> Result<()> {
         } else {
             0
         };
+        let mouse_pad = |delta: i32| PadState {
+            mx: if pitch { 0 } else { delta },
+            my: if pitch { delta } else { 0 },
+            buttons: core::sim::buttons::MOUSE_AIM,
+            ..Default::default()
+        };
         let pad = if mouse {
             pending += per_frame;
-            if pitch {
-                PadState {
-                    my: pending,
-                    buttons: core::sim::buttons::MOUSE_AIM,
-                    ..Default::default()
-                }
-            } else {
-                PadState {
-                    mx: pending,
-                    buttons: core::sim::buttons::MOUSE_AIM,
-                    ..Default::default()
-                }
-            }
-        } else if pitch {
-            PadState {
-                ry: if turning { 32767 } else { 0 },
-                ..Default::default()
-            }
+            mouse_pad(pending)
         } else {
+            let stick = if turning { 32767 } else { 0 };
             PadState {
-                rx: if turning { 32767 } else { 0 },
+                rx: if pitch { 0 } else { stick },
+                ry: if pitch { stick } else { 0 },
                 ..Default::default()
             }
         };
@@ -160,23 +135,7 @@ fn main() -> Result<()> {
         if ticks > 0 && mouse {
             pending = 0;
         }
-        let shown = if mouse {
-            if pitch {
-                PadState {
-                    my: pending,
-                    buttons: core::sim::buttons::MOUSE_AIM,
-                    ..Default::default()
-                }
-            } else {
-                PadState {
-                    mx: pending,
-                    buttons: core::sim::buttons::MOUSE_AIM,
-                    ..Default::default()
-                }
-            }
-        } else {
-            pad
-        };
+        let shown = if mouse { mouse_pad(pending) } else { pad };
         game::render_blend::blend_in_looking(&mut walk, &shown);
         let v = &walk.sim.vehicles[slot];
         let model = Mat4::from_rotation_translation(v.rot, v.pos);
@@ -201,10 +160,7 @@ fn main() -> Result<()> {
             Vec3::ZERO,
         )
         .1;
-        let rot_yaw = {
-            let f = v.rot * Vec3::Z;
-            f.x.atan2(f.z).to_degrees()
-        };
+        let rot_yaw = yaw_pitch(&Mat4::from_quat(v.rot)).0;
         let d_cam = last_cam.map_or((0.0, Vec3::ZERO), |(y, p): (f32, Vec3)| {
             (cy - y, cam.position - p)
         });

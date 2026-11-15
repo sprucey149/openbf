@@ -18,20 +18,20 @@ impl Fx {
             Some(Era::Bf1) => 0.0,
             _ => BF2_LIFT,
         };
-        let at = |v: &Vehicle| -> Option<Vec3> {
+        let at = |v: &Vehicle| -> Option<(&str, Vec3)> {
             if !v.alive || v.kind != VehicleKind::Hover {
                 return None;
             }
-            walk.hover_water.get(v.class as usize)?.as_ref()?;
+            let name = walk.hover_water.get(v.class as usize)?.as_deref()?;
             let h = walk.sim.water_under(v.pos)?;
-            Some(Vec3::new(v.pos.x, h + lift, v.pos.z))
+            Some((name, Vec3::new(v.pos.x, h + lift, v.pos.z)))
         };
         for effect in &mut self.live {
             let Some(handle) = effect.hover_water else {
                 continue;
             };
-            match walk.sim.vehicle(handle).and_then(|v| at(v)) {
-                Some(pos) => effect.frame = Frame::at(pos),
+            match walk.sim.vehicle(handle).and_then(&at) {
+                Some((_, pos)) => effect.frame = Frame::at(pos),
                 None => {
                     effect.stop();
                     effect.hover_water = None;
@@ -39,7 +39,7 @@ impl Fx {
             }
         }
         for (index, v) in walk.sim.vehicles.iter().enumerate() {
-            let Some(pos) = at(v) else {
+            let Some((name, pos)) = at(v) else {
                 continue;
             };
             let handle = VehicleHandle {
@@ -49,10 +49,7 @@ impl Fx {
             if self.live.iter().any(|e| e.hover_water == Some(handle)) {
                 continue;
             }
-            let Some(name) = walk.hover_water.get(v.class as usize).cloned().flatten() else {
-                continue;
-            };
-            if self.spawn(&name, Frame::at(pos)) {
+            if self.spawn(name, Frame::at(pos)) {
                 self.live.last_mut().unwrap().hover_water = Some(handle);
             }
         }

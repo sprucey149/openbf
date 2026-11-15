@@ -5,6 +5,7 @@
 //! measure: matched PS2 moving-pair trajectories and contact-list constraints.
 
 use crate::collision::{CollisionWorld, HullPart, Layers};
+use crate::fmath::FloatExt;
 use crate::vehicle::{
     hover::{HoverParams, Impact, HULL_FRICTION, HULL_RESTITUTION},
     Vehicle, VehicleHandle, VehicleKind,
@@ -101,18 +102,18 @@ fn respond(
     };
     if speed < 0.0 && v.alive {
         let mu = if p.set_altitude == 0.0 {
-            let a = n.dot(up).max(0.0);
+            let a = n.dot(up).fmax(0.0);
             (1.0 - a * a * a * a) * HULL_FRICTION
         } else {
             HULL_FRICTION
         };
-        let other_mass = mass * (0.5 * (-v.vel.dot(n)).max(0.0) + 1.0);
-        let own_mass = p.mass * (0.5 * other.dot(n).max(0.0) + 1.0);
+        let other_mass = mass * (0.5 * (-v.vel.dot(n)).fmax(0.0) + 1.0);
+        let own_mass = p.mass * (0.5 * other.dot(n).fmax(0.0) + 1.0);
         let impulse = -(1.0 + HULL_RESTITUTION) * speed * other_mass / (own_mass + other_mass);
         let mut tangent = relative - n * speed;
         let length = tangent.length();
         if length > 0.0 {
-            tangent -= tangent * (mu * impulse / length).min(1.0);
+            tangent -= tangent * (mu * impulse / length).fmin(1.0);
         }
         v.vel = tangent + n * (impulse + speed) + other;
         crate::vehicle::hover::kick_suspension(v, p, speed * n.dot(up), terrain);

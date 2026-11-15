@@ -1,6 +1,5 @@
 //! Hoth's command walker marker, selection and live spawn path.
-#[path = "../../examples/support/walker_battle.rs"]
-mod walker_battle;
+use super::walker_battle;
 use core::sim::{buttons, PadState, ScreenPick, SpawnStage};
 use core::unit::SpawnPost;
 

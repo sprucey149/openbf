@@ -69,18 +69,17 @@ fn atat_rounds_alternate_animated_barrels_without_a_muzzle_flash_and_walk_has_st
                 if matches!(e, core::sim::Event::Shot { unit, weapon_class, .. } if *unit == w.player && *weapon_class as usize == weapon)
                 {
                     let shot = game::walker_shots::turn(&w, w.player, weapon, event);
+                    let even = shot.is_multiple_of(2);
                     let name = if slot == head_slot {
-                        if shot % 2 == 0 {
+                        if even {
                             "hp_fire_Lgun"
                         } else {
                             "hp_fire_Rgun"
                         }
+                    } else if even {
+                        "barrel_Lcannon"
                     } else {
-                        if shot % 2 == 0 {
-                            "barrel_Lcannon"
-                        } else {
-                            "barrel_Rcannon"
-                        }
+                        "barrel_Rcannon"
                     };
                     let v = w.sim.vehicle(h).unwrap();
                     let rig = w.walker_rigs[class].as_ref().unwrap();
@@ -251,8 +250,7 @@ fn bolt(walk: &WalkSim, class: usize, direction: Vec3) -> Bolt {
     b
 }
 
-#[path = "../../examples/support/walker_battle.rs"]
-mod walker_battle;
+use super::walker_battle;
 use core::sim::{buttons, PadState};
 use core::vehicle::VehicleHandle;
 
@@ -698,9 +696,7 @@ mod non_wind_up_loops {
                 "non-wind-up weapon emitted inherited style loop"
             );
             assert!(
-                game::walker_shots::loops(&w)
-                    .iter()
-                    .all(|l| l.1 != gun),
+                game::walker_shots::loops(&w).iter().all(|l| l.1 != gun),
                 "non-wind-up weapon emitted inherited loop entry"
             );
         }
@@ -750,8 +746,10 @@ mod non_wind_up_loops {
                 let (mut m, spec) = missions
                     .into_iter()
                     .find_map(|mission| {
-                        let m =
-                            super::super::seat_camera::map(&root.join(map_key), &mission.factions())?;
+                        let m = super::super::seat_camera::map(
+                            &root.join(map_key),
+                            &mission.factions(),
+                        )?;
                         let spec = pad_spec(&m.build, vehicle_name)?;
                         Some((m, spec))
                     })
@@ -763,7 +761,8 @@ mod non_wind_up_loops {
             let mut scene = game::assets::load_scene(&dir).expect("load scene");
             scene.apply_mode_layer(layer);
             let mut walk = game::walk::WalkSim::new(1, glam::Vec3::ZERO, scene.heightfield());
-            walk.sim.ground_rules = core::soldier::GroundRules::for_game(&scene.manifest.source_game);
+            walk.sim.ground_rules =
+                core::soldier::GroundRules::for_game(&scene.manifest.source_game);
             scene.install_collision(&mut walk.sim);
             let factions = ["rep", "cis"].map(str::to_owned);
             let build = game::vehicle_pads::install(
@@ -845,7 +844,10 @@ mod non_wind_up_loops {
                 }
             }
             let phase = walk.sim.vehicle(h).map(|v| v.flyer.phase);
-            let ws = &walk.sim.vehicle(h).unwrap().guns[0].as_ref().unwrap().weapons[0];
+            let ws = &walk.sim.vehicle(h).unwrap().guns[0]
+                .as_ref()
+                .unwrap()
+                .weapons[0];
             assert!(
                 shot_ticks >= 2,
                 "expected >= 2 shot cycles while holding fire on {vehicle_name}, got {shot_ticks} (phase={phase:?}, overheated={}, heat={})",

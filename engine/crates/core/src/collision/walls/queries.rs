@@ -787,7 +787,10 @@ impl CollisionWorld {
     /// unit normal of its deepest contact (out of the hull, at the soldier),
     /// in ascending hull order: the vehicle contacts of the soldier's
     /// collision response (B2 `FUN_0023cfd0`, `analysis/re-hover.md` §13.9).
-    pub fn soldier_hull_contacts(&self, cap: &Capsule) -> Vec<(crate::vehicle::VehicleHandle, Vec3)> {
+    pub fn soldier_hull_contacts(
+        &self,
+        cap: &Capsule,
+    ) -> Vec<(crate::vehicle::VehicleHandle, Vec3)> {
         let (shape, iso) = cap.to_parry();
         let aabb = cap.aabb();
         let mut out: Vec<(crate::vehicle::VehicleHandle, f32, Vec3)> = Vec::new();

@@ -95,8 +95,7 @@ impl BarrelKicks {
     pub fn state(
         &self,
         tick: u64,
-        slot: usize,
-        gen: u32,
+        (slot, gen): (usize, u32),
         seat: usize,
         weapon: usize,
         point: u64,
@@ -348,7 +347,7 @@ impl WalkerAim {
                 let state = kicks
                     .iter()
                     .map(|k| kick(k.seat, k.weapon, k.point, k.len))
-                    .fold(0.0, f32::max);
+                    .fold(0.0, core::fmath::FloatExt::fmax);
                 let slide = if state > 0.0 { state * recoil } else { 0.0 };
                 if inherited || slide > 0.0 {
                     m = barrel_node(&p, skel.local_bind[n].w_axis.truncate(), slide);
@@ -399,13 +398,8 @@ fn kick_ring(skel: &Skeleton, spec: &SeatSpec, weapon: usize) -> Vec<Option<usiz
     ring
 }
 
-fn clamp_yaw(mut angle: f32, limits: [f32; 2]) -> f32 {
-    if limits[1] > std::f32::consts::PI && angle < limits[0] {
-        angle += std::f32::consts::TAU;
-    } else if limits[0] < -std::f32::consts::PI && angle > limits[1] {
-        angle -= std::f32::consts::TAU;
-    }
-    angle.clamp(limits[0], limits[1])
+fn clamp_yaw(angle: f32, limits: [f32; 2]) -> f32 {
+    core::vehicle::gun::wrap_angle(angle, limits).clamp(limits[0], limits[1])
 }
 
 fn limited_look(spec: &SeatSpec, look: (f32, f32)) -> (f32, f32) {
@@ -523,26 +517,26 @@ mod tests {
         let gen = s.vehicles[0].gen;
         let mut k = BarrelKicks::default();
         k.step(&s);
-        assert_eq!(k.state(s.tick, 0, gen, 1, 0, 0, 2), 0.0);
+        assert_eq!(k.state(s.tick, (0, gen), 1, 0, 0, 2), 0.0);
         fire(&mut s, 2);
         k.step(&s);
-        assert_eq!(k.state(s.tick, 0, gen, 1, 0, 0, 2), 1.0);
-        assert_eq!(k.state(s.tick, 0, gen, 1, 0, 1, 2), 1.0);
+        assert_eq!(k.state(s.tick, (0, gen), 1, 0, 0, 2), 1.0);
+        assert_eq!(k.state(s.tick, (0, gen), 1, 0, 1, 2), 1.0);
         s.tick += 3;
         fire(&mut s, 1);
         k.step(&s);
         let since = 3.0 * core::TICK_DT;
-        assert_eq!(k.state(s.tick, 0, gen, 1, 0, 0, 2), 1.0);
+        assert_eq!(k.state(s.tick, (0, gen), 1, 0, 0, 2), 1.0);
         assert_eq!(
-            k.state(s.tick, 0, gen, 1, 0, 1, 2),
+            k.state(s.tick, (0, gen), 1, 0, 1, 2),
             super::super::turret_pose::recoil_state(since)
         );
         s.tick += 60;
         k.step(&s);
-        assert_eq!(k.state(s.tick, 0, gen, 1, 0, 0, 2), 0.0);
+        assert_eq!(k.state(s.tick, (0, gen), 1, 0, 0, 2), 0.0);
         s.vehicles[0].gen += 1;
         fire(&mut s, 1);
         k.step(&s);
-        assert_eq!(k.state(s.tick, 0, gen + 1, 1, 0, 0, 1), 0.0);
+        assert_eq!(k.state(s.tick, (0, gen + 1), 1, 0, 0, 1), 0.0);
     }
 }

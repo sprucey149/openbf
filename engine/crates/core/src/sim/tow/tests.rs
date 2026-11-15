@@ -1,7 +1,7 @@
 use super::*;
-use crate::vehicle::walker;
 use crate::collision::{Body, Shape};
 use crate::vehicle::tow::TowFrames;
+use crate::vehicle::walker;
 use glam::Mat4;
 
 struct Leg;
@@ -307,12 +307,13 @@ fn detached_wraps_damage_per_occupied_seat_then_the_walker_dies_in_place() {
     let _ = oracle.unit();
     assert_eq!(s.melee_lcg.state(), oracle.state());
     assert!(!s.step_full_tow(&mut cable, crate::TICK_DT));
-    let dying = s.vehicle(target).expect("a dying walker stays in the world");
+    let dying = s
+        .vehicle(target)
+        .expect("a dying walker stays in the world");
     assert!(dying.walker.dead && !dying.health.alive());
-    assert!(s
-        .events
-        .iter()
-        .any(|e| matches!(e, Event::VehicleExplosion { vehicle, last: false, .. } if *vehicle == target)));
+    assert!(s.events.iter().any(
+        |e| matches!(e, Event::VehicleExplosion { vehicle, last: false, .. } if *vehicle == target)
+    ));
     assert!(!s
         .events
         .iter()

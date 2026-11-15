@@ -153,14 +153,12 @@ struct Piece {
 }
 
 impl Piece {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         spec: &Arc<Spec>,
         at: Vec3,
         vel: Vec3,
         q: Quat,
-        space: bool,
-        blast: bool,
+        (space, blast): (bool, bool),
         lib: Option<&Library>,
         rng: &mut Lcg,
     ) -> Piece {
@@ -964,7 +962,7 @@ impl Chunks {
                 rng,
             );
             let q = Quat::from_mat3(&Mat3::from_mat4(body)).normalize();
-            cluster.push(Piece::new(spec, at, vel, q, self.space, false, lib, rng));
+            cluster.push(Piece::new(spec, at, vel, q, (self.space, false), lib, rng));
         }
         self.live.push_back(cluster);
     }
@@ -1011,8 +1009,7 @@ impl Chunks {
                 at,
                 dir * speed,
                 q,
-                self.space,
-                true,
+                (self.space, true),
                 lib,
                 rng,
             ));

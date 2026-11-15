@@ -530,7 +530,7 @@ impl SeatClock {
                     crate::render_blend::lerp_angle(a.1, b.1, f),
                     Mat4::from_scale_rotation_translation(
                         sa.lerp(sb, f),
-                        ra.slerp(rb, f),
+                        crate::sim_pose::quat_slerp(ra, rb, f),
                         ta.lerp(tb, f),
                     ),
                 )
@@ -551,7 +551,7 @@ impl SeatClock {
 /// own turn rate over its turn speed (B2:189542-189546) where it turns by
 /// one, else its look's turn over the last tick at that speed.
 fn turn_number(rate: Option<f32>, then: SeatThen, yaw_speed: f32) -> f32 {
-    let speed = yaw_speed.max(1e-3);
+    let speed = core::fmath::FloatExt::fmax(yaw_speed, 1e-3);
     rate.map_or(then.turned / (core::TICK_DT * speed), |r| r / speed)
         .clamp(-1.0, 1.0)
 }
