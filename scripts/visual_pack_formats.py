@@ -2,12 +2,19 @@
 import json
 import math
 import struct
+from pathlib import Path
 
 KTX_MAGIC = b'\xabKTX 20\xbb\r\n\x1a\n'
 # render::device requests wgpu's default 2D texture limit.
 MAX_KTX_EDGE = 8192
 # First demonstrated static draw mesh. No terrain, side models, attachments or skins.
 STATIC_MODELS = {'bf1_rhn2/models/rhn_bldg_catacombs_wall.glb'}
+# Explicit draw-only companions; stock model entries remain in the archive.
+PRESENTATION_MODELS = {
+    name.replace('/models/', '/presentation/models/', 1): name
+    for name in json.loads((Path(__file__).resolve().parents[1] /
+                           'engine/crates/game/src/assets/presentation_models.json').read_text())
+}
 
 
 def json_object(raw):

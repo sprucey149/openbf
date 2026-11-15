@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import stat
 
-from visual_pack_formats import (STATIC_MODELS, compatible_mesh, compatible_texture,
+from visual_pack_formats import (PRESENTATION_MODELS, STATIC_MODELS, compatible_mesh, compatible_texture,
                                  glb, json_object, ktx2)
 
 
@@ -52,7 +52,7 @@ def target_kind(name):
     parts = name.split('/')
     if name.endswith('.ktx2') and ('textures' in parts[:-1] or (len(parts) == 3 and parts[1] == 'load')):
         return 'ktx2'
-    if name in STATIC_MODELS:
+    if name in STATIC_MODELS or name in PRESENTATION_MODELS:
         return 'glb'
     raise PackError(f'{name}: unsupported presentation target; use native textures or an audited static GLB path (see docs/visual-packs.md)')
 
@@ -95,15 +95,19 @@ def discover(lookup, explicit=False):
                     raise PackError(f'{where}: targets must be a nonempty array')
                 targets = []
                 for target in row['targets']:
-                    fields(target, ('path', 'sha256'), where)
+                    companion = isinstance(target, dict) and target.get('path') in PRESENTATION_MODELS
+                    fields(target, ('path', 'sha256', 'placement_sha256') if companion else ('path', 'sha256'), where)
                     name = relative(target['path'])
                     kind = target_kind(name)
                     if not file.endswith('.'+kind):
                         raise PackError(f'{where}: replacement file extension must match target {name}')
-                    hashes = target['sha256']
-                    if not isinstance(hashes, list) or not hashes or any(not isinstance(h, str) or not re.fullmatch('[0-9a-fA-F]{64}', h) for h in hashes):
-                        raise PackError(f'{where}: sha256 must list accepted baked original SHA256 hashes (64 hex characters)')
-                    targets.append(dict(path=name, sha256=[h.lower() for h in hashes], kind=kind))
+                    parsed = dict(path=name, kind=kind)
+                    for key in ('sha256', 'placement_sha256') if companion else ('sha256',):
+                        hashes = target[key]
+                        if not isinstance(hashes, list) or not hashes or any(not isinstance(h, str) or not re.fullmatch('[0-9a-fA-F]{64}', h) for h in hashes):
+                            raise PackError(f'{where}: {key} must list accepted baked original SHA256 hashes (64 hex characters)')
+                        parsed[key] = [h.lower() for h in hashes]
+                    targets.append(parsed)
                 pack['replacements'].append(dict(file=file, source=source, targets=targets))
                 used.add(file)
             # Inventory extras, but never discover packs inside a manifest-bearing root.
@@ -165,17 +169,29 @@ def resolve(packs, report, baked):
                 del raw
                 for target in row['targets']:
                     name = target['path']
-                    stock = child(baked, name, missing=True)
-                    if stock is not None and name not in hashes:
-                        hashes[name] = digest(stock)
-                    actual = hashes.get(name)
+                    stock_name = PRESENTATION_MODELS.get(name, name)
+                    stock = child(baked, stock_name, missing=True)
+                    if stock is not None and stock_name not in hashes:
+                        hashes[stock_name] = digest(stock)
+                    actual = hashes.get(stock_name)
                     result = dict(pack=pack['name'], file=row['file'], path=name,
                                   accepted_sha256=target['sha256'], stock_sha256=actual,
                                   replacement_sha256=replacement_hash)
+                    if name in PRESENTATION_MODELS:
+                        result['stock_path'] = stock_name
+                        placement_name = name.split('/')[0]+'/manifest.ron'
+                        placement = child(baked, placement_name, missing=True)
+                        if placement is not None and placement_name not in hashes:
+                            hashes[placement_name] = digest(placement)
+                        result['placement'] = dict(path=placement_name,
+                            accepted_sha256=target['placement_sha256'], stock_sha256=hashes.get(placement_name))
                     if stock is None:
                         result['status'] = 'missing'
                     elif actual not in target['sha256']:
                         result['status'] = 'hash_mismatch'
+                    elif name in PRESENTATION_MODELS and result['placement']['stock_sha256'] not in target['placement_sha256']:
+                        result['status'] = 'hash_mismatch'
+                        result['reason'] = 'stock placement manifest is missing or unfamiliar'
                     else:
                         # Case-fold conflicts too: installed packs must be portable to case-insensitive hosts.
                         key = name.casefold()

@@ -173,6 +173,49 @@ class Packs(unittest.TestCase):
         self.assertNotEqual(before['targets'][0]['replacement_sha256'], after['targets'][0]['replacement_sha256'])
         self.assertEqual(self.stock.read_bytes(), texture())
 
+    def test_presentation_companion_hashes_stock_and_keeps_stock_target_closed(self):
+        stock_name = 'bf1_end1/models/end_prop_rocks.glb'
+        companion = stock_name.replace('/models/', '/presentation/models/')
+        original = self.baked/stock_name
+        original.parent.mkdir(parents=True)
+        original.write_bytes(mesh())
+        placement = original.parent.parent/'manifest.ron'
+        placement.write_text('stock placement')
+        (self.folder/'rock.glb').write_bytes(mesh())
+        self.manifest['replacements'] = [dict(file='rock.glb', targets=[dict(path=companion,
+            sha256=[vp.digest(original)], placement_sha256=[vp.digest(placement)])])]
+        self.write_manifest()
+        entries, report = self.resolve()
+        self.assertEqual(entries, [['assets_baked/'+companion, str((self.folder/'rock.glb').resolve())]])
+        self.assertEqual(report['targets'][0]['stock_path'], stock_name)
+        self.assertEqual(report['targets'][0]['stock_sha256'], vp.digest(original))
+        self.assertEqual(report['targets'][0]['placement']['stock_sha256'], vp.digest(placement))
+        self.assertFalse((self.baked/companion).exists())
+        self.assertEqual(original.read_bytes(), mesh())
+        target = self.manifest['replacements'][0]['targets'][0]
+        for invalid in ([], ['bad'], 'f'*64):
+            target['placement_sha256'] = invalid
+            self.write_manifest()
+            with self.assertRaises(vp.PackError): vp.discover(self.lookup)
+        del target['placement_sha256']
+        self.write_manifest()
+        with self.assertRaises(vp.PackError): vp.discover(self.lookup)
+        target['placement_sha256'] = [vp.digest(placement)]
+        self.write_manifest()
+        for name in (stock_name, companion.replace('end_prop_rocks', 'anything'),
+                     companion.replace('bf1_end1', 'bf1_other')):
+            with self.assertRaises(vp.PackError): vp.target_kind(name)
+        self.assertEqual(vp.target_kind('bf1_rhn2/models/rhn_bldg_catacombs_wall.glb'), 'glb')
+        placement.write_text('moved stock placement')
+        entries, report = self.resolve()
+        self.assertEqual(entries, [])
+        self.assertIn('placement', report['targets'][0]['reason'])
+        placement.write_text('stock placement')
+        original.write_bytes(mesh(lambda d: d['meshes'][0]['extras'].update(sphere=[1, 2, 3, 4])))
+        entries, report = self.resolve()
+        self.assertEqual(entries, [])
+        self.assertEqual(report['counts']['hash_mismatch'], 1)
+
 
 class Formats(unittest.TestCase):
     def test_ktx2_rejects_a_dimension_above_the_renderer_limit(self):
@@ -202,7 +245,7 @@ class Formats(unittest.TestCase):
             with self.assertRaises(ValueError): compatible_mesh(glb(mesh()), glb(mesh(edit)))
 
     def test_glb_rejects_external_buffers_skins_images_bad_views_and_indices(self):
-        for edit in (lambda d: d['buffers'][0].update(uri='../outside.bin'), lambda d: d.update(skins=[{}]), lambda d: d.update(images=[{'uri': '../outside.png'}]), lambda d: d['bufferViews'][0].update(byteLength=4), lambda d: d['accessors'][0].update(count=400), lambda d: d['meshes'][0]['primitives'][0].update(indices=40), lambda d: d['materials'][0].update(alphaMode='MASK')):
+        for edit in (lambda d: d['buffers'][0].update(uri='../outside.bin'), lambda d: d.update(skins=[{}]), lambda d: d.update(animations=[{}]), lambda d: d['meshes'][0]['primitives'][0].update(targets=[{'POSITION': 0}]), lambda d: d.update(images=[{'uri': '../outside.png'}]), lambda d: d['bufferViews'][0].update(byteLength=4), lambda d: d['accessors'][0].update(count=400), lambda d: d['meshes'][0]['primitives'][0].update(indices=40), lambda d: d['materials'][0].update(alphaMode='MASK')):
             with self.subTest(edit=edit):
                 with self.assertRaises((ValueError, IndexError)): glb(mesh(edit))
         with self.assertRaises(ValueError): glb(mesh()[:-1])

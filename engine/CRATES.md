@@ -516,6 +516,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/assets/tests.rs` 406 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
 - `game/src/assets/visual_clips.rs` 168 — Loads optional meshless clip companions for rendering while preserving the simulation body.
 - `game/src/assets/mesh.rs` 527 — static/skinned GLB mesh readers, material and contact-surface extras, and streaming fixtures · `load_glb`, `load_glb_joints`, `load_skinned_glb`, `CpuSkinnedMesh`, `SkinnedAsset`.
+- `game/src/assets/presentation.rs` 249 — audited static draw companions, stock placement/rigid-format checks and native archive additions; keeps stock model consumers intact · `stock_path`, `load_model`, `prepare_pack`; shared registry: `game/src/assets/presentation_models.json`.
 - `game/src/assets/render_ground.rs` 125 — validate an explicit corrected presentation grid and anchor foliage without changing the simulation heightfield · `Scene::render_heightfield`.
 - `game/src/main/windowed/menu_actions.rs` 120 — settings autosave for pause-menu actions (the Network meter row included) · `persist_setting`.
 - `game/src/main/windowed/mouse.rs` 307 — native menu PNG cursor, focus/screen capture policy and mouse glue for `App` · `sync_grab`, `release_mouse`, `mouse_window_event`.
@@ -853,6 +854,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 ## Tests, examples, goldens, data
 
 - `game/tests/ui_sharp.rs` 755 — serial headless owned-source menu/HUD captures, option-value visibility and treated font labels and loaded-font pointer checks (#114).
+- `game/tests/presentation_meshes.rs` 374 — native companion install/rejection, owned stock archive/camera invariance and serial headless world draw binding checks (#177).
 - `game/tests/ui_sharp/cutter.rs` 195 — real-content Fusion Cutter model selection, missing-model fallback, and headless both-era captures (#114).
 - `game/tests/ui_sharp/playtest.rs` 303 — owned native HUD countdown anchoring, mounted Hailfire art/death-map captures and Graphics limits/reset probes (#50, #114, #128).
 

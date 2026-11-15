@@ -320,6 +320,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(mapping) = replacements {
+                game::assets::presentation::prepare_pack(&mut entries, &mapping)?;
                 for index in pak::replace_sources(&mut entries, &mapping)? {
                     let (name, source) = &entries[index];
                     if name.ends_with(".glb") {

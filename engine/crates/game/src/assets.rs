@@ -2,6 +2,7 @@
 //! CPU-side scene data for the renderer. Runtime never touches LVL.
 
 mod mesh;
+pub mod presentation;
 mod render_ground;
 use core::fmath::FloatExt;
 pub use mesh::{load_glb, load_glb_joints, load_skinned_glb, CpuSkinnedMesh, SkinnedAsset};

@@ -121,11 +121,50 @@ RON, scripts, audio, missions, class data and collision cannot be replaced.
 
 ## Static mesh author requirements
 
-The first audited path is
-`bf1_rhn2/models/rhn_bldg_catacombs_wall.glb`. Other mesh paths require a separate
-consumer audit before being added to the loader's allowlist. No side/render
-model currently has that proof: soldiers, heroes, vehicles, weapons, attachments,
-skins, animation, terrain, contact surfaces and collision meshes remain excluded.
+The existing `bf1_rhn2/models/rhn_bldg_catacombs_wall.glb` substitution remains
+supported with its existing checks. New static geometry uses separate draw
+companions. The currently audited companion targets are:
+
+- `bf1_end1/presentation/models/end_prop_rocks.glb`
+- `bf2_end1/presentation/models/end_prop_rocks.glb`
+- `bf1_rhn2/presentation/models/rhn_bldg_damagedwall_01.glb`
+
+These are explicit entries in the shared `presentation_models.json` registry,
+not permission to replace arbitrary `models/*.glb`. Additional entries require
+their own consumer and placement audit. Soldiers, heroes, vehicles, weapons,
+attachments, skins, animation, terrain, contact surfaces and collision meshes
+remain excluded.
+
+A companion target adds `placement_sha256`, a nonempty list of accepted SHA256
+hashes for that map's stock `manifest.ron`. Its ordinary `sha256` list identifies
+the original **`models/<name>.glb`**, which remains the camera's model. For example:
+
+```json
+{
+  "file": "models/rock.glb",
+  "targets": [{
+    "path": "bf1_end1/presentation/models/end_prop_rocks.glb",
+    "sha256": ["<SHA256 of bf1_end1/models/end_prop_rocks.glb>"],
+    "placement_sha256": ["<SHA256 of bf1_end1/manifest.ron>"]
+  }]
+}
+```
+
+Both gates must match. An unfamiliar or missing placement manifest is reported
+as a hash mismatch. The receipt includes `stock_path` and the placement path,
+accepted hashes and actual hash. The native writer also requires a stock map
+placement through a rigid `prop` or `building` class, without a door, turret rig,
+hardpoints, attachments or build-zone substitution. It imports the stock and
+companion GLBs and checks their rigid format, metadata, bindings and bounds
+before opening the output.
+
+The archive retains every stock model and adds only the matched companions.
+Only the world submesh uploader reads these companions. `Scene.meshes`, camera
+triangles and fallback, collision, bounds, gameplay spheres, joints, other model
+readers and LOD selection continue to use stock files. Adding or removing a
+companion therefore does not substitute its detailed surface into the camera.
+Removing the pack removes the extra archive entries on the next build. A
+successful install does not prove that a particular LOD or placement draws it.
 
 The file must be a self-contained GLB 2.0 with one internal binary buffer, one
 rigid mesh and indexed opaque triangle primitives. External buffers/images,
