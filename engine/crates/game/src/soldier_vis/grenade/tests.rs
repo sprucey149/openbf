@@ -11,6 +11,86 @@ use std::sync::Arc;
 const THROWN: &str = "rep_weap_inf_thermaldetonator";
 
 #[test]
+#[ignore = "requires BF2 Ewok bodies, clips and classes in the bake"]
+fn bf2_ewok_throws_use_the_spear_and_offhand_rock_clips() {
+    let root = std::env::var_os("OPENBF_ASSETS")
+        .map_or_else(crate::assets::baked_root, std::path::PathBuf::from);
+    let mission =
+        crate::mission::MissionDef::load(&root.join("../missions/bf2_end1_hunt.ron")).unwrap();
+    let ([_, ewoks], _) = crate::roster::FactionRoster::pair(
+        &root.join("classes"),
+        "bf2",
+        ["imp", "ewk"],
+        Some(&mission),
+    )
+    .unwrap();
+    assert_eq!(ewoks.classes.len(), 2);
+    for roster in &ewoks.classes {
+        let mut team = TeamTemplate::default_trooper();
+        team.classes[0] = crate::walk::ClassVisual::from_roster_with_held(roster);
+        let mut vis = SoldierVisuals::load_cpu(&root, "bf2/locals", &[team.clone(), team]);
+        for (button, expected) in [
+            (buttons::FIRE, "ewok_spear_stand_shoot_full"),
+            (buttons::SECONDARY_FIRE, "human_tool_stand_shoot_secondary2"),
+        ] {
+            let mut walk = WalkSim::new(
+                48,
+                Vec3::ZERO,
+                Some(Heightfield {
+                    size: 2,
+                    unit: 4000.0,
+                    offset_x: 2000.0,
+                    offset_z: 2000.0,
+                    heights: vec![0.0; 4],
+                }),
+            );
+            walk.sim.ground_rules = GroundRules::Bf2;
+            let spear = walk.sim.add_weapon_class(roster.weapon.clone());
+            let rock = roster
+                .held
+                .iter()
+                .find(|w| w.weapon.name == "ewk_weap_inf_rock")
+                .unwrap();
+            let rock_class = walk.sim.add_weapon_class(rock.weapon.clone());
+            let team = walk.sim.unit(walk.player).unwrap().team;
+            walk.player = walk
+                .sim
+                .spawn(&UnitSpec {
+                    weapon_class: spear,
+                    slots: Arc::new([SlotSpec {
+                        slot: rock.slot,
+                        channel: 1,
+                        weapon_class: rock_class,
+                        clips: rock.clips,
+                    }]),
+                    ..UnitSpec::player_in_slot(1, team, Vec3::new(10.0, 0.0, 0.0))
+                })
+                .unwrap();
+            walk.local_slot = 1;
+            vis.units.clear();
+            vis.bf2 = true;
+            walk.step_tick(&[
+                PadState::default(),
+                PadState {
+                    buttons: button,
+                    ..Default::default()
+                },
+            ]);
+            vis.update(&walk, core::TICK_DT);
+            let animator = &vis.units[walk.player.index as usize].animator;
+            let asset = vis.asset_for(team, 0).unwrap();
+            let clip = &asset.asset.clips[animator.upper_clip().unwrap()].name;
+            assert_eq!(
+                clip.trim_end_matches("_full"),
+                expected.trim_end_matches("_full"),
+                "{}",
+                roster.class
+            );
+        }
+    }
+}
+
+#[test]
 fn pack_dispensers_use_the_original_drop_action_for_every_faction() {
     let root = crate::assets::baked_root();
     if !root.join("classes/bf1_all.ron").exists() || !root.join("classes/bf2_all.ron").exists() {

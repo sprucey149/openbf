@@ -1762,12 +1762,15 @@ impl WalkSim {
 
     pub fn flush_career_progress(&mut self, profile: &mut crate::profile::Profile) -> bool {
         let mut changed = self.flush_class_kills(profile);
-        if let Some(counts) = self
-            .local_medal_counts()
-            .filter(|c| *c != profile.career.medals)
-        {
-            profile.career.medals = counts;
-            changed = true;
+        if let Some(counts) = self.local_medal_counts() {
+            for (saved, count) in profile.career.medals.iter_mut().zip(counts) {
+                // A LAN replay or an old lobby snapshot may have started
+                // with fewer medals than this player has already saved.
+                if count > *saved || (!self.netplay.active && count != *saved) {
+                    *saved = count;
+                    changed = true;
+                }
+            }
         }
         changed
     }

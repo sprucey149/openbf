@@ -31,8 +31,8 @@ pub const MAGIC: [u8; 4] = *b"OBF1";
 /// 7: `HashReport` and `Desync` name their round, so a report still in
 /// flight when the next round loads is dropped instead of compared.
 /// 8: `Start` carries the lead to tick 0, so every peer leaves its loading
-/// screen at one moment.
-pub const PROTOCOL: u16 = 8;
+/// screen at one moment. 9: Ready carries the guest's current profile.
+pub const PROTOCOL: u16 = 9;
 /// The largest datagram either side sends or accepts.
 pub const MAX_DATAGRAM: usize = 1200;
 pub const HEADER_LEN: usize = 18;

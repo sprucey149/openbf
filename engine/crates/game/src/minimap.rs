@@ -401,7 +401,7 @@ impl MapStatic {
         let fwd = [-sy, -cy];
         let own = me.team;
         let rel = |team: Option<u8>| match team {
-            Some(t) if t == own => FRIEND,
+            Some(t) if sim.allied(own, t) => FRIEND,
             Some(_) => ENEMY,
             None => NEUTRAL,
         };
@@ -474,7 +474,10 @@ impl MapStatic {
             let Some(texture) = class.texture.clone() else {
                 continue;
             };
-            if !post && station.team.is_some_and(|t| t != own) && !detected(station.pos, None) {
+            if !post
+                && station.team.is_some_and(|team| sim.hostile(own, team))
+                && !detected(station.pos, None)
+            {
                 continue;
             }
             let f = station.transform.z_axis;
@@ -499,13 +502,14 @@ impl MapStatic {
                 continue;
             }
             let shot = (u.last_shot_tick != u64::MAX).then_some(u.last_shot_tick);
-            if u.team != own && !detected(u.soldier.pos, shot) {
+            let enemy = sim.hostile(own, u.team);
+            if enemy && !detected(u.soldier.pos, shot) {
                 continue;
             }
             // Card CLOAK: an enemy with any concealment has no icon, firing
             // or not (B2 FUN_003a5940, D:400941: a soldier whose byte +0x7e3
             // is above 0 skips its icon on the detected path).
-            if u.team != own && !u.cloak.visible() {
+            if enemy && !u.cloak.visible() {
                 continue;
             }
             let icon = soldier(u.team);
@@ -525,7 +529,7 @@ impl MapStatic {
         // (the PS2's rule that hides the controlled unit's icon is not
         // traced, re-hud-map §3).
         for d in &sim.droids {
-            if d.team != own && !detected(d.pos, None) {
+            if sim.hostile(own, d.team) && !detected(d.pos, None) {
                 continue;
             }
             let Some((icon, texture)) = self
@@ -571,7 +575,10 @@ impl MapStatic {
                 .flatten()
                 .flat_map(|g| &g.weapons)
                 .any(|w| w.state == core::weapon::FireState::Firing);
-            if v.team.is_some_and(|t| t != own) && !firing && !detected(v.pos, None) {
+            if v.team.is_some_and(|team| sim.hostile(own, team))
+                && !firing
+                && !detected(v.pos, None)
+            {
                 continue;
             }
             let f = v.rot * Vec3::Z;
@@ -1011,6 +1018,65 @@ mod tests {
         let after = colours(&w);
         assert!(!after.contains(&ENEMY), "{after:?}");
         assert!(after.contains(&FRIEND), "{after:?}");
+    }
+
+    #[test]
+    fn an_allied_native_has_a_friendly_map_icon() {
+        let mut walk = WalkSim::new(3, Vec3::ZERO, None);
+        let own = walk.sim.units[walk.player.index as usize].team;
+        let native = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(own, Vec3::new(1.0, 0.0, -2.0)))
+            .unwrap();
+        walk.sim.units[native.index as usize].team = 2;
+        let map = MapStatic {
+            soldiers: vec![
+                ClassIcon {
+                    texture: Some("troop_icon".into()),
+                    scale: 1.0,
+                    view: VIEW_DEFAULT,
+                };
+                3
+            ],
+            ..MapStatic::default()
+        };
+        assert_eq!(map.model(&walk).units[0].color, ENEMY);
+        walk.sim.set_team_relation(own, 2, true);
+        assert_eq!(map.model(&walk).units[0].color, FRIEND);
+
+        // A friendly Ewok behind the player keeps its icon beyond the
+        // enemy detection radius, but inside the 50 m minimap.
+        walk.sim.units[native.index as usize].soldier.pos = Vec3::new(0.0, 0.0, 30.0);
+        assert_eq!(map.model(&walk).units[0].color, FRIEND);
+        walk.sim.set_team_relation(own, 2, false);
+        assert!(map.model(&walk).units.is_empty());
+    }
+
+    #[test]
+    fn allied_and_neutral_stations_bypass_enemy_radar_detection() {
+        let mut walk = WalkSim::new(3, Vec3::ZERO, None);
+        let own = walk.sim.units[walk.player.index as usize].team;
+        let mut station = core::sim::Station::new(0, Vec3::new(0.0, 0.0, 30.0), 2.0);
+        station.team = Some(2);
+        walk.sim.stations.push(station);
+        let map = MapStatic {
+            soldiers: vec![ClassIcon::of(&ClassDb::default(), "x"); 2],
+            structures: vec![(
+                ClassIcon {
+                    texture: Some("station_icon".into()),
+                    scale: 1.0,
+                    view: VIEW_DEFAULT,
+                },
+                false,
+            )],
+            ..MapStatic::default()
+        };
+
+        assert!(map.model(&walk).units.is_empty());
+        walk.sim.set_team_relation(own, 2, true);
+        assert_eq!(map.model(&walk).units[0].color, FRIEND);
+        walk.sim.stations[0].team = None;
+        assert_eq!(map.model(&walk).units[0].color, NEUTRAL);
     }
 
     /// Flying a droid, the map is centred on the droid, turns with its

@@ -670,9 +670,9 @@ pub fn bake_vehicles(
                 continue;
             }
             let (mut m, mut bones) = ix.model_space(name, &g.name)?;
-            render.apply(&mut m)?;
+            render.apply(&mut m, &mut bones, ix.render_skel_of(name, &g.name))?;
             if offsets.apply(&mut m)? {
-                render.finish(&mut m)?;
+                render.finish(&mut m, &mut bones)?;
             }
             if skinned.contains(&m.name.to_ascii_lowercase()) {
                 ix.canonical_joints(name, &g.name, &mut bones)?;
@@ -801,6 +801,118 @@ pub fn bake_vehicles(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires OPENBF_HAILFIRE_PC and OPENBF_HAILFIRE_XBOX owned side LVLs"]
+    fn hailfire_casings_keep_source_assembly_joints_through_glb() {
+        for (key, segments) in [("OPENBF_HAILFIRE_PC", 6), ("OPENBF_HAILFIRE_XBOX", 41)] {
+            let path = std::env::var(key).expect(key);
+            let (corrected, original) = crate::gameplay::read_with_original(&path).unwrap();
+            let original = original.expect("must select the donor recipe");
+            let chunks = mungefs::content_chunks(mungefs::open(&corrected).unwrap()).unwrap();
+            let mut ix = index(&chunks).unwrap();
+            ix.use_render_skeletons(&original).unwrap();
+            let name = "cis_tread_hailfire";
+            let (mut model, mut joints) = ix.model_space(name, name).unwrap();
+            assert_eq!(model.segments.len(), segments);
+            let old = joints.clone();
+            let skeleton = ix.render_skel_of(name, name).unwrap();
+            let render = crate::vehicle_render::Instructions::of(Some(&original)).unwrap();
+            render
+                .apply(&mut model, &mut joints, Some(skeleton))
+                .unwrap();
+            assert_eq!(joints.len(), segments + 2);
+            assert!(crate::vehicle_offsets::of(Some(&original))
+                .unwrap()
+                .apply(&mut model)
+                .unwrap());
+            render.finish(&mut model, &mut joints).unwrap();
+            assert_eq!(&joints[..segments], old.as_slice());
+            // In both source rigs the -x rack is missile_right, the +x rack
+            // missile_left. These are assembly bones, above the 16 missiles.
+            for (i, assembly) in ["missile_right", "missile_left"].iter().enumerate() {
+                let row = &joints[segments + i];
+                let owner = skeleton.index_of(assembly).unwrap();
+                assert_eq!(
+                    row.len(),
+                    884,
+                    "756 casing vertices plus 128 fitted cap vertices"
+                );
+                assert!(row.iter().all(|&b| b == owner));
+                assert_eq!(
+                    skeleton
+                        .bones
+                        .iter()
+                        .filter(|b| b.parent == Some(owner))
+                        .count(),
+                    16
+                );
+                eprintln!("{key}: {} old rows preserved; casing {} vertices -> {assembly} (donor {owner})", segments, row.len());
+            }
+            ix.canonical_joints(name, name, &mut joints).unwrap();
+            let mut expected_old = old;
+            ix.canonical_joints(name, name, &mut expected_old).unwrap();
+            assert_eq!(&joints[..segments], expected_old.as_slice());
+            let canonical = ix.skel_of(name, name).unwrap();
+            for (i, assembly) in ["missile_right", "missile_left"].iter().enumerate() {
+                let mut source = skeleton.index_of(assembly).unwrap();
+                let owner = loop {
+                    if let Some(b) = canonical.index_of(&skeleton.bones[source].name) {
+                        break b;
+                    }
+                    source = skeleton.bones[source]
+                        .parent
+                        .expect("assembly has a canonical ancestor");
+                };
+                assert!(joints[segments + i].iter().all(|&b| b == owner));
+                eprintln!(
+                    "{key}: {assembly} -> canonical {} ({owner})",
+                    canonical.bones[owner].name
+                );
+            }
+            let alpha = crate::alpha::AlphaTable::new(&[]).model(&model);
+            let bytes =
+                crate::glb::model_to_glb_joints(&model, &alpha, false, Some(&joints)).unwrap();
+            let glb = gltf::Gltf::from_slice(&bytes).unwrap();
+            let blob = glb.blob.as_ref().unwrap();
+            let mut drawn = 0;
+            for (si, segment) in model.segments.iter().enumerate() {
+                if segment.triangles.is_empty() {
+                    continue;
+                }
+                let primitive = glb
+                    .meshes()
+                    .next()
+                    .unwrap()
+                    .primitives()
+                    .nth(drawn)
+                    .unwrap();
+                let reader = primitive.reader(|_| Some(blob));
+                let actual: Vec<_> = reader
+                    .read_joints(0)
+                    .unwrap()
+                    .into_u16()
+                    .map(|b| b[0] as usize)
+                    .collect();
+                assert_eq!(actual, joints[si]);
+                assert_eq!(reader.read_positions().unwrap().count(), joints[si].len());
+                assert!(reader
+                    .read_weights(0)
+                    .unwrap()
+                    .into_f32()
+                    .all(|w| w == [1., 0., 0., 0.]));
+                drawn += 1;
+            }
+            assert_eq!(
+                drawn,
+                model
+                    .segments
+                    .iter()
+                    .filter(|s| !s.triangles.is_empty())
+                    .count()
+            );
+        }
+    }
 
     #[test]
     fn donor_vertex_indices_use_original_rig_without_changing_physics() {

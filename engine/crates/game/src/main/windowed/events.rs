@@ -1238,6 +1238,7 @@ impl winit::application::ApplicationHandler for App {
                     if walk.sim.outcome.is_some() && !self.outcome_reported {
                         self.outcome_reported = true;
                         if let Some(n) = self.netplay.as_mut() {
+                            n.peer.remember_guest_medals(walk);
                             n.round_decided();
                         }
                         println!("{}", hud_title(walk));

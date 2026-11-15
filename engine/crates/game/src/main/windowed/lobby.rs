@@ -812,7 +812,10 @@ impl App {
             if results && n.lobby.ready_sent != Some(round) {
                 n.lobby.ready_sent = Some(round);
                 if let NetLink::Client(s) = &n.link {
-                    s.send(net::ClientCommand::Ready(round));
+                    s.send(net::ClientCommand::Ready {
+                        round_id: round,
+                        profile: n.current_profile(&self.profile).encode(),
+                    });
                 }
             }
             if input.back {
@@ -1307,6 +1310,8 @@ pub(crate) mod tests {
         );
         assert_eq!((s.cheat_policy, s.max_players, s.lag_comp), (0b11, 4, true));
         assert!(guest.netplay.as_ref().unwrap().lobby.ia.is_some());
+        host.profile.career.medals[0] = 3;
+        guest.profile.career.medals[0] = 7;
         // The results' ready check: the host has left its pages.
         {
             let n = host.netplay.as_mut().unwrap();
@@ -1317,6 +1322,15 @@ pub(crate) mod tests {
         run(&mut host, &mut guest, |h, _| {
             h.netplay.as_ref().unwrap().lobby.phase == LobbyPhase::Choosing
         });
+        let setup = host
+            .netplay
+            .as_ref()
+            .unwrap()
+            .host_setup("bf2", &host.session, &host.profile);
+        assert_eq!(setup.humans[0].name, "Ann");
+        assert_eq!(setup.humans[0].profile.medals[0], 3);
+        assert_eq!(setup.humans[1].name, "Bo");
+        assert_eq!(setup.humans[1].profile.medals[0], 7);
         let lines = host.netplay.as_mut().unwrap().lobby.lines();
         assert!(
             lines.iter().any(|l| l.contains("playlist is over")),

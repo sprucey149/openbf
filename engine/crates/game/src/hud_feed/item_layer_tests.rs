@@ -169,6 +169,39 @@ fn render_row(view: &mut HudView, r: &mut render::Renderer, size: [u32; 2]) -> V
     r.capture_rgba().unwrap().0
 }
 
+#[test]
+#[ignore = "requires GPU and HUD_ITEM_ASSETS with the BF2 Ewok bake"]
+fn bf2_ewok_hud_draws_the_original_spear_and_rock_models() {
+    let assets = PathBuf::from(std::env::var_os("HUD_ITEM_ASSETS").expect("HUD_ITEM_ASSETS"));
+    let size = [720, 480];
+    let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+    let mut view = HudView::for_renderer(&assets, &r).unwrap();
+    let weapon = |key: &str, class: &str| HudWeapon {
+        key: key.into(),
+        class: class.into(),
+        bf2: true,
+        icon: None,
+        name: String::new(),
+        total: Some(4),
+        clip_fraction: 1.0,
+    };
+    let spear = weapon("ewk_spear", "ewk_weap_inf_spear");
+    let rock = weapon("ewk_rock", "ewk_weap_inf_rock");
+    assert_eq!(view.weapon_mesh(1, &spear).1.as_deref(), Some("ewk_spear"));
+    assert_eq!(view.weapon_mesh(2, &rock).1.as_deref(), Some("ewk_rock"));
+    view.update(
+        &HudModel {
+            weapon: Some(spear),
+            weapon2: Some(rock),
+            ..Default::default()
+        },
+        0.0,
+        size,
+    );
+    render_row(&mut view, &mut r, size);
+    assert!(view.drawn_sheets().any(|s| s == "ewok#opaque"));
+}
+
 /// Real source geometry and textures, deliberately centred on the faded pill.
 /// The item-only arm identifies opaque item pixels; the pill must not change
 /// those pixels in the candidate, while the original order must shade them.

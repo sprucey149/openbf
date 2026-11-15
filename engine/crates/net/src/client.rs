@@ -355,8 +355,8 @@ impl ClientCore {
         self.send(Msg::Resync);
     }
 
-    pub fn ready(&mut self, round_id: u32) {
-        self.send(Msg::Ready { round_id });
+    pub fn ready(&mut self, round_id: u32, profile: Vec<u8>) {
+        self.send(Msg::Ready { round_id, profile });
     }
 
     /// An opaque request for the host game.

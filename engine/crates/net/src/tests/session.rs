@@ -78,8 +78,9 @@ fn session_handshake_accepts_and_rejects() {
 fn session_other_protocol_reports_version() {
     let mut net = Net::new(2, lan(), Net::host_config());
     // A peer on another protocol: the host answers with a bare header.
+    let other_protocol = crate::packet::PROTOCOL.wrapping_sub(1).to_le_bytes();
     let mut pkt = crate::packet::bare_packet(77).finish();
-    pkt[4] = 9;
+    pkt[4..6].copy_from_slice(&other_protocol);
     net.sim.add_endpoint(addr(9));
     net.sim.send(net.now, addr(9), addr(0), &pkt);
     net.run_ms(50);
@@ -94,7 +95,7 @@ fn session_other_protocol_reports_version() {
         Micros::ZERO,
     );
     let mut theirs = reply.clone();
-    theirs[4] = crate::packet::PROTOCOL.wrapping_add(1) as u8;
+    theirs[4..6].copy_from_slice(&other_protocol);
     c.handle_datagram(Micros(10), addr(0), &theirs);
     assert_eq!(c.state(), ClientState::Rejected(RejectReason::Version));
     assert_eq!(net.host.stats().drops.wrong_protocol, 1);
@@ -572,6 +573,32 @@ fn session_second_round_streams_a_bundle_on_every_tick() {
             "{to}: no bundle sent after ticks {missing:?}"
         );
     }
+}
+
+#[test]
+fn session_ignores_catch_up_from_the_previous_round() {
+    let mut net = Net::new(
+        13,
+        LinkParams::ideal(Micros::from_millis(5)),
+        Net::host_config(),
+    );
+    let guest = net.join(1, "Guest", 1, Player::new(10.0, 1.0, 1));
+    net.connect_all();
+    net.start_round();
+    net.run_until(5_000, |n| n.host.next_tick() >= 90);
+    let previous = net.host.round_id();
+    let slot = net.clients[guest].core.slot().unwrap();
+
+    let current = net.host.load_round(b"next".to_vec(), &[0, slot]);
+    assert_ne!(previous, current);
+    // The host has advanced, but the new load is still on the wire.
+    net.clients[guest].core.caught_up(90);
+    net.run_until(5_000, |n| n.host.next_tick() >= 90);
+    assert!(net
+        .host_event(
+            |e| matches!(e, NetEvent::PeerCaughtUp { round_id, .. } if *round_id == previous)
+        )
+        .is_none());
 }
 
 /// A mid-round join's log transfer over a 10 Mbit/s host uplink: the

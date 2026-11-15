@@ -125,7 +125,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/spec.rs` 237 — PROVISIONAL specular-pass bake and shared CORE textures/table · `spec_pass`, `SpecPass`, `pass_textures`, `bake_table`, `bake_core_texture`; alpha retention and pass rules in the module/API docs (`analysis/re-specular-pass.md`, [O]).
 - `bake/src/tier.rs` 1110 — texture tiers: PS2, or a larger same-art donor · `Tier`, `tier2`, `same_art`
 - `bake/src/detail.rs` 183 — `<name>_dtl` detail maps · `write_detail_for`, `ALPHA_TEST`
-- `bake/src/glb.rs` 1009 — model GLB writer and per-primitive material/lighting metadata · `model_to_glb`, `world_model_to_glb`, `world_contact_surface_to_glb`, `LightPath`, `light_path`, `glow_path`; alpha and COL0/VU1 rules in the module/API docs.
+- `bake/src/glb.rs` 1056 — model GLB writer and per-primitive material/lighting metadata · `model_to_glb`, `world_model_to_glb`, `world_contact_surface_to_glb`, `LightPath`, `light_path`, `glow_path`; alpha and COL0/VU1 rules in the module/API docs.
 - `bake/src/far_lowd.rs` 146 — far-scene LOWD geometry extension (UTA1 cliffs) · `extension`; selection rules and runtime routing in the module header (`analysis/re-far-lowd.md`).
 - `bake/src/gltf_bin.rs` 129 — the shared GLB BIN builder · `Bin`
 - `bake/src/skin_glb.rs` 273 — skinned GLB: skeleton, skin, clips (or a skeleton and clips alone) · `skinned_to_glb`
@@ -142,14 +142,14 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/fpm.rs` 187 — `bake fpm`: a first-person arm model (FPM LVL) as a skinned GLB with its clip-table clips, the `hp_camera` bone added where the rig lacks it · `bake_fpms`, `arm_model`, `BakedFpm`; `analysis/re-first-person-arms.md` §1.
 - `bake/src/soldier/lod.rs` 257 — authored `GeometryLowRes` companions, high-rig bind/joint remap at bake time, PS2 strip-count and sphere metadata; issue #69.
 - `bake/src/shadow.rs` 224 — BF1 vehicle shadow sidecars beside their models, never a reason to fail a bake · `write_model`, `bake`; `analysis/re-vehicle-shadow.md` §9.
-- `bake/src/vehicle_render.rs` 1190 — fingerprinted donor nose/brace, Hailfire quad/crest/pack repairs; subdivided donor rack casings and ear-clipped fitted caps. Collision, joints and simulation headers stay unchanged.
+- `bake/src/vehicle_render.rs` 1392 — fingerprinted donor nose/brace, Hailfire quad/crest/pack repairs; subdivided donor rack casings and ear-clipped fitted caps. Original vertex joints, collision and simulation headers stay unchanged; new casing/cap joints follow the donor missile assembly.
 - `bake/src/vehicle_offsets.rs` 65 — vehicle selection of the shared fingerprinted vertex-offset mechanism and numeric-table guards.
 - `bake/src/vehicle_offsets_table.rs` 118 — Hailfire donor fingerprints, final primitive guards and displacement references; Xbox and PC, both games.
 - `bake/src/vehicle_offsets_data0.rs` 954 — Xbox BF1 donor-relative rack/cap vertex displacements.
 - `bake/src/vehicle_offsets_data1.rs` 951 — PC BF1 donor-relative rack/cap vertex displacements.
 - `bake/src/vehicle_offsets_data2.rs` 948 — Xbox BF2 donor-relative rack/cap vertex displacements.
 - `bake/src/vehicle_offsets_data3.rs` 951 — PC BF2 donor-relative rack/cap vertex displacements.
-- `bake/src/vehicle.rs` 1360 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker and flyer skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs` and `vehicle_offsets.rs`; walker metadata in `walker.rs`.
+- `bake/src/vehicle.rs` 1472 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker and flyer skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs` and `vehicle_offsets.rs`; walker metadata in `walker.rs`.
 - `bake/src/anim_sets.rs` 354 — resolve soldier animation inventories, sets, masks and root speeds · `Inventory`, `SoldierSets`, `plan_bf1`, `plan_bf2`, `masks`, `root_speed`; algorithms in `bake/src/anim_sets/bf1.rs` and `bf2.rs`; PS2-memory referee: `bake/tests/suite/anim_sets.rs`.
 - `bake/src/anim_sets/bf1.rs` 211 — BF1 soldier animation tables and fallbacks · `build`, `Tables`, `FALLBACK`, `weapon_set`; rules in the module and parent `anim_sets.rs` headers.
 - `bake/src/anim_sets/bf2.rs` 730 — BF2 soldier animation registration and inherited set resolution · `Registry`, `Registry::register`, `build`, `base_name`; loader rules in the module and parent `anim_sets.rs` headers.
@@ -870,6 +870,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `net/src/tests/udp.rs` 76 — real UDP loopback through two `NetSession`s for 1 s
 
 ## Tests, examples, goldens, data
+
+- `bake/tests/suite/hailfire_skin.rs` 44 — owned PC/Xbox Hailfire full-bake regression and GLB skin shape checks (#179).
 
 - `game/tests/ui_sharp.rs` 755 — serial headless owned-source menu/HUD captures, option-value visibility and treated font labels and loaded-font pointer checks (#114).
 - `game/tests/presentation_meshes.rs` 374 — native companion install/rejection, owned stock archive/camera invariance and serial headless world draw binding checks (#177).

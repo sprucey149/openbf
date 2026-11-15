@@ -638,6 +638,17 @@ impl Peer {
         &self.guests
     }
 
+    /// The host retains confirmed medals even if the ready check times out.
+    pub fn remember_guest_medals(&mut self, walk: &WalkSim) {
+        for (&slot, guest) in &mut self.guests {
+            if let Some(counts) = walk.sim.slot_medal_counts(usize::from(slot)) {
+                for (saved, count) in guest.profile.medals.iter_mut().zip(counts) {
+                    *saved = (*saved).max(count);
+                }
+            }
+        }
+    }
+
     fn reset_round(&mut self) {
         self.flush_pending();
         self.reported.clear();
@@ -802,17 +813,15 @@ impl Peer {
             }
             NetEvent::PeerLoaded {
                 slot,
+                round_id,
                 static_digest,
                 hash0,
-                ..
-            } => self.check_digest(slot, static_digest, hash0, out),
-            NetEvent::AllLoaded { round_id } => {
-                self.round_id = round_id;
+            } if round_id == self.round_id => self.check_digest(slot, static_digest, hash0, out),
+            NetEvent::AllLoaded { round_id } if round_id == self.round_id => {
                 self.all_loaded = true;
                 self.maybe_start(link);
             }
-            NetEvent::RoundStarted { round_id, lead_us } => {
-                self.round_id = round_id;
+            NetEvent::RoundStarted { round_id, lead_us } if round_id == self.round_id => {
                 let begin_in_s = self.start(lead_us);
                 out.push(Notice::Started { begin_in_s });
             }
@@ -822,7 +831,11 @@ impl Peer {
                     self.queue.push_back(b);
                 }
             }
-            NetEvent::PeerCaughtUp { slot, tick, .. } => {
+            NetEvent::PeerCaughtUp {
+                slot,
+                round_id,
+                tick,
+            } if round_id == self.round_id => {
                 self.reported.remove(&slot);
                 link.host(HostCommand::AddHuman {
                     slot,
@@ -830,6 +843,10 @@ impl Peer {
                 });
                 out.push(Notice::GuestCaughtUp { slot, tick });
             }
+            NetEvent::PeerLoaded { .. }
+            | NetEvent::AllLoaded { .. }
+            | NetEvent::RoundStarted { .. }
+            | NetEvent::PeerCaughtUp { .. } => {}
             NetEvent::Desync {
                 round_id,
                 slot,
@@ -942,7 +959,27 @@ impl Peer {
                 },
             },
             NetEvent::Chat { slot, text } => out.push(Notice::Chat { slot, text }),
-            NetEvent::PeerReady { slot, .. } => out.push(Notice::PeerReady { slot }),
+            NetEvent::PeerReady {
+                slot,
+                round_id,
+                profile,
+            } => {
+                if round_id != self.round_id {
+                    return;
+                }
+                if let Some(guest) = self.guests.get_mut(&slot) {
+                    if let Ok(mut updated) =
+                        serde_json::from_slice::<super::PlayerProfile>(&profile)
+                    {
+                        updated.name.clone_from(&guest.profile.name);
+                        for (count, saved) in updated.medals.iter_mut().zip(guest.profile.medals) {
+                            *count = (*count).max(saved);
+                        }
+                        guest.profile = updated;
+                    }
+                    out.push(Notice::PeerReady { slot });
+                }
+            }
             NetEvent::Refused { .. } | NetEvent::Trouble { .. } => {}
         }
     }
@@ -1996,6 +2033,7 @@ mod tests {
     fn a_digest_that_arrives_before_the_hosts_build_is_still_checked() {
         let mut core = net::HostCore::new(net::HostConfig::new("b", "Host"));
         let mut peer = Peer::host();
+        peer.round_id = 1;
         let mut out = Vec::new();
         for (slot, digest) in [(1, 5), (2, 7)] {
             peer.host_event(
@@ -2027,5 +2065,39 @@ mod tests {
         );
         assert_eq!(peer.stats.digest_mismatches, 1);
         assert!(peer.poll(&mut core).is_empty(), "said once");
+    }
+
+    #[test]
+    fn host_ignores_lifecycle_events_from_the_previous_round() {
+        let mut core = net::HostCore::new(net::HostConfig::new("b", "Host"));
+        let mut peer = Peer::host();
+        peer.round_id = 2;
+        peer.mode = Mode::Loading;
+        let mut out = Vec::new();
+
+        for event in [
+            NetEvent::PeerLoaded {
+                slot: 1,
+                round_id: 1,
+                static_digest: 3,
+                hash0: 4,
+            },
+            NetEvent::AllLoaded { round_id: 1 },
+            NetEvent::RoundStarted {
+                round_id: 1,
+                lead_us: 0,
+            },
+            NetEvent::PeerCaughtUp {
+                slot: 1,
+                round_id: 1,
+                tick: 90,
+            },
+        ] {
+            peer.host_event(&mut core, event, &mut out);
+        }
+
+        assert_eq!(peer.round_id(), 2);
+        assert!(peer.loaded_digests.is_empty() && !peer.all_loaded && !peer.started);
+        assert!(out.is_empty(), "{out:?}");
     }
 }

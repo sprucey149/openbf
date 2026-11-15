@@ -427,7 +427,7 @@ impl NetplaySession {
         });
         let setup =
             RoundSetup::instant_action(&self.args.map, &self.args.mode, armies, session, profile);
-        self.seat_humans(setup)
+        self.seat_humans(setup, profile)
     }
 
     /// The host's round for a playlist row (the lobby's Launch): the row's
@@ -448,11 +448,17 @@ impl NetplaySession {
         );
         setup.difficulty = game::shell_ia::port_difficulty(session.difficulty);
         setup.playlist_pos = pos;
-        self.seat_humans(setup)
+        self.seat_humans(setup, profile)
+    }
+
+    pub(super) fn current_profile(&self, profile: &game::profile::Profile) -> PlayerProfile {
+        let mut current = PlayerProfile::from_profile(profile);
+        current.name.clone_from(&self.profile.name);
+        current
     }
 
     /// Every connected human seated, the host's cheat policy.
-    fn seat_humans(&self, mut setup: RoundSetup) -> RoundSetup {
+    fn seat_humans(&self, mut setup: RoundSetup, profile: &game::profile::Profile) -> RoundSetup {
         setup.cheat_policy = self.args.cheats;
         setup.awards = self.lobby.awards;
         setup.humans.push(HumanSeat {
@@ -460,7 +466,7 @@ impl NetplaySession {
             name: self.profile.name.clone(),
             team: None,
             cheats: 0,
-            profile: self.profile.clone(),
+            profile: self.current_profile(profile),
         });
         for (slot, g) in self.peer.guests() {
             setup.humans.push(HumanSeat {

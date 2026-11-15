@@ -218,7 +218,10 @@ fn codec_messages_round_trip() {
             target: "linux-x86_64".into(),
         },
         Msg::Leave,
-        Msg::Ready { round_id: 2 },
+        Msg::Ready {
+            round_id: 2,
+            profile: vec![1, 2, 3],
+        },
         Msg::Request(vec![1, 2]),
         Msg::Notice(vec![3]),
         Msg::Chat {

@@ -171,7 +171,12 @@ impl Instructions {
         }
         Ok(Self(selected))
     }
-    pub(crate) fn apply(&self, model: &mut Model) -> Result<()> {
+    pub(crate) fn apply(
+        &self,
+        model: &mut Model,
+        joints: &mut Vec<Vec<usize>>,
+        skeleton: Option<&mungefs::skel::Skeleton>,
+    ) -> Result<()> {
         let Some(&recipe) = self.0.get(&model.name.to_ascii_lowercase()) else {
             return Ok(());
         };
@@ -180,16 +185,18 @@ impl Instructions {
             "vehicle drawing instruction requires bind posing"
         );
         let mut result = model.clone();
+        let mut bones = joints.clone();
         match recipe {
             Recipe::Hailfire(donor) => {
                 let apexes = apexes(&result, donor.apexes)?;
                 diagonals(&mut result, donor.quads)?;
                 collapse(&mut result, &apexes)?;
-                racks(&mut result)?;
+                racks(&mut result, &mut bones, skeleton)?;
             }
             Recipe::Bomber => nose(&mut result)?,
         }
         *model = result;
+        *joints = bones;
         Ok(())
     }
 }
@@ -198,14 +205,29 @@ impl Instructions {
 /// A fan from one corner can cross a scalloped edge; ears derived from the
 /// player's corrected ring keep every cap triangle inside that ring.
 impl Instructions {
-    pub(crate) fn finish(&self, model: &mut Model) -> Result<()> {
+    pub(crate) fn finish(&self, model: &mut Model, joints: &mut [Vec<usize>]) -> Result<()> {
         if !matches!(
             self.0.get(&model.name.to_ascii_lowercase()),
             Some(Recipe::Hailfire(_))
         ) {
             return Ok(());
         }
-        for segment in model.segments.iter_mut().rev().take(2) {
+        if !joints.is_empty() {
+            ensure!(
+                joints.len() == model.segments.len(),
+                "changed Hailfire joint rows"
+            );
+        }
+        for (si, segment) in model.segments.iter_mut().enumerate().rev().take(2) {
+            let bones = joints.get_mut(si);
+            if let Some(bones) = &bones {
+                ensure!(
+                    bones.len() == segment.positions.len()
+                        && !bones.is_empty()
+                        && bones.iter().all(|b| *b == bones[0]),
+                    "changed Hailfire casing joint ownership"
+                );
+            }
             let n = 64;
             ensure!(
                 segment.triangles.len() == 4 * n - 4,
@@ -244,6 +266,9 @@ impl Instructions {
                 }
             }
             caps.extend(sides);
+            if let Some(bones) = bones {
+                bones.resize(segment.positions.len(), bones[0]);
+            }
             segment.vertex_count = segment.positions.len() as u32;
             segment.triangles = caps;
             segment.index_count = (segment.triangles.len() * 3) as u32;
@@ -670,7 +695,50 @@ fn min_box(ring: &[[f32; 2]]) -> Vec<[f32; 2]> {
         .collect()
 }
 
-fn racks(model: &mut Model) -> Result<()> {
+fn rack_owner(
+    model: &Model,
+    parts: &[&Part],
+    joints: &[Vec<usize>],
+    skeleton: &mungefs::skel::Skeleton,
+) -> Result<usize> {
+    let mut assembly = None;
+    for p in parts {
+        let mut owner = None;
+        for &fi in &p.faces {
+            for &v in &model.segments[p.segment].triangles[fi] {
+                let bone = joints
+                    .get(p.segment)
+                    .and_then(|row| row.get(v as usize))
+                    .copied()
+                    .ok_or_else(|| anyhow::anyhow!("missing Hailfire missile joint"))?;
+                ensure!(
+                    owner.is_none_or(|b| b == bone),
+                    "mixed Hailfire missile joint ownership"
+                );
+                owner = Some(bone);
+            }
+        }
+        // Each missile has its own rigid bone. Its direct parent is the
+        // rack assembly; all sixteen missiles must agree on that parent.
+        let parent = owner
+            .and_then(|b| skeleton.bones.get(b))
+            .and_then(|b| b.parent)
+            .filter(|&b| b < skeleton.bones.len())
+            .ok_or_else(|| anyhow::anyhow!("missing Hailfire missile assembly"))?;
+        ensure!(
+            assembly.is_none_or(|b| b == parent),
+            "mixed Hailfire rack joint ownership"
+        );
+        assembly = Some(parent);
+    }
+    assembly.ok_or_else(|| anyhow::anyhow!("missing Hailfire rack joint ownership"))
+}
+
+fn racks(
+    model: &mut Model,
+    joints: &mut Vec<Vec<usize>>,
+    skeleton: Option<&mungefs::skel::Skeleton>,
+) -> Result<()> {
     ensure!(
         matches!(model.segments.len(), 4 | 6 | 41),
         "changed Hailfire donor segmentation"
@@ -681,6 +749,20 @@ fn racks(model: &mut Model) -> Result<()> {
         "changed Hailfire donor missile components: {}",
         parts.len()
     );
+    if !joints.is_empty() {
+        ensure!(
+            joints.len() == model.segments.len(),
+            "changed Hailfire joint rows"
+        );
+        ensure!(
+            model
+                .segments
+                .iter()
+                .zip(joints.iter())
+                .all(|(s, b)| s.positions.len() == b.len()),
+            "changed Hailfire joint vertices"
+        );
+    }
     turn_pack(model, &mut parts)?;
     let original = model.clone();
     for (si, s) in model.segments.iter_mut().enumerate() {
@@ -713,6 +795,18 @@ fn racks(model: &mut Model) -> Result<()> {
             .filter(|p| (p.lo.x + p.hi.x) * sign > 0.)
             .collect();
         ensure!(group.len() == 16, "changed Hailfire donor rack ownership");
+        // The casing follows the missile assembly. A material segment may
+        // contain other parts, so resolve ownership from the missile faces.
+        let owner = if joints.is_empty() {
+            None
+        } else {
+            Some(rack_owner(
+                &original,
+                &group,
+                joints,
+                skeleton.ok_or_else(|| anyhow::anyhow!("missing Hailfire render skeleton"))?,
+            )?)
+        };
         let mut points = Vec::new();
         for p in &group {
             let s = &original.segments[p.segment];
@@ -800,6 +894,9 @@ fn racks(model: &mut Model) -> Result<()> {
         }
         s.vertex_count = s.positions.len() as u32;
         s.index_count = (s.triangles.len() * 3) as u32;
+        if let Some(owner) = owner {
+            joints.push(vec![owner; s.positions.len()]);
+        }
         model.segments.push(s);
     }
     Ok(())
@@ -865,7 +962,9 @@ mod tests {
         )]));
         let mut model = bomber(73);
         let before = model.segments[1].positions.clone();
-        assert!(instructions.apply(&mut model).is_err());
+        assert!(instructions
+            .apply(&mut model, &mut Vec::new(), None)
+            .is_err());
         assert_eq!(model.segments[1].positions, before);
     }
     #[test]
@@ -877,20 +976,25 @@ mod tests {
             "imp_fly_tiebomber".into(),
             Recipe::Bomber,
         )]));
-        assert!(instructions.apply(&mut model).is_err());
+        assert!(instructions
+            .apply(&mut model, &mut Vec::new(), None)
+            .is_err());
         assert_eq!(model.segments[1].positions, before);
     }
     #[test]
     fn only_selected_nose_and_brace_positions_move_and_no_recipe_leaves_them_alone() {
         let mut model = bomber(74);
         let before = model.clone();
-        Instructions::of(None).unwrap().apply(&mut model).unwrap();
+        Instructions::of(None)
+            .unwrap()
+            .apply(&mut model, &mut Vec::new(), None)
+            .unwrap();
         assert_eq!(model.segments[1].positions, before.segments[1].positions);
         Instructions(HashMap::from([(
             "imp_fly_tiebomber".into(),
             Recipe::Bomber,
         )]))
-        .apply(&mut model)
+        .apply(&mut model, &mut Vec::new(), None)
         .unwrap();
         assert_eq!(model.segments[0].positions, before.segments[0].positions);
         assert_eq!(
@@ -1097,7 +1201,9 @@ mod tests {
             model.name.clone(),
             Recipe::Hailfire(&HAILFIRE[0]),
         )]));
-        instructions.finish(&mut model).unwrap();
+        let mut joints = vec![vec![7; 2 * n], vec![11; 2 * n]];
+        instructions.finish(&mut model, &mut joints).unwrap();
+        assert_eq!(joints, [vec![7; 4 * n], vec![11; 4 * n]]);
         for segment in &model.segments {
             assert_eq!(&segment.positions[..2 * n], old.positions.as_slice());
             assert_eq!(&segment.uvs[..2 * n], old.uvs.as_slice());
@@ -1152,6 +1258,102 @@ mod tests {
         }
         (quad_model(tris, pos), parts)
     }
+    #[test]
+    fn hailfire_casing_joints_follow_each_racks_missile_parent() {
+        // Closed four-sided tubes: eight side triangles and four per cap.
+        let (mut model, parts) = packs(36., -PACK_TURN_DEG);
+        let mut tube = empty(&model.segments[1]);
+        let mut row = Vec::new();
+        let bone = |parent| mungefs::skel::SkelBone {
+            name: String::new(),
+            crc: 0,
+            parent,
+            rows: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            t: [0.; 3],
+        };
+        let mut skeleton = mungefs::skel::Skeleton {
+            name: model.name.clone(),
+            bones: vec![bone(None), bone(Some(0)), bone(Some(0))],
+        };
+        for part in parts {
+            let centre = tube_centre(&part);
+            let start = tube.positions.len() as u32;
+            let owner = skeleton.bones.len();
+            skeleton
+                .bones
+                .push(bone(Some(if centre.x < 0. { 1 } else { 2 })));
+            for z in [-1.3, 1.3] {
+                for [x, y] in [
+                    [-0.02, -0.02],
+                    [0.02, -0.02],
+                    [0.02, 0.02],
+                    [-0.02, 0.02],
+                    [0., 0.],
+                ] {
+                    tube.positions.push([centre.x + x, centre.y + y, z]);
+                    tube.normals.push([0., 0., 1.]);
+                    tube.uvs.push([0.; 2]);
+                    row.push(owner);
+                }
+            }
+            for i in 0..4 {
+                let j = (i + 1) % 4;
+                for t in [
+                    [i, j, 5 + j],
+                    [i, 5 + j, 5 + i],
+                    [4, j, i],
+                    [9, 5 + i, 5 + j],
+                ] {
+                    tube.triangles.push(t.map(|v| start + v));
+                }
+            }
+        }
+        tube.vertex_count = tube.positions.len() as u32;
+        tube.index_count = (tube.triangles.len() * 3) as u32;
+        model.segments = vec![empty(&tube), tube.clone(), empty(&tube), empty(&tube)];
+        let original = vec![vec![], row, vec![], vec![]];
+        let mut joints = original.clone();
+        static DONOR: Donor = Donor {
+            hash: "",
+            quads: &[],
+            apexes: &[],
+        };
+        let instructions = Instructions(HashMap::from([(
+            model.name.clone(),
+            Recipe::Hailfire(&DONOR),
+        )]));
+        // A single mixed missile vertex or a missile in another assembly must
+        // fail without committing either geometry or joints.
+        for (vertex, replacement) in [(0, 0), (0, 19)] {
+            let mut bad = original.clone();
+            if replacement == 19 {
+                bad[1][..10].fill(replacement);
+            } else {
+                bad[1][vertex] = replacement;
+            }
+            let before = bad.clone();
+            let mut unchanged = model.clone();
+            assert!(instructions
+                .apply(&mut unchanged, &mut bad, Some(&skeleton))
+                .is_err());
+            assert_eq!(bad, before);
+            assert_eq!(unchanged.segments.len(), 4);
+            assert_eq!(unchanged.segments[1].positions, tube.positions);
+        }
+        instructions
+            .apply(&mut model, &mut joints, Some(&skeleton))
+            .unwrap();
+        assert_eq!(joints.len(), 6);
+        assert_eq!(&joints[..4], original.as_slice());
+        assert_eq!(joints[4], vec![1; 756]);
+        assert_eq!(joints[5], vec![2; 756]);
+        instructions.finish(&mut model, &mut joints).unwrap();
+        assert_eq!(joints[4], vec![1; 884]);
+        assert_eq!(joints[5], vec![2; 884]);
+        let alpha = crate::alpha::AlphaTable::new(&[]).model(&model);
+        crate::glb::model_to_glb_joints(&model, &alpha, false, Some(&joints)).unwrap();
+    }
+
     #[test]
     fn the_minus_x_pack_turns_back_into_the_plus_x_packs_mirror_and_both_shift() {
         let (mut m, mut parts) = packs(36., -PACK_TURN_DEG);
