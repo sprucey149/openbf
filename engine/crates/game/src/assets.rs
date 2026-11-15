@@ -422,18 +422,37 @@ pub fn mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
     })
 }
 
+/// Resolve a mission script's requested layer name (from `ReadDataFile`) to an
+/// index in `m.layers`. Covers the spelling/wrapper mismatches in retail BF2
+/// campaign scripts against the baked layer names and `worlds` lists.
+pub fn resolve_campaign_layer_index(m: &Manifest, requested: &str) -> Option<usize> {
+    let req = requested.trim().to_ascii_lowercase();
+    if req == "hoth_objective" {
+        return m.layers.iter().position(|l| {
+            l.worlds
+                .iter()
+                .chain(std::iter::once(&l.name))
+                .any(|w| w.eq_ignore_ascii_case("hoth_cps"))
+        });
+    }
+    let alias = match req.as_str() {
+        "myg1_assult" => Some("myg1_cp-assault"),
+        "spa3_campaign" => Some("spa3_swing_camp"),
+        "kas2_obj" => Some("kas2_gen-cp"),
+        "dea1_campaign" => Some("dea1_design"),
+        "tan1_obj" => Some("tan1_newobjective"),
+        "spa1_campaign" => Some("spa1_campaign_turrets"),
+        _ => None,
+    };
+    m.layers.iter().position(|l| {
+        l.worlds.iter().chain(std::iter::once(&l.name)).any(|w| {
+            w.eq_ignore_ascii_case(&req) || alias.is_some_and(|a| w.eq_ignore_ascii_case(a))
+        })
+    })
+}
+
 impl Scene {
-    /// Merge the world layer for `mode` ("con", "ctf", ...) into the base
-    /// instances/regions. The mode is spelled in a WORLD name and a layer may
-    /// hold several, so EVERY world in a layer is matched, with the spellings
-    /// the discs use and a fallback for the maps that ship no mode sublevel
-    /// — see the body. Naming a layer after `worlds[0]` alone found the
-    /// conquest posts on 1 of 16 BF2 maps. BF1 maps have no layers
-    /// (everything is in the base world). Returns the layer name.
-    pub fn apply_mode_layer(&mut self, mode: &str) -> Option<String> {
-        self.manifest.spawn_only_posts = matches!(mode, "eli" | "hunt");
-        let idx = mode_layer_index(&self.manifest, mode)?;
-        let layer = self.manifest.layers.remove(idx);
+    fn merge_layer(&mut self, layer: ManifestLayer) -> String {
         self.manifest.regions.extend(layer.regions);
         self.manifest.instances.extend(layer.instances);
         // The layer's AI data merges the same way the runtime stacks it (PLAN
@@ -453,7 +472,35 @@ impl Scene {
             base.hints.extend(ln.hints);
             base.barriers.extend(ln.barriers);
         }
-        Some(layer.name)
+        layer.name
+    }
+
+    /// Merge the world layer for `mode` ("con", "ctf", ...) into the base
+    /// instances/regions. The mode is spelled in a WORLD name and a layer may
+    /// hold several, so EVERY world in a layer is matched, with the spellings
+    /// the discs use and a fallback for the maps that ship no mode sublevel
+    /// — see the body. Naming a layer after `worlds[0]` alone found the
+    /// conquest posts on 1 of 16 BF2 maps. BF1 maps have no layers
+    /// (everything is in the base world). Returns the layer name.
+    pub fn apply_mode_layer(&mut self, mode: &str) -> Option<String> {
+        self.manifest.spawn_only_posts = matches!(mode, "eli" | "hunt");
+        let idx = mode_layer_index(&self.manifest, mode)?;
+        let layer = self.manifest.layers.remove(idx);
+        Some(self.merge_layer(layer))
+    }
+
+    /// Merge an ordered list of mission-requested world layers into the base
+    /// scene (used by BF2 campaign scripts). Returns the names of merged layers.
+    pub fn apply_mission_layers(&mut self, layers: &[String]) -> Vec<String> {
+        self.manifest.spawn_only_posts = false;
+        let mut merged = Vec::new();
+        for req in layers {
+            if let Some(idx) = resolve_campaign_layer_index(&self.manifest, req) {
+                let layer = self.manifest.layers.remove(idx);
+                merged.push(self.merge_layer(layer));
+            }
+        }
+        merged
     }
 
     /// Build the sim-side ground-height query from the baked terrain mesh
@@ -1641,14 +1688,29 @@ pub struct BattleLoad {
 /// through here. A COMMON bake that exists but will not load is not an
 /// error: the map still loads, and `BattleLoad::common` says why.
 pub fn load_battle_scene(dir: &Path, mode: &str) -> Result<(Scene, BattleLoad)> {
+    load_battle_scene_with_layers(dir, mode, &[])
+}
+
+/// Load a baked map with explicit mission-script world layers when provided or
+/// in `"campaign"` mode, falling back to `mode_layer_index` for standard modes.
+pub fn load_battle_scene_with_layers(
+    dir: &Path,
+    mode: &str,
+    layers: &[String],
+) -> Result<(Scene, BattleLoad)> {
     let mut scene = load_scene(dir)?;
-    anyhow::ensure!(
-        (mode == "hunt" && scene.manifest.source_game == "bf1")
-            || !matches!(mode, "eli" | "hunt")
-            || authored_mode_layer_index(&scene.manifest, mode).is_some(),
-        "map has no authored world layer for mode {mode}"
-    );
-    let layer = scene.apply_mode_layer(mode);
+    let layer = if mode.eq_ignore_ascii_case("campaign") || !layers.is_empty() {
+        let merged = scene.apply_mission_layers(layers);
+        (!merged.is_empty()).then(|| merged.join(", "))
+    } else {
+        anyhow::ensure!(
+            (mode == "hunt" && scene.manifest.source_game == "bf1")
+                || !matches!(mode, "eli" | "hunt")
+                || authored_mode_layer_index(&scene.manifest, mode).is_some(),
+            "map has no authored world layer for mode {mode}"
+        );
+        scene.apply_mode_layer(mode)
+    };
     let common = dir
         .parent()
         .map(|p| p.join(format!("common_{}", scene.manifest.source_game)))

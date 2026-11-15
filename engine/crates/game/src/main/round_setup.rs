@@ -161,6 +161,94 @@ pub(super) fn build_round(
     Ok(walk)
 }
 
+/// Singleplayer "Rise of the Empire" campaign mission setup (`mode == "campaign"`):
+/// loads the generated campaign RON script directly, puts the player on
+/// team 0, and preserves the script's authored unit counts, hero roster, and
+/// ticket rules without overwriting them with Instant Action defaults.
+pub(super) fn campaign_setup(
+    missions_dir: &Path,
+    assets_dir: &Path,
+    entry: &ui::campaign::CampaignMissionEntry,
+    seed: u32,
+    difficulty: core::skill::Difficulty,
+) -> Result<BattleSetup> {
+    let mission = game::mission::MissionDef::load_campaign(missions_dir, entry.script)?;
+    anyhow::ensure!(
+        mission.teams.len() >= 2,
+        "campaign mission {} must define two teams",
+        entry.script
+    );
+    let teams = [
+        mission.teams[0].faction.clone(),
+        mission.teams[1].faction.clone(),
+    ];
+    let tickets = mission.teams[0].tickets.max(100);
+    let player_team = mission.initial_player_team();
+    Ok(BattleSetup {
+        seed,
+        difficulty,
+        spawn: (0.0, 0.0),
+        spawn_set: false,
+        targets: false,
+        ai: None,
+        ai_cap: None,
+        team_size_pct: None,
+        tickets,
+        tickets_set: false,
+        ticket_pct: 100,
+        time_limit: 0,
+        space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
+        cheats: core::sim::Cheats::default(),
+        teams: Some(teams),
+        classes_dir: assets_dir.join("classes"),
+        mission: Some(mission),
+        vehicle: None,
+        mission_file: Some(format!("bf2_{}.ron", entry.script)),
+        player_team,
+        heroes: game::heroes::rules(&ui::shell::SessionOptions::default()),
+        dlc_heroes: false,
+        netplay_rows: false,
+        opening_humans: [0; 2],
+        score_limit: 0,
+    })
+}
+
+/// World sublevel layers requested by a campaign mission script, if any.
+pub(super) fn campaign_layers_for(
+    missions_dir: &Path,
+    map: &str,
+    mode: &str,
+    script: Option<&str>,
+) -> Vec<String> {
+    if !mode.eq_ignore_ascii_case("campaign") {
+        return Vec::new();
+    }
+    if let Some(stem) = script {
+        if let Ok(m) = game::mission::MissionDef::load_campaign(missions_dir, stem) {
+            return m.layers;
+        }
+    }
+    let dir = missions_dir.join("campaign");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("ron") {
+            continue;
+        }
+        let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if let Ok(m) = game::mission::MissionDef::load_campaign(missions_dir, stem) {
+            if m.map.eq_ignore_ascii_case(map) {
+                return m.layers;
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// A LAN host's self-check build (`game::netplay::selfcheck`), on a worker
 /// thread: the round's map loaded from `assets_dir` again (the window's own
 /// copy stays where it is), [`build_round`], and the event feed the window
@@ -174,7 +262,9 @@ pub(super) fn rebuilder(
     game::netplay::Rebuild::Thread(std::sync::Arc::new(
         move |round: &RoundSetup, local, stop: &Stop| {
             let dir = assets_dir.join(&round.map);
-            let (scene, load) = game::assets::load_battle_scene(&dir, &round.mode)?;
+            let layers = campaign_layers_for(&missions_dir, &round.map, &round.mode, None);
+            let (scene, load) =
+                game::assets::load_battle_scene_with_layers(&dir, &round.mode, &layers)?;
             if let Some((path, Err(error))) = load.common {
                 anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
             }
@@ -378,5 +468,32 @@ mod tests {
             }
             assert!(seen[0] > 0 && seen[1] > 0, "{case}: opening bots {seen:?}");
         }
+    }
+
+    #[test]
+    fn campaign_setup_loads_rise_of_the_empire_entry() {
+        let missions = Path::new("../../missions");
+        let assets = Path::new("../../assets_baked");
+        if !missions.join("campaign").is_dir() {
+            return;
+        }
+        let entry = &ui::campaign::RISE_OF_THE_EMPIRE[0];
+        let setup = campaign_setup(
+            missions,
+            assets,
+            entry,
+            42,
+            core::skill::Difficulty::Normal,
+        )
+        .expect("campaign setup for Geonosis");
+        assert_eq!(setup.player_team, 0);
+        assert_eq!(setup.team_size_pct, None);
+        assert_eq!(setup.mission_file.as_deref(), Some("bf2_geo1c_c.ron"));
+        let mission = setup.mission.as_ref().expect("mission");
+        assert!(mission.campaign.is_some());
+        assert_eq!(
+            campaign_layers_for(missions, entry.map, "campaign", Some(entry.script)),
+            mission.layers
+        );
     }
 }

@@ -249,6 +249,15 @@ pub fn load_classdb(classes_dir: &Path, game: &str, factions: &[&str]) -> Result
             loaded += 1;
         }
     }
+    if game == "bf2" {
+        for extra in ["bf2_gar.ron", "bf2_jed.ron"] {
+            let p = classes_dir.join(extra);
+            if pak::exists(&p) {
+                db.load(&p)?;
+                loaded += 1;
+            }
+        }
+    }
     if loaded == 0 {
         return Err(anyhow!(
             "no {game} class files in {} (run `bake classes` on the side LVLs)",

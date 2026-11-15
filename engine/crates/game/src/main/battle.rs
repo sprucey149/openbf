@@ -27,7 +27,16 @@ pub(super) fn load_and_upload(
     dir: &std::path::Path,
     mode: &str,
 ) -> Result<(SceneGpu, game::assets::Scene)> {
-    let (scene, load) = game::assets::load_battle_scene(dir, mode)?;
+    load_and_upload_with_layers(r, dir, mode, &[])
+}
+
+pub(super) fn load_and_upload_with_layers(
+    r: &mut Renderer,
+    dir: &std::path::Path,
+    mode: &str,
+    layers: &[String],
+) -> Result<(SceneGpu, game::assets::Scene)> {
+    let (scene, load) = game::assets::load_battle_scene_with_layers(dir, mode, layers)?;
     let gpu = upload_battle_scene(r, &scene, &load)?;
     Ok((gpu, scene))
 }
@@ -256,7 +265,8 @@ fn team_templates(
 /// screens stand over the mission's camera shots until the first spawn (card SSELB,
 /// `game::spawn_backdrop`).
 pub(super) fn open_spawn_screens(walk: &mut WalkSim, mission: Option<&game::mission::MissionDef>) {
-    if !walk.sim.open_spawn_screens(0, true) {
+    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    if !walk.sim.open_spawn_screens(0, side_choice) {
         eprintln!("spawn screens: slot 0 holds no live unit; the respawn stays automatic");
         return;
     }
@@ -379,7 +389,7 @@ pub(super) fn make_walk_with_counts(
     let map_defaults = b
         .mission
         .as_ref()
-        .filter(|m| !m.is_hunt())
+        .filter(|m| !m.is_hunt() && !m.is_campaign())
         .and_then(|m| game::conquest_defaults::for_map(&m.map, m.era.as_deref() == Some("cw")));
     let defaults = b.team_size_pct.and(map_defaults);
     let resolved = defaults.map(|d| d.scaled(b.team_size_pct.unwrap_or(100), b.ticket_pct));
@@ -394,6 +404,21 @@ pub(super) fn make_walk_with_counts(
             .map(|n| core::sim::scale_reinforcements(n, b.ticket_pct))
     };
     sim.battle = core::battle::Battle::new(tickets);
+    if let Some(c) = b.mission.as_ref().and_then(|m| m.campaign.as_ref()) {
+        use core::fmath::FloatExt;
+        sim.battle.campaign_rules = true;
+        sim.battle.unlimited_teams = c.infinite_tickets;
+        for t in 0..2 {
+            if c.infinite_tickets[t] {
+                let min_pool = b
+                    .mission
+                    .as_ref()
+                    .map_or(100, |m| m.teams[t].units.max(100)) as f32;
+                sim.battle.teams[t].reinforcements =
+                    sim.battle.teams[t].reinforcements.fmax(min_pool);
+            }
+        }
+    }
     sim.time_limit = (b.time_limit > 0).then(|| b.time_limit * 60);
     if let Some(m) = &b.mission {
         sim.ai_alive_cap = m.ai_alive_cap;
@@ -487,7 +512,11 @@ pub(super) fn make_walk_with_counts(
         })
         .or_else(|| b.vehicle.is_some().then_some([0, 0]));
     let mut vehicle_classes: Vec<String> = Vec::new();
-    let mut layout = game::layout::MapLayout::from_battle_manifest(&scene.manifest, hunt);
+    let mut layout = game::layout::MapLayout::from_mission_manifest(
+        &scene.manifest,
+        hunt,
+        b.mission.as_ref().is_some_and(|m| m.is_campaign()),
+    );
     if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
         // Hoth and Theed register hazards by name in the Hunt scripts.
         // Their baked shapes also occur in the map's shared design worlds.
@@ -544,6 +573,11 @@ pub(super) fn make_walk_with_counts(
     }
     if let Some(counts) = ai_counts {
         walk.add_posts(&layout);
+        let saved_cp_owners = if let Some(m) = b.mission.as_ref().filter(|m| m.is_campaign()) {
+            game::campaign_runtime::CampaignRuntime::kill_startup_posts(&mut walk.sim, &m.killed)
+        } else {
+            Vec::new()
+        };
         if hunt {
             // Class change at your own posts (issue #161): each post's
             // class radius, from the map's shared and own classes.
@@ -569,7 +603,11 @@ pub(super) fn make_walk_with_counts(
         // go in before the opening wave, which spawns at the command walkers
         // they are about to build (card CWSP).
         let factions = [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()];
-        let space = b.mission.as_ref().filter(|m| m.mode == "ass").map(|m| {
+        let space = b
+            .mission
+            .as_ref()
+            .filter(|m| m.mode == "ass" || (m.is_campaign() && (m.space_assault.is_some() || m.map.contains("_spa"))))
+            .map(|m| {
             (
                 m.space_assault.clone().unwrap_or_default(),
                 b.space_score_limit,
@@ -618,6 +656,61 @@ pub(super) fn make_walk_with_counts(
             }
             Err(e) => eprintln!("vehicle pads unavailable ({e:#})"),
         }
+        if let Some(m) = &b.mission {
+            walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
+            for t in 0..2usize {
+                walk.sim
+                    .set_ai_spawn_allowed(t as u8, m.teams[t].allows_ai_spawn_initially());
+                let hero = walk.sim.hero_class(t as u8).map(usize::from);
+                let n = walk.sim.classes[t].len();
+                walk.sim.class_enabled[t] = (0..n)
+                    .map(|ci| {
+                        let name = walk.teams[t]
+                            .classes
+                            .get(ci)
+                            .map(|cv| cv.name.as_str())
+                            .unwrap_or("");
+                        if Some(ci) == hero {
+                            !m.teams[t]
+                                .class_blacklist
+                                .iter()
+                                .any(|c| c.eq_ignore_ascii_case(name))
+                        } else {
+                            m.teams[t].is_class_initially_enabled(name)
+                        }
+                    })
+                    .collect();
+            }
+            let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
+            game::native_teams::install(
+                &mut walk,
+                &layout,
+                &b.classes_dir,
+                assets_dir,
+                m,
+                &scene.manifest,
+            );
+            if let Some(spec) = m.campaign.clone() {
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    walk.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                let mut rt = game::campaign_runtime::CampaignRuntime::new(
+                    spec,
+                    &layout,
+                    &scene.manifest,
+                    &walk.post_keys,
+                    saved_cp_owners,
+                    &walk.sim,
+                );
+                rt.set_team_rosters(team_classes, [0, 0]);
+                rt.start(&mut walk.sim);
+                walk.campaign = Some(rt);
+            }
+        }
         // A LAN round's other humans are seated after this wave
         // (`round_setup::build_round`), but its bots take their skill now:
         // they count for the DTEAM rows while it spawns (issue #171).
@@ -628,16 +721,17 @@ pub(super) fn make_walk_with_counts(
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.
         if let Some(m) = &b.mission {
-            walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
             let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
-            game::native_teams::install(
-                &mut walk,
-                &layout,
-                &b.classes_dir,
-                assets_dir,
-                m,
-                &scene.manifest,
-            );
+            if let Some(rt) = walk.campaign.as_mut() {
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    walk.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                rt.set_team_rosters(team_classes, counts);
+            }
             walk.sound_levels = m.sound_levels();
             walk.space_round = m.space_assault.as_ref().map(|d| {
                 let mut round = game::space_assault::SpaceRound::new(d);
@@ -981,10 +1075,14 @@ pub(super) fn hud_model(
             .domination_left()
             .map(|(holder, secs)| (holder == me.team, secs)),
         round_end: walk.round_end.as_ref().map(round_end_model),
-        time_left: walk.sim.time_limit.map(|l| {
-            (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
-                / core::TICK_HZ as f32
-        }),
+        time_left: walk
+            .sim
+            .time_limit
+            .map(|l| {
+                (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
+                    / core::TICK_HZ as f32
+            })
+            .or_else(|| walk.campaign.as_ref().and_then(|c| c.time_left())),
         messages: feed.take(),
         ambush: feed.take_ambush(),
         damage_flash: feed.damage_flash(walk.sim.tick, walk.player),

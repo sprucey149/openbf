@@ -612,6 +612,8 @@ fn post(name: &str, team: u8, pos: Vec3, spawn_path: Option<&str>) -> CommandPos
         value_def: [crate::layout::VALUE_DEFAULT; 5],
         major: false,
         space: false,
+        capturable: true,
+        visible: true,
         vo: Default::default(),
     }
 }

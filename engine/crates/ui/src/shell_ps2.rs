@@ -112,6 +112,11 @@ pub enum Page {
     Title,
     Main,
     Singleplayer,
+    AskTraining,
+    RiseNewLoad,
+    RiseOfTheEmpire,
+    CampaignBattle,
+    CampaignMenu,
     Options,
     /// `[ours]` issue #168.
     Multiplayer,
@@ -125,9 +130,25 @@ pub enum RowId {
     Splitscreen,
     Options,
     QuitGame,
+    Training,
     RiseOfTheEmpire,
     GalacticConquest,
     InstantAction,
+    AskTrainingPlay,
+    AskTrainingSkip,
+    CampaignNewGame,
+    CampaignLoad,
+    CampaignMission(u8),
+    CampaignToggleAll,
+    CampaignPlay,
+    CampaignBack,
+    CampaignResume,
+    CampaignOptions,
+    CampaignSave,
+    CampaignLoadMenu,
+    CampaignQuit,
+    CampaignQuitYes,
+    CampaignQuitNo,
     GameOptions,
     AudioOptions,
     GraphicsOptions,
@@ -149,9 +170,28 @@ impl RowId {
             RowId::Options => ("ifs.main.options", "Options"),
             // Our own key: the disc's `common.quit2windows` reads "Exit To Windows".
             RowId::QuitGame => ("ifs.main.quitgame", "Quit Game"),
+            RowId::Training => ("ifs.sp.training", "Training"),
             RowId::RiseOfTheEmpire => ("ifs.sp.riseempire", "Rise of the Empire"),
             RowId::GalacticConquest => ("ifs.sp.meta", "Galactic Conquest"),
             RowId::InstantAction => ("ifs.sp.ia", "Instant Action"),
+            RowId::AskTrainingPlay => ("ifs.sp.play", "Play"),
+            RowId::AskTrainingSkip => ("ifs.sp.skip", "Skip"),
+            RowId::CampaignNewGame => ("ifs.meta.load.new", "New Game"),
+            RowId::CampaignLoad => ("ifs.meta.load.btnload", "Load"),
+            RowId::CampaignMission(i) => (
+                "openbf.campaign.mission",
+                crate::campaign::RISE_OF_THE_EMPIRE[i as usize].title,
+            ),
+            RowId::CampaignToggleAll => ("openbf.campaign.toggle_all", "View All Missions"),
+            RowId::CampaignPlay => ("ifs.freeform.attack", "Attack"),
+            RowId::CampaignBack => ("common.back", "Back"),
+            RowId::CampaignResume => ("common.resume", "Resume Game"),
+            RowId::CampaignOptions => ("ifs.main.options", "Options"),
+            RowId::CampaignSave => ("common.save", "Save Game"),
+            RowId::CampaignLoadMenu => ("common.load", "Load Game"),
+            RowId::CampaignQuit => ("common.quit", "Quit"),
+            RowId::CampaignQuitYes => ("common.yes", "Yes"),
+            RowId::CampaignQuitNo => ("common.no", "No"),
             RowId::GameOptions => ("ifs.GameOpt.title", "Game Options"),
             RowId::AudioOptions => ("ifs.SoundOpt.title", "Audio Options"),
             RowId::GraphicsOptions => ("openbf.graphicsoptions", "Graphics Options"),
@@ -216,11 +256,23 @@ impl Stack {
     }
 }
 
+/// Maximum mission rows shown at once on [`Page::RiseOfTheEmpire`] so the
+/// stack and note fit within the 448-unit shell height.
+const CAMPAIGN_WINDOW: usize = 6;
+
 /// What a step asks the game to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellCommand {
     /// Singleplayer → Instant Action: today's IA setup (until card BSHLB).
     InstantAction,
+    /// Rise of the Empire → New Game: plays opening crawl (`crawl1`) and opens Turn 1 planet briefing.
+    StartCampaignNewGame,
+    /// Rise of the Empire → Save Game on the 3D planet pause menu.
+    SaveCampaign,
+    /// Rise of the Empire → Load / Load Game: opens saved campaign turn on the 3D planet screen.
+    LoadCampaign,
+    /// Rise of the Empire → Launch mission index (`0..18`).
+    LaunchCampaignMission { index: usize },
     Settings(crate::menu::SettingsPage),
     /// Multiplayer → LAN: Host Game / Join Game (issue #168).
     HostGame,
@@ -236,8 +288,28 @@ pub struct ShellMenus {
     pub page: Page,
     pub main: Stack,
     pub singleplayer: Stack,
+    pub ask_training: Stack,
+    pub rise_new_load: Stack,
+    pub campaign: Stack,
+    pub campaign_battle: Stack,
+    pub campaign_menu: Stack,
+    pub campaign_quit_popup: Stack,
     pub options: Stack,
     pub multiplayer: Stack,
+    pub campaign_unlocked: u8,
+    pub campaign_selected: usize,
+    pub campaign_view_all: bool,
+    pub campaign_focus_toggle: bool,
+    pub campaign_quit_confirm: bool,
+    pub campaign_pause_options: bool,
+    pub training_prompted: bool,
+    ask_training_prompt: String,
+    campaign_quit_prompt: String,
+    training_label: String,
+    campaign_title: String,
+    campaign_launch_label: String,
+    campaign_planets: Vec<String>,
+    campaign_descs: Vec<String>,
     pub prompt: String,
     pub back: String,
     pub select: String,
@@ -256,7 +328,7 @@ pub struct ShellMenus {
 }
 
 impl ShellMenus {
-    /// The four screens, their texts looked up by `text(key, English)`.
+    /// The screens, their texts looked up by `text(key, English)`.
     pub fn new(text: &dyn Fn(&str, &str) -> String) -> ShellMenus {
         let row = |id: RowId, enabled: bool| {
             let (k, e) = id.key();
@@ -280,6 +352,8 @@ impl ShellMenus {
         };
         let (k, e) = RowId::Singleplayer.key();
         let sp_title = text(k, e);
+        let (k, e) = RowId::RiseOfTheEmpire.key();
+        let campaign_title = text(k, e);
         let (k, e) = RowId::Options.key();
         let opt_title = text(k, e);
         let (k, e) = RowId::Multiplayer.key();
@@ -294,7 +368,35 @@ impl ShellMenus {
             0.0,
         );
         multiplayer.note = Some(text(TEXT_ONLINE_NOTE.0, TEXT_ONLINE_NOTE.1));
-        ShellMenus {
+        let campaign_planets = crate::campaign::RISE_OF_THE_EMPIRE
+            .iter()
+            .map(|e| text(e.planet_key, e.title))
+            .collect();
+        let campaign_descs = crate::campaign::RISE_OF_THE_EMPIRE
+            .iter()
+            .map(|e| {
+                let raw = text(e.desc_key, e.desc_fallback);
+                let joined = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+                if joined.is_empty() {
+                    e.desc_fallback.to_owned()
+                } else {
+                    joined
+                }
+            })
+            .collect();
+        let back_label = text(TEXT_BACK.0, TEXT_BACK.1);
+        let training_label = text("ifs.sp.training", "Training");
+        let ask_training_prompt = text(
+            "ifs.sp.asktraining",
+            "Do you want to play the training mission first?",
+        );
+        let campaign_quit_prompt = text(
+            "ifs.pause.warn_quit",
+            "Leaving the game now will end this session. Are you sure you want to leave?",
+        );
+        let launch_label = text("ifs.freeform.attack", "Attack");
+        let pause_title = text("game.pause.title", "Game Menu");
+        let mut menus = ShellMenus {
             page: Page::Title,
             main: stack(
                 text(TEXT_MAIN.0, TEXT_MAIN.1),
@@ -311,12 +413,69 @@ impl ShellMenus {
             singleplayer: stack(
                 sp_title,
                 vec![
-                    row(RowId::RiseOfTheEmpire, false),
+                    row(RowId::RiseOfTheEmpire, true),
                     row(RowId::GalacticConquest, false),
                     row(RowId::InstantAction, true),
                 ],
                 true,
                 0.0,
+            ),
+            ask_training: stack(
+                String::new(),
+                vec![
+                    row(RowId::AskTrainingPlay, true),
+                    row(RowId::AskTrainingSkip, true),
+                ],
+                false,
+                -32.0,
+            ),
+            rise_new_load: stack(
+                campaign_title.clone(),
+                vec![
+                    row(RowId::CampaignNewGame, true),
+                    row(RowId::CampaignLoad, true),
+                ],
+                true,
+                -44.8,
+            ),
+            campaign: stack(campaign_title.clone(), Vec::new(), true, 0.0),
+            campaign_battle: stack(
+                String::new(),
+                vec![
+                    StackRow {
+                        id: RowId::CampaignPlay,
+                        label: launch_label.clone(),
+                        enabled: true,
+                    },
+                    StackRow {
+                        id: RowId::CampaignBack,
+                        label: back_label.clone(),
+                        enabled: true,
+                    },
+                ],
+                true,
+                0.0,
+            ),
+            campaign_menu: stack(
+                pause_title,
+                vec![
+                    row(RowId::CampaignResume, true),
+                    row(RowId::CampaignOptions, true),
+                    row(RowId::CampaignSave, true),
+                    row(RowId::CampaignLoadMenu, true),
+                    row(RowId::CampaignQuit, true),
+                ],
+                false,
+                0.0,
+            ),
+            campaign_quit_popup: stack(
+                String::new(),
+                vec![
+                    row(RowId::CampaignQuitYes, true),
+                    row(RowId::CampaignQuitNo, true),
+                ],
+                false,
+                -32.0,
             ),
             options: stack(
                 opt_title,
@@ -330,22 +489,177 @@ impl ShellMenus {
                 0.0,
             ),
             multiplayer,
+            campaign_unlocked: 1,
+            campaign_selected: 0,
+            campaign_view_all: false,
+            campaign_focus_toggle: false,
+            campaign_quit_confirm: false,
+            campaign_pause_options: false,
+            training_prompted: false,
+            ask_training_prompt,
+            campaign_quit_prompt,
+            training_label,
+            campaign_title,
+            campaign_launch_label: launch_label,
+            campaign_planets,
+            campaign_descs,
             prompt: text(TEXT_PROMPT.0, TEXT_PROMPT.1),
-            back: text(TEXT_BACK.0, TEXT_BACK.1),
+            back: back_label,
             select: text(TEXT_SELECT.0, TEXT_SELECT.1),
             on_page: 0.0,
             clock: 0.0,
             covered: false,
             cues: Cues::default(),
             pulse: Pulse::BUTTON,
+        };
+        menus.rebuild_campaign_stacks();
+        menus
+    }
+
+    pub fn training_prompted(&self) -> bool {
+        self.training_prompted
+    }
+
+    pub fn set_training_prompted(&mut self, prompted: bool) {
+        if self.training_prompted == prompted {
+            return;
         }
+        self.training_prompted = prompted;
+        let has_training = self
+            .singleplayer
+            .rows
+            .first()
+            .is_some_and(|r| r.id == RowId::Training);
+        if prompted && !has_training {
+            self.singleplayer.rows.insert(
+                0,
+                StackRow {
+                    id: RowId::Training,
+                    label: self.training_label.clone(),
+                    enabled: true,
+                },
+            );
+            self.singleplayer.focus = self.singleplayer.first();
+        } else if !prompted && has_training {
+            self.singleplayer.rows.remove(0);
+            self.singleplayer.focus = self.singleplayer.first();
+        }
+    }
+
+    fn visible_campaign_count(&self) -> usize {
+        let total = crate::campaign::RISE_OF_THE_EMPIRE.len();
+        if self.campaign_view_all {
+            total
+        } else {
+            (self.campaign_unlocked as usize).clamp(1, total)
+        }
+    }
+
+    /// Update the number of unlocked campaign missions (`1..=18`) from the
+    /// active profile.
+    pub fn set_campaign_unlocked(&mut self, unlocked: u8) {
+        let total = crate::campaign::RISE_OF_THE_EMPIRE.len();
+        self.campaign_unlocked = unlocked.clamp(1, total as u8);
+        self.campaign_selected = self.campaign_selected.min(self.visible_campaign_count() - 1);
+        self.rebuild_campaign_stacks();
+    }
+
+    /// Highlight mission `index` on [`Page::RiseOfTheEmpire`].
+    pub fn select_campaign_mission(&mut self, index: usize) {
+        let count = self.visible_campaign_count();
+        self.campaign_selected = index.min(count - 1);
+        self.campaign_focus_toggle = false;
+        self.rebuild_campaign_stacks();
+    }
+
+    fn rebuild_campaign_stacks(&mut self) {
+        let count = self.visible_campaign_count();
+        self.campaign_selected = self.campaign_selected.min(count - 1);
+        let win = count.min(CAMPAIGN_WINDOW);
+        let win_start = if count <= CAMPAIGN_WINDOW {
+            0
+        } else {
+            self.campaign_selected
+                .saturating_sub(CAMPAIGN_WINDOW / 2)
+                .min(count - win)
+        };
+        let mut rows = Vec::with_capacity(win + 1);
+        for i in win_start..win_start + win {
+            let entry = &crate::campaign::RISE_OF_THE_EMPIRE[i];
+            rows.push(StackRow {
+                id: RowId::CampaignMission(i as u8),
+                label: entry.title.to_owned(),
+                enabled: true,
+            });
+        }
+        rows.push(StackRow {
+            id: RowId::CampaignToggleAll,
+            label: if self.campaign_view_all {
+                "Show Unlocked Only".into()
+            } else {
+                "View All Missions".into()
+            },
+            enabled: true,
+        });
+        let focus = if self.campaign_focus_toggle {
+            rows.len() - 1
+        } else {
+            self.campaign_selected - win_start
+        };
+        let note = if self.campaign_focus_toggle {
+            format!("Showing {count} of {} missions", crate::campaign::RISE_OF_THE_EMPIRE.len())
+        } else {
+            let e = &crate::campaign::RISE_OF_THE_EMPIRE[self.campaign_selected];
+            let planet = &self.campaign_planets[self.campaign_selected];
+            format!(
+                "{} ({}/{count}) \u{2014} {planet}",
+                e.era.to_ascii_uppercase(),
+                self.campaign_selected + 1
+            )
+        };
+        self.campaign = Stack {
+            title: self.campaign_title.clone(),
+            rows,
+            focus,
+            left: true,
+            y_add: 0.0,
+            note: Some(note),
+        };
+        let selected = &crate::campaign::RISE_OF_THE_EMPIRE[self.campaign_selected];
+        self.campaign_battle = Stack {
+            title: selected.title.to_owned(),
+            rows: vec![
+                StackRow {
+                    id: RowId::CampaignPlay,
+                    label: self.campaign_launch_label.clone(),
+                    enabled: true,
+                },
+                StackRow {
+                    id: RowId::CampaignBack,
+                    label: self.back.clone(),
+                    enabled: true,
+                },
+            ],
+            focus: 0,
+            left: true,
+            y_add: 0.0,
+            note: Some(self.campaign_descs[self.campaign_selected].clone()),
+        };
     }
 
     pub fn stack(&self) -> Option<&Stack> {
         match self.page {
-            Page::Title => None,
+            Page::Title | Page::CampaignBattle => None,
             Page::Main => Some(&self.main),
             Page::Singleplayer => Some(&self.singleplayer),
+            Page::AskTraining => Some(&self.ask_training),
+            Page::RiseNewLoad => Some(&self.rise_new_load),
+            Page::RiseOfTheEmpire => Some(&self.campaign),
+            Page::CampaignMenu => Some(if self.campaign_quit_confirm {
+                &self.campaign_quit_popup
+            } else {
+                &self.campaign_menu
+            }),
             Page::Options => Some(&self.options),
             Page::Multiplayer => Some(&self.multiplayer),
         }
@@ -353,9 +667,17 @@ impl ShellMenus {
 
     fn stack_mut(&mut self) -> Option<&mut Stack> {
         match self.page {
-            Page::Title => None,
+            Page::Title | Page::CampaignBattle => None,
             Page::Main => Some(&mut self.main),
             Page::Singleplayer => Some(&mut self.singleplayer),
+            Page::AskTraining => Some(&mut self.ask_training),
+            Page::RiseNewLoad => Some(&mut self.rise_new_load),
+            Page::RiseOfTheEmpire => Some(&mut self.campaign),
+            Page::CampaignMenu => Some(if self.campaign_quit_confirm {
+                &mut self.campaign_quit_popup
+            } else {
+                &mut self.campaign_menu
+            }),
             Page::Options => Some(&mut self.options),
             Page::Multiplayer => Some(&mut self.multiplayer),
         }
@@ -369,17 +691,51 @@ impl ShellMenus {
         if !stack.rows.get(row).is_some_and(|r| r.enabled) {
             return false;
         }
+        let id = stack.rows[row].id;
         stack.focus = row;
+        if self.page == Page::RiseOfTheEmpire {
+            match id {
+                RowId::CampaignMission(i) => {
+                    self.campaign_selected = i as usize;
+                    self.campaign_focus_toggle = false;
+                    self.rebuild_campaign_stacks();
+                }
+                RowId::CampaignToggleAll => {
+                    self.campaign_focus_toggle = true;
+                    self.rebuild_campaign_stacks();
+                }
+                _ => {}
+            }
+        }
         true
+    }
+
+    /// Open `page`, resetting reveal animation and focus as needed.
+    pub fn open_page(&mut self, page: Page) {
+        self.go(page);
     }
 
     fn go(&mut self, page: Page) {
         self.page = page;
         self.on_page = 0.0;
+        if page != Page::CampaignMenu {
+            self.campaign_quit_confirm = false;
+        }
         // Back on Singleplayer the focus is its first row (Training on the
         // PS2) whatever was left (menuref "Singleplayer", `ia_enter_back`).
-        if page == Page::Singleplayer {
+        if page == Page::Main {
+            self.campaign_pause_options = false;
+        } else if page == Page::Singleplayer {
+            self.campaign_pause_options = false;
             self.singleplayer.focus = self.singleplayer.first();
+        } else if page == Page::AskTraining {
+            self.ask_training.focus = self.ask_training.first();
+        } else if page == Page::RiseNewLoad {
+            self.rise_new_load.focus = self.rise_new_load.first();
+        } else if page == Page::CampaignMenu {
+            self.campaign_menu.note = None;
+        } else if matches!(page, Page::RiseOfTheEmpire | Page::CampaignBattle) {
+            self.rebuild_campaign_stacks();
         }
     }
 
@@ -413,16 +769,54 @@ impl ShellMenus {
             }
             return None;
         }
+        if self.page == Page::CampaignBattle {
+            if input.confirm {
+                self.cues.play(MenuSound::Accept);
+                return Some(ShellCommand::LaunchCampaignMission {
+                    index: self.campaign_selected,
+                });
+            }
+            if input.back || start {
+                self.campaign_quit_confirm = false;
+                self.campaign_menu.focus = self.campaign_menu.first();
+                self.cues.play(MenuSound::Select);
+                self.go(Page::CampaignMenu);
+                return None;
+            }
+            return None;
+        }
+        if self.page == Page::CampaignMenu {
+            if self.campaign_quit_confirm {
+                if input.back {
+                    self.campaign_quit_confirm = false;
+                    self.on_page = 0.0;
+                    self.cues.play(MenuSound::Exit);
+                    return None;
+                }
+            } else if input.back || (start && !input.confirm) {
+                self.cues.play(MenuSound::Exit);
+                self.go(Page::CampaignBattle);
+                return None;
+            }
+        }
         if input.back {
-            let to = if self.page == Page::Main {
-                Page::Title
-            } else {
-                Page::Main
+            let to = match self.page {
+                Page::Main => Page::Title,
+                Page::AskTraining | Page::RiseNewLoad => Page::Singleplayer,
+                Page::RiseOfTheEmpire => Page::RiseNewLoad,
+                Page::Options if self.campaign_pause_options => {
+                    self.campaign_pause_options = false;
+                    Page::CampaignMenu
+                }
+                _ => Page::Main,
             };
             // The screen underneath plays its exit click on re-Enter.
             self.cues.play(MenuSound::Exit);
             self.go(to);
             return None;
+        }
+        if self.page == Page::RiseOfTheEmpire {
+            return self.step_campaign(input);
         }
         let s = self.stack_mut()?;
         // `FollowButtonLink` clicks whenever it finds a row; links wrap.
@@ -446,6 +840,64 @@ impl ShellMenus {
         self.cues.play(MenuSound::Accept);
         match row {
             RowId::Singleplayer => self.go(Page::Singleplayer),
+            RowId::Training => {
+                return Some(ShellCommand::LaunchCampaignMission { index: 0 });
+            }
+            RowId::RiseOfTheEmpire => {
+                if !self.training_prompted {
+                    self.go(Page::AskTraining);
+                } else {
+                    self.go(Page::RiseNewLoad);
+                }
+            }
+            RowId::AskTrainingPlay => {
+                self.set_training_prompted(true);
+                return Some(ShellCommand::LaunchCampaignMission { index: 0 });
+            }
+            RowId::AskTrainingSkip => {
+                self.set_training_prompted(true);
+                if self.campaign_unlocked < 2 {
+                    self.set_campaign_unlocked(2);
+                }
+                self.go(Page::RiseNewLoad);
+            }
+            RowId::CampaignNewGame => {
+                if self.campaign_unlocked < 2 {
+                    self.set_campaign_unlocked(2);
+                }
+                self.select_campaign_mission(1);
+                return Some(ShellCommand::StartCampaignNewGame);
+            }
+            RowId::CampaignLoad => return Some(ShellCommand::LoadCampaign),
+            RowId::CampaignResume => self.go(Page::CampaignBattle),
+            RowId::CampaignOptions => {
+                self.campaign_pause_options = true;
+                self.go(Page::Options);
+            }
+            RowId::CampaignSave => return Some(ShellCommand::SaveCampaign),
+            RowId::CampaignLoadMenu => return Some(ShellCommand::LoadCampaign),
+            RowId::CampaignQuit => {
+                self.campaign_quit_confirm = true;
+                self.campaign_quit_popup.focus = 1;
+                self.on_page = 0.0;
+            }
+            RowId::CampaignQuitYes => {
+                self.campaign_quit_confirm = false;
+                self.go(Page::Singleplayer);
+            }
+            RowId::CampaignQuitNo => {
+                self.campaign_quit_confirm = false;
+                self.on_page = 0.0;
+            }
+            RowId::CampaignPlay => {
+                return Some(ShellCommand::LaunchCampaignMission {
+                    index: self.campaign_selected,
+                })
+            }
+            RowId::CampaignBack => {
+                self.cues.play(MenuSound::Exit);
+                self.go(Page::RiseOfTheEmpire);
+            }
             RowId::Options => self.go(Page::Options),
             RowId::Multiplayer => self.go(Page::Multiplayer),
             RowId::LanHost => return Some(ShellCommand::HostGame),
@@ -469,6 +921,45 @@ impl ShellMenus {
         None
     }
 
+    fn step_campaign(&mut self, input: MenuInput) -> Option<ShellCommand> {
+        let count = self.visible_campaign_count();
+        let total_slots = count + 1; // missions + toggle row
+        let cur = if self.campaign_focus_toggle {
+            count
+        } else {
+            self.campaign_selected.min(count - 1)
+        };
+        let mut next = cur;
+        if input.up {
+            next = (cur + total_slots - 1) % total_slots;
+        }
+        if input.down {
+            next = (cur + 1) % total_slots;
+        }
+        if next != cur {
+            if next == count {
+                self.campaign_focus_toggle = true;
+            } else {
+                self.campaign_focus_toggle = false;
+                self.campaign_selected = next;
+            }
+            self.rebuild_campaign_stacks();
+            self.cues.play(MenuSound::Select);
+        }
+        if !input.confirm {
+            return None;
+        }
+        self.cues.play(MenuSound::Accept);
+        if self.campaign_focus_toggle {
+            self.campaign_view_all = !self.campaign_view_all;
+            self.campaign_selected = self.campaign_selected.min(self.visible_campaign_count() - 1);
+            self.rebuild_campaign_stacks();
+        } else {
+            self.go(Page::CampaignBattle);
+        }
+        None
+    }
+
     /// Enter the main stack after a profile is selected.
     pub fn profile_selected(&mut self) {
         self.main.focus = self.main.first();
@@ -483,7 +974,19 @@ impl ShellMenus {
     pub fn movie(&self) -> &'static str {
         match self.page {
             Page::Title | Page::Main => MOVIE_MAIN,
-            Page::Singleplayer | Page::Options | Page::Multiplayer => MOVIE_SUB,
+            Page::RiseOfTheEmpire => {
+                if self.campaign_focus_toggle {
+                    MOVIE_SUB
+                } else {
+                    crate::campaign::RISE_OF_THE_EMPIRE[self.campaign_selected].transition_movie
+                }
+            }
+            Page::CampaignBattle | Page::CampaignMenu => "",
+            Page::Singleplayer
+            | Page::AskTraining
+            | Page::RiseNewLoad
+            | Page::Options
+            | Page::Multiplayer => MOVIE_SUB,
         }
     }
 
@@ -601,6 +1104,43 @@ impl Ctx<'_> {
         if matches!(m.page, Page::Title | Page::Main) {
             self.sheet(&centre, LOGO, full, "logo", 1.0);
         }
+        if m.page == Page::CampaignBattle {
+            let entry = &crate::campaign::RISE_OF_THE_EMPIRE[m.campaign_selected];
+            let title = m
+                .campaign_planets
+                .get(m.campaign_selected)
+                .map_or(entry.title, String::as_str);
+            let desc = m
+                .campaign_descs
+                .get(m.campaign_selected)
+                .map_or(entry.desc_fallback, String::as_str);
+            self.bordered(&centre, [36.0, 304.0, 476.0, 396.0]);
+            self.text(
+                &centre,
+                &crate::typography::BODY,
+                title,
+                (52.0, 316.0),
+                HAlign::Left,
+                tint::TITLE,
+            );
+            for (i, line) in self
+                .wrapped(&crate::typography::LIST, desc, 408.0)
+                .iter()
+                .take(3)
+                .enumerate()
+            {
+                self.text(
+                    &centre,
+                    &crate::typography::LIST,
+                    line,
+                    (52.0, 340.0 + i as f32 * 16.0),
+                    HAlign::Left,
+                    tint::BODY,
+                );
+            }
+            self.help(size, true, Prompt::Accept, &m.campaign_launch_label);
+            return;
+        }
         let Some(stack) = m.stack() else {
             let (rgb, _) = tint::UNSELECTED;
             let at = (256.0, PROMPT_TOP);
@@ -617,15 +1157,42 @@ impl Ctx<'_> {
         } else {
             centre
         };
-        let title = FlashyRow {
-            rect: lay.title,
-            pieces: crate::spawn_draw::TITLE_PIECES,
-            bar: ([255.0; 3], crate::spawn_draw::PIECE_ALPHA),
-            text: &stack.title,
-            style: tint::TITLE,
-            title: true,
-        };
-        self.flashy_row(&s, &title, m.on_page);
+        if matches!(m.page, Page::AskTraining)
+            || (m.page == Page::CampaignMenu && m.campaign_quit_confirm)
+        {
+            let prompt = if m.page == Page::AskTraining {
+                &m.ask_training_prompt
+            } else {
+                &m.campaign_quit_prompt
+            };
+            self.bordered(&centre, [118.0, 144.0, 394.0, 276.0]);
+            for (i, line) in self
+                .wrapped(&crate::typography::BODY, prompt, 248.0)
+                .iter()
+                .take(3)
+                .enumerate()
+            {
+                self.text(
+                    &centre,
+                    &crate::typography::BODY,
+                    line,
+                    (256.0, 160.0 + i as f32 * 18.0),
+                    HAlign::Center,
+                    tint::BODY,
+                );
+            }
+        }
+        if !stack.title.is_empty() {
+            let title = FlashyRow {
+                rect: lay.title,
+                pieces: crate::spawn_draw::TITLE_PIECES,
+                bar: ([255.0; 3], crate::spawn_draw::PIECE_ALPHA),
+                text: &stack.title,
+                style: tint::TITLE,
+                title: true,
+            };
+            self.flashy_row(&s, &title, m.on_page);
+        }
         let pulse = m.pulse.alpha();
         for (k, (row, r)) in stack.rows.iter().zip(&lay.rows).enumerate() {
             let grey = ([UNFOCUSED_BAR; 3], tint::UNSELECTED.1);
@@ -656,7 +1223,9 @@ impl Ctx<'_> {
                 self.text(&s, &ITEM, note, at, HAlign::Left, style);
             }
         }
-        self.help(size, false, Prompt::Back, &m.back);
+        if m.page != Page::AskTraining {
+            self.help(size, false, Prompt::Back, &m.back);
+        }
         self.help(size, true, Prompt::Accept, &m.select);
     }
 
@@ -1005,7 +1574,12 @@ mod tests {
         assert_eq!(m.step(confirm, false, 0.1), None);
         assert_eq!(m.page, Page::Singleplayer);
         assert_eq!(m.movie(), MOVIE_SUB);
-        // The first focus skips the two disabled campaigns.
+        // Rise of the Empire is live; down skips disabled Galactic Conquest to Instant Action.
+        assert_eq!(
+            m.singleplayer.rows[m.singleplayer.focus].id,
+            RowId::RiseOfTheEmpire
+        );
+        m.step(press(|i| i.down = true), false, 0.1);
         assert_eq!(
             m.singleplayer.rows[m.singleplayer.focus].id,
             RowId::InstantAction
@@ -1261,5 +1835,125 @@ mod tests {
             })
             .count();
         assert!(lit >= 4 * "Online".len(), "note glyphs drawn: {lit}");
+    }
+
+    #[test]
+    fn rise_of_the_empire_page_lists_unlocked_missions_toggles_all_and_launches() {
+        let mut m = menus();
+        let confirm = press(|i| i.confirm = true);
+        m.step(MenuInput::default(), true, 0.1);
+        m.step(confirm, false, 0.1);
+        assert_eq!(m.page, Page::Singleplayer);
+
+        // First visit prompts for Geonosis training; Skip unlocks Turn 1 and opens New Game / Load.
+        m.step(confirm, false, 0.1);
+        assert_eq!(m.page, Page::AskTraining);
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert!(m.training_prompted());
+        assert_eq!(m.campaign_unlocked, 2);
+        assert_eq!(m.page, Page::RiseNewLoad);
+
+        // New Game emits StartCampaignNewGame targeting Turn 1 (Mygeeto).
+        assert_eq!(
+            m.step(confirm, false, 0.1),
+            Some(ShellCommand::StartCampaignNewGame)
+        );
+        assert_eq!(m.campaign_selected, 1);
+
+        // Load emits LoadCampaign so the frontend opens the saved campaign planet screen.
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::LoadCampaign));
+
+        // Open CampaignBattle directly (as LoadCampaign / crawl completion does), check 3D planet movie == ""
+        m.select_campaign_mission(1);
+        m.open_page(Page::CampaignBattle);
+        assert_eq!(m.page, Page::CampaignBattle);
+        assert_eq!(m.movie(), "");
+
+        // Esc / Back / Start from CampaignBattle opens Game Menu (CampaignMenu) over the planet.
+        assert_eq!(m.step(press(|i| i.back = true), false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignMenu);
+        assert_eq!(m.movie(), "");
+
+        // Row 0 = Resume Game -> back to CampaignBattle.
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignBattle);
+
+        // Re-open Game Menu -> Options -> Back returns to Game Menu (not Main).
+        m.step(MenuInput::default(), true, 0.1);
+        assert_eq!(m.page, Page::CampaignMenu);
+        m.step(press(|i| i.down = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::Options);
+        assert_eq!(m.step(press(|i| i.back = true), false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignMenu);
+
+        // Save Game and Load Game emit commands.
+        m.focus_row(2);
+        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::SaveCampaign));
+        m.focus_row(3);
+        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::LoadCampaign));
+
+        // Quit opens Yes/No confirmation defaulting to No; Back cancels, Yes returns to Singleplayer.
+        m.focus_row(4);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert!(m.campaign_quit_confirm);
+        assert_eq!(m.campaign_quit_popup.focus, 1);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert!(!m.campaign_quit_confirm);
+        assert_eq!(m.page, Page::CampaignMenu);
+
+        m.focus_row(4);
+        m.step(confirm, false, 0.1);
+        m.step(press(|i| i.up = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::Singleplayer);
+
+        // Attack from CampaignBattle launches the selected mission.
+        m.set_campaign_unlocked(18);
+        m.select_campaign_mission(17);
+        m.open_page(Page::CampaignBattle);
+        assert_eq!(
+            m.step(confirm, false, 0.1),
+            Some(ShellCommand::LaunchCampaignMission { index: 17 })
+        );
+
+        // Once prompted, Training appears as Singleplayer's first row and launches mission 0 directly.
+        m.open_page(Page::Singleplayer);
+        assert_eq!(m.singleplayer.rows[0].id, RowId::Training);
+        assert_eq!(
+            m.step(confirm, false, 0.1),
+            Some(ShellCommand::LaunchCampaignMission { index: 0 })
+        );
+    }
+
+    #[test]
+    fn keyboard_enter_sets_confirm_and_start_without_hijacking_campaign_menu() {
+        let mut m = menus();
+        m.set_campaign_unlocked(2);
+        m.select_campaign_mission(1);
+        m.open_page(Page::CampaignBattle);
+
+        // On desktop, KeyCode::Enter sets both confirm and start in menu_bits().
+        let enter = press(|i| i.confirm = true);
+        assert_eq!(
+            m.step(enter, true, 0.1),
+            Some(ShellCommand::LaunchCampaignMission { index: 1 })
+        );
+        assert_eq!(m.page, Page::CampaignBattle);
+
+        // Esc / controller Start (back/start without confirm) still opens Game Menu.
+        assert_eq!(m.step(press(|i| i.back = true), false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignMenu);
+
+        // Inside Game Menu, Enter on Quit opens confirmation -> Up -> Yes -> Singleplayer.
+        m.focus_row(4);
+        assert_eq!(m.step(enter, true, 0.1), None);
+        assert!(m.campaign_quit_confirm);
+        assert_eq!(m.page, Page::CampaignMenu);
+        m.step(press(|i| i.up = true), false, 0.1);
+        assert_eq!(m.step(enter, true, 0.1), None);
+        assert_eq!(m.page, Page::Singleplayer);
     }
 }

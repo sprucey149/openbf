@@ -21,6 +21,7 @@
 
 pub use egui;
 
+pub mod campaign;
 pub mod cursor;
 pub mod hud;
 pub mod hud_ambush;

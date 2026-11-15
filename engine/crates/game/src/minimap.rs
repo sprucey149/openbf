@@ -438,6 +438,7 @@ impl MapStatic {
         let mut posts: Vec<_> = sim
             .cps
             .iter()
+            .filter(|cp| !cp.killed && cp.visible)
             .map(|cp| {
                 let known = self.posts.get(&cp.def.name.to_ascii_lowercase());
                 // Who is taking it: an owned post going neutral is taken by
@@ -659,13 +660,23 @@ impl MapStatic {
     /// selected friendly post (re-command-walker-post §5).
     pub fn spawn_model(&self, walk: &WalkSim, slot: usize) -> MapModel {
         let map = self.model(walk);
+        let vis_cp = |cp: &core::cp::CommandPost| !cp.killed && cp.visible;
         let select = match walk.sim.spawn_post_selected(slot) {
-            Some(core::unit::SpawnPost::Post(i)) => Some(usize::from(i)),
-            Some(post @ core::unit::SpawnPost::Walker(_)) => self
-                .command_posts(walk)
-                .iter()
-                .position(|(p, _)| *p == post)
-                .map(|i| walk.sim.cps.len() + i),
+            Some(core::unit::SpawnPost::Post(i)) => {
+                let idx = usize::from(i);
+                walk.sim
+                    .cps
+                    .get(idx)
+                    .filter(|cp| vis_cp(cp))
+                    .map(|_| walk.sim.cps[..idx].iter().filter(|cp| vis_cp(cp)).count())
+            }
+            Some(post @ core::unit::SpawnPost::Walker(_)) => {
+                let vis_count = walk.sim.cps.iter().filter(|cp| vis_cp(cp)).count();
+                self.command_posts(walk)
+                    .iter()
+                    .position(|(p, _)| *p == post)
+                    .map(|i| vis_count + i)
+            }
             None => None,
         };
         map.spawn_view(select)

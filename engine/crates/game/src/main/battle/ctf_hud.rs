@@ -156,6 +156,32 @@ pub(super) fn hud_hints(
         }
     }
 
+    if let Some(c) = walk.campaign.as_ref() {
+        let obj_flyer = walk
+            .sim
+            .unit(walk.player)
+            .and_then(|u| u.mount)
+            .and_then(|m| walk.sim.vehicles.get(m.vehicle.index as usize))
+            .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer);
+        for pos in c.objective_markers(&walk.sim) {
+            let (ndc, on_screen) = marker_screen(view_proj, pos);
+            hints.push(ui::hud_tree::HintMarker {
+                ndc,
+                distance: (pos - camera.position).length(),
+                friendly: true,
+                visible: visible(&walk.sim, walk.player, None, camera.position, pos),
+                on_screen,
+                flag: false,
+                carrier: false,
+                flyer_view: obj_flyer,
+                own_carrier: false,
+                objective: true,
+                pulse: None,
+                tint: Some([220.0, 175.0, 20.0]),
+            });
+        }
+    }
+
     hints
 }
 

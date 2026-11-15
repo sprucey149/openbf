@@ -387,11 +387,59 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("openbf_data"))
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CampaignProgress {
+    /// Number of Rise of the Empire missions unlocked (`1..=18`).
+    pub unlocked: u8,
+    /// Bitmask of completed mission indices (`0..18`).
+    pub completed_mask: u32,
+    /// Whether the player has already been prompted for the Geonosis training mission.
+    #[serde(default)]
+    pub training_prompted: bool,
+    /// Explicitly saved active story mission turn (`1..=17`).
+    #[serde(default)]
+    pub active_mission: Option<u8>,
+}
+
+impl Default for CampaignProgress {
+    fn default() -> Self {
+        Self {
+            unlocked: 1,
+            completed_mask: 0,
+            training_prompted: false,
+            active_mission: None,
+        }
+    }
+}
+
+impl CampaignProgress {
+    pub const MISSIONS: usize = ui::campaign::RISE_OF_THE_EMPIRE.len();
+
+    pub fn unlocked_count(&self) -> usize {
+        (self.unlocked as usize).clamp(1, Self::MISSIONS)
+    }
+
+    pub fn is_completed(&self, idx: usize) -> bool {
+        idx < Self::MISSIONS && (self.completed_mask & (1u32 << idx)) != 0
+    }
+
+    pub fn record_victory(&mut self, idx: usize) {
+        if idx >= Self::MISSIONS {
+            return;
+        }
+        self.completed_mask |= 1u32 << idx;
+        let next = (idx + 2).min(Self::MISSIONS) as u8;
+        self.unlocked = self.unlocked.max(next).clamp(1, Self::MISSIONS as u8);
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Profile {
     pub name: String,
     pub settings: Settings,
     pub career: Career,
+    #[serde(default)]
+    pub campaign: CampaignProgress,
     #[serde(skip)]
     slot: Option<store::Slot>,
 }
@@ -449,6 +497,7 @@ impl Profile {
         self.settings.mouse_sensitivity = clamp_mouse_sensitivity(self.settings.mouse_sensitivity);
         self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
         self.settings.free_fullscreen_key();
+        self.campaign.unlocked = self.campaign.unlocked.clamp(1, CampaignProgress::MISSIONS as u8);
     }
 
     fn fresh() -> Profile {
@@ -1226,5 +1275,26 @@ mod tests {
         assert_eq!(back.settings.recent_hosts, ["studio-pc:40000", "10.0.0.2"]);
         let old: Settings = ron::from_str("(assist_intensity: 0.5)").unwrap();
         assert!(old.recent_hosts.is_empty());
+    }
+
+    #[test]
+    fn campaign_progress_unlocks_sequentially_and_defaults_for_old_profiles() {
+        let mut p = Profile::default();
+        assert_eq!(p.campaign.unlocked_count(), 1);
+        assert!(!p.campaign.is_completed(0));
+        p.campaign.record_victory(0);
+        assert_eq!(p.campaign.unlocked_count(), 2);
+        assert!(p.campaign.is_completed(0));
+        p.campaign.record_victory(17);
+        assert_eq!(p.campaign.unlocked_count(), 18);
+        assert!(p.campaign.is_completed(17));
+
+        let saved = ron::to_string(&p).unwrap();
+        let back: Profile = ron::from_str(&saved).unwrap();
+        assert_eq!(back.campaign, p.campaign);
+
+        // Older profiles without `campaign:` default cleanly to mission 1 unlocked.
+        let legacy: Profile = ron::from_str("(name:\"Legacy\",settings:(assist_intensity:0.5),career:(rounds:1,wins:1,kills:2,deaths:1,shots:10,hits:4,captures:1))").unwrap();
+        assert_eq!(legacy.campaign, CampaignProgress::default());
     }
 }

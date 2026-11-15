@@ -960,6 +960,11 @@ impl EventFeed {
         self.texts.bf2_text(key).map(|t| t.trim().to_owned())
     }
 
+    /// Resolve a BF2 localization key if present in the HUD table, falling back to `key` verbatim.
+    pub fn localize_or_raw(&self, key: &str) -> String {
+        self.texts.bf2_text(key).unwrap_or(key).to_owned()
+    }
+
     /// Queue `text` unless the same line is still up.
     pub fn say(&mut self, text: String, color: [u8; 3], tick: u64) {
         self.recent

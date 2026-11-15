@@ -85,6 +85,66 @@ impl Sim {
             .position(|entry| entry.team == team)
     }
 
+    /// Spawn up to `count` ambush bots of `team` at `nodes`. Main armies (`0..2`)
+    /// draw from `Sim::spawn_ai`; native/auxiliary teams (`>= 2`) register a
+    /// `NativeSpawnPost` for capacity and consume queued templates (or clone live
+    /// team slot templates when the initial pool is empty).
+    pub fn spawn_native_ambush(
+        &mut self,
+        team: u8,
+        count: u32,
+        nodes: &[(Vec3, f32)],
+    ) -> Vec<crate::unit::UnitHandle> {
+        let mut spawned = Vec::new();
+        if count == 0 || nodes.is_empty() {
+            return spawned;
+        }
+        if team < 2 {
+            for i in 0..count as usize {
+                let (pos, yaw) = nodes[i % nodes.len()];
+                if let Some(h) = self.spawn_ai(team, pos, yaw) {
+                    spawned.push(h);
+                }
+            }
+            return spawned;
+        }
+        let Some(entry) = self.native_team_index(team) else {
+            return spawned;
+        };
+        self.native_teams[entry].spawn_posts.push(NativeSpawnPost {
+            count,
+            nodes: nodes.to_vec(),
+        });
+        let fallback: Vec<UnitSpec> = self
+            .units
+            .iter()
+            .filter(|u| u.team == team)
+            .map(|u| u.spec.clone())
+            .collect();
+        for i in 0..count as usize {
+            let (pos, yaw) = nodes[i % nodes.len()];
+            let (mut spec, from_pending) =
+                if let Some(spec) = self.native_teams[entry].pending.pop_front() {
+                    (spec, true)
+                } else if !fallback.is_empty() {
+                    (fallback[i % fallback.len()].clone(), false)
+                } else {
+                    break;
+                };
+            spec.pos = pos;
+            spec.yaw = yaw;
+            if let Some(h) = self.spawn_roster_slot(&spec) {
+                spawned.push(h);
+            } else {
+                if from_pending {
+                    self.native_teams[entry].pending.push_front(spec);
+                }
+                break;
+            }
+        }
+        spawned
+    }
+
     pub(super) fn assign_unit_wave(&mut self, team: u8) -> Option<(u32, u32)> {
         if let Some(i) = self.native_team_index(team) {
             Some(self.native_teams[i].waves.assign())

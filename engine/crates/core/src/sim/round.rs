@@ -180,20 +180,18 @@ impl Sim {
                 }
             }
         }
-        if self.deathmatch.is_some() || self.space_assault.is_some() {
-            if self.outcome.is_none() {
-                self.check_time_limit();
-            }
-            return;
-        }
-        if self.cps.is_empty() {
+        if !self.battle.campaign_rules
+            && (self.deathmatch.is_some() || self.space_assault.is_some() || self.cps.is_empty())
+        {
             if self.outcome.is_none() {
                 self.check_time_limit();
             }
             return;
         }
         // BF2 conquest bleed (strict CP-value majority, clamped at alive).
-        cp::apply_bleed(&mut self.battle, &self.cps);
+        if !self.battle.campaign_rules {
+            cp::apply_bleed(&mut self.battle, &self.cps);
+        }
         self.apply_team_handicap();
         let shed = self.battle.tick_bleed(dt);
         for (t, &n) in shed.iter().enumerate() {
@@ -204,15 +202,20 @@ impl Sim {
         if self.outcome.is_none() {
             // BF2 Objective.lua OnTicketCountChange: count <= 0 → MissionDefeat.
             for t in 0..teams {
-                if self.battle.teams[t].tickets() == 0 {
+                if !self.battle.unlimited_reinforcements
+                    && !self.battle.unlimited_teams[t]
+                    && self.battle.teams[t].tickets() == 0
+                {
                     self.outcome = Some(if t == 0 { 1 } else { 0 });
                     self.events.push(Event::TeamDefeated { team: t as u8 });
                 }
             }
-            if let Some(loser) = cp::tick_domination(&self.cps, &mut self.domination, dt, 2) {
-                if self.outcome.is_none() {
-                    self.outcome = Some(if loser == 0 { 1 } else { 0 });
-                    self.events.push(Event::TeamDefeated { team: loser });
+            if !self.battle.campaign_rules {
+                if let Some(loser) = cp::tick_domination(&self.cps, &mut self.domination, dt, 2) {
+                    if self.outcome.is_none() {
+                        self.outcome = Some(if loser == 0 { 1 } else { 0 });
+                        self.events.push(Event::TeamDefeated { team: loser });
+                    }
                 }
             }
             self.check_time_limit();

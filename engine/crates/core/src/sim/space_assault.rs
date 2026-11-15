@@ -187,7 +187,7 @@ impl Sim {
             return;
         }
         sa.points[t] += points;
-        let reached = sa.points[t] >= sa.score_limit as i32;
+        let reached = !self.battle.campaign_rules && sa.points[t] >= sa.score_limit as i32;
         if reached && self.outcome.is_none() {
             self.outcome = Some(team);
             self.events.push(Event::TeamDefeated { team: 1 - team });

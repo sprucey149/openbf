@@ -107,6 +107,18 @@ impl Glow {
     }
 }
 
+/// Builds one prop beam glow particle (`ParticleShape::Beam`) at `matrix * local`
+/// using `lib`'s beam library and era, for callers that rotate props outside [`Fx`].
+pub fn prop_glow_draw(
+    lib: &Library,
+    matrix: Mat4,
+    local: &manifest::ManifestAttachedEffect,
+    view: Option<render::FarFade>,
+) -> Option<render::ParticleDraw> {
+    let def = lib.beam(&local.effect)?;
+    Some(Glow::new(def, frame(matrix, local), lib.era, view).draw())
+}
+
 pub(super) struct Attached {
     def: Arc<EffectDef>,
     frame: Frame,

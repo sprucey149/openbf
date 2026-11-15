@@ -396,11 +396,28 @@ impl Sim {
     /// BF2 Hoth's spawn map skips the one team post without either
     /// (`lead_tmp/spsel/fit_dir.py`). A walker's position is its live one.
     pub fn player_spawn_posts(&self, team: u8) -> Vec<(SpawnPost, Vec3)> {
-        self.spawn_posts(team)
+        let all: Vec<(SpawnPost, Vec3)> = self
+            .spawn_posts(team)
             .into_iter()
             .filter(|&(p, _)| !self.spawn_post_nodes(team, p).is_empty())
             .filter_map(|(p, _)| Some((p, self.spawn_post_pos(p)?)))
-            .collect()
+            .collect();
+        let visible: Vec<(SpawnPost, Vec3)> = all
+            .iter()
+            .copied()
+            .filter(|&(p, _)| match p {
+                SpawnPost::Post(i) => self
+                    .cps
+                    .get(usize::from(i))
+                    .is_some_and(|cp| !cp.killed && cp.visible),
+                SpawnPost::Walker(_) => true,
+            })
+            .collect();
+        if visible.is_empty() {
+            all
+        } else {
+            visible
+        }
     }
 
     /// Where post `post` is: a command post's own position, a command
@@ -513,6 +530,17 @@ impl Sim {
         if team >= 2 {
             return !is_player && self.native_team_index(team).is_some() && self.admit_native(team);
         }
+        if !is_player {
+            let t = usize::from(team);
+            if !self.ai_spawn_allowed[t] {
+                return false;
+            }
+            if !self.classes[t].is_empty()
+                && !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c))
+            {
+                return false;
+            }
+        }
         match self.battle.try_spawn(team as usize, is_player) {
             SpawnOutcome::Refused => false,
             SpawnOutcome::Spawned { despawned_ai } => {
@@ -542,6 +570,14 @@ impl Sim {
         spec: &UnitSpec,
         preserve_respawns: bool,
     ) -> Option<UnitHandle> {
+        if spec.controller == Controller::Ai && (spec.team as usize) < 2 {
+            let t = usize::from(spec.team);
+            if !self.classes[t].is_empty()
+                && !self.is_class_enabled(spec.team, usize::from(spec.class))
+            {
+                return None;
+            }
+        }
         if !self.admit(spec.team, spec.is_player()) {
             return None;
         }
@@ -763,7 +799,7 @@ impl Sim {
         let floor = CLASS_FLOOR * cap / ordinary.max(1) as f32;
         (0..table.len())
             .map(|c| {
-                if c >= len || Some(c) == hero {
+                if c >= len || Some(c) == hero || !self.is_class_enabled(team, c) {
                     return 0.0;
                 }
                 let alive = self
@@ -822,6 +858,12 @@ impl Sim {
     ) -> Option<UnitHandle> {
         let t = usize::from(team);
         if self.classes.get(t).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        if t < 2
+            && (!self.ai_spawn_allowed[t]
+                || !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c)))
+        {
             return None;
         }
         let c = if self.hero_assault() {
@@ -1302,6 +1344,29 @@ impl Sim {
 
     /// Class membership, shared by the carousel, UI and unforced respawn.
     /// Ordinary unlock costs remain the separate confirmation refusal.
+    pub fn is_class_enabled(&self, team: u8, class: usize) -> bool {
+        let t = usize::from(team.min(1));
+        if class >= self.classes[t].len() {
+            return false;
+        }
+        self.class_enabled[t].get(class).copied().unwrap_or(true)
+    }
+
+    pub fn set_class_enabled(&mut self, team: u8, class: usize, enabled: bool) {
+        let t = usize::from(team.min(1));
+        if class >= self.classes[t].len() {
+            return;
+        }
+        if self.class_enabled[t].len() < self.classes[t].len() {
+            self.class_enabled[t].resize(self.classes[t].len(), true);
+        }
+        self.class_enabled[t][class] = enabled;
+    }
+
+    pub fn set_ai_spawn_allowed(&mut self, team: u8, allow: bool) {
+        self.ai_spawn_allowed[usize::from(team.min(1))] = allow;
+    }
+
     pub fn spawn_class_available(&self, s: usize, team: u8, class: usize) -> bool {
         if let Some((len, hero)) = self.test_rosters[usize::from(team.min(1))] {
             if class >= len
@@ -1311,7 +1376,9 @@ impl Sim {
                 return false;
             }
         }
-        if class >= self.classes[usize::from(team.min(1))].len() {
+        if class >= self.classes[usize::from(team.min(1))].len()
+            || !self.is_class_enabled(team, class)
+        {
             return false;
         }
         if self.hero_class(team).map(usize::from) != Some(class) {

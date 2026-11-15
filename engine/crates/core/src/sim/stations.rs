@@ -310,6 +310,29 @@ impl Sim {
         }
     }
 
+    /// Restore a destroyed station/destructible building to full health and live collision.
+    pub fn respawn_station(&mut self, station: u16) {
+        let Some(s) = self.stations.get_mut(usize::from(station)) else {
+            return;
+        };
+        s.destroyed = false;
+        s.health.cur = s.health.max;
+        let (class, instance, transform) = (s.class, s.instance, s.pose());
+        if let Some([x, y, z, r]) = self
+            .station_classes
+            .get(usize::from(class))
+            .and_then(|c| c.sphere)
+        {
+            s.sphere_centre = transform.transform_point3(Vec3::new(x, y, z));
+            s.sphere_radius = r;
+        }
+        if let Some(i) = instance {
+            if let Some(parts) = self.station_live_collision.get(usize::from(station)) {
+                self.collision.replace_instance(i, parts, transform);
+            }
+        }
+    }
+
     /// Register a station class (one entry per name) and return its index.
     pub fn add_station_class(&mut self, c: StationClass) -> u8 {
         if let Some(i) = self.station_classes.iter().position(|x| x.name == c.name) {

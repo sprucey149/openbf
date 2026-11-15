@@ -82,6 +82,7 @@ pub struct Flag {
     pub flyer_pickup_radius: f32,
     pub drop_timeout: f32,
     pub carried_offset: Vec3,
+    pub allow_ai_pickup: bool,
 }
 
 impl Flag {
@@ -95,6 +96,7 @@ impl Flag {
             flyer_pickup_radius: FLYER_PICKUP_RADIUS,
             drop_timeout: SPACE_FLAG_RETURN_TIMEOUT,
             carried_offset: SPACE_CARRIED_OFFSET,
+            allow_ai_pickup: true,
         }
     }
 
@@ -108,6 +110,7 @@ impl Flag {
             flyer_pickup_radius: FLYER_PICKUP_RADIUS,
             drop_timeout: GROUND_FLAG_RETURN_TIMEOUT,
             carried_offset: GROUND_CARRIED_OFFSET,
+            allow_ai_pickup: true,
         }
     }
 
@@ -121,6 +124,7 @@ impl Flag {
             flyer_pickup_radius: FLYER_PICKUP_RADIUS,
             drop_timeout,
             carried_offset: GROUND_CARRIED_OFFSET,
+            allow_ai_pickup: true,
         }
     }
 
@@ -354,7 +358,8 @@ impl Sim {
                             flag.status = FlagStatus::AtHome;
                             flag.current_pos = flag.home_pos;
 
-                            if ctf.team_points[carrier_team] >= ctf.score_limit
+                            if !self.battle.campaign_rules
+                                && ctf.team_points[carrier_team] >= ctf.score_limit
                                 && self.outcome.is_none()
                             {
                                 self.outcome = Some(scoring_team);
@@ -484,7 +489,10 @@ impl Sim {
         );
 
         for (idx, u) in self.units.iter().enumerate() {
-            if !u.alive || (only_enemy && u.team == flag.team) {
+            if !u.alive
+                || (only_enemy && u.team == flag.team)
+                || (!flag.allow_ai_pickup && !u.is_player)
+            {
                 continue;
             }
             let handle = UnitHandle {

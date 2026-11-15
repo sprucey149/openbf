@@ -42,6 +42,34 @@ pub struct TeamDef {
     /// generator emitted it still parses.
     #[serde(default)]
     pub classes: Vec<(String, u32, Option<u32>)>,
+    /// Optional explicit whitelist of class names initially enabled for spawn/AI.
+    /// `None` enables all classes in `classes` (minus `class_blacklist`).
+    #[serde(default)]
+    pub class_whitelist: Option<Vec<String>>,
+    /// Classes initially disabled for spawn/AI until unlocked via `AddUnitClass` or `SetClassEnabled`.
+    #[serde(default)]
+    pub class_blacklist: Vec<String>,
+    /// Whether AI units are initially allowed to spawn for this team (`None` -> `true`).
+    #[serde(default)]
+    pub allow_ai_spawn: Option<bool>,
+}
+
+impl TeamDef {
+    /// Whether `class` is initially enabled before any stage mutations run.
+    pub fn is_class_initially_enabled(&self, class: &str) -> bool {
+        if self.class_blacklist.iter().any(|c| c.eq_ignore_ascii_case(class)) {
+            return false;
+        }
+        match &self.class_whitelist {
+            Some(list) => list.iter().any(|c| c.eq_ignore_ascii_case(class)),
+            None => true,
+        }
+    }
+
+    /// Whether AI spawning is allowed at mission start (`allow_ai_spawn.unwrap_or(true)`).
+    pub fn allows_ai_spawn_initially(&self) -> bool {
+        self.allow_ai_spawn.unwrap_or(true)
+    }
 }
 
 /// One BF2 SIDE resource request, with its source file and native load order.
@@ -233,9 +261,40 @@ pub struct MissionDef {
     /// mission whose script sets none.
     #[serde(default)]
     pub ai: AiSettings,
+    /// Whether the spawn screen shows team selection (`None` defaults to `!self.is_campaign()`).
+    #[serde(default)]
+    pub allow_side_select: Option<bool>,
+    /// 0-based sim team index (`0` = mission team 1, `1` = mission team 2) the player
+    /// automatically joins when side selection is disabled (`None` defaults to `0`).
+    #[serde(default)]
+    pub forced_player_team: Option<u8>,
+    /// Optional command post whitelist; when non-empty, only listed CPs remain in the layout.
+    #[serde(default)]
+    pub cp_whitelist: Vec<String>,
+    /// Command posts explicitly excluded from this mission even if present on the world layer.
+    #[serde(default)]
+    pub cp_blacklist: Vec<String>,
+    /// Ordered world sublevel layers requested by `ReadDataFile("<map>.lvl", "<layer>")`.
+    #[serde(default)]
+    pub layers: Vec<String>,
+    /// Singleplayer campaign objectives, movies, and mid-round mutations (`mode == "campaign"`).
+    #[serde(default)]
+    pub campaign: Option<CampaignMissionDef>,
     /// The PC .lua and PS2 script this record was read out of.
     #[serde(default)]
     pub source: String,
+}
+
+impl MissionDef {
+    /// Whether the player can choose teams (`Side` stage) on the spawn screen.
+    pub fn allows_side_select(&self) -> bool {
+        self.allow_side_select.unwrap_or(!self.is_campaign())
+    }
+
+    /// 0-based team index the player auto-joins (and starts on).
+    pub fn initial_player_team(&self) -> u8 {
+        self.forced_player_team.unwrap_or(0).min(1)
+    }
 }
 
 /// [`MissionDef::music`]: the three music setters' calls, in the script's
@@ -381,6 +440,149 @@ pub struct DeathDrain {
     pub tickets: u32,
 }
 
+fn default_one() -> u8 {
+    1
+}
+
+fn default_two() -> u8 {
+    2
+}
+
+fn default_capture_limit() -> u32 {
+    1
+}
+
+/// Rise of the Empire singleplayer campaign specification extracted from BF2 campaign Lua.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct CampaignMissionDef {
+    #[serde(default)]
+    pub intro_movie: Option<String>,
+    #[serde(default)]
+    pub outro_movie: Option<String>,
+    #[serde(default)]
+    pub mid_movies: Vec<String>,
+    #[serde(default)]
+    pub infinite_tickets: [bool; 2],
+    #[serde(default)]
+    pub delay_victory_time: f32,
+    #[serde(default)]
+    pub initial_properties: Vec<(String, String, String)>,
+    #[serde(default)]
+    pub ambushes: Vec<CampaignAmbushDef>,
+    #[serde(default)]
+    pub stages: Vec<CampaignStageDef>,
+}
+
+/// An authored ambush spawn wave, either immediate on callback or triggered by entering a region.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CampaignAmbushDef {
+    pub path: String,
+    pub count: u32,
+    pub team: u8,
+    #[serde(default)]
+    pub trigger_region: Option<String>,
+}
+
+/// One sequential `MultiObjectiveContainer` objective stage.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct CampaignStageDef {
+    pub name: String,
+    pub kind: CampaignObjectiveKind,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub popup_text: Option<String>,
+    #[serde(default = "default_one")]
+    pub att_team: u8,
+    #[serde(default = "default_two")]
+    pub def_team: u8,
+    #[serde(default)]
+    pub time_limit: Option<f32>,
+    #[serde(default)]
+    pub time_limit_winner: Option<u8>,
+    #[serde(default)]
+    pub on_start: Vec<CampaignMutation>,
+    #[serde(default)]
+    pub on_complete: Vec<CampaignMutation>,
+}
+
+/// Objective win-condition family for a [`CampaignStageDef`].
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub enum CampaignObjectiveKind {
+    Conquest {
+        #[serde(default)]
+        posts: Vec<String>,
+    },
+    Assault {
+        #[serde(default)]
+        targets: Vec<String>,
+        #[serde(default)]
+        target_types: Vec<(String, u32)>,
+    },
+    Ctf {
+        #[serde(default)]
+        flag: String,
+        #[serde(default)]
+        home_region: String,
+        #[serde(default)]
+        capture_region: String,
+        #[serde(default = "default_capture_limit")]
+        capture_limit: u32,
+    },
+    Goto {
+        region: String,
+    },
+    Tdm {
+        #[serde(default)]
+        kills: u32,
+    },
+    Defend {
+        seconds: f32,
+    },
+    Interact {
+        #[serde(default)]
+        hint: String,
+        #[serde(default)]
+        region: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        class_filter: Option<String>,
+    },
+}
+
+/// Mid-round world mutations fired when a campaign stage starts/completes or a region triggers.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub enum CampaignMutation {
+    KillObject(String),
+    RespawnObject(String),
+    SetBarriers { name: String, enable: bool },
+    SetArcBlocks { name: String, block: bool },
+    SetProperty { target: String, key: String, value: String },
+    AddReinforcements { team: u8, delta: i32 },
+    SetReinforcements { team: u8, count: i32 },
+    UnlockHeroForTeam(u8),
+    PlayMovie(String),
+    AddUnitClass {
+        team: u8,
+        class: String,
+        min: u32,
+        #[serde(default)]
+        max: Option<u32>,
+    },
+    SetClassEnabled {
+        team: u8,
+        class: String,
+        enabled: bool,
+    },
+    AllowAiSpawn {
+        team: u8,
+        allow: bool,
+    },
+    Ambush(CampaignAmbushDef),
+    RegionTrigger { region: String, mutations: Vec<CampaignMutation> },
+}
+
 /// The mission a battle of `map` in `mode` runs for the two armies picked,
 /// and the team the first army (the player's) sits on in it (card ERAM).
 #[derive(Debug, Clone)]
@@ -479,19 +681,30 @@ impl MissionDef {
         if m.teams.len() != 2 {
             anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
         }
-        // A team with no reinforcements can never spawn anyone, and the first
-        // spawn is what builds the player — so zero tickets crashed at
-        // startup rather than starting a round nobody could play. Reject it
-        // where the value enters instead of teaching the sim to limp.
-        if let Some(t) = m.teams.iter().find(|t| t.tickets == 0) {
-            anyhow::bail!(
-                "{}: team '{}' has 0 reinforcements — a round with no tickets \
-                 cannot spawn anyone",
-                path.display(),
-                t.faction
-            );
+        // A team with no reinforcements can never spawn anyone in normal skirmish
+        // modes; campaign scripts author `-1` (unlimited) on defender/AI pools.
+        if !m.is_campaign() {
+            if let Some(t) = m.teams.iter().find(|t| t.tickets == 0) {
+                anyhow::bail!(
+                    "{}: team '{}' has 0 reinforcements — a round with no tickets \
+                     cannot spawn anyone",
+                    path.display(),
+                    t.faction
+                );
+            }
         }
         Ok(m)
+    }
+
+    /// Load a generated Rise of the Empire campaign mission by script stem (e.g. `"geo1c_c"`).
+    pub fn load_campaign(missions_dir: &Path, script_stem: &str) -> Result<MissionDef> {
+        let sub = missions_dir
+            .join("campaign")
+            .join(format!("bf2_{script_stem}.ron"));
+        if pak::is_file(&sub) {
+            return Self::load(&sub);
+        }
+        Self::load(&missions_dir.join(format!("bf2_{script_stem}.ron")))
     }
 
     /// Apply startup lock overrides to the doors that exist in this mode layer.
@@ -601,6 +814,10 @@ impl MissionDef {
 
     pub fn is_hunt(&self) -> bool {
         self.mode == "hunt"
+    }
+
+    pub fn is_campaign(&self) -> bool {
+        self.mode == "campaign"
     }
 
     pub fn tickets(&self) -> [u32; 2] {
@@ -1262,5 +1479,27 @@ mod tests {
             .to_degrees();
         assert!(deg < 0.1, "view {deg} deg off the PS2's");
         assert!(((c.fov_y * 0.5).tan() - 0.34131).abs() < 1e-5);
+    }
+
+    #[test]
+    fn every_campaign_mission_ron_parses() {
+        let campaign_dir = missions_dir().join("campaign");
+        if !campaign_dir.is_dir() {
+            eprintln!("SKIP: no engine/missions/campaign/*.ron (scripts/gen_missions.py generates them)");
+            return;
+        }
+        let stems = [
+            "geo1c_c", "myg1c_c", "spa2c_c", "fel1c_c", "spa3c_c", "kas2c_c",
+            "uta1c_c", "cor1c_c", "nab2g_c", "spa4g_c", "mus1c_c", "kam1c_c",
+            "dea1g_c", "pol1g_c", "tan1g_c", "spa1g_c", "yav1g_c", "hot1g_c",
+        ];
+        for stem in stems {
+            let m = MissionDef::load_campaign(missions_dir(), stem)
+                .unwrap_or_else(|e| panic!("{stem}: {e:#}"));
+            assert!(m.is_campaign(), "{stem}");
+            let c = m.campaign.as_ref().expect("campaign payload");
+            assert!(!c.stages.is_empty(), "{stem} has no stages");
+            assert!(!m.camera_shot_calls.is_empty(), "{stem} has no camera shots");
+        }
     }
 }

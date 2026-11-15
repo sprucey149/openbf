@@ -141,6 +141,15 @@ pub struct CommandPost {
     /// first scan's players-inside test never holds for them in the
     /// original. Setup-only like [`Self::switch_class_radius`].
     pub capture_authored: bool,
+    /// Inactive/killed mid-round (or from startup) in campaign missions;
+    /// `RespawnObject` clears this to restore the post.
+    pub killed: bool,
+    /// Whether this command post can be captured or neutralized (`true` by default;
+    /// `false` for `*_untakeable_*` control zones).
+    pub capturable: bool,
+    /// Whether this command post appears on the minimap / spawn map (`true` by
+    /// default; `false` for `*_invisible_*` control zones).
+    pub visible: bool,
 }
 
 /// The `AISpawnWeight` a post is constructed with (BF2; a command walker's
@@ -176,6 +185,9 @@ impl CommandPost {
             ai_capture_ban: 0,
             switch_class_radius: 0.0,
             capture_authored: true,
+            killed: false,
+            capturable: true,
+            visible: true,
         }
     }
 
@@ -187,6 +199,9 @@ impl CommandPost {
     /// One tick given the per-team headcount of counting units inside the
     /// capture region (`inside[t]` = alive CapturePosts soldiers of team t).
     pub fn update(&mut self, dt: f32, inside: &[u32]) -> CpChange {
+        if self.killed || !self.capturable {
+            return CpChange::None;
+        }
         let t_cap = self.def.capture_time;
         let t_neu = self.def.neutralize_time;
         match self.owner {
@@ -278,13 +293,16 @@ impl CommandPost {
     /// Spawnable for `team`: owned outright with spawn nodes (meters are
     /// ignored — CanTeamSpawnAt, report §6).
     pub fn spawnable_by(&self, team: u8) -> bool {
-        self.owner == Some(team) && !self.def.spawn_nodes.is_empty()
+        !self.killed && self.owner == Some(team) && !self.def.spawn_nodes.is_empty()
     }
 
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(&[self.owner.unwrap_or(255), self.capture_team.unwrap_or(255)]);
         eat(&self.capture.hash_bits().to_le_bytes());
         eat(&self.neutral.hash_bits().to_le_bytes());
+        if self.killed {
+            eat(&[1]);
+        }
     }
 }
 

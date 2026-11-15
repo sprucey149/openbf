@@ -282,6 +282,7 @@ impl App {
                 } else {
                     front.music_replay = true;
                 }
+                front.menus.set_campaign_unlocked(self.profile.campaign.unlocked);
                 front.menus.profile_selected();
                 front.picker = None;
                 front.cue(MenuSound::Accept);

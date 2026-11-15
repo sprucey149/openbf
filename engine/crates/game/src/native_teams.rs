@@ -2,14 +2,16 @@
 
 use crate::walk::WalkSim;
 
-const NATIVE_SIDES: [&str; 6] = ["ewk", "wok", "gun", "geo", "des", "gam"];
+const NATIVE_SIDES: [&str; 8] = ["ewk", "wok", "gun", "geo", "des", "gam", "gar", "jed"];
+const AUXILIARY_FACTION_SIDES: [&str; 4] = ["all", "imp", "rep", "cis"];
 
-pub fn native_side(
+fn side_with_class(
     classes_dir: &std::path::Path,
     game: &str,
     class: &str,
+    sides: &[&'static str],
 ) -> Option<(&'static str, std::path::PathBuf)> {
-    NATIVE_SIDES.iter().find_map(|&side| {
+    sides.iter().find_map(|&side| {
         let path = classes_dir.join(format!("{game}_{side}.ron"));
         if !pak::is_file(&path) {
             return None;
@@ -18,6 +20,14 @@ pub fn native_side(
         db.load(&path).ok()?;
         db.get(class).is_some().then_some((side, path))
     })
+}
+
+pub fn native_side(
+    classes_dir: &std::path::Path,
+    game: &str,
+    class: &str,
+) -> Option<(&'static str, std::path::PathBuf)> {
+    side_with_class(classes_dir, game, class, &NATIVE_SIDES)
 }
 
 /// Every native side the bake carries supplies its class file and models.
@@ -60,7 +70,19 @@ pub fn install(
         if walk.native_teams.contains_key(&team) {
             continue;
         }
-        let Some((faction, source)) = native_side(classes_dir, &mission.source_game, first) else {
+        let campaign = mission.mode.eq_ignore_ascii_case("campaign");
+        let main_side = assets_dir.join(format!("side_{}", mission.source_game));
+        let found = native_side(classes_dir, &mission.source_game, first).or_else(|| {
+            campaign.then(|| {
+                side_with_class(
+                    classes_dir,
+                    &mission.source_game,
+                    first,
+                    &AUXILIARY_FACTION_SIDES,
+                )
+            })?
+        });
+        let Some((faction, source)) = found else {
             eprintln!(
                 "native team {} unavailable (no baked native side carries {first})",
                 authored.team
@@ -68,7 +90,13 @@ pub fn install(
             continue;
         };
         let roster = (|| -> anyhow::Result<_> {
-            let mut db = crate::roster::load_classdb(classes_dir, &mission.source_game, &[])?;
+            let side_filter: &[&str] = if AUXILIARY_FACTION_SIDES.contains(&faction) {
+                &[faction]
+            } else {
+                &[]
+            };
+            let mut db =
+                crate::roster::load_classdb(classes_dir, &mission.source_game, side_filter)?;
             db.load(&source)?;
             let classes = authored
                 .classes
@@ -80,6 +108,10 @@ pub fn install(
                     .iter()
                     .all(|class| class.geometry.as_ref().is_some_and(|name| {
                         pak::is_file(side.join("soldiers").join(format!("{name}.glb")))
+                            || (campaign
+                                && pak::is_file(
+                                    main_side.join("soldiers").join(format!("{name}.glb")),
+                                ))
                     })),
                 "native soldier model missing"
             );

@@ -1167,12 +1167,41 @@ PRETTY = {
     "bf2_kam1": "Kamino: Tipoca City", "bf2_kas2": "Kashyyyk: Docks",
     "bf2_mus1": "Mustafar: Refinery", "bf2_myg1": "Mygeeto: War-Torn City",
     "bf2_nab2": "Naboo: Theed", "bf2_pol1": "Polis Massa: Medical Facility",
+    "bf2_spa2": "Space Coruscant", "bf2_spa4": "Space Mustafar",
     "bf2_tan1": "Tantive IV: Interior", "bf2_uta1": "Utapau: Sinkhole",
     "bf2_yav1": "Yavin 4: Temple",
 }
 
 ERA_NAME = {"gcw": "GCW", "cw": "CW"}
-MODE_NAME = {"con": "Conquest", "ass": "Space Assault", "eli": "Hero Assault", "1flag": "1-Flag CTF", "hunt": "Hunt"}
+MODE_NAME = {
+    "con": "Conquest",
+    "ass": "Space Assault",
+    "eli": "Hero Assault",
+    "1flag": "1-Flag CTF",
+    "hunt": "Hunt",
+    "campaign": "Campaign",
+}
+
+CAMPAIGN_MISSIONS = [
+    ("bf2_geo1", "bf2", "geo", "cw",  "geo1c_c"),
+    ("bf2_myg1", "bf2", "MYG", "cw",  "myg1c_c"),
+    ("bf2_spa2", "bf2", "SPA", "cw",  "spa2c_c"),
+    ("bf2_fel1", "bf2", "FEL", "cw",  "fel1c_c"),
+    ("bf2_spa3", "bf2", "SPA", "cw",  "spa3c_c"),
+    ("bf2_kas2", "bf2", "KAS", "cw",  "kas2c_c"),
+    ("bf2_uta1", "bf2", "UTA", "cw",  "uta1c_c"),
+    ("bf2_cor1", "bf2", "COR", "cw",  "cor1c_c"),
+    ("bf2_nab2", "bf2", "NAB", "gcw", "nab2g_c"),
+    ("bf2_spa4", "bf2", "SPA", "gcw", "spa4g_c"),
+    ("bf2_mus1", "bf2", "MUS", "gcw", "mus1c_c"),
+    ("bf2_kam1", "bf2", "kam", "gcw", "kam1c_c"),
+    ("bf2_dea1", "bf2", "DEA", "gcw", "dea1g_c"),
+    ("bf2_pol1", "bf2", "POL", "gcw", "pol1g_c"),
+    ("bf2_tan1", "bf2", "TAN", "gcw", "tan1g_c"),
+    ("bf2_spa1", "bf2", "SPA", "gcw", "spa1g_c"),
+    ("bf2_yav1", "bf2", "YAV", "gcw", "yav1g_c"),
+    ("bf2_hot1", "bf2", "hot", "gcw", "hot1g_c"),
+]
 
 
 
@@ -1429,6 +1458,8 @@ def mission_mode(script):
     for mode in ("ass", "eli", "1flag", "hunt"):
         if script.endswith("_" + mode):
             return mode
+    if script.endswith("_c"):
+        return "campaign"
     return "con"
 
 
@@ -1710,6 +1741,677 @@ def startup_mission_facts50(calls, mission, common=None):
                             or c.name not in ("KillObject", "SetProperty", "SetObjectTeam"))
 
 
+_CAMP_SKY_ONLY = {"cor", "kas", "mus", "yav"}
+_CAMP_EVENT_REGISTRARS = {
+    "OnEnterRegion", "OnEnterRegionName", "OnLeaveRegion", "OnTimerElapse",
+    "OnObjectKill", "OnObjectKillClass", "OnObjectKillName", "OnObjectKillTeam",
+    "OnObjectRepairName", "OnObjectRespawnName", "OnObjectInitName",
+    "OnCharacterSpawn", "OnCharacterChangeClass", "OnCharacterEnterVehicle",
+    "OnCharacterLandedFlyer", "OnTicketCountChange", "OnFlagPickUp",
+    "OnFlagDrop", "OnFinishCaptureName",
+}
+
+
+class _SymObj:
+    def __init__(self, kind, opts=None):
+        self.kind = kind
+        self.opts = dict(opts) if isinstance(opts, dict) else {}
+        self.props = {}
+        self.calls = []
+        self.global_name = None
+
+
+class _SymMethod:
+    def __init__(self, obj, meth):
+        self.obj = obj
+        self.meth = meth
+
+
+class _SymTicketExpr:
+    def __init__(self, team, delta=0):
+        self.team = team
+        self.delta = delta
+
+
+def _sym_exec50(proto, base, globs, ups=None, objs=None, event_regs=None,
+                calls_out=None, helper_args=None, depth=0):
+    """Symbolic Lua 5.0 evaluator tracking objective objects and ticket deltas."""
+    if depth > 6:
+        return {}
+    ups = [] if ups is None else ups
+    objs = [] if objs is None else objs
+    event_regs = [] if event_regs is None else event_regs
+    calls_out = [] if calls_out is None else calls_out
+    R = {}
+    if helper_args:
+        for i, v in enumerate(helper_args):
+            R[i] = v
+    closure_ups = {}
+
+    def rk(x):
+        if x >= base:
+            i = x - base
+            return proto.k[i] if i < len(proto.k) else Unknown("k%d" % i)
+        return R.get(x, Unknown("r%d" % x))
+
+    def ti(v):
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == int(v) else None
+
+    skip = 0
+    for idx, ins in enumerate(proto.code):
+        if skip:
+            skip -= 1
+            continue
+        op = OPS50[ins & 0x3F]
+        a = (ins >> 24) & 0xFF
+        c = (ins >> 6) & 0x1FF
+        b = (ins >> 15) & 0x1FF
+        bx = (ins >> 6) & 0x3FFFF
+        if op == "LOADK":
+            R[a] = proto.k[bx]
+        elif op == "MOVE":
+            R[a] = R.get(b, Unknown("r%d" % b))
+        elif op == "LOADNIL":
+            for i in range(a, b + 1):
+                R[i] = None
+        elif op == "LOADBOOL":
+            R[a] = bool(b)
+        elif op == "GETGLOBAL":
+            name = proto.k[bx]
+            R[a] = globs.get(name, Unknown("global:" + str(name)))
+        elif op == "SETGLOBAL":
+            gname = proto.k[bx]
+            val = R.get(a, Unknown("r%d" % a))
+            globs[gname] = val
+            if isinstance(val, _SymObj) and val.global_name is None:
+                val.global_name = gname
+        elif op == "NEWTABLE":
+            R[a] = Table()
+        elif op == "SETTABLE":
+            t = R.get(a)
+            k, v = rk(b), rk(c)
+            if isinstance(t, _SymObj):
+                t.props[k] = v
+            elif isinstance(t, Table) and isinstance(k, (str, float, int)):
+                t[k] = v
+        elif op in ("SETLIST", "SETLISTO"):
+            t = R.get(a)
+            if isinstance(t, Table):
+                n = bx % 32 + 1
+                start = bx - bx % 32
+                for i in range(1, n + 1):
+                    t[float(start + i)] = R.get(a + i, Unknown())
+        elif op == "GETTABLE":
+            t = R.get(b)
+            k = rk(c)
+            if isinstance(t, _SymObj):
+                R[a] = t.props.get(k, t.opts.get(k, Unknown("field:%s" % k)))
+            elif isinstance(t, Table):
+                R[a] = t.get(k, Unknown("field"))
+            else:
+                R[a] = Unknown("field:%s" % k)
+        elif op == "SELF":
+            recv = R.get(b, Unknown("r%d" % b))
+            R[a + 1] = recv
+            meth = rk(c)
+            if isinstance(recv, _SymObj):
+                R[a] = _SymMethod(recv, meth)
+            else:
+                name = recv.what[7:] if isinstance(recv, Unknown) and recv.what.startswith("global:") else "?"
+                R[a] = Unknown("global:%s:%s" % (name, meth))
+        elif op == "CLOSURE":
+            cl = Closure(proto.protos[bx]) if bx < len(proto.protos) else Unknown("closure")
+            n = proto.protos[bx].nups if bx < len(proto.protos) else 0
+            caps = []
+            for j in range(n):
+                if idx + 1 + j >= len(proto.code):
+                    break
+                q = proto.code[idx + 1 + j]
+                qop = OPS50[q & 0x3F]
+                qb = (q >> 15) & 0x1FF
+                if qop == "MOVE":
+                    caps.append(R.get(qb, Unknown("r%d" % qb)))
+                elif qop == "GETUPVAL":
+                    caps.append(ups[qb] if qb < len(ups) else Unknown("upval"))
+                else:
+                    caps.append(Unknown("upval"))
+            if isinstance(cl, Closure):
+                cl._ups = caps
+            closure_ups[bx] = caps
+            R[a] = cl
+            skip = n
+        elif op == "GETUPVAL":
+            R[a] = ups[b] if b < len(ups) else Unknown("upval")
+        elif op in ("ADD", "SUB", "MUL", "DIV", "POW"):
+            x, y = rk(b), rk(c)
+            R[a] = Unknown("arith")
+            if op == "ADD" and isinstance(x, _SymTicketExpr) and isinstance(y, (int, float)):
+                R[a] = _SymTicketExpr(x.team, x.delta + y)
+            elif op == "ADD" and isinstance(y, _SymTicketExpr) and isinstance(x, (int, float)):
+                R[a] = _SymTicketExpr(y.team, y.delta + x)
+            elif op == "SUB" and isinstance(x, _SymTicketExpr) and isinstance(y, (int, float)):
+                R[a] = _SymTicketExpr(x.team, x.delta - y)
+            elif isinstance(x, float) and isinstance(y, float):
+                try:
+                    if op == "ADD":
+                        R[a] = x + y
+                    elif op == "SUB":
+                        R[a] = x - y
+                    elif op == "MUL":
+                        R[a] = x * y
+                    elif op == "DIV":
+                        R[a] = x / y if y else 0.0
+                    else:
+                        R[a] = x ** y
+                except (OverflowError, ZeroDivisionError):
+                    pass
+        elif op in ("UNM", "NOT", "CONCAT"):
+            R[a] = Unknown(op)
+        elif op in ("CALL", "TAILCALL"):
+            fn = R.get(a, Unknown())
+            nargs = (max(R) + 1 - (a + 1)) if b == 0 and R else b - 1
+            args = [R.get(a + 1 + i, Unknown()) for i in range(max(0, nargs))]
+            if isinstance(fn, _SymMethod):
+                m_args = args[1:] if len(args) >= 1 and args[0] is fn.obj else args
+                fn.obj.calls.append((fn.meth, m_args))
+                calls_out.append(Call("%s:%s" % (fn.obj.kind, fn.meth), [fn.obj] + m_args, proto))
+                R[a] = Unknown("ret")
+            elif isinstance(fn, Closure):
+                _sym_exec50(fn.proto, base, globs, getattr(fn, "_ups", []),
+                            objs, event_regs, calls_out, args, depth + 1)
+                for i in range(max(0, c - 1)):
+                    R[a + i] = Unknown("ret")
+            else:
+                nm = fn.what[7:] if isinstance(fn, Unknown) and fn.what.startswith("global:") else "?"
+                calls_out.append(Call(nm, args, proto))
+                if nm in _CAMP_EVENT_REGISTRARS and args and isinstance(args[0], Closure):
+                    event_regs.append((nm, args, proto))
+                if nm in ("ObjectiveConquest:New", "ObjectiveAssault:New", "ObjectiveCTF:New",
+                          "ObjectiveGoto:New", "ObjectiveTDM:New", "Objective:New",
+                          "MultiObjectiveContainer:New", "CommandPost:New", "Target:New", "TargetType:New"):
+                    obj = _SymObj(nm[:-4], args[1] if len(args) >= 2 else None)
+                    objs.append(obj)
+                    R[a] = obj
+                elif nm == "CreateTimer":
+                    obj = _SymObj("Timer", {"name": args[0] if args else None})
+                    objs.append(obj)
+                    R[a] = obj
+                elif nm == "GetRegion":
+                    obj = _SymObj("Region", {"name": args[0] if args else None})
+                    objs.append(obj)
+                    R[a] = obj
+                elif nm == "GetReinforcementCount" and args and ti(args[0]) is not None:
+                    R[a] = _SymTicketExpr(ti(args[0]), 0)
+                else:
+                    for i in range(max(0, c - 1)):
+                        R[a + i] = Unknown("ret")
+    return closure_ups
+
+
+def _prop_str(val):
+    if isinstance(val, bool):
+        return "1" if val else "0"
+    if isinstance(val, float):
+        return str(int(val)) if val == int(val) else f32_text(val)
+    if isinstance(val, int):
+        return str(val)
+    if isinstance(val, str):
+        return val
+    return None
+
+
+def _movie_name(arg):
+    if not isinstance(arg, str):
+        return None
+    s = arg.replace("\\", "/").split("/")[-1]
+    if s.lower().endswith(".mvs"):
+        return None
+    return s.strip().lower()
+
+
+def _mutations_from_calls(calls, event_regs=None, globs=None, depth=0):
+    """Convert symbolic calls and registered region triggers into CampaignMutation dicts."""
+    muts = []
+    seen_timers = set()
+
+    def ti(v):
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == int(v) else None
+
+    def tb(v):
+        if isinstance(v, bool):
+            return v
+        n = ti(v)
+        return (n != 0) if n is not None else None
+
+    for c in calls:
+        a = c.args
+        if c.name == "KillObject" and a and isinstance(a[0], str):
+            muts.append(("KillObject", a[0]))
+        elif c.name == "RespawnObject" and a and isinstance(a[0], str):
+            muts.append(("RespawnObject", a[0]))
+        elif c.name in BARRIER_VERBS and a and isinstance(a[0], str):
+            muts.append(("SetBarriers", a[0], c.name == BARRIER_VERBS[0]))
+        elif c.name in ARC_VERBS and a and isinstance(a[0], str):
+            muts.append(("SetArcBlocks", a[0], c.name == ARC_VERBS[0]))
+        elif c.name == "SetProperty" and len(a) >= 3 and isinstance(a[0], str) and isinstance(a[1], str):
+            vs = _prop_str(a[2])
+            if vs is not None:
+                muts.append(("SetProperty", a[0], a[1], vs))
+        elif c.name == "SetObjectTeam" and len(a) >= 2 and isinstance(a[0], str) and ti(a[1]) is not None:
+            muts.append(("SetProperty", a[0], "Team", str(ti(a[1]))))
+        elif c.name == "AddReinforcements" and len(a) >= 2 and ti(a[0]) is not None and ti(a[1]) is not None:
+            muts.append(("AddReinforcements", ti(a[0]), ti(a[1])))
+        elif c.name == "SetReinforcementCount" and len(a) >= 2 and ti(a[0]) is not None:
+            t = ti(a[0])
+            if isinstance(a[1], _SymTicketExpr) and a[1].team == t and ti(a[1].delta) is not None:
+                delta = ti(a[1].delta)
+                if delta != 0:
+                    muts.append(("AddReinforcements", t, delta))
+            elif ti(a[1]) is not None:
+                muts.append(("SetReinforcements", t, ti(a[1])))
+        elif c.name == "UnlockHeroForTeam" and a and ti(a[0]) is not None:
+            muts.append(("UnlockHeroForTeam", ti(a[0])))
+        elif c.name == "ScriptCB_PlayInGameMovie" and a:
+            mov = _movie_name(a[-1])
+            if mov:
+                muts.append(("PlayMovie", mov))
+        elif c.name == "AddUnitClass" and len(a) >= 2 and ti(a[0]) is not None and isinstance(a[1], str):
+            t = ti(a[0])
+            cls = a[1].lower()
+            mn = ti(a[2]) if len(a) >= 3 and ti(a[2]) is not None else 1
+            mx = ti(a[3]) if len(a) >= 4 and ti(a[3]) is not None else None
+            muts.append(("AddUnitClass", t, cls, mn, mx))
+        elif c.name == "AllowAISpawn" and len(a) >= 2 and ti(a[0]) is not None and tb(a[1]) is not None:
+            muts.append(("AllowAiSpawn", ti(a[0]), tb(a[1])))
+        elif c.name == "Ambush" and len(a) >= 3 and isinstance(a[0], str) and ti(a[1]) is not None and ti(a[2]) is not None:
+            muts.append(("Ambush", (a[0], ti(a[1]), ti(a[2]), None)))
+        elif c.name == "SetupAmbushTrigger" and len(a) >= 4 and isinstance(a[0], str) and isinstance(a[1], str) and ti(a[2]) is not None and ti(a[3]) is not None:
+            muts.append(("Ambush", (a[1], ti(a[2]), ti(a[3]), a[0])))
+
+    if event_regs and depth < 2 and globs is not None:
+        for ev_nm, args, _ in event_regs:
+            if ev_nm not in ("OnEnterRegion", "OnEnterRegionName") or len(args) < 2 or not isinstance(args[0], Closure):
+                continue
+            reg = args[1].opts.get("name") if isinstance(args[1], _SymObj) else args[1]
+            if not isinstance(reg, str):
+                continue
+            sub_calls, sub_regs = [], []
+            base = _rk_base(args[0].proto) if False else None
+            # _sym_exec50 needs base of root chunk; look up from globs sentinel
+            root_base = globs.get("__root_base__", 250)
+            _sym_exec50(args[0].proto, root_base, dict(globs), getattr(args[0], "_ups", []), [], sub_regs, sub_calls, depth=depth + 1)
+            # Only record region trigger mutations if it performs world actions (not purely Objective:Complete / ReleaseEnterRegion)
+            sub_muts = _mutations_from_calls(sub_calls, None, globs, depth + 1)
+            if sub_muts:
+                muts.append(("RegionTrigger", reg, sub_muts))
+    return muts
+
+
+def _eval_closure(cl, base, globs):
+    calls, regs = [], []
+    if isinstance(cl, Closure):
+        _sym_exec50(cl.proto, base, dict(globs), getattr(cl, "_ups", []), [], regs, calls, depth=0)
+    return calls, regs
+
+
+def campaign_facts50(f):
+    """Extract startup world state and ordered campaign stages from BF2 campaign bytecode."""
+    base = _rk_base(f)
+    globs = {"__root_base__": base}
+    objs = []
+    startup_regs = []
+    startup_calls = []
+
+    cu = _sym_exec50(f, base, globs, [], objs, startup_regs, startup_calls, depth=0)
+    for cname in ("ScriptInit", "ScriptPostLoad"):
+        fn = globs.get(cname)
+        if isinstance(fn, Closure):
+            _sym_exec50(fn.proto, base, globs, getattr(fn, "_ups", []), objs, startup_regs, startup_calls, depth=0)
+
+    # Filter facts_from_calls to only startup (excluding closures evaluated below)
+    d = facts_from_calls(startup_calls)
+    d["layers"] = [ly for ly in d["layers"] if ly.lower() not in _CAMP_SKY_ONLY]
+    startup_classes = {t: [c[0].lower() for c in d["classes"].get(t, [])] for t in (1, 2)}
+
+    # Collect completion callbacks linked to each objective SymObj anywhere in the script
+    obj_complete_events = {}
+    for ev_nm, args, _ in startup_regs:
+        if args and isinstance(args[0], Closure):
+            c_calls, _ = _eval_closure(args[0], base, globs)
+            for cc in c_calls:
+                if cc.name.endswith(":Complete") and cc.args and isinstance(cc.args[0], _SymObj):
+                    obj_complete_events.setdefault(id(cc.args[0]), []).append((ev_nm, args, c_calls))
+
+    # Trace MultiObjectiveContainer creation
+    cont_calls, cont_regs = [], []
+    for cname in ("BeginObjectives", "StartObjectives"):
+        fn = globs.get(cname)
+        if isinstance(fn, Closure):
+            _sym_exec50(fn.proto, base, globs, getattr(fn, "_ups", []), objs, cont_regs, cont_calls, depth=0)
+    if not any(o.kind == "MultiObjectiveContainer" for o in objs):
+        for ev_nm, args, _ in list(startup_regs):
+            if ev_nm == "OnTimerElapse" and args and isinstance(args[0], Closure):
+                cl = args[0]
+                if any(cc.name == "MultiObjectiveContainer:New" for cc in calls50(cl.proto, globs=globs, base=base, recurse=True)):
+                    _sym_exec50(cl.proto, base, globs, getattr(cl, "_ups", []), objs, cont_regs, cont_calls, depth=0)
+
+    containers = [o for o in objs if o.kind == "MultiObjectiveContainer"]
+    if not containers:
+        raise ValueError("campaign script has no MultiObjectiveContainer")
+    cont = containers[0]
+    delay_victory = float(cont.opts.get("delayVictoryTime", cont.props.get("delayVictoryTime", 0.0)))
+
+    intro_movie = None
+    outro_movie = None
+    for c in startup_calls:
+        if c.name == "ScriptCB_PlayInGameMovie" and c.args and intro_movie is None:
+            intro_movie = _movie_name(c.args[-1])
+        elif c.name == "SetMissionEndMovie" and c.args:
+            outro_movie = _movie_name(c.args[-1])
+
+    initial_properties = []
+    for c in startup_calls:
+        if c.name == "SetProperty" and len(c.args) >= 3 and isinstance(c.args[0], str) and isinstance(c.args[1], str):
+            if c.args[1].lower() in ("team", "islocked"):
+                continue
+            vs = _prop_str(c.args[2])
+            if vs is not None:
+                initial_properties.append((c.args[0], c.args[1], vs))
+
+    ambushes = []
+    allow_ai_spawn = {}
+    for c in startup_calls:
+        a = c.args
+        if c.name == "Ambush" and len(a) >= 3 and isinstance(a[0], str):
+            cn, tm = _ti_num(a[1]), _ti_num(a[2])
+            if cn is not None and tm is not None:
+                ambushes.append((a[0], cn, tm, None))
+        elif c.name == "SetupAmbushTrigger" and len(a) >= 4 and isinstance(a[0], str) and isinstance(a[1], str):
+            cn, tm = _ti_num(a[2]), _ti_num(a[3])
+            if cn is not None and tm is not None:
+                ambushes.append((a[1], cn, tm, a[0]))
+        elif c.name == "AllowAISpawn" and len(a) >= 2:
+            tm = _ti_num(a[0])
+            val = a[1] if isinstance(a[1], bool) else (_ti_num(a[1]) != 0 if _ti_num(a[1]) is not None else None)
+            if tm in (1, 2) and val is not None:
+                allow_ai_spawn[tm] = val
+    if allow_ai_spawn:
+        d["allow_ai_spawn"] = allow_ai_spawn
+
+    def _collect_stage_classes(mut_list):
+        for mut in mut_list:
+            if mut[0] == "AddUnitClass":
+                _, tm, cls, mn, mx = mut
+                if tm in (1, 2):
+                    cur = d["classes"].setdefault(tm, [])
+                    if not any(c[0].lower() == cls for c in cur):
+                        cur.append((cls, mn, mx))
+            elif mut[0] == "RegionTrigger":
+                _collect_stage_classes(mut[2])
+
+    mid_movies = []
+    def _record_mid_movies(mut_list):
+        for mut in mut_list:
+            if mut[0] == "PlayMovie" and mut[1] not in mid_movies:
+                mid_movies.append(mut[1])
+            elif mut[0] == "RegionTrigger":
+                _record_mid_movies(mut[2])
+
+    stages = []
+    stage_objs = [a[0] for m, a in cont.calls if m == "AddObjectiveSet" and a and isinstance(a[0], _SymObj)]
+    for sidx, st in enumerate(stage_objs):
+        opts = st.opts
+        att = _ti_num(opts.get("teamATT", opts.get("TeamATT", 1.0))) or 1
+        dfn = _ti_num(opts.get("teamDEF", opts.get("TeamDEF", 2.0))) or 2
+        text = opts.get("text") or opts.get("textATT") or opts.get("textDEF") or ("stage_%d" % (sidx + 1))
+        if not isinstance(text, str):
+            text = "stage_%d" % (sidx + 1)
+        popup = opts.get("popupText") if isinstance(opts.get("popupText"), str) else None
+        time_limit = float(opts["timeLimit"]) if isinstance(opts.get("timeLimit"), (int, float)) else None
+        tl_win = _ti_num(opts.get("timeLimitWinningTeam"))
+
+        on_start_calls, on_start_regs = _eval_closure(st.props.get("OnStart"), base, globs)
+        on_comp_calls, on_comp_regs = _eval_closure(st.props.get("OnComplete"), base, globs)
+        on_start_muts = _mutations_from_calls(on_start_calls, on_start_regs, globs)
+        on_comp_muts = _mutations_from_calls(on_comp_calls, on_comp_regs, globs)
+        _collect_stage_classes(on_start_muts)
+        _collect_stage_classes(on_comp_muts)
+        _record_mid_movies(on_start_muts)
+        _record_mid_movies(on_comp_muts)
+
+        # Infer stage kind
+        kind = None
+        if st.kind == "ObjectiveConquest":
+            posts = [a[0].opts["name"] for m, a in st.calls
+                     if m == "AddCommandPost" and a and isinstance(a[0], _SymObj)
+                     and isinstance(a[0].opts.get("name"), str)]
+            kind = ("Conquest", posts)
+        elif st.kind == "ObjectiveAssault":
+            targets, target_types = [], []
+            for m, a in st.calls:
+                if m == "AddTarget" and a and isinstance(a[0], _SymObj):
+                    to = a[0]
+                    if to.kind == "Target" and isinstance(to.opts.get("name"), str):
+                        targets.append(to.opts["name"])
+                    elif to.kind == "TargetType" and isinstance(to.opts.get("classname"), str):
+                        lim = _ti_num(to.opts.get("killLimit")) or 1
+                        target_types.append((to.opts["classname"].lower(), lim))
+            kind = ("Assault", targets, target_types)
+        elif st.kind == "ObjectiveCTF":
+            fl = next((a[0] for m, a in st.calls if m == "AddFlag" and a and isinstance(a[0], dict)), {})
+            cap_lim = _ti_num(opts.get("captureLimit")) or 1
+            kind = ("Ctf", str(fl.get("name", "")), str(fl.get("homeRegion", "")), str(fl.get("captureRegion", "")), cap_lim)
+        elif st.kind == "ObjectiveGoto":
+            kind = ("Goto", str(opts.get("regionName", "")))
+        elif st.kind == "ObjectiveTDM":
+            kills = None
+            for mut in on_start_muts:
+                if mut[0] == "SetReinforcements" and mut[1] == dfn and mut[2] > 0:
+                    kills = mut[2]
+            kind = ("Tdm", kills or 25)
+        elif st.kind == "Objective":
+            kind = _infer_bare_objective(st, opts, text, globs, on_start_calls, on_start_regs, obj_complete_events.get(id(st), []), base)
+
+        if kind is None:
+            kind = ("Interact", text, None, None, None)
+
+        name = st.global_name or ("stage_%d" % (sidx + 1))
+        stages.append({
+            "name": name,
+            "kind": kind,
+            "text": text,
+            "popup_text": popup,
+            "att_team": att,
+            "def_team": dfn,
+            "time_limit": time_limit,
+            "time_limit_winner": tl_win,
+            "on_start": on_start_muts,
+            "on_complete": on_comp_muts,
+        })
+
+    class_whitelist = {}
+    for t in (1, 2):
+        if len(d["classes"].get(t, [])) > len(startup_classes[t]):
+            class_whitelist[t] = startup_classes[t]
+    if class_whitelist:
+        d["class_whitelist"] = class_whitelist
+
+    return d, {
+        "intro_movie": intro_movie,
+        "outro_movie": outro_movie,
+        "mid_movies": mid_movies,
+        "delay_victory_time": delay_victory,
+        "initial_properties": initial_properties,
+        "ambushes": ambushes,
+        "stages": stages,
+    }
+
+
+def _ti_num(v):
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == int(v) else None
+
+
+def _infer_bare_objective(st, opts, text, globs, start_calls, start_regs, linked_events, base):
+    """Map a bare `Objective:New` stage to Goto / Assault / Tdm / Defend / Interact."""
+    entity_markers = [c.args[0] for c in start_calls if c.name == "MapAddEntityMarker" and c.args and isinstance(c.args[0], str)]
+    class_markers = [c.args[0].lower() for c in start_calls if c.name == "MapAddClassMarker" and c.args and isinstance(c.args[0], str)]
+    added_classes = [c.args[1].lower() for c in start_calls if c.name == "AddUnitClass" and len(c.args) >= 2 and isinstance(c.args[1], str)]
+
+    def first_count(default=1):
+        for k, v in globs.items():
+            if any(w in k.lower() for w in ("ship_count", "acklay_count", "droid_count", "rebelleader_count")):
+                n = _ti_num(v)
+                if n and n > 0:
+                    return n
+        return default
+
+    # Check linked events (registered inside ScriptPostLoad pointing to st:Complete) and OnStart events
+    all_evs = list(start_regs) + [(ev, args, None) for ev, args, _ in linked_events]
+
+    for ev_nm, args, _ in all_evs:
+        if ev_nm == "OnCharacterChangeClass":
+            cls = added_classes[0] if added_classes else None
+            reg = entity_markers[0] if entity_markers else None
+            return ("Interact", text, reg, None, cls)
+        if ev_nm == "OnObjectRepairName":
+            target = args[1] if len(args) > 1 and isinstance(args[1], str) else (entity_markers[0] if entity_markers else None)
+            return ("Interact", text, None, target, None)
+        if ev_nm == "OnObjectKillName":
+            target = args[1] if len(args) > 1 and isinstance(args[1], str) else (entity_markers[0] if entity_markers else None)
+            return ("Assault", [target] if target else [], [])
+        if ev_nm == "OnObjectKillClass":
+            # Look for fighter-class list table (spa1g_c / spa2c_c / spa4g_c) when class arg is resolved from ipairs
+            cls = args[1].lower() if len(args) > 1 and isinstance(args[1], str) else None
+            if cls is None:
+                ship_list = next((v for k, v in globs.items() if isinstance(v, Table) and "ship" in k.lower()), None)
+                classes = [v.lower() for _, v in sorted((k, val) for k, val in (ship_list or {}).items() if isinstance(k, float)) if isinstance(v, str)]
+                cnt = _ti_num(globs.get("ship_count")) or 5
+                if classes:
+                    return ("Assault", [], [(classes[0], cnt)])
+            cnt = 1
+            if cls == "geo_inf_acklay":
+                cnt = _ti_num(globs.get("acklay_count")) or 6
+            elif cls == "cis_walk_spider":
+                cnt = 2
+            return ("Assault", [], [(cls, cnt)] if cls else [])
+        if ev_nm == "OnObjectKillTeam":
+            if class_markers:
+                return ("Assault", [], [(cm, 1) for cm in class_markers])
+            return ("Tdm", _ti_num(globs.get("ambushCountBOS")) or 3)
+
+    # Enter-vehicle + enter-region (e.g. spa4g_c grievous fighter landing, fel1c_c / geo1c_c)
+    enter_regs = [ev for ev in all_evs if ev[0] in ("OnEnterRegion", "OnEnterRegionName")]
+    has_enter_veh = any(ev[0] == "OnCharacterEnterVehicle" for ev in all_evs)
+    has_landed = any(ev[0] == "OnCharacterLandedFlyer" for ev in all_evs)
+    if has_enter_veh and not enter_regs and not has_landed:
+        return ("Interact", text, None, entity_markers[0] if entity_markers else None, None)
+
+    for ev_nm, args, _ in enter_regs:
+        reg = args[1].opts.get("name") if len(args) > 1 and isinstance(args[1], _SymObj) else (args[1] if len(args) > 1 else None)
+        if isinstance(reg, str):
+            return ("Goto", reg)
+
+    # ActivateRegion / OnEnterRegion name fallback for spa4g_c
+    if has_landed:
+        act_regs = [c.args[0] for c in start_calls if c.name == "ActivateRegion" and c.args and isinstance(c.args[0], str)]
+        if act_regs:
+            return ("Goto", act_regs[0])
+
+    # Generic OnObjectKill stages (geo1c_c sniper/jedi kill counts, nab2g_c queen, yav1g_c leaders)
+    for ev_nm, args, _ in all_evs:
+        if ev_nm == "OnObjectKill":
+            if class_markers:
+                cnt = _ti_num(globs.get("rebelleader_count")) or len(class_markers)
+                if len(class_markers) == 1:
+                    return ("Assault", [], [(class_markers[0], cnt)])
+                return ("Assault", [], [(cm, 1) for cm in class_markers])
+            if "queen_dead" in globs or "naboo2.objectives.campaign.5" in text:
+                return ("Assault", [], [("gar_inf_nabooqueen", 1)])
+            if "campaign.9" in text:
+                return ("Tdm", _ti_num(globs.get("droid_count")) or 5)
+            if "campaign.21" in text:
+                return ("Tdm", _ti_num(globs.get("droid_count_obj21")) or 10)
+            return ("Tdm", first_count(5))
+
+    if entity_markers:
+        return ("Interact", text, entity_markers[0], None, None)
+    return ("Interact", text, None, None, None)
+
+
+def build_campaign(key, game, planet, era, ps2_name):
+    """Build a BF2 Rise of the Empire singleplayer campaign Mission."""
+    f = load_ps2(game, ps2_name)
+    if f is None:
+        raise ValueError(f"missing PS2 campaign script {ps2_name}.luac")
+    ps2, camp = campaign_facts50(f)
+    m = Mission()
+    m.key, m.game, m.era, m.ps2 = key, game, era, ps2_name
+    m.pc = None
+    m.checked = True
+    m.prov, m.dis, m.missing = [], [], []
+    m.space = None
+    m.ctf = None
+    m.hunt = None
+    m.layers = list(ps2["layers"])
+    m.d = ps2
+    m.strings = set(consts(f, str))
+
+    m.vo_bleed = ps2.get("vo_bleed", [])
+    m.vo_low = ps2.get("vo_low", [])
+    m.vo_oob = ps2.get("vo_oob", [])
+    m.mus_amb = ps2.get("mus_amb", [])
+    m.mus_vic = ps2.get("mus_vic", [])
+    m.mus_def = ps2.get("mus_def", [])
+    m.birds = [(ps2.get("bird_types", {}).get(i, (1.0, "")))
+               for i in range(ps2.get("bird_count", 0))]
+    m.sound = ps2.get("sound", [])
+    m.shots = ps2.get("shots", [])
+    m.class_load_order = ps2.get("class_load_order", [])
+    m.ai_view = ps2.get("ai_view")
+    m.ai_aggr = sorted(ps2.get("ai_aggr", {}).items())
+    m.ai_snipe = ps2.get("ai_snipe")
+    m.ai_no_capture = [k for k, allow in ps2.get("ai_capture", {}).items() if not allow]
+    m.fly = ps2.get("fly")
+    m.fly_min = ps2.get("fly_min")
+    m.fly_ai_max = ps2.get("fly_ai_max")
+    m.fly_ai_min = ps2.get("fly_ai_min")
+    m.ground_flyer_map = ps2.get("ground_flyer_map", False)
+    m.landing_regions = ps2.get("landing_regions", [])
+    m.particle_lod_bias = ps2.get("particle_lod_bias")
+    m.door_locks = door_locks50(f)
+    m.arc_blocks = arc_calls50(f)
+    m.barriers = barrier_calls50(f)
+    m.death_drains = death_drains50(f)
+
+    raw_tickets = [ps2["tickets"].get(t, -1) for t in (1, 2)]
+    m.teams = [
+        (ps2["names"].get(t, "unknown"), ps2["units"].get(t, 20), max(0, ps2["tickets"].get(t, 0)))
+        for t in (1, 2)
+    ]
+    m.classes = [ps2["classes"].get(t, []) for t in (1, 2)]
+    m.class_whitelist = [ps2.get("class_whitelist", {}).get(t) for t in (1, 2)]
+    m.allow_ai_spawn = [ps2.get("allow_ai_spawn", {}).get(t) for t in (1, 2)]
+    m.allow_side_select = False
+    m.forced_player_team = 0
+    m.local_teams = [
+        (team, ps2["units"].get(team, 4), ps2["classes"].get(team, []))
+        for team in sorted(set(ps2["units"].keys()) | set(ps2["classes"].keys()))
+        if team >= 3 and (ps2["units"].get(team, 0) > 0 or ps2["classes"].get(team))
+    ]
+    m.heroes = mission_heroes(game, "campaign", ps2)
+    m.cap = ps2.get("numbots") or max(16, m.teams[0][1], m.teams[1][1])
+    m.spawn = ps2.get("spawn") or (10.0, 0.25)
+    m.attacking = ps2.get("attacking")
+    m.death_regions = ps2.get("death_regions", [])
+    m.cps = ps2.get("cps", [])
+    m.posts = ps2.get("posts", [])
+    m.killed = ps2.get("killed", [])
+
+    camp["infinite_tickets"] = (raw_tickets[0] <= 0, raw_tickets[1] <= 0)
+    m.campaign = camp
+    return m
+
+
 def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
     """Apply known canonical mission facts over the selected script evidence.
 
@@ -1723,6 +2425,8 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
     m.space = None
     m.ctf = None
     m.hunt = None
+    m.layers = []
+    m.campaign = None
 
     if PS2_ONLY:
         m.pc, src = None, ""
@@ -1946,6 +2650,77 @@ def f32_text(x):
     return repr(f)
 
 
+def _ron_str(s):
+    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _ron_opt_str(v):
+    return "Some(%s)" % _ron_str(v) if v is not None else "None"
+
+
+def _ron_ambush(a):
+    path, count, team, trig = a
+    return "(path: %s, count: %d, team: %d, trigger_region: %s)" % (
+        _ron_str(path), count, team, _ron_opt_str(trig)
+    )
+
+
+def _ron_mut(mut):
+    kind = mut[0]
+    if kind in ("KillObject", "RespawnObject", "PlayMovie"):
+        return "%s(%s)" % (kind, _ron_str(mut[1]))
+    if kind == "UnlockHeroForTeam":
+        return "UnlockHeroForTeam(%d)" % mut[1]
+    if kind == "SetBarriers":
+        return "SetBarriers(name: %s, enable: %s)" % (_ron_str(mut[1]), "true" if mut[2] else "false")
+    if kind == "SetArcBlocks":
+        return "SetArcBlocks(name: %s, block: %s)" % (_ron_str(mut[1]), "true" if mut[2] else "false")
+    if kind == "SetProperty":
+        return "SetProperty(target: %s, key: %s, value: %s)" % (_ron_str(mut[1]), _ron_str(mut[2]), _ron_str(mut[3]))
+    if kind == "AddReinforcements":
+        return "AddReinforcements(team: %d, delta: %d)" % (mut[1], mut[2])
+    if kind == "SetReinforcements":
+        return "SetReinforcements(team: %d, count: %d)" % (mut[1], mut[2])
+    if kind == "AddUnitClass":
+        _, t, cls, mn, mx = mut
+        mx_str = ", max: Some(%d)" % mx if mx is not None else ""
+        return "AddUnitClass(team: %d, class: %s, min: %d%s)" % (t, _ron_str(cls), mn, mx_str)
+    if kind == "AllowAiSpawn":
+        return "AllowAiSpawn(team: %d, allow: %s)" % (mut[1], "true" if mut[2] else "false")
+    if kind == "Ambush":
+        return "Ambush(%s)" % _ron_ambush(mut[1])
+    if kind == "RegionTrigger":
+        return "RegionTrigger(region: %s, mutations: [%s])" % (
+            _ron_str(mut[1]), ", ".join(_ron_mut(x) for x in mut[2])
+        )
+    raise ValueError("unknown CampaignMutation %r" % (mut,))
+
+
+def _ron_stage_kind(kind):
+    k = kind[0]
+    if k == "Conquest":
+        return "Conquest(posts: [%s])" % ", ".join(_ron_str(p) for p in kind[1])
+    if k == "Assault":
+        t = ", ".join(_ron_str(x) for x in kind[1])
+        tt = ", ".join("(%s, %d)" % (_ron_str(cls), lim) for cls, lim in kind[2])
+        return "Assault(targets: [%s], target_types: [%s])" % (t, tt)
+    if k == "Ctf":
+        return "Ctf(flag: %s, home_region: %s, capture_region: %s, capture_limit: %d)" % (
+            _ron_str(kind[1]), _ron_str(kind[2]), _ron_str(kind[3]), kind[4]
+        )
+    if k == "Goto":
+        return "Goto(region: %s)" % _ron_str(kind[1])
+    if k == "Tdm":
+        return "Tdm(kills: %d)" % kind[1]
+    if k == "Defend":
+        return "Defend(seconds: %s)" % fmtf(float(f32_text(kind[1])))
+    if k == "Interact":
+        return "Interact(hint: %s, region: %s, target: %s, class_filter: %s)" % (
+            _ron_str(kind[1]), _ron_opt_str(kind[2]), _ron_opt_str(kind[3]), _ron_opt_str(kind[4])
+        )
+    raise ValueError("unknown CampaignObjectiveKind %r" % (kind,))
+
+
 def ron(m):
     pretty = PRETTY.get(m.key, m.key)
     mode = "hunt" if m.hunt is not None else mission_mode(m.ps2)
@@ -2006,11 +2781,19 @@ def ron(m):
             '(side: "%s", request: "%s")' % (side, request)
             for side, request in m.class_load_order))
     L.append("    teams: [")
-    for (fac, units, tickets), cls in zip(m.teams, m.classes):
-        tickets = NO_TICKET_LIMIT if tickets < 0 else tickets
+    for tidx, ((fac, units, tickets), cls) in enumerate(zip(m.teams, m.classes)):
+        tickets = (0 if getattr(m, "campaign", None) is not None else NO_TICKET_LIMIT) if tickets < 0 else tickets
+        wl = (getattr(m, "class_whitelist", None) or [None, None])[tidx]
+        allow_ai = (getattr(m, "allow_ai_spawn", None) or [None, None])[tidx]
+        extra = []
+        if wl is not None:
+            extra.append("class_whitelist: Some([%s])" % ", ".join(_ron_str(c) for c in wl))
+        if allow_ai is not None:
+            extra.append("allow_ai_spawn: Some(%s)" % ("true" if allow_ai else "false"))
+        extra_str = (", " + ", ".join(extra)) if extra else ""
         if not cls:
             L.append('        (faction: "%s", units: %d, tickets: %d, '
-                     'classes: []),' % (fac, units, tickets))
+                     'classes: []%s),' % (fac, units, tickets, extra_str))
             continue
         L.append('        (faction: "%s", units: %d, tickets: %d, classes: ['
                  % (fac, units, tickets))
@@ -2018,8 +2801,12 @@ def ron(m):
             L.append('            ("%s", %d, %s),'
                      % (name.lower(), mn,
                         "None" if mx is None else "Some(%d)" % mx))
-        L.append("        ]),")
+        L.append("        ]%s)," % extra_str)
     L.append("    ],")
+    if getattr(m, "allow_side_select", None) is not None:
+        L.append("    allow_side_select: Some(%s)," % ("true" if m.allow_side_select else "false"))
+    if getattr(m, "forced_player_team", None) is not None:
+        L.append("    forced_player_team: Some(%d)," % m.forced_player_team)
     L.append("    ai_alive_cap: %d," % cap)
     L.append("    spawn_delay: %s," % fmtf(m.spawn[0]))
     L.append("    spawn_interval: %s," % fmtf(m.spawn[1]))
@@ -2242,6 +3029,49 @@ def ron(m):
                  % ", ".join("(%d, %d, %s)" % (source, target,
                                                "true" if friendly else "false")
                              for source, target, friendly in relations))
+    if getattr(m, "layers", None):
+        L.append("    layers: [%s]," % ", ".join(_ron_str(x) for x in m.layers))
+    if (camp := getattr(m, "campaign", None)) is not None:
+        inf0, inf1 = camp["infinite_tickets"]
+        L.append("    campaign: Some((")
+        L.append("        intro_movie: %s," % _ron_opt_str(camp["intro_movie"]))
+        L.append("        outro_movie: %s," % _ron_opt_str(camp["outro_movie"]))
+        L.append("        mid_movies: [%s]," % ", ".join(_ron_str(x) for x in camp["mid_movies"]))
+        L.append("        infinite_tickets: (%s, %s)," % ("true" if inf0 else "false", "true" if inf1 else "false"))
+        L.append("        delay_victory_time: %s," % fmtf(float(f32_text(camp["delay_victory_time"]))))
+        if camp["initial_properties"]:
+            L.append("        initial_properties: [")
+            for tgt, k, v in camp["initial_properties"]:
+                L.append("            (%s, %s, %s)," % (_ron_str(tgt), _ron_str(k), _ron_str(v)))
+            L.append("        ],")
+        else:
+            L.append("        initial_properties: [],")
+        if camp["ambushes"]:
+            L.append("        ambushes: [")
+            for a in camp["ambushes"]:
+                L.append("            %s," % _ron_ambush(a))
+            L.append("        ],")
+        else:
+            L.append("        ambushes: [],")
+        L.append("        stages: [")
+        for st in camp["stages"]:
+            L.append("            (")
+            L.append("                name: %s," % _ron_str(st["name"]))
+            L.append("                kind: %s," % _ron_stage_kind(st["kind"]))
+            L.append("                text: %s," % _ron_str(st["text"]))
+            L.append("                popup_text: %s," % _ron_opt_str(st["popup_text"]))
+            L.append("                att_team: %d," % st["att_team"])
+            L.append("                def_team: %d," % st["def_team"])
+            if st["time_limit"] is not None:
+                L.append("                time_limit: Some(%s)," % fmtf(float(f32_text(st["time_limit"]))))
+            else:
+                L.append("                time_limit: None,")
+            L.append("                time_limit_winner: %s," % ("Some(%d)" % st["time_limit_winner"] if st["time_limit_winner"] is not None else "None"))
+            L.append("                on_start: [%s]," % ", ".join(_ron_mut(x) for x in st["on_start"]))
+            L.append("                on_complete: [%s]," % ", ".join(_ron_mut(x) for x in st["on_complete"]))
+            L.append("            ),")
+        L.append("        ],")
+        L.append("    )),")
     L.append('    source: "%sPS2 %s.luac",' % ("PC %s; " % m.pc if m.pc else "", m.ps2))
     L.append(")")
     return "\n".join(L) + "\n"
@@ -2345,6 +3175,19 @@ def main():
                     fh.write(ron(m))
                 written += 1
             rows.append((name, m))
+
+    camp_dir = os.path.join(OUT_DIR, "campaign")
+    for key, game, planet, era, ps2 in CAMPAIGN_MISSIONS:
+        if load_ps2(game, ps2) is None:
+            continue
+        m = build_campaign(key, game, planet, era, ps2)
+        rel_name = os.path.join("campaign", f"{game}_{ps2}.ron")
+        if not args.check:
+            os.makedirs(camp_dir, exist_ok=True)
+            with open(os.path.join(OUT_DIR, rel_name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(ron(m))
+            written += 1
+        rows.append((rel_name, m))
 
     for name, m in rows:
         print("%-24s %-3s %-3s %-8s %-8s %2d/%-2d %4d/%-4d cap%-3d att%-5s "

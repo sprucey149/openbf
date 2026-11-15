@@ -169,6 +169,8 @@ impl Sim {
             item_classes,
             station_classes,
             test_rosters,
+            class_enabled: _,
+            ai_spawn_allowed: _,
             heroes,
             deathmatch,
             space_assault,

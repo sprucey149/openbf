@@ -303,6 +303,12 @@ pub struct Sim {
     /// spawn comes from the caller's own `UnitSpec`, exactly as before.
     pub classes: [Vec<crate::unit::UnitClass>; 2],
     pub test_rosters: [Option<(usize, Option<u8>)>; 2],
+    /// Per-team dynamically enabled class mask (`class_enabled[team][class]`).
+    /// Empty (or shorter than `classes[team]`) treats omitted indices as enabled.
+    pub class_enabled: [Vec<bool>; 2],
+    /// Per-team AI spawning permission (campaign missions can hold AI spawning
+    /// off at startup until an `AllowAiSpawn` stage mutation enables it).
+    pub ai_spawn_allowed: [bool; 2],
     /// BF2 mission hero classes and offer lifecycle; absent on other content.
     pub heroes: Option<super::heroes::Heroes>,
     pub deathmatch: Option<super::deathmatch::Deathmatch>,
@@ -1127,6 +1133,8 @@ impl Sim {
             weapon_classes: vec![WeaponClass::bf1_rifle()].into(),
             classes: [Vec::new(), Vec::new()],
             test_rosters: [None; 2],
+            class_enabled: [Vec::new(), Vec::new()],
+            ai_spawn_allowed: [true, true],
             heroes: None,
             deathmatch: None,
             space_assault: None,

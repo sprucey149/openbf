@@ -817,6 +817,8 @@ pub struct WalkSim {
     /// presentation only - the sim never reads it): [`WalkSim::advance_with`]
     /// keeps the pose each tick starts from.
     pub blend: crate::render_blend::Blend,
+    /// Rise of the Empire sequential campaign state (active on campaign missions only).
+    pub campaign: Option<crate::campaign_runtime::CampaignRuntime>,
     accum: f32,
 }
 
@@ -990,6 +992,7 @@ impl WalkSim {
             teams,
             native_teams: Default::default(),
             blend: crate::render_blend::Blend::default(),
+            campaign: None,
             accum: 0.0,
         }
     }
@@ -1043,7 +1046,13 @@ impl WalkSim {
             } else {
                 CpDef::class_times(cp.major)
             };
-            let capture = cp.capture.unwrap_or_else(|| Region::sphere(cp.pos, 8.0));
+            let capture = cp.capture.unwrap_or_else(|| {
+                if cp.capturable {
+                    Region::sphere(cp.pos, 8.0)
+                } else {
+                    Region::sphere(Vec3::new(0.0, -10000.0, 0.0), 0.0)
+                }
+            });
             // The post's five per-faction rows collapse to the two the sim
             // needs, HERE, because `core` has no faction notion: team index t
             // takes the row of `self.teams[t].faction` (PLAN "Phase B
@@ -1068,6 +1077,9 @@ impl WalkSim {
             self.sim.add_cp_unresolved(def, owner);
             if let Some(post) = self.sim.cps.last_mut() {
                 post.ai_spawn_weight = cp.ai_spawn_weight;
+                post.capturable = cp.capturable;
+                post.visible = cp.visible;
+                post.capture_authored = cp.capture.is_some();
             }
             self.post_keys
                 .push(format!("level.{}.{}", layout.map, cp.label));
@@ -1446,6 +1458,7 @@ impl WalkSim {
             death_cam: self.death_cam,
             death_seen: self.death_seen,
             blend: crate::render_blend::Blend::default(),
+            campaign: self.campaign.clone(),
             accum: self.accum,
         }
     }
@@ -1530,6 +1543,7 @@ impl WalkSim {
             death_cam: _,
             death_seen: _,
             blend: _,
+            campaign: _,
             accum: _,
         } = replayed;
         self.sim = sim;
@@ -1666,6 +1680,42 @@ impl WalkSim {
             self.player = *h;
         }
         self.refill_after_side_change();
+        if self.sim.outcome.is_none() {
+            if let Some(mut campaign) = self.campaign.take() {
+                let player_ids = self
+                    .sim
+                    .unit(self.player)
+                    .map(|u| (u.team, usize::from(u.spec.class)));
+                let player_class = player_ids.and_then(|(team, cls)| {
+                    self.team_template(team)
+                        .classes
+                        .get(cls)
+                        .map(|c| c.name.clone())
+                });
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    self.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                let native_classes: std::collections::BTreeMap<u8, Vec<String>> = self
+                    .native_teams
+                    .iter()
+                    .map(|(&team, tmpl)| (team, tmpl.classes.iter().map(|c| c.name.clone()).collect()))
+                    .collect();
+                campaign.step(
+                    &mut self.sim,
+                    self.player,
+                    player_class.as_deref(),
+                    &team_classes,
+                    &native_classes,
+                    &self.vehicle_classes,
+                    core::TICK_DT,
+                );
+                self.campaign = Some(campaign);
+            }
+        }
         self.track_class_kills(kills_before);
         self.follow_backdrop();
         self.step_death_cam();

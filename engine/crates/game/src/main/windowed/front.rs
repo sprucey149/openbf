@@ -15,6 +15,8 @@ use core::fmath::FloatExt;
 use ui::menu::{ControlContext, PausePage, SettingsPage};
 use ui::shell_feel::MenuSound;
 
+#[path = "front/gal.rs"]
+mod gal;
 #[path = "front/profiles.rs"]
 mod profiles;
 
@@ -41,6 +43,19 @@ pub(super) struct FrontShell {
     settings_animation: ui::pause_draw::Animation,
     sounds: Option<game::sounds::SoundLib>,
     pub(super) music: Option<audio::MusicVoice>,
+    /// Synced audio track for an active cutscene in `cutscenes`.
+    pub(super) movie_audio: Option<(String, audio::Shot)>,
+    /// Queued full-screen campaign cutscenes (`crawl1`/`crawl2`, `*tran1`, `*mon01`, `*mon02`).
+    pub(super) cutscenes: std::collections::VecDeque<String>,
+    /// Mission index in `ui::campaign::RISE_OF_THE_EMPIRE` waiting on `cutscenes`.
+    pub(super) pending_campaign: Option<usize>,
+    /// Lazy 3D spinning planet backdrop (`bf2_gal1`) for the campaign battle screen.
+    gal: Option<gal::GalPlanetView>,
+    gal_load_failed: bool,
+    /// `metagame_menu_music` from `bf2_gal1/sounds`, played over the planet screen.
+    gal_music: Option<(f32, Vec<audio::StreamTake>)>,
+    /// Whether `self.music` currently plays `gal_music` instead of `shell_soundtrack`.
+    active_gal_music: bool,
     /// `shell_soundtrack`'s gain (x its bus) and takes, and which one plays
     /// when (re-bf2-menus §4.4).
     music_takes: Option<(f32, Vec<audio::StreamTake>)>,
@@ -272,6 +287,8 @@ impl FrontShell {
         let music_takes = sounds
             .as_ref()
             .and_then(|sl| sl.stream_takes(ui::shell_ps2::MUSIC));
+        let gal_music = game::sounds::SoundLib::load(&assets_dir.join("bf2_gal1"))
+            .and_then(|sl| sl.stream_takes("metagame_menu_music"));
         FrontShell {
             menus: ui::shell_ps2::ShellMenus::new(&text),
             picker: None,
@@ -284,6 +301,13 @@ impl FrontShell {
             settings_animation: Default::default(),
             sounds,
             music: None,
+            movie_audio: None,
+            cutscenes: std::collections::VecDeque::new(),
+            pending_campaign: None,
+            gal: None,
+            gal_load_failed: false,
+            gal_music,
+            active_gal_music: false,
             music_takes,
             playlist: Default::default(),
             music_rng: std::time::SystemTime::now()
@@ -304,8 +328,88 @@ impl FrontShell {
     /// new random take when the shell comes back.
     pub(super) fn stop_music(&mut self) {
         self.music = None;
+        self.movie_audio = None;
+        self.active_gal_music = false;
         self.playlist = Default::default();
         self.music_clock = None;
+    }
+
+    pub(super) fn clear_gal(&mut self) {
+        self.gal = None;
+        self.gal_load_failed = false;
+    }
+
+    pub(super) fn queue_campaign_launch(&mut self, index: usize) {
+        let entry = &ui::campaign::RISE_OF_THE_EMPIRE[index];
+        self.cutscenes.clear();
+        if index > 0 && !entry.transition_movie.is_empty() {
+            self.cutscenes.push_back(entry.transition_movie.to_owned());
+        }
+        self.cutscenes.push_back(entry.intro_movie.to_owned());
+        self.pending_campaign = Some(index);
+        if let Some(m) = self.movie.as_mut() {
+            m.stop();
+        }
+        self.stop_music();
+    }
+
+    pub(super) fn queue_campaign_new_game(&mut self) {
+        self.cutscenes.clear();
+        if let Some(crawl) = ui::campaign::RISE_OF_THE_EMPIRE[1].crawl_movie {
+            self.cutscenes.push_back(crawl.to_owned());
+        }
+        self.pending_campaign = None;
+        self.menus.select_campaign_mission(1);
+        self.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
+        if let Some(m) = self.movie.as_mut() {
+            m.stop();
+        }
+        self.stop_music();
+    }
+
+    fn step_cutscene_movie(
+        &mut self,
+        dt: f32,
+        mut audio: Option<&mut audio::Audio>,
+        volume: f32,
+    ) -> (Option<(Vec<u8>, u32, u32)>, bool) {
+        let Some(m) = self.movie.as_mut() else {
+            self.cutscenes.clear();
+            self.movie_audio = None;
+            return (None, false);
+        };
+        while let Some(clip) = self.cutscenes.front().cloned() {
+            if !m.has(&clip) {
+                self.cutscenes.pop_front();
+                self.movie_audio = None;
+                continue;
+            }
+            m.play_once(&clip);
+            if self.movie_audio.as_ref().is_none_or(|(name, _)| name != &clip) {
+                self.movie_audio = None;
+                if volume > 0.0 {
+                    if let (Some(path), Some(a)) = (m.audio_path(&clip), audio.as_deref_mut()) {
+                        match audio::decode(path) {
+                            Ok(sound) => {
+                                self.movie_audio = a
+                                    .play_menu_shot(&sound, game::sounds::level_db(volume))
+                                    .map(|shot| (clip.clone(), shot));
+                            }
+                            Err(e) => eprintln!("cutscene audio {}: {e:#}", path.display()),
+                        }
+                    }
+                }
+            }
+            let frame = m.frame(dt);
+            if m.is_finished() {
+                m.stop();
+                self.cutscenes.pop_front();
+                self.movie_audio = None;
+                continue;
+            }
+            return (frame, m.shown);
+        }
+        (None, false)
     }
 
     /// Tests: the shell music's takes in place of the bank's.
@@ -790,12 +894,17 @@ impl App {
                 && self.controls.is_none()
                 && front.mp.is_none()
                 && front.picker.is_none()
+                && front.cutscenes.is_empty()
             {
                 if let Some(row) = view.shell_row_at(&front.menus, point, [w as f32, h as f32]) {
                     front.menus.focus_row(row);
                     input.confirm |= click;
                 } else if click {
-                    start |= view.shell_prompt_at(&front.menus, point, [w as f32, h as f32]);
+                    if front.menus.page == ui::shell_ps2::Page::CampaignBattle {
+                        input.confirm = true;
+                    } else {
+                        start |= view.shell_prompt_at(&front.menus, point, [w as f32, h as f32]);
+                    }
                 }
             }
         }
@@ -811,13 +920,15 @@ impl App {
             }
         }
         let mut launch = None;
+        let mut launch_campaign = None;
         let mut quit = false;
         let mut settings_model = None;
         let mut controls_model = None;
         let stack_frame = !front.ia_open
             && self.controls.is_none()
             && front.settings.is_none()
-            && front.mp.is_none();
+            && front.mp.is_none()
+            && front.cutscenes.is_empty();
         let mut mp_done = None;
         if !stack_frame {
             front.menus.tick(dt);
@@ -979,6 +1090,14 @@ impl App {
                         auto_quality: self.profile.settings.auto_quality,
                         ..model
                     });
+        } else if !front.cutscenes.is_empty() {
+            if input.confirm || input.back || start || click {
+                if let Some(m) = front.movie.as_mut() {
+                    m.stop();
+                }
+                front.cutscenes.pop_front();
+                front.movie_audio = None;
+            }
         } else if !self.step_profiles(
             &mut front,
             profiles::FrameInput {
@@ -990,7 +1109,35 @@ impl App {
                 wheel,
             },
         ) {
-            match front.menus.step(input, start, dt) {
+            if front.menus.training_prompted() != self.profile.campaign.training_prompted {
+                front
+                    .menus
+                    .set_training_prompted(self.profile.campaign.training_prompted);
+            }
+            let unlocked = self
+                .profile
+                .campaign
+                .unlocked
+                .clamp(1, ui::campaign::RISE_OF_THE_EMPIRE.len() as u8);
+            if front.menus.campaign_unlocked != unlocked {
+                front.menus.set_campaign_unlocked(unlocked);
+            }
+            let cmd = front.menus.step(input, start, dt);
+            let mut dirty_profile = false;
+            if front.menus.training_prompted() != self.profile.campaign.training_prompted {
+                self.profile.campaign.training_prompted = front.menus.training_prompted();
+                dirty_profile = true;
+            }
+            if front.menus.campaign_unlocked > self.profile.campaign.unlocked {
+                self.profile.campaign.unlocked = front.menus.campaign_unlocked;
+                dirty_profile = true;
+            }
+            if dirty_profile {
+                if let Err(e) = self.profile.save() {
+                    eprintln!("campaign profile save failed: {e:#}");
+                }
+            }
+            match cmd {
                 Some(ui::shell_ps2::ShellCommand::InstantAction) => {
                     match front.ia.as_mut() {
                         Some(ia) => ia.enter(),
@@ -1009,6 +1156,42 @@ impl App {
                     }
                     front.ia_open = true;
                 }
+                Some(ui::shell_ps2::ShellCommand::StartCampaignNewGame) => {
+                    self.profile.campaign.unlocked = self.profile.campaign.unlocked.max(2);
+                    self.profile.campaign.active_mission = Some(1);
+                    if let Err(e) = self.profile.save() {
+                        eprintln!("campaign profile save failed: {e:#}");
+                    }
+                    front.queue_campaign_new_game();
+                }
+                Some(ui::shell_ps2::ShellCommand::SaveCampaign) => {
+                    self.profile.campaign.active_mission = Some(front.menus.campaign_selected as u8);
+                    let msg = match self.profile.save() {
+                        Ok(()) => "Saved",
+                        Err(e) => {
+                            eprintln!("campaign profile save failed: {e:#}");
+                            "Save failed"
+                        }
+                    };
+                    front.menus.campaign_menu.note = Some(msg.into());
+                }
+                Some(ui::shell_ps2::ShellCommand::LoadCampaign) => {
+                    let idx = self
+                        .profile
+                        .campaign
+                        .active_mission
+                        .map(usize::from)
+                        .unwrap_or_else(|| {
+                            usize::from(self.profile.campaign.unlocked.saturating_sub(1))
+                        })
+                        .clamp(1, ui::campaign::RISE_OF_THE_EMPIRE.len() - 1);
+                    front.menus.select_campaign_mission(idx);
+                    front.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
+                }
+                Some(ui::shell_ps2::ShellCommand::LaunchCampaignMission { index }) => {
+                    self.profile.campaign.active_mission = Some(index as u8);
+                    front.queue_campaign_launch(index);
+                }
                 Some(ui::shell_ps2::ShellCommand::Settings(page)) => {
                     front.settings = Some((PausePage::Settings(page), 0));
                 }
@@ -1024,23 +1207,91 @@ impl App {
                 None => {}
             }
         }
-        self.step_shell_music(&mut front, dt);
-        front.menus.covered = front.ia_open
-            || front.settings.is_some()
-            || self.controls.is_some()
-            || front.mp.is_some()
-            || front.picker.is_some();
-        let movie_name = front.menus.movie();
         let mut has_movie = false;
-        if let Some(m) = front.movie.as_mut() {
-            m.play(movie_name);
-            if let Some((rgba, w, h)) = m.frame(dt) {
+        if !front.cutscenes.is_empty() {
+            front.music = None;
+            let (frame, shown) = front.step_cutscene_movie(
+                dt,
+                self.audio.as_mut(),
+                self.profile.settings.dialogue_volume,
+            );
+            if let Some((rgba, w, h)) = frame {
                 if let Some(v) = front.view.as_mut() {
                     v.set_movie_frame(rgba, w, h);
                 }
             }
-            has_movie = m.shown;
+            has_movie = shown;
+            if front.cutscenes.is_empty() {
+                launch_campaign = front.pending_campaign.take();
+            }
+        } else {
+            front.movie_audio = None;
+            launch_campaign = front.pending_campaign.take();
+            let launching = launch.is_some() || launch_campaign.is_some();
+            let on_planet_music = !launching
+                && matches!(
+                    front.menus.page,
+                    ui::shell_ps2::Page::CampaignBattle | ui::shell_ps2::Page::CampaignMenu
+                )
+                && !front.ia_open
+                && front.settings.is_none()
+                && self.controls.is_none()
+                && front.mp.is_none()
+                && front.picker.is_none()
+                && front.gal_music.is_some();
+            if on_planet_music {
+                if !front.active_gal_music {
+                    front.stop_music();
+                    front.active_gal_music = true;
+                }
+                if let (Some((gain, takes)), Some(audio)) = (&front.gal_music, self.audio.as_mut()) {
+                    let level = self.profile.settings.music_volume;
+                    if level <= 0.0 {
+                        front.music = None;
+                    } else if front.music.is_none() || front.music_replay {
+                        front.music_replay = false;
+                        front.music = audio
+                            .play_stream(
+                                takes[0].clone(),
+                                game::sounds::level_db(*gain * level),
+                                true,
+                            )
+                            .map_err(|e| eprintln!("campaign music: {e:#}"))
+                            .ok();
+                    }
+                }
+            } else {
+                if front.active_gal_music {
+                    front.stop_music();
+                }
+                if !launching {
+                    self.step_shell_music(&mut front, dt);
+                }
+            }
+            let movie_name = if launching { "" } else { front.menus.movie() };
+            if movie_name.is_empty() {
+                if let Some(m) = front.movie.as_mut() {
+                    m.stop();
+                }
+                has_movie = false;
+            } else if let Some(m) = front.movie.as_mut() {
+                m.play(movie_name);
+                if let Some((rgba, w, h)) = m.frame(dt) {
+                    if let Some(v) = front.view.as_mut() {
+                        v.set_movie_frame(rgba, w, h);
+                    }
+                }
+                has_movie = m.shown;
+            }
         }
+        let launching = launch.is_some() || launch_campaign.is_some();
+        front.menus.covered = front.ia_open
+            || front.settings.is_some()
+            || self.controls.is_some()
+            || front.mp.is_some()
+            || front.picker.is_some()
+            || !front.cutscenes.is_empty()
+            || launching;
         // The IA screen has its own backdrop and no movie (§1.1); Session
         // Options keep `shell_sub_left`.
         let ia = front
@@ -1128,10 +1379,39 @@ impl App {
             if let Some(keep) = name_done {
                 pending_name = Some(keep);
             }
+            let show_planet = matches!(
+                front.menus.page,
+                ui::shell_ps2::Page::CampaignBattle | ui::shell_ps2::Page::CampaignMenu
+            ) && !front.menus.covered;
+            let (cam, planet_draws) = if show_planet {
+                if front.gal.is_none() && !front.gal_load_failed {
+                    front.gal = gal::GalPlanetView::load(&self.assets_dir, r);
+                    front.gal_load_failed = front.gal.is_none();
+                }
+                if let Some(gal) = front.gal.as_mut() {
+                    (r.time, r.water_time) = render::advance_clocks(r.time, r.water_time, dt);
+                    let planet = ui::campaign::RISE_OF_THE_EMPIRE
+                        .get(front.menus.campaign_selected)
+                        .map_or("myg", |e| e.planet);
+                    let (cam, draws, lights, particles) = gal.advance_and_build(planet, dt);
+                    r.set_point_lights(lights);
+                    r.set_particles(particles);
+                    (cam, draws)
+                } else {
+                    (Camera::default(), Vec::new())
+                }
+            } else {
+                front.gal_load_failed = false;
+                if front.gal.take().is_some() {
+                    r.clear_scene();
+                    r.set_particles(Vec::new());
+                }
+                (Camera::default(), Vec::new())
+            };
             let view = &mut front.view;
             if let Err(e) = r.render_with_overlay(
-                &Camera::default(),
-                &[],
+                &cam,
+                &planet_draws,
                 [0.0, 0.0, 0.0, 1.0],
                 Some(&mut |dev, q, enc, target, size| {
                     if let Some(v) = view.as_mut() {
@@ -1180,6 +1460,9 @@ impl App {
         }
         if let Some((rows, options)) = launch {
             self.start_playlist(rows, options);
+        }
+        if let Some(index) = launch_campaign {
+            self.start_campaign(index);
         }
         if let Some(done) = mp_done {
             self.mp_done(done);
@@ -1361,7 +1644,12 @@ impl App {
             MenuAction::SetMusic(v) => {
                 s.music_volume = v.clamp(game::music::VOLUME_RANGE.0, game::music::VOLUME_RANGE.1);
                 // The take playing follows the level; off stops it.
-                let gain = front.music_takes.as_ref().map_or(1.0, |(g, _)| *g);
+                let gain = if front.active_gal_music {
+                    front.gal_music.as_ref()
+                } else {
+                    front.music_takes.as_ref()
+                }
+                .map_or(1.0, |(g, _)| *g);
                 match front.music.as_mut() {
                     Some(m) if s.music_volume > 0.0 => {
                         m.set_volume(game::sounds::level_db(gain * s.music_volume), 0.05)

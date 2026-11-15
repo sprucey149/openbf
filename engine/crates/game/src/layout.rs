@@ -98,6 +98,10 @@ pub struct CommandPostDef {
     pub major: bool,
     /// A space hangar's post: it spawns its team and is never taken.
     pub space: bool,
+    /// Whether this post can be captured or neutralized (`false` for `untakeable` zones).
+    pub capturable: bool,
+    /// Whether this post is drawn on the minimap/spawn map (`false` for invisible zones).
+    pub visible: bool,
     /// The post's `VO_<Listener>_<Subject><Event>` lines (card ANNC,
     /// analysis/re-announcer.md §2.1); empty on a post that authors none.
     pub vo: PostLines,
@@ -1627,6 +1631,10 @@ impl MapLayout {
     }
 
     pub fn from_battle_manifest(m: &Manifest, hunt: bool) -> MapLayout {
+        Self::from_mission_manifest(m, hunt, false)
+    }
+
+    pub fn from_mission_manifest(m: &Manifest, hunt: bool, campaign: bool) -> MapLayout {
         let region = |name: &str| -> Option<Region> {
             let r = m
                 .regions
@@ -1639,20 +1647,27 @@ impl MapLayout {
             // A space hangar's post has no capture region: its control region is where
             // it stands, and only its spawns matter.
             let has_spawn_path = prop(&inst.props, PROP_SPAWN_PATH).is_some();
-            let space_post =
-                inst.class.eq_ignore_ascii_case("com_bldg_controlzone_ctf") && has_spawn_path;
-            let hunt_post =
-                hunt && has_spawn_path && inst.class.eq_ignore_ascii_case("com_bldg_controlzone");
+            let class_lower = inst.class.to_ascii_lowercase();
+            let space_post = class_lower == "com_bldg_controlzone_ctf" && has_spawn_path;
+            let hunt_post = hunt && has_spawn_path && class_lower == "com_bldg_controlzone";
+            let campaign_post = campaign
+                && class_lower.contains("controlzone")
+                && class_lower != "com_holo_controlzone"
+                && !inst.name.eq_ignore_ascii_case(&inst.class);
             let cap_name = match prop(&inst.props, PROP_CAPTURE_REGION) {
                 Some(name) => Some(name),
                 None if space_post => match prop(&inst.props, PROP_CONTROL_REGION) {
                     Some(name) => Some(name),
-                    None if m.spawn_only_posts => None,
+                    None if m.spawn_only_posts || campaign => None,
                     None => continue,
                 },
-                None if hunt_post => None,
+                None if hunt_post || campaign_post => None,
                 None => continue, // not a command post
             };
+            let capturable = !space_post
+                && !class_lower.contains("untakeable")
+                && (cap_name.is_some() || !campaign);
+            let visible = !class_lower.contains("inv");
             cps.push(CommandPostDef {
                 name: inst.name.clone(),
                 label: prop(&inst.props, PROP_LABEL).unwrap_or("").to_owned(),
@@ -1689,6 +1704,8 @@ impl MapLayout {
                 value_def: faction_values(&inst.props, &PROP_VALUE_DEF),
                 major: inst.class.contains("major"),
                 space: space_post && prop(&inst.props, PROP_CAPTURE_REGION).is_none(),
+                capturable,
+                visible,
                 vo: post_lines(&inst.props),
             });
         }
@@ -1761,7 +1778,13 @@ impl MapLayout {
         let named = |list: &[String], name: &str| list.iter().any(|k| k.eq_ignore_ascii_case(name));
 
         let before = self.cps.len();
-        if !m.posts.is_empty() {
+        if !m.cp_whitelist.is_empty() {
+            self.cps.retain(|c| named(&m.cp_whitelist, &c.name));
+        }
+        if !m.cp_blacklist.is_empty() {
+            self.cps.retain(|c| !named(&m.cp_blacklist, &c.name));
+        }
+        if !m.is_campaign() && !m.posts.is_empty() {
             self.cps.retain(|c| named(&m.posts, &c.name));
             for want in &m.posts {
                 if !self.cps.iter().any(|c| c.name.eq_ignore_ascii_case(want)) {
@@ -1774,9 +1797,18 @@ impl MapLayout {
         }
         let dropped_by_roster = before - self.cps.len();
 
-        let before = self.cps.len();
-        self.cps.retain(|c| !named(&m.killed, &c.name));
-        let killed = before - self.cps.len();
+        let killed = if m.is_campaign() {
+            // Campaign scripts kill CPs at startup so `RespawnObject` can
+            // reactivate them in later stages.
+            self.cps
+                .iter()
+                .filter(|c| named(&m.killed, &c.name))
+                .count()
+        } else {
+            let before = self.cps.len();
+            self.cps.retain(|c| !named(&m.killed, &c.name));
+            before - self.cps.len()
+        };
 
         let mut reassigned = 0;
         for (name, team) in &m.cps {

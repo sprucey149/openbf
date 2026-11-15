@@ -99,6 +99,8 @@ pub struct Battle {
     /// `reinforcements`, which is.
     pub death_drain: [[u32; 2]; 2],
     pub unlimited_reinforcements: bool,
+    pub unlimited_teams: [bool; 2],
+    pub campaign_rules: bool,
 }
 
 impl Battle {
@@ -110,6 +112,8 @@ impl Battle {
             ],
             death_drain: [[0; 2]; 2],
             unlimited_reinforcements: false,
+            unlimited_teams: [false; 2],
+            campaign_rules: false,
         }
     }
 
@@ -124,7 +128,8 @@ impl Battle {
         } else {
             t.alive_ai = t.alive_ai.saturating_sub(1);
         }
-        if self.unlimited_reinforcements {
+        if self.unlimited_reinforcements || self.unlimited_teams.get(team).copied().unwrap_or(false)
+        {
             return;
         }
         // Floor at 0: BF1's engine does `if (tickets>0) tickets--`
@@ -136,7 +141,7 @@ impl Battle {
         t.reinforcements = (t.reinforcements - 1.0).fmax(0.0);
         debug_assert!(t.invariant_holds() || self.death_drain != [[0; 2]; 2]);
         for (paying, &n) in self.death_drain[team].iter().enumerate() {
-            if n > 0 {
+            if n > 0 && !self.unlimited_teams[paying] {
                 let p = &mut self.teams[paying];
                 p.reinforcements = (p.reinforcements - n as f32).fmax(0.0);
             }
@@ -180,8 +185,14 @@ impl Battle {
     /// zero bleed (`analysis/re-bleed-reachability.md`). Direct callers may
     /// also supply an unclamped bleed rate.
     pub fn tick_bleed(&mut self, dt: f32) -> [u32; 2] {
+        if self.campaign_rules {
+            return [0; 2];
+        }
         let mut shed = [0u32; 2];
         for (i, t) in self.teams.iter_mut().enumerate() {
+            if self.unlimited_teams[i] {
+                continue;
+            }
             if t.bleed_per_sec > 0.0 && t.reinforcements > 0.0 {
                 t.reinforcements = (t.reinforcements - t.bleed_per_sec * dt).fmax(0.0);
             }

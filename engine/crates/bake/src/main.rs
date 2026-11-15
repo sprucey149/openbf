@@ -409,14 +409,22 @@ fn main() -> Result<()> {
             println!("baked the terrain light texture -> {}/{name}.ktx2", args[3]);
             Ok(())
         }
-        Some("shell") if args.len() == 7 => {
+        Some("shell") if args.len() == 7 || (args.len() == 10 && args[7] == "--campaign") => {
             // <SHELL.LVL> <MOVIES/SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <out>
-            let s = bake::shell::bake_shell(
+            // [--campaign <INSHELL.LVL> <MOVIES/INGAME.MVS_OR_ISO>]
+            let (inshell, ingame) = if args.len() == 10 {
+                (Some(ci(&args[8])), Some(ci(&args[9])))
+            } else {
+                (None, None)
+            };
+            let s = bake::shell::bake_shell_with_campaign(
                 &ci(&args[2]),
                 &ci(&args[3]),
                 &ci(&args[4]),
                 &ci(&args[5]),
                 &args[6],
+                inshell.as_deref(),
+                ingame.as_deref(),
             )?;
             println!(
                 "baked shell: {} movies ({} segments), textures {:?}, music {} -> {}/shell",

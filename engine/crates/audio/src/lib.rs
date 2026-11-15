@@ -225,6 +225,9 @@ impl Audio {
     pub fn clear_game_bus(&mut self) {
         #[cfg(feature = "backend")]
         {
+            // Pause immediately before renewing so held sounds do not leak
+            // during track teardown.
+            let _ = self.game.pause(kira::Tween::default());
             match self.manager.add_sub_track(kira::track::TrackBuilder::new()) {
                 // Dropping the old handle removes the track and its sounds.
                 Ok(game) => self.game = game,
@@ -302,14 +305,30 @@ impl Audio {
         rate: f64,
         pan: f32,
     ) -> Option<Shot> {
+        self.play_shot_on(Bus::Game, sound, volume_db, rate, pan)
+    }
+
+    /// Play a one-shot on `Bus::Menu` (unaffected by game pause, stopped on [`Shot`] drop).
+    pub fn play_menu_shot(&mut self, sound: &SoundData, volume_db: f32) -> Option<Shot> {
+        self.play_shot_on(Bus::Menu, sound, volume_db, 1.0, 0.0)
+    }
+
+    fn play_shot_on(
+        &mut self,
+        bus: Bus,
+        sound: &SoundData,
+        volume_db: f32,
+        rate: f64,
+        pan: f32,
+    ) -> Option<Shot> {
         #[cfg(feature = "backend")]
         {
-            self.play_static(Bus::Game, &sound.inner, volume_db, rate, pan)
+            self.play_static(bus, &sound.inner, volume_db, rate, pan)
                 .map(|inner| Shot { inner })
         }
         #[cfg(not(feature = "backend"))]
         {
-            let _ = (sound, volume_db, rate, pan);
+            let _ = (bus, sound, volume_db, rate, pan);
             Some(Shot {})
         }
     }
