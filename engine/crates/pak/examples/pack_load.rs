@@ -1,7 +1,7 @@
 //! The pack layouts and load cost, on the production `pak` code (card PACK). No game data is written outside `<scratch>`.
 //!
 //! ```text
-//! pack_load write <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...   pack with this executable as the game
+//! pack_load write <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...   pack with this executable as the game
 //! pack_load read <name>/<rel>                                                 print one entry the way the game reads it
 //! pack_load bench <dir> <scratch> [rounds]                                    time reading every file of <dir>
 //! ```
@@ -37,17 +37,24 @@ fn write(out: &str, rest: &[String]) -> std::io::Result<()> {
     let out = PathBuf::from(out);
     let mut pak_file = out.with_file_name(pak::PAK_NAME);
     let mut split_at = pak::SINGLE_FILE_LIMIT;
+    let mut replacements = None;
     let mut entries = Vec::new();
     let mut it = rest.iter();
     while let Some(spec) = it.next() {
         match spec.as_str() {
             "--pak" => pak_file = PathBuf::from(it.next().expect("--pak <file>")),
+            "--replacements" => {
+                replacements = Some(PathBuf::from(it.next().expect("--replacements <json>")))
+            }
             "--split-at" => split_at = it.next().expect("--split-at <n>").parse().expect("bytes"),
             _ => {
                 let (name, dir) = spec.split_once('=').expect("<name>=<dir>");
                 entries.extend(pak::collect(Path::new(dir), name)?);
             }
         }
+    }
+    if let Some(mapping) = replacements {
+        pak::replace_sources(&mut entries, &mapping)?;
     }
     let exe = std::env::current_exe()?;
     println!(

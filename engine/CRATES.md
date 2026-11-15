@@ -13,7 +13,7 @@ module's `//!` header is its spec.
 | `mungefs` | the LVL (`ucfb`), ISO9660 and XDVDFS readers; the runtime never links it | flate2, thiserror |
 | `bake` | the offline tool: LVL → GLB / KTX2 / OGG / RON in `engine/assets_baked/` | mungefs, manifest; glam, png, serde(_json), ron, anyhow |
 | `manifest` | the bake↔runtime schema, data only | serde |
-| `pak` | the game's read-only data: a directory, or the archive appended to the packed game (card PACK) | — |
+| `pak` | the game's read-only data: a directory, or the archive appended to the packed game (card PACK) | flate2, zstd, serde_json |
 | `core` | the deterministic sim: soldiers, weapons, AI, posts, collision | glam (`scalar-math`), serde, parry3d, libm |
 | `render` | the wgpu renderer, windowed or headless | wgpu, winit, glam, bytemuck, pollster, image, thiserror |
 | `ui` | BF2's HUD (interpreter + layout), egui menus, shell, spawn and loading screens | manifest; egui(-wgpu, -winit), wgpu, winit, glam |
@@ -765,11 +765,11 @@ sorted `read_dir`, a seekable `open` for the music); a direct `std::fs` read of 
 `game` or `audio` is a bug the packed game shows as a missing asset. Files the player owns (profile, black box, logs)
 stay on `std::fs`. `game`'s `main` mounts `assets_baked` and `missions`: the directory when it exists, else the
 archive. The archive is the one inside the executable, else `openbf.pak` in its folder (`find_archive`). `game
---write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...` writes the packed copy (`scripts/pack.py` runs it
+--write-pack <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...` writes the packed copy (`scripts/pack.py` runs it
 on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak` from there on, on every OS; unfinished packed builds keep dev mode on by default (`OPENBF_DEV=0` disables it; `dev::on`).
-- `pak/src/lib.rs` 867 — packed/disk runtime data facade · `Archive`, `write_pack`, `write_pack_at`, `find_archive`, `collect`, `mount`, `packed`, `read`, `read_dir`, `open`, `Reader`; archive layout, deduplication and mount policy in the module/API docs.
+- `pak/src/lib.rs` 881 — packed/disk runtime data facade · `Archive`, `write_pack`, `write_pack_at`, `replace_sources`, `find_archive`, `collect`, `mount`, `packed`, `read`, `read_dir`, `open`, `Reader`; archive layout, deduplication and mount policy in the module/API docs.
 - `pak/examples/pack_load.rs` — writes and reads a pack as the game does (`scripts/tests/test_pack_limits.py`) and measures load cost: `bench <dir> <scratch> [rounds]` times reading every file raw and zstd.
-- `pak/src/tests.rs` 486 — round trip, re-pack, a damaged footer, ranged reads, dedupe, the disk fallback
+- `pak/src/tests.rs` 530 — round trip, re-pack, a damaged footer, ranged reads, dedupe, disk fallback and atomic source substitutions
 
 ## ui, input, audio, net
 - `ui/src/lib.rs` 49 — module roots; re-exports `egui`
@@ -1279,3 +1279,5 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `game/examples/space_sweep.rs` 368 — headless multi-map Space Assault sweep across `bf2_spa1..9` reporting outcome, points, destroyed stations, shot-down flyers and crashes.
 - `game/tests/space_playtest_fixes.rs` 1311 — regression checks for capital hull `ShieldLarge` impacts and sounds, flyer collision/death ODF sounds and mounted listener, `SetParticleLODBias` far fade, interpolated missile trails, and hangar shield ordnance collision.
+
+- `game/tests/visual_packs.rs` 88 — explicit owned-payload native GLB/KTX2 imports and stock/install/remove archive checks; CPU only, requires local fixtures.

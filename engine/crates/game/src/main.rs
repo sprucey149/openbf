@@ -73,7 +73,7 @@
 //!     --bench-player-cam          bench from the player's eye, not the overview
 //!     --bench-toggle <what>       `shadows` or `soldier-lod`: time that feature off
 //!                                 and on in alternating blocks of the same frames
-//!   --write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...
+//!   --write-pack <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...
 //!                                 copy this executable to <out> with each
 //!                                 <dir> appended as the archive's <name>/;
 //!                                 at <bytes> (default about 3.9 GiB) the data
@@ -292,14 +292,21 @@ fn main() -> Result<()> {
         "--write-pack" => {
             // Card PACK (`scripts/pack.py` runs it): copy this executable to
             // <out> with each <name>=<dir> appended as the archive's <name>/.
-            let usage = "--write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...";
+            let usage = "--write-pack <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...";
             let out = PathBuf::from(it.next().context(usage)?);
             let mut pak_file = out.with_file_name(pak::PAK_NAME);
             let mut split_at = pak::SINGLE_FILE_LIMIT;
+            let mut replacements = None;
             let mut entries = Vec::new();
             while let Some(spec) = it.next() {
                 match spec.as_str() {
                     "--pak" => pak_file = PathBuf::from(it.next().context(usage)?),
+                    "--replacements" => {
+                        if replacements.is_some() {
+                            bail!("--replacements supplied twice");
+                        }
+                        replacements = Some(PathBuf::from(it.next().context(usage)?));
+                    }
                     "--split-at" => {
                         split_at = it.next().context(usage)?.parse().context("--split-at")?
                     }
@@ -309,6 +316,16 @@ fn main() -> Result<()> {
                             pak::collect(std::path::Path::new(dir), name)
                                 .with_context(|| dir.to_string())?,
                         );
+                    }
+                }
+            }
+            if let Some(mapping) = replacements {
+                for index in pak::replace_sources(&mut entries, &mapping)? {
+                    let (name, source) = &entries[index];
+                    if name.ends_with(".glb") {
+                        // Use the real importer before opening any output; Python checks compatibility.
+                        game::assets::load_glb(source)
+                            .with_context(|| format!("replacement {name}: {}", source.display()))?;
                     }
                 }
             }

@@ -21,6 +21,10 @@ recompiles and re-packs):
      and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
      inside itself first, then for openbf.pak beside it; the two must stay together.
 
+Optional prepared packs: unzip under visual_packs/<pack-name>/pack.json, then run
+the normal command. Remove the pack folder and run again to revert. See
+docs/visual-packs.md for formats, compatibility checks and --visual-packs <dir>.
+
 The bake restores retail audio locally by default. --retail-audio keeps the
 retail audio encode and original music streams.
 
@@ -51,6 +55,7 @@ import tempfile
 from pathlib import Path
 
 import input_scan
+import visual_packs
 from console_input import pc_game
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -589,8 +594,13 @@ def main():
     ap.add_argument("--game-bin", default=None, help="use an already compiled game binary (skips step 1 cargo build)")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
+    ap.add_argument("--visual-packs", default=None, help="folder containing optional pack directories (default: repo-root visual_packs/)")
     ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
     a = ap.parse_args()
+    try:
+        packs, visual_report = visual_packs.discover(a.visual_packs or Path(ROOT) / "visual_packs", explicit=a.visual_packs is not None)
+    except visual_packs.PackError as error:
+        sys.exit(f"pack: {error}")
     out = os.path.abspath(a.out)
     if out.startswith(os.path.join(ENGINE, "")) or os.path.isdir(out):
         sys.exit(f"pack: --out {out} must be a file outside engine/")
@@ -772,11 +782,14 @@ def main():
 
     warnings = check_foliage(bake, plan)
 
+    try:
+        visual_replacements = visual_packs.resolve(packs, visual_report, BAKED)
+    except visual_packs.PackError as error:
+        sys.exit(f"pack: {error}")
+    print("\n".join(visual_packs.summary(visual_report)), flush=True)
+
     step("6/6 pack")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    old_report = out + ".sources.json"  # never left describing an earlier pack
-    if os.path.exists(old_report):
-        os.remove(old_report)
     tmp = os.path.join(os.path.dirname(out), "pack-tmp" + EXE)  # Windows runs only a name ending in .exe
     shutil.copyfile(game, tmp)
     os.chmod(tmp, 0o755)
@@ -791,8 +804,18 @@ def main():
     pak = os.path.join(os.path.dirname(out), PAK_NAME)
     new_pak = pak + ".new"
     try:
-        run([tmp, "--write-pack", new, "--pak", new_pak, f"assets_baked={BAKED}", f"missions={MISSIONS}"])
+        # A small JSON response file avoids command-line limits on Windows. Never stage a bake copy.
+        with tempfile.TemporaryDirectory(prefix="openbf-visual-") as mapping_dir:
+            flags = []
+            if visual_replacements:
+                mapping = Path(mapping_dir) / "replacements.json"
+                mapping.write_text(json.dumps(visual_replacements), encoding="utf-8")
+                flags = ["--replacements", str(mapping)]
+            run([tmp, "--write-pack", new, "--pak", new_pak, *flags, f"assets_baked={BAKED}", f"missions={MISSIONS}"])
         split = install_pack(new, new_pak, out, pak)
+        old_report = out + ".sources.json"  # keep the old receipt if validation/writing fails
+        if os.path.exists(old_report):
+            os.remove(old_report)
     finally:
         os.remove(tmp)
         for leftover in (new, new_pak):
@@ -803,6 +826,7 @@ def main():
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
                            pc_roots=pc_roots, warnings=warnings)
+    report["visual_packs"] = visual_report
     report["audio_restoration"] = not a.retail_audio
     if menu_font_core:
         report["inputs"].append(dict(path=menu_font_core, label="optional PS2 BF2 menu font source",

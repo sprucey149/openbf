@@ -219,6 +219,50 @@ impl Archive {
     }
 }
 
+/// Substitute source files for existing archive names using a JSON array of `[name, file]` pairs.
+/// Validate the complete mapping before changing entries. Return the changed indices.
+/// This never adds archive entries or edits sources.
+pub fn replace_sources(
+    entries: &mut [(String, PathBuf)],
+    mapping: &Path,
+) -> io::Result<Vec<usize>> {
+    let replacements: Vec<(String, PathBuf)> = serde_json::from_reader(File::open(mapping)?)
+        .map_err(|e| bad(&format!("replacement mapping: {e}")))?;
+    let mut positions = BTreeMap::new();
+    for (index, (name, _)) in entries.iter().enumerate() {
+        if positions.insert(name.as_str(), index).is_some() {
+            return Err(bad(&format!("duplicate archive entry {name:?}")));
+        }
+    }
+    let mut changes = BTreeMap::new();
+    for (name, source) in replacements {
+        if name.contains(['\\', ':', '\0'])
+            || name
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+        {
+            return Err(bad(&format!("unsafe replacement archive path {name:?}")));
+        }
+        let index = *positions
+            .get(name.as_str())
+            .ok_or_else(|| bad(&format!("replacement archive entry does not exist: {name}")))?;
+        if !source.is_file() {
+            return Err(bad(&format!(
+                "replacement source is not a file: {}",
+                source.display()
+            )));
+        }
+        if changes.insert(index, source).is_some() {
+            return Err(bad(&format!("duplicate replacement for {name}")));
+        }
+    }
+    let changed = changes.keys().copied().collect();
+    for (index, source) in changes {
+        entries[index].1 = source;
+    }
+    Ok(changed)
+}
+
 /// [`write_pack_at`] with the standard rule: [`PAK_NAME`] beside `out`, at [`SINGLE_FILE_LIMIT`].
 pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::Result<PackLayout> {
     write_pack_at(

@@ -496,3 +496,35 @@ fn a_single_file_cannot_be_allowed_past_the_windows_limit() {
     const { assert!(SINGLE_FILE_LIMIT < WINDOWS_EXE_LIMIT) };
     let _ = std::fs::remove_dir_all(d);
 }
+
+#[test]
+fn replacement_sources_validate_before_mutation() {
+    let d = scratch("replacements");
+    let stock = d.join("stock");
+    let replacement = d.join("replacement");
+    std::fs::write(&stock, b"stock").unwrap();
+    std::fs::write(&replacement, b"replacement").unwrap();
+    let original = vec![("assets_baked/a.ktx2".to_string(), stock.clone())];
+    let mapping = d.join("mapping.json");
+    for names in [
+        vec!["assets_baked/a.ktx2", "missing"],
+        vec!["assets_baked/a.ktx2", "assets_baked/a.ktx2"],
+        vec!["assets_baked/../a.ktx2"],
+    ] {
+        let rows: Vec<_> = names.iter().map(|name| (name, &replacement)).collect();
+        std::fs::write(&mapping, serde_json::to_vec(&rows).unwrap()).unwrap();
+        let mut entries = original.clone();
+        assert!(replace_sources(&mut entries, &mapping).is_err());
+        assert_eq!(entries, original);
+    }
+    std::fs::write(
+        &mapping,
+        serde_json::to_vec(&vec![("assets_baked/a.ktx2", &replacement)]).unwrap(),
+    )
+    .unwrap();
+    let mut entries = original;
+    replace_sources(&mut entries, &mapping).unwrap();
+    assert_eq!(entries[0].1, replacement);
+    assert_eq!(std::fs::read(stock).unwrap(), b"stock");
+    let _ = std::fs::remove_dir_all(d);
+}
