@@ -156,26 +156,30 @@ Your profile and snapshots are saved in `openbf_data\` beside `openbf.exe`.
 The game is built around a controller and plays like the console originals, with their aim assist.
 Keyboard and mouse also work, as a deliberate addition for PC: click into the battle to capture
 the pointer; Esc pauses and frees it again. Mouse aim gets no aim assist. Sensitivity and invert-Y
-are in Options and in the pause menu.
+are in Options and in the pause menu (sensitivity starts at 100 %). Infantry, vehicles and
+starfighters each have their own keyboard layout under Controls (Keyboard / Mouse).
 
 | Action | Keyboard and mouse |
 |---|---|
 | Move | W A S D |
 | Look and aim | mouse |
-| Fire / secondary fire | left / right button |
-| Zoom | middle button or Z |
+| Fire | left button |
+| Secondary fire | middle button (or the back thumb button) |
+| Zoom | right button or Z |
 | Jump | Space |
-| Crouch / prone | C or Left Ctrl |
+| Crouch / prone | Left Ctrl or C |
 | Sprint | Left Shift |
 | Reload | R |
 | Use (enter or leave a vehicle) | E |
-| Next / previous weapon | Q or the wheel |
-| Switch secondary weapon | G |
+| Next weapon | the wheel or Q |
+| Switch secondary weapon | G (or the forward thumb button) |
 | First / third person (also "Viewpoint" in Options and the pause menu) | V |
 | Squad orders | F1 follow, F2 hold, F3 at ease, F4 move out (or the arrow keys, as the D-pad) |
 | Spawn screen | W A S D or arrows to pick a post, Q / Tab or the wheel for the class, Space or Enter to spawn, Backspace back |
 | Menus | arrows, Enter, Esc or Backspace |
+| Fullscreen or a maximized window (the game opens fullscreen) | F11 (Control+Command+F on macOS) |
 
+In a vehicle or a starfighter the right button is secondary fire and the middle button or Z zooms.
 In a hover tank, speeder or flyer the mouse turns the vehicle, as the steering stick does;
 in a walker it aims the walker. In a gunner's seat or a turret it turns the gun.
 Tested and working on Linux and Windows, with the NTSC-U PS2 releases (SLUS-20898 and SLUS-21240).
