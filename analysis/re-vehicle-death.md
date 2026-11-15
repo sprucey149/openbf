@@ -285,7 +285,7 @@ starts `ChunkStartDistance` along its velocity direction (B1:194039); cluster ta
 chunk template has ChunkBounciness 0, ChunkStickiness 0, both dampings 0 and ChunkLifetime −1 (ctor B1:192934-192951;
 ChunkGeometryName handler B1:193340-193353) — explosion debris does not bounce.
 BF2 is the same law (2026-11-13). The explode `FUN_0030c8f8` (B2:287824) skips the land `Effect` in water but always
-reaches the debris loop at LAB_0030ce4c (B2:288030-288248). The orientation is two U·2π angles for the axis
+reaches the debris loop (B2:288030-288248). The orientation is two U·2π angles for the axis
 (c1·s2, s1, c1·c2) and U·π for the angle. ChunkSpeed min ≥ 0 gives U(min, max) (+0x1d0/+0x1d4, B2:288098-288104),
 else (1 + U)·PushRadius (+0x9c, B2:288144-288146). The start is ChunkStartDistance (+0x1d8, B2:288230) along the
 direction. The count byte is +0xd0, capped at 10 (B2:288248). Every vehicle death passes no impact normal (the hover's
