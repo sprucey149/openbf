@@ -11,6 +11,7 @@ pub struct ShadowMesh {
     normals: Vec<Vec3>,
     edges: Vec<(usize, usize, usize, usize)>,
     points: Vec<Vec3>,
+    pushed: Vec<Vec3>,
     lit: Vec<bool>,
 }
 impl ShadowMesh {
@@ -65,6 +66,7 @@ impl ShadowMesh {
         Ok(Self {
             normals,
             points: vec![Vec3::ZERO; positions.len()],
+            pushed: vec![Vec3::ZERO; positions.len()],
             lit: vec![false; faces.len()],
             positions,
             faces: faces
@@ -80,40 +82,61 @@ impl ShadowMesh {
         if extrusion.length_squared() < 1e-8 {
             return;
         }
-        for (p, &original) in self.points.iter_mut().zip(&self.positions) {
-            *p = transform.transform_point3(original);
-        }
-        let points = &self.points;
         let local_light = transform.inverse().transform_vector3(extrusion);
+        for ((p, q), &original) in self
+            .points
+            .iter_mut()
+            .zip(&mut self.pushed)
+            .zip(&self.positions)
+        {
+            *p = transform.transform_point3(on_grid(original));
+            *q = transform.transform_point3(on_grid(original + local_light));
+        }
+        let (points, pushed) = (&self.points, &self.pushed);
         for (lit, normal) in self.lit.iter_mut().zip(&self.normals) {
             *lit = normal.dot(local_light) < 0.0;
         }
         let lit = &self.lit;
         let mut tri =
             |a: Vec3, b: Vec3, c: Vec3| out.extend([a.to_array(), b.to_array(), c.to_array()]);
+        // Both caps are the faces turned AWAY from the sun, at their place
+        // (reversed, so the volume stays closed and outward) and pushed along
+        // it: B1 FUN_004ad180 picks them by n.L > 0 under DAT_00522ecc (ELF 1,
+        // no writer) and FUN_004adbc8 draws that one set as the near and the
+        // far cap (`analysis/re-vehicle-shadow.md` §2). Capping with the lit
+        // faces instead laid a cap on the model's own sunlit surfaces, which
+        // z-fought them: the BF1 AAT's side guns flickered dark.
         for (f, face) in self.faces.iter().enumerate() {
-            let shift = if lit[f] { Vec3::ZERO } else { extrusion };
+            if lit[f] {
+                continue;
+            }
             for i in 1..face.len() - 1 {
-                tri(
-                    points[face[0]] + shift,
-                    points[face[i]] + shift,
-                    points[face[i + 1]] + shift,
-                );
+                tri(points[face[0]], points[face[i + 1]], points[face[i]]);
+                tri(pushed[face[0]], pushed[face[i]], pushed[face[i + 1]]);
             }
         }
         for &(a, b, f, g) in &self.edges {
             if lit[f] == lit[g] {
                 continue;
             }
-            let (a, b) = if lit[f] {
-                (points[a], points[b])
-            } else {
-                (points[b], points[a])
-            };
-            tri(b, a, a + extrusion);
-            tri(b, a + extrusion, b + extrusion);
+            let (a, b) = if lit[f] { (a, b) } else { (b, a) };
+            tri(points[b], points[a], pushed[a]);
+            tri(points[b], pushed[a], pushed[b]);
         }
     }
+}
+
+/// A volume vertex as the PS2 sends it: B1 FUN_004adbc8 packs each one, in
+/// the piece's own frame, into 16 bits over a box of +-DAT_00522ed4 (ELF
+/// 512 m), `(int)((v + 512) * 65535 / 1024)` with the R5900's truncating
+/// convert, and the VU1 unpacks it over that box. The 1.56 cm grid holds the
+/// near cap off the model it was authored on, fixed in the model's frame;
+/// at full precision the cap lay exactly on the AAT's side-gun faces and
+/// their z-fight changed every frame.
+fn on_grid(v: Vec3) -> Vec3 {
+    const BOX: f32 = 512.0;
+    let scale = 65535.0 / (BOX + BOX);
+    ((v + BOX) * scale).trunc() / scale - BOX
 }
 
 pub(crate) struct ShadowState {
