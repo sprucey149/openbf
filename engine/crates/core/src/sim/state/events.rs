@@ -156,6 +156,15 @@ pub enum Event {
         /// bolt's velocity; a blast's victim centre less the blast centre
         /// (PROVISIONAL, §10), zero when they coincide.
         dir: Vec3,
+        /// The shooter's damage-dealt and the victim's damage-taken buff
+        /// multipliers (the two factors of `Sim::buff_scale`: War Hero 1.5,
+        /// Guardian 0.5, a power-up) at the moment of the hit, so a reader
+        /// sees them even when the hit killed and the same tick's
+        /// `tick_buffs` then reset the corpse's buffs, a timer ran out or a
+        /// cheat was switched (#173 black box). `damage` already includes
+        /// them. Presentation only: never hashed, never read by the sim.
+        dealt: f32,
+        taken: f32,
     },
     Kill {
         shooter: UnitHandle,
@@ -343,9 +352,20 @@ pub enum Event {
     TimeUp {
         winner: u8,
     },
-    /// The world killed a unit: a mission death region, or a lethal landing.
-    /// See [`Sim::kill_environment`].
+    /// The world killed a unit: a mission death region, the kill floor, a
+    /// lethal landing and the like, with no attacker to credit. See
+    /// [`Sim::kill_environment`]: a fall-type death after a forced move is
+    /// an [`Event::Kill`] followed by an [`Event::ForcedDeath`] instead.
     EnvDeath {
+        unit: UnitHandle,
+        cause: DeathCause,
+    },
+    /// Issue #173 [ours]: a fall-type death credited to the attacker of a
+    /// forced move (`sim/fall_credit.rs`), right after its [`Event::Kill`].
+    /// It keeps the world's `cause` (a fall, the kill floor, a death region,
+    /// a landing under the map) for the black box; it is not a second death,
+    /// so a consumer that counts deaths counts the kill only.
+    ForcedDeath {
         unit: UnitHandle,
         cause: DeathCause,
     },

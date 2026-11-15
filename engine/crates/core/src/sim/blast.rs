@@ -280,7 +280,7 @@ impl Sim {
                         let dir = (c - pos).normalize_or_zero();
                         self.blast_unit(h, &desc, f, attacker, attacker_is_player, team, dir);
                     }
-                    self.kick_and_push(h, e, pos, c, w);
+                    self.kick_and_push(h, e, pos, c, w, attacker);
                 }
                 Victim::Vehicle(h) if f > 0.0 => {
                     let dir = (c - pos).normalize_or_zero();
@@ -317,6 +317,7 @@ impl Sim {
         pos: Vec3,
         c: Vec3,
         w: f32,
+        attacker: Option<UnitHandle>,
     ) {
         let Some(u) = self
             .units
@@ -356,6 +357,8 @@ impl Sim {
             .soldier
             .knock(dir, scale, crate::soldier::KNOCK_RULES, draw);
         self.nav_stats.knocks += 1;
+        // Issue #173 [ours]: a fall after the throw is the thrower's kill.
+        self.note_forced_move(h, attacker);
     }
 }
 

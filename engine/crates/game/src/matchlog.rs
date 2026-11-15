@@ -15,7 +15,8 @@
 //! JSON lines. The first is the header object (`"kind": "header"`): map,
 //! mission, era, factions, the subject's unit slot, team and kind (`human` /
 //! `proxy`), difficulty, seed, build and checkout commits. A human's log
-//! follows the player's unit (`Sim::players[0]`) through the side select and
+//! follows the player's unit (`Sim::players[slot]`, slot 0 unless
+//! [`MatchLog::follow_slot`] says: a LAN guest's own) through the side select and
 //! every respawn, and its header's `unit` / `team` are the unit and team he
 //! last spawned as (schema 2 on; schema 1 kept the team before the side
 //! select).
@@ -29,6 +30,10 @@
 //!   the ray by angle (its slot, the angle off the ray in 1e-4 rad, the
 //!   metres along it; nulls for none). Schema 3; schema 2 wrote only
 //!   `["shot", tick, weapon]`);
+//! - `["throw", tick, weapon, yaw, pitch]`: a thrown weapon left his hand
+//!   (`Event::Throw`: a grenade, spear, mine, remote droid or dropped
+//!   item), with his aim then (1e-4 rad, as a shot's). Schema 4; before it
+//!   throws were not recorded at all;
 //! - `["hit", tick, shooter, victim, victim_gen, victim_team, damage,
 //!   health_left, direct]` for a hit the subject deals or takes (direct 1 =
 //!   a bolt, 0 = a blast);
@@ -102,6 +107,13 @@ enum Row {
         /// distance along it.
         near: Option<(u32, i32, f32)>,
     },
+    Throw {
+        tick: u64,
+        weapon: u32,
+        /// His aim when it left his hand (1e-4 rad).
+        yaw: i32,
+        pitch: i32,
+    },
     Hit {
         tick: u64,
         shooter: u32,
@@ -158,6 +170,12 @@ impl Row {
                 };
                 json!(["shot", tick, weapon, yaw, pitch, zoom, rx, ry, id, off, along])
             }
+            Row::Throw {
+                tick,
+                weapon,
+                yaw,
+                pitch,
+            } => json!(["throw", tick, weapon, yaw, pitch]),
             Row::Hit {
                 tick,
                 shooter,
@@ -271,8 +289,9 @@ pub struct MatchLog {
     cheats_ever: Vec<bool>,
     alive: bool,
     gen: u32,
-    /// A human's log: follow `Sim::players[0]` (the unit the player plays).
+    /// A human's log: follow `Sim::players[slot]` (the unit the player plays).
     follow_player: bool,
+    slot: usize,
     path: PathBuf,
     written: bool,
 }
@@ -324,7 +343,7 @@ impl MatchLog {
         env.sort();
         let header = Header {
             kind: "header",
-            schema: 3,
+            schema: 4,
             map: meta.map.clone(),
             mission: meta.mission.clone(),
             era: era.to_owned(),
@@ -353,9 +372,16 @@ impl MatchLog {
             alive: false,
             gen: 0,
             follow_player: subject == "human",
+            slot: 0,
             path,
             written: false,
         }
+    }
+
+    /// A human's log follows player slot `slot` (issue #168: a LAN guest's
+    /// own, not the host's slot 0).
+    pub fn follow_slot(&mut self, slot: u8) {
+        self.slot = usize::from(slot);
     }
 
     /// Write to `path` instead (a headless run's own name).
@@ -383,6 +409,7 @@ impl MatchLog {
         }
         let Some(u) = sim.units.get(i) else { return };
         let me = i as u32;
+        let mrad = |a: f32| (a * 1.0e4).round() as i32;
         for ev in &sim.events {
             match *ev {
                 Event::Shot {
@@ -391,7 +418,6 @@ impl MatchLog {
                     origin,
                     dir,
                 } if unit.index == me => {
-                    let mrad = |a: f32| (a * 1.0e4).round() as i32;
                     self.rows.push(Row::Shot {
                         tick: t,
                         weapon: weapon_class,
@@ -402,6 +428,17 @@ impl MatchLog {
                         ry: pad.ry,
                         near: nearest_enemy(sim, u.team, origin, dir)
                             .map(|(i, a, d)| (i, mrad(a), d)),
+                    });
+                }
+                Event::Throw {
+                    unit, weapon_class, ..
+                } if unit.index == me => {
+                    let (aim, _, _) = u.aim_frame();
+                    self.rows.push(Row::Throw {
+                        tick: t,
+                        weapon: weapon_class,
+                        yaw: mrad(core::fmath::atan2(-aim.x, -aim.z)),
+                        pitch: mrad(core::fmath::asin(aim.y.clamp(-1.0, 1.0))),
                     });
                 }
                 Event::Hit {
@@ -466,14 +503,14 @@ impl MatchLog {
         }
     }
 
-    /// A human's log: the unit is the player's current one (`players[0]`),
+    /// A human's log: the unit is the player's current one (`players[slot]`),
     /// so a slot change starts a new life in the rows; with none (between
     /// rounds) the last one stays.
     fn follow(&mut self, sim: &Sim) {
         if !self.follow_player {
             return;
         }
-        let Some(Some(h)) = sim.players.first() else {
+        let Some(Some(h)) = sim.players.get(self.slot) else {
             return;
         };
         if h.index != self.header.unit {
@@ -701,6 +738,8 @@ mod tests {
             age: 0.1,
             health_left: 90.0,
             dir: glam::Vec3::X,
+            dealt: 1.0,
+            taken: 1.0,
         });
         log.tick(&walk.sim, &PadState::default());
         assert_eq!(log.header().unit, other.index);
@@ -710,7 +749,7 @@ mod tests {
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
-        assert_eq!(lines[0]["schema"], 3);
+        assert_eq!(lines[0]["schema"], 4);
         assert_eq!(lines[0]["team"], 1);
         assert_eq!(lines[0]["unit"], other.index);
         let spawns: Vec<_> = lines.iter().filter(|l| l[0] == "spawn").collect();
@@ -796,7 +835,7 @@ mod tests {
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
-        assert_eq!(lines[0]["schema"], 3);
+        assert_eq!(lines[0]["schema"], 4);
         let shot = lines.iter().find(|l| l[0] == "shot").expect("a shot row");
         let shot = shot.as_array().unwrap();
         assert_eq!(shot.len(), 11, "{shot:?}");
@@ -821,6 +860,94 @@ mod tests {
         let off = core::fmath::atan2(c.cross(aim).length(), along);
         assert_eq!(shot[9].as_i64(), Some((off * 1e4).round() as i64));
         assert!((shot[10].as_f64().unwrap() - f64::from(along)).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Issue #168, first VPN playtest: a LAN guest's log followed slot 0
+    /// (the host's unit). It follows the slot it is told, its own.
+    #[test]
+    fn a_guests_log_follows_its_own_slot() {
+        let mut walk = WalkSim::new(7, glam::Vec3::ZERO, None);
+        let meta = crate::blackbox::Meta {
+            map: "test".into(),
+            ..Default::default()
+        };
+        let dir = std::env::temp_dir().join(format!("openbf_matchlog_slot_{}", std::process::id()));
+        let host = walk.player.index;
+        let mut log = MatchLog::start(&meta, &walk, host, "human", "gcw", &dir);
+        let guest = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(1, glam::Vec3::X * 5.0))
+            .unwrap();
+        if walk.sim.players.len() < 2 {
+            walk.sim.players.resize(2, None);
+        }
+        walk.sim.players[1] = Some(guest);
+        log.follow_slot(1);
+        walk.sim.tick = 1;
+        log.tick(&walk.sim, &PadState::default());
+        assert_ne!(guest.index, host);
+        assert_eq!(log.header().unit, guest.index);
+        assert_eq!(log.header().team, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Issue #161 (LAN playtest 2026-11-14): the Ewok's spear throws left no
+    /// row, because a thrown weapon raises `Event::Throw`, not
+    /// `Event::Shot`, so his log could not say how often he threw. Schema 4
+    /// records each throw with his aim then; another unit's throw is not his.
+    #[test]
+    fn a_throw_row_records_the_players_thrown_weapons() {
+        use glam::Vec3;
+        let mut walk = WalkSim::new(7, Vec3::ZERO, None);
+        let me = walk.player;
+        let other = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(
+                1,
+                Vec3::new(4.0, 0.0, -20.0),
+            ))
+            .unwrap();
+        let meta = crate::blackbox::Meta {
+            map: "test".into(),
+            ..Default::default()
+        };
+        let dir =
+            std::env::temp_dir().join(format!("openbf_matchlog_throw_{}", std::process::id()));
+        let mut log = MatchLog::start(&meta, &walk, me.index, "human", "gcw", &dir);
+        walk.sim.tick = 1;
+        log.tick(&walk.sim, &PadState::default());
+        walk.sim.tick = 2;
+        for (unit, weapon_class) in [(me, 5), (other, 6)] {
+            walk.sim.events.push(Event::Throw {
+                unit,
+                weapon_class,
+                origin: Vec3::ZERO,
+            });
+        }
+        log.tick(&walk.sim, &PadState::default());
+        let (aim, _, _) = walk.sim.unit(me).unwrap().aim_frame();
+        let path = log.write(&walk.sim, "quit").expect("written");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines[0]["schema"], 4);
+        let throws: Vec<_> = lines.iter().filter(|l| l[0] == "throw").collect();
+        assert_eq!(throws.len(), 1, "only his own throw: {throws:?}");
+        let row = throws[0].as_array().unwrap();
+        assert_eq!(row.len(), 5, "{row:?}");
+        assert_eq!((row[1].as_u64(), row[2].as_u64()), (Some(2), Some(5)));
+        let mrad = |a: f32| i64::from((a * 1.0e4).round() as i32);
+        assert_eq!(
+            row[3].as_i64(),
+            Some(mrad(core::fmath::atan2(-aim.x, -aim.z)))
+        );
+        assert_eq!(
+            row[4].as_i64(),
+            Some(mrad(core::fmath::asin(aim.y.clamp(-1.0, 1.0))))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

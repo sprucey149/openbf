@@ -221,6 +221,41 @@ fn custom_actions_release_legs_until_next_action_and_keep_authored_full_body_mov
     assert_ne!(r.a.upper_clip(), Some(9));
 }
 
+/// Issue #168, first VPN playtest: a clip number kept from another body
+/// (a unit's class changed under it) is no clip, never an index past the
+/// body's clips (the crash: index 125 of Maul's 113).
+#[test]
+fn a_clip_number_past_the_bodys_clips_is_no_clip() {
+    let mut r = Run::new(rig_bf2());
+    r.clips.push(clip(9, "human_rifle_swing_full", 31, false));
+    r.rig.root.push(Some([0.0, 0.0]));
+    let class = ClassAnim {
+        family: "human".into(),
+        ..Default::default()
+    };
+    r.a.combo_pose(&r.clips, &class, "saber", "swing", 0.2, false, true);
+    r.a.step(&r.rig, &r.clips, &r.skel, &input(0.0), DT);
+    assert_eq!(r.a.upper_clip(), Some(9));
+    assert_eq!(r.a.lower_clip(), Some(9));
+    let stale = r.a.lower.slot.unwrap();
+    // The same animator on a body with fewer clips.
+    r.clips.truncate(9);
+    for speed in [0.0, 7.0] {
+        r.a.step(&r.rig, &r.clips, &r.skel, &input(speed), DT);
+        let _ = r.a.pose(&r.skel);
+        for c in [r.a.upper_clip(), r.a.lower_clip()].into_iter().flatten() {
+            assert!(c < r.clips.len(), "clip {c} of {}", r.clips.len());
+        }
+    }
+    assert_eq!(r.a.lower_clip(), Some(RUN), "the body's own clips play");
+    let mut p = rig::Player {
+        slot: Some(Slot { clip: 125, ..stale }),
+        ..Default::default()
+    };
+    p.advance(&r.clips, DT, Game::Bf2);
+    assert!(p.slot.is_none(), "a stale slot is dropped");
+}
+
 #[test]
 fn restarting_the_same_combo_clip_restarts_its_blend_clock() {
     use manifest::combo::{ComboDef, ComboField, ComboKeyword as K, ComboValue as V};
@@ -315,6 +350,110 @@ fn choking_pose_repeats_the_authored_period_and_keeps_moving() {
     assert_eq!(samples[0], samples[1]);
     assert_eq!(samples[0], samples[2]);
     assert_ne!(samples[2], samples[3]);
+}
+
+/// Issue #173: the victim's clip is his family's own `<family>_choking`,
+/// else BF2's `human_choking` (the clip every baked soldier carries), else
+/// the thrown flail loop.
+#[test]
+fn a_choke_victim_takes_his_familys_clip_then_humans_then_the_flail() {
+    let skeleton = skel();
+    let human = clip(9, "human_choking", 16, false);
+    let wookie = clip(10, "wookie_choking", 16, false);
+    let flail = clip(11, "human_rifle_thrown_flail", 16, false);
+    let drawn = |clips: &[Clip], family: &str| {
+        let mut a = Animator::new();
+        assert!(a.status_pose(clips, &skeleton, family, 0.0));
+        (a.kept_pose(&skeleton).0[ARM].translation.x / 100.0).floor() as usize - 1
+    };
+    let all = [flail.clone(), human.clone(), wookie];
+    assert_eq!(drawn(&all, "wookie"), 10);
+    assert_eq!(drawn(&all, "gungan"), 9);
+    assert_eq!(drawn(&all, "human"), 9);
+    assert_eq!(drawn(&[flail.clone(), human], "ewok"), 9);
+    assert_eq!(drawn(&[flail], "human"), 11);
+    let mut a = Animator::new();
+    assert!(!a.status_pose(&clips(), &skeleton, "human", 0.0));
+}
+
+/// Issue #173: the hold keeps the choking clip's lift (its root raised 0.3 m
+/// here, as `human_choking` raises `bone_root` from about 1.0 m standing to
+/// 1.30-1.36 m) at every point of a 2 s hold, then drops him into his set's
+/// `landhard`, crossfaded from the held pose, for that clip's length (BF1
+/// frames / 30, BF2 (frames - 1) / 30) and back to his feet. Moving off at
+/// once cuts the landing short.
+#[test]
+fn a_choke_lifts_him_for_the_whole_hold_and_lands_him_hard() {
+    const LIFT: f32 = 0.3;
+    let lifted = |k: usize| {
+        let mut c = clip(k, "human_choking", 46, false);
+        for keys in c.tracks.iter_mut().flatten() {
+            for key in keys.iter_mut() {
+                key.translation.y = LIFT;
+            }
+        }
+        c
+    };
+    let mut bf1 = rig_bf1();
+    bf1.sets.bf1.as_mut().unwrap().special[3] = Some(SHOOT_LEGS as u16);
+    let mut bf2 = rig_bf2();
+    let pair = bf2::simple_pair("landhard").unwrap();
+    for set in &mut bf2.sets.bf2 {
+        let slots = set.sets.get_mut("rifle").unwrap();
+        (slots[2 * pair], slots[2 * pair + 1]) = (Some(SHOOT_LEGS as u16), Some(SHOOT_LEGS as u16));
+    }
+    for (rig, landing) in [(bf1, 7.0 / 30.0), (bf2, 6.0 / 30.0)] {
+        let game = rig.game;
+        for moving in [false, true] {
+            let mut r = Run::new(rig.clone());
+            r.clips.push(lifted(9));
+            r.steps(&input(0.0), 30);
+            let height = |r: &Run| r.a.pose(&r.skel).0[1].translation.y;
+            assert_eq!(height(&r), 0.0, "{game:?} standing");
+            let mut age = 0.0f32;
+            let mut seen = Vec::new();
+            while age < 2.0 + DT {
+                r.a.choke_hold(true);
+                r.a.step(&r.rig, &r.clips, &r.skel, &input(0.0), DT);
+                assert!(r.a.status_pose(&r.clips, &r.skel, "human", age));
+                assert_eq!(height(&r), LIFT, "{game:?} held at {age}");
+                assert_ne!(r.a.body(), Some(Body::Special(Special::Landing(true))));
+                seen.push(r.a.kept_pose(&r.skel).0[ARM].translation.x);
+                age += DT;
+            }
+            assert!(
+                seen.windows(2).filter(|w| w[0] != w[1]).count() > 100,
+                "{game:?}: the hold plays its clip"
+            );
+            let after = if moving { input(3.0) } else { input(0.0) };
+            r.a.choke_hold(false);
+            r.a.step(&r.rig, &r.clips, &r.skel, &after, DT);
+            if moving {
+                assert_ne!(r.a.body(), Some(Body::Special(Special::Landing(true))));
+                continue;
+            }
+            assert_eq!(r.a.body(), Some(Body::Special(Special::Landing(true))));
+            assert_eq!(r.a.lower_clip(), Some(SHOOT_LEGS), "{game:?} landhard");
+            let first = height(&r);
+            assert!(first > 0.0 && first < LIFT, "{game:?} crossfades: {first}");
+            let mut played = DT;
+            while played < landing - 1e-4 {
+                r.a.choke_hold(false);
+                r.a.step(&r.rig, &r.clips, &r.skel, &after, DT);
+                assert_eq!(
+                    r.a.body(),
+                    Some(Body::Special(Special::Landing(true))),
+                    "{game:?} landing at {played}"
+                );
+                played += DT;
+            }
+            r.a.choke_hold(false);
+            r.steps(&after, 1);
+            assert_eq!(r.a.body(), Some(Body::Feet(0, Move::Idle)), "{game:?}");
+            r.steps(&after, 60);
+            assert_eq!(height(&r), 0.0, "{game:?} back on his feet");
+        }
+    }
 }
 
 impl Run {
@@ -1132,6 +1271,50 @@ fn the_chooser_is_the_ps2s() {
     assert_eq!((m, t.round()), (Move::WalkBackward, -45.0));
     let (m, t) = pick(Game::Bf2, Vec2::new(-4.4, 0.0), true, idle).unwrap();
     assert_eq!((m, t.round()), (Move::WalkForward, -45.0));
+}
+
+/// Issue #161 (LAN playtest 2026-11-14: "the Ewok walking animation is
+/// broken"). BF1's chooser returns idle above 8 m/s on the soldier's OWN
+/// velocity, before it divides by `SkeletonRootScale` (B1 `FUN_0022e990`
+/// 144988-144994: the `v^2 > 64` exit, then the 1/scale multiply). The port
+/// tested the scaled speed, so a BF1 Ewok (scale 0.5, MaxSpeed 6) running
+/// faster than 4 m/s took the idle clip and slid. A 1.15 Wookiee kept its
+/// run a little past 8 m/s the same way.
+#[test]
+fn bf1s_idle_above_eight_reads_the_unscaled_speed() {
+    let mut l = Legs::default();
+    for speed in [4.5, 6.0, 7.9] {
+        let v = glam::Vec2::new(0.0, speed);
+        let got = choose(Game::Bf1, v, 0.5, false, false, 6.0, &mut l);
+        assert_eq!(
+            got.map(|(m, _)| m),
+            Some(Move::RunForward),
+            "Ewok at {speed} m/s"
+        );
+    }
+    let fast = glam::Vec2::new(0.0, 8.5);
+    assert_eq!(
+        choose(Game::Bf1, fast, 0.5, false, false, 6.0, &mut l),
+        None
+    );
+    let mut w = Legs::default();
+    assert_eq!(
+        choose(Game::Bf1, fast, 1.15, false, false, 7.0, &mut w),
+        None
+    );
+    // A human keeps the old answer at every speed.
+    let mut h = Legs::default();
+    let (m, _) = choose(
+        Game::Bf1,
+        glam::Vec2::new(0.0, 6.0),
+        1.0,
+        false,
+        false,
+        7.0,
+        &mut h,
+    )
+    .unwrap();
+    assert_eq!(m, Move::RunForward);
 }
 
 /// A stance with strafe clips (BF1 prone) strafes on them: left walks

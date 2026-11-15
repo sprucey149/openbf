@@ -34,8 +34,8 @@ fn texts() -> Texts {
         entries,
     };
     Texts {
-        bf2: Some(table.clone()),
-        map: Some(table),
+        bf2: Some(std::sync::Arc::new(table.clone())),
+        map: Some(std::sync::Arc::new(table)),
         bf1_map: false,
     }
 }
@@ -417,6 +417,8 @@ fn a_hit_on_the_player_lights_the_edge_toward_the_shooter() {
         age: 0.5,
         health_left: 100.0,
         dir: (to - from).normalize(),
+        dealt: 1.0,
+        taken: 1.0,
     };
     let edges = |s: &mut Scene, yaw: f32, victim| {
         s.sim.units[me.index as usize].soldier.yaw = yaw;
@@ -453,6 +455,8 @@ fn an_enemy_body_hit_lights_the_plain_flash() {
         age,
         health_left: 250.0,
         dir: Vec3::X,
+        dealt: 1.0,
+        taken: 1.0,
     };
     happen(&mut s, &[hit(me, mate, 0.1)]);
     assert_eq!(s.feed.hit_body(s.sim.tick), None, "a team-mate");
@@ -515,6 +519,8 @@ fn a_sniper_headshot_lights_the_critical_mark() {
         age: 0.1,
         health_left: 250.0,
         dir: Vec3::X,
+        dealt: 1.0,
+        taken: 1.0,
     };
     happen(&mut s, &[body]);
     assert_eq!(s.feed.hit_critical(s.sim.tick), None, "a body hit");
@@ -848,6 +854,33 @@ fn only_a_humans_death_makes_a_line() {
         cause: DeathCause::Fall,
     };
     assert!(happen(&mut s, &[fell]).is_empty());
+}
+
+/// Issue #173, the maintainer's rule: a fall after an enemy's push (or
+/// choke, pull or blast) is that enemy's kill, in the feed and the round
+/// stats alike.
+#[test]
+fn a_fall_after_an_enemys_push_reads_as_his_kill() {
+    let mut s = scene();
+    let [r0, _] = s.rebels;
+    let me = s.me;
+    let tick = s.sim.tick;
+    s.sim.unit_mut(me).unwrap().forced_by = Some(core::sim::ForcedMove::new(r0, tick));
+    s.sim.events.clear();
+    s.sim.kill_environment(me, DeathCause::Fall);
+    let events = s.sim.events.clone();
+    assert_eq!(
+        happen(&mut s, &events),
+        [line("Ben Pulastra killed Player 1", [1, 86, 213])]
+    );
+    let round = s.feed.round();
+    assert_eq!(round.units[r0.index as usize].kills, 1);
+    assert_eq!(
+        round.units[me.index as usize]
+            .killed_by
+            .get(&(r0.index as usize)),
+        Some(&1)
+    );
 }
 
 /// `[ours]` post lines in BF2's own strings, coloured by the team that
@@ -1320,6 +1353,8 @@ fn local_damage_flash_filters_rearms_expires_and_cannot_follow_another_life() {
         health_left,
         age: core::sim::BLAST_AGE,
         dir: Vec3::X,
+        dealt: 1.0,
+        taken: 1.0,
     };
     happen(
         &mut s,
@@ -1351,4 +1386,39 @@ fn local_damage_flash_filters_rearms_expires_and_cannot_follow_another_life() {
     assert_eq!(s.feed.damage_flash(start, bot), 0.0);
     happen(&mut s, &[hit(me, 10.0, 100.0)]);
     assert_eq!(s.feed.damage_flash(s.sim.tick, me), 80.0 / 255.0);
+}
+
+/// Issue #168, the first VPN playtest ("... killed Player 2"): a LAN
+/// round's lines name every human by his session name, the viewer and the
+/// other humans alike, and keep a name after its player left; bots keep
+/// their names, and without names a human is still the PS2's "Player 1".
+#[test]
+fn lan_lines_name_the_humans_by_their_session_names() {
+    let mut s = scene();
+    let guest = s
+        .sim
+        .spawn(&UnitSpec::player_in_slot(1, 0, Vec3::new(44.0, 0.0, 0.0)))
+        .expect("guest");
+    let (me, r0) = (s.me, s.rebels[0]);
+    let bot = s.feed.unit_name(&s.sim, r0);
+    assert_eq!(s.feed.unit_name(&s.sim, guest), "Player 2");
+    s.feed.set_player_names([(0, "the maintainer"), (1, "Kai")]);
+    let kill = |shooter, victim| Event::Kill { shooter, victim };
+    let said = |lines: Vec<HudMessage>| lines.into_iter().map(|l| l.text).collect::<Vec<_>>();
+    assert_eq!(
+        said(happen(&mut s, &[kill(r0, me)])),
+        [format!("{bot} killed the maintainer")]
+    );
+    assert_eq!(
+        said(happen(&mut s, &[kill(me, guest)])),
+        ["the maintainer killed Kai"]
+    );
+    assert_eq!(
+        said(happen(&mut s, &[kill(guest, guest)])),
+        ["Kai killed himself"]
+    );
+    assert_eq!(s.feed.unit_name(&s.sim, r0), bot, "a bot keeps its name");
+    // Kai left the roster: his name stays for the round's lines and stats.
+    s.feed.set_player_names([(0, "the maintainer")]);
+    assert_eq!(s.feed.unit_name(&s.sim, guest), "Kai");
 }

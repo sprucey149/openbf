@@ -229,6 +229,48 @@ fn session_timeout_removes_human_then_token_reclaims_slot() {
         .is_some());
 }
 
+/// Issue #168, the host's self-check: a check tick on which every live
+/// guest reported the host's own hash raises `HashesAgreed` once; a tick
+/// on which any guest differs, or that a guest has not reported yet, never
+/// does.
+#[test]
+fn session_hashes_agreed_needs_every_live_guest() {
+    let mut net = Net::new(6, lan(), Net::host_config());
+    let a = net.join(1, "A", 1, Player::new(10.0, 1.0, 1));
+    let b = net.join(2, "B", 2, Player::new(10.0, 1.0, 2));
+    net.connect_all();
+    net.start_round();
+    net.run_until(10_000, |n| n.host.next_tick() >= 100);
+    let agreed = |net: &Net, tick: u32| {
+        net.host_events
+            .iter()
+            .filter(|(_, e)| matches!(e, NetEvent::HashesAgreed { tick: t, .. } if *t == tick))
+            .count()
+    };
+    net.host.report_hash(30, 0xAAAA);
+    net.clients[a].core.report_hash(30, 0xAAAA);
+    net.run_ms(300);
+    assert_eq!(agreed(&net, 30), 0, "guest B has not reported");
+    net.clients[b].core.report_hash(30, 0xAAAA);
+    net.run_ms(300);
+    assert_eq!(agreed(&net, 30), 1);
+    let round_id = net.host.round_id();
+    assert!(net
+        .host_events
+        .iter()
+        .any(|(_, e)| *e == NetEvent::HashesAgreed { round_id, tick: 30 }));
+    // One differs: no agreement on that tick.
+    net.clients[a].core.report_hash(60, 0xBBBB);
+    net.clients[b].core.report_hash(60, 0xCCCC);
+    net.host.report_hash(60, 0xBBBB);
+    net.run_ms(300);
+    assert_eq!(agreed(&net, 60), 0);
+    // A stale report of an agreed tick raises nothing again.
+    net.clients[a].core.report_hash(30, 0xAAAA);
+    net.run_ms(300);
+    assert_eq!(agreed(&net, 30), 1);
+}
+
 #[test]
 fn session_hash_mismatch_reports_desync_and_resync_resends_round() {
     let mut net = Net::new(5, lan(), Net::host_config());
@@ -249,12 +291,20 @@ fn session_hash_mismatch_reports_desync_and_resync_resends_round() {
     assert!(net
         .host_event(|e| *e
             == NetEvent::Desync {
+                round_id: net.host.round_id(),
                 slot,
                 tick: 60,
                 host_hash: 0xCCCC,
                 peer_hash: 0xBBBB
             })
         .is_some());
+    // The guest hears of it only when the host game says so.
+    assert!(!net.clients[a]
+        .events
+        .iter()
+        .any(|e| matches!(e, ClientEvent::Desync { .. })));
+    net.host.tell_desync(slot, 60, 0xCCCC);
+    net.run_ms(300);
     assert!(net.clients[a].events.iter().any(|e| matches!(
         e,
         ClientEvent::Desync {
@@ -688,4 +738,122 @@ fn session_seat_list_decides_the_rounds_humans() {
     assert!(net.host_bundles.last().unwrap().pad(sb).is_some());
     let mine = &net.clients[b].bundles;
     assert_eq!(mine[..], net.host_bundles[..mine.len()]);
+}
+
+/// Protocol 8: `Start` names one moment for every peer. The lead covers the
+/// farthest guest's half round trip plus the margin; each guest takes its
+/// own half round trip off it, so the near and the far guest both begin
+/// when the host's clock does, and tick 0 closes one tick after that.
+#[test]
+fn session_start_names_one_moment_for_every_peer() {
+    let mut net = Net::new(
+        21,
+        LinkParams::ideal(Micros::from_millis(2)),
+        Net::host_config(),
+    );
+    let near = net.join(1, "Near", 1, Player::new(10.0, 1.0, 1));
+    let far = net.join(2, "Far", 2, Player::new(10.0, 1.0, 2));
+    net.sim
+        .set_both(addr(0), addr(2), LinkParams::ideal(Micros::from_millis(70)));
+    net.connect_all();
+    // The round trips settle on heartbeats.
+    net.run_ms(3_000);
+    net.start_round();
+    let (sent, lead) = net
+        .host_events
+        .iter()
+        .find_map(|(at, e)| match e {
+            NetEvent::RoundStarted { lead_us, .. } => Some((*at, *lead_us)),
+            _ => None,
+        })
+        .expect("RoundStarted");
+    let want = 70_000 + START_MARGIN.0 as u32;
+    assert!(
+        lead.abs_diff(want) <= 3_000,
+        "lead {lead} us, the far guest's half round trip and the margin {want}"
+    );
+    net.run_until(5_000, |n| {
+        !n.host_bundles.is_empty() && n.clients.iter().all(|c| c.start_at.is_some())
+    });
+    let begin = sent.0 + u64::from(lead);
+    let first = net.host_bundle_at[0].0;
+    assert!(
+        first.abs_diff(begin + 33_333) <= 1_000,
+        "tick 0 closed at {first}, the start {begin} plus a tick"
+    );
+    for i in [near, far] {
+        let c = &net.clients[i];
+        let begin_in = c
+            .events
+            .iter()
+            .find_map(|e| match e {
+                ClientEvent::Start { begin_in_us, .. } => Some(*begin_in_us),
+                _ => None,
+            })
+            .expect("Start");
+        let theirs = c.start_at.unwrap().0 + u64::from(begin_in);
+        assert!(
+            theirs.abs_diff(begin) <= 3_000,
+            "{} begins at {theirs}, the host at {begin}",
+            c.core.slot().unwrap()
+        );
+    }
+}
+
+/// A seated guest that never reports `Loaded`: the barrier's timeout starts
+/// the round for everyone else with the same lead, the stuck guest is sent
+/// `Start` too (it enters behind when its build is done) and the clock runs
+/// without it.
+#[test]
+fn session_a_stuck_guest_does_not_hold_the_start() {
+    let mut net = Net::new(
+        22,
+        LinkParams::ideal(Micros::from_millis(5)),
+        Net::host_config(),
+    );
+    let ok = net.join(1, "Ok", 1, Player::new(10.0, 1.0, 1));
+    let stuck = net.join(2, "Stuck", 2, Player::new(10.0, 1.0, 2));
+    net.clients[stuck].auto_load = false;
+    net.connect_all();
+    let humans: Vec<u8> = net.host.players().iter().map(|p| p.0).collect();
+    let loaded_at = net.now;
+    net.host.load_round(b"setup".to_vec(), &humans);
+    net.run_ms(10_000);
+    assert!(
+        net.host_event(|e| matches!(e, NetEvent::RoundStarted { .. }))
+            .is_none(),
+        "the barrier waits for the stuck guest"
+    );
+    net.run_until(BARRIER_TIMEOUT.0 / 1000 + 1_000, |n| {
+        n.host_event(|e| matches!(e, NetEvent::RoundStarted { .. }))
+            .is_some()
+    });
+    let (at, e) = net
+        .host_event(|e| matches!(e, NetEvent::RoundStarted { .. }))
+        .unwrap();
+    // The core's clock is its last update's, a step before the harness's.
+    assert!(
+        at.0 + 1_000 >= loaded_at.0 + BARRIER_TIMEOUT.0,
+        "started at {at:?}"
+    );
+    let NetEvent::RoundStarted { lead_us, .. } = e else {
+        unreachable!()
+    };
+    assert!(lead_us >= START_MARGIN.0 as u32 && lead_us <= START_LEAD_MAX.0 as u32);
+    net.run_until(2_000, |n| {
+        n.clients.iter().all(|c| c.start_at.is_some()) && n.host.next_tick() >= 30
+    });
+    assert!(
+        net.clients[ok].bundles.len() >= 25,
+        "the loaded guest plays"
+    );
+    // The stuck guest's build finishes late: it is in the round, behind.
+    let round_id = net.host.round_id();
+    let late = net.clients[stuck].core.slot().unwrap();
+    net.clients[stuck].core.loaded(round_id, 7, 9);
+    net.run_until(2_000, |n| {
+        n.host_event(|e| matches!(e, NetEvent::PeerLoaded { slot, .. } if *slot == late))
+            .is_some()
+    });
+    assert!(net.host.is_active(late));
 }

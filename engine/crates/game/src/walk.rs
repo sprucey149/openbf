@@ -341,6 +341,9 @@ pub struct ClassVisual {
     pub skins: crate::roster::ClassSkins,
     /// The jet's effect and engine sounds (card JETP2).
     pub jet_look: crate::roster::JetLook,
+    /// A class a BF1 Hunt fields from BF2's side
+    /// ([`crate::roster::ClassRoster::from_bf2_side`]).
+    pub from_bf2_side: bool,
 }
 
 /// A soldier class's two cries (card UCRY, `analysis/re-unit-chatter.md`
@@ -371,6 +374,10 @@ pub struct Cries {
     /// its max x `LowHealthThreshold` (the class's; 0.3 where it sets none).
     pub low_health: Option<String>,
     pub low_threshold: f32,
+    /// Issue #173: `ChokeSound`, the voice a Force Choke's hold plays on him
+    /// (BF2 `impmaleforcechoke`, `allfemaleforcechoke`); none for a class
+    /// that names none.
+    pub choke: Option<String>,
     /// Card UVO2: BF2's `VOSound` lines, `VOUnitType` and `VORadius`
     /// (`crate::vo`); empty on BF1 classes.
     pub vo: std::sync::Arc<crate::vo::VoLines>,
@@ -403,9 +410,10 @@ pub const LOW_HEALTH_THRESHOLD: f32 = 0.3;
 
 impl ClassVisual {
     /// BF2's hero namespace always uses its own models and animation banks,
-    /// including when a BF1 mission selects that playable kit.
+    /// including when a BF1 mission selects that playable kit; so does a
+    /// class a BF1 Hunt fields from BF2's side ([`Self::from_bf2_side`]).
     pub fn asset_game<'a>(&self, map_game: &'a str) -> &'a str {
-        if self.name.split('_').nth(1) == Some("hero") {
+        if self.from_bf2_side || self.name.split('_').nth(1) == Some("hero") {
             "bf2"
         } else {
             map_game
@@ -456,6 +464,7 @@ impl ClassVisual {
             anim: c.anim.clone(),
             skins: c.skins.clone(),
             jet_look: c.jet_look.clone(),
+            from_bf2_side: c.from_bf2_side,
         }
     }
 
@@ -818,6 +827,32 @@ fn cp_spawn_nodes(layout: &MapLayout, cp: &CommandPostDef) -> Vec<(Vec3, f32)> {
         .unwrap_or_else(|| vec![(cp.pos + Vec3::new(3.0, 0.0, 3.0), 0.0)])
 }
 
+/// The classes a map's posts are built from, for
+/// [`WalkSim::set_hunt_class_change`]: the map's own (`classes.ron`) and the
+/// shared ones of its source game (BF2's INGAME, BF1's COMMON).
+pub fn hunt_post_classes(
+    classes_dir: &std::path::Path,
+    map_dir: &std::path::Path,
+    source_game: &str,
+) -> anyhow::Result<crate::classdb::ClassDb> {
+    let mut db = crate::classdb::ClassDb::default();
+    db.load_map(map_dir)?;
+    let shared = classes_dir.join(if source_game.eq_ignore_ascii_case("bf2") {
+        "bf2_ingame.ron"
+    } else {
+        "bf1_common.ron"
+    });
+    if pak::is_file(&shared) {
+        db.load(&shared)?;
+    }
+    Ok(db)
+}
+
+/// `[ours]` (issue #161): the class-change reach of a BF1 Hunt post. BF1
+/// has no class change and its post classes author no `SwitchClassRadius`;
+/// they take BF2's `com_bldg_controlzone` value.
+pub const HUNT_SWITCH_CLASS_RADIUS: f32 = 5.0;
+
 impl WalkSim {
     /// Class presentation of a main or native unit.
     pub fn team_template(&self, team: u8) -> &TeamTemplate {
@@ -1036,6 +1071,34 @@ impl WalkSim {
         self.sim.build_positions();
     }
 
+    /// Hunt (issue #161): each post's reach for a class change, after
+    /// [`Self::add_posts`] with the same layout. On a BF2 map, the post
+    /// class's `SwitchClassRadius` from `db` (the map's shared and own
+    /// classes; BF2's control zones author 5 m); a BF2 class without one
+    /// keeps the original's default of -1 (B2 `FUN_00269d98`), which no
+    /// distance is under: no reach. `[ours]` every post on a BF1 map (BF1 has
+    /// no class change) takes [`HUNT_SWITCH_CLASS_RADIUS`].
+    /// measure: a BF2 Hunt class-change capture at a post's edge.
+    pub fn set_hunt_class_change(
+        &mut self,
+        layout: &MapLayout,
+        db: &crate::classdb::ClassDb,
+        source_game: &str,
+    ) {
+        let bf2 = source_game.eq_ignore_ascii_case("bf2");
+        for (post, cp) in self.sim.cps.iter_mut().zip(&layout.cps) {
+            post.switch_class_radius = if bf2 {
+                db.resolve(&cp.class)
+                    .and_then(|class| db.prop_f32(class, "SwitchClassRadius"))
+                    .filter(|r| *r > 0.0)
+                    .unwrap_or(0.0)
+            } else {
+                HUNT_SWITCH_CLASS_RADIUS
+            };
+            post.capture_authored = cp.capture.is_some();
+        }
+    }
+
     /// The opening wave: `ai_per_team` AI spawned round-robin over their
     /// team's spawn points — its posts' nodes, then the points of the command
     /// walkers its pads are about to build (`Sim::pad_walker_spawn_points`;
@@ -1251,6 +1314,177 @@ impl WalkSim {
         if let Some(Some(h)) = self.sim.players.get(usize::from(slot)) {
             self.player = *h;
         }
+    }
+
+    /// A copy of this round's game for the LAN host's self-check (issue
+    /// #168, `crate::netplay::selfcheck::Checkpoint`): everything a tick
+    /// reads or writes, so the copy stepped through the same bundles is the
+    /// same game. Each field is named (a new one must be decided here):
+    /// - The sim and the walk's own round state are copied: `sim`,
+    ///   `netplay`, `human_teams`, `conquest_defaults`, the team size and
+    ///   reinforcement shares, `teams` and `native_teams` (class costs read
+    ///   their names), `player` and `local_slot`.
+    /// - The small per-class tables and the cameras' and zoom's state are
+    ///   copied too: a tick eases them, and nothing then reads a missing
+    ///   class.
+    /// - The window's own state is left out: the class picker, the camera
+    ///   blockers, the voice-overs and music, the minimap, the render
+    ///   blend, a pending respawn press and the career's pending class
+    ///   kills (only the live walk's are the player's).
+    pub fn checkpoint(&self) -> WalkSim {
+        WalkSim {
+            class_picker: None,
+            sim: self.sim.clone(),
+            conquest_defaults: self.conquest_defaults,
+            team_size_pct: self.team_size_pct,
+            reinforcement_pct: self.reinforcement_pct,
+            human_teams: self.human_teams,
+            pending_class_kills: Default::default(),
+            player: self.player,
+            local_slot: self.local_slot,
+            netplay: self.netplay.clone(),
+            respawn_requested: false,
+            teams: self.teams.clone(),
+            native_teams: self.native_teams.clone(),
+            camera_blockers: CameraBlockers::default(),
+            vehicle_geometry: self.vehicle_geometry.clone(),
+            vehicle_seats: self.vehicle_seats.clone(),
+            vehicle_tops: self.vehicle_tops.clone(),
+            guided_tops: self.guided_tops.clone(),
+            walker_rigs: self.walker_rigs.clone(),
+            flyer_rigs: self.flyer_rigs.clone(),
+            walker_shot_styles: self.walker_shot_styles.clone(),
+            flyer_exhaust: self.flyer_exhaust.clone(),
+            vehicle_weapon_hud: self.vehicle_weapon_hud.clone(),
+            vehicle_riders: self.vehicle_riders.clone(),
+            vehicle_engines: self.vehicle_engines.clone(),
+            vehicle_sounds: self.vehicle_sounds.clone(),
+            sound_triggers: self.sound_triggers.clone(),
+            vehicle_labels: self.vehicle_labels.clone(),
+            vehicle_classes: self.vehicle_classes.clone(),
+            particle_lod_bias: self.particle_lod_bias,
+            zoom_s: self.zoom_s,
+            zoom_fov_mix: self.zoom_fov_mix,
+            cam_place: self.cam_place,
+            cam_jet_lag: self.cam_jet_lag,
+            cam_flyer: self.cam_flyer,
+            cam_gunner: self.cam_gunner,
+            cam_exit: self.cam_exit,
+            cam_handover: self.cam_handover,
+            cam_owner: self.cam_owner,
+            cam_guided: self.cam_guided,
+            seat_view: self.seat_view,
+            seat_view_timer: self.seat_view_timer,
+            cam_pull: self.cam_pull,
+            cam_pull_track: self.cam_pull_track,
+            fov_scale: self.fov_scale,
+            voice: None,
+            music: None,
+            sound_levels: Vec::new(),
+            space_round: self.space_round.clone(),
+            post_keys: self.post_keys.clone(),
+            minimap: None,
+            backdrop: self.backdrop.clone(),
+            end_shots: self.end_shots.clone(),
+            round_end: self.round_end.clone(),
+            death_cam: self.death_cam,
+            death_seen: self.death_seen,
+            blend: crate::render_blend::Blend::default(),
+            accum: self.accum,
+        }
+    }
+
+    /// A LAN host's self-correction (issue #168, `crate::netplay::selfcheck`):
+    /// this round's game becomes `replayed`'s, the same round replayed from
+    /// a fresh build or a [`WalkSim::checkpoint`] through the round's log to
+    /// this tick. Each field is named (a new one must be decided here):
+    /// - From the replay, the game: `sim`, `netplay`, `human_teams`, the
+    ///   population settings, `teams` and `native_teams` (a command may add
+    ///   a class), and `player` (followed again from the local slot).
+    /// - Kept, the career: the pending class kills are the live walk's,
+    ///   kills since the last flush. The replay's count from its own start
+    ///   and would credit kills already flushed a second time; the medal
+    ///   counts are the sim's, so the replay's.
+    /// - Kept, what the window set after the build or eases from frame to
+    ///   frame: the class picker, the per-class tables, the cameras, zoom
+    ///   and FOV, the voice-overs and music, the minimap, the spawn
+    ///   backdrop, the round's end screens, the death camera, a pending
+    ///   respawn press and the accumulator. The view does not start over.
+    /// - The render blend is kept but forgets its last pose: it was the old
+    ///   game's.
+    pub fn adopt_round(&mut self, replayed: WalkSim) {
+        let WalkSim {
+            class_picker: _,
+            sim,
+            conquest_defaults,
+            team_size_pct,
+            reinforcement_pct,
+            human_teams,
+            pending_class_kills: _,
+            player,
+            local_slot: _,
+            netplay,
+            respawn_requested: _,
+            teams,
+            native_teams,
+            camera_blockers: _,
+            vehicle_geometry: _,
+            vehicle_seats: _,
+            vehicle_tops: _,
+            guided_tops: _,
+            walker_rigs: _,
+            flyer_rigs: _,
+            walker_shot_styles: _,
+            flyer_exhaust: _,
+            vehicle_weapon_hud: _,
+            vehicle_riders: _,
+            vehicle_engines: _,
+            vehicle_sounds: _,
+            sound_triggers: _,
+            vehicle_labels: _,
+            vehicle_classes: _,
+            particle_lod_bias: _,
+            zoom_s: _,
+            zoom_fov_mix: _,
+            cam_place: _,
+            cam_jet_lag: _,
+            cam_flyer: _,
+            cam_gunner: _,
+            cam_exit: _,
+            cam_handover: _,
+            cam_owner: _,
+            cam_guided: _,
+            seat_view: _,
+            seat_view_timer: _,
+            cam_pull: _,
+            cam_pull_track: _,
+            fov_scale: _,
+            voice: _,
+            music: _,
+            sound_levels: _,
+            space_round: _,
+            post_keys: _,
+            minimap: _,
+            backdrop: _,
+            end_shots: _,
+            round_end: _,
+            death_cam: _,
+            death_seen: _,
+            blend: _,
+            accum: _,
+        } = replayed;
+        self.sim = sim;
+        self.conquest_defaults = conquest_defaults;
+        self.team_size_pct = team_size_pct;
+        self.reinforcement_pct = reinforcement_pct;
+        self.human_teams = human_teams;
+        self.player = player;
+        self.netplay = netplay;
+        self.teams = teams;
+        self.native_teams = native_teams;
+        self.blend.reset();
+        let slot = self.local_slot;
+        self.set_local_slot(slot);
     }
 
     /// One lockstep tick (issue #168): `bundle`'s pads by player slot (a

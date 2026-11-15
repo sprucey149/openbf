@@ -402,6 +402,7 @@ pub fn screens(
                     deaths: u.deaths as i32,
                     posts: r.posts as i32,
                     me: i == viewer.index as usize,
+                    human: u.spec.player_slot.is_some(),
                     personal: vec![
                         (label("ifs.stats.score", "Points"), r.points.to_string()),
                         (label("ifs.stats.kills", "Kills"), r.kills.to_string()),
@@ -635,6 +636,63 @@ mod tests {
             .iter()
             .flat_map(|t| &t.rows)
             .all(|r| r.ping == Ping::None));
+    }
+
+    /// Issue #168, the first VPN playtest: a LAN round's Team Stats,
+    /// Personal Stats (Nemesis) and scoreboard name every human by his
+    /// session name through the feed (as `stats_pages` and the scoreboard
+    /// do), the host and a guest alike, and mark his row human (Team Stats
+    /// draws it bold); bots keep their names and stay unmarked.
+    #[test]
+    fn lan_rounds_name_and_mark_every_human() {
+        let mut w = walk();
+        let guest = w
+            .sim
+            .spawn(&UnitSpec::player_in_slot(
+                1,
+                1,
+                glam::Vec3::new(44.0, 0.0, 0.0),
+            ))
+            .expect("guest");
+        let sim = &w.sim;
+        let mut feed = crate::event_feed::EventFeed::default();
+        let bot = |i: usize| sim.units[i].spec.player_slot.is_none();
+        let bot_names: Vec<String> = (0..sim.units.len())
+            .filter(|&i| bot(i))
+            .map(|i| feed.unit_name(sim, sim.handle(i)))
+            .collect();
+        assert_eq!(feed.unit_name(sim, guest), "Player 2", "before the names");
+        feed.set_player_names([(0, "the maintainer"), (1, "Kai")]);
+        let mut r = RoundStats::default();
+        r.kill(sim, guest, w.player);
+        let unit = |i: usize| feed.unit_name(sim, sim.handle(i));
+        let text = |_: &str, en: &str| en.to_owned();
+        let pages = screens(
+            sim,
+            &r,
+            w.player,
+            &Default::default(),
+            &names_for(&unit, &text),
+        );
+        let rows: Vec<_> = pages.lists.iter().flat_map(|l| &l.rows).collect();
+        let named = |n: &str| rows.iter().find(|r| r.name == n).copied();
+        let (maintainer, kai) = (named("the maintainer").expect("host"), named("Kai").expect("guest"));
+        assert!(maintainer.me && maintainer.human && kai.human && !kai.me);
+        assert!(rows.iter().all(|r| !r.name.starts_with("Player ")));
+        let bots: Vec<_> = rows.iter().filter(|r| !r.human).map(|r| &r.name).collect();
+        assert_eq!(bots.len(), bot_names.len());
+        assert!(bots.iter().all(|n| bot_names.contains(n)), "{bots:?}");
+        let nemesis = &maintainer
+            .personal
+            .iter()
+            .find(|(l, _)| l == "Nemesis")
+            .unwrap()
+            .1;
+        assert_eq!(nemesis, "Kai (1)");
+        let board = scoreboard(sim, &r, w.player, &unit, ["A".into(), "B".into()], None);
+        let board: Vec<_> = board.teams.iter().flat_map(|t| &t.rows).collect();
+        assert!(board.iter().any(|r| r.name == "the maintainer" && r.human));
+        assert!(board.iter().any(|r| r.name == "Kai" && r.human));
     }
 
     /// Kills, team kills, a suicide and a capture score as the viewer's feed

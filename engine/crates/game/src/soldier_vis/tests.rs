@@ -1274,3 +1274,59 @@ fn a_rider_lost_with_the_hull_is_not_drawn_and_a_corpse_is() {
         assert_eq!(vis.units[player.index as usize].gone, !exposed);
     }
 }
+
+/// Issue #168, first VPN playtest: a battle droid accepted the hero, and
+/// the next frame stepped Maul's body with the droid's clip number (a
+/// crash). A hero accept changes the class but keeps the unit's
+/// generation, so a unit's visual also starts over when its class or body
+/// changes; a unit that left the field that way draws nothing until it
+/// respawns.
+#[test]
+#[ignore = "requires the bf2 cis_inf_bdroid and cis_inf_darthmaul soldier bakes"]
+fn a_class_change_on_the_same_life_starts_the_visual_over() {
+    let root = crate::assets::baked_root();
+    let (droid, maul) = ("cis_inf_bdroid", "cis_inf_darthmaul");
+    for g in [droid, maul] {
+        let glb = root.join(format!("side_bf2/soldiers/{g}.glb"));
+        assert!(glb.exists(), "no bake at {}", glb.display());
+    }
+    let t = team(&[("droid", Some(droid), None), ("maul", Some(maul), None)]);
+    let mut vis = SoldierVisuals::load_cpu(&root, "bf2", &[t.clone(), t]);
+    let clips =
+        |vis: &SoldierVisuals, class: u8| vis.asset_for(0, class).unwrap().asset.clips.len();
+    assert!(clips(&vis, 0) > clips(&vis, 1), "the droid has more clips");
+    for alive in [true, false] {
+        let mut walk = WalkSim::new(7, Vec3::ZERO, None);
+        let me = walk.player.index as usize;
+        assert_eq!(walk.sim.units[me].spec.class, 0);
+        for _ in 0..30 {
+            walk.step_tick(&[core::sim::PadState {
+                ly: i16::MAX,
+                ..core::sim::PadState::default()
+            }]);
+            vis.update(&walk, core::TICK_DT);
+        }
+        assert!(vis.units[me].animator.posed());
+        let gen = walk.sim.units[me].gen;
+        // A marker of the old visual (a fresh one has no shot).
+        vis.units[me].shot_tick = Some(u64::MAX);
+        let u = &mut walk.sim.units[me];
+        u.spec.class = 1;
+        if !alive {
+            // As a hero accept leaves him: no soldier, no body.
+            (u.alive, u.body) = (false, false);
+        }
+        vis.update(&walk, core::TICK_DT);
+        assert_eq!(walk.sim.units[me].gen, gen);
+        let v = &vis.units[me];
+        assert_eq!(v.shot_tick, None, "alive {alive}: the visual started over");
+        for c in [v.animator.upper_clip(), v.animator.lower_clip()]
+            .into_iter()
+            .flatten()
+        {
+            assert!(c < clips(&vis, 1), "alive {alive}: clip {c}");
+        }
+        let drawn = vis.posed(&walk).iter().any(|p| p.0 == me);
+        assert_eq!(drawn, alive, "alive {alive}: drawn");
+    }
+}

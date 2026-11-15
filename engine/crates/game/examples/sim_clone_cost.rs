@@ -10,6 +10,9 @@
 //! - over those ticks, times `Sim::step` against `Sim::step_predicted` from
 //!   the same state (two fresh clones per tick).
 //!
+//! `--checkpoint` instead times the LAN host's self-check checkpoint (the
+//! walk's and the feed's copies) at that tick and counts their bytes.
+//!
 //! `cargo run --release -p game --example sim_clone_cost -- [map] [--bots N]`
 //! from `engine/`, with the baked assets in `assets_baked/`. Headless.
 
@@ -124,6 +127,29 @@ fn main() -> Result<()> {
         .filter(|u| u.alive && u.controller == core::unit::Controller::Ai)
         .count();
     println!("tick {}: {alive} alive ({ai} bots)", sim.tick);
+
+    // `--checkpoint`: what the LAN host's self-check checkpoint costs at this
+    // tick (`WalkSim::checkpoint` + `EventFeed::checkpoint`, issue #168):
+    // bytes one copy allocates and its time (100 copies).
+    if args.iter().any(|a| a == "--checkpoint") {
+        let feed = game::event_feed::EventFeed::for_walk(root, &key[..3], &walk);
+        for (name, run) in [
+            ("walk", &(|| drop(walk.checkpoint())) as &dyn Fn()),
+            ("feed", &|| drop(feed.checkpoint())),
+            ("sim only", &|| drop(walk.sim.clone())),
+        ] {
+            let (_, bytes, allocs) = allocated(run);
+            let mut v = Vec::with_capacity(100);
+            for _ in 0..100 {
+                let t = Instant::now();
+                run();
+                v.push(t.elapsed().as_secs_f64() * 1e6);
+            }
+            println!("checkpoint {name}: {bytes} bytes in {allocs} allocations");
+            stats(&format!("checkpoint {name}"), v);
+        }
+        return Ok(());
+    }
 
     // `--wall-census`: what each soldier's wall pass costs at this tick (a
     // rising ceiling sweep and the push-out, as the movement step asks

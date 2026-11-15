@@ -22,6 +22,7 @@ fn stats() -> ui::stats::StatsScreens {
         deaths: 1,
         posts: 0,
         me,
+        human: me,
         personal: vec![("Kills".into(), points.to_string())],
         medals: Vec::new(),
     };

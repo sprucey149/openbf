@@ -99,6 +99,8 @@ pub struct Client {
     pub alive: bool,
     /// Answer `LoadRound` with `loaded` at once.
     pub auto_load: bool,
+    /// When the last `Start` arrived.
+    pub start_at: Option<Micros>,
 }
 
 pub struct Net {
@@ -166,6 +168,7 @@ impl Net {
             bundle_at: Vec::new(),
             alive: true,
             auto_load: true,
+            start_at: None,
         });
         self.clients.len() - 1
     }
@@ -259,6 +262,7 @@ impl Net {
                     }
                     ClientEvent::Start { .. } => {
                         c.player.playing = true;
+                        c.start_at = Some(now);
                         c.events.push(e);
                     }
                     e => c.events.push(e),

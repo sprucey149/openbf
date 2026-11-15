@@ -297,6 +297,10 @@ pub fn write_pad(w: &mut Writer, pad: &PadState, base: &PadState) {
                     w.var(index.into());
                     w.var(gen.into());
                 }
+                Some(ScreenPick::Class(c)) => {
+                    w.u8(4);
+                    w.u8(c);
+                }
             }
         }
         if ext & E_VIEW != 0 {
@@ -347,6 +351,7 @@ pub fn read_pad(r: &mut Reader, base: &PadState) -> WireResult<PadState> {
                     index: r.var32()?,
                     gen: r.var32()?,
                 }),
+                4 => Some(ScreenPick::Class(r.u8()?)),
                 _ => return Err(WireError::BadValue),
             };
         }

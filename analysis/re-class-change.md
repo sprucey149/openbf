@@ -36,9 +36,16 @@ The flag is cleared each update (B2:109004) and set by one of two scans (B2:1091
    qualifies, and neither does a soldier merely standing in a post he cannot spawn at.
 2. **Other same-team objects** (B2:109236-109289): a 30 m gather (`FUN_00161a98(0x41f00000 = 30.0, ..., mask
    0x10)`), each object within its class's `+0x338` distance, facing it (`> 0.15`), same team (`+0x268` bits).
-   [H] the mobile posts (command walkers); the class field is not named. NOT BUILT (§6).
+   The class field is the object class's `SwitchClassRadius` (checked against the original game; BF2's baked class
+   data authors it only on post classes: `com_bldg_controlzone`, its `_CTF` and untakeable variants 5 m,
+   `rep_bldg_forwardcenter` 15 m, Endor's `end_bldg_bunker_controlpanel` 8 m, Hoth's `hoth_bldg_shieldgenerator`
+   25 m). Unlike scan 1 it needs only the same team, not spawn means. [H] which objects the gather's mask 0x10
+   takes; posts are assumed. A class that authors no `SwitchClassRadius` keeps the class constructor's default
+   -1.0 (B2:186493 in `FUN_00269d98`, `+0x338 = 0xbf800000`; a base copies it at B2:186590), which no distance
+   is under: such an object gives no reach. Built for Hunt only (issue #161, §5).
 
-There is no separate radius: "near" is the post's own capture region. The facing cosine 0.15 is about 81 deg.
+"Near" is the post's own capture region (scan 1) or its class's `SwitchClassRadius` (scan 2). The facing cosine
+0.15 is about 81 deg.
 
 ## 3. The accept: immediate, in place [V]
 
@@ -72,6 +79,7 @@ Built in `engine/crates/core/src/sim/spawn/class_change.rs` (stage `SpawnStage::
 | | PS2 (BF2) | port |
 |---|---|---|
 | where | in the capture region of a post his team can spawn at, facing it (cos > 0.15) | the same (`Sim::class_change_post`, `CLASS_CHANGE_FACING`) |
+| Hunt | the same two scans; BF2's Hunt posts have no capture region, so scan 2's 5 m holds | **issue #161:** no capture count (Hunt's posts keep none): an authored region of a post his team can spawn at, or within the post class's `SwitchClassRadius` of a post his team owns (`Sim::hunt_class_change_near`); a BF2 post class without one has no reach, as in the original; **named deviation:** every BF1 post (BF1 has no class change and no radius in its data) takes 5 m. Hero Assault keeps none |
 | button | use (△) | the use bit `ACTION` (pad △, keyboard E); E also carries △'s back |
 | who | a human with a viewport | a `Controller::Player` slot; bots never |
 | maps | BF2's | **every map of both games** (named deviation, maintainer 2026-10-27) |
@@ -87,7 +95,8 @@ Built in `engine/crates/core/src/sim/spawn/class_change.rs` (stage `SpawnStage::
 
 ## 6. Open
 
-- The second scan (§2.2, the `+0x338` objects: [H] command walkers) is not built.
+- The second scan (§2.2, `SwitchClassRadius`) is built for Hunt only; Conquest still reads scan 1 alone
+  (its posts' regions are wider than 5 m, but a command walker's or a forward center's radius is not read).
 - The PS2's prompt "△ CHANGE SOLDIER CLASS" (hint 5) is not drawn: the port has no tip system yet.
 - Which input bits `+0x2c0 & 3` are, and the PS2's order between entering a vehicle and opening the screen, are
   not read: [H].

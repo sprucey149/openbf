@@ -23,6 +23,12 @@ fn paths() -> (PathBuf, PathBuf) {
     (assets, out)
 }
 
+/// The Instant Action device screen measured on the bake's art, as the
+/// HUD loader measures it, else the PS2 art's.
+fn bake_device(assets: &std::path::Path) -> [f32; 4] {
+    game::hud_feed::instant_device(assets).unwrap_or(ui::shell_ia::DEVICE_SCREEN)
+}
+
 fn instant_frame(
     assets: &std::path::Path,
     ia: &ui::shell::InstantAction,
@@ -63,6 +69,7 @@ fn menu_font_pointer_uses_loaded_metrics() {
     let mut menus = ui::shell_ps2::ShellMenus::new(&|_, english| english.to_owned());
     menus.page = ui::shell_ps2::Page::Main;
     menus.on_page = 5.0;
+    let device = bake_device(&assets);
     for size in [[640, 480], [1920, 1080], [3580, 2020]] {
         let r = render::Renderer::new_headless(size[0], size[1]).unwrap();
         let view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
@@ -76,7 +83,7 @@ fn menu_font_pointer_uses_loaded_metrics() {
             for y in (0..size[1]).step_by(13) {
                 for x in (0..size[0]).step_by(13) {
                     let point = [x as f32, y as f32];
-                    let expected = ui::shell_ia::pointer_target(&ia, point, screen, &font);
+                    let expected = ui::shell_ia::pointer_target(&ia, point, screen, &font, device);
                     let actual = view.instant_target(&ia, point, screen);
                     assert_eq!(actual, expected, "pointer at {point:?} / {size:?}");
                     let expected_shell = ui::shell_ps2::row_at(&font, &menus, point, screen);
@@ -138,13 +145,7 @@ fn option_values_remain_visible_with_and_without_focus() {
     for (group, row) in [(Group::Global, 1), (Group::Conquest, 2)] {
         for focused in [true, false] {
             let mut ia = base.clone();
-            ia.page = Page::Group(
-                group,
-                ListCursor {
-                    at: if focused { row } else { 0 },
-                    top: 0,
-                },
-            );
+            ia.page = Page::Group(group, ListCursor::new(if focused { row } else { 0 }));
             let a = instant_frame(&assets, &ia, size);
             ia.options.difficulty = 4;
             ia.options.con_timer = 30;
@@ -209,7 +210,7 @@ fn capture_menu_label_extremes() {
                 )
             })
             .sum::<f32>()
-            * ui::spawn_draw::MAP_STRETCH
+            * ui::typography::LIST.stretch
     };
     ia.maps
         .sort_by(|a, b| width(&b.label.to_uppercase()).total_cmp(&width(&a.label.to_uppercase())));
@@ -221,8 +222,9 @@ fn capture_menu_label_extremes() {
     ia.options.con_mult = 500;
     ia.options.con_timer = 60;
     ia.options.difficulty = 4;
-    let small: manifest::hud::HudFont = ron::from_str(
-        &std::fs::read_to_string(assets.join("common_bf2/fonts/menu_gamefont_small.ron")).unwrap(),
+    // Option rows are drawn in the settings rows' role.
+    let item: manifest::hud::HudFont = ron::from_str(
+        &std::fs::read_to_string(assets.join("common_bf2/fonts/menu_gamefont_large.ron")).unwrap(),
     )
     .unwrap();
     for population in [10, 100, 500] {
@@ -243,19 +245,7 @@ fn capture_menu_label_extremes() {
                     .iter()
                     .map(|p| match p {
                         ui::shell::Piece::Text(text) => {
-                            text.chars()
-                                .map(|c| {
-                                    f32::from(
-                                        small
-                                            .glyphs
-                                            .iter()
-                                            .find(|g| u32::from(g.code) == c as u32)
-                                            .unwrap()
-                                            .advance,
-                                    )
-                                })
-                                .sum::<f32>()
-                                * ui::spawn_draw::SMALL_STRETCH
+                            ui::typography::width(&item, &ui::typography::ITEM, text)
                         }
                         _ => 14.0,
                     })
@@ -271,11 +261,16 @@ fn capture_menu_label_extremes() {
             ("overview", Page::Overview(0)),
             (
                 "extreme_global",
-                Page::Group(Group::Global, ListCursor { at: 0, top: 0 }),
+                Page::Group(Group::Global, ListCursor::new(0)),
             ),
             (
                 "extreme_conquest",
-                Page::Group(Group::Conquest, ListCursor { at: 1, top: 0 }),
+                Page::Group(Group::Conquest, ListCursor::new(1)),
+            ),
+            // Issue #172: the Assault AI Units help, openbf's longest.
+            (
+                "extreme_assault",
+                Page::Group(Group::Assault, ListCursor::new(0)),
             ),
         ] {
             ia.page = page;
@@ -315,7 +310,7 @@ fn capture_native_surfaces() {
         ] {
             let mut ia = base.clone();
             if let Some((g, at)) = group {
-                ia.page = Page::Group(g, ListCursor { at, top: 0 });
+                ia.page = Page::Group(g, ListCursor::new(at));
             }
             let rgba = instant_frame(&assets, &ia, size);
             std::fs::write(
@@ -610,14 +605,19 @@ fn capture_battle_pause_theme() {
                     ..menu.clone()
                 },
             ),
-            (
-                "pause_graphics",
-                MenuModel {
+            ("pause_graphics", {
+                // On Graphics quality, wherever the page puts it (issue #172
+                // added Display mode above it).
+                let m = MenuModel {
                     page: Some(PausePage::Settings(SettingsPage::Graphics)),
-                    cursor: 2,
                     ..menu.clone()
-                },
-            ),
+                };
+                let cursor = ui::menu::rows(&m)
+                    .iter()
+                    .position(|r| *r == ui::menu::Row::GraphicsQuality)
+                    .expect("Graphics quality row");
+                MenuModel { cursor, ..m }
+            }),
             (
                 "pause_gamepad",
                 MenuModel {
@@ -657,17 +657,25 @@ fn capture_battle_pause_theme() {
             assert!(view
                 .drawn_sheets()
                 .any(|sheet| sheet == "bf2_buttons_title_center"));
-            assert!(view
-                .drawn_sheets()
-                .any(|sheet| sheet == "bf2_buttons_botright"));
+            // The rounded bottom closes the list's last row; a list scrolled
+            // short of its end is cut at its window instead (`ui::scroll`).
+            let n = ui::menu::rows(&state).len();
+            let at_end = pause_draw::row_in_view(&state, &animation, n - 1, size.map(|v| v as f32));
+            assert!(
+                !at_end
+                    || view
+                        .drawn_sheets()
+                        .any(|sheet| sheet == "bf2_buttons_botright"),
+                "{name}"
+            );
             assert!(view.drawn_sheets().any(|sheet| sheet.contains("menu_face")));
             save(&out, name, &r);
         }
         assert!(hit(&menu, &animation, Target::Row(4)));
-        let (_, actions) = pause_draw::click(&mut menu, Target::Row(1));
+        let (_, actions) = pause_draw::click(&mut menu, &animation, Target::Row(1));
         assert_eq!(actions, vec![MenuAction::OpenPage(PausePage::Options)]);
         menu.page = Some(PausePage::Options);
-        let (_, actions) = pause_draw::click(&mut menu, Target::Row(1));
+        let (_, actions) = pause_draw::click(&mut menu, &animation, Target::Row(1));
         assert_eq!(
             actions,
             [MenuAction::OpenPage(PausePage::Settings(
@@ -681,7 +689,7 @@ fn capture_battle_pause_theme() {
             .unwrap();
         let disable = Target::Step { row, right: false };
         assert!(hit(&menu, &animation, disable));
-        let (_, actions) = pause_draw::click(&mut menu, disable);
+        let (_, actions) = pause_draw::click(&mut menu, &animation, disable);
         assert_eq!(actions, vec![MenuAction::SetCareerAwards(false)]);
         menu.popup = Some(Popup::Quit);
         menu.cursor = 0;
@@ -753,4 +761,80 @@ fn capture_personal_stats_medals() {
     assert!(changed(200, 640) > 100);
     assert!(changed(640, 1000) > 100);
     save(&out, "personal_stats_medals", &r);
+}
+
+/// Issue #168 / #114: the first VPN playtest's guest saw Instant Action's
+/// command bars sit left in the device's screen and his profile row ride
+/// over the list's top edge. The profile page, the name keyboard, the
+/// Singleplayer stack and the Instant Action list at the guest's 1920 x
+/// 1094 window, the host's 3839 x 1960 and common sizes, for one owned bake
+/// (`UI_SHARP_ASSETS`): the movie frame behind every page but the list.
+/// Writes `device.txt`, the device screen measured on the bake's art.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn capture_guest_window_menus() {
+    let (assets, out) = paths();
+    let movie = game::shell_movie::ShellMovie::load(&assets).unwrap();
+    let ia = game::shell_ia::instant_action(
+        &assets,
+        &assets.join("../missions"),
+        core::skill::Difficulty::Normal,
+    );
+    std::fs::write(
+        out.join("device.txt"),
+        format!("{:?}\n", bake_device(&assets)),
+    )
+    .unwrap();
+    for size in [
+        [1280, 720],
+        [1600, 900],
+        [1920, 1080],
+        [1920, 1094],
+        [1920, 1200],
+        [2560, 1440],
+        [3839, 1960],
+    ] {
+        let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+        let mut view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
+        let mut menus = ui::shell_ps2::ShellMenus::new(&|_, e| e.to_owned());
+        menus.on_page = 5.0;
+        for (name, page) in [
+            ("profiles", None),
+            ("name", None),
+            ("single", Some(ui::shell_ps2::Page::Singleplayer)),
+        ] {
+            // The picker covers the stack, as the shell has it.
+            menus.page = page.unwrap_or(ui::shell_ps2::Page::Main);
+            menus.covered = page.is_none();
+            let (rgba, w, h) = movie.frame_now(menus.movie(), 0, 30).unwrap();
+            view.set_movie_frame(rgba, w, h);
+            match page {
+                None => {
+                    let mut picker = ui::shell_ps2::profiles::Picker::new(
+                        vec![(1, "the maintainer".into()), (2, "Kai".into())],
+                        Some(1),
+                    );
+                    if name == "name" {
+                        picker.edit_name("Player 3".into());
+                    }
+                    view.update_shell_profiles(&menus, true, &picker, size);
+                }
+                Some(_) => view.update_shell(&menus, true, size),
+            }
+            r.render_with_overlay(
+                &render::Camera::default(),
+                &[],
+                [0.0, 0.0, 0.0, 1.0],
+                Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+            )
+            .unwrap();
+            save(&out, name, &r);
+        }
+        let rgba = instant_frame(&assets, &ia, size);
+        std::fs::write(
+            out.join(format!("ia_{}x{}.png", size[0], size[1])),
+            render::encode_png(&rgba, size[0], size[1]).unwrap(),
+        )
+        .unwrap();
+    }
 }

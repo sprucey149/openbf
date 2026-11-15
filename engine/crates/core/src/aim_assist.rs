@@ -126,6 +126,10 @@ pub struct AssistEnv {
     /// Weapon LockOnRange (weaponClass+0xd4); <= 0 disables the weapon's
     /// assist upstream (no magnet target is ever acquired).
     pub lock_on_range: f32,
+    /// The PS2's fade of the pull over LockOnRange. OURS (issue #164):
+    /// `false` where the caller fades every term on its own curve instead
+    /// (a sniper rifle, [`sniper_range_scale`]).
+    pub range_falloff: bool,
     pub fire_held: bool,
     /// Term-3 gate: SP Auto Aim option / MP host "aimassist" setting.
     pub armed: bool,
@@ -155,18 +159,36 @@ pub struct AssistState {
 /// playtest, scoped on a crossing runner at 50 and 100 m.
 pub const SNIPER_FOLLOW: f32 = 0.5;
 
-/// OURS, PROVISIONAL: sniper assist stays full through half its nominal
-/// range, then all three terms fade linearly to zero at LockOnRange.
-/// measure: scoped controller tracking at 50, 64, 96, 120 and 128 m.
+/// OURS, PROVISIONAL: a sniper rifle that authors its own `LockOnRange`
+/// (none on the discs) keeps full assist through this share of it
+/// ([`sniper_range_scale`]'s `full` when the class gives no
+/// `assist_full_range`). No shipped sniper takes this path: the loader's
+/// magnet reaches the round's reach with full strength to `MaxRange`.
+/// measure: scoped controller tracking on a modded sniper that authors a
+/// `LockOnRange`, at a half and three quarters of it.
 pub const SNIPER_FADE_START: f32 = 0.5;
 
-/// The sniper's shared range taper, including the acquisition bounds fringe.
-/// Sniper magnets are a port addition; this does not alter ordinary weapons.
-pub(crate) fn sniper_range_scale(distance: f32, range: f32) -> f32 {
-    if range <= 0.0 {
+/// OURS, PROVISIONAL (issue #164): the sniper's one range curve, shared by
+/// the slowdown, the follow and the pull, including the acquisition bounds
+/// fringe. Full strength out to `full`, then a straight fade to nothing at
+/// `reach` (the round's reach, `WeaponClass::assist_full_range` and
+/// `lock_on_range`). The caller turns the PS2's own LockOnRange fade on the
+/// pull off for these weapons ([`AssistEnv::range_falloff`]), so the two no
+/// longer stack. Sniper magnets are a port addition; this does not alter
+/// ordinary weapons.
+/// measure: scoped controller play on a crossing runner at 100, 150, 200 and
+/// 250 m on a large map.
+pub(crate) fn sniper_range_scale(distance: f32, full: f32, reach: f32) -> f32 {
+    if reach <= 0.0 {
         return 0.0;
     }
-    ((1.0 - distance / range) / (1.0 - SNIPER_FADE_START)).clamp(0.0, 1.0)
+    if distance <= full {
+        return 1.0;
+    }
+    if reach <= full {
+        return 0.0;
+    }
+    ((reach - distance) / (reach - full)).clamp(0.0, 1.0)
 }
 
 /// OURS: the time constant of the lead's low-pass on the target's velocity
@@ -279,7 +301,7 @@ pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState
         let mut pull = w * st.magnet_timer * GAIN;
         let radii = env.target_radius + env.self_radius;
         let range = env.lock_on_range;
-        if radii < fwd_dist && radii < range {
+        if env.range_falloff && radii < fwd_dist && radii < range {
             pull *= (1.0 - (fwd_dist - radii) / (range - radii)).clamp(0.0, 1.0);
         }
         if pull > 0.0 {
@@ -318,6 +340,7 @@ mod tests {
             turn_rate: 5.0,
             zoom_factor: None,
             lock_on_range: 50.0,
+            range_falloff: true,
             fire_held: false,
             armed: false,
             lead_vel: None,

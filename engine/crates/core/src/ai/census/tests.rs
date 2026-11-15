@@ -138,13 +138,15 @@ fn a_stepped_round_counts_its_thinks() {
 }
 
 /// In a proxy round the bots facing the proxy and his allies (a lower row,
-/// card DTEAM) land in different groups, and the proxy in its own.
+/// card DTEAM) land in different groups, and the proxy in its own. At
+/// Normal: since issue #171 option A a Hard surplus team keeps the Hard
+/// row, so only Easy and Normal still put the allies on a lower row.
 #[test]
 fn a_proxy_round_keeps_the_proxys_foes_and_allies_apart() {
     let (mut sim, _, _) = scene(true, true);
-    sim.difficulty = crate::skill::Difficulty::Hard;
+    sim.difficulty = crate::skill::Difficulty::Normal;
     let (foe_row, ally_row) = (sim.difficulty_of(0), sim.difficulty_of(1));
-    assert_eq!(foe_row, crate::skill::Difficulty::Hard);
+    assert_eq!(foe_row, crate::skill::Difficulty::Normal);
     assert_ne!(ally_row, foe_row, "the proxy's team plays a lower row");
     for _ in 0..60 {
         sim.step(&[]);

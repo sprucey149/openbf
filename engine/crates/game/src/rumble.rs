@@ -175,6 +175,8 @@ mod tests {
             age: 0.0,
             health_left: 0.0,
             dir: glam::Vec3::ZERO,
+            dealt: 1.0,
+            taken: 1.0,
         });
         assert!(for_tick(&sim, player, None).is_some());
         sim.units[player.index as usize].gen += 1;
@@ -208,6 +210,8 @@ mod tests {
             age: 0.0,
             health_left: 150.0,
             dir: Vec3::ZERO,
+            dealt: 1.0,
+            taken: 1.0,
         });
         let impact = feedback.pulse(&sim, player, None, true).unwrap();
         assert!(impact[0].duration_ms > 55);

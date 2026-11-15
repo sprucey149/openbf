@@ -115,6 +115,11 @@ pub struct ClassRoster {
     /// A droideka's shield in the HUD's secondary row: its `HUDTag`, from the
     /// play db, so both games show BF2's `hud_droideka_shield`.
     pub droideka_shield: Option<crate::walk::WeaponHud>,
+    /// Built from BF2's side for a BF1 Hunt adaptation (a mission class BF1
+    /// has no counterpart for, [`FactionRoster::pair`]): its weapons come
+    /// from BF2's class data and it draws with BF2's models, animations and
+    /// first-person arms (`ClassVisual::asset_game`).
+    pub from_bf2_side: bool,
 }
 
 /// One slot of a class's drop table: the item (`None` when the slot names a
@@ -571,6 +576,7 @@ pub fn cries(db: &ClassDb, class: &str) -> crate::walk::Cries {
         need_gunner: sound_key(db, class, "AISCDriverGetInSound"),
         yes: sound_key(db, class, "AISCResponseYesSirSound"),
         low_health: sound_key(db, class, "LowHealthSound"),
+        choke: sound_key(db, class, "ChokeSound"),
         low_threshold: db
             .prop_f32(class, "LowHealthThreshold")
             .unwrap_or(crate::walk::LOW_HEALTH_THRESHOLD),
@@ -713,14 +719,88 @@ pub fn class_anim(
     }
 }
 
+/// The BF2 Ewok weapons a BF1 Hunt Ewok throws in place of its own
+/// (`FactionRoster::pair`, issue #161).
+pub const BF2_EWOK_WEAPONS: [&str; 2] = ["ewk_weap_inf_spear", "ewk_weap_inf_rock"];
+
+/// Give a BF1 Hunt Ewok BF2's spear and rock in their own slots: the class,
+/// its HUD row (BF2's, by class name), its model in hand and its first-person
+/// row come from `donor`, BF2's Ewok side. The spear throws as a sticky;
+/// the rock fires as BF2's shell with its blast.
+fn donate_ewok_weapons(donor: &ClassDb, class: &mut ClassRoster) -> Result<()> {
+    let swap = |weapon: &WeaponClass| -> Result<Option<WeaponClass>> {
+        let Some(name) = BF2_EWOK_WEAPONS
+            .iter()
+            .find(|n| weapon.name.eq_ignore_ascii_case(n))
+        else {
+            return Ok(None);
+        };
+        let thrown = weapon_db::thrown_weapon(donor, name, true)?;
+        Ok(Some(match thrown {
+            Some(w) => w,
+            None => weapon_from_db(donor, name)?,
+        }))
+    };
+    if let Some(w) = swap(&class.weapon)? {
+        class.weapon_hud = weapon_hud(donor, &w.name);
+        class.first_person_weapon = first_person_weapon(donor, &w.name, w.offhand_weapon);
+        class.weapon_geometry = donor.prop(&w.name, "GeometryName").map(str::to_owned);
+        class.weapon = w;
+    }
+    for held in &mut class.held {
+        if let Some(w) = swap(&held.weapon)? {
+            held.hud = weapon_hud(donor, &w.name);
+            held.first_person = first_person_weapon(donor, &w.name, w.offhand_weapon);
+            held.geometry = donor.prop(&w.name, "GeometryName").map(str::to_owned);
+            held.weapon = w;
+        }
+    }
+    Ok(())
+}
+
+/// `[ours]` (issue #161): a distinct name for each Hunt native class. Both
+/// games' text tables give one name to every class of a native faction
+/// ("Ewok", "Wookiee", "Gungan"; BF1 Theed's guard and its pilot are both
+/// "Naboo Guard"), and the classes' `UnitType`s collide too
+/// (BF1's Ewok trooper, who carries the spear and the repair tool, and its
+/// repair Ewok are both `repair`), so the class screen offered two Ewoks
+/// with one name. The Hunt class screen shows these where the text table's
+/// names repeat (`EventFeed::for_walk`). The names describe the class's
+/// kit; neither game's tables have per-class native names.
+pub const HUNT_CLASS_LABELS: &[(&str, &str)] = &[
+    ("ewk_inf_trooper", "Ewok Warrior"),
+    ("ewk_inf_scout", "Ewok Scout"),
+    ("ewk_inf_repair", "Ewok Repair"),
+    ("wok_inf_warrior", "Wookiee Warrior"),
+    ("wok_inf_mechanic", "Wookiee Mechanic"),
+    ("wok_inf_rocketeer", "Wookiee Rocketeer"),
+    ("gun_inf_soldier", "Gungan Soldier"),
+    ("gun_inf_defender", "Gungan Defender"),
+    ("gun_inf_rider", "Gungan Rider"),
+    ("gar_inf_soldier", "Naboo Guard"),
+    ("gar_inf_pilot", "Naboo Guard Pilot"),
+];
+
+/// [`HUNT_CLASS_LABELS`]' name for `class`.
+pub fn hunt_class_label(class: &str) -> Option<&'static str> {
+    HUNT_CLASS_LABELS
+        .iter()
+        .find(|(c, _)| c.eq_ignore_ascii_case(class))
+        .map(|(_, l)| *l)
+}
+
 /// The row of BF2's `hudtransforms` table every BF1 grenade reads, so that a
 /// thermal, a crack grenade and a haywire detonator all show BF2's grenade
 /// model (the maintainer, 2026-11-01). `[ours]`: BF2's table has rows only
 /// for the four thermal detonators.
 pub const BF2_GRENADE_HUD_KEY: &str = "rep_weap_inf_thermaldetonator";
 
-/// A BF1 hand grenade: a `grenade` weapon on the grenade's own animation set.
-/// The mortar launchers share the base class and hold the rifle's set.
+/// A BF1 hand grenade: a `grenade` weapon on the grenade's own animation set
+/// whose ordnance detonates (`ExplosionExpire`). The mortar launchers share
+/// the base class and hold the rifle's set. The Ewok's spear and rock share
+/// the grenade's set but carry no explosion: they keep their own key, which
+/// BF2's table reads by class name (`ewk_weap_inf_spear` -> `ewk_spear`,
+/// `ewk_weap_inf_rock` -> `ewk_rock`; issue #161).
 fn is_bf1_grenade(db: &ClassDb, weapon: &str) -> bool {
     !db.is_bf2()
         && db.engine_base(weapon) == Some("grenade")
@@ -728,6 +808,11 @@ fn is_bf1_grenade(db: &ClassDb, weapon: &str) -> bool {
             .prop(weapon, "AnimationBank")
             .and_then(|b| b.split_whitespace().next())
             .is_some_and(|b| b.eq_ignore_ascii_case("grenade"))
+        && db
+            .prop(weapon, "OrdnanceName")
+            .map(str::trim)
+            .and_then(|ord| db.prop(ord, "ExplosionExpire"))
+            .is_some_and(|e| !e.trim().is_empty())
 }
 
 /// How a weapon slot's item works in the port, read from its class data
@@ -1301,6 +1386,7 @@ impl ClassRoster {
             droideka: walker_droid.then(|| {
                 std::sync::Arc::new(crate::droideka::droideka_class(db, weapon_db, class))
             }),
+            from_bf2_side: false,
         })
     }
 
@@ -1411,11 +1497,14 @@ impl FactionRoster {
         faction: &str,
         mission_classes: &[(String, u32, Option<u32>)],
     ) -> Result<(FactionRoster, Vec<SkippedClass>)> {
-        Self::build_with_fallback(db, game, faction, mission_classes, true)
+        Self::build_with_fallback(db, None, game, faction, mission_classes, true)
     }
 
+    /// `kits`: a second db a mission class missing from `db` is built from
+    /// (a BF1 Hunt's BF2 side, [`FactionRoster::pair`]).
     fn build_with_fallback(
         db: &ClassDb,
+        kits: Option<&ClassDb>,
         game: &str,
         faction: &str,
         mission_classes: &[(String, u32, Option<u32>)],
@@ -1433,8 +1522,17 @@ impl FactionRoster {
         if !mission_classes.is_empty() {
             for (name, min, max) in mission_classes {
                 let name = name.to_ascii_lowercase();
-                match ClassRoster::build(db, &name, *min, *max) {
-                    Ok(c) => classes.push(c),
+                let source = match kits {
+                    Some(kits) if db.resolve(&name).is_none() && kits.resolve(&name).is_some() => {
+                        Some(kits)
+                    }
+                    _ => None,
+                };
+                match ClassRoster::build(source.unwrap_or(db), &name, *min, *max) {
+                    Ok(mut c) => {
+                        c.from_bf2_side = source.is_some();
+                        classes.push(c);
+                    }
                     Err(e) => skipped.push(SkippedClass {
                         class: name,
                         reason: format!("{e:#}"),
@@ -1552,6 +1650,40 @@ impl FactionRoster {
         } else {
             None
         };
+        let ewoks = if hunt && game == "bf1" && factions.contains(&"ewk") {
+            // [ours] BF1's Ewok spear and rock were AI-only weapons: the
+            // spear flies at 25 m/s under 1.5 g with no lift, the rock is a
+            // 20 m/s shell with no blast. A human Ewok in BF1 Hunt throws
+            // BF2's (50 m/s, 2 g, 0.15 lift; the rock 40 m/s with its 25
+            // blast), as BF2's own Hunt Ewoks do; BF1's repair tool stays.
+            // Issue #161. measure: BF1 Endor Hunt both sides and tiers.
+            let mut ewk = ClassDb::default();
+            ewk.load(&classes_dir.join("bf2_ewk.ron"))?;
+            let ingame = classes_dir.join("bf2_ingame.ron");
+            if pak::is_file(&ingame) {
+                ewk.load(&ingame)?;
+            }
+            Some(ewk)
+        } else {
+            None
+        };
+        // [ours] A BF1 Hunt adaptation fields its planet's BF2 Hunt roster
+        // (issue #161). A class BF1 has no counterpart for (BF2 Kashyyyk
+        // Hunt's MagnaGuard, `cis_inf_officer_hunt`) is built from BF2's
+        // side, as BF1 Conquest's heroes are (`heroes::append`).
+        let kits = if hunt && game == "bf1" {
+            let missing = mission.is_some_and(|m| {
+                m.teams
+                    .iter()
+                    .flat_map(|t| &t.classes)
+                    .any(|(c, _, _)| db.resolve(&c.to_ascii_lowercase()).is_none())
+            });
+            missing
+                .then(|| load_classdb(classes_dir, "bf2", &sides))
+                .transpose()?
+        } else {
+            None
+        };
         let mut warnings = Vec::new();
         let mut out = Vec::new();
         for (i, f) in factions.into_iter().enumerate() {
@@ -1561,15 +1693,14 @@ impl FactionRoster {
                 .unwrap_or(&[]);
             let assault = mission.is_some_and(MissionDef::is_hero_assault);
             let (mut roster, skipped) =
-                Self::build_with_fallback(&db, game, f, mix, !assault && !hunt).with_context(
-                    || {
+                Self::build_with_fallback(&db, kits.as_ref(), game, f, mix, !assault && !hunt)
+                    .with_context(|| {
                         format!(
                             "{}team {} ({f})",
                             if assault { "Hero Assault " } else { "" },
                             i + 1
                         )
-                    },
-                )?;
+                    })?;
             if let Some(donor) = jawa.as_ref().filter(|_| f == "jawa") {
                 for class in &mut roster.classes {
                     let original = class.weapon.clone();
@@ -1603,19 +1734,35 @@ impl FactionRoster {
             }
             if hunt {
                 for class in &mut roster.classes {
+                    // Each class's weapons read the class data it was built
+                    // from: BF2's for a class a BF1 Hunt fields from BF2's
+                    // side.
+                    let source = match kits.as_ref() {
+                        Some(kits) if class.from_bf2_side => kits,
+                        _ => &db,
+                    };
                     for weapon in std::iter::once(&mut class.weapon)
                         .chain(class.held.iter_mut().map(|slot| &mut slot.weapon))
                     {
                         if weapon.thrown.is_none()
-                            && db.engine_base(&weapon.name) == Some("grenade")
+                            && source.engine_base(&weapon.name) == Some("grenade")
                         {
-                            if let Some(thrown) = weapon_db::thrown_weapon(&db, &weapon.name, true)?
+                            if let Some(thrown) =
+                                weapon_db::thrown_weapon(source, &weapon.name, true)?
                             {
                                 *weapon = thrown;
                             }
                         }
                     }
                     class.unlock_points = 0;
+                    if let Some(label) = hunt_class_label(&class.class) {
+                        class.label = label.to_owned();
+                    }
+                }
+            }
+            if let Some(donor) = ewoks.as_ref().filter(|_| f == "ewk") {
+                for class in &mut roster.classes {
+                    donate_ewok_weapons(donor, class)?;
                 }
             }
             for s in &skipped {

@@ -62,11 +62,18 @@ pub(super) fn draw_snapshot_notice(ctx: &ui::egui::Context, saved: bool) {
         .interactable(false)
         .show(ctx, |ui| {
             Frame::popup(ui.style()).show(ui, |ui| {
-                ui.label(if saved {
-                    "Snapshot saved"
+                let text = if saved {
+                    "Snapshot Saved"
                 } else {
-                    "Snapshot save failed"
-                });
+                    "Snapshot Save Failed"
+                };
+                let tint = ui::typography::tint::HELP;
+                ui.label(ui::typography::egui_text(
+                    ctx,
+                    &ui::typography::BODY,
+                    tint,
+                    text,
+                ));
             });
         });
 }

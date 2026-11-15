@@ -157,8 +157,11 @@ pub enum NetEvent {
     AllLoaded {
         round_id: u32,
     },
+    /// The round's clock starts `lead_us` from now (tick 0 closes a tick
+    /// after that): the host game leaves its loading screen then.
     RoundStarted {
         round_id: u32,
+        lead_us: u32,
     },
     /// A closed tick; the host game steps it at once.
     Bundle(TickBundle),
@@ -167,11 +170,22 @@ pub enum NetEvent {
         round_id: u32,
         tick: u32,
     },
+    /// Guest `slot`'s hash at `tick` of round `round_id` differed from the
+    /// host game's; the guest is told only by [`HostCore::tell_desync`].
     Desync {
+        round_id: u32,
         slot: u8,
         tick: u32,
         host_hash: u64,
         peer_hash: u64,
+    },
+    /// Every guest live in round `round_id` (connected, in its bundles, not
+    /// catching up) reported a hash for check `tick` equal to the host
+    /// game's: everyone agrees on that tick's game (the host's self-check
+    /// keeps it as its checkpoint).
+    HashesAgreed {
+        round_id: u32,
+        tick: u32,
     },
     /// A guest's per-tick hash rows around its desync at `tick`
     /// ([`crate::msg::Msg::DesyncHashes`]), for the host's report.

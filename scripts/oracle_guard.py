@@ -21,8 +21,8 @@ Protected classes (a path is matched by suffix, so a worktree under openbf-wt/ i
   guards     scripts/gates.py, scripts/oracle_guard.py, scripts/claude_guard.sh, scripts/land.py, .claude/settings.json
 
 Who may write: OPENBF_ORACLE_EDIT=1 in the harness environment (set by the operator, or by the landing tool around its own
-writes — a variable typed inside a Bash command is NOT the harness environment and is itself refused); a session whose job
-is `planner` or `land`; a `capture`-phase card for class pcsx2 (capture cards add data); a card whose COMMITTED header says
+writes — a variable typed inside a Bash command is NOT the harness environment and is itself refused); a `land`-lane agent job
+(every class but baselines); a card whose COMMITTED header says
 `declares: oracle=<classes|any>` (read from `git show HEAD:<card>` in the main checkout, so a session cannot declare for
 itself by editing its own card file). `goldens=` in `declares:` also frees class goldens (the existing golden declaration).
 
@@ -48,7 +48,7 @@ RULES = [
     ("psref", r"(?:^|/)scripts/bot_quality_ps2\.json$"),
     ("guards", r"(?:^|/)(?:scripts/(?:gates|oracle_guard|land)\.py|scripts/claude_guard\.sh|\.claude/settings(?:\.local)?\.json)$"),
 ]
-EXEMPT_JOBS = ("planner", "land")
+EXEMPT_JOBS = ("land",)
 ALL_CLASSES = sorted({c for c, _ in RULES})
 
 
@@ -112,15 +112,12 @@ def oracle_declared(declares):
 
 
 def job_info(env=None):
+    """The agent job of this session (scripts/agent_job.sh), or {} outside one."""
     env = os.environ if env is None else env
     if env.get("OPENBF_AGENT_JOB"):
         lane = env.get("OPENBF_AGENT_LANE", "build")
         return {"job": "land" if lane == "land" else "card", "card": env.get("OPENBF_CARD")}
-    try:
-        j = json.loads(env.get("OPENBF_JOB_JSON") or "{}")
-    except ValueError:
-        j = {}
-    return j if isinstance(j, dict) else {}
+    return {}
 
 
 def allowed_classes(env=None, root=ROOT):
@@ -137,8 +134,6 @@ def allowed_classes(env=None, root=ROOT):
             ok.discard("baselines")
         return ok, f"job {j.get('job')}"
     ok = set()
-    if j.get("phase") == "capture":
-        ok.add("pcsx2")
     cid = j.get("card")
     if cid:
         ap = approved(cid, "oracle", root)   # gates.toml [approvals.<CARD>]: the only channel that works (declarations come from committed cards)
@@ -283,7 +278,7 @@ def changed_by_class(tree, base):
 
 
 def card_declares_for(env=None, tree=None, root=ROOT):
-    """The declared-oracle classes of the card this gates run belongs to: OPENBF_CARD (or a legacy OPENBF_JOB_JSON card), else the card whose
+    """The declared-oracle classes of the card this gates run belongs to: OPENBF_CARD, else the card whose
     `branch:` is the tree's branch. Read from the COMMITTED card in the main checkout."""
     env = os.environ if env is None else env
     cid = job_info(env).get("card")
@@ -319,7 +314,11 @@ def selftest():
     case("agent build protects baseline", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/engine/artifacts/loop/gates.toml"}}, agent, True)
     case("agent land protects baseline", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/engine/artifacts/loop/gates.toml"}}, dict(agent, OPENBF_AGENT_LANE="land"), True)
     case("agent ordinary source allowed", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/scripts/example.py"}}, agent, False)
-    loop = {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "card", "card": "ZZZNOCARD", "phase": "build"})}
+    loop_only = {"OPENBF_LOOP": "1"}
+    case("loop-only session protects golden", {"tool_name": "Edit", "tool_input": {"file_path": ROOT + "/engine/goldens/maps/a.png", "old_string": "a", "new_string": "b"}}, loop_only, True)
+    case("loop-only session protects baseline", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/engine/artifacts/loop/gates.toml"}}, loop_only, True)
+    case("loop-only session ordinary source allowed", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/scripts/example.py"}}, loop_only, False)
+    loop = agent
     wt = os.path.join(os.path.dirname(ROOT), "openbf-wt", "obsr") + "/"
     E = lambda p: {"tool_name": "Edit", "tool_input": {"file_path": p, "old_string": "a", "new_string": "b"}}
     W = lambda p: {"tool_name": "Write", "tool_input": {"file_path": p, "content": "x"}}
@@ -351,17 +350,12 @@ def selftest():
     case("Bash cargo test", B("cd engine && cargo test -p core 2>&1 | tail"), loop, False)
     case("not a loop session", E(wt + "engine/goldens/maps/a.png"), {}, False)
     case("OPENBF_ORACLE_EDIT=1 in env", E(wt + "engine/goldens/maps/a.png"), dict(loop, OPENBF_ORACLE_EDIT="1"), False)
-    case("planner job", E(ROOT + "/engine/artifacts/loop/gates.toml"),
-         {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "planner"})}, False)
     case("land job cannot write gates.toml itself (no self-approval)", E(ROOT + "/engine/artifacts/loop/gates.toml"),
-         {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "land"})}, True)
+         dict(agent, OPENBF_AGENT_LANE="land"), True)
     case("land job still commits a golden", E(ROOT + "/engine/goldens/maps/a.png"),
-         {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "land"})}, False)
+         dict(agent, OPENBF_AGENT_LANE="land"), False)
     case("land job runs land.py (the script re-baselines)", B("python3 scripts/land.py ZZZ --commit"),
-         {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "land"})}, False)
-    cap = {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "card", "card": "ZZZNOCARD", "phase": "capture"})}
-    case("capture-phase card adds pcsx2 data", W(ROOT + "/engine/artifacts/pcsx2/ref/bf1_kas2/new.json"), cap, False)
-    case("capture-phase card still not goldens", W(ROOT + "/engine/goldens/maps/a.png"), cap, True)
+         dict(agent, OPENBF_AGENT_LANE="land"), False)
     # a declared card (fixture repo with a committed card)
     import tempfile
     with tempfile.TemporaryDirectory() as t:
@@ -370,7 +364,7 @@ def selftest():
         subprocess.run(["git", "init", "-q", t])
         subprocess.run(["git", "-C", t, "add", "-A"])
         subprocess.run(["git", "-C", t, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"])
-        env = {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "card", "card": "DCL", "phase": "build"})}
+        env = dict(agent, OPENBF_CARD="DCL")
         for name, p, want in (("declared oracle=guards frees gates.py", wt + "scripts/gates.py", False),
                               ("...but not goldens", wt + "engine/goldens/maps/a.png", True)):
             why = decide(E(p), env, t)
@@ -382,12 +376,12 @@ def selftest():
     os.makedirs(os.path.join(t, "engine/artifacts/loop"))
     open(os.path.join(t, "engine/artifacts/loop/gates.toml"), "w").write('[approvals.AAA]\nfidelity = "recycled, x@m"\noracle = "baselines"\n')
     ok = (approved("AAA", "fidelity", t) == "recycled, x@m" and approved("BBB", "fidelity", t) == ""
-          and card_declares_for({"OPENBF_JOB_JSON": json.dumps({"card": "AAA"})}, None, t) == ("AAA", {"baselines"})
-          and card_declares_for({"OPENBF_JOB_JSON": json.dumps({"card": "BBB"})}, None, t) == ("BBB", set()))
+          and card_declares_for(dict(agent, OPENBF_CARD="AAA"), None, t) == ("AAA", {"baselines"})
+          and card_declares_for(dict(agent, OPENBF_CARD="BBB"), None, t) == ("BBB", set()))
     bad += not ok
     print(f"{'ok  ' if ok else 'FAIL'} approvals: read from gates.toml [approvals.<CARD>], per card")
     E2 = lambda p: {"tool_name": "Edit", "tool_input": {"file_path": p, "old_string": "a", "new_string": "b"}}
-    envc = lambda c: {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "card", "card": c, "phase": "build"})}
+    envc = lambda c: dict(agent, OPENBF_CARD=c)
     open(os.path.join(t, "engine/artifacts/loop/gates.toml"), "w").write('[approvals.AAA]\noracle = "baselines,guards"\n')
     ok = (not decide(E2(os.path.join(t, "scripts/gates.py")), envc("AAA"), t) and not decide(E2(os.path.join(t, "engine/artifacts/loop/gates.toml")), envc("AAA"), t)
           and bool(decide(E2(os.path.join(t, "engine/goldens/x.png")), envc("AAA"), t)) and bool(decide(E2(os.path.join(t, "scripts/gates.py")), envc("BBB"), t)))

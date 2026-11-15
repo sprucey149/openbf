@@ -364,6 +364,53 @@ fn team_outline(vis: &SoldierVisuals, team: u8, classes: &[u8]) -> Outline {
     grown
 }
 
+/// `[ours]` (issue #128) A line-up soldier's pointer box about his feet, in
+/// metres at full size: half his width, and his height. The PS2 has no
+/// pointer; a box the size of a standing soldier keeps the click on him.
+/// measure: live clicks on each class's soldier, droidekas included.
+pub const PICK_BOX: [f32; 2] = [0.35, 1.9];
+
+/// The line-up row whose soldier stands under the window point `point` of a
+/// `size` window (the page's `classes` index), `t` into a slide from `from`
+/// to `pick` of `n` classes, laid out by `fit` under a camera of half-height
+/// tangent `tan_v`: the nearest soldier whose [`PICK_BOX`] holds the point.
+/// Soldiers unseen at the back take no pick.
+#[allow(clippy::too_many_arguments)]
+pub fn lineup_row_at(
+    point: [f32; 2],
+    size: [f32; 2],
+    tan_v: f32,
+    fit: &LineupFit,
+    from: usize,
+    pick: usize,
+    n: usize,
+    t: f32,
+) -> Option<usize> {
+    if size[0] <= 0.0 || size[1] <= 0.0 {
+        return None;
+    }
+    let aspect = size[0] / size[1];
+    let tx = (point[0] / size[0] * 2.0 - 1.0) * tan_v * aspect;
+    let ty = (1.0 - point[1] / size[1] * 2.0) * tan_v;
+    let (half, tall) = (PICK_BOX[0] * fit.scale, PICK_BOX[1] * fit.scale);
+    let mut best: Option<(usize, f32)> = None;
+    for j in 0..n {
+        let (at, colour) = lineup_at(ring_at(j, from, pick, n, t));
+        if colour[3] < SEEN_ALPHA {
+            continue;
+        }
+        let f = fit.feet(at);
+        let inside = tx >= (f.x - half) / f.z
+            && tx <= (f.x + half) / f.z
+            && ty >= f.y / f.z
+            && ty <= (f.y + tall) / f.z;
+        if inside && best.is_none_or(|(_, z)| f.z < z) {
+            best = Some((j, f.z));
+        }
+    }
+    best.map(|(j, _)| j)
+}
+
 /// The model matrix of a soldier whose feet stand at `at` in `cam`'s frame
 /// (right, up, ahead; full size) turned `yaw` from facing the camera, drawn
 /// at [`SHRINK`] about the eye. The soldier models face +Z.
@@ -442,6 +489,18 @@ impl Preview {
         self.compose(None, vis, page, cam, dt, |_, team, class, model, dt| {
             specialized(team, class, model, dt)
         })
+    }
+
+    /// Issue #128: the raw class of the line-up soldier under the window point
+    /// `point` of a `size` window, as the last draw laid the line-up out
+    /// ([`lineup_row_at`]); `None` off the line-up or with none drawn.
+    pub fn class_at(&self, point: [f32; 2], size: [f32; 2]) -> Option<u8> {
+        let (_, pick) = self.lineup?;
+        let (_, tan_v, fit) = self.fit?;
+        let classes = &self.outline.as_ref()?.0;
+        let (from, t) = self.slide.unwrap_or((pick, 1.0));
+        let row = lineup_row_at(point, size, tan_v, &fit, from, pick, classes.len(), t)?;
+        classes.get(row).copied()
     }
 
     /// A live preview: specialized class models as in [`Self::draws_with`], and

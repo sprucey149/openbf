@@ -230,7 +230,7 @@ fn dimmed_rows_are_skipped_by_the_cursor() {
         .unwrap();
     m.map_list = ListCursor {
         at: polis,
-        top: polis - 4,
+        view: crate::scroll::ScrollView::at((polis - 4) as f32),
     };
     m.step(down(), 0.0);
     assert_eq!(rows[m.map_list.at].text, "Rhen Var: Citadel (bf1)");
@@ -505,10 +505,7 @@ fn dlc_heroes_stay_visible_but_cannot_be_changed_without_the_bake() {
         },
         0.0,
     );
-    assert_eq!(
-        ia.page,
-        Page::Group(Group::Hero, ListCursor { at: 2, top: 0 })
-    );
+    assert_eq!(ia.page, Page::Group(Group::Hero, ListCursor::new(2)));
     ia.options.adjust(row, 1, 1);
     assert!(!ia.options.dlc_heroes);
     ia.options.adjust(Opt::HeroesOnOff, 1, 1);
@@ -706,21 +703,23 @@ fn instant_action_clicks() {
 }
 
 /// menuref §9.1.11 (`ia_list_scroll`, `ia_list_page`): on the PS2's 25
-/// Planet rows Down moves to the 9th visible row, then scrolls one row per
-/// press; R1 / L1 page 8 rows (0 -> 8 -> 16 -> 24), not moving at the end.
-/// REMOVE puts the cursor on the playlist's last row.
+/// Planet rows Down scrolls one row per press once the list must move;
+/// R1 / L1 page 8 rows (0 -> 8 -> 16 -> 24), not moving at the end. REMOVE
+/// puts the cursor on the playlist's last row. `[ours]` (`crate::scroll`):
+/// the list starts moving a row before the window's edge (the PS2 waits for
+/// the last visible row), so the next row is always in sight.
 #[test]
 fn lists_scroll_one_row_and_page_eight() {
     let live = [true; 25];
     let mut c = ListCursor::default();
-    for k in 1..LIST_ROWS {
+    for k in 1..LIST_ROWS - 1 {
         assert!(c.step(&live, 1, LIST_ROWS));
-        assert_eq!((c.at, c.top), (k, 0));
+        assert_eq!((c.at, c.top()), (k, 0));
     }
     c.step(&live, 1, LIST_ROWS);
-    assert_eq!((c.at, c.top), (LIST_ROWS, 1));
+    assert_eq!((c.at, c.top()), (LIST_ROWS - 1, 1));
     c.step(&live, 1, LIST_ROWS);
-    assert_eq!((c.at, c.top), (LIST_ROWS + 1, 2));
+    assert_eq!((c.at, c.top()), (LIST_ROWS, 2));
     let page = LIST_PAGE as isize;
     let mut c = ListCursor::default();
     let mut at = Vec::new();
@@ -729,7 +728,7 @@ fn lists_scroll_one_row_and_page_eight() {
         at.push((c.at, moved));
     }
     assert_eq!(at, [(8, true), (16, true), (24, true), (24, false)]);
-    assert_eq!(c.top, 25 - LIST_ROWS);
+    assert_eq!(c.top(), 25 - LIST_ROWS);
     let mut back = Vec::new();
     for _ in 0..3 {
         c.step(&live, -page, LIST_ROWS);
@@ -758,36 +757,36 @@ fn lists_scroll_one_row_and_page_eight() {
 
 #[test]
 fn list_scrolling_moves_top_without_moving_focus() {
-    let mut c = ListCursor { at: 0, top: 0 };
+    let mut c = ListCursor::new(0);
     // 25 rows, 9 shown -> max top is 16
-    assert!(!c.scroll(25, LIST_ROWS, -1), "cannot scroll above 0");
-    assert_eq!((c.at, c.top), (0, 0));
+    assert!(!c.scroll(25, LIST_ROWS, -1.0), "cannot scroll above 0");
+    assert_eq!((c.at, c.top()), (0, 0));
 
-    assert!(c.scroll(25, LIST_ROWS, 1));
+    assert!(c.scroll(25, LIST_ROWS, 1.0));
     assert_eq!(
-        (c.at, c.top),
+        (c.at, c.top()),
         (0, 1),
         "scrolling down increments top without moving at"
     );
 
-    assert!(c.scroll(25, LIST_ROWS, 3));
-    assert_eq!((c.at, c.top), (0, 4));
+    assert!(c.scroll(25, LIST_ROWS, 3.0));
+    assert_eq!((c.at, c.top()), (0, 4));
 
     // Scroll to end
-    assert!(c.scroll(25, LIST_ROWS, 20));
-    assert_eq!((c.at, c.top), (0, 16), "clamped to max top (25 - 9)");
-    assert!(!c.scroll(25, LIST_ROWS, 1), "cannot scroll past max top");
+    assert!(c.scroll(25, LIST_ROWS, 20.0));
+    assert_eq!((c.at, c.top()), (0, 16), "clamped to max top (25 - 9)");
+    assert!(!c.scroll(25, LIST_ROWS, 1.0), "cannot scroll past max top");
 
     // Scroll back up
-    assert!(c.scroll(25, LIST_ROWS, -2));
-    assert_eq!((c.at, c.top), (0, 14));
+    assert!(c.scroll(25, LIST_ROWS, -2.0));
+    assert_eq!((c.at, c.top()), (0, 14));
 
     // InstantAction scroll_left and scroll_pointer
     let mut m = ia();
-    assert_eq!((m.map_list.at, m.map_list.top), (0, 0));
-    assert!(m.scroll_left(1));
+    assert_eq!((m.map_list.at, m.map_list.top()), (0, 0));
+    assert!(m.scroll_left(1.0));
     assert_eq!(
-        (m.map_list.at, m.map_list.top),
+        (m.map_list.at, m.map_list.top()),
         (0, 1),
         "scroll_left advances top without moving at"
     );
@@ -801,24 +800,58 @@ fn list_scrolling_moves_top_without_moving_focus() {
             side: Side::Era(Era::Cw),
         });
     }
-    assert_eq!(m.play_list.top, 0);
+    assert_eq!(m.play_list.top(), 0);
     let size = [640.0, 480.0];
     let pt_right = [400.0 * (640.0 / 512.0), 200.0];
-    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2));
+    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2.0));
     assert_eq!(
-        m.play_list.top, 2,
+        m.play_list.top(),
+        2,
         "scroll_pointer over right window scrolls playlist"
     );
-    assert_eq!(m.map_list.top, 1, "left window untouched");
+    assert_eq!(m.map_list.top(), 1, "left window untouched");
 
     // scroll_pointer over left window scrolls map list
     let pt_left = [100.0 * (640.0 / 512.0), 200.0];
-    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1));
+    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1.0));
     assert_eq!(
-        m.map_list.top, 0,
+        m.map_list.top(),
+        0,
         "scroll_pointer over left window scrolls map list"
     );
     assert_eq!(m.map_list.at, 0, "focus unchanged without selecting");
+}
+
+/// A trackpad sends fractions of a row: on an option group they add up
+/// (review: they were dropped until a step crossed a row).
+#[test]
+fn option_groups_keep_a_trackpads_fractions_of_a_row() {
+    let mut m = ia();
+    let group = [
+        Group::Global,
+        Group::Hero,
+        Group::Conquest,
+        Group::Ctf,
+        Group::Hunt,
+        Group::Assault,
+    ]
+    .into_iter()
+    .find(|g| m.options.rows(*g).len() >= OPTION_ROWS + 2)
+    .expect("a group longer than its window");
+    m.page = Page::Group(group, ListCursor::default());
+    for _ in 0..20 {
+        m.scroll_option(0.1);
+    }
+    let Page::Group(_, cur) = m.page else {
+        panic!("still on the group");
+    };
+    assert!(
+        (cur.view.target() - 2.0).abs() < 1e-4,
+        "{}",
+        cur.view.target()
+    );
+    assert_eq!(cur.at, 0, "the selection stays");
+    assert_eq!(m.take_clicks().len(), 2, "one click per row crossed");
 }
 
 /// The maintainer, 2026-10-28 (a named deviation from the PS2's Normal <-> Elite
@@ -886,7 +919,7 @@ fn option_rows_read_as_the_disc_writes_them() {
             })
             .collect()
     };
-    assert_eq!(flat(t.option(Opt::NumBots, &o)), "Team size: < 100% >");
+    assert_eq!(flat(t.option(Opt::NumBots, &o)), "Team Size: < 100% >");
     assert_eq!(
         flat(t.option(Opt::AiDifficulty, &o)),
         "AI Difficulty Level: < Normal >"
@@ -982,7 +1015,8 @@ fn launch_hands_over_the_playlist_in_order() {
     m.step(press(|i| i.r1 = true), 0.0);
     m.step(press(|i| i.r1 = true), 0.0);
     assert_eq!(m.map_list.at, 2 * LIST_PAGE);
-    assert_eq!(m.map_list.top, 2 * LIST_PAGE + 1 - LIST_ROWS);
+    // The view keeps a row of margin below the cursor (`crate::scroll`).
+    assert_eq!(m.map_list.top(), 2 * LIST_PAGE + 2 - LIST_ROWS);
     m.step(press(|i| i.l1 = true), 0.0);
     m.step(press(|i| i.l1 = true), 0.0);
     assert_eq!(m.map_list.at, 0);
@@ -1069,7 +1103,7 @@ fn population_rows_stop_at_the_percent_and_help_averages_every_map() {
     };
     let help = |v: &SessionOptions, o| v.population_help(o).unwrap();
     for o in [Opt::NumBots, Opt::ConNumBots] {
-        assert_eq!(flat(texts.option(o, &values)), "Team size: < 100% >");
+        assert_eq!(flat(texts.option(o, &values)), "Team Size: < 100% >");
     }
     assert_eq!(
         flat(texts.option(Opt::ConMult, &values)),
@@ -1092,7 +1126,7 @@ fn population_rows_stop_at_the_percent_and_help_averages_every_map() {
     assert_eq!(values.con_numbots, 200);
     assert_eq!(
         flat(texts.option(Opt::ConNumBots, &values)),
-        "Team size: < 200% >"
+        "Team Size: < 200% >"
     );
     assert!(help(&values, Opt::ConNumBots).starts_with("Average team size: 31 units\n"));
     assert!(help(&values, Opt::NumBots).starts_with("Average team size: 31 units\n"));
@@ -1128,4 +1162,61 @@ fn hero_assault_needs_a_mission_and_a_single_era() {
     assert!(!map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
     let list = catalog(&text, &bakes, &with_coruscant);
     assert!(map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+}
+
+/// Issue #172 (playtest): the Assault AI Units row's help is openbf's own,
+/// over the localized "space Assault" line, and says what the count means
+/// in each Assault mode; the count's range is unchanged.
+#[test]
+fn assault_ai_units_help_explains_each_assault_mode() {
+    let mut o = SessionOptions::default();
+    let help = o.population_help(Opt::AssNumBots).unwrap();
+    assert_eq!(
+        help,
+        "Space Assault: up to 16 per side. Hero Assault: one hero per class (8 or 9) \
+         on a side with a player; the other side up to 12."
+    );
+    o.adjust(Opt::AssNumBots, -1, 10);
+    assert_eq!(o.ass_numbots, 6);
+    let help = o.population_help(Opt::AssNumBots).unwrap();
+    assert!(
+        help.starts_with("Space Assault: up to 6 per side."),
+        "{help}"
+    );
+    assert!(help.ends_with("the other side up to 6."), "{help}");
+    o.dlc_heroes_installed = true;
+    o.dlc_heroes = true;
+    let help = o.population_help(Opt::AssNumBots).unwrap();
+    assert!(help.contains("(9 or 10)"), "{help}");
+    assert_eq!(o.population_help(Opt::AssScore), None);
+    assert_eq!(o.population_help(Opt::CtfNumBots), None);
+}
+
+/// Issue #172: [`HERO_ASSAULT_POOL`] is Mos Eisley Hero Assault's units per
+/// team. A public checkout has no missions until `scripts/pack.py` makes
+/// them from the player's discs: the test then skips.
+#[test]
+fn hero_assault_pool_matches_the_mission() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions/tat2_eli.ron");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        eprintln!("skip: no {path}");
+        return;
+    };
+    let teams = &text[text.find("teams:").expect("teams")..];
+    let units: Vec<i32> = teams
+        .match_indices("units:")
+        .map(|(i, k)| {
+            let rest = teams[i + k.len()..].trim_start();
+            let end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
+            rest[..end].parse().expect("units")
+        })
+        .take(2)
+        .collect();
+    assert_eq!(
+        units,
+        [crate::shell::HERO_ASSAULT_POOL; 2],
+        "the help's pool follows the mission"
+    );
 }

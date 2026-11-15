@@ -701,6 +701,33 @@ pub(crate) fn sounds_as_hero(sim: &core::sim::Sim, u: &core::unit::Unit) -> bool
     sim.hero_assault() || sim.hero_class(u.team) == Some(u.spec.class)
 }
 
+/// Issue #173: the Force Choke voices. While a hold has a soldier (on his
+/// feet or caught in the air), his class's `ChokeSound` plays on him, 3-D at
+/// his position and following him, restarted while the hold lasts; it stops
+/// when the hold ends or he dies. BF2's soldier update starts the class's
+/// choke sound on a soldier in the choke state (0xe) whose handle is idle,
+/// moves it with him every update and stops it once he leaves the state
+/// (B2 `FUN_0023f9e0` region, B2:159566-159579; class field +0x11cc, set by
+/// `ChokeSound` at B2:171028). Read from the sim on every peer, so a LAN
+/// guest hears what the host hears; never part of the sim.
+pub fn choke_loops(walk: &WalkSim) -> Vec<(core::unit::UnitHandle, String, Vec3)> {
+    walk.sim
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(_, u)| u.alive && u.mount.is_none() && u.choked.is_some())
+        .filter_map(|(i, u)| {
+            let class = walk.team_template(u.team).class(u.spec.class);
+            let name = class.cries.choke.clone()?;
+            let handle = core::unit::UnitHandle {
+                index: i as u32,
+                gen: u.gen,
+            };
+            Some((handle, name, u.soldier.pos + Vec3::Y))
+        })
+        .collect()
+}
+
 pub fn hero_sample_asks(walk: &WalkSim) -> Vec<(core::unit::UnitHandle, String, Vec3)> {
     let mut asks = Vec::new();
     for (i, u) in walk.sim.units.iter().enumerate() {

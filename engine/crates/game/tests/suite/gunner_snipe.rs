@@ -221,8 +221,8 @@ fn a_scoped_shot_at_a_turret_gunners_drawn_head_hits_it() {
             }
         }
         println!("tick {t}: hit {hit:?}");
-        // The sniper round's 300, x3 on the head.
-        assert_eq!(hit, Some(900.0), "tick {t}: a head hit on the gunner");
+        // The sniper round's 280, x3 on the head.
+        assert_eq!(hit, Some(840.0), "tick {t}: a head hit on the gunner");
         assert!(off < 0.2, "tick {t}: aimed at the drawn head");
         assert!(
             g.distance(drawn) < 0.05,
@@ -303,7 +303,7 @@ fn a_scoped_shot_at_a_gunner_who_boarded_crouched_hits_his_drawn_head() {
             }
         }
         println!("tick {t}: hit {hit:?}");
-        assert_eq!(hit, Some(900.0), "tick {t}: a head hit on the gunner");
+        assert_eq!(hit, Some(840.0), "tick {t}: a head hit on the gunner");
         assert!(off < 0.2, "tick {t}: aimed at the drawn head");
     }
 }
@@ -413,6 +413,6 @@ fn the_shots_with_the_gun_at_unit_27_hit_the_gunners_head() {
         }
         assert!(fired, "tick {t}: the rifle fired");
         println!("tick {t}: gunner feet {g:.3} (logged -17.15, 60.49, 13.0), head gap {gap:.3}, hit {hit:?}");
-        assert_eq!(hit, Some(900.0), "tick {t}: a head hit on the gunner");
+        assert_eq!(hit, Some(840.0), "tick {t}: a head hit on the gunner");
     }
 }

@@ -82,6 +82,8 @@ fn hit_feedback_captures_all_four_sides_on_bf1_and_bf2_maps() {
                 health_left: 100.0,
                 age: 0.0,
                 dir: glam::Quat::from_rotation_y(yaw) * dir,
+                dealt: 1.0,
+                taken: 1.0,
             }];
             let hash = walk.sim.hash();
             animator.note_hit(&walk.sim, 0);
@@ -153,6 +155,8 @@ fn hit_feedback_captures_all_four_sides_on_bf1_and_bf2_maps() {
             health_left: 100.0,
             age: 0.0,
             dir: Vec3::Z,
+            dealt: 1.0,
+            taken: 1.0,
         }];
         visuals.update(&walk, 0.0);
         let (after, after_guns) = visuals.first_person_draws(&walk, &camera);

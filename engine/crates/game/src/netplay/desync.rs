@@ -141,6 +141,30 @@ impl BundleLog {
         }
     }
 
+    /// Every bundle held, decoded, from tick 0.
+    pub fn bundles(&self) -> anyhow::Result<Vec<TickBundle>> {
+        self.since(0).decode()
+    }
+
+    /// The bundles from tick `from` on, still sealed: the host's self-check
+    /// takes them as they are and decodes them on its worker
+    /// (`super::selfcheck`).
+    pub fn since(&self, from: u32) -> LogSince {
+        let n = net::msg::LOG_CHUNK_TICKS;
+        let first = (from / n).min(self.sealed.len() as u32);
+        LogSince {
+            from,
+            first_tick: first * n,
+            sealed: self.sealed[first as usize..].to_vec(),
+            tail: self
+                .tail
+                .iter()
+                .filter(|b| b.tick >= from)
+                .cloned()
+                .collect(),
+        }
+    }
+
     /// The log as `(first tick, count, zstd)` chunks.
     pub fn chunks(&self) -> Vec<BundleChunk> {
         let n = net::msg::LOG_CHUNK_TICKS;
@@ -162,6 +186,32 @@ impl BundleLog {
             });
         }
         out
+    }
+}
+
+/// A [`BundleLog`]'s bundles from tick `from` on ([`BundleLog::since`]).
+#[derive(Clone, Debug, Default)]
+pub struct LogSince {
+    pub from: u32,
+    /// The first sealed chunk's first tick.
+    first_tick: u32,
+    sealed: Vec<Vec<u8>>,
+    tail: Vec<TickBundle>,
+}
+
+impl LogSince {
+    /// The bundles, decoded, from tick `from` on.
+    pub fn decode(self) -> anyhow::Result<Vec<TickBundle>> {
+        let n = net::msg::LOG_CHUNK_TICKS;
+        let mut out = Vec::new();
+        for (i, c) in self.sealed.iter().enumerate() {
+            let at = self.first_tick + i as u32 * n;
+            let chunk = net::bundle::decompress_log(c, at, n as usize)
+                .map_err(|e| anyhow::anyhow!("bundle chunk at {at}: {e}"))?;
+            out.extend(chunk.into_iter().filter(|b| b.tick >= self.from));
+        }
+        out.extend(self.tail);
+        Ok(out)
     }
 }
 
@@ -221,6 +271,14 @@ pub struct DesyncReport {
     pub bundles: Vec<BundleChunk>,
     /// The bundle log was not contiguous from tick 0 (no re-simulation).
     pub bundles_broken: bool,
+    /// The host's: its self-check found its own game parted at this check
+    /// and corrected it (`super::selfcheck`, `peer` module rules).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_diverged_at: Option<u32>,
+    /// The host's, with `host_diverged_at`: the guests whose hashes at the
+    /// check equalled the host's replay (they had not parted).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agreeing_guests: Vec<u8>,
 }
 
 impl DesyncReport {

@@ -47,16 +47,51 @@ fn draw_out(netplay: &mut Option<lan::NetplaySession>, walk: &mut game::walk::Wa
     }
 }
 
+impl App {
+    /// One console line per change of the window's size, display scale or
+    /// frame size (issue #168: both Windows guests of the first VPN
+    /// playtest saw the menus off their art; the next report says what
+    /// their windows were). Called only once the renderer has its size
+    /// (opened, resized, a frame), never from a scale change itself, whose
+    /// new inner size would print against the frame before its resize.
+    fn note_window_size(&mut self, why: &str) {
+        let (Some(w), Some(r)) = (&self.window, &self.renderer) else {
+            return;
+        };
+        let inner = w.inner_size();
+        let now = (inner.width, inner.height, w.scale_factor(), r.size());
+        if self.window_note != Some(now) {
+            self.window_note = Some(now);
+            println!(
+                "window: {why}: inner {}x{}, scale {:.2}, frame {}x{}",
+                now.0, now.1, now.2, now.3 .0, now.3 .1
+            );
+        }
+    }
+}
+
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if self.window.is_some() {
             return;
         }
+        // Issue #172: the saved display mode, unless a size is forced.
+        self.display.exclusive = super::display::exclusive_supported(event_loop);
+        self.display.forced = window_size_env().is_some();
+        let mode = self.shown_window_mode();
+        let fullscreen = super::display::fullscreen_for(
+            mode,
+            event_loop
+                .primary_monitor()
+                .or_else(|| event_loop.available_monitors().next()),
+            self.display.exclusive,
+        );
         let window = Arc::new(
             event_loop
-                .create_window(window_attributes(window_size_env()))
+                .create_window(window_attributes(window_size_env(), fullscreen))
                 .expect("create window"),
         );
+        self.display_opened(mode);
         self.idle = Some(super::idle::IdleInhibit::new(&window));
         let mut renderer = Renderer::new_windowed(window.clone()).expect("renderer");
         self.overlay = Some(ui::overlay::EguiOverlay::new(
@@ -64,6 +99,11 @@ impl winit::application::ApplicationHandler for App {
             renderer.device(),
             renderer.surface_format(),
         ));
+        // Every egui text in the menu face (`ui::typography`).
+        if let Some(overlay) = &self.overlay {
+            let face = game::hud_feed::menu_face(&self.assets_dir);
+            ui::typography::face::install(overlay.ctx(), &face);
+        }
         window.set_cursor(winit::window::CursorIcon::Default);
         if let Some(overlay) = &mut self.overlay {
             overlay.set_window_cursor(mouse::menu_cursor(event_loop, window.scale_factor()));
@@ -78,6 +118,7 @@ impl winit::application::ApplicationHandler for App {
             }
             self.window = Some(window);
             self.renderer = Some(renderer);
+            self.note_window_size("opened");
             self.last = std::time::Instant::now();
             return;
         };
@@ -105,10 +146,6 @@ impl winit::application::ApplicationHandler for App {
                             return;
                         }
                     };
-                    self.profile.settings.last_map = Some(scene.manifest.map.clone());
-                    self.profile.settings.last_mode = Some(self.mode.clone());
-                    self.profile.settings.last_teams =
-                        Some([walk.teams[0].faction.clone(), walk.teams[1].faction.clone()]);
                     if let Err(e) = self.profile.save() {
                         eprintln!("profile autosave failed: {e:#}");
                     }
@@ -132,6 +169,7 @@ impl winit::application::ApplicationHandler for App {
         }
         self.window = Some(window);
         self.renderer = Some(renderer);
+        self.note_window_size("opened");
         self.last = std::time::Instant::now();
     }
 
@@ -161,6 +199,10 @@ impl winit::application::ApplicationHandler for App {
         if game::input_icons::is_keyboard_or_mouse_use(&event) {
             self.icon_device.keyboard_or_mouse();
         }
+        // Issue #172: loading owns every other key.
+        if matches!(self.screen, Screen::Loading) && self.display_hotkey(&event) {
+            return;
+        }
         if self.loading_window_event(&event) {
             return;
         }
@@ -173,10 +215,15 @@ impl winit::application::ApplicationHandler for App {
                 if !event.state.is_pressed() {
                     if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
                         self.keys_held &= !game::kbm::menu_key(code);
-                        self.kbm.press(game::kbm::Trigger::Key(code), false);
+                        // Through the chord rule, so a Command, waiting or
+                        // swallowed key released here leaves no state behind.
+                        self.kbm.key_released(code, std::time::Instant::now());
                     }
                 }
             }
+            return;
+        }
+        if self.display_hotkey(&event) {
             return;
         }
         if let (Some(o), Some(w)) = (&mut self.overlay, &self.window) {
@@ -264,8 +311,12 @@ impl winit::application::ApplicationHandler for App {
                 if let Some(r) = &mut self.renderer {
                     r.resize(size.width, size.height);
                 }
+                self.display_resized();
+                self.note_window_size("resized");
             }
             WindowEvent::RedrawRequested => {
+                // A scale change without a resize shows at its next frame.
+                self.note_window_size("scale changed");
                 let elapsed = self.last.elapsed().as_secs_f32();
                 let dt = elapsed.fmin(0.1);
                 self.last = std::time::Instant::now();
@@ -290,6 +341,9 @@ impl winit::application::ApplicationHandler for App {
                     }
                 }
 
+                if let Some(mode) = self.display.requested.take() {
+                    self.set_window_mode(mode);
+                }
                 self.sync_grab();
                 self.sync_pause_audio();
                 let awake = super::idle::wants_idle_inhibit(self.in_battle(), self.paused);
@@ -406,30 +460,25 @@ impl winit::application::ApplicationHandler for App {
                     let mut sound = self.step_controls(input);
                     let pointer = self.shell_pointer.take_frame();
                     let wheel = self.shell_pointer.take_wheel();
-                    if let Some(mut model) = self.controls_model(icons).filter(|_| !input.back) {
-                        if native_pause {
-                            if wheel != 0.0 {
-                                ui::pause_draw::scroll(&mut model, wheel);
-                                if let Some(controls) = self.controls.as_mut() {
-                                    controls.cursor = model.cursor;
-                                }
-                            }
-                            if let (Some((point, true)), Some(r)) =
-                                (pointer, self.renderer.as_ref())
-                            {
-                                let (w, h) = r.size();
-                                if let Some(ui::pause_draw::Target::Row(row)) =
-                                    ui::pause_draw::target(
-                                        &model,
-                                        &self.pause_menu.animation,
-                                        point,
-                                        [w as f32, h as f32],
-                                    )
-                                {
-                                    sound = self.activate_control_row(row).or(sound);
-                                }
-                            }
-                        }
+                    // The list's view eases every frame it is open: the
+                    // paused branch below is skipped while it is.
+                    let model = self
+                        .controls_model(icons)
+                        .filter(|_| !input.back && native_pause);
+                    let size = self.renderer.as_ref().map(|r| {
+                        let (w, h) = r.size();
+                        [w as f32, h as f32]
+                    });
+                    let click = pointer.and_then(|(point, down)| down.then_some(point));
+                    if let Some(row) = game::pause::binding_list_frame(
+                        model.as_ref(),
+                        &mut self.pause_menu.animation,
+                        wheel,
+                        click,
+                        size,
+                        dt,
+                    ) {
+                        sound = self.activate_control_row(row).or(sound);
                     }
                     if let (Some(sound), Some(lib)) = (sound, self.sounds.as_mut()) {
                         lib.play_2d(self.audio.as_mut(), sound.name());
@@ -567,6 +616,8 @@ impl winit::application::ApplicationHandler for App {
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             auto_quality: self.profile.settings.auto_quality,
+                            window_mode: self.display.shown(self.profile.settings.window_mode),
+                            exclusive_fullscreen: self.display.exclusive,
                             input_icons_label: self.profile.settings.input_icons.label(),
                             icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
@@ -631,15 +682,27 @@ impl winit::application::ApplicationHandler for App {
                                 _ => None,
                             };
                             if target.is_none() && wheel != 0.0 {
-                                ui::pause_draw::scroll(&mut model, wheel);
+                                if let Some((w, h)) = self.renderer.as_ref().map(|r| r.size()) {
+                                    ui::pause_draw::scroll(
+                                        &model,
+                                        &self.pause_menu.animation,
+                                        wheel,
+                                        [w as f32, h as f32],
+                                    );
+                                }
                             }
                             self.pause_menu.animation.advance(dt);
                             target
                         } else {
                             None
                         };
-                        let (cursor, actions) =
-                            game::pause::navigate(&mut model, rows_input, target, page_right);
+                        let (cursor, actions) = game::pause::navigate(
+                            &mut model,
+                            rows_input,
+                            target,
+                            page_right,
+                            &self.pause_menu.animation,
+                        );
                         let click = game::pause::pause_sound(rows_input, from, cursor, &actions);
                         if let (Some(c), Some(sl)) = (click, self.sounds.as_mut()) {
                             sl.play_2d(self.audio.as_mut(), c.name());
@@ -681,6 +744,9 @@ impl winit::application::ApplicationHandler for App {
                                 binding_menu = true;
                             }
                             self.restart_clicked |= a == ui::menu::MenuAction::Restart;
+                            if let ui::menu::MenuAction::SetWindowMode(m) = a {
+                                self.display.requested = Some(m);
+                            }
                             if self.netplay.as_mut().is_some_and(|n| {
                                 n.pause_action(
                                     walk,
@@ -761,6 +827,7 @@ impl winit::application::ApplicationHandler for App {
                                 invert_y: self.profile.settings.invert_y,
                                 low_power_resolution: self.profile.settings.low_power_resolution,
                                 auto_quality: self.profile.settings.auto_quality,
+                                window_mode: self.display.shown(self.profile.settings.window_mode),
                                 input_icons_label: self.profile.settings.input_icons.label(),
                                 first_person: self.profile.settings.viewpoint.is_first(),
                                 ..model
@@ -847,6 +914,17 @@ impl winit::application::ApplicationHandler for App {
                                         }
                                     },
                                 );
+                                if let Some(at) = report.corrected {
+                                    // The host's game was replaced by its
+                                    // replay (LAN §4.7): the prediction and
+                                    // the render blend started over in the
+                                    // view; the drawn bolts were the old
+                                    // game's.
+                                    self.bolts.clear();
+                                    println!(
+                                        "lan: the game was corrected from the check at tick {at}"
+                                    );
+                                }
                                 self.kbm.consumed(&pad, 1);
                                 walk.blend.consumed(1);
                                 n.update_meter(Some(walk), report.ticks);
@@ -1189,9 +1267,15 @@ impl winit::application::ApplicationHandler for App {
                 if let Some(quad) = self.fx_quad {
                     extra.extend(self.fx.draws(quad, self.fx_sprite, &camera));
                     if let Some((walk, _)) = &self.walk {
+                        // The view's own squad (issue #173: slot 0 drew the
+                        // host's squad markers on a LAN guest's screen).
+                        let slot = walk.sim.units[walk.player.index as usize]
+                            .spec
+                            .player_slot
+                            .unwrap_or(0);
                         extra.extend(game::squad_vis::squad_draws(
                             &walk.sim,
-                            0,
+                            slot,
                             quad,
                             self.squad_icons.0,
                             self.squad_icons.1,
@@ -1540,6 +1624,9 @@ impl winit::application::ApplicationHandler for App {
                                         ));
                                     }
                                     self.restart_clicked |= a == ui::menu::MenuAction::Restart;
+                                    if let ui::menu::MenuAction::SetWindowMode(m) = a {
+                                        self.display.requested = Some(m);
+                                    }
                                     if self.netplay.as_mut().is_some_and(|n| {
                                         n.pause_action(
                                             walk,

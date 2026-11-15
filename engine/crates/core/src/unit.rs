@@ -382,6 +382,14 @@ pub struct Unit {
     /// any range (design decision 2's hearing rule), which is what stops a
     /// unit standing still while it is killed from behind. Hashed.
     pub last_hit: Option<(UnitHandle, u64)>,
+    /// Issue #173, the maintainer's rule [ours]: the last choke, Force push
+    /// or pull, saber shove or blast throw that moved this unit against its
+    /// will ([`crate::sim::ForcedMove`]). A fall, kill-floor, death-region or
+    /// under-the-map death while it is set is that attacker's kill
+    /// (`Sim::kill_environment`). Never the unit itself; cleared once he has
+    /// been back in control for `FORCED_GRACE` (`Sim::expire_forced_moves`).
+    /// HASHED only when `Some`.
+    pub forced_by: Option<crate::sim::ForcedMove>,
     /// The seat this unit rides in (card VENT, `crate::vehicle`), the unit's
     /// half of the two-sided occupancy; written only by `Sim::seat_unit` /
     /// `Sim::unseat_unit`. HASHED only when `Some`, like `command`, so an
@@ -750,9 +758,25 @@ impl Unit {
             eat(b"CHOKED");
             eat(&choked.left.hash_bits().to_le_bytes());
             eat(&choked.age.hash_bits().to_le_bytes());
+            if let Some(hold) = choked.hold {
+                eat(b"AIR");
+                for v in hold.to_array() {
+                    eat(&v.hash_bits().to_le_bytes());
+                }
+            }
         }
         if let Some(burn) = self.burn {
             burn.hash_into(eat);
+        }
+        if let Some(f) = self.forced_by {
+            eat(b"FORCED");
+            eat(&f.by.index.to_le_bytes());
+            eat(&f.by.gen.to_le_bytes());
+            eat(&f.at.to_le_bytes());
+            if let Some(t) = f.steady_since {
+                eat(b"STEADY");
+                eat(&t.to_le_bytes());
+            }
         }
         self.cloak.hash_into(eat);
         if self.buffs.active() {
@@ -1397,6 +1421,7 @@ impl UnitSpec {
             burst: false,
             last_shot_tick: u64::MAX,
             last_hit: None,
+            forced_by: None,
             command: None,
             order: None,
             mount: None,

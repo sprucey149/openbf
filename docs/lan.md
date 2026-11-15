@@ -72,6 +72,15 @@ verdict:
    networks.
 5. Build the playlist on the Instant Action screen. Guests see it update as
    you edit it. Then start.
+   - Everyone goes to the loading screen together. In a LAN game the loading
+     screen cannot be skipped. When the slowest player has loaded, every
+     screen goes to the battle at the same moment.
+6. The player list (top right) shows everyone's ping, team and whether they
+   are ready. Press **Square** (Xbox **X**, keyboard **Space**) to move into
+   it, **Up / Down** to pick a player, and **Accept** twice to remove one.
+   **Back** cancels, then leaves the list, as Square does. With a mouse, use
+   the **Kick** buttons and **Hide** / **Players**. Guests can open the list
+   too, without Kick.
 
 ## 4. Join a game
 
@@ -115,4 +124,4 @@ verdict:
 | **"The host runs a different openbf build"** | Everyone, the host included, builds from the same commit of the public repository and runs `pack.py` again. A build id ending in `+` and a hash has local changes: see `git status`. |
 | **No answer from the host** | Check the address and the host's firewall. Make sure the host has started hosting. |
 | **"Your copy of a map plays differently"** | That map stays playable for the others. Pick another map for mixed groups. |
-| **A desync message** | The game rejoins on its own. A report is saved under `openbf_data/` next to the game. Please attach it to an issue. |
+| **A desync message** | The game rejoins on its own. If the host's game was the one out of sync, it corrects itself and everyone plays on ("The host's game was corrected"); if that happens twice in one round, the round ends and everyone goes to the results. A report is saved under `openbf_data/` next to the game. Please attach it to an issue. |

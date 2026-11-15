@@ -942,6 +942,100 @@ fn bf1_grenade_types_switch_models_in_bf2s_hud() {
     assert_ne!(v.weapon_mesh(1, &mortar).1, want);
 }
 
+/// Issue #161 (LAN playtest 2026-11-14): the Ewok HUD showed BF2's thermal
+/// detonator for the spear and the rock. A BF1 grenade-bank weapon was sent
+/// to the thermal's key whether it explodes or not, and the natives' weapon
+/// models (baked under `locals`) were not in the HUD's model index, so BF2's
+/// own `ewk_weap_inf_spear -> ewk_spear` and `ewk_weap_inf_rock -> ewk_rock`
+/// rows could never resolve. Both games' Ewoks now show their spear and rock
+/// in the rows they are carried in; BF1's grenades keep BF2's thermal.
+#[test]
+fn ewok_weapons_show_their_own_models_in_bf2s_hud() {
+    let Some(v) = view([640, 480]) else {
+        return;
+    };
+    if !baked()
+        .join("side_bf1/locals/weapons/ewk_spear.glb")
+        .is_file()
+    {
+        eprintln!("skip: no baked Ewok weapons");
+        return;
+    }
+    for game in ["bf1", "bf2"] {
+        let db = side_db(game);
+        // Each in the row it is carried in: the spear the primary, the rock
+        // the second channel.
+        for (class, r, want) in [
+            ("ewk_weap_inf_spear", 1, "ewk_spear"),
+            ("ewk_weap_inf_rock", 2, "ewk_rock"),
+        ] {
+            let row = hud_row(&db, class);
+            assert_ne!(row.key, game::roster::BF2_GRENADE_HUD_KEY, "{game} {class}");
+            let (key, mesh) = v.weapon_mesh(r, &row);
+            println!(
+                "{game} row{r} {class}: sends {}, key {key}, model {mesh:?}",
+                row.key
+            );
+            assert_eq!(mesh.as_deref(), Some(want), "{game} row{r} {class}");
+        }
+    }
+    let bf1 = side_db("bf1");
+    let thermal = hud_row(&bf1, "imp_weap_inf_thermaldetonator");
+    assert_eq!(thermal.key, game::roster::BF2_GRENADE_HUD_KEY);
+}
+
+/// Issue #161's audit: the BF1 natives' weapons with no placed model and no
+/// baked icon sheet showed an empty HUD row. Each stand-in shows its BF2
+/// model in the primary row, where each of them is carried.
+#[test]
+fn bf1_native_weapons_without_a_model_show_a_bf2_stand_in() {
+    let Some(v) = view([640, 480]) else {
+        return;
+    };
+    let db = side_db("bf1");
+    for (class, stand_in) in game::roster::NATIVE_HUD_STAND_INS {
+        if db.get(class).is_none() {
+            continue;
+        }
+        let row = hud_row(&db, class);
+        let mesh = v.weapon_mesh(1, &row).1;
+        println!("{class}: row 1 model {mesh:?}");
+        assert_eq!(mesh.as_deref(), Some(*stand_in), "{class}");
+    }
+}
+
+/// Census (run by hand, `--ignored --nocapture`): every native weapon of
+/// both games' side files and the model each HUD row shows for it (issue
+/// #161's audit table), `None` meaning the row falls back to the icon.
+#[test]
+#[ignore]
+fn census_native_weapons_in_bf2s_hud() {
+    let Some(v) = view([640, 480]) else {
+        return;
+    };
+    for game in ["bf1", "bf2"] {
+        let db = side_db(game);
+        let mut names: Vec<_> = db
+            .names()
+            .filter(|n| db.get(n).is_some_and(|d| d.kind == "wpnc"))
+            .filter(|n| {
+                [
+                    "ewk_", "wok_", "gun_", "geo_", "tat_", "snw_", "hot_", "des_", "gar_",
+                ]
+                .iter()
+                .any(|p| n.starts_with(p))
+            })
+            .map(str::to_owned)
+            .collect();
+        names.sort();
+        for n in &names {
+            let w = hud_row(&db, n);
+            let rows: Vec<_> = [1u8, 2].iter().map(|r| v.weapon_mesh(*r, &w).1).collect();
+            println!("{game} {n}: key {} icon {:?} rows {rows:?}", w.key, w.icon);
+        }
+    }
+}
+
 /// Census (run by hand, `--ignored --nocapture`): for every weapon class
 /// of each game's side files and both HUD rows, the model the port shows
 /// against the PS2's rule on the class's own key (`hudtransforms[key]`,

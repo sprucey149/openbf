@@ -11,6 +11,9 @@
 //! - Every step of every peer checks `Sim::hash` against the first hash any
 //!   peer produced for that tick ([`HashChecker`]); a rejoined peer's replay
 //!   is checked too.
+//! - The host checks itself on a hash mismatch (`super::selfcheck`) with
+//!   the same builder, run inline so a run repeats; a test may give it a
+//!   worker thread instead ([`VirtualNet::set_host_rebuild`]).
 //! - Input latency is measured with markers: every [`MARK_EVERY`]th frame's
 //!   pad carries a marker id 1..=3 in the [`MARK`] bits (button bits the sim
 //!   ignores). A marker's change survives the pacer and the host's queue
@@ -18,12 +21,26 @@
 //!   to id `v` in its own slot's pads it is the latest marker `v` it sent.
 //!   Latency is that send time to the step, in virtual ms. A marker the host
 //!   dropped (sent before the slot joined) is skipped, never mismatched.
-//! - Prediction (opt-in, [`VirtualNet::predict`]): every node also runs a
-//!   [`Predictor`] over its pending inputs each frame, as the window does,
-//!   recording its CPU cost, depth, mode and corrections. It only reads the
-//!   node's sim; the hash checks would catch a write.
+//! - Prediction (opt-in, [`VirtualNet::predict`]): every node runs its
+//!   frames through a [`LocalView`] as the window does (the [`Predictor`]
+//!   over its pending inputs), recording its CPU cost, depth, mode and
+//!   corrections. It only reads the node's sim; the hash checks would catch
+//!   a write.
+//! - Drawing (opt-in, [`VirtualNet::draw`], with prediction): after each
+//!   frame every node draws as the window does - the render blend on,
+//!   [`LocalView::draw_in`] then [`LocalView::draw_out`] - and its
+//!   `Sim::hash` must be the same after as before ([`DrawCheck`]).
+//! - Loading time (opt-in, [`Node::load_ms`]): a node builds its round that
+//!   many virtual ms after its `LoadRound` (its loading screen: the
+//!   presentation and the build), so a test can give every peer its own.
+//!   [`Node::loaded_at`], [`Node::playing_at`] and [`Node::first_step`]
+//!   record when it built, when it first played and its first stepped tick.
+//! - Heroes (opt-in, [`VirtualNet::heroes`]): the scripted pads also accept
+//!   hero offers and hold block now and then ([`scripted_hero_pad`]), so a
+//!   human plays a saber hero whose swings and blocks are predicted and
+//!   drawn ([`Node::hero_frames`], [`Node::melee_frames`]).
 
-use super::{Link, LinkEvent, Notice, Peer, RoundSetup};
+use super::{Link, LinkEvent, LocalView, Notice, Peer, RoundSetup};
 use crate::event_feed::EventFeed;
 use crate::walk::WalkSim;
 use core::sim::PadState;
@@ -69,6 +86,24 @@ pub fn scripted_pad(slot: u8, tick: u64) -> PadState {
         buttons,
         ..PadState::default()
     }
+}
+
+/// [`scripted_pad`] for a hero soak ([`VirtualNet::heroes`]): it also
+/// taps Accept on a hero offer every second and holds block (Reload) for
+/// a second now and then, between the fire bursts.
+pub fn scripted_hero_pad(slot: u8, tick: u64) -> PadState {
+    use core::sim::buttons as b;
+    let mut pad = scripted_pad(slot, tick);
+    let k = f32::from(slot);
+    let t = tick as f32 * core::TICK_DT + k * 1.3;
+    if t % 1.0 < 0.5 {
+        pad.buttons |= b::HERO_ACCEPT;
+    }
+    let block = t % (5.0 + k * 0.3);
+    if (2.0..3.0).contains(&block) {
+        pad.buttons = (pad.buttons & !b::FIRE) | b::RELOAD;
+    }
+    pad
 }
 
 /// Builds a peer's round for its local slot: the walk (already
@@ -179,6 +214,8 @@ pub struct HashChecker {
     /// (node, tick, reference, got), the first 32.
     pub mismatches: Vec<(usize, u32, u64, u64)>,
     pub mismatch_count: u64,
+    /// The latest tick that mismatched.
+    pub last_mismatch_tick: Option<u32>,
 }
 
 impl HashChecker {
@@ -188,6 +225,8 @@ impl HashChecker {
                 self.checks += 1;
                 if *r != hash {
                     self.mismatch_count += 1;
+                    self.last_mismatch_tick =
+                        Some(self.last_mismatch_tick.map_or(tick, |t| t.max(tick)));
                     if self.mismatches.len() < 32 {
                         self.mismatches.push((node, tick, *r, hash));
                     }
@@ -198,6 +237,18 @@ impl HashChecker {
             }
         }
     }
+}
+
+/// [`VirtualNet::draw`]: frames drawn and those whose drawing changed the
+/// confirmed sim's hash.
+#[derive(Debug, Default)]
+pub struct DrawCheck {
+    pub frames: u64,
+    /// Frames that drew the predicted local pose.
+    pub swapped: u64,
+    pub changed: u64,
+    /// (node, tick), the first 32 that changed.
+    pub first_changed: Vec<(usize, u64)>,
 }
 
 /// One peer.
@@ -225,6 +276,15 @@ pub struct Node {
     pub catch_up: Vec<(Micros, Option<Micros>, f64)>,
     /// Wall ms of each round build.
     pub build_ms: Vec<f64>,
+    /// Virtual ms from a `LoadRound` to its build (module rules).
+    pub load_ms: u64,
+    /// A build waiting out [`Node::load_ms`]: when, the setup, joining.
+    pending_build: Option<(Micros, RoundSetup, bool)>,
+    /// The last round's build, first playing frame and first stepped tick
+    /// (with its virtual time).
+    pub loaded_at: Option<Micros>,
+    pub playing_at: Option<Micros>,
+    pub first_step: Option<(u32, Micros)>,
     /// Virtual time this node (re)connected.
     pub connected_at: Micros,
     load_wall: Option<std::time::Instant>,
@@ -235,13 +295,17 @@ pub struct Node {
     /// What every stepped command did, by tick.
     pub applied: Vec<(u32, super::Applied)>,
     pub build_error: Option<String>,
-    /// [`VirtualNet::predict`]: the node's predictor and, per frame that
-    /// predicted, its CPU ms and depth.
-    pub predictor: Option<super::Predictor>,
+    /// [`VirtualNet::predict`]: the node's drawn view (its predictor) and,
+    /// per frame that predicted, its CPU ms and depth.
+    pub view: Option<LocalView>,
     pub predict_ms: Vec<f64>,
     pub predict_depth: Vec<u32>,
     /// Frames with prediction off although inputs were pending.
     pub predict_off: u64,
+    /// Frames whose local unit was a hero, and those with its melee pose
+    /// (a swing or a block) on.
+    pub hero_frames: u64,
+    pub melee_frames: u64,
 }
 
 impl Node {
@@ -272,6 +336,11 @@ impl Node {
             builds: Vec::new(),
             catch_up: Vec::new(),
             build_ms: Vec::new(),
+            load_ms: 0,
+            pending_build: None,
+            loaded_at: None,
+            playing_at: None,
+            first_step: None,
             connected_at: Micros::ZERO,
             load_wall: None,
             bytes_out: 0,
@@ -279,10 +348,12 @@ impl Node {
             log: Vec::new(),
             applied: Vec::new(),
             build_error: None,
-            predictor: None,
+            view: None,
             predict_ms: Vec::new(),
             predict_depth: Vec::new(),
             predict_off: 0,
+            hero_frames: 0,
+            melee_frames: 0,
         }
     }
 }
@@ -294,10 +365,15 @@ pub struct VirtualNet {
     pub nodes: Vec<Node>,
     pub checker: HashChecker,
     build: String,
-    builder: Builder,
+    builder: std::rc::Rc<std::cell::RefCell<Builder>>,
     conn_ids: u32,
     /// Every node predicts (module rules).
     pub predict: bool,
+    /// Every predicting node draws each frame (module rules).
+    pub draw: bool,
+    pub draws: DrawCheck,
+    /// The scripted pads accept heroes and block (module rules).
+    pub heroes: bool,
 }
 
 /// Address of node `i` (0 = the host, on the default port).
@@ -326,10 +402,16 @@ impl VirtualNet {
         sim.add_endpoint(addr(0));
         let mut config = HostConfig::new(build, "Host");
         config.profile = host_profile;
+        let builder = std::rc::Rc::new(std::cell::RefCell::new(builder));
+        let mut peer = Peer::host();
+        let shared = std::rc::Rc::clone(&builder);
+        peer.rebuild = Some(super::Rebuild::Inline(Box::new(move |s, local| {
+            (shared.borrow_mut())(s, local, 0)
+        })));
         let host = Node::new(
             "Host",
             0,
-            Peer::host(),
+            peer,
             NodeLink::Host(Box::new(HostCore::new(config))),
             addr(0),
             16.7,
@@ -343,7 +425,15 @@ impl VirtualNet {
             builder,
             conn_ids: 1000,
             predict: false,
+            draw: false,
+            draws: DrawCheck::default(),
+            heroes: false,
         }
+    }
+
+    /// How the host replays its round for a self-check (module rules).
+    pub fn set_host_rebuild(&mut self, rebuild: Option<super::Rebuild>) {
+        self.nodes[0].peer.rebuild = rebuild;
     }
 
     /// The host's core.
@@ -412,7 +502,21 @@ impl VirtualNet {
         let n = &mut self.nodes[0];
         let bytes = n.peer.host_load(&mut n.link, setup);
         let setup = RoundSetup::decode(&bytes).expect("own setup decodes");
-        self.build_node(0, &setup, false);
+        self.load_node(0, setup, false);
+    }
+
+    /// A `LoadRound` (or the host's own): built now, or after the node's
+    /// [`Node::load_ms`].
+    fn load_node(&mut self, i: usize, setup: RoundSetup, joining: bool) {
+        let n = &mut self.nodes[i];
+        (n.loaded_at, n.playing_at, n.first_step) = (None, None, None);
+        if n.load_ms == 0 {
+            self.build_node(i, &setup, joining);
+        } else {
+            // Its loading screen: no frame of the old round meanwhile.
+            n.walk = None;
+            n.pending_build = Some((self.now + Micros::from_millis(n.load_ms), setup, joining));
+        }
     }
 
     /// The host issues a game command.
@@ -431,9 +535,11 @@ impl VirtualNet {
         let started = std::time::Instant::now();
         let now = self.now;
         let local = self.nodes[i].peer.local_slot;
-        match (self.builder)(setup, local, i) {
+        let built = (self.builder.borrow_mut())(setup, local, i);
+        match built {
             Ok((walk, feed)) => {
                 let n = &mut self.nodes[i];
+                n.loaded_at = Some(now);
                 n.build_ms.push(started.elapsed().as_secs_f64() * 1e3);
                 n.walk = Some(walk);
                 n.feed = feed;
@@ -480,6 +586,11 @@ impl VirtualNet {
             let n = &mut self.nodes[i];
             n.next_frame = n.next_frame + n.frame;
             n.frames += 1;
+            if n.pending_build.as_ref().is_some_and(|(at, ..)| now >= *at) {
+                let (_, setup, joining) = n.pending_build.take().expect("due build");
+                self.build_node(i, &setup, joining);
+            }
+            let n = &mut self.nodes[i];
             let notices = n.peer.poll(&mut n.link);
             for notice in notices {
                 if let Notice::Load { setup, joining, .. } = &notice {
@@ -487,7 +598,7 @@ impl VirtualNet {
                     self.nodes[i]
                         .log
                         .push((now, format!("load (joining {joining})")));
-                    self.build_node(i, &setup, joining);
+                    self.load_node(i, setup, joining);
                     continue;
                 }
                 self.nodes[i].log.push((now, format!("{notice:?}")));
@@ -496,45 +607,57 @@ impl VirtualNet {
             let Some(walk) = n.walk.as_mut() else {
                 continue;
             };
-            let mut pad = scripted_pad(n.peer.local_slot, walk.sim.tick);
+            let mut pad = if self.heroes {
+                scripted_hero_pad(n.peer.local_slot, walk.sim.tick)
+            } else {
+                scripted_pad(n.peer.local_slot, walk.sim.tick)
+            };
             if n.frames.is_multiple_of(MARK_EVERY) {
                 pad.buttons |= (n.marks_made % 3 + 1) << 30;
                 n.marks_made += 1;
             }
             let slot = n.peer.local_slot;
             let dt = n.frame.as_secs_f64();
-            if self.predict && n.predictor.is_none() {
-                n.predictor = Some(super::Predictor::new());
+            if self.predict && n.view.is_none() {
+                n.view = Some(LocalView::new());
             }
-            let (checker, markers, last_mark, lat, predictor) = (
+            let (checker, markers, last_mark, lat, first_step) = (
                 &mut self.checker,
                 &mut n.markers,
                 &mut n.last_mark,
                 &mut n.latencies_ms,
-                &mut n.predictor,
+                &mut n.first_step,
             );
-            let report = n.peer.frame(
-                &mut n.link,
-                dt,
-                pad,
-                walk,
-                n.feed.as_mut(),
-                |w, b: &TickBundle, _| {
-                    checker.check(i, b.tick, w.sim.hash());
-                    if let Some(p) = predictor.as_mut() {
-                        p.note_bundle(b, &w.sim, slot);
-                        p.confirm_shots(&w.sim, w.player);
+            let mut on_tick = |w: &mut WalkSim, b: &TickBundle| {
+                first_step.get_or_insert((b.tick, now));
+                checker.check(i, b.tick, w.sim.hash());
+                let mark = b.pad(slot).map_or(0, mark_of);
+                if mark != 0 && mark != *last_mark {
+                    if let Some(k) = markers.iter().rposition(|(v, _)| *v == mark) {
+                        lat.push(now.saturating_sub(markers[k].1).as_millis_f64());
+                        markers.drain(..=k);
                     }
-                    let mark = b.pad(slot).map_or(0, mark_of);
-                    if mark != 0 && mark != *last_mark {
-                        if let Some(k) = markers.iter().rposition(|(v, _)| *v == mark) {
-                            lat.push(now.saturating_sub(markers[k].1).as_millis_f64());
-                            markers.drain(..=k);
-                        }
-                    }
-                    *last_mark = mark;
-                },
-            );
+                }
+                *last_mark = mark;
+            };
+            // With prediction the window's own per-frame step: the frame,
+            // then the prediction over the inputs still pending.
+            let report = match n.view.as_mut() {
+                Some(view) => view.frame(
+                    &mut n.peer,
+                    &mut n.link,
+                    dt as f32,
+                    pad,
+                    walk,
+                    n.feed.as_mut(),
+                    |w, b, _, _| on_tick(w, b),
+                ),
+                None => n
+                    .peer
+                    .frame(&mut n.link, dt, pad, walk, n.feed.as_mut(), |w, b, _| {
+                        on_tick(w, b)
+                    }),
+            };
             // A marker held across several sent ticks is one rising edge.
             for p in &report.submitted {
                 let m = mark_of(p);
@@ -547,15 +670,44 @@ impl VirtualNet {
                 n.last_sent_mark = m;
             }
             n.applied.extend(report.applied);
-            if let Some(p) = n.predictor.as_mut() {
-                let pending: Vec<PadState> = n.peer.pending_inputs().iter().copied().collect();
-                p.update(&walk.sim, slot, &pending, dt as f32);
+            if report.mode == super::Mode::Playing {
+                n.playing_at.get_or_insert(now);
+            }
+            if let Some(view) = n.view.as_mut() {
+                let p = &view.predictor;
                 if p.depth() > 0 {
                     n.predict_ms.push(p.stats.cost_ms);
                     n.predict_depth.push(p.depth() as u32);
-                } else if !pending.is_empty() {
+                } else if !n.peer.pending_inputs().is_empty() {
                     n.predict_off += 1;
                 }
+                if self.draw {
+                    walk.blend.on = true;
+                    let before = walk.sim.hash();
+                    view.draw_in(walk);
+                    self.draws.frames += 1;
+                    self.draws.swapped += u64::from(view.predictor.swapped());
+                    view.draw_out(walk);
+                    if walk.sim.hash() != before {
+                        self.draws.changed += 1;
+                        if self.draws.first_changed.len() < 32 {
+                            self.draws.first_changed.push((i, walk.sim.tick));
+                        }
+                    }
+                }
+            }
+            if let Some(u) = walk
+                .sim
+                .players
+                .get(usize::from(slot))
+                .copied()
+                .flatten()
+                .filter(|h| walk.sim.is_hero(*h))
+                .and_then(|h| walk.sim.unit(h))
+            {
+                n.hero_frames += 1;
+                let melee = u.weapon.melee.as_ref().and_then(|m| m.pose());
+                n.melee_frames += u64::from(melee.is_some());
             }
             if let Some(t) = report.caught_up {
                 let wall = n

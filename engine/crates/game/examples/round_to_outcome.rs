@@ -414,7 +414,11 @@
 //!   PROXY (`core::ai::proxy`): the sim treats it as a human for every
 //!   human-only rule, it plays with that strength's fixed profile (the
 //!   `key=value` items override single fields: the calibration loop's knobs),
-//!   and it keeps the flag through its deaths.
+//!   and it keeps the flag through its deaths. Issue #171: further entries
+//!   after `;` (`0:good;0:good;1:good`) make more fighting proxies, each the
+//!   next bot of its team on foot; the tally, match log and `round` line's
+//!   proxy fields stay the first one's, and the line adds the others' kills
+//!   and deaths and `humans a:b`.
 //!
 //! `MATCHLOG_DIR=<dir>` with a proxy writes the proxy's match log
 //! (`game::matchlog`, the file the windowed game writes for its player) as
@@ -436,6 +440,11 @@
 //! per side on the missions' tickets, the setup the tiers were tuned at (not
 //! the map defaults); `SWEEP_COMBATANTS` / `SWEEP_TICKETS` override. Without
 //! maps it runs [`CHECK_MAPS`]. `SWEEP_THREADS` (default 8) rounds at once.
+//! Issue #171: `--humans A:B` puts A fighting proxies (the first included)
+//! on the proxy's side and B on the other, every one of the same strength;
+//! the win counted is the A side's. `--first-seed N` runs seeds N..N+seeds-1.
+//! `SWEEP_PROXY_CLASS=N` plays every proxy as the mission's class N.
+//! Its table adds the `bvb` and `fire` lines below, summed per tier.
 //!
 //! ## Bot census — `BOT_CENSUS`
 //! With `BOT_CENSUS=1` or `STUCK_CENSUS`, and always inside
@@ -458,6 +467,15 @@
 //! - `think <key>: calls N p50 X p99 Y max Z us | thinks ... | proxy calls
 //!   ...`: the think's wall time per call (a machine measurement: never
 //!   compare it across loads or cores).
+//! - Issue #171, keyed on the PROXY's side ("ally", team 0 without one)
+//!   against the other team, not on the DTEAM row: `bvb <key>: ally bots
+//!   kill enemy bots N | enemy bots kill ally bots N | ally bvb K/D X |
+//!   all-cause K/D ...`, and per weapon kind (`scoped` = the AI sniper
+//!   table's rifle on foot, `foot-other`, `mounted`) `fire <key> <kind>:
+//!   shots S (>=40m) hits H (>=40m) rate ... kills K one-hit O mean-range M
+//!   strays T`: a hostile bot's shots whose target is a human, its hits
+//!   that took a human's health, its kills of humans, the hits that killed
+//!   from full health, and the hits from a bot holding none of his tokens.
 //!
 //! `--difficulty-check` adds the D1 rates of the bots facing the proxy and
 //! each group's lever counts per foot-minute to its tier table.
@@ -539,6 +557,11 @@ struct Cfg {
     mission_dir: Option<std::path::PathBuf>,
     /// The proxy's team, profile and strength label.
     proxy: Option<(u8, core::ai::proxy::Profile, String)>,
+    /// Issue #171: more fighting proxies (`SWEEP_PROXY`'s `;`-separated
+    /// entries after the first, or `--difficulty-check --humans`), each a
+    /// team and profile. They count as humans and play like the first; the
+    /// round's tally and match log stay the first one's.
+    more_proxies: Vec<(u8, core::ai::proxy::Profile)>,
     /// `BOT_CENSUS=1` (module header): the bot census lines.
     bot_census: bool,
 }
@@ -580,13 +603,31 @@ impl Cfg {
             }),
             era_cw: var("SWEEP_ERA").as_deref() == Some("cw"),
             mission_dir: var("SWEEP_MISSION_DIR").map(std::path::PathBuf::from),
-            proxy: var("SWEEP_PROXY").and_then(|v| match parse_proxy(&v) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    eprintln!("SWEEP_PROXY={v}: {e}; no proxy");
-                    None
+            proxy: var("SWEEP_PROXY").and_then(|v| {
+                let first = v.split(';').next().unwrap_or("");
+                match parse_proxy(first) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        eprintln!("SWEEP_PROXY={v}: {e}; no proxy");
+                        None
+                    }
                 }
             }),
+            more_proxies: var("SWEEP_PROXY")
+                .map(|v| {
+                    v.split(';')
+                        .skip(1)
+                        .filter(|e| !e.trim().is_empty())
+                        .filter_map(|e| match parse_proxy(e) {
+                            Ok((t, p, _)) => Some((t, p)),
+                            Err(err) => {
+                                eprintln!("SWEEP_PROXY entry {e}: {err}; skipped");
+                                None
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             bot_census: var("BOT_CENSUS").is_some_and(|v| v != "0"),
         }
     }
@@ -727,6 +768,11 @@ struct RoundResult {
     proxy: Option<(u8, game::blackbox::session::Session)>,
     /// The round's bot census (`core::ai::census`).
     bots: core::ai::census::BotCensus,
+    /// Issue #171: bot fire at humans and bot-vs-bot kills, by the proxy's
+    /// side (with `BOT_CENSUS`).
+    fire: HumanFire,
+    /// Issue #171: the further proxies' teams and tallies.
+    others: Vec<(u8, game::blackbox::session::Session)>,
 }
 
 impl RoundResult {
@@ -751,6 +797,18 @@ impl RoundResult {
                 m.hits as f32 / m.shots.max(1) as f32,
                 m.alive_ticks as f32 / core::TICK_HZ as f32 / lives
             ));
+            if !self.others.is_empty() {
+                let mut n = [0u8; 2];
+                n[usize::from(*team)] += 1;
+                for (t, o) in &self.others {
+                    n[usize::from(*t)] += 1;
+                    s.push_str(&format!(
+                        " | other {t} kills {} deaths {}",
+                        o.kills, o.deaths
+                    ));
+                }
+                s.push_str(&format!(" | humans {}:{}", n[0], n[1]));
+            }
         }
         s.push('\n');
         s
@@ -4796,8 +4854,14 @@ fn run_map(
         w.sim.vacate_player_slot(0);
     }
     let seated = w.sim.extra_humans;
+    // Issue #171 option C: `SWEEP_NETPLAY=1` plays the round as a LAN one
+    // (`Sim::netplay_rows`).
+    w.sim.netplay_rows = std::env::var("SWEEP_NETPLAY").as_deref() == Ok("1");
     if let Some((team, _, _)) = cfg().proxy {
         w.sim.extra_humans[team as usize] += 1;
+        for (t, _) in cfg().more_proxies {
+            w.sim.extra_humans[t as usize] += 1;
+        }
     }
     let opening = if slot0_is_bot() {
         counts
@@ -4847,6 +4911,36 @@ fn run_map(
             "{key:10} SWEEP_PROXY: no bot on foot to make the proxy"
         );
     }
+    // Issue #171: the further proxies, each the next bot of its team on
+    // foot that is not one already.
+    let mut others: Vec<(usize, game::blackbox::session::Tally)> = Vec::new();
+    if proxy.is_some() {
+        for (team, profile) in cfg().more_proxies {
+            let h = w
+                .sim
+                .alive_units()
+                .find(|(_, u)| {
+                    u.team == team
+                        && u.controller == core::unit::Controller::Ai
+                        && !u.is_player
+                        && u.proxy_human.is_none()
+                        && u.mount.is_none()
+                })
+                .map(|(h, _)| h);
+            match h {
+                Some(h) => {
+                    w.sim.set_proxy(h, Some(profile));
+                    others.push((h.index as usize, game::blackbox::session::Tally::default()));
+                }
+                None => outln!(
+                    out,
+                    "{key:10} SWEEP_PROXY: no bot on foot for proxy on team {team}"
+                ),
+            }
+        }
+    }
+    let ally_team = proxy.as_ref().map_or(0, |(i, _)| w.sim.units[*i].team);
+    let mut hfire = cfg().bot_census.then(HumanFire::default);
     // `MATCHLOG_DIR`: the proxy's whole-round match log.
     let mut matchlog = proxy
         .as_ref()
@@ -5023,6 +5117,12 @@ fn run_map(
         }
         if let Some((i, tally)) = proxy.as_mut() {
             tally.tick(&w.sim, Some((*i, "proxy")));
+        }
+        for (i, tally) in &mut others {
+            tally.tick(&w.sim, Some((*i, "proxy")));
+        }
+        if let Some(h) = hfire.as_mut() {
+            h.observe(&w.sim, ally_team);
         }
         if let Some(m) = matchlog.as_mut() {
             m.tick(&w.sim, &core::sim::PadState::default());
@@ -5936,6 +6036,9 @@ fn run_map(
     if census_on || cfg().bot_census {
         census.push_str(&bot_census_lines(key, &w.sim));
     }
+    if let Some(h) = &hfire {
+        census.push_str(&h.lines(key));
+    }
     if let Some(f) = &fire {
         census.push_str(&f.line(key));
     }
@@ -5984,6 +6087,11 @@ fn run_map(
             - i64::from(w.sim.battle.teams[0].tickets()),
         proxy: proxy.map(|(i, tally)| (w.sim.units[i].team, tally.out)),
         bots: w.sim.bot_census,
+        fire: hfire.unwrap_or_default(),
+        others: others
+            .into_iter()
+            .map(|(i, tally)| (w.sim.units[i].team, tally.out))
+            .collect(),
     };
     census.push_str(&round.line(
         key,
@@ -6002,6 +6110,239 @@ fn run_map(
             stuck_max: w.sim.nav_stats.stuck_max,
         }),
         round: Some(round),
+    }
+}
+
+/// Issue #171: the human-fire and bot-vs-bot census (`BOT_CENSUS`, and
+/// always inside `--difficulty-check`). Read off each tick's events only;
+/// nothing here writes to the sim, so STDOUT and the hash are unchanged.
+///
+/// Teams are keyed on the PROXY's team ("ally", the side with the most
+/// humans; team 0 without a proxy) against the other of teams 0 and 1
+/// ("enemy"), never on the DTEAM row, so the split survives a rule that
+/// gives both teams the same row. Bots are units without a human flag;
+/// third teams (natives) are left out.
+#[derive(Clone, Copy, Default)]
+struct HumanFire {
+    /// `bvb[k]`: kills by bots of side k (0 ally, 1 enemy) of bots of the
+    /// other side.
+    bvb: [u64; 2],
+    /// `bot_deaths[k]`: deaths of side k's bots to anything that credited
+    /// a Kill (bots, humans, own side).
+    bot_deaths: [u64; 2],
+    /// `bot_kills[k]`: every hostile unit (bot or human) side k's bots killed.
+    bot_kills: [u64; 2],
+    /// Per weapon kind ([`HumanFire::KINDS`]): bot fire at humans.
+    kind: [FireKind; 3],
+}
+
+/// One weapon kind's bot fire at humans ([`HumanFire`]).
+#[derive(Clone, Copy, Default)]
+struct FireKind {
+    /// `Shot` events of a hostile bot whose target is a human; `shots40`
+    /// those with the human 40 m or more away.
+    shots: u64,
+    shots40: u64,
+    /// `Hit` events from a hostile bot that took a human's health.
+    hits: u64,
+    hits40: u64,
+    /// `Kill` events of a human by a hostile bot.
+    kills: u64,
+    /// Hits that killed a human from full health.
+    one_hit: u64,
+    /// Sum of the hit ranges (m).
+    range_sum: f64,
+    /// Hits from a bot holding none of the human's tokens (card TOKN's
+    /// real strays, `ai::tokn::bars`).
+    strays: u64,
+}
+
+impl FireKind {
+    fn merge(&mut self, o: &FireKind) {
+        self.shots += o.shots;
+        self.shots40 += o.shots40;
+        self.hits += o.hits;
+        self.hits40 += o.hits40;
+        self.kills += o.kills;
+        self.one_hit += o.one_hit;
+        self.range_sum += o.range_sum;
+        self.strays += o.strays;
+    }
+
+    fn line(&self) -> String {
+        format!(
+            "shots {} (>=40m {}) hits {} (>=40m {}) rate {:.3} (>=40m {:.3}) kills {} one-hit {} mean-range {:.1} m strays {}",
+            self.shots,
+            self.shots40,
+            self.hits,
+            self.hits40,
+            self.hits as f64 / self.shots.max(1) as f64,
+            self.hits40 as f64 / self.shots40.max(1) as f64,
+            self.kills,
+            self.one_hit,
+            self.range_sum / self.hits.max(1) as f64,
+            self.strays,
+        )
+    }
+}
+
+impl HumanFire {
+    /// The weapon kinds: a scoped rifle on foot (the AI sniper table's
+    /// class, `WeaponClass::ai_distance_table`), any other weapon on foot,
+    /// and any gun fired from a seat.
+    const KINDS: [&'static str; 3] = ["scoped", "foot-other", "mounted"];
+    /// The far band's edge (m).
+    const FAR: f32 = 40.0;
+
+    /// Unit `h` as it stands this tick, alive or just killed (same
+    /// generation).
+    fn any(sim: &core::sim::Sim, h: core::unit::UnitHandle) -> Option<&core::unit::Unit> {
+        sim.units.get(h.index as usize).filter(|u| u.gen == h.gen)
+    }
+
+    /// Which side (0 ally, 1 enemy) a team 0/1 unit is on.
+    fn side(ally: u8, team: u8) -> Option<usize> {
+        (team < 2).then(|| usize::from(team != ally))
+    }
+
+    fn kind_of(sim: &core::sim::Sim, u: &core::unit::Unit) -> usize {
+        if u.mount.is_some() {
+            2
+        } else {
+            let wc = u.active_weapon().0;
+            usize::from(
+                !sim.weapon_classes
+                    .get(wc)
+                    .is_some_and(|c| c.ai_distance_table()),
+            )
+        }
+    }
+
+    /// Fold this tick's events in. `ally`: the proxy's team (0 with none).
+    fn observe(&mut self, sim: &core::sim::Sim, ally: u8) {
+        use core::sim::Event;
+        let bot =
+            |u: &core::unit::Unit| u.controller == core::unit::Controller::Ai && !u.is_human();
+        for ev in &sim.events {
+            match *ev {
+                Event::Shot { unit, .. } => {
+                    let Some(u) = sim.unit(unit).filter(|u| bot(u)) else {
+                        continue;
+                    };
+                    let Some(t) = u.ai.target.and_then(|f| f.unit()).and_then(|t| sim.unit(t))
+                    else {
+                        continue;
+                    };
+                    if !t.is_human() || !sim.hostile(u.team, t.team) {
+                        continue;
+                    }
+                    let k = &mut self.kind[Self::kind_of(sim, u)];
+                    k.shots += 1;
+                    if (t.capsule().center() - u.ai_eye()).length() >= Self::FAR {
+                        k.shots40 += 1;
+                    }
+                }
+                Event::Hit {
+                    shooter,
+                    victim,
+                    damage,
+                    health_left,
+                    ..
+                } => {
+                    let (Some(s), Some(v)) = (Self::any(sim, shooter), Self::any(sim, victim))
+                    else {
+                        continue;
+                    };
+                    if !bot(s) || !v.is_human() || damage <= 0.0 || !sim.hostile(s.team, v.team) {
+                        continue;
+                    }
+                    let d = (v.capsule().center() - s.ai_eye()).length();
+                    let k = &mut self.kind[Self::kind_of(sim, s)];
+                    k.hits += 1;
+                    k.range_sum += f64::from(d);
+                    if d >= Self::FAR {
+                        k.hits40 += 1;
+                    }
+                    if health_left <= 0.0 && damage + health_left >= 0.999 * v.health.max {
+                        k.one_hit += 1;
+                    }
+                    if core::ai::tokn::bars(sim, shooter, victim) {
+                        k.strays += 1;
+                    }
+                }
+                Event::Kill { shooter, victim } => {
+                    let (Some(s), Some(v)) = (Self::any(sim, shooter), Self::any(sim, victim))
+                    else {
+                        continue;
+                    };
+                    if !v.is_human() && v.controller == core::unit::Controller::Ai {
+                        if let Some(vs) = Self::side(ally, v.team) {
+                            self.bot_deaths[vs] += 1;
+                        }
+                    }
+                    if !bot(s) || !sim.hostile(s.team, v.team) {
+                        continue;
+                    }
+                    let Some(ss) = Self::side(ally, s.team) else {
+                        continue;
+                    };
+                    if Self::side(ally, v.team).is_some() {
+                        self.bot_kills[ss] += 1;
+                        if !v.is_human() {
+                            self.bvb[ss] += 1;
+                        }
+                    }
+                    if v.is_human() {
+                        self.kind[Self::kind_of(sim, s)].kills += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn merge(&mut self, o: &HumanFire) {
+        for (a, b) in [
+            (&mut self.bvb, &o.bvb),
+            (&mut self.bot_deaths, &o.bot_deaths),
+            (&mut self.bot_kills, &o.bot_kills),
+        ] {
+            a[0] += b[0];
+            a[1] += b[1];
+        }
+        for (a, b) in self.kind.iter_mut().zip(&o.kind) {
+            a.merge(b);
+        }
+    }
+
+    /// The bot-vs-bot line: each side's kills of the other side's bots, its
+    /// bot-vs-bot K/D (the enemy's is the reciprocal) and its all-cause K/D.
+    fn bvb_line(&self) -> String {
+        let r = |a: u64, b: u64| a as f64 / b.max(1) as f64;
+        format!(
+            "ally bots kill enemy bots {} | enemy bots kill ally bots {} | ally bvb K/D {:.3} | all-cause K/D ally {:.3} enemy {:.3}",
+            self.bvb[0],
+            self.bvb[1],
+            r(self.bvb[0], self.bvb[1]),
+            r(self.bot_kills[0], self.bot_deaths[0]),
+            r(self.bot_kills[1], self.bot_deaths[1]),
+        )
+    }
+
+    /// The round's stderr lines (`bvb <key>: ...`, `fire <key> <kind>: ...`).
+    fn lines(&self, key: &str) -> String {
+        let mut s = format!(
+            "bvb {key}: {} | raw kills {}/{} deaths {}/{}\n",
+            self.bvb_line(),
+            self.bot_kills[0],
+            self.bot_kills[1],
+            self.bot_deaths[0],
+            self.bot_deaths[1]
+        );
+        for (name, k) in Self::KINDS.iter().zip(&self.kind) {
+            s.push_str(&format!("fire {key} {name}: {}\n", k.line()));
+        }
+        s
     }
 }
 
@@ -6140,12 +6481,25 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
     let mut ticks = 60_000u64;
     let mut tiers: Vec<Difficulty> = Difficulty::ALL.to_vec();
     let mut only: Vec<String> = Vec::new();
+    // Issue #171: humans on the proxy's side and on the other (all fighting
+    // proxies of the same strength), and the first seed.
+    let mut humans = (1u8, 0u8);
+    let mut first_seed = 1u32;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().unwrap_or_default();
         match a.as_str() {
             "--strength" => strength = Strength::parse(&val()).unwrap_or(Strength::Good),
             "--seeds" => seeds = val().parse().unwrap_or(8),
+            "--first-seed" => first_seed = val().parse().unwrap_or(1),
+            "--humans" => {
+                let v = val();
+                let (a, b) = v.split_once(':').unwrap_or(("1", "0"));
+                humans = (
+                    a.parse().unwrap_or(1).clamp(1, 8),
+                    b.parse().unwrap_or(0).min(8),
+                );
+            }
             "--ticks" => ticks = val().parse().unwrap_or(60_000),
             "--tiers" => {
                 tiers = val().split(',').filter_map(Difficulty::parse).collect();
@@ -6170,6 +6524,15 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
     // The tiers (`core::ai::proxy::TARGETS`) were tuned at 16 per side on the
     // missions' tickets: the check plays that unless SWEEP_COMBATANTS /
     // SWEEP_TICKETS / SWEEP_TICKET_PCT say otherwise.
+    // Issue #171: `SWEEP_PROXY_CLASS=N` plays every proxy as the mission's
+    // class N (`-1`: free choice) instead of the profile's.
+    let mut profile = strength.profile();
+    if let Some(c) = std::env::var("SWEEP_PROXY_CLASS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i32>().ok())
+    {
+        profile.class = u8::try_from(c).ok();
+    }
     let base = Cfg::from_env();
     let base = Cfg {
         combatants: base.combatants.or(Some(DIFFICULTY_CHECK_PER_SIDE)),
@@ -6181,7 +6544,7 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
     for &d in &tiers {
         for m in 0..selected.len() {
             for side in [0u8, 1] {
-                for seed in 1..=seeds {
+                for seed in first_seed..first_seed + seeds {
                     jobs.push((d, m, side, seed));
                 }
             }
@@ -6213,10 +6576,16 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
                 }
                 let (d, m, side, seed) = jobs[k];
                 let (key, path) = selected[m];
+                let more: Vec<(u8, core::ai::proxy::Profile)> = (1..humans.0)
+                    .map(|_| side)
+                    .chain((0..humans.1).map(|_| 1 - side))
+                    .map(|t| (t, profile))
+                    .collect();
                 CFG.with(|c| {
                     *c.borrow_mut() = Cfg {
                         difficulty: d,
-                        proxy: Some((side, strength.profile(), strength.label().to_owned())),
+                        proxy: Some((side, profile, strength.label().to_owned())),
+                        more_proxies: more,
                         bot_census: true,
                         ..base.clone()
                     };
@@ -6229,6 +6598,8 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
                         .lines()
                         .filter(|l| {
                             l.starts_with("round ")
+                                || l.starts_with("bvb ")
+                                || l.starts_with("fire ")
                                 || l.starts_with("d1 ")
                                 || l.starts_with("levers ")
                                 || l.starts_with("think ")
@@ -6245,10 +6616,20 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
         }
     });
     let results = results.into_inner().expect("check results");
-    println!(
-        "difficulty check: proxy {} (PROVISIONAL), both sides of each map, seeds 1..={seeds}",
-        strength.label()
-    );
+    if humans == (1, 0) && first_seed == 1 {
+        println!(
+            "difficulty check: proxy {} (PROVISIONAL), both sides of each map, seeds 1..={seeds}",
+            strength.label()
+        );
+    } else {
+        println!(
+            "difficulty check: proxy {} (PROVISIONAL), humans {}:{} (the proxy's side first), both sides of each map, seeds {first_seed}..={}",
+            strength.label(),
+            humans.0,
+            humans.1,
+            first_seed + seeds - 1
+        );
+    }
     println!(
         "{:7} {:>6} {:>12} {:>7} {:>11} {:>8} {:>6} {:>6} {:>6}  verdict",
         "tier", "rounds", "proxy wins", "rate", "target", "margin", "K/D", "acc", "life_s"
@@ -6260,6 +6641,7 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
             (0u32, 0u32, 0u32, 0u32, 0u64, 0usize);
         let mut per_map: Vec<String> = Vec::new();
         let mut bots = core::ai::census::BotCensus::default();
+        let mut fire = HumanFire::default();
         for (m, (key, _)) in selected.iter().enumerate() {
             let mut side_w = [0u32; 2];
             let mut side_n = [0u32; 2];
@@ -6270,6 +6652,7 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
                 }
                 let Some(r) = r else { continue };
                 bots.merge(&r.bots);
+                fire.merge(&r.fire);
                 let side = j.2;
                 let own = if side == 1 { r.margin } else { -r.margin };
                 let won = r.winner == Some(side);
@@ -6336,6 +6719,10 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
             d[4],
             pct(d[5], d[4])
         );
+        println!("    bvb (the proxy's side = ally): {}", fire.bvb_line());
+        for (name, k) in HumanFire::KINDS.iter().zip(&fire.kind) {
+            println!("    fire at humans, {name}: {}", k.line());
+        }
         for (name, c) in census_groups(&bots) {
             if name.starts_with("proxy ") {
                 continue;

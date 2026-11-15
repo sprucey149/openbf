@@ -52,6 +52,10 @@ pub(super) struct FrontShell {
     pub(super) repeat: ui::shell_feel::HoldRepeat,
     /// The music level was raised from off: the take of the moment again.
     music_replay: bool,
+    /// Issue #128: when the music's clock last moved. The menus' frames can
+    /// stall (a hidden window draws no frames, and each frame's step is
+    /// clamped) while the take plays on in real time.
+    music_clock: Option<std::time::Instant>,
     /// A page of the port's own covered the screen last frame.
     was_covered: bool,
     /// Issue #168: Multiplayer's Host Game or Join Game page is up.
@@ -133,6 +137,23 @@ impl Controls {
                 control_layout::gamepad_defaults(context, &settings.controller_bindings)
             })
         };
+        // Issue #172: a layout from before F11 switched fullscreen shows its
+        // F11 action unassigned, and the page asks for a key before leaving.
+        let mut layout = layout;
+        let mut message = None;
+        if let Layout::Keyboard(items) = &mut layout {
+            let actions = control_layout::actions(context, true);
+            for (i, t) in items.iter_mut().enumerate() {
+                if *t == Some(game::kbm::FULLSCREEN_KEY) {
+                    *t = None;
+                    message = Some(format!(
+                        "{}; {} is unassigned",
+                        game::kbm::f11_note(game::kbm::MAC),
+                        actions[i].name
+                    ));
+                }
+            }
+        }
         let original = layout.complete();
         Self {
             context,
@@ -140,7 +161,7 @@ impl Controls {
             original,
             cursor: 0,
             capture: None,
-            message: None,
+            message,
         }
     }
 
@@ -187,6 +208,11 @@ impl Controls {
         }
         let conflict = match (&mut self.layout, bind) {
             (Layout::Keyboard(items), Binding::Keyboard(t)) => {
+                // Issue #172: F11, and Command on macOS, never hold an action.
+                if let Some(why) = game::kbm::reserved_key(t, game::kbm::MAC) {
+                    self.message = Some(why);
+                    return MenuSound::Error;
+                }
                 if !game::control_layout::accepts_trigger(actions[row], t) {
                     self.message = Some(
                         "Mouse wheel cannot hold movement; choose a key or mouse button".into(),
@@ -266,6 +292,7 @@ impl FrontShell {
                 | 1,
             repeat: Default::default(),
             music_replay: false,
+            music_clock: None,
             was_covered: false,
             mp: None,
             text_focus: false,
@@ -278,6 +305,50 @@ impl FrontShell {
     pub(super) fn stop_music(&mut self) {
         self.music = None;
         self.playlist = Default::default();
+        self.music_clock = None;
+    }
+
+    /// Tests: the shell music's takes in place of the bank's.
+    #[cfg(test)]
+    pub(super) fn set_music_takes(&mut self, takes: Vec<audio::StreamTake>) {
+        self.music_takes = Some((1.0, takes));
+    }
+
+    /// Tests: the take playing now (`None` in a gap or before the first).
+    #[cfg(test)]
+    pub(super) fn music_playing(&self) -> Option<usize> {
+        self.playlist.playing(&self.music_secs())
+    }
+
+    /// The takes' lengths in list order (none without the bank).
+    fn music_secs(&self) -> Vec<f32> {
+        self.music_takes
+            .as_ref()
+            .map_or_else(Vec::new, |(_, takes)| {
+                takes.iter().map(audio::StreamTake::secs).collect()
+            })
+    }
+
+    /// The music's schedule moved on by one menu frame: `dt` the frame's
+    /// step, `wall` the real seconds since the last one (the take keeps
+    /// playing in real time, so the next is due by the later of the two).
+    /// Returns the take to start now: the playlist's next, or the take of
+    /// the moment again after the level was raised from off.
+    fn music_due(&mut self, dt: f32, wall: f32) -> Option<usize> {
+        let secs = self.music_secs();
+        let mut rng = self.music_rng;
+        let due = {
+            let mut pick = |n: usize| (xorshift(&mut rng) % n.max(1) as u64) as usize;
+            self.playlist.step(dt.fmax(wall), &secs, &mut pick)
+        };
+        self.music_rng = rng;
+        // A replay asked for waits until there is a take to play (none
+        // loaded yet, or a gap between takes).
+        let start = due.or_else(|| self.playlist.playing(&secs).filter(|_| self.music_replay));
+        if start.is_some() {
+            self.music_replay = false;
+        }
+        start
     }
 
     /// Ask for a menu click (rate limited, `ShellMenus::cues`).
@@ -330,7 +401,11 @@ fn setting_sound(
     }
     match rows.get(to)? {
         Row::Music | Row::Resume => None,
-        Row::InvertY | Row::InputIcons | Row::FlightControls | Row::CareerAwards
+        Row::InvertY
+        | Row::InputIcons
+        | Row::FlightControls
+        | Row::CareerAwards
+        | Row::WindowMode
             if input.confirm || input.left || input.right =>
         {
             Some(MenuSound::Accept)
@@ -625,6 +700,37 @@ impl App {
         true
     }
 
+    /// The shell music (`ifs_start` sets `shell_soundtrack`, §2): a random
+    /// take each time with the shell's gap between them, at its gain x the
+    /// `shellmusic` bus x the profile's level (re-bf2-menus §4.4, menuref
+    /// §9.3.9). Every menu screen's frame runs it, the LAN lobby's too
+    /// (issue #128), so the takes follow one another for as long as the
+    /// menus are up.
+    pub(super) fn step_shell_music(&mut self, front: &mut FrontShell, dt: f32) {
+        let now = std::time::Instant::now();
+        let wall = front
+            .music_clock
+            .replace(now)
+            .map_or(0.0, |t| now.duration_since(t).as_secs_f32());
+        let due = front.music_due(dt, wall);
+        if let (Some(k), Some((gain, takes)), Some(audio)) =
+            (due, &front.music_takes, self.audio.as_mut())
+        {
+            let level = self.profile.settings.music_volume;
+            front.music = None;
+            if level > 0.0 {
+                front.music = audio
+                    .play_stream(
+                        takes[k].clone(),
+                        game::sounds::level_db(gain * level),
+                        false,
+                    )
+                    .map_err(|e| eprintln!("shell music: {e:#}"))
+                    .ok();
+            }
+        }
+    }
+
     /// Shell frame: the PS2 front screens (card BSHLA), the Instant Action
     /// screen or the settings page; navigate, maybe launch, draw.
     pub(super) fn redraw_shell(
@@ -741,32 +847,24 @@ impl App {
             }
             let icons = self.current_icons();
             controls_model = self.controls_model(icons);
-            front.settings_animation.advance(dt);
-            if let Some(model) = controls_model.as_mut().filter(|_| !input.back) {
-                let native = front.view.as_ref().is_some_and(|v| v.can_draw_pause());
-                if native {
-                    if wheel != 0.0 {
-                        ui::pause_draw::scroll(model, wheel);
-                        if let Some(controls) = self.controls.as_mut() {
-                            controls.cursor = model.cursor;
-                        }
-                    }
-                    if let Some((point, true)) = pointer {
-                        if let Some((w, h)) = self.renderer.as_ref().map(|r| r.size()) {
-                            if let Some(ui::pause_draw::Target::Row(row)) = ui::pause_draw::target(
-                                model,
-                                &front.settings_animation,
-                                point,
-                                [w as f32, h as f32],
-                            ) {
-                                if let Some(sound) = self.activate_control_row(row) {
-                                    front.cue(sound);
-                                }
-                                controls_model = self.controls_model(icons);
-                            }
-                        }
-                    }
+            let native = front.view.as_ref().is_some_and(|v| v.can_draw_pause());
+            let size = self.renderer.as_ref().map(|r| {
+                let (w, h) = r.size();
+                [w as f32, h as f32]
+            });
+            let click = pointer.and_then(|(point, down)| down.then_some(point));
+            if let Some(row) = game::pause::binding_list_frame(
+                controls_model.as_ref().filter(|_| !input.back && native),
+                &mut front.settings_animation,
+                wheel,
+                click,
+                size,
+                dt,
+            ) {
+                if let Some(sound) = self.activate_control_row(row) {
+                    front.cue(sound);
                 }
+                controls_model = self.controls_model(icons);
             }
         } else if let Some((page, cursor)) = front.settings {
             let icons = self.current_icons();
@@ -797,6 +895,8 @@ impl App {
                 invert_y: settings.invert_y,
                 low_power_resolution: settings.low_power_resolution,
                 auto_quality: settings.auto_quality,
+                window_mode: self.shown_window_mode(),
+                exclusive_fullscreen: self.display.exclusive,
                 input_icons_label: settings.input_icons.label(),
                 icons,
                 first_person: settings.viewpoint.is_first(),
@@ -821,10 +921,17 @@ impl App {
                 None
             };
             if wheel != 0.0 && native {
-                ui::pause_draw::scroll(&mut model, wheel);
+                if let Some((w, h)) = self.renderer.as_ref().map(|r| r.size()) {
+                    ui::pause_draw::scroll(
+                        &model,
+                        &front.settings_animation,
+                        wheel,
+                        [w as f32, h as f32],
+                    );
+                }
             }
             let (cursor, acts) = if let Some(hit) = pointer_hit {
-                let result = ui::pause_draw::click(&mut model, hit);
+                let result = ui::pause_draw::click(&mut model, &front.settings_animation, hit);
                 if let Some(sound) = result.1.first().copied().and_then(shell_click_sound) {
                     front.cue(sound);
                 }
@@ -915,41 +1022,7 @@ impl App {
                 None => {}
             }
         }
-        // The music (`ifs_start` sets `shell_soundtrack`, §2): a random take
-        // each time with the shell's gap between them, at its gain x the
-        // `shellmusic` bus x the profile's level (re-bf2-menus §4.4, menuref
-        // §9.3.9).
-        let secs: Vec<f32> = front
-            .music_takes
-            .as_ref()
-            .map_or_else(Vec::new, |(_, takes)| {
-                takes.iter().map(audio::StreamTake::secs).collect()
-            });
-        let mut rng = front.music_rng;
-        let due = {
-            let mut pick = |n: usize| (xorshift(&mut rng) % n.max(1) as u64) as usize;
-            front.playlist.step(dt, &secs, &mut pick)
-        };
-        front.music_rng = rng;
-        if let Some((gain, takes)) = &front.music_takes {
-            let level = self.profile.settings.music_volume;
-            // A level raised from off: the take of the moment starts again.
-            let replay = std::mem::take(&mut front.music_replay);
-            let due = due.or_else(|| front.playlist.playing(&secs).filter(|_| replay));
-            if let (Some(k), Some(audio)) = (due, self.audio.as_mut()) {
-                front.music = None;
-                if level > 0.0 {
-                    front.music = audio
-                        .play_stream(
-                            takes[k].clone(),
-                            game::sounds::level_db(gain * level),
-                            false,
-                        )
-                        .map_err(|e| eprintln!("shell music: {e:#}"))
-                        .ok();
-                }
-            }
-        }
+        self.step_shell_music(&mut front, dt);
         front.menus.covered = front.ia_open
             || front.settings.is_some()
             || self.controls.is_some()
@@ -1131,11 +1204,9 @@ impl App {
             r1: edges & game::kbm::MENU_R1 != 0,
         };
         if wheel != 0.0 {
-            let lines = if wheel > 0.0 {
-                -(wheel.round().fmax(1.0) as isize)
-            } else {
-                (-wheel).round().fmax(1.0) as isize
-            };
+            // The wheel's own amount, a trackpad's fractions too: the list's
+            // view eases there (`ui::scroll`).
+            let lines = -wheel;
             let point = self.shell_pointer.pos();
             let size = self.renderer.as_ref().map(|r| r.size());
             ia.scroll_pointer(point, size.map(|(w, h)| [w as f32, h as f32]), lines);
@@ -1163,13 +1234,13 @@ impl App {
                     if click {
                         match target {
                             ui::shell::PointerTarget::ScrollLeft(delta) => {
-                                ia.scroll_left(delta);
+                                ia.scroll_left(delta as f32);
                             }
                             ui::shell::PointerTarget::ScrollRight(delta) => {
-                                ia.scroll_right(delta);
+                                ia.scroll_right(delta as f32);
                             }
                             ui::shell::PointerTarget::ScrollOption(delta) => {
-                                ia.scroll_option(delta);
+                                ia.scroll_option(delta as f32);
                             }
                             ui::shell::PointerTarget::Option(_, right) => {
                                 ia_input.menu.left |= !right;
@@ -1270,6 +1341,10 @@ impl App {
             MenuAction::SetFpsCounter(v) => s.fps_counter = v as u8,
             MenuAction::SetNetworkMeter(on) => s.network_meter = on,
             MenuAction::SetAutoQuality(on) => s.auto_quality = on,
+            MenuAction::SetWindowMode(mode) => {
+                self.set_window_mode(mode);
+                return;
+            }
             MenuAction::SetAssist(v) => {
                 s.assist_intensity = game::profile::clamp_assist_intensity(v)
             }
@@ -1319,15 +1394,138 @@ impl App {
             );
         }
         self.kbm.follow(&self.profile.settings);
+        self.refresh_context_bindings();
         if let Err(e) = self.profile.save() {
             eprintln!("profile autosave failed: {e:#}");
         }
     }
 }
 
+/// Tests: a mono take of `secs` seconds that no test opens (28 frames
+/// from each 16-byte block at 28 Hz: a block a second).
+#[cfg(test)]
+pub(super) fn test_take(secs: u32) -> audio::StreamTake {
+    audio::StreamTake {
+        path: std::path::PathBuf::new(),
+        offset: 0,
+        size: 16 * secs as usize,
+        format: 0,
+        channels: 1,
+        substreams: 1,
+        interleave: 0,
+        frequency: 28,
+        block_size: 16 * 1024,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A settings change made in a vehicle (the real `apply_shell_setting`
+    /// path, not `Kbm::follow` alone) keeps the vehicle's table and look
+    /// factor, and takes the new sensitivity.
+    #[test]
+    fn a_settings_change_in_a_vehicle_keeps_the_vehicle_table() {
+        use game::kbm::Bindings;
+        use std::path::PathBuf;
+        let dir =
+            std::env::temp_dir().join(format!("openbf-vehicle-setting-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        let store = game::profile::Store::new(dir.clone());
+        let mut app = App::new(
+            PathBuf::new(),
+            PathBuf::new(),
+            super::super::tests::setup(None),
+            None,
+            None,
+            None,
+            Default::default(),
+        );
+        app.profile = store
+            .create("Tester", core::skill::Difficulty::Normal)
+            .unwrap();
+        app.profile_store = Some(store);
+        app.binding_context = Some(ControlContext::Vehicle);
+        app.refresh_context_bindings();
+        assert_eq!(app.kbm.bindings, Bindings::pc_default_v0());
+        let mut front = FrontShell::new(&dir);
+        app.apply_shell_setting(&mut front, ui::menu::MenuAction::SetMouseSensitivity(0.5));
+        assert_eq!(app.kbm.bindings, Bindings::pc_default_v0());
+        assert_eq!(app.kbm.look_scale, 1.0);
+        assert_eq!(app.kbm.sensitivity, 0.5);
+        app.binding_context = Some(ControlContext::Infantry);
+        app.refresh_context_bindings();
+        assert_eq!(app.kbm.bindings, Bindings::pc_default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Issue #128: the shell music never ends while the menus are up. Over
+    /// twelve minutes of shell frames a take always follows the last after
+    /// the shell's gap, also while the frames stall (a hidden window: each
+    /// frame's step clamped to 0.1 s while two real seconds pass), since the
+    /// take itself plays on in real time.
+    #[test]
+    fn the_shell_music_moves_on_take_after_take_for_twelve_minutes() {
+        let mut front = FrontShell::new(std::path::Path::new("/nonexistent-openbf-assets"));
+        front.set_music_takes(vec![test_take(95), test_take(140), test_take(60)]);
+        let secs = front.music_secs();
+        assert_eq!(secs, [95.0, 140.0, 60.0]);
+        // (real seconds, the silence so far, the longest, takes started)
+        let mut run = (0.0f32, 0.0f32, 0.0f32, 0u32);
+        let frames = |front: &mut FrontShell, run: &mut (f32, f32, f32, u32), dt, wall, until| {
+            while run.0 < until {
+                if front.music_due(dt, wall).is_some() {
+                    run.3 += 1;
+                }
+                run.0 += wall;
+                if front.music_playing().is_some() {
+                    run.1 = 0.0;
+                } else {
+                    run.1 += wall;
+                    run.2 = run.2.fmax(run.1);
+                }
+            }
+        };
+        frames(&mut front, &mut run, 1.0 / 30.0, 1.0 / 30.0, 360.0);
+        let steady = run.3;
+        frames(&mut front, &mut run, 0.1, 2.0, 720.0);
+        let (starts, longest) = (run.3, run.2);
+        assert!(steady >= 3, "{steady} takes in the first six minutes");
+        assert!(
+            starts - steady >= 2,
+            "{} takes while the frames stalled",
+            starts - steady
+        );
+        assert!(
+            longest <= ui::shell_feel::MUSIC_GAP + 2.0,
+            "{longest} s without music"
+        );
+    }
+
+    /// Issue #128: music raised from off asks for the take of the moment
+    /// again; with no takes loaded the ask waits for one instead of being
+    /// spent on nothing.
+    #[test]
+    fn a_music_replay_waits_for_a_take() {
+        let mut front = FrontShell::new(std::path::Path::new("/nonexistent-openbf-assets"));
+        front.music_takes = None;
+        front.music_replay = true;
+        assert_eq!(front.music_due(0.1, 0.1), None);
+        assert!(front.music_replay, "nothing to play: the replay waits");
+        front.set_music_takes(vec![test_take(95)]);
+        assert_eq!(front.music_due(0.1, 0.1), Some(0), "the first take");
+        assert!(!front.music_replay, "the take started");
+        front.music_replay = true;
+        assert_eq!(
+            front.music_due(0.1, 0.1),
+            Some(0),
+            "the take of the moment again"
+        );
+        assert!(!front.music_replay);
+        assert_eq!(front.music_due(0.1, 0.1), None, "once");
+    }
 
     fn controls() -> Controls {
         let mut controls = Controls::new(
@@ -1403,6 +1601,64 @@ mod tests {
         assert_eq!(sound(&at(Row::Fov), MenuInput::default()), None);
     }
 
+    /// Issue #172: F11 is the fullscreen key; the editor keeps the row as it was.
+    #[test]
+    fn the_binding_editor_refuses_the_fullscreen_key() {
+        let mut c = controls();
+        let f11 = game::kbm::Trigger::Key(winit::keyboard::KeyCode::F11);
+        assert_eq!(c.assign(Binding::Keyboard(f11)), MenuSound::Error);
+        assert!(c.capture.is_some(), "still waiting for a key");
+        assert_eq!(
+            c.message.as_deref(),
+            Some(
+                format!(
+                    "{}; choose another key",
+                    game::kbm::f11_note(game::kbm::MAC)
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(c.missing(), None);
+    }
+
+    /// Issue #172: a saved layout that bound F11 opens with that action
+    /// unassigned and says so; the page asks for a key before it saves.
+    #[test]
+    fn a_saved_f11_binding_opens_unassigned() {
+        let mut settings = game::profile::Settings::default();
+        let mut items: Vec<_> = game::control_layout::keyboard_defaults(
+            ControlContext::Infantry,
+            &settings.keyboard_bindings,
+        )
+        .into_iter()
+        .map(Option::unwrap)
+        .collect();
+        let row = items.len() - 1;
+        items[row] = game::kbm::FULLSCREEN_KEY;
+        assert!(game::control_layout::keyboard(ControlContext::Infantry, &items).is_some());
+        settings
+            .keyboard_layouts
+            .set(ControlContext::Infantry, items);
+        let c = Controls::new(
+            SettingsPage::KeyboardMouse,
+            ControlContext::Infantry,
+            &settings,
+        );
+        assert_eq!(c.missing(), Some(row));
+        let name = game::control_layout::actions(ControlContext::Infantry, true)[row].name;
+        assert_eq!(
+            c.message.as_deref(),
+            Some(
+                format!(
+                    "{}; {name} is unassigned",
+                    game::kbm::f11_note(game::kbm::MAC)
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(settings.free_fullscreen_key(), [ControlContext::Infantry]);
+    }
+
     #[test]
     fn occupied_binding_leaves_the_displaced_action_unassigned() {
         let mut c = controls();
@@ -1436,6 +1692,8 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            netplay_rows: false,
+            opening_humans: [0; 2],
             score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         let mut app = App::new(

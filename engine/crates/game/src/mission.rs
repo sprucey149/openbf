@@ -164,12 +164,7 @@ pub struct MissionDef {
     /// (Tantive `blastdoor`, Yavin `TempleBlastDoor`).
     #[serde(default)]
     pub killed: Vec<String>,
-    /// Legacy first-class summary and member pool. It cannot identify the team
-    /// or describe the complete roster. New consumers should use `local_teams`.
-    #[serde(default)]
-    pub locals: Option<(String, u32)>,
-    /// Authored native teams. Older RON files may carry a legacy `locals`
-    /// summary, which omits team IDs and classes.
+    /// Authored native teams.
     #[serde(default)]
     pub local_teams: Vec<LocalTeamDef>,
     /// Authored `SetTeamAsFriend` / `SetTeamAsEnemy` calls involving local teams,
@@ -749,12 +744,6 @@ mod tests {
         );
 
         assert_eq!(current.local_team_relations, [(4, 1, true), (2, 4, false)]);
-
-        let legacy: MissionDef =
-            ron::from_str(&format!(r#"{base} locals: Some(("first", 3)))"#)).unwrap();
-        assert_eq!(legacy.locals, Some(("first".into(), 3)));
-        assert!(legacy.local_teams.is_empty());
-        assert!(legacy.local_team_relations.is_empty());
     }
 
     fn cp(name: &str) -> core::cp::CpDef {

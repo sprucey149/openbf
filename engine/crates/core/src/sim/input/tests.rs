@@ -199,13 +199,13 @@ fn past_lock_on_range_is_picked_but_not_the_magnet() {
     assert_eq!(s.reticle_pick[0], None);
 }
 
-/// OURS (sniper aim assist): the disc's sniper (LockOnRange 0) takes no
-/// magnet; with the loader's override it takes an enemy at 50 m and at
-/// 120 m, scoped and not, and none past its 128 m reach.
+/// OURS (sniper aim assist, issue #164): the disc's sniper (LockOnRange 0)
+/// takes no magnet; with the loader's override it takes an enemy at 50,
+/// 120, 200 and 290 m, scoped and not, and none past its bolt's 300 m reach.
 /// measure: controller sniper-assist acquisition and pull at staged distances before replacing
 /// the deliberate shared sniper-assist reach.
 #[test]
-fn a_sniper_rifle_takes_a_magnet_out_to_its_max_range() {
+fn a_sniper_rifle_takes_a_magnet_out_to_its_rounds_reach() {
     let r = (crate::unit::AIM_BOX_MAX - crate::unit::AIM_BOX_MIN).length() * 0.5;
     let disc = crate::weapon::tests::disc_sniper(0.0);
     let mut ours = disc.clone();
@@ -214,7 +214,9 @@ fn a_sniper_rifle_takes_a_magnet_out_to_its_max_range() {
         (&disc, 50.0, false),
         (&ours, 50.0, true),
         (&ours, 120.0, true),
-        (&ours, 128.0 + r + 1.0, false),
+        (&ours, 200.0, true),
+        (&ours, 290.0, true),
+        (&ours, 300.0 + r + 1.0, false),
     ] {
         for scoped in [false, true] {
             let (mut s, p, o) = range(&[(1, Vec3::new(0.0, 0.0, -dist))]);
@@ -819,6 +821,8 @@ fn aim_assist_pulls_toward_the_unit_target() {
 /// What [`strafe`] measured.
 struct Strafe {
     hits: u32,
+    /// Shots followed by a hit before the next (a beam hits on many ticks).
+    hit_shots: u32,
     shots: u32,
     /// The player's yaw after each tick.
     yaws: Vec<f32>,
@@ -837,11 +841,54 @@ struct Strafe {
 /// with no magnet arms nothing). `lead`: the assist's lead on or off
 /// (off = the PS2's assist).
 fn strafe(lead: bool, dist: f32, speed: f32, life: f32, period: u32, ticks: u32) -> Strafe {
+    let mut rifle = crate::weapon::WeaponClass::bf1_rifle();
+    rifle.ordnance.velocity = speed;
+    rifle.ordnance.life_span = life;
+    strafe_with(&rifle, false, 0.0, lead, dist, period, ticks)
+}
+
+/// [`strafe`] with the player's weapon `class`, scoped at its far zoom or
+/// not, and the player's move stick held at `walk` to his right (−1..1).
+fn strafe_with(
+    class: &crate::weapon::WeaponClass,
+    scoped: bool,
+    walk: f32,
+    lead: bool,
+    dist: f32,
+    period: u32,
+    ticks: u32,
+) -> Strafe {
+    strafe_world(class, scoped, walk, lead, dist, period, ticks).0
+}
+
+/// [`strafe_with`], and the world after it.
+fn strafe_world(
+    class: &crate::weapon::WeaponClass,
+    scoped: bool,
+    walk: f32,
+    lead: bool,
+    dist: f32,
+    period: u32,
+    ticks: u32,
+) -> (Strafe, Sim) {
     let (mut s, p, o) = range(&[(1, Vec3::new(0.0, 0.0, -dist))]);
     s.assist_lead_on = lead;
     let w = s.unit(p).unwrap().weapon_class;
-    s.weapon_classes[w].ordnance.velocity = speed;
-    s.weapon_classes[w].ordnance.life_span = life;
+    s.weapon_classes[w] = class.clone();
+    // No reload in the run (a reload drops the scope).
+    s.weapon_classes[w].rounds_per_clip = 1000;
+    s.units[p.index as usize].weapon =
+        crate::weapon::WeaponState::new(&s.weapon_classes[w], true, 6);
+    let zoom = scoped.then(|| {
+        let (value, divisor) = class.zoom_at(1);
+        crate::unit::Zoom {
+            step: 1,
+            value,
+            divisor,
+            scope: class.zoom_first_person,
+        }
+    });
+    s.units[p.index as usize].zoom = zoom;
     let e = o[0];
     let run = s.unit(e).unwrap().consts.max_speed;
     let u = &mut s.units[e.index as usize];
@@ -857,7 +904,9 @@ fn strafe(lead: bool, dist: f32, speed: f32, life: f32, period: u32, ticks: u32)
     me.yaw = crate::fmath::atan2(-c.x, -c.z);
     me.pitch = crate::fmath::atan2(c.y, (c.x * c.x + c.z * c.z).sqrt());
     s.acquire_magnet(0, p, false);
+    let mut window_hit = false;
     let mut out = Strafe {
+        hit_shots: 0,
         hits: 0,
         shots: 0,
         yaws: Vec::new(),
@@ -865,16 +914,24 @@ fn strafe(lead: bool, dist: f32, speed: f32, life: f32, period: u32, ticks: u32)
         run,
     };
     for k in 0..ticks {
-        let pad = if k % 10 == 0 {
+        let mut pad = if k % 10 == 0 {
             fire()
         } else {
             PadState::default()
         };
+        pad.lx = PadState::quantize(walk);
         s.step(&[pad]);
         for ev in &s.events {
             match *ev {
-                crate::sim::Event::Shot { unit, .. } if unit == p => out.shots += 1,
-                crate::sim::Event::Hit { victim, .. } if victim == e => out.hits += 1,
+                crate::sim::Event::Shot { unit, .. } if unit == p => {
+                    out.shots += 1;
+                    window_hit = false;
+                }
+                crate::sim::Event::Hit { victim, .. } if victim == e => {
+                    out.hits += 1;
+                    out.hit_shots += u32::from(!window_hit);
+                    window_hit = true;
+                }
                 _ => {}
             }
         }
@@ -884,7 +941,7 @@ fn strafe(lead: bool, dist: f32, speed: f32, life: f32, period: u32, ticks: u32)
             out.unpicked += 1;
         }
     }
-    out
+    (out, s)
 }
 
 /// The ticks the reticle's turn changes sense (a wobble), counting only
@@ -910,8 +967,8 @@ fn largest_step(yaws: &[f32]) -> f32 {
 /// often than under the PS2's assist - a rifle's 80 m/s round and a
 /// sniper's 2000 m/s one, at 30 and 60 m. (The disc snipers ship
 /// LockOnRange 0; the loader's `WeaponClass::give_sniper_assist` gives
-/// them a 128 m, 1° magnet; the 2000 m/s round here is the rifle's
-/// magnet with a sniper's speed.) The runner
+/// them a 1° magnet to their round's reach; the 2000 m/s round here is
+/// the rifle's magnet with a sniper's speed.) The runner
 /// turns about every 5 s.
 #[test]
 fn the_lead_hits_a_crossing_runner_under_a_still_stick() {
@@ -939,6 +996,114 @@ fn the_lead_hits_a_crossing_runner_under_a_still_stick() {
         );
         assert_eq!(ours.unpicked, 0, "{name} {dist}: the HUD's pick held");
     }
+}
+
+/// Issue #164: the assisted aim meets each round where the sweep judges
+/// it. A human's round meets a soldier [`crate::unit::HUMAN_SHOT_LAG`] back
+/// and a fast one also its own age back (`unit::human_meet_lag`), so a
+/// sniper's 2000 m/s bolt and a beam are aimed at the body with no flight
+/// lead, and a slow bolt leads by its own flight. A controller player holds
+/// his sticks still on a runner crossing at run speed (turning about every
+/// 5 s) and taps FIRE: the scoped sniper rifle (the loader's magnet) at 80
+/// and 150 m, at 250 m with its full strength carried out to the bolt's
+/// reach (past 128 m the loader's curve fades it, so a still stick there
+/// is not enough), BF2's award beam at 80, 150 and 250 m, and a rifle
+/// firing a 500 m beam at 30, 45 and 60 m (its lead had taken the beam's
+/// unauthored 150 m/s `Velocity`). The rifle's 80 m/s bolt on one crossing
+/// with no turn about: it misses only while its lead grows in. Lead-off
+/// (the PS2's lead) leads a beam by the same speed: the award beam hits
+/// 60 of 60 at 80 and 150 m (by the 150 m/s it hit 1 of 60, the reticle
+/// dragged off the runner), and the rifle's beam at 30 m hits 4 of 60
+/// either way, as the PS2's tracking needs a moving stick.
+#[test]
+fn the_assisted_aim_meets_each_round_where_the_sweep_judges_it() {
+    let beam = crate::weapon::BeamClass {
+        range: 500.0,
+        life: 0.15,
+        pierce: true,
+        impact: None,
+    };
+    let mut bolt = crate::weapon::tests::disc_sniper(0.0);
+    bolt.give_sniper_assist();
+    let mut far = bolt.clone();
+    far.assist_full_range = far.lock_on_range;
+    let mut award = crate::weapon::tests::disc_sniper(0.1);
+    award.ordnance.velocity = 150.0;
+    award.ordnance.beam = Some(beam.clone());
+    award.extreme_range = 22.5;
+    award.give_sniper_assist();
+    let rifle = crate::weapon::WeaponClass::bf1_rifle();
+    let mut beam_rifle = rifle.clone();
+    beam_rifle.ordnance.velocity = 150.0;
+    beam_rifle.ordnance.beam = Some(beam);
+    for (name, class, scoped, lead, dist, ticks, floor) in [
+        ("sniper bolt", &bolt, true, true, 80.0, 600, 59),
+        ("sniper bolt", &bolt, true, true, 150.0, 600, 59),
+        (
+            "sniper bolt, full strength",
+            &far,
+            true,
+            true,
+            250.0,
+            600,
+            59,
+        ),
+        ("award beam", &award, true, true, 80.0, 600, 59),
+        ("award beam", &award, true, true, 150.0, 600, 59),
+        ("award beam", &award, true, true, 250.0, 600, 59),
+        ("rifle beam", &beam_rifle, false, true, 30.0, 600, 59),
+        ("rifle beam", &beam_rifle, false, true, 45.0, 600, 59),
+        ("rifle beam", &beam_rifle, false, true, 60.0, 600, 59),
+        ("rifle bolt", &rifle, false, true, 30.0, 150, 12),
+        ("rifle bolt", &rifle, false, true, 45.0, 150, 11),
+        ("rifle bolt", &rifle, false, true, 60.0, 150, 9),
+        ("award beam, lead off", &award, true, false, 80.0, 600, 59),
+        ("award beam, lead off", &award, true, false, 150.0, 600, 59),
+        (
+            "rifle beam, lead off",
+            &beam_rifle,
+            false,
+            false,
+            30.0,
+            600,
+            4,
+        ),
+    ] {
+        let r = strafe_with(class, scoped, 0.0, lead, dist, 150, ticks);
+        println!(
+            "{name} at {dist} m, runner {} m/s: {}/{} shots hit",
+            r.run, r.hit_shots, r.shots
+        );
+        assert!(
+            r.hit_shots >= floor,
+            "{name} at {dist} m: {}/{}",
+            r.hit_shots,
+            r.shots
+        );
+        assert_eq!(r.unpicked, 0, "{name} at {dist} m: the HUD's pick held");
+    }
+}
+
+/// Issue #164 pin: a controller sniper, scoped with the loader's magnet,
+/// holding his sticks still on a runner crossing 150 m out (past the 128 m
+/// full strength, on the fade) and tapping FIRE, for 300 ticks. The idle
+/// core pin never has a human holding a magnet; this one moves when the
+/// sniper's acquisition, lead, curve or pull does.
+#[test]
+fn assist_hash_pin_scoped_sniper_on_a_runner() {
+    // Recorded 2026-11-14 (job claude-aim-assist-164-fixup).
+    const PIN: u64 = 0xeb57_878b_139c_7708;
+    let mut bolt = crate::weapon::tests::disc_sniper(0.0);
+    bolt.give_sniper_assist();
+    let (r, s) = strafe_world(&bolt, true, 0.0, true, 150.0, 150, 300);
+    println!(
+        "sniper pin: {}/{} shots hit, hash {:#018x}",
+        r.hit_shots,
+        r.shots,
+        s.hash()
+    );
+    assert!(r.hit_shots > 0 && r.unpicked == 0);
+    assert_eq!(s.hash(), PIN);
 }
 
 /// No jump when the runner turns about (every 1.5 s here): the reticle
@@ -1041,13 +1206,15 @@ fn heavy_rocket_infantry_magnet_uses_half_configured_assist_only_on_foot() {
 fn sniper_slowdown_tracking_and_pull_fade_at_long_range() {
     for scoped in [false, true] {
         for intensity in [0.0, 0.5, 1.0] {
+            // Full to 128 m, nothing at the bolt's 300 m (issue #164).
             for (dist, fade) in [
                 (50.0, 1.0),
-                (64.0, 1.0),
-                (96.0, 0.5),
-                (120.0, 0.125),
-                (128.0, 0.0),
-                (129.0, 0.0),
+                (128.0, 1.0),
+                (171.0, 0.75),
+                (214.0, 0.5),
+                (257.0, 0.25),
+                (300.0, 0.0),
+                (301.0, 0.0),
             ] {
                 let (mut s, p, targets) = range(&[(1, Vec3::new(0.0, 0.0, -dist))]);
                 let w = s.unit(p).unwrap().weapon_class;
@@ -1069,8 +1236,8 @@ fn sniper_slowdown_tracking_and_pull_fade_at_long_range() {
                 s.unit_mut(targets[0]).unwrap().soldier.pos += eye + fwd * dist - center;
                 let m = AimTarget::Unit(targets[0]);
                 s.acquire_magnet(0, p, false);
-                if dist <= 128.0 {
-                    assert_eq!(s.magnet[0], Some(m));
+                if dist <= 300.0 {
+                    assert_eq!(s.magnet[0], Some(m), "magnet at {dist} m");
                 }
                 let pad = PadState {
                     rx: 8000,
@@ -1098,7 +1265,10 @@ fn sniper_slowdown_tracking_and_pull_fade_at_long_range() {
                     let out = s.assisted(0, p, m, &pad, crate::TICK_DT).unwrap().0;
                     // A full-strength control at the same distance: remove only
                     // sniper classification, retaining the identical scope and lead.
+                    // Its PS2 pull fade over LockOnRange is pushed out of reach:
+                    // the sniper's one curve replaces it (issue #164).
                     s.weapon_classes[w].zoom_first_person = false;
+                    s.weapon_classes[w].lock_on_range = 1.0e9;
                     s.assist_lead[0] = Some((m, lead));
                     s.assist_intensity = intensity * fade;
                     // Before fire the scoped sniper follows half the angular rate.
@@ -1114,6 +1284,7 @@ fn sniper_slowdown_tracking_and_pull_fade_at_long_range() {
                     assert!((i32::from(out.rx) - i32::from(expected)).abs() <= 1,
                         "tracking/pull {dist} scoped {scoped} fire {fire} intensity {intensity}: {} vs {expected}", out.rx);
                     s.weapon_classes[w].zoom_first_person = true;
+                    s.weapon_classes[w].lock_on_range = 300.0;
                     s.assist_intensity = intensity;
                     s.assist_lead[0] = None;
                 }
@@ -1163,7 +1334,7 @@ fn heavy_vehicle_assist_and_named_other_weapons_keep_full_strength() {
 #[test]
 fn zero_intensity_and_sniper_range_fringe_preserve_the_pad_exactly() {
     for sniper in [false, true] {
-        let (mut s, p, targets) = range(&[(1, Vec3::new(0.0, 0.0, -129.0))]);
+        let (mut s, p, targets) = range(&[(1, Vec3::new(0.0, 0.0, -301.0))]);
         if sniper {
             let w = s.unit(p).unwrap().weapon_class;
             s.weapon_classes[w] = crate::weapon::tests::disc_sniper(0.0);

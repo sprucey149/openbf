@@ -16,8 +16,8 @@
 //! index:  u32 count, then per entry: u16 path length, path (UTF-8, '/'-separated, "<name>/<rel>"), u64 offset, u64 length
 //! footer: b"OPENBFPK", u64 pack start, u64 index offset, u64 index length      (32 bytes, the file's last)
 //! ```
-//! Length bit 63 marks compression; bit 62 selects zstd (otherwise legacy raw Deflate). The body begins with a
-//! u32 uncompressed length. Unflagged entries retain the original layout and remain directly seekable.
+//! Length bit 63 marks compression, and a compressed entry also carries bit 62 (zstd, the only codec). The body
+//! begins with a u32 uncompressed length. Unflagged entries are stored as they are and remain directly seekable.
 //!
 //! Offsets are from the start of the file. The pack start is where the executable proper ends, so re-packing a packed
 //! binary copies only the executable. [`PAK_NAME`] has the same layout with no executable bytes: its pack start is 0.
@@ -197,51 +197,20 @@ impl Archive {
         let expected = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
         // Do not reserve from the advertised length: a corrupt header must not allocate gigabytes.
         // Read at most one byte past it, so a bad stream cannot expand without a bound either.
+        if raw_len & ZSTD_FLAG == 0 {
+            return Err(bad(
+                "compressed entry without zstd (an older pack; build the game again)",
+            ));
+        }
         let mut out = Vec::new();
-        if raw_len & ZSTD_FLAG != 0 {
-            let mut decoder = zstd::stream::read::Decoder::with_buffer(&buf[4..])?.single_frame();
-            decoder.window_log_max(27)?;
-            decoder
-                .by_ref()
-                .take(expected as u64 + 1)
-                .read_to_end(&mut out)?;
-            if !decoder.finish().is_empty() {
-                return Err(bad("trailing compressed data"));
-            }
-        } else {
-            // Legacy Deflate packs remain readable. Require the end marker as well as the length;
-            // Read's EOF alone also accepts a truncated raw Deflate stream.
-            let mut decoder = flate2::Decompress::new(false);
-            let mut block = [0u8; 65536];
-            loop {
-                let before_in = decoder.total_in();
-                let before_out = decoder.total_out();
-                let room = expected
-                    .saturating_sub(out.len())
-                    .saturating_add(1)
-                    .min(block.len());
-                let status = decoder
-                    .decompress(
-                        &buf[4 + before_in as usize..],
-                        &mut block[..room],
-                        flate2::FlushDecompress::None,
-                    )
-                    .map_err(|e| bad(&format!("invalid Deflate stream: {e}")))?;
-                let written = (decoder.total_out() - before_out) as usize;
-                out.extend_from_slice(&block[..written]);
-                if out.len() > expected {
-                    break;
-                }
-                if status == flate2::Status::StreamEnd {
-                    if decoder.total_in() as usize != buf.len() - 4 {
-                        return Err(bad("trailing compressed data"));
-                    }
-                    break;
-                }
-                if decoder.total_in() == before_in && written == 0 {
-                    return Err(bad("truncated Deflate stream"));
-                }
-            }
+        let mut decoder = zstd::stream::read::Decoder::with_buffer(&buf[4..])?.single_frame();
+        decoder.window_log_max(27)?;
+        decoder
+            .by_ref()
+            .take(expected as u64 + 1)
+            .read_to_end(&mut out)?;
+        if !decoder.finish().is_empty() {
+            return Err(bad("trailing compressed data"));
         }
         if out.len() != expected {
             return Err(bad("decompressed length mismatch"));

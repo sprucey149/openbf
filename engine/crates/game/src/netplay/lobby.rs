@@ -211,10 +211,6 @@ pub enum LobbyPhase {
     Results { ready: Vec<u8> },
 }
 
-fn awards_default() -> bool {
-    true
-}
-
 /// One player in the roster.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LobbyPlayer {
@@ -257,7 +253,6 @@ pub struct LobbyState {
     pub cheat_policy: u32,
     pub lag_comp: bool,
     /// The award policy (LAN §5b; `RoundSetup::awards`).
-    #[serde(default = "awards_default")]
     pub awards: bool,
     pub max_players: u8,
     pub roster: Vec<LobbyPlayer>,
@@ -273,14 +268,15 @@ const STATES: [State; 5] = [
     State::Playlist,
 ];
 
+/// A cursor on the wire: its row and the first row its view rests on.
 fn cur(c: ListCursor) -> (u16, u16) {
-    (c.at as u16, c.top as u16)
+    (c.at as u16, c.view.target().round() as u16)
 }
 
 fn uncur((at, top): (u16, u16)) -> ListCursor {
     ListCursor {
         at: usize::from(at),
-        top: usize::from(top),
+        view: ui::scroll::ScrollView::at(f32::from(top)),
     }
 }
 
@@ -295,7 +291,7 @@ impl LobbyState {
             Page::Group(g, c) => PageKey::Group {
                 group: GROUPS.iter().position(|x| *x == g).unwrap_or(0) as u8,
                 at: c.at as u16,
-                top: c.top as u16,
+                top: c.view.target().round() as u16,
             },
         };
         let o = &ia.options;

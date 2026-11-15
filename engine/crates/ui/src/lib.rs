@@ -39,6 +39,7 @@ pub mod menu;
 pub mod overlay;
 pub mod pause_draw;
 pub mod scoreboard;
+pub mod scroll;
 pub mod shell;
 pub mod shell_feel;
 pub mod shell_ia;
@@ -47,6 +48,7 @@ pub mod spawn;
 pub mod spawn_draw;
 pub mod stats;
 pub mod stats_draw;
+pub mod typography;
 
 pub mod match_length;
 pub mod population;

@@ -171,6 +171,12 @@ impl Opt {
     }
 }
 
+/// Mos Eisley Hero Assault's units per team (`missions/tat2_eli.ron`, the
+/// PS2 mission's 12), the only Hero Assault mission the port fields. The ui
+/// crate cannot read missions; `hero_assault_pool_matches_the_mission` pins
+/// this to the file where the missions are generated.
+pub const HERO_ASSAULT_POOL: i32 = 12;
+
 /// The session's option values (§2.3's fields and defaults).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionOptions {
@@ -245,12 +251,15 @@ impl Default for SessionOptions {
 }
 
 impl SessionOptions {
-    /// The Team size / Reinforcements help: what an average match over every
-    /// map looks like at the current percentages (two lines).
+    /// The help lines openbf computes, in place of the localized line: Team
+    /// size / Reinforcements say what an average match over every map looks
+    /// like at the current percentages (two lines); the Assault AI Units row
+    /// says what its count means in each Assault mode.
     pub fn population_help(&self, option: Opt) -> Option<String> {
         let team = match option {
             Opt::NumBots => self.num_bots,
             Opt::ConNumBots | Opt::ConMult => self.con_numbots,
+            Opt::AssNumBots => return Some(self.assault_help()),
             _ => return None,
         } as u32;
         let summary = crate::population::summary(self.population_table, team, self.con_mult as u32);
@@ -260,6 +269,27 @@ impl SessionOptions {
         } else {
             team_note
         })
+    }
+
+    /// Playtest (issue #172): why Assault stops at 16 per side when Conquest
+    /// reaches 32. The row is the original's per-mode count, 0..[`MAX_BOTS`]
+    /// (the localized line names space Assault only). Hero Assault fields at
+    /// most one hero per class on a side with a player, its class reserve
+    /// (`re-hero-assault.md` §3: 9 hero classes, 8 villain classes, one more
+    /// each with the DLC heroes), and its mission's pool on the other side
+    /// ([`HERO_ASSAULT_POOL`]). The line is English in every language, as the
+    /// Team size / Reinforcements lines are, and fits the help box's three
+    /// lines (`shell_ia`'s `every_shell_help_line_fits_the_help_box`).
+    fn assault_help(&self) -> String {
+        let n = self.ass_numbots.clamp(0, MAX_BOTS);
+        let dlc = i32::from(self.dlc_heroes && self.dlc_heroes_installed);
+        format!(
+            "Space Assault: up to {n} per side. Hero Assault: one hero per class \
+             ({} or {}) on a side with a player; the other side up to {}.",
+            8 + dlc,
+            9 + dlc,
+            n.min(HERO_ASSAULT_POOL)
+        )
     }
 
     pub fn option_enabled(&self, option: Opt) -> bool {

@@ -282,14 +282,11 @@ fn netplay_award_policy_applies_to_every_slot() {
     assert_eq!(on(&walk), [true, false]);
     let cmd = GameCommand::SetAwardPolicy { on: false };
     assert_eq!(GameCommand::decode(&cmd.encode()), Some(cmd));
-    // An older setup without the field reads as On.
+    // A setup without the field (a desync report from before the award
+    // policy) is refused, not guessed.
     let mut json: serde_json::Value = serde_json::from_slice(&setup().encode()).unwrap();
     json.as_object_mut().unwrap().remove("awards");
-    assert!(
-        RoundSetup::decode(&serde_json::to_vec(&json).unwrap())
-            .unwrap()
-            .awards
-    );
+    assert!(RoundSetup::decode(&serde_json::to_vec(&json).unwrap()).is_err());
 }
 
 use super::apply::apply_game;
@@ -549,6 +546,9 @@ fn netplay_a_second_desync_sends_the_guest_to_the_lobby() {
         && v.nodes[g].peer.stats.desyncs == 1
         && playing(v)));
     assert!(!logged(&v, g, "DesyncAgain"));
+    // The host checked itself first: its own game had not parted.
+    assert!(v.nodes[0].peer.stats.host_checks >= 1);
+    assert_eq!(v.nodes[0].peer.stats.host_divergences, 0);
     let builds = v.nodes[g].builds.len();
     nudge(&mut v);
     assert!(v.run_until(20_000, |v| logged(v, 0, "LeftRound")));
@@ -566,6 +566,352 @@ fn netplay_a_second_desync_sends_the_guest_to_the_lobby() {
     // No third replay of the round.
     v.run_until(3_000, |_| false);
     assert_eq!(v.nodes[g].builds.len(), builds, "no resync asked");
+}
+
+/// Issue #168, first VPN playtest: the 5-minute window of LAN §4.7 is per
+/// round. A desync late in one round and one early in the next are one
+/// each: the guest rejoins both times instead of going to the lobby. The
+/// next round loads while the old one runs, so the old round's hash
+/// reports, bundles and builds still on their way must not reach it.
+#[test]
+fn netplay_a_desync_in_each_round_rejoins_both_times() {
+    let mut v = VirtualNet::new(
+        14,
+        clean_link(),
+        "test-build",
+        seat(0).profile.encode(),
+        fixture_builder(),
+    );
+    v.nodes[0].peer.report_dir = None;
+    v.host_load(&setup());
+    assert!(v.run_until(5_000, |v| v.host_tick() >= 30));
+    let g = v.join("Guest", 48, seat(1).profile.encode(), 15.0);
+    v.nodes[g].peer.report_dir = None;
+    let nudge = |v: &mut VirtualNet| {
+        let w = v.nodes[g].walk.as_mut().unwrap();
+        let u = w.sim.units.iter_mut().find(|u| u.alive).unwrap();
+        u.soldier.pos.x += 0.01;
+    };
+    let playing = |v: &VirtualNet, from: u32| {
+        v.nodes[g].peer.mode() == Mode::Playing && v.nodes[g].peer.next_tick() >= from
+    };
+    assert!(v.run_until(15_000, |v| playing(v, 100)));
+    nudge(&mut v);
+    assert!(v.run_until(20_000, |v| v.nodes[g].peer.stats.desyncs == 1
+        && v.nodes[g].builds.len() == 2
+        && playing(v, 100)));
+    // The next round, the guest seated from its start.
+    let mut next = setup();
+    next.seed += 1;
+    next.humans.push(seat(v.nodes[g].peer.local_slot));
+    v.host_load(&next);
+    assert!(
+        v.run_until(20_000, |v| v.nodes[g].builds.len() == 3 && playing(v, 60)),
+        "{:?}\n{:?}",
+        v.nodes[g].log,
+        v.nodes[0].log
+    );
+    assert_eq!(v.nodes[g].peer.stats.desyncs, 1, "{:?}", v.nodes[g].log);
+    assert!(!logged(&v, 0, "DigestMismatch"), "{:?}", v.nodes[0].log);
+    nudge(&mut v);
+    assert!(
+        v.run_until(20_000, |v| v.nodes[g].peer.stats.desyncs == 2
+            && v.nodes[g].builds.len() == 4
+            && playing(v, 60)),
+        "{:?}",
+        v.nodes[g].log
+    );
+    assert!(!logged(&v, g, "DesyncAgain"), "{:?}", v.nodes[g].log);
+    assert!(!logged(&v, 0, "LeftRound"));
+}
+
+/// Nudges the host's own sim (as a drawing write once did).
+fn nudge_host(v: &mut VirtualNet) {
+    let w = v.nodes[0].walk.as_mut().unwrap();
+    let u = w.sim.units.iter_mut().find(|u| u.alive).unwrap();
+    u.soldier.pos.x += 0.01;
+}
+
+/// A host and `guests` guests playing past tick 120.
+fn playing_round(seed: u64, guests: usize) -> (VirtualNet, Vec<usize>) {
+    let mut v = VirtualNet::new(
+        seed,
+        clean_link(),
+        "test-build",
+        seat(0).profile.encode(),
+        fixture_builder(),
+    );
+    v.nodes[0].peer.report_dir = None;
+    v.host_load(&setup());
+    assert!(v.run_until(5_000, |v| v.host_tick() >= 30));
+    let gs: Vec<usize> = (0..guests)
+        .map(|i| {
+            let g = v.join(
+                &format!("G{i}"),
+                60 + i as u64,
+                seat(i as u8 + 1).profile.encode(),
+                15.0 + 2.0 * i as f64,
+            );
+            v.nodes[g].peer.report_dir = None;
+            g
+        })
+        .collect();
+    assert!(v.run_until(20_000, |v| gs.iter().all(|g| {
+        v.nodes[*g].peer.mode() == Mode::Playing && v.nodes[*g].peer.next_tick() >= 120
+    })));
+    (v, gs)
+}
+
+/// After the host corrected itself: no guest was told of a desync, none
+/// rebuilt or left, every guest heard it once, and no hash differed after
+/// the correction.
+fn assert_host_corrected(v: &VirtualNet, gs: &[usize], corrections: u32) {
+    let host = &v.nodes[0].peer;
+    assert_eq!(host.corrections(), corrections, "{:?}", v.nodes[0].log);
+    assert_eq!(host.stats.host_divergences, corrections);
+    assert_eq!(host.stats.desyncs, 0, "{:?}", v.nodes[0].log);
+    assert!(logged(v, 0, "HostDiverged"), "{:?}", v.nodes[0].log);
+    assert!(!logged(v, 0, "LeftRound"));
+    for g in gs {
+        let n = &v.nodes[*g];
+        assert_eq!(n.peer.stats.desyncs, 0, "{:?}", n.log);
+        assert_eq!(n.builds.len(), 1, "no rejoin: {:?}", n.log);
+        let heard = n
+            .log
+            .iter()
+            .filter(|(_, l)| l.contains("HostDiverged"))
+            .count();
+        assert_eq!(heard, corrections as usize, "{:?}", n.log);
+        assert!(!logged(v, *g, "DesyncAgain"), "{:?}", n.log);
+        assert_eq!(n.peer.mode(), Mode::Playing);
+    }
+    let last = v
+        .checker
+        .last_mismatch_tick
+        .expect("the host's game parted");
+    assert!(
+        last < host.trusted_from(),
+        "a mismatch at {last} after the correction at {}",
+        host.trusted_from()
+    );
+}
+
+/// Issue #168, first VPN playtest: when the host's own game parts, it
+/// replays its round from the log, finds the replay disagrees with its live
+/// game, and takes the replay's place. The guests play on: nobody rejoins
+/// or goes to the lobby, and every guest is told once.
+#[test]
+fn netplay_a_host_that_parts_corrects_itself_and_the_guests_play_on() {
+    let (mut v, gs) = playing_round(15, 2);
+    nudge_host(&mut v);
+    assert!(
+        v.run_until(20_000, |v| v.nodes[0].peer.corrections() == 1),
+        "{:?}",
+        v.nodes[0].log
+    );
+    // Well past the next checks.
+    let t = v.host_tick();
+    assert!(v.run_until(20_000, |v| gs
+        .iter()
+        .all(|g| v.nodes[*g].peer.next_tick() >= t + 6 * HASH_EVERY)));
+    assert_host_corrected(&v, &gs, 1);
+    assert_eq!(v.nodes[0].peer.stats.host_checks, 1, "one check, no loop");
+}
+
+/// The same with one guest, the host's replay on a worker thread as in the
+/// window: nothing needs two guests to agree.
+#[test]
+fn netplay_a_one_guest_host_corrects_itself_on_a_worker() {
+    let (mut v, gs) = playing_round(16, 1);
+    v.set_host_rebuild(Some(Rebuild::Thread(std::sync::Arc::new(
+        |s: &RoundSetup, local: u8, _: &super::selfcheck::Stop| {
+            Ok((
+                fixture(s, local)?,
+                Some(crate::event_feed::EventFeed::default()),
+            ))
+        },
+    ))));
+    nudge_host(&mut v);
+    // Virtual time waits for the worker's real time.
+    let wait = |v: &VirtualNet| {
+        if v.nodes[0].peer.checking() {
+            std::thread::sleep(std::time::Duration::from_micros(200));
+        }
+    };
+    assert!(
+        v.run_until(20_000, |v| {
+            wait(v);
+            v.nodes[0].peer.corrections() == 1
+        }),
+        "{:?}",
+        v.nodes[0].log
+    );
+    let t = v.host_tick();
+    assert!(v.run_until(20_000, |v| v.nodes[gs[0]].peer.next_tick()
+        >= t + 6 * HASH_EVERY));
+    assert_host_corrected(&v, &gs, 1);
+}
+
+/// Second review of issue #168: a host's game that parts late in a long
+/// round is checked from its latest checkpoint (a copy of its game where
+/// every guest agreed), on the worker, in a few seconds of ticks instead of
+/// a replay of the whole round. The builder is never called.
+#[test]
+fn netplay_a_late_host_parting_is_checked_from_a_checkpoint_on_a_worker() {
+    let (mut v, gs) = playing_round(18, 1);
+    let late = 20_100;
+    assert!(v.run_until(late as u64 * 40, |v| v.host_tick() >= late));
+    let cp = v.nodes[0].peer.checkpoint_tick().expect("a checkpoint");
+    assert!(
+        cp + 2 * peer::CHECKPOINT_EVERY >= late,
+        "checkpoint at {cp}"
+    );
+    v.set_host_rebuild(Some(Rebuild::Thread(std::sync::Arc::new(
+        |_: &RoundSetup, _: u8, _: &super::selfcheck::Stop| {
+            anyhow::bail!("built: the checkpoint was not used")
+        },
+    ))));
+    nudge_host(&mut v);
+    let wall = std::time::Instant::now();
+    let wait = |v: &VirtualNet| {
+        if v.nodes[0].peer.checking() {
+            std::thread::sleep(std::time::Duration::from_micros(200));
+        }
+    };
+    assert!(
+        v.run_until(20_000, |v| {
+            wait(v);
+            v.nodes[0].peer.corrections() == 1
+        }),
+        "{:?}",
+        v.nodes[0].log
+    );
+    let secs = wall.elapsed().as_secs_f64();
+    let st = &v.nodes[0].peer.stats;
+    assert_eq!(st.host_check_failures, 0, "{:?}", v.nodes[0].log);
+    assert!(st.last_check_from > cp && st.last_check_from >= late - 2 * peer::CHECKPOINT_EVERY);
+    assert!(
+        st.last_check_ticks < peer::CHECK_BASE_TICKS,
+        "the check took {} ticks",
+        st.last_check_ticks
+    );
+    assert!(secs < 10.0, "the check took {secs:.1} s");
+    let t = v.host_tick();
+    assert!(v.run_until(20_000, |v| v.nodes[gs[0]].peer.next_tick()
+        >= t + 6 * HASH_EVERY));
+    assert_host_corrected(&v, &gs, 1);
+}
+
+/// Third review of issue #168: a checkpoint is proven by `Sim::hash` only.
+/// Here the host's game parts in what the hash does not cover but the sim
+/// reads (the round's time limit, read by the round's rules; the feed's
+/// round points the class gate reads are another) before a checkpoint, so
+/// the checkpoint carries the parting and the replay from it agrees with
+/// the parted host. The host confirms from the setup before telling
+/// anyone, and corrects itself: the guest is not blamed.
+#[test]
+fn netplay_a_host_parting_outside_the_hash_before_a_checkpoint_is_corrected() {
+    let (mut v, gs) = playing_round(20, 1);
+    let every = peer::CHECKPOINT_EVERY;
+    assert!(v.run_until(40_000, |v| v.host_tick() >= every + 100));
+    let c1 = 2 * every;
+    assert!(v.host_tick() < c1, "the next candidate still ahead");
+    // Ends the host's round (`Sim::outcome`, hashed) at tick c1 + 150:
+    // after the candidate at c1 is agreed on, before the next.
+    let limit = (c1 + 150) / core::TICK_HZ;
+    v.nodes[0].walk.as_mut().unwrap().sim.time_limit = Some(limit);
+    let hash = |v: &VirtualNet| v.nodes[0].walk.as_ref().unwrap().sim.hash();
+    let before = hash(&v);
+    v.nodes[0].walk.as_mut().unwrap().sim.time_limit = None;
+    assert_eq!(hash(&v), before, "the time limit is outside the hash");
+    v.nodes[0].walk.as_mut().unwrap().sim.time_limit = Some(limit);
+    assert!(
+        v.run_until(40_000, |v| v.nodes[0].peer.corrections() == 1
+            || v.nodes[0].peer.stats.desyncs > 0),
+        "{:?}",
+        v.nodes[0].log
+    );
+    let st = &v.nodes[0].peer.stats;
+    assert_eq!(st.desyncs, 0, "the guest was blamed: {:?}", v.nodes[0].log);
+    assert!(st.checkpoints >= 2, "the candidate at {c1} was agreed on");
+    assert_eq!(st.host_confirm_checks, 1, "{:?}", v.nodes[0].log);
+    assert_eq!(st.host_checks, 2, "the checkpoint's, then the setup's");
+    assert_eq!(st.last_check_from, 0);
+    let t = v.host_tick();
+    assert!(v.run_until(20_000, |v| v.nodes[gs[0]].peer.next_tick()
+        >= t + 6 * HASH_EVERY));
+    assert_host_corrected(&v, &gs, 1);
+    assert_eq!(v.nodes[0].walk.as_ref().unwrap().sim.time_limit, None);
+}
+
+/// Second review of issue #168: a self-check that gives no verdict (here
+/// its build fails, before any checkpoint) falls back to the rule before
+/// self-checks: the guest that differed is told and rejoins, and the round
+/// goes on for everyone.
+#[test]
+fn netplay_a_failed_self_check_tells_the_guest_and_the_round_goes_on() {
+    let (mut v, gs) = playing_round(19, 1);
+    let g = gs[0];
+    v.set_host_rebuild(Some(Rebuild::Inline(Box::new(|_: &RoundSetup, _: u8| {
+        anyhow::bail!("no build here")
+    }))));
+    assert_eq!(v.nodes[0].peer.checkpoint_tick(), None);
+    let w = v.nodes[g].walk.as_mut().unwrap();
+    let u = w.sim.units.iter_mut().find(|u| u.alive).unwrap();
+    u.soldier.pos.x += 0.01;
+    assert!(
+        v.run_until(20_000, |v| v.nodes[g].builds.len() == 2
+            && v.nodes[g].peer.mode() == Mode::Playing),
+        "{:?}\n{:?}",
+        v.nodes[0].log,
+        v.nodes[g].log
+    );
+    let host = &v.nodes[0].peer;
+    assert_eq!(host.stats.host_check_failures, 1, "{:?}", v.nodes[0].log);
+    assert_eq!(host.stats.host_divergences, 0);
+    assert_eq!(host.stats.desyncs, 1);
+    assert!(logged(&v, 0, "SelfCheckFailed"), "{:?}", v.nodes[0].log);
+    assert_eq!(v.nodes[g].peer.stats.desyncs, 1);
+    let t = v.host_tick();
+    assert!(v.run_until(20_000, |v| v.nodes[g].peer.next_tick()
+        >= t + 4 * HASH_EVERY));
+    for n in &v.nodes {
+        assert_eq!(n.peer.mode(), Mode::Playing, "{}: {:?}", n.name, n.log);
+        assert!(!n.log.iter().any(|(_, l)| l.contains("RoundAbandoned")));
+    }
+}
+
+/// A host whose game parts a second time in one round ends the round for
+/// everyone, once, instead of correcting again and again; nobody rejoins.
+#[test]
+fn netplay_a_host_that_parts_twice_ends_the_round() {
+    let (mut v, gs) = playing_round(17, 2);
+    nudge_host(&mut v);
+    assert!(v.run_until(20_000, |v| v.nodes[0].peer.corrections() == 1));
+    let t = v.host_tick();
+    assert!(v.run_until(10_000, |v| v.host_tick() >= t + 2 * HASH_EVERY));
+    nudge_host(&mut v);
+    assert!(
+        v.run_until(20_000, |v| v
+            .nodes
+            .iter()
+            .all(|n| n.peer.mode() == Mode::Ended)),
+        "{:?}\n{:?}",
+        v.nodes[0].log,
+        v.nodes[gs[0]].log
+    );
+    for n in &v.nodes {
+        let ended = n
+            .log
+            .iter()
+            .filter(|(_, l)| l.contains("RoundAbandoned"))
+            .count();
+        assert_eq!(ended, 1, "{}: {:?}", n.name, n.log);
+        assert_eq!(n.peer.stats.desyncs, 0, "{}: {:?}", n.name, n.log);
+        assert_eq!(n.builds.len(), 1, "{}: no rejoin", n.name);
+        assert!(!n.log.iter().any(|(_, l)| l.contains("DesyncAgain")));
+    }
+    assert_eq!(v.nodes[0].peer.corrections(), 2);
 }
 
 /// LAN §4.3/§4.5: a mid-round joiner's build is checked like a round-start
@@ -647,6 +993,290 @@ fn netplay_a_guest_that_cannot_build_does_not_hold_the_barrier() {
     assert!(v.run_until(2_000, |v| v.host_tick() > 0));
     assert!(v.now.saturating_sub(t) < Micros::from_millis(2_000));
     assert_eq!(v.nodes[0].peer.mode(), Mode::Playing);
+}
+
+/// A round-start network: the host and guests with their own loading
+/// times (virtual ms) and frame intervals, every guest seated.
+fn loading_round(seed: u64, host_ms: u64, guests: &[(u64, f64)]) -> (VirtualNet, Vec<usize>) {
+    let mut v = VirtualNet::new(
+        seed,
+        clean_link(),
+        "test-build",
+        seat(0).profile.encode(),
+        fixture_builder(),
+    );
+    v.nodes[0].peer.report_dir = None;
+    let gs: Vec<usize> = guests
+        .iter()
+        .enumerate()
+        .map(|(i, (load, frame))| {
+            let g = v.join(
+                &format!("G{i}"),
+                70 + i as u64,
+                seat(i as u8 + 1).profile.encode(),
+                *frame,
+            );
+            v.nodes[g].peer.report_dir = None;
+            v.nodes[g].load_ms = *load;
+            g
+        })
+        .collect();
+    // The first guest is far away (a VPN hop): its `Start` is late by 80 ms.
+    v.sim.set_both(
+        super::virtual_net::addr(0),
+        v.nodes[gs[0]].addr,
+        LinkParams {
+            latency: Micros::from_millis(80),
+            ..clean_link()
+        },
+    );
+    assert!(v.run_until(5_000, |v| gs.iter().all(|g| logged(v, *g, "Welcome"))));
+    // Their round trips settle on heartbeats.
+    v.run_until(2_000, |_| false);
+    let mut s = setup();
+    for g in &gs {
+        s.humans.push(seat(v.nodes[*g].peer.local_slot));
+    }
+    v.nodes[0].load_ms = host_ms;
+    v.host_load(&s);
+    (v, gs)
+}
+
+/// Issue #168, the first VPN playtest: every peer leaves its loading
+/// screen at one moment. Four peers whose loading takes 0.6 to 4 s, one of
+/// them 80 ms from the host: none
+/// plays before its own loading is over or before the slowest one's, every
+/// one plays from tick 0 in step, and they all begin within two frames.
+#[test]
+fn netplay_peers_with_different_loads_start_together() {
+    let (mut v, gs) = loading_round(31, 2_500, &[(600, 15.0), (4_000, 16.7), (1_500, 7.0)]);
+    let launched = v.now;
+    let all = |v: &VirtualNet| v.nodes.iter().all(|n| n.first_step.is_some());
+    assert!(v.run_until(10_000, all), "every peer plays");
+    assert!(v.run_until(3_000, |v| v.nodes.iter().all(|n| n.peer.next_tick() >= 60)));
+    let slowest = v.nodes.iter().filter_map(|n| n.loaded_at).max().unwrap();
+    assert!(slowest >= launched + Micros::from_millis(4_000));
+    let playing: Vec<Micros> = v.nodes.iter().map(|n| n.playing_at.unwrap()).collect();
+    for n in &v.nodes {
+        let at = n.playing_at.unwrap();
+        assert!(
+            at >= launched + Micros::from_millis(n.load_ms) && at >= slowest,
+            "{} played at {at:?} (launched {launched:?}, its load {} ms, the slowest {slowest:?})",
+            n.name,
+            n.load_ms
+        );
+        assert_eq!(n.first_step.unwrap().0, 0, "{} plays from tick 0", n.name);
+        assert!(n.build_error.is_none());
+    }
+    let spread = playing
+        .iter()
+        .max()
+        .unwrap()
+        .saturating_sub(*playing.iter().min().unwrap());
+    assert!(
+        spread <= Micros::from_millis(34),
+        "the peers began {} ms apart: {playing:?}",
+        spread.as_millis_f64()
+    );
+    assert_eq!(gs.len(), 3);
+    assert!(v.checker.checks > 0);
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+}
+
+/// A seated guest whose loading outlasts the load barrier: the others start
+/// together at the barrier's timeout, and it enters when it is built,
+/// behind (from tick 0, in step) without holding them.
+#[test]
+fn netplay_a_guest_stuck_loading_enters_behind_without_holding_the_start() {
+    let barrier = net::BARRIER_TIMEOUT.0 / 1000;
+    let (mut v, gs) = loading_round(32, 1_000, &[(800, 15.0), (barrier + 4_000, 16.7)]);
+    let (ok, stuck) = (gs[0], gs[1]);
+    let launched = v.now;
+    assert!(
+        v.run_until(barrier + 2_000, |v| v.nodes[0].first_step.is_some()
+            && v.nodes[ok].first_step.is_some())
+    );
+    let host_at = v.nodes[0].playing_at.unwrap();
+    assert!(host_at >= launched + Micros::from_millis(barrier - 50));
+    let ok_at = v.nodes[ok].playing_at.unwrap();
+    assert!(host_at.max(ok_at).saturating_sub(host_at.min(ok_at)) <= Micros::from_millis(34));
+    assert!(v.nodes[stuck].walk.is_none(), "still loading");
+    assert!(v.run_until(8_000, |v| v.nodes[stuck].first_step.is_some()));
+    let n = &v.nodes[stuck];
+    assert!(n.playing_at.unwrap() >= launched + Micros::from_millis(n.load_ms));
+    assert_eq!(n.first_step.unwrap().0, 0);
+    assert!(v.run_until(10_000, |v| v.nodes[stuck].peer.next_tick() + 10
+        >= v.host_tick()));
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+}
+
+/// One peer of [`netplay_udp_peers_with_different_loads_start_together`].
+struct UdpPeer<L> {
+    peer: Peer,
+    link: L,
+    load: std::time::Duration,
+    due: Option<(std::time::Instant, RoundSetup)>,
+    walk: Option<crate::walk::WalkSim>,
+    loaded: Option<std::time::Instant>,
+    playing: Option<std::time::Instant>,
+    first: Option<u32>,
+    last: std::time::Instant,
+}
+
+impl<L: Link> UdpPeer<L> {
+    fn new(peer: Peer, link: L, load_ms: u64) -> Self {
+        Self {
+            peer,
+            link,
+            load: std::time::Duration::from_millis(load_ms),
+            due: None,
+            walk: None,
+            loaded: None,
+            playing: None,
+            first: None,
+            last: std::time::Instant::now(),
+        }
+    }
+
+    /// Its loading screen: the build `load` after the `LoadRound`.
+    fn load(&mut self, setup: RoundSetup) {
+        self.due = Some((std::time::Instant::now() + self.load, setup));
+        self.walk = None;
+    }
+
+    /// One frame on the real clock.
+    fn frame(&mut self) {
+        let now = std::time::Instant::now();
+        for n in self.peer.poll(&mut self.link) {
+            if let Notice::Load { setup, .. } = n {
+                self.load(*setup);
+            }
+        }
+        if self.due.as_ref().is_some_and(|(at, _)| now >= *at) {
+            let (_, setup) = self.due.take().unwrap();
+            let mut walk = fixture(&setup, self.peer.local_slot).expect("fixture");
+            self.peer.round_built(&mut self.link, &mut walk);
+            self.loaded = Some(now);
+            self.walk = Some(walk);
+        }
+        let dt = now.saturating_duration_since(self.last).as_secs_f64();
+        self.last = now;
+        if let Some(walk) = self.walk.as_mut() {
+            let pad = super::virtual_net::scripted_pad(self.peer.local_slot, walk.sim.tick);
+            let first = &mut self.first;
+            let report = self
+                .peer
+                .frame(&mut self.link, dt, pad, walk, None, |_, b, _| {
+                    first.get_or_insert(b.tick);
+                });
+            if report.mode == Mode::Playing {
+                self.playing.get_or_insert(now);
+            }
+        }
+    }
+}
+
+/// Issue #168 over real UDP on this machine (`net::NetSession`, its own
+/// threads and the real clock): a host and two guests whose loading takes
+/// 0.3, 1.2 and 0.6 s. None plays before the slowest is built, every one
+/// plays from tick 0 without a desync, and they all begin within a few
+/// frames of each other.
+#[test]
+fn netplay_udp_peers_with_different_loads_start_together() {
+    use net::{ClientConfig, HostConfig, NetSession, Transport, UdpTransport};
+    use std::time::{Duration, Instant};
+    let host_t = UdpTransport::bind("127.0.0.1:0").expect("bind");
+    let at = host_t.local_addr().unwrap();
+    let mut config = HostConfig::new("test-build", "Host");
+    config.profile = seat(0).profile.encode();
+    let mut host = UdpPeer::new(Peer::host(), NetSession::host(config, host_t), 300);
+    let mut guests: Vec<_> = [1_200u64, 600]
+        .iter()
+        .enumerate()
+        .map(|(i, load)| {
+            let mut c = ClientConfig::new("test-build", format!("G{i}"), 80 + i as u64);
+            c.profile = seat(i as u8 + 1).profile.encode();
+            let t = UdpTransport::bind("127.0.0.1:0").expect("bind");
+            UdpPeer::new(Peer::client(), NetSession::join(c, at, t), *load)
+        })
+        .collect();
+    type Host = UdpPeer<NetSession<net::HostCore>>;
+    type Guest = UdpPeer<NetSession<net::ClientCore>>;
+    fn frames(
+        host: &mut Host,
+        guests: &mut [Guest],
+        until: &dyn Fn(&Host, &[Guest]) -> bool,
+        secs: u64,
+    ) {
+        let t = Instant::now();
+        while !until(host, guests) {
+            assert!(
+                t.elapsed() < Duration::from_secs(secs),
+                "not reached in {secs} s"
+            );
+            host.frame();
+            for g in guests.iter_mut() {
+                g.frame();
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    frames(
+        &mut host,
+        &mut guests,
+        &|h, gs| h.peer.guests().len() == 2 && gs.iter().all(|g| g.peer.local_slot != 0),
+        5,
+    );
+    // Their round trips settle on heartbeats.
+    let settle = Instant::now() + Duration::from_millis(600);
+    frames(&mut host, &mut guests, &|_, _| Instant::now() >= settle, 5);
+    let mut setup = setup();
+    for g in &guests {
+        setup.humans.push(seat(g.peer.local_slot));
+    }
+    let bytes = host.peer.host_load(&mut host.link, &setup);
+    host.load(RoundSetup::decode(&bytes).unwrap());
+    let launched = Instant::now();
+    frames(
+        &mut host,
+        &mut guests,
+        &|h, gs| h.peer.next_tick() >= 60 && gs.iter().all(|g| g.peer.next_tick() >= 60),
+        15,
+    );
+    let loaded = std::iter::once(host.loaded)
+        .chain(guests.iter().map(|g| g.loaded))
+        .map(Option::unwrap)
+        .max()
+        .unwrap();
+    assert!(loaded >= launched + Duration::from_millis(1_200));
+    let playing: Vec<Instant> = std::iter::once(host.playing)
+        .chain(guests.iter().map(|g| g.playing))
+        .map(Option::unwrap)
+        .collect();
+    assert!(
+        playing.iter().all(|p| *p >= loaded),
+        "nobody began before the slowest was built"
+    );
+    let spread = *playing.iter().max().unwrap() - *playing.iter().min().unwrap();
+    println!("udp start spread {:.1} ms", spread.as_secs_f64() * 1e3);
+    assert!(
+        spread <= Duration::from_millis(50),
+        "the peers began {:.1} ms apart",
+        spread.as_secs_f64() * 1e3
+    );
+    assert_eq!(host.first, Some(0));
+    for g in &guests {
+        assert_eq!(g.first, Some(0));
+        assert_eq!(
+            (g.peer.stats.desyncs, g.peer.stats.digest_mismatches),
+            (0, 0)
+        );
+    }
+    assert_eq!(host.peer.stats.digest_mismatches, 0);
+    host.link.shutdown();
+    for g in guests {
+        g.link.shutdown();
+    }
 }
 
 // The build id's rules (game/build.rs), with their own tests.

@@ -22,6 +22,15 @@ pub fn weapon_hud(db: &ClassDb, weapon: &str) -> crate::walk::WeaponHud {
         .unwrap_or_else(|| clean(weapon));
     let key = if is_bf1_grenade(db, weapon) {
         BF2_GRENADE_HUD_KEY.to_owned()
+    } else if let Some((_, stand_in)) = (!db.is_bf2())
+        .then(|| {
+            NATIVE_HUD_STAND_INS
+                .iter()
+                .find(|(class, _)| class.eq_ignore_ascii_case(weapon))
+        })
+        .flatten()
+    {
+        (*stand_in).to_owned()
     } else {
         key
     };
@@ -39,6 +48,22 @@ pub fn weapon_hud(db: &ClassDb, weapon: &str) -> crate::walk::WeaponHud {
             .map(Box::new),
     }
 }
+
+/// `[ours]` (issue #161): the BF2 HUD model a BF1 native weapon shows. These
+/// BF1 weapons have no model BF2's layout places and no baked icon sheet, so
+/// their HUD row stayed empty; each takes the placed BF2 model of the same
+/// kind of weapon. Every other native weapon shows its own model.
+pub const NATIVE_HUD_STAND_INS: &[(&str, &str)] = &[
+    ("gar_weap_inf_rifle", "all_weap_inf_rifle"),
+    ("gar_weap_inf_pistol", "all_weap_inf_pistol"),
+    ("gar_weap_inf_fusioncutter", "all_weap_inf_fusioncutter"),
+    ("gar_weap_inf_torpedo_launcher", "all_weap_inf_launcher"),
+    (
+        "tat_weap_inf_jawa_fusioncutter",
+        "des_weap_inf_fusioncutter",
+    ),
+    ("wok_weap_inf_torpedo_launcher", "all_weap_inf_launcher"),
+];
 
 /// BF2's vehicle weapon art on BF1 maps, under the shared HUD rule.
 /// The counterpart supplies only its HUD key; class identity and ammunition

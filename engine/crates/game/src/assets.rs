@@ -524,24 +524,7 @@ impl Scene {
     /// unbuilt props keep the static zone substitution (card VTUR2).
     /// BF1 keeps the class's own row (card BZONE1).
     pub fn resolve_class(&self, class: &str) -> Option<&ManifestClass> {
-        let find = |n: &str| {
-            self.manifest
-                .classes
-                .iter()
-                .find(|c| c.name.eq_ignore_ascii_case(n))
-        };
-        let c = find(class)?;
-        match &c.build_zone {
-            Some(zone)
-                if self.manifest.source_game.eq_ignore_ascii_case("bf2")
-                    && !crate::vehicle_class::TURRET_BASES
-                        .iter()
-                        .any(|b| c.base.eq_ignore_ascii_case(b)) =>
-            {
-                find(zone)
-            }
-            _ => Some(c),
-        }
+        resolve_manifest_class(&self.manifest, class)
     }
 
     /// Build the sim's static collision world from the manifest's INSTANCE
@@ -905,6 +888,33 @@ impl Scene {
             .far
             .as_deref()?;
         self.meshes.get_key_value(far).map(|(k, _)| k.as_str())
+    }
+}
+
+/// [`Scene::resolve_class`] on a bare manifest: the one rule for which class row
+/// draws an instance, shared by the draw and the sim (a building turret's drawn
+/// gunner seat, `vehicle_pads::gunner_seat`), so the two cannot drift apart.
+pub fn resolve_manifest_class<'a>(
+    manifest: &'a Manifest,
+    class: &str,
+) -> Option<&'a ManifestClass> {
+    let find = |n: &str| {
+        manifest
+            .classes
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(n))
+    };
+    let c = find(class)?;
+    match &c.build_zone {
+        Some(zone)
+            if manifest.source_game.eq_ignore_ascii_case("bf2")
+                && !crate::vehicle_class::TURRET_BASES
+                    .iter()
+                    .any(|b| c.base.eq_ignore_ascii_case(b)) =>
+        {
+            find(zone)
+        }
+        _ => Some(c),
     }
 }
 

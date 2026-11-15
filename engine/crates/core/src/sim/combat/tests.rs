@@ -593,6 +593,47 @@ fn v6_five_shots_kill_and_pay_a_ticket() {
     assert_eq!(s.unit(p).unwrap().weapon.shots_fired, 6);
 }
 
+/// #173 black box: a killing hit carries the buff multipliers the sim
+/// applied at the hit (`Event::Hit::dealt`/`taken`), although the same
+/// tick's `tick_buffs` then resets the corpse's buffs. The shooter holds the
+/// War Hero cheat (x1.5 dealt) and the victim a x0.5 defense power-up; the
+/// one bolt kills. Before the fix a reader at the tick's end saw taken 1.0.
+#[test]
+fn a_killing_hit_keeps_the_multipliers_it_was_dealt_with() {
+    let (mut s, p, t) = duel();
+    s.cheats.damage_award = true;
+    s.step(&[PadState::default()]);
+    assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.5, "War Hero synced");
+    s.units[t.index as usize]
+        .buffs
+        .apply_multipliers((0.0, 1.0), (20.0, 0.5));
+    s.units[t.index as usize].health.cur = 10.0;
+    let mut hit = None;
+    for _ in 0..30 {
+        s.step(&[fire()]);
+        hit = s.events.iter().find_map(|e| match e {
+            Event::Hit {
+                victim,
+                health_left,
+                dealt,
+                taken,
+                damage,
+                ..
+            } if *victim == t => Some((*health_left, *dealt, *taken, *damage)),
+            _ => None,
+        });
+        if hit.is_some() {
+            break;
+        }
+    }
+    let (left, dealt, taken, _damage) = hit.expect("the bolt lands within 1 s");
+    assert!(left <= 0.0, "the hit killed: {left}");
+    assert_eq!((dealt, taken), (1.5, 0.5));
+    // The corpse's buffs are already reset when the step returns, which is
+    // why the event must carry them.
+    assert_eq!(s.units[t.index as usize].buffs.taken(), 1.0);
+}
+
 /// Issue #41: a bolt that meets a soldier's head prim does the PS2's
 /// HitLocation x3, a human's always. A bot's does plain damage at every
 /// tier on a ground round (playtest 2026-11-05 B1, card DRETIRE: no damage

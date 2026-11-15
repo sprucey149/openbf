@@ -23,6 +23,8 @@ pub(super) fn setup(cap: Option<u32>) -> BattleSetup {
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
         dlc_heroes: false,
+        netplay_rows: false,
+        opening_humans: [0; 2],
         score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
     }
 }
@@ -96,37 +98,14 @@ fn gameplay_stick_holds_through_wobble_and_resets_on_controller_changes() {
     assert_eq!(input::stick_arms(0.0, 0.59, latch.arms), 0);
 }
 
+/// PR #102's and issue #128's pointer reaches the sim only through the
+/// pad, in the shell's model: fresh motion over a row selects it (the pick
+/// in the next pad, the sim untouched until the tick), a click on the row
+/// selected accepts it, a click on another selects it, and a screen that
+/// has only just opened takes no accept. On the spawn map the pointer is
+/// hit-tested at the Map element's Scale it is given.
 #[test]
-fn spawn_click_tracker_distinguishes_single_and_double_clicks() {
-    let mut tracker = SpawnClickTracker::default();
-    let pos = [100.0, 100.0];
-
-    // First click
-    assert!(!tracker.check_double_click(SpawnTarget::Side(1), pos));
-
-    // Second click within threshold
-    tracker.step(0.1);
-    assert!(tracker.check_double_click(SpawnTarget::Side(1), pos));
-
-    // Third click is fresh single click
-    tracker.step(0.05);
-    assert!(!tracker.check_double_click(SpawnTarget::Side(1), pos));
-
-    // Click on a different target is a single click
-    tracker.step(0.1);
-    assert!(!tracker.check_double_click(SpawnTarget::Side(2), pos));
-
-    // Click after timeout is single click
-    tracker.step(1.0);
-    assert!(!tracker.check_double_click(SpawnTarget::Side(2), pos));
-}
-
-/// PR #102's clicks reach the sim only through the pad: a click leaves
-/// the sim untouched and puts its pick in the next pad, a double click
-/// adds the accept, and the stepped tick applies both. On the spawn map
-/// the click is hit-tested at the Map element's Scale it is given.
-#[test]
-fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
+fn spawn_pointer_hovers_selects_and_accepts_side_and_map_rows() {
     use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SideChoice, SpawnStage};
     let setup = setup(None);
     let mut a = App::new(
@@ -198,32 +177,36 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
         )
     };
 
-    // Side: click team 2's row. The sim is untouched until the tick.
+    // Side: the pointer comes over team 2's row. The sim is untouched
+    // until the tick.
     a.shell_pointer.moved_to(row(2.0));
-    a.shell_pointer.click();
     a.step_spawn_pointer_at(0.016, scale);
     assert_eq!(sim(&a).side_choice[0], SideChoice::Team1, "no direct write");
     let pad = tick(&mut a);
-    assert_eq!(pad.pick, Some(ScreenPick::Side(1)));
-    assert_eq!(pad.buttons & SPAWN_ACCEPT, 0, "one click selects only");
+    assert_eq!(pad.pick, Some(ScreenPick::Side(1)), "hover selects");
+    assert_eq!(pad.buttons & SPAWN_ACCEPT, 0, "hover never accepts");
     assert_eq!(sim(&a).side_choice[0], SideChoice::Team2);
     assert_eq!(a.kbm.pad(PadState::default()).pick, None, "taken once");
-    // Double click (the first click well after the last): the pick and
-    // the accept in one pad.
-    a.shell_pointer.click();
-    a.step_spawn_pointer_at(1.0, scale);
-    assert_eq!(a.kbm.pad(PadState::default()).buttons & SPAWN_ACCEPT, 0);
+    // A resting pointer does nothing; the row is not picked again.
+    a.step_spawn_pointer_at(0.016, scale);
+    assert_eq!(a.kbm.pad(PadState::default()).pick, None);
+    // Clicked as the screen has only just opened: selects only.
     a.shell_pointer.click();
     a.step_spawn_pointer_at(0.1, scale);
+    assert_eq!(a.kbm.pad(PadState::default()).buttons & SPAWN_ACCEPT, 0);
+    tick(&mut a);
+    // The click on the selected row accepts it.
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(1.0, scale);
     let pad = tick(&mut a);
     assert_eq!(pad.pick, Some(ScreenPick::Side(1)));
-    assert_ne!(pad.buttons & SPAWN_ACCEPT, 0);
+    assert_ne!(pad.buttons & SPAWN_ACCEPT, 0, "one click accepts");
     assert_eq!(sim(&a).spawn_stage[0], SpawnStage::Map);
     let walk = &a.walk.as_ref().unwrap().0;
     assert_eq!(walk.sim.units[walk.player.index as usize].team, 1);
 
     // Map: it opens on team 2's first post (1, x = -200); its other
-    // post (2, x = -300) is clicked where the 0.6 Scale draws it.
+    // post (2, x = -300) is under the pointer where the 0.6 Scale draws it.
     tick(&mut a);
     assert_eq!(
         sim(&a).spawn_post_choice[0],
@@ -232,39 +215,347 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
     let walk = &a.walk.as_ref().unwrap().0;
     let map = walk.minimap.as_ref().unwrap().spawn_model(walk, 0);
     let at = ui::hud_map::spawn_window_point(&map, k, [-300.0, 0.0], true, size).unwrap();
-    // No HUD pass, no map drawn: a click there picks nothing.
+    let one = ui::hud_map::spawn_window_point(&map, k, [-200.0, 0.0], true, size).unwrap();
+    // No HUD pass, no map drawn: the pointer finds nothing there.
     a.shell_pointer.moved_to(at);
     a.shell_pointer.click();
     a.step_spawn_pointer_at(0.5, None);
     assert_eq!(a.kbm.pad(PadState::default()).pick, None);
-    a.shell_pointer.click();
-    a.step_spawn_pointer_at(1.0, scale);
-    assert_eq!(
-        sim(&a).spawn_post_choice[0],
-        Some(core::unit::SpawnPost::Post(1)),
-        "no direct write"
-    );
-    let pad = tick(&mut a);
-    assert_eq!(pad.pick, Some(ScreenPick::Post(2)));
-    assert_eq!(pad.buttons & SPAWN_ACCEPT, 0);
-    assert_eq!(
-        sim(&a).spawn_post_choice[0],
-        Some(core::unit::SpawnPost::Post(2))
-    );
-    // Double click on the map goes to the class screen.
-    a.shell_pointer.click();
-    a.step_spawn_pointer_at(1.0, scale);
-    assert_eq!(a.kbm.pad(PadState::default()).buttons & SPAWN_ACCEPT, 0);
+    // A second click right after the side's accept only selects the post.
     a.shell_pointer.click();
     a.step_spawn_pointer_at(0.1, scale);
     let pad = tick(&mut a);
     assert_eq!(pad.pick, Some(ScreenPick::Post(2)));
-    assert_ne!(pad.buttons & SPAWN_ACCEPT, 0);
-    assert_eq!(sim(&a).spawn_stage[0], SpawnStage::Class);
+    assert_eq!(
+        pad.buttons & SPAWN_ACCEPT,
+        0,
+        "a fresh screen takes no accept"
+    );
     assert_eq!(
         sim(&a).spawn_post_choice[0],
         Some(core::unit::SpawnPost::Post(2))
     );
+    // Hovering back over post 1 selects it; clicking it goes on to the
+    // class screen with it.
+    a.shell_pointer.moved_to(one);
+    a.step_spawn_pointer_at(1.0, scale);
+    let pad = tick(&mut a);
+    assert_eq!(pad.pick, Some(ScreenPick::Post(1)));
+    assert_eq!(pad.buttons & SPAWN_ACCEPT, 0);
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(0.1, scale);
+    let pad = tick(&mut a);
+    assert_eq!(pad.pick, Some(ScreenPick::Post(1)));
+    assert_ne!(pad.buttons & SPAWN_ACCEPT, 0);
+    assert_eq!(sim(&a).spawn_stage[0], SpawnStage::Class);
+    assert_eq!(
+        sim(&a).spawn_post_choice[0],
+        Some(core::unit::SpawnPost::Post(1))
+    );
+    // The class screen with no line-up drawn and no HUD pass: a click there
+    // finds no soldier and no help line.
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(1.0, scale);
+    let pad = tick(&mut a);
+    assert_eq!((pad.pick, pad.buttons & SPAWN_ACCEPT), (None, 0));
+}
+
+/// A double click's second click names the first click's pick even where
+/// the pointer now finds another target (the class line-up slides the
+/// clicked soldier to the front under it); too late or too far it is a
+/// fresh click, and a new screen forgets it.
+#[test]
+fn a_double_click_keeps_its_first_clicks_pick() {
+    let mut t = SpawnClickTracker::default();
+    let pos = [100.0, 100.0];
+    assert_eq!(t.double(pos), None);
+    t.clicked(Some(SpawnTarget::Class(2)), pos);
+    t.step(0.2);
+    assert_eq!(t.double([110.0, 105.0]), Some(SpawnTarget::Class(2)));
+    assert_eq!(t.double([200.0, 100.0]), None, "too far");
+    t.step(0.3);
+    assert_eq!(t.double(pos), None, "too late");
+    t.clicked(Some(SpawnTarget::Class(1)), pos);
+    t.clear();
+    assert_eq!(t.double(pos), None, "a new screen");
+    t.clicked(None, pos);
+    assert_eq!(t.double(pos), None, "a click that picked nothing");
+}
+
+/// A battle app whose player is dead behind the spawn screen `stage`.
+fn behind_spawn_screen(stage: core::sim::SpawnStage) -> App {
+    let mut a = App::new(
+        Default::default(),
+        Default::default(),
+        setup(None),
+        None,
+        None,
+        None,
+        Default::default(),
+    );
+    a.screen = Screen::Battle;
+    let mut walk = game::walk::WalkSim::new(42, glam::Vec3::ZERO, None);
+    walk.sim.spawn_stage[0] = stage;
+    walk.sim.units[walk.player.index as usize].alive = false;
+    a.walk = Some((walk, render::MeshHandle::default()));
+    a
+}
+
+/// Issue #128 on a LAN: the pad's pick leaves the window (`Kbm::consumed`)
+/// a round trip before the host's ticks show it, and a click on the row
+/// just picked still accepts it. A sent pick the sim never shows is
+/// forgotten after [`SENT_PICK_WAIT`]: the click then selects again.
+#[test]
+fn a_click_on_a_row_just_picked_accepts_before_the_host_shows_it() {
+    use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SideChoice, SpawnStage};
+    let mut a = behind_spawn_screen(SpawnStage::Side);
+    // The frame's pad goes out; the confirmed sim does not step.
+    let send = |a: &mut App| {
+        let pad = a.kbm.pad(PadState::default());
+        a.kbm.consumed(&pad, 1);
+        pad
+    };
+    let row = |k: f32| {
+        ui::spawn_draw::window_point(
+            [
+                (ui::spawn_draw::SIDE_STACK_X[0] + ui::spawn_draw::SIDE_STACK_X[1]) * 0.5,
+                ui::spawn_draw::SIDE_STACK_TOP + k * ui::spawn_draw::ROW_PITCH + 10.0,
+            ],
+            [640.0, 480.0],
+        )
+    };
+    a.shell_pointer.moved_to(row(2.0));
+    a.step_spawn_pointer_at(1.0, None);
+    assert_eq!(send(&mut a).pick, Some(ScreenPick::Side(1)), "hover picks");
+    a.step_spawn_pointer_at(0.5, None);
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(0.1, None);
+    let pad = send(&mut a);
+    let sim = &a.walk.as_ref().unwrap().0.sim;
+    assert_eq!(
+        sim.side_choice[0],
+        SideChoice::Team1,
+        "the host shows no pick yet"
+    );
+    assert_eq!(pad.pick, Some(ScreenPick::Side(1)));
+    assert_ne!(
+        pad.buttons & SPAWN_ACCEPT,
+        0,
+        "the click accepts the row picked"
+    );
+    // Never shown: after the wait the same click only selects.
+    a.step_spawn_pointer_at(SENT_PICK_WAIT + 0.1, None);
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(0.1, None);
+    let pad = send(&mut a);
+    assert_eq!(pad.pick, Some(ScreenPick::Side(1)));
+    assert_eq!(pad.buttons & SPAWN_ACCEPT, 0, "a stale pick is forgotten");
+}
+
+/// Issue #128: the class screen's window path. A click on a line-up
+/// soldier where the last draw stood him (`Preview::class_at`) puts his
+/// class in the next pad's pick; a click on him again spawns him.
+#[test]
+fn a_click_on_a_drawn_line_up_soldier_picks_his_class() {
+    use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SpawnStage};
+    let mut a = behind_spawn_screen(SpawnStage::Class);
+    let page = ui::spawn_draw::SpawnPage::Class {
+        title: String::new(),
+        lines: Vec::new(),
+        back: String::new(),
+        accept: String::new(),
+        team: 0,
+        class: 0,
+        classes: vec![0, 1, 2],
+        refused: 0,
+    };
+    let cam = render::Camera {
+        fov_y: 2.0 * 0.4f32.atan(),
+        ..Default::default()
+    };
+    let size = [640.0, 480.0];
+    assert_eq!(
+        a.spawn_preview.class_at([320.0, 240.0], size),
+        None,
+        "none drawn"
+    );
+    a.spawn_preview
+        .draws(&Default::default(), Some(&page), &cam, 0.0);
+    // A soldier the pointer finds that is not the front one.
+    let (at, class) = (0..480)
+        .step_by(4)
+        .flat_map(|y| (0..640).step_by(4).map(move |x| [x as f32, y as f32]))
+        .find_map(|p| {
+            a.spawn_preview
+                .class_at(p, size)
+                .filter(|&c| c != 0)
+                .map(|c| (p, c))
+        })
+        .expect("a neighbour of the front soldier under some window point");
+    a.shell_pointer.moved_to(at);
+    a.step_spawn_pointer_at(1.0, None);
+    assert_eq!(
+        a.kbm.pending_pick(),
+        None,
+        "hover does not pick on the line-up"
+    );
+    a.step_spawn_pointer_at(1.0, None);
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(0.1, None);
+    let pad = a.kbm.pad(PadState::default());
+    assert_eq!(pad.pick, Some(ScreenPick::Class(class)));
+    assert_eq!(pad.buttons & SPAWN_ACCEPT, 0, "the first click selects");
+    a.kbm.consumed(&pad, 1);
+    a.step_spawn_pointer_at(0.5, None);
+    a.shell_pointer.click();
+    a.step_spawn_pointer_at(0.1, None);
+    let pad = a.kbm.pad(PadState::default());
+    assert_eq!(pad.pick, Some(ScreenPick::Class(class)));
+    assert_ne!(pad.buttons & SPAWN_ACCEPT, 0, "a click on him again spawns");
+}
+
+/// Issue #128's pointer rules, screen by screen: the class line-up selects
+/// by click only (its ring turns under a hovering pointer), a click on the
+/// selected soldier or on "Select Character" spawns, "Back" backs, and
+/// nothing accepts or backs before the screen has settled.
+#[test]
+fn spawn_pointer_rules_select_spawn_and_back() {
+    use ui::spawn_draw::Help;
+    let class = |c| Some(SpawnTarget::Class(c));
+    let act = spawn_pointer_act;
+    // The line-up: hover does nothing, a click selects, a click on the
+    // selected class spawns it.
+    assert_eq!(act(false, class(2), class(0), None, false, true), None);
+    assert_eq!(
+        act(false, class(2), class(0), None, true, true),
+        Some(SpawnPointerAct::Pick(SpawnTarget::Class(2)))
+    );
+    assert_eq!(
+        act(false, class(2), class(2), None, true, true),
+        Some(SpawnPointerAct::Accept(class(2)))
+    );
+    // The help lines.
+    assert_eq!(
+        act(false, None, class(0), Some(Help::Accept), true, true),
+        Some(SpawnPointerAct::Accept(None))
+    );
+    assert_eq!(
+        act(false, None, class(0), Some(Help::Back), true, true),
+        Some(SpawnPointerAct::Back)
+    );
+    assert_eq!(
+        act(false, None, class(0), Some(Help::Back), false, true),
+        None
+    );
+    // Unsettled: selects only.
+    assert_eq!(
+        act(false, None, class(0), Some(Help::Accept), true, false),
+        None
+    );
+    assert_eq!(
+        act(false, class(0), class(0), None, true, false),
+        Some(SpawnPointerAct::Pick(SpawnTarget::Class(0)))
+    );
+    // Side rows and posts: hover selects a row not yet selected.
+    let side = |r| Some(SpawnTarget::Side(r));
+    assert_eq!(
+        act(true, side(1), side(0), None, false, true),
+        Some(SpawnPointerAct::Pick(SpawnTarget::Side(1)))
+    );
+    assert_eq!(act(true, side(1), side(1), None, false, true), None);
+    assert_eq!(act(true, None, side(1), None, true, true), None);
+}
+
+/// Issue #128: a click on a line-up soldier names his row. The front
+/// soldier (the pick) and his neighbours each take the clicks on their own
+/// body; the floor between them and the sky above take none, and so does a
+/// soldier waiting unseen at the back.
+#[test]
+fn a_click_on_a_line_up_soldier_names_his_row() {
+    use game::spawn_preview::{lineup_at, lineup_fit, lineup_row_at, ring_at, PICK_BOX};
+    let size = [1280.0, 720.0];
+    let (aspect, tan_v) = (size[0] / size[1], 0.4f32);
+    let mut outline = game::soldier_vis::Outline::default();
+    outline.add(glam::Vec3::new(-0.4, 0.0, 0.0));
+    outline.add(glam::Vec3::new(0.4, 0.0, 0.0));
+    let fit = lineup_fit(aspect, tan_v, &outline);
+    let (n, pick) = (6, 1);
+    // Where row `j`'s soldier is at `up` of his height, in window pixels.
+    let point = |j: usize, up: f32| {
+        let f = fit.feet(lineup_at(ring_at(j, pick, pick, n, 1.0)).0);
+        let y = f.y + up * PICK_BOX[1] * fit.scale;
+        [
+            (f.x / f.z / (tan_v * aspect) + 1.0) * 0.5 * size[0],
+            (1.0 - y / f.z / tan_v) * 0.5 * size[1],
+        ]
+    };
+    let at = |p: [f32; 2]| lineup_row_at(p, size, tan_v, &fit, pick, pick, n, 1.0);
+    for j in [pick, pick + 1, pick - 1] {
+        assert_eq!(at(point(j, 0.5)), Some(j), "row {j}'s chest");
+    }
+    assert_eq!(at(point(pick, 1.15)), None, "above the front soldier");
+    assert_eq!(at([2.0, size[1] - 2.0]), None, "the window's corner");
+    // Row 4 of six waits at the back (place 5, unseen).
+    assert_eq!(game::spawn_preview::ring_place(4, pick, n), 5);
+    assert_ne!(at(point(4, 0.5)), Some(4));
+}
+
+/// Issue #128: the help lines' pointer boxes follow their drawn icons and
+/// labels, at every aspect: "Back" at the left, "Select Character" at the
+/// right of the class screen, "Select" at the right of the side screen; the
+/// spawn map has none.
+#[test]
+fn spawn_help_lines_take_their_clicks() {
+    use ui::spawn_draw::{help_at, help_icon_point, Help, SpawnPage};
+    let class = SpawnPage::Class {
+        title: "Rifleman".into(),
+        lines: Vec::new(),
+        back: "Back".into(),
+        accept: "Select Character".into(),
+        team: 0,
+        class: 0,
+        classes: vec![0, 1],
+        refused: 0,
+    };
+    let side = SpawnPage::Side {
+        title: "Select a team".into(),
+        rows: vec!["A".into(), "B".into(), "Auto".into()],
+        selected: 0,
+        select: "Select".into(),
+    };
+    let map = SpawnPage::Map {
+        objective: String::new(),
+        legend: Default::default(),
+    };
+    for size in [[640.0, 480.0], [1920.0, 1080.0], [2560.0, 1080.0]] {
+        let (left, right) = (help_icon_point(size, false), help_icon_point(size, true));
+        assert_eq!(
+            help_at(None, &class, left, size),
+            Some(Help::Back),
+            "{size:?}"
+        );
+        assert_eq!(help_at(None, &class, right, size), Some(Help::Accept));
+        assert_eq!(help_at(None, &side, right, size), Some(Help::Accept));
+        assert_eq!(
+            help_at(None, &side, left, size),
+            None,
+            "no Back on the side screen"
+        );
+        assert_eq!(help_at(None, &map, right, size), None);
+        // Along the label, inward of the icon.
+        let k = size[1] / 448.0;
+        let label = [right[0] - 40.0 * k, right[1]];
+        assert_eq!(help_at(None, &class, label, size), Some(Help::Accept));
+        assert_eq!(
+            help_at(None, &class, [right[0], right[1] - 40.0 * k], size),
+            None
+        );
+        assert_eq!(
+            help_at(None, &class, [size[0] * 0.5, right[1]], size),
+            None,
+            "the middle of the footer"
+        );
+    }
 }
 
 #[test]
@@ -502,22 +793,35 @@ fn pause_audio_follows_the_battle_pause_only() {
 /// Playtest A5: the window opens maximized; a forced size stays exact.
 #[test]
 fn window_attributes_maximize_unless_a_size_is_forced() {
-    let a = window_attributes(None);
+    let a = window_attributes(None, None);
     assert!(a.maximized);
     assert_eq!(
         a.inner_size,
         Some(winit::dpi::LogicalSize::new(1280, 720).into())
     );
     assert!(
-        window_attributes(Some((0, 600))).maximized,
+        window_attributes(Some((0, 600)), None).maximized,
         "a zero size is ignored"
     );
-    let a = window_attributes(Some((800, 600)));
+    let a = window_attributes(Some((800, 600)), None);
     assert!(!a.maximized);
     assert_eq!(
         a.inner_size,
         Some(winit::dpi::PhysicalSize::new(800, 600).into())
     );
+}
+
+/// Issue #172: the saved fullscreen mode opens the window fullscreen, still
+/// maximized beneath; OPENBF_WINDOW_SIZE keeps it a window at that size.
+#[test]
+fn window_attributes_open_the_saved_fullscreen_unless_a_size_is_forced() {
+    let borderless = Some(winit::window::Fullscreen::Borderless(None));
+    let a = window_attributes(None, borderless.clone());
+    assert_eq!(a.fullscreen, borderless);
+    assert!(a.maximized);
+    let a = window_attributes(Some((800, 600)), borderless);
+    assert_eq!(a.fullscreen, None);
+    assert!(!a.maximized);
 }
 
 /// Playtest A1: the display is held awake only in a round being played.
@@ -633,4 +937,62 @@ fn ground_vehicle_death_waits_without_the_egui_spawn_placeholder() {
         spawn_model(&walk, &feed).unwrap().page,
         Some(ui::spawn_draw::SpawnPage::Map { .. })
     ));
+}
+
+/// A2: a window mode chosen on the title screen, before any profile is
+/// picked, goes to the profile picked next and is saved there.
+#[test]
+fn a_title_screen_window_mode_goes_to_the_picked_profile() {
+    let dir = std::env::temp_dir().join(format!("openbf-held-mode-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = game::profile::Store::new(dir.clone());
+    // A new profile starts fullscreen; F11 on the title screen chose a window.
+    let mut picked = store.create("Kaz", Default::default()).unwrap();
+    assert_eq!(
+        picked.settings.window_mode,
+        ui::menu::WindowMode::Borderless
+    );
+    let mut held = Some(ui::menu::WindowMode::Windowed);
+    super::display::hold_window_mode(&mut held, &mut picked);
+    assert_eq!(held, None);
+    assert_eq!(picked.settings.window_mode, ui::menu::WindowMode::Windowed);
+    assert_eq!(
+        picked.settings.last_fullscreen,
+        ui::menu::WindowMode::Borderless
+    );
+    let id = store.list().unwrap().names[0].0;
+    let back = store.select(id).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(back.settings.window_mode, ui::menu::WindowMode::Windowed);
+}
+
+/// The maintainer, 2026-11-14: a first launch (no profile yet) opens the
+/// shell fullscreen; with profiles it opens in the mode of the profile the
+/// picker offers first, so a player who chose a window keeps it.
+#[test]
+fn the_shell_opens_fullscreen_first_then_in_the_last_profiles_mode() {
+    use ui::menu::WindowMode;
+    let dir = std::env::temp_dir().join(format!("openbf-shell-mode-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = game::profile::Store::new(dir.clone());
+    let first = super::shell_profile(&store);
+    assert_eq!(first.settings.window_mode, WindowMode::Borderless);
+    assert!(!first.persists());
+    assert!(store.list().unwrap().names.is_empty(), "nothing created");
+
+    for (name, saved, last) in [
+        ("Win", WindowMode::Windowed, WindowMode::Borderless),
+        ("Excl", WindowMode::Exclusive, WindowMode::Exclusive),
+        ("Full", WindowMode::Borderless, WindowMode::Borderless),
+    ] {
+        let mut p = store.create(name, Default::default()).unwrap();
+        p.settings.window_mode = saved;
+        p.settings.last_fullscreen = last;
+        p.save().unwrap();
+        let shell = super::shell_profile(&store);
+        assert_eq!(shell.settings.window_mode, saved);
+        assert_eq!(shell.settings.last_fullscreen, last);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

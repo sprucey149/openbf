@@ -10,12 +10,14 @@
 //! - [`content`]: [`ContentManifest`] and the host's intersection, the build
 //!   identity ([`build_id`]).
 //! - [`command`]: [`GameCommand`], [`GameRequest`] and the host's checks.
-//! - [`apply`]: [`install_humans`], [`apply`], [`gate`], [`score`], [`step`]
-//!   and the round's per-slot state ([`RoundState`]).
+//! - [`apply`]: [`install_humans`], [`joining_humans`], [`apply`], [`gate`],
+//!   [`score`], [`step`] and the round's per-slot state ([`RoundState`]).
 //! - [`desync`]: the desync reports' rows, bundle log, file and
 //!   comparison ([`DesyncReport`]).
 //! - [`peer`], [`link`]: [`Peer`], [`Link`] (bare cores in virtual time or
 //!   `NetSession`s), [`FrameReport`].
+//! - [`selfcheck`]: the host's self-check, its round replayed from the log
+//!   when a guest's hash differs ([`Rebuild`]).
 //! - [`meter`]: [`NetMeter`], the net meter's figures (the overlay and the
 //!   black box).
 //! - [`lobby`]: [`LobbyState`] (the host's setup screen as the guests draw
@@ -44,10 +46,11 @@ pub mod meter;
 pub mod peer;
 pub mod predict;
 pub mod reach;
+pub mod selfcheck;
 pub mod view;
 pub mod virtual_net;
 
-pub use apply::{apply, gate, install_humans, score, step, Applied, RoundState};
+pub use apply::{apply, gate, install_humans, joining_humans, score, step, Applied, RoundState};
 pub use command::{
     cheat_bits, cheat_index, cheats_from_bits, validate_request, validate_request_bytes,
     GameCommand, GameRequest, LeftWhy, Refusal, ALL_CHEATS, ALL_SLOTS, CHEAT_COUNT,
@@ -61,6 +64,7 @@ pub use peer::{
     FrameReport, Guest, Link, LinkEvent, Mode, Notice, Peer, PeerStats, DESYNC_WINDOW_S, HASH_EVERY,
 };
 pub use predict::{PredictMode, PredictStats, PredictedShot, Predictor};
+pub use selfcheck::Rebuild;
 pub use view::LocalView;
 
 #[cfg(test)]

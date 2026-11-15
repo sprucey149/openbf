@@ -31,7 +31,11 @@
 //! Also printed per node: its floor, the level test there (`off` = given up
 //! as lost from the first tick, `Sim::level_at`) and the first wall a
 //! soldier's stepped capsule meets on the straight line to the start hub.
-//! Walls do not make a node fail: the steering walks round them.
+//! Walls do not make a node fail: the steering walks round them. `push` and
+//! `shut` say whether a standing soldier planted on the node is inside a
+//! wall (issue #173; `EMBEDDED` past 5 cm of push or 3 shut sides), and
+//! `SPNC_CONTROL=1` repeats that probe 0.3 m past the first wall, where it
+//! must fire, as the probe's own check.
 //!
 //! ```text
 //! cargo run --release -p game --example spawn_node_census [map ...]
@@ -203,6 +207,31 @@ fn first_wall(sim: &Sim, feet: Vec3, to: Vec2) -> Option<f32> {
         .map(|(t, _)| t)
 }
 
+/// How far a standing soldier planted at `feet` is inside the world (issue
+/// #173, a player spawned inside a wall): the soldier wall pass's push out
+/// of a pose there (m), and of eight directions, how many a 0.5 m step meets
+/// a wall in at once (under 5 cm). A mesh wall is a sheet, so a node inside
+/// a closed shell is pushed little but shut on most sides.
+fn embedded(sim: &Sim, feet: Vec3) -> (f32, usize) {
+    let cap = core::collision::Capsule {
+        base: feet,
+        height: core::unit::capsule_height(core::soldier::Stance::Stand),
+        radius: core::unit::SOLDIER_RADIUS,
+    };
+    let push = sim.collision.push_out_soldier(&cap).length();
+    let stepped = cap.stepped();
+    let shut = (0..8)
+        .filter(|k| {
+            let a = *k as f32 * std::f32::consts::FRAC_PI_4;
+            let d = Vec3::new(a.cos(), 0.0, a.sin());
+            sim.collision
+                .wall_sweep(&stepped, d, 0.5)
+                .is_some_and(|(t, _)| t < 0.05)
+        })
+        .count();
+    (push, shut)
+}
+
 /// One post as the census reads it.
 struct Post {
     name: String,
@@ -347,15 +376,31 @@ fn census(key: &str, path: &Path, show_all: bool, rule: usize) -> MapOut {
                 let wall = starts[1]
                     .and_then(|h| w.sim.nav.as_ref().and_then(|g| g.hub(h)))
                     .and_then(|h| first_wall(&w.sim, feet, Vec2::new(h.pos.x, h.pos.z)));
+                let (push, shut) = embedded(&w.sim, feet);
+                // SPNC_CONTROL=1: the same probe 0.3 m past that first wall,
+                // a pose known to be in it (the probe's own check).
+                if std::env::var_os("SPNC_CONTROL").is_some() {
+                    let hub = starts[1].and_then(|h| w.sim.nav.as_ref().and_then(|g| g.hub(h)));
+                    if let (Some(t), Some(h)) = (wall, hub) {
+                        let d = Vec2::new(h.pos.x - feet.x, h.pos.z - feet.z).normalize_or_zero();
+                        let past = feet + Vec3::new(d.x, 0.0, d.y) * (t + 0.3);
+                        let (p, s) = embedded(&w.sim, past);
+                        let _ = writeln!(
+                            detail,
+                            "  {key} {name} node {ni} control push {p:.2} shut {s}/8"
+                        );
+                    }
+                }
                 let _ = writeln!(
                     detail,
-                    "  {key} {name} node {ni} ({:.1}, {:.1}, {:.1}) floor {:.1} level {:?} wall {} starts before {} after {}{}{}",
+                    "  {key} {name} node {ni} ({:.1}, {:.1}, {:.1}) floor {:.1} level {:?} wall {} push {push:.2} shut {shut}/8{} starts before {} after {}{}{}",
                     node.x,
                     node.y,
                     node.z,
                     feet.y,
                     off,
                     first_wall_txt(wall),
+                    if push > 0.05 || shut >= 3 { " EMBEDDED" } else { "" },
                     starts[0].map_or("-".to_owned(), |h| h.to_string()),
                     starts[1].map_or("-".to_owned(), |h| h.to_string()),
                     if node_fail[0] { " FAIL-BEFORE" } else { "" },

@@ -89,6 +89,32 @@ fn codec_random_pads_round_trip_against_random_bases() {
     }
 }
 
+/// Issue #128: a class screen's pick crosses the wire as itself, against a
+/// bare base and against a base holding another pick.
+#[test]
+fn codec_class_pick_round_trips() {
+    for base in [
+        PadState::default(),
+        PadState {
+            pick: Some(ScreenPick::Post(3)),
+            ..PadState::default()
+        },
+    ] {
+        for class in [0u8, 1, 9, u8::MAX] {
+            let pad = PadState {
+                pick: Some(ScreenPick::Class(class)),
+                buttons: 1,
+                ..base
+            };
+            let mut w = Writer::new();
+            write_pad(&mut w, &pad, &base);
+            let mut rd = Reader::new(&w.buf);
+            assert_eq!(read_pad(&mut rd, &base).unwrap(), pad);
+            assert!(rd.is_done());
+        }
+    }
+}
+
 #[test]
 fn codec_bundle_chains_and_logs_round_trip() {
     let mut r = Lcg(2);
@@ -175,9 +201,17 @@ fn codec_messages_round_trip() {
             static_digest: 7,
             hash0: 8,
         },
-        Msg::Start { round_id: 2 },
-        Msg::HashReport { tick: 30, hash: 9 },
+        Msg::Start {
+            round_id: 2,
+            lead_us: 120_000,
+        },
+        Msg::HashReport {
+            round_id: 2,
+            tick: 30,
+            hash: 9,
+        },
         Msg::Desync {
+            round_id: 2,
             tick: 30,
             host_hash: 0xfeed,
             build: "abc".into(),

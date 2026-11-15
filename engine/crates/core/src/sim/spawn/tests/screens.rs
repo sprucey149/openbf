@@ -428,6 +428,79 @@ fn a_side_pick_is_read_by_the_accept_on_its_own_pad() {
     assert_eq!(s.spawn_post_choice[0], Some(SpawnPost::Post(3)));
 }
 
+/// Issue #128: a class pick takes a class the screen shows the slot; the
+/// accept on the same pad (the click that spawns) spawns that class. Off the
+/// class screen, or for a class not shown, it does nothing.
+#[test]
+fn a_class_pick_selects_a_shown_class_and_its_accept_spawns_it() {
+    use crate::sim::ScreenPick;
+    let mut s = screens_sim(5, true);
+    s.step(&[pick(ScreenPick::Class(1))]);
+    assert_eq!(s.spawn_choice[0], 0, "no class pick on the side screen");
+    s.step(&[pick_accept(ScreenPick::Side(0))]);
+    s.step(&[PadState::default()]);
+    s.step(&[pick_accept(ScreenPick::Post(0))]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Class);
+    s.step(&[PadState::default()]);
+    s.step(&[pick(ScreenPick::Class(1))]);
+    assert_eq!(s.spawn_choice[0], 1, "the clicked soldier's class");
+    s.step(&[pick(ScreenPick::Class(7))]);
+    assert_eq!(s.spawn_choice[0], 1, "a class the team does not have");
+    s.step(&[pick(ScreenPick::Post(1))]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Class, "a post is no class");
+    s.step(&[pick(ScreenPick::Class(0))]);
+    assert_eq!(s.spawn_choice[0], 0);
+    s.step(&[PadState::default()]);
+    s.step(&[pick_accept(ScreenPick::Class(1))]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Accepted);
+    assert!(slot0(&s).alive, "spawned on the click's tick");
+    assert_eq!(slot0(&s).spec.class, 1, "as the picked class");
+}
+
+/// Issue #128 on issue #28's screen: the class screen a living player opens
+/// at a friendly post (`SpawnStage::Alive`) takes a class pick too. The pick
+/// only selects; the accept on the click's pad swaps him in place as the
+/// picked class. A class the team does not have, or another screen's pick,
+/// does nothing.
+#[test]
+fn a_class_pick_on_the_post_class_change_screen_swaps_to_it() {
+    use super::class_change::{change_sim, me};
+    use crate::sim::ScreenPick;
+    use crate::soldier::GroundRules;
+    let mut s = change_sim(GroundRules::Bf2);
+    let before = s.players[0].unwrap();
+    s.step(&[press(buttons::ACTION | buttons::SPAWN_BACK)]);
+    s.step(&[PadState::default()]);
+    assert_eq!(
+        s.spawn_stage[0],
+        SpawnStage::Alive,
+        "the class screen opened"
+    );
+    s.step(&[pick(ScreenPick::Class(7))]);
+    assert_eq!(s.spawn_choice[0], 0, "a class the team does not have");
+    s.step(&[pick(ScreenPick::Side(1))]);
+    s.step(&[pick(ScreenPick::Post(1))]);
+    assert_eq!(
+        (s.spawn_stage[0], s.spawn_choice[0]),
+        (SpawnStage::Alive, 0),
+        "a side row or a post is no class"
+    );
+    s.step(&[pick(ScreenPick::Class(1))]);
+    assert_eq!(s.spawn_choice[0], 1, "the clicked soldier's class");
+    assert_eq!(me(&s).spec.class, 0, "the pick only selects");
+    assert_eq!(s.players[0], Some(before));
+    s.step(&[PadState::default()]);
+    s.step(&[pick_accept(ScreenPick::Class(1))]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Accepted);
+    let after = s.players[0].unwrap();
+    assert_eq!(
+        (after.index, after.gen),
+        (before.index, before.gen + 1),
+        "swapped in place"
+    );
+    assert_eq!(me(&s).spec.class, 1, "as the picked class");
+}
+
 /// The pick reaches only the slot whose pad carries it.
 #[test]
 fn a_pick_moves_only_its_own_slot() {

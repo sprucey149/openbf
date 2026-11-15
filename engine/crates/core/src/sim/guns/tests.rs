@@ -645,6 +645,38 @@ fn a_full_circle_turret_turns_past_180_and_its_gun_follows() {
     }
 }
 
+/// OURS (issue #164): zoomed, a human gunner's turret turns at its rates
+/// over the weapon's zoom turn divisor (the rifle's 2.5), as a zoomed
+/// soldier does; unzoomed at its own 1 rad/s.
+#[test]
+fn a_zoomed_turret_turns_at_its_rate_over_the_zoom_divisor() {
+    for zoomed in [false, true] {
+        let (mut s, v) = dish_world();
+        let p = s
+            .spawn(&UnitSpec::player(0, Vec3::new(0.0, 0.0, 3.0)))
+            .unwrap();
+        assert!(s.enter_vehicle(p, v, 0));
+        s.step(&[PadState::default()]);
+        if zoomed {
+            tap(&mut s, buttons::ZOOM);
+            assert!(s.seat_zoom(p).is_some());
+        }
+        let full = PadState {
+            rx: PadState::quantize(1.0),
+            ..PadState::default()
+        };
+        for _ in 0..20 {
+            s.step(&[full]);
+        }
+        let yaw = |s: &Sim| s.vehicle(v).unwrap().guns[0].as_ref().unwrap().look.0;
+        let a = yaw(&s);
+        s.step(&[full]);
+        let rate = crate::vehicle::gun::wrap(yaw(&s) - a) / crate::TICK_DT;
+        let want = if zoomed { -1.0 / 2.5 } else { -1.0 };
+        assert!((rate - want).abs() < 1e-3, "zoomed {zoomed}: {rate}");
+    }
+}
+
 /// Card TURR: BF2 Mygeeto's recoilless turret (`tur_bldg_recoilless_lg`):
 /// the pivot `aimer_y` at the origin, `hp_fire1` 3.39 m over it and 1.28 m
 /// to the side, `EyePointOffset 1.0 4.2 -8.3`, `AimerYawLimits 0 0`,

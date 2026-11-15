@@ -222,3 +222,20 @@ fn profile_picker_renders_native_menu_pages() {
         }
     }
 }
+
+/// Issue #173: each view's reticle colour is its own slot's pick. A LAN
+/// guest (slot 1) with nothing under his aim shows no relation while the
+/// host's (slot 0) aim is on an enemy, and the host's view keeps its red.
+#[test]
+fn reticle_relation_reads_the_views_own_slot() {
+    use core::sim::AimTarget;
+    use core::unit::UnitHandle;
+    let mut sim = core::sim::Sim::empty(1);
+    let enemy = AimTarget::Unit(UnitHandle { index: 3, gen: 1 });
+    sim.reticle_pick = vec![Some((enemy, -1)), None];
+    assert_eq!(reticle_relation(&sim, 0), -1, "the host sees his enemy");
+    assert_eq!(reticle_relation(&sim, 1), 0, "the guest has no pick");
+    sim.reticle_pick[1] = Some((enemy, 1));
+    assert_eq!(reticle_relation(&sim, 1), 1);
+    assert_eq!(reticle_relation(&sim, 5), 0, "a slot past the table");
+}

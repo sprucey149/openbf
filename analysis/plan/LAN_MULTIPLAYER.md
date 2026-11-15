@@ -166,14 +166,23 @@ How it is played (`game/src/main/windowed/lobby.rs`):
   cheat policy (Off, or an allowed list with a row per cheat) and lag
   compensation on or off; then the host's own Instant Action screen is the
   lobby, with a roster panel (name, ping, addon, team, ready) and Kick.
+  The panel works without a mouse (#168): Square / X / Space moves the pad
+  into it (opening it if hidden), Up / Down move between the players,
+  Accept on a guest asks to kick him and a second Accept kicks (the question
+  belongs to that guest: if the roster shifts under the pad it is dropped),
+  Back cancels the question, else closes the list, as Square does. While the
+  list holds the pad the screen under it gets no input; the lobby is entered
+  again (after a round) with the pad out of the list. The mouse keeps the
+  Kick buttons and a Hide / Players button.
   Every human starts at the side select ("Auto"); a per-player team
   preference is not offered yet.
 - Join Game: the hosts found on the LAN, Join by address (IP or host name,
   optional `:port`, resolved off the frame loop) and the recent hosts.
 - Guests draw the host's screen from `LobbyState` with "The host is
-  choosing…"; their only input is Back (leave). The map list is the host's
-  by key, built from the guest's own catalog in the host's order, so every
-  index and cursor lines up.
+  choosing…"; their input is Back (leave) and the same player list, which
+  opens, moves and closes as the host's but has no Kick. The map list is
+  the host's by key, built from the guest's own catalog in the host's
+  order, so every index and cursor lines up.
 
 ### 4.3 Round start and the load barrier
 
@@ -200,8 +209,21 @@ How it is played (`game/src/main/windowed/lobby.rs`):
      when the host's build is done.
    - A mid-round joiner without the map in play is benched the same way
      ("You do not have <map>; you join the next round").
+   - A round-start peer reports `Loaded` only after its whole loading
+     presentation (as long as single player's, with no skip in a LAN
+     round) and its battle install. It then holds the last image. The host's
+     own build counts the same way: the start waits for the slowest peer.
 4. The barrier times out at 60 s. Late peers become mid-round joiners.
-5. `Start` carries the host's tick-0 time, and bundles start flowing.
+   - A seated peer still loading at the timeout gets `Start` too. When its
+     build is done it skips the rest of its presentation and enters behind
+     its spawn screen, catching up as a joiner does.
+5. `Start` (protocol 8) carries the lead to tick 0: the slowest seated
+   guest's half round trip plus 100 ms, at most 300 ms. The host's clock
+   starts after that lead. Each guest takes its own half round trip off the
+   lead. Every peer's loading screen ends at that one moment, and tick 0's
+   bundle follows a tick later.
+   - Joins and rejoins load without a hold and enter as soon as they are
+     built.
 
 ### 4.4 Ticks, inputs and commands
 
@@ -302,13 +324,45 @@ How it is played (`game/src/main/windowed/lobby.rs`):
 
 - Every 30 ticks each client sends `(tick, Sim::hash)`. The host compares it
   with its own.
-- On a mismatch:
-  - Both sides write a black box desync record with the SHASH group hashes at
-    that tick and the last 300 bundles.
-  - The client is told and **rejoins automatically** through §4.5.
-  - A second desync within 5 minutes moves that player to the lobby with a
-    message naming the first differing group.
-- The host is the reference and never desyncs.
+- On a mismatch the host first checks itself (issue #168, the first VPN
+  playtest showed the host's own game can part; `game::netplay::selfcheck`):
+  - It replays the round's bundle log to the mismatch tick on a worker
+    thread, so its frames go on. The replay starts from the host's latest
+    checkpoint: every 10 s it keeps a copy of its own game, which becomes
+    the checkpoint once every live guest's hash agreed on that tick. A check
+    then steps seconds of ticks, not the round (measured on the test
+    fixture's small round, not a real map: tick 20,100, replayed from the
+    checkpoint at 19,800, in one tick of play; on bf2_kas2 in the soak, 27
+    ticks). Without one it builds the round from its setup, with its own
+    copy of the map, and replays from tick 0. One check runs at a time;
+    guests that differ meanwhile wait for its verdict. Both sides' rows for
+    the reports are taken at the mismatch. A mismatch at tick T drops a
+    copy taken at T or later, and no copy is taken or promoted while a
+    check runs.
+  - The replay agrees with the host's game: the guest parted. Both sides
+    write a desync report (below), the guest is told once and **rejoins
+    automatically** through §4.5. A checkpoint is proven by `Sim::hash`
+    only, and it also holds state the hash does not cover but the sim reads
+    (the feed's round points, which gate the class screen). So when a
+    replay from a checkpoint agrees, the host drops the checkpoint and
+    checks again from the setup before telling anyone. Only that verdict
+    counts.
+  - The replay differs: the host's game parted. The replay, stepped on to
+    the host's tick, takes its place; the host writes a report
+    (`host_diverged_at`) and tells every guest once ("The host's game was
+    corrected"). The guests play on; none rejoins and none gets a strike.
+  - A check that cannot replay, or gives no verdict in 10 s plus a quarter
+    of its replay span (plus 30 s when it builds the round), falls back to
+    the rule before self-checks: each guest that differed is told and
+    rejoins, with the normal strikes.
+  - A second host correction in one round ends the round for everyone with
+    a message instead of playing on out of step. Everyone goes to the
+    round's results and ready check, as after a decided round.
+- Strikes are per round: a guest's second desync in the same round (within
+  5 minutes of the first) moves it to the lobby with a message naming the
+  first differing group. A new round starts the count over.
+- Hash reports and desync notices name their round (protocol 7), so a check
+  still in flight when the next round loads is dropped, never compared.
 - Desync reports (done November 13, 2026; `game::netplay::desync`):
   - While a round runs, each peer keeps every stepped tick's row (its
     `Sim::hash` and the five SHASH groups units, rng, score, posts and timers

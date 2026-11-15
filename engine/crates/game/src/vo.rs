@@ -1186,6 +1186,8 @@ mod tests {
             age: 0.1,
             health_left,
             dir: glam::Vec3::NEG_Z,
+            dealt: 1.0,
+            taken: 1.0,
         };
         sim.events = vec![
             hit(h[2], h[1], 200.0),

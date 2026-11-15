@@ -42,6 +42,8 @@ fn load_from(
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
         dlc_heroes: false,
+        netplay_rows: false,
+        opening_humans: [0; 2],
     };
     make_walk(&scene, &setup).expect("ordinary Conquest fixture")
 }

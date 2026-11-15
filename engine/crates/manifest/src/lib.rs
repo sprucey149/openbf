@@ -380,21 +380,13 @@ pub struct ManifestLayer {
     pub nav: Option<ManifestNav>,
 }
 
-/// `source_game` for a manifest baked before the field existed: those are all
-/// BF1 (pre-P5).
-fn default_game() -> String {
-    "bf1".to_string()
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub spawn_only_posts: bool,
     pub map: String,
     /// "bf1" | "bf2" — from the model material record size (BF2 = 25 B),
-    /// falling back to "bf2" when per-mode world layers exist. Defaulted to
-    /// "bf1" for pre-P5 bakes.
-    #[serde(default = "default_game")]
+    /// falling back to "bf2" when per-mode world layers exist.
     pub source_game: String,
     pub terrain_name: Option<String>,
     pub sky_name: Option<String>,
@@ -873,7 +865,6 @@ pub struct ManifestPrimPoint {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestHead {
     pub map: String,
-    #[serde(default = "default_game")]
     pub source_game: String,
 }
 

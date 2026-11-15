@@ -10,52 +10,34 @@
 //! the shell's (`analysis/re-bf2-shell.md` §3): a title tab of the
 //! `bf2_buttons_top*` bar over a `border_3_pieces` box, the list cursor
 //! `listbox_cursor`, the scroll wedges `listbox_topbot_more`, the help lines.
-//! Texts are `gamefont_medium` (titles) and `gamefont_tiny` (the rest: its
-//! lower case is drawn as capitals), each stretched across as the frames
-//! measure. Colours are the glyphs' brightest pixels on the frames.
+//! Texts are the menu roles (`crate::typography`): the titles [`TITLE`] (the
+//! PS2 draws them in `gamefont_medium`), the rest [`LIST`] (`gamefont_tiny`,
+//! capitals), at the roles' own size and stretch; a text too long for its
+//! column ends in an ellipsis instead of being squeezed. Colours are the
+//! glyphs' brightest pixels on the frames.
 //!
 //! `[ours]` Hor+: the pages keep the 4:3 box at the window's centre, the help
 //! lines their edges, as the other shell pages.
 
-use crate::hud_draw::{color, run_width, Ctx, Quad, Run, Screen};
+use crate::hud_draw::{Ctx, Quad, Screen};
 use crate::hud_tree::HAlign;
 use crate::input_icons::{IconSet, Prompt};
-use crate::spawn_draw::{
-    screen_at, Anchor, HELP_DROP, HELP_TEXT, ICON, ICON_GAP, MAP_FONT, SAFE_X, SMALL_FONT,
-    TITLE_PIECES,
-};
+use crate::spawn_draw::{screen_at, Anchor, HELP_DROP, ICON, ICON_GAP, SAFE_X, TITLE_PIECES};
 use crate::stats::{Page, StatsScreens, SHOWN};
+use crate::typography::{self, tint, Tint, HELP, LIST, TITLE};
 use glam::Mat4;
 
-/// The titles' font (`ifs.stats.*title` texts, gamefont_medium [V] the
-/// scripts) and the rest's (gamefont_tiny [V]).
-pub const TITLE_FONT: &str = "gamefont_medium";
-pub const TEXT_FONT: &str = MAP_FONT;
-
-type Style = ([f32; 3], f32);
-
-/// Title tab text: the frames' (243, 233, 18), gTitleTextColor at full
-/// alpha.
-const TITLE_TEXT: Style = ([246.0, 235.0, 20.0], 1.0);
-/// Row texts: a name or a number grey 126, points yellow, the player's row
-/// white, the cursor row's name blue (gSelectedTextColor's (138, 160, 244)
-/// as the frames show it).
-const GREY: Style = ([126.0; 3], 1.0);
-const YELLOW: Style = ([253.0, 253.0, 0.0], 1.0);
-const WHITE: Style = ([250.0; 3], 1.0);
-const BLUE: Style = ([129.0, 150.0, 229.0], 1.0);
-
-/// x stretch of each text group over the font's advances (ink widths on the
-/// frames: "UNIT 464" 92 px over 66 texels, a list column's "0" 7 px where
-/// a name's is 10, "PLAYER POINTS" 150 over 105, "Team Stats" 139 over 100,
-/// the medal text 553 over 376).
-const KX_TITLE: f32 = 1.11;
-const KX_LIST: f32 = 1.115;
-const KX_NUMBER: f32 = 0.78;
-const KX_PAGE: f32 = 1.143;
-const KX_INFO: f32 = 1.157;
-/// The help lines' `gamefont_small` ("Done" 58 px over 43 texels).
-const KX_HELP: f32 = 1.08;
+/// Colours: the title tab's text at full alpha, grey names and numbers,
+/// yellow points, the player's row white, the cursor row's name blue, the
+/// award winners yellow (`crate::typography::tint`).
+const GREY: Tint = tint::STATS_GREY;
+const YELLOW: Tint = tint::STATS_YELLOW;
+const WHITE: Tint = tint::STATS_WHITE;
+const BLUE: Tint = tint::STATS_BLUE;
+const WINNER: Tint = tint::STATS_WINNER;
+/// `[ours]` A human's name on Team Stats is bold (issue #168): the run drawn
+/// again [`BOLD_DX`] units right.
+const BOLD_DX: f32 = typography::BOLD_DX;
 
 /// Every panel's left and right border (Team, Personal and Career: 26 ..
 /// 616 px).
@@ -116,7 +98,6 @@ const AWARD_X: [f32; 2] = [28.0, 264.0];
 const AWARD_W: f32 = 101.6;
 const WINNER_RIGHT: [f32; 2] = [248.4, 483.6];
 const WINNER_W: f32 = 104.0;
-const WINNER: Style = ([250.0, 250.0, 0.0], 1.0);
 
 /// Personal Stats: its box (57 .. 247 px), the Medals tab (250.5 .. 282.5
 /// px) and box (283 .. 413 px); lines from 45 px, values right-aligned at
@@ -195,77 +176,13 @@ enum Icon {
 }
 
 impl Ctx<'_> {
-    /// One text run: `kx` × the font's advances across, 1:1 down.
-    #[allow(clippy::too_many_arguments)]
-    fn stats_text(
-        &mut self,
-        s: &Screen,
-        font: &str,
-        text: &str,
-        at: (f32, f32),
-        h_align: HAlign,
-        kx: f32,
-        (rgb, alpha): Style,
-    ) {
-        let Some(font) = self.art.fonts.get(font) else {
-            return;
-        };
-        self.run(
-            NONE,
-            &Mat4::IDENTITY,
-            s,
-            font,
-            &Run {
-                text,
-                at,
-                h_align,
-                scale: [kx, 1.0],
-                color: color(rgb, alpha),
-                additive: false,
-                shadow: false,
-            },
-        );
-    }
-
-    fn text_width(&self, font: &str, text: &str, kx: f32) -> f32 {
-        self.art
-            .fonts
-            .get(font)
-            .map_or(0.0, |f| run_width(f, text, kx, false))
-    }
-
-    /// The x stretch that keeps `text` within `width` (the scripts'
-    /// `ifs_careerstats_fnShrinkToFit`): `kx`, or less.
-    fn fit(&self, text: &str, kx: f32, width: f32) -> f32 {
-        self.fit_font(TEXT_FONT, text, kx, width)
-    }
-
-    fn fit_font(&self, font: &str, text: &str, kx: f32, width: f32) -> f32 {
-        let w = self.text_width(font, text, kx);
-        if w > width {
-            kx * width / w
-        } else {
-            kx
-        }
-    }
-
-    fn font_height(&self, font: &str) -> f32 {
-        self.art
-            .fonts
-            .get(font)
-            .map_or(15.0, |f| f32::from(f.line_height))
-    }
-
     /// A panel: its title tab (the shell's title bar pieces, as the class
     /// panel's) with the title centred, and its `border_3_pieces` box.
     fn stats_panel(&mut self, s: &Screen, tab: [f32; 4], title: &str, body: [f32; 4]) {
         self.bar(s, tab, TITLE_PIECES);
-        let at = (
-            TITLE_CX,
-            title_top([tab[1], tab[3]], self.font_height(TITLE_FONT)),
-        );
-        let kx = self.fit_font(TITLE_FONT, title, KX_TITLE, tab[2] - tab[0] - 36.0);
-        self.stats_text(s, TITLE_FONT, title, at, HAlign::Center, kx, TITLE_TEXT);
+        let at = (TITLE_CX, title_top([tab[1], tab[3]], TITLE.size));
+        let title = self.ellipsized(&TITLE, title, tab[2] - tab[0] - 36.0);
+        self.text(s, &TITLE, &title, at, HAlign::Center, tint::STATS_TITLE);
         self.stats_box(s, body);
     }
 
@@ -317,14 +234,13 @@ impl Ctx<'_> {
                 self.sheet(&s, r, [0.0, 0.0, 1.0, 1.0], sheet, 1.0);
             }
         }
-        let lh = self.font_height(SMALL_FONT);
         let (x, align) = if right {
             (ix - ICON_GAP, HAlign::Right)
         } else {
             (ix + ICON[0] + ICON_GAP, HAlign::Left)
         };
-        let at = (x, y - lh * 0.5 + HELP_DROP);
-        self.stats_text(&s, SMALL_FONT, text, at, align, KX_HELP, HELP_TEXT);
+        let at = (x, y - HELP.size * 0.5 + HELP_DROP);
+        self.text(&s, &HELP, text, at, align, tint::HELP);
     }
 
     /// The black the pages stand on (`statsscreens_bg` is black on the
@@ -399,14 +315,19 @@ impl Ctx<'_> {
                     (false, false) => (GREY, GREY),
                 };
                 let at = (NAME_X + dx, top);
-                let kx = self.fit(&row.name, KX_LIST, NAME_W);
-                self.stats_text(s, TEXT_FONT, &row.name, at, HAlign::Left, kx, name);
+                let bold = if row.human { BOLD_DX } else { 0.0 };
+                let fitted = self.ellipsized(&LIST, &row.name, NAME_W - bold);
+                self.text(s, &LIST, &fitted, at, HAlign::Left, name);
+                if row.human {
+                    let at = (at.0 + bold, at.1);
+                    self.text(s, &LIST, &fitted, at, HAlign::Left, name);
+                }
                 let values = [row.points, row.kills, row.deaths, row.posts];
                 for (c, (x, v)) in COLUMN_X.iter().zip(values).enumerate() {
                     let style = if c == 0 { YELLOW } else { number };
                     let at = (x + dx, top);
                     let v = v.to_string();
-                    self.stats_text(s, TEXT_FONT, &v, at, HAlign::Center, KX_NUMBER, style);
+                    self.text(s, &LIST, &v, at, HAlign::Center, style);
                 }
             }
         }
@@ -414,14 +335,14 @@ impl Ctx<'_> {
             for (k, a) in column.iter().enumerate() {
                 let top = AWARD_TOP + AWARD_PITCH * k as f32;
                 let at = (AWARD_X[c], top);
-                let kx = self.fit(&a.label, KX_PAGE, AWARD_W);
-                self.stats_text(s, TEXT_FONT, &a.label, at, HAlign::Left, kx, WHITE);
+                let fitted = self.ellipsized(&LIST, &a.label, AWARD_W);
+                self.text(s, &LIST, &fitted, at, HAlign::Left, WHITE);
                 if a.winner.is_empty() {
                     continue;
                 }
-                let kx = self.fit(&a.winner, KX_PAGE, WINNER_W);
+                let fitted = self.ellipsized(&LIST, &a.winner, WINNER_W);
                 let at = (WINNER_RIGHT[c], top);
-                self.stats_text(s, TEXT_FONT, &a.winner, at, HAlign::Right, kx, WINNER);
+                self.text(s, &LIST, &fitted, at, HAlign::Right, WINNER);
             }
         }
         self.stats_help(size, false, Icon::Square, &st.texts.done);
@@ -472,9 +393,9 @@ impl Ctx<'_> {
                 }
                 let at = (LINE_X[0], top);
                 let tint = if focused { BLUE } else { WHITE };
-                self.stats_text(s, TEXT_FONT, label, at, HAlign::Left, KX_PAGE, tint);
+                self.text(s, &LIST, label, at, HAlign::Left, tint);
                 let at = (LINE_X[1], top);
-                self.stats_text(s, TEXT_FONT, value, at, HAlign::Right, KX_PAGE, WHITE);
+                self.text(s, &LIST, value, at, HAlign::Right, WHITE);
             }
             for (i, (name, count)) in row.medals.iter().enumerate() {
                 let label = format!("{name} ({count})");
@@ -482,8 +403,8 @@ impl Ctx<'_> {
                     ROUND_MEDAL_X[i % 2],
                     ROUND_MEDAL_TOP + ROUND_MEDAL_PITCH * (i / 2) as f32,
                 );
-                let kx = self.fit(&label, KX_PAGE, ROUND_MEDAL_W);
-                self.stats_text(s, TEXT_FONT, &label, at, HAlign::Left, kx, WHITE);
+                let fitted = self.ellipsized(&LIST, &label, ROUND_MEDAL_W);
+                self.text(s, &LIST, &fitted, at, HAlign::Left, WHITE);
             }
         }
         self.stats_help(size, false, Icon::Triangle, &st.texts.back);
@@ -500,10 +421,10 @@ impl Ctx<'_> {
             let (line, col) = (CAREER_LINES[(k / 2).min(2)], k % 2);
             let top = CAREER_LINE_TOP + CAREER_PITCH * line as f32;
             let at = (CAREER_LABEL_X[col], top);
-            self.stats_text(s, TEXT_FONT, label, at, HAlign::Left, KX_PAGE, WHITE);
+            self.text(s, &LIST, label, at, HAlign::Left, WHITE);
             let at = (CAREER_VALUE_RIGHT[col], top);
-            let kx = self.fit(value, KX_PAGE, CAREER_VALUE_W);
-            self.stats_text(s, TEXT_FONT, value, at, HAlign::Right, kx, YELLOW);
+            let fitted = self.ellipsized(&LIST, value, CAREER_VALUE_W);
+            self.text(s, &LIST, &fitted, at, HAlign::Right, YELLOW);
         }
         let view = c.view_of(st.medal);
         let (head, rows) = if view.unlocks {
@@ -511,15 +432,7 @@ impl Ctx<'_> {
         } else {
             (&st.texts.career_medals, &c.medals)
         };
-        self.stats_text(
-            s,
-            TEXT_FONT,
-            head,
-            MEDALS_HEAD,
-            HAlign::Left,
-            KX_PAGE,
-            YELLOW,
-        );
+        self.text(s, &LIST, head, MEDALS_HEAD, HAlign::Left, YELLOW);
         if c.views().len() > 1 {
             match view.unlocks {
                 true => self.wedge(s, CAREER_WEDGE_X, CAREER_UP_WEDGE, false),
@@ -543,45 +456,34 @@ impl Ctx<'_> {
             }
             let (text, number) = if on { (BLUE, BLUE) } else { (WHITE, YELLOW) };
             let at = (MEDAL_NAME_X[col], top);
-            let kx = self.fit(&m.name, KX_PAGE, MEDAL_NAME_W);
-            self.stats_text(s, TEXT_FONT, &m.name, at, HAlign::Left, kx, text);
+            let fitted = self.ellipsized(&LIST, &m.name, MEDAL_NAME_W);
+            self.text(s, &LIST, &fitted, at, HAlign::Left, text);
             let at = (MEDAL_COUNT_X[col], top);
             let n = m.count.to_string();
-            self.stats_text(s, TEXT_FONT, &n, at, HAlign::Center, KX_PAGE, number);
+            self.text(s, &LIST, &n, at, HAlign::Center, number);
             let at = (MEDAL_LEVEL_RIGHT[col], top);
-            let kx = self.fit(&m.level, KX_PAGE, MEDAL_LEVEL_W);
-            self.stats_text(s, TEXT_FONT, &m.level, at, HAlign::Right, kx, text);
+            let fitted = self.ellipsized(&LIST, &m.level, MEDAL_LEVEL_W);
+            self.text(s, &LIST, &fitted, at, HAlign::Right, text);
         }
         if let Some(m) = c.row(st.medal) {
-            let lines = self.wrap(&m.info, INFO_W, KX_INFO);
+            let flat = m.info.split_whitespace().collect::<Vec<_>>().join(" ");
+            let lines = self.wrapped(&LIST, &flat, INFO_W);
             for (k, line) in lines.iter().enumerate() {
                 let at = (INFO_AT.0, INFO_AT.1 + INFO_PITCH * k as f32);
-                self.stats_text(s, TEXT_FONT, line, at, HAlign::Left, KX_INFO, WHITE);
+                self.text(s, &LIST, line, at, HAlign::Left, WHITE);
             }
         }
         self.stats_help(size, false, Icon::Triangle, &st.texts.back);
         self.stats_help(size, true, Icon::Cross, &st.texts.done);
-    }
-
-    /// `text` broken at words to `width` units.
-    fn wrap(&self, text: &str, width: f32, kx: f32) -> Vec<String> {
-        let mut lines: Vec<String> = Vec::new();
-        for word in text.split_whitespace() {
-            match lines.last_mut() {
-                Some(l) if self.text_width(TEXT_FONT, &format!("{l} {word}"), kx) <= width => {
-                    l.push(' ');
-                    l.push_str(word);
-                }
-                _ => lines.push(word.to_owned()),
-            }
-        }
-        lines
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    const TEXT_FONT: &str = "gamefont_tiny";
+    const TITLE_FONT: &str = "gamefont_large";
+    const SMALL_FONT: &str = "gamefont_small";
     use crate::hud_draw::{draw, HudArt, HudFrame};
     use crate::hud_tree::Hud;
     use crate::stats::{Award, Career, Medal, StatRow, StatsTexts, TeamList};
@@ -615,6 +517,7 @@ mod tests {
             deaths: 1,
             posts: 0,
             me,
+            human: me,
             personal: vec![("Kills".into(), points.to_string())],
             medals: Vec::new(),
         };
@@ -748,6 +651,66 @@ mod tests {
         };
         assert!(has(WHITE.0), "the player's row");
         assert!(has(BLUE.0), "the cursor row's name");
+    }
+
+    /// The text font's vertices: position and colour.
+    fn text_verts(f: &HudFrame) -> Vec<([f32; 2], [f32; 4])> {
+        let page = format!("{TEXT_FONT}_page");
+        f.batches
+            .iter()
+            .filter(|b| b.texture == page)
+            .flat_map(|b| {
+                f.indices[b.first as usize..(b.first + b.count) as usize]
+                    .iter()
+                    .map(|i| {
+                        let v = &f.verts[*i as usize];
+                        ([v.pos[0], v.pos[1]], v.color)
+                    })
+            })
+            .collect()
+    }
+
+    /// Issue #168: a human's name on Team Stats is bold, a bot's is not:
+    /// the same glyphs once more, `BOLD_DX` units (here 1 px) to the right,
+    /// in the row's own colour; nothing else on the page changes.
+    #[test]
+    fn team_stats_draws_human_names_bold() {
+        let mut st = screens();
+        let plain = text_verts(&frame(&st));
+        // "RHO 557" (a bot until now, grey, not under the cursor) is a
+        // second human; "PLAYER 1" (the viewer) was one already.
+        let rho = &mut st.lists[1].rows[0];
+        assert_eq!(rho.name, "RHO 557");
+        rho.human = true;
+        let bold = text_verts(&frame(&st));
+        assert_eq!(
+            bold.len(),
+            plain.len() + 7 * 6,
+            "7 glyphs, 2 triangles each"
+        );
+        let dx = BOLD_DX * 640.0 / 512.0;
+        let mut extra: Vec<_> = bold.iter().filter(|v| !plain.contains(v)).collect();
+        extra.dedup();
+        assert!(!extra.is_empty());
+        for (p, c) in extra {
+            let copy = plain.iter().any(|(q, k)| {
+                k == c && (q[0] + dx - p[0]).abs() < 1e-3 && (q[1] - p[1]).abs() < 1e-3
+            });
+            assert!(
+                copy,
+                "{p:?} is no copy of a plain glyph {dx} px left in {c:?}"
+            );
+            assert_eq!(c[..3], GREY.0.map(|v| v / 255.0), "same colour");
+        }
+        // The viewer's row is bold too: his name (under the cursor, blue)
+        // has twice the vertices of the same name drawn plain.
+        let blue = |v: &&([f32; 2], [f32; 4])| v.1[..3] == BLUE.0.map(|x| x / 255.0);
+        let mut st = screens();
+        st.lists[1].rows[1].human = false;
+        let viewer_plain = text_verts(&frame(&st)).iter().filter(blue).count();
+        let viewer_bold = plain.iter().filter(blue).count();
+        assert_eq!(viewer_plain, "PLAYER 1".len() * 6);
+        assert_eq!(viewer_bold, 2 * viewer_plain);
     }
 
     /// Square is the PS2's drawn outline only on the PS2's set; any other

@@ -568,6 +568,8 @@ enum LoopSource {
     Repair(core::unit::UnitHandle, usize),
     Hero(core::unit::UnitHandle, u32),
     Shield(core::unit::UnitHandle),
+    /// A choked soldier's `ChokeSound` (issue #173), by unit.
+    Choke(core::unit::UnitHandle),
     /// A soldier's aura loop (the War Hero's crackle and the like), by unit
     /// and the aura's kind.
     Buff(core::unit::UnitHandle, usize),

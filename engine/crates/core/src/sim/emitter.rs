@@ -175,7 +175,7 @@ impl Sim {
                             ..Default::default()
                         };
                         let pos = body.pos;
-                        self.kick_and_push(h, &e, hit.from, pos, w);
+                        self.kick_and_push(h, &e, hit.from, pos, w, Some(unit));
                     }
                 }
             }
@@ -635,6 +635,22 @@ mod tests {
         assert!(vel.x > 1.0, "pushed along the aim: {vel}");
         assert_eq!(s.nav_stats.knocks, 1);
         assert_eq!(emitter_links(&s).len(), 1);
+    }
+
+    /// Issue #173 [ours]: an emitter's shove that throws a soldier records
+    /// the shooter, so a fall that follows is his kill.
+    #[test]
+    fn an_emitter_shove_records_the_shooter_for_a_fall() {
+        let (mut s, class) = sim_with(force_push(), no_damage());
+        let unit = shooter(&mut s, Vec3::ZERO);
+        s.units[unit.index as usize].weapon_class = class;
+        let target = s
+            .spawn(&UnitSpec::trooper(1, Vec3::new(6.0, 0.0, 0.0)))
+            .unwrap();
+        s.soldier_shots(unit.index as usize, None, &[shot()]);
+        let u = s.unit(target).unwrap();
+        assert!(u.soldier.stance.knocked(), "thrown");
+        assert_eq!(u.forced_by.map(|f| f.by), Some(unit));
     }
 
     /// BF1 has no team test: a zero-damage BF1 cone shoves an ally too.

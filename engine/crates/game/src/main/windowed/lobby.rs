@@ -85,6 +85,9 @@ pub(super) struct Lobby {
     pub awards: bool,
     /// The pointer was over a panel of the lobby's own last frame.
     over_panel: bool,
+    /// The roster panel's pad and key state (issue #168): open or closed,
+    /// and the row the pad is on while the list holds the input.
+    pub roster_nav: ui::lobby::RosterNav,
 }
 
 impl Default for Lobby {
@@ -113,6 +116,7 @@ impl Default for Lobby {
             lag_comp: true,
             awards: true,
             over_panel: false,
+            roster_nav: Default::default(),
         }
     }
 }
@@ -140,7 +144,7 @@ impl Lobby {
         }
     }
 
-    fn lines(&mut self) -> Vec<String> {
+    pub(super) fn lines(&mut self) -> Vec<String> {
         self.lines
             .retain(|(_, at)| at.elapsed().as_secs_f32() < LINE_SECS);
         self.lines.iter().map(|(l, _)| l.clone()).collect()
@@ -571,6 +575,9 @@ impl App {
             f.mp = None;
             f.text_focus = false;
         }
+        if let Some(n) = self.netplay.as_mut() {
+            n.lobby.roster_nav.release();
+        }
         self.screen = Screen::Lobby;
         self.sync_grab();
     }
@@ -590,6 +597,9 @@ impl App {
             n.peer.leave_round();
             n.loading = None;
             n.view.reset();
+            // The player list held the pad when the round began; the lobby
+            // comes back with its input free.
+            n.lobby.roster_nav.release();
             if let Some(l) = line {
                 n.lobby.say(l);
             }
@@ -669,7 +679,7 @@ impl App {
         }
         let mut edges = self.menu_edges();
         edges |= front.repeat.step(self.prev_menu_buttons & 15, dt);
-        let input = ui::menu::MenuInput {
+        let mut input = ui::menu::MenuInput {
             up: edges & 1 != 0,
             down: edges & 2 != 0,
             left: edges & 4 != 0,
@@ -677,6 +687,27 @@ impl App {
             confirm: edges & 16 != 0,
             back: edges & 32 != 0,
         };
+        // The roster panel first (issue #168): Square / X / Space moves the
+        // pad into it; while it holds the input the screen under it sees
+        // none, and Back closes the list instead of leaving the lobby.
+        if let Some(n) = self.netplay.as_mut() {
+            let host = n.is_host();
+            let rows = roster_rows(n);
+            let toggle = edges & game::kbm::MENU_SQUARE != 0;
+            let was = n.lobby.roster_nav;
+            let kick = n.lobby.roster_nav.input(toggle, input, &rows, host);
+            if toggle || was.active() {
+                if n.lobby.roster_nav != was {
+                    front.menus.cues.play(MenuSound::Select);
+                }
+                input = ui::menu::MenuInput::default();
+                edges = 0;
+            }
+            if let Some(slot) = kick {
+                front.menus.cues.play(MenuSound::Accept);
+                lobby_kick(n, slot);
+            }
+        }
         front.menus.tick(dt);
         let wheel = self.shell_pointer.take_wheel();
         let mut pointer = self.shell_pointer.take_frame();
@@ -755,7 +786,8 @@ impl App {
                 leave = true;
             }
         } else {
-            // A guest: the host's screen, read-only; only Back (leave).
+            // A guest: the host's screen, read-only; only Back (leave) and
+            // the player list (taken above).
             let lobby = &mut n.lobby;
             if lobby.state_new {
                 lobby.state_new = false;
@@ -804,6 +836,7 @@ impl App {
         self.host_publish();
         self.draw_lobby(&mut front, dt)?;
         front.play_cues(self.audio.as_mut(), dt);
+        self.step_shell_music(&mut front, dt);
         self.front = Some(front);
         Ok(())
     }
@@ -960,41 +993,12 @@ impl App {
     /// Draws the lobby: the setup screen (or the waiting line), the roster
     /// and the status.
     fn draw_lobby(&mut self, front: &mut FrontShell, dt: f32) -> Result<()> {
+        let prompts = ui::lobby::RosterPrompts::of(&self.current_icons());
         let Some(n) = self.netplay.as_mut() else {
             return Ok(());
         };
         let host = n.is_host();
-        let players = if host {
-            host_roster(n)
-        } else {
-            n.lobby
-                .state
-                .as_ref()
-                .map(|s| s.roster.clone())
-                .unwrap_or_default()
-        };
-        let roster: Vec<ui::lobby::RosterRow> = players
-            .into_iter()
-            .map(|p| {
-                let ready = match &n.lobby.phase {
-                    LobbyPhase::Results { ready } if host => ready.contains(&p.slot),
-                    _ => match n.lobby.state.as_ref().map(|s| &s.phase) {
-                        Some(LobbyPhase::Results { ready }) => ready.contains(&p.slot),
-                        _ => false,
-                    },
-                };
-                ui::lobby::RosterRow {
-                    slot: p.slot,
-                    name: p.name,
-                    ping_ms: p.ping_ms,
-                    addon: p.addon,
-                    team: p
-                        .team
-                        .map_or_else(|| "Auto".into(), |t| format!("{}", t + 1)),
-                    ready,
-                }
-            })
-            .collect();
+        let roster = roster_rows(n);
         let phase = if host {
             Some(n.lobby.phase.clone())
         } else {
@@ -1043,6 +1047,7 @@ impl App {
         }
         let mut kicked = None;
         let mut over_panel = false;
+        let mut nav = n.lobby.roster_nav;
         if let (Some(r), Some(overlay), Some(window)) =
             (&mut self.renderer, &mut self.overlay, &self.window)
         {
@@ -1064,7 +1069,9 @@ impl App {
                     ui::lobby::draw_status(ctx, t);
                 }
                 if phase.is_some() {
-                    kicked = ui::lobby::draw_roster(ctx, &title, &roster, host, &lines);
+                    kicked = ui::lobby::draw_roster(
+                        ctx, &title, &roster, host, &lines, &mut nav, &prompts,
+                    );
                 }
                 if let Some(t) = &banner {
                     super::lan::draw_banner(ctx, t);
@@ -1086,18 +1093,64 @@ impl App {
         }
         if let Some(n) = self.netplay.as_mut() {
             n.lobby.over_panel = over_panel;
+            n.lobby.roster_nav = nav;
             if let Some(slot) = kicked {
-                let name = n
-                    .peer
-                    .guests()
-                    .get(&slot)
-                    .map_or_else(|| format!("Player {slot}"), |g| g.name.clone());
-                n.link.host(net::HostCommand::Kick { slot, ban: false });
-                n.lobby.say(format!("{name} was removed from the game"));
+                lobby_kick(n, slot);
             }
         }
         Ok(())
     }
+}
+
+/// The host removes `slot` from the game (the roster's Kick, by pointer or
+/// pad).
+fn lobby_kick(n: &mut NetplaySession, slot: u8) {
+    if !n.is_host() || slot == 0 {
+        return;
+    }
+    let name = n.peer.guests().get(&slot).map_or_else(
+        || format!("Player {}", u32::from(slot) + 1),
+        |g| g.name.clone(),
+    );
+    n.link.host(net::HostCommand::Kick { slot, ban: false });
+    n.lobby.say(format!("{name} was removed from the game"));
+}
+
+/// The roster panel's rows: the host's own roster, or the one the host
+/// last sent, with each player's ready mark.
+fn roster_rows(n: &NetplaySession) -> Vec<ui::lobby::RosterRow> {
+    let host = n.is_host();
+    let players = if host {
+        host_roster(n)
+    } else {
+        n.lobby
+            .state
+            .as_ref()
+            .map(|s| s.roster.clone())
+            .unwrap_or_default()
+    };
+    players
+        .into_iter()
+        .map(|p| {
+            let ready = match &n.lobby.phase {
+                LobbyPhase::Results { ready } if host => ready.contains(&p.slot),
+                _ => match n.lobby.state.as_ref().map(|s| &s.phase) {
+                    Some(LobbyPhase::Results { ready }) => ready.contains(&p.slot),
+                    _ => false,
+                },
+            };
+            ui::lobby::RosterRow {
+                slot: p.slot,
+                name: p.name,
+                ping_ms: p.ping_ms,
+                addon: p.addon,
+                team: p
+                    .team
+                    .map_or_else(|| "Auto".into(), |t| format!("{}", t + 1)),
+                ready,
+            }
+        })
+        .collect()
 }
 
 impl NetplaySession {
@@ -1158,7 +1211,7 @@ fn host_roster(n: &NetplaySession) -> Vec<LobbyPlayer> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Boxed: the test's own frame would hold every by-value copy of the
@@ -1183,7 +1236,7 @@ mod tests {
     }
 
     /// Both lobbies, frame by frame, until `done` holds (5 s at most).
-    fn run(host: &mut App, guest: &mut App, mut done: impl FnMut(&App, &App) -> bool) {
+    pub(crate) fn run(host: &mut App, guest: &mut App, mut done: impl FnMut(&App, &App) -> bool) {
         let start = Instant::now();
         while start.elapsed().as_secs_f32() < 5.0 {
             if done(host, guest) {
@@ -1197,6 +1250,28 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(4));
         }
         assert!(done(host, guest), "not reached in 5 s");
+    }
+
+    /// A host's lobby and a guest in it, over UDP on this machine.
+    pub(crate) fn lobby_pair() -> (Box<App>, Box<App>) {
+        let port = free_port();
+        let mut host = app();
+        host.host_from_shell(4, port, 0, true).expect("hosting");
+        host.enter_lobby();
+        let mut guest = app();
+        let mut args = guest.lan_args(false);
+        args.addr = Some(format!("127.0.0.1:{port}"));
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let n = NetplaySession::join(args, guest.lan_profile(), addr).expect("joining");
+        guest.netplay = Some(n);
+        guest.enter_lobby();
+        run(&mut host, &mut guest, |_, g| {
+            g.netplay
+                .as_ref()
+                .and_then(|n| n.lobby.state.as_ref())
+                .is_some_and(|s| s.roster.len() == 2)
+        });
+        (host, guest)
     }
 
     /// Headless, over UDP on this machine: Start Hosting opens the lobby;
@@ -1274,6 +1349,96 @@ mod tests {
         }
     }
 
+    /// Issue #168, the first VPN playtest: the host's player list works
+    /// without a mouse (Square / X / Space in, Up / Down, Accept twice to
+    /// kick, Back out; keys and pad buttons make the same menu bits), the
+    /// setup screen under it gets none of those presses, and every peer
+    /// knows every human by his session name, kept after he leaves.
+    #[test]
+    fn the_host_kicks_from_the_player_list_without_a_mouse() {
+        let port = free_port();
+        let mut host = app();
+        host.profile.name = "Ann".into();
+        host.host_from_shell(4, port, 0, true).expect("hosting");
+        host.enter_lobby();
+        let mut guest = app();
+        guest.profile.name = "Bo".into();
+        let mut args = guest.lan_args(false);
+        args.addr = Some(format!("127.0.0.1:{port}"));
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let n = NetplaySession::join(args, guest.lan_profile(), addr).expect("joining");
+        guest.netplay = Some(n);
+        guest.enter_lobby();
+        let names = |a: &App| {
+            a.netplay
+                .as_ref()
+                .map(|n| n.names().values().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        run(&mut host, &mut guest, |h, g| {
+            names(h) == ["Ann", "Bo"] && names(g) == ["Ann", "Bo"]
+        });
+        let nav = |a: &App| a.netplay.as_ref().unwrap().lobby.roster_nav;
+        // The setup screen's place, its entrance clock aside.
+        let ia = |a: &App| {
+            let mut ia = a.netplay.as_ref().unwrap().lobby.ia.clone().unwrap();
+            ia.on_page = 0.0;
+            ia
+        };
+        let screen = ia(&host);
+        // One frame of the host with `keys` tapped.
+        let press = |a: &mut App, keys: u32| {
+            a.keys_tapped |= keys;
+            a.redraw_lobby(1.0 / 60.0).expect("lobby frame");
+        };
+        let space = game::kbm::menu_key(winit::keyboard::KeyCode::Space);
+        let down = game::kbm::menu_key(winit::keyboard::KeyCode::ArrowDown);
+        let enter = game::kbm::menu_key(winit::keyboard::KeyCode::Enter);
+        let back = game::kbm::menu_key(winit::keyboard::KeyCode::Backspace);
+        press(&mut host, space);
+        assert_eq!(nav(&host).focus, Some(0), "in the list, on the host");
+        press(&mut host, down);
+        assert_eq!(nav(&host).focus, Some(1), "on Bo");
+        assert_eq!(ia(&host), screen, "the setup screen saw no press");
+        press(&mut host, enter);
+        assert_eq!(nav(&host).confirm, Some(1), "asks first, for Bo");
+        press(&mut host, back);
+        assert!(
+            nav(&host).active() && nav(&host).confirm.is_none(),
+            "Back cancels"
+        );
+        press(&mut host, enter);
+        press(&mut host, enter);
+        assert!(matches!(host.screen, Screen::Lobby), "Back never left");
+        run(&mut host, &mut guest, |_, g| {
+            g.netplay.as_ref().is_some_and(|n| n.ended.is_some())
+        });
+        let why = guest.netplay.as_ref().unwrap().ended.clone().unwrap().0;
+        assert_eq!(why, "The host removed you from the game");
+        run(&mut host, &mut guest, |h, _| {
+            h.netplay.as_ref().unwrap().peer.guests().is_empty()
+        });
+        let host_lines = host.netplay.as_mut().unwrap().lobby.lines();
+        assert!(host_lines
+            .iter()
+            .any(|l| l == "Bo was removed from the game"));
+        assert_eq!(names(&host), ["Ann", "Bo"], "Bo keeps his name");
+        // Back closes the list and gives the screen its input back.
+        press(&mut host, back);
+        assert!(!nav(&host).active() && nav(&host).hidden);
+        assert!(matches!(host.screen, Screen::Lobby));
+        // Back from a round, the list never keeps the pad it held.
+        press(&mut host, space);
+        assert!(nav(&host).active());
+        host.net_to_lobby(None);
+        assert!(!nav(&host).active() && nav(&host).confirm.is_none());
+        for mut a in [host, guest] {
+            if let Some(n) = a.netplay.take() {
+                n.shutdown();
+            }
+        }
+    }
+
     /// Discovery asks the limited broadcast first, on the default port.
     #[test]
     fn the_browser_asks_the_limited_broadcast() {
@@ -1283,5 +1448,46 @@ mod tests {
             SocketAddr::from(([255, 255, 255, 255], net::DEFAULT_PORT))
         );
         assert!(t.iter().all(|a| a.port() == net::DEFAULT_PORT));
+    }
+
+    /// Issue #128: the LAN lobby is a menu too, and its frames keep the
+    /// shell music going: over twelve minutes in the host's lobby a take
+    /// follows the last after the shell's gap (the lobby used to leave the
+    /// playlist unstepped, so the music ended with its take and never came
+    /// back between rounds).
+    #[test]
+    fn the_lobby_keeps_the_shell_music_going_for_twelve_minutes() {
+        let port = free_port();
+        let mut host = app();
+        host.host_from_shell(4, port, 0b11, true).expect("hosting");
+        host.enter_lobby();
+        let mut front = FrontShell::new(&host.assets_dir);
+        front.set_music_takes(vec![
+            super::super::front::test_take(95),
+            super::super::front::test_take(140),
+        ]);
+        host.front = Some(front);
+        let dt = 0.5;
+        let (mut silent, mut longest, mut starts, mut was) = (0.0f32, 0.0f32, 0, None);
+        for _ in 0..(12.0 * 60.0 / dt) as usize {
+            host.redraw_lobby(dt).expect("lobby frame");
+            assert!(matches!(host.screen, Screen::Lobby));
+            let now = host.front.as_ref().expect("front").music_playing();
+            if now.is_some() && was.is_none() {
+                starts += 1;
+            }
+            if now.is_some() {
+                silent = 0.0;
+            } else {
+                silent += dt;
+                longest = longest.max(silent);
+            }
+            was = now;
+        }
+        assert!(starts >= 4, "{starts} takes in twelve minutes");
+        assert!(
+            longest <= ui::shell_feel::MUSIC_GAP + dt,
+            "{longest} s without music"
+        );
     }
 }

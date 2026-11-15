@@ -906,16 +906,43 @@ pub(crate) fn disc_sniper(vehicle_scale: f32) -> WeaponClass {
     w
 }
 
-/// OURS (sniper aim assist): a sniper rifle gets its MaxRange as the reach,
-/// keeps its 1° cone, and takes vehicles only when its round hurts them.
+/// OURS (sniper aim assist, issue #164): a sniper rifle's magnet reaches as
+/// far as its round (the bolt's 300 m, a beam's `Range`), at full strength
+/// to its MaxRange; it keeps its 1° cone, and takes vehicles only when its
+/// round hurts them.
 #[test]
-fn a_sniper_rifle_gets_a_narrow_magnet_to_its_max_range() {
+fn a_sniper_rifle_gets_a_narrow_magnet_to_its_rounds_reach() {
     let mut bf1 = disc_sniper(0.0);
     assert!(bf1.is_sniper_rifle());
     bf1.give_sniper_assist();
     assert_eq!(
-        (bf1.lock_on_range, bf1.lock_on_angle, bf1.extreme_range),
-        (128.0, DEG, 300.0)
+        (
+            bf1.assist_full_range,
+            bf1.lock_on_range,
+            bf1.lock_on_angle,
+            bf1.extreme_range
+        ),
+        (128.0, 300.0, DEG, 300.0)
+    );
+    // BF2's award rifle: a 500 m beam whose ordnance names no Velocity (the
+    // parsed reach 150 x 0.15 m): the cone runs to the beam's end.
+    let mut award = disc_sniper(0.1);
+    award.ordnance.velocity = 150.0;
+    award.ordnance.beam = Some(crate::weapon::BeamClass {
+        range: 500.0,
+        life: 0.15,
+        pierce: true,
+        impact: None,
+    });
+    award.extreme_range = 22.5;
+    award.give_sniper_assist();
+    assert_eq!(
+        (
+            award.assist_full_range,
+            award.lock_on_range,
+            award.extreme_range
+        ),
+        (128.0, 500.0, 500.0)
     );
     assert_eq!((bf1.target_team, bf1.target_kind & 0x1f), (1, 0b111));
     let mut bf2 = disc_sniper(0.1);
@@ -923,18 +950,25 @@ fn a_sniper_rifle_gets_a_narrow_magnet_to_its_max_range() {
     assert_eq!(bf2.target_kind & 0x1f, 0b1111);
     // The AI's kinds are its own.
     assert_eq!(bf2.ai_target_kind, disc_sniper(0.1).ai_target_kind);
-    // No MaxRange, no LockOnAngle, a short bolt: the fallbacks, and the
-    // cone at least as long as the reach.
+    // No MaxRange, no LockOnAngle, a short bolt: the fallbacks, the reach
+    // never short of full strength, and the cone at least as long.
     let mut bare = WeaponClass {
         ai_range: [0.0; 3],
         lock_on_angle: 0.0,
         extreme_range: 22.5,
         ..disc_sniper(0.0)
     };
+    bare.ordnance.velocity = 150.0;
     bare.give_sniper_assist();
     assert_eq!(
-        (bare.lock_on_range, bare.lock_on_angle, bare.extreme_range),
         (
+            bare.assist_full_range,
+            bare.lock_on_range,
+            bare.lock_on_angle,
+            bare.extreme_range
+        ),
+        (
+            SNIPER_LOCK_ON_RANGE,
             SNIPER_LOCK_ON_RANGE,
             SNIPER_LOCK_ON_ANGLE,
             SNIPER_LOCK_ON_RANGE

@@ -491,8 +491,10 @@ impl Rig {
         }
         let mut pose = Pose::bind(skel);
         for (slot, mask) in [(low, &self.lower), (up, &self.upper)] {
-            let Some(slot) = slot else { continue };
-            let sampled = clips[slot.clip].sample(skel, frame, true);
+            let Some(c) = slot.and_then(|s| clips.get(s.clip)) else {
+                continue;
+            };
+            let sampled = c.sample(skel, frame, true);
             for (b, x) in pose.0.iter_mut().enumerate() {
                 if mask[b] {
                     *x = sampled.0[b];
@@ -573,7 +575,13 @@ impl Player {
 
     pub(super) fn advance(&mut self, clips: &[Clip], dt: f32, game: Game) {
         let Some(s) = self.slot else { return };
-        let f = clips[s.clip].frames.max(2) as f32;
+        // A clip number this body does not have (kept from another body):
+        // no clip, never an index past the clips (issue #168).
+        let Some(c) = clips.get(s.clip) else {
+            self.slot = None;
+            return;
+        };
+        let f = c.frames.max(2) as f32;
         let denom = match game {
             Game::Bf1 => f,
             Game::Bf2 => f - 1.0,
@@ -600,7 +608,7 @@ impl Player {
         } = *cx;
         let (mask, game) = (if upper { &rig.upper } else { &rig.lower }, rig.game);
         let Some(s) = self.slot else { return };
-        let c = &clips[s.clip];
+        let Some(c) = clips.get(s.clip) else { return };
         let mut sampled = c.sample(skel, self.t * c.frames.saturating_sub(1) as f32, s.looping);
         if let (Some(true), Some((b, rest))) = (rig.flight.get(s.clip), rig.root_bone) {
             let x = &mut sampled.0[b].translation;

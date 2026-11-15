@@ -60,6 +60,7 @@ impl SettingsPage {
             ],
             Self::Audio => &[Music, EffectsVolume, DialogueVolume],
             Self::Graphics => &[
+                WindowMode,
                 Viewpoint,
                 Fov,
                 GraphicsQuality,
@@ -102,7 +103,7 @@ pub enum FpsCounter {
 impl FpsCounter {
     pub fn from_index(index: u8) -> Self {
         match index {
-            1 | 2 => Self::On,
+            1 => Self::On,
             _ => Self::Off,
         }
     }
@@ -118,6 +119,61 @@ impl FpsCounter {
         match self {
             Self::Off => Self::On,
             Self::On => Self::Off,
+        }
+    }
+}
+
+/// Issue #172: how the game window fills the display (Graphics Options'
+/// Display mode, and the OS's fullscreen key: F11, or Control+Command+F on
+/// macOS). The profile stores it; the game applies it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WindowMode {
+    /// A normal window (it opens maximized).
+    #[default]
+    Windowed,
+    /// A borderless window over the whole monitor at the desktop's resolution.
+    Borderless,
+    /// The monitor's own video mode at its native size (not on Wayland).
+    Exclusive,
+}
+
+impl WindowMode {
+    pub const ALL: [Self; 3] = [Self::Windowed, Self::Borderless, Self::Exclusive];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Windowed => "Windowed",
+            Self::Borderless => "Fullscreen",
+            Self::Exclusive => "Exclusive",
+        }
+    }
+
+    pub fn is_fullscreen(self) -> bool {
+        self != Self::Windowed
+    }
+
+    /// The Display mode row's step: on (+1) or back (-1), wrapping, past
+    /// Exclusive where the display cannot do it.
+    pub fn cycled(self, dir: i32, exclusive_available: bool) -> Self {
+        let n = Self::ALL.len() as i32;
+        let mut i = Self::ALL.iter().position(|m| *m == self).unwrap_or(0) as i32;
+        let step = if dir < 0 { -1 } else { 1 };
+        loop {
+            i = (i + step).rem_euclid(n);
+            let next = Self::ALL[i as usize];
+            if next != Self::Exclusive || exclusive_available {
+                return next;
+            }
+        }
+    }
+
+    /// The fullscreen key: a window goes to the last fullscreen kind, any
+    /// fullscreen back to a window.
+    pub fn toggled(self, last_fullscreen: Self) -> Self {
+        match (self, last_fullscreen) {
+            (Self::Windowed, Self::Exclusive) => Self::Exclusive,
+            (Self::Windowed, _) => Self::Borderless,
+            _ => Self::Windowed,
         }
     }
 }
@@ -164,11 +220,15 @@ pub fn draw_fps_counter_note(
         return;
     }
     let rate = format!("{:.0} FPS", seconds.recip());
-    let text = egui::RichText::new(match note {
-        Some(n) => format!("{rate} · {n}"),
-        None => rate,
-    })
-    .monospace();
+    let text = crate::typography::egui_text(
+        ctx,
+        &crate::typography::READOUT,
+        crate::typography::tint::HELP,
+        &match note {
+            Some(n) => format!("{rate} · {n}"),
+            None => rate,
+        },
+    );
     egui::Area::new(egui::Id::new("fps_counter"))
         .interactable(false)
         .anchor(Align2::LEFT_TOP, egui::vec2(8.0, 8.0))

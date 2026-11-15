@@ -24,9 +24,9 @@ fn host_setup_defaults_ranges_and_cheat_policy() {
     assert_eq!(
         labels,
         [
-            "Max players",
-            "UDP port",
-            "Cheats for guests",
+            "Max Players",
+            "UDP Port",
+            "Cheats for Guests",
             "Awards",
             "Start Hosting",
             "Back"
@@ -56,7 +56,7 @@ fn host_setup_defaults_ranges_and_cheat_policy() {
     h.step(press(|i| i.confirm = true));
     assert!(h.cheats_allowed);
     assert_eq!(h.rows().len(), 6 + CHEATS.len());
-    assert_eq!(h.rows()[4].label, "   Infinite ammo");
+    assert_eq!(h.rows()[4].label, "   Infinite Ammo");
     assert_eq!(h.cheat_policy(), 0b111);
     h.step(press(|i| i.down = true));
     h.step(press(|i| i.down = true));
@@ -160,7 +160,7 @@ fn join_page_rows_connect_and_refusals() {
     j.step(press(|i| i.down = true));
     j.step(press(|i| i.down = true));
     assert_eq!(j.row_ids()[j.cursor], JoinRow::Test);
-    assert_eq!(j.rows()[j.cursor].label, "Test connection");
+    assert_eq!(j.rows()[j.cursor].label, "Test Connection");
     assert_eq!(
         j.step(press(|i| i.confirm = true)),
         Some(JoinCommand::Test("studio-pc:40000".into())),
@@ -173,4 +173,142 @@ fn join_page_rows_connect_and_refusals() {
         Some(JoinCommand::Connect("10.0.0.9:37450".into()))
     );
     assert_eq!(j.step(press(|i| i.back = true)), Some(JoinCommand::Back));
+}
+
+fn roster() -> Vec<RosterRow> {
+    let row = |slot: u8, name: &str| RosterRow {
+        slot,
+        name: name.into(),
+        ping_ms: (slot != 0).then_some(40),
+        addon: false,
+        team: "Auto".into(),
+        ready: false,
+    };
+    vec![row(0, "the maintainer"), row(1, "Kai"), row(2, "Sam")]
+}
+
+/// Issue #168, the first VPN playtest: the host's player list with a pad.
+/// Square opens it (and moves into it), Up / Down move and wrap, Accept on
+/// the host's own row does nothing, Accept on a guest asks and a second
+/// Accept kicks him; Back cancels the question, then closes the list, as
+/// Square does; a closed list opens again with Square.
+#[test]
+fn roster_list_opens_moves_kicks_and_closes_with_a_pad() {
+    let rows = roster();
+    let mut nav = RosterNav::default();
+    let none = MenuInput::default();
+    assert!(!nav.active() && !nav.hidden, "shown, not holding the input");
+    // Moves do not reach a list the pad is not in.
+    assert_eq!(
+        nav.input(false, press(|i| i.down = true), &rows, true),
+        None
+    );
+    assert_eq!(nav.focus, None);
+    // Square: into the list, on the first row.
+    assert_eq!(nav.input(true, none, &rows, true), None);
+    assert!(nav.active());
+    assert_eq!(nav.focus, Some(0));
+    // Accept on the host's own row: nothing.
+    assert_eq!(
+        nav.input(false, press(|i| i.confirm = true), &rows, true),
+        None
+    );
+    assert_eq!(nav.confirm, None);
+    // Up wraps to the last guest; Down back to the first row, then Kai.
+    nav.input(false, press(|i| i.up = true), &rows, true);
+    assert_eq!(nav.focus, Some(2));
+    nav.input(false, press(|i| i.down = true), &rows, true);
+    nav.input(false, press(|i| i.down = true), &rows, true);
+    assert_eq!(nav.focus, Some(1));
+    // Accept asks; Back cancels the question and stays in the list.
+    let accept = press(|i| i.confirm = true);
+    assert_eq!(nav.input(false, accept, &rows, true), None);
+    assert_eq!(nav.confirm, Some(1), "asks for Kai");
+    nav.input(false, press(|i| i.back = true), &rows, true);
+    assert!(nav.active() && nav.confirm.is_none());
+    // Accept twice: Kai is kicked.
+    assert_eq!(nav.input(false, accept, &rows, true), None);
+    assert_eq!(nav.input(false, accept, &rows, true), Some(1));
+    // The question belongs to the guest it was asked for: Kai leaves while
+    // asked, Sam is now the row under the pad, and Accept only asks again.
+    assert_eq!(nav.input(false, accept, &rows, true), None, "asks for Kai");
+    let kai_gone = vec![rows[0].clone(), rows[2].clone()];
+    assert_eq!(
+        nav.input(false, accept, &kai_gone, true),
+        None,
+        "Sam is not kicked unasked"
+    );
+    assert_eq!(
+        RosterPrompts::default().line(&nav, &kai_gone, true),
+        "Kick Sam? : kick \u{b7} : cancel",
+        "the question is Sam's now"
+    );
+    assert_eq!(nav.input(false, accept, &kai_gone, true), Some(2));
+    // Sam leaves while asked, the pad falls back to the maintainer: no question.
+    nav.input(false, accept, &kai_gone, true);
+    nav.input(false, none, &kai_gone[..1], true);
+    assert_eq!(nav.confirm, None, "disarmed on the maintainer");
+    assert_eq!(
+        RosterPrompts::default().line(&nav, &kai_gone[..1], true),
+        "Up / Down: move \u{b7} : close"
+    );
+    // A guest's list never kicks.
+    let mut guest = RosterNav {
+        focus: Some(1),
+        ..RosterNav::default()
+    };
+    assert_eq!(guest.input(false, accept, &rows, false), None);
+    assert_eq!(guest.input(false, accept, &rows, false), None);
+    // Back closes the list and gives the input back; Square opens it again.
+    nav.input(false, press(|i| i.back = true), &rows, true);
+    assert!(!nav.active() && nav.hidden);
+    nav.input(true, none, &rows, true);
+    assert!(nav.active() && !nav.hidden);
+    // Square closes it as well.
+    nav.input(true, none, &rows, true);
+    assert!(!nav.active() && nav.hidden);
+    // A list whose rows went away lets go of the input.
+    let mut nav = RosterNav {
+        focus: Some(2),
+        ..RosterNav::default()
+    };
+    nav.input(false, none, &rows[..1], true);
+    assert_eq!(nav.focus, Some(0), "held to the last row");
+    nav.input(false, none, &[], true);
+    assert!(!nav.active());
+}
+
+/// The roster's help line names the set's own buttons: Square / X / Space
+/// to open, Accept, and the lobby's Back (Circle / B / Backspace).
+#[test]
+fn roster_prompts_name_the_buttons_in_use() {
+    use crate::input_icons::{IconSet, Icons};
+    let rows = roster();
+    let ds = RosterPrompts::of(&Icons::of(IconSet::Ds4));
+    let xbox = RosterPrompts::of(&Icons::of(IconSet::XboxOne));
+    let keys = RosterPrompts::of(&Icons::of(IconSet::KeyboardMouse));
+    let shut = RosterNav::default();
+    assert_eq!(ds.line(&shut, &rows, true), "Square: players list");
+    assert_eq!(xbox.line(&shut, &rows, true), "X: players list");
+    assert_eq!(keys.line(&shut, &rows, true), "Space: players list");
+    let on_kai = RosterNav {
+        focus: Some(1),
+        ..RosterNav::default()
+    };
+    assert_eq!(
+        xbox.line(&on_kai, &rows, true),
+        "Up / Down: move \u{b7} A: kick \u{b7} B: close"
+    );
+    let asking = RosterNav {
+        confirm: Some(1),
+        ..on_kai
+    };
+    assert_eq!(
+        ds.line(&asking, &rows, true),
+        "Kick Kai? Cross: kick \u{b7} Circle: cancel"
+    );
+    assert_eq!(
+        keys.line(&on_kai, &rows, false),
+        "Up / Down: move \u{b7} Backspace: close"
+    );
 }

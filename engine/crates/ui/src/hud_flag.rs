@@ -60,7 +60,12 @@ pub fn feed(hud: &mut Hud, status: Option<FlagStatus>, has_mesh: &dyn Fn(&str) -
     );
 }
 
+/// The teams' colours ([`crate::typography::tint::TEAMS`]).
 pub const TEAM_COLORS: [egui::Color32; 2] = [
-    egui::Color32::from_rgb(242, 100, 40),
-    egui::Color32::from_rgb(80, 220, 90),
+    team_colour(crate::typography::tint::TEAMS[0]),
+    team_colour(crate::typography::tint::TEAMS[1]),
 ];
+
+const fn team_colour((rgb, _): crate::typography::Tint) -> egui::Color32 {
+    egui::Color32::from_rgb(rgb[0] as u8, rgb[1] as u8, rgb[2] as u8)
+}

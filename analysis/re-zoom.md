@@ -322,6 +322,12 @@ its 0.6 m scope eye are [V] only; a frame of the scope overlay.
 
 ## 10. What the port has, and what a build needs
 
+**Since 2026-11-14 (ours, the maintainer's sniper rule):** every army sniper rifle zooms in BF2's
+two steps, x2 then x8 (`normalize::KEYS` sets `ZoomMin` 2 / `ZoomMax` 8 on BF1's four
+`*_weap_inf_sniperrifle`; the turn divisors follow by the copy rule). BF1's Imperial and
+Republic rifles had one x6 step. The award beam rifle keeps one x6 step and the Tusken sniper
+its own. Bots still read them as sniper rifles (`ZoomMax` 8 passes the AI table's `>= 6`).
+
 **Built 2026-10-07 (card ZOOM): items 1-4 below**, without the continuous zoom of a `ZoomRate` class (no hand
 weapon), the eased return of the eye on the zoom out (the stance sections' MoveTension, card CAMS) and the "first
 person suspended" gate (the port has no thrown state); item 5 is card ZSCP. Before the build:

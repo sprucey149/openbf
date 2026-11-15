@@ -312,7 +312,7 @@ pub fn catalog(
     let mut out = Vec::new();
     for (code, cw, gcw) in BF2_MAPS {
         let name = text(Game::Bf2, &format!("mapname.name.{code}"))
-            .map_or_else(|| code.to_uppercase(), |t| t.trim().to_owned());
+            .map_or_else(|| code.to_uppercase(), |t| t.trim().to_owned()); // typography: name data
         let desc = text(Game::Bf2, &format!("mapname.description.{code}"))
             .map_or_else(|| name.clone(), |t| t.trim_end().to_owned());
         let mut gcw = gcw.to_vec();
@@ -336,8 +336,9 @@ pub fn catalog(
                     let first = chars
                         .next()
                         .expect("split_whitespace yields nonempty words");
+                    // typography: name data (BF1's capitals to Title Case)
                     first
-                        .to_uppercase()
+                        .to_uppercase() // typography: name data
                         .chain(chars.flat_map(char::to_lowercase))
                         .collect::<String>()
                 })

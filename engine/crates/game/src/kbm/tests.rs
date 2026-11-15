@@ -78,6 +78,7 @@ fn a_valid_reordered_saved_keyboard_layout_drives_the_remapped_action() {
     assert_eq!(loaded, settings);
     let mut k = Kbm::default();
     k.follow(&loaded);
+    k.set_bindings(&loaded.keyboard_bindings);
     k.press(Trigger::Key(KeyCode::KeyW), true);
     assert_eq!(k.pad(PadState::default()).ly, 0);
     k.press(Trigger::Key(KeyCode::KeyP), true);
@@ -96,6 +97,7 @@ fn remapping_swaps_conflicts_and_releases_old_held_keys() {
         .keyboard_bindings
         .remap(0, Trigger::Key(KeyCode::KeyS));
     k.follow(&settings);
+    k.set_bindings(&settings.keyboard_bindings);
     assert_eq!(k.pad(PadState::default()).ly, 0);
     k.press(Trigger::Key(KeyCode::KeyS), true);
     assert!(k.pad(PadState::default()).ly > 0);
@@ -415,6 +417,36 @@ fn pause_menus_and_focus_loss_release_motion_and_require_a_new_click() {
         .unwrap();
 }
 
+/// Issue #172: after a display mode change the cached grab is not trusted:
+/// the next sync locks again in play, and in a menu releases a lock the
+/// system may still hold instead of taking "not grabbed" as already true.
+#[test]
+fn a_forgotten_grab_always_sends_its_next_request() {
+    let mut k = Kbm::default();
+    k.click_in();
+    k.sync_grab_with(true, |_| Ok::<_, ()>(())).unwrap();
+    assert!(k.grabbed());
+    k.forget_grab();
+    assert!(!k.grabbed());
+    let mut tried = Vec::new();
+    k.sync_grab_with(true, |mode| {
+        tried.push(mode);
+        Ok::<_, ()>(())
+    })
+    .unwrap();
+    assert_eq!(tried, [CursorGrabMode::Locked], "play locks again");
+    k.forget_grab();
+    tried.clear();
+    k.sync_grab_with(false, |mode| {
+        tried.push(mode);
+        Ok::<_, ()>(())
+    })
+    .unwrap();
+    assert_eq!(tried, [CursorGrabMode::None], "a pause menu releases");
+    k.sync_grab_with(false, |_| -> Result<(), ()> { panic!("released twice") })
+        .unwrap();
+}
+
 #[test]
 fn legacy_viewpoint_migration_keeps_a_remap_onto_v_when_loading_a_profile() {
     let mut settings = crate::profile::Settings::default();
@@ -442,6 +474,7 @@ fn legacy_viewpoint_migration_keeps_a_remap_onto_v_when_loading_a_profile() {
     assert_ne!(*view_key, Trigger::Key(KeyCode::KeyV));
     let mut input = Kbm::default();
     input.follow(&loaded);
+    input.set_bindings(&loaded.keyboard_bindings);
     input.press(Trigger::Key(KeyCode::KeyV), true);
     let moving = input.pad(PadState::default());
     assert_eq!(moving.ly, i16::MAX);
@@ -636,4 +669,226 @@ fn north_backs_the_pause_menu_only_on_a_fresh_press() {
     assert_eq!(menu_edges(MENU_NORTH, 0, 0, false), 0);
     // Other edges and taps pass as before.
     assert_eq!(menu_edges(16 | 32, 32, 2, true), 16 | 2);
+}
+
+/// 2026-11-14 defaults: each on-foot action's shown trigger (it works on a
+/// three-button mouse) and its extra press the same action.
+#[test]
+fn the_stock_fallbacks_press_the_same_action() {
+    use winit::event::MouseButton as M;
+    use KeyCode as K;
+    let pressed = |t: Trigger| {
+        let mut k = Kbm::default();
+        k.press(t, true);
+        k.pad(PadState::default()).buttons & !buttons::MOUSE_AIM
+    };
+    for (first, fallback, bit) in [
+        (
+            Trigger::Mouse(M::Middle),
+            Trigger::Mouse(M::Back),
+            buttons::SECONDARY_FIRE,
+        ),
+        (
+            Trigger::Mouse(M::Right),
+            Trigger::Key(K::KeyZ),
+            buttons::ZOOM,
+        ),
+        (
+            Trigger::Key(K::ControlLeft),
+            Trigger::Key(K::KeyC),
+            buttons::ROLL_STANCE,
+        ),
+        (
+            Trigger::WheelDown,
+            Trigger::Key(K::KeyQ),
+            buttons::SWITCH_WEAPON,
+        ),
+        (
+            Trigger::Key(K::KeyG),
+            Trigger::Mouse(M::Forward),
+            buttons::SWITCH_SECONDARY,
+        ),
+    ] {
+        assert_ne!(pressed(first) & bit, 0, "{first:?}");
+        assert_eq!(
+            pressed(first),
+            pressed(fallback),
+            "{first:?} / {fallback:?}"
+        );
+    }
+    assert_eq!(pressed(Trigger::Mouse(M::Left)), buttons::FIRE);
+    assert_ne!(pressed(Trigger::WheelUp) & buttons::SWITCH_WEAPON, 0);
+}
+
+/// Getting into or out of a vehicle swaps the table: a held key or button
+/// stays held through it (it reads through the new table), and only latched
+/// taps are dropped.
+#[test]
+fn held_keys_survive_getting_in_and_out_of_a_vehicle() {
+    use winit::event::MouseButton as M;
+    let mut k = Kbm::default();
+    k.press(Trigger::Key(KeyCode::KeyW), true);
+    k.press(Trigger::Mouse(M::Left), true);
+    let first = k.pad(PadState::default());
+    k.consumed(&first, 1);
+    for (table, scale) in [
+        (Bindings::vehicle_default(), 1.0),
+        (Bindings::pc_default(), ON_FOOT_LOOK_SCALE),
+    ] {
+        k.swap_context(&table, scale);
+        let p = k.pad(PadState::default());
+        assert_ne!(p.buttons & buttons::FIRE, 0, "fire held");
+        assert!(p.ly > 0, "W still walks forward");
+        k.consumed(&p, 1);
+    }
+    k.press(Trigger::Key(KeyCode::KeyW), false);
+    k.press(Trigger::Mouse(M::Left), false);
+    let p = k.pad(PadState::default());
+    assert_eq!(p.buttons & buttons::FIRE, 0);
+    assert_eq!(p.ly, 0);
+}
+
+/// Sensitivity 1.0 on foot turns as the old 2.8 did; in a vehicle 1.0 turns
+/// as the old 1.0 did.
+#[test]
+fn the_on_foot_look_factor_scales_the_mouse() {
+    let turned = |scale: f64, sensitivity: f32| {
+        let mut k = grabbed();
+        k.sensitivity = sensitivity;
+        k.look_scale = scale;
+        k.motion(100.0, 0.0);
+        f64::from(k.pad(PadState::default()).look().0)
+    };
+    let old_on_foot = 100.0 * 2.8 * RAD_PER_COUNT;
+    assert!((turned(ON_FOOT_LOOK_SCALE, 1.0) - old_on_foot).abs() < 1e-4);
+    assert!((turned(1.0, 1.0) - 100.0 * RAD_PER_COUNT).abs() < 1e-4);
+}
+
+/// Issue #172, one fullscreen key per OS: on macOS Control+Command+F must
+/// never roll the soldier, in either key order, while a lone Control still
+/// rolls. Off macOS Control rolls at once.
+#[test]
+fn macos_control_command_f_never_rolls_and_a_lone_control_still_does() {
+    use std::time::{Duration, Instant};
+    let roll = |k: &mut Kbm| k.pad(PadState::default()).buttons & buttons::ROLL_STANCE != 0;
+    let ctrl = KeyCode::ControlLeft;
+    let cmd = KeyCode::SuperLeft;
+
+    // Control first, Command inside the wait, then F (the toggle key itself
+    // never reaches the bindings): no roll, now or after the wait.
+    let mut k = Kbm::default();
+    k.set_mac_chords(true);
+    let t0 = Instant::now();
+    k.key(ctrl, true, t0);
+    k.key(cmd, true, t0 + Duration::from_millis(30));
+    assert!(!roll(&mut k));
+    k.chord_due(t0 + MAC_CHORD_WAIT * 3);
+    assert!(!roll(&mut k));
+    k.key(cmd, false, t0 + Duration::from_millis(200));
+    k.key(ctrl, false, t0 + Duration::from_millis(210));
+    assert!(
+        !roll(&mut k),
+        "the swallowed Control's release taps nothing"
+    );
+
+    // Command first: every key pressed with it belongs to the system.
+    let mut k = Kbm::default();
+    k.set_mac_chords(true);
+    let t0 = Instant::now();
+    k.key(cmd, true, t0);
+    k.key(ctrl, true, t0);
+    k.key(KeyCode::KeyW, true, t0);
+    let pad = k.pad(PadState::default());
+    assert_eq!(pad.buttons & buttons::ROLL_STANCE, 0);
+    assert_eq!(pad.ly, 0, "W pressed with Command does not walk");
+    k.key(cmd, false, t0);
+    assert_eq!(
+        k.pad(PadState::default()).ly,
+        0,
+        "still swallowed until released"
+    );
+    k.key(KeyCode::KeyW, false, t0);
+    k.key(KeyCode::KeyW, true, t0);
+    assert_eq!(k.pad(PadState::default()).ly, i16::MAX);
+
+    // A lone Control held past the wait rolls (pad() runs the wait on the
+    // real clock, so press it in the past).
+    let mut k = Kbm::default();
+    k.set_mac_chords(true);
+    k.key(ctrl, true, Instant::now() - MAC_CHORD_WAIT * 2);
+    assert!(roll(&mut k));
+
+    // A quick Control tap rolls at its release.
+    let mut k = Kbm::default();
+    k.set_mac_chords(true);
+    let t0 = Instant::now();
+    k.key(ctrl, true, t0);
+    k.key(ctrl, false, t0 + Duration::from_millis(40));
+    assert!(roll(&mut k));
+
+    // Off macOS: Control rolls at once and Command changes nothing.
+    let mut k = Kbm::default();
+    k.set_mac_chords(false);
+    let t0 = Instant::now();
+    k.key(cmd, true, t0);
+    k.key(ctrl, true, t0);
+    assert!(roll(&mut k));
+}
+
+#[test]
+fn macos_a_second_control_inside_the_wait_does_not_lose_the_first() {
+    use std::time::{Duration, Instant};
+    let roll = |k: &mut Kbm| k.pad(PadState::default()).buttons & buttons::ROLL_STANCE != 0;
+    let mut k = Kbm::default();
+    k.set_mac_chords(true);
+    let t0 = Instant::now();
+    k.key(KeyCode::ControlLeft, true, t0);
+    k.key(KeyCode::ControlRight, true, t0 + Duration::from_millis(50));
+    assert!(
+        roll(&mut k),
+        "Left Control, which no Command joined, rolls when Right Control replaces it"
+    );
+    // Right Control (unbound) now waits; Left Control's release lets go of
+    // a held key, not a waiting one.
+    k.key(KeyCode::ControlLeft, false, t0 + Duration::from_millis(500));
+    k.key(
+        KeyCode::ControlRight,
+        false,
+        t0 + Duration::from_millis(510),
+    );
+    assert!(k.held.is_empty() && k.mac.waiting.is_none());
+}
+
+#[test]
+fn macos_command_let_go_during_a_binding_capture_frees_the_battle_keys() {
+    use std::time::Instant;
+    let mut k = Kbm::default();
+    k.set_mac_chords(true);
+    let t0 = Instant::now();
+    k.key(KeyCode::SuperLeft, true, t0);
+    // The Controls page captures the release (events.rs routes it here).
+    k.key_released(KeyCode::SuperLeft, t0);
+    k.key(KeyCode::KeyW, true, t0);
+    assert_eq!(
+        k.pad(PadState::default()).ly,
+        i16::MAX,
+        "W walks once Command is up"
+    );
+}
+
+#[test]
+fn reserved_keys_are_f11_everywhere_and_command_on_macos() {
+    use KeyCode::{SuperLeft, SuperRight};
+    for mac in [false, true] {
+        assert!(reserved_key(FULLSCREEN_KEY, mac).is_some());
+        assert!(reserved_key(Trigger::Key(KeyCode::KeyG), mac).is_none());
+        for k in [SuperLeft, SuperRight] {
+            assert_eq!(reserved_key(Trigger::Key(k), mac).is_some(), mac);
+        }
+    }
+    assert_eq!(f11_note(false), "F11 switches fullscreen");
+    assert_eq!(
+        f11_note(true),
+        "F11 is reserved (Control+Command+F switches fullscreen)"
+    );
 }

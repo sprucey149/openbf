@@ -24,6 +24,8 @@
 //!   --desync-report FILE [FILE]   read LAN desync reports: the first tick and
 //!                                 group that differ, and a re-simulation
 //!                                 (main/desync_report.rs)
+//!   --desync-spawns FILE          re-simulate a desync report and probe every
+//!                                 human spawn for walls (main/desync_spawns.rs)
 //!   (no args) | --shell           BF2-style instant-action shell (windowed)
 //!     --assets <dir>              baked maps root (default assets_baked)
 //!     --missions <dir>            mission RONs (default missions)
@@ -126,8 +128,8 @@
 //!   OPENBF_BENCH_TARGET_TICKS=<n,n..>  with OPENBF_BENCH_DETAIL: these one-based
 //!                                 ticks run under `targeted_tick`, for callgrind's
 //!                                 --toggle-collect (same work, another symbol)
-//!   OPENBF_PROFILE=<file>         the profile file (default
-//!                                 openbf_data/profiles.ron beside the game)
+//!   OPENBF_PROFILE=<file>         dev/tests: one single-profile file instead
+//!                                 of the catalog (openbf_data/profiles.ron)
 //!   OPENBF_ADAPTER=igpu|dgpu|<name>  the GPU (default: high performance)
 //!   OPENBF_GPU_TIMING=1           GPU ms per section of the frame (timestamp
 //!                                 queries; `--bench` prints them, the
@@ -180,6 +182,8 @@
 mod battle;
 #[path = "main/desync_report.rs"]
 mod desync_report;
+#[path = "main/desync_spawns.rs"]
+mod desync_spawns;
 #[path = "main/headless.rs"]
 mod headless;
 #[path = "main/net_real.rs"]
@@ -333,6 +337,7 @@ fn main() -> Result<()> {
         "--lan-host" => windowed::run_lan(&args[1..], true),
         "--lan-join" => windowed::run_lan(&args[1..], false),
         "--desync-report" => desync_report::run(&args[1..]),
+        "--desync-spawns" => desync_spawns::run(&args[1..]),
         "--sim-hash" => {
             let n: u64 = it
                 .next()
@@ -613,6 +618,15 @@ struct BattleSetup {
     heroes: Option<core::sim::heroes::HeroRules>,
     /// Include installed DLC heroes in Hero Assault.
     dlc_heroes: bool,
+    /// A LAN round (`round_setup::battle_setup`): the sim's
+    /// `netplay_rows` (issue #171 option C), set before the opening wave
+    /// spawns so its bots take the LAN rows. False for single player.
+    netplay_rows: bool,
+    /// A LAN round's humans besides slot 0, per team
+    /// (`game::netplay::joining_humans`): the opening wave counts them for
+    /// its rows (issue #171), as they are seated only after it spawns.
+    /// `[0; 2]` for single player.
+    opening_humans: [u8; 2],
     score_limit: u32,
 }
 
@@ -685,6 +699,8 @@ impl BattleSetup {
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: v.mode == "eli",
+            netplay_rows: false,
+            opening_humans: [0; 2],
             score_limit: if v.mode == "hunt" {
                 50
             } else {

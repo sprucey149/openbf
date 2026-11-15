@@ -217,6 +217,8 @@ fn bugx_c_a_hit_before_death_has_no_chevron_at_respawn() {
                 age: 0.0,
                 health_left: 99.0,
                 dir: Vec3::X,
+                dealt: 1.0,
+                taken: 1.0,
             },
         )
         .expect("direction lights an edge"),

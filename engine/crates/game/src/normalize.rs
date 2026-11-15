@@ -7,7 +7,7 @@
 //! ([`ClassDb::load`](crate::classdb::ClassDb::load), `bf1_*` files, and
 //! [`ClassDb::load_map`](crate::classdb::ClassDb::load_map) on a BF1 map) and
 //! the same kind of soldier and weapon then behaves the same on every map.
-//! BF2's files are never touched.
+//! BF2's files are touched only by [`SHARED_RULES`], which sets both games alike.
 //!
 //! The rules:
 //! - a soldier class takes its BF2 counterpart's health ([`HEALTH`]); a
@@ -17,6 +17,8 @@
 //!   takes its BF2 counterpart's ([`PERSON_DAMAGE`]), or else
 //!   [`BF1_SCALE`];
 //! - a few keys follow their BF2 counterpart outright ([`KEYS`]);
+//! - the maintainer's own values for both games ([`SHARED_RULES`]): the one place a
+//!   BF2 class is rewritten too;
 //! - the vehicle pass ([`vehicles`]): vehicles and turrets take their BF2
 //!   twin's health and guns, and infantry weapons their twin's damage to
 //!   vehicles and buildings;
@@ -204,9 +206,11 @@ pub const PERSON_DAMAGE: &[DamageRow] = &[
         person: 60.0,
         twin: "rep_weap_inf_commando_pistol_ord",
     },
+    // [ours] 280, not BF2's 300 ([`SHARED_RULES`] sets BF2's rifle alike).
+    // measure: bot snipers' one-hit kills of a sniper-class stand-in (0 at 280).
     DamageRow {
         class: "*_weap_inf_sniperrifle_ord",
-        person: 300.0,
+        person: 280.0,
         twin: "all_weap_inf_sniper_rifle_ord",
     },
     DamageRow {
@@ -292,6 +296,21 @@ pub const KEYS: &[KeyRow] = &[
         class: "*_weap_inf_sniperrifle",
         keys: &["ShotDelay"],
         value: 1.0,
+        twin: "all_weap_inf_sniper_rifle",
+    },
+    // Every army sniper rifle zooms in BF2's two steps, x2 then x8 (BF1's
+    // Imperial and Republic rifles had one x6 step). The turn divisors follow
+    // the zoom (`WeaponClass::from_props`).
+    KeyRow {
+        class: "*_weap_inf_sniperrifle",
+        keys: &["ZoomMin"],
+        value: 2.0,
+        twin: "all_weap_inf_sniper_rifle",
+    },
+    KeyRow {
+        class: "*_weap_inf_sniperrifle",
+        keys: &["ZoomMax"],
+        value: 8.0,
         twin: "all_weap_inf_sniper_rifle",
     },
     KeyRow {
@@ -396,6 +415,50 @@ pub const KEYS: &[KeyRow] = &[
         twin: "com_item_healthrecharge",
     },
 ];
+
+/// A damage class both games take at the maintainer's value: its damage to
+/// soldiers, animals, droids and shields lands on `person`; vehicles and
+/// buildings take what they took.
+pub struct SharedRow {
+    pub class: &'static str,
+    pub person: f32,
+}
+
+/// [ours] The maintainer 2026-11-14: a sniper's head hit kills any non-hero
+/// in one shot and its body hit never kills a full-health soldier of 300
+/// health or more (natives under 280, such as Ewoks, Gungans, Jawas and
+/// Geonosians, are accepted exceptions). The army
+/// sniper rifle does 280 (300-health classes take two body hits; x3 on the
+/// head, 840, kills up to the 800 Wookiee), and the award beam rifle keeps
+/// BF2's x2 over it, 560 (its five beam ticks land about 622, as BF2's 600
+/// lands about 667). BF1's rifle takes 280 through [`PERSON_DAMAGE`]; the
+/// Tusken sniper keeps BF2's 200.
+///
+/// measure: the #171 sniper table (a sniper-class stand-in's deaths and
+/// one-hit deaths to bot snipers) and the Hard/Elite stand-in win rates;
+/// replace: the maintainer's playtest verdict on sniper duels.
+pub const SHARED_RULES: &[SharedRow] = &[
+    SharedRow {
+        class: "com_weap_inf_sniper_rifle_ord",
+        person: 280.0,
+    },
+    SharedRow {
+        class: "com_weap_award_sniper_rifle_ord",
+        person: 560.0,
+    },
+];
+
+/// Apply [`SHARED_RULES`] to one class definition of either game. A side's child
+/// class (`all_weap_inf_sniper_rifle_ord`) inherits the `com_` class's
+/// damage, so only the class that authors it moves.
+pub fn shared_rules(def: &mut ClassDef) {
+    if !matches!(def.kind.as_str(), "ordc" | "expc") {
+        return;
+    }
+    if let Some(row) = SHARED_RULES.iter().find(|r| matches(r.class, &def.name)) {
+        land(def, Some(row.person));
+    }
+}
 
 fn matches(pattern: &str, name: &str) -> bool {
     match pattern.strip_prefix('*') {
@@ -503,6 +566,16 @@ fn entity(def: &mut ClassDef) {
 }
 
 fn damage(def: &mut ClassDef) {
+    let person = PERSON_DAMAGE
+        .iter()
+        .find(|r| matches(r.class, &def.name))
+        .map(|r| r.person);
+    land(def, person);
+}
+
+/// Move a damage class's hits on soldiers, animals, droids and shields so a
+/// hit on a person deals `target`, or by [`BF1_SCALE`] when `None`.
+fn land(def: &mut ClassDef, target: Option<f32>) {
     let [max_damage, plain_damage] = ["MaxDamage", "Damage"].map(fnv1a_lowercase);
     let [health, person, animal, droid, shield] = [
         "HealthScale",
@@ -519,11 +592,9 @@ fn damage(def: &mut ClassDef) {
         * first(def, person)
             .or_else(|| first(def, health))
             .unwrap_or(1.0);
-    let k = PERSON_DAMAGE
-        .iter()
-        .find(|r| matches(r.class, &def.name))
+    let k = target
         .filter(|_| to_person > 0.0)
-        .map_or(BF1_SCALE, |r| r.person / to_person);
+        .map_or(BF1_SCALE, |p| p / to_person);
     if k == 1.0 {
         return;
     }

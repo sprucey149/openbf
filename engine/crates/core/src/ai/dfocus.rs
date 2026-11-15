@@ -29,6 +29,10 @@
 //!   human as crowded (`tactic::choose`).
 //! - A friend in the line of fire: card FFLN's rule stands for focusers as
 //!   for every bot (the shot waits, the holder steps aside).
+//! - Issue #171 lever L1 [ours] PROVISIONAL: a focuser that sees an enemy
+//!   bot at half the human's distance or nearer (within its fight reach)
+//!   does not force the human that think ([`yields_at`]); it keeps his
+//!   token. A proxy's focus stays frozen.
 
 use crate::commander::{Objective, DEFEND_QUIET_FALL};
 use crate::perception::{contact_of, Contact};
@@ -66,10 +70,9 @@ pub fn focuses(d: Difficulty) -> bool {
 /// Does unit `u` focus on the humans whose tokens it holds: its team's
 /// tier, or a proxy's frozen rule (`ai::proxy::frozen_focuses`)?
 pub(crate) fn focuses_as(sim: &Sim, u: &crate::unit::Unit) -> bool {
-    let d = sim.difficulty_of(u.team);
     match u.proxy_human {
-        Some(_) => super::proxy::frozen_focuses(d),
-        None => focuses(d),
+        Some(_) => super::proxy::frozen_focuses(sim.proxy_row(u.team)),
+        None => focuses(sim.difficulty_of(u.team)),
     }
 }
 
@@ -213,14 +216,18 @@ pub fn remembers(sim: &Sim, bot: UnitHandle, human: UnitHandle) -> bool {
 /// The human bot `me` focuses this think, if any: of the humans whose
 /// token it holds at a focusing tier, those it has its own record of within
 /// [`MEMORY`] - seen first, then the nearest, then the lowest index. `None`
-/// for a bot on a post's job or in a seat.
+/// for a bot on a post's job or in a seat, and (issue #171 lever L1) for a
+/// bot that sees an enemy bot at half that human's distance or nearer
+/// ([`yields_at`]): it keeps his token, and the ordinary target choice
+/// decides.
 pub fn pick(sim: &Sim, me: UnitHandle, st: &crate::ai::AiState) -> Option<UnitHandle> {
     let u = sim.unit(me)?;
     if u.mount.is_some() || !focuses_as(sim, u) || on_post(sim, me, u) {
         return None;
     }
     let eye = u.muzzle();
-    sim.tokens
+    let (h, c) = sim
+        .tokens
         .iter()
         .filter(|t| t.bot == me)
         .filter_map(|t| own(st, t.human, sim.tick).map(|c| (t.human, c)))
@@ -234,8 +241,45 @@ pub fn pick(sim: &Sim, me: UnitHandle, st: &crate::ai::AiState) -> Option<UnitHa
                         .total_cmp(&(b.1.last_pos - eye).length()),
                 )
                 .then(a.0.index.cmp(&b.0.index))
-        })
-        .map(|(h, _)| h)
+        })?;
+    (!yields(sim, me, u, st, c.last_pos)).then_some(h)
+}
+
+/// Issue #171 lever L1 [ours] PROVISIONAL (the maintainer's call): does a
+/// focusing tier's bot let its focus go when a nearer enemy bot is in
+/// sight? Hard and Elite. The originals have no focus fire at all
+/// (`analysis/re-ai-difficulty.md` §5.2, §8); without this a holder took
+/// the human over a bot at a fraction of his distance (at Hard the bots
+/// facing the proxy kept a far human 11x as often as a far bot).
+/// measure: the #171 pressure band (far-human share at most 1.5x the
+/// far-bot share at Hard, 2x at Elite).
+pub fn yields_at(d: Difficulty) -> bool {
+    matches!(d, Difficulty::Hard | Difficulty::Elite)
+}
+
+/// Lever L1: bot `me` (never a proxy, whose focus is frozen) at a tier
+/// that [`yields_at`] sees, this think, an admitted enemy bot (not a
+/// human) within its fight reach at half the human's distance at `human_at`
+/// or nearer: the census's FAR test (`census::d1`), so the focus does not
+/// force the human and the ordinary target choice decides.
+fn yields(sim: &Sim, me: UnitHandle, u: &Unit, st: &crate::ai::AiState, human_at: Vec3) -> bool {
+    if u.proxy_human.is_some() || !yields_at(sim.difficulty_of(u.team)) {
+        return false;
+    }
+    let eye = u.ai_eye();
+    let dh = (human_at - eye).length();
+    let reach = super::brain::fight_reach(sim, u);
+    st.contacts.iter().flatten().any(|c| {
+        c.seen_now
+            && c.handle
+                .live_unit(sim)
+                .is_some_and(|e| sim.hostile(u.team, e.team) && !e.is_human())
+            && crate::perception::target_admitted(sim, me, c)
+            && {
+                let d = (c.last_pos - eye).length();
+                d <= reach && 2.0 * d <= dh
+            }
+    })
 }
 
 /// Where a focuser that lost sight of its target walks: his last seen

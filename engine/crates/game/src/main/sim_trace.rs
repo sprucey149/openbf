@@ -332,6 +332,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            netplay_rows: false,
+            opening_humans: [0; 2],
             score_limit: if mode == "hunt" {
                 50
             } else {

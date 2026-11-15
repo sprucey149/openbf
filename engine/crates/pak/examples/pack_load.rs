@@ -6,8 +6,8 @@
 //! pack_load bench <dir> <scratch> [rounds]                                    time reading every file of <dir>
 //! ```
 //!
-//! `bench` packs `<dir>` three ways (raw, the legacy raw Deflate and the current zstd, whose pack is the one
-//! `write_pack` makes), then rotates between them reading all the entries, so a warm cache favours none. Run it in
+//! `bench` packs `<dir>` two ways (raw and zstd, whose pack is the one `write_pack` makes), then rotates between
+//! them reading all the entries, so a warm cache favours none. Run it in
 //! release (`cargo run --release -p pak --example pack_load -- bench engine/assets_baked/tat1 <scratch>`). It times
 //! reading and decompressing, not building the scene or uploading to the GPU.
 //!
@@ -103,14 +103,6 @@ fn fixed_pack(
     Ok(pos + index.len() as u64 + 32)
 }
 
-fn deflate(raw: &[u8]) -> Option<(Vec<u8>, u64)> {
-    let mut out = (raw.len() as u32).to_le_bytes().to_vec();
-    let mut enc = flate2::write::DeflateEncoder::new(&mut out, flate2::Compression::fast());
-    enc.write_all(raw).ok()?;
-    enc.finish().ok()?;
-    Some((out, 1 << 63))
-}
-
 fn bench(dir: &Path, scratch: &Path, rounds: usize) -> std::io::Result<()> {
     std::fs::create_dir_all(scratch)?;
     let entries = pak::collect(dir, "d")?;
@@ -119,15 +111,14 @@ fn bench(dir: &Path, scratch: &Path, rounds: usize) -> std::io::Result<()> {
         files.push((name.clone(), std::fs::read(path)?));
     }
     let total: usize = files.iter().map(|(_, b)| b.len()).sum();
-    let (raw, legacy) = (scratch.join("raw.pack"), scratch.join("deflate.pack"));
+    let raw = scratch.join("raw.pack");
     let (stub, zstd) = (scratch.join("stub"), scratch.join("zstd.pack"));
     fixed_pack(&raw, &files, |_| None)?;
-    fixed_pack(&legacy, &files, deflate)?;
     std::fs::write(&stub, b"")?;
     let side = scratch.join("zstd.unused");
     let layout = pak::write_pack_at(&stub, &zstd, &side, &entries, pak::SINGLE_FILE_LIMIT)?;
     assert_eq!(layout, pak::PackLayout::SingleFile);
-    let mut arms: Vec<_> = [("raw", &raw), ("deflate", &legacy), ("zstd", &zstd)]
+    let mut arms: Vec<_> = [("raw", &raw), ("zstd", &zstd)]
         .into_iter()
         .map(|(label, path)| {
             let archive = pak::Archive::open(path)?.expect("a pack");
@@ -164,7 +155,7 @@ fn bench(dir: &Path, scratch: &Path, rounds: usize) -> std::io::Result<()> {
             samples[samples.len() - 1]
         );
     }
-    for path in [raw, legacy, stub, zstd] {
+    for path in [raw, stub, zstd] {
         std::fs::remove_file(path)?;
     }
     Ok(())

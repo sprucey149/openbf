@@ -8,6 +8,20 @@ the later [ground vehicle and anti-vehicle pass](vehicle-normalization.md),
 which supersedes rule 5 for matched ground guns and changes the listed
 infantry weapons against vehicles and buildings.
 
+**Our own sniper values (2026-11-14), on both games' maps.** The maintainer: "I want a
+headshot to be a one shot kill with a sniper but a body shot shouldn't be a one shot kill with
+full health", then, asked to choose: the army sniper rifle does **280** to a person (BF2's 300),
+the award beam rifle keeps BF2's x2 over it, **560** (BF2's 600), the Tusken sniper keeps
+BF2's 200, and every army sniper rifle zooms in BF2's two steps, x2 then x8 (BF1's Imperial
+and Republic rifles had one x6 step); the award beam rifle keeps its one x6 step. With x3 on
+the head, 840 kills every non-hero up to the 800-health Wookiee, and no body hit kills a
+full-health soldier of 300 or more (natives under 280 health, the Jawa, Ewok, Gungan and
+Geonosian, stay one body hit, accepted). Every other body-hit count is unchanged: trooper 2,
+heavy 2 (560 against 550), Wookiee 3. This is the one place BF2's classes change
+(`normalize::SHARED_RULES`); BF1's rifle meets the same 280 through its row. Weapon values stay the
+same in both games: no per-game exceptions. Tests: `normalization::
+sniper_hits_to_kill_every_kind_of_soldier`, `bf2_classes_change_only_by_ours`.
+
 The ground Conquest roster applies one additional E-11 adjustment on both
 games' maps. A full-damage bolt takes 80 health from a person, restoring the
 five body hits of BF1's stock 60-damage rifle against a 300-health trooper.
@@ -41,7 +55,8 @@ One pass, `game::normalize::apply`, rewrites each BF1 class definition as it is 
 a map whose manifest says `source_game: "bf1"` (it holds the map's own vehicles, turrets and
 props). BF1 classes never inherit from one another, so one definition at a time is exact.
 `ClassDb::disc()` reads the disc's own numbers (tests and the tables below). BF2's class
-files and a BF2 map's `classes.ron` are read as written.
+files and a BF2 map's `classes.ron` are read as written, except for the rows of
+`normalize::SHARED_RULES` (the sniper rifles, 2026-11-14), which set both games alike.
 
 ## The rules
 
@@ -58,7 +73,8 @@ files and a BF2 map's `classes.ron` are read as written.
    BF1's arc caster is the one exception: BF1's emitter ignores the scales, so its `MaxDamage`
    and `Damage` are multiplied instead. Its sweep targets units.
 3. **Keys taken whole from BF2** (`normalize::KEYS`). A weapon that takes BF2's damage takes
-   BF2's rate of fire, so it is the same weapon on every map: the sniper rifles (1.0 s), the
+   BF2's rate of fire, so it is the same weapon on every map: the sniper rifles (1.0 s, and
+   BF2's zoom steps x2 then x8, 2026-11-14), the
    jet trooper's pistol (0.1 s), the Tusken rifle (0.33 s) and sniper (1.0 s), the Geonosian's
    blaster (1.0 s). The torpedo launchers lock in BF2's 1.0 s (BF1's took 1.5 s). The rocket blast takes BF2's radii (2 m inner, 4 m outer). The recon droid
    has BF2's 100 health. A health droid heals 25 a pass. The fusion cutter reaches 4 m in a
@@ -71,7 +87,7 @@ files and a BF2 map's `classes.ron` are read as written.
    Their damage to vehicles and buildings was unchanged by the soldier pass.
 
 Award weapons are BF2's own classes, so they are the reference and have no rows: pistol 150,
-rifle 150, sniper 600, shotgun pellet 85 to a person. A BF1 class carries them from BF2's
+rifle 150, sniper 560 (ours since 2026-11-14; BF2's 600), shotgun pellet 85 to a person. A BF1 class carries them from BF2's
 class data (`award-weapons.md` section 3), as BF1's droids read their BF2 weapons, and they
 arrive on this scale. BF1's Blast Cannon is the exception: its award is our own Heavy Blast
 Cannon, built from the normalized Blast Cannon with the flechette's 85 / 65 on its soldier
@@ -120,7 +136,7 @@ The full per-class table is at the end.
 | Imperial blaster rifle | 60 at 0.2 s | 5 | 70 at 0.166 s | 6 | 70 at 0.166 s | 6 | BF2's, with its rate |
 | Pistol | 40 | 8 | 60 | 7 | 60 | 7 | BF2's |
 | Jet trooper's pistol | 40 at 0.05 s | 8 | 60 at 0.1 s | 7 | 60 at 0.1 s | 7 | BF2's, with its rate |
-| Sniper rifle | 160 at 0.5 s | 2 | 300 at 1.0 s | 2 | 300 at 1.0 s | 2 | BF2's, with its rate |
+| Sniper rifle | 160 at 0.5 s | 2 | 300 at 1.0 s | 2 | 280 at 1.0 s | 2 | ours on both maps (BF2's rate and zoom) |
 | Shotgun, a pellet | 65 x 5 at 0.75 s | 5 | 65 x 8 at 1.0 s | 7 | 86.67 x 5 at 0.75 s | 5 | x4/3 |
 | Bowcaster | 60 (charged 75) | 5 | 75 x 7 (charged 300) | 6 | 80 (charged 100) | 5 | x4/3 |
 | Rocket, direct hit | 600 | 1 | 500 rising to 1500 | 1 | 800 | 1 | x4/3 |
@@ -143,7 +159,7 @@ The full per-class table is at the end.
 | Gungan grenade (BF1 only) | 300 | 1 | - | - | 400 | 1 | x4/3 |
 | Super battle droid's wrist blaster (BF2's on both) | (60) | (5) | 100 | 4 | 100 | 4 | already BF2's |
 | Droideka's repeater (BF2's on both) | (55) | (6) | 80 | 5 | 80 | 5 | already BF2's |
-| Award pistol / rifle / sniper / shotgun pellet (BF2 only) | - | - | 150 / 150 / 600 / 85 | 3 / 3 / 1 / 5 | unchanged | | reference |
+| Award pistol / rifle / sniper / shotgun pellet (BF2 only) | - | - | 150 / 150 / 600 / 85 | 3 / 3 / 1 / 5 | 150 / 150 / 560 / 85 on both maps | 3 / 3 / 1 / 5 | reference; the sniper ours |
 
 This settles the open question about the BF2 weapons BF1's droids carry: against the old
 300-health clone the wrist blaster killed in 3 body hits and the repeater in 4; against the
@@ -153,13 +169,17 @@ What moves on BF1 maps beyond the plain 4/3:
 
 - The Imperial rifle is BF2's: 70 a bolt every 0.166 s (6 body hits, 422 damage a second)
   where the other sides' rifle does 80 every 0.2 s (5 hits, 400 a second).
-- A sniper's body shot kills a 300-health class (sniper, dark trooper, jet trooper) in one,
-  and snipers fire half as fast.
+- A sniper's body shot no longer kills a 300-health class (sniper, dark trooper, jet trooper)
+  in one: 280 on both maps (ours, 2026-11-14); snipers fire half as fast and zoom x2 then x8.
 - A thermal detonator no longer kills a heavy outright (450 against 550), as in BF2.
 - The rocket's blast is full out to 2 m instead of 0.75 m (also a little more splash on
   buildings, whose scale is 0.25).
 - The recon droid is a real weapon: 60 a hit and 100 health, from 10 and 40.
 - Geonosians and Ewoks are BF2's: a Geonosian hits for 100 a second, an Ewok has 200 health.
+  In BF1 Hunt an Ewok also throws BF2's spear and rock (issue #161): the spear flies at
+  50 m/s under 2 g lifted 0.15, where BF1's AI-only spear flew at 25 m/s under 1.5 g with
+  no lift (about 9 m on a level throw); the rock is BF2's 40 m/s shell with its 25 blast.
+  Elsewhere BF1's Ewoks keep BF1's weapon data.
 - A heavy (550) and a Wookiee smuggler (800) gained more than 4/3, so some guns need one
   more hit on them than on the disc: the AT-ST's and AT-AT's head guns and the Geonosis
   turret (400 on the disc, 533 now) take two on a heavy.
@@ -236,7 +256,8 @@ Scaled, not yet one rule:
 
 Every BF1 round's state hash moves from the first tick (soldier health). BF2 ground rounds
 and every space round are unchanged: no BF2 class file and no BF2 map's own class file is
-rewritten (`normalization::bf2_class_files_are_untouched`,
+rewritten (`normalization::bf2_class_files_are_untouched`; since 2026-11-14 the sniper
+rifles' `normalize::SHARED_RULES` rows are the one exception, `normalization::bf2_classes_change_only_by_ours`,
 `normalization::a_maps_own_classes_follow_its_game`).
 
 Measured 2026-11-10 in two steps, each a release binary before and after, `--sim-trace <out>
@@ -372,7 +393,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `all_weap_inf_remotedroid_exp2` | 50 | 6 | 66.67 | 6 | 1.333 | x4/3 |
 | `all_weap_inf_rifle_ord` | 60 | 5 | 80 | 5 | 1.333 | x4/3 |
 | `all_weap_inf_shotgun_ord` | 65 | 5 | 86.67 | 5 | 1.333 | x4/3 |
-| `all_weap_inf_sniperrifle_ord` | 160 | 2 | 300 | 2 | 1.875 | BF2 `all_weap_inf_sniper_rifle_ord` |
+| `all_weap_inf_sniperrifle_ord` | 160 | 2 | 280 | 2 | 1.750 | ours, as BF2's `all_weap_inf_sniper_rifle_ord` |
 | `all_weap_inf_thermaldetonator_exp` | 320 | 1 | 450 | 1 | 1.406 | BF2 `all_weap_inf_thermaldetonator_exp` |
 | `all_weap_inf_torpedo_launcher_exp` | 320 | 1 | 400 | 1 | 1.250 | BF2 `all_weap_inf_rocket_launcher_exp` |
 | `all_weap_inf_torpedo_launcher_ord` | 600 | 1 | 800 | 1 | 1.333 | x4/3 |
@@ -386,7 +407,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `cis_weap_inf_remotedroid_exp2` | 50 | 6 | 66.67 | 6 | 1.333 | x4/3 |
 | `cis_weap_inf_repeater_ord` | 55 | 6 | 73.33 | 6 | 1.333 | x4/3 |
 | `cis_weap_inf_rifle_ord` | 60 | 5 | 80 | 5 | 1.333 | x4/3 |
-| `cis_weap_inf_sniperrifle_ord` | 160 | 2 | 300 | 2 | 1.875 | BF2 `all_weap_inf_sniper_rifle_ord` |
+| `cis_weap_inf_sniperrifle_ord` | 160 | 2 | 280 | 2 | 1.750 | ours, as BF2's `all_weap_inf_sniper_rifle_ord` |
 | `cis_weap_inf_thermaldetonator_exp` | 320 | 1 | 450 | 1 | 1.406 | BF2 `all_weap_inf_thermaldetonator_exp` |
 | `cis_weap_inf_torpedo_launcher_exp` | 320 | 1 | 400 | 1 | 1.250 | BF2 `all_weap_inf_rocket_launcher_exp` |
 | `cis_weap_inf_torpedo_launcher_ord` | 600 | 1 | 800 | 1 | 1.333 | x4/3 |
@@ -410,7 +431,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `imp_weap_inf_remotedroid_exp2` | 50 | 6 | 66.67 | 6 | 1.333 | x4/3 |
 | `imp_weap_inf_rifle_ord` | 60 | 5 | 70 | 6 | 1.167 | BF2 `imp_weap_inf_rifle_ord` |
 | `imp_weap_inf_shotgun_ord` | 65 | 5 | 86.67 | 5 | 1.333 | x4/3 |
-| `imp_weap_inf_sniperrifle_ord` | 160 | 2 | 300 | 2 | 1.875 | BF2 `all_weap_inf_sniper_rifle_ord` |
+| `imp_weap_inf_sniperrifle_ord` | 160 | 2 | 280 | 2 | 1.750 | ours, as BF2's `all_weap_inf_sniper_rifle_ord` |
 | `imp_weap_inf_thermaldetonator_exp` | 320 | 1 | 450 | 1 | 1.406 | BF2 `all_weap_inf_thermaldetonator_exp` |
 | `imp_weap_inf_torpedo_launcher_exp` | 320 | 1 | 400 | 1 | 1.250 | BF2 `all_weap_inf_rocket_launcher_exp` |
 | `imp_weap_inf_torpedo_launcher_ord` | 600 | 1 | 800 | 1 | 1.333 | x4/3 |
@@ -426,7 +447,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `rep_weap_inf_rifle_ord` | 60 | 5 | 80 | 5 | 1.333 | x4/3 |
 | `rep_weap_inf_rocket_launcher_exp` | 150 | 2 | 200 | 2 | 1.333 | x4/3 |
 | `rep_weap_inf_rocket_launcher_ord` | 60 | 5 | 80 | 5 | 1.333 | x4/3 |
-| `rep_weap_inf_sniperrifle_ord` | 160 | 2 | 300 | 2 | 1.875 | BF2 `all_weap_inf_sniper_rifle_ord` |
+| `rep_weap_inf_sniperrifle_ord` | 160 | 2 | 280 | 2 | 1.750 | ours, as BF2's `all_weap_inf_sniper_rifle_ord` |
 | `rep_weap_inf_thermaldetonator_exp` | 320 | 1 | 450 | 1 | 1.406 | BF2 `all_weap_inf_thermaldetonator_exp` |
 | `rep_weap_inf_torpedo_launcher_exp` | 320 | 1 | 400 | 1 | 1.250 | BF2 `all_weap_inf_rocket_launcher_exp` |
 | `rep_weap_inf_torpedo_launcher_ord` | 600 | 1 | 800 | 1 | 1.333 | x4/3 |
@@ -587,14 +608,14 @@ field them; the stand-in human's win rate is the measure still owed.
 | `yav_weap_bldg_tower_minigun_ord` | bf1_yav1 | 100 | 3 | 133.33 | 3 |
 | `tat_hover_skiff_exp` | tat1 | 20 | 15 | 26.67 | 15 |
 
-### BF2 infantry damage classes (the reference, unchanged)
+### BF2 infantry damage classes (the reference; the sniper rifles ours since 2026-11-14)
 
 | BF2 class | To a person | Hits on 400 |
 |---|---|---|
 | `all_weap_award_pistol_ord` | 150 | 3 |
 | `all_weap_award_rifle_ord` | 150 | 3 |
 | `all_weap_award_shotgun_ord` | 85 | 5 |
-| `all_weap_award_sniper_rifle_ord` | 600 | 1 |
+| `all_weap_award_sniper_rifle_ord` | 560 (disc 600) | 1 |
 | `all_weap_inf_autoturret_ord` | 100 | 4 |
 | `all_weap_inf_bowcaster_ord` | 75 | 6 |
 | `all_weap_inf_bowcaster_ord_high` | 300 | 2 |
@@ -611,13 +632,13 @@ field them; the stand-in human's win rate is the measure still owed.
 | `all_weap_inf_rocket_launcher_exp` | 400 | 1 |
 | `all_weap_inf_rocket_launcher_ord` | 500 | 1 |
 | `all_weap_inf_shotgun_ord` | 65 | 7 |
-| `all_weap_inf_sniper_rifle_ord` | 300 | 2 |
+| `all_weap_inf_sniper_rifle_ord` | 280 (disc 300) | 2 |
 | `all_weap_inf_thermaldetonator_exp` | 450 | 1 |
 | `all_weap_inf_timebomb_exp` | 5000 | 1 |
 | `cis_weap_award_pistol_ord` | 150 | 3 |
 | `cis_weap_award_rifle_ord` | 150 | 3 |
 | `cis_weap_award_shotgun_ord` | 85 | 5 |
-| `cis_weap_award_sniper_rifle_ord` | 600 | 1 |
+| `cis_weap_award_sniper_rifle_ord` | 560 (disc 600) | 1 |
 | `cis_weap_award_wrist_blaster_ord` | 150 | 3 |
 | `cis_weap_inf_autoturret_ord` | 100 | 4 |
 | `cis_weap_inf_bulldog_exp` | 150 | 3 |
@@ -633,7 +654,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `cis_weap_inf_rocket_launcher_exp` | 400 | 1 |
 | `cis_weap_inf_rocket_launcher_ord` | 500 | 1 |
 | `cis_weap_inf_shotgun_ord` | 65 | 7 |
-| `cis_weap_inf_sniper_rifle_ord` | 300 | 2 |
+| `cis_weap_inf_sniper_rifle_ord` | 280 (disc 300) | 2 |
 | `cis_weap_inf_thermaldetonator_exp` | 450 | 1 |
 | `cis_weap_inf_timebomb_exp` | 5000 | 1 |
 | `cis_weap_inf_wrist_blaster_ord` | 100 | 4 |
@@ -642,7 +663,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `com_weap_award_pistol_ord` | 150 | 3 |
 | `com_weap_award_rifle_ord` | 150 | 3 |
 | `com_weap_award_shotgun_ord` | 85 | 5 |
-| `com_weap_award_sniper_rifle_ord` | 600 | 1 |
+| `com_weap_award_sniper_rifle_ord` | 560 (disc 600) | 1 |
 | `com_weap_inf_arccaster_exp` | 7.5 | 54 |
 | `com_weap_inf_arccaster_ord` | 325 | 2 |
 | `com_weap_inf_autoturret_ord` | 100 | 4 |
@@ -674,7 +695,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `com_weap_inf_sabre_throw_ord` | 400 | 1 |
 | `com_weap_inf_seismic_mine_exp` | 5000 | 1 |
 | `com_weap_inf_shotgun_ord` | 65 | 7 |
-| `com_weap_inf_sniper_rifle_ord` | 300 | 2 |
+| `com_weap_inf_sniper_rifle_ord` | 280 (disc 300) | 2 |
 | `com_weap_inf_sonic_blaster_hidden` | 100 | 4 |
 | `com_weap_inf_sonic_blaster_ord` | 100 | 4 |
 | `com_weap_inf_thermaldetonator_exp` | 450 | 1 |
@@ -695,7 +716,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `imp_weap_award_pistol_ord` | 150 | 3 |
 | `imp_weap_award_rifle_ord` | 150 | 3 |
 | `imp_weap_award_shotgun_ord` | 85 | 5 |
-| `imp_weap_award_sniper_rifle_ord` | 600 | 1 |
+| `imp_weap_award_sniper_rifle_ord` | 560 (disc 600) | 1 |
 | `imp_weap_inf_arccaster_exp` | 7.5 | 54 |
 | `imp_weap_inf_arccaster_ord` | 325 | 2 |
 | `imp_weap_inf_autoturret_ord` | 100 | 4 |
@@ -710,7 +731,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `imp_weap_inf_rocket_launcher_exp` | 400 | 1 |
 | `imp_weap_inf_rocket_launcher_ord` | 500 | 1 |
 | `imp_weap_inf_shotgun_ord` | 65 | 7 |
-| `imp_weap_inf_sniper_rifle_ord` | 300 | 2 |
+| `imp_weap_inf_sniper_rifle_ord` | 280 (disc 300) | 2 |
 | `imp_weap_inf_sonic_blaster_hidden` | 100 | 4 |
 | `imp_weap_inf_sonic_blaster_ord` | 100 | 4 |
 | `imp_weap_inf_thermaldetonator_exp` | 450 | 1 |
@@ -720,7 +741,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `rep_weap_award_pistol_ord` | 150 | 3 |
 | `rep_weap_award_rifle_ord` | 150 | 3 |
 | `rep_weap_award_shotgun_ord` | 85 | 5 |
-| `rep_weap_award_sniper_rifle_ord` | 600 | 1 |
+| `rep_weap_award_sniper_rifle_ord` | 560 (disc 600) | 1 |
 | `rep_weap_inf_autoturret_ord` | 100 | 4 |
 | `rep_weap_inf_chaingun_ord` | 25 | 16 |
 | `rep_weap_inf_commando_pistol_ord` | 60 | 7 |
@@ -732,7 +753,7 @@ field them; the stand-in human's win rate is the measure still owed.
 | `rep_weap_inf_rocket_launcher_exp` | 400 | 1 |
 | `rep_weap_inf_rocket_launcher_ord` | 500 | 1 |
 | `rep_weap_inf_shotgun_ord` | 65 | 7 |
-| `rep_weap_inf_sniper_rifle_ord` | 300 | 2 |
+| `rep_weap_inf_sniper_rifle_ord` | 280 (disc 300) | 2 |
 | `rep_weap_inf_thermaldetonator_exp` | 450 | 1 |
 | `rep_weap_inf_timebomb_exp` | 5000 | 1 |
 | `tat_weap_inf_jawa_arccaster_exp` | 7.5 | 54 |

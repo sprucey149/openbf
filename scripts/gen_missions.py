@@ -1037,35 +1037,65 @@ BF1_HUNTS = {
     "bf1_tat2": ("tat2i", 1, 3, "jawa"),
 }
 
+# [ours] Issue #161: a BF1 adaptation fields the roster of its planet's BF2
+# Hunt, which the maintainer asked Hunt to match: the BF2 script's classes
+# and unit counts, by BF1's class for the same unit where BF1 has one (BF2's
+# Endor scout trooper `imp_inf_sniper` is BF1's `imp_inf_scout_trooper`).
+# Each row: the army team's faction, then per team its unit count and its
+# (class, count, max) list, as the BF2 Hunt mission has them. A row
+# replaces the encounter's lists; the native faction stays.
+# bf1_nab2 and tat1 have no BF2 Hunt on their planet and keep the encounter.
+BF1_HUNT_ROSTERS = {
+    # end1g_hunt: scout troopers against Ewok troopers and scouts.
+    "bf1_end1": ("imp", 12, [("imp_inf_scout_trooper", 22, None)],
+                 24, [("ewk_inf_trooper", 12, None), ("ewk_inf_scout", 12, None)]),
+    # geo1c_hunt: clone sharpshooters against Geonosians.
+    "bf1_geo1": ("rep", 8, [("rep_inf_clone_sharpshooter", 8, None)],
+                 25, [("geo_inf_geonosian", 25, None)]),
+    # kas2c_hunt: BF2's MagnaGuard (BF1 has none; the roster builds it
+    # from BF2's side) against Wookiee mechanics and warriors.
+    "bf1_kas1": ("cis", 25, [("cis_inf_officer_hunt", 8, None)],
+                 25, [("wok_inf_mechanic", 5, None), ("wok_inf_warrior", 20, None)]),
+    "bf1_kas2": ("cis", 25, [("cis_inf_officer_hunt", 8, None)],
+                 25, [("wok_inf_mechanic", 5, None), ("wok_inf_warrior", 20, None)]),
+    # nab2c_hunt: super battle droids (BF1's cis_inf_battledroid) against
+    # Gungan defenders and soldiers.
+    "bf1_nab1": ("cis", 8, [("cis_inf_battledroid", 8, None)],
+                 32, [("gun_inf_defender", 13, None), ("gun_inf_soldier", 12, None)]),
+    # tat2g_hunt: Tusken hunters and raiders, at most 6 each, against Jawas.
+    "bf1_tat2": ("tusken", 12, [("tat_inf_tuskenhunter", 2, 6), ("tat_inf_tuskenraider", 2, 6)],
+                 25, [("tat_inf_jawa", 25, None)]),
+}
+
 # openbf Hunt balance in mission team order. Rows are Easy, Normal, Hard
 # and Elite. Population includes the player. See issue #161 for validation.
 # Each tuple contains combatants, optional health percent and optional
 # BF1 points per kill. BF2 always reads points per kill from its scripts.
 HUNT_BALANCE = {
     "bf1_end1": (
-        [[8, 24], [8, 24], [8, 24], [8, 24]],
-        [[70, 165], [70, 180], [60, 230], [70, 180]],
-        [[1, 6], [1, 6], [1, 5], [1, 7]],
+        [[5, 24], [5, 28], [5, 28], [8, 42]],
+        [[62, 125], [65, 150], [60, 205], [65, 215]],
+        [[1, 1], [1, 1], [1, 1], [1, 1]],
     ),
     "bf1_geo1": (
-        [[10, 20], [10, 20], [10, 20], [10, 20]],
-        [[90, 150], [70, 240], [90, 150], [70, 250]],
-        [[1, 7], [1, 4], [1, 7], [1, 4]],
+        [[10, 24], [8, 24], [8, 24], [8, 24]],
+        [[100, 205], [100, 200], [100, 280], [140, 340]],
+        [[1, 3], [1, 3], [1, 3], [1, 7]],
     ),
     "bf1_kas1": (
-        [[18, 24], [18, 24], [18, 24], [18, 24]],
-        [[100, 125], [100, 100], [100, 100], [100, 125]],
-        [[1, 2], [1, 2], [1, 2], [1, 2]],
+        [[3, 24], [3, 24], [4, 36], [4, 36]],
+        [[45, 410], [45, 320], [45, 340], [45, 350]],
+        [[2, 1], [2, 1], [2, 1], [2, 1]],
     ),
     "bf1_kas2": (
-        [[10, 16], [10, 16], [10, 16], [10, 16]],
-        [[100, 150], [100, 120], [100, 100], [100, 110]],
-        [[1, 2], [1, 2], [1, 2], [1, 2]],
+        [[4, 24], [4, 24], [6, 36], [6, 36]],
+        [[45, 440], [45, 435], [45, 370], [45, 380]],
+        [[2, 1], [2, 1], [2, 1], [2, 1]],
     ),
     "bf1_nab1": (
-        [[13, 24], [12, 24], [14, 24], [12, 24]],
-        [[100, 150], [100, 175], [100, 165], [100, 175]],
-        [[1, 3], [1, 3], [1, 3], [1, 4]],
+        [[8, 18], [8, 18], [8, 26], [8, 18]],
+        [[100, 140], [100, 150], [70, 200], [100, 200]],
+        [[1, 3], [1, 3], [1, 4], [1, 3]],
     ),
     "bf1_nab2": (
         [[15, 22], [15, 22], [15, 22], [17, 22]],
@@ -1073,9 +1103,9 @@ HUNT_BALANCE = {
         None,
     ),
     "bf1_tat2": (
-        [[20, 14], [22, 16], [20, 16], [20, 16]],
-        [[100, 100], [100, 115], [100, 145], [100, 145]],
-        None,
+        [[16, 6], [16, 8], [24, 12], [12, 8]],
+        [[300, 83], [280, 65], [280, 120], [280, 105]],
+        [[1, 1], [1, 1], [1, 1], [1, 1]],
     ),
     "bf2_end1": (
         [[3, 24], [3, 28], [4, 28], [3, 28]],
@@ -1634,6 +1664,14 @@ def bf1_hunt(key, planet, era):
     m.teams = [(d["names"][army], d["units"][army], NO_TICKET_LIMIT),
                (faction, d["units"][native], NO_TICKET_LIMIT)]
     m.classes = [d["classes"][army], d["classes"][native]]
+    army_replaced = False
+    if key in BF1_HUNT_ROSTERS:
+        army_faction, army_units, army_classes, native_units, native_classes = \
+            BF1_HUNT_ROSTERS[key]
+        army_replaced = army_faction != d["names"][army]
+        m.teams = [(army_faction, army_units, NO_TICKET_LIMIT),
+                   (faction, native_units, NO_TICKET_LIMIT)]
+        m.classes = [list(army_classes), list(native_classes)]
     m.heroes = []
     m.class_load_order = d.get("class_load_order", [])
     m.local_teams = []
@@ -1646,6 +1684,10 @@ def bf1_hunt(key, planet, era):
                  for target, team in enumerate((army, native), 1) if team in d["ai_aggr"]]
     for field in ("vo_bleed", "vo_low", "vo_oob", "mus_amb", "mus_vic", "mus_def"):
         team_map = {army: 1, native: 2}
+        # A replaced army is another faction: the encounter army's
+        # commander lines are not its own (its music is the planet's).
+        if army_replaced and field.startswith("vo_"):
+            team_map = {native: 2}
         setattr(m, field, [(team_map[row[0]], *row[1:])
                            for row in getattr(m, field) if row[0] in team_map])
     m.death_drains = []
@@ -1912,10 +1954,14 @@ def ron(m):
              % ("BF1" if m.game == "bf1" else "BF2", pretty,
                 MODE_NAME[mode],
                 ERA_NAME[m.era]))
-    if m.game == "bf1" and mode == "hunt":
+    if m.game == "bf1" and mode == "hunt" and m.key in BF1_HUNT_ROSTERS:
+        L.append("// openbf adaptation using the roster of BF2's Hunt on this planet.")
+        L.append("// Map facts come from PS2 mission bytecode.")
+    elif m.game == "bf1" and mode == "hunt":
         L.append("// openbf adaptation using the original native encounter's roster.")
-    if mode == "hunt":
+    if mode == "hunt" and not (m.game == "bf1" and m.key in BF1_HUNT_ROSTERS):
         L.append("// Roster and map facts come from PS2 mission bytecode.")
+    if mode == "hunt":
         L.append("// The openbf balance table supplies per-difficulty adjustments.")
         L.append("// Do not hand-edit — regenerate.")
     else:
@@ -2181,13 +2227,6 @@ def ron(m):
                      % ", ".join('("%s", %d)' % (n, t)
                                  for n, t in m.ai_no_capture))
         L.append("    ),")
-    # Retain the legacy summary for readers that predate the full roster.
-    if m.local_teams:
-        team, units, classes = m.local_teams[0]
-        name = classes[0][0] if classes else m.d["names"].get(team, "locals")
-        L.append('    locals: Some(("%s", %d)),' % (name, units))
-    else:
-        L.append("    locals: None,")
     if m.local_teams:
         L.append("    local_teams: [")
         for team, units, classes in m.local_teams:

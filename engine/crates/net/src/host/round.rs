@@ -14,6 +14,12 @@
 //!   digest mismatch means. `start_round` (or [`crate::BARRIER_TIMEOUT`])
 //!   sends `Start` and starts the clock: tick `T` closes at
 //!   `start + (T + 1) / 30 s`.
+//! - The start is one moment on every peer: `start` is the lead after
+//!   `start_round`, the slowest guest given `Start`'s half round trip plus
+//!   [`crate::START_MARGIN`] (at most [`crate::START_LEAD_MAX`]; none
+//!   without a guest). `Start` and `RoundStarted` carry it; each guest
+//!   takes off its own half round trip, so every loading screen ends when
+//!   tick 0 begins.
 //! - Closing tick `T`: each active slot's queue gives its pad, then pending
 //!   session commands go in, in order, while the bundle stays within
 //!   [`crate::packet::BUNDLE_BUDGET`] (each pad counted against both bases
@@ -29,10 +35,19 @@
 //!   [`crate::msg::LOG_CHUNK_TICKS`], then live bundles from the log's end.
 //!   Full chunks are compressed once and cached.
 //! - Hash reports compare a guest's hash with the host game's for the same
-//!   tick, whichever arrives first; a mismatch emits `Desync` and tells that
-//!   guest (with the host's hash, build and target). Old reports are trimmed
-//!   so the maps stay bounded. The guest's `DesyncHashes` answer is handed
-//!   to the host game as it comes.
+//!   tick, whichever arrives first; a mismatch emits `Desync` to the host
+//!   game, which decides whose game parted. Only [`HostCore::tell_desync`]
+//!   tells the guest (with the host's hash, build and target). A report of
+//!   another round is stale and dropped. Old reports are trimmed so the maps
+//!   stay bounded. The guest's `DesyncHashes` answer is handed to the host
+//!   game as it comes.
+//! - A check tick on which every guest live in the round (connected, in its
+//!   bundles, not catching up; at least one) reported the host game's own
+//!   hash raises `HashesAgreed` once, newest first: everyone holds that
+//!   tick's game, so the host game may replay from it (issue #168). A tick
+//!   with any differing hash never does.
+//! - `load_round` drops the old round's bundles and hash events the host
+//!   game has not read yet, so none is stepped or compared in the new one.
 //! - Fell behind (`LAN_MULTIPLAYER.md` §8b): a connected guest in the round
 //!   that is not catching up is known to have stepped the newest tick it
 //!   reported a hash for (or the tick it became live). When the clock is
@@ -51,7 +66,7 @@ use crate::bundle::{
 };
 use crate::msg::{Msg, RosterEntry, LOG_CHUNK_TICKS};
 use crate::packet::BUNDLE_BUDGET;
-use crate::{Micros, BARRIER_TIMEOUT};
+use crate::{Micros, BARRIER_TIMEOUT, START_LEAD_MAX, START_MARGIN};
 use core::sim::PadState;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -59,6 +74,8 @@ const HOST_HASHES_KEPT: usize = 2000;
 /// Ticks between a guest's hash reports (the game reports every 30).
 const REPORT_SLACK: u32 = 30;
 const PEER_HASHES_KEPT: usize = 8192;
+/// Check ticks whose agreement is still open (a few seconds of reports).
+const AGREEMENT_KEPT: usize = 64;
 
 /// Where the host is in a round.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -90,6 +107,11 @@ pub(crate) struct RoundState {
     all_loaded_sent: bool,
     host_hashes: BTreeMap<u32, u64>,
     peer_hashes: BTreeMap<(u32, u8), u64>,
+    /// Per check tick still open: the guests whose hash equalled the host's,
+    /// and whether any differed (module rules, `HashesAgreed`).
+    agreement: BTreeMap<u32, (Vec<u8>, bool)>,
+    /// The newest check tick `HashesAgreed` was emitted for.
+    agreed_through: Option<u32>,
 }
 
 impl RoundState {
@@ -179,7 +201,18 @@ impl HostCore {
         r.pending.clear();
         r.host_hashes.clear();
         r.peer_hashes.clear();
+        r.agreement.clear();
+        r.agreed_through = None;
         r.all_loaded_sent = false;
+        self.events.retain(|e| {
+            !matches!(
+                e,
+                NetEvent::Bundle(_)
+                    | NetEvent::Desync { .. }
+                    | NetEvent::DesyncHashes { .. }
+                    | NetEvent::HashesAgreed { .. }
+            )
+        });
         r.phase = RoundPhase::Loading {
             deadline: self.now + BARRIER_TIMEOUT,
         };
@@ -227,21 +260,31 @@ impl HostCore {
         if !self.round.is_loading() {
             return;
         }
-        self.round.phase = RoundPhase::Running { start: self.now };
+        let id = self.round.id;
+        let lead = self.start_lead();
+        self.round.phase = RoundPhase::Running {
+            start: self.now + lead,
+        };
         for (s, p) in self.players.iter_mut() {
             p.seen_tick = 0;
             // A guest still loading at a barrier timeout starts late.
             p.catching_up = *s != 0 && !p.loaded;
         }
-        let id = self.round.id;
-        let start = Msg::Start { round_id: id }.encode();
+        let lead_us = u32::try_from(lead.0).unwrap_or(u32::MAX);
+        let start = Msg::Start {
+            round_id: id,
+            lead_us,
+        }
+        .encode();
         for peer in self.peers.values_mut() {
             if peer.stream_round == id && matches!(peer.phase, Phase::Joined(_)) {
                 peer.conn.send_reliable(&start);
             }
         }
-        self.events
-            .push_back(NetEvent::RoundStarted { round_id: id });
+        self.events.push_back(NetEvent::RoundStarted {
+            round_id: id,
+            lead_us,
+        });
         // Connected but not seated: they join the running round.
         for slot in std::mem::take(&mut self.round.late) {
             let peer = self.players.get(&slot).and_then(|p| p.conn);
@@ -249,6 +292,20 @@ impl HostCore {
                 self.start_stream(pid, true);
             }
         }
+    }
+
+    /// The start's lead (module rules): the slowest guest `Start` goes to.
+    fn start_lead(&self) -> Micros {
+        let id = self.round.id;
+        let half = self
+            .peers
+            .values()
+            .filter(|p| p.stream_round == id && matches!(p.phase, Phase::Joined(_)))
+            .map(|p| p.conn.rtt.srtt.max(0) as u64 / 2)
+            .max();
+        half.map_or(Micros(0), |h| {
+            Micros((h + START_MARGIN.0).min(START_LEAD_MAX.0))
+        })
     }
 
     /// Schedules `EndRound` in the next bundle.
@@ -313,16 +370,59 @@ impl HostCore {
     }
 
     fn compare_hash(&mut self, slot: u8, tick: u32, host_hash: u64, peer_hash: u64) {
+        self.note_agreement(slot, tick, host_hash == peer_hash);
         if host_hash == peer_hash {
             return;
         }
         self.events.push_back(NetEvent::Desync {
+            round_id: self.round.id,
             slot,
             tick,
             host_hash,
             peer_hash,
         });
+    }
+
+    /// Guest `slot`'s hash for `tick` was compared (`equal`): once every
+    /// live guest's equalled the host's, `HashesAgreed` (module rules).
+    fn note_agreement(&mut self, slot: u8, tick: u32, equal: bool) {
+        if self.round.agreed_through.is_some_and(|t| tick <= t) {
+            return;
+        }
+        let live: Vec<u8> = self
+            .players
+            .iter()
+            .filter(|(s, p)| **s != 0 && p.active && p.conn.is_some() && !p.catching_up)
+            .map(|(s, _)| *s)
+            .collect();
+        let r = &mut self.round;
+        let (agreed, differed) = r.agreement.entry(tick).or_default();
+        if equal {
+            if !agreed.contains(&slot) {
+                agreed.push(slot);
+            }
+        } else {
+            *differed = true;
+        }
+        let all = !*differed && !live.is_empty() && live.iter().all(|s| agreed.contains(s));
+        if all {
+            r.agreed_through = Some(tick);
+            r.agreement.retain(|t, _| *t > tick);
+            self.events.push_back(NetEvent::HashesAgreed {
+                round_id: r.id,
+                tick,
+            });
+        }
+        while r.agreement.len() > AGREEMENT_KEPT {
+            r.agreement.pop_first();
+        }
+    }
+
+    /// Tells guest `slot` its hash at `tick` of this round differed from
+    /// the host's `host_hash` (the host game decided its game parted).
+    pub fn tell_desync(&mut self, slot: u8, tick: u32, host_hash: u64) {
         let msg = Msg::Desync {
+            round_id: self.round.id,
             tick,
             host_hash,
             build: self.config.build.clone(),
@@ -377,7 +477,15 @@ impl HostCore {
                 self.check_all_loaded();
                 true
             }
-            Msg::HashReport { tick, hash } => {
+            Msg::HashReport {
+                round_id,
+                tick,
+                hash,
+            } => {
+                if round_id != self.round.id {
+                    // Stale: sent before this round loaded.
+                    return true;
+                }
                 if let Some(p) = self.players.get_mut(&slot) {
                     p.seen_tick = p.seen_tick.max(tick);
                 }

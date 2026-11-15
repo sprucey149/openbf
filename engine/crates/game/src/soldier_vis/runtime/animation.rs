@@ -278,6 +278,8 @@ impl SoldierVisuals {
         v.animator
             .hero_jump(s.jump_animation.map(|d| (d, s.jump_animation_serial)));
         v.animator
+            .choke_hold(u.alive && u.mount.is_none() && u.choked.is_some());
+        v.animator
             .step(rig, &sa.asset.clips, &sa.asset.skeleton, &input, dt);
         if u.alive && u.mount.is_none() {
             if let Some(class) = anim {

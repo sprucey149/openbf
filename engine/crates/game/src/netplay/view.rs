@@ -1,12 +1,13 @@
 //! [`LocalView`]: a lockstep peer's per-frame step and its drawn view (LAN
 //! §4.4, §6), shared by the windowed loop and the tests. Presentation only:
-//! the confirmed sim is only ever stepped by [`Peer::frame`].
+//! the confirmed sim is only ever stepped by [`Peer`]'s frame.
 //!
 //! Per frame:
-//! 1. [`LocalView::frame`] runs [`Peer::frame`] (inputs out, bundles
-//!    stepped), handing the caller's per-tick hook whether the local unit's
-//!    shot feedback this tick was already given by the prediction
-//!    ([`Predictor::confirm_shots`]); then sets the render blend's fraction
+//! 1. [`LocalView::frame`] polls the host's self-check (a correction
+//!    resets the prediction), then runs [`Peer::frame`]'s steps (inputs
+//!    out, bundles stepped), handing the caller's per-tick hook whether the
+//!    local unit's shot feedback this tick was already given by the
+//!    prediction ([`Predictor::confirm_shots`]); then sets the render blend's fraction
 //!    (a guest's playback fraction; the host's time since its last close,
 //!    carried from tick to tick like single player's accumulator) and
 //!    updates the prediction over the inputs still pending. The predicted
@@ -87,16 +88,25 @@ impl LocalView {
         dt: f32,
         pad: PadState,
         walk: &mut WalkSim,
-        feed: Option<&mut EventFeed>,
+        mut feed: Option<&mut EventFeed>,
         mut each: impl FnMut(&mut WalkSim, &TickBundle, Option<&mut EventFeed>, bool),
     ) -> FrameReport {
+        // The host's game replaced by its replay: nothing predicted from
+        // the old one holds. Before the frame's steps, whose bundles the
+        // prediction then notes against the new game; the frame's only
+        // poll of the check (`Peer::frame_steps`), so none goes unseen.
+        let corrected = peer.poll_self_check(link, walk, feed.as_deref_mut());
+        if corrected.is_some() {
+            self.predictor.reset();
+        }
         let predictor = &mut self.predictor;
         let slot = peer.local_slot;
-        let report = peer.frame(link, f64::from(dt), pad, walk, feed, |w, b, f| {
+        let mut report = peer.frame_steps(link, f64::from(dt), pad, walk, feed, |w, b, f| {
             predictor.note_bundle(b, &w.sim, slot);
             let muted = predictor.confirm_shots(&w.sim, w.player);
             each(w, b, f, muted);
         });
+        report.corrected = corrected;
         // The host steps each tick as its network thread closes it: the
         // time since the last close, kept like single player's accumulator
         // (each tick stepped takes one tick's time off, the rest carries) so

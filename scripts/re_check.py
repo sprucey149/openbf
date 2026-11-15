@@ -280,10 +280,7 @@ def search(terms, srcs=(), elf=False, quiet=False, pc=False):
 def write_receipt(rec, card=None):
     """Stamp + write the receipt; returns its id (8 hex)."""
     if not card:
-        try:
-            card = json.loads(os.environ.get("OPENBF_JOB_JSON", "") or "{}").get("card") or json.loads(os.environ.get("OPENBF_JOB_JSON", "{}")).get("id")
-        except ValueError:
-            card = None
+        card = os.environ.get("OPENBF_CARD")
     rec["card"] = card or "nocard"
     rec["timestamp"] = datetime.datetime.now().isoformat(timespec="seconds")
     rid = hashlib.sha1(json.dumps(rec, sort_keys=True).encode()).hexdigest()[:8]

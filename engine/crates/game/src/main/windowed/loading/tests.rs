@@ -779,3 +779,148 @@ fn controller_hold_is_neutral_until_release_then_allows_new_input() {
         "one physical press must have one usable interface"
     );
 }
+
+/// Issue #168: the LAN loading gate. A round start never ends before its
+/// presentation (the first VPN playtest's skip: it ended when the round was
+/// built), holds the installed battle until the start and shows it then; a
+/// peer the start went on without installs when built; a join enters when
+/// built; single player is unchanged.
+#[test]
+fn lan_round_start_holds_until_the_hosts_start() {
+    let now = Instant::now();
+    let soon = now + Duration::from_millis(120);
+    let start = |s| Some((false, s));
+    // Single player: the presentation's end.
+    assert_eq!(next(None, false, true, false, now), Next::Draw);
+    assert_eq!(next(None, true, true, false, now), Next::Enter);
+    // A round start built before its presentation's end keeps drawing.
+    assert_eq!(next(start(None), false, true, false, now), Next::Draw);
+    assert_eq!(next(start(None), true, true, false, now), Next::Hold);
+    // Held: until the start's moment, then shown.
+    assert_eq!(next(start(None), true, false, true, now), Next::Draw);
+    assert_eq!(next(start(Some(soon)), true, false, true, now), Next::Draw);
+    assert_eq!(next(start(Some(soon)), true, false, true, soon), Next::Show);
+    // Started without it (the barrier's timeout): in as soon as built.
+    assert_eq!(next(start(Some(now)), false, false, false, now), Next::Draw);
+    assert_eq!(next(start(Some(now)), false, true, false, now), Next::Hold);
+    // A join or a rejoin catches up: in when built, no hold.
+    assert_eq!(
+        next(Some((true, None)), false, true, false, now),
+        Next::Enter
+    );
+    assert_eq!(
+        next(Some((true, None)), false, false, false, now),
+        Next::Draw
+    );
+}
+
+/// A LAN round's playback: no press prompts or skips.
+#[test]
+fn lan_playback_ignores_presses() {
+    let mut p = Playback::no_skip();
+    for ms in [0, 1, 5, 20, 2_000] {
+        p.press(Duration::from_millis(ms));
+        assert!(!p.prompt(Duration::from_millis(ms)));
+    }
+    assert!(!p.skipped());
+    assert!(!p.done(Duration::from_millis(2_000), Duration::from_secs(4)));
+    assert!(p.done(Duration::from_secs(4), Duration::from_secs(4)));
+}
+
+/// The loading screen's wall time for one round on the fixture's
+/// `bf1_bes1` (one still: 1 s), `net` with a LAN host session. Accept is
+/// held from the screen before (the lobby's Launch), then pressed twice
+/// fresh, then mashed: in single player that skips. Returns the wall ms,
+/// the presentation's length and whether the playback was ever prompted
+/// or skipped.
+fn loading_wall(net: bool) -> (f64, Duration, bool) {
+    use winit::event::{DeviceId, ElementState, MouseButton, WindowEvent};
+    let f = Fixture::new();
+    f.map("bf1_bes1", &[], false);
+    std::fs::write(
+        f.0.join("bf1_bes1/manifest.ron"),
+        "(map: \"bf1_bes1\", source_game: \"bf1\", terrain_name: None, sky_name: None, \
+         terrain_glb: None, models: [], textures: [], classes: [], geometries: [], \
+         regions: [], instances: [])",
+    )
+    .unwrap();
+    let mut a = app(f.0.clone());
+    if net {
+        let port = std::net::UdpSocket::bind("127.0.0.1:0")
+            .and_then(|s| s.local_addr())
+            .map(|a| a.port())
+            .unwrap();
+        let args =
+            super::super::lan::LanArgs::parse(&["--port".to_owned(), port.to_string()], true)
+                .unwrap();
+        let profile = game::netplay::PlayerProfile::decode_or_default(&[]);
+        a.netplay = Some(super::super::lan::NetplaySession::host(args, profile, 4, true).unwrap());
+    }
+    let click = |button, state| WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state,
+        button,
+    };
+    let accept = MouseButton::Left;
+    // The lobby's Launch, still held as the loading screen opens.
+    a.loading_window_event(&click(accept, ElementState::Pressed));
+    assert!(a.begin_loading(row("bf1_bes1", ui::shell::Mode::Con)));
+    let duration = a.loading.as_ref().unwrap().display.duration();
+    let t = Instant::now();
+    let mut prompted = false;
+    let mut frame = 0;
+    while matches!(a.screen, super::super::Screen::Loading) && t.elapsed() < Duration::from_secs(10)
+    {
+        // The held Accept again (not fresh), its release, then fresh
+        // presses and a mash of two buttons.
+        let presses: &[(MouseButton, ElementState)] = match frame {
+            0 => &[(accept, ElementState::Pressed)],
+            1 => &[(accept, ElementState::Released)],
+            2 | 3 => &[
+                (accept, ElementState::Pressed),
+                (accept, ElementState::Released),
+            ],
+            _ => &[
+                (accept, ElementState::Pressed),
+                (MouseButton::Right, ElementState::Pressed),
+                (accept, ElementState::Released),
+                (MouseButton::Right, ElementState::Released),
+            ],
+        };
+        for (b, s) in presses {
+            a.loading_window_event(&click(*b, *s));
+        }
+        if let Some(l) = a.loading.as_ref() {
+            let e = l.started.elapsed();
+            prompted |= l.playback.prompt(e) || l.playback.skipped();
+        }
+        a.redraw_loading().unwrap();
+        frame += 1;
+        std::thread::sleep(Duration::from_millis(4));
+    }
+    let ms = t.elapsed().as_secs_f64() * 1000.0;
+    if let Some(n) = a.netplay.take() {
+        n.shutdown();
+    }
+    (ms, duration, prompted)
+}
+
+/// Issue #168, the first VPN playtest ("all the loading screens were
+/// skipped"): a LAN round's loading screen lasts its whole presentation,
+/// whatever Accept did on the lobby and on the screen. The same input skips
+/// a single-player loading (the control).
+#[test]
+fn a_lan_loading_screen_is_never_cut_short_by_held_or_repeated_accept() {
+    let (sp_ms, duration, sp_prompted) = loading_wall(false);
+    assert!(sp_prompted, "single player: the presses prompt and skip");
+    assert!(
+        sp_ms < duration.as_secs_f64() * 1000.0,
+        "single player skipped: {sp_ms:.1} ms of {duration:?}"
+    );
+    let (lan_ms, duration, lan_prompted) = loading_wall(true);
+    assert!(!lan_prompted, "a LAN round never prompts or skips");
+    assert!(
+        lan_ms >= duration.as_secs_f64() * 1000.0,
+        "a LAN round's loading lasted {lan_ms:.1} ms of {duration:?}"
+    );
+}

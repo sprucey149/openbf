@@ -185,6 +185,19 @@ pub fn weapon_gauge(walk: &crate::walk::WalkSim) -> HudGauge {
     }
 }
 
+/// The relation the centre reticle shows for player slot `slot`: what that
+/// slot's own reticle picks (`core::sim::Sim::reticle_pick`), 0 for nothing.
+/// Issue #173: the HUD read slot 0's pick for every view, so a LAN guest's
+/// reticle turned red whenever the host's aim was on an enemy, with no enemy
+/// under the guest's own aim or one behind a wall from where he stood.
+pub fn reticle_relation(sim: &core::sim::Sim, slot: usize) -> i8 {
+    sim.reticle_pick
+        .get(slot)
+        .copied()
+        .flatten()
+        .map_or(0, |(_, rel)| rel)
+}
+
 pub fn armed_seat(walk: &crate::walk::WalkSim) -> bool {
     walk.sim.unit(walk.player).is_some_and(|u| {
         u.alive
@@ -305,6 +318,17 @@ pub struct HudView {
 fn read_ron<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     ron::from_str(&pak::read_to_string(path).with_context(|| path.display().to_string())?)
         .with_context(|| path.display().to_string())
+}
+
+/// The Instant Action device screen measured on this bake's backdrop, read
+/// as the HUD loader reads it; `None` when the art has no device.
+pub fn instant_device(assets_dir: &Path) -> Option<[f32; 4]> {
+    read_hud_sheet(
+        &crate::shell_movie::shell_dir(assets_dir)
+            .join("textures")
+            .join(format!("{}.ktx2", ui::shell_ia::BACKDROP)),
+    )
+    .and_then(|t| ui::shell_ia::device_screen(&t.rgba, t.width, t.height))
 }
 
 fn read_hud_sheet(path: &Path) -> Option<crate::assets::CpuTexture> {
@@ -441,6 +465,40 @@ fn add_menu_fonts(
     art.fonts.extend(menu_art.fonts);
     art.distance_fonts.extend(menu_art.distance_fonts);
     pages.extend(menu_pages);
+}
+
+/// The menu face for egui (`ui::typography::face`): each metric set of the
+/// bake's BF2 Light traced into a font. Empty for a bake without the face
+/// (egui keeps its own, at the roles' sizes).
+pub fn menu_face(assets_dir: &Path) -> ui::typography::face::Fonts {
+    let dir = assets_dir.join("common_bf2/fonts");
+    let mut art = HudArt::default();
+    let mut pages = HashMap::new();
+    add_menu_fonts(&mut art, &mut pages, &dir);
+    ui::typography::Face::ALL
+        .iter()
+        .filter_map(|&face| {
+            let (menu, _) = manifest::hud::MENU_FONTS
+                .iter()
+                .find(|(_, legacy)| *legacy == face.role())?;
+            let font = art.fonts.get(*menu)?;
+            let distance = art.distance_fonts.get(*menu)?;
+            let page = |name: &str| {
+                pages.get(name).map(|t| ui::typography::face::Page {
+                    rgba: &t.rgba,
+                    width: t.width,
+                    height: t.height,
+                })
+            };
+            let bytes = ui::typography::face::build(
+                font,
+                distance,
+                page,
+                ui::typography::face::stretch(face),
+            )?;
+            Some((face, bytes))
+        })
+        .collect()
 }
 
 /// `name` → file for every `*.glb` in `dirs`; the first directory wins.
@@ -597,7 +655,7 @@ impl HudView {
         point: [f32; 2],
         size: [f32; 2],
     ) -> Option<usize> {
-        let font = self.art.menu_font(ui::spawn_draw::BUTTON_FONT)?;
+        let font = self.art.menu_font(ui::typography::ITEM.face.role())?;
         ui::shell_ps2::row_at(font, menus, point, size)
     }
 
@@ -609,8 +667,17 @@ impl HudView {
         size: [f32; 2],
     ) -> bool {
         self.art
-            .menu_font(ui::spawn_draw::BUTTON_FONT)
+            .menu_font(ui::typography::ITEM.face.role())
             .is_some_and(|font| ui::shell_ps2::prompt_at(font, menus, point, size))
+    }
+
+    /// Issue #128: the help line of the spawn page last laid out under the
+    /// window point `point` ([`ui::spawn_draw::help_at`], the battle pass's
+    /// help role's face).
+    pub fn spawn_help_at(&self, point: [f32; 2], size: [f32; 2]) -> Option<ui::spawn_draw::Help> {
+        let page = self.hud.spawn.as_ref()?;
+        let font = self.art.menu_font(ui::typography::HELP.face.role());
+        ui::spawn_draw::help_at(font, page, point, size)
     }
 
     /// Hit-test Instant Action using the same font metrics as its draw pass.
@@ -620,8 +687,12 @@ impl HudView {
         point: [f32; 2],
         size: [f32; 2],
     ) -> Option<ui::shell::PointerTarget> {
-        let font = self.art.menu_font(ui::spawn_draw::BUTTON_FONT)?;
-        ui::shell_ia::pointer_target(ia, point, size, font)
+        let font = self.art.menu_font(ui::typography::ITEM.face.role())?;
+        let device = self
+            .art
+            .instant_device
+            .unwrap_or(ui::shell_ia::DEVICE_SCREEN);
+        ui::shell_ia::pointer_target(ia, point, size, font, device)
     }
 
     /// [`HudView::load`] for `r`'s frames.
@@ -660,10 +731,16 @@ impl HudView {
             art.fonts.insert(tiny.to_owned(), font);
             add_distance_font(&mut art, &mut distance_pages, &bf1_fonts, tiny);
         }
+        // The natives' weapon models are baked with their soldiers, under
+        // `locals` (issue #161: BF2's `ewk_weap_inf_spear -> ewk_spear` row
+        // and the layout's native models never resolved). The side folders
+        // come first, so a name in both keeps its old file.
         let mesh_files = glb_index(&[
             common.join("models"),
             assets_dir.join("side_bf2/weapons"),
             assets_dir.join("side_bf1/weapons"),
+            assets_dir.join("side_bf2/locals/weapons"),
+            assets_dir.join("side_bf1/locals/weapons"),
         ]);
         let mut layout = layout;
         ui::hud::add_leaving_line(&mut layout);
@@ -675,6 +752,8 @@ impl HudView {
                 .is_some_and(|path| path.parent() == Some(bf2_weapons.as_path()))
         });
         place_vehicle_chaingun(&mut hud);
+        // Fit Instant Action's command bars to this copy's device art.
+        art.instant_device = instant_device(assets_dir);
         if let Some(thermal) = mesh_files
             .get("hud_thermaldetonator")
             .and_then(|path| load_mesh(path).ok())
@@ -702,9 +781,9 @@ impl HudView {
             });
         }
         ui::hud::place_countdown_labels(&mut hud);
-        let pause_art = [ui::spawn_draw::BUTTON_FONT, ui::spawn_draw::SMALL_FONT]
+        let pause_art = [ui::typography::ITEM.face, ui::typography::BODY.face]
             .iter()
-            .all(|role| art.menu_font(role).is_some())
+            .all(|face| art.menu_font(face.role()).is_some())
             && ui::pause_draw::button_sheets()
                 .all(|sheet| pak::is_file(common.join("textures").join(format!("{sheet}.ktx2"))));
         Ok(Self {

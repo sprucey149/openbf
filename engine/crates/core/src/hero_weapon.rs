@@ -75,6 +75,11 @@ fn hash_target(target: &crate::projectile::Target, eat: &mut impl FnMut(&[u8])) 
 pub struct Choked {
     pub left: f32,
     pub age: f32,
+    /// Caught off the floor (a jump, a fall, a throw or a jet): where the
+    /// hold keeps him while it lasts. The jet is cut off at the catch, so he
+    /// falls when it ends (issue #173, the maintainer's rule; the original
+    /// holds only a standing or crouching soldier). [ours]
+    pub hold: Option<glam::Vec3>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

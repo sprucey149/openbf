@@ -337,8 +337,9 @@ pub fn board(sim: &mut Sim) {
         }
         let d = sim.difficulty_of(t);
         let cover = d.tier().cover;
-        let proxy_cover = super::proxy::frozen_tier(d).cover;
-        let may_cover = |u: &crate::unit::Unit| covers(u, d, cover);
+        let pd = sim.proxy_row(t);
+        let proxy_cover = super::proxy::frozen_tier(pd).cover;
+        let may_cover = |u: &crate::unit::Unit| covers(u, pd, cover);
         let n = sim.units.len();
         // Who counts in each post's region, per post (unit-index order).
         let inside: Vec<Vec<usize>> = (0..sim.cps.len())

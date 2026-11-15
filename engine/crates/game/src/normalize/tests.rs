@@ -168,7 +168,7 @@ fn every_charge_stage_moves() {
 fn a_named_weapon_lands_on_its_target() {
     for (name, damage, scale, target) in [
         ("cis_weap_inf_pistol_ord", "40.0", "1.0", 60.0),
-        ("rep_weap_inf_sniperrifle_ord", "160.0", "1.0", 300.0),
+        ("rep_weap_inf_sniperrifle_ord", "160.0", "1.0", 280.0),
         ("all_weap_inf_thermaldetonator_exp", "320.0", "1.0", 450.0),
         ("cis_weap_inf_mortar_launcher_exp", "300.0", "1.0", 400.0),
         ("imp_weap_inf_remotedroid_blaster_ord", "10.0", "1.0", 60.0),
@@ -464,6 +464,26 @@ fn key_rows_set_or_add_their_key() {
     apply(&mut sniper);
     assert_eq!(all(&sniper, "ShotDelay"), [1.0]);
     assert_eq!(all(&sniper, "RoundsPerClip"), [6.0]);
+    // Every army sniper rifle zooms x2 then x8, as BF2's does.
+    let mut scout = def(
+        "imp_weap_inf_sniperrifle",
+        "wpnc",
+        "cannon",
+        &[("ZoomMin", "6.0"), ("ZoomMax", "6.0"), ("ShotDelay", "0.5")],
+    );
+    apply(&mut scout);
+    assert_eq!(all(&scout, "ZoomMin"), [2.0]);
+    assert_eq!(all(&scout, "ZoomMax"), [8.0]);
+    // The Tusken's rifle keeps its own scope.
+    let mut tusken = def(
+        "tat_weap_inf_tuskensniperrifle",
+        "wpnc",
+        "cannon",
+        &[("ZoomMin", "6.0"), ("ZoomMax", "6.0")],
+    );
+    apply(&mut tusken);
+    assert_eq!(all(&tusken, "ZoomMin"), [6.0]);
+    assert_eq!(all(&tusken, "ZoomMax"), [6.0]);
 
     // The Imperial rifle alone takes BF2's faster rate.
     let mut rifle = def(
@@ -551,4 +571,62 @@ fn the_tables_name_each_class_once() {
             assert_ne!(a.class, b.class);
         }
     }
+}
+
+/// The maintainer's sniper values set BF2's classes too: the base rifle
+/// lands on 280 and the award beam on 560, against soldiers only; a side's
+/// child class, every other BF2 class and a weapon class are left alone.
+#[test]
+fn ours_sets_both_games_sniper_rifles() {
+    let props = [
+        ("MaxDamage", "300.0"),
+        ("PersonScale", "1.0"),
+        ("DroidScale", "1.0"),
+        ("ShieldScale", "1.0"),
+        ("VehicleScale", "0.2"),
+    ];
+    let mut rifle = def("com_weap_inf_sniper_rifle_ord", "ordc", "bolt", &props);
+    shared_rules(&mut rifle);
+    assert_eq!(
+        all(&rifle, "MaxDamage")[0] * all(&rifle, "PersonScale")[0],
+        280.0
+    );
+    assert_eq!(all(&rifle, "DroidScale"), all(&rifle, "PersonScale"));
+    assert_eq!(all(&rifle, "VehicleScale"), [0.2]);
+
+    let mut beam = def(
+        "com_weap_award_sniper_rifle_ord",
+        "ordc",
+        "beam",
+        &[("MaxDamage", "600.0"), ("PersonScale", "1.0")],
+    );
+    shared_rules(&mut beam);
+    assert_eq!(
+        all(&beam, "MaxDamage")[0] * all(&beam, "PersonScale")[0],
+        560.0
+    );
+
+    for (name, kind, base) in [
+        (
+            "all_weap_inf_sniper_rifle_ord",
+            "ordc",
+            "com_weap_inf_sniper_rifle_ord",
+        ),
+        ("tat_weap_inf_tuskensniperrifle_ord", "ordc", "bolt"),
+        ("com_weap_inf_rifle_ord", "ordc", "bolt"),
+        ("com_weap_inf_sniper_rifle", "wpnc", "cannon"),
+    ] {
+        let d = def(name, kind, base, &props);
+        let mut after = d.clone();
+        shared_rules(&mut after);
+        assert_eq!(after, d, "{name}");
+    }
+    // BF1's rifle meets the same number through its row.
+    assert_eq!(
+        PERSON_DAMAGE
+            .iter()
+            .find(|r| r.class == "*_weap_inf_sniperrifle_ord")
+            .map(|r| r.person),
+        Some(SHARED_RULES[0].person)
+    );
 }

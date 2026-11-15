@@ -74,6 +74,16 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     if host.build != guest.build && !host.build.is_empty() && !guest.build.is_empty() {
         println!("  WARNING: the builds differ");
     }
+    if let Some(at) = reports.iter().find_map(|r| r.host_diverged_at) {
+        let agreeing = reports
+            .iter()
+            .map(|r| &r.agreeing_guests)
+            .find(|g| !g.is_empty());
+        println!(
+            "host divergence: at the check at tick {at} the host's replay of the round differed from its own game, which it corrected{}",
+            agreeing.map_or_else(String::new, |g| format!(" (slots {g:?} agreed with the replay)"))
+        );
+    }
     if let Some(o) = reports.get(1) {
         let differ: Vec<&str> = r
             .static_groups
@@ -88,6 +98,29 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 "static digest: {} / {} differ in {differ:?}",
                 r.static_digest, o.static_digest
             );
+        }
+    }
+    // #173: the cheats the round started under, so a damage difference is
+    // never read as a rule bug (in-round switches are commands in the log).
+    if !r.setup.is_empty() {
+        match r.round_setup() {
+            Ok(setup) => {
+                let names = |bits: u32| {
+                    game::blackbox::cheat_names((bits & game::netplay::ALL_CHEATS) as u16)
+                        .join(", ")
+                };
+                let seats: Vec<String> = setup
+                    .humans
+                    .iter()
+                    .map(|h| format!("slot {} {} [{}]", h.slot, h.name, names(h.cheats)))
+                    .collect();
+                println!(
+                    "cheats at round start: {}  | guests may ask for [{}]",
+                    seats.join("; "),
+                    names(setup.cheat_policy)
+                );
+            }
+            Err(e) => println!("cheats: the round setup does not read ({e:#})"),
         }
     }
     let hr = desync::parse_rows(&host.rows)?;

@@ -223,6 +223,8 @@ fn battle_stats_filter_non_player_and_non_enemy_damage_and_deduplicate_ticks() {
         age: 0.0,
         health_left: 100.0,
         dir: Vec3::NEG_Z,
+        dealt: 1.0,
+        taken: 1.0,
     };
     walk.sim.events = vec![
         shot(player),

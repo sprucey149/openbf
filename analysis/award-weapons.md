@@ -25,10 +25,16 @@ BF2's PS2 class data (`engine/assets_baked/classes/bf2_*.ron`), damage to a pers
 | Flechette shotgun (5, Regulator) | 85 x 7, far 25 | 65 x 8, far 15 | x1.31 a pellet, x1.14 a volley, x0.95 a second | 1.2 s against 1.0 s, full damage to shields against a quarter |
 | Guided rocket (2, Demolition) | blast 500, radius 22.5 m, x0.2 to vehicles and buildings | none replaced | - | an extra slot beside the launcher |
 
+Since 2026-11-14 (the maintainer's sniper rule, `gameplay-normalization.md`): the beam rifle
+does 560 over 0.15 s against the army sniper rifle's 280 on both games' maps, keeping BF2's
+x2; its five beam ticks land about 622 a shot (the same 11 % overshoot as the disc's 600 to
+667, below). It keeps its fixed x6 zoom; the army sniper rifles zoom x2 then x8.
+
 ### What the port did before this change
 
 The same numbers. `OrdnanceClass::from_props` reads the award classes with no override, and
-BF2's class files are not rewritten by the shared-numbers pass. Measured in the sim with real
+BF2's class files were not rewritten by the shared-numbers pass (since 2026-11-14 the sniper
+rifles' rows of `normalize::SHARED_RULES` are the one exception). Measured in the sim with real
 classes on flat ground (a still target 10 m off, one trigger pull, body hits):
 
 | Weapon | Hits a pull | Health a hit |
@@ -129,9 +135,9 @@ Rules:
 
 - **The weapon is BF2's class**, built from BF2's class data (the BF2 side files a BF1 round
   now loads beside its own, `roster::load_classdb`). Damage, burst, clip, spread, zoom, the
-  beam and the guided rocket are BF2's, the same on every map. BF2's files are not rewritten,
-  and BF1's base weapons are already on BF2's scale, so the advantage is BF2's: rifle 150 over
-  80 (Empire 70), pistol 150 over 60, sniper 600 over 300.
+  beam and the guided rocket are BF2's, the same on every map. BF2's files are not rewritten
+  except for the sniper rifles' rows of `normalize::SHARED_RULES` (2026-11-14), and BF1's base weapons are already on BF2's scale, so the advantage is BF2's: rifle 150 over
+  80 (Empire 70), pistol 150 over 60, sniper 600 over 300 (560 over 280 since 2026-11-14).
 - **The Blast Cannon's award is our own, the Heavy Blast Cannon** (`[ours]`, the maintainer
   2026-11-10: "blast cannon award: sure, I'm on board"; earlier "I don't want to lose the blast
   cannon effect or its equivalent power"; `roster::awards::heavy_blast_cannon`). BF1's Blast

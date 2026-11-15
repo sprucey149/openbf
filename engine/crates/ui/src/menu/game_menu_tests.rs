@@ -271,8 +271,8 @@ fn the_game_menu_is_titled_by_its_page() {
     };
     assert_eq!(menu_title(&options), "Options");
     let flat = MenuModel { page: None, ..m };
-    assert_eq!(menu_title(&flat), "PAUSED");
-    assert_eq!(row_text(&flat, Row::Quit).0, "Quit to desktop");
+    assert_eq!(menu_title(&flat), "Paused");
+    assert_eq!(row_text(&flat, Row::Quit).0, "Quit to Desktop");
 }
 
 /// One frame at 1280 x 900; its actions and its shapes.
@@ -392,7 +392,7 @@ fn the_player_name_row_shows_the_profile_name_read_only() {
     assert_eq!(rows(&battle).last(), Some(&Row::PlayerName));
     assert_eq!(
         row_text(&battle, Row::PlayerName),
-        ("Player name".to_owned(), Some("Ann".to_owned()))
+        ("Player Name".to_owned(), Some("Ann".to_owned()))
     );
     assert_eq!(press(&battle, Row::PlayerName), None);
     assert!(row_locked(&battle, Row::PlayerName).is_some());

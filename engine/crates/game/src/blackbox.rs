@@ -78,9 +78,12 @@ pub use rotating::PREVIOUS;
 /// left stick as gilrs reports it, before the deadzone and the range scale
 /// (`stick_raw`), and the travel the game took as a full push on each axis
 /// that tick (`stick_full`): a pad that walks slowly shows a peak under 0.9
-/// there. 17 (#168): a LAN round's net meter every 0.5 s (`net`).
+/// there. 17 (#168): a LAN round's net meter every 0.5 s (`net`). 18
+/// (#173): the cheats (`header.cheats`, `header.cheats_now`, `cheats` event
+/// rows) and each hit's damage multipliers (`hit` `v[3]`, `v[4]`), so a
+/// playtest with a cheat on is never read as a rule bug.
 /// An older file still reads.
-pub const SCHEMA: u32 = 17;
+pub const SCHEMA: u32 = 18;
 /// Net meter rows kept (60 s at 2 Hz).
 const NET_ROWS: usize = 120;
 
@@ -428,6 +431,11 @@ pub enum Ev {
     /// vehicle; `v` = [damage, b's health at the tick's end: 0 when it was
     /// destroyed] (schema 11).
     VehicleHit,
+    /// Schema 18 (#173): scope a (-1 the session, else that player slot)
+    /// changed the cheats it plays under; `text` = the names on after the
+    /// change, comma-separated (empty = all off); `v` = [the set after, the
+    /// set before] as [`cheat_names`] bits.
+    Cheats,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -636,6 +644,15 @@ pub struct Header {
     pub trail_tick: u64,
     /// The recorder's own memory, MB.
     pub ring_mb: f32,
+    /// Schema 18 (#173): every cheat on at any tick the file covers, in the
+    /// session or for any human's player slot (the match log's names).
+    /// Empty = a clean capture.
+    #[serde(default)]
+    pub cheats: Vec<String>,
+    /// Schema 18: each scope's cheats when the file was written: `session`
+    /// (a round with no human) or `slot N`.
+    #[serde(default)]
+    pub cheats_now: BTreeMap<String, Vec<String>>,
 }
 
 /// The unit a bug report's "this guy" is: what the human was looking at.
@@ -770,6 +787,50 @@ pub struct Ring {
     stick: ([f32; 2], [f32; 2]),
     /// A LAN round's net meter rows (#168).
     net: VecDeque<NetRow>,
+    /// Schema 18 (#173): each scope's cheat set at the last tick, as
+    /// [`cheat_names`] bits: a seated human's slot, else -1 the session.
+    cheat_scopes: BTreeMap<i32, u16>,
+    /// Schema 18: every cheat bit any scope had on at any tick since the
+    /// ring started, so `header.cheats` still names a cheat after its rows
+    /// left the event ring or its player slot was vacated.
+    cheats_seen: u16,
+}
+
+/// Schema 18: a cheat set's bit for the class picker the match log also
+/// counts as a cheat (`Sim::test_rosters`); bits 0..10 are
+/// [`core::sim::Cheats::entries`] in order.
+const CLASS_PICKER_BIT: u16 = 1 << 10;
+
+/// Schema 18: the bits of cheat set `c` (bit 10: the class picker).
+fn cheat_bits(c: &core::sim::Cheats, picker: bool) -> u16 {
+    let bits = c
+        .entries()
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, _, on))| *on)
+        .fold(0u16, |b, (i, _)| b | 1 << i);
+    if picker {
+        bits | CLASS_PICKER_BIT
+    } else {
+        bits
+    }
+}
+
+/// The names of the cheats in `bits` ([`cheat_bits`]), as the match log
+/// names them: `invincible`, `ammo`, ... `damage` (War Hero, damage x1.5),
+/// ... and `class_picker`.
+pub fn cheat_names(bits: u16) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = core::sim::Cheats::default()
+        .entries()
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| bits & 1 << i != 0)
+        .map(|(_, (id, _, _))| *id)
+        .collect();
+    if bits & CLASS_PICKER_BIT != 0 {
+        names.push("class_picker");
+    }
+    names
 }
 
 /// A stick value to three places (the pad's own resolution is ~1/256).
@@ -859,7 +920,44 @@ impl Ring {
             hitches: None,
             session: session::Tally::default(),
             stick: ([0.0; 2], [0.0; 2]),
+            cheat_scopes: BTreeMap::new(),
+            cheats_seen: 0,
         }
+    }
+
+    /// Schema 18 (#173): a `cheats` row for every scope whose cheat set
+    /// changed this tick (the first tick counts a set that is on as a
+    /// change from none). A scope is each seated human's player slot
+    /// ([`Sim::cheats_for_slot`]); a round with no human reads the session.
+    fn cheats_of(&mut self, sim: &Sim) {
+        let picker = sim.test_rosters.iter().any(Option::is_some);
+        let mut now: BTreeMap<i32, u16> = sim
+            .players
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| h.is_some())
+            .map(|(s, _)| (s as i32, cheat_bits(&sim.cheats_for_slot(s), picker)))
+            .collect();
+        if now.is_empty() {
+            now.insert(-1, cheat_bits(&sim.cheats, picker));
+        }
+        for (&scope, &after) in &now {
+            let before = self.cheat_scopes.get(&scope).copied().unwrap_or(0);
+            if after != before {
+                self.event(EventRow {
+                    tick: sim.tick,
+                    kind: Ev::Cheats,
+                    a: scope,
+                    b: -1,
+                    c: -1,
+                    pos: [0.0; 3],
+                    text: cheat_names(after).join(","),
+                    v: vec![f32::from(after), f32::from(before)],
+                });
+            }
+        }
+        self.cheats_seen |= now.values().fold(0u16, |a, b| a | b);
+        self.cheat_scopes = now;
     }
 
     fn event(&mut self, row: EventRow) {
@@ -962,9 +1060,23 @@ impl Ring {
                     damage,
                     age,
                     health_left,
+                    dealt,
+                    taken,
                     ..
                 } if human(shooter) || human(victim) => {
-                    v = vec![r2(damage), r2(health_left), (age * 1e3).round() / 1e3];
+                    // Schema 18: the multipliers the hit carried (War Hero,
+                    // Guardian, a power-up), taken by the sim at the hit
+                    // itself (`Event::Hit::dealt`/`taken`), so a killing hit,
+                    // a timer that ran out or a cheat switched later in the
+                    // same tick still reads right; `damage` already includes
+                    // them.
+                    v = vec![
+                        r2(damage),
+                        r2(health_left),
+                        (age * 1e3).round() / 1e3,
+                        r2(dealt),
+                        r2(taken),
+                    ];
                     (
                         Ev::Hit,
                         shooter.index as i32,
@@ -1004,7 +1116,9 @@ impl Ring {
                         .map_or(-1, |u| u.weapon_class as i32),
                     at(victim),
                 ),
-                Event::EnvDeath { unit, cause } => (
+                // Issue #173: a credited fall keeps its cause row, right
+                // after the kill row of the same unit.
+                Event::EnvDeath { unit, cause } | Event::ForcedDeath { unit, cause } => (
                     match cause {
                         DeathCause::Suicide => Ev::Suicide,
                         DeathCause::HeroExhausted => Ev::HeroExhausted,
@@ -1078,7 +1192,8 @@ impl Ring {
         let u = &sim.units[walk.player.index as usize];
         let cam = walk.camera();
         let v = u.soldier.vel;
-        let pick = sim.reticle_pick.first().copied().flatten();
+        let slot = view_slot(walk);
+        let pick = sim.reticle_pick.get(slot).copied().flatten();
         HumanRow {
             tick: sim.tick,
             alive: u.alive,
@@ -1104,7 +1219,7 @@ impl Ring {
             spare: u.weapon.spare,
             reticle: pick.map_or(-1, |(t, _)| target_code(t)),
             reticle_k: pick.map_or(0, |(_, k)| k),
-            magnet: sim.magnet_at(0).map_or(-1, target_code),
+            magnet: sim.magnet_at(slot).map_or(-1, target_code),
             veh: u.mount.map_or(-1, |m| m.vehicle.index as i32),
             seat: u.mount.map_or(0, |m| m.seat),
             edges: sim.press_edges_of(walk.player.index as usize),
@@ -1121,6 +1236,7 @@ impl Ring {
         self.tick = t;
         self.expire_sounds(t);
         self.events_of(sim);
+        self.cheats_of(sim);
         let human = sim
             .units
             .get(walk.player.index as usize)
@@ -1457,9 +1573,9 @@ impl Ring {
             ("frames", "every alive unit every 0.5 s, oldest first; keys below"),
             ("human", "the player: every 0.5 s, then every tick for the last 5 s; lx/ly/rx/ry sticks -32767..32767; buttons bits 1 fire 2 jump 4 roll/stance 8 sprint 16 zoom 32 reload 64 action 128 switch 256 secondary fire 512-4096 squad follow / hold / at ease / move out 8192 / 16384 spawn class next / prev 32768 switch secondary 65536-524288 spawn post up / down / left / right 1048576 spawn accept 2097152 spawn back 4194304 pause-menu respawn 8388608 mouse aim (aim assist off); mx/my the mouse look the tick took, 1/65536 rad (mx + turns right, my + looks up), 0 = none or a controller; edges the buttons taken as presses this tick; combo the saber combo state after it (name hash, 0 none)"),
             ("world", "every 2 s: tickets, bleed/s, alive, posts (owner -1 neutral, cap charge and cap_team its team, neutral the neutralise charge, inside the counting units per team, times CaptureTime / NeutralizeTime), vehicles (kind 0 hover 1 walker 2 flyer 3 turret; riders by seat), doors (0 shut..1 open)"),
-            ("events", "kill: a killer b victim c the killer's weapon in hand (a seat gun's or a thrown grenade's kill reads as it); death_region/fall/rider_death/blast/kill_floor/under_map/lost/recycle: a unit; spawn/despawn: a unit; captured/neutralized/saved: a post b team; vehicle_lost: a vehicle b killer c class; order: a slot b kind c bots; voice: text; stuck: a unit b body (a no-progress run reached 3 s); shot: the human a fired weapon c; hit: a hit b (one of them the human), c a's weapon in hand, v = damage, b's health after, the round's age (-1 = a blast; schema < 11: 0 = a blast or a first-update bolt); vehicle_hit (schema 12): a (-1 a collision) damaged vehicle or building turret b (the human a or a rider of b), c a's weapon in hand, v = damage, b's health at the tick's end (0 = destroyed)"),
+            ("events", "kill: a killer b victim c the killer's weapon in hand (a seat gun's or a thrown grenade's kill reads as it); death_region/fall/rider_death/blast/kill_floor/under_map/lost/recycle: a unit (right after a kill row of the same unit on the same tick: that death was credited to the killer, #173); spawn/despawn: a unit; captured/neutralized/saved: a post b team; vehicle_lost: a vehicle b killer c class; order: a slot b kind c bots; voice: text; stuck: a unit b body (a no-progress run reached 3 s); shot: the human a fired weapon c; hit: a hit b (one of them the human), c a's weapon in hand, v = damage, b's health after, the round's age (-1 = a blast; schema < 11: 0 = a blast or a first-update bolt); vehicle_hit (schema 12): a (-1 a collision) damaged vehicle or building turret b (the human a or a rider of b), c a's weapon in hand, v = damage, b's health at the tick's end (0 = destroyed); schema 18: a hit's v[3] = the shooter's damage-dealt multiplier and v[4] = the victim's damage-taken multiplier, as the sim applied them at the hit itself (War Hero 1.5, Guardian 0.5; v[0] already includes them); cheats: scope a (-1 the session, else a player slot) changed its cheats, text = the names on after the change (empty = all off), v = [set after, set before] as bits in header.cheats name order (bit 10 = class_picker)"),
             ("trails", "each unit's last 10 s of positions at 4 Hz, oldest first, ending at its own tick: header.trail_tick for a unit alive then, earlier for one that died (its slot not yet respawned); gen is that life's generation"),
-            ("header", "build_commit / build_dirty: the commit the BINARY was built from (the code that ran); commit / dirty: the checkout's HEAD when the battle started; build_time: the executable's mtime, s since the epoch"),
+            ("header", "build_commit / build_dirty: the commit the BINARY was built from (the code that ran); commit / dirty: the checkout's HEAD when the battle started; build_time: the executable's mtime, s since the epoch; cheats (schema 18): every cheat on at any tick the file covers, session or any human slot (empty = a clean capture), cheats_now: each scope's cheats when it was written"),
             ("sounds", "every one-shot the mixer was handed in the last 60 s, oldest first: tick, name (names.sounds: the property), take (names.takes: the file under the baked root), gain (linear, the level by distance included), ears (what each ear got [left, right]: the gain x the bus, a 3-D sound split by the PS2's per-ear law, card MIXH), pitch (playback rate), dist (m from the listener, 0 = a 2-D line), voices (one-shots still sounding by their length + engine loops), secs (the take's length at that pitch). Not in it: the engine loops themselves and the music"),
             ("hitches", "the windowed game's frame record (card HITCH): frames, the seconds they span, p50 / p99 / worst ms (a frame = its start to the next frame's start), over = frames longer than limit_ms past the battle's first settle_s seconds, per_min of them, made_frames = frames that made GPU objects; slow = the newest frames over limit_ms, worst = the longest past settle_s; a row: t (s since the battle's first frame), tick, ms, laps (the frame's phases in order: sim = the ticks with their hook, update, draws, render = render_frame with its image wait acquire_ms, other = the time outside them), ticks run, ai_ms / hook_ms (inside sim), gpu_ms (with OPENBF_GPU_TIMING=1, a frame or two old), made (kind, label, bytes of each GPU object made)"),
             ("why", "card WHY (schema 9): per unit slot (id, gen), its last 8 reasons oldest first: tick, doing = the behaviour entered (or, fail true, the one it was in when its walk failed), why = the code (recover is entered for a failed-walk code), arc = the nav arc a failed leg walked (-1 none), fail = a failed walk, not a change. Behaviour codes: off_level grenade pickup snipe_spot guard_spot seen hit memory claim order arrived goal_changed target_lost safe recovered claim_ended seated idle set_out. Failed-walk codes (a progress window that failed, by the mover's books): wall (slid or fanned off a wall) rim (a level-edge barrier) body (going round a body) round_spent (the going-round allowance spent) ledge (no floor ahead) boxed (every way shut, backed off) off_graph (no hop: a straight walk) no_gain (the way open, no nearer: pushed, jammed) oscillation (back and forth at its waypoint, card ARCM) driving (a driver's window) return_failed (a lost bot's walk back) gave_up (the goal given up) pinned (sent off along the floor) recycled"),
@@ -1482,6 +1598,32 @@ impl Ring {
                 human: self.human,
                 trail_tick: self.trail_tick,
                 ring_mb: r2(self.bytes() as f32 / (1024.0 * 1024.0)),
+                cheats: {
+                    // Sticky: every bit seen since the ring started, plus the
+                    // rows still held (a ring restored from older state).
+                    let mut bits =
+                        self.cheats_seen | self.cheat_scopes.values().fold(0u16, |a, b| a | b);
+                    for e in self.events.iter().filter(|e| e.kind == Ev::Cheats) {
+                        for x in &e.v {
+                            bits |= *x as u16;
+                        }
+                    }
+                    cheat_names(bits).into_iter().map(String::from).collect()
+                },
+                cheats_now: self
+                    .cheat_scopes
+                    .iter()
+                    .map(|(s, b)| {
+                        (
+                            if *s < 0 {
+                                "session".to_owned()
+                            } else {
+                                format!("slot {s}")
+                            },
+                            cheat_names(*b).into_iter().map(String::from).collect(),
+                        )
+                    })
+                    .collect(),
             },
             legend,
             names,
@@ -1668,6 +1810,16 @@ pub fn sound_digest(snap: &Snapshot, span: Option<f32>) -> String {
     s
 }
 
+/// The player slot of the viewed human, whose reticle and magnet rows are
+/// recorded (0 when the unit has none). Issue #173: these rows read slot 0
+/// for every view, so a LAN guest's black box held the host's aim.
+fn view_slot(walk: &WalkSim) -> usize {
+    walk.sim.units[walk.player.index as usize]
+        .spec
+        .player_slot
+        .map_or(0, usize::from)
+}
+
 /// What the human is looking at (module header, [`Focus`]).
 fn focus_of(walk: &WalkSim) -> Focus {
     let sim = &walk.sim;
@@ -1683,10 +1835,11 @@ fn focus_of(walk: &WalkSim) -> Focus {
         (Some(a), Some(b)) => a.fmin(b),
         (a, b) => a.or(b).unwrap_or(-1.0),
     };
-    let reticle = sim.reticle_pick.first().copied().flatten();
+    let slot = view_slot(walk);
+    let reticle = sim.reticle_pick.get(slot).copied().flatten();
     let (unit, how) = if let Some(h) = reticle.and_then(|(t, _)| t.unit()) {
         (h.index as i32, "reticle")
-    } else if let Some(h) = sim.magnet_at(0).and_then(AimTarget::unit) {
+    } else if let Some(h) = sim.magnet_at(slot).and_then(AimTarget::unit) {
         (h.index as i32, "magnet")
     } else {
         // The alive unit nearest the view axis, within 8 degrees and 200 m.
@@ -2157,6 +2310,8 @@ mod tests {
             age,
             health_left: 290.0,
             dir: glam::Vec3::Z,
+            dealt: 1.0,
+            taken: 1.0,
         };
         let shot = |unit| Event::Shot {
             unit,
@@ -2184,14 +2339,90 @@ mod tests {
             rows,
             vec![
                 (Ev::Shot, m, -1, vec![]),
-                (Ev::Hit, m, x1, vec![110.0, 290.0, 0.03]),
-                (Ev::Hit, m, x1, vec![250.0, 290.0, 0.0]),
-                (Ev::Hit, x2, m, vec![20.0, 290.0, 0.1]),
+                (Ev::Hit, m, x1, vec![110.0, 290.0, 0.03, 1.0, 1.0]),
+                (Ev::Hit, m, x1, vec![250.0, 290.0, 0.0, 1.0, 1.0]),
+                (Ev::Hit, x2, m, vec![20.0, 290.0, 0.1, 1.0, 1.0]),
             ]
         );
         // A row without numbers writes no `v`.
         let json = serde_json::to_string(&ring.events[0]).unwrap();
         assert!(!json.contains("\"v\""), "{json}");
+    }
+
+    /// Schema 18 (#173): a capture taken with the War Hero cheat on names it
+    /// in the header and carries its x1.5 on the human's hits, so a body shot
+    /// that kills is never read as a damage-rule bug; switching it off is a
+    /// `cheats` row and the header still names it (on during the capture).
+    #[test]
+    fn a_capture_with_war_hero_on_names_the_cheat_and_its_multiplier() {
+        use core::sim::Event;
+        let mut w = walk();
+        let me = w.player;
+        let bot = w
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(
+                1,
+                glam::Vec3::new(0.0, 0.0, -5.0),
+            ))
+            .expect("spawn");
+        if w.sim.players.is_empty() {
+            w.sim.players.push(Some(me));
+        }
+        w.sim.cheats.damage_award = true;
+        w.sim.units[me.index as usize].buffs.offense = core::sim::WAR_HERO;
+        w.sim.events = vec![Event::Hit {
+            direct: true,
+            shooter: me,
+            victim: bot,
+            damage: 420.0,
+            age: 0.03,
+            health_left: -20.0,
+            dir: glam::Vec3::Z,
+            dealt: 1.5,
+            taken: 1.0,
+        }];
+        let mut ring = Ring::new(meta(), Names::default(), Vec::new());
+        ring.events_of(&w.sim);
+        ring.cheats_of(&w.sim);
+        let hit = ring
+            .events
+            .iter()
+            .find(|e| e.kind == Ev::Hit)
+            .expect("hit row");
+        assert_eq!(hit.v, vec![420.0, -20.0, 0.03, 1.5, 1.0]);
+        let on = ring
+            .events
+            .iter()
+            .find(|e| e.kind == Ev::Cheats)
+            .expect("cheats row");
+        assert_eq!((on.a, on.text.as_str()), (0, "damage"));
+        let snap = ring.snapshot("hotkey");
+        assert_eq!(snap.header.cheats, vec!["damage".to_owned()]);
+        assert_eq!(
+            snap.header.cheats_now.get("slot 0"),
+            Some(&vec!["damage".to_owned()])
+        );
+
+        // Off again: a row, nothing on now, and the header still names it.
+        w.sim.events.clear();
+        w.sim.cheats.damage_award = false;
+        w.sim.tick += 1;
+        ring.cheats_of(&w.sim);
+        let off = ring
+            .events
+            .iter()
+            .rev()
+            .find(|e| e.kind == Ev::Cheats)
+            .expect("off row");
+        assert_eq!(
+            (off.text.as_str(), off.v.as_slice()),
+            ("", &[0.0, 64.0][..])
+        );
+        let snap = ring.snapshot("hotkey");
+        assert_eq!(snap.header.cheats, vec!["damage".to_owned()]);
+        assert_eq!(snap.header.cheats_now.get("slot 0"), Some(&Vec::new()));
+        let back = serde_json::to_string(&snap.header).unwrap();
+        assert!(back.contains("\"cheats\":[\"damage\"]"), "{back}");
     }
 
     /// Dev mode off, or `OPENBF_BLACKBOX=0` in it: no recorder — no ring, no
@@ -2720,5 +2951,35 @@ mod tests {
         assert_eq!(rb_fl.channel, 1);
         assert_eq!(rb_fl.threat_id, 7);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Issue #173: the human row's reticle and magnet and the focus read the
+    /// viewed player's own slot. A LAN guest (slot 1) aiming at nothing
+    /// records nothing while the host (slot 0) holds an enemy.
+    #[test]
+    fn reticle_and_magnet_rows_read_the_views_own_slot() {
+        let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
+        let cam = w.camera();
+        let behind = cam.position - cam.forward() * 30.0;
+        let enemy = w
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(1, behind))
+            .expect("spawn");
+        let held = AimTarget::Unit(enemy);
+        w.sim.reticle_pick = vec![Some((held, -1)), None];
+        w.sim.magnet = vec![Some(held), None];
+        let player = w.player.index as usize;
+        let sticks = ([0.0; 2], [0.0; 2]);
+        w.sim.units[player].spec.player_slot = Some(1);
+        let row = Ring::human_row(&w, PadState::default(), sticks);
+        assert_eq!((row.reticle, row.reticle_k, row.magnet), (-1, 0, -1));
+        let focus = focus_of(&w);
+        assert_eq!((focus.unit, focus.how.as_str()), (-1, "none"));
+        w.sim.units[player].spec.player_slot = Some(0);
+        let row = Ring::human_row(&w, PadState::default(), sticks);
+        let code = enemy.index as i32;
+        assert_eq!((row.reticle, row.reticle_k, row.magnet), (code, -1, code));
+        let focus = focus_of(&w);
+        assert_eq!((focus.unit, focus.how.as_str()), (code, "reticle"));
     }
 }

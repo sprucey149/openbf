@@ -990,14 +990,11 @@ fn gunner_seat(
     if s.gunner_draw(bf2) != vehicle_class::GunnerDraw::Drawn {
         return None;
     }
-    // The class as the scene resolves it (a BF2 build zone's built class).
-    let find = |n: &str| m.classes.iter().find(|k| k.name.eq_ignore_ascii_case(n));
-    let k = find(class)?;
-    let k = match &k.build_zone {
-        Some(zone) if bf2 => find(zone)?,
-        _ => k,
-    };
-    let rig = k.turret_rig.as_ref()?;
+    // The class row the scene draws (an armed building keeps its own row, build
+    // zone or not), so the gunner's body stands where he is drawn.
+    let rig = crate::assets::resolve_manifest_class(m, class)?
+        .turret_rig
+        .as_ref()?;
     let hang = tp::GunnerHang::of(rig, s)?;
     let node_bind = hang
         .parent

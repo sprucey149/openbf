@@ -81,7 +81,7 @@ fn entire_row_accepts_pointer_including_binding_value_and_padding() {
                     response = Some(row_label(
                         ui,
                         Some(1.0),
-                        "Invert mouse Y".into(),
+                        "Invert Mouse Y".into(),
                         Some("OFF".into()),
                     ));
                 });
@@ -180,6 +180,11 @@ fn every_value_row_steps_by_pointer() {
         let rows = rows(&m);
         for row in value_rows {
             let i = rows.iter().position(|r| *r == row).unwrap();
+            // Selected, so the list shows it.
+            let m = MenuModel {
+                cursor: i,
+                ..m.clone()
+            };
             for right in [true, false] {
                 let ctx = egui::Context::default();
                 for _ in 0..3 {
@@ -299,7 +304,18 @@ fn a_hovered_row_shows_its_help() {
         shows(&frame_texts(&ctx, &m, vec![]), why),
         "greyed row reason"
     );
-    // The controller look row's arrow.
+    // The controller look row's arrow, once the wheel has scrolled the
+    // list down to it (the selection stays on Resume).
+    let laid = ctx.read_response(step_id(pad, true)).unwrap().rect.center();
+    let wheel = egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, (above.center().y - laid.y).min(0.0)),
+        modifiers: Default::default(),
+    };
+    frame_texts(&ctx, &m, vec![egui::Event::PointerMoved(at), wheel]);
+    for _ in 0..30 {
+        frame_texts(&ctx, &m, vec![]);
+    }
     let arrow = ctx.read_response(step_id(pad, true)).unwrap().rect.center();
     frame_texts(&ctx, &m, vec![egui::Event::PointerMoved(arrow)]);
     assert!(

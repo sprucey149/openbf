@@ -109,7 +109,11 @@ impl RollRow {
 impl Census {
     /// One unit after its animator's update for `input`.
     pub fn note(&mut self, rig: &Rig, clips: &[Clip], a: &Animator, input: &AnimInput) {
-        let name = |c: Option<usize>| c.map_or("-", |c| clips[c].name.as_str()).to_owned();
+        let name = |c: Option<usize>| {
+            c.and_then(|c| clips.get(c))
+                .map_or("-", |c| c.name.as_str())
+                .to_owned()
+        };
         let row = self.sets.entry(rig.set_name(input.set)).or_default();
         row.updates += 1;
         row.own += u64::from(a.upper_clip() != a.lower_clip());

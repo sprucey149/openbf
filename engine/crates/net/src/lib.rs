@@ -70,6 +70,14 @@ pub const DROP_AFTER: Micros = Micros::from_secs(12);
 pub const DROP_AFTER_LOADING: Micros = Micros::from_secs(60);
 /// How long the load barrier waits before starting without late peers.
 pub const BARRIER_TIMEOUT: Micros = Micros::from_secs(60);
+/// OURS: the start lead over the slowest seated guest's half round trip, so
+/// `Start` reaches every guest before the shared moment it names.
+/// measure: the `loading: net` lines' start spread on a VPN playtest.
+pub const START_MARGIN: Micros = Micros::from_millis(100);
+/// OURS: the longest start lead; a guest further away than this leaves its
+/// loading screen late by the difference (its bundles wait in its buffer).
+/// measure: the `loading: net` lines' start spread on a VPN playtest.
+pub const START_LEAD_MAX: Micros = Micros::from_millis(300);
 /// How long a departed player's slot and name stay reserved for their token.
 pub const RESERVE_FOR: Micros = Micros::from_secs(90);
 

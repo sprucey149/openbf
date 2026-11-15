@@ -232,6 +232,7 @@ pub fn apply_menu_action(
         | MenuAction::ToggleInvertY
         | MenuAction::ToggleLowPowerResolution
         | MenuAction::SetAutoQuality(_)
+        | MenuAction::SetWindowMode(_)
         | MenuAction::CycleInputIcons(_)
         | MenuAction::ToggleViewpoint => {}
     }
@@ -255,6 +256,38 @@ pub fn rows_input(
     }
 }
 
+/// One frame of a binding list's pointer and view (the Controls pages, in
+/// battle and in the shell): the wheel scrolls the view, a click picks the
+/// row under it (returned for the caller to activate) without moving the
+/// view, and the view eases on by `dt`. Call it every frame the list is
+/// open; `model` is `None` when no native menu is drawn (the view still
+/// eases), `size` the window's.
+pub fn binding_list_frame(
+    model: Option<&ui::menu::MenuModel>,
+    animation: &mut ui::pause_draw::Animation,
+    wheel: f32,
+    click: Option<[f32; 2]>,
+    size: Option<[f32; 2]>,
+    dt: f32,
+) -> Option<usize> {
+    let mut picked = None;
+    if let (Some(model), Some(size)) = (model, size) {
+        if wheel != 0.0 {
+            ui::pause_draw::scroll(model, animation, wheel, size);
+        }
+        if let Some(point) = click {
+            if let Some(ui::pause_draw::Target::Row(row)) =
+                ui::pause_draw::target(model, animation, point, size)
+            {
+                ui::pause_draw::pick(animation);
+                picked = Some(row);
+            }
+        }
+    }
+    animation.advance(dt);
+    picked
+}
+
 /// Resolve one pause input. A pointer action or an ordinary menu edge wins
 /// when it lands in the same frame as a shoulder step.
 pub fn navigate(
@@ -262,9 +295,10 @@ pub fn navigate(
     input: ui::menu::MenuInput,
     target: Option<ui::pause_draw::Target>,
     page_right: Option<bool>,
+    animation: &ui::pause_draw::Animation,
 ) -> (usize, Vec<ui::menu::MenuAction>) {
     if let Some(hit) = target.filter(|_| !input.back) {
-        return ui::pause_draw::click(model, hit);
+        return ui::pause_draw::click(model, animation, hit);
     }
     if let Some(right) = page_right {
         if !input.back && !input.confirm && !input.left && !input.right && !input.up && !input.down
@@ -619,22 +653,35 @@ mod tests {
         };
         let row = at(&mut m, Row::MouseSensitivity);
         let idle = MenuInput::default();
+        // A shoulder takes ten 5 % steps (100 % -> 150 % / 50 %) and stops
+        // at the slider's bounds (5 % to 200 %, `ui::menu::MOUSE_SENSITIVITY_RANGE`).
         assert_eq!(
-            navigate(&mut m, idle, None, Some(true)).1,
+            navigate(&mut m, idle, None, Some(true), &Default::default()).1,
+            [MenuAction::SetMouseSensitivity(1.5)]
+        );
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(false), &Default::default()).1,
+            [MenuAction::SetMouseSensitivity(0.5)]
+        );
+        m.mouse_sensitivity = 1.8;
+        assert_eq!(
+            navigate(&mut m, idle, None, Some(true), &Default::default()).1,
             [MenuAction::SetMouseSensitivity(2.0)]
         );
+        m.mouse_sensitivity = 0.3;
         assert_eq!(
-            navigate(&mut m, idle, None, Some(false)).1,
-            [MenuAction::SetMouseSensitivity(0.1)]
+            navigate(&mut m, idle, None, Some(false), &Default::default()).1,
+            [MenuAction::SetMouseSensitivity(0.05)]
         );
+        m.mouse_sensitivity = 1.0;
         let click = Target::Step { row, right: true };
         assert_eq!(
-            navigate(&mut m, idle, Some(click), Some(true)).1,
-            [MenuAction::SetMouseSensitivity(1.1)]
+            navigate(&mut m, idle, Some(click), Some(true), &Default::default()).1,
+            [MenuAction::SetMouseSensitivity(1.05)]
         );
         let back = MenuInput { back: true, ..idle };
         assert_eq!(
-            navigate(&mut m, back, Some(click), Some(false)).1,
+            navigate(&mut m, back, Some(click), Some(false), &Default::default()).1,
             [MenuAction::ClosePage]
         );
 
@@ -642,28 +689,32 @@ mod tests {
         m.base_fov_deg = 60.0;
         m.fov_scale = 100.0 / 60.0;
         let fov = at(&mut m, Row::Fov);
-        let (_, actions) = navigate(&mut m, idle, None, Some(true));
+        let (_, actions) = navigate(&mut m, idle, None, Some(true), &Default::default());
         assert_eq!(actions, [MenuAction::Denied]);
         assert_eq!(
             pause_sound(idle, fov, fov, &actions),
             Some(MenuSound::Error)
         );
         assert_eq!(
-            navigate(&mut m, idle, None, Some(false)).1,
+            navigate(&mut m, idle, None, Some(false), &Default::default()).1,
             [MenuAction::SetFov(1.2)]
         );
         at(&mut m, Row::ResetGraphics);
-        assert!(navigate(&mut m, idle, None, Some(true)).1.is_empty());
+        assert!(
+            navigate(&mut m, idle, None, Some(true), &Default::default())
+                .1
+                .is_empty()
+        );
 
         m.page = Some(PausePage::Settings(SettingsPage::Gamepad));
         m.assist_intensity = 0.5;
         at(&mut m, Row::Assist);
         assert_eq!(
-            navigate(&mut m, idle, None, Some(true)).1,
+            navigate(&mut m, idle, None, Some(true), &Default::default()).1,
             [MenuAction::SetAssist(1.0)]
         );
         assert_eq!(
-            navigate(&mut m, idle, None, Some(false)).1,
+            navigate(&mut m, idle, None, Some(false), &Default::default()).1,
             [MenuAction::SetAssist(0.0)]
         );
     }
@@ -745,11 +796,123 @@ mod tests {
             } else {
                 Target::Row(from)
             };
-            let (to, pad) = navigate(&mut m, input, None, None);
-            let (hit, mouse) = navigate(&mut m, idle, Some(target), None);
+            let (to, pad) = navigate(&mut m, input, None, None, &Default::default());
+            let (hit, mouse) = navigate(&mut m, idle, Some(target), None, &Default::default());
             assert_eq!((hit, &mouse), (to, &pad), "{row:?}");
             assert_eq!(pause_sound(input, from, to, &pad), cue, "{row:?}");
             assert_eq!(pause_sound(idle, from, hit, &mouse), cue, "{row:?}");
         }
+    }
+
+    fn binding_list(actions: usize) -> MenuModel {
+        let mut labels = vec![
+            ("Back".to_string(), String::new()),
+            ("Restore defaults".to_string(), String::new()),
+        ];
+        labels.extend((0..actions).map(|i| (format!("Action {i}"), "Key".to_string())));
+        MenuModel {
+            bindings: Some(ui::menu::BindingRows {
+                title: "Infantry Controls",
+                labels,
+                capture: false,
+                message: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    const SIZE: [f32; 2] = [1920.0, 1080.0];
+
+    /// `n` frames of the battle loop: the list's frame, then its drawing
+    /// (which lays the list out, keeping the selection in view).
+    fn frames(m: &MenuModel, anim: &mut ui::pause_draw::Animation, n: usize) {
+        for _ in 0..n {
+            binding_list_frame(Some(m), anim, 0.0, None, Some(SIZE), 1.0 / 60.0);
+            let _ = ui::pause_draw::row_in_view(m, anim, m.cursor, SIZE);
+        }
+    }
+
+    /// Review blocker: in battle the binding list's view never eased, so
+    /// keys walked the selection out of the window and the wheel did nothing.
+    #[test]
+    fn the_binding_list_keeps_its_selection_in_view_and_follows_the_wheel() {
+        use ui::pause_draw::{row_in_view, Animation};
+        let mut m = binding_list(14);
+        let mut anim = Animation::default();
+        let len = rows(&m).len();
+        for cursor in 0..len {
+            m.cursor = cursor;
+            frames(&m, &mut anim, 30);
+            assert!(
+                row_in_view(&m, &anim, cursor, SIZE),
+                "row {cursor} out of the window at offset {}",
+                anim.scroll_offset()
+            );
+        }
+        let bottom = anim.scroll_offset();
+        assert!(bottom > 0.0, "a long list scrolled: {bottom}");
+        binding_list_frame(Some(&m), &mut anim, 3.0, None, Some(SIZE), 1.0 / 60.0);
+        frames(&m, &mut anim, 30);
+        assert!(
+            (anim.scroll_offset() - (bottom - 3.0).max(0.0)).abs() < 1.0e-3,
+            "the wheel moved the view: {} from {bottom}",
+            anim.scroll_offset()
+        );
+        assert_eq!(m.cursor, len - 1, "the wheel never moves the selection");
+    }
+
+    /// Review: a click on the last wholly shown row selected it and then
+    /// scrolled the list a row to keep a margin below it.
+    #[test]
+    fn a_click_on_the_last_shown_binding_row_leaves_the_list_where_it_is() {
+        use ui::pause_draw::{row_in_view, target, Animation};
+        let m = binding_list(14);
+        let mut anim = Animation::default();
+        frames(&m, &mut anim, 5);
+        let len = rows(&m).len();
+        let last = (0..len)
+            .rev()
+            .find(|&r| row_in_view(&m, &anim, r, SIZE))
+            .expect("a shown row");
+        assert!(last + 1 < len, "the list is longer than its window");
+        let point = (0..SIZE[1] as usize)
+            .map(|y| [SIZE[0] * 0.5, y as f32])
+            .find(|&p| target(&m, &anim, p, SIZE) == Some(Target::Row(last)))
+            .expect("a point on the row");
+        let before = anim.scroll_offset();
+        let picked = binding_list_frame(
+            Some(&m),
+            &mut anim,
+            0.0,
+            Some(point),
+            Some(SIZE),
+            1.0 / 60.0,
+        );
+        assert_eq!(picked, Some(last));
+        let mut m = m;
+        m.cursor = last; // the caller activates it
+        frames(&m, &mut anim, 30);
+        assert_eq!(anim.scroll_offset(), before, "a click never moves the list");
+    }
+
+    /// Review: a page whose row count changes (a toggle that hides rows)
+    /// counted as a new list and jumped back to its selection.
+    #[test]
+    fn a_row_count_change_on_the_same_page_keeps_the_view() {
+        use ui::pause_draw::Animation;
+        let m = binding_list(14);
+        let mut anim = Animation::default();
+        frames(&m, &mut anim, 1);
+        binding_list_frame(Some(&m), &mut anim, -4.0, None, Some(SIZE), 1.0 / 60.0);
+        frames(&m, &mut anim, 30);
+        let before = anim.scroll_offset();
+        assert!(before > 0.0, "scrolled: {before}");
+        let shorter = binding_list(13);
+        frames(&shorter, &mut anim, 30);
+        let after = anim.scroll_offset();
+        assert!(
+            after > 0.0 && (before - after) <= 1.0 + 1.0e-3,
+            "kept, clamped at most a row: {before} -> {after}"
+        );
     }
 }

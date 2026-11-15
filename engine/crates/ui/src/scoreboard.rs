@@ -153,13 +153,25 @@ pub fn draw_scoreboard(ctx: &egui::Context, b: &Scoreboard) {
                             }
                             let tint = color(if team.friend { friend } else { enemy });
                             ui.vertical(|ui| {
-                                ui.label(RichText::new(&team.title).size(18.0).color(tint));
+                                ui.label(
+                                    RichText::new(&team.title)
+                                        .font(crate::typography::egui_font(
+                                            ctx,
+                                            &crate::typography::ITEM,
+                                        ))
+                                        .color(tint),
+                                );
                                 Grid::new(("scoreboard_team", k))
                                     .num_columns(if b.ping_column { 5 } else { 4 })
                                     .spacing([16.0, 2.0])
                                     .show(ui, |ui| {
                                         let head = |t: &str| {
-                                            RichText::new(t).size(13.0).color(Color32::GRAY)
+                                            crate::typography::egui_text(
+                                                ctx,
+                                                &crate::typography::LIST,
+                                                crate::typography::tint::NOTE,
+                                                t,
+                                            )
                                         };
                                         ui.label(head("Name"));
                                         ui.label(head("Points"));
@@ -171,14 +183,20 @@ pub fn draw_scoreboard(ctx: &egui::Context, b: &Scoreboard) {
                                         ui.end_row();
                                         for r in team.rows.iter().take(MAX_ROWS) {
                                             let c = if r.me {
-                                                Color32::from_rgb(255, 230, 120)
+                                                crate::typography::tint::ROW_ME
                                             } else if r.human {
-                                                Color32::WHITE
+                                                crate::typography::tint::ROW_HUMAN
                                             } else {
-                                                Color32::from_gray(185)
+                                                crate::typography::tint::ROW_BOT
                                             };
-                                            let cell =
-                                                |t: String| RichText::new(t).size(14.0).color(c);
+                                            let cell = |t: String| {
+                                                crate::typography::egui_text(
+                                                    ctx,
+                                                    &crate::typography::LIST,
+                                                    c,
+                                                    &t,
+                                                )
+                                            };
                                             ui.label(cell(r.name.clone()));
                                             ui.label(cell(r.points.to_string()));
                                             ui.label(cell(r.kills.to_string()));

@@ -33,7 +33,12 @@ impl Sim {
             }
             if let Some(choked) = u.choked.as_mut() {
                 if choked.left <= 0.0 {
+                    // The hold ends: the stand-up's lock (or, held in the
+                    // air, the fall he drops into keeps it too).
                     u.choked = None;
+                    u.soldier.choke_release_lock();
+                    // Issue #173 [ours]: the drop counts from the release.
+                    self.restamp_forced_move(i);
                     continue;
                 }
                 choked.left -= TICK_DT;
@@ -149,7 +154,13 @@ impl Sim {
     /// steps the soldier stance, so a knock would stay in its stance and hold
     /// its fire for good; blasts leave it unthrown the same way
     /// (`Sim::kick_and_push`). [ours]
-    pub(super) fn hero_knock(&mut self, target: UnitHandle, direction: Vec3, scale: f32) {
+    pub(super) fn hero_knock(
+        &mut self,
+        target: UnitHandle,
+        direction: Vec3,
+        scale: f32,
+        attacker: UnitHandle,
+    ) {
         if self.unit(target).is_none_or(|u| u.droideka.is_some()) {
             return;
         }
@@ -157,6 +168,8 @@ impl Sim {
         self.units[target.index as usize]
             .soldier
             .knock(direction, scale, self.ground_rules, draw);
+        // Issue #173 [ours]: a fall after a shove is the attacker's kill.
+        self.note_forced_move(target, Some(attacker));
     }
 
     /// An emitter is immediate ordnance, not a projectile with zero speed.
@@ -340,7 +353,7 @@ impl Sim {
                                 });
                             }
                             if power.push != 0.0 {
-                                self.force_push(target, from, power.range, power.push);
+                                self.force_push(target, from, power.range, power.push, owner);
                             }
                         }
                     }
@@ -387,7 +400,14 @@ impl Sim {
         }
     }
 
-    fn force_push(&mut self, target: UnitHandle, from: Vec3, range: f32, strength: f32) {
+    fn force_push(
+        &mut self,
+        target: UnitHandle,
+        from: Vec3,
+        range: f32,
+        strength: f32,
+        owner: UnitHandle,
+    ) {
         let Some(u) = self.unit(target) else { return };
         if u.mount.is_some() || u.droideka.is_some() || u.soldier.stance.knocked() {
             return;
@@ -421,6 +441,8 @@ impl Sim {
                 strength.abs() * falloff,
                 draw,
             );
+            // Issue #173 [ours]: a fall after a push or pull is the caster's.
+            self.note_forced_move(target, Some(owner));
         }
     }
 

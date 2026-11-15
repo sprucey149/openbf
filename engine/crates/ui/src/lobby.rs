@@ -24,7 +24,10 @@
 
 use crate::menu::MenuInput;
 use crate::shell_feel::MenuSound;
-use egui::{Align2, Color32, RichText, Vec2};
+use crate::typography::{
+    egui_color, egui_font, egui_text, egui_units, tint, BODY, ITEM, LIST, TITLE,
+};
+use egui::{Align2, Color32, Vec2};
 
 /// Max players' range and default (`LAN_MULTIPLAYER.md` §8: up to 16).
 pub const MAX_PLAYERS_RANGE: (u8, u8) = (2, 16);
@@ -65,7 +68,7 @@ fn follow(rows: &[PageRow], at: usize, step: isize) -> usize {
 }
 
 fn on_off(on: bool) -> Option<String> {
-    Some(if on { "On" } else { "Off" }.into())
+    Some(crate::menu::on_off(on).into())
 }
 
 /// Host Game's rows.
@@ -143,11 +146,7 @@ impl HostSetup {
         if self.cheats_allowed {
             v.extend((0..self.cheats.len()).map(HostRow::Cheat));
         }
-        v.extend([
-            HostRow::Awards,
-            HostRow::Start,
-            HostRow::Back,
-        ]);
+        v.extend([HostRow::Awards, HostRow::Start, HostRow::Back]);
         v
     }
 
@@ -156,17 +155,17 @@ impl HostSetup {
             .into_iter()
             .map(|r| match r {
                 HostRow::MaxPlayers => {
-                    PageRow::plain("Max players", Some(self.max_players.to_string()))
+                    PageRow::plain("Max Players", Some(self.max_players.to_string()))
                 }
                 HostRow::Port => PageRow {
                     text: true,
-                    ..PageRow::plain("UDP port", Some(self.port.clone()))
+                    ..PageRow::plain("UDP Port", Some(self.port.clone()))
                 },
                 HostRow::CheatPolicy => PageRow::plain(
-                    "Cheats for guests",
+                    "Cheats for Guests",
                     Some(
                         if self.cheats_allowed {
-                            "Allowed list"
+                            "Allowed List"
                         } else {
                             "Off"
                         }
@@ -174,7 +173,8 @@ impl HostSetup {
                     ),
                 ),
                 HostRow::Cheat(i) => {
-                    let (_, label, on) = self.cheats[i];
+                    let (id, label, on) = self.cheats[i];
+                    let label = crate::menu::cheat_text(id).map_or(label, |(l, _)| l);
                     PageRow::plain(format!("   {label}"), on_off(on))
                 }
                 HostRow::Awards => PageRow::plain("Awards", on_off(self.awards)),
@@ -371,9 +371,9 @@ impl JoinPage {
                 }
                 JoinRow::Address => PageRow {
                     text: true,
-                    ..PageRow::plain("Join by address", Some(self.address.clone()))
+                    ..PageRow::plain("Join by Address", Some(self.address.clone()))
                 },
-                JoinRow::Test => PageRow::plain("Test connection", None),
+                JoinRow::Test => PageRow::plain("Test Connection", None),
                 JoinRow::Recent(i) => PageRow::plain(format!("Recent: {}", self.recent[i]), None),
                 JoinRow::Back => PageRow::plain("Back", None),
             })
@@ -470,7 +470,8 @@ pub struct PageDraw {
     pub submitted: bool,
 }
 
-const FOCUS_BG: Color32 = Color32::from_rgb(76, 115, 178);
+/// The focused row's bar: the native stack's white bar, faint.
+const FOCUS_BG: crate::typography::Tint = ([255.0; 3], 0.14);
 
 /// Draws a page: `title`, `rows` with `cursor` focused, the text box of
 /// the focused text row bound to `text` (given the keyboard when `focus`),
@@ -494,45 +495,41 @@ pub fn draw_page(
                 .inner_margin(egui::Margin::same(18))
                 .corner_radius(6.0)
                 .show(ui, |ui| {
-                    ui.set_min_width(520.0);
+                    let width = egui_units(ctx, 420.0);
+                    ui.set_min_width(width);
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            RichText::new(title)
-                                .size(28.0)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
+                        ui.label(egui_text(ctx, &TITLE, tint::TITLE, title));
                     });
                     ui.add_space(8.0);
                     for (i, row) in rows.iter().enumerate() {
                         let focused = i == cursor;
                         let fg = if !row.enabled {
-                            Color32::GRAY
+                            tint::DIMMED
                         } else if focused {
-                            Color32::WHITE
+                            tint::SELECTED
                         } else {
-                            Color32::LIGHT_GRAY
+                            tint::UNSELECTED
                         };
                         let frame = egui::Frame::new()
                             .fill(if focused {
-                                FOCUS_BG
+                                egui_color(FOCUS_BG)
                             } else {
                                 Color32::TRANSPARENT
                             })
                             .inner_margin(egui::Margin::symmetric(10, 6))
                             .corner_radius(3.0)
                             .show(ui, |ui| {
-                                ui.set_min_width(500.0);
+                                ui.set_min_width(width - 20.0);
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(&row.label).size(18.0).color(fg));
+                                    ui.label(egui_text(ctx, &ITEM, fg, &row.label));
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| match (row.text && focused, text.as_deref_mut()) {
                                             (true, Some(t)) => {
                                                 let r = ui.add(
                                                     egui::TextEdit::singleline(t)
-                                                        .font(egui::FontId::proportional(18.0))
-                                                        .desired_width(240.0),
+                                                        .font(egui_font(ctx, &ITEM))
+                                                        .desired_width(egui_units(ctx, 180.0)),
                                                 );
                                                 if focus {
                                                     r.request_focus();
@@ -546,12 +543,7 @@ pub fn draw_page(
                                             }
                                             _ => {
                                                 if let Some(v) = &row.value {
-                                                    ui.label(
-                                                        RichText::new(v)
-                                                            .size(18.0)
-                                                            .color(fg)
-                                                            .strong(),
-                                                    );
+                                                    ui.label(egui_text(ctx, &ITEM, fg, v));
                                                 }
                                             }
                                         },
@@ -568,7 +560,7 @@ pub fn draw_page(
                     }
                     ui.add_space(8.0);
                     for (line, color) in lines {
-                        ui.label(RichText::new(line).size(16.0).color(*color));
+                        ui.label(egui_text(ctx, &BODY, tint::HELP, line).color(*color));
                     }
                 });
         });
@@ -587,14 +579,167 @@ pub struct RosterRow {
     pub ready: bool,
 }
 
+/// `[ours]` The roster panel's own input (issue #168, the first VPN
+/// playtest: the host could neither close the list nor reach its Kick with a
+/// controller). The panel shows at the lobby's start; the shell's Square
+/// (Xbox X, Space) moves into it, opening it if it was closed. In the list
+/// Up / Down move between the players, Accept on a guest asks to kick him
+/// and a second Accept kicks; Back cancels that question, else closes the
+/// list (hidden), as Square does. While the list holds the input the
+/// screen under it gets none. The mouse keeps its Kick buttons and has a
+/// Hide / Players button.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RosterNav {
+    /// The list is closed: only its "Players" tab shows.
+    pub hidden: bool,
+    /// The row the pad is on while the list holds the input.
+    pub focus: Option<usize>,
+    /// The guest (by slot) whose kick waits for a second Accept. It holds
+    /// only while the pad is on his row: a roster that shifts under the
+    /// pad (he left) drops the question rather than hand it to the next.
+    pub confirm: Option<u8>,
+}
+
+impl RosterNav {
+    /// Whether the list takes this frame's menu input (the screen under it
+    /// must not see it).
+    pub fn active(&self) -> bool {
+        self.focus.is_some()
+    }
+
+    /// Gives the input back and drops any question (the lobby is entered
+    /// again, after a round); an open or closed list stays so.
+    pub fn release(&mut self) {
+        self.focus = None;
+        self.confirm = None;
+    }
+
+    /// The focused row while its kick waits for a second Accept.
+    pub fn asking<'a>(&self, rows: &'a [RosterRow]) -> Option<&'a RosterRow> {
+        let r = rows.get(self.focus?)?;
+        (self.confirm == Some(r.slot)).then_some(r)
+    }
+
+    /// One frame of the pad and keys: `toggle` is the Square edge. Returns
+    /// the slot to kick (only with `kick`, the host's, never the host's own
+    /// row). Call it before the screen under the panel steps, and give that
+    /// screen no input when it returns with [`RosterNav::active`] or when
+    /// `toggle` was pressed.
+    pub fn input(
+        &mut self,
+        toggle: bool,
+        m: MenuInput,
+        rows: &[RosterRow],
+        kick: bool,
+    ) -> Option<u8> {
+        let Some(at) = self.focus else {
+            if toggle && !rows.is_empty() {
+                *self = Self {
+                    hidden: false,
+                    focus: Some(0),
+                    confirm: None,
+                };
+            } else if toggle {
+                self.hidden = !self.hidden;
+            }
+            return None;
+        };
+        if rows.is_empty() {
+            *self = Self::default();
+            return None;
+        }
+        let at = at.min(rows.len() - 1);
+        self.focus = Some(at);
+        if self.confirm != Some(rows[at].slot) {
+            self.confirm = None;
+        }
+        if toggle || (m.back && self.confirm.is_none()) {
+            *self = Self {
+                hidden: true,
+                focus: None,
+                confirm: None,
+            };
+            return None;
+        }
+        if m.back {
+            self.confirm = None;
+            return None;
+        }
+        let n = rows.len();
+        if m.up || m.down {
+            let step = if m.up { n - 1 } else { 1 };
+            self.focus = Some((at + step) % n);
+            self.confirm = None;
+            return None;
+        }
+        if m.confirm && kick && rows[at].slot != 0 {
+            if self.confirm.is_some() {
+                self.confirm = None;
+                return Some(rows[at].slot);
+            }
+            self.confirm = Some(rows[at].slot);
+        }
+        None
+    }
+}
+
+/// The roster panel's prompt words for the set in use: the button that
+/// opens the list, Accept and Back.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RosterPrompts {
+    pub open: String,
+    pub accept: String,
+    pub back: String,
+}
+
+impl RosterPrompts {
+    /// The shell's buttons as `icons` names them; the lobby's Back is
+    /// Circle / B, or Backspace.
+    pub fn of(icons: &crate::input_icons::Icons) -> Self {
+        use crate::input_icons::{pad_name, IconSet, PadButton, Prompt};
+        Self {
+            open: icons.text(Prompt::Done).to_owned(),
+            accept: icons.text(Prompt::Accept).to_owned(),
+            back: if icons.set == IconSet::KeyboardMouse {
+                "Backspace".to_owned()
+            } else {
+                pad_name(icons.set, PadButton::East).to_owned()
+            },
+        }
+    }
+
+    /// The help line under the list for `nav`, `kick` the host's.
+    pub fn line(&self, nav: &RosterNav, rows: &[RosterRow], kick: bool) -> String {
+        let Some(at) = nav.focus else {
+            return format!("{}: players list", self.open);
+        };
+        let guest = rows.get(at).filter(|r| kick && r.slot != 0);
+        match guest {
+            Some(r) if nav.confirm == Some(r.slot) => format!(
+                "Kick {}? {}: kick \u{b7} {}: cancel",
+                r.name, self.accept, self.back
+            ),
+            Some(_) => format!(
+                "Up / Down: move \u{b7} {}: kick \u{b7} {}: close",
+                self.accept, self.back
+            ),
+            None => format!("Up / Down: move \u{b7} {}: close", self.back),
+        }
+    }
+}
+
 /// Draws the lobby's roster panel (top right); with `kick`, every guest's
-/// row has a Kick button. Returns the slot whose Kick was clicked.
+/// row has a Kick button. `nav` is the pad's place in it (its focused row
+/// is marked, a closed list is a "Players" tab) and its Hide / Players
+/// button sets it. Returns the slot whose Kick was clicked.
 pub fn draw_roster(
     ctx: &egui::Context,
     title: &str,
     rows: &[RosterRow],
     kick: bool,
     lines: &[String],
+    nav: &mut RosterNav,
+    prompts: &RosterPrompts,
 ) -> Option<u8> {
     let mut kicked = None;
     egui::Area::new(egui::Id::new("lan_roster"))
@@ -605,35 +750,66 @@ pub fn draw_roster(
                 .inner_margin(egui::Margin::same(10))
                 .corner_radius(5.0)
                 .show(ui, |ui| {
-                    ui.label(
-                        RichText::new(title)
-                            .size(18.0)
-                            .color(Color32::WHITE)
-                            .strong(),
-                    );
+                    if nav.hidden {
+                        let label = format!("Players ({}) \u{b7} {}", rows.len(), prompts.open);
+                        if ui
+                            .button(egui_text(ctx, &BODY, tint::UNSELECTED, &label))
+                            .clicked()
+                        {
+                            nav.hidden = false;
+                        }
+                        return;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(egui_text(ctx, &TITLE, tint::TITLE, title));
+                        if ui
+                            .button(egui_text(ctx, &BODY, tint::UNSELECTED, "Hide"))
+                            .clicked()
+                        {
+                            *nav = RosterNav {
+                                hidden: true,
+                                ..RosterNav::default()
+                            };
+                        }
+                    });
                     egui::Grid::new("lan_roster_grid")
                         .striped(true)
-                        .spacing([12.0, 4.0])
+                        .spacing([egui_units(ctx, 8.0), egui_units(ctx, 2.0)])
                         .show(ui, |ui| {
                             for h in ["Player", "Ping", "Addon", "Team", ""] {
-                                ui.label(RichText::new(h).size(13.0).color(Color32::GRAY));
+                                ui.label(egui_text(ctx, &LIST, tint::DIMMED, h));
                             }
                             ui.end_row();
-                            for r in rows {
-                                let name = if r.ready {
-                                    format!("{} \u{2713}", r.name)
-                                } else {
-                                    r.name.clone()
+                            for (k, r) in rows.iter().enumerate() {
+                                let focused = nav.focus == Some(k);
+                                let name = match (focused, r.ready) {
+                                    (true, true) => format!("\u{25b6} {} \u{2713}", r.name),
+                                    (true, false) => format!("\u{25b6} {}", r.name),
+                                    (false, true) => format!("{} \u{2713}", r.name),
+                                    (false, false) => r.name.clone(),
                                 };
-                                ui.label(RichText::new(name).size(15.0).color(Color32::WHITE));
-                                ui.label(
-                                    r.ping_ms
+                                let tint = if focused {
+                                    tint::SELECTED
+                                } else {
+                                    tint::UNSELECTED
+                                };
+                                let cell = |t: &str| egui_text(ctx, &LIST, tint, t);
+                                let mut text = cell(&name);
+                                if focused {
+                                    text = text.background_color(egui_color(FOCUS_BG));
+                                }
+                                ui.label(text);
+                                ui.label(cell(
+                                    &r.ping_ms
                                         .map_or_else(|| "host".into(), |p| format!("{p} ms")),
-                                );
-                                ui.label(if r.addon { "yes" } else { "no" });
-                                ui.label(&r.team);
+                                ));
+                                ui.label(cell(if r.addon { "Yes" } else { "No" }));
+                                ui.label(cell(&r.team));
                                 if kick && r.slot != 0 {
-                                    if ui.button("Kick").clicked() {
+                                    let armed = focused && nav.confirm == Some(r.slot);
+                                    let button =
+                                        egui::Button::new(cell("Kick")).selected(armed || focused);
+                                    if ui.add(button).clicked() {
                                         kicked = Some(r.slot);
                                     }
                                 } else {
@@ -642,34 +818,40 @@ pub fn draw_roster(
                                 ui.end_row();
                             }
                         });
+                    let help = prompts.line(nav, rows, kick);
+                    let color = if nav.asking(rows).is_some() {
+                        tint::WARNING
+                    } else {
+                        tint::HELP
+                    };
+                    ui.label(egui_text(ctx, &BODY, color, &help));
                     for l in lines {
-                        ui.label(
-                            RichText::new(l)
-                                .size(14.0)
-                                .color(Color32::from_rgb(255, 210, 120)),
-                        );
+                        ui.label(egui_text(ctx, &BODY, tint::TITLE, l));
                     }
                 });
         });
     kicked
 }
 
-/// Draws a line across the top of the screen (the guest's "The host is
-/// choosing…", "Waiting for other players").
+/// Draws a status line near the bottom of the screen (the guest's "The
+/// host is choosing…", "Waiting for other players").
 pub fn draw_status(ctx: &egui::Context, text: &str) {
+    // Above the help lines, clear of the roster at the top right.
     egui::Area::new(egui::Id::new("lan_status"))
         .interactable(false)
-        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 14.0))
+        .anchor(
+            Align2::CENTER_BOTTOM,
+            Vec2::new(0.0, -egui_units(ctx, 64.0)),
+        )
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(Color32::from_black_alpha(200))
                 .inner_margin(egui::Margin::symmetric(16, 8))
                 .corner_radius(5.0)
                 .show(ui, |ui| {
-                    ui.label(
-                        RichText::new(text)
-                            .size(20.0)
-                            .color(Color32::from_rgb(255, 210, 120)),
+                    ui.add(
+                        egui::Label::new(egui_text(ctx, &ITEM, tint::TITLE, text))
+                            .wrap_mode(egui::TextWrapMode::Extend),
                     );
                 });
         });
@@ -688,17 +870,12 @@ pub fn draw_name_box(ctx: &egui::Context, name: &mut String, error: Option<&str>
                 .inner_margin(egui::Margin::same(18))
                 .corner_radius(6.0)
                 .show(ui, |ui| {
-                    ui.label(
-                        RichText::new("Player name")
-                            .size(22.0)
-                            .color(Color32::WHITE)
-                            .strong(),
-                    );
+                    ui.label(egui_text(ctx, &TITLE, tint::TITLE, "Player Name"));
                     let r = ui.add(
                         egui::TextEdit::singleline(name)
-                            .font(egui::FontId::proportional(18.0))
+                            .font(egui_font(ctx, &ITEM))
                             .char_limit(crate::lobby::NAME_CHARS)
-                            .desired_width(300.0),
+                            .desired_width(egui_units(ctx, 240.0)),
                     );
                     if !r.has_focus() && !r.lost_focus() {
                         r.request_focus();
@@ -709,19 +886,14 @@ pub fn draw_name_box(ctx: &egui::Context, name: &mut String, error: Option<&str>
                         out = Some(true);
                     }
                     if let Some(e) = error {
-                        ui.label(
-                            RichText::new(e)
-                                .size(15.0)
-                                .color(Color32::from_rgb(255, 140, 120)),
-                        );
+                        ui.label(egui_text(ctx, &BODY, tint::WARNING, e));
                     }
-                    ui.label(
-                        RichText::new(
-                            "Enter keeps it, Escape cancels. Other players see this name.",
-                        )
-                        .size(14.0)
-                        .color(Color32::LIGHT_GRAY),
-                    );
+                    ui.label(egui_text(
+                        ctx,
+                        &BODY,
+                        tint::HELP,
+                        "Enter keeps it, Escape cancels. Other players see this name.",
+                    ));
                 });
         });
     out

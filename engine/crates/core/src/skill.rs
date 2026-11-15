@@ -37,6 +37,27 @@
 //! | Hard | 20 | 1.0 | 1.25 | 0.2 (6) | 1.3 | 1.2 m | — |
 //! | Elite | 20 | 1.0 | 1.5 | 0.15 (5) | 1.6 | **0.9 m** | ×1.25 |
 //!
+//! Issue #171 [ours] PROVISIONAL (lever (b), the maintainer's call; it
+//! reverses part of the 2026-10-29 "Hard and Elite are the full fix"): a
+//! still Hard or Elite sniper sees through its scope to Normal's 0.75 of the
+//! rifle's MaxRange (96 m), not 1.0 (128 m). Measured with a sniper-class
+//! proxy at Hard over seeds 1-8 and 33-40: scoped kills of him 210 -> 143,
+//! one-shots 136 -> 82, mean hit range 72 -> 60 m; held out (seeds 81-104,
+//! bf1_yav2, tat1, bf1_nab2 and bf2_cor1, 192 rounds) with lever (c) still
+//! on at Hard: kills 321 -> 256, one-shots 199 -> 153; with (c) off, as Hard
+//! ships: kills 305 -> 270, one-shots 190 -> 173, mean hit range 67 -> 60 m,
+//! the same direction but inside the noise of 192 rounds.
+//!
+//! Issue #171 [ours] PROVISIONAL (lever (c), the maintainer's call), ELITE
+//! ONLY: Elite bots' scoped rifles keep at least 0.316 of the AI sniper
+//! distance table (`Tier::sniper_disp_floor`), the skill-17 (Normal) share;
+//! at skill 20 the curve's own share is 0. At Hard it did not hold on two
+//! held-out seed blocks against a sniper-class stand-in (seeds 33-40; seeds
+//! 81-104: the >= 40 m hit rate 0.156 without it, 0.149 with it, intervals
+//! overlapping) and is 0 there. At Elite it carries the 1v0 band: without
+//! it the Good proxy won 64/192 (33.3 %) on seeds 81-104, with it 87/192
+//! (45.3 %), the same seeds.
+//!
 //! [ours] PROVISIONAL (the maintainer, 2026-10-29): Hard and Elite bots also
 //! go to a health droid under 35 % health (`mend`); Elite bots also prefer
 //! threats (`picks`) and attack the nearest unheld post (`hunts`). These are
@@ -72,8 +93,36 @@
 //! |---|---|---|---|---|---|
 //! | Easy (14) | 0 | 14 | 14 Easy | 14 Easy | 14 Easy |
 //! | Normal (17) | −1 | 14 | 16 Easy row | 15 Easy row | 14 Easy row |
-//! | Hard (20) | −2 | 11 | 18 Normal row | 16 Easy row | 14 Easy row |
-//! | Elite (20+extras) | −1 | 11 | 19 Normal row | 18 Normal row | 17 Normal row |
+//! | Hard (20) | −2 | 18 | 18 Hard row | 18 Hard row | 18 Hard row |
+//! | Elite (20+extras) | −3 | 17 | 17 Elite row | 17 Elite row | 17 Elite row |
+//!
+//! Issue #171 option A (2026-11-14, [ours] PROVISIONAL, the maintainer's
+//! call): at Hard and Elite a surplus team keeps the host row's columns
+//! ([`Difficulty::ally_keeps_row`]): Hard loses 2 skill per surplus human,
+//! floor 18, Elite 3, floor 17, so any surplus gives 18 / 17 (Hard −1
+//! measured 1v0 81 %, above the proposed 55-70 % band, −2 64 % on training
+//! and 69 % on fresh seeds; Elite −2 52 % on training but 59 % on fresh
+//! seeds, above 40-55 %, −3 42 %). Before it Hard took −2 (floor
+//! 11) and Elite −1 and both played the row that skill fell in (Hard 1v0:
+//! 18 on the Normal row, so at Hard 1v0 only the columns change). The PS2's
+//! single player is more asymmetric still (teammates {6, 11, 11} against
+//! {4, 14, 17}, BF1 {6, 4, 4}; RE §2.1), and its netplay gives both teams
+//! the enemy table. The human proxy keeps the old rule for its own row
+//! (`ai::proxy::frozen_row`).
+//!
+//! Issue #171 option C (2026-11-14, [ours] PROVISIONAL, the maintainer's
+//! call): a LAN round at Hard or Elite gives both teams the host row
+//! whatever the head count ([`Difficulty::lan_even_rows`],
+//! `Sim::netplay_rows`, set by the round build before the opening wave), as
+//! the PS2's netplay does (BF2 `FUN_002a8300` false for every team; RE
+//! §2.1). Easy and Normal LAN rounds keep the table above, so the two lower
+//! tiers play as before #171.
+//!
+//! Issue #171, space rounds ([`team_skill_space`], [ours] PROVISIONAL):
+//! option A was measured on the ground only, so a space round (a human
+//! pilot, a building-turret gunner) keeps the 2026-11-03 rule below (Hard
+//! -2 and Elite -1, floor 11, the row that skill falls in) until a
+//! human-present Hard/Elite space round is measured.
 //!
 //! The floor 11 is the PS2's own teammates' skill (RE §2.1); Normal's floor
 //! is one row down (Easy's 14), Easy (a new player's team should win) takes
@@ -241,6 +290,7 @@ impl Difficulty {
                 picks: false,
                 mend: 0.0,
                 hunts: false,
+                sniper_disp_floor: 0.0,
             },
             Difficulty::Normal => Tier {
                 view_mult: 1.0,
@@ -256,6 +306,7 @@ impl Difficulty {
                 picks: false,
                 mend: 0.0,
                 hunts: false,
+                sniper_disp_floor: 0.0,
             },
             Difficulty::Hard => Tier {
                 view_mult: 1.25,
@@ -267,10 +318,11 @@ impl Difficulty {
                 grenade: 0.85,
                 grenade_delay: (0, 24),
                 cover: true,
-                scope_sight: 1.0,
+                scope_sight: 0.75,
                 picks: false,
                 mend: 0.35,
                 hunts: false,
+                sniper_disp_floor: 0.0,
             },
             Difficulty::Elite => Tier {
                 view_mult: 1.5,
@@ -284,10 +336,11 @@ impl Difficulty {
                 grenade: 0.95,
                 grenade_delay: (0, 24),
                 cover: true,
-                scope_sight: 1.0,
+                scope_sight: 0.75,
                 picks: true,
                 mend: 0.35,
                 hunts: true,
+                sniper_disp_floor: 0.316,
             },
         }
     }
@@ -331,9 +384,30 @@ impl Difficulty {
         match self {
             Difficulty::Easy => (0, 14),
             Difficulty::Normal => (1, 14),
-            Difficulty::Hard => (2, 11),
-            Difficulty::Elite => (1, 11),
+            Difficulty::Hard => (2, 18),
+            Difficulty::Elite => (3, 17),
         }
+    }
+
+    /// Card DTEAM, issue #171 option A [ours] PROVISIONAL: does a surplus
+    /// team under this host tier keep the host row's columns (only its
+    /// integer skill drops)? Hard and Elite: yes, so allies keep Hard's
+    /// view, reaction, cover, mend, scope sight and grenade columns and the
+    /// humans on both sides face the host tier's tokens, focus and
+    /// pressure. Easy and Normal: no, the 2026-10-28 row rule.
+    /// measure: the #171 1v0 ally bvb K/D and Good-proxy bands.
+    pub fn ally_keeps_row(self) -> bool {
+        matches!(self, Difficulty::Hard | Difficulty::Elite)
+    }
+
+    /// Card DTEAM, issue #171 option C [ours] PROVISIONAL: does a LAN round
+    /// under this host tier give both teams the host row whatever the head
+    /// count (`Sim::netplay_rows`)? Hard and Elite: yes, the PS2's netplay
+    /// rule. Easy and Normal: no, a LAN round there keeps the DTEAM rule,
+    /// so the two lower tiers play as they did before #171.
+    /// measure: the #171 2v1 LAN band.
+    pub fn lan_even_rows(self) -> bool {
+        matches!(self, Difficulty::Hard | Difficulty::Elite)
     }
 
     /// The row a bot of integer skill `level` plays under this host tier: the
@@ -369,7 +443,43 @@ pub fn team_skill(tier: Difficulty, humans: [u8; 2]) -> [TeamSkill; 2] {
             .saturating_sub(per * surplus)
             .max(floor.min(tier.base_skill()));
         TeamSkill {
-            tier: tier.row_for(level),
+            tier: if tier.ally_keeps_row() {
+                tier
+            } else {
+                tier.row_for(level)
+            },
+            level,
+        }
+    })
+}
+
+/// Card DTEAM as it stood on 2026-11-03 (issue #86), kept for space rounds
+/// (issue #171 [ours] PROVISIONAL): per surplus human Easy 0 (floor 14),
+/// Normal -1 (floor 14), Hard -2 and Elite -1 (floor 11), the surplus team
+/// playing the row that skill falls in. Option A (the host row kept, Hard
+/// -2 floor 18, Elite -3 floor 17) was measured only in ground rounds; a
+/// space round with a human (a pilot, a building-turret gunner) is not
+/// measured, so it keeps this rule until it is (`Sim::team_rows`).
+/// measure: a human-present Hard/Elite space round before lifting it.
+pub fn team_skill_space(tier: Difficulty, humans: [u8; 2]) -> [TeamSkill; 2] {
+    let (per, floor) = match tier {
+        Difficulty::Easy => (0, 14),
+        Difficulty::Normal => (1, 14),
+        Difficulty::Hard => (2, 11),
+        Difficulty::Elite => (1, 11),
+    };
+    [0usize, 1].map(|t| {
+        let surplus = humans[t].saturating_sub(humans[1 - t]).min(SURPLUS_CAP);
+        let level = tier
+            .base_skill()
+            .saturating_sub(per * surplus)
+            .max(floor.min(tier.base_skill()));
+        TeamSkill {
+            tier: if surplus == 0 {
+                tier
+            } else {
+                tier.row_for(level)
+            },
             level,
         }
     })
@@ -432,6 +542,14 @@ pub struct Tier {
     pub mend: f32,
     /// [ours] PROVISIONAL: attack the nearest unheld post, never defend.
     pub hunts: bool,
+    /// Issue #171 [ours] PROVISIONAL: the least share of the AI sniper
+    /// distance table a bot's scoped rifle keeps (`Skill::dispersion_mult`
+    /// is 0 at skill 20, so a Hard or Elite sniper has no range dispersion
+    /// of its own). 0 = the skill's own, every tier but Elite. Elite keeps
+    /// 0.316 as a band lever: it holds Elite's 1v0 win rate inside its
+    /// band; as a sniper fix it did not hold at Hard. measure: the #171
+    /// Elite 1v0 band.
+    pub sniper_disp_floor: f32,
 }
 
 /// [ours] PROVISIONAL: the share of its skill a bot on foot's aim tracker
@@ -872,10 +990,11 @@ mod tests {
             Difficulty::ALL.map(|d| d.tier().hunts),
             [false, false, false, true]
         );
-        // The scope's sight (the maintainer, 2026-10-29): Easy off.
+        // The scope's sight (the maintainer, 2026-10-29): Easy off; issue
+        // #171 lever (b) gives Hard and Elite Normal's reach.
         assert_eq!(
             Difficulty::ALL.map(|d| d.tier().scope_sight),
-            [0.0, 0.75, 1.0, 1.0]
+            [0.0, 0.75, 0.75, 0.75]
         );
         assert_eq!(Difficulty::Elite.tier().err_cap, Some(0.9));
         for d in [Difficulty::Easy, Difficulty::Normal, Difficulty::Hard] {
@@ -971,23 +1090,19 @@ mod tests {
             (No, 1) => ts(Ea, 16),
             (No, 2) => ts(Ea, 15),
             (No, _) => ts(Ea, 14),
-            (Ha, 1) => ts(No, 18),
-            (Ha, 2) => ts(Ea, 16),
-            (Ha, _) => ts(Ea, 14),
-            (El, 1) => ts(No, 19),
-            (El, 2) => ts(No, 18),
-            (El, _) => ts(No, 17),
+            (Ha, _) => ts(Ha, 18),
+            (El, _) => ts(El, 17),
         };
         // Written out once for Elite, the tier the maintainer plays: 1v0 .. 0v0.
         let elite = [
-            [ts(No, 19), ts(El, 20)],
-            [ts(No, 18), ts(El, 20)],
-            [ts(No, 17), ts(El, 20)],
-            [ts(No, 17), ts(El, 20)],
-            [ts(No, 17), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
             [ts(El, 20), ts(El, 20)],
-            [ts(No, 19), ts(El, 20)],
-            [ts(No, 18), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
+            [ts(El, 17), ts(El, 20)],
             [ts(El, 20), ts(El, 20)],
             [ts(El, 20), ts(El, 20)],
         ];
@@ -1021,7 +1136,11 @@ mod tests {
                     for t in r {
                         assert!(t.level >= 11 && t.level >= floor.min(host.base_skill()));
                         assert!(t.level <= host.base_skill() && t.tier <= host);
-                        assert_eq!(t.tier, host.row_for(t.level), "{host:?} {a}v{b}");
+                        if host.ally_keeps_row() {
+                            assert_eq!(t.tier, host, "{host:?} {a}v{b}");
+                        } else {
+                            assert_eq!(t.tier, host.row_for(t.level), "{host:?} {a}v{b}");
+                        }
                     }
                     if a <= b {
                         assert_eq!(r[0], team_skill(host, [0, 0])[0], "{a}v{b}");

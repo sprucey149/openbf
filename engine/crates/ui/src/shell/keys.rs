@@ -6,6 +6,17 @@ impl InstantAction {
     /// One frame: `dt` seconds and the presses.
     pub fn step(&mut self, input: IaInput, dt: f32) -> Option<IaCommand> {
         self.on_page += dt;
+        for list in [
+            &mut self.map_list,
+            &mut self.mode_list,
+            &mut self.era_list,
+            &mut self.play_list,
+        ] {
+            list.advance(dt);
+        }
+        if let Page::Group(_, cur) = &mut self.page {
+            cur.advance(dt);
+        }
         let i = input.menu;
         match self.page {
             Page::Missions => {}

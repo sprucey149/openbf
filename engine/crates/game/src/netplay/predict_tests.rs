@@ -222,3 +222,76 @@ impl Predictor {
         }
     }
 }
+
+/// The local saber unit's melee state as a frame might hold it: idle (no
+/// pose, a clock left from the last swing), a swing's first ticks, or a
+/// block's reaction over a swing's clock.
+fn melee(kind: &str, later: f32) -> core::hero_weapon::MeleeState {
+    let mut m = core::hero_weapon::MeleeState::default();
+    match kind {
+        "idle" => m.runtime.time = 0.4 + later,
+        "swing" => {
+            m.animation = Some("stand_attack1a".into());
+            m.runtime.time = 0.2 + later;
+        }
+        _ => {
+            m.animation = Some("stand_block".into());
+            m.runtime.time = 0.3 + later;
+            m.block_animation = Some("stand_block_front1".into());
+            m.block_animation_time = 0.1 + later;
+        }
+    }
+    m
+}
+
+/// Issue #168, first VPN playtest: the peer playing a saber hero parted
+/// from the others. Drawing (render blend, then the predicted local pose
+/// swapped in and out) must leave the confirmed unit exactly as it was
+/// whatever the predicted pose's melee is: across idle -> swing start,
+/// swing -> block and block -> idle, both ways, its `Sim::hash` and every
+/// field are unchanged.
+#[test]
+fn drawing_a_predicted_saber_swing_or_block_leaves_the_confirmed_sim_unchanged() {
+    let pending = [run(0.2, 0), run(0.4, 0), run(0.0, 0)];
+    let mut swapped = 0;
+    for (confirmed, predicted) in [
+        ("idle", "swing"),
+        ("swing", "idle"),
+        ("swing", "block"),
+        ("block", "swing"),
+        ("block", "idle"),
+        ("idle", "block"),
+    ] {
+        let mut w = walk();
+        let i = w.player.index as usize;
+        w.sim.units[i].weapon.melee = Some(melee(confirmed, 0.0));
+        let mut view = crate::netplay::LocalView::new();
+        view.predictor.update(&w.sim, 0, &pending, 1.0 / 60.0);
+        assert_eq!(view.predictor.depth(), pending.len());
+        // The copy's swing or block as its poses would hold it.
+        let mut drawn = w.sim.units[i].clone();
+        for p in &mut view.predictor.poses {
+            drawn.weapon.melee = Some(melee(predicted, 0.033 * p.seq as f32));
+            p.unit.melee = UnitPose::of(&drawn).melee;
+        }
+        let hash = w.sim.hash();
+        let unit = format!("{:?}", w.sim.units[i]);
+        for frac in [0.0, 0.5, 1.0] {
+            w.set_frame_fraction(frac);
+            view.draw_in(&mut w);
+            swapped += usize::from(view.predictor.swapped());
+            view.draw_out(&mut w);
+            assert_eq!(
+                w.sim.hash(),
+                hash,
+                "{confirmed} -> {predicted}: drawing reached the sim"
+            );
+            assert_eq!(
+                format!("{:?}", w.sim.units[i]),
+                unit,
+                "{confirmed} -> {predicted}: the unit changed"
+            );
+        }
+    }
+    assert_eq!(swapped, 18, "every frame drew the predicted pose");
+}

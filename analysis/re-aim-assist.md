@@ -959,7 +959,8 @@ ray meet the soldiers 1.25 ticks back along their velocity, where the interpolat
 full whatever the move stick (`core::aim_assist::Lead`). Branch `sniperassist`: every disc sniper ships LockOnRange 0;
 the class loader gives a sniper rifle (`ZoomFirstPerson` and in the AI sniper table) LockOnRange = its MaxRange (128 m),
 its own LockOnAngle (1°), and TargetVehicle when its round hurts vehicles (BF2 only)
-(`core::weapon::WeaponClass::give_sniper_assist`); a mouse-aimed pad is still never pulled.
+(`core::weapon::WeaponClass::give_sniper_assist`); a mouse-aimed pad is still never pulled. Since 2026-11-14 (issue #164,
+§10.10) that LockOnRange is the round's reach (300 m bolt, 500 m award beam), with full strength only to MaxRange.
 
 ### 10.9 Checks, evidence, what stays [H]
 - **Check 1 (`re_check.py fn`)**: every B1 / B2 line cited in §10 lies in the function named —
@@ -1007,7 +1008,8 @@ velocity onto the aim lateral axis and weights it by one movement axis.
 Openbf reads both movement axes for ordinary tracking and matches full
 shooter-minus-lead velocity while firing. Scope tracking uses the visible
 body for instant shots. It remains at the configured strength through
-half the weapon's nominal range, then fades to zero at that range.
+half the weapon's nominal range, then fades to zero at that range
+(replaced on November 14 by the sniper reach below).
 Measure: controller tracking on crossing and co-moving targets, and
 scoped tracking at 50, 64, 96, 120 and 128 m.
 
@@ -1018,3 +1020,85 @@ foot soldiers without passing them to the player missile lock.
 Measure: matched infantry and vehicle shots with a controller, on ground
 and in a space hangar. The bot guidance path has its own replay evidence
 in issue #164.
+
+Further controller changes, November 14, 2026 (issue #164, after the
+first LAN playtest). Each is OURS and PROVISIONAL.
+
+- Sniper reach. On the PS2, term 2 of FUN_0025fea8 scales the pull by a
+  straight fade from the two radii out to LockOnRange (§5), and every disc
+  sniper authors LockOnRange 0, so no disc sniper has a magnet at all.
+  The port's sniper magnet (`WeaponClass::give_sniper_assist`) now reaches
+  as far as the round does, `WeaponClass::round_reach`: 300 m for the
+  2000 m/s x 0.15 s bolts and 500 m for BF2's award beam, whose cone is
+  raised to the beam's range. It keeps full strength out to the rifle's
+  MaxRange, 128 m, stored as `WeaponClass::assist_full_range`. Past that,
+  the slowdown, the follow and the pull fade together on one straight line
+  to nothing at the reach (`aim_assist::sniper_range_scale`). The PS2's own
+  fade on the pull is switched off for these weapons
+  (`AssistEnv::range_falloff`), so the two fades no longer multiply.
+  The raised reach also lifts the award beam's ExtremeRange from 128 to
+  500 m (the bolt's was already its 300 m reach). Besides the cone and the
+  query box, ExtremeRange bounds only the HUD's station readout
+  (`game::event_feed`'s `station_target`): a health or ammo droid on the
+  reticle's ray, in sight, when the pick holds no unit or vehicle. That is
+  display only and no further than the beam reaches, so it is harmless.
+  Measure: scoped controller play on a crossing runner at 100, 150, 200
+  and 250 m on a large map.
+- Beam lead. FUN_0026d3f0 leads by the ordnance speed. A beam is cast
+  across its whole range in one tick, and the soldier rewind of a human's
+  round takes that speed too (`unit::human_meet_lag`). The assist now
+  leads a beam by its range per tick, not by the ordnance `Velocity`, which
+  BF2's award beam leaves at the 150 m/s default. Before this, a rifle
+  firing a beam aimed metres ahead of a crossing runner (1 hit in 60 at
+  30 m in the headless test; 60 in 60 after). Lead-off mode (the PS2's
+  ballistic lead, no rewind or easing) leads a beam by the same speed.
+  No shipped beam ordnance authors a Velocity, so the 150 m/s it would
+  otherwise take is the port's default, not a PS2 value. By it, the award
+  beam's still stick hit 1 of 60 at 80 and 150 m, with the reticle dragged
+  off the runner for most of the run; by the beam's speed it hits 60 of 60.
+  The rifle's beam hits 4 of 60 at 30 m either way, since the PS2's
+  tracking needs a moving stick. A bolt's lead-off lead is unchanged.
+- Travel time, measured headlessly. A still stick on a runner crossing at
+  9 m/s, FIRE every 10 ticks, the magnet held: the scoped sniper bolt hits
+  60 of 60 at 80 and 150 m, and at 250 m when its full strength is carried
+  out that far. The award beam hits 60 of 60 at 80, 150 and 250 m. A human's
+  fast round already meets a soldier where he was drawn at the press,
+  however long it flies, so a flight lead would make it miss ahead. The
+  80 m/s rifle bolt hits 12, 11 and 9 of 15 shots on one crossing at 30, 45
+  and 60 m: it misses while its lead grows in, and over 20 s with a turn
+  every 5 s it also misses the rounds in flight at each turn (45, 42 and 31
+  of 60). With the shipped curve, the sniper bolt at 250 m keeps 29 % of
+  its strength and a still stick hits 1 of 60: past 128 m the player
+  supplies the rest. The 60 of 60 at 250 m is only the control with full
+  strength carried that far, not the shipped behaviour.
+- Building turrets (`core::sim::seat_assist`). A human gunner on a pad in
+  a building turret takes a magnet along the seat's camera ray, out to the
+  round's reach, at full strength to three quarters of it. The magnet uses
+  the weapon's cone, or 1 degree. Its kinds are the weapon's own Target*
+  bits plus soldiers, animals and droids, plus vehicles when the round's
+  vehicle scale is above 0. Its team filter takes enemies only: an ally
+  or a neutral in the cone can be the reticle's pick, but never the
+  magnet, so the pull never turns onto him. The weapon's authored Target* bits are left
+  alone for the seat dwell lock and the target hints. On the PS2, FUN_00223850 (the MountedTurret tick, §3.10)
+  sets no stick magnetism for a seat, and BF1's building guns author
+  LockOnRange 0. The turret's stick sets a target rate that its filter
+  slews toward, so the assist's own law follows the lead point's turn rate
+  and closes the barrel's error at 0.2 x the turn filter per radian. That
+  is past critical damping. A filter stiff enough to reach the target rate
+  within a tick (BF1's exponential slew takes it whole from 30) would let
+  that gain close more than the error in a tick from a filter of about
+  200, so the correction is capped at the error over one tick. The settle
+  test shows 0 rad of overshoot for filters 1, 10, 50, 200 and 400 under
+  both slew laws, zoomed and not (0.82 degrees at 400 without the cap).
+  Shipped building turrets author filters of 10 or less. On one 8 s crossing at 60 and 85 m it hits 16 and
+  13 of 21 shots (BF1's slew law), against none without it. Pitch is only
+  slowed, as on foot. Measure: controller turret play on a crossing runner
+  at half and three quarters of the reach.
+- Zoomed turret turn. A zoomed human turret now divides its turn and
+  pitch rates by the first weapon's zoom turn divisor, as a zoomed soldier
+  does (`Sim::seat_turn`). Card VTURZ left this unread on the PS2. Trace:
+  the zoomed turret turn rate in PCSX2.
+- R. §8 item 2 found that the PS2 assist's R is MaxPitchSpeed. The soldier
+  path still passes MaxTurnSpeed (`Sim::assisted`); that is unchanged here.
+  The turret law reads the turret's own yaw speed, which is what its stick
+  scales.

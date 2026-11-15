@@ -71,7 +71,9 @@ pub enum Game {
 /// B1:145127-145148; also a left strafe's, where a stance has strafe clips).
 pub const BF1_RUN: f32 = 5.5;
 pub const BF1_RUN_STAY: f32 = 5.0;
-/// BF1's chooser gives idle above this speed (m/s; `v^2 > 64`).
+/// BF1's chooser gives idle above this speed (m/s; `v^2 > 64`), on the
+/// soldier's own velocity before the root scale divides it (B1
+/// `FUN_0022e990` 144988-144994).
 const BF1_IDLE_ABOVE: f32 = 8.0;
 /// BF2's speed mode 2 (the run) above this share of the class's MaxSpeed,
 /// this one to stay (`FUN_0024f350` B2:168790-168800).
@@ -359,7 +361,9 @@ pub fn choose(
     };
     match game {
         Game::Bf1 => {
-            if speed > BF1_IDLE_ABOVE || (side.abs() < IDLE && fwd.abs() < IDLE) {
+            // The 8 m/s exit reads the unscaled speed; the rest the scaled
+            // one (issue #161: a 0.5 Ewok over 4 m/s slid in its idle).
+            if raw > BF1_IDLE_ABOVE || (side.abs() < IDLE && fwd.abs() < IDLE) {
                 return None;
             }
             if strafe && fwd.abs() < side.abs() {
@@ -647,6 +651,9 @@ pub struct Animator {
     travel: f32,
     roll: RollClock,
     jump: jump::Jump,
+    /// Force Choke's hold: whether this update and the last one hold the
+    /// victim ([`Animator::choke_hold`]), and the hard landing after it.
+    choke: combo_pose::ChokeRelease,
     /// Seated (card VTURG): the seat clip's frame clock; the kept pose is
     /// the seat's and the twist and aim are not laid on it.
     seat: Option<f32>,
@@ -727,6 +734,21 @@ impl Animator {
     /// One update: pick the two clips, advance them by `dt` and write them
     /// into the kept pose.
     pub fn step(&mut self, rig: &Rig, clips: &[Clip], skel: &Skeleton, i: &AnimInput, dt: f32) {
+        // Clips or a pose kept from another body (issue #168: a class change
+        // on the same life) are none: never an index past this body's.
+        for p in [&mut self.upper, &mut self.lower] {
+            if p.slot.is_some_and(|s| s.clip >= clips.len()) {
+                p.slot = None;
+            }
+        }
+        self.drop_stale_combo(clips.len().min(rig.root.len()));
+        if self
+            .kept
+            .as_ref()
+            .is_some_and(|k| k.0.len() != skel.names.len())
+        {
+            self.kept = None;
+        }
         self.age += dt;
         self.combo_override = false;
         self.combo_aim = false;
@@ -766,6 +788,7 @@ impl Animator {
             (Err(Special::Jump), Some((direction, _))) => Err(Special::DirectionalJump(direction)),
             _ => stance,
         };
+        let stance = self.choke_release(rig, clips, i, stance, dt);
         let scale = if i.root_scale > 0.0 {
             i.root_scale
         } else {

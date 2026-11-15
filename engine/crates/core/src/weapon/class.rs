@@ -122,6 +122,7 @@ impl WeaponClass {
             // TargetVehicle/Building 0 (every BF1 side's rifle, disc census).
             lock_on_angle: DEG,
             extreme_range: 120.0,
+            assist_full_range: 0.0,
             ai_range: [0.0, 16.0, 48.0],
             barrage: [3, 6],
             barrage_delay: 2.0,
@@ -237,6 +238,7 @@ impl WeaponClass {
             // trace: BF2 rifle ordnance-name inheritance and shipped bolt velocity/lifetime
             // before replacing this fixture reach.
             extreme_range: 128.0,
+            assist_full_range: 0.0,
             ai_range: [0.0, 24.0, 64.0],
             barrage: [3, 6],
             barrage_delay: 2.0,
@@ -614,8 +616,8 @@ impl WeaponClass {
     /// target — [`crate::ai::think`] answers both.
     ///
     /// `>=` is load-bearing: `imp_weap_inf_sniperrifle` ships `ZoomMax`
-    /// exactly 6.0 (§3), and a `>` would drop the Scout Trooper out of the
-    /// table. Note `yaw_spread` is written by `YawSpread` AND by the legacy
+    /// exactly 6.0 (§3; the shared rule now gives it BF2's 8.0), and BF2's
+    /// award beam rifle keeps 6.0; a `>` would drop it out of the table. Note `yaw_spread` is written by `YawSpread` AND by the legacy
     /// `MaxSpread`, exactly as on the PS2.
     pub fn ai_distance_table(&self) -> bool {
         self.yaw_spread == 0.0 && self.trigger_single && self.zoom_max >= 6.0
@@ -632,26 +634,35 @@ impl WeaponClass {
 
     /// OURS (the maintainer 2026-10-28: "give bf1 and bf2 snipers aim assist with
     /// controller"): every disc sniper ships `LockOnRange 0`, so it never has
-    /// a magnet. Give a sniper rifle one: the reach is the rifle's own
-    /// `MaxRange` (128 m on every disc sniper, the AI's band for it), the cone
-    /// its own `LockOnAngle` (1° on every disc sniper, the rifle's), the kinds
-    /// it may take soldiers, animals and droids (the disc's bits) plus
-    /// vehicles when its round hurts them. Both games use the shared armor
-    /// scale. The cone's length is at least the new reach. The mouse rule stays:
-    /// a mouse-aimed pad is never pulled (`Sim::step` stage 2). Only the
-    /// human's magnet reads these fields; the AI's own kinds
-    /// (`ai_target_kind`) are left as parsed.
+    /// a magnet. Give a sniper rifle one: the cone its own `LockOnAngle` (1°
+    /// on every disc sniper, the rifle's), the kinds it may take soldiers,
+    /// animals and droids (the disc's bits) plus vehicles when its round hurts
+    /// them. Both games use the shared armor scale. The mouse rule stays: a
+    /// mouse-aimed pad is never pulled (`Sim::step` stage 2). Only the human's
+    /// magnet reads these fields; the AI's own kinds (`ai_target_kind`) are
+    /// left as parsed.
+    ///
+    /// OURS, PROVISIONAL (issue #164, the maintainer's playtest of
+    /// 2026-11-14: a much longer sniper assist for big open maps): the assist
+    /// is at full strength out to the rifle's own `MaxRange` (128 m on every
+    /// disc sniper, the AI's band for it), [`WeaponClass::assist_full_range`],
+    /// and the magnet reaches as far as the round does
+    /// ([`WeaponClass::round_reach`]: 300 m for the discs' 2000 m/s x 0.15 s
+    /// bolts, 500 m for BF2's award beam), where the assist has faded to
+    /// nothing. The cone's length is at least the new reach (the award beam's
+    /// ordnance names no `Velocity`, so its parsed reach is 22.5 m).
     /// measure: controller sniper-assist acquisition and pull at staged distances before
     /// replacing these deliberately added magnet values.
     pub fn give_sniper_assist(&mut self) {
         if !self.is_sniper_rifle() || self.lock_on_range > 0.0 {
             return;
         }
-        self.lock_on_range = if self.ai_range[2] > 0.0 {
+        self.assist_full_range = if self.ai_range[2] > 0.0 {
             self.ai_range[2]
         } else {
             SNIPER_LOCK_ON_RANGE
         };
+        self.lock_on_range = self.round_reach().fmax(self.assist_full_range);
         if self.lock_on_angle <= 0.0 {
             self.lock_on_angle = SNIPER_LOCK_ON_ANGLE;
         }
@@ -661,6 +672,15 @@ impl WeaponClass {
             self.target_kind |= 1 << 3;
         }
         self.extreme_range = self.extreme_range.fmax(self.lock_on_range);
+    }
+
+    /// How far this weapon's round goes: a beam's `Range`, else the bolt's
+    /// `Velocity` x `LifeSpan`.
+    pub fn round_reach(&self) -> f32 {
+        match &self.ordnance.beam {
+            Some(b) => b.range,
+            None => self.ordnance.velocity * self.ordnance.life_span,
+        }
     }
 
     /// An infantry rocket launcher: the weapons whose vehicle critical hits
