@@ -838,3 +838,92 @@ fn capture_guest_window_menus() {
         .unwrap();
     }
 }
+
+/// Issue #180: the final letters must affect actual offscreen pixels,
+/// including when a large medal count leaves less room for its tier.
+/// Replacing the last letter keeps both inputs too wide for the old
+/// ellipsis columns; shortening a word could accidentally make it fit.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn career_stats_full_names_reach_pixels() {
+    let (assets, out) = paths();
+    for size in [[640, 480], [1280, 720], [1920, 1080]] {
+        let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+        let mut view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
+        for count in [64, u32::MAX] {
+            let mut stats = ui::stats::StatsScreens {
+                page: ui::stats::Page::Career,
+                texts: ui::stats::StatsTexts {
+                    career_title: "Career Stats".into(),
+                    career_medals: "Career Medals".into(),
+                    back: "Back".into(),
+                    done: "Done".into(),
+                    ..Default::default()
+                },
+                career: ui::stats::Career {
+                    values: vec![
+                        ("Player Points".into(), "57".into()),
+                        ("Rank".into(), "Private".into()),
+                    ],
+                    medals: (0..9)
+                        .map(|_| ui::stats::Medal {
+                            name: "Gunslinger".into(),
+                            count,
+                            level: "Legendary".into(),
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut paint = |stats: &ui::stats::StatsScreens| {
+                view.update(
+                    &ui::hud::HudModel {
+                        round_end: Some(ui::hud::RoundEndModel {
+                            stats: Some(stats.clone()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    0.0,
+                    size,
+                );
+                r.render_with_overlay(
+                    &render::Camera::default(),
+                    &[],
+                    [0.0, 0.0, 0.0, 1.0],
+                    Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+                )
+                .unwrap();
+                assert_all_sheets_bound(&view);
+                r.capture_rgba().unwrap().0
+            };
+            let full = paint(&stats);
+            std::fs::write(
+                out.join(format!("career_{count}_{}x{}.png", size[0], size[1])),
+                render::encode_png(&full, size[0], size[1]).unwrap(),
+            )
+            .unwrap();
+            stats.career.values[1].1 = "PrivatX".into();
+            let rank = paint(&stats);
+            stats.career.values[1].1 = "Private".into();
+            for medal in &mut stats.career.medals {
+                medal.level = "LegendarX".into();
+            }
+            let tier = paint(&stats);
+            for (field, control) in [("rank", rank), ("tier", tier)] {
+                let changed = full
+                    .chunks_exact(4)
+                    .zip(control.chunks_exact(4))
+                    .filter(|(a, b)| a != b)
+                    .count();
+                println!("{size:?} count={count} {field}: final letter changes {changed} pixels");
+                assert!(
+                    changed > 5,
+                    "{field} final letter is missing at {size:?}, count={count}"
+                );
+            }
+        }
+    }
+}

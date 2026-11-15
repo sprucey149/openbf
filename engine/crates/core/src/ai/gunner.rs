@@ -89,19 +89,29 @@ pub(super) fn aim(
         .and_then(|id| sim.live_turret(id));
     let speed = wc.shot_ordnance().velocity;
     let piloting = flyer_pilot(sim, me, &s);
-    let point = enemy
-        .map(|e| {
-            piloting
-                .then(|| led_flyer(sim, s.eye, e, speed))
-                .flatten()
-                .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc, false))
-        })
-        .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc, false)))
-        .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)));
-    let centre = enemy
-        .map(|e| e.capsule().center())
-        .or(droid.map(|d| d.pos))
-        .or(turret.map(|t| t.centre()));
+    let tow = wc.ordnance.tow.filter(|_| matches!(look, Look::Seat));
+    if tow.is_some() && sim.tow_seat_locked(me) {
+        return None;
+    }
+    let (point, centre) = if let Some(class) = tow {
+        let leg = sim.tow_leg_aim(me, &s, class);
+        (leg, leg)
+    } else {
+        let point = enemy
+            .map(|e| {
+                piloting
+                    .then(|| led_flyer(sim, s.eye, e, speed))
+                    .flatten()
+                    .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc, false))
+            })
+            .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc, false)))
+            .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)));
+        let centre = enemy
+            .map(|e| e.capsule().center())
+            .or(droid.map(|d| d.pos))
+            .or(turret.map(|t| t.centre()));
+        (point, centre)
+    };
     let at = point.or(idle);
 
     if let (Look::Seat, Some(t)) = (look, s.gun.turn) {
@@ -175,8 +185,9 @@ pub(super) fn aim(
                     .is_some_and(|(q, o)| to(q).dot(s.barrel) >= cos_tol && turned(q, o))
         };
         let range = (c - s.muzzle).length();
-        let ready = held.is_some_and(|c| perception::fireable(&c, sim.tick, tier.reaction_ticks));
-        ready && on && range <= wc.shot_range()
+        let ready = tow.is_some()
+            || held.is_some_and(|c| perception::fireable(&c, sim.tick, tier.reaction_ticks));
+        ready && on && range <= tow.map_or(wc.shot_range(), |class| class.initial_length)
     });
     if wc.max_pressed_time > 0.0 {
         if centre.is_some() {

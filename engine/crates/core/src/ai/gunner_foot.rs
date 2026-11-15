@@ -464,7 +464,12 @@ pub(super) fn run(
                         .or_else(|| class.saber_throw.as_ref().map(|p| p.energy))
                         .unwrap_or(0.0);
                     let kind = enemy.map_or(2, Unit::kind).min(31);
-                    range > class.ai_range[0] && range < arsenal::reach(class)
+                    let clear = !class.force.as_ref().is_some_and(|p| {
+                        matches!(p.kind, crate::hero_weapon::ForceKind::Emitter(_))
+                    }) || held
+                        .and_then(|c| c.handle.unit())
+                        .is_none_or(|target| sim.force_emitter_can_reach_unit(me, target));
+                    clear && range > class.ai_range[0] && range < arsenal::reach(class)
                         && class.ai_target_kind & (1 << kind) != 0
                         && (state.force_channel.is_some() || u.soldier.energy >= energy)
                         && state.saber_flight.is_none() && !state.reloading() && !state.overheated
