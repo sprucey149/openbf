@@ -208,7 +208,16 @@ pub struct HudModel {
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
+    /// Teams with unlimited reinforcements (`SetReinforcementCount(t, -1)`):
+    /// their count is posted as -1, which the reinforcement Text prints as
+    /// "--" (`FUN_003ae6c0`, `analysis/re-hud.md` §2.3).
+    pub unlimited_tickets: [bool; 2],
     pub team_points: Option<([i32; 2], u32)>,
+    /// The mission script's popup, its text localized; the battle holds
+    /// under it until the player dismisses it.
+    pub popup: Option<HudPopup>,
+    /// `player1.objectivesUpdated` is up (`FUN_0038abd8`).
+    pub objectives_updated: bool,
     /// When true, 1-Flag CTF HUD displays flag icons and single-score points.
     pub ctf: bool,
     pub flag_status: Option<crate::hud_flag::FlagStatus>,
@@ -325,7 +334,10 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 /// Publish `m` as the 1-player HUD's events (`re-hud.md` §3). Change-gated
 /// like the PS2's publishers, so call it every frame. `has_mesh` answers
 /// whether a model of that name can be drawn (the NameMesh fallback).
+pub use crate::hud_popup::HudPopup;
+
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
+    crate::hud_popup::feed(hud, m.popup.as_ref(), m.objectives_updated, has_mesh);
     feed_lock(
         hud,
         m.lock.as_ref(),
@@ -569,7 +581,11 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         );
         put(
             &format!("player1.team{slot}.reinforcements"),
-            EventValue::Number(m.tickets[team] as f32),
+            EventValue::Number(if m.unlimited_tickets[team] {
+                -1.0
+            } else {
+                m.tickets[team] as f32
+            }),
         );
         let period = if m.bleed[team] > 0.0 {
             1.0 / m.bleed[team]
@@ -1115,6 +1131,9 @@ mod tests {
             incoming_missile: None,
             hints: Vec::new(),
             team_points: None,
+            unlimited_tickets: [false; 2],
+            popup: None,
+            objectives_updated: false,
             ctf: false,
             flag_status: None,
             space: None,
@@ -1591,5 +1610,43 @@ mod team_points_tests {
             Some(&EventValue::Text("0".to_owned()))
         );
         assert_eq!(hud.last("player1.team1.reinforcements"), None);
+    }
+}
+
+#[cfg(test)]
+mod campaign_hud_tests {
+    use super::*;
+
+    #[test]
+    fn an_unlimited_team_posts_the_infinite_count() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let m = HudModel {
+            tickets: [250, 250],
+            unlimited_tickets: [true, false],
+            ..Default::default()
+        };
+        feed(&mut hud, &m, &|_| false);
+        assert_eq!(
+            hud.last("player1.team1.reinforcements"),
+            Some(&EventValue::Number(INFINITE))
+        );
+        assert_eq!(
+            hud.last("player1.team2.reinforcements"),
+            Some(&EventValue::Number(250.0))
+        );
+    }
+
+    #[test]
+    fn the_objective_popup_shows_then_closes_with_its_disable() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut m = HudModel {
+            popup: Some(HudPopup::Objective("Go".into())),
+            ..Default::default()
+        };
+        feed(&mut hud, &m, &|_| false);
+        assert_eq!(hud.last("objectivePopup"), Some(&EventValue::Text("Go".into())));
+        m.popup = None;
+        feed(&mut hud, &m, &|_| false);
+        assert_eq!(hud.last("objectivePopup"), None);
     }
 }

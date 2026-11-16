@@ -712,6 +712,9 @@ pub struct Sim {
     /// Phase B: the two teams' objective plans (`core::commander`). SIM STATE
     /// — hashed, replay-exact, re-made one team per tick.
     pub commander: [crate::commander::TeamPlan; 2],
+    /// The mission script's AI goals (`core::goals`). SIM STATE — hashed
+    /// once a goal is made.
+    pub ai_goals: crate::goals::AiGoals,
     /// Card ARCM: per team, per arc of `nav`, the round's closings by its
     /// bots (`ai::arcm`): an arc that keeps failing leaves the team's route
     /// draw. SIM STATE — hashed once any is counted; empty until then.
@@ -1259,6 +1262,7 @@ impl Sim {
                 crate::commander::TeamPlan::new(0),
                 crate::commander::TeamPlan::new(1),
             ],
+            ai_goals: Default::default(),
             arc_fails: Default::default(),
             tokens: Vec::new(),
             focus_born: Vec::new(),

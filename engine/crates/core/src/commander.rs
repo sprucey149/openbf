@@ -429,6 +429,7 @@ pub fn plan(sim: &mut Sim, team: u8) {
             || u.team != team
             || u.controller != crate::unit::Controller::Ai
             || u.command.is_some()
+            || sim.ai_goals.steer(sim.handle(i)).is_some()
         {
             continue;
         }

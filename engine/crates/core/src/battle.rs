@@ -128,7 +128,13 @@ impl Battle {
         } else {
             t.alive_ai = t.alive_ai.saturating_sub(1);
         }
-        if self.unlimited_reinforcements || self.unlimited_teams.get(team).copied().unwrap_or(false)
+        // Rise of the Empire leaves the count to its scripts: the
+        // MultiObjectiveContainer's OnCharacterDeath pays the reinforcement
+        // (`AddReinforcements(team, -1)`, campaign/lib/multiobjectivecontainer)
+        // and its OnTicketCountChange calls MissionDefeat.
+        if self.campaign_rules
+            || self.unlimited_reinforcements
+            || self.unlimited_teams.get(team).copied().unwrap_or(false)
         {
             return;
         }

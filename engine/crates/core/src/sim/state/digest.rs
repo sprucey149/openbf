@@ -113,6 +113,7 @@ impl Sim {
             hazards: _,
             last_warning_id: _,
             commander: _,
+            ai_goals: _,
             arc_fails: _,
             tokens: _,
             focus_born: _,

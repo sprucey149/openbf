@@ -400,6 +400,7 @@ mod tests {
                     &[],
                     1,
                     secs,
+                    None,
                 );
                 r.step(4.99, ui::stats::Pad::default());
                 assert_eq!(r.phase, Phase::Banner);

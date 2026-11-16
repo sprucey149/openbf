@@ -308,9 +308,9 @@ def _func50(r, parent_source):
     f.source = r.string() or parent_source
     r.int()          # lineDefined
     f.nups = r.byte()
-    r.byte()         # numparams
-    r.byte()         # is_vararg
-    r.byte()         # maxstacksize
+    f.numparams = r.byte()
+    f.is_vararg = r.byte()
+    f.maxstack = r.byte()
     for _ in range(r.int()):        # line info
         r.int()
     for _ in range(r.int()):        # locals
@@ -2055,7 +2055,7 @@ def _eval_closure(cl, base, globs):
 
 
 def campaign_facts50(f):
-    """Extract startup world state and ordered campaign stages from BF2 campaign bytecode."""
+    """Extract startup world state (teams, classes, layers, movies) from BF2 campaign bytecode."""
     base = _rk_base(f)
     globs = {"__root_base__": base}
     objs = []
@@ -2072,15 +2072,6 @@ def campaign_facts50(f):
     d = facts_from_calls(startup_calls)
     d["layers"] = [ly for ly in d["layers"] if ly.lower() not in _CAMP_SKY_ONLY]
     startup_classes = {t: [c[0].lower() for c in d["classes"].get(t, [])] for t in (1, 2)}
-
-    # Collect completion callbacks linked to each objective SymObj anywhere in the script
-    obj_complete_events = {}
-    for ev_nm, args, _ in startup_regs:
-        if args and isinstance(args[0], Closure):
-            c_calls, _ = _eval_closure(args[0], base, globs)
-            for cc in c_calls:
-                if cc.name.endswith(":Complete") and cc.args and isinstance(cc.args[0], _SymObj):
-                    obj_complete_events.setdefault(id(cc.args[0]), []).append((ev_nm, args, c_calls))
 
     # Trace MultiObjectiveContainer creation
     cont_calls, cont_regs = [], []
@@ -2157,77 +2148,17 @@ def campaign_facts50(f):
             elif mut[0] == "RegionTrigger":
                 _record_mid_movies(mut[2])
 
-    stages = []
+    # The stages' own logic runs from the translated script
+    # (`campaign_ir`); their OnStart/OnComplete are still read here for
+    # the classes the roster must carry and the movies to preload.
     stage_objs = [a[0] for m, a in cont.calls if m == "AddObjectiveSet" and a and isinstance(a[0], _SymObj)]
-    for sidx, st in enumerate(stage_objs):
-        opts = st.opts
-        att = _ti_num(opts.get("teamATT", opts.get("TeamATT", 1.0))) or 1
-        dfn = _ti_num(opts.get("teamDEF", opts.get("TeamDEF", 2.0))) or 2
-        text = opts.get("text") or opts.get("textATT") or opts.get("textDEF") or ("stage_%d" % (sidx + 1))
-        if not isinstance(text, str):
-            text = "stage_%d" % (sidx + 1)
-        popup = opts.get("popupText") if isinstance(opts.get("popupText"), str) else None
-        time_limit = float(opts["timeLimit"]) if isinstance(opts.get("timeLimit"), (int, float)) else None
-        tl_win = _ti_num(opts.get("timeLimitWinningTeam"))
-
+    for st in stage_objs:
         on_start_calls, on_start_regs = _eval_closure(st.props.get("OnStart"), base, globs)
         on_comp_calls, on_comp_regs = _eval_closure(st.props.get("OnComplete"), base, globs)
-        on_start_muts = _mutations_from_calls(on_start_calls, on_start_regs, globs)
-        on_comp_muts = _mutations_from_calls(on_comp_calls, on_comp_regs, globs)
-        _collect_stage_classes(on_start_muts)
-        _collect_stage_classes(on_comp_muts)
-        _record_mid_movies(on_start_muts)
-        _record_mid_movies(on_comp_muts)
-
-        # Infer stage kind
-        kind = None
-        if st.kind == "ObjectiveConquest":
-            posts = [a[0].opts["name"] for m, a in st.calls
-                     if m == "AddCommandPost" and a and isinstance(a[0], _SymObj)
-                     and isinstance(a[0].opts.get("name"), str)]
-            kind = ("Conquest", posts)
-        elif st.kind == "ObjectiveAssault":
-            targets, target_types = [], []
-            for m, a in st.calls:
-                if m == "AddTarget" and a and isinstance(a[0], _SymObj):
-                    to = a[0]
-                    if to.kind == "Target" and isinstance(to.opts.get("name"), str):
-                        targets.append(to.opts["name"])
-                    elif to.kind == "TargetType" and isinstance(to.opts.get("classname"), str):
-                        lim = _ti_num(to.opts.get("killLimit")) or 1
-                        target_types.append((to.opts["classname"].lower(), lim))
-            kind = ("Assault", targets, target_types)
-        elif st.kind == "ObjectiveCTF":
-            fl = next((a[0] for m, a in st.calls if m == "AddFlag" and a and isinstance(a[0], dict)), {})
-            cap_lim = _ti_num(opts.get("captureLimit")) or 1
-            kind = ("Ctf", str(fl.get("name", "")), str(fl.get("homeRegion", "")), str(fl.get("captureRegion", "")), cap_lim)
-        elif st.kind == "ObjectiveGoto":
-            kind = ("Goto", str(opts.get("regionName", "")))
-        elif st.kind == "ObjectiveTDM":
-            kills = None
-            for mut in on_start_muts:
-                if mut[0] == "SetReinforcements" and mut[1] == dfn and mut[2] > 0:
-                    kills = mut[2]
-            kind = ("Tdm", kills or 25)
-        elif st.kind == "Objective":
-            kind = _infer_bare_objective(st, opts, text, globs, on_start_calls, on_start_regs, obj_complete_events.get(id(st), []), base)
-
-        if kind is None:
-            kind = ("Interact", text, None, None, None)
-
-        name = st.global_name or ("stage_%d" % (sidx + 1))
-        stages.append({
-            "name": name,
-            "kind": kind,
-            "text": text,
-            "popup_text": popup,
-            "att_team": att,
-            "def_team": dfn,
-            "time_limit": time_limit,
-            "time_limit_winner": tl_win,
-            "on_start": on_start_muts,
-            "on_complete": on_comp_muts,
-        })
+        for muts in (_mutations_from_calls(on_start_calls, on_start_regs, globs),
+                     _mutations_from_calls(on_comp_calls, on_comp_regs, globs)):
+            _collect_stage_classes(muts)
+            _record_mid_movies(muts)
 
     class_whitelist = {}
     for t in (1, 2):
@@ -2243,99 +2174,11 @@ def campaign_facts50(f):
         "delay_victory_time": delay_victory,
         "initial_properties": initial_properties,
         "ambushes": ambushes,
-        "stages": stages,
     }
 
 
 def _ti_num(v):
     return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == int(v) else None
-
-
-def _infer_bare_objective(st, opts, text, globs, start_calls, start_regs, linked_events, base):
-    """Map a bare `Objective:New` stage to Goto / Assault / Tdm / Defend / Interact."""
-    entity_markers = [c.args[0] for c in start_calls if c.name == "MapAddEntityMarker" and c.args and isinstance(c.args[0], str)]
-    class_markers = [c.args[0].lower() for c in start_calls if c.name == "MapAddClassMarker" and c.args and isinstance(c.args[0], str)]
-    added_classes = [c.args[1].lower() for c in start_calls if c.name == "AddUnitClass" and len(c.args) >= 2 and isinstance(c.args[1], str)]
-
-    def first_count(default=1):
-        for k, v in globs.items():
-            if any(w in k.lower() for w in ("ship_count", "acklay_count", "droid_count", "rebelleader_count")):
-                n = _ti_num(v)
-                if n and n > 0:
-                    return n
-        return default
-
-    # Check linked events (registered inside ScriptPostLoad pointing to st:Complete) and OnStart events
-    all_evs = list(start_regs) + [(ev, args, None) for ev, args, _ in linked_events]
-
-    for ev_nm, args, _ in all_evs:
-        if ev_nm == "OnCharacterChangeClass":
-            cls = added_classes[0] if added_classes else None
-            reg = entity_markers[0] if entity_markers else None
-            return ("Interact", text, reg, None, cls)
-        if ev_nm == "OnObjectRepairName":
-            target = args[1] if len(args) > 1 and isinstance(args[1], str) else (entity_markers[0] if entity_markers else None)
-            return ("Interact", text, None, target, None)
-        if ev_nm == "OnObjectKillName":
-            target = args[1] if len(args) > 1 and isinstance(args[1], str) else (entity_markers[0] if entity_markers else None)
-            return ("Assault", [target] if target else [], [])
-        if ev_nm == "OnObjectKillClass":
-            # Look for fighter-class list table (spa1g_c / spa2c_c / spa4g_c) when class arg is resolved from ipairs
-            cls = args[1].lower() if len(args) > 1 and isinstance(args[1], str) else None
-            if cls is None:
-                ship_list = next((v for k, v in globs.items() if isinstance(v, Table) and "ship" in k.lower()), None)
-                classes = [v.lower() for _, v in sorted((k, val) for k, val in (ship_list or {}).items() if isinstance(k, float)) if isinstance(v, str)]
-                cnt = _ti_num(globs.get("ship_count")) or 5
-                if classes:
-                    return ("Assault", [], [(classes[0], cnt)])
-            cnt = 1
-            if cls == "geo_inf_acklay":
-                cnt = _ti_num(globs.get("acklay_count")) or 6
-            elif cls == "cis_walk_spider":
-                cnt = 2
-            return ("Assault", [], [(cls, cnt)] if cls else [])
-        if ev_nm == "OnObjectKillTeam":
-            if class_markers:
-                return ("Assault", [], [(cm, 1) for cm in class_markers])
-            return ("Tdm", _ti_num(globs.get("ambushCountBOS")) or 3)
-
-    # Enter-vehicle + enter-region (e.g. spa4g_c grievous fighter landing, fel1c_c / geo1c_c)
-    enter_regs = [ev for ev in all_evs if ev[0] in ("OnEnterRegion", "OnEnterRegionName")]
-    has_enter_veh = any(ev[0] == "OnCharacterEnterVehicle" for ev in all_evs)
-    has_landed = any(ev[0] == "OnCharacterLandedFlyer" for ev in all_evs)
-    if has_enter_veh and not enter_regs and not has_landed:
-        return ("Interact", text, None, entity_markers[0] if entity_markers else None, None)
-
-    for ev_nm, args, _ in enter_regs:
-        reg = args[1].opts.get("name") if len(args) > 1 and isinstance(args[1], _SymObj) else (args[1] if len(args) > 1 else None)
-        if isinstance(reg, str):
-            return ("Goto", reg)
-
-    # ActivateRegion / OnEnterRegion name fallback for spa4g_c
-    if has_landed:
-        act_regs = [c.args[0] for c in start_calls if c.name == "ActivateRegion" and c.args and isinstance(c.args[0], str)]
-        if act_regs:
-            return ("Goto", act_regs[0])
-
-    # Generic OnObjectKill stages (geo1c_c sniper/jedi kill counts, nab2g_c queen, yav1g_c leaders)
-    for ev_nm, args, _ in all_evs:
-        if ev_nm == "OnObjectKill":
-            if class_markers:
-                cnt = _ti_num(globs.get("rebelleader_count")) or len(class_markers)
-                if len(class_markers) == 1:
-                    return ("Assault", [], [(class_markers[0], cnt)])
-                return ("Assault", [], [(cm, 1) for cm in class_markers])
-            if "queen_dead" in globs or "naboo2.objectives.campaign.5" in text:
-                return ("Assault", [], [("gar_inf_nabooqueen", 1)])
-            if "campaign.9" in text:
-                return ("Tdm", _ti_num(globs.get("droid_count")) or 5)
-            if "campaign.21" in text:
-                return ("Tdm", _ti_num(globs.get("droid_count_obj21")) or 10)
-            return ("Tdm", first_count(5))
-
-    if entity_markers:
-        return ("Interact", text, entity_markers[0], None, None)
-    return ("Interact", text, None, None, None)
 
 
 def build_campaign(key, game, planet, era, ps2_name):
@@ -2408,8 +2251,29 @@ def build_campaign(key, game, planet, era, ps2_name):
     m.killed = ps2.get("killed", [])
 
     camp["infinite_tickets"] = (raw_tickets[0] <= 0, raw_tickets[1] <= 0)
+    import campaign_ir
+    camp["script"] = campaign_ir.translate(f)
     m.campaign = camp
     return m
+
+
+def campaign_libs(scripts):
+    """The shared scripts the campaign missions load with ScriptCB_DoFile
+    (Objective, MultiObjectiveContainer, Ambush, ...), closed over the files
+    those load in turn, translated the same way."""
+    import campaign_ir
+    todo = [n for sc in scripts for n in campaign_ir.do_files(sc)]
+    out = {}
+    while todo:
+        name = todo.pop().lower()
+        if name in out:
+            continue
+        f = load_ps2("bf2", name)
+        if f is None:
+            raise ValueError(f"campaign library {name}.luac missing")
+        out[name] = campaign_ir.translate(f)
+        todo += campaign_ir.do_files(out[name])
+    return out
 
 
 def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
@@ -3038,39 +2902,10 @@ def ron(m):
         L.append("        outro_movie: %s," % _ron_opt_str(camp["outro_movie"]))
         L.append("        mid_movies: [%s]," % ", ".join(_ron_str(x) for x in camp["mid_movies"]))
         L.append("        infinite_tickets: (%s, %s)," % ("true" if inf0 else "false", "true" if inf1 else "false"))
-        L.append("        delay_victory_time: %s," % fmtf(float(f32_text(camp["delay_victory_time"]))))
-        if camp["initial_properties"]:
-            L.append("        initial_properties: [")
-            for tgt, k, v in camp["initial_properties"]:
-                L.append("            (%s, %s, %s)," % (_ron_str(tgt), _ron_str(k), _ron_str(v)))
-            L.append("        ],")
-        else:
-            L.append("        initial_properties: [],")
-        if camp["ambushes"]:
-            L.append("        ambushes: [")
-            for a in camp["ambushes"]:
-                L.append("            %s," % _ron_ambush(a))
-            L.append("        ],")
-        else:
-            L.append("        ambushes: [],")
-        L.append("        stages: [")
-        for st in camp["stages"]:
-            L.append("            (")
-            L.append("                name: %s," % _ron_str(st["name"]))
-            L.append("                kind: %s," % _ron_stage_kind(st["kind"]))
-            L.append("                text: %s," % _ron_str(st["text"]))
-            L.append("                popup_text: %s," % _ron_opt_str(st["popup_text"]))
-            L.append("                att_team: %d," % st["att_team"])
-            L.append("                def_team: %d," % st["def_team"])
-            if st["time_limit"] is not None:
-                L.append("                time_limit: Some(%s)," % fmtf(float(f32_text(st["time_limit"]))))
-            else:
-                L.append("                time_limit: None,")
-            L.append("                time_limit_winner: %s," % ("Some(%d)" % st["time_limit_winner"] if st["time_limit_winner"] is not None else "None"))
-            L.append("                on_start: [%s]," % ", ".join(_ron_mut(x) for x in st["on_start"]))
-            L.append("                on_complete: [%s]," % ", ".join(_ron_mut(x) for x in st["on_complete"]))
-            L.append("            ),")
-        L.append("        ],")
+        # The mission's own logic, translated from its bytecode
+        # (scripts/campaign_ir.py); `game::campaign_script` runs it.
+        import campaign_ir
+        L.append(campaign_ir.ron_script(camp["script"]))
         L.append("    )),")
     L.append('    source: "%sPS2 %s.luac",' % ("PC %s; " % m.pc if m.pc else "", m.ps2))
     L.append(")")
@@ -3176,7 +3011,9 @@ def main():
                 written += 1
             rows.append((name, m))
 
+    import campaign_ir
     camp_dir = os.path.join(OUT_DIR, "campaign")
+    camp_scripts = []
     for key, game, planet, era, ps2 in CAMPAIGN_MISSIONS:
         if load_ps2(game, ps2) is None:
             continue
@@ -3188,6 +3025,16 @@ def main():
                 fh.write(ron(m))
             written += 1
         rows.append((rel_name, m))
+        camp_scripts.append(m.campaign["script"])
+
+    lib_dir = os.path.join(camp_dir, "lib")
+    for name, script in sorted(campaign_libs(camp_scripts).items()):
+        if not args.check:
+            os.makedirs(lib_dir, exist_ok=True)
+            with open(os.path.join(lib_dir, name + ".ron"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("// Generated by scripts/gen_missions.py from PS2 %s.luac\n" % name)
+                fh.write(campaign_ir.ron_lib(script))
+            written += 1
 
     for name, m in rows:
         print("%-24s %-3s %-3s %-8s %-8s %2d/%-2d %4d/%-4d cap%-3d att%-5s "

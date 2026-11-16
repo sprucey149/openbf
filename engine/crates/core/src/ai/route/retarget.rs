@@ -42,6 +42,37 @@ pub(in super::super) fn retarget(
         retarget_deathmatch(sim, me, st, nt);
         return;
     }
+    // The script's goals (`core::goals`): a Deathmatch member on foot takes
+    // the roaming walk of order 10 (`FUN_002c62a8`), a Defend member holds
+    // its target (order 0xb). OURS: a mounted Deathmatch member hunts as the
+    // port's ground Deathmatch does, and a Defend member walks to its
+    // target as a defender walks to its post. trace: order 0xb's agent, and
+    // what a seated Deathmatch member's driver does with order 10.
+    if let Some(goal) = sim.ai_goals.steer(me) {
+        st.want_stance = 0;
+        match goal {
+            crate::goals::Steer::Deathmatch if u.mount.is_none() => {
+                retarget_deathmatch(sim, me, st, nt);
+            }
+            crate::goals::Steer::Deathmatch => retarget_hunt(sim, me, st, nearest_enemy, nt),
+            crate::goals::Steer::Defend(crate::goals::GoalTarget::Post(cp)) => {
+                if !retarget_to_post(sim, me, st, cp, true, nt) {
+                    aim_last_leg(sim, me, st, nt);
+                }
+            }
+            crate::goals::Steer::Defend(t) => {
+                st.target_cp = None;
+                match crate::goals::target_pos(sim, t) {
+                    Some(at) => {
+                        retarget_board(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    None => retarget_hunt(sim, me, st, nearest_enemy, nt),
+                }
+            }
+        }
+        return;
+    }
     if u.team >= 2 || sim.deathmatch.is_some() {
         // PROVISIONAL, replace: trace the PS2 native Deathmatch and Conquest
         // goal orders. The main-army commander owns neither team's members.

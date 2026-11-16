@@ -396,7 +396,15 @@ impl WalkSim {
             } else {
                 Result::Defeat
             };
-            RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs)
+            // `FUN_00381110` plays the end movie when the winners mask has
+            // bit 2, the script's team 1 (sim team 0): a draw sets both.
+            let movie = self
+                .campaign
+                .as_ref()
+                .and_then(|c| c.end_movie())
+                .filter(|_| winner == 0 || winner == core::sim::OUTCOME_DRAW)
+                .map(str::to_owned);
+            RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs, movie)
         });
         let sound = r.step(dt, pad);
         (r.done(), sound)

@@ -218,6 +218,26 @@ fn bots_are_not_affected() {
 }
 
 #[test]
+fn the_press_that_closes_a_popup_does_not_accept_on_the_class_screen() {
+    let mut s = change_sim(GroundRules::Bf2);
+    let h = s.players[0].unwrap();
+    tap(&mut s, buttons::ACTION | buttons::SPAWN_BACK);
+    tap(&mut s, buttons::SPAWN_CLASS_NEXT);
+    assert_eq!(s.spawn_choice[0], 1);
+    s.hold_class_screen_accept();
+    s.step(&[press(buttons::SPAWN_ACCEPT)]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Alive, "still up");
+    assert_eq!(s.players[0], Some(h), "no swap");
+    s.step(&[PadState::default()]);
+    while s.class_carousel[0].slide > 0 {
+        s.step(&[PadState::default()]);
+    }
+    tap(&mut s, buttons::SPAWN_ACCEPT);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Accepted, "a new press accepts");
+    assert_eq!(me(&s).spec.class, 1);
+}
+
+#[test]
 fn back_returns_to_play_on_the_same_unit() {
     let mut s = change_sim(GroundRules::Bf2);
     let h = s.players[0].unwrap();

@@ -203,6 +203,9 @@ impl Sim {
         for p in &self.commander {
             p.hash_into(&mut eat);
         }
+        if !self.ai_goals.idle() {
+            self.ai_goals.hash_into(&mut eat);
+        }
         // Length-prefixed magnets and players preserve slot identity; None
         // uses (u32::MAX, u32::MAX). Flattening Some values loses the slot.
         let handle_or_none =

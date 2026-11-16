@@ -202,7 +202,8 @@ impl Sim {
         if self.outcome.is_none() {
             // BF2 Objective.lua OnTicketCountChange: count <= 0 → MissionDefeat.
             for t in 0..teams {
-                if !self.battle.unlimited_reinforcements
+                if !self.battle.campaign_rules
+                    && !self.battle.unlimited_reinforcements
                     && !self.battle.unlimited_teams[t]
                     && self.battle.teams[t].tickets() == 0
                 {

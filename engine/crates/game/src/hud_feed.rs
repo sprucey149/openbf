@@ -843,6 +843,12 @@ impl HudView {
         self.install_frame(frame);
     }
 
+    pub fn update_campaign_map(&mut self, model: &HudModel, page: &ui::hud_draw::campaign::Model, size: [u32; 2]) {
+        self.feed(model, 0.0);
+        let frame = ui::hud_draw::campaign::draw(&self.hud, &self.art, page, size.map(|v| v as f32));
+        self.install_frame(frame);
+    }
+
     fn feed(&mut self, model: &HudModel, dt: f32) {
         // Each weapon row's model, else its icon sheet ([`Self::weapon_mesh`]).
         let mut model = model.clone();
@@ -1017,6 +1023,18 @@ impl HudView {
         self.batches = frame.batches;
         self.boxes = frame.boxes;
         self.squad = frame.squad;
+    }
+
+    /// The round's end movie over black (`game::round_end::Phase::Movie`);
+    /// its frames come through [`HudView::set_movie_frame`].
+    pub fn update_end_movie(&mut self, size: [u32; 2]) {
+        let movie = self.movie.is_some() || self.movie_frame.is_some();
+        self.install_frame(ui::stats_draw::draw_end_movie(
+            &self.hud,
+            &self.art,
+            movie,
+            size.map(|v| v as f32),
+        ));
     }
 
     /// The shell movie's newest frame (RGBA8 display values), written into

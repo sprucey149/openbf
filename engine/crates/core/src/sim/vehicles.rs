@@ -1090,6 +1090,9 @@ impl Sim {
     /// one, then counts down to a spawn while it has fewer than `SpawnCount`
     /// and a class for its team.
     pub(crate) fn tick_vehicle_pads(&mut self, dt: f32) {
+        for v in self.vehicles.iter_mut().filter(|v| v.disable > 0.0) {
+            v.disable = (v.disable - dt).fmax(0.0);
+        }
         for pi in 0..self.vehicle_pads.len() {
             if let Some(ci) = self.vehicle_pads[pi].def.cp {
                 let owner = self.cps.get(ci).and_then(|c| c.owner);

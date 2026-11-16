@@ -29,6 +29,7 @@ pub mod hud_capture;
 pub mod hud_draw;
 pub mod hud_flag;
 pub mod hud_map;
+pub mod hud_popup;
 pub mod hud_scope;
 pub mod hud_space;
 pub mod hud_squad;

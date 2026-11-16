@@ -68,7 +68,7 @@ pub(super) fn hud_hints(
         })
         .collect();
 
-    if let Some(ctf) = &walk.sim.ctf {
+    if let Some(ctf) = walk.sim.ctf.as_ref().filter(|_| walk.campaign.is_none()) {
         let me_team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
         let flyer_view = walk
             .sim
@@ -163,7 +163,8 @@ pub(super) fn hud_hints(
             .and_then(|u| u.mount)
             .and_then(|m| walk.sim.vehicles.get(m.vehicle.index as usize))
             .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer);
-        for pos in c.objective_markers(&walk.sim) {
+        for m in c.objective_markers(&walk.sim) {
+            let pos = m.pos;
             let (ndc, on_screen) = marker_screen(view_proj, pos);
             hints.push(ui::hud_tree::HintMarker {
                 ndc,
@@ -176,7 +177,9 @@ pub(super) fn hud_hints(
                 flyer_view: obj_flyer,
                 own_carrier: false,
                 objective: true,
-                pulse: None,
+                pulse: m
+                    .pulse
+                    .then_some((walk.sim.tick as f32 * core::TICK_DT) % 1.0),
                 tint: Some([220.0, 175.0, 20.0]),
             });
         }

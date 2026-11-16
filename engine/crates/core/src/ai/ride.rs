@@ -211,6 +211,10 @@ fn reach_test(sim: &Sim, u: &Unit, vh: VehicleHandle) -> Option<(f32, f32)> {
     Some((cap.center().distance_squared(v.pos), reach))
 }
 
+/// `FUN_002e2e38` skips a vehicle moving faster than 3 m/s
+/// (`re-soldier-ai.md` §7.1).
+const NOTIFY_SPEED: f32 = 3.0;
+
 /// On the think period, a bot on foot with no claim: the nearest vehicle it
 /// could drive within [`BOARD_SEEK`], when its post is farther than
 /// [`BOARD_TRIP`] (or the vehicle is a [`command`] walker) and no other bot
@@ -232,7 +236,12 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     }
     let cp = st.target_cp.and_then(|i| sim.cps.get(i as usize));
     let space = sim.round_rules().space_deathmatch();
-    if cp.is_none() && !space {
+    // `FUN_002e2e38` tells every friendly AI within 50 m of a slow vehicle
+    // with a free seat, whatever its order. The port takes that scan in
+    // space and for a member of a script goal (`core::goals`); a bot of the
+    // commander keeps the post rule below.
+    let goal = !space && sim.ai_goals.steer(me).is_some();
+    if cp.is_none() && !space && !goal {
         return;
     }
     let pos = u.soldier.pos;
@@ -259,13 +268,14 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
             continue;
         }
         let space_flyer = space && v.kind == VehicleKind::Flyer;
-        let d = if space_flyer {
+        let notify = space_flyer || goal;
+        let d = if notify {
             (v.pos - pos).length()
         } else {
             nav::xz_dist(pos, v.pos)
         };
-        let too_far = if space_flyer {
-            d > VEHICLE_NOTIFY_RADIUS
+        let too_far = if notify {
+            d > VEHICLE_NOTIFY_RADIUS || (goal && v.vel.length() > NOTIFY_SPEED)
         } else {
             d > BOARD_SEEK || (near_post && !command(sim, vh))
         };
@@ -278,7 +288,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         {
             continue;
         }
-        let routed = space_flyer || cp.is_some_and(|cp| routes_to(sim, vh, cp));
+        let routed = notify || cp.is_some_and(|cp| routes_to(sim, vh, cp));
         if routed && claim_seat(sim, me, vh).is_some() && !taken(vh) {
             best = Some((d, vh));
         }

@@ -182,8 +182,9 @@ fn team_templates(
             let mut team = 0usize;
             let mut hero_classes = [None; 2];
             let templates = rosters.map(|mut r| {
-                // Heroes Off: no hero class at all (Session Options).
-                if b.heroes.is_some() && hunt.is_none() {
+                // Campaign scripts choose their heroes independently of the
+                // Instant Action session's Heroes setting.
+                if (b.heroes.is_some() || b.mission.as_ref().is_some_and(|m| m.is_campaign())) && hunt.is_none() {
                     hero_classes[team] = game::heroes::append(
                         &mut r,
                         &b.classes_dir,
@@ -235,7 +236,11 @@ fn team_templates(
                 team += 1;
                 game::walk::TeamTemplate::from_roster(&r, &sim.classes[team - 1][0], visuals)
             });
-            if let Some(rules) = b.heroes.filter(|_| hunt.is_none()) {
+            if let Some(mut rules) = b.heroes.or_else(|| b.mission.as_ref().filter(|m| m.is_campaign()).map(|_| Default::default())).filter(|_| hunt.is_none()) {
+                if b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
+                    // Only the campaign's UnlockHeroForTeam enables an offer.
+                    rules.unlock = core::sim::heroes::HeroUnlock::Points(i32::MAX);
+                }
                 game::heroes::install_with(sim, hero_classes, rules);
             }
             Ok(templates)
@@ -578,7 +583,7 @@ pub(super) fn make_walk_with_counts(
         } else {
             Vec::new()
         };
-        if hunt {
+        if hunt || b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
             // Class change at your own posts (issue #161): each post's
             // class radius, from the map's shared and own classes.
             let posts = game::walk::hunt_post_classes(
@@ -587,7 +592,7 @@ pub(super) fn make_walk_with_counts(
                 &scene.manifest.source_game,
             )?;
             walk.set_hunt_class_change(&layout, &posts, &scene.manifest.source_game);
-            for team in 0..2 {
+            for team in (0..2).filter(|_| hunt) {
                 anyhow::ensure!(
                     !walk.sim.spawn_points(team).is_empty(),
                     "Hunt team {} has no spawn points",
@@ -707,6 +712,16 @@ pub(super) fn make_walk_with_counts(
                     &walk.sim,
                 );
                 rt.set_team_rosters(team_classes, [0, 0]);
+                rt.set_native_rosters(
+                    m.local_teams
+                        .iter()
+                        .filter_map(|lt| {
+                            let team = lt.team.checked_sub(1).filter(|t| *t >= 2)?;
+                            let classes = lt.classes.iter().map(|c| c.0.clone()).collect();
+                            Some((team, (classes, lt.units)))
+                        })
+                        .collect(),
+                );
                 rt.start(&mut walk.sim);
                 walk.campaign = Some(rt);
             }
@@ -986,6 +1001,16 @@ pub(super) fn hud_model(
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
+        unlimited_tickets: [0, 1].map(|t| b.unlimited_reinforcements || b.unlimited_teams[t]),
+        popup: walk.campaign.as_ref().and_then(|c| c.popup()).map(|p| {
+            use game::campaign_runtime::Popup;
+            match p {
+                Popup::Hint(t) => ui::hud::HudPopup::Hint(feed.localize_or_raw(t)),
+                Popup::Objective(t) => ui::hud::HudPopup::Objective(feed.localize_or_raw(t)),
+                Popup::Selection(t) => ui::hud::HudPopup::Selection(feed.localize_or_raw(t)),
+            }
+        }),
+        objectives_updated: walk.campaign.as_ref().is_some_and(|c| c.objectives_updated()),
         bleed: if walk.sim.ctf.is_some() {
             [0.0, 0.0]
         } else {
@@ -1033,9 +1058,11 @@ pub(super) fn hud_model(
             .mount
             .and_then(|m| walk.sim.vehicle(m.vehicle))
             .map(|v| (v.health.cur, v.health.max)),
-        team_points: walk
-            .sim
-            .space_team_points()
+        // A campaign shows team points only where its script turned them
+        // on (`ShowTeamPoints`); its flags are the script's, not a CTF round.
+        team_points: match walk.campaign.as_ref() {
+            Some(c) => c.team_points().map(|p| (p, 0)),
+            None => walk.sim.space_team_points()
             .or_else(|| {
                 walk.sim.ctf.as_ref().map(|c| {
                     (
@@ -1049,12 +1076,13 @@ pub(super) fn hud_model(
                     .team_points()
                     .map(|(points, limit)| (points.map(|p| p as i32), limit))
             }),
-        ctf: walk.sim.ctf.is_some(),
+        },
+        ctf: walk.sim.ctf.is_some() && walk.campaign.is_none(),
         flag_status: walk
             .sim
             .ctf
             .as_ref()
-            .filter(|c| c.mode == core::sim::CtfMode::OneFlag)
+            .filter(|c| walk.campaign.is_none() && c.mode == core::sim::CtfMode::OneFlag)
             .and_then(|c| c.flags.first())
             .and_then(|flag| match flag.status {
                 core::sim::FlagStatus::AtHome => None,
@@ -1126,7 +1154,10 @@ pub(super) fn spawn_model(
     // Issue #28: a live player has a spawn screen only while the class
     // screen he opened at a friendly post is up.
     let alive_screen = walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Alive);
-    if (me.alive && !alive_screen) || walk.sim.outcome.is_some() {
+    // A script popup hides the live class screen until it closes (B2
+    // `FUN_0038c7a0` → `FUN_00397840` on state 4; `FUN_0038cb28` reopens).
+    let hidden = alive_screen && walk.campaign.as_ref().is_some_and(|c| c.popup().is_some());
+    if (me.alive && !alive_screen) || hidden || walk.sim.outcome.is_some() {
         return None;
     }
     // Ground death views wait for the native spawn map, including a dead

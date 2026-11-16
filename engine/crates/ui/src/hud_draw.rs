@@ -21,6 +21,11 @@ use glam::{Mat4, Vec3};
 use manifest::hud::{HudFont, HudGlyph};
 use std::collections::HashMap;
 
+#[path = "hud_text.rs"]
+mod text;
+#[path = "campaign_map.rs"]
+pub mod campaign;
+
 /// Frame pixels per Model3D mesh unit: 1 / (0.01 × 1.24) (`re-hud.md` §2.4
 /// [V] `FUN_0059fdb0`, DAT_0060c7b8).
 pub const MESH_UNIT: f32 = 1.0 / (0.01 * 1.24);
@@ -693,34 +698,6 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn elem_text(&mut self, i: usize, e: &Elem, m: &Mat4, s: &Screen, alpha: f32) {
-        let Some(font) = self.art.fonts.get(&e.font) else {
-            return;
-        };
-        let height = f32::from(font.line_height) * e.text_scale[1];
-        let top = match e.v_align {
-            VAlign::Top => 0.0,
-            VAlign::Center => -height * 0.5,
-            VAlign::Bottom => -height,
-        };
-        self.run(
-            i,
-            m,
-            s,
-            font,
-            &Run {
-                text: &e.text,
-                at: (0.0, top),
-                h_align: e.h_align,
-                scale: e.text_scale,
-                color: color(self.hud.drawn(i), alpha),
-                additive: e.additive,
-                shadow: false,
-                tracking: 0.0,
-            },
-        );
-    }
-
     /// The menu face's metric set for `face` (`crate::typography`).
     pub(crate) fn face(&self, face: crate::typography::Face) -> Option<&'a HudFont> {
         self.art.menu_font(face.role())
@@ -853,7 +830,7 @@ impl<'a> Ctx<'a> {
             if a <= 0.0 {
                 continue;
             }
-            self.run(
+            self.token_run(
                 i,
                 m,
                 s,

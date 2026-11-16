@@ -4,6 +4,18 @@ use core::sim::InputLog;
 use glam::Vec3;
 
 #[test]
+fn tutorial_followup_modal_discards_mouse_preview_and_resume_turn() {
+    let mut k = grabbed();
+    k.motion(300.0, -100.0);
+    assert!(k.look().has_look());
+    k.clear_look();
+    assert!(!k.look().has_look());
+    assert_eq!(menu_key(KeyCode::Tab), MENU_MAP);
+    assert_ne!(menu_bits(MENU_MAP, false) & MENU_MAP, 0);
+    assert_ne!(menu_bits(menu_key(KeyCode::KeyE), false) & MENU_DETAILS, 0);
+}
+
+#[test]
 fn saved_wheel_movement_is_repaired_before_sampling() {
     let mut settings = crate::profile::Settings::default();
     let table = &mut settings.keyboard_bindings.table;

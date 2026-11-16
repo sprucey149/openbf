@@ -822,14 +822,19 @@ pub struct WalkSim {
     accum: f32,
 }
 
-/// A command post's spawn nodes as `(position, yaw)`, with the fallback
-/// [`WalkSim::setup_conquest`] has always used when the post names no path or
-/// the path is empty: one node 3 m off the post's +x/+z corner. Never empty,
-/// so index 0 is always a node.
+/// A command post's spawn nodes as `(position, yaw)`. A post that names no
+/// SpawnPath has none: `CanTeamSpawnAt` (B2 `FUN_00356880`) wants the path
+/// or a class SpawnPointCount, and no post class authors one
+/// (`re-command-walker-post.md` §3) - the campaigns' invisible objective
+/// posts (geo1's CIS `obj3_wheel`) are never spawned at. A named path the
+/// map lacks, or an empty one, keeps the fallback [`WalkSim::setup_conquest`]
+/// has always used: one node 3 m off the post's +x/+z corner (OURS).
 fn cp_spawn_nodes(layout: &MapLayout, cp: &CommandPostDef) -> Vec<(Vec3, f32)> {
-    cp.spawn_path
-        .as_deref()
-        .and_then(|n| layout.path(n))
+    let Some(name) = cp.spawn_path.as_deref() else {
+        return Vec::new();
+    };
+    layout
+        .path(name)
         .map(|p| p.nodes.iter().map(|n| (n.pos, n.yaw)).collect())
         .filter(|v: &Vec<(Vec3, f32)>| !v.is_empty())
         .unwrap_or_else(|| vec![(cp.pos + Vec3::new(3.0, 0.0, 3.0), 0.0)])
@@ -1234,7 +1239,9 @@ impl WalkSim {
     fn move_to_friendly_post(&mut self, layout: &MapLayout) -> Option<(String, f32)> {
         let own = self.sim.units[self.player.index as usize].team + 1;
         for cp in layout.cps.iter().filter(|c| c.team == own) {
-            let (pos, yaw) = cp_spawn_nodes(layout, cp)[0];
+            let Some(&(pos, yaw)) = cp_spawn_nodes(layout, cp).first() else {
+                continue;
+            };
             let g = self.sim.ground_under(pos, false);
             if g <= core::collision::NO_GROUND {
                 continue;
@@ -1702,7 +1709,9 @@ impl WalkSim {
                 let native_classes: std::collections::BTreeMap<u8, Vec<String>> = self
                     .native_teams
                     .iter()
-                    .map(|(&team, tmpl)| (team, tmpl.classes.iter().map(|c| c.name.clone()).collect()))
+                    .map(|(&team, tmpl)| {
+                        (team, tmpl.classes.iter().map(|c| c.name.clone()).collect())
+                    })
                     .collect();
                 campaign.step(
                     &mut self.sim,
@@ -1713,6 +1722,15 @@ impl WalkSim {
                     &self.vehicle_classes,
                     core::TICK_DT,
                 );
+                // `BroadcastVoiceOver` lines join the commander's voice
+                // queue as commander lines. [H] the binding's queue key
+                // is not traced. trace: BroadcastVoiceOver's binding.
+                let lines = campaign.take_voice_overs();
+                if let Some(v) = self.voice.as_mut() {
+                    for name in lines {
+                        v.queue.ask(core::announcer::Line::commander(&name));
+                    }
+                }
                 self.campaign = Some(campaign);
             }
         }

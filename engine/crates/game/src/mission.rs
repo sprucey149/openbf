@@ -440,19 +440,9 @@ pub struct DeathDrain {
     pub tickets: u32,
 }
 
-fn default_one() -> u8 {
-    1
-}
-
-fn default_two() -> u8 {
-    2
-}
-
-fn default_capture_limit() -> u32 {
-    1
-}
-
-/// Rise of the Empire singleplayer campaign specification extracted from BF2 campaign Lua.
+/// Rise of the Empire singleplayer campaign: the mission's movies, its
+/// unlimited pools, and its logic translated from the PS2 bytecode
+/// (`scripts/campaign_ir.py`, run by [`crate::campaign_script`]).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct CampaignMissionDef {
     #[serde(default)]
@@ -464,123 +454,11 @@ pub struct CampaignMissionDef {
     #[serde(default)]
     pub infinite_tickets: [bool; 2],
     #[serde(default)]
-    pub delay_victory_time: f32,
-    #[serde(default)]
-    pub initial_properties: Vec<(String, String, String)>,
-    #[serde(default)]
-    pub ambushes: Vec<CampaignAmbushDef>,
-    #[serde(default)]
-    pub stages: Vec<CampaignStageDef>,
-}
-
-/// An authored ambush spawn wave, either immediate on callback or triggered by entering a region.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CampaignAmbushDef {
-    pub path: String,
-    pub count: u32,
-    pub team: u8,
-    #[serde(default)]
-    pub trigger_region: Option<String>,
-}
-
-/// One sequential `MultiObjectiveContainer` objective stage.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct CampaignStageDef {
-    pub name: String,
-    pub kind: CampaignObjectiveKind,
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub popup_text: Option<String>,
-    #[serde(default = "default_one")]
-    pub att_team: u8,
-    #[serde(default = "default_two")]
-    pub def_team: u8,
-    #[serde(default)]
-    pub time_limit: Option<f32>,
-    #[serde(default)]
-    pub time_limit_winner: Option<u8>,
-    #[serde(default)]
-    pub on_start: Vec<CampaignMutation>,
-    #[serde(default)]
-    pub on_complete: Vec<CampaignMutation>,
-}
-
-/// Objective win-condition family for a [`CampaignStageDef`].
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub enum CampaignObjectiveKind {
-    Conquest {
-        #[serde(default)]
-        posts: Vec<String>,
-    },
-    Assault {
-        #[serde(default)]
-        targets: Vec<String>,
-        #[serde(default)]
-        target_types: Vec<(String, u32)>,
-    },
-    Ctf {
-        #[serde(default)]
-        flag: String,
-        #[serde(default)]
-        home_region: String,
-        #[serde(default)]
-        capture_region: String,
-        #[serde(default = "default_capture_limit")]
-        capture_limit: u32,
-    },
-    Goto {
-        region: String,
-    },
-    Tdm {
-        #[serde(default)]
-        kills: u32,
-    },
-    Defend {
-        seconds: f32,
-    },
-    Interact {
-        #[serde(default)]
-        hint: String,
-        #[serde(default)]
-        region: Option<String>,
-        #[serde(default)]
-        target: Option<String>,
-        #[serde(default)]
-        class_filter: Option<String>,
-    },
-}
-
-/// Mid-round world mutations fired when a campaign stage starts/completes or a region triggers.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub enum CampaignMutation {
-    KillObject(String),
-    RespawnObject(String),
-    SetBarriers { name: String, enable: bool },
-    SetArcBlocks { name: String, block: bool },
-    SetProperty { target: String, key: String, value: String },
-    AddReinforcements { team: u8, delta: i32 },
-    SetReinforcements { team: u8, count: i32 },
-    UnlockHeroForTeam(u8),
-    PlayMovie(String),
-    AddUnitClass {
-        team: u8,
-        class: String,
-        min: u32,
-        #[serde(default)]
-        max: Option<u32>,
-    },
-    SetClassEnabled {
-        team: u8,
-        class: String,
-        enabled: bool,
-    },
-    AllowAiSpawn {
-        team: u8,
-        allow: bool,
-    },
-    Ambush(CampaignAmbushDef),
-    RegionTrigger { region: String, mutations: Vec<CampaignMutation> },
+    pub script: Option<crate::campaign_script::ScriptDef>,
+    /// The shared scripts beside the mission (`campaign/lib/*.ron`) by
+    /// lower-case name, read by [`MissionDef::load`].
+    #[serde(skip)]
+    pub libs: Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>,
 }
 
 /// The mission a battle of `map` in `mode` runs for the two armies picked,
@@ -676,8 +554,14 @@ impl MissionDef {
 
     pub fn load(path: &Path) -> Result<MissionDef> {
         let txt = pak::read_to_string(path).with_context(|| path.display().to_string())?;
-        let m: MissionDef =
-            ron::from_str(&txt).with_context(|| format!("parse {}", path.display()))?;
+        // A campaign's translated script nests deeper than RON's default limit.
+        let mut m: MissionDef = ron::Options::default()
+            .without_recursion_limit()
+            .from_str(&txt)
+            .with_context(|| format!("parse {}", path.display()))?;
+        if let Some(c) = m.campaign.as_mut() {
+            c.libs = load_campaign_libs(&path.parent().unwrap_or(Path::new(".")).join("lib"))?;
+        }
         if m.teams.len() != 2 {
             anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
         }
@@ -1498,8 +1382,32 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{stem}: {e:#}"));
             assert!(m.is_campaign(), "{stem}");
             let c = m.campaign.as_ref().expect("campaign payload");
-            assert!(!c.stages.is_empty(), "{stem} has no stages");
+            assert!(c.script.is_some(), "{stem} has no translated script");
+            assert!(
+                c.libs.iter().any(|(n, _)| n == "objective"),
+                "{stem} loaded no objective framework"
+            );
             assert!(!m.camera_shot_calls.is_empty(), "{stem} has no camera shots");
         }
     }
+}
+
+/// The shared campaign scripts (`engine/missions/campaign/lib/*.ron`),
+/// sorted by name so every load lists them alike.
+fn load_campaign_libs(dir: &Path) -> Result<Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>> {
+    let mut out = Vec::new();
+    for path in pak::read_dir(dir).unwrap_or_default() {
+        if path.extension().and_then(|e| e.to_str()) != Some("ron") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let text = pak::read_to_string(&path).with_context(|| path.display().to_string())?;
+        let def = crate::campaign_script::parse(&text)
+            .with_context(|| format!("parse {}", path.display()))?;
+        out.push((stem.to_ascii_lowercase(), std::sync::Arc::new(def)));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
 }

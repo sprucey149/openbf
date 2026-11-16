@@ -97,6 +97,9 @@ pub const MENU_ADJUST_RIGHT: u32 = 2048;
 pub const MENU_NORTH: u32 = 4096;
 /// Circle / B, separately from Back, for the profile keyboard symbols page.
 pub const MENU_EAST: u32 = 8192;
+pub const MENU_MAP: u32 = 16384;
+pub const MENU_DETAILS: u32 = 32768;
+pub const MENU_HINTS: u32 = 65536;
 
 /// A frame's menu edges from the held bits. With `north_backs` (the ground
 /// pause menu, as BF2's ifs_pausemenu) North's own fresh press is Back (32).
@@ -126,6 +129,9 @@ pub fn stick_latch(prev_menu_buttons: u32) -> u32 {
 pub fn menu_key(code: KeyCode) -> u32 {
     match code {
         KeyCode::ArrowUp => 1,
+        KeyCode::Tab => MENU_MAP,
+        KeyCode::KeyE => MENU_DETAILS,
+        KeyCode::KeyR => MENU_HINTS,
         KeyCode::ArrowDown => 2,
         KeyCode::ArrowLeft => 4,
         KeyCode::ArrowRight => 8,
@@ -142,7 +148,7 @@ pub fn menu_key(code: KeyCode) -> u32 {
 }
 
 pub fn menu_bits(keys: u32, shell: bool) -> u32 {
-    let mut bits = keys & 63;
+    let mut bits = keys & (63 | MENU_MAP | MENU_DETAILS | MENU_HINTS);
     if keys & KEY_ESCAPE != 0 {
         bits |= if shell { 32 } else { 64 };
     }
@@ -863,6 +869,12 @@ impl Kbm {
     pub fn drop_taps(&mut self) {
         self.taps = 0;
         self.pick = None;
+    }
+
+    /// Discard camera input accumulated while a modal screen owns input.
+    pub fn clear_look(&mut self) {
+        self.pending = (0.0, 0.0);
+        self.flyer = Default::default();
     }
 
     pub fn release_keys(&mut self) {

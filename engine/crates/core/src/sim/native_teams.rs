@@ -115,6 +115,36 @@ impl Sim {
             count,
             nodes: nodes.to_vec(),
         });
+        self.spawn_native_members(entry, count, nodes, &mut spawned, false);
+        spawned
+    }
+
+    /// A mission script's `SpawnCharacter` (B2 binding `FUN_001916e8`): one
+    /// native member of `team` enters at `node` and nothing more - no spawn
+    /// post is left behind, so a dead ambusher stays dead.
+    pub fn spawn_native_character(
+        &mut self,
+        team: u8,
+        node: (Vec3, f32),
+    ) -> Option<crate::unit::UnitHandle> {
+        if team < 2 {
+            return self.spawn_ai(team, node.0, node.1);
+        }
+        let entry = self.native_team_index(team)?;
+        let mut spawned = Vec::new();
+        self.spawn_native_members(entry, 1, &[node], &mut spawned, true);
+        spawned.first().copied()
+    }
+
+    fn spawn_native_members(
+        &mut self,
+        entry: usize,
+        count: u32,
+        nodes: &[(Vec3, f32)],
+        spawned: &mut Vec<crate::unit::UnitHandle>,
+        scripted: bool,
+    ) {
+        let team = self.native_teams[entry].team;
         let fallback: Vec<UnitSpec> = self
             .units
             .iter()
@@ -133,7 +163,12 @@ impl Sim {
                 };
             spec.pos = pos;
             spec.yaw = yaw;
-            if let Some(h) = self.spawn_roster_slot(&spec) {
+            let placed = if scripted {
+                self.spawn_scripted_slot(&spec)
+            } else {
+                self.spawn_roster_slot(&spec)
+            };
+            if let Some(h) = placed {
                 spawned.push(h);
             } else {
                 if from_pending {
@@ -142,7 +177,6 @@ impl Sim {
                 break;
             }
         }
-        spawned
     }
 
     pub(super) fn assign_unit_wave(&mut self, team: u8) -> Option<(u32, u32)> {

@@ -557,18 +557,25 @@ impl Sim {
     /// alive; a PLAYER taking the last slots sheds AI — core::battle). Feet
     /// snapped to the terrain. Returns None if refused.
     pub fn spawn(&mut self, spec: &UnitSpec) -> Option<UnitHandle> {
-        self.spawn_with_slot_policy(spec, false)
+        self.spawn_with_slot_policy(spec, false, false)
     }
 
     /// Add a roster slot without taking a dead unit's pending respawn slot.
     pub fn spawn_roster_slot(&mut self, spec: &UnitSpec) -> Option<UnitHandle> {
-        self.spawn_with_slot_policy(spec, true)
+        self.spawn_with_slot_policy(spec, true, false)
+    }
+
+    /// [`Sim::spawn_roster_slot`] for a native member a mission script
+    /// places itself (`SpawnCharacter`): no spawn post's capacity gates it.
+    pub(crate) fn spawn_scripted_slot(&mut self, spec: &UnitSpec) -> Option<UnitHandle> {
+        self.spawn_with_slot_policy(spec, true, spec.team >= 2)
     }
 
     fn spawn_with_slot_policy(
         &mut self,
         spec: &UnitSpec,
         preserve_respawns: bool,
+        scripted: bool,
     ) -> Option<UnitHandle> {
         if spec.controller == Controller::Ai && (spec.team as usize) < 2 {
             let t = usize::from(spec.team);
@@ -578,7 +585,7 @@ impl Sim {
                 return None;
             }
         }
-        if !self.admit(spec.team, spec.is_player()) {
+        if !scripted && !self.admit(spec.team, spec.is_player()) {
             return None;
         }
         // A dead unit a player slot still holds is that player's (its next
@@ -879,7 +886,7 @@ impl Sim {
             c,
             self.bot_skill(team),
         );
-        let h = self.spawn_with_slot_policy(&spec, preserve_respawns)?;
+        let h = self.spawn_with_slot_policy(&spec, preserve_respawns, false)?;
         self.ai_spawned[t] += 1;
         Some(h)
     }

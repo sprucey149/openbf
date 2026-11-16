@@ -231,10 +231,11 @@ const FORBIDDEN: [(&str, &str); 14] = [
 
 /// The HUD (BF2's tree and the code-drawn pieces beside it) keeps the
 /// layouts' own fonts; the renderer and this module define text.
-const EXEMPT: [&str; 14] = [
+const EXEMPT: [&str; 15] = [
     "typography.rs",
     "typography/",
     "hud_draw.rs",
+    "hud_text.rs",
     "hud_tree.rs",
     "hud_tree/",
     "hud_map.rs",

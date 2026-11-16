@@ -419,11 +419,40 @@ impl winit::application::ApplicationHandler for App {
                 // A death camera or a dead rider's held seat view is up.
                 let icons = self.current_icons();
                 let mut menu: Option<ui::menu::MenuModel> = None;
-                let edges = if self.walk.is_some() {
+                let mut edges = if self.walk.is_some() {
                     self.menu_edges()
                 } else {
                     0
                 };
+                let campaign_browser = self.netplay.is_none() && self.walk.as_ref().is_some_and(|(w, _)|
+                    w.campaign.is_some() && w.sim.outcome.is_none() && w.sim.units[w.player.index as usize].alive);
+                if !campaign_browser { self.campaign_map = None; }
+                if campaign_browser && !self.paused {
+                    let popup = self.walk.as_ref().and_then(|(w, _)| w.campaign.as_ref()).is_some_and(|c| c.popup().is_some());
+                    if self.campaign_map.is_some() && edges & (game::kbm::MENU_MAP | 64 | 32) != 0 {
+                        self.campaign_map = None;
+                        if popup { self.walk.as_mut().unwrap().0.campaign.as_mut().unwrap().close_popup(); }
+                        self.kbm.clear_look();
+                        edges &= !(game::kbm::MENU_MAP | 64 | 32);
+                    } else if !popup && edges & game::kbm::MENU_MAP != 0 {
+                        let c = self.walk.as_ref().unwrap().0.campaign.as_ref().unwrap();
+                        self.campaign_map = Some(c.objectives().iter().rposition(|o| o.state == 2).unwrap_or(0));
+                        self.kbm.clear_look();
+                    } else if !popup {
+                        if let Some(selected) = self.campaign_map.as_mut() {
+                            let c = self.walk.as_mut().unwrap().0.campaign.as_mut().unwrap();
+                            if edges & 1 != 0 { *selected = selected.saturating_sub(1); }
+                            if edges & 2 != 0 { *selected = (*selected + 1).min(c.objectives().len().saturating_sub(1)); }
+                            if edges & (16 | game::kbm::MENU_DETAILS) != 0 {
+                                c.show_details(*selected);
+                                edges &= !(16 | game::kbm::MENU_DETAILS);
+                            } else if edges & (game::kbm::MENU_SQUARE | game::kbm::MENU_HINTS) != 0 {
+                                c.show_hint();
+                                edges &= !(game::kbm::MENU_SQUARE | game::kbm::MENU_HINTS);
+                            }
+                        }
+                    }
+                }
                 if let Some(sounds) = self.sounds.as_mut() {
                     sounds.advance_menu_clock(elapsed);
                 }
@@ -485,11 +514,34 @@ impl winit::application::ApplicationHandler for App {
                     }
                     menu = self.controls_model(icons);
                 }
+                // A mission popup holds single player (`FUN_0038c7a0` sets
+                // `DAT_00600b44`) until the player presses to continue
+                // (`FUN_0038cb28`); the frame's audio runs on under it.
+                let campaign_popup_up = self.netplay.is_none()
+                    && self.walk.as_ref().is_some_and(|(w, _)| {
+                        w.sim.outcome.is_none()
+                            && w.campaign.as_ref().is_some_and(|c| c.popup().is_some())
+                    });
+                let popup_up = campaign_popup_up || self.campaign_map.is_some();
+                if campaign_popup_up && !self.paused && edges & 16 != 0 {
+                    if let Some((w, _)) = self.walk.as_mut() {
+                        if let Some(c) = w.campaign.as_mut() { c.dismiss_popup(&mut w.sim); }
+                    }
+                    if let Some(sl) = self.sounds.as_mut() {
+                        sl.play_2d(
+                            self.audio.as_mut(),
+                            ui::shell_feel::MenuSound::Accept.name(),
+                        );
+                    }
+                }
                 let camera = if self.walk.is_some() {
                     self.step_spawn_pointer(dt);
                     let pad = if self.paused {
                         self.kbm.drop_taps();
                         game::pause::hold_for_resume(&mut self.resume_gate);
+                        PadState::default()
+                    } else if popup_up {
+                        self.kbm.drop_taps();
                         PadState::default()
                     } else if self
                         .walk
@@ -636,7 +688,8 @@ impl winit::application::ApplicationHandler for App {
                             cursor: self.pause_menu.cursor,
                             page: Some(self.pause_menu.page),
                             popup: self.pause_menu.confirm,
-                            restart_available: self.current.is_some() || self.active_campaign.is_some(),
+                            restart_available: self.current.is_some()
+                                || self.active_campaign.is_some(),
                             texts: game::pause::texts(&self.feed),
                             respawn_label: game::pause::respawn_label(walk, &self.feed),
                             in_shell: None,
@@ -854,7 +907,10 @@ impl winit::application::ApplicationHandler for App {
                         // once: a frame steps no tick (every other one at
                         // 60 Hz), one or several, and `Sim::events` keeps
                         // only the last tick's (card EVTK).
-                        self.bolts.age(walk, dt);
+                        // The world holds still under a popup; only the
+                        // voice and music frames below run on.
+                        let world_dt = if popup_up { 0.0 } else { dt };
+                        self.bolts.age(walk, world_dt);
                         let aspect = self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
                             let (w, h) = r.size();
                             w as f32 / h.max(1) as f32
@@ -984,6 +1040,7 @@ impl winit::application::ApplicationHandler for App {
                                     }
                                 }
                             }
+                            None if popup_up => {}
                             None => {
                                 let ticks =
                                     walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
@@ -1005,11 +1062,16 @@ impl winit::application::ApplicationHandler for App {
                                 feed.say(text, ui::hud::message_color::YELLOW, walk.sim.tick);
                             }
                             let _ = c.take_movies();
+                            let _ = c.take_sounds();
+                            let _ = c.take_music();
                         }
-                        look = self.kbm.look();
+                        look = if popup_up {
+                            self.kbm.clear_look();
+                            PadState::default()
+                        } else { self.kbm.look() };
                         // A controller's preview is its held stick (the
                         // next tick's turn, `Sim::look_preview`).
-                        if !look.has_look() && !look.mouse_aim() {
+                        if !popup_up && !look.has_look() && !look.mouse_aim() {
                             look = PadState {
                                 mx: 0,
                                 my: 0,
@@ -1020,10 +1082,10 @@ impl winit::application::ApplicationHandler for App {
                             p.lap("sim_ms");
                         }
                         self.fx
-                            .advance_frame(self.soldier_vis.as_mut(), walk, &look, dt);
+                            .advance_frame(self.soldier_vis.as_mut(), walk, &look, world_dt);
                         if let Some(w) = self.weather.as_mut() {
-                            w.update(dt);
-                            rain_splashes(w, &mut self.fx, walk, aspect, dt);
+                            w.update(world_dt);
+                            rain_splashes(w, &mut self.fx, walk, aspect, world_dt);
                         }
                         if let (Some(audio), Some(sl)) = (self.audio.as_mut(), self.sounds.as_mut())
                         {
@@ -1182,6 +1244,7 @@ impl winit::application::ApplicationHandler for App {
                         self.vehicle_vis
                             .set_tick_share(game::render_blend::share(walk));
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
+                        extra.extend(self.vehicle_vis.campaign_flags(walk));
                         extra.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
                         self.deka_vis.eye = Some(walk.camera().position);
                         extra.extend(self.deka_vis.draws(r, &walk.sim));
@@ -1227,6 +1290,20 @@ impl winit::application::ApplicationHandler for App {
                         let (done, cue) = walk.follow_round_end(dt, pad, music_secs);
                         if let (Some(cue), Some(sounds)) = (cue, self.sounds.as_mut()) {
                             sounds.play_2d(self.audio.as_mut(), cue.name());
+                        }
+                        if let Some(r) = walk.round_end.as_mut() {
+                            let frame = game::round_end::step_end_movie(
+                                r,
+                                self.front.as_mut().and_then(|f| f.movie.as_mut()),
+                                self.audio.as_mut(),
+                                &mut self.end_movie_voice,
+                                self.profile.settings.dialogue_volume,
+                                dt,
+                                pad.cross || pad.triangle,
+                            );
+                            if let (Some((rgba, w, h)), Some(v)) = (frame, self.hud_view.as_mut()) {
+                                v.set_movie_frame(rgba, w, h);
+                            }
                         }
                         if done && self.netplay.is_some() {
                             // A LAN round: the lobby's ready check (issue #168).
@@ -1329,6 +1406,7 @@ impl winit::application::ApplicationHandler for App {
                             gpu.see_through(&see.props);
                             gpu.pose_ctf(&walk.sim, walk.player);
                             self.holos.advance(walk);
+                            let items = self.vehicle_vis.campaign_lights(walk);
                             game::point_light::submit(
                                 r,
                                 gpu,
@@ -1336,6 +1414,7 @@ impl winit::application::ApplicationHandler for App {
                                 &mut self.bolts,
                                 camera.position,
                                 &self.holos,
+                                &items,
                             );
                             let flashes = self
                                 .soldier_vis
@@ -1356,6 +1435,7 @@ impl winit::application::ApplicationHandler for App {
                                 r.lighting.sun_dir,
                             ));
                             particles.extend(self.holos.draws(&gpu.holo, walk, &camera));
+                            particles.extend(self.vehicle_vis.campaign_glows(walk, &camera));
                             if let Some(w) = self.weather.as_mut() {
                                 particles.extend(w.frame_draws(r, &camera, tracked_velocity(walk)));
                             }
@@ -1429,12 +1509,29 @@ impl winit::application::ApplicationHandler for App {
                     // hides it. It is fed either way — a model's event
                     // lines are handed over once. Paused, its fades hold.
                     let (w, h) = r.size();
-                    let hud_dt = if frozen { 0.0 } else { dt };
+                    let hud_dt = if self.paused && self.netplay.is_none() { 0.0 } else { dt };
+                    let end_movie = self.walk.as_ref().is_some_and(|(w, _)| {
+                        w.round_end.as_ref().is_some_and(|r| r.playing_movie().is_some())
+                    });
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
                             hv.set_icons(icons);
-                            if let Some(m) = menu.as_ref().filter(|_| native_pause) {
+                            if end_movie {
+                                hv.update_end_movie([w, h]);
+                                Some(hv)
+                            } else if let Some(m) = menu.as_ref().filter(|_| native_pause) {
                                 hv.update_pause(model, m, &self.pause_menu.animation, [w, h]);
+                                Some(hv)
+                            } else if let Some(selected) = self.campaign_map.filter(|_| !campaign_popup_up) {
+                                let c = self.walk.as_ref().unwrap().0.campaign.as_ref().unwrap();
+                                let page = ui::hud_draw::campaign::Model {
+                                    selected,
+                                    objectives: c.objectives().iter().map(|o| ui::hud_draw::campaign::Objective {
+                                        text: self.feed.localize_or_raw(&o.text), active: o.state == 2,
+                                    }).collect(),
+                                    footer: ["game.objectives.showdetails", "game.objectives.showhints", "game.mapdisplay.pressToReturn"].map(|key| self.feed.localize_or_raw(key)),
+                                };
+                                hv.update_campaign_map(model, &page, [w, h]);
                                 Some(hv)
                             } else {
                                 hv.update(model, hud_dt, [w, h]);
@@ -1527,7 +1624,7 @@ impl winit::application::ApplicationHandler for App {
                     // class there), under the menu or at the round's end.
                     let scoreboard = match (&self.walk, &hud) {
                         (Some((walk, _)), Some(model))
-                            if self.score_hold.shown()
+                            if walk.campaign.is_none() && self.score_hold.shown()
                                 && spawn.is_none()
                                 && menu.is_none()
                                 && model.round_end.is_none() =>

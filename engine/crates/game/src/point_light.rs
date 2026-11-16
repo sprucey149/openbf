@@ -15,8 +15,9 @@
 //!   the hologram's intensity I in a battle (its 2 s fades and flicker dips,
 //!   `crate::holo`, card CPHOL; steady in a render with no battle).
 //!   Every BF2 post gets one (each names `com_holo_controlzone`, §3 [D]).
+//! - an item's `LightOdf` EntityLight (§4): the campaign's holocron.
 //!
-//! The runtime lights (explosion flashes, flags, mines) are not built; the
+//! The other runtime lights (explosion flashes, CTF flags, mines) are not built; the
 //! bolts' reach models through [`omni`].
 //!
 //! **Packing** (§1): the VU's colour is the packed byte / 128 —
@@ -214,6 +215,7 @@ fn ground_light(l: &PointLight, rgb: [u8; 3]) -> OmniLight {
 /// models ([`Renderer::set_point_lights`]) and, the non-Static omnis, to the
 /// terrain pass beside the bolts (`BoltVis::submit`, §8). A post's light
 /// takes its hologram's intensity (`holos`, already advanced to this frame).
+/// `items` are the items' EntityLights (position, colour, OmniRadius; §4).
 pub fn submit(
     r: &mut Renderer,
     gpu: &crate::viewer::SceneGpu,
@@ -221,12 +223,17 @@ pub fn submit(
     bolts: &mut BoltVis,
     eye: Vec3,
     holos: &crate::holo::Holos,
+    items: &[(Vec3, [u8; 3], f32)],
 ) {
     let mut lights = gpu.lights.clone();
     let mut ground: Vec<OmniLight> = gpu.ground_lights.clone();
     if gpu.post_lights {
         let viewer = walk.player_team();
         for (i, cp) in walk.sim.cps.iter().enumerate() {
+            // The light is the hologram's: a post with none has none.
+            if gpu.holo.bare.contains(&cp.def.name) {
+                continue;
+            }
             // The hologram shows its own team until the flip's fade is over.
             let team = holos.list.get(i).map_or(cp.owner, |h| h.team);
             let rgb = dimmed(Relation::of(team, viewer).bytes(), holos.intensity(i));
@@ -234,6 +241,11 @@ pub fn submit(
             ground.push(ground_light(&l, rgb));
             lights.push(l);
         }
+    }
+    for &(pos, rgb, range) in items {
+        let l = omni(pos, rgb, range, false);
+        ground.push(ground_light(&l, rgb));
+        lights.push(l);
     }
     let shots = bolts.submit(r, walk, eye, &ground);
     lights.extend(shots.iter().map(|b| omni(b.pos, b.rgb, b.radius, false)));

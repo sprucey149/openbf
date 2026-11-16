@@ -677,6 +677,10 @@ impl Sim {
         //    below reads the plan made this same tick. One team per tick at
         //    most: team t plans when the tick reaches its `next_plan_tick`,
         //    which starts at t and advances by `PLAN_PERIOD`.
+        //    The script's goal manager files its members first (`goals`).
+        if !predicted {
+            crate::goals::step(self);
+        }
         for t in 0..2u8 {
             if !predicted && self.tick >= self.commander[usize::from(t)].next_plan_tick {
                 crate::commander::plan(self, t);

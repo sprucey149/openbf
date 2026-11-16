@@ -1,7 +1,8 @@
 //! The end of a round (issue #33, `analysis/re-round-end.md` §2-§3): one flow
 //! on every map. When the round is decided the view goes to a random
 //! camera shot of the mission and the victory / defeat banner stands over it
-//! (5 s at least and until the music ends, 7 s at most: BF1 §2.1); then
+//! (5 s at least and until the music ends, 7 s at most: BF1 §2.1); then,
+//! on a win with an end movie set, that movie; then
 //! BF2's stats pages (issue #50, [`ui::stats`]: Team Stats, a row's Personal
 //! Stats, the player's Career Stats), left with Square ("Done") or 30 s with
 //! no input (§3, both games); leaving goes on to the next playlist map or
@@ -30,6 +31,14 @@ pub fn hud_pass_drawn(round_end: bool, hud_hidden: bool) -> bool {
 pub enum Phase {
     /// The banner over the camera shot.
     Banner,
+    /// `SetMissionEndMovie`'s clip, between the banner and the stats
+    /// (`FUN_00381110`): once the banner's timer has run out and the fade
+    /// to black (`FUN_0045ec50`, done in `FUN_00381088`) is over, with the
+    /// clip set and the winners mask's bit 2 up, `FUN_00564398` plays it;
+    /// the stats wait on it (`FUN_00381358`: `FUN_00172df0`, a movie still
+    /// playing). The caller plays it and calls [`RoundEnd::movie_over`].
+    /// trace: `DAT_00600b4d`, the other flag it needs.
+    Movie,
     /// The stats pages ([`RoundEnd::stats`] says which).
     Stats,
     /// Left: the next playlist map, else the shell.
@@ -60,13 +69,21 @@ pub struct RoundEnd {
     /// The stats pages, made once the banner is down
     /// ([`RoundEnd::wants_stats`]); input waits for them.
     pub stats: Option<StatsScreens>,
+    /// The end movie to play after the banner ([`Phase::Movie`]).
+    pub movie: Option<String>,
 }
 
 impl RoundEnd {
     /// The round just ended: draw a shot from `shots` (the picker's own draw,
     /// seeded) and stand the banner for the music's length within 5-7 s
-    /// (5 s with no music).
-    pub fn start(result: Result, shots: &[CameraShot], seed: u32, music_secs: Option<f32>) -> Self {
+    /// (5 s with no music); `movie` plays after it.
+    pub fn start(
+        result: Result,
+        shots: &[CameraShot],
+        seed: u32,
+        music_secs: Option<f32>,
+        movie: Option<String>,
+    ) -> Self {
         let shot = (!shots.is_empty()).then(|| {
             let mut p = ShotPicker::new(seed);
             shots[p.next(shots.len()).min(shots.len() - 1)]
@@ -81,7 +98,34 @@ impl RoundEnd {
             secs: 0.0,
             idle: 0.0,
             stats: None,
+            movie,
         }
+    }
+
+    /// The end movie is over, or there was none to play.
+    pub fn movie_over(&mut self) {
+        if self.phase == Phase::Movie {
+            self.phase = Phase::Stats;
+            self.secs = 0.0;
+        }
+    }
+
+    /// The end movie has had its turn (played, skipped or missing).
+    pub fn movie_played(&self) -> bool {
+        self.movie.is_some() && self.phase != Phase::Banner
+    }
+
+    /// The clip [`Phase::Movie`] plays now.
+    pub fn playing_movie(&self) -> Option<&str> {
+        self.movie.as_deref().filter(|_| self.phase == Phase::Movie)
+    }
+
+    /// The battle's sounds are over: from the fade out of the banner on
+    /// (`FUN_00381110` stops them before the movie: `FUN_0043df50` sets each
+    /// of the six channels' playing voices to state 2 and stops the streams [D];
+    /// `FUN_00380f48` again before the stats).
+    pub fn silenced(&self) -> bool {
+        self.phase != Phase::Banner
     }
 
     /// The banner is down and the pages are not made yet.
@@ -94,7 +138,12 @@ impl RoundEnd {
         self.secs += dt;
         let mut sound = None;
         let next = match self.phase {
-            Phase::Banner => (self.secs >= self.banner_secs).then_some(Phase::Stats),
+            Phase::Banner => (self.secs >= self.banner_secs).then_some(if self.movie.is_some() {
+                Phase::Movie
+            } else {
+                Phase::Stats
+            }),
+            Phase::Movie => None,
             Phase::Stats => {
                 self.idle = if pad.any() { 0.0 } else { self.idle + dt };
                 let quit = self.stats.as_mut().and_then(|s| {
@@ -129,6 +178,46 @@ impl RoundEnd {
     pub fn done(&self) -> bool {
         self.phase == Phase::Done
     }
+}
+
+/// One frame of [`Phase::Movie`] on the shell's player `movie`: it starts
+/// the clip with its sound track (dropped with `voice`, at the dialogue
+/// `volume` as the shell's cutscenes) and ends the phase at the clip's end,
+/// on `skip`, or at once when the clip is not baked. The newest decoded
+/// frame, for the HUD. OURS: `skip` (the shell cutscenes' accept / back);
+/// trace: whether `FUN_00564398`'s player takes a skip.
+pub fn step_end_movie(
+    r: &mut RoundEnd,
+    movie: Option<&mut crate::shell_movie::ShellMovie>,
+    audio: Option<&mut audio::Audio>,
+    voice: &mut Option<audio::Shot>,
+    volume: f32,
+    dt: f32,
+    skip: bool,
+) -> Option<(Vec<u8>, u32, u32)> {
+    let clip = r.playing_movie()?.to_owned();
+    let Some(m) = movie.filter(|m| m.has(&clip)) else {
+        *voice = None;
+        r.movie_over();
+        return None;
+    };
+    if m.current() != Some(clip.as_str()) {
+        m.play_once(&clip);
+        *voice = None;
+        if let (Some(path), Some(a)) = (m.audio_path(&clip).filter(|_| volume > 0.0), audio) {
+            match audio::decode(path) {
+                Ok(sound) => *voice = a.play_menu_shot(&sound, crate::sounds::level_db(volume)),
+                Err(e) => eprintln!("end movie audio {}: {e:#}", path.display()),
+            }
+        }
+    }
+    let frame = m.frame(dt);
+    if m.is_finished() || skip {
+        m.stop();
+        *voice = None;
+        r.movie_over();
+    }
+    frame
 }
 
 #[cfg(test)]
@@ -194,7 +283,7 @@ mod flow_tests {
             (Some(6.2), 6.2),
             (Some(20.0), 7.0),
         ] {
-            let mut r = RoundEnd::start(Result::Victory, &shots(), 7, music);
+            let mut r = RoundEnd::start(Result::Victory, &shots(), 7, music, None);
             let mut t = 0.0f32;
             while r.phase == Phase::Banner {
                 r.step(1.0 / 30.0, Pad::default());
@@ -203,7 +292,7 @@ mod flow_tests {
             assert!((t - want).abs() < 0.05, "music {music:?}: {t}");
             assert_eq!(r.phase, Phase::Stats);
         }
-        let mut r = RoundEnd::start(Result::Defeat, &shots(), 7, Some(5.0));
+        let mut r = RoundEnd::start(Result::Defeat, &shots(), 7, Some(5.0), None);
         r.step(5.1, Pad::default());
         assert!(r.wants_stats());
         r.step(0.1, press(|p| p.square = true));
@@ -235,11 +324,30 @@ mod flow_tests {
         assert!(r.done(), "Square: Done");
     }
 
+    /// A won campaign round plays its end movie after the banner and before
+    /// the stats (`FUN_00381110`), the battle silent from the movie on.
+    #[test]
+    fn the_end_movie_comes_between_the_banner_and_the_stats() {
+        let mut r = RoundEnd::start(Result::Victory, &shots(), 1, None, Some("geomon02".into()));
+        assert!(!r.silenced());
+        assert_eq!(r.playing_movie(), None);
+        r.step(5.1, Pad::default());
+        assert_eq!(r.phase, Phase::Movie);
+        assert_eq!(r.playing_movie(), Some("geomon02"));
+        assert!(r.silenced());
+        assert!(!r.wants_stats());
+        r.step(60.0, press(|p| p.square = true));
+        assert_eq!(r.phase, Phase::Movie, "the movie waits for its end");
+        r.movie_over();
+        assert!(r.wants_stats());
+        assert!(r.silenced());
+    }
+
     /// 30 s with no input on a stats page quits; any press restarts the
     /// count. A mission with no shots keeps the battle's view.
     #[test]
     fn an_idle_stats_screen_quits_after_30_s() {
-        let mut r = RoundEnd::start(Result::Victory, &shots(), 1, None);
+        let mut r = RoundEnd::start(Result::Victory, &shots(), 1, None, None);
         assert!(r.shot.is_some());
         r.step(7.1, Pad::default());
         r.stats = Some(pages());
@@ -256,7 +364,7 @@ mod flow_tests {
             r.step(1.0 / 30.0, Pad::default());
         }
         assert!(r.done());
-        assert!(RoundEnd::start(Result::Victory, &[], 1, None)
+        assert!(RoundEnd::start(Result::Victory, &[], 1, None, None)
             .shot
             .is_none());
     }

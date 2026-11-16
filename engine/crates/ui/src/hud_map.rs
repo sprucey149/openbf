@@ -75,6 +75,8 @@ pub enum MapView {
     /// centre and radius, §2.3 D:402078), turned by the mission's north
     /// angle only (§2.2), no units (they need a controlled entity, §3).
     Spawn,
+    /// Campaign map with live units and objective markers.
+    Large,
 }
 
 /// One sprite on the map.
@@ -183,7 +185,7 @@ impl MapModel {
     pub fn side(&self) -> f32 {
         match self.view {
             MapView::Small => BACKDROP,
-            MapView::Spawn => SPAWN_BACKDROP,
+            MapView::Spawn | MapView::Large => SPAWN_BACKDROP,
         }
     }
 
@@ -221,7 +223,7 @@ impl MapModel {
     pub fn group(&self, base: &Mat4) -> Mat4 {
         match self.view {
             MapView::Small => *base * Mat4::from_rotation_z(-self.heading),
-            MapView::Spawn => *base * Mat4::from_rotation_z(self.turn),
+            MapView::Spawn | MapView::Large => *base * Mat4::from_rotation_z(self.turn),
         }
     }
 
@@ -245,7 +247,7 @@ pub fn window_point(hud: &Hud, world: [f32; 2], clamp: bool, size: [f32; 2]) -> 
     let (uv, _) = map.place(world, clamp)?;
     let (base, fx) = match map.view {
         MapView::Small => (e.local(), e.pos.x / FRAME_W),
-        MapView::Spawn => (spawn_base(e.scale), POSITION_SPAWN[0]),
+        MapView::Spawn | MapView::Large => (spawn_base(e.scale), POSITION_SPAWN[0]),
     };
     let p = map.group(&base).transform_point3(map.local(uv));
     let sc = frame_scale(size);
@@ -365,6 +367,52 @@ impl Ctx<'_> {
         self.map_view(i, e, map, &spawn_base(e.scale), &s, e.alpha);
     }
 
+    pub(crate) fn map_campaign(&mut self, size: [f32; 2]) {
+        let Some(map) = self.hud.map.as_ref() else {
+            return;
+        };
+        let eye = map.eye;
+        let heading = map.heading;
+        let units = map.units.clone();
+        let mut map = map.clone().spawn_view(None);
+        map.view = MapView::Large;
+        map.units = units;
+        let Some(i) = self
+            .hud
+            .roots
+            .iter()
+            .copied()
+            .find(|i| self.hud.elems[*i].kind == Kind::Map)
+        else {
+            return;
+        };
+        let e = &self.hud.elems[i];
+        let screen = Screen {
+            origin: [
+                OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(POSITION_SPAWN[0], size),
+                OVERFILL[1].0 * size[1],
+            ],
+            scale: frame_scale(size),
+        };
+        self.map_view(i, e, &map, &spawn_base(e.scale), &screen, 1.0);
+        if let Some((uv, _)) = map.place(eye, false) {
+            let fov = map.group(&spawn_base(e.scale))
+                * Mat4::from_translation(map.local(uv))
+                * Mat4::from_rotation_z(heading)
+                * Mat4::from_scale(Vec3::splat(FOV_SCALE))
+                * mesh_frame()
+                * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+            self.mesh(
+                i,
+                "hud_map_fov",
+                &fov,
+                &screen,
+                color([255.0; 3], 1.0),
+                false,
+            );
+        }
+    }
+
     /// One view of the map under `base` (the view's Position × the
     /// element's Scale).
     #[allow(clippy::too_many_arguments)]
@@ -415,7 +463,7 @@ impl Ctx<'_> {
             let turn = p.heading.unwrap_or(upright);
             self.icon_at(i, &group, s, map.local(uv), turn, p, alpha);
         }
-        if small {
+        if map.view != MapView::Spawn {
             for marker in &map.markers {
                 if let Some((uv, _)) = map.place(marker.pos, true) {
                     self.icon_at(i, &group, s, map.local(uv), upright, marker, alpha);

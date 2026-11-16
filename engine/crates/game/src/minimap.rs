@@ -590,10 +590,20 @@ impl MapStatic {
             });
         }
         let mut markers = Vec::new();
+        if let Some(campaign) = &walk.campaign {
+            markers.extend(campaign.map_markers(sim).into_iter().map(|m| MapIcon {
+                pos: [m.pos.x, m.pos.z],
+                texture: m.icon,
+                scale: m.scale,
+                color: [223, 223, 32],
+                heading: None,
+                number: None,
+            }));
+        }
         if let Some(ctf) = sim
             .ctf
             .as_ref()
-            .filter(|ctf| ctf.mode == core::sim::CtfMode::OneFlag)
+            .filter(|ctf| walk.campaign.is_none() && ctf.mode == core::sim::CtfMode::OneFlag)
         {
             for flag in &ctf.flags {
                 let Some((pos, delivery)) = ctf_marker(sim, flag, own) else {

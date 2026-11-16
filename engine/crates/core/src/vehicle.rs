@@ -227,6 +227,15 @@ pub struct Vehicle {
     /// Issue #35 [ours]: after a slice only this unit may board, until the
     /// tick ([`SLICE_RESERVE`]). Hashed only when set.
     pub slice_hold: Option<(crate::unit::UnitHandle, u64)>,
+    /// E+0x188, s: while above 0 both CanEnter tests refuse every soldier
+    /// (B2 `FUN_0024a9d0` B2:164158, `FUN_0024ac98` B2:164291). The entity
+    /// setter `FUN_00268c78` writes it from `DisableTime` (hash 0x1c1694fa,
+    /// B2:185034-185040), as geo1c's Objective1 does to shut its hailfire;
+    /// the slicer writes `TimeTilReboard` (B2:340188). Counted down by dt
+    /// in `Sim::tick_vehicle_pads`. PROVISIONAL: trace: the PS2's
+    /// decrement of E+0x188 (not in the entity's own functions). Hashed
+    /// only when non-zero.
+    pub disable: f32,
 }
 
 /// Issue #35 [ours, the maintainer 2026-10-29]: after a slice only the
@@ -329,12 +338,19 @@ impl Vehicle {
             eat(&u.gen.to_le_bytes());
             eat(&t.to_le_bytes());
         }
+        if self.disable != 0.0 {
+            eat(&[0x5e]);
+            eat(&self.disable.hash_bits().to_le_bytes());
+        }
     }
 
-    /// Issue #35: is boarding shut to `u` by another unit's slice hold?
+    /// Issue #35: is boarding shut to `u` by another unit's slice hold, or
+    /// to everyone by the E+0x188 lock ([`Vehicle::disable`])?
     pub fn held_against(&self, u: crate::unit::UnitHandle, tick: u64) -> bool {
-        self.slice_hold
-            .is_some_and(|(who, until)| who != u && tick < until)
+        self.disable > 0.0
+            || self
+                .slice_hold
+                .is_some_and(|(who, until)| who != u && tick < until)
     }
 }
 
@@ -469,6 +485,7 @@ impl VehicleSpec {
             aim_sphere: None,
             slice: 0.0,
             slice_hold: None,
+            disable: 0.0,
         }
     }
 }

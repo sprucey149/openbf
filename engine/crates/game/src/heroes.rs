@@ -79,11 +79,24 @@ pub fn append(
     } else {
         m.teams.iter().position(|t| t.faction == roster.faction)? + 1
     };
-    let name = &m
+    let name = m
         .heroes
         .iter()
-        .find(|(t, _)| usize::from(*t) == source_team)?
-        .1;
+        .find(|(t, _)| usize::from(*t) == source_team)
+        .map(|(_, name)| name.as_str())
+        .or_else(|| {
+            m.is_campaign()
+                .then(|| {
+                    m.class_load_order
+                        .iter()
+                        .find(|load| {
+                            load.request
+                                .starts_with(&format!("{}_hero_", roster.faction))
+                        })
+                        .map(|load| load.request.as_str())
+                })
+                .flatten()
+        })?;
     if roster
         .classes
         .iter()
@@ -257,6 +270,21 @@ pub fn tick(walk: &mut crate::walk::WalkSim, feed: &mut EventFeed) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tutorial_followup_loads_the_scripted_mace_kit() {
+        let root = crate::assets::baked_root();
+        let def =
+            MissionDef::load_campaign(&root.parent().unwrap().join("missions"), "geo1c_c").unwrap();
+        let (mut rosters, _) =
+            FactionRoster::pair(&root.join("classes"), "bf2", ["rep", "cis"], Some(&def)).unwrap();
+        let index = append(&mut rosters[0], &root.join("classes"), Some(&def), 0)
+            .expect("scripted Mace kit");
+        assert_eq!(
+            rosters[0].classes[index as usize].class,
+            "rep_hero_macewindu"
+        );
+    }
 
     /// The Hero rows' values (`re-bf2-menus.md` §2.3) as the manager's rules.
     #[test]

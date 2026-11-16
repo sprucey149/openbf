@@ -596,6 +596,33 @@ impl Sim {
     /// the class screen with the hero chosen. With the screens off (a
     /// headless run) he is put back at once as the hero; a refused spawn
     /// keeps him the owner and the ordinary respawn retries it.
+    pub fn accept_scripted_hero(&mut self, member: u32) -> bool {
+        let Some(u) = self.units.get(member as usize) else {
+            return false;
+        };
+        let (team, gen) = (usize::from(u.team), u.gen);
+        let Some(mut heroes) = self.heroes.take() else {
+            return false;
+        };
+        let Some(class) = heroes.classes.get(team).copied().flatten() else {
+            self.heroes = Some(heroes);
+            return false;
+        };
+        if !self.accept_hero_member(member, class) {
+            self.heroes = Some(heroes);
+            return false;
+        }
+        let state = &mut heroes.teams[team];
+        state.unlocked = true;
+        state.offer = None;
+        state.owner = Some(member);
+        state.owner_gen = gen;
+        state.kill_streak = 0;
+        state.spawned = self.units[member as usize].alive;
+        self.heroes = Some(heroes);
+        true
+    }
+
     fn accept_hero_member(&mut self, member: u32, class: u8) -> bool {
         let i = member as usize;
         let Some(u) = self.units.get(i) else {

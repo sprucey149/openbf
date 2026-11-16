@@ -127,7 +127,43 @@ pub fn icons(set: IconSet, map: &input::Mapping) -> Icons {
         spawn_back: bound(map, buttons::SPAWN_BACK).unwrap_or(fallback.spawn_back),
         class_next: bound(map, buttons::SPAWN_CLASS_NEXT).unwrap_or(fallback.class_next),
         class_prev: bound(map, buttons::SPAWN_CLASS_PREV).unwrap_or(fallback.class_prev),
+        controls: CONTROL_BITS
+            .map(|bit| bound(map, bit).unwrap_or(ui::input_icons::PadButton::Select)),
+        ..fallback
     }
+}
+
+pub const CONTROL_BITS: [u32; 14] = {
+    use core::sim::buttons as b;
+    [
+        b::FIRE,
+        b::SECONDARY_FIRE,
+        b::JUMP,
+        b::ROLL_STANCE,
+        b::SPRINT,
+        b::RELOAD,
+        b::ACTION,
+        b::SWITCH_WEAPON,
+        b::SWITCH_SECONDARY,
+        b::ZOOM,
+        b::SQUAD_MOVE_OUT,
+        b::SQUAD_HOLD,
+        b::SQUAD_AT_EASE,
+        b::SQUAD_FOLLOW,
+    ]
+};
+
+pub fn with_keyboard(mut icons: Icons, bindings: &crate::kbm::Bindings) -> Icons {
+    for (k, bit) in CONTROL_BITS.iter().enumerate() {
+        let text = bindings
+            .table
+            .iter()
+            .find(|(_, bind)| bind.bits & bit != 0)
+            .map(|(trigger, _)| format!("[{}]", crate::control_layout::keyboard_name(*trigger)))
+            .unwrap_or_else(|| "[Unbound]".into());
+        icons.keys[k] = ui::input_icons::KeyLabel::new(&text);
+    }
+    icons
 }
 
 /// Whether a key event is the player pressing that key now: not a repeat, and
