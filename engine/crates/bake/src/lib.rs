@@ -58,6 +58,7 @@ mod vehicle_offsets;
 mod vehicle_render;
 pub mod walker;
 pub mod water_glb;
+pub mod world_anims;
 pub mod xbox;
 pub mod xbox_icons;
 

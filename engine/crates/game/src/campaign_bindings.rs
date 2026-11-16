@@ -87,6 +87,11 @@ const BOUND: &[&str] = &[
     "MissionVictory",
     "OpenAudioStream",
     "RespawnObject",
+    "PauseAnimation",
+    "PlayAnimation",
+    "PlayAnimationFromTo",
+    "RewindAnimation",
+    "SetAnimationStartPoint",
     "ScriptCB_GetMissionTime",
     "ScriptCB_IsMissionSetupSaved",
     "ScriptCB_PlayInGameMovie",
@@ -120,10 +125,10 @@ const BOUND: &[&str] = &[
 
 /// Bindings with nothing to do in this port: loading, memory, rendering,
 /// sound mixing, camera shots, the AI planner's goals and tuning, the
-/// gameplay-option queries the campaign does not read, animations.
+/// gameplay-option queries the campaign does not read.
 /// PROVISIONAL: `SetAIDamageThreshold` is not wired to the sim's bots;
-/// animations (`PlayAnimation`, ...) and `EntityFlyerTakeOff`/`InitAsLanded`
-/// play nothing. trace: the animation bank player. `ShowPopup` is bound to
+/// `EntityFlyerTakeOff`/`InitAsLanded` play nothing. The world animation
+/// bindings (`PlayAnimation`, ...) drive `crate::world_anim`. `ShowPopup` is bound to
 /// `0x18e920` (the table entry at `0x5f9df0`), `jr ra; move v0,zero`: it
 /// does nothing on the PS2.
 const IGNORED: &[&str] = &[
@@ -149,12 +154,8 @@ const IGNORED: &[&str] = &[
     "FillAsteroidPath",
     "FillAsteroidRegion",
     "ForceAIOutOfVehicles",
-    "PauseAnimation",
-    "PlayAnimation",
-    "PlayAnimationFromTo",
     "ReadDataFile",
     "RemoveRegion",
-    "RewindAnimation",
     "ScaleSoundParameter",
     "ScriptCB_DisableFlyerShadows",
     "ScriptCB_EnableCommandPostVO",
@@ -175,7 +176,6 @@ const IGNORED: &[&str] = &[
     "SetAIVehicleNotifyRadius",
     "SetAIViewMultiplier",
     "SetAllowBlindJetJumps",
-    "SetAnimationStartPoint",
     "SetAttackingTeam",
     "SetBirdType",
     "SetBleedingVoiceOver",
@@ -757,6 +757,28 @@ impl Ctx<'_> {
             }
             "RespawnObject" => {
                 w.respawn_object(sim, arg(a, 0));
+                nothing()
+            }
+            "PlayAnimation" => {
+                w.anims.play(&text(arg(a, 0)));
+                nothing()
+            }
+            "PauseAnimation" => {
+                w.anims.pause(&text(arg(a, 0)));
+                nothing()
+            }
+            "RewindAnimation" => {
+                w.anims.rewind(&text(arg(a, 0)));
+                nothing()
+            }
+            "PlayAnimationFromTo" => {
+                if let (Some(from), Some(to)) = (num(a, 1), num(a, 2)) {
+                    w.anims.play_from_to(&text(arg(a, 0)), from, to);
+                }
+                nothing()
+            }
+            "SetAnimationStartPoint" => {
+                w.anims.set_start_point(&text(arg(a, 0)), sim);
                 nothing()
             }
             "CreateEntity" => {

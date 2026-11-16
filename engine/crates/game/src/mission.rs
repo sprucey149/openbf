@@ -384,6 +384,14 @@ pub struct SpaceAssaultDef {
     pub lock_shields: Vec<u16>,
     #[serde(default)]
     pub scripted: Vec<SpaceScriptedDef>,
+    /// Give every seatless armed building with health a `Station`, not only
+    /// the names above: set for a campaign space round, whose script names its
+    /// targets itself (spa2c's `comms_cis`, `cisbridge01`, `ciseng01/02`).
+    /// On the PS2 every placed `armedbuilding` is a live entity with health in
+    /// any mode; the port gates it to stay off ground maps
+    /// (`re-space-assault.md` §5).
+    #[serde(default)]
+    pub armed_parts: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -702,6 +710,20 @@ impl MissionDef {
 
     pub fn is_campaign(&self) -> bool {
         self.mode == "campaign"
+    }
+
+    /// The Space Assault objects a round installs: a Space Assault mission's
+    /// own, or a campaign space round's, which gives a `Station` to every
+    /// seatless armed building ([`SpaceAssaultDef::armed_parts`]).
+    pub fn space_round(&self) -> Option<SpaceAssaultDef> {
+        let campaign_space =
+            self.is_campaign() && (self.space_assault.is_some() || self.map.contains("_spa"));
+        if self.mode != "ass" && !campaign_space {
+            return None;
+        }
+        let mut def = self.space_assault.clone().unwrap_or_default();
+        def.armed_parts |= self.is_campaign();
+        Some(def)
     }
 
     pub fn tickets(&self) -> [u32; 2] {

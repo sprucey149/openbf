@@ -268,6 +268,7 @@ pub(crate) struct World {
     /// `player1.objectivesUpdated` is up: the last of its posts to fire.
     pub updated_on: bool,
     pub reported: BTreeSet<String>,
+    pub anims: crate::world_anim::WorldAnimPlayer,
 }
 
 #[derive(Clone, Debug)]
@@ -431,6 +432,7 @@ impl CampaignRuntime {
             hud_events: Vec::new(),
             updated_on: false,
             reported: BTreeSet::new(),
+            anims: Default::default(),
         };
         Self {
             interp,
@@ -542,6 +544,19 @@ impl CampaignRuntime {
         self.dispatch_sim_events(sim);
         self.dispatch_state_changes(sim);
         self.step_timers(sim, dt);
+        self.w.anims.step(sim, dt);
+    }
+
+    /// The map's world animations (`crate::world_anim`), before `start` runs
+    /// the script's setup. A layer still in `manifest.layers` was not
+    /// merged, so its worlds' groups are left out.
+    pub fn load_world_anims(&mut self, dir: &std::path::Path, manifest: &crate::assets::Manifest, sim: &Sim) {
+        let unloaded: Vec<String> = manifest
+            .layers
+            .iter()
+            .flat_map(|l| l.worlds.iter().chain(std::iter::once(&l.name)).cloned())
+            .collect();
+        self.w.anims = crate::world_anim::WorldAnimPlayer::load(dir, &unloaded, &self.w.station_names, sim);
     }
 
     fn fire(&mut self, sim: &mut Sim, kind: EventKind, key: &EventKey, args: Vec<Value>) {

@@ -160,7 +160,7 @@ pub use state::{
     STATIC_DIGEST_GROUPS,
 };
 pub use stations::{
-    Station, StationAnim, StationClass, StationDamageEffect, StationMotion,
+    Station, StationAnim, StationClass, StationDamageEffect, StationMotion, StationParts,
     DELAY_DEFAULT as STATION_DELAY_DEFAULT, GATHER_MAX as STATION_GATHER_MAX,
 };
 pub use target_hints::{TargetHint, TargetHints};

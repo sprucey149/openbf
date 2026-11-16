@@ -176,11 +176,8 @@ fn setup_baked_campaign_with(
     .unwrap();
     walk.set_hunt_class_change(&layout, &post_classes, "bf2");
     let factions = [def.teams[0].faction.clone(), def.teams[1].faction.clone()];
-    let space = def
-        .space_assault
-        .as_ref()
-        .filter(|_| def.mode == "ass" || (def.is_campaign() && def.map.contains("_spa")))
-        .map(|s| (s, 180));
+    let space_def = def.space_round();
+    let space = space_def.as_ref().map(|s| (s, 180));
     let _ = crate::vehicle_pads::install_for_mission(
         &mut walk.sim,
         &manifest,
@@ -265,6 +262,7 @@ fn setup_baked_campaign_with(
             })
             .collect(),
     );
+    rt.load_world_anims(&baked_dir.join(&def.map), &manifest, &walk.sim);
     rt.start(&mut walk.sim);
     walk.step_tick(&[core::sim::PadState::default()]);
     walk.sim
@@ -753,4 +751,50 @@ fn geo1c_objective_goals_reach_the_goal_manager() {
     }
     assert_eq!(goals(&walk)[0], (2, Deathmatch, 100.0));
     assert!(!goals(&walk).contains(&(1, Deathmatch, 1.0)));
+}
+
+#[test]
+fn spa2c_comm_array_is_a_destructible_station() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: spa2c_c mission and baked assets required");
+        return;
+    };
+    let (_def, walk, rt) = setup_baked_campaign(&missions_dir, &baked_dir, "spa2c_c");
+    for name in ["comms_cis", "cisbridge01", "ciseng01", "ciseng02"] {
+        let Some(Ud::Station(si)) = rt.w.resolve_name(&walk.sim, name) else {
+            panic!("{name} is not a station: {:?}", rt.w.resolve_name(&walk.sim, name));
+        };
+        let st = &walk.sim.stations[usize::from(si)];
+        assert!(st.health.max > 0.0 && st.health.max.is_finite() && !st.destroyed, "{name}");
+    }
+}
+
+#[test]
+fn myg1c_core_shield_animation_drops_the_shield_station() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: myg1c_c mission and baked assets required");
+        return;
+    };
+    if !baked_dir
+        .join("bf2_myg1")
+        .join(manifest::world_anim::FILE)
+        .exists()
+    {
+        eprintln!("SKIP: bf2_myg1 world animations not baked");
+        return;
+    }
+    let (_def, mut walk, mut rt) = setup_baked_campaign(&missions_dir, &baked_dir, "myg1c_c");
+    let Some(Ud::Station(si)) = rt.w.resolve_name(&walk.sim, "cforce_shield_04") else {
+        panic!("cforce_shield_04 is not a station");
+    };
+    let si = usize::from(si);
+    assert_eq!(rt.w.anims.stations("cshield_down_04"), vec![Some(si)]);
+    let before = walk.sim.stations[si].transform.w_axis.truncate();
+    rt.w.anims.play("cshield_down_04");
+    for _ in 0..3 {
+        rt.w.anims.step(&mut walk.sim, 1.0 / core::TICK_HZ as f32);
+    }
+    let after = walk.sim.stations[si].transform.w_axis.truncate();
+    assert!((before.y - 9000.0 - after.y).abs() < 1.0, "{before} -> {after}");
+    assert!((before.x - after.x).abs() < 1e-3 && (before.z - after.z).abs() < 1e-3);
 }

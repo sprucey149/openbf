@@ -88,6 +88,10 @@ names a mission declares and only in Space Assault, so no ground map changes. Th
 health (`sensors_spin`, `sensors_spin0`, `imp_cap_stardestroyer_shield1`) and are left out. `Sim::building_down` also
 answers for a destroyed station, so `FallenDraw` shows the armed building's wreck.
 
+A campaign space round (`MissionDef::space_round`, 2026-11-16) gives a `Station` to every seatless armed building with
+finite positive health, not only declared names: its script names its own targets (spa2c's `comms_cis` objective had no
+marker, no health bar and took no damage while it stayed scenery). `SpaceAssaultDef::armed_parts` carries the choice.
+
 ## 6. HUD
 
 `player1.team{1,2}.points` and `.pointsText` drive the disc's own text. The interim bars are gone: `ui::hud_space` draws the

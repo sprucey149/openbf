@@ -524,6 +524,11 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("world-anims") if args.len() == 4 => {
+            let groups = bake::world_anims::bake(&ci(&args[2]), &args[3])?;
+            println!("baked {groups} world animation groups -> {}", args[3]);
+            Ok(())
+        }
         Some("classes") if args.len() == 4 => {
             let c = bake::classes::bake_classes(&ci(&args[2]), &args[3])?;
             println!("baked {} classes -> {}", c.len(), args[3]);
@@ -584,6 +589,7 @@ fn main() -> Result<()> {
                  \x20 bake donor-hints <assets_baked>             BF2 cover hints onto the BF1 maps of bake::donor::DONORS\n\
                  \x20 bake common     <common.lvl> <outdir> [pc.lvl]  shared models/textures/classes\n\
                  \x20 bake classes    <file.lvl>   <out.ron>      entc/wpnc/ordc/expc props\n\
+                 \x20 bake world-anims <map.lvl>  <mapdir>       world animations and groups\n\
                  \x20 bake loadscreen <load.lvl>   <mapdir>       load screen sequence/pool\n\
                  \x20 bake load-orbits <gal1.lvl>  <common-dir>   BF2 loading orbit views\n\
                  \x20 bake load-layout <load.lvl>  <common-dir>   BF1 loading layout and sprites\n\

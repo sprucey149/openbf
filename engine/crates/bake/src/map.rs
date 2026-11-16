@@ -500,6 +500,7 @@ pub fn bake_map_with_sky(
     crate::write_ron(&Path::new(outdir).join("manifest.ron"), &m)?;
     let classes = Path::new(outdir).join(MAP_CLASSES_FILE);
     crate::classes::bake_classes(lvl_path, &classes.to_string_lossy())?;
+    crate::world_anims::bake(lvl_path, outdir)?;
     Ok(m)
 }
 

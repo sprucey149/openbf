@@ -1,0 +1,297 @@
+//! World animation groups, as the campaign scripts drive them
+//! (`PlayAnimation`, `PauseAnimation`, `RewindAnimation`,
+//! `PlayAnimationFromTo`, `SetAnimationStartPoint`). The data is the map's
+//! `manifest::world_anim::FILE`.
+//!
+//! BF2, `SWBFRNT2.ELF-decomp.c`:
+//! - **Tables.** Animations by name (0x691918, FUN_00272ef8), groups by name
+//!   (0x6979c8, FUN_00274280). A name already taken keeps the first.
+//! - **Entries.** 0x60 bytes at DAT_00691a20 (FUN_00274008): its time, its
+//!   object, and a base matrix, identity until the object of that name is
+//!   placed, which links it and copies its matrix (FUN_00274738).
+//! - **Bindings.** `PlayAnimation` (FUN_00190dc8) sets the group playing,
+//!   `PauseAnimation` (FUN_00190e28) clears it, `RewindAnimation`
+//!   (FUN_00190e88) sets every entry's time to 0 and the end time to -1,
+//!   `PlayAnimationFromTo` (FUN_00190f68) pauses, sets every time to `from`
+//!   and the end to `to`, then plays (only for 0 <= from < to), and
+//!   `SetAnimationStartPoint` (FUN_00190f08) copies each object's matrix into
+//!   its entry's base (FUN_002741b8).
+//! - **Each frame** (FUN_00274c18): a playing group advances each linked
+//!   entry by dt; with an end time it advances only up to it, then stops.
+//! - **Evaluation** (FUN_002736e0, an animation with its local byte clear):
+//!   time += dt, clamped to the duration, or wrapped when it loops. The
+//!   matrix is the base; rotation keys give angles (radians) in x, y, z,
+//!   built as identity × Rx × Ry × Rz (FUN_0053ad40, FUN_0053adf0,
+//!   FUN_0053ae90) and put before the base; position keys put the
+//!   translation at the base's origin plus p along the base's own axes.
+//!   Row-vector on the PS2, so here `base * Rz * Ry * Rx` and
+//!   `base.transform_point3(p)`.
+//! - **Keys** (FUN_00273298): the last key at or before t and the next one;
+//!   past the last, the last and (looping) the first, or (not) itself; past
+//!   the duration when not looping, the last twice; before the first, none,
+//!   and that channel keeps the base.
+//! - **Interpolation** (FUN_00273530), by the first key's byte: 0 holds it,
+//!   1 is linear over the gap (the gap to the duration when the next key is
+//!   not later, 1 s when neither), 2 is a cubic Hermite in the seconds since
+//!   the first key, with both tangents stored on it (FUN_00539d78).
+//!   PROVISIONAL: the cubic's span is the gap; the float FUN_00539d50
+//!   passes on is not visible in the listing, and the gap is the one
+//!   value that makes the curve reach the next key.
+//!
+//! The port moves only what it can place: an entry whose object is a sim
+//! `Station` ([`core::sim::Sim::set_station_transform`]), which the viewer
+//! draws and collides from its pose. trace: an entry on any other object
+//! (Mygeeto's gunships and dropship `repveh4`..`6`) is left static.
+//! trace: an animation with its local byte set (FUN_002736e0's other
+//! branch, Mygeeto's `gunshipfly`) steps along its own turning axes and is
+//! not ported. trace: the group flag that re-takes the base when the object
+//! reports a state (group+0xe bit 0), and the hierarchy pass that carries
+//! child objects (DAT_008252c0), are not ported. PROVISIONAL: the sign of
+//! each axis rotation is glam's; FUN_0053ad40's lane order is not read.
+
+use core::fmath::FloatExt;
+use glam::{Mat4, Vec3};
+use manifest::world_anim::{WorldAnim, WorldAnimKey, WorldAnims};
+
+#[derive(Clone, Debug)]
+struct Entry {
+    anim: Option<usize>,
+    station: Option<usize>,
+    time: f32,
+    base: Mat4,
+    parts: Option<(bool, core::sim::StationParts)>,
+}
+
+#[derive(Clone, Debug)]
+struct Group {
+    name: String,
+    playing: bool,
+    end: f32,
+    entries: Vec<Entry>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WorldAnimPlayer {
+    anims: Vec<WorldAnim>,
+    groups: Vec<Group>,
+}
+
+fn bracket(a: &WorldAnim, keys: &[WorldAnimKey], t: f32) -> Option<(WorldAnimKey, WorldAnimKey)> {
+    let last = *keys.last()?;
+    if !a.looping && a.duration < t {
+        return Some((last, last));
+    }
+    for (i, k) in keys.iter().enumerate() {
+        if k.time > t {
+            continue;
+        }
+        match keys.get(i + 1) {
+            None => return Some((*k, if a.looping { keys[0] } else { *k })),
+            Some(next) if t < next.time => return Some((*k, *next)),
+            Some(_) => {}
+        }
+    }
+    None
+}
+
+fn sample(a: &WorldAnim, keys: &[WorldAnimKey], t: f32) -> Option<Vec3> {
+    let (k0, k1) = bracket(a, keys, t)?;
+    let u = t - k0.time;
+    let gap = if k0.time < k1.time {
+        k1.time - k0.time
+    } else if k0.time < a.duration {
+        a.duration - k0.time
+    } else {
+        1.0
+    };
+    let (p0, p1) = (Vec3::from(k0.value), Vec3::from(k1.value));
+    Some(match k0.interp {
+        1 => p1 * (u / gap) + p0 * (1.0 - u / gap),
+        2 => {
+            let (m0, m1) = (Vec3::from(k0.tangent_out), Vec3::from(k0.tangent_in));
+            let c3 = ((p0 - p1) * 2.0 + (m0 + m1) * gap) / (gap * gap * gap);
+            let c2 = ((p1 - p0) * 3.0 - (m0 * 2.0 + m1) * gap) / (gap * gap);
+            ((c3 * u + c2) * u + m0) * u + p0
+        }
+        _ => p0,
+    })
+}
+
+/// Advance `time` by `dt` and give the matrix (FUN_002736e0, local clear).
+fn evaluate(a: &WorldAnim, time: &mut f32, dt: f32, base: Mat4) -> Mat4 {
+    *time += dt;
+    if !a.looping {
+        *time = time.fmin(a.duration);
+    } else if a.duration > 0.0 {
+        while *time > a.duration {
+            *time -= a.duration;
+        }
+    }
+    let mut out = base;
+    if let Some(r) = sample(a, &a.rot, *time) {
+        out = base
+            * Mat4::from_rotation_z(r.z)
+            * Mat4::from_rotation_y(r.y)
+            * Mat4::from_rotation_x(r.x);
+    }
+    if let Some(p) = sample(a, &a.pos, *time) {
+        out.w_axis = base.transform_point3(p).extend(1.0);
+    }
+    out
+}
+
+impl WorldAnimPlayer {
+    /// The map's world animations in `dir`, without those of a world in a
+    /// layer the round left unmerged (`unloaded`), each entry linked to the
+    /// station of its object's name (`station_names`, lowercase).
+    pub fn load(
+        dir: &std::path::Path,
+        unloaded: &[String],
+        station_names: &[String],
+        sim: &core::sim::Sim,
+    ) -> Self {
+        let path = dir.join(manifest::world_anim::FILE);
+        let Some(all) = pak::read_to_string(&path)
+            .ok()
+            .and_then(|t| ron::from_str::<WorldAnims>(&t).ok())
+        else {
+            return Self::default();
+        };
+        let loaded = |w: &str| !unloaded.iter().any(|u| u.eq_ignore_ascii_case(w));
+        let mut anims: Vec<WorldAnim> = Vec::new();
+        for a in all.anims.into_iter().filter(|a| loaded(&a.world)) {
+            if !anims.iter().any(|b| b.name.eq_ignore_ascii_case(&a.name)) {
+                anims.push(a);
+            }
+        }
+        let mut groups: Vec<Group> = Vec::new();
+        for g in all.groups.into_iter().filter(|g| loaded(&g.world)) {
+            if groups.iter().any(|h| h.name.eq_ignore_ascii_case(&g.name)) {
+                continue;
+            }
+            let entries = g
+                .entries
+                .iter()
+                .map(|(anim, object)| {
+                    let object = object.to_ascii_lowercase();
+                    let station = station_names.iter().position(|n| *n == object);
+                    Entry {
+                        anim: anims.iter().position(|a| a.name.eq_ignore_ascii_case(anim)),
+                        base: station
+                            .and_then(|s| sim.stations.get(s))
+                            .map_or(Mat4::IDENTITY, |s| s.transform),
+                        station,
+                        time: 0.0,
+                        parts: None,
+                    }
+                })
+                .collect();
+            groups.push(Group {
+                name: g.name.to_ascii_lowercase(),
+                playing: g.play,
+                end: -1.0,
+                entries,
+            });
+        }
+        WorldAnimPlayer { anims, groups }
+    }
+
+    fn group(&mut self, name: &str) -> Option<&mut Group> {
+        let name = name.to_ascii_lowercase();
+        self.groups.iter_mut().find(|g| g.name == name)
+    }
+
+    pub fn play(&mut self, name: &str) {
+        if let Some(g) = self.group(name) {
+            g.playing = true;
+        }
+    }
+
+    pub fn pause(&mut self, name: &str) {
+        if let Some(g) = self.group(name) {
+            g.playing = false;
+        }
+    }
+
+    pub fn rewind(&mut self, name: &str) {
+        if let Some(g) = self.group(name) {
+            g.entries.iter_mut().for_each(|e| e.time = 0.0);
+            g.end = -1.0;
+        }
+    }
+
+    pub fn play_from_to(&mut self, name: &str, from: f32, to: f32) {
+        if !(from < to && from >= 0.0 && to >= 0.0) {
+            return;
+        }
+        if let Some(g) = self.group(name) {
+            g.entries.iter_mut().for_each(|e| e.time = from);
+            g.end = to;
+            g.playing = true;
+        }
+    }
+
+    pub fn set_start_point(&mut self, name: &str, sim: &core::sim::Sim) {
+        if let Some(g) = self.group(name) {
+            for e in &mut g.entries {
+                if let Some(s) = e.station.and_then(|s| sim.stations.get(s)) {
+                    e.base = s.transform;
+                }
+            }
+        }
+    }
+
+    /// One tick of every playing group (FUN_00274c18).
+    pub fn step(&mut self, sim: &mut core::sim::Sim, dt: f32) {
+        for g in &mut self.groups {
+            let Group {
+                playing,
+                end,
+                entries,
+                ..
+            } = g;
+            if !*playing {
+                continue;
+            }
+            for e in entries {
+                let (Some(ai), Some(si)) = (e.anim, e.station) else {
+                    continue;
+                };
+                let a = &self.anims[ai];
+                if a.local {
+                    continue;
+                }
+                let step = if *end <= 0.0 {
+                    dt
+                } else if *end <= e.time {
+                    *playing = false;
+                    continue;
+                } else if e.time + dt <= *end {
+                    dt
+                } else {
+                    *playing = false;
+                    *end - e.time
+                };
+                let m = evaluate(a, &mut e.time, step, e.base);
+                let destroyed = sim.stations[si].destroyed;
+                if e.parts.as_ref().is_none_or(|(d, _)| *d != destroyed) {
+                    e.parts = Some((destroyed, sim.station_parts(si)));
+                }
+                if let Some((_, parts)) = &e.parts {
+                    sim.set_station_transform(si, m, parts);
+                }
+            }
+        }
+    }
+
+    /// The station each entry of `group` moves.
+    #[cfg(test)]
+    pub(crate) fn stations(&self, group: &str) -> Vec<Option<usize>> {
+        let group = group.to_ascii_lowercase();
+        self.groups
+            .iter()
+            .filter(|g| g.name == group)
+            .flat_map(|g| g.entries.iter().map(|e| e.station))
+            .collect()
+    }
+}

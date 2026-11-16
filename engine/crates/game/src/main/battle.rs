@@ -611,13 +611,8 @@ pub(super) fn make_walk_with_counts(
         let space = b
             .mission
             .as_ref()
-            .filter(|m| m.mode == "ass" || (m.is_campaign() && (m.space_assault.is_some() || m.map.contains("_spa"))))
-            .map(|m| {
-            (
-                m.space_assault.clone().unwrap_or_default(),
-                b.space_score_limit,
-            )
-        });
+            .and_then(|m| m.space_round())
+            .map(|def| (def, b.space_score_limit));
         match game::vehicle_pads::install_for_mission(
             &mut walk.sim,
             &scene.manifest,
@@ -722,6 +717,7 @@ pub(super) fn make_walk_with_counts(
                         })
                         .collect(),
                 );
+                rt.load_world_anims(&scene.dir, &scene.manifest, &walk.sim);
                 rt.start(&mut walk.sim);
                 walk.campaign = Some(rt);
             }

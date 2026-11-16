@@ -88,6 +88,7 @@ pub mod vo;
 pub mod walk;
 pub mod water_anim;
 pub mod weather;
+pub mod world_anim;
 pub mod world_fingerprint;
 
 pub mod walker_shots;

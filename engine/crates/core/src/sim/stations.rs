@@ -209,7 +209,50 @@ pub(super) fn give_health(h: &mut Health, amount: f32) -> bool {
     changed
 }
 
+/// A station's bodies (index, matrix in the station's pose) and blast
+/// sphere centre in the same space: [`Sim::station_parts`].
+pub type StationParts = (Vec<(usize, glam::Mat4)>, Vec3);
+
 impl Sim {
+    /// Station `si`'s bodies and blast sphere in the space of its pose now,
+    /// for [`Sim::set_station_transform`]: taken once, so a station moved
+    /// every tick does not drift.
+    pub fn station_parts(&self, si: usize) -> StationParts {
+        let Some(s) = self.stations.get(si) else {
+            return (Vec::new(), Vec3::ZERO);
+        };
+        let inverse = s.pose().inverse();
+        let bodies = s
+            .instance
+            .map(|i| self.collision.instance_bodies(i))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(i, to_world)| (i, inverse * to_world))
+            .collect();
+        (bodies, inverse.transform_point3(s.sphere_centre))
+    }
+
+    /// Place station `si` at `transform`, as a world animation sets its
+    /// object's matrix (BF2 FUN_00273eb0, vtable +0xbc then +0x14): `parts`
+    /// ([`Sim::station_parts`]) move with it. `pos` stays where the instance
+    /// was placed, the key the viewer joins its draws by.
+    pub fn set_station_transform(
+        &mut self,
+        si: usize,
+        transform: glam::Mat4,
+        parts: &StationParts,
+    ) {
+        let Some(s) = self.stations.get_mut(si) else {
+            return;
+        };
+        s.transform = transform;
+        let pose = s.pose();
+        s.sphere_centre = pose.transform_point3(parts.1);
+        for &(i, local) in &parts.0 {
+            self.collision.move_body(i, pose * local);
+        }
+    }
+
     /// Cache the live collision before destruction so rebuilding restores it.
     pub fn prepare_station_collision(&mut self, station: usize) {
         let s = self.stations[station];
@@ -330,6 +373,7 @@ impl Sim {
             if let Some(parts) = self.station_live_collision.get(usize::from(station)) {
                 self.collision.replace_instance(i, parts, transform);
             }
+            self.collision.bind_station(i, station);
         }
     }
 

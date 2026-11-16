@@ -666,6 +666,16 @@ impl CollisionWorld {
         parts
     }
 
+    /// Every body of `instance` with its world matrix, by body index.
+    pub fn instance_bodies(&self, instance: u32) -> Vec<(usize, glam::Mat4)> {
+        self.bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.instance == Some(instance))
+            .map(|(i, b)| (i, b.to_world))
+            .collect()
+    }
+
     /// An instance's live bodies as parts in the space of `pose` (the
     /// instance's own matrix): what [`CollisionWorld::replace_instance`]
     /// puts back. Bodies in no subset are left out.
