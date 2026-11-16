@@ -567,19 +567,34 @@ impl Sim {
                 };
                 let health_type = v.health.health_type;
                 let enemy = v.team.is_some_and(|team| self.hostile(b.team, team));
-                let surface =
-                    if v.kind == crate::vehicle::VehicleKind::Turret && v.instance.is_some() {
-                        Surface::Building
-                    } else {
-                        Surface::Vehicle
-                    };
+                let friendly = v.team.is_some() && v.team == Some(b.team);
+                let ff = if friendly { self.friendly_fire_scale } else { 1.0 };
+                let large = v
+                    .instance
+                    .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
+                    .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                let shield = v.health.shield;
+                let turret_building =
+                    v.kind == crate::vehicle::VehicleKind::Turret && v.instance.is_some();
                 let desc = self.bolt_desc(b);
+                let scale = self.hit_scale(b);
+                let shield_hit = desc.damage * scale * ff * desc.shield_scale;
+                let surface = if shield > 0.0 && desc.shield_scale > 0.0 && shield_hit < shield {
+                    if large {
+                        Surface::ShieldLarge
+                    } else {
+                        Surface::Shield
+                    }
+                } else if turret_building {
+                    Surface::Building
+                } else {
+                    Surface::Vehicle
+                };
                 self.events.push(Event::BoltExpired {
                     pos: b.end,
                     struck: true,
                 });
                 self.push_impact(b, surface, Some(vh));
-                let scale = self.hit_scale(b);
                 let damage = self.damage_vehicle_by(
                     vh,
                     &desc,

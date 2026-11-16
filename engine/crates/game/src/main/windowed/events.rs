@@ -1063,7 +1063,10 @@ impl winit::application::ApplicationHandler for App {
                             }
                             let _ = c.take_movies();
                             let _ = c.take_sounds();
-                            let _ = c.take_music();
+                            let calls = c.take_music();
+                            if let Some(m) = walk.music.as_mut() {
+                                m.script_calls.extend(calls);
+                            }
                         }
                         look = if popup_up {
                             self.kbm.clear_look();
@@ -1099,6 +1102,9 @@ impl winit::application::ApplicationHandler for App {
                                 // The units' combat calls through the
                                 // bank's gates join the queue first.
                                 v.gate_calls(sl, ears.pos);
+                                for name in v.gate_script_sounds(sl) {
+                                    sl.play_voice(audio, &name);
+                                }
                                 v.frame(&walk.sim, walk.player, dt, |line| {
                                     if let Some(bb) = self.blackbox.as_mut() {
                                         bb.voice(tick, &line.name);
@@ -1130,6 +1136,10 @@ impl winit::application::ApplicationHandler for App {
                                 if !missing.is_empty() {
                                     eprintln!("music: not in the bank: {missing:?}");
                                 }
+                            }
+                            let missing = m.apply_script(sl);
+                            if !missing.is_empty() {
+                                eprintln!("music: not in the bank: {missing:?}");
                             }
                             let db = game::sounds::level_db;
                             let tickets = [0, 1].map(|t| walk.sim.battle.teams[t].tickets());

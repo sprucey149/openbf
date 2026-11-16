@@ -45,6 +45,17 @@ impl Sim {
         }
     }
 
+    fn spawn_ground_hit(&self, node: Vec3) -> Option<f32> {
+        match self
+            .spawn_seats
+            .iter()
+            .find(|(n, _)| n.x == node.x && n.z == node.z)
+        {
+            Some(&(_, y)) => Some(y),
+            None => self.node_floor_hit(node),
+        }
+    }
+
     /// OURS: on an authored command-post node with no walkable exit, a
     /// regular bot uses the nearest standable, connected node of that post.
     /// Preserve the original draw and retain it if no alternate is proven.
@@ -125,13 +136,12 @@ impl Sim {
                 .total_cmp(&b.0.distance_squared(chosen.0))
         });
         alternatives.into_iter().find_map(|(point, yaw)| {
-            let floor = self.spawn_ground(point);
+            let floor = self.spawn_ground_hit(point)?;
             let feet = Vec3::new(point.x, floor, point.z);
             let hub = hub_at(feet)?;
             let goal = graph.hub(hub)?.xz();
             let goal_floor = self.nav_floor(hub)?;
-            (floor > crate::collision::NO_GROUND
-                && self.kill_floor.is_none_or(|minimum| floor >= minimum)
+            (self.kill_floor.is_none_or(|minimum| floor >= minimum)
                 && !self
                     .death_regions
                     .iter()
@@ -197,18 +207,21 @@ impl Sim {
     }
 
     fn node_floor(&self, node: Vec3) -> f32 {
-        let y = self.ground_under(node, false);
-        let lifted = || self.ground_under(node + Vec3::Y * SPAWN_LIFT, false);
-        if y <= crate::collision::NO_GROUND {
-            return lifted();
-        }
+        self.node_floor_hit(node)
+            .unwrap_or(crate::collision::NO_GROUND)
+    }
+
+    fn node_floor_hit(&self, node: Vec3) -> Option<f32> {
+        let lifted = || self.ground_hit_under(node + Vec3::Y * SPAWN_LIFT, false);
+        let y = self.ground_hit_under(node, false).or_else(lifted)?;
         if self.level_at(Vec3::new(node.x, y, node.z)).is_off() {
-            let up = lifted();
-            if up > y && !self.level_at(Vec3::new(node.x, up, node.z)).is_off() {
-                return up;
+            if let Some(up) = lifted() {
+                if up > y && !self.level_at(Vec3::new(node.x, up, node.z)).is_off() {
+                    return Some(up);
+                }
             }
         }
-        y
+        Some(y)
     }
 
     /// Where `team` may spawn: the spawn nodes of the posts it may spawn at,

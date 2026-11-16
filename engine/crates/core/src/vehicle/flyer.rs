@@ -87,6 +87,9 @@ pub struct FollowerParams {
     pub roll_speed_factor: f32,
     pub roll_dampening: f32,
     pub min_branch_dist: f32,
+    pub branch_range: f32,
+    pub branch_max_angle_cos: f32,
+    pub branch_paths: u8,
     pub flyer_vs_flyer: bool,
     pub formations: u8,
 }
@@ -107,6 +110,9 @@ impl Default for FollowerParams {
             roll_speed_factor: 1.0,
             roll_dampening: 0.5,
             min_branch_dist: 300.0,
+            branch_range: f32::MAX,
+            branch_max_angle_cos: -1.0,
+            branch_paths: 0,
             flyer_vs_flyer: true,
             formations: 0,
         }

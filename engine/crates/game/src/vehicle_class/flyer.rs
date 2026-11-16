@@ -14,6 +14,7 @@ enum Convert {
     /// Stored as 1/x; an authored zero stores 0.0001 (re-flyer-ai.md).
     Inverse,
     Degrees,
+    CosDegrees,
 }
 
 impl Convert {
@@ -23,6 +24,7 @@ impl Convert {
             Convert::Inverse if v == 0.0 => 0.0001,
             Convert::Inverse => 1.0 / v,
             Convert::Degrees => v.to_radians(),
+            Convert::CosDegrees => v.to_radians().cos(),
         }
     }
 }
@@ -175,6 +177,16 @@ impl FlyerClass {
                 &mut f.min_branch_dist,
                 Convert::Plain,
             ),
+            (
+                "PathFollowerBranchRange",
+                &mut f.branch_range,
+                Convert::Plain,
+            ),
+            (
+                "PathFollowerBranchMaxAngle",
+                &mut f.branch_max_angle_cos,
+                Convert::CosDegrees,
+            ),
         ] {
             if key == h(name) {
                 if let Some(number) = number {
@@ -182,6 +194,12 @@ impl FlyerClass {
                 }
                 return;
             }
+        }
+        if key == h("PathFollowerBranchPaths") {
+            if let Some(number) = number {
+                f.branch_paths = number.clamp(0.0, 255.0) as u8;
+            }
+            return;
         }
         if key == 0xe510_8b93 {
             f.formations = f.formations.saturating_add(1);

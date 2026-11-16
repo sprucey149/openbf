@@ -192,6 +192,11 @@ impl Sim {
         setup.guns.get(usize::from(m.seat))?.clone()
     }
 
+    /// Primary weapon class index for the seat `u` currently occupies, if any.
+    pub fn seat_primary_weapon(&self, u: UnitHandle) -> Option<usize> {
+        self.seat_gun_setup(u)?.weapons.first().map(|w| w.class)
+    }
+
     /// Make every seat's gun state of vehicle `vi` from its class's setup
     /// (each gun at rest, each weapon full), once.
     pub fn arm(&mut self, vi: usize) {

@@ -335,6 +335,17 @@ impl Interp {
         self.raw_get(t, &Value::str(k))
     }
 
+    pub fn table_meta(&self, t: TableId) -> Option<TableId> {
+        self.tables.get(t.0 as usize).and_then(|t| t.meta)
+    }
+
+    pub fn table_values(&self, t: TableId) -> Vec<Value> {
+        self.tables
+            .get(t.0 as usize)
+            .map(|t| t.entries.iter().map(|(_, v)| v.clone()).collect())
+            .unwrap_or_default()
+    }
+
     /// The array part `t[1..n]`, n the first nil (lua 5.0 `table.getn`
     /// without an `n` field).
     pub fn array(&self, t: TableId) -> Vec<Value> {

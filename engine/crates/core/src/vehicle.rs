@@ -236,6 +236,12 @@ pub struct Vehicle {
     /// decrement of E+0x188 (not in the entity's own functions). Hashed
     /// only when non-zero.
     pub disable: f32,
+    /// Shield regeneration rate per second from script `SetProperty("AddShield")`.
+    /// Hashed only when non-zero.
+    pub add_shield: f32,
+    /// Hull regeneration rate per second from authored `AddHealth` on space armed buildings.
+    /// Hashed only when non-zero.
+    pub add_health: f32,
 }
 
 /// Issue #35 [ours, the maintainer 2026-10-29]: after a slice only the
@@ -341,6 +347,17 @@ impl Vehicle {
         if self.disable != 0.0 {
             eat(&[0x5e]);
             eat(&self.disable.hash_bits().to_le_bytes());
+        }
+        if self.health.shield_max != 0.0
+            || self.health.shield != 0.0
+            || self.add_shield != 0.0
+            || self.add_health != 0.0
+        {
+            eat(&[0x5f]);
+            eat(&self.health.shield.hash_bits().to_le_bytes());
+            eat(&self.health.shield_max.hash_bits().to_le_bytes());
+            eat(&self.add_shield.hash_bits().to_le_bytes());
+            eat(&self.add_health.hash_bits().to_le_bytes());
         }
     }
 
@@ -486,6 +503,8 @@ impl VehicleSpec {
             slice: 0.0,
             slice_hold: None,
             disable: 0.0,
+            add_shield: 0.0,
+            add_health: 0.0,
         }
     }
 }

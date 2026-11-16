@@ -1718,6 +1718,9 @@ impl Sim {
         //     their first ticks through the volumes he saw. No lag: nothing.
         self.compensate_new_bolts(first_bolt, dt);
 
+        // Regenerate station shields before combat so linked shields zeroing this tick reach HUD and script dispatch intact.
+        self.tick_station_shields(dt);
+
         // 5. Bolt flight + impacts (in spawn order): first what each bolt
         //    passes through on this tick's flight (issue #41).
         self.tick_cloaks(dt);

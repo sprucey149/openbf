@@ -144,6 +144,12 @@ pub(crate) fn station_class_of(db: &ClassDb, name: &str) -> Option<StationClass>
         explosion: db
             .prop(name, "ExplosionName")
             .and_then(|s| explosion_class(db, s)),
+        hide_health_bar: db.chain(name).into_iter().any(|def| {
+            def.props.iter().any(|(k, v)| {
+                (*k == 0xe921_a7d8 || *k == 0xa1c0_f27b || *k == 0x1b2d_820b)
+                    && v.trim().parse::<f32>().is_ok_and(|n| n != 0.0)
+            })
+        }),
     })
 }
 

@@ -175,6 +175,13 @@ impl Sim {
         }
     }
 
+    /// Set continuous hull regeneration for a live vehicle (space `armedbuilding` turrets).
+    pub fn set_vehicle_add_health(&mut self, h: VehicleHandle, add: f32) {
+        if let Some(v) = self.vehicle_mut(h) {
+            v.add_health = add.fmax(0.0);
+        }
+    }
+
     /// Initial BF2 build pad: retain the standing spec/rig but remove its
     /// empty vehicle without a death, explosion or regeneration. The old
     /// handle is invalidated by remove_vehicle and cannot alias a reused slot.

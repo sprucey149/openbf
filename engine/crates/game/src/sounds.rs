@@ -1366,11 +1366,15 @@ impl SoundLib {
         self.find_named(name).is_some()
     }
 
+    /// Stream id (`Stream` property) for `name`, if this sound is streamed.
+    pub fn stream_id(&self, name: &str) -> Option<u32> {
+        self.find_named(name).and_then(|(p, _)| p.stream)
+    }
+
     /// Card UTALK: is `name` a line on a stream (the voice slot's), not a
     /// sample-bank sound?
     pub fn streamed(&self, name: &str) -> bool {
-        self.find(fnv1a_lowercase(name))
-            .is_some_and(|(p, _)| p.stream.is_some())
+        self.stream_id(name).is_some()
     }
 
     pub fn trigger_sound(&self, region: u32, reinforcements: f32, side: usize) -> Option<u32> {

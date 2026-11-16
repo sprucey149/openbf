@@ -10,7 +10,8 @@ use super::spawn::SpawnWaves;
 use crate::aim_assist::AssistState;
 use crate::battle::Battle;
 use crate::collision::{
-    CollisionWorld, FOOT_RADIUS, FOOT_RING, FOOT_RING_DIRS, NO_GROUND, STEP_HEIGHT, TERRAIN_BURY,
+    CollisionWorld, FLOOR_SEARCH_MIN, FOOT_RADIUS, FOOT_RING, FOOT_RING_DIRS, NO_GROUND,
+    STEP_HEIGHT, TERRAIN_BURY,
 };
 use crate::cp::CommandPost;
 use crate::fmath::FloatExt;
@@ -1481,6 +1482,10 @@ impl Sim {
         self.ground_under_with(feet, rising, crate::collision::HullFilter::All)
     }
 
+    pub fn ground_hit_under(&self, feet: Vec3, rising: bool) -> Option<f32> {
+        self.ground_hit_under_with(feet, rising, crate::collision::HullFilter::All)
+    }
+
     /// [`Sim::ground_under`] standing on only the vehicle hulls `hulls`
     /// admits (a pad's spawn ray sees none, card VHULL).
     pub fn ground_under_with(
@@ -1491,6 +1496,16 @@ impl Sim {
     ) -> f32 {
         let probe = feet.y + if rising { 0.0 } else { STEP_HEIGHT };
         self.floor_under(feet, probe, hulls, true).0
+    }
+
+    pub fn ground_hit_under_with(
+        &self,
+        feet: Vec3,
+        rising: bool,
+        hulls: crate::collision::HullFilter,
+    ) -> Option<f32> {
+        let probe = feet.y + if rising { 0.0 } else { STEP_HEIGHT };
+        self.floor_hit(feet, probe, hulls, true).map(|(y, _, _)| y)
     }
 
     pub fn water_plane(&self) -> Option<crate::water::Plane<'_>> {
@@ -1532,6 +1547,12 @@ impl Sim {
             .0
     }
 
+    pub fn ground_point_hit_under(&self, feet: Vec3, rising: bool) -> Option<f32> {
+        let probe = feet.y + if rising { 0.0 } else { STEP_HEIGHT };
+        self.floor_hit(feet, probe, crate::collision::HullFilter::All, false)
+            .map(|(y, _, _)| y)
+    }
+
     /// [`Sim::ground_under`] with the floor's normal: the model ray's, or the
     /// heightfield triangle's; up when there is no ground. The soldier's
     /// floor contact (card STHOP, `Soldier::resolve_ground`), asked AFTER the
@@ -1563,6 +1584,23 @@ impl Sim {
     pub fn ground_point_under_n(&self, feet: Vec3, from_y: f32) -> (f32, Vec3) {
         let probe = (feet.y + STEP_HEIGHT).fmax(from_y);
         self.floor_under(feet, probe, crate::collision::HullFilter::All, false)
+    }
+
+    pub fn ground_point_hit_under_n(&self, feet: Vec3, from_y: f32) -> Option<(f32, Vec3)> {
+        let probe = (feet.y + STEP_HEIGHT).fmax(from_y);
+        self.floor_hit(feet, probe, crate::collision::HullFilter::All, false)
+            .map(|(y, n, _)| (y, n))
+    }
+
+    /// [`Sim::ground_under`] with the floor's normal when one is struck.
+    pub fn ground_hit_under_n(&self, feet: Vec3, rising: bool, from_y: f32) -> Option<(f32, Vec3)> {
+        let probe = if rising {
+            feet.y
+        } else {
+            (feet.y + STEP_HEIGHT).fmax(from_y)
+        };
+        self.floor_hit(feet, probe, crate::collision::HullFilter::All, true)
+            .map(|(y, n, _)| (y, n))
     }
 
     /// [`Sim::ground_under_n`] with the probe only
@@ -1609,6 +1647,23 @@ impl Sim {
         hulls: crate::collision::HullFilter,
         ring: bool,
     ) -> (f32, Vec3, Option<crate::vehicle::VehicleHandle>) {
+        self.floor_hit(feet, probe, hulls, ring).unwrap_or_else(|| {
+            let miss = if probe > NO_GROUND {
+                NO_GROUND
+            } else {
+                FLOOR_SEARCH_MIN
+            };
+            (miss, Vec3::Y, None)
+        })
+    }
+
+    fn floor_hit(
+        &self,
+        feet: Vec3,
+        probe: f32,
+        hulls: crate::collision::HullFilter,
+        ring: bool,
+    ) -> Option<(f32, Vec3, Option<crate::vehicle::VehicleHandle>)> {
         let mut terrain = self
             .heightfield
             .as_ref()
@@ -1620,24 +1675,14 @@ impl Sim {
         if terrain.is_some_and(|t| t > feet.y + TERRAIN_BURY) {
             terrain = None;
         }
-        let floor = terrain.unwrap_or(NO_GROUND);
-        if probe > floor {
-            // y >= floor by construction of the ray length.
+        let min_y = terrain.unwrap_or(FLOOR_SEARCH_MIN);
+        if probe > min_y {
+            // y >= min_y by construction of the ray length.
             let down = |x: f32, z: f32| {
                 self.collision
-                    .ray_down_owned(Vec3::new(x, probe, z), probe - floor, hulls)
+                    .ray_down_owned(Vec3::new(x, probe, z), probe - min_y, hulls)
             };
             let centre = down(feet.x, feet.z);
-            // The PS2's foot is a sphere, not a point (`coll_body_lower`,
-            // r 0.57 — re-soldier-ground.md §1.2): it bridges the slits
-            // between collision floor pieces that a point falls through
-            // (KAM1's cloning rooms: the PS2 soldier stands at 69.272 on a
-            // slit, the point foot found the hidden disc 7.9 m down — card
-            // GRND, re-kamino.md §4.3). When the centre ray finds no floor
-            // within a step under the feet, a ring of rays inside the
-            // sphere's reach looks for one, each hit lowered by how far the
-            // sphere's underside is over the feet at that radius.
-            // The terrain within a step is a floor too: no ring on open ground.
             let near = |y| y >= feet.y - STEP_HEIGHT;
             let terrain_near = terrain.is_some_and(|t| t >= feet.y - STEP_HEIGHT);
             if ring && !centre.is_some_and(|(y, _, _)| near(y)) && !terrain_near {
@@ -1654,26 +1699,12 @@ impl Sim {
                     }
                 }
                 if let Some(hit) = best {
-                    return hit;
+                    return Some(hit);
                 }
             } else if let Some(hit) = centre {
-                // The same foot on a short STEEP face (card RAIL). The centre
-                // ray stands the soldier on the bevel of a kerb or a rail — a
-                // floor to the PS2 too (n.y > 0.6), but one the stick has no
-                // hold on (under n.y 0.7 / 0.75, `GroundRules::climb_min_ny`),
-                // so the point foot had to climb the whole face on momentum:
-                // BF2 Kamino's rim rail (0.5 m up a 53° bevel) let a soldier
-                // over at 7 m/s head on and held him at 6.5 m/s, at 45°, and
-                // from a stand — the maintainer's "invisible wall". The PS2's foot
-                // sphere (r 0.57) rides the bevel's top edge instead. So when
-                // the floor under the centre gives no hold, a ring ray that
-                // finds one that does, higher and within a step of the feet,
-                // is the floor: the top of the kerb, less the sphere's sag.
                 if ring && hit.1.y < self.ground_rules.climb_min_ny() && near(hit.0) {
                     let lift =
                         FOOT_RADIUS - (FOOT_RADIUS * FOOT_RADIUS - FOOT_RING * FOOT_RING).sqrt();
-                    // The highest such surface wins; the feet never go
-                    // under the face the centre found.
                     let mut best = None;
                     for (dx, dz) in FOOT_RING_DIRS {
                         if let Some((y, n, owner)) =
@@ -1687,17 +1718,17 @@ impl Sim {
                             }
                         }
                     }
-                    return match best {
+                    return Some(match best {
                         Some((y, n, owner)) => ((y - lift).fmax(hit.0), n, owner),
                         None => hit,
-                    };
+                    });
                 }
-                return hit;
+                return Some(hit);
             }
         }
         match (terrain, self.heightfield.as_ref()) {
-            (Some(t), Some(h)) => (t, Vec3::from(h.normal_at(feet.x, feet.z)), None),
-            _ => (floor, Vec3::Y, None),
+            (Some(t), Some(h)) => Some((t, Vec3::from(h.normal_at(feet.x, feet.z)), None)),
+            _ => None,
         }
     }
 

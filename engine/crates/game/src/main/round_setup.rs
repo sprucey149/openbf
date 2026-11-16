@@ -496,4 +496,68 @@ mod tests {
             mission.layers
         );
     }
+
+    #[test]
+    #[ignore = "requires the owned bf2_myg1 bake and missions; run with --release"]
+    fn myg1c_walk_to_the_objective_has_no_long_tick() {
+        use core::sim::{buttons, PadState};
+        let missions = Path::new("../../missions");
+        let assets = Path::new("../../assets_baked");
+        let entry = &ui::campaign::RISE_OF_THE_EMPIRE[1];
+        let layers = campaign_layers_for(missions, entry.map, "campaign", Some(entry.script));
+        let (scene, _) =
+            game::assets::load_battle_scene_with_layers(&assets.join(entry.map), "campaign", &layers)
+                .expect("myg1 scene");
+        let setup = campaign_setup(missions, assets, entry, 42, core::skill::Difficulty::Normal)
+            .expect("myg1c setup");
+        let mut walk = super::super::battle::make_walk(&scene, &setup).expect("walk");
+        super::super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
+        let route = [
+            glam::Vec3::new(-123.0, 0.0, 299.0),
+            glam::Vec3::new(-80.0, 0.0, 231.0),
+            glam::Vec3::new(-64.0, 0.0, 198.0),
+            glam::Vec3::new(-62.0, 0.0, 140.0),
+        ];
+        let mut worst = (0.0f64, 0u64);
+        let mut spawned_at = None;
+        for tick in 0..(60 * core::TICK_HZ as u64) {
+            let alive = walk.sim.unit(walk.player).is_some_and(|u| u.alive);
+            let pad = PadState {
+                buttons: if alive || tick % 15 > 7 { 0 } else { buttons::SPAWN_ACCEPT },
+                ly: if alive { PadState::quantize(1.0) } else { 0 },
+                ..PadState::default()
+            };
+            if alive {
+                let since = *spawned_at.get_or_insert(tick);
+                let d = (tick - since) as f32 * core::TICK_DT * 7.0;
+                let mut left = d;
+                let mut at = route[route.len() - 1];
+                for w in route.windows(2) {
+                    let seg = (w[1] - w[0]).length();
+                    if left <= seg {
+                        at = w[0] + (w[1] - w[0]) * (left / seg);
+                        break;
+                    }
+                    left -= seg;
+                }
+                let i = walk.player.index as usize;
+                walk.sim.units[i].soldier.pos.x = at.x;
+                walk.sim.units[i].soldier.pos.z = at.z;
+            }
+            let t = std::time::Instant::now();
+            walk.step_tick(&[pad]);
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            if ms > worst.0 {
+                worst = (ms, tick);
+            }
+            if ms > 200.0 {
+                let p = walk.sim.unit(walk.player).map(|u| u.soldier.pos);
+                eprintln!("tick {tick}: {ms:.0} ms, human at {p:?}");
+            }
+        }
+        eprintln!("spawned at {spawned_at:?}, worst tick {:.1} ms at {}", worst.0, worst.1);
+        assert!(spawned_at.is_some(), "the human never spawned");
+        assert!(worst.0 < 500.0, "a {:.0} ms tick at {}", worst.0, worst.1);
+    }
+
 }

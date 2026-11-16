@@ -334,6 +334,27 @@ impl MapStatic {
             .map(|(k, w)| (k, droid_icon(&db, &w.name)))
             .collect();
         let sheet_dir = scene.dir.join("textures");
+        let map_lower = m.map.to_ascii_lowercase();
+        let bf2_space_map = m.source_game.eq_ignore_ascii_case("bf2")
+            && map_lower
+                .strip_prefix("bf2_")
+                .unwrap_or(&map_lower)
+                .starts_with("spa");
+        let map_icon_for = |name: &str| {
+            let mut icon = ClassIcon::of(&db, name);
+            let base = db.engine_base(name);
+            // BF2 FUN_001e7a30:95758 removes armedbuilding from the minimap on maps starting with "spa".
+            let hide_spa_armed =
+                bf2_space_map && base.is_some_and(|b| b.eq_ignore_ascii_case("armedbuilding"));
+            // BF2 FUN_001e2610:92238 + FUN_003a5940:388768-388791 hides EntityBuilding with flag 0x58071137.
+            let hide_flag = db
+                .prop_hash(name, 1_476_858_167)
+                .is_some_and(|v| !matches!(v.trim(), "" | "0"));
+            if hide_spa_armed || hide_flag {
+                icon.texture = None;
+            }
+            icon
+        };
         Self {
             droids,
             structures: walk
@@ -342,7 +363,7 @@ impl MapStatic {
                 .iter()
                 .map(|c| {
                     (
-                        ClassIcon::of(&db, &c.name),
+                        map_icon_for(&c.name),
                         db.engine_base(&c.name)
                             .is_some_and(|b| b.eq_ignore_ascii_case("commandpost")),
                     )
@@ -355,10 +376,7 @@ impl MapStatic {
             turn: turn_of(&m.map.to_ascii_lowercase(), era),
             posts,
             soldiers,
-            vehicles: vehicle_classes
-                .iter()
-                .map(|c| ClassIcon::of(&db, c))
-                .collect(),
+            vehicles: vehicle_classes.iter().map(|c| map_icon_for(c)).collect(),
         }
     }
 

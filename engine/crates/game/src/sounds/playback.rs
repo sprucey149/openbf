@@ -249,7 +249,17 @@ impl SoundLib {
     fn play_prepared(&mut self, audio: &mut audio::Audio, take: &Handed) {
         if take.gain > 0.001 {
             let (db, pan) = mixer_pair(take.ears);
-            audio.play_oneshot(&self.cache[&take.path], db, f64::from(take.pitch), pan);
+            // Voice lines (commander, squad answers and campaign objective
+            // speech) have their own sub-track: a full effects bus cannot
+            // drop a line here. The PS2 routes them on `voiceover` too
+            // (analysis/re-mix-headroom.md §1.4).
+            audio.play_oneshot_on(
+                audio::Bus::Voice,
+                &self.cache[&take.path],
+                db,
+                f64::from(take.pitch),
+                pan,
+            );
             self.note(
                 take.hash, &take.path, take.gain, take.ears, take.pitch, take.dist,
             );

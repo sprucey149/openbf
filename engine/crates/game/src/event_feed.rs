@@ -1466,14 +1466,27 @@ impl EventFeed {
         }
     }
 
+    fn health_shield_bar(h: &core::weapon::Health) -> Option<(String, f32)> {
+        (h.shield_max > 0.0 && h.shield > 0.0001)
+            .then(|| ("Shield".to_owned(), (h.shield / h.shield_max).clamp(0.0, 1.0)))
+    }
+
     fn station_hud(&self, sim: &Sim, i: u16, relation: i8) -> Option<HudTarget> {
         let s = sim.stations.get(usize::from(i))?;
+        if sim
+            .station_classes
+            .get(usize::from(s.class))
+            .is_some_and(|c| c.hide_health_bar)
+        {
+            return None;
+        }
         let shield = sim
             .space_assault
             .as_ref()
             .and_then(|sa| sa.shields.iter().find(|g| g.objects.contains(&i)))
             .filter(|g| g.max > 0.0 && g.shield > 0.0)
-            .map(|g| ("Shield".to_owned(), (g.shield / g.max).clamp(0.0, 1.0)));
+            .map(|g| ("Shield".to_owned(), (g.shield / g.max).clamp(0.0, 1.0)))
+            .or_else(|| Self::health_shield_bar(&s.health));
         (s.health.max > 0.0).then(|| HudTarget {
             id: (1 << 62) | u64::from(i),
             name: self
@@ -1529,7 +1542,7 @@ impl EventFeed {
                     health_fraction: fraction(&v.health),
                     relation,
                     team0: v.team.is_none(),
-                    shield: None,
+                    shield: Self::health_shield_bar(&v.health),
                 })
             }
             AimTarget::Station(i) => self.station_hud(sim, i, relation),
@@ -1637,7 +1650,13 @@ impl EventFeed {
         let range = sim.weapon_classes.get(me.weapon_class)?.extreme_range;
         let mut best: Option<(f32, usize)> = None;
         for (i, s) in sim.stations.iter().enumerate() {
-            if s.destroyed || s.health.max <= 0.0 {
+            if s.destroyed
+                || s.health.max <= 0.0
+                || sim
+                    .station_classes
+                    .get(usize::from(s.class))
+                    .is_some_and(|c| c.hide_health_bar)
+            {
                 continue;
             }
             let (c, r) = (s.sphere_centre, s.sphere_radius.fmax(0.5));
@@ -1661,23 +1680,12 @@ impl EventFeed {
         }
         let (_, i) = best?;
         let s = &sim.stations[i];
-        Some(HudTarget {
-            // Bit 62: a station's id is neither a unit's nor a vehicle's.
-            id: (1 << 62) | i as u64,
-            name: self
-                .stations
-                .get(usize::from(s.class))
-                .cloned()
-                .unwrap_or_default(),
-            health_fraction: (s.health.cur / s.health.max).clamp(0.0, 1.0),
-            relation: match s.team {
-                None => 0,
-                Some(t) if t == me.team => 1,
-                Some(_) => -1,
-            },
-            team0: s.team.is_none(),
-            shield: None,
-        })
+        let rel = match s.team {
+            None => 0,
+            Some(t) if t == me.team => 1,
+            Some(_) => -1,
+        };
+        self.station_hud(sim, i as u16, rel)
     }
 
     /// The viewer's statistics as BF2 publishes them (§5).

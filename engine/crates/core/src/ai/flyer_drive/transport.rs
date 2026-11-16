@@ -2,7 +2,8 @@
 
 use crate::fmath::FloatExt;
 use super::{
-    chords_clear, hull_radius, FlightPhase, FlyerAi, Sim, Vec3, Vehicle, VehicleHandle, VehicleKind,
+    chords_clear, hull_extents, FlightPhase, FlyerAi, Sim, Vec3, Vehicle, VehicleHandle,
+    VehicleKind,
 };
 use crate::region::Region;
 
@@ -63,9 +64,9 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         return false;
     }
     let forward = v.rot * Vec3::Z;
-    let radius = hull_radius(sim, v);
+    let extents = hull_extents(sim, v);
     if let Some(goal) = ai.transport_goal.take() {
-        if leg(sim, v, handle, ai, goal, goal + (goal - v.pos), radius) {
+        if leg(sim, v, handle, ai, goal, goal + (goal - v.pos), extents) {
             ai.transport_goal = Some(goal);
             return true;
         }
@@ -81,7 +82,7 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         // Carry a straight approach through the doorway before descending.
         let points = [region.basis.x_axis, region.basis.z_axis];
         let mut entries = [points[0], -points[0], points[1], -points[1]]
-            .map(|dir| center + dir * (width + APPROACH_CLEARANCE_RADII * radius));
+            .map(|dir| center + dir * (width + APPROACH_CLEARANCE_RADII * extents.0));
         entries.sort_by(|a, b| {
             v.pos
                 .distance_squared(*a)
@@ -89,11 +90,11 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         });
         for entry in entries {
             if (entry - v.pos).dot(forward) <= 0.0
-                || !chords_clear(sim, &[entry, center], radius, handle)
+                || !chords_clear(sim, &[entry, center], extents, handle)
             {
                 continue;
             }
-            if leg(sim, v, handle, ai, entry, center, radius) {
+            if leg(sim, v, handle, ai, entry, center, extents) {
                 ai.transport_goal = Some(center);
                 return true;
             }
@@ -109,13 +110,13 @@ pub(super) fn departure(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut 
     let Some(region) = sim.landing_regions.iter().find(|r| r.contains(v.pos)) else {
         return false;
     };
-    let radius = hull_radius(sim, v);
+    let extents = hull_extents(sim, v);
     let width = region.size.x.fmax(region.size.z);
     let center = Vec3::new(region.center.x, v.pos.y, region.center.z);
     let [x, z] = [region.basis.x_axis, region.basis.z_axis];
     for axis in [x, -x, z, -z] {
-        let end = center + axis * (width + APPROACH_CLEARANCE_RADII * radius);
-        if !chords_clear(sim, &[v.pos, end], radius, handle) {
+        let end = center + axis * (width + APPROACH_CLEARANCE_RADII * extents.0);
+        if !chords_clear(sim, &[v.pos, end], extents, handle) {
             continue;
         }
         // Straight translation through the opening. The spline aligns the
@@ -137,7 +138,7 @@ fn leg(
     ai: &mut FlyerAi,
     end: Vec3,
     after: Vec3,
-    radius: f32,
+    extents: (f32, f32, f32),
 ) -> bool {
     let forward = v.rot * Vec3::Z;
     let behind = (end - v.pos).length().fmin(super::CONNECT_BEHIND);
@@ -145,7 +146,7 @@ fn leg(
     let points: [Vec3; super::HOP_SAMPLES + 1] = std::array::from_fn(|k| {
         crate::vehicle::flyer::curve_at(&curve, k as f32 / super::HOP_SAMPLES as f32).0
     });
-    if !chords_clear(sim, &points, radius, handle) {
+    if !chords_clear(sim, &points, extents, handle) {
         return false;
     }
     ai.curve = Some(curve);

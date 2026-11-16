@@ -203,6 +203,7 @@ struct CharSeen {
     alive: bool,
     class: u8,
     mount: Option<core::vehicle::VehicleHandle>,
+    landed: bool,
 }
 
 /// Everything the bindings read and write besides the sim.
@@ -230,6 +231,7 @@ pub(crate) struct World {
     pub class_names: Vec<String>,
 
     pub setup: bool,
+    pub post_loaded: bool,
     pub player: UnitHandle,
     pub player_team: u8,
     pub time: f32,
@@ -253,12 +255,12 @@ pub(crate) struct World {
     pub allow_ai_pickup: bool,
     pub hide_cps: bool,
     pub shown_timer: Option<u32>,
-    pub voice_until: f32,
+    pub voice_playing: bool,
 
     pub messages: Vec<String>,
     pub popups: VecDeque<Popup>,
     pub voice: Vec<String>,
-    pub music: Vec<Option<String>>,
+    pub music: Vec<crate::music::InGameMusic>,
     pub sounds: Vec<String>,
     pub movies: Vec<String>,
     /// `SetMissionEndMovie`'s clip (`FUN_00192a50` → `FUN_00381598`, the
@@ -398,6 +400,7 @@ impl CampaignRuntime {
             class_order: [Vec::new(), Vec::new()],
             class_names: Vec::new(),
             setup: false,
+            post_loaded: false,
             player: UnitHandle { index: 0, gen: 0 },
             player_team: 0,
             time: 0.0,
@@ -421,7 +424,7 @@ impl CampaignRuntime {
             allow_ai_pickup: true,
             hide_cps: false,
             shown_timer: None,
-            voice_until: 0.0,
+            voice_playing: false,
             messages: Vec::new(),
             popups: VecDeque::new(),
             voice: Vec::new(),
@@ -490,6 +493,7 @@ impl CampaignRuntime {
         self.call_global(sim, "ScriptInit", Vec::new());
         self.w.setup = false;
         self.call_global(sim, "ScriptPostLoad", Vec::new());
+        self.w.post_loaded = true;
     }
 
     fn call_global(&mut self, sim: &mut Sim, name: &str, args: Vec<Value>) {
@@ -591,13 +595,27 @@ impl CampaignRuntime {
     }
 
     fn dispatch_sim_events(&mut self, sim: &mut Sim) {
-        let events = sim.events.clone();
-        for e in &events {
+        let mut cursor = 0usize;
+        while cursor < sim.events.len() && sim.outcome.is_none() {
+            let events = sim.events[cursor..].to_vec();
+            cursor = sim.events.len();
+            self.dispatch_event_batch(sim, &events);
+        }
+    }
+
+    fn dispatch_event_batch(&mut self, sim: &mut Sim, events: &[Event]) {
+        for e in events {
             if let Event::Shot {
                 unit, weapon_class, ..
             } = *e
             {
                 let i = unit.index as usize;
+                // An unmanned auto turret's shot names no unit (index
+                // u32::MAX): no killer reads it, and the table stays the
+                // units' size.
+                if i >= sim.units.len() {
+                    continue;
+                }
                 if self.w.last_shot.len() <= i {
                     self.w.last_shot.resize(i + 1, None);
                 }
@@ -609,7 +627,7 @@ impl CampaignRuntime {
         // tick's `Impact`; a hit without one (a blast) is put down to the
         // shooter's weapon then. A walker's death comes at the end of its
         // death clip, after the shooter may have fired something else.
-        for e in &events {
+        for e in events {
             if let Event::VehicleHit {
                 shooter: Some(s),
                 vehicle,
@@ -639,7 +657,7 @@ impl CampaignRuntime {
                     .note_hit(Ud::Vehicle(vehicle.index, vehicle.gen), weapon);
             }
         }
-        for e in &events {
+        for e in events {
             match *e {
                 Event::Kill { shooter, victim } => {
                     let obj = Ud::Unit(victim.index, victim.gen);
@@ -684,6 +702,29 @@ impl CampaignRuntime {
                     let key = self.w.obj_key(sim, obj);
                     let k = killer.map_or(Value::Nil, |k| char_value(k.index));
                     self.fire(sim, EventKind::ObjectKill, &key, vec![Value::Ud(obj), k]);
+                }
+                Event::StationDamaged { station, attacker } => {
+                    let obj = Ud::Station(station);
+                    let key = self.w.obj_key(sim, obj);
+                    let d = attacker.map_or(Value::Nil, |u| char_value(u.index));
+                    self.fire(sim, EventKind::ObjectDamage, &key, vec![Value::Ud(obj), d]);
+                }
+                Event::VehicleHit {
+                    shooter,
+                    vehicle,
+                    damage,
+                    ..
+                } if damage > 0.0 => {
+                    let obj = Ud::Vehicle(vehicle.index, vehicle.gen);
+                    let key = self.w.obj_key(sim, obj);
+                    let d = shooter.map_or(Value::Nil, |u| char_value(u.index));
+                    self.fire(sim, EventKind::ObjectDamage, &key, vec![Value::Ud(obj), d]);
+                }
+                Event::VehicleShieldDamaged { shooter, vehicle } => {
+                    let obj = Ud::Vehicle(vehicle.index, vehicle.gen);
+                    let key = self.w.obj_key(sim, obj);
+                    let d = shooter.map_or(Value::Nil, |u| char_value(u.index));
+                    self.fire(sim, EventKind::ObjectDamage, &key, vec![Value::Ud(obj), d]);
                 }
                 Event::StationDestroyed {
                     station, killer, ..
@@ -786,11 +827,22 @@ impl CampaignRuntime {
             self.w.seen.resize(sim.units.len(), None);
         }
         for (i, u) in sim.units.iter().enumerate() {
+            let landed = u
+                .mount
+                .and_then(|m| sim.vehicle(m.vehicle))
+                .is_some_and(|v| {
+                    sim.flyer_params
+                        .get(v.class as usize)
+                        .and_then(Option::as_ref)
+                        .is_some()
+                        && v.flyer.phase == core::vehicle::flyer::FlightPhase::Landed
+                });
             let now = CharSeen {
                 gen: u.gen,
                 alive: u.alive,
                 class: u.spec.class,
                 mount: u.mount.map(|m| m.vehicle),
+                landed,
             };
             let ch = char_value(i as u32);
             if let Some(prev) = self.w.seen[i] {
@@ -816,6 +868,14 @@ impl CampaignRuntime {
                             vec![ch.clone(), Value::Ud(Ud::Vehicle(v.index, v.gen))],
                         ));
                     }
+                } else if now.alive && !prev.landed && now.landed {
+                    if let Some(v) = now.mount {
+                        fired.push((
+                            EventKind::CharacterLandedFlyer,
+                            EventKey::default(),
+                            vec![ch.clone(), Value::Ud(Ud::Vehicle(v.index, v.gen))],
+                        ));
+                    }
                 }
             }
             if now.alive {
@@ -823,6 +883,7 @@ impl CampaignRuntime {
             } else if let Some(prev) = self.w.seen[i].as_mut() {
                 prev.alive = false;
                 prev.mount = None;
+                prev.landed = false;
             }
         }
         if self.has_handlers(EventKind::EnterRegion) || self.has_handlers(EventKind::LeaveRegion) {
@@ -945,19 +1006,24 @@ impl CampaignRuntime {
         std::mem::take(&mut self.w.voice)
     }
 
+    /// `ScriptCB_SndPlaySound` names since the last call, in order.
     pub fn take_sounds(&mut self) -> Vec<String> {
         std::mem::take(&mut self.w.sounds)
     }
 
-    /// Music the script started (`Some`) or stopped (`None`).
-    pub fn take_music(&mut self) -> Vec<Option<String>> {
+    /// The in-game music the script started or stopped.
+    pub fn take_music(&mut self) -> Vec<crate::music::InGameMusic> {
         std::mem::take(&mut self.w.music)
     }
 
-    /// A voice-over the script asked for is playing for `secs` more: what
-    /// `AudioStreamComplete` answers from.
-    pub fn voice_playing_for(&mut self, secs: f32) {
-        self.w.voice_until = self.w.voice_until.fmax(self.w.time + secs);
+    /// Whether the battle's voice slot is sounding a line: what
+    /// `AudioStreamComplete` answers from. B2 `FUN_0019f0f8` finds the
+    /// stream slot holding the named stream and answers whether that slot's
+    /// voice is stopped (`FUN_00542338` state 4), queued lines not counted.
+    /// The port has one voice queue, so every voice stream name reads it.
+    /// trace: a slot other than the slow voice slot named here.
+    pub fn set_voice_playing(&mut self, playing: bool) {
+        self.w.voice_playing = playing;
     }
 
     /// The popup up now (the battle pauses under it).
@@ -1438,7 +1504,9 @@ impl World {
             self.last_shot
                 .get(killer.index as usize)
                 .copied()
-                .flatten()? as usize
+                .flatten()
+                .map(|wc| wc as usize)
+                .or_else(|| sim.seat_primary_weapon(killer))?
         } else {
             u.weapon_class
         };

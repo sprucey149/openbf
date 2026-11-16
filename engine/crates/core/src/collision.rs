@@ -149,7 +149,7 @@ mod vehicle_pairs;
 mod walls;
 mod world;
 
-pub use prim_contact::{bounding_radius, PrimContact};
+pub use prim_contact::{bounding_radius, clearance_extents, PrimContact};
 pub use rays::{
     is_cut_by, lead_point, ray_heightfield, ray_heightfield_front, ray_terrain_ps2, RayHit,
 };
@@ -206,11 +206,15 @@ pub const TERRAIN_BURY: f32 = 2.0;
 /// PROVISIONAL (ours): the down ray and the wall pass call a surface a floor when |normal.y| >= this
 /// (60°); steeper is a wall. A soldier STANDS only above `soldier::FLOOR_MIN_NY` (0.6, the PS2's).
 pub const WALKABLE_MIN_NY: f32 = 0.5;
-/// Ground when nothing is below: −300.0 — the PS2's own "cut terrain" sentinel
-/// (analysis/re-terrain-heights.md, FUN_00473db0 returns −300.0 for a cut
-/// point) reused as the floor of a map with no terrain under a point.
-/// PROVISIONAL as a no-terrain floor.
+/// Ground when nothing is below above it: −300.0 — the PS2's own cut-terrain
+/// sentinel, reused as the no-floor return value for callers that take `f32`.
+/// Below `−300.0` (such as BF2 `spa4`'s CIS hangar deck around y = −328 m),
+/// `Sim` queries use `FLOOR_SEARCH_MIN` and `Option`-returning `ground_hit_*`
+/// helpers so geometry under −300.0 is still found.
 pub const NO_GROUND: f32 = -300.0;
+/// Lower bound for downward collision probes when no terrain heightfield
+/// caps the search.
+pub const FLOOR_SEARCH_MIN: f32 = -10_000.0;
 
 type Isometry = parry3d::na::Isometry3<f32>;
 

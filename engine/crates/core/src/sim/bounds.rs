@@ -87,7 +87,7 @@
 //! and the level test itself.
 
 use super::state::Sim;
-use crate::collision::{Layers, NO_GROUND, STEP_HEIGHT};
+use crate::collision::{Layers, STEP_HEIGHT};
 use crate::fmath::FloatExt;
 use crate::nav::{Mover, SOLDIER};
 use glam::{Vec2, Vec3};
@@ -249,10 +249,9 @@ impl Sim {
                 let anchors =
                     std::iter::once(cp.def.pos).chain(cp.def.spawn_nodes.iter().map(|&(p, _)| p));
                 for p in anchors {
-                    let y = self.ground_under(p, false);
-                    if y <= NO_GROUND {
+                    let Some(y) = self.ground_hit_under(p, false) else {
                         continue;
-                    }
+                    };
                     lowest = lowest.fmin(y);
                     let Some(h) = g.unit_hub_on(p, Mover::new(SOLDIER, true), &|_| true) else {
                         continue;
@@ -579,17 +578,18 @@ impl Sim {
         for i in 1..=steps {
             let p = start + (to - start) * (i as f32 / steps as f32);
             let at = Vec3::new(p.x, y + TRACE_UP, p.y);
-            let mut f = self.ground_point_under(at, true);
+            let mut f = self.ground_point_hit_under(at, true);
             // A crack narrower than a foot is not a drop (card STLVL): where
             // the one ray falls more than a step, the foot's ring is asked,
             // and a floor level with the walk under it is the floor.
-            if f < y - STEP_HEIGHT {
-                let foot = self.ground_under(at, true);
-                if (foot - y).abs() <= CRACK_TOL {
-                    f = foot;
+            if f.is_none_or(|y_f| y_f < y - STEP_HEIGHT) {
+                if let Some(foot) = self.ground_hit_under(at, true) {
+                    if (foot - y).abs() <= CRACK_TOL {
+                        f = Some(foot);
+                    }
                 }
             }
-            if f > NO_GROUND && f >= y - TRACE_DROP {
+            if let Some(f) = f.filter(|&f| f >= y - TRACE_DROP) {
                 y = f;
                 gap = 0.0;
             } else {
@@ -603,8 +603,8 @@ impl Sim {
             return Some(y);
         }
         // In the air at the end: only a jump comes down.
-        let f = self.ground_point_under(Vec3::new(to.x, y + TRACE_UP, to.y), true);
-        (jump && f > NO_GROUND).then_some(f)
+        jump.then(|| self.ground_point_hit_under(Vec3::new(to.x, y + TRACE_UP, to.y), true))
+            .flatten()
     }
 
     /// Can a soldier WALK arc `arc` from hub `from` to its other end — the
@@ -1044,9 +1044,8 @@ impl Sim {
     /// soldier can step onto it: up at most a step, down at most
     /// [`RETURN_STEP_DOWN`], a face he stands on.
     fn return_floor(&self, p: Vec3, n: Vec3) -> Option<f32> {
-        let (f, nrm) = self.ground_point_under_n(Vec3::new(n.x, p.y, n.z), p.y + STEP_HEIGHT);
-        (f > NO_GROUND
-            && f <= p.y + STEP_HEIGHT
+        let (f, nrm) = self.ground_point_hit_under_n(Vec3::new(n.x, p.y, n.z), p.y + STEP_HEIGHT)?;
+        (f <= p.y + STEP_HEIGHT
             && f >= p.y - RETURN_STEP_DOWN
             && nrm.y >= crate::soldier::FLOOR_MIN_NY)
             .then_some(f)

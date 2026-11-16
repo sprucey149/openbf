@@ -234,6 +234,11 @@ pub fn submit(
             if gpu.holo.bare.contains(&cp.def.name) {
                 continue;
             }
+            // A killed post's light is off the render list (DEA1's CP6,
+            // `analysis/re-vertex-colour-interp.md` section 6).
+            if cp.killed {
+                continue;
+            }
             // The hologram shows its own team until the flip's fade is over.
             let team = holos.list.get(i).map_or(cp.owner, |h| h.team);
             let rgb = dimmed(Relation::of(team, viewer).bytes(), holos.intensity(i));

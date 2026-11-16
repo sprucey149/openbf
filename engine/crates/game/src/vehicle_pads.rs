@@ -670,7 +670,17 @@ pub fn install_for_mission(
             Some(g) => crate::turret_fall::collision_parts(m, map_dir, &common, g, class)?,
             None => Vec::new(),
         };
-        sim.add_building_turret(t.spec.clone(), t.rot, sphere, t.instance, (t.fall.0, parts));
+        let h = sim.add_building_turret(t.spec.clone(), t.rot, sphere, t.instance, (t.fall.0, parts));
+        if space.is_some()
+            && db.engine_base(class) == Some("armedbuilding")
+        {
+            if let Some(add) = db
+                .prop_f32(class, "AddHealth")
+                .filter(|a| a.is_finite() && *a > 0.0)
+            {
+                sim.set_vehicle_add_health(h, add);
+            }
+        }
         // OURS: this plaza turret's first exit is a ledge across a wall.
         // measure: Coruscant upper plaza turret exit and native ledge (#108).
         if game == "bf2" && m.map == "cor1" && t.name.eq_ignore_ascii_case("tur_bldg_laser16") {

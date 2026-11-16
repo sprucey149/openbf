@@ -10,6 +10,18 @@ use super::{
     SceneGpu, SpeckleAnim, TextureHandle, Untextured, Vec3, CLAMP_V_KEY_PREFIX, WATER_TINT,
 };
 
+/// OURS (maintainer, 2026-11-16: myg1c's `enemyspawn` and `tankspawn` pads
+/// float over the bunker and the cliff): the invisible post classes draw no
+/// model. Their disc record names `com_bldg_controlzone` like a drawn post;
+/// the one key only they (and `com_bldg_untakeable_controlzone`) carry,
+/// 0x73425BAD = "1", has no parser and no constant in the BF2 ELF
+/// (`analysis/re-cp-capture.md` section 9). trace: what keeps the PS2 from
+/// drawing them, on a Mygeeto campaign state.
+const INVISIBLE_POSTS: [&str; 2] = [
+    "com_bldg_invisible_controlzone",
+    "com_bldg_inv_untakeable_controlzone",
+];
+
 pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     let mut textures: HashMap<String, BoundTexture> = HashMap::new();
     let mut draws = Vec::new();
@@ -399,6 +411,10 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             continue;
         };
         let world = ii < scene.manifest.instances.len();
+        if world && INVISIBLE_POSTS.iter().any(|c| c.eq_ignore_ascii_case(&inst.class)) {
+            *skipped.entry(inst.class.clone()).or_default() += 1;
+            continue;
+        }
         // Card LOD (`analysis/re-lod.md` §4, §7 [O]): on a map with a far
         // scene the PS2 draws a geometry that has a LOWD as its model to the
         // near scene's end and as its LOWD past the far scene's reach; the

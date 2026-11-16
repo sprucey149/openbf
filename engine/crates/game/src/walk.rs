@@ -1221,8 +1221,10 @@ impl WalkSim {
     /// An ordinary post start announces itself here, so that every line
     /// printed says what actually happened.
     pub fn rescue_spawn(&mut self, layout: &MapLayout) -> Option<(String, f32)> {
-        let grounded =
-            self.sim.ground_under(self.soldier().pos, false) > core::collision::NO_GROUND;
+        let grounded = self
+            .sim
+            .ground_hit_under(self.soldier().pos, false)
+            .is_some();
         let (post, y) = self.move_to_friendly_post(layout)?;
         if grounded {
             println!("spawn: no mission — starting at command post {post} (y {y:.2})");
@@ -1242,10 +1244,9 @@ impl WalkSim {
             let Some(&(pos, yaw)) = cp_spawn_nodes(layout, cp).first() else {
                 continue;
             };
-            let g = self.sim.ground_under(pos, false);
-            if g <= core::collision::NO_GROUND {
+            let Some(g) = self.sim.ground_hit_under(pos, false) else {
                 continue;
-            }
+            };
             let u = &mut self.sim.units[self.player.index as usize];
             u.soldier.pos = Vec3::new(pos.x, g, pos.z);
             u.soldier.yaw = yaw;
@@ -1713,6 +1714,9 @@ impl WalkSim {
                         (team, tmpl.classes.iter().map(|c| c.name.clone()).collect())
                     })
                     .collect();
+                campaign.set_voice_playing(
+                    self.voice.as_ref().is_some_and(|v| v.voice_playing()),
+                );
                 campaign.step(
                     &mut self.sim,
                     self.player,
@@ -1725,11 +1729,10 @@ impl WalkSim {
                 // `BroadcastVoiceOver` lines join the commander's voice
                 // queue as commander lines. [H] the binding's queue key
                 // is not traced. trace: BroadcastVoiceOver's binding.
-                let lines = campaign.take_voice_overs();
+                let mut lines = campaign.take_voice_overs();
+                lines.extend(campaign.take_sounds());
                 if let Some(v) = self.voice.as_mut() {
-                    for name in lines {
-                        v.queue.ask(core::announcer::Line::commander(&name));
-                    }
+                    v.ask_script_sounds(lines);
                 }
                 self.campaign = Some(campaign);
             }

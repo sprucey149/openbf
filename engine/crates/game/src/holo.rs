@@ -176,6 +176,17 @@ impl Holo {
         }
     }
 
+    /// A post the mission killed before the battle's first frame: switched
+    /// off with its fade done.
+    pub fn dark(team: Option<u8>) -> Self {
+        Holo {
+            fade: 0.0,
+            intensity: 0.0,
+            on: false,
+            ..Holo::steady(team)
+        }
+    }
+
     /// Switch on or off (`FUN_00218550` / `FUN_00218658`): a fade under way
     /// turns round where it is.
     pub fn switch(&mut self, on: bool, c: &HoloClass) {
@@ -657,7 +668,16 @@ impl Holos {
             || now < self.clock
         {
             *self = Holos {
-                list: cps.iter().map(|cp| Holo::steady(cp.owner)).collect(),
+                list: cps
+                    .iter()
+                    .map(|cp| {
+                        if cp.killed {
+                            Holo::dark(cp.owner)
+                        } else {
+                            Holo::steady(cp.owner)
+                        }
+                    })
+                    .collect(),
                 builds: walk
                     .sim
                     .building_turrets
@@ -708,6 +728,16 @@ impl Holos {
 /// One update of a post's hologram: the post's switch, a change of owner
 /// (the new team and icon, switched on: `FUN_00359c08`), the update.
 pub fn step(h: &mut Holo, cp: &core::cp::CommandPost, c: &HoloClass, rng: &mut Lcg) {
+    // A killed post (`KillObject`, BF2 `FUN_00354e10`): unscheduled, so its
+    // own update (`FUN_00357440`) stops, and its hologram at +0xb20 is
+    // switched off (`FUN_00218658`) until `RespawnObject` schedules it again
+    // (`FUN_00355648`). OURS: the hologram's own fade keeps running here;
+    // trace: whether the PS2 still updates a dead post's hologram.
+    if cp.killed {
+        h.switch(false, c);
+        h.update(STEP, c, rng);
+        return;
+    }
     h.switch(switched_on(cp, c), c);
     if h.team != cp.owner {
         h.team = cp.owner;

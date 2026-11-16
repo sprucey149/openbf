@@ -1307,6 +1307,24 @@ fn voicep_public_callers() {
     assert!(sl.handed.as_ref().unwrap().is_empty());
 }
 
+/// A voice line goes to the dedicated voice bus, not the effects bus. The
+/// space-round sound flood can fill the game bus, but it must never silence a
+/// campaign objective line on the way out (the headless voice-queue test
+/// cannot see this: it has no mixer).
+#[test]
+fn voice_lines_are_played_on_the_voice_bus() {
+    let f = VoiceFixture::new("voice_bus");
+    let Some(mut audio) = audio::Audio::new() else {
+        eprintln!("SKIP: no audio device");
+        return;
+    };
+    let mut sl = f.load();
+    let before = audio.voice_num_sounds();
+    assert!(sl.play_voice(&mut audio, "rep_test_voice").is_some());
+    assert!(audio.voice_num_sounds() > before);
+    assert_eq!(audio.num_sounds(), 0);
+}
+
 /// Rows supplied by the content census: mission path, faction0, faction1,
 /// requested commander property (tab separated). Prints both resolutions and
 /// every take; the input inventory must cover all selectable mixed battles.

@@ -293,8 +293,10 @@ pub(super) fn walk_floor(sim: &Sim, from: Vec3, to: Vec2) -> Option<f32> {
     let mut y = from.y;
     for i in 1..=steps {
         let p = start + (to - start) * (i as f32 / steps as f32);
-        let f = sim.ground_under(Vec3::new(p.x, y, p.y), false);
-        if f <= crate::collision::NO_GROUND || f < y - super::LEDGE_DROP {
+        let Some(f) = sim.ground_hit_under(Vec3::new(p.x, y, p.y), false) else {
+            return None;
+        };
+        if f < y - super::LEDGE_DROP {
             return None;
         }
         y = f;

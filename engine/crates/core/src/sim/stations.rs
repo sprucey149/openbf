@@ -66,6 +66,8 @@ pub struct StationClass {
     /// Wreck-local blast sphere, transformed by the death pose.
     pub wreck_sphere: Option<[f32; 4]>,
     pub damage_effects: Vec<StationDamageEffect>,
+    /// Class property `HideHealthBar` / `ShowHealthBar`: suppress HUD readout.
+    pub hide_health_bar: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,6 +115,7 @@ impl StationClass {
             sphere: None,
             wreck_sphere: None,
             damage_effects: Vec::new(),
+            hide_health_bar: false,
         }
     }
 }
@@ -138,6 +141,8 @@ pub struct Station {
     pub sphere_centre: Vec3,
     pub sphere_radius: f32,
     pub motion: StationMotion,
+    /// Shield points regenerated per second when driven by `SetProperty("addshield")`.
+    pub add_shield: f32,
 }
 
 impl Station {
@@ -156,6 +161,7 @@ impl Station {
             sphere_centre: pos,
             sphere_radius: 0.0,
             motion: StationMotion::new(1),
+            add_shield: 0.0,
         }
     }
 
@@ -187,6 +193,11 @@ impl Station {
         eat(&self.health.cur.hash_bits().to_le_bytes());
         for v in [self.pos.x, self.pos.y, self.pos.z, self.radius, self.timer] {
             eat(&v.hash_bits().to_le_bytes());
+        }
+        if self.add_shield != 0.0 || self.health.shield_max != 0.0 || self.health.shield != 0.0 {
+            for v in [self.health.shield, self.health.shield_max, self.add_shield] {
+                eat(&v.hash_bits().to_le_bytes());
+            }
         }
     }
 }
@@ -292,14 +303,31 @@ impl Sim {
         s.health
             .take_damage(desc, scale, friendly, self.friendly_fire_scale);
         let alive = s.health.alive();
-        if let Some(shooter) = attacker.filter(|_| pool != (s.health.cur, s.health.shield)) {
-            let team = s.team;
-            self.events.push(Event::HitLanded { shooter, team });
+        if pool != (s.health.cur, s.health.shield) {
+            if let Some(shooter) = attacker {
+                let team = s.team;
+                self.events.push(Event::HitLanded { shooter, team });
+            }
+            self.events.push(Event::StationDamaged { station, attacker });
         }
         self.space_station_damaged(station);
         if alive || self.stations[usize::from(station)].destroyed {
             return;
         }
+        self.station_dies(station, attacker);
+    }
+
+    /// Destroy `station` as a credited kill of `attacker` (the campaign
+    /// `KillObject` binding).
+    pub fn kill_station(&mut self, station: u16, attacker: Option<UnitHandle>) {
+        let Some(s) = self
+            .stations
+            .get_mut(usize::from(station))
+            .filter(|s| !s.destroyed)
+        else {
+            return;
+        };
+        s.health.cur = 0.0;
         self.station_dies(station, attacker);
     }
 
@@ -386,11 +414,92 @@ impl Sim {
         (self.station_classes.len() - 1) as u8
     }
 
+    /// Enable or disable collision on a station's placed instance (`SetProperty("iscollidable")`).
+    pub fn set_station_collidable(&mut self, station: u16, collidable: bool) {
+        let Some(s) = self.stations.get(usize::from(station)) else {
+            return;
+        };
+        let Some(instance) = s.instance else {
+            return;
+        };
+        let pose = s.pose();
+        if collidable && !s.destroyed {
+            if self
+                .station_live_collision
+                .get(usize::from(station))
+                .is_none_or(Vec::is_empty)
+            {
+                self.prepare_station_collision(usize::from(station));
+            }
+            if let Some(parts) = self.station_live_collision.get(usize::from(station)) {
+                self.collision.replace_instance(instance, parts, pose);
+            }
+            self.collision.bind_station(instance, station);
+        } else {
+            if self
+                .station_live_collision
+                .get(usize::from(station))
+                .is_none_or(Vec::is_empty)
+            {
+                self.prepare_station_collision(usize::from(station));
+            }
+            self.collision.replace_instance(instance, &[], pose);
+        }
+    }
+
+    /// Enable or disable flyer missile lock-on on station `station` (`EnableLockOn`).
+    pub fn set_station_lock_on(&mut self, station: u16, enabled: bool) {
+        let Some(sa) = self.space_assault.as_mut() else {
+            return;
+        };
+        if enabled {
+            if !sa.lock_on.contains(&station) {
+                sa.lock_on.push(station);
+            }
+        } else {
+            sa.lock_on.retain(|&o| o != station);
+        }
+    }
+
+    /// Regenerate station shields before combat so hits that drain shields to zero stay visible until script dispatch.
+    pub(super) fn tick_station_shields(&mut self, dt: f32) {
+        for si in 0..self.stations.len() {
+            let s = self.stations[si];
+            if s.destroyed {
+                continue;
+            }
+            let in_group = self.space_assault.as_ref().is_some_and(|sa| {
+                sa.shields.iter().any(|g| g.objects.contains(&(si as u16)))
+            });
+            if !in_group
+                && s.add_shield > 0.0
+                && s.health.shield_max > 0.0
+                && s.health.shield < s.health.shield_max
+            {
+                self.stations[si].health.shield =
+                    (s.health.shield + dt * s.add_shield).clamp(0.0, s.health.shield_max);
+            }
+        }
+        for v in &mut self.vehicles {
+            if v.alive
+                && v.add_shield > 0.0
+                && v.health.shield_max > 0.0
+                && v.health.shield < v.health.shield_max
+            {
+                v.health.shield =
+                    (v.health.shield + dt * v.add_shield).clamp(0.0, v.health.shield_max);
+            }
+        }
+    }
+
     /// Step 5c': every station's clock, and the passes that come due.
     pub(super) fn tick_stations(&mut self, dt: f32) {
         for si in 0..self.stations.len() {
             let s = self.stations[si];
-            if s.destroyed || !s.serves() {
+            if s.destroyed {
+                continue;
+            }
+            if !s.serves() {
                 continue;
             }
             let Some(c) = self.station_classes.get(usize::from(s.class)) else {

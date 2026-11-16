@@ -46,6 +46,8 @@ const BOUND: &[&str] = &[
     "DestroyTimer",
     "DisableBarriers",
     "EnableBarriers",
+    "EnableBuildingLockOn",
+    "EnableLockOn",
     "FindTimer",
     "GetCharacterClass",
     "GetCharacterTeam",
@@ -145,8 +147,6 @@ const IGNORED: &[&str] = &[
     "BeginScreenTransition",
     "ClearWalkers",
     "DisableAIAutoBalance",
-    "EnableBuildingLockOn",
-    "EnableLockOn",
     "EnableSPHeroRules",
     "EnableSPScriptedHeroes",
     "EntityFlyerInitAsLanded",
@@ -418,6 +418,10 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
+            // B2 `FUN_0019e458`: one argument plays the property 2-D with
+            // the queue flag set (`FUN_0043ceb0(h, 0, 0, _, 1)`), so a
+            // stream line waits its turn on its stream's slot
+            // (re-announcer.md §1 step 2). The battle routes it by kind.
             "ScriptCB_SndPlaySound" => {
                 if let Some(t) = arg(a, 0).as_str() {
                     w.sounds.push(t.to_owned());
@@ -425,11 +429,23 @@ impl Ctx<'_> {
                 nothing()
             }
             "ScriptCB_PlayInGameMusic" => {
-                w.music.push(arg(a, 0).as_str().map(str::to_owned));
+                // FUN_001a04a0 (45241): the name, then the replay delay when
+                // the call has a second argument (lua_gettop >= 2), else 15.
+                if let Some(name) = arg(a, 0).as_str() {
+                    let replay = if a.len() < 2 {
+                        crate::music::IN_GAME_REPLAY
+                    } else {
+                        num(a, 1).unwrap_or(0.0)
+                    };
+                    w.music.push(crate::music::InGameMusic::Play {
+                        name: name.to_owned(),
+                        replay,
+                    });
+                }
                 nothing()
             }
             "ScriptCB_StopInGameMusic" => {
-                w.music.push(None);
+                w.music.push(crate::music::InGameMusic::Stop);
                 nothing()
             }
             "ScriptCB_PlayInGameMovie" => {
@@ -459,7 +475,7 @@ impl Ctx<'_> {
             }
             "OpenAudioStream" => one(Value::Ud(Ud::Stream(0))),
             "AudioStreamComplete" => {
-                one(Value::Num(if w.time >= w.voice_until { 1.0 } else { 0.0 }))
+                one(Value::Num(if w.voice_playing { 0.0 } else { 1.0 }))
             }
 
             "AddMissionObjective" => {
@@ -739,7 +755,20 @@ impl Ctx<'_> {
                 .resolve(sim, arg(a, 0))
                 .and_then(|o| w.obj_health(sim, o))
                 .map_or(Value::Nil, Value::Num)),
-            "GetObjectShield" => one(Value::Num(0.0)),
+            "GetObjectShield" => {
+                let (cur, max, add) = w
+                    .resolve(sim, arg(a, 0))
+                    .map_or((0.0, 0.0, 0.0), |o| w.obj_shield(sim, o));
+                Ok(vec![Value::Num(cur), Value::Num(max), Value::Num(add)])
+            }
+            "EnableLockOn" | "EnableBuildingLockOn" => {
+                let enable = !matches!(arg(a, 1), Value::Bool(false))
+                    && num(a, 1).is_none_or(|n| n != 0.0);
+                if let Some(Ud::Station(si)) = w.resolve(sim, arg(a, 0)) {
+                    sim.set_station_lock_on(si, enable);
+                }
+                nothing()
+            }
             "GetObjectLastHitWeaponClass" => one(w
                 .resolve(sim, arg(a, 0))
                 .and_then(|o| w.last_hit_weapon.iter().find(|(x, _)| *x == o))
@@ -751,8 +780,12 @@ impl Ctx<'_> {
                 w.set_property(sim, arg(a, 0), &key, &val);
                 nothing()
             }
-            "KillObject" | "DeleteEntity" => {
-                w.kill_object(sim, arg(a, 0));
+            "KillObject" => {
+                w.kill_object(sim, arg(a, 0), true);
+                nothing()
+            }
+            "DeleteEntity" => {
+                w.kill_object(sim, arg(a, 0), false);
                 nothing()
             }
             "RespawnObject" => {
@@ -1080,6 +1113,37 @@ impl World {
         }
     }
 
+    fn obj_shield(&self, sim: &Sim, o: Ud) -> (f32, f32, f32) {
+        match o {
+            Ud::Station(i) => sim
+                .stations
+                .get(usize::from(i))
+                .map_or((0.0, 0.0, 0.0), |s| {
+                    (s.health.shield, s.health.shield_max, s.add_shield)
+                }),
+            Ud::Vehicle(i, g) => sim
+                .vehicles
+                .get(i as usize)
+                .filter(|v| v.gen == g)
+                .map_or((0.0, 0.0, 0.0), |v| {
+                    (v.health.shield, v.health.shield_max, v.add_shield)
+                }),
+            Ud::Unit(i, g) => sim
+                .units
+                .get(i as usize)
+                .filter(|u| u.gen == g)
+                .map_or((0.0, 0.0, 0.0), |u| {
+                    u.droideka
+                        .as_ref()
+                        .and_then(|d| {
+                            Some((d.shield.points, u.droideka_class()?.shield.max, 0.0))
+                        })
+                        .unwrap_or((u.health.shield, u.health.shield_max, 0.0))
+                }),
+            _ => (0.0, 0.0, 0.0),
+        }
+    }
+
     /// Top a main army back up to its unit count where it may spawn.
     pub(crate) fn fill_enabled_ai(&self, sim: &mut Sim) {
         for t in 0..2usize {
@@ -1183,7 +1247,7 @@ impl World {
         Value::Ud(Ud::Flag(self.flags.len() as u8 - 1))
     }
 
-    pub(crate) fn kill_object(&mut self, sim: &mut Sim, v: &Value) {
+    pub(crate) fn kill_object(&mut self, sim: &mut Sim, v: &Value, notify: bool) {
         let Some(o) = self.resolve(sim, v) else {
             return;
         };
@@ -1208,7 +1272,11 @@ impl World {
                     .get(usize::from(si))
                     .is_some_and(|s| !s.destroyed)
                 {
-                    sim.install_station_wreck(si);
+                    if notify && self.post_loaded {
+                        sim.kill_station(si, None);
+                    } else {
+                        sim.install_station_wreck(si);
+                    }
                 }
             }
             Ud::Vehicle(i, g) => {
@@ -1221,7 +1289,9 @@ impl World {
                     p.team = None;
                     p.armed = false;
                 }
-                if let Some(v) = sim.vehicles.get_mut(i as usize).filter(|v| v.gen == g) {
+                if notify && self.post_loaded {
+                    sim.destroy_vehicle(core::vehicle::VehicleHandle { index: i, gen: g }, None);
+                } else if let Some(v) = sim.vehicles.get_mut(i as usize).filter(|v| v.gen == g) {
                     v.health.cur = 0.0;
                     v.alive = false;
                 }
@@ -1331,7 +1401,11 @@ impl World {
             }
             (Ud::Post(ci), _) => self.set_post_property(sim, usize::from(ci), &key, val),
             (Ud::Station(si), _) => set_station_property(sim, usize::from(si), &key, val),
-            (Ud::Vehicle(i, g), "curhealth" | "maxhealth" | "team" | "disabletime") => {
+            (
+                Ud::Vehicle(i, g),
+                "curhealth" | "maxhealth" | "curshield" | "maxshield" | "addshield" | "team"
+                | "disabletime",
+            ) => {
                 let Some(v) = sim.vehicles.get_mut(i as usize).filter(|v| v.gen == g) else {
                     return;
                 };
@@ -1344,6 +1418,18 @@ impl World {
                         v.health.max = n.fmax(1.0);
                         v.health.cur = v.health.cur.fmin(v.health.max);
                     }
+                    "curshield" => {
+                        v.health.shield = if v.health.shield_max > 0.0 {
+                            n.clamp(0.0, v.health.shield_max)
+                        } else {
+                            n.fmax(0.0)
+                        };
+                    }
+                    "maxshield" => {
+                        v.health.shield_max = n.fmax(0.0);
+                        v.health.shield = v.health.shield.fmin(v.health.shield_max);
+                    }
+                    "addshield" => v.add_shield = n.fmax(0.0),
                     "disabletime" => v.disable = n,
                     _ => v.team = (n >= 1.0).then(|| n as u8 - 1),
                 }
@@ -1421,6 +1507,11 @@ impl World {
 }
 
 fn set_station_property(sim: &mut Sim, si: usize, key: &str, val: &str) {
+    if matches!(key, "iscollidable" | "iscollidible") {
+        let collidable = val != "0" && !val.eq_ignore_ascii_case("false");
+        sim.set_station_collidable(si as u16, collidable);
+        return;
+    }
     let Ok(n) = val.parse::<f32>() else {
         return;
     };
@@ -1447,6 +1538,18 @@ fn set_station_property(sim: &mut Sim, si: usize, key: &str, val: &str) {
             st.health.max = n.fmax(1.0);
             st.health.cur = st.health.cur.fmin(st.health.max);
         }
+        "curshield" => {
+            st.health.shield = if st.health.shield_max > 0.0 {
+                n.clamp(0.0, st.health.shield_max)
+            } else {
+                n.fmax(0.0)
+            };
+        }
+        "maxshield" => {
+            st.health.shield_max = n.fmax(0.0);
+            st.health.shield = st.health.shield.fmin(st.health.shield_max);
+        }
+        "addshield" => st.add_shield = n.fmax(0.0),
         _ => {}
     }
 }

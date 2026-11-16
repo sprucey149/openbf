@@ -133,7 +133,9 @@ impl Sim {
                 }
             }
         }
-        self.battle.unlimited_reinforcements = true;
+        if !self.battle.campaign_rules {
+            self.battle.unlimited_reinforcements = true;
+        }
         self.space_assault = Some(sa);
     }
 
@@ -491,6 +493,11 @@ impl Sim {
                 if !s.destroyed && s.health.cur < s.health.max {
                     s.health.cur = (s.health.cur + dt * add).fmin(s.health.max);
                 }
+            }
+        }
+        for v in &mut self.vehicles {
+            if v.alive && v.add_health > 0.0 && v.health.cur < v.health.max {
+                v.health.cur = (v.health.cur + dt * v.add_health).fmin(v.health.max);
             }
         }
         let mut returned = Vec::new();

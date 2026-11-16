@@ -5,7 +5,7 @@
 //! census). `--aim-replay` runs the scripted acquisition referee without a device.
 
 use super::battle::{
-    hud_model, load_and_upload, load_hud_view, make_walk, spawn_model, squad_icons, walk_draws,
+    hud_model, load_hud_view, make_walk, spawn_model, squad_icons, walk_draws,
 };
 use super::{BattleSetup, ViewerArgs};
 use anyhow::{anyhow, Context, Result};
@@ -540,6 +540,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::VehicleCollision { vehicle, .. } => {
                 format!("{tick},vehicle_collision,{},,\n", vehicle.index)
             }
+            Event::StationDamaged { .. } | Event::VehicleShieldDamaged { .. } => continue,
         };
         csv.push_str(&line);
     }
@@ -762,7 +763,12 @@ fn bench_camera(v: &ViewerArgs, scene: &game::assets::Scene, walk: &WalkSim) -> 
 
 pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
     let mut r = Renderer::new_headless(v.size.0, v.size.1).map_err(|e| anyhow!("renderer: {e}"))?;
-    let (mut gpu, scene) = load_and_upload(&mut r, &v.map, &v.mode)?;
+    let layers = match &v.mission {
+        Some(path) => game::mission::MissionDef::load(path)?.layers,
+        None => Vec::new(),
+    };
+    let (mut gpu, scene) =
+        super::battle::load_and_upload_with_layers(&mut r, &v.map, &v.mode, &layers)?;
 
     if v.scene_report {
         return scene_report(&scene, &gpu, &v.map);

@@ -19,7 +19,6 @@
 
 use super::awards::endurance_rate;
 use super::state::{DeathCause, Event, Sim};
-use crate::collision::NO_GROUND;
 use crate::collision::{CollisionWorld, HullFilter, Layers, Shape};
 use crate::fmath::FloatExt;
 use crate::heightfield::Heightfield;
@@ -549,6 +548,12 @@ impl Sim {
             damage,
             dir,
         });
+        if landed && damage == 0.0 {
+            self.events.push(Event::VehicleShieldDamaged {
+                shooter,
+                vehicle: h,
+            });
+        }
         if let Some(shooter) = shooter.filter(|_| landed) {
             self.events.push(Event::HitLanded {
                 shooter,
@@ -1174,8 +1179,7 @@ impl Sim {
                 Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
             }
             None => {
-                let g = self.ground_under_with(p, false, HullFilter::Static);
-                if g > NO_GROUND {
+                if let Some(g) = self.ground_hit_under_with(p, false, HullFilter::Static) {
                     Vec3::new(p.x, g, p.z)
                 } else {
                     p
