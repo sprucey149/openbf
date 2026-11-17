@@ -736,6 +736,15 @@ impl Scene {
             if class.base.eq_ignore_ascii_case("trap") {
                 continue;
             }
+            // A `flag` class is a carryable item: the PS2's EntityItem is a
+            // touch trigger, never solid geometry (space CTF picks its flag
+            // up from a flyer). Its model's baked coll prim would stand an
+            // invisible box at the item — the campaign plans room's
+            // `com_item_holocron` is a 0.6 m cube floating at chest height
+            // where a soldier walking under it must pass.
+            if class.base.eq_ignore_ascii_case("flag") {
+                continue;
+            }
             let key = geom.to_ascii_lowercase();
             let Some(cg) = self.collision.get(&key) else {
                 continue;

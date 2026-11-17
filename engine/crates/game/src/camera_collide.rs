@@ -77,6 +77,18 @@ pub const PULL_RETURN_STEP: f32 = 0.15;
 /// small trees, and leaves walls, doors, buildings and rocks (4.5 m up)
 /// solid (measured on BF1 NAB1 / YAV2, BF2 KAS2 / NAB2).
 pub const PROP_MAX_FOOTPRINT: f32 = 4.0;
+/// The two `spacedust1` capture-marker models: the 7.5 m ground column
+/// (`com_prop_ctfdrop`, drawn by the placed `com_bldg_ctfbase`) and the 40 m
+/// space sphere. Both are translucent effects with no solid body in the
+/// original, so their drawn triangles must not pull the chase camera in —
+/// the 7.5 m column otherwise counts as a building (`PROP_MAX_FOOTPRINT` is
+/// 4 m) and the camera zooms right up behind the player as he approaches the
+/// delivery point. Matched by model, not by class: several placement classes
+/// share these geometries.
+pub fn is_ctf_marker_model(model: &str) -> bool {
+    model.eq_ignore_ascii_case("com_prop_ctfdrop")
+        || model.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+}
 /// A see-through prop's opacity while it stands between the camera and the
 /// player (an ordered dither, `render::Fade::see_through`). PROVISIONAL.
 pub const SEE_THROUGH_OPACITY: f32 = 0.3;
@@ -398,6 +410,9 @@ impl CameraBlockers {
             let Some(model) = scene.resolve_model(&inst.class) else {
                 continue;
             };
+            if is_ctf_marker_model(model) {
+                continue;
+            }
             let contact_surface = scene.meshes[model].contact_surface;
             if !meshes.contains_key(model) {
                 let cpu = &scene.meshes[model];

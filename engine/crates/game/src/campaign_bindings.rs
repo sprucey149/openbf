@@ -1369,6 +1369,29 @@ impl World {
     pub(crate) fn set_property(&mut self, sim: &mut Sim, target: &Value, key: &str, val: &str) {
         let key = key.trim().to_ascii_lowercase();
         let val = val.trim();
+        // The PS2 creates a scripted vehicle at setup, so the mission can
+        // author DisableTime/Team before anyone can board it. Our pads spawn
+        // later (spa3's LAAT after SpawnTime = 15 s) and its name also names a
+        // placed marker, so a ScriptPostLoad write resolves to that marker and
+        // the vehicle arrives enabled for the AI to fly off. Bring the pad's
+        // vehicle out first; `resolve` then finds it ahead of the marker.
+        if let Some(name) = target.as_str() {
+            let lower = name.to_ascii_lowercase();
+            if let Some(pi) = sim
+                .vehicle_pads
+                .iter()
+                .position(|p| p.def.name.eq_ignore_ascii_case(&lower))
+            {
+                let live = sim.vehicle_pads[pi]
+                    .vehicles
+                    .iter()
+                    .any(|pv| sim.vehicle(pv.handle).is_some_and(|v| v.alive));
+                if !live {
+                    let team = sim.vehicle_pads[pi].team;
+                    sim.spawn_from_pad(pi, team);
+                }
+            }
+        }
         let Some(o) = self.resolve(sim, target) else {
             return;
         };

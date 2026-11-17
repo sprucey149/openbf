@@ -206,6 +206,19 @@ fn write_model(
 ) -> Result<Vec<u8>> {
     let vertex_light = !matches!(lighting, VertexLighting::Off);
     let keep_col0_alpha = matches!(lighting, VertexLighting::Sky);
+    // The ground CTF marker (`INGAME.LVL`) is one BLEND `spacedust1` column
+    // whose 91 COL0 entries are a GREYSCALE ramp, not alpha-only: every
+    // vertex is (v,v,v,v) with v = 0 / 127 / 102 / 76 / 51 / 25 / 0 down the
+    // seven height rings (dumped off the disc with `mungefs::examples::
+    // ctfdump`). The native unlit VU1 multiplies BOTH colour and alpha by
+    // COL0 (`re-model-lighting.md` §2.6, `re-glow.md` §1.2), and the additive
+    // draw multiplies by the resulting alpha once more — so the ramp lands
+    // twice and only three bands remain visible. The common bake used to drop
+    // this COL0 altogether because its flags select no vertex-lit path; the
+    // port then drew five evenly bright bands. Export it here with the usual
+    // GS-to-linear colour conversion and the vertex alpha, as the space
+    // sphere's map bake already does.
+    let marker_col0 = m.name.eq_ignore_ascii_case("com_prop_ctfdrop");
     let programs = match lighting {
         VertexLighting::Programs(programs) => Some(programs),
         _ => None,
@@ -289,8 +302,9 @@ fn write_model(
         materials.push(mat);
 
         let mut attributes = json!({"POSITION": pos_acc, "NORMAL": nrm_acc, "TEXCOORD_0": uv_acc});
-        if let Some(c) = seg.colors.as_ref().filter(|_| vertex_light) {
-            let glow_av = glow == Some(LightPath::Glow)
+        if let Some(c) = seg.colors.as_ref().filter(|_| vertex_light || marker_col0) {
+            let glow_av = marker_col0
+                || glow == Some(LightPath::Glow)
                 || (keep_col0_alpha && seg.material_flags & 0x200 == 0)
                 || (seg.bf2_material
                     && seg.material_flags & 0x204 == 0x04
@@ -752,6 +766,53 @@ mod tests {
         let extras: serde_json::Value =
             serde_json::from_str(mesh.extras().as_ref().unwrap().get()).unwrap();
         assert_eq!(extras["vis_top"], 7.5);
+    }
+
+    /// The ground CTF marker's COL0 is a GREYSCALE ramp — (v,v,v,v) per ring,
+    /// dumped off `INGAME.LVL`. The native unlit VU1 multiplies both colour
+    /// and alpha by it, so both halves of the ramp must reach `COLOR_0`:
+    /// forcing rgb white leaves four to five bands where the original shows
+    /// three. Every other model keeps its ordinary COL0 rule.
+    #[test]
+    fn the_ground_ctf_marker_exports_its_full_greyscale_ramp() {
+        let mut marker = bf2(0x0101_0044, true);
+        marker.colors = Some(vec![[0, 0, 0, 0], [127, 127, 127, 127], [25, 25, 25, 25]]);
+        let mut m = model(vec![marker]);
+        m.name = "com_prop_ctfdrop".into();
+        let alphas = crate::alpha::AlphaTable::new(&[]).model(&m);
+        let bytes = model_to_glb(&m, &alphas, false).unwrap();
+        let (doc, buffers, _) = gltf::import_slice(&bytes).expect("gltf reads it");
+        let prim = doc.meshes().next().unwrap().primitives().next().unwrap();
+        let colors: Vec<[f32; 4]> = prim
+            .reader(|b| Some(&buffers[b.index()]))
+            .read_colors(0)
+            .expect("the marker keeps its COL0")
+            .into_rgba_f32()
+            .collect();
+        assert_eq!(colors.len(), 3);
+        for (c, v) in colors.iter().zip([0u8, 127, 25]) {
+            let rgb = col0_linear([v, v, v, v]);
+            assert!(
+                (c[0] - rgb[0]).abs() < 1e-6,
+                "rgb keeps the ramp: {colors:?}"
+            );
+            assert!(
+                (c[1] - rgb[1]).abs() < 1e-6,
+                "rgb keeps the ramp: {colors:?}"
+            );
+            assert!(
+                (c[2] - rgb[2]).abs() < 1e-6,
+                "rgb keeps the ramp: {colors:?}"
+            );
+            assert_eq!(c[3], glow_vertex_alpha(v));
+        }
+
+        // Any other model keeps the ordinary rule: a common model gets no
+        // COLOR_0 at all, since its COL0 is not a vertex-light multiplier.
+        let mut plain = m.clone();
+        plain.name = "com_prop_something".into();
+        let bytes = model_to_glb(&plain, &alphas, false).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes[20..]).contains("COLOR_0"));
     }
 
     #[test]

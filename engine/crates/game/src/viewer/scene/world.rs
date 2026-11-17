@@ -22,6 +22,13 @@ const INVISIBLE_POSTS: [&str; 2] = [
     "com_bldg_inv_untakeable_controlzone",
 ];
 
+/// The instance property key `Team`, FNV-1a of the lowercased name as the
+/// disc hashes properties (`crate::classdb::fnv1a_lowercase`). A CTF marker
+/// placement carries its owning team here in BF2 numbering (1 = Republic /
+/// Alliance, 2 = CIS / Empire); the space sphere markers and the ground
+/// `com_bldg_ctfbase` base both do.
+const PROP_TEAM: u32 = 2_734_521_612;
+
 pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     let mut textures: HashMap<String, BoundTexture> = HashMap::new();
     let mut draws = Vec::new();
@@ -658,8 +665,16 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             .with_light(*light)
             .with_fade(p.fade)
             .with_lit(lit);
+            // Both CTF marker models use the SAME authored `spacedust1`
+            // segment flags (0x01010044): the ground column from INGAME.LVL
+            // and the 40 m space sphere. BF2's `FUN_0058ed70` selects the
+            // translucent path from bit 0x40 for either, so the ground marker
+            // takes the additive path here too — without it the column drew
+            // as a solid blue sheet instead of the original's translucent
+            // glow (`analysis/re-ctf.md` §5).
             base.additive = *layer == render::DrawLayer::Blend
-                && model.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+                && (model.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+                    || model.eq_ignore_ascii_case("com_prop_ctfdrop"))
                 && scene.meshes[model].submeshes[k].4 & 0x40 != 0;
             if let Some(c) = p.color {
                 base.color = std::array::from_fn(|i| base.color[i] * c[i]);
@@ -835,9 +850,12 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             .iter()
             .enumerate()
             .filter_map(|(i, x)| {
-                x.class
-                    .eq_ignore_ascii_case("com_icon_spaceflag")
-                    .then_some(i as u32)
+                // A placed holocron (spa3's `plans`) is a live flag once the
+                // campaign registers it: fade its static draw so the carried
+                // / dropped flag draw takes over, as with space flags.
+                (x.class.eq_ignore_ascii_case("com_icon_spaceflag")
+                    || x.class.eq_ignore_ascii_case("com_item_holocron"))
+                .then_some(i as u32)
             })
             .collect(),
         ctf_markers: scene
@@ -846,9 +864,22 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             .iter()
             .enumerate()
             .filter_map(|(i, x)| {
-                x.class
-                    .eq_ignore_ascii_case("com_prop_ctfdrop_space")
-                    .then_some((i as u32, Vec3::from(x.translation)))
+                // Space CTF places the 40 m `com_prop_ctfdrop_space` spheres;
+                // a ground or campaign capture point places the 5 m
+                // `com_bldg_ctfbase` building, whose class geometry is the
+                // same `com_prop_ctfdrop` marker. Both take the native
+                // marker's team tint (`SceneGpu::pose_ctf`).
+                if !(x.class.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+                    || x.class.eq_ignore_ascii_case("com_bldg_ctfbase"))
+                {
+                    return None;
+                }
+                let team = x
+                    .props
+                    .iter()
+                    .find(|(k, _)| *k == PROP_TEAM)
+                    .and_then(|(_, v)| v.trim().parse::<u8>().ok());
+                Some((i as u32, Vec3::from(x.translation), team))
             })
             .collect(),
         faded: Vec::new(),

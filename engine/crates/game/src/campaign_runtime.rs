@@ -469,6 +469,44 @@ impl CampaignRuntime {
             return;
         }
         self.started = true;
+        // A flag-class object placed in the map (spa3's `plans` holocron) is a
+        // real flag in the original's object registry: a soldier picks it up
+        // on contact. The tutorial's holocron is made with `CreateEntity`,
+        // which registers a flag; a placed one never was, leaving it a solid
+        // prop. Register every placed flag-class instance the same way before
+        // the script runs, so `GetFlagCarrier` / `SetProperty` and the pickup
+        // itself work. `pose_ctf` fades the static draw for these instances.
+        let placed: Vec<(String, String, Vec3)> = self.w.instances.clone();
+        for (name, class, pos) in placed {
+            if self.w.class_bases.get(&class).map(String::as_str) != Some("flag") {
+                continue;
+            }
+            if self.w.flags.iter().any(|f| f.name.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            let far = Vec3::new(0.0, -10_000.0, 0.0);
+            let ctf = sim.ctf.get_or_insert_with(|| {
+                let mut c = core::sim::ctf::CtfState::new_ground_one_flag(u32::MAX, pos, far, far);
+                c.flags.clear();
+                for r in &mut c.capture_regions {
+                    r.radius = 0.0;
+                }
+                c
+            });
+            let mut flag = core::sim::ctf::Flag::new_ground_neutral(pos);
+            // These are player objectives (spa3's script explicitly sets
+            // AllowAIPickUp 0); bots must neither take one nor chase it into
+            // the command room and crash.
+            flag.allow_ai_pickup = false;
+            ctf.flags.push(flag);
+            let ci = ctf.flags.len() - 1;
+            self.w.flags.push(FlagEnt {
+                name,
+                class,
+                ctf: ci,
+                dead: false,
+            });
+        }
         // The hero is the army's `SetHeroClass` slot, not an `AddUnitClass`
         // entry; the port keeps him in the class table (`heroes::append`),
         // so he must not take a place in the script's numbering: geo1c's
@@ -1155,7 +1193,20 @@ impl CampaignRuntime {
                     // A destroyed station remains a repair objective until
                     // its script removes the marker (user's geo1c frame 7).
                     if self.w.obj_alive(sim, *o) || matches!(o, Ud::Station(_)) {
-                        if let Some(p) = self.w.obj_pos(sim, *o) {
+                        // A destructable's geometry can be baked well away
+                        // from its instance origin (spa3's life_int_cis is
+                        // ~49 m off). Put the marker on the actual body so
+                        // the player aims at the object, not empty space.
+                        let p = match o {
+                            Ud::Station(si) => sim
+                                .stations
+                                .get(usize::from(*si))
+                                .and_then(|st| st.instance)
+                                .and_then(|i| sim.collision.instance_centre(i))
+                                .or_else(|| self.w.obj_pos(sim, *o)),
+                            _ => self.w.obj_pos(sim, *o),
+                        };
+                        if let Some(p) = p {
                             push(p + lift);
                         }
                     }

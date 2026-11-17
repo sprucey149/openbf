@@ -1,5 +1,33 @@
 use super::*;
 
+/// The CTF marker's team colours are display-space 0..255; decoded from 255
+/// they stay under 1 (blue is blue) instead of clamping to white.
+#[test]
+fn ctf_marker_tint_stays_in_gamut() {
+    let blue = SceneGpu::marker_tint([1.0, 86.0, 213.0]);
+    let red = SceneGpu::marker_tint([200.0, 100.0, 100.0]);
+    for c in blue.into_iter().chain(red) {
+        assert!((0.0..=1.0).contains(&c), "tint {c} out of gamut");
+    }
+    assert!(blue[2] > blue[0] * 10.0, "friendly marker must read blue: {blue:?}");
+    assert!(red[0] > red[1] * 2.0, "enemy marker must read red: {red:?}");
+}
+
+/// A scripted campaign capture point never fills `sim.ctf.capture_regions`
+/// (its capture test is an `OnEnterRegion` call), so the placement's own
+/// `Team` property decides the side: a Republic marker reads blue to the
+/// Republic player, red to CIS. A live CTF region wins over the property.
+#[test]
+fn a_placed_marker_without_a_capture_region_uses_its_team_prop() {
+    assert_eq!(marker_is_friendly(None, Some(1), 0), Some(true));
+    assert_eq!(marker_is_friendly(None, Some(1), 1), Some(false));
+    assert_eq!(marker_is_friendly(None, Some(2), 0), Some(false));
+    assert_eq!(marker_is_friendly(None, Some(2), 1), Some(true));
+    assert_eq!(marker_is_friendly(Some(1), Some(1), 1), Some(true));
+    assert_eq!(marker_is_friendly(Some(0), Some(1), 1), Some(false));
+    assert_eq!(marker_is_friendly(None, None, 0), None);
+}
+
 /// An ocean step that turns 2 water draws into 130 moves every later draw
 /// by 128: the door parts follow, a speckle frame inside the old range
 /// (the still plane's) is dropped, and an index before the range stays.

@@ -1,5 +1,17 @@
 use super::*;
 
+/// The CTF marker's drawn cylinder is 7.5 m across, well over the prop
+/// threshold, but it is an effect rather than a building: neither it nor the
+/// space sphere may become a camera blocker through `from_scene`.
+#[test]
+fn ctf_marker_models_are_not_camera_blockers() {
+    assert!(is_ctf_marker_model("com_prop_ctfdrop"));
+    assert!(is_ctf_marker_model("com_prop_ctfdrop_space"));
+    assert!(is_ctf_marker_model("COM_PROP_CTFDROP"));
+    assert!(!is_ctf_marker_model("com_bldg_ctfbase"));
+    assert!(!is_ctf_marker_model("com_bldg_commandpost"));
+}
+
 fn mesh(positions: Vec<Vec3>, indices: Vec<u32>) -> Arc<TriMesh> {
     let mut local = Aabb::empty();
     for p in &positions {

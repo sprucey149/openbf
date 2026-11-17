@@ -602,6 +602,22 @@ impl CollisionWorld {
             .find_map(|(i, v)| (*v == turret).then_some(*i))
     }
 
+    /// The world-space centre of a placed instance's collision bodies: the
+    /// average of their AABB centres. Some BF2 destructables (Felucia's
+    /// `life_int_cis` console) bake geometry offset tens of metres from their
+    /// instance origin, so the origin is not where the object actually sits.
+    /// Objective markers use this so the arrow lands on the object, not the
+    /// empty origin (the sim's own Station::pos stays the instance origin).
+    pub fn instance_centre(&self, instance: u32) -> Option<glam::Vec3> {
+        let mut sum = glam::Vec3::ZERO;
+        let mut n = 0u32;
+        for b in self.bodies.iter().filter(|b| b.instance == Some(instance)) {
+            sum += (b.aabb.min + b.aabb.max) * 0.5;
+            n += 1;
+        }
+        (n > 0).then_some(sum / n as f32)
+    }
+
     pub fn instance_radius_sq_at(&self, instance: u32, point: glam::Vec3) -> Option<f32> {
         let margin = glam::Vec3::splat(0.5);
         let mut struck = None::<f32>;

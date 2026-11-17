@@ -343,6 +343,11 @@ fn ctf_goal(sim: &Sim, me: UnitHandle) -> Option<Vec3> {
     let ctf = sim.ctf.as_ref().filter(|c| !c.is_space())?;
     let my_team = sim.unit(me).map_or(0, |u| u.team);
     for flag in &ctf.flags {
+        // A flag the mission bars AI from taking is a player objective: no
+        // bot should chase it (spa3's holocron sits in a command room).
+        if !flag.allow_ai_pickup {
+            continue;
+        }
         match flag.status {
             crate::sim::FlagStatus::Carried { carrier } => {
                 if carrier == me {

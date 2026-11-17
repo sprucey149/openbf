@@ -2114,3 +2114,127 @@ fn fel1c_c_acklay_objective_counts_ally_kills_and_spawns_both_waves() {
         "Objective2 must complete after all 6 acklays are killed by allies"
     );
 }
+
+/// spa3's LAAT is authored neutral and disabled until the player reaches the
+/// hangar. The pad spawns it 15 s into the round, long after ScriptPostLoad
+/// sets those properties, so a pad vehicle the script names must be created
+/// when the property is written (otherwise an AI pilots it out of the hangar).
+#[test]
+fn spa3c_c_laat_is_disabled_before_the_pad_would_spawn_it() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        return;
+    };
+    let (_, walk, _) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa3c_c");
+    let pad = walk
+        .sim
+        .vehicle_pads
+        .iter()
+        .find(|p| p.def.name.eq_ignore_ascii_case("rep04"))
+        .expect("REP04 pad");
+    let v = pad
+        .vehicles
+        .first()
+        .and_then(|pv| walk.sim.vehicle(pv.handle))
+        .expect("the script's SetProperty must have spawned REP04");
+    assert!(v.disable > 0.0, "the LAAT must be disabled until the player arrives");
+    assert!(
+        walk.sim.units.iter().all(|u| u.mount.map(|m| m.vehicle) != Some(pad.vehicles[0].handle)),
+        "no AI may pilot the LAAT out of the hangar"
+    );
+}
+
+/// The life-support console's geometry is baked ~49 m from its instance
+/// origin; the objective arrow must sit on the console the player can shoot,
+/// not on the empty origin (where a different structure stands).
+#[test]
+fn spa3c_c_life_support_marker_sits_on_the_console() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa3c_c");
+    begin_objectives(&mut walk, &mut rt, &def);
+    rt.close_popup();
+    {
+        let this = rt.interp.global("objectiveSequence");
+        let mut host = Ctx {
+            w: &mut rt.w,
+            sim: &mut walk.sim,
+        };
+        let f = rt
+            .interp
+            .index(&mut host, &this, &Value::str("ActivateObjectiveSet"))
+            .unwrap();
+        rt.interp
+            .call_value(&mut host, &f, vec![this, Value::Num(4.0)])
+            .unwrap();
+    }
+    for _ in 0..(2 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+    }
+    let si = rt
+        .w
+        .station_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("life_int_cis"))
+        .unwrap();
+    let origin = walk.sim.stations[si].pos;
+    let centre = walk.sim.collision.instance_centre(walk.sim.stations[si].instance.unwrap()).unwrap();
+    assert!(
+        origin.distance(centre) > 10.0,
+        "this console's geometry is offset from its origin"
+    );
+    let markers = rt.objective_markers(&walk.sim);
+    assert!(
+        markers.iter().any(|m| m.pos.distance(centre) < 5.0),
+        "no objective marker on the console at {centre}: {markers:?}"
+    );
+}
+
+#[test]
+fn spa3c_c_placed_holocron_is_a_carryable_flag() {
+    let Some((missions_dir, baked_dir)) = baked() else { return; };
+    let (def, walk, rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa3c_c");
+    assert!(
+        rt.w.flags.iter().any(|f| f.name.eq_ignore_ascii_case("plans")),
+        "the placed plans holocron must be registered as a flag"
+    );
+    assert!(
+        walk.sim.ctf.as_ref().is_some_and(|c| !c.flags.is_empty()),
+        "the sim must hold a live flag for the holocron"
+    );
+    assert!(
+        matches!(rt.w.resolve_name(&walk.sim, "plans"), Some(Ud::Flag(_))),
+        "the script must resolve plans to a carryable flag"
+    );
+    // A flag is a carryable item, not solid geometry: its baked coll would
+    // stand an invisible 0.6 m box at the floating holocron (the playtest's
+    // invisible wall in the plans room).
+    let (scene, _) = crate::assets::load_battle_scene_with_layers(
+        &baked_dir.join(&def.map),
+        "campaign",
+        &def.layers,
+    )
+    .expect("scene loads");
+    let plans_instance = scene
+        .manifest
+        .instances
+        .iter()
+        .position(|i| i.name.eq_ignore_ascii_case("plans"))
+        .expect("the plans instance") as u32;
+    assert!(
+        walk.sim
+            .collision
+            .bodies()
+            .iter()
+            .all(|b| b.instance != Some(plans_instance)),
+        "a carryable flag must not leave a solid collision body"
+    );
+    // The tutorial has no placed holocron: its flag is created later by
+    // CreateEntity, so setup must not add a placed one there.
+    let (_, _, rt2) = setup_baked_campaign_full(&missions_dir, &baked_dir, "geo1c_c");
+    assert!(
+        rt2.w.flags.iter().all(|f| !f.name.eq_ignore_ascii_case("holocron")),
+        "the tutorial holocron is not a placed instance"
+    );
+}
