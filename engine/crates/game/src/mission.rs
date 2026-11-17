@@ -1412,6 +1412,15 @@ mod tests {
                 "{stem} loaded no objective framework"
             );
             assert!(!m.camera_shot_calls.is_empty(), "{stem} has no camera shots");
+            // BF2's alive-AI cap is the default NumBots (16), not the larger
+            // SetUnitCount member pool.  kas2c_c's 33-unit CIS pool used to
+            // leak into ai_alive_cap and field 33 bots at once; the menu's
+            // NumBots ceiling is 16 (re-bf2-menus.md, analysis/re-tickets-spawn.md).
+            assert!(
+                m.ai_alive_cap <= 16,
+                "{stem}: BF2 campaign alive cap {} exceeds NumBots 16",
+                m.ai_alive_cap
+            );
         }
     }
 }

@@ -1087,7 +1087,7 @@ pub(super) fn hud_model(
                     walk.sim
                         .unit(carrier)
                         .map(|unit| ui::hud_flag::FlagStatus::Carried {
-                            friendly: unit.team == me.team,
+                            friendly: walk.sim.allied(me.team, unit.team),
                             player_first_person: carrier == walk.player && walk.first_person(),
                         })
                 }

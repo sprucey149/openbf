@@ -44,7 +44,7 @@ pub fn carrier_marker(
     if !unit.alive {
         return None;
     }
-    let friendly = unit.team == sim.unit(viewer)?.team;
+    let friendly = sim.allied(sim.unit(viewer)?.team, unit.team);
     if let Some(mount) = unit.mount {
         let vehicle = sim
             .vehicles
@@ -81,7 +81,7 @@ pub fn ctf_marker(sim: &core::sim::Sim, flag: &core::sim::Flag, team: u8) -> Opt
             Some((flag.current_pos, false))
         }
         core::sim::FlagStatus::Carried { carrier } => {
-            if sim.unit(carrier)?.team != team {
+            if !sim.allied(team, sim.unit(carrier)?.team) {
                 return None;
             }
             Some((
@@ -418,8 +418,12 @@ impl MapStatic {
         let (sy, cy) = core::fmath::sin_cos(yaw);
         let fwd = [-sy, -cy];
         let own = me.team;
+        // Native teams (Wookiees, Ewoks, ...) can be allies of a main army.
+        // Ask the sim's relation table, not raw team equality: the campaign's
+        // SetTeamAsFriend makes them friends even though their team != ours.
+        let hostile = |t: u8| sim.hostile(own, t);
         let rel = |team: Option<u8>| match team {
-            Some(t) if t == own => FRIEND,
+            Some(t) if sim.allied(own, t) => FRIEND,
             Some(_) => ENEMY,
             None => NEUTRAL,
         };
@@ -493,7 +497,7 @@ impl MapStatic {
             let Some(texture) = class.texture.clone() else {
                 continue;
             };
-            if !post && station.team.is_some_and(|t| t != own) && !detected(station.pos, None) {
+            if !post && station.team.is_some_and(hostile) && !detected(station.pos, None) {
                 continue;
             }
             let f = station.transform.z_axis;
@@ -518,13 +522,14 @@ impl MapStatic {
                 continue;
             }
             let shot = (u.last_shot_tick != u64::MAX).then_some(u.last_shot_tick);
-            if u.team != own && !detected(u.soldier.pos, shot) {
+            if hostile(u.team) && !detected(u.soldier.pos, shot) {
                 continue;
             }
             // Card CLOAK: an enemy with any concealment has no icon, firing
             // or not (B2 FUN_003a5940, D:400941: a soldier whose byte +0x7e3
-            // is above 0 skips its icon on the detected path).
-            if u.team != own && !u.cloak.visible() {
+            // is above 0 skips its icon on the detected path). Allies stay
+            // visible regardless of cloak, like same-team soldiers.
+            if hostile(u.team) && !u.cloak.visible() {
                 continue;
             }
             let icon = soldier(u.team);
@@ -544,7 +549,7 @@ impl MapStatic {
         // (the PS2's rule that hides the controlled unit's icon is not
         // traced, re-hud-map §3).
         for d in &sim.droids {
-            if d.team != own && !detected(d.pos, None) {
+            if hostile(d.team) && !detected(d.pos, None) {
                 continue;
             }
             let Some((icon, texture)) = self
@@ -590,7 +595,7 @@ impl MapStatic {
                 .flatten()
                 .flat_map(|g| &g.weapons)
                 .any(|w| w.state == core::weapon::FireState::Firing);
-            if v.team.is_some_and(|t| t != own) && !firing && !detected(v.pos, None) {
+            if v.team.is_some_and(hostile) && !firing && !detected(v.pos, None) {
                 continue;
             }
             let f = v.rot * Vec3::Z;
@@ -675,7 +680,11 @@ impl MapStatic {
                         pos: [v.pos.x, v.pos.z],
                         texture: icon.texture.clone()?,
                         scale: icon.scale,
-                        color: if v.team == Some(own) { FRIEND } else { ENEMY },
+                        color: if v.team.is_some_and(|t| sim.allied(own, t)) {
+                            FRIEND
+                        } else {
+                            ENEMY
+                        },
                         heading: Some(heading([f.x, f.z])),
                         number: None,
                     },
@@ -1050,6 +1059,53 @@ mod tests {
         let after = colours(&w);
         assert!(!after.contains(&ENEMY), "{after:?}");
         assert!(after.contains(&FRIEND), "{after:?}");
+    }
+
+    /// A native team the campaign made an ally (the Wookiees) is a friend on
+    /// the map even though its team differs from the player's.  Friends show
+    /// outside the enemy-detection range (re-hud-map.md §8: "Shown when
+    /// friendly ...; otherwise ... only when detected").
+    #[test]
+    fn native_allies_show_as_friends_outside_detection_range() {
+        let mut w = WalkSim::new(3, Vec3::ZERO, None);
+        let own = w.sim.units[w.player.index as usize].team;
+        let ally = 2u8;
+        assert_ne!(own, ally);
+        // A native team needs its own member pool and spawn post to field a
+        // soldier; far outside the map's NEAR/FAR detection range.
+        let mut spec = core::unit::UnitSpec::trooper(ally, Vec3::ZERO);
+        spec.controller = core::unit::Controller::Ai;
+        let far = Vec3::new(0.0, 0.0, 200.0);
+        w.sim.add_native_team_with_posts(
+            ally,
+            vec![spec],
+            vec![core::sim::NativeSpawnPost {
+                count: 1,
+                nodes: vec![(far, 0.0)],
+            }],
+        );
+        w.sim.populate_native_teams();
+        assert!(
+            w.sim.units.iter().any(|u| u.team == ally),
+            "native member spawned"
+        );
+        let icon = ClassIcon {
+            texture: Some("troop_icon".into()),
+            ..ClassIcon::of(&ClassDb::default(), "x")
+        };
+        let st = MapStatic {
+            bounds: Some(([0.0, 0.0], 300.0)),
+            soldiers: vec![icon; 3],
+            ..MapStatic::default()
+        };
+        let colours = |w: &WalkSim| -> Vec<[u8; 3]> {
+            st.model(w).units.into_iter().map(|u| u.color).collect()
+        };
+        // Before SetTeamAsFriend it is an unseen enemy and draws no icon.
+        assert!(colours(&w).is_empty());
+        w.sim.set_team_relation(own, ally, true);
+        w.sim.set_team_relation(ally, own, true);
+        assert_eq!(colours(&w), vec![FRIEND]);
     }
 
     /// Flying a droid, the map is centred on the droid, turns with its

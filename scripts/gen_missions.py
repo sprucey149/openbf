@@ -2242,7 +2242,18 @@ def build_campaign(key, game, planet, era, ps2_name):
         if team >= 3 and (ps2["units"].get(team, 0) > 0 or ps2["classes"].get(team))
     ]
     m.heroes = mission_heroes(game, "campaign", ps2)
-    m.cap = ps2.get("numbots") or max(16, m.teams[0][1], m.teams[1][1])
+    # --- alive-AI cap.  Same rule as the conquest builder: BF1's cap is the
+    # member pool itself, BF2's is the 16 that ObjectiveConquest:Start installs
+    # via ScriptCB_GetCONNumBots (re-tickets-spawn.md §1.5).  A literal
+    # ScriptCB_SetNumBots(N) in the mission overrides either.  Using the member
+    # pool for BF2 campaigns let kas2c_c's 33-unit CIS pool field 33 bots at
+    # once instead of the original's 16.
+    if ps2.get("numbots"):
+        m.cap = ps2["numbots"]
+    elif game == "bf1":
+        m.cap = max(m.teams[0][1], m.teams[1][1])
+    else:
+        m.cap = 16
     m.spawn = ps2.get("spawn") or (10.0, 0.25)
     m.attacking = ps2.get("attacking")
     m.death_regions = ps2.get("death_regions", [])

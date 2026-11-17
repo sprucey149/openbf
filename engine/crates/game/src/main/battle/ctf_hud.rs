@@ -127,7 +127,9 @@ pub(super) fn hud_hints(
                     core::sim::FlagStatus::Carried { carrier } => (
                         flag.current_pos,
                         false,
-                        walk.sim.unit(carrier).is_some_and(|u| u.team == me_team),
+                        walk.sim
+                            .unit(carrier)
+                            .is_some_and(|u| walk.sim.allied(me_team, u.team)),
                     ),
                     _ => (flag.current_pos, false, true),
                 }
