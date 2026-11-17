@@ -1079,7 +1079,16 @@ impl Animator {
 
     /// The pose the two players keep, without the aim's turn.
     pub fn kept_pose(&self, skel: &Skeleton) -> Pose {
-        self.kept.clone().unwrap_or_else(|| Pose::bind(skel))
+        // A class change (a hero accept included) keeps the generation, so
+        // the animator can still hold the previous body's pose when the first
+        // draw with the new skeleton arrives. `step` drops it on the next
+        // update, but drawing happens before that: never pose a skeleton with
+        // a kept pose of a different length (the old body's bone indices can
+        // index past it in `aim::global`).
+        self.kept
+            .clone()
+            .filter(|k| k.0.len() == skel.names.len())
+            .unwrap_or_else(|| Pose::bind(skel))
     }
 
     /// One update in a seat (card VTURG, `analysis/re-turret-draw.md` 3.3

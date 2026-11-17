@@ -665,6 +665,25 @@ impl CampaignRuntime {
                     self.w.note_hit(obj, weapon);
                     let key = self.w.obj_key(sim, obj);
                     let k = char_value(shooter.index);
+                    // WORKAROUND for a bug in the original fel1c_c script: its
+                    // 6-acklay counter only advances for a killer that passes
+                    // `IsCharacterHuman`, so allied AI kills leave the count
+                    // at 6 and the second wave is never requested. The port's
+                    // allies reliably get those kills. Credit an acklay kill
+                    // by the player's side to the player so the script's own
+                    // counter advances. Details and original-game evidence:
+                    // analysis/re-bf2-campaign-kill-credit.md.
+                    // OURS, replace: upstream script fix that counts friendly
+                    // kills, or an authored player-only acklay damage rule.
+                    let k = if key.class.as_deref() == Some("geo_inf_acklay")
+                        && sim
+                            .unit(shooter)
+                            .is_some_and(|u| sim.allied(u.team, self.w.player_team))
+                    {
+                        char_value(self.w.player.index)
+                    } else {
+                        k
+                    };
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,

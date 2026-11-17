@@ -1099,14 +1099,14 @@ pub(super) fn hud_model(
             .domination_left()
             .map(|(holder, secs)| (holder == me.team, secs)),
         round_end: walk.round_end.as_ref().map(round_end_model),
-        time_left: walk
-            .sim
-            .time_limit
-            .map(|l| {
-                (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
-                    / core::TICK_HZ as f32
-            })
-            .or_else(|| walk.campaign.as_ref().and_then(|c| c.time_left())),
+        // Only the round's own time limit draws a countdown. The campaign's
+        // `ShowTimer` objectives have no HUD timer in the original - the egui
+        // panel was a port addition that rendered badly over the battle - so
+        // mission timers stay off the HUD.
+        time_left: walk.sim.time_limit.map(|l| {
+            (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
+                / core::TICK_HZ as f32
+        }),
         messages: feed.take(),
         ambush: feed.take_ambush(),
         damage_flash: feed.damage_flash(walk.sim.tick, walk.player),

@@ -1997,3 +1997,120 @@ fn spa2c_c_objective6_hangar_voice_plays_immediately_over_background_streams() {
         "SPA2_obj_62 must start immediately on its own stream without waiting on background voices: {played:?}"
     );
 }
+
+#[test]
+fn fel1c_c_acklay_objective_counts_ally_kills_and_spawns_both_waves() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "fel1c_c");
+    // The real battle gives the runtime each local team's roster (battle.rs's
+    // `set_native_rosters`), which the Ambush spawn reads.
+    rt.set_native_rosters(
+        def.local_teams
+            .iter()
+            .filter_map(|lt| {
+                let team = lt.team.checked_sub(1).filter(|t| *t >= 2)?;
+                Some((
+                    team,
+                    (lt.classes.iter().map(|c| c.0.clone()).collect(), lt.units),
+                ))
+            })
+            .collect(),
+    );
+    begin_objectives(&mut walk, &mut rt, &def);
+    rt.close_popup();
+    let _ = rt.complete_objective(&mut walk.sim, "Objective1");
+    for _ in 0..(5 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+    }
+    let slots: Vec<_> = walk
+        .sim
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(_, u)| u.team == 4)
+        .map(|(i, u)| core::unit::UnitHandle {
+            index: i as u32,
+            gen: u.gen,
+        })
+        .collect();
+    assert!(
+        slots.len() >= 3,
+        "first Ambush must spawn 3 acklays: {} slots",
+        slots.len()
+    );
+
+    // The original script only counts kills credited to a human; the port's
+    // allies reliably get the acklay kills, which is the bug documented in
+    // analysis/re-bf2-campaign-kill-credit.md. Use an AI ally as the shooter
+    // here so this test covers the workaround.
+    let step_with_kills =
+        |walk: &mut WalkSim, rt: &mut CampaignRuntime, victims: &[core::unit::UnitHandle]| {
+            walk.step_tick(&[core::sim::PadState::default()]);
+            // The headless battle has no living allies left, so seat a fresh
+            // REP bot as the killer: the script's bug is that an ally's kill
+            // does not count as a human kill.
+            let ally = walk
+                .sim
+                .spawn_ai(0, Vec3::ZERO, 0.0)
+                .expect("a REP bot to stand in for the allied AI killer");
+            for &v in victims {
+                if let Some(u) = walk.sim.units.get_mut(v.index as usize) {
+                    u.health.cur = 0.0;
+                    u.alive = false;
+                }
+                walk.sim.events.push(core::sim::Event::Kill {
+                    shooter: ally,
+                    victim: v,
+                });
+            }
+            rt.step(
+                &mut walk.sim,
+                walk.player,
+                None,
+                &team_classes(&def),
+                &BTreeMap::new(),
+                &[],
+                core::TICK_DT,
+            );
+            rt.close_popup();
+        };
+    step_with_kills(&mut walk, &mut rt, &slots[..3]);
+    assert_eq!(
+        rt.interp.global("acklay_count").num(),
+        Some(3.0),
+        "three ally-credited acklay kills must decrement 6 to 3"
+    );
+    let second: Vec<_> = walk
+        .sim
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(_, u)| u.team == 4 && u.alive)
+        .map(|(i, u)| core::unit::UnitHandle {
+            index: i as u32,
+            gen: u.gen,
+        })
+        .collect();
+    assert_eq!(
+        second.len(),
+        3,
+        "the second Ambush must spawn 3 live acklays: {} alive",
+        second.len()
+    );
+
+    step_with_kills(&mut walk, &mut rt, &second);
+    assert_eq!(rt.interp.global("acklay_count").num(), Some(0.0));
+    for _ in 0..(2 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+    }
+    assert!(
+        rt.objectives()
+            .iter()
+            .any(|o| o.text == "level.fel1.objectives.campaign.2" && o.state == 3),
+        "Objective2 must complete after all 6 acklays are killed by allies"
+    );
+}

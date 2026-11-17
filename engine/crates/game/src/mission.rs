@@ -808,7 +808,9 @@ mod tests {
                 missions.push((path, m));
             }
         }
-        assert_eq!(missions.len(), 34);
+        // 34 Instant Action ground missions plus the 6 ground Rise of the
+        // Empire campaign missions (the space ones are excluded above).
+        assert_eq!(missions.len(), 40);
         if missions.iter().all(|(_, m)| m.class_load_order.is_empty()) {
             eprintln!(
                 "SKIP: all BF2 missions predate SIDE load-order metadata; regenerate missions"
