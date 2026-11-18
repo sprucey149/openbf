@@ -1108,6 +1108,10 @@ impl World {
         self.inside.retain(|(x, _)| *x != r);
     }
 
+    pub(crate) fn clear_obj_markers(&mut self, obj: Ud) {
+        self.markers.retain(|m| m.target != MarkTarget::Obj(obj));
+    }
+
     fn char_of(&self, v: &Value) -> Option<u32> {
         match v {
             Value::Ud(Ud::Char(c)) => Some(*c),
@@ -1373,6 +1377,7 @@ impl World {
         let Some(o) = self.resolve(sim, v) else {
             return;
         };
+        self.clear_obj_markers(o);
         match o {
             Ud::Post(ci) => {
                 let ci = usize::from(ci);
@@ -1545,7 +1550,12 @@ impl World {
                 }
             }
             (Ud::Post(ci), _) => self.set_post_property(sim, usize::from(ci), &key, val),
-            (Ud::Station(si), _) => set_station_property(sim, usize::from(si), &key, val),
+            (Ud::Station(si), _) => {
+                set_station_property(sim, usize::from(si), &key, val);
+                if key == "curhealth" && val.parse::<f32>().is_ok_and(|n| n <= 0.0) {
+                    self.clear_obj_markers(o);
+                }
+            }
             (
                 Ud::Vehicle(i, g),
                 "curhealth" | "maxhealth" | "curshield" | "maxshield" | "addshield" | "team"

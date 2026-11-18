@@ -474,6 +474,82 @@ pub(crate) fn append_rig_attachment(
     Ok(true)
 }
 
+/// Fold any unskinned helper bone `p` absent from the pose `rig` whose
+/// children all declare `p`'s own parent `gp` as their rig parent (such as
+/// `gar_inf_nabooqueen`'s `root_a_spine` between `bone_root` and
+/// `bone_a_spine`). The `zaf_` rig has no `root_a_spine` joint, and PS2 runs
+/// clips on the `zaf_` hierarchy (`FUN_00533d38`, `FUN_0057e988`); keeping
+/// `root_a_spine` active above `bone_a_spine` applies its +90° Y bind
+/// rotation a second time on top of clips that already rotate `bone_a_spine`
+/// in `bone_root` space. Folding `p`'s bind transform into each child `c` and
+/// resetting `p` to identity preserves bone indices and global bind poses.
+pub(crate) fn fold_unrigged_ancestors(
+    skel: &mut Skeleton,
+    rig: &mungefs::anim::Rig,
+    sm: &SkinnedModel,
+) -> bool {
+    let mut changed = false;
+    loop {
+        let mut step = false;
+        for p in 0..skel.bones.len() {
+            let Some(gp) = skel.bones[p].parent else {
+                continue;
+            };
+            if rig.joint(skel.bones[p].crc).is_some() {
+                continue;
+            }
+            let skinned_to_p = sm.segments.iter().any(|seg| {
+                seg.weights.iter().zip(&seg.joints).any(|(w, j)| {
+                    w.iter()
+                        .zip(j)
+                        .any(|(&wi, &ji)| wi > 0.0 && usize::from(ji) == p)
+                })
+            });
+            if skinned_to_p {
+                continue;
+            }
+            let children: Vec<usize> = (0..skel.bones.len())
+                .filter(|&c| skel.bones[c].parent == Some(p))
+                .collect();
+            if children.is_empty() {
+                continue;
+            }
+            let gp_crc = skel.bones[gp].crc;
+            if !children.iter().all(|&c| {
+                rig.joint(skel.bones[c].crc)
+                    .is_some_and(|j| j.parent_crc == gp_crc)
+            }) {
+                continue;
+            }
+            let m_p = Mat3::from_cols(
+                Vec3::from_array(skel.bones[p].rows[0]),
+                Vec3::from_array(skel.bones[p].rows[1]),
+                Vec3::from_array(skel.bones[p].rows[2]),
+            );
+            let t_p = Vec3::from_array(skel.bones[p].t);
+            for c in children {
+                let m_c = Mat3::from_cols(
+                    Vec3::from_array(skel.bones[c].rows[0]),
+                    Vec3::from_array(skel.bones[c].rows[1]),
+                    Vec3::from_array(skel.bones[c].rows[2]),
+                );
+                let t_c = Vec3::from_array(skel.bones[c].t);
+                skel.bones[c].parent = Some(gp);
+                skel.bones[c].rows = (m_p * m_c).to_cols_array_2d();
+                skel.bones[c].t = (m_p * t_c + t_p).to_array();
+            }
+            skel.bones[p].rows = Mat3::IDENTITY.to_cols_array_2d();
+            skel.bones[p].t = [0.0; 3];
+            step = true;
+            changed = true;
+        }
+        if !step {
+            break;
+        }
+    }
+    changed
+}
+
 /// [`PoseRig`] of `model` from the level's soldier classes: the first class
 /// (in `classes` order) whose `GeometryName` is the model and whose chain
 /// names a `SkeletonName`. `None` = the human rig, whose rest is the human

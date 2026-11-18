@@ -111,12 +111,16 @@ pub fn walk_draws(
     visuals: Option<&game::soldier_vis::SoldierVisuals>,
 ) {
     let has_model = |team| visuals.is_some_and(|v| v.has_model(team));
-    let player_team = walk.sim.units[walk.player.index as usize].team;
-    if walk.player_on_foot() && !walk.player_body_hidden() && !has_model(player_team) {
+    let player_u = &walk.sim.units[walk.player.index as usize];
+    if walk.player_on_foot()
+        && !walk.player_body_hidden()
+        && !has_model(player_u.team)
+        && !(visuals.is_some() && player_u.droideka.is_some())
+    {
         draws.push(marker_draw(cube, walk));
     }
     for t in walk.target_draws() {
-        if has_model(t.team) {
+        if has_model(t.team) || (visuals.is_some() && t.droideka) {
             continue; // drawn as an animated model instead
         }
         let base = if t.magnet {

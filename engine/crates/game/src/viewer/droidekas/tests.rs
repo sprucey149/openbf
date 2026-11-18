@@ -154,6 +154,16 @@ fn the_bubble_does_not_depend_on_the_charge() {
 }
 
 #[test]
+fn native_team_droideka_resolves_its_own_team_slot() {
+    let mut vis = DroidekaVisuals::default();
+    vis.by_class = [Vec::new(), Vec::new()];
+    vis.native.insert(4, vec![Some(3)]);
+    assert_eq!(vis.class_model(4, 0), Some(3));
+    assert_eq!(vis.class_model(1, 0), None);
+    assert_eq!(vis.class_model(5, 0), None);
+}
+
+#[test]
 fn the_bubble_colour_is_the_disc_config_per_game() {
     assert_eq!(bubble_color("bf1"), [96, 160, 192, 192]);
     assert_eq!(bubble_color("BF2"), [96, 160, 192, 255]);

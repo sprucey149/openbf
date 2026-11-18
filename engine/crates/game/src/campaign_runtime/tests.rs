@@ -2876,3 +2876,148 @@ fn cor1c_c_fixes_hero_spawns_door_camera_holocron_flagrunner_and_library_defense
     assert_eq!(rt.errors().count(), 0, "no Lua script errors during cor1c_c run");
 }
 
+fn call_script(
+    rt: &mut CampaignRuntime,
+    sim: &mut core::sim::Sim,
+    name: &str,
+    args: Vec<Value>,
+) {
+    use crate::campaign_script::Host;
+    let mut host = crate::campaign_runtime::Ctx { w: &mut rt.w, sim };
+    if host.known(name) {
+        host.call(&mut rt.interp, name, &args).unwrap();
+    } else {
+        let f = rt.interp.global(name);
+        rt.interp.call_value(&mut host, &f, args).unwrap();
+    }
+}
+
+#[test]
+fn myg1c_destroying_one_generator_clears_only_its_marker() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: myg1c_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign(&missions_dir, &baked_dir, "myg1c_c");
+    let resolve = |name: &str| match rt.w.resolve_name(&walk.sim, name) {
+        Some(Ud::Station(si)) => si,
+        other => panic!("{name} is not a station: {other:?}"),
+    };
+    let s1 = resolve("backgen1");
+    let s2 = resolve("backgen2");
+    let s3 = resolve("generator_01");
+    let team = rt.w.player_team + 1;
+    rt.w.markers = vec![s1, s2, s3]
+        .into_iter()
+        .map(|si| Marker {
+            target: MarkTarget::Obj(Ud::Station(si)),
+            icon: "hud_objective_icon".into(),
+            scale: 4.0,
+            team,
+            pulse: true,
+        })
+        .collect();
+    assert_eq!(rt.objective_markers(&walk.sim).len(), 3);
+    assert_eq!(rt.map_markers(&walk.sim).len(), 3);
+
+    walk.step_tick(&[core::sim::PadState::default()]);
+    walk.sim.kill_station(s1, None);
+    rt.step(
+        &mut walk.sim,
+        walk.player,
+        None,
+        &team_classes(&def),
+        &BTreeMap::new(),
+        &[],
+        core::TICK_DT,
+    );
+    let has_marker = |rt: &CampaignRuntime, si: u16| {
+        rt.w.markers
+            .iter()
+            .any(|m| m.target == MarkTarget::Obj(Ud::Station(si)))
+    };
+    assert!(!has_marker(&rt, s1), "destroyed backgen1 marker must clear");
+    assert!(has_marker(&rt, s2), "living backgen2 marker must remain");
+    assert!(has_marker(&rt, s3), "living generator_01 marker must remain");
+    assert_eq!(rt.objective_markers(&walk.sim).len(), 2);
+    assert_eq!(rt.map_markers(&walk.sim).len(), 2);
+
+    call_script(
+        &mut rt,
+        &mut walk.sim,
+        "SetProperty",
+        vec![Value::str("backgen2"), Value::str("CurHealth"), Value::Num(0.0)],
+    );
+    assert!(
+        !has_marker(&rt, s2),
+        "CurHealth <= 0 on backgen2 must clear its marker"
+    );
+    call_script(
+        &mut rt,
+        &mut walk.sim,
+        "KillObject",
+        vec![Value::str("generator_01")],
+    );
+    assert!(
+        !has_marker(&rt, s3),
+        "KillObject on generator_01 must clear its marker"
+    );
+    assert!(rt.objective_markers(&walk.sim).is_empty());
+    assert!(rt.map_markers(&walk.sim).is_empty());
+}
+
+#[test]
+fn myg1c_ambush_spawns_native_team_5_droidekas() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: myg1c_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "myg1c_c");
+    let native_template = walk
+        .native_teams
+        .get(&4)
+        .expect("BF2 team 5 (cis_inf_droideka) must install on myg1c_c");
+    assert!(native_template
+        .classes
+        .iter()
+        .any(|c| c.name.eq_ignore_ascii_case("cis_inf_droideka")));
+    rt.set_native_rosters(
+        def.local_teams
+            .iter()
+            .filter_map(|lt| {
+                let team = lt.team.checked_sub(1).filter(|t| *t >= 2)?;
+                Some((
+                    team,
+                    (lt.classes.iter().map(|c| c.0.clone()).collect(), lt.units),
+                ))
+            })
+            .collect(),
+    );
+    call_script(
+        &mut rt,
+        &mut walk.sim,
+        "Ambush",
+        vec![Value::str("droideka"), Value::Num(3.0), Value::Num(5.0)],
+    );
+    let droidekas: Vec<_> = walk
+        .sim
+        .units
+        .iter()
+        .filter(|u| u.team == 4 && u.droideka.is_some())
+        .collect();
+    assert_eq!(
+        droidekas.len(),
+        3,
+        "Ambush(\"droideka\", 3, 5) must spawn 3 live team-5 droidekas"
+    );
+    assert!(droidekas.iter().all(|u| u.alive));
+    let deka_class = droidekas[0]
+        .droideka_class()
+        .expect("spawned team 5 unit must carry DroidekaClass");
+    assert!(
+        !deka_class.walk_ordnance.is_empty() && !deka_class.guns.is_empty(),
+        "team 5 droideka must receive side bake ordnance and guns"
+    );
+}
+
+

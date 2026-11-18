@@ -98,23 +98,43 @@ pub fn install(
             let mut db =
                 crate::roster::load_classdb(classes_dir, &mission.source_game, side_filter)?;
             db.load(&source)?;
-            let classes = authored
+            let mut classes = authored
                 .classes
                 .iter()
                 .map(|(name, min, max)| crate::roster::ClassRoster::build(&db, name, *min, *max))
                 .collect::<anyhow::Result<Vec<_>>>()?;
+            let map_dir = assets_dir.join(&mission.map);
+            let has_droideka = classes.iter().any(|c| c.droideka.is_some());
+            let droideka_bakes = has_droideka
+                .then(|| crate::droideka::bakes(&map_dir, &mission.source_game.to_ascii_lowercase()));
             anyhow::ensure!(
-                classes
-                    .iter()
-                    .all(|class| class.geometry.as_ref().is_some_and(|name| {
+                classes.iter().all(|class| {
+                    if class.droideka.is_some() {
+                        return droideka_bakes
+                            .as_ref()
+                            .is_some_and(|b| b.contains_key(&class.class.to_ascii_lowercase()))
+                            || (campaign
+                                && pak::is_file(
+                                    main_side
+                                        .join("vehicles")
+                                        .join(faction)
+                                        .join("walkers")
+                                        .join("cis_walk_droideka.glb"),
+                                ));
+                    }
+                    class.geometry.as_ref().is_some_and(|name| {
                         pak::is_file(side.join("soldiers").join(format!("{name}.glb")))
                             || (campaign
                                 && pak::is_file(
                                     main_side.join("soldiers").join(format!("{name}.glb")),
                                 ))
-                    })),
+                    })
+                }),
                 "native soldier model missing"
             );
+            if has_droideka {
+                crate::droideka::install_classes(&mut classes, &map_dir, &mission.source_game);
+            }
             Ok(crate::roster::FactionRoster {
                 faction: faction.to_owned(),
                 classes,

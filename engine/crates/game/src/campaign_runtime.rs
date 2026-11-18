@@ -753,6 +753,7 @@ impl CampaignRuntime {
                     } else {
                         k
                     };
+                    self.w.clear_obj_markers(obj);
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,
@@ -765,6 +766,7 @@ impl CampaignRuntime {
                     let obj = Ud::Unit(unit.index, unit.gen);
                     self.w.note_hit(obj, None);
                     let key = self.w.obj_key(sim, obj);
+                    self.w.clear_obj_markers(obj);
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,
@@ -789,6 +791,7 @@ impl CampaignRuntime {
                     }
                     let key = self.w.obj_key(sim, obj);
                     let k = killer.map_or(Value::Nil, |k| char_value(k.index));
+                    self.w.clear_obj_markers(obj);
                     self.fire(sim, EventKind::ObjectKill, &key, vec![Value::Ud(obj), k]);
                 }
                 Event::StationDamaged { station, attacker } => {
@@ -824,6 +827,7 @@ impl CampaignRuntime {
                     }
                     let key = self.w.obj_key(sim, obj);
                     let k = killer.map_or(Value::Nil, |k| char_value(k.index));
+                    self.w.clear_obj_markers(obj);
                     self.fire(sim, EventKind::ObjectKill, &key, vec![Value::Ud(obj), k]);
                 }
                 Event::Respawn { unit } => {

@@ -263,6 +263,7 @@ pub struct TargetDraw {
     pub magnet: bool,
     pub health_frac: f32,
     pub team: u8,
+    pub droideka: bool,
 }
 
 /// What the HUD's weapon slot shows for a class's primary weapon (visual
@@ -1889,6 +1890,7 @@ impl WalkSim {
                     magnet: self.magnet() == Some(h),
                     health_frac: (u.health.cur / u.health.max).clamp(0.0, 1.0),
                     team: u.team,
+                    droideka: u.droideka.is_some(),
                 }
             })
             .collect()
