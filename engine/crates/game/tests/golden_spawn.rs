@@ -225,6 +225,7 @@ fn hot1_teams() -> [game::walk::TeamTemplate; 2] {
             family: "human".into(),
             root_scale: 1.0,
             banks: Vec::new(),
+            fallback_banks: Vec::new(),
             custom: Default::default(),
         },
         ..base.clone()

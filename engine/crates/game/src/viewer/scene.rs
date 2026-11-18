@@ -258,6 +258,20 @@ impl SceneGpu {
             }
         }
     }
+    /// Pose placed world instances moved by a campaign world animation
+    /// (`crate::world_anim`), such as Coruscant's sliding library doors. The
+    /// map's instance draws are grouped in `instance_draws`; a posed instance
+    /// has its whole draw range rewritten to the animated matrix.
+    pub fn pose_world_anims(&mut self, poses: &std::collections::BTreeMap<u32, glam::Mat4>) {
+        for (ii, range) in &self.instance_draws {
+            if let Some(m) = poses.get(ii) {
+                for draw in &mut self.draws[range.clone()] {
+                    draw.model = *m;
+                }
+            }
+        }
+    }
+
     /// Pose every drawn door at its sim door's `open` (`core::door`): each
     /// moving submesh at `instance · D(open)`, the collision bodies' own
     /// rule. A door with no sim twin (`OPENBF_DOORS_SOLID=1`) stays shut.

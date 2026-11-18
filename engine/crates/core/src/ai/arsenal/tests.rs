@@ -119,6 +119,7 @@ fn ask(d: f32) -> Ask {
         vehicle: None,
         crowd: false,
         droid: None,
+        station: false,
     }
 }
 

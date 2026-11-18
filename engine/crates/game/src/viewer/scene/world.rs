@@ -850,11 +850,14 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             .iter()
             .enumerate()
             .filter_map(|(i, x)| {
-                // A placed holocron (spa3's `plans`) is a live flag once the
-                // campaign registers it: fade its static draw so the carried
-                // / dropped flag draw takes over, as with space flags.
+                // A placed holocron (spa3's `plans`, cor1's `holocron*`) is a live
+                // flag once the campaign registers it: fade its static draw so the
+                // carried / dropped flag draw takes over, as with space flags.
                 (x.class.eq_ignore_ascii_case("com_icon_spaceflag")
-                    || x.class.eq_ignore_ascii_case("com_item_holocron"))
+                    || x.class.eq_ignore_ascii_case("com_item_holocron")
+                    || scene
+                        .resolve_class(&x.class)
+                        .is_some_and(|c| c.base.eq_ignore_ascii_case("flag")))
                 .then_some(i as u32)
             })
             .collect(),

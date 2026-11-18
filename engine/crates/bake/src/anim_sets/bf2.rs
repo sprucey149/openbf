@@ -79,6 +79,16 @@ impl Registry {
             .position(|c| !c.combo && c.name.eq_ignore_ascii_case(name))
     }
 
+    /// The first class of that name, combo or not (`FUN_00278968` scans
+    /// `DAT_005fd868` in index order without filtering out combo rows, so
+    /// `doublesabre`'s `ComboAnimationBank = "human_doublesabre sabre ..."`
+    /// links its parent to `sabre` -> `melee` -> `tool` -> `rifle`).
+    pub fn any_class(&self, name: &str) -> Option<usize> {
+        self.classes
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(name))
+    }
+
     /// Register a set once.
     pub fn add_set(&mut self, family: usize, class: usize) {
         if !self.sets.contains(&(family, class)) {
@@ -104,7 +114,10 @@ fn weapon_row(
                 let mut w = v.split_whitespace();
                 let name = w.next().unwrap_or_default();
                 let name = name.split_once('_').map_or(name, |(_, n)| n);
-                let parent = w.next().and_then(|p| reg.class(p));
+                let parent = w.next().and_then(|p| {
+                    let p = p.split_once('_').map_or(p, |(_, n)| n);
+                    reg.any_class(p)
+                });
                 let third = w.next().unwrap_or_default();
                 if !combo {
                     if let Some(i) = reg.class(name) {

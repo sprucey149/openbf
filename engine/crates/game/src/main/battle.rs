@@ -238,8 +238,11 @@ fn team_templates(
             });
             if let Some(mut rules) = b.heroes.or_else(|| b.mission.as_ref().filter(|m| m.is_campaign()).map(|_| Default::default())).filter(|_| hunt.is_none()) {
                 if b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
-                    // Only the campaign's UnlockHeroForTeam enables an offer.
+                    // Only the campaign's UnlockHeroForTeam enables an offer;
+                    // PS2 campaign ruleset forbids AI candidates and hero respawn.
                     rules.unlock = core::sim::heroes::HeroUnlock::Points(i32::MAX);
+                    rules.respawn_ticks = None;
+                    rules.ai_candidates = false;
                 }
                 game::heroes::install_with(sim, hero_classes, rules);
             }
@@ -719,6 +722,7 @@ pub(super) fn make_walk_with_counts(
                 );
                 rt.load_world_anims(&scene.dir, &scene.manifest, &walk.sim);
                 rt.start(&mut walk.sim);
+                walk.camera_blockers.mark_moving(rt.animated_instances());
                 walk.campaign = Some(rt);
             }
         }

@@ -19,6 +19,12 @@ impl Soldier {
         rules: GroundRules,
     ) {
         let bf1 = rules == GroundRules::Bf1;
+        if self.stance == Stance::Dead && !bf1 && (c.hero || c.flee_like_a_hero) && self.grounded {
+            // B2 FUN_00240bf8 case 0x10 (B2:160312-160354): HeroDead does not
+            // call FUN_002480a0; the kneeling death anim plays in place.
+            self.vel = Vec3::ZERO;
+            return;
+        }
         let t = self.time_in_stance;
         let decel = match self.stance {
             Stance::Tumble => c.acceleration * KNOCK_BRAKE_SHARE * TUMBLE_BRAKE,

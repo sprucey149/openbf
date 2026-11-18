@@ -134,6 +134,8 @@ pub(in crate::ai) fn compose_aim<'a>(
         AimRequest::Droid(d, ready)
     } else if let Some((t, ready)) = frame.turret {
         AimRequest::Turret(t, ready)
+    } else if let Some((s, ready)) = frame.station {
+        AimRequest::Station(s, ready)
     } else {
         match (faced, faced_memory, cands.corner, cands.route_leg) {
             // A seen enemy: the gunner's own aim point (its lead point under the

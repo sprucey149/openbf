@@ -143,6 +143,8 @@ pub struct Station {
     pub motion: StationMotion,
     /// Shield points regenerated per second when driven by `SetProperty("addshield")`.
     pub add_shield: f32,
+    /// `SetAIDamageThreshold`: health fraction floor below which AI neither targets nor damages this station.
+    pub ai_damage_threshold: f32,
 }
 
 impl Station {
@@ -162,6 +164,7 @@ impl Station {
             sphere_radius: 0.0,
             motion: StationMotion::new(1),
             add_shield: 0.0,
+            ai_damage_threshold: 0.0,
         }
     }
 
@@ -198,6 +201,9 @@ impl Station {
             for v in [self.health.shield, self.health.shield_max, self.add_shield] {
                 eat(&v.hash_bits().to_le_bytes());
             }
+        }
+        if self.ai_damage_threshold != 0.0 {
+            eat(&self.ai_damage_threshold.hash_bits().to_le_bytes());
         }
     }
 }
@@ -292,16 +298,24 @@ impl Sim {
         attacker: Option<UnitHandle>,
         team: Option<u8>,
     ) {
+        let by_ai = attacker
+            .and_then(|h| self.unit(h))
+            .is_some_and(|u| !u.is_human());
         let Some(s) = self.stations.get_mut(usize::from(station)) else {
             return;
         };
         if s.destroyed {
             return;
         }
+        let ai_floor = (by_ai && s.ai_damage_threshold > 0.0)
+            .then(|| (s.ai_damage_threshold * s.health.max).fmin(s.health.cur));
         let friendly = s.team.is_some() && s.team == team;
         let pool = (s.health.cur, s.health.shield);
         s.health
             .take_damage(desc, scale, friendly, self.friendly_fire_scale);
+        if let Some(floor) = ai_floor {
+            s.health.cur = s.health.cur.fmax(floor);
+        }
         let alive = s.health.alive();
         if pool != (s.health.cur, s.health.shield) {
             if let Some(shooter) = attacker {

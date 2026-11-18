@@ -1231,7 +1231,10 @@ impl Sim {
             match self.units[i].controller {
                 _ if corpse => {
                     stepped = Some(self.units[i].soldier.grounded);
-                    let (consts, rules) = (self.units[i].consts, self.ground_rules);
+                    let mut consts = self.units[i].consts;
+                    consts.hero =
+                        self.hero_class(self.units[i].team) == Some(self.units[i].spec.class);
+                    let rules = self.ground_rules;
                     self.units[i]
                         .soldier
                         .step(dt, &PadState::default(), &consts, rules);

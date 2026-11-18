@@ -1411,6 +1411,9 @@ impl winit::application::ApplicationHandler for App {
                         Some((walk, _)) => {
                             game::forest::submit_actors(r, &walk.sim);
                             gpu.pose_doors(&walk.sim.doors);
+                            if let Some(campaign) = walk.campaign.as_ref() {
+                                gpu.pose_world_anims(campaign.instance_poses());
+                            }
                             gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
                             gpu.pose_stations(&walk.sim);
                             gpu.see_through(&see.props);

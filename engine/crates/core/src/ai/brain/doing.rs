@@ -82,7 +82,7 @@ pub(in crate::ai) fn settle(
         .is_some_and(|(_, t)| sim.tick.saturating_sub(t) < u64::from(crate::TICK_HZ));
     let fought = match () {
         _ if hit => Why::Hit,
-        _ if frame.enemy.is_some() => Why::Seen,
+        _ if frame.enemy.is_some() || frame.station.is_some() => Why::Seen,
         _ => Why::Memory,
     };
     match walk {

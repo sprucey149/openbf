@@ -132,10 +132,15 @@ pub fn install(
             .iter()
             .map(|class| class.register(&mut walk.sim, &mut names))
             .collect();
+        let custom = crate::animator::custom::for_mission(classes_dir, mission).unwrap_or_default();
         let visuals = roster
             .classes
             .iter()
-            .map(crate::walk::ClassVisual::from_roster_with_held)
+            .map(|c| {
+                let mut v = crate::walk::ClassVisual::from_roster_with_held(c);
+                v.anim.custom = custom.clone();
+                v
+            })
             .collect();
         let mut members = Vec::new();
         let cap = usize::from(member_count);
@@ -205,19 +210,21 @@ pub fn install(
         })
         .collect();
     walk.sim.set_ally_spawns(ally_spawns);
-    walk.sim.populate_native_teams();
-    for (&team, template) in &walk.native_teams {
-        let alive = walk
-            .sim
-            .alive_units()
-            .filter(|(_, u)| u.team == team)
-            .count();
-        println!(
-            "native team {} ({}): {} on field",
-            team + 1,
-            template.faction,
-            alive
-        );
+    if mission.campaign.is_none() {
+        walk.sim.populate_native_teams();
+        for (&team, template) in &walk.native_teams {
+            let alive = walk
+                .sim
+                .alive_units()
+                .filter(|(_, u)| u.team == team)
+                .count();
+            println!(
+                "native team {} ({}): {} on field",
+                team + 1,
+                template.faction,
+                alive
+            );
+        }
     }
 }
 

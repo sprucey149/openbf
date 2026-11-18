@@ -340,7 +340,10 @@ fn post_point(sim: &Sim, me: UnitHandle, salt: u32) -> Option<Vec3> {
 /// `objectiveoneflagctf.luac` registers `CTFOffense` at 100 x that weight, so
 /// the space bots' only goal is the script's `Deathmatch` at 100.
 fn ctf_goal(sim: &Sim, me: UnitHandle) -> Option<Vec3> {
-    let ctf = sim.ctf.as_ref().filter(|c| !c.is_space())?;
+    let ctf = sim
+        .ctf
+        .as_ref()
+        .filter(|c| !c.is_space() && c.capture_regions.iter().any(|r| r.radius > 0.0))?;
     let my_team = sim.unit(me).map_or(0, |u| u.team);
     for flag in &ctf.flags {
         // A flag the mission bars AI from taking is a player objective: no

@@ -448,7 +448,7 @@ if want side; then
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
   BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
-  for s in ALL IMP REP CIS TUR DES WOK GAM EWK GEO JED; do
+  for s in ALL IMP REP CIS TUR DES WOK GAM EWK GEO JED GAR GUN SNW; do
     "$BAKE" combos "$(ci "$B2" "SIDE/$s.LVL")" "$OUT/side_bf2/combos/$(echo "$s" | tr 'A-Z' 'a-z').ron"
   done
   # BF2's pistols are baked for the HUD's weapon row (card HUDW): the PS2

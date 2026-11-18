@@ -526,17 +526,43 @@ impl CameraBlockers {
         let dir = delta / len;
         let mut t = len;
         for b in &self.blockers {
-            if (b.prop && !props)
-                || Some(b.instance) == skip
-                || !b.world.hits(target, dir, t, CAMERA_RADIUS)
-            {
+            if (b.prop && !props) || Some(b.instance) == skip {
                 continue;
             }
-            if let Some(hit) = b.sweep(b.pose_inv(&live, doors), target, dir, t, CAMERA_RADIUS) {
-                t = t.fmin(hit);
+            if b.moves || b.door.is_some() {
+                let pose = b.live_pose(&live, doors);
+                let world = pose.map_or(b.world, |m| Aabb::transformed(b.mesh.local, m));
+                if !world.hits(target, dir, t, CAMERA_RADIUS) {
+                    continue;
+                }
+                let inv = pose.map_or(b.inv, |m| m.inverse());
+                if let Some(hit) = b.sweep(inv, target, dir, t, CAMERA_RADIUS) {
+                    t = t.fmin(hit);
+                }
+            } else {
+                if !b.world.hits(target, dir, t, CAMERA_RADIUS) {
+                    continue;
+                }
+                if let Some(hit) = b.sweep(b.inv, target, dir, t, CAMERA_RADIUS) {
+                    t = t.fmin(hit);
+                }
             }
         }
         t / len
+    }
+
+    /// Mark animated world instances (e.g. scripted library doors) as moving
+    /// so camera collision and see-through evaluate their live pose and AABB.
+    pub fn mark_moving(&mut self, instances: impl IntoIterator<Item = u32>) {
+        let moving: std::collections::HashSet<u32> = instances.into_iter().collect();
+        if moving.is_empty() {
+            return;
+        }
+        for b in &mut self.blockers {
+            if b.door.is_none() && moving.contains(&b.instance) {
+                b.moves = true;
+            }
+        }
     }
 
     /// The props to draw see-through for a camera at `eye` filming the
@@ -578,7 +604,7 @@ impl CameraBlockers {
                     return false;
                 }
                 let dir = (s - eye) / dist;
-                b.world.hits(eye, dir, len, SIGHT_RADIUS)
+                near.hits(eye, dir, len, SIGHT_RADIUS)
                     && b.sweep(inv, eye, dir, len, SIGHT_RADIUS).is_some()
             });
             if blocks {
@@ -601,16 +627,20 @@ impl CameraBlockers {
         let mut out: Vec<(u32, f32)> = self
             .blockers
             .iter()
-            .filter(|b| !b.prop && b.world.hits(target, dir, len, CAMERA_RADIUS))
+            .filter(|b| !b.prop)
             .filter_map(|b| {
-                b.sweep(
-                    b.pose_inv(&|_| None, doors),
-                    target,
-                    dir,
-                    len,
-                    CAMERA_RADIUS,
-                )
-                .map(|t| (b.instance, t))
+                let pose = if b.door.is_some() {
+                    b.live_pose(&|_| None, doors)
+                } else {
+                    None
+                };
+                let world = pose.map_or(b.world, |m| Aabb::transformed(b.mesh.local, m));
+                if !world.hits(target, dir, len, CAMERA_RADIUS) {
+                    return None;
+                }
+                let inv = pose.map_or(b.inv, |m| m.inverse());
+                b.sweep(inv, target, dir, len, CAMERA_RADIUS)
+                    .map(|t| (b.instance, t))
             })
             .collect();
         out.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -637,14 +667,6 @@ impl Blocker {
             return Some(ride.place * core::door::sample(&ride.frames, door.open));
         }
         self.moves.then(|| live(self.instance)).flatten()
-    }
-
-    /// World -> model at [`Self::live_pose`], else the placed pose.
-    fn pose_inv(&self, live: &impl Fn(u32) -> Option<Mat4>, doors: &[Door]) -> Mat4 {
-        match self.live_pose(live, doors) {
-            Some(pose) => pose.inverse(),
-            None => self.inv,
-        }
     }
 
     /// How far (m, within `len`) a sphere of `radius` at `from` moves along

@@ -546,7 +546,7 @@ impl WalkSim {
     fn guided_hold_clear(&self, from: Vec3, to: Vec3) -> bool {
         if self
             .camera_blockers
-            .fraction(from, to, None, |i| self.station_pose(i), &self.sim.doors)
+            .fraction(from, to, None, |i| self.live_instance_pose(i), &self.sim.doors)
             < 1.0
         {
             return false;

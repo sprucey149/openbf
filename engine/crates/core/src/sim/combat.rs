@@ -515,9 +515,12 @@ impl Sim {
                 }
                 if killed {
                     // The direct hit's death kick along the shot (B1
-                    // FUN_00200c30 -> FUN_00200f90, re-knockback §3).
+                    // FUN_00200c30 -> FUN_00200f90, re-knockback §3). B2
+                    // HeroDead (state 0x10, FUN_00240bf8 B2:160312) does not
+                    // slide the kneeling corpse.
+                    let hero_death = self.is_hero_death(h.index as usize);
                     let u = &mut self.units[h.index as usize];
-                    if u.body {
+                    if u.body && !hero_death {
                         u.soldier.kick(b.vel);
                     }
                 }
@@ -701,6 +704,14 @@ impl Sim {
         false
     }
 
+    /// True when `i` uses BF2's hero death state (`FUN_00237e34` B2:151135:
+    /// hero class or `FleeLikeAHero = 1`).
+    pub(crate) fn is_hero_death(&self, i: usize) -> bool {
+        self.ground_rules == crate::soldier::GroundRules::Bf2
+            && (self.units[i].consts.flee_like_a_hero
+                || self.hero_class(self.units[i].team) == Some(self.units[i].spec.class))
+    }
+
     /// A struck bolt's impact explosion (card RKEX): the ordnance base's
     /// collision (B1 FUN_00272d70, B2 FUN_0030f550) detonates the class's
     /// `Explosion` / `ExplosionImpact` / `ExplosionName` class (B1 class
@@ -813,6 +824,19 @@ impl Sim {
         killed
     }
 
+    /// Kill `h` as a combat death credited to `killer`.
+    pub fn kill_unit_by(&mut self, h: UnitHandle, killer: Option<UnitHandle>) {
+        let Some(u) = self
+            .units
+            .get_mut(h.index as usize)
+            .filter(|u| u.alive && u.gen == h.gen)
+        else {
+            return;
+        };
+        u.health.cur = 0.0;
+        self.unit_killed(h, killer);
+    }
+
     /// The bookkeeping of a unit that damage killed (its health is already
     /// ≤ 0): respawn timer, wave slot, the battle's alive count and ticket,
     /// the squad rules, the seat, and the kill credit — [`Event::Kill`] for
@@ -847,6 +871,7 @@ impl Sim {
         let seated_body = self.units[h.index as usize]
             .mount
             .and_then(|_| self.hero_body_prims(h.index as usize));
+        let hero_death = self.is_hero_death(h.index as usize);
         let v = &self.units[h.index as usize];
         let (victim_team, victim_is_player) = (v.team, v.is_player);
         let respawn_at = self.tick + (self.respawn_delay * TICK_HZ as f32) as u64;
@@ -866,12 +891,30 @@ impl Sim {
             v.soldier.pos = body.pos;
             v.soldier.yaw = body.yaw;
         }
+        // B2 FUN_00237e34 (B2:151135-151147): when a hero or FleeLikeAHero
+        // soldier dies on foot, states 4/6/7/8/0xc (Jump/Jet/Hover/Fall/Roll)
+        // transition to state 9 (`Thrown`) so the body arcs to the floor and
+        // tumbles instead of freezing in `stand_deadhero` mid-air; grounded
+        // stances stop in place for state 0x10 (`HeroDead`).
+        if v.body && hero_death {
+            if matches!(
+                v.soldier.stance,
+                Stance::Jump | Stance::Fall | Stance::Roll | Stance::Jet | Stance::Hover
+            ) {
+                v.soldier.stance = Stance::Thrown;
+                v.soldier.time_in_stance = 0.0;
+            } else if !v.soldier.stance.knocked() {
+                v.soldier.vel = Vec3::ZERO;
+            }
+        }
         v.drop_due = v.body;
         if !v.body {
             self.drop_item(h, None);
         }
         if victim_team < 2 {
             self.battle.on_death(victim_team as usize, victim_is_player);
+        } else {
+            self.spend_native_reinforcement(victim_team);
         }
         self.note_medal_death(h);
         self.class_change_life_ended(h);
@@ -944,7 +987,11 @@ impl Sim {
             self.chunk_death(i)
         };
         if !burst {
+            let hero_death = self.is_hero_death(i);
             let u = &mut self.units[i];
+            if hero_death && u.soldier.grounded {
+                u.soldier.vel = Vec3::ZERO;
+            }
             u.soldier.stance = Stance::Dead;
             u.soldier.time_in_stance = 0.0;
         }
@@ -1014,6 +1061,8 @@ impl Sim {
         }
         if team < 2 {
             self.battle.on_death(team as usize, is_player);
+        } else {
+            self.spend_native_reinforcement(team);
         }
         self.note_medal_death(h);
         self.class_change_life_ended(h);

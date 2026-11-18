@@ -85,6 +85,7 @@ pub enum GoalTarget {
     Post(u32),
     Unit(UnitHandle),
     Point(Vec3),
+    Station(u16),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -105,6 +106,7 @@ pub struct Goal {
 pub enum Steer {
     Deathmatch,
     Defend(GoalTarget),
+    Destroy(GoalTarget),
 }
 
 /// The goal manager `DAT_005fe7a8`. SIM STATE: hashed once a goal is made.
@@ -206,6 +208,7 @@ impl AiGoals {
         let g = self.of(h.index as usize, h.gen)?;
         match g.kind {
             GoalKind::Deathmatch => Some(Steer::Deathmatch),
+            GoalKind::Destroy => g.target.map(Steer::Destroy),
             GoalKind::Defend => g.target.map(Steer::Defend),
             _ => None,
         }
@@ -255,6 +258,10 @@ impl AiGoals {
                             for c in p.to_array() {
                                 eat(&c.to_bits().to_le_bytes());
                             }
+                        }
+                        Some(GoalTarget::Station(s)) => {
+                            eat(&[4]);
+                            eat(&s.to_le_bytes());
                         }
                     }
                 }
@@ -308,12 +315,17 @@ pub fn step(sim: &mut Sim) {
     }
 }
 
-/// Where a Defend member holds: the post, the player or the object.
+/// Where a Defend member holds: the post, the player, the station or the object.
 pub fn target_pos(sim: &Sim, t: GoalTarget) -> Option<Vec3> {
     match t {
         GoalTarget::Post(c) => sim.cps.get(c as usize).map(|c| c.def.pos),
         GoalTarget::Unit(h) => sim.unit(h).map(|u| u.soldier.pos),
         GoalTarget::Point(p) => Some(p),
+        GoalTarget::Station(s) => sim
+            .stations
+            .get(usize::from(s))
+            .filter(|s| !s.destroyed)
+            .map(|s| Vec3::new(s.sphere_centre.x, s.pos.y, s.sphere_centre.z)),
     }
 }
 

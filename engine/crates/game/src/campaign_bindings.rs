@@ -51,6 +51,8 @@ const BOUND: &[&str] = &[
     "EnableBarriers",
     "EnableBuildingLockOn",
     "EnableLockOn",
+    "EnableSPHeroRules",
+    "EnableSPScriptedHeroes",
     "FindTimer",
     "GetCharacterClass",
     "GetCharacterTeam",
@@ -113,6 +115,7 @@ const BOUND: &[&str] = &[
     "SetTeamAsEnemy",
     "SetTeamAsFriend",
     "SetTeamPoints",
+    "SetAIDamageThreshold",
     "SetTimerRate",
     "SetTimerValue",
     "SetUnitCount",
@@ -131,11 +134,10 @@ const BOUND: &[&str] = &[
 /// Bindings with nothing to do in this port: loading, memory, rendering,
 /// sound mixing, camera shots, the AI planner's goals and tuning, the
 /// gameplay-option queries the campaign does not read.
-/// PROVISIONAL: `SetAIDamageThreshold` is not wired to the sim's bots;
-/// `EntityFlyerTakeOff`/`InitAsLanded` play nothing. The world animation
-/// bindings (`PlayAnimation`, ...) drive `crate::world_anim`. `ShowPopup` is bound to
-/// `0x18e920` (the table entry at `0x5f9df0`), `jr ra; move v0,zero`: it
-/// does nothing on the PS2.
+/// PROVISIONAL: `EntityFlyerTakeOff`/`InitAsLanded` play nothing. The world
+/// animation bindings (`PlayAnimation`, ...) drive `crate::world_anim`.
+/// `ShowPopup` is bound to `0x18e920` (the table entry at `0x5f9df0`),
+/// `jr ra; move v0,zero`: it does nothing on the PS2.
 const IGNORED: &[&str] = &[
     "ShowPopup",
     "AddAssaultDestroyPoints",
@@ -149,8 +151,6 @@ const IGNORED: &[&str] = &[
     "BeginScreenTransition",
     "ClearWalkers",
     "DisableAIAutoBalance",
-    "EnableSPHeroRules",
-    "EnableSPScriptedHeroes",
     "EntityFlyerInitAsLanded",
     "EntityFlyerTakeOff",
     "FillAsteroidPath",
@@ -172,7 +172,6 @@ const IGNORED: &[&str] = &[
     "ScriptCB_SetUberScoreLimit",
     "ScriptCB_SetYAxisFlip",
     "ScriptCB_ShowHuntScoreLimit",
-    "SetAIDamageThreshold",
     "SetAIDifficulty",
     "SetAIVehicleNotifyRadius",
     "SetAIViewMultiplier",
@@ -292,6 +291,7 @@ fn add_ai_goal(w: &World, sim: &mut Sim, a: &[Value]) -> Option<u32> {
     let target = w.resolve(sim, arg(a, 3)).and_then(|o| match o {
         Ud::Post(i) => Some(GoalTarget::Post(u32::from(i))),
         Ud::Unit(i, gen) => Some(GoalTarget::Unit(core::unit::UnitHandle { index: i, gen })),
+        Ud::Station(si) => Some(GoalTarget::Station(u16::from(si))),
         o => w.obj_pos(sim, o).map(GoalTarget::Point),
     });
     sim.ai_goals.add(team, kind, weight, target)
@@ -316,7 +316,11 @@ impl Host for Ctx<'_> {
     }
 
     fn call(&mut self, it: &mut Interp, name: &str, args: &[Value]) -> Ret {
-        if self.w.setup && !is_query(name) {
+        if self.w.setup
+            && !is_query(name)
+            && !(name == "SetReinforcementCount"
+                && sim_team(arg(args, 0)).is_some_and(|t| t >= 2))
+        {
             return nothing();
         }
         if IGNORED.contains(&name) {
@@ -370,6 +374,12 @@ impl Ctx<'_> {
                     .and_then(|n| self.w.region_id(n))
                     .map_or(Filter::Region(u32::MAX), Filter::Region),
             },
+            // The flag events take no filter on the PS2: the binding stores
+            // -1 and never reads its second argument (`FUN_00481b60`,
+            // `FUN_004847e8`). cor1c registers `"holocron"` for flags named
+            // `holocron1` / `holocron2`; a name filter never fired there and
+            // Objective 5 never marked the Jedi carrying the holocron.
+            (EventKind::FlagPickUp | EventKind::FlagDrop | EventKind::FlagReset, _) => Filter::Any,
             (EventKind::TimerElapse, _) => match key {
                 Value::Ud(Ud::Timer(t)) => Filter::Timer(*t),
                 Value::Str(s) => self
@@ -860,24 +870,37 @@ impl Ctx<'_> {
                 .and_then(|f| sim.ctf.as_ref()?.flags.get(f.ctf)?.carrier())
                 .map_or(Value::Nil, |h| char_value(h.index))),
 
-            "GetReinforcementCount" => one(Value::Num(
-                sim_team(arg(a, 0))
-                    .filter(|t| *t < 2)
-                    .map_or(0, |t| reinforcement_count(sim, usize::from(t))) as f32,
-            )),
+            "GetReinforcementCount" => one(Value::Num(sim_team(arg(a, 0)).map_or(0.0, |t| {
+                if t < 2 {
+                    reinforcement_count(sim, usize::from(t)) as f32
+                } else {
+                    sim.native_reinforcements(t).map_or(-1.0, |n| n as f32)
+                }
+            }))),
             "SetReinforcementCount" | "AddReinforcements" => {
-                if let (Some(t), Some(n)) = (sim_team(arg(a, 0)).filter(|t| *t < 2), num(a, 1)) {
-                    let t = usize::from(t);
-                    if name == "AddReinforcements" {
-                        if !sim.battle.unlimited_teams[t] {
-                            let cur = sim.battle.teams[t].reinforcements;
-                            sim.battle.teams[t].reinforcements = (cur + n).fmax(0.0);
+                if let (Some(t), Some(n)) = (sim_team(arg(a, 0)), num(a, 1)) {
+                    if t < 2 {
+                        let t = usize::from(t);
+                        if name == "AddReinforcements" {
+                            if !sim.battle.unlimited_teams[t] {
+                                let cur = sim.battle.teams[t].reinforcements;
+                                sim.battle.teams[t].reinforcements = (cur + n).fmax(0.0);
+                            }
+                        } else if n < 0.0 {
+                            sim.battle.unlimited_teams[t] = true;
+                        } else {
+                            sim.battle.unlimited_teams[t] = false;
+                            sim.battle.teams[t].reinforcements = n;
+                        }
+                    } else if name == "AddReinforcements" {
+                        if let Some(cur) = sim.native_reinforcements(t) {
+                            let next = (cur as f32 + n).fmax(0.0).round() as u32;
+                            sim.set_native_reinforcements(t, Some(next));
                         }
                     } else if n < 0.0 {
-                        sim.battle.unlimited_teams[t] = true;
+                        sim.set_native_reinforcements(t, None);
                     } else {
-                        sim.battle.unlimited_teams[t] = false;
-                        sim.battle.teams[t].reinforcements = n;
+                        sim.set_native_reinforcements(t, Some(n.fmax(0.0).round() as u32));
                     }
                 }
                 nothing()
@@ -968,6 +991,14 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
+            "EnableSPHeroRules" | "EnableSPScriptedHeroes" => {
+                if let Some(heroes) = sim.heroes.as_mut() {
+                    heroes.rules.unlock = core::sim::heroes::HeroUnlock::Points(i32::MAX);
+                    heroes.rules.respawn_ticks = None;
+                    heroes.rules.ai_candidates = false;
+                }
+                nothing()
+            }
             "UnlockHeroForTeam" => {
                 if let (Some(t), Some(heroes)) =
                     (sim_team(arg(a, 0)).filter(|t| *t < 2), sim.heroes.as_mut())
@@ -976,6 +1007,7 @@ impl Ctx<'_> {
                     h.unlocked = true;
                     h.exhausted = false;
                     h.ready_at = 0;
+                    h.declined.clear();
                 }
                 nothing()
             }
@@ -986,8 +1018,29 @@ impl Ctx<'_> {
                 nothing()
             }
             "BlockPlanningGraphArcs" | "UnblockPlanningGraphArcs" => {
-                if let (Some(n), Some(nav)) = (arg(a, 0).as_str(), sim.nav.as_mut()) {
-                    nav.block_arcs(&[fnv1a_lowercase(n)], name == "BlockPlanningGraphArcs");
+                if let Some(nav) = sim.nav.as_mut() {
+                    let block = name == "BlockPlanningGraphArcs";
+                    for v in a {
+                        if let Some(idx) = v
+                            .num()
+                            .map(|n| n as i32)
+                            .filter(|&i| (1..=8).contains(&i))
+                        {
+                            nav.block_group((idx - 1) as u32, block);
+                        } else if let Some(s) = v.as_str() {
+                            nav.block_arcs(&[fnv1a_lowercase(s)], block);
+                        }
+                    }
+                }
+                nothing()
+            }
+            "SetAIDamageThreshold" => {
+                if let (Some(Ud::Station(si)), Some(thresh)) =
+                    (self.w.resolve(sim, arg(a, 0)), num(a, 1))
+                {
+                    if let Some(st) = sim.stations.get_mut(usize::from(si)) {
+                        st.ai_damage_threshold = thresh.clamp(0.0, 1.0);
+                    }
                 }
                 nothing()
             }
@@ -1304,6 +1357,7 @@ impl World {
         });
         let mut flag = core::sim::ctf::Flag::new_ground_neutral(pos);
         flag.allow_ai_pickup = self.allow_ai_pickup;
+        flag.flyer_pickup_radius = 0.0;
         ctf.flags.push(flag);
         let ci = ctf.flags.len() - 1;
         self.flags.push(FlagEnt {

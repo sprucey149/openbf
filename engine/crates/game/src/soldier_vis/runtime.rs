@@ -197,6 +197,10 @@ impl SoldierVisuals {
         unused.classes.clear();
         let teams = [template.clone(), unused];
         let mut added = Self::load_with_side(r, root, game, &teams, true);
+        // Native teams were skipped by `load_with_side`'s saber pass. Build
+        // them here so a campaign Jedi's blade is drawn like any other hero's.
+        let mut native_sabers = added.load_sabers(Some(&mut *r), root, &teams);
+        let sabers = std::mem::take(&mut native_sabers[0]);
         let bodies = self.assets.len();
         let weapons = self.weapons.len();
         let mut per_class = std::mem::take(&mut added.per_class[0]);
@@ -218,6 +222,7 @@ impl SoldierVisuals {
                 anim: std::mem::take(&mut added.anim[0]),
                 skins: std::mem::take(&mut added.skins[0]),
                 low_skins: std::mem::take(&mut added.low_skins[0]),
+                sabers,
             },
         );
     }
@@ -294,7 +299,7 @@ impl SoldierVisuals {
                 .flat_map(|t| &t.classes)
                 .any(|c| c.asset_game(game) == "bf2")
             {
-                s.load_sabers(Some(&mut *r), assets_dir, teams);
+                s.sabers = s.load_sabers(Some(&mut *r), assets_dir, teams);
             }
         }
         // Each class's skins over its body's parts (card USKN).
@@ -397,7 +402,7 @@ impl SoldierVisuals {
             .flat_map(|t| &t.classes)
             .any(|c| c.asset_game(game) == "bf2")
         {
-            s.load_sabers(None, assets_dir, teams);
+            s.sabers = s.load_sabers(None, assets_dir, teams);
         }
         s
     }

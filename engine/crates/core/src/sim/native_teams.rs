@@ -29,6 +29,7 @@ pub(super) struct NativeTeam {
     pending: VecDeque<UnitSpec>,
     spawn_posts: Vec<NativeSpawnPost>,
     waves: SpawnWaves,
+    reinforcements: Option<u32>,
 }
 
 impl Sim {
@@ -76,7 +77,31 @@ impl Sim {
                 next_slot: 0,
                 ..self.waves[0]
             },
+            reinforcements: None,
         });
+    }
+
+    /// Set a native/local team's reinforcement count (`None` = unlimited,
+    /// `Some(0)` = no CP auto-spawns; scripted `spawn_native_character` /
+    /// `Ambush` still enters).
+    pub fn set_native_reinforcements(&mut self, team: u8, count: Option<u32>) {
+        if let Some(i) = self.native_team_index(team) {
+            self.native_teams[i].reinforcements = count;
+        }
+    }
+
+    /// Query a native/local team's reinforcement count (`None` = unlimited).
+    pub fn native_reinforcements(&self, team: u8) -> Option<u32> {
+        self.native_team_index(team)
+            .and_then(|i| self.native_teams[i].reinforcements)
+    }
+
+    pub(super) fn spend_native_reinforcement(&mut self, team: u8) {
+        if let Some(i) = self.native_team_index(team) {
+            if let Some(n) = &mut self.native_teams[i].reinforcements {
+                *n = n.saturating_sub(1);
+            }
+        }
     }
 
     pub(super) fn native_team_index(&self, team: u8) -> Option<usize> {
@@ -221,13 +246,17 @@ impl Sim {
         // Capacity is summed independently of usable paths, then effectively
         // clamped by the team's member pool. BF1 FUN_002ac378:237768-237783;
         // BF2 FUN_0036c750:366105-366110,366161-366164.
-        let owned = self.native_team_index(team).map_or(0, |entry| {
-            self.native_teams[entry]
-                .spawn_posts
-                .iter()
-                .map(|post| post.count)
-                .fold(0, u32::saturating_add)
-        });
+        let Some(entry) = self.native_team_index(team) else {
+            return false;
+        };
+        if self.native_teams[entry].reinforcements == Some(0) {
+            return false;
+        }
+        let owned = self.native_teams[entry]
+            .spawn_posts
+            .iter()
+            .map(|post| post.count)
+            .fold(0, u32::saturating_add);
         let limit = self
             .ally_spawns
             .iter()
@@ -295,6 +324,9 @@ impl Sim {
         let Some(entry) = self.native_team_index(old.team) else {
             return;
         };
+        if self.native_teams[entry].reinforcements == Some(0) {
+            return;
+        }
         if old
             .spawn_slot
             .is_some_and(|slot| !self.native_teams[entry].waves.ready(slot))
@@ -321,6 +353,10 @@ impl Sim {
             eat(&entry.waves.timer.hash_bits().to_le_bytes());
             eat(&entry.waves.wave.to_le_bytes());
             eat(&entry.waves.next_slot.to_le_bytes());
+            if let Some(n) = entry.reinforcements {
+                eat(b"native-reinf");
+                eat(&n.to_le_bytes());
+            }
             if !entry.spawn_posts.is_empty() {
                 eat(b"native-spawn-posts");
                 eat(&(entry.spawn_posts.len() as u32).to_le_bytes());
@@ -729,5 +765,54 @@ mod tests {
             "capacity, not path count or roster minimum"
         );
         assert_eq!(sim.units[0].spec.pos, own.0);
+    }
+
+    #[test]
+    fn native_reinforcement_zero_blocks_cp_spawn_but_allows_scripted_ambush() {
+        let mut sim = Sim::empty(42);
+        sim.heightfield = Some(crate::heightfield::Heightfield {
+            size: 2,
+            unit: 50.0,
+            offset_x: 25.0,
+            offset_z: 25.0,
+            heights: vec![0.0; 4],
+        });
+        let p = post(&mut sim, 0, -10.0);
+        sim.set_ally_spawns(vec![p]);
+        let mut native = UnitSpec::trooper(2, Vec3::ZERO);
+        native.controller = Controller::Ai;
+        sim.add_native_team(2, vec![native]);
+        sim.set_team_relation(0, 2, true);
+        sim.set_team_relation(2, 0, true);
+        sim.set_native_reinforcements(2, Some(0));
+        assert_eq!(sim.native_reinforcements(2), Some(0));
+
+        // Zero reinforcements blocks CP auto-spawn.
+        sim.populate_native_teams();
+        assert_eq!(sim.alive_units().count(), 0);
+
+        // Scripted ambush still places the pending unit at the ambush node.
+        let ambush_pos = Vec3::new(12.0, 0.0, -5.0);
+        let h = sim
+            .spawn_native_character(2, (ambush_pos, 0.5))
+            .expect("scripted character spawns despite zero reinforcements");
+        assert_eq!(sim.alive_units().count(), 1);
+        assert_eq!(sim.unit(h).unwrap().soldier.pos.x, ambush_pos.x);
+
+        // Death with zero reinforcements does not respawn at the allied CP.
+        sim.kill_environment(h, crate::sim::DeathCause::DeathRegion);
+        let wave = &mut sim.native_teams[0].waves;
+        wave.wave = 1;
+        wave.timer = wave.interval;
+        sim.tick = sim.units[0].respawn_at.unwrap();
+        sim.step(&[]);
+        assert!(!sim.units[0].alive);
+
+        // Restoring unlimited reinforcements allows CP spawning again (via respawn or populate).
+        sim.set_native_reinforcements(2, None);
+        assert_eq!(sim.native_reinforcements(2), None);
+        sim.step(&[]);
+        assert!(sim.units[0].alive);
+        assert_eq!(sim.units[0].spec.pos.x, -10.0);
     }
 }

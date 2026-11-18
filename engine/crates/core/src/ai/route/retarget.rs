@@ -60,7 +60,11 @@ pub(in super::super) fn retarget(
                     aim_last_leg(sim, me, st, nt);
                 }
             }
-            crate::goals::Steer::Defend(t) => {
+            crate::goals::Steer::Destroy(crate::goals::GoalTarget::Post(cp)) => {
+                retarget_to_post(sim, me, st, cp, false, nt);
+                aim_last_leg(sim, me, st, nt);
+            }
+            crate::goals::Steer::Defend(t) | crate::goals::Steer::Destroy(t) => {
                 st.target_cp = None;
                 match crate::goals::target_pos(sim, t) {
                     Some(at) => {

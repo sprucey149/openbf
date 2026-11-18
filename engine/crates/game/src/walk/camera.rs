@@ -125,7 +125,7 @@ impl WalkSim {
             1.0
         } else {
             self.camera_blockers
-                .fraction(from, to, None, |i| self.station_pose(i), &self.sim.doors)
+                .fraction(from, to, None, |i| self.live_instance_pose(i), &self.sim.doors)
         };
         let track = to - from;
         let len = track.length();
@@ -523,7 +523,7 @@ impl WalkSim {
             base,
             point,
             v.instance,
-            |i| self.station_pose(i),
+            |i| self.live_instance_pose(i),
             &self.sim.doors,
         );
         let end = base + (point - base) * f;
@@ -634,7 +634,7 @@ impl WalkSim {
                 target,
                 desired,
                 own_instance,
-                |i| self.station_pose(i),
+                |i| self.live_instance_pose(i),
                 &self.sim.doors,
             )
         };
@@ -794,6 +794,17 @@ impl WalkSim {
             .map(|s| s.pose())
     }
 
+    /// Live pose of any animated station or campaign world instance (doors).
+    pub(super) fn live_instance_pose(&self, instance: u32) -> Option<Mat4> {
+        self.station_pose(instance).or_else(|| {
+            self.campaign
+                .as_ref()?
+                .instance_poses()
+                .get(&instance)
+                .copied()
+        })
+    }
+
     /// The props and vehicles the drawn chase camera sees through now (ours,
     /// playtest 2026-10-28, `crate::camera_collide`): those between it and
     /// the player's eye or body (a seat's or droid's camera: its target),
@@ -811,7 +822,7 @@ impl WalkSim {
                 cam.position,
                 &sights,
                 t.own_instance,
-                |i| self.station_pose(i),
+                |i| self.live_instance_pose(i),
                 &self.sim.doors,
             )
         };

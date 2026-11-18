@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::walk::WalkSim;
 
 #[test]
@@ -1032,6 +1032,66 @@ fn myg1c_core_shield_animation_drops_the_shield_station() {
     assert!((before.x - after.x).abs() < 1e-3 && (before.z - after.z).abs() < 1e-3);
 }
 
+/// Coruscant's "Go to library" objective plays `DoorOpen01`, a world
+/// animation whose entries are placed prop instances (the library doors),
+/// not sim stations. The port must pose those instances so the doors open.
+#[test]
+fn coruscant_library_door_animation_poses_its_instances() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: cor1c_c mission and baked assets required");
+        return;
+    };
+    if !baked_dir
+        .join("bf2_cor1")
+        .join(manifest::world_anim::FILE)
+        .exists()
+    {
+        eprintln!("SKIP: bf2_cor1 world animations not baked");
+        return;
+    }
+    let (_def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "cor1c_c");
+    let door =
+        rt.w.instances
+            .iter()
+            .position(|(n, _, _)| n == "leftlibrarydoor")
+            .expect("leftlibrarydoor is a placed instance") as u32;
+    let base_y = rt.w.instances[door as usize].2.y;
+    let bodies_before: Vec<(usize, glam::Vec3)> = walk
+        .sim
+        .collision
+        .instance_bodies(door)
+        .into_iter()
+        .map(|(i, m)| (i, m.w_axis.truncate()))
+        .collect();
+    assert!(!bodies_before.is_empty(), "the door has collision bodies");
+    assert!(
+        rt.instance_poses().is_empty(),
+        "no door pose before playing"
+    );
+
+    rt.w.anims.play("DoorOpen01");
+    // The doors' position keys run 0..4 s; step past the end.
+    for _ in 0..(core::TICK_HZ * 5) {
+        rt.w.anims.step(&mut walk.sim, core::TICK_DT);
+    }
+    let m = rt
+        .instance_poses()
+        .get(&door)
+        .unwrap_or_else(|| panic!("DoorOpen01 did not pose leftlibrarydoor"));
+    assert!(
+        m.w_axis.y > base_y + 5.0,
+        "the door slid up: base y {base_y}, posed y {}",
+        m.w_axis.y
+    );
+    for (i, before) in bodies_before {
+        let after = walk.sim.collision.bodies()[i].to_world.w_axis.truncate();
+        assert!(
+            after.y > before.y + 5.0,
+            "door body {i} collision must rise with the draw: {before} -> {after}"
+        );
+    }
+}
+
 fn setup_baked_campaign_full(
     missions_dir: &std::path::Path,
     baked_dir: &std::path::Path,
@@ -1135,6 +1195,18 @@ fn setup_baked_campaign_full(
     let saved = CampaignRuntime::kill_startup_posts(&mut walk.sim, &def.killed);
     let mut rt = CampaignRuntime::new(spec, &layout, &scene.manifest, &walk.post_keys, saved, &walk.sim);
     rt.set_team_rosters(team_classes(&def), [def.teams[0].units, def.teams[1].units]);
+    rt.set_native_rosters(
+        def.local_teams
+            .iter()
+            .filter_map(|lt| {
+                let team = lt.team.checked_sub(1).filter(|t| *t >= 2)?;
+                Some((
+                    team,
+                    (lt.classes.iter().map(|c| c.0.clone()).collect(), lt.units),
+                ))
+            })
+            .collect(),
+    );
     rt.load_world_anims(&baked_dir.join(&def.map), &scene.manifest, &walk.sim);
     rt.start(&mut walk.sim);
     walk.step_tick(&[core::sim::PadState::default()]);
@@ -2370,3 +2442,437 @@ fn uta1c_scripted_hero_bindings_spawn_grievous_for_the_final_objective() {
     assert!(grievous.is_some(), "Grievous must be fielded for Objective 3b");
     assert_eq!(rt.errors().count(), 0, "no script errors");
 }
+
+#[test]
+fn cor1c_c_fixes_hero_spawns_door_camera_holocron_flagrunner_and_library_defense() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: cor1c_c mission and baked assets required");
+        return;
+    };
+    if !baked_dir
+        .join("bf2_cor1")
+        .join(manifest::world_anim::FILE)
+        .exists()
+    {
+        eprintln!("SKIP: bf2_cor1 world animations not baked");
+        return;
+    }
+
+    // Bug 1: PS2-regenerated mission mission heroes field + EnableSPScriptedHeroes disables AI Anakins.
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "cor1c_c");
+    assert_eq!(
+        def.heroes,
+        vec![(1, "rep_hero_cloakedanakin".to_owned())],
+        "cor1c_c must declare Anakin as team 1 hero"
+    );
+    // Re-invoke EnableSPScriptedHeroes after appending the real hero class (matches battle.rs order).
+    let (mut rosters, _) = crate::roster::FactionRoster::pair(
+        &baked_dir.join("classes"),
+        "bf2",
+        ["rep", "all"],
+        Some(&def),
+    )
+    .expect("cor1c_c faction rosters");
+    let appended_idx = crate::heroes::append(
+        &mut rosters[0],
+        &baked_dir.join("classes"),
+        Some(&def),
+        0,
+    )
+    .expect("cor1c_c must append rep_hero_cloakedanakin including gar combo load index");
+    assert_eq!(
+        rosters[0].classes[appended_idx as usize].class,
+        "rep_hero_cloakedanakin"
+    );
+    let hero_class_idx = walk.sim.classes[0].len() as u8;
+    let hero_uc = walk.sim.classes[0][0].clone();
+    walk.sim.classes[0].push(hero_uc);
+    walk.sim.class_enabled[0].push(true);
+    walk.sim.heroes = Some(core::sim::heroes::Heroes::new([Some(hero_class_idx), None]));
+    rt.w.team_classes[0].push("rep_hero_cloakedanakin".into());
+    {
+        use crate::campaign_script::Host;
+        let mut host = Ctx {
+            w: &mut rt.w,
+            sim: &mut walk.sim,
+        };
+        host.call(&mut rt.interp, "EnableSPScriptedHeroes", &[])
+            .unwrap();
+    }
+    let heroes = walk.sim.heroes.as_ref().unwrap();
+    assert!(!heroes.rules.ai_candidates);
+    assert_eq!(heroes.rules.unlock, core::sim::heroes::HeroUnlock::Points(i32::MAX));
+    assert_eq!(heroes.rules.respawn_ticks, None);
+    assert!(
+        !heroes.teams[0].unlocked,
+        "Anakin must not be unlocked at mission start"
+    );
+    // Even if team 0 has high AI scores, Points(i32::MAX) keeps it locked and AI never picks Anakin.
+    {
+        let heroes = walk.sim.heroes.as_mut().unwrap();
+        for p in &mut heroes.points {
+            *p = 500;
+        }
+    }
+    for _ in 0..(4 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        if rt
+            .objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.Campaign.1") && o.state == 2)
+        {
+            break;
+        }
+    }
+    assert!(
+        rt.objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.Campaign.1") && o.state == 2),
+        "Objective1 should be active after startup timer, got {:?}",
+        rt.objectives()
+    );
+    assert!(
+        walk.sim.hero_offer(0).is_none(),
+        "Player must not receive Anakin offer before Objective 4 completes"
+    );
+    assert!(
+        walk.sim
+            .units
+            .iter()
+            .all(|u| !u.alive || u.is_human() || u.team != 0 || u.spec.class != hero_class_idx),
+        "AI teammates must never spawn as Anakin"
+    );
+
+    // Bug 2: Opening DoorOpen01 moves animated door instances and updates CameraBlockers::mark_moving.
+    let door = rt
+        .w
+        .instances
+        .iter()
+        .position(|(n, _, _)| n == "leftlibrarydoor")
+        .expect("leftlibrarydoor instance") as u32;
+    let (scene, _) = crate::assets::load_battle_scene_with_layers(
+        &baked_dir.join(&def.map),
+        "campaign",
+        &def.layers,
+    )
+    .expect("scene loads");
+    let inst = &scene.manifest.instances[door as usize];
+    let model_name = scene.resolve_model(&inst.class).expect("door model");
+    let cpu_mesh = &scene.meshes[model_name];
+    let mut local_min = Vec3::splat(f32::MAX);
+    let mut local_max = Vec3::splat(f32::MIN);
+    for p in &cpu_mesh.positions {
+        let v = Vec3::from(*p);
+        local_min = local_min.min(v);
+        local_max = local_max.max(v);
+    }
+    let door_mat = crate::viewer::instance_matrix(inst.rotation, inst.translation);
+    let door_center = door_mat.transform_point3((local_min + local_max) * 0.5);
+    let local_ext = local_max - local_min;
+    let local_thin_axis = if local_ext.x <= local_ext.z {
+        Vec3::X
+    } else {
+        Vec3::Z
+    };
+    let door_normal = door_mat.transform_vector3(local_thin_axis).normalize();
+    let mut blockers = crate::camera_collide::CameraBlockers::from_scene(&scene);
+    blockers.mark_moving(rt.animated_instances());
+    let cam_from = door_center + door_normal * 1.2;
+    let cam_to = door_center - door_normal * 1.2;
+    let is_door_prop = blockers.is_prop(door).expect("leftlibrarydoor must be a blocker");
+    if is_door_prop {
+        assert!(
+            blockers
+                .see_through(cam_from, &[cam_to], None, |_| None, &walk.sim.doors)
+                .iter()
+                .any(|(ii, _)| *ii == door),
+            "closed library door prop must obstruct sight line before opening"
+        );
+    } else {
+        assert!(
+            blockers.fraction(cam_from, cam_to, None, |_| None, &walk.sim.doors) < 1.0,
+            "closed library door must obstruct camera ray before opening (hits: {:?})",
+            blockers.track_hits(cam_from, cam_to, &walk.sim.doors)
+        );
+    }
+
+    walk.sim.cheats.invincible = true;
+
+    // Advance from Objective 1 -> Objective 2a (opens DoorOpen01 + UnblockPlanningGraphArcs(1)).
+    if let Some(ci) = rt.w.find_cp(&walk.sim, "Consul_CP") {
+        walk.sim.cps[ci].owner = Some(0);
+    }
+    assert!(rt.complete_objective(&mut walk.sim, "Objective1"));
+    for _ in 0..(8 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        if rt
+            .objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.campaign.2.a") && o.state == 2)
+        {
+            break;
+        }
+    }
+    assert!(
+        rt.objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.campaign.2.a") && o.state == 2),
+        "Objective2a should be active, got {:?}",
+        rt.objectives()
+    );
+    for _ in 0..(5 * core::TICK_HZ) {
+        rt.w.anims.step(&mut walk.sim, core::TICK_DT);
+    }
+    let poses = rt.instance_poses();
+    assert!(poses.contains_key(&door), "DoorOpen01 must pose leftlibrarydoor");
+    if is_door_prop {
+        assert!(
+            !blockers
+                .see_through(
+                    cam_from,
+                    &[cam_to],
+                    None,
+                    |inst| poses.get(&inst).copied(),
+                    &walk.sim.doors,
+                )
+                .iter()
+                .any(|(ii, _)| *ii == door),
+            "opened DoorOpen01 must clear see-through obstruction"
+        );
+    } else {
+        let frac = blockers.fraction(
+            cam_from,
+            cam_to,
+            None,
+            |inst| poses.get(&inst).copied(),
+            &walk.sim.doors,
+        );
+        assert_eq!(
+            frac,
+            1.0,
+            "opened DoorOpen01 must let camera ray pass cleanly (hits: {:?}, pose: {:?})",
+            blockers.track_hits(cam_from, cam_to, &walk.sim.doors),
+            poses.get(&door)
+        );
+    }
+
+    // Bug 4: Objective 2a locks LibCase AI damage threshold to 1.0; Objective 2c unlocks (0.0),
+    // spawns JediLibraryDefenders (AMB team 3), issues Destroy goals on LibCase1..4, and AI deals damage.
+    let libcase_indices: Vec<usize> = rt
+        .w
+        .station_names
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| n.starts_with("libcase").then_some(i))
+        .collect();
+    assert_eq!(libcase_indices.len(), 4, "4 library bookcases");
+    for &si in &libcase_indices {
+        assert_eq!(walk.sim.stations[si].ai_damage_threshold, 1.0);
+    }
+    if let Some(ci) = rt.w.find_cp(&walk.sim, "Library_CP") {
+        walk.sim.cps[ci].owner = Some(0);
+    }
+    assert!(rt.complete_objective(&mut walk.sim, "Objective2a"));
+    for _ in 0..(8 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        if rt
+            .objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.Campaign.2.c") && o.state == 2)
+        {
+            break;
+        }
+    }
+    assert!(
+        rt.objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.Campaign.2.c") && o.state == 2),
+        "Objective2c should be active, got {:?}",
+        rt.objectives()
+    );
+    assert_eq!(walk.sim.stations[libcase_indices[0]].ai_damage_threshold, 0.0);
+    assert!(
+        walk.sim
+            .units
+            .iter()
+            .any(|u| u.alive && u.team == 2),
+        "AMB (Lua team 3 -> sim team 2) JediLibraryDefenders must spawn"
+    );
+    let hp_before: Vec<f32> = libcase_indices
+        .iter()
+        .map(|&si| walk.sim.stations[si].health.cur)
+        .collect();
+    let mut any_damaged = false;
+    for _ in 0..(15 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        if libcase_indices
+            .iter()
+            .zip(hp_before.iter())
+            .any(|(&si, &before)| walk.sim.stations[si].health.cur < before || walk.sim.stations[si].destroyed)
+        {
+            any_damaged = true;
+            break;
+        }
+    }
+    assert!(any_damaged, "Objective 2c AMB/GAR bots must attack and damage LibCase stations");
+
+    // Bug 3: Advance to Objective 5 -> spawns flagrunner (RUN, Lua team 5 -> sim team 4) who picks up holocron2,
+    // and holocron2's placed class has base == "flag" so the static ground draw fades on pickup.
+    let holo2_inst = scene
+        .manifest
+        .instances
+        .iter()
+        .find(|inst| inst.name.eq_ignore_ascii_case("holocron2"))
+        .expect("holocron2 placed instance in bf2_cor1");
+    assert!(
+        scene
+            .resolve_class(&holo2_inst.class)
+            .is_some_and(|c| c.base.eq_ignore_ascii_case("flag")),
+        "holocron2 class ({}) must have base == flag for flag_instances fading",
+        holo2_inst.class
+    );
+    assert!(rt.complete_objective(&mut walk.sim, "Objective2c"));
+    for _ in 0..(6 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        if rt
+            .objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.campaign.4") && o.state == 2)
+        {
+            break;
+        }
+    }
+    assert!(
+        rt.objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.campaign.4") && o.state == 2),
+        "Objective4 should be active, got {:?}",
+        rt.objectives()
+    );
+    // Complete Objective4 -> Objective4.OnComplete calls UnlockHeroForTeam(ATT).
+    assert!(rt.complete_objective(&mut walk.sim, "Objective4"));
+    let mut saw_anakin_offer = false;
+    for _ in 0..(6 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        if walk.sim.hero_offer(0).map(|(c, _)| c) == Some(hero_class_idx) {
+            saw_anakin_offer = true;
+        }
+        if rt
+            .objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.campaign.5") && o.state == 2)
+        {
+            break;
+        }
+    }
+    if walk.sim.hero_offer(0).map(|(c, _)| c) == Some(hero_class_idx) {
+        saw_anakin_offer = true;
+    }
+    assert!(
+        rt.objectives()
+            .iter()
+            .any(|o| o.text.eq_ignore_ascii_case("level.cor1.objectives.campaign.5") && o.state == 2),
+        "Objective5 should be active, got {:?}",
+        rt.objectives()
+    );
+    assert!(
+        saw_anakin_offer,
+        "Completing Objective 4 (UnlockHeroForTeam) must offer Anakin (F1/F2 prompt) to player 0, heroes state: {:?}",
+        walk.sim.heroes
+    );
+    let holo2_idx = rt
+        .w
+        .flags
+        .iter()
+        .position(|f| f.name == "holocron2")
+        .expect("holocron2 must be registered as a flag");
+    let flag = &walk.sim.ctf.as_ref().unwrap().flags[rt.w.flags[holo2_idx].ctf];
+    assert!(flag.allow_ai_pickup, "holocron2 must allow AI pickup for flagrunner");
+    assert_eq!(flag.flyer_pickup_radius, 0.0);
+
+    let mut runner_carried = false;
+    for _ in 0..(10 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+        let f = &walk.sim.ctf.as_ref().unwrap().flags[rt.w.flags[holo2_idx].ctf];
+        if let Some(carrier) = f.carrier() {
+            if walk.sim.unit(carrier).is_some_and(|u| u.team == 4) {
+                runner_carried = true;
+                break;
+            }
+        }
+    }
+    assert!(runner_carried, "flagrunner (RUN team) must spawn and pick up holocron2 in Objective 5");
+    // The pickup handler was registered as OnFlagPickUp(fn, "holocron"); BF2
+    // ignores that argument, so the runner's pickup of `holocron2` must reach
+    // it and hang the objective marker over the carrying Jedi.
+    for _ in 0..core::TICK_HZ {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+    }
+    let carrier = walk.sim.ctf.as_ref().unwrap().flags[rt.w.flags[holo2_idx].ctf].carrier();
+    if let Some(carrier) = carrier.filter(|c| walk.sim.unit(*c).is_some_and(|u| u.team == 4)) {
+        assert!(
+            rt.w.markers.iter().any(|m| m.icon == "hud_objective_icon"
+                && m.target == MarkTarget::Obj(Ud::Unit(carrier.index, carrier.gen))),
+            "Objective 5 must mark the Jedi carrying holocron2, markers: {:?}",
+            rt.w.markers
+        );
+        assert!(
+            rt.objective_markers(&walk.sim)
+                .iter()
+                .any(|m| m.icon == "hud_objective_icon"),
+            "the carrier marker must be drawn in the world"
+        );
+        // Killing the running Jedi on the ground stops it in place (no corpse
+        // slide across the floor) and drops holocron2.
+        let (death_pos, airborne_jedi) = {
+            let u = &mut walk.sim.units[carrier.index as usize];
+            assert!(
+                u.consts.flee_like_a_hero,
+                "Jedi classes must set FleeLikeAHero so they use BF2 HeroDead transitions"
+            );
+            u.soldier.grounded = true;
+            u.soldier.stance = core::soldier::Stance::Sprint;
+            u.soldier.vel = glam::Vec3::new(9.0, 0.0, 0.0);
+            let pos = u.soldier.pos;
+            (pos, walk.sim.units.iter().position(|o| o.alive && o.team == 1 && o.spec.class == 0))
+        };
+        walk.sim.kill_unit_by(carrier, None);
+        assert_eq!(
+            walk.sim.units[carrier.index as usize].soldier.vel,
+            glam::Vec3::ZERO,
+            "grounded Jedi death must immediately zero horizontal velocity instead of sliding"
+        );
+        tick(&mut walk, &mut rt, &def);
+        assert_eq!(
+            walk.sim.units[carrier.index as usize].soldier.stance,
+            core::soldier::Stance::Dead
+        );
+        assert!(
+            (walk.sim.units[carrier.index as usize].soldier.pos - death_pos).length() < 0.05,
+            "grounded Jedi corpse must not slide across the floor during HeroDead"
+        );
+        if let Some(j_idx) = airborne_jedi {
+            let jh = walk.sim.handle(j_idx);
+            walk.sim.units[j_idx].consts.flee_like_a_hero = true;
+            walk.sim.units[j_idx].soldier.grounded = false;
+            walk.sim.units[j_idx].soldier.stance = core::soldier::Stance::Jump;
+            walk.sim.units[j_idx].soldier.vel = glam::Vec3::new(4.0, 6.0, 0.0);
+            walk.sim.kill_unit_by(jh, None);
+            assert_eq!(
+                walk.sim.units[j_idx].soldier.stance,
+                core::soldier::Stance::Thrown,
+                "airborne Jedi death must transition to Thrown instead of locking into HeroDead mid-air"
+            );
+        }
+    }
+    assert_eq!(rt.errors().count(), 0, "no Lua script errors during cor1c_c run");
+}
+

@@ -507,10 +507,10 @@ impl CampaignRuntime {
                 c
             });
             let mut flag = core::sim::ctf::Flag::new_ground_neutral(pos);
-            // These are player objectives (spa3's script explicitly sets
-            // AllowAIPickUp 0); bots must neither take one nor chase it into
-            // the command room and crash.
-            flag.allow_ai_pickup = false;
+            // Match retail default (AllowAIPickUp 1) while disabling flyer
+            // pickup so spa3 fighters never chase or scoop placed holocrons.
+            flag.allow_ai_pickup = true;
+            flag.flyer_pickup_radius = 0.0;
             ctf.flags.push(flag);
             let ci = ctf.flags.len() - 1;
             self.w.flags.push(FlagEnt {
@@ -545,6 +545,7 @@ impl CampaignRuntime {
         self.w.setup = false;
         self.call_global(sim, "ScriptPostLoad", Vec::new());
         self.w.post_loaded = true;
+        sim.populate_native_teams();
     }
 
     fn call_global(&mut self, sim: &mut Sim, name: &str, args: Vec<Value>) {
@@ -611,7 +612,24 @@ impl CampaignRuntime {
             .iter()
             .flat_map(|l| l.worlds.iter().chain(std::iter::once(&l.name)).cloned())
             .collect();
-        self.w.anims = crate::world_anim::WorldAnimPlayer::load(dir, &unloaded, &self.w.station_names, sim);
+        let instance_names: Vec<String> = manifest
+            .instances
+            .iter()
+            .map(|i| i.name.to_ascii_lowercase())
+            .collect();
+        let instance_mats: Vec<glam::Mat4> = manifest
+            .instances
+            .iter()
+            .map(|i| crate::viewer::instance_matrix(i.rotation, i.translation))
+            .collect();
+        self.w.anims = crate::world_anim::WorldAnimPlayer::load(
+            dir,
+            &unloaded,
+            &self.w.station_names,
+            &instance_names,
+            &instance_mats,
+            sim,
+        );
     }
 
     fn fire(&mut self, sim: &mut Sim, kind: EventKind, key: &EventKey, args: Vec<Value>) {
@@ -1059,6 +1077,17 @@ impl CampaignRuntime {
     }
 
     // ---- what the HUD reads
+
+    /// Posed world instances from the mission's world animations, for the
+    /// viewer to apply to the map's instance draws (the library doors).
+    pub fn instance_poses(&self) -> &std::collections::BTreeMap<u32, glam::Mat4> {
+        self.w.anims.instance_poses()
+    }
+
+    /// Manifest instance indices driven by loaded non-local world animations.
+    pub fn animated_instances(&self) -> impl Iterator<Item = u32> + '_ {
+        self.w.anims.animated_instances()
+    }
 
     pub fn take_messages(&mut self) -> Vec<String> {
         std::mem::take(&mut self.w.messages)

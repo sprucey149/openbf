@@ -1279,6 +1279,8 @@ def facts_from_calls(seq):
                 # Slot entries in TABLE ORDER (soldier, assault, engineer,
                 # sniper, officer, special on the disc): {class, min, max}.
                 for slot, ent in side.items():
+                    if str(slot).strip().lower() == "hero":
+                        continue
                     if isinstance(ent, dict) and isinstance(ent.get(1.0), str):
                         mn, mx = ti(ent.get(2.0)), ti(ent.get(3.0))
                         d["classes"].setdefault(t, []).append(

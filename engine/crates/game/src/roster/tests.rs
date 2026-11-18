@@ -343,3 +343,57 @@ fn roster_secondary_needs_a_known_class_and_a_period_of_one() {
     ]);
     assert!(missing.secondary.is_none());
 }
+
+#[test]
+fn class_anim_extracts_fallback_bank_from_multiword_combo_bank() {
+    let d = db_for_game(
+        "bf2",
+        &[
+            (
+                "test_saber",
+                "melee",
+                &[("ComboAnimationBank", "jedifemale jedi")],
+            ),
+            (
+                "test_rifle",
+                "weapon",
+                &[("AnimationBank", "rifle none")],
+            ),
+            (
+                "test_jedi",
+                "soldier",
+                &[
+                    ("AnimationName", "jedifemale"),
+                    ("WeaponName", "test_saber"),
+                    ("WeaponName", "test_rifle"),
+                ],
+            ),
+        ],
+    );
+    let slots = vec![
+        WeaponSlot {
+            slot: 0,
+            channel: 0,
+            weapon: "test_saber".into(),
+            ammo: Some(0),
+        },
+        WeaponSlot {
+            slot: 1,
+            channel: 0,
+            weapon: "test_rifle".into(),
+            ammo: Some(4),
+        },
+    ];
+    let anim = class_anim(&d, "test_jedi", &slots);
+    assert_eq!(
+        anim.banks,
+        vec![
+            ("test_saber".into(), "jedifemale".into()),
+            ("test_rifle".into(), "rifle".into()),
+        ]
+    );
+    assert_eq!(
+        anim.fallback_banks,
+        vec![("test_saber".into(), "jedi".into())]
+    );
+}

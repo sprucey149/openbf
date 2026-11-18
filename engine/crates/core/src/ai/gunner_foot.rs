@@ -55,6 +55,8 @@ pub(super) enum AimRequest<'a> {
     Droid(&'a Droid, bool),
     /// A SEEN enemy auto-turret, likewise (`re-portable-turret.md` 10).
     Turret(&'a Turret, bool),
+    /// A SEEN destructible station targeted by a script `Destroy` AI goal.
+    Station(&'a crate::sim::Station, bool),
 }
 
 pub(super) enum GunMode {
@@ -146,6 +148,11 @@ pub(super) fn track_error(sim: &Sim, st: &mut AiState, skill: &crate::skill::Ski
             }
             // It stands still: the error decays as on a still soldier.
             perception::Foe::Turret(id) => sim.live_turret(id).map(|t| (t.centre(), 1.0)),
+            perception::Foe::Station(id) => sim
+                .stations
+                .get(usize::from(id))
+                .filter(|s| !s.destroyed)
+                .map(|s| (s.sphere_centre, 1.0)),
         });
     match tracked {
         Some((p, top)) => {
@@ -212,13 +219,15 @@ pub(super) fn run(
     let (enemy, held, memory) = match *aim {
         AimRequest::Enemy(e, c) => (Some(e), Some(c), None),
         AimRequest::Memory(p) => (None, None, Some(p)),
-        AimRequest::Travel(_) | AimRequest::Droid(..) | AimRequest::Turret(..) => {
-            (None, None, None)
-        }
+        AimRequest::Travel(_)
+        | AimRequest::Droid(..)
+        | AimRequest::Turret(..)
+        | AimRequest::Station(..) => (None, None, None),
     };
     let droid = match *aim {
         AimRequest::Droid(d, ready) => Some((d.pos, ready)),
         AimRequest::Turret(t, ready) => Some((t.centre(), ready)),
+        AimRequest::Station(s, ready) => Some((s.sphere_centre, ready)),
         _ => None,
     };
     // Card TOKN: a human this bot holds none of the tokens of - it shoots
@@ -290,6 +299,12 @@ pub(super) fn run(
             p
         }
         (AimRequest::Turret(t, _), _) => turret_aim(sim, me, st, eye, t, wc),
+        (AimRequest::Station(s, _), Armed::Thrown(gc, _) | Armed::Lobbed(gc)) => {
+            let (p, ok) = arsenal::lob_aim(sim, u, eye, s.sphere_centre, Vec3::ZERO, gc);
+            reaches = ok;
+            p
+        }
+        (AimRequest::Station(s, _), _) => station_aim(sim, me, st, eye, s, wc),
         (AimRequest::Memory(p) | AimRequest::Travel(p), _) => p,
     };
     let to = look_at - eye;
@@ -384,25 +399,32 @@ pub(super) fn run(
     fire_discipline(sim, me, u, st, wc, meter, &skill);
     // Card FFLN: a friend in the line of fire. The shot waits (below); the
     // behaviour steps a holder with no Tactician's position aside.
-    let line = enemy
-        .map(|e| e.capsule().center())
-        .or(droid.map(|d| d.0))
-        .and_then(|at| {
-            let range = (at - eye).length();
-            // The cone a shot can leave in: the weapon's spread as it is now
-            // (a sniper's AI table, the posture, the recoil) round the aim.
-            let spread = weapon.yaw_spread(wc).fmax(weapon.pitch_spread(wc));
-            friend_in_line(
-                sim,
-                me,
-                u,
-                eye,
-                range,
-                LINE_SPREAD + spread,
-                Some(shot_late(wc)),
-            )
-            .or_else(|| friend_in_blast(sim, me, u, at, wc))
-        });
+    let line = if matches!(*aim, AimRequest::Station(..)) && wc.saber.is_some() {
+        None
+    } else {
+        enemy
+            .map(|e| e.capsule().center())
+            .or(droid.map(|d| d.0))
+            .and_then(|at| {
+                let range = match *aim {
+                    AimRequest::Station(s, _) => ((at - eye).length() - s.sphere_radius).fmax(0.5),
+                    _ => (at - eye).length(),
+                };
+                // The cone a shot can leave in: the weapon's spread as it is now
+                // (a sniper's AI table, the posture, the recoil) round the aim.
+                let spread = weapon.yaw_spread(wc).fmax(weapon.pitch_spread(wc));
+                friend_in_line(
+                    sim,
+                    me,
+                    u,
+                    eye,
+                    range,
+                    LINE_SPREAD + spread,
+                    Some(shot_late(wc)),
+                )
+                .or_else(|| friend_in_blast(sim, me, u, at, wc))
+            })
+    };
     let mut no_throw = false;
     let mut close_on = None;
     let target = enemy
@@ -417,6 +439,10 @@ pub(super) fn run(
             // Playtest C1: no shot while the bot flinches from a hit.
             let ready = ready && sim.tick >= st.flinch_until;
             let range = (at - eye).length();
+            let eff_range = match *aim {
+                AimRequest::Station(s, _) => (range - s.sphere_radius).fmax(0.1),
+                _ => range,
+            };
             let in_reach = match armed {
                 // Card CLSE4 (`analysis/re-soldier-ai.md` 20.2, both games):
                 // the trigger fires a tracked target only strictly inside
@@ -432,29 +458,29 @@ pub(super) fn run(
                 // own gate: the aim on its arc is the whole change (issue
                 // #29); the gate is the hand weapon's, unchanged.
                 Armed::Lobbed(gc) if sim.is_hunt() && gc.thrown.is_some() => {
-                    reaches && range > gc.ai_range[0] && range < gc.ai_range[2]
+                    reaches && eff_range > gc.ai_range[0] && eff_range < gc.ai_range[2]
                 }
                 Armed::Hand | Armed::Lobbed(_) if hand.is_some() => {
-                    range <= wc.shot_range() && !st.arm.spare
+                    eff_range <= wc.shot_range() && !st.arm.spare
                 }
-                Armed::Hand if wc.saber.is_some() => range < wc.ai_range[2] && !st.arm.spare,
+                Armed::Hand if wc.saber.is_some() => eff_range < wc.ai_range[2] && !st.arm.spare,
                 // A cone cannot honour the token's harmless miss by offsetting
                 // the aim point, so a barred bot holds its fire.
                 Armed::Hand if wc.emitter.as_ref().is_some_and(|e| e.is_cone()) => {
-                    range <= wc.shot_range()
-                        && range < wc.ai_range[2]
+                    eff_range <= wc.shot_range()
+                        && eff_range < wc.ai_range[2]
                         && !st.arm.spare
                         && barred.is_none()
                 }
                 Armed::Hand | Armed::Lobbed(_) => {
-                    range <= wc.shot_range() && range < wc.ai_range[2] && !st.arm.spare
+                    eff_range <= wc.shot_range() && eff_range < wc.ai_range[2] && !st.arm.spare
                 }
                 Armed::Draw(_) => false,
                 Armed::Thrown(gc, live) => {
                     live && reaches
                         && e_pitch.abs() < arsenal::LOB_PITCH
-                        && gc.ai_range[0] < range
-                        && range < gc.ai_range[2]
+                        && gc.ai_range[0] < eff_range
+                        && eff_range < gc.ai_range[2]
                 }
                 Armed::Secondary(class, state) => {
                     let energy = class
@@ -463,9 +489,18 @@ pub(super) fn run(
                         .map(|p| p.energy)
                         .or_else(|| class.saber_throw.as_ref().map(|p| p.energy))
                         .unwrap_or(0.0);
-                    let kind = enemy.map_or(2, Unit::kind).min(31);
-                    range > class.ai_range[0] && range < arsenal::reach(class)
-                        && class.ai_target_kind & (1 << kind) != 0
+                    let kind = enemy
+                        .map_or_else(
+                            || match *aim {
+                                AimRequest::Station(s, _) => s.health.health_type as u32,
+                                _ => 2,
+                            },
+                            Unit::kind,
+                        )
+                        .min(31);
+                    eff_range > class.ai_range[0] && eff_range < arsenal::reach(class)
+                        && (matches!(*aim, AimRequest::Station(..))
+                            || class.ai_target_kind & (1 << kind) != 0)
                         && (state.force_channel.is_some() || u.soldier.energy >= energy)
                         && state.saber_flight.is_none() && !state.reloading() && !state.overheated
                         // A cone or a broad blade cannot honor the token's
@@ -1125,6 +1160,34 @@ pub(super) fn turret_aim(
     }
     let err = sim.unit(t.owner).map_or(st.err, |o| o.aim.err);
     let r = radius(DROID_AIM_SIZE, 1.0, err, 0.0, 1.0, cap);
+    aim + bubble(
+        sim,
+        me,
+        false,
+        error_dir(sim, me, u) * r,
+        (aim - eye).length(),
+        wc,
+    )
+}
+
+pub(super) fn station_aim(
+    sim: &Sim,
+    me: UnitHandle,
+    st: &AiState,
+    eye: Vec3,
+    s: &crate::sim::Station,
+    wc: &WeaponClass,
+) -> Vec3 {
+    let aim = s.sphere_centre;
+    let Some(u) = sim.unit(me) else {
+        return aim;
+    };
+    let cap = sim.aim_err_cap(u);
+    if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
+        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap);
+        return aim + bf1_error_dir(sim, me) * r;
+    }
+    let r = radius(DROID_AIM_SIZE, 1.0, st.err, 0.0, 1.0, cap);
     aim + bubble(
         sim,
         me,

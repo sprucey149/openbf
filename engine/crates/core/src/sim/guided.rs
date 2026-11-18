@@ -233,7 +233,9 @@ impl Sim {
                     .unit(h)
                     .filter(|e| e.cloak.visible())
                     .map(|u| u.aim_point()),
-                crate::perception::Foe::Droid(_) | crate::perception::Foe::Turret(_) => {
+                crate::perception::Foe::Droid(_)
+                | crate::perception::Foe::Turret(_)
+                | crate::perception::Foe::Station(_) => {
                     crate::perception::foe_motion(self, h).map(|(p, _)| p)
                 }
             });

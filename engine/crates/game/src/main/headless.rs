@@ -123,6 +123,9 @@ impl ReplayFrame {
         gpu.animate_water_live(r, cam.position)?;
         game::forest::submit_actors(r, &walk.sim);
         gpu.pose_doors(&walk.sim.doors);
+        if let Some(campaign) = walk.campaign.as_ref() {
+            gpu.pose_world_anims(campaign.instance_poses());
+        }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
         // A set viewer camera is not the chase camera: it sees through
@@ -621,6 +624,9 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         // ocean's patches, then every frame below.
         gpu.animate_water(&mut r, game::water_anim::clock(0.0), cam.position)?;
         gpu.pose_doors(&walk.sim.doors);
+        if let Some(campaign) = walk.campaign.as_ref() {
+            gpu.pose_world_anims(campaign.instance_poses());
+        }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
         gpu.pose_ctf(&walk.sim, walk.player);

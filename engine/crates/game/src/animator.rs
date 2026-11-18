@@ -148,6 +148,8 @@ pub struct ClassAnim {
     /// (weapon class, lowercase; its animation bank) per weapon slot that
     /// names one.
     pub banks: Vec<(String, String)>,
+    /// Optional parent bank (`ComboAnimationBank` word 1) per weapon slot.
+    pub fallback_banks: Vec<(String, String)>,
     /// BF2 custom-animation descriptors, including explicit hero defaults.
     pub custom: custom::Descriptors,
 }
@@ -159,6 +161,18 @@ impl ClassAnim {
             .iter()
             .find(|(w, _)| w.eq_ignore_ascii_case(weapon))
             .map_or("rifle", |(_, b)| b)
+    }
+
+    /// Primary bank stem and optional parent bank stem for combo/offhand lookup.
+    pub fn bank_pair_of(&self, weapon: &str) -> (&str, Option<&str>) {
+        let primary = self.bank_of(weapon);
+        let primary = primary.split_once('_').map_or(primary, |(_, b)| b);
+        let fallback = self
+            .fallback_banks
+            .iter()
+            .find(|(w, _)| w.eq_ignore_ascii_case(weapon))
+            .map(|(_, b)| b.split_once('_').map_or(b.as_str(), |(_, s)| s));
+        (primary, fallback)
     }
 }
 
