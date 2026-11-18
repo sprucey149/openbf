@@ -2238,3 +2238,135 @@ fn spa3c_c_placed_holocron_is_a_carryable_flag() {
         "the tutorial holocron is not a placed instance"
     );
 }
+
+
+/// The maintainer's Utapau black box (2026-11-17, `dist/.../last.json`): the
+/// player stands on cam_cp4's platform at (-190.95, 18.4, 204.84), sees no
+/// capture meter and cannot take the first objective post. The authored box
+/// starts 0.19 m above that floor; the layout's campaign-only correction must
+/// bring it down so the post can be taken from its own platform.
+#[test]
+fn uta1c_first_post_counts_and_captures_from_its_platform() {
+    let (missions, baked) = baked().expect("bake");
+    let (_, mut walk, _) = setup_baked_campaign(&missions, &baked, "uta1c_c");
+    let ci = walk
+        .sim
+        .cps
+        .iter()
+        .position(|c| c.def.name.eq_ignore_ascii_case("cam_cp4"))
+        .expect("cam_cp4");
+    let player = walk.player.index as usize;
+    {
+        let u = &mut walk.sim.units[player];
+        u.alive = true;
+        u.capture_posts = true;
+        u.mount = None;
+        u.soldier.pos = Vec3::new(-190.95, 18.4, 204.84);
+    }
+    assert!(
+        walk.sim.counts_in_cp(player, ci),
+        "the platform spot must count toward cam_cp4"
+    );
+    assert_eq!(
+        crate::capture_feed::post_of(&walk.sim, player).map(|x| x.0),
+        Some(ci),
+        "the HUD capture meter must show cam_cp4"
+    );
+    // Drive the post's own state machine, as the sim's step 6 does.
+    let mut owned_by_player = false;
+    let team = walk.sim.units[player].team;
+    for _ in 0..(30 * core::TICK_HZ * 3) {
+        let inside = walk.sim.cp_inside(ci);
+        if matches!(
+            walk.sim.cps[ci].update(core::TICK_DT, &inside),
+            core::cp::CpChange::Captured { by } if by == team
+        ) {
+            owned_by_player = true;
+            break;
+        }
+    }
+    assert!(owned_by_player, "cam_cp4 must be capturable from the platform");
+}
+
+/// Utapau's Objective 3a.OnComplete turns native team 4's member into the CIS
+/// hero Grievous with `BatchChangeTeams` + `SelectCharacterClass`, then calls
+/// `SpawnCharacter` at the `grievious_spawn` path. The window's roster has the
+/// hero appended by `heroes::append`; the fixture builds rosters from the
+/// mission file alone, so mirror that here.
+#[test]
+fn uta1c_scripted_hero_bindings_spawn_grievous_for_the_final_objective() {
+    use crate::campaign_bindings::PLACEHOLDER;
+    use crate::campaign_script::Host;
+
+    let (missions, baked) = baked().expect("bake");
+    let (def, mut walk, mut rt) = setup_baked_campaign(&missions, &baked, "uta1c_c");
+    let hero_class = walk.sim.classes[1][0].clone();
+    walk.sim.classes[1].push(hero_class);
+    let mut tc = team_classes(&def);
+    tc[1].push("cis_hero_grievous".into());
+    rt.set_team_rosters(tc, [def.teams[0].units, def.teams[1].units]);
+
+    // Native team 4 is sim team 3; its member 0 is the placeholder char id.
+    let member = PLACEHOLDER + 3 * 1000;
+    let point = {
+        let mut host = Ctx {
+            w: &mut rt.w,
+            sim: &mut walk.sim,
+        };
+        host.call(
+            &mut rt.interp,
+            "GetPathPoint",
+            &[Value::str("grievious_spawn"), Value::Num(0.0)],
+        )
+        .expect("grievious_spawn path point")
+        .into_iter()
+        .next()
+        .expect("one point")
+    };
+    assert_ne!(point, Value::Nil);
+    {
+        let mut host = Ctx {
+            w: &mut rt.w,
+            sim: &mut walk.sim,
+        };
+        host.call(
+            &mut rt.interp,
+            "BatchChangeTeams",
+            &[
+                Value::Num(4.0),
+                Value::Num(2.0),
+                Value::Num(1.0),
+            ],
+        )
+        .expect("BatchChangeTeams");
+        host.call(
+            &mut rt.interp,
+            "SelectCharacterClass",
+            &[Value::Num(member as f32), Value::str("cis_hero_grievous")],
+        )
+        .expect("SelectCharacterClass");
+        host.call(
+            &mut rt.interp,
+            "SpawnCharacter",
+            &[Value::Num(member as f32), point],
+        )
+        .expect("SpawnCharacter");
+    }
+    let grievous = walk
+        .sim
+        .units
+        .iter()
+        .enumerate()
+        .find(|(_, u)| {
+            u.alive
+                && u.team == 1
+                && rt.w
+                    .team_classes
+                    .get(usize::from(u.team))
+                    .and_then(|cs| cs.get(usize::from(u.spec.class)))
+                    .is_some_and(|n| n.eq_ignore_ascii_case("cis_hero_grievous"))
+        })
+        .map(|(i, _)| i);
+    assert!(grievous.is_some(), "Grievous must be fielded for Objective 3b");
+    assert_eq!(rt.errors().count(), 0, "no script errors");
+}

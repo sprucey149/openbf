@@ -197,6 +197,13 @@ pub(crate) struct FlagEnt {
     pub dead: bool,
 }
 
+/// A script's team / class reassignment of a native member before spawn.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ScriptedChar {
+    pub team: Option<u8>,
+    pub class: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CharSeen {
     gen: u32,
@@ -242,6 +249,11 @@ pub(crate) struct World {
     pub inside: BTreeSet<(u32, u32)>,
     seen: Vec<Option<CharSeen>>,
     pub char_alias: BTreeMap<u32, u32>,
+    /// A native member the script reassigns before `SpawnCharacter`: BF2's
+    /// `BatchChangeTeams` / `SelectCharacterClass` (the Utapau campaign turns
+    /// team 4's member into the CIS hero Grievous for Objective 3b). Keyed by
+    /// the member's placeholder character id.
+    pub scripted_chars: BTreeMap<u32, ScriptedChar>,
     last_shot: Vec<Option<u32>>,
     pub last_hit_weapon: Vec<(Ud, String)>,
     pub tickets_seen: [i64; 2],
@@ -411,6 +423,7 @@ impl CampaignRuntime {
             inside: BTreeSet::new(),
             seen: Vec::new(),
             char_alias: BTreeMap::new(),
+            scripted_chars: BTreeMap::new(),
             last_shot: Vec::new(),
             last_hit_weapon: Vec::new(),
             tickets_seen: [i64::MIN; 2],

@@ -18,12 +18,15 @@ use crate::classdb::fnv1a_lowercase;
 use core::fmath::FloatExt;
 use core::region::Region;
 use core::sim::{CtfState, Sim};
+use core::unit::Controller;
 use glam::Vec3;
 
 /// The bindings these scripts call that do something here.
 const BOUND: &[&str] = &[
     "AcceptHero",
     "SetHeroClass",
+    "BatchChangeTeams",
+    "SelectCharacterClass",
     "ActivateObjective",
     "ActivateRegion",
     "AddDeathRegion",
@@ -143,7 +146,6 @@ const IGNORED: &[&str] = &[
     "AddWalkerType",
     "AISnipeSuitabilityDist",
     "AudioStreamAppendSegments",
-    "BatchChangeTeams",
     "BeginScreenTransition",
     "ClearWalkers",
     "DisableAIAutoBalance",
@@ -170,7 +172,6 @@ const IGNORED: &[&str] = &[
     "ScriptCB_SetUberScoreLimit",
     "ScriptCB_SetYAxisFlip",
     "ScriptCB_ShowHuntScoreLimit",
-    "SelectCharacterClass",
     "SetAIDamageThreshold",
     "SetAIDifficulty",
     "SetAIVehicleNotifyRadius",
@@ -716,6 +717,33 @@ impl Ctx<'_> {
             "GetNumTeamMembersAlive" => one(Value::Num(sim_team(arg(a, 0)).map_or(0, |t| {
                 sim.units.iter().filter(|u| u.alive && u.team == t).count()
             }) as f32)),
+            // BF2's scripted hero path: `BatchChangeTeams(from, to, count)`
+            // moves native members to a main army, and
+            // `SelectCharacterClass(member, class)` gives one a hero kit.
+            // Utapau's Objective 3a.OnComplete uses both to field Grievous
+            // for the "Fight General Grievous" target objective.
+            "BatchChangeTeams" => {
+                if let (Some(from), Some(to), Some(n)) =
+                    (bf2_team(arg(a, 0)), bf2_team(arg(a, 1)), num(a, 2))
+                {
+                    let from = from.saturating_sub(1);
+                    let to = to.saturating_sub(1);
+                    for i in 0..(n.max(0.0) as u32).min(1000) {
+                        let c = PLACEHOLDER + u32::from(from) * 1000 + i;
+                        w.scripted_chars.entry(c).or_default().team = Some(to);
+                    }
+                }
+                nothing()
+            }
+            "SelectCharacterClass" => {
+                if let (Some(c), Some(class)) = (w.char_of(arg(a, 0)), arg(a, 1).as_str()) {
+                    w.scripted_chars
+                        .entry(c)
+                        .or_default()
+                        .class = Some(class.to_ascii_lowercase());
+                }
+                nothing()
+            }
             "SpawnCharacter" => {
                 let (Some(c), Some(pos)) = (w.char_of(arg(a, 0)), w.point_of(sim, arg(a, 1)))
                 else {
@@ -1091,12 +1119,52 @@ impl World {
     /// `SpawnCharacter(char, point)` (`FUN_001916e8`): the character's
     /// member enters at the point, once (`Sim::spawn_native_character`).
     fn spawn_character(&mut self, sim: &mut Sim, c: u32, pos: (Vec3, f32)) {
-        if self.char_unit(sim, c).is_some() {
+        let scripted = self.scripted_chars.get(&c).cloned();
+        if scripted.is_none() && self.char_unit(sim, c).is_some() {
             return;
         }
-        let Some(team) = self.char_team(sim, c) else {
+        let team = scripted
+            .as_ref()
+            .and_then(|s| s.team)
+            .or_else(|| self.char_team(sim, c));
+        let Some(team) = team else {
             return;
         };
+        // A scripted hero is spawned with the class the script selected, on
+        // the army it moved the member to, at the path point it asked for.
+        // The native pool's own (already spawned) template is not used.
+        if let Some(class) = scripted.as_ref().and_then(|s| s.class.as_deref()) {
+            let Some(ci) = self
+                .team_classes
+                .get(usize::from(team))
+                .and_then(|classes| classes.iter().position(|n| n.eq_ignore_ascii_case(class)))
+            else {
+                self.report(&format!(
+                    "SpawnCharacter: {class} is not in team {}'s roster",
+                    team + 1
+                ));
+                return;
+            };
+            let Some(uc) = sim
+                .classes
+                .get(usize::from(team))
+                .and_then(|classes| classes.get(ci))
+            else {
+                return;
+            };
+            let spec = uc.spec(
+                team,
+                pos.0,
+                pos.1,
+                Controller::Ai,
+                ci as u8,
+                sim.bot_skill(team),
+            );
+            if let Some(h) = sim.spawn(&spec) {
+                self.char_alias.insert(c, h.index);
+            }
+            return;
+        }
         if let Some(h) = sim.spawn_native_character(team, pos) {
             if h.index != c {
                 self.char_alias.insert(c, h.index);

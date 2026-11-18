@@ -1668,6 +1668,32 @@ impl MapLayout {
                 && !class_lower.contains("untakeable")
                 && (cap_name.is_some() || !campaign);
             let visible = !class_lower.contains("inv");
+            let pos = Vec3::from(inst.translation);
+            let mut capture = cap_name.and_then(region);
+            // OURS, PROVISIONAL (Utapau campaign, `cam_cp4`): the authored
+            // capture box's bottom sits 0.19 m above the post instance, so a
+            // soldier standing on the platform at the post itself is outside
+            // it and the first objective cannot be captured. Original-game
+            // footage shows that post being captured from the platform. Bring
+            // a small authored gap inside the box, without turning a distant
+            // region (a layer mix-up) into a capture zone.
+            // replace: a PS2 capture of the post with the soldier's feet
+            // height and the live capture region, to fix the data instead.
+            if campaign && capturable {
+                if let Some(r) = &mut capture {
+                    let local = r.to_local(pos);
+                    let below = -r.size.y - local.y;
+                    let horizontal = match r.shape {
+                        core::region::Shape::Cylinder => {
+                            local.x * local.x + local.z * local.z < r.size.x * r.size.x
+                        }
+                        _ => local.x.abs() < r.size.x && local.z.abs() < r.size.z,
+                    };
+                    if below > 0.0 && below <= 0.5 && horizontal {
+                        r.center -= r.basis.y_axis * (below + 0.01);
+                    }
+                }
+            }
             cps.push(CommandPostDef {
                 name: inst.name.clone(),
                 label: prop(&inst.props, PROP_LABEL).unwrap_or("").to_owned(),
@@ -1675,8 +1701,8 @@ impl MapLayout {
                 team: prop(&inst.props, PROP_TEAM)
                     .and_then(|s| s.trim().parse().ok())
                     .unwrap_or(0),
-                pos: Vec3::from(inst.translation),
-                capture: cap_name.and_then(region),
+                pos,
+                capture,
                 control: prop(&inst.props, PROP_CONTROL_REGION).and_then(region),
                 spawn_path: prop(&inst.props, PROP_SPAWN_PATH).map(str::to_owned),
                 ally_path: prop(&inst.props, PROP_ALLY_PATH).map(str::to_owned),
