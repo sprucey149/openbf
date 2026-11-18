@@ -378,7 +378,8 @@ if want common; then
   GAL_LVL="$(ci "$UI2" GAL/GAL1.LVL)"
   if [ -f "$GAL_LVL" ]; then
     clean "$OUT/bf2_gal1/models" "$OUT/bf2_gal1/textures" "$OUT/bf2_gal1/sounds"
-    "$BAKE" map "$GAL_LVL" "$OUT/bf2_gal1"
+    map_donors bf2 gal/gal1.lvl
+    "$BAKE" map "$GAL_LVL" "$OUT/bf2_gal1" ${PC_ARG[@]+"${PC_ARG[@]}"}
     GAL_SND="$(ci "$S2" SOUND/GAL.LVL)"
     if [ -f "$GAL_SND" ]; then
       "$BAKE" sounds "$GAL_SND" "$OUT/bf2_gal1" "$(ci "$UI2" CORE.LVL)"

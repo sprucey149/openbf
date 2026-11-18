@@ -655,6 +655,10 @@ impl HudView {
         point: [f32; 2],
         size: [f32; 2],
     ) -> Option<usize> {
+        if menus.page == ui::shell_ps2::Page::CampaignSaves {
+            let font = self.art.menu_font(ui::typography::BODY.face.role())?;
+            return ui::shell_ps2::campaign_saves::row_at(font, menus, point, size);
+        }
         let font = self.art.menu_font(ui::typography::ITEM.face.role())?;
         ui::shell_ps2::row_at(font, menus, point, size)
     }

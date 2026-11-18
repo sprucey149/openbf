@@ -76,6 +76,10 @@ pub struct Picker {
     pub page: Page,
     pub focus: Target,
     pub message: Option<String>,
+    /// The name keyboard's title when it names something else (a Rise of
+    /// the Empire save: `ifs.vkeyboard.title_rote`, `ifs_campaign_load`
+    /// main.f32 pc 166-170).
+    pub name_title: Option<String>,
     /// The name list's view ([`crate::scroll`]).
     view: ScrollView,
 }
@@ -87,6 +91,7 @@ impl Picker {
             page: Page::List,
             focus: Target::Create,
             message: None,
+            name_title: None,
             view: ScrollView::default(),
         };
         if let Some(index) = picker
@@ -421,7 +426,12 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
     let s = screen(size);
     let (title, left, right, top) = match picker.page {
         Page::List => ("Pick a Profile", 104.0, 408.0, 68.0),
-        Page::Name { .. } => ("Enter profile name", 33.0, 479.0, 102.0),
+        Page::Name { .. } => (
+            picker.name_title.as_deref().unwrap_or("Enter profile name"),
+            33.0,
+            479.0,
+            102.0,
+        ),
         Page::Difficulty(_) => ("Select Difficulty", 104.0, 408.0, 122.0),
         Page::Delete(_) => ("Delete Profile", 104.0, 408.0, 122.0),
     };

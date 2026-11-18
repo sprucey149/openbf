@@ -13,8 +13,8 @@ use ui::{
 
 #[derive(Default)]
 pub(super) struct NameInput {
-    text: String,
-    backspaces: usize,
+    pub(super) text: String,
+    pub(super) backspaces: usize,
 }
 
 fn picker(store: &Store) -> Picker {
@@ -283,6 +283,7 @@ impl App {
                     front.music_replay = true;
                 }
                 front.menus.set_campaign_unlocked(self.profile.campaign.unlocked);
+                front.menus.campaign_saves.current = None;
                 front.menus.profile_selected();
                 front.picker = None;
                 front.cue(MenuSound::Accept);
@@ -310,6 +311,7 @@ impl App {
         if !front
             .picker
             .as_ref()
+            .or(front.save_name.as_ref())
             .is_some_and(|p| matches!(p.page, Page::Name { .. }))
         {
             return false;

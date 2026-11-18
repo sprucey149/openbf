@@ -67,8 +67,9 @@ pub const INGAME_MOVIES: [&str; 40] = [
 /// The shell's sheets: the title and main menu's logo (§3.4), the Instant
 /// Action backdrop and the five mode icons its lists draw
 /// (`analysis/re-bf2-menus.md` §1.1, §6, §8; `mode_icon_eli` is unused and
-/// `mode_icon_tdm` is not on the disc).
-pub const SHELL_TEXTURES: [&str; 7] = [
+/// `mode_icon_tdm` is not on the disc), and the Rise of the Empire save
+/// list's type icon (`ifs_campaign_load` main.f1 pc 22-33).
+pub const SHELL_TEXTURES: [&str; 8] = [
     "logo",
     "iface_instant_action",
     "mode_icon_con",
@@ -76,6 +77,7 @@ pub const SHELL_TEXTURES: [&str; 7] = [
     "mode_icon_ctf",
     "mode_icon_hunt",
     "mode_icon_ass",
+    "rote_icon",
 ];
 /// The music the start screen sets (`ifs_start` main.f2, §2).
 pub const MUSIC: &str = "shell_soundtrack";

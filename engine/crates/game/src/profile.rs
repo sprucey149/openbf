@@ -387,7 +387,25 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("openbf_data"))
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// One Rise of the Empire save: the PS2 card's campaign file
+/// (`ScriptCB_StartSaveCampaign`, `ifs_campaign_load` main.f15) holds the
+/// campaign map's state, whose turn is the port's whole campaign
+/// (`ifs_campaign_main` SaveState main.f6 pc 3).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CampaignSave {
+    pub name: String,
+    /// The story turn it resumes (`1..=17`).
+    pub turn: u8,
+    /// Seconds since 1970 when written: the list's newest-first order
+    /// (FUN_00189ec8 compares the files' dates).
+    #[serde(default)]
+    pub saved: u64,
+}
+
+/// OURS: the saves live with the profile that wrote them; the PS2 lists
+/// every campaign file on the memory card (FUN_0018a300 reads all files of
+/// type 3). trace: whether one card's saves are shared by its profiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CampaignProgress {
     /// Number of Rise of the Empire missions unlocked (`1..=18`).
     pub unlocked: u8,
@@ -396,9 +414,12 @@ pub struct CampaignProgress {
     /// Whether the player has already been prompted for the Geonosis training mission.
     #[serde(default)]
     pub training_prompted: bool,
-    /// Explicitly saved active story mission turn (`1..=17`).
-    #[serde(default)]
+    /// The single autosaved turn older builds kept; [`Profile::normalize`]
+    /// turns it into a save.
+    #[serde(default, skip_serializing)]
     pub active_mission: Option<u8>,
+    #[serde(default)]
+    pub saves: Vec<CampaignSave>,
 }
 
 impl Default for CampaignProgress {
@@ -408,6 +429,7 @@ impl Default for CampaignProgress {
             completed_mask: 0,
             training_prompted: false,
             active_mission: None,
+            saves: Vec::new(),
         }
     }
 }
@@ -430,6 +452,48 @@ impl CampaignProgress {
         self.completed_mask |= 1u32 << idx;
         let next = (idx + 2).min(Self::MISSIONS) as u8;
         self.unlocked = self.unlocked.max(next).clamp(1, Self::MISSIONS as u8);
+    }
+
+    /// The saves' names as the list shows them: `current` first, then the
+    /// newest (FUN_00189ec8).
+    pub fn save_names(&self, current: Option<&str>) -> Vec<String> {
+        self.save_list(current)
+            .into_iter()
+            .map(|s| s.name.clone())
+            .collect()
+    }
+
+    /// The saves in the list's order: `current` first, then the newest.
+    pub fn save_list(&self, current: Option<&str>) -> Vec<&CampaignSave> {
+        let mut order: Vec<&CampaignSave> = self.saves.iter().collect();
+        order.sort_by_key(|s| (Some(s.name.as_str()) != current, std::cmp::Reverse(s.saved)));
+        order
+    }
+
+    pub fn save_turn(&self, name: &str) -> Option<u8> {
+        self.saves.iter().find(|s| s.name == name).map(|s| s.turn)
+    }
+
+    /// Write `turn` as `name`, replacing the save `replace` and any of the
+    /// same name (`ScriptCB_StartSaveCampaign(filename1, filename2)`).
+    pub fn write_save(&mut self, replace: Option<&str>, name: &str, turn: u8, saved: u64) {
+        self.saves
+            .retain(|s| Some(s.name.as_str()) != replace && !s.name.eq_ignore_ascii_case(name));
+        self.saves.push(CampaignSave {
+            name: name.to_owned(),
+            turn: turn.clamp(1, Self::MISSIONS as u8 - 1),
+            saved,
+        });
+        self.unlocked = self
+            .unlocked
+            .max(turn.saturating_add(1))
+            .clamp(1, Self::MISSIONS as u8);
+    }
+
+    pub fn delete_save(&mut self, name: &str) -> bool {
+        let before = self.saves.len();
+        self.saves.retain(|s| s.name != name);
+        self.saves.len() != before
     }
 }
 
@@ -498,6 +562,16 @@ impl Profile {
         self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
         self.settings.free_fullscreen_key();
         self.campaign.unlocked = self.campaign.unlocked.clamp(1, CampaignProgress::MISSIONS as u8);
+        if let Some(turn) = self.campaign.active_mission.take() {
+            if self.campaign.saves.is_empty() {
+                let name: String = self
+                    .name
+                    .chars()
+                    .take(ui::shell_ps2::campaign_saves::NAME_LIMIT)
+                    .collect();
+                self.campaign.write_save(None, &name, turn, 0);
+            }
+        }
     }
 
     fn fresh() -> Profile {

@@ -46,6 +46,7 @@
 //! left-justified stack keeps its offset from the box's left edge, the help
 //! lines their offsets from the window's edges.
 
+pub mod campaign_saves;
 pub mod profiles;
 
 use crate::hud_draw::Ctx;
@@ -117,6 +118,7 @@ pub enum Page {
     RiseOfTheEmpire,
     CampaignBattle,
     CampaignMenu,
+    CampaignSaves,
     Options,
     /// `[ours]` issue #168.
     Multiplayer,
@@ -149,6 +151,16 @@ pub enum RowId {
     CampaignQuit,
     CampaignQuitYes,
     CampaignQuitNo,
+    SaveAsNew,
+    SaveSlot(u8),
+    NoSavedGames,
+    SaveContinue,
+    SaveConfirm,
+    LoadCancel,
+    LoadContinue,
+    SaveYes,
+    SaveNo,
+    SaveOk,
     GameOptions,
     AudioOptions,
     GraphicsOptions,
@@ -192,6 +204,16 @@ impl RowId {
             RowId::CampaignQuit => ("common.quit", "Quit"),
             RowId::CampaignQuitYes => ("common.yes", "Yes"),
             RowId::CampaignQuitNo => ("common.no", "No"),
+            RowId::SaveAsNew => ("ifs.meta.load.saveasnew", "< Save as New >"),
+            RowId::SaveSlot(_) => ("ifs.meta.load.save", "Save Game"),
+            RowId::NoSavedGames => ("ifs.meta.load.nogames", "No Saved Games Available"),
+            RowId::SaveContinue => ("ifs.loadsave_ps2.continuenosave", "Continue Without Saving"),
+            RowId::SaveConfirm => ("ifs.loadsave_ps2.save", "Save"),
+            RowId::LoadCancel => ("ifs.loadsave_ps2.cancel", "Cancel"),
+            RowId::LoadContinue => ("ifs.loadsave_ps2.continue", "Continue"),
+            RowId::SaveYes => ("common.yes", "Yes"),
+            RowId::SaveNo => ("common.no", "No"),
+            RowId::SaveOk => ("common.ok", "OK"),
             RowId::GameOptions => ("ifs.GameOpt.title", "Game Options"),
             RowId::AudioOptions => ("ifs.SoundOpt.title", "Audio Options"),
             RowId::GraphicsOptions => ("openbf.graphicsoptions", "Graphics Options"),
@@ -256,6 +278,12 @@ impl Stack {
     }
 }
 
+/// OURS: the save list's Delete help text one help line above Select. The
+/// disc puts it 40 above the screen's bottom, right-justified
+/// (`ifs_campaign_load` main.f36 pc 113-121). measure: the PS2's help line
+/// heights on the save list's frame.
+const DELETE_HELP_LIFT: f32 = 25.0;
+
 /// Maximum mission rows shown at once on [`Page::RiseOfTheEmpire`] so the
 /// stack and note fit within the 448-unit shell height.
 const CAMPAIGN_WINDOW: usize = 6;
@@ -267,10 +295,14 @@ pub enum ShellCommand {
     InstantAction,
     /// Rise of the Empire → New Game: plays opening crawl (`crawl1`) and opens Turn 1 planet briefing.
     StartCampaignNewGame,
-    /// Rise of the Empire → Save Game on the 3D planet pause menu.
-    SaveCampaign,
-    /// Rise of the Empire → Load / Load Game: opens saved campaign turn on the 3D planet screen.
-    LoadCampaign,
+    /// The save screen's name keyboard, for [`campaign_saves::CampaignSaves::pending`].
+    EditCampaignSaveName,
+    /// Write [`campaign_saves::CampaignSaves::pending`] with the current turn.
+    WriteCampaignSave,
+    /// Read the focused save ([`campaign_saves::CampaignSaves::selected_name`]).
+    LoadCampaignSave,
+    /// Delete the focused save.
+    DeleteCampaignSave,
     /// Rise of the Empire → Launch mission index (`0..18`).
     LaunchCampaignMission { index: usize },
     Settings(crate::menu::SettingsPage),
@@ -294,6 +326,7 @@ pub struct ShellMenus {
     pub campaign_battle: Stack,
     pub campaign_menu: Stack,
     pub campaign_quit_popup: Stack,
+    pub campaign_saves: campaign_saves::CampaignSaves,
     pub options: Stack,
     pub multiplayer: Stack,
     pub campaign_unlocked: u8,
@@ -477,6 +510,7 @@ impl ShellMenus {
                 false,
                 -32.0,
             ),
+            campaign_saves: campaign_saves::CampaignSaves::new(text),
             options: stack(
                 opt_title,
                 vec![
@@ -660,6 +694,7 @@ impl ShellMenus {
             } else {
                 &self.campaign_menu
             }),
+            Page::CampaignSaves => Some(&self.campaign_saves.stack),
             Page::Options => Some(&self.options),
             Page::Multiplayer => Some(&self.multiplayer),
         }
@@ -678,6 +713,7 @@ impl ShellMenus {
             } else {
                 &mut self.campaign_menu
             }),
+            Page::CampaignSaves => Some(&mut self.campaign_saves.stack),
             Page::Options => Some(&mut self.options),
             Page::Multiplayer => Some(&mut self.multiplayer),
         }
@@ -693,6 +729,17 @@ impl ShellMenus {
         }
         let id = stack.rows[row].id;
         stack.focus = row;
+        if self.page == Page::CampaignSaves {
+            let s = &mut self.campaign_saves;
+            if s.step == campaign_saves::SaveStep::List {
+                let first = usize::from(s.mode == campaign_saves::SaveMode::Save);
+                s.selected = match id {
+                    RowId::SaveSlot(i) => first + i as usize,
+                    _ => 0,
+                };
+                s.rebuild();
+            }
+        }
         if self.page == Page::RiseOfTheEmpire {
             match id {
                 RowId::CampaignMission(i) => {
@@ -785,6 +832,9 @@ impl ShellMenus {
             }
             return None;
         }
+        if self.page == Page::CampaignSaves {
+            return self.step_campaign_saves(input);
+        }
         if self.page == Page::CampaignMenu {
             if self.campaign_quit_confirm {
                 if input.back {
@@ -868,14 +918,26 @@ impl ShellMenus {
                 self.select_campaign_mission(1);
                 return Some(ShellCommand::StartCampaignNewGame);
             }
-            RowId::CampaignLoad => return Some(ShellCommand::LoadCampaign),
+            RowId::CampaignLoad => self.open_campaign_saves(
+                campaign_saves::SaveMode::Load,
+                campaign_saves::SaveReturn::NewLoad,
+                false,
+            ),
             RowId::CampaignResume => self.go(Page::CampaignBattle),
             RowId::CampaignOptions => {
                 self.campaign_pause_options = true;
                 self.go(Page::Options);
             }
-            RowId::CampaignSave => return Some(ShellCommand::SaveCampaign),
-            RowId::CampaignLoadMenu => return Some(ShellCommand::LoadCampaign),
+            RowId::CampaignSave => self.open_campaign_saves(
+                campaign_saves::SaveMode::Save,
+                campaign_saves::SaveReturn::Menu,
+                false,
+            ),
+            RowId::CampaignLoadMenu => self.open_campaign_saves(
+                campaign_saves::SaveMode::Load,
+                campaign_saves::SaveReturn::Menu,
+                true,
+            ),
             RowId::CampaignQuit => {
                 self.campaign_quit_confirm = true;
                 self.campaign_quit_popup.focus = 1;
@@ -883,7 +945,11 @@ impl ShellMenus {
             }
             RowId::CampaignQuitYes => {
                 self.campaign_quit_confirm = false;
-                self.go(Page::Singleplayer);
+                self.open_campaign_saves(
+                    campaign_saves::SaveMode::Save,
+                    campaign_saves::SaveReturn::Quit,
+                    true,
+                );
             }
             RowId::CampaignQuitNo => {
                 self.campaign_quit_confirm = false;
@@ -970,7 +1036,23 @@ impl ShellMenus {
         self.go(Page::Title);
     }
 
-    /// The movie property the page plays (§4).
+    /// The page stands over the campaign map's planet: the planet screen,
+    /// its pause menu, and the save screen opened from them
+    /// (`ifs_campaign_load` has no movie, main pc 62-64).
+    pub fn over_planet(&self) -> bool {
+        match self.page {
+            Page::CampaignBattle | Page::CampaignMenu => true,
+            Page::CampaignSaves => {
+                self.campaign_saves.back_to != campaign_saves::SaveReturn::NewLoad
+            }
+            _ => false,
+        }
+    }
+
+    /// The movie property the page plays (§4). The save screen sets none and
+    /// keeps the one playing (`ifs_campaign_load` main pc 62-64,
+    /// `analysis/re-bf2-menus.md` "A screen that sets no `movieBackground`"):
+    /// Rise of the Empire's `shell_sub_left`, or the planet screen's none.
     pub fn movie(&self) -> &'static str {
         match self.page {
             Page::Title | Page::Main => MOVIE_MAIN,
@@ -981,7 +1063,8 @@ impl ShellMenus {
                     crate::campaign::RISE_OF_THE_EMPIRE[self.campaign_selected].transition_movie
                 }
             }
-            Page::CampaignBattle | Page::CampaignMenu => "",
+            Page::CampaignSaves if !self.over_planet() => MOVIE_SUB,
+            Page::CampaignBattle | Page::CampaignMenu | Page::CampaignSaves => "",
             Page::Singleplayer
             | Page::AskTraining
             | Page::RiseNewLoad
@@ -1141,6 +1224,10 @@ impl Ctx<'_> {
             self.help(size, true, Prompt::Accept, &m.campaign_launch_label);
             return;
         }
+        if m.page == Page::CampaignSaves {
+            self.campaign_saves_page(m, size);
+            return;
+        }
         let Some(stack) = m.stack() else {
             let (rgb, _) = tint::UNSELECTED;
             let at = (256.0, PROMPT_TOP);
@@ -1169,7 +1256,7 @@ impl Ctx<'_> {
             for (i, line) in self
                 .wrapped(&crate::typography::BODY, prompt, 248.0)
                 .iter()
-                .take(3)
+                .take(5)
                 .enumerate()
             {
                 self.text(
@@ -1189,7 +1276,7 @@ impl Ctx<'_> {
                 bar: ([255.0; 3], crate::spawn_draw::PIECE_ALPHA),
                 text: &stack.title,
                 style: tint::TITLE,
-                title: true,
+                font: &TITLE,
             };
             self.flashy_row(&s, &title, m.on_page);
         }
@@ -1209,7 +1296,7 @@ impl Ctx<'_> {
                 bar,
                 text: &row.label,
                 style,
-                title: false,
+                font: &ITEM,
             };
             let t = m.on_page - ROW_REVEAL * (k + 1) as f32;
             self.flashy_row(&s, &row, t);
@@ -1242,11 +1329,11 @@ impl Ctx<'_> {
         let caps = 2.0 * (y1 - y0);
         let right = x0 + caps + (x1 - x0 - caps).max(0.0) * out;
         self.bar_tinted(s, [x0, y0, right, y1], row.pieces, row.bar);
-        let style = if row.title { &TITLE } else { &ITEM };
+        let style = row.font;
         let lh = style.size;
         // Text wider than its bar ends in an ellipsis, never a smaller size.
         let text = self.ellipsized(style, row.text, x1 - x0 - 2.0 * (y1 - y0));
-        let (cx, top) = ((x0 + x1) * 0.5, y0 + (ROW_H - lh) * 0.5);
+        let (cx, top) = ((x0 + x1) * 0.5, y0 + (y1 - y0 - lh) * 0.5);
         if let Some(across) = f.square {
             let w = self.text_width(style, &text);
             let x = cx - w * 0.5 + w * across;
@@ -1271,8 +1358,9 @@ pub(crate) struct FlashyRow<'a> {
     pub(crate) bar: ([f32; 3], f32),
     pub(crate) text: &'a str,
     pub(crate) style: ([f32; 3], f32),
-    /// The title bar ([`TITLE`]) rather than a row ([`ITEM`]).
-    pub(crate) title: bool,
+    /// The label's role: [`TITLE`] on a title bar, [`ITEM`] on a stack's
+    /// row, [`crate::typography::BODY`] on a popup's (`gPopupButtonFont`).
+    pub(crate) font: &'static crate::typography::TextStyle,
 }
 
 #[cfg(test)]
@@ -1861,9 +1949,14 @@ mod tests {
         );
         assert_eq!(m.campaign_selected, 1);
 
-        // Load emits LoadCampaign so the frontend opens the saved campaign planet screen.
+        // Load opens the save list without the load question (`SkipPromptSave`); Back returns.
+        m.open_page(Page::RiseNewLoad);
         m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::LoadCampaign));
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignSaves);
+        assert_eq!(m.campaign_saves.step, campaign_saves::SaveStep::List);
+        m.step(press(|i| i.back = true), false, 0.1);
+        assert_eq!(m.page, Page::RiseNewLoad);
 
         // Open CampaignBattle directly (as LoadCampaign / crawl completion does), check 3D planet movie == ""
         m.select_campaign_mission(1);
@@ -1889,11 +1982,19 @@ mod tests {
         assert_eq!(m.step(press(|i| i.back = true), false, 0.1), None);
         assert_eq!(m.page, Page::CampaignMenu);
 
-        // Save Game and Load Game emit commands.
+        // Save Game opens the save list; Load Game asks the load question first.
         m.focus_row(2);
-        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::SaveCampaign));
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignSaves);
+        assert_eq!(m.campaign_saves.step, campaign_saves::SaveStep::List);
+        m.step(press(|i| i.back = true), false, 0.1);
+        assert_eq!(m.page, Page::CampaignMenu);
         m.focus_row(3);
-        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::LoadCampaign));
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.campaign_saves.step, campaign_saves::SaveStep::ConfirmLoad);
+        m.step(press(|i| i.up = true), false, 0.1);
+        m.step(confirm, false, 0.1);
+        assert_eq!(m.page, Page::CampaignMenu);
 
         // Quit opens Yes/No confirmation defaulting to No; Back cancels, Yes returns to Singleplayer.
         m.focus_row(4);
@@ -1904,8 +2005,13 @@ mod tests {
         assert!(!m.campaign_quit_confirm);
         assert_eq!(m.page, Page::CampaignMenu);
 
+        // Yes asks the save question (`QuitRequested`), then leaves.
         m.focus_row(4);
         m.step(confirm, false, 0.1);
+        m.step(press(|i| i.up = true), false, 0.1);
+        assert_eq!(m.step(confirm, false, 0.1), None);
+        assert_eq!(m.page, Page::CampaignSaves);
+        assert_eq!(m.campaign_saves.step, campaign_saves::SaveStep::Prompt);
         m.step(press(|i| i.up = true), false, 0.1);
         assert_eq!(m.step(confirm, false, 0.1), None);
         assert_eq!(m.page, Page::Singleplayer);
@@ -1947,13 +2053,13 @@ mod tests {
         assert_eq!(m.step(press(|i| i.back = true), false, 0.1), None);
         assert_eq!(m.page, Page::CampaignMenu);
 
-        // Inside Game Menu, Enter on Quit opens confirmation -> Up -> Yes -> Singleplayer.
+        // Inside Game Menu, Enter on Quit opens confirmation -> Up -> Yes -> the save question.
         m.focus_row(4);
         assert_eq!(m.step(enter, true, 0.1), None);
         assert!(m.campaign_quit_confirm);
         assert_eq!(m.page, Page::CampaignMenu);
         m.step(press(|i| i.up = true), false, 0.1);
         assert_eq!(m.step(enter, true, 0.1), None);
-        assert_eq!(m.page, Page::Singleplayer);
+        assert_eq!(m.page, Page::CampaignSaves);
     }
 }

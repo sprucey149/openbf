@@ -17,6 +17,8 @@ use ui::shell_feel::MenuSound;
 
 #[path = "front/gal.rs"]
 mod gal;
+#[path = "front/campaign_saves.rs"]
+mod campaign_saves;
 #[path = "front/profiles.rs"]
 mod profiles;
 
@@ -28,6 +30,8 @@ mod profiles;
 pub(super) struct FrontShell {
     pub(super) menus: ui::shell_ps2::ShellMenus,
     picker: Option<ui::shell_ps2::profiles::Picker>,
+    /// The Rise of the Empire save's name keyboard.
+    save_name: Option<ui::shell_ps2::profiles::Picker>,
     name_input: profiles::NameInput,
     pub(super) movie: Option<game::shell_movie::ShellMovie>,
     /// Built at the first frame with a renderer.
@@ -292,6 +296,7 @@ impl FrontShell {
         FrontShell {
             menus: ui::shell_ps2::ShellMenus::new(&text),
             picker: None,
+            save_name: None,
             name_input: Default::default(),
             movie,
             view: None,
@@ -894,6 +899,7 @@ impl App {
                 && self.controls.is_none()
                 && front.mp.is_none()
                 && front.picker.is_none()
+                && front.save_name.is_none()
                 && front.cutscenes.is_empty()
             {
                 if let Some(row) = view.shell_row_at(&front.menus, point, [w as f32, h as f32]) {
@@ -1098,6 +1104,18 @@ impl App {
                 front.cutscenes.pop_front();
                 front.movie_audio = None;
             }
+        } else if front.save_name.is_some() {
+            self.step_save_name(
+                &mut front,
+                profiles::FrameInput {
+                    menu: input,
+                    start,
+                    edges,
+                    dt,
+                    pointer,
+                    wheel,
+                },
+            );
         } else if !self.step_profiles(
             &mut front,
             profiles::FrameInput {
@@ -1121,6 +1139,10 @@ impl App {
                 .clamp(1, ui::campaign::RISE_OF_THE_EMPIRE.len() as u8);
             if front.menus.campaign_unlocked != unlocked {
                 front.menus.set_campaign_unlocked(unlocked);
+            }
+            self.sync_campaign_saves(&mut front);
+            if edges & game::kbm::MENU_SQUARE != 0 {
+                front.menus.campaign_save_delete();
             }
             let cmd = front.menus.step(input, start, dt);
             let mut dirty_profile = false;
@@ -1157,39 +1179,15 @@ impl App {
                     front.ia_open = true;
                 }
                 Some(ui::shell_ps2::ShellCommand::StartCampaignNewGame) => {
-                    self.profile.campaign.unlocked = self.profile.campaign.unlocked.max(2);
-                    self.profile.campaign.active_mission = Some(1);
-                    if let Err(e) = self.profile.save() {
-                        eprintln!("campaign profile save failed: {e:#}");
-                    }
-                    front.queue_campaign_new_game();
+                    self.start_campaign_new_game(&mut front)
                 }
-                Some(ui::shell_ps2::ShellCommand::SaveCampaign) => {
-                    self.profile.campaign.active_mission = Some(front.menus.campaign_selected as u8);
-                    let msg = match self.profile.save() {
-                        Ok(()) => "Saved",
-                        Err(e) => {
-                            eprintln!("campaign profile save failed: {e:#}");
-                            "Save failed"
-                        }
-                    };
-                    front.menus.campaign_menu.note = Some(msg.into());
-                }
-                Some(ui::shell_ps2::ShellCommand::LoadCampaign) => {
-                    let idx = self
-                        .profile
-                        .campaign
-                        .active_mission
-                        .map(usize::from)
-                        .unwrap_or_else(|| {
-                            usize::from(self.profile.campaign.unlocked.saturating_sub(1))
-                        })
-                        .clamp(1, ui::campaign::RISE_OF_THE_EMPIRE.len() - 1);
-                    front.menus.select_campaign_mission(idx);
-                    front.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
-                }
+                Some(
+                    cmd @ (ui::shell_ps2::ShellCommand::EditCampaignSaveName
+                    | ui::shell_ps2::ShellCommand::WriteCampaignSave
+                    | ui::shell_ps2::ShellCommand::LoadCampaignSave
+                    | ui::shell_ps2::ShellCommand::DeleteCampaignSave),
+                ) => self.campaign_save_command(&mut front, cmd),
                 Some(ui::shell_ps2::ShellCommand::LaunchCampaignMission { index }) => {
-                    self.profile.campaign.active_mission = Some(index as u8);
                     front.queue_campaign_launch(index);
                 }
                 Some(ui::shell_ps2::ShellCommand::Settings(page)) => {
@@ -1229,10 +1227,7 @@ impl App {
             launch_campaign = front.pending_campaign.take();
             let launching = launch.is_some() || launch_campaign.is_some();
             let on_planet_music = !launching
-                && matches!(
-                    front.menus.page,
-                    ui::shell_ps2::Page::CampaignBattle | ui::shell_ps2::Page::CampaignMenu
-                )
+                && front.menus.over_planet()
                 && !front.ia_open
                 && front.settings.is_none()
                 && self.controls.is_none()
@@ -1290,6 +1285,7 @@ impl App {
             || self.controls.is_some()
             || front.mp.is_some()
             || front.picker.is_some()
+            || front.save_name.is_some()
             || !front.cutscenes.is_empty()
             || launching;
         // The IA screen has its own backdrop and no movie (§1.1); Session
@@ -1314,7 +1310,7 @@ impl App {
                 match ia {
                     Some(ia) => v.update_instant(&front.menus, ia, movie_shown, [w, h]),
                     None => {
-                        if let Some(picker) = front.picker.as_ref() {
+                        if let Some(picker) = front.picker.as_ref().or(front.save_name.as_ref()) {
                             v.update_shell_profiles(&front.menus, has_movie, picker, [w, h]);
                         } else if let Some(model) = controls_model
                             .as_ref()
@@ -1379,10 +1375,7 @@ impl App {
             if let Some(keep) = name_done {
                 pending_name = Some(keep);
             }
-            let show_planet = matches!(
-                front.menus.page,
-                ui::shell_ps2::Page::CampaignBattle | ui::shell_ps2::Page::CampaignMenu
-            ) && !front.menus.covered;
+            let show_planet = front.menus.over_planet() && !front.menus.covered;
             let (cam, planet_draws) = if show_planet {
                 if front.gal.is_none() && !front.gal_load_failed {
                     front.gal = gal::GalPlanetView::load(&self.assets_dir, r);

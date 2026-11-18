@@ -1954,7 +1954,16 @@ impl App {
         }
     }
 
-    fn finish_campaign_round(&mut self, idx: usize, won: bool, outro_played: bool) {
+    /// Back on the shell after campaign mission `idx`. Training (`idx` 0)
+    /// never touches the saves. After a story battle that ended in a result
+    /// (`finished`) the planet screen asks to save first: `ifs_campaign_main`
+    /// ApplyBattleResult sets `requestSave` for a win and a loss alike
+    /// (main.f8 pc 36-37; a result is the winning team, 1 or 2:
+    /// `ifs_freeform_main` soak mode draws `math.random(2)`), and
+    /// `ifs_campaign_battle` Enter shows it (main.f0 pc 97-99). The last
+    /// turn's win ends the campaign instead (`ifs_campaign_main` NextTurn
+    /// main.f10 pc 15-17 pushes `ifs_campaign_end`).
+    fn finish_campaign_round(&mut self, idx: usize, won: bool, finished: bool, outro_played: bool) {
         self.profile.campaign.training_prompted = true;
         if won {
             self.profile.campaign.record_victory(idx);
@@ -1989,10 +1998,6 @@ impl App {
         }
         let last_idx = ui::campaign::RISE_OF_THE_EMPIRE.len() - 1;
         let next = if won { (idx + 1).min(last_idx) } else { idx };
-        self.profile.campaign.active_mission = Some(next as u8);
-        if let Err(e) = self.profile.save() {
-            eprintln!("campaign profile save failed: {e:#}");
-        }
         front.menus.select_campaign_mission(next);
         if won {
             front.stop_music();
@@ -2012,11 +2017,19 @@ impl App {
                 front
                     .menus
                     .open_page(ui::shell_ps2::Page::Singleplayer);
+                return;
             }
         } else {
             front
                 .menus
                 .open_page(ui::shell_ps2::Page::CampaignBattle);
+        }
+        if finished {
+            front.menus.open_campaign_saves(
+                ui::shell_ps2::campaign_saves::SaveMode::Save,
+                ui::shell_ps2::campaign_saves::SaveReturn::Battle,
+                true,
+            );
         }
     }
 
@@ -2025,9 +2038,9 @@ impl App {
     fn leave_battle(&mut self) {
         self.campaign_map = None;
         let finished_campaign = self.active_campaign.take();
-        let won_campaign = finished_campaign.is_some()
-            && self.round_over
-            && self.walk.as_ref().is_some_and(|(w, _)| w.sim.outcome == Some(0));
+        let finished_round = finished_campaign.is_some() && self.round_over;
+        let won_campaign =
+            finished_round && self.walk.as_ref().is_some_and(|(w, _)| w.sim.outcome == Some(0));
         // The battle played the mission's end movie before its stats.
         let outro_played = self.walk.as_ref().is_some_and(|(w, _)| {
             w.round_end.as_ref().is_some_and(|r| r.movie_played())
@@ -2083,7 +2096,7 @@ impl App {
         self.sync_pause_audio();
         self.init_shell();
         if let Some(idx) = finished_campaign {
-            self.finish_campaign_round(idx, won_campaign, outro_played);
+            self.finish_campaign_round(idx, won_campaign, finished_round, outro_played);
         }
     }
 
