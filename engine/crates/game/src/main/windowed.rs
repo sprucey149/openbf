@@ -1921,7 +1921,23 @@ impl App {
     /// never stops (issue #168): its pause menu overlays a running battle.
     fn frozen(&self) -> bool {
         self.in_battle() && self.netplay.is_none() && (self.paused || self.campaign_map.is_some()
+            || self.round_end_held()
             || self.walk.as_ref().is_some_and(|(w, _)| w.campaign.as_ref().is_some_and(|c| c.popup().is_some())))
+    }
+
+    /// A decided single-player round holds the world still from the banner
+    /// on: BF2's frame driver `FUN_00425840` takes its pause branch (the one
+    /// `DAT_00600b44` takes) once the game-over flag `DAT_00600b3c` is up and
+    /// the game is not networked, skipping the world step and leaving only
+    /// the banner, the stats screens and the audio running (B2 470204-470214;
+    /// the flag is raised after the step that decided the round, 470297-470300).
+    /// A LAN round steps on, as the PS2's networked branch does.
+    fn round_end_held(&self) -> bool {
+        self.netplay.is_none()
+            && self
+                .walk
+                .as_ref()
+                .is_some_and(|(w, _)| w.sim.outcome.is_some())
     }
 
     /// Pause or resume the game's mixer bus to match [`App::game_audio_paused`].

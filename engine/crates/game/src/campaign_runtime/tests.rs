@@ -948,6 +948,67 @@ fn myg1c_script_voice_lines_reach_the_commander_queue() {
     );
 }
 
+/// The Naboo campaign opens its slow voice slot with `nab_objective_vo_slow`
+/// and appends both sides' `*_unit_vo_slow` and `global_vo_slow` to it: an
+/// objective line asked while a commander line sounds waits for it on that
+/// slot (re-announcer.md §1 steps 2-4), and the quick slot stays its own.
+#[test]
+fn nab2g_c_objective_line_waits_for_the_commander_line_on_its_slot() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: campaign missions and baked assets required");
+        return;
+    };
+    if !baked_dir.join("bf2_nab2/manifest.ron").is_file() {
+        eprintln!("SKIP: bf2_nab2 baked assets required");
+        return;
+    }
+    let (def, walk, rt) = setup_baked_campaign(&missions_dir, &baked_dir, "nab2g_c");
+    let lib = crate::sounds::SoundLib::load_for(&baked_dir.join(&def.map), &def)
+        .expect("nab2 sound library");
+    let h = crate::classdb::fnv1a_lowercase;
+    let slots = rt.stream_slots();
+    let slow = slots[&h("nab_objective_vo_slow")];
+    for s in ["global_vo_slow", "imp_unit_vo_slow", "all_unit_vo_slow"] {
+        assert_eq!(slots.get(&h(s)), Some(&slow), "{s} on the slow slot");
+    }
+    let quick = slots[&h("imp_unit_vo_quick")];
+    assert_ne!(quick, slow);
+    assert_eq!(slots.get(&h("global_vo_quick")), Some(&quick));
+    assert!(lib.stream_id("NAB_obj_22").is_some(), "NAB_obj_22 is a stream line");
+
+    let mut v = crate::announce::Commander::for_battle(
+        &def,
+        &crate::layout::MapLayout::default(),
+        &walk,
+    );
+    v.route_streams(slots);
+    let _ = v.gate_script_sounds(&lib);
+    let lines = ["imp_off_com_report_us_overwhelmed", "NAB_obj_22"];
+    let mut played = Vec::new();
+    let mut frame = |v: &mut crate::announce::Commander, played: &mut Vec<String>| {
+        let _ = v.frame(&walk.sim, walk.player, core::TICK_DT, |line| {
+            if lines.contains(&line.name.as_str()) {
+                played.push(line.name.clone());
+            }
+            Some(5.0)
+        });
+    };
+    v.queue
+        .ask(core::announcer::Line::commander("imp_off_com_report_us_overwhelmed"));
+    frame(&mut v, &mut played);
+    assert_eq!(played, ["imp_off_com_report_us_overwhelmed"]);
+    v.ask_script_sounds(vec!["NAB_obj_22".into()]);
+    assert!(v.gate_script_sounds(&lib).is_empty());
+    for _ in 0..(4 * core::TICK_HZ) {
+        frame(&mut v, &mut played);
+    }
+    assert_eq!(played, ["imp_off_com_report_us_overwhelmed"], "nothing over the line");
+    for _ in 0..(2 * core::TICK_HZ) {
+        frame(&mut v, &mut played);
+    }
+    assert_eq!(played, lines, "the objective line next");
+}
+
 #[test]
 fn myg1c_walk_from_spawn_to_the_objective_has_no_long_tick() {
     let Some((missions_dir, baked_dir)) = baked() else {
@@ -2010,6 +2071,7 @@ fn spa2c_c_objective6_hangar_voice_plays_immediately_over_background_streams() {
         &crate::layout::MapLayout::default(),
         &walk,
     );
+    v.route_streams(rt.stream_slots());
     begin_objectives(&mut walk, &mut rt, &def);
     rt.close_popup();
     let _ = rt.take_voice_overs();

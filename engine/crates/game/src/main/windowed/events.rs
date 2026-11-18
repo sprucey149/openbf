@@ -522,7 +522,8 @@ impl winit::application::ApplicationHandler for App {
                         w.sim.outcome.is_none()
                             && w.campaign.as_ref().is_some_and(|c| c.popup().is_some())
                     });
-                let popup_up = campaign_popup_up || self.campaign_map.is_some();
+                let popup_up =
+                    campaign_popup_up || self.campaign_map.is_some() || self.round_end_held();
                 if campaign_popup_up && !self.paused && edges & 16 != 0 {
                     if let Some((w, _)) = self.walk.as_mut() {
                         if let Some(c) = w.campaign.as_mut() { c.dismiss_popup(&mut w.sim); }
@@ -910,6 +911,15 @@ impl winit::application::ApplicationHandler for App {
                         // The world holds still under a popup; only the
                         // voice and music frames below run on.
                         let world_dt = if popup_up { 0.0 } else { dt };
+                        // The held round end (`App::round_end_held`) steps no
+                        // tick to keep the loops' voices current, and BF2
+                        // stops the battle's sounds as its banner goes up
+                        // (`FUN_00380c30`, re-round-end.md §2.2): they stop.
+                        if walk.sim.outcome.is_some() && self.netplay.is_none() {
+                            if let Some(sl) = self.sounds.as_mut() {
+                                sl.stop_loops();
+                            }
+                        }
                         self.bolts.age(walk, world_dt);
                         let aspect = self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
                             let (w, h) = r.size();

@@ -1733,6 +1733,7 @@ impl WalkSim {
                 let mut lines = campaign.take_voice_overs();
                 lines.extend(campaign.take_sounds());
                 if let Some(v) = self.voice.as_mut() {
+                    v.route_streams(campaign.stream_slots());
                     v.ask_script_sounds(lines);
                 }
                 self.campaign = Some(campaign);

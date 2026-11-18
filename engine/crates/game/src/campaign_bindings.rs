@@ -93,6 +93,7 @@ const BOUND: &[&str] = &[
     "MissionDefeat",
     "MissionVictory",
     "OpenAudioStream",
+    "AudioStreamAppendSegments",
     "RespawnObject",
     "PauseAnimation",
     "PlayAnimation",
@@ -147,7 +148,6 @@ const IGNORED: &[&str] = &[
     "AddLandingRegion",
     "AddWalkerType",
     "AISnipeSuitabilityDist",
-    "AudioStreamAppendSegments",
     "BeginScreenTransition",
     "ClearWalkers",
     "DisableAIAutoBalance",
@@ -318,6 +318,7 @@ impl Host for Ctx<'_> {
     fn call(&mut self, it: &mut Interp, name: &str, args: &[Value]) -> Ret {
         if self.w.setup
             && !is_query(name)
+            && !is_stream_routing(name)
             && !(name == "SetReinforcementCount"
                 && sim_team(arg(args, 0)).is_some_and(|t| t >= 2))
         {
@@ -347,6 +348,12 @@ impl Host for Ctx<'_> {
         }
         self.bound(it, name, args)
     }
+}
+
+/// The stream-slot calls `ScriptInit` makes: the loader applies none of
+/// them, so they run during setup ([`World::stream_slots`]).
+fn is_stream_routing(name: &str) -> bool {
+    matches!(name, "OpenAudioStream" | "AudioStreamAppendSegments")
 }
 
 /// What may run while `ScriptInit` replays: the reads, never a change.
@@ -484,7 +491,21 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
-            "OpenAudioStream" => one(Value::Ud(Ud::Stream(0))),
+            "OpenAudioStream" => {
+                let slot = arg(a, 1).as_str().map_or(0, fnv1a_lowercase);
+                if slot != 0 {
+                    w.stream_slots.entry(slot).or_insert(slot);
+                }
+                one(Value::Ud(Ud::Stream(slot)))
+            }
+            "AudioStreamAppendSegments" => {
+                if let (Some(name), Value::Ud(Ud::Stream(slot))) = (arg(a, 1).as_str(), arg(a, 2)) {
+                    if *slot != 0 {
+                        w.stream_slots.entry(fnv1a_lowercase(name)).or_insert(*slot);
+                    }
+                }
+                nothing()
+            }
             "AudioStreamComplete" => {
                 one(Value::Num(if w.voice_playing { 0.0 } else { 1.0 }))
             }

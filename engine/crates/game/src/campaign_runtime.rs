@@ -268,6 +268,13 @@ pub(crate) struct World {
     pub hide_cps: bool,
     pub shown_timer: Option<u32>,
     pub voice_playing: bool,
+    /// The script's stream slots: each stream's name hash to the hash of the
+    /// stream its slot was opened with. `OpenAudioStream` opens a slot and
+    /// `AudioStreamAppendSegments` adds a stream's segments to one, so a
+    /// property of an appended stream plays and queues on that slot
+    /// (B2 `FUN_005519c8` finds the slot holding the property's stream,
+    /// re-announcer.md §1 steps 2 and 7).
+    pub stream_slots: BTreeMap<u32, u32>,
 
     pub messages: Vec<String>,
     pub popups: VecDeque<Popup>,
@@ -438,6 +445,7 @@ impl CampaignRuntime {
             hide_cps: false,
             shown_timer: None,
             voice_playing: false,
+            stream_slots: BTreeMap::new(),
             messages: Vec::new(),
             popups: VecDeque::new(),
             voice: Vec::new(),
@@ -1127,6 +1135,11 @@ impl CampaignRuntime {
     /// trace: a slot other than the slow voice slot named here.
     pub fn set_voice_playing(&mut self, playing: bool) {
         self.w.voice_playing = playing;
+    }
+
+    /// The stream slots the script opened ([`World::stream_slots`]).
+    pub fn stream_slots(&self) -> &BTreeMap<u32, u32> {
+        &self.w.stream_slots
     }
 
     /// The popup up now (the battle pauses under it).

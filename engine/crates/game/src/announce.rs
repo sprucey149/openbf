@@ -213,6 +213,14 @@ pub struct Commander {
     speaker_asks: Vec<SpeakerAsk>,
     first_reinforcements: Option<[f32; 2]>,
     last_flag_voice: Option<u64>,
+    /// A campaign script's stream slots
+    /// ([`crate::campaign_runtime::World::stream_slots`]); empty elsewhere,
+    /// where each stream is its own slot.
+    stream_slots: std::collections::BTreeMap<u32, u32>,
+    /// The slot [`Commander::queue`] stands for once a script names its
+    /// slots: the one holding `global_vo_slow`, where every commander line
+    /// and unit chatter line of a BF2 battle plays (re-announcer.md §1.7).
+    main_slot: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -268,6 +276,8 @@ impl Commander {
             speaker_asks: Vec::new(),
             first_reinforcements: None,
             last_flag_voice: None,
+            stream_slots: std::collections::BTreeMap::new(),
+            main_slot: None,
         }
     }
 
@@ -787,8 +797,32 @@ impl Commander {
         self.script_sounds.extend(names);
     }
 
+    /// Take a campaign script's stream slots: a stream appended to a slot
+    /// queues on that slot's line, behind or ahead of the others by key, and
+    /// never sounds over it (B2 `FUN_005519c8` / `FUN_00550528`,
+    /// re-announcer.md §1 steps 2-4). The Naboo campaign appends
+    /// `global_vo_slow` and both sides' `*_unit_vo_slow` to the slot it opens
+    /// with `nab_objective_vo_slow`, so an objective line waits for a capture
+    /// line already sounding instead of playing over it.
+    pub fn route_streams(&mut self, slots: &std::collections::BTreeMap<u32, u32>) {
+        if slots.is_empty() || *slots == self.stream_slots {
+            return;
+        }
+        self.stream_slots = slots.clone();
+        self.main_slot = slots
+            .get(&crate::classdb::fnv1a_lowercase("global_vo_slow"))
+            .copied();
+    }
+
     /// Select the per-stream voice slot queue matching PS2 stream allocation (`FUN_005519c8`).
     fn queue_for_stream(&mut self, stream: Option<u32>) -> &mut VoiceQueue {
+        let stream = stream.map(|s| self.stream_slots.get(&s).copied().unwrap_or(s));
+        if let Some(main) = self.main_slot {
+            return match stream {
+                Some(s) if s != main => self.stream_queues.entry(s).or_default(),
+                _ => &mut self.queue,
+            };
+        }
         if let Some(s) = stream {
             if self
                 .stream_queues
