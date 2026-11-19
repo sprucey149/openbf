@@ -1,6 +1,5 @@
-//! First-run networking help (LAN §5b, issue #168): the Host page's lines
-//! (this machine's addresses, the firewall and tunnel notes) and the Join
-//! page's "Test connection".
+//! Networking readouts (LAN §5b, issues #168, #181): the Host page's
+//! LAN/VPN addresses and the Join page's "Test connection".
 //!
 //! Rules:
 //! - This machine's IPv4 addresses come without an interface-list crate:
@@ -8,9 +7,8 @@
 //!   address (the default route's), and toward Tailscale's service address
 //!   100.100.100.100 (a Tailscale address is in 100.64.0.0/10). A UDP
 //!   connect sends nothing. A ZeroTier address, or a WireGuard tunnel that
-//!   is not the default route, is not found this way, so the help says to
-//!   read it from the VPN app (an interface list would find it:
-//!   `getifaddrs`, `GetAdaptersAddresses`).
+//!   is not the default route, is not found this way. The Host page says "Not detected" rather
+//!   than guessing a tunnel or a second LAN interface.
 //! - A connection test sends the discovery `Find` to the one address,
 //!   once a second (`net::LanBrowser`), and reports the first answer's
 //!   ping, host name and whether its build matches; no answer within
@@ -54,30 +52,31 @@ pub fn local_ipv4s() -> Vec<(Ipv4Addr, bool)> {
     v
 }
 
-/// The Host page's help lines for `addrs` ([`local_ipv4s`]) and the port.
-pub fn host_help(addrs: &[(Ipv4Addr, bool)], port: u16) -> Vec<String> {
-    let port_text = if port == net::DEFAULT_PORT {
-        String::new()
-    } else {
-        format!(":{port}")
-    };
-    let list = if addrs.is_empty() {
-        "this computer's IP address (none found: is it on a network?)".to_owned()
-    } else {
-        addrs
-            .iter()
-            .map(|(ip, ts)| format!("{ip}{port_text}{}", if *ts { " (Tailscale)" } else { "" }))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    vec![
-        format!("Other players join with your address: {list}"),
-        "If Windows asks, allow openbf on Private and Public networks".to_owned(),
-        "Tailscale/WireGuard: hosts don't appear in the LAN list \u{2014} use Join by Address"
-            .to_owned(),
-        "ZeroTier/WireGuard: your VPN address may be missing above \u{2014} read it in the VPN app"
-            .to_owned(),
-    ]
+/// Only the Host page's LAN and identifiable VPN endpoints. An invalid
+/// port must not advertise the default port in place of the typed value.
+pub fn host_addresses(addrs: &[(Ipv4Addr, bool)], port: Option<u16>) -> Vec<String> {
+    [("LAN Address", false), ("VPN Address", true)]
+        .into_iter()
+        .map(|(label, vpn)| {
+            let address = match port.filter(|p| *p != 0) {
+                None => "Unavailable (invalid UDP port)".to_owned(),
+                Some(port) => addrs
+                    .iter()
+                    .find(|(ip, is_vpn)| {
+                        *is_vpn == vpn && !ip.is_unspecified() && !ip.is_loopback()
+                    })
+                    .map(|(ip, _)| {
+                        if port == net::DEFAULT_PORT {
+                            ip.to_string()
+                        } else {
+                            SocketAddr::from((*ip, port)).to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "Not detected".to_owned()),
+            };
+            format!("{label}: {address}")
+        })
+        .collect()
 }
 
 /// What a connection test found.
@@ -161,32 +160,72 @@ impl ConnectionTest {
 }
 
 #[cfg(test)]
+mod host_draw_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use net::{HostConfig, HostCore, UdpTransport};
 
-    /// The help names every address once, marks Tailscale's and adds a
-    /// port that is not the default.
     #[test]
-    fn reach_host_help_lists_addresses() {
+    fn reach_host_addresses_label_routes_and_custom_ports() {
         let addrs = [
-            (Ipv4Addr::new(192, 168, 1, 20), false),
-            (Ipv4Addr::new(100, 101, 7, 9), true),
+            (Ipv4Addr::new(192, 168, 255, 254), false),
+            (Ipv4Addr::new(100, 127, 255, 254), true),
         ];
-        let lines = host_help(&addrs, net::DEFAULT_PORT);
         assert_eq!(
-            lines[0],
-            "Other players join with your address: 192.168.1.20, 100.101.7.9 (Tailscale)"
+            host_addresses(&addrs, Some(net::DEFAULT_PORT)),
+            [
+                "LAN Address: 192.168.255.254",
+                "VPN Address: 100.127.255.254",
+            ]
         );
-        assert!(lines[1].contains("Private and Public"));
-        assert!(lines[2].contains("Join by Address"));
-        assert!(lines[3].contains("ZeroTier") && lines[3].contains("VPN app"));
-        assert!(host_help(&addrs[..1], 40000)[0].ends_with("192.168.1.20:40000"));
-        assert!(host_help(&[], net::DEFAULT_PORT)[0].contains("none found"));
+        assert_eq!(
+            host_addresses(&addrs, Some(65535)),
+            [
+                "LAN Address: 192.168.255.254:65535",
+                "VPN Address: 100.127.255.254:65535",
+            ]
+        );
+        assert_eq!(
+            host_addresses(&addrs[..1], Some(40000)),
+            [
+                "LAN Address: 192.168.255.254:40000",
+                "VPN Address: Not detected",
+            ]
+        );
+        assert_eq!(
+            host_addresses(&addrs[1..], Some(40000)),
+            [
+                "LAN Address: Not detected",
+                "VPN Address: 100.127.255.254:40000",
+            ]
+        );
+    }
+
+    #[test]
+    fn reach_host_addresses_do_not_invent_missing_routes_or_ports() {
+        let unknown = ["LAN Address: Not detected", "VPN Address: Not detected"];
+        assert_eq!(host_addresses(&[], Some(net::DEFAULT_PORT)), unknown);
+        assert_eq!(
+            host_addresses(
+                &[(Ipv4Addr::LOCALHOST, false), (Ipv4Addr::UNSPECIFIED, true)],
+                Some(1)
+            ),
+            unknown
+        );
+        for port in [None, Some(0)] {
+            assert_eq!(
+                host_addresses(&[(Ipv4Addr::new(10, 0, 0, 1), false)], port),
+                [
+                    "LAN Address: Unavailable (invalid UDP port)",
+                    "VPN Address: Unavailable (invalid UDP port)",
+                ]
+            );
+        }
         assert!(is_tailscale(Ipv4Addr::new(100, 64, 0, 1)));
         assert!(!is_tailscale(Ipv4Addr::new(100, 128, 0, 1)));
         assert!(!is_tailscale(Ipv4Addr::new(10, 0, 0, 1)));
-        // Whatever this machine has, never a loopback or a duplicate.
         let mine = local_ipv4s();
         assert!(mine.iter().all(|(ip, _)| !ip.is_loopback()));
         assert!(mine.len() <= 2);

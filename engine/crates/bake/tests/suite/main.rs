@@ -10,6 +10,7 @@ mod bake_tat2;
 mod bake_vehicles;
 mod beep;
 mod combo;
+mod hailfire_skin;
 mod hud_alpha;
 mod side_steps;
 mod sky_glow_alpha;

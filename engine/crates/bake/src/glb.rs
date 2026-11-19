@@ -204,6 +204,20 @@ fn write_model(
     hud_colors: bool,
     metadata: MeshMetadata,
 ) -> Result<Vec<u8>> {
+    if let Some(rows) = joints {
+        anyhow::ensure!(
+            rows.len() == m.segments.len(),
+            "{}: joint rows do not match segments",
+            m.name
+        );
+        for (si, (seg, bones)) in m.segments.iter().zip(rows).enumerate() {
+            anyhow::ensure!(
+                bones.len() == seg.positions.len() && bones.iter().all(|&b| b <= 255),
+                "{}: segment {si}'s bones do not fit JOINTS_0",
+                m.name
+            );
+        }
+    }
     let vertex_light = !matches!(lighting, VertexLighting::Off);
     let keep_col0_alpha = matches!(lighting, VertexLighting::Sky);
     // The ground CTF marker (`INGAME.LVL`) is one BLEND `spacedust1` column
@@ -330,9 +344,6 @@ fn write_model(
             attributes["COLOR_0"] = json!(bin.f32s(&raw, "VEC4", json!({})));
         }
         if let Some(bones) = joints.map(|j| &j[si]) {
-            if bones.len() != seg.positions.len() || bones.iter().any(|&b| b > 255) {
-                anyhow::bail!("{}: segment {si}'s bones do not fit JOINTS_0", m.name);
-            }
             let j: Vec<u8> = bones.iter().flat_map(|&b| [b as u8, 0, 0, 0]).collect();
             let w: Vec<f32> = bones.iter().flat_map(|_| [1.0, 0.0, 0.0, 0.0]).collect();
             attributes["JOINTS_0"] = json!(bin.accessor(&j, 5121, bones.len(), "VEC4", json!({})));
@@ -704,6 +715,37 @@ mod tests {
             sphere: None,
             segments,
         }
+    }
+
+    #[test]
+    fn joint_bundles_require_exact_segment_and_vertex_shape() {
+        let mut m = model(vec![seg("panel", 0), seg("panel", 0)]);
+        // Even undrawn segments have a row in the bundle.
+        m.segments[1].triangles.clear();
+        let alpha = crate::alpha::AlphaTable::new(&[]).model(&m);
+        for rows in [
+            vec![],
+            vec![vec![1; 3]],
+            vec![vec![1; 3]; 3],
+            vec![vec![1; 2], vec![1; 3]],
+            vec![vec![1; 3], vec![1; 4]],
+            vec![vec![256; 3], vec![1; 3]],
+        ] {
+            assert!(model_to_glb_joints(&m, &alpha, false, Some(&rows)).is_err());
+        }
+        let bytes =
+            model_to_glb_joints(&m, &alpha, false, Some(&[vec![1; 3], vec![2; 3]])).unwrap();
+        let glb = gltf::Gltf::from_slice(&bytes).unwrap();
+        let primitive = glb.meshes().next().unwrap().primitives().next().unwrap();
+        let reader = primitive.reader(|_| glb.blob.as_deref());
+        assert_eq!(
+            reader
+                .read_joints(0)
+                .unwrap()
+                .into_u16()
+                .collect::<Vec<_>>(),
+            vec![[1, 0, 0, 0]; 3]
+        );
     }
 
     #[test]

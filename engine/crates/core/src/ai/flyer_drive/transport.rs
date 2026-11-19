@@ -1,10 +1,10 @@
 //! BF2 transport approach and cargo deployment at a hostile hangar.
 
-use crate::fmath::FloatExt;
 use super::{
     chords_clear, hull_extents, FlightPhase, FlyerAi, Sim, Vec3, Vehicle, VehicleHandle,
     VehicleKind,
 };
+use crate::fmath::FloatExt;
 use crate::region::Region;
 
 /// OURS: port turnaround interval. measure: original time from touchdown to departure.
@@ -141,28 +141,35 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
 /// After a drop, use the hangar opening even if the ship landed nose-in.
 /// replace: original transport spline departure and turning profile.
 pub(super) fn departure(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut FlyerAi) -> bool {
-    let Some(region) = sim.landing_regions.iter().find(|r| r.contains(v.pos)) else {
+    let Some(curve) = departure_curve(sim, v, handle, v.pos) else {
         return false;
     };
+    ai.curve = Some(curve);
+    ai.cursor = None;
+    ai.goal = None;
+    ai.t = 0.0;
+    true
+}
+
+pub(super) fn departure_curve(
+    sim: &Sim,
+    v: &Vehicle,
+    handle: VehicleHandle,
+    start: Vec3,
+) -> Option<[Vec3; 4]> {
+    let region = sim.landing_regions.iter().find(|r| r.contains(start))?;
     let extents = hull_extents(sim, v);
     let width = region.size.x.fmax(region.size.z);
-    let center = Vec3::new(region.center.x, v.pos.y, region.center.z);
+    let center = region.center.with_y(start.y);
     let [x, z] = [region.basis.x_axis, region.basis.z_axis];
-    for axis in [x, -x, z, -z] {
-        let end = center + axis * (width + APPROACH_CLEARANCE_RADII * extents.0);
-        if !chords_clear(sim, &[v.pos, end], extents, handle) {
-            continue;
-        }
-        // Straight translation through the opening. The spline aligns the
-        // hull along the escape chord as it begins moving.
-        let delta = end - v.pos;
-        ai.curve = Some([v.pos - delta, v.pos, end, end + delta]);
-        ai.cursor = None;
-        ai.goal = None;
-        ai.t = 0.0;
-        return true;
-    }
-    false
+    let end = [x, -x, z, -z]
+        .map(|axis| center + axis * (width + APPROACH_CLEARANCE_RADII * extents.0))
+        .into_iter()
+        .find(|&end| chords_clear(sim, &[start, end], extents, handle))?;
+    // Straight translation through the opening. The spline aligns the
+    // hull along the escape chord as it begins moving.
+    let delta = end - start;
+    Some([start - delta, start, end, end + delta])
 }
 
 fn leg(

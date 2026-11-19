@@ -140,15 +140,19 @@ impl SoldierVisuals {
             let (wc, _, state) = u.active_weapon();
             let class = &walk.sim.weapon_classes[wc];
             let free = u.alive && u.mount.is_none();
+            // BF2's Ewok rock uses the offhand throw action even though
+            // its projectile is a shell rather than a sticky.
+            let rock = self.bf2 && class.name == "ewk_weap_inf_rock";
             let released = class.dispenses() && walk.sim.events.iter().any(|e| {
                 matches!(e,
                     core::sim::Event::Throw { unit, weapon_class, .. }
                     if unit.index as usize == i && unit.gen == u.gen && *weapon_class as usize == wc
                 )
             });
-            let throwing =
-                (free && class.thrown.is_some() && (state.state == FireState::Firing || released))
-                    .then_some(wc);
+            let throwing = (free
+                && (class.thrown.is_some() || rock)
+                && (state.state == FireState::Firing || released))
+                .then_some(wc);
             if throwing.is_some() && throwing != v.throwing {
                 v.pending_throw = Some(if class.dispenses() {
                     0

@@ -40,17 +40,17 @@ fn saber_sound(class: &core::hero_weapon::SaberClass, hash: u32) -> Option<&str>
 
 /// The local player's ears.
 pub fn listener(walk: &WalkSim) -> Listener {
-    let me = &walk.sim.units[walk.player.index as usize];
-    if me.mount.is_some() || (!me.alive && walk.seat_view_timer > 0.0) || walk.holds_seat_view() {
-        let cam = walk.camera();
-        return Listener {
-            pos: cam.position,
-            yaw: cam.yaw,
-        };
-    }
+    let cam = walk.camera();
+    let scope_anchor = walk
+        .sim
+        .unit(walk.player)
+        .filter(|me| me.alive && me.mount.is_none() && me.scoped() && walk.in_eye_view())
+        .map(|me| me.soldier.pos);
+    // B1 FUN_0019f080 and B2 FUN_001ba080 offset the listener along the
+    // camera's back axis. A scope keeps the tracked body's collision origin.
     Listener {
-        pos: me.soldier.pos + Vec3::Y * 1.6,
-        yaw: me.soldier.yaw,
+        pos: scope_anchor.unwrap_or(cam.position) - cam.forward() * 2.0,
+        yaw: cam.yaw,
     }
 }
 

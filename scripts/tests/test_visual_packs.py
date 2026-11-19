@@ -482,6 +482,16 @@ class PackScriptInstall(unittest.TestCase):
                     for root in (self.lookup, self.baked, missions) for p in root.rglob('*') if p.is_file()}
         def build(selected=None):
             before = snapshot()
+            run = pack.run
+
+            def run_cached(command, **kwargs):
+                if command[-1] == 'global-sound':
+                    result = Path(kwargs['env']['OPENBF_GLOBAL_RESULT'])
+                    result.parent.mkdir(parents=True, exist_ok=True)
+                    result.write_text(json.dumps([{'game': game, 'action': 'reused'} for game in pack.LUA]))
+                    return
+                run(command, **kwargs)
+
             with contextlib.ExitStack() as stack:
                 args = ['pack.py', '--game-bin', os.environ['OPENBF_GAME_BIN'], '--out', str(out)]
                 if selected is not None:
@@ -489,7 +499,8 @@ class PackScriptInstall(unittest.TestCase):
                 stack.enter_context(mock.patch.object(sys, 'argv', args))
                 stack.enter_context(mock.patch.dict(os.environ, {}, clear=True))
                 stack.enter_context(mock.patch.object(pack, 'GAMEPLAY_TREES', {}))
-                for name, value in dict(ROOT=str(self.root), BAKED=str(self.baked), MISSIONS=str(missions)).items():
+                for name, value in dict(ROOT=str(self.root), BAKED=str(self.baked), MISSIONS=str(missions),
+                                        EXTRACTED=str(self.root/'extracted')).items():
                     stack.enter_context(mock.patch.object(pack, name, value))
                 for name, value in dict(scan=plan, summary_lines=[], write_summary=None, discs_to_extract=[], bake_env={}).items():
                     stack.enter_context(mock.patch.object(pack.input_scan, name, return_value=value))
@@ -497,11 +508,12 @@ class PackScriptInstall(unittest.TestCase):
                                         gameplay_correction_args=[], stale=None, missing_music=[], missing_shadows=[],
                                         check_foliage=[], find_bash='bash').items():
                     stack.enter_context(mock.patch.object(pack, name, return_value=value))
-                runner = stack.enter_context(mock.patch.object(pack, 'run', wraps=pack.run))
+                runner = stack.enter_context(mock.patch.object(pack, 'run', side_effect=run_cached))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 pack.main()
                 commands = [c.args[0] for c in runner.call_args_list]
-                self.assertTrue(all(c[0] == 'strip' or '--write-pack' in c for c in commands), commands)
+                self.assertTrue(all(c[0] == 'strip' or '--write-pack' in c or c[-1] == 'global-sound'
+                                    for c in commands), commands)
             self.assertEqual(snapshot(), before)
         build()
         source = Path(str(out)+'.sources.json')

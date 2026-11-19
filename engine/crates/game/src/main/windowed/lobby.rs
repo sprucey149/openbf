@@ -226,9 +226,9 @@ impl TestRun {
     }
 }
 
-/// The Host page's help lines (LAN §5b): this machine's addresses, looked
+/// The Host page's endpoints (LAN §5b, #181), looked
 /// up again every few seconds (two UDP connects, nothing sent).
-fn host_help(port: u16) -> Vec<String> {
+fn host_addresses(port: Option<u16>) -> Vec<String> {
     use std::sync::Mutex;
     type Found = Option<(Instant, Vec<(std::net::Ipv4Addr, bool)>)>;
     static ADDRS: Mutex<Found> = Mutex::new(None);
@@ -240,7 +240,7 @@ fn host_help(port: u16) -> Vec<String> {
         *cache = Some((Instant::now(), reach::local_ipv4s()));
     }
     let addrs = cache.as_ref().map(|c| c.1.clone()).unwrap_or_default();
-    reach::host_help(&addrs, port)
+    reach::host_addresses(&addrs, port)
 }
 
 /// The broadcast targets: the limited broadcast, and the /24 directed
@@ -305,22 +305,12 @@ pub(super) fn draw_mp(ctx: &ui::egui::Context, page: &mut MpPage) -> ui::lobby::
             if let Some(m) = &h.message {
                 lines.push((m.clone(), Color32::from_rgb(255, 160, 120)));
             }
-            let port = h.parsed_port().unwrap_or(net::DEFAULT_PORT);
-            for l in host_help(port) {
+            for l in host_addresses(h.parsed_port()) {
                 lines.push((l, Color32::from_rgb(170, 210, 255)));
             }
-            lines.push(help);
             let cursor = h.cursor;
             let focus = std::mem::take(&mut h.focus_text);
-            ui::lobby::draw_page(
-                ctx,
-                "LAN: Host Game",
-                &rows,
-                cursor,
-                h.text_mut(),
-                focus,
-                &lines,
-            )
+            ui::lobby::draw_host_page(ctx, &rows, cursor, h.text_mut(), focus, &lines)
         }
         MpPage::Join(j) => {
             let rows = j.page.rows();
@@ -440,6 +430,7 @@ impl App {
             MpPage::Host(h) => {
                 if let Some(i) = d.clicked {
                     h.cursor = i;
+                    h.focus_text = h.row_ids().get(i) == Some(&ui::lobby::HostRow::Port);
                 }
                 (h.step(press).map(MpDone::Host), h.take_clicks())
             }
@@ -812,7 +803,10 @@ impl App {
             if results && n.lobby.ready_sent != Some(round) {
                 n.lobby.ready_sent = Some(round);
                 if let NetLink::Client(s) = &n.link {
-                    s.send(net::ClientCommand::Ready(round));
+                    s.send(net::ClientCommand::Ready {
+                        round_id: round,
+                        profile: n.current_profile(&self.profile).encode(),
+                    });
                 }
             }
             if input.back {
@@ -1211,6 +1205,10 @@ fn host_roster(n: &NetplaySession) -> Vec<LobbyPlayer> {
 }
 
 #[cfg(test)]
+#[path = "lobby/host_layout_tests.rs"]
+mod host_layout_tests;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
 
@@ -1307,6 +1305,8 @@ pub(crate) mod tests {
         );
         assert_eq!((s.cheat_policy, s.max_players, s.lag_comp), (0b11, 4, true));
         assert!(guest.netplay.as_ref().unwrap().lobby.ia.is_some());
+        host.profile.career.medals[0] = 3;
+        guest.profile.career.medals[0] = 7;
         // The results' ready check: the host has left its pages.
         {
             let n = host.netplay.as_mut().unwrap();
@@ -1317,6 +1317,15 @@ pub(crate) mod tests {
         run(&mut host, &mut guest, |h, _| {
             h.netplay.as_ref().unwrap().lobby.phase == LobbyPhase::Choosing
         });
+        let setup = host
+            .netplay
+            .as_ref()
+            .unwrap()
+            .host_setup("bf2", &host.session, &host.profile);
+        assert_eq!(setup.humans[0].name, "Ann");
+        assert_eq!(setup.humans[0].profile.medals[0], 3);
+        assert_eq!(setup.humans[1].name, "Bo");
+        assert_eq!(setup.humans[1].profile.medals[0], 7);
         let lines = host.netplay.as_mut().unwrap().lobby.lines();
         assert!(
             lines.iter().any(|l| l.contains("playlist is over")),

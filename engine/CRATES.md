@@ -125,7 +125,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/spec.rs` 237 — PROVISIONAL specular-pass bake and shared CORE textures/table · `spec_pass`, `SpecPass`, `pass_textures`, `bake_table`, `bake_core_texture`; alpha retention and pass rules in the module/API docs (`analysis/re-specular-pass.md`, [O]).
 - `bake/src/tier.rs` 1110 — texture tiers: PS2, or a larger same-art donor · `Tier`, `tier2`, `same_art`
 - `bake/src/detail.rs` 183 — `<name>_dtl` detail maps · `write_detail_for`, `ALPHA_TEST`
-- `bake/src/glb.rs` 1009 — model GLB writer and per-primitive material/lighting metadata · `model_to_glb`, `world_model_to_glb`, `world_contact_surface_to_glb`, `LightPath`, `light_path`, `glow_path`; alpha and COL0/VU1 rules in the module/API docs.
+- `bake/src/glb.rs` 1056 — model GLB writer and per-primitive material/lighting metadata · `model_to_glb`, `world_model_to_glb`, `world_contact_surface_to_glb`, `LightPath`, `light_path`, `glow_path`; alpha and COL0/VU1 rules in the module/API docs.
 - `bake/src/far_lowd.rs` 146 — far-scene LOWD geometry extension (UTA1 cliffs) · `extension`; selection rules and runtime routing in the module header (`analysis/re-far-lowd.md`).
 - `bake/src/gltf_bin.rs` 129 — the shared GLB BIN builder · `Bin`
 - `bake/src/skin_glb.rs` 273 — skinned GLB: skeleton, skin, clips (or a skeleton and clips alone) · `skinned_to_glb`
@@ -142,14 +142,14 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/fpm.rs` 187 — `bake fpm`: a first-person arm model (FPM LVL) as a skinned GLB with its clip-table clips, the `hp_camera` bone added where the rig lacks it · `bake_fpms`, `arm_model`, `BakedFpm`; `analysis/re-first-person-arms.md` §1.
 - `bake/src/soldier/lod.rs` 257 — authored `GeometryLowRes` companions, high-rig bind/joint remap at bake time, PS2 strip-count and sphere metadata; issue #69.
 - `bake/src/shadow.rs` 224 — BF1 vehicle shadow sidecars beside their models, never a reason to fail a bake · `write_model`, `bake`; `analysis/re-vehicle-shadow.md` §9.
-- `bake/src/vehicle_render.rs` 1190 — fingerprinted donor nose/brace, Hailfire quad/crest/pack repairs; subdivided donor rack casings and ear-clipped fitted caps. Collision, joints and simulation headers stay unchanged.
+- `bake/src/vehicle_render.rs` 1392 — fingerprinted donor nose/brace, Hailfire quad/crest/pack repairs; subdivided donor rack casings and ear-clipped fitted caps. Original vertex joints, collision and simulation headers stay unchanged; new casing/cap joints follow the donor missile assembly.
 - `bake/src/vehicle_offsets.rs` 65 — vehicle selection of the shared fingerprinted vertex-offset mechanism and numeric-table guards.
 - `bake/src/vehicle_offsets_table.rs` 118 — Hailfire donor fingerprints, final primitive guards and displacement references; Xbox and PC, both games.
 - `bake/src/vehicle_offsets_data0.rs` 954 — Xbox BF1 donor-relative rack/cap vertex displacements.
 - `bake/src/vehicle_offsets_data1.rs` 951 — PC BF1 donor-relative rack/cap vertex displacements.
 - `bake/src/vehicle_offsets_data2.rs` 948 — Xbox BF2 donor-relative rack/cap vertex displacements.
 - `bake/src/vehicle_offsets_data3.rs` 951 — PC BF2 donor-relative rack/cap vertex displacements.
-- `bake/src/vehicle.rs` 1360 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker and flyer skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs` and `vehicle_offsets.rs`; walker metadata in `walker.rs`.
+- `bake/src/vehicle.rs` 1472 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker and flyer skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs` and `vehicle_offsets.rs`; walker metadata in `walker.rs`.
 - `bake/src/anim_sets.rs` 354 — resolve soldier animation inventories, sets, masks and root speeds · `Inventory`, `SoldierSets`, `plan_bf1`, `plan_bf2`, `masks`, `root_speed`; algorithms in `bake/src/anim_sets/bf1.rs` and `bf2.rs`; PS2-memory referee: `bake/tests/suite/anim_sets.rs`.
 - `bake/src/anim_sets/bf1.rs` 211 — BF1 soldier animation tables and fallbacks · `build`, `Tables`, `FALLBACK`, `weapon_set`; rules in the module and parent `anim_sets.rs` headers.
 - `bake/src/anim_sets/bf2.rs` 730 — BF2 soldier animation registration and inherited set resolution · `Registry`, `Registry::register`, `build`, `base_name`; loader rules in the module and parent `anim_sets.rs` headers.
@@ -518,7 +518,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/main/windowed/idle.rs` 304 — keeps the display awake while a round is played unpaused (Wayland idle-inhibit, X11 screen-saver reset, Windows `SetThreadExecutionState`; macOS no-op) · `IdleInhibit`, `wants_idle_inhibit`
 - `game/src/main/windowed/loading_tests.rs` 731 — loading cadence, input, error recovery, headless captures, and team-screen timings.
 - `game/src/main/windowed/career.rs` 14 — finished/abandoned battle profile save and career summary logging, using the event feed's battle totals · `record_round`.
-- `game/src/main/windowed/lobby.rs` 1309 — Multiplayer → LAN Host Game (`ui::lobby::HostSetup`) and Join Game (LAN browser on the limited and the primary interface's /24 broadcast, Join by address resolved off the frame loop, recent hosts), the lobby screen: the host's Instant Action screen limited to everyone's content with a roster panel and Kick, the guests' read-only mirror of `LobbyState`, the round's results ready check (every connected player or 60 s) and the playlist's next row; a loopback test of join, ready check and kick · `Lobby`, `MpPage`, `JoinScreen`, `App::redraw_lobby`, `App::net_to_lobby`, `App::net_round_finished`, `browse_targets`.
+- `game/src/main/windowed/lobby.rs` 1502 — Multiplayer → LAN Host Game (`ui::lobby::HostSetup`) and Join Game (LAN browser on the limited and the primary interface's /24 broadcast, Join by address resolved off the frame loop, recent hosts), the lobby screen: the host's Instant Action screen limited to everyone's content with a roster panel and Kick, the guests' read-only mirror of `LobbyState`, the round's results ready check (every connected player or 60 s) and the playlist's next row; a loopback test of join, ready check and kick · `Lobby`, `MpPage`, `JoinScreen`, `App::redraw_lobby`, `App::net_to_lobby`, `App::net_round_finished`, `browse_targets`.
+- `game/src/main/windowed/lobby/host_layout_tests.rs` 167 — CPU-only installed-font Host page geometry and dispatcher regression; requires owned baked menu fonts.
 - `game/src/main/windowed/front.rs` 1435 — shell front screens, movie/music (takes in turn), menu clicks, the BF2 Instant Action screen (`App::step_instant`, shared with the LAN lobby), Instant Action, settings and binding capture, Game Options' Player name box, the Multiplayer pages' hooks (a text box holds the menu keys) · `FrontShell`, `App::redraw_shell`; `ui::shell_ps2` owns the screen flow.
 - `game/src/main/windowed/front/profiles.rs` 429 — profile selection after Start and rebinding the shell to the selected save · `App::step_profiles`.
 - `game/src/lib.rs` 83 — module roots
@@ -583,7 +584,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/netplay/lobby/tests.rs` 250 — lobby state round trip and key-based playlist mapping into a differently ordered guest catalog, the intersection's removals and the addon switch, refusal texts, recent hosts and names, the digest group text.
 - `game/src/netplay/meter.rs` 167 — the net meter's figures (ping, input delay, queue and slack, jitter buffer, loss, bytes/s, hash check, prediction, the host's guests) and its lines; the black box records them · `NetMeter`, `MeterPeer`.
 - `game/src/netplay/desync.rs` 518 — LAN desync reports: per-tick hash rows ring, the round's bundle log (and its sealed tail from a tick, decoded by the self-check's worker), report files, the analyzer's row comparison and re-simulation · `DesyncReport`, `HashRing`, `BundleLog`, `LogSince`, `resimulate`.
-- `game/src/netplay/reach.rs` 283 — first-run networking help: this machine's addresses (Tailscale marked; a ZeroTier or split-tunnel WireGuard address is not found, so the help says to read it in the VPN app), the Host page's lines and the Join page's Test connection · `local_ipv4s`, `host_help`, `ConnectionTest`.
+- `game/src/netplay/reach.rs` 322 — Host LAN/VPN endpoint readouts from existing routes (unidentified tunnels stay unavailable) and Join Test Connection · `local_ipv4s`, `host_addresses`, `ConnectionTest`.
+- `game/src/netplay/reach/host_draw_tests.rs` 88 — owned-font headless GPU Host captures and safe-inset pixel bounds; requires owned menu fonts and output folder.
 - `game/src/netplay/smooth_tests.rs` 824 — the drawn LAN view's steadiness against single player (mouse, stick, running; 60/144 Hz; busy frame times) · regression tests.
 - `game/src/netplay/selfcheck.rs` 363 — the host's self-check on a hash mismatch: its round replayed from its latest agreed checkpoint (a copy of its own game) or, without one, rebuilt from the setup, through the bundle log (worker thread or inline; the build and the log's decoding on the worker), the verdict (its own game parted or the guest's) and the replay that takes the live game's place; a dropped check's builder stops between load stages · `Rebuild`, `Stop`, `Checkpoint`, `Start`, `Check`, `Differ`, `Verdict`, `Replayed`.
 - `game/src/netplay/virtual_net.rs` 692 — several peers in one process on `LinkSim` in virtual time, per-tick hash checker, marker-based input latency, scripted pads, opt-in prediction per node (cost, depth, corrections) · `VirtualNet`, `Node`, `HashChecker`, `scripted_pad`, `Builder`.
@@ -832,9 +834,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `ui/src/typography/tests.rs` 463 — the roles' values, Title Case of our labels, and the guard that fails when a menu module styles its own text (`menu_modules_take_text_styles_from_typography`, with `strip_tests` and the case-rule check).
 - `ui/src/scroll.rs` 233 — `[ours]` the one scrolling-list behaviour, configured once · `ScrollView` (fractional view, eased by `EASE_SECONDS`; `wheel`, `reveal` with `MARGIN`, `clamp`, `snap`), `wheel_lines`, `PX_PER_LINE`.
 - `ui/src/spawn_draw.rs` 1083 — BF2 side/class/spawn-map screens in the HUD pass · `SpawnPage`, `window_point`; veil, button/help geometry and Hor+ layout in the module header (`analysis/re-spawn-flow.md` §2–§4, `analysis/re-bf2-shell.md` §3).
-- `ui/src/lobby.rs` 711 — `[ours]` the LAN pages (issue #168): Host Game's setup (max players 2-16, port box, cheat policy and per-cheat rows, lag compensation) and Join Game's rows (found hosts, address box, recent hosts) as models on `MenuInput`, their egui page, the lobby's roster panel and status line, the Player name box · `HostSetup`, `JoinPage`, `FoundRow`, `PageRow`, `draw_page`, `draw_roster`, `draw_status`, `draw_name_box`.
+- `ui/src/lobby.rs` 1060 — `[ours]` the LAN pages (issue #168): Host Game's setup (max players 2-16, port box, cheat policy and per-cheat rows, lag compensation) and Join Game's rows (found hosts, address box, recent hosts) as models on `MenuInput`, their egui pages (Host uses a compact safe-inset scrolling form), the lobby's roster panel and status line, the Player name box · `HostSetup`, `JoinPage`, `FoundRow`, `PageRow`, `draw_page`, `draw_host_page`, `draw_roster`, `draw_status`, `draw_name_box`.
 - `ui/src/scoreboard.rs` 282 — `[ours]` the in-battle scoreboard held on Select/Tab (not during the seat chord): both teams' rows and a LAN ping column · `Hold`, `Scoreboard`.
-- `ui/src/lobby/tests.rs` 158 — Host Game's defaults, ranges, cheat rows and port check; Join Game's rows, focus kept across host-list changes, refusals and Connect.
+- `ui/src/lobby/tests.rs` 516 — Host Game's defaults, ranges, cheat rows and port check; Join Game's rows, focus kept across host-list changes, refusals and Connect.
 - `ui/src/loading.rs` 483 — BF1 loading scan, zoom, dial and skip prompt · `Choreography`, `draw_choreography`, `draw_loading`
 - `ui/src/overlay.rs` 241 — egui ↔ winit ↔ wgpu glue; reapplies the game-owned native cursor after platform output · `EguiOverlay`
 - `ui/src/cursor.rs` 149 — the shell's pointer activity gate: hover moves menu focus only on fresh motion or a click; native cursor image and policy live in `game/src/main/windowed/mouse.rs` · `Pointer`
@@ -870,6 +872,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `net/src/tests/udp.rs` 76 — real UDP loopback through two `NetSession`s for 1 s
 
 ## Tests, examples, goldens, data
+
+- `bake/tests/suite/hailfire_skin.rs` 44 — owned PC/Xbox Hailfire full-bake regression and GLB skin shape checks (#179).
 
 - `game/tests/ui_sharp.rs` 755 — serial headless owned-source menu/HUD captures, option-value visibility and treated font labels and loaded-font pointer checks (#114).
 - `game/tests/presentation_meshes.rs` 374 — native companion install/rejection, owned stock archive/camera invariance and serial headless world draw binding checks (#177).

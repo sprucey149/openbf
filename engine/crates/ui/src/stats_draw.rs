@@ -13,7 +13,8 @@
 //! Texts are the menu roles (`crate::typography`): the titles [`TITLE`] (the
 //! PS2 draws them in `gamefont_medium`), the rest [`LIST`] (`gamefont_tiny`,
 //! capitals), at the roles' own size and stretch; a text too long for its
-//! column ends in an ellipsis instead of being squeezed. Colours are the
+//! column ends in an ellipsis, except Career Stats rank and tier names,
+//! which keep every glyph by fitting horizontally. Colours are the
 //! glyphs' brightest pixels on the frames.
 //!
 //! `[ours]` Hor+: the pages keep the 4:3 box at the window's centre, the help
@@ -141,7 +142,6 @@ const MEDAL_TOP: f32 = 193.9;
 const MEDAL_NAME_X: [f32; 2] = [30.4, 265.6];
 const MEDAL_COUNT_X: [f32; 2] = [166.4, 401.6];
 const MEDAL_LEVEL_RIGHT: [f32; 2] = [248.0, 483.2];
-const MEDAL_LEVEL_W: f32 = 48.8;
 const MEDAL_CURSOR_X: [f32; 2] = [24.8, 251.6];
 /// `[ours]` A row's name squeezed to fit before the count (the medals'
 /// names all fit; the unlockable classes' longest do not).
@@ -456,6 +456,24 @@ impl Ctx<'_> {
         self.stats_help(size, true, Icon::Cross, &st.texts.career_title);
     }
 
+    /// Career names must remain complete. Use the shared role and its
+    /// actual advances, changing only horizontal scale when room runs out.
+    /// `[ours]` Keep the measured anchors and a shared text inset between
+    /// fields; unlike other stats columns these names never use ellipses.
+    fn career_fit(&self, text: &str, room: f32) -> typography::TextStyle {
+        let width = self.text_width(&LIST, text);
+        let fit = if width > 0.0 {
+            (room / width).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        typography::TextStyle {
+            stretch: LIST.stretch * fit,
+            tracking: LIST.tracking * fit,
+            ..LIST
+        }
+    }
+
     fn career_stats(&mut self, s: &Screen, st: &StatsScreens, size: [f32; 2]) {
         let tab = [PANEL_X[0], TAB[0], PANEL_X[1], TAB[1]];
         self.stats_panel(s, tab, &st.texts.career_title, CAREER_BOXES[0]);
@@ -468,8 +486,18 @@ impl Ctx<'_> {
             let at = (CAREER_LABEL_X[col], top);
             self.text(s, &LIST, label, at, HAlign::Left, WHITE);
             let at = (CAREER_VALUE_RIGHT[col], top);
-            let fitted = self.ellipsized(&LIST, value, CAREER_VALUE_W);
-            self.text(s, &LIST, &fitted, at, HAlign::Right, YELLOW);
+            if k == 1 {
+                // Rank is the only named value; numbers retain their columns.
+                let room = at.0
+                    - CAREER_LABEL_X[col]
+                    - self.text_width(&LIST, label)
+                    - typography::TEXT_INSET;
+                let style = self.career_fit(value, room);
+                self.text(s, &style, value, at, HAlign::Right, YELLOW);
+            } else {
+                let fitted = self.ellipsized(&LIST, value, CAREER_VALUE_W);
+                self.text(s, &LIST, &fitted, at, HAlign::Right, YELLOW);
+            }
         }
         let view = c.view_of(st.medal);
         let (head, rows) = if view.unlocks {
@@ -505,10 +533,16 @@ impl Ctx<'_> {
             self.text(s, &LIST, &fitted, at, HAlign::Left, text);
             let at = (MEDAL_COUNT_X[col], top);
             let n = m.count.to_string();
-            self.text(s, &LIST, &n, at, HAlign::Center, number);
+            // Leave room for the name even at the largest stored count.
+            let count_room =
+                2.0 * (at.0 - MEDAL_NAME_X[col] - MEDAL_NAME_W - typography::TEXT_INSET);
+            let count_style = self.career_fit(&n, count_room);
+            let count_width = self.text_width(&count_style, &n);
+            self.text(s, &count_style, &n, at, HAlign::Center, number);
+            let room = MEDAL_LEVEL_RIGHT[col] - (at.0 + count_width * 0.5) - typography::TEXT_INSET;
             let at = (MEDAL_LEVEL_RIGHT[col], top);
-            let fitted = self.ellipsized(&LIST, &m.level, MEDAL_LEVEL_W);
-            self.text(s, &LIST, &fitted, at, HAlign::Right, text);
+            let style = self.career_fit(&m.level, room);
+            self.text(s, &style, &m.level, at, HAlign::Right, text);
         }
         if let Some(m) = c.row(st.medal) {
             let flat = m.info.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -548,7 +582,12 @@ mod tests {
                     x1: 9,
                     y0: 4,
                     y1: 12,
-                    uv: [0.0, 0.1, 0.0, 0.1],
+                    uv: [
+                        f32::from(code) / 128.0,
+                        f32::from(code + 1) / 128.0,
+                        0.0,
+                        1.0,
+                    ],
                 })
                 .collect(),
         }
@@ -611,6 +650,10 @@ mod tests {
     }
 
     fn frame(st: &StatsScreens) -> HudFrame {
+        frame_at(st, [640.0, 480.0])
+    }
+
+    fn frame_at(st: &StatsScreens, size: [f32; 2]) -> HudFrame {
         let mut art = HudArt::default();
         art.fonts.insert(TEXT_FONT.into(), font(TEXT_FONT, 15));
         art.fonts.insert(TITLE_FONT.into(), font(TITLE_FONT, 18));
@@ -621,7 +664,7 @@ mod tests {
         };
         let mut hud = Hud::new(&empty, &empty);
         hud.stats = Some(Box::new(st.clone()));
-        draw(&hud, &art, [640.0, 480.0])
+        draw(&hud, &art, size)
     }
 
     fn sheets(f: &HudFrame) -> Vec<&str> {
@@ -816,6 +859,145 @@ mod tests {
         assert_eq!(quads, 27);
         assert!(sheets(&f).contains(&"listbox_cursor"));
         assert!(!sheets(&f).contains(&"listbox_topbot_more"), "no unlocks");
+    }
+
+    /// Decode the glyph quads emitted by the normal HUD draw path. Each
+    /// synthetic glyph has its own UV, so an ellipsis cannot pass as a name.
+    fn career_glyphs(
+        f: &HudFrame,
+        s: &Screen,
+        col: usize,
+        top: f32,
+    ) -> Vec<(char, [f32; 4], [f32; 4])> {
+        let page = format!("{TEXT_FONT}_page");
+        let y = s.origin[1] + s.scale[1] * (top + 4.0);
+        let x = s.origin[0] + s.scale[0] * (if col == 0 { 20.0 } else { 260.0 });
+        let right = s.origin[0] + s.scale[0] * (if col == 0 { 252.0 } else { 490.0 });
+        f.batches
+            .iter()
+            .filter(|b| b.texture == page)
+            .flat_map(|b| f.indices[b.first as usize..(b.first + b.count) as usize].chunks_exact(6))
+            .filter_map(|q| {
+                let a = &f.verts[q[0] as usize];
+                let b = &f.verts[q[2] as usize];
+                ((a.pos[1] - y).abs() < 0.01 && a.pos[0] >= x && a.pos[0] < right).then(|| {
+                    (
+                        (a.uv[0] * 128.0).round() as u8 as char,
+                        [a.pos[0], a.pos[1], b.pos[0], b.pos[1]],
+                        a.color,
+                    )
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn career_names_rank_keeps_complete_glyphs_and_clear_neighbors() {
+        check_career_names(true);
+    }
+
+    #[test]
+    fn career_names_medals_keep_complete_glyphs_and_clear_neighbors() {
+        check_career_names(false);
+    }
+
+    fn check_career_names(rank_only: bool) {
+        for size in [
+            [640.0, 480.0],
+            [1280.0, 720.0],
+            [1920.0, 1080.0],
+            [1280.0, 1024.0],
+        ] {
+            for (rank, tier) in [
+                ("Private", "Legendary"),
+                ("General", "Green"),
+                ("Sergeant", "Veteran"),
+                ("Captain", "Elite"),
+                ("Generaloberst der Republik", "Legendenstatus der Republik"),
+            ] {
+                for count in [0, 64, 999, u32::MAX] {
+                    for selected in [0, 5] {
+                        let mut st = screens();
+                        st.page = Page::Career;
+                        st.medal = selected;
+                        st.career.values =
+                            vec![(String::new(), String::new()), ("Rank".into(), rank.into())];
+                        for m in &mut st.career.medals {
+                            m.name = "Gunslinger".into();
+                            m.count = count;
+                            m.level = tier.into();
+                            m.info.clear();
+                        }
+                        let f = frame_at(&st, size);
+                        let s = screen_at(size, Anchor::Centre);
+                        if rank_only {
+                            let glyphs = career_glyphs(&f, &s, 1, CAREER_LINE_TOP);
+                            let actual: String = glyphs.iter().map(|g| g.0).collect();
+                            assert_eq!(
+                                actual,
+                                format!("RANK{}", LIST.case.apply(rank)),
+                                "rank at {size:?}"
+                            );
+                            assert!(
+                                glyphs[3].1[2] + 4.9 * s.scale[0] <= glyphs[4].1[0],
+                                "rank label gap"
+                            );
+                            assert_eq!(glyphs[4].2[..3], YELLOW.0.map(|v| v / 255.0));
+                            if rank == "Private" {
+                                assert!(
+                                    (glyphs[4].1[2] - glyphs[4].1[0] - 9.9 * s.scale[0]).abs()
+                                        < 0.01,
+                                    "stock rank keeps its natural width"
+                                );
+                            }
+                            let last = glyphs.last().unwrap().1;
+                            assert!(
+                                (last[2] - s.origin[0] - CAREER_VALUE_RIGHT[1] * s.scale[0]).abs()
+                                    < 0.01
+                            );
+                            continue;
+                        }
+                        for (col, right) in MEDAL_LEVEL_RIGHT.iter().enumerate() {
+                            let glyphs = career_glyphs(&f, &s, col, MEDAL_TOP);
+                            let n = count.to_string();
+                            let actual: String = glyphs.iter().map(|g| g.0).collect();
+                            assert_eq!(
+                                actual,
+                                format!("GUNSLINGER{n}{}", LIST.case.apply(tier)),
+                                "medal at {size:?} count={count}"
+                            );
+                            let name_end = glyphs[9].1[2];
+                            let count_start = glyphs[10].1[0];
+                            let count_end = glyphs[9 + n.len()].1[2];
+                            let tier_start = glyphs[10 + n.len()].1[0];
+                            assert!(
+                                name_end + 4.9 * s.scale[0] <= count_start,
+                                "name/count overlap: {name_end} {count_start}"
+                            );
+                            assert!(
+                                count_end + 4.9 * s.scale[0] <= tier_start,
+                                "count/tier overlap: {count_end} {tier_start}"
+                            );
+                            let focused = selected == col * 5;
+                            let text_tint = if focused { BLUE } else { WHITE };
+                            let number_tint = if focused { BLUE } else { YELLOW };
+                            assert_eq!(glyphs[0].2[..3], text_tint.0.map(|v| v / 255.0));
+                            assert_eq!(glyphs[10].2[..3], number_tint.0.map(|v| v / 255.0));
+                            assert_eq!(glyphs[10 + n.len()].2[..3], text_tint.0.map(|v| v / 255.0));
+                            let count_center = (count_start + count_end) * 0.5;
+                            assert!(
+                                (count_center - s.origin[0] - MEDAL_COUNT_X[col] * s.scale[0])
+                                    .abs()
+                                    < 0.01
+                            );
+                            let last = glyphs.last().unwrap().1;
+                            assert!((last[2] - s.origin[0] - right * s.scale[0]).abs() < 0.01);
+                            println!("{size:?} {rank}/{tier} {count} col={col}: name_end={name_end:.2}, count=[{count_start:.2},{count_end:.2}], tier=[{tier_start:.2},{:.2}]", last[2]);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Card UNLK3: with unlocks the box has a down wedge on the medals' page

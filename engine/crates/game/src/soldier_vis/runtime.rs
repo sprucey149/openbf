@@ -881,14 +881,18 @@ impl SoldierVisuals {
             {
                 continue;
             }
-            let Some(sa) = self.asset_for(u.team, u.spec.class) else {
+            let Some(at) = self.asset_index(u.team, u.spec.class) else {
                 continue;
             };
+            let sa = &self.assets[at];
             let Some(v) = self.units.get(i) else { continue };
             // A droid that burst leaves no body to draw (card DROIDDEATH);
             // a cloaked soldier is not drawn (card CLOAK).
+            // Tick effects can read the pose before sync_units has seen a
+            // hero take over the same unit slot and generation.
             if !u.cloak.visible()
                 || v.gen != u.gen
+                || v.body != Some((u.team, u.spec.class, Some(at)))
                 || (!u.alive && (u.burst || v.gone || v.dead_for > CORPSE_SECS))
             {
                 continue;
@@ -921,7 +925,6 @@ impl SoldierVisuals {
                 }
                 (None, _) => model_of(&u.soldier),
             };
-            let at = self.asset_index(u.team, u.spec.class).unwrap_or(0);
             let compute = || -> std::sync::Arc<[Mat4]> {
                 let pose = v.animator.pose(&sa.asset.skeleton);
                 sa.asset.skeleton.palette(&pose.locals()).into()
@@ -949,13 +952,14 @@ impl SoldierVisuals {
         else {
             return Vec::new();
         };
-        let Some(sa) = self.asset_for(u.team, u.spec.class) else {
+        let Some(body) = self.asset_index(u.team, u.spec.class) else {
             return Vec::new();
         };
+        let sa = &self.assets[body];
         let Some(v) = self
             .units
             .get(unit.index as usize)
-            .filter(|v| v.gen == unit.gen)
+            .filter(|v| v.gen == unit.gen && v.body == Some((u.team, u.spec.class, Some(body))))
         else {
             return Vec::new();
         };
@@ -1091,7 +1095,24 @@ impl SoldierVisuals {
         let thrown = sim
             .stickies
             .iter()
-            .map(|g| (g.weapon_class, Mat4::from_translation(g.pos)))
+            .map(|g| {
+                let geometry = sim.weapon_classes[g.weapon_class]
+                    .ordnance
+                    .geometry
+                    .as_deref();
+                let rotation = if geometry == Some("ewk_spear") {
+                    // The shaft runs along the baked model's +Z axis.
+                    g.vel.try_normalize().map_or(glam::Quat::IDENTITY, |dir| {
+                        glam::Quat::from_rotation_arc(Vec3::Z, dir)
+                    })
+                } else {
+                    glam::Quat::IDENTITY
+                };
+                (
+                    g.weapon_class,
+                    Mat4::from_rotation_translation(rotation, g.pos),
+                )
+            })
             .chain(sim.droids.iter().map(|d| {
                 // The model faces +Z, as the engine's models do (a soldier is
                 // drawn turned by π for the same reason); the droid's aim

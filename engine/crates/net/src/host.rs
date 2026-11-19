@@ -201,6 +201,7 @@ pub enum NetEvent {
     PeerReady {
         slot: u8,
         round_id: u32,
+        profile: Vec<u8>,
     },
     Request {
         slot: u8,
@@ -620,9 +621,12 @@ impl HostCore {
                 (Phase::Joined(slot), Msg::Request(data)) => {
                     self.events.push_back(NetEvent::Request { slot, data });
                 }
-                (Phase::Joined(slot), Msg::Ready { round_id }) => {
-                    self.events
-                        .push_back(NetEvent::PeerReady { slot, round_id });
+                (Phase::Joined(slot), Msg::Ready { round_id, profile }) => {
+                    self.events.push_back(NetEvent::PeerReady {
+                        slot,
+                        round_id,
+                        profile,
+                    });
                 }
                 (Phase::Joined(slot), m) => {
                     if !self.round_message(slot, m) {

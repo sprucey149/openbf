@@ -28,7 +28,7 @@ class MissionSelection(unittest.TestCase):
                 captured.append(command)
                 raise AtMissionGeneration
 
-        games = {game: {"gameplay": {"kind": "ps2-disc", "path": "disc.iso"}, "visual": []}
+        games = {game: {"gameplay": {"kind": "ps2-extracted", "path": "extracted"}, "visual": []}
                  for game in ("bf1", "bf2")}
         if bf2_kind == "pc-install":
             games["bf2"]["gameplay"] = {"kind": bf2_kind, "path": "pc-bf2"}
@@ -50,7 +50,10 @@ class MissionSelection(unittest.TestCase):
                  mock.patch.object(pack, "console_lua_root", return_value=str(lua)), \
                  mock.patch.object(pack, "git_tracked_missions", return_value=False), \
                  mock.patch.object(pack, "GAMEPLAY_TREES", {}), \
-                 mock.patch.object(pack, "MISSIONS", str(Path(folder) / "missions")):
+                 mock.patch.object(pack, "MISSIONS", str(Path(folder) / "missions")), \
+                 mock.patch.object(pack, "BAKED", str(Path(folder) / "assets")), \
+                 mock.patch.object(pack, "EXTRACTED", str(Path(folder) / "extracted")), \
+                 mock.patch.object(pack, "MISSION_STAMP", str(Path(folder) / "mission.stamp")):
                 with self.assertRaises(AtMissionGeneration):
                     pack.main()
         self.assertEqual(len(captured), 1)

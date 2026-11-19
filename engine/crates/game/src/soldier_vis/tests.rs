@@ -1331,3 +1331,65 @@ fn a_class_change_on_the_same_life_starts_the_visual_over() {
         assert_eq!(drawn, alive, "alive {alive}: drawn");
     }
 }
+
+#[test]
+#[ignore = "requires the BF2 Felucia trooper and Aayla soldier bakes"]
+fn felucia_water_effects_skip_the_old_pose_after_a_hero_class_change() {
+    let root = crate::assets::baked_root();
+    let classes = team(&[
+        ("rifleman", Some("rep_inf_ep3trooper"), None),
+        ("aayla", Some("rep_inf_aaylasecura"), None),
+    ]);
+    let mut vis = SoldierVisuals::load_cpu(&root, "bf2", &[classes.clone(), classes]);
+    let mut walk = WalkSim::new(48, Vec3::ZERO, None);
+    let player = walk.player.index as usize;
+    vis.sync_units(&walk);
+
+    let soldier = vis.asset_index(0, 0).unwrap();
+    let hero = &vis.asset_for(0, 1).unwrap().asset.skeleton;
+    assert_eq!(hero.parents[hero.index_of("bone_a_spine").unwrap()], Some(29));
+    let asset = &vis.assets[soldier];
+    assert_eq!(asset.asset.skeleton.len(), 25);
+    let rig = asset.rig.as_ref().unwrap();
+    let input = crate::animator::AnimInput {
+        stance: core::soldier::Stance::Stand,
+        vel: glam::Vec2::ZERO,
+        yaw: 0.0,
+        mouse_aim: false,
+        max_speed: 7.0,
+        root_scale: 1.0,
+        dead: false,
+        hero_dead: false,
+        hard_lock: false,
+        set: rig.weapon_set("human", "rifle"),
+        fired: true,
+        throw: None,
+        reloading: false,
+        reload_time: 0.0,
+        alert: true,
+        aim: (0.0, 0.3),
+    };
+    let animator = &mut vis.units[player].animator;
+    animator.step(
+        rig,
+        &asset.asset.clips,
+        &asset.asset.skeleton,
+        &input,
+        core::TICK_DT,
+    );
+    assert_ne!(animator.aim().weights(), (0.0, 0.0));
+    assert!(vis.water_feet(&walk)[player].is_some());
+
+    // The hero offer can transfer ownership on death before the next
+    // visual update, leaving the old generation and a corpse.
+    let unit = &mut walk.sim.units[player];
+    unit.spec.class = 1;
+    unit.alive = false;
+    unit.body = true;
+    vis.units[player].palette = Default::default();
+    assert!(vis.water_feet(&walk)[player].is_none());
+    assert!(vis.chunk_nodes(&walk, walk.player).is_empty());
+
+    vis.update(&walk, core::TICK_DT);
+    assert!(vis.water_feet(&walk)[player].is_none());
+}

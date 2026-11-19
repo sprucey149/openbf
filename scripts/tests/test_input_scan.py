@@ -731,6 +731,7 @@ class Pack(unittest.TestCase):
         xbox_image(xbox, 'bf2')
         target = engine / 'target'
         write(target / 'release' / ('game' + pack.EXE), b'binary')
+        write(target / 'release' / ('bake' + pack.EXE), b'bake')
         calls, envs = [], []
 
         def run(command, **kwargs):
@@ -747,10 +748,15 @@ class Pack(unittest.TestCase):
                 tree(Path(command[3]) / 'Data/_LVL_XBOX', 'bf2', 'xbox')
                 for library in pack.LUA['bf2'].values():
                     write(pack.ci_path(Path(command[3]) / 'Data/_LVL_XBOX', library), b'x')
+            if any(str(p).endswith('gen_missions.py') for p in command):
+                write(Path(command[command.index('--out') + 1]) / 'generated.ron', b'mission')
             if len(command) > 2 and command[1] == '--write-pack':
                 Path(command[2]).write_bytes(b'packed')
             if 'rebake.sh' in ' '.join(command):
                 write(baked / 'classes/bf1_all.ron')
+                if command[-1] == 'global-sound':
+                    Path(kwargs['env']['OPENBF_GLOBAL_RESULT']).write_text(json.dumps([
+                        dict(game=g, action='rebuilt', reason='fixture', key='fixture') for g in ('bf1', 'bf2')]))
 
         values = dict(ROOT=str(root), ENGINE=str(engine), EXTRACTED=str(root / 'extracted'), BAKED=str(baked),
                       MISSIONS=str(missions), TARGET=str(target), BAKE_STAMP=str(root / 'extracted/bake.sha'),
@@ -765,6 +771,24 @@ class Pack(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             pack.main()
         return calls, envs[-1], ps2, xbox
+
+    def test_bake_build_uses_its_standalone_feature_configuration(self):
+        calls, env, _, _ = self.full_run(False)
+        self.assertEqual([c for c in calls if c[:2] == ['cargo', 'build']], [
+            ['cargo', 'build', '--release', '-p', 'game'],
+            ['cargo', 'build', '--release', '-p', 'bake']])
+        self.assertEqual(env['OPENBF_BAKE_BIN'], str(self.top / 'engine/target/release' / ('bake' + pack.EXE)))
+        report = json.loads(Path(str(self.out) + '.sources.json').read_text())
+        self.assertEqual([r['action'] for r in report['global_sound']], ['rebuilt', 'rebuilt'])
+
+    def test_fresh_pack_replaces_stale_assets_and_generated_missions(self):
+        self.tool_output = ''  # git does not own this fixture's generated missions
+        def stale(root):
+            write(root / 'engine/assets_baked/classes/bf1_all.ron')
+            write(root / 'engine/assets_baked/stale.ron')
+        self.full_run(False, before=stale, extra=['--rebake'])
+        self.assertFalse((self.top / 'engine/assets_baked/stale.ron').exists())
+        self.assertEqual([p.name for p in (self.top / 'engine/missions').iterdir()], ['generated.ron'])
 
     def tool(self, command, **kwargs):
         """git and the foliage check, as pack.py runs them directly."""
@@ -786,7 +810,7 @@ class Pack(unittest.TestCase):
 
     def test_an_extraction_without_the_executable_is_finished_from_the_disc(self):
         calls, _, _, _ = self.full_run(False, before=self.old_extraction)
-        self.assertEqual(sorted(Path(call[3]).parent.name for call in calls if call[1:2] == ['extract-iso']), ['bf1', 'bf2'])
+        self.assertEqual(sorted(Path(call[3]).parent.parent.name for call in calls if call[1:2] == ['extract-iso']), ['bf1', 'bf2'])
         for game in pack.LUA:
             self.assertTrue((self.top / 'extracted' / game / 'lvl' / pack.GAME_ELF[game]).is_file())
 
@@ -803,9 +827,9 @@ class Pack(unittest.TestCase):
         report = json.loads(Path(str(self.out) + '.sources.json').read_text())
         self.assertFalse(report['audio_restoration'])
 
-    def test_a_whole_extraction_is_left_alone(self):
+    def test_an_unattested_whole_extraction_is_replaced(self):
         calls, _, _, _ = self.full_run(False, before=lambda root: self.old_extraction(root, elf=True))
-        self.assertFalse([call for call in calls if call[1:2] == ['extract-iso']])
+        self.assertEqual(len([call for call in calls if call[1:2] == ['extract-iso']]), 2)
 
     def test_every_build_checks_its_foliage_and_lost_foliage_stops_it(self):
         self.full_run(False)
@@ -865,7 +889,7 @@ class Pack(unittest.TestCase):
         self.assertNotIn('XB2', env)
         self.assertNotIn('BF2_CONSOLE_ISO', env)
         self.assertEqual([call[2] for call in calls if scan.XBOX_EXTRACT in call], [str(xbox)])
-        self.assertEqual([Path(call[3]).parent.name for call in calls if call[1:2] == ['extract-iso']], ['bf1'])
+        self.assertEqual([Path(call[3]).parent.parent.name for call in calls if call[1:2] == ['extract-iso']], ['bf1'])
 
 
 class RebakeCase(unittest.TestCase):
@@ -1331,8 +1355,8 @@ class RebakeOnAnyMachine(RebakeCase):
         """The bake opens the path it is given, and on Linux FPM/ is not fpm/: one literal path stops the whole build."""
         bf1, bf2 = self.root / 'lower1', self.root / 'lower2'
         for root in (bf1, bf2):
-            for name in ('core.lvl', 'ingame.lvl', 'shell.lvl', 'common/eng/common.lvl', 'fpm/all/alltroop.lvl',
-                         *(f'side/{side}.lvl' for side in ('all', 'imp', 'rep', 'cis', 'gun', 'des', 'ewk', 'gam', 'geo', 'tur', 'wok'))):
+            for name in ('core.lvl', 'ingame.lvl', 'shell.lvl', 'common/eng/common.lvl', 'fpm/all/alltroop.lvl', 'tat/tat1.lvl',
+                         *(f'side/{side}.lvl' for side in ('all', 'imp', 'rep', 'cis', 'gun', 'des', 'ewk', 'gam', 'geo', 'tur', 'wok', 'gar', 'snw'))):
                 write(root / name)
         bake = self.root / 'target/release/bake'
         bake.write_text("""#!/bin/sh

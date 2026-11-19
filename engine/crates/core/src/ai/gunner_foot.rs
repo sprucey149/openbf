@@ -498,7 +498,12 @@ pub(super) fn run(
                             Unit::kind,
                         )
                         .min(31);
-                    eff_range > class.ai_range[0] && eff_range < arsenal::reach(class)
+                    let clear = !class.force.as_ref().is_some_and(|p| {
+                        matches!(p.kind, crate::hero_weapon::ForceKind::Emitter(_))
+                    }) || held
+                        .and_then(|c| c.handle.unit())
+                        .is_none_or(|target| sim.force_emitter_can_reach_unit(me, target));
+                    clear && eff_range > class.ai_range[0] && eff_range < arsenal::reach(class)
                         && (matches!(*aim, AimRequest::Station(..))
                             || class.ai_target_kind & (1 << kind) != 0)
                         && (state.force_channel.is_some() || u.soldier.energy >= energy)

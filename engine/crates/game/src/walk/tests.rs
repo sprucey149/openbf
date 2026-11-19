@@ -1487,3 +1487,19 @@ fn a_host_correction_leaves_the_career_totals_unchanged() {
     let lines: Vec<String> = feed.take().into_iter().map(|m| m.text).collect();
     assert_eq!(lines, ["live"]);
 }
+
+#[test]
+fn a_stale_lan_round_cannot_replace_medals_already_saved() {
+    let mut walk = WalkSim::new(3, Vec3::ZERO, None);
+    walk.netplay.active = true;
+    let mut profile = crate::profile::Profile::default();
+    profile.career.medals[0] = 7;
+    let mut counts = profile.career.medals;
+    counts[0] = 3;
+    counts[1] = 1;
+    walk.sim.install_medal_career(walk.player, counts);
+
+    assert!(walk.flush_career_progress(&mut profile));
+    assert_eq!(profile.career.medals[..2], [7, 1]);
+    assert!(!walk.flush_career_progress(&mut profile));
+}

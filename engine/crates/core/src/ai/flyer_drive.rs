@@ -41,6 +41,7 @@
 //! roll wobble's address-derived phase (the vehicle's generation stands in).
 
 mod admission;
+mod tow;
 mod transport;
 use crate::fmath::FloatExt;
 pub(crate) use admission::commit as commit_plan;
@@ -81,8 +82,9 @@ pub const PURSUIT_OFFSET: f32 = 30.0;
 pub const PURSUIT_ESCAPE: f32 = 3.5;
 /// FUN_002fe868's connection: P0 behind the craft (0x41a00000).
 pub const CONNECT_BEHIND: f32 = 20.0;
-/// FUN_002ff478: the choices a blocked connection may try.
-pub const CONNECT_TRIES: usize = 4;
+/// OURS: fewer primary connection candidates than this also try the ungated
+/// ones ([`connection`]).
+pub const CONNECT_PRIMARY_MIN: usize = 4;
 /// OURS: a takeoff that has not flown after this long gives up.
 pub const TAKEOFF_GIVEUP: u64 = 15 * crate::TICK_HZ as u64;
 /// OURS: an attack run's break-off, and how long it flies on before another.
@@ -730,22 +732,22 @@ fn curve_chords_clear(
     })
 }
 
-/// Best path end to join, as a connection curve (`analysis/re-flyer-ai.md`).
-/// Scores candidates using `BranchRange / dist_sq`, the nose and first-leg
-/// alignment against `BranchMaxAngle`, `MinBranchDist` penalty, and path
-/// frequency; falls back to unconstrained proximity/alignment without
-/// frequency when fewer than four candidates pass range/angle gating. Tests
-/// hull-radius clearance along the spline so wings and bellies do not clip
+/// FUN_002ff478 and FUN_002f9498: the best path end to join from `pos`, as
+/// a connection curve (`analysis/re-flyer-ai.md`). Scores candidates using
+/// `BranchRange / dist_sq`, the nose and first-leg alignment against
+/// `BranchMaxAngle`, the `MinBranchDist` penalty and path frequency; falls
+/// back to unconstrained proximity/alignment without frequency when fewer
+/// than [`CONNECT_PRIMARY_MIN`] candidates pass range/angle gating. Tests
+/// hull-extent clearance along the spline so wings and bellies do not clip
 /// hangar decks, lips, or pillars.
-fn connect(
+fn connection(
     sim: &Sim,
     v: &Vehicle,
     handle: VehicleHandle,
     p: &FlyerParams,
-    ai: &mut FlyerAi,
+    pos: Vec3,
     leave: Option<u16>,
-) {
-    let pos = v.pos;
+) -> Option<(PathCursor, [Vec3; 4])> {
     let forward = v.rot * Vec3::Z;
     let branch_range = if p.follower.branch_range <= 0.0 {
         f32::MAX
@@ -811,57 +813,91 @@ fn connect(
         }
     }
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let max_tries = CONNECT_TRIES.max(usize::from(p.follower.branch_paths));
+    // OURS. After the primary candidates, try other admitted endpoints
+    // with the same clearance test. replace: the original's two-chord
+    // geometric retry and its filter for candidate obstacles.
     let clear = |c: &&(f32, PathCursor, [Vec3; 4])| hull_clear(sim, v, &c.2, handle);
+    let max_tries = CONNECT_PRIMARY_MIN.max(usize::from(p.follower.branch_paths));
     let chosen = ranked.iter().take(max_tries).find(clear).or_else(|| {
-        if ranked.len() < CONNECT_TRIES {
+        if ranked.len() < CONNECT_PRIMARY_MIN {
             fallback.sort_by(|a, b| b.0.total_cmp(&a.0));
             fallback.iter().find(clear)
         } else {
             None
         }
     });
-    if let Some((_, cursor, curve)) = chosen {
-        ai.curve = Some(*curve);
-        ai.cursor = Some(*cursor);
+    chosen.map(|(_, cursor, curve)| (*cursor, *curve))
+}
+
+fn connect(
+    sim: &Sim,
+    v: &Vehicle,
+    handle: VehicleHandle,
+    p: &FlyerParams,
+    ai: &mut FlyerAi,
+    leave: Option<u16>,
+) {
+    if let Some((cursor, curve)) = connection(sim, v, handle, p, v.pos, leave) {
+        ai.curve = Some(curve);
+        ai.cursor = Some(cursor);
         ai.goal = None;
     } else {
-        let was_escaping = ai.curve.is_some() && ai.cursor.is_none() && ai.goal.is_none();
-        loiter(v, p, ai);
-        if !ai.curve.as_ref().is_some_and(|c| hull_clear(sim, v, c, handle)) {
-            let esc_dir = clearest(sim, v, handle, was_escaping);
-            let curve = [
-                pos - forward * CONNECT_BEHIND,
-                pos,
-                pos + esc_dir * 40.0,
-                pos + esc_dir * 80.0,
-            ];
-            if clear_chord(sim, pos, pos + esc_dir * WEDGED_RAY, handle)
-                && escape_clear(sim, v, &curve, handle)
-            {
-                ai.curve = Some(curve);
-                ai.cursor = None;
-                ai.goal = None;
-            } else {
-                ai.curve = None;
-                ai.goal = None;
-            }
-        }
+        recover(sim, v, handle, p, ai);
     }
     ai.t = 0.0;
+}
+
+fn recover(sim: &Sim, v: &Vehicle, handle: VehicleHandle, p: &FlyerParams, ai: &mut FlyerAi) {
+    // A craft already airborne in a bay can take a checked opening. An
+    // aircraft outside uses a holding path and retries route admission.
+    if sim.space_round() && sim.flyer_region_coverage(v).0 {
+        if !transport::departure(sim, v, handle, ai) {
+            ai.curve = launch_lane(sim, v, handle, p, v.pos);
+            ai.goal = None;
+            ai.cursor = None;
+        }
+        return;
+    }
+    let clear = |curve: &[Vec3; 4]| hull_clear(sim, v, curve, handle);
+    let was_escaping = ai.curve.is_some() && ai.cursor.is_none() && ai.goal.is_none();
+    let right = Vec3::Y.cross(v.rot * Vec3::Z);
+    let side = ai
+        .goal
+        .map_or(1.0, |centre| right.dot(centre - v.pos).signum());
+    loiter(v, p, ai, side);
+    if ai.curve.as_ref().is_some_and(clear) {
+        return;
+    }
+    ai.curve = None;
+    ai.goal = None;
+    loiter(v, p, ai, -side);
+    if ai.curve.as_ref().is_some_and(clear) {
+        return;
+    }
+    let pos = v.pos;
+    let forward = v.rot * Vec3::Z;
+    let dir = clearest(sim, v, handle, was_escaping);
+    let curve = [
+        pos - forward * CONNECT_BEHIND,
+        pos,
+        pos + dir * (WEDGED_RAY * 0.5),
+        pos + dir * WEDGED_RAY,
+    ];
+    ai.curve = escape_clear(sim, v, &curve, handle).then_some(curve);
+    ai.goal = None;
 }
 
 /// OURS: hold near the failed connection without occupying a refused route.
 /// measure: PS2 all-routes-refused trajectory after FUN_002fa478 resets the
 /// follower; replace this circle and its two seconds of mid-speed radius.
-fn loiter(v: &Vehicle, p: &FlyerParams, ai: &mut FlyerAi) {
+fn loiter(v: &Vehicle, p: &FlyerParams, ai: &mut FlyerAi, side: f32) {
     ai.curve = Some(if let (Some(center), Some(old)) = (ai.goal, ai.curve) {
         [old[1], old[2], old[3], center * 2.0 - old[2]]
     } else {
         let forward = (v.rot * Vec3::Z * Vec3::new(1.0, 0.0, 1.0))
             .try_normalize()
             .unwrap_or(Vec3::Z);
-        let right = Vec3::Y.cross(forward);
+        let right = Vec3::Y.cross(forward) * side;
         let radius = p.mid_speed.fmax(SLOW_FLOOR) * 2.0;
         let center = v.pos + right * radius;
         ai.goal = Some(center);
@@ -1057,6 +1093,43 @@ fn is_transport_at_destination(sim: &Sim, v: &Vehicle, p: &FlyerParams) -> bool 
             .is_none_or(|pad| (v.pos - pad.def.pos).length_squared() > 150.0 * 150.0)
 }
 
+/// A short clear path along the pad's heading can give the craft room
+/// to rise to its flight path. The route's underside hull ray at takeoff
+/// height can still cross the deck (measured on Space Yavin and Kashyyyk).
+/// measure: the original's pilot clearance check near a stock launch pad.
+fn launch_lane(
+    sim: &Sim,
+    v: &Vehicle,
+    handle: VehicleHandle,
+    p: &FlyerParams,
+    at: Vec3,
+) -> Option<[Vec3; 4]> {
+    let forward = (v.rot * Vec3::Z).with_y(0.0).try_normalize()?;
+    let distance = (2.0 * hull_extents(sim, v).0).fmax(p.takeoff_speed * p.takeoff_time);
+    let delta = forward * distance;
+    (distance > 0.0 && clear_chord(sim, at, at + delta, handle)).then_some([
+        at - delta,
+        at,
+        at + delta,
+        at + delta * 2.0,
+    ])
+}
+
+fn departure_clear(sim: &Sim, v: &Vehicle, handle: VehicleHandle, p: &FlyerParams) -> bool {
+    if !p.bf2 || !sim.space_round() || !sim.flyer_region_coverage(v).0 {
+        return true;
+    }
+    // OURS. Check the climb to the authored takeoff height and a clear
+    // connection or bay opening from there. measure: a blocked stock bay.
+    let launch = v.pos + Vec3::Y * p.takeoff_height;
+    if !clear_chord(sim, v.pos, launch, handle) {
+        return false;
+    }
+    launch_lane(sim, v, handle, p, launch).is_some()
+        || connection(sim, v, handle, p, launch, None).is_some()
+        || transport::departure_curve(sim, v, handle, launch).is_some()
+}
+
 pub(super) fn drive(
     sim: &Sim,
     me: UnitHandle,
@@ -1091,7 +1164,24 @@ pub(super) fn drive(
     if v.flyer.phase == FlightPhase::Takeoff && ai.takeoff_at == 0 {
         ai.takeoff_at = sim.tick;
     }
+    let tow_sticks = if v.flyer.phase == FlightPhase::Flying {
+        tow::pilot(sim, me, v, m.vehicle, p, &mut ai)
+    } else {
+        ai.tow_run = None;
+        None
+    };
     match v.flyer.phase {
+        FlightPhase::Flying if tow_sticks.is_some() => {
+            out = tow_sticks.unwrap_or_default();
+            ai.curve = None;
+            ai.cursor = None;
+            ai.goal = None;
+            ai.t = 0.0;
+            ai.trick = None;
+            ai.wedges = 0;
+            ai.anchor = v.pos;
+            ai.anchor_at = sim.tick;
+        }
         FlightPhase::Landed => {
             if !transport && is_transport_at_destination(sim, v, p) {
                 super::ride::request_exit(st);
@@ -1102,8 +1192,9 @@ pub(super) fn drive(
                 ai.transport_depart_at
                     .get_or_insert(sim.tick + transport::WAIT);
             }
-            takeoff =
-                !v.flyer.jump_was_down && ai.transport_depart_at.is_none_or(|at| sim.tick >= at);
+            takeoff = !v.flyer.jump_was_down
+                && ai.transport_depart_at.is_none_or(|at| sim.tick >= at)
+                && departure_clear(sim, v, m.vehicle, p);
             if takeoff {
                 ai.takeoff_at = sim.tick;
                 if transport {

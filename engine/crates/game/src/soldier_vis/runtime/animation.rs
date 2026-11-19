@@ -177,6 +177,13 @@ impl SoldierVisuals {
         let drop_shot = rig.game == crate::animator::Game::Bf1
             && pending_throw == Some(0)
             && class.is_some_and(|c| c.dispenser.is_some());
+        // The BF2 Ewok spear is a main-hand weapon. Its authored shoot and
+        // shoot2 rows share the spear cast (B2 FUN_00281630, 203802–203837).
+        let spear_cast = rig.game == crate::animator::Game::Bf2
+            && pending_throw.is_some()
+            && v.throwing.is_some_and(|throwing| {
+                walk.sim.weapon_classes[throwing].name == "ewk_weap_inf_spear"
+            });
         let aim = if class.is_some_and(|c| c.saber.is_some()) {
             u.weapon
                 .melee
@@ -214,10 +221,11 @@ impl SoldierVisuals {
             hard_lock: s.look_frozen(),
             set,
             fired: drop_shot
+                || spear_cast
                 || (u.mount.is_none()
                     && v.throwing.is_none()
                     && (v.repair_shot.take() == Some(wc) || fired.contains(&(i as u32)))),
-            throw: pending_throw.filter(|_| !drop_shot),
+            throw: pending_throw.filter(|_| !drop_shot && !spear_cast),
             reloading: weapon.reloading(),
             reload_time: class.map_or(0.0, |c| c.reload_time),
             // PROVISIONAL and ours (FEEL_NOTES; the PS2's two soldier

@@ -2,9 +2,11 @@
 //! energy, visibility and damage paths serve human and bot casters.
 
 use super::{Event, Sim};
+use crate::collision::HullFilter;
 use crate::fmath::FloatExt;
 use crate::hero_weapon::{Burn, ForceKind, ForcePower};
 use crate::unit::UnitHandle;
+use crate::vehicle::VehicleHandle;
 use crate::weapon::{DamageDesc, FireState};
 use crate::TICK_DT;
 use glam::Vec3;
@@ -12,7 +14,7 @@ use glam::Vec3;
 #[derive(Clone, Copy)]
 enum EmitterTarget {
     Unit(UnitHandle),
-    Vehicle(crate::vehicle::VehicleHandle),
+    Vehicle(VehicleHandle),
     /// A sniper's dropped turret or a remote droid.
     Item(crate::projectile::Target),
 }
@@ -72,6 +74,43 @@ impl Sim {
         } else {
             power.affect_enemies
         }
+    }
+
+    fn force_centre(&self, index: usize) -> Option<Vec3> {
+        let (lift, _) = super::blast::soldier_blast_sphere(self.units.get(index)?.soldier.stance);
+        Some(self.hero_body_prims(index)?.pos + Vec3::Y * lift)
+    }
+
+    fn force_emitter_clear(
+        &self,
+        from: Vec3,
+        to: Vec3,
+        endpoints: [Option<VehicleHandle>; 2],
+    ) -> bool {
+        // B2 FUN_00315f78:306386 traces the emitter against vehicles as well
+        // as the world. Seats and chained links can start or end inside an
+        // intended hull. Use the shared seat ray's endpoint exclusions.
+        let instances = endpoints.map(|h| self.vehicle(h?).and_then(|v| v.instance));
+        crate::perception::los_seat(self, from, to, HullFilter::Except(endpoints), instances)
+    }
+
+    pub(crate) fn force_emitter_can_reach_unit(
+        &self,
+        caster: UnitHandle,
+        target: UnitHandle,
+    ) -> bool {
+        self.unit(caster)
+            .zip(self.unit(target))
+            .is_some_and(|(from, to)| {
+                self.force_centre(target.index as usize)
+                    .is_some_and(|centre| {
+                        self.force_emitter_clear(
+                            from.muzzle(),
+                            centre,
+                            [from.mount.map(|m| m.vehicle), to.mount.map(|m| m.vehicle)],
+                        )
+                    })
+            })
     }
 
     pub(super) fn hero_damage(
@@ -195,8 +234,7 @@ impl Sim {
         let mut targets: Vec<_> = (0..self.units.len())
             .filter(|&t| self.force_can_target(i, t, &power))
             .filter_map(|t| {
-                let (lift, _) = super::blast::soldier_blast_sphere(self.units[t].soldier.stance);
-                let centre = self.hero_body_prims(t)?.pos + Vec3::Y * lift;
+                let centre = self.force_centre(t)?;
                 power
                     .contains(from, direction, centre)
                     .then_some(Candidate {
@@ -272,6 +310,7 @@ impl Sim {
                 .fmax(self.weapon_classes[class].ordnance.charged(0.0).damage);
         }
         let mut origin = from;
+        let mut origin_hull = self.units[i].mount.map(|m| m.vehicle);
         let mut previous_distance = 0.0;
         let mut hits = 0;
         for candidate in targets {
@@ -288,17 +327,12 @@ impl Sim {
             {
                 break;
             }
-            let ignore = match candidate.target {
-                EmitterTarget::Vehicle(h) => self.vehicle(h).and_then(|v| v.instance),
-                EmitterTarget::Unit(_) | EmitterTarget::Item(_) => None,
+            let target_hull = match candidate.target {
+                EmitterTarget::Vehicle(h) => Some(h),
+                EmitterTarget::Unit(h) => self.unit(h).and_then(|u| u.mount).map(|m| m.vehicle),
+                EmitterTarget::Item(_) => None,
             };
-            if !crate::perception::los_seat(
-                self,
-                origin,
-                candidate.centre,
-                crate::collision::HullFilter::Static,
-                [ignore, None],
-            ) {
+            if !self.force_emitter_clear(origin, candidate.centre, [origin_hull, target_hull]) {
                 continue;
             }
             let incoming = (candidate.centre - origin).normalize_or_zero();
@@ -391,6 +425,7 @@ impl Sim {
                 previous_distance = candidate.distance;
                 if !emitter.hit_all && emitter.lightning && (hits == 0 || self.lcg.unit() > 0.3) {
                     origin = candidate.centre;
+                    origin_hull = target_hull;
                 }
             }
             if !emitter.hit_all {

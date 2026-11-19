@@ -151,6 +151,7 @@ pub enum Msg {
     Leave,
     Ready {
         round_id: u32,
+        profile: Vec<u8>,
     },
     Request(Vec<u8>),
     Notice(Vec<u8>),
@@ -285,9 +286,10 @@ impl Msg {
                 w.str(target);
             }
             Msg::Leave => w.u8(11),
-            Msg::Ready { round_id } => {
+            Msg::Ready { round_id, profile } => {
                 w.u8(12);
                 w.var((*round_id).into());
+                w.bytes(profile);
             }
             Msg::Request(b) => {
                 w.u8(13);
@@ -416,6 +418,7 @@ impl Msg {
             11 => Msg::Leave,
             12 => Msg::Ready {
                 round_id: r.var32()?,
+                profile: r.bytes(MAX_PROFILE)?.to_vec(),
             },
             13 => Msg::Request(r.bytes(MAX_REQUEST)?.to_vec()),
             14 => Msg::Notice(r.bytes(MAX_NOTICE)?.to_vec()),

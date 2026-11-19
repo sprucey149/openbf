@@ -501,6 +501,9 @@ impl HostCore {
                 true
             }
             Msg::CaughtUp { round_id, tick } => {
+                if round_id != self.round.id || !self.round.is_running() {
+                    return true;
+                }
                 if let Some(p) = self.players.get_mut(&slot) {
                     p.catching_up = false;
                     p.seen_tick = p.seen_tick.max(tick);

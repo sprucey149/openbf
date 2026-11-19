@@ -1101,6 +1101,65 @@ mod tests {
         assert_eq!(colours(&w), vec![FRIEND]);
     }
 
+    #[test]
+    fn an_allied_native_has_a_friendly_map_icon() {
+        let mut walk = WalkSim::new(3, Vec3::ZERO, None);
+        let own = walk.sim.units[walk.player.index as usize].team;
+        let native = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(own, Vec3::new(1.0, 0.0, -2.0)))
+            .unwrap();
+        walk.sim.units[native.index as usize].team = 2;
+        let map = MapStatic {
+            soldiers: vec![
+                ClassIcon {
+                    texture: Some("troop_icon".into()),
+                    scale: 1.0,
+                    view: VIEW_DEFAULT,
+                };
+                3
+            ],
+            ..MapStatic::default()
+        };
+        assert_eq!(map.model(&walk).units[0].color, ENEMY);
+        walk.sim.set_team_relation(own, 2, true);
+        assert_eq!(map.model(&walk).units[0].color, FRIEND);
+
+        // A friendly Ewok behind the player keeps its icon beyond the
+        // enemy detection radius, but inside the 50 m minimap.
+        walk.sim.units[native.index as usize].soldier.pos = Vec3::new(0.0, 0.0, 30.0);
+        assert_eq!(map.model(&walk).units[0].color, FRIEND);
+        walk.sim.set_team_relation(own, 2, false);
+        assert!(map.model(&walk).units.is_empty());
+    }
+
+    #[test]
+    fn allied_and_neutral_stations_bypass_enemy_radar_detection() {
+        let mut walk = WalkSim::new(3, Vec3::ZERO, None);
+        let own = walk.sim.units[walk.player.index as usize].team;
+        let mut station = core::sim::Station::new(0, Vec3::new(0.0, 0.0, 30.0), 2.0);
+        station.team = Some(2);
+        walk.sim.stations.push(station);
+        let map = MapStatic {
+            soldiers: vec![ClassIcon::of(&ClassDb::default(), "x"); 2],
+            structures: vec![(
+                ClassIcon {
+                    texture: Some("station_icon".into()),
+                    scale: 1.0,
+                    view: VIEW_DEFAULT,
+                },
+                false,
+            )],
+            ..MapStatic::default()
+        };
+
+        assert!(map.model(&walk).units.is_empty());
+        walk.sim.set_team_relation(own, 2, true);
+        assert_eq!(map.model(&walk).units[0].color, FRIEND);
+        walk.sim.stations[0].team = None;
+        assert_eq!(map.model(&walk).units[0].color, NEUTRAL);
+    }
+
     /// Flying a droid, the map is centred on the droid, turns with its
     /// heading and zooms with its speed; the standing body shows as a
     /// soldier icon. Control back, the soldier's camera again and no body.
