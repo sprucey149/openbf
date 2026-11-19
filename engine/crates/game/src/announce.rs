@@ -221,6 +221,10 @@ pub struct Commander {
     /// slots: the one holding `global_vo_slow`, where every commander line
     /// and unit chatter line of a BF2 battle plays (re-announcer.md §1.7).
     main_slot: Option<u32>,
+    /// A campaign script's `ScriptCB_EnableCommandPostVO`
+    /// ([`crate::campaign_runtime::World::command_post_vo`]): while clear,
+    /// an owner change asks for no post line.
+    post_vo: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -277,6 +281,7 @@ impl Commander {
             first_reinforcements: None,
             last_flag_voice: None,
             stream_slots: std::collections::BTreeMap::new(),
+            post_vo: true,
             main_slot: None,
         }
     }
@@ -352,6 +357,9 @@ impl Commander {
             let Some(post) = self.posts.get(i) else {
                 continue;
             };
+            if !self.post_vo {
+                continue;
+            }
             let a = &self.announcer;
             asked.extend(was.and_then(|o| a.post(post, PostEvent::Lost, usize::from(o))));
             asked.extend(now.and_then(|o| a.post(post, PostEvent::Capture, usize::from(o))));
@@ -802,6 +810,11 @@ impl Commander {
         self.script_sounds.extend(names);
     }
 
+    /// Follow the script's `ScriptCB_EnableCommandPostVO` flag.
+    pub fn enable_post_vo(&mut self, on: bool) {
+        self.post_vo = on;
+    }
+
     /// Take a campaign script's stream slots: a stream appended to a slot
     /// queues on that slot's line, behind or ahead of the others by key, and
     /// never sounds over it (B2 `FUN_005519c8` / `FUN_00550528`,
@@ -1237,6 +1250,29 @@ mod tests {
             v.calls(&w.sim, &w.teams);
         }
         assert!(v.calls_asked.is_empty(), "{:?}", v.calls_asked);
+    }
+
+    #[test]
+    fn a_script_that_mutes_the_posts_hears_no_post_line() {
+        let mut lines = PostLines::default();
+        let imp = core::announcer::faction_index("imp").unwrap();
+        lines.set(imp, imp, PostEvent::Capture, "imp_off_com_report_captured_commandpost");
+        let mut c = Commander::new(
+            BattleLines::default(),
+            ["imp", "all"],
+            0,
+            vec![lines],
+            vec![None],
+        );
+        let dt = 1.0 / 30.0;
+        c.enable_post_vo(false);
+        let said = c.observe(dt, &[Some(0)], [0.0; 2], [150; 2], true, false);
+        assert!(said.is_empty(), "{said:?}");
+        c.enable_post_vo(true);
+        c.observe(dt, &[None], [0.0; 2], [150; 2], true, false);
+        let said = c.observe(dt, &[Some(0)], [0.0; 2], [150; 2], true, false);
+        let names: Vec<&str> = said.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["imp_off_com_report_captured_commandpost"]);
     }
 
     #[test]

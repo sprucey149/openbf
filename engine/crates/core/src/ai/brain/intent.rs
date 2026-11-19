@@ -92,9 +92,15 @@ pub(in crate::ai) fn compose_aim<'a>(
     goal: Option<Vec3>,
 ) -> Option<AimRequest<'a>> {
     let Tick {
-        u, eye, wc, rules, ..
+        me,
+        u,
+        eye,
+        wc,
+        rules,
+        ..
     } = frame.tick;
     let pos = frame.pos;
+    let look = crate::goals::defend_look(sim, me);
     let ground = rules.round.ground();
     // Playtest C3: a bot walking somewhere faces its walk unless it can
     // fight what it looks at. The PS2 gives no aim order outside an attack
@@ -151,6 +157,11 @@ pub(in crate::ai) fn compose_aim<'a>(
                 AimRequest::Travel(perception::level(eye, p + Vec3::Y * 1.4))
             }
             (None, Some(p), _, _) => AimRequest::Memory(p + Vec3::Y * 1.4),
+            // A Defend member stopped where it heard a noise looks one way,
+            // then the other (`crate::goals::defend_look`, `FUN_002cef98`).
+            (None, None, _, _) if look.is_some() => {
+                AimRequest::Travel(look.map_or(pos, |p| Vec3::new(p.x, eye.y, p.z)))
+            }
             // Card HOLD: a holder standing on its point with nobody in sight
             // watches the way the nearest enemy is.
             (None, None, _, _)

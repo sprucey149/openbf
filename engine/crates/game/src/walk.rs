@@ -1734,6 +1734,7 @@ impl WalkSim {
                 lines.extend(campaign.take_sounds());
                 if let Some(v) = self.voice.as_mut() {
                     v.route_streams(campaign.stream_slots());
+                    v.enable_post_vo(campaign.command_post_vo());
                     v.ask_script_sounds(lines);
                 }
                 self.campaign = Some(campaign);

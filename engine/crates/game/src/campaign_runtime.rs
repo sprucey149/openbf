@@ -229,6 +229,11 @@ pub(crate) struct World {
     pub saved_cp_captures: Vec<Region>,
     pub team_classes: [Vec<String>; 2],
     pub team_units: [u32; 2],
+    /// Each team's per-faction value row ([`crate::walk::faction_row`]): which
+    /// team a script's `SetProperty(post, "Value_ATK_<faction>", v)` writes,
+    /// the same collapse `WalkSim::add_posts` makes for the posts' authored
+    /// rows.
+    pub team_value_rows: [usize; 2],
     pub native_classes: BTreeMap<u8, Vec<String>>,
     pub native_units: BTreeMap<u8, u32>,
     pub vehicle_classes: Vec<String>,
@@ -249,6 +254,10 @@ pub(crate) struct World {
     pub inside: BTreeSet<(u32, u32)>,
     seen: Vec<Option<CharSeen>>,
     pub char_alias: BTreeMap<u32, u32>,
+    /// Each native team's members in `GetTeamMember` order, fixed once
+    /// asked: the PS2's team holds one character per unit for the whole
+    /// battle, and `SpawnCharacter` brings that character back.
+    pub native_members: BTreeMap<u8, Vec<u32>>,
     /// A native member the script reassigns before `SpawnCharacter`: BF2's
     /// `BatchChangeTeams` / `SelectCharacterClass` (the Utapau campaign turns
     /// team 4's member into the CIS hero Grievous for Objective 3b). Keyed by
@@ -275,6 +284,11 @@ pub(crate) struct World {
     /// (B2 `FUN_005519c8` finds the slot holding the property's stream,
     /// re-announcer.md §1 steps 2 and 7).
     pub stream_slots: BTreeMap<u32, u32>,
+    /// `ScriptCB_EnableCommandPostVO`'s flag (`DAT_005fed28`, default 1):
+    /// the binding `FUN_001a0580` stores `(int)n == 1`, and the post line
+    /// `FUN_003570b8` says nothing while it is clear; the post's sound and
+    /// music still play (re-announcer.md §2.1).
+    pub command_post_vo: bool,
 
     pub messages: Vec<String>,
     pub popups: VecDeque<Popup>,
@@ -421,6 +435,7 @@ impl CampaignRuntime {
             saved_cp_captures,
             team_classes: [Vec::new(), Vec::new()],
             team_units: [0, 0],
+            team_value_rows: [crate::walk::faction_row("all"), crate::walk::faction_row("imp")],
             native_classes: BTreeMap::new(),
             native_units: BTreeMap::new(),
             vehicle_classes: Vec::new(),
@@ -438,6 +453,7 @@ impl CampaignRuntime {
             inside: BTreeSet::new(),
             seen: Vec::new(),
             char_alias: BTreeMap::new(),
+            native_members: BTreeMap::new(),
             scripted_chars: BTreeMap::new(),
             last_shot: Vec::new(),
             last_hit_weapon: Vec::new(),
@@ -454,6 +470,7 @@ impl CampaignRuntime {
             shown_timer: None,
             voice_playing: false,
             stream_slots: BTreeMap::new(),
+            command_post_vo: true,
             messages: Vec::new(),
             popups: VecDeque::new(),
             voice: Vec::new(),
@@ -478,6 +495,12 @@ impl CampaignRuntime {
     pub fn set_team_rosters(&mut self, team_classes: [Vec<String>; 2], team_units: [u32; 2]) {
         self.w.team_classes = team_classes;
         self.w.team_units = team_units;
+    }
+
+    /// The two main teams' faction keys (`all`, `imp`, ...), before `start`:
+    /// they route the script's per-faction post values to teams.
+    pub fn set_team_factions(&mut self, factions: [&str; 2]) {
+        self.w.team_value_rows = factions.map(crate::walk::faction_row);
     }
 
     /// Ask the runtime to spawn the main teams' opening AI wave on the first
@@ -1167,6 +1190,11 @@ impl CampaignRuntime {
     /// The stream slots the script opened ([`World::stream_slots`]).
     pub fn stream_slots(&self) -> &BTreeMap<u32, u32> {
         &self.w.stream_slots
+    }
+
+    /// The script lets command posts speak ([`World::command_post_vo`]).
+    pub fn command_post_vo(&self) -> bool {
+        self.w.command_post_vo
     }
 
     /// The popup up now (the battle pauses under it).

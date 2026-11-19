@@ -59,6 +59,12 @@ struct Entry {
     anim: Option<usize>,
     station: Option<usize>,
     vehicle_pad: Option<usize>,
+    /// The pad's vehicle this entry is linked to. The BF2 pad spawn step
+    /// links the entry of the pad's name to each vehicle it creates and copies
+    /// that vehicle's matrix into `base` after its constructor has added the
+    /// flyer's LandedHeight (SWBFRNT2.ELF FUN_003725f0 lines 358123-358128,
+    /// analysis/re-vehicle-rest.md §2).
+    linked: Option<core::vehicle::VehicleHandle>,
     instance: Option<u32>,
     time: f32,
     base: Mat4,
@@ -285,6 +291,7 @@ impl WorldAnimPlayer {
                         cur_pos: base.w_axis.truncate(),
                         station,
                         vehicle_pad,
+                        linked: None,
                         instance,
                         time: 0.0,
                         parts: None,
@@ -349,6 +356,8 @@ impl WorldAnimPlayer {
             for e in &mut g.entries {
                 if let Some(s) = e.station.and_then(|s| sim.stations.get(s)) {
                     e.base = s.transform;
+                } else if let Some(v) = e.linked.and_then(|h| sim.vehicle(h)) {
+                    e.base = Mat4::from_rotation_translation(v.rot, v.pos);
                 }
             }
         }
@@ -356,6 +365,7 @@ impl WorldAnimPlayer {
 
     /// One tick of every playing group (FUN_00274c18).
     pub fn step(&mut self, sim: &mut core::sim::Sim, dt: f32) {
+        self.link_pad_vehicles(sim);
         let mut poses = BTreeMap::new();
         for g in &mut self.groups {
             let Group {
@@ -371,7 +381,7 @@ impl WorldAnimPlayer {
                 let Some(ai) = e.anim else {
                     continue;
                 };
-                if e.station.is_none() && e.vehicle_pad.is_none() && e.instance.is_none() {
+                if e.station.is_none() && e.linked.is_none() && e.instance.is_none() {
                     continue;
                 }
                 let a = &self.anims[ai];
@@ -395,15 +405,8 @@ impl WorldAnimPlayer {
                     if let Some((_, parts)) = &e.parts {
                         sim.set_station_transform(si, m, parts);
                     }
-                } else if let Some(pi) = e.vehicle_pad {
-                    let handles: Vec<_> = sim
-                        .vehicle_pads
-                        .get(pi)
-                        .map(|pad| pad.vehicles.iter().map(|pv| pv.handle).collect())
-                        .unwrap_or_default();
-                    for h in handles {
-                        sim.set_vehicle_world_pose(h, m, step);
-                    }
+                } else if let Some(h) = e.linked {
+                    sim.set_vehicle_world_pose(h, m, step);
                 } else if let Some(ii) = e.instance {
                     if let Some(parts) = self.instance_parts.get(&ii) {
                         for &(i, local) in parts {
@@ -415,6 +418,41 @@ impl WorldAnimPlayer {
             }
         }
         self.instance_poses.extend(poses);
+    }
+
+    /// Link every pad entry, playing or not, to its pad's newest vehicle once
+    /// that vehicle is not the one already linked, and take its matrix as the
+    /// base (FUN_003725f0 lines 358123-358128 → FUN_00274738). The pad
+    /// creates the vehicle at its spawn point plus the flyer's LandedHeight
+    /// before the link, so a landing animation such as Death Star's
+    /// `incoming03` sets the trooper transport down on its gear, not sunk by
+    /// that height. trace: the PS2 names a pad's second live vehicle with a
+    /// number suffix (lines 358046-358054), so only the first carries the
+    /// pad's name; the port links the newest one once the linked one is gone.
+    fn link_pad_vehicles(&mut self, sim: &core::sim::Sim) {
+        for e in self.groups.iter_mut().flat_map(|g| g.entries.iter_mut()) {
+            let Some(pi) = e.vehicle_pad else {
+                continue;
+            };
+            if e.linked.is_some_and(|h| sim.vehicle(h).is_some()) {
+                continue;
+            }
+            let Some(h) = sim
+                .vehicle_pads
+                .get(pi)
+                .and_then(|pad| pad.vehicles.last())
+                .map(|pv| pv.handle)
+                .filter(|h| Some(*h) != e.linked)
+            else {
+                continue;
+            };
+            let Some(v) = sim.vehicle(h) else {
+                continue;
+            };
+            e.base = Mat4::from_rotation_translation(v.rot, v.pos);
+            e.cur_pos = v.pos;
+            e.linked = Some(h);
+        }
     }
 
     /// The current pose of each animated world instance (manifest index).

@@ -1453,3 +1453,33 @@ fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
     let _ = (goal_id, HullFilter::All);
 }
 
+
+/// `FUN_002e43c8`: an AI enemy whose sight ray reaches the bot gives the bot
+/// a sighting of it, whichever way the bot faces; a human seer, or one that
+/// has not looked since the bot's last think, gives none.
+#[test]
+fn being_seen_by_an_ai_enemy_is_a_sighting_of_it() {
+    for (ai, looked, held) in [(true, true, true), (false, true, false), (true, false, false)] {
+        let (mut s, a) = watcher(5);
+        let e = s
+            .spawn(&UnitSpec {
+                controller: if ai { Controller::Ai } else { Controller::Player { slot: 0 } },
+                ..UnitSpec::trooper(1, Vec3::new(0.0, 0.0, 15.0))
+            })
+            .unwrap();
+        let mut seer = AiState::default();
+        scan(&s, e, &mut seer, normal());
+        assert!(contact_of(&seer, a).is_some_and(|c| c.seen_now), "the seer sees the bot");
+        s.units[e.index as usize].ai = seer;
+        if !looked {
+            s.tick += THINK_PERIOD;
+        }
+        let mut st = AiState::default();
+        scan(&s, a, &mut st, normal());
+        assert_eq!(
+            contact_of(&st, e).is_some_and(|c| c.seen_now),
+            held,
+            "ai {ai}, looked {looked}"
+        );
+    }
+}

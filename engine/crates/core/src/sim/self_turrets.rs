@@ -94,7 +94,7 @@ impl SelfPilot {
 }
 
 pub use crate::vehicle::flyer::THREAT_SLOTS;
-pub(super) const LEVEL_THINK: [f32; 5] = [4.0, 3.0, 2.0, 1.0, 0.25];
+pub(crate) const LEVEL_THINK: [f32; 5] = [4.0, 3.0, 2.0, 1.0, 0.25];
 pub(super) const COMBAT_THINK_FACTOR: f32 = 0.4;
 pub(super) const RAY_INTERVAL_BY_LEVEL: [f32; 5] = [4.0, 4.0, 2.0, 1.0, 1.0];
 pub(super) const RAY_REQUESTS_BY_LEVEL: [usize; 5] = [1, 1, 2, 4, 5];
@@ -164,7 +164,7 @@ impl Sim {
         crate::collision::lead_point(at - eye, v.vel, speed).map_or(at, |rel| eye + rel)
     }
 
-    pub(super) fn self_level(&self, pos: Vec3, eye: Vec3, view: Vec3) -> usize {
+    pub(crate) fn self_level(&self, pos: Vec3, eye: Vec3, view: Vec3) -> usize {
         let mut level = 0;
         for (_, u) in self.alive_units().filter(|(_, u)| u.is_human()) {
             let at = u

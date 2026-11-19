@@ -714,6 +714,7 @@ pub(super) fn make_walk_with_counts(
                     &walk.sim,
                 );
                 rt.set_team_rosters(team_classes, [0, 0]);
+                rt.set_team_factions([walk.teams[0].faction.as_str(), walk.teams[1].faction.as_str()]);
                 rt.set_native_rosters(
                     m.local_teams
                         .iter()

@@ -252,6 +252,7 @@ fn setup_baked_campaign_with(
     let saved = CampaignRuntime::kill_startup_posts(&mut walk.sim, &def.killed);
     let mut rt = CampaignRuntime::new(spec, &layout, &manifest, &walk.post_keys, saved, &walk.sim);
     rt.set_team_rosters(team_classes(&def), [def.teams[0].units, def.teams[1].units]);
+    rt.set_team_factions([def.teams[0].faction.as_str(), def.teams[1].faction.as_str()]);
     rt.set_native_rosters(
         def.local_teams
             .iter()
@@ -985,7 +986,7 @@ fn nab2g_c_objective_line_waits_for_the_commander_line_on_its_slot() {
     let _ = v.gate_script_sounds(&lib);
     let lines = ["imp_off_com_report_us_overwhelmed", "NAB_obj_22"];
     let mut played = Vec::new();
-    let mut frame = |v: &mut crate::announce::Commander, played: &mut Vec<String>| {
+    let frame = |v: &mut crate::announce::Commander, played: &mut Vec<String>| {
         let _ = v.frame(&walk.sim, walk.player, core::TICK_DT, |line| {
             if lines.contains(&line.name.as_str()) {
                 played.push(line.name.clone());
@@ -1594,6 +1595,7 @@ fn setup_baked_campaign_full(
     let saved = CampaignRuntime::kill_startup_posts(&mut walk.sim, &def.killed);
     let mut rt = CampaignRuntime::new(spec, &layout, &scene.manifest, &walk.post_keys, saved, &walk.sim);
     rt.set_team_rosters(team_classes(&def), [def.teams[0].units, def.teams[1].units]);
+    rt.set_team_factions([def.teams[0].faction.as_str(), def.teams[1].faction.as_str()]);
     rt.set_native_rosters(
         def.local_teams
             .iter()
@@ -3629,4 +3631,120 @@ fn spa4g_c_bots_leave_the_barred_cis_bomber_parked() {
     }
     let v = walk.sim.vehicle(bomber).expect("the bomber is still there");
     assert!(glam::Vec2::new(v.pos.x, v.pos.z).distance(pad) < 1.0, "still on its pad: {:?}", v.pos);
+}
+
+#[test]
+fn dea1g_c_landing_craft_rests_on_its_gear_and_the_rebel_waves_reach_the_hangar() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        return;
+    };
+    if !baked_dir
+        .join("bf2_dea1")
+        .join(manifest::world_anim::FILE)
+        .exists()
+    {
+        eprintln!("SKIP: bf2_dea1 world animations not baked");
+        return;
+    }
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "dea1g_c");
+
+    // 1. `incoming01` then `incoming03` set `trans01` down. The pad links the
+    //    animation to its flyer AFTER the constructor added LandedHeight
+    //    (FUN_003725f0 → FUN_00274738), so its origin ends LandedHeight
+    //    (2.2516 m, -vis_min_y) over the 50.0 m deck, less land03's 1.6 cm.
+    for _ in 0..(14 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+    }
+    let pad = walk
+        .sim
+        .vehicle_pads
+        .iter()
+        .find(|p| p.def.name.eq_ignore_ascii_case("trans01"))
+        .expect("trans01 pad");
+    let ship = walk
+        .sim
+        .vehicle(pad.vehicles.last().expect("trans01 spawned").handle)
+        .expect("trans01 alive");
+    let rest = pad.def.pos.y + 2.2516367 - 8.93;
+    assert!(
+        (ship.pos.y - rest).abs() < 0.05,
+        "trans01 must land on its gear at y {rest}, got {}",
+        ship.pos.y
+    );
+
+    // 2. `SetProperty("CAM_CP2", "Value_ATK_Empire", 10)` and
+    //    `..."Value_DEF_Alliance", 10)` reach the Empire (team 0 here) and
+    //    the Alliance (team 1), by each team's faction.
+    let cp2 = walk
+        .sim
+        .cps
+        .iter()
+        .find(|c| c.def.name.eq_ignore_ascii_case("cam_cp2"))
+        .expect("cam_cp2");
+    assert_eq!(cp2.def.value_atk[0], 10, "Value_ATK_Empire is team 0's");
+    assert_eq!(cp2.def.value_def[1], 10, "Value_DEF_Alliance is team 1's");
+
+    // 3. `all_spawn` stands 0.62 m under the corridor deck: its hub still
+    //    resolves to that deck, not the level 28 m below, so the corridor
+    //    from the Alliance's room is no trap.
+    let spawn_hub = walk
+        .sim
+        .cps
+        .iter()
+        .find(|c| c.def.name.eq_ignore_ascii_case("all_spawn"))
+        .and_then(|c| c.nav_hub)
+        .expect("all_spawn hub");
+    let floor = walk.sim.nav_floor(spawn_hub).expect("resolved");
+    assert!(
+        (floor - 50.0).abs() < 0.5,
+        "all_spawn's hub floor {floor}, the corridor deck is 50.0"
+    );
+    assert!(!walk.sim.hub_trapped(spawn_hub), "the corridor is no trap");
+
+    // 4. The hangar ambush fields all six of team 5 after `defend_ambush`'s
+    //    three have died: the members keep their places.
+    call_script(
+        &mut rt,
+        &mut walk.sim,
+        "Ambush",
+        vec![Value::str("defend_ambush"), Value::Num(3.0), Value::Num(5.0)],
+    );
+    let first: Vec<_> = walk
+        .sim
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(_, u)| u.team == 4 && u.alive)
+        .map(|(i, u)| core::unit::UnitHandle {
+            index: i as u32,
+            gen: u.gen,
+        })
+        .collect();
+    assert_eq!(first.len(), 3, "defend_ambush fields three");
+    for h in first {
+        walk.sim.kill_unit_by(h, None);
+    }
+    call_script(
+        &mut rt,
+        &mut walk.sim,
+        "Ambush",
+        vec![Value::str("hangar_ambush_spawn"), Value::Num(6.0), Value::Num(5.0)],
+    );
+    let alive = walk.sim.units.iter().filter(|u| u.team == 4 && u.alive).count();
+    assert_eq!(alive, 6, "hangar_ambush_spawn fields all six of team 5");
+}
+
+/// `ScriptCB_EnableCommandPostVO(n)` sets the post-line flag to `n == 1`
+/// (B2 `FUN_001a0580`), on by default.
+#[test]
+fn enable_command_post_vo_sets_the_flag_to_n_equals_one() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        return;
+    };
+    let (_def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "dea1g_c");
+    assert!(rt.command_post_vo());
+    for (n, on) in [(0.0, false), (1.0, true), (2.0, false), (1.0, true)] {
+        call_script(&mut rt, &mut walk.sim, "ScriptCB_EnableCommandPostVO", vec![Value::Num(n)]);
+        assert_eq!(rt.command_post_vo(), on, "n = {n}");
+    }
 }

@@ -249,7 +249,7 @@ impl Sim {
                 let anchors =
                     std::iter::once(cp.def.pos).chain(cp.def.spawn_nodes.iter().map(|&(p, _)| p));
                 for p in anchors {
-                    let Some(y) = self.ground_hit_under(p, false) else {
+                    let Some(y) = self.anchor_floor(p) else {
                         continue;
                     };
                     lowest = lowest.fmin(y);
@@ -411,6 +411,25 @@ impl Sim {
         }
         self.nav_unwalkable = unwalkable;
         self.nav_trapped = self.trapped_hubs();
+    }
+
+    /// The floor a post or spawn node at `p` stands on, for the walk's
+    /// anchors. A soldier's step probe first; when that lands more than
+    /// [`TRACE_DROP`] under the anchor, the anchor is set into its own floor
+    /// and the probe went through it, so it asks again from [`TRACE_UP`], the
+    /// walk's own climb. BF2 Death Star's `all_spawn` stands 0.62 m under the
+    /// prison corridor's deck: the step probe met the level 28 m below and
+    /// pinned hub 7 there, so the corridor read as a trap and the Alliance's
+    /// wave never left its room. PROVISIONAL (ours, like the anchors): measure:
+    /// census the posts and spawn nodes the retry moves on every map.
+    fn anchor_floor(&self, p: Vec3) -> Option<f32> {
+        let y = self.ground_hit_under(p, false);
+        if y.is_some_and(|y| y >= p.y - TRACE_DROP) {
+            return y;
+        }
+        self.ground_hit_under(Vec3::new(p.x, p.y + TRACE_UP, p.z), true)
+            .filter(|&f| f >= p.y - TRACE_DROP)
+            .or(y)
     }
 
     /// Card TGAP: is arc `arc` WALLED for a soldier leaving hub `from` - the

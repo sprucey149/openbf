@@ -620,6 +620,8 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         }
     }
 
+    seen_by(sim, me, st);
+
     // 3. Listen (no cone, no LOS): a shot fired inside HEAR_RADIUS since the
     //    last think, and — at any range — whoever hit me. A shooter that hit
     //    me unseen must be found first ([`search_ticks`], playtest C1).
@@ -667,6 +669,45 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
 
     let held = st.contacts.iter().flatten().count() as u8;
     (held, heard)
+}
+
+/// `FUN_002e43c8` (`SWBFRNT2.ELF-decomp.c` 258331-258422): a seer whose sight
+/// ray reaches a unit sends message 5 about the unit to itself and, when the
+/// unit is AI-driven (`FUN_002b6b70`), message 5 about the seer to the unit,
+/// which takes the seer into its threats (`FUN_002b9cb0`, +0x2e0): being
+/// seen by an AI enemy starts a fight at once (`analysis/re-soldier-ai.md`
+/// 4.1), whichever way the seen bot faces. Here `me` takes every hostile AI
+/// unit that saw it since its last think as seen, where that unit stood. A
+/// proxy stands in for a human (card DPRX), so it neither sends nor takes it.
+///
+/// PROVISIONAL (ours): the message reaches the seen bot at once and its fight
+/// order passes the attack matrix (`FUN_002b7e58`, 4.4); the port reads it at
+/// the seen bot's next think, and its target is [`choose_target`]'s.
+/// replace: the matrix's test on the message.
+fn seen_by(sim: &Sim, me: UnitHandle, st: &mut AiState) {
+    let Some(u) = sim.unit(me).filter(|u| !u.is_human()) else {
+        return;
+    };
+    let tick = sim.tick;
+    for (i, o) in sim.units.iter().enumerate() {
+        let h = sim.handle(i);
+        if h == me
+            || !o.alive
+            || o.controller != crate::unit::Controller::Ai
+            || o.is_human()
+            || !sim.hostile(u.team, o.team)
+        {
+            continue;
+        }
+        let saw = o.ai.contacts.iter().flatten().any(|c| {
+            c.seen_now
+                && c.handle == Foe::Unit(me)
+                && tick.saturating_sub(c.last_seen) < THINK_PERIOD
+        });
+        if saw {
+            see(st, Foe::Unit(h), tick, o.capsule().center());
+        }
+    }
 }
 
 /// [`view_distance`] for a remote droid, by the same `(20·bound_radius + 30)

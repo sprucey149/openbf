@@ -390,6 +390,17 @@ struct PostInfo {
     /// Card MAIS: the mission lets this team's bots capture it
     /// ([`crate::cp::CommandPost::ai_no_capture`]).
     capturable: bool,
+    /// BF2: the post's owner entity (post+0x2c) is gone, as a `KillObject`
+    /// leaves it. The capture behaviour checks that handle on entry and on
+    /// every update and goes straight to state 100 when it is null
+    /// (`FUN_002cba48`, `FUN_002cc0a0`: `SWBFRNT2.ELF-decomp.c` 241618-241644,
+    /// 241938-241964), so the goal's base update (`FUN_002e7110`) assigns the
+    /// member again within a second (`analysis/re-conquest-goal.md` §2, §4).
+    /// The draw itself still offers the post as an ownerless one (§3).
+    /// PROVISIONAL (ours): between that draw and the next plan the port's bot
+    /// walks toward the dead post; the disc's stands with its order finished.
+    /// replace: hold the walk for an objective whose post is dead.
+    dead: bool,
 }
 
 /// The Conquest goal's tick for team `team`. Called by
@@ -465,6 +476,7 @@ pub fn plan(sim: &mut Sim, team: u8) {
             atk: c.def.value_atk[t],
             def: c.def.value_def[t],
             capturable: !c.ai_no_capture(team),
+            dead: rules == GoalRules::Bf2 && c.killed,
         });
     }
     // Unreachable from where the unit stands. No graph (or no hub for the
@@ -569,7 +581,9 @@ pub fn plan(sim: &mut Sim, team: u8) {
                 if tested {
                     clock = AT_POST_TESTED;
                 }
-                if dwell >= DWELL_GIVE_UP || gave_up == Some(c) {
+                if p.dead {
+                    true
+                } else if dwell >= DWELL_GIVE_UP || gave_up == Some(c) {
                     // It has stood beside the post for 10 s without arriving,
                     // or its walk there has failed twice (card MOVR).
                     exclude = Some(c);
@@ -986,7 +1000,7 @@ fn nearest_hint<'a>(
 /// no deeper than the AI's own ledge rule ([`crate::ai::LEDGE_DROP`], card
 /// STLVL: BF2 DEA1's cp2 at 52 m has a hint 6 m under its gallery, and its
 /// defenders stood on the rim over it until they were recycled).
-fn hint_on_level(sim: &Sim, centre_y: f32, hint: Vec3) -> bool {
+pub(crate) fn hint_on_level(sim: &Sim, centre_y: f32, hint: Vec3) -> bool {
     let own = sim.ground_under(hint, false);
     let from_centre = sim.ground_under(Vec3::new(hint.x, centre_y, hint.z), false);
     (own - from_centre).abs() <= STEP_HEIGHT && own >= centre_y - crate::ai::LEDGE_DROP

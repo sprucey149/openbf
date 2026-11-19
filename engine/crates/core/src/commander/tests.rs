@@ -1309,3 +1309,173 @@ fn the_plan_hash_covers_every_field() {
         assert_ne!(h(&base), h(v), "{v:?}");
     }
 }
+
+/// BF2: a target post whose owner entity is gone (`KillObject`) ends the
+/// capture behaviour at once, so the member is assigned again at the next
+/// plan; while the post stands the same target is kept.
+#[test]
+fn a_killed_target_post_is_drawn_again_at_the_next_plan() {
+    let fixture = || {
+        let mut sim = world(&[Some(1), Some(1), Some(1)]);
+        sim.cps[1].def.value_atk = [0, 0];
+        sim.cps[1].def.value_def = [0, 0];
+        sim.commander[0].assignment = vec![Some(Objective::Attack(1)); 5];
+        sim
+    };
+    let mut sim = fixture();
+    plans(&mut sim, 1);
+    assert!(assignments(&sim, 0)[..4]
+        .iter()
+        .all(|o| *o == Some(Objective::Attack(1))));
+
+    let mut sim = fixture();
+    sim.cps[1].killed = true;
+    sim.cps[1].owner = None;
+    plans(&mut sim, 1);
+    let a = assignments(&sim, 0);
+    assert!(
+        a[..4]
+            .iter()
+            .all(|o| matches!(o, Some(Objective::Attack(0 | 2)))),
+        "{a:?}"
+    );
+}
+
+/// BF2's defend helper (`FUN_002d2f98`, `FUN_002d2e40`): 10 s after a Defend
+/// member joins, it takes the nearest free type "7" hint in a 50 m box of
+/// its target, else the nearest free Cover hint, one member a hint.
+#[test]
+fn a_defend_member_takes_the_nearest_free_type_7_hint_after_ten_seconds() {
+    let (mut sim, first) = defend_world();
+    let held = |sim: &Sim| {
+        (0..4)
+            .map(|i| sim.ai_goals.hint_of(sim.handle(i)))
+            .collect::<Vec<_>>()
+    };
+    while sim.tick < first {
+        crate::goals::step(&mut sim);
+        assert_eq!(held(&sim), vec![None; 4], "no search before 10 s");
+        sim.tick += 1;
+    }
+    crate::goals::step(&mut sim);
+    assert_eq!(held(&sim), vec![Some(1), Some(0), Some(2), None]);
+    assert_eq!(
+        crate::goals::defend_walk(&sim, sim.handle(0)),
+        Some((Vec3::new(70.0, 0.0, 0.0), MASK_CROUCH))
+    );
+}
+
+#[test]
+fn a_defend_hint_is_free_two_seconds_after_its_holder_last_stamped_it() {
+    let (mut sim, first) = defend_world();
+    while sim.tick <= first {
+        crate::goals::step(&mut sim);
+        sim.tick += 1;
+    }
+    assert_eq!(sim.ai_goals.hint_of(sim.handle(3)), None);
+    sim.units[0].ai.behaviour = crate::ai::Behaviour::Fight;
+    let stamped = sim.ai_goals.hold_of(sim.handle(0)).expect("hold").stamp;
+    let mut taken = None;
+    while sim.tick < stamped + 10 * crate::goals::TICK && taken.is_none() {
+        crate::goals::step(&mut sim);
+        taken = sim.ai_goals.hint_of(sim.handle(3)).map(|k| (k, sim.tick));
+        sim.tick += 1;
+    }
+    let (k, at) = taken.expect("unit 3 takes the fighter's hint");
+    assert_eq!(k, 1);
+    assert!(
+        at >= stamped + crate::goals::HINT_KEEP,
+        "free only after 2 s: {at}"
+    );
+}
+
+/// BF2's noise pass (`FUN_002de708`) and the combat helper it orders
+/// (`FUN_002c3390`, `FUN_002ce648`, `FUN_002cf458`, `FUN_002cef98`): an enemy
+/// that fired 20 m off is walked to, a still one is not heard past 8 m nor
+/// one straight overhead past 3.5 m; at the noise the member stops, looks
+/// 30-75° one way, then twice that back the other, and walks again.
+#[test]
+fn a_defend_member_walks_to_a_heard_shot_and_looks_round() {
+    use crate::goals::HoldState;
+    let state = |sim: &Sim, i: usize| sim.ai_goals.hold_of(sim.handle(i)).map(|h| h.state);
+    let (mut sim, _) = defend_world();
+    crate::goals::step(&mut sim);
+    sim.tick += 1;
+    let enemy = 4;
+    sim.units[enemy].soldier.pos = Vec3::new(40.0, 0.0, 20.0);
+    sim.units[enemy].ai.last_think = sim.tick - 1;
+    sim.units[enemy].last_shot_tick = u64::MAX;
+    crate::goals::step(&mut sim);
+    assert_eq!(
+        state(&sim, 0),
+        Some(HoldState::Walk),
+        "a still enemy at 20 m"
+    );
+    sim.tick += 1;
+    sim.units[enemy].soldier.pos = Vec3::new(40.0, 5.0, 0.0);
+    sim.units[enemy].last_shot_tick = sim.tick - 1;
+    sim.units[enemy].ai.last_think = sim.tick - 1;
+    crate::goals::step(&mut sim);
+    assert_eq!(state(&sim, 0), Some(HoldState::Walk), "a shot overhead");
+    sim.tick += 1;
+    sim.units[enemy].soldier.pos = Vec3::new(40.0, 0.0, 20.0);
+    sim.units[enemy].last_shot_tick = sim.tick - 1;
+    sim.units[enemy].ai.last_think = sim.tick - 1;
+    crate::goals::step(&mut sim);
+    assert!((0..4).all(|i| state(&sim, i) == Some(HoldState::Noise)));
+    let (at, mask) = crate::goals::defend_walk(&sim, sim.handle(0)).expect("walk");
+    assert!(
+        (at - Vec3::new(40.0, 0.0, 20.0)).length() < 1e-3 && mask == 0,
+        "{at}"
+    );
+    sim.units[0].ai.mv.arrived = true;
+    sim.units[0].ai.mv.dest = at;
+    sim.units[0].soldier.yaw = 0.0;
+    let mut looks = Vec::new();
+    for _ in 0..2000 {
+        sim.tick += 1;
+        crate::goals::step(&mut sim);
+        let Some(gaze) = crate::goals::defend_look(&sim, sim.handle(0)) else {
+            if !looks.is_empty() {
+                break;
+            }
+            continue;
+        };
+        let d = gaze - sim.units[0].soldier.pos;
+        let yaw = (-d.x).atan2(-d.z);
+        if looks.last() != Some(&yaw) {
+            looks.push(yaw);
+        }
+        sim.units[0].soldier.yaw = yaw;
+    }
+    assert_eq!(state(&sim, 0), Some(HoldState::Walk));
+    assert_eq!(looks.len(), 2, "{looks:?}");
+    let first = looks[0].abs().to_degrees();
+    assert!((30.0..=75.0).contains(&first), "{looks:?}");
+    assert!((looks[1] + looks[0]).abs() < 1e-3, "{looks:?}");
+}
+
+/// Four AI of team 0 by post 1 (x 40) in its Defend goal, with two type "7"
+/// hints 30 and 45 m from it, a Cover hint at 5 m and one outside the
+/// search's box, and the tick of the first search: the first update of the
+/// walk (factor 1.5, level 0) past 10 s.
+fn defend_world() -> (Sim, u64) {
+    let mut sim = world(&[Some(0), None, None]);
+    sim.nav.as_mut().expect("graph").hints = vec![
+        hint("far7", crate::goals::HINT_DEFEND, 85.0, MASK_STAND),
+        hint("near7", crate::goals::HINT_DEFEND, 70.0, MASK_CROUCH),
+        hint("cover", crate::goals::HINT_COVER, 45.0, MASK_STAND),
+        hint("out", crate::goals::HINT_COVER, 100.0, MASK_STAND),
+    ];
+    sim.ai_goals
+        .add(
+            0,
+            crate::goals::GoalKind::Defend,
+            100.0,
+            Some(crate::goals::GoalTarget::Post(1)),
+        )
+        .expect("goal");
+    let period = (crate::goals::THINK_WALK * 4.0 * crate::TICK_HZ as f32) as u64;
+    let first = (crate::goals::HINT_WAIT / period + 1) * period;
+    (sim, first)
+}

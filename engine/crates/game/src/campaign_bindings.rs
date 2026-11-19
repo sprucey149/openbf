@@ -53,6 +53,7 @@ const BOUND: &[&str] = &[
     "EnableLockOn",
     "EnableSPHeroRules",
     "EnableSPScriptedHeroes",
+    "ScriptCB_EnableCommandPostVO",
     "FindTimer",
     "GetCharacterClass",
     "GetCharacterTeam",
@@ -163,7 +164,6 @@ const IGNORED: &[&str] = &[
     "RemoveRegion",
     "ScaleSoundParameter",
     "ScriptCB_DisableFlyerShadows",
-    "ScriptCB_EnableCommandPostVO",
     "ScriptCB_LoadMissionSetup",
     "ScriptCB_SetControlMode",
     "ScriptCB_SetDopplerFactor",
@@ -1044,6 +1044,10 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
+            "ScriptCB_EnableCommandPostVO" => {
+                w.command_post_vo = num(a, 0).is_some_and(|n| n as i32 == 1);
+                nothing()
+            }
             "EnableSPHeroRules" | "EnableSPScriptedHeroes" => {
                 if let Some(heroes) = sim.heroes.as_mut() {
                     heroes.rules.unlock = core::sim::heroes::HeroUnlock::Points(i32::MAX);
@@ -1203,8 +1207,14 @@ impl World {
     }
 
     /// The team's i-th member: its slots in order, then (for a native team)
-    /// the members that never spawned.
-    fn team_member(&self, sim: &Sim, t: u8, i: usize) -> Option<u32> {
+    /// the members that never spawned. A native team's list is taken once
+    /// and kept: a member spawned again lands in a new slot
+    /// (`Sim::spawn_native_character`) and keeps its place through
+    /// `char_alias`, where a fresh scan would shift every later member onto
+    /// the units just spawned. Death Star's 45 s hangar
+    /// `Ambush("hangar_ambush_spawn", 6, 5)` after `defend_ambush`'s three
+    /// fielded three of its six.
+    fn team_member(&mut self, sim: &Sim, t: u8, i: usize) -> Option<u32> {
         let slots: Vec<u32> = sim
             .units
             .iter()
@@ -1212,14 +1222,27 @@ impl World {
             .filter(|(_, u)| u.team == t)
             .map(|(k, _)| k as u32)
             .collect();
-        if let Some(s) = slots.get(i) {
-            return Some(*s);
+        if t < 2 {
+            return slots.get(i).copied();
         }
         let size = self.team_size(t) as usize;
-        if t < 2 || i >= size.max(slots.len()) {
-            return None;
+        if !self.native_members.contains_key(&t) {
+            let mut members: Vec<u32> = slots
+                .iter()
+                .map(|&s| {
+                    self.char_alias
+                        .iter()
+                        .find(|&(_, &slot)| slot == s)
+                        .map_or(s, |(&c, _)| c)
+                })
+                .collect();
+            let first_free = members.len();
+            members.extend(
+                (first_free..size).map(|k| PLACEHOLDER + u32::from(t) * 1000 + k as u32),
+            );
+            self.native_members.insert(t, members);
         }
-        Some(PLACEHOLDER + u32::from(t) * 1000 + i as u32)
+        self.native_members.get(&t)?.get(i).copied()
     }
 
     fn point_of(&self, sim: &Sim, v: &Value) -> Option<(Vec3, f32)> {
@@ -1730,11 +1753,16 @@ impl World {
             }
             k if k.starts_with("value_atk_") || k.starts_with("value_def_") => {
                 if let Ok(v) = val.parse::<f32>() {
-                    let idx = usize::from(k.ends_with("empire") || k.ends_with("cis"));
-                    if k.starts_with("value_atk_") {
-                        sim.cps[ci].def.value_atk[idx] = v as i32;
-                    } else {
-                        sim.cps[ci].def.value_def[idx] = v as i32;
+                    let row = crate::walk::faction_row(&k["value_atk_".len()..]);
+                    for t in 0..2 {
+                        if self.team_value_rows[t] != row {
+                            continue;
+                        }
+                        if k.starts_with("value_atk_") {
+                            sim.cps[ci].def.value_atk[t] = v as i32;
+                        } else {
+                            sim.cps[ci].def.value_def[t] = v as i32;
+                        }
                     }
                 }
             }
