@@ -713,6 +713,102 @@ fn a_waypoint_with_no_floor_on_this_level_is_rejected_for_the_other_arc() {
     assert_eq!(hub_waypoint(&up, g, 1, 10.0).y, 10.0, "its own storey");
 }
 
+/// BF2 POL1's hub 177 in small: the floor walk resolved hub 1 onto a slab
+/// 7 m over the floor the arc runs on, so it calls the only arc to it
+/// unwalkable both ways. The table's hop is kept (`RouteSource::Kept`), not a
+/// straight walk at the post, and is reached in XZ on the unit's own floor.
+#[test]
+fn a_table_hop_the_floor_walk_misjudged_is_kept_and_reached() {
+    use crate::collision::{Body, CollisionWorld, Shape};
+    use crate::cp::CpDef;
+    use crate::region::Region;
+    use crate::unit::{Controller, UnitSpec};
+    use glam::Mat4;
+    let mut sim = Sim::empty(7);
+    sim.collision = CollisionWorld::new(
+        vec![Body::new(
+            Mat4::from_translation(Vec3::new(0.0, -1.0, 0.0)),
+            Shape::Box {
+                half: Vec3::new(60.0, 1.0, 20.0),
+            },
+        )],
+        Vec::new(),
+    );
+    let hub = |x: f32, arcs: Vec<u16>| Hub {
+        pos: Vec3::new(x, 0.0, 0.0),
+        radius: 2.0,
+        arcs,
+    };
+    let a = |a: u16, b: u16| Arc {
+        a,
+        b,
+        type_mask: 1,
+        flags: 0,
+    };
+    let n = 3usize;
+    let mut rows = vec![Vec::new(); crate::nav::TYPE_COUNT * n];
+    let mut from0 = vec![0u8; n];
+    from0[1] = 31 << 3;
+    from0[2] = 31 << 3;
+    let mut from1 = vec![0u8; n];
+    from1[0] = 31 << 3;
+    from1[2] = (31 << 3) | 1;
+    rows[nav::SOLDIER * n] = from0;
+    rows[nav::SOLDIER * n + 1] = from1;
+    sim.nav = Some(
+        NavGraph::new(
+            vec![
+                hub(-40.0, vec![0]),
+                hub(0.0, vec![0, 1]),
+                hub(40.0, vec![1]),
+            ],
+            vec![a(0, 1), a(1, 2)],
+            RouteTable::from_rows(n, crate::nav::TYPE_COUNT, rows),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("graph"),
+    );
+    sim.add_cp(
+        CpDef {
+            name: "cp1".into(),
+            pos: Vec3::new(40.0, 0.0, 0.0),
+            capture: Region::sphere(Vec3::new(40.0, 0.0, 0.0), 4.0),
+            control: None,
+            value_bleed: 100,
+            value_atk: [100, 100],
+            value_def: [100, 100],
+            spawn_nodes: vec![],
+            capture_time: 10.0,
+            neutralize_time: 12.0,
+        },
+        Some(1),
+    );
+    sim.nav_floors[1] = 7.0;
+    sim.nav_unwalkable[0] = 3;
+    let h = sim
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::new(-40.0, 0.0, 0.0))
+        })
+        .expect("spawned");
+    let mut kept = false;
+    for _ in 0..1500 {
+        sim.step(&[PadState::default()]);
+        if let Some(r) = sim.unit(h).expect("alive").ai.nav.route {
+            kept |= r.source == RouteSource::Kept && r.next_hub == 1;
+            assert_ne!(r.source, RouteSource::Straight, "no straight walk");
+        }
+    }
+    assert!(kept, "the table's hop to hub 1 was kept");
+    let u = sim.unit(h).expect("alive");
+    assert!(
+        sim.cps[0].def.capture.contains(u.soldier.pos),
+        "walked on through hub 1 to the post: {:?}",
+        u.soldier.pos
+    );
+}
+
 /// Card BNDS: a hub is reached on ITS level. Under it — at its XZ, on a
 /// floor far below its resolved one — is not arrival.
 #[test]

@@ -382,6 +382,7 @@ impl Probe {
                 core::ai::RouteSource::Straight => 's',
                 core::ai::RouteSource::Flank => 'f',
                 core::ai::RouteSource::Shun => 'r',
+                core::ai::RouteSource::Kept => 'k',
             }),
             wp: r.map_or([0.0; 3], |r| r.waypoint.to_array()),
             wp_d: r.map_or(-1.0, |r| core::nav::xz_dist(p, r.waypoint)),

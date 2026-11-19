@@ -278,16 +278,25 @@ fn text(v: &Value) -> String {
 /// under 8, the name's goal type, and for Destroy, Defend and Follow the
 /// object or player the fourth argument names (`FUN_001935a8`, else a
 /// player index). CtfOffense is made only when its fourth argument names a
-/// region (`FUN_00538108`). The handle is the goal's id (the PS2's goal
+/// region (`FUN_00538108`); the goal keeps the region's centre and the flag
+/// its fifth argument names (`FUN_002e8ab8` +0x30, +0x20). The handle is the goal's id (the PS2's goal
 /// pointer, which `DeleteAIGoal` takes back).
 fn add_ai_goal(w: &World, sim: &mut Sim, a: &[Value]) -> Option<u32> {
     use core::goals::{GoalKind, GoalTarget};
     let team = bf2_team(arg(a, 0)).filter(|t| *t < 8)?.checked_sub(1)?;
     let kind = GoalKind::named(arg(a, 1).as_str()?)?;
-    if kind == GoalKind::CtfOffense && arg(a, 3).as_str().and_then(|r| w.region_id(r)).is_none() {
-        return None;
-    }
     let weight = arg(a, 2).num()?;
+    if kind == GoalKind::CtfOffense {
+        let r = arg(a, 3).as_str().and_then(|r| w.region_id(r))?;
+        let region = w.regions.get(r as usize)?.1.center;
+        let flag = match w.resolve(sim, arg(a, 4)) {
+            Some(Ud::Flag(f)) => w.flags.get(usize::from(f)).map(|e| e.ctf as u16),
+            _ => None,
+        };
+        return sim
+            .ai_goals
+            .add(team, kind, weight, Some(GoalTarget::Ctf { region, flag }));
+    }
     let target = w.resolve(sim, arg(a, 3)).and_then(|o| match o {
         Ud::Post(i) => Some(GoalTarget::Post(u32::from(i))),
         Ud::Unit(i, gen) => Some(GoalTarget::Unit(core::unit::UnitHandle { index: i, gen })),
@@ -1312,7 +1321,12 @@ impl World {
             }
             return;
         }
-        if let Some(h) = sim.spawn_native_character(team, pos) {
+        let old = sim
+            .units
+            .get(self.char_slot(c) as usize)
+            .filter(|u| u.team == team && !u.alive)
+            .map(|u| u.spec.class);
+        if let Some(h) = sim.spawn_native_member(team, pos, old) {
             if h.index != c {
                 self.char_alias.insert(c, h.index);
             }

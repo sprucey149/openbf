@@ -46,10 +46,22 @@ impl Sim {
         // Resolve the post's planning hub once: `locate` is O(hubs + arcs) and
         // a capture centre never moves. Requires `nav` to be set first —
         // `WalkSim::with_teams` does that before `setup_conquest`.
+        // `FUN_002a6c68` (`analysis/re-conquest-goal.md` 3) locates a post by
+        // its capture region's centre, else its owner's position: a post with
+        // no region (`WalkSim::add_posts`' empty sphere far under the map)
+        // is located where it stands. BF2 POL1's cp6camp, cp5camp and
+        // cp1inviso have none; their centre found the Empire's base hub, and
+        // the bots sent to them walked the last leg 200 m straight from there
+        // into the reflecting pool.
+        let at = if cp.def.capture.radius() > 0.0 {
+            cp.def.capture.center
+        } else {
+            cp.def.pos
+        };
         cp.nav_hub = self
             .nav
             .as_ref()
-            .and_then(|g| g.hub_for(cp.def.capture.center, crate::nav::Mover::SOLDIER));
+            .and_then(|g| g.hub_for(at, crate::nav::Mover::SOLDIER));
         self.cps.push(cp);
         self.cps.len() - 1
     }

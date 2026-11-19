@@ -1357,8 +1357,10 @@ fn kam1c_c_opening_spawn_class_mix_and_flying_gunship() {
         imp_ai.len()
     );
 
-    // 2. Team 4 (`ambushTeam1`, sim team 3) should have 4 snipers (its max)
-    //    and 8 riflemen, not 1 sniper + 11 riflemen.
+    // 2. Team 4 (`ambushTeam1`, sim team 3): its members draw with
+    //    `FUN_0036f198` under the first minute's reserve, where a class
+    //    needs `count < max - 1`: 3 snipers (max 4) and 9 riflemen, not
+    //    1 sniper + 11 riflemen.
     let mut sniper_count = 0usize;
     let mut rifle_count = 0usize;
     let ambush_node = (glam::Vec3::new(-135.0, 70.0, 35.0), 0.0);
@@ -1373,8 +1375,8 @@ fn kam1c_c_opening_spawn_class_mix_and_flying_gunship() {
     }
     assert_eq!(
         (rifle_count, sniper_count),
-        (8, 4),
-        "ambushTeam1 should balance riflemen and snipers up to max=4"
+        (9, 3),
+        "ambushTeam1 should hold snipers to max - 1 = 3 under the reserve"
     );
 
     // 3. `transport1` gunship moves on `PlayAnimation("test")` (`local: true`
@@ -3157,6 +3159,7 @@ fn cor1c_c_fixes_hero_spawns_door_camera_holocron_flagrunner_and_library_defense
         rt.objectives()
     );
     // Complete Objective4 -> Objective4.OnComplete calls UnlockHeroForTeam(ATT).
+    walk.sim.tick = walk.sim.tick.max(60 * u64::from(core::TICK_HZ));
     assert!(rt.complete_objective(&mut walk.sim, "Objective4"));
     let mut saw_anakin_offer = false;
     for _ in 0..(6 * core::TICK_HZ) {

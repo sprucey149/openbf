@@ -26,13 +26,22 @@
 //!   trace: `FUN_002e71f0`'s callers.
 //!
 //! What a member does is [`Steer`]: Deathmatch (`FUN_002e9458` posts order
-//! 10, the roaming walk `ai::route::retarget_deathmatch`) and Defend
-//! (`FUN_002e96c8` posts order 0xb with the goal's target). Conquest is the
-//! port's commander (`core::commander`), which owns a member of a Conquest
-//! goal as it owns every bot of a team with no script goal. OURS: Destroy
-//! (order 0xc, `FUN_002e9948`), the two CTF goals and Follow also keep the
-//! commander's behaviour. replace: those goals' orders, once their agents
-//! are traced.
+//! 10, the roaming walk `ai::route::retarget_deathmatch`), Defend
+//! (`FUN_002e96c8` posts order 0xb with the goal's target) and CTFOffense
+//! (`FUN_002e8be8` posts order 9 with the flag and the capture region's
+//! centre; [`CtfStep`]). Conquest is the port's commander
+//! (`core::commander`), which owns a member of a Conquest goal as it owns
+//! every bot while the script has made no goal. OURS: Destroy (order 0xc,
+//! `FUN_002e9948`), CTFDefense and Follow also keep the commander's
+//! behaviour. replace: those goals' orders, once their agents are traced.
+//!
+//! - **No goal.** Once the script has made a goal, an AI in none is told
+//!   nothing: a deleted goal's members get the wait order (order 1, state 1
+//!   UnitWaitAgent; `FUN_002e6f50` builds it with `FUN_002b6258(_, 1, 0, 0,
+//!   0)`), a new life of a team with no goal gets no order, and only a
+//!   goal's 1 s tick (`FUN_002e7110` → the goal's +0x24) hands orders out
+//!   (`re-soldier-ai.md` 1.4: a finished agent with an empty queue stays).
+//!   [`Steer::Stand`].
 //!
 //! - **The Defend member's hint.** The soldier controller maps order 0xb to
 //!   state 0xc (`FUN_002b8d60`), whose behaviour (`FUN_002c6ff0`, vtable
@@ -63,6 +72,24 @@ use glam::{Vec3, Vec3Swizzles};
 pub const SLOTS: usize = 20;
 /// `FUN_002e7cf8`: the manager's period, 1.0 s.
 pub const TICK: u64 = crate::TICK_HZ as u64;
+/// `FUN_002c53c8` state 1: a friendly carrier within this (m, 2500.0
+/// squared) is escorted.
+pub const ESCORT_NEAR: f32 = 50.0;
+/// `FUN_00249f30`: a soldier's follower slots (claim kind 3) are 4 when its
+/// +0x328 record has no +0x1a0, else `FUN_00360120()` + 1.
+/// PROVISIONAL: the port keeps neither; 4. trace: soldier +0x328 +0x1a0 of
+/// a campaign player.
+pub const ESCORT_SLOTS: usize = 4;
+/// `FUN_002e0610` kind 3: a follower's place in the carrier's frame, to the
+/// side by 0.75 (left for an even slot, right for an odd one), back by
+/// slot / 2 + 0.25, each axis moved by 0.2 of a draw in [-1, 1); the draw's
+/// seed changes every 8 s (time × 0.125). `FUN_002c5a88` state 4 doubles
+/// the place.
+pub const ESCORT_SIDE: f32 = 0.75;
+pub const ESCORT_ROW: f32 = 0.25;
+pub const ESCORT_JITTER: f32 = 0.2;
+pub const ESCORT_SCALE: f32 = 2.0;
+pub const ESCORT_RESEED: u64 = 8 * TICK;
 /// `FUN_002d2f98`: the first hint search once the target has stayed this
 /// long (10.0 s) within [`HINT_ANCHOR`] of the anchor.
 pub const HINT_WAIT: u64 = 10 * TICK;
@@ -181,6 +208,17 @@ pub enum GoalTarget {
     Unit(UnitHandle),
     Point(Vec3),
     Station(u16),
+    /// A CTFOffense goal (`FUN_002e8ab8`): its capture region's centre
+    /// (+0x30) and its flag (+0x20, an index into `CtfState::flags`).
+    /// PROVISIONAL: with no flag the ctor takes the first entity not on the
+    /// goal's team; the port takes none, and the members stand.
+    /// trace: `FUN_002e8ab8`'s fallback scan.
+    Ctf {
+        region: Vec3,
+        flag: Option<u16>,
+    },
+    /// A flag of `CtfState::flags`, where it is now.
+    Flag(u16),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -202,6 +240,61 @@ pub enum Steer {
     Deathmatch,
     Defend(GoalTarget),
     Destroy(GoalTarget),
+    /// A walk to the target (`FUN_002bc378`): the CTF offense agent's
+    /// states 2, 3 and 5.
+    Go(GoalTarget),
+    /// The CTF offense agent's state 4: the walk after a friendly carrier to
+    /// `offset` in his frame (`FUN_002bc800`).
+    Escort {
+        carrier: UnitHandle,
+        offset: Vec3,
+    },
+    /// No order: the bot stays where it is. PROVISIONAL (ours): it fights
+    /// what it sees, as the wait agent (state 1) a deleted goal leaves does;
+    /// a new life that never had an order has no agent to take the message
+    /// (`FUN_002b7e58`). trace: a controller with no agent on a sighting.
+    Stand,
+}
+
+/// The CTF offense agent's states (UnitCTFOffenseAgent, vtable 0x622ca8,
+/// controller state 10 from order 9; entry `FUN_002c53c8`, update
+/// `FUN_002c5a88`). State 1 chooses (`FUN_002c53c8`): an uncarried flag
+/// (+0x2ac 0, `FUN_002c5220`) is fetched when AI may pick it up (flag
+/// +0x45d, `AllowAIPickUp`, `FUN_0035ec80`) and guarded when not; one the
+/// bot carries (`FUN_002c5268`) goes to the region; one a friend carries
+/// (team relation > 0, `FUN_002c52b8`) is escorted when the carrier is
+/// within [`ESCORT_NEAR`] and has a follower slot (`FUN_002e0338(_, team,
+/// 3)`), else covered; any other carrier is chased. Each state runs until
+/// its own test fails (`FUN_002c5a88`), then state 1 chooses again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtfStep {
+    /// State 2: the walk to the flag; it ends when the flag is taken or the
+    /// walk is done (`FUN_002bc2b8`).
+    Fetch = 2,
+    /// State 3: the walk to the goal's region while the bot carries.
+    Carry = 3,
+    /// State 4: the walk after the carrier, while a friend carries.
+    Escort = 4,
+    /// State 5: after a carrier that is no friend.
+    Chase = 5,
+    /// State 6: the defend helper (`FUN_002d20a0`) on the flag (order
+    /// target type 3), until a friend carries it.
+    Guard = 6,
+    /// State 7: the defend helper on the flag's home region (+0x458,
+    /// `HomeRegion`) or, with none, on the flag (type 1, a point), while
+    /// another carries it.
+    Cover = 7,
+}
+
+/// A CTFOffense member's agent: its goal, its life, its state and, while it
+/// escorts, the carrier and its place behind him.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CtfMember {
+    pub goal: u32,
+    pub life: u32,
+    pub step: CtfStep,
+    pub carrier: Option<UnitHandle>,
+    pub offset: Vec3,
 }
 
 /// The defend helper's state (`FUN_002d2168`, `FUN_002d31a8`).
@@ -276,6 +369,8 @@ pub struct AiGoals {
     pub member: Vec<Option<(u32, u32)>>,
     /// Per unit slot, a Defend member's hint search.
     pub hold: Vec<Option<DefendHold>>,
+    /// Per unit slot, a CTFOffense member's agent.
+    pub ctf: Vec<Option<CtfMember>>,
     pub next_tick: u64,
     pub next_id: u32,
 }
@@ -366,20 +461,63 @@ impl AiGoals {
 
     /// What unit `h`'s goal tells it to do.
     pub fn steer(&self, h: UnitHandle) -> Option<Steer> {
-        let g = self.of(h.index as usize, h.gen)?;
+        let Some(g) = self.of(h.index as usize, h.gen) else {
+            return (!self.idle()).then_some(Steer::Stand);
+        };
         match g.kind {
             GoalKind::Deathmatch => Some(Steer::Deathmatch),
             GoalKind::Destroy => g.target.map(Steer::Destroy),
             GoalKind::Defend => g.target.map(Steer::Defend),
+            GoalKind::CtfOffense => Some(self.ctf_steer(h, g)),
             _ => None,
         }
     }
 
-    /// Unit `h`'s defend helper, while it is a member of a Defend goal.
+    /// Unit `h`'s CTF offense agent, while it is a member of a CTFOffense
+    /// goal.
+    pub fn ctf_of(&self, h: UnitHandle) -> Option<CtfMember> {
+        let g = self.of(h.index as usize, h.gen)?;
+        let m = (*self.ctf.get(h.index as usize)?)?;
+        (g.kind == GoalKind::CtfOffense && m.goal == g.id && m.life == h.gen).then_some(m)
+    }
+
+    fn ctf_steer(&self, h: UnitHandle, g: &Goal) -> Steer {
+        let (
+            Some(GoalTarget::Ctf {
+                region,
+                flag: Some(f),
+            }),
+            Some(m),
+        ) = (g.target, self.ctf_of(h))
+        else {
+            return Steer::Stand;
+        };
+        match (m.step, m.carrier) {
+            (CtfStep::Fetch, _) => Steer::Go(GoalTarget::Flag(f)),
+            (CtfStep::Carry, _) => Steer::Go(GoalTarget::Point(region)),
+            (CtfStep::Escort, Some(c)) => Steer::Escort {
+                carrier: c,
+                offset: m.offset,
+            },
+            (CtfStep::Chase, Some(c)) => Steer::Go(GoalTarget::Unit(c)),
+            (CtfStep::Guard | CtfStep::Cover, _) => Steer::Defend(GoalTarget::Flag(f)),
+            (CtfStep::Escort | CtfStep::Chase, None) => Steer::Stand,
+        }
+    }
+
+    /// Unit `h`'s defend helper, while it is a member of a Defend goal or a
+    /// CTFOffense member guards or covers its flag.
     pub fn hold_of(&self, h: UnitHandle) -> Option<DefendHold> {
         let g = self.of(h.index as usize, h.gen)?;
         let hold = (*self.hold.get(h.index as usize)?)?;
-        (g.kind == GoalKind::Defend && hold.goal == g.id && hold.life == h.gen).then_some(hold)
+        let defends = match g.kind {
+            GoalKind::Defend => true,
+            GoalKind::CtfOffense => self
+                .ctf_of(h)
+                .is_some_and(|m| matches!(m.step, CtfStep::Guard | CtfStep::Cover)),
+            _ => false,
+        };
+        (defends && hold.goal == g.id && hold.life == h.gen).then_some(hold)
     }
 
     /// The hint unit `h` holds for its Defend goal, if it has found one.
@@ -436,6 +574,17 @@ impl AiGoals {
                             eat(&[4]);
                             eat(&s.to_le_bytes());
                         }
+                        Some(GoalTarget::Ctf { region, flag }) => {
+                            eat(&[5]);
+                            for c in region.to_array() {
+                                eat(&c.to_bits().to_le_bytes());
+                            }
+                            eat(&flag.unwrap_or(u16::MAX).to_le_bytes());
+                        }
+                        Some(GoalTarget::Flag(f)) => {
+                            eat(&[6]);
+                            eat(&f.to_le_bytes());
+                        }
                     }
                 }
                 None => eat(&[0]),
@@ -484,6 +633,26 @@ impl AiGoals {
                 None => eat(&[0]),
             }
         }
+        if self.ctf.iter().any(Option::is_some) {
+            eat(b"CTFO");
+            eat(&(self.ctf.len() as u32).to_le_bytes());
+            for m in &self.ctf {
+                match m {
+                    Some(m) => {
+                        eat(&[1, m.step as u8]);
+                        eat(&m.goal.to_le_bytes());
+                        eat(&m.life.to_le_bytes());
+                        let (ci, cg) = m.carrier.map_or((u32::MAX, u32::MAX), |c| (c.index, c.gen));
+                        eat(&ci.to_le_bytes());
+                        eat(&cg.to_le_bytes());
+                        for c in m.offset.to_array() {
+                            eat(&c.to_bits().to_le_bytes());
+                        }
+                    }
+                    None => eat(&[0]),
+                }
+            }
+        }
     }
 }
 
@@ -518,7 +687,146 @@ pub fn step(sim: &mut Sim) {
             goals.member[i] = goals.pick(u.team).map(|id| (id, u.gen));
         }
     }
+    ctf_agents(sim);
     defend_hints(sim);
+}
+
+/// The CTF offense agent of every CTFOffense member, in unit order. A new
+/// state starts a new defend helper (`FUN_002c53c8` builds it on entry to
+/// states 6 and 7).
+///
+/// PROVISIONAL (ours): a state's test runs at the member's think
+/// (`FUN_002c5a88` on the agent's clock); the fight (state 8, entered from
+/// the message handler `FUN_002c5e38`) is the port's fight, and the aim on
+/// the way (`FUN_002c58b0`) the port's aim. replace: state 8 and
+/// `FUN_002c58b0`.
+fn ctf_agents(sim: &mut Sim) {
+    let n = sim.units.len();
+    sim.ai_goals.ctf.resize(n, None);
+    for i in 0..n {
+        let prev = sim.ai_goals.ctf[i];
+        let next = ctf_agent(sim, i);
+        let key = |m: Option<CtfMember>| m.map(|m| (m.goal, m.life, m.step));
+        if key(next) != key(prev) {
+            if let Some(h) = sim.ai_goals.hold.get_mut(i) {
+                *h = None;
+            }
+        }
+        sim.ai_goals.ctf[i] = next;
+    }
+    for i in 0..n {
+        let Some(mut m) = sim.ai_goals.ctf[i] else {
+            continue;
+        };
+        let Some(c) = m.carrier.filter(|_| m.step == CtfStep::Escort) else {
+            continue;
+        };
+        let slot = sim.ai_goals.ctf[..i]
+            .iter()
+            .flatten()
+            .filter(|o| o.step == CtfStep::Escort && o.carrier == Some(c))
+            .count();
+        m.offset = escort_offset(c, slot, sim.tick);
+        sim.ai_goals.ctf[i] = Some(m);
+    }
+}
+
+/// `FUN_002c5a88`'s tests and `FUN_002c53c8` state 1's choice for unit
+/// slot `i`. `None` (no flag: state 100) leaves the bot standing.
+fn ctf_agent(sim: &Sim, i: usize) -> Option<CtfMember> {
+    let u = &sim.units[i];
+    if !u.alive || u.controller != Controller::Ai {
+        return None;
+    }
+    let g = sim
+        .ai_goals
+        .of(i, u.gen)
+        .filter(|g| g.kind == GoalKind::CtfOffense)?;
+    let Some(GoalTarget::Ctf { flag: Some(f), .. }) = g.target else {
+        return None;
+    };
+    let flag = sim.ctf.as_ref()?.flags.get(usize::from(f))?;
+    let me = sim.handle(i);
+    let carrier = flag.carrier();
+    let team_of = |c: UnitHandle| sim.units.get(c.index as usize).map(|o| o.team);
+    let mine = carrier == Some(me);
+    let friend =
+        carrier.is_some_and(|c| c != me && team_of(c).is_some_and(|t| sim.allied(u.team, t)));
+    let enemy = carrier.is_some_and(|c| team_of(c).is_some_and(|t| sim.hostile(u.team, t)));
+    let prev = sim.ai_goals.ctf[i].filter(|m| m.goal == g.id && m.life == u.gen);
+    let thinks = sim.tick > 0 && u.ai.last_think == sim.tick - 1;
+    let stays = |step: CtfStep| match step {
+        CtfStep::Fetch => carrier.is_none() && !walked(u, flag.current_pos),
+        CtfStep::Carry => mine,
+        CtfStep::Escort => friend,
+        CtfStep::Chase => enemy,
+        CtfStep::Guard => !friend,
+        CtfStep::Cover => !mine && carrier.is_some(),
+    };
+    let step = match prev {
+        Some(m) if !thinks || stays(m.step) => m.step,
+        _ => match carrier {
+            None if flag.allow_ai_pickup => CtfStep::Fetch,
+            None => CtfStep::Guard,
+            Some(_) if mine => CtfStep::Carry,
+            Some(c) if friend => {
+                let near = sim.unit(c).is_some_and(|o| {
+                    o.soldier.pos.distance_squared(u.soldier.pos) < ESCORT_NEAR * ESCORT_NEAR
+                });
+                let escorts = sim
+                    .ai_goals
+                    .ctf
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, o)| {
+                        *j != i
+                            && o.is_some_and(|o| o.step == CtfStep::Escort && o.carrier == Some(c))
+                            && sim.units.get(*j).is_some_and(|o| o.team == u.team)
+                    })
+                    .count();
+                if near && escorts < ESCORT_SLOTS {
+                    CtfStep::Escort
+                } else {
+                    CtfStep::Cover
+                }
+            }
+            Some(_) => CtfStep::Chase,
+        },
+    };
+    Some(CtfMember {
+        goal: g.id,
+        life: u.gen,
+        step,
+        carrier,
+        offset: prev.map_or(Vec3::ZERO, |m| m.offset),
+    })
+}
+
+/// `FUN_002e0610` kind 3 times [`ESCORT_SCALE`]: escort `slot`'s place
+/// behind carrier `c`, in his frame (the port's local +Z is behind him, as
+/// the disc's -Z is).
+///
+/// PROVISIONAL: the disc seeds its draw with the carrier's address and the
+/// clock; the port draws per carrier, slot and 8 s window. The slot is the
+/// escort's order among the carrier's escorts in unit order (the disc's
+/// claim table order). trace: the frame `FUN_002bc800` applies the place in.
+fn escort_offset(c: UnitHandle, slot: usize, tick: u64) -> Vec3 {
+    let window = tick / ESCORT_RESEED;
+    let draw = |axis: u32| {
+        let salt = crate::ai::SALT_FORMATION ^ ((slot as u32) << 4 | axis);
+        crate::ai::unit_unit(c.index, window, c.gen, salt) * 2.0 - 1.0
+    };
+    let side = if slot % 2 == 1 {
+        -ESCORT_SIDE
+    } else {
+        ESCORT_SIDE
+    };
+    let row = (slot / 2) as f32 + ESCORT_ROW;
+    Vec3::new(
+        side + draw(1) * ESCORT_JITTER,
+        0.0,
+        row + draw(2) * ESCORT_JITTER,
+    ) * ESCORT_SCALE
 }
 
 /// The defend helper of every Defend member, in unit order (`FUN_002d31a8`
@@ -575,11 +883,18 @@ fn defend_hold(sim: &Sim, i: usize) -> Option<DefendHold> {
     if !u.alive || u.controller != Controller::Ai {
         return None;
     }
-    let g = sim
-        .ai_goals
-        .of(i, u.gen)
-        .filter(|g| g.kind == GoalKind::Defend)?;
-    let target = target_pos(sim, g.target?)?;
+    let g = sim.ai_goals.of(i, u.gen)?;
+    let held = match g.kind {
+        GoalKind::Defend => g.target?,
+        GoalKind::CtfOffense => match (sim.ai_goals.ctf_of(sim.handle(i))?.step, g.target?) {
+            (CtfStep::Guard | CtfStep::Cover, GoalTarget::Ctf { flag: Some(f), .. }) => {
+                GoalTarget::Flag(f)
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let target = target_pos(sim, held)?;
     let tick = sim.tick;
     let mut hold = sim.ai_goals.hold[i]
         .filter(|h| h.goal == g.id && h.life == u.gen)
@@ -989,7 +1304,8 @@ pub fn defend_hint(sim: &Sim, h: UnitHandle) -> Option<(Vec3, u8)> {
     Some((hint.pos, hint.stance_mask))
 }
 
-/// Where a Defend member holds: the post, the player, the station or the object.
+/// Where a Defend member holds: the post, the player, the station, the
+/// object or the flag; a CTFOffense goal's region.
 pub fn target_pos(sim: &Sim, t: GoalTarget) -> Option<Vec3> {
     match t {
         GoalTarget::Post(c) => sim.cps.get(c as usize).map(|c| c.def.pos),
@@ -1000,6 +1316,8 @@ pub fn target_pos(sim: &Sim, t: GoalTarget) -> Option<Vec3> {
             .get(usize::from(s))
             .filter(|s| !s.destroyed)
             .map(|s| Vec3::new(s.sphere_centre.x, s.pos.y, s.sphere_centre.z)),
+        GoalTarget::Ctf { region, .. } => Some(region),
+        GoalTarget::Flag(f) => Some(sim.ctf.as_ref()?.flags.get(usize::from(f))?.current_pos),
     }
 }
 

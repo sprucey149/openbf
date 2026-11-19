@@ -388,7 +388,14 @@ struct PostInfo {
     atk: i32,
     def: i32,
     /// Card MAIS: the mission lets this team's bots capture it
-    /// ([`crate::cp::CommandPost::ai_no_capture`]).
+    /// ([`crate::cp::CommandPost::ai_no_capture`]). Always on BF2: its draw
+    /// (`FUN_002e8318`, `SWBFRNT2.ELF-decomp.c` 261383-261560) never reads the
+    /// ban (cp+0x80), which only keeps the bots out of the capture count
+    /// (`FUN_003573f8`), so a barred enemy post is still drawn and walked to
+    /// (`analysis/re-conquest-goal.md` 3). BF2 POL1's allies are barred from
+    /// the radar post they are sent to take while the script kills the other
+    /// three enemy posts. PROVISIONAL (ours): BF1 keeps the drop; its draw
+    /// (`FUN_002618b8`) is not checked for the ban. trace: B1:182098-182205.
     capturable: bool,
     /// BF2: the post's owner entity (post+0x2c) is gone, as a `KillObject`
     /// leaves it. The capture behaviour checks that handle on entry and on
@@ -475,7 +482,7 @@ pub fn plan(sim: &mut Sim, team: u8) {
             neutral: c.owner.is_none(),
             atk: c.def.value_atk[t],
             def: c.def.value_def[t],
-            capturable: !c.ai_no_capture(team),
+            capturable: rules == GoalRules::Bf2 || !c.ai_no_capture(team),
             dead: rules == GoalRules::Bf2 && c.killed,
         });
     }
@@ -618,9 +625,9 @@ pub fn plan(sim: &mut Sim, team: u8) {
                 neutral: p.neutral,
                 atk: p.atk,
                 def: p.def,
-                // Card MAIS (OURS): a post its bots may not capture
-                // (`AICanCaptureCP`) is not drawn to take; held, it is
-                // still defended.
+                // Card MAIS (OURS, BF1 only): a post its bots may not
+                // capture (`AICanCaptureCP`) is not drawn to take; held, it
+                // is still defended.
                 open: reach(hub, p) && exclude != Some(ci as u32) && (p.friendly || p.capturable),
             }));
             let r = roll(i as u32, sim.tick, gen);

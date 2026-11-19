@@ -91,6 +91,35 @@ pub(in super::super) fn retarget(
                     None => retarget_hunt(sim, me, st, nearest_enemy, nt),
                 }
             }
+            crate::goals::Steer::Go(t) => {
+                st.target_cp = None;
+                match (t, crate::goals::target_pos(sim, t)) {
+                    (crate::goals::GoalTarget::Unit(_), Some(at)) => {
+                        retarget_board(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    (_, Some(at)) => {
+                        retarget_point(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    (_, None) => clear(st),
+                }
+            }
+            crate::goals::Steer::Escort { carrier, offset } => {
+                st.target_cp = None;
+                match sim.unit(carrier) {
+                    Some(c) => {
+                        let at = c.soldier.pos + crate::ai::rotate_xz(offset, c.soldier.yaw);
+                        retarget_board(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    None => clear(st),
+                }
+            }
+            crate::goals::Steer::Stand => {
+                st.target_cp = None;
+                clear(st);
+            }
         }
         return;
     }

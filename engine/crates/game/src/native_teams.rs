@@ -162,48 +162,45 @@ pub fn install(
                 v
             })
             .collect();
-        let mut members = Vec::new();
-        let mut counts = vec![0u32; table.len()];
-        let cap = usize::from(member_count);
-        for (i, class) in table.iter().enumerate() {
-            let take = (class.min as usize).min(cap.saturating_sub(members.len()));
-            for _ in 0..take {
-                members.push(class.spec(
+        let templates: Vec<_> = table
+            .iter()
+            .enumerate()
+            .map(|(i, class)| {
+                class.spec(
                     team,
                     glam::Vec3::ZERO,
                     0.0,
                     core::unit::Controller::Ai,
                     i as u8,
                     walk.sim.bot_skill(team),
-                ));
-                counts[i] += 1;
+                )
+            })
+            .collect();
+        let limits: Vec<(u32, u32)> = table
+            .iter()
+            .map(|class| (class.min, class.max.unwrap_or(u32::MAX)))
+            .collect();
+        let mut members = Vec::new();
+        let mut counts = vec![0u32; table.len()];
+        let mut unassigned = 0u32;
+        // Each member joins its team in order (`FUN_0034cde0`): class 0
+        // (`FUN_0034f1f8(m, 0)`), then its respawn preparation `FUN_0034ffe0`
+        // draws with `FUN_0036f198`, counting the members before it and
+        // itself as class 0, with the clock under 60 s. `SpawnCharacter`
+        // (`FUN_0034e1f0`) spawns the member's class, so an ambush's mix is
+        // its members' draws (re-ai-class-selection.md). PROVISIONAL, trace:
+        // the vtable caller of `FUN_0034cde0` at level start.
+        for _ in 0..usize::from(member_count) {
+            let mut seen = counts.clone();
+            if let Some(first) = seen.first_mut() {
+                *first += 1;
             }
-        }
-        // Fill the remainder across classes that have not reached their
-        // authored `max` (PROVISIONAL, replace: trace assigned-member class
-        // draws across native waves, re-ai-class-selection.md).
-        let mut cursor = 0usize;
-        while members.len() < cap {
-            let mut picked = None;
-            for step in 0..table.len() {
-                let idx = (cursor + step) % table.len();
-                let limit = table[idx].max.unwrap_or(u32::MAX);
-                if counts[idx] < limit {
-                    picked = Some(idx);
-                    cursor = (idx + 1) % table.len();
-                    break;
-                }
-            }
-            let idx = picked.unwrap_or(0);
-            members.push(table[idx].spec(
-                team,
-                glam::Vec3::ZERO,
-                0.0,
-                core::unit::Controller::Ai,
-                idx as u8,
-                walk.sim.bot_skill(team),
-            ));
-            counts[idx] += 1;
+            let Some(k) = core::sim::draw_class(&mut walk.sim.lcg, &seen, &limits, true) else {
+                unassigned += 1;
+                continue;
+            };
+            counts[k] += 1;
+            members.push(templates[k].clone());
         }
         walk.native_teams.insert(
             team,
@@ -215,6 +212,15 @@ pub fn install(
             Vec::new()
         };
         walk.sim.add_native_team_with_posts(team, members, posts);
+        walk.sim.set_native_class_draw(
+            team,
+            core::sim::NativeClassDraw {
+                templates,
+                limits,
+                counts,
+                unassigned,
+            },
+        );
     }
     if walk.native_teams.is_empty() {
         return;

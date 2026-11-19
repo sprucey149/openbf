@@ -1007,11 +1007,12 @@ fn a_less_aggressive_team_keeps_more_defenders() {
     assert_eq!(defenders(&sim, 1), [2, 3, 5, 6, 7, 8]);
 }
 
-/// Card MAIS (OURS): a post the team's bots may not capture is not drawn
-/// to attack; one they hold still is to defend.
+/// Card MAIS (OURS, BF1): a post the team's bots may not capture is not
+/// drawn to attack.
 #[test]
 fn a_post_barred_to_the_teams_bots_is_not_drawn_to_take() {
     let mut sim = defs_world();
+    sim.ground_rules = crate::soldier::GroundRules::Bf1;
     // cp0 and cp2 are the enemy's: bar both to team 0's bots.
     sim.cps[0].ai_capture_ban = 1;
     sim.cps[2].ai_capture_ban = 1;
@@ -1025,7 +1026,29 @@ fn a_post_barred_to_the_teams_bots_is_not_drawn_to_take() {
             sim.commander[0].of(i)
         );
     }
-    assert_eq!(defenders(&sim, 1), [2, 3, 5, 6], "its own post is held");
+}
+
+/// BF2's draw (`FUN_002e8318`) does not read `AICanCaptureCP`'s ban: with
+/// the other enemy posts killed, a barred one is the target (POL1's radar).
+#[test]
+fn a_bf2_post_barred_to_the_teams_bots_is_still_drawn() {
+    let mut sim = defs_world();
+    sim.ground_rules = crate::soldier::GroundRules::Bf2;
+    sim.cps[0].ai_capture_ban = 1;
+    sim.cps[2].killed = true;
+    sim.cps[2].owner = None;
+    sim.units[0].soldier.pos = Vec3::new(40.0, 0.0, 20.0);
+    sim.units[1].soldier.pos = Vec3::new(40.0, 0.0, 21.0);
+    for _ in 0..4 {
+        plans(&mut sim, 1);
+    }
+    for i in [0, 1, 7, 8] {
+        assert_eq!(
+            sim.commander[0].of(i),
+            Some(Objective::Attack(0)),
+            "unit {i}"
+        );
+    }
 }
 
 /// Card DEFS, rule 2: of the eight that targeted the post, a quarter of
@@ -1478,4 +1501,129 @@ fn defend_world() -> (Sim, u64) {
     let period = (crate::goals::THINK_WALK * 4.0 * crate::TICK_HZ as f32) as u64;
     let first = (crate::goals::HINT_WAIT / period + 1) * period;
     (sim, first)
+}
+
+/// BF2's goal manager hands an AI in no goal nothing once the script has made
+/// one (`FUN_002e6f50`'s wait order; `FUN_002e7110` orders only members), so
+/// the commander leaves it standing; before any goal it is the commander's.
+#[test]
+fn a_bot_in_no_goal_stands_once_the_script_has_made_a_goal() {
+    let mut sim = world(&[Some(0), None, None]);
+    let enemy = sim.handle(4);
+    assert_eq!(sim.ai_goals.steer(enemy), None);
+    sim.ai_goals
+        .add(
+            0,
+            crate::goals::GoalKind::Defend,
+            100.0,
+            Some(crate::goals::GoalTarget::Post(1)),
+        )
+        .expect("goal");
+    crate::goals::step(&mut sim);
+    assert_eq!(sim.ai_goals.steer(enemy), Some(crate::goals::Steer::Stand));
+    assert!(matches!(
+        sim.ai_goals.steer(sim.handle(0)),
+        Some(crate::goals::Steer::Defend(_))
+    ));
+}
+
+/// The CTF offense agent (`FUN_002c53c8` state 1, `FUN_002c5a88`): a flag
+/// the AI may not pick up is guarded with the defend helper, a friend's
+/// carry is escorted in two files behind him (`FUN_002e0610` kind 3 x 2),
+/// an enemy's chased, and one the AI may pick up fetched.
+#[test]
+fn a_ctf_offense_member_guards_escorts_chases_and_fetches() {
+    use crate::goals::{CtfStep, GoalTarget, Steer};
+    use crate::sim::ctf::{CtfState, FlagStatus};
+    let mut sim = world(&[Some(0), None, None]);
+    let flag_at = Vec3::new(40.0, 0.0, 30.0);
+    let far = Vec3::new(0.0, -10000.0, 0.0);
+    let mut ctf = CtfState::new_ground_one_flag(u32::MAX, flag_at, far, far);
+    ctf.flags[0].allow_ai_pickup = false;
+    sim.ctf = Some(ctf);
+    sim.ai_goals
+        .add(
+            0,
+            crate::goals::GoalKind::CtfOffense,
+            70.0,
+            Some(GoalTarget::Ctf {
+                region: Vec3::new(80.0, 0.0, 0.0),
+                flag: Some(0),
+            }),
+        )
+        .expect("goal");
+    let think = |sim: &mut Sim| {
+        sim.tick += 1;
+        for u in &mut sim.units {
+            u.ai.last_think = sim.tick - 1;
+        }
+        crate::goals::step(sim);
+    };
+    let steps = |sim: &Sim| {
+        (0..4)
+            .map(|i| sim.ai_goals.ctf_of(sim.handle(i)).map(|m| m.step))
+            .collect::<Vec<_>>()
+    };
+    think(&mut sim);
+    assert_eq!(steps(&sim), vec![Some(CtfStep::Guard); 4]);
+    assert_eq!(
+        sim.ai_goals.steer(sim.handle(1)),
+        Some(Steer::Defend(GoalTarget::Flag(0)))
+    );
+    assert!(sim.ai_goals.hold_of(sim.handle(1)).is_some());
+    sim.ctf.as_mut().expect("ctf").flags[0].allow_ai_pickup = true;
+    think(&mut sim);
+    assert_eq!(steps(&sim), vec![Some(CtfStep::Guard); 4], "a guard stays");
+
+    sim.ctf.as_mut().expect("ctf").flags[0].status = FlagStatus::Carried {
+        carrier: sim.handle(0),
+    };
+    think(&mut sim);
+    assert_eq!(
+        steps(&sim),
+        vec![
+            Some(CtfStep::Guard),
+            Some(CtfStep::Escort),
+            Some(CtfStep::Escort),
+            Some(CtfStep::Escort)
+        ]
+    );
+    let place = |sim: &Sim, i: usize| match sim.ai_goals.steer(sim.handle(i)) {
+        Some(Steer::Escort { offset, .. }) => offset,
+        s => panic!("{s:?}"),
+    };
+    let jitter = crate::goals::ESCORT_JITTER * crate::goals::ESCORT_SCALE + 1e-4;
+    for (i, side, back) in [(1, 1.5, 0.5), (2, -1.5, 0.5), (3, 1.5, 2.5)] {
+        let o = place(&sim, i);
+        assert!(
+            (o.x - side).abs() <= jitter && (o.z - back).abs() <= jitter && o.y == 0.0,
+            "{i}: {o}"
+        );
+    }
+
+    sim.ctf.as_mut().expect("ctf").flags[0].status = FlagStatus::Carried {
+        carrier: sim.handle(4),
+    };
+    think(&mut sim);
+    assert_eq!(
+        steps(&sim),
+        vec![
+            Some(CtfStep::Guard),
+            Some(CtfStep::Chase),
+            Some(CtfStep::Chase),
+            Some(CtfStep::Chase)
+        ]
+    );
+    assert_eq!(
+        sim.ai_goals.steer(sim.handle(1)),
+        Some(Steer::Go(GoalTarget::Unit(sim.handle(4))))
+    );
+
+    sim.ctf.as_mut().expect("ctf").flags[0].status = FlagStatus::AtHome;
+    think(&mut sim);
+    assert_eq!(steps(&sim)[1..], [Some(CtfStep::Fetch); 3]);
+    assert_eq!(
+        sim.ai_goals.steer(sim.handle(1)),
+        Some(Steer::Go(GoalTarget::Flag(0)))
+    );
 }
