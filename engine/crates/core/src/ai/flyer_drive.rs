@@ -667,9 +667,12 @@ fn transport_curve_clear(sim: &Sim, v: &Vehicle, curve: &[Vec3; 4]) -> bool {
         || curve_chords_clear(sim, &curve_points(curve), (r, r, r), HullFilter::Static)
 }
 
+/// OURS: `curve` clear by the hull's side radius and its real up and down
+/// reach ([`hull_extents`]), so a wingspan projected upward does not refuse
+/// an authored leg under a hangar ceiling (Space Coruscant).
+/// replace: original space follower obstacle-query geometry.
 fn hull_clear(sim: &Sim, v: &Vehicle, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
-    let r = hull_extents(sim, v).0;
-    hull_clear_extents(sim, curve, (r, r, r), handle)
+    hull_clear_extents(sim, curve, hull_extents(sim, v), handle)
 }
 
 /// OURS, for [`clearest`] hangar escapes: uses the hull's actual downward
@@ -818,14 +821,20 @@ fn connection(
     // geometric retry and its filter for candidate obstacles.
     let clear = |c: &&(f32, PathCursor, [Vec3; 4])| hull_clear(sim, v, &c.2, handle);
     let max_tries = CONNECT_PRIMARY_MIN.max(usize::from(p.follower.branch_paths));
-    let chosen = ranked.iter().take(max_tries).find(clear).or_else(|| {
-        if ranked.len() < CONNECT_PRIMARY_MIN {
-            fallback.sort_by(|a, b| b.0.total_cmp(&a.0));
-            fallback.iter().find(clear)
-        } else {
-            None
-        }
-    });
+    fallback.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let gated = ranked.len() >= CONNECT_PRIMARY_MIN;
+    let chosen = ranked
+        .iter()
+        .take(max_tries)
+        .chain(fallback.iter().filter(|_| !gated))
+        .find(clear)
+        .or_else(|| {
+            ranked
+                .iter()
+                .skip(max_tries)
+                .chain(fallback.iter().filter(|_| gated))
+                .find(clear)
+        });
     chosen.map(|(_, cursor, curve)| (*cursor, *curve))
 }
 
