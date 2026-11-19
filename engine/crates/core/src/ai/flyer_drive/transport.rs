@@ -52,6 +52,40 @@ pub(crate) fn at_destination(sim: &Sim, v: &Vehicle) -> bool {
     uses_authored_transport(sim, v) && destination_regions(sim, v).any(|r| r.contains(v.pos))
 }
 
+/// True when `v` is a landed `commandflyer` sitting inside a hostile landing
+/// region (e.g. a deployed enemy-hangar spawn transport or `spa4g_c`'s
+/// `cis_gunship`). Autonomous on-foot bots must not board and fly it away.
+pub(crate) fn is_deployed_command_flyer(sim: &Sim, v: &Vehicle) -> bool {
+    if v.kind != VehicleKind::Flyer
+        || v.flyer.phase != FlightPhase::Landed
+        || !sim
+            .flyer_params
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .is_some_and(|p| p.command_flyer)
+    {
+        return false;
+    }
+    let Some(team) = v.team.or(v.home_team) else {
+        return false;
+    };
+    sim.landing_regions.iter().any(|region| {
+        region.contains(v.pos)
+            && sim
+                .cps
+                .iter()
+                .filter(|cp| !cp.killed)
+                .min_by(|a, b| {
+                    a.def
+                        .pos
+                        .distance_squared(region.center)
+                        .total_cmp(&b.def.pos.distance_squared(region.center))
+                })
+                .and_then(|cp| cp.owner)
+                .is_some_and(|owner| sim.hostile(team, owner))
+    })
+}
+
 /// The PS2 fly agent lines up with a landing hint. The stock space maps
 /// instead provide landing volumes. Use the clear face of the destination
 /// volume as the intermediate point and the center as the touchdown target.

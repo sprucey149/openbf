@@ -65,6 +65,12 @@ pub struct FlyerParams {
     pub collision_scale: [f32; 3],
     /// BF2 AI: the path follower's class numbers (FUN_00300168).
     pub follower: FollowerParams,
+    /// Authored `SpawnPointLocation`s for a `commandflyer` (BF2 FUN_00353088 ->
+    /// FUN_0035a3a0, B2:336258): (local position, local yaw in radians).
+    pub spawn_points: Vec<(Vec3, f32)>,
+    /// Model bounding-sphere centre in vehicle-local space for the
+    /// `FUN_00356998` spawn segment cast (re-command-walker-post §4).
+    pub spawn_sphere_centre: Option<Vec3>,
 }
 
 /// BF2 FUN_00300168's defaults; authored through the setter FUN_00300230.
@@ -169,6 +175,8 @@ impl Default for FlyerParams {
             collision_threshold: [7.5, 2.5, 0.0],
             collision_scale: [1.0, 0.0, 0.0],
             follower: FollowerParams::default(),
+            spawn_points: Vec::new(),
+            spawn_sphere_centre: None,
         }
     }
 }

@@ -117,6 +117,7 @@ const BOUND: &[&str] = &[
     "SetTeamAsFriend",
     "SetTeamPoints",
     "SetAIDamageThreshold",
+    "SetAIDifficulty",
     "SetTimerRate",
     "SetTimerValue",
     "SetUnitCount",
@@ -172,7 +173,6 @@ const IGNORED: &[&str] = &[
     "ScriptCB_SetUberScoreLimit",
     "ScriptCB_SetYAxisFlip",
     "ScriptCB_ShowHuntScoreLimit",
-    "SetAIDifficulty",
     "SetAIVehicleNotifyRadius",
     "SetAIViewMultiplier",
     "SetAllowBlindJetJumps",
@@ -1052,6 +1052,20 @@ impl Ctx<'_> {
                             nav.block_arcs(&[fnv1a_lowercase(s)], block);
                         }
                     }
+                }
+                nothing()
+            }
+            "SetAIDifficulty" => {
+                if let (Some(human_team), Some(others)) = (num(a, 0), num(a, 1)) {
+                    let level = arg(a, 2).as_str().map(|s| match s.to_ascii_lowercase().as_str() {
+                        "easy" => 1,
+                        "medium" => 2,
+                        "hard" => 3,
+                        _ => 0,
+                    });
+                    self.sim
+                        .mission_ai
+                        .set_skill_delta(human_team as i32, others as i32, level);
                 }
                 nothing()
             }

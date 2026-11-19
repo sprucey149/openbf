@@ -745,7 +745,14 @@ pub fn install_for_mission(
         .classes
         .iter()
         .enumerate()
-        .map(|(i, c)| flyer_params(&db, c, game == "bf2", landed[i].unwrap_or(0.0)))
+        .map(|(i, c)| {
+            let name = c.to_ascii_lowercase();
+            flyer_params(&db, c, game == "bf2", landed[i].unwrap_or(0.0)).map(|mut params| {
+                params.spawn_sphere_centre =
+                    spheres.get(&name).map(|&[x, y, z, _]| Vec3::new(x, y, z));
+                params
+            })
+        })
         .collect();
     // BF2's path Properties now survive the bake; older manifests use the
     // PS2 constructor defaults until rebaked (analysis/re-flyer-ai.md).
@@ -962,14 +969,35 @@ pub fn install_for_mission(
     sim.missile_target_points = b
         .classes
         .iter()
-        .map(|c| {
+        .enumerate()
+        .map(|(i, c)| {
             let Some((dir, k, entry)) = class_collision(m, map_dir, &sides, c) else {
                 return Vec::new();
             };
             let Ok(cg) = crate::assets::load_collision_geom(dir, &entry) else {
                 return Vec::new();
             };
-            crate::assets::missile_target_points(&cg, &k.collision)
+            let pts = crate::assets::missile_target_points(&cg, &k.collision);
+            if !pts.is_empty() {
+                return pts;
+            }
+            // OURS: when a vehicle has no TargetableCollision and its fallback
+            // visual bounding-sphere centre sits in an empty gap of its
+            // ordnance hull (e.g. `cis_fly_droidgunship`, whose sphere centre
+            // y = 0.18 lies 19 cm under its saucer mesh at y = 0.37..1.71),
+            // lift the homing aim point into the solid ordnance hull along Y
+            // so locked rockets hit the craft instead of flying through the
+            // gap. measure: check whether BF2's entity collision sphere
+            // differs from the baked visual sphere on `cis_fly_droidgunship`.
+            if let (Some(parts), Some(blast)) = (
+                sim.hull_parts.get(i).and_then(Option::as_ref),
+                sim.blast_setup.get(i).and_then(Option::as_ref),
+            ) {
+                if let Some(p) = solid_ordnance_aim_point(parts, blast.sphere_centre) {
+                    return vec![p];
+                }
+            }
+            Vec::new()
         })
         .collect();
     let nodes = hardpoints_from(m, &sides);
@@ -1384,6 +1412,33 @@ fn hull_parts_from(
             (!parts.is_empty()).then(|| parts.into())
         })
         .collect()
+}
+
+/// If `centre` lies strictly above or below the vertical `[y_lo, y_hi]` span of
+/// `parts`'s `ORDNANCE` hull at `(centre.x, centre.z)` (e.g. an empty gap under
+/// a saucer hull), return the vertical midpoint of that solid span so homing
+/// missiles hit the craft instead of flying through the gap.
+fn solid_ordnance_aim_point(parts: &[core::collision::HullPart], centre: Vec3) -> Option<Vec3> {
+    use core::collision::{CollisionWorld, HullFilter, Layers};
+    if !parts.iter().any(|p| p.layers.contains(Layers::ORDNANCE)) {
+        return None;
+    }
+    let mut world = CollisionWorld::new(Vec::new(), Vec::new());
+    let owner = core::vehicle::VehicleHandle { index: 0, gen: 1 };
+    world.set_hull(owner, parts, glam::Mat4::IDENTITY);
+    let hit = |origin: Vec3, dir: Vec3, max_t: f32| {
+        world.ray_with(origin, dir, max_t, Layers::ORDNANCE, HullFilter::All)
+    };
+    const REACH: f32 = 64.0;
+    let lo = hit(centre - Vec3::Y * REACH, Vec3::Y, REACH * 2.0)?.t;
+    let hi = hit(centre + Vec3::Y * REACH, Vec3::NEG_Y, REACH * 2.0)?.t;
+    let y_lo = (centre.y - REACH) + lo;
+    let y_hi = (centre.y + REACH) - hi;
+    if y_lo <= y_hi && (centre.y < y_lo || centre.y > y_hi) {
+        Some(Vec3::new(centre.x, 0.5 * (y_lo + y_hi), centre.z))
+    } else {
+        None
+    }
 }
 
 /// Each `side_<game>/vehicles/*/vehicles.ron` beside the map's bake, in path

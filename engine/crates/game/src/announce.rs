@@ -740,19 +740,24 @@ impl Commander {
         self.gating = true;
         let mut asks = std::mem::take(&mut self.calls_asked);
         for s in std::mem::take(&mut self.speaker_asks) {
-            if !self.queue.is_idle() || !self.queue.pending().is_empty() {
+            let Some(sound) = sounds.trigger_sound(s.region, s.reinforcements, s.side) else {
+                continue;
+            };
+            let name = format!("#{sound:08x}");
+            // BF2 FUN_0043f138 (B2:488202-488205): a streamed trigger sound
+            // only starts when its own stream slot (e.g. `voiceSlow`) is idle.
+            let stream = sounds.stream_id(&name);
+            let q = self.queue_for_stream(stream);
+            if !q.is_idle() || !q.pending().is_empty() {
                 continue;
             }
-            let sound = sounds.trigger_sound(s.region, s.reinforcements, s.side);
-            if let Some(sound) = sound {
-                asks.push(CallAsk {
-                    unit: s.unit,
-                    call: core::sim::Call::Loudspeaker,
-                    name: Some(format!("#{sound:08x}")),
-                    pos: s.center,
-                    own: false,
-                });
-            }
+            asks.push(CallAsk {
+                unit: s.unit,
+                call: core::sim::Call::Loudspeaker,
+                name: Some(name),
+                pos: s.center,
+                own: false,
+            });
         }
         let mut out = Vec::with_capacity(asks.len());
         for a in asks {

@@ -614,6 +614,17 @@ within `VEHICLE_NOTIFY_RADIUS` 50 m with no post, as the scan does. Ground maps 
 spa8 and spa9 name `transport`). The PS2 would seat the pilot; what its follower does with no route is the unported geometric
 candidate (section 10). `measure:` a PS2 round on spa1, watching a landing craft.
 
+**The barrier skip (2026-11-18) [V].** Before it gathers anyone, the scan tests the vehicle's spot. For a vehicle that is not an
+EntityBuilding (`DAT_00688e98`), `FUN_002eea68` is called with radius 2.0 (0x40000000), mask 1 and the vehicle excluded
+(B2:257514-257520). It queries the static obstacle tree `DAT_005fe8ec`, which is filled from the world's `BARR` chunks:
+`FUN_00178ae8` reads NAME, FLAG, XFRM and SIZE and calls `FUN_002ee588`. The per-barrier test is `FUN_002ee2c8` (an enabled
+bit 0x20, and FLAG & 0x1f & mask) and then `FUN_002ed840`, which is the port's `contains_r` with `<`. A spot that is not clear
+means no AI is told. spa4's `barrier19` (half 1.72 x 1.66 m, flags 1) sits on the `cis_bomber` pad, so on the PS2 the CIS never
+fly the greviousfighter that spa4g's Objective 4 marks for the player to steal. The port flew it off within 8 s, and the marker
+followed it around the sky. Ported as `ride::notify_barred`, BF2 only, for every autonomous claim. The test is
+`spa4g_c_bots_leave_the_barred_cis_bomber_parked`. `trace:` the second test (B2:257529-257533, the vehicle's radius
+`FUN_002a76b8`, its class+0x330 mask) also counts the dynamic obstacles `FUN_002ee6f0` registers. The port has no such index.
+
 ### Not ported, and why
 
 - **Route to the human** and **relocation near the human** are now ported: section 16. `FUN_002fbe60`, `FUN_002fa8b8`, `FUN_002fe150` and

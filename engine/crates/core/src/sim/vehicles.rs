@@ -1169,15 +1169,7 @@ impl Sim {
         let p = pad.def.pos;
         let landed_height = class.landed_height;
         spec.pos = match landed_height {
-            Some(lh) => {
-                let g = self.floor_point_under_static(p, p.y + PAD_RAY);
-                let y = if (p.y - PAD_RAY..=p.y + PAD_RAY).contains(&g) {
-                    g
-                } else {
-                    p.y
-                };
-                Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
-            }
+            Some(lh) => self.pad_flyer_spawn_pos(p, lh),
             None => {
                 if let Some(g) = self.ground_hit_under_with(p, false, HullFilter::Static) {
                     Vec3::new(p.x, g, p.z)
@@ -1190,6 +1182,17 @@ impl Sim {
         self.vehicle_pads[pi].team = team;
         self.vehicle_pads[pi].spawned(h);
         Some(h)
+    }
+
+    /// World position where a flyer pad at `p` spawns a craft with `landed_height`.
+    pub(in crate::sim) fn pad_flyer_spawn_pos(&self, p: Vec3, lh: f32) -> Vec3 {
+        let g = self.floor_point_under_static(p, p.y + PAD_RAY);
+        let y = if (p.y - PAD_RAY..=p.y + PAD_RAY).contains(&g) {
+            g
+        } else {
+            p.y
+        };
+        Vec3::new(p.x, y + crate::vehicle::flyer::rest_height(lh), p.z)
     }
 
     fn pad_box_taken(&self, pi: usize) -> bool {

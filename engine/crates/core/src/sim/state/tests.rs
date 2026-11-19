@@ -724,3 +724,36 @@ fn a_space_round_keeps_the_pre_171_team_rule() {
     assert_eq!(s.team_rows()[0].tier, D::Normal);
     assert_eq!(s.team_rows()[0].level, 18);
 }
+
+/// `SetAIDifficulty(a, b, level)` (FUN_002a2988 / FUN_002a29d8): a
+/// campaign's per-level pair moves the human team's bots by `a` and every
+/// other team's by `b`, clamped 1..20, at the port tier mapped to that
+/// level (Easy: "medium", Normal and up: "hard"). spa4g's
+/// `SetAIDifficulty(2, -9, "medium")` is the pair checked here.
+#[test]
+fn a_campaign_skill_delta_moves_each_sides_bots_at_its_mapped_level() {
+    use crate::skill::Difficulty as D;
+    let mut s = Sim::empty(4);
+    s.heightfield = Some(flat_ground());
+    s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+    let base = |s: &Sim, d| {
+        let mut b = s.clone();
+        b.difficulty = d;
+        b.mission_ai.skill_delta = [[0; 2]; 3];
+        (b.bot_skill(0), b.bot_skill(1))
+    };
+    let (easy0, _) = base(&s, D::Easy);
+    let normal = base(&s, D::Normal);
+    s.mission_ai.set_skill_delta(2, -9, Some(2));
+    s.difficulty = D::Easy;
+    assert_eq!((s.bot_skill(0), s.bot_skill(1)), (easy0 + 2, 14 - 9));
+    s.difficulty = D::Normal;
+    assert_eq!((s.bot_skill(0), s.bot_skill(1)), normal, "the hard pair is unset");
+    s.mission_ai.set_skill_delta(1, 30, Some(3));
+    assert_eq!((s.bot_skill(0), s.bot_skill(1)), (normal.0 + 1, 20), "clamped to 20");
+    s.mission_ai.set_skill_delta(0, -30, None);
+    s.difficulty = D::Easy;
+    assert_eq!(s.bot_skill(1), 1, "no level sets all three; clamped to 1");
+    s.mission_ai.set_skill_delta(5, 5, Some(4));
+    assert_eq!(s.bot_skill(1), 1, "an unknown level is ignored");
+}

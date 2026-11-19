@@ -242,27 +242,64 @@ impl Sim {
             .chain(self.walker_spawn_nodes(team))
     }
 
-    /// The live command walkers `team` may spawn at, in vehicle order: a
-    /// walker whose class authors spawn points and whose team is `team` — its
-    /// pad's, from the spawn to the kill (re-command-walker-post §3 [O]: no
-    /// ally, no capture). Destroyed, it is gone from here at once, dying
-    /// walker and all; the pad's next walker is here again.
+    /// The live command vehicles `team` may spawn at, in vehicle order: a
+    /// command walker or landed command flyer whose class authors spawn points
+    /// and whose team is `team` — its pad's, from the spawn to the kill
+    /// (re-command-walker-post §3 [O]: no ally, no capture; BF2 CommandFlyer
+    /// FUN_00352cf8 / FUN_00352ee0 / FUN_00352ef0 enables its post iff
+    /// `FlightPhase::Landed`). Destroyed, it is gone from here at once; the
+    /// pad's next vehicle is here again.
     pub fn command_walkers(
         &self,
         team: u8,
     ) -> impl Iterator<Item = (crate::vehicle::VehicleHandle, &crate::vehicle::Vehicle)> {
-        self.alive_vehicles().filter(move |(_, v)| {
-            v.team == Some(team) && v.health.alive() && !self.class_spawn_points(v.class).is_empty()
-        })
+        self.alive_vehicles()
+            .filter(move |(_, v)| v.team == Some(team) && self.vehicle_can_spawn(v))
+    }
+
+    /// True when `v` is currently acting as a live team spawn post (a command
+    /// walker or a landed command flyer with authored spawn points).
+    pub fn is_command_spawn_vehicle(&self, v: &crate::vehicle::Vehicle) -> bool {
+        v.alive && v.team.is_some_and(|t| t < 2) && self.vehicle_can_spawn(v)
+    }
+
+    fn vehicle_can_spawn(&self, v: &crate::vehicle::Vehicle) -> bool {
+        v.health.alive()
+            && !self.class_spawn_points(v.class).is_empty()
+            && (v.kind != crate::vehicle::VehicleKind::Flyer
+                || v.flyer.phase == crate::vehicle::flyer::FlightPhase::Landed)
     }
 
     /// Vehicle class `class`'s spawn points (a command walker's
-    /// `WalkerParams::spawn_points`; empty for anything else).
+    /// `WalkerParams::spawn_points` or a command flyer's
+    /// `FlyerParams::spawn_points`; empty for anything else).
     fn class_spawn_points(&self, class: u32) -> &[(Vec3, f32)] {
+        if let Some(pts) = self
+            .walker_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .map(|p| p.spawn_points.as_slice())
+            .filter(|pts| !pts.is_empty())
+        {
+            return pts;
+        }
+        self.flyer_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .map_or(&[], |p| p.spawn_points.as_slice())
+    }
+
+    fn class_spawn_sphere_centre(&self, class: u32) -> Option<Vec3> {
         self.walker_params
             .get(class as usize)
             .and_then(Option::as_ref)
-            .map_or(&[], |p| &p.spawn_points)
+            .and_then(|p| p.spawn_sphere_centre)
+            .or_else(|| {
+                self.flyer_params
+                    .get(class as usize)
+                    .and_then(Option::as_ref)
+                    .and_then(|p| p.spawn_sphere_centre)
+            })
     }
 
     /// The spawn points of `team`'s live command walkers (card CWSP,
@@ -308,11 +345,16 @@ impl Sim {
             .iter()
             .filter(|p| p.team == Some(team) && p.vehicles.is_empty() && p.wants_spawn())
             .flat_map(|p| {
-                let class = p.def.class_for(p.team).map_or(u32::MAX, |c| c.spec.class);
+                let class_def = p.def.class_for(p.team);
+                let class = class_def.map_or(u32::MAX, |c| c.spec.class);
                 let rot = crate::vehicle::hover::quat_y(-p.def.yaw);
+                let pos = match class_def.and_then(|c| c.landed_height) {
+                    Some(lh) => self.pad_flyer_spawn_pos(p.def.pos, lh),
+                    None => p.def.pos,
+                };
                 self.class_spawn_points(class)
                     .iter()
-                    .map(move |&pt| walker_point(p.def.pos, rot, pt))
+                    .map(move |&pt| walker_point(pos, rot, pt))
             })
             .collect()
     }
@@ -1009,11 +1051,7 @@ impl Sim {
 
     fn walker_respawn_point(&self, owner: VehicleHandle, node: Vec3) -> Option<Vec3> {
         let v = self.vehicle(owner)?;
-        let centre = self
-            .walker_params
-            .get(v.class as usize)?
-            .as_ref()?
-            .spawn_sphere_centre?;
+        let centre = self.class_spawn_sphere_centre(v.class)?;
         if !centre.is_finite() {
             return None;
         }

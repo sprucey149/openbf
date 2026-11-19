@@ -955,6 +955,13 @@ pub struct MissionAi {
     /// 70): a sniper's lane counts ground out to `2 d`
     /// ([`crate::ai::snipe::lane`]).
     pub snipe_suitability: f32,
+    /// `SetAIDifficulty(a, b [, level])`: per PS2 level (easy, medium,
+    /// hard) the skill added to the human team's bots (`a`) and to every
+    /// other team's (`b`). BF2 `FUN_002a2988` writes `DAT_005fdf88` /
+    /// `DAT_005fdf98` at the level; with no level string the binding writes
+    /// all three. `FUN_002a28e0` zeroes them at mission start
+    /// (`re-ai-difficulty.md` §1.1, §2.1). Every campaign script sets them.
+    pub skill_delta: [[i32; 2]; 3],
 }
 
 /// `AISnipeSuitabilityDist`'s default (BF2 `DAT_005fdffc`, 70.0).
@@ -967,6 +974,7 @@ impl Default for MissionAi {
             view_mult: 1.0,
             aggressiveness: [1.0; 2],
             snipe_suitability: SNIPE_SUITABILITY_DEFAULT,
+            skill_delta: [[0; 2]; 3],
         }
     }
 }
@@ -975,6 +983,20 @@ impl MissionAi {
     /// `SetAIViewMultiplier`'s clamp (BF2 `FUN_002e37c0`).
     pub fn set_view_mult(&mut self, m: f32) {
         self.view_mult = m.clamp(0.1, 1.0);
+    }
+
+    /// `SetAIDifficulty(a, b, level)`: `level` 1..=3 (easy, medium, hard)
+    /// sets that level's pair; `None` sets all three (BF2 `FUN_002a2988`
+    /// ignores a level outside 1..=3).
+    pub fn set_skill_delta(&mut self, human_team: i32, others: i32, level: Option<usize>) {
+        let levels = match level {
+            Some(l @ 1..=3) => l - 1..l,
+            Some(_) => return,
+            None => 0..3,
+        };
+        for l in levels {
+            self.skill_delta[l] = [human_team, others];
+        }
     }
 
     /// `AISnipeSuitabilityDist`'s clamp (BF2: [0, 100]).
@@ -1073,15 +1095,42 @@ impl Sim {
     /// The integer skill a bot of team `team` spawns with: the base skill
     /// of the team's [`Sim::team_difficulty`] override (the arena), else the
     /// team's DTEAM row's skill, else (a team past 1) the round's base.
+    /// The mission's `SetAIDifficulty` delta is added on top, clamped to
+    /// 1..=20 ([`Sim::script_skill_delta`]).
     pub fn bot_skill(&self, team: u8) -> u8 {
         let t = usize::from(team);
-        match self.team_difficulty.get(t).copied().flatten() {
+        let base = match self.team_difficulty.get(t).copied().flatten() {
             Some(d) => d.base_skill(),
             None => self
                 .team_rows()
                 .get(t)
                 .map_or(self.difficulty.base_skill(), |r| r.level),
+        };
+        let delta = self.script_skill_delta(team);
+        if delta == 0 {
+            return base;
         }
+        (i32::from(base) + delta).clamp(1, 20) as u8
+    }
+
+    /// The `SetAIDifficulty` delta for team `team`'s bots. BF2 `FUN_002a29d8`
+    /// adds the human team's (`DAT_005fdf88`) to the bots of the team
+    /// `FUN_002a8300` names (the single-player or co-op human's; none in
+    /// netplay) and the other (`DAT_005fdf98`) to every other team, both at
+    /// the shell level, then clamps to 1..=20. OURS: the port's tiers sit a
+    /// step above the PS2's levels (`crate::skill`, Easy is the PS2 Normal's
+    /// base 14 and Normal the PS2 Elite's 17), so Easy reads the script's
+    /// medium pair and Normal the hard pair; Hard and Elite, above anything
+    /// the PS2 has, read the hard pair too. No tier reads the easy pair.
+    pub fn script_skill_delta(&self, team: u8) -> i32 {
+        let level = match self.difficulty {
+            crate::skill::Difficulty::Easy => 1,
+            _ => 2,
+        };
+        let human_team = !self.netplay_rows
+            && team < 2
+            && self.humans_per_team()[usize::from(team)] > 0;
+        self.mission_ai.skill_delta[level][usize::from(!human_team)]
     }
 
     /// The skill vector of whoever shoots AT a unit of team `team`: the

@@ -45,7 +45,9 @@ mod transport;
 use crate::fmath::FloatExt;
 pub(crate) use admission::commit as commit_plan;
 pub use admission::{has_transport_paths, TRANSPORT_CLASS};
-pub(crate) use transport::{at_destination as transport_destination, uses_authored_transport};
+pub(crate) use transport::{
+    at_destination as transport_destination, is_deployed_command_flyer, uses_authored_transport,
+};
 
 use super::gunner::Look;
 use super::hover_drive::{self, Body, Class, Order};

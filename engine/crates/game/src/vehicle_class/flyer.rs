@@ -32,6 +32,7 @@ impl Convert {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlyerClass {
     motion: FlyerParams,
+    spawn_point_count: usize,
 }
 
 impl FlyerClass {
@@ -40,12 +41,15 @@ impl FlyerClass {
         if !FLYER_BASES.contains(&base) {
             return None;
         }
+        let mut motion = if bf2 {
+            FlyerParams::bf2()
+        } else {
+            FlyerParams::default()
+        };
+        motion.command_flyer = base == "commandflyer";
         let mut c = Self {
-            motion: if bf2 {
-                FlyerParams::bf2()
-            } else {
-                FlyerParams::default()
-            },
+            motion,
+            spawn_point_count: 0,
         };
         for def in db.chain(class).into_iter().rev() {
             let mut scope = Scope::Body;
@@ -61,7 +65,6 @@ impl FlyerClass {
                 }
             }
         }
-        c.motion.command_flyer = base == "commandflyer";
         Some(c)
     }
 
@@ -223,6 +226,18 @@ impl FlyerClass {
             fill(&mut p.collision_threshold, value);
         } else if key == h("CollisionScale") {
             fill(&mut p.collision_scale, value);
+        } else if p.command_flyer && key == h("SpawnPointCount") {
+            // BF2 CommandFlyer class setter FUN_00353088 -> FUN_0035a3a0
+            // (B2:336258): allocates spawn points at this count.
+            self.spawn_point_count = value.trim().parse::<usize>().unwrap_or(0);
+            p.spawn_points.clear();
+        } else if p.command_flyer && key == h("SpawnPointLocation") {
+            if let Some([x, y, z, a]) = super::floats::<4>(value) {
+                if p.spawn_points.len() < self.spawn_point_count {
+                    p.spawn_points
+                        .push((Vec3::new(x, y, z), a * walker::SPAWN_ANGLE_RAD));
+                }
+            }
         }
     }
 }

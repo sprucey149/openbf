@@ -1645,7 +1645,7 @@ fn campaign_space_missions_preserve_hangars_takeoffs_and_tickets() {
     }
     for (script, max_impact_deaths, want_unlimited_teams, want_kill_floor_below) in [
         ("spa2c_c", 0usize, [true, true], None),
-        ("spa3c_c", 0usize, [false, true], None),
+        ("spa3c_c", 1usize, [false, true], None),
         ("spa4g_c", 3usize, [false, true], Some(-330.0)),
         ("spa1g_c", 2usize, [false, true], None),
     ] {
@@ -2076,7 +2076,7 @@ fn spa2c_c_objective6_hangar_voice_plays_immediately_over_background_streams() {
     rt.close_popup();
     let _ = rt.take_voice_overs();
     let _ = rt.take_sounds();
-    let call_obj = |rt: &mut CampaignRuntime, walk: &mut WalkSim, obj: &str, method: &str, arg: f32| {
+    let call_obj =|rt: &mut CampaignRuntime, walk: &mut WalkSim, obj: &str, method: &str, arg: f32| {
         let this = rt.interp.global(obj);
         let mut host = Ctx {
             w: &mut rt.w,
@@ -3082,4 +3082,213 @@ fn myg1c_ambush_spawns_native_team_5_droidekas() {
     );
 }
 
+#[test]
+fn spa4g_c_gunship_spawns_cis_droids_in_imperial_hangar() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: spa4g_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa4g_c");
+    // Step a couple ticks so pads build vehicles (including `cis_gunship`).
+    for _ in 0..5 {
+        walk.step_tick(&[core::sim::PadState::default()]);
+        rt.step(
+            &mut walk.sim,
+            walk.player,
+            None,
+            &team_classes(&def),
+            &BTreeMap::new(),
+            &walk.vehicle_classes,
+            core::TICK_DT,
+        );
+    }
+    let gunship_class = walk
+        .vehicle_classes
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("cis_fly_droidgunship"))
+        .expect("cis_fly_droidgunship class loaded") as u32;
+    let fp = walk
+        .sim
+        .flyer_params
+        .get(gunship_class as usize)
+        .and_then(Option::as_ref)
+        .expect("cis_fly_droidgunship FlyerParams");
+    assert!(fp.command_flyer, "cis_fly_droidgunship must be a commandflyer");
+    assert_eq!(
+        fp.spawn_points.len(),
+        6,
+        "cis_fly_droidgunship must carry its 6 authored SpawnPointLocations"
+    );
+    let (gunship_handle, gunship) = walk
+        .sim
+        .command_walkers(1)
+        .find(|(_, v)| v.class == gunship_class)
+        .expect("landed cis_gunship must be an active CIS command spawn post");
+    let gunship_pos = gunship.pos;
+    // Verify the gunship's missile homing aim point lands inside its solid
+    // ordnance hull from the player's hangar floor position (not the gap under
+    // its saucer at visual sphere_centre y=0.18).
+    let target_pts = &walk.sim.missile_target_points[gunship_class as usize];
+    assert!(
+        !target_pts.is_empty(),
+        "cis_fly_droidgunship must have a lifted solid ordnance missile target point"
+    );
+    let world_aim = gunship.pos + gunship.rot * target_pts[0];
+    let shooter_eye = Vec3::new(-928.77, -83.54, -391.54);
+    let aim_dir = (world_aim - shooter_eye).normalize();
+    let hit = walk.sim.collision.ray_with(
+        shooter_eye,
+        aim_dir,
+        100.0,
+        core::collision::Layers::ORDNANCE,
+        core::collision::HullFilter::All,
+    );
+    assert_eq!(
+        hit.and_then(|h| h.owner),
+        Some(gunship_handle),
+        "locked rocket ray from hangar floor toward cis_gunship aim point must hit its ordnance hull"
+    );
+    let mut near_gunship_initial = 0usize;
+    for u in &walk.sim.units {
+        if u.alive && u.team == 1 && (u.soldier.pos - gunship_pos).length() < 30.0 {
+            near_gunship_initial += 1;
+        }
+    }
+    // `setup_baked_campaign_full` spawns all 22 authored CIS units while
+    // `battle.rs` caps opening AI at `def.initial_ai(1, false)` (= 16).
+    // Match `battle.rs`'s live cap so killing hangar droids drops below
+    // `ai_limit(1)` and triggers immediate respawns, just like real play.
+    walk.sim.ai_alive_cap = def.teams[1].units;
+    let mut total_cis_respawns = 0usize;
+    let mut respawns_near_gunship = 0usize;
+    let mut gunship_phase_after = core::vehicle::flyer::FlightPhase::Landed;
+    let mut gunship_pos_after = gunship_pos;
+    for tick in 0..900 {
+        if tick == 10 || tick == 450 {
+            let victims: Vec<_> = walk
+                .sim
+                .units
+                .iter()
+                .enumerate()
+                .filter(|(_, u)| u.alive && u.team == 1 && (u.soldier.pos - gunship_pos).length() < 40.0)
+                .map(|(i, u)| core::unit::UnitHandle { index: i as u32, gen: u.gen })
+                .collect();
+            for h in victims {
+                walk.sim.kill_environment(h, core::sim::DeathCause::Suicide);
+            }
+        }
+        walk.step_tick(&[core::sim::PadState::default()]);
+        for ev in &walk.sim.events {
+            if let core::sim::Event::Respawn { unit } = *ev {
+                let u = &walk.sim.units[unit.index as usize];
+                if u.team == 1 {
+                    total_cis_respawns += 1;
+                    if (u.soldier.pos - gunship_pos).length() < 25.0 {
+                        respawns_near_gunship += 1;
+                    }
+                }
+            }
+        }
+        rt.step(
+            &mut walk.sim,
+            walk.player,
+            None,
+            &team_classes(&def),
+            &BTreeMap::new(),
+            &walk.vehicle_classes,
+            core::TICK_DT,
+        );
+        if let Some(v) = walk.sim.vehicle(gunship_handle) {
+            gunship_phase_after = v.flyer.phase;
+            gunship_pos_after = v.pos;
+        }
+    }
+    assert!(
+        near_gunship_initial > 0,
+        "opening wave must spawn CIS droids near cis_gunship"
+    );
+    assert!(
+        respawns_near_gunship > 0,
+        "CIS droids must keep respawning near cis_gunship while it is alive and landed (initial={near_gunship_initial}, total_cis_respawns={total_cis_respawns}, respawns={respawns_near_gunship}, phase={gunship_phase_after:?}, pos={gunship_pos_after:?})"
+    );
+    assert!(
+        walk.sim.vehicle(gunship_handle).is_some(),
+        "cis_gunship must still be alive in the hangar (last phase={gunship_phase_after:?}, last pos={gunship_pos_after:?}, start pos={gunship_pos:?})"
+    );
+    // Taking off disables the CommandFlyer's spawn post (BF2 FUN_00352cf8 / FUN_00352ee0).
+    walk.sim.vehicle_mut(gunship_handle).unwrap().flyer.phase =
+        core::vehicle::flyer::FlightPhase::Flying;
+    assert!(
+        walk.sim.command_walkers(1).all(|(h, _)| h != gunship_handle),
+        "a flying CommandFlyer must not be an eligible spawn post"
+    );
+    // Landing re-enables it.
+    walk.sim.vehicle_mut(gunship_handle).unwrap().flyer.phase =
+        core::vehicle::flyer::FlightPhase::Landed;
+    assert!(
+        walk.sim.command_walkers(1).any(|(h, _)| h == gunship_handle),
+        "a landed CommandFlyer must be an eligible spawn post again"
+    );
+    // Destroying it removes it as a spawn post.
+    walk.sim.vehicle_mut(gunship_handle).unwrap().health.cur = 0.0;
+    assert!(
+        walk.sim.command_walkers(1).all(|(h, _)| h != gunship_handle),
+        "a destroyed CommandFlyer must not be an eligible spawn post"
+    );
+}
 
+
+/// spa4g's ScriptPostLoad calls `SetAIDifficulty(2, -9, "medium")`: the
+/// pair lands on the medium level and leaves easy and hard alone, before
+/// the opening wave spawns.
+#[test]
+fn spa4g_c_script_sets_its_medium_ai_difficulty_pair() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: spa4g_c mission and baked assets required");
+        return;
+    };
+    let (_def, walk, _rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa4g_c");
+    assert_eq!(walk.sim.mission_ai.skill_delta, [[0, 0], [2, -9], [0, 0]]);
+}
+
+/// spa4's `barrier19` covers the `cis_bomber` pad, so the vehicle notify
+/// scan (`FUN_002e2e38`) never offers its greviousfighter to a bot: it is
+/// still parked, with nobody aboard, when Objective 4 asks the player to
+/// steal it.
+#[test]
+fn spa4g_c_bots_leave_the_barred_cis_bomber_parked() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: spa4g_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa4g_c");
+    let bomber_class = walk
+        .vehicle_classes
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("cis_fly_greviousfighter"))
+        .expect("cis_fly_greviousfighter class loaded") as u32;
+    let pad = glam::Vec2::new(-260.471, -1809.34);
+    let (bomber, _) = walk
+        .sim
+        .alive_vehicles()
+        .find(|(_, v)| v.class == bomber_class && glam::Vec2::new(v.pos.x, v.pos.z).distance(pad) < 1.0)
+        .expect("the cis_bomber pad builds its greviousfighter");
+    for _ in 0..1800 {
+        walk.step_tick(&[core::sim::PadState::default()]);
+        rt.step(
+            &mut walk.sim,
+            walk.player,
+            None,
+            &team_classes(&def),
+            &BTreeMap::new(),
+            &walk.vehicle_classes,
+            core::TICK_DT,
+        );
+        assert!(
+            !walk.sim.units.iter().any(|u| u.alive && u.mount.is_some_and(|m| m.vehicle == bomber)),
+            "nobody boards the barred bomber"
+        );
+    }
+    let v = walk.sim.vehicle(bomber).expect("the bomber is still there");
+    assert!(glam::Vec2::new(v.pos.x, v.pos.z).distance(pad) < 1.0, "still on its pad: {:?}", v.pos);
+}

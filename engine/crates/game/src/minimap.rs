@@ -570,14 +570,7 @@ impl MapStatic {
         }
         for (i, v) in sim.vehicles.iter().enumerate() {
             let own_ride = me.mount.is_some_and(|m| m.vehicle.index as usize == i);
-            if !v.alive
-                || own_ride
-                || sim
-                    .walker_params
-                    .get(v.class as usize)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|p| !p.spawn_points.is_empty())
-            {
+            if !v.alive || own_ride || sim.is_command_spawn_vehicle(v) {
                 continue;
             }
             let Some((icon, texture)) = self
