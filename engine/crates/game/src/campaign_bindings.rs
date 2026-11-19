@@ -113,6 +113,8 @@ const BOUND: &[&str] = &[
     "SetObjectTeam",
     "SetProperty",
     "SetReinforcementCount",
+    "SetSpawnDelay",
+    "SetSpawnDelayTeam",
     "SetTeamAsEnemy",
     "SetTeamAsFriend",
     "SetTeamPoints",
@@ -202,8 +204,6 @@ const IGNORED: &[&str] = &[
     "SetParticleLODBias",
     "SetPS2ModelMemory",
     "SetSoundEffect",
-    "SetSpawnDelay",
-    "SetSpawnDelayTeam",
     "SetTeamAggressiveness",
     "SetTeamIcon",
     "SetTeamName",
@@ -319,6 +319,8 @@ impl Host for Ctx<'_> {
         if self.w.setup
             && !is_query(name)
             && !is_stream_routing(name)
+            && name != "SetSpawnDelay"
+            && name != "SetSpawnDelayTeam"
             && !(name == "SetReinforcementCount"
                 && sim_team(arg(args, 0)).is_some_and(|t| t >= 2))
         {
@@ -952,8 +954,10 @@ impl Ctx<'_> {
             "SetUnitCount" => {
                 if let (Some(t), Some(n)) = (sim_team(arg(a, 0)), num(a, 1)) {
                     if t < 2 {
-                        w.team_units[usize::from(t)] = n as u32;
-                        w.fill_enabled_ai(sim);
+                        if !w.setup {
+                            w.team_units[usize::from(t)] = n as u32;
+                            w.pending_ai_fill = true;
+                        }
                     } else {
                         w.native_units.insert(t, n as u32);
                     }
@@ -965,8 +969,36 @@ impl Ctx<'_> {
                     let allow = arg(a, 1).truthy();
                     sim.set_ai_spawn_allowed(t, allow);
                     if allow {
-                        w.fill_enabled_ai(sim);
+                        w.pending_ai_fill = true;
                     }
+                }
+                nothing()
+            }
+            "SetSpawnDelay" => {
+                // SWBFRNT2.ELF FUN_0018d348 (lines 32695-32722) -> FUN_0036bec0:
+                // sets wave delay and release interval for main teams 1 and 2.
+                if let (Some(delay), Some(interval)) = (num(a, 0), num(a, 1)) {
+                    let delay = delay.fmax(0.0);
+                    let interval = interval.fmax(0.0);
+                    for t in 0..2 {
+                        sim.waves[t].delay = delay;
+                        sim.waves[t].interval = interval;
+                    }
+                }
+                nothing()
+            }
+            "SetSpawnDelayTeam" => {
+                // SWBFRNT2.ELF FUN_0018d3f8 (lines 32725-32747) -> FUN_0036bec0:
+                // sets wave delay and release interval for one team.
+                if let (Some(delay), Some(interval), Some(t)) = (
+                    num(a, 0),
+                    num(a, 1),
+                    sim_team(arg(a, 2)).filter(|t| *t < 2),
+                ) {
+                    let delay = delay.fmax(0.0);
+                    let interval = interval.fmax(0.0);
+                    sim.waves[usize::from(t)].delay = delay;
+                    sim.waves[usize::from(t)].interval = interval;
                 }
                 nothing()
             }
@@ -1305,7 +1337,11 @@ impl World {
     }
 
     /// Top a main army back up to its unit count where it may spawn.
-    pub(crate) fn fill_enabled_ai(&self, sim: &mut Sim) {
+    /// Collect spawn points distributed round-robin across owned CPs (then
+    /// command walkers), so a CP with 20 nodes (e.g. Kamino's `cp1` in the DNA
+    /// hall) does not absorb an entire team before the second CP (`cp4`) gets
+    /// any spawns.
+    pub(crate) fn fill_enabled_ai(&mut self, sim: &mut Sim) {
         for t in 0..2usize {
             let team = t as u8;
             if !sim.ai_spawn_allowed[t] || self.team_units[t] == 0 {
@@ -1316,9 +1352,7 @@ impl World {
             {
                 continue;
             }
-            let mut pts = sim.spawn_points(team);
-            pts.extend(sim.pad_walker_spawn_points(team));
-            if pts.is_empty() {
+            if sim.spawn_posts(team).is_empty() {
                 continue;
             }
             let existing = sim
@@ -1326,9 +1360,22 @@ impl World {
                 .iter()
                 .filter(|u| !u.is_player && u.team == team)
                 .count() as u32;
+            if existing >= self.team_units[t] {
+                continue;
+            }
+            // Opening wave (`tick <= 1` or team 0's first wave after `onfirstspawn`)
+            // spawns immediately by `AISpawnWeight` (`SWBFRNT2.ELF` `FUN_002e7240`,
+            // lines 260573-260620). Mid-mission team activation (`tick > 1` on
+            // non-opening teams, e.g. Kamino `DEF` when `cp1` + `cp4` open) enters
+            // through `sim.waves[t]` (`FUN_0036c750`, lines 353853-353875) so bots
+            // release on the team's spawn wave instead of materializing all at once.
+            let use_wave = sim.tick > 1 && t != 0;
             for k in existing..self.team_units[t] {
-                let (pos, yaw) = pts[(k as usize) % pts.len()];
-                sim.spawn_ai(team, pos, yaw);
+                if use_wave {
+                    sim.queue_ai_for_wave(team);
+                } else {
+                    sim.spawn_ai_at_drawn_post(team, k as usize);
+                }
             }
         }
     }
@@ -1369,7 +1416,7 @@ impl World {
             self.class_order[ti].push(ci);
         }
         sim.set_class_enabled(t, ci, true);
-        self.fill_enabled_ai(sim);
+        self.pending_ai_fill = true;
     }
 
     /// `CreateEntity(class, point, name)`: a `flag` class becomes a
@@ -1519,7 +1566,7 @@ impl World {
                     sim.cps[ci].capture = 0.0;
                     sim.cps[ci].neutral = 0.0;
                 }
-                self.fill_enabled_ai(sim);
+                self.pending_ai_fill = true;
             }
             Ud::Station(si) => sim.respawn_station(si),
             _ => {}
@@ -1643,7 +1690,7 @@ impl World {
                         sim.cps[ci].capture = 0.0;
                         sim.cps[ci].neutral = 0.0;
                     }
-                    self.fill_enabled_ai(sim);
+                    self.pending_ai_fill = true;
                 }
             }
             "spawnpath" => {
@@ -1651,7 +1698,7 @@ impl World {
                     sim.cps[ci].def.spawn_nodes.clear();
                 } else if let Some(p) = self.path(val) {
                     sim.cps[ci].def.spawn_nodes = self.paths[p].1.clone();
-                    self.fill_enabled_ai(sim);
+                    self.pending_ai_fill = true;
                 }
             }
             "captureregion" => {

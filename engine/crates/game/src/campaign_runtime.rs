@@ -289,6 +289,14 @@ pub(crate) struct World {
     /// `player1.objectivesUpdated` is up: the last of its posts to fire.
     pub updated_on: bool,
     pub reported: BTreeSet<String>,
+    /// True when a campaign script changed CP ownership, spawn paths, unit
+    /// counts, or class availability and main-team AI should be topped up once
+    /// the current tick's callbacks finish (so consecutive `OnComplete` +
+    /// `OnStart` CP changes split bots across all newly opened posts).
+    pub pending_ai_fill: bool,
+    /// True once the human player has spawned at least once (so `onfirstspawn`
+    /// runs before the campaign's opening AI wave spawns).
+    pub human_spawned: bool,
     pub anims: crate::world_anim::WorldAnimPlayer,
 }
 
@@ -456,6 +464,8 @@ impl CampaignRuntime {
             hud_events: Vec::new(),
             updated_on: false,
             reported: BTreeSet::new(),
+            pending_ai_fill: false,
+            human_spawned: false,
             anims: Default::default(),
         };
         Self {
@@ -468,6 +478,12 @@ impl CampaignRuntime {
     pub fn set_team_rosters(&mut self, team_classes: [Vec<String>; 2], team_units: [u32; 2]) {
         self.w.team_classes = team_classes;
         self.w.team_units = team_units;
+    }
+
+    /// Ask the runtime to spawn the main teams' opening AI wave on the first
+    /// post-spawn `step` (after `onfirstspawn` updates initial CP ownership).
+    pub fn defer_opening_wave(&mut self) {
+        self.w.pending_ai_fill = true;
     }
 
     /// The local teams' rosters (team, member classes, unit count): who
@@ -554,6 +570,10 @@ impl CampaignRuntime {
         self.call_global(sim, "ScriptPostLoad", Vec::new());
         self.w.post_loaded = true;
         sim.populate_native_teams();
+        if self.w.pending_ai_fill && !sim.spawn_screens {
+            self.w.pending_ai_fill = false;
+            self.w.fill_enabled_ai(sim);
+        }
     }
 
     fn call_global(&mut self, sim: &mut Sim, name: &str, args: Vec<Value>) {
@@ -608,6 +628,10 @@ impl CampaignRuntime {
         self.dispatch_sim_events(sim);
         self.dispatch_state_changes(sim);
         self.step_timers(sim, dt);
+        if self.w.pending_ai_fill && (!sim.spawn_screens || self.w.human_spawned) {
+            self.w.pending_ai_fill = false;
+            self.w.fill_enabled_ai(sim);
+        }
         self.w.anims.step(sim, dt);
     }
 
@@ -839,6 +863,9 @@ impl CampaignRuntime {
                     self.fire(sim, EventKind::ObjectKill, &key, vec![Value::Ud(obj), k]);
                 }
                 Event::Respawn { unit } => {
+                    if unit == self.w.player {
+                        self.w.human_spawned = true;
+                    }
                     self.fire(
                         sim,
                         EventKind::CharacterSpawn,

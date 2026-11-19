@@ -163,9 +163,11 @@ pub fn install(
             })
             .collect();
         let mut members = Vec::new();
+        let mut counts = vec![0u32; table.len()];
         let cap = usize::from(member_count);
         for (i, class) in table.iter().enumerate() {
-            for _ in 0..(class.min as usize).min(cap.saturating_sub(members.len())) {
+            let take = (class.min as usize).min(cap.saturating_sub(members.len()));
+            for _ in 0..take {
                 members.push(class.spec(
                     team,
                     glam::Vec3::ZERO,
@@ -174,22 +176,35 @@ pub fn install(
                     i as u8,
                     walk.sim.bot_skill(team),
                 ));
+                counts[i] += 1;
             }
         }
-        // The member pool is distinct from the authored minimums. The normal
-        // roster's fill class takes the remainder here too. PROVISIONAL,
-        // replace: trace the BF1 quota top-up and assigned-member class draws
-        // across native waves (re-ai-class-selection.md).
-        members.resize_with(cap, || {
-            table[0].spec(
+        // Fill the remainder across classes that have not reached their
+        // authored `max` (PROVISIONAL, replace: trace assigned-member class
+        // draws across native waves, re-ai-class-selection.md).
+        let mut cursor = 0usize;
+        while members.len() < cap {
+            let mut picked = None;
+            for step in 0..table.len() {
+                let idx = (cursor + step) % table.len();
+                let limit = table[idx].max.unwrap_or(u32::MAX);
+                if counts[idx] < limit {
+                    picked = Some(idx);
+                    cursor = (idx + 1) % table.len();
+                    break;
+                }
+            }
+            let idx = picked.unwrap_or(0);
+            members.push(table[idx].spec(
                 team,
                 glam::Vec3::ZERO,
                 0.0,
                 core::unit::Controller::Ai,
-                0,
+                idx as u8,
                 walk.sim.bot_skill(team),
-            )
-        });
+            ));
+            counts[idx] += 1;
+        }
         walk.native_teams.insert(
             team,
             crate::walk::TeamTemplate::from_roster(&roster, &table[0], visuals),

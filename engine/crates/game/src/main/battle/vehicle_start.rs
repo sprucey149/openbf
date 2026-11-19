@@ -145,6 +145,7 @@ mod tests {
                 radius: 3.0,
                 landed_height: None,
                 vis_box: Some((Vec3::splat(-3.0), Vec3::splat(3.0))),
+                self_seats: Vec::new(),
             })
         };
         PadDef {

@@ -89,7 +89,7 @@ mod saber;
 mod saber_throw;
 mod seat_assist;
 mod seats;
-mod self_turrets;
+pub mod self_turrets;
 mod space_assault;
 mod space_balance;
 mod spawn;

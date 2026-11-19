@@ -138,7 +138,7 @@ impl Sim {
         let mut gone = Vec::new();
         for i in 0..self.vehicles.len() {
             let v = &self.vehicles[i];
-            if !v.alive || v.kind != VehicleKind::Flyer {
+            if !v.alive || v.kind != VehicleKind::Flyer || v.world_animated {
                 continue;
             }
             let [floor, ceiling] = self.flight_limits.player;
@@ -171,7 +171,7 @@ impl Sim {
     fn fly_flyers(&mut self, dt: f32) {
         for i in 0..self.vehicles.len() {
             let v = &self.vehicles[i];
-            if !v.alive || v.kind != VehicleKind::Flyer {
+            if !v.alive || v.kind != VehicleKind::Flyer || v.world_animated {
                 continue;
             }
             let handle = VehicleHandle {

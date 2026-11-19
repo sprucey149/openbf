@@ -58,9 +58,14 @@ use std::collections::BTreeMap;
 struct Entry {
     anim: Option<usize>,
     station: Option<usize>,
+    vehicle_pad: Option<usize>,
     instance: Option<u32>,
     time: f32,
     base: Mat4,
+    /// Accumulated world position for `local == true` animations
+    /// (SWBFRNT2.ELF FUN_002736e0 lines 193587-193768), reset to `base`'s
+    /// translation on rewind or loop wrap.
+    cur_pos: Vec3,
     parts: Option<(bool, core::sim::StationParts)>,
 }
 
@@ -130,14 +135,47 @@ fn sample(a: &WorldAnim, keys: &[WorldAnimKey], t: f32) -> Option<Vec3> {
     })
 }
 
-/// Advance `time` by `dt` and give the matrix (FUN_002736e0, local clear).
-fn evaluate(a: &WorldAnim, time: &mut f32, dt: f32, base: Mat4) -> Mat4 {
+/// Advance `time` by `dt` and give the matrix (FUN_002736e0).
+/// Supports both global (`local == false`) and local-axis (`local == true`,
+/// lines 193587-193768) world animations.
+fn evaluate(a: &WorldAnim, time: &mut f32, cur_pos: &mut Vec3, dt: f32, base: Mat4) -> Mat4 {
+    if !a.local {
+        *time += dt;
+        if !a.looping {
+            *time = time.fmin(a.duration);
+        } else if a.duration > 0.0 {
+            while *time > a.duration {
+                *time -= a.duration;
+            }
+        }
+        let mut out = base;
+        if let Some(r) = sample(a, &a.rot, *time) {
+            out = base
+                * Mat4::from_rotation_z(r.z)
+                * Mat4::from_rotation_y(r.y)
+                * Mat4::from_rotation_x(r.x);
+        }
+        if let Some(p) = sample(a, &a.pos, *time) {
+            out.w_axis = base.transform_point3(p).extend(1.0);
+        }
+        *cur_pos = out.w_axis.truncate();
+        return out;
+    }
+
+    // `local == true` branch (FUN_002736e0 lines 193587-193768):
+    // integrate position delta along the animation's current rotated axes.
+    let mut prev_pos = sample(a, &a.pos, *time).unwrap_or(Vec3::ZERO);
+    let old_time = *time;
     *time += dt;
     if !a.looping {
         *time = time.fmin(a.duration);
-    } else if a.duration > 0.0 {
+    } else if a.duration > 0.0 && *time > a.duration {
         while *time > a.duration {
             *time -= a.duration;
+        }
+        if old_time <= a.duration {
+            *cur_pos = base.w_axis.truncate();
+            prev_pos = Vec3::ZERO;
         }
     }
     let mut out = base;
@@ -147,9 +185,12 @@ fn evaluate(a: &WorldAnim, time: &mut f32, dt: f32, base: Mat4) -> Mat4 {
             * Mat4::from_rotation_y(r.y)
             * Mat4::from_rotation_x(r.x);
     }
-    if let Some(p) = sample(a, &a.pos, *time) {
-        out.w_axis = base.transform_point3(p).extend(1.0);
-    }
+    let new_pos = sample(a, &a.pos, *time).unwrap_or(Vec3::ZERO);
+    let dp = new_pos - prev_pos;
+    *cur_pos += out.x_axis.truncate() * dp.x
+        + out.y_axis.truncate() * dp.y
+        + out.z_axis.truncate() * dp.z;
+    out.w_axis = cur_pos.extend(1.0);
     out
 }
 
@@ -194,17 +235,38 @@ impl WorldAnimPlayer {
                 .map(|(anim, object)| {
                     let object = object.to_ascii_lowercase();
                     let station = station_names.iter().position(|n| *n == object);
-                    let instance = if station.is_some() {
+                    let vehicle_pad = if station.is_some() {
                         None
                     } else {
-                        instance_names
+                        sim.vehicle_pads
                             .iter()
-                            .position(|n| *n == object)
-                            .map(|i| i as u32)
+                            .position(|p| p.def.name.eq_ignore_ascii_case(&object))
+                    };
+                    let instance_idx = instance_names
+                        .iter()
+                        .position(|n| *n == object)
+                        .map(|i| i as u32);
+                    let instance = if station.is_some() || vehicle_pad.is_some() {
+                        None
+                    } else {
+                        instance_idx
                     };
                     let base = station
                         .and_then(|s| sim.stations.get(s))
                         .map(|s| s.transform)
+                        .or_else(|| {
+                            vehicle_pad.map(|pi| {
+                                instance_idx
+                                    .and_then(|i| instance_mats.get(i as usize).copied())
+                                    .unwrap_or_else(|| {
+                                        let def = &sim.vehicle_pads[pi].def;
+                                        Mat4::from_rotation_translation(
+                                            glam::Quat::from_rotation_y(def.yaw),
+                                            def.pos,
+                                        )
+                                    })
+                            })
+                        })
                         .or_else(|| instance.and_then(|i| instance_mats.get(i as usize).copied()))
                         .unwrap_or(Mat4::IDENTITY);
                     if let Some(ii) = instance {
@@ -220,7 +282,9 @@ impl WorldAnimPlayer {
                     Entry {
                         anim: anims.iter().position(|a| a.name.eq_ignore_ascii_case(anim)),
                         base,
+                        cur_pos: base.w_axis.truncate(),
                         station,
+                        vehicle_pad,
                         instance,
                         time: 0.0,
                         parts: None,
@@ -261,7 +325,10 @@ impl WorldAnimPlayer {
 
     pub fn rewind(&mut self, name: &str) {
         if let Some(g) = self.group(name) {
-            g.entries.iter_mut().for_each(|e| e.time = 0.0);
+            for e in &mut g.entries {
+                e.time = 0.0;
+                e.cur_pos = e.base.w_axis.truncate();
+            }
             g.end = -1.0;
         }
     }
@@ -304,13 +371,10 @@ impl WorldAnimPlayer {
                 let Some(ai) = e.anim else {
                     continue;
                 };
-                if e.station.is_none() && e.instance.is_none() {
+                if e.station.is_none() && e.vehicle_pad.is_none() && e.instance.is_none() {
                     continue;
                 }
                 let a = &self.anims[ai];
-                if a.local {
-                    continue;
-                }
                 let step = if *end <= 0.0 {
                     dt
                 } else if *end <= e.time {
@@ -322,7 +386,7 @@ impl WorldAnimPlayer {
                     *playing = false;
                     *end - e.time
                 };
-                let m = evaluate(a, &mut e.time, step, e.base);
+                let m = evaluate(a, &mut e.time, &mut e.cur_pos, step, e.base);
                 if let Some(si) = e.station {
                     let destroyed = sim.stations[si].destroyed;
                     if e.parts.as_ref().is_none_or(|(d, _)| *d != destroyed) {
@@ -330,6 +394,15 @@ impl WorldAnimPlayer {
                     }
                     if let Some((_, parts)) = &e.parts {
                         sim.set_station_transform(si, m, parts);
+                    }
+                } else if let Some(pi) = e.vehicle_pad {
+                    let handles: Vec<_> = sim
+                        .vehicle_pads
+                        .get(pi)
+                        .map(|pad| pad.vehicles.iter().map(|pv| pv.handle).collect())
+                        .unwrap_or_default();
+                    for h in handles {
+                        sim.set_vehicle_world_pose(h, m, step);
                     }
                 } else if let Some(ii) = e.instance {
                     if let Some(parts) = self.instance_parts.get(&ii) {

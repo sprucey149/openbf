@@ -54,7 +54,7 @@ impl SelfPilot {
         }
     }
 
-    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+    pub(crate) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"SELF");
         eat(&[self.seat, u8::from(self.fighting), self.burst]);
         if self.aim_block.axis != Vec3::ZERO {
@@ -487,6 +487,21 @@ impl Sim {
                 self.self_turret(h, p);
             }
             self.building_turrets[i].self_pilots = pilots;
+        }
+        for i in 0..self.vehicles.len() {
+            let v = &self.vehicles[i];
+            if !v.alive || !v.health.alive() || v.self_pilots.is_empty() || v.team.is_none() {
+                continue;
+            }
+            let h = VehicleHandle {
+                index: i as u32,
+                gen: v.gen,
+            };
+            let mut pilots = std::mem::take(&mut self.vehicles[i].self_pilots);
+            for p in &mut pilots {
+                self.self_turret(h, p);
+            }
+            self.vehicles[i].self_pilots = pilots;
         }
     }
 

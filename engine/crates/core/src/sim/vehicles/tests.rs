@@ -545,6 +545,7 @@ fn pad(team: Option<u8>, cp: Option<usize>) -> PadDef {
             radius: 3.0,
             landed_height: None,
             vis_box: None,
+            self_seats: Vec::new(),
         })
     };
     PadDef {

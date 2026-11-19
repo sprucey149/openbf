@@ -242,6 +242,13 @@ pub struct Vehicle {
     /// Hull regeneration rate per second from authored `AddHealth` on space armed buildings.
     /// Hashed only when non-zero.
     pub add_health: f32,
+    /// True while a campaign world animation (`WorldAnimPlayer`) drives this
+    /// vehicle's pose (e.g. Kamino's `transport1`/`2`/`4` gunships). Skips
+    /// flyer flight/gravity physics so the animation controls its path.
+    pub world_animated: bool,
+    /// Autonomous `PilotType=self` gunners on pad-spawned BF2 vehicles
+    /// (e.g. `uta_fly_ride_gunship`'s wing and ball turrets).
+    pub self_pilots: Vec<crate::sim::self_turrets::SelfPilot>,
 }
 
 /// Issue #35 [ours, the maintainer 2026-10-29]: after a slice only the
@@ -358,6 +365,16 @@ impl Vehicle {
             eat(&self.health.shield_max.hash_bits().to_le_bytes());
             eat(&self.add_shield.hash_bits().to_le_bytes());
             eat(&self.add_health.hash_bits().to_le_bytes());
+        }
+        if self.world_animated {
+            eat(&[0x60]);
+        }
+        if !self.self_pilots.is_empty() {
+            eat(&[0x61]);
+            eat(&(self.self_pilots.len() as u32).to_le_bytes());
+            for p in &self.self_pilots {
+                p.hash_into(eat);
+            }
         }
     }
 
@@ -505,6 +522,8 @@ impl VehicleSpec {
             disable: 0.0,
             add_shield: 0.0,
             add_health: 0.0,
+            world_animated: false,
+            self_pilots: Vec::new(),
         }
     }
 }

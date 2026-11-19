@@ -1254,12 +1254,14 @@ fn mus1c_c_beacon_settles_onto_conference_room_floor() {
         .and_then(|(_, pts)| pts.first().copied())
         .map(|(p, _)| p)
         .expect("bomb_spawn2 path point");
-    walk.sim.ctf = Some(core::sim::ctf::CtfState::new_ground_one_flag(
+    let mut ctf = core::sim::ctf::CtfState::new_ground_one_flag(
         u32::MAX,
         spawn,
         glam::Vec3::new(0.0, -10_000.0, 0.0),
         glam::Vec3::new(0.0, -10_000.0, 0.0),
-    ));
+    );
+    ctf.flags[0].allow_ai_pickup = false;
+    walk.sim.ctf = Some(ctf);
     for _ in 0..(core::TICK_HZ * 2) {
         walk.step_tick(&[core::sim::PadState::default()]);
     }
@@ -1270,6 +1272,222 @@ fn mus1c_c_beacon_settles_onto_conference_room_floor() {
         "beacon should drop from bomb_spawn2 y={} onto the floor, got y={}",
         spawn.y,
         flag.current_pos.y
+    );
+}
+
+/// Regression test for Kamino (`kam1c_c`):
+/// 1. Imperial AI teammates spawn at `cp5` after `onfirstspawn`, not piled on
+///    top of the player at `boba`.
+/// 2. `ambushTeam1` (Team 4) distributes classes up to each class's `max`
+///    instead of putting 11/12 into class 0.
+/// 3. `transport1` (`uta_fly_ride_gunship`) moves along its `local: true`
+///    world animation `anim1` (`PlayAnimation("test")`) and carries
+///    `PilotType=self` gunners (`self_pilots`) so it shoots enemies in flight.
+#[test]
+fn kam1c_c_opening_spawn_class_mix_and_flying_gunship() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: kam1c_c mission and baked assets required");
+        return;
+    };
+    if !baked_dir
+        .join("bf2_kam1")
+        .join(manifest::world_anim::FILE)
+        .exists()
+    {
+        eprintln!("SKIP: bf2_kam1 world animations not baked");
+        return;
+    }
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "kam1c_c");
+    let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+        walk.teams[t]
+            .classes
+            .iter()
+            .map(|c| c.name.clone())
+            .collect()
+    });
+    let native_classes: std::collections::BTreeMap<u8, Vec<String>> = def
+        .local_teams
+        .iter()
+        .filter_map(|lt| {
+            let team = lt.team.checked_sub(1).filter(|t| *t >= 2)?;
+            Some((team, lt.classes.iter().map(|c| c.0.clone()).collect()))
+        })
+        .collect();
+    let vehicle_classes = walk.vehicle_classes.clone();
+
+    // 1. Simulate the real battle.rs + spawn-screen startup: no AI spawned
+    //    before `onfirstspawn`, then after `onfirstspawn` switches `boba` to
+    //    neutral and `cp5` to Team 1, `defer_opening_wave` spawns all Imperial
+    //    AI near `cp5` instead of piling them on `boba`.
+    walk.sim.units.retain(|u| u.is_player);
+    rt.set_team_rosters(team_classes.clone(), [11, 12]);
+    rt.defer_opening_wave();
+    rt.step(
+        &mut walk.sim,
+        walk.player,
+        None,
+        &team_classes,
+        &native_classes,
+        &vehicle_classes,
+        core::TICK_DT,
+    );
+    let boba_pos = glam::Vec3::new(-69.235, 73.028, 82.685);
+    let cp5_pos = glam::Vec3::new(22.0, 78.428, -76.0);
+    let imp_ai: Vec<glam::Vec3> = walk
+        .sim
+        .units
+        .iter()
+        .filter(|u| u.alive && !u.is_player && u.team == 0)
+        .map(|u| u.soldier.pos)
+        .collect();
+    assert!(
+        imp_ai.len() >= 11,
+        "Imperial AI teammates spawned (got {})",
+        imp_ai.len()
+    );
+    let near_cp5 = imp_ai
+        .iter()
+        .filter(|p| p.distance(cp5_pos) < p.distance(boba_pos))
+        .count();
+    assert_eq!(
+        near_cp5,
+        imp_ai.len(),
+        "all Imperial AI should spawn near cp5, not boba ({near_cp5}/{})",
+        imp_ai.len()
+    );
+
+    // 2. Team 4 (`ambushTeam1`, sim team 3) should have 4 snipers (its max)
+    //    and 8 riflemen, not 1 sniper + 11 riflemen.
+    let mut sniper_count = 0usize;
+    let mut rifle_count = 0usize;
+    let ambush_node = (glam::Vec3::new(-135.0, 70.0, 35.0), 0.0);
+    for _ in 0..12 {
+        if let Some(h) = walk.sim.spawn_native_character(3, ambush_node) {
+            match walk.sim.units[h.index as usize].spec.class {
+                0 => rifle_count += 1,
+                1 => sniper_count += 1,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        (rifle_count, sniper_count),
+        (8, 4),
+        "ambushTeam1 should balance riflemen and snipers up to max=4"
+    );
+
+    // 3. `transport1` gunship moves on `PlayAnimation("test")` (`local: true`
+    //    `anim1`) and has `PilotType=self` gunners (`self_pilots`).
+    let pad_idx = walk
+        .sim
+        .vehicle_pads
+        .iter()
+        .position(|p| p.def.name.eq_ignore_ascii_case("transport1"))
+        .expect("transport1 pad exists");
+    let gunship = walk.sim.vehicle_pads[pad_idx]
+        .vehicles
+        .first()
+        .map(|pv| pv.handle)
+        .or_else(|| walk.sim.spawn_from_pad(pad_idx, Some(1)))
+        .expect("transport1 gunship spawned");
+    let v0 = walk.sim.vehicle(gunship).expect("live transport1");
+    assert!(
+        !v0.self_pilots.is_empty(),
+        "uta_fly_ride_gunship must have PilotType=self turrets"
+    );
+    let pos0 = v0.pos;
+    rt.w.anims.pause("sit");
+    rt.w.anims.rewind("test");
+    rt.w.anims.play("test");
+    for _ in 0..(core::TICK_HZ * 5) {
+        rt.w.anims.step(&mut walk.sim, core::TICK_DT);
+    }
+    let pos1 = walk.sim.vehicle(gunship).expect("live transport1").pos;
+    assert!(
+        pos1.distance(pos0) > 20.0,
+        "transport1 must fly along anim1: moved only {} m ({pos0} -> {pos1})",
+        pos1.distance(pos0)
+    );
+
+    // 4. Bringing a world-animated gunship's health to 0 must immediately
+    //    destroy it instead of leaving it flying/shooting at 0 HP.
+    if let Some(v) = walk.sim.vehicle_mut(gunship) {
+        v.health.max = 2500.0;
+        v.health.cur = 2500.0;
+    }
+    let lethal = core::weapon::DamageDesc {
+        damage: 50_000.0,
+        scales: [1.0; 7],
+        shield_scale: 1.0,
+    };
+    walk.sim
+        .damage_vehicle(gunship, &lethal, 1.0, Some((walk.player, 0)));
+    assert!(
+        walk.sim.vehicle(gunship).is_none(),
+        "0-HP world-animated transport1 must be destroyed immediately"
+    );
+
+    // 5. `SetSpawnDelay(10.0, 0.25)` in `ScriptInit` overwrites the earlier
+    //    `SetSpawnDelayTeam(5.0, 3.0, DEF)` on main teams 1 and 2
+    //    (SWBFRNT2.ELF `FUN_0018d348` lines 32695-32722).
+    assert_eq!(walk.sim.waves[0].delay, 10.0);
+    assert_eq!(walk.sim.waves[0].interval, 0.25);
+    assert_eq!(walk.sim.waves[1].delay, 10.0);
+    assert_eq!(walk.sim.waves[1].interval, 0.25);
+
+    // 6. When `cp1` and `cp4` both open for `DEF` mid-mission (as in
+    //    Objective1a.OnComplete + Objective2.OnStart), `DEF` bots enter through
+    //    `sim.waves[1]` (`FUN_0036c750`) and split across `cp1` and `cp4` by
+    //    `AISpawnWeight` (`FUN_002e7240`), not 12/12 into `cp1` on one tick.
+    walk.sim.tick = u64::from(core::TICK_HZ) * 15;
+    for cp in &mut walk.sim.cps {
+        if cp.def.name.eq_ignore_ascii_case("cp1") || cp.def.name.eq_ignore_ascii_case("cp4") {
+            cp.killed = false;
+            cp.owner = Some(1);
+        }
+    }
+    rt.w.fill_enabled_ai(&mut walk.sim);
+    let immediate_def = walk
+        .sim
+        .units
+        .iter()
+        .filter(|u| u.alive && !u.is_player && u.team == 1)
+        .count();
+    assert_eq!(
+        immediate_def, 0,
+        "mid-mission DEF bots should queue on sim.waves[1] instead of materializing all 12 on one tick"
+    );
+    let queued_def = walk
+        .sim
+        .units
+        .iter()
+        .filter(|u| !u.alive && !u.is_player && u.team == 1 && u.spawn_slot.is_some())
+        .count();
+    assert_eq!(queued_def, 12, "all 12 DEF slots should be queued on waves[1]");
+    for _ in 0..(core::TICK_HZ * 15) {
+        walk.step_tick(&[core::sim::PadState::default()]);
+    }
+    let cp1_pos = glam::Vec3::new(-185.5, 71.3, 32.2);
+    let cp4_pos = glam::Vec3::new(-15.0, 61.651, 102.0);
+    let def_alive: Vec<glam::Vec3> = walk
+        .sim
+        .units
+        .iter()
+        .filter(|u| u.alive && !u.is_player && u.team == 1)
+        .map(|u| u.soldier.pos)
+        .collect();
+    assert!(
+        !def_alive.is_empty(),
+        "DEF bots should spawn once their wave opens"
+    );
+    let at_cp4 = def_alive
+        .iter()
+        .filter(|p| p.distance(cp4_pos) < p.distance(cp1_pos))
+        .count();
+    assert!(
+        at_cp4 > 0,
+        "DEF spawns should split across cp4 and cp1 by AISpawnWeight (got {at_cp4}/{} near cp4)",
+        def_alive.len()
     );
 }
 

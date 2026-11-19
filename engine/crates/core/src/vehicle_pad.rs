@@ -62,6 +62,8 @@ pub struct PadClass {
     /// this far over the pad's spawn point. `None` for every other kind.
     pub landed_height: Option<f32>,
     pub vis_box: Option<(Vec3, Vec3)>,
+    /// Authored BF2 `PilotType=self` seat indices (e.g. gunship wing/ball turrets).
+    pub self_seats: Vec<u8>,
 }
 
 /// A pad as the level authors it, classes resolved.

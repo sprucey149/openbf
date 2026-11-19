@@ -735,7 +735,15 @@ pub(super) fn make_walk_with_counts(
         // they count for the DTEAM rows while it spawns (issue #171).
         let seated = walk.sim.extra_humans;
         walk.sim.extra_humans = [0, 1].map(|t| seated[t].saturating_add(b.opening_humans[t]));
-        walk.opening_wave(counts, !b.spawn_set);
+        // Campaigns with spawn screens defer their opening AI wave until the
+        // human player spawns so `onfirstspawn` (e.g. Kamino switching Team 1
+        // from `boba` to `cp5`) updates CP ownership before allies spawn.
+        let opening_counts = if walk.campaign.is_some() {
+            [0, 0]
+        } else {
+            counts
+        };
+        walk.opening_wave(opening_counts, !b.spawn_set);
         walk.sim.extra_humans = seated;
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.
@@ -750,6 +758,7 @@ pub(super) fn make_walk_with_counts(
                         .collect()
                 });
                 rt.set_team_rosters(team_classes, counts);
+                rt.defer_opening_wave();
             }
             walk.sound_levels = m.sound_levels();
             walk.space_round = m.space_assault.as_ref().map(|d| {

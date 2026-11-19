@@ -358,6 +358,16 @@ pub fn build(
                 .unwrap_or(out.classes.len());
             classes[t as usize] = match spec_for(db, &name, index as u32) {
                 Some(spec) => {
+                    let self_seats: Vec<u8> = if db.is_bf2() {
+                        vehicle_class::seats(db, &name)
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, s)| s.pilot_type == vehicle_class::PilotType::SelfPilot)
+                            .map(|(i, _)| i as u8)
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
                     if index == out.classes.len() {
                         out.geometry.push(
                             db.prop(&name, "GeometryName")
@@ -372,6 +382,7 @@ pub fn build(
                         // Filled by `install`, which has the side bakes.
                         landed_height: None,
                         vis_box: None,
+                        self_seats,
                     })
                 }
                 None => {

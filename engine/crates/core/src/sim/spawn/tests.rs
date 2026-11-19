@@ -508,6 +508,7 @@ fn command_walker_sim(pad_pos: Vec3, pad_yaw: f32) -> Sim {
             Some(PadClass {
                 landed_height: None,
                 vis_box: None,
+                self_seats: Vec::new(),
                 spec: VehicleSpec {
                     kind: VehicleKind::Walker,
                     class: 0,

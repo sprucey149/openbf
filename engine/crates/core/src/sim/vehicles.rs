@@ -509,6 +509,7 @@ impl Sim {
         let tick = self.tick;
         let crashes = self.vehicle(h).is_some_and(|v| {
             v.kind == VehicleKind::Flyer
+                && !v.world_animated
                 && self
                     .flyer_params
                     .get(v.class as usize)
@@ -1168,6 +1169,10 @@ impl Sim {
         // the same place (§1).
         let p = pad.def.pos;
         let landed_height = class.landed_height;
+        let self_seats = class.self_seats.clone();
+        if !self_seats.is_empty() {
+            spec.neutral_when_empty = false;
+        }
         spec.pos = match landed_height {
             Some(lh) => self.pad_flyer_spawn_pos(p, lh),
             None => {
@@ -1179,9 +1184,42 @@ impl Sim {
             }
         };
         let h = self.spawn_vehicle(&spec);
+        if !self_seats.is_empty() {
+            if let Some(v) = self.vehicle_mut(h) {
+                v.self_pilots = self_seats
+                    .into_iter()
+                    .map(super::self_turrets::SelfPilot::new)
+                    .collect();
+            }
+        }
         self.vehicle_pads[pi].team = team;
         self.vehicle_pads[pi].spawned(h);
         Some(h)
+    }
+
+    /// Drive a pad-spawned vehicle's world pose from a campaign world animation
+    /// (e.g. Kamino's `transport1`/`2`/`4` gunships). Updates position,
+    /// rotation, velocity, and marks `world_animated = true` so flyer physics
+    /// does not pull it down while animated.
+    pub fn set_vehicle_world_pose(&mut self, h: VehicleHandle, pose: glam::Mat4, dt: f32) {
+        let Some(v) = self.vehicle_mut(h) else {
+            return;
+        };
+        if !v.alive || !v.health.alive() {
+            return;
+        }
+        let (_, rot, pos) = pose.to_scale_rotation_translation();
+        v.vel = if dt > 1e-4 {
+            (pos - v.pos) / dt
+        } else {
+            Vec3::ZERO
+        };
+        v.pos = pos;
+        v.rot = rot;
+        v.world_animated = true;
+        if v.kind == VehicleKind::Flyer {
+            v.flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+        }
     }
 
     /// World position where a flyer pad at `p` spawns a craft with `landed_height`.

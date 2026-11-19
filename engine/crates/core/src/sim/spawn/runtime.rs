@@ -911,6 +911,54 @@ impl Sim {
         self.spawn_ai_with_slot_policy(team, pos, yaw, true)
     }
 
+    /// Spawn one AI member for `team` at a post drawn by `AISpawnWeight`
+    /// (`SWBFRNT2.ELF` `FUN_002e7240`, lines 260573–260620), spreading opening
+    /// slots across that post's spawn nodes via `slot_index`.
+    pub fn spawn_ai_at_drawn_post(&mut self, team: u8, slot_index: usize) -> Option<UnitHandle> {
+        let post = self.draw_spawn_post(team)?;
+        let nodes = self.spawn_post_nodes(team, post);
+        let (pos, yaw) = if !nodes.is_empty() {
+            nodes[slot_index % nodes.len()]
+        } else {
+            (self.spawn_post_pos(post)?, 0.0)
+        };
+        self.spawn_ai(team, pos, yaw)
+    }
+
+    /// Enqueue one unspawned AI member for `team` onto its `SpawnWaves` queue
+    /// (`SWBFRNT2.ELF` `FUN_0036c750`, lines 353853–353875) so `step` draws its
+    /// post via `AISpawnWeight` (`FUN_002e7240`) and releases it on the team's
+    /// wave schedule rather than materializing the entire army on one tick.
+    pub fn queue_ai_for_wave(&mut self, team: u8) -> Option<UnitHandle> {
+        let t = usize::from(team);
+        if t >= 2 || self.classes.get(t).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        if !self.ai_spawn_allowed[t]
+            || !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c))
+        {
+            return None;
+        }
+        let c = self.ai_class(team);
+        let spec = self.classes[t][usize::from(c)].spec(
+            team,
+            Vec3::ZERO,
+            0.0,
+            Controller::Ai,
+            c,
+            self.bot_skill(team),
+        );
+        let h = self.spawn_roster_slot(&spec)?;
+        let i = h.index as usize;
+        self.units[i].alive = false;
+        self.units[i].respawn_at = Some(self.tick);
+        self.units[i].spawn_slot = Some(self.waves[t].assign());
+        self.units[i].spawn_post = None;
+        let bt = &mut self.battle.teams[t];
+        bt.alive_ai = bt.alive_ai.saturating_sub(1);
+        Some(h)
+    }
+
     fn spawn_ai_with_slot_policy(
         &mut self,
         team: u8,
