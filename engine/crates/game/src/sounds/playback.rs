@@ -113,22 +113,61 @@ impl SoundLib {
     /// The auras' looping sounds (`crate::fx::Fx::buff_loops`): each starts
     /// with its aura and stops with it. The property holds its own gain and
     /// distances (`buff_rage_effect`: 0.5, 15 to 30 m, looping).
+    ///
+    /// Each start draws its own pitch and gain from the property's
+    /// `PitchDev` and `GainDev` (B2 `FUN_0054cba8` -> `FUN_0054dd28`, the
+    /// draws `FUN_00542508` and `FUN_005425c8`), and the emitter's handle
+    /// update only moves the voice after that (B2 `FUN_00374de0` ->
+    /// `FUN_0043d948`), so the drawn pitch holds for the loop's life. An
+    /// officer's cast puts the same loop on every ally it reaches on one
+    /// tick: at one pitch they would sum in phase.
     pub fn play_buff_loops(
         &mut self,
         audio: &mut audio::Audio,
         loops: &[(core::unit::UnitHandle, usize, String, Vec3)],
         listener: &Listener,
     ) {
-        let requests = loops.iter().map(|(unit, kind, name, pos)| LoopRequest {
-            source: LoopSource::Buff(*unit, *kind),
-            sound: fnv1a_lowercase(name),
-            pos: *pos,
-            gain: 1.0,
-            pitch: 1.0,
-        });
+        let mut requests = Vec::with_capacity(loops.len());
+        for (unit, kind, name, pos) in loops {
+            let source = LoopSource::Buff(*unit, *kind);
+            let sound = fnv1a_lowercase(name);
+            let (gain, pitch) = match self.loop_draws.get(&source) {
+                Some(draw) if self.loops.contains_key(&source) => *draw,
+                _ => {
+                    let draw = self.start_draw(sound);
+                    self.loop_draws.insert(source, draw);
+                    draw
+                }
+            };
+            requests.push(LoopRequest {
+                source,
+                sound,
+                pos: *pos,
+                gain,
+                pitch,
+            });
+        }
         self.play_loop_set(audio, listener, requests, |k| {
             matches!(k, LoopSource::Buff(..))
         });
+        let loops = &self.loops;
+        self.loop_draws.retain(|k, _| loops.contains_key(k));
+    }
+
+    /// One start's (gain, pitch) as factors on property `sound`'s own:
+    /// gain + 2 (r - 0.5) `GainDev` clamped to 0..1 and pitch +
+    /// 2 (r - 0.5) `PitchDev` (B2 `FUN_005425c8`, `FUN_00542508`).
+    pub(super) fn start_draw(&mut self, sound: u32) -> (f32, f32) {
+        let Some((p, _)) = self.find(sound) else {
+            return (1.0, 1.0);
+        };
+        let pitch = p.pitch + p.pitch_dev.map_or(0.0, |d| self.spread(d));
+        let gain = match p.gain_dev {
+            Some(d) => (p.gain + self.spread(d)).clamp(0.0, 1.0),
+            None => p.gain,
+        };
+        let factor = |drawn: f32, own: f32| if own > 0.0 { drawn / own } else { 1.0 };
+        (factor(gain, p.gain), factor(pitch, p.pitch))
     }
 
     pub(super) fn play_loop_set(
