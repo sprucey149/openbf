@@ -1706,7 +1706,7 @@ impl Sim {
         })
     }
 
-    fn floor_hit(
+    pub(super) fn floor_hit(
         &self,
         feet: Vec3,
         probe: f32,

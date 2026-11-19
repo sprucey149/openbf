@@ -62,10 +62,6 @@ struct Entry {
     time: f32,
     base: Mat4,
     parts: Option<(bool, core::sim::StationParts)>,
-    /// The instance's collision bodies in its base space, taken once before
-    /// the first pose (the same local-parts idea as a station's). An animated
-    /// door prop carries its collision with its draw.
-    instance_parts: Option<Vec<(usize, Mat4)>>,
 }
 
 #[derive(Clone, Debug)]
@@ -82,8 +78,15 @@ pub struct WorldAnimPlayer {
     groups: Vec<Group>,
     /// Posed world instances by manifest index, written each `step` for
     /// entries whose object is a placed prop (Coruscant's sliding library
-    /// doors) rather than a sim Station. The viewer poses these draws.
+    /// doors, Mustafar's lava bridge) rather than a sim Station. The viewer
+    /// poses these draws.
     instance_poses: BTreeMap<u32, Mat4>,
+    /// Each animated world instance's collision bodies in its rest-base space,
+    /// captured once at load before any group moves it. Shared across groups
+    /// that drive the same instance (e.g. `lava_bridge_drop` and
+    /// `lava_bridge_raise` on Mustafar's `lavatrap`) so a second group does
+    /// not bake in the first group's displacement.
+    instance_parts: BTreeMap<u32, Vec<(usize, Mat4)>>,
 }
 
 fn bracket(a: &WorldAnim, keys: &[WorldAnimKey], t: f32) -> Option<(WorldAnimKey, WorldAnimKey)> {
@@ -180,6 +183,7 @@ impl WorldAnimPlayer {
             }
         }
         let mut groups: Vec<Group> = Vec::new();
+        let mut instance_parts: BTreeMap<u32, Vec<(usize, Mat4)>> = BTreeMap::new();
         for g in all.groups.into_iter().filter(|g| loaded(&g.world)) {
             if groups.iter().any(|h| h.name.eq_ignore_ascii_case(&g.name)) {
                 continue;
@@ -203,6 +207,16 @@ impl WorldAnimPlayer {
                         .map(|s| s.transform)
                         .or_else(|| instance.and_then(|i| instance_mats.get(i as usize).copied()))
                         .unwrap_or(Mat4::IDENTITY);
+                    if let Some(ii) = instance {
+                        instance_parts.entry(ii).or_insert_with(|| {
+                            let inverse = base.inverse();
+                            sim.collision
+                                .instance_bodies(ii)
+                                .into_iter()
+                                .map(|(i, to_world)| (i, inverse * to_world))
+                                .collect()
+                        });
+                    }
                     Entry {
                         anim: anims.iter().position(|a| a.name.eq_ignore_ascii_case(anim)),
                         base,
@@ -210,7 +224,6 @@ impl WorldAnimPlayer {
                         instance,
                         time: 0.0,
                         parts: None,
-                        instance_parts: None,
                     }
                 })
                 .collect();
@@ -225,6 +238,7 @@ impl WorldAnimPlayer {
             anims,
             groups,
             instance_poses: BTreeMap::new(),
+            instance_parts,
         }
     }
 
@@ -318,17 +332,7 @@ impl WorldAnimPlayer {
                         sim.set_station_transform(si, m, parts);
                     }
                 } else if let Some(ii) = e.instance {
-                    if e.instance_parts.is_none() {
-                        let inverse = e.base.inverse();
-                        e.instance_parts = Some(
-                            sim.collision
-                                .instance_bodies(ii)
-                                .into_iter()
-                                .map(|(i, to_world)| (i, inverse * to_world))
-                                .collect(),
-                        );
-                    }
-                    if let Some(parts) = &e.instance_parts {
+                    if let Some(parts) = self.instance_parts.get(&ii) {
                         for &(i, local) in parts {
                             sim.collision.move_body(i, m * local);
                         }

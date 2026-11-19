@@ -1153,6 +1153,126 @@ fn coruscant_library_door_animation_poses_its_instances() {
     }
 }
 
+/// Regression test for Mustafar (`mus1c_c`) lava bridge: `lava_bridge_drop`
+/// lowers `lavatrap` by 7 m at mission start, and `lava_bridge_raise` raises it
+/// back to its rest height for the "Proceed forward across the bridge"
+/// objective. Both groups drive the same world instance, so the second group
+/// must move collision from the instance's rest-pose offset rather than baking
+/// in the first group's -7 m displacement.
+#[test]
+fn mus1c_c_lava_bridge_collision_rises_back_with_visual_pose() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: mus1c_c mission and baked assets required");
+        return;
+    };
+    if !baked_dir
+        .join("bf2_mus1")
+        .join(manifest::world_anim::FILE)
+        .exists()
+    {
+        eprintln!("SKIP: bf2_mus1 world animations not baked");
+        return;
+    }
+    let (_def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "mus1c_c");
+    let bridge =
+        rt.w.instances
+            .iter()
+            .position(|(n, _, _)| n == "lavatrap")
+            .expect("lavatrap is a placed instance") as u32;
+    let base_y = rt.w.instances[bridge as usize].2.y;
+    let body_indices: Vec<usize> = walk
+        .sim
+        .collision
+        .instance_bodies(bridge)
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect();
+    assert!(!body_indices.is_empty(), "lavatrap has collision bodies");
+
+    // Step past the 3 s drop started by ScriptPostLoad's PlayAnimDrop().
+    for _ in 0..(core::TICK_HZ * 4) {
+        rt.w.anims.step(&mut walk.sim, core::TICK_DT);
+    }
+    let dropped_pose = rt
+        .instance_poses()
+        .get(&bridge)
+        .expect("lava_bridge_drop posed lavatrap");
+    assert!(
+        (dropped_pose.w_axis.y - (base_y - 7.0)).abs() < 0.05,
+        "bridge dropped 7 m: base {base_y}, pose {}",
+        dropped_pose.w_axis.y
+    );
+    for &i in &body_indices {
+        let y = walk.sim.collision.bodies()[i].to_world.w_axis.y;
+        assert!(
+            (y - (base_y - 7.0)).abs() < 0.05,
+            "bridge body {i} dropped 7 m: base {base_y}, body {y}"
+        );
+    }
+
+    // Now play PlayAnimRise() sequence: pause drop, rewind & play raise (4 s).
+    rt.w.anims.pause("lava_bridge_drop");
+    rt.w.anims.rewind("lava_bridge_raise");
+    rt.w.anims.play("lava_bridge_raise");
+    for _ in 0..(core::TICK_HZ * 5) {
+        rt.w.anims.step(&mut walk.sim, core::TICK_DT);
+    }
+    let raised_pose = rt
+        .instance_poses()
+        .get(&bridge)
+        .expect("lava_bridge_raise posed lavatrap");
+    assert!(
+        (raised_pose.w_axis.y - base_y).abs() < 0.05,
+        "bridge visual returned to base {base_y}, got {}",
+        raised_pose.w_axis.y
+    );
+    for &i in &body_indices {
+        let y = walk.sim.collision.bodies()[i].to_world.w_axis.y;
+        assert!(
+            (y - base_y).abs() < 0.05,
+            "bridge body {i} collision must return to base {base_y}, got {y}"
+        );
+    }
+}
+
+/// Regression test for Mustafar (`mus1c_c`) orbital strike beacon (`bomb2`):
+/// `bomb_spawn2` sits above the conference room floor, so `mus_flag_bomb` must
+/// settle onto the floor under gravity (`SWBFRNT2.ELF` `FUN_0035e058` ->
+/// `FUN_00225578`) instead of floating in midair.
+#[test]
+fn mus1c_c_beacon_settles_onto_conference_room_floor() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: mus1c_c mission and baked assets required");
+        return;
+    };
+    let (_def, mut walk, rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "mus1c_c");
+    let spawn = rt
+        .w
+        .paths
+        .iter()
+        .find(|(n, _)| n == "bomb_spawn2")
+        .and_then(|(_, pts)| pts.first().copied())
+        .map(|(p, _)| p)
+        .expect("bomb_spawn2 path point");
+    walk.sim.ctf = Some(core::sim::ctf::CtfState::new_ground_one_flag(
+        u32::MAX,
+        spawn,
+        glam::Vec3::new(0.0, -10_000.0, 0.0),
+        glam::Vec3::new(0.0, -10_000.0, 0.0),
+    ));
+    for _ in 0..(core::TICK_HZ * 2) {
+        walk.step_tick(&[core::sim::PadState::default()]);
+    }
+    let flag = &walk.sim.ctf.as_ref().unwrap().flags[0];
+    assert!(flag.landed, "beacon should land on the conference room floor");
+    assert!(
+        flag.current_pos.y < spawn.y - 1.0 && flag.current_pos.y > spawn.y - 5.0,
+        "beacon should drop from bomb_spawn2 y={} onto the floor, got y={}",
+        spawn.y,
+        flag.current_pos.y
+    );
+}
+
 fn setup_baked_campaign_full(
     missions_dir: &std::path::Path,
     baked_dir: &std::path::Path,

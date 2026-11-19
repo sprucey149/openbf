@@ -71,6 +71,12 @@ pub enum FlagStatus {
     Dropped { timer: f32, pickup_cooldown: f32 },
 }
 
+/// Ground clearance above the floor when a ground flag lands.
+/// PROVISIONAL: measure: per-flag model bounding-box `-y_min` (`EntityItem`
+/// floor contact, SWBFRNT2.ELF FUN_00225578); 0.15 m clears `mus1_icon_bomb`'s
+/// 0.12 m lower extent without sinking into the floor.
+pub const GROUND_FLAG_CLEARANCE: f32 = 0.15;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flag {
     /// Team affiliation: 0 for neutral flag in 1-flag, or 0 (team 1 / att) and 1 (team 2 / def) in 2-flag.
@@ -83,6 +89,12 @@ pub struct Flag {
     pub drop_timeout: f32,
     pub carried_offset: Vec3,
     pub allow_ai_pickup: bool,
+    /// Whether gravity settles this flag onto the floor when uncarried
+    /// (SWBFRNT2.ELF FUN_0035e058 -> FUN_00225578, EntityItem::Simulate).
+    /// False for space flags (`com_icon_spaceflag`).
+    pub gravity: bool,
+    pub vel: Vec3,
+    pub landed: bool,
 }
 
 impl Flag {
@@ -97,6 +109,9 @@ impl Flag {
             drop_timeout: SPACE_FLAG_RETURN_TIMEOUT,
             carried_offset: SPACE_CARRIED_OFFSET,
             allow_ai_pickup: true,
+            gravity: false,
+            vel: Vec3::ZERO,
+            landed: true,
         }
     }
 
@@ -111,6 +126,9 @@ impl Flag {
             drop_timeout: GROUND_FLAG_RETURN_TIMEOUT,
             carried_offset: GROUND_CARRIED_OFFSET,
             allow_ai_pickup: true,
+            gravity: true,
+            vel: Vec3::ZERO,
+            landed: false,
         }
     }
 
@@ -125,6 +143,9 @@ impl Flag {
             drop_timeout,
             carried_offset: GROUND_CARRIED_OFFSET,
             allow_ai_pickup: true,
+            gravity: true,
+            vel: Vec3::ZERO,
+            landed: false,
         }
     }
 
@@ -249,8 +270,11 @@ impl CtfState {
         }
         eat(&(self.flags.len() as u32).to_le_bytes());
         for f in &self.flags {
-            eat(&[f.team]);
+            eat(&[f.team, u8::from(f.gravity), u8::from(f.landed)]);
             for coord in f.current_pos.to_array() {
+                eat(&coord.hash_bits().to_le_bytes());
+            }
+            for coord in f.vel.to_array() {
                 eat(&coord.hash_bits().to_le_bytes());
             }
             match f.status {
@@ -280,6 +304,36 @@ impl Sim {
         self.battle.unlimited_reinforcements = true;
     }
 
+    /// Settle an uncarried ground flag onto the floor under gravity, matching
+    /// `EntityFlag::Simulate` -> `EntityItem::Simulate` (SWBFRNT2.ELF
+    /// FUN_0035e058 line 343754, FUN_00225578 lines 138440-138455).
+    fn settle_flag(&self, flag: &mut Flag, dt: f32) {
+        if !flag.gravity || flag.landed {
+            return;
+        }
+        let from_y = flag.current_pos.y;
+        let Some((floor, _, _)) = self.floor_hit(
+            flag.current_pos,
+            from_y + crate::collision::STEP_HEIGHT,
+            crate::collision::HullFilter::Static,
+            false,
+        ) else {
+            flag.vel = Vec3::ZERO;
+            flag.landed = true;
+            return;
+        };
+        let rest_y = floor + GROUND_FLAG_CLEARANCE;
+        let half_g = super::pickups::ITEM_GRAVITY * 0.5 * dt;
+        flag.vel.y += half_g;
+        flag.current_pos += flag.vel * dt;
+        flag.vel.y += half_g;
+        if flag.current_pos.y <= rest_y {
+            flag.current_pos.y = rest_y;
+            flag.vel = Vec3::ZERO;
+            flag.landed = true;
+        }
+    }
+
     /// Ticks the CTF / One-Flag simulation rules for fixed step dt.
     pub(super) fn tick_ctf(&mut self, dt: f32) {
         let Some(mut ctf) = self.ctf.take() else {
@@ -292,12 +346,14 @@ impl Sim {
 
             match flag.status {
                 FlagStatus::AtHome => {
-                    flag.current_pos = flag.home_pos;
+                    self.settle_flag(&mut flag, dt);
                     let only_enemy = matches!(ctf.mode, CtfMode::TwoFlag);
                     if let Some(carrier) = self.ctf_find_pickup(&flag, only_enemy) {
                         flag.status = FlagStatus::Carried { carrier };
                         let (pos, _) = self.ctf_carrier_pos(carrier, &flag);
                         flag.current_pos = pos;
+                        flag.vel = Vec3::ZERO;
+                        flag.landed = false;
                         let team = self.unit(carrier).map_or(0, |u| u.team);
                         self.events.push(Event::FlagPickedUp {
                             flag: flag_idx as u8,
@@ -311,6 +367,8 @@ impl Sim {
 
                     if drop {
                         flag.current_pos = carrier_pos;
+                        flag.vel = Vec3::ZERO;
+                        flag.landed = !flag.gravity;
                         flag.status = FlagStatus::Dropped {
                             timer: flag.drop_timeout,
                             pickup_cooldown: FLAG_REPICKUP_DELAY,
@@ -357,6 +415,8 @@ impl Sim {
 
                             flag.status = FlagStatus::AtHome;
                             flag.current_pos = flag.home_pos;
+                            flag.vel = Vec3::ZERO;
+                            flag.landed = !flag.gravity;
 
                             if !self.battle.campaign_rules
                                 && ctf.team_points[carrier_team] >= ctf.score_limit
@@ -374,6 +434,7 @@ impl Sim {
                     mut timer,
                     mut pickup_cooldown,
                 } => {
+                    self.settle_flag(&mut flag, dt);
                     pickup_cooldown = (pickup_cooldown - dt).fmax(0.0);
                     timer -= dt;
 
@@ -386,6 +447,8 @@ impl Sim {
                     if out_of_bounds || timer <= 0.0 {
                         flag.status = FlagStatus::AtHome;
                         flag.current_pos = flag.home_pos;
+                        flag.vel = Vec3::ZERO;
+                        flag.landed = !flag.gravity;
                         self.events.push(Event::FlagReset {
                             flag: flag_idx as u8,
                         });
@@ -406,6 +469,8 @@ impl Sim {
                                         };
                                         let (pos, _) = self.ctf_carrier_pos(touching_unit, &flag);
                                         flag.current_pos = pos;
+                                        flag.vel = Vec3::ZERO;
+                                        flag.landed = false;
                                         self.events.push(Event::FlagPickedUp {
                                             flag: flag_idx as u8,
                                             unit: touching_unit,
@@ -416,6 +481,8 @@ impl Sim {
                                         if unit_team == flag.team {
                                             flag.status = FlagStatus::AtHome;
                                             flag.current_pos = flag.home_pos;
+                                            flag.vel = Vec3::ZERO;
+                                            flag.landed = !flag.gravity;
                                             self.events.push(Event::FlagReturned {
                                                 flag: flag_idx as u8,
                                                 team: unit_team,
@@ -427,6 +494,8 @@ impl Sim {
                                             let (pos, _) =
                                                 self.ctf_carrier_pos(touching_unit, &flag);
                                             flag.current_pos = pos;
+                                            flag.vel = Vec3::ZERO;
+                                            flag.landed = false;
                                             self.events.push(Event::FlagPickedUp {
                                                 flag: flag_idx as u8,
                                                 unit: touching_unit,

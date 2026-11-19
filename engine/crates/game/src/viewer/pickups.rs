@@ -224,14 +224,15 @@ impl FlagVisuals {
             };
             let parts = if carried { &self.carried } else { &self.loose };
             for part in parts {
-                if let Some(texture) = part.texture {
-                    let mut draw = draw_in(part.layer, part.mesh, texture, m)
-                        .with_cull(self.cull)
-                        .with_light(part.light)
-                        .with_lit(part.lit(m));
-                    draw.additive = part.additive;
-                    out.push(draw);
+                let mut draw = match part.texture {
+                    Some(texture) => draw_in(part.layer, part.mesh, texture, m),
+                    None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], m),
                 }
+                .with_cull(self.cull)
+                .with_light(part.light)
+                .with_lit(part.lit(m));
+                draw.additive = part.additive;
+                out.push(draw);
             }
         }
         out
@@ -338,14 +339,15 @@ impl FlagVisuals {
             };
             let parts = if carried { carried_parts } else { loose };
             for part in parts {
-                if let Some(texture) = part.texture {
-                    let mut draw = draw_in(part.layer, part.mesh, texture, matrix)
-                        .with_cull(self.cull)
-                        .with_light(part.light)
-                        .with_lit(part.lit(matrix));
-                    draw.additive = part.additive;
-                    out.push(draw);
+                let mut draw = match part.texture {
+                    Some(texture) => draw_in(part.layer, part.mesh, texture, matrix),
+                    None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], matrix),
                 }
+                .with_cull(self.cull)
+                .with_light(part.light)
+                .with_lit(part.lit(matrix));
+                draw.additive = part.additive;
+                out.push(draw);
             }
         }
         out
@@ -662,5 +664,73 @@ mod tests {
         assert!(carried);
         assert_eq!(pose.w_axis.truncate(), pos + rot * flag.carried_offset);
         assert!((pose.transform_vector3(glam::Vec3::Z) - rot * glam::Vec3::Z).length() < 0.001);
+    }
+
+    /// Regression test for Mustafar (`mus1c_c`) orbital strike beacon:
+    /// `mus_flag_bomb`'s loose model `mus1_icon_bomb` references textures
+    /// (`tan4_prop_console`, `tan4_prop_console_fx`) that stock `MUS1.LVL`
+    /// omits. `FlagVisuals::campaign_draws` must still emit flat-fallback draws
+    /// instead of dropping the model while placed.
+    #[test]
+    #[ignore = "requires GPU and BF2 Mustafar bake"]
+    fn mus1_beacon_draws_when_loose_and_when_carried() {
+        let root = crate::assets::baked_root();
+        let map = root.join("bf2_mus1");
+        if !map.join("manifest.ron").exists() {
+            return;
+        }
+        let scene = crate::assets::load_scene(&map).unwrap();
+        let mut r = Renderer::new_headless(64, 64).unwrap();
+        let art = FlagVisuals::load(&mut r, &scene, None);
+        let (loose, carried) = art
+            .campaign
+            .get("mus_flag_bomb")
+            .expect("mus_flag_bomb class loaded");
+        assert!(!loose.is_empty(), "mus1_icon_bomb loose parts loaded");
+        assert!(
+            !carried.is_empty(),
+            "mus_icon_bomb_carried parts loaded"
+        );
+        let missions = root.parent().unwrap().join("missions");
+        let mission = crate::mission::MissionDef::load_campaign(&missions, "mus1c_c").unwrap();
+        let layout = crate::layout::MapLayout::from_manifest(&scene.manifest);
+        let mut sim = core::sim::Sim::empty(1);
+        let unit = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, glam::Vec3::ZERO))
+            .unwrap();
+        sim.ctf = Some(core::sim::CtfState::new_ground_one_flag(
+            1,
+            glam::Vec3::ZERO,
+            glam::Vec3::ZERO,
+            glam::Vec3::ZERO,
+        ));
+        let mut campaign = crate::campaign_runtime::CampaignRuntime::new(
+            mission.campaign.unwrap(),
+            &layout,
+            &scene.manifest,
+            &[],
+            Vec::new(),
+            &sim,
+        );
+        campaign.w.flags.push(crate::campaign_runtime::FlagEnt {
+            name: "bomb2".into(),
+            class: "mus_flag_bomb".into(),
+            ctf: 0,
+            dead: false,
+        });
+        let loose_draws = art.campaign_draws(&sim, &campaign);
+        assert_eq!(
+            loose_draws.len(),
+            loose.len(),
+            "loose beacon must draw even when its textures are absent from MUS1.LVL"
+        );
+        sim.ctf.as_mut().unwrap().flags[0].status =
+            core::sim::FlagStatus::Carried { carrier: unit };
+        let carried_draws = art.campaign_draws(&sim, &campaign);
+        assert_eq!(
+            carried_draws.len(),
+            carried.len(),
+            "carried beacon must draw"
+        );
     }
 }
