@@ -118,7 +118,7 @@ impl Renderer {
     /// rejects a bad handle in `draws` and `skinned` with `BadHandle` before
     /// any pass starts; the sky shells, grass, leaves, bolts and particles
     /// are not checked, so a bad handle in one of those draws white.
-    fn tex_bg(&self, texture: Option<TextureHandle>) -> &wgpu::BindGroup {
+    pub(crate) fn tex_bg(&self, texture: Option<TextureHandle>) -> &wgpu::BindGroup {
         match texture.and_then(|t| self.textures.get(t.0 as usize)) {
             Some(t) => &t.bind_group,
             None => &self.white.bind_group,

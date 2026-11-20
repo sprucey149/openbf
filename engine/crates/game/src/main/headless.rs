@@ -759,6 +759,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
     }
 
     if let Some(log_path) = v.walk_replay.as_ref() {
+        super::battle::configure_battle_shadows(&mut r);
         let log: InputLog =
             ron::from_str(&std::fs::read_to_string(log_path)?).context("parse walk log")?;
         let cube = upload_unit_cube(&mut r)?;

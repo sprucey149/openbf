@@ -637,6 +637,7 @@ impl VehicleVisuals {
             });
             if self.bf1_shadows
                 && self.shadows_on
+                && !r.sun_shadows_enabled()
                 && v.kind != core::vehicle::VehicleKind::Turret
                 && !class.shadows.is_empty()
             {

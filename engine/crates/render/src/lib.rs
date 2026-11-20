@@ -86,6 +86,7 @@ mod point_light;
 mod rand;
 mod resources;
 mod shadow;
+mod sun_shadow;
 mod sun_flare;
 pub use shadow::ShadowMesh;
 mod sky;
@@ -284,6 +285,7 @@ pub struct Renderer {
     format: wgpu::TextureFormat,
     depth_view: wgpu::TextureView,
     shadows: shadow::ShadowState,
+    sun_shadow: Option<sun_shadow::SunShadow>,
     pipeline: wgpu::RenderPipeline,
     /// The opaque pipeline through `fs_mask`: the same depth state and the
     /// same instanced sort, plus the shader's MASK test (`MASK_CUTOFF`).
@@ -505,6 +507,7 @@ impl Renderer {
     /// A frame after this is the clear colour plus its draws, as before any
     /// map was loaded (the shell after a battle).
     pub fn clear_scene(&mut self) {
+        self.sun_shadow = None;
         self.atmosphere_time = None;
         self.lightning = None;
         self.set_sky(Vec::new());

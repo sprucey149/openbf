@@ -74,8 +74,12 @@ impl Renderer {
         );
         let aspect = frame_width as f32 / frame_height as f32;
         let guard = crate::affine::guard(aspect);
-        self.shadows
-            .prepare(&self.device, &self.queue, camera.view_proj(aspect));
+        let sun_direction = self.lighting.sun_dir.try_normalize();
+        let use_sun_shadow = self.sun_shadow.is_some() && sun_direction.is_some();
+        if !use_sun_shadow {
+            self.shadows
+                .prepare(&self.device, &self.queue, camera.view_proj(aspect));
+        }
         let scene_camera = camera.reaching(self.far_range);
         let view_proj = scene_camera.view_proj(aspect);
         let iface_view_proj = Camera {
@@ -220,11 +224,30 @@ impl Renderer {
         // not drawn from this eye, with or without culling: its model and
         // LOWD must never both draw.
         let switched = |d: &DrawCmd| d.lod.is_none_or(|l| l.drawn(eye));
+        let mut shadow_casters = Vec::new();
+        let mut shadow_skin = Vec::new();
+        let light_frustum = self
+            .sun_shadow
+            .as_ref()
+            .zip(sun_direction)
+            .map(|(shadow, sun)| {
+                let light_clip = shadow.light_clip(eye, sun);
+                if !ab.skips("soldiers") {
+                    // A posed mesh can extend outside its bind bounds. Let the
+                    // GPU clip it against the light instead of using those bounds.
+                    shadow_skin.extend((0..skinned.len()).filter(|&i| {
+                        let d = &skinned[i];
+                        d.layer == DrawLayer::Opaque && d.light != LightPath::Iface
+                    }));
+                }
+                shadow.prepare(self, light_clip, view_proj, eye, globals.material_time);
+                frustum::Frustum::from_view_proj(&light_clip)
+            });
         let far_begin = self.lighting.far_fade.map(|f| f.begin);
         let mut keep = Vec::with_capacity(draws.len());
         let mut sorts: Vec<DrawSort> = Vec::with_capacity(draws.len());
         let mut iface_frustum = None;
-        for d in draws {
+        for (i, d) in draws.iter().enumerate() {
             // Past its switch or its fade (on a forest map, most of the
             // instances) a draw needs no box, and nothing reads its sort.
             if self.cull
@@ -242,6 +265,15 @@ impl Renderer {
             let eye = if iface { glam::Vec3::ZERO } else { eye };
             let b = boxed(d, &self.meshes, eye);
             let mut v = switched(d);
+            if let Some(light_frustum) = &light_frustum {
+                if v && !iface
+                    && matches!(d.layer, DrawLayer::Opaque | DrawLayer::Mask)
+                    && (self.cull || shows(d))
+                    && visible(d, b, light_frustum)
+                {
+                    shadow_casters.push(i);
+                }
+            }
             if self.cull {
                 let view = if iface {
                     iface_frustum
@@ -260,6 +292,7 @@ impl Renderer {
                 may_discard: ab.discard || crate::draw::may_discard(d, near, far, eye),
             });
         }
+        shadow_casters.sort_unstable_by_key(|&i| crate::sun_shadow::caster_key(&draws[i]));
 
         let mut order = sort_runs(
             (0..draws.len()).filter(|&i| keep[i] && draws[i].layer != DrawLayer::Blend),
@@ -369,6 +402,13 @@ impl Renderer {
                 region_top: region.map_or([0.0; 4], |r| [r[0][0], r[0][1], r[0][2], r[0][3] + 1.0]),
                 region_bottom: region.map_or([0.0; 4], |r| r[1]),
             }
+        }));
+        let first_shadow_instance = instances.len();
+        instances.extend(shadow_casters.iter().map(|&i| Instance {
+            model: draws[i].model.to_cols_array_2d(),
+            color: draws[i].color,
+            light: draws[i].light as u32,
+            ..bytemuck::Zeroable::zeroed()
         }));
         if !instances.is_empty() {
             if instances.len() > self.instance_capacity {
@@ -647,6 +687,24 @@ impl Renderer {
         if let Some(t) = &mut timer {
             t.begin(&self.device, &mut encoder);
         }
+        let sun_pass = self
+            .sun_shadow
+            .as_ref()
+            .filter(|_| !shadow_casters.is_empty() || !shadow_skin.is_empty());
+        if let Some(shadow) = sun_pass {
+            draw_calls += shadow.draw_casters(
+                self,
+                &mut encoder,
+                draws,
+                &shadow_casters,
+                first_shadow_instance,
+                skinned,
+                &shadow_skin,
+            );
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "sun shadow depth");
+            }
+        }
         // The texture the terrain light pass copies (the frame so far).
         let frame_texture: &wgpu::Texture = match (&frame, &self.target) {
             (Some(f), _) => &f.texture,
@@ -883,7 +941,19 @@ impl Renderer {
                     }
                     mark(&mut timer, &mut pass, "soldiers spec");
                     // BF1 bucket 6: all opaque geometry is down, water is not.
-                    if !self.shadows.is_empty() {
+                    if let Some(shadow) = sun_pass {
+                        drop(pass);
+                        shadow.composite(self, &mut encoder, frame_texture);
+                        draw_calls += 1;
+                        pass = continue_pass(
+                            &mut encoder,
+                            &view,
+                            &self.depth_view,
+                            "after sun shadows",
+                        );
+                        mark(&mut timer, &mut pass, "sun shadow composite");
+                        pass.set_bind_group(0, &self.globals_bg, &[]);
+                    } else if !use_sun_shadow && !self.shadows.is_empty() {
                         drop(pass);
                         draw_calls +=
                             self.shadows

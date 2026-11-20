@@ -1,6 +1,133 @@
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, LightPath, MeshData, Renderer, ShadowMesh};
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn sun_shadows_project_rigid_and_posed_meshes() {
+    use render::{DrawLayer, SkinnedDrawCmd, SkinnedMeshData};
+
+    let size = 256;
+    let mut r = Renderer::new_headless(size, size).unwrap();
+    let floor = [
+        [-12., 0., -12.],
+        [-12., 0., 12.],
+        [12., 0., 12.],
+        [12., 0., -12.],
+    ];
+    let panel = [
+        [-0.7, 1., -0.7],
+        [-0.7, 1., 0.7],
+        [0.7, 1., 0.7],
+        [0.7, 1., -0.7],
+    ];
+    let indices = [0, 1, 2, 0, 2, 3];
+    let upload = |r: &mut Renderer, positions| {
+        r.add_mesh(&MeshData {
+            positions,
+            normals: &[[0., 1., 0.]; 4],
+            uvs: &[[0.; 2]; 4],
+            colors: None,
+            indices: &indices,
+        })
+        .unwrap()
+    };
+    let ground = upload(&mut r, &floor);
+    let rigid = upload(&mut r, &panel);
+    let skinned = r
+        .add_skinned_mesh(&SkinnedMeshData {
+            positions: &panel,
+            normals: &[[0., 1., 0.]; 4],
+            uvs: &[[0.; 2]; 4],
+            colors: None,
+            indices: &indices,
+            joints: &[[0; 4]; 4],
+            weights: &[[1., 0., 0., 0.]; 4],
+        })
+        .unwrap();
+    r.lighting.sun_dir = Vec3::new(0.45, -1., 0.25);
+    let eye = Vec3::new(0., 6., 7.);
+    let camera = Camera {
+        position: eye,
+        pitch: -0.68,
+        far: 40.,
+        ..Default::default()
+    };
+    let world = [
+        DrawCmd::flat(ground, [0.65, 0.65, 0.65, 1.], Mat4::IDENTITY).with_light(LightPath::Unlit),
+        DrawCmd::flat(
+            rigid,
+            [0.9, 0.2, 0.2, 1.],
+            Mat4::from_translation(Vec3::new(-2.5, 0., 0.)),
+        )
+        .with_light(LightPath::Unlit),
+    ];
+    let pose = |x| SkinnedDrawCmd {
+        mesh: skinned,
+        texture: None,
+        color: [0.2, 0.9, 0.2, 1.],
+        model: Mat4::IDENTITY,
+        palette: [Mat4::from_translation(Vec3::new(x, 0., 0.))].into(),
+        layer: DrawLayer::Opaque,
+        lit: None,
+        light: LightPath::Unlit,
+    };
+    let render = |r: &mut Renderer, world: &[DrawCmd], shadows, posed| {
+        r.set_sun_shadows(shadows);
+        r.render_frame(&camera, world, &[pose(posed)], [0.; 4], None)
+            .unwrap();
+        r.capture_rgba().unwrap().0
+    };
+    let mut centres = Vec::new();
+    for (scale, x) in [(1.0, 0.25), (0.75, 2.75)] {
+        r.set_world_scale(scale);
+        let base = render(&mut r, &world, false, x);
+        let shaded = render(&mut r, &world, true, x);
+        let mut left = 0;
+        let mut right = Vec::new();
+        for (i, (b, s)) in base.chunks_exact(4).zip(shaded.chunks_exact(4)).enumerate() {
+            if b[0] > 150 && b[0] == b[1] && b[1] == b[2] && s[0] + 20 < b[0] {
+                if i as u32 % size < size / 2 {
+                    left += 1;
+                } else {
+                    right.push(i as u32 % size);
+                }
+                if scale == 1.0 {
+                    assert!((s[0] as f32 - 0.625 * b[0] as f32).abs() <= 1.5);
+                }
+            }
+        }
+        assert!(
+            left > 100 && right.len() > 100,
+            "{scale}: {left} / {}",
+            right.len()
+        );
+        let mean_x = right.iter().sum::<u32>() / right.len() as u32;
+        centres.push(mean_x);
+        println!(
+            "{scale}: {left} rigid and {} posed shadow pixels, posed centre {mean_x}",
+            right.len()
+        );
+    }
+    assert!(
+        centres[1] > centres[0] + 25,
+        "posed shadow centres: {centres:?}"
+    );
+
+    let mut masked = world;
+    masked[1].layer = DrawLayer::Mask;
+    assert_eq!(
+        render(&mut r, &world, true, 2.75),
+        render(&mut r, &masked, true, 2.75),
+        "an opaque mask casts the same outline as the panel"
+    );
+    masked[1].color[3] = 0.0;
+    assert_eq!(
+        render(&mut r, &world[..1], true, 2.75),
+        render(&mut r, &masked, true, 2.75),
+        "a transparent mask leaves neither geometry nor shadow"
+    );
+}
+
 fn capture_shadowed(
     r: &mut Renderer,
     camera: &Camera,
