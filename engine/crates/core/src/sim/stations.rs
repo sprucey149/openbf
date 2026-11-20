@@ -347,7 +347,7 @@ impl Sim {
 
     pub(super) fn station_dies(&mut self, station: u16, attacker: Option<UnitHandle>) {
         let s = &self.stations[usize::from(station)];
-        let (class, pos) = (s.class, s.pos);
+        let (class, pos) = (s.class, s.transform.w_axis.truncate());
         let station_team = s.team;
         self.install_station_wreck(station);
         self.events.push(Event::StationDestroyed {

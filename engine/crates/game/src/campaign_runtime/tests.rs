@@ -3751,3 +3751,86 @@ fn enable_command_post_vo_sets_the_flag_to_n_equals_one() {
         assert_eq!(rt.command_post_vo(), on, "n = {n}");
     }
 }
+
+#[test]
+fn spa1g_c_animated_transports_and_corvettes_spawn_chunks_at_live_pose() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: spa1g_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "spa1g_c");
+    let map_dir = baked_dir.join("bf2_spa1");
+    let mut fx = crate::fx::Fx::for_walk(&baked_dir, &map_dir, "bf2", &walk);
+    fx.set_lit_chunks(
+        fx.chunk_models()
+            .into_iter()
+            .map(|m| m.to_ascii_lowercase()),
+    );
+
+    // Advance 10 seconds so trans01 (mini01) and frig01 (cor01) move away from their
+    // initial placement origins.
+    for _ in 0..(10 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+    }
+    // Start cor01's animation group too so we verify animated corvettes as well.
+    rt.w.anims.play("gate01");
+    for _ in 0..(10 * core::TICK_HZ) {
+        tick(&mut walk, &mut rt, &def);
+        rt.close_popup();
+    }
+
+    for (name, chunk_prefix, expected_chunks) in [
+        ("mini01", "spa1_prop_correliancruiser_chunk", 4usize),
+        ("cor01", "all_prop_blockaderunner_chunk", 2usize),
+    ] {
+        let Some(Ud::Station(si)) = rt.w.resolve_name(&walk.sim, name) else {
+            panic!("{name} is not a station");
+        };
+        let st = walk.sim.stations[usize::from(si)];
+        let live_pos = st.transform.w_axis.truncate();
+        assert!(
+            live_pos.distance(st.pos) > 50.0,
+            "{name} should have moved away from its initial placement origin ({} vs {})",
+            live_pos,
+            st.pos
+        );
+
+        walk.sim.events.clear();
+        walk.sim.kill_station(si, Some(walk.player));
+        let event_pos = walk
+            .sim
+            .events
+            .iter()
+            .find_map(|e| match *e {
+                core::sim::Event::StationDestroyed {
+                    station, pos, ..
+                } if station == si => Some(pos),
+                _ => None,
+            })
+            .expect("StationDestroyed event");
+        assert!(
+            event_pos.distance(live_pos) < 1e-3,
+            "{name}: StationDestroyed pos {event_pos} != live animated pos {live_pos}"
+        );
+
+        fx.clear();
+        fx.ingest(&walk);
+        let pieces: Vec<(String, glam::Vec3)> = fx
+            .lit_chunk_poses()
+            .filter(|(m, _, _)| m.to_ascii_lowercase().starts_with(chunk_prefix))
+            .map(|(m, mat, _)| (m.to_owned(), mat.w_axis.truncate()))
+            .collect();
+        assert_eq!(
+            pieces.len(),
+            expected_chunks,
+            "{name}: expected {expected_chunks} destruction chunks, got {}",
+            pieces.len()
+        );
+        let centroid =
+            pieces.iter().map(|(_, p)| *p).sum::<glam::Vec3>() / pieces.len() as f32;
+        assert!(
+            centroid.distance(live_pos) < 150.0,
+            "{name}: chunks spawned at {centroid} instead of live pos {live_pos} (old pos was {})",
+            st.pos
+        );

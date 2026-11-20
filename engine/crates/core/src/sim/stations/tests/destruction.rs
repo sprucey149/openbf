@@ -287,3 +287,47 @@ fn ai_damage_threshold_clamps_ai_but_allows_player_to_destroy_station() {
     assert!(sim.stations[0].destroyed);
     assert_eq!(sim.stations[0].health.cur, 0.0);
 }
+
+#[test]
+fn animated_station_death_emits_event_and_blast_at_live_transform() {
+    let (mut sim, _) = fixture();
+    sim.station_classes[0].explosion = Some(ExplosionClass {
+        damage: 500.0,
+        damage_inner: 10.0,
+        damage_outer: 10.0,
+        ..Default::default()
+    });
+    let moved = Vec3::new(400.0, 50.0, -250.0);
+    let near_origin = sim.spawn(&UnitSpec::trooper(1, Vec3::X * 2.0)).unwrap();
+    let near_moved = sim
+        .spawn(&UnitSpec::trooper(1, moved + Vec3::X * 2.0))
+        .unwrap();
+    sim.units[near_origin.index as usize].soldier.pos = Vec3::X * 2.0;
+    sim.units[near_moved.index as usize].soldier.pos = moved + Vec3::X * 2.0;
+    let parts = sim.station_parts(0);
+    sim.set_station_transform(0, glam::Mat4::from_translation(moved), &parts);
+    sim.events.clear();
+
+    sim.kill_station(0, None);
+
+    let destroyed_pos = sim
+        .events
+        .iter()
+        .find_map(|e| match *e {
+            Event::StationDestroyed {
+                station: 0, pos, ..
+            } => Some(pos),
+            _ => None,
+        })
+        .expect("StationDestroyed event");
+    assert_eq!(destroyed_pos, moved);
+    assert_eq!(
+        sim.unit(near_origin).unwrap().health.cur,
+        sim.unit(near_origin).unwrap().health.max,
+        "origin bystander must not be hit by animated station's death blast"
+    );
+    assert!(
+        sim.unit(near_moved).is_none(),
+        "animated-pose bystander must be killed by animated station's death blast"
+    );
+}
