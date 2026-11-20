@@ -10,6 +10,7 @@ pub(super) fn setup(cap: Option<u32>) -> BattleSetup {
         ai: None,
         ai_cap: cap,
         team_size_pct: None,
+        xl: false,
         tickets: 250,
         tickets_set: false,
         ticket_pct: 100,

@@ -844,7 +844,7 @@ impl App {
         if n.lobby.ia.is_some() {
             return;
         }
-        let mut ia = game::shell_ia::instant_action(
+        let mut ia = game::shell_ia::lobby_instant_action(
             &self.assets_dir,
             &self.missions_dir,
             self.profile.settings.difficulty,

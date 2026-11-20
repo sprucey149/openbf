@@ -1683,6 +1683,7 @@ mod tests {
             ai: None,
             ai_cap: None,
             team_size_pct: None,
+            xl: false,
             tickets: 250,
             tickets_set: false,
             ticket_pct: 100,

@@ -3,6 +3,7 @@ use crate::unit::UnitHandle;
 use crate::TICK_HZ;
 
 pub const ASSAULT_SCORE_LIMIT: u32 = 180;
+pub const XL_SCORE_LIMIT: u32 = 350;
 
 const CLASS_RESERVE_SECS: u64 = 60;
 
@@ -11,7 +12,14 @@ pub struct Deathmatch {
     pub score_limit: u32,
     pub members: [u32; 2],
     pub points: [u32; 2],
-    hunt_points_per_kill: Option<[u8; 2]>,
+    kind: Kind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Kind {
+    HeroAssault,
+    Hunt([u8; 2]),
+    Xl,
 }
 
 impl Deathmatch {
@@ -20,26 +28,37 @@ impl Deathmatch {
             score_limit,
             members,
             points: [0; 2],
-            hunt_points_per_kill: None,
+            kind: Kind::HeroAssault,
         }
     }
 
     pub fn hunt(score_limit: u32, members: [u32; 2], points_per_kill: [u8; 2]) -> Self {
         Self {
-            hunt_points_per_kill: Some(points_per_kill),
+            kind: Kind::Hunt(points_per_kill),
             ..Self::new(score_limit, members)
         }
     }
 
     pub fn is_hero_assault(&self) -> bool {
-        self.hunt_points_per_kill.is_none()
+        self.kind == Kind::HeroAssault
+    }
+
+    pub fn xl(members: [u32; 2]) -> Self {
+        Self {
+            kind: Kind::Xl,
+            ..Self::new(XL_SCORE_LIMIT, members)
+        }
     }
 
     pub(crate) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"DEATHMATCH");
-        if let Some(weights) = self.hunt_points_per_kill {
-            eat(b"HUNT");
-            eat(&weights);
+        match &self.kind {
+            Kind::HeroAssault => {}
+            Kind::Hunt(weights) => {
+                eat(b"HUNT");
+                eat(weights);
+            }
+            Kind::Xl => eat(b"XL"),
         }
         eat(&self.score_limit.to_le_bytes());
         for team in 0..2 {
@@ -53,7 +72,13 @@ impl Sim {
     pub fn is_hunt(&self) -> bool {
         self.deathmatch
             .as_ref()
-            .is_some_and(|round| !round.is_hero_assault())
+            .is_some_and(|round| matches!(round.kind, Kind::Hunt(_)))
+    }
+
+    pub fn is_xl(&self) -> bool {
+        self.deathmatch
+            .as_ref()
+            .is_some_and(|round| round.kind == Kind::Xl)
     }
 
     pub fn hero_assault(&self) -> bool {
@@ -76,9 +101,10 @@ impl Sim {
             return;
         }
         let team = usize::from(killer_team);
-        let points = deathmatch
-            .hunt_points_per_kill
-            .map_or(1, |weights| weights[team]);
+        let points = match deathmatch.kind {
+            Kind::Hunt(weights) => weights[team],
+            Kind::HeroAssault | Kind::Xl => 1,
+        };
         deathmatch.points[team] += u32::from(points);
         if deathmatch.points[team] >= deathmatch.score_limit {
             self.outcome = Some(killer_team);

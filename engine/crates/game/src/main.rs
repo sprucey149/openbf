@@ -617,6 +617,7 @@ struct BattleSetup {
     /// the map-relative combatant percentage; other CLI launches use the mission.
     ai_cap: Option<u32>,
     team_size_pct: Option<u32>,
+    xl: bool,
     tickets: u32,
     /// Explicit --tickets wins over the mission's (and ignores
     /// `ticket_pct`).
@@ -709,6 +710,7 @@ impl BattleSetup {
             ai: v.ai,
             ai_cap: v.ai_cap,
             team_size_pct: None,
+            xl: false,
             tickets: v.tickets,
             tickets_set: v.tickets_set,
             ticket_pct: 100,

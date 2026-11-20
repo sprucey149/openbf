@@ -1652,6 +1652,11 @@ pub struct BattleLoad {
 /// through here. A COMMON bake that exists but will not load is not an
 /// error: the map still loads, and `BattleLoad::common` says why.
 pub fn load_battle_scene(dir: &Path, mode: &str) -> Result<(Scene, BattleLoad)> {
+    let mode = if mode == ui::shell::Mode::Xl.subst() {
+        "con"
+    } else {
+        mode
+    };
     let mut scene = load_scene(dir)?;
     anyhow::ensure!(
         (mode == "hunt" && scene.manifest.source_game == "bf1")

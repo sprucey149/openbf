@@ -72,6 +72,27 @@ fn an_enemy_kill_scores_for_the_killers_team() {
 }
 
 #[test]
+fn xl_counts_up_to_350_and_ends_on_the_winning_kill() {
+    let (mut sim, first, ally, enemy) = arena(XL_SCORE_LIMIT);
+    sim.deathmatch = Some(Deathmatch::xl([12, 12]));
+    assert!(sim.is_xl());
+    assert!(!sim.hero_assault());
+    assert!(!sim.is_hunt());
+    assert_eq!(sim.team_points(), Some(([0, 0], 350)));
+    sim.unit_killed_with_cause(ally, Some(first), DeathCause::Suicide);
+    assert_eq!(sim.team_points(), Some(([0, 0], 350)));
+    sim.unit_killed_with_cause(first, Some(enemy), DeathCause::Suicide);
+    assert_eq!(sim.team_points(), Some(([0, 1], 350)));
+    assert_eq!(sim.outcome, None);
+
+    let replacement = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
+    sim.deathmatch.as_mut().unwrap().points[1] = 349;
+    sim.unit_killed_with_cause(replacement, Some(enemy), DeathCause::Suicide);
+    assert_eq!(sim.team_points(), Some(([0, 350], 350)));
+    assert_eq!(sim.outcome, Some(1));
+}
+
+#[test]
 fn hunt_uses_the_team_weight_and_ends_without_hero_rules() {
     let (mut sim, first, _, enemy) = arena(3);
     sim.deathmatch = Some(Deathmatch::hunt(3, [12, 12], [1, 3]));
