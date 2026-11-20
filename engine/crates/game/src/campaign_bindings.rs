@@ -95,6 +95,7 @@ const BOUND: &[&str] = &[
     "MissionVictory",
     "OpenAudioStream",
     "AudioStreamAppendSegments",
+    "RemoveRegion",
     "RespawnObject",
     "PauseAnimation",
     "PlayAnimation",
@@ -161,7 +162,6 @@ const IGNORED: &[&str] = &[
     "FillAsteroidRegion",
     "ForceAIOutOfVehicles",
     "ReadDataFile",
-    "RemoveRegion",
     "ScaleSoundParameter",
     "ScriptCB_DisableFlyerShadows",
     "ScriptCB_LoadMissionSetup",
@@ -665,7 +665,19 @@ impl Ctx<'_> {
             }
             "AddDeathRegion" => {
                 if let Some(r) = w.region_of(arg(a, 0)) {
-                    sim.death_regions.push(w.regions[r as usize].1);
+                    let region = w.regions[r as usize].1;
+                    if !sim.death_regions.contains(&region) {
+                        sim.death_regions.push(region);
+                    }
+                }
+                nothing()
+            }
+            "RemoveRegion" => {
+                if let Some(r) = w.region_of(arg(a, 0)) {
+                    let region = w.regions[r as usize].1;
+                    sim.death_regions.retain(|d| *d != region);
+                    w.active_regions.remove(&r);
+                    w.clear_inside(r);
                 }
                 nothing()
             }
@@ -778,11 +790,29 @@ impl Ctx<'_> {
                 nothing()
             }
             "SelectCharacterClass" => {
-                if let (Some(c), Some(class)) = (w.char_of(arg(a, 0)), arg(a, 1).as_str()) {
-                    w.scripted_chars
-                        .entry(c)
-                        .or_default()
-                        .class = Some(class.to_ascii_lowercase());
+                if let Some(c) = w.char_of(arg(a, 0)) {
+                    let class = if let Some(s) = arg(a, 1).as_str() {
+                        Some(s.to_ascii_lowercase())
+                    } else if let Some(idx) = num(a, 1).filter(|n| *n >= 0.0) {
+                        let team = w
+                            .scripted_chars
+                            .get(&c)
+                            .and_then(|s| s.team)
+                            .or_else(|| w.char_team(sim, c));
+                        team.and_then(|t| {
+                            let ti = usize::from(t);
+                            let ci = *w.class_order.get(ti)?.get(idx as usize)?;
+                            w.team_classes
+                                .get(ti)?
+                                .get(ci)
+                                .map(|s| s.to_ascii_lowercase())
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some(class) = class {
+                        w.scripted_chars.entry(c).or_default().class = Some(class);
+                    }
                 }
                 nothing()
             }
@@ -955,10 +985,11 @@ impl Ctx<'_> {
 
             "AddUnitClass" => {
                 let (Some(t), Some(class)) = (sim_team(arg(a, 0)), arg(a, 1).as_str()) else {
-                    return nothing();
+                    return one(Value::Nil);
                 };
-                w.add_unit_class(sim, t, class, num(a, 2), num(a, 3));
-                nothing()
+                one(w
+                    .add_unit_class(sim, t, class, num(a, 2), num(a, 3))
+                    .map_or(Value::Nil, |idx| Value::Num(idx as f32)))
             }
             "SetUnitCount" => {
                 if let (Some(t), Some(n)) = (sim_team(arg(a, 0)), num(a, 1)) {
@@ -1418,7 +1449,8 @@ impl World {
     }
 
     /// `AddUnitClass(team, class, min, max)`: the class joins the army's
-    /// selectable list (and `GetCharacterClass`'s numbering).
+    /// selectable list (and `GetCharacterClass`'s numbering) and returns its
+    /// 0-based index in that list.
     fn add_unit_class(
         &mut self,
         sim: &mut Sim,
@@ -1426,9 +1458,9 @@ impl World {
         class: &str,
         min: Option<f32>,
         max: Option<f32>,
-    ) {
+    ) -> Option<usize> {
         if t >= 2 {
-            return;
+            return None;
         }
         let ti = usize::from(t);
         let Some(ci) = self.team_classes[ti]
@@ -1439,7 +1471,7 @@ impl World {
                 "AddUnitClass: {class} is not in team {}'s roster",
                 t + 1
             ));
-            return;
+            return None;
         };
         if let Some(uc) = sim.classes[ti].get_mut(ci) {
             if let Some(m) = min {
@@ -1449,11 +1481,15 @@ impl World {
                 uc.max = Some(m as u32);
             }
         }
-        if !self.class_order[ti].contains(&ci) {
+        let idx = if let Some(idx) = self.class_order[ti].iter().position(|&c| c == ci) {
+            idx
+        } else {
             self.class_order[ti].push(ci);
-        }
+            self.class_order[ti].len() - 1
+        };
         sim.set_class_enabled(t, ci, true);
         self.pending_ai_fill = true;
+        Some(idx)
     }
 
     /// `CreateEntity(class, point, name)`: a `flag` class becomes a

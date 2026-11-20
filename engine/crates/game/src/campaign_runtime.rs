@@ -1289,7 +1289,7 @@ impl CampaignRuntime {
             .w
             .markers
             .iter()
-            .filter(|m| (m.team == team || m.team == 0) && (!world || m.pulse))
+            .filter(|m| m.scale > 0.0 && (m.team == team || m.team == 0) && (!world || m.pulse))
         {
             // OURS: the hint hangs 2 m over the object's origin.
             // trace: the hint list's draw (`DAT_0066af58`) for its anchor.

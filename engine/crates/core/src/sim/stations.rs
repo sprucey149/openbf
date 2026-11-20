@@ -304,7 +304,7 @@ impl Sim {
         let Some(s) = self.stations.get_mut(usize::from(station)) else {
             return;
         };
-        if s.destroyed {
+        if s.destroyed || s.health.max <= 0.0 {
             return;
         }
         let ai_floor = (by_ai && s.ai_damage_threshold > 0.0)

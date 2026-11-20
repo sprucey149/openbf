@@ -13,7 +13,10 @@ impl Fx {
                 .get(usize::from(s.class))?
                 .damage_effects
                 .get(slot)?;
-            (!s.destroyed && effect.band.active(s.health.cur / s.health.max)).then_some((s, effect))
+            (!s.destroyed
+                && s.health.max > 0.0
+                && effect.band.active(s.health.cur / s.health.max))
+            .then_some((s, effect))
         };
         for live in &mut self.live {
             let Some((station, slot)) = live.station else {

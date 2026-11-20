@@ -179,7 +179,10 @@ impl Sim {
             if gathered.len() == BLAST_GATHER_MAX {
                 break;
             }
-            if !s.destroyed && overlaps(s.sphere_centre, s.sphere_radius, ground) {
+            if !s.destroyed
+                && s.health.max > 0.0
+                && overlaps(s.sphere_centre, s.sphere_radius, ground)
+            {
                 gathered.push((Victim::Station(i as u16), s.sphere_centre, s.sphere_radius));
             }
         }

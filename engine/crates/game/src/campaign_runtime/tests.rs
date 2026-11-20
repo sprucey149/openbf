@@ -3752,6 +3752,179 @@ fn enable_command_post_vo_sets_the_flag_to_n_equals_one() {
     }
 }
 
+/// Tantive IV ("Recovering the Plans", `tan1g_c`): the boarding-room
+/// `blastdoor` (`tan4_prop_door_charred`, `destructablebuilding` with no
+/// `MaxHealth`) must stay invulnerable to gunfire, then explode and clear its
+/// collision 1.7 s after the human spawns (`doorunlock` -> `KillObject`).
+#[test]
+fn tan1g_c_opening_blastdoor_blows_up_and_clears_collision_after_spawn() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: tan1g_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "tan1g_c");
+    let Some(Ud::Station(si)) = rt.w.resolve_name(&walk.sim, "blastdoor") else {
+        panic!(
+            "blastdoor is not a station: {:?}",
+            rt.w.resolve_name(&walk.sim, "blastdoor")
+        );
+    };
+    let st = &walk.sim.stations[usize::from(si)];
+    assert_eq!(st.health.max, 0.0);
+    assert!(!st.destroyed);
+    let inst = st.instance.expect("blastdoor placed instance");
+
+    // Gunfire must not destroy a zero-MaxHealth scripted prop.
+    let desc = core::weapon::DamageDesc {
+        damage: 500.0,
+        scales: [1.0; 7],
+        shield_scale: 1.0,
+    };
+    walk.sim.damage_station(si, &desc, 1.0, None, Some(0));
+    assert!(
+        !walk.sim.stations[usize::from(si)].destroyed,
+        "weapon damage must not destroy a zero-MaxHealth destructible prop"
+    );
+
+    // Before doorunlock elapses, the door owns live collision parts.
+    let pose = walk.sim.stations[usize::from(si)].pose();
+    assert!(
+        !walk.sim.collision.instance_parts(inst, pose).is_empty(),
+        "blastdoor should have live collision before doorunlock"
+    );
+
+    // Spawn the human player and tick past the 1.7 s `doorunlock` timer.
+    begin_objectives(&mut walk, &mut rt, &def);
+    for _ in 0..(2 * core::TICK_HZ as usize) {
+        tick(&mut walk, &mut rt, &def);
+    }
+
+    assert!(
+        walk.sim.stations[usize::from(si)].destroyed,
+        "blastdoor must be destroyed when doorunlock elapses"
+    );
+    assert!(
+        walk.sim.collision.instance_parts(inst, pose).is_empty(),
+        "blastdoor collision must clear once destroyed"
+    );
+}
+
+/// Tantive IV ("Recovering the Plans", `tan1g_c`): Objective 4's `OnStart`
+/// passes the return value of `AddUnitClass(DEF, "all_hero_leia", 1, 1)` to
+/// `SelectCharacterClass` before `SpawnCharacter(..., GetPathPoint("leia_spawn", 0))`.
+/// Leia must spawn alive on team `DEF` at `leia_spawn`.
+#[test]
+fn tan1g_c_objective4_spawns_princess_leia_at_leia_spawn() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: tan1g_c mission and baked assets required");
+        return;
+    };
+    let (_def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "tan1g_c");
+    // Start Objective4 via its ObjectiveAssault:Start() method so TargetType's
+    // MapAddClassMarker(..., iconScale = 0.0) and OnStart() both run.
+    let obj4 = rt.interp.global("Objective4");
+    let start = {
+        let mut host = Ctx {
+            w: &mut rt.w,
+            sim: &mut walk.sim,
+        };
+        rt.interp
+            .index(&mut host, &obj4, &Value::str("Start"))
+            .expect("Objective4.Start resolves")
+    };
+    {
+        let mut host = Ctx {
+            w: &mut rt.w,
+            sim: &mut walk.sim,
+        };
+        rt.interp
+            .call_value(&mut host, &start, vec![obj4])
+            .expect("Objective4:Start runs");
+    }
+    let leia = walk
+        .sim
+        .units
+        .iter()
+        .find(|u| {
+            u.alive
+                && u.team == 1
+                && rt
+                    .w
+                    .team_classes
+                    .get(usize::from(u.team))
+                    .and_then(|cs| cs.get(usize::from(u.spec.class)))
+                    .is_some_and(|n| n.eq_ignore_ascii_case("all_hero_leia"))
+        })
+        .expect("Princess Leia must spawn on team DEF when Objective4 starts");
+    let expected = glam::Vec3::new(-290.6831, 2.918823, 202.68283);
+    assert!(
+        (leia.soldier.pos - expected).length() < 1.5,
+        "Leia spawned at {:?}, expected near {expected:?}",
+        leia.soldier.pos
+    );
+    assert!(
+        rt.objective_markers(&walk.sim).is_empty(),
+        "Princess target sets iconScale = 0.0 so no 3D objective arrow should appear over Leia"
+    );
+    assert!(
+        rt.map_markers(&walk.sim).is_empty(),
+        "Princess target sets iconScale = 0.0 so no minimap marker should appear for Leia"
+    );
+    assert_eq!(rt.errors().count(), 0, "no script errors");
+}
+
+/// Tantive IV ("Recovering the Plans", `tan1g_c`): destroying `turbineconsole`
+/// fires `destturbine` -> `RemoveRegion("turbinedeath")`, removing the turbine
+/// kill volume so soldiers can pass through; respawning it fires `returbine`
+/// -> `AddDeathRegion("turbinedeath")`, restoring the kill volume.
+#[test]
+fn tan1g_c_destroying_turbineconsole_removes_turbinedeath_region() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: tan1g_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign_full(&missions_dir, &baked_dir, "tan1g_c");
+    let turbine_region = rt
+        .w
+        .regions
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("turbinedeath"))
+        .map(|(_, r)| *r)
+        .expect("turbinedeath region in bf2_tan1");
+    assert!(
+        walk.sim.death_regions.contains(&turbine_region),
+        "turbinedeath should be active before turbineconsole is destroyed"
+    );
+    let Some(Ud::Station(console)) = rt.w.resolve_name(&walk.sim, "turbineconsole") else {
+        panic!("turbineconsole is not a station");
+    };
+
+    // Destroy the console and step the runtime so OnObjectKillName fires.
+    walk.step_tick(&[core::sim::PadState::default()]);
+    walk.sim.kill_station(console, Some(walk.player));
+    rt.step(
+        &mut walk.sim,
+        walk.player,
+        None,
+        &team_classes(&def),
+        &BTreeMap::new(),
+        &[],
+        core::TICK_DT,
+    );
+    assert!(
+        !walk.sim.death_regions.contains(&turbine_region),
+        "turbinedeath must be removed once turbineconsole is destroyed"
+    );
+
+    // Re-adding turbinedeath via returbine restores the kill volume.
+    call_script(&mut rt, &mut walk.sim, "returbine", vec![]);
+    assert!(
+        walk.sim.death_regions.contains(&turbine_region),
+        "turbinedeath must be restored when returbine runs"
+    );
+    assert_eq!(rt.errors().count(), 0, "no script errors");
+}
+
 #[test]
 fn spa1g_c_animated_transports_and_corvettes_spawn_chunks_at_live_pose() {
     let Some((missions_dir, baked_dir)) = baked() else {
@@ -3834,3 +4007,5 @@ fn spa1g_c_animated_transports_and_corvettes_spawn_chunks_at_live_pose() {
             "{name}: chunks spawned at {centroid} instead of live pos {live_pos} (old pos was {})",
             st.pos
         );
+    }
+}
