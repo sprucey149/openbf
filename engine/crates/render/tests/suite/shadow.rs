@@ -84,6 +84,7 @@ fn sun_shadows_project_rigid_and_posed_meshes() {
         let shaded = render(&mut r, &world, true, x);
         let mut left = 0;
         let mut right = Vec::new();
+        let mut interior = 0;
         for (i, (b, s)) in base.chunks_exact(4).zip(shaded.chunks_exact(4)).enumerate() {
             if b[0] > 150 && b[0] == b[1] && b[1] == b[2] && s[0] + 20 < b[0] {
                 if i as u32 % size < size / 2 {
@@ -91,10 +92,18 @@ fn sun_shadows_project_rigid_and_posed_meshes() {
                 } else {
                     right.push(i as u32 % size);
                 }
-                if scale == 1.0 {
-                    assert!((s[0] as f32 - 0.625 * b[0] as f32).abs() <= 1.5);
-                }
+                interior += usize::from((s[0] as f32 - 0.68 * b[0] as f32).abs() <= 1.5);
             }
+        }
+        if scale == 1.0 {
+            assert!(
+                interior * 100 > (left + right.len()) * 90,
+                "the silhouette interior must keep a flat shade: {interior}"
+            );
+            assert!(
+                interior < left + right.len(),
+                "edges should have partial coverage"
+            );
         }
         assert!(
             left > 100 && right.len() > 100,
@@ -126,6 +135,50 @@ fn sun_shadows_project_rigid_and_posed_meshes() {
         render(&mut r, &masked, true, 2.75),
         "a transparent mask leaves neither geometry nor shadow"
     );
+
+    // The overhang blocks the light falling on the posed panel. The panel
+    // should keep its character lighting while still casting onto the floor.
+    r.set_world_scale(1.0);
+    let overhang = DrawCmd::flat(
+        rigid,
+        [0.9, 0.2, 0.2, 1.],
+        Mat4::from_translation(Vec3::new(2.30, 1., -0.25)),
+    )
+    .with_light(LightPath::Unlit);
+    let cloth = DrawCmd::flat(
+        rigid,
+        [0.1, 0.2, 1., 1.],
+        Mat4::from_translation(Vec3::new(-2.25, 0., 0.)),
+    )
+    .with_light(LightPath::Character);
+    let left_overhang = DrawCmd {
+        model: Mat4::from_translation(Vec3::new(-2.70, 1., -0.25)),
+        ..overhang
+    };
+    let world = [world[0], overhang, left_overhang, cloth];
+    let base = render(&mut r, &world, false, 2.75);
+    let shaded = render(&mut r, &world, true, 2.75);
+    let visible_body = base
+        .chunks_exact(4)
+        .zip(shaded.chunks_exact(4))
+        .filter(|(b, _)| b[1] > 200 && b[0] < 150)
+        .map(|(b, s)| {
+            assert_eq!(b, s, "the projection should leave the posed panel alone");
+        })
+        .count();
+    assert!(visible_body > 100, "panel should be visible");
+    let visible_cloth = base
+        .chunks_exact(4)
+        .zip(shaded.chunks_exact(4))
+        .filter(|(b, _)| i16::from(b[2]) - i16::from(b[0]) > 25)
+        .map(|(b, s)| {
+            assert_eq!(
+                b, s,
+                "the projection should leave rigid character parts alone"
+            );
+        })
+        .count();
+    assert!(visible_cloth > 100, "cloth should be visible");
 }
 
 fn capture_shadowed(

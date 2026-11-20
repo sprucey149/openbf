@@ -70,6 +70,7 @@ struct MaskVertex {
 
 @group(0) @binding(1) var scene_depth: texture_depth_2d;
 @group(0) @binding(2) var light_depth: texture_depth_2d;
+@group(0) @binding(3) var light_compare: sampler_comparison;
 
 @vertex fn vs_composite(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     let p = array<vec2<f32>, 3>(vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
@@ -90,8 +91,7 @@ struct MaskVertex {
     if (any(uv < vec2(0.0)) || any(uv >= vec2(1.0)) || light.z < 0.0 || light.z > 1.0) {
         discard;
     }
-    let blocker = textureLoad(light_depth, vec2<i32>(uv * vec2<f32>(textureDimensions(light_depth))), 0);
-    if (light.z <= blocker + shadow.params.z) { discard; }
+    let lit = textureSampleCompareLevel(light_depth, light_compare, uv, light.z - shadow.params.z);
     let fade = 1.0 - smoothstep(shadow.params.x, shadow.params.y, distance);
-    return vec4(0.0, 0.0, 0.0, fade * shadow.params.w);
+    return vec4(0.0, 0.0, 0.0, (1.0 - lit) * fade * shadow.params.w);
 }

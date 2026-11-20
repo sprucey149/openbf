@@ -299,6 +299,14 @@ impl Renderer {
             draws,
             &sorts,
         );
+        let shadow_before = (!shadow_casters.is_empty() || !shadow_skin.is_empty()).then(|| {
+            // Keep rigid character parts (held weapons and live cloth) with
+            // the skinned body, out of the scenery's shadow composite.
+            let water = order.partition_point(|&i| !skinned_go_before(Some(draw_key(&draws[i]).0)));
+            let character = |i: &usize| draws[*i].light == LightPath::Character;
+            order[..water].sort_by_key(character);
+            order[..water].partition_point(|i| !character(i))
+        });
         // The blend pass holds the skinned blended draws too; the world ones'
         // instances follow the runs' in the pass's own order.
         let blended = blend_order(draws, &keep, skinned, camera.position);
@@ -864,8 +872,10 @@ impl Renderer {
             let mut water_display_active = false;
             while run_start <= blend_base {
                 let key = (run_start < blend_base).then(|| draw_key(&draws[order[run_start]]));
+                let at_shadow = Some(run_start) == shadow_before;
                 if lights_pending
-                    && key.is_none_or(|k| k.0 > draw_key_layer(DrawLayer::TerrainLayer))
+                    && (at_shadow
+                        || key.is_none_or(|k| k.0 > draw_key_layer(DrawLayer::TerrainLayer)))
                 {
                     lights_pending = false;
                     if let Some(l) = section.take() {
@@ -879,6 +889,21 @@ impl Renderer {
                     }
                     pass =
                         continue_pass(&mut encoder, &view, &self.depth_view, "map pass, resumed");
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                    bound_layer = None;
+                    water_display_active = false;
+                }
+                if let Some(shadow) = sun_pass.filter(|_| at_shadow) {
+                    if let Some(l) = section.take() {
+                        mark(&mut timer, &mut pass, l);
+                    }
+                    drop(pass);
+                    shadow.composite(self, &mut encoder, frame_texture);
+                    draw_calls += 1;
+                    pass =
+                        continue_pass(&mut encoder, &view, &self.depth_view, "after sun shadows");
+                    mark(&mut timer, &mut pass, "sun shadow composite");
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
@@ -941,19 +966,7 @@ impl Renderer {
                     }
                     mark(&mut timer, &mut pass, "soldiers spec");
                     // BF1 bucket 6: all opaque geometry is down, water is not.
-                    if let Some(shadow) = sun_pass {
-                        drop(pass);
-                        shadow.composite(self, &mut encoder, frame_texture);
-                        draw_calls += 1;
-                        pass = continue_pass(
-                            &mut encoder,
-                            &view,
-                            &self.depth_view,
-                            "after sun shadows",
-                        );
-                        mark(&mut timer, &mut pass, "sun shadow composite");
-                        pass.set_bind_group(0, &self.globals_bg, &[]);
-                    } else if !use_sun_shadow && !self.shadows.is_empty() {
+                    if !use_sun_shadow && !self.shadows.is_empty() {
                         drop(pass);
                         draw_calls +=
                             self.shadows
@@ -977,6 +990,7 @@ impl Renderer {
                 let mut run_end = run_start + 1;
                 let run_key = runs_key(&draws[order[run_start]], sorts[order[run_start]]).0;
                 while run_end < blend_base
+                    && Some(run_end) != shadow_before
                     && runs_key(&draws[order[run_end]], sorts[order[run_end]]).0 == run_key
                 {
                     run_end += 1;

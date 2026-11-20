@@ -1,6 +1,6 @@
 //! Camera-local directional shadows from the current world and skinned meshes.
-//! An unfiltered depth lookup keeps the projected silhouette hard. The
-//! composite uses the existing scene depth, before water and translucent draws.
+//! One bilinear depth comparison antialiases the edge of the silhouette.
+//! The opaque scene receives the shadow before soldiers and water draw.
 
 use crate::bindings;
 use crate::frame::draw_mesh;
@@ -15,6 +15,9 @@ const LIGHT_DEPTH: f32 = 192.0;
 const FADE_START: f32 = 24.0;
 const FADE_END: f32 = 31.0;
 const RECEIVER_BIAS: f32 = 0.055;
+// OURS: nearby lit and shadowed floor patches in the supplied PC screenshot
+// had median display luma of about 185 and 125. measure: a locked-camera pair.
+const SHADOW_TRANSMITTANCE: f32 = 0.68;
 
 pub(crate) fn caster_key(draw: &DrawCmd) -> (bool, u32, Option<u32>) {
     let masked = draw.layer == DrawLayer::Mask;
@@ -44,6 +47,7 @@ pub(crate) struct SunShadow {
     skin: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
+    compare: wgpu::Sampler,
     display_format: wgpu::TextureFormat,
 }
 
@@ -153,7 +157,24 @@ impl SunShadow {
         };
         let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sun shadow receiver"),
-            entries: &[uniform_entry, depth_entry(1), depth_entry(2)],
+            entries: &[
+                uniform_entry,
+                depth_entry(1),
+                depth_entry(2),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+            ],
+        });
+        let compare = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sun shadow edge coverage"),
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
         let display_format = r.water_display_format.unwrap_or(r.format);
         let composite = crate::pipelines::PipelineDesc {
@@ -177,6 +198,7 @@ impl SunShadow {
             skin,
             composite,
             composite_layout,
+            compare,
             display_format,
         }
     }
@@ -205,11 +227,10 @@ impl SunShadow {
     }
 
     pub fn prepare(&self, r: &Renderer, light_clip: Mat4, view_proj: Mat4, eye: Vec3, time: f32) {
-        // Reuse the vehicle pass's display-space attenuation as the initial look.
         let opacity = if self.display_format.is_srgb() {
-            1.0 - 0.625_f32.powf(2.2)
+            1.0 - SHADOW_TRANSMITTANCE.powf(2.2)
         } else {
-            0.375
+            1.0 - SHADOW_TRANSMITTANCE
         };
         let view = ShadowView {
             light_clip: light_clip.to_cols_array_2d(),
@@ -304,6 +325,7 @@ impl SunShadow {
                 bindings::entire_buffer(0, &self.uniform),
                 bindings::texture_view(1, &scene_depth),
                 bindings::texture_view(2, &self.depth),
+                bindings::sampler(3, &self.compare),
             ],
         });
         let display = frame.create_view(&wgpu::TextureViewDescriptor {
