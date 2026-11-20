@@ -744,6 +744,7 @@ impl HudView {
         ]);
         let mut layout = layout;
         ui::hud::add_leaving_line(&mut layout);
+        ui::hud::add_spectate_lines(&mut layout);
         let mut hud = Hud::new(&layout, &transforms);
         let bf2_weapons = assets_dir.join("side_bf2/weapons");
         place_secondary_cutters(&mut hud, |name| {

@@ -678,6 +678,53 @@ fn bf1_spawn_team_preview_keeps_the_command_post_before_unit_selection() {
     );
 }
 
+/// Issue #182: behind the teammate view the hidden spawn screens play no
+/// selection cue, whatever the player presses to switch teammates.
+#[test]
+fn the_teammate_view_closes_the_spawn_selection_cues() {
+    use super::spawn_feedback::Selection;
+    use core::sim::{buttons, PadState, SpawnStage};
+
+    let flat = core::heightfield::Heightfield {
+        size: 2,
+        unit: 4000.0,
+        offset_x: 2000.0,
+        offset_z: 2000.0,
+        heights: vec![0.0; 4],
+    };
+    let mut walk = game::walk::WalkSim::new(1, glam::Vec3::ZERO, Some(flat));
+    for x in [5.0, -5.0] {
+        walk.sim
+            .spawn(&core::unit::UnitSpec::trooper(
+                0,
+                glam::Vec3::new(x, 0.0, -5.0),
+            ))
+            .unwrap();
+    }
+    walk.sim.spawn_screens = true;
+    walk.step_tick(&[PadState::default()]);
+    walk.sim
+        .kill_environment(walk.player, core::sim::DeathCause::Suicide);
+    walk.sim.units[walk.player.index as usize].respawn_at = None;
+    walk.sim.spawn_stage = vec![SpawnStage::Class];
+    assert!(matches!(Selection::read(&walk), Selection::Class(..)));
+    for _ in 0..=game::walk::SPECTATE_HOLD_TICKS {
+        walk.step_tick(&[PadState::default()]);
+    }
+    assert!(walk.spectating());
+    let before = Selection::read(&walk);
+    assert!(matches!(before, Selection::Closed));
+    walk.step_tick(&[PadState {
+        buttons: buttons::FIRE,
+        ..Default::default()
+    }]);
+    let after = Selection::read(&walk);
+    assert_eq!(
+        before.movement_cue(after, core::soldier::GroundRules::Bf2),
+        None
+    );
+}
+
 #[test]
 #[ignore = "requires the owned mixed bake and missions"]
 fn bespin_platforms_initial_spawn_pages_use_each_selection_once() {

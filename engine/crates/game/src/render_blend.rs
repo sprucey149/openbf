@@ -239,6 +239,8 @@ pub struct Pose {
     pub cam_guided: Option<crate::walk::GuidedCam>,
     /// The death camera's timer, eye and turn.
     pub cam_death: Option<(f32, Vec3, Quat)>,
+    /// The teammate view's watched teammate, eye and turn (issue #182).
+    pub cam_spectate: Option<(core::unit::UnitHandle, Vec3, Quat)>,
 }
 
 impl Pose {
@@ -323,6 +325,7 @@ impl Pose {
         self.cam_handover = walk.cam_handover;
         self.cam_guided = walk.cam_guided;
         self.cam_death = walk.death_cam.map(|d| (d.timer, d.eye, d.rot));
+        self.cam_spectate = walk.spectate_pose();
     }
 
     /// Write this pose into the walk (slots past either length untouched).
@@ -365,6 +368,11 @@ impl Pose {
         walk.cam_guided = self.cam_guided;
         if let (Some(d), Some((_, eye, rot))) = (walk.death_cam.as_mut(), self.cam_death) {
             (d.eye, d.rot) = (eye, rot);
+        }
+        if let (Some((t, _, _)), Some((s, eye, rot))) = (walk.spectate_pose(), self.cam_spectate) {
+            if t == s {
+                walk.set_spectate_pose(eye, rot);
+            }
         }
     }
 }
@@ -521,6 +529,16 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
     if let (Some(p), Some(c)) = (prev.cam_death, cur.cam_death) {
         if c.0 >= p.0 {
             out.cam_death = Some((
+                c.0,
+                mix3(p.1, c.1, t),
+                crate::sim_pose::quat_slerp(p.2, c.2, t),
+            ));
+        }
+    }
+    // The same watched teammate (a new one cuts to him: snap).
+    if let (Some(p), Some(c)) = (prev.cam_spectate, cur.cam_spectate) {
+        if p.0 == c.0 {
+            out.cam_spectate = Some((
                 c.0,
                 mix3(p.1, c.1, t),
                 crate::sim_pose::quat_slerp(p.2, c.2, t),

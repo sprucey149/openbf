@@ -46,8 +46,8 @@
 //! does not replace still vary by tier, below): its aim skill, its reaction,
 //! what it does when hit, how readily it runs from a grenade, how far it
 //! sees and whether it strafes (circles) instead of standing. Two strengths,
-//! [`Strength::Average`] (PROVISIONAL) and [`Strength::Good`] (fitted to the
-//! maintainer's own matches on 2026-10-29, a little under him; its row says
+//! [`Strength::Average`] (PROVISIONAL) and [`Strength::Good`] (refitted to
+//! real players' Hard and Elite matches on 2026-11-19; its row says
 //! which numbers the fit supports - `scripts/human_profile.py`,
 //! `analysis/difficulty-proposal.md` §5).
 //!
@@ -122,28 +122,42 @@ impl Strength {
                 mend: 0.0,
                 picks: false,
             },
-            // [ours] Fitted 2026-10-29 to the maintainer's two BF1 Yavin 4
-            // Arena matches at Normal, set a little under him on purpose
-            // (`human_profile.py calibrate`, 16 seeds): kills/min 5.4 of his
-            // 8.3, K/D 8.7 of 23.8, accuracy 0.37 of 0.37, life 73 s of 110.
-            // Fit-supported: `hand.floor` (the accuracy), `class` 0 (the
-            // rifleman he played), `headshots` (his rule; 13 % of his rifle
-            // hits were heads). The rest stays PROVISIONAL.
+            // [ours] Refitted 2026-11-19 to real players: a brother's 25
+            // clean Hard and Elite LAN/solo Conquest logs (2026-11-14..17,
+            // 24 map/tier pairs, hero lives left out, award-weapon, Hunt and
+            // short-quit logs skipped), each replayed at its own map, tier,
+            // team, era, population and LAN rows with the known other
+            // humans as proxies and the class he played most
+            // (`human_profile.py calibrate --setup --mirror-class
+            // --skip-heroes`). Fresh seeds 5-8, 100 rounds: K/D 4.79 of
+            // 5.69, kills/min 3.24 of 4.00, accuracy 0.332 of 0.293, life
+            // 70 s of 59 - each within 20 %. Fit-supported: those four
+            // (`reaction_ticks`, `view_mult`, `mend` 0, `hand.floor`,
+            // `hand.acquire`). Not supported: seconds from sight to first
+            // hit (1.5 of 2.2 s), and the tier split (the proxy is under
+            // him at Elite, K/D 5.2 of 8.1, and over him at Hard, 4.5 of
+            // 3.7). `class` 0 stays the check's rifleman; he played the
+            // sniper most (class 3). Was (2026-10-29, the maintainer's
+            // Normal Yavin, set under him): reaction 6, view 2.0, mend
+            // 0.35, floor 0.006, acquire 0.06. The rest stays PROVISIONAL.
+            // replace: refit with more players' logs (team sizes and other
+            // humans written in the log header).
             Strength::Good => Profile {
                 skill: 20,
-                reaction_ticks: 6,
+                reaction_ticks: 3,
                 react: [0.35, 0.25, 0.30],
                 grenade: 0.95,
-                view_mult: 2.0,
+                view_mult: 4.0,
                 circles: true,
                 hand: Some(hand::Hand {
-                    floor: 0.006,
+                    floor: 0.002,
+                    acquire: 0.1,
                     ..hand::Hand::DEFAULT
                 }),
                 headshots: true,
                 hunts: true,
                 class: Some(0),
-                mend: 0.35,
+                mend: 0.0,
                 picks: true,
             },
         }

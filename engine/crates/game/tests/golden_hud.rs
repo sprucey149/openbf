@@ -28,6 +28,7 @@ fn model() -> ui::hud::HudModel {
         damage_flash: 0.0,
         gauge: Default::default(),
         leaving: None,
+        spectate: None,
         team_names: ["all".into(), "imp".into()],
         tickets: [247, 239],
         bleed: [0.0; 2],

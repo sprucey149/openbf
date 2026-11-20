@@ -1036,6 +1036,15 @@ impl App {
         if self.paused {
             return;
         }
+        // Issue #182: behind the teammate view the spawn screens are hidden;
+        // a click steps to the next teammate (presentation only).
+        if let Some((walk, _)) = self.walk.as_mut().filter(|(w, _)| w.spectating()) {
+            if let Some((_, true)) = self.shell_pointer.take_frame() {
+                walk.spectate_cycle(1);
+            }
+            self.spawn_clicks.clear();
+            return;
+        }
         let Some((walk, _)) = self.walk.as_ref() else {
             return;
         };

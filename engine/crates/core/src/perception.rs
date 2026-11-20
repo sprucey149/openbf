@@ -256,6 +256,32 @@ pub fn level(eye: Vec3, p: Vec3) -> Vec3 {
     Vec3::new(p.x, eye.y, p.z)
 }
 
+/// Where bot sight finds soldier `o` from `eye` (issue #182, BF1 Kashyyyk
+/// Docks: a last enemy against a wall, Wookiees beside him not shooting): his
+/// body centre when the [`los_seat`] ray reaches it, else his head (the top
+/// of his capsule's segment) when that ray does, else `None`. A soldier on
+/// foot whose middle is behind a wall edge or a rail but whose head shows is
+/// seen and aimed at there; a rider is only ever seen by his centre, as before.
+/// OURS: the PS2's sight ray goes to the target's body centre only; a second
+/// ray to the head is the port's, so a partly covered soldier is not
+/// invisible. measure: SWEEP_EMBED `unseen`/`unhit` runs on bf1_kas2 before
+/// and after; replace: if the original's target point is traced.
+pub fn sight_point(
+    sim: &Sim,
+    eye: Vec3,
+    o: &crate::unit::Unit,
+    hulls: HullFilter,
+    buildings: [Option<u32>; 2],
+) -> Option<Vec3> {
+    let c = o.capsule().center();
+    if los_seat(sim, eye, c, hulls, buildings) {
+        return Some(c);
+    }
+    let cap = o.capsule();
+    let head = cap.base + Vec3::Y * (cap.height - cap.radius).fmax(cap.height * 0.5);
+    (o.mount.is_none() && los_seat(sim, eye, head, hulls, buildings)).then_some(head)
+}
+
 /// Both vehicles `a` and `b` ride in, skipped ([`HullFilter::Except`]).
 pub fn past_mounts(sim: &Sim, a: UnitHandle, b: UnitHandle) -> HullFilter {
     let m = |h| sim.unit(h).and_then(|u| u.mount).map(|m| m.vehicle);
@@ -493,16 +519,30 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         cand.push((d2, (0, u64::from(h.index)), Foe::Unit(h), p));
     }
     // A rider is seen by his craft's body (RE §5.1's bound radius; BF2 doubles
-    // a flyer observer and a human target): for a flyer in the sky, and for a
-    // flyer pilot's eyes on any vehicle. Ground bots and ground vehicles keep
-    // the soldier's sight.
+    // a flyer observer and a human target), whatever the craft and whoever
+    // looks (issue #182). Both games size the view distance by the TARGET's
+    // collision sphere: BF2 `FUN_002e3910` (re-ai-difficulty 5.1), BF1
+    // `FUN_00242678` (B1:159387-159410, 20 x radius + 30 times 2 for one
+    // observer class), and BF2's scan asks it of every enemy object in its
+    // query, the vehicle itself included (checked against the original
+    // game). That query is bounded: BF2 `FUN_002e3aa0` asks within
+    // `FUN_002a9d90` (longest weapon range + 5 x top speed, [`scan_radius`]),
+    // BF1 within a clamp of 75-350 m. A walker or a tank is seen from well
+    // past a soldier's 49 m but no farther than the observer's scan radius,
+    // as the turret path below: ground bots once saw a ground vehicle's rider
+    // only by the soldier's sight, and a human in BF1 Geonosis's spider
+    // walker went all round nearly unshot. A flyer, and a flyer pilot's eyes,
+    // keep their earlier unbounded reach (the soldier's weapons and speed do
+    // not size a pilot's query; flyer AI is out of #182's scope).
+    // Known gap: a bot in a ground vehicle's gun seat is still bounded by its
+    // personal weapons' scan radius, not by the seat gun's range.
+    let query = scan_radius(sim, u);
     let pilot = u
         .mount
         .and_then(|m| sim.vehicle(m.vehicle))
         .is_some_and(|v| v.kind == crate::vehicle::VehicleKind::Flyer);
     for (_, v) in sim.alive_vehicles() {
-        let flyer = v.kind == crate::vehicle::VehicleKind::Flyer;
-        if (!flyer && !pilot) || v.is_empty() || !v.health.alive() {
+        if v.is_empty() || !v.health.alive() {
             continue;
         }
         let radius = sim
@@ -525,6 +565,11 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             let d2 = off.dot(off);
             let human_target = bf2 && rider.is_human();
             let reach = base * if human_target { 2.0 } else { 1.0 };
+            let reach = if pilot || v.kind == crate::vehicle::VehicleKind::Flyer {
+                reach
+            } else {
+                reach.fmin(query)
+            };
             if d2 < reach * reach
                 && in_cone(view, off, d2, sim.omni_radius)
                 && !cand.iter().any(|c| c.2 == Foe::Unit(o))
@@ -571,14 +616,13 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             break;
         }
         let past = h.unit().unwrap_or(me);
-        if los_seat(
-            sim,
-            eye,
-            p,
-            past_mounts(sim, me, past),
-            past_buildings(sim, me, past),
-        ) {
-            see(st, h, tick, p);
+        let (hulls, buildings) = (past_mounts(sim, me, past), past_buildings(sim, me, past));
+        let at = match h.unit().and_then(|o| sim.unit(o)) {
+            Some(o) => sight_point(sim, eye, o, hulls, buildings),
+            None => los_seat(sim, eye, p, hulls, buildings).then_some(p),
+        };
+        if let Some(at) = at {
+            see(st, h, tick, at);
             seen += 1;
         }
     }
@@ -649,7 +693,7 @@ pub fn turret_view_distance(view_mult: f32) -> f32 {
 /// The PS2's scan radius (B2 `FUN_002a9d90`): the longest range of the unit's
 /// weapons + 5 × its top speed. The soldier's own sight is the port's and
 /// stays as it is; this only keeps [`turret_view_distance`]'s long reach.
-fn scan_radius(sim: &Sim, u: &crate::unit::Unit) -> f32 {
+pub(crate) fn scan_radius(sim: &Sim, u: &crate::unit::Unit) -> f32 {
     let range = |c: usize| sim.weapon_classes.get(c).map_or(0.0, |w| w.ai_range[2]);
     // An award weapon out of the unit's cycle does not count.
     let held = u
@@ -917,13 +961,31 @@ pub fn choose_target_with(
     let score = |c: &Contact| -> f32 {
         let d = (c.last_pos - eye).length();
         let human = c.handle.live_unit(sim).is_some_and(|o| o.is_human());
-        let base = (200.0 - 100.0 * d / scale) * if human { tier.pressure } else { 1.0 };
-        if c.seen_now {
-            // Card HVYW (OURS): a bot with a launcher prefers the vehicle.
-            base + c
-                .handle
+        // Card HVYW (OURS): a bot with a launcher prefers the vehicle it can
+        // hurt in its reach ...
+        let bonus = if c.seen_now {
+            c.handle
                 .live_unit(sim)
                 .map_or(0.0, |o| crate::ai::vehicle_bonus(sim, u, o))
+        } else {
+            0.0
+        };
+        // ... wherever in sight it is (issue #182, OURS): a vehicle is seen
+        // past a soldier's view distance, and its distance term counts no
+        // farther than that, so a tank at 90 m still outranks a soldier at
+        // 10 m for the bot whose launcher reaches it.
+        // measure: launcher shots at vehicles per round (HEAVY_CENSUS).
+        // Past the clamp a small distance term still ranks several vehicles
+        // nearest first, rather than by slot order.
+        let (d, far) = if bonus > 0.0 {
+            (d.fmin(scale), (d - scale).max(0.0))
+        } else {
+            (d, 0.0)
+        };
+        let base = (200.0 - 100.0 * d / scale) * if human { tier.pressure } else { 1.0 }
+            - 0.01 * far;
+        if c.seen_now {
+            base + bonus
         } else {
             base - 10.0 * c.age_s(tick)
         }

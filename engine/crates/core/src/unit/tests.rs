@@ -12,6 +12,7 @@ fn a_soldiers_bolt_prims_are_the_ps2s() {
         yaw: 0.0,
         stance,
         scale,
+        posed: None,
     };
     let stand = at(Stance::Stand, 1.0);
     // From 20 m to his right, level, toward him.
@@ -50,6 +51,56 @@ fn a_soldiers_bolt_prims_are_the_ps2s() {
         Some(HitZone::Head)
     );
     assert_eq!(shot(&stand, 1.9, -0.16), None);
+}
+
+/// Issue #182: a seated rider's prims ([`BoltPrims::posed`]) sit on his
+/// drawn head and torso: a side shot at each meets that zone, the torso
+/// sphere stops short of a head set close over the chest (so the head is
+/// still a head hit), and the body cylinder stops at the torso centre.
+#[test]
+fn a_seated_riders_prims_sit_on_his_drawn_head_and_torso() {
+    let head = Vec3::new(0.0, 1.825, 0.1);
+    let torso = Vec3::new(0.0, 1.3, 0.0);
+    let p = BoltPrims {
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        stance: Stance::Stand,
+        scale: 1.0,
+        posed: Some([head, torso]),
+    };
+    // His facing (+z in his frame) is world -Z at yaw 0.
+    let shot = |p: &BoltPrims, y: f32, z: f32| {
+        p.hit(Vec3::new(20.0, y, z), Vec3::NEG_X, 40.0)
+            .map(|(_, zone)| zone)
+    };
+    assert_eq!(shot(&p, 1.825, -0.1), Some(HitZone::Head));
+    assert_eq!(shot(&p, 1.3, 0.0), Some(HitZone::Torso));
+    assert_eq!(shot(&p, 0.3, 0.0), Some(HitZone::Body));
+    assert_eq!(shot(&p, 1.65, 0.6), None, "beside him");
+    // Down the spine: the head first.
+    let down = p.hit(Vec3::new(0.0, 10.0, -0.1), Vec3::NEG_Y, 20.0);
+    assert_eq!(down.map(|(_, z)| z), Some(HitZone::Head));
+    // The torso stops 0.17 m (the head's radius) short of the head's
+    // centre, 0.53 m off (a trooper's 0.4 m would reach into the head);
+    // the body reaches half the torso centre's height.
+    let (r, hh) = p.posed_sizes(head, torso);
+    assert!((r - (head.distance(torso) - 0.17)).abs() < 1e-6, "{r}");
+    assert!(r < 0.4);
+    assert!((hh - 0.65).abs() < 1e-6, "{hh}");
+    // Head far over the chest: the full 0.4 m.
+    let (r, _) = p.posed_sizes(Vec3::new(0.0, 2.0, 0.0), torso);
+    assert!((r - 0.4).abs() < 1e-6, "{r}");
+    // A head 0.3 m over the chest: the torso stops 0.17 m short of it.
+    let close = Vec3::new(0.0, 1.6, 0.0);
+    let (r, _) = p.posed_sizes(close, torso);
+    assert!((r - (0.3 - 0.17)).abs() < 1e-5, "{r}");
+    let q = BoltPrims {
+        posed: Some([close, torso]),
+        ..p
+    };
+    assert_eq!(shot(&q, 1.6, 0.0), Some(HitZone::Head));
+    // Over the body cylinder's top (the torso centre's height).
+    assert_eq!(shot(&q, 1.35, 0.0), Some(HitZone::Torso));
 }
 
 const DT: f32 = AimBlock::PERIOD as f32 * crate::TICK_DT;

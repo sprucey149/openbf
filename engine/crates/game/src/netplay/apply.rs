@@ -89,7 +89,8 @@ pub fn install_humans(walk: &mut WalkSim, setup: &RoundSetup) -> anyhow::Result<
     };
     walk.sim.cheats = core::sim::Cheats::default();
     walk.sim.team_handicap_on = setup.team_handicap;
-    // Issue #171 option C: the LAN rows (`Difficulty::lan_even_rows`). The
+    // Issue #171: the LAN marker (`Sim::netplay_rows`; since step 3 it
+    // changes no row, the head-count rule is single player's). The
     // game's round build sets it before the opening wave
     // (`BattleSetup::netplay_rows`); this keeps a walk built elsewhere LAN.
     walk.sim.netplay_rows = true;

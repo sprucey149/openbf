@@ -212,3 +212,156 @@ fn spider_beam_leaves_the_turned_turret() {
         assert!(samples >= 2, "{key}: {samples} beam samples");
     }
 }
+
+/// Issue #182 (playtest 2026-11-16, BF1 Geonosis): "when aiming at something
+/// nearby it sometimes shoots straight up or right over the target while
+/// the targeter is right on it". Each Spider weapon hangs on its own pair
+/// of aimers (`turret_y_*` yawing `turret_x_*`), and the PS2 steers each
+/// from its own node toward the seat's aim point. The port turned both
+/// barrels about one seat point (BF1: the lower cannon's muzzle) and then
+/// fired from the muzzle at the point: a target 3-8 m out lay behind the
+/// muzzle, so the shot turned round and left at the 25 deg limit, up and
+/// back (BF1 laser at 3 m: model direction (-0.24, 0.42, -0.87)). A
+/// soldier is held on the reticle's ray 3-15 m out from the walker; every
+/// shot must go out toward him, and every shot whose barrel can reach him
+/// (the reticle's point's pitch from the barrel's pivot inside its limits,
+/// beyond its length) must pass within 0.1 m of the point the reticle
+/// covers on his capsule. Mutation: either half of the fix
+/// undone (`GunSetup::line_aim` unused, or the yaw-only carrier dropping
+/// the pivot in `fire_ring`) fails both maps.
+#[test]
+fn spider_shots_meet_close_targets_on_the_reticle() {
+    use core::unit::{Controller, UnitHandle, UnitSpec};
+    use core::vehicle::gun;
+    use glam::Vec3;
+    for key in ["bf1_geo1", "bf2_geo1"] {
+        let (mut m, spec) = spider_map(key);
+        let h = m.walk.sim.spawn_vehicle(&spec);
+        let player = m.walk.player;
+        for wc in &mut m.walk.sim.weapon_classes {
+            wc.pitch_spread = 0.0;
+            wc.yaw_spread = 0.0;
+            wc.spread_per_shot = 0.0;
+            wc.posture_spread = [[0.0; 3]; 3];
+        }
+        assert!(m.walk.sim.seat_unit(player, h, 0));
+        let setup = m.walk.sim.seat_look(player).unwrap().gun;
+        // Each weapon's one barrel: the bind of the `turret_x_*` aimer that
+        // pitches it (the upper turret's over 6 m, the lower's under; both
+        // discs' models agree), its length and its pitch limits.
+        let barrels: Vec<_> = setup
+            .weapons
+            .iter()
+            .map(|w| {
+                let pivot = if w.fire_points[0].y > 6.0 {
+                    Vec3::new(0.0, 9.2316, 0.1257)
+                } else {
+                    Vec3::new(0.0, 3.1053, 0.0)
+                };
+                (
+                    pivot,
+                    (w.fire_points[0] - pivot).length(),
+                    w.fire_limits[0][1],
+                )
+            })
+            .collect();
+        let enemy = 1 - m.walk.sim.unit(player).unwrap().team.min(1);
+        let target = UnitSpec {
+            controller: Controller::Idle,
+            max_health: 1.0e9,
+            ..UnitSpec::trooper(enemy, Vec3::new(0.0, -500.0, 0.0))
+        };
+        let t = m.walk.sim.spawn(&target).unwrap();
+        // Hold the target on the reticle's ray, `d` m out from the walker's
+        // centre along the ground; its capsule's middle on the ray.
+        let hold = |m: &mut super::seat_camera::Map, t: UnitHandle, d: f32| {
+            let look = m.walk.sim.seat_look(player).unwrap();
+            let v = m.walk.sim.vehicle(h).unwrap();
+            let flat = look.view.with_y(0.0);
+            let r = ((v.pos - look.eye).with_y(0.0).dot(flat.normalize()) + d) / flat.length();
+            let at = look.eye + look.view * r;
+            let u = m.walk.sim.unit_mut(t).unwrap();
+            u.soldier.pos = at - Vec3::Y * 0.5 * core::unit::capsule_height(u.soldier.stance);
+            u.soldier.vel = Vec3::ZERO;
+            at
+        };
+        let (mut reached, mut checked) = (0, 0);
+        for (yaw, pitch) in [
+            (0.0f32, -0.3f32),
+            (0.0, -0.1),
+            (0.9, -0.25),
+            (-2.0, -0.2),
+            (3.0, -0.3),
+        ] {
+            for d in [3.0f32, 5.0, 8.0, 11.0, 15.0] {
+                let w = &mut m.walk.sim.vehicle_mut(h).unwrap().walker;
+                (w.aim_yaw, w.aim_pitch) = (yaw, pitch);
+                for _ in 0..40 {
+                    hold(&mut m, t, d);
+                    m.walk.sim.step(&[PadState::default()]);
+                }
+                for (k, button) in [buttons::FIRE, buttons::SECONDARY_FIRE]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let mut fired = false;
+                    for _ in 0..25 {
+                        let at = hold(&mut m, t, d);
+                        m.walk.sim.step(&[PadState {
+                            buttons: button,
+                            ..Default::default()
+                        }]);
+                        let shot = m.walk.sim.events.iter().find_map(|e| match e {
+                            Event::Shot {
+                                unit, origin, dir, ..
+                            } if *unit == player => Some((*origin, *dir)),
+                            _ => None,
+                        });
+                        let Some((origin, dir)) = shot.filter(|_| !fired) else {
+                            continue;
+                        };
+                        fired = true;
+                        checked += 1;
+                        let v = m.walk.sim.vehicle(h).unwrap();
+                        let (pivot, length, limits) = barrels[k];
+                        let from = v.rot.inverse() * (at - v.pos) - pivot;
+                        let local = v.rot.inverse() * dir;
+                        assert!(
+                            local.with_y(0.0).dot(from.with_y(0.0)) > 0.0,
+                            "{key}, aim ({yaw}, {pitch}), {d} m, channel {button}: shot {local} (model) turns away from the target at {from} off its turret"
+                        );
+                        // The reticle's point: where the camera ray meets him.
+                        let look = m.walk.sim.seat_look(player).unwrap();
+                        let cap = m.walk.sim.unit(t).unwrap().capsule();
+                        let hit = cap
+                            .ray_hit(look.eye, look.view, 600.0)
+                            .expect("the reticle on him");
+                        let p = look.eye + look.view * hit;
+                        let from = v.rot.inverse() * (p - v.pos) - pivot;
+                        let (_, need) = gun::angles(from);
+                        if from.length() < length + 0.5
+                            || need < limits[0] + 0.03
+                            || need > limits[1] - 0.03
+                        {
+                            continue;
+                        }
+                        let off = p - origin;
+                        let miss = (off - dir * off.dot(dir)).length();
+                        assert!(
+                            miss < 0.1 && off.dot(dir) > 0.0,
+                            "{key}, aim ({yaw}, {pitch}), {d} m, channel {button}: shot from {origin} along {dir} passes {miss} m from the reticle's point {p}"
+                        );
+                        reached += 1;
+                    }
+                    assert!(fired, "{key}: channel {button} never fired");
+                    for _ in 0..40 {
+                        hold(&mut m, t, d);
+                        m.walk.sim.step(&[PadState::default()]);
+                    }
+                }
+            }
+        }
+        eprintln!("{key}: {checked} close shots go toward the target; {reached} within the barrels' reach pass through it");
+        assert!(reached >= 15, "{key}: only {reached} reachable close shots");
+    }
+}

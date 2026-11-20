@@ -153,18 +153,35 @@ pub fn loops(walk: &WalkSim) -> Vec<(UnitHandle, usize, &str, glam::Vec3)> {
         .collect()
 }
 
-/// Every seated walker, flyer, and hover gun's loop voices this tick. A gun
+/// Every seated walker, flyer, and hover gun's loop voices this tick, and
+/// every soldier's own wind-up weapon's (the clone commander's chaingun). A gun
 /// that winds up (`wind_up > 0`) keeps its chaingun fire loop (`0x2298cae8` or
 /// `FireLoopSound`) to the ticks it fires on (bit 0 of its weapon +0x144 set
 /// and the spin timer +0x140 run out, B2 `FUN_0032e8c0` starting it through
 /// `FUN_0032fec8`) and fades it out once released; the spin motor runs from the
 /// press to the end of the wind-down. A gun that does not wind up ignores
 /// inherited wind-up style loops (`0x2298cae8` / `0xca333e94`) and loops only
-/// `FireLoopSound` while its trigger holds a firing weapon.
+/// `FireLoopSound` while its trigger holds a firing weapon. A soldier's
+/// weapon that does not wind up is left to its own paths (the fusion
+/// cutter's loop is `crate::repair_feedback`'s).
 pub fn voices(walk: &WalkSim) -> Vec<Voice<'_>> {
     let mut out = Vec::new();
     for (h, u) in walk.sim.alive_units() {
-        let Some(m) = u.mount else { continue };
+        let Some(m) = u.mount else {
+            // On foot: the active weapon, its sounds at the soldier (a
+            // soldier's weapon has no aimer, so the PS2 sets its voices at
+            // the owner's matrix, as `sounds::overheat::voices` does).
+            let (class, _, s) = u.active_weapon();
+            if walk
+                .sim
+                .weapon_classes
+                .get(class)
+                .is_some_and(|wc| wc.wind_up > 0.0)
+            {
+                gun_voices(walk, &mut out, h, class, s, u.soldier.pos);
+            }
+            continue;
+        };
         let Some(v) = walk.sim.vehicle(m.vehicle).filter(|v| {
             matches!(
                 v.kind,
@@ -187,75 +204,87 @@ pub fn voices(walk: &WalkSim) -> Vec<Voice<'_>> {
             continue;
         };
         for (w, s) in gun.weapons.iter().zip(&state.weapons) {
-            let Some(wc) = walk.sim.weapon_classes.get(w.class) else {
-                continue;
-            };
             let pos = frame(walk, h, w.class, s.last_turn).map_or(v.pos, |m| m.w_axis.truncate());
-            let voice = |name, ramp: Ramp| Voice {
-                unit: h,
-                class: w.class,
-                spin: false,
-                name,
-                pos,
-                pitch: 1.0,
-                ramp,
-            };
-            if wc.wind_up <= 0.0 {
-                if let Some(name) = wc.fire_loop_sound.as_deref() {
-                    let live = s.fire_cmd > 0
-                        && s.shots_fired > 0
-                        && !s.overheated
-                        && s.reload_timer <= 0.0
-                        && s.active;
-                    if live {
-                        out.push(voice(name, Ramp::Rise(0.0)));
-                    }
-                }
-                continue;
-            }
-            if s.state != FireState::Firing || !s.active {
-                continue;
-            }
-            let style = style(walk, w.class);
-            let engaged = !s.spin_down;
-            if let Some(name) = style
-                .and_then(|s| s.fire_sound.as_deref())
-                .or(wc.fire_loop_sound.as_deref())
-            {
-                let fade = style.map_or([0.0; 2], |s| s.fire_fade);
-                if engaged && s.spin <= 0.0 {
-                    out.push(voice(name, Ramp::Rise(fade[0])));
-                } else if !engaged {
-                    out.push(voice(name, Ramp::Fall(fade[1])));
-                }
-            }
-            let Some(spin) = style.and_then(|s| s.spin.as_ref()) else {
-                continue;
-            };
-            let (span, from, to) = if engaged {
-                (wc.wind_up, spin.pitch, 1.0)
-            } else {
-                (wc.wind_down, 1.0, spin.pitch)
-            };
-            let f = if span > 0.0 && s.spin > 0.0 {
-                ((span - s.spin) / span).clamp(0.0, 1.0)
-            } else {
-                1.0
-            };
-            let ramp = if engaged {
-                Ramp::Rise(spin.fade[0])
-            } else if s.spin <= spin.fade[1] {
-                Ramp::Fall(spin.fade[1])
-            } else {
-                Ramp::Hold
-            };
-            out.push(Voice {
-                spin: true,
-                name: &spin.name,
-                pitch: (1.0 - f) * from + f * to,
-                ..voice(&spin.name, ramp)
-            });
+            gun_voices(walk, &mut out, h, w.class, s, pos);
         }
     }
     out
+}
+
+/// One weapon's loop voices ([`voices`]), sounding at `pos`.
+fn gun_voices<'a>(
+    walk: &'a WalkSim,
+    out: &mut Vec<Voice<'a>>,
+    h: UnitHandle,
+    class: usize,
+    s: &core::weapon::WeaponState,
+    pos: glam::Vec3,
+) {
+    let Some(wc) = walk.sim.weapon_classes.get(class) else {
+        return;
+    };
+    let voice = |name, ramp: Ramp| Voice {
+        unit: h,
+        class,
+        spin: false,
+        name,
+        pos,
+        pitch: 1.0,
+        ramp,
+    };
+    if wc.wind_up <= 0.0 {
+        if let Some(name) = wc.fire_loop_sound.as_deref() {
+            let live = s.fire_cmd > 0
+                && s.shots_fired > 0
+                && !s.overheated
+                && s.reload_timer <= 0.0
+                && s.active;
+            if live {
+                out.push(voice(name, Ramp::Rise(0.0)));
+            }
+        }
+        return;
+    }
+    if s.state != FireState::Firing || !s.active {
+        return;
+    }
+    let style = style(walk, class);
+    let engaged = !s.spin_down;
+    if let Some(name) = style
+        .and_then(|s| s.fire_sound.as_deref())
+        .or(wc.fire_loop_sound.as_deref())
+    {
+        let fade = style.map_or([0.0; 2], |s| s.fire_fade);
+        if engaged && s.spin <= 0.0 {
+            out.push(voice(name, Ramp::Rise(fade[0])));
+        } else if !engaged {
+            out.push(voice(name, Ramp::Fall(fade[1])));
+        }
+    }
+    let Some(spin) = style.and_then(|s| s.spin.as_ref()) else {
+        return;
+    };
+    let (span, from, to) = if engaged {
+        (wc.wind_up, spin.pitch, 1.0)
+    } else {
+        (wc.wind_down, 1.0, spin.pitch)
+    };
+    let f = if span > 0.0 && s.spin > 0.0 {
+        ((span - s.spin) / span).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let ramp = if engaged {
+        Ramp::Rise(spin.fade[0])
+    } else if s.spin <= spin.fade[1] {
+        Ramp::Fall(spin.fade[1])
+    } else {
+        Ramp::Hold
+    };
+    out.push(Voice {
+        spin: true,
+        name: &spin.name,
+        pitch: (1.0 - f) * from + f * to,
+        ..voice(&spin.name, ramp)
+    });
 }

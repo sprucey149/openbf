@@ -645,7 +645,7 @@ struct BattleSetup {
     /// Include installed DLC heroes in Hero Assault.
     dlc_heroes: bool,
     /// A LAN round (`round_setup::battle_setup`): the sim's
-    /// `netplay_rows` (issue #171 option C), set before the opening wave
+    /// `netplay_rows` (issue #171, the LAN marker), set before the opening wave
     /// spawns so its bots take the LAN rows. False for single player.
     netplay_rows: bool,
     /// A LAN round's humans besides slot 0, per team

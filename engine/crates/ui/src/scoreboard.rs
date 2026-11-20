@@ -6,10 +6,16 @@
 //!
 //! Rules:
 //! - It shows while Select / View (a controller) or Tab (the keyboard) is
-//!   held: both are the pad's `SPAWN_CLASS_PREV` bit in battle. The hold
-//!   shows it after [`SHOW_AFTER`] seconds, so the vehicle seat chord
-//!   (Select with Switch Weapon) never flashes it; a Switch Weapon press
+//!   held. Select is the pad's `SPAWN_CLASS_PREV` bit in battle: its hold
+//!   shows the board after [`SHOW_AFTER`] seconds, so the vehicle seat chord
+//!   (Select with Switch Weapon) never flashes it, and a Switch Weapon press
 //!   during the hold hides it until the hold ends ([`Hold`]).
+//! - Tab is read as the key itself, not through a binding: it shows the
+//!   board at once and in every control context, whatever layout the player
+//!   saved unless that layout binds an action to Tab, and a held Tab keeps
+//!   the board up through a weapon or seat switch (Tab+Q still picks the
+//!   previous seat; the keyboard deliberately does not hide the board for
+//!   the seat chord; issue #182).
 //! - The caller does not draw it on the spawn screens (Select is the
 //!   previous class there), under the pause menu or at the round's end.
 //! - Rows are sorted as Team Stats sorts them ([`crate::stats::sort_rows`]'s
@@ -33,16 +39,20 @@ pub struct Hold {
 }
 
 impl Hold {
-    /// One frame: whether the board's button (`select`) and Switch Weapon
-    /// are held, and the frame's seconds. Returns whether the board shows.
-    pub fn step(&mut self, select: bool, switch_weapon: bool, dt: f32) -> bool {
-        if !select {
-            *self = Self::default();
-            return false;
-        }
-        self.chord |= switch_weapon;
-        self.held_for += dt.max(0.0);
-        self.shown = !self.chord && self.held_for >= SHOW_AFTER;
+    /// One frame: whether the pad's board button (`select`), Switch Weapon
+    /// and the keyboard's board key (`key`) are held, and the frame's
+    /// seconds. Returns whether the board shows.
+    pub fn step(&mut self, select: bool, switch_weapon: bool, key: bool, dt: f32) -> bool {
+        let pad = if select {
+            self.chord |= switch_weapon;
+            self.held_for += dt.max(0.0);
+            !self.chord && self.held_for >= SHOW_AFTER
+        } else {
+            self.chord = false;
+            self.held_for = 0.0;
+            false
+        };
+        self.shown = key || pad;
         self.shown
     }
 
@@ -221,7 +231,7 @@ mod tests {
     const DT: f32 = 1.0 / 60.0;
 
     fn hold(h: &mut Hold, frames: usize, select: bool, switch: bool) -> bool {
-        (0..frames).fold(false, |_, _| h.step(select, switch, DT))
+        (0..frames).fold(false, |_, _| h.step(select, switch, false, DT))
     }
 
     /// Held, the board shows after the short delay and hides on release.
@@ -231,7 +241,7 @@ mod tests {
         assert!(!hold(&mut h, 5, true, false), "not at once");
         assert!(hold(&mut h, 10, true, false));
         assert!(h.shown());
-        assert!(!h.step(false, false, DT), "release hides it");
+        assert!(!h.step(false, false, false, DT), "release hides it");
         assert!(!hold(&mut h, 3, false, false));
     }
 
@@ -240,14 +250,37 @@ mod tests {
     #[test]
     fn scoreboard_hold_chord_hides_it() {
         let mut h = Hold::default();
-        assert!(!h.step(true, true, DT), "a key bound to both");
+        assert!(!h.step(true, true, false, DT), "a key bound to both");
         assert!(!hold(&mut h, 30, true, false), "the chord spoils the hold");
         let mut h = Hold::default();
         assert!(hold(&mut h, 20, true, false));
-        assert!(!h.step(true, true, DT), "Switch Weapon mid-hold hides it");
+        assert!(
+            !h.step(true, true, false, DT),
+            "Switch Weapon mid-hold hides it"
+        );
         assert!(!hold(&mut h, 30, true, false));
-        h.step(false, false, DT);
+        h.step(false, false, false, DT);
         assert!(hold(&mut h, 20, true, false), "a new hold shows it again");
+    }
+
+    /// Tab (issue #182): shown on its first frame, with or without the pad
+    /// bit a stock table also gives it, and a weapon switch while it is held
+    /// (the wheel's Switch Weapon and Select bits, or Q's) never hides it.
+    #[test]
+    fn scoreboard_tab_shows_at_once_and_survives_a_weapon_switch() {
+        let mut h = Hold::default();
+        assert!(
+            h.step(false, false, true, DT),
+            "a custom layout: no pad bit"
+        );
+        let mut h = Hold::default();
+        assert!(
+            h.step(true, false, true, DT),
+            "the stock table's pad bit too"
+        );
+        assert!(h.step(true, true, true, DT), "wheel up mid-hold");
+        assert!(h.step(true, false, true, DT));
+        assert!(!h.step(false, false, false, DT), "release hides it");
     }
 
     fn row(name: &str, points: i32, kills: i32, deaths: i32, ping: Ping) -> ScoreRow {

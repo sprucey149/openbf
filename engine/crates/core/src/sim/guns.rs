@@ -664,9 +664,18 @@ impl Sim {
                 let turn = turns.next().unwrap_or(turn0);
                 let point = (!w.fire_points.is_empty())
                     .then(|| (turn % w.fire_points.len() as u64) as usize);
-                let own_aim = point
-                    .filter(|_| g.turn.is_some() && !fixed_guns)
-                    .and_then(|p| barrel_aim(&g, w, p, st.look, st.rel, st.target));
+                // A barrel on an aimer of its own (the Spider Walker's two
+                // turrets, a hover pilot's side guns) turns about that
+                // aimer's node toward the aim point, inside its limits, and
+                // fires along its own line (issue #182: from the muzzle a
+                // near target fell behind it and the shot went up and back).
+                let own_aim = point.filter(|_| !fixed_guns).and_then(|p| {
+                    if g.turn.is_some() {
+                        barrel_aim(&g, w, p, st.look, st.rel, st.target)
+                    } else {
+                        GunSetup::line_aim(w, p, target_model).map(|(aim, _)| aim)
+                    }
+                });
                 let origin = point.map_or(origin, |p| {
                     pos + rot * g.shot_point(k, Some(p), own_aim.unwrap_or(st.aim), fixed_guns)
                 });

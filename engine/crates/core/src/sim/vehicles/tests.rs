@@ -1295,6 +1295,7 @@ fn a_destroyed_turrets_gunner_dies_at_his_seat() {
                 local: glam::Mat4::from_translation(seat),
                 turns: false,
                 pitch_factor: 1.0,
+                aimer: None,
             }),
         })],
     })];

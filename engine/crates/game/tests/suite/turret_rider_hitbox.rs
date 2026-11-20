@@ -75,6 +75,7 @@ fn scene(class: &str) -> Option<Scene> {
     let hf = scene.heightfield();
     let mut walk = game::walk::WalkSim::with_teams_seat(sim, hf, ME, [t0.clone(), t1], None, 1);
     walk.vehicle_seats = build.seats.clone();
+    game::seated_bodies::install(&mut walk, &root, "bf2");
     // Aimed by hand, as logged: no magnet.
     walk.sim.assist_intensity = 0.0;
     // The pad starts unbuilt in a bare sim; it stood built in the playtest.
@@ -255,13 +256,20 @@ fn drawn(s: &Scene) -> (Vec3, Vec3, Vec3) {
     )
 }
 
-/// The sim's standing head prim centre (`BoltPrims::hit`: 1.65 m up, 0.16 m
-/// forward).
+/// The sim's head prim centre: the seat pose's (`BoltPrims::posed`), else
+/// the standing posture's (1.65 m up, 0.16 m forward).
 fn head_prim(s: &Scene) -> Vec3 {
-    let g = s.walk.sim.unit(s.gunner).unwrap();
-    let y = g.soldier.yaw;
-    let k = g.consts.collision_scale;
-    g.soldier.pos + Vec3::Y * 1.65 * k + Vec3::new(-y.sin(), 0.0, -y.cos()) * 0.16
+    prim_head(&s.walk.sim.body_prims(s.gunner).expect("a body to hit"))
+}
+
+fn prim_head(p: &core::unit::BoltPrims) -> Vec3 {
+    let (sy, cy) = p.yaw.sin_cos();
+    let right = Vec3::new(cy, 0.0, -sy);
+    let fwd = Vec3::new(-sy, 0.0, -cy);
+    let h = p
+        .posed
+        .map_or(Vec3::new(0.0, 1.65 * p.scale, 0.16), |q| q[0]);
+    p.pos + right * h.x + Vec3::Y * h.y + fwd * h.z
 }
 
 /// At every gun look the gunner's body stands under the drawn one (feet
@@ -270,7 +278,15 @@ fn head_prim(s: &Scene) -> Vec3 {
 /// at the drawn chest a body hit, and the logged ray is no head hit.
 #[test]
 fn a_bf2_build_zone_turret_gunner_is_hit_where_he_is_drawn() {
-    let Some(mut s) = scene("cis_inf_rocketeer") else {
+    // Issue #182: the MagnaGuard (`cis_inf_officer`, 1.24 root on his own
+    // longer rig) too.
+    for class in ["cis_inf_rocketeer", "cis_inf_officer"] {
+        build_zone_gunner_is_hit_where_drawn(class);
+    }
+}
+
+fn build_zone_gunner_is_hit_where_drawn(class: &str) {
+    let Some(mut s) = scene(class) else {
         return;
     };
     assert!(s.seat, "the drawn gunner has a seat on the turret's rig");
@@ -289,7 +305,7 @@ fn a_bf2_build_zone_turret_gunner_is_hit_where_he_is_drawn() {
         let (origin, head, chest) = drawn(&s);
         let gap = head.distance(head_prim(&s));
         println!(
-            "look {dl:+.0}: feet {:.3} off the drawn origin, head prim {gap:.3} off the drawn head",
+            "{class} look {dl:+.0}: feet {:.3} off the drawn origin, head prim {gap:.3} off the drawn head",
             feet.distance(origin)
         );
         assert!(
@@ -315,6 +331,21 @@ fn a_bf2_build_zone_turret_gunner_is_hit_where_he_is_drawn() {
         let logged = fire(&mut s, LOGGED);
         println!("look {dl:+.0}: logged ray -> {logged:?}");
         assert_ne!(logged, Struck::Gunner(840.0), "look {dl}: the logged ray");
+    }
+    if class == "cis_inf_officer" {
+        // Control: without the seat poses his bolt prims stand in the
+        // standing posture's places and his drawn head is over the head
+        // prim, past its 0.17 m radius.
+        s.walk.sim.seated_bodies = None;
+        s.look = (face, 0.0);
+        for _ in 0..3 {
+            aim(&mut s, LOGGED);
+            tick(&mut s, 0);
+        }
+        let (_, head, _) = drawn(&s);
+        let gap = head.distance(head_prim(&s));
+        println!("{class} without seat poses: head prim {gap:.3} off the drawn head");
+        assert!(gap > 0.17, "without seat poses the gap is {gap:.3} m");
     }
 }
 
@@ -375,4 +406,318 @@ fn a_sniper_body_shot_does_not_kill_a_full_health_soldier() {
         "body hit x1.5"
     );
     assert_eq!(full <= 420.0, !alive(&s), "War Hero's body hit");
+}
+
+/// Issue #182 ("MagnaGuard hit box broken in turrets"): every soldier class
+/// of a game, of every size, in every building turret seat that draws its
+/// gunner, is hit where he is drawn. Each map's turrets are built and every
+/// class is seated in each at gun looks across its yaw and pitch; a level
+/// ray from either side at the drawn bone_head, and one down his spine,
+/// meets the head prim, and at his drawn chest (between bone_ribcage and
+/// bone_pelvis) the torso or body, never the head. Every vehicle seat that
+/// shows its rider is held to the same head. Without the seat poses
+/// (`Sim::seated_bodies` = None) the MagnaGuard's drawn head is over the
+/// head prim and a leaning trooper's under it.
+#[test]
+fn every_class_in_every_drawn_seat_is_hit_where_drawn() {
+    const BF2: &[&str] = &[
+        "bf2_cor1", "bf2_geo1", "bf2_hot1", "bf2_kam1", "bf2_kas2", "bf2_myg1", "bf2_yav1",
+    ];
+    const BF1: &[&str] = &["bf1_bes1", "bf1_geo1", "bf1_hot1", "bf1_tat2", "bf1_yav1"];
+    let mut checked = 0;
+    let mut sizes = std::collections::BTreeSet::new();
+    for (game, maps, heroes) in [
+        (
+            "bf2",
+            BF2,
+            &[
+                "rep_hero_yoda",
+                "cis_hero_grievous",
+                "all_hero_chewbacca",
+                "imp_hero_darthvader",
+            ][..],
+        ),
+        ("bf1", BF1, &[][..]),
+    ] {
+        for map in maps {
+            let Some(n) = every_class_on(map, game, heroes, &mut sizes) else {
+                continue;
+            };
+            checked += n;
+        }
+    }
+    println!("{checked} class x seat (x look) cases; root scales {sizes:?}");
+    if checked == 0 {
+        eprintln!("SKIP: no map bake");
+        return;
+    }
+    // The MagnaGuard's 1.24, the Wookiee's 1.15 and Yoda's small rig were
+    // among them.
+    assert!(
+        sizes.contains("1.24") && sizes.contains("1.15"),
+        "{sizes:?}"
+    );
+}
+
+/// [`every_class_in_every_drawn_seat_is_hit_where_drawn`] on one
+/// map: the cases checked, `None` without its bake.
+fn every_class_on(
+    map: &str,
+    game: &str,
+    heroes: &[&str],
+    sizes: &mut std::collections::BTreeSet<String>,
+) -> Option<usize> {
+    use core::unit::HitZone;
+    let root = game::assets::baked_root();
+    let dir = root.join(map);
+    let Ok(mut scene) = game::assets::load_scene(&dir) else {
+        eprintln!("SKIP: no {map} bake");
+        return None;
+    };
+    scene.apply_mode_layer("con");
+    scene.merge_common(game::assets::load_common(&root.join(format!("common_{game}"))).ok()?);
+    let factions = ["all", "cis", "imp", "rep"];
+    let db = game::roster::load_classdb(&root.join("classes"), game, &factions).ok()?;
+    let mut sim = core::sim::Sim::empty(42);
+    sim.ground_rules = if game == "bf2" {
+        core::soldier::GroundRules::Bf2
+    } else {
+        core::soldier::GroundRules::Bf1
+    };
+    scene.install_collision(&mut sim);
+    let mut out = 0;
+    for pair in [["rep", "cis"], ["all", "imp"]] {
+        let f = pair.map(str::to_owned);
+        let mut sim = sim.clone();
+        let Ok(build) =
+            game::vehicle_pads::install(&mut sim, &scene.manifest, &dir, &root.join("classes"), &f)
+        else {
+            continue;
+        };
+        let mut names = Vec::new();
+        let classes: Vec<_> = factions
+            .iter()
+            .flat_map(|f| game::roster::default_classes(game, f).unwrap_or(&[]))
+            .chain(heroes)
+            .filter(|c| game::roster::is_soldier_chain(&db, c))
+            .filter_map(|c| game::roster::ClassRoster::build(&db, c, 1, None).ok())
+            .collect();
+        let team = |sim: &mut core::sim::Sim,
+                    names: &mut Vec<_>,
+                    t: usize,
+                    classes: Vec<game::roster::ClassRoster>| {
+            let table: Vec<_> = classes.iter().map(|c| c.register(sim, names)).collect();
+            let visuals = classes
+                .iter()
+                .map(game::walk::ClassVisual::from_roster)
+                .collect();
+            let faction = game::roster::FactionRoster {
+                faction: "cis".into(),
+                classes,
+            };
+            sim.classes[t] = table;
+            game::walk::TeamTemplate::from_roster(&faction, &sim.classes[t][0], visuals)
+        };
+        let t0 = team(&mut sim, &mut names, 0, classes);
+        let sniper = default_sniper(&db, game);
+        let t1 = team(&mut sim, &mut names, 1, vec![sniper]);
+        let far = Vec3::new(0.0, 500.0, 0.0);
+        let mut walk = game::walk::WalkSim::with_teams_seat(
+            sim,
+            scene.heightfield(),
+            far,
+            [t0.clone(), t1],
+            None,
+            1,
+        );
+        walk.vehicle_seats = build.seats.clone();
+        walk.vehicle_riders = build.riders.clone();
+        for i in 0..walk.sim.building_turrets.len() {
+            walk.sim.repair_building(i as u16, 1.0e6);
+        }
+        walk.step_tick(&[PadState::default()]);
+        game::seated_bodies::install(&mut walk, &root, game);
+        let mut vis = game::soldier_vis::SoldierVisuals::load_cpu(&root, game, &walk.teams);
+        vis.set_turrets(game::viewer::turret_pose::rigged_turrets(&scene));
+        let turrets: Vec<_> = walk
+            .sim
+            .alive_vehicles()
+            .filter(|(_, v)| v.kind == core::vehicle::VehicleKind::Turret)
+            .filter(|(_, v)| {
+                walk.sim.seat_setup[v.class as usize]
+                    .as_ref()
+                    .and_then(|s| s.guns.first()?.as_ref())
+                    .is_some_and(|g| g.gunner.is_some())
+            })
+            .map(|(h, v)| (h, v.class))
+            .collect();
+        // Every vehicle seat that shows its rider (a speeder bike, the
+        // fighter tanks' gunners, the AT-TE's, the LAAT's door gunner): his
+        // head prim on his drawn head, met from his side.
+        let vehicles: Vec<_> = walk
+            .sim
+            .alive_vehicles()
+            .filter(|(_, v)| v.kind != core::vehicle::VehicleKind::Turret)
+            .map(|(h, v)| (h, v.class))
+            .collect();
+        let mut seen = std::collections::BTreeSet::new();
+        for (vh, vc) in vehicles {
+            if !seen.insert(vc) {
+                continue;
+            }
+            for (si, seat) in build.seats[vc as usize].iter().enumerate() {
+                if seat.gunner_draw(game == "bf2") != game::vehicle_class::GunnerDraw::Drawn {
+                    continue;
+                }
+                for (k, class) in t0.classes.iter().enumerate() {
+                    let pos = walk.sim.vehicle(vh).unwrap().pos;
+                    let spec = t0.spec(0, pos + Vec3::Y * 5.0, 0.0, Controller::Idle, k as u8);
+                    let Some(g) = walk.sim.spawn(&spec) else {
+                        continue;
+                    };
+                    if walk.sim.seat_unit(g, vh, si as u8) {
+                        for _ in 0..3 {
+                            walk.step_tick(&[PadState::default()]);
+                            vis.update(&walk, core::TICK_DT);
+                        }
+                        let drawn = vis
+                            .drawn_body(&walk, g.index as usize)
+                            .and_then(|(_, b)| b.iter().find(|x| x.0 == "bone_head").map(|x| x.1));
+                        if let (Some(head), Some(p)) = (drawn, walk.sim.body_prims(g)) {
+                            let case = format!(
+                                "{map} {} seat {si} {}",
+                                build.classes[vc as usize], class.name
+                            );
+                            let gap = prim_head(&p).distance(head);
+                            assert!(
+                                gap < 0.08,
+                                "{case}: head prim {gap:.3} m off the drawn head"
+                            );
+                            let (sy, cy) = p.yaw.sin_cos();
+                            let right = Vec3::new(cy, 0.0, -sy);
+                            let z = p.hit(head + right * 20.0, -right, 40.0).map(|h| h.1);
+                            assert_eq!(z, Some(HitZone::Head), "{case}: at the drawn head");
+                            out += 1;
+                        }
+                        walk.sim.unseat_unit(g);
+                    }
+                    walk.sim.unit_mut(g).unwrap().alive = false;
+                }
+            }
+        }
+        // One turret of each class.
+        let mut seen = std::collections::BTreeSet::new();
+        for (turret, vclass) in turrets {
+            if !seen.insert(vclass) {
+                continue;
+            }
+            let tname = &build.classes[vclass as usize];
+            for (k, class) in t0.classes.iter().enumerate() {
+                let tpos = walk.sim.vehicle(turret).unwrap().pos;
+                let Some(g) = walk.sim.spawn(&t0.spec(
+                    0,
+                    tpos + Vec3::Y * 5.0,
+                    0.0,
+                    Controller::Idle,
+                    k as u8,
+                )) else {
+                    continue;
+                };
+                if !walk.sim.seat_unit(g, turret, 0) {
+                    walk.sim.unit_mut(g).unwrap().alive = false;
+                    continue;
+                }
+                let scale = format!("{:.2}", class.anim.root_scale);
+                for (yaw, pitch) in [
+                    (0.0, 0.0),
+                    (1.2, 0.0),
+                    (0.0, 0.35),
+                    (-0.8, -0.3),
+                    (0.0, 0.6),
+                ] {
+                    {
+                        let v = walk.sim.vehicle_mut(turret).unwrap();
+                        if v.guns.is_empty() {
+                            v.guns.resize(1, None);
+                        }
+                        let rest = (yaw, pitch);
+                        let gs = v.guns[0].get_or_insert_with(|| core::vehicle::gun::GunState {
+                            target: None,
+                            look: rest,
+                            aim: rest,
+                            rate: (0.0, 0.0),
+                            rel: rest,
+                            weapons: Vec::new(),
+                            zoom: None,
+                        });
+                        gs.look = rest;
+                        gs.aim = rest;
+                        gs.rel = rest;
+                    }
+                    // The draw holds an aimer-hung gunner a tick back.
+                    for _ in 0..3 {
+                        walk.step_tick(&[PadState::default()]);
+                        vis.update(&walk, core::TICK_DT);
+                    }
+                    let Some((_, bones)) = vis.drawn_body(&walk, g.index as usize) else {
+                        // Not drawn in this seat: nothing to match.
+                        break;
+                    };
+                    let bone = |n: &str| bones.iter().find(|b| b.0 == n).map(|b| b.1);
+                    let (Some(head), Some(rib), Some(pelvis)) =
+                        (bone("bone_head"), bone("bone_ribcage"), bone("bone_pelvis"))
+                    else {
+                        break;
+                    };
+                    // His chest: between the ribcage and pelvis bones (on
+                    // Grievous the ribcage bone sits 0.13 m under his head).
+                    let chest = rib.lerp(pelvis, 0.5);
+                    let p = walk.sim.body_prims(g).expect("a seated gunner has a body");
+                    let (sy, cy) = p.yaw.sin_cos();
+                    let right = Vec3::new(cy, 0.0, -sy);
+                    let zone = |at: Vec3, from: Vec3| {
+                        let start = at + from * 20.0;
+                        p.hit(start, -from, 40.0).map(|h| h.1)
+                    };
+                    let case = format!(
+                        "{map} {tname} {} (root {scale}) look ({yaw}, {pitch}): head prim {:.3} off the drawn head",
+                        class.name,
+                        prim_head(&p).distance(head)
+                    );
+                    // From either side and from over his head along his
+                    // spine: views where his own chest does not cover his
+                    // head (a reclined AA gunner's does, seen from in front).
+                    let crown = (head - chest).normalize();
+                    for from in [right, -right, crown] {
+                        assert_eq!(
+                            zone(head, from),
+                            Some(HitZone::Head),
+                            "{case}: at the drawn head"
+                        );
+                    }
+                    for from in [right, -right] {
+                        let z = zone(chest, from);
+                        assert!(
+                            matches!(z, Some(HitZone::Torso | HitZone::Body)),
+                            "{case}: at the drawn chest {z:?}"
+                        );
+                    }
+                    sizes.insert(scale.clone());
+                    out += 1;
+                }
+                walk.sim.unseat_unit(g);
+                walk.sim.unit_mut(g).unwrap().alive = false;
+            }
+        }
+    }
+    Some(out)
+}
+
+fn default_sniper(db: &game::classdb::ClassDb, game: &str) -> game::roster::ClassRoster {
+    let name = if game == "bf2" {
+        "rep_inf_ep3_sniper"
+    } else {
+        "rep_inf_clone_sharpshooter"
+    };
+    game::roster::ClassRoster::build(db, name, 1, None).unwrap()
 }

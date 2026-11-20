@@ -30,3 +30,7 @@ desktop.ini
 
 # Written by the export (card PACK): data and build output stay local
 /visual_packs/
+
+# Written by the export (card PACK): data and build output stay local
+*.pack.lock
+*.global-sound.lock

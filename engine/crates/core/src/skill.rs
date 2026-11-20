@@ -110,13 +110,37 @@
 //! the enemy table. The human proxy keeps the old rule for its own row
 //! (`ai::proxy::frozen_row`).
 //!
-//! Issue #171 option C (2026-11-14, [ours] PROVISIONAL, the maintainer's
-//! call): a LAN round at Hard or Elite gives both teams the host row
-//! whatever the head count ([`Difficulty::lan_even_rows`],
-//! `Sim::netplay_rows`, set by the round build before the opening wave), as
-//! the PS2's netplay does (BF2 `FUN_002a8300` false for every team; RE
-//! §2.1). Easy and Normal LAN rounds keep the table above, so the two lower
-//! tiers play as before #171.
+//! OURS #171 step 3 (2026-11-19, [ours] PROVISIONAL): ONE rule for single
+//! player and LAN, from the humans on both sides only, so every peer
+//! derives the same rows ([`Difficulty::ally_drop`]). It replaces option C
+//! (2026-11-14: a LAN round at Hard or Elite gave both teams the host row
+//! whatever the head count, the PS2's netplay rule), which measured the 2v1
+//! pair at 70-78 % at Elite, and option A's floors (Hard 18, Elite 17),
+//! which gave 2v0 and 3v0 the 1v0 drop. A team with `s > 0` surplus humans
+//! and `o` humans on the other team loses `first + more * (s - 1) - back * o`
+//! skill (s and o capped at [`SURPLUS_CAP`], never below 0, never below
+//! the floor 11, the PS2's own teammates' skill):
+//!
+//! | host | first | more | back | 1v0 | 2v0 | 3v0 | 2v1 | 3v1 | 1v1 |
+//! |---|---|---|---|---|---|---|---|---|---|
+//! | Hard (20) | 2 | 2 | 1 | 18 | 16 | 14 | 19 | 17 | 20 |
+//! | Elite (20) | 3 | 3 | 1 | 17 | 14 | 11 | 18 | 15 | 20 |
+//!
+//! Easy and Normal keep the table above (more = first, back 0). 1v0 is
+//! unchanged (option A, measured), so a lone player's Hard and Elite are
+//! as before; the further humans on one team keep a small bonus, and a
+//! split lobby favours the bigger side a little. The maintainer's targets
+//! (Good player): solo Hard 55-70 %, Elite 40-55 %; Elite 2v0 50-60 %,
+//! 3v0 55-65 %, 2v1 bigger side 55-65 %, 1v1 even. measure: refitted Good
+//! proxy, Elite, bf1_yav2 / tat1 / bf1_nab2 / bf2_cor1, both sides, seeds
+//! 1-8, rows 1v0 2v0 3v0 2v1 1v1 (LAN rounds: `SWEEP_NETPLAY=1`), Hard 1v0.
+//! Measured 2026-11-19 (that setup, map-default populations and tickets,
+//! n = 64 a row, Wilson 95 %): Elite 1v0 40.6 % (29.5-52.9), 2v0 56.2 %
+//! (44.1-67.7), 3v0 62.5 % (50.3-73.3), 2v1 60.9 % (48.7-71.9), 1v1 50.0 %
+//! (38.1-61.9); Hard 1v0 68.8 % (56.6-78.8). Option C had Elite 2v0 and
+//! 3v0 at 85.9 %, 2v1 at 73.4 %. Elite `more` 2 gave 2v0 65.6 %, so it is 3.
+//! Hard 2v0 / 3v0 / 2v1 are not measured.
+//! `Sim::netplay_rows` stays the LAN marker but no longer changes rows.
 //!
 //! Issue #171, space rounds ([`team_skill_space`], [ours] PROVISIONAL):
 //! option A was measured on the ground only, so a space round (a human
@@ -378,14 +402,23 @@ pub struct TeamSkill {
 }
 
 impl Difficulty {
-    /// Card DTEAM: (skill lowered per surplus human, the floor it stops at).
-    /// OURS, PROVISIONAL; measure: the module header's seeded Good-proxy check.
-    pub fn ally_offset(self) -> (u8, u8) {
+    /// Card DTEAM, issue #171 step 3 [ours] PROVISIONAL: the surplus team's
+    /// skill drop as (first surplus human, each further surplus human, back
+    /// per human on the other team, the floor it stops at) ([`team_skill`]).
+    /// measure: the module header's #171 step-3 rows (refitted Good proxy,
+    /// Elite 1v0 / 2v0 / 3v0 / 2v1 / 1v1 and Hard 1v0, four maps, both sides).
+    pub fn ally_drop(self) -> AllyDrop {
+        let d = |first, more, back, floor| AllyDrop {
+            first,
+            more,
+            back,
+            floor,
+        };
         match self {
-            Difficulty::Easy => (0, 14),
-            Difficulty::Normal => (1, 14),
-            Difficulty::Hard => (2, 18),
-            Difficulty::Elite => (3, 17),
+            Difficulty::Easy => d(0, 0, 0, 14),
+            Difficulty::Normal => d(1, 1, 0, 14),
+            Difficulty::Hard => d(2, 2, 1, 11),
+            Difficulty::Elite => d(3, 3, 1, 11),
         }
     }
 
@@ -397,16 +430,6 @@ impl Difficulty {
     /// pressure. Easy and Normal: no, the 2026-10-28 row rule.
     /// measure: the #171 1v0 ally bvb K/D and Good-proxy bands.
     pub fn ally_keeps_row(self) -> bool {
-        matches!(self, Difficulty::Hard | Difficulty::Elite)
-    }
-
-    /// Card DTEAM, issue #171 option C [ours] PROVISIONAL: does a LAN round
-    /// under this host tier give both teams the host row whatever the head
-    /// count (`Sim::netplay_rows`)? Hard and Elite: yes, the PS2's netplay
-    /// rule. Easy and Normal: no, a LAN round there keeps the DTEAM rule,
-    /// so the two lower tiers play as they did before #171.
-    /// measure: the #171 2v1 LAN band.
-    pub fn lan_even_rows(self) -> bool {
         matches!(self, Difficulty::Hard | Difficulty::Elite)
     }
 
@@ -429,7 +452,12 @@ impl Difficulty {
 /// per surplus human (at most [`SURPLUS_CAP`] of them), never below its
 /// floor, and play the row that skill falls in.
 pub fn team_skill(tier: Difficulty, humans: [u8; 2]) -> [TeamSkill; 2] {
-    let (per, floor) = tier.ally_offset();
+    let AllyDrop {
+        first,
+        more,
+        back,
+        floor,
+    } = tier.ally_drop();
     [0usize, 1].map(|t| {
         let surplus = humans[t].saturating_sub(humans[1 - t]).min(SURPLUS_CAP);
         if surplus == 0 {
@@ -438,9 +466,11 @@ pub fn team_skill(tier: Difficulty, humans: [u8; 2]) -> [TeamSkill; 2] {
                 level: tier.base_skill(),
             };
         }
+        let other = humans[1 - t].min(SURPLUS_CAP);
+        let drop = (first + more * (surplus - 1)).saturating_sub(back * other);
         let level = tier
             .base_skill()
-            .saturating_sub(per * surplus)
+            .saturating_sub(drop)
             .max(floor.min(tier.base_skill()));
         TeamSkill {
             tier: if tier.ally_keeps_row() {
@@ -451,6 +481,20 @@ pub fn team_skill(tier: Difficulty, humans: [u8; 2]) -> [TeamSkill; 2] {
             level,
         }
     })
+}
+
+/// Card DTEAM, issue #171 step 3: a surplus team's skill drop
+/// ([`Difficulty::ally_drop`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllyDrop {
+    /// Skill off for the first surplus human.
+    pub first: u8,
+    /// Skill off for each further surplus human (up to [`SURPLUS_CAP`]).
+    pub more: u8,
+    /// Skill given back per human on the other team (up to [`SURPLUS_CAP`]).
+    pub back: u8,
+    /// The lowest skill the drop reaches (never above the host's base).
+    pub floor: u8,
 }
 
 /// Card DTEAM as it stood on 2026-11-03 (issue #86), kept for space rounds
@@ -1083,36 +1127,30 @@ mod tests {
             [2, 2],
             [0, 0],
         ];
-        // The surplus team's (row, skill) per tier at surplus 0, 1, 2, 3+.
-        let ally = |host: Difficulty, s: u8| match (host, s.min(3)) {
-            (h, 0) => ts(h, h.base_skill()),
-            (Ea, _) => ts(Ea, 14),
-            (No, 1) => ts(Ea, 16),
-            (No, 2) => ts(Ea, 15),
-            (No, _) => ts(Ea, 14),
-            (Ha, _) => ts(Ha, 18),
-            (El, _) => ts(El, 17),
-        };
+        // The surplus team's (row, skill) per tier at surplus 0, 1, 2, 3+;
+        // Hard and Elite (issue #171 step 3) by head count, the module
+        // header's table.
+        let hard = [18, 16, 14, 14, 14, 20, 19, 17, 20, 20];
+        let elite_level = [17, 14, 11, 11, 11, 20, 18, 15, 20, 20];
+        let ally =
+            |host: Difficulty, h: [u8; 2], i: usize| match (host, h[0].saturating_sub(h[1]).min(3))
+            {
+                (h, 0) => ts(h, h.base_skill()),
+                (Ea, _) => ts(Ea, 14),
+                (No, 1) => ts(Ea, 16),
+                (No, 2) => ts(Ea, 15),
+                (No, _) => ts(Ea, 14),
+                (Ha, _) => ts(Ha, hard[i]),
+                (El, _) => ts(El, elite_level[i]),
+            };
         // Written out once for Elite, the tier the maintainer plays: 1v0 .. 0v0.
-        let elite = [
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 20), ts(El, 20)],
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 17), ts(El, 20)],
-            [ts(El, 20), ts(El, 20)],
-            [ts(El, 20), ts(El, 20)],
-        ];
+        let elite = elite_level.map(|l| [ts(El, l), ts(El, 20)]);
         for (h, want) in counts.iter().zip(elite) {
             assert_eq!(team_skill(El, *h), want, "elite {h:?}");
         }
         for host in Difficulty::ALL {
-            for h in counts {
-                let s0 = h[0].saturating_sub(h[1]);
-                let want = [ally(host, s0), ts(host, host.base_skill())];
+            for (i, h) in counts.into_iter().enumerate() {
+                let want = [ally(host, h, i), ts(host, host.base_skill())];
                 assert_eq!(team_skill(host, h), want, "{host:?} {h:?}");
                 // Mirrored: the same rule from the other side.
                 let back = team_skill(host, [h[1], h[0]]);
@@ -1129,7 +1167,7 @@ mod tests {
     #[test]
     fn team_skill_holds_its_floor_and_cap() {
         for host in Difficulty::ALL {
-            let (_, floor) = host.ally_offset();
+            let floor = host.ally_drop().floor;
             for a in 0..8u8 {
                 for b in 0..8u8 {
                     let r = team_skill(host, [a, b]);

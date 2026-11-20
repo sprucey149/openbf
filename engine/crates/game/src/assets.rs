@@ -720,8 +720,19 @@ impl Scene {
                 let layers = next.next().unwrap_or(Layers::NONE);
                 // Degenerate meshes are skipped, like `CameraBlockers` does.
                 let arc = built
-                    .entry(key)
-                    .or_insert_with(|| core::collision::trimesh(&cpu.positions, &cpu.indices))
+                    .entry(key.clone())
+                    .or_insert_with(|| {
+                        // Faces this port adds to a shipped mesh's hole
+                        // (`crate::collision_fixes`), joined from its own vertices.
+                        match crate::collision_fixes::fixed_indices(
+                            &key,
+                            &cpu.positions,
+                            &cpu.indices,
+                        ) {
+                            Some(indices) => core::collision::trimesh(&cpu.positions, &indices),
+                            None => core::collision::trimesh(&cpu.positions, &cpu.indices),
+                        }
+                    })
                     .clone();
                 if let (true, Some(arc)) = (layers != Layers::NONE, arc) {
                     bodies.push(Body::with_layers(m, Shape::Mesh(arc), layers));

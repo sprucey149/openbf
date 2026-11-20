@@ -254,16 +254,13 @@ pub struct Sim {
     /// round; what it gates reaches the hash through tickets. (Its twin, the
     /// human damage multiplier, was retired by card DRETIRE.)
     pub team_handicap_on: bool,
-    /// Card DTEAM, issue #171 option C [ours] PROVISIONAL: a networked
-    /// round (LAN) at Hard or Elite gives both teams' bots the host row
-    /// whatever the head count, as the PS2's netplay does (BF2
-    /// `FUN_002a8300` is false for every team in netplay, so both teams
-    /// take the enemy table {4, 14, 17}; `analysis/re-ai-difficulty.md`
-    /// §2.1). Easy and Normal LAN rounds and single player keep the DTEAM
-    /// rule ([`crate::skill::Difficulty::lan_even_rows`]). Set by the round
-    /// build before the opening wave spawns (`BattleSetup::netplay_rows`).
-    /// An INPUT, constant for a round; what it decides reaches the hash
-    /// through the per-team rows. measure: the #171 2v1 band.
+    /// Issue #171: a networked (LAN) round. Set by the round build before
+    /// the opening wave spawns (`BattleSetup::netplay_rows`). OURS #171 step
+    /// 3: it no longer changes the rows (option C, both teams on the host
+    /// row at Hard and Elite, is replaced by the one head-count rule of
+    /// [`crate::skill::team_skill`], the same in single player and on every
+    /// peer). An INPUT, constant for a round; not hashed.
+    /// measure: the skill module header's #171 step-3 rows.
     pub netplay_rows: bool,
     pub rng: SimRng,
     pub lcg: GameLcg,
@@ -274,6 +271,9 @@ pub struct Sim {
     /// rider. Soldier movement and collision do not read it; vehicle state is
     /// hashed.
     pub hero_rider_frames: Option<std::sync::Arc<dyn super::HeroRiderFrames>>,
+    /// Issue #182: seated riders' drawn heads and torsos by class and seat
+    /// ([`super::SeatedBodies`]); `None` = every rider keeps his posture's.
+    pub seated_bodies: Option<std::sync::Arc<super::SeatedBodies>>,
     /// Immutable setup for querying animated walker tow collision.
     pub tow_frames: Option<std::sync::Arc<dyn crate::vehicle::tow::TowFrames>>,
     pub tow_cables: Vec<super::TowCable>,
@@ -1046,11 +1046,7 @@ impl Sim {
     /// stored, so a human joining, leaving or changing team is in the next
     /// read; the skill reaches a bot at its next spawn ([`Sim::bot_skill`]).
     pub fn team_rows(&self) -> [crate::skill::TeamSkill; 2] {
-        let humans = if self.netplay_rows && self.difficulty.lan_even_rows() {
-            [0, 0]
-        } else {
-            self.humans_per_team()
-        };
+        let humans = self.humans_per_team();
         // Issue #171: a space round keeps the 2026-11-03 rule (option A is
         // measured on the ground only, `skill::team_skill_space`).
         if self.space_round() {
@@ -1119,6 +1115,7 @@ impl Sim {
             melee_lcg: GameLcg::new(seed ^ 0x5341_4252),
             melee_lcg_active: false,
             hero_rider_frames: None,
+            seated_bodies: None,
             tow_frames: None,
             tow_cables: Vec::new(),
             heightfield: None,

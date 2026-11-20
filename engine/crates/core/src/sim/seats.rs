@@ -1048,20 +1048,53 @@ impl Sim {
             .get(v.class as usize)
             .and_then(Option::as_ref)
             .and_then(|st| st.guns.get(s)?.as_ref());
-        match gun.and_then(|g| Some((g, g.gunner?))) {
-            Some((g, hang)) if v.kind == VehicleKind::Turret => {
-                let look = v
-                    .guns
-                    .get(s)
-                    .and_then(Option::as_ref)
-                    .map_or(g.rest().0, |st| st.look);
-                let f = hang.frame(look);
+        match gun.and_then(|g| g.gunner) {
+            Some(hang) if v.kind == VehicleKind::Turret => {
+                let (look, aim) = self.gun_angles(v, seat).unwrap_or_default();
+                let f = hang.frame(look, aim);
                 let face = v.rot * f.z_axis.truncate();
                 let yaw = (face.x != 0.0 || face.z != 0.0).then(|| yaw_facing(face));
                 (v.pos + v.rot * f.w_axis.truncate(), yaw)
             }
             _ => (v.pos, None),
         }
+    }
+
+    /// The look of seat `seat`'s gun: its state's, else its rest look
+    /// (a bot's seat is armed on its first aim); `None` for a seat with no gun.
+    pub(super) fn gun_look(&self, v: &crate::vehicle::Vehicle, seat: u8) -> Option<(f32, f32)> {
+        self.gun_angles(v, seat).map(|a| a.0)
+    }
+
+    /// The (look, aim) of seat `seat`'s gun: its state's, else its rest.
+    fn gun_angles(
+        &self,
+        v: &crate::vehicle::Vehicle,
+        seat: u8,
+    ) -> Option<((f32, f32), (f32, f32))> {
+        let s = usize::from(seat);
+        v.guns
+            .get(s)
+            .and_then(Option::as_ref)
+            .map(|st| (st.look, st.aim))
+            .or_else(|| {
+                let setup = self.seat_setup.get(v.class as usize)?.as_ref()?;
+                let (look, _, aim) = setup.guns.get(s)?.as_ref()?.rest();
+                Some((look, aim))
+            })
+    }
+
+    /// A building turret's drawn gunner's world matrix (his model frame:
+    /// +Z his facing, origin his feet), as [`Self::rider_pose`] stands him;
+    /// `None` for any other seat.
+    pub(super) fn gunner_frame(&self, v: &crate::vehicle::Vehicle, seat: u8) -> Option<glam::Mat4> {
+        if v.kind != VehicleKind::Turret {
+            return None;
+        }
+        let setup = self.seat_setup.get(v.class as usize)?.as_ref()?;
+        let hang = setup.guns.get(usize::from(seat))?.as_ref()?.gunner?;
+        let (look, aim) = self.gun_angles(v, seat)?;
+        Some(glam::Mat4::from_rotation_translation(v.rot, v.pos) * hang.frame(look, aim))
     }
 }
 

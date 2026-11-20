@@ -813,6 +813,9 @@ pub struct WalkSim {
     pub death_cam: Option<DeathCam>,
     /// The life whose death the death camera last noticed (once per life).
     death_seen: Option<UnitHandle>,
+    /// Watching teammates while the player cannot spawn (issue #182,
+    /// [`spectate`]; presentation only).
+    pub spectate: Spectate,
     /// The drawn frame's blend between the last two ticks (card RINT;
     /// presentation only - the sim never reads it): [`WalkSim::advance_with`]
     /// keeps the pose each tick starts from.
@@ -987,6 +990,7 @@ impl WalkSim {
             round_end: None,
             death_cam: None,
             death_seen: None,
+            spectate: Spectate::default(),
             teams,
             native_teams: Default::default(),
             blend: crate::render_blend::Blend::default(),
@@ -1445,6 +1449,7 @@ impl WalkSim {
             round_end: self.round_end.clone(),
             death_cam: self.death_cam,
             death_seen: self.death_seen,
+            spectate: self.spectate,
             blend: crate::render_blend::Blend::default(),
             accum: self.accum,
         }
@@ -1529,6 +1534,7 @@ impl WalkSim {
             round_end: _,
             death_cam: _,
             death_seen: _,
+            spectate: _,
             blend: _,
             accum: _,
         } = replayed;
@@ -1670,6 +1676,7 @@ impl WalkSim {
         self.follow_backdrop();
         self.step_death_cam();
         self.notice_death(&old_camera, killer_before);
+        self.step_spectate(pads.get(usize::from(self.local_slot)));
         // The camera's zoom follows the player's (`re-zoom.md` §5): S and
         // the FOV ease toward their targets, and rest exactly once there.
         // A building turret's zoom is the seat's (card VTURZ); the same ease
@@ -1911,11 +1918,13 @@ pub(crate) fn turret_test_walk() -> (WalkSim, usize, usize) {
 mod camera;
 mod death_camera;
 mod flyer_camera;
+mod spectate;
 pub use camera::{CamOwner, Handover, DEATH_VIEW_HOLD};
 pub use death_camera::DeathCam;
 pub use flyer_camera::{
     guided_section, FlyerCam, FlyerSection, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE,
 };
+pub use spectate::{Spectate, SPECTATE_HOLD_TICKS};
 pub use walker_view::walker_section;
 
 #[cfg(test)]

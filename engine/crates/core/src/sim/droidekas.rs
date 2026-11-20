@@ -9,6 +9,14 @@ use crate::unit::{Controller, Unit};
 
 pub const FLOOR_SNAP: f32 = 0.05;
 pub const UNROLL_HEADROOM: f32 = 1.1;
+/// [`Sim::soldier_room`]: a crouched soldier the wall pass moves by no more
+/// than this (m) fits, as the spawn's pen test reads a body (`PEN_CLEAR`).
+/// OURS. measure: as `soldier_room`.
+const ROOM_CLEAR: f32 = 0.02;
+/// [`Sim::soldier_room`]'s headroom ray starts this far (m) over the feet,
+/// above the floor the ball rests on and the snap that holds it there
+/// ([`FLOOR_SNAP`]). OURS. measure: as `soldier_room`.
+const ROOM_RAY_START: f32 = 0.1;
 
 pub fn capsule_of(c: &DroidekaClass, form: Form, pos: Vec3) -> Capsule {
     match form {
@@ -144,6 +152,51 @@ impl Sim {
                 })
                 .length_squared()
                 > 1e-6
+    }
+
+    /// Issue #182 (OURS): could a soldier crouch at `feet`? A bot's rolled
+    /// droideka (1.3 m tall) fits under roofs no soldier does, and rolls on
+    /// where its route leads. BF1 Kashyyyk Docks' piers have a 1.4 m gap
+    /// under the deck beside their keel that opens into the hollow of the
+    /// landward end, walled on every side: in 64 headless Elite rounds with
+    /// the Wookiees, bot droidekas sat in there out of everyone's sight for
+    /// up to 51 s, the Wookiees a few metres off, and their routes never
+    /// lead them back out. So a bot's grounded ball does not roll from where
+    /// a soldier fits to where none does; one already somewhere cramped
+    /// rolls freely, so it can get out. A player's ball is not held, and
+    /// vehicle hulls do not count (a parked tank's belly held a ball beside
+    /// it).
+    ///
+    /// Two questions, both against the map's own bodies. HEADROOM: nothing
+    /// overhead between [`ROOM_RAY_START`] over the feet and the crouch's
+    /// height, a ray straight up from the feet. The wall pass cannot answer
+    /// that: a ceiling contact pushes only by its horizontal part (card
+    /// WTUN), so a flat roof pushes about nothing and the whole area under
+    /// it read as roomy. SIDES: the wall pass moves a crouched capsule here
+    /// by no more than [`ROOM_CLEAR`], which catches a roof's edge over part
+    /// of the body, where the centre ray is still clear.
+    /// The crouch, because the bots' routes are a soldier's.
+    /// measure: whether the originals' AI droidekas roll under the BF1
+    /// Kashyyyk Docks pier decks.
+    fn soldier_room(&self, feet: Vec3) -> bool {
+        if self.collision.is_empty() {
+            return true;
+        }
+        let height = crate::unit::capsule_height(crate::soldier::Stance::Crouch);
+        let roofed = self.collision.ray_blocked(
+            feet + Vec3::Y * ROOM_RAY_START,
+            Vec3::Y,
+            height - ROOM_RAY_START,
+            crate::collision::Layers::SOLDIER,
+            crate::collision::HullFilter::Static,
+            [None; 2],
+        );
+        let cap = Capsule {
+            base: feet,
+            height,
+            radius: crate::unit::SOLDIER_RADIUS,
+        };
+        !roofed && self.collision.push_out_soldier_static(&cap).length() <= ROOM_CLEAR
     }
 
     fn resolve_droideka_motion(
@@ -369,6 +422,19 @@ impl Sim {
             u.weapon.salvo_counter = 0;
         }
         let (wall, n) = self.resolve_droideka_motion(&mut deka, &class, &mut body, from, dt);
+        if self.units[i].controller == Controller::Ai
+            && deka.form() == Form::Ball
+            && body.grounded
+            && !self.soldier_room(body.pos)
+            && self.soldier_room(from.base)
+        {
+            // A bot's grounded ball stops where it would roll under a roof
+            // no soldier fits beneath ([`Sim::soldier_room`]). An airborne
+            // one falls on, so it never hangs where it was put back.
+            body.pos = from.base;
+            body.vel.x = 0.0;
+            body.vel.z = 0.0;
+        }
         if let Some(push) = wall {
             self.units[i].wall_push = push;
         }

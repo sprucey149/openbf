@@ -199,6 +199,28 @@ pub struct Bindings {
 /// Issue #172: F11 switches fullscreen before any binding sees it.
 pub const FULLSCREEN_KEY: Trigger = Trigger::Key(KeyCode::F11);
 
+/// Issue #182: the in-battle scoreboard's key. It is read held, as itself,
+/// so a context's saved layout (which binds only that context's actions)
+/// never leaves the board without its key ([`step_scoreboard`]). A layout
+/// that binds an action to it keeps that action alone ([`Kbm::scoreboard_held`]).
+pub const SCOREBOARD_KEY: Trigger = Trigger::Key(KeyCode::Tab);
+
+/// One battle frame of the scoreboard's hold (`ui::scoreboard`'s rules):
+/// the pad's Select bit and Switch Weapon, and the scoreboard key held.
+pub fn step_scoreboard(
+    hold: &mut ui::scoreboard::Hold,
+    kbm: &Kbm,
+    pad: &PadState,
+    dt: f32,
+) -> bool {
+    hold.step(
+        pad.buttons & buttons::SPAWN_CLASS_PREV != 0,
+        pad.buttons & buttons::SWITCH_WEAPON != 0,
+        kbm.scoreboard_held(),
+        dt,
+    )
+}
+
 /// This build runs on macOS (its fullscreen key is Control+Command+F).
 pub const MAC: bool = cfg!(target_os = "macos");
 
@@ -495,6 +517,10 @@ pub struct Kbm {
     pub look_scale: f64,
     pub invert_y: bool,
     held: Vec<Trigger>,
+    /// Issue #182: the bits a held trigger gained when the table changed
+    /// under it ([`Kbm::swap_context`]), kept out of the pad until it is
+    /// let go. A context change never presses a button.
+    swap_held: Vec<(Trigger, u32)>,
     taps: u32,
     /// A spawn-screen click's pick, kept like a tap until a tick takes it.
     pick: Option<core::sim::ScreenPick>,
@@ -534,6 +560,7 @@ impl Default for Kbm {
             look_scale: 1.0,
             invert_y: false,
             held: Vec::new(),
+            swap_held: Vec::new(),
             taps: 0,
             pick: None,
             pending: (0.0, 0.0),
@@ -562,12 +589,39 @@ impl Kbm {
     /// Enter a control context: its bindings and look factor. Held keys and
     /// buttons stay held (a trigger held across getting into or out of a
     /// vehicle reads through the new table); only latched taps are dropped.
+    ///
+    /// Issue #182: a held key keeps only the bits it gave before the change;
+    /// the bits the new table adds wait until it is let go and pressed again.
+    /// The on-foot layout's use key opens a post's class screen, whose
+    /// table (the spawn screens') also makes it back: still held, it must
+    /// not back out of the screen it just opened.
     pub fn swap_context(&mut self, bindings: &Bindings, look_scale: f64) {
         self.look_scale = look_scale;
         if &self.bindings != bindings {
             self.taps = 0;
+            let swap_held = self
+                .held
+                .iter()
+                .filter_map(|&t| {
+                    let gave = self.held_bits(t);
+                    let gains = bindings.of(t).fold(0, |a, b| a | b.bits) & !gave;
+                    (gains != 0).then_some((t, gains))
+                })
+                .collect();
+            self.swap_held = swap_held;
             self.bindings.clone_from(bindings);
         }
+    }
+
+    /// The bits held trigger `t` gives the pad now: its bindings, less what
+    /// it gained from a context change while held ([`Kbm::swap_context`]).
+    fn held_bits(&self, t: Trigger) -> u32 {
+        let waiting = self
+            .swap_held
+            .iter()
+            .find(|(h, _)| *h == t)
+            .map_or(0, |(_, bits)| *bits);
+        self.bindings.of(t).fold(0, |a, b| a | b.bits) & !waiting
     }
 
     pub fn set_bindings(&mut self, bindings: &Bindings) {
@@ -586,6 +640,7 @@ impl Kbm {
             }
             (false, Some(i)) => {
                 self.held.swap_remove(i);
+                self.swap_held.retain(|(h, _)| *h != t);
             }
             _ => {}
         }
@@ -820,11 +875,7 @@ impl Kbm {
         if pad.rx != 0 || pad.ry != 0 {
             self.mouse_aim = false;
         }
-        let held = self
-            .held
-            .iter()
-            .flat_map(|t| self.bindings.of(*t))
-            .fold(0, |a, b| a | b.bits);
+        let held = self.held.iter().fold(0, |a, t| a | self.held_bits(*t));
         let (kx, ky) = self.walk();
         let axis = |key: f32, stick: i16| {
             if key != 0.0 && key.abs() > PadState::axis(stick).abs() {
@@ -869,12 +920,25 @@ impl Kbm {
         let on = self.mac.on;
         self.set_mac_chords(on);
         self.held.clear();
+        self.swap_held.clear();
         self.taps = 0;
         self.pick = None;
     }
 
     pub fn grabbed(&self) -> bool {
         self.grabbed
+    }
+
+    /// The scoreboard key is down ([`SCOREBOARD_KEY`]) and this context's
+    /// table leaves it free: unbound, or bound only to the scoreboard's own
+    /// pad bit (the stock tables' Select). A layout that puts an action on
+    /// it plays that action alone. A key a macOS Command chord took is not.
+    pub fn scoreboard_held(&self) -> bool {
+        self.held.contains(&SCOREBOARD_KEY)
+            && self
+                .bindings
+                .of(SCOREBOARD_KEY)
+                .all(|b| b.walk == (0, 0) && b.bits & !buttons::SPAWN_CLASS_PREV == 0)
     }
 
     /// A click asked for the pointer and the next sync takes it.
@@ -886,7 +950,9 @@ impl Kbm {
         self.want_grab = true;
     }
 
-    pub fn sync_grab(&mut self, window: &Window, allowed: bool) {
+    /// Returns true when it set the system cursor's visibility, which the
+    /// overlay's cursor plan then applies again (issue #182).
+    pub fn sync_grab(&mut self, window: &Window, allowed: bool) -> bool {
         let stale = self.grab_stale;
         let was_grabbed = self.grabbed;
         if let Err(e) = self.sync_grab_with(allowed, |mode| window.set_cursor_grab(mode)) {
@@ -900,9 +966,11 @@ impl Kbm {
                 size.height / 2,
             ));
         }
-        if was_grabbed != self.grabbed || stale {
+        let touched = was_grabbed != self.grabbed || stale;
+        if touched {
             window.set_cursor_visible(!self.grabbed);
         }
+        touched
     }
 
     /// [`Kbm::sync_grab`]'s rule with the window's grab call given as

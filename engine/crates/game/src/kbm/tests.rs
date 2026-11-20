@@ -748,6 +748,111 @@ fn held_keys_survive_getting_in_and_out_of_a_vehicle() {
     assert_eq!(p.ly, 0);
 }
 
+/// Issue #182: with a saved on-foot keyboard layout, E is only "use" on
+/// foot, while the spawn screens' table (which a post's class screen plays)
+/// makes it use and back. The E that opened the class screen, still held as
+/// the table changed, used to rise as back on the next tick and close the
+/// screen it had just opened. A context change never presses a button: the
+/// back waits for the next press of E.
+#[test]
+fn a_held_use_key_does_not_back_out_of_the_class_screen_it_opened() {
+    use crate::control_layout::{context_bindings, keyboard_defaults, look_scale};
+    use ui::menu::ControlContext;
+    let mut settings = crate::profile::Settings::default();
+    let layout = keyboard_defaults(ControlContext::Infantry, &settings.keyboard_bindings)
+        .into_iter()
+        .flatten()
+        .collect();
+    settings
+        .keyboard_layouts
+        .set(ControlContext::Infantry, layout);
+    let on_foot = Some(ControlContext::Infantry);
+    assert_ne!(
+        context_bindings(on_foot, &settings),
+        context_bindings(None, &settings),
+        "the saved layout plays on foot"
+    );
+    let mut k = Kbm::default();
+    k.follow(&settings);
+    k.swap_context(&context_bindings(on_foot, &settings), look_scale(on_foot));
+    let e = Trigger::Key(KeyCode::KeyE);
+    // The sim's edge for the class screen's back: a rise of `SPAWN_BACK`
+    // from one tick's pad to the next.
+    let mut prev = 0;
+    let mut tick = |k: &mut Kbm| {
+        let p = k.pad(PadState::default());
+        k.consumed(&p, 1);
+        let rose = p.buttons & !prev;
+        prev = p.buttons;
+        (p.buttons, rose & buttons::SPAWN_BACK != 0)
+    };
+    k.press(e, true);
+    let (opened, _) = tick(&mut k);
+    assert_ne!(opened & buttons::ACTION, 0, "E uses on foot");
+    assert_eq!(opened & buttons::SPAWN_BACK, 0);
+    // The class screen is up: the spawn screens' table, E still held.
+    k.swap_context(&context_bindings(None, &settings), look_scale(None));
+    assert!(
+        context_bindings(None, &settings)
+            .of(e)
+            .any(|b| b.bits & buttons::SPAWN_BACK != 0),
+        "E backs on the class screen"
+    );
+    for held in 0..5 {
+        let (_, backed) = tick(&mut k);
+        assert!(!backed, "tick {held}: the held E does not back out");
+    }
+    // Let go and pressed again: back closes the screen.
+    k.press(e, false);
+    tick(&mut k);
+    k.press(e, true);
+    let (_, backed) = tick(&mut k);
+    assert!(backed, "a fresh press of E backs");
+    // On foot again with E held: it keeps the use it already gave.
+    k.swap_context(&context_bindings(on_foot, &settings), look_scale(on_foot));
+    let (held, _) = tick(&mut k);
+    assert_eq!(
+        held & (buttons::ACTION | buttons::SPAWN_BACK),
+        buttons::ACTION
+    );
+}
+
+/// Issue #182: a key held through a table change keeps the bits both tables
+/// give and gains the new table's others only from its next press.
+#[test]
+fn a_table_change_never_presses_a_held_key() {
+    use winit::event::MouseButton as M;
+    let mut k = Kbm::default();
+    let right = Trigger::Mouse(M::Right);
+    k.press(right, true);
+    let zoomed = k.pad(PadState::default()).buttons & !buttons::MOUSE_AIM;
+    assert_eq!(zoomed, buttons::ZOOM);
+    // The vehicle table makes the right button secondary fire.
+    k.swap_context(&Bindings::vehicle_default(), 1.0);
+    assert_eq!(
+        k.pad(PadState::default()).buttons & !buttons::MOUSE_AIM,
+        0,
+        "no secondary fire from the held zoom"
+    );
+    k.press(right, false);
+    k.press(right, true);
+    assert_eq!(
+        k.pad(PadState::default()).buttons & !buttons::MOUSE_AIM,
+        buttons::SECONDARY_FIRE,
+        "the next press fires"
+    );
+    // Back on foot while still held: the right button gave no zoom in the
+    // vehicle, so it waits again.
+    k.swap_context(&Bindings::pc_default(), ON_FOOT_LOOK_SCALE);
+    assert_eq!(k.pad(PadState::default()).buttons & !buttons::MOUSE_AIM, 0);
+    k.release_keys();
+    k.press(right, true);
+    assert_eq!(
+        k.pad(PadState::default()).buttons & !buttons::MOUSE_AIM,
+        buttons::ZOOM
+    );
+}
+
 /// Sensitivity 1.0 on foot turns as the old 2.8 did; in a vehicle 1.0 turns
 /// as the old 1.0 did.
 #[test]
@@ -890,5 +995,95 @@ fn reserved_keys_are_f11_everywhere_and_command_on_macos() {
     assert_eq!(
         f11_note(true),
         "F11 is reserved (Control+Command+F switches fullscreen)"
+    );
+}
+
+/// Issue #182: Tab shows the scoreboard in every control context. A saved
+/// layout binds only its context's actions, so Tab gave no pad bit there and
+/// the board never showed; and a wheel weapon switch while Tab was held hid it
+/// as if it were the controller's seat chord.
+#[test]
+fn tab_shows_the_scoreboard_with_a_saved_layout_and_through_a_weapon_switch() {
+    use crate::control_layout::{context_bindings, keyboard_defaults};
+    use ui::menu::ControlContext;
+    const DT: f32 = 1.0 / 60.0;
+    let mut settings = crate::profile::Settings::default();
+    let layout: Vec<Trigger> = keyboard_defaults(ControlContext::Infantry, &Bindings::default())
+        .into_iter()
+        .flatten()
+        .collect();
+    settings
+        .keyboard_layouts
+        .set(ControlContext::Infantry, layout.clone());
+    let mut k = grabbed();
+    k.swap_context(
+        &context_bindings(Some(ControlContext::Infantry), &settings),
+        1.0,
+    );
+    let mut hold = ui::scoreboard::Hold::default();
+    k.key(KeyCode::Tab, true, std::time::Instant::now());
+    let pad = k.pad(PadState::default());
+    assert!(
+        !pad.pressed(buttons::SPAWN_CLASS_PREV),
+        "the saved layout gives Tab no pad bit (the drop)"
+    );
+    assert!(step_scoreboard(&mut hold, &k, &pad, DT), "Tab shows it");
+    k.consumed(&pad, 1);
+
+    // A layout that puts Reload on Tab plays Reload alone: no board.
+    let mut layout = layout;
+    let reload = crate::control_layout::actions(ControlContext::Infantry, true)
+        .iter()
+        .position(|a| a.name == "Reload")
+        .unwrap();
+    layout[reload] = Trigger::Key(KeyCode::Tab);
+    settings
+        .keyboard_layouts
+        .set(ControlContext::Infantry, layout);
+    let bindings = context_bindings(Some(ControlContext::Infantry), &settings);
+    assert!(
+        bindings
+            .table
+            .iter()
+            .any(|(t, b)| *t == SCOREBOARD_KEY && b.bits & buttons::RELOAD != 0),
+        "the saved layout took Tab for Reload"
+    );
+    let mut k = grabbed();
+    k.swap_context(&bindings, 1.0);
+    let mut hold = ui::scoreboard::Hold::default();
+    k.key(KeyCode::Tab, true, std::time::Instant::now());
+    for _ in 0..3 {
+        let pad = k.pad(PadState::default());
+        assert!(pad.pressed(buttons::RELOAD), "Tab reloads");
+        assert!(
+            !step_scoreboard(&mut hold, &k, &pad, DT),
+            "Tab bound to Reload never shows the board"
+        );
+        k.consumed(&pad, 1);
+    }
+
+    // The stock table: a wheel switch mid-hold keeps it up.
+    let mut k = grabbed();
+    let mut hold = ui::scoreboard::Hold::default();
+    k.key(KeyCode::Tab, true, std::time::Instant::now());
+    for _ in 0..3 {
+        let pad = k.pad(PadState::default());
+        assert!(step_scoreboard(&mut hold, &k, &pad, DT));
+        k.consumed(&pad, 1);
+    }
+    k.wheel(1.0);
+    let pad = k.pad(PadState::default());
+    assert!(pad.pressed(buttons::SWITCH_WEAPON));
+    assert!(step_scoreboard(&mut hold, &k, &pad, DT), "wheel mid-hold");
+    k.consumed(&pad, 1);
+    k.key(KeyCode::KeyQ, true, std::time::Instant::now());
+    let pad = k.pad(PadState::default());
+    assert!(step_scoreboard(&mut hold, &k, &pad, DT), "Q mid-hold");
+    k.consumed(&pad, 1);
+    k.key(KeyCode::Tab, false, std::time::Instant::now());
+    let pad = k.pad(PadState::default());
+    assert!(
+        !step_scoreboard(&mut hold, &k, &pad, DT),
+        "release hides it"
     );
 }

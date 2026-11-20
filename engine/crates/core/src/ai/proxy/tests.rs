@@ -390,13 +390,14 @@ fn the_skill_runs_past_twenty_on_the_same_curves() {
     assert_eq!(k25.burst_t, k20.burst_t);
 }
 
-/// The good strength plays by every player's rule the fit kept; the
+/// The good strength plays by every player's rule the fit kept (since the
+/// 2026-11-19 refit it does not break off to heal); the
 /// average one by none of them (a bot's gunner and plan).
 #[test]
 fn the_good_proxy_carries_the_fitted_features() {
     let g = Strength::Good.profile();
     assert!(g.hand.is_some() && g.headshots && g.hunts && g.picks);
-    assert_eq!((g.class, g.mend), (Some(0), 0.35));
+    assert_eq!((g.class, g.mend), (Some(0), 0.0));
     let a = Strength::Average.profile();
     assert!(a.hand.is_none() && !a.headshots && !a.hunts && !a.picks);
     assert_eq!((a.class, a.mend), (None, 0.0));
@@ -751,6 +752,10 @@ fn the_proxy_reads_the_frozen_rows() {
 /// was 19) is the DTEAM row's; the proxies' brains are unchanged. The Elite
 /// offset -3 (floor 17) then moved it 09c5292876cd883b -> 0f21523a29eb72b6
 /// the same way (spawn skill 17).
+/// 2026-11-19 (#171, the Good stand-in refitted to real players: reaction
+/// 3, view 4.0, no mending, hand floor 0.002 from 0.1) moved Easy
+/// 7efc85cee4eb5f2a -> 8784bda06a6b4c62 and Elite 0f21523a29eb72b6 ->
+/// 813b89e81f2d3ebf: the proxies' own profile changed.
 #[test]
 fn an_all_proxy_skirmish_keeps_its_hash() {
     let run = |d: Difficulty| {
@@ -776,7 +781,7 @@ fn an_all_proxy_skirmish_keeps_its_hash() {
     let got = [run(Difficulty::Easy), run(Difficulty::Elite)];
     assert_eq!(
         got.map(|h| format!("{h:016x}")),
-        ["7efc85cee4eb5f2a", "0f21523a29eb72b6"],
+        ["8784bda06a6b4c62", "813b89e81f2d3ebf"],
         "the all-proxy skirmish moved"
     );
 }

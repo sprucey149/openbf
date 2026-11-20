@@ -241,6 +241,13 @@
 //! (card SWPN; `scripts/sweep_seeds.py` reads it — KAM1's falls were the
 //! clearest single number in STALL).
 //!
+//! `SWEEP_EMBED=1` (issue #182) adds `embed <key>:` lines: soldiers whose
+//! body no enemy within 10 m can see, that sight cannot leave, that are seen
+//! and not hit, or that have a floor over their feet (`Embed`).
+//! `SWEEP_NATIVES=1` installs the mission's native teams (BF1 Kashyyyk's
+//! Wookiees) after the opening wave, as the game does; the default sweep
+//! fields none.
+//!
 //! ## The recycle list and the shares (card RCYC) — with either of the two
 //! EVERY use of the last resort (`core::ai` `RECYCLE_AFTER`: a bot that made
 //! no net progress, `DeathCause::Stalled`) is a defect to close, so each is
@@ -476,6 +483,14 @@
 //!   strays T`: a hostile bot's shots whose target is a human, its hits
 //!   that took a human's health, its kills of humans, the hits that killed
 //!   from full health, and the hits from a bot holding none of his tokens.
+//!
+//! - Issue #171 step 2, where the tickets went (`SidesCensus`): `sides <key>:`
+//!   posts each team owned at the start, mean posts owned, seconds each team
+//!   held the bleed majority, tickets each team lost to bleed, captures and
+//!   losses, first capture; `sidesroles <key>:` unit-seconds attacking,
+//!   defending, hunting and unassigned per team; `sidespost <key> cp<i>:`
+//!   per post, seconds owned, attackers and defenders sent, and captures, by
+//!   team. Read-only: the round is the round the sweep played.
 //!
 //! `--difficulty-check` adds the D1 rates of the bots facing the proxy and
 //! each group's lever counts per foot-minute to its tier table.
@@ -757,6 +772,181 @@ struct MapReport {
     stats: Option<MapStats>,
     /// Card DPRX: the round's result and the proxy's tally.
     round: Option<RoundResult>,
+}
+
+/// Issue #171 step 2 (`BOT_CENSUS`): where a round's tickets went, by team.
+/// Read-only. Every second it samples the posts each team owns and the bleed
+/// value they carry; every tick it adds each team's bleed loss and counts
+/// post captures (an owner change to the team) and losses.
+/// `sides <key>: start a/b/n | owned-mean a/b | majority-s a/b | bleed-tk a/b
+/// | caps a/b | lost a/b | first-cap-s a/b | secs S`: `start` posts owned at
+/// tick 0 by team 0 / team 1 / nobody, `majority-s` seconds a team held a
+/// strict majority of the bleed value (the other side bleeds), `bleed-tk` the
+/// tickets each team lost to bleed, `first-cap-s` when it first took a post.
+struct SidesCensus {
+    start: [u32; 3],
+    owners: Vec<Option<u8>>,
+    owned_sum: [u64; 2],
+    samples: u64,
+    majority_ticks: [u64; 2],
+    bleed: [f32; 2],
+    caps: [u32; 2],
+    lost: [u32; 2],
+    first_cap: [Option<u64>; 2],
+    ticks: u64,
+    /// Per post: seconds owned by team 0 / 1, attackers (unit-seconds) sent
+    /// by team 0 / 1, defenders kept by team 0 / 1, captures by team 0 / 1.
+    post: Vec<[u64; 8]>,
+    /// Per team: unit-seconds attacking, defending, hunting, unassigned.
+    roles: [[u64; 4]; 2],
+    /// Per post: authored ATK and DEF values for team 0 / 1, bleed value,
+    /// spawn weight, and position (x, z).
+    vals: Vec<String>,
+}
+
+impl SidesCensus {
+    fn start(sim: &core::sim::Sim) -> Self {
+        let mut start = [0u32; 3];
+        for c in &sim.cps {
+            start[c.owner.map_or(2, |o| usize::from(o.min(2)))] += 1;
+        }
+        Self {
+            start,
+            owners: sim.cps.iter().map(|c| c.owner).collect(),
+            owned_sum: [0; 2],
+            samples: 0,
+            majority_ticks: [0; 2],
+            bleed: [0.0; 2],
+            caps: [0; 2],
+            lost: [0; 2],
+            first_cap: [None; 2],
+            ticks: 0,
+            post: vec![[0; 8]; sim.cps.len()],
+            roles: [[0; 4]; 2],
+            vals: sim
+                .cps
+                .iter()
+                .map(|c| {
+                    format!(
+                        "atk {}/{} def {}/{} bleed {} spawnw {:.0} at {:.0},{:.0}",
+                        c.def.value_atk[0],
+                        c.def.value_atk[1],
+                        c.def.value_def[0],
+                        c.def.value_def[1],
+                        c.def.value_bleed,
+                        c.ai_spawn_weight,
+                        c.def.pos.x,
+                        c.def.pos.z
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn observe(&mut self, sim: &core::sim::Sim) {
+        self.ticks += 1;
+        let dt = 1.0 / core::TICK_HZ as f32;
+        for t in 0..2 {
+            let b = sim.battle.teams[t].bleed_per_sec;
+            if b > 0.0 {
+                self.bleed[t] += b * dt;
+                // The other team holds the majority.
+                self.majority_ticks[t ^ 1] += 1;
+            }
+        }
+        for (i, c) in sim.cps.iter().enumerate() {
+            if i >= self.owners.len() {
+                break;
+            }
+            if c.owner != self.owners[i] {
+                if let Some(o) = c.owner.filter(|o| *o < 2) {
+                    self.post[i][6 + usize::from(o)] += 1;
+                    self.caps[usize::from(o)] += 1;
+                    self.first_cap[usize::from(o)].get_or_insert(self.ticks);
+                }
+                if let Some(o) = self.owners[i].filter(|o| *o < 2) {
+                    self.lost[usize::from(o)] += 1;
+                }
+                self.owners[i] = c.owner;
+            }
+        }
+        if self.ticks.is_multiple_of(u64::from(core::TICK_HZ)) {
+            self.samples += 1;
+            for (i, c) in sim.cps.iter().enumerate() {
+                if let Some(o) = c.owner.filter(|o| *o < 2) {
+                    self.owned_sum[usize::from(o)] += 1;
+                    if let Some(p) = self.post.get_mut(i) {
+                        p[usize::from(o)] += 1;
+                    }
+                }
+            }
+            for (i, u) in sim.units.iter().enumerate() {
+                if !u.alive || u.team > 1 || u.controller != core::unit::Controller::Ai {
+                    continue;
+                }
+                let t = usize::from(u.team);
+                let o = sim.commander.get(t).and_then(|p| p.of(i as u32));
+                use core::commander::Objective as O;
+                let (role, cp, slot) = match o {
+                    Some(O::Attack(c)) => (0, Some(c), 2),
+                    Some(O::Defend(c)) => (1, Some(c), 4),
+                    Some(O::Hunt) => (2, None, 0),
+                    None => (3, None, 0),
+                };
+                self.roles[t][role] += 1;
+                if let Some(p) = cp.and_then(|c| self.post.get_mut(c as usize)) {
+                    p[slot + t] += 1;
+                }
+            }
+        }
+    }
+
+    fn line(&self, key: &str, _t: u64) -> String {
+        let hz = core::TICK_HZ as f32;
+        let n = self.samples.max(1) as f32;
+        let fc = |x: Option<u64>| x.map_or("-".to_owned(), |v| format!("{:.0}", v as f32 / hz));
+        format!(
+            "sides {key}: start {}/{}/{} | owned-mean {:.2}/{:.2} | majority-s {:.0}/{:.0} | bleed-tk {:.0}/{:.0} | caps {}/{} | lost {}/{} | first-cap-s {}/{} | secs {:.0}\n",
+            self.start[0],
+            self.start[1],
+            self.start[2],
+            self.owned_sum[0] as f32 / n,
+            self.owned_sum[1] as f32 / n,
+            self.majority_ticks[0] as f32 / hz,
+            self.majority_ticks[1] as f32 / hz,
+            self.bleed[0],
+            self.bleed[1],
+            self.caps[0],
+            self.caps[1],
+            self.lost[0],
+            self.lost[1],
+            fc(self.first_cap[0]),
+            fc(self.first_cap[1]),
+            self.ticks as f32 / hz,
+        ) + &format!(
+            "sidesroles {key}: t0 atk/def/hunt/none {}/{}/{}/{} | t1 {}/{}/{}/{}\n",
+            self.roles[0][0], self.roles[0][1], self.roles[0][2], self.roles[0][3],
+            self.roles[1][0], self.roles[1][1], self.roles[1][2], self.roles[1][3],
+        ) + &self
+            .post
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                format!(
+                    "sidespost {key} cp{i}: own-s {}/{} | atk-us {}/{} | def-us {}/{} | caps {}/{} | {}\n",
+                    p[0],
+                    p[1],
+                    p[2],
+                    p[3],
+                    p[4],
+                    p[5],
+                    p[6],
+                    p[7],
+                    self.vals.get(i).map_or("", String::as_str)
+                )
+            })
+            .collect::<String>()
+    }
 }
 
 /// One round's result (card DPRX): the winner, the margin (team 1's
@@ -1695,6 +1885,182 @@ impl Spawns {
             rule(0),
             rule(1)
         )
+    }
+}
+
+/// `SWEEP_EMBED=1` (issue #182, BF1 Kashyyyk Docks' last enemy "stuck in a
+/// wall" with Wookiees round it not shooting): every [`EMBED_EVERY`] ticks,
+/// each soldier on foot that is
+/// - `shut`: every one of eight level rays of [`EMBED_RAY`] from its body
+///   centre meets an ordnance-layer body;
+/// - `unseen`: an enemy soldier stands within [`EMBED_NEAR`] of it and none
+///   sees its centre (the AI's own sight ray, eye to body centre); the line
+///   before it says what stopped the first such ray (`inst` is the map
+///   instance, the manifest's `instances` index);
+/// - `unhit`: an enemy within [`EMBED_NEAR`] sees it and it took no hit
+///   since the last sample;
+/// - `buried`: a walkable surface lies over its feet under a rolled
+///   droideka's top.
+///
+/// Runs of [`EMBED_MIN`] ticks or more are one STDERR line each
+/// (`embed <key>: <kind> unit ...`). It only reads the sim.
+const EMBED_EVERY: u64 = 15;
+const EMBED_RAY: f32 = 1.5;
+const EMBED_NEAR: f32 = 10.0;
+const EMBED_MIN: u64 = 90;
+const EMBED_KINDS: [&str; 4] = ["shut", "unseen", "unhit", "buried"];
+
+/// One unit's run of one kind.
+#[derive(Clone)]
+struct EmbedRun {
+    gen: u32,
+    from: u64,
+    to: u64,
+    at: glam::Vec3,
+    near: u32,
+    why: String,
+}
+
+#[derive(Default)]
+struct Embed {
+    /// Per unit index, per kind.
+    runs: Vec<[Option<EmbedRun>; 4]>,
+    lines: String,
+}
+
+fn embed_on() -> bool {
+    std::env::var_os("SWEEP_EMBED").is_some()
+}
+
+impl Embed {
+    fn observe(&mut self, key: &str, sim: &core::sim::Sim) {
+        use core::perception::{los, los_terrain, los_world};
+        if !sim.tick.is_multiple_of(EMBED_EVERY) {
+            return;
+        }
+        self.runs.resize_with(sim.units.len(), Default::default);
+        for (i, u) in sim.units.iter().enumerate() {
+            let mut now = [false; 4];
+            let mut near = 0;
+            let mut why = String::new();
+            if u.alive && u.mount.is_none() {
+                let c = u.capsule().center();
+                now[0] = (0..8).all(|k| {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                    let d = glam::Vec3::new(a.cos(), 0.0, a.sin());
+                    !los_world(sim, c, c + d * EMBED_RAY)
+                });
+                let mut seen = false;
+                for (oh, o) in sim.alive_units() {
+                    if o.mount.is_some()
+                        || !sim.hostile(o.team, u.team)
+                        || (o.soldier.pos - u.soldier.pos).length() > EMBED_NEAR
+                    {
+                        continue;
+                    }
+                    near += 1;
+                    let e = o.ai_eye();
+                    let ok = los(sim, e, c);
+                    seen |= ok;
+                    if !ok && why.is_empty() {
+                        let d = c - e;
+                        let hit = sim.collision.ray_with(
+                            e,
+                            d.normalize_or_zero(),
+                            d.length(),
+                            core::collision::Layers::ORDNANCE,
+                            core::collision::HullFilter::All,
+                        );
+                        why = format!(
+                            "    why: #{} from ({:.1},{:.1},{:.1}) terrain_clear {} world {}",
+                            oh.index,
+                            e.x,
+                            e.y,
+                            e.z,
+                            los_terrain(sim, e, c),
+                            hit.map_or("clear".to_owned(), |h| format!(
+                                "inst {:?} at {:.2} of {:.2} m",
+                                h.instance,
+                                h.t,
+                                d.length()
+                            )),
+                        );
+                    }
+                }
+                now[1] = near > 0 && !seen;
+                now[2] = seen
+                    && !u
+                        .last_hit
+                        .is_some_and(|(_, t)| sim.tick.saturating_sub(t) < EMBED_EVERY);
+                let f = u.soldier.pos;
+                now[3] = u.soldier.grounded
+                    && sim
+                        .collision
+                        .ray_down(f + glam::Vec3::Y * 1.25, 1.0)
+                        .is_some_and(|(y, _)| y > f.y + 0.25);
+            }
+            let gen = sim.handle(i).gen;
+            for (k, &on) in now.iter().enumerate() {
+                match self.runs[i][k].as_mut() {
+                    Some(r) if on && r.gen == gen => {
+                        r.to = sim.tick;
+                        r.near = r.near.max(near);
+                    }
+                    _ => {
+                        let start = on.then(|| EmbedRun {
+                            gen,
+                            from: sim.tick,
+                            to: sim.tick,
+                            at: u.soldier.pos,
+                            near,
+                            why: if k == 1 { why.clone() } else { String::new() },
+                        });
+                        if let Some(r) = std::mem::replace(&mut self.runs[i][k], start) {
+                            self.close(key, i, k, r, sim);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn close(&mut self, key: &str, i: usize, k: usize, r: EmbedRun, sim: &core::sim::Sim) {
+        let len = r.to - r.from;
+        if len < EMBED_MIN {
+            return;
+        }
+        if !r.why.is_empty() {
+            let _ = writeln!(self.lines, "{}", r.why);
+        }
+        let u = &sim.units[i];
+        let _ = writeln!(
+            self.lines,
+            "embed {key}: {} unit {i} team {} droideka {} ticks {}..{} ({:.1} s) at ({:.1},{:.1},{:.1}) near_enemies {} alive_now {} tickets {}/{}",
+            EMBED_KINDS[k],
+            u.team,
+            u.droideka_class().is_some(),
+            r.from,
+            r.to,
+            len as f32 / core::TICK_HZ as f32,
+            r.at.x,
+            r.at.y,
+            r.at.z,
+            r.near,
+            u.alive,
+            sim.battle.teams[0].tickets(),
+            sim.battle.teams[1].tickets(),
+        );
+    }
+
+    fn finish(&mut self, key: &str, sim: &core::sim::Sim) -> String {
+        for i in 0..self.runs.len() {
+            for k in 0..EMBED_KINDS.len() {
+                if let Some(r) = self.runs[i][k].take() {
+                    self.close(key, i, k, r, sim);
+                }
+            }
+        }
+        std::mem::take(&mut self.lines)
     }
 }
 
@@ -4854,7 +5220,7 @@ fn run_map(
         w.sim.vacate_player_slot(0);
     }
     let seated = w.sim.extra_humans;
-    // Issue #171 option C: `SWEEP_NETPLAY=1` plays the round as a LAN one
+    // Issue #171: `SWEEP_NETPLAY=1` plays the round as a LAN one
     // (`Sim::netplay_rows`).
     w.sim.netplay_rows = std::env::var("SWEEP_NETPLAY").as_deref() == Ok("1");
     if let Some((team, _, _)) = cfg().proxy {
@@ -4869,6 +5235,20 @@ fn run_map(
         [counts[0].saturating_sub(1), counts[1]]
     };
     w.opening_wave(opening, true);
+    // `SWEEP_NATIVES=1` (issue #182): the mission's native teams (BF1
+    // Kashyyyk's Wookiees), installed as the game does after its wave.
+    if std::env::var("SWEEP_NATIVES").as_deref() == Ok("1") {
+        if let Some(m) = &mission {
+            game::native_teams::install(
+                &mut w,
+                &layout,
+                &classes_dir,
+                scene.dir.parent().unwrap_or(&scene.dir),
+                m,
+                &scene.manifest,
+            );
+        }
+    }
     let opened = [0u8, 1].map(|team| w.sim.alive_units().filter(|(_, u)| u.team == team).count());
     outln!(out, "    opening {key} alive {}/{}", opened[0], opened[1]);
     w.sim.extra_humans = seated;
@@ -4978,6 +5358,7 @@ fn run_map(
     let mut longest = LongestRun::default();
     let mut noprog = NoProgress::default();
     let mut deaths = deaths_on().then(Deaths::default);
+    let mut embed = embed_on().then(Embed::default);
     let mut shots = std::env::var_os("SWEEP_SHOTS").map(|_| Shots::default());
     let mut snipe = std::env::var_os("SNIPE_CENSUS").map(|_| SnipeCensus::default());
     let mut droid_census = std::env::var_os("DROID_CENSUS").map(|_| DroidCensus::default());
@@ -5102,6 +5483,7 @@ fn run_map(
         .filter(|n| *n > 0);
     let mut tick_us = Vec::new();
     let mut flyer_census = FlyerCensus::default();
+    let mut sides = SidesCensus::start(&w.sim);
     while t < max_ticks && w.sim.outcome.is_none() {
         let started = timing.then(std::time::Instant::now);
         w.step_tick(&idle);
@@ -5112,6 +5494,7 @@ fn run_map(
             tick_us.push(started.elapsed().as_micros() as u64);
         }
         t += 1;
+        sides.observe(&w.sim);
         if hash_every.is_some_and(|n| t.is_multiple_of(n)) {
             outln!(out, "    checkpoint {key} {t} {:016x}", w.sim.hash());
         }
@@ -5391,6 +5774,9 @@ fn run_map(
         }
         if let Some(d) = deaths.as_mut() {
             d.observe(&w.sim);
+        }
+        if let Some(e) = embed.as_mut() {
+            e.observe(key, &w.sim);
         }
         if let Some(s) = shots.as_mut() {
             s.observe(&w.sim);
@@ -6035,6 +6421,7 @@ fn run_map(
     }
     if census_on || cfg().bot_census {
         census.push_str(&bot_census_lines(key, &w.sim));
+        census.push_str(&sides.line(key, t));
     }
     if let Some(h) = &hfire {
         census.push_str(&h.lines(key));
@@ -6044,6 +6431,9 @@ fn run_map(
     }
     if let Some(d) = &deaths {
         census.push_str(&d.line(key, &w.sim));
+    }
+    if let Some(e) = embed.as_mut() {
+        census.push_str(&e.finish(key, &w.sim));
     }
     if let Some(s) = &spawns {
         census.push_str(&s.line(key));

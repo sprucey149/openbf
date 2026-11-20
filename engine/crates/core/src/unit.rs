@@ -449,6 +449,7 @@ impl Unit {
             yaw: self.soldier.yaw,
             stance: self.soldier.stance,
             scale: self.consts.collision_scale,
+            posed: None,
         }
     }
 
@@ -837,6 +838,12 @@ pub struct BoltPrims {
     pub yaw: f32,
     pub stance: Stance,
     pub scale: f32,
+    /// A seated rider's drawn head and torso centres in his frame (x right,
+    /// y up, z his facing; `crate::sim::SeatedBody`): they stand in for the
+    /// posture's, as BF2 moves the head and torso onto the animation's
+    /// points each frame (FUN_0024f350 B2:168821-169060,
+    /// `analysis/re-hitzones.md` 1). `None` = the posture's.
+    pub posed: Option<[Vec3; 2]>,
 }
 
 /// OURS (playtest 2026-10-28, BF1 Yavin 4: "I'd see the bullet hit the guy
@@ -890,10 +897,32 @@ impl BoltPrims {
     /// The prims' reach around `pos`: (lower corner, upper corner).
     pub fn bounds(&self) -> (Vec3, Vec3) {
         let r = 1.2 * self.scale.fmax(1.0);
+        let mut top = 2.1 * self.scale.fmax(1.0);
+        if let Some(p) = self.posed {
+            for c in p {
+                top = top.fmax(c.y + 0.4 * self.scale.fmax(1.0));
+            }
+        }
         (
             self.pos - Vec3::new(r, 0.0, r),
-            self.pos + Vec3::new(r, 2.1 * self.scale.fmax(1.0), r),
+            self.pos + Vec3::new(r, top, r),
         )
+    }
+
+    /// A seated rider's ([`BoltPrims::posed`]) torso radius and body
+    /// half height. OURS (issue #182): the torso sphere stops short of the
+    /// drawn head - 0.4 s, or less where his head sits closer over his
+    /// chest than a trooper's (the MagnaGuard's 0.40 m, Yoda's 0.2 m), so a
+    /// shot at the drawn head is a head hit from every side - and the body
+    /// reaches from his feet to the torso's centre as the standing
+    /// posture's does (1.1 s under 1.15 s), not over a small rider's head.
+    /// measure: a PS2 MagnaGuard gunner's head and torso prims in RAM.
+    pub fn posed_sizes(&self, head: Vec3, torso: Vec3) -> (f32, f32) {
+        let head_r = 0.17 * self.scale.fmax(1.0);
+        let torso_r = (0.4 * self.scale)
+            .fmin(head.distance(torso) - head_r)
+            .fmax(0.05);
+        (torso_r, (0.5 * torso.y).fmax(0.05))
     }
 
     /// See [`Unit::bolt_hit`].
@@ -910,6 +939,22 @@ impl BoltPrims {
                 best = Some((t, z));
             }
         };
+        if let Some([head, torso]) = self.posed {
+            let (torso_r, body_hh) = self.posed_sizes(head, torso);
+            take(
+                ray_sphere(from, dir, at(head.x, head.y, head.z), head_r),
+                HitZone::Head,
+            );
+            take(
+                ray_sphere(from, dir, at(torso.x, torso.y, torso.z), torso_r),
+                HitZone::Torso,
+            );
+            take(
+                ray_upright_cylinder(from, dir, at(0.0, body_hh, 0.0), 0.35, body_hh),
+                HitZone::Body,
+            );
+            return best;
+        }
         match self.stance {
             Stance::Prone | Stance::Roll | Stance::Dead => {
                 take(

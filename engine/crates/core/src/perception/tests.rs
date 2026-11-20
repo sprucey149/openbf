@@ -769,6 +769,40 @@ fn a_remembered_target_is_aimed_at_but_never_shot_at() {
     assert_eq!(pad.buttons & buttons::FIRE, 0, "never fires at a memory");
 }
 
+/// Issue #182 (BF1 Kashyyyk Docks: a last enemy against a wall, Wookiees
+/// round him not shooting): a soldier whose body centre is behind a low wall
+/// right in front of him but whose head shows over it is seen, held at his
+/// head and shot at.
+#[test]
+fn a_soldier_whose_head_shows_over_a_wall_is_seen_and_shot() {
+    let (mut s, a) = watcher(37);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, -20.0));
+    s.collision.push_body(Body::new(
+        Mat4::from_translation(Vec3::new(0.0, 0.6, -19.3)),
+        Shape::Box {
+            half: Vec3::new(3.0, 0.6, 0.2),
+        },
+    ));
+    let eye = s.unit(a).unwrap().ai_eye();
+    let o = s.unit(e).unwrap();
+    assert!(
+        !los(&s, eye, o.capsule().center()),
+        "the wall hides his middle"
+    );
+    let at = sight_point(&s, eye, o, HullFilter::All, [None; 2]).expect("his head shows");
+    assert!(at.y > 1.2, "seen at the head, over the wall");
+    let mut st = AiState::default();
+    let mut fired = false;
+    for t in 0..60u64 {
+        s.tick = t;
+        let (pad, _) = think(&s, a, &mut st);
+        fired |= pad.buttons & buttons::FIRE != 0;
+    }
+    assert_eq!(st.target, Some(e.into()), "the target");
+    assert!(contact_of(&st, e).unwrap().seen_now, "in sight");
+    assert!(fired, "and shot at");
+}
+
 /// `PadState` is not part of this module's contract, but the fairness
 /// rule is: every FIRE the AI presses is at a contact it holds.
 #[test]
