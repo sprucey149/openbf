@@ -850,6 +850,13 @@ impl Sim {
         // (B2 FUN_003b3398:410036-410060, re-target-hud §2). Retain the
         // existing station readout's policy of not pulling infantry aim.
         for i in 0..self.stations.len() {
+            if self
+                .station_classes
+                .get(usize::from(self.stations[i].class))
+                .is_some_and(|sc| sc.hide_health_bar)
+            {
+                continue;
+            }
             let t = AimTarget::Station(i as u16);
             let Some(c) = self.aim_candidate(t) else {
                 continue;

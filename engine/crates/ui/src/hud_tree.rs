@@ -531,7 +531,9 @@ pub struct Elem {
     pub v_align: VAlign,
     pub text_scale: [f32; 2],
     /// What an INFINITE number prints (`re-hud.md` §2.3, property
-    /// 0x7a4e6e71): "--" when set, nothing when clear.
+    /// 0x7a4e6e71): "--" when set, nothing when clear. Set by default: the
+    /// Text ctor ORs bit 33 into +0x1c8 (`0x200000000`, decomp 393438), so
+    /// only the ammo counts' `#7a4e6e71(0)` clear it.
     pub infinite_dashes: bool,
     /// `numbertotime`: the number is seconds, printed as minutes and two-digit
     /// seconds ("%m:%02s", the domination countdown's "0:20"; issue #33).
@@ -605,7 +607,7 @@ impl Elem {
             h_align: HAlign::Left,
             v_align: VAlign::Top,
             text_scale: [1.0, 1.0],
-            infinite_dashes: false,
+            infinite_dashes: true,
             as_time: false,
             mesh: None,
             mesh_info: Vec::new(),
@@ -693,6 +695,8 @@ pub struct Hud {
     pub stats: Option<Box<crate::stats::StatsScreens>>,
     /// The round-end banner result; drawn alone over the scene.
     pub banner: Option<u8>,
+    /// The black drawn over the banner and the scene, 0 to 1.
+    pub banner_fade: f32,
     /// Per font: each glyph's pen advance in texels (what a MultiLineText
     /// wraps its words by). Empty until [`Hud::set_fonts`].
     advances: HashMap<String, HashMap<u32, f32>>,
@@ -831,6 +835,7 @@ impl Hud {
             instant: None,
             stats: None,
             banner: None,
+            banner_fade: 0.0,
             advances: HashMap::new(),
             clock: 0.0,
         };
@@ -1008,6 +1013,11 @@ impl Hud {
                     e.tex_coords = [0, 1, 2, 3].map(|k| num(c, k).unwrap_or(0.0));
                 }
                 "bitmaprect" | "rect" => e.rect = rect(c),
+                // A Text's TextBox: w, h × the screen size (`FUN_003ae050`).
+                "textbox" => {
+                    let (w, h) = (num(c, 0).unwrap_or(0.0), num(c, 1).unwrap_or(0.0));
+                    (e.rect.w, e.rect.h) = to_pixels(w, h, Some(&HudArg::Num(1.0)));
+                }
                 "bitmapstyle" => {
                     e.shadow = text(c, 0).is_some_and(|s| s.eq_ignore_ascii_case("shadow"))
                 }

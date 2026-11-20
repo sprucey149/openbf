@@ -167,6 +167,51 @@ const SQUARE_PINK: [f32; 3] = [209.0, 129.0, 195.0];
 
 const NONE: usize = usize::MAX;
 
+/// The mission's end movie before the stats (`FUN_00381110` →
+/// `FUN_00564398`), after the banner's fade to black: black over the window
+/// and, once a frame is decoded (`movie`), the clip in the shell's 512 × 448
+/// box as the shell's own movies ([`crate::shell_ps2::MOVIE_SHEET`]).
+pub fn draw_end_movie(
+    hud: &crate::hud_tree::Hud,
+    art: &crate::hud_draw::HudArt,
+    movie: bool,
+    size: [f32; 2],
+) -> crate::hud_draw::HudFrame {
+    let mut ctx = Ctx {
+        hud,
+        art,
+        out: crate::hud_draw::HudFrame::default(),
+        clip: None,
+    };
+    ctx.quad(
+        usize::MAX,
+        &Mat4::IDENTITY,
+        &Screen {
+            origin: [0.0, 0.0],
+            scale: [1.0, 1.0],
+        },
+        &Quad {
+            rect: [0.0, 0.0, size[0], size[1]],
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: [0.0, 0.0, 0.0, 1.0],
+            texture: "white",
+            additive: false,
+            shadow: false,
+            boxed: false,
+        },
+    );
+    if movie {
+        ctx.sheet(
+            &screen_at(size, Anchor::Centre),
+            [0.0, 0.0, 512.0, 448.0],
+            [0.0, 0.0, 1.0, 1.0],
+            crate::shell_ps2::MOVIE_SHEET,
+            1.0,
+        );
+    }
+    ctx.out
+}
+
 /// A help line's pad icon.
 #[derive(Clone, Copy)]
 enum Icon {

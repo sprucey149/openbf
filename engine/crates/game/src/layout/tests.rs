@@ -1,4 +1,5 @@
 use super::*;
+use glam::Vec2;
 
 /// Five posts (`cp1`..`cp5`), each with its own capture sphere, plus one
 /// `sarlac01` region for the death-region path.
@@ -48,6 +49,19 @@ fn mission(src: &str) -> MissionDef {
 fn synthetic_manifest_uses_the_real_prop_hashes() {
     assert_eq!(PROP_TEAM, 2_734_521_612);
     assert_eq!(PROP_CAPTURE_REGION, 3_334_562_297);
+}
+
+#[test]
+fn post_class_names_apply_visibility_and_capture_rules_only_in_campaign() {
+    let mut m = manifest();
+    m.instances[0].class = "com_bldg_inv_untakeable_controlzone".into();
+    let instant_action = MapLayout::from_battle_manifest(&m, false);
+    assert!(instant_action.cps[0].visible);
+    assert!(instant_action.cps[0].capturable);
+
+    let campaign = MapLayout::from_mission_manifest(&m, false, true);
+    assert!(!campaign.cps[0].visible);
+    assert!(!campaign.cps[0].capturable);
 }
 
 #[test]

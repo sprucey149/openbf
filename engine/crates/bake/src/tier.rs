@@ -98,6 +98,17 @@
 //! silhouette, so tier 2 takes the PS2 texture's alpha whenever a draw depends
 //! on it ([`Resolved::take_alpha_from`]) and is forced opaque whenever the
 //! base is.
+//!
+//! ## One equal-size exception for the galaxy screen
+//!
+//! The palette-versus-DXT argument above does not hold when the PS2 copy is
+//! 4 bpp (16 colours) and the PC stores the same size as `A8R8G8B8` or
+//! `X8R8G8B8`: then the PC copy is the same painting with no compression at
+//! all. Measured 2026-11-18 over every BF2 PS2 LVL with a PC twin: 23
+//! textures qualify, 22 of them the `GAL1.LVL` planet globes (Naboo's
+//! `gal_prp_naboo_hi_land` is 512x256 4 bpp on the disc and 512x256
+//! `A8R8G8B8` on the PC) and one Hoth sheet (`hoth_frosty_metals`). They still
+//! pass [`same_art`] like every other donor.
 
 use anyhow::{Context, Result};
 use mungefs::texture::Texture;
@@ -334,7 +345,8 @@ pub(crate) fn box_down(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8
 pub enum Tier {
     /// The PS2 disc's own texture.
     Ps2,
-    /// PC stock, taken only because it is strictly larger in both dimensions.
+    /// PC stock, taken because it is strictly larger in both dimensions, or
+    /// lossless at the size of a 16-colour PS2 sheet (see the module doc).
     Pc,
     /// The Xbox disc's copy, by the same rule.
     Xbox,
@@ -455,6 +467,8 @@ impl Resolved {
 pub struct PcTextures {
     /// Every donor's copy of each name, largest first; on a tie the earlier donor first.
     by_name: std::collections::HashMap<String, Vec<Resolved>>,
+    /// The PC copies stored as `A8R8G8B8` / `X8R8G8B8`, by name and size.
+    lossless: std::collections::HashSet<(String, u32, u32)>,
 }
 
 /// The paths in a comma-joined donor list. A folder name can hold a comma, so a
@@ -488,13 +502,14 @@ impl PcTextures {
     pub fn load(lvl_paths: &str) -> Result<PcTextures> {
         let mut by_name: std::collections::HashMap<String, Vec<Resolved>> =
             std::collections::HashMap::new();
+        let mut lossless = std::collections::HashSet::new();
         for lvl_path in donor_paths(lvl_paths) {
             let lvl_path = lvl_path.as_str();
             let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_owned())?;
             let inner = mungefs::open(&buf).map_err(|e| anyhow::anyhow!("{lvl_path}: {e}"))?;
             // Within one LVL a repeated name replaces the earlier copy.
             let mut own = std::collections::HashMap::new();
-            Self::load_pc(inner, &mut own);
+            Self::load_pc(inner, &mut own, &mut lossless);
             Self::load_xbox(inner, &mut own).map_err(|e| anyhow::anyhow!("{lvl_path}: {e}"))?;
             // An explicitly supplied PS2 LVL can fill a missing donor sheet too.
             // Never interpret a cube/volume's first face as an ordinary image.
@@ -515,7 +530,7 @@ impl PcTextures {
                 copies.insert(at, r);
             }
         }
-        Ok(PcTextures { by_name })
+        Ok(PcTextures { by_name, lossless })
     }
 
     /// Fill an absent image from an explicitly supplied copy. This does not
@@ -556,7 +571,11 @@ impl PcTextures {
         Ok(())
     }
 
-    fn load_pc(inner: &[u8], by_name: &mut std::collections::HashMap<String, Resolved>) {
+    fn load_pc(
+        inner: &[u8],
+        by_name: &mut std::collections::HashMap<String, Resolved>,
+        lossless: &mut std::collections::HashSet<(String, u32, u32)>,
+    ) {
         for t in texture_pc::find_textures(inner) {
             let Some(s) = t.best() else { continue };
             if s.is_cube() {
@@ -581,8 +600,15 @@ impl PcTextures {
             if mips.is_empty() {
                 continue;
             }
+            let name = t.name.to_ascii_lowercase();
+            if matches!(
+                s.format,
+                texture_pc::PixelFormat::A8R8G8B8 | texture_pc::PixelFormat::X8R8G8B8
+            ) {
+                lossless.insert((name.clone(), s.width, s.height));
+            }
             by_name.insert(
-                t.name.to_ascii_lowercase(),
+                name,
                 Resolved {
                     width: s.width,
                     height: s.height,
@@ -600,6 +626,17 @@ impl PcTextures {
             .into_iter()
             .flatten()
             .filter(move |r| r.width > w && r.height > h)
+    }
+
+    /// The lossless PC copy of `name` at exactly `w` x `h`, if the PC has one.
+    fn lossless_at<'a>(&'a self, name: &str, w: u32, h: u32) -> Option<&'a Resolved> {
+        if !self.lossless.contains(&(name.to_owned(), w, h)) {
+            return None;
+        }
+        self.by_name
+            .get(name)?
+            .iter()
+            .find(|r| r.tier == Tier::Pc && r.width == w && r.height == h)
     }
 }
 
@@ -623,6 +660,20 @@ pub(crate) fn tier2_matching(
     usage: Usage,
     matches: impl Fn(&Resolved) -> bool,
 ) -> Option<Resolved> {
+    resolve_tier2(t, pc, usage, false, matches)
+}
+
+pub(crate) fn galaxy_tier2(t: &Texture, pc: Option<&PcTextures>, usage: Usage) -> Option<Resolved> {
+    resolve_tier2(t, pc, usage, true, |_| true)
+}
+
+fn resolve_tier2(
+    t: &Texture,
+    pc: Option<&PcTextures>,
+    usage: Usage,
+    allow_same_size: bool,
+    matches: impl Fn(&Resolved) -> bool,
+) -> Option<Resolved> {
     // Exclusion 1: a detail-compressed base's `_dtl` companion is registered
     // to the PS2 pixels (see the module doc).
     if t.info.detail_compressed {
@@ -631,7 +682,11 @@ pub(crate) fn tier2_matching(
     let name = t.name.to_ascii_lowercase();
     let base = t.rgba8(0);
     let (w, h) = (t.info.width, t.info.height);
-    pc?.larger_than(&name, w, h).filter(|r| matches(r)).find_map(|better| {
+    let pc = pc?;
+    let same_size = (allow_same_size && t.info.bpp == 4)
+        .then(|| pc.lossless_at(&name, w, h))
+        .flatten();
+    pc.larger_than(&name, w, h).chain(same_size).filter(|r| matches(r)).find_map(|better| {
         let m = compare(&base, w, h, &better.mips[0], better.width, better.height, usage);
         let same = same_art(&m, usage);
         if !same {
@@ -732,7 +787,92 @@ mod tests {
     fn pc_with(name: &str, w: u32, h: u32) -> PcTextures {
         let mut by_name = std::collections::HashMap::new();
         by_name.insert(name.to_string(), vec![res(w, h, Tier::Pc)]);
-        PcTextures { by_name }
+        PcTextures {
+            by_name,
+            ..PcTextures::default()
+        }
+    }
+
+    fn sixteen_colour(name: &str, w: u32, h: u32) -> Texture {
+        Texture {
+            name: name.into(),
+            info: mungefs::texture::TextureInfo {
+                width: w,
+                height: h,
+                bpp: 4,
+                detail_compressed: false,
+                mip_distance: 0.0,
+                mip_count: 1,
+            },
+            palette: vec![[0, 0, 0, 255]; 16],
+            mips: vec![vec![0u8; (w * h) as usize]],
+        }
+    }
+
+    /// A same-size PC copy replaces a 16-colour PS2 sheet only when the PC
+    /// stores it lossless; an 8 bpp or direct-colour PS2 sheet keeps the
+    /// strictly-larger rule.
+    #[test]
+    fn a_sixteen_colour_sheet_takes_same_size_lossless_pc_art() {
+        let lossy = pc_with("globe", 4, 2);
+        assert!(galaxy_tier2(
+            &sixteen_colour("globe", 4, 2),
+            Some(&lossy),
+            Usage::default()
+        )
+        .is_none());
+        let mut lossless = pc_with("globe", 4, 2);
+        lossless.lossless.insert(("globe".into(), 4, 2));
+        assert!(tier2(
+            &sixteen_colour("globe", 4, 2),
+            Some(&lossless),
+            Usage::default(),
+        )
+        .is_none());
+        let got = galaxy_tier2(
+            &sixteen_colour("globe", 4, 2),
+            Some(&lossless),
+            Usage::default(),
+        )
+        .expect("lossless same-size PC art");
+        assert_eq!((got.width, got.height, got.tier), (4, 2, Tier::Pc));
+        let mut eight = sixteen_colour("globe", 4, 2);
+        eight.info.bpp = 8;
+        assert!(galaxy_tier2(&eight, Some(&lossless), Usage::default()).is_none());
+        let direct = ps2("globe", 4, 2, [0u8, 0, 0, 255].repeat(8));
+        assert!(galaxy_tier2(&direct, Some(&lossless), Usage::default()).is_none());
+    }
+
+    /// Real data: the campaign screen's Naboo globe is 16 colours on the PS2
+    /// disc and lossless at the same size on the PC.
+    #[test]
+    fn the_naboo_globe_takes_the_pc_lossless_land() {
+        let ps2_lvl = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../extracted/bf2/lvl/DATA/_LVL_PS2/GAL/GAL1.LVL"
+        );
+        let Some(pc_lvl) = std::env::var("OPENBF_PC_GAL1").ok() else {
+            eprintln!("SKIP: set OPENBF_PC_GAL1 to a PC gal1.lvl");
+            return;
+        };
+        let Ok(buf) = std::fs::read(ps2_lvl) else {
+            eprintln!("SKIP: no BF2 GAL1");
+            return;
+        };
+        let donors = PcTextures::load(&pc_lvl).unwrap();
+        let land = mungefs::content_chunks(mungefs::open(&buf).unwrap())
+            .unwrap()
+            .into_iter()
+            .filter(|c| &c.tag == b"tex_")
+            .filter_map(|c| Texture::parse(&c).ok())
+            .find(|t| t.name.eq_ignore_ascii_case("gal_prp_naboo_hi_land"))
+            .expect("naboo land");
+        assert_eq!(
+            (land.info.width, land.info.height, land.info.bpp),
+            (512, 256, 4)
+        );
+        let got = galaxy_tier2(&land, Some(&donors), Usage::default()).expect("tier 2");
+        assert_eq!((got.width, got.height, got.tier), (512, 256, Tier::Pc));
     }
 
     /// Real data: BF2 Geonosis's Xbox disc fills tier 2 of the PS2 bake, and a

@@ -1,5 +1,17 @@
 use super::*;
 
+/// The CTF marker's drawn cylinder is 7.5 m across, well over the prop
+/// threshold, but it is an effect rather than a building: neither it nor the
+/// space sphere may become a camera blocker through `from_scene`.
+#[test]
+fn ctf_marker_models_are_not_camera_blockers() {
+    assert!(is_ctf_marker_model("com_prop_ctfdrop"));
+    assert!(is_ctf_marker_model("com_prop_ctfdrop_space"));
+    assert!(is_ctf_marker_model("COM_PROP_CTFDROP"));
+    assert!(!is_ctf_marker_model("com_bldg_ctfbase"));
+    assert!(!is_ctf_marker_model("com_bldg_commandpost"));
+}
+
 fn mesh(positions: Vec<Vec3>, indices: Vec<u32>) -> Arc<TriMesh> {
     let mut local = Aabb::empty();
     for p in &positions {
@@ -17,6 +29,7 @@ fn mesh(positions: Vec<Vec3>, indices: Vec<u32>) -> Arc<TriMesh> {
 fn one(mesh: Arc<TriMesh>, m: Mat4, moves: bool) -> CameraBlockers {
     CameraBlockers {
         blockers: vec![Blocker::new(mesh, m, 7, moves)],
+        ..Default::default()
     }
 }
 
@@ -485,7 +498,10 @@ fn door_blockers(place: Mat4) -> CameraBlockers {
             None => Blocker::new(part, place, 7, false),
         })
         .collect();
-    CameraBlockers { blockers }
+    CameraBlockers {
+        blockers,
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -614,7 +630,10 @@ fn a_door_prop_is_listed_once_at_its_lowest_opacity() {
         })
         .collect();
     assert!(blockers.iter().all(|b| b.prop));
-    let b = CameraBlockers { blockers };
+    let b = CameraBlockers {
+        blockers,
+        ..Default::default()
+    };
     let shut = open_at(0.0);
     let got = b.see_through(
         Vec3::new(0.0, 0.25, -4.0),
@@ -624,4 +643,37 @@ fn a_door_prop_is_listed_once_at_its_lowest_opacity() {
         &shut,
     );
     assert_eq!(got, vec![(7, SEE_THROUGH_OPACITY)]);
+}
+
+#[test]
+fn mark_moving_updates_world_aabb_and_clears_camera_ray_after_pose_moves() {
+    let mut b = CameraBlockers {
+        blockers: vec![Blocker::new(slab(), Mat4::IDENTITY, 12, false)],
+        ..Default::default()
+    };
+    let (from, to) = (Vec3::ZERO, Vec3::new(0.0, 0.0, -5.0));
+    let none = |_: u32| None;
+    assert!(b.fraction(from, to, None, none, &[]) < 1.0);
+    b.mark_moving([12]);
+    let moved = Mat4::from_translation(Vec3::new(0.0, 20.0, 0.0));
+    let live = |id: u32| (id == 12).then_some(moved);
+    assert_eq!(b.fraction(from, to, None, live, &[]), 1.0);
+    // Moving back across a ray far from the original placed AABB still blocks
+    // because the broadphase AABB is recomputed from the live pose.
+    let (hi_from, hi_to) = (Vec3::new(0.0, 20.0, 0.0), Vec3::new(0.0, 20.0, -5.0));
+    assert!(b.fraction(hi_from, hi_to, None, live, &[]) < 1.0);
+}
+
+#[test]
+fn a_script_excluded_instance_clears_the_camera_and_can_return() {
+    let mut blocker = wall();
+    let (from, to) = (Vec3::ZERO, Vec3::new(0.0, 0.0, -5.0));
+    let fraction = |blocker: &CameraBlockers| blocker.fraction(from, to, None, |_| None, &[]);
+    let before = fraction(&blocker);
+    assert!(before < 1.0);
+    blocker.set_excluded([7]);
+    assert_eq!(fraction(&blocker), 1.0);
+    assert!(blocker.track_hits(from, to, &[]).is_empty());
+    blocker.set_excluded([]);
+    assert_eq!(fraction(&blocker), before);
 }

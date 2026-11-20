@@ -318,6 +318,9 @@ impl RoundSetup {
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         let s: Self = serde_json::from_slice(bytes).context("round setup")?;
+        if s.mode.eq_ignore_ascii_case("campaign") {
+            bail!("round setup: campaign is single-player only");
+        }
         if s.humans
             .iter()
             .any(|h| usize::from(h.slot) >= net::MAX_SLOTS)

@@ -1791,3 +1791,36 @@ fn bf2_hero_death_uses_the_hero_clip_but_a_thrown_hero_stays_thrown() {
     i.stance = Stance::Thrown;
     assert!(matches!(stance_of(&i, Game::Bf2), Err(Special::Flying(_))));
 }
+
+/// A hero accept changes a unit's class without changing its generation, so
+/// the first draw can come with the new (larger) skeleton while the animator
+/// still holds the old body's pose. Posing must not index past the old pose
+/// (the Felucia Aayla crash, `aim::global`).
+#[test]
+fn a_kept_pose_of_another_body_does_not_pose_a_larger_skeleton() {
+    let old = skel();
+    let mut a = Animator::new();
+    a.kept = Some(crate::skin::Pose::bind(&old));
+    let names: Vec<String> = BONES
+        .iter()
+        .copied()
+        .chain(["bone_l_shin", "bone_r_shin", "bone_hand"])
+        .map(str::to_string)
+        .collect();
+    let new = Skeleton::new(
+        names,
+        vec![
+            None,
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(3),
+            Some(2),
+            Some(1),
+            Some(4),
+        ],
+        vec![Mat4::IDENTITY; 8],
+    );
+    let pose = a.pose(&new);
+    assert_eq!(pose.0.len(), new.names.len());
+}

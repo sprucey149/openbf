@@ -94,18 +94,10 @@ impl Sim {
                     .stations
                     .get(usize::from(s))
                     .filter(|st| !st.destroyed && st.health.max > 0.0 && st.health.alive())?;
-                let lockable = if let Some(sa) = &self.space_assault {
-                    let lockable = sa.lock_on.contains(&s);
-                    if !lockable
-                        && !sa.critical.iter().any(|c| c.station == s)
-                        && !sa.shields.iter().any(|g| g.objects.contains(&s))
-                    {
-                        return None;
-                    }
-                    lockable
-                } else {
-                    false
-                };
+                let lockable = self
+                    .space_assault
+                    .as_ref()
+                    .is_some_and(|sa| sa.lock_on.contains(&s));
                 Some(LockProbe {
                     pos: st.sphere_centre,
                     aim: st.sphere_centre,
@@ -329,6 +321,16 @@ impl Sim {
         let own_building = self.vehicle(own).and_then(|v| v.instance);
         let mut best: Option<(f32, AimTarget, i8)> = None;
         for t in self.lock_candidates(own, ph) {
+            if let LockTarget::Station(si) = t {
+                let hide = self.stations.get(usize::from(si)).is_some_and(|st| {
+                    self.station_classes
+                        .get(usize::from(st.class))
+                        .is_some_and(|sc| sc.hide_health_bar)
+                });
+                if hide {
+                    continue;
+                }
+            }
             let Some(p) = self.lock_probe(t) else {
                 continue;
             };

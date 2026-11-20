@@ -244,7 +244,7 @@ impl WalkSim {
                 origin,
                 origin + dir * len,
                 None,
-                |i| self.station_pose(i),
+                |i| self.live_instance_pose(i),
                 &self.sim.doors,
             )
         };

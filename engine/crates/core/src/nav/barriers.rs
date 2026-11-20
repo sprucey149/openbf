@@ -37,6 +37,20 @@ impl Barrier {
         self.cross_t_r(a, b, r).is_some()
     }
 
+    /// `FUN_002ed968`: corner `c` of the rectangle grown by `grow` on every
+    /// side, in the disc's order: +u +v, +u -v, -u -v, -u +v.
+    pub fn corner(&self, grow: f32, c: u32) -> Vec2 {
+        let (su, sv) = match c & 3 {
+            0 => (1.0, 1.0),
+            1 => (1.0, -1.0),
+            2 => (-1.0, -1.0),
+            _ => (-1.0, 1.0),
+        };
+        self.centre
+            + self.axes[0] * (su * (self.half.x + grow))
+            + self.axes[1] * (sv * (self.half.y + grow))
+    }
+
     /// [`Self::crosses_r`], and WHERE along `a → b` (0..1) the segment first
     /// touches the grown rectangle: 0 from inside it.
     pub fn cross_t_r(&self, a: Vec2, b: Vec2, r: f32) -> Option<f32> {

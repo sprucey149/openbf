@@ -71,6 +71,36 @@ fn action_enters_the_vehicle_ahead_in_its_first_boardable_seat() {
 }
 
 #[test]
+fn force_ai_out_of_vehicles_ejects_the_team_and_blocks_further_boarding() {
+    let at = Vec3::new(0.0, 2.0, -6.0);
+    let (mut s, player, vehicle) = world(at, Some(0), false);
+    let mut bot = UnitSpec::player(0, at);
+    bot.controller = Controller::Ai;
+    let rider = s.spawn(&bot).unwrap();
+    let boarder = s.spawn(&bot).unwrap();
+    s.unit_mut(boarder).unwrap().ai.ride = Some(crate::ai::RideState {
+        board: Some(vehicle),
+        use_req: true,
+        ..Default::default()
+    });
+    assert!(s.enter_vehicle(rider, vehicle, 0));
+    assert!(s.enter_vehicle(player, vehicle, 1));
+
+    s.force_ai_out_of_vehicles(1, true);
+    assert!(s.seat_of(rider).is_some());
+    s.force_ai_out_of_vehicles(0, true);
+    assert!(s.seat_of(rider).is_none());
+    assert_eq!(s.seat_of(player), Some((vehicle, SeatKind::Gunner(0))));
+    assert!(s.unit(boarder).unwrap().ai.ride.is_none());
+    assert_eq!(s.enter_seat(boarder, vehicle), None);
+    assert!(!s.enter_vehicle(boarder, vehicle, 0));
+
+    s.force_ai_out_of_vehicles(0, false);
+    assert_eq!(s.enter_seat(boarder, vehicle), Some(0));
+    assert!(s.enter_vehicle(boarder, vehicle, 0));
+}
+
+#[test]
 fn nothing_behind_or_out_of_reach_is_entered() {
     let (s, p, _) = world(Vec3::new(0.0, 2.0, 6.0), None, true);
     assert_eq!(s.enter_target(p), None, "behind the eye: t < 0");

@@ -37,19 +37,20 @@ pub fn decode_bank_sample(format: u32, raw: &[u8]) -> Vec<i16> {
     }
 }
 
-/// Minimal mono s16 WAV writer.
-pub fn wav_mono_s16(rate: u32, pcm: &[i16]) -> Vec<u8> {
+fn wav_s16(channels: u16, rate: u32, pcm: &[i16]) -> Vec<u8> {
     let data_len = pcm.len() * 2;
+    let block_align = channels * 2;
+    let byte_rate = rate * u32::from(block_align);
     let mut w = Vec::with_capacity(44 + data_len);
     w.extend_from_slice(b"RIFF");
     w.extend_from_slice(&((36 + data_len) as u32).to_le_bytes());
     w.extend_from_slice(b"WAVEfmt ");
     w.extend_from_slice(&16u32.to_le_bytes());
     w.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    w.extend_from_slice(&1u16.to_le_bytes()); // mono
+    w.extend_from_slice(&channels.to_le_bytes());
     w.extend_from_slice(&rate.to_le_bytes());
-    w.extend_from_slice(&(rate * 2).to_le_bytes());
-    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&byte_rate.to_le_bytes());
+    w.extend_from_slice(&block_align.to_le_bytes());
     w.extend_from_slice(&16u16.to_le_bytes());
     w.extend_from_slice(b"data");
     w.extend_from_slice(&(data_len as u32).to_le_bytes());
@@ -57,6 +58,16 @@ pub fn wav_mono_s16(rate: u32, pcm: &[i16]) -> Vec<u8> {
         w.extend_from_slice(&s.to_le_bytes());
     }
     w
+}
+
+/// Minimal mono s16 WAV writer.
+pub fn wav_mono_s16(rate: u32, pcm: &[i16]) -> Vec<u8> {
+    wav_s16(1, rate, pcm)
+}
+
+/// Minimal interleaved stereo s16 WAV writer.
+pub fn wav_stereo_s16(rate: u32, pcm: &[i16]) -> Vec<u8> {
+    wav_s16(2, rate, pcm)
 }
 
 /// Goertzel power at `freq` Hz — used by tests to confirm tone frequency.

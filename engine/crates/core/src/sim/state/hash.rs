@@ -29,6 +29,10 @@ impl Sim {
         if !self.mission_ai.allow_blind_jet_jumps {
             eat(b"NO_BLIND_JET_HOPS");
         }
+        if self.mission_ai.force_out_of_vehicles != 0 {
+            eat(b"FORCE_AI_OUT_OF_VEHICLES");
+            eat(&[self.mission_ai.force_out_of_vehicles]);
+        }
         eat(&self.difficulty.bytes());
         if self.team_difficulty.iter().any(Option::is_some) {
             for d in self.team_difficulty {
@@ -202,6 +206,22 @@ impl Sim {
         // as its own sentinel byte.
         for p in &self.commander {
             p.hash_into(&mut eat);
+        }
+        if !self.ai_goals.idle() {
+            self.ai_goals.hash_into(&mut eat);
+        }
+        for (team, classes) in self.class_enabled.iter().enumerate() {
+            for (class, &enabled) in classes.iter().enumerate() {
+                if !enabled {
+                    eat(b"DISABLED_CLASS");
+                    eat(&[team as u8]);
+                    eat(&(class as u32).to_le_bytes());
+                }
+            }
+        }
+        if self.ai_spawn_allowed != [true; 2] {
+            eat(b"AI_SPAWN_ALLOWED");
+            eat(&self.ai_spawn_allowed.map(u8::from));
         }
         // Length-prefixed magnets and players preserve slot identity; None
         // uses (u32::MAX, u32::MAX). Flattening Some values loses the slot.

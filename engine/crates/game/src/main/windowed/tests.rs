@@ -1062,3 +1062,85 @@ fn single_player_rounds_take_the_profiles_name() {
     );
     assert_eq!(single_player_name(false, "Da\u{7}wg"), None);
 }
+
+#[test]
+fn leave_battle_clears_pause_state_and_sounds() {
+    let mut a = App::new(
+        Default::default(),
+        Default::default(),
+        setup(None),
+        None,
+        None,
+        None,
+        Default::default(),
+    );
+    a.screen = Screen::Battle;
+    a.walk = Some((
+        game::walk::WalkSim::new(42, glam::Vec3::ZERO, None),
+        render::MeshHandle::default(),
+    ));
+    a.paused = true;
+    a.pause_menu.cursor = 3;
+    a.front = Some(front::FrontShell::new(&PathBuf::new()));
+
+    a.leave_battle();
+
+    assert!(matches!(a.screen, Screen::Shell));
+    assert!(!a.paused);
+    assert_eq!(a.pause_menu.cursor, 0);
+    assert!(a.sounds.is_none());
+    assert!(a.foley.is_none());
+    assert!(a.weather.is_none());
+}
+
+#[test]
+fn campaign_relaunch_preserves_class_whitelist_and_side_rules() {
+    let missions = std::path::Path::new("../../missions");
+    let assets = std::path::Path::new("../../assets_baked");
+    if !missions.join("campaign").is_dir() || !assets.join("bf2_geo1c").is_dir() {
+        return;
+    }
+    let entry = &ui::campaign::RISE_OF_THE_EMPIRE[0];
+    let probe = super::super::round_setup::campaign_setup(
+        missions,
+        assets,
+        entry,
+        42,
+        core::skill::Difficulty::Normal,
+    )
+    .expect("campaign setup");
+    let layers: &[String] = probe
+        .mission
+        .as_ref()
+        .map(|m| m.layers.as_slice())
+        .unwrap_or(&[]);
+    let (scene, _) =
+        game::assets::load_battle_scene_with_layers(&assets.join(entry.map), "campaign", layers)
+            .expect("geonosis scene loads");
+    for run in 0..2 {
+        let setup = super::super::round_setup::campaign_setup(
+            missions,
+            assets,
+            entry,
+            42 + run,
+            core::skill::Difficulty::Normal,
+        )
+        .expect("campaign setup");
+        let mut walk = super::super::battle::make_walk(&scene, &setup).expect("make_walk");
+        super::super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
+        assert_eq!(
+            walk.sim.spawn_stage[0],
+            core::sim::SpawnStage::Map,
+            "run {run}: Geonosis skips side select"
+        );
+        assert!(
+            !walk.sim.ai_spawn_allowed[0],
+            "run {run}: Geonosis holds ally AI spawn until player spawns"
+        );
+        assert_eq!(
+            walk.sim.spawn_class_indices(0, 0).len(),
+            1,
+            "run {run}: Geonosis initially restricts player to 1 whitelisted class"
+        );
+    }
+}

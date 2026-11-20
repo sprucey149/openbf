@@ -1,5 +1,98 @@
 use glam::Vec3;
 
+/// A ground or campaign capture point places `com_bldg_ctfbase`, whose class
+/// geometry is the same `com_prop_ctfdrop` marker the space spheres use. The
+/// campaign's objective is scripted (`OnEnterRegion`), so it never fills
+/// `sim.ctf.capture_regions`: the placement's own `Team` property must give
+/// the marker its side, or the Republic delivery point draws as an untinted,
+/// dithered white/pink column.
+#[test]
+#[ignore]
+fn ground_ctf_base_takes_the_native_marker_tint() {
+    let root = game::assets::baked_root();
+    let (scene, _) = game::assets::load_battle_scene_with_layers(
+        &root.join("bf2_spa3"),
+        "campaign",
+        &["spa3_campaign".to_owned()],
+    )
+    .unwrap();
+    let (index, pos) = scene
+        .manifest
+        .instances
+        .iter()
+        .enumerate()
+        .find(|(_, i)| i.class.eq_ignore_ascii_case("com_bldg_ctfbase"))
+        .map(|(i, x)| (i as u32, Vec3::from(x.translation)))
+        .expect("the spa3 campaign places its delivery base");
+    // The marker is a translucent effect, not a 7.5 m building: its drawn
+    // cylinder must not become a chase-camera blocker.
+    let blockers = game::camera_collide::CameraBlockers::from_scene(&scene);
+    assert_eq!(
+        blockers.is_prop(index),
+        None,
+        "the CTF marker must not pull the camera in"
+    );
+    let mut renderer = render::Renderer::new_headless(64, 64).unwrap();
+    let mut gpu = game::viewer::upload_scene(&mut renderer, &scene).unwrap();
+    assert_eq!(
+        gpu.ctf_markers
+            .iter()
+            .find(|(i, _, _)| *i == index)
+            .and_then(|(_, _, team)| *team),
+        Some(1),
+        "the placement carries its Republic team"
+    );
+    let mut sim = core::sim::Sim::empty(1);
+    let player = sim.spawn(&core::unit::UnitSpec::trooper(0, pos)).unwrap();
+    // The campaign path: no CTF state, no capture region.
+    gpu.pose_ctf(&sim, player);
+    let range = gpu
+        .instance_draws
+        .iter()
+        .find(|(i, _)| *i == index)
+        .expect("the base draws")
+        .1
+        .clone();
+    let blue = gpu.draws[range.start].color;
+    assert!(
+        blue[2] > blue[0] * 10.0,
+        "the friendly delivery base must read blue: {blue:?}"
+    );
+    assert!(
+        gpu.draws[range.clone()].iter().all(|d| d.fade.is_none()),
+        "a tinted marker keeps the material's own blend, not a dither"
+    );
+    assert!(
+        gpu.draws[range.clone()].iter().all(|d| d.additive),
+        "the ground marker's 0x40 material takes the same additive path as the space sphere"
+    );
+    let opponent = sim.spawn(&core::unit::UnitSpec::trooper(1, pos)).unwrap();
+    gpu.pose_ctf(&sim, opponent);
+    let red = gpu.draws[range.start].color;
+    assert!(
+        red[0] > red[2] * 2.0,
+        "the enemy delivery base must read red: {red:?}"
+    );
+    // A live CTF round fills capture regions instead; the region's team
+    // decides, and wins over the placement's own team.
+    sim.ctf = Some(core::sim::CtfState::new_ground_one_flag(
+        u32::MAX,
+        pos,
+        pos,
+        Vec3::new(0.0, -10000.0, 0.0),
+    ));
+    gpu.pose_ctf(&sim, opponent);
+    assert!(
+        gpu.draws[range.start].color[0] > gpu.draws[range.start].color[2] * 2.0,
+        "an enemy-held region reads red"
+    );
+    gpu.pose_ctf(&sim, player);
+    assert!(
+        gpu.draws[range.start].color[2] > gpu.draws[range.start].color[0] * 10.0,
+        "an own-team region reads blue"
+    );
+}
+
 #[test]
 #[ignore]
 fn live_space_flag_models_replace_home_on_all_maps() {

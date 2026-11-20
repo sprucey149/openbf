@@ -1,11 +1,10 @@
 //! BF2 placed `PilotType=self` seats (issue #91). No soldier is invented:
 //! the building owns the controller and the ordinary mounted gun owns shots.
 //! PS2 reference: re-turret-ai §§2–3, 6–7; 100 m view, range + 10 m fight,
-//! 22.5 degree fire cone, idle yaw ±30 degrees every 18 thinks. The 0.5 s
-//! think cadence is provisional port policy; bursts share the PS2 heat and
-//! skill laws with soldier gunners.
+//! 22.5 degree fire cone, idle yaw ±30 degrees every 18 thinks. The stationary
+//! controller uses the AI view cone, threat table and target aim error.
 use super::{buttons, PadState, Sim};
-use crate::autoturret::{Aim, AIM_CONE, FIGHT_MARGIN, LOOK_EVERY, LOOK_SPREAD, THINK, VIEW};
+use crate::autoturret::{Aim, AIM_CONE, FIGHT_MARGIN, LOOK_EVERY, LOOK_SPREAD, VIEW};
 use crate::collision::HullFilter;
 use crate::fmath;
 use crate::fmath::FloatExt;
@@ -54,7 +53,7 @@ impl SelfPilot {
         }
     }
 
-    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+    pub(crate) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(b"SELF");
         eat(&[self.seat, u8::from(self.fighting), self.burst]);
         if self.aim_block.axis != Vec3::ZERO {
@@ -94,7 +93,7 @@ impl SelfPilot {
 }
 
 pub use crate::vehicle::flyer::THREAT_SLOTS;
-pub(super) const LEVEL_THINK: [f32; 5] = [4.0, 3.0, 2.0, 1.0, 0.25];
+pub(crate) const LEVEL_THINK: [f32; 5] = [4.0, 3.0, 2.0, 1.0, 0.25];
 pub(super) const COMBAT_THINK_FACTOR: f32 = 0.4;
 pub(super) const RAY_INTERVAL_BY_LEVEL: [f32; 5] = [4.0, 4.0, 2.0, 1.0, 1.0];
 pub(super) const RAY_REQUESTS_BY_LEVEL: [usize; 5] = [1, 1, 2, 4, 5];
@@ -164,7 +163,7 @@ impl Sim {
         crate::collision::lead_point(at - eye, v.vel, speed).map_or(at, |rel| eye + rel)
     }
 
-    pub(super) fn self_level(&self, pos: Vec3, eye: Vec3, view: Vec3) -> usize {
+    pub(crate) fn self_level(&self, pos: Vec3, eye: Vec3, view: Vec3) -> usize {
         let mut level = 0;
         for (_, u) in self.alive_units().filter(|(_, u)| u.is_human()) {
             let at = u
@@ -231,6 +230,37 @@ impl Sim {
             off *= AIM_ERROR_AGAINST_BOT;
         }
         off * (d / wc.ai_bubble_dist + 0.5).fmin(wc.ai_bubble_clamp)
+    }
+
+    fn ground_target_aim(
+        &self,
+        p: &SelfPilot,
+        at: Vec3,
+        eye: Vec3,
+        team: u8,
+        class: usize,
+    ) -> Vec3 {
+        let wc = &self.weapon_classes[class];
+        let Some(unit) = (match p.target {
+            Some(Aim::Unit(h)) => self.unit(h),
+            _ => None,
+        }) else {
+            return at + self.flyer_aim_error(p, at.distance(eye), class);
+        };
+        let speed = wc.shot_ordnance().velocity;
+        let lead = crate::collision::lead_point(at - eye, unit.soldier.vel, speed)
+            .map_or(at, |rel| eye + rel);
+        let cap = self
+            .difficulty_of(team)
+            .skill_at(self.bot_skill(team))
+            .err_cap;
+        let radius = crate::ai::gunner_foot::soldier_error_radius(unit, cap);
+        lead + crate::ai::gunner_foot::bubble_offset(
+            unit.is_human(),
+            p.aim_block.dir * radius,
+            lead.distance(eye),
+            wc,
+        )
     }
 
     fn self_foe(&self, a: Aim, team: u8) -> Option<(Vec3, Vec3, bool, i32)> {
@@ -388,17 +418,22 @@ impl Sim {
             .visible
             .and_then(|v| p.threats[usize::from(v)])
             .map(|t| t.aim);
-        let factor = if visible.is_some() {
-            COMBAT_THINK_FACTOR
-        } else {
-            1.0
-        };
-        p.next_think = self.tick + (LEVEL_THINK[level] * factor * crate::TICK_HZ as f32) as u64;
-        p.target = visible;
-        p.fighting = p
+        let space = self.space_assault.is_some();
+        let seen = p
             .visible
             .and_then(|v| p.threats[usize::from(v)])
             .is_some_and(|t| t.seen);
+        let range = max + if p.fighting { FIGHT_MARGIN } else { 0.0 };
+        let fighting = seen
+            && (space
+                || visible
+                    .and_then(|a| self.self_foe(a, team))
+                    .is_some_and(|(at, ..)| at.distance(eye) <= range));
+        let active = if space { visible.is_some() } else { fighting };
+        let factor = if active { COMBAT_THINK_FACTOR } else { 1.0 };
+        p.next_think = self.tick + (LEVEL_THINK[level] * factor * crate::TICK_HZ as f32) as u64;
+        p.target = visible;
+        p.fighting = fighting;
 
         let units = self
             .alive_units()
@@ -455,7 +490,7 @@ impl Sim {
             if human {
                 p.next_think = self.tick + 1;
             }
-            if let (true, Aim::Vehicle(target)) = (seen, aim) {
+            if let (true, true, Aim::Vehicle(target)) = (space, seen, aim) {
                 self.force_pilot_threat(target, crate::vehicle::flyer::ThreatObject::Vehicle(h));
             }
         }
@@ -487,6 +522,21 @@ impl Sim {
                 self.self_turret(h, p);
             }
             self.building_turrets[i].self_pilots = pilots;
+        }
+        for i in 0..self.vehicles.len() {
+            let v = &self.vehicles[i];
+            if !v.alive || !v.health.alive() || v.self_pilots.is_empty() || v.team.is_none() {
+                continue;
+            }
+            let h = VehicleHandle {
+                index: i as u32,
+                gen: v.gen,
+            };
+            let mut pilots = std::mem::take(&mut self.vehicles[i].self_pilots);
+            for p in &mut pilots {
+                self.self_turret(h, p);
+            }
+            self.vehicles[i].self_pilots = pilots;
         }
     }
 
@@ -573,60 +623,35 @@ impl Sim {
         let [min, _, max] = wc.ai_range;
         let target_kinds = wc.ai_target_kind;
         let space = self.space_assault.is_some();
+        if self.tick >= p.next_think {
+            p.thinks += 1;
+            let view = rot * gun::dir(look.0, look.1);
+            self.threat_think(h, p, team, (pos, eye, view), target_kinds, max);
+        }
         if space {
-            if self.tick >= p.next_think {
-                p.thinks += 1;
-                let view = rot * gun::dir(look.0, look.1);
-                self.threat_think(h, p, team, (pos, eye, view), target_kinds, max);
-            }
             p.fighting = p
                 .visible
                 .and_then(|v| p.threats[usize::from(v)])
                 .is_some_and(|t| t.seen);
-            if (self.tick + u64::from(h.index)).is_multiple_of(crate::unit::AimBlock::PERIOD) {
-                let tick = self.tick;
-                let draw = |k: u32| {
-                    let salt = crate::ai::SALT_ERR_AXIS.wrapping_add(k);
-                    2.0 * crate::ai::unit_unit(h.index, tick, h.gen, salt) - 1.0
-                };
-                let jolt = Vec3::new(draw(0), draw(0x51ED_2701), draw(0xA3DA_4E03));
-                p.aim_block.think(
-                    crate::unit::AimBlock::PERIOD as f32 * crate::TICK_DT,
-                    Vec3::ZERO,
-                    1.0,
-                    0.0,
-                    0.0,
-                    jolt,
-                );
-            }
-        } else if self.tick >= p.next_think {
-            p.next_think = self.tick + (THINK * crate::TICK_HZ as f32) as u64;
-            p.thinks += 1;
-            let held = p
-                .target
-                .and_then(|a| self.self_target(h, a, team, eye, f32::INFINITY));
-            if !(p.fighting && held.is_some_and(|at| at.distance(eye) <= max + FIGHT_MARGIN)) {
-                let units = self
-                    .alive_units()
-                    .filter(|(_, u)| wc.ai_target_kind & (1 << u.kind()) != 0)
-                    .map(|(h, _)| Aim::Unit(h));
-                let vehicles = self
-                    .alive_vehicles()
-                    .filter(|(_, v)| wc.ai_target_kind & (1 << v.health.health_type as u32) != 0)
-                    .map(|(h, _)| Aim::Vehicle(h));
-                let found = units
-                    .chain(vehicles)
-                    .filter_map(|a| {
-                        self.self_target(h, a, team, eye, self.self_view(a, team, max))
-                            .map(|at| (a, at.distance(eye)))
-                    })
-                    .min_by(|a, b| a.1.total_cmp(&b.1));
-                p.target = found.map(|(a, _)| a);
-                p.fighting = found.is_some_and(|(_, d)| (min..=max).contains(&d));
-            }
-            if p.target.is_none() && p.thinks % LOOK_EVERY == 1 {
-                p.look = self.lcg.uniform(-LOOK_SPREAD, LOOK_SPREAD);
-            }
+        } else if p.target.is_some_and(|a| self.self_foe(a, team).is_none()) {
+            p.target = None;
+            p.fighting = false;
+        }
+        if (self.tick + u64::from(h.index)).is_multiple_of(crate::unit::AimBlock::PERIOD) {
+            let tick = self.tick;
+            let draw = |k: u32| {
+                let salt = crate::ai::SALT_ERR_AXIS.wrapping_add(k);
+                2.0 * crate::ai::unit_unit(h.index, tick, h.gen, salt) - 1.0
+            };
+            let jolt = Vec3::new(draw(0), draw(0x51ED_2701), draw(0xA3DA_4E03));
+            p.aim_block.think(
+                crate::unit::AimBlock::PERIOD as f32 * crate::TICK_DT,
+                Vec3::ZERO,
+                1.0,
+                0.0,
+                0.0,
+                jolt,
+            );
         }
         let shot_speed = self.weapon_classes[class].shot_ordnance().velocity;
         let at = p.target.and_then(|a| {
@@ -641,7 +666,7 @@ impl Sim {
             if space {
                 at + self.flyer_aim_error(p, at.distance(eye), class)
             } else {
-                at
+                self.ground_target_aim(p, at, eye, team, class)
             }
         });
         let want = wanted.map_or((p.look, 0.0), |at| gun::angles(rot.inverse() * (at - eye)));
@@ -688,17 +713,11 @@ impl Sim {
             && at.is_some_and(|at| {
                 let d = at.distance(eye);
                 let cone = fmath::sin_cos(AIM_CONE).1;
-                let line = if space {
-                    rot * gun::dir(look.0, look.1)
-                } else {
-                    fwd
-                };
+                let line = rot * gun::dir(look.0, look.1);
                 (min..=max).contains(&d)
                     && (at - eye).normalize_or_zero().dot(line) >= cone
-                    && (!space
-                        || (line.dot(fwd) >= cone
-                            && (d < AIM_LINE_NEAR
-                                || (at - eye).cross(line).length() < AIM_LINE_MISS)))
+                    && line.dot(fwd) >= cone
+                    && (d < AIM_LINE_NEAR || (at - eye).cross(line).length() < AIM_LINE_MISS)
                     && !crate::ai::item_line_blocked(
                         self,
                         team,
@@ -723,7 +742,7 @@ impl Sim {
             g,
             &pad,
             None,
-            at,
+            if space { at } else { wanted },
         );
         if !unlimited {
             p.shots += self.events[before..]
@@ -957,6 +976,54 @@ mod tests {
         let vh = s.building_turrets[0].handle;
         s.vehicle_mut(vh).unwrap().alive = false;
         assert_eq!(shots(&mut s, 60), 0);
+    }
+
+    #[test]
+    fn a_ground_self_seat_cannot_acquire_a_target_behind_it_outside_the_omni_radius() {
+        let (mut s, u) = world();
+        s.unit_mut(u).unwrap().soldier.pos.z = -60.0;
+        assert_eq!(shots(&mut s, 180), 0);
+        assert_eq!(s.building_turrets[0].self_pilots[0].target, None);
+
+        s.unit_mut(u).unwrap().soldier.pos = Vec3::new(3.0, 0.0, -5.0);
+        shots(&mut s, 120);
+        assert_eq!(
+            s.building_turrets[0].self_pilots[0].target,
+            Some(Aim::Unit(u))
+        );
+    }
+
+    #[test]
+    fn a_ground_self_seat_uses_the_soldiers_aim_error_and_leads_motion() {
+        let (mut s, u) = world();
+        let mut pilot = SelfPilot::new(0);
+        pilot.target = Some(Aim::Unit(u));
+        pilot.aim_block.dir = Vec3::Y;
+        let at = Vec3::new(0.0, 1.0, 45.0);
+        let target = s.unit_mut(u).unwrap();
+        target.soldier.vel = Vec3::X * 3.0;
+        target.aim.err = 1.0;
+        let aim = s.ground_target_aim(&pilot, at, Vec3::Y, 0, 0);
+        assert!(aim.x > 0.0 && aim.y > at.y, "{aim:?}");
+    }
+
+    #[test]
+    fn a_ground_self_seats_barrel_follows_the_offset_aim_order() {
+        let (mut s, u) = world();
+        let h = s.building_turrets[0].handle;
+        s.tick = crate::TICK_HZ as u64 + 1;
+        s.unit_mut(u).unwrap().aim.err = 1.0;
+        let mut pilot = SelfPilot::new(0);
+        pilot.target = Some(Aim::Unit(u));
+        pilot.aim_block.dir = Vec3::X;
+        pilot.next_think = u64::MAX;
+        pilot.fighting = true;
+
+        for _ in 0..12 {
+            s.self_turret(h, &mut pilot);
+        }
+        let aim = s.vehicle(h).unwrap().guns[0].as_ref().unwrap().aim;
+        assert!(gun::dir(aim.0, aim.1).x > 0.01, "{aim:?}");
     }
 
     #[test]

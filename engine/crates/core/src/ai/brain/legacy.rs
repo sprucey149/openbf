@@ -19,7 +19,7 @@ use crate::ai::{
     LOST_RECYCLE, RETURN_ARRIVE, RETURN_ARRIVE_DY, RETURN_PLANS, RING_ARRIVE, SHUT_PROBE_UP,
     SHUT_RECYCLE, SIDESTEP_TICKS, THINK_PERIOD,
 };
-use crate::fmath;
+use crate::fmath::{self, FloatExt};
 use crate::nav;
 use crate::perception;
 use crate::sim::{PadState, Sim};
@@ -365,6 +365,13 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         let t = sim.live_turret(c.handle.turret()?)?;
         Some((t, perception::fireable(&c, sim.tick, tier.reaction_ticks)))
     });
+    let station = seen.and_then(|c| {
+        let s = sim
+            .stations
+            .get(usize::from(c.handle.station()?))
+            .filter(|s| !s.destroyed)?;
+        Some((s, perception::fireable(&c, sim.tick, tier.reaction_ticks)))
+    });
     let pos = u.soldier.pos;
     let tk = Tick {
         me,
@@ -379,13 +386,15 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
     let seen_at = enemy
         .map(|e| e.capsule().center())
         .or(droid.map(|(d, _)| d.pos))
-        .or(turret.map(|(t, _)| t.centre()));
+        .or(turret.map(|(t, _)| t.centre()))
+        .or(station.map(|(s, _)| s.sphere_centre));
     gunner_foot::range_table(&tk, st, seen_at);
     // Card GRAI: the weapon for this target, once a think (the gunner's).
     if thinking {
-        match (droid, turret) {
-            (Some((d, _)), _) => super::arsenal::think_droid(sim, &tk, st, d),
-            (_, Some((t, _))) => super::arsenal::think_turret(sim, &tk, st, t),
+        match (droid, turret, station) {
+            (Some((d, _)), _, _) => super::arsenal::think_droid(sim, &tk, st, d),
+            (_, Some((t, _)), _) => super::arsenal::think_turret(sim, &tk, st, t),
+            (_, _, Some((s, _))) => super::arsenal::think_station(sim, &tk, st, s),
             _ => super::arsenal::think(sim, &tk, st, enemy),
         }
     }
@@ -687,6 +696,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         AimRequest::Droid(d, ready)
     } else if let Some((t, ready)) = turret {
         AimRequest::Turret(t, ready)
+    } else if let Some((s, ready)) = station {
+        AimRequest::Station(s, ready)
     } else {
         match (faced, faced_memory, corner, route_leg) {
             // A seen enemy: the gunner's own aim point (its lead point under the
@@ -826,12 +837,16 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         && !st.arm.spare
         && st.arm.pick.is_none_or(|slot| slot == u.weapon_slot)
     {
-        enemy.filter(|e| e.mount.is_none()).map(|target| {
+        if let Some(target) = enemy.filter(|e| e.mount.is_none()) {
             let state = st
                 .melee
                 .get_or_insert_with(|| super::super::melee::MeleeBrain::begin(me, sim.tick));
-            super::super::melee::goal(sim, me, u, target, state)
-        })
+            Some(super::super::melee::goal(sim, me, u, target, state))
+        } else if let Some((s, _)) = station {
+            Some(Vec3::new(s.sphere_centre.x, s.pos.y, s.sphere_centre.z))
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -899,6 +914,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         || ring.is_some()
         || flee.is_some()
         || enemy.is_some()
+        || station.is_some()
         || st.cmd.is_some();
     // The holder's goal may have moved this tick: its destination with it.
     let arrive = match (walk_kind, holding) {
@@ -909,6 +925,12 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         (WalkAsk::HOLD, Some(h)) => Some(h.goal),
         _ => goal,
     };
+    let station_stand = station.zip(gun.range).is_some_and(|((s, _), r)| {
+        wc.saber.is_none()
+            && !st.arm.spare
+            && gun.line.is_none()
+            && r - s.sphere_radius <= wc.shot_range().fmin(wc.ai_range[2]).fmin(HOLD_RANGE)
+    });
     let mut mv = MoveRequest {
         kind: walk_kind,
         goal,
@@ -923,7 +945,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         // stood 0.4 m out of reach shooting the enemy it was sent to man
         // the turret against).
         in_range: (hold && !free && !manning && item.is_none())
-            || (fight.is_some() && free && ring_walk(sim, st).is_none()),
+            || (fight.is_some() && free && ring_walk(sim, st).is_none())
+            || station_stand,
         ret,
         hold: holding,
         flee: flee.is_some(),

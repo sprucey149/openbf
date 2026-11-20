@@ -100,13 +100,23 @@ pub(super) fn goal(
     target: &Unit,
     state: &mut MeleeBrain,
 ) -> Vec3 {
+    point(sim, me, u, target.soldier.pos, state)
+}
+
+pub(super) fn point(
+    sim: &Sim,
+    me: UnitHandle,
+    u: &Unit,
+    target_pos: Vec3,
+    state: &mut MeleeBrain,
+) -> Vec3 {
     if u.soldier.grounded && state.jump_tick.is_some_and(|t| sim.tick > t) {
         state.jump_goal = None;
     }
     if let Some(goal) = state.jump_goal {
         return goal;
     }
-    let delta = target.soldier.pos - u.soldier.pos;
+    let delta = target_pos - u.soldier.pos;
     let direction = Vec3::new(delta.x, 0.0, delta.z).normalize_or_zero();
     if direction == Vec3::ZERO
         || !u.soldier.grounded
@@ -114,7 +124,7 @@ pub(super) fn goal(
         || !matches!(u.soldier.stance, Stance::Stand | Stance::Crouch)
         || sim.tick <= state.next_jump
     {
-        return target.soldier.pos;
+        return target_pos;
     }
     let direction = jump_direction(
         direction,
@@ -129,7 +139,7 @@ pub(super) fn goal(
         state.jump_goal.unwrap()
     } else {
         state.next_jump = sim.tick + 4 * u64::from(TICK_HZ);
-        target.soldier.pos
+        target_pos
     }
 }
 

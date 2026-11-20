@@ -192,14 +192,18 @@ impl Builder<'_> {
     /// the level, in no soldier barrier, with head room.
     fn stand(&mut self, x: f32, z: f32, y_ref: f32) -> Option<f32> {
         let sim = self.sim;
-        let mut f = sim.ground_point_under(Vec3::new(x, y_ref + 1.0, z), false);
-        if f <= crate::collision::NO_GROUND + 1.0 || (f - y_ref).abs() > STOREY {
+        let mut f = sim
+            .ground_point_hit_under(Vec3::new(x, y_ref + 1.0, z), false)
+            .filter(|&f| (f - y_ref).abs() <= STOREY);
+        if f.is_none() {
             let t = sim.heightfield.as_ref().map(|h| h.height_at(x, z))?;
-            f = sim.ground_point_under(Vec3::new(x, t + 0.2, z), false);
-            if (f - t).abs() > 0.3 {
+            let tf = sim.ground_point_under(Vec3::new(x, t + 0.2, z), false);
+            if (tf - t).abs() > 0.3 {
                 return None;
             }
+            f = Some(tf);
         }
+        let f = f?;
         if sim
             .still_water_under(Vec3::new(x, f, z))
             .is_some_and(|w| f < w - 0.2)

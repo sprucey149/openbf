@@ -76,8 +76,8 @@ impl Sim {
     /// (`FUN_00356880`), and facing it (`CLASS_CHANGE_FACING`). Enemy and
     /// neutral posts never qualify; neither does a bot.
     ///
-    /// Hunt (issue #161) takes [`Self::hunt_class_change_near`] for the
-    /// capture count, which no Hunt post keeps. Hero Assault, the other
+    /// Hunt and campaign take [`Self::hunt_class_change_near`] for posts
+    /// whose capture region is absent or disabled by the script. Hero Assault, the other
     /// deathmatch, keeps no class change.
     pub fn class_change_post(&self, i: usize) -> Option<usize> {
         let u = self.units.get(i)?;
@@ -90,7 +90,7 @@ impl Sim {
             let cp = &self.cps[ci];
             let to = cp.def.pos - u.soldier.pos;
             let d = to.length();
-            let near = if hunt {
+            let near = if hunt || self.battle.campaign_rules {
                 self.hunt_class_change_near(i, ci, d)
             } else {
                 self.counts_in_cp(i, ci) && cp.spawnable_by(u.team)
@@ -114,7 +114,7 @@ impl Sim {
         let inside = cp.capture_authored
             && cp.def.capture.contains(u.soldier.pos)
             && cp.spawnable_by(u.team);
-        let close = d < cp.switch_class_radius && cp.owner == Some(u.team);
+        let close = !cp.killed && d < cp.switch_class_radius && cp.owner == Some(u.team);
         inside || close
     }
 
@@ -177,6 +177,22 @@ impl Sim {
             }
         }
         Some(out)
+    }
+
+    /// A script popup closed over the live class screen. The PS2 hides that
+    /// screen while the popup is up (`FUN_0038c7a0` → `FUN_00397840` when
+    /// the display's state is 4) and reopens it on the close
+    /// (`FUN_0038cb28` → `FUN_00397f00`). OURS: the press that closed the
+    /// popup is not an accept on the reopened screen; whether
+    /// `FUN_00397f00` arms the X is not read. trace: `FUN_00397f00`.
+    pub fn hold_class_screen_accept(&mut self) {
+        for (s, stage) in self.spawn_stage.iter().enumerate() {
+            if *stage == SpawnStage::Alive {
+                if let Some(bits) = self.prev_spawn_bits.get_mut(s) {
+                    *bits |= buttons::SPAWN_ACCEPT;
+                }
+            }
+        }
     }
 
     /// Triangle on the live class screen: back to play on the class he has.

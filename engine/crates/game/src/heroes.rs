@@ -79,11 +79,24 @@ pub fn append(
     } else {
         m.teams.iter().position(|t| t.faction == roster.faction)? + 1
     };
-    let name = &m
+    let name = m
         .heroes
         .iter()
-        .find(|(t, _)| usize::from(*t) == source_team)?
-        .1;
+        .find(|(t, _)| usize::from(*t) == source_team)
+        .map(|(_, name)| name.as_str())
+        .or_else(|| {
+            m.is_campaign()
+                .then(|| {
+                    m.class_load_order
+                        .iter()
+                        .find(|load| {
+                            load.request
+                                .starts_with(&format!("{}_hero_", roster.faction))
+                        })
+                        .map(|load| load.request.as_str())
+                })
+                .flatten()
+        })?;
     if roster
         .classes
         .iter()
@@ -257,6 +270,60 @@ pub fn tick(walk: &mut crate::walk::WalkSim, feed: &mut EventFeed) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tutorial_followup_loads_the_scripted_mace_kit() {
+        let root = crate::assets::baked_root();
+        let missions = root.parent().unwrap().join("missions");
+        // Campaign missions are generated local data, not committed: a clean
+        // checkout has no campaign directory and cannot exercise this test.
+        if !missions.join("campaign").is_dir() {
+            return;
+        }
+        let def = MissionDef::load_campaign(&missions, "geo1c_c").unwrap();
+        let (mut rosters, _) =
+            FactionRoster::pair(&root.join("classes"), "bf2", ["rep", "cis"], Some(&def)).unwrap();
+        let index = append(&mut rosters[0], &root.join("classes"), Some(&def), 0)
+            .expect("scripted Mace kit");
+        assert_eq!(
+            rosters[0].classes[index as usize].class,
+            "rep_hero_macewindu"
+        );
+
+        for entry in ui::campaign::RISE_OF_THE_EMPIRE {
+            let def = MissionDef::load_campaign(&missions, entry.script).unwrap();
+            if def.heroes.is_empty() {
+                continue;
+            }
+            let armies = [&def.teams[0].faction, &def.teams[1].faction];
+            let (mut rosters, _) = FactionRoster::pair(
+                &root.join("classes"),
+                "bf2",
+                [armies[0].as_str(), armies[1].as_str()],
+                Some(&def),
+            )
+            .unwrap();
+            for &(team_num, ref expected_hero) in &def.heroes {
+                let team = usize::from(team_num - 1);
+                let idx = append(&mut rosters[team], &root.join("classes"), Some(&def), team)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "campaign {} team {} failed to append hero {}",
+                            entry.script, team_num, expected_hero
+                        )
+                    });
+                assert!(
+                    rosters[team].classes[idx as usize]
+                        .class
+                        .eq_ignore_ascii_case(expected_hero),
+                    "campaign {}: got {}, expected {}",
+                    entry.script,
+                    rosters[team].classes[idx as usize].class,
+                    expected_hero
+                );
+            }
+        }
+    }
 
     /// The Hero rows' values (`re-bf2-menus.md` §2.3) as the manager's rules.
     #[test]

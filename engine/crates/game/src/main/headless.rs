@@ -4,9 +4,7 @@
 //! gates run this — a `--capture-orbit` flythrough, or the `--scene-report`
 //! census). `--aim-replay` runs the scripted acquisition referee without a device.
 
-use super::battle::{
-    hud_model, load_and_upload, load_hud_view, make_walk, spawn_model, squad_icons, walk_draws,
-};
+use super::battle::{hud_model, load_hud_view, make_walk, spawn_model, squad_icons, walk_draws};
 use super::{BattleSetup, ViewerArgs};
 use anyhow::{anyhow, Context, Result};
 use core::sim::InputLog;
@@ -123,6 +121,9 @@ impl ReplayFrame {
         gpu.animate_water_live(r, cam.position)?;
         game::forest::submit_actors(r, &walk.sim);
         gpu.pose_doors(&walk.sim.doors);
+        if let Some(campaign) = walk.campaign.as_ref() {
+            gpu.pose_world_anims(campaign.instance_poses());
+        }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
         // A set viewer camera is not the chase camera: it sees through
@@ -134,9 +135,14 @@ impl ReplayFrame {
         };
         gpu.see_through(&see.props);
         gpu.pose_ctf(&walk.sim, walk.player);
-        let mut draws = gpu.view_draws(&walk.sim, walk.player);
+        let mut draws = gpu.view_draws_with_hidden_instances(
+            &walk.sim,
+            walk.player,
+            walk.campaign.as_ref().map(|c| c.hidden_instances()),
+        );
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
+        draws.extend(self.vehicle_vis.campaign_flags(&walk));
         draws.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
         self.deka_vis.eye = Some(cam.position);
         draws.extend(self.deka_vis.draws(r, &walk.sim));
@@ -153,13 +159,23 @@ impl ReplayFrame {
         }
         draws.extend(self.fx.draws(self.quad, self.sprite, &cam));
         self.holos.advance(walk);
-        game::point_light::submit(r, gpu, walk, &mut self.bolts, cam.position, &self.holos);
+        let items = self.vehicle_vis.campaign_lights(walk);
+        game::point_light::submit(
+            r,
+            gpu,
+            walk,
+            &mut self.bolts,
+            cam.position,
+            &self.holos,
+            &items,
+        );
         let mut points = self.vis.fire_points(walk);
         self.deka_vis.fire_points(&walk.sim, &mut points);
         let mut particles = self.vis.flash_draws_at(walk, &points);
         particles.extend(self.vis.saber_draws(walk));
         particles.extend(self.deka_vis.bubbles(&walk.sim, &cam, r.lighting.sun_dir));
         particles.extend(self.holos.draws(&gpu.holo, walk, &cam));
+        particles.extend(self.vehicle_vis.campaign_glows(walk, &cam));
         if let Some(w) = self.weather.as_mut() {
             particles.extend(w.frame_draws(r, &cam, glam::Vec3::ZERO));
         }
@@ -532,6 +548,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::VehicleCollision { vehicle, .. } => {
                 format!("{tick},vehicle_collision,{},,\n", vehicle.index)
             }
+            Event::StationDamaged { .. } | Event::VehicleShieldDamaged { .. } => continue,
         };
         csv.push_str(&line);
     }
@@ -612,12 +629,16 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         // ocean's patches, then every frame below.
         gpu.animate_water(&mut r, game::water_anim::clock(0.0), cam.position)?;
         gpu.pose_doors(&walk.sim.doors);
+        if let Some(campaign) = walk.campaign.as_ref() {
+            gpu.pose_world_anims(campaign.instance_poses());
+        }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
         gpu.pose_ctf(&walk.sim, walk.player);
         let mut draws = gpu.draws.clone();
         walk_draws(cube, &walk, &mut draws, Some(&vis));
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
+        draws.extend(vehicle_vis.campaign_flags(&walk));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));
         vis.prepare_view(&walk, &cam, v.size.0 as f32 / v.size.1 as f32);
         let skinned = vis.draws(&walk);
@@ -645,6 +666,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
                 let mut draws = gpu.draws.clone();
                 walk_draws(cube, &walk, &mut draws, Some(&vis));
                 draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
+                draws.extend(vehicle_vis.campaign_flags(&walk));
                 draws.extend(deka_vis.draws(&mut r, &walk.sim));
                 vis.prepare_view(&walk, &cam, v.size.0 as f32 / v.size.1 as f32);
                 let skinned = vis.draws(&walk);
@@ -752,7 +774,12 @@ fn bench_camera(v: &ViewerArgs, scene: &game::assets::Scene, walk: &WalkSim) -> 
 
 pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
     let mut r = Renderer::new_headless(v.size.0, v.size.1).map_err(|e| anyhow!("renderer: {e}"))?;
-    let (mut gpu, scene) = load_and_upload(&mut r, &v.map, &v.mode)?;
+    let layers = match &v.mission {
+        Some(path) => game::mission::MissionDef::load(path)?.layers,
+        None => Vec::new(),
+    };
+    let (mut gpu, scene) =
+        super::battle::load_and_upload_with_layers(&mut r, &v.map, &v.mode, &layers)?;
 
     if v.scene_report {
         return scene_report(&scene, &gpu, &v.map);

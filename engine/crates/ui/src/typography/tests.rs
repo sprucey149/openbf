@@ -230,14 +230,19 @@ const FORBIDDEN: [(&str, &str); 14] = [
 ];
 
 /// The HUD (BF2's tree and the code-drawn pieces beside it) keeps the
-/// layouts' own fonts; the renderer and this module define text.
-const EXEMPT: [&str; 14] = [
+/// layouts' own fonts; the renderer and this module define text. The campaign
+/// objective browser is a code-drawn HUD piece on the same whole-map pass;
+/// `hud.rs` holds the layouts' own font-name data, not menu text styling.
+const EXEMPT: [&str; 17] = [
     "typography.rs",
     "typography/",
+    "hud.rs",
     "hud_draw.rs",
+    "hud_text.rs",
     "hud_tree.rs",
     "hud_tree/",
     "hud_map.rs",
+    "campaign_map.rs",
     "hud_squad.rs",
     "hud_scope.rs",
     "hud_space.rs",

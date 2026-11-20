@@ -309,6 +309,16 @@ pub fn install(
     let mut sa = SpaceAssault::new(score_limit);
     let objectives = objectives(def);
     sa.objectives_left = vec![0; objectives.len()];
+    if def.armed_parts {
+        for instance in 0..instances.len() as u32 {
+            if sim.stations.iter().any(|s| s.instance == Some(instance)) || parts.seated(instance) {
+                continue;
+            }
+            if let Some(station) = add_part(sim, instances, db, instance) {
+                add_regen(&mut sa, sim, &parts, station);
+            }
+        }
+    }
     for (name, _, points) in &def.critical {
         let Some(station) = parts.station(sim, name) else {
             continue;

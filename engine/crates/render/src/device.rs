@@ -377,10 +377,19 @@ fn request_device(
         .map_err(|e| RenderError::Adapter(e.to_string()))?,
     };
 
+    let required_features = crate::gpu_timer::wanted_features(&adapter)
+        | if adapter
+            .features()
+            .contains(wgpu::Features::DEPTH32FLOAT_STENCIL8)
+        {
+            wgpu::Features::DEPTH32FLOAT_STENCIL8
+        } else {
+            wgpu::Features::empty()
+        };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("swbf render device"),
         // Timestamp queries only for `OPENBF_GPU_TIMING=1` (`gpu_timer.rs`).
-        required_features: crate::gpu_timer::wanted_features(&adapter),
+        required_features,
         required_limits: wgpu::Limits::default(),
         memory_hints: wgpu::MemoryHints::Performance,
         trace: wgpu::Trace::Off,
@@ -505,16 +514,22 @@ fn pick_adapter(instance: &wgpu::Instance, want: &str) -> Result<wgpu::Adapter, 
     }
 }
 
-pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+pub(crate) fn depth_format(features: wgpu::Features) -> wgpu::TextureFormat {
+    if features.contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+        wgpu::TextureFormat::Depth32FloatStencil8
+    } else {
+        wgpu::TextureFormat::Depth24PlusStencil8
+    }
+}
 
-/// Depth24PlusStencil8 depth target, matching the pipeline's depth-stencil state.
+/// Depth target matching the pipeline's depth-stencil state (32-bit float when supported).
 /// From an earlier wgpu project's renderer/mod.rs `create_depth_texture` (binding usage dropped).
 pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
     let texture = crate::resources::texture_2d(
         device,
         "depth",
         [width, height],
-        DEPTH_FORMAT,
+        depth_format(device.features()),
         wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         &[],
     );

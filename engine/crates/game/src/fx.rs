@@ -54,6 +54,7 @@ mod force;
 mod hover_water;
 mod jet;
 mod props;
+pub use props::prop_glow_draw;
 mod repair;
 pub mod ripple;
 mod sky;

@@ -46,7 +46,9 @@ mod transport;
 use crate::fmath::FloatExt;
 pub(crate) use admission::commit as commit_plan;
 pub use admission::{has_transport_paths, TRANSPORT_CLASS};
-pub(crate) use transport::{at_destination as transport_destination, uses_authored_transport};
+pub(crate) use transport::{
+    at_destination as transport_destination, is_deployed_command_flyer, uses_authored_transport,
+};
 
 use super::gunner::Look;
 use super::hover_drive::{self, Body, Class, Order};
@@ -80,6 +82,10 @@ pub const PURSUIT_OFFSET: f32 = 30.0;
 pub const PURSUIT_ESCAPE: f32 = 3.5;
 /// FUN_002fe868's connection: P0 behind the craft (0x41a00000).
 pub const CONNECT_BEHIND: f32 = 20.0;
+/// OURS: fewer primary connection candidates than this also try the ungated
+/// ones ([`connection`]). measure: the PS2's hangar connection census per map
+/// before fixing the fallback threshold.
+pub const CONNECT_PRIMARY_MIN: usize = 4;
 /// OURS: a takeoff that has not flown after this long gives up.
 pub const TAKEOFF_GIVEUP: u64 = 15 * crate::TICK_HZ as u64;
 /// OURS: an attack run's break-off, and how long it flies on before another.
@@ -339,9 +345,17 @@ fn post_point(sim: &Sim, me: UnitHandle, salt: u32) -> Option<Vec3> {
 /// `objectiveoneflagctf.luac` registers `CTFOffense` at 100 x that weight, so
 /// the space bots' only goal is the script's `Deathmatch` at 100.
 fn ctf_goal(sim: &Sim, me: UnitHandle) -> Option<Vec3> {
-    let ctf = sim.ctf.as_ref().filter(|c| !c.is_space())?;
+    let ctf = sim
+        .ctf
+        .as_ref()
+        .filter(|c| !c.is_space() && c.capture_regions.iter().any(|r| r.radius > 0.0))?;
     let my_team = sim.unit(me).map_or(0, |u| u.team);
     for flag in &ctf.flags {
+        // A flag the mission bars AI from taking is a player objective: no
+        // bot should chase it (spa3's holocron sits in a command room).
+        if !flag.allow_ai_pickup {
+            continue;
+        }
         match flag.status {
             crate::sim::FlagStatus::Carried { carrier } => {
                 if carrier == me {
@@ -444,14 +458,21 @@ fn avoid_goal(
 }
 
 /// OURS: the horizontal direction with the longest clear ray, with the nose's
-/// own last so a craft nosed into a wall turns off it. Ties go to the first.
-fn clearest(sim: &Sim, v: &Vehicle, handle: VehicleHandle) -> Vec3 {
+/// own last on an initial turn so a craft nosed into a wall turns off it, and
+/// straight ahead first while continuing an escape (`no_reverse`) so a craft
+/// flying through a double-ended hangar does not reverse back and forth.
+fn clearest(sim: &Sim, v: &Vehicle, handle: VehicleHandle, no_reverse: bool) -> Vec3 {
     let forward = v.rot * Vec3::Z;
     let flat = Vec3::new(forward.x, 0.0, forward.z)
         .try_normalize()
         .unwrap_or(Vec3::Z);
+    let order = if no_reverse {
+        [8i32, 1, 7, 2, 6, 3, 5, 4]
+    } else {
+        [1i32, 2, 3, 4, 5, 6, 7, 8]
+    };
     let mut best = (-1.0f32, flat);
-    for k in 1..=8 {
+    for k in order {
         let (sin, cos) = crate::fmath::sin_cos(k as f32 * core::f32::consts::FRAC_PI_4);
         let dir = Vec3::new(
             flat.x * cos - flat.z * sin,
@@ -521,7 +542,7 @@ fn bf1_sticks(
         ai.anchor_at = sim.tick;
         ai.wedged_until = sim.tick + WEDGED_HOLD;
         ai.wedges = ai.wedges.saturating_add(1);
-        let out = pos + clearest(sim, v, handle) * ESCAPE_FORWARD + Vec3::Y * ESCAPE_UP;
+        let out = pos + clearest(sim, v, handle, false) * ESCAPE_FORWARD + Vec3::Y * ESCAPE_UP;
         ai.goal = Some(out);
         ai.agent = FlyAgent::Escape;
     }
@@ -622,12 +643,14 @@ fn chord_clear(sim: &Sim, a: Vec3, b: Vec3, filter: HullFilter) -> bool {
 
 /// The four sampled points of `curve` at 0, 1/3, 2/3 and 1 joined by clear
 /// chords (`FUN_002fff48` checks three chords at the parameter's thirds).
+#[cfg(test)]
 fn curve_clear(sim: &Sim, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
     curve_points(curve)
         .windows(2)
         .all(|w| clear_chord(sim, w[0], w[1], handle))
 }
 
+#[cfg(test)]
 fn curve_points(curve: &[Vec3; 4]) -> [Vec3; 4] {
     [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0].map(|t| crate::vehicle::flyer::curve_at(curve, t).0)
 }
@@ -638,58 +661,89 @@ fn curve_points(curve: &[Vec3; 4]) -> [Vec3; 4] {
 // eligible for pursuit and still use ordinary physical contact. The radius
 // probes reuse the port's CTF clearance margin. replace: original space
 // follower obstacle-query geometry and flags.
+#[cfg(test)]
 fn transport_curve_clear(sim: &Sim, v: &Vehicle, curve: &[Vec3; 4]) -> bool {
+    let r = hull_extents(sim, v).0;
     !transport::uses_authored_transport(sim, v)
-        || curve_chords_clear(
-            sim,
-            &curve_points(curve),
-            hull_radius(sim, v),
-            HullFilter::Static,
-        )
+        || curve_chords_clear(sim, &curve_points(curve), (r, r, r), HullFilter::Static)
 }
 
-/// OURS, for the CTF hop only: `curve` sampled at [`HOP_SAMPLES`] chords, each
-/// tested down its centre and at the hull's bounding radius above, below and
-/// to each side. A centre ray alone let a hop graze a hangar's frame on spa6
-/// one-flag, killing 16 of 42 sorties 1.5 to 3 s after takeoff (seed 7).
-/// `replace:` with the original's clearance test if a CTF flight goal is
-/// ever traced; the PS2's space one-flag gives its CTF goal weight 0
-/// (`objectiveoneflagctf.luac`), so space pilots never take this hop.
+/// OURS: `curve` clear by the hull's side radius and its real up and down
+/// reach ([`hull_extents`]), so a wingspan projected upward does not refuse
+/// an authored leg under a hangar ceiling (Space Coruscant).
+/// replace: original space follower obstacle-query geometry.
 fn hull_clear(sim: &Sim, v: &Vehicle, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
-    let radius = hull_radius(sim, v);
+    hull_clear_extents(sim, curve, hull_extents(sim, v), handle)
+}
+
+/// OURS, for [`clearest`] hangar escapes: uses the hull's actual downward
+/// collision reach instead of horizontal bounding radius so wide fighters at
+/// `takeoff_height` do not probe beneath the hangar deck. `replace:` original
+/// hangar-exit clearance profile.
+fn escape_clear(sim: &Sim, v: &Vehicle, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
+    let (side_r, _, down_r) = hull_extents(sim, v);
+    hull_clear_extents(sim, curve, (side_r, side_r, down_r), handle)
+}
+
+fn hull_clear_extents(
+    sim: &Sim,
+    curve: &[Vec3; 4],
+    extents: (f32, f32, f32),
+    handle: VehicleHandle,
+) -> bool {
     let points: [Vec3; HOP_SAMPLES + 1] = std::array::from_fn(|k| {
         crate::vehicle::flyer::curve_at(curve, k as f32 / HOP_SAMPLES as f32).0
     });
-    chords_clear(sim, &points, radius, handle)
+    chords_clear(sim, &points, extents, handle)
 }
 
-fn hull_radius(sim: &Sim, v: &Vehicle) -> f32 {
+fn hull_extents(sim: &Sim, v: &Vehicle) -> (f32, f32, f32) {
     sim.hull_parts
         .get(v.class as usize)
         .and_then(Option::as_deref)
-        .map_or(0.0, crate::collision::bounding_radius)
+        .map_or((0.0, 0.0, 0.0), crate::collision::clearance_extents)
 }
 
-/// Every chord between consecutive `points` clear ([`clear_chord`]); with a
-/// `radius`, also the four chords that far above, below and to each side.
-fn chords_clear(sim: &Sim, points: &[Vec3], radius: f32, handle: VehicleHandle) -> bool {
-    curve_chords_clear(sim, points, radius, HullFilter::except(Some(handle)))
+/// Every chord between consecutive `points` clear ([`clear_chord`]); with
+/// non-zero hull extents, also the four chords at `+up`, `-down`, `+side` and
+/// `-side`.
+fn chords_clear(
+    sim: &Sim,
+    points: &[Vec3],
+    extents: (f32, f32, f32),
+    handle: VehicleHandle,
+) -> bool {
+    curve_chords_clear(sim, points, extents, HullFilter::except(Some(handle)))
 }
 
-fn curve_chords_clear(sim: &Sim, points: &[Vec3], radius: f32, filter: HullFilter) -> bool {
+fn curve_chords_clear(
+    sim: &Sim,
+    points: &[Vec3],
+    (side_r, up_r, down_r): (f32, f32, f32),
+    filter: HullFilter,
+) -> bool {
     points.windows(2).all(|w| {
         let along = (w[1] - w[0]).try_normalize().unwrap_or(Vec3::Z);
-        let side = along.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X) * radius;
-        let up = side.cross(along);
-        let ring = [Vec3::ZERO, up, -up, side, -side];
-        let ring = if radius > 0.0 { &ring[..] } else { &ring[..1] };
-        ring.iter()
-            .all(|o| chord_clear(sim, w[0] + *o, w[1] + *o, filter))
+        let side = along.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X) * side_r;
+        let up = side.cross(along).try_normalize().unwrap_or(Vec3::Y);
+        if side_r <= 0.0 && up_r <= 0.0 && down_r <= 0.0 {
+            chord_clear(sim, w[0], w[1], filter)
+        } else {
+            let ring = [Vec3::ZERO, up * up_r, -up * down_r, side, -side];
+            ring.iter()
+                .all(|o| chord_clear(sim, w[0] + *o, w[1] + *o, filter))
+        }
     })
 }
 
-/// FUN_002ff478 and FUN_002f9498: the best path end to join, as a connection
-/// curve. Frequency weights the score; MaxAngle is still unimplemented. FUN_002fff48 checks three chords at the parameter's thirds.
+/// FUN_002ff478 and FUN_002f9498: the best path end to join from `pos`, as
+/// a connection curve (`analysis/re-flyer-ai.md`). Scores candidates using
+/// `BranchRange / dist_sq`, the nose and first-leg alignment against
+/// `BranchMaxAngle`, the `MinBranchDist` penalty and path frequency; falls
+/// back to unconstrained proximity/alignment without frequency when fewer
+/// than [`CONNECT_PRIMARY_MIN`] candidates pass range/angle gating. Tests
+/// hull-extent clearance along the spline so wings and bellies do not clip
+/// hangar decks, lips, or pillars.
 fn connection(
     sim: &Sim,
     v: &Vehicle,
@@ -699,7 +753,14 @@ fn connection(
     leave: Option<u16>,
 ) -> Option<(PathCursor, [Vec3; 4])> {
     let forward = v.rot * Vec3::Z;
+    let branch_range = if p.follower.branch_range <= 0.0 {
+        f32::MAX
+    } else {
+        p.follower.branch_range
+    };
+    let max_cos = p.follower.branch_max_angle_cos;
     let mut ranked: Vec<(f32, PathCursor, [Vec3; 4])> = Vec::new();
+    let mut fallback: Vec<(f32, PathCursor, [Vec3; 4])> = Vec::new();
     for (i, path) in sim.flyer_paths.iter().enumerate() {
         if leave == Some(i as u16) || path.nodes.len() < 2 {
             continue;
@@ -719,28 +780,63 @@ fn connection(
             let end = path.nodes[node];
             let after = path.nodes[next];
             let to = end - pos;
-            let direction = to.try_normalize().unwrap_or(forward);
+            let dist_sq = to.length_squared();
+            let dist = dist_sq.sqrt();
+            let direction = if dist > 1e-4 { to / dist } else { forward };
             let along = (after - end).try_normalize().unwrap_or(direction);
-            let nose = (direction.dot(forward) + 1.0) * 0.5 + 0.0001;
-            let leg = (direction.dot(along) + 1.0) * 0.5 + 0.0001;
-            let mut score = nose * leg;
-            if to.length() < p.follower.min_branch_dist {
-                score *= 0.4;
-            }
+            let dot_nose = direction.dot(forward);
+            let dot_leg = direction.dot(along);
+            let nose = (dot_nose + 1.0) * 0.5 + 0.0001;
+            let leg = (dot_leg + 1.0) * 0.5 + 0.0001;
+            let range_factor = if dist_sq > 0.0 {
+                (branch_range / dist_sq).fmin(1.0)
+            } else {
+                1.0
+            };
+            let penalty = if dist < p.follower.min_branch_dist {
+                0.4
+            } else {
+                1.0
+            };
+            let base_score = range_factor * nose * leg * penalty;
             let curve = [pos - forward * CONNECT_BEHIND, pos, end, after];
-            ranked.push(((score * path.frequency).clamp(0.0, 1.0), cursor, curve));
+            let primary_score = if dist_sq <= branch_range
+                && dot_nose >= max_cos
+                && dot_leg >= max_cos
+                && path.frequency > 0.0
+            {
+                (base_score * path.frequency).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            if primary_score > 0.0 {
+                ranked.push((primary_score, cursor, curve));
+            } else {
+                fallback.push((base_score.clamp(0.0, 1.0), cursor, curve));
+            }
         }
     }
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
     // OURS. After the primary candidates, try other admitted endpoints
     // with the same clearance test. replace: the original's two-chord
     // geometric retry and its filter for candidate obstacles.
-    ranked
-        .into_iter()
-        .find(|(_, _, curve)| {
-            curve_clear(sim, curve, handle) && transport_curve_clear(sim, v, curve)
-        })
-        .map(|(_, cursor, curve)| (cursor, curve))
+    let clear = |c: &&(f32, PathCursor, [Vec3; 4])| hull_clear(sim, v, &c.2, handle);
+    let max_tries = CONNECT_PRIMARY_MIN.max(usize::from(p.follower.branch_paths));
+    fallback.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let gated = ranked.len() >= CONNECT_PRIMARY_MIN;
+    let chosen = ranked
+        .iter()
+        .take(max_tries)
+        .chain(fallback.iter().filter(|_| !gated))
+        .find(clear)
+        .or_else(|| {
+            ranked
+                .iter()
+                .skip(max_tries)
+                .chain(fallback.iter().filter(|_| gated))
+                .find(clear)
+        });
+    chosen.map(|(_, cursor, curve)| (*cursor, *curve))
 }
 
 fn connect(
@@ -772,8 +868,8 @@ fn recover(sim: &Sim, v: &Vehicle, handle: VehicleHandle, p: &FlyerParams, ai: &
         }
         return;
     }
-    let clear =
-        |curve: &[Vec3; 4]| curve_clear(sim, curve, handle) && transport_curve_clear(sim, v, curve);
+    let clear = |curve: &[Vec3; 4]| hull_clear(sim, v, curve, handle);
+    let was_escaping = ai.curve.is_some() && ai.cursor.is_none() && ai.goal.is_none();
     let right = Vec3::Y.cross(v.rot * Vec3::Z);
     let side = ai
         .goal
@@ -790,14 +886,14 @@ fn recover(sim: &Sim, v: &Vehicle, handle: VehicleHandle, p: &FlyerParams, ai: &
     }
     let pos = v.pos;
     let forward = v.rot * Vec3::Z;
-    let dir = clearest(sim, v, handle);
+    let dir = clearest(sim, v, handle, was_escaping);
     let curve = [
         pos - forward * CONNECT_BEHIND,
         pos,
         pos + dir * (WEDGED_RAY * 0.5),
         pos + dir * WEDGED_RAY,
     ];
-    ai.curve = clear(&curve).then_some(curve);
+    ai.curve = escape_clear(sim, v, &curve, handle).then_some(curve);
     ai.goal = None;
 }
 
@@ -854,7 +950,7 @@ fn bf2_plan(
         p.follower.flyer_vs_flyer && !ai.pursuit && ai.escape <= 0.0 && ai.transport_goal.is_none()
     }) {
         let curve = pursuit_curve(sim, me, v, t);
-        if transport_curve_clear(sim, v, &curve) {
+        if hull_clear(sim, v, &curve, handle) {
             ai.goal = None;
             ai.curve = Some(curve);
             ai.cursor = None;
@@ -913,7 +1009,7 @@ fn bf2_plan(
         if let Some(next) = step(c.node) {
             let after = step(next).map_or(nodes[usize::from(next)], |n| nodes[usize::from(n)]);
             let next_curve = [curve[1], curve[2], nodes[usize::from(next)], after];
-            if transport_curve_clear(sim, v, &next_curve) {
+            if hull_clear(sim, v, &next_curve, handle) {
                 ai.curve = Some(next_curve);
                 ai.cursor = Some(PathCursor { node: next, ..c });
                 ai.t = 0.0;
@@ -1019,7 +1115,7 @@ fn launch_lane(
     at: Vec3,
 ) -> Option<[Vec3; 4]> {
     let forward = (v.rot * Vec3::Z).with_y(0.0).try_normalize()?;
-    let distance = (2.0 * hull_radius(sim, v)).fmax(p.takeoff_speed * p.takeoff_time);
+    let distance = (2.0 * hull_extents(sim, v).0).fmax(p.takeoff_speed * p.takeoff_time);
     let delta = forward * distance;
     (distance > 0.0 && clear_chord(sim, at, at + delta, handle)).then_some([
         at - delta,

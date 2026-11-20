@@ -239,7 +239,8 @@ def need(tool, why):
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
 BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
                "scripts/global_sound_cache.py", "scripts/pack_cache.py", "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "scripts/restore_audio.py", "engine/crates/audio/src",
-               "engine/crates/bake/src/effect_names.txt", "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
+               "scripts/gen_missions.py", "scripts/extract_lua.py", "engine/crates/bake/src/effect_names.txt",
+               "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
 MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py",
                   "scripts/gameplay_missions.py", "engine/crates/manifest/data/gameplay/corrections-v1")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.

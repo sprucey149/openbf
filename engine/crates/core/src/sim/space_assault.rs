@@ -133,7 +133,9 @@ impl Sim {
                 }
             }
         }
-        self.battle.unlimited_reinforcements = true;
+        if !self.battle.campaign_rules {
+            self.battle.unlimited_reinforcements = true;
+        }
         self.space_assault = Some(sa);
     }
 
@@ -187,7 +189,7 @@ impl Sim {
             return;
         }
         sa.points[t] += points;
-        let reached = sa.points[t] >= sa.score_limit as i32;
+        let reached = !self.battle.campaign_rules && sa.points[t] >= sa.score_limit as i32;
         if reached && self.outcome.is_none() {
             self.outcome = Some(team);
             self.events.push(Event::TeamDefeated { team: 1 - team });
@@ -491,6 +493,11 @@ impl Sim {
                 if !s.destroyed && s.health.cur < s.health.max {
                     s.health.cur = (s.health.cur + dt * add).fmin(s.health.max);
                 }
+            }
+        }
+        for v in &mut self.vehicles {
+            if v.alive && v.add_health > 0.0 && v.health.cur < v.health.max {
+                v.health.cur = (v.health.cur + dt * v.add_health).fmin(v.health.max);
             }
         }
         let mut returned = Vec::new();

@@ -20,6 +20,7 @@ pub mod droideka;
 pub mod emitter;
 pub mod flash;
 pub mod fmath;
+pub mod goals;
 pub mod guided;
 pub mod heightfield;
 pub mod hero_weapon;

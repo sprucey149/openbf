@@ -138,8 +138,10 @@ fn typography_captures() {
     let mut sm = base.clone();
     sm.page = ui::shell_ps2::Page::Main;
     sm.covered = true;
-    let picker =
-        ui::shell_ps2::profiles::Picker::new(vec![(1, "the maintainer".into()), (2, "Kai".into())], Some(1));
+    let picker = ui::shell_ps2::profiles::Picker::new(
+        vec![(1, "the maintainer".into()), (2, "Kai".into())],
+        Some(1),
+    );
     view.update_shell_profiles(&sm, false, &picker, size);
     paint(&mut r, &mut view);
     save(&out, "profiles", &r);

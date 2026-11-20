@@ -50,6 +50,80 @@ fn native_saber_glow_has_its_own_alpha_and_wider_ribbon() {
     assert_eq!(rng.get(), 1196435762, "two native LCG advances per glow");
 }
 
+/// The campaign's Jedi knights and masters are native ambush teams, not main
+/// armies. Their saber edges must still be built — otherwise only the player's
+/// Anakin has a blade (the Coruscant Knightfall bug).
+#[test]
+fn jedi_native_classes_build_saber_edges() {
+    let root = crate::assets::baked_root();
+    if !root.join("classes/bf2_jed.ron").exists() {
+        eprintln!("SKIP: no baked Jedi classes");
+        return;
+    }
+    let mut team = crate::walk::TeamTemplate::default_trooper();
+    team.faction = "jed".into();
+    team.classes = ["jed_master_01", "jed_master_02", "jed_knight_01"]
+        .map(|name| crate::walk::ClassVisual {
+            name: name.into(),
+            ..Default::default()
+        })
+        .into();
+    let unused = crate::walk::TeamTemplate::default_trooper();
+    let vis = SoldierVisuals::default();
+    let sabers = vis.load_sabers(None, &root, &[team, unused]);
+    for (i, edge) in sabers[0].iter().enumerate() {
+        let edge = edge
+            .as_ref()
+            .unwrap_or_else(|| panic!("Jedi class {i}: no saber visual"));
+        assert!(!edge.bindings.is_empty(), "Jedi class {i}: no blade edge");
+    }
+}
+
+/// `saber_visual` must reach a native team's edges through its `NativeDraw`
+/// entry (main teams use the two `sabers` slots).
+#[test]
+fn saber_visual_reads_native_team_entry() {
+    let mut vis = SoldierVisuals::default();
+    let edge = SaberVisual {
+        bindings: vec![BladeBinding {
+            blade: core::hero_weapon::Blade {
+                node: "hp_fire".into(),
+                bone: "hp_weapons".into(),
+                length: 1.0,
+                width: 0.1,
+                texture: "blade".into(),
+                trail_color: Some([255; 4]),
+            },
+            geometry: None,
+            glow_texture: None,
+            local: core::hero_weapon::BladeSegment {
+                start: Vec3::ZERO,
+                end: Vec3::Y,
+            },
+        }],
+        textures: vec![None],
+        glows: vec![None],
+        hilts: vec![],
+        rng: Cell::new(0),
+    };
+    vis.native.insert(
+        2,
+        crate::soldier_vis::NativeDraw {
+            per_class: vec![],
+            held: vec![],
+            anim: vec![],
+            skins: vec![],
+            low_skins: vec![],
+            sabers: vec![Some(edge)],
+        },
+    );
+    assert!(vis.saber_visual(2, 0).is_some(), "native team 2, class 0");
+    assert!(
+        vis.saber_visual(1, 0).is_none(),
+        "a normal team with no roster"
+    );
+}
+
 /// The heroes' classes are their own file, so the draw needs them as well as
 /// the roster: without them they fight with nothing in their hands.
 #[test]

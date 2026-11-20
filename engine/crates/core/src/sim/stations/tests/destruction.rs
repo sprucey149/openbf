@@ -256,3 +256,78 @@ fn destroyed_ammo_droids_never_resupply_and_damage_respects_type_and_team_scales
     assert_eq!(sim.units[owner.index as usize].weapon.spare, 0);
     assert!(sim.stations[0].destroyed);
 }
+
+#[test]
+fn ai_damage_threshold_clamps_ai_but_allows_player_to_destroy_station() {
+    let (mut sim, _dummy) = fixture();
+    let bot = sim
+        .spawn(&UnitSpec {
+            controller: crate::unit::Controller::Ai,
+            ..UnitSpec::trooper(1, Vec3::new(0.0, 0.0, 4.0))
+        })
+        .unwrap();
+    let human = sim
+        .spawn(&UnitSpec::player(1, Vec3::new(0.0, 0.0, -4.0)))
+        .unwrap();
+    sim.stations[0].team = Some(0);
+    sim.stations[0].ai_damage_threshold = 0.5;
+    // Bot hits can reduce HP from 80 down to the 40 HP floor, never below.
+    let shot_desc = crate::weapon::OrdnanceClass {
+        max_damage: 80.0,
+        ..Default::default()
+    }
+    .damage_desc(0.0, false);
+    sim.damage_station(0, &shot_desc, 1.0, Some(bot), Some(1));
+    assert_eq!(sim.stations[0].health.cur, 40.0);
+    assert!(!sim.stations[0].destroyed);
+    sim.damage_station(0, &shot_desc, 1.0, Some(bot), Some(1));
+    assert_eq!(sim.stations[0].health.cur, 40.0);
+    // Human attacker bypasses the AI damage floor and finishes it.
+    sim.damage_station(0, &shot_desc, 1.0, Some(human), Some(1));
+    assert!(sim.stations[0].destroyed);
+    assert_eq!(sim.stations[0].health.cur, 0.0);
+}
+
+#[test]
+fn animated_station_death_emits_event_and_blast_at_live_transform() {
+    let (mut sim, _) = fixture();
+    sim.station_classes[0].explosion = Some(ExplosionClass {
+        damage: 500.0,
+        damage_inner: 10.0,
+        damage_outer: 10.0,
+        ..Default::default()
+    });
+    let moved = Vec3::new(400.0, 50.0, -250.0);
+    let near_origin = sim.spawn(&UnitSpec::trooper(1, Vec3::X * 2.0)).unwrap();
+    let near_moved = sim
+        .spawn(&UnitSpec::trooper(1, moved + Vec3::X * 2.0))
+        .unwrap();
+    sim.units[near_origin.index as usize].soldier.pos = Vec3::X * 2.0;
+    sim.units[near_moved.index as usize].soldier.pos = moved + Vec3::X * 2.0;
+    let parts = sim.station_parts(0);
+    sim.set_station_transform(0, glam::Mat4::from_translation(moved), &parts);
+    sim.events.clear();
+
+    sim.kill_station(0, None);
+
+    let destroyed_pos = sim
+        .events
+        .iter()
+        .find_map(|e| match *e {
+            Event::StationDestroyed {
+                station: 0, pos, ..
+            } => Some(pos),
+            _ => None,
+        })
+        .expect("StationDestroyed event");
+    assert_eq!(destroyed_pos, moved);
+    assert_eq!(
+        sim.unit(near_origin).unwrap().health.cur,
+        sim.unit(near_origin).unwrap().health.max,
+        "origin bystander must not be hit by animated station's death blast"
+    );
+    assert!(
+        sim.unit(near_moved).is_none(),
+        "animated-pose bystander must be killed by animated station's death blast"
+    );
+}

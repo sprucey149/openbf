@@ -179,7 +179,10 @@ impl Sim {
             if gathered.len() == BLAST_GATHER_MAX {
                 break;
             }
-            if !s.destroyed && overlaps(s.sphere_centre, s.sphere_radius, ground) {
+            if !s.destroyed
+                && s.health.max > 0.0
+                && overlaps(s.sphere_centre, s.sphere_radius, ground)
+            {
                 gathered.push((Victim::Station(i as u16), s.sphere_centre, s.sphere_radius));
             }
         }
@@ -331,7 +334,7 @@ impl Sim {
         }
         let mounted = u.mount.is_some();
         let i = h.index as usize;
-        if !u.alive {
+        if !u.alive && !self.is_hero_death(i) {
             let feet = self.units[i].soldier.pos;
             self.units[i].soldier.kick(feet - pos);
         }

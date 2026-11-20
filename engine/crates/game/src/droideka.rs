@@ -96,9 +96,8 @@ pub fn apply(c: &DroidekaClass, bake: &DroidekaBake) -> DroidekaClass {
     out
 }
 
-pub fn install(rosters: &mut [crate::roster::FactionRoster; 2], map_dir: &Path, game: &str) {
-    let bakes = bakes(map_dir, &game.to_ascii_lowercase());
-    for c in rosters.iter_mut().flat_map(|r| r.classes.iter_mut()) {
+fn apply_bakes(classes: &mut [crate::roster::ClassRoster], bakes: &HashMap<String, DroidekaBake>) {
+    for c in classes {
         let Some(deka) = c.droideka.as_deref() else {
             continue;
         };
@@ -106,6 +105,21 @@ pub fn install(rosters: &mut [crate::roster::FactionRoster; 2], map_dir: &Path, 
             Some(b) => c.droideka = Some(Arc::new(apply(deka, b))),
             None => eprintln!("droideka {}: no side bake; class defaults kept", c.class),
         }
+    }
+}
+
+pub fn install_classes(classes: &mut [crate::roster::ClassRoster], map_dir: &Path, game: &str) {
+    if classes.iter().all(|c| c.droideka.is_none()) {
+        return;
+    }
+    let bakes = bakes(map_dir, &game.to_ascii_lowercase());
+    apply_bakes(classes, &bakes);
+}
+
+pub fn install(rosters: &mut [crate::roster::FactionRoster; 2], map_dir: &Path, game: &str) {
+    let bakes = bakes(map_dir, &game.to_ascii_lowercase());
+    for r in rosters {
+        apply_bakes(&mut r.classes, &bakes);
     }
 }
 

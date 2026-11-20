@@ -44,7 +44,7 @@ pub fn carrier_marker(
     if !unit.alive {
         return None;
     }
-    let friendly = unit.team == sim.unit(viewer)?.team;
+    let friendly = sim.allied(sim.unit(viewer)?.team, unit.team);
     if let Some(mount) = unit.mount {
         let vehicle = sim
             .vehicles
@@ -81,7 +81,7 @@ pub fn ctf_marker(sim: &core::sim::Sim, flag: &core::sim::Flag, team: u8) -> Opt
             Some((flag.current_pos, false))
         }
         core::sim::FlagStatus::Carried { carrier } => {
-            if sim.unit(carrier)?.team != team {
+            if !sim.allied(team, sim.unit(carrier)?.team) {
                 return None;
             }
             Some((
@@ -334,6 +334,27 @@ impl MapStatic {
             .map(|(k, w)| (k, droid_icon(&db, &w.name)))
             .collect();
         let sheet_dir = scene.dir.join("textures");
+        let map_lower = m.map.to_ascii_lowercase();
+        let bf2_space_map = m.source_game.eq_ignore_ascii_case("bf2")
+            && map_lower
+                .strip_prefix("bf2_")
+                .unwrap_or(&map_lower)
+                .starts_with("spa");
+        let map_icon_for = |name: &str| {
+            let mut icon = ClassIcon::of(&db, name);
+            let base = db.engine_base(name);
+            // BF2 FUN_001e7a30:95758 removes armedbuilding from the minimap on maps starting with "spa".
+            let hide_spa_armed =
+                bf2_space_map && base.is_some_and(|b| b.eq_ignore_ascii_case("armedbuilding"));
+            // BF2 FUN_001e2610:92238 + FUN_003a5940:388768-388791 hides EntityBuilding with flag 0x58071137.
+            let hide_flag = db
+                .prop_hash(name, 1_476_858_167)
+                .is_some_and(|v| !matches!(v.trim(), "" | "0"));
+            if hide_spa_armed || hide_flag {
+                icon.texture = None;
+            }
+            icon
+        };
         Self {
             droids,
             structures: walk
@@ -342,7 +363,7 @@ impl MapStatic {
                 .iter()
                 .map(|c| {
                     (
-                        ClassIcon::of(&db, &c.name),
+                        map_icon_for(&c.name),
                         db.engine_base(&c.name)
                             .is_some_and(|b| b.eq_ignore_ascii_case("commandpost")),
                     )
@@ -355,10 +376,7 @@ impl MapStatic {
             turn: turn_of(&m.map.to_ascii_lowercase(), era),
             posts,
             soldiers,
-            vehicles: vehicle_classes
-                .iter()
-                .map(|c| ClassIcon::of(&db, c))
-                .collect(),
+            vehicles: vehicle_classes.iter().map(|c| map_icon_for(c)).collect(),
         }
     }
 
@@ -400,6 +418,10 @@ impl MapStatic {
         let (sy, cy) = core::fmath::sin_cos(yaw);
         let fwd = [-sy, -cy];
         let own = me.team;
+        // Native teams (Wookiees, Ewoks, ...) can be allies of a main army.
+        // Ask the sim's relation table, not raw team equality: the campaign's
+        // SetTeamAsFriend makes them friends even though their team != ours.
+        let hostile = |t: u8| sim.hostile(own, t);
         let rel = |team: Option<u8>| match team {
             Some(t) if sim.allied(own, t) => FRIEND,
             Some(_) => ENEMY,
@@ -438,6 +460,7 @@ impl MapStatic {
         let mut posts: Vec<_> = sim
             .cps
             .iter()
+            .filter(|cp| !cp.killed && cp.visible)
             .map(|cp| {
                 let known = self.posts.get(&cp.def.name.to_ascii_lowercase());
                 // Who is taking it: an owned post going neutral is taken by
@@ -474,10 +497,7 @@ impl MapStatic {
             let Some(texture) = class.texture.clone() else {
                 continue;
             };
-            if !post
-                && station.team.is_some_and(|team| sim.hostile(own, team))
-                && !detected(station.pos, None)
-            {
+            if !post && station.team.is_some_and(hostile) && !detected(station.pos, None) {
                 continue;
             }
             let f = station.transform.z_axis;
@@ -502,14 +522,14 @@ impl MapStatic {
                 continue;
             }
             let shot = (u.last_shot_tick != u64::MAX).then_some(u.last_shot_tick);
-            let enemy = sim.hostile(own, u.team);
-            if enemy && !detected(u.soldier.pos, shot) {
+            if hostile(u.team) && !detected(u.soldier.pos, shot) {
                 continue;
             }
             // Card CLOAK: an enemy with any concealment has no icon, firing
             // or not (B2 FUN_003a5940, D:400941: a soldier whose byte +0x7e3
-            // is above 0 skips its icon on the detected path).
-            if enemy && !u.cloak.visible() {
+            // is above 0 skips its icon on the detected path). Allies stay
+            // visible regardless of cloak, like same-team soldiers.
+            if hostile(u.team) && !u.cloak.visible() {
                 continue;
             }
             let icon = soldier(u.team);
@@ -529,7 +549,7 @@ impl MapStatic {
         // (the PS2's rule that hides the controlled unit's icon is not
         // traced, re-hud-map §3).
         for d in &sim.droids {
-            if sim.hostile(own, d.team) && !detected(d.pos, None) {
+            if hostile(d.team) && !detected(d.pos, None) {
                 continue;
             }
             let Some((icon, texture)) = self
@@ -550,14 +570,7 @@ impl MapStatic {
         }
         for (i, v) in sim.vehicles.iter().enumerate() {
             let own_ride = me.mount.is_some_and(|m| m.vehicle.index as usize == i);
-            if !v.alive
-                || own_ride
-                || sim
-                    .walker_params
-                    .get(v.class as usize)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|p| !p.spawn_points.is_empty())
-            {
+            if !v.alive || own_ride || sim.is_command_spawn_vehicle(v) {
                 continue;
             }
             let Some((icon, texture)) = self
@@ -575,10 +588,7 @@ impl MapStatic {
                 .flatten()
                 .flat_map(|g| &g.weapons)
                 .any(|w| w.state == core::weapon::FireState::Firing);
-            if v.team.is_some_and(|team| sim.hostile(own, team))
-                && !firing
-                && !detected(v.pos, None)
-            {
+            if v.team.is_some_and(hostile) && !firing && !detected(v.pos, None) {
                 continue;
             }
             let f = v.rot * Vec3::Z;
@@ -596,10 +606,20 @@ impl MapStatic {
             });
         }
         let mut markers = Vec::new();
+        if let Some(campaign) = &walk.campaign {
+            markers.extend(campaign.map_markers(sim).into_iter().map(|m| MapIcon {
+                pos: [m.pos.x, m.pos.z],
+                texture: m.icon,
+                scale: m.scale,
+                color: [223, 223, 32],
+                heading: None,
+                number: None,
+            }));
+        }
         if let Some(ctf) = sim
             .ctf
             .as_ref()
-            .filter(|ctf| ctf.mode == core::sim::CtfMode::OneFlag)
+            .filter(|ctf| walk.campaign.is_none() && ctf.mode == core::sim::CtfMode::OneFlag)
         {
             for flag in &ctf.flags {
                 let Some((pos, delivery)) = ctf_marker(sim, flag, own) else {
@@ -653,7 +673,11 @@ impl MapStatic {
                         pos: [v.pos.x, v.pos.z],
                         texture: icon.texture.clone()?,
                         scale: icon.scale,
-                        color: if v.team == Some(own) { FRIEND } else { ENEMY },
+                        color: if v.team.is_some_and(|t| sim.allied(own, t)) {
+                            FRIEND
+                        } else {
+                            ENEMY
+                        },
                         heading: Some(heading([f.x, f.z])),
                         number: None,
                     },
@@ -666,13 +690,23 @@ impl MapStatic {
     /// selected friendly post (re-command-walker-post §5).
     pub fn spawn_model(&self, walk: &WalkSim, slot: usize) -> MapModel {
         let map = self.model(walk);
+        let vis_cp = |cp: &core::cp::CommandPost| !cp.killed && cp.visible;
         let select = match walk.sim.spawn_post_selected(slot) {
-            Some(core::unit::SpawnPost::Post(i)) => Some(usize::from(i)),
-            Some(post @ core::unit::SpawnPost::Walker(_)) => self
-                .command_posts(walk)
-                .iter()
-                .position(|(p, _)| *p == post)
-                .map(|i| walk.sim.cps.len() + i),
+            Some(core::unit::SpawnPost::Post(i)) => {
+                let idx = usize::from(i);
+                walk.sim
+                    .cps
+                    .get(idx)
+                    .filter(|cp| vis_cp(cp))
+                    .map(|_| walk.sim.cps[..idx].iter().filter(|cp| vis_cp(cp)).count())
+            }
+            Some(post @ core::unit::SpawnPost::Walker(_)) => {
+                let vis_count = walk.sim.cps.iter().filter(|cp| vis_cp(cp)).count();
+                self.command_posts(walk)
+                    .iter()
+                    .position(|(p, _)| *p == post)
+                    .map(|i| vis_count + i)
+            }
             None => None,
         };
         map.spawn_view(select)
@@ -1020,13 +1054,63 @@ mod tests {
         assert!(after.contains(&FRIEND), "{after:?}");
     }
 
+    /// A native team the campaign made an ally (the Wookiees) is a friend on
+    /// the map even though its team differs from the player's.  Friends show
+    /// outside the enemy-detection range (re-hud-map.md §8: "Shown when
+    /// friendly ...; otherwise ... only when detected").
+    #[test]
+    fn native_allies_show_as_friends_outside_detection_range() {
+        let mut w = WalkSim::new(3, Vec3::ZERO, None);
+        let own = w.sim.units[w.player.index as usize].team;
+        let ally = 2u8;
+        assert_ne!(own, ally);
+        // A native team needs its own member pool and spawn post to field a
+        // soldier; far outside the map's NEAR/FAR detection range.
+        let mut spec = core::unit::UnitSpec::trooper(ally, Vec3::ZERO);
+        spec.controller = core::unit::Controller::Ai;
+        let far = Vec3::new(0.0, 0.0, 200.0);
+        w.sim.add_native_team_with_posts(
+            ally,
+            vec![spec],
+            vec![core::sim::NativeSpawnPost {
+                count: 1,
+                nodes: vec![(far, 0.0)],
+            }],
+        );
+        w.sim.populate_native_teams();
+        assert!(
+            w.sim.units.iter().any(|u| u.team == ally),
+            "native member spawned"
+        );
+        let icon = ClassIcon {
+            texture: Some("troop_icon".into()),
+            ..ClassIcon::of(&ClassDb::default(), "x")
+        };
+        let st = MapStatic {
+            bounds: Some(([0.0, 0.0], 300.0)),
+            soldiers: vec![icon; 3],
+            ..MapStatic::default()
+        };
+        let colours = |w: &WalkSim| -> Vec<[u8; 3]> {
+            st.model(w).units.into_iter().map(|u| u.color).collect()
+        };
+        // Before SetTeamAsFriend it is an unseen enemy and draws no icon.
+        assert!(colours(&w).is_empty());
+        w.sim.set_team_relation(own, ally, true);
+        w.sim.set_team_relation(ally, own, true);
+        assert_eq!(colours(&w), vec![FRIEND]);
+    }
+
     #[test]
     fn an_allied_native_has_a_friendly_map_icon() {
         let mut walk = WalkSim::new(3, Vec3::ZERO, None);
         let own = walk.sim.units[walk.player.index as usize].team;
         let native = walk
             .sim
-            .spawn(&core::unit::UnitSpec::trooper(own, Vec3::new(1.0, 0.0, -2.0)))
+            .spawn(&core::unit::UnitSpec::trooper(
+                own,
+                Vec3::new(1.0, 0.0, -2.0),
+            ))
             .unwrap();
         walk.sim.units[native.index as usize].team = 2;
         let map = MapStatic {

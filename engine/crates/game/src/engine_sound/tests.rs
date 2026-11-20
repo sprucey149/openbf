@@ -116,7 +116,7 @@ fn a_tie_crosses_its_shift_points_between_gears_on_every_thrust() {
     }
     let no_boost = core::vehicle::flyer::FlyerParams {
         boost_speed: 0.0,
-        ..p
+        ..p.clone()
     };
     assert_eq!(flyer_speed_divisor(&no_boost, false), 95.0);
     let bf1 = core::vehicle::flyer::FlyerParams { bf2: false, ..p };

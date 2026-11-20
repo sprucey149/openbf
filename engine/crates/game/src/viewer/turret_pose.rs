@@ -584,8 +584,25 @@ impl super::SceneGpu {
     /// [`SceneGpu::hidden_for`], with every fallen building turret's look in
     /// place of its intact draws (card TBLD, `super::turret_fall`).
     pub fn view_draws(&self, sim: &core::sim::Sim, viewer: core::unit::UnitHandle) -> Vec<DrawCmd> {
+        self.view_draws_with_hidden_instances(sim, viewer, None)
+    }
+
+    pub fn view_draws_with_hidden_instances(
+        &self,
+        sim: &core::sim::Sim,
+        viewer: core::unit::UnitHandle,
+        hidden_instances: Option<&std::collections::BTreeSet<u32>>,
+    ) -> Vec<DrawCmd> {
         let (mut hidden, fallen) = self.fallen_view(sim);
         hidden.extend(self.hidden_for(sim, viewer));
+        if let Some(instances) = hidden_instances.filter(|instances| !instances.is_empty()) {
+            hidden.extend(
+                self.instance_draws
+                    .iter()
+                    .filter(|(instance, _)| instances.contains(instance))
+                    .map(|(_, range)| range.clone()),
+            );
+        }
         self.station_view_draws(sim, hidden, fallen)
     }
 

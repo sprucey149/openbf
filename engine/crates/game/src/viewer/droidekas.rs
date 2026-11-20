@@ -16,7 +16,7 @@ use core::fmath::FloatExt;
 use core::vehicle::walker::WalkerState;
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, ParticleDraw, ParticleShape, Renderer, TextureHandle};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 #[derive(Default)]
@@ -25,6 +25,7 @@ pub struct DroidekaVisuals {
     aims: Vec<GunAim>,
     preview: preview::Preview,
     by_class: [Vec<Option<usize>>; 2],
+    native: HashMap<u8, Vec<Option<usize>>>,
     posed: HashMap<usize, super::vehicles::PosedMeshes<(u32, usize)>>,
     /// The frame's eye, for how often a far droideka re-skins.
     pub eye: Option<glam::Vec3>,
@@ -190,6 +191,7 @@ impl DroidekaVisuals {
             scene,
             assets_dir,
             &walk.teams,
+            &walk.native_teams,
             &scene.manifest.source_game,
         )
     }
@@ -199,6 +201,7 @@ impl DroidekaVisuals {
         scene: &Scene,
         assets_dir: &Path,
         teams: &[crate::walk::TeamTemplate; 2],
+        native: &BTreeMap<u8, crate::walk::TeamTemplate>,
         game: &str,
     ) -> Self {
         let game = game.to_ascii_lowercase();
@@ -242,9 +245,8 @@ impl DroidekaVisuals {
         let mut loaded: HashMap<String, Option<usize>> = HashMap::new();
         let mut textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>> =
             HashMap::new();
-        for (t, team) in teams.iter().enumerate() {
-            out.by_class[t] = team
-                .classes
+        let mut load_team = |team: &crate::walk::TeamTemplate| -> Vec<Option<usize>> {
+            team.classes
                 .iter()
                 .map(|cv| {
                     let key = cv.name.to_ascii_lowercase();
@@ -267,7 +269,13 @@ impl DroidekaVisuals {
                     loaded.insert(key, k);
                     k
                 })
-                .collect();
+                .collect()
+        };
+        for (t, team) in teams.iter().enumerate() {
+            out.by_class[t] = load_team(team);
+        }
+        for (&t, team) in native {
+            out.native.insert(t, load_team(team));
         }
         out
     }
@@ -287,7 +295,8 @@ impl DroidekaVisuals {
             return;
         }
         let teams = request.templates(walk);
-        let mut added = Self::load_teams(r, scene, root, &teams, game);
+        let empty = BTreeMap::new();
+        let mut added = Self::load_teams(r, scene, root, &teams, &empty, game);
         let offset = self.models.len();
         self.by_class[team].push(added.by_class[team].pop().flatten().map(|k| k + offset));
         self.models.extend(added.models);
@@ -299,6 +308,15 @@ impl DroidekaVisuals {
         }
     }
 
+    fn class_model(&self, team: u8, class: u8) -> Option<usize> {
+        let classes = if team < 2 {
+            self.by_class.get(usize::from(team))
+        } else {
+            self.native.get(&team)
+        };
+        classes?.get(usize::from(class)).copied().flatten()
+    }
+
     pub fn draws(&mut self, r: &mut Renderer, sim: &core::sim::Sim) -> Vec<DrawCmd> {
         let mut out = Vec::new();
         for (slot, u) in sim.units.iter().enumerate() {
@@ -308,13 +326,7 @@ impl DroidekaVisuals {
             if !u.alive || u.burst {
                 continue;
             }
-            let Some(k) = self
-                .by_class
-                .get(usize::from(u.team).min(1))
-                .and_then(|t| t.get(usize::from(u.spec.class)))
-                .copied()
-                .flatten()
-            else {
+            let Some(k) = self.class_model(u.team, u.spec.class) else {
                 continue;
             };
             let Some(palette) = self.palette(k, d, c, u.soldier.pitch) else {
@@ -364,13 +376,7 @@ impl DroidekaVisuals {
             if !u.alive || u.burst || d.no_fire() {
                 continue;
             }
-            let Some(k) = self
-                .by_class
-                .get(usize::from(u.team).min(1))
-                .and_then(|t| t.get(usize::from(u.spec.class)))
-                .copied()
-                .flatten()
-            else {
+            let Some(k) = self.class_model(u.team, u.spec.class) else {
                 continue;
             };
             let Some(palette) = self.palette(k, d, c, u.soldier.pitch) else {

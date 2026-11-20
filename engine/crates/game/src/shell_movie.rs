@@ -50,7 +50,33 @@ type Decoded = (u64, Vec<u8>, u32, u32);
 /// One movie property's packs, loaded.
 struct Property {
     name: String,
-    packs: Vec<Arc<FramePack>>,
+    paths: Vec<PathBuf>,
+    packs: Vec<Option<Arc<FramePack>>>,
+    audio: Option<PathBuf>,
+}
+
+impl Property {
+    fn pack(&mut self, seg: usize) -> Option<&Arc<FramePack>> {
+        if let Some(slot) = self.packs.get_mut(seg) {
+            if slot.is_none() {
+                if let Some(path) = self.paths.get(seg) {
+                    *slot = pak::read(path)
+                        .ok()
+                        .and_then(FramePack::parse)
+                        .filter(|p| !p.is_empty())
+                        .map(Arc::new);
+                }
+            }
+            return slot.as_ref();
+        }
+        None
+    }
+
+    fn unload_packs(&mut self) {
+        for slot in &mut self.packs {
+            *slot = None;
+        }
+    }
 }
 
 pub struct ShellMovie {
@@ -59,6 +85,8 @@ pub struct ShellMovie {
     segment: usize,
     /// Seconds into the playing segment.
     t: f32,
+    looping: bool,
+    finished: bool,
     /// The frame last asked of the worker, by (property, segment, frame).
     asked: Option<(usize, usize, usize)>,
     /// Changes on each property transition, including A → B → A.
@@ -127,20 +155,27 @@ impl ShellMovie {
         let dir = shell_dir(assets_dir).join("movies");
         let mut properties = Vec::new();
         for m in &index.movies {
-            let packs: Vec<Arc<FramePack>> = m
+            let paths: Vec<PathBuf> = m
                 .segments
                 .iter()
-                .filter_map(|f| pak::read(dir.join(f)).ok())
-                .filter_map(FramePack::parse)
-                .filter(|p| !p.is_empty())
-                .map(Arc::new)
+                .map(|f| dir.join(f))
+                .filter(|p| pak::is_file(p))
                 .collect();
-            if !packs.is_empty() {
-                properties.push(Property {
-                    name: m.name.clone(),
-                    packs,
-                });
+            if paths.is_empty() {
+                continue;
             }
+            let packs = vec![None; paths.len()];
+            let audio = m
+                .audio
+                .as_ref()
+                .map(|a| dir.join(a))
+                .filter(|p| pak::is_file(p));
+            properties.push(Property {
+                name: m.name.clone(),
+                paths,
+                packs,
+                audio,
+            });
         }
         let job = Arc::new((Mutex::new(JobSlot::default()), Condvar::new()));
         let (tx, done) = mpsc::channel();
@@ -159,6 +194,8 @@ impl ShellMovie {
             playing: None,
             segment: 0,
             t: 0.0,
+            looping: true,
+            finished: false,
             asked: None,
             generation: 0,
             job,
@@ -168,34 +205,105 @@ impl ShellMovie {
         })
     }
 
-    /// Play `name` (from its start unless it is the one playing).
-    pub fn play(&mut self, name: &str) {
-        let k = self.properties.iter().position(|p| p.name == name);
-        if k != self.playing {
-            self.generation = self.generation.wrapping_add(1);
-            // Supersede any pending request; an in-flight result is rejected
-            // by its generation when it returns.
-            self.job.0.lock().unwrap_or_else(|e| e.into_inner()).pending = None;
-            self.playing = k;
-            self.segment = 0;
-            self.t = 0.0;
-            self.asked = None;
-            self.shown = false;
+    fn reset_active(&mut self, next: Option<usize>) {
+        self.generation = self.generation.wrapping_add(1);
+        // Supersede any pending request; an in-flight result is rejected
+        // by its generation when it returns.
+        self.job.0.lock().unwrap_or_else(|e| e.into_inner()).pending = None;
+        if let Some(prev) = self.playing {
+            // Keep the light menu loops cached; drop heavy one-shot cutscene packs.
+            let prop = &mut self.properties[prev];
+            if !prop.paths.is_empty()
+                && !matches!(prop.name.as_str(), "shell_main" | "shell_sub_left")
+            {
+                prop.unload_packs();
+            }
         }
+        self.playing = next;
+        self.segment = 0;
+        self.t = 0.0;
+        self.asked = None;
+        self.shown = false;
+        self.finished = false;
+    }
+
+    fn start(&mut self, name: &str, looping: bool, restart_if_same: bool) {
+        let k = self.properties.iter().position(|p| p.name == name);
+        let switch = k != self.playing || (k.is_some() && (restart_if_same || self.finished));
+        if switch {
+            self.reset_active(k);
+        }
+        self.looping = looping;
+    }
+
+    /// Stop the active movie, release any heavy cutscene packs, and clear playback state.
+    pub fn stop(&mut self) {
+        if self.playing.is_some() || self.finished {
+            self.reset_active(None);
+        }
+    }
+
+    /// Play `name` looping (from its start unless it is the one playing).
+    pub fn play(&mut self, name: &str) {
+        self.start(name, true, false);
+    }
+
+    /// Play `name` once from its start unless already active; `is_finished()` becomes true after the last frame.
+    pub fn play_once(&mut self, name: &str) {
+        self.start(name, false, false);
+    }
+
+    /// Whether a `play_once` movie has reached its end.
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /// Currently active movie property name, if any.
+    pub fn current(&self) -> Option<&str> {
+        self.playing.map(|i| self.properties[i].name.as_str())
+    }
+
+    /// Whether movie `name` exists in the baked shell index.
+    pub fn has(&self, name: &str) -> bool {
+        self.properties.iter().any(|p| p.name == name)
+    }
+
+    /// Path to the optional WAV audio track synced with movie `name`.
+    pub fn audio_path(&self, name: &str) -> Option<&Path> {
+        self.properties
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.audio.as_deref())
     }
 
     /// Which (segment, frame) the playing property shows `dt` seconds on.
     fn advance(&mut self, dt: f32) -> Option<(usize, usize)> {
-        let p = &self.properties[self.playing?];
+        if self.finished {
+            return None;
+        }
+        let p_idx = self.playing?;
         self.t += dt;
         loop {
-            let pack = &p.packs[self.segment];
-            if self.t < pack.seconds() {
+            let p = &mut self.properties[p_idx];
+            let segs = p.packs.len();
+            let Some(pack) = p.pack(self.segment) else {
+                self.finished = true;
+                return None;
+            };
+            let secs = pack.seconds();
+            if self.t < secs {
                 let k = (self.t * pack.fps.0 as f32 / pack.fps.1 as f32) as usize;
                 return Some((self.segment, k.min(pack.len() - 1)));
             }
-            self.t -= pack.seconds();
-            self.segment = (self.segment + 1) % p.packs.len();
+            self.t -= secs;
+            if self.segment + 1 < segs {
+                self.segment += 1;
+            } else if self.looping {
+                self.segment = 0;
+            } else {
+                self.finished = true;
+                return None;
+            }
         }
     }
 
@@ -205,11 +313,12 @@ impl ShellMovie {
         if let (Some(p), Some((seg, k))) = (self.playing, self.advance(dt)) {
             if self.asked != Some((p, seg, k)) {
                 self.asked = Some((p, seg, k));
-                let pack = Arc::clone(&self.properties[p].packs[seg]);
-                let (lock, wake) = &*self.job;
-                lock.lock().unwrap_or_else(|e| e.into_inner()).pending =
-                    Some((pack, k, self.generation));
-                wake.notify_one();
+                if let Some(pack) = self.properties[p].pack(seg).cloned() {
+                    let (lock, wake) = &*self.job;
+                    lock.lock().unwrap_or_else(|e| e.into_inner()).pending =
+                        Some((pack, k, self.generation));
+                    wake.notify_one();
+                }
             }
         }
         let mut newest = None;
@@ -228,7 +337,12 @@ impl ShellMovie {
     /// this thread (the goldens and tests).
     pub fn frame_now(&self, name: &str, seg: usize, k: usize) -> Option<(Vec<u8>, u32, u32)> {
         let p = self.properties.iter().find(|p| p.name == name)?;
-        p.packs.get(seg)?.frame(k).and_then(decode)
+        if let Some(Some(pack)) = p.packs.get(seg) {
+            return pack.frame(k).and_then(decode);
+        }
+        let path = p.paths.get(seg)?;
+        let pack = FramePack::parse(pak::read(path).ok()?).filter(|fp| !fp.is_empty())?;
+        pack.frame(k).and_then(decode)
     }
 }
 
@@ -248,12 +362,16 @@ mod tests {
                     .into_iter()
                     .map(|name| Property {
                         name: name.into(),
-                        packs: vec![pack()],
+                        paths: Vec::new(),
+                        packs: vec![Some(pack())],
+                        audio: None,
                     })
                     .collect(),
                 playing: None,
                 segment: 0,
                 t: 0.0,
+                looping: true,
+                finished: false,
                 asked: None,
                 generation: 0,
                 job: Arc::new((Mutex::new(JobSlot::default()), Condvar::new())),
@@ -316,7 +434,10 @@ mod tests {
         let pending = movie.job.0.lock().unwrap().pending.take().unwrap();
         assert_eq!(pending.2, b);
         assert_ne!(a, b);
-        assert!(Arc::ptr_eq(&pending.0, &movie.properties[1].packs[0]));
+        assert!(Arc::ptr_eq(
+            &pending.0,
+            movie.properties[1].packs[0].as_ref().unwrap()
+        ));
     }
 
     #[test]
@@ -407,11 +528,12 @@ mod tests {
             sums[0], sums[1]
         );
         m.play("shell_main");
-        let first = m.properties[m.playing.unwrap()].packs[0].seconds();
+        let playing = m.playing.unwrap();
+        let first = m.properties[playing].pack(0).unwrap().seconds();
         assert_eq!(m.advance(0.0), Some((0, 0)));
         assert_eq!(m.advance(first + 0.05).map(|(s, _)| s), Some(1));
         // Back to segment 0 after the second.
-        let second = m.properties[m.playing.unwrap()].packs[1].seconds();
+        let second = m.properties[playing].pack(1).unwrap().seconds();
         assert_eq!(m.advance(second).map(|(s, _)| s), Some(0));
         // The worker hands a frame back.
         m.play("shell_sub_left");
@@ -424,5 +546,31 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(got.is_some_and(|(_, w, h)| (w, h) == (512, 448)));
+    }
+
+    #[test]
+    fn play_once_stops_at_end_and_exposes_audio_path() {
+        let (mut m, _) = synthetic();
+        m.properties[0].audio = Some(PathBuf::from("movies/A.wav"));
+        assert!(m.has("A"));
+        assert_eq!(m.audio_path("A"), Some(Path::new("movies/A.wav")));
+        assert_eq!(m.audio_path("B"), None);
+        m.play_once("A");
+        let gen = m.generation;
+        assert_eq!(m.current(), Some("A"));
+        assert!(!m.is_finished());
+        assert_eq!(m.advance(0.5), Some((0, 0)));
+        assert!(!m.is_finished());
+        m.play_once("A");
+        assert_eq!(
+            m.generation, gen,
+            "calling play_once per frame keeps progress"
+        );
+        assert!((m.t - 0.5).abs() < 1e-6);
+        assert_eq!(m.advance(0.6), None);
+        assert!(m.is_finished());
+        m.stop();
+        assert_eq!(m.current(), None);
+        assert!(!m.is_finished());
     }
 }

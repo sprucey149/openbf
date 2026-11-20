@@ -155,10 +155,16 @@ impl Animator {
         looping: bool,
         force: bool,
     ) -> bool {
-        let bank = class.bank_of(weapon);
-        let bank = bank.split_once('_').map_or(bank, |(_, b)| b);
+        let (primary, fallback) = class.bank_pair_of(weapon);
+        let banks: [&str; 2] = [primary, fallback.unwrap_or(primary)];
+        let banks = if fallback.is_some() {
+            &banks[..]
+        } else {
+            &banks[..1]
+        };
         let slot = |layer: &str| {
-            let clip = crate::hero_blades::clip_for(clips, &class.family, bank, animation, layer)?;
+            let clip =
+                crate::hero_blades::clip_for_banks(clips, &class.family, banks, animation, layer)?;
             let descriptor = if layer == "upper" {
                 class.custom.upper(animation)
             } else {

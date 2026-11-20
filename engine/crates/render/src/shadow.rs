@@ -222,12 +222,12 @@ impl ShadowState {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: crate::device::DEPTH_FORMAT,
+                    format: crate::device::depth_format(device.features()),
                     depth_write_enabled: false,
                     depth_compare: if shade {
                         wgpu::CompareFunction::Always
                     } else {
-                        wgpu::CompareFunction::LessEqual
+                        wgpu::CompareFunction::GreaterEqual
                     },
                     stencil: if shade {
                         wgpu::StencilState {

@@ -195,7 +195,7 @@ impl Renderer {
         let water_pipeline = PipelineDesc {
             fs: water_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
             ..PipelineDesc::world("map water pipeline", &pipeline_layout, &vb)
         }
         .build(&device, &shader, display_target);
@@ -225,7 +225,7 @@ impl Renderer {
             fs: display_fs("fs_speckle", "fs_speckle_display"),
             blend: Some(additive),
             depth_write: false,
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
             ..PipelineDesc::world("map speckle pipeline", &pipeline_layout, &vb)
         }
         .build(&device, &shader, display_target);
@@ -250,7 +250,7 @@ impl Renderer {
             fs: terrain_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
             ..PipelineDesc::world("map terrain layer pipeline", &pipeline_layout, &vb)
         }
         .build(&device, &shader, display_target);
@@ -322,7 +322,7 @@ impl Renderer {
                 blend,
                 depth_write: depth && blend.is_none(),
                 depth_compare: Some(if depth {
-                    wgpu::CompareFunction::LessEqual
+                    wgpu::CompareFunction::GreaterEqual
                 } else {
                     wgpu::CompareFunction::Always
                 }),
@@ -407,7 +407,7 @@ impl Renderer {
                 fs: terrain_fs,
                 blend: alpha,
                 depth_write: false,
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 ..PipelineDesc::world(
                     "map terrain layer pipeline, no discard",
                     &pipeline_layout,
@@ -418,7 +418,7 @@ impl Renderer {
             water: PipelineDesc {
                 fs: water_fs,
                 blend: alpha,
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 ..PipelineDesc::world("map water pipeline, no discard", &pipeline_layout, &vb)
             }
             .build_with(&device, &shader, display_target, no_cull),
@@ -458,7 +458,7 @@ impl Renderer {
                 fs: "fs_spec",
                 blend: Some(additive),
                 depth_write: false,
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 ..PipelineDesc::world(label, &spec_layout, vb)
             }
             .build(&device, &shader, format)
@@ -638,7 +638,7 @@ impl Renderer {
             fs: "fs_terrain_light",
             blend: Some(additive),
             depth_write: false,
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
             ..PipelineDesc::world("terrain light pipeline", &terrain_light_layout, &vb)
         }
         .build(&device, &terrain_light_shader, format);
@@ -912,7 +912,7 @@ impl<'a> PipelineDesc<'a> {
             fs: "fs_main",
             blend: None,
             depth_write: true,
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_compare: Some(wgpu::CompareFunction::Greater),
         }
     }
 
@@ -985,7 +985,7 @@ impl<'a> PipelineDesc<'a> {
                 depth_stencil: self
                     .depth_compare
                     .map(|depth_compare| wgpu::DepthStencilState {
-                        format: crate::device::DEPTH_FORMAT,
+                        format: crate::device::depth_format(device.features()),
                         depth_write_enabled: self.depth_write,
                         depth_compare,
                         stencil,

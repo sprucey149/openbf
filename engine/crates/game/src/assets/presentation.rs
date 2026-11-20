@@ -3,7 +3,7 @@
 //! `load_model`; admitting another model requires a consumer/placement audit.
 
 use super::{CpuMesh, Manifest, Scene};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 

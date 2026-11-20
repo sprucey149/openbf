@@ -148,6 +148,8 @@ pub struct ClassAnim {
     /// (weapon class, lowercase; its animation bank) per weapon slot that
     /// names one.
     pub banks: Vec<(String, String)>,
+    /// Optional parent bank (`ComboAnimationBank` word 1) per weapon slot.
+    pub fallback_banks: Vec<(String, String)>,
     /// BF2 custom-animation descriptors, including explicit hero defaults.
     pub custom: custom::Descriptors,
 }
@@ -159,6 +161,18 @@ impl ClassAnim {
             .iter()
             .find(|(w, _)| w.eq_ignore_ascii_case(weapon))
             .map_or("rifle", |(_, b)| b)
+    }
+
+    /// Primary bank stem and optional parent bank stem for combo/offhand lookup.
+    pub fn bank_pair_of(&self, weapon: &str) -> (&str, Option<&str>) {
+        let primary = self.bank_of(weapon);
+        let primary = primary.split_once('_').map_or(primary, |(_, b)| b);
+        let fallback = self
+            .fallback_banks
+            .iter()
+            .find(|(w, _)| w.eq_ignore_ascii_case(weapon))
+            .map(|(_, b)| b.split_once('_').map_or(b.as_str(), |(_, s)| s));
+        (primary, fallback)
     }
 }
 
@@ -1079,7 +1093,16 @@ impl Animator {
 
     /// The pose the two players keep, without the aim's turn.
     pub fn kept_pose(&self, skel: &Skeleton) -> Pose {
-        self.kept.clone().unwrap_or_else(|| Pose::bind(skel))
+        // A class change (a hero accept included) keeps the generation, so
+        // the animator can still hold the previous body's pose when the first
+        // draw with the new skeleton arrives. `step` drops it on the next
+        // update, but drawing happens before that: never pose a skeleton with
+        // a kept pose of a different length (the old body's bone indices can
+        // index past it in `aim::global`).
+        self.kept
+            .clone()
+            .filter(|k| k.0.len() == skel.names.len())
+            .unwrap_or_else(|| Pose::bind(skel))
     }
 
     /// One update in a seat (card VTURG, `analysis/re-turret-draw.md` 3.3

@@ -210,6 +210,16 @@ impl NavGraph {
         };
         self.set_blocked_groups(if block { cur | bits } else { cur & !bits });
     }
+
+    /// `BlockPlanningGraphArcs` (`block`) / `UnblockPlanningGraphArcs` by
+    /// 0-based group index (BF2 mission scripts also pass 1-based group numbers).
+    pub fn block_group(&mut self, group: u32, block: bool) {
+        let (cur, bits) = match &self.patches {
+            Some(p) if (group as usize) < p.groups.len() => (p.mask, 1u32 << group),
+            _ => return,
+        };
+        self.set_blocked_groups(if block { cur | bits } else { cur & !bits });
+    }
 }
 
 #[cfg(test)]
@@ -319,5 +329,20 @@ mod tests {
         assert!(g.attach_patches(short).is_err());
         assert!(RoutePatches::parse(vec![vec![1]], &sidecar(&[vec![0, 0]])).is_err());
         assert_eq!(g.blocked_groups(), 0);
+    }
+
+    #[test]
+    fn block_group_toggles_valid_bit_and_ignores_out_of_range() {
+        let mut g = graph();
+        let authored = g.routes.clone();
+        g.attach_patches(patches()).unwrap();
+        g.block_group(0, true);
+        assert_eq!(g.blocked_groups(), 1);
+        assert_ne!(g.routes, authored);
+        g.block_group(7, true); // only 1 group attached: clamped to bitmask width
+        assert_eq!(g.blocked_groups(), 1);
+        g.block_group(0, false);
+        assert_eq!(g.blocked_groups(), 0);
+        assert_eq!(g.routes, authored);
     }
 }

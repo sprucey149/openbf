@@ -249,6 +249,15 @@ pub fn load_classdb(classes_dir: &Path, game: &str, factions: &[&str]) -> Result
             loaded += 1;
         }
     }
+    if game == "bf2" {
+        for extra in ["bf2_gar.ron", "bf2_jed.ron"] {
+            let p = classes_dir.join(extra);
+            if pak::exists(&p) {
+                db.load(&p)?;
+                loaded += 1;
+            }
+        }
+    }
     if loaded == 0 {
         return Err(anyhow!(
             "no {game} class files in {} (run `bake classes` on the side LVLs)",
@@ -691,16 +700,30 @@ pub fn class_anim(
         .iter()
         .find_map(|k| db.prop(class, k).and_then(word))
         .unwrap_or_else(|| "human".to_owned());
-    let banks = slots
-        .iter()
-        .filter_map(|s| {
-            let weapon = db.resolve(&s.weapon)?;
-            let bank = ["ComboAnimationBank", "CustomAnimationBank", "AnimationBank"]
-                .iter()
-                .find_map(|k| db.prop(weapon, k).and_then(word))?;
-            Some((s.weapon.to_ascii_lowercase(), bank))
-        })
-        .collect();
+    let mut banks = Vec::new();
+    let mut fallback_banks = Vec::new();
+    for s in slots {
+        let Some(weapon) = db.resolve(&s.weapon) else {
+            continue;
+        };
+        let Some(val) = ["ComboAnimationBank", "CustomAnimationBank", "AnimationBank"]
+            .iter()
+            .find_map(|k| db.prop(weapon, k))
+        else {
+            continue;
+        };
+        let mut words = val.split_whitespace();
+        let Some(first) = words.next() else {
+            continue;
+        };
+        let wname = s.weapon.to_ascii_lowercase();
+        banks.push((wname.clone(), first.to_ascii_lowercase()));
+        if let Some(second) = words.next() {
+            if !second.eq_ignore_ascii_case("none") && !second.eq_ignore_ascii_case(first) {
+                fallback_banks.push((wname, second.to_ascii_lowercase()));
+            }
+        }
+    }
     // SkeletonRootScale counts only with an own skeleton (BF1 B1:123186-123194,
     // BF2 B2:172070-172080; re-soldier-skeleton-skins 3).
     let own = db
@@ -715,6 +738,7 @@ pub fn class_anim(
         family,
         root_scale,
         banks,
+        fallback_banks,
         custom: Default::default(),
     }
 }

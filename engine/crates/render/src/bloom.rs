@@ -52,7 +52,7 @@ pub(crate) fn gather(
     PipelineDesc {
         fs,
         depth_write: false,
-        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+        depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
         ..desc
     }
     .build_with_stencil(

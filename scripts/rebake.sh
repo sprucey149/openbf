@@ -369,8 +369,30 @@ if want common; then
     echo "rebake: common needs MOVIES/SHELL.MVS: no copy in $UI2 and no BF2 PS2 disc was chosen. Add the disc to iso/." >&2
     exit 2
   fi
+  INSHELL="$(ci "$UI2" INSHELL.LVL)"
+  INGAME_MVS="$(ci "$UI2" MOVIES/INGAME.MVS)"
+  [ -f "$INGAME_MVS" ] || INGAME_MVS="${BF2_CONSOLE_ISO:-}"
+  CAMP_ARGS=()
+  if [ -f "$INSHELL" ] && [ -n "$INGAME_MVS" ] && [ -f "$INGAME_MVS" ]; then
+    CAMP_ARGS=(--campaign "$INSHELL" "$INGAME_MVS")
+  fi
   clean "$OUT/common_bf2/shell"
-  "$BAKE" shell "$(ci "$UI2" SHELL.LVL)" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
+  SHELL_LVL="$(ci "$UI2" SHELL.LVL)"
+  "$BAKE" shell "$SHELL_LVL" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" ${CAMP_ARGS[@]+"${CAMP_ARGS[@]}"}
+  if [ -z "$OPENBF_BF2_TREE" ] || ! is_pc_lvl_dir "$UI2" bf2; then
+    "$PYTHON" -I "$ROOT/scripts/gen_missions.py" --shell-credits "$SHELL_LVL" "$OUT/common_bf2/shell/credits.json"
+  fi
+  # Rise of the Empire 3D planet gallery (`GAL/GAL1.LVL`) and its music (`SOUND/GAL.LVL`).
+  GAL_LVL="$(ci "$UI2" GAL/GAL1.LVL)"
+  if [ -f "$GAL_LVL" ]; then
+    clean "$OUT/bf2_gal1/models" "$OUT/bf2_gal1/textures" "$OUT/bf2_gal1/sounds"
+    map_donors bf2 gal/gal1.lvl
+    "$BAKE" map "$GAL_LVL" "$OUT/bf2_gal1" ${PC_ARG[@]+"${PC_ARG[@]}"}
+    GAL_SND="$(ci "$S2" SOUND/GAL.LVL)"
+    if [ -f "$GAL_SND" ]; then
+      "$BAKE" sounds "$GAL_SND" "$OUT/bf2_gal1" "$(ci "$UI2" CORE.LVL)"
+    fi
+  fi
 fi
 if want side; then
   echo "== soldiers + weapons + vehicles =="
@@ -425,7 +447,9 @@ if want side; then
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle "$A1"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian,geo_inf_acklay geo_weap_inf_blunderbuss,ack_weap_r_smash,ack_weap_l_smash "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" jed jed_inf_jedi,jed_inf_sith all_weap_inf_lightsabre,rep_weap_aalya_lightsabre,rep_weap_inf_lightsabre,cis_weap_inf_doublesabre "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gar gar_inf_nabooqueen,gar_inf_nabooguard,gar_inf_jediguard gar_weap_inf_rifle,gar_weap_inf_pistol,gar_weap_inf_launcher,gar_weap_inf_thermaldetonator "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gam gam_inf_gamorreanguard gam_inf_weap_axe "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" snw hot_inf_wampa hot_inf_weap_l_smash,hot_inf_weap_r_smash,hot_inf_weap_head_smash "$A2"
@@ -433,7 +457,7 @@ if want side; then
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
   BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
-  for s in ALL IMP REP CIS TUR DES WOK GAM EWK GEO; do
+  for s in ALL IMP REP CIS TUR DES WOK GAM EWK GEO JED GAR GUN SNW; do
     "$BAKE" combos "$(ci "$B2" "SIDE/$s.LVL")" "$OUT/side_bf2/combos/$(echo "$s" | tr 'A-Z' 'a-z').ron"
   done
   # BF2's pistols are baked for the HUD's weapon row (card HUDW): the PS2
@@ -566,7 +590,7 @@ if want classes; then
   for side in ewk wok geo des gun gar; do
     "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
   done
-  for side in ewk wok geo des gun snw gam; do
+  for side in ewk wok geo des gun snw gam jed gar; do
     "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
   done
   # BF2's building turrets (card VTUR2): their PROPs; each map bake pulls the
@@ -617,7 +641,7 @@ if want sounds; then
     n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2" "$D2"
   done
   if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ]; then
-    for n in SPA1 SPA3 SPA6 SPA7 SPA8 SPA9; do
+    for n in SPA1 SPA2 SPA3 SPA4 SPA6 SPA7 SPA8 SPA9; do
       [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
       n=$(printf '%s' "$n" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2"
     done
@@ -702,7 +726,9 @@ if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
     [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
     case "$n" in
       SPA1) SKY=yav ;;
+      SPA2) SKY=cor ;;
       SPA3) SKY=kas ;;
+      SPA4) SKY=mus ;;
       SPA6) SKY=myg ;;
       SPA7) SKY=fel ;;
       SPA8) SKY=hot ;;

@@ -304,6 +304,18 @@ fn animation_names(combo: &ComboDef) -> BTreeSet<String> {
     names
 }
 
+pub(crate) fn clip_for_banks<'a>(
+    clips: &'a [Clip],
+    family: &str,
+    banks: &[&str],
+    name: &str,
+    layer: &str,
+) -> Option<&'a Clip> {
+    banks
+        .iter()
+        .find_map(|bank| clip_for(clips, family, bank, name, layer))
+}
+
 pub(crate) fn clip_for<'a>(
     clips: &'a [Clip],
     family: &str,
@@ -408,6 +420,17 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
         .unwrap_or("human")
         .to_ascii_lowercase();
     let bank = words[0].split_once('_').map_or(words[0], |(_, b)| b);
+    let mut banks = vec![bank];
+    if let Some(parent) = words
+        .get(1)
+        .copied()
+        .filter(|w| !w.eq_ignore_ascii_case("none"))
+    {
+        let parent = parent.split_once('_').map_or(parent, |(_, b)| b);
+        if !parent.eq_ignore_ascii_case(bank) {
+            banks.push(parent);
+        }
+    }
     let asset = assets::load_skinned_glb(&side.join("soldiers").join(format!("{geometry}.glb")))?;
     physical::skeleton(&asset.skeleton)?;
     let sets: manifest::anim_sets::SoldierSets = ron::from_str(&pak::read_to_string(
@@ -444,15 +467,15 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
     let mut names = animation_names(&combo);
     // IDLE can omit Animation. Keep an authored standing pose for launches.
     if let Some(idle) = ["stand_idle", "stand_idle_emote"].into_iter().find(|name| {
-        clip_for(&asset.clips, &family, bank, name, "upper").is_some()
-            || clip_for(&asset.clips, &family, bank, name, "lower").is_some()
+        clip_for_banks(&asset.clips, &family, &banks, name, "upper").is_some()
+            || clip_for_banks(&asset.clips, &family, &banks, name, "lower").is_some()
     }) {
         names.insert(idle.into());
     }
     let mut clips = Vec::new();
     for name in names {
-        let upper = clip_for(&asset.clips, &family, bank, &name, "upper");
-        let lower = clip_for(&asset.clips, &family, bank, &name, "lower");
+        let upper = clip_for_banks(&asset.clips, &family, &banks, &name, "upper");
+        let lower = clip_for_banks(&asset.clips, &family, &banks, &name, "lower");
         let frames = upper
             .into_iter()
             .chain(lower)
@@ -537,7 +560,7 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
                 .map_or(0.0, SaberClip::seconds)
         })
         .collect();
-    let throw_bindings = throw_bind::bindings(db, soldier, &combo, &asset, &sets, &family, bank)?;
+    let throw_bindings = throw_bind::bindings(db, soldier, &combo, &asset, &sets, &family, &banks)?;
     let class = SaberClass {
         combo,
         blades: bindings.into_iter().map(|b| b.blade).collect(),

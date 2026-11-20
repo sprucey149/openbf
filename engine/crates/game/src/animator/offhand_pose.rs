@@ -19,10 +19,17 @@ impl Animator {
         seconds: f32,
         legs: bool,
     ) -> bool {
-        let bank = class.bank_of(weapon);
-        let bank = bank.split_once('_').map_or(bank, |(_, b)| b);
-        let upper = crate::hero_blades::clip_for(clips, &class.family, bank, animation, "upper");
-        let lower = crate::hero_blades::clip_for(clips, &class.family, bank, animation, "lower");
+        let (primary, fallback) = class.bank_pair_of(weapon);
+        let banks: [&str; 2] = [primary, fallback.unwrap_or(primary)];
+        let banks = if fallback.is_some() {
+            &banks[..]
+        } else {
+            &banks[..1]
+        };
+        let upper =
+            crate::hero_blades::clip_for_banks(clips, &class.family, banks, animation, "upper");
+        let lower =
+            crate::hero_blades::clip_for_banks(clips, &class.family, banks, animation, "lower");
         let Some(upper) = upper.or(lower) else {
             return false;
         };

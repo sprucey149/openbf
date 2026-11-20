@@ -20,12 +20,16 @@ pub(in crate::ai) fn goal(
         && !st.arm.spare
         && st.arm.pick.is_none_or(|slot| slot == u.weapon_slot)
     {
-        frame.enemy.filter(|e| e.mount.is_none()).map(|target| {
+        if let Some(target) = frame.enemy.filter(|e| e.mount.is_none()) {
             let state = st
                 .melee
                 .get_or_insert_with(|| MeleeBrain::begin(me, sim.tick));
-            crate::ai::melee::goal(sim, me, u, target, state)
-        })
+            Some(crate::ai::melee::goal(sim, me, u, target, state))
+        } else if let Some((s, _)) = frame.station {
+            Some(Vec3::new(s.sphere_centre.x, s.pos.y, s.sphere_centre.z))
+        } else {
+            None
+        }
     } else {
         None
     };

@@ -139,6 +139,8 @@ pub struct StationDraw {
     /// The instance's translation: the sim's station stands exactly there
     /// (`crate::roster::add_stations`), which is how the two are joined.
     pub pos: Vec3,
+    /// The sim station's `transform`, taken each step: a world animation
+    /// (`crate::world_anim`) moves it.
     model: Mat4,
     rig: Option<ManifestTurretRig>,
     /// (the draws in `SceneGpu::draws`, the rig part they ride).
@@ -221,6 +223,7 @@ impl super::SceneGpu {
             let Some(class) = sim.station_classes.get(usize::from(st.class)) else {
                 continue;
             };
+            sd.model = st.transform;
             if st.destroyed {
                 sd.anim = st.motion;
                 sd.last_tick = Some(sim.tick);

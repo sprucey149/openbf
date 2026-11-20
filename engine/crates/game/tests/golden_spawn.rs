@@ -15,6 +15,9 @@ use game::viewer::{camera_from, upload_scene, GOLDEN_CAM};
 fn hud() -> ui::hud::HudModel {
     ui::hud::HudModel {
         ctf: false,
+        unlimited_tickets: [false; 2],
+        popup: None,
+        objectives_updated: false,
         team_points: None,
         flag_status: None,
         lock: None,
@@ -223,6 +226,7 @@ fn hot1_teams() -> [game::walk::TeamTemplate; 2] {
             family: "human".into(),
             root_scale: 1.0,
             banks: Vec::new(),
+            fallback_banks: Vec::new(),
             custom: Default::default(),
         },
         ..base.clone()

@@ -34,6 +34,10 @@ pub struct ShellMovie {
     pub name: String,
     /// Frame pack file names under `movies/`, in play order.
     pub segments: Vec<String>,
+    /// Optional demuxed audio file name under `movies/` (for campaign cutscenes/transitions).
+    /// The default keeps `shell.ron` baked before campaign audio loadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<String>,
 }
 
 pub const PACK_MAGIC: &[u8; 4] = b"OBJM";

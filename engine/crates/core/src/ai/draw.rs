@@ -70,6 +70,10 @@ pub const SALT_TPOS: u32 = 0x7B_05C0;
 /// Card DROIDAI: a hidden droid carrier's launch draw, one per
 /// `remote::BOT_ROLL` window.
 pub const SALT_DROID: u32 = 0xD8_01D5;
+/// A Defend member's defend helper (`core::goals`): its step-out draw at a
+/// hint (`^ 1` the barrier coin, `^ 2` the first corner, `^ 3` and `^ 4` the
+/// random step on X and Z).
+pub const SALT_DEFEND: u32 = 0xDE_FE4D;
 
 /// [`route_rand`]'s FNV shape with a per-use-site salt folded in.
 pub fn unit_rand(unit_index: u32, tick: u64, gen: u32, salt: u32) -> u32 {

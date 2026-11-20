@@ -485,6 +485,16 @@ pub enum Event {
         /// false today.
         energy: bool,
     },
+    /// A station's health or shield pool lost points to an attack.
+    StationDamaged {
+        station: u16,
+        attacker: Option<UnitHandle>,
+    },
+    /// A shielded vehicle lost shield points without hull damage (`Event::VehicleHit` had `damage == 0.0`).
+    VehicleShieldDamaged {
+        shooter: Option<UnitHandle>,
+        vehicle: crate::vehicle::VehicleHandle,
+    },
     /// A door's trigger was entered: its `OpenSound` plays (queue DRV,
     /// [`crate::door::Door::edge`]). `door` indexes [`Sim::doors`].
     DoorOpened {

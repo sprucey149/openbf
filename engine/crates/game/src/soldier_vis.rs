@@ -740,6 +740,10 @@ struct NativeDraw {
     anim: Vec<ClassAnim>,
     skins: Vec<Vec<Option<TextureHandle>>>,
     low_skins: Vec<Vec<Option<TextureHandle>>>,
+    /// Saber edges for a native team's classes (campaign Jedi knights and
+    /// masters are native ambush teams). Loaded the same way as a main team's
+    /// sabers; indexed by the unit's class slot.
+    sabers: Vec<Option<saber::SaberVisual>>,
 }
 
 /// Per-class soldier assets. `assets` is the BODY cache, one upload per

@@ -612,6 +612,8 @@ fn post(name: &str, team: u8, pos: Vec3, spawn_path: Option<&str>) -> CommandPos
         value_def: [crate::layout::VALUE_DEFAULT; 5],
         major: false,
         space: false,
+        capturable: true,
+        visible: true,
         vo: Default::default(),
     }
 }
@@ -624,8 +626,18 @@ fn post(name: &str, team: u8, pos: Vec3, spawn_path: Option<&str>) -> CommandPos
 fn rescue_layout() -> MapLayout {
     MapLayout {
         cps: vec![
-            post("cp_enemy", 2, Vec3::new(100.0, 6.0, 100.0), None),
-            post("cp_void", 1, Vec3::new(500.0, 0.0, 500.0), None),
+            post(
+                "cp_enemy",
+                2,
+                Vec3::new(100.0, 6.0, 100.0),
+                Some("cp_enemy_spawn"),
+            ),
+            post(
+                "cp_void",
+                1,
+                Vec3::new(500.0, 0.0, 500.0),
+                Some("cp_void_spawn"),
+            ),
             post(
                 "cp_home",
                 1,
@@ -633,13 +645,31 @@ fn rescue_layout() -> MapLayout {
                 Some("cp_home_spawn"),
             ),
         ],
-        paths: vec![SpawnPath {
-            name: "cp_home_spawn".to_string(),
-            nodes: vec![SpawnNode {
-                pos: Vec3::new(110.0, 6.0, 110.0),
-                yaw: 1.25,
-            }],
-        }],
+        // A post with no SpawnPath is never spawned at (`cp_spawn_nodes`),
+        // so the first two carry one node each, 3 m off their corner.
+        paths: vec![
+            SpawnPath {
+                name: "cp_enemy_spawn".to_string(),
+                nodes: vec![SpawnNode {
+                    pos: Vec3::new(103.0, 6.0, 103.0),
+                    yaw: 0.0,
+                }],
+            },
+            SpawnPath {
+                name: "cp_void_spawn".to_string(),
+                nodes: vec![SpawnNode {
+                    pos: Vec3::new(503.0, 0.0, 503.0),
+                    yaw: 0.0,
+                }],
+            },
+            SpawnPath {
+                name: "cp_home_spawn".to_string(),
+                nodes: vec![SpawnNode {
+                    pos: Vec3::new(110.0, 6.0, 110.0),
+                    yaw: 1.25,
+                }],
+            },
+        ],
         regions: Vec::new(),
         // Any map but TAT1: the rule under test applies everywhere else.
         map: "kamino1".to_string(),
@@ -660,7 +690,7 @@ fn a_player_seated_on_team_1_starts_at_its_own_post() {
         let u = &w.sim.units[w.player.index as usize];
         (u.team, u.soldier.pos)
     };
-    // `cp_enemy` (team 2) has no spawn path: its one node is beside it.
+    // `cp_enemy` (team 2): its path's one node is beside it.
     let own = Vec3::new(103.0, 6.0, 103.0);
     assert_eq!(start(1), (1, own));
     let (team, pos) = start(0);

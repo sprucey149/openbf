@@ -358,6 +358,15 @@ Rules, the same on both games' maps:
   (`Fx::buff_loops`, `SoundLib::play_buff_loops`), and an ability's cast plays its effect's
   own sound (`buff_rage_fire` and the like) beside the weapon's `com_buff_fire`. Both were
   missing for the officer and hero abilities too.
+- **Each aura loop draws its own pitch and gain** (2026-11-19): every BF2 start draws pitch +-
+  `PitchDev` and gain +- `GainDev` (`FUN_0054cba8` -> `FUN_0054dd28`, the draws `FUN_00542508`
+  and `FUN_005425c8`), loops included, and the emitter's handle update only moves the voice
+  afterwards (`FUN_00374de0` -> `FUN_0043d948`). The four aura loops carry `PitchDev` 0.15. The
+  port had played every aura at the property's pitch, so the dozen loops one officer cast
+  starts at a spawn summed in phase, about 21 dB over one aura instead of about 11 dB
+  (`SoundLib::start_draw`, `game/src/sounds/tests.rs` `a_loop_start_draws_its_pitch_and_gain`).
+  trace: whether the other loop paths (engines, walkers, turrets, the cutter, overheat) keep a
+  start's draw under the pitch their own code writes each update.
 
 For earning and career levels see section 5. trace: whether the PS2 hides the aura while its soldier sits in a
 vehicle (`FUN_002368a0`'s attach test); the port draws it at the rider as before.

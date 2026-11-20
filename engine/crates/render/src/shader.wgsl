@@ -316,7 +316,7 @@ fn vs_speckle(in: VsIn) -> VsOut {
 @vertex
 fn vs_sky_bloom(in: VsIn) -> VsOut {
     var out = mesh_vertex(in);
-    out.clip_pos.z = out.clip_pos.w;
+    out.clip_pos.z = 0.0;
     return out;
 }
 

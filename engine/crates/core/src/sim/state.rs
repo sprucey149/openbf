@@ -10,7 +10,8 @@ use super::spawn::SpawnWaves;
 use crate::aim_assist::AssistState;
 use crate::battle::Battle;
 use crate::collision::{
-    CollisionWorld, FOOT_RADIUS, FOOT_RING, FOOT_RING_DIRS, NO_GROUND, STEP_HEIGHT, TERRAIN_BURY,
+    CollisionWorld, FLOOR_SEARCH_MIN, FOOT_RADIUS, FOOT_RING, FOOT_RING_DIRS, NO_GROUND,
+    STEP_HEIGHT, TERRAIN_BURY,
 };
 use crate::cp::CommandPost;
 use crate::fmath::FloatExt;
@@ -303,6 +304,12 @@ pub struct Sim {
     /// spawn comes from the caller's own `UnitSpec`, exactly as before.
     pub classes: [Vec<crate::unit::UnitClass>; 2],
     pub test_rosters: [Option<(usize, Option<u8>)>; 2],
+    /// Per-team dynamically enabled class mask (`class_enabled[team][class]`).
+    /// Empty (or shorter than `classes[team]`) treats omitted indices as enabled.
+    pub class_enabled: [Vec<bool>; 2],
+    /// Per-team AI spawning permission (campaign missions can hold AI spawning
+    /// off at startup until an `AllowAiSpawn` stage mutation enables it).
+    pub ai_spawn_allowed: [bool; 2],
     /// BF2 mission hero classes and offer lifecycle; absent on other content.
     pub heroes: Option<super::heroes::Heroes>,
     pub deathmatch: Option<super::deathmatch::Deathmatch>,
@@ -706,6 +713,9 @@ pub struct Sim {
     /// Phase B: the two teams' objective plans (`core::commander`). SIM STATE
     /// — hashed, replay-exact, re-made one team per tick.
     pub commander: [crate::commander::TeamPlan; 2],
+    /// The mission script's AI goals (`core::goals`). SIM STATE — hashed
+    /// once a goal is made.
+    pub ai_goals: crate::goals::AiGoals,
     /// Card ARCM: per team, per arc of `nav`, the round's closings by its
     /// bots (`ai::arcm`): an arc that keeps failing leaves the team's route
     /// draw. SIM STATE — hashed once any is counted; empty until then.
@@ -931,6 +941,8 @@ pub fn omni_radius_for(source_game: &str) -> f32 {
 /// plays as before.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MissionAi {
+    /// BF2 ForceAIOutOfVehicles team mask (FUN_001924e8).
+    pub force_out_of_vehicles: u8,
     /// Stock Kamino disables blind tactical jet hops. The hop must clear
     /// the intervening soldier barriers (BF2 FUN_002dbb68 B2:265077–265083).
     pub allow_blind_jet_jumps: bool,
@@ -945,6 +957,13 @@ pub struct MissionAi {
     /// 70): a sniper's lane counts ground out to `2 d`
     /// ([`crate::ai::snipe::lane`]).
     pub snipe_suitability: f32,
+    /// `SetAIDifficulty(a, b [, level])`: per PS2 level (easy, medium,
+    /// hard) the skill added to the human team's bots (`a`) and to every
+    /// other team's (`b`). BF2 `FUN_002a2988` writes `DAT_005fdf88` /
+    /// `DAT_005fdf98` at the level; with no level string the binding writes
+    /// all three. `FUN_002a28e0` zeroes them at mission start
+    /// (`re-ai-difficulty.md` §1.1, §2.1). Every campaign script sets them.
+    pub skill_delta: [[i32; 2]; 3],
 }
 
 /// `AISnipeSuitabilityDist`'s default (BF2 `DAT_005fdffc`, 70.0).
@@ -953,10 +972,12 @@ pub const SNIPE_SUITABILITY_DEFAULT: f32 = 70.0;
 impl Default for MissionAi {
     fn default() -> Self {
         Self {
+            force_out_of_vehicles: 0,
             allow_blind_jet_jumps: true,
             view_mult: 1.0,
             aggressiveness: [1.0; 2],
             snipe_suitability: SNIPE_SUITABILITY_DEFAULT,
+            skill_delta: [[0; 2]; 3],
         }
     }
 }
@@ -965,6 +986,20 @@ impl MissionAi {
     /// `SetAIViewMultiplier`'s clamp (BF2 `FUN_002e37c0`).
     pub fn set_view_mult(&mut self, m: f32) {
         self.view_mult = m.clamp(0.1, 1.0);
+    }
+
+    /// `SetAIDifficulty(a, b, level)`: `level` 1..=3 (easy, medium, hard)
+    /// sets that level's pair; `None` sets all three (BF2 `FUN_002a2988`
+    /// ignores a level outside 1..=3).
+    pub fn set_skill_delta(&mut self, human_team: i32, others: i32, level: Option<usize>) {
+        let levels = match level {
+            Some(l @ 1..=3) => l - 1..l,
+            Some(_) => return,
+            None => 0..3,
+        };
+        for l in levels {
+            self.skill_delta[l] = [human_team, others];
+        }
     }
 
     /// `AISnipeSuitabilityDist`'s clamp (BF2: [0, 100]).
@@ -1059,15 +1094,41 @@ impl Sim {
     /// The integer skill a bot of team `team` spawns with: the base skill
     /// of the team's [`Sim::team_difficulty`] override (the arena), else the
     /// team's DTEAM row's skill, else (a team past 1) the round's base.
+    /// The mission's `SetAIDifficulty` delta is added on top, clamped to
+    /// 1..=20 ([`Sim::script_skill_delta`]).
     pub fn bot_skill(&self, team: u8) -> u8 {
         let t = usize::from(team);
-        match self.team_difficulty.get(t).copied().flatten() {
+        let base = match self.team_difficulty.get(t).copied().flatten() {
             Some(d) => d.base_skill(),
             None => self
                 .team_rows()
                 .get(t)
                 .map_or(self.difficulty.base_skill(), |r| r.level),
+        };
+        let delta = self.script_skill_delta(team);
+        if delta == 0 {
+            return base;
         }
+        (i32::from(base) + delta).clamp(1, 20) as u8
+    }
+
+    /// The `SetAIDifficulty` delta for team `team`'s bots. BF2 `FUN_002a29d8`
+    /// adds the human team's (`DAT_005fdf88`) to the bots of the team
+    /// `FUN_002a8300` names (the single-player or co-op human's; none in
+    /// netplay) and the other (`DAT_005fdf98`) to every other team, both at
+    /// the shell level, then clamps to 1..=20. OURS: the port's tiers sit a
+    /// step above the PS2's levels (`crate::skill`, Easy is the PS2 Normal's
+    /// base 14 and Normal the PS2 Elite's 17), so Easy reads the script's
+    /// medium pair and Normal the hard pair; Hard and Elite, above anything
+    /// the PS2 has, read the hard pair too. No tier reads the easy pair.
+    pub fn script_skill_delta(&self, team: u8) -> i32 {
+        let level = match self.difficulty {
+            crate::skill::Difficulty::Easy => 1,
+            _ => 2,
+        };
+        let human_team =
+            !self.netplay_rows && team < 2 && self.humans_per_team()[usize::from(team)] > 0;
+        self.mission_ai.skill_delta[level][usize::from(!human_team)]
     }
 
     /// The skill vector of whoever shoots AT a unit of team `team`: the
@@ -1124,6 +1185,8 @@ impl Sim {
             weapon_classes: vec![WeaponClass::bf1_rifle()].into(),
             classes: [Vec::new(), Vec::new()],
             test_rosters: [None; 2],
+            class_enabled: [Vec::new(), Vec::new()],
+            ai_spawn_allowed: [true, true],
             heroes: None,
             deathmatch: None,
             space_assault: None,
@@ -1248,6 +1311,7 @@ impl Sim {
                 crate::commander::TeamPlan::new(0),
                 crate::commander::TeamPlan::new(1),
             ],
+            ai_goals: Default::default(),
             arc_fails: Default::default(),
             tokens: Vec::new(),
             focus_born: Vec::new(),
@@ -1466,6 +1530,10 @@ impl Sim {
         self.ground_under_with(feet, rising, crate::collision::HullFilter::All)
     }
 
+    pub fn ground_hit_under(&self, feet: Vec3, rising: bool) -> Option<f32> {
+        self.ground_hit_under_with(feet, rising, crate::collision::HullFilter::All)
+    }
+
     /// [`Sim::ground_under`] standing on only the vehicle hulls `hulls`
     /// admits (a pad's spawn ray sees none, card VHULL).
     pub fn ground_under_with(
@@ -1476,6 +1544,16 @@ impl Sim {
     ) -> f32 {
         let probe = feet.y + if rising { 0.0 } else { STEP_HEIGHT };
         self.floor_under(feet, probe, hulls, true).0
+    }
+
+    pub fn ground_hit_under_with(
+        &self,
+        feet: Vec3,
+        rising: bool,
+        hulls: crate::collision::HullFilter,
+    ) -> Option<f32> {
+        let probe = feet.y + if rising { 0.0 } else { STEP_HEIGHT };
+        self.floor_hit(feet, probe, hulls, true).map(|(y, _, _)| y)
     }
 
     pub fn water_plane(&self) -> Option<crate::water::Plane<'_>> {
@@ -1517,6 +1595,12 @@ impl Sim {
             .0
     }
 
+    pub fn ground_point_hit_under(&self, feet: Vec3, rising: bool) -> Option<f32> {
+        let probe = feet.y + if rising { 0.0 } else { STEP_HEIGHT };
+        self.floor_hit(feet, probe, crate::collision::HullFilter::All, false)
+            .map(|(y, _, _)| y)
+    }
+
     /// [`Sim::ground_under`] with the floor's normal: the model ray's, or the
     /// heightfield triangle's; up when there is no ground. The soldier's
     /// floor contact (card STHOP, `Soldier::resolve_ground`), asked AFTER the
@@ -1548,6 +1632,23 @@ impl Sim {
     pub fn ground_point_under_n(&self, feet: Vec3, from_y: f32) -> (f32, Vec3) {
         let probe = (feet.y + STEP_HEIGHT).fmax(from_y);
         self.floor_under(feet, probe, crate::collision::HullFilter::All, false)
+    }
+
+    pub fn ground_point_hit_under_n(&self, feet: Vec3, from_y: f32) -> Option<(f32, Vec3)> {
+        let probe = (feet.y + STEP_HEIGHT).fmax(from_y);
+        self.floor_hit(feet, probe, crate::collision::HullFilter::All, false)
+            .map(|(y, n, _)| (y, n))
+    }
+
+    /// [`Sim::ground_under`] with the floor's normal when one is struck.
+    pub fn ground_hit_under_n(&self, feet: Vec3, rising: bool, from_y: f32) -> Option<(f32, Vec3)> {
+        let probe = if rising {
+            feet.y
+        } else {
+            (feet.y + STEP_HEIGHT).fmax(from_y)
+        };
+        self.floor_hit(feet, probe, crate::collision::HullFilter::All, true)
+            .map(|(y, n, _)| (y, n))
     }
 
     /// [`Sim::ground_under_n`] with the probe only
@@ -1594,6 +1695,23 @@ impl Sim {
         hulls: crate::collision::HullFilter,
         ring: bool,
     ) -> (f32, Vec3, Option<crate::vehicle::VehicleHandle>) {
+        self.floor_hit(feet, probe, hulls, ring).unwrap_or_else(|| {
+            let miss = if probe > NO_GROUND {
+                NO_GROUND
+            } else {
+                FLOOR_SEARCH_MIN
+            };
+            (miss, Vec3::Y, None)
+        })
+    }
+
+    pub(super) fn floor_hit(
+        &self,
+        feet: Vec3,
+        probe: f32,
+        hulls: crate::collision::HullFilter,
+        ring: bool,
+    ) -> Option<(f32, Vec3, Option<crate::vehicle::VehicleHandle>)> {
         let mut terrain = self
             .heightfield
             .as_ref()
@@ -1605,24 +1723,14 @@ impl Sim {
         if terrain.is_some_and(|t| t > feet.y + TERRAIN_BURY) {
             terrain = None;
         }
-        let floor = terrain.unwrap_or(NO_GROUND);
-        if probe > floor {
-            // y >= floor by construction of the ray length.
+        let min_y = terrain.unwrap_or(FLOOR_SEARCH_MIN);
+        if probe > min_y {
+            // y >= min_y by construction of the ray length.
             let down = |x: f32, z: f32| {
                 self.collision
-                    .ray_down_owned(Vec3::new(x, probe, z), probe - floor, hulls)
+                    .ray_down_owned(Vec3::new(x, probe, z), probe - min_y, hulls)
             };
             let centre = down(feet.x, feet.z);
-            // The PS2's foot is a sphere, not a point (`coll_body_lower`,
-            // r 0.57 — re-soldier-ground.md §1.2): it bridges the slits
-            // between collision floor pieces that a point falls through
-            // (KAM1's cloning rooms: the PS2 soldier stands at 69.272 on a
-            // slit, the point foot found the hidden disc 7.9 m down — card
-            // GRND, re-kamino.md §4.3). When the centre ray finds no floor
-            // within a step under the feet, a ring of rays inside the
-            // sphere's reach looks for one, each hit lowered by how far the
-            // sphere's underside is over the feet at that radius.
-            // The terrain within a step is a floor too: no ring on open ground.
             let near = |y| y >= feet.y - STEP_HEIGHT;
             let terrain_near = terrain.is_some_and(|t| t >= feet.y - STEP_HEIGHT);
             if ring && !centre.is_some_and(|(y, _, _)| near(y)) && !terrain_near {
@@ -1639,26 +1747,12 @@ impl Sim {
                     }
                 }
                 if let Some(hit) = best {
-                    return hit;
+                    return Some(hit);
                 }
             } else if let Some(hit) = centre {
-                // The same foot on a short STEEP face (card RAIL). The centre
-                // ray stands the soldier on the bevel of a kerb or a rail — a
-                // floor to the PS2 too (n.y > 0.6), but one the stick has no
-                // hold on (under n.y 0.7 / 0.75, `GroundRules::climb_min_ny`),
-                // so the point foot had to climb the whole face on momentum:
-                // BF2 Kamino's rim rail (0.5 m up a 53° bevel) let a soldier
-                // over at 7 m/s head on and held him at 6.5 m/s, at 45°, and
-                // from a stand — the maintainer's "invisible wall". The PS2's foot
-                // sphere (r 0.57) rides the bevel's top edge instead. So when
-                // the floor under the centre gives no hold, a ring ray that
-                // finds one that does, higher and within a step of the feet,
-                // is the floor: the top of the kerb, less the sphere's sag.
                 if ring && hit.1.y < self.ground_rules.climb_min_ny() && near(hit.0) {
                     let lift =
                         FOOT_RADIUS - (FOOT_RADIUS * FOOT_RADIUS - FOOT_RING * FOOT_RING).sqrt();
-                    // The highest such surface wins; the feet never go
-                    // under the face the centre found.
                     let mut best = None;
                     for (dx, dz) in FOOT_RING_DIRS {
                         if let Some((y, n, owner)) =
@@ -1672,17 +1766,17 @@ impl Sim {
                             }
                         }
                     }
-                    return match best {
+                    return Some(match best {
                         Some((y, n, owner)) => ((y - lift).fmax(hit.0), n, owner),
                         None => hit,
-                    };
+                    });
                 }
-                return hit;
+                return Some(hit);
             }
         }
         match (terrain, self.heightfield.as_ref()) {
-            (Some(t), Some(h)) => (t, Vec3::from(h.normal_at(feet.x, feet.z)), None),
-            _ => (floor, Vec3::Y, None),
+            (Some(t), Some(h)) => Some((t, Vec3::from(h.normal_at(feet.x, feet.z)), None)),
+            _ => None,
         }
     }
 

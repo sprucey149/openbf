@@ -258,6 +258,10 @@ impl AiState {
                 eat(&[3]);
                 eat(&id.to_le_bytes());
             }
+            Some(crate::perception::Foe::Station(id)) => {
+                eat(&[4]);
+                eat(&id.to_le_bytes());
+            }
             None => eat(&[0]),
         }
         // Every slot, `None` a sentinel byte and never skipped: what a unit

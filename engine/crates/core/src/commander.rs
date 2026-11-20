@@ -388,8 +388,26 @@ struct PostInfo {
     atk: i32,
     def: i32,
     /// Card MAIS: the mission lets this team's bots capture it
-    /// ([`crate::cp::CommandPost::ai_no_capture`]).
+    /// ([`crate::cp::CommandPost::ai_no_capture`]). Always on BF2: its draw
+    /// (`FUN_002e8318`, `SWBFRNT2.ELF-decomp.c` 261383-261560) never reads the
+    /// ban (cp+0x80), which only keeps the bots out of the capture count
+    /// (`FUN_003573f8`), so a barred enemy post is still drawn and walked to
+    /// (`analysis/re-conquest-goal.md` 3). BF2 POL1's allies are barred from
+    /// the radar post they are sent to take while the script kills the other
+    /// three enemy posts. PROVISIONAL (ours): BF1 keeps the drop; its draw
+    /// (`FUN_002618b8`) is not checked for the ban. trace: B1:182098-182205.
     capturable: bool,
+    /// BF2: the post's owner entity (post+0x2c) is gone, as a `KillObject`
+    /// leaves it. The capture behaviour checks that handle on entry and on
+    /// every update and goes straight to state 100 when it is null
+    /// (`FUN_002cba48`, `FUN_002cc0a0`: `SWBFRNT2.ELF-decomp.c` 241618-241644,
+    /// 241938-241964), so the goal's base update (`FUN_002e7110`) assigns the
+    /// member again within a second (`analysis/re-conquest-goal.md` §2, §4).
+    /// The draw itself still offers the post as an ownerless one (§3).
+    /// PROVISIONAL (ours): between that draw and the next plan the port's bot
+    /// walks toward the dead post; the disc's stands with its order finished.
+    /// replace: hold the walk for an objective whose post is dead.
+    dead: bool,
 }
 
 /// The Conquest goal's tick for team `team`. Called by
@@ -429,6 +447,7 @@ pub fn plan(sim: &mut Sim, team: u8) {
             || u.team != team
             || u.controller != crate::unit::Controller::Ai
             || u.command.is_some()
+            || sim.ai_goals.steer(sim.handle(i)).is_some()
         {
             continue;
         }
@@ -463,7 +482,8 @@ pub fn plan(sim: &mut Sim, team: u8) {
             neutral: c.owner.is_none(),
             atk: c.def.value_atk[t],
             def: c.def.value_def[t],
-            capturable: !c.ai_no_capture(team),
+            capturable: rules == GoalRules::Bf2 || !c.ai_no_capture(team),
+            dead: rules == GoalRules::Bf2 && c.killed,
         });
     }
     // Unreachable from where the unit stands. No graph (or no hub for the
@@ -568,7 +588,9 @@ pub fn plan(sim: &mut Sim, team: u8) {
                 if tested {
                     clock = AT_POST_TESTED;
                 }
-                if dwell >= DWELL_GIVE_UP || gave_up == Some(c) {
+                if p.dead {
+                    true
+                } else if dwell >= DWELL_GIVE_UP || gave_up == Some(c) {
                     // It has stood beside the post for 10 s without arriving,
                     // or its walk there has failed twice (card MOVR).
                     exclude = Some(c);
@@ -603,9 +625,9 @@ pub fn plan(sim: &mut Sim, team: u8) {
                 neutral: p.neutral,
                 atk: p.atk,
                 def: p.def,
-                // Card MAIS (OURS): a post its bots may not capture
-                // (`AICanCaptureCP`) is not drawn to take; held, it is
-                // still defended.
+                // Card MAIS (OURS, BF1 only): a post its bots may not
+                // capture (`AICanCaptureCP`) is not drawn to take; held, it
+                // is still defended.
                 open: reach(hub, p) && exclude != Some(ci as u32) && (p.friendly || p.capturable),
             }));
             let r = roll(i as u32, sim.tick, gen);

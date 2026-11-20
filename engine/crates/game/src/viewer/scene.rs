@@ -98,7 +98,10 @@ pub struct SceneGpu {
     /// see-through props fade ([`SceneGpu::see_through`]).
     pub instance_draws: Vec<(u32, std::ops::Range<usize>)>,
     pub flag_instances: Vec<u32>,
-    pub ctf_markers: Vec<(u32, Vec3)>,
+    /// Every placed capture marker: its manifest index, the point a capture
+    /// region is matched against, and the placement's own BF2 `Team` property
+    /// (`None` when it carries none).
+    pub ctf_markers: Vec<(u32, Vec3, Option<u8>)>,
     /// The props drawn see-through now, by manifest index and opacity
     /// (`crate::camera_collide`, set by [`SceneGpu::see_through`]).
     pub(super) faded: Vec<(u32, f32)>,
@@ -194,6 +197,13 @@ impl SceneGpu {
         r.set_softness(if softness { self.softness } else { None });
     }
 
+    /// Display-space HUD team colour (0..255) to a linear instance tint.
+    /// Dividing by 128 sent 213 -> 1.66, whose sRGB decode exceeds 1 and
+    /// clamps the marker to flat white instead of blue.
+    fn marker_tint(rgb: [f32; 3]) -> [f32; 3] {
+        rgb.map(|x| render::srgb_decode(x / 255.0))
+    }
+
     pub fn pose_ctf(&mut self, sim: &core::sim::Sim, player: core::unit::UnitHandle) {
         for (ii, range) in &self.instance_draws {
             if self.flag_instances.contains(ii) {
@@ -202,31 +212,73 @@ impl SceneGpu {
                 }
             }
         }
-        let Some(ctf) = &sim.ctf else { return };
         let Some(team) = sim.unit(player).map(|u| usize::from(u.team)) else {
             return;
         };
-        for (ii, pos) in &self.ctf_markers {
-            let Some(owner) = ctf
-                .capture_regions
-                .iter()
-                .position(|r| r.pos.distance_squared(*pos) < 1.0)
-            else {
-                continue;
-            };
-            let rgb = if owner == team {
-                [1.0, 86.0, 213.0]
-            } else {
-                [200.0, 100.0, 100.0]
-            };
-            let color = rgb.map(|x| render::srgb_decode(x / 128.0));
+        for (ii, pos, map_team) in &self.ctf_markers {
+            // The live CTF modes fill `sim.ctf.capture_regions`; a scripted
+            // campaign objective never does (its capture test is an
+            // `OnEnterRegion` call), so the placement's own `Team` property
+            // is what identifies its side there.
+            let owner = sim.ctf.as_ref().and_then(|ctf| {
+                ctf.capture_regions
+                    .iter()
+                    .position(|r| r.pos.distance_squared(*pos) < 1.0)
+            });
+            let own = marker_is_friendly(owner, *map_team, team);
             for (_, range) in self.instance_draws.iter().filter(|(index, _)| index == ii) {
-                for draw in &mut self.draws[range.clone()] {
-                    draw.color = [color[0], color[1], color[2], 1.0];
+                match own {
+                    // The native marker draw (`FUN_001c5610`) tints the
+                    // whole marker — sphere and ground base alike — in the
+                    // viewer's relation colour. Its `spacedust1` material is
+                    // already BLEND (a patterned, non-opaque column), so the
+                    // tint is enough; a dither here reads as a dotted ghost.
+                    Some(own) => {
+                        let rgb = if own {
+                            [1.0, 86.0, 213.0]
+                        } else {
+                            [200.0, 100.0, 100.0]
+                        };
+                        let color = Self::marker_tint(rgb);
+                        for draw in &mut self.draws[range.clone()] {
+                            draw.color = [color[0], color[1], color[2], 1.0];
+                            draw.fade = None;
+                        }
+                    }
+                    // A marker no capture region owns belongs to another
+                    // mode's layout (the map's base world keeps a flag
+                    // placement the active layer does not use). Hide it
+                    // rather than leave a solid white/pink column.
+                    None => {
+                        for draw in &mut self.draws[range.clone()] {
+                            draw.fade = Some(render::Fade::see_through(0.18));
+                        }
+                    }
                 }
             }
         }
     }
+    /// Pose placed world instances moved by a campaign world animation
+    /// (`crate::world_anim`), such as Coruscant's sliding library doors. The
+    /// map's instance draws are grouped in `instance_draws`; a posed instance
+    /// has its whole draw range rewritten to the animated matrix.
+    pub fn pose_world_anims(&mut self, poses: &std::collections::BTreeMap<u32, glam::Mat4>) {
+        for (ii, range) in &self.instance_draws {
+            if let Some(m) = poses.get(ii) {
+                for draw in &mut self.draws[range.clone()] {
+                    draw.model = *m;
+                }
+            }
+        }
+        for turret in &mut self.fallen {
+            if let Some(pose) = poses.get(&(turret.instance as u32)) {
+                for draw in &mut turret.fallen {
+                    draw.model = *pose;
+                }
+            }
+        }
+    }
+
     /// Pose every drawn door at its sim door's `open` (`core::door`): each
     /// moving submesh at `instance · D(open)`, the collision bodies' own
     /// rule. A door with no sim twin (`OPENBF_DOORS_SOLID=1`) stays shut.
@@ -310,6 +362,23 @@ impl SceneGpu {
             }
         }
         self.faded = faded.to_vec();
+    }
+}
+
+/// Which side a placed capture marker reads as, in the viewer's eyes:
+/// `Some(true)` when its owning capture region — or, for a scripted campaign
+/// point that never fills `capture_regions`, its own BF2 `Team` property — is
+/// the viewer's team. `None` means no region and no team: another mode's
+/// placement. Team numbers differ by one (`campaign_bindings::sim_team`).
+fn marker_is_friendly(
+    owner: Option<usize>,
+    map_team: Option<u8>,
+    player_team: usize,
+) -> Option<bool> {
+    match (owner, map_team) {
+        (Some(owner), _) => Some(owner == player_team),
+        (None, Some(team)) => Some(usize::from(team) == player_team + 1),
+        (None, None) => None,
     }
 }
 

@@ -12,13 +12,18 @@ pub struct PrimContact {
     pub owner: Option<VehicleHandle>,
 }
 
-pub fn bounding_radius(parts: &[HullPart]) -> f32 {
+fn parts_bounds(parts: &[HullPart]) -> Aabb {
     let mut bounds = Aabb::empty();
     for part in parts {
         let placed = Aabb::transformed(part.shape.local_aabb(), part.local);
         bounds.add(placed.min);
         bounds.add(placed.max);
     }
+    bounds
+}
+
+pub fn bounding_radius(parts: &[HullPart]) -> f32 {
+    let bounds = parts_bounds(parts);
     if bounds.is_empty() {
         return 0.0;
     }
@@ -30,6 +35,20 @@ pub fn bounding_radius(parts: &[HullPart]) -> f32 {
             at.distance(center) + reach
         })
         .fold(0.0, crate::fmath::max)
+}
+
+/// Returns `(side_radius, up_reach, down_reach)` in vehicle-local space for
+/// flyer route clearance probes without projecting wingspan vertically.
+pub fn clearance_extents(parts: &[HullPart]) -> (f32, f32, f32) {
+    let bounds = parts_bounds(parts);
+    if bounds.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    (
+        bounding_radius(parts),
+        crate::fmath::max(bounds.max.y, 0.0),
+        crate::fmath::max(-bounds.min.y, 0.0),
+    )
 }
 
 fn part_sphere(part: &HullPart) -> (Vec3, f32) {

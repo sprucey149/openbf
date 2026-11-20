@@ -841,3 +841,89 @@ fn weapon_fire_points_are_the_ram_values() {
         }
     }
 }
+
+/// Unskinned helper wrappers absent from the pose rig (e.g.
+/// `gar_inf_nabooqueen`'s `root_a_spine` above `bone_a_spine`) fold into their
+/// children so clips run on the `zaf_` hierarchy without double-applying the
+/// +90° Y bind rotation, while global bind poses stay identical.
+#[test]
+fn nabooqueen_folds_root_a_spine_into_bone_a_spine() {
+    let gar = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../extracted/bf2/lvl/DATA/_LVL_PS2/SIDE/GAR.LVL"
+    );
+    let ingame = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../extracted/bf2/lvl/DATA/_LVL_PS2/COMMON/ENG/INGAME.LVL"
+    );
+    if !std::path::Path::new(gar).exists() || !std::path::Path::new(ingame).exists() {
+        eprintln!("SKIP: BF2 GAR.LVL / INGAME.LVL not present");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("openbf_nabooqueen_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let baked = bake_soldier_anims(
+        gar,
+        "gar_inf_nabooqueen",
+        Some(ingame),
+        dir.to_str().unwrap(),
+        None,
+    )
+    .unwrap();
+    assert!(baked.clips > 0);
+    let (doc, _, _) = gltf::import(dir.join("soldiers/gar_inf_nabooqueen.glb")).unwrap();
+    let nodes: Vec<_> = doc.nodes().collect();
+    let idx = |name: &str| nodes.iter().position(|n| n.name() == Some(name)).unwrap();
+    let bone_root = idx("bone_root");
+    let root_a_spine = idx("root_a_spine");
+    let bone_a_spine = idx("bone_a_spine");
+    assert!(
+        nodes[bone_root]
+            .children()
+            .any(|c| c.index() == bone_a_spine),
+        "bone_a_spine should be reparented directly under bone_root"
+    );
+    let (t, r, _) = nodes[root_a_spine].transform().decomposed();
+    assert_eq!(t, [0.0, 0.0, 0.0]);
+    assert!(
+        Quat::from_array(r).abs_diff_eq(Quat::IDENTITY, 1e-5),
+        "root_a_spine should fold to identity, got {r:?}"
+    );
+    let gbuf = std::fs::read(gar).unwrap();
+    let (_, orig_skel) = find_soldier(mungefs::open(&gbuf).unwrap(), "gar_inf_nabooqueen").unwrap();
+    let orig_binds = crate::skin_glb::global_binds(&bones_of(&orig_skel));
+    let baked_bones: Vec<crate::skin_glb::Bone> = doc
+        .skins()
+        .next()
+        .unwrap()
+        .joints()
+        .enumerate()
+        .map(|(i, n)| {
+            let (t, r, _) = n.transform().decomposed();
+            let parent = nodes
+                .iter()
+                .position(|p| p.children().any(|c| c.index() == n.index()))
+                .and_then(|pi| {
+                    doc.skins()
+                        .next()
+                        .unwrap()
+                        .joints()
+                        .position(|j| j.index() == pi)
+                });
+            let _ = i;
+            crate::skin_glb::Bone {
+                name: n.name().unwrap_or_default().to_owned(),
+                parent,
+                translation: t,
+                rotation: r,
+            }
+        })
+        .collect();
+    let new_binds = crate::skin_glb::global_binds(&baked_bones);
+    let spine_i = orig_skel.index_of("bone_a_spine").unwrap();
+    assert!(
+        new_binds[spine_i].abs_diff_eq(orig_binds[spine_i], 1e-4),
+        "bone_a_spine global bind should be preserved"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -235,7 +235,21 @@ pub(super) fn prepare_round(
 ) -> anyhow::Result<Worker<Prepared>> {
     Worker::spawn(move || {
         let started = Instant::now();
-        let (scene, load) = game::assets::load_battle_scene(&dir, &mode)?;
+        let layers = job
+            .as_ref()
+            .map(|j| {
+                let script = j
+                    .campaign_index
+                    .map(|i| ui::campaign::RISE_OF_THE_EMPIRE[i].script);
+                super::super::round_setup::campaign_layers_for(
+                    &j.missions_dir,
+                    &j.name,
+                    &mode,
+                    script,
+                )
+            })
+            .unwrap_or_default();
+        let (scene, load) = game::assets::load_battle_scene_with_layers(&dir, &mode, &layers)?;
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
         let round = job.map(|j| j.build(&scene)).transpose()?;
         Ok(Prepared {

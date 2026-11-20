@@ -106,7 +106,7 @@ BF2 `FUN_002a29d8` picks the table by `FUN_002a8300(team)` — "is the (single-p
 human team". In netplay (`DAT_00600548` path) and in split-screen versus (humans on different
 teams) it is false for every team, so **all bots use the {4,14,17} table** [V]. On top of the
 base: BF2 adds `SetAIDifficulty`'s per-level delta (`DAT_005fdf88`/`DAT_005fdf98`, zero unless a
-mission script calls it — none of the stock scripts do) and the auto-balance delta
+mission script calls it — every PS2 campaign script does, §10) and the auto-balance delta
 (`DAT_005fdfa4`/`DAT_005fdfa8`, §6); BF1 adds the `Set*TeamDifficulty*` deltas. Result clamped to
 [1,20] in both.
 
@@ -678,3 +678,35 @@ at 256266 stores it in the goal record) — the handlers that act on 2/3/4/5 wer
 **meanings stay [H]** (an attack style chosen per weapon set and range, not a movement mode).
 
 Still open after this pass: §8.2 (mode handlers), §8.3 (LOS), §8.5–§8.7, §8.9.
+
+## 10. The campaign scripts all call `SetAIDifficulty` (2026-11-18) [V/O]
+
+Correction to §2.1: every PS2 BF2 campaign `ScriptPostLoad` calls `SetAIDifficulty(a, b,
+level)`, and most of the pairs make the enemy much weaker. The calls with `"medium"` are spa4g
+(2,−9), spa2c (2,−11), spa3c (2,−8), spa1g (1,−5), geo1c (2,−8), fel1c (1,−5), uta1c (1,−3),
+pol1g (1,−3), kas2c (2,−4), kam1c (2,−3), myg1c (3,−5), cor1c (2,−2), nab2g (0,−2), mus1c
+(0,−2), dea1g (0,−1), tan1g (1,0) and yav1g (0,0). The calls with `"hard"` are tan1g (1,−3),
+nab2g (0,−1), myg1c (1,2), kas2c (0,1) and hot1g (0,2). No level is unset (0,0) [D, from the
+luac string dumps]. So on PS2 Medium, the "Preventive Measures" (spa4g) CIS bots play at 14−9 = 5,
+and the Imperial AI at 11+2 = 13.
+
+The port before this: `SetAIDifficulty` was on the binding's ignore list, so the space campaign
+enemy played at the full tier skill (17 at Normal). With the §2.1 bases, that is the gap between
+skill 5 and skill 17 on every aim curve and fire gate.
+
+The port now (OURS, `MissionAi::skill_delta`, `Sim::script_skill_delta`):
+- The binding stores the pair per level, or for all three levels when no level is given
+  (FUN_002a2988). A new `Sim` starts with zeroed deltas (FUN_002a28e0 at mission start).
+- `bot_skill` adds the delta to its base and clamps the sum to 1..20 (FUN_002a29d8). "Human team"
+  means a team with a local human outside netplay (FUN_002a8300).
+- Our tiers have no PS2 level index, so the mapping is OURS. Easy (base 14) reads the
+  `"medium"` pair, because PS2 Medium's enemy base is also 14. Normal (17) and Hard/Elite (20) read
+  the `"hard"` pair, because PS2 Hard's enemy base is 17. Our "easy" slot is never read: PS2
+  Easy's base 4 has no port tier.
+- replace: if a port tier is ever bound to the PS2 level number directly, index the table by it
+  instead.
+- The tests are `a_campaign_skill_delta_moves_each_sides_bots_at_its_mapped_level` (core) and
+  `spa4g_c_script_sets_its_medium_ai_difficulty_pair` (game).
+
+Still open: the human team's AI base. On PS2 it is {6, 11, 11}, but the port gives both sides the
+tier base. That is outside this change and is §7's existing decision.

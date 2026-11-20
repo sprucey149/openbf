@@ -13,8 +13,8 @@ use ui::{
 
 #[derive(Default)]
 pub(super) struct NameInput {
-    text: String,
-    backspaces: usize,
+    pub(super) text: String,
+    pub(super) backspaces: usize,
 }
 
 fn picker(store: &Store) -> Picker {
@@ -39,112 +39,194 @@ pub(super) struct FrameInput {
     pub wheel: f32,
 }
 
+/// What the one name keyboard asks its screen to do after a frame. The
+/// mechanics (typed letters, backspace, the symbols page, focus and pointer
+/// clicks) and the common key / symbols / backspace targets are applied in
+/// [`step_name_keyboard`]; the two screens keep their own prompts and
+/// accept / cancel behaviour.
+pub(super) enum NameKeyAction {
+    /// Keyboard stays up; nothing else to do.
+    None,
+    /// The symbols page was toggled: return from the frame's step.
+    Symbols,
+    /// Back was pressed: close the keyboard the screen's way.
+    Cancel,
+    /// A picker target the screen must apply (its accept or its profile action).
+    Target(Target),
+}
+
+/// The screen-specific bits of the shared keyboard. Profile creation pages
+/// and scrolls its name list with L1/R1 and the wheel, lets Square delete a
+/// listed profile, and only types on the Name page. The save-name keyboard is
+/// a bare name page with none of those.
+pub(super) struct NameKeys<'a> {
+    pub frame: &'a FrameInput,
+    pub name_limit: usize,
+    pub renderer: Option<&'a render::Renderer>,
+    pub list: bool,
+}
+
+/// One frame of the profile picker's name keyboard, shared by profile
+/// creation and the campaign save-name screen. Both put a `Picker` on `front`
+/// (`front.picker` / `front.save_name`); this steps the typed glyphs fed by
+/// [`App::profile_keyboard`], the backspaces and symbols key, the focus and
+/// pointer clicks, and handles the common key / symbols / backspace targets.
+/// The caller applies the returned accept or cancel with its own cues.
+pub(super) fn step_name_keyboard(
+    menus: &mut ui::shell_ps2::ShellMenus,
+    name_input: &mut NameInput,
+    pick: &mut Picker,
+    keys: NameKeys<'_>,
+) -> NameKeyAction {
+    let NameKeys {
+        frame,
+        name_limit,
+        renderer,
+        list,
+    } = keys;
+    let editing = matches!(pick.page, Page::Name { .. });
+    menus.tick(frame.dt);
+    pick.advance(frame.dt);
+    let typed = std::mem::take(name_input);
+    if !list || editing {
+        if typed.backspaces != 0 || frame.edges & game::kbm::MENU_SQUARE != 0 {
+            for _ in 0..typed.backspaces.max(1) {
+                pick.backspace();
+            }
+            menus.cues.play(MenuSound::Backspace);
+        }
+        if !typed.text.is_empty() {
+            pick.type_name(&typed.text, name_limit);
+            menus.cues.play(MenuSound::Key);
+        }
+        if frame.edges & game::kbm::MENU_EAST != 0 {
+            pick.toggle_symbols();
+            menus.cues.play(MenuSound::Key);
+            return NameKeyAction::Symbols;
+        }
+    }
+    if frame.menu.back {
+        return NameKeyAction::Cancel;
+    }
+    let old = pick.focus;
+    let mut x = isize::from(frame.menu.right) - isize::from(frame.menu.left);
+    if !list || editing {
+        x += isize::from(frame.edges & game::kbm::MENU_R1 != 0)
+            - isize::from(frame.edges & game::kbm::MENU_L1 != 0);
+    }
+    let y = isize::from(frame.menu.down) - isize::from(frame.menu.up);
+    if x != 0 || y != 0 {
+        pick.move_focus(x, y);
+    }
+    // L1 / R1 page the profile list; the save keyboard only moves focus.
+    if list {
+        if frame.edges & game::kbm::MENU_L1 != 0 {
+            pick.page_list(-1);
+        } else if frame.edges & game::kbm::MENU_R1 != 0 {
+            pick.page_list(1);
+        }
+        if frame.wheel != 0.0 {
+            pick.wheel(frame.wheel);
+        }
+    }
+    let mut action = if frame.start && (!list || editing) {
+        Some(Target::Accept)
+    } else if frame.menu.confirm {
+        Some(pick.focus)
+    } else if list && matches!(pick.page, Page::List) && frame.edges & game::kbm::MENU_SQUARE != 0 {
+        Some(Target::Delete)
+    } else {
+        None
+    };
+    if let (Some((point, click)), Some(renderer)) = (frame.pointer, renderer) {
+        let (w, h) = renderer.size();
+        if let Some(target) = pick.target(point, [w as f32, h as f32]) {
+            if !matches!(
+                target,
+                Target::Delete | Target::Previous | Target::Next | Target::Symbols
+            ) {
+                pick.point_focus(target);
+            }
+            if click {
+                action = Some(target);
+            }
+        }
+    }
+    if pick.focus != old {
+        menus.cues.play(MenuSound::Select);
+    }
+    match action {
+        Some(Target::Key(i)) => {
+            if let Some(c) = pick.keys().as_bytes().get(i) {
+                let mut key = [0; 1];
+                pick.type_name(char::from(*c).encode_utf8(&mut key), name_limit);
+            }
+            menus.cues.play(MenuSound::Key);
+            NameKeyAction::None
+        }
+        Some(Target::Symbols) => {
+            pick.toggle_symbols();
+            menus.cues.play(MenuSound::Key);
+            NameKeyAction::Symbols
+        }
+        Some(Target::Backspace) => {
+            pick.backspace();
+            menus.cues.play(MenuSound::Backspace);
+            NameKeyAction::None
+        }
+        Some(Target::Cancel) => NameKeyAction::Cancel,
+        Some(other) => NameKeyAction::Target(other),
+        None => NameKeyAction::None,
+    }
+}
+
 impl App {
     pub(super) fn step_profiles(&mut self, front: &mut FrontShell, frame: FrameInput) -> bool {
-        let FrameInput {
-            menu,
-            start,
-            edges,
-            dt,
-            pointer,
-            wheel,
-        } = frame;
         let Some(store) = self.profile_store.as_ref() else {
             return false;
         };
         let Some(pick) = front.picker.as_mut() else {
-            let cue = match (front.menus.page, start, menu.back) {
+            let cue = match (front.menus.page, frame.start, frame.menu.back) {
                 (ShellPage::Title, true, _) => MenuSound::Accept,
                 (ShellPage::Main, _, true) => MenuSound::Exit,
                 _ => return false,
             };
             front.picker = Some(picker(store));
-            front.menus.tick(dt);
+            front.menus.tick(frame.dt);
             front.cue(cue);
             return true;
         };
 
-        front.menus.tick(dt);
-        pick.advance(dt);
-        let editing = matches!(pick.page, Page::Name { .. });
-        let name_input = std::mem::take(&mut front.name_input);
-        if editing {
-            if name_input.backspaces != 0 || edges & game::kbm::MENU_SQUARE != 0 {
-                for _ in 0..name_input.backspaces.max(1) {
-                    pick.backspace();
-                }
-                front.menus.cues.play(MenuSound::Backspace);
-            }
-            if !name_input.text.is_empty() {
-                pick.type_name(&name_input.text, NAME_LIMIT);
-                front.menus.cues.play(MenuSound::Key);
-            }
-            if edges & game::kbm::MENU_EAST != 0 {
-                pick.toggle_symbols();
-                front.menus.cues.play(MenuSound::Key);
-                return true;
-            }
-        }
-        if menu.back {
-            match pick.page {
-                Page::List => {
+        match step_name_keyboard(
+            &mut front.menus,
+            &mut front.name_input,
+            pick,
+            NameKeys {
+                frame: &frame,
+                name_limit: NAME_LIMIT,
+                renderer: self.renderer.as_ref(),
+                list: true,
+            },
+        ) {
+            NameKeyAction::None => {}
+            NameKeyAction::Symbols => return true,
+            NameKeyAction::Cancel => {
+                if matches!(front.picker.as_ref().map(|p| &p.page), Some(Page::List)) {
                     front.picker = None;
                     front.menus.profile_cancelled();
+                } else if front
+                    .picker
+                    .as_ref()
+                    .is_some_and(|p| matches!(p.page, Page::Delete(_)))
+                {
+                    self.profile_action(front, Target::No);
+                } else {
+                    self.profile_action(front, Target::Cancel);
                 }
-                Page::Delete(_) => self.profile_action(front, Target::No),
-                _ => self.profile_action(front, Target::Cancel),
+                front.cue(MenuSound::Exit);
+                return true;
             }
-            front.cue(MenuSound::Exit);
-            return true;
-        }
-
-        let old = pick.focus;
-        let mut x = isize::from(menu.right) - isize::from(menu.left);
-        if editing {
-            x += isize::from(edges & game::kbm::MENU_R1 != 0)
-                - isize::from(edges & game::kbm::MENU_L1 != 0);
-        }
-        let y = isize::from(menu.down) - isize::from(menu.up);
-        if x != 0 || y != 0 {
-            pick.move_focus(x, y);
-        }
-        // L1 / R1 page the focus; the wheel scrolls the names, not the focus.
-        if edges & game::kbm::MENU_L1 != 0 {
-            pick.page_list(-1);
-        } else if edges & game::kbm::MENU_R1 != 0 {
-            pick.page_list(1);
-        }
-        if wheel != 0.0 {
-            pick.wheel(wheel);
-        }
-        let mut action = if editing && start {
-            Some(Target::Accept)
-        } else if menu.confirm {
-            Some(pick.focus)
-        } else if matches!(pick.page, Page::List) && edges & game::kbm::MENU_SQUARE != 0 {
-            Some(Target::Delete)
-        } else {
-            None
-        };
-        if let (Some((point, click)), Some(renderer)) = (pointer, self.renderer.as_ref()) {
-            let (w, h) = renderer.size();
-            if let Some(target) = pick.target(point, [w as f32, h as f32]) {
-                if !matches!(
-                    target,
-                    Target::Delete | Target::Previous | Target::Next | Target::Symbols
-                ) {
-                    pick.point_focus(target);
-                }
-                if click {
-                    action = Some(target);
-                }
-            }
-        }
-        if pick.focus != old {
-            front.cue(MenuSound::Select);
-        }
-        if let Some(action) = action {
-            self.profile_action(front, action);
+            NameKeyAction::Target(action) => self.profile_action(front, action),
         }
         true
     }
@@ -282,6 +364,10 @@ impl App {
                 } else {
                     front.music_replay = true;
                 }
+                front
+                    .menus
+                    .set_campaign_unlocked(self.profile.campaign.unlocked);
+                front.menus.campaign_saves.current = None;
                 front.menus.profile_selected();
                 front.picker = None;
                 front.cue(MenuSound::Accept);
@@ -309,6 +395,7 @@ impl App {
         if !front
             .picker
             .as_ref()
+            .or(front.save_name.as_ref())
             .is_some_and(|p| matches!(p.page, Page::Name { .. }))
         {
             return false;

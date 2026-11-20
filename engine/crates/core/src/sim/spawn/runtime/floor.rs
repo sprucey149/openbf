@@ -76,12 +76,10 @@ impl Sim {
         let radius = crate::unit::SOLDIER_RADIUS;
         let dir = Vec3::new(dx as f32, 0.0, dz as f32);
         let b = a + dir * PEN_CELL;
-        let (f, n) = self.ground_under_n(b, false, a.y + PEN_CELL);
-        if f <= crate::collision::NO_GROUND
-            || n.y <= crate::soldier::FLOOR_MIN_NY
-            || f - a.y > PEN_CELL
-            || a.y - f > PEN_DROP
-        {
+        let Some((f, n)) = self.ground_hit_under_n(b, false, a.y + PEN_CELL) else {
+            return None;
+        };
+        if n.y <= crate::soldier::FLOOR_MIN_NY || f - a.y > PEN_CELL || a.y - f > PEN_DROP {
             return None;
         }
         // Resolve the floor before checking the key: another storey at this
