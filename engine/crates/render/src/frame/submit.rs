@@ -262,7 +262,7 @@ impl Renderer {
             if let Some(light_frustum) = &light_frustum {
                 if v && !iface
                     && matches!(d.layer, DrawLayer::Opaque | DrawLayer::Mask)
-                    && !self.draws_stencil_shadow(d)
+                    && crate::character_shadow::rigid_caster(d, &self.meshes).is_none()
                     && (self.cull || shows(d))
                     && visible(d, b, light_frustum)
                 {

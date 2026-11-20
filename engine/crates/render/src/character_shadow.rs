@@ -2,6 +2,7 @@
 //! character draw. Closing each triangle's extrusion also handles open
 //! render meshes. Matching side walls cancel before upload.
 
+use crate::mesh::GpuMesh;
 use crate::{DrawCmd, DrawLayer, LightPath, Renderer, SkinnedDrawCmd};
 use glam::{Mat4, Vec3};
 
@@ -141,13 +142,15 @@ impl Scratch {
     }
 }
 
-impl Renderer {
-    pub(crate) fn draws_stencil_shadow(&self, draw: &DrawCmd) -> bool {
-        draw.layer == DrawLayer::Opaque
-            && draw.light == LightPath::Character
-            && self.meshes[draw.mesh.0 as usize].shadow.is_some()
+pub(crate) fn rigid_caster<'a>(draw: &DrawCmd, meshes: &'a [GpuMesh]) -> Option<&'a VolumeMesh> {
+    if draw.layer == DrawLayer::Opaque && draw.light == LightPath::Character {
+        meshes[draw.mesh.0 as usize].shadow.as_ref()
+    } else {
+        None
     }
+}
 
+impl Renderer {
     pub(crate) fn prepare_character_shadows(
         &mut self,
         eye: Vec3,
@@ -159,12 +162,11 @@ impl Renderer {
         let nearby =
             |model: Mat4| eye.distance_squared(model.w_axis.truncate()) < CASTER_RANGE.powi(2);
         let mut scratch = Scratch::default();
-        let mut volumes = std::mem::take(self.shadows.vertices_mut());
+        let volumes = self.shadows.vertices_mut();
         volumes.clear();
         for d in draws {
-            if self.draws_stencil_shadow(d) && nearby(d.model) {
-                let mesh = self.meshes[d.mesh.0 as usize].shadow.as_ref().unwrap();
-                scratch.append(mesh, d.model, &[], sun, &mut volumes);
+            if let Some(mesh) = rigid_caster(d, &self.meshes).filter(|_| nearby(d.model)) {
+                scratch.append(mesh, d.model, &[], sun, volumes);
             }
         }
         if !self.frame_ab.skips("soldiers") {
@@ -174,11 +176,10 @@ impl Renderer {
                         .shadow
                         .as_ref()
                         .unwrap();
-                    scratch.append(mesh, d.model, &d.palette, sun, &mut volumes);
+                    scratch.append(mesh, d.model, &d.palette, sun, volumes);
                 }
             }
         }
-        *self.shadows.vertices_mut() = volumes;
         self.shadows.prepare(&self.device, &self.queue, camera);
     }
 }

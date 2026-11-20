@@ -763,7 +763,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/particle_blur.rs` 259 — scene reduction and BLUR particle composite with visible-character coverage.
 - `render/src/particle_blur.wgsl` 30 — alpha-masked sampling of the reduced scene in display space.
 - `render/src/shadow.rs` 414 — capped z-fail stencil counting shared by character and legacy BF1 vehicle volumes · `ShadowMesh`, `Renderer::set_shadow_triangles`; `analysis/re-vehicle-shadow.md`.
-- `render/src/character_shadow.rs` 184 — screen-resolution volumes from the current character pose, held weapons and opaque cloth.
+- `render/src/character_shadow.rs` 185 — screen-resolution volumes from the current character pose, held weapons and opaque cloth.
 - `render/src/sun_shadow.rs` 393 — camera-local scenery shadow map and one display-space darkening where the scene depth or character stencil marks a shadow · `Renderer::set_sun_shadows`.
 - `render/src/sun_shadow.wgsl` 93 — light-space scenery depth and the stencil-aware shadow composite.
 - `render/src/bolt.wgsl` 97 — `fs_bolt_core` / `fs_bolt_glow` (GS MODULATE, unfogged), appended after `grass.wgsl`
