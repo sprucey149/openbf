@@ -941,6 +941,8 @@ pub fn omni_radius_for(source_game: &str) -> f32 {
 /// plays as before.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MissionAi {
+    /// BF2 ForceAIOutOfVehicles team mask (FUN_001924e8).
+    pub force_out_of_vehicles: u8,
     /// Stock Kamino disables blind tactical jet hops. The hop must clear
     /// the intervening soldier barriers (BF2 FUN_002dbb68 B2:265077–265083).
     pub allow_blind_jet_jumps: bool,
@@ -970,6 +972,7 @@ pub const SNIPE_SUITABILITY_DEFAULT: f32 = 70.0;
 impl Default for MissionAi {
     fn default() -> Self {
         Self {
+            force_out_of_vehicles: 0,
             allow_blind_jet_jumps: true,
             view_mult: 1.0,
             aggressiveness: [1.0; 2],

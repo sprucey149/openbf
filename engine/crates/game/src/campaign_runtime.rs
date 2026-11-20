@@ -220,6 +220,8 @@ pub(crate) struct World {
     pub regions: Vec<(String, Region)>,
     pub paths: Vec<(String, Vec<(Vec3, f32)>)>,
     pub instances: Vec<(String, String, Vec3)>,
+    pub hidden_instances: BTreeSet<u32>,
+    pub disabled_prop_collision: BTreeMap<u32, Vec<(usize, core::collision::Layers)>>,
     pub class_bases: BTreeMap<String, String>,
     pub station_names: Vec<String>,
     pub station_classes: Vec<String>,
@@ -426,6 +428,8 @@ impl CampaignRuntime {
             regions,
             paths,
             instances,
+            hidden_instances: BTreeSet::new(),
+            disabled_prop_collision: BTreeMap::new(),
             class_bases,
             station_names,
             station_classes,
@@ -1146,6 +1150,18 @@ impl CampaignRuntime {
         self.w.anims.instance_poses()
     }
 
+    pub fn hidden_instances(&self) -> &BTreeSet<u32> {
+        &self.w.hidden_instances
+    }
+
+    pub fn excluded_camera_instances(&self) -> impl Iterator<Item = u32> + '_ {
+        self.w
+            .hidden_instances
+            .iter()
+            .chain(self.w.disabled_prop_collision.keys())
+            .copied()
+    }
+
     /// Manifest instance indices driven by loaded non-local world animations.
     pub fn animated_instances(&self) -> impl Iterator<Item = u32> + '_ {
         self.w.anims.animated_instances()
@@ -1157,6 +1173,10 @@ impl CampaignRuntime {
 
     pub fn take_movies(&mut self) -> Vec<String> {
         std::mem::take(&mut self.w.movies)
+    }
+
+    pub fn has_movies(&self) -> bool {
+        !self.w.movies.is_empty()
     }
 
     pub fn end_movie(&self) -> Option<&str> {

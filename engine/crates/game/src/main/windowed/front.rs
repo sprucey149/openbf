@@ -19,6 +19,8 @@ use ui::shell_feel::MenuSound;
 mod gal;
 #[path = "front/campaign_saves.rs"]
 mod campaign_saves;
+#[path = "front/credits.rs"]
+mod credits;
 #[path = "front/profiles.rs"]
 mod profiles;
 
@@ -53,6 +55,7 @@ pub(super) struct FrontShell {
     pub(super) cutscenes: std::collections::VecDeque<String>,
     /// Mission index in `ui::campaign::RISE_OF_THE_EMPIRE` waiting on `cutscenes`.
     pub(super) pending_campaign: Option<usize>,
+    credits: Option<credits::Crawl>,
     /// Lazy 3D spinning planet backdrop (`bf2_gal1`) for the campaign battle screen.
     gal: Option<gal::GalPlanetView>,
     gal_load_failed: bool,
@@ -309,6 +312,7 @@ impl FrontShell {
             movie_audio: None,
             cutscenes: std::collections::VecDeque::new(),
             pending_campaign: None,
+            credits: None,
             gal: None,
             gal_load_failed: false,
             gal_music,
@@ -372,6 +376,10 @@ impl FrontShell {
         self.stop_music();
     }
 
+    pub(super) fn queue_credits(&mut self, assets_dir: &std::path::Path) {
+        self.credits = credits::Crawl::load(assets_dir);
+    }
+
     fn step_cutscene_movie(
         &mut self,
         dt: f32,
@@ -415,6 +423,14 @@ impl FrontShell {
             return (frame, m.shown);
         }
         (None, false)
+    }
+
+    fn skip_cutscene(&mut self) {
+        if let Some(m) = self.movie.as_mut() {
+            m.stop();
+        }
+        self.cutscenes.pop_front();
+        self.movie_audio = None;
     }
 
     /// Tests: the shell music's takes in place of the bank's.
@@ -539,6 +555,60 @@ fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
 }
 
 impl App {
+    pub(super) fn queue_battle_movies(&mut self) {
+        if !self.in_battle() || self.netplay.is_some() {
+            return;
+        }
+        let clips = self
+            .walk
+            .as_mut()
+            .and_then(|(walk, _)| walk.campaign.as_mut())
+            .map_or_else(Vec::new, |campaign| campaign.take_movies());
+        if !clips.is_empty() {
+            self.front
+                .get_or_insert_with(|| FrontShell::new(&self.assets_dir))
+                .cutscenes
+                .extend(clips);
+        }
+    }
+
+    pub(super) fn battle_movie_pending(&self) -> bool {
+        self.in_battle() && self.front.as_ref().is_some_and(|f| !f.cutscenes.is_empty())
+    }
+
+    pub(super) fn redraw_battle_movie(&mut self, dt: f32) -> anyhow::Result<()> {
+        let edges = self.menu_edges();
+        self.kbm.drop_taps();
+        self.kbm.clear_look();
+        game::pause::hold_for_resume(&mut self.resume_gate);
+        let Some(front) = self.front.as_mut() else {
+            return Ok(());
+        };
+        if (edges & (16 | 32 | 64 | game::kbm::MENU_NORTH)) != 0
+            && front.movie.as_ref().is_some_and(|m| m.shown)
+        {
+            front.skip_cutscene();
+        }
+        let (frame, shown) = front.step_cutscene_movie(
+            dt,
+            self.audio.as_mut(),
+            self.profile.settings.dialogue_volume,
+        );
+        if let (Some(r), Some(hud)) = (self.renderer.as_mut(), self.hud_view.as_mut()) {
+            if let Some((rgba, w, h)) = frame {
+                hud.set_movie_frame(rgba, w, h);
+            }
+            let (w, h) = r.size();
+            hud.update_cutscene([w, h], shown);
+            r.render_with_overlay(
+                &Camera::default(),
+                &[],
+                [0.0, 0.0, 0.0, 1.0],
+                Some(&mut |dev, q, enc, target, size| hud.paint(dev, q, enc, target, size)),
+            )?;
+        }
+        Ok(())
+    }
     /// Session Options were left (`push_prefs`): AI Difficulty is the
     /// profile's tier, saved.
     pub(super) fn keep_session_prefs(&mut self, options: &ui::shell::SessionOptions) {
@@ -852,6 +922,50 @@ impl App {
             .front
             .take()
             .unwrap_or_else(|| FrontShell::new(&self.assets_dir));
+        if front.cutscenes.is_empty() {
+            if let Some(mut credits) = front.credits.take() {
+                // ifs_credits plays no music of its own: the shell's
+                // `shell_soundtrack` (ifs_start) carries on under the crawl.
+                if front.active_gal_music {
+                    front.stop_music();
+                }
+                self.step_shell_music(&mut front, dt);
+                let _ = self.shell_pointer.take_wheel();
+                let click = self.shell_pointer.take_frame().is_some_and(|(_, c)| c);
+                // OURS: the finale's crawl skips like a cutscene (Cross,
+                // Triangle, Start or a click) in place of ifs_credits' Back
+                // help. replace: none, maintainer decision 2026-11-20.
+                let done = edges & (16 | 32 | 64) != 0 || click || credits.advance(dt);
+                if !done {
+                    if let (Some(r), Some(overlay), Some(window)) =
+                        (&mut self.renderer, &mut self.overlay, &self.window)
+                    {
+                        let paint = overlay.begin(window, |ctx| credits.draw(ctx));
+                        if let Err(error) = r.render_with_overlay(
+                            &Camera::default(),
+                            &[],
+                            [0.0, 0.0, 0.0, 1.0],
+                            Some(&mut |dev, q, enc, target, size| {
+                                overlay.paint(&paint, dev, q, enc, target, size);
+                            }),
+                        ) {
+                            eprintln!("render: {error:#}");
+                            event_loop.exit();
+                        }
+                    }
+                }
+                if done {
+                    // OURS: the menus start their own take afresh, not the
+                    // one the crawl played over. replace: none, maintainer
+                    // decision 2026-11-20.
+                    front.stop_music();
+                } else {
+                    front.credits = Some(credits);
+                }
+                self.front = Some(front);
+                return;
+            }
+        }
         // A held arm presses again (menuref: from 0.62 s, every 0.167 s).
         edges |= front.repeat.step(self.prev_menu_buttons & 15, dt);
         let mut input = ui::menu::MenuInput {
@@ -1098,11 +1212,7 @@ impl App {
                     });
         } else if !front.cutscenes.is_empty() {
             if input.confirm || input.back || start || click {
-                if let Some(m) = front.movie.as_mut() {
-                    m.stop();
-                }
-                front.cutscenes.pop_front();
-                front.movie_audio = None;
+                front.skip_cutscene();
             }
         } else if front.save_name.is_some() {
             self.step_save_name(

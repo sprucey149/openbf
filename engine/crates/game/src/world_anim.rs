@@ -408,7 +408,20 @@ impl WorldAnimPlayer {
                 } else if let Some(h) = e.linked {
                     sim.set_vehicle_world_pose(h, m, step);
                 } else if let Some(ii) = e.instance {
-                    if let Some(parts) = self.instance_parts.get(&ii) {
+                    if let Some(wreck) = sim
+                        .building_turrets
+                        .iter()
+                        .find(|turret| turret.instance == ii && turret.down.is_some())
+                    {
+                        for ((i, _), part) in sim
+                            .collision
+                            .instance_bodies(ii)
+                            .into_iter()
+                            .zip(&wreck.fallen_parts)
+                        {
+                            sim.collision.move_body(i, m * part.local);
+                        }
+                    } else if let Some(parts) = self.instance_parts.get(&ii) {
                         for &(i, local) in parts {
                             sim.collision.move_body(i, m * local);
                         }

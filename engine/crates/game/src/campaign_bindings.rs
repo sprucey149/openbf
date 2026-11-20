@@ -122,6 +122,7 @@ const BOUND: &[&str] = &[
     "SetTeamPoints",
     "SetAIDamageThreshold",
     "SetAIDifficulty",
+    "ForceAIOutOfVehicles",
     "SetTimerRate",
     "SetTimerValue",
     "SetUnitCount",
@@ -160,7 +161,6 @@ const IGNORED: &[&str] = &[
     "EntityFlyerTakeOff",
     "FillAsteroidPath",
     "FillAsteroidRegion",
-    "ForceAIOutOfVehicles",
     "ReadDataFile",
     "ScaleSoundParameter",
     "ScriptCB_DisableFlyerShadows",
@@ -1145,6 +1145,12 @@ impl Ctx<'_> {
                 }
                 nothing()
             }
+            "ForceAIOutOfVehicles" => {
+                if let Some(team) = sim_team(arg(a, 0)) {
+                    sim.force_ai_out_of_vehicles(team, arg(a, 1).truthy());
+                }
+                nothing()
+            }
             "SetAIDamageThreshold" => {
                 if let (Some(Ud::Station(si)), Some(thresh)) =
                     (self.w.resolve(sim, arg(a, 0)), num(a, 1))
@@ -1691,6 +1697,38 @@ impl World {
             (Ud::Unit(i, _), "captureposts") => {
                 if let Some(u) = sim.units.get_mut(i as usize) {
                     u.capture_posts = val != "0";
+                }
+            }
+            (Ud::Entity(i), "isvisible") if (i as usize) < self.instances.len() => {
+                if val == "0" || val.eq_ignore_ascii_case("false") {
+                    self.hidden_instances.insert(i);
+                } else {
+                    self.hidden_instances.remove(&i);
+                }
+            }
+            (Ud::Entity(i), "iscollidable" | "iscollidible")
+                if (i as usize) < self.instances.len() =>
+            {
+                let saved = &mut self.disabled_prop_collision;
+                if val == "0" || val.eq_ignore_ascii_case("false") {
+                    saved.entry(i).or_insert_with(|| {
+                        let layers: Vec<_> = sim
+                            .collision
+                            .bodies()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, body)| body.instance == Some(i))
+                            .map(|(index, body)| (index, body.layers))
+                            .collect();
+                        sim.collision.set_body_layers(
+                            layers
+                                .iter()
+                                .map(|&(index, _)| (index, core::collision::Layers::NONE)),
+                        );
+                        layers
+                    });
+                } else if let Some(layers) = saved.remove(&i) {
+                    sim.collision.set_body_layers(layers);
                 }
             }
             (Ud::Entity(_), "islocked") => {

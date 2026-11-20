@@ -551,9 +551,46 @@ impl Sim {
         best.map(|(_, vh, s)| (vh, s))
     }
 
+    pub(crate) fn ai_vehicle_allowed(&self, team: u8) -> bool {
+        self.mission_ai.force_out_of_vehicles & 1u8.checked_shl(u32::from(team)).unwrap_or(0) == 0
+    }
+
+    /// BF2 FUN_001924e8 requests dismounts, and FUN_002c2428 rejects new
+    /// boarding orders for the team until the script clears the flag.
+    pub fn force_ai_out_of_vehicles(&mut self, team: u8, forced: bool) {
+        let Some(bit) = 1u8.checked_shl(u32::from(team)) else {
+            return;
+        };
+        if !forced {
+            self.mission_ai.force_out_of_vehicles &= !bit;
+            return;
+        }
+        self.mission_ai.force_out_of_vehicles |= bit;
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if !u.alive || u.team != team || u.controller != Controller::Ai {
+                continue;
+            }
+            if u.mount.is_some() {
+                self.exit_vehicle(self.handle(i));
+                self.nav_stats.ai_dismounts += 1;
+            } else if u.ai.pending_board.is_none() && u.ai.ride.is_none_or(|r| r.board.is_none()) {
+                continue;
+            }
+            let ai = &mut self.units[i].ai;
+            ai.pending_board = None;
+            ai.ride = None;
+            route::clear(ai);
+            ai.next_think = self.tick;
+        }
+    }
+
     /// CanEnter (B1 FUN_0020b1b0): the seat `u` would take in `vh`.
     pub fn enter_seat(&self, u: UnitHandle, vh: VehicleHandle) -> Option<u8> {
         let unit = self.unit(u).filter(|unit| unit.droideka.is_none())?;
+        if unit.controller == Controller::Ai && !self.ai_vehicle_allowed(unit.team) {
+            return None;
+        }
         let v = self.vehicle(vh)?;
         if v.team.is_some_and(|t| t != unit.team) || v.held_against(u, self.tick) {
             return None;
@@ -590,6 +627,9 @@ impl Sim {
         else {
             return false;
         };
+        if unit.controller == Controller::Ai && !self.ai_vehicle_allowed(unit.team) {
+            return false;
+        }
         let Some(v) = self.vehicle(vh) else {
             return false;
         };

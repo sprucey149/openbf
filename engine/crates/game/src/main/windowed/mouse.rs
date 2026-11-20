@@ -75,6 +75,7 @@ impl App {
         self.focused
             && self.in_battle()
             && !self.paused
+            && !self.battle_movie_pending()
             && self.walk.as_ref().is_some_and(|(walk, _)| {
                 walk.sim.outcome.is_none()
                     && walk.sim.unit(walk.player).is_some_and(|u| {

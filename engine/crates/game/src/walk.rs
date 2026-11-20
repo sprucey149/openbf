@@ -1611,6 +1611,20 @@ impl WalkSim {
         pads: &[PadState],
         mut each: impl FnMut(&mut WalkSim),
     ) -> u32 {
+        self.advance_while(real_dt, pads, |walk| {
+            each(walk);
+            true
+        })
+    }
+
+    /// Stop after the tick that requests a modal presentation. Drop any
+    /// pending wall time so it cannot become catch-up ticks after the movie.
+    pub fn advance_while(
+        &mut self,
+        real_dt: f32,
+        pads: &[PadState],
+        mut each: impl FnMut(&mut WalkSim) -> bool,
+    ) -> u32 {
         self.accum = (self.accum + real_dt).fmin(core::MAX_FRAME_ACCUM_SECS);
         let mut ticks = 0;
         let mut pads = std::borrow::Cow::Borrowed(pads);
@@ -1622,9 +1636,13 @@ impl WalkSim {
             if pads.iter().any(PadState::has_once) {
                 pads.to_mut().iter_mut().for_each(PadState::clear_once);
             }
-            each(self);
+            let keep_stepping = each(self);
             self.accum -= core::TICK_DT;
             ticks += 1;
+            if !keep_stepping {
+                self.accum = 0.0;
+                break;
+            }
         }
         ticks
     }
@@ -1733,6 +1751,8 @@ impl WalkSim {
                     &self.vehicle_classes,
                     core::TICK_DT,
                 );
+                self.camera_blockers
+                    .set_excluded(campaign.excluded_camera_instances());
                 // `BroadcastVoiceOver` lines join the commander's voice
                 // queue as commander lines. [H] the binding's queue key
                 // is not traced. trace: BroadcastVoiceOver's binding.

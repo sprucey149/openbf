@@ -731,6 +731,28 @@ def load_ps2(game, script):
     return undump40(body) if body[4] == 0x40 else undump50(body)
 
 
+def write_shell_credits(source, destination):
+    """Bake the user's PS2 CreditLines table as presentation data."""
+    import json
+    from pathlib import Path
+
+    script = undump50(Path(source).read_bytes())
+    globals_ = {}
+    _sym_exec50(script, _rk_base(script), globals_)
+    lines = globals_["CreditLines"]
+    if not lines or any(not isinstance(line, Table) for line in lines.values()):
+        raise ValueError("Invalid PS2 credits table")
+    rows = [
+        {"text": line.get("str", ""), "heading": line.get("ColorB") == 0}
+        for _, line in sorted(lines.items())
+        if not line.get("bNoPS2")
+    ]
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    return len(rows)
+
+
 def load_donor_script(game, script):
     """Read bytecode from the fingerprinted donor's own mission data."""
     if game not in GAMEPLAY_REFERENCES:

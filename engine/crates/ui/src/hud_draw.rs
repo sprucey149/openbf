@@ -1036,7 +1036,27 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         return ctx.out;
     }
     if let Some(result) = hud.banner {
-        return crate::hud::draw_round_end(result, size);
+        ctx.out = crate::hud::draw_round_end(result, size);
+        if hud.banner_fade > 0.0 {
+            ctx.quad(
+                usize::MAX,
+                &Mat4::IDENTITY,
+                &Screen {
+                    origin: [0.0, 0.0],
+                    scale: [1.0, 1.0],
+                },
+                &Quad {
+                    rect: [0.0, 0.0, size[0], size[1]],
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    color: [0.0, 0.0, 0.0, hud.banner_fade],
+                    texture: "white",
+                    additive: false,
+                    shadow: false,
+                    boxed: false,
+                },
+            );
+        }
+        return ctx.out;
     }
     if let Some(st) = &hud.stats {
         ctx.stats_page(st, size);

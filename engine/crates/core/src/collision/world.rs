@@ -692,6 +692,21 @@ impl CollisionWorld {
             .collect()
     }
 
+    /// Change query membership without replacing the bodies or moving their poses.
+    pub fn set_body_layers(&mut self, layers: impl IntoIterator<Item = (usize, super::Layers)>) {
+        let mut changed = false;
+        for (i, layers) in layers {
+            if let Some(body) = self.bodies.get_mut(i).filter(|b| b.layers != layers) {
+                body.layers = layers;
+                changed = true;
+            }
+        }
+        if changed {
+            self.generation += 1;
+            self.rebuild_broadphase();
+        }
+    }
+
     /// An instance's live bodies as parts in the space of `pose` (the
     /// instance's own matrix): what [`CollisionWorld::replace_instance`]
     /// puts back. Bodies in no subset are left out.

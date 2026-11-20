@@ -335,6 +335,7 @@ impl winit::application::ApplicationHandler for App {
                         (elapsed - self.frame_seconds) * (elapsed * 3.0).fmin(1.0);
                 }
                 self.sync_audio_levels();
+                self.queue_battle_movies();
                 // The renderer's animation clock, for UV-scrolling materials
                 // (a map's water). Wrapped so `uv + velocity * time` keeps
                 // its f32 precision in a long session — see Renderer::time.
@@ -396,6 +397,15 @@ impl winit::application::ApplicationHandler for App {
                     }
                     return;
                 }
+                if self.battle_movie_pending() {
+                    if let Err(error) = self.redraw_battle_movie(dt) {
+                        eprintln!("render: {error:#}");
+                        event_loop.exit();
+                    } else if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
+                    return;
+                }
 
                 // Issue #168: the LAN session's events before the battle
                 // frame borrows the walk (a new round leaves for loading).
@@ -421,6 +431,7 @@ impl winit::application::ApplicationHandler for App {
                 // fog); the shell and the pre-map screens keep the default.
                 let clear = self.gpu.as_ref().map_or(CLEAR, |g| g.clear);
                 let mut hud: Option<ui::hud::HudModel> = None;
+                let mut credits_handoff = false;
                 let mut spawn: Option<ui::spawn::SpawnModel> = None;
                 // A death camera or a dead rider's held seat view is up.
                 let icons = self.current_icons();
@@ -1052,8 +1063,9 @@ impl winit::application::ApplicationHandler for App {
                             None if popup_up => {}
                             None => {
                                 let ticks =
-                                    walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
-                                        hook.tick(walk, feed, &mut st, false, false)
+                                    walk.advance_while(dt, std::slice::from_ref(&pad), |walk| {
+                                        hook.tick(walk, feed, &mut st, false, false);
+                                        !walk.campaign.as_ref().is_some_and(|c| c.has_movies())
                                     });
                                 self.kbm.consumed(&pad, ticks);
                                 walk.blend.consumed(ticks);
@@ -1070,7 +1082,6 @@ impl winit::application::ApplicationHandler for App {
                                 let text = feed.localize_or_raw(&msg);
                                 feed.say(text, ui::hud::message_color::YELLOW, walk.sim.tick);
                             }
-                            let _ = c.take_movies();
                             let _ = c.take_sounds();
                             let calls = c.take_music();
                             if let Some(m) = walk.music.as_mut() {
@@ -1306,7 +1317,11 @@ impl winit::application::ApplicationHandler for App {
                             let team = walk.sim.units.get(walk.player.index as usize)?.team;
                             m.end_music_secs(usize::from(team), walk.sim.outcome?)
                         });
-                        let (done, cue) = walk.follow_round_end(dt, pad, music_secs);
+                        let credits_after_outro = self.netplay.is_none()
+                            && self.active_campaign == Some(ui::campaign::RISE_OF_THE_EMPIRE.len() - 1)
+                            && walk.sim.outcome == Some(0);
+                        let (mut done, cue) =
+                            walk.follow_round_end(dt, pad, music_secs, !credits_after_outro);
                         if let (Some(cue), Some(sounds)) = (cue, self.sounds.as_mut()) {
                             sounds.play_2d(self.audio.as_mut(), cue.name());
                         }
@@ -1323,7 +1338,9 @@ impl winit::application::ApplicationHandler for App {
                             if let (Some((rgba, w, h)), Some(v)) = (frame, self.hud_view.as_mut()) {
                                 v.set_movie_frame(rgba, w, h);
                             }
+                            done |= r.done();
                         }
+                        credits_handoff = done && credits_after_outro;
                         if done && self.netplay.is_some() {
                             // A LAN round: the lobby's ready check (issue #168).
                             self.net_round_over = true;
@@ -1424,7 +1441,9 @@ impl winit::application::ApplicationHandler for App {
                 }
 
                 let frozen = self.frozen();
-                if let (Some(r), Some(gpu)) = (&mut self.renderer, &mut self.gpu) {
+                if let (false, Some(r), Some(gpu)) =
+                    (credits_handoff, &mut self.renderer, &mut self.gpu)
+                {
                     gpu.apply_render_options(
                         r,
                         self.profile.settings.terrain_lod,
@@ -1494,7 +1513,11 @@ impl winit::application::ApplicationHandler for App {
                     // The player's own view: a zoomed turret gunner's
                     // building is left out of it (card VTURZ).
                     let mut draws: Vec<DrawCmd> = match &self.walk {
-                        Some((walk, _)) => gpu.view_draws(&walk.sim, walk.player),
+                        Some((walk, _)) => gpu.view_draws_with_hidden_instances(
+                            &walk.sim,
+                            walk.player,
+                            walk.campaign.as_ref().map(|c| c.hidden_instances()),
+                        ),
                         None => gpu.draws.clone(),
                     };
                     draws.append(&mut extra);

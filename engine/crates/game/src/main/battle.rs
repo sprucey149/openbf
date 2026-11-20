@@ -300,6 +300,7 @@ fn round_end_model(r: &game::round_end::RoundEnd) -> ui::hud::RoundEndModel {
             Result::Draw => 2,
         },
         stats: r.stats.clone(),
+        fade: r.fade(),
     }
 }
 
@@ -727,7 +728,12 @@ pub(super) fn make_walk_with_counts(
                 );
                 rt.load_world_anims(&scene.dir, &scene.manifest, &walk.sim);
                 rt.start(&mut walk.sim);
+                // ScriptPostLoad requests the same opening clip played by the
+                // campaign shell before loading the battle.
+                rt.take_movies();
                 walk.camera_blockers.mark_moving(rt.animated_instances());
+                walk.camera_blockers
+                    .set_excluded(rt.excluded_camera_instances());
                 walk.campaign = Some(rt);
             }
         }

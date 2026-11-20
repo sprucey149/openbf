@@ -29,6 +29,10 @@ impl Sim {
         if !self.mission_ai.allow_blind_jet_jumps {
             eat(b"NO_BLIND_JET_HOPS");
         }
+        if self.mission_ai.force_out_of_vehicles != 0 {
+            eat(b"FORCE_AI_OUT_OF_VEHICLES");
+            eat(&[self.mission_ai.force_out_of_vehicles]);
+        }
         eat(&self.difficulty.bytes());
         if self.team_difficulty.iter().any(Option::is_some) {
             for d in self.team_difficulty {

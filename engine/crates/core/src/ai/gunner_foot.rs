@@ -1003,14 +1003,7 @@ pub(super) fn seen_aim(
         let r = radius(1.0, 1.0, st.err, moving, vis, cap);
         return aim + bf1_error_dir(sim, me) * r;
     }
-    let r = radius(
-        e.consts.aim_size,
-        stance_factor(e.soldier.stance),
-        e.aim.err,
-        moving,
-        e.cloak.visibility(),
-        cap,
-    );
+    let r = soldier_error_radius(e, cap);
     aim + error_vector(
         sim,
         me,
@@ -1018,6 +1011,17 @@ pub(super) fn seen_aim(
         error_dir(sim, me, u) * r,
         (aim - eye).length(),
         wc,
+    )
+}
+
+pub(crate) fn soldier_error_radius(target: &Unit, cap: f32) -> f32 {
+    radius(
+        target.consts.aim_size,
+        stance_factor(target.soldier.stance),
+        target.aim.err,
+        target.soldier.vel.length() / target.consts.max_speed.fmax(0.1),
+        target.cloak.visibility(),
+        cap,
     )
 }
 
@@ -1265,12 +1269,16 @@ fn error_vector(sim: &Sim, me: UnitHandle, e: &Unit, off: Vec3, d: f32, wc: &Wea
     bubble(sim, me, e.is_human() || carries_human(sim, e), off, d, wc)
 }
 
-fn bubble(sim: &Sim, me: UnitHandle, human: bool, mut off: Vec3, d: f32, wc: &WeaponClass) -> Vec3 {
-    off *= wc.ai_bubble_size;
-    off.y = off.y.fmax(0.0);
+fn bubble(sim: &Sim, me: UnitHandle, human: bool, off: Vec3, d: f32, wc: &WeaponClass) -> Vec3 {
     if sim.unit(me).is_some_and(|u| carries_human(sim, u)) {
         return Vec3::ZERO;
     }
+    bubble_offset(human, off, d, wc)
+}
+
+pub(crate) fn bubble_offset(human: bool, mut off: Vec3, d: f32, wc: &WeaponClass) -> Vec3 {
+    off *= wc.ai_bubble_size;
+    off.y = off.y.fmax(0.0);
     // Card DPRX: a proxy is a human target too (the shooter test above
     // stays `is_player`: a proxy shooting aims with a bot's error).
     if !human {

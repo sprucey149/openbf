@@ -18,6 +18,12 @@ pub const BANNER_MIN_SECS: f32 = 5.0;
 pub const BANNER_MAX_SECS: f32 = 7.0;
 /// A stats screen with no input this long quits by itself (§3, both games).
 pub const STATS_IDLE_SECS: f32 = 30.0;
+/// BF2's fade to black after the banner: `FUN_00381110` starts it on every
+/// viewport with `FUN_0045ec50(1.0, 0.0001, 0, ..., 2, 2, FUN_00381088)`;
+/// `FUN_0045f088` runs its first stage for 1.0 s, mode 2 (`FUN_0045edb8`)
+/// raising the black's alpha linearly from 0 to 255, holds 0.0001 s, and
+/// its callback `FUN_00381088` leaves the viewports black.
+pub const FADE_SECS: f32 = 1.0;
 
 /// Whether the windowed HUD pass draws this frame. At the end of the round it
 /// always does, `hud` cheat or not: it draws no battle HUD then, only the
@@ -31,6 +37,11 @@ pub fn hud_pass_drawn(round_end: bool, hud_hidden: bool) -> bool {
 pub enum Phase {
     /// The banner over the camera shot.
     Banner,
+    /// [`FADE_SECS`] of black rising over the banner and the shot. The
+    /// movie and the stats wait on its callback (`FUN_00381110`: both test
+    /// the bit `FUN_00381088` sets). trace: whether the viewport fader
+    /// covers the banner too; drawn over it here.
+    Fade,
     /// `SetMissionEndMovie`'s clip, between the banner and the stats
     /// (`FUN_00381110`): once the banner's timer has run out and the fade
     /// to black (`FUN_0045ec50`, done in `FUN_00381088`) is over, with the
@@ -66,6 +77,7 @@ pub struct RoundEnd {
     /// screen.
     pub secs: f32,
     idle: f32,
+    show_stats: bool,
     /// The stats pages, made once the banner is down
     /// ([`RoundEnd::wants_stats`]); input waits for them.
     pub stats: Option<StatsScreens>,
@@ -97,22 +109,46 @@ impl RoundEnd {
                 .clamp(BANNER_MIN_SECS, BANNER_MAX_SECS),
             secs: 0.0,
             idle: 0.0,
+            show_stats: true,
             stats: None,
             movie,
+        }
+    }
+
+    /// A campaign finale leaves the battle once its end movie is over.
+    pub fn without_stats(mut self) -> Self {
+        self.show_stats = false;
+        self
+    }
+
+    fn after_movie(&self) -> Phase {
+        if self.show_stats {
+            Phase::Stats
+        } else {
+            Phase::Done
         }
     }
 
     /// The end movie is over, or there was none to play.
     pub fn movie_over(&mut self) {
         if self.phase == Phase::Movie {
-            self.phase = Phase::Stats;
+            self.phase = self.after_movie();
             self.secs = 0.0;
         }
     }
 
     /// The end movie has had its turn (played, skipped or missing).
     pub fn movie_played(&self) -> bool {
-        self.movie.is_some() && self.phase != Phase::Banner
+        self.movie.is_some() && !matches!(self.phase, Phase::Banner | Phase::Fade)
+    }
+
+    /// The black over the banner and the shot, 0 (none) to 1 (opaque).
+    pub fn fade(&self) -> f32 {
+        match self.phase {
+            Phase::Banner => 0.0,
+            Phase::Fade => (self.secs / FADE_SECS).min(1.0),
+            Phase::Movie | Phase::Stats | Phase::Done => 1.0,
+        }
     }
 
     /// The clip [`Phase::Movie`] plays now.
@@ -138,10 +174,11 @@ impl RoundEnd {
         self.secs += dt;
         let mut sound = None;
         let next = match self.phase {
-            Phase::Banner => (self.secs >= self.banner_secs).then_some(if self.movie.is_some() {
+            Phase::Banner => (self.secs >= self.banner_secs).then_some(Phase::Fade),
+            Phase::Fade => (self.secs >= FADE_SECS).then_some(if self.movie.is_some() {
                 Phase::Movie
             } else {
-                Phase::Stats
+                self.after_movie()
             }),
             Phase::Movie => None,
             Phase::Stats => {
@@ -290,10 +327,18 @@ mod flow_tests {
                 t += 1.0 / 30.0;
             }
             assert!((t - want).abs() < 0.05, "music {music:?}: {t}");
+            assert_eq!(r.phase, Phase::Fade);
+            assert!(r.fade() < 0.05);
+            r.step(FADE_SECS * 0.5, Pad::default());
+            assert!((r.fade() - 0.5).abs() < 0.05, "linear: {}", r.fade());
+            assert!(!r.wants_stats(), "the stats wait for the black");
+            r.step(FADE_SECS * 0.5, Pad::default());
             assert_eq!(r.phase, Phase::Stats);
+            assert_eq!(r.fade(), 1.0);
         }
         let mut r = RoundEnd::start(Result::Defeat, &shots(), 7, Some(5.0), None);
         r.step(5.1, Pad::default());
+        r.step(FADE_SECS, Pad::default());
         assert!(r.wants_stats());
         r.step(0.1, press(|p| p.square = true));
         assert!(!r.done(), "no pages yet: nothing to quit");
@@ -324,14 +369,22 @@ mod flow_tests {
         assert!(r.done(), "Square: Done");
     }
 
-    /// A won campaign round plays its end movie after the banner and before
-    /// the stats (`FUN_00381110`), the battle silent from the movie on.
+    /// A won campaign round fades to black after the banner, then plays its
+    /// end movie before the stats (`FUN_00381110`), the battle silent from
+    /// the fade on.
     #[test]
     fn the_end_movie_comes_between_the_banner_and_the_stats() {
         let mut r = RoundEnd::start(Result::Victory, &shots(), 1, None, Some("geomon02".into()));
         assert!(!r.silenced());
         assert_eq!(r.playing_movie(), None);
         r.step(5.1, Pad::default());
+        assert_eq!(r.phase, Phase::Fade);
+        assert!(r.silenced());
+        assert_eq!(r.playing_movie(), None, "no cut straight to the movie");
+        assert!(!r.movie_played());
+        r.step(FADE_SECS * 0.75, Pad::default());
+        assert_eq!(r.phase, Phase::Fade);
+        r.step(FADE_SECS * 0.25, Pad::default());
         assert_eq!(r.phase, Phase::Movie);
         assert_eq!(r.playing_movie(), Some("geomon02"));
         assert!(r.silenced());
@@ -350,6 +403,7 @@ mod flow_tests {
         let mut r = RoundEnd::start(Result::Victory, &shots(), 1, None, None);
         assert!(r.shot.is_some());
         r.step(7.1, Pad::default());
+        r.step(FADE_SECS, Pad::default());
         r.stats = Some(pages());
         for _ in 0..(29 * 30) {
             r.step(1.0 / 30.0, Pad::default());
@@ -386,15 +440,16 @@ mod tests {
         let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
         let shot = CameraShot::from_call([1.0, 0.0, 0.0, 0.0, 40.0, 25.0, -10.0]);
         w.end_shots = vec![shot];
-        assert!(!w.follow_round_end(0.1, Pad::default(), None).0);
+        assert!(!w.follow_round_end(0.1, Pad::default(), None, true).0);
         assert!(w.round_end.is_none(), "not before the round is decided");
         let me = w.sim.units[w.player.index as usize].team;
         w.sim.outcome = Some(me);
-        w.follow_round_end(1.0 / 30.0, Pad::default(), None);
+        w.follow_round_end(1.0 / 30.0, Pad::default(), None, true);
         let r = w.round_end.as_ref().unwrap();
         assert_eq!((r.result, r.phase), (Result::Victory, Phase::Banner));
         assert_eq!(w.camera().position, shot.camera().position);
-        w.follow_round_end(7.1, Pad::default(), None);
+        w.follow_round_end(7.1, Pad::default(), None, true);
+        w.follow_round_end(super::FADE_SECS, Pad::default(), None, true);
         let r = w.round_end.as_mut().unwrap();
         assert!(r.wants_stats());
         let unit = |i: usize| format!("U{i}");
@@ -417,12 +472,19 @@ mod tests {
             square: true,
             ..Pad::default()
         };
-        assert!(w.follow_round_end(0.1, square, None).0, "Done: out");
+        assert!(w.follow_round_end(0.1, square, None, true).0, "Done: out");
         let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
         w.sim.outcome = Some(1 - me.min(1));
         let before = w.camera().position;
-        w.follow_round_end(0.1, Pad::default(), None);
+        w.follow_round_end(0.1, Pad::default(), None, true);
         assert_eq!(w.round_end.as_ref().unwrap().result, Result::Defeat);
         assert_eq!(w.camera().position, before, "no shots: the battle's view");
+        let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
+        w.sim.outcome = Some(me);
+        assert!(!w.follow_round_end(1.0 / 30.0, Pad::default(), None, false).0);
+        assert!(!w.follow_round_end(7.1, Pad::default(), None, false).0, "the fade first");
+        let (done, _) = w.follow_round_end(super::FADE_SECS, Pad::default(), None, false);
+        assert!(done, "the campaign finale leaves for its credits, no stats");
+        assert!(w.round_end.as_ref().unwrap().stats.is_none());
     }
 }

@@ -270,6 +270,13 @@ impl SceneGpu {
                 }
             }
         }
+        for turret in &mut self.fallen {
+            if let Some(pose) = poses.get(&(turret.instance as u32)) {
+                for draw in &mut turret.fallen {
+                    draw.model = *pose;
+                }
+            }
+        }
     }
 
     /// Pose every drawn door at its sim door's `open` (`core::door`): each

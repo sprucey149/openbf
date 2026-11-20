@@ -385,6 +385,7 @@ impl WalkSim {
         dt: f32,
         pad: ui::stats::Pad,
         music_secs: Option<f32>,
+        show_stats: bool,
     ) -> (bool, Option<ui::shell_feel::MenuSound>) {
         let Some(winner) = self.sim.outcome else {
             return (false, None);
@@ -407,7 +408,8 @@ impl WalkSim {
                 .and_then(|c| c.end_movie())
                 .filter(|_| winner == 0 || winner == core::sim::OUTCOME_DRAW)
                 .map(str::to_owned);
-            RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs, movie)
+            let end = RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs, movie);
+            if show_stats { end } else { end.without_stats() }
         });
         let sound = r.step(dt, pad);
         (r.done(), sound)

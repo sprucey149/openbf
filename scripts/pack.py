@@ -831,6 +831,13 @@ def build(a, out, plan, packs, visual_report):
     print("\n".join(visual_packs.summary(visual_report)), flush=True)
 
     step("6/6 pack")
+    credits_source = Path(lua_root, "bf2", "shell", "ifs_credits.luac")
+    if credits_source.is_file() and "bf2" not in table_only:
+        from gen_missions import write_shell_credits
+        count = write_shell_credits(
+            credits_source, Path(BAKED, "common_bf2", "shell", "credits.json")
+        )
+        print(f"   baked {count} PS2 credit lines", flush=True)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     tmp = os.path.join(os.path.dirname(out), "pack-tmp" + EXE)  # Windows runs only a name ending in .exe
     shutil.copyfile(game, tmp)

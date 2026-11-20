@@ -553,11 +553,13 @@ mod tests {
                 r.step(4.99, ui::stats::Pad::default());
                 assert_eq!(r.phase, Phase::Banner);
                 r.step(0.02, ui::stats::Pad::default());
-                assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Stats });
-                r.step(1.98, ui::stats::Pad::default());
+                assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Fade });
+                r.step(0.5, ui::stats::Pad::default());
+                assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Fade });
+                r.step(1.48, ui::stats::Pad::default());
                 assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Stats });
                 r.step(0.02, ui::stats::Pad::default());
-                assert_eq!(r.phase, Phase::Stats, "7 s at most");
+                assert_eq!(r.phase, if won { Phase::Fade } else { Phase::Stats }, "7 s at most");
             }
         }
         assert_eq!(m.end_music_secs(2, 0), None);

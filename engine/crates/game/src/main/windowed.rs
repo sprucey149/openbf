@@ -1923,13 +1923,14 @@ impl App {
         // Tutorial narration continues while an objective popup is shown.
         // From the round's end movie on the battle is silent (`RoundEnd::silenced`).
         let ended = self.walk.as_ref().is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.silenced()));
-        self.in_battle() && (self.paused && self.netplay.is_none() || ended)
+        self.in_battle() && (self.paused && self.netplay.is_none() || ended || self.battle_movie_pending())
     }
 
     /// The battle's clock is stopped: paused in single player. A LAN round
     /// never stops (issue #168): its pause menu overlays a running battle.
     fn frozen(&self) -> bool {
         self.in_battle() && self.netplay.is_none() && (self.paused || self.campaign_map.is_some()
+            || self.battle_movie_pending()
             || self.round_end_held()
             || self.walk.as_ref().is_some_and(|(w, _)| w.campaign.as_ref().is_some_and(|c| c.popup().is_some())))
     }
@@ -2039,6 +2040,7 @@ impl App {
                     .menus
                     .open_page(ui::shell_ps2::Page::CampaignBattle);
             } else {
+                front.queue_credits(&assets_dir);
                 front
                     .menus
                     .open_page(ui::shell_ps2::Page::Singleplayer);
@@ -2071,8 +2073,12 @@ impl App {
             w.round_end.as_ref().is_some_and(|r| r.movie_played())
         });
         self.end_movie_voice = None;
-        if let Some(m) = self.front.as_mut().and_then(|f| f.movie.as_mut()) {
-            m.stop();
+        if let Some(front) = self.front.as_mut() {
+            front.cutscenes.clear();
+            front.movie_audio = None;
+            if let Some(m) = front.movie.as_mut() {
+                m.stop();
+            }
         }
         if let Some(n) = self.netplay.take() {
             n.shutdown();

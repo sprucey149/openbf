@@ -397,6 +397,7 @@ struct Blocker {
 #[derive(Debug, Default)]
 pub struct CameraBlockers {
     blockers: Vec<Blocker>,
+    excluded: std::collections::BTreeSet<u32>,
 }
 
 impl CameraBlockers {
@@ -477,7 +478,15 @@ impl CameraBlockers {
                 blockers.push(b);
             }
         }
-        Self { blockers }
+        Self {
+            blockers,
+            ..Self::default()
+        }
+    }
+
+    /// Exclude props the campaign has hidden or made non-collidable.
+    pub fn set_excluded(&mut self, instances: impl IntoIterator<Item = u32>) {
+        self.excluded = instances.into_iter().collect();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -526,7 +535,7 @@ impl CameraBlockers {
         let dir = delta / len;
         let mut t = len;
         for b in &self.blockers {
-            if (b.prop && !props) || Some(b.instance) == skip {
+            if (b.prop && !props) || Some(b.instance) == skip || self.excluded.contains(&b.instance) {
                 continue;
             }
             if b.moves || b.door.is_some() {
@@ -587,7 +596,7 @@ impl CameraBlockers {
             None => out.push((ii, opacity)),
         };
         for b in self.blockers.iter().filter(|b| b.prop) {
-            if Some(b.instance) == skip {
+            if Some(b.instance) == skip || self.excluded.contains(&b.instance) {
                 continue;
             }
             let pose = b.live_pose(&live, doors);
@@ -627,7 +636,7 @@ impl CameraBlockers {
         let mut out: Vec<(u32, f32)> = self
             .blockers
             .iter()
-            .filter(|b| !b.prop)
+            .filter(|b| !b.prop && !self.excluded.contains(&b.instance))
             .filter_map(|b| {
                 let pose = if b.door.is_some() {
                     b.live_pose(&|_| None, doors)

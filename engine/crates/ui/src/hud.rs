@@ -579,6 +579,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         .as_ref()
         .filter(|r| r.stats.is_none())
         .map(|r| r.result);
+    hud.banner_fade = m.round_end.as_ref().map_or(0.0, |r| r.fade);
     hud.stats = m
         .round_end
         .as_ref()
@@ -1067,6 +1068,8 @@ pub struct RoundEndModel {
     /// The stats pages once the banner is down (drawn by the HUD pass,
     /// `crate::stats_draw`); `None` = the banner.
     pub stats: Option<crate::stats::StatsScreens>,
+    /// The black over the banner, 0 to 1 (`game::round_end::RoundEnd::fade`).
+    pub fade: f32,
 }
 
 /// BF1's banner sheet, size and UV halves (`re-round-end.md` §2.1 [V]).
@@ -1271,6 +1274,7 @@ mod tests {
             model.round_end = Some(RoundEndModel {
                 result,
                 stats: None,
+                fade: 0.0,
             });
             feed(&mut hud, &model, &|_| false);
             let frame = crate::hud_draw::draw(&hud, &Default::default(), [1280.0, 896.0]);
@@ -1288,6 +1292,14 @@ mod tests {
                 frame.verts[0].color,
                 [rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1.0]
             );
+            model.round_end.as_mut().unwrap().fade = 0.5;
+            feed(&mut hud, &model, &|_| false);
+            let frame = crate::hud_draw::draw(&hud, &Default::default(), [1280.0, 896.0]);
+            assert_eq!(frame.verts.len(), 8, "the banner, then black over it");
+            assert_eq!(frame.batches.last().unwrap().texture, "white");
+            assert_eq!(frame.verts[4].pos[..2], [0.0, 0.0]);
+            assert_eq!(frame.verts[6].pos[..2], [1280.0, 896.0]);
+            assert_eq!(frame.verts[7].color, [0.0, 0.0, 0.0, 0.5]);
             model.round_end = None;
             feed(&mut hud, &model, &|_| false);
             assert_eq!(hud.banner, None);

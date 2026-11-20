@@ -263,6 +263,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     }
     if r.board.is_some()
         || u.droideka.is_some()
+        || !sim.ai_vehicle_allowed(u.team)
         || sim.tick < r.block_until
         || sim.tick < r.own_search_until
         || sim.vehicles.is_empty()

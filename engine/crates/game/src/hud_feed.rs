@@ -1036,10 +1036,14 @@ impl HudView {
     /// its frames come through [`HudView::set_movie_frame`].
     pub fn update_end_movie(&mut self, size: [u32; 2]) {
         let movie = self.movie.is_some() || self.movie_frame.is_some();
+        self.update_cutscene(size, movie);
+    }
+
+    pub fn update_cutscene(&mut self, size: [u32; 2], shown: bool) {
         self.install_frame(ui::stats_draw::draw_end_movie(
             &self.hud,
             &self.art,
-            movie,
+            shown,
             size.map(|v| v as f32),
         ));
     }

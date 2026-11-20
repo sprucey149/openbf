@@ -658,6 +658,7 @@ pub(crate) fn follow_vehicle(
     u: &crate::unit::Unit,
 ) -> Option<crate::vehicle::VehicleHandle> {
     if u.mount.is_some()
+        || !sim.ai_vehicle_allowed(u.team)
         || u.order
             .is_some_and(|p| matches!(p.order, Order::PileIn | Order::GetOut))
     {

@@ -137,7 +137,11 @@ impl ReplayFrame {
         };
         gpu.see_through(&see.props);
         gpu.pose_ctf(&walk.sim, walk.player);
-        let mut draws = gpu.view_draws(&walk.sim, walk.player);
+        let mut draws = gpu.view_draws_with_hidden_instances(
+            &walk.sim,
+            walk.player,
+            walk.campaign.as_ref().map(|c| c.hidden_instances()),
+        );
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.vehicle_vis.campaign_flags(&walk));
