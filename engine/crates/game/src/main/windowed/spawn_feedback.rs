@@ -19,7 +19,9 @@ impl Selection {
         // The local player's screens (slot 0 in single player).
         let slot = usize::from(walk.local_slot);
         let stage = sim.spawn_stage.get(slot).copied().unwrap_or_default();
-        if !sim.spawn_screens && stage != SpawnStage::Alive {
+        // Issue #182: the teammate view hides the screens; its presses
+        // play no menu cue.
+        if walk.spectating() || (!sim.spawn_screens && stage != SpawnStage::Alive) {
             return Self::Closed;
         }
         match stage {

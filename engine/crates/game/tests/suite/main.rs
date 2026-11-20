@@ -86,6 +86,7 @@ mod squad_orders_ps2;
 mod squad_vehicle_maps;
 mod station_destruction;
 mod station_draw;
+mod theed_stairs;
 mod turret_damage;
 mod turret_enter;
 mod turret_fall;

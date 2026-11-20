@@ -386,7 +386,7 @@ pub(super) fn make_walk_with_counts(
     // The tier is set BEFORE `setup_conquest` spawns anyone: every bot takes
     // its skill at spawn (D2).
     sim.difficulty = b.difficulty;
-    // A LAN round's rows (issue #171 option C), before anyone spawns too.
+    // A LAN round's rows (issue #171's LAN marker), before anyone spawns too.
     sim.netplay_rows = b.netplay_rows;
     // BF1 has no 10 m omni in the view cone (RE §9.1); BF2 does.
     sim.omni_radius = core::sim::omni_radius_for(&scene.manifest.source_game);
@@ -832,6 +832,13 @@ pub(super) fn make_walk_with_counts(
                 .collect();
             walk.music.as_mut().unwrap().set_hero_music(names);
         }
+        // Issue #182: seated riders are hit where their own size and pose
+        // draw them (after the native teams join).
+        game::seated_bodies::install(
+            &mut walk,
+            scene.dir.parent().unwrap_or(&scene.dir),
+            &scene.manifest.source_game,
+        );
         println!(
             "conquest: {} posts, the player on team {} ({}), AI {}/{}, tickets {}/{}, alive-AI limit {}/{}, difficulty {}, omni {:.0} m",
             layout.cps.len(),
@@ -1058,6 +1065,7 @@ pub(super) fn hud_model(
         weapon2,
         gauge,
         leaving,
+        spectate: spectate_label(walk, feed, KEYBOARD_SPECTATE_HINT),
         reticle,
         // The reticle's pick by name and health (card HTGT).
         target: (on_foot || game::hud_feed::armed_seat(walk))
@@ -1154,6 +1162,46 @@ pub(super) fn hud_model(
     }
 }
 
+/// Issue #182: the teammate view's switch hint on keyboard and mouse: a
+/// click steps on, G (or the right button, secondary fire) steps back
+/// (`game::walk` spectate's `PREV_BITS`).
+pub(super) const KEYBOARD_SPECTATE_HINT: &str = "Click / G / Right click: switch teammate";
+
+/// Issue #182: the teammate view's switch hint on a controller, by family,
+/// when the bindings leave a trigger unbound
+/// (`game::input_icons::spectate_pad_hint` names the bound ones)
+/// (`[ours]`: R2 steps on, L2 back; the spawn screens' own buttons stay
+/// theirs, as the sim still reads them behind the view).
+pub(super) fn pad_spectate_hint(xbox: bool) -> &'static str {
+    if xbox {
+        "LT / RT: switch teammate"
+    } else {
+        "L2 / R2: switch teammate"
+    }
+}
+
+/// Issue #182: the teammate view's label while the player watches: who, by
+/// the name the kill feed gives him, and `hint`.
+pub(super) fn spectate_label(
+    walk: &WalkSim,
+    feed: &game::event_feed::EventFeed,
+    hint: &str,
+) -> Option<ui::hud::HudSpectate> {
+    if !walk.spectating() {
+        return None;
+    }
+    Some(match walk.spectate_target() {
+        Some(h) => ui::hud::HudSpectate {
+            name: format!("Watching {}", feed.unit_name(&walk.sim, h)),
+            hint: hint.to_owned(),
+        },
+        None => ui::hud::HudSpectate {
+            name: "No teammates left to watch".to_owned(),
+            hint: String::new(),
+        },
+    })
+}
+
 /// Spawn screen model while the player is dead and the round is live; None
 /// otherwise. The post list is the sim's ([`core::sim::Sim::player_spawn_posts`]:
 /// the team's posts, then its live command walkers) and the selection is the
@@ -1172,6 +1220,11 @@ pub(super) fn spawn_model(
     // `FUN_0038c7a0` → `FUN_00397840` on state 4; `FUN_0038cb28` reopens).
     let hidden = alive_screen && walk.campaign.as_ref().is_some_and(|c| c.popup().is_some());
     if (me.alive && !alive_screen) || hidden || walk.sim.outcome.is_some() {
+        return None;
+    }
+    // Issue #182: the teammate view hides the spawn screens until a spawn
+    // is possible again.
+    if walk.spectating() {
         return None;
     }
     // Ground death views wait for the native spawn map, including a dead
@@ -1769,5 +1822,82 @@ mod tests {
             let screen = spawn_model(&walk, &feed).and_then(|m| m.screen);
             assert!(matches!(screen, Some(ui::spawn::SpawnScreen::Map)));
         }
+    }
+
+    /// Issue #182: with no post to spawn at, the spawn map gives way to the
+    /// teammate view after its hold (no spawn page, a "Watching" label), and
+    /// comes back when a post does.
+    #[test]
+    fn the_teammate_view_hides_the_spawn_map_until_a_post_is_back() {
+        use core::sim::SpawnStage;
+        let flat = core::heightfield::Heightfield {
+            size: 2,
+            unit: 4000.0,
+            offset_x: 2000.0,
+            offset_z: 2000.0,
+            heights: vec![0.0; 4],
+        };
+        let mut feed = game::event_feed::EventFeed::default();
+        let mut walk = WalkSim::new(1, glam::Vec3::ZERO, Some(flat));
+        let mate = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(
+                0,
+                glam::Vec3::new(5.0, 0.0, -5.0),
+            ))
+            .unwrap();
+        walk.sim.spawn_screens = true;
+        walk.sim.spawn_stage = vec![SpawnStage::Accepted];
+        let idle = [core::sim::PadState::default()];
+        walk.step_tick(&idle);
+        walk.sim
+            .kill_environment(walk.player, core::sim::DeathCause::Suicide);
+        let mut ticks = 0;
+        while walk.sim.spawn_stage[0] == SpawnStage::Accepted {
+            walk.step_tick(&idle);
+            ticks += 1;
+            assert!(ticks < 300, "the spawn map never opened");
+        }
+        // The spawn map opens first; the view takes over after the hold.
+        assert!(!walk.spectating());
+        assert!(spawn_model(&walk, &feed).is_some());
+        for _ in 0..(game::walk::SPECTATE_HOLD_TICKS + 1) {
+            walk.step_tick(&idle);
+        }
+        assert!(walk.spectating());
+        assert_eq!(walk.spectate_target(), Some(mate));
+        assert!(
+            spawn_model(&walk, &feed).is_none(),
+            "no spawn page behind it"
+        );
+        let hud = hud_model(&walk, &mut feed, 16.0 / 9.0);
+        assert!(hud.spawn.is_none());
+        let label = hud.spectate.expect("the label");
+        assert!(label.name.starts_with("Watching "), "{}", label.name);
+        assert_eq!(label.hint, KEYBOARD_SPECTATE_HINT);
+        // A post of his team's with a spawn node: the spawn map is back.
+        let at = glam::Vec3::new(0.0, 0.0, 20.0);
+        walk.sim.add_cp(
+            core::cp::CpDef {
+                name: "cp".into(),
+                pos: at,
+                capture: core::region::Region::sphere(at, 8.0),
+                control: None,
+                value_bleed: 1,
+                value_atk: [1, 1],
+                value_def: [1, 1],
+                spawn_nodes: vec![(at + glam::Vec3::X * 4.0, 0.0)],
+                capture_time: 10.0,
+                neutralize_time: 10.0,
+            },
+            Some(0),
+        );
+        walk.step_tick(&idle);
+        assert!(!walk.spectating());
+        assert!(hud_model(&walk, &mut feed, 16.0 / 9.0).spectate.is_none());
+        assert!(matches!(
+            spawn_model(&walk, &feed).and_then(|m| m.screen),
+            Some(ui::spawn::SpawnScreen::Map)
+        ));
     }
 }

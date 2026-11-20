@@ -879,3 +879,68 @@ fn shield_debt_is_not_extra_damage_or_erased_by_health_lending() {
         assert_eq!(u.health.shield, 0.0);
     }
 }
+
+/// Issue #182: a slab 1.45 m over the ground ahead, a gap a rolled
+/// droideka (1.3 m) fits under and no soldier does. A player's ball rolls on
+/// under it; a bot's, driven by the same stick, stops at its edge.
+#[test]
+fn a_bot_ball_does_not_roll_under_a_roof_no_soldier_fits_beneath() {
+    use crate::collision::{Body, CollisionWorld, Shape};
+    let run = |bot: bool| {
+        let mut s = sim();
+        // Ahead is -z; the slab's underside 1.45 m up from z = -6 on.
+        s.collision = CollisionWorld::new(
+            vec![Body::new(
+                glam::Mat4::from_translation(Vec3::new(0.0, 1.95, -26.0)),
+                Shape::Box {
+                    half: Vec3::new(10.0, 0.5, 20.0),
+                },
+            )],
+            Vec::new(),
+        );
+        let h = rolled(&mut s);
+        let i = h.index as usize;
+        if bot {
+            s.units[i].controller = Controller::Ai;
+        }
+        for _ in 0..90 {
+            s.step_droideka(i, &pad(0, 1.0), crate::TICK_DT);
+        }
+        s.unit(h).unwrap().soldier.pos.z
+    };
+    let (player, bot) = (run(false), run(true));
+    assert!(player < -9.0, "the player's ball stopped at {player}");
+    assert!(bot > -6.0 && bot < -3.0, "the bot's ball at {bot}");
+}
+
+/// Issue #182: the whole area under a low roof reads as cramped, not only its
+/// edge, so a bot's ball that is already deep under the slab rolls back out
+/// (the room test once read the inside as roomy and held the ball at the
+/// edge band from both sides).
+#[test]
+fn a_bot_ball_under_a_low_roof_rolls_back_out() {
+    use crate::collision::{Body, CollisionWorld, Shape};
+    let mut s = sim();
+    let h = rolled(&mut s);
+    let i = h.index as usize;
+    s.units[i].controller = Controller::Ai;
+    // The slab of the test above: underside 1.45 m up from z = -6 to -46.
+    s.collision = CollisionWorld::new(
+        vec![Body::new(
+            glam::Mat4::from_translation(Vec3::new(0.0, 1.95, -26.0)),
+            Shape::Box {
+                half: Vec3::new(10.0, 0.5, 20.0),
+            },
+        )],
+        Vec::new(),
+    );
+    let u = &mut s.units[i];
+    u.soldier.pos = Vec3::new(0.0, 0.0, -12.0);
+    u.soldier.vel = Vec3::ZERO;
+    u.soldier.yaw = std::f32::consts::PI;
+    for _ in 0..150 {
+        s.step_droideka(i, &pad(0, 1.0), crate::TICK_DT);
+    }
+    let z = s.unit(h).unwrap().soldier.pos.z;
+    assert!(z > -5.0, "the bot's ball stayed under the roof at z = {z}");
+}

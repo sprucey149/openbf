@@ -54,6 +54,13 @@ impl BoltPrims {
         };
         let s = self.scale;
         let head = 0.17 * s.fmax(1.0);
+        if let Some([h, t]) = self.posed {
+            let (torso, hh) = self.posed_sizes(h, t);
+            return nearest(
+                nearest(sphere(h, head), sphere(t, torso)),
+                cylinder(Vec3::new(0.0, hh, 0.0), 0.35, hh),
+            );
+        }
         match self.stance {
             Stance::Prone | Stance::Roll | Stance::Dead => nearest(
                 sphere(Vec3::new(0.0, 0.28 * s, 0.75 * s), head),
@@ -93,6 +100,7 @@ mod tests {
             yaw: 0.0,
             stance: Stance::Stand,
             scale: 1.0,
+            posed: None,
         }
     }
 

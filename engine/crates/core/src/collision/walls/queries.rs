@@ -489,6 +489,13 @@ impl CollisionWorld {
         self.push_out_with(&full.stepped(), Some(*full), None, HullFilter::Hulls)
     }
 
+    /// [`Self::push_out_soldier`] against the map's own bodies alone, no
+    /// vehicle hull: issue #182's room test for a bot's rolled droideka
+    /// (`Sim::soldier_room`), which a parked tank's belly must not hold.
+    pub fn push_out_soldier_static(&self, full: &Capsule) -> Vec3 {
+        self.push_out_with(&full.stepped(), Some(*full), None, HullFilter::Static)
+    }
+
     /// PROVISIONAL (ours): the soldier's wall pass for a tick that moved him
     /// from `from` to `full` (card WPSH, `analysis/re-soldier-walls.md` §4):
     /// [`Self::push_out_soldier`] along the move, with two rules the pose

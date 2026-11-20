@@ -117,6 +117,32 @@ fn the_static_digest_is_stable_and_names_the_group_that_differs() {
     let mut c = fixture(16, 2, 8, 5, 3);
     c.water_level = Some(-3.0);
     assert_eq!(differs(&c), ["water"]);
+
+    // Issue #182: the seated riders' points, each sampled by its own peer.
+    let seated = |head_y: f32| {
+        let mut s = crate::sim::SeatedBodies::default();
+        s.by.insert(
+            (0, 1, 7, 0),
+            crate::sim::SeatedBody {
+                pitch_limits: Some([-20.0, 30.0]),
+                yaw_limits: None,
+                points: vec![[
+                    glam::Vec3::new(0.0, head_y, 0.1),
+                    glam::Vec3::new(0.0, 1.3, 0.0),
+                ]],
+            },
+        );
+        Some(std::sync::Arc::new(s))
+    };
+    let mut c = fixture(16, 2, 8, 5, 3);
+    c.seated_bodies = seated(1.825);
+    assert_eq!(differs(&c), ["classes"], "a table where there was none");
+    let mut d = fixture(16, 2, 8, 5, 3);
+    d.seated_bodies = seated(1.825);
+    assert_eq!(c.static_digest(), d.static_digest());
+    d.seated_bodies = seated(1.826);
+    assert_ne!(c.static_digest(), d.static_digest(), "one point moved");
+    assert_eq!(differs(&d), ["classes"]);
 }
 
 /// A map-sized fixture (a 512 x 512 terrain, 40 meshes of 2000 triangles

@@ -1250,3 +1250,71 @@ fn a_blocked_barrel_passes_its_turn_without_firing() {
     assert!(fired_on.iter().all(|t| t % 2 == 1), "{fired_on:?}");
     assert_eq!(w.last_turn % 2, 1);
 }
+
+/// The clone commander's chaingun as its class authors it (`ShotDelay`
+/// 0.05, `HeatPerShot` 0.02, `HeatRecoverRate` 0.25, `HeatThreshold` 0.2,
+/// wind-up 0.5 s, wind-down 1.5 s, no clip).
+fn commander_chaingun() -> WeaponClass {
+    WeaponClass {
+        shot_delay: [0.05, 0.05],
+        heat_per_shot: 0.02,
+        heat_recover_rate: 0.25,
+        heat_threshold: 0.2,
+        wind_up: 0.5,
+        wind_down: 1.5,
+        rounds_per_clip: 0,
+        ..WeaponClass::default()
+    }
+}
+
+/// Issue #182: a chaingun held down keeps firing at its cadence, with no
+/// gap, from the end of its wind-up until the shot that overheats it; it
+/// then winds down and stays quiet until the heat is back under
+/// `HeatThreshold`, and the still-held trigger winds it up and fires again.
+/// With the commander's numbers: 0.5 s of spin, about 6.4 s of rounds at
+/// 20 a second, then (1.0 - 0.2) / 0.25 = 3.2 s to cool and 0.5 s of spin.
+/// Mutation: the wind-up restarted every held tick -> no round at all.
+#[test]
+fn a_held_chaingun_fires_without_a_gap_until_it_overheats_then_resumes() {
+    let c = commander_chaingun();
+    let mut w = WeaponState::new(&c, true, 0);
+    let mut lcg = GameLcg::new(1);
+    let mut shots = Vec::new();
+    let mut fired = Vec::new();
+    let mut overheated_at = None;
+    for t in 0..600usize {
+        shots.clear();
+        w.update(DT30, &c, fi(true, false), &mut lcg, &mut shots);
+        if !shots.is_empty() {
+            fired.push(t);
+        }
+        if w.overheated && overheated_at.is_none() {
+            overheated_at = Some(t);
+        }
+    }
+    let first = fired[0] as f32 * DT30;
+    assert!(
+        (0.5..0.5 + 2.0 * DT30).contains(&first),
+        "first round {first}"
+    );
+    let hot = overheated_at.expect("20 rounds a second outrun the recovery");
+    let gaps: Vec<_> = fired
+        .windows(2)
+        .filter(|p| p[1] - p[0] > 2)
+        .map(|p| (p[0], p[1]))
+        .collect();
+    // The only pauses are the overheats, each after 6 s or more of rounds.
+    let (last, resumed) = gaps[0];
+    assert!(last <= hot && hot <= last + 2, "gap {gaps:?}, hot at {hot}");
+    assert!((last - fired[0]) as f32 * DT30 > 6.0, "{gaps:?}");
+    let pause = (resumed - last) as f32 * DT30;
+    assert!(
+        (3.2 + 0.5 - 0.2..3.2 + 0.5 + 0.3).contains(&pause),
+        "pause {pause}"
+    );
+    assert!(
+        gaps.windows(2)
+            .all(|g| (g[1].0 - g[0].1) as f32 * DT30 > 5.5),
+        "{gaps:?}"
+    );
+}

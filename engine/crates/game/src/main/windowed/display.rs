@@ -344,6 +344,10 @@ impl App {
     fn display_changed(&mut self) {
         self.dyn_res_budget_ms = None;
         self.kbm.forget_grab();
+        // Issue #182: the system may rebuild the cursor after the change.
+        if let Some(o) = &mut self.overlay {
+            o.display_changed();
+        }
     }
 
     /// The window opened in `mode`: its first reports are not the system's.

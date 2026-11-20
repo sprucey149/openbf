@@ -117,6 +117,20 @@ fn bound(map: &input::Mapping, bit: u32) -> Option<PadButton> {
         .and_then(|(b, _)| pad_button(*b))
 }
 
+/// Issue #182: the teammate view's switch hint on a pad as `map` binds its
+/// previous (secondary fire) and next (fire) buttons; None when either is
+/// unbound (the caller keeps its default).
+pub fn spectate_pad_hint(set: IconSet, map: &input::Mapping) -> Option<String> {
+    use core::sim::buttons;
+    let back = bound(map, buttons::SECONDARY_FIRE)?;
+    let next = bound(map, buttons::FIRE)?;
+    Some(format!(
+        "{} / {}: switch teammate",
+        ui::input_icons::pad_name(set, back),
+        ui::input_icons::pad_name(set, next)
+    ))
+}
+
 /// What the screens draw: the set and the spawn prompts as `map` binds them.
 pub fn icons(set: IconSet, map: &input::Mapping) -> Icons {
     use core::sim::buttons;

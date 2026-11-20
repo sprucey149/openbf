@@ -979,7 +979,14 @@ pub(super) fn seen_aim(
     wc: &WeaponClass,
     swept: bool,
 ) -> Vec3 {
-    let c = e.capsule().center();
+    // Issue #182: a soldier on foot whose centre is behind a wall edge but
+    // whose head shows is aimed at the head (`perception::sight_point`).
+    let on_foot = e.mount.is_none() && sim.unit(me).is_some_and(|u| u.mount.is_none());
+    let c = match on_foot {
+        true => perception::sight_point(sim, eye, e, crate::collision::HullFilter::All, [None; 2])
+            .unwrap_or_else(|| e.capsule().center()),
+        false => e.capsule().center(),
+    };
     let own = sim.unit(me).map_or(Vec3::ZERO, |u| u.soldier.vel);
     let aim = match swept {
         true => eye + swept_lead(c - eye, e.soldier.vel, own, speed, crate::TICK_DT),

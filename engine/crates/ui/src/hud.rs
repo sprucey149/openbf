@@ -86,6 +86,63 @@ pub fn add_leaving_line(layout: &mut manifest::hud::HudLayout) {
     });
 }
 
+/// The elements of the teammate view's label ([`add_spectate_lines`]).
+pub const SPECTATE_ELEM: &str = "player1spectatename";
+pub const SPECTATE_HINT_ELEM: &str = "player1spectatehint";
+
+/// The teammate view's label (issue #182, `[ours]`): who is watched, and the
+/// buttons that step to another teammate.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HudSpectate {
+    pub name: String,
+    pub hint: String,
+}
+
+/// Add the teammate view's two lines to BF2's layout (issue #182, `[ours]`:
+/// no original screen to follow): who is watched in `gamefont_small` low on
+/// the screen's centre, the switch hint under it in `gamefont_tiny`. Both
+/// stay off until [`feed`] sends a [`HudModel::spectate`].
+pub fn add_spectate_lines(layout: &mut manifest::hud::HudLayout) {
+    use manifest::hud::{HudArg, HudNode};
+    fn node(name: &str, args: Vec<HudArg>) -> HudNode {
+        HudNode {
+            name: name.to_owned(),
+            args,
+            children: Vec::new(),
+        }
+    }
+    let (s, n) = (|v: &str| HudArg::Str(v.to_owned()), HudArg::Num);
+    for (elem, font, y, event) in [
+        (
+            SPECTATE_ELEM,
+            "gamefont_small",
+            0.80,
+            "player1.spectate.name",
+        ),
+        (
+            SPECTATE_HINT_ELEM,
+            "gamefont_tiny",
+            0.85,
+            "player1.spectate.hint",
+        ),
+    ] {
+        layout.nodes.push(HudNode {
+            name: "Text".to_owned(),
+            args: vec![s(elem)],
+            children: vec![
+                node("textstyle", vec![s("Shadow")]),
+                node("textalignment", vec![s("Center"), s("Center")]),
+                node("textfont", vec![s(font)]), // typography: HUD tree
+                node("Position", vec![n(0.5), n(y), n(0.0), s("Viewport")]),
+                node("zorder", vec![n(5.0)]),
+                node("eventtext", vec![s(event)]),
+                node("eventenable", vec![s(event)]),
+                node("eventdisable", vec![s("player1.spectateOff")]),
+            ],
+        });
+    }
+}
+
 /// The line's alpha, an undamped spring round 128 that the PS2 steps each frame from
 /// 254 at rest when it first shows, clamped to 2..=255 (`re-boundary.md` T4: B1
 /// `FUN_002d89c0`, B2 `FUN_00391fe0`). Stepped at the PS2's 30 updates a second, so
@@ -245,6 +302,9 @@ pub struct HudModel {
     /// The flown droid is outside the map's boundary and counting down: the line
     /// the HUD shows at the screen's centre (`re-boundary.md` 5).
     pub leaving: Option<String>,
+    /// The teammate view's label while the player watches his teammates
+    /// (issue #182); `None` hides it.
+    pub spectate: Option<HudSpectate>,
     /// The reticle: `None` hides it; else the relation of what the crosshair
     /// picks (−1 enemy, 1 friend, 0 nothing) — `Sim::reticle_pick`. A
     /// [`HudModel::target`] colours it instead.
@@ -604,6 +664,28 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             if hud.last("player1.leaving").is_some() {
                 hud.forget("player1.leaving");
                 hud.send("player1.leavingOff", EventValue::None, has_mesh);
+            }
+        }
+    }
+
+    match m.spectate.as_ref().filter(|_| !alive) {
+        Some(sp) => {
+            hud.publish(
+                "player1.spectate.name",
+                EventValue::Text(sp.name.clone()),
+                has_mesh,
+            );
+            hud.publish(
+                "player1.spectate.hint",
+                EventValue::Text(sp.hint.clone()),
+                has_mesh,
+            );
+        }
+        None => {
+            if hud.last("player1.spectate.name").is_some() {
+                hud.forget("player1.spectate.name");
+                hud.forget("player1.spectate.hint");
+                hud.send("player1.spectateOff", EventValue::None, has_mesh);
             }
         }
     }
@@ -1140,6 +1222,7 @@ mod tests {
             damage_flash: 0.0,
             gauge: Default::default(),
             leaving: None,
+            spectate: None,
             team_names: ["rep".into(), "cis".into()],
             tickets: [150, 143],
             bleed: [0.0; 2],
@@ -1648,5 +1731,55 @@ mod campaign_hud_tests {
         m.popup = None;
         feed(&mut hud, &m, &|_| false);
         assert_eq!(hud.last("objectivePopup"), None);
+    }
+}
+
+#[cfg(test)]
+mod spectate_tests {
+    use super::*;
+
+    /// Issue #182: the teammate view's lines are off until a dead player's
+    /// model carries them, show its texts, and go off with it.
+    #[test]
+    fn the_teammate_label_shows_only_while_watching() {
+        let mut layout = manifest::hud::HudLayout {
+            name: "t".into(),
+            nodes: vec![],
+        };
+        add_spectate_lines(&mut layout);
+        let none = manifest::hud::HudLayout {
+            name: "none".into(),
+            nodes: vec![],
+        };
+        let mut hud = Hud::new(&layout, &none);
+        hud.send("initialize", EventValue::None, &|_| false);
+        hud.advance(0.0);
+        let shown = |hud: &Hud, name: &str| {
+            let e = &hud.elems[hud.find(name).unwrap()];
+            (e.fader.state != 0).then(|| e.text.clone())
+        };
+        let mut m = HudModel {
+            dead: true,
+            ..Default::default()
+        };
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(0.1);
+        assert_eq!(shown(&hud, SPECTATE_ELEM), None, "off until watching");
+        m.spectate = Some(HudSpectate {
+            name: "Watching CT-1".into(),
+            hint: "Click: switch teammate".into(),
+        });
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(0.1);
+        assert_eq!(shown(&hud, SPECTATE_ELEM).as_deref(), Some("Watching CT-1"));
+        assert_eq!(
+            shown(&hud, SPECTATE_HINT_ELEM).as_deref(),
+            Some("Click: switch teammate")
+        );
+        m.spectate = None;
+        feed(&mut hud, &m, &|_| false);
+        hud.advance(0.1);
+        assert_eq!(shown(&hud, SPECTATE_ELEM), None, "off again");
+        assert_eq!(shown(&hud, SPECTATE_HINT_ELEM), None);
     }
 }

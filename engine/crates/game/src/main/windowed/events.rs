@@ -107,6 +107,9 @@ impl winit::application::ApplicationHandler for App {
         window.set_cursor(winit::window::CursorIcon::Default);
         if let Some(overlay) = &mut self.overlay {
             overlay.set_window_cursor(mouse::menu_cursor(event_loop, window.scale_factor()));
+            if let Some((rgba, side, hot)) = mouse::software_cursor(window.scale_factor()) {
+                overlay.set_software_cursor(rgba, side, hot);
+            }
         }
         self.focused = window.has_focus();
         let Some(map) = self.map.clone() else {
@@ -232,6 +235,9 @@ impl winit::application::ApplicationHandler for App {
         if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = &event {
             if let Some(overlay) = &mut self.overlay {
                 overlay.set_window_cursor(mouse::menu_cursor(event_loop, *scale_factor));
+                if let Some((rgba, side, hot)) = mouse::software_cursor(*scale_factor) {
+                    overlay.set_software_cursor(rgba, side, hot);
+                }
             }
         }
         self.mouse_window_event(&event);
@@ -604,16 +610,9 @@ impl winit::application::ApplicationHandler for App {
                         }
                     }
                     let pad = self.profile.settings.viewpoint.stamp(pad);
-                    // The scoreboard is held on Select / View or Tab (its
-                    // battle bit; never with the seat chord, LAN §5b).
-                    {
-                        use core::sim::buttons as b;
-                        self.score_hold.step(
-                            pad.buttons & b::SPAWN_CLASS_PREV != 0,
-                            pad.buttons & b::SWITCH_WEAPON != 0,
-                            dt,
-                        );
-                    }
+                    // The scoreboard is held on Select / View (never with the
+                    // seat chord) or Tab, read as the key (LAN §5b, #182).
+                    game::kbm::step_scoreboard(&mut self.score_hold, &self.kbm, &pad, dt);
                     // A LAN round: the pad is neutral while paused (the sim
                     // runs on), and carries a confirmed Respawn (issue #168).
                     let paused_now = self.paused;
@@ -1358,6 +1357,25 @@ impl winit::application::ApplicationHandler for App {
                         w as f32 / h.max(1) as f32
                     });
                     hud = Some(hud_model(walk, &mut self.feed, hud_aspect));
+                    // Issue #182: the teammate view's hint names the device in use.
+                    if let Some(sp) = hud.as_mut().and_then(|m| m.spectate.as_mut()) {
+                        if !sp.hint.is_empty() {
+                            if let game::input_icons::Device::Pad(family) =
+                                self.icon_device.device()
+                            {
+                                use input::PadFamily as F;
+                                let xbox = matches!(family, F::XboxOriginal | F::XboxOne);
+                                let set = self.icon_device.set(self.profile.settings.input_icons);
+                                sp.hint = game::input_icons::spectate_pad_hint(
+                                    set,
+                                    &self.profile.settings.controller_bindings,
+                                )
+                                .unwrap_or_else(|| {
+                                    crate::battle::pad_spectate_hint(xbox).to_owned()
+                                });
+                            }
+                        }
+                    }
                     // The capture icon is off under the pause menu, as the
                     // PS2's (card CPBAR, re-capture-display 3.4).
                     if let Some(m) = hud.as_mut().filter(|_| paused) {

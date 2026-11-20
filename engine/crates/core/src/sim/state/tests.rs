@@ -646,12 +646,11 @@ fn shared_sprint_keeps_hero_energy_nonnegative_but_soldiers_take_debt() {
     }
 }
 
-/// Issue #171 option C: a networked round at Hard or Elite gives both teams
-/// the host row whatever the head count, and hashes as the even round does;
-/// at Easy and Normal it keeps the DTEAM rule and hashes as the same head
-/// count in single player.
+/// OURS #171 step 3: a networked round takes the same head-count rule as
+/// single player (option C's host row for both teams is gone), and hashes
+/// as the same head count in single player.
 #[test]
-fn a_netplay_round_gives_both_teams_the_host_row() {
+fn a_netplay_round_takes_the_single_player_rows() {
     use crate::skill::Difficulty as D;
     for d in D::ALL {
         let make = |extra: [u8; 2], net: bool| {
@@ -661,29 +660,20 @@ fn a_netplay_round_gives_both_teams_the_host_row() {
             s.netplay_rows = net;
             s
         };
-        let even = matches!(d, D::Hard | D::Elite);
-        assert_eq!(d.lan_even_rows(), even, "{d:?}");
         for extra in [[1, 0], [2, 1], [3, 0], [0, 2]] {
-            let s = make(extra, true);
-            let like = if even {
-                make([0, 0], false)
-            } else {
-                make(extra, false)
-            };
+            let (s, like) = (make(extra, true), make(extra, false));
             assert_eq!(s.team_rows(), like.team_rows(), "{d:?} {extra:?}");
-            if even {
-                assert_eq!((s.difficulty_of(0), s.difficulty_of(1)), (d, d));
-            }
+            assert_eq!(s.team_rows(), crate::skill::team_skill(d, extra));
             assert_eq!(s.hash(), like.hash(), "{d:?} {extra:?}");
         }
     }
-    // Normal 2v1 keeps the surplus team's drop (16 on the Easy row).
+    // Elite 2v1: the pair's bots 18 on the Elite row, the other team 20.
     let mut s = Sim::empty(4);
-    s.difficulty = D::Normal;
+    s.difficulty = D::Elite;
     s.extra_humans = [2, 1];
     s.netplay_rows = true;
-    assert_eq!(s.team_rows()[0].level, 16);
-    assert_eq!(s.team_rows()[0].tier, D::Easy);
+    assert_eq!(s.team_rows().map(|t| t.level), [18, 20]);
+    assert_eq!(s.team_rows()[0].tier, D::Elite);
 }
 
 /// Issue #171: a space round keeps the 2026-11-03 DTEAM rule (option A is

@@ -1142,38 +1142,28 @@ pub fn install_for_mission(
         })
         .collect();
     crate::hero_riders::install(sim, m, map_dir, &b, tow_parts);
-    for (class, setup) in sim
-        .seat_setup
-        .iter()
-        .enumerate()
-        .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
-    {
-        if !matches!(
-            db.engine_base(&b.classes[class]).and_then(vehicle_kind),
-            Some(VehicleKind::Walker | VehicleKind::Flyer | VehicleKind::Hover)
-        ) {
+    // Every weapon that winds up, a seat's or a soldier's own (the clone
+    // commander's chaingun): the spin and fire sounds belong to the
+    // weapon class, played by the same cycle wherever it is held (B2
+    // `FUN_0032e8c0`).
+    for (class, wc) in sim.weapon_classes.iter().enumerate() {
+        if wc.wind_up <= 0.0 {
             continue;
         }
-        for w in setup.guns.iter().flatten().flat_map(|g| &g.weapons) {
-            let wc = &sim.weapon_classes[w.class];
-            if wc.wind_up <= 0.0 {
-                continue;
-            }
-            let name = &wc.name;
-            let f = |h: u32, or: f32| db.prop_hash_f32(name, h).unwrap_or(or);
-            let style = crate::walker_shots::Style {
-                fire_sound: db.prop_hash(name, 0x2298cae8).map(str::to_owned),
-                fire_fade: [f(0x674fc158, 0.0), f(0x0f1ca143, 0.0)],
-                spin: db
-                    .prop_hash(name, 0xca333e94)
-                    .map(|n| crate::walker_shots::SpinSound {
-                        name: n.to_owned(),
-                        pitch: f(0x1a2034be, 1.0),
-                        fade: [f(0x22e5153c, 0.0), f(0x25820dbf, 0.0)],
-                    }),
-            };
-            b.walker_shot_styles.insert(w.class, style);
-        }
+        let name = &wc.name;
+        let f = |h: u32, or: f32| db.prop_hash_f32(name, h).unwrap_or(or);
+        let style = crate::walker_shots::Style {
+            fire_sound: db.prop_hash(name, 0x2298cae8).map(str::to_owned),
+            fire_fade: [f(0x674fc158, 0.0), f(0x0f1ca143, 0.0)],
+            spin: db
+                .prop_hash(name, 0xca333e94)
+                .map(|n| crate::walker_shots::SpinSound {
+                    name: n.to_owned(),
+                    pitch: f(0x1a2034be, 1.0),
+                    fade: [f(0x22e5153c, 0.0), f(0x25820dbf, 0.0)],
+                }),
+        };
+        b.walker_shot_styles.insert(class, style);
     }
     Ok(b)
 }
@@ -1200,11 +1190,23 @@ fn gunner_seat(
     let node_bind = hang
         .parent
         .map_or(glam::Mat4::IDENTITY, |p| tp::bind_of(rig, p));
+    let spec = tp::PoseSpec::of(rig, s);
+    // An aimer-node parent is posed as the draw poses it (`Rig::pose`).
+    let aimer = hang.parent.filter(|p| Some(*p) == spec.aimer).map(|a| {
+        let up = rig.nodes[a].parent.map(|p| p as usize);
+        let parent_bind = up.map_or(glam::Mat4::IDENTITY, |p| tp::bind_of(rig, p));
+        core::vehicle::gun::AimerHang {
+            local: parent_bind.inverse() * tp::bind_of(rig, a),
+            parent_bind,
+            parent_turns: up.is_some() && up == spec.turret,
+        }
+    });
     Some(core::vehicle::gun::GunnerSeat {
         node_bind,
         local: hang.local,
-        turns: hang.parent.is_some() && hang.parent == tp::PoseSpec::of(rig, s).turret,
-        pitch_factor: s.pitch_turn_factor.unwrap_or(1.0),
+        turns: hang.parent.is_some() && hang.parent == spec.turret,
+        pitch_factor: spec.pitch_factor,
+        aimer,
     })
 }
 
@@ -1600,7 +1602,8 @@ pub fn seat_gun(
 /// the IFT-X's `lgun_y`) carries the firing aimer after it, so the two
 /// aimers' ranges add: `lgun_x`'s pitch -30..90 with `lgun_y`'s yaw -30..15.
 /// Each barrel's pivot is its firing aimer's node when no aimer carries
-/// another; otherwise none, and the seat's pivot turns them.
+/// another, or only yaw-only aimers do; otherwise none, and the seat's
+/// pivot turns them.
 fn fire_ring(
     s: &vehicle_class::SeatSpec,
     weapon: usize,
@@ -1643,10 +1646,15 @@ fn fire_ring(
         let own = [lim(a.yaw), lim(a.pitch)];
         if a.no_fire {
             carried = add(carried, own);
-            lone = false;
+            // A carrier that only yaws (the Spider Walker's `turret_y_*`
+            // over its `turret_x_*`) turns its barrel about the vertical
+            // through it; the barrel still pitches about the firing
+            // aimer's node, which takes the barrel's pivot (0.13 m off the
+            // carrier's axis on the Spider).
+            lone &= own[1] == [0.0, 0.0];
             continue;
         }
-        let pivot = node(&a.node).filter(|_| carried == [[0.0; 2]; 2]);
+        let pivot = node(&a.node).filter(|_| carried[1] == [0.0; 2]);
         for p in a.muzzles().into_iter().filter_map(&node) {
             points.push(p);
             limits.push(add(carried, own));

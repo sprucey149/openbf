@@ -178,6 +178,9 @@ impl WalkSim {
         if let Some(view) = self.held_seat_view() {
             return (view, None);
         }
+        if let Some(cam) = self.spectate_camera() {
+            return (cam, None);
+        }
         if let Some(d) = &self.death_cam {
             return (d.camera(self.fov_y()), None);
         }

@@ -951,3 +951,102 @@ fn atst_passenger_looks_from_over_the_walker_and_fires_its_rocket_forward() {
         "rocket heads {dir:?} in the walker's frame"
     );
 }
+
+/// Issue #182: the clone commander's chaingun on foot sounds as a seat's
+/// chaingun does. Its class authors the spin motor and the fire loop
+/// (`rep_weap_inf_chaingun_spin`, `rep_weap_inf_chaingun_fire`) and no
+/// `FireSound`, so before this the soldier's gun was silent through its
+/// wind-up, its rounds and its wind-down. Held: the spin motor rises from
+/// the press and the fire loop joins once the wind-up is spent; let go: the
+/// fire loop fades, the spin holds then fades over the wind-down's end, and
+/// both are gone once the gun is idle. Mutation: the on-foot branch of
+/// `voices` dropped -> no voice on the held tick.
+mod soldier_chaingun {
+    use core::sim::{buttons, PadState};
+    use core::weapon::{FireState, WeaponState};
+    use game::walker_shots::{voices, Ramp};
+
+    #[test]
+    fn a_held_commander_chaingun_spins_fires_and_winds_down_with_its_sounds() {
+        let root = game::assets::baked_root();
+        let (mut w, _) = super::walker_battle::battle(&root).unwrap();
+        let gun = w
+            .sim
+            .weapon_classes
+            .iter()
+            .position(|c| c.name == "rep_weap_inf_chaingun")
+            .expect("the clone commander's chaingun is registered");
+        let style = game::walker_shots::style(&w, gun).expect("a wind-up style");
+        assert_eq!(
+            style.fire_sound.as_deref(),
+            Some("rep_weap_inf_chaingun_fire")
+        );
+        let spin = style.spin.as_ref().expect("a spin motor");
+        assert_eq!(spin.name, "rep_weap_inf_chaingun_spin");
+        let (wind_up, wind_down) = {
+            let c = &w.sim.weapon_classes[gun];
+            (c.wind_up, c.wind_down)
+        };
+        assert!(wind_up > 0.0 && wind_down > 0.0);
+
+        let me = w.player;
+        let state = WeaponState::new(&w.sim.weapon_classes[gun], true, 0);
+        let u = w.sim.unit_mut(me).expect("the player is alive");
+        assert!(u.mount.is_none());
+        u.weapon = state;
+        u.weapon_class = gun;
+        u.held.clear();
+        u.cur1 = None;
+
+        let fire = PadState {
+            buttons: buttons::FIRE,
+            ..Default::default()
+        };
+        let mine = |w: &game::walk::WalkSim| -> (Option<Ramp>, Option<Ramp>) {
+            let v = voices(w);
+            let of = |spin: bool| {
+                v.iter()
+                    .find(|v| v.unit == me && v.class == gun && v.spin == spin)
+                    .map(|v| v.ramp)
+            };
+            (of(true), of(false))
+        };
+
+        // The press: the motor starts, the fire loop waits for the rounds.
+        w.step_tick(&[fire]);
+        let (spin_v, fire_v) = mine(&w);
+        assert!(matches!(spin_v, Some(Ramp::Rise(_))), "{spin_v:?}");
+        assert_eq!(fire_v, None, "no fire loop inside the wind-up");
+
+        // Held past the wind-up: rounds, and the fire loop with them.
+        let ticks = (wind_up / core::TICK_DT).ceil() as usize + 3;
+        for _ in 0..ticks {
+            w.step_tick(&[fire]);
+        }
+        assert!(w.sim.unit(me).unwrap().weapon.shots_fired > 0);
+        let (spin_v, fire_v) = mine(&w);
+        assert!(matches!(spin_v, Some(Ramp::Rise(_))), "{spin_v:?}");
+        assert!(matches!(fire_v, Some(Ramp::Rise(_))), "{fire_v:?}");
+
+        // Let go: the fire loop fades out, the motor runs down.
+        for _ in 0..3 {
+            w.step_tick(&[PadState::default()]);
+            if w.sim.unit(me).unwrap().weapon.spin_down {
+                break;
+            }
+        }
+        let (spin_v, fire_v) = mine(&w);
+        let s = &w.sim.unit(me).unwrap().weapon;
+        assert!(s.spin_down, "{:?} spin {} cmd {}", s.state, s.spin, s.fire_cmd);
+        assert!(matches!(spin_v, Some(Ramp::Hold)), "{spin_v:?}");
+        assert!(matches!(fire_v, Some(Ramp::Fall(_))), "{fire_v:?}");
+
+        // The wind-down spent: idle and silent.
+        let ticks = (wind_down / core::TICK_DT).ceil() as usize + 3;
+        for _ in 0..ticks {
+            w.step_tick(&[PadState::default()]);
+        }
+        assert_eq!(w.sim.unit(me).unwrap().weapon.state, FireState::Idle);
+        assert_eq!(mine(&w), (None, None));
+    }
+}

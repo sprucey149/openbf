@@ -9,23 +9,34 @@ writes one match log per battle: engine/artifacts/playtest/matches/
 writes the same file for its human proxy (round_to_outcome with
 SWEEP_PROXY and MATCHLOG_DIR).
 
-  human_profile.py show LOG [LOG ...] [--json] [--allow-cheats]
+  human_profile.py show LOG [LOG ...] [--json] [--allow-cheats] [--skip-heroes]
       the profile of each log (several: also their sum)
   human_profile.py compare HUMAN_LOG [HUMAN_LOG ...] --proxy LOG [LOG ...]
-      [--tol 0.2]
+      [--tol 0.2] [--skip-heroes]
       the human's summed profile against the proxy logs' summed profile,
       per metric, with the gap and OK / OFF against the tolerance
   human_profile.py calibrate HUMAN_LOG [HUMAN_LOG ...] [--seeds 4]
-      [--grid skill=16,18,20 reaction=6,9] [--strength good] [--bin PATH]
-      [--keep DIR] [--tol 0.2]
-      the tuning loop: for every point of the grid, play the human's map at
-      his tier with the proxy on his team (seeds 1..N, round_to_outcome with
-      SWEEP_PROXY + MATCHLOG_DIR, 16 per side on the mission's tickets:
-      SWEEP_COMBATANTS=16 SWEEP_MISSION_TICKETS=1, both overridable from the
-      environment), sum the proxy's logs, and rank the
-      points by their distance to the human on the FIT metrics. Prints the
+      [--first-seed 1] [--grid skill=16,18,20 reaction=6,9] [--strength good]
+      [--bin PATH] [--keep DIR] [--tol 0.2] [--fit kd,kills_min,...]
+      [--setup FILE] [--mirror-class] [--skip-heroes] [--jobs N]
+      the tuning loop: for every point of the grid, play EVERY human log's
+      own map, tier, era and team with the proxy on his team (seeds
+      first..first+N-1, round_to_outcome with SWEEP_PROXY + MATCHLOG_DIR, 16
+      per side on the mission's tickets: SWEEP_COMBATANTS=16
+      SWEEP_MISSION_TICKETS=1, both overridable from the environment), sum
+      the proxy's logs over all of them, and rank the points by their
+      distance to the human's sum on the FIT metrics (or --fit). Prints the
       best point and the `Strength::Good` fields to set in
       engine/crates/core/src/ai/proxy.rs.
+      --setup: a JSON object, log file name -> {"allies": N, "foes": N,
+      "netplay": 0|1, "combatants": N|"map"}: the round's other humans (more
+      proxies of the same point, on his team and on the other), whether it
+      was a LAN round (SWEEP_NETPLAY=1, the LAN rows) and its population
+      (per side, or the map's defaults; a kill rate depends on it). --mirror-class: the proxy plays the
+      class he spent the most time as in that log. --skip-heroes: his hero
+      lives are left out (a headless round installs no heroes). --jobs: rounds
+      at once. Run the whole loop inside the machine's capped scope
+      (scripts/heavy.sh + systemd-run); the rounds are its child processes.
 
 A log with a cheat on at ANY tick (its footer's `cheats`) is refused unless
 --allow-cheats (then every line says CHEATS). A log without a footer (the
@@ -97,14 +108,66 @@ def life_starts(spawns, ends):
     return out
 
 
-def tally(head, rows, end):
-    """The raw counts of one log."""
+def hero_lives(head, rows, end):
+    """The (start, end) ticks of every stretch spent as a hero class (a
+    class name with `_hero_`): from its `spawn` row to his next death (or
+    next spawn, or the footer). A headless round installs no heroes, so a
+    human's hero time is left out when he is compared with a proxy
+    (`--skip-heroes`)."""
+    u = head["unit"]
+    names = end.get("names", {}).get("classes", [])
+    ends = sorted([r[1] for r in rows if r[0] == "death"]
+                  + [r[1] for r in rows if r[0] == "kill" and r[3] == u])
+    spawns = sorted((r[1], r[2], r[3]) for r in rows if r[0] == "spawn")
+    out = []
+    for i, (s, c, t) in enumerate(spawns):
+        name = names[t][c] if t < len(names) and c < len(names[t]) else ""
+        if "_hero_" in name:
+            nxt = spawns[i + 1][0] - 1 if i + 1 < len(spawns) else end["tick"]
+            out.append((s, min([x for x in ends if x >= s] + [nxt, end["tick"]])))
+    return out
+
+
+def main_class(head, rows, end):
+    """The class index the subject spent the most alive time as (hero lives
+    left out): what `calibrate --mirror-class` plays the proxy as."""
+    u = head["unit"]
+    names = end.get("names", {}).get("classes", [])
+    ends = sorted([r[1] for r in rows if r[0] == "death"]
+                  + [r[1] for r in rows if r[0] == "kill" and r[3] == u])
+    spawns = sorted((r[1], r[2], r[3]) for r in rows if r[0] == "spawn")
+    time = {}
+    for i, (s, c, t) in enumerate(spawns):
+        nxt = spawns[i + 1][0] if i + 1 < len(spawns) else end["tick"]
+        e = min([x for x in ends if x >= s] + [nxt, end["tick"]])
+        name = names[t][c] if t < len(names) and c < len(names[t]) else ""
+        if "_hero_" not in name:
+            time[c] = time.get(c, 0) + max(e - s, 0)
+    return max(time, key=time.get) if time else None
+
+
+def tally(head, rows, end, skip_heroes=False):
+    """The raw counts of one log (`skip_heroes`: without his hero lives)."""
+    if skip_heroes:
+        hero = hero_lives(head, rows, end)
+        if hero:
+            inside = lambda t: any(s <= t <= e for s, e in hero)
+            rows = [r for r in rows if not inside(r[1])]
+            cut = sum(e - s for s, e in hero)
+            end = dict(end, tick=end["tick"] - cut)
+            # Later rows keep their ticks; only the totals drop the hero
+            # time (minutes and lives are what the cut changes).
+            rows = [[r[0], r[1] - sum(e - s for s, e in hero if e < r[1])] + list(r[2:]) for r in rows]
+            # Each cut ends the life it was in (a `cut` row: a life's end,
+            # not a death).
+            rows += [["cut", s - sum(e2 - s2 for s2, e2 in hero if e2 < s)] for s, _ in hero]
+            rows.sort(key=lambda r: r[1])
     u, team = head["unit"], head["team"]
     t = {"kills": 0, "deaths": 0, "shots": 0, "hits": 0, "taken": 0.0, "engage": [], "dropped": 0,
          "lives": [], "alive_ticks": 0, "foot": 0, "dist": 0.0, "strafe": 0, "strafe_starts": 0,
          "crouch": 0, "crouch_starts": 0, "prone": 0, "prone_starts": 0, "minutes": 0.0,
          "cheats": list(end.get("cheats", []))}
-    ends = sorted([r[1] for r in rows if r[0] == "death"]
+    ends = sorted([r[1] for r in rows if r[0] in ("death", "cut")]
                   + [r[1] for r in rows if r[0] == "kill" and r[3] == u])
     spawns = life_starts([r[1] for r in rows if r[0] == "spawn"], ends)
     first = spawns[0] if spawns else head.get("from", 0)
@@ -209,12 +272,12 @@ ROWS = [
 ]
 
 
-def summed(paths, allow):
+def summed(paths, allow, skip_heroes=False):
     total, heads = None, []
     for p in paths:
         head, rows, end = load(p, allow)
         heads.append((head, end))
-        t = tally(head, rows, end)
+        t = tally(head, rows, end, skip_heroes)
         total = t if total is None else add(total, t)
     return total, heads
 
@@ -232,12 +295,13 @@ def show(args):
     total = None
     for p in args.logs:
         head, rows, end = load(p, args.allow_cheats)
-        t = tally(head, rows, end)
+        t = tally(head, rows, end, args.skip_heroes)
         total = t if total is None else add(total, t)
         pr = profile(t)
         if args.json:
             print(json.dumps({"file": p, "map": head["map"], "difficulty": head["difficulty"],
-                              "subject": head["subject"], "cheats": end.get("cheats", []), **pr}))
+                              "subject": head["subject"], "cheats": end.get("cheats", []),
+                              "main_class": main_class(head, rows, end), **pr}))
             continue
         print(describe(p, head, end))
         for k, f in ROWS:
@@ -255,14 +319,14 @@ def gap(h, p):
     return (p - h) / max(abs(h), 1e-9)
 
 
-def distance(hp, pp):
-    gs = [abs(gap(hp[k], pp[k])) for k in FIT]
+def distance(hp, pp, fit=FIT):
+    gs = [abs(gap(hp[k], pp[k])) for k in fit]
     gs = [g for g in gs if g == g]
     return sum(g * g for g in gs) / max(len(gs), 1)
 
 
 def compare(args):
-    ht, _ = summed(args.human, args.allow_cheats)
+    ht, _ = summed(args.human, args.allow_cheats, args.skip_heroes)
     pt, _ = summed(args.proxy, True)
     hp, pp = profile(ht), profile(pt)
     print(f"{'metric':13} {'human':>9} {'proxy':>9} {'gap':>7}")
@@ -280,36 +344,72 @@ def compare(args):
     return off
 
 
-def run_round(bin_path, head, strength, point, seed, out_dir):
+def proxy_spec(team, strength, point):
     items = ",".join(f"{k}={v}" for k, v in point.items())
-    spec = f"{head['team']}:{strength}" + (f",{items}" if items else "")
+    return f"{team}:{strength}" + (f",{items}" if items else "")
+
+
+def run_round(bin_path, head, strength, point, seed, out_dir, setup=None, ticks=60000):
+    """One headless round of the log's map, tier and era with the proxy on
+    the log's team (`point` overrides its profile), the log's other humans
+    as more proxies of the same point (`setup`: `allies` on his team,
+    `foes` on the other; their class is the strength's own) and, with
+    `setup["netplay"]`, the LAN round's rows (`SWEEP_NETPLAY=1`). The caller
+    runs the whole loop inside the machine's capped scope (heavy.sh +
+    systemd-run), so a round is a plain child process."""
+    setup = setup or {}
+    others = {k: v for k, v in point.items() if k != "class"}
+    team = head["team"]
+    spec = ";".join([proxy_spec(team, strength, point)]
+                    + [proxy_spec(team, strength, others)] * int(setup.get("allies", 0))
+                    + [proxy_spec(1 - team, strength, others)] * int(setup.get("foes", 0)))
     env = dict(os.environ)
     env.update({
         "SWEEP_PROXY": spec,
         "SWEEP_DIFFICULTY": head.get("difficulty") or "normal",
         "SWEEP_THREADS": "1",
+        "OPENBF_SIM_THREADS": os.environ.get("OPENBF_SIM_THREADS", "1"),
         # The proxy and the tiers live at 16 per side on the mission's tickets
         # (the sweep's own default is the map's team sizes and tickets).
         "SWEEP_COMBATANTS": os.environ.get("SWEEP_COMBATANTS", "16"),
         "SWEEP_MISSION_TICKETS": os.environ.get("SWEEP_MISSION_TICKETS", "1"),
+        "SWEEP_NETPLAY": "1" if setup.get("netplay") else "0",
         "MATCHLOG_DIR": str(out_dir),
     })
+    # The round's own population when the setup knows it: a number per
+    # side (on the mission's tickets), or "map" for the map's defaults.
+    pop = setup.get("combatants")
+    if pop == "map":
+        env.pop("SWEEP_COMBATANTS", None)
+        env.pop("SWEEP_MISSION_TICKETS", None)
+    elif pop:
+        env["SWEEP_COMBATANTS"] = str(int(pop))
     if head.get("mission", "").endswith("_con_cw.ron"):
         env["SWEEP_ERA"] = "cw"
-    cmd = ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=16G",
-           "timeout", "900", str(bin_path), "60000", str(seed), head["map"]]
+    else:
+        env.pop("SWEEP_ERA", None)
+    cmd = ["timeout", "900", str(bin_path), str(ticks), str(seed), head["map"]]
     subprocess.run(cmd, env=env, cwd=ENGINE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     f = pathlib.Path(out_dir) / f"{head['map']}_s{seed}.jsonl"
     return f if f.exists() else None
 
 
 def calibrate(args):
-    ht, heads = summed(args.human, args.allow_cheats)
-    head = heads[0][0]
-    if any(h["map"] != head["map"] or h["difficulty"] != head["difficulty"] or h["team"] != head["team"]
-           for h, _ in heads):
-        print("note: the logs differ in map / tier / team; the loop plays the first one's", file=sys.stderr)
+    """The tuning loop. Every human log is played at its own map, tier,
+    team and era (and, from `--setup`, its other humans and LAN rows;
+    `--mirror-class`: as the class he played most), `--seeds` seeds each,
+    and the proxy's logs of all of them are summed against the human's
+    sum: one fit over every map and tier the logs cover."""
+    import concurrent.futures as cf
+    setups = json.loads(pathlib.Path(args.setup).read_text()) if args.setup else {}
+    logs = []
+    for path in args.human:
+        head, rows, end = load(path, args.allow_cheats)
+        logs.append((path, head, main_class(head, rows, end) if args.mirror_class else None,
+                     setups.get(pathlib.Path(path).name, {})))
+    ht, _ = summed(args.human, args.allow_cheats, args.skip_heroes)
     hp = profile(ht)
+    fit = args.fit.split(",") if args.fit else FIT
     grid = [{}]
     for g in args.grid:
         k, vs = g.split("=", 1)
@@ -318,31 +418,44 @@ def calibrate(args):
     if not bin_path.exists():
         sys.exit(f"{bin_path}: build it first (cargo build --release -p game --example round_to_outcome)")
     keep = pathlib.Path(args.keep) if args.keep else pathlib.Path(tempfile.mkdtemp(prefix="dprx_cal_"))
-    print(f"human ({len(args.human)} logs, {hp['minutes']:.0f} min): {head['map']} {head['difficulty']} "
-          f"team {head['team']}: " + "  ".join(f"{k} {hp[k]:.3g}" for k in FIT))
+    maps = sorted({(h["map"], h["difficulty"]) for _, h, _, _ in logs})
+    print(f"human ({len(logs)} logs, {hp['minutes']:.0f} min, {len(maps)} map/tier pairs): "
+          + "  ".join(f"{k} {hp[k]:.3g}" for k in fit), flush=True)
     ranked = []
     for point in grid:
         d = keep / ("_".join(f"{k}{v}" for k, v in point.items()) or "default")
-        d.mkdir(parents=True, exist_ok=True)
-        files = [f for seed in range(1, args.seeds + 1)
-                 if (f := run_round(bin_path, head, args.strength, point, seed, d))]
+        jobs = []
+        for n, (path, head, cls, setup) in enumerate(logs):
+            pt = dict(point)
+            if cls is not None and "class" not in pt:
+                pt["class"] = cls
+            for seed in range(args.first_seed, args.first_seed + args.seeds):
+                out = d / f"{n:02d}_{pathlib.Path(path).stem}"
+                out.mkdir(parents=True, exist_ok=True)
+                jobs.append((head, pt, seed, out, setup))
+        with cf.ThreadPoolExecutor(max_workers=args.jobs) as ex:
+            files = [f for f in ex.map(lambda j: run_round(bin_path, j[0], args.strength, j[1], j[2], j[3], j[4]),
+                                       jobs) if f]
         if not files:
             print(f"  {point}: no log written")
             continue
-        pt, _ = summed(files, True)
-        pp = profile(pt)
-        dist = distance(hp, pp)
+        pt_, _ = summed(files, True)
+        pp = profile(pt_)
+        dist = distance(hp, pp, fit)
         ranked.append((dist, point, pp))
-        print(f"  {point or 'profile as is'}: distance {dist:.3f}  "
-              + "  ".join(f"{k} {pp[k]:.3g}" for k in FIT), flush=True)
+        print(f"  {point or 'profile as is'}: {len(files)}/{len(jobs)} rounds, distance {dist:.3f}  "
+              + "  ".join(f"{k} {pp[k]:.3g}" for k in fit), flush=True)
     if not ranked:
         sys.exit("no point played")
     ranked.sort(key=lambda r: r[0])
     dist, point, pp = ranked[0]
-    gaps = [abs(gap(hp[k], pp[k])) for k in FIT if gap(hp[k], pp[k]) == gap(hp[k], pp[k])]
+    gaps = [abs(gap(hp[k], pp[k])) for k in fit if gap(hp[k], pp[k]) == gap(hp[k], pp[k])]
     worst = max(gaps) if gaps else float("nan")
     print(f"best: {point or 'profile as is'}  distance {dist:.3f}, largest fit gap {100 * worst:.0f} %"
           f" ({'within' if worst <= args.tol else 'OUTSIDE'} the {100 * args.tol:.0f} % tolerance)")
+    for k in fit:
+        g = gap(hp[k], pp[k])
+        print(f"  {k:13} human {hp[k]:.3g}  proxy {pp[k]:.3g}  gap {100 * g:+.0f} %")
     print("set these in Strength::Good's row (engine/crates/core/src/ai/proxy.rs), then drop PROVISIONAL:")
     names = {"skill": "skill", "reaction": "reaction_ticks", "view": "view_mult", "circles": "circles",
              "strafe": "react[0]", "roll": "react[1]", "move": "react[2]", "grenade": "grenade",
@@ -361,22 +474,30 @@ def main():
     a.add_argument("logs", nargs="+")
     a.add_argument("--json", action="store_true")
     a.add_argument("--allow-cheats", action="store_true")
+    a.add_argument("--skip-heroes", action="store_true")
     a.set_defaults(fn=show)
     a = sub.add_parser("compare")
     a.add_argument("human", nargs="+")
     a.add_argument("--proxy", nargs="+", required=True)
     a.add_argument("--tol", type=float, default=0.2)
     a.add_argument("--allow-cheats", action="store_true")
+    a.add_argument("--skip-heroes", action="store_true")
     a.set_defaults(fn=compare)
     a = sub.add_parser("calibrate")
     a.add_argument("human", nargs="+")
     a.add_argument("--seeds", type=int, default=4)
+    a.add_argument("--first-seed", type=int, default=1)
     a.add_argument("--grid", nargs="*", default=["skill=16,18,20", "reaction=6,9"])
     a.add_argument("--strength", default="good")
     a.add_argument("--bin")
     a.add_argument("--keep")
     a.add_argument("--tol", type=float, default=0.2)
+    a.add_argument("--fit", help="comma-separated metrics for the distance (default: FIT)")
+    a.add_argument("--setup", help="JSON: log file name -> {allies, foes, netplay}")
+    a.add_argument("--mirror-class", action="store_true")
+    a.add_argument("--jobs", type=int, default=1)
     a.add_argument("--allow-cheats", action="store_true")
+    a.add_argument("--skip-heroes", action="store_true")
     a.set_defaults(fn=calibrate)
     args = ap.parse_args()
     r = args.fn(args)

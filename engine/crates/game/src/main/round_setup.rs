@@ -136,7 +136,7 @@ pub(super) fn battle_setup(
         round.seed,
         round.difficulty,
     )?;
-    // Issue #171 option C: the LAN rows from the opening wave on, and the
+    // Issue #171: the LAN marker from the opening wave on, and the
     // opening wave counts every round-start human, not only slot 0.
     setup.netplay_rows = true;
     setup.opening_humans = game::netplay::joining_humans(round, setup.player_team);
@@ -380,14 +380,15 @@ mod tests {
 
     /// Issue #171 through the real LAN build (`build_round`): every opening
     /// bot spawns at the row its team plays once every round-start human is
-    /// seated. A Hard or Elite 2v1 gives both teams the host row (option C:
-    /// the host's team's opening bots at 20, not the surplus skill); at Normal
+    /// seated, by the single-player head-count rule (OURS #171 step 3, which
+    /// replaced option C's host row for both teams: an Elite 2v1's pair's
+    /// opening bots at 18, not 20 and not the host alone's 17); at Normal
     /// the DTEAM rule counts every human, not only slot 0, the host: a 1v1
     /// (the guest on the auto team) has no surplus, and a 2v1 with the host
     /// alone gives the surplus to the other side.
     #[test]
     fn a_lan_2v1_round_takes_its_rows_before_the_opening_wave() {
-        use core::skill::{Difficulty as D, TeamSkill};
+        use core::skill::Difficulty as D;
         let missions = Path::new("../../missions");
         let assets = game::assets::baked_root();
         let dir = assets.join("bf1_nab2");
@@ -443,15 +444,7 @@ mod tests {
             }
             assert_eq!(humans, want_humans, "{case}");
             assert!(sim.netplay_rows, "{case}");
-            let host_row = TeamSkill {
-                tier: d,
-                level: d.base_skill(),
-            };
-            let want = if d.lan_even_rows() {
-                [host_row; 2]
-            } else {
-                core::skill::team_skill(d, humans)
-            };
+            let want = core::skill::team_skill(d, humans);
             assert_eq!(sim.team_rows(), want, "{case}");
             let mut seen = [0; 2];
             for u in sim

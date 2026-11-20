@@ -120,6 +120,54 @@ pub struct MapLayout {
     pub regions: Vec<(String, Region)>,
 }
 
+/// One Conquest map-parity fix (issue #171).
+#[derive(Debug, Clone, Copy)]
+pub enum ParityFix {
+    /// This post starts neutral.
+    NeutralStart(usize),
+    /// This post's attack/defend values for one team index (0-based).
+    Goals {
+        post: usize,
+        team: usize,
+        atk: i32,
+        def: i32,
+    },
+}
+
+/// Issue #171 Conquest map-parity fixes: (map, clone-wars era, fix), applied
+/// over the mission's own post data by [`MapLayout::apply_mission`].
+/// OURS #171, each from the bot-only Hard `sides` census (authored tickets):
+/// measure: bot-only Hard seeds 1–8 with the map's `conquest_defaults` entry
+/// at its authored pair, after any sim, AI or map change; replace: a fix
+/// measured to even the map on its own, or drop the row.
+const fn goals(post: usize, team: usize, atk: i32, def: i32) -> ParityFix {
+    ParityFix::Goals {
+        post,
+        team,
+        atk,
+        def,
+    }
+}
+
+pub const CONQUEST_PARITY: &[(&str, bool, ParityFix)] = &[
+    // OURS #171: the Empire starts on one post of five (cp2) and the Rebels
+    // hold the majority from the first second, so the Empire bleeds all round
+    // (one neutral alone was retaken in 50 s: 0/8). The two Rebel posts
+    // nearest the Empire's (cp1, cp3) start neutral. Bot-only Hard seeds 1-8
+    // at the authored 232/232: Empire 0/8 -> 1/8, mean Rebel margin 70 -> 44.
+    ("bf1_hot1", false, ParityFix::NeutralStart(1)),
+    ("bf1_hot1", false, ParityFix::NeutralStart(3)),
+    // OURS #171: cp2 is the swing post; the Empire (team 1) spends its waves
+    // on the Alliance's three home posts (cp0, cp1, cp5), which it never
+    // takes, and loses cp2. Those three are worth less to it to attack, and
+    // cp2 twice as much to attack and hold. Bot-only Hard seeds 1-8 at the
+    // authored 150/150: still 8/8 for the Alliance, mean margin 82 -> 71.
+    ("bf2_kam1", false, goals(0, 1, 3, 10)),
+    ("bf2_kam1", false, goals(1, 1, 3, 10)),
+    ("bf2_kam1", false, goals(5, 1, 3, 10)),
+    ("bf2_kam1", false, goals(2, 1, 20, 20)),
+];
+
 /// What [`MapLayout::apply_mission`] did, for the caller's log.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MissionApplied {
@@ -1783,6 +1831,37 @@ impl MapLayout {
             .map(|(_, r)| *r)
     }
 
+    /// Issue #171 map-parity fixes for one Conquest mission ([`CONQUEST_PARITY`]).
+    /// Post indexes are the layout's after the mission roster, the order the
+    /// sim and the sweep's `sidespost` census number them.
+    fn apply_conquest_parity(&mut self, m: &MissionDef) {
+        let cw = m.era.as_deref() == Some("cw");
+        let rows = m.factions().map(|f| crate::walk::faction_row(&f));
+        for (map, era_cw, fix) in CONQUEST_PARITY {
+            if *map != m.map || *era_cw != cw {
+                continue;
+            }
+            match *fix {
+                ParityFix::NeutralStart(i) => {
+                    if let Some(c) = self.cps.get_mut(i) {
+                        c.team = 0;
+                    }
+                }
+                ParityFix::Goals {
+                    post,
+                    team,
+                    atk,
+                    def,
+                } => {
+                    if let Some(c) = self.cps.get_mut(post) {
+                        c.value_atk[rows[team]] = atk;
+                        c.value_def[rows[team]] = def;
+                    }
+                }
+            }
+        }
+    }
+
     /// Fold a mission's command-post edits into this layout, and resolve its
     /// death regions.
     ///
@@ -1852,6 +1931,10 @@ impl MapLayout {
                     m.map, m.mode
                 ),
             }
+        }
+
+        if m.mode == "con" {
+            self.apply_conquest_parity(m);
         }
 
         let mut death_regions = Vec::new();

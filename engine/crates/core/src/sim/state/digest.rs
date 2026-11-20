@@ -14,7 +14,10 @@
 //!
 //! Not covered: the game's animation providers `hero_rider_frames` and
 //! `tow_frames` (trait objects with no data view; they come from the same
-//! baked animations the class tables do).
+//! baked animations the class tables do). `seated_bodies` (issue #182), the
+//! seated riders' head and torso points each peer samples from its own
+//! skeletons, is plain data and is in "classes": a copy whose skeleton
+//! differs, or that lacks one, hits seated gunners differently.
 //!
 //! Only what the simulation reads (issue #168, LAN §7: PS2, PC and Xbox
 //! copies must agree when they simulate alike): the class tables are fed
@@ -173,6 +176,7 @@ impl Sim {
             class_enabled: _,
             ai_spawn_allowed: _,
             heroes,
+            seated_bodies,
             deathmatch,
             space_assault,
             ctf,
@@ -244,6 +248,27 @@ impl Sim {
         group("weapons", &mut |f| f.debug_sim(weapon_classes));
         group("classes", &mut |f| {
             f.debug_sim(&(classes, item_classes, station_classes));
+            // Issue #182: every key, limit and point, by its bits.
+            match seated_bodies {
+                None => f.eat(b"-"),
+                Some(s) => {
+                    f.count(s.by.len());
+                    for (&(team, class, vclass, seat), body) in &s.by {
+                        f.eat(&[team, class, seat]);
+                        f.u32(vclass);
+                        for l in [body.pitch_limits, body.yaw_limits] {
+                            match l {
+                                None => f.eat(b"-"),
+                                Some(l) => f.f32s(&l),
+                            }
+                        }
+                        f.count(body.points.len());
+                        for p in &body.points {
+                            f.f32s(&[p[0].x, p[0].y, p[0].z, p[1].x, p[1].y, p[1].z]);
+                        }
+                    }
+                }
+            }
         });
         group("modes", &mut |f| {
             f.debug_sim(&(test_rosters, heroes, deathmatch, space_assault, ctf));

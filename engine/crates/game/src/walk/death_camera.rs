@@ -100,7 +100,7 @@ impl DeathCam {
 }
 
 /// The camera rotation looking along `dir` (unit), no roll.
-fn look_rotation(dir: Vec3) -> Quat {
+pub(super) fn look_rotation(dir: Vec3) -> Quat {
     let yaw = fmath::atan2(-dir.x, -dir.z);
     let pitch = fmath::asin(dir.y.clamp(-1.0, 1.0));
     camera::camera_rotation(yaw, pitch, 0.0)
@@ -219,8 +219,8 @@ impl WalkSim {
     }
 
     /// Where the view looks at a living killer: his vehicle when he rides,
-    /// else his head.
-    fn killer_point(&self, k: UnitHandle) -> Option<Vec3> {
+    /// else his head. The teammate view (issue #182) follows the same point.
+    pub(super) fn killer_point(&self, k: UnitHandle) -> Option<Vec3> {
         let u = self.sim.unit(k)?;
         if let Some(v) = u.mount.and_then(|m| self.sim.vehicle(m.vehicle)) {
             return Some(v.pos + Vec3::Y * KILLER_VEHICLE_UP);
@@ -231,12 +231,18 @@ impl WalkSim {
     /// The clear fraction of a [`CAST`] m cast from `origin` along `dir`
     /// against the terrain sheet and the world's big models.
     fn death_cast(&self, origin: Vec3, dir: Vec3) -> f32 {
+        self.view_cast(origin, dir, CAST)
+    }
+
+    /// The clear fraction of a `len` m cast from `origin` along `dir`
+    /// against the terrain sheet and the world's big models.
+    pub(super) fn view_cast(&self, origin: Vec3, dir: Vec3, len: f32) -> f32 {
         let models = if self.camera_blockers.is_empty() {
             1.0
         } else {
             self.camera_blockers.fraction(
                 origin,
-                origin + dir * CAST,
+                origin + dir * len,
                 None,
                 |i| self.live_instance_pose(i),
                 &self.sim.doors,
@@ -244,9 +250,9 @@ impl WalkSim {
         };
         let terrain = self.sim.heightfield.as_ref().and_then(|h| {
             let cutters = &self.sim.collision.cutters;
-            core::collision::ray_heightfield(h, cutters, origin, dir, CAST, 0.25)
+            core::collision::ray_heightfield(h, cutters, origin, dir, len, 0.25)
         });
-        terrain.map_or(models, |t| models.fmin(t / CAST))
+        terrain.map_or(models, |t| models.fmin(t / len))
     }
 }
 

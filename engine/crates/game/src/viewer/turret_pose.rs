@@ -205,17 +205,11 @@ pub fn nine_pose(
     pitch_limits: Option<[f32; 2]>,
     yaw_limits: Option<[f32; 2]>,
 ) -> NinePose {
-    let rad = |l: Option<[f32; 2]>| l.map_or([0.0; 2], |l| l.map(f32::to_radians));
-    let place = |x: f32, [lo, hi]: [f32; 2]| (((x - lo) / (hi - lo) - 0.5) * 2.0).clamp(-1.0, 1.0);
-    let p = rad(pitch_limits);
-    let pf = if p[0] >= p[1] {
-        0.5
-    } else {
-        place(pitch_down, p)
-    };
-    let y = rad(yaw_limits);
-    let yf = if y[1] - y[0] > 0.0 && y[1] - y[0] < 4.712389 {
-        place(yaw, y)
+    // The sim places its seated riders' hit points by the same numbers
+    // (issue #182): one copy of the placement, the stick kept here.
+    let (yf, pf) = core::sim::nine_numbers((yaw, -pitch_down), pitch_limits, yaw_limits);
+    let yf = if core::sim::nine_yaw_limited(yaw_limits) {
+        yf
     } else {
         stick.clamp(-1.0, 1.0)
     };

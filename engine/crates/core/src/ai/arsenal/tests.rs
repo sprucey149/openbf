@@ -1359,6 +1359,88 @@ fn a_bot_with_a_launcher_fires_it_at_a_tank_in_range_and_line() {
     assert_eq!(shots_of(&mut sim, bot, 20), Vec::<u32>::new());
 }
 
+/// Issue #182: a ground vehicle is seen by its own body, `(20 x radius +
+/// 30) x mult` (both games size the view distance by the target's sphere),
+/// not by its rider's soldier sight (49 m at Normal). The scene's hull has
+/// a 5 m sphere: 130 m. At 100 m the launcher bot fires at it; at 140 m it
+/// does not see it.
+#[test]
+fn a_ground_vehicle_is_seen_and_rocketed_past_a_soldiers_sight() {
+    let (mut sim, bot, [l, _]) = heavy_scene(launcher(), rifle());
+    let (_, rider) = manned(&mut sim, VehicleKind::Hover, Vec3::new(0.0, 1.5, -100.0));
+    let got = shots_of(&mut sim, bot, 20);
+    assert!(!got.is_empty() && got.iter().all(|c| *c == l), "{got:?}");
+    assert_eq!(sim.unit(bot).unwrap().ai.target, Some(rider.into()));
+    let (mut sim, bot, _) = heavy_scene(launcher(), rifle());
+    manned(&mut sim, VehicleKind::Hover, Vec3::new(0.0, 1.5, -140.0));
+    assert_eq!(shots_of(&mut sim, bot, 10), Vec::<u32>::new());
+    assert!(sim.unit(bot).unwrap().ai.target.is_none());
+}
+
+/// Issue #182: a ground vehicle's sight is bounded by the observer's scan
+/// radius (BF2 `FUN_002a9d90`: longest weapon range + 5 x top speed). The
+/// hover's 130 m body sight is past a rifle/rifle bot's reach (about 109 m),
+/// so at 110 m it does not see it; a launcher bot, whose rocket reaches
+/// farther, sees and takes the same hover at 110 m.
+#[test]
+fn a_ground_vehicle_is_seen_no_farther_than_the_observers_scan_radius() {
+    use crate::perception::scan_radius;
+    let at = Vec3::new(0.0, 1.5, -110.0);
+    let (mut sim, bot, _) = heavy_scene(rifle(), rifle());
+    let reach = scan_radius(&sim, sim.unit(bot).unwrap());
+    assert!(reach < 110.0, "rifle scan radius {reach}");
+    manned(&mut sim, VehicleKind::Hover, at);
+    for _ in 0..2 * TICK_HZ {
+        sim.step(&[]);
+    }
+    assert!(sim.unit(bot).unwrap().ai.target.is_none());
+    // Control: the launcher reaches past 110 m.
+    let (mut sim, bot, _) = heavy_scene(launcher(), rifle());
+    let reach = scan_radius(&sim, sim.unit(bot).unwrap());
+    assert!(reach > 110.0, "launcher scan radius {reach}");
+    let (_, rider) = manned(&mut sim, VehicleKind::Hover, at);
+    for _ in 0..2 * TICK_HZ {
+        sim.step(&[]);
+    }
+    assert_eq!(sim.unit(bot).unwrap().ai.target, Some(rider.into()));
+}
+
+/// Issue #182 (OURS): past a soldier's view distance a launcher bot still
+/// takes the nearer of two tanks, whichever it saw first.
+#[test]
+fn a_launcher_bot_takes_the_nearer_of_two_far_tanks() {
+    let (mut sim, bot, _) = heavy_scene(launcher(), rifle());
+    manned(&mut sim, VehicleKind::Hover, Vec3::new(10.0, 1.5, -100.0));
+    let (_, near) = manned(&mut sim, VehicleKind::Hover, Vec3::new(-10.0, 1.5, -70.0));
+    for _ in 0..2 * TICK_HZ {
+        sim.step(&[]);
+    }
+    assert_eq!(sim.unit(bot).unwrap().ai.target, Some(near.into()));
+}
+
+/// Issue #182 (OURS): the launcher bot's vehicle preference holds past a
+/// soldier's view distance - a tank at 90 m outranks a soldier at 12 m.
+/// A bot whose weapons cannot hurt the tank takes the soldier.
+#[test]
+fn a_launcher_bot_takes_a_far_tank_over_a_near_soldier() {
+    let (mut sim, bot, [l, _]) = heavy_scene(launcher(), rifle());
+    let (_, rider) = manned(&mut sim, VehicleKind::Hover, Vec3::new(0.0, 1.5, -90.0));
+    dummy(&mut sim, Vec3::new(3.0, 0.0, -12.0));
+    for _ in 0..2 * TICK_HZ {
+        sim.step(&[]);
+    }
+    assert_eq!(sim.unit(bot).unwrap().ai.target, Some(rider.into()));
+    let got = shots_of(&mut sim, bot, 10);
+    assert!(got.contains(&l), "{got:?}");
+    let (mut sim, bot, _) = heavy_scene(rifle(), rifle());
+    manned(&mut sim, VehicleKind::Hover, Vec3::new(0.0, 1.5, -90.0));
+    let man = dummy(&mut sim, Vec3::new(3.0, 0.0, -12.0));
+    for _ in 0..2 * TICK_HZ {
+        sim.step(&[]);
+    }
+    assert_eq!(sim.unit(bot).unwrap().ai.target, Some(man.into()));
+}
+
 /// Acceptance: a rocket at a 4-man group - and none at a lone soldier at
 /// 10 m or at 30 m, who gets the rifle. The same for the wrist rocket, whose
 /// own mask takes a person: on the PS2 it is one more weapon in its band.

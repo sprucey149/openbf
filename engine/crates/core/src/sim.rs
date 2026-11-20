@@ -130,7 +130,9 @@ pub use fall_credit::{ForcedMove, FORCED_GRACE, FORCED_MAX};
 pub use flyers::FlightLimits;
 pub use foot_lock::FootLock;
 pub use guns::SeatLook;
-pub use hero_bodies::HeroRiderFrames;
+pub use hero_bodies::{
+    nine_numbers, nine_yaw_limited, HeroRiderFrames, SeatedBodies, SeatedBody, SeatedKey, NINE_GRID,
+};
 pub use input::{
     buttons, AimTarget, HeldEat, InputLog, PadState, ScreenPick, LOOK_SCALE, LOOK_UNIT,
 };

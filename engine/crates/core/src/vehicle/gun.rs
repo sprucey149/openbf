@@ -329,8 +329,8 @@ pub struct GunSetup {
 /// 3.2, `re-turret-collision.md` 3.2 [O]): the PS2 puts his body at `L x E`
 /// in the model frame - `L` the `PilotPosition` hardpoint's bind relative to
 /// its parent node, `E` that node now. A turret-node parent turns with the
-/// look; any other parent is taken at its bind (PROVISIONAL for the aimer
-/// node's seats).
+/// look; an aimer-node parent looks along the aim ([`AimerHang`], as
+/// [`Rig::pose`] poses it); any other parent is taken at its bind.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GunnerSeat {
     /// The parent node's bind, model space.
@@ -341,23 +341,52 @@ pub struct GunnerSeat {
     pub turns: bool,
     /// `PitchTurnFactor` of the turret node's pitch.
     pub pitch_factor: f32,
+    /// Issue #182: the parent is the seat's aimer node (Kashyyyk's and
+    /// Mygeeto's recoilless guns: the gunner swings 2.8 m round with the
+    /// gun, and stood at the bind before).
+    pub aimer: Option<AimerHang>,
+}
+
+/// A [`GunnerSeat`] parent that is the seat's aimer node: posed as
+/// [`Rig::pose`] poses it, over its own parent now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimerHang {
+    /// The aimer's bind relative to its parent.
+    pub local: glam::Mat4,
+    /// The aimer's parent's bind, model space (identity for a root).
+    pub parent_bind: glam::Mat4,
+    /// The aimer's parent is the turret node, posed by the look.
+    pub parent_turns: bool,
 }
 
 impl GunnerSeat {
     /// His drawn matrix `E x L` in the model frame with the seat's camera
-    /// at `look`; the soldier model faces its +Z.
-    pub fn frame(&self, look: (f32, f32)) -> glam::Mat4 {
-        let e = if self.turns {
-            turret_node(&self.node_bind, look.0, -look.1 * self.pitch_factor)
-        } else {
-            self.node_bind
+    /// at `look` and its aimer at `aim` (model frame); the soldier model
+    /// faces its +Z. The draw holds an aimer parent one tick back
+    /// (`game::soldier_vis`'s seat clock); this is the tick's own (OURS:
+    /// one tick's turn, a few cm at the guns' turn rates; measure: the
+    /// drawn and sim gunner of a recoilless gun turning at full stick).
+    pub fn frame(&self, look: (f32, f32), aim: (f32, f32)) -> glam::Mat4 {
+        let turned = |bind: &glam::Mat4| turret_node(bind, look.0, -look.1 * self.pitch_factor);
+        let e = match self.aimer {
+            Some(a) => {
+                let p = if a.parent_turns {
+                    turned(&a.parent_bind)
+                } else {
+                    a.parent_bind
+                };
+                aimer_node(&p, &a.local, dir(aim.0, aim.1))
+            }
+            None if self.turns => turned(&self.node_bind),
+            None => self.node_bind,
         };
         e * self.local
     }
 
-    /// His feet in the model frame with the seat's camera at `look`.
-    pub fn feet(&self, look: (f32, f32)) -> Vec3 {
-        self.frame(look).w_axis.truncate()
+    /// His feet in the model frame with the seat's camera at `look` and
+    /// its aimer at `aim`.
+    pub fn feet(&self, look: (f32, f32), aim: (f32, f32)) -> Vec3 {
+        self.frame(look, aim).w_axis.truncate()
     }
 }
 
@@ -476,6 +505,19 @@ impl GunSetup {
         {
             return None;
         }
+        Self::line_aim(w, p, target)
+    }
+
+    /// Barrel `p` of `w` turned about its own aimer's node
+    /// (`GunWeapon::fire_pivots`) so its muzzle's line meets `target`
+    /// (model space), inside that barrel's limits: the angles, and whether
+    /// they reach it unclamped. `None` for a barrel with no pivot of its
+    /// own. The PS2 steers each aimer from its own node toward the seat's
+    /// aim point (`analysis/re-turret-draw.md` 2.3), and the barrel rides
+    /// the aimer's line, so a near target is met from that node, not from
+    /// the muzzle (from the muzzle, a target nearer than the barrel's reach
+    /// lies behind it and the shot turned round and up).
+    pub fn line_aim(w: &GunWeapon, p: usize, target: Vec3) -> Option<((f32, f32), bool)> {
         let pivot = *w.fire_pivots.get(p)?;
         let off = *w.fire_points.get(p)? - pivot;
         let v = target - pivot;

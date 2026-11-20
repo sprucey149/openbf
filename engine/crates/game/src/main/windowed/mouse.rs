@@ -42,6 +42,20 @@ fn cursor_source(px: u32) -> anyhow::Result<CustomCursorSource> {
     )?)
 }
 
+/// Issue #182: the menu cursor's image for fullscreen menus, where the
+/// overlay draws it: straight RGBA, its side and its click point in pixels.
+pub(super) fn software_cursor(scale: f64) -> Option<(Vec<u8>, u32, [f32; 2])> {
+    let px = cursor_px(scale);
+    let k = px as f32 / 32.0;
+    match render_cursor(px) {
+        Ok(rgba) => Some((rgba, px, [HOTSPOT.0 * k, HOTSPOT.1 * k])),
+        Err(e) => {
+            eprintln!("mouse: software cursor unavailable ({e})");
+            None
+        }
+    }
+}
+
 pub(super) fn menu_cursor(event_loop: &winit::event_loop::ActiveEventLoop, scale: f64) -> Cursor {
     match cursor_source(cursor_px(scale)) {
         Ok(source) => event_loop.create_custom_cursor(source).into(),
@@ -129,6 +143,7 @@ impl App {
         }
         if let Some(o) = &mut self.overlay {
             o.set_cursor_visible(true);
+            o.refresh_cursor();
         }
     }
 
@@ -173,6 +188,13 @@ impl App {
                 }
                 self.sync_grab();
             }
+            // Issue #182: a size change (a fullscreen the system finished,
+            // a mode switch) may drop the lock or confinement while mouse
+            // look holds it: the next sync sends it again.
+            WindowEvent::Resized(_) if self.kbm.grabbed() => {
+                self.kbm.forget_grab();
+                self.sync_grab();
+            }
             WindowEvent::CloseRequested => self.release_mouse(),
             _ => {}
         }
@@ -183,11 +205,15 @@ impl App {
         if self.regrab_after_spawn(allowed) {
             self.kbm.click_in();
         }
-        if let Some(w) = &self.window {
-            self.kbm.sync_grab(w, allowed);
-        }
+        let touched = match &self.window {
+            Some(w) => self.kbm.sync_grab(w, allowed),
+            None => false,
+        };
         if let Some(o) = &mut self.overlay {
             o.set_cursor_visible(cursor_shown(allowed, self.kbm.grabbed()));
+            if touched {
+                o.refresh_cursor();
+            }
         }
     }
 }
@@ -515,6 +541,19 @@ mod tests {
             "a battle with no mouse grab (controller)"
         );
         assert!(!cursor_shown(true, true), "a battle with the mouse grabbed");
+    }
+
+    /// Issue #182: fullscreen menus draw the same arrow, with the same click
+    /// point, as the system cursor.
+    #[test]
+    fn the_software_cursor_matches_the_system_one() {
+        for scale in [1.0, 1.25, 2.0] {
+            let (rgba, side, hot) = software_cursor(scale).unwrap();
+            assert_eq!(side, cursor_px(scale));
+            assert_eq!(rgba, render_cursor(side).unwrap());
+            let k = side as f32 / 32.0;
+            assert_eq!(hot, [HOTSPOT.0 * k, HOTSPOT.1 * k]);
+        }
     }
 
     #[test]

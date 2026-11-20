@@ -304,7 +304,8 @@ missions set it.
 
 Perception: a rider in a flyer is seen by the craft's body (§5.1's bound radius,
 doubled in BF2 for a flyer), and a flyer pilot sees any vehicle's riders by that
-vehicle's body. Ground bots looking at ground vehicles are unchanged.
+vehicle's body. Since issue #182 every observer sees an occupied ground vehicle's
+riders by (20r+30) x mult the same way, within the observer's scan radius.
 
 Not confirmed or not read: the follower's base speed argument (taken as
 MaxSpeed x PathFollowerSpeed); the order's forward vector in the speed share
