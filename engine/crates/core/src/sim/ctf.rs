@@ -98,6 +98,10 @@ pub struct Flag {
 }
 
 impl Flag {
+    fn is_falling(&self) -> bool {
+        self.gravity && !self.landed && !matches!(self.status, FlagStatus::Carried { .. })
+    }
+
     pub fn new_space_neutral(home_pos: Vec3) -> Self {
         Self {
             team: 0,
@@ -270,18 +274,8 @@ impl CtfState {
         }
         eat(&(self.flags.len() as u32).to_le_bytes());
         for f in &self.flags {
-            eat(&[
-                f.team,
-                u8::from(f.gravity),
-                u8::from(f.landed),
-                // A campaign script can turn AI pickups off at runtime; the
-                // AI reads it every tick, so it is live sim state, not setup.
-                u8::from(f.allow_ai_pickup),
-            ]);
+            eat(&[f.team]);
             for coord in f.current_pos.to_array() {
-                eat(&coord.hash_bits().to_le_bytes());
-            }
-            for coord in f.vel.to_array() {
                 eat(&coord.hash_bits().to_le_bytes());
             }
             match f.status {
@@ -301,6 +295,22 @@ impl CtfState {
                 }
             }
         }
+        // Append live campaign controls and active falling motion after the
+        // baseline flag records, so ordinary settled flags keep their hashes.
+        for (index, f) in self.flags.iter().enumerate() {
+            let index = (index as u32).to_le_bytes();
+            if !f.allow_ai_pickup {
+                eat(b"FLAG_AI_PICKUP_DISABLED");
+                eat(&index);
+            }
+            if f.is_falling() {
+                eat(b"FLAG_FALLING");
+                eat(&index);
+                for coord in f.vel.to_array() {
+                    eat(&coord.hash_bits().to_le_bytes());
+                }
+            }
+        }
     }
 }
 
@@ -315,7 +325,7 @@ impl Sim {
     /// `EntityFlag::Simulate` -> `EntityItem::Simulate` (SWBFRNT2.ELF
     /// FUN_0035e058 line 343754, FUN_00225578 lines 138440-138455).
     fn settle_flag(&self, flag: &mut Flag, dt: f32) {
-        if !flag.gravity || flag.landed {
+        if !flag.is_falling() {
             return;
         }
         let from_y = flag.current_pos.y;
@@ -649,6 +659,35 @@ mod tests {
         let s2 = Sim::empty(12345);
         assert_eq!(s1.hash(), s2.hash());
         assert!(s1.ctf.is_none());
+    }
+
+    #[test]
+    fn flag_hash_extends_the_legacy_record_only_for_active_state() {
+        let mut ctf = CtfState::new_space_one_flag(5, Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
+        let bytes = |ctf: &CtfState| {
+            let mut out = Vec::new();
+            ctf.hash_into(&mut |bytes| out.extend_from_slice(bytes));
+            out
+        };
+        let mut legacy = vec![1];
+        legacy.extend_from_slice(&5u32.to_le_bytes());
+        legacy.extend_from_slice(&[0; 8]); // Team scores.
+        legacy.extend_from_slice(&1u32.to_le_bytes());
+        legacy.extend_from_slice(&[ctf.flags[0].team]);
+        legacy.extend_from_slice(&[0; 13]); // Position and AtHome.
+
+        assert_eq!(bytes(&ctf), legacy);
+        ctf.flags[0].gravity = true;
+        assert_eq!(bytes(&ctf), legacy);
+        ctf.flags[0].landed = false;
+        let falling = bytes(&ctf);
+        assert_ne!(falling, legacy);
+        ctf.flags[0].vel = Vec3::NEG_Y;
+        assert_ne!(bytes(&ctf), falling);
+        ctf.flags[0].landed = true;
+        assert_eq!(bytes(&ctf), legacy);
+        ctf.flags[0].allow_ai_pickup = false;
+        assert_ne!(bytes(&ctf), legacy);
     }
 
     #[test]

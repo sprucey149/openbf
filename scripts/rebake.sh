@@ -377,7 +377,11 @@ if want common; then
     CAMP_ARGS=(--campaign "$INSHELL" "$INGAME_MVS")
   fi
   clean "$OUT/common_bf2/shell"
-  "$BAKE" shell "$(ci "$UI2" SHELL.LVL)" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" ${CAMP_ARGS[@]+"${CAMP_ARGS[@]}"}
+  SHELL_LVL="$(ci "$UI2" SHELL.LVL)"
+  "$BAKE" shell "$SHELL_LVL" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" ${CAMP_ARGS[@]+"${CAMP_ARGS[@]}"}
+  if [ -z "$OPENBF_BF2_TREE" ] || ! is_pc_lvl_dir "$UI2" bf2; then
+    "$PYTHON" -I "$ROOT/scripts/gen_missions.py" --shell-credits "$SHELL_LVL" "$OUT/common_bf2/shell/credits.json"
+  fi
   # Rise of the Empire 3D planet gallery (`GAL/GAL1.LVL`) and its music (`SOUND/GAL.LVL`).
   GAL_LVL="$(ci "$UI2" GAL/GAL1.LVL)"
   if [ -f "$GAL_LVL" ]; then

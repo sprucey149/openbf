@@ -99,7 +99,7 @@
 //! on it ([`Resolved::take_alpha_from`]) and is forced opaque whenever the
 //! base is.
 //!
-//! ## One equal-size exception: a 16-colour PS2 sheet against lossless PC art
+//! ## One equal-size exception for the galaxy screen
 //!
 //! The palette-versus-DXT argument above does not hold when the PS2 copy is
 //! 4 bpp (16 colours) and the PC stores the same size as `A8R8G8B8` or
@@ -660,6 +660,20 @@ pub(crate) fn tier2_matching(
     usage: Usage,
     matches: impl Fn(&Resolved) -> bool,
 ) -> Option<Resolved> {
+    resolve_tier2(t, pc, usage, false, matches)
+}
+
+pub(crate) fn galaxy_tier2(t: &Texture, pc: Option<&PcTextures>, usage: Usage) -> Option<Resolved> {
+    resolve_tier2(t, pc, usage, true, |_| true)
+}
+
+fn resolve_tier2(
+    t: &Texture,
+    pc: Option<&PcTextures>,
+    usage: Usage,
+    allow_same_size: bool,
+    matches: impl Fn(&Resolved) -> bool,
+) -> Option<Resolved> {
     // Exclusion 1: a detail-compressed base's `_dtl` companion is registered
     // to the PS2 pixels (see the module doc).
     if t.info.detail_compressed {
@@ -669,8 +683,7 @@ pub(crate) fn tier2_matching(
     let base = t.rgba8(0);
     let (w, h) = (t.info.width, t.info.height);
     let pc = pc?;
-    let sixteen_colour = t.info.bpp == 4 && t.info.width == w && t.info.height == h;
-    let same_size = sixteen_colour
+    let same_size = (allow_same_size && t.info.bpp == 4)
         .then(|| pc.lossless_at(&name, w, h))
         .flatten();
     pc.larger_than(&name, w, h).chain(same_size).filter(|r| matches(r)).find_map(|better| {
@@ -802,7 +815,7 @@ mod tests {
     #[test]
     fn a_sixteen_colour_sheet_takes_same_size_lossless_pc_art() {
         let lossy = pc_with("globe", 4, 2);
-        assert!(tier2(
+        assert!(galaxy_tier2(
             &sixteen_colour("globe", 4, 2),
             Some(&lossy),
             Usage::default()
@@ -810,7 +823,13 @@ mod tests {
         .is_none());
         let mut lossless = pc_with("globe", 4, 2);
         lossless.lossless.insert(("globe".into(), 4, 2));
-        let got = tier2(
+        assert!(tier2(
+            &sixteen_colour("globe", 4, 2),
+            Some(&lossless),
+            Usage::default(),
+        )
+        .is_none());
+        let got = galaxy_tier2(
             &sixteen_colour("globe", 4, 2),
             Some(&lossless),
             Usage::default(),
@@ -819,9 +838,9 @@ mod tests {
         assert_eq!((got.width, got.height, got.tier), (4, 2, Tier::Pc));
         let mut eight = sixteen_colour("globe", 4, 2);
         eight.info.bpp = 8;
-        assert!(tier2(&eight, Some(&lossless), Usage::default()).is_none());
+        assert!(galaxy_tier2(&eight, Some(&lossless), Usage::default()).is_none());
         let direct = ps2("globe", 4, 2, [0u8, 0, 0, 255].repeat(8));
-        assert!(tier2(&direct, Some(&lossless), Usage::default()).is_none());
+        assert!(galaxy_tier2(&direct, Some(&lossless), Usage::default()).is_none());
     }
 
     /// Real data: the campaign screen's Naboo globe is 16 colours on the PS2
@@ -852,7 +871,7 @@ mod tests {
             (land.info.width, land.info.height, land.info.bpp),
             (512, 256, 4)
         );
-        let got = tier2(&land, Some(&donors), Usage::default()).expect("tier 2");
+        let got = galaxy_tier2(&land, Some(&donors), Usage::default()).expect("tier 2");
         assert_eq!((got.width, got.height, got.tier), (512, 256, Tier::Pc));
     }
 

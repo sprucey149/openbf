@@ -123,6 +123,10 @@ pub(super) fn battle_setup(
     missions_dir: &Path,
     assets_dir: &Path,
 ) -> Result<BattleSetup> {
+    anyhow::ensure!(
+        !round.mode.eq_ignore_ascii_case("campaign"),
+        "campaign is single-player only"
+    );
     let session = round
         .options
         .to_session(ui::shell::SessionOptions::default());
@@ -290,6 +294,26 @@ pub(super) fn rebuilder(
 mod tests {
     use super::*;
     use game::netplay::{HumanSeat, PlayerProfile, RoundOptions};
+
+    #[test]
+    fn lan_rejects_campaign_rounds() {
+        let round = RoundSetup::instant_action(
+            "bf2_geo1",
+            "Campaign",
+            ["rep".into(), "cis".into()],
+            &ui::shell::SessionOptions::default(),
+            &game::profile::Profile::default(),
+        );
+        assert!(RoundSetup::decode(&round.encode())
+            .unwrap_err()
+            .to_string()
+            .contains("campaign is single-player only"));
+        assert!(battle_setup(&round, Path::new(""), Path::new(""))
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("campaign is single-player only"));
+    }
 
     fn summary(b: &BattleSetup) -> String {
         format!(

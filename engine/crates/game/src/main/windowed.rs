@@ -1229,6 +1229,9 @@ impl App {
 
     /// Launch Rise of the Empire campaign mission `index` after its opening movies.
     pub(super) fn start_campaign(&mut self, index: usize) {
+        if self.netplay.is_some() {
+            return;
+        }
         let Some(entry) = ui::campaign::RISE_OF_THE_EMPIRE.get(index) else {
             return;
         };
@@ -1298,6 +1301,9 @@ impl App {
         mode: String,
         row: Option<ui::shell::Launch>,
     ) -> bool {
+        if self.netplay.is_some() && mode.eq_ignore_ascii_case("campaign") {
+            return false;
+        }
         // The shell music and planet backdrop stop with the shell.
         if let Some(f) = self.front.as_mut() {
             f.stop_music();
@@ -1831,7 +1837,7 @@ impl App {
             || ["all".to_owned(), "imp".to_owned()],
             |r| r.armies.clone(),
         );
-        if self.mode == "campaign" {
+        if net_round.is_none() && self.netplay.is_none() && self.mode == "campaign" {
             if let Some(entry) = self
                 .active_campaign
                 .and_then(|i| ui::campaign::RISE_OF_THE_EMPIRE.get(i))

@@ -731,12 +731,23 @@ def load_ps2(game, script):
     return undump40(body) if body[4] == 0x40 else undump50(body)
 
 
-def write_shell_credits(source, destination):
+def write_shell_credits(shell_lvl, destination):
     """Bake the user's PS2 CreditLines table as presentation data."""
     import json
     from pathlib import Path
+    from extract_lua import collect_scripts
 
-    script = undump50(Path(source).read_bytes())
+    data = Path(shell_lvl).read_bytes()
+    chunks = []
+    collect_scripts(data, 0, len(data), chunks)
+    body = next((chunk["body"] for chunk in chunks
+                 if (chunk.get("name") or "").lower() == "ifs_credits"
+                 and (chunk.get("body") or b"").startswith(b"\x1bLua\x50")), None)
+    destination = Path(destination)
+    if body is None:
+        destination.unlink(missing_ok=True)
+        return 0
+    script = undump50(body)
     globals_ = {}
     _sym_exec50(script, _rk_base(script), globals_)
     lines = globals_["CreditLines"]
@@ -747,7 +758,6 @@ def write_shell_credits(source, destination):
         for _, line in sorted(lines.items())
         if not line.get("bNoPS2")
     ]
-    destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
     return len(rows)
@@ -2968,10 +2978,17 @@ def main():
                     help="source install/disc or MISSION.LVL whose fingerprint selects the correction table")
     ap.add_argument("--dump", nargs=2, metavar=("GAME", "SCRIPT"),
                     help="print a PS2 script's reconstructed call sequence")
+    ap.add_argument("--shell-credits", nargs=2, metavar=("SHELL.LVL", "OUTPUT"),
+                    help="bake the credits presentation data from the shell")
     args = ap.parse_args()
     global PS2_ONLY, TABLE_ONLY_GAMES, PS2_BF1, PS2_BF2, OUT_DIR, GAMEPLAY_REFERENCES
     # pack.py runs this with -I, which leaves the script's own folder off the path.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    if args.shell_credits:
+        count = write_shell_credits(*args.shell_credits)
+        if count:
+            print(f"baked {count} credit lines")
+        return
     from gameplay_missions import load
     references = args.gameplay_reference or [p for p in os.environ.get("OPENBF_GAMEPLAY_CORRECTIONS", "").split(os.pathsep) if p]
     sources = {game: os.environ[f"OPENBF_GAMEPLAY_SOURCE_{game.upper()}"] for game in ("bf1", "bf2")

@@ -75,6 +75,7 @@ impl RoundJob {
     pub fn walk(&self, scene: &game::assets::Scene) -> Result<(BattleSetup, WalkSim)> {
         use super::super::round_setup::{battle_setup, build_round, campaign_setup, shell_setup};
         if let Some(idx) = self.campaign_index {
+            anyhow::ensure!(self.net.is_none(), "campaign is single-player only");
             let entry = &ui::campaign::RISE_OF_THE_EMPIRE[idx];
             let setup = campaign_setup(
                 &self.missions_dir,

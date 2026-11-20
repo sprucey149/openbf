@@ -103,9 +103,9 @@ pub struct CommandPostDef {
     pub major: bool,
     /// A space hangar's post: it spawns its team and is never taken.
     pub space: bool,
-    /// Whether this post can be captured or neutralized (`false` for `untakeable` zones).
+    /// Whether this post can be captured or neutralized.
     pub capturable: bool,
-    /// Whether this post is drawn on the minimap/spawn map (`false` for invisible zones).
+    /// Whether this post is drawn on the minimap or spawn map.
     pub visible: bool,
     /// The post's `VO_<Listener>_<Subject><Event>` lines (card ANNC,
     /// analysis/re-announcer.md §2.1); empty on a post that authors none.
@@ -271,9 +271,8 @@ impl MapLayout {
                 None => continue, // not a command post
             };
             let capturable = !space_post
-                && !class_lower.contains("untakeable")
-                && (cap_name.is_some() || !campaign);
-            let visible = !class_lower.contains("inv");
+                && (!campaign || (cap_name.is_some() && !class_lower.contains("untakeable")));
+            let visible = !campaign || !class_lower.contains("inv");
             let pos = Vec3::from(inst.translation);
             let mut capture = cap_name.and_then(region);
             // OURS, PROVISIONAL (Utapau campaign, `cam_cp4`): the authored

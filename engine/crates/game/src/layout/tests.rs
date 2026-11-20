@@ -52,6 +52,19 @@ fn synthetic_manifest_uses_the_real_prop_hashes() {
 }
 
 #[test]
+fn post_class_names_apply_visibility_and_capture_rules_only_in_campaign() {
+    let mut m = manifest();
+    m.instances[0].class = "com_bldg_inv_untakeable_controlzone".into();
+    let instant_action = MapLayout::from_battle_manifest(&m, false);
+    assert!(instant_action.cps[0].visible);
+    assert!(instant_action.cps[0].capturable);
+
+    let campaign = MapLayout::from_mission_manifest(&m, false, true);
+    assert!(!campaign.cps[0].visible);
+    assert!(!campaign.cps[0].capturable);
+}
+
+#[test]
 fn ally_spawn_data_is_separate_from_the_post_spawn_path() {
     let mut m = manifest();
     m.instances[0].props.extend([

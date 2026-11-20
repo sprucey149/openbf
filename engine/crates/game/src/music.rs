@@ -83,9 +83,8 @@ pub enum InGameMusic {
 /// (`FUN_001a04a0` 45253: 0x41700000).
 pub const IN_GAME_REPLAY: f32 = 15.0;
 
-/// The handle (`FUN_0043f6d0`): the Music (`*param_1`), its byte
-/// (`param_1[1]`: 0 none, 1 found and not asked, 2 asked), the replay delay
-/// `DAT_0066caf4` and its countdown `DAT_0066caf8`.
+/// Tracks the selected cue, whether playback was requested, and when it may
+/// repeat. See `FUN_0043f6d0` for the original cue handling.
 #[derive(Debug, Clone, Default)]
 pub struct ScriptMusic {
     pub music: Option<usize>,

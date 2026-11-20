@@ -2,83 +2,40 @@
 //! `ClearAIGoals` and the goal manager they fill
 //! (`analysis/re-conquest-goal.md` §1).
 //!
-//! - **The list.** `FUN_002e79a8` takes the first free of 20 slots at
-//!   manager+0x1c for a weight above 0; Destroy and Defend need a resolved
-//!   target and Follow a player or object one, else nothing is made and the
-//!   script gets 0. [`AiGoals::add`].
-//! - **Delete.** `FUN_00191ce8` → `FUN_002e6f50` (the members leave) →
-//!   `FUN_002e7bf0` (the slot frees). [`AiGoals::delete`].
-//! - **Clear.** `FUN_002e7c58`: the same for every goal of one team.
-//!   [`AiGoals::clear`].
-//! - **Filing.** The manager ticks when its stamp passes and sets it one
-//!   second on (`FUN_002e7cf8`). Each tick every AI record in no goal of its own
-//!   team (`FUN_002e7808`: one in another team's goal leaves it first) joins
-//!   the enabled goal of its team with the smallest
-//!   `members / (team size × weight / sum of weights)` (`FUN_002e7580`; the
-//!   first such goal on a tie, from a start of 1e11). The team size (team
-//!   +0x34) is the same for every goal of the team, so it leaves the choice
-//!   alone and is not kept. A record is re-filed when it is readied for a
-//!   respawn (`FUN_0034ffe0` → `FUN_002e7708`): here, the first step that
-//!   sees its new life.
-//! - **Enabled.** Goal +0x18 is 1 from the ctor `FUN_002e6e98`; its only
-//!   other writer `FUN_002e71f0` is called from two other goal classes'
-//!   updates, which are not ported, so every goal stays enabled.
-//!   trace: `FUN_002e71f0`'s callers.
+//! A mission can add weighted goals, remove one goal, or clear a team's
+//! goals. Unassigned bots join the least filled goal relative to its
+//! weight, with registration order breaking ties. Bots reconsider their
+//! assignments after respawning. A bot whose goal was removed waits for
+//! another assignment. See `FUN_002e79a8`, `FUN_00191ce8`, `FUN_002e7c58`,
+//! `FUN_002e7cf8`, `FUN_002e7580`, and `FUN_002e7708`.
 //!
-//! What a member does is [`Steer`]: Deathmatch (`FUN_002e9458` posts order
-//! 10, the roaming walk `ai::route::retarget_deathmatch`), Defend
-//! (`FUN_002e96c8` posts order 0xb with the goal's target) and CTFOffense
-//! (`FUN_002e8be8` posts order 9 with the flag and the capture region's
-//! centre; [`CtfStep`]). Conquest is the port's commander
-//! (`core::commander`), which owns a member of a Conquest goal as it owns
-//! every bot while the script has made no goal. OURS: Destroy (order 0xc,
-//! `FUN_002e9948`), CTFDefense and Follow also keep the commander's
-//! behaviour. replace: those goals' orders, once their agents are traced.
+//! Deathmatch bots roam. CTF offense bots recover a flag, escort its
+//! carrier, or chase it down. Defenders stay near their target and look
+//! for a free hint or cover when it stays put. They resume defending
+//! after a fight and move with a target that leaves the area. See
+//! `FUN_002e9458`, `FUN_002e8be8`, and `FUN_002d2f98`
+//! (`SWBFRNT2.ELF-decomp.c` lines 246552-246615).
 //!
-//! - **No goal.** Once the script has made a goal, an AI in none is told
-//!   nothing: a deleted goal's members get the wait order (order 1, state 1
-//!   UnitWaitAgent; `FUN_002e6f50` builds it with `FUN_002b6258(_, 1, 0, 0,
-//!   0)`), a new life of a team with no goal gets no order, and only a
-//!   goal's 1 s tick (`FUN_002e7110` → the goal's +0x24) hands orders out
-//!   (`re-soldier-ai.md` 1.4: a finished agent with an empty queue stays).
-//!   [`Steer::Stand`].
-//!
-//! - **The Defend member's hint.** The soldier controller maps order 0xb to
-//!   state 0xc (`FUN_002b8d60`), whose behaviour (`FUN_002c6ff0`, vtable
-//!   0x622f48) runs the defend helper (`FUN_002d1fa8`, vtable 0x623e40) and,
-//!   on a sighting, noise or hit message, the ordinary combat helper
-//!   (`FUN_002ce568`, vtable 0x623b58) until the fight ends, then the defend
-//!   helper again from its walk (`FUN_002c7218`, `FUN_002c7308`). The defend
-//!   helper's hint search (`FUN_002d2f98`, `SWBFRNT2.ELF-decomp.c`
-//!   246552-246615) counts the seconds its target stays within 25 m of an
-//!   anchor; past 10 s it takes the nearest free type "7" hint (query mask
-//!   0x40) within a 50 m box of the target, else the nearest free Cover hint
-//!   (mask 4), sets its clock to 8 s (one search every 2 s) and walks to the
-//!   hint (`FUN_002d2e40`, state 5). Standing there (state 3) it keeps the
-//!   hint; a target that moves more than 25 m from the anchor sends it back
-//!   to the target (`FUN_002d3118`). [`DefendHold`], [`AiGoals::hint_of`].
-//!   At its hint it steps out to another one now and then (state 6,
-//!   `FUN_002d2168`), a hint is free 2 s after its holder last stamped it
-//!   (`FUN_002ade38`), and after a fight the helper walks again and searches
-//!   at once. Every update is on the agent's think clock (`FUN_002c70b8`,
-//!   `FUN_002d2110`): 2.0 s (states 3, 5 and 8) or 1.5 s, times the level of
-//!   detail's {4, 3, 2, 1, 0.25} (`FUN_002b6fe8`).
+//! The commander handles Conquest and supplies orders before the mission
+//! adds any scripted goals. OURS: Destroy, CTFDefense, and Follow also
+//! use the commander. replace: trace the agents for those orders, starting
+//! with Destroy in `FUN_002e9948`.
+//! trace: goal enablement in the callers of `FUN_002e71f0`.
 
 use crate::sim::Sim;
 use crate::unit::{Controller, UnitHandle};
 use glam::{Vec3, Vec3Swizzles};
 
-/// `FUN_002e79a8`'s slot count (manager+0x1c, 0x14 slots).
+/// Maximum number of active goal assignments (`FUN_002e79a8`).
 pub const SLOTS: usize = 20;
 /// `FUN_002e7cf8`: the manager's period, 1.0 s.
 pub const TICK: u64 = crate::TICK_HZ as u64;
 /// `FUN_002c53c8` state 1: a friendly carrier within this (m, 2500.0
 /// squared) is escorted.
 pub const ESCORT_NEAR: f32 = 50.0;
-/// `FUN_00249f30`: a soldier's follower slots (claim kind 3) are 4 when its
-/// +0x328 record has no +0x1a0, else `FUN_00360120()` + 1.
-/// PROVISIONAL: the port keeps neither; 4. trace: soldier +0x328 +0x1a0 of
-/// a campaign player.
+/// A soldier normally has four escort slots (`FUN_00249f30`).
+/// PROVISIONAL: four slots for every carrier. trace: the campaign player
+/// override in `FUN_00360120`.
 pub const ESCORT_SLOTS: usize = 4;
 /// `FUN_002e0610` kind 3: a follower's place in the carrier's frame, to the
 /// side by 0.75 (left for an even slot, right for an odd one), back by
@@ -256,16 +213,10 @@ pub enum Steer {
     Stand,
 }
 
-/// The CTF offense agent's states (UnitCTFOffenseAgent, vtable 0x622ca8,
-/// controller state 10 from order 9; entry `FUN_002c53c8`, update
-/// `FUN_002c5a88`). State 1 chooses (`FUN_002c53c8`): an uncarried flag
-/// (+0x2ac 0, `FUN_002c5220`) is fetched when AI may pick it up (flag
-/// +0x45d, `AllowAIPickUp`, `FUN_0035ec80`) and guarded when not; one the
-/// bot carries (`FUN_002c5268`) goes to the region; one a friend carries
-/// (team relation > 0, `FUN_002c52b8`) is escorted when the carrier is
-/// within [`ESCORT_NEAR`] and has a follower slot (`FUN_002e0338(_, team,
-/// 3)`), else covered; any other carrier is chased. Each state runs until
-/// its own test fails (`FUN_002c5a88`), then state 1 chooses again.
+/// A CTF offense bot picks a job based on who has the flag and whether it
+/// can pick it up. Escorts stay near a friendly carrier when a follower
+/// slot is available. A bot reconsiders its job when the flag changes
+/// hands or it can no longer help. See `FUN_002c53c8` and `FUN_002c5a88`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CtfStep {
     /// State 2: the walk to the flag; it ends when the flag is taken or the
@@ -320,15 +271,12 @@ pub enum HoldState {
     Look,
 }
 
-/// A Defend member's defend helper (`FUN_002d1fa8`): its state, the +0x1a0
-/// anchor, the +0x1b0 clock, the +0x1b4 hint and that hint's last stamp.
+/// Tracks where a defender last settled and which hint it has reserved
+/// (`FUN_002d1fa8`).
 ///
-/// PROVISIONAL (ours): the states 7-10 the helper runs at its target (the
-/// snipe stand, `FUN_002d7c30` / `FUN_002d6828` / `FUN_002d6168` /
-/// `FUN_002d4810`) are not ported, nor the sub-helper +0xd4 it runs at the
-/// target: near the player a head turn (`FUN_002d3aa8`, the bone look of
-/// `FUN_002bcc70`) or, with a hint, the cover peek (`FUN_002d0608`); the
-/// port's fight takes cover on its own. replace: those states.
+/// PROVISIONAL. Defenders use ordinary combat cover. replace: trace the
+/// defender's sniper stance, nearby head turns, and cover peeks in
+/// `FUN_002d7c30`, `FUN_002d3aa8`, and `FUN_002d0608`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DefendHold {
     /// The goal and the life this helper belongs to.
@@ -840,9 +788,8 @@ fn defend_hints(sim: &mut Sim) {
     }
 }
 
-/// `FUN_002d2168` state 2's entry: the clock at its top (+0x1b0 =
-/// `FLT_MAX`), so the walk's first search runs while the target is still by
-/// the anchor. The hint is kept (+0x1b4 is not cleared).
+/// Resume defending after an interruption. Keep the reserved hint and
+/// check for a nearby position on the first walk update (`FUN_002d2168`).
 fn walk(hold: &mut DefendHold) {
     hold.state = HoldState::Walk;
     hold.clock = u64::MAX;
@@ -1035,26 +982,15 @@ fn look(u: &crate::unit::Unit, hold: &mut DefendHold, turn: f32) {
     hold.until = None;
 }
 
-/// `FUN_002de708`'s noise pass reaching Defend member `i` as message 6 that
-/// its Defend behaviour takes (`FUN_002c7308` → `FUN_002c3730` →
-/// `FUN_002c3390`): the order to walk to the noise (`FUN_002ce648`, type 3),
-/// ended where the walk can stand ([`crate::nav::NavGraph::clear_goal`],
-/// `FUN_002bc378`). An emitter's pass runs at its think, a human's every
-/// [`NOISE_HUMAN`] steps; it reaches every enemy within its radius
-/// ([`NOISE_SHOT`] after a shot, else from its speed) but one straight above
-/// or below it, and one within [`NOISE_SEEN`] takes a sighting instead. The
-/// first such emitter in unit order is walked to; none while the member rides
-/// (`FUN_002a8ef0`).
+/// A defender on foot investigates a noise from a hostile unit. A shot
+/// carries farther than footsteps. The defender walks toward the first
+/// eligible sound in unit order and approaches as far as the terrain
+/// allows. See `FUN_002de708`, `FUN_002a8ef0`, and `FUN_002ce648`.
 ///
-/// PROVISIONAL (ours): the unfired radius is also half a weapon value the
-/// port has not traced when that is larger; the fire flag (ai +0x80) is read
-/// as a shot since the emitter's last pass; a human's pass runs on the
-/// sim's 15th steps, not its own; the sighting within 3 m is left to the
-/// look pass's near radius; the handler's matrix test (`FUN_002accb0`) is
-/// read as the emitter being on foot, its class (`DAT_00689368`) and weapon
-/// (`FUN_002a9e38`) tests are not ported, and a noise that comes while the
-/// combat helper already walks or looks is not taken. replace: the weapon
-/// value, the flag's writer, the human's step, the matrix and the class test.
+/// PROVISIONAL. The port uses fixed hearing checks for humans and handles
+/// close sightings in the vision pass. replace: trace weapon noise range,
+/// shot timing, human hearing cadence and the eligibility checks in
+/// `FUN_002de708`, `FUN_002accb0`, and `FUN_002a9e38`.
 fn noise(sim: &Sim, i: usize) -> Option<Vec3> {
     let u = &sim.units[i];
     if u.mount.is_some() {
@@ -1187,27 +1123,13 @@ fn free_hint(sim: &Sim, target: Vec3) -> Option<u32> {
     None
 }
 
-/// `FUN_002d2168` state 6, the step out: one time in two, by a barrier within
-/// [`SHUFFLE_BARRIER`] (`FUN_002eea68` not clear), the first of its four grown
-/// corners from a random one (grown by the radius × 1.1, `FUN_002a76b8`, and
-/// 0.5 m, `FUN_002eda98`) that the bot walks to with no barrier between
-/// ([`crate::nav::NavGraph::leg_hits_barrier`], `FUN_002ef628`); else a random point
-/// within ±[`SHUFFLE_REACH`] on X and Z, cut where a barrier stops the walk
-/// to it (`FUN_002eeeb0`). From that point the first free type "7" hint in a
-/// [`SHUFFLE_BOX`] with no barrier between is the new hint (stamped) and the
-/// walk's end; with none the walk comes back to where it started, and the
-/// old hint is kept.
+/// A defender occasionally looks for a reachable hint near its current
+/// position. Nearby barrier corners offer places to search from, and a bot
+/// keeps its current hint if it finds no better position (`FUN_002d2168`).
 ///
-/// PROVISIONAL (ours): the disc's queries return barriers and at most 10
-/// hints in their trees' order, the port's in index order; the port's
-/// corners run the same way round from the drawn one, which axis is the
-/// disc's +u is not traced; the class radius is the port's soldier capsule;
-/// `FUN_002eeeb0` stops the point short of the barrier by its own rule, the
-/// port's at the barrier's edge less that radius; and the step's point
-/// carries a path flag (8 or 0x16, one in two) the port does not read; the
-/// disc walks the step straight (`FUN_002bc720`, a `FUN_002c07a0` follower)
-/// where the port's mover routes it. replace: the trees' order,
-/// `FUN_002eed40`'s rule, the path flag and a straight follower.
+/// PROVISIONAL. Search uses map index order and movement uses the usual
+/// route planner. replace: trace the original query order, barrier
+/// clearance (`FUN_002eed40`), and movement flags for a direct step.
 fn shuffle(sim: &Sim, i: usize, hold: &mut DefendHold) {
     let u = &sim.units[i];
     let (me, tick, gen) = (i as u32, sim.tick, u.gen);

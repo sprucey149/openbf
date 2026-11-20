@@ -210,6 +210,19 @@ impl Sim {
         if !self.ai_goals.idle() {
             self.ai_goals.hash_into(&mut eat);
         }
+        for (team, classes) in self.class_enabled.iter().enumerate() {
+            for (class, &enabled) in classes.iter().enumerate() {
+                if !enabled {
+                    eat(b"DISABLED_CLASS");
+                    eat(&[team as u8]);
+                    eat(&(class as u32).to_le_bytes());
+                }
+            }
+        }
+        if self.ai_spawn_allowed != [true; 2] {
+            eat(b"AI_SPAWN_ALLOWED");
+            eat(&self.ai_spawn_allowed.map(u8::from));
+        }
         // Length-prefixed magnets and players preserve slot identity; None
         // uses (u32::MAX, u32::MAX). Flattening Some values loses the slot.
         let handle_or_none =

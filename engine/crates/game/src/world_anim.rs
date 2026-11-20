@@ -3,51 +3,20 @@
 //! `PlayAnimationFromTo`, `SetAnimationStartPoint`). The data is the map's
 //! `manifest::world_anim::FILE`.
 //!
-//! BF2, `SWBFRNT2.ELF-decomp.c`:
-//! - **Tables.** Animations by name (0x691918, FUN_00272ef8), groups by name
-//!   (0x6979c8, FUN_00274280). A name already taken keeps the first.
-//! - **Entries.** 0x60 bytes at DAT_00691a20 (FUN_00274008): its time, its
-//!   object, and a base matrix, identity until the object of that name is
-//!   placed, which links it and copies its matrix (FUN_00274738).
-//! - **Bindings.** `PlayAnimation` (FUN_00190dc8) sets the group playing,
-//!   `PauseAnimation` (FUN_00190e28) clears it, `RewindAnimation`
-//!   (FUN_00190e88) sets every entry's time to 0 and the end time to -1,
-//!   `PlayAnimationFromTo` (FUN_00190f68) pauses, sets every time to `from`
-//!   and the end to `to`, then plays (only for 0 <= from < to), and
-//!   `SetAnimationStartPoint` (FUN_00190f08) copies each object's matrix into
-//!   its entry's base (FUN_002741b8).
-//! - **Each frame** (FUN_00274c18): a playing group advances each linked
-//!   entry by dt; with an end time it advances only up to it, then stops.
-//! - **Evaluation** (FUN_002736e0, an animation with its local byte clear):
-//!   time += dt, clamped to the duration, or wrapped when it loops. The
-//!   matrix is the base; rotation keys give angles (radians) in x, y, z,
-//!   built as identity × Rx × Ry × Rz (FUN_0053ad40, FUN_0053adf0,
-//!   FUN_0053ae90) and put before the base; position keys put the
-//!   translation at the base's origin plus p along the base's own axes.
-//!   Row-vector on the PS2, so here `base * Rz * Ry * Rx` and
-//!   `base.transform_point3(p)`.
-//! - **Keys** (FUN_00273298): the last key at or before t and the next one;
-//!   past the last, the last and (looping) the first, or (not) itself; past
-//!   the duration when not looping, the last twice; before the first, none,
-//!   and that channel keeps the base.
-//! - **Interpolation** (FUN_00273530), by the first key's byte: 0 holds it,
-//!   1 is linear over the gap (the gap to the duration when the next key is
-//!   not later, 1 s when neither), 2 is a cubic Hermite in the seconds since
-//!   the first key, with both tangents stored on it (FUN_00539d78).
-//!   PROVISIONAL: the cubic's span is the gap; the float FUN_00539d50
-//!   passes on is not visible in the listing, and the gap is the one
-//!   value that makes the curve reach the next key.
+//! Scripts play, pause and rewind named groups of object animations.
+//! A bounded play stops at its requested end time. A script can also take
+//! the objects' current poses as new starting points. See `FUN_00190dc8`
+//! through `FUN_00190f68` and `FUN_00274c18`.
 //!
-//! The port moves only what it can place: an entry whose object is a sim
-//! `Station` ([`core::sim::Sim::set_station_transform`]), which the viewer
-//! draws and collides from its pose. trace: an entry on any other object
-//! (Mygeeto's gunships and dropship `repveh4`..`6`) is left static.
-//! trace: an animation with its local byte set (FUN_002736e0's other
-//! branch, Mygeeto's `gunshipfly`) steps along its own turning axes and is
-//! not ported. trace: the group flag that re-takes the base when the object
-//! reports a state (group+0xe bit 0), and the hierarchy pass that carries
-//! child objects (DAT_008252c0), are not ported. PROVISIONAL: the sign of
-//! each axis rotation is glam's; FUN_0053ad40's lane order is not read.
+//! Each track moves relative to its starting pose. Keys can hold, blend
+//! linearly, or follow a cubic curve. Looping tracks blend back toward the
+//! first key when their keys call for it. One-shot tracks hold their final
+//! pose. See `FUN_00273298`, `FUN_00273530`, and `FUN_002736e0`.
+//!
+//! PROVISIONAL. The cubic uses the interval between keys for its span and
+//! axis signs follow glam. replace: trace the curve span at `FUN_00539d50`
+//! and compare sample poses against `FUN_0053ad40`.
+//! trace: automatic rebasing and linked child transforms in `FUN_00274c18`.
 
 use core::fmath::FloatExt;
 use glam::{Mat4, Vec3};

@@ -3,6 +3,24 @@ use crate::sim::tests::flat_ground;
 use crate::sim::PadState;
 use crate::unit::Controller;
 
+#[test]
+fn replay_hash_tracks_active_spawn_restrictions() {
+    let mut sim = Sim::empty(42);
+    let baseline = sim.hash();
+    sim.class_enabled[0] = vec![true, true];
+    assert_eq!(sim.hash(), baseline);
+    sim.class_enabled[0][1] = false;
+    let class_disabled = sim.hash();
+    assert_ne!(class_disabled, baseline);
+    sim.class_enabled[0] = vec![false, true];
+    assert_ne!(sim.hash(), class_disabled);
+    sim.class_enabled[0].fill(true);
+    sim.set_ai_spawn_allowed(0, false);
+    assert_ne!(sim.hash(), baseline);
+    sim.set_ai_spawn_allowed(0, true);
+    assert_eq!(sim.hash(), baseline);
+}
+
 /// DR2: a unit standing in a door's trigger opens it through
 /// `Sim::step` — the parameter reaches 1.0 in the clip's (frames−1)/30 s
 /// and the door's body rides to the last frame — and nobody in range

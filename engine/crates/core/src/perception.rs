@@ -739,10 +739,9 @@ fn seen_by(sim: &Sim, me: UnitHandle, st: &mut AiState) {
         return;
     };
     let tick = sim.tick;
+    let target = Foe::Unit(me);
     for (i, o) in sim.units.iter().enumerate() {
-        let h = sim.handle(i);
-        if h == me
-            || !o.alive
+        if !o.alive
             || o.controller != crate::unit::Controller::Ai
             || o.is_human()
             || !sim.hostile(u.team, o.team)
@@ -750,12 +749,10 @@ fn seen_by(sim: &Sim, me: UnitHandle, st: &mut AiState) {
             continue;
         }
         let saw = o.ai.contacts.iter().flatten().any(|c| {
-            c.seen_now
-                && c.handle == Foe::Unit(me)
-                && tick.saturating_sub(c.last_seen) < THINK_PERIOD
+            c.handle == target && c.seen_now && tick.saturating_sub(c.last_seen) < THINK_PERIOD
         });
         if saw {
-            see(st, Foe::Unit(h), tick, o.capsule().center());
+            see(st, Foe::Unit(sim.handle(i)), tick, o.capsule().center());
         }
     }
 }
