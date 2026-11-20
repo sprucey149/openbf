@@ -62,6 +62,7 @@ mod bloom;
 mod bolt;
 mod camera;
 mod capture;
+mod character_shadow;
 mod device;
 mod draw;
 mod dust;

@@ -91,6 +91,12 @@ fn sun_shadows_project_rigid_and_posed_meshes() {
                     left += 1;
                 } else {
                     right.push(i as u32 % size);
+                    if scale == 1.0 {
+                        assert!(
+                            (s[0] as f32 - 0.68 * b[0] as f32).abs() <= 1.5,
+                            "the posed shadow should have a screen-pixel edge"
+                        );
+                    }
                 }
                 interior += usize::from((s[0] as f32 - 0.68 * b[0] as f32).abs() <= 1.5);
             }
@@ -145,8 +151,20 @@ fn sun_shadows_project_rigid_and_posed_meshes() {
         Mat4::from_translation(Vec3::new(2.30, 1., -0.25)),
     )
     .with_light(LightPath::Unlit);
+    let cloth_mesh = r
+        .add_character_mesh(
+            &MeshData {
+                positions: &panel,
+                normals: &[[0., 1., 0.]; 4],
+                uvs: &[[0.; 2]; 4],
+                colors: None,
+                indices: &indices,
+            },
+            true,
+        )
+        .unwrap();
     let cloth = DrawCmd::flat(
-        rigid,
+        cloth_mesh,
         [0.1, 0.2, 1., 1.],
         Mat4::from_translation(Vec3::new(-2.25, 0., 0.)),
     )
@@ -158,6 +176,18 @@ fn sun_shadows_project_rigid_and_posed_meshes() {
     let world = [world[0], overhang, left_overhang, cloth];
     let base = render(&mut r, &world, false, 2.75);
     let shaded = render(&mut r, &world, true, 2.75);
+    let overlap = base
+        .chunks_exact(4)
+        .zip(shaded.chunks_exact(4))
+        .filter(|(b, s)| b[0] > 150 && b[0] == b[1] && b[1] == b[2] && s[0] + 20 < b[0])
+        .map(|(b, s)| {
+            assert!(
+                s[0] as f32 >= b[0] as f32 * 0.68 - 1.5,
+                "a world shadow and a character volume should darken just once"
+            );
+        })
+        .count();
+    assert!(overlap > 200, "both overhangs should cast onto the scenery");
     let visible_body = base
         .chunks_exact(4)
         .zip(shaded.chunks_exact(4))

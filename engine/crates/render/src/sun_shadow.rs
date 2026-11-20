@@ -1,11 +1,10 @@
-//! Camera-local directional shadows from the current world and skinned meshes.
-//! One bilinear depth comparison antialiases the edge of the silhouette.
+//! Camera-local directional shadows from scenery depth and character stencil.
 //! The opaque scene receives the shadow before soldiers and water draw.
 
 use crate::bindings;
 use crate::frame::draw_mesh;
 use crate::mesh::Instance;
-use crate::{DrawCmd, DrawLayer, Renderer, SkinnedDrawCmd, SkinnedVertex, Vertex};
+use crate::{DrawCmd, DrawLayer, Renderer, Vertex};
 use glam::{Mat4, Vec3};
 
 // OURS: fit nearby battle geometry with ~1.6 cm texels and fade before the
@@ -44,8 +43,9 @@ pub(crate) struct SunShadow {
     camera: wgpu::BindGroup,
     rigid: wgpu::RenderPipeline,
     mask: wgpu::RenderPipeline,
-    skin: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
+    outside_volume: wgpu::RenderPipeline,
+    inside_volume: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
     compare: wgpu::Sampler,
     display_format: wgpu::TextureFormat,
@@ -139,12 +139,6 @@ impl SunShadow {
             &rigid_buffers,
             true,
         );
-        let skin = caster(
-            &caster_layout(&[&camera_layout, &r.texture_bgl, &r.palette_bgl]),
-            "vs_skin",
-            &[SkinnedVertex::layout(), Instance::layout()],
-            false,
-        );
         let depth_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -177,17 +171,44 @@ impl SunShadow {
             ..Default::default()
         });
         let display_format = r.water_display_format.unwrap_or(r.format);
-        let composite = crate::pipelines::PipelineDesc {
+        let layout = caster_layout(&[&composite_layout]);
+        let composite_desc = crate::pipelines::PipelineDesc {
             label: "sun shadow composite",
-            layout: &caster_layout(&[&composite_layout]),
+            layout: &layout,
             vs: "vs_composite",
             buffers: &[],
             fs: "fs_composite",
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             depth_compare: None,
-        }
-        .build(device, &shader, display_format);
+        };
+        let composite = composite_desc.build(device, &shader, display_format);
+        let stencil_pipeline = |compare, fs| {
+            let face = wgpu::StencilFaceState {
+                compare,
+                ..Default::default()
+            };
+            crate::pipelines::PipelineDesc {
+                fs,
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                ..composite_desc
+            }
+            .build_with_stencil(
+                device,
+                &shader,
+                display_format,
+                &[],
+                wgpu::ColorWrites::COLOR,
+                wgpu::StencilState {
+                    front: face,
+                    back: face,
+                    read_mask: 255,
+                    write_mask: 0,
+                },
+            )
+        };
+        let outside_volume = stencil_pipeline(wgpu::CompareFunction::Equal, "fs_composite");
+        let inside_volume = stencil_pipeline(wgpu::CompareFunction::NotEqual, "fs_stencil");
         Self {
             size,
             depth,
@@ -195,8 +216,9 @@ impl SunShadow {
             camera,
             rigid,
             mask,
-            skin,
             composite,
+            outside_volume,
+            inside_volume,
             composite_layout,
             compare,
             display_format,
@@ -249,8 +271,6 @@ impl SunShadow {
         draws: &[DrawCmd],
         casters: &[usize],
         first_instance: usize,
-        skinned: &[SkinnedDrawCmd],
-        skin_casters: &[usize],
     ) -> u32 {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sun shadow depth"),
@@ -288,20 +308,6 @@ impl SunShadow {
             );
             draw_calls += 1;
         }
-        if !skin_casters.is_empty() {
-            pass.set_pipeline(&self.skin);
-            pass.set_bind_group(1, r.tex_bg(None), &[]);
-            pass.set_vertex_buffer(1, r.skinned_instance_buf.slice(..));
-            for &i in skin_casters {
-                pass.set_bind_group(2, &r.palette_bg, &[(i * crate::PALETTE_STRIDE) as u32]);
-                draw_mesh(
-                    &mut pass,
-                    &r.skinned_meshes[skinned[i].mesh.0 as usize],
-                    i as u32..i as u32 + 1,
-                );
-                draw_calls += 1;
-            }
-        }
         draw_calls
     }
 
@@ -310,7 +316,8 @@ impl SunShadow {
         r: &Renderer,
         encoder: &mut wgpu::CommandEncoder,
         frame: &wgpu::Texture,
-    ) {
+    ) -> u32 {
+        let stencil = !r.shadows.is_empty();
         let scene_depth = r
             .depth_view
             .texture()
@@ -332,6 +339,10 @@ impl SunShadow {
             format: Some(self.display_format),
             ..Default::default()
         });
+        if stencil {
+            let view = frame.create_view(&Default::default());
+            r.shadows.write_stencil(encoder, &view, &r.depth_view);
+        }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sun shadow composite"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -343,11 +354,28 @@ impl SunShadow {
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: stencil.then_some(wgpu::RenderPassDepthStencilAttachment {
+                view: &r.depth_view,
+                depth_ops: None,
+                stencil_ops: None,
+            }),
             ..Default::default()
         });
-        pass.set_pipeline(&self.composite);
         pass.set_bind_group(0, &group, &[]);
+        if stencil {
+            pass.set_stencil_reference(0);
+            pass.set_pipeline(&self.outside_volume);
+            pass.draw(0..3, 0..1);
+            pass.set_pipeline(&self.inside_volume);
+        } else {
+            pass.set_pipeline(&self.composite);
+        }
         pass.draw(0..3, 0..1);
+        if stencil {
+            3
+        } else {
+            1
+        }
     }
 }
 

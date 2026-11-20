@@ -157,7 +157,7 @@ impl ShadowState {
     ) -> Self {
         let display_format = display.unwrap_or(format);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vehicle shadows"),
+            label: Some("shadow volume"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shadow.wgsl").into()),
         });
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -301,6 +301,10 @@ impl ShadowState {
         self.vertices.is_empty()
     }
 
+    pub fn vertices_mut(&mut self) -> &mut Vec<[f32; 3]> {
+        &mut self.vertices
+    }
+
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Mat4) {
         if self.vertices.is_empty() {
             return;
@@ -335,48 +339,70 @@ impl ShadowState {
             format: Some(self.display_format),
             ..Default::default()
         });
-        for shade in [false, true] {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("vehicle shadows"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: if shade { &display } else { view },
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: Some(wgpu::Operations {
-                        load: if shade {
-                            wgpu::LoadOp::Load
-                        } else {
-                            wgpu::LoadOp::Clear(0)
-                        },
-                        store: wgpu::StoreOp::Store,
-                    }),
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_bind_group(0, &self.bind, &[]);
-            pass.set_stencil_reference(0);
-            if shade {
-                pass.set_pipeline(&self.shade);
-                pass.draw(0..3, 0..1);
-            } else {
-                pass.set_pipeline(&self.volume);
-                pass.set_vertex_buffer(0, self.buffer.slice(..));
-                pass.draw(0..self.vertices.len() as u32, 0..1);
-            }
-        }
+        self.draw_phase(encoder, view, depth, false);
+        self.draw_phase(encoder, &display, depth, true);
         2
+    }
+
+    pub fn write_stencil(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+    ) {
+        self.draw_phase(encoder, view, depth, false);
+    }
+
+    fn draw_phase(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        shade: bool,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(if shade {
+                "shadow darkening"
+            } else {
+                "shadow stencil"
+            }),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: Some(wgpu::Operations {
+                    load: if shade {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(0)
+                    },
+                    store: wgpu::StoreOp::Store,
+                }),
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_bind_group(0, &self.bind, &[]);
+        pass.set_stencil_reference(0);
+        if shade {
+            pass.set_pipeline(&self.shade);
+            pass.draw(0..3, 0..1);
+        } else {
+            pass.set_pipeline(&self.volume);
+            pass.set_vertex_buffer(0, self.buffer.slice(..));
+            pass.draw(0..self.vertices.len() as u32, 0..1);
+        }
     }
 }
 impl crate::Renderer {

@@ -13,11 +13,6 @@ struct Material {
     offset: vec4<f32>,
 };
 @group(1) @binding(3) var<uniform> material: Material;
-struct Palette {
-    joints: array<mat4x4<f32>, 96>,
-};
-@group(2) @binding(0) var<uniform> palette: Palette;
-
 struct Caster {
     @location(0) position: vec3<f32>,
     @location(2) uv: vec2<f32>,
@@ -57,17 +52,6 @@ struct MaskVertex {
     }
 }
 
-@vertex fn vs_skin(
-    in: Caster, @location(9) joints: vec4<u32>, @location(10) weights: vec4<f32>,
-) -> @builtin(position) vec4<f32> {
-    let skin = weights.x * palette.joints[joints.x]
-        + weights.y * palette.joints[joints.y]
-        + weights.z * palette.joints[joints.z]
-        + weights.w * palette.joints[joints.w];
-    let model = mat4x4<f32>(in.m0, in.m1, in.m2, in.m3);
-    return shadow.light_clip * model * skin * vec4(in.position, 1.0);
-}
-
 @group(0) @binding(1) var scene_depth: texture_depth_2d;
 @group(0) @binding(2) var light_depth: texture_depth_2d;
 @group(0) @binding(3) var light_compare: sampler_comparison;
@@ -77,21 +61,33 @@ struct MaskVertex {
     return vec4(p[i], 0.0, 1.0);
 }
 
-@fragment fn fs_composite(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> {
-    let scene_z = textureLoad(scene_depth, vec2<i32>(pixel.xy), 0);
+fn receiver(pixel: vec2<f32>) -> vec3<f32> {
+    let scene_z = textureLoad(scene_depth, vec2<i32>(pixel), 0);
     if (scene_z == 0.0) { discard; }
-    let ndc = pixel.xy / vec2<f32>(textureDimensions(scene_depth)) * vec2(2.0, -2.0)
+    let ndc = pixel / vec2<f32>(textureDimensions(scene_depth)) * vec2(2.0, -2.0)
         + vec2(-1.0, 1.0);
     let h = shadow.world_from_clip * vec4(ndc, scene_z, 1.0);
-    let world = h.xyz / h.w;
+    return h.xyz / h.w;
+}
+
+fn receiver_fade(world: vec3<f32>) -> f32 {
     let distance = length(world - shadow.eye_and_time.xyz);
     if (distance >= shadow.params.y) { discard; }
+    return 1.0 - smoothstep(shadow.params.x, shadow.params.y, distance);
+}
+
+@fragment fn fs_stencil(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4(0.0, 0.0, 0.0, receiver_fade(receiver(pixel.xy)) * shadow.params.w);
+}
+
+@fragment fn fs_composite(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> {
+    let world = receiver(pixel.xy);
+    let fade = receiver_fade(world);
     let light = (shadow.light_clip * vec4(world, 1.0)).xyz;
     let uv = light.xy * vec2(0.5, -0.5) + vec2(0.5);
     if (any(uv < vec2(0.0)) || any(uv >= vec2(1.0)) || light.z < 0.0 || light.z > 1.0) {
         discard;
     }
     let lit = textureSampleCompareLevel(light_depth, light_compare, uv, light.z - shadow.params.z);
-    let fade = 1.0 - smoothstep(shadow.params.x, shadow.params.y, distance);
     return vec4(0.0, 0.0, 0.0, (1.0 - lit) * fade * shadow.params.w);
 }

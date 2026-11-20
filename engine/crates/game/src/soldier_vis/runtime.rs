@@ -593,7 +593,7 @@ impl SoldierVisuals {
         }
         if let Some(r) = r {
             match crate::assets::load_glb(&wpath) {
-                Ok(cpu) => match crate::viewer::upload_submeshes(r, &cpu) {
+                Ok(cpu) => match crate::viewer::upload_character_submeshes(r, &cpu) {
                     Ok(up) => {
                         bounds = super::position_bounds(&cpu.positions);
                         for (k, (mesh, mat, layer, _)) in up.into_iter().enumerate() {
