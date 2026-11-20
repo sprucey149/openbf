@@ -53,6 +53,9 @@ pub(super) fn persist_setting(
         MenuAction::ToggleTerrainLod => {
             profile.settings.terrain_lod = !profile.settings.terrain_lod
         }
+        MenuAction::ToggleHardShadows => {
+            profile.settings.hard_shadows = !profile.settings.hard_shadows
+        }
         MenuAction::ToggleSceneSoftness => {
             profile.settings.scene_softness = !profile.settings.scene_softness
         }

@@ -74,10 +74,17 @@ impl Renderer {
         );
         let aspect = frame_width as f32 / frame_height as f32;
         let guard = crate::affine::guard(aspect);
-        self.shadows
-            .prepare(&self.device, &self.queue, camera.view_proj(aspect));
+        let sun_direction = self.lighting.sun_dir.try_normalize();
+        let use_sun_shadow = self.sun_shadow.is_some() && sun_direction.is_some();
+        if !use_sun_shadow {
+            self.shadows
+                .prepare(&self.device, &self.queue, camera.view_proj(aspect));
+        }
         let scene_camera = camera.reaching(self.far_range);
         let view_proj = scene_camera.view_proj(aspect);
+        if let Some(sun) = sun_direction.filter(|_| use_sun_shadow) {
+            self.prepare_character_shadows(camera.position, sun, view_proj, draws, skinned);
+        }
         let iface_view_proj = Camera {
             position: glam::Vec3::ZERO,
             ..scene_camera
@@ -220,11 +227,21 @@ impl Renderer {
         // not drawn from this eye, with or without culling: its model and
         // LOWD must never both draw.
         let switched = |d: &DrawCmd| d.lod.is_none_or(|l| l.drawn(eye));
+        let mut shadow_casters = Vec::new();
+        let light_frustum = self
+            .sun_shadow
+            .as_ref()
+            .zip(sun_direction)
+            .map(|(shadow, sun)| {
+                let light_clip = shadow.light_clip(eye, sun);
+                shadow.prepare(self, light_clip, view_proj, eye, globals.material_time);
+                frustum::Frustum::from_view_proj(&light_clip)
+            });
         let far_begin = self.lighting.far_fade.map(|f| f.begin);
         let mut keep = Vec::with_capacity(draws.len());
         let mut sorts: Vec<DrawSort> = Vec::with_capacity(draws.len());
         let mut iface_frustum = None;
-        for d in draws {
+        for (i, d) in draws.iter().enumerate() {
             // Past its switch or its fade (on a forest map, most of the
             // instances) a draw needs no box, and nothing reads its sort.
             if self.cull
@@ -242,6 +259,16 @@ impl Renderer {
             let eye = if iface { glam::Vec3::ZERO } else { eye };
             let b = boxed(d, &self.meshes, eye);
             let mut v = switched(d);
+            if let Some(light_frustum) = &light_frustum {
+                if v && !iface
+                    && matches!(d.layer, DrawLayer::Opaque | DrawLayer::Mask)
+                    && crate::character_shadow::rigid_caster(d, &self.meshes).is_none()
+                    && (self.cull || shows(d))
+                    && visible(d, b, light_frustum)
+                {
+                    shadow_casters.push(i);
+                }
+            }
             if self.cull {
                 let view = if iface {
                     iface_frustum
@@ -260,12 +287,23 @@ impl Renderer {
                 may_discard: ab.discard || crate::draw::may_discard(d, near, far, eye),
             });
         }
+        shadow_casters.sort_unstable_by_key(|&i| crate::sun_shadow::caster_key(&draws[i]));
 
         let mut order = sort_runs(
             (0..draws.len()).filter(|&i| keep[i] && draws[i].layer != DrawLayer::Blend),
             draws,
             &sorts,
         );
+        let shadow_before = (use_sun_shadow
+            && (!shadow_casters.is_empty() || !self.shadows.is_empty()))
+        .then(|| {
+            // Keep rigid character parts (held weapons and live cloth) with
+            // the skinned body, out of the scenery's shadow composite.
+            let water = order.partition_point(|&i| !skinned_go_before(Some(draw_key(&draws[i]).0)));
+            let character = |i: &usize| draws[*i].light == LightPath::Character;
+            order[..water].sort_by_key(character);
+            order[..water].partition_point(|i| !character(i))
+        });
         // The blend pass holds the skinned blended draws too; the world ones'
         // instances follow the runs' in the pass's own order.
         let blended = blend_order(draws, &keep, skinned, camera.position);
@@ -369,6 +407,13 @@ impl Renderer {
                 region_top: region.map_or([0.0; 4], |r| [r[0][0], r[0][1], r[0][2], r[0][3] + 1.0]),
                 region_bottom: region.map_or([0.0; 4], |r| r[1]),
             }
+        }));
+        let first_shadow_instance = instances.len();
+        instances.extend(shadow_casters.iter().map(|&i| Instance {
+            model: draws[i].model.to_cols_array_2d(),
+            color: draws[i].color,
+            light: draws[i].light as u32,
+            ..bytemuck::Zeroable::zeroed()
         }));
         if !instances.is_empty() {
             if instances.len() > self.instance_capacity {
@@ -647,6 +692,19 @@ impl Renderer {
         if let Some(t) = &mut timer {
             t.begin(&self.device, &mut encoder);
         }
+        let sun_pass = self.sun_shadow.as_ref().filter(|_| shadow_before.is_some());
+        if let Some(shadow) = sun_pass {
+            draw_calls += shadow.draw_casters(
+                self,
+                &mut encoder,
+                draws,
+                &shadow_casters,
+                first_shadow_instance,
+            );
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "sun shadow depth");
+            }
+        }
         // The texture the terrain light pass copies (the frame so far).
         let frame_texture: &wgpu::Texture = match (&frame, &self.target) {
             (Some(f), _) => &f.texture,
@@ -806,8 +864,10 @@ impl Renderer {
             let mut water_display_active = false;
             while run_start <= blend_base {
                 let key = (run_start < blend_base).then(|| draw_key(&draws[order[run_start]]));
+                let at_shadow = Some(run_start) == shadow_before;
                 if lights_pending
-                    && key.is_none_or(|k| k.0 > draw_key_layer(DrawLayer::TerrainLayer))
+                    && (at_shadow
+                        || key.is_none_or(|k| k.0 > draw_key_layer(DrawLayer::TerrainLayer)))
                 {
                     lights_pending = false;
                     if let Some(l) = section.take() {
@@ -821,6 +881,20 @@ impl Renderer {
                     }
                     pass =
                         continue_pass(&mut encoder, &view, &self.depth_view, "map pass, resumed");
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                    bound_layer = None;
+                    water_display_active = false;
+                }
+                if let Some(shadow) = sun_pass.filter(|_| at_shadow) {
+                    if let Some(l) = section.take() {
+                        mark(&mut timer, &mut pass, l);
+                    }
+                    drop(pass);
+                    draw_calls += shadow.composite(self, &mut encoder, frame_texture);
+                    pass =
+                        continue_pass(&mut encoder, &view, &self.depth_view, "after sun shadows");
+                    mark(&mut timer, &mut pass, "sun shadow composite");
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
@@ -883,7 +957,7 @@ impl Renderer {
                     }
                     mark(&mut timer, &mut pass, "soldiers spec");
                     // BF1 bucket 6: all opaque geometry is down, water is not.
-                    if !self.shadows.is_empty() {
+                    if !use_sun_shadow && !self.shadows.is_empty() {
                         drop(pass);
                         draw_calls +=
                             self.shadows
@@ -907,6 +981,7 @@ impl Renderer {
                 let mut run_end = run_start + 1;
                 let run_key = runs_key(&draws[order[run_start]], sorts[order[run_start]]).0;
                 while run_end < blend_base
+                    && Some(run_end) != shadow_before
                     && runs_key(&draws[order[run_end]], sorts[order[run_end]]).0 == run_key
                 {
                     run_end += 1;

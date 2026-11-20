@@ -155,6 +155,7 @@ pub(crate) struct GpuMesh {
     /// Model-space AABB (min, max) — what frustum culling tests. An empty
     /// mesh gets a degenerate box at the origin, which culls as a point.
     pub bounds: (glam::Vec3, glam::Vec3),
+    pub shadow: Option<crate::character_shadow::VolumeMesh>,
 }
 
 /// Model-space AABB of a position list.
@@ -252,6 +253,7 @@ impl GpuMesh {
             index_count: data.indices.len() as u32,
             max_joint: 0,
             bounds: aabb_of(data.positions.iter().copied()),
+            shadow: None,
         })
     }
 
@@ -331,6 +333,7 @@ impl GpuMesh {
             index_count: data.indices.len() as u32,
             max_joint: u32::from(max_joint),
             bounds: aabb_of(data.positions.iter().copied()),
+            shadow: Some(crate::character_shadow::VolumeMesh::skinned(data)),
         })
     }
 }
@@ -395,6 +398,24 @@ pub struct SkinnedMeshHandle(pub(crate) u32);
 // buffer code rather than in `device.rs`'s Resources block; `Renderer`'s fields
 // are visible to this child module.
 impl crate::Renderer {
+    /// Upload the geometry for an opaque rigid part of a character silhouette.
+    pub fn add_character_mesh(
+        &mut self,
+        data: &MeshData<'_>,
+        dynamic: bool,
+    ) -> Result<MeshHandle, RenderError> {
+        let handle = if dynamic {
+            self.add_dynamic_mesh(data)?
+        } else {
+            self.add_mesh(data)?
+        };
+        self.meshes[handle.0 as usize].shadow = Some(crate::character_shadow::VolumeMesh::new(
+            data.positions,
+            data.indices,
+        ));
+        Ok(handle)
+    }
+
     /// As [`crate::Renderer::add_mesh`], but the vertex buffer can be
     /// rewritten afterwards with [`crate::Renderer::update_vertices`]. The
     /// indices are fixed at upload.
@@ -437,6 +458,11 @@ impl crate::Renderer {
         }
         self.queue.write_buffer(&m.vertex_buffer, 0, bytes);
         m.bounds = aabb_of(vertices.iter().map(|v| v.position));
+        if let Some(mesh) = &mut m.shadow {
+            for (p, v) in mesh.positions.iter_mut().zip(vertices) {
+                *p = v.position;
+            }
+        }
         Ok(())
     }
 }

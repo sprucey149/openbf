@@ -234,14 +234,36 @@ pub type SubmeshPart<'a> = (MeshHandle, Option<&'a str>, DrawLayer, u32);
 /// path routes on the alpha mode; only the SKY path reads the flags
 /// (`render::SkyMode`).
 pub fn upload_submeshes<'a>(r: &mut Renderer, cpu: &'a CpuMesh) -> Result<Vec<SubmeshPart<'a>>> {
+    upload_parts(r, cpu, false)
+}
+
+pub(crate) fn upload_character_submeshes<'a>(
+    r: &mut Renderer,
+    cpu: &'a CpuMesh,
+) -> Result<Vec<SubmeshPart<'a>>> {
+    upload_parts(r, cpu, true)
+}
+
+fn upload_parts<'a>(
+    r: &mut Renderer,
+    cpu: &'a CpuMesh,
+    character: bool,
+) -> Result<Vec<SubmeshPart<'a>>> {
     let mut out = Vec::new();
     let single = cpu.submeshes.len() == 1;
     for (start, count, mat, layer, flags) in &cpu.submeshes {
         let idx = &cpu.indices[*start as usize..(*start + *count) as usize];
+        let mut add = |data: &MeshData<'_>| {
+            if character && *layer == DrawLayer::Opaque {
+                r.add_character_mesh(data, false)
+            } else {
+                r.add_mesh(data)
+            }
+        };
         let mesh = if single {
             // One submesh already owns every vertex; compacting would copy
             // the arrays for nothing.
-            r.add_mesh(&cpu.mesh_data(idx))
+            add(&cpu.mesh_data(idx))
         } else {
             // Each submesh gets ONLY the vertices its own indices touch.
             //
@@ -254,7 +276,7 @@ pub fn upload_submeshes<'a>(r: &mut Renderer, cpu: &'a CpuMesh) -> Result<Vec<Su
             // could only ever cull all of a model or none of it. Compacting
             // is what lets a split mesh — the terrain — be culled piecewise.
             let sub = compact_submesh(cpu, idx);
-            r.add_mesh(&sub.mesh_data())
+            add(&sub.mesh_data())
         }
         .map_err(|e| anyhow!("mesh upload: {e}"))?;
         out.push((

@@ -34,6 +34,7 @@ mod treads;
 pub mod turret_fall;
 pub mod turret_pose;
 mod upload;
+pub(crate) use upload::upload_character_submeshes;
 mod vehicles;
 mod walker_aim;
 pub mod walker_pose;

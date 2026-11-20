@@ -216,6 +216,7 @@ fn model() -> MenuModel {
         invert_y: false,
         low_power_resolution: false,
         terrain_lod: false,
+        hard_shadows: true,
         scene_softness: false,
         input_icons_label: "Auto",
         icons: Default::default(),
@@ -818,6 +819,7 @@ fn render_options_toggle_from_shell_and_pause_options() {
         for (row, action) in [
             (Row::TerrainLod, MenuAction::ToggleTerrainLod),
             (Row::SceneSoftness, MenuAction::ToggleSceneSoftness),
+            (Row::HardShadows, MenuAction::ToggleHardShadows),
         ] {
             m.cursor = rows(&m).iter().position(|r| *r == row).unwrap();
             assert_eq!(row_text(&m, row).1.as_deref(), Some("Off"));
@@ -840,8 +842,17 @@ fn render_options_toggle_from_shell_and_pause_options() {
         }
         m.terrain_lod = true;
         m.scene_softness = true;
+        m.hard_shadows = true;
         assert_eq!(row_text(&m, Row::TerrainLod).1.as_deref(), Some("On"));
         assert_eq!(row_text(&m, Row::SceneSoftness).1.as_deref(), Some("On"));
+        assert_eq!(row_text(&m, Row::HardShadows).1.as_deref(), Some("On"));
+        let index = rows(&m).iter().position(|r| *r == Row::HardShadows).unwrap();
+        let (_, actions) = crate::pause_draw::click(
+            &mut m,
+            &crate::pause_draw::Animation::default(),
+            crate::pause_draw::Target::Row(index),
+        );
+        assert_eq!(actions, vec![MenuAction::ToggleHardShadows]);
     }
 }
 

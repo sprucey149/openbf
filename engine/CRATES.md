@@ -748,7 +748,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/resources.rs` 45 — unmapped buffers and single-level D2 textures through GPU creation instrumentation · `buffer`, `texture_2d`
 - `render/src/pipelines.rs` 1000 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
 - `render/src/frame.rs` 623 — frame submission, culling, instancing, pass/draw ordering and overlay · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
-- `render/src/frame/submit.rs` 1353 — frame validation, instance/palette uploads and ordered render-pass submission · `Renderer::render_frame`; frame helpers and public paths remain in the facade
+- `render/src/frame/submit.rs` 1428 — frame validation, instance/palette uploads and ordered render-pass submission · `Renderer::render_frame`; frame helpers and public paths remain in the facade
 - `render/src/frame/tests.rs` 373 — frame sort keys, pass ordering and interface light regressions.
 - `render/src/frame_ab.rs` 136 — per-frame interleaved pricing states for the bench (`OPENBF_FRAMEAB`) · `FrameAb`.
 - `render/src/world_scale.rs` 180 — world upscaling and optional edge smoothing before the full-resolution HUD · `Renderer::set_world_scale`, `Renderer::set_world_antialiasing`, `world_scale.wgsl`.
@@ -762,7 +762,10 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/particles.rs` 810 — per-view particle geometry and sorted runs shared with bolts (`ParticleShape::Shaded`: world triangles with their own vertex bytes, the water ripple) · `Renderer::set_particles`, `ParticleDraw`, `ParticleShape`; shape/blend rules in the module header (`analysis/re-fx.md` §6, [O]).
 - `render/src/particle_blur.rs` 259 — scene reduction and BLUR particle composite with visible-character coverage.
 - `render/src/particle_blur.wgsl` 30 — alpha-masked sampling of the reduced scene in display space.
-- `render/src/shadow.rs` 365 — BF1 vehicle volumes: capped z-fail, one display-space multiply · `ShadowMesh`, `Renderer::set_shadow_triangles`; `analysis/re-vehicle-shadow.md`.
+- `render/src/shadow.rs` 414 — capped z-fail stencil counting shared by character and legacy BF1 vehicle volumes · `ShadowMesh`, `Renderer::set_shadow_triangles`; `analysis/re-vehicle-shadow.md`.
+- `render/src/character_shadow.rs` 185 — screen-resolution volumes from the current character pose, held weapons and opaque cloth.
+- `render/src/sun_shadow.rs` 393 — camera-local scenery shadow map and one display-space darkening where the scene depth or character stencil marks a shadow · `Renderer::set_sun_shadows`.
+- `render/src/sun_shadow.wgsl` 93 — light-space scenery depth and the stencil-aware shadow composite.
 - `render/src/bolt.wgsl` 97 — `fs_bolt_core` / `fs_bolt_glow` (GS MODULATE, unfogged), appended after `grass.wgsl`
 - `render/src/terrain_light.rs` 478 — BF2 terrain light projection pass · `Renderer::set_omniproj`, `Renderer::set_terrain_lights`, `TerrainLights`, `LitPatch`; gather contract, gamma addition and frame-copy sequencing in the module header (`analysis/re-bolt.md` §5.3, [O]).
 - `render/src/terrain_light.wgsl` 94 — `vs_terrain_light` / `fs_terrain_light`, appended after `shader.wgsl`
@@ -775,7 +778,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
   padding and encoder tests · `Renderer::capture_rgba`, `encode_png`, `encode_png_rgb`
 - `render/src/shader.wgsl` 1295 — world/skinned shader: vertex lighting, alpha, fog, water/speckle, sky, specular and terrain · `shade_unfogged`, `gs_lit`, `point_sum`, `MASK_CUTOFF`; grass/bolt/terrain-light/filter have separate `.wgsl` files; HUD shader is in `hud.rs`.
 - `render/src/made.rs` 192 — GPU-object creation wrappers and frame-recorder inventory · `Made`, `note`, `take`, `texture_bytes`; enable/cap and wrapper contract in the module header; consumer: `game::frame_profile` (HITCH).
-- `render/src/mesh.rs` 476 — vertex formats, GPU meshes · `Vertex`, `MeshData`
+- `render/src/mesh.rs` 502 — vertex formats, GPU meshes and opt-in rigid character silhouettes · `Vertex`, `MeshData`
 - `render/src/texture.rs` 293 — RGBA8 → bind group; samplers · `TextureDesc`
 - `render/src/camera.rs` 143 — the fly camera (Y-up, −Z forward) · `Camera`
 - `render/src/frustum.rs` 175 — frustum culling, a box's distance range from the eye (card LODP) · `Frustum`, `distance_range`
@@ -997,6 +1000,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 | how a world model is lit (COL0, prelit, unlit, Light2, `Static()`) | `bake/src/glb.rs` (`light_path`) | `render/src/draw.rs` (`LightPath`), `render/src/shader.wgsl` (`shade_unfogged`), `game/src/assets/mesh.rs` (`light_of`), `bake/src/lighting.rs` |
 | BF2's local lights on models (lamps, EntityLights, the command post's light) | `game/src/point_light.rs`, `render/src/point_light.rs` (`gather`), `render/src/shader.wgsl` (`point_sum`, `gs_lit`) | `bake/src/lighting.rs` (`point_lights_from`), `bake/src/entity_light.rs`, `bake/src/glb.rs` (`model_sphere`), `manifest/src/environment.rs` (`ManifestPointLight`), `manifest/src/lib.rs` (`ManifestClassLight`), `mungefs/src/light.rs`, `game/src/viewer/scene.rs` (`DrawCmd::lit`), `game/src/assets.rs` (`CpuMesh::sphere`), `render/src/draw.rs` (`DrawCmd::lit`), `render/src/frame.rs` |
 | BF1 vehicle shadow volumes (BF2 draws none) | `mungefs/src/shadow.rs`, `bake/src/shadow.rs`, `manifest/src/shadow.rs` | `game/src/viewer/vehicles.rs`, `render/src/shadow.rs`, `render/src/shadow.wgsl`, `render/src/device.rs` (`Depth24PlusStencil8`), `render/src/frame.rs`; authored sidecars, posed nodes, capped z-fail and one display-space ×0.625 pass |
+| Hard directional battle shadows | Existing world draws, material masks, skinned meshes and sun direction | `render/src/character_shadow.rs`, `render/src/sun_shadow.rs`, `render/src/frame/submit.rs`. Screen-resolution character volumes and a scenery depth map share one shadow strength on the opaque world before characters and water draw. The profile's Hard Shadows option applies to live battles. `OPENBF_HARD_SHADOWS=0` selects the previous mode in headless walk replays. |
 | the command post's hologram (the beam, the icon, the relation colours, the fade across a capture, the flicker) | `game/src/holo.rs`, `render/src/light_beam.rs` | `render/src/particles.rs` (`ParticleShape::Beam`), `game/src/point_light.rs` (`submit`: the light × I), `game/src/viewer/scene.rs` (`SceneGpu::holo`), `core/src/cp.rs` (the meters) |
 | the terrain's texture layers (which, their alphas, UVs, draw order) | `mungefs/src/terrain.rs` (`patch_alpha`), `bake/src/terrain_glb.rs` (`terrain_layers_to_glb`, `layer_uv`) | `game/src/viewer/scene.rs` (`upload_terrain_layer_chunks`), `render/src/draw.rs` (`DrawLayer::TerrainLayer`), `render/src/pipelines.rs`, `render/src/shader.wgsl` (`fs_terrain_layer`), `render/src/frame.rs` (`draw_key`) |
 | how the terrain is lit (unlit, COLR × the per-game GS scale) | `bake/src/terrain_glb.rs` (`gs_vertex_byte`), `bake/src/map/content.rs` (`source_game`) | `render/src/draw.rs` (`LightPath::Terrain`), `render/src/shader.wgsl`, `game/src/viewer/scene.rs` |
