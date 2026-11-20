@@ -38,6 +38,23 @@ pub fn instant_action(
     missions_dir: &Path,
     difficulty: core::skill::Difficulty,
 ) -> InstantAction {
+    catalog_action(assets_dir, missions_dir, difficulty, true)
+}
+
+pub fn lobby_instant_action(
+    assets_dir: &Path,
+    missions_dir: &Path,
+    difficulty: core::skill::Difficulty,
+) -> InstantAction {
+    catalog_action(assets_dir, missions_dir, difficulty, false)
+}
+
+fn catalog_action(
+    assets_dir: &Path,
+    missions_dir: &Path,
+    difficulty: core::skill::Difficulty,
+    single_player: bool,
+) -> InstantAction {
     let bf2 = crate::event_feed::Texts::load(assets_dir, "bf2");
     let bf1 = crate::event_feed::Texts::load(assets_dir, "bf1");
     let text = |g: Game, key: &str| {
@@ -51,7 +68,11 @@ pub fn instant_action(
         .into_iter()
         .map(|(k, g, _)| (k, g))
         .collect();
-    let missions = |key: &str, mode: Mode| crate::mission::pairs(missions_dir, key, mode.subst());
+    let missions = |key: &str, mode: Mode| match mode {
+        Mode::Xl if single_player => crate::mission::pairs(missions_dir, key, Mode::Con.subst()),
+        Mode::Xl => Vec::new(),
+        _ => crate::mission::pairs(missions_dir, key, mode.subst()),
+    };
     let maps = ui::shell::catalog(&text, &bakes, &missions);
     let texts = IaTexts::new(&|key, english| {
         bf2.bf2_text(key)

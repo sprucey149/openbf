@@ -379,10 +379,20 @@ pub(super) fn make_walk_with_counts(
     let map_defaults = b
         .mission
         .as_ref()
-        .filter(|m| !m.is_hunt())
+        .filter(|m| !b.xl && !m.is_hunt())
         .and_then(|m| game::conquest_defaults::for_map(&m.map, m.era.as_deref() == Some("cw")));
     let defaults = b.team_size_pct.and(map_defaults);
-    let resolved = defaults.map(|d| d.scaled(b.team_size_pct.unwrap_or(100), b.ticket_pct));
+    let team_pct = b.team_size_pct.unwrap_or(100);
+    let resolved = if b.xl {
+        let combatants = ui::population::xl_team_counts(team_pct);
+        Some(game::conquest_defaults::Defaults {
+            combatants,
+            // Battle tracks spawn capacity in this field even with unlimited respawns.
+            tickets: combatants,
+        })
+    } else {
+        defaults.map(|d| d.scaled(team_pct, b.ticket_pct))
+    };
     let tickets = if b.tickets_set {
         [b.tickets; 2]
     } else if let Some(d) = resolved {
@@ -447,6 +457,10 @@ pub(super) fn make_walk_with_counts(
     if let Some(d) = resolved {
         sim.team_combatants = Some(d.combatants);
     }
+    if let Some(d) = resolved.filter(|_| b.xl) {
+        sim.battle.unlimited_reinforcements = true;
+        sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::xl(d.combatants));
+    }
     let teams = team_templates(scene, b, &mut sim)?;
     let seat = usize::from(b.player_team.min(1));
     let mut walk = WalkSim::with_teams_seat(
@@ -457,7 +471,7 @@ pub(super) fn make_walk_with_counts(
         game::layout::nav_graph(&scene.manifest, &scene.dir),
         b.player_team,
     );
-    // Only a battle that uses percentages can change them in the pause menu.
+    // The pause menu's population calibration is for standard Conquest.
     walk.conquest_defaults = defaults;
     walk.team_size_pct = b.team_size_pct.unwrap_or(100);
     walk.reinforcement_pct = b.ticket_pct;
@@ -1364,6 +1378,7 @@ mod tests {
             ai: Some(0),
             ai_cap: None,
             team_size_pct: None,
+            xl: false,
             tickets: 250,
             tickets_set: false,
             ticket_pct: 100,
@@ -1428,6 +1443,7 @@ mod tests {
             ai: None,
             ai_cap: None,
             team_size_pct: Some(100),
+            xl: false,
             tickets: 250,
             tickets_set: false,
             ticket_pct: 100,
@@ -1565,6 +1581,7 @@ mod tests {
                 ai: None,
                 ai_cap: None,
                 team_size_pct: Some(100),
+                xl: false,
                 tickets: 250,
                 tickets_set: false,
                 ticket_pct: 100,

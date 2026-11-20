@@ -162,6 +162,9 @@ impl Sim {
     }
 
     pub(super) fn update_cps(&mut self, dt: f32) {
+        if self.is_xl() {
+            return;
+        }
         let teams = self.battle.teams.len();
         for ci in 0..self.cps.len() {
             let inside = self.cp_inside(ci);

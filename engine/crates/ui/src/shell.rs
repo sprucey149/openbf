@@ -30,12 +30,13 @@ pub const OPTION_ROWS: usize = 5;
 /// `ScriptCB_GetNetGameDefaults`' non-network branch).
 pub const MAX_BOTS: i32 = 16;
 /// The modes the port's sim can run (§7 dims the rest).
-pub const PORT_MODES: [Mode; 5] = [
+pub const PORT_MODES: [Mode; 6] = [
     Mode::Con,
     Mode::Eli,
     Mode::Assault,
     Mode::OneFlag,
     Mode::Hunt,
+    Mode::Xl,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,15 +64,17 @@ pub enum Mode {
     Hunt,
     Assault,
     Eli,
+    Xl,
 }
 
-pub const MODES: [Mode; 6] = [
+pub const MODES: [Mode; 7] = [
     Mode::Con,
     Mode::Ctf,
     Mode::OneFlag,
     Mode::Hunt,
     Mode::Assault,
     Mode::Eli,
+    Mode::Xl,
 ];
 
 impl Mode {
@@ -85,6 +88,7 @@ impl Mode {
             Mode::Hunt => "hunt",
             Mode::Assault => "ass",
             Mode::Eli => "eli",
+            Mode::Xl => "xl",
         }
     }
 
@@ -134,6 +138,13 @@ impl Mode {
                     "Assault\r\nHeroes and villains clash sabers and exchange fire in the ultimate duel of the fates.",
                 ),
             ),
+            Mode::Xl => (
+                ("openbf.mode.xl", "XL"),
+                (
+                    "openbf.mode.xl.description",
+                    "XL\r\nDefeat enemy units to earn points. The first team to 350 wins.",
+                ),
+            ),
         }
     }
 
@@ -144,7 +155,7 @@ impl Mode {
             Mode::Ctf => "mode_icon_2ctf",
             Mode::OneFlag => "mode_icon_ctf",
             Mode::Hunt => "mode_icon_hunt",
-            Mode::Assault | Mode::Eli => "mode_icon_ass",
+            Mode::Assault | Mode::Eli | Mode::Xl => "mode_icon_ass",
         }
     }
 }
@@ -806,7 +817,11 @@ impl InstantAction {
             icon2: None,
         })
         .chain(self.playlist.iter().map(|e| ListRow {
-            text: self.maps[e.map].label.clone(),
+            text: if e.mode == Mode::Xl {
+                format!("{} / {}", self.maps[e.map].label, self.texts.mode(e.mode).0)
+            } else {
+                self.maps[e.map].label.clone()
+            },
             enabled: true,
             icon: Some(e.mode.icon()),
             icon2: match e.side {

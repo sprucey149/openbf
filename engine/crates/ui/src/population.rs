@@ -7,10 +7,20 @@ pub const MAX_TEAM_PCT: u32 = 200;
 /// Round to nearest, halves upward. The 32-combatant ceiling limits the entire
 /// pair together so asymmetric missions keep their ratio at large percentages.
 pub fn team_counts(defaults: [u32; 2], pct: u32) -> [u32; 2] {
+    team_counts_capped(defaults, pct, 32)
+}
+
+/// OURS: XL has 48 combatants per side at 100%.
+/// measure: live population and frame time on each XL map and era.
+pub fn xl_team_counts(pct: u32) -> [u32; 2] {
+    team_counts_capped([48; 2], pct, 96)
+}
+
+fn team_counts_capped(defaults: [u32; 2], pct: u32, cap: u32) -> [u32; 2] {
     let largest = defaults.into_iter().max().unwrap_or(1).max(1);
     let pct = pct.clamp(10, MAX_TEAM_PCT);
-    let (num, den) = if largest * pct > 3200 {
-        (32, largest)
+    let (num, den) = if largest * pct > cap * 100 {
+        (cap, largest)
     } else {
         (pct, 100)
     };
@@ -37,6 +47,7 @@ impl Defaults {
             tickets: tickets(self.tickets, ticket_pct),
         }
     }
+
     pub fn initial_ai(self, human_team: u8) -> [u32; 2] {
         [0, 1].map(|t| {
             self.combatants[t].saturating_sub(u32::from(t == usize::from(human_team.min(1))))

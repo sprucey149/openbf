@@ -31,7 +31,23 @@ pub(super) fn shell_setup(
     difficulty: core::skill::Difficulty,
 ) -> Result<BattleSetup> {
     let armies = [row_armies[0].as_str(), row_armies[1].as_str()];
-    let pick = game::mission::pick(missions_dir, name, mode, armies);
+    let xl = mode == ui::shell::Mode::Xl.subst();
+    let mission_mode = if xl { "con" } else { mode };
+    let pick = game::mission::pick(missions_dir, name, mission_mode, armies);
+    if xl {
+        let code = name.strip_prefix("bf2_").unwrap_or(name);
+        anyhow::ensure!(
+            pick.as_ref().is_some_and(|p| {
+                p.own
+                    && p.mission.source_game == "bf2"
+                    && ui::shell::xl_eras(code).iter().any(|era| {
+                        let pair = era.armies();
+                        armies == pair || armies == [pair[1], pair[0]]
+                    })
+            }),
+            "XL requires a supported Battlefront II map and era with a Conquest mission"
+        );
+    }
     let player_team = pick.as_ref().map_or(0, |p| p.player_team);
     let mut teams = armies.map(str::to_string);
     if player_team == 1 {
@@ -59,8 +75,8 @@ pub(super) fn shell_setup(
         "Hero Assault and Hunt require a mission"
     );
     anyhow::ensure!(
-        mission.as_ref().is_none_or(|m| m.mode == mode),
-        "mission mode differs from {mode}"
+        mission.as_ref().is_none_or(|m| m.mode == mission_mode),
+        "mission mode differs from {mission_mode}"
     );
     let assault = mission.as_ref().is_some_and(|m| m.is_hero_assault());
     let hunt = mode == "hunt";
@@ -76,22 +92,23 @@ pub(super) fn shell_setup(
         spawn: (0.0, 0.0),
         spawn_set: false,
         targets: false,
-        // Map-relative team size, including the human.
+        xl,
         ai: None,
         // Explicit CLI cap is separate from the percentage setting.
         ai_cap: space.then_some(session.ass_numbots.max(0) as u32),
+        // Map-relative team size, including the human.
         team_size_pct: (!assault && !space && !hunt).then_some(session.con_numbots as u32),
         // Calibrated map tickets, scaled by the shell percentage.
         tickets: 250,
         tickets_set: false,
-        ticket_pct: if assault || space || hunt {
+        ticket_pct: if assault || space || hunt || xl {
             100
         } else {
             session.con_mult.max(10) as u32
         },
         time_limit: if hunt {
             session.hun_timer.max(1) as u32
-        } else if assault || space {
+        } else if assault || space || xl {
             0
         } else {
             session.con_timer.max(0) as u32
@@ -123,6 +140,10 @@ pub(super) fn battle_setup(
     missions_dir: &Path,
     assets_dir: &Path,
 ) -> Result<BattleSetup> {
+    anyhow::ensure!(
+        round.mode != ui::shell::Mode::Xl.subst(),
+        "XL is available in single-player Instant Action"
+    );
     let session = round
         .options
         .to_session(ui::shell::SessionOptions::default());
@@ -196,6 +217,114 @@ pub(super) fn rebuilder(
 mod tests {
     use super::*;
     use game::netplay::{HumanSeat, PlayerProfile, RoundOptions};
+
+    #[test]
+    fn xl_launches_all_supported_eras_from_instant_action() {
+        use ui::shell::{MapPick, Mode, ModePick, SidePick};
+
+        let missions = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
+        let assets = game::assets::baked_root();
+        if !missions.is_dir() || !assets.join("bf2_geo1/manifest.ron").is_file() {
+            eprintln!("SKIP: no owned Battlefront II bake and missions");
+            return;
+        }
+        let difficulty = core::skill::Difficulty::Normal;
+        let mode = Mode::Xl;
+        let mut ia = game::shell_ia::instant_action(&assets, missions, difficulty);
+        assert_eq!(ia.texts.mode(mode).0, "XL");
+        ia.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        let rows = ia.launch();
+        let mut pairs: Vec<_> = rows
+            .iter()
+            .map(|row| (row.key.as_str(), row.armies[0].as_str()))
+            .collect();
+        pairs.sort_unstable();
+        assert_eq!(
+            pairs,
+            [
+                ("bf2_geo1", "rep"),
+                ("bf2_hot1", "all"),
+                ("bf2_kas2", "all"),
+                ("bf2_kas2", "rep"),
+            ]
+        );
+        let mut lobby = game::shell_ia::lobby_instant_action(&assets, missions, difficulty);
+        lobby.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        assert!(lobby.launch().is_empty());
+
+        for row in rows {
+            let (scene, load) =
+                game::assets::load_battle_scene(&assets.join(&row.key), mode.subst()).unwrap();
+            assert!(load.layer.is_some(), "{} needs its Conquest layer", row.key);
+            for (team_pct, ticket_pct, size) in [(100, 100, 48), (200, 50, 96)] {
+                let session = ui::shell::SessionOptions {
+                    con_numbots: team_pct,
+                    con_mult: ticket_pct,
+                    con_timer: 1,
+                    ..ia.options
+                };
+                let setup = shell_setup(
+                    missions,
+                    &assets,
+                    &row.key,
+                    mode.subst(),
+                    &row.armies,
+                    &session,
+                    42,
+                    difficulty,
+                )
+                .unwrap();
+                let mission = setup.mission.as_ref().unwrap();
+                let mut walk = super::super::battle::make_walk(&scene, &setup).unwrap();
+                assert_eq!(walk.sim.team_combatants, Some([size; 2]), "{}", row.key);
+                assert_eq!(
+                    walk.sim.battle.teams.map(|team| team.alive()),
+                    [size; 2],
+                    "{}",
+                    row.key
+                );
+                assert!(walk.sim.is_xl());
+                assert!(walk.sim.battle.unlimited_reinforcements);
+                assert_eq!(walk.sim.time_limit, None);
+                assert!(!walk.sim.player_spawn_posts(0).is_empty());
+                assert!(!walk.sim.player_spawn_posts(1).is_empty());
+                let owners: Vec<_> = walk.sim.cps.iter().map(|post| post.owner).collect();
+                let player = walk.player.index as usize;
+                let enemy_post = walk
+                    .sim
+                    .cps
+                    .iter()
+                    .position(|post| {
+                        post.capture_authored && post.owner == Some(1 - setup.player_team)
+                    })
+                    .unwrap();
+                let original_pos = walk.sim.units[player].soldier.pos;
+                walk.sim.units[player].soldier.pos = walk.sim.cps[enemy_post].def.capture.center;
+                assert!(!walk.sim.counts_in_cp(player, enemy_post));
+                let mut feed = game::event_feed::EventFeed::for_walk(&assets, "bf2", &walk);
+                let hud = super::super::battle::hud_model(&walk, &mut feed, 16.0 / 9.0);
+                assert_eq!(hud.team_points, Some(([0, 0], 350)));
+                assert!(hud.capture.is_none() && hud.countdown.is_none());
+                walk.sim.units[player].soldier.pos = original_pos;
+                let start = std::time::Instant::now();
+                for _ in 0..120 {
+                    walk.step_tick(&[core::sim::PadState::default()]);
+                }
+                assert_eq!(walk.sim.tick, 120);
+                assert!(walk.sim.cps.iter().map(|post| post.owner).eq(owners));
+                assert_eq!(
+                    walk.sim.battle.teams.map(|team| team.bleed_per_sec),
+                    [0.0; 2]
+                );
+                eprintln!(
+                    "{} {}: {size} per team, 120 ticks in {:?}",
+                    row.key,
+                    mission.era.as_deref().unwrap(),
+                    start.elapsed()
+                );
+            }
+        }
+    }
 
     fn summary(b: &BattleSetup) -> String {
         format!(
