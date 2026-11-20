@@ -625,6 +625,7 @@ impl winit::application::ApplicationHandler for App {
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             terrain_lod: self.profile.settings.terrain_lod,
+                            hard_shadows: self.profile.settings.hard_shadows,
                             scene_softness: self.profile.settings.scene_softness,
                             auto_quality: self.profile.settings.auto_quality,
                             window_mode: self.display.shown(self.profile.settings.window_mode),
@@ -838,6 +839,7 @@ impl winit::application::ApplicationHandler for App {
                                 invert_y: self.profile.settings.invert_y,
                                 low_power_resolution: self.profile.settings.low_power_resolution,
                                 terrain_lod: self.profile.settings.terrain_lod,
+                                hard_shadows: self.profile.settings.hard_shadows,
                                 scene_softness: self.profile.settings.scene_softness,
                                 auto_quality: self.profile.settings.auto_quality,
                                 window_mode: self.display.shown(self.profile.settings.window_mode),
@@ -1171,6 +1173,7 @@ impl winit::application::ApplicationHandler for App {
                     // see-through (`game::camera_collide`).
                     see = walk.camera_see_through();
                     if let Some(r) = self.renderer.as_mut() {
+                        r.set_sun_shadows(self.profile.settings.hard_shadows);
                         self.vehicle_vis
                             .set_tick_share(game::render_blend::share(walk));
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));

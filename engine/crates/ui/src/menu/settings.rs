@@ -67,6 +67,7 @@ impl SettingsPage {
                 AutoQuality,
                 LowPowerResolution,
                 TerrainLod,
+                HardShadows,
                 SceneSoftness,
                 FpsCounter,
                 NetworkMeter,

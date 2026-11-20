@@ -19,12 +19,6 @@ use game::viewer::{upload_scene, SceneGpu};
 use game::walk::WalkSim;
 use render::{DrawCmd, MeshHandle, Renderer};
 
-/// The hard-edged presentation is shared by campaign and instant action.
-/// Keep a way to compare with the previous vehicle-only presentation.
-pub(super) fn configure_battle_shadows(renderer: &mut Renderer) {
-    renderer.set_sun_shadows(std::env::var("OPENBF_HARD_SHADOWS").as_deref() != Ok("0"));
-}
-
 /// Walk-mode soldier marker tint (orange — reads on sand and rock).
 const MARKER_COLOR: [f32; 4] = [0.9, 0.45, 0.1, 1.0];
 

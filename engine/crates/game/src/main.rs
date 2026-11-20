@@ -169,7 +169,7 @@
 //!                                 hash after every tick for capture comparisons
 //!   OPENBF_WALK_FEET_Y=<metres>    with --walk-replay: start at an explicit
 //!                                 floor height for indoor capture scripts
-//!   OPENBF_HARD_SHADOWS=0          use the previous shadow mode in battles
+//!   OPENBF_HARD_SHADOWS=0          use the previous shadow mode in headless walk replays
 // Test code may use f32::max/min; the sim may not (clippy.toml, LAN_MULTIPLAYER.md §7).
 #![cfg_attr(test, allow(clippy::disallowed_methods))]
 
