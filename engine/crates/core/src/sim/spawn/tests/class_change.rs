@@ -233,7 +233,11 @@ fn the_press_that_closes_a_popup_does_not_accept_on_the_class_screen() {
         s.step(&[PadState::default()]);
     }
     tap(&mut s, buttons::SPAWN_ACCEPT);
-    assert_eq!(s.spawn_stage[0], SpawnStage::Accepted, "a new press accepts");
+    assert_eq!(
+        s.spawn_stage[0],
+        SpawnStage::Accepted,
+        "a new press accepts"
+    );
     assert_eq!(me(&s).spec.class, 1);
 }
 

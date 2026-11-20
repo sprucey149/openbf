@@ -535,7 +535,8 @@ impl CameraBlockers {
         let dir = delta / len;
         let mut t = len;
         for b in &self.blockers {
-            if (b.prop && !props) || Some(b.instance) == skip || self.excluded.contains(&b.instance) {
+            if (b.prop && !props) || Some(b.instance) == skip || self.excluded.contains(&b.instance)
+            {
                 continue;
             }
             if b.moves || b.door.is_some() {

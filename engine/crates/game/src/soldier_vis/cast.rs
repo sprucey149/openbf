@@ -121,7 +121,11 @@ impl CastClock {
         let (source, age) = self.active?;
         let (primary, fallback) = class.bank_pair_of(weapon);
         let banks: [&str; 2] = [primary, fallback.unwrap_or(primary)];
-        let banks = if fallback.is_some() { &banks[..] } else { &banks[..1] };
+        let banks = if fallback.is_some() {
+            &banks[..]
+        } else {
+            &banks[..1]
+        };
         let end = ["upper", "lower"]
             .into_iter()
             .filter_map(|layer| {

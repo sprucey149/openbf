@@ -73,7 +73,10 @@ impl Crawl {
                 (19.0, Color32::from_rgb(245, 242, 229))
             };
             let fade = ((FAR_DEPTH - depth) / 170.0).clamp(0.0, 1.0);
-            let font = egui::FontId::proportional(size * scale);
+            // The crawl's perspective lettering is artwork (a film credit),
+            // not menu text, so it keeps its own size; the guard's `// typography:`
+            // exception records why (cf. `ui::loading`'s LOADING stamp).
+            let font = egui::FontId::proportional(size * scale); // typography: perspective credits lettering is artwork, not menu text
             let galley =
                 painter.layout_no_wrap(line.text.clone(), font, color.gamma_multiply(fade));
             visible.push((depth, galley));

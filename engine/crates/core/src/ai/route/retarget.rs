@@ -416,11 +416,30 @@ pub(in super::super) fn retarget_board(
     at: Vec3,
     nt: &mut NavTick,
 ) {
+    route_to(sim, me, st, at, nt, true);
+}
+
+/// Shared graph walk for a boarding claim and a defend point: the mover,
+/// start hub, reachability check and kept/planned leg are identical. Only the
+/// destination resolver differs — a vehicle's own hub for boarding, the
+/// path query's hub for a point.
+fn route_to(
+    sim: &Sim,
+    me: UnitHandle,
+    st: &mut AiState,
+    at: Vec3,
+    nt: &mut NavTick,
+    boarding: bool,
+) {
     let (Some(g), Some(u)) = (sim.nav.as_ref(), sim.unit(me)) else {
         return;
     };
     let m = mover(sim, u);
-    let dest = unit_goal_hub(sim, g, m, at);
+    let dest = if boarding {
+        unit_goal_hub(sim, g, m, at)
+    } else {
+        g.hub_for(at, m)
+    };
     match (start_hub(sim, g, me), dest) {
         (Some(c), Some(d)) if g.reachable_by(c, d, m) => {
             keep_or_plan(sim, st, me, c, d, nt);
@@ -448,16 +467,7 @@ pub(in super::super) fn retarget_point(
     at: Vec3,
     nt: &mut NavTick,
 ) {
-    let (Some(g), Some(u)) = (sim.nav.as_ref(), sim.unit(me)) else {
-        return;
-    };
-    let m = mover(sim, u);
-    match (start_hub(sim, g, me), g.hub_for(at, m)) {
-        (Some(c), Some(d)) if g.reachable_by(c, d, m) => {
-            keep_or_plan(sim, st, me, c, d, nt);
-        }
-        _ => clear(st),
-    }
+    route_to(sim, me, st, at, nt, false);
 }
 
 /// A hunter's LAST leg walks at the enemy itself, not at the enemy's hub

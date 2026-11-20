@@ -738,9 +738,17 @@ fn a_campaign_skill_delta_moves_each_sides_bots_at_its_mapped_level() {
     s.difficulty = D::Easy;
     assert_eq!((s.bot_skill(0), s.bot_skill(1)), (easy0 + 2, 14 - 9));
     s.difficulty = D::Normal;
-    assert_eq!((s.bot_skill(0), s.bot_skill(1)), normal, "the hard pair is unset");
+    assert_eq!(
+        (s.bot_skill(0), s.bot_skill(1)),
+        normal,
+        "the hard pair is unset"
+    );
     s.mission_ai.set_skill_delta(1, 30, Some(3));
-    assert_eq!((s.bot_skill(0), s.bot_skill(1)), (normal.0 + 1, 20), "clamped to 20");
+    assert_eq!(
+        (s.bot_skill(0), s.bot_skill(1)),
+        (normal.0 + 1, 20),
+        "clamped to 20"
+    );
     s.mission_ai.set_skill_delta(0, -30, None);
     s.difficulty = D::Easy;
     assert_eq!(s.bot_skill(1), 1, "no level sets all three; clamped to 1");

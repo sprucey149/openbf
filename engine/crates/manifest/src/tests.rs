@@ -1477,3 +1477,69 @@ fn flight_properties_round_trip_and_old_paths_keep_their_serialization() {
         path
     );
 }
+
+#[test]
+fn world_anims_round_trip_with_every_field_populated() {
+    use crate::world_anim::{WorldAnim, WorldAnimGroup, WorldAnimKey, WorldAnims, FILE};
+
+    let key = WorldAnimKey {
+        time: 1.25,
+        value: [1.0, -2.0, 3.0],
+        interp: 2,
+        tangent_out: [0.1, 0.2, 0.3],
+        tangent_in: [-0.1, -0.2, -0.3],
+    };
+    let anims = WorldAnims {
+        anims: vec![WorldAnim {
+            world: "geonosis".into(),
+            name: "geonosis_anim_1".into(),
+            duration: 4.5,
+            looping: true,
+            local: false,
+            pos: vec![key],
+            rot: vec![WorldAnimKey { time: 0.0, ..key }],
+        }],
+        groups: vec![WorldAnimGroup {
+            world: "geonosis".into(),
+            name: "geonosis_group".into(),
+            play: true,
+            restart_on_state: true,
+            no_hierarchy: false,
+            entries: vec![("anim".into(), "object".into())],
+        }],
+    };
+    let text = to_ron(&anims);
+    let back: WorldAnims = ron::from_str(&text).expect("deserialize world_anims.ron");
+    assert_eq!(back, anims);
+    assert_eq!(FILE, "world_anims.ron");
+}
+
+#[test]
+fn shell_index_round_trips_a_movie_with_audio() {
+    use crate::shell::{ShellIndex, ShellMovie};
+
+    let shell = ShellIndex {
+        movies: vec![
+            ShellMovie {
+                name: "menus".into(),
+                segments: vec!["movies/0.objm".into()],
+                audio: None,
+            },
+            ShellMovie {
+                name: "geo1c_c".into(),
+                segments: vec!["movies/1.objm".into()],
+                audio: Some("movies/geo1c_c.wav".into()),
+            },
+        ],
+        textures: vec!["textures/logo.ktx2".into()],
+        music: "shell_music".into(),
+    };
+    let back: ShellIndex = ron::from_str(&to_ron(&shell)).expect("deserialize shell.ron");
+    assert_eq!(back, shell);
+
+    // The default is load-bearing: shell.ron written before campaign cutscenes
+    // had no `audio` field at all and must still load.
+    let old = r#"(movies:[(name:"menus",segments:["movies/0.objm"])],textures:[],music:"")"#;
+    let back: ShellIndex = ron::from_str(old).expect("pre-campaign shell.ron");
+    assert!(back.movies[0].audio.is_none());
+}

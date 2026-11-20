@@ -595,8 +595,9 @@ struct App {
     /// The playing take of the battle's music (card AMBM); dropping it
     /// stops it.
     music_voice: Option<audio::MusicVoice>,
-    /// The round's end movie's sound track (`game::round_end::step_end_movie`).
-    end_movie_voice: Option<audio::Shot>,
+    /// The round's end movie's sound track, keyed by clip
+    /// (`game::round_end::step_one_shot_movie`).
+    end_movie_voice: Option<(String, audio::Shot)>,
     /// The battle's soldier foley (card FOLY), when the map has a table.
     foley: Option<game::foley::Foley>,
     /// The battle's vehicle engines (card VSND).
@@ -1283,7 +1284,9 @@ impl App {
                 .netplay
                 .as_ref()
                 .and_then(|n| Some((n.loading.clone()?, n.peer.local_slot))),
-            campaign_index: (mode == "campaign").then_some(self.active_campaign).flatten(),
+            campaign_index: (mode == "campaign")
+                .then_some(self.active_campaign)
+                .flatten(),
         }
     }
 
@@ -1922,17 +1925,27 @@ impl App {
     fn game_audio_paused(&self) -> bool {
         // Tutorial narration continues while an objective popup is shown.
         // From the round's end movie on the battle is silent (`RoundEnd::silenced`).
-        let ended = self.walk.as_ref().is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.silenced()));
-        self.in_battle() && (self.paused && self.netplay.is_none() || ended || self.battle_movie_pending())
+        let ended = self
+            .walk
+            .as_ref()
+            .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.silenced()));
+        self.in_battle()
+            && (self.paused && self.netplay.is_none() || ended || self.battle_movie_pending())
     }
 
     /// The battle's clock is stopped: paused in single player. A LAN round
     /// never stops (issue #168): its pause menu overlays a running battle.
     fn frozen(&self) -> bool {
-        self.in_battle() && self.netplay.is_none() && (self.paused || self.campaign_map.is_some()
-            || self.battle_movie_pending()
-            || self.round_end_held()
-            || self.walk.as_ref().is_some_and(|(w, _)| w.campaign.as_ref().is_some_and(|c| c.popup().is_some())))
+        self.in_battle()
+            && self.netplay.is_none()
+            && (self.paused
+                || self.campaign_map.is_some()
+                || self.battle_movie_pending()
+                || self.round_end_held()
+                || self
+                    .walk
+                    .as_ref()
+                    .is_some_and(|(w, _)| w.campaign.as_ref().is_some_and(|c| c.popup().is_some())))
     }
 
     /// A decided single-player round holds the world still from the banner
@@ -2012,13 +2025,9 @@ impl App {
                         .cutscenes
                         .push_back(ui::campaign::RISE_OF_THE_EMPIRE[0].outro_movie.to_owned());
                 }
-                front
-                    .menus
-                    .open_page(ui::shell_ps2::Page::RiseNewLoad);
+                front.menus.open_page(ui::shell_ps2::Page::RiseNewLoad);
             } else {
-                front
-                    .menus
-                    .open_page(ui::shell_ps2::Page::Singleplayer);
+                front.menus.open_page(ui::shell_ps2::Page::Singleplayer);
             }
             return;
         }
@@ -2036,20 +2045,16 @@ impl App {
                 if let Some(crawl) = ui::campaign::RISE_OF_THE_EMPIRE[next].crawl_movie {
                     front.cutscenes.push_back(crawl.to_owned());
                 }
-                front
-                    .menus
-                    .open_page(ui::shell_ps2::Page::CampaignBattle);
+                front.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
             } else {
                 front.queue_credits(&assets_dir);
-                front
-                    .menus
-                    .open_page(ui::shell_ps2::Page::Singleplayer);
+                // The page owns skip / exit navigation; the game draws the
+                // crawl it invokes (`front::credits::Crawl`).
+                front.menus.open_page(ui::shell_ps2::Page::Credits);
                 return;
             }
         } else {
-            front
-                .menus
-                .open_page(ui::shell_ps2::Page::CampaignBattle);
+            front.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
         }
         if finished {
             front.menus.open_campaign_saves(
@@ -2066,12 +2071,16 @@ impl App {
         self.campaign_map = None;
         let finished_campaign = self.active_campaign.take();
         let finished_round = finished_campaign.is_some() && self.round_over;
-        let won_campaign =
-            finished_round && self.walk.as_ref().is_some_and(|(w, _)| w.sim.outcome == Some(0));
+        let won_campaign = finished_round
+            && self
+                .walk
+                .as_ref()
+                .is_some_and(|(w, _)| w.sim.outcome == Some(0));
         // The battle played the mission's end movie before its stats.
-        let outro_played = self.walk.as_ref().is_some_and(|(w, _)| {
-            w.round_end.as_ref().is_some_and(|r| r.movie_played())
-        });
+        let outro_played = self
+            .walk
+            .as_ref()
+            .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.movie_played()));
         self.end_movie_voice = None;
         if let Some(front) = self.front.as_mut() {
             front.cutscenes.clear();
@@ -2145,7 +2154,9 @@ impl App {
         game::input_icons::with_keyboard(
             game::input_icons::icons(
                 self.icon_device.set(settings.input_icons),
-                self.context_gamepad.as_ref().unwrap_or(&settings.controller_bindings),
+                self.context_gamepad
+                    .as_ref()
+                    .unwrap_or(&settings.controller_bindings),
             ),
             &self.kbm.bindings,
         )
@@ -2205,7 +2216,11 @@ impl App {
                     .as_ref()
                     .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.stats.is_some()));
                 if pad.is_pressed(Button::North) {
-                    if self.campaign_map.is_some() && self.walk.as_ref().is_some_and(|(w, _)| w.campaign.as_ref().is_some_and(|c| c.popup().is_none())) {
+                    if self.campaign_map.is_some()
+                        && self.walk.as_ref().is_some_and(|(w, _)| {
+                            w.campaign.as_ref().is_some_and(|c| c.popup().is_none())
+                        })
+                    {
                         now |= game::kbm::MENU_DETAILS;
                     }
                     // Held North is remembered everywhere; it backs out of

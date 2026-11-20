@@ -107,7 +107,10 @@ pub enum ClientCommand {
         values: Vec<u64>,
     },
     RequestResync,
-    Ready { round_id: u32, profile: Vec<u8> },
+    Ready {
+        round_id: u32,
+        profile: Vec<u8>,
+    },
     Request(Vec<u8>),
     Chat(String),
     Leave,

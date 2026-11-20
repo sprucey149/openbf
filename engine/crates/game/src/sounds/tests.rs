@@ -533,8 +533,14 @@ fn a_loop_start_draws_its_pitch_and_gain() {
         hi = (hi.0.max(gain), hi.1.max(pitch));
         pitches.insert(pitch.to_bits());
     }
-    assert!(lo.1 >= 0.85 && lo.1 < 0.86 && hi.1 <= 1.15 && hi.1 > 1.14, "{lo:?} {hi:?}");
-    assert!(lo.0 >= 0.3 && lo.0 < 0.31 && hi.0 <= 0.7 && hi.0 > 0.69, "{lo:?} {hi:?}");
+    assert!(
+        lo.1 >= 0.85 && lo.1 < 0.86 && hi.1 <= 1.15 && hi.1 > 1.14,
+        "{lo:?} {hi:?}"
+    );
+    assert!(
+        lo.0 >= 0.3 && lo.0 < 0.31 && hi.0 <= 0.7 && hi.0 > 0.69,
+        "{lo:?} {hi:?}"
+    );
     assert!(pitches.len() > 900);
 }
 

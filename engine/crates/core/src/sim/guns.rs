@@ -595,13 +595,15 @@ impl Sim {
         // W+0x128), here the threat vehicle it is armed against, else its
         // combat target.
         let bot_candidate = driver.filter(|_| ai).and_then(|i| {
-            armed_target.map(crate::missile::MissileTarget::Vehicle).or_else(|| {
-                self.units[i]
-                    .ai
-                    .target
-                    .and_then(|f| f.unit())
-                    .map(crate::missile::MissileTarget::Unit)
-            })
+            armed_target
+                .map(crate::missile::MissileTarget::Vehicle)
+                .or_else(|| {
+                    self.units[i]
+                        .ai
+                        .target
+                        .and_then(|f| f.unit())
+                        .map(crate::missile::MissileTarget::Unit)
+                })
         });
         let mut shots = Vec::new();
         for (k, w) in g.weapons.iter().enumerate() {

@@ -240,7 +240,16 @@ fn team_templates(
                 team += 1;
                 game::walk::TeamTemplate::from_roster(&r, &sim.classes[team - 1][0], visuals)
             });
-            if let Some(mut rules) = b.heroes.or_else(|| b.mission.as_ref().filter(|m| m.is_campaign()).map(|_| Default::default())).filter(|_| hunt.is_none()) {
+            if let Some(mut rules) = b
+                .heroes
+                .or_else(|| {
+                    b.mission
+                        .as_ref()
+                        .filter(|m| m.is_campaign())
+                        .map(|_| Default::default())
+                })
+                .filter(|_| hunt.is_none())
+            {
                 if b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
                     // Only the campaign's UnlockHeroForTeam enables an offer;
                     // PS2 campaign ruleset forbids AI candidates and hero respawn.
@@ -423,10 +432,10 @@ pub(super) fn make_walk_with_counts(
         sim.battle.unlimited_teams = c.infinite_tickets;
         for t in 0..2 {
             if c.infinite_tickets[t] {
-                let min_pool = b
-                    .mission
-                    .as_ref()
-                    .map_or(100, |m| m.teams[t].units.max(100)) as f32;
+                let min_pool =
+                    b.mission
+                        .as_ref()
+                        .map_or(100, |m| m.teams[t].units.max(100)) as f32;
                 sim.battle.teams[t].reinforcements =
                     sim.battle.teams[t].reinforcements.fmax(min_pool);
             }
@@ -715,7 +724,10 @@ pub(super) fn make_walk_with_counts(
                     &walk.sim,
                 );
                 rt.set_team_rosters(team_classes, [0, 0]);
-                rt.set_team_factions([walk.teams[0].faction.as_str(), walk.teams[1].faction.as_str()]);
+                rt.set_team_factions([
+                    walk.teams[0].faction.as_str(),
+                    walk.teams[1].faction.as_str(),
+                ]);
                 rt.set_native_rosters(
                     m.local_teams
                         .iter()
@@ -1037,7 +1049,10 @@ pub(super) fn hud_model(
                 Popup::Selection(t) => ui::hud::HudPopup::Selection(feed.localize_or_raw(t)),
             }
         }),
-        objectives_updated: walk.campaign.as_ref().is_some_and(|c| c.objectives_updated()),
+        objectives_updated: walk
+            .campaign
+            .as_ref()
+            .is_some_and(|c| c.objectives_updated()),
         bleed: if walk.sim.ctf.is_some() {
             [0.0, 0.0]
         } else {
@@ -1090,20 +1105,22 @@ pub(super) fn hud_model(
         // on (`ShowTeamPoints`); its flags are the script's, not a CTF round.
         team_points: match walk.campaign.as_ref() {
             Some(c) => c.team_points().map(|p| (p, 0)),
-            None => walk.sim.space_team_points()
-            .or_else(|| {
-                walk.sim.ctf.as_ref().map(|c| {
-                    (
-                        [c.team_points[0] as i32, c.team_points[1] as i32],
-                        c.score_limit,
-                    )
+            None => walk
+                .sim
+                .space_team_points()
+                .or_else(|| {
+                    walk.sim.ctf.as_ref().map(|c| {
+                        (
+                            [c.team_points[0] as i32, c.team_points[1] as i32],
+                            c.score_limit,
+                        )
+                    })
                 })
-            })
-            .or_else(|| {
-                walk.sim
-                    .team_points()
-                    .map(|(points, limit)| (points.map(|p| p as i32), limit))
-            }),
+                .or_else(|| {
+                    walk.sim
+                        .team_points()
+                        .map(|(points, limit)| (points.map(|p| p as i32), limit))
+                }),
         },
         ctf: walk.sim.ctf.is_some() && walk.campaign.is_none(),
         flag_status: walk

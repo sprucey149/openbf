@@ -129,13 +129,14 @@ impl GalPlanetView {
             .resolve_class("gal_prp_galaxy")
             .map(|c| c.effects.clone())
             .unwrap_or_default();
-        let galaxy = galaxy_inst
-            .filter(|_| !galaxy_effects.is_empty())
-            .map(|(pivot, base_matrix)| GalaxyStars {
-                pivot,
-                base_matrix,
-                effects: galaxy_effects,
-            });
+        let galaxy =
+            galaxy_inst
+                .filter(|_| !galaxy_effects.is_empty())
+                .map(|(pivot, base_matrix)| GalaxyStars {
+                    pivot,
+                    base_matrix,
+                    effects: galaxy_effects,
+                });
         let fx_lib = game::fx::Library::load(assets_dir, &dir, "bf2", &[]);
 
         let mut lights: HashMap<String, Vec<PointLight>> = HashMap::new();
@@ -214,7 +215,11 @@ impl GalPlanetView {
             let spin = if spin_rate == 0.0 && tilt == 0.0 {
                 Mat4::IDENTITY
             } else {
-                let angle = if spin_rate == 0.0 { 0.0 } else { self.spin_angle };
+                let angle = if spin_rate == 0.0 {
+                    0.0
+                } else {
+                    self.spin_angle
+                };
                 Mat4::from_translation(group.center)
                     * Mat4::from_rotation_x(tilt)
                     * Mat4::from_rotation_y(angle)
@@ -288,7 +293,8 @@ mod tests {
             assert!(!draws.is_empty(), "missing draws for planet {planet}");
             r.set_point_lights(lights);
             r.set_particles(particles);
-            r.render(&cam, &draws, [0.0, 0.0, 0.0, 1.0]).expect("render");
+            r.render(&cam, &draws, [0.0, 0.0, 0.0, 1.0])
+                .expect("render");
             r.capture_rgba().expect("capture").0
         };
 

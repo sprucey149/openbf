@@ -143,3 +143,83 @@ pub fn parse(wrld: &Chunk<'_>) -> WorldAnims {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chunk(tag: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::from(*tag);
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        out.extend_from_slice(payload);
+        while out.len() % 4 != 0 {
+            out.push(0);
+        }
+        out
+    }
+
+    fn f32_bytes(v: f32) -> [u8; 4] {
+        v.to_le_bytes()
+    }
+
+    fn key_bytes(time: f32, value: [f32; 3], interp: u8) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&f32_bytes(time));
+        for v in value {
+            out.extend_from_slice(&f32_bytes(v));
+        }
+        out.push(interp);
+        for v in [0.5, 0.25, 0.125] {
+            out.extend_from_slice(&f32_bytes(v));
+        }
+        for v in [-0.5, -0.25, -0.125] {
+            out.extend_from_slice(&f32_bytes(v));
+        }
+        assert_eq!(out.len(), 41, "the PS2 key is 41 bytes");
+        out
+    }
+
+    #[test]
+    fn parses_one_animation_and_group_with_their_keys() {
+        let mut info = b"my_anim\0".to_vec();
+        info.extend_from_slice(&f32_bytes(4.5));
+        info.extend_from_slice(&[1, 0]);
+        let k = key_bytes(1.25, [1.0, -2.0, 3.0], 2);
+        let mut anim_payload = chunk(b"INFO", &info);
+        anim_payload.extend(chunk(b"POSK", &k));
+        anim_payload.extend(chunk(b"ROTK", &key_bytes(0.0, [0.0, 0.0, 0.0], 0)));
+
+        let mut ginfo = b"my_group\0".to_vec();
+        ginfo.extend_from_slice(&[1, 1]);
+        let mut group_payload = chunk(b"INFO", &ginfo);
+        group_payload.extend(chunk(b"ANIM", b"my_anim\0my_object\0"));
+        group_payload.extend(chunk(b"NOHI", &[]));
+
+        let mut wrld_payload = chunk(b"anim", &anim_payload);
+        wrld_payload.extend(chunk(b"anmg", &group_payload));
+        let wrld = chunk(b"wrld", &wrld_payload);
+        let c = crate::chunks(&wrld).next().unwrap().unwrap();
+        let out = parse(&c);
+
+        assert_eq!(out.anims.len(), 1);
+        let a = &out.anims[0];
+        assert_eq!(a.name, "my_anim");
+        assert_eq!(a.duration, 4.5);
+        assert!(a.looping);
+        assert!(!a.local);
+        assert_eq!(a.pos.len(), 1);
+        assert_eq!(a.pos[0].time, 1.25);
+        assert_eq!(a.pos[0].value, [1.0, -2.0, 3.0]);
+        assert_eq!(a.pos[0].interp, 2);
+        assert_eq!(a.pos[0].tangent_out, [0.5, 0.25, 0.125]);
+        assert_eq!(a.pos[0].tangent_in, [-0.5, -0.25, -0.125]);
+        assert_eq!(a.rot.len(), 1);
+        assert_eq!(a.rot[0].interp, 0, "an unknown interpolation is step");
+
+        assert_eq!(out.groups.len(), 1);
+        let g = &out.groups[0];
+        assert_eq!(g.name, "my_group");
+        assert!(g.play && g.restart_on_state && g.no_hierarchy);
+        assert_eq!(g.entries, vec![("my_anim".into(), "my_object".into())]);
+    }
+}

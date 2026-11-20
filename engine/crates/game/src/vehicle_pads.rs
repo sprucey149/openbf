@@ -681,10 +681,9 @@ pub fn install_for_mission(
             Some(g) => crate::turret_fall::collision_parts(m, map_dir, &common, g, class)?,
             None => Vec::new(),
         };
-        let h = sim.add_building_turret(t.spec.clone(), t.rot, sphere, t.instance, (t.fall.0, parts));
-        if space.is_some()
-            && db.engine_base(class) == Some("armedbuilding")
-        {
+        let h =
+            sim.add_building_turret(t.spec.clone(), t.rot, sphere, t.instance, (t.fall.0, parts));
+        if space.is_some() && db.engine_base(class) == Some("armedbuilding") {
             if let Some(add) = db
                 .prop_f32(class, "AddHealth")
                 .filter(|a| a.is_finite() && *a > 0.0)

@@ -571,7 +571,11 @@ impl Sim {
                 let health_type = v.health.health_type;
                 let enemy = v.team.is_some_and(|team| self.hostile(b.team, team));
                 let friendly = v.team.is_some() && v.team == Some(b.team);
-                let ff = if friendly { self.friendly_fire_scale } else { 1.0 };
+                let ff = if friendly {
+                    self.friendly_fire_scale
+                } else {
+                    1.0
+                };
                 let large = v
                     .instance
                     .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))

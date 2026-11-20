@@ -710,4 +710,3 @@ The port now (OURS, `MissionAi::skill_delta`, `Sim::script_skill_delta`):
 
 Still open: the human team's AI base. On PS2 it is {6, 11, 11}, but the port gives both sides the
 tier base. That is outside this change and is §7's existing decision.
-

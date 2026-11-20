@@ -14,6 +14,10 @@ use std::path::{Path, PathBuf};
 mod store;
 pub use store::{valid_name_char, List, Store, NAME_LIMIT};
 
+// The UI's save-name text box owns its own limit (ui cannot depend on game);
+// keep the two in step at compile time rather than reading the UI's value here.
+const _: () = assert!(NAME_LIMIT == ui::shell_ps2::campaign_saves::NAME_LIMIT);
+
 fn yes() -> bool {
     true
 }
@@ -561,14 +565,13 @@ impl Profile {
         self.settings.mouse_sensitivity = clamp_mouse_sensitivity(self.settings.mouse_sensitivity);
         self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
         self.settings.free_fullscreen_key();
-        self.campaign.unlocked = self.campaign.unlocked.clamp(1, CampaignProgress::MISSIONS as u8);
+        self.campaign.unlocked = self
+            .campaign
+            .unlocked
+            .clamp(1, CampaignProgress::MISSIONS as u8);
         if let Some(turn) = self.campaign.active_mission.take() {
             if self.campaign.saves.is_empty() {
-                let name: String = self
-                    .name
-                    .chars()
-                    .take(ui::shell_ps2::campaign_saves::NAME_LIMIT)
-                    .collect();
+                let name: String = self.name.chars().take(NAME_LIMIT).collect();
                 self.campaign.write_save(None, &name, turn, 0);
             }
         }

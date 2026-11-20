@@ -57,7 +57,11 @@ pub struct TeamDef {
 impl TeamDef {
     /// Whether `class` is initially enabled before any stage mutations run.
     pub fn is_class_initially_enabled(&self, class: &str) -> bool {
-        if self.class_blacklist.iter().any(|c| c.eq_ignore_ascii_case(class)) {
+        if self
+            .class_blacklist
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(class))
+        {
             return false;
         }
         match &self.class_whitelist {
@@ -1393,13 +1397,15 @@ mod tests {
     fn every_campaign_mission_ron_parses() {
         let campaign_dir = missions_dir().join("campaign");
         if !campaign_dir.is_dir() {
-            eprintln!("SKIP: no engine/missions/campaign/*.ron (scripts/gen_missions.py generates them)");
+            eprintln!(
+                "SKIP: no engine/missions/campaign/*.ron (scripts/gen_missions.py generates them)"
+            );
             return;
         }
         let stems = [
-            "geo1c_c", "myg1c_c", "spa2c_c", "fel1c_c", "spa3c_c", "kas2c_c",
-            "uta1c_c", "cor1c_c", "nab2g_c", "spa4g_c", "mus1c_c", "kam1c_c",
-            "dea1g_c", "pol1g_c", "tan1g_c", "spa1g_c", "yav1g_c", "hot1g_c",
+            "geo1c_c", "myg1c_c", "spa2c_c", "fel1c_c", "spa3c_c", "kas2c_c", "uta1c_c", "cor1c_c",
+            "nab2g_c", "spa4g_c", "mus1c_c", "kam1c_c", "dea1g_c", "pol1g_c", "tan1g_c", "spa1g_c",
+            "yav1g_c", "hot1g_c",
         ];
         for stem in stems {
             let m = MissionDef::load_campaign(missions_dir(), stem)
@@ -1411,7 +1417,10 @@ mod tests {
                 c.libs.iter().any(|(n, _)| n == "objective"),
                 "{stem} loaded no objective framework"
             );
-            assert!(!m.camera_shot_calls.is_empty(), "{stem} has no camera shots");
+            assert!(
+                !m.camera_shot_calls.is_empty(),
+                "{stem} has no camera shots"
+            );
             // BF2's alive-AI cap is the default NumBots (16), not the larger
             // SetUnitCount member pool.  kas2c_c's 33-unit CIS pool used to
             // leak into ai_alive_cap and field 33 bots at once; the menu's
@@ -1427,7 +1436,9 @@ mod tests {
 
 /// The shared campaign scripts (`engine/missions/campaign/lib/*.ron`),
 /// sorted by name so every load lists them alike.
-fn load_campaign_libs(dir: &Path) -> Result<Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>> {
+fn load_campaign_libs(
+    dir: &Path,
+) -> Result<Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>> {
     let mut out = Vec::new();
     for path in pak::read_dir(dir).unwrap_or_default() {
         if path.extension().and_then(|e| e.to_str()) != Some("ron") {

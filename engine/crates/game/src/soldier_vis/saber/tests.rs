@@ -72,7 +72,9 @@ fn jedi_native_classes_build_saber_edges() {
     let vis = SoldierVisuals::default();
     let sabers = vis.load_sabers(None, &root, &[team, unused]);
     for (i, edge) in sabers[0].iter().enumerate() {
-        let edge = edge.as_ref().unwrap_or_else(|| panic!("Jedi class {i}: no saber visual"));
+        let edge = edge
+            .as_ref()
+            .unwrap_or_else(|| panic!("Jedi class {i}: no saber visual"));
         assert!(!edge.bindings.is_empty(), "Jedi class {i}: no blade edge");
     }
 }
@@ -94,7 +96,10 @@ fn saber_visual_reads_native_team_entry() {
             },
             geometry: None,
             glow_texture: None,
-            local: core::hero_weapon::BladeSegment { start: Vec3::ZERO, end: Vec3::Y },
+            local: core::hero_weapon::BladeSegment {
+                start: Vec3::ZERO,
+                end: Vec3::Y,
+            },
         }],
         textures: vec![None],
         glows: vec![None],
@@ -113,7 +118,10 @@ fn saber_visual_reads_native_team_entry() {
         },
     );
     assert!(vis.saber_visual(2, 0).is_some(), "native team 2, class 0");
-    assert!(vis.saber_visual(1, 0).is_none(), "a normal team with no roster");
+    assert!(
+        vis.saber_visual(1, 0).is_none(),
+        "a normal team with no roster"
+    );
 }
 
 /// The heroes' classes are their own file, so the draw needs them as well as

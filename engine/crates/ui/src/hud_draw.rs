@@ -21,10 +21,10 @@ use glam::{Mat4, Vec3};
 use manifest::hud::{HudFont, HudGlyph};
 use std::collections::HashMap;
 
-#[path = "hud_text.rs"]
-mod text;
 #[path = "campaign_map.rs"]
 pub mod campaign;
+#[path = "hud_text.rs"]
+mod text;
 
 /// Frame pixels per Model3D mesh unit: 1 / (0.01 × 1.24) (`re-hud.md` §2.4
 /// [V] `FUN_0059fdb0`, DAT_0060c7b8).

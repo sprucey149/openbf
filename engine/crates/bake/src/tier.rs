@@ -802,11 +802,20 @@ mod tests {
     #[test]
     fn a_sixteen_colour_sheet_takes_same_size_lossless_pc_art() {
         let lossy = pc_with("globe", 4, 2);
-        assert!(tier2(&sixteen_colour("globe", 4, 2), Some(&lossy), Usage::default()).is_none());
+        assert!(tier2(
+            &sixteen_colour("globe", 4, 2),
+            Some(&lossy),
+            Usage::default()
+        )
+        .is_none());
         let mut lossless = pc_with("globe", 4, 2);
         lossless.lossless.insert(("globe".into(), 4, 2));
-        let got = tier2(&sixteen_colour("globe", 4, 2), Some(&lossless), Usage::default())
-            .expect("lossless same-size PC art");
+        let got = tier2(
+            &sixteen_colour("globe", 4, 2),
+            Some(&lossless),
+            Usage::default(),
+        )
+        .expect("lossless same-size PC art");
         assert_eq!((got.width, got.height, got.tier), (4, 2, Tier::Pc));
         let mut eight = sixteen_colour("globe", 4, 2);
         eight.info.bpp = 8;
@@ -839,7 +848,10 @@ mod tests {
             .filter_map(|c| Texture::parse(&c).ok())
             .find(|t| t.name.eq_ignore_ascii_case("gal_prp_naboo_hi_land"))
             .expect("naboo land");
-        assert_eq!((land.info.width, land.info.height, land.info.bpp), (512, 256, 4));
+        assert_eq!(
+            (land.info.width, land.info.height, land.info.bpp),
+            (512, 256, 4)
+        );
         let got = tier2(&land, Some(&donors), Usage::default()).expect("tier 2");
         assert_eq!((got.width, got.height, got.tier), (512, 256, Tier::Pc));
     }

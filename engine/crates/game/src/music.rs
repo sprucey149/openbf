@@ -171,7 +171,9 @@ impl BattleMusic {
             return Some(i);
         }
         let t = find(name)?;
-        self.player.musics.push(core::music::Music::new(t.def.clone()));
+        self.player
+            .musics
+            .push(core::music::Music::new(t.def.clone()));
         self.tracks.push(t);
         Some(self.tracks.len() - 1)
     }
@@ -180,7 +182,9 @@ impl BattleMusic {
     /// (state 4).
     fn script_play(&mut self) {
         let Some(i) = self.script.music else { return };
-        let Some(m) = self.player.musics.get_mut(i) else { return };
+        let Some(m) = self.player.musics.get_mut(i) else {
+            return;
+        };
         if !self.script.asked || m.phase == core::music::Phase::Stopped {
             m.wanted = true;
             self.script.asked = true;
@@ -559,7 +563,11 @@ mod tests {
                 r.step(1.48, ui::stats::Pad::default());
                 assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Stats });
                 r.step(0.02, ui::stats::Pad::default());
-                assert_eq!(r.phase, if won { Phase::Fade } else { Phase::Stats }, "7 s at most");
+                assert_eq!(
+                    r.phase,
+                    if won { Phase::Fade } else { Phase::Stats },
+                    "7 s at most"
+                );
             }
         }
         assert_eq!(m.end_music_secs(2, 0), None);

@@ -157,7 +157,11 @@ impl Animator {
     ) -> bool {
         let (primary, fallback) = class.bank_pair_of(weapon);
         let banks: [&str; 2] = [primary, fallback.unwrap_or(primary)];
-        let banks = if fallback.is_some() { &banks[..] } else { &banks[..1] };
+        let banks = if fallback.is_some() {
+            &banks[..]
+        } else {
+            &banks[..1]
+        };
         let slot = |layer: &str| {
             let clip =
                 crate::hero_blades::clip_for_banks(clips, &class.family, banks, animation, layer)?;

@@ -418,7 +418,11 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             continue;
         };
         let world = ii < scene.manifest.instances.len();
-        if world && INVISIBLE_POSTS.iter().any(|c| c.eq_ignore_ascii_case(&inst.class)) {
+        if world
+            && INVISIBLE_POSTS
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(&inst.class))
+        {
             *skipped.entry(inst.class.clone()).or_default() += 1;
             continue;
         }

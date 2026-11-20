@@ -426,14 +426,9 @@ impl Commander {
         self.was_leaving = now;
         // Crossing the line again and again queues it once: the queue does not
         // read the line's `PlayInterval`, which keeps the PS2's from repeating.
-        let name = self
-            .leaving_line
-            .as_deref()
-            .filter(|n| {
-                started
-                    && !self.queue.waiting(n)
-                    && !self.stream_queues.values().any(|q| q.waiting(n))
-            })?;
+        let name = self.leaving_line.as_deref().filter(|n| {
+            started && !self.queue.waiting(n) && !self.stream_queues.values().any(|q| q.waiting(n))
+        })?;
         let line = Line::commander(name);
         self.queue.ask(line.clone());
         Some(line)
@@ -1256,7 +1251,12 @@ mod tests {
     fn a_script_that_mutes_the_posts_hears_no_post_line() {
         let mut lines = PostLines::default();
         let imp = core::announcer::faction_index("imp").unwrap();
-        lines.set(imp, imp, PostEvent::Capture, "imp_off_com_report_captured_commandpost");
+        lines.set(
+            imp,
+            imp,
+            PostEvent::Capture,
+            "imp_off_com_report_captured_commandpost",
+        );
         let mut c = Commander::new(
             BattleLines::default(),
             ["imp", "all"],

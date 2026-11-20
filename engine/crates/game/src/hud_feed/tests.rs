@@ -40,15 +40,27 @@ fn tutorial_followup_campaign_map_renders() {
         view.set_icons(icons);
         view.hud.map = Some(crate::minimap::still(&scene, glam::Vec3::ZERO, 0.0));
         let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep"]).unwrap();
-        let unit_sheet = db.prop("rep_inf_ep2_rifleman", "MapTexture").unwrap().to_owned();
+        let unit_sheet = db
+            .prop("rep_inf_ep2_rifleman", "MapTexture")
+            .unwrap()
+            .to_owned();
         let map = view.hud.map.as_mut().unwrap();
-        map.units.push(ui::hud_map::MapIcon { pos: map.centre, texture: unit_sheet.clone(), scale: 2.0,
-            color: ui::hud_map::FRIEND, ..Default::default() });
+        map.units.push(ui::hud_map::MapIcon {
+            pos: map.centre,
+            texture: unit_sheet.clone(),
+            scale: 2.0,
+            color: ui::hud_map::FRIEND,
+            ..Default::default()
+        });
         // The production feed registers this map-specific texture directory.
-        view.texture_dirs.insert(0, map.sheet_dir.as_ref().unwrap().clone());
+        view.texture_dirs
+            .insert(0, map.sheet_dir.as_ref().unwrap().clone());
         let frame = ui::hud_draw::campaign::draw(&view.hud, &view.art, &page, [1280.0, 720.0]);
         view.install_frame(frame);
-        assert!(view.drawn_sheets().any(|s| s == unit_sheet), "large map lost its live units");
+        assert!(
+            view.drawn_sheets().any(|s| s == unit_sheet),
+            "large map lost its live units"
+        );
         assert!(
             view.drawn_sheets().any(|s| s.contains("geo1_map")),
             "missing large map"

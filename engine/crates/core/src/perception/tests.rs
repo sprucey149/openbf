@@ -1314,7 +1314,7 @@ fn a_far_hit_from_an_unseen_shooter_waits_out_the_search() {
 
 #[test]
 fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
-    use crate::collision::{HullFilter, Shape};
+    use crate::collision::Shape;
     use crate::goals::{GoalKind, GoalTarget};
     use crate::hero_weapon::{Blade, BladeSegment, SaberClass, SaberClip};
     use crate::sim::{Station, StationClass};
@@ -1397,11 +1397,7 @@ fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
             vec![
                 f(K::AttackId, vec![V::Text("slash".into())], vec![]),
                 f(K::Edge, vec![V::Number(0.0)], vec![]),
-                f(
-                    K::DamageTime,
-                    vec![V::Number(0.0), V::Number(0.5)],
-                    vec![],
-                ),
+                f(K::DamageTime, vec![V::Number(0.0), V::Number(0.5)], vec![]),
             ],
         ),
     ];
@@ -1480,30 +1476,39 @@ fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
     }
     assert!(
         sim.stations[0].health.cur < before_saber,
-        "saber bot with Destroy goal must swing and damage LibCase ({before_saber} -> {}, pos {:?})",
+        "saber bot with Destroy goal {goal_id} must swing and damage LibCase ({before_saber} -> {}, pos {:?})",
         sim.stations[0].health.cur,
         sim.unit(jedi).unwrap().soldier.pos
     );
-    let _ = (goal_id, HullFilter::All);
 }
-
 
 /// `FUN_002e43c8`: an AI enemy whose sight ray reaches the bot gives the bot
 /// a sighting of it, whichever way the bot faces; a human seer, or one that
 /// has not looked since the bot's last think, gives none.
 #[test]
 fn being_seen_by_an_ai_enemy_is_a_sighting_of_it() {
-    for (ai, looked, held) in [(true, true, true), (false, true, false), (true, false, false)] {
+    for (ai, looked, held) in [
+        (true, true, true),
+        (false, true, false),
+        (true, false, false),
+    ] {
         let (mut s, a) = watcher(5);
         let e = s
             .spawn(&UnitSpec {
-                controller: if ai { Controller::Ai } else { Controller::Player { slot: 0 } },
+                controller: if ai {
+                    Controller::Ai
+                } else {
+                    Controller::Player { slot: 0 }
+                },
                 ..UnitSpec::trooper(1, Vec3::new(0.0, 0.0, 15.0))
             })
             .unwrap();
         let mut seer = AiState::default();
         scan(&s, e, &mut seer, normal());
-        assert!(contact_of(&seer, a).is_some_and(|c| c.seen_now), "the seer sees the bot");
+        assert!(
+            contact_of(&seer, a).is_some_and(|c| c.seen_now),
+            "the seer sees the bot"
+        );
         s.units[e.index as usize].ai = seer;
         if !looked {
             s.tick += THINK_PERIOD;

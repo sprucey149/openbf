@@ -4,7 +4,7 @@
 //! the profile picker's keyboard (`ifs_campaign_load` main.f32 pc 129-173
 //! pushes `ifs_vkeyboard`).
 
-use super::profiles::FrameInput;
+use super::profiles::{step_name_keyboard, FrameInput, NameKeyAction, NameKeys};
 use super::{App, FrontShell};
 use ui::{
     shell_feel::MenuSound,
@@ -54,7 +54,14 @@ fn local_time(secs: u64) -> [u32; 6] {
             out: *mut SystemTime,
         ) -> i32;
     }
-    let ticks = (secs + 11_644_473_600) * 10_000_000;
+    // A corrupt save's timestamp must not overflow the 100 ns tick count:
+    // fall back to the UTC civil date when it cannot be represented.
+    let Some(ticks) = secs
+        .checked_add(11_644_473_600)
+        .and_then(|secs| secs.checked_mul(10_000_000))
+    else {
+        return utc_time(secs);
+    };
     let (mut utc, mut local) = (SystemTime::default(), SystemTime::default());
     let ok = unsafe {
         FileTimeToSystemTime(&ticks, &mut utc) != 0
@@ -209,92 +216,29 @@ impl App {
 
     /// One frame of the save name keyboard (the profile picker's name page).
     pub(super) fn step_save_name(&mut self, front: &mut FrontShell, frame: FrameInput) {
-        let FrameInput {
-            menu,
-            start,
-            edges,
-            dt,
-            pointer,
-            ..
-        } = frame;
-        front.menus.tick(dt);
         let Some(pick) = front.save_name.as_mut() else {
             return;
         };
-        pick.advance(dt);
-        let typed = std::mem::take(&mut front.name_input);
-        if typed.backspaces != 0 || edges & game::kbm::MENU_SQUARE != 0 {
-            for _ in 0..typed.backspaces.max(1) {
-                pick.backspace();
-            }
-            front.menus.cues.play(MenuSound::Backspace);
-        }
-        if !typed.text.is_empty() {
-            pick.type_name(&typed.text, NAME_LIMIT);
-            front.menus.cues.play(MenuSound::Key);
-        }
-        if edges & game::kbm::MENU_EAST != 0 {
-            pick.toggle_symbols();
-            front.menus.cues.play(MenuSound::Key);
-            return;
-        }
-        if menu.back {
-            front.save_name = None;
-            front.menus.campaign_save_name_cancelled();
-            front.menus.cues.play(MenuSound::Exit);
-            return;
-        }
-        let old = pick.focus;
-        let x = isize::from(menu.right) - isize::from(menu.left)
-            + isize::from(edges & game::kbm::MENU_R1 != 0)
-            - isize::from(edges & game::kbm::MENU_L1 != 0);
-        let y = isize::from(menu.down) - isize::from(menu.up);
-        if x != 0 || y != 0 {
-            pick.move_focus(x, y);
-        }
-        let mut action = if start {
-            Some(Target::Accept)
-        } else if menu.confirm {
-            Some(pick.focus)
-        } else {
-            None
-        };
-        if let (Some((point, click)), Some(renderer)) = (pointer, self.renderer.as_ref()) {
-            let (w, h) = renderer.size();
-            if let Some(target) = pick.target(point, [w as f32, h as f32]) {
-                if target != Target::Symbols {
-                    pick.point_focus(target);
-                }
-                if click {
-                    action = Some(target);
-                }
-            }
-        }
-        if pick.focus != old {
-            front.menus.cues.play(MenuSound::Select);
-        }
-        match action {
-            Some(Target::Key(i)) => {
-                if let Some(c) = pick.keys().as_bytes().get(i) {
-                    let mut key = [0; 1];
-                    pick.type_name(char::from(*c).encode_utf8(&mut key), NAME_LIMIT);
-                }
-                front.menus.cues.play(MenuSound::Key);
-            }
-            Some(Target::Symbols) => {
-                pick.toggle_symbols();
-                front.menus.cues.play(MenuSound::Key);
-            }
-            Some(Target::Backspace) => {
-                pick.backspace();
-                front.menus.cues.play(MenuSound::Backspace);
-            }
-            Some(Target::Cancel) => {
+        match step_name_keyboard(
+            &mut front.menus,
+            &mut front.name_input,
+            pick,
+            NameKeys {
+                frame: &frame,
+                name_limit: NAME_LIMIT,
+                renderer: self.renderer.as_ref(),
+                list: false,
+            },
+        ) {
+            // The shared helper already applied the symbols toggle and the
+            // key / symbols / backspace targets with this screen's cues.
+            NameKeyAction::None | NameKeyAction::Symbols => {}
+            NameKeyAction::Cancel => {
                 front.save_name = None;
                 front.menus.campaign_save_name_cancelled();
                 front.menus.cues.play(MenuSound::Exit);
             }
-            Some(Target::Accept) => {
+            NameKeyAction::Target(Target::Accept) => {
                 let Page::Name { text, .. } = &pick.page else {
                     return;
                 };
@@ -310,7 +254,7 @@ impl App {
                     self.campaign_save_command(front, cmd);
                 }
             }
-            _ => {}
+            NameKeyAction::Target(_) => {}
         }
     }
 }

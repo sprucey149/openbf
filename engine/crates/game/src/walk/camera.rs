@@ -124,8 +124,13 @@ impl WalkSim {
         let mut f = if self.camera_blockers.is_empty() {
             1.0
         } else {
-            self.camera_blockers
-                .fraction(from, to, None, |i| self.live_instance_pose(i), &self.sim.doors)
+            self.camera_blockers.fraction(
+                from,
+                to,
+                None,
+                |i| self.live_instance_pose(i),
+                &self.sim.doors,
+            )
         };
         let track = to - from;
         let len = track.length();
@@ -408,8 +413,18 @@ impl WalkSim {
                 .and_then(|c| c.end_movie())
                 .filter(|_| winner == 0 || winner == core::sim::OUTCOME_DRAW)
                 .map(str::to_owned);
-            let end = RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs, movie);
-            if show_stats { end } else { end.without_stats() }
+            let end = RoundEnd::start(
+                result,
+                &self.end_shots,
+                self.sim.tick as u32,
+                music_secs,
+                movie,
+            );
+            if show_stats {
+                end
+            } else {
+                end.without_stats()
+            }
         });
         let sound = r.step(dt, pad);
         (r.done(), sound)

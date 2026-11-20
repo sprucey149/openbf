@@ -1107,7 +1107,10 @@ mod tests {
         let own = walk.sim.units[walk.player.index as usize].team;
         let native = walk
             .sim
-            .spawn(&core::unit::UnitSpec::trooper(own, Vec3::new(1.0, 0.0, -2.0)))
+            .spawn(&core::unit::UnitSpec::trooper(
+                own,
+                Vec3::new(1.0, 0.0, -2.0),
+            ))
             .unwrap();
         walk.sim.units[native.index as usize].team = 2;
         let map = MapStatic {

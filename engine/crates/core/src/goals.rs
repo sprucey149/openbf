@@ -1141,6 +1141,8 @@ fn search(sim: &Sim, hold: &mut DefendHold, target: Vec3, dt: u64) {
 /// `FUN_002a62e0` over `FUN_002ade38`: hint `k` is taken while any unit's
 /// last stamp on it, the asking unit's own included, is under [`HINT_KEEP`]
 /// old. OURS: a commander defender's spot on it also holds it.
+/// replace: measure how long the PS2 keeps a hint reserved after its holder
+/// stops stamping it, then drop the defender hold if it is not needed.
 fn taken(sim: &Sim, k: u32, at: Vec3) -> bool {
     let tick = sim.tick;
     sim.ai_goals

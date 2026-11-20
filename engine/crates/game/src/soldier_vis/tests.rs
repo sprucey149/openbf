@@ -1347,7 +1347,10 @@ fn felucia_water_effects_skip_the_old_pose_after_a_hero_class_change() {
 
     let soldier = vis.asset_index(0, 0).unwrap();
     let hero = &vis.asset_for(0, 1).unwrap().asset.skeleton;
-    assert_eq!(hero.parents[hero.index_of("bone_a_spine").unwrap()], Some(29));
+    assert_eq!(
+        hero.parents[hero.index_of("bone_a_spine").unwrap()],
+        Some(29)
+    );
     let asset = &vis.assets[soldier];
     assert_eq!(asset.asset.skeleton.len(), 25);
     let rig = asset.rig.as_ref().unwrap();

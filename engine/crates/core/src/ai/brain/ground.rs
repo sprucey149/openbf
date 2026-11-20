@@ -497,12 +497,15 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         intent.step.after_aim(melee_goal)
     };
     st.step = step;
-    let station_stand = frame.station.zip(after_aim.gun.range).is_some_and(|((s, _), r)| {
-        wc.saber.is_none()
-            && !st.arm.spare
-            && after_aim.gun.line.is_none()
-            && r - s.sphere_radius <= wc.shot_range().fmin(wc.ai_range[2]).fmin(HOLD_RANGE)
-    });
+    let station_stand = frame
+        .station
+        .zip(after_aim.gun.range)
+        .is_some_and(|((s, _), r)| {
+            wc.saber.is_none()
+                && !st.arm.spare
+                && after_aim.gun.line.is_none()
+                && r - s.sphere_radius <= wc.shot_range().fmin(wc.ai_range[2]).fmin(HOLD_RANGE)
+        });
     let mut mv = MoveRequest {
         kind: step.move_kind() as u8,
         goal,

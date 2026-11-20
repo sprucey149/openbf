@@ -322,7 +322,8 @@ impl Sim {
                 let team = s.team;
                 self.events.push(Event::HitLanded { shooter, team });
             }
-            self.events.push(Event::StationDamaged { station, attacker });
+            self.events
+                .push(Event::StationDamaged { station, attacker });
         }
         self.space_station_damaged(station);
         if alive || self.stations[usize::from(station)].destroyed {
@@ -482,9 +483,10 @@ impl Sim {
             if s.destroyed {
                 continue;
             }
-            let in_group = self.space_assault.as_ref().is_some_and(|sa| {
-                sa.shields.iter().any(|g| g.objects.contains(&(si as u16)))
-            });
+            let in_group = self
+                .space_assault
+                .as_ref()
+                .is_some_and(|sa| sa.shields.iter().any(|g| g.objects.contains(&(si as u16))));
             if !in_group
                 && s.add_shield > 0.0
                 && s.health.shield_max > 0.0

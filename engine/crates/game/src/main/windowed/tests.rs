@@ -1114,12 +1114,9 @@ fn campaign_relaunch_preserves_class_whitelist_and_side_rules() {
         .as_ref()
         .map(|m| m.layers.as_slice())
         .unwrap_or(&[]);
-    let (scene, _) = game::assets::load_battle_scene_with_layers(
-        &assets.join(entry.map),
-        "campaign",
-        layers,
-    )
-    .expect("geonosis scene loads");
+    let (scene, _) =
+        game::assets::load_battle_scene_with_layers(&assets.join(entry.map), "campaign", layers)
+            .expect("geonosis scene loads");
     for run in 0..2 {
         let setup = super::super::round_setup::campaign_setup(
             missions,

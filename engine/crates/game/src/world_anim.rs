@@ -193,9 +193,8 @@ fn evaluate(a: &WorldAnim, time: &mut f32, cur_pos: &mut Vec3, dt: f32, base: Ma
     }
     let new_pos = sample(a, &a.pos, *time).unwrap_or(Vec3::ZERO);
     let dp = new_pos - prev_pos;
-    *cur_pos += out.x_axis.truncate() * dp.x
-        + out.y_axis.truncate() * dp.y
-        + out.z_axis.truncate() * dp.z;
+    *cur_pos +=
+        out.x_axis.truncate() * dp.x + out.y_axis.truncate() * dp.y + out.z_axis.truncate() * dp.z;
     out.w_axis = cur_pos.extend(1.0);
     out
 }
@@ -492,5 +491,52 @@ impl WorldAnimPlayer {
             .filter(|g| g.name == group)
             .flat_map(|g| g.entries.iter().map(|e| e.station))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use manifest::world_anim::{WorldAnim, WorldAnimKey};
+
+    fn anim(looping: bool, duration: f32) -> WorldAnim {
+        WorldAnim {
+            world: "w".into(),
+            name: "a".into(),
+            duration,
+            looping,
+            local: false,
+            pos: Vec::new(),
+            rot: Vec::new(),
+        }
+    }
+
+    fn key(time: f32, value: [f32; 3], interp: u8) -> WorldAnimKey {
+        WorldAnimKey {
+            time,
+            value,
+            interp,
+            tangent_out: [0.0; 3],
+            tangent_in: [0.0; 3],
+        }
+    }
+
+    #[test]
+    fn a_non_looping_animation_brackets_and_samples_between_its_keys() {
+        let a = anim(false, 2.0);
+        let keys = [key(0.0, [0.0; 3], 1), key(2.0, [2.0, 4.0, 6.0], 1)];
+        let (k0, k1) = bracket(&a, &keys, 1.0).expect("a bracket");
+        assert_eq!(k0.time, 0.0);
+        assert_eq!(k1.time, 2.0);
+        assert_eq!(sample(&a, &keys, 1.0), Some(Vec3::new(1.0, 2.0, 3.0)));
+    }
+
+    #[test]
+    fn a_non_looping_animation_holds_its_last_key_past_the_duration() {
+        let a = anim(false, 1.0);
+        let keys = [key(0.0, [0.0; 3], 1), key(1.0, [3.0, 0.0, 0.0], 1)];
+        let (k0, k1) = bracket(&a, &keys, 5.0).expect("a bracket");
+        assert_eq!(k0.time, 1.0);
+        assert_eq!(k1.time, 1.0);
     }
 }

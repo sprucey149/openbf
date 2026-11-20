@@ -232,11 +232,15 @@ pub(super) fn campaign_layers_for(
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) != Some("ron") {
-            continue;
-        }
+    // The campaign directory is generated local data; its `read_dir` order is
+    // filesystem-dependent, so sort before picking a mission for a map.
+    let mut files: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("ron"))
+        .collect();
+    files.sort();
+    for p in files {
         let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
@@ -471,14 +475,8 @@ mod tests {
             return;
         }
         let entry = &ui::campaign::RISE_OF_THE_EMPIRE[0];
-        let setup = campaign_setup(
-            missions,
-            assets,
-            entry,
-            42,
-            core::skill::Difficulty::Normal,
-        )
-        .expect("campaign setup for Geonosis");
+        let setup = campaign_setup(missions, assets, entry, 42, core::skill::Difficulty::Normal)
+            .expect("campaign setup for Geonosis");
         assert_eq!(setup.player_team, 0);
         assert_eq!(setup.team_size_pct, None);
         assert_eq!(setup.mission_file.as_deref(), Some("bf2_geo1c_c.ron"));
@@ -498,9 +496,12 @@ mod tests {
         let assets = Path::new("../../assets_baked");
         let entry = &ui::campaign::RISE_OF_THE_EMPIRE[1];
         let layers = campaign_layers_for(missions, entry.map, "campaign", Some(entry.script));
-        let (scene, _) =
-            game::assets::load_battle_scene_with_layers(&assets.join(entry.map), "campaign", &layers)
-                .expect("myg1 scene");
+        let (scene, _) = game::assets::load_battle_scene_with_layers(
+            &assets.join(entry.map),
+            "campaign",
+            &layers,
+        )
+        .expect("myg1 scene");
         let setup = campaign_setup(missions, assets, entry, 42, core::skill::Difficulty::Normal)
             .expect("myg1c setup");
         let mut walk = super::super::battle::make_walk(&scene, &setup).expect("walk");
@@ -516,7 +517,11 @@ mod tests {
         for tick in 0..(60 * core::TICK_HZ as u64) {
             let alive = walk.sim.unit(walk.player).is_some_and(|u| u.alive);
             let pad = PadState {
-                buttons: if alive || tick % 15 > 7 { 0 } else { buttons::SPAWN_ACCEPT },
+                buttons: if alive || tick % 15 > 7 {
+                    0
+                } else {
+                    buttons::SPAWN_ACCEPT
+                },
                 ly: if alive { PadState::quantize(1.0) } else { 0 },
                 ..PadState::default()
             };
@@ -548,9 +553,11 @@ mod tests {
                 eprintln!("tick {tick}: {ms:.0} ms, human at {p:?}");
             }
         }
-        eprintln!("spawned at {spawned_at:?}, worst tick {:.1} ms at {}", worst.0, worst.1);
+        eprintln!(
+            "spawned at {spawned_at:?}, worst tick {:.1} ms at {}",
+            worst.0, worst.1
+        );
         assert!(spawned_at.is_some(), "the human never spawned");
         assert!(worst.0 < 500.0, "a {:.0} ms tick at {}", worst.0, worst.1);
     }
-
 }

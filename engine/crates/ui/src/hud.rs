@@ -1739,7 +1739,10 @@ mod campaign_hud_tests {
             ..Default::default()
         };
         feed(&mut hud, &m, &|_| false);
-        assert_eq!(hud.last("objectivePopup"), Some(&EventValue::Text("Go".into())));
+        assert_eq!(
+            hud.last("objectivePopup"),
+            Some(&EventValue::Text("Go".into()))
+        );
         m.popup = None;
         feed(&mut hud, &m, &|_| false);
         assert_eq!(hud.last("objectivePopup"), None);

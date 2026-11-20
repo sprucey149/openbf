@@ -1007,7 +1007,7 @@ fn nearest_hint<'a>(
 /// no deeper than the AI's own ledge rule ([`crate::ai::LEDGE_DROP`], card
 /// STLVL: BF2 DEA1's cp2 at 52 m has a hint 6 m under its gallery, and its
 /// defenders stood on the rim over it until they were recycled).
-pub(crate) fn hint_on_level(sim: &Sim, centre_y: f32, hint: Vec3) -> bool {
+fn hint_on_level(sim: &Sim, centre_y: f32, hint: Vec3) -> bool {
     let own = sim.ground_under(hint, false);
     let from_centre = sim.ground_under(Vec3::new(hint.x, centre_y, hint.z), false);
     (own - from_centre).abs() <= STEP_HEIGHT && own >= centre_y - crate::ai::LEDGE_DROP

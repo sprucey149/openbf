@@ -47,7 +47,10 @@ impl<'a> Frame<'a> {
         let droid = seen.and_then(|c| Some((sim.live_droid(c.handle.droid()?)?, fireable(&c))));
         let turret = seen.and_then(|c| Some((sim.live_turret(c.handle.turret()?)?, fireable(&c))));
         let station = seen.and_then(|c| {
-            let s = sim.stations.get(usize::from(c.handle.station()?)).filter(|s| !s.destroyed)?;
+            let s = sim
+                .stations
+                .get(usize::from(c.handle.station()?))
+                .filter(|s| !s.destroyed)?;
             Some((s, fireable(&c)))
         });
         Self {

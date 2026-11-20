@@ -1474,8 +1474,12 @@ impl EventFeed {
     }
 
     fn health_shield_bar(h: &core::weapon::Health) -> Option<(String, f32)> {
-        (h.shield_max > 0.0 && h.shield > 0.0001)
-            .then(|| ("Shield".to_owned(), (h.shield / h.shield_max).clamp(0.0, 1.0)))
+        (h.shield_max > 0.0 && h.shield > 0.0001).then(|| {
+            (
+                "Shield".to_owned(),
+                (h.shield / h.shield_max).clamp(0.0, 1.0),
+            )
+        })
     }
 
     fn station_hud(&self, sim: &Sim, i: u16, relation: i8) -> Option<HudTarget> {

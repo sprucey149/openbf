@@ -278,8 +278,11 @@ impl FlagVisuals {
                 if d2 >= far || def.intensity <= 0.0 {
                     return None;
                 }
-                let alpha = f32::from(def.color[3]) * core::fmath::FloatExt::fmin(def.intensity, 1.0);
-                let alpha = core::fmath::FloatExt::fmin(alpha * if self.hdr { 2.0 } else { 1.0 }, 255.0) as u8;
+                let alpha =
+                    f32::from(def.color[3]) * core::fmath::FloatExt::fmin(def.intensity, 1.0);
+                let alpha =
+                    core::fmath::FloatExt::fmin(alpha * if self.hdr { 2.0 } else { 1.0 }, 255.0)
+                        as u8;
                 let fade = if d2 > far * 0.80999994 {
                     (1.0 - d2 / far) * 5.2631564
                 } else {
@@ -687,10 +690,7 @@ mod tests {
             .get("mus_flag_bomb")
             .expect("mus_flag_bomb class loaded");
         assert!(!loose.is_empty(), "mus1_icon_bomb loose parts loaded");
-        assert!(
-            !carried.is_empty(),
-            "mus_icon_bomb_carried parts loaded"
-        );
+        assert!(!carried.is_empty(), "mus_icon_bomb_carried parts loaded");
         let missions = root.parent().unwrap().join("missions");
         let mission = crate::mission::MissionDef::load_campaign(&missions, "mus1c_c").unwrap();
         let layout = crate::layout::MapLayout::from_manifest(&scene.manifest);

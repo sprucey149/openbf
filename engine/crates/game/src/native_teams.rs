@@ -105,8 +105,9 @@ pub fn install(
                 .collect::<anyhow::Result<Vec<_>>>()?;
             let map_dir = assets_dir.join(&mission.map);
             let has_droideka = classes.iter().any(|c| c.droideka.is_some());
-            let droideka_bakes = has_droideka
-                .then(|| crate::droideka::bakes(&map_dir, &mission.source_game.to_ascii_lowercase()));
+            let droideka_bakes = has_droideka.then(|| {
+                crate::droideka::bakes(&map_dir, &mission.source_game.to_ascii_lowercase())
+            });
             anyhow::ensure!(
                 classes.iter().all(|class| {
                     if class.droideka.is_some() {

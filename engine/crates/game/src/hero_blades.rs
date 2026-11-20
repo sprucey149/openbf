@@ -421,7 +421,11 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
         .to_ascii_lowercase();
     let bank = words[0].split_once('_').map_or(words[0], |(_, b)| b);
     let mut banks = vec![bank];
-    if let Some(parent) = words.get(1).copied().filter(|w| !w.eq_ignore_ascii_case("none")) {
+    if let Some(parent) = words
+        .get(1)
+        .copied()
+        .filter(|w| !w.eq_ignore_ascii_case("none"))
+    {
         let parent = parent.split_once('_').map_or(parent, |(_, b)| b);
         if !parent.eq_ignore_ascii_case(bank) {
             banks.push(parent);

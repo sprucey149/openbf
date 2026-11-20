@@ -43,12 +43,11 @@ use super::{Page, RowId, ShellCommand, ShellMenus, Stack, StackRow, BAR_PAD, ROW
 use crate::hud_draw::{Ctx, Screen};
 use crate::hud_tree::HAlign;
 use crate::input_icons::Prompt;
-use crate::shell_ps2::FlashyRow;
-use crate::spawn_draw::{item_pieces, screen_at, Anchor};
-use crate::typography::{tint, BODY};
-use manifest::hud::HudFont;
 use crate::menu::MenuInput;
 use crate::shell_feel::MenuSound;
+use crate::spawn_draw::{screen_at, Anchor};
+use crate::typography::{tint, BODY};
+use manifest::hud::HudFont;
 
 /// `iMaxSaves`: FUN_0018a300 returns 32.0 beside the list.
 pub const MAX_SAVES: usize = 32;
@@ -893,20 +892,7 @@ impl Ctx<'_> {
             let pulse = m.pulse.alpha();
             let n = s.stack.rows.len();
             for (k, (row, r)) in s.stack.rows.iter().zip(&p.buttons).enumerate() {
-                let grey = ([super::UNFOCUSED_BAR; 3], tint::UNSELECTED.1);
-                let (bar, style) = if k == s.stack.focus {
-                    (([255.0; 3], pulse), (tint::SELECTED.0, pulse))
-                } else {
-                    (grey, tint::UNSELECTED)
-                };
-                let row = FlashyRow {
-                    rect: *r,
-                    pieces: item_pieces(k + 1 == n),
-                    bar,
-                    text: &row.label,
-                    style,
-                    font: &BODY,
-                };
+                let row = Ctx::flashy_row_from_stack(row, *r, k, n, s.stack.focus, pulse, &BODY);
                 self.flashy_row(&centre, &row, m.on_page - ROW_REVEAL * (k + 1) as f32);
             }
         }
@@ -935,7 +921,14 @@ impl Ctx<'_> {
         let s = &m.campaign_saves;
         self.window_box(c, LIST_WINDOW, Some(s.title()));
         if let Some(none) = s.no_games() {
-            self.text(c, &BODY, none, (MID[0], MID[1]), HAlign::Center, tint::UNSELECTED);
+            self.text(
+                c,
+                &BODY,
+                none,
+                (MID[0], MID[1]),
+                HAlign::Center,
+                tint::UNSELECTED,
+            );
         }
         let count = s.row_count();
         let shown = count.min(LIST_SHOWN);
@@ -993,10 +986,7 @@ mod tests {
 
     fn menus(names: &[&str]) -> ShellMenus {
         let mut m = ShellMenus::new(&|_, english| english.into());
-        m.set_campaign_saves(
-            names.iter().map(|n| (*n).to_owned()).collect(),
-            Vec::new(),
-        );
+        m.set_campaign_saves(names.iter().map(|n| (*n).to_owned()).collect(), Vec::new());
         m
     }
 
@@ -1111,7 +1101,10 @@ mod tests {
         let rows = &m.stack().unwrap().rows;
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].enabled);
-        assert_eq!(m.campaign_saves.no_games(), Some("No Saved Games Available"));
+        assert_eq!(
+            m.campaign_saves.no_games(),
+            Some("No Saved Games Available")
+        );
         assert_eq!(m.movie(), super::super::MOVIE_SUB);
         assert_eq!(press(&mut m, |i| i.confirm = true), None);
         assert_eq!(m.page, Page::RiseNewLoad);
@@ -1224,11 +1217,24 @@ mod tests {
             let [fx0, fy0, fx1, fy1] = p.frame;
             assert!(!p.buttons.is_empty());
             for [x0, y0, x1, y1] in &p.buttons {
-                assert!(*x0 > fx0 && *x1 < fx1, "{step:?} {:?} {:?}", p.frame, p.buttons);
-                assert!(*y0 > fy0 && *y1 < fy1, "{step:?} {:?} {:?}", p.frame, p.buttons);
+                assert!(
+                    *x0 > fx0 && *x1 < fx1,
+                    "{step:?} {:?} {:?}",
+                    p.frame,
+                    p.buttons
+                );
+                assert!(
+                    *y0 > fy0 && *y1 < fy1,
+                    "{step:?} {:?} {:?}",
+                    p.frame,
+                    p.buttons
+                );
             }
             let text_bottom = p.text_top + p.lines.len() as f32 * BODY.line;
-            assert!(p.text_top > fy0 && text_bottom < p.buttons[0][1], "{step:?}");
+            assert!(
+                p.text_top > fy0 && text_bottom < p.buttons[0][1],
+                "{step:?}"
+            );
             let focus = m.campaign_saves.stack.focus;
             let point = window_point(p.buttons[focus]);
             assert_eq!(row_at(&font, &m, point, [1280.0, 960.0]), Some(focus));
@@ -1262,7 +1268,10 @@ mod tests {
         let s = &m.campaign_saves;
         assert_eq!(s.stack.rows[s.stack.focus].id, RowId::SaveSlot(10));
         m.open_campaign_saves(SaveMode::Save, SaveReturn::Menu, false);
-        assert_eq!(m.campaign_saves.row(0), Some(("< Save as New >", "", false)));
+        assert_eq!(
+            m.campaign_saves.row(0),
+            Some(("< Save as New >", "", false))
+        );
         let font = small_font();
         let point = window_point(CampaignSaves::list_row(1));
         assert_eq!(row_at(&font, &m, point, [1280.0, 960.0]), Some(1));

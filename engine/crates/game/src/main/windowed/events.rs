@@ -10,6 +10,16 @@ use super::{
 };
 use core::fmath::FloatExt;
 
+// The six low menu-edge bits (`game::kbm::menu_key` / `menu_bits`): D-pad and
+// arrows, Cross, Back and Start. `game::kbm` names the higher shoulder / face
+// bits (MENU_L1, MENU_SQUARE, MENU_DETAILS, ...) but not these, so event
+// dispatch names them here instead of repeating magic numbers.
+const MENU_UP: u32 = 1;
+const MENU_DOWN: u32 = 2;
+const MENU_CONFIRM: u32 = 16;
+const MENU_BACK: u32 = 32;
+const MENU_START: u32 = 64;
+
 /// The in-battle scoreboard of `walk` (LAN §5b, `game::round_stats::scoreboard`):
 /// a LAN round names its humans by their session names and gives them a
 /// ping; single player has no Ping column.
@@ -441,29 +451,60 @@ impl winit::application::ApplicationHandler for App {
                 } else {
                     0
                 };
-                let campaign_browser = self.netplay.is_none() && self.walk.as_ref().is_some_and(|(w, _)|
-                    w.campaign.is_some() && w.sim.outcome.is_none() && w.sim.units[w.player.index as usize].alive);
-                if !campaign_browser { self.campaign_map = None; }
+                let campaign_browser = self.netplay.is_none()
+                    && self.walk.as_ref().is_some_and(|(w, _)| {
+                        w.campaign.is_some()
+                            && w.sim.outcome.is_none()
+                            && w.sim.units[w.player.index as usize].alive
+                    });
+                if !campaign_browser {
+                    self.campaign_map = None;
+                }
                 if campaign_browser && !self.paused {
-                    let popup = self.walk.as_ref().and_then(|(w, _)| w.campaign.as_ref()).is_some_and(|c| c.popup().is_some());
-                    if self.campaign_map.is_some() && edges & (game::kbm::MENU_MAP | 64 | 32) != 0 {
+                    let popup = self
+                        .walk
+                        .as_ref()
+                        .and_then(|(w, _)| w.campaign.as_ref())
+                        .is_some_and(|c| c.popup().is_some());
+                    let close = game::kbm::MENU_MAP | MENU_START | MENU_BACK;
+                    if self.campaign_map.is_some() && edges & close != 0 {
                         self.campaign_map = None;
-                        if popup { self.walk.as_mut().unwrap().0.campaign.as_mut().unwrap().close_popup(); }
+                        if popup {
+                            if let Some(c) =
+                                self.walk.as_mut().and_then(|(w, _)| w.campaign.as_mut())
+                            {
+                                c.close_popup();
+                            }
+                        }
                         self.kbm.clear_look();
-                        edges &= !(game::kbm::MENU_MAP | 64 | 32);
+                        edges &= !close;
                     } else if !popup && edges & game::kbm::MENU_MAP != 0 {
-                        let c = self.walk.as_ref().unwrap().0.campaign.as_ref().unwrap();
-                        self.campaign_map = Some(c.objectives().iter().rposition(|o| o.state == 2).unwrap_or(0));
-                        self.kbm.clear_look();
+                        if let Some(c) = self.walk.as_ref().and_then(|(w, _)| w.campaign.as_ref()) {
+                            self.campaign_map = Some(
+                                c.objectives()
+                                    .iter()
+                                    .rposition(|o| o.state == 2)
+                                    .unwrap_or(0),
+                            );
+                            self.kbm.clear_look();
+                        }
                     } else if !popup {
-                        if let Some(selected) = self.campaign_map.as_mut() {
-                            let c = self.walk.as_mut().unwrap().0.campaign.as_mut().unwrap();
-                            if edges & 1 != 0 { *selected = selected.saturating_sub(1); }
-                            if edges & 2 != 0 { *selected = (*selected + 1).min(c.objectives().len().saturating_sub(1)); }
-                            if edges & (16 | game::kbm::MENU_DETAILS) != 0 {
+                        if let (Some(selected), Some(c)) = (
+                            self.campaign_map.as_mut(),
+                            self.walk.as_mut().and_then(|(w, _)| w.campaign.as_mut()),
+                        ) {
+                            if edges & MENU_UP != 0 {
+                                *selected = selected.saturating_sub(1);
+                            }
+                            if edges & MENU_DOWN != 0 {
+                                *selected =
+                                    (*selected + 1).min(c.objectives().len().saturating_sub(1));
+                            }
+                            if edges & (MENU_CONFIRM | game::kbm::MENU_DETAILS) != 0 {
                                 c.show_details(*selected);
-                                edges &= !(16 | game::kbm::MENU_DETAILS);
-                            } else if edges & (game::kbm::MENU_SQUARE | game::kbm::MENU_HINTS) != 0 {
+                                edges &= !(MENU_CONFIRM | game::kbm::MENU_DETAILS);
+                            } else if edges & (game::kbm::MENU_SQUARE | game::kbm::MENU_HINTS) != 0
+                            {
                                 c.show_hint();
                                 edges &= !(game::kbm::MENU_SQUARE | game::kbm::MENU_HINTS);
                             }
@@ -543,7 +584,9 @@ impl winit::application::ApplicationHandler for App {
                     campaign_popup_up || self.campaign_map.is_some() || self.round_end_held();
                 if campaign_popup_up && !self.paused && edges & 16 != 0 {
                     if let Some((w, _)) = self.walk.as_mut() {
-                        if let Some(c) = w.campaign.as_mut() { c.dismiss_popup(&mut w.sim); }
+                        if let Some(c) = w.campaign.as_mut() {
+                            c.dismiss_popup(&mut w.sim);
+                        }
                     }
                     if let Some(sl) = self.sounds.as_mut() {
                         sl.play_2d(
@@ -1091,7 +1134,9 @@ impl winit::application::ApplicationHandler for App {
                         look = if popup_up {
                             self.kbm.clear_look();
                             PadState::default()
-                        } else { self.kbm.look() };
+                        } else {
+                            self.kbm.look()
+                        };
                         // A controller's preview is its held stick (the
                         // next tick's turn, `Sim::look_preview`).
                         if !popup_up && !look.has_look() && !look.mouse_aim() {
@@ -1318,7 +1363,8 @@ impl winit::application::ApplicationHandler for App {
                             m.end_music_secs(usize::from(team), walk.sim.outcome?)
                         });
                         let credits_after_outro = self.netplay.is_none()
-                            && self.active_campaign == Some(ui::campaign::RISE_OF_THE_EMPIRE.len() - 1)
+                            && self.active_campaign
+                                == Some(ui::campaign::RISE_OF_THE_EMPIRE.len() - 1)
                             && walk.sim.outcome == Some(0);
                         let (mut done, cue) =
                             walk.follow_round_end(dt, pad, music_secs, !credits_after_outro);
@@ -1574,9 +1620,15 @@ impl winit::application::ApplicationHandler for App {
                     // hides it. It is fed either way — a model's event
                     // lines are handed over once. Paused, its fades hold.
                     let (w, h) = r.size();
-                    let hud_dt = if self.paused && self.netplay.is_none() { 0.0 } else { dt };
+                    let hud_dt = if self.paused && self.netplay.is_none() {
+                        0.0
+                    } else {
+                        dt
+                    };
                     let end_movie = self.walk.as_ref().is_some_and(|(w, _)| {
-                        w.round_end.as_ref().is_some_and(|r| r.playing_movie().is_some())
+                        w.round_end
+                            .as_ref()
+                            .is_some_and(|r| r.playing_movie().is_some())
                     });
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
@@ -1587,14 +1639,26 @@ impl winit::application::ApplicationHandler for App {
                             } else if let Some(m) = menu.as_ref().filter(|_| native_pause) {
                                 hv.update_pause(model, m, &self.pause_menu.animation, [w, h]);
                                 Some(hv)
-                            } else if let Some(selected) = self.campaign_map.filter(|_| !campaign_popup_up) {
-                                let c = self.walk.as_ref().unwrap().0.campaign.as_ref().unwrap();
+                            } else if let (Some(selected), Some(c)) = (
+                                self.campaign_map.filter(|_| !campaign_popup_up),
+                                self.walk.as_ref().and_then(|(w, _)| w.campaign.as_ref()),
+                            ) {
                                 let page = ui::hud_draw::campaign::Model {
                                     selected,
-                                    objectives: c.objectives().iter().map(|o| ui::hud_draw::campaign::Objective {
-                                        text: self.feed.localize_or_raw(&o.text), active: o.state == 2,
-                                    }).collect(),
-                                    footer: ["game.objectives.showdetails", "game.objectives.showhints", "game.mapdisplay.pressToReturn"].map(|key| self.feed.localize_or_raw(key)),
+                                    objectives: c
+                                        .objectives()
+                                        .iter()
+                                        .map(|o| ui::hud_draw::campaign::Objective {
+                                            text: self.feed.localize_or_raw(&o.text),
+                                            active: o.state == 2,
+                                        })
+                                        .collect(),
+                                    footer: [
+                                        "game.objectives.showdetails",
+                                        "game.objectives.showhints",
+                                        "game.mapdisplay.pressToReturn",
+                                    ]
+                                    .map(|key| self.feed.localize_or_raw(key)),
                                 };
                                 hv.update_campaign_map(model, &page, [w, h]);
                                 Some(hv)
@@ -1689,7 +1753,8 @@ impl winit::application::ApplicationHandler for App {
                     // class there), under the menu or at the round's end.
                     let scoreboard = match (&self.walk, &hud) {
                         (Some((walk, _)), Some(model))
-                            if walk.campaign.is_none() && self.score_hold.shown()
+                            if walk.campaign.is_none()
+                                && self.score_hold.shown()
                                 && spawn.is_none()
                                 && menu.is_none()
                                 && model.round_end.is_none() =>

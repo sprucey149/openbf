@@ -9,7 +9,10 @@ fn ctf_marker_tint_stays_in_gamut() {
     for c in blue.into_iter().chain(red) {
         assert!((0.0..=1.0).contains(&c), "tint {c} out of gamut");
     }
-    assert!(blue[2] > blue[0] * 10.0, "friendly marker must read blue: {blue:?}");
+    assert!(
+        blue[2] > blue[0] * 10.0,
+        "friendly marker must read blue: {blue:?}"
+    );
     assert!(red[0] > red[1] * 2.0, "enemy marker must read red: {red:?}");
 }
 

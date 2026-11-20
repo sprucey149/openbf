@@ -420,7 +420,10 @@ fn resolve_campaign_layer_handles_aliases_and_hoth() {
         r#"(name: "hoth_objective", worlds: ["hoth_objective", "hoth_hunt"], regions: [], instances: []),
            (name: "hoth_objective", worlds: ["hoth_objective", "hoth_cps"], regions: [], instances: [])"#,
     );
-    assert_eq!(resolve_campaign_layer_index(&hoth, "hoth_objective"), Some(1));
+    assert_eq!(
+        resolve_campaign_layer_index(&hoth, "hoth_objective"),
+        Some(1)
+    );
     let myg = make_manifest(
         r#"(name: "myg1_shields", worlds: ["myg1_shields", "myg1_cp-assault"], regions: [], instances: [])"#,
     );
@@ -443,7 +446,8 @@ fn every_campaign_mission_resolves_its_layers_when_baked() {
         }
         let stem = p.file_stem().unwrap().to_str().unwrap();
         let script = stem.strip_prefix("bf2_").unwrap_or(stem);
-        let def = crate::mission::MissionDef::load_campaign(&root.join("missions"), script).unwrap();
+        let def =
+            crate::mission::MissionDef::load_campaign(&root.join("missions"), script).unwrap();
         let map_dir = baked.join(&def.map);
         if !map_dir.join("manifest.ron").exists() {
             continue;

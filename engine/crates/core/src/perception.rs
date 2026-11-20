@@ -1077,8 +1077,8 @@ pub fn choose_target_with(
         } else {
             (d, 0.0)
         };
-        let base = (200.0 - 100.0 * d / scale) * if human { tier.pressure } else { 1.0 }
-            - 0.01 * far;
+        let base =
+            (200.0 - 100.0 * d / scale) * if human { tier.pressure } else { 1.0 } - 0.01 * far;
         if c.seen_now {
             base + bonus
         } else {

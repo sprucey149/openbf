@@ -217,17 +217,50 @@ impl RoundEnd {
     }
 }
 
+/// Decode a one-shot movie's sound track once per clip and expose its newest
+/// decoded frame. The single canonical version of a repeated piece of the
+/// round-ending movie ([`step_end_movie`]) and the shell's campaign cutscenes
+/// (`front::campaign`): both keep a `(clip, voice)` slot, so a clip's audio is
+/// decoded exactly once and both sites agree on how a one-shot is read. The
+/// caller owns playback state (start / skip / phase changes) and clears
+/// `voice` when the clip ends (cf. `holo::lens_flare` for a shared draw).
+pub fn step_one_shot_movie(
+    movie: &mut crate::shell_movie::ShellMovie,
+    clip: &str,
+    audio: Option<&mut audio::Audio>,
+    voice: &mut Option<(String, audio::Shot)>,
+    volume: f32,
+    dt: f32,
+) -> Option<(Vec<u8>, u32, u32)> {
+    if voice.as_ref().is_none_or(|(name, _)| name != clip) {
+        *voice = None;
+        if volume > 0.0 {
+            if let (Some(path), Some(a)) = (movie.audio_path(clip), audio) {
+                match audio::decode(path) {
+                    Ok(sound) => {
+                        *voice = a
+                            .play_menu_shot(&sound, crate::sounds::level_db(volume))
+                            .map(|shot| (clip.to_owned(), shot));
+                    }
+                    Err(e) => eprintln!("movie audio {}: {e:#}", path.display()),
+                }
+            }
+        }
+    }
+    movie.frame(dt)
+}
+
 /// One frame of [`Phase::Movie`] on the shell's player `movie`: it starts
-/// the clip with its sound track (dropped with `voice`, at the dialogue
-/// `volume` as the shell's cutscenes) and ends the phase at the clip's end,
-/// on `skip`, or at once when the clip is not baked. The newest decoded
-/// frame, for the HUD. OURS: `skip` (the shell cutscenes' accept / back);
-/// trace: whether `FUN_00564398`'s player takes a skip.
+/// the clip and ends the phase at the clip's end, on `skip`, or at once when
+/// the clip is not baked. The newest decoded frame, for the HUD. OURS: `skip`
+/// (the shell cutscenes' accept / back); trace: whether `FUN_00564398`'s
+/// player takes a skip. Audio decoding and frame decoding are shared with the
+/// shell's cutscenes in [`step_one_shot_movie`].
 pub fn step_end_movie(
     r: &mut RoundEnd,
     movie: Option<&mut crate::shell_movie::ShellMovie>,
     audio: Option<&mut audio::Audio>,
-    voice: &mut Option<audio::Shot>,
+    voice: &mut Option<(String, audio::Shot)>,
     volume: f32,
     dt: f32,
     skip: bool,
@@ -241,14 +274,8 @@ pub fn step_end_movie(
     if m.current() != Some(clip.as_str()) {
         m.play_once(&clip);
         *voice = None;
-        if let (Some(path), Some(a)) = (m.audio_path(&clip).filter(|_| volume > 0.0), audio) {
-            match audio::decode(path) {
-                Ok(sound) => *voice = a.play_menu_shot(&sound, crate::sounds::level_db(volume)),
-                Err(e) => eprintln!("end movie audio {}: {e:#}", path.display()),
-            }
-        }
     }
-    let frame = m.frame(dt);
+    let frame = step_one_shot_movie(m, &clip, audio, voice, volume, dt);
     if m.is_finished() || skip {
         m.stop();
         *voice = None;
@@ -481,8 +508,14 @@ mod tests {
         assert_eq!(w.camera().position, before, "no shots: the battle's view");
         let mut w = WalkSim::new(7, glam::Vec3::ZERO, None);
         w.sim.outcome = Some(me);
-        assert!(!w.follow_round_end(1.0 / 30.0, Pad::default(), None, false).0);
-        assert!(!w.follow_round_end(7.1, Pad::default(), None, false).0, "the fade first");
+        assert!(
+            !w.follow_round_end(1.0 / 30.0, Pad::default(), None, false)
+                .0
+        );
+        assert!(
+            !w.follow_round_end(7.1, Pad::default(), None, false).0,
+            "the fade first"
+        );
         let (done, _) = w.follow_round_end(super::FADE_SECS, Pad::default(), None, false);
         assert!(done, "the campaign finale leaves for its credits, no stats");
         assert!(w.round_end.as_ref().unwrap().stats.is_none());

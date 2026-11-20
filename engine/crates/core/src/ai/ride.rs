@@ -154,8 +154,7 @@ fn claim_seat_policy(
     // transport or spa4g_c's `cis_gunship`) serves as a mobile spawn post;
     // autonomous on-foot bots must not board and fly it away
     // (BF2 FUN_002e2e38, B2:257502-257503).
-    if source == SeatAdmission::Autonomous
-        && super::flyer_drive::is_deployed_command_flyer(sim, v)
+    if source == SeatAdmission::Autonomous && super::flyer_drive::is_deployed_command_flyer(sim, v)
     {
         return None;
     }

@@ -56,13 +56,11 @@ pub const CAMPAIGN_TRANSITIONS: [&str; 18] = [
 ];
 /// In-game campaign movies stored in `INGAME.MVS` and configured in `INSHELL.LVL`.
 pub const INGAME_MOVIES: [&str; 40] = [
-    "crawl1", "crawl2", "hot1cam1", "hot1cam2",
-    "geomon01", "geomon02", "mygmon01", "mygmon02", "sb2mon01", "sb2mon02",
-    "felmon01", "felmon02", "sb3mon01", "sb3mon02", "kasmon01", "kasmon02",
-    "utamon01", "utamon02", "cormon01", "cormon02", "nabmon01", "nabmon02",
-    "sb4mon01", "sb4mon02", "musmon01", "musmon02", "kammon01", "kammon02",
-    "deamon01", "deamon02", "polmon01", "polmon02", "tanmon01", "tanmon02",
-    "sb1mon01", "sb1mon02", "yavmon01", "yavmon02", "hotmon01", "hotmon02",
+    "crawl1", "crawl2", "hot1cam1", "hot1cam2", "geomon01", "geomon02", "mygmon01", "mygmon02",
+    "sb2mon01", "sb2mon02", "felmon01", "felmon02", "sb3mon01", "sb3mon02", "kasmon01", "kasmon02",
+    "utamon01", "utamon02", "cormon01", "cormon02", "nabmon01", "nabmon02", "sb4mon01", "sb4mon02",
+    "musmon01", "musmon02", "kammon01", "kammon02", "deamon01", "deamon02", "polmon01", "polmon02",
+    "tanmon01", "tanmon02", "sb1mon01", "sb1mon02", "yavmon01", "yavmon02", "hotmon01", "hotmon02",
 ];
 /// The shell's sheets: the title and main menu's logo (§3.4), the Instant
 /// Action backdrop and the five mode icons its lists draw
@@ -268,7 +266,8 @@ pub fn read_movie_entry(path: &str, on_disc: &str) -> Result<Vec<u8>> {
         lba: disc.files[i].lba,
         size: disc.files[i].size,
     };
-    disc.read_file(&entry).map_err(|e| anyhow!("{on_disc}: {e}"))
+    disc.read_file(&entry)
+        .map_err(|e| anyhow!("{on_disc}: {e}"))
 }
 
 /// The shell movie file at `path`, or read out of the disc image when `path` is
@@ -360,14 +359,23 @@ pub fn demux_pss_audio(segment: &[u8]) -> Result<Option<(u16, u32, Vec<i16>)>> {
         raw.len()
     );
     let hdr_size = le_u32(&raw[4..8]) as usize;
-    anyhow::ensure!(hdr_size >= 16 && 8 + hdr_size + 8 <= raw.len(), "truncated SShd");
+    anyhow::ensure!(
+        hdr_size >= 16 && 8 + hdr_size + 8 <= raw.len(),
+        "truncated SShd"
+    );
     let audio_type = le_u32(&raw[8..12]);
     let sample_rate = le_u32(&raw[12..16]);
     let channels = le_u32(&raw[16..20]);
     let interleave = le_u32(&raw[20..24]) as usize;
-    anyhow::ensure!(channels == 1 || channels == 2, "unsupported PSS channel count {channels}");
+    anyhow::ensure!(
+        channels == 1 || channels == 2,
+        "unsupported PSS channel count {channels}"
+    );
     let bd_off = 8 + hdr_size;
-    anyhow::ensure!(&raw[bd_off..bd_off + 4] == b"SSbd", "PSS audio missing SSbd header");
+    anyhow::ensure!(
+        &raw[bd_off..bd_off + 4] == b"SSbd",
+        "PSS audio missing SSbd header"
+    );
     let bd_size = le_u32(&raw[bd_off + 4..bd_off + 8]) as usize;
     // Clamp rather than asserting equality: INGAME.MVS sb4mon01 is 21 bytes short at EOF.
     let payload_end = (bd_off + 8 + bd_size).min(raw.len());
@@ -376,7 +384,10 @@ pub fn demux_pss_audio(segment: &[u8]) -> Result<Option<(u16, u32, Vec<i16>)>> {
     let pcm = if channels == 1 {
         decode_pcm_or_vag(audio_type, payload)?
     } else {
-        anyhow::ensure!(interleave >= 2, "invalid PSS stereo interleave {interleave}");
+        anyhow::ensure!(
+            interleave >= 2,
+            "invalid PSS stereo interleave {interleave}"
+        );
         let frame_bytes = interleave * 2;
         let est_samples = (payload.len() / frame_bytes) * interleave;
         let mut out = Vec::with_capacity(est_samples);
@@ -426,7 +437,10 @@ fn bake_movie_group(
             Err(error) => {
                 if pc_shell {
                     if let Some(order) = pc::movie_order(mvs, spec.prop) {
-                        println!("  PC shell: {} uses the fingerprinted PC galaxy loops", spec.prop);
+                        println!(
+                            "  PC shell: {} uses the fingerprinted PC galaxy loops",
+                            spec.prop
+                        );
                         order
                     } else if !spec.required {
                         continue;
@@ -467,8 +481,9 @@ fn bake_movie_group(
         .map_or(4, |n| n.get().min(8))
         .max(1);
     let next_idx = std::sync::atomic::AtomicUsize::new(0);
-    let results: Vec<std::sync::Mutex<Option<Result<ShellMovie>>>> =
-        (0..resolved.len()).map(|_| std::sync::Mutex::new(None)).collect();
+    let results: Vec<std::sync::Mutex<Option<Result<ShellMovie>>>> = (0..resolved.len())
+        .map(|_| std::sync::Mutex::new(None))
+        .collect();
 
     std::thread::scope(|scope| {
         for _ in 0..workers {
@@ -489,7 +504,11 @@ fn bake_movie_group(
                         let pack =
                             FramePack::write(MOVIE_SIZE[0], MOVIE_SIZE[1], MOVIE_FPS, &frames);
                         std::fs::write(movie_dir.join(name), pack)?;
-                        println!("  {}: segment {k} ({h:08x}): {} frames", job.prop, frames.len());
+                        println!(
+                            "  {}: segment {k} ({h:08x}): {} frames",
+                            job.prop,
+                            frames.len()
+                        );
                         files.push(name.clone());
                         if job.demux_audio {
                             if let Some((ch, rate, mut samples)) = demux_pss_audio(bytes)
@@ -526,7 +545,11 @@ fn bake_movie_group(
 
     let mut out = Vec::with_capacity(resolved.len());
     for slot in results {
-        out.push(slot.into_inner().unwrap_or_else(|e| e.into_inner()).unwrap()?);
+        out.push(
+            slot.into_inner()
+                .unwrap_or_else(|e| e.into_inner())
+                .unwrap()?,
+        );
     }
     Ok(out)
 }
@@ -634,16 +657,14 @@ pub fn bake_shell_with_campaign(
     });
     if let (Some(in_lvl_path), Some(in_mvs_path)) = (auto_inshell, auto_ingame) {
         let explicit = inshell_lvl.is_some() && ingame_mvs.is_some();
-        let in_lvl_bytes = std::fs::read(&in_lvl_path)
-            .with_context(|| in_lvl_path.clone());
-        let in_mvs_res = read_movie_entry(&in_mvs_path, INGAME_MVS_ON_DISC)
-            .with_context(|| in_mvs_path.clone());
+        let in_lvl_bytes = std::fs::read(&in_lvl_path).with_context(|| in_lvl_path.clone());
+        let in_mvs_res =
+            read_movie_entry(&in_mvs_path, INGAME_MVS_ON_DISC).with_context(|| in_mvs_path.clone());
         match (in_lvl_bytes, in_mvs_res) {
             (Ok(in_lvl_bytes), Ok(in_mvs)) => {
-                let in_lvl = mungefs::open(&in_lvl_bytes)
-                    .map_err(|e| anyhow!("{in_lvl_path}: {e}"))?;
-                let in_segs = mvs_segments(&in_mvs)
-                    .with_context(|| in_mvs_path.clone())?;
+                let in_lvl =
+                    mungefs::open(&in_lvl_bytes).map_err(|e| anyhow!("{in_lvl_path}: {e}"))?;
+                let in_segs = mvs_segments(&in_mvs).with_context(|| in_mvs_path.clone())?;
                 let in_specs: Vec<MovieSpec<'_>> = INGAME_MOVIES
                     .iter()
                     .map(|&prop| MovieSpec {
@@ -654,12 +675,7 @@ pub fn bake_shell_with_campaign(
                     })
                     .collect();
                 movies.extend(bake_movie_group(
-                    &in_specs,
-                    in_lvl,
-                    &in_mvs,
-                    &in_segs,
-                    false,
-                    &movie_dir,
+                    &in_specs, in_lvl, &in_mvs, &in_segs, false, &movie_dir,
                 )?);
             }
             (Err(e), _) | (_, Err(e)) if explicit => return Err(e),

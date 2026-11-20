@@ -609,8 +609,7 @@ impl SoldierVisuals {
             side = common;
             wpath = shared;
         } else if !pak::is_file(&wpath) {
-            let (alt_side, _) =
-                resolve_side_dir(assets_dir, game, "weapons", &format!("{wg}.glb"));
+            let (alt_side, _) = resolve_side_dir(assets_dir, game, "weapons", &format!("{wg}.glb"));
             let alt_wpath = alt_side.join("weapons").join(format!("{wg}.glb"));
             if pak::is_file(&alt_wpath) {
                 side = alt_side;

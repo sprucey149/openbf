@@ -322,7 +322,11 @@ mod tests {
         let mut outros = HashSet::new();
         for (i, entry) in RISE_OF_THE_EMPIRE.iter().enumerate() {
             assert_eq!(entry.index, i);
-            assert!(scripts.insert(entry.script), "duplicate script {}", entry.script);
+            assert!(
+                scripts.insert(entry.script),
+                "duplicate script {}",
+                entry.script
+            );
             assert!(
                 transitions.insert(entry.transition_movie),
                 "duplicate transition {}",

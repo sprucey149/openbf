@@ -1126,9 +1126,8 @@ impl Sim {
             crate::skill::Difficulty::Easy => 1,
             _ => 2,
         };
-        let human_team = !self.netplay_rows
-            && team < 2
-            && self.humans_per_team()[usize::from(team)] > 0;
+        let human_team =
+            !self.netplay_rows && team < 2 && self.humans_per_team()[usize::from(team)] > 0;
         self.mission_ai.skill_delta[level][usize::from(!human_team)]
     }
 

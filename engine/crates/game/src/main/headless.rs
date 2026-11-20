@@ -4,9 +4,7 @@
 //! gates run this — a `--capture-orbit` flythrough, or the `--scene-report`
 //! census). `--aim-replay` runs the scripted acquisition referee without a device.
 
-use super::battle::{
-    hud_model, load_hud_view, make_walk, spawn_model, squad_icons, walk_draws,
-};
+use super::battle::{hud_model, load_hud_view, make_walk, spawn_model, squad_icons, walk_draws};
 use super::{BattleSetup, ViewerArgs};
 use anyhow::{anyhow, Context, Result};
 use core::sim::InputLog;

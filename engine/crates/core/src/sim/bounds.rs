@@ -1063,7 +1063,8 @@ impl Sim {
     /// soldier can step onto it: up at most a step, down at most
     /// [`RETURN_STEP_DOWN`], a face he stands on.
     fn return_floor(&self, p: Vec3, n: Vec3) -> Option<f32> {
-        let (f, nrm) = self.ground_point_hit_under_n(Vec3::new(n.x, p.y, n.z), p.y + STEP_HEIGHT)?;
+        let (f, nrm) =
+            self.ground_point_hit_under_n(Vec3::new(n.x, p.y, n.z), p.y + STEP_HEIGHT)?;
         (f <= p.y + STEP_HEIGHT
             && f >= p.y - RETURN_STEP_DOWN
             && nrm.y >= crate::soldier::FLOOR_MIN_NY)

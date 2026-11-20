@@ -83,7 +83,8 @@ pub const PURSUIT_ESCAPE: f32 = 3.5;
 /// FUN_002fe868's connection: P0 behind the craft (0x41a00000).
 pub const CONNECT_BEHIND: f32 = 20.0;
 /// OURS: fewer primary connection candidates than this also try the ungated
-/// ones ([`connection`]).
+/// ones ([`connection`]). measure: the PS2's hangar connection census per map
+/// before fixing the fallback threshold.
 pub const CONNECT_PRIMARY_MIN: usize = 4;
 /// OURS: a takeoff that has not flown after this long gives up.
 pub const TAKEOFF_GIVEUP: u64 = 15 * crate::TICK_HZ as u64;

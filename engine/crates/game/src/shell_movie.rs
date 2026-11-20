@@ -562,7 +562,10 @@ mod tests {
         assert_eq!(m.advance(0.5), Some((0, 0)));
         assert!(!m.is_finished());
         m.play_once("A");
-        assert_eq!(m.generation, gen, "calling play_once per frame keeps progress");
+        assert_eq!(
+            m.generation, gen,
+            "calling play_once per frame keeps progress"
+        );
         assert!((m.t - 0.5).abs() < 1e-6);
         assert_eq!(m.advance(0.6), None);
         assert!(m.is_finished());

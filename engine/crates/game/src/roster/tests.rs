@@ -354,11 +354,7 @@ fn class_anim_extracts_fallback_bank_from_multiword_combo_bank() {
                 "melee",
                 &[("ComboAnimationBank", "jedifemale jedi")],
             ),
-            (
-                "test_rifle",
-                "weapon",
-                &[("AnimationBank", "rifle none")],
-            ),
+            ("test_rifle", "weapon", &[("AnimationBank", "rifle none")]),
             (
                 "test_jedi",
                 "soldier",

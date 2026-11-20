@@ -903,7 +903,13 @@ fn nabooqueen_folds_root_a_spine_into_bone_a_spine() {
             let parent = nodes
                 .iter()
                 .position(|p| p.children().any(|c| c.index() == n.index()))
-                .and_then(|pi| doc.skins().next().unwrap().joints().position(|j| j.index() == pi));
+                .and_then(|pi| {
+                    doc.skins()
+                        .next()
+                        .unwrap()
+                        .joints()
+                        .position(|j| j.index() == pi)
+                });
             let _ = i;
             crate::skin_glb::Bone {
                 name: n.name().unwrap_or_default().to_owned(),

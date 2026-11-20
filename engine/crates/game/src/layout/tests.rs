@@ -1,4 +1,5 @@
 use super::*;
+use glam::Vec2;
 
 /// Five posts (`cp1`..`cp5`), each with its own capture sphere, plus one
 /// `sarlac01` region for the death-region path.

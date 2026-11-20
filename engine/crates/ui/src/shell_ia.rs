@@ -525,7 +525,12 @@ impl Ctx<'_> {
 
     /// `NewButtonWindow`: the `border_3_pieces` box and, with a title, its
     /// bar above (`ifelem_buttonwindow`).
-    pub(crate) fn window_box(&mut self, s: &crate::hud_draw::Screen, r: [f32; 4], title: Option<&str>) {
+    pub(crate) fn window_box(
+        &mut self,
+        s: &crate::hud_draw::Screen,
+        r: [f32; 4],
+        title: Option<&str>,
+    ) {
         let full = [0.0, 0.0, 1.0, 1.0];
         self.nine(s, r, full, (BORDER, BORDER / 64.0), "border_3_pieces");
         let Some(title) = title else {

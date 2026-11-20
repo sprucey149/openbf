@@ -270,7 +270,14 @@ impl CtfState {
         }
         eat(&(self.flags.len() as u32).to_le_bytes());
         for f in &self.flags {
-            eat(&[f.team, u8::from(f.gravity), u8::from(f.landed)]);
+            eat(&[
+                f.team,
+                u8::from(f.gravity),
+                u8::from(f.landed),
+                // A campaign script can turn AI pickups off at runtime; the
+                // AI reads it every tick, so it is live sim state, not setup.
+                u8::from(f.allow_ai_pickup),
+            ]);
             for coord in f.current_pos.to_array() {
                 eat(&coord.hash_bits().to_le_bytes());
             }

@@ -850,9 +850,15 @@ impl HudView {
         self.install_frame(frame);
     }
 
-    pub fn update_campaign_map(&mut self, model: &HudModel, page: &ui::hud_draw::campaign::Model, size: [u32; 2]) {
+    pub fn update_campaign_map(
+        &mut self,
+        model: &HudModel,
+        page: &ui::hud_draw::campaign::Model,
+        size: [u32; 2],
+    ) {
         self.feed(model, 0.0);
-        let frame = ui::hud_draw::campaign::draw(&self.hud, &self.art, page, size.map(|v| v as f32));
+        let frame =
+            ui::hud_draw::campaign::draw(&self.hud, &self.art, page, size.map(|v| v as f32));
         self.install_frame(frame);
     }
 
