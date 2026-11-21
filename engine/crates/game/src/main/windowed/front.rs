@@ -1,22 +1,41 @@
 //! The windowed shell's front screens (card BSHLA, `ui::shell_ps2`): the
 //! PS2's Press START, Main Menu, Singleplayer and Options over the shell
 //! movie, with the shell music; Instant Action and its Session Options
-//! (`ui::shell`, `ui::shell_ia`, `analysis/re-bf2-menus.md` §1-§2) and the
+//! (`ui::shell`, `ui::shell_ia`, `analysis/re-bf2-menus.md` ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§1-ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§2) and the
 //! settings page (`ui::menu` in its shell form). A child of `windowed` so it
 //! reaches the `App` state.
 //!
-//! The menus' clicks (`analysis/re-bf2-menus.md` §4.1) are asked for by
+//! The menus' clicks (`analysis/re-bf2-menus.md` ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.1) are asked for by
 //! `ui::shell_ps2` and, for the pages of the port's own, here; all of them go
 //! through `ShellMenus::cues` (the select click's 0.1 s limit) and play from
 //! the CORE.LVL bank (`SoundLib::load_shell`).
 
 use super::{App, Camera};
 use core::fmath::FloatExt;
-use ui::menu::{ControlContext, PausePage, SettingsPage};
+use ui::menu::PausePage;
+// The extracted `front/tests.rs` reaches these through `use super::*`.
+#[cfg(test)]
+use ui::menu::{ControlContext, SettingsPage};
 use ui::shell_feel::MenuSound;
 
+#[path = "front/campaign.rs"]
+mod campaign;
+#[path = "front/campaign_saves.rs"]
+mod campaign_saves;
+#[path = "front/controls.rs"]
+mod controls;
+#[path = "front/credits.rs"]
+mod credits;
+#[path = "front/gal.rs"]
+mod gal;
 #[path = "front/profiles.rs"]
 mod profiles;
+
+// The binding editor is built in `windowed` (the pause / shell command path)
+// and its state travels with `App`, so keep the facade's names visible there.
+pub(super) use controls::{
+    Binding, Capture, Controls, Layout, CANCEL_HOLD, CONTROL_COMMAND_ROWS, PAD_BUTTONS,
+};
 
 /// The BF2 PS2 shell's front screens (card BSHLA, `ui::shell_ps2`): Press
 /// START, the Main Menu, Singleplayer and Options over the background
@@ -26,13 +45,15 @@ mod profiles;
 pub(super) struct FrontShell {
     pub(super) menus: ui::shell_ps2::ShellMenus,
     picker: Option<ui::shell_ps2::profiles::Picker>,
+    /// The Rise of the Empire save's name keyboard.
+    save_name: Option<ui::shell_ps2::profiles::Picker>,
     name_input: profiles::NameInput,
     pub(super) movie: Option<game::shell_movie::ShellMovie>,
     /// Built at the first frame with a renderer.
     pub(super) view: Option<game::hud_feed::HudView>,
     /// The Instant Action screen: built at its first Enter, kept (with its
     /// playlist and session options) for the process, as the PS2 keeps
-    /// `gPickedMapList` (§1.3).
+    /// `gPickedMapList` (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§1.3).
     ia: Option<ui::shell::InstantAction>,
     /// It is up.
     ia_open: bool,
@@ -41,12 +62,26 @@ pub(super) struct FrontShell {
     settings_animation: ui::pause_draw::Animation,
     sounds: Option<game::sounds::SoundLib>,
     pub(super) music: Option<audio::MusicVoice>,
+    /// Synced audio track for an active cutscene in `cutscenes`.
+    pub(super) movie_audio: Option<(String, audio::Shot)>,
+    /// Queued full-screen campaign cutscenes (`crawl1`/`crawl2`, `*tran1`, `*mon01`, `*mon02`).
+    pub(super) cutscenes: std::collections::VecDeque<String>,
+    /// Mission index in `ui::campaign::RISE_OF_THE_EMPIRE` waiting on `cutscenes`.
+    pub(super) pending_campaign: Option<usize>,
+    credits: Option<credits::Crawl>,
+    /// Lazy 3D spinning planet backdrop (`bf2_gal1`) for the campaign battle screen.
+    gal: Option<gal::GalPlanetView>,
+    gal_load_failed: bool,
+    /// `metagame_menu_music` from `bf2_gal1/sounds`, played over the planet screen.
+    gal_music: Option<(f32, Vec<audio::StreamTake>)>,
+    /// Whether `self.music` currently plays `gal_music` instead of `shell_soundtrack`.
+    active_gal_music: bool,
     /// `shell_soundtrack`'s gain (x its bus) and takes, and which one plays
-    /// when (re-bf2-menus §4.4).
+    /// when (re-bf2-menus ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.4).
     music_takes: Option<(f32, Vec<audio::StreamTake>)>,
     playlist: ui::shell_feel::ShellPlaylist,
     /// The random take picker's state (the shell is not the sim: seeded
-    /// from the clock, menuref §9.3.9).
+    /// from the clock, menuref ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§9.3.9).
     music_rng: u64,
     /// A held D-pad arm's repeat (menuref: 0.62 s, then every 0.167 s).
     pub(super) repeat: ui::shell_feel::HoldRepeat,
@@ -65,193 +100,6 @@ pub(super) struct FrontShell {
     /// Game Options' Player name box is open: the text and its refusal.
     name_edit: Option<(String, Option<String>)>,
 }
-
-pub(super) struct Controls {
-    context: ControlContext,
-    layout: Layout,
-    pub(super) cursor: usize,
-    capture: Option<Capture>,
-    original: Vec<Binding>,
-    message: Option<String>,
-}
-
-enum Layout {
-    Keyboard(Vec<Option<game::kbm::Trigger>>),
-    Gamepad(Vec<Option<gilrs::Button>>),
-}
-
-impl Layout {
-    fn complete(&self) -> Vec<Binding> {
-        match self {
-            Self::Keyboard(items) => items
-                .iter()
-                .flatten()
-                .copied()
-                .map(Binding::Keyboard)
-                .collect(),
-            Self::Gamepad(items) => items
-                .iter()
-                .flatten()
-                .copied()
-                .map(Binding::Gamepad)
-                .collect(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Binding {
-    Keyboard(game::kbm::Trigger),
-    Gamepad(gilrs::Button),
-}
-
-struct Capture {
-    row: usize,
-    ready: bool,
-    controller: Option<gilrs::GamepadId>,
-    candidate: Option<(Binding, std::time::Instant)>,
-}
-
-const CONTROL_COMMAND_ROWS: usize = 2;
-const CANCEL_HOLD: std::time::Duration = std::time::Duration::from_millis(600);
-
-impl Controls {
-    pub(super) fn new(
-        device: SettingsPage,
-        context: ControlContext,
-        settings: &game::profile::Settings,
-    ) -> Self {
-        use game::control_layout;
-        let layout = if device == SettingsPage::KeyboardMouse {
-            let saved = settings.keyboard_layouts.get(context);
-            Layout::Keyboard(if control_layout::keyboard(context, saved).is_some() {
-                saved.iter().copied().map(Some).collect()
-            } else {
-                control_layout::keyboard_defaults(context, &settings.keyboard_bindings)
-            })
-        } else {
-            let saved = settings.gamepad_layouts.get(context);
-            Layout::Gamepad(if control_layout::gamepad(context, saved).is_some() {
-                saved.iter().copied().map(Some).collect()
-            } else {
-                control_layout::gamepad_defaults(context, &settings.controller_bindings)
-            })
-        };
-        // Issue #172: a layout from before F11 switched fullscreen shows its
-        // F11 action unassigned, and the page asks for a key before leaving.
-        let mut layout = layout;
-        let mut message = None;
-        if let Layout::Keyboard(items) = &mut layout {
-            let actions = control_layout::actions(context, true);
-            for (i, t) in items.iter_mut().enumerate() {
-                if *t == Some(game::kbm::FULLSCREEN_KEY) {
-                    *t = None;
-                    message = Some(format!(
-                        "{}; {} is unassigned",
-                        game::kbm::f11_note(game::kbm::MAC),
-                        actions[i].name
-                    ));
-                }
-            }
-        }
-        let original = layout.complete();
-        Self {
-            context,
-            layout,
-            original,
-            cursor: 0,
-            capture: None,
-            message,
-        }
-    }
-
-    fn keyboard(&self) -> bool {
-        matches!(self.layout, Layout::Keyboard(_))
-    }
-
-    fn len(&self) -> usize {
-        match &self.layout {
-            Layout::Keyboard(items) => items.len(),
-            Layout::Gamepad(items) => items.len(),
-        }
-    }
-
-    fn missing(&self) -> Option<usize> {
-        match &self.layout {
-            Layout::Keyboard(items) => items.iter().position(Option::is_none),
-            Layout::Gamepad(items) => items.iter().position(Option::is_none),
-        }
-    }
-
-    fn cancel(&mut self, reason: &str) -> MenuSound {
-        self.capture = None;
-        self.message = Some(reason.into());
-        MenuSound::Cancel
-    }
-
-    fn assign(&mut self, bind: Binding) -> MenuSound {
-        let Some(capture) = self.capture.as_mut() else {
-            return MenuSound::Error;
-        };
-        let row = capture.row;
-        let actions = game::control_layout::actions(self.context, self.keyboard());
-        fn assign<T: Copy + Eq>(items: &mut [Option<T>], row: usize, trigger: T) -> Option<usize> {
-            let conflict = items
-                .iter()
-                .position(|t| *t == Some(trigger))
-                .filter(|i| *i != row);
-            if let Some(i) = conflict {
-                items[i] = None;
-            }
-            items[row] = Some(trigger);
-            conflict
-        }
-        let conflict = match (&mut self.layout, bind) {
-            (Layout::Keyboard(items), Binding::Keyboard(t)) => {
-                // Issue #172: F11, and Command on macOS, never hold an action.
-                if let Some(why) = game::kbm::reserved_key(t, game::kbm::MAC) {
-                    self.message = Some(why);
-                    return MenuSound::Error;
-                }
-                if !game::control_layout::accepts_trigger(actions[row], t) {
-                    self.message = Some(
-                        "Mouse wheel cannot hold movement; choose a key or mouse button".into(),
-                    );
-                    return MenuSound::Error;
-                }
-                assign(items, row, t)
-            }
-            (Layout::Gamepad(items), Binding::Gamepad(b)) => assign(items, row, b),
-            _ => return MenuSound::Error,
-        };
-        self.capture = None;
-        self.message = Some(match conflict {
-            Some(i) => format!("{} is unassigned", actions[i].name),
-            None => "Binding assigned".into(),
-        });
-        MenuSound::Accept
-    }
-}
-
-const PAD_BUTTONS: [gilrs::Button; 17] = [
-    gilrs::Button::South,
-    gilrs::Button::East,
-    gilrs::Button::West,
-    gilrs::Button::North,
-    gilrs::Button::LeftTrigger,
-    gilrs::Button::LeftTrigger2,
-    gilrs::Button::RightTrigger,
-    gilrs::Button::RightTrigger2,
-    gilrs::Button::Select,
-    gilrs::Button::Start,
-    gilrs::Button::Mode,
-    gilrs::Button::LeftThumb,
-    gilrs::Button::RightThumb,
-    gilrs::Button::DPadUp,
-    gilrs::Button::DPadDown,
-    gilrs::Button::DPadLeft,
-    gilrs::Button::DPadRight,
-];
 
 impl FrontShell {
     pub(super) fn new(assets_dir: &std::path::Path) -> Self {
@@ -272,9 +120,12 @@ impl FrontShell {
         let music_takes = sounds
             .as_ref()
             .and_then(|sl| sl.stream_takes(ui::shell_ps2::MUSIC));
+        let gal_music = game::sounds::SoundLib::load(&assets_dir.join("bf2_gal1"))
+            .and_then(|sl| sl.stream_takes("metagame_menu_music"));
         FrontShell {
             menus: ui::shell_ps2::ShellMenus::new(&text),
             picker: None,
+            save_name: None,
             name_input: Default::default(),
             movie,
             view: None,
@@ -284,6 +135,14 @@ impl FrontShell {
             settings_animation: Default::default(),
             sounds,
             music: None,
+            movie_audio: None,
+            cutscenes: std::collections::VecDeque::new(),
+            pending_campaign: None,
+            credits: None,
+            gal: None,
+            gal_load_failed: false,
+            gal_music,
+            active_gal_music: false,
             music_takes,
             playlist: Default::default(),
             music_rng: std::time::SystemTime::now()
@@ -304,8 +163,15 @@ impl FrontShell {
     /// new random take when the shell comes back.
     pub(super) fn stop_music(&mut self) {
         self.music = None;
+        self.movie_audio = None;
+        self.active_gal_music = false;
         self.playlist = Default::default();
         self.music_clock = None;
+    }
+
+    pub(super) fn clear_gal(&mut self) {
+        self.gal = None;
+        self.gal_load_failed = false;
     }
 
     /// Tests: the shell music's takes in place of the bank's.
@@ -381,7 +247,7 @@ fn xorshift(state: &mut u64) -> u64 {
     x
 }
 
-/// A settings page frame's click (re-bf2-menus §4.1 [V]): a cursor move
+/// A settings page frame's click (re-bf2-menus ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.1 [V]): a cursor move
 /// clicks; Left / Right on a Game Options row plays accept, even at a clamp
 /// (`common_ifs_opt_general` main.f6 / f8 pc 113); the music row plays
 /// nothing but the music (`common_ifs_opt_sound`); Cross on a toggle
@@ -430,6 +296,60 @@ fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
 }
 
 impl App {
+    pub(super) fn queue_battle_movies(&mut self) {
+        if !self.in_battle() || self.netplay.is_some() {
+            return;
+        }
+        let clips = self
+            .walk
+            .as_mut()
+            .and_then(|(walk, _)| walk.campaign.as_mut())
+            .map_or_else(Vec::new, |campaign| campaign.take_movies());
+        if !clips.is_empty() {
+            self.front
+                .get_or_insert_with(|| FrontShell::new(&self.assets_dir))
+                .cutscenes
+                .extend(clips);
+        }
+    }
+
+    pub(super) fn battle_movie_pending(&self) -> bool {
+        self.in_battle() && self.front.as_ref().is_some_and(|f| !f.cutscenes.is_empty())
+    }
+
+    pub(super) fn redraw_battle_movie(&mut self, dt: f32) -> anyhow::Result<()> {
+        let edges = self.menu_edges();
+        self.kbm.drop_taps();
+        self.kbm.clear_look();
+        game::pause::hold_for_resume(&mut self.resume_gate);
+        let Some(front) = self.front.as_mut() else {
+            return Ok(());
+        };
+        if (edges & (16 | 32 | 64 | game::kbm::MENU_NORTH)) != 0
+            && front.movie.as_ref().is_some_and(|m| m.shown)
+        {
+            front.skip_cutscene();
+        }
+        let (frame, shown) = front.step_cutscene_movie(
+            dt,
+            self.audio.as_mut(),
+            self.profile.settings.dialogue_volume,
+        );
+        if let (Some(r), Some(hud)) = (self.renderer.as_mut(), self.hud_view.as_mut()) {
+            if let Some((rgba, w, h)) = frame {
+                hud.set_movie_frame(rgba, w, h);
+            }
+            let (w, h) = r.size();
+            hud.update_cutscene([w, h], shown);
+            r.render_with_overlay(
+                &Camera::default(),
+                &[],
+                [0.0, 0.0, 0.0, 1.0],
+                Some(&mut |dev, q, enc, target, size| hud.paint(dev, q, enc, target, size)),
+            )?;
+        }
+        Ok(())
+    }
     /// Session Options were left (`push_prefs`): AI Difficulty is the
     /// profile's tier, saved.
     pub(super) fn keep_session_prefs(&mut self, options: &ui::shell::SessionOptions) {
@@ -700,10 +620,10 @@ impl App {
         true
     }
 
-    /// The shell music (`ifs_start` sets `shell_soundtrack`, §2): a random
+    /// The shell music (`ifs_start` sets `shell_soundtrack`, ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§2): a random
     /// take each time with the shell's gap between them, at its gain x the
-    /// `shellmusic` bus x the profile's level (re-bf2-menus §4.4, menuref
-    /// §9.3.9). Every menu screen's frame runs it, the LAN lobby's too
+    /// `shellmusic` bus x the profile's level (re-bf2-menus ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.4, menuref
+    /// ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§9.3.9). Every menu screen's frame runs it, the LAN lobby's too
     /// (issue #128), so the takes follow one another for as long as the
     /// menus are up.
     pub(super) fn step_shell_music(&mut self, front: &mut FrontShell, dt: f32) {
@@ -743,6 +663,67 @@ impl App {
             .front
             .take()
             .unwrap_or_else(|| FrontShell::new(&self.assets_dir));
+        if front.menus.page == ui::shell_ps2::Page::Credits {
+            // The UI page owns navigation (any skip leaves for Singleplayer
+            // with its own Exit cue); `Crawl` stays the game-side renderer it
+            // invokes. With no crawl bake, leave the page rather than draw a
+            // blank shell.
+            if front.credits.is_none() {
+                front.menus.open_page(ui::shell_ps2::Page::Singleplayer);
+            } else {
+                // ifs_credits plays no music of its own: the shell's
+                // `shell_soundtrack` (ifs_start) carries on under the crawl.
+                if front.active_gal_music {
+                    front.stop_music();
+                }
+                self.step_shell_music(&mut front, dt);
+                let _ = self.shell_pointer.take_wheel();
+                let click = self.shell_pointer.take_frame().is_some_and(|(_, c)| c);
+                // OURS: a click also skips, as Cross / Triangle / Start do.
+                // replace: none, maintainer decision 2026-11-20.
+                front.menus.step(
+                    ui::menu::MenuInput {
+                        confirm: edges & 16 != 0 || click,
+                        back: edges & 32 != 0,
+                        ..Default::default()
+                    },
+                    edges & 64 != 0,
+                    dt,
+                );
+                let left = front.menus.page != ui::shell_ps2::Page::Credits;
+                let done = left || front.credits.as_mut().is_none_or(|c| c.advance(dt));
+                if !done {
+                    if let (Some(r), Some(overlay), Some(window), Some(crawl)) = (
+                        &mut self.renderer,
+                        &mut self.overlay,
+                        &self.window,
+                        front.credits.as_mut(),
+                    ) {
+                        let paint = overlay.begin(window, |ctx| crawl.draw(ctx));
+                        if let Err(error) = r.render_with_overlay(
+                            &Camera::default(),
+                            &[],
+                            [0.0, 0.0, 0.0, 1.0],
+                            Some(&mut |dev, q, enc, target, size| {
+                                overlay.paint(&paint, dev, q, enc, target, size);
+                            }),
+                        ) {
+                            eprintln!("render: {error:#}");
+                            event_loop.exit();
+                        }
+                    }
+                }
+                if done {
+                    // OURS: the menus start their own take afresh, not the
+                    // one the crawl played over. replace: none, maintainer
+                    // decision 2026-11-20.
+                    front.credits = None;
+                    front.stop_music();
+                }
+                self.front = Some(front);
+                return;
+            }
+        }
         // A held arm presses again (menuref: from 0.62 s, every 0.167 s).
         edges |= front.repeat.step(self.prev_menu_buttons & 15, dt);
         let mut input = ui::menu::MenuInput {
@@ -790,12 +771,18 @@ impl App {
                 && self.controls.is_none()
                 && front.mp.is_none()
                 && front.picker.is_none()
+                && front.save_name.is_none()
+                && front.cutscenes.is_empty()
             {
                 if let Some(row) = view.shell_row_at(&front.menus, point, [w as f32, h as f32]) {
                     front.menus.focus_row(row);
                     input.confirm |= click;
                 } else if click {
-                    start |= view.shell_prompt_at(&front.menus, point, [w as f32, h as f32]);
+                    if front.menus.page == ui::shell_ps2::Page::CampaignBattle {
+                        input.confirm = true;
+                    } else {
+                        start |= view.shell_prompt_at(&front.menus, point, [w as f32, h as f32]);
+                    }
                 }
             }
         }
@@ -811,13 +798,16 @@ impl App {
             }
         }
         let mut launch = None;
+        // Both branches of the movie step below assign it.
+        let launch_campaign;
         let mut quit = false;
         let mut settings_model = None;
         let mut controls_model = None;
         let stack_frame = !front.ia_open
             && self.controls.is_none()
             && front.settings.is_none()
-            && front.mp.is_none();
+            && front.mp.is_none()
+            && front.cutscenes.is_empty();
         let mut mp_done = None;
         if !stack_frame {
             front.menus.tick(dt);
@@ -979,6 +969,22 @@ impl App {
                         auto_quality: self.profile.settings.auto_quality,
                         ..model
                     });
+        } else if !front.cutscenes.is_empty() {
+            if input.confirm || input.back || start || click {
+                front.skip_cutscene();
+            }
+        } else if front.save_name.is_some() {
+            self.step_save_name(
+                &mut front,
+                profiles::FrameInput {
+                    menu: input,
+                    start,
+                    edges,
+                    dt,
+                    pointer,
+                    wheel,
+                },
+            );
         } else if !self.step_profiles(
             &mut front,
             profiles::FrameInput {
@@ -990,7 +996,10 @@ impl App {
                 wheel,
             },
         ) {
-            match front.menus.step(input, start, dt) {
+            self.sync_campaign_menu_state(&mut front, edges);
+            let cmd = front.menus.step(input, start, dt);
+            self.save_campaign_menu_state(&mut front);
+            match cmd {
                 Some(ui::shell_ps2::ShellCommand::InstantAction) => {
                     match front.ia.as_mut() {
                         Some(ia) => ia.enter(),
@@ -1009,6 +1018,14 @@ impl App {
                     }
                     front.ia_open = true;
                 }
+                Some(
+                    cmd @ (ui::shell_ps2::ShellCommand::StartCampaignNewGame
+                    | ui::shell_ps2::ShellCommand::EditCampaignSaveName
+                    | ui::shell_ps2::ShellCommand::WriteCampaignSave
+                    | ui::shell_ps2::ShellCommand::LoadCampaignSave
+                    | ui::shell_ps2::ShellCommand::DeleteCampaignSave
+                    | ui::shell_ps2::ShellCommand::LaunchCampaignMission { .. }),
+                ) => self.campaign_command(&mut front, cmd),
                 Some(ui::shell_ps2::ShellCommand::Settings(page)) => {
                     front.settings = Some((PausePage::Settings(page), 0));
                 }
@@ -1024,24 +1041,84 @@ impl App {
                 None => {}
             }
         }
-        self.step_shell_music(&mut front, dt);
+        let mut has_movie = false;
+        if !front.cutscenes.is_empty() {
+            let (shown, launch) = self.step_shell_cutscene(
+                &mut front,
+                dt,
+                false,
+                self.profile.settings.dialogue_volume,
+            );
+            has_movie = shown;
+            launch_campaign = launch;
+        } else {
+            front.movie_audio = None;
+            launch_campaign = front.pending_campaign.take();
+            let launching = launch.is_some() || launch_campaign.is_some();
+            let on_planet_music = !launching
+                && front.menus.over_planet()
+                && !front.ia_open
+                && front.settings.is_none()
+                && self.controls.is_none()
+                && front.mp.is_none()
+                && front.picker.is_none()
+                && front.gal_music.is_some();
+            if on_planet_music {
+                if !front.active_gal_music {
+                    front.stop_music();
+                    front.active_gal_music = true;
+                }
+                if let (Some((gain, takes)), Some(audio)) = (&front.gal_music, self.audio.as_mut())
+                {
+                    let level = self.profile.settings.music_volume;
+                    if level <= 0.0 {
+                        front.music = None;
+                    } else if front.music.is_none() || front.music_replay {
+                        front.music_replay = false;
+                        front.music = audio
+                            .play_stream(
+                                takes[0].clone(),
+                                game::sounds::level_db(*gain * level),
+                                true,
+                            )
+                            .map_err(|e| eprintln!("campaign music: {e:#}"))
+                            .ok();
+                    }
+                }
+            } else {
+                if front.active_gal_music {
+                    front.stop_music();
+                }
+                if !launching {
+                    self.step_shell_music(&mut front, dt);
+                }
+            }
+            let movie_name = if launching { "" } else { front.menus.movie() };
+            if movie_name.is_empty() {
+                if let Some(m) = front.movie.as_mut() {
+                    m.stop();
+                }
+                has_movie = false;
+            } else if let Some(m) = front.movie.as_mut() {
+                m.play(movie_name);
+                if let Some((rgba, w, h)) = m.frame(dt) {
+                    if let Some(v) = front.view.as_mut() {
+                        v.set_movie_frame(rgba, w, h);
+                    }
+                }
+                has_movie = m.shown;
+            }
+        }
+        let launching = launch.is_some() || launch_campaign.is_some();
         front.menus.covered = front.ia_open
             || front.settings.is_some()
             || self.controls.is_some()
             || front.mp.is_some()
-            || front.picker.is_some();
-        let movie_name = front.menus.movie();
-        let mut has_movie = false;
-        if let Some(m) = front.movie.as_mut() {
-            m.play(movie_name);
-            if let Some((rgba, w, h)) = m.frame(dt) {
-                if let Some(v) = front.view.as_mut() {
-                    v.set_movie_frame(rgba, w, h);
-                }
-            }
-            has_movie = m.shown;
-        }
-        // The IA screen has its own backdrop and no movie (§1.1); Session
+            || front.picker.is_some()
+            || front.save_name.is_some()
+            || !front.cutscenes.is_empty()
+            || launching;
+        // The IA screen has its own backdrop and no movie (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§1.1); Session
         // Options keep `shell_sub_left`.
         let ia = front
             .ia
@@ -1063,7 +1140,7 @@ impl App {
                 match ia {
                     Some(ia) => v.update_instant(&front.menus, ia, movie_shown, [w, h]),
                     None => {
-                        if let Some(picker) = front.picker.as_ref() {
+                        if let Some(picker) = front.picker.as_ref().or(front.save_name.as_ref()) {
                             v.update_shell_profiles(&front.menus, has_movie, picker, [w, h]);
                         } else if let Some(model) = controls_model
                             .as_ref()
@@ -1128,10 +1205,12 @@ impl App {
             if let Some(keep) = name_done {
                 pending_name = Some(keep);
             }
+            let (cam, planet_draws) =
+                campaign::planet_for_frame(&mut front, &self.assets_dir, r, dt);
             let view = &mut front.view;
             if let Err(e) = r.render_with_overlay(
-                &Camera::default(),
-                &[],
+                &cam,
+                &planet_draws,
                 [0.0, 0.0, 0.0, 1.0],
                 Some(&mut |dev, q, enc, target, size| {
                     if let Some(v) = view.as_mut() {
@@ -1180,6 +1259,9 @@ impl App {
         }
         if let Some((rows, options)) = launch {
             self.start_playlist(rows, options);
+        }
+        if let Some(index) = launch_campaign {
+            self.start_campaign(index);
         }
         if let Some(done) = mp_done {
             self.mp_done(done);
@@ -1361,7 +1443,12 @@ impl App {
             MenuAction::SetMusic(v) => {
                 s.music_volume = v.clamp(game::music::VOLUME_RANGE.0, game::music::VOLUME_RANGE.1);
                 // The take playing follows the level; off stops it.
-                let gain = front.music_takes.as_ref().map_or(1.0, |(g, _)| *g);
+                let gain = if front.active_gal_music {
+                    front.gal_music.as_ref()
+                } else {
+                    front.music_takes.as_ref()
+                }
+                .map_or(1.0, |(g, _)| *g);
                 match front.music.as_mut() {
                     Some(m) if s.music_volume > 0.0 => {
                         m.set_volume(game::sounds::level_db(gain * s.music_volume), 0.05)
@@ -1405,330 +1492,8 @@ impl App {
     }
 }
 
-/// Tests: a mono take of `secs` seconds that no test opens (28 frames
-/// from each 16-byte block at 28 Hz: a block a second).
 #[cfg(test)]
-pub(super) fn test_take(secs: u32) -> audio::StreamTake {
-    audio::StreamTake {
-        path: std::path::PathBuf::new(),
-        offset: 0,
-        size: 16 * secs as usize,
-        format: 0,
-        channels: 1,
-        substreams: 1,
-        interleave: 0,
-        frequency: 28,
-        block_size: 16 * 1024,
-    }
-}
-
+#[path = "front/tests.rs"]
+mod tests;
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A settings change made in a vehicle (the real `apply_shell_setting`
-    /// path, not `Kbm::follow` alone) keeps the vehicle's table and look
-    /// factor, and takes the new sensitivity.
-    #[test]
-    fn a_settings_change_in_a_vehicle_keeps_the_vehicle_table() {
-        use game::kbm::Bindings;
-        use std::path::PathBuf;
-        let dir =
-            std::env::temp_dir().join(format!("openbf-vehicle-setting-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir(&dir).unwrap();
-        let store = game::profile::Store::new(dir.clone());
-        let mut app = App::new(
-            PathBuf::new(),
-            PathBuf::new(),
-            super::super::tests::setup(None),
-            None,
-            None,
-            None,
-            Default::default(),
-        );
-        app.profile = store
-            .create("Tester", core::skill::Difficulty::Normal)
-            .unwrap();
-        app.profile_store = Some(store);
-        app.binding_context = Some(ControlContext::Vehicle);
-        app.refresh_context_bindings();
-        assert_eq!(app.kbm.bindings, Bindings::pc_default_v0());
-        let mut front = FrontShell::new(&dir);
-        app.apply_shell_setting(&mut front, ui::menu::MenuAction::SetMouseSensitivity(0.5));
-        assert_eq!(app.kbm.bindings, Bindings::pc_default_v0());
-        assert_eq!(app.kbm.look_scale, 1.0);
-        assert_eq!(app.kbm.sensitivity, 0.5);
-        app.binding_context = Some(ControlContext::Infantry);
-        app.refresh_context_bindings();
-        assert_eq!(app.kbm.bindings, Bindings::pc_default());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Issue #128: the shell music never ends while the menus are up. Over
-    /// twelve minutes of shell frames a take always follows the last after
-    /// the shell's gap, also while the frames stall (a hidden window: each
-    /// frame's step clamped to 0.1 s while two real seconds pass), since the
-    /// take itself plays on in real time.
-    #[test]
-    fn the_shell_music_moves_on_take_after_take_for_twelve_minutes() {
-        let mut front = FrontShell::new(std::path::Path::new("/nonexistent-openbf-assets"));
-        front.set_music_takes(vec![test_take(95), test_take(140), test_take(60)]);
-        let secs = front.music_secs();
-        assert_eq!(secs, [95.0, 140.0, 60.0]);
-        // (real seconds, the silence so far, the longest, takes started)
-        let mut run = (0.0f32, 0.0f32, 0.0f32, 0u32);
-        let frames = |front: &mut FrontShell, run: &mut (f32, f32, f32, u32), dt, wall, until| {
-            while run.0 < until {
-                if front.music_due(dt, wall).is_some() {
-                    run.3 += 1;
-                }
-                run.0 += wall;
-                if front.music_playing().is_some() {
-                    run.1 = 0.0;
-                } else {
-                    run.1 += wall;
-                    run.2 = run.2.fmax(run.1);
-                }
-            }
-        };
-        frames(&mut front, &mut run, 1.0 / 30.0, 1.0 / 30.0, 360.0);
-        let steady = run.3;
-        frames(&mut front, &mut run, 0.1, 2.0, 720.0);
-        let (starts, longest) = (run.3, run.2);
-        assert!(steady >= 3, "{steady} takes in the first six minutes");
-        assert!(
-            starts - steady >= 2,
-            "{} takes while the frames stalled",
-            starts - steady
-        );
-        assert!(
-            longest <= ui::shell_feel::MUSIC_GAP + 2.0,
-            "{longest} s without music"
-        );
-    }
-
-    /// Issue #128: music raised from off asks for the take of the moment
-    /// again; with no takes loaded the ask waits for one instead of being
-    /// spent on nothing.
-    #[test]
-    fn a_music_replay_waits_for_a_take() {
-        let mut front = FrontShell::new(std::path::Path::new("/nonexistent-openbf-assets"));
-        front.music_takes = None;
-        front.music_replay = true;
-        assert_eq!(front.music_due(0.1, 0.1), None);
-        assert!(front.music_replay, "nothing to play: the replay waits");
-        front.set_music_takes(vec![test_take(95)]);
-        assert_eq!(front.music_due(0.1, 0.1), Some(0), "the first take");
-        assert!(!front.music_replay, "the take started");
-        front.music_replay = true;
-        assert_eq!(
-            front.music_due(0.1, 0.1),
-            Some(0),
-            "the take of the moment again"
-        );
-        assert!(!front.music_replay);
-        assert_eq!(front.music_due(0.1, 0.1), None, "once");
-    }
-
-    fn controls() -> Controls {
-        let mut controls = Controls::new(
-            SettingsPage::KeyboardMouse,
-            ControlContext::Infantry,
-            &Default::default(),
-        );
-        controls.capture = Some(Capture {
-            row: 0,
-            ready: false,
-            controller: None,
-            candidate: None,
-        });
-        controls
-    }
-
-    /// re-bf2-menus §4.1: a settings move clicks; a value step plays accept
-    /// (even at a clamp); the music row and Back play nothing here.
-    #[test]
-    fn the_settings_page_asks_for_the_options_clicks() {
-        use ui::menu::{MenuInput, MenuModel, Row};
-        let model = MenuModel {
-            in_shell: Some("Game Options".into()),
-            team_size_pct: 10,
-            ..Default::default()
-        };
-        let rows = ui::menu::rows(&model);
-        let at = |row: Row| MenuModel {
-            cursor: rows.iter().position(|r| *r == row).unwrap(),
-            ..model.clone()
-        };
-        let sound = |m: &MenuModel, input: MenuInput| {
-            let (to, _) = ui::menu::navigate(m, input);
-            setting_sound(m, input, to)
-        };
-        let down = MenuInput {
-            down: true,
-            ..Default::default()
-        };
-        let left = MenuInput {
-            left: true,
-            ..Default::default()
-        };
-        let back = MenuInput {
-            back: true,
-            ..Default::default()
-        };
-        assert_eq!(sound(&model, down), Some(MenuSound::Select));
-        assert_eq!(
-            sound(&at(Row::AiCap), left),
-            Some(MenuSound::Accept),
-            "at its clamp"
-        );
-        assert_eq!(sound(&at(Row::Music), left), None);
-        assert_eq!(sound(&at(Row::Fov), back), None);
-        // A click sounds as its press: a value step accepts, music and Back
-        // stay quiet (issue #142).
-        use ui::menu::MenuAction;
-        assert_eq!(
-            shell_click_sound(MenuAction::SetFov(1.05)),
-            Some(MenuSound::Accept)
-        );
-        assert_eq!(
-            shell_click_sound(MenuAction::SetPadLookSensitivity(1.1)),
-            Some(MenuSound::Accept)
-        );
-        assert_eq!(
-            shell_click_sound(MenuAction::ToggleInvertY),
-            Some(MenuSound::Accept)
-        );
-        assert_eq!(shell_click_sound(MenuAction::SetMusic(0.5)), None);
-        assert_eq!(shell_click_sound(MenuAction::Resume), None);
-        assert_eq!(sound(&at(Row::Fov), MenuInput::default()), None);
-    }
-
-    /// Issue #172: F11 is the fullscreen key; the editor keeps the row as it was.
-    #[test]
-    fn the_binding_editor_refuses_the_fullscreen_key() {
-        let mut c = controls();
-        let f11 = game::kbm::Trigger::Key(winit::keyboard::KeyCode::F11);
-        assert_eq!(c.assign(Binding::Keyboard(f11)), MenuSound::Error);
-        assert!(c.capture.is_some(), "still waiting for a key");
-        assert_eq!(
-            c.message.as_deref(),
-            Some(
-                format!(
-                    "{}; choose another key",
-                    game::kbm::f11_note(game::kbm::MAC)
-                )
-                .as_str()
-            )
-        );
-        assert_eq!(c.missing(), None);
-    }
-
-    /// Issue #172: a saved layout that bound F11 opens with that action
-    /// unassigned and says so; the page asks for a key before it saves.
-    #[test]
-    fn a_saved_f11_binding_opens_unassigned() {
-        let mut settings = game::profile::Settings::default();
-        let mut items: Vec<_> = game::control_layout::keyboard_defaults(
-            ControlContext::Infantry,
-            &settings.keyboard_bindings,
-        )
-        .into_iter()
-        .map(Option::unwrap)
-        .collect();
-        let row = items.len() - 1;
-        items[row] = game::kbm::FULLSCREEN_KEY;
-        assert!(game::control_layout::keyboard(ControlContext::Infantry, &items).is_some());
-        settings
-            .keyboard_layouts
-            .set(ControlContext::Infantry, items);
-        let c = Controls::new(
-            SettingsPage::KeyboardMouse,
-            ControlContext::Infantry,
-            &settings,
-        );
-        assert_eq!(c.missing(), Some(row));
-        let name = game::control_layout::actions(ControlContext::Infantry, true)[row].name;
-        assert_eq!(
-            c.message.as_deref(),
-            Some(
-                format!(
-                    "{}; {name} is unassigned",
-                    game::kbm::f11_note(game::kbm::MAC)
-                )
-                .as_str()
-            )
-        );
-        assert_eq!(settings.free_fullscreen_key(), [ControlContext::Infantry]);
-    }
-
-    #[test]
-    fn occupied_binding_leaves_the_displaced_action_unassigned() {
-        let mut c = controls();
-        let key = game::kbm::Trigger::Key(winit::keyboard::KeyCode::KeyS);
-        assert_eq!(c.assign(Binding::Keyboard(key)), MenuSound::Accept);
-        assert_eq!(c.missing(), Some(1));
-        assert_eq!(c.message.as_deref(), Some("Move backward is unassigned"));
-    }
-
-    #[test]
-    fn rejected_wheel_binding_explains_rejection_and_focus_loss_cancels() {
-        let setup = crate::BattleSetup {
-            seed: 42,
-            difficulty: Default::default(),
-            spawn: (0.0, 0.0),
-            spawn_set: false,
-            targets: false,
-            ai: None,
-            ai_cap: None,
-            team_size_pct: None,
-            tickets: 250,
-            tickets_set: false,
-            ticket_pct: 100,
-            time_limit: 0,
-            space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
-            cheats: Default::default(),
-            teams: None,
-            classes_dir: Default::default(),
-            mission: None,
-            vehicle: None,
-            mission_file: None,
-            player_team: 0,
-            heroes: Some(core::sim::heroes::HeroRules::default()),
-            dlc_heroes: false,
-            netplay_rows: false,
-            opening_humans: [0; 2],
-            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
-        };
-        let mut app = App::new(
-            Default::default(),
-            Default::default(),
-            setup,
-            None,
-            None,
-            None,
-            Default::default(),
-        );
-        app.controls = Some(controls());
-        let before = app.profile.clone();
-        assert!(
-            app.capture_keyboard(&winit::event::WindowEvent::MouseWheel {
-                device_id: winit::event::DeviceId::dummy(),
-                delta: winit::event::MouseScrollDelta::LineDelta(0.0, 1.0),
-                phase: winit::event::TouchPhase::Moved,
-            })
-        );
-        assert_eq!(app.profile, before);
-        let c = app.controls.as_ref().unwrap();
-        assert!(c.capture.is_some());
-        assert!(c
-            .message
-            .as_deref()
-            .unwrap()
-            .contains("wheel cannot hold movement"));
-        assert!(!app.capture_keyboard(&winit::event::WindowEvent::Focused(false)));
-        assert!(app.controls.as_ref().unwrap().capture.is_none());
-        assert_eq!(app.profile, before);
-    }
-}
+pub(super) use tests::test_take;

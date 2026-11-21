@@ -48,6 +48,22 @@ use crate::walk::WalkSim;
 /// this rate (BF2's update step; BF1's taken as the same, PROVISIONAL).
 pub const STEP: f32 = 1.0 / 30.0;
 
+/// Post classes whose disc record names no hologram class: both games'
+/// `com_bldg_invisible_controlzone` and `com_bldg_untakeable_controlzone`,
+/// and BF2's `com_bldg_inv_untakeable_controlzone` (BF2 `INGAME.LVL`, BF1
+/// `COMMON.LVL`; the drawn ones name `com_holo_controlzone`). The campaign
+/// layers mark their objectives with these.
+const NO_HOLOGRAM: [&str; 3] = [
+    "com_bldg_invisible_controlzone",
+    "com_bldg_untakeable_controlzone",
+    "com_bldg_inv_untakeable_controlzone",
+];
+
+/// Does a post of `class` stand under a hologram.
+pub fn has_hologram(class: &str) -> bool {
+    !NO_HOLOGRAM.iter().any(|c| c.eq_ignore_ascii_case(class))
+}
+
 /// A hologram class's keys (`com_holo_controlzone`, both games' discs).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HoloClass {
@@ -160,6 +176,17 @@ impl Holo {
         }
     }
 
+    /// A post the mission killed before the battle's first frame: switched
+    /// off with its fade done.
+    pub fn dark(team: Option<u8>) -> Self {
+        Holo {
+            fade: 0.0,
+            intensity: 0.0,
+            on: false,
+            ..Holo::steady(team)
+        }
+    }
+
     /// Switch on or off (`FUN_00218550` / `FUN_00218658`): a fade under way
     /// turns round where it is.
     pub fn switch(&mut self, on: bool, c: &HoloClass) {
@@ -245,6 +272,8 @@ pub struct HoloArt {
     /// By faction key (all | imp | rep | cis).
     pub icons: HashMap<&'static str, Parts>,
     pub heights: HashMap<String, f32>,
+    /// The posts with no hologram ([`has_hologram`]), by name.
+    pub bare: std::collections::HashSet<String>,
 }
 
 /// Faction key → the icon model's side name.
@@ -287,6 +316,16 @@ impl HoloArt {
             bf1: game != "bf2",
             ..HoloArt::default()
         };
+        // Every instance, not the conquest layout's posts: a campaign makes
+        // posts of the capture-region-less objective zones too (geo1's
+        // `goto`, `obj3_wheel`, `MapLayout::from_mission_manifest`).
+        art.bare = scene
+            .manifest
+            .instances
+            .iter()
+            .filter(|i| !has_hologram(&i.class))
+            .map(|i| i.name.clone())
+            .collect();
         for cp in &crate::layout::MapLayout::from_manifest(&scene.manifest).cps {
             // The class's geometry, drawn or not (the port draws no BF1 post).
             let geometry = scene
@@ -428,6 +467,24 @@ fn flare_draw(
     camera: &Camera,
 ) -> Option<ParticleDraw> {
     let (radius, alpha) = flare_parameters(h, c, origin, camera.position)?;
+    lens_flare(origin, radius, alpha, 1.0, rgb, camera)
+}
+
+/// Shared native lens-flare fans and ring (re-point-lights.md §10).
+/// `alpha` is the flare's colour byte, which every vertex halves onto the
+/// GS scale once (`(b + 1) >> 1`, `FUN_00468238` 515896–515897,
+/// `FUN_00468a28` 516115–516126); the particle path's `gs_unit` is that
+/// halving, so the byte goes in whole. The ring's mid vertices carry
+/// `alpha >> 1`. `fade` scales only the stars' centre alpha, the manager's
+/// distance fade (`FUN_00466d08` passes it as the draw's first argument).
+pub(crate) fn lens_flare(
+    origin: Vec3,
+    radius: f32,
+    alpha: u8,
+    fade: f32,
+    rgb: [u8; 3],
+    camera: &Camera,
+) -> Option<ParticleDraw> {
     let delta = origin - camera.position;
     let depth = delta.dot(camera.forward());
     if depth <= camera.near {
@@ -439,6 +496,7 @@ fn flare_draw(
         + (delta.dot(right) + 2.0 * delta.dot(up)) * std::f32::consts::PI / depth;
     // LensFlare is untextured: GS RGB bytes are half-strength, while its
     // alpha byte is normalized on the GS's 0..128 scale by the particle path.
+    let star = (f32::from(alpha) * fade) as u8;
     let color = |a| {
         [
             rgb[0].div_ceil(2),
@@ -461,7 +519,7 @@ fn flare_draw(
             let a = phase + i as f32 * std::f32::consts::TAU / 3.0;
             let b = a + std::f32::consts::TAU / 3.0;
             tris.extend([
-                at(0.0, 0.0, alpha),
+                at(0.0, 0.0, star),
                 on_ring(a, rx * radius, ry * radius, 0),
                 on_ring(b, rx * radius, ry * radius, 0),
             ]);
@@ -470,7 +528,7 @@ fn flare_draw(
     for i in 0..7 {
         let a = angle + i as f32 * std::f32::consts::TAU / 7.0;
         let b = a + std::f32::consts::TAU / 7.0;
-        let inner = |t: f32| on_ring(t, radius, radius, alpha / 2);
+        let inner = |t: f32| on_ring(t, radius, radius, alpha >> 1);
         let outer = |t: f32| on_ring(t, radius * 4.0, radius * 4.0, 0);
         tris.extend([
             at(0.0, 0.0, alpha),
@@ -610,7 +668,16 @@ impl Holos {
             || now < self.clock
         {
             *self = Holos {
-                list: cps.iter().map(|cp| Holo::steady(cp.owner)).collect(),
+                list: cps
+                    .iter()
+                    .map(|cp| {
+                        if cp.killed {
+                            Holo::dark(cp.owner)
+                        } else {
+                            Holo::steady(cp.owner)
+                        }
+                    })
+                    .collect(),
                 builds: walk
                     .sim
                     .building_turrets
@@ -643,6 +710,9 @@ impl Holos {
         let viewer = walk.player_team();
         let mut out = Vec::new();
         for (h, cp) in self.list.iter().zip(&walk.sim.cps) {
+            if art.bare.contains(&cp.def.name) {
+                continue;
+            }
             let faction = h
                 .team
                 .and_then(|t| walk.teams.get(usize::from(t)))
@@ -658,6 +728,16 @@ impl Holos {
 /// One update of a post's hologram: the post's switch, a change of owner
 /// (the new team and icon, switched on: `FUN_00359c08`), the update.
 pub fn step(h: &mut Holo, cp: &core::cp::CommandPost, c: &HoloClass, rng: &mut Lcg) {
+    // A killed post (`KillObject`, BF2 `FUN_00354e10`): unscheduled, so its
+    // own update (`FUN_00357440`) stops, and its hologram at +0xb20 is
+    // switched off (`FUN_00218658`) until `RespawnObject` schedules it again
+    // (`FUN_00355648`). OURS: the hologram's own fade keeps running here;
+    // trace: whether the PS2 still updates a dead post's hologram.
+    if cp.killed {
+        h.switch(false, c);
+        h.update(STEP, c, rng);
+        return;
+    }
     h.switch(switched_on(cp, c), c);
     if h.team != cp.owner {
         h.team = cp.owner;
@@ -674,6 +754,9 @@ pub fn still_draws(art: &HoloArt, scene: &Scene, camera: &Camera) -> Vec<Particl
     let mission = crate::point_light::still_mission(scene);
     let mut out = Vec::new();
     for cp in crate::point_light::still_posts(&scene.manifest, mission.as_ref()) {
+        if art.bare.contains(&cp.name) {
+            continue;
+        }
         // Mission team numbers: 0 = neutral, 1 / 2 the sides.
         let team = (cp.team != 0).then_some(cp.team);
         let faction = mission
@@ -700,6 +783,35 @@ mod tests {
     use super::*;
     use core::cp::{CommandPost, CpDef};
     use core::region::Region;
+
+    #[test]
+    #[ignore = "requires GPU and tutorial bake"]
+    fn tutorial_objective_zones_have_no_beam() {
+        let root = crate::assets::baked_root();
+        let mission = crate::mission::MissionDef::load_campaign(
+            &root.parent().unwrap().join("missions"),
+            "geo1c_c",
+        )
+        .unwrap();
+        let mut scene = crate::assets::load_scene(&root.join("bf2_geo1")).unwrap();
+        scene.apply_mission_layers(&mission.layers);
+        let mut renderer = Renderer::new_headless(320, 240).unwrap();
+        let art = HoloArt::load(&mut renderer, &scene);
+        let layout = crate::layout::MapLayout::from_mission_manifest(&scene.manifest, false, true);
+        let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+        walk.add_posts(&layout);
+        walk.sim.cps.retain(|cp| art.bare.contains(&cp.def.name));
+        assert!(
+            walk.sim.cps.iter().any(|cp| cp.def.name == "goto"),
+            "missing tutorial zone"
+        );
+        let mut holos = Holos::default();
+        holos.advance(&walk);
+        assert!(
+            holos.draws(&art, &walk, &Camera::default()).is_empty(),
+            "objective zone emitted hologram light"
+        );
+    }
 
     fn post(owner: Option<u8>) -> CommandPost {
         CommandPost::new(

@@ -124,8 +124,13 @@ impl WalkSim {
         let mut f = if self.camera_blockers.is_empty() {
             1.0
         } else {
-            self.camera_blockers
-                .fraction(from, to, None, |i| self.station_pose(i), &self.sim.doors)
+            self.camera_blockers.fraction(
+                from,
+                to,
+                None,
+                |i| self.live_instance_pose(i),
+                &self.sim.doors,
+            )
         };
         let track = to - from;
         let len = track.length();
@@ -385,6 +390,7 @@ impl WalkSim {
         dt: f32,
         pad: ui::stats::Pad,
         music_secs: Option<f32>,
+        show_stats: bool,
     ) -> (bool, Option<ui::shell_feel::MenuSound>) {
         let Some(winner) = self.sim.outcome else {
             return (false, None);
@@ -399,7 +405,26 @@ impl WalkSim {
             } else {
                 Result::Defeat
             };
-            RoundEnd::start(result, &self.end_shots, self.sim.tick as u32, music_secs)
+            // `FUN_00381110` plays the end movie when the winners mask has
+            // bit 2, the script's team 1 (sim team 0): a draw sets both.
+            let movie = self
+                .campaign
+                .as_ref()
+                .and_then(|c| c.end_movie())
+                .filter(|_| winner == 0 || winner == core::sim::OUTCOME_DRAW)
+                .map(str::to_owned);
+            let end = RoundEnd::start(
+                result,
+                &self.end_shots,
+                self.sim.tick as u32,
+                music_secs,
+                movie,
+            );
+            if show_stats {
+                end
+            } else {
+                end.without_stats()
+            }
         });
         let sound = r.step(dt, pad);
         (r.done(), sound)
@@ -518,7 +543,7 @@ impl WalkSim {
             base,
             point,
             v.instance,
-            |i| self.station_pose(i),
+            |i| self.live_instance_pose(i),
             &self.sim.doors,
         );
         let end = base + (point - base) * f;
@@ -629,7 +654,7 @@ impl WalkSim {
                 target,
                 desired,
                 own_instance,
-                |i| self.station_pose(i),
+                |i| self.live_instance_pose(i),
                 &self.sim.doors,
             )
         };
@@ -789,6 +814,17 @@ impl WalkSim {
             .map(|s| s.pose())
     }
 
+    /// Live pose of any animated station or campaign world instance (doors).
+    pub(super) fn live_instance_pose(&self, instance: u32) -> Option<Mat4> {
+        self.station_pose(instance).or_else(|| {
+            self.campaign
+                .as_ref()?
+                .instance_poses()
+                .get(&instance)
+                .copied()
+        })
+    }
+
     /// The props and vehicles the drawn chase camera sees through now (ours,
     /// playtest 2026-10-28, `crate::camera_collide`): those between it and
     /// the player's eye or body (a seat's or droid's camera: its target),
@@ -806,7 +842,7 @@ impl WalkSim {
                 cam.position,
                 &sights,
                 t.own_instance,
-                |i| self.station_pose(i),
+                |i| self.live_instance_pose(i),
                 &self.sim.doors,
             )
         };

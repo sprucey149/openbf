@@ -192,6 +192,11 @@ impl Sim {
         setup.guns.get(usize::from(m.seat))?.clone()
     }
 
+    /// Primary weapon class index for the seat `u` currently occupies, if any.
+    pub fn seat_primary_weapon(&self, u: UnitHandle) -> Option<usize> {
+        self.seat_gun_setup(u)?.weapons.first().map(|w| w.class)
+    }
+
     /// Make every seat's gun state of vehicle `vi` from its class's setup
     /// (each gun at rest, each weapon full), once.
     pub fn arm(&mut self, vi: usize) {
@@ -584,6 +589,22 @@ impl Sim {
                     .and_then(Option::as_ref)
                     .is_some_and(|p| p.bf2)
                     && self.flyer_region_coverage(vehicle).0));
+        // A bot's launcher candidate: the target its AI handed the gun
+        // (B2 `FUN_002bbb98` writes the current weapon's W+0x10c, which
+        // `FUN_0033a658` reads for a non-human owner; B1 `FUN_0023d1f8`'s
+        // W+0x128), here the threat vehicle it is armed against, else its
+        // combat target.
+        let bot_candidate = driver.filter(|_| ai).and_then(|i| {
+            armed_target
+                .map(crate::missile::MissileTarget::Vehicle)
+                .or_else(|| {
+                    self.units[i]
+                        .ai
+                        .target
+                        .and_then(|f| f.unit())
+                        .map(crate::missile::MissileTarget::Unit)
+                })
+        });
         let mut shots = Vec::new();
         for (k, w) in g.weapons.iter().enumerate() {
             let held = match (channel, k) {
@@ -605,6 +626,19 @@ impl Sim {
             ws.set_posture(wc, 0, 0.0, false);
             if let Some(m) = ai_spread_mult {
                 ws.spread_mult = m;
+            }
+            // A bot's launcher dwells as a human's does (`re-ordnance-kinds.md`
+            // §5.2): its clock counts while the candidate stays and restarts
+            // when it changes (B2 `FUN_0033a950`), and only the current weapon
+            // holds a candidate. A salvo under way keeps its lock.
+            if ai && wc.lock_time > 0.0 && wc.ordnance.missile.is_some() && ws.salvo_counter < 1 {
+                let candidate = bot_candidate.filter(|_| channel.is_none_or(|c| c == k));
+                if candidate != ws.lock_target {
+                    ws.lock_target = candidate;
+                    ws.lock_held = 0.0;
+                } else if candidate.is_some() {
+                    ws.lock_held += dt;
+                }
             }
             let player_guided = is_player && wc.guided.is_some();
             let guided_up = player_guided
@@ -762,6 +796,9 @@ impl Sim {
                 // rockets pass their held target at every shot
                 // (`re-ordnance-kinds.md` §5), so the vehicle gun's own
                 // `ai.target` / crewman's target is its lock, with no dwell.
+                // A launcher (`LockTime > 0`) passes its target only with
+                // the dwell full (vt+0x34 is its ready byte W+0x17c), for a
+                // bot too.
                 if let Some(mc) = self.weapon_classes[w.class].ordnance.missile {
                     let ord = self.weapon_classes[w.class].ordnance.clone();
                     let target = self
@@ -775,7 +812,13 @@ impl Sim {
                     let locked = driver
                         .and_then(|i| self.seat_lock_target(i, w.class, lock_origin, lock_dir));
                     let armed = armed_target.map(crate::missile::MissileTarget::Vehicle);
-                    let target = locked.or(armed).or(target);
+                    let wc = &self.weapon_classes[w.class];
+                    let ws = &st.weapons[k];
+                    let target = if ai && wc.lock_time > 0.0 {
+                        ws.lock_target.filter(|_| ws.locked(wc))
+                    } else {
+                        locked.or(armed).or(target)
+                    };
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);
                 }
                 self.note_bolt_shot(&mut bolt, origin, d);
@@ -784,6 +827,18 @@ impl Sim {
                     let round = st.weapons[k].count_secondary_round();
                     self.fire_secondary(who, w.class, round, origin, d, spec.charge);
                 }
+            }
+            // The salvo's end leaves the fire state, which clears the ready
+            // byte (B2 `FUN_0033a620`), and the dwell state's entry zeroes
+            // the clock (`FUN_0033a840`, both under class +0x305 && +0x304):
+            // every shot spends a bot's lock, guided or not.
+            let wc = &self.weapon_classes[w.class];
+            if ai
+                && wc.lock_time > 0.0
+                && wc.ordnance.missile.is_some()
+                && st.weapons[k].salvo_counter < 1
+            {
+                st.weapons[k].lock_held = 0.0;
             }
             if st.weapons[k].salvo_counter < 1 && k < super::lock_on::LOCK_CHANNELS {
                 if let Some(i) = driver {

@@ -46,6 +46,8 @@
 //! left-justified stack keeps its offset from the box's left edge, the help
 //! lines their offsets from the window's edges.
 
+mod campaign;
+pub mod campaign_saves;
 pub mod profiles;
 
 use crate::hud_draw::Ctx;
@@ -112,9 +114,18 @@ pub enum Page {
     Title,
     Main,
     Singleplayer,
+    AskTraining,
+    RiseNewLoad,
+    RiseOfTheEmpire,
+    CampaignBattle,
+    CampaignMenu,
+    CampaignSaves,
     Options,
     /// `[ours]` issue #168.
     Multiplayer,
+    /// `[ours]` the end-of-campaign credits crawl. The game draws the crawl
+    /// (no stack, no shell movie); any skip input leaves for Singleplayer.
+    Credits,
 }
 
 /// Every button the port shows; the label is the disc's text.
@@ -125,9 +136,35 @@ pub enum RowId {
     Splitscreen,
     Options,
     QuitGame,
+    Training,
     RiseOfTheEmpire,
     GalacticConquest,
     InstantAction,
+    AskTrainingPlay,
+    AskTrainingSkip,
+    CampaignNewGame,
+    CampaignLoad,
+    CampaignMission(u8),
+    CampaignToggleAll,
+    CampaignPlay,
+    CampaignBack,
+    CampaignResume,
+    CampaignOptions,
+    CampaignSave,
+    CampaignLoadMenu,
+    CampaignQuit,
+    CampaignQuitYes,
+    CampaignQuitNo,
+    SaveAsNew,
+    SaveSlot(u8),
+    NoSavedGames,
+    SaveContinue,
+    SaveConfirm,
+    LoadCancel,
+    LoadContinue,
+    SaveYes,
+    SaveNo,
+    SaveOk,
     GameOptions,
     AudioOptions,
     GraphicsOptions,
@@ -149,9 +186,38 @@ impl RowId {
             RowId::Options => ("ifs.main.options", "Options"),
             // Our own key: the disc's `common.quit2windows` reads "Exit To Windows".
             RowId::QuitGame => ("ifs.main.quitgame", "Quit Game"),
+            RowId::Training => ("ifs.sp.training", "Training"),
             RowId::RiseOfTheEmpire => ("ifs.sp.riseempire", "Rise of the Empire"),
             RowId::GalacticConquest => ("ifs.sp.meta", "Galactic Conquest"),
             RowId::InstantAction => ("ifs.sp.ia", "Instant Action"),
+            RowId::AskTrainingPlay => ("ifs.sp.play", "Play"),
+            RowId::AskTrainingSkip => ("ifs.sp.skip", "Skip"),
+            RowId::CampaignNewGame => ("ifs.meta.load.new", "New Game"),
+            RowId::CampaignLoad => ("ifs.meta.load.btnload", "Load"),
+            RowId::CampaignMission(i) => (
+                "openbf.campaign.mission",
+                crate::campaign::RISE_OF_THE_EMPIRE[i as usize].title,
+            ),
+            RowId::CampaignToggleAll => ("openbf.campaign.toggle_all", "View All Missions"),
+            RowId::CampaignPlay => ("ifs.freeform.attack", "Attack"),
+            RowId::CampaignBack => ("common.back", "Back"),
+            RowId::CampaignResume => ("common.resume", "Resume Game"),
+            RowId::CampaignOptions => ("ifs.main.options", "Options"),
+            RowId::CampaignSave => ("common.save", "Save Game"),
+            RowId::CampaignLoadMenu => ("common.load", "Load Game"),
+            RowId::CampaignQuit => ("common.quit", "Quit"),
+            RowId::CampaignQuitYes => ("common.yes", "Yes"),
+            RowId::CampaignQuitNo => ("common.no", "No"),
+            RowId::SaveAsNew => ("ifs.meta.load.saveasnew", "< Save as New >"),
+            RowId::SaveSlot(_) => ("ifs.meta.load.save", "Save Game"),
+            RowId::NoSavedGames => ("ifs.meta.load.nogames", "No Saved Games Available"),
+            RowId::SaveContinue => ("ifs.loadsave_ps2.continuenosave", "Continue Without Saving"),
+            RowId::SaveConfirm => ("ifs.loadsave_ps2.save", "Save"),
+            RowId::LoadCancel => ("ifs.loadsave_ps2.cancel", "Cancel"),
+            RowId::LoadContinue => ("ifs.loadsave_ps2.continue", "Continue"),
+            RowId::SaveYes => ("common.yes", "Yes"),
+            RowId::SaveNo => ("common.no", "No"),
+            RowId::SaveOk => ("common.ok", "OK"),
             RowId::GameOptions => ("ifs.GameOpt.title", "Game Options"),
             RowId::AudioOptions => ("ifs.SoundOpt.title", "Audio Options"),
             RowId::GraphicsOptions => ("openbf.graphicsoptions", "Graphics Options"),
@@ -216,11 +282,31 @@ impl Stack {
     }
 }
 
+/// OURS: the save list's Delete help text one help line above Select. The
+/// disc puts it 40 above the screen's bottom, right-justified
+/// (`ifs_campaign_load` main.f36 pc 113-121). measure: the PS2's help line
+/// heights on the save list's frame.
+const DELETE_HELP_LIFT: f32 = 25.0;
+
 /// What a step asks the game to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellCommand {
     /// Singleplayer → Instant Action: today's IA setup (until card BSHLB).
     InstantAction,
+    /// Rise of the Empire → New Game: plays opening crawl (`crawl1`) and opens Turn 1 planet briefing.
+    StartCampaignNewGame,
+    /// The save screen's name keyboard, for [`campaign_saves::CampaignSaves::pending`].
+    EditCampaignSaveName,
+    /// Write [`campaign_saves::CampaignSaves::pending`] with the current turn.
+    WriteCampaignSave,
+    /// Read the focused save ([`campaign_saves::CampaignSaves::selected_name`]).
+    LoadCampaignSave,
+    /// Delete the focused save.
+    DeleteCampaignSave,
+    /// Rise of the Empire → Launch mission index (`0..18`).
+    LaunchCampaignMission {
+        index: usize,
+    },
     Settings(crate::menu::SettingsPage),
     /// Multiplayer → LAN: Host Game / Join Game (issue #168).
     HostGame,
@@ -236,8 +322,36 @@ pub struct ShellMenus {
     pub page: Page,
     pub main: Stack,
     pub singleplayer: Stack,
+    pub ask_training: Stack,
+    pub rise_new_load: Stack,
+    pub campaign: Stack,
+    pub campaign_battle: Stack,
+    pub campaign_menu: Stack,
+    pub campaign_quit_popup: Stack,
+    pub campaign_saves: campaign_saves::CampaignSaves,
     pub options: Stack,
     pub multiplayer: Stack,
+    pub campaign_unlocked: u8,
+    pub campaign_selected: usize,
+    pub campaign_view_all: bool,
+    pub campaign_focus_toggle: bool,
+    pub campaign_quit_confirm: bool,
+    pub campaign_pause_options: bool,
+    pub training_prompted: bool,
+    ask_training_prompt: String,
+    campaign_quit_prompt: String,
+    training_label: String,
+    campaign_title: String,
+    campaign_launch_label: String,
+    campaign_planets: Vec<String>,
+    campaign_descs: Vec<String>,
+    /// The campaign list's localizable texts, looked up once in [`Self::new`]
+    /// through `text(key, English)`. They live here so the list can be
+    /// rebuilt on a profile change without the lookup closure.
+    campaign_show_unlocked: String,
+    campaign_view_all_text: String,
+    campaign_showing_fmt: String,
+    campaign_mission_note_fmt: String,
     pub prompt: String,
     pub back: String,
     pub select: String,
@@ -256,7 +370,7 @@ pub struct ShellMenus {
 }
 
 impl ShellMenus {
-    /// The four screens, their texts looked up by `text(key, English)`.
+    /// The screens, their texts looked up by `text(key, English)`.
     pub fn new(text: &dyn Fn(&str, &str) -> String) -> ShellMenus {
         let row = |id: RowId, enabled: bool| {
             let (k, e) = id.key();
@@ -280,6 +394,8 @@ impl ShellMenus {
         };
         let (k, e) = RowId::Singleplayer.key();
         let sp_title = text(k, e);
+        let (k, e) = RowId::RiseOfTheEmpire.key();
+        let campaign_title = text(k, e);
         let (k, e) = RowId::Options.key();
         let opt_title = text(k, e);
         let (k, e) = RowId::Multiplayer.key();
@@ -294,7 +410,43 @@ impl ShellMenus {
             0.0,
         );
         multiplayer.note = Some(text(TEXT_ONLINE_NOTE.0, TEXT_ONLINE_NOTE.1));
-        ShellMenus {
+        let campaign_planets = crate::campaign::RISE_OF_THE_EMPIRE
+            .iter()
+            .map(|e| text(e.planet_key, e.title))
+            .collect();
+        let campaign_descs = crate::campaign::RISE_OF_THE_EMPIRE
+            .iter()
+            .map(|e| {
+                let raw = text(e.desc_key, e.desc_fallback);
+                let joined = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+                if joined.is_empty() {
+                    e.desc_fallback.to_owned()
+                } else {
+                    joined
+                }
+            })
+            .collect();
+        let campaign_show_unlocked = text(
+            campaign::TEXT_SHOW_UNLOCKED.0,
+            campaign::TEXT_SHOW_UNLOCKED.1,
+        );
+        let campaign_view_all_text = text(campaign::TEXT_VIEW_ALL.0, campaign::TEXT_VIEW_ALL.1);
+        let campaign_showing_fmt = text(campaign::TEXT_SHOWING.0, campaign::TEXT_SHOWING.1);
+        let campaign_mission_note_fmt =
+            text(campaign::TEXT_MISSION_NOTE.0, campaign::TEXT_MISSION_NOTE.1);
+        let back_label = text(TEXT_BACK.0, TEXT_BACK.1);
+        let training_label = text("ifs.sp.training", "Training");
+        let ask_training_prompt = text(
+            "ifs.sp.asktraining",
+            "Do you want to play the training mission first?",
+        );
+        let campaign_quit_prompt = text(
+            "ifs.pause.warn_quit",
+            "Leaving the game now will end this session. Are you sure you want to leave?",
+        );
+        let launch_label = text("ifs.freeform.attack", "Attack");
+        let pause_title = text("game.pause.title", "Game Menu");
+        let mut menus = ShellMenus {
             page: Page::Title,
             main: stack(
                 text(TEXT_MAIN.0, TEXT_MAIN.1),
@@ -311,13 +463,71 @@ impl ShellMenus {
             singleplayer: stack(
                 sp_title,
                 vec![
-                    row(RowId::RiseOfTheEmpire, false),
+                    row(RowId::RiseOfTheEmpire, true),
                     row(RowId::GalacticConquest, false),
                     row(RowId::InstantAction, true),
                 ],
                 true,
                 0.0,
             ),
+            ask_training: stack(
+                String::new(),
+                vec![
+                    row(RowId::AskTrainingPlay, true),
+                    row(RowId::AskTrainingSkip, true),
+                ],
+                false,
+                -32.0,
+            ),
+            rise_new_load: stack(
+                campaign_title.clone(),
+                vec![
+                    row(RowId::CampaignNewGame, true),
+                    row(RowId::CampaignLoad, true),
+                ],
+                true,
+                -44.8,
+            ),
+            campaign: stack(campaign_title.clone(), Vec::new(), true, 0.0),
+            campaign_battle: stack(
+                String::new(),
+                vec![
+                    StackRow {
+                        id: RowId::CampaignPlay,
+                        label: launch_label.clone(),
+                        enabled: true,
+                    },
+                    StackRow {
+                        id: RowId::CampaignBack,
+                        label: back_label.clone(),
+                        enabled: true,
+                    },
+                ],
+                true,
+                0.0,
+            ),
+            campaign_menu: stack(
+                pause_title,
+                vec![
+                    row(RowId::CampaignResume, true),
+                    row(RowId::CampaignOptions, true),
+                    row(RowId::CampaignSave, true),
+                    row(RowId::CampaignLoadMenu, true),
+                    row(RowId::CampaignQuit, true),
+                ],
+                false,
+                0.0,
+            ),
+            campaign_quit_popup: stack(
+                String::new(),
+                vec![
+                    row(RowId::CampaignQuitYes, true),
+                    row(RowId::CampaignQuitNo, true),
+                ],
+                false,
+                -32.0,
+            ),
+            campaign_saves: campaign_saves::CampaignSaves::new(text),
             options: stack(
                 opt_title,
                 vec![
@@ -330,22 +540,81 @@ impl ShellMenus {
                 0.0,
             ),
             multiplayer,
+            campaign_unlocked: 1,
+            campaign_selected: 0,
+            campaign_view_all: false,
+            campaign_focus_toggle: false,
+            campaign_quit_confirm: false,
+            campaign_pause_options: false,
+            training_prompted: false,
+            ask_training_prompt,
+            campaign_quit_prompt,
+            training_label,
+            campaign_title,
+            campaign_launch_label: launch_label,
+            campaign_planets,
+            campaign_descs,
+            campaign_show_unlocked,
+            campaign_view_all_text,
+            campaign_showing_fmt,
+            campaign_mission_note_fmt,
             prompt: text(TEXT_PROMPT.0, TEXT_PROMPT.1),
-            back: text(TEXT_BACK.0, TEXT_BACK.1),
+            back: back_label,
             select: text(TEXT_SELECT.0, TEXT_SELECT.1),
             on_page: 0.0,
             clock: 0.0,
             covered: false,
             cues: Cues::default(),
             pulse: Pulse::BUTTON,
+        };
+        menus.rebuild_campaign_stacks();
+        menus
+    }
+
+    pub fn training_prompted(&self) -> bool {
+        self.training_prompted
+    }
+
+    pub fn set_training_prompted(&mut self, prompted: bool) {
+        if self.training_prompted == prompted {
+            return;
+        }
+        self.training_prompted = prompted;
+        let has_training = self
+            .singleplayer
+            .rows
+            .first()
+            .is_some_and(|r| r.id == RowId::Training);
+        if prompted && !has_training {
+            self.singleplayer.rows.insert(
+                0,
+                StackRow {
+                    id: RowId::Training,
+                    label: self.training_label.clone(),
+                    enabled: true,
+                },
+            );
+            self.singleplayer.focus = self.singleplayer.first();
+        } else if !prompted && has_training {
+            self.singleplayer.rows.remove(0);
+            self.singleplayer.focus = self.singleplayer.first();
         }
     }
 
     pub fn stack(&self) -> Option<&Stack> {
         match self.page {
-            Page::Title => None,
+            Page::Title | Page::CampaignBattle | Page::Credits => None,
             Page::Main => Some(&self.main),
             Page::Singleplayer => Some(&self.singleplayer),
+            Page::AskTraining => Some(&self.ask_training),
+            Page::RiseNewLoad => Some(&self.rise_new_load),
+            Page::RiseOfTheEmpire => Some(&self.campaign),
+            Page::CampaignMenu => Some(if self.campaign_quit_confirm {
+                &self.campaign_quit_popup
+            } else {
+                &self.campaign_menu
+            }),
+            Page::CampaignSaves => Some(&self.campaign_saves.stack),
             Page::Options => Some(&self.options),
             Page::Multiplayer => Some(&self.multiplayer),
         }
@@ -353,9 +622,18 @@ impl ShellMenus {
 
     fn stack_mut(&mut self) -> Option<&mut Stack> {
         match self.page {
-            Page::Title => None,
+            Page::Title | Page::CampaignBattle | Page::Credits => None,
             Page::Main => Some(&mut self.main),
             Page::Singleplayer => Some(&mut self.singleplayer),
+            Page::AskTraining => Some(&mut self.ask_training),
+            Page::RiseNewLoad => Some(&mut self.rise_new_load),
+            Page::RiseOfTheEmpire => Some(&mut self.campaign),
+            Page::CampaignMenu => Some(if self.campaign_quit_confirm {
+                &mut self.campaign_quit_popup
+            } else {
+                &mut self.campaign_menu
+            }),
+            Page::CampaignSaves => Some(&mut self.campaign_saves.stack),
             Page::Options => Some(&mut self.options),
             Page::Multiplayer => Some(&mut self.multiplayer),
         }
@@ -369,17 +647,62 @@ impl ShellMenus {
         if !stack.rows.get(row).is_some_and(|r| r.enabled) {
             return false;
         }
+        let id = stack.rows[row].id;
         stack.focus = row;
+        if self.page == Page::CampaignSaves {
+            let s = &mut self.campaign_saves;
+            if s.step == campaign_saves::SaveStep::List {
+                let first = usize::from(s.mode == campaign_saves::SaveMode::Save);
+                s.selected = match id {
+                    RowId::SaveSlot(i) => first + i as usize,
+                    _ => 0,
+                };
+                s.rebuild();
+            }
+        }
+        if self.page == Page::RiseOfTheEmpire {
+            match id {
+                RowId::CampaignMission(i) => {
+                    self.campaign_selected = i as usize;
+                    self.campaign_focus_toggle = false;
+                    self.rebuild_campaign_stacks();
+                }
+                RowId::CampaignToggleAll => {
+                    self.campaign_focus_toggle = true;
+                    self.rebuild_campaign_stacks();
+                }
+                _ => {}
+            }
+        }
         true
+    }
+
+    /// Open `page`, resetting reveal animation and focus as needed.
+    pub fn open_page(&mut self, page: Page) {
+        self.go(page);
     }
 
     fn go(&mut self, page: Page) {
         self.page = page;
         self.on_page = 0.0;
+        if page != Page::CampaignMenu {
+            self.campaign_quit_confirm = false;
+        }
         // Back on Singleplayer the focus is its first row (Training on the
         // PS2) whatever was left (menuref "Singleplayer", `ia_enter_back`).
-        if page == Page::Singleplayer {
+        if page == Page::Main {
+            self.campaign_pause_options = false;
+        } else if page == Page::Singleplayer {
+            self.campaign_pause_options = false;
             self.singleplayer.focus = self.singleplayer.first();
+        } else if page == Page::AskTraining {
+            self.ask_training.focus = self.ask_training.first();
+        } else if page == Page::RiseNewLoad {
+            self.rise_new_load.focus = self.rise_new_load.first();
+        } else if page == Page::CampaignMenu {
+            self.campaign_menu.note = None;
+        } else if matches!(page, Page::RiseOfTheEmpire | Page::CampaignBattle) {
+            self.rebuild_campaign_stacks();
         }
     }
 
@@ -413,16 +736,67 @@ impl ShellMenus {
             }
             return None;
         }
+        if self.page == Page::Credits {
+            // The crawl has no stack: the game draws it, and any skip input
+            // (Cross, Back/Triangle or Start) leaves for the Singleplayer
+            // screen that queued it. This is the page's only navigation.
+            if input.back || input.confirm || start {
+                self.cues.play(MenuSound::Exit);
+                self.go(Page::Singleplayer);
+            }
+            return None;
+        }
+        if self.page == Page::CampaignBattle {
+            if input.confirm {
+                self.cues.play(MenuSound::Accept);
+                return Some(ShellCommand::LaunchCampaignMission {
+                    index: self.campaign_selected,
+                });
+            }
+            if input.back || start {
+                self.campaign_quit_confirm = false;
+                self.campaign_menu.focus = self.campaign_menu.first();
+                self.cues.play(MenuSound::Select);
+                self.go(Page::CampaignMenu);
+                return None;
+            }
+            return None;
+        }
+        if self.page == Page::CampaignSaves {
+            return self.step_campaign_saves(input);
+        }
+        if self.page == Page::CampaignMenu {
+            if self.campaign_quit_confirm {
+                if input.back {
+                    self.campaign_quit_confirm = false;
+                    self.on_page = 0.0;
+                    self.cues.play(MenuSound::Exit);
+                    return None;
+                }
+            } else if input.back || (start && !input.confirm) {
+                self.cues.play(MenuSound::Exit);
+                self.go(Page::CampaignBattle);
+                return None;
+            }
+        }
         if input.back {
-            let to = if self.page == Page::Main {
-                Page::Title
-            } else {
-                Page::Main
+            let to = match self.page {
+                Page::Main => Page::Title,
+                Page::AskTraining | Page::RiseNewLoad => Page::Singleplayer,
+                Page::RiseOfTheEmpire => Page::RiseNewLoad,
+                Page::Options if self.campaign_pause_options => {
+                    self.campaign_pause_options = false;
+                    Page::CampaignMenu
+                }
+                _ => Page::Main,
             };
             // The screen underneath plays its exit click on re-Enter.
             self.cues.play(MenuSound::Exit);
             self.go(to);
             return None;
+        }
+        if self.page == Page::RiseOfTheEmpire {
+            return self.step_campaign(input);
         }
         let s = self.stack_mut()?;
         // `FollowButtonLink` clicks whenever it finds a row; links wrap.
@@ -446,6 +820,80 @@ impl ShellMenus {
         self.cues.play(MenuSound::Accept);
         match row {
             RowId::Singleplayer => self.go(Page::Singleplayer),
+            RowId::Training => {
+                return Some(ShellCommand::LaunchCampaignMission { index: 0 });
+            }
+            RowId::RiseOfTheEmpire => {
+                if !self.training_prompted {
+                    self.go(Page::AskTraining);
+                } else {
+                    self.go(Page::RiseNewLoad);
+                }
+            }
+            RowId::AskTrainingPlay => {
+                self.set_training_prompted(true);
+                return Some(ShellCommand::LaunchCampaignMission { index: 0 });
+            }
+            RowId::AskTrainingSkip => {
+                self.set_training_prompted(true);
+                if self.campaign_unlocked < 2 {
+                    self.set_campaign_unlocked(2);
+                }
+                self.go(Page::RiseNewLoad);
+            }
+            RowId::CampaignNewGame => {
+                if self.campaign_unlocked < 2 {
+                    self.set_campaign_unlocked(2);
+                }
+                self.select_campaign_mission(1);
+                return Some(ShellCommand::StartCampaignNewGame);
+            }
+            RowId::CampaignLoad => self.open_campaign_saves(
+                campaign_saves::SaveMode::Load,
+                campaign_saves::SaveReturn::NewLoad,
+                false,
+            ),
+            RowId::CampaignResume => self.go(Page::CampaignBattle),
+            RowId::CampaignOptions => {
+                self.campaign_pause_options = true;
+                self.go(Page::Options);
+            }
+            RowId::CampaignSave => self.open_campaign_saves(
+                campaign_saves::SaveMode::Save,
+                campaign_saves::SaveReturn::Menu,
+                false,
+            ),
+            RowId::CampaignLoadMenu => self.open_campaign_saves(
+                campaign_saves::SaveMode::Load,
+                campaign_saves::SaveReturn::Menu,
+                true,
+            ),
+            RowId::CampaignQuit => {
+                self.campaign_quit_confirm = true;
+                self.campaign_quit_popup.focus = 1;
+                self.on_page = 0.0;
+            }
+            RowId::CampaignQuitYes => {
+                self.campaign_quit_confirm = false;
+                self.open_campaign_saves(
+                    campaign_saves::SaveMode::Save,
+                    campaign_saves::SaveReturn::Quit,
+                    true,
+                );
+            }
+            RowId::CampaignQuitNo => {
+                self.campaign_quit_confirm = false;
+                self.on_page = 0.0;
+            }
+            RowId::CampaignPlay => {
+                return Some(ShellCommand::LaunchCampaignMission {
+                    index: self.campaign_selected,
+                })
+            }
+            RowId::CampaignBack => {
+                self.cues.play(MenuSound::Exit);
+                self.go(Page::RiseOfTheEmpire);
+            }
             RowId::Options => self.go(Page::Options),
             RowId::Multiplayer => self.go(Page::Multiplayer),
             RowId::LanHost => return Some(ShellCommand::HostGame),
@@ -479,11 +927,40 @@ impl ShellMenus {
         self.go(Page::Title);
     }
 
-    /// The movie property the page plays (§4).
+    /// The page stands over the campaign map's planet: the planet screen,
+    /// its pause menu, and the save screen opened from them
+    /// (`ifs_campaign_load` has no movie, main pc 62-64).
+    pub fn over_planet(&self) -> bool {
+        match self.page {
+            Page::CampaignBattle | Page::CampaignMenu => true,
+            Page::CampaignSaves => {
+                self.campaign_saves.back_to != campaign_saves::SaveReturn::NewLoad
+            }
+            _ => false,
+        }
+    }
+
+    /// The movie property the page plays (§4). The save screen sets none and
+    /// keeps the one playing (`ifs_campaign_load` main pc 62-64,
+    /// `analysis/re-bf2-menus.md` "A screen that sets no `movieBackground`"):
+    /// Rise of the Empire's `shell_sub_left`, or the planet screen's none.
     pub fn movie(&self) -> &'static str {
         match self.page {
             Page::Title | Page::Main => MOVIE_MAIN,
-            Page::Singleplayer | Page::Options | Page::Multiplayer => MOVIE_SUB,
+            Page::RiseOfTheEmpire => {
+                if self.campaign_focus_toggle {
+                    MOVIE_SUB
+                } else {
+                    crate::campaign::RISE_OF_THE_EMPIRE[self.campaign_selected].transition_movie
+                }
+            }
+            Page::CampaignSaves if !self.over_planet() => MOVIE_SUB,
+            Page::CampaignBattle | Page::CampaignMenu | Page::CampaignSaves | Page::Credits => "",
+            Page::Singleplayer
+            | Page::AskTraining
+            | Page::RiseNewLoad
+            | Page::Options
+            | Page::Multiplayer => MOVIE_SUB,
         }
     }
 
@@ -601,6 +1078,47 @@ impl Ctx<'_> {
         if matches!(m.page, Page::Title | Page::Main) {
             self.sheet(&centre, LOGO, full, "logo", 1.0);
         }
+        if m.page == Page::CampaignBattle {
+            let entry = &crate::campaign::RISE_OF_THE_EMPIRE[m.campaign_selected];
+            let title = m
+                .campaign_planets
+                .get(m.campaign_selected)
+                .map_or(entry.title, String::as_str);
+            let desc = m
+                .campaign_descs
+                .get(m.campaign_selected)
+                .map_or(entry.desc_fallback, String::as_str);
+            self.bordered(&centre, [36.0, 304.0, 476.0, 396.0]);
+            self.text(
+                &centre,
+                &crate::typography::BODY,
+                title,
+                (52.0, 316.0),
+                HAlign::Left,
+                tint::TITLE,
+            );
+            for (i, line) in self
+                .wrapped(&crate::typography::LIST, desc, 408.0)
+                .iter()
+                .take(3)
+                .enumerate()
+            {
+                self.text(
+                    &centre,
+                    &crate::typography::LIST,
+                    line,
+                    (52.0, 340.0 + i as f32 * 16.0),
+                    HAlign::Left,
+                    tint::BODY,
+                );
+            }
+            self.help(size, true, Prompt::Accept, &m.campaign_launch_label);
+            return;
+        }
+        if m.page == Page::CampaignSaves {
+            self.campaign_saves_page(m, size);
+            return;
+        }
         let Some(stack) = m.stack() else {
             let (rgb, _) = tint::UNSELECTED;
             let at = (256.0, PROMPT_TOP);
@@ -617,33 +1135,53 @@ impl Ctx<'_> {
         } else {
             centre
         };
-        let title = FlashyRow {
-            rect: lay.title,
-            pieces: crate::spawn_draw::TITLE_PIECES,
-            bar: ([255.0; 3], crate::spawn_draw::PIECE_ALPHA),
-            text: &stack.title,
-            style: tint::TITLE,
-            title: true,
-        };
-        self.flashy_row(&s, &title, m.on_page);
+        if matches!(m.page, Page::AskTraining)
+            || (m.page == Page::CampaignMenu && m.campaign_quit_confirm)
+        {
+            let prompt = if m.page == Page::AskTraining {
+                &m.ask_training_prompt
+            } else {
+                &m.campaign_quit_prompt
+            };
+            self.bordered(&centre, [118.0, 144.0, 394.0, 276.0]);
+            for (i, line) in self
+                .wrapped(&crate::typography::BODY, prompt, 248.0)
+                .iter()
+                .take(5)
+                .enumerate()
+            {
+                self.text(
+                    &centre,
+                    &crate::typography::BODY,
+                    line,
+                    (256.0, 160.0 + i as f32 * 18.0),
+                    HAlign::Center,
+                    tint::BODY,
+                );
+            }
+        }
+        if !stack.title.is_empty() {
+            let title = FlashyRow {
+                rect: lay.title,
+                pieces: crate::spawn_draw::TITLE_PIECES,
+                bar: ([255.0; 3], crate::spawn_draw::PIECE_ALPHA),
+                text: &stack.title,
+                style: tint::TITLE,
+                font: &TITLE,
+            };
+            self.flashy_row(&s, &title, m.on_page);
+        }
         let pulse = m.pulse.alpha();
         for (k, (row, r)) in stack.rows.iter().zip(&lay.rows).enumerate() {
-            let grey = ([UNFOCUSED_BAR; 3], tint::UNSELECTED.1);
-            let (bar, style) = if !row.enabled {
-                (grey, tint::DIMMED)
-            } else if k == stack.focus {
-                (([255.0; 3], pulse), (tint::SELECTED.0, pulse))
-            } else {
-                (grey, tint::UNSELECTED)
-            };
-            let row = FlashyRow {
-                rect: *r,
-                pieces: crate::spawn_draw::item_pieces(k + 1 == stack.rows.len()),
-                bar,
-                text: &row.label,
-                style,
-                title: false,
-            };
+            let row = Self::flashy_row_from_stack(
+                row,
+                *r,
+                k,
+                stack.rows.len(),
+                stack.focus,
+                pulse,
+                &ITEM,
+            );
             let t = m.on_page - ROW_REVEAL * (k + 1) as f32;
             self.flashy_row(&s, &row, t);
         }
@@ -656,8 +1194,43 @@ impl Ctx<'_> {
                 self.text(&s, &ITEM, note, at, HAlign::Left, style);
             }
         }
-        self.help(size, false, Prompt::Back, &m.back);
+        if m.page != Page::AskTraining {
+            self.help(size, false, Prompt::Back, &m.back);
+        }
         self.help(size, true, Prompt::Accept, &m.select);
+    }
+
+    /// Build a stack row's [`FlashyRow`] at its laid-out `rect`. The bar and
+    /// text style come from the row's enabled/focus state and the pulse
+    /// `alpha`; the font is the label's role ([`ITEM`] on a shell stack,
+    /// [`crate::typography::BODY`] on a save popup's buttons). Shared by the
+    /// shell stacks here and the campaign save popups
+    /// ([`crate::shell_ps2::campaign_saves`]), so the two draw the same rows.
+    pub(crate) fn flashy_row_from_stack<'a>(
+        row: &'a StackRow,
+        rect: [f32; 4],
+        k: usize,
+        n: usize,
+        focus: usize,
+        alpha: f32,
+        font: &'static crate::typography::TextStyle,
+    ) -> FlashyRow<'a> {
+        let grey = ([UNFOCUSED_BAR; 3], tint::UNSELECTED.1);
+        let (bar, style) = if !row.enabled {
+            (grey, tint::DIMMED)
+        } else if k == focus {
+            (([255.0; 3], alpha), (tint::SELECTED.0, alpha))
+        } else {
+            (grey, tint::UNSELECTED)
+        };
+        FlashyRow {
+            rect,
+            pieces: crate::spawn_draw::item_pieces(k + 1 == n),
+            bar,
+            text: &row.label,
+            style,
+            font,
+        }
     }
 
     /// One stack row (or the title) `t` seconds into its flashy entrance
@@ -673,11 +1246,11 @@ impl Ctx<'_> {
         let caps = 2.0 * (y1 - y0);
         let right = x0 + caps + (x1 - x0 - caps).max(0.0) * out;
         self.bar_tinted(s, [x0, y0, right, y1], row.pieces, row.bar);
-        let style = if row.title { &TITLE } else { &ITEM };
+        let style = row.font;
         let lh = style.size;
         // Text wider than its bar ends in an ellipsis, never a smaller size.
         let text = self.ellipsized(style, row.text, x1 - x0 - 2.0 * (y1 - y0));
-        let (cx, top) = ((x0 + x1) * 0.5, y0 + (ROW_H - lh) * 0.5);
+        let (cx, top) = ((x0 + x1) * 0.5, y0 + (y1 - y0 - lh) * 0.5);
         if let Some(across) = f.square {
             let w = self.text_width(style, &text);
             let x = cx - w * 0.5 + w * across;
@@ -702,564 +1275,10 @@ pub(crate) struct FlashyRow<'a> {
     pub(crate) bar: ([f32; 3], f32),
     pub(crate) text: &'a str,
     pub(crate) style: ([f32; 3], f32),
-    /// The title bar ([`TITLE`]) rather than a row ([`ITEM`]).
-    pub(crate) title: bool,
+    /// The label's role: [`TITLE`] on a title bar, [`ITEM`] on a stack's
+    /// row, [`crate::typography::BODY`] on a popup's (`gPopupButtonFont`).
+    pub(crate) font: &'static crate::typography::TextStyle,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    const BUTTON_FONT: &str = "gamefont_large";
-    use crate::typography::tint::SELECTED as SELECTED_TEXT;
-
-    #[test]
-    fn shell_draw_and_pointer_share_menu_metrics_at_all_capture_sizes() {
-        use crate::hud_draw::HudArt;
-        use crate::hud_tree::Hud;
-        use manifest::hud::{HudFont, HudGlyph, HudLayout};
-        let legacy = HudFont {
-            name: BUTTON_FONT.into(),
-            line_height: 22,
-            pages: vec!["legacy".into()],
-            glyphs: (32..127)
-                .map(|code| HudGlyph {
-                    code,
-                    page: 0,
-                    advance: 4,
-                    x0: 0,
-                    x1: 4,
-                    y0: 3,
-                    y1: 18,
-                    uv: [0.0, 0.1, 0.0, 0.1],
-                })
-                .collect(),
-        };
-        let mut menu = legacy.clone();
-        menu.name = "menu_gamefont_large".into();
-        menu.pages = vec!["menu".into()];
-        for g in &mut menu.glyphs {
-            g.advance = 12;
-            g.x1 = 12;
-        }
-        let mut art = HudArt::default();
-        art.fonts.insert(legacy.name.clone(), legacy);
-        art.fonts.insert(menu.name.clone(), menu);
-        let mut menus = ShellMenus::new(&|_, fallback| fallback.into());
-        menus.page = Page::Main;
-        menus.on_page = 5.0;
-        let empty = HudLayout {
-            name: "empty".into(),
-            nodes: Vec::new(),
-        };
-        let mut hud = Hud::new(&empty, &empty);
-        hud.shell = Some((menus.clone(), false));
-        let layout = stack_layout(art.menu_font(BUTTON_FONT).unwrap(), menus.stack().unwrap());
-        for size in [
-            [1920.0, 1080.0],
-            [2560.0, 1440.0],
-            [3840.0, 2160.0],
-            [640.0, 480.0],
-        ] {
-            let frame = crate::hud_draw::draw(&hud, &art, size);
-            assert!(frame.batches.iter().any(|b| b.texture == "menu"));
-            assert!(!frame.batches.iter().any(|b| b.texture == "legacy"));
-            let [x0, y0, x1, y1] = layout.rows[0];
-            let screen = crate::spawn_draw::screen_at(size, crate::spawn_draw::Anchor::Centre);
-            let point = screen.map(glam::vec3(x1 - 1.0, (y0 + y1) * 0.5, 0.0));
-            assert_eq!(
-                row_at(art.menu_font(BUTTON_FONT).unwrap(), &menus, point, size),
-                Some(0)
-            );
-            // The edge of this wider row is outside the old, narrow font's bar.
-            assert!(x1 > x0);
-            assert_eq!(row_at(&art.fonts[BUTTON_FONT], &menus, point, size), None);
-        }
-        hud.shell = None;
-        let ctx = Ctx {
-            hud: &hud,
-            art: &art,
-            out: Default::default(),
-            clip: None,
-        };
-        let face = ctx.face(crate::typography::ITEM.face).unwrap();
-        assert_eq!(face.name, "menu_gamefont_large");
-    }
-
-    fn menus() -> ShellMenus {
-        ShellMenus::new(&|_, e| e.to_owned())
-    }
-
-    fn press(f: impl Fn(&mut MenuInput)) -> MenuInput {
-        let mut i = MenuInput::default();
-        f(&mut i);
-        i
-    }
-
-    /// Acceptance 2 of card BSHLA, updated for issue #168: Multiplayer sits
-    /// in its PS2 slot and is live; the dimmed Splitscreen is skipped both
-    /// ways (§3.3).
-    #[test]
-    fn main_menu_skips_the_disabled_splitscreen() {
-        let mut m = menus();
-        assert_eq!(m.step(MenuInput::default(), true, 0.1), None);
-        assert_eq!(m.page, Page::Main);
-        let ids: Vec<_> = m.main.rows.iter().map(|r| r.id).collect();
-        assert_eq!(
-            ids,
-            [
-                RowId::Singleplayer,
-                RowId::Multiplayer,
-                RowId::Splitscreen,
-                RowId::Options,
-                RowId::QuitGame
-            ]
-        );
-        assert!(m.main.rows[1].enabled, "Multiplayer is live (issue #168)");
-        assert!(!m.main.rows[2].enabled, "Splitscreen is disabled");
-        assert_eq!(m.main.focus, 0);
-        m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(m.main.rows[m.main.focus].id, RowId::Multiplayer);
-        m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(
-            m.main.rows[m.main.focus].id,
-            RowId::Options,
-            "Down skips Splitscreen"
-        );
-        m.step(press(|i| i.up = true), false, 0.1);
-        assert_eq!(m.main.rows[m.main.focus].id, RowId::Multiplayer, "and Up");
-        m.step(press(|i| i.up = true), false, 0.1);
-        // Wrapping: Up from Singleplayer lands on Quit Game, Down from Quit
-        // Game on Singleplayer.
-        m.step(press(|i| i.up = true), false, 0.1);
-        assert_eq!(m.main.rows[m.main.focus].id, RowId::QuitGame);
-        m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(m.main.rows[m.main.focus].id, RowId::Singleplayer);
-        // A confirm never lands on a disabled row.
-        m.main.focus = 2;
-        assert_eq!(m.step(press(|i| i.confirm = true), false, 0.1), None);
-        assert_eq!(m.page, Page::Main);
-    }
-
-    /// Playtest A5: the main menu's bottom row is Quit Game, by pad (the
-    /// wrap) or by mouse, and it quits.
-    #[test]
-    fn main_menu_quit_game_is_the_last_row_and_quits() {
-        use crate::shell_feel::MenuSound as S;
-        use manifest::hud::{HudFont, HudGlyph};
-        let mut m = menus();
-        m.step(MenuInput::default(), true, 0.1);
-        m.cues.take();
-        m.step(press(|i| i.up = true), false, 0.2);
-        let row = &m.main.rows[m.main.focus];
-        assert_eq!((row.id, row.label.as_str()), (RowId::QuitGame, "Quit Game"));
-        assert_eq!(m.main.focus, m.main.rows.len() - 1, "the bottom row");
-        m.cues.take();
-        assert_eq!(
-            m.step(press(|i| i.confirm = true), false, 0.2),
-            Some(ShellCommand::Quit)
-        );
-        assert_eq!(m.cues.take(), [S::Accept]);
-        // The mouse: the row's bar is a hit, and a click on it quits.
-        let font = HudFont {
-            name: BUTTON_FONT.into(),
-            line_height: 22,
-            pages: vec!["page0".into()],
-            glyphs: (32u8..127)
-                .map(|code| HudGlyph {
-                    code: u16::from(code),
-                    page: 0,
-                    advance: 10,
-                    x0: 0,
-                    x1: 10,
-                    y0: 2,
-                    y1: 14,
-                    uv: [0.0, 0.1, 0.0, 0.1],
-                })
-                .collect(),
-        };
-        let mut m = menus();
-        m.page = Page::Main;
-        m.on_page = 2.0;
-        let [x0, y0, x1, y1] = stack_layout(&font, m.stack().unwrap()).rows[4];
-        let p = [
-            ((x0 + x1) * 0.5) * 1.25,
-            ((y0 + y1) * 0.5) * (480.0 / 448.0),
-        ];
-        assert_eq!(row_at(&font, &m, p, [640.0, 480.0]), Some(4));
-        assert!(m.focus_row(4));
-        assert_eq!(
-            m.step(press(|i| i.confirm = true), false, 0.2),
-            Some(ShellCommand::Quit)
-        );
-    }
-
-    #[test]
-    fn mouse_hit_uses_the_visible_row_layout_and_skips_disabled_rows() {
-        use manifest::hud::{HudFont, HudGlyph};
-        let font = HudFont {
-            name: BUTTON_FONT.into(),
-            line_height: 22,
-            pages: vec!["page0".into()],
-            glyphs: (32u8..127)
-                .map(|code| HudGlyph {
-                    code: u16::from(code),
-                    page: 0,
-                    advance: 10,
-                    x0: 0,
-                    x1: 10,
-                    y0: 2,
-                    y1: 14,
-                    uv: [0.0, 0.1, 0.0, 0.1],
-                })
-                .collect(),
-        };
-        let mut m = menus();
-        m.page = Page::Main;
-        m.on_page = 2.0;
-        let stack = m.stack().unwrap();
-        let layout = stack_layout(&font, stack);
-        let [x0, y0, x1, y1] = layout.rows[3];
-        let p = [
-            ((x0 + x1) * 0.5) * 1.25,
-            ((y0 + y1) * 0.5) * (480.0 / 448.0),
-        ];
-        assert_eq!(row_at(&font, &m, p, [640.0, 480.0]), Some(3));
-        let [x0, y0, x1, y1] = layout.rows[2];
-        let p = [
-            ((x0 + x1) * 0.5) * 1.25,
-            ((y0 + y1) * 0.5) * (480.0 / 448.0),
-        ];
-        assert_eq!(row_at(&font, &m, p, [640.0, 480.0]), None);
-    }
-
-    /// `m` as the HUD pass lays it out in a 640 x 480 window, with a font
-    /// of 10-unit glyphs.
-    fn frame(m: ShellMenus) -> crate::hud_draw::HudFrame {
-        use crate::hud_draw::HudArt;
-        use crate::hud_tree::Hud;
-        use manifest::hud::{HudFont, HudGlyph, HudLayout};
-        let font = HudFont {
-            name: BUTTON_FONT.into(),
-            line_height: 22,
-            pages: vec!["page0".into()],
-            glyphs: (32u8..127)
-                .map(|code| HudGlyph {
-                    code: u16::from(code),
-                    page: 0,
-                    advance: 10,
-                    x0: 0,
-                    x1: 10,
-                    y0: 2,
-                    y1: 14,
-                    uv: [0.0, 0.1, 0.0, 0.1],
-                })
-                .collect(),
-        };
-        let mut art = HudArt::default();
-        art.fonts.insert(BUTTON_FONT.into(), font);
-        let empty = HudLayout {
-            name: "t".into(),
-            nodes: Vec::new(),
-        };
-        let mut hud = Hud::new(&empty, &empty);
-        hud.shell = Some((m, false));
-        crate::hud_draw::draw(&hud, &art, [640.0, 480.0])
-    }
-
-    /// The main menu as the HUD pass lays it out: the dimmed rows' labels
-    /// are drawn grey 110 (§3.3), every glyph of both of them.
-    #[test]
-    fn the_disabled_rows_are_drawn_dimmed() {
-        let mut m = menus();
-        m.step(MenuInput::default(), true, 5.0);
-        m.step(MenuInput::default(), false, 5.0);
-        let f = frame(m);
-        let grey = DIMMED_GREY / 255.0;
-        let dimmed = f
-            .verts
-            .iter()
-            .filter(|v| v.color[..3].iter().all(|c| (c - grey).abs() < 1e-4))
-            .count();
-        let glyphs = "Splitscreen".len();
-        assert_eq!(dimmed, 4 * glyphs, "Splitscreen dimmed");
-        let sheets: Vec<&str> = f.batches.iter().map(|b| b.texture.as_str()).collect();
-        for p in [
-            "logo",
-            "bf2_buttons_topleft",
-            "bf2_buttons_botright",
-            "btna",
-            "btnb",
-        ] {
-            assert!(sheets.contains(&p), "{p}: {sheets:?}");
-        }
-    }
-
-    #[test]
-    fn the_flow_reaches_instant_action_and_back() {
-        let mut m = menus();
-        let confirm = press(|i| i.confirm = true);
-        // Only Start leaves the title: Cross does nothing there.
-        assert_eq!(m.step(confirm, false, 0.1), None);
-        assert_eq!(m.page, Page::Title);
-        m.step(MenuInput::default(), true, 0.1);
-        assert_eq!(m.step(confirm, false, 0.1), None);
-        assert_eq!(m.page, Page::Singleplayer);
-        assert_eq!(m.movie(), MOVIE_SUB);
-        // The first focus skips the two disabled campaigns.
-        assert_eq!(
-            m.singleplayer.rows[m.singleplayer.focus].id,
-            RowId::InstantAction
-        );
-        assert_eq!(
-            m.step(confirm, false, 0.1),
-            Some(ShellCommand::InstantAction)
-        );
-        m.step(press(|i| i.back = true), false, 0.1);
-        assert_eq!(m.page, Page::Main);
-        // Down: Multiplayer (issue #168), then Options past Splitscreen.
-        m.step(press(|i| i.down = true), false, 0.1);
-        m.step(press(|i| i.down = true), false, 0.1);
-        m.step(confirm, false, 0.1);
-        assert_eq!(m.page, Page::Options);
-        assert_eq!(
-            m.step(confirm, false, 0.1),
-            Some(ShellCommand::Settings(crate::menu::SettingsPage::Game))
-        );
-        m.step(press(|i| i.back = true), false, 0.1);
-        m.step(press(|i| i.back = true), false, 0.1);
-        assert_eq!(m.page, Page::Title);
-        assert_eq!(m.movie(), MOVIE_MAIN);
-        assert_eq!(
-            m.step(press(|i| i.back = true), false, 0.1),
-            Some(ShellCommand::Quit)
-        );
-    }
-
-    #[test]
-    fn controls_are_reachable_from_options() {
-        let mut m = menus();
-        m.page = Page::Options;
-        m.options.focus = m
-            .options
-            .rows
-            .iter()
-            .position(|row| row.id == RowId::Controls)
-            .unwrap();
-        assert!(m.options.rows[m.options.focus].enabled);
-        assert_eq!(
-            m.step(press(|i| i.confirm = true), false, 0.1),
-            Some(ShellCommand::Settings(crate::menu::SettingsPage::Controls))
-        );
-    }
-
-    #[test]
-    fn the_prompt_pulses_between_its_alphas() {
-        let mut m = menus();
-        let mut seen = (f32::MAX, f32::MIN);
-        for _ in 0..100 {
-            m.step(MenuInput::default(), false, 0.05);
-            let a = m.prompt_alpha();
-            seen = (seen.0.min(a), seen.1.max(a));
-        }
-        assert!(
-            (seen.0 - 0.4).abs() < 0.03 && (seen.1 - 1.0).abs() < 0.03,
-            "{seen:?}"
-        );
-    }
-
-    /// re-bf2-menus §4.1: Start on the title accepts; a stack move clicks
-    /// even through the wrap; Cross accepts; Back plays the exit click.
-    #[test]
-    fn the_stacks_ask_for_the_ps2_clicks() {
-        use crate::shell_feel::MenuSound as S;
-        let mut m = menus();
-        m.step(press(|i| i.confirm = true), false, 0.2);
-        assert!(m.cues.take().is_empty(), "Cross does nothing on the title");
-        m.step(MenuInput::default(), true, 0.2);
-        assert_eq!(m.cues.take(), [S::Accept]);
-        // Multiplayer, Options, Quit Game, Singleplayer (the wrap),
-        // Multiplayer, Options.
-        for _ in 0..6 {
-            m.step(press(|i| i.down = true), false, 0.2);
-        }
-        assert_eq!(m.cues.take(), [S::Select; 6], "every press, the wrap too");
-        m.step(press(|i| i.confirm = true), false, 0.2);
-        assert_eq!(m.page, Page::Options);
-        assert_eq!(m.cues.take(), [S::Accept]);
-        m.step(press(|i| i.back = true), false, 0.2);
-        assert_eq!(m.cues.take(), [S::Exit]);
-        // Presses faster than 0.1 s apart: one click.
-        m.step(press(|i| i.down = true), false, 0.02);
-        m.step(press(|i| i.down = true), false, 0.02);
-        assert_eq!(m.cues.take(), [S::Select]);
-        // Back from a page of the port's own: the stack's re-Enter.
-        m.on_page = 3.0;
-        m.uncover();
-        assert_eq!((m.cues.take(), m.on_page), (vec![S::Exit], 0.0));
-    }
-
-    /// re-bf2-menus §5: the pulse's phase runs on through a focus move, and
-    /// the focused row's label and bar share it; the others sit at 0.6 with
-    /// a grey 150 bar. It steps at 30 Hz (menuref §9.4.1).
-    #[test]
-    fn the_focused_row_pulses_and_keeps_its_phase_across_moves() {
-        let mut m = menus();
-        m.step(MenuInput::default(), true, 0.0);
-        m.step(MenuInput::default(), false, 0.15);
-        let before = m.pulse.alpha();
-        // 0.15 s = 4 whole updates of 2/30 from 0.5.
-        assert!((before - (0.5 + 4.0 * 2.0 / 30.0)).abs() < 1e-4, "{before}");
-        m.step(press(|i| i.down = true), false, 0.05);
-        assert!(
-            (m.pulse.alpha() - 0.9).abs() < 1e-4,
-            "not reset by the move"
-        );
-        m.on_page = 5.0;
-        let a = m.pulse.alpha();
-        let f = frame(m);
-        let [r, g, b] = SELECTED_TEXT.0.map(|c| c / 255.0);
-        let focused = |v: &&crate::hud_draw::HudVertex| {
-            (v.color[0] - r).abs() < 1e-4
-                && (v.color[1] - g).abs() < 1e-4
-                && (v.color[2] - b).abs() < 1e-4
-        };
-        let label: Vec<_> = f.verts.iter().filter(focused).collect();
-        // Down from Singleplayer: Multiplayer (issue #168).
-        assert_eq!(label.len(), 4 * "Multiplayer".len());
-        assert!(label.iter().all(|v| (v.color[3] - a).abs() < 1e-4));
-        let white_bar = f
-            .verts
-            .iter()
-            .filter(|v| v.color == [1.0, 1.0, 1.0, a])
-            .count();
-        assert_eq!(white_bar, 3 * 4, "the focused bar's three pieces");
-        let grey = UNFOCUSED_BAR / 255.0;
-        let grey_bars = f
-            .verts
-            .iter()
-            .filter(|v| v.color == [grey, grey, grey, 0.6])
-            .count();
-        assert_eq!(grey_bars, 4 * 3 * 4, "the other four rows' bars");
-    }
-
-    /// re-bf2-menus §5, menuref §9.4.5: on entering a page nothing of row 1
-    /// shows until its 0.1 s delay, then its bar wipes out before its text
-    /// appears.
-    #[test]
-    fn a_page_entry_replays_the_flashy_entrance() {
-        let mut m = menus();
-        m.step(MenuInput::default(), true, 0.0);
-        let bar_right = |m: &ShellMenus| {
-            let f = frame(m.clone());
-            f.verts
-                .iter()
-                .filter(|v| v.color[..3] == [1.0, 1.0, 1.0] && v.color[3] == m.pulse.alpha())
-                .map(|v| v.pos[0])
-                .fold(f32::MIN, f32::max)
-        };
-        m.on_page = 0.05;
-        assert_eq!(bar_right(&m), f32::MIN, "row 1 not started");
-        m.on_page = 0.1 + 0.05;
-        let half = bar_right(&m);
-        m.on_page = 0.1 + 0.1;
-        let full = bar_right(&m);
-        assert!(half > f32::MIN && half < full, "{half} {full}");
-        let text = |m: &ShellMenus| {
-            let [r, g, b] = SELECTED_TEXT.0.map(|c| c / 255.0);
-            frame(m.clone())
-                .verts
-                .iter()
-                .filter(|v| v.color[..3] == [r, g, b])
-                .count()
-        };
-        m.on_page = 0.1 + 0.15;
-        assert_eq!(text(&m), 0, "the square sweeps before the text");
-        m.on_page = 0.1 + 0.3;
-        assert_eq!(text(&m), 4 * "Singleplayer".len());
-    }
-
-    /// menuref "Singleplayer": coming back to Singleplayer (from Instant
-    /// Action, or from the Main Menu) focuses its first row, not the one
-    /// left.
-    #[test]
-    fn singleplayer_is_always_entered_on_its_first_row() {
-        let mut m = menus();
-        // As if Training were shown: the first row live.
-        m.singleplayer.rows[0].enabled = true;
-        m.step(MenuInput::default(), true, 0.1);
-        m.step(press(|i| i.confirm = true), false, 0.1);
-        assert_eq!(m.page, Page::Singleplayer);
-        assert_eq!(m.singleplayer.focus, 0);
-        m.singleplayer.focus = 2;
-        // Instant Action opens over it and closes: back on the first row.
-        m.uncover();
-        assert_eq!(m.singleplayer.focus, 0);
-        m.singleplayer.focus = 2;
-        m.step(press(|i| i.back = true), false, 0.1);
-        m.step(press(|i| i.confirm = true), false, 0.1);
-        assert_eq!(m.page, Page::Singleplayer);
-        assert_eq!(m.singleplayer.focus, 0);
-    }
-
-    /// Issue #168: Main → Multiplayer offers LAN Host Game and Join Game;
-    /// Online is shown dimmed with its note, never focused; Back returns to
-    /// the main menu.
-    #[test]
-    fn multiplayer_offers_lan_host_and_join_and_a_dimmed_online_row() {
-        let mut m = menus();
-        let confirm = press(|i| i.confirm = true);
-        m.step(MenuInput::default(), true, 0.1);
-        m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(m.step(confirm, false, 0.1), None);
-        assert_eq!(m.page, Page::Multiplayer);
-        assert_eq!(m.movie(), MOVIE_SUB);
-        let rows: Vec<_> = m
-            .multiplayer
-            .rows
-            .iter()
-            .map(|r| (r.id, r.label.as_str(), r.enabled))
-            .collect();
-        assert_eq!(
-            rows,
-            [
-                (RowId::LanHost, "LAN: Host Game", true),
-                (RowId::LanJoin, "LAN: Join Game", true),
-                (RowId::Online, "Online", false),
-            ]
-        );
-        assert_eq!(
-            m.multiplayer.note.as_deref(),
-            Some("Online play needs a dedicated server \u{2014} not available yet")
-        );
-        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::HostGame));
-        m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(m.step(confirm, false, 0.1), Some(ShellCommand::JoinGame));
-        // Down from Join wraps past the dimmed Online row to Host.
-        m.step(press(|i| i.down = true), false, 0.1);
-        assert_eq!(m.multiplayer.rows[m.multiplayer.focus].id, RowId::LanHost);
-        assert!(!m.focus_row(2), "Online cannot take the pointer's focus");
-        m.step(press(|i| i.back = true), false, 0.1);
-        assert_eq!(m.page, Page::Main);
-    }
-
-    /// The Online note is drawn under the Multiplayer stack once revealed.
-    #[test]
-    fn the_online_note_is_drawn_on_the_multiplayer_page() {
-        let mut m = menus();
-        m.page = Page::Multiplayer;
-        m.step(MenuInput::default(), false, 5.0);
-        let f = frame(m);
-        let note = ([DIMMED_GREY + 60.0; 3].map(|c| c / 255.0), ());
-        let lit = f
-            .verts
-            .iter()
-            .filter(|v| {
-                v.color[..3]
-                    .iter()
-                    .zip(note.0)
-                    .all(|(c, n)| (c - n).abs() < 1e-4)
-            })
-            .count();
-        assert!(lit >= 4 * "Online".len(), "note glyphs drawn: {lit}");
-    }
-}
+mod tests;

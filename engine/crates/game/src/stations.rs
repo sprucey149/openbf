@@ -182,7 +182,7 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
         .collect::<Result<_>>()?;
     for si in 0..sim.stations.len() {
         let station = &sim.stations[si];
-        if !station.serves() && !station.health.alive() {
+        if !station.serves() && station.health.max > 0.0 && !station.health.alive() {
             sim.install_station_wreck(si as u16);
         }
     }

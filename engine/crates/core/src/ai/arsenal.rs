@@ -164,6 +164,8 @@ pub(super) struct Ask {
     /// The target is a remote droid of this MaxHealth (`kind` is its
     /// health type), and the choice is for it ([`against_droid`]).
     pub droid: Option<f32>,
+    /// The target is a station targeted by a script `Destroy` AI goal.
+    pub station: bool,
 }
 
 /// May weapon `c` be used on a remote droid of `max_health` and health type
@@ -186,6 +188,25 @@ pub(super) fn against_droid(c: &Cand, max_health: f32, kind: u32, bf2: bool) -> 
     }
     let (s, dealt) = scored(c, kind, bf2)?;
     (dealt > 0.5 * max_health).then_some(s)
+}
+
+/// Weapon suitability for an explicit script `Destroy` goal against a station:
+/// skips target-kind masks and the "too weak" pool check so melee lightsabers
+/// and rifles both attack scripted destructible props such as the Jedi Temple
+/// bookcases, while excluding grenades (their low-arc LOS check hits the prop's
+/// own colliders) and non-force cone emitters.
+fn against_station(c: &Cand, kind: u32, bf2: bool) -> Option<f32> {
+    if c.class.thrown.is_some()
+        || (c.class.force.is_none() && c.class.emitter.as_ref().is_some_and(|e| e.is_cone()))
+    {
+        return None;
+    }
+    let s = if bf2 {
+        score(c.class, kind)
+    } else {
+        shot(c.class, kind)
+    };
+    (s > 0.0).then_some(s)
 }
 
 /// Weapon `c`'s score against health type `kind` and what the "too weak"
@@ -313,7 +334,7 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
         }
         // Card HVYW: a heavy weapon in a crowd is taken as a forced grenade
         // is; at any other soldier it is passed over (OURS).
-        let heavy = c.heavy && ask.vehicle.is_none();
+        let heavy = c.heavy && ask.vehicle.is_none() && !ask.station;
         let s = if ask.bf2 && c.class.saber.is_some() {
             1000.0
         } else if let Some(v) = ask.vehicle {
@@ -323,6 +344,11 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
             }
         } else if let Some(max) = ask.droid {
             match against_droid(&c, max, ask.kind, ask.bf2) {
+                Some(s) => s,
+                None => continue,
+            }
+        } else if ask.station {
+            match against_station(&c, ask.kind, ask.bf2) {
                 Some(s) => s,
                 None => continue,
             }
@@ -703,6 +729,7 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
         vehicle,
         crowd,
         droid: None,
+        station: false,
         group,
         barred,
         forced: grenade_forced(
@@ -770,6 +797,7 @@ fn item_ask(
         vehicle: None,
         crowd: false,
         droid: Some(max_health),
+        station: false,
     }
 }
 
@@ -807,6 +835,36 @@ pub(super) fn think_turret(sim: &Sim, tk: &Tick, st: &mut AiState, t: &Turret) {
     };
     let item = (t.centre(), c.body.max_health, c.health_type as u32);
     think_item(sim, tk, st, item);
+}
+
+/// [`think`] for a seen `Destroy`-goal station: measures range to its surface
+/// (`sphere_radius`) and evaluates weapons via [`against_station`].
+pub(super) fn think_station(sim: &Sim, tk: &Tick, st: &mut AiState, s: &crate::sim::Station) {
+    let Tick { me, u, eye, .. } = *tk;
+    if u.held.is_empty() || throwing(sim, u).is_some() {
+        return;
+    }
+    let surface_d = ((s.sphere_centre - eye).length() - s.sphere_radius).fmax(0.1);
+    let ask = Ask {
+        kind: s.health.health_type as u32,
+        d2: surface_d * surface_d,
+        bf2: sim.ground_rules == GroundRules::Bf2,
+        group: false,
+        barred: false,
+        forced: false,
+        coin: unit_unit(me.index, sim.tick, me.gen, SALT_ARM) < 0.5,
+        vehicle: None,
+        crowd: false,
+        droid: None,
+        station: true,
+    };
+    let cands = slots(sim, u);
+    let pick = choose(cands.into_iter().flatten(), &ask);
+    st.arm.pick = pick.map(|p| p.0);
+    st.arm.in_range = pick.is_some_and(|p| p.1);
+    st.arm.vehicle = false;
+    st.arm.spare = pick.is_none();
+    st.arm.claim = st.arm.claim.filter(|c| sim.tick < c.1);
 }
 
 fn think_item(sim: &Sim, tk: &Tick, st: &mut AiState, item: (Vec3, f32, u32)) {

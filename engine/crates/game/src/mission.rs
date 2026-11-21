@@ -42,6 +42,38 @@ pub struct TeamDef {
     /// generator emitted it still parses.
     #[serde(default)]
     pub classes: Vec<(String, u32, Option<u32>)>,
+    /// Optional explicit whitelist of class names initially enabled for spawn/AI.
+    /// `None` enables all classes in `classes` (minus `class_blacklist`).
+    #[serde(default)]
+    pub class_whitelist: Option<Vec<String>>,
+    /// Classes initially disabled for spawn/AI until unlocked via `AddUnitClass` or `SetClassEnabled`.
+    #[serde(default)]
+    pub class_blacklist: Vec<String>,
+    /// Whether AI units are initially allowed to spawn for this team (`None` -> `true`).
+    #[serde(default)]
+    pub allow_ai_spawn: Option<bool>,
+}
+
+impl TeamDef {
+    /// Whether `class` is initially enabled before any stage mutations run.
+    pub fn is_class_initially_enabled(&self, class: &str) -> bool {
+        if self
+            .class_blacklist
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(class))
+        {
+            return false;
+        }
+        match &self.class_whitelist {
+            Some(list) => list.iter().any(|c| c.eq_ignore_ascii_case(class)),
+            None => true,
+        }
+    }
+
+    /// Whether AI spawning is allowed at mission start (`allow_ai_spawn.unwrap_or(true)`).
+    pub fn allows_ai_spawn_initially(&self) -> bool {
+        self.allow_ai_spawn.unwrap_or(true)
+    }
 }
 
 /// One BF2 SIDE resource request, with its source file and native load order.
@@ -233,9 +265,40 @@ pub struct MissionDef {
     /// mission whose script sets none.
     #[serde(default)]
     pub ai: AiSettings,
+    /// Whether the spawn screen shows team selection (`None` defaults to `!self.is_campaign()`).
+    #[serde(default)]
+    pub allow_side_select: Option<bool>,
+    /// 0-based sim team index (`0` = mission team 1, `1` = mission team 2) the player
+    /// automatically joins when side selection is disabled (`None` defaults to `0`).
+    #[serde(default)]
+    pub forced_player_team: Option<u8>,
+    /// Optional command post whitelist; when non-empty, only listed CPs remain in the layout.
+    #[serde(default)]
+    pub cp_whitelist: Vec<String>,
+    /// Command posts explicitly excluded from this mission even if present on the world layer.
+    #[serde(default)]
+    pub cp_blacklist: Vec<String>,
+    /// Ordered world sublevel layers requested by `ReadDataFile("<map>.lvl", "<layer>")`.
+    #[serde(default)]
+    pub layers: Vec<String>,
+    /// Singleplayer campaign objectives, movies, and mid-round mutations (`mode == "campaign"`).
+    #[serde(default)]
+    pub campaign: Option<CampaignMissionDef>,
     /// The PC .lua and PS2 script this record was read out of.
     #[serde(default)]
     pub source: String,
+}
+
+impl MissionDef {
+    /// Whether the player can choose teams (`Side` stage) on the spawn screen.
+    pub fn allows_side_select(&self) -> bool {
+        self.allow_side_select.unwrap_or(!self.is_campaign())
+    }
+
+    /// 0-based team index the player auto-joins (and starts on).
+    pub fn initial_player_team(&self) -> u8 {
+        self.forced_player_team.unwrap_or(0).min(1)
+    }
 }
 
 /// [`MissionDef::music`]: the three music setters' calls, in the script's
@@ -325,6 +388,14 @@ pub struct SpaceAssaultDef {
     pub lock_shields: Vec<u16>,
     #[serde(default)]
     pub scripted: Vec<SpaceScriptedDef>,
+    /// Give every seatless armed building with health a `Station`, not only
+    /// the names above: set for a campaign space round, whose script names its
+    /// targets itself (spa2c's `comms_cis`, `cisbridge01`, `ciseng01/02`).
+    /// On the PS2 every placed `armedbuilding` is a live entity with health in
+    /// any mode; the port gates it to stay off ground maps
+    /// (`re-space-assault.md` §5).
+    #[serde(default)]
+    pub armed_parts: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -379,6 +450,27 @@ pub struct DeathDrain {
     pub on: u8,
     pub team: u8,
     pub tickets: u32,
+}
+
+/// Rise of the Empire singleplayer campaign: the mission's movies, its
+/// unlimited pools, and its logic translated from the PS2 bytecode
+/// (`scripts/campaign_ir.py`, run by [`crate::campaign_script`]).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct CampaignMissionDef {
+    #[serde(default)]
+    pub intro_movie: Option<String>,
+    #[serde(default)]
+    pub outro_movie: Option<String>,
+    #[serde(default)]
+    pub mid_movies: Vec<String>,
+    #[serde(default)]
+    pub infinite_tickets: [bool; 2],
+    #[serde(default)]
+    pub script: Option<crate::campaign_script::ScriptDef>,
+    /// The shared scripts beside the mission (`campaign/lib/*.ron`) by
+    /// lower-case name, read by [`MissionDef::load`].
+    #[serde(skip)]
+    pub libs: Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>,
 }
 
 /// The mission a battle of `map` in `mode` runs for the two armies picked,
@@ -474,24 +566,41 @@ impl MissionDef {
 
     pub fn load(path: &Path) -> Result<MissionDef> {
         let txt = pak::read_to_string(path).with_context(|| path.display().to_string())?;
-        let m: MissionDef =
-            ron::from_str(&txt).with_context(|| format!("parse {}", path.display()))?;
+        // A campaign's translated script nests deeper than RON's default limit.
+        let mut m: MissionDef = ron::Options::default()
+            .without_recursion_limit()
+            .from_str(&txt)
+            .with_context(|| format!("parse {}", path.display()))?;
+        if let Some(c) = m.campaign.as_mut() {
+            c.libs = load_campaign_libs(&path.parent().unwrap_or(Path::new(".")).join("lib"))?;
+        }
         if m.teams.len() != 2 {
             anyhow::bail!("{}: v0 missions need exactly two teams", path.display());
         }
-        // A team with no reinforcements can never spawn anyone, and the first
-        // spawn is what builds the player — so zero tickets crashed at
-        // startup rather than starting a round nobody could play. Reject it
-        // where the value enters instead of teaching the sim to limp.
-        if let Some(t) = m.teams.iter().find(|t| t.tickets == 0) {
-            anyhow::bail!(
-                "{}: team '{}' has 0 reinforcements — a round with no tickets \
-                 cannot spawn anyone",
-                path.display(),
-                t.faction
-            );
+        // A team with no reinforcements can never spawn anyone in normal skirmish
+        // modes; campaign scripts author `-1` (unlimited) on defender/AI pools.
+        if !m.is_campaign() {
+            if let Some(t) = m.teams.iter().find(|t| t.tickets == 0) {
+                anyhow::bail!(
+                    "{}: team '{}' has 0 reinforcements — a round with no tickets \
+                     cannot spawn anyone",
+                    path.display(),
+                    t.faction
+                );
+            }
         }
         Ok(m)
+    }
+
+    /// Load a generated Rise of the Empire campaign mission by script stem (e.g. `"geo1c_c"`).
+    pub fn load_campaign(missions_dir: &Path, script_stem: &str) -> Result<MissionDef> {
+        let sub = missions_dir
+            .join("campaign")
+            .join(format!("bf2_{script_stem}.ron"));
+        if pak::is_file(&sub) {
+            return Self::load(&sub);
+        }
+        Self::load(&missions_dir.join(format!("bf2_{script_stem}.ron")))
     }
 
     /// Apply startup lock overrides to the doors that exist in this mode layer.
@@ -603,6 +712,24 @@ impl MissionDef {
         self.mode == "hunt"
     }
 
+    pub fn is_campaign(&self) -> bool {
+        self.mode == "campaign"
+    }
+
+    /// The Space Assault objects a round installs: a Space Assault mission's
+    /// own, or a campaign space round's, which gives a `Station` to every
+    /// seatless armed building ([`SpaceAssaultDef::armed_parts`]).
+    pub fn space_round(&self) -> Option<SpaceAssaultDef> {
+        let campaign_space =
+            self.is_campaign() && (self.space_assault.is_some() || self.map.contains("_spa"));
+        if self.mode != "ass" && !campaign_space {
+            return None;
+        }
+        let mut def = self.space_assault.clone().unwrap_or_default();
+        def.armed_parts |= self.is_campaign();
+        Some(def)
+    }
+
     pub fn tickets(&self) -> [u32; 2] {
         [self.teams[0].tickets, self.teams[1].tickets]
     }
@@ -685,7 +812,9 @@ mod tests {
                 missions.push((path, m));
             }
         }
-        assert_eq!(missions.len(), 34);
+        // 34 Instant Action ground missions plus the 6 ground Rise of the
+        // Empire campaign missions (the space ones are excluded above).
+        assert_eq!(missions.len(), 40);
         if missions.iter().all(|(_, m)| m.class_load_order.is_empty()) {
             eprintln!(
                 "SKIP: all BF2 missions predate SIDE load-order metadata; regenerate missions"
@@ -1263,4 +1392,66 @@ mod tests {
         assert!(deg < 0.1, "view {deg} deg off the PS2's");
         assert!(((c.fov_y * 0.5).tan() - 0.34131).abs() < 1e-5);
     }
+
+    #[test]
+    fn every_campaign_mission_ron_parses() {
+        let campaign_dir = missions_dir().join("campaign");
+        if !campaign_dir.is_dir() {
+            eprintln!(
+                "SKIP: no engine/missions/campaign/*.ron (scripts/gen_missions.py generates them)"
+            );
+            return;
+        }
+        let stems = [
+            "geo1c_c", "myg1c_c", "spa2c_c", "fel1c_c", "spa3c_c", "kas2c_c", "uta1c_c", "cor1c_c",
+            "nab2g_c", "spa4g_c", "mus1c_c", "kam1c_c", "dea1g_c", "pol1g_c", "tan1g_c", "spa1g_c",
+            "yav1g_c", "hot1g_c",
+        ];
+        for stem in stems {
+            let m = MissionDef::load_campaign(missions_dir(), stem)
+                .unwrap_or_else(|e| panic!("{stem}: {e:#}"));
+            assert!(m.is_campaign(), "{stem}");
+            let c = m.campaign.as_ref().expect("campaign payload");
+            assert!(c.script.is_some(), "{stem} has no translated script");
+            assert!(
+                c.libs.iter().any(|(n, _)| n == "objective"),
+                "{stem} loaded no objective framework"
+            );
+            assert!(
+                !m.camera_shot_calls.is_empty(),
+                "{stem} has no camera shots"
+            );
+            // BF2's alive-AI cap is the default NumBots (16), not the larger
+            // SetUnitCount member pool.  kas2c_c's 33-unit CIS pool used to
+            // leak into ai_alive_cap and field 33 bots at once; the menu's
+            // NumBots ceiling is 16 (re-bf2-menus.md, analysis/re-tickets-spawn.md).
+            assert!(
+                m.ai_alive_cap <= 16,
+                "{stem}: BF2 campaign alive cap {} exceeds NumBots 16",
+                m.ai_alive_cap
+            );
+        }
+    }
+}
+
+/// The shared campaign scripts (`engine/missions/campaign/lib/*.ron`),
+/// sorted by name so every load lists them alike.
+fn load_campaign_libs(
+    dir: &Path,
+) -> Result<Vec<(String, std::sync::Arc<crate::campaign_script::ScriptDef>)>> {
+    let mut out = Vec::new();
+    for path in pak::read_dir(dir).unwrap_or_default() {
+        if path.extension().and_then(|e| e.to_str()) != Some("ron") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let text = pak::read_to_string(&path).with_context(|| path.display().to_string())?;
+        let def = crate::campaign_script::parse(&text)
+            .with_context(|| format!("parse {}", path.display()))?;
+        out.push((stem.to_ascii_lowercase(), std::sync::Arc::new(def)));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
 }

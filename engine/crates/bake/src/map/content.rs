@@ -21,6 +21,11 @@ pub(super) fn bake_content(
     pc_lvl: Option<&str>,
     sky_sublevel: Option<(&str, &str)>,
 ) -> Result<Manifest> {
+    let galaxy = kind == Content::Map
+        && Path::new(lvl_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("gal1.lvl"));
     let pc = pc_lvl
         .map(crate::tier::PcTextures::load)
         .transpose()
@@ -1283,6 +1288,7 @@ pub(super) fn bake_content(
             || pass_named.contains(&lower)
             || flash_named.contains(&lower)
             || hud_named.contains(&lower)
+            || lower.starts_with("icon_")
             || lower.ends_with("_icon_ass")
             || lower.ends_with("_icon_ass_shield")
             || lower == "spa_icon_critsys"
@@ -1345,7 +1351,11 @@ pub(super) fn bake_content(
             sky: is_sky,
             alpha_carried: needs_alpha,
         };
-        let mut tier2 = crate::tier::tier2(t, pc.as_ref(), usage);
+        let mut tier2 = if galaxy {
+            crate::tier::galaxy_tier2(t, pc.as_ref(), usage)
+        } else {
+            crate::tier::tier2(t, pc.as_ref(), usage)
+        };
         if original.is_some() {
             tier2 = super::render_textures::larger_own(lvl_path, t, &all_textures, usage, tier2)?;
         }

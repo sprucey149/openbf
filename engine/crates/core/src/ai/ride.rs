@@ -150,6 +150,14 @@ fn claim_seat_policy(
     if v.kind == VehicleKind::Flyer && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed {
         return None;
     }
+    // A CommandFlyer landed inside a hostile hangar (e.g. a deployed
+    // transport or spa4g_c's `cis_gunship`) serves as a mobile spawn post;
+    // autonomous on-foot bots must not board and fly it away
+    // (BF2 FUN_002e2e38, B2:257502-257503).
+    if source == SeatAdmission::Autonomous && super::flyer_drive::is_deployed_command_flyer(sim, v)
+    {
+        return None;
+    }
     if v.seats.first().map(|s| s.kind) != Some(SeatKind::Pilot) {
         return None;
     }
@@ -211,6 +219,36 @@ fn reach_test(sim: &Sim, u: &Unit, vh: VehicleHandle) -> Option<(f32, f32)> {
     Some((cap.center().distance_squared(v.pos), reach))
 }
 
+/// `FUN_002e2e38` skips a vehicle moving faster than 3 m/s
+/// (`re-soldier-ai.md` §7.1).
+const NOTIFY_SPEED: f32 = 3.0;
+
+/// The clear query's radius: `FUN_002e2e38` passes 0x40000000 (B2:257516).
+const NOTIFY_CLEAR_RADIUS: f32 = 2.0;
+
+/// BF2 `FUN_002e2e38` (B2:257514-257520): a vehicle that is not an
+/// EntityBuilding is offered only when `FUN_002eea68` finds the spot clear,
+/// with radius [`NOTIFY_CLEAR_RADIUS`] and mask 1 (the soldier bit). Its
+/// barrier test is `FUN_002ed840`, the same two dot products as
+/// [`nav::Barrier::contains_r`] (the PS2 compares with `<`, the port with
+/// `<=`). A barrier counts when it is enabled (bit 0x20,
+/// `FUN_002ee2c8`). spa4's `barrier19` (1.7 m) sits on the `cis_bomber` pad,
+/// so no CIS bot flies off the bomber that spa4g's Objective 4 has the
+/// player steal.
+/// trace: the second test (B2:257529-257533), at the vehicle's own radius
+/// and class+0x330 mask, also counts the dynamic obstacles that
+/// `FUN_002ee6f0` registers. The port has no such index.
+fn notify_barred(sim: &Sim, pos: Vec3) -> bool {
+    sim.ground_rules == GroundRules::Bf2
+        && sim.nav.as_ref().is_some_and(|g| {
+            g.barriers.iter().any(|b| {
+                b.enabled
+                    && b.stops(nav::SOLDIER)
+                    && b.contains_r(glam::Vec2::new(pos.x, pos.z), NOTIFY_CLEAR_RADIUS)
+            })
+        })
+}
+
 /// On the think period, a bot on foot with no claim: the nearest vehicle it
 /// could drive within [`BOARD_SEEK`], when its post is farther than
 /// [`BOARD_TRIP`] (or the vehicle is a [`command`] walker) and no other bot
@@ -224,6 +262,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     }
     if r.board.is_some()
         || u.droideka.is_some()
+        || !sim.ai_vehicle_allowed(u.team)
         || sim.tick < r.block_until
         || sim.tick < r.own_search_until
         || sim.vehicles.is_empty()
@@ -232,7 +271,12 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     }
     let cp = st.target_cp.and_then(|i| sim.cps.get(i as usize));
     let space = sim.round_rules().space_deathmatch();
-    if cp.is_none() && !space {
+    // `FUN_002e2e38` tells every friendly AI within 50 m of a slow vehicle
+    // with a free seat, whatever its order. The port takes that scan in
+    // space and for a member of a script goal (`core::goals`); a bot of the
+    // commander keeps the post rule below.
+    let goal = !space && sim.ai_goals.steer(me).is_some();
+    if cp.is_none() && !space && !goal {
         return;
     }
     let pos = u.soldier.pos;
@@ -255,17 +299,18 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         if v.kind == VehicleKind::Turret {
             continue;
         }
-        if !v.health.alive() {
+        if !v.health.alive() || notify_barred(sim, v.pos) {
             continue;
         }
         let space_flyer = space && v.kind == VehicleKind::Flyer;
-        let d = if space_flyer {
+        let notify = space_flyer || goal;
+        let d = if notify {
             (v.pos - pos).length()
         } else {
             nav::xz_dist(pos, v.pos)
         };
-        let too_far = if space_flyer {
-            d > VEHICLE_NOTIFY_RADIUS
+        let too_far = if notify {
+            d > VEHICLE_NOTIFY_RADIUS || (goal && v.vel.length() > NOTIFY_SPEED)
         } else {
             d > BOARD_SEEK || (near_post && !command(sim, vh))
         };
@@ -278,7 +323,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         {
             continue;
         }
-        let routed = space_flyer || cp.is_some_and(|cp| routes_to(sim, vh, cp));
+        let routed = notify || cp.is_some_and(|cp| routes_to(sim, vh, cp));
         if routed && claim_seat(sim, me, vh).is_some() && !taken(vh) {
             best = Some((d, vh));
         }

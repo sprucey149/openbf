@@ -113,6 +113,52 @@ pub struct Icons {
     pub spawn_back: PadButton,
     pub class_next: PadButton,
     pub class_prev: PadButton,
+    /// Gameplay prompts follow the current context's bindings.
+    pub controls: [PadButton; 14],
+    pub keys: [KeyLabel; 14],
+}
+
+/// A short keycap label, kept inline so icon settings remain Copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyLabel([u8; 48]);
+
+impl KeyLabel {
+    pub const fn new(text: &str) -> Self {
+        let mut bytes = [0; 48];
+        let mut i = 0;
+        while i < text.len() && i < bytes.len() {
+            bytes[i] = text.as_bytes()[i];
+            i += 1;
+        }
+        Self(bytes)
+    }
+
+    pub fn text(&self) -> &str {
+        std::str::from_utf8(&self.0[..self.0.iter().position(|b| *b == 0).unwrap_or(48)])
+            .unwrap_or("[Key]")
+    }
+}
+
+/// Semantic actions of the original localized tokens, in binding order.
+/// btnr1/btnl1 describe fire actions, rather than the port's physical R1/L1.
+pub fn control_token(token: &str) -> Option<usize> {
+    Some(match token.to_ascii_lowercase().as_str() {
+        "btnr1" | "fire" => 0,
+        "btnl1" | "secondaryfire" => 1,
+        "btna" | "jump" => 2,
+        "btnmisc2" | "crouchbutton" => 3,
+        "btn_analog_l_down" | "sprint" => 4,
+        "btn2" | "btnmisc" | "locktargetbutton" | "reload" => 5,
+        "btnb" | "usebutton" => 6,
+        "btnr2" | "btn_r2" | "optionr" => 7,
+        "btnl2" | "btn_l2" | "optionl" => 8,
+        "btn_analog_r_down" | "zoom" => 9,
+        "btn_directional_pad_u" => 10,
+        "btn_directional_pad_d" => 11,
+        "btn_directional_pad_l" => 12,
+        "btn_directional_pad_r" => 13,
+        _ => return None,
+    })
 }
 
 impl Default for Icons {
@@ -130,6 +176,38 @@ impl Icons {
             spawn_back: PadButton::North,
             class_next: PadButton::R1,
             class_prev: PadButton::Select,
+            controls: [
+                PadButton::R2,
+                PadButton::L2,
+                PadButton::South,
+                PadButton::East,
+                PadButton::L3,
+                PadButton::West,
+                PadButton::North,
+                PadButton::R1,
+                PadButton::L1,
+                PadButton::R3,
+                PadButton::DPadUp,
+                PadButton::DPadDown,
+                PadButton::DPadLeft,
+                PadButton::DPadRight,
+            ],
+            keys: [
+                KeyLabel::new("[Left mouse]"),
+                KeyLabel::new("[Middle mouse]"),
+                KeyLabel::new("[Space]"),
+                KeyLabel::new("[Ctrl]"),
+                KeyLabel::new("[Shift]"),
+                KeyLabel::new("[R]"),
+                KeyLabel::new("[E]"),
+                KeyLabel::new("[Wheel down]"),
+                KeyLabel::new("[G]"),
+                KeyLabel::new("[Right mouse]"),
+                KeyLabel::new("[Up]"),
+                KeyLabel::new("[Down]"),
+                KeyLabel::new("[Left]"),
+                KeyLabel::new("[Right]"),
+            ],
         }
     }
 

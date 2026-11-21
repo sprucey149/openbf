@@ -19,6 +19,9 @@ fn model() -> ui::hud::HudModel {
     ui::hud::HudModel {
         ctf: false,
         team_points: None,
+        unlimited_tickets: [false; 2],
+        popup: None,
+        objectives_updated: false,
         flag_status: None,
         lock: None,
         hints: Vec::new(),

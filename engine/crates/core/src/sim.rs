@@ -89,7 +89,7 @@ mod saber;
 mod saber_throw;
 mod seat_assist;
 mod seats;
-mod self_turrets;
+pub mod self_turrets;
 mod space_assault;
 mod space_balance;
 mod spawn;
@@ -138,7 +138,7 @@ pub use input::{
 };
 pub use lock_on::{LockOn, LockTarget};
 pub use look::{LookPreview, MOUSE_STEER};
-pub use native_teams::{AllySpawn, NativeSpawnPost};
+pub use native_teams::{draw_class, AllySpawn, NativeClassDraw, NativeSpawnPost};
 pub use pickups::{
     DropTable, ItemClass, Pickup, BODY_AHEAD, BODY_RADIUS, DROP_HEIGHT, DROP_SIDE_SPEED,
     ITEM_GRAVITY, ITEM_POOL_DEFAULT, LIFE_END, MAX_DROPS, TAKE_AGE,
@@ -162,7 +162,7 @@ pub use state::{
     STATIC_DIGEST_GROUPS,
 };
 pub use stations::{
-    Station, StationAnim, StationClass, StationDamageEffect, StationMotion,
+    Station, StationAnim, StationClass, StationDamageEffect, StationMotion, StationParts,
     DELAY_DEFAULT as STATION_DELAY_DEFAULT, GATHER_MAX as STATION_GATHER_MAX,
 };
 pub use target_hints::{TargetHint, TargetHints};

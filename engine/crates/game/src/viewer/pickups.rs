@@ -14,7 +14,7 @@ use super::scene::draw_in;
 use super::upload::{upload_submeshes, upload_texture_file};
 use crate::assets::load_glb;
 use anyhow::Result;
-use glam::{Mat4, Quat};
+use glam::{Mat4, Quat, Vec3};
 use render::{DrawCmd, DrawLayer, LightPath, MeshHandle, Renderer, TextureHandle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,10 @@ struct Part {
     layer: DrawLayer,
     light: LightPath,
     additive: bool,
+    /// The model's sphere in its own space: every model draw gathers the
+    /// local lights for it (`re-point-lights.md` §5), the item's own
+    /// `LightOdf` omni among them (§4).
+    sphere: Option<render::LitSphere>,
 }
 
 impl Part {
@@ -46,7 +50,15 @@ impl Part {
             layer,
             light: cpu.light_path(k),
             additive,
+            sphere: crate::point_light::model_sphere(cpu, Mat4::IDENTITY),
         }
+    }
+
+    fn lit(&self, m: Mat4) -> Option<render::LitSphere> {
+        self.sphere.map(|s| render::LitSphere {
+            centre: m.transform_point3(s.centre),
+            radius: s.radius * m.transform_vector3(Vec3::X).length(),
+        })
     }
 }
 
@@ -56,6 +68,19 @@ pub struct FlagVisuals {
     carried: Vec<Part>,
     cull: Option<f32>,
     home_rotation: Quat,
+    campaign: HashMap<String, (Vec<Part>, Vec<Part>)>,
+    glows: HashMap<String, FlagGlow>,
+    /// The map's `Effect("HDR")` is on, so a lens flare lands ×2
+    /// (`glow_draws`).
+    hdr: bool,
+}
+
+struct FlagGlow {
+    color: [u8; 4],
+    intensity: f32,
+    radius: f32,
+    distance: f32,
+    omni: f32,
 }
 
 fn flag_pose(
@@ -89,20 +114,62 @@ impl FlagVisuals {
     pub fn load(r: &mut Renderer, scene: &crate::assets::Scene, cull: Option<f32>) -> Self {
         let mut out = Self {
             cull,
+            hdr: scene.manifest.hdr.is_some(),
             ..Self::default()
         };
-        let Some(instance) = scene
+        if let Some(instance) = scene
             .manifest
             .instances
             .iter()
             .find(|i| i.class.eq_ignore_ascii_case("com_icon_spaceflag"))
-        else {
-            return out;
-        };
-        out.home_rotation = Quat::from_mat4(&super::instance_matrix(
-            instance.rotation,
-            instance.translation,
-        ));
+        {
+            out.home_rotation = Quat::from_mat4(&super::instance_matrix(
+                instance.rotation,
+                instance.translation,
+            ));
+        }
+        let mut db = crate::classdb::ClassDb::default();
+        if let Some(root) = scene.dir.parent() {
+            let _ = db.load_map(&scene.dir);
+            let _ = db.load(
+                &root
+                    .join("classes")
+                    .join(format!("{}_ingame.ron", scene.manifest.source_game)),
+            );
+        }
+        for class in db
+            .names()
+            .filter(|name| db.engine_base(name) == Some("flag"))
+        {
+            if let Some(light) = db.prop(class, "LightOdf") {
+                let color: Vec<u8> = db
+                    .prop(light, "Color")
+                    .unwrap_or("255 255 255 255")
+                    .split_whitespace()
+                    .filter_map(|n| n.parse().ok())
+                    .collect();
+                if color.len() == 4 {
+                    out.glows.insert(
+                        class.to_owned(),
+                        FlagGlow {
+                            color: [color[0], color[1], color[2], color[3]],
+                            intensity: db.prop_f32(light, "FlareIntensity").unwrap_or(0.0),
+                            // EntityLight defaults, re-point-lights.md §10.
+                            radius: db.prop_f32(light, "ConeInitialWidth").unwrap_or(1.0) * 0.5,
+                            distance: db.prop_f32(light, "DrawDistance").unwrap_or(200.0),
+                            omni: db.prop_f32(light, "OmniRadius").unwrap_or(0.0),
+                        },
+                    );
+                }
+            }
+            out.campaign.insert(
+                class.to_owned(),
+                (
+                    load_flag_parts(r, scene, db.prop(class, "GeometryName")),
+                    load_flag_parts(r, scene, db.prop(class, "CarriedGeometryName")),
+                ),
+            );
+        }
         let additive_bit = crate::fx::draw::additive_bit(
             if scene.manifest.source_game.eq_ignore_ascii_case("bf1") {
                 crate::fx::emitter::Era::Bf1
@@ -157,17 +224,212 @@ impl FlagVisuals {
             };
             let parts = if carried { &self.carried } else { &self.loose };
             for part in parts {
-                if let Some(texture) = part.texture {
-                    let mut draw = draw_in(part.layer, part.mesh, texture, m)
-                        .with_cull(self.cull)
-                        .with_light(part.light);
-                    draw.additive = part.additive;
-                    out.push(draw);
+                let mut draw = match part.texture {
+                    Some(texture) => draw_in(part.layer, part.mesh, texture, m),
+                    None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], m),
                 }
+                .with_cull(self.cull)
+                .with_light(part.light)
+                .with_lit(part.lit(m));
+                draw.additive = part.additive;
+                out.push(draw);
             }
         }
         out
     }
+
+    /// The item light's lens flare (re-point-lights.md §10). The light ctor
+    /// `FUN_00227150` bakes the flare's alpha byte as `A × FlareIntensity`
+    /// (B2 139719–139724; FlareIntensity clamped to 0..1 by the setter,
+    /// 140625–140632) and keeps `DrawDistance²` for the cull. The manager
+    /// `FUN_00466d08` fades the star's centre alpha by
+    /// `(1 − d²/D²) / 0.19` past `0.81·D²` (515485–515488); the ring keeps
+    /// the full byte (`FUN_00468238` → `FUN_00468a28`, 515993–516002).
+    /// `flaglight`'s 225 255 255 64 × 0.5 gives byte 32, GS alpha 16.
+    ///
+    /// On an HDR map the flare's bytes skip the HDR scale (no
+    /// `FUN_0057fd50` read in `FUN_00466d08` / `FUN_00468238`) while the
+    /// scene draws at ×0.5 and the bloom composite (pass priority 0x271a,
+    /// B2 504385, after the managers) multiplies by 255/128
+    /// (re-glow.md §2.2), so the flare lands ×2; the port's frame is not
+    /// half-scale, so the alpha byte doubles here. [D] measured: the PS2
+    /// tutorial frame lifts the holocron's surroundings by about +50 luma;
+    /// this model predicts about +56 at the centre. PROVISIONAL: that the
+    /// LensFlare stage draws before the composite is inferred from the
+    /// pass priority, not read off the frame loop. trace: the caller of
+    /// `FUN_00466ce8`.
+    fn glow_draws(
+        &self,
+        walk: &crate::walk::WalkSim,
+        camera: &render::Camera,
+    ) -> Vec<render::ParticleDraw> {
+        let (Some(campaign), Some(ctf)) = (&walk.campaign, &walk.sim.ctf) else {
+            return Vec::new();
+        };
+        campaign
+            .flag_objects()
+            .filter_map(|(index, class)| {
+                let def = self.glows.get(class)?;
+                let flag = ctf.flags.get(index)?;
+                let (_, matrix) = flag_pose(&walk.sim, flag, Quat::IDENTITY)?;
+                let pos = matrix.w_axis.truncate();
+                let d2 = pos.distance_squared(camera.position);
+                let far = def.distance * def.distance;
+                if d2 >= far || def.intensity <= 0.0 {
+                    return None;
+                }
+                let alpha =
+                    f32::from(def.color[3]) * core::fmath::FloatExt::fmin(def.intensity, 1.0);
+                let alpha =
+                    core::fmath::FloatExt::fmin(alpha * if self.hdr { 2.0 } else { 1.0 }, 255.0)
+                        as u8;
+                let fade = if d2 > far * 0.80999994 {
+                    (1.0 - d2 / far) * 5.2631564
+                } else {
+                    1.0
+                };
+                crate::holo::lens_flare(
+                    pos,
+                    def.radius,
+                    alpha,
+                    fade,
+                    [def.color[0], def.color[1], def.color[2]],
+                    camera,
+                )
+            })
+            .collect()
+    }
+    /// The item's `LightOdf` EntityLight as a light (EntityItem ctor
+    /// `FUN_00224fb8`, re-point-lights.md §4): a non-Static omni of the
+    /// light class's Color and OmniRadius — `flaglight`'s 225 255 255, r 10
+    /// — that lights the models and the terrain around the holocron.
+    /// PROVISIONAL: at the item's origin, the light's own offset is not
+    /// traced. trace: `FUN_00224fb8`'s light placement.
+    fn item_lights(&self, walk: &crate::walk::WalkSim) -> Vec<(Vec3, [u8; 3], f32)> {
+        let (Some(campaign), Some(ctf)) = (&walk.campaign, &walk.sim.ctf) else {
+            return Vec::new();
+        };
+        campaign
+            .flag_objects()
+            .filter_map(|(index, class)| {
+                let def = self.glows.get(class).filter(|d| d.omni > 0.0)?;
+                let flag = ctf.flags.get(index)?;
+                let (_, matrix) = flag_pose(&walk.sim, flag, Quat::IDENTITY)?;
+                Some((
+                    matrix.w_axis.truncate(),
+                    [def.color[0], def.color[1], def.color[2]],
+                    def.omni,
+                ))
+            })
+            .collect()
+    }
+    pub fn campaign_draws(
+        &self,
+        sim: &core::sim::Sim,
+        campaign: &crate::campaign_runtime::CampaignRuntime,
+    ) -> Vec<DrawCmd> {
+        let mut out = Vec::new();
+        let Some(ctf) = &sim.ctf else { return out };
+        for (index, class) in campaign.flag_objects() {
+            let Some(flag) = ctf.flags.get(index) else {
+                continue;
+            };
+            let Some((loose, carried_parts)) = self.campaign.get(class) else {
+                continue;
+            };
+            let Some((carried, matrix)) = flag_pose(sim, flag, Quat::IDENTITY) else {
+                continue;
+            };
+            let parts = if carried { carried_parts } else { loose };
+            for part in parts {
+                let mut draw = match part.texture {
+                    Some(texture) => draw_in(part.layer, part.mesh, texture, matrix),
+                    None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], matrix),
+                }
+                .with_cull(self.cull)
+                .with_light(part.light)
+                .with_lit(part.lit(matrix));
+                draw.additive = part.additive;
+                out.push(draw);
+            }
+        }
+        out
+    }
+}
+
+impl super::vehicles::VehicleVisuals {
+    pub fn campaign_glows(
+        &self,
+        walk: &crate::walk::WalkSim,
+        camera: &render::Camera,
+    ) -> Vec<render::ParticleDraw> {
+        self.flags.glow_draws(walk, camera)
+    }
+    pub fn campaign_lights(&self, walk: &crate::walk::WalkSim) -> Vec<(Vec3, [u8; 3], f32)> {
+        self.flags.item_lights(walk)
+    }
+    pub fn campaign_flags(&self, walk: &crate::walk::WalkSim) -> Vec<DrawCmd> {
+        walk.campaign
+            .as_ref()
+            .map(|c| self.flags.campaign_draws(&walk.sim, c))
+            .unwrap_or_default()
+    }
+}
+
+/// Script-created flags need no placed instance. Their class selects both
+/// models, including the tutorial holocron in the common bake.
+fn load_flag_parts(
+    r: &mut Renderer,
+    scene: &crate::assets::Scene,
+    geometry: Option<&str>,
+) -> Vec<Part> {
+    let Some(geometry) = geometry else {
+        return Vec::new();
+    };
+    let Some(root) = scene.dir.parent() else {
+        return Vec::new();
+    };
+    let common = root.join(format!("common_{}", scene.manifest.source_game));
+    let loaded = [scene.dir.as_path(), common.as_path()]
+        .into_iter()
+        .find_map(|dir| load_glb(&dir.join("models").join(format!("{geometry}.glb"))).ok());
+    let Some(cpu) = scene.meshes.get(geometry).or(loaded.as_ref()) else {
+        eprintln!("campaign flag model missing: {geometry}");
+        return Vec::new();
+    };
+    let Ok(meshes) = upload_submeshes(r, cpu) else {
+        return Vec::new();
+    };
+    let additive_bit = crate::fx::draw::additive_bit(crate::fx::emitter::Era::Bf2);
+    meshes
+        .into_iter()
+        .enumerate()
+        .map(|(k, (mesh, material, layer, flags))| {
+            let texture = material.and_then(|name| {
+                scene
+                    .textures
+                    .get(&name.to_ascii_lowercase())
+                    .and_then(|t| super::upload::upload_cpu_texture(r, t, name).ok())
+                    .or_else(|| {
+                        [scene.dir.as_path(), common.as_path()]
+                            .into_iter()
+                            .find_map(|dir| {
+                                upload_texture_file(r, &dir.join("textures"), name)
+                                    .ok()
+                                    .flatten()
+                            })
+                    })
+            });
+            Part::new(
+                cpu,
+                k,
+                mesh,
+                texture,
+                layer,
+                layer == DrawLayer::Blend && flags & additive_bit != 0,
+            )
+        })
+        .collect()
 }
 
 /// The item models uploaded so far, by geometry name.
@@ -265,7 +527,11 @@ impl PickupVisuals {
                     Some(t) => draw_in(part.layer, part.mesh, t, m),
                     None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], m),
                 };
-                out.push(base.with_cull(self.cull).with_light(part.light));
+                out.push(
+                    base.with_cull(self.cull)
+                        .with_light(part.light)
+                        .with_lit(part.lit(m)),
+                );
             }
         }
         out
@@ -275,6 +541,80 @@ impl PickupVisuals {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GPU and BF2 common/Geonosis bakes"]
+    fn tutorial_holocron_uploads_without_a_placed_space_flag() {
+        let root = crate::assets::baked_root();
+        let scene = crate::assets::load_scene(&root.join("bf2_geo1")).unwrap();
+        let mut r = Renderer::new_headless(320, 240).unwrap();
+        let art = FlagVisuals::load(&mut r, &scene, None);
+        let (loose, carried) = art.campaign.get("com_item_holocron").expect("flag class");
+        assert!(!loose.is_empty(), "invisible loose holocron");
+        assert!(!carried.is_empty(), "invisible carried holocron");
+        assert!(loose.iter().chain(carried).all(|p| p.texture.is_some()));
+        let missions = root.parent().unwrap().join("missions");
+        let mission = crate::mission::MissionDef::load_campaign(&missions, "geo1c_c").unwrap();
+        let layout = crate::layout::MapLayout::from_manifest(&scene.manifest);
+        let mut sim = core::sim::Sim::empty(1);
+        sim.ctf = Some(core::sim::CtfState::new_ground_one_flag(
+            1,
+            glam::Vec3::ZERO,
+            glam::Vec3::ZERO,
+            glam::Vec3::ZERO,
+        ));
+        let mut campaign = crate::campaign_runtime::CampaignRuntime::new(
+            mission.campaign.unwrap(),
+            &layout,
+            &scene.manifest,
+            &[],
+            Vec::new(),
+            &sim,
+        );
+        campaign.w.flags.push(crate::campaign_runtime::FlagEnt {
+            name: "tutorial_holocron".into(),
+            class: "com_item_holocron".into(),
+            ctf: 0,
+            dead: false,
+        });
+        let draws = art.campaign_draws(&sim, &campaign);
+        assert!(!draws.is_empty(), "live campaign flag produced no draws");
+        let camera = render::Camera {
+            position: glam::Vec3::new(0.0, 0.5, 3.0),
+            ..Default::default()
+        };
+        r.render(&camera, &draws, [0.0, 0.0, 0.0, 1.0]).unwrap();
+        let (rgba, w, h) = r.capture_rgba().unwrap();
+        assert!(
+            rgba.chunks_exact(4)
+                .filter(|p| p[..3].iter().any(|c| *c > 20))
+                .count()
+                > 100,
+            "holocron rendered blank"
+        );
+        let out = root.parent().unwrap().join("artifacts/tutorial-ui");
+        std::fs::create_dir_all(&out).unwrap();
+        image::RgbaImage::from_raw(w, h, rgba)
+            .unwrap()
+            .save(out.join("holocron.png"))
+            .unwrap();
+        let mut walk = crate::walk::WalkSim::new(1, glam::Vec3::ZERO, None);
+        walk.sim = sim;
+        walk.campaign = Some(campaign);
+        let glows = art.glow_draws(&walk, &camera);
+        assert_eq!(glows.len(), 1, "missing LightOdf lens flare");
+        r.set_particles(glows);
+        r.render(&camera, &draws, [0.0, 0.0, 0.0, 1.0]).unwrap();
+        let (lit, w, h) = r.capture_rgba().unwrap();
+        image::RgbaImage::from_raw(w, h, lit)
+            .unwrap()
+            .save(out.join("holocron-glow.png"))
+            .unwrap();
+        let mut campaign = walk.campaign.take().unwrap();
+        let sim = walk.sim;
+        campaign.w.flags[0].dead = true;
+        assert!(art.campaign_draws(&sim, &campaign).is_empty());
+    }
 
     /// BF1 hides an item for its last 2 s (life 1 -> -1); BF2 never.
     #[test]
@@ -327,5 +667,70 @@ mod tests {
         assert!(carried);
         assert_eq!(pose.w_axis.truncate(), pos + rot * flag.carried_offset);
         assert!((pose.transform_vector3(glam::Vec3::Z) - rot * glam::Vec3::Z).length() < 0.001);
+    }
+
+    /// Regression test for Mustafar (`mus1c_c`) orbital strike beacon:
+    /// `mus_flag_bomb`'s loose model `mus1_icon_bomb` references textures
+    /// (`tan4_prop_console`, `tan4_prop_console_fx`) that stock `MUS1.LVL`
+    /// omits. `FlagVisuals::campaign_draws` must still emit flat-fallback draws
+    /// instead of dropping the model while placed.
+    #[test]
+    #[ignore = "requires GPU and BF2 Mustafar bake"]
+    fn mus1_beacon_draws_when_loose_and_when_carried() {
+        let root = crate::assets::baked_root();
+        let map = root.join("bf2_mus1");
+        if !map.join("manifest.ron").exists() {
+            return;
+        }
+        let scene = crate::assets::load_scene(&map).unwrap();
+        let mut r = Renderer::new_headless(64, 64).unwrap();
+        let art = FlagVisuals::load(&mut r, &scene, None);
+        let (loose, carried) = art
+            .campaign
+            .get("mus_flag_bomb")
+            .expect("mus_flag_bomb class loaded");
+        assert!(!loose.is_empty(), "mus1_icon_bomb loose parts loaded");
+        assert!(!carried.is_empty(), "mus_icon_bomb_carried parts loaded");
+        let missions = root.parent().unwrap().join("missions");
+        let mission = crate::mission::MissionDef::load_campaign(&missions, "mus1c_c").unwrap();
+        let layout = crate::layout::MapLayout::from_manifest(&scene.manifest);
+        let mut sim = core::sim::Sim::empty(1);
+        let unit = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, glam::Vec3::ZERO))
+            .unwrap();
+        sim.ctf = Some(core::sim::CtfState::new_ground_one_flag(
+            1,
+            glam::Vec3::ZERO,
+            glam::Vec3::ZERO,
+            glam::Vec3::ZERO,
+        ));
+        let mut campaign = crate::campaign_runtime::CampaignRuntime::new(
+            mission.campaign.unwrap(),
+            &layout,
+            &scene.manifest,
+            &[],
+            Vec::new(),
+            &sim,
+        );
+        campaign.w.flags.push(crate::campaign_runtime::FlagEnt {
+            name: "bomb2".into(),
+            class: "mus_flag_bomb".into(),
+            ctf: 0,
+            dead: false,
+        });
+        let loose_draws = art.campaign_draws(&sim, &campaign);
+        assert_eq!(
+            loose_draws.len(),
+            loose.len(),
+            "loose beacon must draw even when its textures are absent from MUS1.LVL"
+        );
+        sim.ctf.as_mut().unwrap().flags[0].status =
+            core::sim::FlagStatus::Carried { carrier: unit };
+        let carried_draws = art.campaign_draws(&sim, &campaign);
+        assert_eq!(
+            carried_draws.len(),
+            carried.len(),
+            "carried beacon must draw"
+        );
     }
 }

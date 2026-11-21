@@ -4,6 +4,139 @@ mod cutter_tests;
 mod item_layer_tests;
 
 use super::*;
+
+#[test]
+#[ignore = "requires GPU and tutorial bake"]
+fn tutorial_followup_campaign_map_renders() {
+    let root = crate::assets::baked_root();
+    let mut scene = crate::assets::load_scene(&root.join("bf2_geo1")).unwrap();
+    scene.apply_mode_layer("con");
+    let page = ui::hud_draw::campaign::Model {
+        selected: 7,
+        objectives: (0..8)
+            .map(|i| ui::hud_draw::campaign::Objective {
+                text: format!("Objective {}: follow the marked target", i + 1),
+                active: i == 7,
+            })
+            .collect(),
+        footer: [
+            "Objective Details {usebutton}",
+            "Hints {lockTargetButton}",
+            "Return {Map}",
+        ]
+        .map(str::to_owned),
+    };
+    let out = root.parent().unwrap().join("artifacts/tutorial-ui");
+    std::fs::create_dir_all(&out).unwrap();
+    for (name, icons) in [
+        ("ps2", ui::input_icons::Icons::default()),
+        (
+            "keyboard",
+            ui::input_icons::Icons::of(ui::input_icons::IconSet::KeyboardMouse),
+        ),
+    ] {
+        let mut r = render::Renderer::new_headless(1280, 720).unwrap();
+        let mut view = HudView::for_renderer(&root, &r).unwrap();
+        view.set_icons(icons);
+        view.hud.map = Some(crate::minimap::still(&scene, glam::Vec3::ZERO, 0.0));
+        let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep"]).unwrap();
+        let unit_sheet = db
+            .prop("rep_inf_ep2_rifleman", "MapTexture")
+            .unwrap()
+            .to_owned();
+        let map = view.hud.map.as_mut().unwrap();
+        map.units.push(ui::hud_map::MapIcon {
+            pos: map.centre,
+            texture: unit_sheet.clone(),
+            scale: 2.0,
+            color: ui::hud_map::FRIEND,
+            ..Default::default()
+        });
+        // The production feed registers this map-specific texture directory.
+        view.texture_dirs
+            .insert(0, map.sheet_dir.as_ref().unwrap().clone());
+        let frame = ui::hud_draw::campaign::draw(&view.hud, &view.art, &page, [1280.0, 720.0]);
+        view.install_frame(frame);
+        assert!(
+            view.drawn_sheets().any(|s| s == unit_sheet),
+            "large map lost its live units"
+        );
+        assert!(
+            view.drawn_sheets().any(|s| s.contains("geo1_map")),
+            "missing large map"
+        );
+        r.render_with_overlay(
+            &render::Camera::default(),
+            &[],
+            [0.15, 0.12, 0.1, 1.0],
+            Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+        )
+        .unwrap();
+        assert!(
+            view.unresolved_sheets().next().is_none(),
+            "missing campaign map art"
+        );
+        let (rgba, w, h) = r.capture_rgba().unwrap();
+        image::RgbaImage::from_raw(w, h, rgba)
+            .unwrap()
+            .save(out.join(format!("campaign-map-{name}.png")))
+            .unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter and the BF2 HUD bake"]
+fn tutorial_prompts_render_for_each_device() {
+    use ui::input_icons::{IconSet, Icons};
+    let assets = crate::assets::baked_root();
+    let size = [1280, 720];
+    let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+    let out = assets.parent().unwrap().join("artifacts/tutorial-ui");
+    std::fs::create_dir_all(&out).unwrap();
+    for (name, set) in [
+        ("ps2", IconSet::Ds2),
+        ("xbox", IconSet::XboxOne),
+        ("keyboard", IconSet::KeyboardMouse),
+    ] {
+        let mut view = HudView::for_renderer(&assets, &r).unwrap();
+        view.set_icons(Icons::of(set));
+        view.send(
+            "objectivePopup",
+            ui::hud_tree::EventValue::Text(
+                "{btnr1} Fire   {btnl1} Grenade\n{btna} Jump   {btnb} Use".into(),
+            ),
+        );
+        view.send("player1.objectivesUpdated", ui::hud_tree::EventValue::None);
+        view.hud.advance(0.5);
+        let frame = ui::hud_draw::draw(&view.hud, &view.art, size.map(|v| v as f32));
+        view.install_frame(frame);
+        let expected = if set == IconSet::KeyboardMouse {
+            "icon_kb_enter"
+        } else {
+            ui::input_icons::pad_sheet(set, ui::input_icons::PadButton::L2)
+        };
+        assert!(
+            view.drawn_sheets().any(|s| s == expected),
+            "missing {expected}"
+        );
+        r.render_with_overlay(
+            &render::Camera::default(),
+            &[],
+            [0.15, 0.12, 0.1, 1.0],
+            Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+        )
+        .unwrap();
+        assert!(
+            view.unresolved_sheets().next().is_none(),
+            "missing tutorial art"
+        );
+        let (rgba, w, h) = r.capture_rgba().unwrap();
+        image::RgbaImage::from_raw(w, h, rgba)
+            .unwrap()
+            .save(out.join(format!("prompts-{name}.png")))
+            .unwrap();
+    }
+}
 use manifest::hud::{HudDistanceFont, HudDistanceGlyph};
 
 #[test]

@@ -14,11 +14,32 @@ use crate::walk::{TeamTemplate, WalkSim};
 use glam::{Mat4, Vec3};
 use render::{ParticleDraw, Renderer, SkinnedDrawCmd, TextureHandle};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The bone a jet effect rides (card JETP2, PROVISIONAL: `crate::fx`
 /// `jet.rs`).
 pub const JET_BONE: &str = "bone_ribcage";
+
+fn resolve_side_dir(assets_dir: &Path, game: &str, subdir: &str, file: &str) -> (PathBuf, String) {
+    let primary = assets_dir.join(format!("side_{game}"));
+    if pak::is_file(primary.join(subdir).join(file)) {
+        return (primary, game.to_owned());
+    }
+    let alt_game = if let Some(base) = game.strip_suffix("/locals") {
+        Some(base.to_owned())
+    } else if matches!(game, "bf1" | "bf2") {
+        Some(format!("{game}/locals"))
+    } else {
+        None
+    };
+    if let Some(alt_game) = alt_game {
+        let alt = assets_dir.join(format!("side_{alt_game}"));
+        if pak::is_file(alt.join(subdir).join(file)) {
+            return (alt, alt_game);
+        }
+    }
+    (primary, game.to_owned())
+}
 
 impl SoldierVisuals {
     pub fn append_test_class(
@@ -176,6 +197,10 @@ impl SoldierVisuals {
         unused.classes.clear();
         let teams = [template.clone(), unused];
         let mut added = Self::load_with_side(r, root, game, &teams, true);
+        // Native teams were skipped by `load_with_side`'s saber pass. Build
+        // them here so a campaign Jedi's blade is drawn like any other hero's.
+        let mut native_sabers = added.load_sabers(Some(&mut *r), root, &teams);
+        let sabers = std::mem::take(&mut native_sabers[0]);
         let bodies = self.assets.len();
         let weapons = self.weapons.len();
         let mut per_class = std::mem::take(&mut added.per_class[0]);
@@ -197,6 +222,7 @@ impl SoldierVisuals {
                 anim: std::mem::take(&mut added.anim[0]),
                 skins: std::mem::take(&mut added.skins[0]),
                 low_skins: std::mem::take(&mut added.low_skins[0]),
+                sabers,
             },
         );
     }
@@ -273,7 +299,7 @@ impl SoldierVisuals {
                 .flat_map(|t| &t.classes)
                 .any(|c| c.asset_game(game) == "bf2")
             {
-                s.load_sabers(Some(&mut *r), assets_dir, teams);
+                s.sabers = s.load_sabers(Some(&mut *r), assets_dir, teams);
             }
         }
         // Each class's skins over its body's parts (card USKN).
@@ -281,7 +307,12 @@ impl SoldierVisuals {
             let mut rows = Vec::new();
             let mut low_rows = Vec::new();
             for (k, c) in t.classes.iter().enumerate() {
-                let side = assets_dir.join(format!("side_{}", c.asset_game(&side_game)));
+                let class_game = c.asset_game(&side_game);
+                let side = if let Some(geom) = c.geometry.as_deref() {
+                    resolve_side_dir(assets_dir, class_game, "soldiers", &format!("{geom}.glb")).0
+                } else {
+                    assets_dir.join(format!("side_{class_game}"))
+                };
                 let body = s.per_class[team].get(k).and_then(|d| d.body);
                 let groups = body.map_or(&[][..], |b| s.assets[b].groups.as_slice());
                 let row: Vec<Option<TextureHandle>> = groups
@@ -371,7 +402,7 @@ impl SoldierVisuals {
             .flat_map(|t| &t.classes)
             .any(|c| c.asset_game(game) == "bf2")
         {
-            s.load_sabers(None, assets_dir, teams);
+            s.sabers = s.load_sabers(None, assets_dir, teams);
         }
         s
     }
@@ -479,7 +510,8 @@ impl SoldierVisuals {
         // specular pass resolves against the lighting the map's
         // `upload_scene` already put on the renderer: every caller loads
         // the soldiers after the scene.
-        let side = assets_dir.join(format!("side_{game}"));
+        let (side, effective_game) =
+            resolve_side_dir(assets_dir, game, "soldiers", &format!("{geometry}.glb"));
         let glb = side.join("soldiers").join(format!("{geometry}.glb"));
         let asset = match load_visual_skinned_glb(&glb) {
             Ok(a) => a,
@@ -523,7 +555,7 @@ impl SoldierVisuals {
         } else {
             Self::load_cloths(&side, geometry, &asset)
         };
-        let (lod, low) = Self::load_low(r, assets_dir, game, geometry, &asset, cache);
+        let (lod, low) = Self::load_low(r, assets_dir, &effective_game, geometry, &asset, cache);
         println!(
             "soldier {geometry}: {} bones, {} clips, {} parts",
             asset.skeleton.len(),
@@ -577,18 +609,25 @@ impl SoldierVisuals {
             side = common;
             wpath = shared;
         } else if !pak::is_file(&wpath) {
-            // A BF2 award's own model on a BF1 map (the guided rocket), or a
-            // BF1 class's on a BF2 map: the other game's side holds it.
-            let other = if game.starts_with("bf2") {
-                "side_bf1"
+            let (alt_side, _) = resolve_side_dir(assets_dir, game, "weapons", &format!("{wg}.glb"));
+            let alt_wpath = alt_side.join("weapons").join(format!("{wg}.glb"));
+            if pak::is_file(&alt_wpath) {
+                side = alt_side;
+                wpath = alt_wpath;
             } else {
-                "side_bf2"
-            };
-            let other = assets_dir.join(other);
-            let theirs = other.join("weapons").join(format!("{wg}.glb"));
-            if pak::is_file(&theirs) {
-                side = other;
-                wpath = theirs;
+                // A BF2 award's own model on a BF1 map (the guided rocket), or a
+                // BF1 class's on a BF2 map: the other game's side holds it.
+                let other = if game.starts_with("bf2") {
+                    "side_bf1"
+                } else {
+                    "side_bf2"
+                };
+                let other = assets_dir.join(other);
+                let theirs = other.join("weapons").join(format!("{wg}.glb"));
+                if pak::is_file(&theirs) {
+                    side = other;
+                    wpath = theirs;
+                }
             }
         }
         if let Some(r) = r {

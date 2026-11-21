@@ -88,6 +88,7 @@ These read your own disc extract and your own Ghidra exports; nothing here ships
 | `annotate_hashes.py`, `analysis_index.py` | annotate name hashes in the listings; generate `analysis/INDEX.md` |
 | `ExportCensus.java`, `ExportDecomp.java` | Ghidra scripts that write those exports |
 | `callgraph.py`, `scan_tables.py`, `bindings_diff.py` | reachability, Lua binding tables and their BF1/BF2 difference |
+| `campaign_ir.py`, `gen_missions.py` | translate PS2 campaign bytecode into the action tree the interpreter reads and generate the mission RON (local game data, gitignored) |
 | `ucfb_tree.py` | print an LVL's chunk tree |
 | `tools/` | small helpers; see `tools/README.md` |
 

@@ -26,7 +26,7 @@ fn vs_main(v: Vertex) -> Fragment {
 fn sky_at(p: vec2<f32>) -> f32 {
     let size = vec2<i32>(textureDimensions(depth));
     if any(p < vec2(0.0)) || any(p >= vec2<f32>(size)) { return 0.0; }
-    return select(0.0, 1.0, textureLoad(depth, vec2<i32>(p), 0) >= 0.999999);
+    return select(0.0, 1.0, textureLoad(depth, vec2<i32>(p), 0) <= 0.000001);
 }
 fn flare(v: Fragment) -> vec3<f32> {
     var visible = sky_at(v.position.xy);

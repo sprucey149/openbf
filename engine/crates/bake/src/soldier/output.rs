@@ -163,7 +163,9 @@ pub fn bake_soldier_anims(
         }
         let pose = pose_rig(&classes, &m.name, &rigs, sanm.is_some());
         if let Some(pose) = &pose {
-            if super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons")? {
+            let attached = super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons")?;
+            let folded = super::fold_unrigged_ancestors(&mut skel, &pose.rig, &sm);
+            if attached || folded {
                 sm.bones = super::bones_of(&skel);
             }
         }

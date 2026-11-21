@@ -86,12 +86,17 @@ fn edge_draws(
 }
 
 impl SoldierVisuals {
+    /// Build each team's saber edges, textures and hilts from the class
+    /// database. Native teams need these too — the campaign's Jedi knights
+    /// and masters are native ambush teams — so the result is returned for
+    /// either the main `sabers` slots or a native team's draw entry.
     pub(super) fn load_sabers(
-        &mut self,
+        &self,
         mut renderer: Option<&mut Renderer>,
         root: &Path,
         teams: &[TeamTemplate; 2],
-    ) {
+    ) -> [Vec<Option<SaberVisual>>; 2] {
+        let mut result: [Vec<Option<SaberVisual>>; 2] = Default::default();
         let mut factions: Vec<_> = teams.iter().map(|t| t.faction.as_str()).collect();
         for class in teams.iter().flat_map(|t| &t.classes) {
             if let Some(side) = class.name.split('_').next() {
@@ -105,7 +110,7 @@ impl SoldierVisuals {
             Ok(db) => db,
             Err(error) => {
                 eprintln!("saber classes: {error:#}");
-                return;
+                return result;
             }
         };
         if let Err(error) = crate::dlc::load_classes(&classes, &mut db) {
@@ -193,11 +198,17 @@ impl SoldierVisuals {
                     rng: Cell::new(0x53414252 ^ crate::classdb::fnv1a_lowercase(&class.name)),
                 }));
             }
-            self.sabers[team] = visuals;
+            result[team] = visuals;
         }
+        result
     }
 
     pub(super) fn saber_visual(&self, team: u8, class: u8) -> Option<&SaberVisual> {
+        // Native teams (campaign Jedi) keep their edges in the native draw
+        // entry; the two main `sabers` slots hold only the battle's armies.
+        if let Some(native) = self.native.get(&team) {
+            return native.sabers.get(usize::from(class))?.as_ref();
+        }
         self.sabers
             .get(usize::from(team))?
             .get(usize::from(class))?

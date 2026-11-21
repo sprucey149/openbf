@@ -293,8 +293,10 @@ pub(super) fn walk_floor(sim: &Sim, from: Vec3, to: Vec2) -> Option<f32> {
     let mut y = from.y;
     for i in 1..=steps {
         let p = start + (to - start) * (i as f32 / steps as f32);
-        let f = sim.ground_under(Vec3::new(p.x, y, p.y), false);
-        if f <= crate::collision::NO_GROUND || f < y - super::LEDGE_DROP {
+        let Some(f) = sim.ground_hit_under(Vec3::new(p.x, y, p.y), false) else {
+            return None;
+        };
+        if f < y - super::LEDGE_DROP {
             return None;
         }
         y = f;
@@ -880,11 +882,14 @@ pub(crate) fn plan_leg(
     // Card HUBP: a soldier on foot walks at its own point of the next hub. A
     // vehicle keeps the centre (OURS, PROVISIONAL: the drivers' laws were
     // measured against centre legs).
-    let waypoint = if u.mount.is_none() {
+    let mut waypoint = if u.mount.is_none() {
         hub_point(sim, g, me, next, pos, 0.0)
     } else {
         hub_waypoint(sim, g, next, pos.y)
     };
+    if source == RouteSource::Kept {
+        waypoint.y = pos.y;
+    }
     let mut r = Route {
         dest_hub: dest,
         next_hub: next,
@@ -970,7 +975,17 @@ fn choose_hop(
     // Card BNDS: an arc the floor walk found no soldier can walk from here
     // (open air on its line, a far end 8 m up, card TGAP: a wall) is
     // rejected the same way, and so is a hop into a hub a soldier is
-    // trapped in (`trap`).
+    // trapped in (`trap`). Such an arc whose far hub stands on this level
+    // and is no trap keeps the table's hop when all three fail, also
+    // `level_unrouted`: the PS2 has no floor walk and walks its route
+    // table's hop (`FUN_002eca30` over `FUN_002ed2d0`), never a straight
+    // line at a goal the table leads to. BF2 POL1's attackers drew cp6camp
+    // and walked its last leg 120 m into the base's wall for 90 s: arc
+    // 200 runs 178 -> 177 on the floor at 13.0 under a slab at 20.0, the
+    // floor votes tie 1-1 at 177 and keep the slab, and the walk then calls
+    // the flat arc a 7 m climb both ways. Freed, the bots walk it and take
+    // the ramp 177 -> 176 out of the base (seed 7). PROVISIONAL (ours, as
+    // the floor walk is): replace: resolve a tied floor vote.
     // Card ARCM: a hop rejected only because it is shunned is not handed
     // "any other arc" (that one goes nowhere in particular): with no other
     // way the caller asks again without the shunned arcs.
@@ -996,6 +1011,9 @@ fn choose_hop(
                 });
             if retry.is_none() && level {
                 nt.level_unrouted += 1;
+                if floor(next) && unwalkable(arc) && !shun(arc) {
+                    return hop.map(|(h, _)| (h, RouteSource::Kept));
+                }
             }
             retry
         }
@@ -1073,9 +1091,10 @@ pub(super) fn advance_route(
         st.nav.route = Some(r);
         let at_foot = on_foot
             && r.corner().is_none()
-            && sim
-                .nav_floor(r.next_hub)
-                .is_none_or(|f| (f - pos.y).abs() <= HUB_LEVEL_TOL)
+            && (r.source == RouteSource::Kept
+                || sim
+                    .nav_floor(r.next_hub)
+                    .is_none_or(|f| (f - pos.y).abs() <= HUB_LEVEL_TOL))
             && super::avoid::at_foot_of(
                 sim,
                 Vec2::new(r.waypoint.x, r.waypoint.z),
@@ -1133,12 +1152,14 @@ pub(super) fn advance_route(
 /// Card BNDS: a hub is reached ON ITS LEVEL — a unit under a walkway's hub
 /// (BF2 Kamino's hub 123 at 63.7 over a deck at 51.5) is not at it, and the
 /// leg after it cannot be walked from there. Past a stuck window the radius
-/// fallback below still lets it go.
+/// fallback below still lets it go. A [`crate::ai::RouteSource::Kept`] leg
+/// skips the level: its hub's floor is the one the floor walk got wrong.
 fn hub_reached(sim: &Sim, g: &NavGraph, r: &crate::ai::Route, pos: Vec3, min_arrive: f32) -> bool {
     let d = nav::xz_dist(pos, r.waypoint);
-    let level = sim
-        .nav_floor(r.next_hub)
-        .is_none_or(|f| (f - pos.y).abs() <= HUB_LEVEL_TOL);
+    let level = r.source == crate::ai::RouteSource::Kept
+        || sim
+            .nav_floor(r.next_hub)
+            .is_none_or(|f| (f - pos.y).abs() <= HUB_LEVEL_TOL);
     if d <= ARRIVE_MIN_RADIUS.fmax(min_arrive) && level {
         return true;
     }

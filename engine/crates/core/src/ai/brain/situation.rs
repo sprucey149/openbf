@@ -29,6 +29,7 @@ pub(in crate::ai) struct Frame<'a> {
     pub memory: Option<Vec3>,
     pub droid: Option<(&'a Droid, bool)>,
     pub turret: Option<(&'a Turret, bool)>,
+    pub station: Option<(&'a Station, bool)>,
 }
 
 impl<'a> Frame<'a> {
@@ -45,6 +46,13 @@ impl<'a> Frame<'a> {
         let fireable = |c: &Contact| perception::fireable(c, sim.tick, tick.tier.reaction_ticks);
         let droid = seen.and_then(|c| Some((sim.live_droid(c.handle.droid()?)?, fireable(&c))));
         let turret = seen.and_then(|c| Some((sim.live_turret(c.handle.turret()?)?, fireable(&c))));
+        let station = seen.and_then(|c| {
+            let s = sim
+                .stations
+                .get(usize::from(c.handle.station()?))
+                .filter(|s| !s.destroyed)?;
+            Some((s, fireable(&c)))
+        });
         Self {
             tick,
             pos: tick.u.soldier.pos,
@@ -55,6 +63,7 @@ impl<'a> Frame<'a> {
             memory,
             droid,
             turret,
+            station,
         }
     }
 
@@ -63,6 +72,7 @@ impl<'a> Frame<'a> {
             .map(|u| u.capsule().center())
             .or(self.droid.map(|(d, _)| d.pos))
             .or(self.turret.map(|(t, _)| t.centre()))
+            .or(self.station.map(|(s, _)| s.sphere_centre))
     }
 }
 

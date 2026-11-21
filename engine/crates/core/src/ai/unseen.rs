@@ -104,12 +104,12 @@ pub(super) fn nearby_route(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<Ve
 /// else the first of [`RINGS`] round it (fixed order).
 fn hub_spot(sim: &Sim, g: &NavGraph, h: u16, pos: Vec3) -> Option<Vec3> {
     let hub = g.hub(h)?;
-    let floor = sim
+    let Some(floor) = sim
         .nav_floor(h)
-        .unwrap_or_else(|| sim.ground_under(hub.pos + Vec3::Y * 2.0, false));
-    if floor <= crate::collision::NO_GROUND {
+        .or_else(|| sim.ground_hit_under(hub.pos + Vec3::Y * 2.0, false))
+    else {
         return None;
-    }
+    };
     let centre = Vec3::new(hub.pos.x, floor, hub.pos.z);
     if (centre - pos).length() > REACH || nav::xz_dist(centre, pos) < MIN_MOVE {
         return None;

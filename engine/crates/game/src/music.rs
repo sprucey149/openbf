@@ -60,6 +60,37 @@ pub struct BattleMusic {
     pub clock: f32,
     /// The music volume option ([`VOLUME_RANGE`]).
     pub volume: f32,
+    /// BF2's in-game music handle (`DAT_0066caf0`, built by `FUN_001a13b8`
+    /// 45850): the Music `ScriptCB_PlayInGameMusic` named, asked again
+    /// after its replay delay.
+    pub script: ScriptMusic,
+    /// The campaign script's calls this frame, applied by
+    /// [`BattleMusic::apply_script`] where the bank is at hand.
+    pub script_calls: Vec<InGameMusic>,
+}
+
+/// A campaign script's in-game music call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InGameMusic {
+    /// `ScriptCB_PlayInGameMusic(name [, replay])` (`FUN_001a04a0` 45241).
+    Play { name: String, replay: f32 },
+    /// `ScriptCB_StopInGameMusic` (`FUN_001a0558` 45265): the name is not
+    /// read.
+    Stop,
+}
+
+/// `ScriptCB_PlayInGameMusic`'s replay delay when the script gives none
+/// (`FUN_001a04a0` 45253: 0x41700000).
+pub const IN_GAME_REPLAY: f32 = 15.0;
+
+/// Tracks the selected cue, whether playback was requested, and when it may
+/// repeat. See `FUN_0043f6d0` for the original cue handling.
+#[derive(Debug, Clone, Default)]
+pub struct ScriptMusic {
+    pub music: Option<usize>,
+    pub asked: bool,
+    pub replay: f32,
+    pub countdown: f32,
 }
 
 impl BattleMusic {
@@ -78,6 +109,118 @@ impl BattleMusic {
             hero_tracks: Vec::new(),
             clock: 0.0,
             volume: DEFAULT_VOLUME,
+            script: ScriptMusic {
+                replay: IN_GAME_REPLAY,
+                ..ScriptMusic::default()
+            },
+            script_calls: Vec::new(),
+        }
+    }
+
+    /// [`BattleMusic::script_calls`] against the map's bank.
+    pub fn apply_script(&mut self, sounds: &SoundLib) -> Vec<String> {
+        let calls = std::mem::take(&mut self.script_calls);
+        let mut missing = Vec::new();
+        for call in calls {
+            if let Some(name) = self.script_call(call, |n| sounds.music(n)) {
+                missing.push(name);
+            }
+        }
+        missing
+    }
+
+    /// One in-game music call; returns a name the bank lacks.
+    pub fn script_call(
+        &mut self,
+        call: InGameMusic,
+        find: impl Fn(&str) -> Option<MusicTrack>,
+    ) -> Option<String> {
+        match call {
+            InGameMusic::Stop => {
+                self.script_stop();
+                None
+            }
+            InGameMusic::Play { name, replay } => {
+                // FUN_001a04a0: stop (FUN_0043f780), set (FUN_0043f800:
+                // stop again, find the Music by name, FUN_00440e08), play
+                // (FUN_0043f708); then the delay and its countdown.
+                self.script_stop();
+                let found = self.track_index(&name, find);
+                self.script.music = found;
+                self.script.asked = false;
+                self.script_play();
+                self.script.replay = replay;
+                self.script.countdown = replay;
+                found.is_none().then_some(name)
+            }
+        }
+    }
+
+    /// The bank's Music by name, added to the player when it is new.
+    fn track_index(
+        &mut self,
+        name: &str,
+        find: impl Fn(&str) -> Option<MusicTrack>,
+    ) -> Option<usize> {
+        if let Some(i) = self
+            .tracks
+            .iter()
+            .position(|t| t.def.name.eq_ignore_ascii_case(name))
+        {
+            return Some(i);
+        }
+        let t = find(name)?;
+        self.player
+            .musics
+            .push(core::music::Music::new(t.def.clone()));
+        self.tracks.push(t);
+        Some(self.tracks.len() - 1)
+    }
+
+    /// `FUN_0043f708`: asked when the byte is 1 or the Music has stopped
+    /// (state 4).
+    fn script_play(&mut self) {
+        let Some(i) = self.script.music else { return };
+        let Some(m) = self.player.musics.get_mut(i) else {
+            return;
+        };
+        if !self.script.asked || m.phase == core::music::Phase::Stopped {
+            m.wanted = true;
+            self.script.asked = true;
+        }
+    }
+
+    /// `FUN_0043f780`: an asked Music's target set to stopped (`FUN_0043fc60`),
+    /// the byte back to 1.
+    fn script_stop(&mut self) {
+        let Some(i) = self.script.music else { return };
+        if self.script.asked {
+            if let Some(m) = self.player.musics.get_mut(i) {
+                m.wanted = false;
+            }
+            self.script.asked = false;
+        }
+    }
+
+    /// The handle's frame (`FUN_0043e020` 487424-487431, `DAT_0066cafc` set
+    /// once by `FUN_001a13b8`): the countdown runs out, then the first frame
+    /// the Music does not sound (`FUN_0043f7c8`: states 3 to 6 -> 1) asks it
+    /// again and the countdown restarts.
+    fn script_frame(&mut self, dt: f32) {
+        if self.script.countdown > 0.0 {
+            self.script.countdown -= dt;
+            return;
+        }
+        let Some(i) = self.script.music else { return };
+        let sounding = self.player.musics.get(i).is_some_and(|m| {
+            matches!(
+                m.phase,
+                core::music::Phase::FadingIn | core::music::Phase::Playing
+            )
+        });
+        if !sounding {
+            self.script.countdown = self.script.replay;
+            self.script_play();
         }
     }
 
@@ -140,8 +283,15 @@ impl BattleMusic {
             .iter()
             .filter_map(|(team, class, name)| Some((*team, *class, index(name, &mut missing)?)))
             .collect();
+        let kept = self.script.music.and_then(|i| self.tracks.get(i).cloned());
         self.player = Player::new(tracks.iter().map(|t| t.def.clone()).collect());
         self.tracks = tracks;
+        if let Some(t) = kept {
+            let name = t.def.name.clone();
+            self.script.music = self.track_index(&name, |_| Some(t.clone()));
+            self.script.asked = false;
+            self.script_play();
+        }
         missing
     }
 
@@ -216,6 +366,7 @@ impl BattleMusic {
                 self.ambient.update(&mut self.player, listener, t);
             }
         }
+        self.script_frame(dt);
         out.extend(self.player.update(dt));
         out
     }
@@ -400,15 +551,22 @@ mod tests {
                     &[],
                     1,
                     secs,
+                    None,
                 );
                 r.step(4.99, ui::stats::Pad::default());
                 assert_eq!(r.phase, Phase::Banner);
                 r.step(0.02, ui::stats::Pad::default());
-                assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Stats });
-                r.step(1.98, ui::stats::Pad::default());
+                assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Fade });
+                r.step(0.5, ui::stats::Pad::default());
+                assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Fade });
+                r.step(1.48, ui::stats::Pad::default());
                 assert_eq!(r.phase, if won { Phase::Banner } else { Phase::Stats });
                 r.step(0.02, ui::stats::Pad::default());
-                assert_eq!(r.phase, Phase::Stats, "7 s at most");
+                assert_eq!(
+                    r.phase,
+                    if won { Phase::Fade } else { Phase::Stats },
+                    "7 s at most"
+                );
             }
         }
         assert_eq!(m.end_music_secs(2, 0), None);

@@ -74,7 +74,8 @@ impl Camera {
     }
 
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective_rh(self.fov_y, aspect, self.near, self.far) * self.view()
+        // Reverse-Z (1.0 at near, 0.0 at far) for float depth precision across large space scenes.
+        Mat4::perspective_rh(self.fov_y, aspect, self.far, self.near) * self.view()
     }
 }
 
@@ -135,9 +136,9 @@ mod tests {
             ndc.z
         );
 
-        // Depth must increase toward the far plane (perspective_rh is 0-at-near).
+        // Reverse-Z: depth decreases toward the far plane (1 at near, 0 at far).
         let near_clip = vp * Vec3::new(0.0, 0.0, -1.0).extend(1.0);
         let far_clip = vp * Vec3::new(0.0, 0.0, -1000.0).extend(1.0);
-        assert!(near_clip.z / near_clip.w < far_clip.z / far_clip.w);
+        assert!(near_clip.z / near_clip.w > far_clip.z / far_clip.w);
     }
 }

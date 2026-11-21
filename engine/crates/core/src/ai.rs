@@ -134,9 +134,9 @@ pub use brain::think;
 pub(crate) use brain::UnitRules;
 pub use command::CmdState;
 pub use draw::{
-    route_rand, stance_hold, unit_dir, unit_rand, unit_unit, SALT_BURST, SALT_CHARGE, SALT_DODGE,
-    SALT_DROID, SALT_ERR_AXIS, SALT_ERR_DIR, SALT_FOLLOW, SALT_FORMATION, SALT_GRENADE, SALT_HOLD,
-    SALT_NEED_GUNNER, SALT_REACT, SALT_STANCE, SALT_TAP,
+    route_rand, stance_hold, unit_dir, unit_rand, unit_unit, SALT_BURST, SALT_CHARGE, SALT_DEFEND,
+    SALT_DODGE, SALT_DROID, SALT_ERR_AXIS, SALT_ERR_DIR, SALT_FOLLOW, SALT_FORMATION, SALT_GRENADE,
+    SALT_HOLD, SALT_NEED_GUNNER, SALT_REACT, SALT_STANCE, SALT_TAP,
 };
 pub use gunner_foot::yaw_toward;
 pub(crate) use gunner_foot::{burst_len, heat_fits, heat_spent, pause_ticks};

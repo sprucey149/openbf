@@ -178,6 +178,8 @@ fn script_rates(sim: &Sim) -> [f32; 2] {
 pub struct Commander {
     pub announcer: Announcer,
     pub queue: VoiceQueue,
+    queue_stream: Option<u32>,
+    stream_queues: std::collections::BTreeMap<u32, VoiceQueue>,
     /// The two teams' faction keys (`rep`, `cis`, ...).
     factions: [String; 2],
     pub answers: Answers,
@@ -195,6 +197,9 @@ pub struct Commander {
     /// The units' combat calls asked since the last
     /// [`Commander::gate_calls`] (card UCALL).
     pub calls_asked: Vec<CallAsk>,
+    /// A campaign script's `ScriptCB_SndPlaySound` names, held for
+    /// [`Commander::gate_script_sounds`].
+    pub script_sounds: Vec<String>,
     /// A sound bank gates the calls: until one does (a headless round, a
     /// sweep) each tick's asks replace the last's.
     gating: bool,
@@ -208,6 +213,18 @@ pub struct Commander {
     speaker_asks: Vec<SpeakerAsk>,
     first_reinforcements: Option<[f32; 2]>,
     last_flag_voice: Option<u64>,
+    /// A campaign script's stream slots
+    /// ([`crate::campaign_runtime::World::stream_slots`]); empty elsewhere,
+    /// where each stream is its own slot.
+    stream_slots: std::collections::BTreeMap<u32, u32>,
+    /// The slot [`Commander::queue`] stands for once a script names its
+    /// slots: the one holding `global_vo_slow`, where every commander line
+    /// and unit chatter line of a BF2 battle plays (re-announcer.md §1.7).
+    main_slot: Option<u32>,
+    /// A campaign script's `ScriptCB_EnableCommandPostVO`
+    /// ([`crate::campaign_runtime::World::command_post_vo`]): while clear,
+    /// an owner change asks for no post line.
+    post_vo: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -245,6 +262,8 @@ impl Commander {
         Commander {
             announcer: Announcer::new(lines, listener, factions.map(faction_index)),
             queue: VoiceQueue::default(),
+            queue_stream: None,
+            stream_queues: std::collections::BTreeMap::new(),
             factions: factions.map(str::to_owned),
             answers: Answers::default(),
             posts,
@@ -252,6 +271,7 @@ impl Commander {
             asked: Vec::new(),
             script_bleed: None,
             calls_asked: Vec::new(),
+            script_sounds: Vec::new(),
             gating: false,
             vo: None,
             leaving_line: None,
@@ -260,6 +280,9 @@ impl Commander {
             speaker_asks: Vec::new(),
             first_reinforcements: None,
             last_flag_voice: None,
+            stream_slots: std::collections::BTreeMap::new(),
+            post_vo: true,
+            main_slot: None,
         }
     }
 
@@ -334,6 +357,9 @@ impl Commander {
             let Some(post) = self.posts.get(i) else {
                 continue;
             };
+            if !self.post_vo {
+                continue;
+            }
             let a = &self.announcer;
             asked.extend(was.and_then(|o| a.post(post, PostEvent::Lost, usize::from(o))));
             asked.extend(now.and_then(|o| a.post(post, PostEvent::Capture, usize::from(o))));
@@ -400,10 +426,9 @@ impl Commander {
         self.was_leaving = now;
         // Crossing the line again and again queues it once: the queue does not
         // read the line's `PlayInterval`, which keeps the PS2's from repeating.
-        let name = self
-            .leaving_line
-            .as_deref()
-            .filter(|n| started && !self.queue.waiting(n))?;
+        let name = self.leaving_line.as_deref().filter(|n| {
+            started && !self.queue.waiting(n) && !self.stream_queues.values().any(|q| q.waiting(n))
+        })?;
         let line = Line::commander(name);
         self.queue.ask(line.clone());
         Some(line)
@@ -629,6 +654,9 @@ impl Commander {
             let low = u.health.cur <= u.health.max * class.cries.low_threshold;
             if !u.alive || !low {
                 self.queue.release(i as u32);
+                for q in self.stream_queues.values_mut() {
+                    q.release(i as u32);
+                }
                 continue;
             }
             self.calls_asked.push(CallAsk {
@@ -715,19 +743,24 @@ impl Commander {
         self.gating = true;
         let mut asks = std::mem::take(&mut self.calls_asked);
         for s in std::mem::take(&mut self.speaker_asks) {
-            if !self.queue.is_idle() || !self.queue.pending().is_empty() {
+            let Some(sound) = sounds.trigger_sound(s.region, s.reinforcements, s.side) else {
+                continue;
+            };
+            let name = format!("#{sound:08x}");
+            // BF2 FUN_0043f138 (B2:488202-488205): a streamed trigger sound
+            // only starts when its own stream slot (e.g. `voiceSlow`) is idle.
+            let stream = sounds.stream_id(&name);
+            let q = self.queue_for_stream(stream);
+            if !q.is_idle() || !q.pending().is_empty() {
                 continue;
             }
-            let sound = sounds.trigger_sound(s.region, s.reinforcements, s.side);
-            if let Some(sound) = sound {
-                asks.push(CallAsk {
-                    unit: s.unit,
-                    call: core::sim::Call::Loudspeaker,
-                    name: Some(format!("#{sound:08x}")),
-                    pos: s.center,
-                    own: false,
-                });
-            }
+            asks.push(CallAsk {
+                unit: s.unit,
+                call: core::sim::Call::Loudspeaker,
+                name: Some(name),
+                pos: s.center,
+                own: false,
+            });
         }
         let mut out = Vec::with_capacity(asks.len());
         for a in asks {
@@ -737,7 +770,11 @@ impl Commander {
             // a voice-stream line is the queue's (the Gungans'); a
             // sample-bank one (a saber's hum, card HERO) is not played here.
             let stream = || a.name.as_deref().is_some_and(|n| sounds.streamed(n));
-            if own && (self.queue.holds(a.unit) || !stream()) {
+            if own
+                && (self.queue.holds(a.unit)
+                    || self.stream_queues.values().any(|q| q.holds(a.unit))
+                    || !stream())
+            {
                 continue;
             }
             // BF2 steps past a locked take (card UVO2); its subject's own
@@ -751,11 +788,99 @@ impl Commander {
                 let mut l = l.clone();
                 l.speaker = own.then_some(a.unit);
                 l.mode_3d = !a.own;
-                self.queue.ask(l);
+                let stream = a.name.as_deref().and_then(|n| sounds.stream_id(n));
+                self.queue_for_stream(stream).ask(l);
             }
             out.push((a, r));
         }
         out
+    }
+
+    /// The sounds a campaign script played this tick. Held like the calls:
+    /// without a sound bank each tick's replace the last's.
+    pub fn ask_script_sounds(&mut self, names: Vec<String>) {
+        if !self.gating {
+            self.script_sounds.clear();
+        }
+        self.script_sounds.extend(names);
+    }
+
+    /// Follow the script's `ScriptCB_EnableCommandPostVO` flag.
+    pub fn enable_post_vo(&mut self, on: bool) {
+        self.post_vo = on;
+    }
+
+    /// Take a campaign script's stream slots: a stream appended to a slot
+    /// queues on that slot's line, behind or ahead of the others by key, and
+    /// never sounds over it (B2 `FUN_005519c8` / `FUN_00550528`,
+    /// re-announcer.md §1 steps 2-4). The Naboo campaign appends
+    /// `global_vo_slow` and both sides' `*_unit_vo_slow` to the slot it opens
+    /// with `nab_objective_vo_slow`, so an objective line waits for a capture
+    /// line already sounding instead of playing over it.
+    pub fn route_streams(&mut self, slots: &std::collections::BTreeMap<u32, u32>) {
+        if slots.is_empty() || *slots == self.stream_slots {
+            return;
+        }
+        self.stream_slots = slots.clone();
+        self.main_slot = slots
+            .get(&crate::classdb::fnv1a_lowercase("global_vo_slow"))
+            .copied();
+    }
+
+    /// Select the per-stream voice slot queue matching PS2 stream allocation (`FUN_005519c8`).
+    fn queue_for_stream(&mut self, stream: Option<u32>) -> &mut VoiceQueue {
+        let stream = stream.map(|s| self.stream_slots.get(&s).copied().unwrap_or(s));
+        if let Some(main) = self.main_slot {
+            return match stream {
+                Some(s) if s != main => self.stream_queues.entry(s).or_default(),
+                _ => &mut self.queue,
+            };
+        }
+        if let Some(s) = stream {
+            if self
+                .stream_queues
+                .get(&s)
+                .is_some_and(|q| !q.is_idle() || !q.pending().is_empty())
+            {
+                return self.stream_queues.entry(s).or_default();
+            }
+        }
+        if self.queue.is_idle() && self.queue.pending().is_empty() {
+            self.queue_stream = stream;
+        }
+        match stream {
+            Some(s) if self.queue_stream != Some(s) => self.stream_queues.entry(s).or_default(),
+            _ => {
+                if self.queue_stream.is_none() {
+                    self.queue_stream = stream;
+                }
+                &mut self.queue
+            }
+        }
+    }
+
+    /// The held script sounds by kind (B2 `FUN_0043ceb0` with the queue
+    /// flag): a stream property joins the voice queue for its stream slot,
+    /// as `BroadcastVoiceOver`'s do; the rest are returned to play 2-D now.
+    /// [H] the objective lines' Priority and Bias are not read: their key
+    /// is the commander's. trace: the `<planet>_obj_*` templates' Bias.
+    pub fn gate_script_sounds(&mut self, sounds: &crate::sounds::SoundLib) -> Vec<String> {
+        self.gating = true;
+        let mut now = Vec::new();
+        for name in std::mem::take(&mut self.script_sounds) {
+            if let Some(stream) = sounds.stream_id(&name) {
+                self.queue_for_stream(Some(stream))
+                    .ask(Line::commander(&name));
+            } else {
+                now.push(name);
+            }
+        }
+        now
+    }
+
+    /// Whether any voice slot is sounding a line now.
+    pub fn voice_playing(&self) -> bool {
+        !self.queue.is_idle() || self.stream_queues.values().any(|q| !q.is_idle())
     }
 
     /// [`Commander::observe`] from the sim, then the voice queue's frame:
@@ -794,7 +919,16 @@ impl Commander {
             me.is_some(),
             sim.outcome.is_some(),
         );
-        self.queue.step(dt, |l| play(l))
+        let started = self.queue.step(dt, |l| play(l));
+        for q in self.stream_queues.values_mut() {
+            q.step(dt, |l| play(l));
+        }
+        self.stream_queues
+            .retain(|_, q| !q.is_idle() || !q.pending().is_empty());
+        if self.queue.is_idle() && self.queue.pending().is_empty() {
+            self.queue_stream = None;
+        }
+        started
     }
 }
 
@@ -1111,6 +1245,34 @@ mod tests {
             v.calls(&w.sim, &w.teams);
         }
         assert!(v.calls_asked.is_empty(), "{:?}", v.calls_asked);
+    }
+
+    #[test]
+    fn a_script_that_mutes_the_posts_hears_no_post_line() {
+        let mut lines = PostLines::default();
+        let imp = core::announcer::faction_index("imp").unwrap();
+        lines.set(
+            imp,
+            imp,
+            PostEvent::Capture,
+            "imp_off_com_report_captured_commandpost",
+        );
+        let mut c = Commander::new(
+            BattleLines::default(),
+            ["imp", "all"],
+            0,
+            vec![lines],
+            vec![None],
+        );
+        let dt = 1.0 / 30.0;
+        c.enable_post_vo(false);
+        let said = c.observe(dt, &[Some(0)], [0.0; 2], [150; 2], true, false);
+        assert!(said.is_empty(), "{said:?}");
+        c.enable_post_vo(true);
+        c.observe(dt, &[None], [0.0; 2], [150; 2], true, false);
+        let said = c.observe(dt, &[Some(0)], [0.0; 2], [150; 2], true, false);
+        let names: Vec<&str> = said.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["imp_off_com_report_captured_commandpost"]);
     }
 
     #[test]

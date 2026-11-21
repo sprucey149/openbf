@@ -27,7 +27,16 @@ pub(super) fn load_and_upload(
     dir: &std::path::Path,
     mode: &str,
 ) -> Result<(SceneGpu, game::assets::Scene)> {
-    let (scene, load) = game::assets::load_battle_scene(dir, mode)?;
+    load_and_upload_with_layers(r, dir, mode, &[])
+}
+
+pub(super) fn load_and_upload_with_layers(
+    r: &mut Renderer,
+    dir: &std::path::Path,
+    mode: &str,
+    layers: &[String],
+) -> Result<(SceneGpu, game::assets::Scene)> {
+    let (scene, load) = game::assets::load_battle_scene_with_layers(dir, mode, layers)?;
     let gpu = upload_battle_scene(r, &scene, &load)?;
     Ok((gpu, scene))
 }
@@ -102,12 +111,16 @@ pub fn walk_draws(
     visuals: Option<&game::soldier_vis::SoldierVisuals>,
 ) {
     let has_model = |team| visuals.is_some_and(|v| v.has_model(team));
-    let player_team = walk.sim.units[walk.player.index as usize].team;
-    if walk.player_on_foot() && !walk.player_body_hidden() && !has_model(player_team) {
+    let player_u = &walk.sim.units[walk.player.index as usize];
+    if walk.player_on_foot()
+        && !walk.player_body_hidden()
+        && !has_model(player_u.team)
+        && !(visuals.is_some() && player_u.droideka.is_some())
+    {
         draws.push(marker_draw(cube, walk));
     }
     for t in walk.target_draws() {
-        if has_model(t.team) {
+        if has_model(t.team) || (visuals.is_some() && t.droideka) {
             continue; // drawn as an animated model instead
         }
         let base = if t.magnet {
@@ -173,8 +186,9 @@ fn team_templates(
             let mut team = 0usize;
             let mut hero_classes = [None; 2];
             let templates = rosters.map(|mut r| {
-                // Heroes Off: no hero class at all (Session Options).
-                if b.heroes.is_some() && hunt.is_none() {
+                // Campaign scripts choose their heroes independently of the
+                // Instant Action session's Heroes setting.
+                if (b.heroes.is_some() || b.mission.as_ref().is_some_and(|m| m.is_campaign())) && hunt.is_none() {
                     hero_classes[team] = game::heroes::append(
                         &mut r,
                         &b.classes_dir,
@@ -226,7 +240,23 @@ fn team_templates(
                 team += 1;
                 game::walk::TeamTemplate::from_roster(&r, &sim.classes[team - 1][0], visuals)
             });
-            if let Some(rules) = b.heroes.filter(|_| hunt.is_none()) {
+            if let Some(mut rules) = b
+                .heroes
+                .or_else(|| {
+                    b.mission
+                        .as_ref()
+                        .filter(|m| m.is_campaign())
+                        .map(|_| Default::default())
+                })
+                .filter(|_| hunt.is_none())
+            {
+                if b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
+                    // Only the campaign's UnlockHeroForTeam enables an offer;
+                    // PS2 campaign ruleset forbids AI candidates and hero respawn.
+                    rules.unlock = core::sim::heroes::HeroUnlock::Points(i32::MAX);
+                    rules.respawn_ticks = None;
+                    rules.ai_candidates = false;
+                }
                 game::heroes::install_with(sim, hero_classes, rules);
             }
             Ok(templates)
@@ -256,7 +286,8 @@ fn team_templates(
 /// screens stand over the mission's camera shots until the first spawn (card SSELB,
 /// `game::spawn_backdrop`).
 pub(super) fn open_spawn_screens(walk: &mut WalkSim, mission: Option<&game::mission::MissionDef>) {
-    if !walk.sim.open_spawn_screens(0, true) {
+    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    if !walk.sim.open_spawn_screens(0, side_choice) {
         eprintln!("spawn screens: slot 0 holds no live unit; the respawn stays automatic");
         return;
     }
@@ -278,6 +309,7 @@ fn round_end_model(r: &game::round_end::RoundEnd) -> ui::hud::RoundEndModel {
             Result::Draw => 2,
         },
         stats: r.stats.clone(),
+        fade: r.fade(),
     }
 }
 
@@ -379,7 +411,7 @@ pub(super) fn make_walk_with_counts(
     let map_defaults = b
         .mission
         .as_ref()
-        .filter(|m| !m.is_hunt())
+        .filter(|m| !m.is_hunt() && !m.is_campaign())
         .and_then(|m| game::conquest_defaults::for_map(&m.map, m.era.as_deref() == Some("cw")));
     let defaults = b.team_size_pct.and(map_defaults);
     let resolved = defaults.map(|d| d.scaled(b.team_size_pct.unwrap_or(100), b.ticket_pct));
@@ -394,6 +426,21 @@ pub(super) fn make_walk_with_counts(
             .map(|n| core::sim::scale_reinforcements(n, b.ticket_pct))
     };
     sim.battle = core::battle::Battle::new(tickets);
+    if let Some(c) = b.mission.as_ref().and_then(|m| m.campaign.as_ref()) {
+        use core::fmath::FloatExt;
+        sim.battle.campaign_rules = true;
+        sim.battle.unlimited_teams = c.infinite_tickets;
+        for t in 0..2 {
+            if c.infinite_tickets[t] {
+                let min_pool =
+                    b.mission
+                        .as_ref()
+                        .map_or(100, |m| m.teams[t].units.max(100)) as f32;
+                sim.battle.teams[t].reinforcements =
+                    sim.battle.teams[t].reinforcements.fmax(min_pool);
+            }
+        }
+    }
     sim.time_limit = (b.time_limit > 0).then(|| b.time_limit * 60);
     if let Some(m) = &b.mission {
         sim.ai_alive_cap = m.ai_alive_cap;
@@ -487,7 +534,11 @@ pub(super) fn make_walk_with_counts(
         })
         .or_else(|| b.vehicle.is_some().then_some([0, 0]));
     let mut vehicle_classes: Vec<String> = Vec::new();
-    let mut layout = game::layout::MapLayout::from_battle_manifest(&scene.manifest, hunt);
+    let mut layout = game::layout::MapLayout::from_mission_manifest(
+        &scene.manifest,
+        hunt,
+        b.mission.as_ref().is_some_and(|m| m.is_campaign()),
+    );
     if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
         // Hoth and Theed register hazards by name in the Hunt scripts.
         // Their baked shapes also occur in the map's shared design worlds.
@@ -544,7 +595,12 @@ pub(super) fn make_walk_with_counts(
     }
     if let Some(counts) = ai_counts {
         walk.add_posts(&layout);
-        if hunt {
+        let saved_cp_owners = if let Some(m) = b.mission.as_ref().filter(|m| m.is_campaign()) {
+            game::campaign_runtime::CampaignRuntime::kill_startup_posts(&mut walk.sim, &m.killed)
+        } else {
+            Vec::new()
+        };
+        if hunt || b.mission.as_ref().is_some_and(|m| m.is_campaign()) {
             // Class change at your own posts (issue #161): each post's
             // class radius, from the map's shared and own classes.
             let posts = game::walk::hunt_post_classes(
@@ -553,7 +609,7 @@ pub(super) fn make_walk_with_counts(
                 &scene.manifest.source_game,
             )?;
             walk.set_hunt_class_change(&layout, &posts, &scene.manifest.source_game);
-            for team in 0..2 {
+            for team in (0..2).filter(|_| hunt) {
                 anyhow::ensure!(
                     !walk.sim.spawn_points(team).is_empty(),
                     "Hunt team {} has no spawn points",
@@ -569,12 +625,11 @@ pub(super) fn make_walk_with_counts(
         // go in before the opening wave, which spawns at the command walkers
         // they are about to build (card CWSP).
         let factions = [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()];
-        let space = b.mission.as_ref().filter(|m| m.mode == "ass").map(|m| {
-            (
-                m.space_assault.clone().unwrap_or_default(),
-                b.space_score_limit,
-            )
-        });
+        let space = b
+            .mission
+            .as_ref()
+            .and_then(|m| m.space_round())
+            .map(|def| (def, b.space_score_limit));
         match game::vehicle_pads::install_for_mission(
             &mut walk.sim,
             &scene.manifest,
@@ -618,17 +673,31 @@ pub(super) fn make_walk_with_counts(
             }
             Err(e) => eprintln!("vehicle pads unavailable ({e:#})"),
         }
-        // A LAN round's other humans are seated after this wave
-        // (`round_setup::build_round`), but its bots take their skill now:
-        // they count for the DTEAM rows while it spawns (issue #171).
-        let seated = walk.sim.extra_humans;
-        walk.sim.extra_humans = [0, 1].map(|t| seated[t].saturating_add(b.opening_humans[t]));
-        walk.opening_wave(counts, !b.spawn_set);
-        walk.sim.extra_humans = seated;
-        // The commander speaks the mission's lines over the posts and the
-        // battle just set up.
         if let Some(m) = &b.mission {
             walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
+            for t in 0..2usize {
+                walk.sim
+                    .set_ai_spawn_allowed(t as u8, m.teams[t].allows_ai_spawn_initially());
+                let hero = walk.sim.hero_class(t as u8).map(usize::from);
+                let n = walk.sim.classes[t].len();
+                walk.sim.class_enabled[t] = (0..n)
+                    .map(|ci| {
+                        let name = walk.teams[t]
+                            .classes
+                            .get(ci)
+                            .map(|cv| cv.name.as_str())
+                            .unwrap_or("");
+                        if Some(ci) == hero {
+                            !m.teams[t]
+                                .class_blacklist
+                                .iter()
+                                .any(|c| c.eq_ignore_ascii_case(name))
+                        } else {
+                            m.teams[t].is_class_initially_enabled(name)
+                        }
+                    })
+                    .collect();
+            }
             let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
             game::native_teams::install(
                 &mut walk,
@@ -638,6 +707,78 @@ pub(super) fn make_walk_with_counts(
                 m,
                 &scene.manifest,
             );
+            if let Some(spec) = m.campaign.clone() {
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    walk.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                let mut rt = game::campaign_runtime::CampaignRuntime::new(
+                    spec,
+                    &layout,
+                    &scene.manifest,
+                    &walk.post_keys,
+                    saved_cp_owners,
+                    &walk.sim,
+                );
+                rt.set_team_rosters(team_classes, [0, 0]);
+                rt.set_team_factions([
+                    walk.teams[0].faction.as_str(),
+                    walk.teams[1].faction.as_str(),
+                ]);
+                rt.set_native_rosters(
+                    m.local_teams
+                        .iter()
+                        .filter_map(|lt| {
+                            let team = lt.team.checked_sub(1).filter(|t| *t >= 2)?;
+                            let classes = lt.classes.iter().map(|c| c.0.clone()).collect();
+                            Some((team, (classes, lt.units)))
+                        })
+                        .collect(),
+                );
+                rt.load_world_anims(&scene.dir, &scene.manifest, &walk.sim);
+                rt.start(&mut walk.sim);
+                // ScriptPostLoad requests the same opening clip played by the
+                // campaign shell before loading the battle.
+                rt.take_movies();
+                walk.camera_blockers.mark_moving(rt.animated_instances());
+                walk.camera_blockers
+                    .set_excluded(rt.excluded_camera_instances());
+                walk.campaign = Some(rt);
+            }
+        }
+        // A LAN round's other humans are seated after this wave
+        // (`round_setup::build_round`), but its bots take their skill now:
+        // they count for the DTEAM rows while it spawns (issue #171).
+        let seated = walk.sim.extra_humans;
+        walk.sim.extra_humans = [0, 1].map(|t| seated[t].saturating_add(b.opening_humans[t]));
+        // Campaigns with spawn screens defer their opening AI wave until the
+        // human player spawns so `onfirstspawn` (e.g. Kamino switching Team 1
+        // from `boba` to `cp5`) updates CP ownership before allies spawn.
+        let opening_counts = if walk.campaign.is_some() {
+            [0, 0]
+        } else {
+            counts
+        };
+        walk.opening_wave(opening_counts, !b.spawn_set);
+        walk.sim.extra_humans = seated;
+        // The commander speaks the mission's lines over the posts and the
+        // battle just set up.
+        if let Some(m) = &b.mission {
+            let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
+            if let Some(rt) = walk.campaign.as_mut() {
+                let team_classes: [Vec<String>; 2] = [0, 1].map(|t| {
+                    walk.teams[t]
+                        .classes
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect()
+                });
+                rt.set_team_rosters(team_classes, counts);
+                rt.defer_opening_wave();
+            }
             walk.sound_levels = m.sound_levels();
             walk.space_round = m.space_assault.as_ref().map(|d| {
                 let mut round = game::space_assault::SpaceRound::new(d);
@@ -899,6 +1040,19 @@ pub(super) fn hud_model(
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
+        unlimited_tickets: [0, 1].map(|t| b.unlimited_reinforcements || b.unlimited_teams[t]),
+        popup: walk.campaign.as_ref().and_then(|c| c.popup()).map(|p| {
+            use game::campaign_runtime::Popup;
+            match p {
+                Popup::Hint(t) => ui::hud::HudPopup::Hint(feed.localize_or_raw(t)),
+                Popup::Objective(t) => ui::hud::HudPopup::Objective(feed.localize_or_raw(t)),
+                Popup::Selection(t) => ui::hud::HudPopup::Selection(feed.localize_or_raw(t)),
+            }
+        }),
+        objectives_updated: walk
+            .campaign
+            .as_ref()
+            .is_some_and(|c| c.objectives_updated()),
         bleed: if walk.sim.ctf.is_some() {
             [0.0, 0.0]
         } else {
@@ -947,28 +1101,33 @@ pub(super) fn hud_model(
             .mount
             .and_then(|m| walk.sim.vehicle(m.vehicle))
             .map(|v| (v.health.cur, v.health.max)),
-        team_points: walk
-            .sim
-            .space_team_points()
-            .or_else(|| {
-                walk.sim.ctf.as_ref().map(|c| {
-                    (
-                        [c.team_points[0] as i32, c.team_points[1] as i32],
-                        c.score_limit,
-                    )
+        // A campaign shows team points only where its script turned them
+        // on (`ShowTeamPoints`); its flags are the script's, not a CTF round.
+        team_points: match walk.campaign.as_ref() {
+            Some(c) => c.team_points().map(|p| (p, 0)),
+            None => walk
+                .sim
+                .space_team_points()
+                .or_else(|| {
+                    walk.sim.ctf.as_ref().map(|c| {
+                        (
+                            [c.team_points[0] as i32, c.team_points[1] as i32],
+                            c.score_limit,
+                        )
+                    })
                 })
-            })
-            .or_else(|| {
-                walk.sim
-                    .team_points()
-                    .map(|(points, limit)| (points.map(|p| p as i32), limit))
-            }),
-        ctf: walk.sim.ctf.is_some(),
+                .or_else(|| {
+                    walk.sim
+                        .team_points()
+                        .map(|(points, limit)| (points.map(|p| p as i32), limit))
+                }),
+        },
+        ctf: walk.sim.ctf.is_some() && walk.campaign.is_none(),
         flag_status: walk
             .sim
             .ctf
             .as_ref()
-            .filter(|c| c.mode == core::sim::CtfMode::OneFlag)
+            .filter(|c| walk.campaign.is_none() && c.mode == core::sim::CtfMode::OneFlag)
             .and_then(|c| c.flags.first())
             .and_then(|flag| match flag.status {
                 core::sim::FlagStatus::AtHome => None,
@@ -977,7 +1136,7 @@ pub(super) fn hud_model(
                     walk.sim
                         .unit(carrier)
                         .map(|unit| ui::hud_flag::FlagStatus::Carried {
-                            friendly: unit.team == me.team,
+                            friendly: walk.sim.allied(me.team, unit.team),
                             player_first_person: carrier == walk.player && walk.first_person(),
                         })
                 }
@@ -989,6 +1148,10 @@ pub(super) fn hud_model(
             .domination_left()
             .map(|(holder, secs)| (holder == me.team, secs)),
         round_end: walk.round_end.as_ref().map(round_end_model),
+        // Only the round's own time limit draws a countdown. The campaign's
+        // `ShowTimer` objectives have no HUD timer in the original - the egui
+        // panel was a port addition that rendered badly over the battle - so
+        // mission timers stay off the HUD.
         time_left: walk.sim.time_limit.map(|l| {
             (u64::from(l) * u64::from(core::TICK_HZ)).saturating_sub(walk.sim.tick) as f32
                 / core::TICK_HZ as f32
@@ -1076,7 +1239,10 @@ pub(super) fn spawn_model(
     // Issue #28: a live player has a spawn screen only while the class
     // screen he opened at a friendly post is up.
     let alive_screen = walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Alive);
-    if (me.alive && !alive_screen) || walk.sim.outcome.is_some() {
+    // A script popup hides the live class screen until it closes (B2
+    // `FUN_0038c7a0` → `FUN_00397840` on state 4; `FUN_0038cb28` reopens).
+    let hidden = alive_screen && walk.campaign.as_ref().is_some_and(|c| c.popup().is_some());
+    if (me.alive && !alive_screen) || hidden || walk.sim.outcome.is_some() {
         return None;
     }
     // Issue #182: the teammate view hides the spawn screens until a spawn

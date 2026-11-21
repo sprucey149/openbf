@@ -119,12 +119,17 @@ impl CastClock {
         holding: bool,
     ) -> Option<(usize, f32)> {
         let (source, age) = self.active?;
-        let bank = class.bank_of(weapon);
-        let bank = bank.split_once('_').map_or(bank, |(_, b)| b);
+        let (primary, fallback) = class.bank_pair_of(weapon);
+        let banks: [&str; 2] = [primary, fallback.unwrap_or(primary)];
+        let banks = if fallback.is_some() {
+            &banks[..]
+        } else {
+            &banks[..1]
+        };
         let end = ["upper", "lower"]
             .into_iter()
             .filter_map(|layer| {
-                crate::hero_blades::clip_for(clips, &class.family, bank, animation, layer)
+                crate::hero_blades::clip_for_banks(clips, &class.family, banks, animation, layer)
             })
             .map(|clip| clip.frames.saturating_sub(1) as f32 / 30.0)
             .reduce(core::fmath::max)?;

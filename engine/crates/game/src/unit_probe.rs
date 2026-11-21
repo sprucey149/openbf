@@ -382,6 +382,7 @@ impl Probe {
                 core::ai::RouteSource::Straight => 's',
                 core::ai::RouteSource::Flank => 'f',
                 core::ai::RouteSource::Shun => 'r',
+                core::ai::RouteSource::Kept => 'k',
             }),
             wp: r.map_or([0.0; 3], |r| r.waypoint.to_array()),
             wp_d: r.map_or(-1.0, |r| core::nav::xz_dist(p, r.waypoint)),
@@ -448,6 +449,11 @@ impl Probe {
                     Foe::Unit(h) => sim.unit(h).map(|o| o.soldier.pos),
                     Foe::Droid(id) => sim.live_droid(id).map(|d| d.pos),
                     Foe::Turret(id) => sim.live_turret(id).map(|t| t.centre()),
+                    Foe::Station(id) => sim
+                        .stations
+                        .get(usize::from(id))
+                        .filter(|s| !s.destroyed)
+                        .map(|s| s.sphere_centre),
                 })
                 .map_or(-1.0, |t| t.distance(p)),
             target_droid: u.ai.target.and_then(|t| t.droid()),

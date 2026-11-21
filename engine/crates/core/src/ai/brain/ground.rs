@@ -14,6 +14,7 @@ use crate::ai::state::{
     AiState, Behaviour, FightState, MoverState, NavTick, RouteSource, SteerPick, WalkAsk,
 };
 use crate::ai::{FIGHT_BEYOND, FLINCH_GAP, FLINCH_TICKS, HOLD_ARRIVE, HOLD_RANGE, THINK_PERIOD};
+use crate::fmath::FloatExt;
 use crate::nav;
 use crate::perception;
 use crate::sim::{PadState, Sim};
@@ -250,9 +251,10 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
     gunner_foot::range_table(&frame.tick, st, frame.seen_at());
     // Card GRAI: the weapon for this target, once a think (the gunner's).
     if thinking {
-        match (frame.droid, frame.turret) {
-            (Some((d, _)), _) => super::arsenal::think_droid(sim, &tk, st, d),
-            (_, Some((t, _))) => super::arsenal::think_turret(sim, &tk, st, t),
+        match (frame.droid, frame.turret, frame.station) {
+            (Some((d, _)), _, _) => super::arsenal::think_droid(sim, &tk, st, d),
+            (_, Some((t, _)), _) => super::arsenal::think_turret(sim, &tk, st, t),
+            (_, _, Some((s, _))) => super::arsenal::think_station(sim, &tk, st, s),
             _ => super::arsenal::think(sim, &tk, st, frame.enemy),
         }
     }
@@ -480,6 +482,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         || ring.is_some()
         || flee.is_some()
         || frame.enemy.is_some()
+        || frame.station.is_some()
         || st.cmd.is_some();
     // The holder's goal may have moved this tick: its destination with it.
     let held_goal = after_aim
@@ -494,6 +497,15 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         intent.step.after_aim(melee_goal)
     };
     st.step = step;
+    let station_stand = frame
+        .station
+        .zip(after_aim.gun.range)
+        .is_some_and(|((s, _), r)| {
+            wc.saber.is_none()
+                && !st.arm.spare
+                && after_aim.gun.line.is_none()
+                && r - s.sphere_radius <= wc.shot_range().fmin(wc.ai_range[2]).fmin(HOLD_RANGE)
+        });
     let mut mv = MoveRequest {
         kind: step.move_kind() as u8,
         goal,
@@ -508,7 +520,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         // stood 0.4 m out of reach shooting the enemy it was sent to man
         // the turret against).
         in_range: (after_aim.hold && !after_aim.free && !manning && item.is_none())
-            || (after_aim.fight.is_some() && after_aim.free && ring_walk(sim, st).is_none()),
+            || (after_aim.fight.is_some() && after_aim.free && ring_walk(sim, st).is_none())
+            || station_stand,
         ret,
         hold: after_aim.holding,
         flee: flee.is_some(),

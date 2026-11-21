@@ -77,6 +77,18 @@ pub const PULL_RETURN_STEP: f32 = 0.15;
 /// small trees, and leaves walls, doors, buildings and rocks (4.5 m up)
 /// solid (measured on BF1 NAB1 / YAV2, BF2 KAS2 / NAB2).
 pub const PROP_MAX_FOOTPRINT: f32 = 4.0;
+/// The two `spacedust1` capture-marker models: the 7.5 m ground column
+/// (`com_prop_ctfdrop`, drawn by the placed `com_bldg_ctfbase`) and the 40 m
+/// space sphere. Both are translucent effects with no solid body in the
+/// original, so their drawn triangles must not pull the chase camera in —
+/// the 7.5 m column otherwise counts as a building (`PROP_MAX_FOOTPRINT` is
+/// 4 m) and the camera zooms right up behind the player as he approaches the
+/// delivery point. Matched by model, not by class: several placement classes
+/// share these geometries.
+pub fn is_ctf_marker_model(model: &str) -> bool {
+    model.eq_ignore_ascii_case("com_prop_ctfdrop")
+        || model.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+}
 /// A see-through prop's opacity while it stands between the camera and the
 /// player (an ordered dither, `render::Fade::see_through`). PROVISIONAL.
 pub const SEE_THROUGH_OPACITY: f32 = 0.3;
@@ -385,6 +397,7 @@ struct Blocker {
 #[derive(Debug, Default)]
 pub struct CameraBlockers {
     blockers: Vec<Blocker>,
+    excluded: std::collections::BTreeSet<u32>,
 }
 
 impl CameraBlockers {
@@ -398,6 +411,9 @@ impl CameraBlockers {
             let Some(model) = scene.resolve_model(&inst.class) else {
                 continue;
             };
+            if is_ctf_marker_model(model) {
+                continue;
+            }
             let contact_surface = scene.meshes[model].contact_surface;
             if !meshes.contains_key(model) {
                 let cpu = &scene.meshes[model];
@@ -462,7 +478,15 @@ impl CameraBlockers {
                 blockers.push(b);
             }
         }
-        Self { blockers }
+        Self {
+            blockers,
+            ..Self::default()
+        }
+    }
+
+    /// Exclude props the campaign has hidden or made non-collidable.
+    pub fn set_excluded(&mut self, instances: impl IntoIterator<Item = u32>) {
+        self.excluded = instances.into_iter().collect();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -511,17 +535,44 @@ impl CameraBlockers {
         let dir = delta / len;
         let mut t = len;
         for b in &self.blockers {
-            if (b.prop && !props)
-                || Some(b.instance) == skip
-                || !b.world.hits(target, dir, t, CAMERA_RADIUS)
+            if (b.prop && !props) || Some(b.instance) == skip || self.excluded.contains(&b.instance)
             {
                 continue;
             }
-            if let Some(hit) = b.sweep(b.pose_inv(&live, doors), target, dir, t, CAMERA_RADIUS) {
-                t = t.fmin(hit);
+            if b.moves || b.door.is_some() {
+                let pose = b.live_pose(&live, doors);
+                let world = pose.map_or(b.world, |m| Aabb::transformed(b.mesh.local, m));
+                if !world.hits(target, dir, t, CAMERA_RADIUS) {
+                    continue;
+                }
+                let inv = pose.map_or(b.inv, |m| m.inverse());
+                if let Some(hit) = b.sweep(inv, target, dir, t, CAMERA_RADIUS) {
+                    t = t.fmin(hit);
+                }
+            } else {
+                if !b.world.hits(target, dir, t, CAMERA_RADIUS) {
+                    continue;
+                }
+                if let Some(hit) = b.sweep(b.inv, target, dir, t, CAMERA_RADIUS) {
+                    t = t.fmin(hit);
+                }
             }
         }
         t / len
+    }
+
+    /// Mark animated world instances (e.g. scripted library doors) as moving
+    /// so camera collision and see-through evaluate their live pose and AABB.
+    pub fn mark_moving(&mut self, instances: impl IntoIterator<Item = u32>) {
+        let moving: std::collections::HashSet<u32> = instances.into_iter().collect();
+        if moving.is_empty() {
+            return;
+        }
+        for b in &mut self.blockers {
+            if b.door.is_none() && moving.contains(&b.instance) {
+                b.moves = true;
+            }
+        }
     }
 
     /// The props to draw see-through for a camera at `eye` filming the
@@ -546,7 +597,7 @@ impl CameraBlockers {
             None => out.push((ii, opacity)),
         };
         for b in self.blockers.iter().filter(|b| b.prop) {
-            if Some(b.instance) == skip {
+            if Some(b.instance) == skip || self.excluded.contains(&b.instance) {
                 continue;
             }
             let pose = b.live_pose(&live, doors);
@@ -563,7 +614,7 @@ impl CameraBlockers {
                     return false;
                 }
                 let dir = (s - eye) / dist;
-                b.world.hits(eye, dir, len, SIGHT_RADIUS)
+                near.hits(eye, dir, len, SIGHT_RADIUS)
                     && b.sweep(inv, eye, dir, len, SIGHT_RADIUS).is_some()
             });
             if blocks {
@@ -586,16 +637,20 @@ impl CameraBlockers {
         let mut out: Vec<(u32, f32)> = self
             .blockers
             .iter()
-            .filter(|b| !b.prop && b.world.hits(target, dir, len, CAMERA_RADIUS))
+            .filter(|b| !b.prop && !self.excluded.contains(&b.instance))
             .filter_map(|b| {
-                b.sweep(
-                    b.pose_inv(&|_| None, doors),
-                    target,
-                    dir,
-                    len,
-                    CAMERA_RADIUS,
-                )
-                .map(|t| (b.instance, t))
+                let pose = if b.door.is_some() {
+                    b.live_pose(&|_| None, doors)
+                } else {
+                    None
+                };
+                let world = pose.map_or(b.world, |m| Aabb::transformed(b.mesh.local, m));
+                if !world.hits(target, dir, len, CAMERA_RADIUS) {
+                    return None;
+                }
+                let inv = pose.map_or(b.inv, |m| m.inverse());
+                b.sweep(inv, target, dir, len, CAMERA_RADIUS)
+                    .map(|t| (b.instance, t))
             })
             .collect();
         out.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -622,14 +677,6 @@ impl Blocker {
             return Some(ride.place * core::door::sample(&ride.frames, door.open));
         }
         self.moves.then(|| live(self.instance)).flatten()
-    }
-
-    /// World -> model at [`Self::live_pose`], else the placed pose.
-    fn pose_inv(&self, live: &impl Fn(u32) -> Option<Mat4>, doors: &[Door]) -> Mat4 {
-        match self.live_pose(live, doors) {
-            Some(pose) => pose.inverse(),
-            None => self.inv,
-        }
     }
 
     /// How far (m, within `len`) a sphere of `radius` at `from` moves along

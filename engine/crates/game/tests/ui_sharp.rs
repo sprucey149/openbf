@@ -452,6 +452,7 @@ fn capture_native_surfaces() {
                     round_end: Some(ui::hud::RoundEndModel {
                         result: 0,
                         stats: Some(stats),
+                        fade: 1.0,
                     }),
                     ..model.clone()
                 },

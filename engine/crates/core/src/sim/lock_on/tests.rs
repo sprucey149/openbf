@@ -368,3 +368,52 @@ fn a_fully_locked_shot_keeps_its_target_when_its_tilt_leaves_the_lock_cone() {
     assert!(missile.launch.dot(s.flyer_ray(p).1) < LOCK_FIRE_COS);
     assert_eq!(missile.target, Some(MissileTarget::Vehicle(target)));
 }
+
+/// A bot pilot's launcher dwells on the target its AI handed the gun before
+/// a missile homes, and every shot spends the lock (`re-ordnance-kinds.md`
+/// §5.2): a shot before LockTime flies straight.
+#[test]
+fn a_bot_pilots_missile_homes_only_after_the_dwell_and_spends_it() {
+    let (mut s, _, own) = world();
+    let w = &mut s.weapon_classes[0];
+    w.lock_time = 3.0;
+    w.ordnance.missile = Some(Default::default());
+    let p = s.players[0].unwrap();
+    s.unseat_unit(p);
+    let bot = s
+        .spawn(&UnitSpec {
+            controller: crate::unit::Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    assert!(s.seat_unit(bot, own, 0));
+    s.vehicle_mut(own).unwrap().flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+    let centre = ahead(&s, bot, 500.0, 0.0);
+    let target = fighter(&mut s, 1, centre);
+    s.vehicle_mut(own).unwrap().flyer.ai.armed_target = Some(target);
+    let fire = PadState {
+        buttons: buttons::FIRE,
+        ..Default::default()
+    };
+    let idle = PadState::default();
+    let shoot = |s: &mut Sim| {
+        s.bolts.clear();
+        for _ in 0..(10.0 / STEP) as usize {
+            s.seat_gun(bot.index as usize, &fire);
+            if let Some(b) = s.bolts.first() {
+                return b.missile.unwrap().target;
+            }
+        }
+        panic!("the bot's launcher never fired");
+    };
+    assert_eq!(shoot(&mut s), None, "fired before the dwell: unguided");
+    for _ in 0..(3.1 / STEP) as usize {
+        s.seat_gun(bot.index as usize, &idle);
+    }
+    assert_eq!(
+        shoot(&mut s),
+        Some(MissileTarget::Vehicle(target)),
+        "a full dwell homes"
+    );
+    assert_eq!(shoot(&mut s), None, "the shot spent the lock");
+}

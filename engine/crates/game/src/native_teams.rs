@@ -2,14 +2,16 @@
 
 use crate::walk::WalkSim;
 
-const NATIVE_SIDES: [&str; 6] = ["ewk", "wok", "gun", "geo", "des", "gam"];
+const NATIVE_SIDES: [&str; 8] = ["ewk", "wok", "gun", "geo", "des", "gam", "gar", "jed"];
+const AUXILIARY_FACTION_SIDES: [&str; 4] = ["all", "imp", "rep", "cis"];
 
-pub fn native_side(
+fn side_with_class(
     classes_dir: &std::path::Path,
     game: &str,
     class: &str,
+    sides: &[&'static str],
 ) -> Option<(&'static str, std::path::PathBuf)> {
-    NATIVE_SIDES.iter().find_map(|&side| {
+    sides.iter().find_map(|&side| {
         let path = classes_dir.join(format!("{game}_{side}.ron"));
         if !pak::is_file(&path) {
             return None;
@@ -18,6 +20,14 @@ pub fn native_side(
         db.load(&path).ok()?;
         db.get(class).is_some().then_some((side, path))
     })
+}
+
+pub fn native_side(
+    classes_dir: &std::path::Path,
+    game: &str,
+    class: &str,
+) -> Option<(&'static str, std::path::PathBuf)> {
+    side_with_class(classes_dir, game, class, &NATIVE_SIDES)
 }
 
 /// Every native side the bake carries supplies its class file and models.
@@ -60,7 +70,19 @@ pub fn install(
         if walk.native_teams.contains_key(&team) {
             continue;
         }
-        let Some((faction, source)) = native_side(classes_dir, &mission.source_game, first) else {
+        let campaign = mission.mode.eq_ignore_ascii_case("campaign");
+        let main_side = assets_dir.join(format!("side_{}", mission.source_game));
+        let found = native_side(classes_dir, &mission.source_game, first).or_else(|| {
+            campaign.then(|| {
+                side_with_class(
+                    classes_dir,
+                    &mission.source_game,
+                    first,
+                    &AUXILIARY_FACTION_SIDES,
+                )
+            })?
+        });
+        let Some((faction, source)) = found else {
             eprintln!(
                 "native team {} unavailable (no baked native side carries {first})",
                 authored.team
@@ -68,21 +90,52 @@ pub fn install(
             continue;
         };
         let roster = (|| -> anyhow::Result<_> {
-            let mut db = crate::roster::load_classdb(classes_dir, &mission.source_game, &[])?;
+            let side_filter: &[&str] = if AUXILIARY_FACTION_SIDES.contains(&faction) {
+                &[faction]
+            } else {
+                &[]
+            };
+            let mut db =
+                crate::roster::load_classdb(classes_dir, &mission.source_game, side_filter)?;
             db.load(&source)?;
-            let classes = authored
+            let mut classes = authored
                 .classes
                 .iter()
                 .map(|(name, min, max)| crate::roster::ClassRoster::build(&db, name, *min, *max))
                 .collect::<anyhow::Result<Vec<_>>>()?;
+            let map_dir = assets_dir.join(&mission.map);
+            let has_droideka = classes.iter().any(|c| c.droideka.is_some());
+            let droideka_bakes = has_droideka.then(|| {
+                crate::droideka::bakes(&map_dir, &mission.source_game.to_ascii_lowercase())
+            });
             anyhow::ensure!(
-                classes
-                    .iter()
-                    .all(|class| class.geometry.as_ref().is_some_and(|name| {
+                classes.iter().all(|class| {
+                    if class.droideka.is_some() {
+                        return droideka_bakes
+                            .as_ref()
+                            .is_some_and(|b| b.contains_key(&class.class.to_ascii_lowercase()))
+                            || (campaign
+                                && pak::is_file(
+                                    main_side
+                                        .join("vehicles")
+                                        .join(faction)
+                                        .join("walkers")
+                                        .join("cis_walk_droideka.glb"),
+                                ));
+                    }
+                    class.geometry.as_ref().is_some_and(|name| {
                         pak::is_file(side.join("soldiers").join(format!("{name}.glb")))
-                    })),
+                            || (campaign
+                                && pak::is_file(
+                                    main_side.join("soldiers").join(format!("{name}.glb")),
+                                ))
+                    })
+                }),
                 "native soldier model missing"
             );
+            if has_droideka {
+                crate::droideka::install_classes(&mut classes, &map_dir, &mission.source_game);
+            }
             Ok(crate::roster::FactionRoster {
                 faction: faction.to_owned(),
                 classes,
@@ -100,39 +153,56 @@ pub fn install(
             .iter()
             .map(|class| class.register(&mut walk.sim, &mut names))
             .collect();
+        let custom = crate::animator::custom::for_mission(classes_dir, mission).unwrap_or_default();
         let visuals = roster
             .classes
             .iter()
-            .map(crate::walk::ClassVisual::from_roster_with_held)
+            .map(|c| {
+                let mut v = crate::walk::ClassVisual::from_roster_with_held(c);
+                v.anim.custom = custom.clone();
+                v
+            })
             .collect();
-        let mut members = Vec::new();
-        let cap = usize::from(member_count);
-        for (i, class) in table.iter().enumerate() {
-            for _ in 0..(class.min as usize).min(cap.saturating_sub(members.len())) {
-                members.push(class.spec(
+        let templates: Vec<_> = table
+            .iter()
+            .enumerate()
+            .map(|(i, class)| {
+                class.spec(
                     team,
                     glam::Vec3::ZERO,
                     0.0,
                     core::unit::Controller::Ai,
                     i as u8,
                     walk.sim.bot_skill(team),
-                ));
+                )
+            })
+            .collect();
+        let limits: Vec<(u32, u32)> = table
+            .iter()
+            .map(|class| (class.min, class.max.unwrap_or(u32::MAX)))
+            .collect();
+        let mut members = Vec::new();
+        let mut counts = vec![0u32; table.len()];
+        let mut unassigned = 0u32;
+        // Each member joins its team in order (`FUN_0034cde0`): class 0
+        // (`FUN_0034f1f8(m, 0)`), then its respawn preparation `FUN_0034ffe0`
+        // draws with `FUN_0036f198`, counting the members before it and
+        // itself as class 0, with the clock under 60 s. `SpawnCharacter`
+        // (`FUN_0034e1f0`) spawns the member's class, so an ambush's mix is
+        // its members' draws (re-ai-class-selection.md). PROVISIONAL, trace:
+        // the vtable caller of `FUN_0034cde0` at level start.
+        for _ in 0..usize::from(member_count) {
+            let mut seen = counts.clone();
+            if let Some(first) = seen.first_mut() {
+                *first += 1;
             }
+            let Some(k) = core::sim::draw_class(&mut walk.sim.lcg, &seen, &limits, true) else {
+                unassigned += 1;
+                continue;
+            };
+            counts[k] += 1;
+            members.push(templates[k].clone());
         }
-        // The member pool is distinct from the authored minimums. The normal
-        // roster's fill class takes the remainder here too. PROVISIONAL,
-        // replace: trace the BF1 quota top-up and assigned-member class draws
-        // across native waves (re-ai-class-selection.md).
-        members.resize_with(cap, || {
-            table[0].spec(
-                team,
-                glam::Vec3::ZERO,
-                0.0,
-                core::unit::Controller::Ai,
-                0,
-                walk.sim.bot_skill(team),
-            )
-        });
         walk.native_teams.insert(
             team,
             crate::walk::TeamTemplate::from_roster(&roster, &table[0], visuals),
@@ -143,6 +213,15 @@ pub fn install(
             Vec::new()
         };
         walk.sim.add_native_team_with_posts(team, members, posts);
+        walk.sim.set_native_class_draw(
+            team,
+            core::sim::NativeClassDraw {
+                templates,
+                limits,
+                counts,
+                unassigned,
+            },
+        );
     }
     if walk.native_teams.is_empty() {
         return;
@@ -173,19 +252,21 @@ pub fn install(
         })
         .collect();
     walk.sim.set_ally_spawns(ally_spawns);
-    walk.sim.populate_native_teams();
-    for (&team, template) in &walk.native_teams {
-        let alive = walk
-            .sim
-            .alive_units()
-            .filter(|(_, u)| u.team == team)
-            .count();
-        println!(
-            "native team {} ({}): {} on field",
-            team + 1,
-            template.faction,
-            alive
-        );
+    if mission.campaign.is_none() {
+        walk.sim.populate_native_teams();
+        for (&team, template) in &walk.native_teams {
+            let alive = walk
+                .sim
+                .alive_units()
+                .filter(|(_, u)| u.team == team)
+                .count();
+            println!(
+                "native team {} ({}): {} on field",
+                team + 1,
+                template.faction,
+                alive
+            );
+        }
     }
 }
 

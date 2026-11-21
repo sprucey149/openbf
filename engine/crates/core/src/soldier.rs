@@ -163,6 +163,11 @@ pub struct SoldierConstants {
     /// A channel-0 weapon is a lightsaber (B2 s+0x4e0 bit 0x10000, §3.3): a
     /// class that does not hover double-jumps instead of jetting.
     pub saber: bool,
+    /// `FleeLikeAHero = "1"` (B2 class+0x778 bit 0x10, FUN_00252bb0): uses
+    /// hero death transitions (`FUN_00237e34` B2:151135-151147 -> state 0x10
+    /// `stand_deadhero` on the ground, state 9 `Thrown` when killed airborne
+    /// or rolling) and skips corpse ground slide (`FUN_00240bf8` case 0x10).
+    pub flee_like_a_hero: bool,
 }
 
 impl Default for SoldierConstants {
@@ -215,6 +220,7 @@ impl Default for SoldierConstants {
             sprint_control: [CONTROL_SPEED[3][0], CONTROL_SPEED[3][1]],
             hero_cameras: [None; 7],
             saber: false,
+            flee_like_a_hero: false,
         }
     }
 }
@@ -291,6 +297,10 @@ impl SoldierConstants {
         c.jet_hover = src
             .prop("JetType")
             .is_some_and(|t| t.trim().eq_ignore_ascii_case("hover"));
+        c.flee_like_a_hero = src
+            .prop("FleeLikeAHero")
+            .and_then(|v| v.trim().parse::<i32>().ok())
+            .is_some_and(|v| v & 1 != 0);
         c
     }
 

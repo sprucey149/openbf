@@ -213,7 +213,7 @@ impl Default for WalkerClass {
 }
 
 /// The post setter's degrees-to-radians factor (B2 FUN_0035a3a0).
-const SPAWN_ANGLE_RAD: f32 = 0.017_453_294;
+pub(super) const SPAWN_ANGLE_RAD: f32 = 0.017_453_294;
 
 /// tan(min(|deg|·π/180, 89.1°)); 0 stays 0.
 fn tan_prop(deg: f32) -> f32 {

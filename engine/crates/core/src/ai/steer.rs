@@ -231,8 +231,10 @@ fn ramp_clear(sim: &Sim, u: &crate::unit::Unit, cap: &Capsule, dir: Vec3) -> boo
     let mut y = feet.y;
     for (k, r) in rise.iter_mut().enumerate() {
         let p = feet + d * (RAMP_SAMPLE * (k + 1) as f32);
-        let f = sim.ground_point_under(Vec3::new(p.x, y, p.z), false);
-        if f <= crate::collision::NO_GROUND || f - y > RAMP_SAMPLE_RISE {
+        let Some(f) = sim.ground_point_hit_under(Vec3::new(p.x, y, p.z), false) else {
+            return false;
+        };
+        if f - y > RAMP_SAMPLE_RISE {
             return false;
         }
         y = f;
@@ -312,8 +314,8 @@ fn barrier_ahead(sim: &Sim, u: &crate::unit::Unit, dir: Vec3) -> Option<Vec3> {
             // dunes read as no floor from a metre up, and every barrier on a
             // slope became a wall — 7/8 rounds → 3/8).
             let q = u.soldier.pos + Vec3::new(dir.x, 0.0, dir.z) * EDGE_LOOK;
-            let f = sim.ground_point_under(q + Vec3::Y * EDGE_LOOK, false);
-            f <= crate::collision::NO_GROUND || sim.level_at(Vec3::new(q.x, f, q.z)).is_off()
+            sim.ground_point_hit_under(q + Vec3::Y * EDGE_LOOK, false)
+                .is_none_or(|f| sim.level_at(Vec3::new(q.x, f, q.z)).is_off())
         });
         if off {
             return Some(Vec3::new(n.x, 0.0, n.y));

@@ -211,7 +211,9 @@ fn every_bf2_mission_resolves_only_its_ordered_native_resource_programs() {
             count += 1;
         }
     }
-    assert_eq!(count, 34);
+    // 34 Instant Action ground missions plus the 6 ground Rise of the
+    // Empire campaign missions (space maps are excluded above).
+    assert_eq!(count, 40);
 }
 
 #[test]

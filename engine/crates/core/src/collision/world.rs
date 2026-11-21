@@ -602,6 +602,22 @@ impl CollisionWorld {
             .find_map(|(i, v)| (*v == turret).then_some(*i))
     }
 
+    /// The world-space centre of a placed instance's collision bodies: the
+    /// average of their AABB centres. Some BF2 destructables (Felucia's
+    /// `life_int_cis` console) bake geometry offset tens of metres from their
+    /// instance origin, so the origin is not where the object actually sits.
+    /// Objective markers use this so the arrow lands on the object, not the
+    /// empty origin (the sim's own Station::pos stays the instance origin).
+    pub fn instance_centre(&self, instance: u32) -> Option<glam::Vec3> {
+        let mut sum = glam::Vec3::ZERO;
+        let mut n = 0u32;
+        for b in self.bodies.iter().filter(|b| b.instance == Some(instance)) {
+            sum += (b.aabb.min + b.aabb.max) * 0.5;
+            n += 1;
+        }
+        (n > 0).then_some(sum / n as f32)
+    }
+
     pub fn instance_radius_sq_at(&self, instance: u32, point: glam::Vec3) -> Option<f32> {
         let margin = glam::Vec3::splat(0.5);
         let mut struck = None::<f32>;
@@ -664,6 +680,31 @@ impl CollisionWorld {
         self.envelopes.sort_by_key(|(i, _)| *i);
         self.rebuild_broadphase();
         parts
+    }
+
+    /// Every body of `instance` with its world matrix, by body index.
+    pub fn instance_bodies(&self, instance: u32) -> Vec<(usize, glam::Mat4)> {
+        self.bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.instance == Some(instance))
+            .map(|(i, b)| (i, b.to_world))
+            .collect()
+    }
+
+    /// Change query membership without replacing the bodies or moving their poses.
+    pub fn set_body_layers(&mut self, layers: impl IntoIterator<Item = (usize, super::Layers)>) {
+        let mut changed = false;
+        for (i, layers) in layers {
+            if let Some(body) = self.bodies.get_mut(i).filter(|b| b.layers != layers) {
+                body.layers = layers;
+                changed = true;
+            }
+        }
+        if changed {
+            self.generation += 1;
+            self.rebuild_broadphase();
+        }
     }
 
     /// An instance's live bodies as parts in the space of `pose` (the

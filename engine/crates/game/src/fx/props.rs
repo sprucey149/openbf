@@ -13,7 +13,8 @@ impl Fx {
                 .get(usize::from(s.class))?
                 .damage_effects
                 .get(slot)?;
-            (!s.destroyed && effect.band.active(s.health.cur / s.health.max)).then_some((s, effect))
+            (!s.destroyed && s.health.max > 0.0 && effect.band.active(s.health.cur / s.health.max))
+                .then_some((s, effect))
         };
         for live in &mut self.live {
             let Some((station, slot)) = live.station else {
@@ -105,6 +106,18 @@ impl Glow {
             additive: true,
         }
     }
+}
+
+/// Builds one prop beam glow particle (`ParticleShape::Beam`) at `matrix * local`
+/// using `lib`'s beam library and era, for callers that rotate props outside [`Fx`].
+pub fn prop_glow_draw(
+    lib: &Library,
+    matrix: Mat4,
+    local: &manifest::ManifestAttachedEffect,
+    view: Option<render::FarFade>,
+) -> Option<render::ParticleDraw> {
+    let def = lib.beam(&local.effect)?;
+    Some(Glow::new(def, frame(matrix, local), lib.era, view).draw())
 }
 
 pub(super) struct Attached {

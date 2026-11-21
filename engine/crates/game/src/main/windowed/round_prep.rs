@@ -41,6 +41,8 @@ pub(super) struct RoundJob {
     pub difficulty: core::skill::Difficulty,
     /// A LAN round's setup and this peer's slot.
     pub net: Option<(game::netplay::RoundSetup, u8)>,
+    /// Index into `ui::campaign::RISE_OF_THE_EMPIRE` when launching a campaign mission.
+    pub campaign_index: Option<usize>,
 }
 
 /// The CPU-only battle resources the event thread used to load after the
@@ -71,7 +73,20 @@ fn ms(t: Instant) -> f64 {
 impl RoundJob {
     /// The setup and the walk, exactly as `App::start_battle` built them.
     pub fn walk(&self, scene: &game::assets::Scene) -> Result<(BattleSetup, WalkSim)> {
-        use super::super::round_setup::{battle_setup, build_round, shell_setup};
+        use super::super::round_setup::{battle_setup, build_round, campaign_setup, shell_setup};
+        if let Some(idx) = self.campaign_index {
+            anyhow::ensure!(self.net.is_none(), "campaign is single-player only");
+            let entry = &ui::campaign::RISE_OF_THE_EMPIRE[idx];
+            let setup = campaign_setup(
+                &self.missions_dir,
+                &self.assets_dir,
+                entry,
+                self.seed,
+                self.difficulty,
+            )?;
+            let walk = super::make_walk(scene, &setup)?;
+            return Ok((setup, walk));
+        }
         match &self.net {
             Some((round, local)) => {
                 let setup = battle_setup(round, &self.missions_dir, &self.assets_dir)?;
@@ -219,6 +234,7 @@ mod tests {
             seed: 42,
             difficulty: core::skill::Difficulty::Normal,
             net,
+            campaign_index: None,
         }
     }
 

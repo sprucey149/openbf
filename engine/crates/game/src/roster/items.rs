@@ -144,6 +144,12 @@ pub(crate) fn station_class_of(db: &ClassDb, name: &str) -> Option<StationClass>
         explosion: db
             .prop(name, "ExplosionName")
             .and_then(|s| explosion_class(db, s)),
+        hide_health_bar: db.chain(name).into_iter().any(|def| {
+            def.props.iter().any(|(k, v)| {
+                (*k == 0xe921_a7d8 || *k == 0xa1c0_f27b || *k == 0x1b2d_820b)
+                    && v.trim().parse::<f32>().is_ok_and(|n| n != 0.0)
+            })
+        }),
     })
 }
 
@@ -195,9 +201,10 @@ pub fn add_stations(
         let Some(class) = station_class_from_db(db, &name) else {
             continue;
         };
-        let destructible = db
-            .engine_base(&name)
-            .is_some_and(crate::stations::is_destructible_building);
+        let base = db.engine_base(&name);
+        let destructible = base.is_some_and(crate::stations::is_destructible_building);
+        let destructible_building =
+            base.is_some_and(|b| b.eq_ignore_ascii_case("destructablebuilding"));
         let instance_f32 = |key: u32| {
             inst.props
                 .iter()
@@ -210,7 +217,11 @@ pub fn add_stations(
         } else {
             instance_f32(radius_key).unwrap_or(0.0)
         };
-        let unusable = if destructible {
+        let unusable = if destructible_building {
+            // Script-destroyed props (e.g. Tantive IV's blastdoor) omit MaxHealth
+            // so weapons cannot destroy them, while KillObject still can.
+            !class.max_health.is_finite() || class.max_health < 0.0
+        } else if destructible {
             !class.max_health.is_finite() || class.max_health <= 0.0
         } else {
             radius <= 0.0

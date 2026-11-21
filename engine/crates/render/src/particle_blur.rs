@@ -75,13 +75,13 @@ impl ParticleBlur {
             fs: "fs_particle_blur",
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
         };
         let display_format = format.remove_srgb_suffix();
         let pipeline = composite.build(device, &shader, display_format);
         let over_character = PipelineDesc {
             label: "particle blur over character",
-            depth_compare: Some(wgpu::CompareFunction::Greater),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             ..composite
         }
         .build_with_stencil(

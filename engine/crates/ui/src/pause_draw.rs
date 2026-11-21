@@ -496,7 +496,7 @@ pub(crate) fn draw_stack(ctx: &mut Ctx<'_>, m: &MenuModel, anim: &Animation, siz
         bar: ([255.0; 3], PIECE_ALPHA),
         text: title,
         style: tint::TITLE,
-        title: true,
+        font: &crate::typography::TITLE,
     };
     ctx.flashy_row(&s, &title, title_age);
 
@@ -561,7 +561,7 @@ pub(crate) fn draw_stack(ctx: &mut Ctx<'_>, m: &MenuModel, anim: &Animation, siz
                     bar,
                     text: name,
                     style: tint,
-                    title: false,
+                    font: &ITEM,
                 },
                 reveal(anim.age, i),
             );

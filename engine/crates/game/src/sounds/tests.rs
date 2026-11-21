@@ -408,6 +408,7 @@ fn lib() -> SoundLib {
         music_takes: HashMap::new(),
         cache: HashMap::new(),
         loops: HashMap::new(),
+        loop_draws: HashMap::new(),
         walker_gains: HashMap::new(),
         turret_whirs: HashMap::new(),
         ambient: HashMap::new(),
@@ -514,6 +515,33 @@ fn each_start_draws_its_pitch_and_gain() {
         g.0 >= 0.3 && g.0 < 0.31 && g.1 <= 0.7 && g.1 > 0.69,
         "{g:?}"
     );
+}
+
+/// An aura loop's start draws as a one-shot's does, so the loops one cast
+/// puts on many allies on one tick do not share a pitch.
+#[test]
+fn a_loop_start_draws_its_pitch_and_gain() {
+    let mut sl = lib();
+    let sound = fnv1a_lowercase("com_weap_thermaldetonator_exp");
+    let (p, _) = sl.find(sound).unwrap();
+    let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+    let mut pitches = std::collections::HashSet::new();
+    for _ in 0..1000 {
+        let (gain, pitch) = sl.start_draw(sound);
+        let (gain, pitch) = (gain * p.gain, pitch * p.pitch);
+        lo = (lo.0.min(gain), lo.1.min(pitch));
+        hi = (hi.0.max(gain), hi.1.max(pitch));
+        pitches.insert(pitch.to_bits());
+    }
+    assert!(
+        lo.1 >= 0.85 && lo.1 < 0.86 && hi.1 <= 1.15 && hi.1 > 1.14,
+        "{lo:?} {hi:?}"
+    );
+    assert!(
+        lo.0 >= 0.3 && lo.0 < 0.31 && hi.0 <= 0.7 && hi.0 > 0.69,
+        "{lo:?} {hi:?}"
+    );
+    assert!(pitches.len() > 900);
 }
 
 /// `PlayInterval` refuses a start inside the interval; `PlayProbability`
@@ -1305,6 +1333,24 @@ fn voicep_public_callers() {
         )
         .is_some());
     assert!(sl.handed.as_ref().unwrap().is_empty());
+}
+
+/// A voice line goes to the dedicated voice bus, not the effects bus. The
+/// space-round sound flood can fill the game bus, but it must never silence a
+/// campaign objective line on the way out (the headless voice-queue test
+/// cannot see this: it has no mixer).
+#[test]
+fn voice_lines_are_played_on_the_voice_bus() {
+    let f = VoiceFixture::new("voice_bus");
+    let Some(mut audio) = audio::Audio::new() else {
+        eprintln!("SKIP: no audio device");
+        return;
+    };
+    let mut sl = f.load();
+    let before = audio.voice_num_sounds();
+    assert!(sl.play_voice(&mut audio, "rep_test_voice").is_some());
+    assert!(audio.voice_num_sounds() > before);
+    assert_eq!(audio.num_sounds(), 0);
 }
 
 /// Rows supplied by the content census: mission path, faction0, faction1,

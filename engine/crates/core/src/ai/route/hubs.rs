@@ -36,20 +36,20 @@ use crate::fmath::FloatExt;
 /// walkway puts it, not on whatever lies under it at the unit's height (a
 /// deck under a ramp, a platform's hidden core).
 pub(super) fn hub_waypoint(sim: &Sim, g: &NavGraph, hub: u16, from_y: f32) -> Vec3 {
-    if let (Some(h), Some(f)) = (g.hub(hub), sim.nav_floor(hub)) {
-        return Vec3::new(h.pos.x, f, h.pos.z);
-    }
-    match g.hub(hub) {
-        Some(h) => {
-            let at = |y: f32| sim.ground_under(Vec3::new(h.pos.x, y, h.pos.z), false);
-            let mut y = at(from_y);
-            if y <= crate::collision::NO_GROUND && h.pos.y > from_y {
-                y = at(h.pos.y);
-            }
-            Vec3::new(h.pos.x, y, h.pos.z)
-        }
+    hub_waypoint_hit(sim, g, hub, from_y).unwrap_or_else(|| match g.hub(hub) {
+        Some(h) => Vec3::new(h.pos.x, crate::collision::NO_GROUND, h.pos.z),
         None => Vec3::ZERO,
+    })
+}
+
+fn hub_waypoint_hit(sim: &Sim, g: &NavGraph, hub: u16, from_y: f32) -> Option<Vec3> {
+    if let (Some(h), Some(f)) = (g.hub(hub), sim.nav_floor(hub)) {
+        return Some(Vec3::new(h.pos.x, f, h.pos.z));
     }
+    let h = g.hub(hub)?;
+    let at = |y: f32| sim.ground_hit_under(Vec3::new(h.pos.x, y, h.pos.z), false);
+    let y = at(from_y).or_else(|| (h.pos.y > from_y).then(|| at(h.pos.y)).flatten())?;
+    Some(Vec3::new(h.pos.x, y, h.pos.z))
 }
 
 /// How many points of a hub [`hub_point`] draws while the draw lies in a
@@ -190,7 +190,7 @@ pub(in super::super) fn centre_leg(sim: &Sim, g: &NavGraph, r: &mut Route, pos: 
 /// to that, and on the discs often should). The design's rule is the sentinel,
 /// and the sentinel is what this tests.
 pub(crate) fn hub_has_floor(sim: &Sim, g: &NavGraph, hub: u16, from_y: f32) -> bool {
-    hub_waypoint(sim, g, hub, from_y).y > crate::collision::NO_GROUND
+    hub_waypoint_hit(sim, g, hub, from_y).is_some()
 }
 
 /// Is hub `hub` on the level of a unit whose feet are at `y` — its resolved

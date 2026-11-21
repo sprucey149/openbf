@@ -265,7 +265,16 @@ pub struct HudModel {
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
+    /// Teams with unlimited reinforcements (`SetReinforcementCount(t, -1)`):
+    /// their count is posted as -1, which the reinforcement Text prints as
+    /// "--" (`FUN_003ae6c0`, `analysis/re-hud.md` §2.3).
+    pub unlimited_tickets: [bool; 2],
     pub team_points: Option<([i32; 2], u32)>,
+    /// The mission script's popup, its text localized; the battle holds
+    /// under it until the player dismisses it.
+    pub popup: Option<HudPopup>,
+    /// `player1.objectivesUpdated` is up (`FUN_0038abd8`).
+    pub objectives_updated: bool,
     /// When true, 1-Flag CTF HUD displays flag icons and single-score points.
     pub ctf: bool,
     pub flag_status: Option<crate::hud_flag::FlagStatus>,
@@ -385,7 +394,10 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 /// Publish `m` as the 1-player HUD's events (`re-hud.md` §3). Change-gated
 /// like the PS2's publishers, so call it every frame. `has_mesh` answers
 /// whether a model of that name can be drawn (the NameMesh fallback).
+pub use crate::hud_popup::HudPopup;
+
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
+    crate::hud_popup::feed(hud, m.popup.as_ref(), m.objectives_updated, has_mesh);
     feed_lock(
         hud,
         m.lock.as_ref(),
@@ -567,6 +579,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         .as_ref()
         .filter(|r| r.stats.is_none())
         .map(|r| r.result);
+    hud.banner_fade = m.round_end.as_ref().map_or(0.0, |r| r.fade);
     hud.stats = m
         .round_end
         .as_ref()
@@ -629,7 +642,11 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         );
         put(
             &format!("player1.team{slot}.reinforcements"),
-            EventValue::Number(m.tickets[team] as f32),
+            EventValue::Number(if m.unlimited_tickets[team] {
+                -1.0
+            } else {
+                m.tickets[team] as f32
+            }),
         );
         let period = if m.bleed[team] > 0.0 {
             1.0 / m.bleed[team]
@@ -1051,6 +1068,8 @@ pub struct RoundEndModel {
     /// The stats pages once the banner is down (drawn by the HUD pass,
     /// `crate::stats_draw`); `None` = the banner.
     pub stats: Option<crate::stats::StatsScreens>,
+    /// The black over the banner, 0 to 1 (`game::round_end::RoundEnd::fade`).
+    pub fade: f32,
 }
 
 /// BF1's banner sheet, size and UV halves (`re-round-end.md` §2.1 [V]).
@@ -1197,6 +1216,9 @@ mod tests {
             incoming_missile: None,
             hints: Vec::new(),
             team_points: None,
+            unlimited_tickets: [false; 2],
+            popup: None,
+            objectives_updated: false,
             ctf: false,
             flag_status: None,
             space: None,
@@ -1252,6 +1274,7 @@ mod tests {
             model.round_end = Some(RoundEndModel {
                 result,
                 stats: None,
+                fade: 0.0,
             });
             feed(&mut hud, &model, &|_| false);
             let frame = crate::hud_draw::draw(&hud, &Default::default(), [1280.0, 896.0]);
@@ -1269,6 +1292,14 @@ mod tests {
                 frame.verts[0].color,
                 [rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1.0]
             );
+            model.round_end.as_mut().unwrap().fade = 0.5;
+            feed(&mut hud, &model, &|_| false);
+            let frame = crate::hud_draw::draw(&hud, &Default::default(), [1280.0, 896.0]);
+            assert_eq!(frame.verts.len(), 8, "the banner, then black over it");
+            assert_eq!(frame.batches.last().unwrap().texture, "white");
+            assert_eq!(frame.verts[4].pos[..2], [0.0, 0.0]);
+            assert_eq!(frame.verts[6].pos[..2], [1280.0, 896.0]);
+            assert_eq!(frame.verts[7].color, [0.0, 0.0, 0.0, 0.5]);
             model.round_end = None;
             feed(&mut hud, &model, &|_| false);
             assert_eq!(hud.banner, None);
@@ -1674,6 +1705,47 @@ mod team_points_tests {
             Some(&EventValue::Text("0".to_owned()))
         );
         assert_eq!(hud.last("player1.team1.reinforcements"), None);
+    }
+}
+
+#[cfg(test)]
+mod campaign_hud_tests {
+    use super::*;
+
+    #[test]
+    fn an_unlimited_team_posts_the_infinite_count() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let m = HudModel {
+            tickets: [250, 250],
+            unlimited_tickets: [true, false],
+            ..Default::default()
+        };
+        feed(&mut hud, &m, &|_| false);
+        assert_eq!(
+            hud.last("player1.team1.reinforcements"),
+            Some(&EventValue::Number(INFINITE))
+        );
+        assert_eq!(
+            hud.last("player1.team2.reinforcements"),
+            Some(&EventValue::Number(250.0))
+        );
+    }
+
+    #[test]
+    fn the_objective_popup_shows_then_closes_with_its_disable() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut m = HudModel {
+            popup: Some(HudPopup::Objective("Go".into())),
+            ..Default::default()
+        };
+        feed(&mut hud, &m, &|_| false);
+        assert_eq!(
+            hud.last("objectivePopup"),
+            Some(&EventValue::Text("Go".into()))
+        );
+        m.popup = None;
+        feed(&mut hud, &m, &|_| false);
+        assert_eq!(hud.last("objectivePopup"), None);
     }
 }
 

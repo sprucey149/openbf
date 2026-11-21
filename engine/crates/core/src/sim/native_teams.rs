@@ -23,12 +23,57 @@ pub struct NativeSpawnPost {
     pub nodes: Vec<(Vec3, f32)>,
 }
 
+/// `FUN_0036f198`, BF2's class selector: shuffle the class indices once
+/// (Fisher-Yates on `DAT_0073d870`, an unsigned remainder), then the first
+/// class with `counts < min`, else the first with `counts < max`; while
+/// `reserve` (the clock under 60.0 s, or a human on the team) a class also
+/// needs `counts < max - 1`. `None` is the selector's -1. Flagged classes
+/// (class +0x330 bit 33) are not modelled: no native roster has one.
+/// `analysis/re-ai-class-selection.md`.
+pub fn draw_class(
+    lcg: &mut crate::lcg::GameLcg,
+    counts: &[u32],
+    limits: &[(u32, u32)],
+    reserve: bool,
+) -> Option<usize> {
+    let mut order: Vec<usize> = (0..limits.len()).collect();
+    let mut left = order.len();
+    while left > 1 {
+        let j = lcg.index(left as u32) as usize;
+        left -= 1;
+        order.swap(j, left);
+    }
+    let room = |k: usize| !reserve || counts[k] < limits[k].1.saturating_sub(1);
+    let first = |bound: fn(&(u32, u32)) -> u32| {
+        order
+            .iter()
+            .copied()
+            .find(|&k| room(k) && counts[k] < bound(&limits[k]))
+    };
+    first(|l| l.0).or_else(|| first(|l| l.1))
+}
+
+/// A native team's class table for [`draw_class`]: one template per class,
+/// its `(min, max)`, how many members hold each class (member +0x140 by
+/// +0x13c, dead members included), and how many members the selector left
+/// with no class (its -1: `FUN_0034f1f8` clears +0x140 and `FUN_0034e1f0`
+/// will not spawn them until a later draw gives them one).
+#[derive(Clone, Debug)]
+pub struct NativeClassDraw {
+    pub templates: Vec<UnitSpec>,
+    pub limits: Vec<(u32, u32)>,
+    pub counts: Vec<u32>,
+    pub unassigned: u32,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct NativeTeam {
     team: u8,
     pending: VecDeque<UnitSpec>,
+    draw: Option<NativeClassDraw>,
     spawn_posts: Vec<NativeSpawnPost>,
     waves: SpawnWaves,
+    reinforcements: Option<u32>,
 }
 
 impl Sim {
@@ -69,6 +114,7 @@ impl Sim {
         self.native_teams.push(NativeTeam {
             team,
             pending: members.into(),
+            draw: None,
             spawn_posts,
             waves: SpawnWaves {
                 timer: 0.0,
@@ -76,13 +122,182 @@ impl Sim {
                 next_slot: 0,
                 ..self.waves[0]
             },
+            reinforcements: None,
         });
+    }
+
+    /// The class table a member spawned again draws from ([`draw_class`]).
+    pub fn set_native_class_draw(&mut self, team: u8, draw: NativeClassDraw) {
+        if let Some(i) = self.native_team_index(team) {
+            self.native_teams[i].draw = Some(draw);
+        }
+    }
+
+    /// Set a native/local team's reinforcement count (`None` = unlimited,
+    /// `Some(0)` = no CP auto-spawns; scripted `spawn_native_character` /
+    /// `Ambush` still enters).
+    pub fn set_native_reinforcements(&mut self, team: u8, count: Option<u32>) {
+        if let Some(i) = self.native_team_index(team) {
+            self.native_teams[i].reinforcements = count;
+        }
+    }
+
+    /// Query a native/local team's reinforcement count (`None` = unlimited).
+    pub fn native_reinforcements(&self, team: u8) -> Option<u32> {
+        self.native_team_index(team)
+            .and_then(|i| self.native_teams[i].reinforcements)
+    }
+
+    pub(super) fn spend_native_reinforcement(&mut self, team: u8) {
+        if let Some(i) = self.native_team_index(team) {
+            if let Some(n) = &mut self.native_teams[i].reinforcements {
+                *n = n.saturating_sub(1);
+            }
+        }
     }
 
     pub(super) fn native_team_index(&self, team: u8) -> Option<usize> {
         self.native_teams
             .iter()
             .position(|entry| entry.team == team)
+    }
+
+    /// Spawn up to `count` ambush bots of `team` at `nodes`. Main armies (`0..2`)
+    /// draw from `Sim::spawn_ai`; native/auxiliary teams (`>= 2`) register a
+    /// `NativeSpawnPost` for capacity and consume queued templates (or clone live
+    /// team slot templates when the initial pool is empty).
+    pub fn spawn_native_ambush(
+        &mut self,
+        team: u8,
+        count: u32,
+        nodes: &[(Vec3, f32)],
+    ) -> Vec<crate::unit::UnitHandle> {
+        let mut spawned = Vec::new();
+        if count == 0 || nodes.is_empty() {
+            return spawned;
+        }
+        if team < 2 {
+            for i in 0..count as usize {
+                let (pos, yaw) = nodes[i % nodes.len()];
+                if let Some(h) = self.spawn_ai(team, pos, yaw) {
+                    spawned.push(h);
+                }
+            }
+            return spawned;
+        }
+        let Some(entry) = self.native_team_index(team) else {
+            return spawned;
+        };
+        self.native_teams[entry].spawn_posts.push(NativeSpawnPost {
+            count,
+            nodes: nodes.to_vec(),
+        });
+        self.spawn_native_members(entry, count, nodes, &mut spawned, false);
+        spawned
+    }
+
+    /// A mission script's `SpawnCharacter` (B2 binding `FUN_001916e8`): one
+    /// native member of `team` enters at `node` and nothing more - no spawn
+    /// post is left behind, so a dead ambusher stays dead.
+    pub fn spawn_native_character(
+        &mut self,
+        team: u8,
+        node: (Vec3, f32),
+    ) -> Option<crate::unit::UnitHandle> {
+        self.spawn_native_member(team, node, None)
+    }
+
+    /// [`Sim::spawn_native_character`] for a member that held class `old`
+    /// in an earlier life (`None`: one the selector left with no class,
+    /// [`NativeClassDraw::unassigned`]). Once the never-spawned members are gone, its
+    /// respawn preparation (`FUN_0034ffe0`, from the member update
+    /// `FUN_0034cea8`) drew its class again with [`draw_class`], counting
+    /// its own old class, and `FUN_0034e1f0` spawns that class.
+    pub fn spawn_native_member(
+        &mut self,
+        team: u8,
+        node: (Vec3, f32),
+        old: Option<u8>,
+    ) -> Option<crate::unit::UnitHandle> {
+        if team < 2 {
+            return self.spawn_ai(team, node.0, node.1);
+        }
+        let entry = self.native_team_index(team)?;
+        if self.native_teams[entry].pending.is_empty() && self.native_teams[entry].draw.is_some() {
+            let mut spec = self.redraw_native_class(entry, old)?;
+            spec.pos = node.0;
+            spec.yaw = node.1;
+            return self.spawn_scripted_slot(&spec);
+        }
+        let mut spawned = Vec::new();
+        self.spawn_native_members(entry, 1, &[node], &mut spawned, true);
+        spawned.first().copied()
+    }
+
+    /// `FUN_0034ffe0` then `FUN_0036f198` then `FUN_0034f1f8` for a member
+    /// of native team `entry` whose class was `old`; `None` (-1) clears its
+    /// class and `FUN_0034e1f0` spawns nothing.
+    ///
+    /// PROVISIONAL (ours): the PS2 draws when the dead member's respawn
+    /// timer runs out (member +0x158), not when the script spawns it, so
+    /// its counts are the ones at the spawn. trace: `FUN_0034cea8`'s timer
+    /// for a member of a team with no reinforcements.
+    fn redraw_native_class(&mut self, entry: usize, old: Option<u8>) -> Option<UnitSpec> {
+        let reserve = self.tick < 60 * u64::from(crate::TICK_HZ);
+        let draw = self.native_teams[entry].draw.as_mut()?;
+        let k = draw_class(&mut self.lcg, &draw.counts, &draw.limits, reserve);
+        if let Some(c) = old.and_then(|o| draw.counts.get_mut(usize::from(o))) {
+            *c = c.saturating_sub(1);
+        }
+        let k = k?;
+        draw.counts[k] += 1;
+        if old.is_none() {
+            draw.unassigned = draw.unassigned.saturating_sub(1);
+        }
+        Some(draw.templates[k].clone())
+    }
+
+    fn spawn_native_members(
+        &mut self,
+        entry: usize,
+        count: u32,
+        nodes: &[(Vec3, f32)],
+        spawned: &mut Vec<crate::unit::UnitHandle>,
+        scripted: bool,
+    ) {
+        let team = self.native_teams[entry].team;
+        let fallback: Vec<UnitSpec> = self
+            .units
+            .iter()
+            .filter(|u| u.team == team)
+            .map(|u| u.spec.clone())
+            .collect();
+        for i in 0..count as usize {
+            let (pos, yaw) = nodes[i % nodes.len()];
+            let (mut spec, from_pending) =
+                if let Some(spec) = self.native_teams[entry].pending.pop_front() {
+                    (spec, true)
+                } else if !fallback.is_empty() {
+                    (fallback[i % fallback.len()].clone(), false)
+                } else {
+                    break;
+                };
+            spec.pos = pos;
+            spec.yaw = yaw;
+            let placed = if scripted {
+                self.spawn_scripted_slot(&spec)
+            } else {
+                self.spawn_roster_slot(&spec)
+            };
+            if let Some(h) = placed {
+                spawned.push(h);
+            } else {
+                if from_pending {
+                    self.native_teams[entry].pending.push_front(spec);
+                }
+                break;
+            }
+        }
     }
 
     pub(super) fn assign_unit_wave(&mut self, team: u8) -> Option<(u32, u32)> {
@@ -127,13 +342,17 @@ impl Sim {
         // Capacity is summed independently of usable paths, then effectively
         // clamped by the team's member pool. BF1 FUN_002ac378:237768-237783;
         // BF2 FUN_0036c750:366105-366110,366161-366164.
-        let owned = self.native_team_index(team).map_or(0, |entry| {
-            self.native_teams[entry]
-                .spawn_posts
-                .iter()
-                .map(|post| post.count)
-                .fold(0, u32::saturating_add)
-        });
+        let Some(entry) = self.native_team_index(team) else {
+            return false;
+        };
+        if self.native_teams[entry].reinforcements == Some(0) {
+            return false;
+        }
+        let owned = self.native_teams[entry]
+            .spawn_posts
+            .iter()
+            .map(|post| post.count)
+            .fold(0, u32::saturating_add);
         let limit = self
             .ally_spawns
             .iter()
@@ -201,6 +420,9 @@ impl Sim {
         let Some(entry) = self.native_team_index(old.team) else {
             return;
         };
+        if self.native_teams[entry].reinforcements == Some(0) {
+            return;
+        }
         if old
             .spawn_slot
             .is_some_and(|slot| !self.native_teams[entry].waves.ready(slot))
@@ -224,9 +446,19 @@ impl Sim {
         for entry in &self.native_teams {
             eat(&[entry.team]);
             eat(&(entry.pending.len() as u32).to_le_bytes());
+            if let Some(draw) = &entry.draw {
+                eat(b"native-class-draw");
+                for c in &draw.counts {
+                    eat(&c.to_le_bytes());
+                }
+            }
             eat(&entry.waves.timer.hash_bits().to_le_bytes());
             eat(&entry.waves.wave.to_le_bytes());
             eat(&entry.waves.next_slot.to_le_bytes());
+            if let Some(n) = entry.reinforcements {
+                eat(b"native-reinf");
+                eat(&n.to_le_bytes());
+            }
             if !entry.spawn_posts.is_empty() {
                 eat(b"native-spawn-posts");
                 eat(&(entry.spawn_posts.len() as u32).to_le_bytes());
@@ -635,5 +867,100 @@ mod tests {
             "capacity, not path count or roster minimum"
         );
         assert_eq!(sim.units[0].spec.pos, own.0);
+    }
+
+    #[test]
+    fn native_reinforcement_zero_blocks_cp_spawn_but_allows_scripted_ambush() {
+        let mut sim = Sim::empty(42);
+        sim.heightfield = Some(crate::heightfield::Heightfield {
+            size: 2,
+            unit: 50.0,
+            offset_x: 25.0,
+            offset_z: 25.0,
+            heights: vec![0.0; 4],
+        });
+        let p = post(&mut sim, 0, -10.0);
+        sim.set_ally_spawns(vec![p]);
+        let mut native = UnitSpec::trooper(2, Vec3::ZERO);
+        native.controller = Controller::Ai;
+        sim.add_native_team(2, vec![native]);
+        sim.set_team_relation(0, 2, true);
+        sim.set_team_relation(2, 0, true);
+        sim.set_native_reinforcements(2, Some(0));
+        assert_eq!(sim.native_reinforcements(2), Some(0));
+
+        // Zero reinforcements blocks CP auto-spawn.
+        sim.populate_native_teams();
+        assert_eq!(sim.alive_units().count(), 0);
+
+        // Scripted ambush still places the pending unit at the ambush node.
+        let ambush_pos = Vec3::new(12.0, 0.0, -5.0);
+        let h = sim
+            .spawn_native_character(2, (ambush_pos, 0.5))
+            .expect("scripted character spawns despite zero reinforcements");
+        assert_eq!(sim.alive_units().count(), 1);
+        assert_eq!(sim.unit(h).unwrap().soldier.pos.x, ambush_pos.x);
+
+        // Death with zero reinforcements does not respawn at the allied CP.
+        sim.kill_environment(h, crate::sim::DeathCause::DeathRegion);
+        let wave = &mut sim.native_teams[0].waves;
+        wave.wave = 1;
+        wave.timer = wave.interval;
+        sim.tick = sim.units[0].respawn_at.unwrap();
+        sim.step(&[]);
+        assert!(!sim.units[0].alive);
+
+        // Restoring unlimited reinforcements allows CP spawning again (via respawn or populate).
+        sim.set_native_reinforcements(2, None);
+        assert_eq!(sim.native_reinforcements(2), None);
+        sim.step(&[]);
+        assert!(sim.units[0].alive);
+        assert_eq!(sim.units[0].spec.pos.x, -10.0);
+    }
+
+    #[test]
+    fn the_class_draw_fills_minimums_in_a_shuffled_order_then_maximums() {
+        let mut lcg = crate::lcg::GameLcg::new(7);
+        let limits = [(8, 15), (8, 15), (8, 15)];
+        let mut counts = [0u32; 3];
+        let mut order = Vec::new();
+        for _ in 0..24 {
+            let k = draw_class(&mut lcg, &counts, &limits, true).unwrap();
+            counts[k] += 1;
+            order.push(k);
+        }
+        assert_eq!(counts, [8, 8, 8]);
+        assert!(order[..8].iter().any(|&k| k != order[0]));
+        assert_eq!(draw_class(&mut lcg, &[14, 13, 14], &limits, true), Some(1));
+        assert_eq!(draw_class(&mut lcg, &[14, 14, 14], &limits, true), None);
+        assert!(draw_class(&mut lcg, &[14, 14, 14], &limits, false).is_some());
+        assert_eq!(draw_class(&mut lcg, &[15, 15, 15], &limits, false), None);
+    }
+
+    #[test]
+    fn a_member_spawned_again_draws_its_class_from_the_members_counts() {
+        let mut sim = Sim::empty(42);
+        let mut first = UnitSpec::trooper(2, Vec3::ZERO);
+        first.controller = Controller::Ai;
+        let mut second = first.clone();
+        second.class = 1;
+        sim.add_native_team(2, vec![first.clone()]);
+        sim.set_native_class_draw(
+            2,
+            NativeClassDraw {
+                templates: vec![first, second],
+                limits: vec![(1, 2), (1, 2)],
+                counts: vec![1, 0],
+                unassigned: 0,
+            },
+        );
+        let at = (Vec3::new(3.0, 0.0, 0.0), 0.0);
+        let h = sim.spawn_native_member(2, at, None).unwrap();
+        assert_eq!(sim.unit(h).unwrap().spec.class, 0);
+        sim.kill_environment(h, crate::sim::DeathCause::DeathRegion);
+        sim.tick = 60 * u64::from(crate::TICK_HZ);
+        let h = sim.spawn_native_member(2, at, Some(0)).unwrap();
+        assert_eq!(sim.unit(h).unwrap().spec.class, 1);
+        assert_eq!(sim.native_teams[0].draw.as_ref().unwrap().counts, [0, 1]);
     }
 }

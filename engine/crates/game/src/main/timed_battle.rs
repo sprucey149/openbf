@@ -27,7 +27,11 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
             v.mode
         );
     }
-    let (scene, load) = game::assets::load_battle_scene(&v.map, &v.mode)?;
+    let layers = match &v.mission {
+        Some(path) => game::mission::MissionDef::load(path)?.layers,
+        None => Vec::new(),
+    };
+    let (scene, load) = game::assets::load_battle_scene_with_layers(&v.map, &v.mode, &layers)?;
     if let Some((path, Err(error))) = load.common {
         anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
     }

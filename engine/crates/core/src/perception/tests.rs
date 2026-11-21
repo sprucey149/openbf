@@ -1311,3 +1311,214 @@ fn a_far_hit_from_an_unseen_shooter_waits_out_the_search() {
     );
     eprintln!("C1 side {old} -> {new} (sustained {sustained}), behind {old_b} -> {new_b}");
 }
+
+#[test]
+fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
+    use crate::collision::Shape;
+    use crate::goals::{GoalKind, GoalTarget};
+    use crate::hero_weapon::{Blade, BladeSegment, SaberClass, SaberClip};
+    use crate::sim::{Station, StationClass};
+    use crate::weapon::WeaponClass;
+    use manifest::combo::{ComboDef, ComboField as F, ComboKeyword as K, ComboValue as V};
+
+    let (mut sim, shooter) = watcher(91);
+    sim.ground_rules = crate::soldier::GroundRules::Bf2;
+    sim.weapon_classes[0].ordnance.max_damage = 50.0;
+    sim.weapon_classes[0].ordnance.scales[crate::weapon::HealthType::Building as usize] = 1.0;
+
+    sim.add_station_class(StationClass::soldier("libcase", 1.0, 0.0, 0));
+    let mut station = Station::new(0, Vec3::new(0.0, 0.0, -20.0), 0.0);
+    station.instance = Some(77);
+    station.team = Some(1);
+    station.health = crate::weapon::Health::new(9000.0, crate::weapon::HealthType::Building);
+    station.sphere_centre = Vec3::new(0.0, 2.0, -20.0);
+    station.sphere_radius = 7.0;
+    station.ai_damage_threshold = 0.5;
+    sim.stations.push(station);
+
+    // Give the station a solid collider matching a wide bookcase so LOS must
+    // ignore the target station's own instance when tracing to sphere_centre.
+    let mut body = Body::new(
+        Mat4::from_translation(Vec3::new(0.0, 2.0, -20.0)),
+        Shape::Box {
+            half: Vec3::new(2.0, 2.5, 4.0),
+        },
+    );
+    body.instance = Some(77);
+    sim.collision.push_body(body);
+    sim.collision.bind_station(77, 0);
+    sim.collision.rebuild_broadphase();
+
+    let goal_id = sim
+        .ai_goals
+        .add(0, GoalKind::Destroy, 50.0, Some(GoalTarget::Station(0)))
+        .expect("destroy goal created");
+
+    // Step until the blaster bot acquires and hits the station multiple times.
+    let start_hp = sim.stations[0].health.cur;
+    for _ in 0..120 {
+        sim.step(&[]);
+    }
+    let after_blaster = sim.stations[0].health.cur;
+    assert!(
+        after_blaster < start_hp,
+        "blaster bot with Destroy goal must damage LibCase: {start_hp} -> {after_blaster}"
+    );
+    // Floor at 50% protects the station once AI drops it to 4500.
+    sim.stations[0].health.cur = 4520.0;
+    for _ in 0..90 {
+        sim.step(&[]);
+    }
+    assert!(
+        sim.stations[0].health.cur >= 4500.0,
+        "AI damage must clamp at threshold floor: {}",
+        sim.stations[0].health.cur
+    );
+
+    // Clear the blaster shooter's shots and add a saber bot near the station.
+    sim.units[shooter.index as usize].alive = false;
+    sim.stations[0].ai_damage_threshold = 0.0;
+    let segment = BladeSegment {
+        start: Vec3::new(0.0, 0.9, 0.0),
+        end: Vec3::new(0.0, 0.9, 1.5),
+    };
+    let f = |keyword: K, args: Vec<V>, children: Vec<F>| F {
+        keyword,
+        args,
+        scoped: !children.is_empty(),
+        children,
+    };
+    let attack_body = vec![
+        f(K::Duration, vec![V::Number(0.5)], vec![]),
+        f(K::Animation, vec![V::Text("swing".into())], vec![]),
+        f(
+            K::Attack,
+            vec![],
+            vec![
+                f(K::AttackId, vec![V::Text("slash".into())], vec![]),
+                f(K::Edge, vec![V::Number(0.0)], vec![]),
+                f(K::DamageTime, vec![V::Number(0.0), V::Number(0.5)], vec![]),
+            ],
+        ),
+    ];
+    let combo = ComboDef {
+        name_hash: 1,
+        fields: vec![
+            f(
+                K::State,
+                vec![V::Text("IDLE".into())],
+                vec![
+                    f(K::Duration, vec![V::Number(0.0)], vec![]),
+                    f(
+                        K::Transition,
+                        vec![V::Text("ATTACK".into())],
+                        vec![f(
+                            K::If,
+                            vec![],
+                            vec![
+                                f(K::Break, vec![], vec![]),
+                                f(
+                                    K::Button,
+                                    vec![V::Text("Fire".into()), V::Text("Press".into())],
+                                    vec![],
+                                ),
+                            ],
+                        )],
+                    ),
+                ],
+            ),
+            f(K::State, vec![V::Text("ATTACK".into())], attack_body),
+        ],
+    };
+    let saber_wc = WeaponClass {
+        ai_range: [0.0, 2.5, 4.0],
+        saber: Some(Box::new(SaberClass {
+            combo,
+            blades: vec![Blade {
+                node: "edge".into(),
+                bone: "hand".into(),
+                length: 1.5,
+                width: 0.1,
+                texture: "blade".into(),
+                trail_color: None,
+            }],
+            clips: vec![SaberClip {
+                name: "swing".into(),
+                root_speed: [0.0; 2],
+                root_frames: vec![Vec3::ZERO; 16],
+                weapon_frames: Vec::new(),
+                frames: vec![vec![segment]; 16],
+            }],
+            state_seconds: vec![0.0, 0.5],
+            throw_edges: Vec::new(),
+            deflect_edges: Vec::new(),
+            weapon_bind: Mat4::IDENTITY,
+            throw_bindings: Vec::new(),
+            damage: 250.0,
+            hit_sound: None,
+            deflect_sound: None,
+            hit_effect: None,
+            deflect_effect: None,
+        })),
+        ..WeaponClass::default()
+    };
+    let saber_idx = sim.add_weapon_class(saber_wc);
+    let jedi = sim
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            weapon_class: saber_idx,
+            ..UnitSpec::trooper(0, Vec3::new(0.0, 0.0, -14.0))
+        })
+        .unwrap();
+    let before_saber = sim.stations[0].health.cur;
+    for _ in 0..90 {
+        sim.step(&[]);
+    }
+    assert!(
+        sim.stations[0].health.cur < before_saber,
+        "saber bot with Destroy goal {goal_id} must swing and damage LibCase ({before_saber} -> {}, pos {:?})",
+        sim.stations[0].health.cur,
+        sim.unit(jedi).unwrap().soldier.pos
+    );
+}
+
+/// `FUN_002e43c8`: an AI enemy whose sight ray reaches the bot gives the bot
+/// a sighting of it, whichever way the bot faces; a human seer, or one that
+/// has not looked since the bot's last think, gives none.
+#[test]
+fn being_seen_by_an_ai_enemy_is_a_sighting_of_it() {
+    for (ai, looked, held) in [
+        (true, true, true),
+        (false, true, false),
+        (true, false, false),
+    ] {
+        let (mut s, a) = watcher(5);
+        let e = s
+            .spawn(&UnitSpec {
+                controller: if ai {
+                    Controller::Ai
+                } else {
+                    Controller::Player { slot: 0 }
+                },
+                ..UnitSpec::trooper(1, Vec3::new(0.0, 0.0, 15.0))
+            })
+            .unwrap();
+        let mut seer = AiState::default();
+        scan(&s, e, &mut seer, normal());
+        assert!(
+            contact_of(&seer, a).is_some_and(|c| c.seen_now),
+            "the seer sees the bot"
+        );
+        s.units[e.index as usize].ai = seer;
+        if !looked {
+            s.tick += THINK_PERIOD;
+        }
+        let mut st = AiState::default();
+        scan(&s, a, &mut st, normal());
+        assert_eq!(
+            contact_of(&st, e).is_some_and(|c| c.seen_now),
+            held,
+            "ai {ai}, looked {looked}"
+        );
+    }
+}

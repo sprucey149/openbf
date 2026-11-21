@@ -13,6 +13,9 @@ pub mod bolt_vis;
 pub mod bot_names;
 pub mod camera_collide;
 pub mod camera_shake;
+mod campaign_bindings;
+pub mod campaign_runtime;
+pub mod campaign_script;
 pub mod capture_feed;
 pub mod cheats;
 pub mod class_picker;
@@ -87,6 +90,7 @@ pub mod vo;
 pub mod walk;
 pub mod water_anim;
 pub mod weather;
+pub mod world_anim;
 pub mod world_fingerprint;
 
 pub mod walker_shots;

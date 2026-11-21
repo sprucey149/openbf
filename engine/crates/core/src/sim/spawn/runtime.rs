@@ -45,6 +45,17 @@ impl Sim {
         }
     }
 
+    fn spawn_ground_hit(&self, node: Vec3) -> Option<f32> {
+        match self
+            .spawn_seats
+            .iter()
+            .find(|(n, _)| n.x == node.x && n.z == node.z)
+        {
+            Some(&(_, y)) => Some(y),
+            None => self.node_floor_hit(node),
+        }
+    }
+
     /// OURS: on an authored command-post node with no walkable exit, a
     /// regular bot uses the nearest standable, connected node of that post.
     /// Preserve the original draw and retain it if no alternate is proven.
@@ -125,13 +136,12 @@ impl Sim {
                 .total_cmp(&b.0.distance_squared(chosen.0))
         });
         alternatives.into_iter().find_map(|(point, yaw)| {
-            let floor = self.spawn_ground(point);
+            let floor = self.spawn_ground_hit(point)?;
             let feet = Vec3::new(point.x, floor, point.z);
             let hub = hub_at(feet)?;
             let goal = graph.hub(hub)?.xz();
             let goal_floor = self.nav_floor(hub)?;
-            (floor > crate::collision::NO_GROUND
-                && self.kill_floor.is_none_or(|minimum| floor >= minimum)
+            (self.kill_floor.is_none_or(|minimum| floor >= minimum)
                 && !self
                     .death_regions
                     .iter()
@@ -197,18 +207,21 @@ impl Sim {
     }
 
     fn node_floor(&self, node: Vec3) -> f32 {
-        let y = self.ground_under(node, false);
-        let lifted = || self.ground_under(node + Vec3::Y * SPAWN_LIFT, false);
-        if y <= crate::collision::NO_GROUND {
-            return lifted();
-        }
+        self.node_floor_hit(node)
+            .unwrap_or(crate::collision::NO_GROUND)
+    }
+
+    fn node_floor_hit(&self, node: Vec3) -> Option<f32> {
+        let lifted = || self.ground_hit_under(node + Vec3::Y * SPAWN_LIFT, false);
+        let y = self.ground_hit_under(node, false).or_else(lifted)?;
         if self.level_at(Vec3::new(node.x, y, node.z)).is_off() {
-            let up = lifted();
-            if up > y && !self.level_at(Vec3::new(node.x, up, node.z)).is_off() {
-                return up;
+            if let Some(up) = lifted() {
+                if up > y && !self.level_at(Vec3::new(node.x, up, node.z)).is_off() {
+                    return Some(up);
+                }
             }
         }
-        y
+        Some(y)
     }
 
     /// Where `team` may spawn: the spawn nodes of the posts it may spawn at,
@@ -229,27 +242,64 @@ impl Sim {
             .chain(self.walker_spawn_nodes(team))
     }
 
-    /// The live command walkers `team` may spawn at, in vehicle order: a
-    /// walker whose class authors spawn points and whose team is `team` — its
-    /// pad's, from the spawn to the kill (re-command-walker-post §3 [O]: no
-    /// ally, no capture). Destroyed, it is gone from here at once, dying
-    /// walker and all; the pad's next walker is here again.
+    /// The live command vehicles `team` may spawn at, in vehicle order: a
+    /// command walker or landed command flyer whose class authors spawn points
+    /// and whose team is `team` — its pad's, from the spawn to the kill
+    /// (re-command-walker-post §3 [O]: no ally, no capture; BF2 CommandFlyer
+    /// FUN_00352cf8 / FUN_00352ee0 / FUN_00352ef0 enables its post iff
+    /// `FlightPhase::Landed`). Destroyed, it is gone from here at once; the
+    /// pad's next vehicle is here again.
     pub fn command_walkers(
         &self,
         team: u8,
     ) -> impl Iterator<Item = (crate::vehicle::VehicleHandle, &crate::vehicle::Vehicle)> {
-        self.alive_vehicles().filter(move |(_, v)| {
-            v.team == Some(team) && v.health.alive() && !self.class_spawn_points(v.class).is_empty()
-        })
+        self.alive_vehicles()
+            .filter(move |(_, v)| v.team == Some(team) && self.vehicle_can_spawn(v))
+    }
+
+    /// True when `v` is currently acting as a live team spawn post (a command
+    /// walker or a landed command flyer with authored spawn points).
+    pub fn is_command_spawn_vehicle(&self, v: &crate::vehicle::Vehicle) -> bool {
+        v.alive && v.team.is_some_and(|t| t < 2) && self.vehicle_can_spawn(v)
+    }
+
+    fn vehicle_can_spawn(&self, v: &crate::vehicle::Vehicle) -> bool {
+        v.health.alive()
+            && !self.class_spawn_points(v.class).is_empty()
+            && (v.kind != crate::vehicle::VehicleKind::Flyer
+                || v.flyer.phase == crate::vehicle::flyer::FlightPhase::Landed)
     }
 
     /// Vehicle class `class`'s spawn points (a command walker's
-    /// `WalkerParams::spawn_points`; empty for anything else).
+    /// `WalkerParams::spawn_points` or a command flyer's
+    /// `FlyerParams::spawn_points`; empty for anything else).
     fn class_spawn_points(&self, class: u32) -> &[(Vec3, f32)] {
+        if let Some(pts) = self
+            .walker_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .map(|p| p.spawn_points.as_slice())
+            .filter(|pts| !pts.is_empty())
+        {
+            return pts;
+        }
+        self.flyer_params
+            .get(class as usize)
+            .and_then(Option::as_ref)
+            .map_or(&[], |p| p.spawn_points.as_slice())
+    }
+
+    fn class_spawn_sphere_centre(&self, class: u32) -> Option<Vec3> {
         self.walker_params
             .get(class as usize)
             .and_then(Option::as_ref)
-            .map_or(&[], |p| &p.spawn_points)
+            .and_then(|p| p.spawn_sphere_centre)
+            .or_else(|| {
+                self.flyer_params
+                    .get(class as usize)
+                    .and_then(Option::as_ref)
+                    .and_then(|p| p.spawn_sphere_centre)
+            })
     }
 
     /// The spawn points of `team`'s live command walkers (card CWSP,
@@ -295,11 +345,16 @@ impl Sim {
             .iter()
             .filter(|p| p.team == Some(team) && p.vehicles.is_empty() && p.wants_spawn())
             .flat_map(|p| {
-                let class = p.def.class_for(p.team).map_or(u32::MAX, |c| c.spec.class);
+                let class_def = p.def.class_for(p.team);
+                let class = class_def.map_or(u32::MAX, |c| c.spec.class);
                 let rot = crate::vehicle::hover::quat_y(-p.def.yaw);
+                let pos = match class_def.and_then(|c| c.landed_height) {
+                    Some(lh) => self.pad_flyer_spawn_pos(p.def.pos, lh),
+                    None => p.def.pos,
+                };
                 self.class_spawn_points(class)
                     .iter()
-                    .map(move |&pt| walker_point(p.def.pos, rot, pt))
+                    .map(move |&pt| walker_point(pos, rot, pt))
             })
             .collect()
     }
@@ -396,11 +451,28 @@ impl Sim {
     /// BF2 Hoth's spawn map skips the one team post without either
     /// (`lead_tmp/spsel/fit_dir.py`). A walker's position is its live one.
     pub fn player_spawn_posts(&self, team: u8) -> Vec<(SpawnPost, Vec3)> {
-        self.spawn_posts(team)
+        let all: Vec<(SpawnPost, Vec3)> = self
+            .spawn_posts(team)
             .into_iter()
             .filter(|&(p, _)| !self.spawn_post_nodes(team, p).is_empty())
             .filter_map(|(p, _)| Some((p, self.spawn_post_pos(p)?)))
-            .collect()
+            .collect();
+        let visible: Vec<(SpawnPost, Vec3)> = all
+            .iter()
+            .copied()
+            .filter(|&(p, _)| match p {
+                SpawnPost::Post(i) => self
+                    .cps
+                    .get(usize::from(i))
+                    .is_some_and(|cp| !cp.killed && cp.visible),
+                SpawnPost::Walker(_) => true,
+            })
+            .collect();
+        if visible.is_empty() {
+            all
+        } else {
+            visible
+        }
     }
 
     /// Where post `post` is: a command post's own position, a command
@@ -513,6 +585,17 @@ impl Sim {
         if team >= 2 {
             return !is_player && self.native_team_index(team).is_some() && self.admit_native(team);
         }
+        if !is_player {
+            let t = usize::from(team);
+            if !self.ai_spawn_allowed[t] {
+                return false;
+            }
+            if !self.classes[t].is_empty()
+                && !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c))
+            {
+                return false;
+            }
+        }
         match self.battle.try_spawn(team as usize, is_player) {
             SpawnOutcome::Refused => false,
             SpawnOutcome::Spawned { despawned_ai } => {
@@ -529,20 +612,35 @@ impl Sim {
     /// alive; a PLAYER taking the last slots sheds AI — core::battle). Feet
     /// snapped to the terrain. Returns None if refused.
     pub fn spawn(&mut self, spec: &UnitSpec) -> Option<UnitHandle> {
-        self.spawn_with_slot_policy(spec, false)
+        self.spawn_with_slot_policy(spec, false, false)
     }
 
     /// Add a roster slot without taking a dead unit's pending respawn slot.
     pub fn spawn_roster_slot(&mut self, spec: &UnitSpec) -> Option<UnitHandle> {
-        self.spawn_with_slot_policy(spec, true)
+        self.spawn_with_slot_policy(spec, true, false)
+    }
+
+    /// [`Sim::spawn_roster_slot`] for a native member a mission script
+    /// places itself (`SpawnCharacter`): no spawn post's capacity gates it.
+    pub(crate) fn spawn_scripted_slot(&mut self, spec: &UnitSpec) -> Option<UnitHandle> {
+        self.spawn_with_slot_policy(spec, true, spec.team >= 2)
     }
 
     fn spawn_with_slot_policy(
         &mut self,
         spec: &UnitSpec,
         preserve_respawns: bool,
+        scripted: bool,
     ) -> Option<UnitHandle> {
-        if !self.admit(spec.team, spec.is_player()) {
+        if spec.controller == Controller::Ai && (spec.team as usize) < 2 {
+            let t = usize::from(spec.team);
+            if !self.classes[t].is_empty()
+                && !self.is_class_enabled(spec.team, usize::from(spec.class))
+            {
+                return None;
+            }
+        }
+        if !scripted && !self.admit(spec.team, spec.is_player()) {
             return None;
         }
         // A dead unit a player slot still holds is that player's (its next
@@ -763,7 +861,7 @@ impl Sim {
         let floor = CLASS_FLOOR * cap / ordinary.max(1) as f32;
         (0..table.len())
             .map(|c| {
-                if c >= len || Some(c) == hero {
+                if c >= len || Some(c) == hero || !self.is_class_enabled(team, c) {
                     return 0.0;
                 }
                 let alive = self
@@ -813,6 +911,54 @@ impl Sim {
         self.spawn_ai_with_slot_policy(team, pos, yaw, true)
     }
 
+    /// Spawn one AI member for `team` at a post drawn by `AISpawnWeight`
+    /// (`SWBFRNT2.ELF` `FUN_002e7240`, lines 260573–260620), spreading opening
+    /// slots across that post's spawn nodes via `slot_index`.
+    pub fn spawn_ai_at_drawn_post(&mut self, team: u8, slot_index: usize) -> Option<UnitHandle> {
+        let post = self.draw_spawn_post(team)?;
+        let nodes = self.spawn_post_nodes(team, post);
+        let (pos, yaw) = if !nodes.is_empty() {
+            nodes[slot_index % nodes.len()]
+        } else {
+            (self.spawn_post_pos(post)?, 0.0)
+        };
+        self.spawn_ai(team, pos, yaw)
+    }
+
+    /// Enqueue one unspawned AI member for `team` onto its `SpawnWaves` queue
+    /// (`SWBFRNT2.ELF` `FUN_0036c750`, lines 353853–353875) so `step` draws its
+    /// post via `AISpawnWeight` (`FUN_002e7240`) and releases it on the team's
+    /// wave schedule rather than materializing the entire army on one tick.
+    pub fn queue_ai_for_wave(&mut self, team: u8) -> Option<UnitHandle> {
+        let t = usize::from(team);
+        if t >= 2 || self.classes.get(t).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        if !self.ai_spawn_allowed[t]
+            || !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c))
+        {
+            return None;
+        }
+        let c = self.ai_class(team);
+        let spec = self.classes[t][usize::from(c)].spec(
+            team,
+            Vec3::ZERO,
+            0.0,
+            Controller::Ai,
+            c,
+            self.bot_skill(team),
+        );
+        let h = self.spawn_roster_slot(&spec)?;
+        let i = h.index as usize;
+        self.units[i].alive = false;
+        self.units[i].respawn_at = Some(self.tick);
+        self.units[i].spawn_slot = Some(self.waves[t].assign());
+        self.units[i].spawn_post = None;
+        let bt = &mut self.battle.teams[t];
+        bt.alive_ai = bt.alive_ai.saturating_sub(1);
+        Some(h)
+    }
+
     fn spawn_ai_with_slot_policy(
         &mut self,
         team: u8,
@@ -822,6 +968,12 @@ impl Sim {
     ) -> Option<UnitHandle> {
         let t = usize::from(team);
         if self.classes.get(t).is_none_or(Vec::is_empty) {
+            return None;
+        }
+        if t < 2
+            && (!self.ai_spawn_allowed[t]
+                || !(0..self.classes[t].len()).any(|c| self.is_class_enabled(team, c)))
+        {
             return None;
         }
         let c = if self.hero_assault() {
@@ -837,7 +989,7 @@ impl Sim {
             c,
             self.bot_skill(team),
         );
-        let h = self.spawn_with_slot_policy(&spec, preserve_respawns)?;
+        let h = self.spawn_with_slot_policy(&spec, preserve_respawns, false)?;
         self.ai_spawned[t] += 1;
         Some(h)
     }
@@ -947,11 +1099,7 @@ impl Sim {
 
     fn walker_respawn_point(&self, owner: VehicleHandle, node: Vec3) -> Option<Vec3> {
         let v = self.vehicle(owner)?;
-        let centre = self
-            .walker_params
-            .get(v.class as usize)?
-            .as_ref()?
-            .spawn_sphere_centre?;
+        let centre = self.class_spawn_sphere_centre(v.class)?;
         if !centre.is_finite() {
             return None;
         }
@@ -1302,6 +1450,29 @@ impl Sim {
 
     /// Class membership, shared by the carousel, UI and unforced respawn.
     /// Ordinary unlock costs remain the separate confirmation refusal.
+    pub fn is_class_enabled(&self, team: u8, class: usize) -> bool {
+        let t = usize::from(team.min(1));
+        if class >= self.classes[t].len() {
+            return false;
+        }
+        self.class_enabled[t].get(class).copied().unwrap_or(true)
+    }
+
+    pub fn set_class_enabled(&mut self, team: u8, class: usize, enabled: bool) {
+        let t = usize::from(team.min(1));
+        if class >= self.classes[t].len() {
+            return;
+        }
+        if self.class_enabled[t].len() < self.classes[t].len() {
+            self.class_enabled[t].resize(self.classes[t].len(), true);
+        }
+        self.class_enabled[t][class] = enabled;
+    }
+
+    pub fn set_ai_spawn_allowed(&mut self, team: u8, allow: bool) {
+        self.ai_spawn_allowed[usize::from(team.min(1))] = allow;
+    }
+
     pub fn spawn_class_available(&self, s: usize, team: u8, class: usize) -> bool {
         if let Some((len, hero)) = self.test_rosters[usize::from(team.min(1))] {
             if class >= len
@@ -1311,7 +1482,9 @@ impl Sim {
                 return false;
             }
         }
-        if class >= self.classes[usize::from(team.min(1))].len() {
+        if class >= self.classes[usize::from(team.min(1))].len()
+            || !self.is_class_enabled(team, class)
+        {
             return false;
         }
         if self.hero_class(team).map(usize::from) != Some(class) {

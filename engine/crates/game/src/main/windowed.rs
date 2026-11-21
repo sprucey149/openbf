@@ -579,6 +579,8 @@ struct App {
     /// order), the row in play and the session options it launched with.
     playlist: std::collections::VecDeque<ui::shell::Launch>,
     current: Option<ui::shell::Launch>,
+    /// Active mission index in `ui::campaign::RISE_OF_THE_EMPIRE`.
+    active_campaign: Option<usize>,
     session: ui::shell::SessionOptions,
     /// The round ended and its end screens were left (the next playlist
     /// row loads); a pause-menu Quit leaves it false and ends the list.
@@ -593,6 +595,9 @@ struct App {
     /// The playing take of the battle's music (card AMBM); dropping it
     /// stops it.
     music_voice: Option<audio::MusicVoice>,
+    /// The round's end movie's sound track, keyed by clip
+    /// (`game::round_end::step_one_shot_movie`).
+    end_movie_voice: Option<(String, audio::Shot)>,
     /// The battle's soldier foley (card FOLY), when the map has a table.
     foley: Option<game::foley::Foley>,
     /// The battle's vehicle engines (card VSND).
@@ -668,6 +673,7 @@ struct App {
     prev_menu_buttons: u32,
     /// The in-battle scoreboard's hold (Select / View, Tab; LAN §5b).
     score_hold: ui::scoreboard::Hold,
+    campaign_map: Option<usize>,
     /// The other players' names over their heads (LAN §5b).
     name_tags: game::name_tags::NameTags,
     /// The window's inner size, display scale and frame size last logged
@@ -919,6 +925,7 @@ impl App {
             screen: Screen::Shell,
             playlist: std::collections::VecDeque::new(),
             current: None,
+            active_campaign: None,
             session: ui::shell::SessionOptions::default(),
             round_over: false,
             loading: None,
@@ -927,6 +934,7 @@ impl App {
             audio,
             sounds: None,
             music_voice: None,
+            end_movie_voice: None,
             foley: None,
             engines: Default::default(),
             ambience: Default::default(),
@@ -973,6 +981,7 @@ impl App {
             snapshot_notice: None,
             prev_menu_buttons: 0,
             score_hold: Default::default(),
+            campaign_map: None,
             name_tags: Default::default(),
             window_note: None,
             gameplay_stick: GameplayStick::default(),
@@ -1212,9 +1221,27 @@ impl App {
 
     /// LAUNCH: the playlist in order, the first row now (§1.4, §7).
     fn start_playlist(&mut self, rows: Vec<ui::shell::Launch>, session: ui::shell::SessionOptions) {
+        self.active_campaign = None;
         self.session = session;
         self.playlist = rows.into();
         self.next_round();
+    }
+
+    /// Launch Rise of the Empire campaign mission `index` after its opening movies.
+    pub(super) fn start_campaign(&mut self, index: usize) {
+        if self.netplay.is_some() {
+            return;
+        }
+        let Some(entry) = ui::campaign::RISE_OF_THE_EMPIRE.get(index) else {
+            return;
+        };
+        self.playlist.clear();
+        self.current = None;
+        self.active_campaign = Some(index);
+        if !self.begin_loading_key(entry.map, "campaign".to_owned(), None) {
+            self.active_campaign = None;
+            self.init_shell();
+        }
     }
 
     /// The playlist's next row to the loading screen; `false` when none is
@@ -1260,6 +1287,9 @@ impl App {
                 .netplay
                 .as_ref()
                 .and_then(|n| Some((n.loading.clone()?, n.peer.local_slot))),
+            campaign_index: (mode == "campaign")
+                .then_some(self.active_campaign)
+                .flatten(),
         }
     }
 
@@ -1271,9 +1301,13 @@ impl App {
         mode: String,
         row: Option<ui::shell::Launch>,
     ) -> bool {
-        // The shell music stops with the shell.
+        if self.netplay.is_some() && mode.eq_ignore_ascii_case("campaign") {
+            return false;
+        }
+        // The shell music and planet backdrop stop with the shell.
         if let Some(f) = self.front.as_mut() {
             f.stop_music();
+            f.clear_gal();
         }
         let maps = game::assets::discover_maps(&self.assets_dir);
         let Some((name, _, dir)) = maps.into_iter().find(|(k, ..)| *k == key) else {
@@ -1803,6 +1837,20 @@ impl App {
             || ["all".to_owned(), "imp".to_owned()],
             |r| r.armies.clone(),
         );
+        if net_round.is_none() && self.netplay.is_none() && self.mode == "campaign" {
+            if let Some(entry) = self
+                .active_campaign
+                .and_then(|i| ui::campaign::RISE_OF_THE_EMPIRE.get(i))
+            {
+                return super::round_setup::campaign_setup(
+                    &self.missions_dir,
+                    &self.assets_dir,
+                    entry,
+                    42u32.wrapping_add(self.profile.career.rounds),
+                    self.profile.settings.difficulty,
+                );
+            }
+        }
         match net_round {
             Some(round) => {
                 super::round_setup::battle_setup(round, &self.missions_dir, &self.assets_dir)
@@ -1830,6 +1878,10 @@ impl App {
         self.gpu = Some(gpu);
         self.setup = setup;
         self.paused = false;
+        self.pause_menu.reset();
+        self.round_over = false;
+        self.quit_clicked = false;
+        self.restart_clicked = false;
         if let Some(r) = self.renderer.as_mut() {
             r.atmosphere_time = Some(0.0);
         }
@@ -1877,13 +1929,44 @@ impl App {
     }
 
     fn game_audio_paused(&self) -> bool {
-        self.frozen()
+        // Tutorial narration continues while an objective popup is shown.
+        // From the round's end movie on the battle is silent (`RoundEnd::silenced`).
+        let ended = self
+            .walk
+            .as_ref()
+            .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.silenced()));
+        self.in_battle()
+            && (self.paused && self.netplay.is_none() || ended || self.battle_movie_pending())
     }
 
     /// The battle's clock is stopped: paused in single player. A LAN round
     /// never stops (issue #168): its pause menu overlays a running battle.
     fn frozen(&self) -> bool {
-        self.in_battle() && self.paused && self.netplay.is_none()
+        self.in_battle()
+            && self.netplay.is_none()
+            && (self.paused
+                || self.campaign_map.is_some()
+                || self.battle_movie_pending()
+                || self.round_end_held()
+                || self
+                    .walk
+                    .as_ref()
+                    .is_some_and(|(w, _)| w.campaign.as_ref().is_some_and(|c| c.popup().is_some())))
+    }
+
+    /// A decided single-player round holds the world still from the banner
+    /// on: BF2's frame driver `FUN_00425840` takes its pause branch (the one
+    /// `DAT_00600b44` takes) once the game-over flag `DAT_00600b3c` is up and
+    /// the game is not networked, skipping the world step and leaving only
+    /// the banner, the stats screens and the audio running (B2 470204-470214;
+    /// the flag is raised after the step that decided the round, 470297-470300).
+    /// A LAN round steps on, as the PS2's networked branch does.
+    fn round_end_held(&self) -> bool {
+        self.netplay.is_none()
+            && self
+                .walk
+                .as_ref()
+                .is_some_and(|(w, _)| w.sim.outcome.is_some())
     }
 
     /// Pause or resume the game's mixer bus to match [`App::game_audio_paused`].
@@ -1900,6 +1983,11 @@ impl App {
     /// rest of the playlist after it and the session's cheats kept. The left
     /// round is recorded as a Quit's is.
     fn restart_round(&mut self) {
+        if let Some(idx) = self.active_campaign.take() {
+            self.leave_battle();
+            self.start_campaign(idx);
+            return;
+        }
         let Some(row) = self.current.clone() else {
             return;
         };
@@ -1911,9 +1999,102 @@ impl App {
         }
     }
 
+    /// Back on the shell after campaign mission `idx`. Training (`idx` 0)
+    /// never touches the saves. After a story battle that ended in a result
+    /// (`finished`) the planet screen asks to save first: `ifs_campaign_main`
+    /// ApplyBattleResult sets `requestSave` for a win and a loss alike
+    /// (main.f8 pc 36-37; a result is the winning team, 1 or 2:
+    /// `ifs_freeform_main` soak mode draws `math.random(2)`), and
+    /// `ifs_campaign_battle` Enter shows it (main.f0 pc 97-99). The last
+    /// turn's win ends the campaign instead (`ifs_campaign_main` NextTurn
+    /// main.f10 pc 15-17 pushes `ifs_campaign_end`).
+    fn finish_campaign_round(&mut self, idx: usize, won: bool, finished: bool, outro_played: bool) {
+        self.profile.campaign.training_prompted = true;
+        if won {
+            self.profile.campaign.record_victory(idx);
+        }
+        if let Err(e) = self.profile.save() {
+            eprintln!("campaign profile save failed: {e:#}");
+        }
+        let assets_dir = self.assets_dir.clone();
+        let unlocked = self.profile.campaign.unlocked;
+        let front = self
+            .front
+            .get_or_insert_with(|| front::FrontShell::new(&assets_dir));
+        front.menus.set_training_prompted(true);
+        front.menus.set_campaign_unlocked(unlocked);
+        if idx == 0 {
+            if won {
+                front.stop_music();
+                if !outro_played {
+                    front
+                        .cutscenes
+                        .push_back(ui::campaign::RISE_OF_THE_EMPIRE[0].outro_movie.to_owned());
+                }
+                front.menus.open_page(ui::shell_ps2::Page::RiseNewLoad);
+            } else {
+                front.menus.open_page(ui::shell_ps2::Page::Singleplayer);
+            }
+            return;
+        }
+        let last_idx = ui::campaign::RISE_OF_THE_EMPIRE.len() - 1;
+        let next = if won { (idx + 1).min(last_idx) } else { idx };
+        front.menus.select_campaign_mission(next);
+        if won {
+            front.stop_music();
+            if !outro_played {
+                front
+                    .cutscenes
+                    .push_back(ui::campaign::RISE_OF_THE_EMPIRE[idx].outro_movie.to_owned());
+            }
+            if idx < last_idx {
+                if let Some(crawl) = ui::campaign::RISE_OF_THE_EMPIRE[next].crawl_movie {
+                    front.cutscenes.push_back(crawl.to_owned());
+                }
+                front.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
+            } else {
+                front.queue_credits(&assets_dir);
+                // The page owns skip / exit navigation; the game draws the
+                // crawl it invokes (`front::credits::Crawl`).
+                front.menus.open_page(ui::shell_ps2::Page::Credits);
+                return;
+            }
+        } else {
+            front.menus.open_page(ui::shell_ps2::Page::CampaignBattle);
+        }
+        if finished {
+            front.menus.open_campaign_saves(
+                ui::shell_ps2::campaign_saves::SaveMode::Save,
+                ui::shell_ps2::campaign_saves::SaveReturn::Battle,
+                true,
+            );
+        }
+    }
+
     /// Battle → shell (records the round). A LAN session ends with it
     /// (issue #168).
     fn leave_battle(&mut self) {
+        self.campaign_map = None;
+        let finished_campaign = self.active_campaign.take();
+        let finished_round = finished_campaign.is_some() && self.round_over;
+        let won_campaign = finished_round
+            && self
+                .walk
+                .as_ref()
+                .is_some_and(|(w, _)| w.sim.outcome == Some(0));
+        // The battle played the mission's end movie before its stats.
+        let outro_played = self
+            .walk
+            .as_ref()
+            .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.movie_played()));
+        self.end_movie_voice = None;
+        if let Some(front) = self.front.as_mut() {
+            front.cutscenes.clear();
+            front.movie_audio = None;
+            if let Some(m) = front.movie.as_mut() {
+                m.stop();
+            }
+        }
         if let Some(n) = self.netplay.take() {
             n.shutdown();
         }
@@ -1935,20 +2116,34 @@ impl App {
             r.clear_scene();
         }
         self.hud_view = None;
-        // Left from the pause menu: drop the held battle sounds rather than
-        // resume them over the shell. (Space never pauses the bus.)
-        if let Some(a) = self.audio.as_mut().filter(|a| a.game_paused()) {
+        // Drop every held or playing battle sound so nothing leaks over the shell.
+        if let Some(a) = self.audio.as_mut() {
             a.clear_game_bus();
         }
         self.paused = false;
+        self.pause_menu.reset();
         self.kbm.release_keys();
+        self.clear_loading_input();
+        self.loading_edges.quarantine();
+        self.loading_pad_blocked = self.any_pad_button_down();
         self.resume_gate = core::sim::HeldEat::default();
         self.release_mouse();
         if let Some(sl) = self.sounds.as_mut() {
             sl.stop_loops();
         }
+        self.sounds = None;
+        self.foley = None;
+        self.engines = Default::default();
+        self.ambience = Default::default();
+        self.weather = None;
+        if let Some(f) = self.front.as_mut() {
+            f.clear_gal();
+        }
         self.sync_pause_audio();
         self.init_shell();
+        if let Some(idx) = finished_campaign {
+            self.finish_campaign_round(idx, won_campaign, finished_round, outro_played);
+        }
     }
 
     /// The control prompts' icons this frame.
@@ -1962,9 +2157,14 @@ impl App {
     fn current_icons(&mut self) -> ui::input_icons::Icons {
         self.icon_device.sync(self.gilrs.as_ref(), &self.active_pad);
         let settings = &self.profile.settings;
-        game::input_icons::icons(
-            self.icon_device.set(settings.input_icons),
-            &settings.controller_bindings,
+        game::input_icons::with_keyboard(
+            game::input_icons::icons(
+                self.icon_device.set(settings.input_icons),
+                self.context_gamepad
+                    .as_ref()
+                    .unwrap_or(&settings.controller_bindings),
+            ),
+            &self.kbm.bindings,
         )
     }
 
@@ -2001,6 +2201,7 @@ impl App {
                     (Button::South, 16),
                     (Button::East, 32),
                     (Button::Start, 64),
+                    (Button::Select, game::kbm::MENU_MAP),
                     (Button::LeftTrigger, game::kbm::MENU_L1),
                     (Button::RightTrigger, game::kbm::MENU_R1),
                     (Button::West, game::kbm::MENU_SQUARE),
@@ -2021,6 +2222,13 @@ impl App {
                     .as_ref()
                     .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.stats.is_some()));
                 if pad.is_pressed(Button::North) {
+                    if self.campaign_map.is_some()
+                        && self.walk.as_ref().is_some_and(|(w, _)| {
+                            w.campaign.as_ref().is_some_and(|c| c.popup().is_none())
+                        })
+                    {
+                        now |= game::kbm::MENU_DETAILS;
+                    }
                     // Held North is remembered everywhere; it backs out of
                     // the ground pause menu only on its own fresh press
                     // (`kbm::menu_edges`).

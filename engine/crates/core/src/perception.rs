@@ -90,27 +90,36 @@ pub enum Foe {
     /// `FUN_002e3aa0` asks `FUN_002a7c30` alive, finite health, hostile, then
     /// the weapon choice; `analysis/re-portable-turret.md` 10).
     Turret(u64),
+    /// A destructible station targeted by a script `Destroy` AI goal.
+    Station(u16),
 }
 
 impl Foe {
     pub fn unit(self) -> Option<UnitHandle> {
         match self {
             Foe::Unit(h) => Some(h),
-            Foe::Droid(_) | Foe::Turret(_) => None,
+            Foe::Droid(_) | Foe::Turret(_) | Foe::Station(_) => None,
         }
     }
 
     pub fn turret(self) -> Option<u64> {
         match self {
             Foe::Turret(id) => Some(id),
-            Foe::Unit(_) | Foe::Droid(_) => None,
+            Foe::Unit(_) | Foe::Droid(_) | Foe::Station(_) => None,
         }
     }
 
     pub fn droid(self) -> Option<u64> {
         match self {
             Foe::Droid(id) => Some(id),
-            Foe::Unit(_) | Foe::Turret(_) => None,
+            Foe::Unit(_) | Foe::Turret(_) | Foe::Station(_) => None,
+        }
+    }
+
+    pub fn station(self) -> Option<u16> {
+        match self {
+            Foe::Station(id) => Some(id),
+            Foe::Unit(_) | Foe::Droid(_) | Foe::Turret(_) => None,
         }
     }
 
@@ -170,6 +179,10 @@ impl Contact {
             }
             Foe::Droid(id) => {
                 eat(b"DROID");
+                eat(&id.to_le_bytes());
+            }
+            Foe::Station(id) => {
+                eat(b"S");
                 eat(&id.to_le_bytes());
             }
         }
@@ -601,6 +614,26 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             cand.push((d2, (2, t.id), Foe::Turret(t.id), at));
         }
     }
+    if let Some(crate::goals::Steer::Destroy(crate::goals::GoalTarget::Station(target_si))) =
+        sim.ai_goals.steer(me)
+    {
+        if let Some(s) = sim.stations.get(usize::from(target_si)).filter(|s| {
+            !s.destroyed
+                && s.health.max > 0.0
+                && s.team.is_none_or(|t| sim.hostile(u.team, t))
+                && (s.ai_damage_threshold <= 0.0
+                    || s.health.cur > s.ai_damage_threshold * s.health.max)
+        }) {
+            let reach = scan_radius(sim, u).fmax(view_distance(Stance::Stand, tier.view_mult));
+            let station_reach = turret_view_distance(tier.view_mult).fmin(reach) + s.sphere_radius;
+            let at = s.sphere_centre;
+            let off = at - eye;
+            let d2 = off.dot(off);
+            if in_cone(view, off, d2, sim.omni_radius) && d2 < station_reach * station_reach {
+                cand.push((d2, (3, u64::from(target_si)), Foe::Station(target_si), at));
+            }
+        }
+    }
     cand.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     // The unit's own target is always ray-tested first, so a firefight never
     // loses its target to five closer bodies it has not shot at yet.
@@ -616,7 +649,17 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             break;
         }
         let past = h.unit().unwrap_or(me);
-        let (hulls, buildings) = (past_mounts(sim, me, past), past_buildings(sim, me, past));
+        let mut buildings = past_buildings(sim, me, past);
+        if let Foe::Station(si) = h {
+            if let Some(inst) = sim.stations.get(usize::from(si)).and_then(|s| s.instance) {
+                if buildings[1].is_none() {
+                    buildings[1] = Some(inst);
+                } else if buildings[0].is_none() {
+                    buildings[0] = Some(inst);
+                }
+            }
+        }
+        let hulls = past_mounts(sim, me, past);
         let at = match h.unit().and_then(|o| sim.unit(o)) {
             Some(o) => sight_point(sim, eye, o, hulls, buildings),
             None => los_seat(sim, eye, p, hulls, buildings).then_some(p),
@@ -626,6 +669,8 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             seen += 1;
         }
     }
+
+    seen_by(sim, me, st);
 
     // 3. Listen (no cone, no LOS): a shot fired inside HEAR_RADIUS since the
     //    last think, and — at any range — whoever hit me. A shooter that hit
@@ -676,6 +721,42 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     (held, heard)
 }
 
+/// `FUN_002e43c8` (`SWBFRNT2.ELF-decomp.c` 258331-258422): a seer whose sight
+/// ray reaches a unit sends message 5 about the unit to itself and, when the
+/// unit is AI-driven (`FUN_002b6b70`), message 5 about the seer to the unit,
+/// which takes the seer into its threats (`FUN_002b9cb0`, +0x2e0): being
+/// seen by an AI enemy starts a fight at once (`analysis/re-soldier-ai.md`
+/// 4.1), whichever way the seen bot faces. Here `me` takes every hostile AI
+/// unit that saw it since its last think as seen, where that unit stood. A
+/// proxy stands in for a human (card DPRX), so it neither sends nor takes it.
+///
+/// PROVISIONAL (ours): the message reaches the seen bot at once and its fight
+/// order passes the attack matrix (`FUN_002b7e58`, 4.4); the port reads it at
+/// the seen bot's next think, and its target is [`choose_target`]'s.
+/// replace: the matrix's test on the message.
+fn seen_by(sim: &Sim, me: UnitHandle, st: &mut AiState) {
+    let Some(u) = sim.unit(me).filter(|u| !u.is_human()) else {
+        return;
+    };
+    let tick = sim.tick;
+    let target = Foe::Unit(me);
+    for (i, o) in sim.units.iter().enumerate() {
+        if !o.alive
+            || o.controller != crate::unit::Controller::Ai
+            || o.is_human()
+            || !sim.hostile(u.team, o.team)
+        {
+            continue;
+        }
+        let saw = o.ai.contacts.iter().flatten().any(|c| {
+            c.handle == target && c.seen_now && tick.saturating_sub(c.last_seen) < THINK_PERIOD
+        });
+        if saw {
+            see(st, Foe::Unit(sim.handle(i)), tick, o.capsule().center());
+        }
+    }
+}
+
 /// [`view_distance`] for a remote droid, by the same `(20·bound_radius + 30)
 /// × mult × vis` (B2 `FUN_002e3910`). PROVISIONAL as the soldier's is: the
 /// PS2's bound radius is the droid model's, ours the droid's collision sphere
@@ -704,12 +785,18 @@ pub(crate) fn scan_radius(sim: &Sim, u: &crate::unit::Unit) -> f32 {
     held.fold(range(u.weapon_class), crate::fmath::max) + 5.0 * u.consts.max_speed
 }
 
-/// Whether `h` is still there to be remembered: a live unit, droid or turret.
+/// Whether `h` is still there to be remembered: a live unit, droid, turret, or station.
 pub fn alive(sim: &Sim, h: Foe) -> bool {
     match h {
         Foe::Unit(h) => sim.unit(h).is_some(),
         Foe::Droid(id) => sim.live_droid(id).is_some(),
         Foe::Turret(id) => sim.live_turret(id).is_some(),
+        Foe::Station(id) => sim.stations.get(usize::from(id)).is_some_and(|s| {
+            !s.destroyed
+                && s.health.max > 0.0
+                && (s.ai_damage_threshold <= 0.0
+                    || s.health.cur > s.ai_damage_threshold * s.health.max)
+        }),
     }
 }
 
@@ -720,6 +807,11 @@ pub fn foe_motion(sim: &Sim, h: Foe) -> Option<(Vec3, Vec3)> {
         Foe::Unit(h) => sim.unit(h).map(|o| (o.capsule().center(), o.soldier.vel)),
         Foe::Droid(id) => sim.live_droid(id).map(|d| (d.pos, d.vel)),
         Foe::Turret(id) => sim.live_turret(id).map(|t| (t.centre(), t.vel)),
+        Foe::Station(id) => sim
+            .stations
+            .get(usize::from(id))
+            .filter(|s| !s.destroyed)
+            .map(|s| (s.sphere_centre, Vec3::ZERO)),
     }
 }
 
@@ -982,8 +1074,8 @@ pub fn choose_target_with(
         } else {
             (d, 0.0)
         };
-        let base = (200.0 - 100.0 * d / scale) * if human { tier.pressure } else { 1.0 }
-            - 0.01 * far;
+        let base =
+            (200.0 - 100.0 * d / scale) * if human { tier.pressure } else { 1.0 } - 0.01 * far;
         if c.seen_now {
             base + bonus
         } else {

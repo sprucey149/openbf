@@ -177,7 +177,7 @@ pub fn icon(
 /// with its units inside per team.
 pub fn post_of(sim: &Sim, unit: usize) -> Option<(usize, [u32; 8])> {
     (0..sim.cps.len())
-        .find(|&ci| sim.counts_in_cp(unit, ci))
+        .find(|&ci| sim.cps[ci].capturable && sim.counts_in_cp(unit, ci))
         .map(|ci| (ci, sim.cp_inside(ci)))
 }
 

@@ -12,7 +12,7 @@ pub(super) fn bindings(
     asset: &assets::SkinnedAsset,
     sets: &manifest::anim_sets::SoldierSets,
     family: &str,
-    bank: &str,
+    banks: &[&str],
 ) -> Result<Vec<SaberThrowBinding>> {
     let weapons: BTreeSet<_> = db
         .weapon_slots(soldier)
@@ -34,8 +34,8 @@ pub(super) fn bindings(
         .filter_map(|f| f.text(0))
         .next_back()
         .ok_or_else(|| anyhow!("{soldier}: throw class has no ThrowAnimation"))?;
-    let upper = clip_for(&asset.clips, family, bank, animation, "upper");
-    let lower = clip_for(&asset.clips, family, bank, animation, "lower");
+    let upper = clip_for_banks(&asset.clips, family, banks, animation, "upper");
+    let lower = clip_for_banks(&asset.clips, family, banks, animation, "lower");
     let base = lower
         .or(upper)
         .ok_or_else(|| anyhow!("{soldier}: ThrowAnimation {animation} not baked"))?;

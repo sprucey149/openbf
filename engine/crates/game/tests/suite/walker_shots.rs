@@ -1037,7 +1037,11 @@ mod soldier_chaingun {
         }
         let (spin_v, fire_v) = mine(&w);
         let s = &w.sim.unit(me).unwrap().weapon;
-        assert!(s.spin_down, "{:?} spin {} cmd {}", s.state, s.spin, s.fire_cmd);
+        assert!(
+            s.spin_down,
+            "{:?} spin {} cmd {}",
+            s.state, s.spin, s.fire_cmd
+        );
         assert!(matches!(spin_v, Some(Ramp::Hold)), "{spin_v:?}");
         assert!(matches!(fire_v, Some(Ramp::Fall(_))), "{fire_v:?}");
 

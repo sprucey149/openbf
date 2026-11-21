@@ -236,6 +236,7 @@ fn capture_every_set() {
                 round_end: Some(ui::hud::RoundEndModel {
                     result: 0,
                     stats: Some(stats()),
+                    fade: 1.0,
                 }),
                 ..Default::default()
             };

@@ -741,6 +741,30 @@ survey's centre column (the same stands' rockets turned to the hull centre, as B
 BF2's centre lock met a weak prim by chance: always on the one-man AT-ST (its hip prim covers its centre), 13 of
 15 on the hailfire, almost never elsewhere.
 
+### 5.2 A bot's seat launcher dwells too (2026-11-18) [O]
+
+Maintainer playtest: in space rounds "you're constantly getting hit by homing missiles". The port's seat gun path
+gave a bot's missile the bot's target at every shot, as the cannon-class wrist rockets do. A launcher does not do this
+for a bot either:
+
+- `FUN_0033a658` (B2:319411) takes a human owner's fresh pick, else the weapon's W+0x10c / +0x110 / +0x114. The AI
+  writes those on the controllable's current weapon only (`FUN_002bbb98`, B2:230228, after its team and AITarget kind
+  masks, part −1). A bot pilot's flyer is that controllable, so its secondary launcher dwells on what the AI handed it.
+- The clock is the same as a human's: `FUN_0033a950` adds dt up to LockTime and sets the ready byte W+0x17c, and a
+  changed candidate zeroes it (B2:319583-319650). The packet carries the target only while that byte is set (§5,
+  vt+0x34 = `FUN_0033af18`).
+- Leaving the fire state clears the byte (`FUN_0033a620`), and entering the dwell state again zeroes the clock
+  (`FUN_0033a840`), both under class +0x305 and +0x304. So every shot spends the lock. A bot that fires before its
+  dwell is full sends an unguided missile.
+
+Every homing space secondary has `LockTime > 0` (§4.8; the Y-wing and X-wing launchers hold 3.0 live, §4.6), so a bot
+pilot now homes at most once per dwell. Port: `Sim::drive_seat_gun` keeps the bot's candidate (its armed threat
+vehicle, else its combat target) in the seat weapon's `lock_target` / `lock_held`, counts only on the bot's current
+channel, keeps the lock through a salvo, and zeroes the clock when the salvo ends. Check:
+`a_bot_pilots_missile_homes_only_after_the_dwell_and_spends_it`. Cannon-class seat rockets (`LockTime` 0) still pass
+the bot's target at every shot. `trace:` whether a non-current weapon's state machine ticks; the port counts no dwell
+on it. `measure:` the share of homing bot missiles in a played PS2 space round.
+
 ## 6. The shell and the mortar launcher [V][O] (H3 §3-4)
 
 **Port checkpoint, November 11.** The original BF1 shell constructor sets a

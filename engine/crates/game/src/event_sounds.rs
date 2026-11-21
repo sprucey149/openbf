@@ -1084,6 +1084,9 @@ impl SoundLog {
                 a.unit
             );
         }
+        for name in v.gate_script_sounds(lib) {
+            let _ = writeln!(self.csv, "{tick},script,{name},-1,0.0");
+        }
         let started = v.frame(&walk.sim, walk.player, core::TICK_DT, |l| lib.line_secs(l));
         if let Some(l) = started {
             let d = l.at.map_or(0.0, |p| (p - ears).length());

@@ -405,3 +405,65 @@ fn a_layer_without_nav_leaves_the_base_alone() {
     assert_eq!(nav.plan.expect("plan").routes, "nav/routes_base.bin");
     assert_eq!((nav.hints.len(), nav.barriers.len()), (1, 1));
 }
+
+#[test]
+fn resolve_campaign_layer_handles_aliases_and_hoth() {
+    let make_manifest = |layers_ron: &str| -> Manifest {
+        ron::from_str(&format!(
+            r#"(map: "m", source_game: "bf2", terrain_name: None, sky_name: None,
+                terrain_glb: None, models: [], textures: [], classes: [], geometries: [],
+                regions: [], instances: [], layers: [{layers_ron}])"#
+        ))
+        .unwrap()
+    };
+    let hoth = make_manifest(
+        r#"(name: "hoth_objective", worlds: ["hoth_objective", "hoth_hunt"], regions: [], instances: []),
+           (name: "hoth_objective", worlds: ["hoth_objective", "hoth_cps"], regions: [], instances: [])"#,
+    );
+    assert_eq!(
+        resolve_campaign_layer_index(&hoth, "hoth_objective"),
+        Some(1)
+    );
+    let myg = make_manifest(
+        r#"(name: "myg1_shields", worlds: ["myg1_shields", "myg1_cp-assault"], regions: [], instances: [])"#,
+    );
+    assert_eq!(resolve_campaign_layer_index(&myg, "myg1_assult"), Some(0));
+}
+
+#[test]
+fn every_campaign_mission_resolves_its_layers_when_baked() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+    let camp_dir = root.join("missions").join("campaign");
+    let baked = root.join("assets_baked");
+    let Ok(entries) = std::fs::read_dir(&camp_dir) else {
+        return;
+    };
+    let mut checked = 0usize;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("ron") {
+            continue;
+        }
+        let stem = p.file_stem().unwrap().to_str().unwrap();
+        let script = stem.strip_prefix("bf2_").unwrap_or(stem);
+        let def =
+            crate::mission::MissionDef::load_campaign(&root.join("missions"), script).unwrap();
+        let map_dir = baked.join(&def.map);
+        if !map_dir.join("manifest.ron").exists() {
+            continue;
+        }
+        let m_text = std::fs::read_to_string(map_dir.join("manifest.ron")).unwrap();
+        let manifest: Manifest = ron::from_str(&m_text).unwrap();
+        for req in &def.layers {
+            assert!(
+                resolve_campaign_layer_index(&manifest, req).is_some(),
+                "{stem} ({}) failed to resolve campaign layer {req:?}",
+                def.map
+            );
+        }
+        checked += 1;
+    }
+    if baked.join("bf2_geo1/manifest.ron").exists() {
+        assert_eq!(checked, 18);
+    }
+}

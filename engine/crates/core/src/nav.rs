@@ -88,6 +88,9 @@ impl Mover {
 /// barrier and the search finds nothing. Ours keeps the same 0.5 m gap
 /// relative to whatever margin the caller passes. PROVISIONAL.
 pub const CORNER_CLEARANCE: f32 = 0.5;
+/// `FUN_002edbb8`: how far (m, 0.1) [`NavGraph::clear_goal`] pushes a goal
+/// off the grown side of the barrier it was in.
+pub const GOAL_OUT: f32 = 0.1;
 
 /// Half-width of the search band around the leg: `max(BAND_MIN, leg length)`,
 /// measured perpendicular to the leg. The PS2's `DAT_00588a60`.
@@ -1440,6 +1443,55 @@ impl NavGraph {
         })
     }
 
+    /// `FUN_002eea68`'s barrier test: the first barrier (index order) that
+    /// stops `ty` and holds a disc of radius `r` at `p`. PROVISIONAL (ours):
+    /// the disc returns the first of its query's tree. replace: that order.
+    pub fn barrier_at(&self, p: Vec2, r: f32, ty: usize) -> Option<&Barrier> {
+        self.barriers
+            .iter()
+            .find(|b| b.blocks(ty) && b.contains_r(p, r))
+    }
+
+    /// `FUN_002eefc8`, the goal of a walk to a point (`FUN_002bc378`): a goal
+    /// in a barrier (a disc of radius `r`) moves to the nearest point of a side
+    /// of that barrier grown by `r` (`FUN_002edbb8` over `FUN_002edac8`),
+    /// pushed [`GOAL_OUT`] off it, trying the sides from the nearest until
+    /// one is clear of every barrier; with none it stays. Only X and Z move.
+    ///
+    /// PROVISIONAL (ours): the disc pushes along (dz, -dx) of the side from
+    /// its corner `k` to `k + 1` and the port away from the barrier's centre;
+    /// which of the port's axes is the disc's +u is not traced, so the two
+    /// agree when the disc's winding is outward. replace: the loader's axis
+    /// order.
+    pub fn clear_goal(&self, p: Vec2, r: f32, ty: usize) -> Vec2 {
+        let Some(b) = self.barrier_at(p, r, ty) else {
+            return p;
+        };
+        let mut sides = [(0.0, p); 4];
+        for (k, side) in sides.iter_mut().enumerate() {
+            let a = b.corner(r, k as u32);
+            let e = b.corner(r, k as u32 + 1) - a;
+            let len2 = e.length_squared();
+            let t = if len2 > 0.0 {
+                ((p - a).dot(e) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let q = a + e * t;
+            let mut n = Vec2::new(e.y, -e.x).normalize_or_zero();
+            if n.dot(q - b.centre) < 0.0 {
+                n = -n;
+            }
+            *side = ((p - q).length_squared(), q + n * GOAL_OUT);
+        }
+        sides.sort_by(|x, y| x.0.total_cmp(&y.0));
+        sides
+            .iter()
+            .map(|s| s.1)
+            .find(|&q| self.barrier_at(q, r, ty).is_none())
+            .unwrap_or(p)
+    }
+
     /// How far along `a → b` (0..1) a walker gets before the first barrier
     /// that stops `ty`: 1.0 when none is in the way. A barrier `a` stands in
     /// does not count (card BNDS, `Sim::level_at`).
@@ -1466,6 +1518,24 @@ impl NavGraph {
             }
         }
         t
+    }
+
+    /// `FUN_002ef628` / `FUN_002ef6b8`, the clear test of a straight walk:
+    /// does the leg `a → b` cross a side of a barrier that stops `ty`, grown
+    /// by `radius` (`FUN_002edd00` over `FUN_002ed968`)? Unlike
+    /// [`Self::leg_crosses_barrier`] a barrier holding one end counts, and
+    /// only a leg with both ends inside one misses it.
+    ///
+    /// PROVISIONAL (ours): the disc's query skips the walker's own object
+    /// (`FUN_002a9050`, `FUN_002ef560`) and a barrier without flag 0x20 while
+    /// `DAT_005fe8e0` is set; the port's barriers hold neither. replace: those
+    /// flags, once loaded.
+    pub fn leg_hits_barrier(&self, a: Vec2, b: Vec2, radius: f32, ty: usize) -> bool {
+        self.barriers.iter().any(|br| {
+            br.blocks(ty)
+                && br.crosses_r(a, b, radius)
+                && !(br.contains_r(a, radius) && br.contains_r(b, radius))
+        })
     }
 
     /// Does the straight leg `a → b` (XZ, with a `radius` margin) cross a

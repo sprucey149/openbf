@@ -677,6 +677,10 @@ impl Sim {
         //    below reads the plan made this same tick. One team per tick at
         //    most: team t plans when the tick reaches its `next_plan_tick`,
         //    which starts at t and advances by `PLAN_PERIOD`.
+        //    The script's goal manager files its members first (`goals`).
+        if !predicted {
+            crate::goals::step(self);
+        }
         for t in 0..2u8 {
             if !predicted && self.tick >= self.commander[usize::from(t)].next_plan_tick {
                 crate::commander::plan(self, t);
@@ -1227,7 +1231,10 @@ impl Sim {
             match self.units[i].controller {
                 _ if corpse => {
                     stepped = Some(self.units[i].soldier.grounded);
-                    let (consts, rules) = (self.units[i].consts, self.ground_rules);
+                    let mut consts = self.units[i].consts;
+                    consts.hero =
+                        self.hero_class(self.units[i].team) == Some(self.units[i].spec.class);
+                    let rules = self.ground_rules;
                     self.units[i]
                         .soldier
                         .step(dt, &PadState::default(), &consts, rules);
@@ -1713,6 +1720,9 @@ impl Sim {
         // 4'. Lag compensation (issue #168): a lagged player's new bolts fly
         //     their first ticks through the volumes he saw. No lag: nothing.
         self.compensate_new_bolts(first_bolt, dt);
+
+        // Regenerate station shields before combat so linked shields zeroing this tick reach HUD and script dispatch intact.
+        self.tick_station_shields(dt);
 
         // 5. Bolt flight + impacts (in spawn order): first what each bolt
         //    passes through on this tick's flight (issue #41).

@@ -395,11 +395,10 @@ pub(super) fn closer_stand(sim: &Sim, u: &Unit, st: &AiState, nominal: Vec3) -> 
         return None;
     }
     let mut p = centre + away * (reach_xz_sq.sqrt() - super::HOLD_ARRIVE);
-    p.y = sim.ground_under(Vec3::new(p.x, u.soldier.pos.y, p.z), false);
+    p.y = sim.ground_hit_under(Vec3::new(p.x, u.soldier.pos.y, p.z), false)?;
     let from = p + (eye - u.soldier.pos);
     let dir = (centre - from).normalize_or_zero();
-    (p.y > crate::collision::NO_GROUND
-        && (p.y - u.soldier.pos.y).abs() <= crate::collision::STEP_HEIGHT
+    ((p.y - u.soldier.pos.y).abs() <= crate::collision::STEP_HEIGHT
         && from.distance_squared(centre) <= reach * reach
         && crate::perception::los_terrain(sim, from, centre - dir * radius))
     .then_some(p)

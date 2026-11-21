@@ -139,7 +139,9 @@ fn discretionary_landing_clear(sim: &Sim, from: Vec3, goal: Vec3, speed: f32) ->
     if sim.ground_rules != GroundRules::Bf1 || sim.mission_ai.allow_blind_jet_jumps {
         return true;
     }
-    let (floor, normal) = sim.ground_point_under_n(goal, from.y);
+    let Some((floor, normal)) = sim.ground_point_hit_under_n(goal, from.y) else {
+        return false;
+    };
     let landing = goal.with_y(floor);
     // OURS: on BF1 Kamino, a discretionary jet can drop out early or coast
     // past the goal. Require continuous deck and room to coast. Authored jet
@@ -147,8 +149,7 @@ fn discretionary_landing_clear(sim: &Sim, from: Vec3, goal: Vec3, speed: f32) ->
     // clearance, and Jango's observed travel past release.
     let heading = (goal - from).with_y(0.0).normalize_or_zero();
     let coast = landing + heading * (speed * 3.0);
-    floor > crate::collision::NO_GROUND
-        && normal.y >= sim.ground_rules.climb_min_ny()
+    normal.y >= sim.ground_rules.climb_min_ny()
         && sim.floor_line(from, landing)
         && sim.floor_line(landing, coast)
 }
@@ -287,8 +288,7 @@ pub(super) fn run(
                 .fmax(graph.hubs[arc.b as usize].pos.y)
                 .fmax(s.pos.y);
             let mut goal = r.waypoint;
-            let floor = sim.ground_under(Vec3::new(goal.x, probe, goal.z), false);
-            if floor > -300.0 {
+            if let Some(floor) = sim.ground_hit_under(Vec3::new(goal.x, probe, goal.z), false) {
                 goal.y = floor;
             }
             Some(goal)

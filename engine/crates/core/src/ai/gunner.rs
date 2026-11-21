@@ -87,6 +87,9 @@ pub(super) fn aim(
     let turret = seen
         .and_then(|c| c.handle.turret())
         .and_then(|id| sim.live_turret(id));
+    let station = seen
+        .and_then(|c| c.handle.station())
+        .and_then(|id| sim.stations.get(usize::from(id)).filter(|s| !s.destroyed));
     let speed = wc.shot_ordnance().velocity;
     let piloting = flyer_pilot(sim, me, &s);
     let tow = wc.ordnance.tow.filter(|_| matches!(look, Look::Seat));
@@ -105,11 +108,13 @@ pub(super) fn aim(
                     .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc, false))
             })
             .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc, false)))
-            .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)));
+            .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)))
+            .or_else(|| station.map(|st_ent| st_ent.sphere_centre));
         let centre = enemy
             .map(|e| e.capsule().center())
             .or(droid.map(|d| d.pos))
-            .or(turret.map(|t| t.centre()));
+            .or(turret.map(|t| t.centre()))
+            .or(station.map(|s| s.sphere_centre));
         (point, centre)
     };
     let at = point.or(idle);

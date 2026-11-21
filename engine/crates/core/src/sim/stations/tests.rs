@@ -252,3 +252,52 @@ fn a_full_unit_is_not_served() {
     }
     assert!(!s.stations[0].serving);
 }
+
+#[test]
+fn a_placed_station_takes_its_bodies_and_sphere_along() {
+    use crate::collision::{Body, CollisionWorld, Layers, Shape};
+    let mut s = sim(ammo_droid());
+    let mut body = Body::with_layers(
+        glam::Mat4::from_translation(Vec3::new(1.0, 2.0, 0.0)),
+        Shape::Sphere { radius: 1.0 },
+        Layers::ALL,
+    );
+    body.instance = Some(7);
+    s.collision = CollisionWorld::new(vec![body], Vec::new());
+    s.stations[0].instance = Some(7);
+    s.stations[0].sphere_centre = Vec3::new(0.0, 1.0, 0.0);
+    let parts = s.station_parts(0);
+    let down = glam::Mat4::from_translation(Vec3::new(0.0, -9000.0, 0.0));
+    for _ in 0..3 {
+        s.set_station_transform(0, down, &parts);
+    }
+    let bodies = s.collision.instance_bodies(7);
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].1.w_axis.truncate(), Vec3::new(1.0, -8998.0, 0.0));
+    assert_eq!(s.stations[0].sphere_centre, Vec3::new(0.0, -8999.0, 0.0));
+    assert_eq!(s.stations[0].pos, Vec3::ZERO);
+}
+
+/// `RespawnObject` on a destroyed building puts its live bodies back as the
+/// same station: a blade or bolt on them still finds it (Mygeeto campaign's
+/// generator_01, respawned by its script at startup).
+#[test]
+fn a_respawned_station_keeps_its_bodies_bound() {
+    use crate::collision::{Body, CollisionWorld, Layers, Shape};
+    let mut s = sim(ammo_droid());
+    let mut body = Body::with_layers(
+        glam::Mat4::from_translation(Vec3::new(1.0, 2.0, 0.0)),
+        Shape::Sphere { radius: 1.0 },
+        Layers::ALL,
+    );
+    body.instance = Some(7);
+    s.collision = CollisionWorld::new(vec![body], Vec::new());
+    s.collision.bind_station(7, 0);
+    s.stations[0].instance = Some(7);
+    s.prepare_station_collision(0);
+    s.install_station_wreck(0);
+    assert_eq!(s.collision.station(7), None);
+    s.respawn_station(0);
+    assert_eq!(s.collision.station(7), Some(0));
+    assert_eq!(s.collision.instance_bodies(7).len(), 1);
+}

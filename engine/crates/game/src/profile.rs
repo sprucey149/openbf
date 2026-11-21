@@ -14,6 +14,10 @@ use std::path::{Path, PathBuf};
 mod store;
 pub use store::{valid_name_char, List, Store, NAME_LIMIT};
 
+// The UI's save-name text box owns its own limit (ui cannot depend on game);
+// keep the two in step at compile time rather than reading the UI's value here.
+const _: () = assert!(NAME_LIMIT == ui::shell_ps2::campaign_saves::NAME_LIMIT);
+
 fn yes() -> bool {
     true
 }
@@ -387,11 +391,123 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("openbf_data"))
 }
 
+/// One Rise of the Empire save: the PS2 card's campaign file
+/// (`ScriptCB_StartSaveCampaign`, `ifs_campaign_load` main.f15) holds the
+/// campaign map's state, whose turn is the port's whole campaign
+/// (`ifs_campaign_main` SaveState main.f6 pc 3).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CampaignSave {
+    pub name: String,
+    /// The story turn it resumes (`1..=17`).
+    pub turn: u8,
+    /// Seconds since 1970 when written: the list's newest-first order
+    /// (FUN_00189ec8 compares the files' dates).
+    #[serde(default)]
+    pub saved: u64,
+}
+
+/// OURS: the saves live with the profile that wrote them; the PS2 lists
+/// every campaign file on the memory card (FUN_0018a300 reads all files of
+/// type 3). trace: whether one card's saves are shared by its profiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CampaignProgress {
+    /// Number of Rise of the Empire missions unlocked (`1..=18`).
+    pub unlocked: u8,
+    /// Bitmask of completed mission indices (`0..18`).
+    pub completed_mask: u32,
+    /// Whether the player has already been prompted for the Geonosis training mission.
+    #[serde(default)]
+    pub training_prompted: bool,
+    /// The single autosaved turn older builds kept; [`Profile::normalize`]
+    /// turns it into a save.
+    #[serde(default, skip_serializing)]
+    pub active_mission: Option<u8>,
+    #[serde(default)]
+    pub saves: Vec<CampaignSave>,
+}
+
+impl Default for CampaignProgress {
+    fn default() -> Self {
+        Self {
+            unlocked: 1,
+            completed_mask: 0,
+            training_prompted: false,
+            active_mission: None,
+            saves: Vec::new(),
+        }
+    }
+}
+
+impl CampaignProgress {
+    pub const MISSIONS: usize = ui::campaign::RISE_OF_THE_EMPIRE.len();
+
+    pub fn unlocked_count(&self) -> usize {
+        (self.unlocked as usize).clamp(1, Self::MISSIONS)
+    }
+
+    pub fn is_completed(&self, idx: usize) -> bool {
+        idx < Self::MISSIONS && (self.completed_mask & (1u32 << idx)) != 0
+    }
+
+    pub fn record_victory(&mut self, idx: usize) {
+        if idx >= Self::MISSIONS {
+            return;
+        }
+        self.completed_mask |= 1u32 << idx;
+        let next = (idx + 2).min(Self::MISSIONS) as u8;
+        self.unlocked = self.unlocked.max(next).clamp(1, Self::MISSIONS as u8);
+    }
+
+    /// The saves' names as the list shows them: `current` first, then the
+    /// newest (FUN_00189ec8).
+    pub fn save_names(&self, current: Option<&str>) -> Vec<String> {
+        self.save_list(current)
+            .into_iter()
+            .map(|s| s.name.clone())
+            .collect()
+    }
+
+    /// The saves in the list's order: `current` first, then the newest.
+    pub fn save_list(&self, current: Option<&str>) -> Vec<&CampaignSave> {
+        let mut order: Vec<&CampaignSave> = self.saves.iter().collect();
+        order.sort_by_key(|s| (Some(s.name.as_str()) != current, std::cmp::Reverse(s.saved)));
+        order
+    }
+
+    pub fn save_turn(&self, name: &str) -> Option<u8> {
+        self.saves.iter().find(|s| s.name == name).map(|s| s.turn)
+    }
+
+    /// Write `turn` as `name`, replacing the save `replace` and any of the
+    /// same name (`ScriptCB_StartSaveCampaign(filename1, filename2)`).
+    pub fn write_save(&mut self, replace: Option<&str>, name: &str, turn: u8, saved: u64) {
+        self.saves
+            .retain(|s| Some(s.name.as_str()) != replace && !s.name.eq_ignore_ascii_case(name));
+        self.saves.push(CampaignSave {
+            name: name.to_owned(),
+            turn: turn.clamp(1, Self::MISSIONS as u8 - 1),
+            saved,
+        });
+        self.unlocked = self
+            .unlocked
+            .max(turn.saturating_add(1))
+            .clamp(1, Self::MISSIONS as u8);
+    }
+
+    pub fn delete_save(&mut self, name: &str) -> bool {
+        let before = self.saves.len();
+        self.saves.retain(|s| s.name != name);
+        self.saves.len() != before
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Profile {
     pub name: String,
     pub settings: Settings,
     pub career: Career,
+    #[serde(default)]
+    pub campaign: CampaignProgress,
     #[serde(skip)]
     slot: Option<store::Slot>,
 }
@@ -449,6 +565,16 @@ impl Profile {
         self.settings.mouse_sensitivity = clamp_mouse_sensitivity(self.settings.mouse_sensitivity);
         self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
         self.settings.free_fullscreen_key();
+        self.campaign.unlocked = self
+            .campaign
+            .unlocked
+            .clamp(1, CampaignProgress::MISSIONS as u8);
+        if let Some(turn) = self.campaign.active_mission.take() {
+            if self.campaign.saves.is_empty() {
+                let name: String = self.name.chars().take(NAME_LIMIT).collect();
+                self.campaign.write_save(None, &name, turn, 0);
+            }
+        }
     }
 
     fn fresh() -> Profile {
@@ -1226,5 +1352,26 @@ mod tests {
         assert_eq!(back.settings.recent_hosts, ["studio-pc:40000", "10.0.0.2"]);
         let old: Settings = ron::from_str("(assist_intensity: 0.5)").unwrap();
         assert!(old.recent_hosts.is_empty());
+    }
+
+    #[test]
+    fn campaign_progress_unlocks_sequentially_and_defaults_for_old_profiles() {
+        let mut p = Profile::default();
+        assert_eq!(p.campaign.unlocked_count(), 1);
+        assert!(!p.campaign.is_completed(0));
+        p.campaign.record_victory(0);
+        assert_eq!(p.campaign.unlocked_count(), 2);
+        assert!(p.campaign.is_completed(0));
+        p.campaign.record_victory(17);
+        assert_eq!(p.campaign.unlocked_count(), 18);
+        assert!(p.campaign.is_completed(17));
+
+        let saved = ron::to_string(&p).unwrap();
+        let back: Profile = ron::from_str(&saved).unwrap();
+        assert_eq!(back.campaign, p.campaign);
+
+        // Older profiles without `campaign:` default cleanly to mission 1 unlocked.
+        let legacy: Profile = ron::from_str("(name:\"Legacy\",settings:(assist_intensity:0.5),career:(rounds:1,wins:1,kills:2,deaths:1,shots:10,hits:4,captures:1))").unwrap();
+        assert_eq!(legacy.campaign, CampaignProgress::default());
     }
 }

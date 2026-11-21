@@ -359,8 +359,8 @@ impl Sim {
             };
             d.pitch += PadState::axis(pad.ry) * pitch_rate * dt;
             (d.yaw, d.pitch) = d.mouse_turned(c, pad.look(), look);
-            let (floor, normal) = self.ground_point_under_n(d.pos, d.pos.y);
-            let ground = (floor > crate::collision::NO_GROUND).then_some((d.pos.y - floor, normal));
+            let floor_hit = self.ground_point_hit_under_n(d.pos, d.pos.y);
+            let ground = floor_hit.map(|(floor, normal)| (d.pos.y - floor, normal));
             d.fly(
                 c,
                 dt,
@@ -387,7 +387,7 @@ impl Sim {
             {
                 end = Some(DroidEnd::Destroyed);
             }
-            if d.tick_adrift(floor <= crate::collision::NO_GROUND, dt) && end.is_none() {
+            if d.tick_adrift(floor_hit.is_none(), dt) && end.is_none() {
                 end = Some(DroidEnd::Destroyed);
             }
             let press = pad.pressed(buttons::SECONDARY_FIRE)

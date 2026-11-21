@@ -87,6 +87,12 @@ pub enum RouteSource {
     /// team — the fewest-arcs way without them, kept hub by hub to the same
     /// goal (`route::plan_leg`).
     Shun,
+    /// The authored table's hop, kept after the port's floor walk called its
+    /// arc unwalkable and no other way was found (`route::plan_leg`). Its
+    /// waypoint is at the unit's own height and it arrives in XZ, the PS2's
+    /// 2-D rule, without the level test: that hub's resolved floor is what the
+    /// walk got wrong.
+    Kept,
 }
 
 impl RouteSource {
@@ -97,6 +103,7 @@ impl RouteSource {
             RouteSource::Straight => "straight",
             RouteSource::Flank => "flank",
             RouteSource::Shun => "shun",
+            RouteSource::Kept => "kept",
         }
     }
 }

@@ -1,7 +1,8 @@
 //! BF2 transport approach and cargo deployment at a hostile hangar.
 
 use super::{
-    chords_clear, hull_radius, FlightPhase, FlyerAi, Sim, Vec3, Vehicle, VehicleHandle, VehicleKind,
+    chords_clear, hull_extents, FlightPhase, FlyerAi, Sim, Vec3, Vehicle, VehicleHandle,
+    VehicleKind,
 };
 use crate::fmath::FloatExt;
 use crate::region::Region;
@@ -51,6 +52,40 @@ pub(crate) fn at_destination(sim: &Sim, v: &Vehicle) -> bool {
     uses_authored_transport(sim, v) && destination_regions(sim, v).any(|r| r.contains(v.pos))
 }
 
+/// True when `v` is a landed `commandflyer` sitting inside a hostile landing
+/// region (e.g. a deployed enemy-hangar spawn transport or `spa4g_c`'s
+/// `cis_gunship`). Autonomous on-foot bots must not board and fly it away.
+pub(crate) fn is_deployed_command_flyer(sim: &Sim, v: &Vehicle) -> bool {
+    if v.kind != VehicleKind::Flyer
+        || v.flyer.phase != FlightPhase::Landed
+        || !sim
+            .flyer_params
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .is_some_and(|p| p.command_flyer)
+    {
+        return false;
+    }
+    let Some(team) = v.team.or(v.home_team) else {
+        return false;
+    };
+    sim.landing_regions.iter().any(|region| {
+        region.contains(v.pos)
+            && sim
+                .cps
+                .iter()
+                .filter(|cp| !cp.killed)
+                .min_by(|a, b| {
+                    a.def
+                        .pos
+                        .distance_squared(region.center)
+                        .total_cmp(&b.def.pos.distance_squared(region.center))
+                })
+                .and_then(|cp| cp.owner)
+                .is_some_and(|owner| sim.hostile(team, owner))
+    })
+}
+
 /// The PS2 fly agent lines up with a landing hint. The stock space maps
 /// instead provide landing volumes. Use the clear face of the destination
 /// volume as the intermediate point and the center as the touchdown target.
@@ -63,9 +98,9 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         return false;
     }
     let forward = v.rot * Vec3::Z;
-    let radius = hull_radius(sim, v);
+    let extents = hull_extents(sim, v);
     if let Some(goal) = ai.transport_goal.take() {
-        if leg(sim, v, handle, ai, goal, goal + (goal - v.pos), radius) {
+        if leg(sim, v, handle, ai, goal, goal + (goal - v.pos), extents) {
             ai.transport_goal = Some(goal);
             return true;
         }
@@ -81,7 +116,7 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         // Carry a straight approach through the doorway before descending.
         let points = [region.basis.x_axis, region.basis.z_axis];
         let mut entries = [points[0], -points[0], points[1], -points[1]]
-            .map(|dir| center + dir * (width + APPROACH_CLEARANCE_RADII * radius));
+            .map(|dir| center + dir * (width + APPROACH_CLEARANCE_RADII * extents.0));
         entries.sort_by(|a, b| {
             v.pos
                 .distance_squared(*a)
@@ -89,11 +124,11 @@ pub(super) fn approach(sim: &Sim, v: &Vehicle, handle: VehicleHandle, ai: &mut F
         });
         for entry in entries {
             if (entry - v.pos).dot(forward) <= 0.0
-                || !chords_clear(sim, &[entry, center], radius, handle)
+                || !chords_clear(sim, &[entry, center], extents, handle)
             {
                 continue;
             }
-            if leg(sim, v, handle, ai, entry, center, radius) {
+            if leg(sim, v, handle, ai, entry, center, extents) {
                 ai.transport_goal = Some(center);
                 return true;
             }
@@ -123,14 +158,14 @@ pub(super) fn departure_curve(
     start: Vec3,
 ) -> Option<[Vec3; 4]> {
     let region = sim.landing_regions.iter().find(|r| r.contains(start))?;
-    let radius = hull_radius(sim, v);
+    let extents = hull_extents(sim, v);
     let width = region.size.x.fmax(region.size.z);
     let center = region.center.with_y(start.y);
     let [x, z] = [region.basis.x_axis, region.basis.z_axis];
     let end = [x, -x, z, -z]
-        .map(|axis| center + axis * (width + APPROACH_CLEARANCE_RADII * radius))
+        .map(|axis| center + axis * (width + APPROACH_CLEARANCE_RADII * extents.0))
         .into_iter()
-        .find(|&end| chords_clear(sim, &[start, end], radius, handle))?;
+        .find(|&end| chords_clear(sim, &[start, end], extents, handle))?;
     // Straight translation through the opening. The spline aligns the
     // hull along the escape chord as it begins moving.
     let delta = end - start;
@@ -144,7 +179,7 @@ fn leg(
     ai: &mut FlyerAi,
     end: Vec3,
     after: Vec3,
-    radius: f32,
+    extents: (f32, f32, f32),
 ) -> bool {
     let forward = v.rot * Vec3::Z;
     let behind = (end - v.pos).length().fmin(super::CONNECT_BEHIND);
@@ -152,7 +187,7 @@ fn leg(
     let points: [Vec3; super::HOP_SAMPLES + 1] = std::array::from_fn(|k| {
         crate::vehicle::flyer::curve_at(&curve, k as f32 / super::HOP_SAMPLES as f32).0
     });
-    if !chords_clear(sim, &points, radius, handle) {
+    if !chords_clear(sim, &points, extents, handle) {
         return false;
     }
     ai.curve = Some(curve);

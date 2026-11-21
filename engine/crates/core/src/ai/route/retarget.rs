@@ -42,6 +42,87 @@ pub(in super::super) fn retarget(
         retarget_deathmatch(sim, me, st, nt);
         return;
     }
+    // The script's goals (`core::goals`): a Deathmatch member on foot takes
+    // the roaming walk of order 10 (`FUN_002c62a8`), a Defend member holds
+    // its target (order 0xb; state 0xc's defend helper, `core::goals`). OURS:
+    // a mounted Deathmatch member hunts as the port's ground Deathmatch does,
+    // and a Defend member with no hint yet walks to its target as a defender
+    // walks to its post (the disc's helper walks to the target ± 2-5 m,
+    // `FUN_002d2168` state 2). trace: what a seated Deathmatch member's
+    // driver does with order 10.
+    if let Some(goal) = sim.ai_goals.steer(me) {
+        let held_stance = st.want_stance;
+        st.want_stance = 0;
+        // The defend helper walks to its hint once it has one
+        // (`core::goals`: `FUN_002d2f98`, state 5) and stands there in a
+        // stance the hint allows, as a commander defender does at its spot;
+        // its step out walks to the step's point, then to the new hint
+        // (state 6).
+        if let (crate::goals::Steer::Defend(_), Some((at, mask))) =
+            (goal, crate::goals::defend_walk(sim, me))
+        {
+            st.target_cp = None;
+            retarget_point(sim, me, st, at, nt);
+            set_last_waypoint(st, at, Refresh::None);
+            st.want_stance = stance_hold(held_stance, mask, me, sim.tick);
+            return;
+        }
+        match goal {
+            crate::goals::Steer::Deathmatch if u.mount.is_none() => {
+                retarget_deathmatch(sim, me, st, nt);
+            }
+            crate::goals::Steer::Deathmatch => retarget_hunt(sim, me, st, nearest_enemy, nt),
+            crate::goals::Steer::Defend(crate::goals::GoalTarget::Post(cp)) => {
+                if !retarget_to_post(sim, me, st, cp, true, nt) {
+                    aim_last_leg(sim, me, st, nt);
+                }
+            }
+            crate::goals::Steer::Destroy(crate::goals::GoalTarget::Post(cp)) => {
+                retarget_to_post(sim, me, st, cp, false, nt);
+                aim_last_leg(sim, me, st, nt);
+            }
+            crate::goals::Steer::Defend(t) | crate::goals::Steer::Destroy(t) => {
+                st.target_cp = None;
+                match crate::goals::target_pos(sim, t) {
+                    Some(at) => {
+                        retarget_board(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    None => retarget_hunt(sim, me, st, nearest_enemy, nt),
+                }
+            }
+            crate::goals::Steer::Go(t) => {
+                st.target_cp = None;
+                match (t, crate::goals::target_pos(sim, t)) {
+                    (crate::goals::GoalTarget::Unit(_), Some(at)) => {
+                        retarget_board(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    (_, Some(at)) => {
+                        retarget_point(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    (_, None) => clear(st),
+                }
+            }
+            crate::goals::Steer::Escort { carrier, offset } => {
+                st.target_cp = None;
+                match sim.unit(carrier) {
+                    Some(c) => {
+                        let at = c.soldier.pos + crate::ai::rotate_xz(offset, c.soldier.yaw);
+                        retarget_board(sim, me, st, at, nt);
+                        set_last_waypoint(st, at, Refresh::None);
+                    }
+                    None => clear(st),
+                }
+            }
+            crate::goals::Steer::Stand => {
+                st.target_cp = None;
+                clear(st);
+            }
+        }
+        return;
+    }
     if u.team >= 2 || sim.deathmatch.is_some() {
         // PROVISIONAL, replace: trace the PS2 native Deathmatch and Conquest
         // goal orders. The main-army commander owns neither team's members.
@@ -335,17 +416,58 @@ pub(in super::super) fn retarget_board(
     at: Vec3,
     nt: &mut NavTick,
 ) {
+    route_to(sim, me, st, at, nt, true);
+}
+
+/// Shared graph walk for a boarding claim and a defend point: the mover,
+/// start hub, reachability check and kept/planned leg are identical. Only the
+/// destination resolver differs — a vehicle's own hub for boarding, the
+/// path query's hub for a point.
+fn route_to(
+    sim: &Sim,
+    me: UnitHandle,
+    st: &mut AiState,
+    at: Vec3,
+    nt: &mut NavTick,
+    boarding: bool,
+) {
     let (Some(g), Some(u)) = (sim.nav.as_ref(), sim.unit(me)) else {
         return;
     };
     let m = mover(sim, u);
-    let dest = unit_goal_hub(sim, g, m, at);
+    let dest = if boarding {
+        unit_goal_hub(sim, g, m, at)
+    } else {
+        g.hub_for(at, m)
+    };
     match (start_hub(sim, g, me), dest) {
         (Some(c), Some(d)) if g.reachable_by(c, d, m) => {
             keep_or_plan(sim, st, me, c, d, nt);
         }
         _ => clear(st),
     }
+}
+
+/// The defend helper's walk to a point (`FUN_002bc378`): the graph walk to
+/// the hub the disc's path query locates the point at (`FUN_002eca30` over
+/// `FUN_002eb918`, in 3-D as a post is: [`NavGraph::hub_for`]), then the last
+/// leg to it. BF2 DEA1's type "7" hint 16 on the gallery over CAM_CP1's
+/// hallway, moved out of its barrier, locates at Hub32 in the hallway; the
+/// unit locate ([`unit_goal_hub`]) put it on the far end of the gallery's
+/// arc and its level rule on the east deck, where its takers walked into the
+/// wall at x -31.
+///
+/// PROVISIONAL (ours): the disc walks a goal with no graph route
+/// (`FUN_002f3280` false) by its local planner alone (`FUN_002c0718`,
+/// `FUN_002f3528`); the port routes every one. replace: `FUN_002f3280`.
+pub(in super::super) fn retarget_point(
+    sim: &Sim,
+    me: UnitHandle,
+    st: &mut AiState,
+    at: Vec3,
+    nt: &mut NavTick,
+) {
+    route_to(sim, me, st, at, nt, false);
 }
 
 /// A hunter's LAST leg walks at the enemy itself, not at the enemy's hub

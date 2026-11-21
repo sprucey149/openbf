@@ -97,11 +97,9 @@ fn presentation_writer_keeps_stock_and_rejects_unsupported_inputs() {
     std::fs::write(&mapping, rows(target).to_string()).unwrap();
     let mut parent_entries = pak::collect(&assets, "assets_baked").unwrap();
     let error = pak::replace_sources(&mut parent_entries, &mapping).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("replacement archive entry does not exist")
-    );
+    assert!(error
+        .to_string()
+        .contains("replacement archive entry does not exist"));
     let out = temp.0.join("openbf");
     let result = write_pack(&assets, &mapping, &out, true);
     assert!(
@@ -119,11 +117,9 @@ fn presentation_writer_keeps_stock_and_rejects_unsupported_inputs() {
     );
     assert_eq!(archive.read_entry(target).unwrap(), fixture_glb(true));
     let scene = assets::load_scene(&map).unwrap();
-    assert!(
-        presentation::load_model(&scene, "end_prop_rocks")
-            .unwrap()
-            .is_none()
-    );
+    assert!(presentation::load_model(&scene, "end_prop_rocks")
+        .unwrap()
+        .is_none());
     let companion = map.join("presentation/models/end_prop_rocks.glb");
     std::fs::create_dir_all(companion.parent().unwrap()).unwrap();
     std::fs::copy(&payload, &companion).unwrap();
