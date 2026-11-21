@@ -7,9 +7,10 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 
 | script | what it does |
 |---|---|
-| `pack.py` | what you own in `iso/` to a self-contained game |
+| `pack.py` | what you own in `iso/` to a self-contained game; `--bake-only` keeps a checkout's own `engine/missions` and `engine/assets_baked` current with the same cache |
 | `input_scan.py`, `console_input.py`, `dlc_inputs.py` | recognize inputs by content, and say what a build makes of them |
 | `rebake.sh`, `bake_dlc.py` | bake assets, and the two optional DLC heroes (`DLC.md`) |
+| `bake_cache.py`, `bake_versions.py` | which bake groups a pack redoes (version, input content, audio tools; `pack.py --explain` says why), and the landing guard that makes a bake-code change bump its groups or prove them unchanged |
 | `extract_lua.py`, `gen_missions.py`, `gameplay_missions.py` | mission files from the mod tools' Lua |
 | `scratch_bake.sh`, `cmp_bake.sh` | bake into a scratch tree, and compare it byte for byte |
 | `world_fingerprint.py` | hash baked gameplay inputs, independently of texture and asset resolution |
