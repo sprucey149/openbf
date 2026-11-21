@@ -2,6 +2,7 @@
 
 mod animation;
 
+use super::weapon_part_additive;
 use super::{
     drawn, fire_point, held_or_primary, model_of, part_groups, part_spec, rider_now, seat_now,
     turn_number, with_spec, ClassDraw, DrawPlan, FlashModel, NativeDraw, SeatClock, SoldierAsset,
@@ -601,6 +602,7 @@ impl SoldierVisuals {
     ) -> WeaponAsset {
         let mut side = assets_dir.join(format!("side_{game}"));
         let mut parts = Vec::new();
+        let mut additive = Vec::new();
         let mut bounds = None;
         let mut wpath = side.join("weapons").join(format!("{wg}.glb"));
         let common = assets_dir.join(format!("common_{game}"));
@@ -635,9 +637,10 @@ impl SoldierVisuals {
                 Ok(cpu) => match crate::viewer::upload_character_submeshes(r, &cpu) {
                     Ok(up) => {
                         bounds = super::position_bounds(&cpu.positions);
-                        for (k, (mesh, mat, layer, _)) in up.into_iter().enumerate() {
+                        for (k, (mesh, mat, layer, flags)) in up.into_iter().enumerate() {
                             let tex = Self::texture(r, &side, mat, cpu.uv_scroll(k), cache);
                             parts.push((mesh, tex, layer, part_spec(r, cpu.spec_pass(k))));
+                            additive.push(weapon_part_additive(layer, flags));
                         }
                     }
                     Err(e) => eprintln!("weapon {wg}: {e:#}"),
@@ -652,6 +655,7 @@ impl SoldierVisuals {
         println!("weapon {wg}: {} parts", parts.len());
         WeaponAsset {
             parts,
+            additive,
             nodes,
             bounds,
         }
@@ -811,6 +815,24 @@ impl SoldierVisuals {
             };
             if walk.sim.is_item_gun(*weapon_class as usize) {
                 continue;
+            }
+            // A melee hero's thrown power (Kit's Force ball) plays his
+            // offhand fire pose from its shot ([`cast::offhand_projectile`]).
+            if let (Some(v), Some(u), Some(power)) = (
+                self.units.get_mut(unit.index as usize),
+                walk.sim.units.get(unit.index as usize),
+                walk.sim.weapon_classes.get(*weapon_class as usize),
+            ) {
+                if v.gen == u.gen
+                    && u.alive
+                    && u.mount.is_none()
+                    && super::cast::offhand_projectile(
+                        power,
+                        &walk.sim.weapon_classes[u.weapon_class],
+                    )
+                {
+                    v.cast.start(walk.sim.tick, *weapon_class as usize);
+                }
             }
             let (Some(v), Some(u)) = (
                 self.units.get_mut(unit.index as usize),

@@ -304,6 +304,11 @@ fn real_dlc_effects_load_only_with_the_bake_and_after_retail() {
     }
     assert!(library.get("com_sfx_dusttrail").is_some());
     assert_eq!(library.len(), retail.len() + 7, "only the DLC's seven join");
+    // The Force ball's shell record rides beside them, outside the count.
+    let shell = library.shield("fisto_bubble").expect("fisto_bubble shell");
+    assert_eq!((shell.radius, shell.turn_on_time), (0.75, 2.0));
+    assert!(retail.shield("fisto_bubble").is_none());
+    assert!(gcw.shield("fisto_bubble").is_none());
 }
 
 /// Kit Fisto's tentacles rest where the body bake placed them and only they

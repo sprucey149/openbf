@@ -759,12 +759,12 @@ class Pack(unittest.TestCase):
                         dict(game=g, action='rebuilt', reason='fixture', key='fixture') for g in ('bf1', 'bf2')]))
 
         values = dict(ROOT=str(root), ENGINE=str(engine), EXTRACTED=str(root / 'extracted'), BAKED=str(baked),
-                      MISSIONS=str(missions), TARGET=str(target), BAKE_STAMP=str(root / 'extracted/bake.sha'),
-                      MISSION_STAMP=str(root / 'extracted/mission.sha'))
+                      MISSIONS=str(missions), TARGET=str(target), MISSION_STAMP=str(root / 'extracted/mission.sha'))
         args = ['pack.py', '--iso-dir', str(self.iso), '--out', str(self.out), *extra]
-        with mock.patch.multiple(pack, **values), mock.patch.object(sys, 'argv', args), mock.patch.object(pack, 'need'), \
+        with mock.patch.multiple(pack, **values), mock.patch.object(sys, 'argv', args), mock.patch.object(pack, 'need'), mock.patch.object(pack, 'need_ffmpeg'), \
                 mock.patch.object(pack, 'run', side_effect=run), mock.patch.object(pack, 'find_bash', return_value='bash'), \
                 mock.patch.object(pack, 'stale', return_value=None), mock.patch.object(pack, 'inputs_hash', return_value='hash'), \
+                mock.patch.object(pack, 'group_versions', return_value={'schema': 1, 'target': 'test', 'groups': dict.fromkeys(pack.bake_cache.GROUPS + ('extract-iso',), 1)}), \
                 mock.patch.object(pack, 'missing_music', return_value=[]), mock.patch.object(pack.shutil, 'which', return_value=None), \
                 mock.patch.object(pack.subprocess, 'run', side_effect=self.tool), \
                 mock.patch.object(scan, 'XBOX_SUPPORTED', xbox_on), mock.patch.object(pack.os, 'environ', dict(os.environ)), \

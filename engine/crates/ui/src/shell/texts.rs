@@ -382,7 +382,16 @@ impl IaTexts {
             Opt::CtfTimer => pieces(self.get("ifs.mp.create.opt.timer"), &[&off(v.ctf_timer)]),
             Opt::HunTimer => pieces(self.get("ifs.mp.create.opt.timer"), &[&n(v.hun_timer)]),
             Opt::CtfScore => pieces(self.get("ifs.mp.create.opt.ctf"), &[&n(v.ctf_score)]),
-            Opt::HunScore => pieces(self.get("ifs.mp.create.opt.scorelimit"), &[&n(v.hun_score)]),
+            // [ours] 0 is each Hunt's own per-tier, per-side points to win
+            // (`hunt_points_to_win`); the battle HUD shows each side's target.
+            Opt::HunScore => pieces(
+                self.get("ifs.mp.create.opt.scorelimit"),
+                &[&if v.hun_score == 0 {
+                    "Per map".to_owned()
+                } else {
+                    n(v.hun_score)
+                }],
+            ),
             Opt::AssScore => pieces(self.get("ifs.mp.create.opt.scorelimit"), &[&n(v.ass_score)]),
         }
     }

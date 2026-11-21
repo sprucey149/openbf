@@ -1,5 +1,6 @@
 //! Spawn placement, roster admission, respawning and spawn-screen input.
 mod floor;
+pub mod spread;
 
 use super::{
     class_share, walker_point, Carousel, ClassRefusal, SideChoice, SpawnStage, CAROUSEL,
@@ -408,7 +409,9 @@ impl Sim {
     /// `None` when the team has no post or every weight is 0. BF1's draw
     /// (`FUN_00261e80`) is uniform over the same list; with BF1's equal
     /// weights this rule is that to within 1 part in S − 1, and like BF1's
-    /// it takes no draw when there is one post.
+    /// it takes no draw when there is one post. OURS #171 parity rows
+    /// (`game::layout::CONQUEST_PARITY` `SpawnWeight`) set unequal weights on
+    /// some BF1 maps, so the draw is weighted there.
     pub fn draw_spawn_post(&mut self, team: u8) -> Option<SpawnPost> {
         let posts = self.spawn_posts(team);
         let total: f32 = posts.iter().map(|p| p.1).sum();
@@ -676,7 +679,9 @@ impl Sim {
         // ON the platforms (BF1 KAM1 `CP4SpawnPath` nodes sit at y ~ 61.4-62.3
         // for a post at y = 61), so the model floor under them is what grounds
         // the unit, not the terrain far below.
+        self.hunt_clear_spawn(&mut unit, None);
         self.settle_spawn(&mut unit, None);
+        self.hunt_spread(&mut unit);
         let index = match slot {
             Some(i) => {
                 self.units[i] = unit;
@@ -1167,7 +1172,9 @@ impl Sim {
             // The live walker segment already resolved its final point.
             unit.soldier.pos = pos;
         } else {
+            self.hunt_clear_spawn(&mut unit, self.units[i].spawn_post);
             self.settle_spawn(&mut unit, self.units[i].spawn_post);
+            self.hunt_spread(&mut unit);
         }
         crate::ai::proxy::hand_weapons(&mut unit);
         self.units[i] = unit;
@@ -1362,7 +1369,9 @@ impl Sim {
                 if self.spawn_post_selected(s).is_some() {
                     self.spawn_stage[s] = SpawnStage::Class;
                     // The hero's owner finds the hero chosen (FUN_00396a00
-                    // selects its row on entry); any class stays his to pick.
+                    // selects its row on entry). The PS2 leaves any class
+                    // his to pick; `[ours]` (2026-11-19) the hero is his only
+                    // row ([`Sim::hero_locked`]).
                     if let Some(hero) = self.owned_hero_class(s, team) {
                         self.spawn_choice[s] = hero;
                     }
@@ -1488,7 +1497,8 @@ impl Sim {
             return false;
         }
         if self.hero_class(team).map(usize::from) != Some(class) {
-            return true;
+            // `[ours]` (2026-11-19): the hero's owner plays only the hero.
+            return self.locked_hero_class(s, team).is_none();
         }
         let Some(member) = self.players.get(s).copied().flatten() else {
             return false;
@@ -1582,10 +1592,19 @@ impl Sim {
     /// whose team fields its max. Conquest retains that deviation here;
     /// Hero Assault separately enforces bot class maxima in `assault_class`.
     pub fn class_refusal(&self, s: usize, team: u8, class: usize) -> Option<ClassRefusal> {
-        if self.hero_class(team).map(usize::from) == Some(class)
-            && !self.spawn_class_available(s, team, class)
-        {
-            return Some(ClassRefusal::HeroUnavailable);
+        let hero = self.hero_class(team).map(usize::from) == Some(class);
+        if !self.spawn_class_available(s, team, class) {
+            if hero {
+                return Some(ClassRefusal::HeroUnavailable);
+            }
+            if self.locked_hero_class(s, team).is_some() {
+                return Some(ClassRefusal::HeroLocked);
+            }
+        }
+        // The locked hero is never refused for points: the offer is its
+        // unlock, and the lock leaves him no other row.
+        if hero && self.locked_hero_class(s, team).is_some() {
+            return None;
         }
         let cost = i64::from(self.spawn_cost(s, team, class));
         let points = i64::from(self.spawn_points.get(s).copied().unwrap_or(0));

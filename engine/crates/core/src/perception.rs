@@ -64,6 +64,40 @@ pub const SEARCH_KNOWN: f32 = 0.5;
 /// measure: as [`SEARCH_BASE`].
 pub const SEARCH_FRESH: u64 = THINK_PERIOD;
 
+/// [ours] (the maintainer, 2026-11-20) How long a bot shot at from past its
+/// opening range ([`crate::ai::AiState::shot_by`]) may answer that shooter
+/// out to its round's reach (ticks, 5 s). Within it the shooter, once the
+/// search for him is over ([`search_ticks`]), is located by any clear line
+/// of sight, cone and view distance aside, and the trigger takes the round's
+/// reach for him ([`crate::weapon::WeaponClass::shot_range`]); every other
+/// enemy is opened on within the disc's reach
+/// ([`crate::weapon::WeaponClass::engage_range`]) as before.
+/// measure: the bots-only Hard / Elite proxy parity sweep with and without it.
+pub const RETURN_FIRE_TICKS: u64 = 150;
+
+/// [ours] The band in which bot `u` on foot answers a shooter it could not
+/// open on: past its hand weapon's opening range (the disc's reach held to
+/// the class `MaxRange`, which the trigger asks) and within the lengthened
+/// round's reach ([`crate::weapon::BOLT_REACH`]). `None` in a seat, or for
+/// a weapon whose round was not lengthened.
+pub fn return_band(sim: &Sim, u: &crate::unit::Unit) -> Option<(f32, f32)> {
+    if u.mount.is_some() {
+        return None;
+    }
+    let wc = sim.weapon_classes.get(u.weapon_class)?;
+    wc.ordnance.natural_reach?;
+    let open = wc.engage_range().fmin(wc.ai_range[2]);
+    let reach = wc.shot_range();
+    (reach > open).then_some((open, reach))
+}
+
+/// Is `h` the shooter bot state `st` may still answer out to its round's
+/// reach ([`RETURN_FIRE_TICKS`])?
+pub fn answering(st: &AiState, h: UnitHandle, tick: u64) -> bool {
+    st.shot_by
+        .is_some_and(|(s, t)| s == h && tick.saturating_sub(t) <= RETURN_FIRE_TICKS)
+}
+
 /// The unit grid's query is this much wider than the test it feeds (m): the
 /// grid measures the feet in XZ, the tests a body's centre in 3D (card TEAM).
 const NEAR_MARGIN: f32 = 1.0;
@@ -547,9 +581,12 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     // walker went all round nearly unshot. A flyer, and a flyer pilot's eyes,
     // keep their earlier unbounded reach (the soldier's weapons and speed do
     // not size a pilot's query; flyer AI is out of #182's scope).
-    // Known gap: a bot in a ground vehicle's gun seat is still bounded by its
-    // personal weapons' scan radius, not by the seat gun's range.
-    let query = scan_radius(sim, u);
+    // A bot in a ground vehicle's seat (a hover's, a walker's, a building
+    // turret's) reaches as far as its seat guns' reach plus its vehicle's
+    // speed, never less than its own kit's scan radius
+    // (`ai::seat_fight::seat_scan_radius`, [`seat_reach`], PROVISIONAL): the
+    // rider is still seen no farther than `min((20 r + 30) x view_mult, query)`.
+    let query = seat_reach(sim, u);
     let pilot = u
         .mount
         .and_then(|m| sim.vehicle(m.vehicle))
@@ -591,6 +628,28 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             }
         }
     }
+    // [ours] The shooter who shot at the bot from past its opening range
+    // ([`RETURN_FIRE_TICKS`]): once the search for him is over, any clear
+    // line locates him, out to the round's reach.
+    if st
+        .shot_by
+        .is_some_and(|(_, t)| tick.saturating_sub(t) > RETURN_FIRE_TICKS)
+    {
+        st.shot_by = None;
+    }
+    if let (Some((s, _)), Some((_, reach))) = (st.shot_by, return_band(sim, u)) {
+        let searched = contact_of(st, s).is_some_and(|c| c.first_seen <= tick);
+        if let Some(o) = sim
+            .unit(s)
+            .filter(|o| searched && sim.hostile(u.team, o.team) && o.cloak.visible())
+        {
+            let p = o.capsule().center();
+            let d2 = (p - eye).length_squared();
+            if d2 <= reach * reach && !cand.iter().any(|c| c.2 == Foe::Unit(s)) {
+                cand.push((d2, (0, u64::from(s.index)), Foe::Unit(s), p));
+            }
+        }
+    }
     let droid_reach = droid_view_distance(tier.view_mult);
     for d in &sim.droids {
         if !sim.hostile(u.team, d.team) || !d.alive() || !droid_admitted(sim, u, d) {
@@ -602,7 +661,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             cand.push((d2, (1, d.id), Foe::Droid(d.id), d.pos));
         }
     }
-    let turret_reach = turret_view_distance(tier.view_mult).fmin(scan_radius(sim, u));
+    let turret_reach = turret_view_distance(tier.view_mult).fmin(query);
     for t in &sim.turrets {
         if !sim.hostile(u.team, t.team) || !t.alive() || !turret_admitted(sim, u, t) {
             continue;
@@ -679,7 +738,12 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     let mut heard = 0u8;
     let searches = hit_reaction_applies(sim, u);
     sim.units_within(eye, HEAR_RADIUS + NEAR_MARGIN, &mut near);
-    if let Some((s, _)) = u.last_hit {
+    for s in u
+        .last_hit
+        .map(|h| h.0)
+        .into_iter()
+        .chain(st.shot_by.map(|h| h.0))
+    {
         if let Err(k) = near.binary_search(&s.index) {
             if sim.units.get(s.index as usize).is_some_and(|o| o.alive) {
                 near.insert(k, s.index);
@@ -695,9 +759,12 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             .checked_sub(o.last_shot_tick)
             .is_some_and(|d| d < THINK_PERIOD)
             && (o.soldier.pos - eye).length_squared() < HEAR_RADIUS * HEAR_RADIUS;
-        let hit_me = u
-            .last_hit
-            .is_some_and(|(s, t)| s == h && tick.checked_sub(t).is_some_and(|d| d < THINK_PERIOD));
+        let fresh = |(s, t): (UnitHandle, u64)| {
+            s == h && tick.checked_sub(t).is_some_and(|d| d < THINK_PERIOD)
+        };
+        // [ours] A near miss from past the opening range is answered as a
+        // hit is ([`RETURN_FIRE_TICKS`]).
+        let hit_me = u.last_hit.is_some_and(fresh) || st.shot_by.is_some_and(fresh);
         let prior = if hit_me && searches {
             contact_of(st, h)
         } else {
@@ -783,6 +850,15 @@ pub(crate) fn scan_radius(sim: &Sim, u: &crate::unit::Unit) -> f32 {
         .filter(|h| !sim.weapon_locked(u, h.class))
         .map(|h| range(h.class));
     held.fold(range(u.weapon_class), crate::fmath::max) + 5.0 * u.consts.max_speed
+}
+
+/// [`scan_radius`], or for a bot in a ground vehicle's seat the longer of
+/// it and its seat guns' reach (`ai::seat_fight::seat_scan_radius`): a seat
+/// whose guns reach less than the rider's own kit (an AT-ST's 60 m chin gun,
+/// a building's rocket turret) never sees less than he did on foot.
+pub(crate) fn seat_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
+    let own = scan_radius(sim, u);
+    crate::ai::seat_fight::seat_scan_radius(sim, u).map_or(own, |r| r.fmax(own))
 }
 
 /// Whether `h` is still there to be remembered: a live unit, droid, turret, or station.

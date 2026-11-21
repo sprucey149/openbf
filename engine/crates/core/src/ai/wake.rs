@@ -35,17 +35,42 @@ pub const SIGHT: f32 = 20.0;
 /// study of Quake bots judged most human (`modern.md` B3).
 pub const GAP: u64 = 3;
 
-/// What has happened to bot `me` since its last think that wakes it.
-pub(super) fn events(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState) -> u8 {
+/// What has happened to bot `me` since its last think that wakes it. A hit
+/// or a near miss from past the bot's opening range also notes the shooter
+/// ([`AiState::shot_by`], [`note_shooter`]); a new note sets its census
+/// lever in `levers` ([`crate::ai::census::LV_NOTE_HIT`],
+/// [`crate::ai::census::LV_NOTE_NEAR`]).
+pub(super) fn events(
+    sim: &Sim,
+    me: UnitHandle,
+    u: &Unit,
+    st: &mut AiState,
+    levers: &mut u32,
+) -> u8 {
     let mut bits = 0;
-    if u.last_hit.is_some_and(|(_, t)| t >= st.last_think) {
+    let hit = u.last_hit.filter(|&(_, t)| t >= st.last_think);
+    if hit.is_some() {
         bits |= HIT;
     }
     if u.mount.is_some() {
         return bits;
     }
-    if near_miss(sim, me, u) {
+    if let Some((s, t)) = hit {
+        // Stamped with the hit's own tick: the window runs from the hit,
+        // however many ticks pass before the next think, and a hit is
+        // noted once (a later note, a near miss's, is not overwritten by it).
+        if st.shot_by.is_none_or(|(_, n)| t > n) && note_shooter(sim, u, st, s, t) {
+            *levers |= crate::ai::census::LV_NOTE_HIT;
+        }
+    }
+    let mut near = near_misses(sim, me, u).peekable();
+    if near.peek().is_some() {
         bits |= NEAR;
+        // The first near bolt whose owner stands in the return band: a near
+        // miss from close by earlier in the bolt list does not hide it.
+        if near.any(|owner| note_shooter(sim, u, st, owner, sim.tick)) {
+            *levers |= crate::ai::census::LV_NOTE_NEAR;
+        }
     }
     if new_in_sight(sim, me, u, st) {
         bits |= SEEN;
@@ -53,17 +78,45 @@ pub(super) fn events(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState) -> u8 {
     bits
 }
 
-/// An enemy bolt's last step passed within [`NEAR_MISS`] of `u`'s body (the
-/// segment from its feet to its eye).
-fn near_miss(sim: &Sim, me: UnitHandle, u: &Unit) -> bool {
+/// [ours] (the maintainer, 2026-11-20) Note `shooter` as the enemy who shot
+/// at bot `u` on foot at tick `at`, when he stands past its hand weapon's
+/// opening range and within its round's reach
+/// ([`crate::perception::return_band`]); nearer, the bot's own sight and
+/// trigger answer him as before. Whether he was noted.
+fn note_shooter(sim: &Sim, u: &Unit, st: &mut AiState, shooter: UnitHandle, at: u64) -> bool {
+    let Some((open, reach)) = crate::perception::return_band(sim, u) else {
+        return false;
+    };
+    let Some(o) = sim.unit(shooter).filter(|o| sim.hostile(u.team, o.team)) else {
+        return false;
+    };
+    let d2 = (o.capsule().center() - u.ai_eye()).length_squared();
+    let noted = d2 > open * open && d2 <= reach * reach;
+    if noted {
+        st.shot_by = Some((shooter, at));
+    }
+    noted
+}
+
+/// The owners of the enemy bolts (in the sim's bolt order) whose last step
+/// passed within [`NEAR_MISS`] of `u`'s body (the segment from its feet to
+/// its eye).
+fn near_misses<'a>(
+    sim: &'a Sim,
+    me: UnitHandle,
+    u: &'a Unit,
+) -> impl Iterator<Item = UnitHandle> + 'a {
     let (feet, eye) = (u.soldier.pos, u.muzzle());
-    sim.bolts.iter().any(|b| {
-        if !sim.hostile(u.team, b.team) || b.owner == me {
-            return false;
-        }
-        let from = b.pos - b.vel * crate::TICK_DT;
-        seg_seg_dist(from, b.pos, feet, eye) < NEAR_MISS
-    })
+    sim.bolts
+        .iter()
+        .filter(move |b| {
+            if !sim.hostile(u.team, b.team) || b.owner == me {
+                return false;
+            }
+            let from = b.pos - b.vel * crate::TICK_DT;
+            seg_seg_dist(from, b.pos, feet, eye) < NEAR_MISS
+        })
+        .map(|b| b.owner)
 }
 
 /// An enemy within [`SIGHT`], in `u`'s view and in the line of its eye, that

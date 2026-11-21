@@ -16,7 +16,9 @@
 //!   blasts and Force powers already spare). A friend's credited fall is a
 //!   team kill.
 //! - **What it credits.** A death by [`DeathCause::Fall`], the kill floor, a
-//!   mission death region or a landing under the map while it is set goes
+//!   mission death region, a landing under the map or the rescue's kill of a
+//!   soldier shut in a solid ([`DeathCause::Embedded`], `sim/rescue.rs`:
+//!   like a fall, the maintainer's rule) while it is set goes
 //!   through the kill credit ([`Event::Kill`], the attacker's kill count, team
 //!   kills, a hero's kill heal), followed by an [`Event::ForcedDeath`] that
 //!   keeps the death's cause for the black box. Water and damage regions wear
@@ -144,6 +146,7 @@ impl Sim {
                 | DeathCause::KillFloor
                 | DeathCause::DeathRegion
                 | DeathCause::UnderMap
+                | DeathCause::Embedded
         ) {
             return None;
         }

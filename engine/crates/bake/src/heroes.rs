@@ -102,6 +102,9 @@ pub fn bake_heroes(disc: &Path, out: &Path) -> Result<HeroBake> {
         }
     }
     let mut result = HeroBake::default();
+    // As the DLC bake: a held model that draws a hero body's sheet keeps the
+    // alpha the body was written with (`crate::soldier::bake_weapon_with`).
+    let mut body_flags: HashMap<String, u32> = HashMap::new();
     let mut closure = BTreeSet::new();
     let mut needed_models = BTreeSet::new();
     let mut needed_textures = BTreeSet::new();
@@ -139,6 +142,9 @@ pub fn bake_heroes(disc: &Path, out: &Path) -> Result<HeroBake> {
                 "hero {}: {} bones, {} clips, cloths {:?}",
                 c.name, baked.bones, baked.clips, baked.cloths
             );
+            for (name, flags) in baked.texture_flags {
+                *body_flags.entry(name).or_default() |= flags;
+            }
             result.soldiers.push(geometry);
         }
         // Include every referenced ancestor slot as well: an overridden slot's
@@ -204,7 +210,13 @@ pub fn bake_heroes(disc: &Path, out: &Path) -> Result<HeroBake> {
         .collect::<Vec<_>>()
         .join(",");
     for model in needed_models {
-        crate::soldier::bake_weapon(&sources, &model, &out.to_string_lossy(), None)?;
+        crate::soldier::bake_weapon_with(
+            &sources,
+            &model,
+            &out.to_string_lossy(),
+            None,
+            &body_flags,
+        )?;
         result.weapons.push(model);
     }
     let flags: HashMap<_, _> = needed_textures

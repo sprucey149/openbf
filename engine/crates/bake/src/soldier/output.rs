@@ -472,6 +472,7 @@ pub fn bake_soldier_anims(
         textures,
         cloths: cloth_names,
         aabb: (min, max),
+        texture_flags: flags,
     })
 }
 
@@ -614,6 +615,52 @@ pub fn bake_weapon(
     outdir: &str,
     pc_lvl: Option<&str>,
 ) -> Result<BakedWeapon> {
+    bake_weapon_with(
+        lvl_path,
+        model,
+        outdir,
+        pc_lvl,
+        &std::collections::HashMap::new(),
+    )
+}
+
+/// [`bake_flags`] of a weapon model, ORed with `prior`: the flags an earlier
+/// bake into the same folder already decided its sheets by. A weapon that
+/// draws a sheet a soldier also draws (Kit Fisto's fist and foot models
+/// name his body sheet with plain 0x1) must not rewrite it opaque: the
+/// body's specular pass reads that alpha as its gloss weight.
+pub fn weapon_flags(
+    m: &mungefs::model::Model,
+    prior: &std::collections::HashMap<String, u32>,
+) -> std::collections::HashMap<String, u32> {
+    merge_prior(bake_flags(m), prior)
+}
+
+/// `flags` with each sheet's `prior` flags ORed in; a sheet `prior` does not
+/// name keeps its own.
+pub(crate) fn merge_prior(
+    mut flags: std::collections::HashMap<String, u32>,
+    prior: &std::collections::HashMap<String, u32>,
+) -> std::collections::HashMap<String, u32> {
+    for (name, f) in flags.iter_mut() {
+        if let Some(p) = prior.get(name) {
+            *f |= p;
+        }
+    }
+    flags
+}
+
+/// [`bake_weapon`] after a soldier bake into the same folder: `prior` holds
+/// the per-sheet flags that bake wrote its textures with
+/// ([`crate::soldier::BakedSoldier::texture_flags`]), so a sheet both draw
+/// keeps the alpha the soldier needs ([`weapon_flags`]).
+pub fn bake_weapon_with(
+    lvl_path: &str,
+    model: &str,
+    outdir: &str,
+    pc_lvl: Option<&str>,
+    prior: &std::collections::HashMap<String, u32>,
+) -> Result<BakedWeapon> {
     let pc_resolved = pc_lvl.map(crate::resolve_ci);
     let pc = pc_resolved
         .as_deref()
@@ -659,7 +706,7 @@ pub fn bake_weapon(
         if m.name.to_ascii_lowercase().starts_with("hud_") {
             crate::glb::hud_model_to_glb(&m, &crate::alpha::legacy_per_texture_or(&m))?
         } else {
-            crate::glb::model_to_glb(&m, &crate::alpha::legacy_per_texture_or(&m), false)?
+            crate::glb::model_to_glb(&m, &crate::alpha::weapon_alphas(&m), false)?
         },
     )?;
     let wanted: Vec<String> = m
@@ -668,7 +715,7 @@ pub fn bake_weapon(
         .filter_map(crate::alpha::segment_texture)
         .map(|n| n.to_ascii_lowercase())
         .collect();
-    let flags = bake_flags(&m);
+    let flags = weapon_flags(&m, prior);
     let mut textures = Vec::new();
     for k in std::iter::once(home).chain((0..inners.len()).filter(|&k| k != home)) {
         let rest: Vec<String> = wanted

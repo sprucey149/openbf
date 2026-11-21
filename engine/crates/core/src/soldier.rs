@@ -528,6 +528,11 @@ pub struct Soldier {
     /// the hover, a fall, a tumble, the get-up or death leave it as he is
     /// (`FUN_00247bf8`). No gravity acts while he has one.
     pub platform_vel: Option<Vec3>,
+    /// Issue #182 B1 (ours): the low stance the sim KEPT him in because the
+    /// taller one had no headroom (`Sim::keep_headroom`), while he is still
+    /// in it. He stands (or crouches) on his own once there is room. `None`
+    /// in every ordinary tick, and then not hashed.
+    pub held_low: Option<Stance>,
     /// The previous tick's pad word — the EDGE source for every contextual
     /// button, and (Phase D) for the squad commands `Sim::step` phase 0b reads.
     /// NOT hashed: it is a copy of a pad the input log already determines, so a
@@ -806,6 +811,7 @@ impl Soldier {
             jump_animation: None,
             jump_animation_serial: 0,
             platform_vel: None,
+            held_low: None,
             prev_buttons: 0,
         }
     }
@@ -1275,7 +1281,60 @@ impl Soldier {
         if self.knock_rules != KNOCK_RULES {
             eat(b"FORCE_KNOCK");
         }
+        if let Some(low) = self.held_low {
+            eat(b"HELD_LOW");
+            eat(&[low as u8]);
+        }
     }
+
+    /// Issue #182 B1: what a stance change this tick may have to undo.
+    pub fn stance_snap(&self) -> StanceSnap {
+        StanceSnap {
+            stance: self.stance,
+            time_in_stance: self.time_in_stance,
+            stand_age: self.stand_age,
+            lock_timer: self.lock_timer,
+            lock_hard: self.lock_hard,
+        }
+    }
+
+    /// Issue #182 B1 (ours): the tick grew him into a stance with no
+    /// headroom, so he stays `low` instead. Back in the stance he had
+    /// (`before`, a crouch or a prone whose stand-up was refused) the
+    /// refused change is undone as if never pressed: the stance's timer and
+    /// the lock run on. Into another (a roll ending crouched or prone, a
+    /// prone rising only to a crouch) it is an ordinary change that keeps
+    /// the lock the tick set.
+    pub(crate) fn hold_low(&mut self, low: Stance, before: &StanceSnap, dt: f32) {
+        if low == before.stance {
+            self.stance = low;
+            self.time_in_stance = before.time_in_stance + dt;
+            self.stand_age = before.stand_age + dt;
+            self.lock_timer = (before.lock_timer - dt).fmax(0.0);
+            self.lock_hard = before.lock_hard && self.lock_timer > 0.0;
+        } else {
+            self.set_stance(low);
+        }
+        self.held_low = Some(low);
+    }
+
+    /// Issue #182 B1 (ours): a stance he was held in has room to grow now:
+    /// up to `to`, still held while that is not a stand.
+    pub(crate) fn rise_from_held(&mut self, to: Stance) {
+        self.set_stance(to);
+        self.held_low = (to == Stance::Crouch).then_some(to);
+    }
+}
+
+/// Issue #182 B1: a soldier's stance and its timers before a tick
+/// ([`Soldier::stance_snap`]).
+#[derive(Clone, Copy, Debug)]
+pub struct StanceSnap {
+    pub stance: Stance,
+    pub time_in_stance: f32,
+    pub stand_age: f32,
+    pub lock_timer: f32,
+    pub lock_hard: bool,
 }
 
 mod air;

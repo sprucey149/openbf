@@ -22,8 +22,8 @@
 use anyhow::{anyhow, Result};
 use manifest::{
     FxBeam, FxBlend, FxColorNode, FxColorOp, FxEffect, FxEmitter, FxGeometry, FxLightning,
-    FxPositionNode, FxPositionOp, FxRange, FxScalarNode, FxScalarOp, FxSet, FxShape, FxSpawner,
-    FxTransformer, FxType,
+    FxPositionNode, FxPositionOp, FxRange, FxScalarNode, FxScalarOp, FxSet, FxShape, FxShield,
+    FxSpawner, FxTransformer, FxType,
 };
 use mungefs::fx::LightningBoltConfig;
 use mungefs::lightbeam::LightBeamConfig;
@@ -31,6 +31,7 @@ use mungefs::particle::{
     BlendMode, ColorMode, ColorOp, Effect, Emitter, GeometryType, PositionOp, Range, ScalarOp,
     Shape,
 };
+use mungefs::shield::ShieldConfig;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -53,6 +54,12 @@ pub struct Collected {
     pub effects: Vec<Effect>,
     pub beams: Vec<LightBeamConfig>,
     pub lightning: Vec<LightningBoltConfig>,
+    /// `Shield` records (`mungefs::shield`). Collected always, written only
+    /// when [`Collected::write_shields`] is set (the DLC layer): a retail
+    /// layer's droideka shell is drawn from its class, and its file keeps
+    /// the bytes it had.
+    pub shields: Vec<ShieldConfig>,
+    pub write_shields: bool,
     /// Copies of an already-seen NAME whose tree differs from the first.
     pub differing_copies: Vec<u32>,
 }
@@ -76,6 +83,17 @@ impl Collected {
                     .any(|b| b.name.eq_ignore_ascii_case(&bolt.name))
                 {
                     out.lightning.push(bolt);
+                }
+            }
+            if let Some(sh) =
+                ShieldConfig::parse(c).map_err(|err| anyhow!("fx__ 0x{:X}: {err}", c.offset))?
+            {
+                if !out
+                    .shields
+                    .iter()
+                    .any(|x| x.name.eq_ignore_ascii_case(&sh.name))
+                {
+                    out.shields.push(sh);
                 }
             }
             if let Some(b) =
@@ -153,7 +171,16 @@ impl Collected {
         have_textures: &[String],
         have_models: &[String],
     ) -> Result<Option<FxSet>> {
-        if self.effects.is_empty() && self.beams.is_empty() && self.lightning.is_empty() {
+        let shields: Vec<FxShield> = if self.write_shields {
+            self.shields.iter().map(shield).collect()
+        } else {
+            Vec::new()
+        };
+        if self.effects.is_empty()
+            && self.beams.is_empty()
+            && self.lightning.is_empty()
+            && shields.is_empty()
+        {
             // A rebake into a used directory must not keep a stale file.
             let _ = std::fs::remove_file(outdir.join(EFFECTS_FILE));
             return Ok(None);
@@ -164,6 +191,7 @@ impl Collected {
             effects: self.effects.iter().map(|e| effect(e, &names)).collect(),
             beams: self.beams.iter().filter_map(beam).collect(),
             lightning: self.lightning.iter().map(lightning).collect(),
+            shields,
         };
         crate::write_ron(&outdir.join(EFFECTS_FILE), &set)?;
         let emitters: usize = self.effects.iter().map(|e| e.all_emitters().len()).sum();
@@ -177,6 +205,9 @@ impl Collected {
         }
         if !set.lightning.is_empty() {
             eprintln!("effects: {} lightning definition(s)", set.lightning.len());
+        }
+        if !set.shields.is_empty() {
+            eprintln!("effects: {} shield record(s)", set.shields.len());
         }
         for b in self.beams.iter().filter(|b| b.color.is_none()) {
             eprintln!("effects: light beam {} authors no Color, not drawn", b.name);
@@ -212,10 +243,22 @@ impl Collected {
 /// `mungefs::content_chunks`). PS2 textures only: the classic-plus tier is
 /// not looked up for effect sheets. Writes nothing for a side with none.
 pub fn bake_side(lvl_path: &str, outdir: &str, game: &str) -> Result<Option<FxSet>> {
+    bake_side_with(lvl_path, outdir, game, false)
+}
+
+/// [`bake_side`], also writing the layer's `Shield` records when `shields`
+/// (the DLC heroes' layer: the Force ball's `fisto_bubble`).
+pub fn bake_side_with(
+    lvl_path: &str,
+    outdir: &str,
+    game: &str,
+    shields: bool,
+) -> Result<Option<FxSet>> {
     let buf = std::fs::read(lvl_path).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
-    let fx = Collected::from_chunks(chunks.iter())?;
+    let mut fx = Collected::from_chunks(chunks.iter())?;
+    fx.write_shields = shields;
     if fx.effects.is_empty() && fx.beams.is_empty() && fx.lightning.is_empty() {
         eprintln!("effects: {lvl_path} holds no particle effect");
         // As `Collected::write`: no stale file from an earlier bake.
@@ -277,6 +320,23 @@ pub fn bake_side(lvl_path: &str, outdir: &str, game: &str) -> Result<Option<FxSe
         .collect();
     let have_textures = crate::soldier::bake_textures_flagged(inner, &wanted, &flags, out, None)?;
     fx.write(out, game, &have_textures, &have_models)
+}
+
+fn shield(s: &ShieldConfig) -> FxShield {
+    FxShield {
+        hash: mungefs::fnv1a_lowercase(&s.name),
+        name: s.name.clone(),
+        shape: s.shape.clone(),
+        texture: s.texture.clone(),
+        color: s.color,
+        specular_color: s.specular_color,
+        radius: s.radius,
+        height: s.height,
+        turn_on_time: s.turn_on_time,
+        turn_off_time: s.turn_off_time,
+        scroll_rate: s.scroll_rate,
+        unread_b28af6f4: s.unread_b28af6f4,
+    }
 }
 
 fn lightning(b: &LightningBoltConfig) -> FxLightning {
@@ -466,5 +526,88 @@ mod tests {
         assert_eq!(n.len(), lines, "two names share a hash");
         assert_eq!(n.len(), 382);
         assert_eq!(n.get(&0xc42b_8278), Some(&"ord_explosion"));
+    }
+
+    fn chunk(tag: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut v = tag.to_vec();
+        v.extend((payload.len() as u32).to_le_bytes());
+        v.extend(payload);
+        while v.len() % 4 != 0 {
+            v.push(0);
+        }
+        v
+    }
+
+    fn data(name: &str, nums: &[f32], strs: &[&str]) -> Vec<u8> {
+        let argc = (nums.len() + strs.len()) as u8;
+        let mut blob = Vec::new();
+        let mut slots: Vec<u32> = Vec::new();
+        for s in strs {
+            slots.push(4 * u32::from(argc) + blob.len() as u32);
+            blob.extend(s.as_bytes());
+            blob.push(0);
+        }
+        slots.extend(nums.iter().map(|n| n.to_bits()));
+        let mut p = mungefs::fnv1a_lowercase(name).to_le_bytes().to_vec();
+        p.push(argc);
+        for s in &slots {
+            p.extend(s.to_le_bytes());
+        }
+        p.extend((blob.len() as u32).to_le_bytes());
+        p.extend(blob);
+        chunk(b"DATA", &p)
+    }
+
+    /// The DLC's `fisto_bubble` (built from its authored field values) joins
+    /// the DLC layer's file as a shield record, and only there: a retail
+    /// layer keeps the file it wrote.
+    #[test]
+    fn the_force_balls_shield_record_is_written_by_the_dlc_layer_only() {
+        let scope = [
+            data("Type", &[], &["droideka"]),
+            data("Texture", &[], &["cis_inf_droideka_shield"]),
+            data("Color", &[0.0, 192.0, 220.0, 255.0], &[]),
+            data("SpecularColor", &[140.0, 150.0, 100.0], &[]),
+            data("Radius", &[0.75], &[]),
+            data("Height", &[0.75], &[]),
+            data("TurnOnTime", &[2.0], &[]),
+            data("TurnOffTime", &[0.15], &[]),
+            data("ScrollRate", &[1.0], &[]),
+        ]
+        .concat();
+        let mut body = chunk(
+            b"NAME",
+            &mungefs::fnv1a_lowercase("fisto_bubble").to_le_bytes(),
+        );
+        body.extend(data("Shield", &[], &["fisto_bubble"]));
+        body.extend(chunk(b"SCOP", &scope));
+        let buf = chunk(b"fx__", &body);
+        let c = mungefs::chunks(&buf).next().unwrap().unwrap();
+        let mut fx = Collected::from_chunks([&c]).unwrap();
+        assert!(
+            fx.effects.is_empty() && fx.beams.is_empty(),
+            "not a particle effect"
+        );
+        assert_eq!(fx.shields.len(), 1);
+        let dir = std::env::temp_dir().join(format!("openbf_fx_shield_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(
+            fx.write(&dir, "bf2", &[], &[]).unwrap().is_none(),
+            "retail: no file"
+        );
+        assert!(!dir.join(EFFECTS_FILE).exists());
+        fx.write_shields = true;
+        let set = fx.write(&dir, "bf2", &[], &[]).unwrap().unwrap();
+        let s = &set.shields[0];
+        assert_eq!(s.hash, 0xcb11_ec3f);
+        assert_eq!((s.radius, s.color), (0.75, [0, 192, 220, 255]));
+        assert_eq!(
+            (s.specular_color, s.turn_on_time),
+            ([140, 150, 100, 255], 2.0)
+        );
+        let back: FxSet =
+            ron::from_str(&std::fs::read_to_string(dir.join(EFFECTS_FILE)).unwrap()).unwrap();
+        assert_eq!(back.shields, set.shields);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

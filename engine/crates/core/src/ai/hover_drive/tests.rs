@@ -45,6 +45,7 @@ fn the_sticks_are_the_ps2s_on_347_ticks() {
             since_end: r[39],
             since_state2: r[40],
             held: [r[41], r[42]],
+            aim: None,
         };
         let mut state = r[34] as u8;
         let mut fwd0 = v3(r, 35);
@@ -102,6 +103,7 @@ fn order(goal: Vec3) -> Order {
         since_end: f32::MAX,
         since_state2: f32::MAX,
         held: [0.0; 2],
+        aim: None,
     }
 }
 

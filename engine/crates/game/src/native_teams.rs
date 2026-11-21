@@ -136,6 +136,25 @@ pub fn install(
             if has_droideka {
                 crate::droideka::install_classes(&mut classes, &map_dir, &mission.source_game);
             }
+            // `[ours]` (maintainer, 2026-11-20, `crate::jawa`): every Jawa
+            // carries the arc caster; outside Hunt it is toned down.
+            if classes.iter().any(crate::jawa::needs_arc_caster) {
+                match crate::jawa::donor(classes_dir) {
+                    Ok(donor) => {
+                        for class in &mut classes {
+                            if let Err(e) = crate::jawa::arm(&donor, class) {
+                                eprintln!("native Jawa keeps its own kit ({e:#})");
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("native Jawa keeps its own kit (no BF2 arc caster: {e:#})"),
+                }
+            }
+            if !mission.is_hunt() {
+                for class in &mut classes {
+                    crate::jawa::tame(class);
+                }
+            }
             Ok(crate::roster::FactionRoster {
                 faction: faction.to_owned(),
                 classes,
@@ -148,11 +167,34 @@ pub fn install(
                 continue;
             }
         };
-        let table: Vec<_> = roster
+        let mut table: Vec<_> = roster
             .classes
             .iter()
             .map(|class| class.register(&mut walk.sim, &mut names))
             .collect();
+        // `[ours]` (maintainer, 2026-11-19): Jabba's guards never capture,
+        // neutralise or contest a command post. On the disc they can (the
+        // guard class sets CapturePosts and a locals team friendly to
+        // neither army keeps its own capture affiliation,
+        // analysis/re-cp-capture.md §2-3). Only the Gamorreans: the Dune Sea
+        // Tuskens retake their own posts to keep spawning (§6.1).
+        if faction == "gam" {
+            for class in &mut table {
+                class.capture_posts = false;
+            }
+        }
+        // `[ours]` (maintainer, 2026-11-20, `crate::jawa`): the Jawas are
+        // friendly to both armies on both discs, so they never took a post;
+        // fighting both armies now, they still take none.
+        let jawas = roster
+            .classes
+            .iter()
+            .any(|c| crate::jawa::is_jawa(&c.class));
+        for (class, built) in table.iter_mut().zip(&roster.classes) {
+            if crate::jawa::is_jawa(&built.class) {
+                class.capture_posts = false;
+            }
+        }
         let custom = crate::animator::custom::for_mission(classes_dir, mission).unwrap_or_default();
         let visuals = roster
             .classes
@@ -222,6 +264,19 @@ pub fn install(
                 unassigned,
             },
         );
+        // The palace script's `AddAIGoal(3, "Deathmatch", 100)`: the guards
+        // go after a random foe of either army, not just the nearest
+        // (maintainer, 2026-11-19: hostile to both armies; the census of
+        // 2026-11-20 had 63 % of the guards' kills on one army in the
+        // Clone Wars era with the nearest-enemy hunt).
+        if faction == "gam" {
+            walk.sim.set_native_deathmatch(team);
+        }
+        // Outside Hunt the Jawas fight both armies (`crate::jawa`); their
+        // authored friendship still gives them the posts' ally paths.
+        if jawas && !mission.is_hunt() {
+            walk.sim.set_native_neutral(team);
+        }
     }
     if walk.native_teams.is_empty() {
         return;

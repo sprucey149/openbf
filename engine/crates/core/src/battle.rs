@@ -87,17 +87,6 @@ pub enum SpawnOutcome {
 #[derive(Debug, Clone)]
 pub struct Battle {
     pub teams: [TeamState; 2],
-    /// A mission's EXTRA per-death drains: `death_drain[dying][paying]`
-    /// tickets `paying` loses when a unit of `dying` dies, on top of the one
-    /// [`Battle::on_death`] always takes. All zero except on BF2 Death Star
-    /// conquest, whose `ScriptPostLoad` registers `OnCharacterDeathTeam` →
-    /// `AddReinforcements(1, -1)` for Lua team 1 (the port's team 0), so a
-    /// team-0 death costs team 0 two tickets (analysis/re-time-limit.md §6
-    /// [V][O]; queue DSD). PROVISIONAL [O]: that the filter selects the DYING
-    /// character's team is [D], and the floor at 0 is ours (§6 [H]). Not in
-    /// `Sim::hash`: it is fixed setup, and what it spends lands in
-    /// `reinforcements`, which is.
-    pub death_drain: [[u32; 2]; 2],
     pub unlimited_reinforcements: bool,
     pub unlimited_teams: [bool; 2],
     pub campaign_rules: bool,
@@ -110,17 +99,16 @@ impl Battle {
                 TeamState::new(reinforcements[0]),
                 TeamState::new(reinforcements[1]),
             ],
-            death_drain: [[0; 2]; 2],
             unlimited_reinforcements: false,
             unlimited_teams: [false; 2],
             campaign_rules: false,
         }
     }
 
-    /// A unit died: the team pays one reinforcement, plus any mission drain
-    /// ([`Battle::death_drain`]). A drain can leave the paying team with
-    /// fewer tickets than live units; the next [`Battle::tick_bleed`] sheds
-    /// the AI even when command-post bleed is clamped off.
+    /// A unit died: its team pays exactly one reinforcement, on every map and
+    /// in every ticket mode. openbf runs no per-mission extra death charge
+    /// (BF2 Death Star's script-side second ticket is dropped on purpose;
+    /// analysis/plan/FEATURE_SET.md "Every death costs one ticket").
     pub fn on_death(&mut self, team: usize, was_player: bool) {
         let t = &mut self.teams[team];
         if was_player {
@@ -145,13 +133,7 @@ impl Battle {
         // clamps on READ, but `Sim::hash` eats the raw field, so an unfloored
         // pool hashes a state neither disc can hold.
         t.reinforcements = (t.reinforcements - 1.0).fmax(0.0);
-        debug_assert!(t.invariant_holds() || self.death_drain != [[0; 2]; 2]);
-        for (paying, &n) in self.death_drain[team].iter().enumerate() {
-            if n > 0 && !self.unlimited_teams[paying] {
-                let p = &mut self.teams[paying];
-                p.reinforcements = (p.reinforcements - n as f32).fmax(0.0);
-            }
-        }
+        debug_assert!(t.invariant_holds());
     }
 
     /// A unit wants to spawn. Players always fit while any reinforcement
@@ -187,9 +169,9 @@ impl Battle {
 
     /// Spend ticket bleed and repair the no-overspawn invariant; returns AI
     /// shed per team this tick. The sim's command-post bleed clamps at the
-    /// live count, but mission death drains can leave excess AI even with
-    /// zero bleed (`analysis/re-bleed-reachability.md`). Direct callers may
-    /// also supply an unclamped bleed rate.
+    /// live count; the repair stays unconditional as a guard because direct
+    /// callers may supply an unclamped bleed rate
+    /// (`analysis/re-bleed-reachability.md`).
     pub fn tick_bleed(&mut self, dt: f32) -> [u32; 2] {
         if self.campaign_rules {
             return [0; 2];
@@ -344,39 +326,6 @@ mod tests {
         assert_eq!(c.teams[0].reinforcements, 1.0);
         c.on_death(0, false);
         assert_eq!(c.teams[0].reinforcements, 0.0);
-    }
-
-    /// DSD: Death Star conquest's extra drain — a team-0 death costs team 0
-    /// two tickets, a team-1 death one, and neither pool drops below 0; the
-    /// next bleed tick sheds the AI the drain left without a ticket.
-    #[test]
-    fn a_mission_death_drain_costs_the_extra_ticket_floored_at_zero() {
-        let mut b = Battle::new([10, 10]);
-        b.death_drain[0][0] = 1;
-        b.teams[0].alive_ai = 3;
-        b.teams[1].alive_ai = 3;
-        b.on_death(0, false);
-        assert_eq!(b.teams[0].tickets(), 8, "a team-0 death costs two");
-        assert_eq!(b.teams[1].tickets(), 10);
-        b.on_death(1, false);
-        assert_eq!(b.teams[0].tickets(), 8);
-        assert_eq!(b.teams[1].tickets(), 9, "a team-1 death costs one");
-
-        // Floor: one ticket left, a team-0 death spends both halves of it.
-        let mut c = Battle::new([1, 10]);
-        c.death_drain[0][0] = 1;
-        c.teams[0].alive_ai = 3;
-        c.on_death(0, false);
-        assert_eq!(c.teams[0].reinforcements, 0.0, "never below 0");
-        // 2 AI alive on 0 tickets: the bleed tick sheds them.
-        assert_eq!(c.tick_bleed(1.0 / 30.0), [2, 0]);
-        assert!(c.teams[0].invariant_holds());
-
-        // With the drain empty a death is the plain one ticket.
-        let mut d = Battle::new([10, 10]);
-        d.teams[0].alive_ai = 1;
-        d.on_death(0, false);
-        assert_eq!(d.teams[0].tickets(), 9);
     }
 
     /// A mid-bleed fraction is floored too: 0.5 − 1 is 0 in the hash, not −0.5.

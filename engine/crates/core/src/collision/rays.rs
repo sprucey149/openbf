@@ -412,7 +412,9 @@ const ENCLOSE_SIDE_MIN: usize = 7;
 const ENCLOSE_PASSES: usize = 16;
 
 impl CollisionWorld {
-    /// The SOLDIER-layer mesh body `p` is shut inside, if any (card VMESH;
+    /// The SOLDIER-layer body `p` is shut inside, if any (card VMESH;
+    /// issue #182 B5: a primitive whose volume holds `p` too, ahead of the
+    /// rays;
     /// ours, the PS2 has no such query): two of three rays up and seven of
     /// eight sideways from `p` each cross that one body's faces an ODD
     /// number of times. A closed prop (BF1 Endor's cp2 boulder) answers on every ray;
@@ -426,11 +428,16 @@ impl CollisionWorld {
         let mut found: Option<*const Body> = None;
         self.visit_xz(p.x, p.x, p.z, p.z, HullFilter::Static, |body| {
             let inside = body.aabb.min.cmple(p).all() && p.cmple(body.aabb.max).all();
-            if found.is_some()
-                || !body.layers.contains(Layers::SOLDIER)
-                || !matches!(body.shape, super::shape::Shape::Mesh(_))
-                || !inside
-            {
+            if found.is_some() || !body.layers.contains(Layers::SOLDIER) || !inside {
+                return;
+            }
+            // Issue #182 B5 (ours): a primitive is a solid, so a point in
+            // its volume is shut in it (a crate, a pillar, BF1 KAS2 City
+            // Hall's solid lobes), no parity needed.
+            if !matches!(body.shape, super::shape::Shape::Mesh(_)) {
+                if body.solid_holds(p) {
+                    found = Some(body as *const Body);
+                }
                 return;
             }
             let reach = (body.aabb.max - body.aabb.min).length() + 1.0;
@@ -1021,27 +1028,33 @@ mod tests {
     }
 
     /// PROVISIONAL `TERRAIN_BURY`: the heightfield is a one-sided sheet, so a
-    /// unit far enough UNDER an uncut one is underground and the model floor
-    /// beneath it is the ground (BF2 Polis Massa's under-surface base).
+    /// unit far enough UNDER an uncut one, with a roof of its own between
+    /// him and the sheet, is underground and the model floor beneath it is
+    /// the ground (BF2 Polis Massa's under-surface base). Issue #182 B3:
+    /// with the sky over him instead he is under the map, and the sheet
+    /// stays his ground.
     #[test]
     fn unit_under_an_uncut_heightfield_stands_on_the_model_floor() {
-        let s = sim_with(world_from_triangles(floor_quad(10.0, 5.0)), Some(40.0));
-        // 30 m under the surface, standing on the box: the terrain is absent.
-        // (The probe is 330 m long, so the mesh hit is only float-close.)
+        let mut tris = floor_quad(10.0, 5.0);
+        tris.extend(floor_quad(30.0, 5.0));
+        let s = sim_with(world_from_triangles(tris), Some(40.0));
+        // 30 m under the surface, standing on the box under its roof: the
+        // terrain is absent. (The probe is 330 m long, so the mesh hit is
+        // only float-close.)
         let g = s.ground_under(Vec3::new(0.0, 10.2, 0.0), false);
         assert!((g - 10.0).abs() < 1e-4, "{g}");
         // 1 m under the surface: inside the bury depth, so the terrain still
         // wins outright and snaps the unit up onto it.
         assert_eq!(s.ground_under(Vec3::new(0.0, 39.0, 0.0), false), 40.0);
-        // 2.5 m under: past the bury depth — falls through to the box.
-        let g = s.ground_under(Vec3::new(0.0, 37.5, 0.0), false);
-        assert!((g - 10.0).abs() < 1e-4, "{g}");
-        // ... and with nothing under it, to NO_GROUND.
+        // 2.5 m under, over the roof: nothing between him and the sheet.
+        assert_eq!(s.ground_under(Vec3::new(0.0, 37.5, 0.0), false), 40.0);
+        // Under the sky with no roof at all: the sheet, not NO_GROUND, and
+        // not the box below (the old rule's walk under the map).
+        let open = sim_with(world_from_triangles(floor_quad(10.0, 5.0)), Some(40.0));
+        assert_eq!(open.ground_under(Vec3::new(0.0, 37.5, 0.0), false), 40.0);
+        assert_eq!(open.ground_under(Vec3::new(0.0, 10.2, 0.0), false), 40.0);
         let bare = sim_with(CollisionWorld::default(), Some(40.0));
-        assert_eq!(
-            bare.ground_under(Vec3::new(0.0, 37.5, 0.0), false),
-            NO_GROUND
-        );
+        assert_eq!(bare.ground_under(Vec3::new(0.0, 37.5, 0.0), false), 40.0);
         // The surface itself is unaffected.
         assert_eq!(bare.ground_under(Vec3::new(0.0, 40.0, 0.0), false), 40.0);
     }
@@ -1590,5 +1603,33 @@ mod tests {
         roof_mesh.closed = false;
         let w = CollisionWorld::new(vec![roof_mesh], Vec::new());
         assert_eq!(w.enclosing(Vec3::new(0.0, 1.0, 0.0)), None, "under a slab");
+    }
+
+    /// Issue #182 B5: a point inside a box or cylinder PRIMITIVE is
+    /// enclosed by it (a crate, a pillar, KAS2 City Hall's lobes), which
+    /// the parity rays never asked; beside or over it, it is not.
+    #[test]
+    fn enclosing_finds_points_inside_primitives() {
+        let crate_box = Body::with_layers(
+            glam::Mat4::from_translation(Vec3::new(0.0, 1.0, 0.0)),
+            Shape::Box {
+                half: Vec3::new(2.0, 1.0, 2.0),
+            },
+            Layers::SOLDIER,
+        );
+        let pillar = Body::with_layers(
+            glam::Mat4::from_translation(Vec3::new(10.0, 3.0, 0.0)),
+            Shape::Cylinder {
+                radius: 1.0,
+                half_height: 3.0,
+            },
+            Layers::SOLDIER,
+        );
+        let w = CollisionWorld::new(vec![crate_box, pillar], Vec::new());
+        assert_eq!(w.enclosing(Vec3::new(0.5, 1.0, 0.5)), Some(0));
+        assert_eq!(w.enclosing(Vec3::new(10.3, 1.0, 0.0)), Some(1));
+        assert_eq!(w.enclosing(Vec3::new(2.5, 1.0, 0.0)), None, "beside");
+        assert_eq!(w.enclosing(Vec3::new(0.0, 2.5, 0.0)), None, "over it");
+        assert_eq!(w.enclosing(Vec3::new(11.5, 1.0, 0.0)), None, "beside");
     }
 }

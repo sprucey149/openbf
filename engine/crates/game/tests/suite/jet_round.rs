@@ -63,7 +63,6 @@ fn run(scene: &Scene, mission: &MissionDef, roster: &ClassRoster, seed: u32) -> 
     mission.apply_barriers(nav.as_mut());
     let mut sim = Sim::empty(seed);
     sim.battle = core::battle::Battle::new(mission.tickets());
-    mission.apply_death_drains(&mut sim.battle);
     sim.ground_rules = core::soldier::GroundRules::Bf2;
     sim.omni_radius = core::sim::omni_radius_for("bf2");
     scene.install_water(&mut sim);

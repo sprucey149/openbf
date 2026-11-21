@@ -231,7 +231,8 @@ impl Audio {
     }
 
     /// Pause or resume [`Bus::Game`] and [`Bus::Voice`] (the pause menu),
-    /// fading over [`PAUSE_FADE_SECS`]; nothing when already so. OURS: the
+    /// fading over [`PAUSE_FADE_SECS`]; nothing when already so. OURS (trace:
+    /// the original pause fade's length): the
     /// originals fade their in-game bus to silence while its voices run on,
     /// so a line or take that ends inside the pause is lost; here the buses
     /// stop, and everything on them resumes where it stopped.

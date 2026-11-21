@@ -10,10 +10,23 @@ pub fn team_counts(defaults: [u32; 2], pct: u32) -> [u32; 2] {
     team_counts_capped(defaults, pct, 32)
 }
 
-/// OURS: XL has 48 combatants per side at 100%.
-/// measure: live population and frame time on each XL map and era.
-pub fn xl_team_counts(pct: u32) -> [u32; 2] {
-    team_counts_capped([48; 2], pct, 96)
+/// XL's combatants per side at 100% Team Size, by Battlefront II world:
+/// the PC game's XL missions set up both teams with these counts
+/// (`geo1c_xl` 80, `hot1g_xl` 120, `kas2c_xl` and `kas2g_xl` 160), each with
+/// `SetSpawnDelay(10, 0.25)`. `None`: the world has no XL.
+pub fn xl_team_size(map: &str) -> Option<u32> {
+    match map.strip_prefix("bf2_").unwrap_or(map) {
+        "geo1" => Some(80),
+        "hot1" => Some(120),
+        "kas2" => Some(160),
+        _ => None,
+    }
+}
+
+/// XL's combatants per side: the world's [`xl_team_size`] scaled by Team
+/// Size, rounded to nearest, with no ceiling below [`MAX_TEAM_PCT`].
+pub fn xl_team_counts(base: u32, pct: u32) -> [u32; 2] {
+    team_counts_capped([base; 2], pct, base * MAX_TEAM_PCT / 100)
 }
 
 fn team_counts_capped(defaults: [u32; 2], pct: u32, cap: u32) -> [u32; 2] {
@@ -129,6 +142,18 @@ pub fn notes(s: Summary) -> [String; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xl_takes_the_retail_team_sizes_at_100_percent_without_a_ceiling() {
+        for (map, base) in [("bf2_geo1", 80), ("hot1", 120), ("bf2_kas2", 160)] {
+            let base_got = xl_team_size(map).unwrap();
+            assert_eq!(base_got, base, "{map}");
+            assert_eq!(xl_team_counts(base, 100), [base; 2]);
+            assert_eq!(xl_team_counts(base, MAX_TEAM_PCT), [base * 2; 2]);
+            assert_eq!(xl_team_counts(base, 50), [base / 2; 2]);
+        }
+        assert_eq!(xl_team_size("bf2_nab2"), None);
+    }
     #[test]
     fn percentages_round_halves_up_and_cap_the_pair_together() {
         assert_eq!(team_counts([31, 25], 50), [16, 13]);

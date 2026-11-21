@@ -1293,6 +1293,28 @@ pub struct FxSet {
     /// particle emitter defaults do not apply to this separate effect type.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lightning: Vec<FxLightning>,
+    /// `Shield` records the layer's ordnance names as its `TrailEffect`
+    /// (`mungefs::shield`): only the DLC layer writes them (the Force ball's
+    /// `fisto_bubble`); the droideka's own is drawn from its class.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shields: Vec<FxShield>,
+}
+
+/// A `Shield` effect record (`mungefs::shield::ShieldConfig`), by NAME hash.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct FxShield {
+    pub hash: u32,
+    pub name: String,
+    pub shape: String,
+    pub texture: Option<String>,
+    pub color: [u8; 4],
+    pub specular_color: [u8; 4],
+    pub radius: f32,
+    pub height: f32,
+    pub turn_on_time: f32,
+    pub turn_off_time: f32,
+    pub scroll_rate: f32,
+    pub unread_b28af6f4: f32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

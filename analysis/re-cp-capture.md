@@ -207,6 +207,9 @@ Component ctor default 0; entity-class ctors set it to 1 for `soldier` (BF1 `FUN
 `FUN_00250488`) and `walkerdroid` (BF1 `FUN_001d31d8`, BF2 `FUN_001fc3a8`); BF1 `trap` sets 0.
 Retail: BF1 `all_inf_lukeskywalker(snow)`, `imp_inf_darthvader`, `cis_inf_countdooku`,
 `rep_inf_macewindu` = 0; BF2 only `gam_inf_gamorreanguard` = 1 (redundant). [V]
+[ours] 2026-11-19: the port turns `CapturePosts` off for every Gamorrean (faction `gam`) class
+(`game/src/native_teams.rs`), so the guards never capture, neutralise or contest a post. Tuskens
+and other natives keep the disc rule.
 
 ---
 

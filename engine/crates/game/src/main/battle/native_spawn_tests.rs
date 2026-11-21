@@ -158,6 +158,17 @@ fn gamorreans(era: &str) {
         let path = sounds.take_path(name, 0).expect("guard audio sample");
         assert!(pak::is_file(path), "guard audio sample exists");
     }
+    assert!(
+        walk.sim.native_deathmatch(2),
+        "{era}: the palace's Deathmatch goal"
+    );
+    // `[ours]` (2026-11-19): the guards never count for a post.
+    assert!(
+        native
+            .iter()
+            .all(|(_, u)| !u.capture_posts && !u.spec.capture_posts),
+        "{era}: guards spawn without CapturePosts"
+    );
     for (_, guard) in &native {
         let weapon = &walk.sim.weapon_classes[guard.weapon_class];
         assert!(weapon.saber.as_ref().is_some_and(|s| !s.clips.is_empty()));
@@ -188,6 +199,69 @@ fn gamorreans(era: &str) {
         !walk.native_teams.is_empty(),
         "native roster survives stepping"
     );
+}
+
+/// `[ours]` (maintainer, 2026-11-19): a Gamorrean guard held inside each of
+/// the palace's five posts, with its own (spawned) CapturePosts flag, never
+/// counts there: the post's owner and capture state stay as they were.
+fn gamorreans_hold_no_post(era: &str) {
+    let root = PathBuf::from(std::env::var_os("GAMORREAN_ASSETS").expect("owned Gamorrean bake"));
+    let missions = PathBuf::from(std::env::var_os("GAMORREAN_MISSIONS").expect("mission input"));
+    let mut w = load_from(&root, &missions, "bf2_tat3", era);
+    let guards: Vec<usize> = w
+        .sim
+        .alive_units()
+        .filter(|(_, u)| u.team == 2)
+        .map(|(h, _)| h.index as usize)
+        .collect();
+    assert_eq!(guards.len(), 2, "{era}: the guards at launch");
+    let guard = guards[0];
+    // Everyone else out of the count, every tick (a respawn takes its
+    // class's flag again); the guards keep their own.
+    let others_out = |w: &mut WalkSim| {
+        for (i, u) in w.sim.units.iter_mut().enumerate() {
+            if !guards.contains(&i) {
+                u.capture_posts = false;
+            }
+        }
+    };
+    for ci in 0..w.sim.cps.len() {
+        let owner = w.sim.cps[ci].owner;
+        let at = w.sim.cps[ci].def.capture.center;
+        for _ in 0..(20 * core::TICK_HZ) {
+            // Position only: unlike `stand`, the guard keeps its own flag.
+            let y = w.sim.ground_under(at, false);
+            let u = &mut w.sim.units[guard];
+            u.soldier.pos = glam::Vec3::new(at.x, y, at.z);
+            u.soldier.vel = glam::Vec3::ZERO;
+            assert!(u.alive, "{era} post {ci}: the guard is alive");
+            assert!(w.sim.cps[ci]
+                .def
+                .capture
+                .contains(w.sim.units[guard].soldier.pos));
+            assert_eq!(
+                w.sim.cp_inside(ci)[2],
+                0,
+                "{era} post {ci}: the guard counts"
+            );
+            others_out(&mut w);
+            controlled_tick(&mut w);
+        }
+        assert_eq!(w.sim.cps[ci].owner, owner, "{era} post {ci}: owner changed");
+    }
+    println!("{era}: a guard held 20 s in each of 5 posts; no post counted it");
+}
+
+#[test]
+#[ignore = "requires GAMORREAN_ASSETS owned overlay and GAMORREAN_MISSIONS"]
+fn gamorreans_gcw_hold_no_post() {
+    gamorreans_hold_no_post("bf2_tat3_con");
+}
+
+#[test]
+#[ignore = "requires GAMORREAN_ASSETS owned overlay and GAMORREAN_MISSIONS"]
+fn gamorreans_cw_hold_no_post() {
+    gamorreans_hold_no_post("bf2_tat3_con_cw");
 }
 
 fn dune(era: &str) -> WalkSim {
@@ -237,7 +311,8 @@ fn dune(era: &str) -> WalkSim {
             u.spec.class, u.spec.pos, u.spec.yaw
         );
     }
-    assert_eq!(classes, [12, 2]);
+    assert_eq!(classes, [7, 7], "{era}: the class selector mix (PR #183)");
+    assert!(!w.sim.native_deathmatch(2), "{era}: Tuskens keep the hunt");
     assert!(cp3_spawns > 0);
     println!("{era}: {cp3_spawns} of 14 opening members use CP3's 13 nodes; the rest use CP1");
     w
@@ -467,6 +542,101 @@ fn tusken_controls_friendly_natives_and_two_armies() {
             b.sim.step(&[PadState::default()]);
             assert_eq!(a.sim.hash(), b.sim.hash(), "{map} tick {tick}");
             println!("control {map} {tick} {:016x}", a.sim.hash());
+        }
+    }
+}
+
+/// The Jawa rule on the four Mos Eisley Conquest rows (maintainer,
+/// 2026-11-20, `game::jawa`): fielded, armed with the arc caster (at its
+/// native share) and the fusion cutter, hostile to both armies, never in a
+/// post's count; a Jawa's death costs no ticket and is no team kill, and a
+/// soldier a Jawa kills costs his side one ticket.
+#[test]
+#[ignore = "owned retail bakes; set TUSKEN_ASSETS and TUSKEN_MISSIONS"]
+fn mos_eisley_jawas_fight_both_armies_with_a_toned_down_arc_caster() {
+    let root = PathBuf::from(std::env::var_os("TUSKEN_ASSETS").unwrap());
+    let donor = game::jawa::donor(&root.join("classes")).unwrap();
+    let full = game::roster::weapon_from_db(&donor, game::jawa::ARC_CASTER).unwrap();
+    for (map, mission) in [
+        ("tat2", "tat2_con"),
+        ("tat2", "tat2_con_cw"),
+        ("bf1_tat2", "bf1_tat2_con"),
+        ("bf1_tat2", "bf1_tat2_con_cw"),
+    ] {
+        let mut w = load(map, mission);
+        let jawas: Vec<_> = w
+            .sim
+            .alive_units()
+            .filter(|(_, u)| u.team == 2)
+            .map(|(h, _)| h)
+            .collect();
+        assert!(!jawas.is_empty(), "{mission}: Jawas on the field");
+        assert!(w.sim.native_neutral(2), "{mission}");
+        for army in [0, 1] {
+            assert!(
+                w.sim.hostile(2, army) && w.sim.hostile(army, 2),
+                "{mission} {army}"
+            );
+        }
+        let names = |u: &core::unit::Unit| -> Vec<String> {
+            std::iter::once(u.weapon_class)
+                .chain(u.held.iter().map(|h| h.class))
+                .map(|i| w.sim.weapon_classes[i].name.clone())
+                .collect()
+        };
+        for &h in &jawas {
+            let u = w.sim.unit(h).unwrap();
+            let kit = names(u);
+            assert!(
+                kit.iter().any(|n| n == game::jawa::ARC_CASTER),
+                "{mission} {kit:?}"
+            );
+            assert!(
+                kit.iter().any(|n| n == "tat_weap_inf_jawa_fusioncutter"),
+                "{mission} {kit:?}"
+            );
+            assert!(!u.capture_posts, "{mission}: Jawas take no post");
+            for ci in 0..w.sim.cps.len() {
+                assert!(!w.sim.counts_in_cp(h.index as usize, ci), "{mission}");
+            }
+        }
+        let arc = w
+            .sim
+            .weapon_classes
+            .iter()
+            .find(|c| c.name == game::jawa::ARC_CASTER)
+            .unwrap();
+        assert_eq!(
+            arc.ordnance.max_damage,
+            full.ordnance.max_damage * game::jawa::NATIVE_ARC_CASTER_SCALE,
+            "{mission}"
+        );
+        let army = w
+            .sim
+            .alive_units()
+            .find(|(_, u)| u.team == 0 && !u.is_player)
+            .map(|(h, _)| h)
+            .unwrap();
+        let tickets = w.sim.battle.teams.map(|t| t.tickets());
+        let team_kills = w.sim.nav_stats.team_kills;
+        w.sim.kill_unit_by(jawas[0], Some(army));
+        assert_eq!(
+            w.sim.battle.teams.map(|t| t.tickets()),
+            tickets,
+            "{mission}"
+        );
+        assert_eq!(
+            w.sim.nav_stats.team_kills, team_kills,
+            "{mission}: no team kill"
+        );
+        if let Some(&killer) = jawas.get(1) {
+            w.sim.kill_unit_by(army, Some(killer));
+            assert_eq!(
+                w.sim.battle.teams.map(|t| t.tickets()),
+                [tickets[0] - 1, tickets[1]],
+                "{mission}: one ticket for a soldier a Jawa kills"
+            );
+            assert_eq!(w.sim.nav_stats.team_kills, team_kills, "{mission}");
         }
     }
 }

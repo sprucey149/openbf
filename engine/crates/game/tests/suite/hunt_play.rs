@@ -49,7 +49,8 @@ fn hunt_walk(root: &Path, key: &str) -> WalkSim {
     let m = mission(root, key);
     let assets = root.join("assets_baked");
     let dir = assets.join(&m.map);
-    let (scene, _) = game::assets::load_battle_scene(&dir, "hunt").unwrap();
+    let (mut scene, _) = game::assets::load_battle_scene(&dir, "hunt").unwrap();
+    scene.kill_objects(m.scene_kills());
     let rosters = rosters(root, &m);
     let mut sim = Sim::empty(42);
     if m.source_game == "bf2" {
@@ -78,7 +79,7 @@ fn hunt_walk(root: &Path, key: &str) -> WalkSim {
         team += 1;
         template
     });
-    sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::hunt(50, [8, 8], [1, 1]));
+    sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::hunt(50, [8, 8]));
     let nav = game::layout::nav_graph(&scene.manifest, &scene.dir);
     let mut walk = WalkSim::with_teams(sim, scene.heightfield(), Vec3::ZERO, templates, nav);
     scene.install_collision(&mut walk.sim);
@@ -401,5 +402,164 @@ fn census_hunt_kits() {
             let post = at_own_post(&mut walk).map(|ci| walk.sim.cps[ci].def.name.clone());
             println!("{key} t{team}: class change at {post:?}");
         }
+    }
+}
+
+/// The maintainer (2026-11-20): each BF2 Hunt plays the original's Hunt world.
+/// The scene merges the sublevel that holds the mission's `<map>_hunt` world,
+/// every object the script's `KillObject` names is gone from the scene (model
+/// and collision), the round's posts are that sublevel's and none is killed,
+/// the script's AI barriers switch and its death regions are found. BF2 Hoth's
+/// Hunt opens the Echo Base back shields and removes the shield generator. The
+/// BF1 Hunts (ours: BF1 maps have no Hunt world) play the base world's posts.
+/// Kashyyyk's flag bases (`ctfbase1`, `ctfbase2`) are not in its Hunt world,
+/// so its KillObject removes nothing there, as on the disc.
+#[test]
+fn every_hunt_plays_its_hunt_world_without_the_objects_its_script_kills() {
+    let Some(root) = root() else { return };
+    for key in HUNTS {
+        let m = mission(&root, key);
+        let dir = root.join("assets_baked").join(&m.map);
+        let bare = game::assets::load_scene(&dir).unwrap();
+        let (mut scene, load) = game::assets::load_battle_scene(&dir, "hunt").unwrap();
+        let removed = scene.kill_objects(m.scene_kills());
+        let layer = game::assets::authored_mode_layer_index(&bare.manifest, "hunt")
+            .map(|i| &bare.manifest.layers[i]);
+        let mut layer_posts: Vec<String> = Vec::new();
+        if m.source_game == "bf2" {
+            let layer = layer.unwrap_or_else(|| panic!("{key}: no Hunt world"));
+            assert!(
+                layer
+                    .worlds
+                    .iter()
+                    .any(|w| w.to_ascii_lowercase().ends_with("_hunt")),
+                "{key}: layer {} holds no _hunt world: {:?}",
+                layer.name,
+                layer.worlds
+            );
+            assert_eq!(load.layer.as_deref(), Some(layer.name.as_str()), "{key}");
+            layer_posts = layer
+                .instances
+                .iter()
+                .map(|i| i.name.to_ascii_lowercase())
+                .collect();
+        } else {
+            assert!(layer.is_none(), "{key}: BF1 has no mode worlds");
+        }
+        for name in m.scene_kills() {
+            assert!(
+                !scene
+                    .manifest
+                    .instances
+                    .iter()
+                    .any(|i| i.name.eq_ignore_ascii_case(name)),
+                "{key}: {name} is killed but still in the scene"
+            );
+        }
+        let walk = hunt_walk(&root, key);
+        let posts: Vec<String> = walk.sim.cps.iter().map(|c| c.def.name.clone()).collect();
+        assert!(!posts.is_empty(), "{key}: no Hunt posts");
+        for post in &posts {
+            assert!(
+                !m.killed.iter().any(|k| k.eq_ignore_ascii_case(post)),
+                "{key}: killed post {post} is in the round"
+            );
+            if m.source_game == "bf2" {
+                assert!(
+                    layer_posts.contains(&post.to_ascii_lowercase()),
+                    "{key}: post {post} is not the Hunt world's"
+                );
+            }
+        }
+        for team in 0..2u8 {
+            assert!(
+                !walk.sim.spawn_points(team).is_empty(),
+                "{key}: team {team} cannot spawn"
+            );
+        }
+        let mut nav = game::layout::nav_graph(&scene.manifest, &scene.dir);
+        let switched = m.apply_barriers(nav.as_mut());
+        let mut layout =
+            game::layout::MapLayout::from_mission_manifest(&scene.manifest, true, false);
+        let applied = layout.apply_mission(&m);
+        println!(
+            "{key}: layer {:?}, {removed} objects killed {:?}, posts {posts:?}, \
+             {switched} barriers switched of {}, death regions {} (missing {:?})",
+            load.layer,
+            m.scene_kills(),
+            m.barriers.len(),
+            applied.death_regions.len(),
+            applied.missing_death_regions,
+        );
+        if key == "bf2_hot1" {
+            // CP7OBJ twice: one instance each of the eight names.
+            assert_eq!(removed, 8, "{key}");
+        }
+    }
+    // Hoth: the two back shields and the shield generator are gone.
+    let m = mission(&root, "bf2_hot1");
+    for name in ["echoback1", "echoback2", "shield"] {
+        assert!(m.scene_kills().iter().any(|k| k == name), "{name}");
+    }
+}
+
+/// The maintainer's big Hunt sides (2026-11-20 late): 32 a side open on
+/// every Hunt map, more than most maps' spawn nodes, and spread out around
+/// the nodes instead of stacking. Prints each team's posts and nodes (the
+/// fitter's limits).
+#[test]
+fn big_hunt_sides_open_spread_out_on_every_map() {
+    let Some(root) = root() else { return };
+    const SIDE: u32 = 32;
+    for key in HUNTS {
+        let mut walk = hunt_walk(&root, key);
+        walk.sim.team_combatants = Some([SIDE; 2]);
+        walk.sim.ai_alive_cap = SIDE;
+        let nodes = [0u8, 1].map(|team| {
+            let mut n: Vec<[u32; 3]> = walk
+                .sim
+                .spawn_points(team)
+                .iter()
+                .map(|(p, _)| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()])
+                .collect();
+            n.sort_unstable();
+            n.dedup();
+            (walk.sim.spawn_posts(team).len(), n.len())
+        });
+        walk.opening_wave([SIDE; 2], false);
+        let alive: Vec<(u8, Vec3)> = walk
+            .sim
+            .alive_units()
+            .filter(|(_, u)| u.team < 2 && !u.is_player)
+            .map(|(_, u)| (u.team, u.soldier.pos))
+            .collect();
+        let per_team = [0u8, 1].map(|t| alive.iter().filter(|(team, _)| *team == t).count());
+        let stacked = alive
+            .iter()
+            .enumerate()
+            .filter(|(i, (_, a))| {
+                alive.iter().enumerate().any(|(j, (_, b))| {
+                    j != *i
+                        && (a.y - b.y).abs() < 2.0
+                        && (Vec3::new(a.x - b.x, 0.0, a.z - b.z)).length() < 0.5
+                })
+            })
+            .count();
+        println!(
+            "{key}: team 0 {} posts {} nodes, team 1 {} posts {} nodes; opened {per_team:?}, \
+             {stacked} within 0.5 m of another",
+            nodes[0].0, nodes[0].1, nodes[1].0, nodes[1].1
+        );
+        if std::env::var_os("HUNT_SPREAD_DEBUG").is_some() {
+            for (t, p) in &alive {
+                println!("  {key} t{t} {p}");
+            }
+        }
+        assert_eq!(per_team, [SIDE as usize; 2], "{key}: every soldier opened");
+        assert!(
+            stacked * 10 <= alive.len(),
+            "{key}: {stacked} of {} soldiers stand on another",
+            alive.len()
+        );
     }
 }

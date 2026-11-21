@@ -236,7 +236,8 @@ fn cross_with(
 }
 
 /// The turret magnet's values: the round's reach (80 m/s x 1.5 s), full
-/// strength to three quarters of it, the rifle's 1° cone (1° too when the
+/// strength to three quarters of it (to the disc's reach once the bolt is
+/// lengthened), the rifle's 1° cone (1° too when the
 /// class has none), soldiers and droids, and vehicles only when the round
 /// hurts them. The weapon's own Target* bits are left as parsed.
 #[test]
@@ -251,6 +252,12 @@ fn a_turret_magnet_reaches_as_far_as_its_round() {
     let m = seat_magnet(&c);
     assert_eq!((m.angle, m.kinds & 0x1f), (SNIPER_LOCK_ON_ANGLE, 0b1111));
     assert_eq!(c.target_kind, WeaponClass::bf1_rifle().target_kind);
+    // [ours] (2026-11-20) Its bolt lengthened to 200 m (BF1's building gun
+    // turret): full strength to the disc's 120 m, nothing at 200 m.
+    c.ordnance.extend_bolt_reach();
+    let m = seat_magnet(&c);
+    assert_eq!(m.full, 120.0);
+    assert!(m.reach >= crate::weapon::BOLT_REACH && m.reach < crate::weapon::BOLT_REACH + 0.01);
 }
 
 /// A pad gunner holding his sticks still on a runner crossing at 60 and

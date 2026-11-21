@@ -7,7 +7,8 @@
 //! Run `bake` with no arguments for the full usage table (tex-dump, pc-tex,
 //! xbox, xbox-prints, map, common, classes, loadscreen, sounds, sound-names, global-sound, beep,
 //! specular, omniproj, soldier, weapon, vehicle, effects, locl, fonts). scripts/rebake.sh runs all of them
-//! over the extracted discs; `extract-iso` makes those (scripts/pack.py).
+//! over the extracted discs; `extract-iso` makes those (scripts/pack.py). `format-versions` prints the version of
+//! each output group (`bake::versions`), which pack.py keys its per-group bake cache on.
 
 use anyhow::{bail, Context, Result};
 use std::io::BufWriter;
@@ -193,6 +194,10 @@ fn main() -> Result<()> {
                 Path::new(&args[4]),
             )?;
             println!("baked {sounds} DLC hero sounds");
+            Ok(())
+        }
+        Some("format-versions") if args.len() == 2 => {
+            println!("{}", bake::versions::format_versions_json());
             Ok(())
         }
         Some("extract-iso") if args.len() == 4 => extract_iso(&ci(&args[2]), &args[3]),
@@ -582,6 +587,7 @@ fn main() -> Result<()> {
                 "usage:\n\
                  \x20 bake extract-iso <disc.iso>  <outdir>       the disc's DATA/_LVL_PS2 tree, as files\n\
                  \x20 bake extract-xiso <disc.iso> <outdir>       an Xbox disc's Data/_LVL_XBOX tree, shell movie only\n\
+                 \x20 bake format-versions                         each output group's version, as JSON (pack.py's cache)\n\
                  \x20 bake xbox <disc.iso|root> <outdir> [--ps2 <root>] [--maps a,b] [--allow-gameplay-drift]\n\
                  \x20                                               an Xbox disc's maps, keeping the PS2's gameplay\n\
                  \x20 bake xbox-prints <ps2 root>... <work> <file>  the PS2 gameplay hashes `bake xbox` compares with\n\

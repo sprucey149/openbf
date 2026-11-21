@@ -383,7 +383,7 @@ fn a_class_change_replays() {
 /// ([`Sim::counts_in_cp`]), which the plain rule needs.
 fn hunt_sim() -> Sim {
     let mut s = change_sim(GroundRules::Bf2);
-    s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::hunt(50, [8, 8], [1, 1]));
+    s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::hunt(50, [8, 8]));
     s
 }
 
@@ -439,6 +439,23 @@ fn hunt_posts_without_a_region_take_their_class_radius() {
     assert_eq!(s.class_change_post(1), None, "a bot never qualifies");
     change_to(&mut s, 1);
     assert_eq!(me(&s).weapon_class, 1);
+}
+
+/// XL keeps every Conquest post as a spawn and counts no occupants; a
+/// human inside his own post's authored region changes class there, and
+/// the post captures nothing.
+#[test]
+fn xl_player_changes_class_inside_own_post() {
+    let mut s = change_sim(GroundRules::Bf2);
+    s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::xl([8, 8]));
+    assert!(s.is_xl() && !s.is_hunt());
+    assert!(!s.counts_in_cp(0, 0), "XL posts count no occupants");
+    assert_eq!(s.class_change_post(0), Some(0));
+    change_to(&mut s, 1);
+    assert_eq!(me(&s).weapon_class, 1);
+    s.update_cps(1.0);
+    assert_eq!(s.cps[0].owner, Some(0));
+    assert_eq!(s.cps[0].capture, 0.0);
 }
 
 /// Hero Assault, the other deathmatch, keeps no class change at a post.

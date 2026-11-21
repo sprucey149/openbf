@@ -157,7 +157,7 @@ impl Opt {
             ),
             Opt::HunScore => (
                 "ifs.mp.createopts.helptext.hun_score",
-                "Set the score limit for all the Hunt matches in your session.",
+                "Set the score limit for all the Hunt matches in your session. Per map plays each map's own points to win for each side; a number keeps each map's split around it.",
             ),
             Opt::AssNumBots => (
                 "ifs.mp.createopts.helptext.ass_numbots",
@@ -176,6 +176,17 @@ impl Opt {
 /// crate cannot read missions; `hero_assault_pool_matches_the_mission` pins
 /// this to the file where the missions are generated.
 pub const HERO_ASSAULT_POOL: i32 = 12;
+
+/// [ours] The Hunt score option's default, 0: each Hunt plays its mission's
+/// per-tier points to win for each side (`hunt_points_to_win`, 50 each where
+/// the mission sets none). Any other value N keeps each map's split, scaled
+/// so the two sides' targets average N.
+pub const HUNT_SCORE_PER_MAP: i32 = 0;
+
+/// The Assault score option's default, 180: the limit both Hero Assault
+/// (`core::sim::deathmatch::ASSAULT_SCORE_LIMIT`) and Space Assault
+/// (`core::sim::DEFAULT_SCORE_LIMIT`, the original BF2 points to win) play to.
+pub const ASSAULT_SCORE_DEFAULT: i32 = 180;
 
 /// The session's option values (§2.3's fields and defaults).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,7 +229,7 @@ impl Default for SessionOptions {
     /// Conquest population is map-relative (maintainer, 2026-10-29): 100%.
     /// Unsupported modes retain the PS2's values (§2.3): 16 AI,
     /// Normal (ours: 2 = Normal, the port's default tier), 100 %, timers Off,
-    /// CTF 5, Hunt 5 min / 50, Assault 180; Unlock Points, first to 10
+    /// CTF 5, Hunt 5 min / 50 ([ours] per map, see [`HUNT_SCORE_PER_MAP`]), Assault 180; Unlock Points, first to 10
     /// points, Best Player, Timer 90 s (`so_hero`,
     /// `sheets/hero_all_steps.png`). [ours] Heroes On (the PS2's is Off;
     /// maintainer 2026-10-30: "Make heroes on by default in instant
@@ -243,9 +254,9 @@ impl Default for SessionOptions {
             ctf_score: 5,
             ctf_timer: 0,
             hun_timer: 5,
-            hun_score: 50,
+            hun_score: HUNT_SCORE_PER_MAP,
             ass_numbots: 16,
-            ass_score: 180,
+            ass_score: ASSAULT_SCORE_DEFAULT,
         }
     }
 }
@@ -372,7 +383,7 @@ impl SessionOptions {
             Opt::CtfScore => self.ctf_score = clamp(self.ctf_score + d, 1, 15),
             Opt::CtfTimer => self.ctf_timer = clamp(self.ctf_timer + 5 * d, 0, 60),
             Opt::HunTimer => self.hun_timer = clamp(self.hun_timer + 5 * d, 5, 60),
-            Opt::HunScore => self.hun_score = clamp(self.hun_score + 10 * d, 10, 1000),
+            Opt::HunScore => self.hun_score = clamp(self.hun_score + 10 * d, 0, 1000),
             Opt::AssNumBots => self.ass_numbots = clamp(self.ass_numbots + d, 0, MAX_BOTS),
             Opt::AssScore => self.ass_score = clamp(self.ass_score + 10 * d, 50, 1000),
         }

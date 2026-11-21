@@ -141,13 +141,18 @@ pub struct WeaponAsset {
     /// through the WORLD's mask pipeline (the disc's cutoff since queue AT);
     /// none of the 31 baked weapon GLBs has a MASK material. The last field
     /// is the part's specular second pass, as [`SoldierAsset::meshes`]'.
-    /// Empty when the GLB is not baked (no weapon drawn).
+    /// Empty when the GLB is not baked (no weapon drawn). A BLEND part
+    /// composites in the blend pass, additively where its BF2 material is
+    /// additive (`bake::alpha::weapon_alphas`: the DLC Force ball's shells
+    /// and Ventress's starblade): [`WeaponAsset::additive`].
     pub parts: Vec<(
         render::MeshHandle,
         Option<TextureHandle>,
         render::DrawLayer,
         PartSpec,
     )>,
+    /// Per part, aligned with `parts`: drawn additively (`Cs·As + Cd`).
+    pub additive: Vec<bool>,
     /// The weapon's `skel` nodes (`weapons/<model>.nodes.ron`, card FXMF):
     /// where its `FirePointName` puts the muzzle flash. Empty when the bake
     /// predates them or the model has none.
@@ -817,19 +822,32 @@ pub struct SoldierVisuals {
 /// the body is not drawn after it left the world.
 const CORPSE_SECS: f32 = core::soldier::CORPSE_SECS;
 
+/// Whether a weapon part draws additively: a BLEND material whose BF2 flags
+/// carry the additive bit (`bake::alpha::weapon_alphas` makes such a segment
+/// BLEND; no other weapon material is BLEND).
+pub(crate) fn weapon_part_additive(layer: render::DrawLayer, flags: u32) -> bool {
+    const BF2_ADDITIVE: u32 = 0x40;
+    layer == render::DrawLayer::Blend && flags & BF2_ADDITIVE != 0
+}
+
 impl WeaponAsset {
     /// The weapon's parts at `m` (the hand's `hp_weapons` in the world),
     /// each textured one with its specular second pass.
     fn part_draws(&self, m: Mat4, out: &mut Vec<render::DrawCmd>) {
-        for (mesh, tex, layer, spec) in &self.parts {
+        for (k, (mesh, tex, layer, spec)) in self.parts.iter().enumerate() {
             // The weapon is a non-static draw with no shadow volume: the
             // soldier's own character ambient on BF1 (re-model-lighting §12).
             let light = render::LightPath::Character;
+            let additive = self.additive.get(k).copied().unwrap_or(false);
             out.push(
                 match tex {
                     Some(t) if *layer == render::DrawLayer::Mask => {
                         render::DrawCmd::textured_masked(*mesh, *t, m)
                     }
+                    Some(t) if *layer == render::DrawLayer::Blend => render::DrawCmd {
+                        additive,
+                        ..render::DrawCmd::textured_blended(*mesh, *t, m)
+                    },
                     Some(t) => render::DrawCmd::textured(*mesh, *t, m),
                     None => render::DrawCmd::flat(*mesh, [0.3, 0.3, 0.32, 1.0], m),
                 }

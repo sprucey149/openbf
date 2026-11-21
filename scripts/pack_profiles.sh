@@ -102,6 +102,8 @@ for profile in "${PROFILES[@]}"; do
         --iso-dir "$input_dir"
         --game-bin "$GAME_BIN"
         --out "$profile_out/openbf"
+        # Each profile bakes into its own folder: one shared engine/assets_baked made every profile rebake the last one's.
+        --baked "$profile_out/assets_baked"
     )
     if [[ -f "$FONT" ]]; then
         pack_args+=(--menu-font-core "$FONT")

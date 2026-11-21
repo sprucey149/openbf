@@ -103,6 +103,7 @@ fn each_same_tick_cast_has_its_own_minimum_bolts_and_charge() {
             effects: Vec::new(),
             beams: Vec::new(),
             lightning: vec![def],
+            shields: Vec::new(),
         }],
         &mut Lcg(9),
     );

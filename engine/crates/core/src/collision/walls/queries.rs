@@ -306,6 +306,19 @@ const LEDGE_ESCAPE_MAX: f32 = 1.5;
 /// Among those, the deepest wall-like contact wins, with a strict `<` in the
 /// BVH's traversal order, as in [`mesh_contact`], and with its `start` rule
 /// ([`pushes_past`]) on the FULL capsule's start segment.
+///
+/// A LIP is the other mesh answer (issue #182, OURS): a triangle that is no
+/// wall by its face normal (sloped or flat) that the full capsule meets at a
+/// point over the step. The ground query's probe starts at the step, so it
+/// can never stand him on that face there; without this the wall pass
+/// skipped it as a floor and the capsule
+/// walked into it until its axis crossed the face (BF2 Kashyyyk's
+/// `kas2_prop_rock_m16`, a face at n.y 0.62 whose lip stands 0.8 m over the
+/// terrain; BF2 Felucia's `fel1_bldg_segmented` shelves, n.y 0.77: the
+/// census's `floor` class). A penetrating contact with a lip that is not
+/// ceiling-like (n.y > -[`WALKABLE_MIN_NY`]) pushes level, along its normal's
+/// horizontal part, by its depth. A wall contact of the same body wins over
+/// it.
 fn ledge_contact(
     body: &Body,
     full: &Capsule,
@@ -321,12 +334,61 @@ fn ledge_contact(
             let step_top = full.base.y + super::super::STEP_HEIGHT.fmin(full.height * 0.5);
             let query = local_query_aabb(full.aabb(), body);
             let mut best: Option<parry3d::query::Contact> = None;
+            let mut lip: Option<(Vec3, f32)> = None;
             for i in mesh.bvh().intersect_aabb(&query) {
                 let tri = mesh.triangle(i);
                 let Some(face) = tri.normal() else { continue };
-                if (body.iso.rotation * face.into_inner()).y.abs() >= WALKABLE_MIN_NY {
-                    continue; // a floor TRIANGLE is not the ledge's wall
+                let face_y = (body.iso.rotation * face.into_inner()).y;
+                if face_y.abs() >= WALKABLE_MIN_NY {
+                    // A floor or ceiling triangle (the faces carry no side):
+                    // no wall, but a LIP when it is over the step where the
+                    // capsule is and the contact is not ceiling-like.
+                    let w = |p: parry3d::na::Point3<f32>| {
+                        body.to_world.transform_point3(Vec3::new(p.x, p.y, p.z))
+                    };
+                    let t3 = [w(tri.a), w(tri.b), w(tri.c)];
+                    // Wholly over the top sphere's centre: its contact
+                    // points down at his head, a ceiling's (the stepped
+                    // capsule's ceiling rule answers it), not a lip's.
+                    let head = full.base.y + full.height - full.radius;
+                    if t3.iter().all(|p| p.y > head) {
+                        continue;
+                    }
+                    if top_in_disc(t3, full.base, full.radius).is_none_or(|t| t <= step_top) {
+                        continue; // all of it under the step here: a floor
+                    }
+                    // The capsule's axis a radius or more off the face's
+                    // plane, on one side: no contact (cost only).
+                    let n = (t3[1] - t3[0]).cross(t3[2] - t3[0]).normalize_or_zero();
+                    let e0 = full.base + Vec3::Y * full.radius;
+                    let e1 = full.base + Vec3::Y * (full.height - full.radius);
+                    let (s0, s1) = (n.dot(e0 - t3[0]), n.dot(e1 - t3[0]));
+                    if s0 * s1 > 0.0 && s0.abs().fmin(s1.abs()) >= full.radius {
+                        continue;
+                    }
+                    let Some(c) = triangle_contact(fiso, fshape, &body.iso, &tri) else {
+                        continue;
+                    };
+                    if c.dist >= 0.0 || c.normal2.y <= -WALKABLE_MIN_NY || c.point2.y <= step_top {
+                        continue;
+                    }
+                    if start.is_some_and(|s| pushes_past(body, &tri, &c, s)) {
+                        continue;
+                    }
+                    let (n, depth) = answer(c);
+                    let h = (n.x * n.x + n.z * n.z).sqrt();
+                    // The whole depth, level: a lip's slope takes depth / h
+                    // to clear, so this never pushes him past it, and the
+                    // pass's iterations close the rest (scaled by h like a
+                    // ceiling's, the push left the census's soldiers 0.05-0.3 m
+                    // in the lip at rest: `overlap`).
+                    let d = depth;
+                    if h > 1e-6 && lip.is_none_or(|(_, b)| d > b) {
+                        lip = Some((n, d));
+                    }
+                    continue;
                 }
+
                 let top = [tri.a, tri.b, tri.c]
                     .iter()
                     .map(|p| body.to_world.transform_point3(Vec3::new(p.x, p.y, p.z)).y)
@@ -361,7 +423,7 @@ fn ledge_contact(
                     best = Some(c);
                 }
             }
-            best.map(answer)
+            best.map(answer).or(lip)
         }
         _ => {
             let c = body.shape.with_parry(&mut |s| {
@@ -1443,6 +1505,116 @@ fn penetration_block(
             // A floor-like UPWARD normal is a LEDGE above the step (card JWAL,
             // as in `push_out_soldier` and the cast above): a wall.
             xz_unit(n)
+        }
+    }
+}
+
+impl CollisionWorld {
+    /// The index in [`Self::bodies`] of a MAP body a query handed out
+    /// (`None` for a vehicle hull or a falling walker, which live elsewhere).
+    /// Address arithmetic on the one slice, so no scan.
+    pub(crate) fn body_index(&self, b: &Body) -> Option<usize> {
+        let size = std::mem::size_of::<Body>();
+        let base = self.bodies().as_ptr() as usize;
+        let at = b as *const Body as usize;
+        let i = at.checked_sub(base)? / size;
+        (i < self.bodies().len() && std::ptr::eq(&self.bodies()[i], b)).then_some(i)
+    }
+
+    /// Issue #182, the embed oracle ([`crate::sim::Embed`], read-only, ours):
+    /// the deepest penetration of `cap` into one MAP body of the SOLDIER
+    /// layer, whatever the contact's normal, as `(depth, body index)`;
+    /// `None` when it touches nothing. The same narrow phase as
+    /// [`Self::sphere_contacts`] (meshes per triangle, [`mesh_contact`]);
+    /// vehicle hulls are not asked (a parked tank pushes, it does not
+    /// embed). Ties go to the first body in index order.
+    pub fn capsule_overlap(&self, cap: &Capsule) -> Option<(f32, usize)> {
+        let (d, b) = self.deepest_overlap(cap, HullFilter::Static)?;
+        Some((d, self.body_index(b)?))
+    }
+
+    /// Issue #182, the rescue's check of its put-back spot (ours): the
+    /// deepest penetration of `cap` into any live vehicle HULL part of the
+    /// SOLDIER layer, `None` when it touches none. [`Self::capsule_overlap`]
+    /// skips hulls, so a vehicle parked on the spot after it was recorded
+    /// would otherwise pass.
+    pub fn capsule_hull_overlap(&self, cap: &Capsule) -> Option<f32> {
+        self.deepest_overlap(cap, HullFilter::Hulls).map(|(d, _)| d)
+    }
+
+    /// The narrow phase behind [`Self::capsule_overlap`] and
+    /// [`Self::capsule_hull_overlap`], over the bodies `hulls` admits.
+    fn deepest_overlap(&self, cap: &Capsule, hulls: HullFilter) -> Option<(f32, &Body)> {
+        let (shape, iso) = cap.to_parry();
+        let aabb = cap.aabb();
+        let mut best: Option<(f32, &Body)> = None;
+        self.visit_xz(
+            aabb.min.x,
+            aabb.max.x,
+            aabb.min.z,
+            aabb.max.z,
+            hulls,
+            |body| {
+                if !body.layers.contains(Layers::SOLDIER) || !body.aabb.overlaps(&aabb) {
+                    return;
+                }
+                let c = match &body.shape {
+                    Shape::Mesh(mesh) => mesh_contact(mesh, body, &shape, &iso, None, false),
+                    _ => body.shape.with_parry(&mut |s| {
+                        parry3d::query::contact(&iso, &shape, &body.iso, s, 0.0)
+                            .ok()
+                            .flatten()
+                    }),
+                };
+                let Some(c) = c.filter(|c| c.dist < 0.0) else {
+                    return;
+                };
+                if best.is_none_or(|(d, _)| -c.dist > d) {
+                    best = Some((-c.dist, body));
+                }
+            },
+        );
+        best
+    }
+
+    /// Issue #182, the embed oracle (ours): the first MAP primitive (box,
+    /// cylinder or sphere) of the SOLDIER layer whose solid holds `p`, by
+    /// index. [`Self::enclosing`] asks meshes only, so a soldier inside a
+    /// crate, a pillar or BF1 KAS2 City Hall's solid lobes was never seen
+    /// (re-soldier-walls §2). The leak census's own `inside_primitive`,
+    /// moved here so the sim and every census share one test.
+    pub fn inside_primitive(&self, p: Vec3) -> Option<usize> {
+        let mut found: Option<&Body> = None;
+        self.visit_xz(p.x, p.x, p.z, p.z, HullFilter::Static, |body| {
+            if found.is_some()
+                || !body.layers.contains(Layers::SOLDIER)
+                || p.cmplt(body.aabb.min).any()
+                || p.cmpgt(body.aabb.max).any()
+            {
+                return;
+            }
+            if body.solid_holds(p) {
+                found = Some(body);
+            }
+        });
+        self.body_index(found?)
+    }
+}
+
+impl Body {
+    /// Issue #182: does this PRIMITIVE's solid hold `p` (strictly inside)?
+    /// Always false for a mesh, whose inside is a parity question
+    /// ([`CollisionWorld::enclosing`]).
+    pub(crate) fn solid_holds(&self, p: Vec3) -> bool {
+        let l = self.to_local.transform_point3(p);
+        match &self.shape {
+            Shape::Mesh(_) => false,
+            Shape::Sphere { radius } => l.length_squared() < radius * radius,
+            Shape::Cylinder {
+                radius,
+                half_height,
+            } => l.x * l.x + l.z * l.z < radius * radius && l.y.abs() < *half_height,
+            Shape::Box { half } => l.x.abs() < half.x && l.y.abs() < half.y && l.z.abs() < half.z,
         }
     }
 }

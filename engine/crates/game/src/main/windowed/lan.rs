@@ -223,7 +223,8 @@ pub(in super::super) fn run_lan(args: &[String], host: bool) -> Result<()> {
     println!("lan: {}", session.status);
     app.netplay = Some(session);
     app.screen = Screen::NetWait;
-    super::run_app(event_loop, &mut app)
+    super::run_app(event_loop, &mut app)?;
+    super::end_after_close(&app)
 }
 
 /// Whether a `LoadRound` (`round_id`, `joining`) rebuilds the round in play
@@ -284,6 +285,8 @@ pub(super) struct NetplaySession {
     /// rounds' seats, the joins and the roster (issue #168). Kept after a
     /// player leaves, for his lines and the stats pages. Presentation only.
     names: std::collections::BTreeMap<u8, String>,
+    /// A guest's entry in this computer's recent games (`lobby.rs`).
+    pub recent: super::lobby::RecentNote,
 }
 
 impl NetplaySession {
@@ -387,6 +390,7 @@ impl NetplaySession {
             lobby: Default::default(),
             round_in_play: None,
             names: Default::default(),
+            recent: Default::default(),
         }
     }
 
@@ -567,6 +571,7 @@ impl NetplaySession {
             match n {
                 Notice::Welcome { slot } => {
                     self.status = format!("Connected as player {slot}; waiting for the round");
+                    out.push(NetAction::Welcomed);
                 }
                 Notice::Load {
                     setup,
@@ -580,6 +585,9 @@ impl NetplaySession {
                         if joining { " (joining)" } else { "" }
                     );
                     self.start = None;
+                    if let Some(m) = ui::shell::MODES.iter().find(|m| m.subst() == setup.mode) {
+                        self.recent.mode = m.english().to_owned();
+                    }
                     let rejoin = note_load(&mut self.round_in_play, round_id, joining);
                     for h in &setup.humans {
                         self.names.insert(h.slot, h.name.clone());
@@ -1173,6 +1181,8 @@ pub(super) enum NetAction {
     Line(String),
     /// The session is over.
     Ended(String),
+    /// The host accepted this guest (a recent game from now on).
+    Welcomed,
     /// Back to the lobby with this line (benched by the host).
     ToLobby(String),
     /// The round ended without being decided (the host abandoned it): to
@@ -1303,6 +1313,7 @@ impl App {
                         n.lobby.say(text);
                     }
                 }
+                NetAction::Welcomed => self.note_recent_game(true),
                 NetAction::Ended(text) => {
                     println!("lan: session ended: {text}");
                     if let Some(n) = self.netplay.as_mut() {
@@ -1313,6 +1324,7 @@ impl App {
                 }
             }
         }
+        self.note_recent_game(false);
         // The guests' lobby follows the host in a battle too (its roster,
         // the decided round's ready check).
         self.host_publish();

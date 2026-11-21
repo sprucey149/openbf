@@ -1312,6 +1312,194 @@ fn a_far_hit_from_an_unseen_shooter_waits_out_the_search() {
     eprintln!("C1 side {old} -> {new} (sustained {sustained}), behind {old_b} -> {new_b}");
 }
 
+// ── [ours] Bolt reach 200 m (the maintainer, 2026-11-20) ──────────────────
+
+/// The empty sim's rifle (BF1's: 80 m/s x 1.5 s, 120 m, MaxRange 48) with
+/// its bolt lengthened as the class loader lengthens an infantry bolt.
+fn long_rifle(s: &mut Sim) {
+    let wc = &mut s.weapon_classes[0];
+    wc.ordnance.extend_bolt_reach();
+    assert_eq!(wc.ordnance.velocity, 80.0, "the speed is kept");
+    assert!(
+        wc.shot_range() >= crate::weapon::BOLT_REACH,
+        "{}",
+        wc.shot_range()
+    );
+    assert_eq!(wc.engage_range(), 120.0, "the disc's reach");
+}
+
+/// A lengthened bolt fired by a player flies its whole 200 m over open
+/// ground, at the authored speed, before it expires.
+#[test]
+fn a_rifle_bolt_flies_two_hundred_metres() {
+    let mut s = Sim::empty(3);
+    s.heightfield = Some(ground());
+    long_rifle(&mut s);
+    let p = s
+        .spawn(&UnitSpec {
+            controller: Controller::Player { slot: 0 },
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    s.step(&[]);
+    let from = s.unit(p).unwrap().muzzle();
+    let fire = crate::sim::PadState {
+        buttons: buttons::FIRE,
+        ..Default::default()
+    };
+    s.step(&[fire]);
+    assert_eq!(s.bolts.len(), 1, "one bolt");
+    let speed = s.bolts[0].vel.length();
+    assert!((speed - 80.0).abs() < 1e-3, "speed {speed}");
+    let mut far = 0.0f32;
+    for _ in 0..200 {
+        if let Some(b) = s.bolts.first() {
+            let d = b.pos - from;
+            far = far.max((d.x * d.x + d.z * d.z).sqrt());
+        } else {
+            break;
+        }
+        s.step(&[]);
+    }
+    assert!(s.bolts.is_empty(), "it expires");
+    assert!(
+        far >= crate::weapon::BOLT_REACH - 80.0 / crate::TICK_HZ as f32 && far <= 200.5,
+        "flew {far} m"
+    );
+}
+
+/// A bot shot at by nobody holds its fire at an enemy 150 m off with the
+/// lengthened bolt in hand, and notes no shooter. An end-to-end pin only:
+/// here the rifle's 48 m MaxRange and the bot's sight already hold it, so
+/// it stays green with `engage_range` unheld. The disc's reach as the only
+/// gate is pinned by `ai::proxy::tests::the_discs_bolt_reach_is_a_bots_opening_range`
+/// and `ai::arsenal::tests::the_fallback_reaches_the_discs_bolt_not_the_lengthened_one`.
+#[test]
+fn a_bot_does_not_open_fire_at_150_m_on_an_unaware_target() {
+    let (mut s, a) = watcher(71);
+    long_rifle(&mut s);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, -150.0));
+    let before = s.unit(a).unwrap().last_shot_tick;
+    for _ in 0..300 {
+        s.step(&[]);
+        s.unit_mut(e).unwrap().health.cur = 300.0;
+    }
+    assert_eq!(s.unit(a).unwrap().last_shot_tick, before, "no shot");
+    assert!(s.unit(a).unwrap().ai.shot_by.is_none());
+}
+
+/// A bot hit by a shooter 150 m off - past its rifle's 48 m MaxRange and
+/// the bolt's authored 120 m, within its 200 m - finds him after the search
+/// and fires back; so does one whose body a bolt from him just missed. An
+/// enemy 30 m off, within reach of the bot's own sight and trigger, is not
+/// noted: the bot answers him as before.
+#[test]
+fn a_bot_shot_at_from_150_m_returns_fire() {
+    let first_shot = |near_miss: bool| {
+        let (mut s, a) = watcher(73);
+        long_rifle(&mut s);
+        let at = Vec3::new(0.0, 0.0, -150.0);
+        let e = enemy_at(&mut s, at);
+        for _ in 0..5 {
+            s.step(&[]);
+        }
+        let shot_at = s.tick;
+        if near_miss {
+            let who = crate::projectile::Shooter {
+                owner: e,
+                team: 1,
+                weapon_class: 0,
+                is_player: false,
+            };
+            near_bolt(&mut s, who);
+        } else {
+            s.units[a.index as usize].last_hit = Some((e, shot_at - 1));
+        }
+        let before = s.unit(a).unwrap().last_shot_tick;
+        for _ in 0..300 {
+            s.step(&[]);
+            s.unit_mut(e).unwrap().health.cur = 300.0;
+            if s.unit(a).unwrap().last_shot_tick != before {
+                let st = s.unit(a).unwrap().ai;
+                assert_eq!(st.shot_by.map(|x| x.0), Some(e), "the shooter noted");
+                if !near_miss {
+                    // The window runs from the hit, not from the last think.
+                    assert_eq!(
+                        st.shot_by.map(|x| x.1),
+                        Some(shot_at - 1),
+                        "stamped at the hit"
+                    );
+                }
+                return s.tick - shot_at;
+            }
+        }
+        panic!("near_miss={near_miss}: never fired back");
+    };
+    let r = normal().reaction_ticks;
+    for near_miss in [false, true] {
+        let t = first_shot(near_miss);
+        assert!(t <= SEARCH_CAP + r + 60, "near_miss={near_miss}: {t} ticks");
+        eprintln!("return fire from 150 m, near_miss={near_miss}: {t} ticks");
+    }
+    // Within the opening range the rule takes no part.
+    let (mut s, a) = watcher(73);
+    long_rifle(&mut s);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, -30.0));
+    s.step(&[]);
+    s.units[a.index as usize].last_hit = Some((e, s.tick - 1));
+    s.step(&[]);
+    assert!(s.unit(a).unwrap().ai.shot_by.is_none());
+}
+
+/// A bolt whose last step passes 1 m from the watcher at the origin, fired
+/// by `who` (only its owner and team are read).
+fn near_bolt(s: &mut Sim, who: crate::projectile::Shooter) {
+    let to = Vec3::new(1.0, 1.0, 0.0);
+    let from = s.unit(who.owner).unwrap().muzzle();
+    let b = crate::projectile::Bolt::fire(
+        to - (to - from).normalize() * 3.0,
+        (to - from).normalize(),
+        200.0,
+        0.05,
+        who,
+        None,
+        None,
+        &s.collision,
+        crate::collision::HullFilter::All,
+    );
+    s.bolts.push(b);
+}
+
+/// Two near misses on one tick, each passing 1 m beside the bot: first in
+/// the bolt list one from an enemy 10 m behind it (inside the opening
+/// range: not noted), then one from an enemy 150 m in front. The far
+/// shooter is noted all the same.
+#[test]
+fn a_near_miss_from_close_by_does_not_hide_a_far_shooter() {
+    let (mut s, a) = watcher(79);
+    long_rifle(&mut s);
+    let near = enemy_at(&mut s, Vec3::new(0.0, 0.0, 10.0));
+    let far = enemy_at(&mut s, Vec3::new(0.0, 0.0, -150.0));
+    s.step(&[]);
+    for owner in [near, far] {
+        near_bolt(
+            &mut s,
+            crate::projectile::Shooter {
+                owner,
+                team: 1,
+                weapon_class: 0,
+                is_player: false,
+            },
+        );
+    }
+    // The bot reads a bolt's last step: the one after it is pushed.
+    for _ in 0..3 {
+        s.step(&[]);
+    }
+    assert!(s.unit(a).unwrap().last_hit.is_none(), "both missed");
+    assert_eq!(s.unit(a).unwrap().ai.shot_by.map(|x| x.0), Some(far));
+}
+
 #[test]
 fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
     use crate::collision::Shape;

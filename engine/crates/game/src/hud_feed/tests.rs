@@ -1,5 +1,7 @@
 #[path = "cutter_tests.rs"]
 mod cutter_tests;
+#[path = "fisto_tests.rs"]
+mod fisto_tests;
 #[path = "item_layer_tests.rs"]
 mod item_layer_tests;
 

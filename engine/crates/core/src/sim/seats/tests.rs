@@ -3,6 +3,7 @@
 use super::{driver_input, EXIT_RING, MOVE_FLOOR};
 use crate::sim::tests::flat_ground;
 use crate::sim::{buttons, PadState, Sim};
+use crate::soldier::Stance;
 use crate::unit::{Controller, UnitHandle, UnitSpec};
 use crate::vehicle::hover::tests::skiff;
 use crate::vehicle::{SeatKind, SeatSetup, VehicleHandle, VehicleKind, VehicleSpec};
@@ -914,4 +915,80 @@ fn a_walker_bot_retries_an_exit_whose_ray_starts_under_the_floor() {
         recovered.x < -2.0 && recovered.y.abs() < 0.01,
         "{recovered}"
     );
+}
+
+/// Issue #182 B6: a floor and these SOLDIER boxes `(centre, half)`.
+fn exit_world(boxes: &[(Vec3, Vec3)]) -> Sim {
+    use crate::collision::{Body, CollisionWorld, Layers, Shape};
+    use glam::Mat4;
+    let mut sim = Sim::empty(1);
+    let mut bodies = vec![Body::with_layers(
+        Mat4::from_translation(Vec3::new(0.0, -0.5, 0.0)),
+        Shape::Box {
+            half: Vec3::new(40.0, 0.5, 40.0),
+        },
+        Layers::SOLDIER,
+    )];
+    bodies.extend(boxes.iter().map(|&(c, half)| {
+        Body::with_layers(
+            Mat4::from_translation(c),
+            Shape::Box { half },
+            Layers::SOLDIER,
+        )
+    }));
+    sim.collision = CollisionWorld::new(bodies, Vec::new());
+    sim
+}
+
+fn exit_at(sim: &Sim, centre: Vec3, rho: f32) -> Vec3 {
+    sim.exit_point(
+        centre,
+        Vec3::X,
+        Vec3::Z,
+        rho,
+        10.0,
+        true,
+        crate::collision::HullFilter::All,
+        false,
+        false,
+    )
+}
+
+/// Issue #182 B6: §5's first point (behind) stands 0.3 m from a wall, so a
+/// 0.5 m capsule there is in it: the exit takes the next point, where the
+/// standing capsule is clear.
+#[test]
+fn exit_beside_a_wall_leaves_the_capsule_clear() {
+    let rho = 2.0;
+    // The wall's near face at z = -(rho + 0.3).
+    let wall = (
+        Vec3::new(0.0, 2.0, -(rho + 0.3) - 1.0),
+        Vec3::new(6.0, 2.0, 1.0),
+    );
+    let sim = exit_world(&[wall]);
+    let p = exit_at(&sim, Vec3::new(0.0, 0.5, 0.0), rho);
+    assert!(
+        sim.embed_at(p, Stance::Stand).is_none(),
+        "exit {p} is embedded: {:?}",
+        sim.embed_at(p, Stance::Stand)
+    );
+    assert!(p.z > -rho + 0.1, "not the behind point: {p}");
+}
+
+/// Issue #182 B6 (with B5): a vehicle whose centre is inside a solid box
+/// (a walker's pivot in a wall) never puts its rider at that centre or
+/// anywhere in the box: he comes out past the box.
+#[test]
+fn vehicle_centre_inside_a_body_is_never_the_exit() {
+    let half = Vec3::new(3.0, 2.0, 3.0);
+    let block = (Vec3::new(0.0, 2.0, 0.0), half);
+    let sim = exit_world(&[block]);
+    let centre = Vec3::new(0.5, 1.0, 0.5);
+    let p = exit_at(&sim, centre, 2.0);
+    assert!(p.distance(centre) > 1.0, "the bare centre: {p}");
+    assert!(
+        sim.collision.inside_primitive(p + Vec3::Y).is_none(),
+        "inside the box: {p}"
+    );
+    assert!(sim.embed_at(p, Stance::Stand).is_none(), "{p}");
 }

@@ -154,7 +154,7 @@ pub use rays::{
     is_cut_by, lead_point, ray_heightfield, ray_heightfield_front, ray_terrain_ps2, RayHit,
 };
 pub(crate) use shape::MeshDigests;
-pub use shape::{trimesh, Aabb, Body, Capsule, Cutter, HullPart, Layers, Shape};
+pub use shape::{convex_hull_mesh, trimesh, Aabb, Body, Capsule, Cutter, HullPart, Layers, Shape};
 pub use walls::{SWEEP_CONTACT_DIST, WALL_ITERATIONS};
 pub use world::{CollisionWorld, HullFilter};
 
@@ -193,13 +193,17 @@ pub const FOOT_RING_DIRS: [(f32, f32); 8] = [
     (0.707_106_77, -0.707_106_77),
 ];
 /// PROVISIONAL (ours): how far a soldier's feet may be BELOW the heightfield
-/// before the terrain stops being a ground candidate at all. The terrain is a
+/// before the terrain MAY stop being a ground candidate. The terrain is a
 /// one-sided SHEET, not a solid: a base under an uncut heightfield (BF2 Polis
 /// Massa's `cp5con`/`cp6con` sit 21 m and 34 m under the asteroid surface, and
 /// none of POL1's 7 cutters contains them) is legitimately underground, and
 /// snapping its occupants up onto the surface is what the old always-solid
-/// rule did. Between `STEP_HEIGHT` and this the terrain still wins outright —
-/// that is a soldier climbing a steep bank in one tick. The PS2's own rule is
+/// rule did. Past this depth the sheet stops being ground only when a SOLDIER
+/// face lies between the feet and the sheet (a roof: a real tunnel or base) or
+/// the sheet itself is cut at that x z (a pit he fell out the bottom of);
+/// under open sky it stays the ground and lifts him back out (issue #182 B3,
+/// `Sim::floor_contact`). Between `STEP_HEIGHT` and this the terrain still
+/// wins outright — that is a soldier climbing a steep bank in one tick. The PS2's own rule is
 /// untraced (re-terrain-heights.md covers the height query, not the stance
 /// probe).
 pub const TERRAIN_BURY: f32 = 2.0;

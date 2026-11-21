@@ -1008,7 +1008,7 @@ fn a_less_aggressive_team_keeps_more_defenders() {
 }
 
 /// Card MAIS (OURS, BF1): a post the team's bots may not capture is not
-/// drawn to attack.
+/// drawn to attack. trace: B1:182098-182205.
 #[test]
 fn a_post_barred_to_the_teams_bots_is_not_drawn_to_take() {
     let mut sim = defs_world();

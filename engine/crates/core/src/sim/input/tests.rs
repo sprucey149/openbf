@@ -1084,6 +1084,45 @@ fn the_assisted_aim_meets_each_round_where_the_sweep_judges_it() {
     }
 }
 
+/// [ours] (the maintainer, 2026-11-20) A BF1 rifle whose bolt was
+/// lengthened to 200 m (`WeaponClass::give_bolt_assist`): within the disc's
+/// LockOnRange (64 m) its assist is the one it had, tick for tick; at 100 m,
+/// past that and inside the disc's 120 m reach, and at 150 m, past the
+/// disc's reach, it now holds a magnet that keeps the runner under a still
+/// reticle (the slowdown and tracking, at full strength and on the fade),
+/// where the rifle's reticle loses him. At 150 m the faded tracking lets
+/// him slip out near the run's end.
+#[test]
+fn a_lengthened_rifle_keeps_its_assist_inside_the_disc_reach_and_reaches_on() {
+    let plain = crate::weapon::WeaponClass::bf1_rifle();
+    let mut long = plain.clone();
+    long.ordnance.extend_bolt_reach();
+    long.give_bolt_assist();
+    let near = |c: &crate::weapon::WeaponClass| strafe_world(c, false, 0.0, true, 30.0, 150, 150);
+    let (a, _) = near(&plain);
+    let (b, _) = near(&long);
+    assert_eq!(a.yaws, b.yaws, "inside the disc's LockOnRange");
+    assert_eq!((a.hit_shots, a.unpicked), (b.hit_shots, b.unpicked));
+    for dist in [100.0, 150.0] {
+        let (a, sa) = strafe_world(&plain, false, 0.0, true, dist, 150, 150);
+        let (b, _) = strafe_world(&long, false, 0.0, true, dist, 150, 150);
+        println!(
+            "{dist} m: rifle {}/{} unpicked {}, lengthened {}/{} unpicked {}",
+            a.hit_shots, a.shots, a.unpicked, b.hit_shots, b.shots, b.unpicked
+        );
+        assert!(
+            sa.magnet[0].is_none(),
+            "{dist} m: the rifle's magnet ends at 64 m"
+        );
+        // Without a magnet the runner leaves the still reticle; with the
+        // lengthened rifle's he stays under it (at 100 m throughout, at
+        // 150 m, on the fade, for most of the run).
+        assert!(a.unpicked > 100, "{dist} m");
+        assert!(b.unpicked < 30, "{dist} m");
+        assert_ne!(a.yaws, b.yaws, "{dist} m: the assist acts");
+    }
+}
+
 /// Issue #164 pin: a controller sniper, scoped with the loader's magnet,
 /// holding his sticks still on a runner crossing 150 m out (past the 128 m
 /// full strength, on the fade) and tapping FIRE, for 300 ticks. The idle

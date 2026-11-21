@@ -43,7 +43,8 @@ fn hero_offer_opens_normal_map_then_spawns_at_the_confirmed_post() {
         .events
         .iter()
         .any(|e| matches!(e, Event::Kill { .. } | Event::EnvDeath { .. })));
-    assert_eq!(sim.spawn_class_indices(0, 0), vec![0, 1]);
+    // `[ours]` (2026-11-19): from the Yes the hero is his only row.
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![1]);
     for _ in 0..120 {
         sim.step(&[PadState::default()]);
     }
@@ -53,9 +54,9 @@ fn hero_offer_opens_normal_map_then_spawns_at_the_confirmed_post() {
     tap(&mut sim, buttons::SPAWN_ACCEPT);
     assert_eq!(sim.spawn_stage[0], SpawnStage::Class);
     assert!(!sim.units[p.index as usize].alive);
-    // Browsing an ordinary row does not spend the hero reservation.
+    // No ordinary row to browse to.
     tap(&mut sim, buttons::SPAWN_CLASS_NEXT);
-    assert_eq!(sim.spawn_choice[0], 0);
+    assert_eq!(sim.spawn_choice[0], 1);
     for _ in 0..25 {
         sim.step(&[PadState::default()]);
     }
@@ -119,7 +120,8 @@ fn hero_carousel_and_confirmation_share_current_member_ownership() {
         },
         PadState::default(),
     ]);
-    assert_eq!(sim.spawn_class_indices(0, 0), vec![0, 1, 2]);
+    // `[ours]` (2026-11-19): the owner is locked to his hero.
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![1]);
     assert_eq!(sim.spawn_class_indices(1, 0), vec![0, 2]);
     assert_eq!(
         sim.class_refusal(1, 0, 1),
@@ -220,13 +222,13 @@ fn screen_accept(sim: &mut Sim) {
 
 /// The maintainer's flow (playtest 2026-10-30): the offer counts down from
 /// 30 s; Yes takes the body away with no death or ticket and opens the
-/// command post map; the class screen opens on the hero, but any class can
-/// be chosen and the hero is kept for later (the PS2's owner survives a
-/// life in another class: FUN_0034e1f0 B2:345046-345058); the next class
-/// screen opens on the hero again; the hero's own death ends the ownership
-/// and starts the respawn timer.
+/// command post map; the class screen opens on the hero. The PS2 lets the
+/// owner choose any class and keep the hero for later (FUN_0034e1f0
+/// B2:345046-345058); `[ours]` (maintainer, 2026-11-19) the hero is his only
+/// row until it dies. The hero's own death ends the ownership and starts the
+/// respawn timer.
 #[test]
-fn hero_yes_goes_map_then_class_and_another_class_keeps_the_hero() {
+fn hero_yes_goes_map_then_class_and_the_hero_is_the_only_class() {
     let (mut sim, p) = screen_scene();
     earn(&mut sim, p, 10);
     sim.step(&[PadState::default()]);
@@ -250,29 +252,14 @@ fn hero_yes_goes_map_then_class_and_another_class_keeps_the_hero() {
     sim.step(&[PadState::default()]);
     screen_accept(&mut sim);
     assert_eq!(sim.spawn_choice[0], 1, "the class screen opens on the hero");
-    // Another class: the hero is saved for later.
+    // The carousel has nowhere else to go.
     tap(&mut sim, buttons::SPAWN_CLASS_NEXT);
-    assert_eq!(sim.spawn_choice[0], 0);
-    tap(&mut sim, buttons::SPAWN_ACCEPT);
-    let trooper = sim.players[0].unwrap();
-    assert!(sim.unit(trooper).unwrap().alive && !sim.is_hero(trooper));
-    for _ in 0..90 {
-        sim.step(&[PadState::default()]);
-    }
-    assert_eq!(sim.heroes.as_ref().unwrap().teams[0].owner, Some(p.index));
-    assert_eq!(sim.hero_offer(0), None, "no new offer while he owns it");
-    // He dies as the trooper: still the owner, the class screen opens on
-    // the hero.
-    sim.kill_environment(trooper, crate::sim::DeathCause::Suicide);
-    sim.step(&[PadState::default()]);
-    assert_eq!(sim.heroes.as_ref().unwrap().teams[0].owner, Some(p.index));
-    sim.open_spawn_map(0, 0);
-    screen_accept(&mut sim);
     assert_eq!(sim.spawn_choice[0], 1);
     tap(&mut sim, buttons::SPAWN_ACCEPT);
     let hero = sim.players[0].unwrap();
     assert!(sim.is_hero(hero));
     sim.step(&[PadState::default()]);
+    assert_eq!(sim.heroes.as_ref().unwrap().teams[0].owner, Some(p.index));
     // The hero's death ends it and starts the 90 s timer.
     sim.kill_environment(hero, crate::sim::DeathCause::Suicide);
     sim.step(&[PadState::default()]);
@@ -280,6 +267,123 @@ fn hero_yes_goes_map_then_class_and_another_class_keeps_the_hero() {
     assert_eq!(team.owner, None);
     assert_eq!(team.ready_at, sim.tick - 1 + 90 * u64::from(crate::TICK_HZ));
     assert!(!sim.spawn_class_available(0, 0, 1));
+    assert!(sim.spawn_class_available(0, 0, 0));
+}
+
+/// `[ours]` (2026-11-19): from the Yes the class screen offers only the
+/// hero: the carousel, a pointer pick and a stale choice cannot take
+/// another class.
+#[test]
+fn hero_owner_class_screen_shows_only_the_hero() {
+    let (mut sim, p) = screen_scene();
+    sim.classes[0].push(class(450.0));
+    earn(&mut sim, p, 10);
+    sim.step(&[PadState::default()]);
+    sim.step(&[PadState {
+        buttons: buttons::HERO_ACCEPT,
+        ..Default::default()
+    }]);
+    assert!(sim.hero_locked(0));
+    sim.step(&[PadState::default()]);
+    screen_accept(&mut sim);
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![1]);
+    for c in [0, 2] {
+        assert!(!sim.spawn_class_available(0, 0, c));
+        assert_eq!(sim.class_refusal(0, 0, c), Some(ClassRefusal::HeroLocked));
+    }
+    assert_eq!(sim.class_refusal(0, 0, 1), None);
+    for _ in 0..3 {
+        tap(&mut sim, buttons::SPAWN_CLASS_PREV);
+        assert_eq!(sim.spawn_choice[0], 1);
+    }
+    // A stale choice falls back to the hero: no ordinary soldier spawns.
+    sim.spawn_choice[0] = 0;
+    assert_eq!(sim.spawn_class_choice(0, 0), Some(1));
+    tap(&mut sim, buttons::SPAWN_ACCEPT);
+    let spawned = sim.players[0].unwrap();
+    assert!(sim.unit(spawned).is_some_and(|u| u.alive));
+    assert!(sim.is_hero(spawned));
+}
+
+/// The live hero, standing in his own post facing it, as the post class
+/// change (issue #28) needs. Screens off: the Yes spawns him at once.
+fn hero_at_post() -> (Sim, UnitHandle) {
+    let (mut sim, p) = scene();
+    sim.heightfield = Some(crate::sim::tests::flat_ground());
+    earn(&mut sim, p, 10);
+    sim.step(&[PadState::default()]);
+    tap(&mut sim, buttons::HERO_ACCEPT);
+    let hero = sim.players[0].unwrap();
+    assert!(sim.is_hero(hero));
+    let u = &mut sim.units[hero.index as usize];
+    // Yaw 0 looks down -z: from z = +4 that is at the post.
+    u.soldier.pos = Vec3::new(0.0, 0.0, 4.0);
+    u.soldier.yaw = 0.0;
+    u.soldier.pitch = 0.0;
+    assert_eq!(sim.class_change_post(hero.index as usize), Some(0));
+    (sim, hero)
+}
+
+/// `[ours]` (2026-11-19): a hero's use press at his post opens no class
+/// screen; it says "Heroes can't change class" (the event) instead.
+#[test]
+fn hero_at_a_post_cannot_open_the_class_screen() {
+    let (mut sim, hero) = hero_at_post();
+    assert!(sim.hero_locked(0));
+    sim.step(&[PadState {
+        buttons: buttons::ACTION,
+        ..Default::default()
+    }]);
+    assert!(sim.events.contains(&Event::HeroClassLocked { unit: hero }));
+    sim.step(&[PadState::default()]);
+    assert_eq!(sim.spawn_stage[0], SpawnStage::Accepted);
+    assert_eq!(sim.players[0], Some(hero));
+    assert!(sim.is_hero(hero));
+    assert_eq!(
+        sim.heroes.as_ref().unwrap().teams[0].owner,
+        Some(hero.index)
+    );
+}
+
+/// Defence in depth: even with the live class screen forced open on another
+/// class, an accept does not swap the hero; it closes the screen.
+#[test]
+fn hero_class_screen_accept_cannot_swap() {
+    let (mut sim, hero) = hero_at_post();
+    sim.spawn_stage[0] = SpawnStage::Alive;
+    sim.spawn_choice[0] = 0;
+    tap(&mut sim, buttons::SPAWN_ACCEPT);
+    assert_eq!(sim.spawn_stage[0], SpawnStage::Accepted);
+    assert_eq!(sim.players[0], Some(hero));
+    assert!(sim.is_hero(hero));
+    assert_eq!(sim.unit(hero).unwrap().spec.class, 1);
+}
+
+/// The lock ends with the hero: after his death (the pause menu's Respawn
+/// is one) the ordinary classes are his again, and so is the post's class
+/// change.
+#[test]
+fn hero_lock_lifts_on_death() {
+    let (mut sim, hero) = hero_at_post();
+    sim.kill_environment(hero, crate::sim::DeathCause::Suicide);
+    sim.step(&[PadState::default()]);
+    assert!(!sim.hero_locked(0));
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![0]);
+    assert_eq!(sim.class_refusal(0, 0, 0), None);
+    sim.units[hero.index as usize].respawn_at = Some(sim.tick);
+    sim.step(&[PadState::default()]);
+    let trooper = sim.players[0].unwrap();
+    assert!(sim.unit(trooper).unwrap().alive && !sim.is_hero(trooper));
+    let u = &mut sim.units[trooper.index as usize];
+    u.soldier.pos = Vec3::new(0.0, 0.0, 4.0);
+    u.soldier.yaw = 0.0;
+    u.soldier.pitch = 0.0;
+    tap(&mut sim, buttons::ACTION);
+    assert_eq!(
+        sim.spawn_stage[0],
+        SpawnStage::Alive,
+        "the class screen opened"
+    );
 }
 
 /// No or the timer running out dismisses the offer: nothing changes for the

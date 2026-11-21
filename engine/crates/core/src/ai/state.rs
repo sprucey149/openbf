@@ -412,6 +412,57 @@ pub struct AiState {
     /// detector ([`super::arcm::ArcmState`]) — hashed only when it differs
     /// from the default, after `droid_rest`.
     pub arcm: super::arcm::ArcmState,
+    /// A bot in a ground vehicle's seat: its seat weapon and its duel with an
+    /// enemy vehicle ([`SeatFight`], `super::seat_fight`) - hashed only when
+    /// it differs from the default, after `arcm`.
+    pub seat: SeatFight,
+    /// [ours] (the maintainer, 2026-11-20) The enemy who last shot at this
+    /// bot on foot - hit it, or passed a bolt within
+    /// [`super::wake::NEAR_MISS`] of it - from past its weapon's opening
+    /// range ([`crate::weapon::WeaponClass::engage_range`]) but within its
+    /// round's reach, and the tick. For
+    /// [`crate::perception::RETURN_FIRE_TICKS`] the bot may locate him and
+    /// fire back out to that reach. `None` otherwise; hashed only when
+    /// `Some`, after `seat`.
+    pub shot_by: Option<(crate::unit::UnitHandle, u64)>,
+}
+
+/// What a bot in a ground vehicle's seat fights with (`super::seat_fight`):
+/// the seat it was chosen for, the seat weapon (0 FIRE, 1 SECONDARY_FIRE),
+/// whether it holds its fire, and its duel with an enemy vehicle - the
+/// vehicle, its hull's health when it last lost some, that tick - and the
+/// tick its rest from a stalled duel ends. All zero on foot and in any
+/// other seat.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SeatFight {
+    pub at: Option<crate::vehicle::Mount>,
+    pub weapon: u8,
+    pub hold: bool,
+    pub duel: Option<crate::vehicle::VehicleHandle>,
+    pub duel_hp: f32,
+    pub duel_tick: u64,
+    pub rest_until: u64,
+}
+
+impl SeatFight {
+    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        eat(b"SEATFIGHT");
+        eat(&[u8::from(self.at.is_some())]);
+        if let Some(m) = self.at {
+            eat(&m.vehicle.index.to_le_bytes());
+            eat(&m.vehicle.gen.to_le_bytes());
+            eat(&[m.seat]);
+        }
+        eat(&[self.weapon, u8::from(self.hold)]);
+        if let Some(v) = self.duel {
+            eat(&[1]);
+            eat(&v.index.to_le_bytes());
+            eat(&v.gen.to_le_bytes());
+            eat(&self.duel_hp.hash_bits().to_le_bytes());
+            eat(&self.duel_tick.to_le_bytes());
+        }
+        eat(&self.rest_until.to_le_bytes());
+    }
 }
 
 /// Card FLNK (`analysis/bot-design.md` 6.2; OURS): the hub a bot's route to

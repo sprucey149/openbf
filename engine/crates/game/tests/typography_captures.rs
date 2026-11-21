@@ -138,10 +138,8 @@ fn typography_captures() {
     let mut sm = base.clone();
     sm.page = ui::shell_ps2::Page::Main;
     sm.covered = true;
-    let picker = ui::shell_ps2::profiles::Picker::new(
-        vec![(1, "the maintainer".into()), (2, "Kai".into())],
-        Some(1),
-    );
+    let picker =
+        ui::shell_ps2::profiles::Picker::new(vec![(1, "the maintainer".into()), (2, "Kai".into())], Some(1));
     view.update_shell_profiles(&sm, false, &picker, size);
     paint(&mut r, &mut view);
     save(&out, "profiles", &r);
@@ -440,30 +438,35 @@ fn typography_captures() {
                 value: Some("Hoth: Echo Base".into()),
                 enabled: true,
                 text: false,
+                heading: false,
             },
             ui::lobby::PageRow {
                 label: "Mode".into(),
                 value: Some("Conquest".into()),
                 enabled: true,
                 text: false,
+                heading: false,
             },
             ui::lobby::PageRow {
                 label: "Player name".into(),
                 value: Some("Player".into()),
                 enabled: true,
                 text: true,
+                heading: false,
             },
             ui::lobby::PageRow {
                 label: "Start".into(),
                 value: None,
                 enabled: true,
                 text: false,
+                heading: false,
             },
             ui::lobby::PageRow {
                 label: "Back".into(),
                 value: None,
                 enabled: true,
                 text: false,
+                heading: false,
             },
         ];
         let lines = vec![(

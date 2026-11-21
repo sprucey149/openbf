@@ -690,6 +690,15 @@ pub struct Sim {
     /// Navigation diagnostics for the round (ROUND_VERBOSE / the sweep). An
     /// OUTPUT counter like `events`: deterministic, but not hashed.
     pub nav_stats: NavStats,
+    /// Issue #182 B4: the rescue's put-backs and kills this round
+    /// (`sim/rescue.rs`). An OUTPUT counter like `nav_stats`: deterministic,
+    /// never read by the sim, not hashed.
+    pub rescue_counts: [u32; 2],
+    /// Issue #182 B4: no rescue at all (`sim/rescue.rs`). A harness switch:
+    /// the leak census's `LEAK_NO_RESCUE=1` reads the raw geometry with it.
+    /// Every game the port runs leaves it `false`; a session setting in the
+    /// static digest, only when set.
+    pub rescue_off: bool,
     /// Card HITCH: wall-clock ms the last [`Sim::step`] spent on the AI (the
     /// commander's plan, the turret offers, the team board and every bot's
     /// think) - the windowed game's frame recorder reads it. A measurement
@@ -1028,6 +1037,16 @@ impl Sim {
     pub fn ai_tier(&self, team: u8) -> crate::skill::Tier {
         let mut t = self.difficulty_of(team).tier();
         t.view_mult *= self.mission_ai.view_mult;
+        // A Hunt's eased side also reacts a little slower: the reaction time
+        // over its ease percent, rounded, never past 1 s (OURS, the
+        // maintainer 2026-11-20/21: an eased bot still fires within about a
+        // second of a clear sight).
+        // measure: the Hunt easing refit's win shares per percent.
+        let pct = u64::from(self.hunt_skill_pct(team));
+        if pct < 100 {
+            let cap = t.reaction_ticks.max(super::deathmatch::HUNT_REACTION_MAX);
+            t.reaction_ticks = ((t.reaction_ticks * 100 + pct / 2) / pct).min(cap);
+        }
         t
     }
 
@@ -1095,7 +1114,8 @@ impl Sim {
     /// of the team's [`Sim::team_difficulty`] override (the arena), else the
     /// team's DTEAM row's skill, else (a team past 1) the round's base.
     /// The mission's `SetAIDifficulty` delta is added on top, clamped to
-    /// 1..=20 ([`Sim::script_skill_delta`]).
+    /// 1..=20 ([`Sim::script_skill_delta`]). A Hunt's ease leaves the level
+    /// alone ([`Sim::hunt_aim_widen`]).
     pub fn bot_skill(&self, team: u8) -> u8 {
         let t = usize::from(team);
         let base = match self.team_difficulty.get(t).copied().flatten() {
@@ -1107,9 +1127,10 @@ impl Sim {
         };
         let delta = self.script_skill_delta(team);
         if delta == 0 {
-            return base;
+            base
+        } else {
+            (i32::from(base) + delta).clamp(1, 20) as u8
         }
-        (i32::from(base) + delta).clamp(1, 20) as u8
     }
 
     /// The `SetAIDifficulty` delta for team `team`'s bots. BF2 `FUN_002a29d8`
@@ -1121,6 +1142,8 @@ impl Sim {
     /// base 14 and Normal the PS2 Elite's 17), so Easy reads the script's
     /// medium pair and Normal the hard pair; Hard and Elite, above anything
     /// the PS2 has, read the hard pair too. No tier reads the easy pair.
+    /// measure: campaign win rates at Easy and Normal against the PS2's
+    /// medium and hard.
     pub fn script_skill_delta(&self, team: u8) -> i32 {
         let level = match self.difficulty {
             crate::skill::Difficulty::Easy => 1,
@@ -1302,6 +1325,8 @@ impl Sim {
             nav: None,
             flank: Default::default(),
             nav_stats: NavStats::default(),
+            rescue_counts: [0; 2],
+            rescue_off: false,
             ai_wall_ms: 0.0,
             tick_cost: TickCost::default(),
             bot_census: Default::default(),
@@ -1520,9 +1545,12 @@ impl Sim {
     /// there is not one.
     ///
     /// The terrain is also a ONE-SIDED sheet: feet more than [`TERRAIN_BURY`]
-    /// below it are underground (a base or tunnel under an UNCUT heightfield —
-    /// BF2 Polis Massa's `cp5con`/`cp6con`) and the terrain does not apply at
-    /// all, so the model floor under them is the ground.
+    /// below it stop counting it as ground only when a SOLDIER face lies
+    /// between the feet and the sheet (a base or tunnel under an UNCUT
+    /// heightfield — BF2 Polis Massa's `cp5con`/`cp6con`), or when the sheet
+    /// itself is cut at that x z (a pit he fell out the bottom of); then the
+    /// model floor under them is the ground. With the sky over him (issue #182
+    /// B3) the sheet stays his ground and lifts him back onto the surface.
     ///
     /// PROVISIONAL: `STEP_HEIGHT`, `TERRAIN_BURY`, `WALKABLE_MIN_NY` and using
     /// −300.0 as a no-terrain floor are all ours (`core::collision`).
@@ -1719,9 +1747,32 @@ impl Sim {
         if terrain.is_some() && self.collision.is_cut(feet) {
             terrain = None;
         }
-        // Buried: the sheet is above the feet by more than a bank climb.
-        if terrain.is_some_and(|t| t > feet.y + TERRAIN_BURY) {
-            terrain = None;
+        // Buried: the sheet is above the feet by more than a bank climb -
+        // and (issue #182 B3, ours) a SOLDIER face lies between them and it:
+        // a real tunnel or base under an uncut sheet (BF2 Polis Massa's
+        // cp5con slab). With the sky over him he is under the map, not in a
+        // base, and the sheet stays his ground: it lifts him back out
+        // instead of letting him walk on underneath (the census's
+        // `underterrain` sites). measure: the census's underterrain and
+        // float counts on bf1_hot1 / bf2_hot1 / bf2_pol1.
+        if let Some(t) = terrain.filter(|t| *t > feet.y + TERRAIN_BURY) {
+            let roofed = self
+                .collision
+                .ray(
+                    feet + Vec3::Y * 0.05,
+                    Vec3::Y,
+                    t - feet.y,
+                    crate::collision::Layers::SOLDIER,
+                )
+                .is_some();
+            // A hole the sheet has at this x z (a pit's cutter whose
+            // bottom plane he fell past): no sheet to lift him onto, he
+            // falls on as before. Lifting him there bounced him in the
+            // pit for ever (BF1 Bespin's chamber exit).
+            let holed = self.collision.is_cut(Vec3::new(feet.x, t, feet.z));
+            if roofed || holed {
+                terrain = None;
+            }
         }
         let min_y = terrain.unwrap_or(FLOOR_SEARCH_MIN);
         if probe > min_y {

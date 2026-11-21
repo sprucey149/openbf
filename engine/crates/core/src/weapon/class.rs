@@ -20,6 +20,16 @@ impl WeaponClass {
             .map_or_else(|| self.shot_ordnance().max_range(), |e| e.cone_length)
     }
 
+    /// [ours] How far the AI opens fire with this weapon: [`Self::shot_range`]
+    /// held to the disc's own reach when the bolt was lengthened
+    /// ([`super::BOLT_REACH`], [`OrdnanceClass::natural_reach`]). A bot
+    /// fires past it only back at a shooter who shot at it
+    /// (`perception::RETURN_FIRE_TICKS`).
+    pub fn engage_range(&self) -> f32 {
+        let r = self.shot_range();
+        self.ordnance.natural_reach.map_or(r, |n| r.fmin(n))
+    }
+
     pub fn shot_ordnance(&self) -> OrdBlend {
         self.ordnance.charged(if self.max_pressed_time > 0.0 {
             0.0
@@ -180,6 +190,7 @@ impl WeaponClass {
                 fat_ray: None,
                 beam: None,
                 tow: None,
+                natural_reach: None,
                 impact: Some(crate::impact::ImpactLook {
                     soft: Some("ord_explosion".into()),
                     rigid: Some("ord_explosion".into()),
@@ -288,6 +299,7 @@ impl WeaponClass {
                 fat_ray: None,
                 beam: None,
                 tow: None,
+                natural_reach: None,
                 impact: Some(crate::impact::ImpactLook {
                     soft: Some("com_sfx_ord_exp".into()),
                     rigid: Some("com_sfx_ord_exp".into()),
@@ -448,6 +460,10 @@ impl WeaponClass {
         // ordnance and no ExtremeRange takes the reach (Velocity × LifeSpan,
         // FUN_00277d30); only the mortars write ExtremeRange, and they have
         // no magnet (LockOnRange 0).
+        // [ours] (2026-11-20) A bolt lengthened to the 200 m reach
+        // (`OrdnanceClass::natural_reach`) takes the lengthened reach here:
+        // the acquisition and the reticle's in-range cue reach as far as the
+        // bolt (`WeaponClass::give_bolt_assist`).
         w.extreme_range = match pf(src, "ExtremeRange") {
             Some(v) => v.fmax(w.lock_on_range),
             None if Self::ordnance_name(src).is_some() => {
@@ -687,6 +703,82 @@ impl WeaponClass {
             self.target_kind |= 1 << 3;
         }
         self.extreme_range = self.extreme_range.fmax(self.lock_on_range);
+    }
+
+    /// OURS (the maintainer, 2026-11-20: the lengthened blasters' assist
+    /// "like the sniper's"): a weapon whose bolt was lengthened to
+    /// [`super::BOLT_REACH`] ([`OrdnanceClass::natural_reach`]) and that has
+    /// the disc's magnet (`LockOnRange` > 0) keeps a human's assist at full
+    /// strength out to the disc's reach ([`WeaponClass::assist_full_range`]
+    /// = the natural reach: 112.5-128 m on the rifles and pistols), then
+    /// fades it in a straight line to nothing at the bolt's reach
+    /// ([`WeaponClass::magnet_reach`], [`WeaponClass::assist_range_scale`]).
+    /// The acquisition and the reticle's in-range cue already reach that far
+    /// (`extreme_range`, the bolt's reach). `lock_on_range` keeps the disc's
+    /// value: the PS2's fade of the pull over it stays as it was, so within
+    /// the disc's `LockOnRange` (40 m BF2, 64 m BF1 rifles) the assist is
+    /// unchanged and the pull still ends there; the slowdown and the
+    /// tracking now reach on along the curve. Snipers keep their own
+    /// ([`WeaponClass::give_sniper_assist`]). Only a human's magnet reads
+    /// these; the AI's aim is untouched.
+    /// measure: controller play on a crossing runner at 60, 100, 150 and
+    /// 190 m with a BF1 and a BF2 rifle.
+    pub fn give_bolt_assist(&mut self) {
+        let Some(n) = self.ordnance.natural_reach else {
+            return;
+        };
+        // A gun without the disc's magnet, or whose magnet reaches past the
+        // bolt already (BF2's snail tank: LockOnRange 1500), keeps it.
+        if self.is_sniper_rifle()
+            || self.lock_on_range <= 0.0
+            || self.lock_on_range >= self.round_reach()
+        {
+            return;
+        }
+        self.assist_full_range = n;
+        self.extreme_range = self.extreme_range.fmax(self.round_reach());
+    }
+
+    /// [`WeaponClass::give_bolt_assist`] gave this weapon its curve.
+    fn bolt_assist(&self) -> bool {
+        self.assist_full_range > 0.0
+            && self.ordnance.natural_reach.is_some()
+            && !self.is_sniper_rifle()
+    }
+
+    /// How far a human's magnet holds a target with this weapon (m): the
+    /// bolt's reach for a lengthened blaster
+    /// ([`WeaponClass::give_bolt_assist`]), else `lock_on_range` (a
+    /// sniper's is the round's reach already).
+    pub fn magnet_reach(&self) -> f32 {
+        if self.bolt_assist() {
+            self.round_reach().fmax(self.lock_on_range)
+        } else {
+            self.lock_on_range
+        }
+    }
+
+    /// The share of a human's assist this weapon keeps at `distance` (m): a
+    /// sniper rifle's curve ([`WeaponClass::give_sniper_assist`]), a
+    /// lengthened blaster's ([`WeaponClass::give_bolt_assist`]), else 1 (the
+    /// PS2's own fade of the pull, over `lock_on_range`, is applied apart).
+    pub fn assist_range_scale(&self, distance: f32) -> f32 {
+        if self.is_sniper_rifle() {
+            let reach = self.lock_on_range;
+            let full = match self.assist_full_range {
+                f if f > 0.0 => f,
+                _ => crate::aim_assist::SNIPER_FADE_START * reach,
+            };
+            crate::aim_assist::sniper_range_scale(distance, full, reach)
+        } else if self.bolt_assist() {
+            crate::aim_assist::sniper_range_scale(
+                distance,
+                self.assist_full_range,
+                self.magnet_reach(),
+            )
+        } else {
+            1.0
+        }
     }
 
     /// How far this weapon's round goes: a beam's `Range`, else the bolt's

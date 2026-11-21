@@ -228,8 +228,9 @@ pub struct Settings {
     pub team_size_pct: u32,
     #[serde(default = "hundred", deserialize_with = "percent_setting")]
     pub reinforcement_pct: u32,
-    /// Issue #168: the LAN hosts last joined, newest first
-    /// (`netplay::lobby::remember_host`).
+    /// Issue #168: the LAN hosts last joined, newest first. DEV-PHASE,
+    /// slated for removal at v1: no longer written; it only seeds this
+    /// computer's `recent_games.ron` once (`netplay::recent`).
     #[serde(default)]
     pub recent_hosts: Vec<String>,
 }
@@ -423,10 +424,6 @@ pub struct CampaignProgress {
     /// Whether the player has already been prompted for the Geonosis training mission.
     #[serde(default)]
     pub training_prompted: bool,
-    /// The single autosaved turn older builds kept; [`Profile::normalize`]
-    /// turns it into a save.
-    #[serde(default, skip_serializing)]
-    pub active_mission: Option<u8>,
     #[serde(default)]
     pub saves: Vec<CampaignSave>,
 }
@@ -437,7 +434,6 @@ impl Default for CampaignProgress {
             unlocked: 1,
             completed_mask: 0,
             training_prompted: false,
-            active_mission: None,
             saves: Vec::new(),
         }
     }
@@ -574,12 +570,6 @@ impl Profile {
             .campaign
             .unlocked
             .clamp(1, CampaignProgress::MISSIONS as u8);
-        if let Some(turn) = self.campaign.active_mission.take() {
-            if self.campaign.saves.is_empty() {
-                let name: String = self.name.chars().take(NAME_LIMIT).collect();
-                self.campaign.write_save(None, &name, turn, 0);
-            }
-        }
     }
 
     fn fresh() -> Profile {
@@ -638,7 +628,7 @@ impl Profile {
     }
 }
 
-fn write_ron(value: &impl Serialize, path: &Path) -> Result<()> {
+pub(crate) fn write_ron(value: &impl Serialize, path: &Path) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
     }
@@ -1357,8 +1347,7 @@ mod tests {
             name: "Ann".into(),
             ..Default::default()
         };
-        crate::netplay::lobby::remember_host(&mut p.settings.recent_hosts, "10.0.0.2");
-        crate::netplay::lobby::remember_host(&mut p.settings.recent_hosts, "studio-pc:40000");
+        p.settings.recent_hosts = vec!["studio-pc:40000".into(), "10.0.0.2".into()];
         p.save_to(&path).unwrap();
         let back = Profile::load_from(&path);
         let _ = std::fs::remove_dir_all(&dir);

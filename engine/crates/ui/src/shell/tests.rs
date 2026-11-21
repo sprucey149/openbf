@@ -423,7 +423,7 @@ fn option_ranges_steps_and_defaults() {
     );
     assert_eq!(
         (o.ctf_score, o.ctf_timer, o.hun_timer, o.hun_score),
-        (5, 0, 5, 50)
+        (5, 0, 5, HUNT_SCORE_PER_MAP)
     );
     assert_eq!(o.ass_score, 180);
     o.adjust(Opt::NumBots, 1, 10);
@@ -460,7 +460,9 @@ fn option_ranges_steps_and_defaults() {
     o.adjust(Opt::HunTimer, -1, 10);
     assert_eq!(o.hun_timer, 5, "Hunt's timer has no Off");
     o.adjust(Opt::HunScore, 1, 10);
-    assert_eq!(o.hun_score, 150);
+    assert_eq!(o.hun_score, 100);
+    o.adjust(Opt::HunScore, -1, 10);
+    assert_eq!(o.hun_score, HUNT_SCORE_PER_MAP, "Per map is below 10");
     o.adjust(Opt::AssScore, -1, 10);
     assert_eq!(o.ass_score, 80);
     o.adjust(Opt::AssScore, -1, 10);
@@ -929,6 +931,16 @@ fn option_rows_read_as_the_disc_writes_them() {
     let mut o2 = o;
     o2.hero_respawn = 1;
     assert_eq!(flat(t.option(Opt::HeroRespawn, &o2)), "Timer: < 1 > second");
+    // The score rows show the limit each mode plays to.
+    assert_eq!(
+        flat(t.option(Opt::HunScore, &o)),
+        "Score Limit: < Per map >"
+    );
+    assert_eq!(flat(t.option(Opt::AssScore, &o)), "Score Limit: < 180 >");
+    o2.hun_score = 70;
+    o2.ass_score = 360;
+    assert_eq!(flat(t.option(Opt::HunScore, &o2)), "Score Limit: < 70 >");
+    assert_eq!(flat(t.option(Opt::AssScore, &o2)), "Score Limit: < 360 >");
     assert_eq!(
         t.help(Opt::ConNumBots),
         "Set the number of AI units per team for all Conquest matches in your session."

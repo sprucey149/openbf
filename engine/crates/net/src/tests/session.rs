@@ -659,6 +659,131 @@ fn session_discovery_answers_once_per_datagram_and_rate_limits() {
     assert_eq!(replies(&mut host, Micros::from_millis(300)), 1);
 }
 
+/// Discovery over a tunnel: a browser whose targets change to a unicast
+/// address keeps the hosts it already heard and hears the unicast host.
+#[test]
+fn session_discovery_set_targets_keeps_heard_hosts_and_asks_unicast() {
+    let mut net = Net::new(17, lan(), Net::host_config());
+    net.host.set_info(b"first".to_vec());
+    let me = addr(8);
+    net.sim.add_endpoint(me);
+    // A target nobody listens on: nothing is heard.
+    let mut browser = LanBrowser::new(vec![addr(40)]);
+    let run = |browser: &mut LanBrowser, net: &mut Net, steps: usize| {
+        for _ in 0..steps {
+            for (to, b) in browser.update(net.now) {
+                net.sim.send(net.now, me, to, &b);
+            }
+            net.step();
+            while let Some((from, b)) = net.sim.recv(me) {
+                browser.handle_datagram(net.now, from, &b);
+            }
+        }
+    };
+    run(&mut browser, &mut net, 600);
+    assert!(browser.hosts().is_empty());
+    browser.set_targets(vec![addr(40), addr(0)]);
+    assert_eq!(browser.targets(), [addr(40), addr(0)]);
+    run(&mut browser, &mut net, 600);
+    let hosts = browser.hosts();
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].addr, addr(0));
+    assert_eq!(hosts[0].protocol, crate::PROTOCOL);
+    // New targets: the host heard stays listed until it goes silent.
+    let heard = hosts[0].last_seen;
+    browser.set_targets(vec![addr(40)]);
+    browser.update(heard + Micros::from_millis(10));
+    assert_eq!(browser.hosts().len(), 1, "kept across set_targets");
+    browser.update(heard + discovery::FORGET_AFTER + Micros::from_millis(10));
+    assert!(browser.hosts().is_empty(), "then forgotten when silent");
+}
+
+/// Discovery's frozen layout: the bytes of a `Find` and a `Found` are
+/// pinned, so every later protocol can still read them.
+#[test]
+fn session_discovery_layout_is_frozen() {
+    let mut pw = crate::packet::bare_packet(0);
+    pw.find(0x0102_0304_0506_0708);
+    let find = pw.finish();
+    let mut want = b"OBF1".to_vec();
+    want.extend(crate::PROTOCOL.to_le_bytes());
+    want.extend([0; 12]);
+    want.extend([7, 8, 8, 7, 6, 5, 4, 3, 2, 1]);
+    assert_eq!(find, want);
+    assert_eq!(
+        crate::packet::frozen_find_nonce(&find),
+        Some(0x0102_0304_0506_0708)
+    );
+    let mut pw = crate::packet::bare_packet(0);
+    pw.found(9, b"info");
+    let found = pw.finish();
+    assert_eq!(
+        &found[18..],
+        &[8, 12, 9, 0, 0, 0, 0, 0, 0, 0, b'i', b'n', b'f', b'o']
+    );
+    assert_eq!(
+        crate::packet::frozen_found(&found),
+        Some((crate::PROTOCOL, 9, &b"info"[..]))
+    );
+    // Not discovery: another connection id, or another first chunk.
+    let mut other = find.clone();
+    other[6] = 1;
+    assert_eq!(crate::packet::frozen_find_nonce(&other), None);
+    assert_eq!(crate::packet::frozen_found(&find), None);
+}
+
+/// A browser and a host on different protocol versions still list each
+/// other: the host answers the other version's `Find` (rate-limited, no
+/// peer opened), and the browser lists the answer with the host's version.
+#[test]
+fn session_discovery_answers_another_protocol_without_a_session() {
+    let other = crate::PROTOCOL.wrapping_add(1);
+    let mut host = HostCore::new(Net::host_config());
+    host.set_info(b"Host on Hoth".to_vec());
+    let from = addr(9);
+    let mut browser = LanBrowser::new(vec![addr(0)]);
+    let (_, mut find) = browser.update(Micros::from_millis(1)).remove(0);
+    find[4..6].copy_from_slice(&other.to_le_bytes());
+    host.handle_datagram(Micros::from_millis(2), from, &find);
+    let out = host.update(Micros::from_millis(2));
+    let replies: Vec<_> = out.iter().filter(|(to, _)| *to == from).collect();
+    assert_eq!(replies.len(), 1, "one Found");
+    // Again within FOUND_EVERY: no second answer.
+    host.handle_datagram(Micros::from_millis(50), from, &find);
+    assert!(host
+        .update(Micros::from_millis(50))
+        .iter()
+        .all(|(to, _)| *to != from));
+    // No session: no player, no peer, and nothing more goes to it.
+    for ms in [500, 1_500, 3_000, 6_000] {
+        assert!(host
+            .update(Micros::from_millis(ms))
+            .iter()
+            .all(|(to, _)| *to != from));
+    }
+    assert_eq!(host.players().len(), 1);
+    assert!(host.stats().peers.is_empty());
+    assert_eq!(host.stats().drops.wrong_protocol, 2);
+    // The browser on that other version reads the host's own-version
+    // answer and lists it with the host's protocol.
+    let (_, found) = replies[0].clone();
+    browser.handle_datagram(Micros::from_millis(4), addr(0), &found);
+    let hosts = browser.hosts();
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].info, b"Host on Hoth");
+    // Seen from a browser of a third version, the reply's protocol differs.
+    let mut theirs = found.clone();
+    theirs[4..6].copy_from_slice(&other.to_le_bytes());
+    browser.handle_datagram(Micros::from_millis(5), addr(1), &theirs);
+    let h = browser
+        .hosts()
+        .into_iter()
+        .find(|h| h.addr == addr(1))
+        .unwrap();
+    assert_eq!(h.protocol, other);
+    assert_eq!(h.info, b"Host on Hoth");
+}
+
 /// Sixteen humans with the widest pads and a queue of large commands: every
 /// bundle stays within one datagram against either base, reaches every
 /// guest, and the commands spread over the ticks.

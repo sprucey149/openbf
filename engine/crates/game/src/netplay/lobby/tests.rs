@@ -198,20 +198,9 @@ fn reject_reasons_read_as_plain_text() {
     assert!(reject_text(R::Kicked, "", "x").contains("removed"));
 }
 
-/// Recent hosts: newest first, once each, at most eight; the name falls
-/// back when the profile's is not a valid one.
+/// The name falls back when the profile's is not a valid one.
 #[test]
-fn recent_hosts_and_the_player_name() {
-    let mut r = Vec::new();
-    for i in 0..10 {
-        remember_host(&mut r, &format!("10.0.0.{i}"));
-    }
-    remember_host(&mut r, " 10.0.0.5 ");
-    remember_host(&mut r, "");
-    assert_eq!(r.len(), RECENT_HOSTS);
-    assert_eq!(r[0], "10.0.0.5");
-    assert_eq!(r[1], "10.0.0.9");
-    assert_eq!(r.iter().filter(|a| *a == "10.0.0.5").count(), 1);
+fn the_player_name_falls_back() {
     assert_eq!(player_name("  Ann "), "Ann");
     assert_eq!(player_name(&"x".repeat(40)).chars().count(), 24);
     let fallback = player_name("   ");
@@ -241,7 +230,34 @@ fn digest_mismatch_names_the_first_differing_group() {
     };
     assert_eq!(HostInfo::decode(&info.encode()), Some(info.clone()));
     assert_eq!(info.refusal("b").as_deref(), Some("full"));
-    assert_eq!(info.refusal("c").as_deref(), Some("another openbf build"));
+    assert_eq!(info.refusal("c").as_deref(), Some("different version"));
+    // Another version's blob (other fields, none of the new ones): listed
+    // by name with its build, not dropped.
+    let old = br#"{"name":"Bo","map":"","players":1,"max_players":8,"protocol":8,"build":"old"}"#;
+    assert_eq!(HostInfo::decode(old), None);
+    let any = HostInfo::decode_any(old).unwrap();
+    assert_eq!(
+        (any.name.as_str(), any.protocol, any.build.as_str()),
+        ("Bo", 8, "old")
+    );
+    assert_eq!(any.refusal("b").as_deref(), Some("different version"));
+    // A discovery answer in another protocol is that protocol's, whatever
+    // its blob claims.
+    let found = net::FoundHost {
+        addr: "10.0.0.2:37450".parse().unwrap(),
+        info: HostInfo {
+            session: 5,
+            ..info.clone()
+        }
+        .encode(),
+        rtt: net::Micros::ZERO,
+        last_seen: net::Micros::ZERO,
+        protocol: net::PROTOCOL + 1,
+    };
+    let of = HostInfo::of_found(&found);
+    assert_eq!((of.name.as_str(), of.session), ("Ann", 5));
+    assert_eq!(of.protocol, net::PROTOCOL + 1);
+    assert_eq!(of.refusal("b").as_deref(), Some("different version"));
     let n = GameNotice::DigestMismatch {
         map: "Kashyyyk".into(),
         groups: host,

@@ -365,8 +365,10 @@ impl Sim {
     /// d-pad); No or the timeout declines it; a Yes removes his soldier
     /// without a death and opens the spawn map; if he loses his soldier
     /// while the offer is up he is the owner anyway (B2:448990-449000). The
-    /// owner keeps the hero through lives in other classes until his hero
-    /// soldier is gone ([`HeroTeam::spawned`]); then the respawn rule runs.
+    /// owner's hero soldier is gone ([`HeroTeam::spawned`]); then the
+    /// respawn rule runs. The PS2 lets the owner keep the hero through lives
+    /// in other classes; `[ours]` (maintainer, 2026-11-19): from the Yes
+    /// until the hero dies he plays only the hero ([`Sim::hero_locked`]).
     pub(super) fn step_heroes(&mut self, pads: &[PadState]) -> Option<Vec<PadState>> {
         let mut filtered = pads
             .iter()
@@ -679,6 +681,32 @@ impl Sim {
             self.respawn_slot_with_class(i, Some(class));
         }
         true
+    }
+
+    /// `[ours]` (maintainer, 2026-11-19): player slot `s` owns his team's
+    /// hero (from the Yes on the offer, or the offer's lost-soldier accept,
+    /// until the hero dies), so he plays only the hero: the class screen
+    /// lists only it ([`Sim::spawn_class_available`]) and a command post
+    /// opens no class change ([`Sim::class_change_open`]). The PS2 lets the
+    /// owner take other classes and keep the hero for later (FUN_0034e1f0
+    /// B2:345046-345058). The pause menu's Respawn is a death and frees him.
+    /// The testing class picker (a logged cheat) still changes class.
+    pub fn hero_locked(&self, s: usize) -> bool {
+        let Some(h) = self.players.get(s).copied().flatten() else {
+            return false;
+        };
+        self.units
+            .get(h.index as usize)
+            .filter(|u| u.gen == h.gen)
+            .is_some_and(|u| self.locked_hero_class(s, u.team).is_some())
+    }
+
+    /// The hero class slot `s` is locked to on `team` ([`Sim::hero_locked`]):
+    /// the hero it owns, while that hero is a row it may take (the testing
+    /// picker's hero outside the mission's roster is not).
+    pub(crate) fn locked_hero_class(&self, s: usize, team: u8) -> Option<u8> {
+        self.owned_hero_class(s, team)
+            .filter(|&hero| self.spawn_class_available(s, team, usize::from(hero)))
     }
 
     /// The hero class player slot `s` owns on `team`, if it owns one: the

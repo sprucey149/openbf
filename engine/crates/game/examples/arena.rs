@@ -583,7 +583,7 @@ fn mission_for(key: &str) -> Option<game::mission::MissionDef> {
 /// The map field retains the arena's historical referee setup: mode sublevel,
 /// shared props, mission tickets/factions/class mix, nav graph, model collision,
 /// then `setup_conquest` at 16 v 16 with the idle player. Unlike the sweep it
-/// omits mission death drains, arc blocks and barrier toggles; unlike runtime
+/// omits arc blocks and barrier toggles; unlike runtime
 /// it also omits mission unit counts and alive-AI caps. Changing these inputs
 /// needs a separate review of the protected arena baselines.
 fn run_map(key: &str, path: &Path, ticks: u64, seed: u32, tiers: [Difficulty; 2]) -> Option<Row> {

@@ -273,6 +273,7 @@ pub struct WalkSim {
 /// posts (geo1's CIS `obj3_wheel`) are never spawned at. A named path the
 /// map lacks, or an empty one, keeps the fallback [`WalkSim::setup_conquest`]
 /// has always used: one node 3 m off the post's +x/+z corner (OURS).
+/// measure: which posts reach this fallback on the stock maps.
 fn cp_spawn_nodes(layout: &MapLayout, cp: &CommandPostDef) -> Vec<(Vec3, f32)> {
     let Some(name) = cp.spawn_path.as_deref() else {
         return Vec::new();

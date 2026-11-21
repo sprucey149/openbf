@@ -1441,6 +1441,7 @@ fn an_effect_set_round_trips_through_ron() {
             direction: [0.0, 1.0, 0.0],
         }],
         lightning: Vec::new(),
+        shields: Vec::new(),
     };
     let text = ron::ser::to_string_pretty(&set, ron::ser::PrettyConfig::default()).unwrap();
     let back: FxSet = ron::from_str(&text).unwrap();

@@ -421,6 +421,24 @@ pub fn trimesh(positions: &[[f32; 3]], indices: &[u32]) -> Option<Arc<TriMesh>> 
     TriMesh::new(points, tris).ok().map(Arc::new)
 }
 
+/// The closed [`TriMesh`] of the convex hull of `points`, or `None` when
+/// they span no volume. Issue #182's added solids (a hull that fills a
+/// prop's grooves); keeps `parry3d` an implementation detail of this crate.
+pub fn convex_hull_mesh(points: &[[f32; 3]]) -> Option<Arc<TriMesh>> {
+    if points.len() < 4 {
+        return None;
+    }
+    let pts: Vec<parry3d::na::Point3<f32>> = points
+        .iter()
+        .map(|p| parry3d::na::Point3::new(p[0], p[1], p[2]))
+        .collect();
+    let (v, idx) = parry3d::transformation::try_convex_hull(&pts).ok()?;
+    if idx.is_empty() {
+        return None;
+    }
+    TriMesh::new(v, idx).ok().map(Arc::new)
+}
+
 /// Which QUERIES a body answers (`analysis/re-collision-layers.md` §4: a
 /// soldier's walk / ground / wall queries use the model's SOLDIER subset, a
 /// bolt / reticle / LOS ray its ORDNANCE subset), plus the VEHICLE subset and

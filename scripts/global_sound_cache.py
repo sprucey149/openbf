@@ -126,21 +126,22 @@ def recipe(game, root):
 
 
 def identity(bake, env):
+    """What the global VO bytes are made by: the global-sound group's version (`bake format-versions`), this recipe,
+    ffmpeg's build and the local restoration. Not the bake binary or its source: a bake change that moves these bytes
+    raises the version (engine/crates/bake/src/versions.rs, guarded by scripts/bake_versions.py)."""
+    import bake_cache
     ffmpeg = shutil.which("ffmpeg", path=env.get("PATH"))
     if not ffmpeg:
         raise ValueError("global-sound needs ffmpeg on PATH")
-    result = {"schema": SCHEMA, "bake": digest(bake), "helper": digest(__file__),
+    versions = bake_cache.format_versions(bake)
+    result = {"schema": SCHEMA, "version": versions["groups"]["global-sound"], "target": versions["target"],
+              "helper": digest(__file__),
               "ffmpeg": [digest(ffmpeg), subprocess.check_output([ffmpeg, "-version"], env=env).decode(errors="replace")]}
     script = env.get("OPENBF_AUDIO_RESTORE_SCRIPT")
     result["restoration"] = None
     if "OPENBF_AUDIO_RESTORE_SCRIPT" in env:
         python = shutil.which(env.get("OPENBF_PYTHON", "python3"), path=env.get("PATH"))
         result["restoration"] = [digest(script), digest(python), subprocess.check_output([python, "-I", "-c", "import sys; print(sys.version); print(sys.platform)"], env=env).decode()]
-    # Conservative schema/code identity even for a binary supplied by --game-bin.
-    root = Path(__file__).resolve().parents[1]
-    result["code"] = [[p.relative_to(root).as_posix(), digest(p)] for folder in ("bake", "mungefs", "manifest")
-                      for p in sorted((root / "engine/crates" / folder).rglob("*"))
-                      if p.is_file() and p.suffix in (".rs", ".toml", ".json")]
     return result
 
 
@@ -168,7 +169,7 @@ def valid(entry, key, dependencies=None):
             if isinstance(previous, dict) and dependencies is not None:
                 labels = {"sources": "stream inputs", "references": "reference banks",
                           "restoration": "audio restoration", "ffmpeg": "ffmpeg",
-                          "bake": "bake executable", "code": "bake source", "helper": "recipe"}
+                          "version": "global-sound version", "target": "platform", "helper": "recipe"}
                 changed = [label for field, label in labels.items()
                            if previous.get(field) != dependencies.get(field)]
                 if changed:

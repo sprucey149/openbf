@@ -385,3 +385,208 @@ fn region_lookup_is_case_insensitive() {
     assert!(l.region("sarlac01").is_some());
     assert!(l.region("nope").is_none());
 }
+
+/// Issue #171 parity rows: the sweep's extra rows apply over the table's on
+/// their own map and era only, an empty list is the game's own path, and
+/// `StartTeam` / `SpawnWeight` set what they name. A map fixed in both eras
+/// carries the same rows in each (Rhen Var Harbor's weights differ), and
+/// every table row's post index is one its map keeps after the mission
+/// roster (checked against the baked layout and mission when present).
+#[test]
+fn conquest_parity_rows() {
+    let con = |map: &str, era: &str| {
+        mission(&format!(
+            r#"(
+                map: "{map}", mode: "con", source_game: "bf2",
+                teams: [(faction: "rep", units: 16, tickets: 150),
+                        (faction: "cis", units: 16, tickets: 150)],
+                ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25,
+                era: Some("{era}"),
+            )"#
+        ))
+    };
+    let state = |l: &MapLayout| -> Vec<(u8, [i32; 5], [i32; 5], f32)> {
+        l.cps
+            .iter()
+            .map(|c| (c.team, c.value_atk, c.value_def, c.ai_spawn_weight))
+            .collect()
+    };
+    let m = con("t", "cw");
+    let (mut a, mut b) = (
+        MapLayout::from_manifest(&manifest()),
+        MapLayout::from_manifest(&manifest()),
+    );
+    assert_eq!(a.apply_mission(&m), b.apply_mission_with(&m, &[]));
+    assert_eq!(state(&a), state(&b));
+
+    let extra = [
+        ("t", true, ParityFix::StartTeam { post: 0, team: 2 }),
+        ("t", true, ParityFix::NeutralStart(1)),
+        (
+            "t",
+            true,
+            ParityFix::SpawnWeight {
+                post: 2,
+                weight: 30.0,
+            },
+        ),
+        ("t", true, goals(3, 1, 4, 9)),
+        // Another era and another map: untouched.
+        ("t", false, ParityFix::StartTeam { post: 4, team: 2 }),
+        ("u", true, ParityFix::StartTeam { post: 4, team: 2 }),
+    ];
+    let mut l = MapLayout::from_manifest(&manifest());
+    l.apply_mission_with(&m, &extra);
+    let s = state(&l);
+    assert_eq!(s[0].0, 2);
+    assert_eq!(s[1].0, 0);
+    assert_eq!(s[2].3, 30.0);
+    // Team 1 is the CIS: the CIS row of the values (crate::walk::faction_row).
+    let cis = crate::walk::faction_row("cis");
+    assert_eq!((s[3].1[cis], s[3].2[cis]), (4, 9));
+    let base = state(&a);
+    assert_eq!(s[4], base[4]);
+    for i in [0, 1, 2] {
+        assert_eq!((s[i].1, s[i].2), (base[i].1, base[i].2));
+    }
+
+    // The table's rows: a map fixed in both eras has the same rows in each
+    // (Rhen Var Harbor's CW spawn weight is milder; BF2 Kamino's are GCW
+    // only: its CW entry measured even without them),
+    // and every row's post index is inside its map's roster when the bake
+    // is here to say so.
+    for map in ["bf2_dea1", "bf1_kas2", "bf1_bes1", "bf2_myg1", "bf2_uta1"] {
+        let rows = |cw: bool| {
+            CONQUEST_PARITY
+                .iter()
+                .filter(|(m, e, _)| *m == map && *e == cw)
+                .map(|(_, _, f)| format!("{f:?}"))
+                .collect::<Vec<_>>()
+        };
+        assert!(!rows(false).is_empty(), "{map}");
+        assert_eq!(rows(false), rows(true), "{map}");
+    }
+    assert!(!CONQUEST_PARITY
+        .iter()
+        .any(|(map, cw, _)| *map == "bf2_kam1" && *cw));
+    let rhn1 = |cw: bool| {
+        CONQUEST_PARITY
+            .iter()
+            .filter(|(map, e, _)| *map == "bf1_rhn1" && *e == cw)
+            .count()
+    };
+    assert_eq!((rhn1(false), rhn1(true)), (2, 2));
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut checked = 0;
+    for (map, cw, fix) in CONQUEST_PARITY {
+        let post = match *fix {
+            ParityFix::NeutralStart(i) => i,
+            ParityFix::StartTeam { post, .. }
+            | ParityFix::SpawnWeight { post, .. }
+            | ParityFix::Goals { post, .. }
+            | ParityFix::AllyNodes { post, .. } => post,
+        };
+        // A CW-only map (BF1 Geonosis, Kamino) has one `{map}_con.ron`
+        // carrying `era: Some("cw")`, and no `_con_cw` file.
+        let read = |suffix: &str| {
+            std::fs::read_to_string(root.join(format!("missions/{map}{suffix}.ron")))
+        };
+        let msrc = if *cw {
+            read("_con_cw").or_else(|_| read("_con"))
+        } else {
+            read("_con")
+        };
+        let lpath = root.join(format!("assets_baked/{map}/manifest.ron"));
+        let (Ok(msrc), Ok(lsrc)) = (msrc, pak::read_to_string(&lpath)) else {
+            continue;
+        };
+        let mission: MissionDef = ron::from_str(&msrc).expect("mission parses");
+        assert_eq!(
+            mission.era.as_deref() == Some("cw"),
+            *cw,
+            "{map}: the row's era is not the mission's ({:?})",
+            mission.era
+        );
+        let mut manifest: Manifest = ron::from_str(&lsrc).expect("manifest parses");
+        // The mode sublevel, merged as `Scene::apply_mode_layer` does.
+        if let Some(i) = crate::assets::mode_layer_index(&manifest, "con") {
+            let layer = manifest.layers.remove(i);
+            manifest.regions.extend(layer.regions);
+            manifest.instances.extend(layer.instances);
+        }
+        let mut l = MapLayout::from_manifest(&manifest);
+        l.apply_mission(&mission);
+        assert!(
+            post < l.cps.len(),
+            "{map} (cw {cw}): post {post} of {}",
+            l.cps.len()
+        );
+        checked += 1;
+    }
+    // With the bake here, every row is checked: none is skipped silently.
+    if root.join("assets_baked/bf2_dea1/manifest.ron").exists() {
+        assert_eq!(checked, CONQUEST_PARITY.len(), "rows checked");
+    }
+}
+
+#[test]
+fn an_ally_nodes_row_drops_only_its_posts_ally_path_nodes() {
+    let con = |era: &str| {
+        mission(&format!(
+            r#"(
+                map: "t", mode: "con", source_game: "bf2",
+                teams: [(faction: "rep", units: 16, tickets: 150),
+                        (faction: "cis", units: 16, tickets: 150)],
+                ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25,
+                era: Some("{era}"),
+            )"#
+        ))
+    };
+    let layout = || {
+        let mut m = manifest();
+        m.instances[0].props.extend([
+            (PROP_ALLY_PATH, "allies".into()),
+            (PROP_ALLY_COUNT, "4".into()),
+        ]);
+        let mut l = MapLayout::from_manifest(&m);
+        l.paths.push(SpawnPath {
+            name: "allies".into(),
+            nodes: (0..5)
+                .map(|i| SpawnNode {
+                    pos: Vec3::new(i as f32, 0.0, 0.0),
+                    yaw: 0.0,
+                })
+                .collect(),
+        });
+        l
+    };
+    let xs = |l: &MapLayout| -> Vec<f32> {
+        l.path("allies")
+            .unwrap()
+            .nodes
+            .iter()
+            .map(|n| n.pos.x)
+            .collect()
+    };
+    let extra = [(
+        "t",
+        true,
+        ParityFix::AllyNodes {
+            post: 0,
+            drop: 0b10110,
+        },
+    )];
+    let mut cw = layout();
+    cw.apply_mission_with(&con("cw"), &extra);
+    assert_eq!(xs(&cw), [0.0, 3.0]);
+    // Another era keeps every node; a post without an ally path is a no-op.
+    let mut gcw = layout();
+    gcw.apply_mission_with(&con("gcw"), &extra);
+    assert_eq!(xs(&gcw), [0.0, 1.0, 2.0, 3.0, 4.0]);
+    let mut other = layout();
+    other.apply_mission_with(
+        &con("cw"),
+        &[("t", true, ParityFix::AllyNodes { post: 1, drop: 1 })],
+    );
+    assert_eq!(xs(&other).len(), 5);
+}

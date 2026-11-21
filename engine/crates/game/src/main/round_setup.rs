@@ -125,8 +125,9 @@ pub(super) fn shell_setup(
         dlc_heroes: session.dlc_heroes,
         netplay_rows: false,
         opening_humans: [0; 2],
+        // Hunt's 0 is "Per map": the mission's per-tier, per-side targets (battle.rs).
         score_limit: if hunt {
-            session.hun_score.max(1) as u32
+            session.hun_score.max(0) as u32
         } else {
             session.ass_score.max(0) as u32
         },
@@ -140,6 +141,10 @@ pub(super) fn battle_setup(
     missions_dir: &Path,
     assets_dir: &Path,
 ) -> Result<BattleSetup> {
+    anyhow::ensure!(
+        !round.mode.eq_ignore_ascii_case("campaign"),
+        "campaign is single-player only"
+    );
     anyhow::ensure!(
         round.mode != ui::shell::Mode::Xl.subst(),
         "XL is available in single-player Instant Action"
@@ -214,6 +219,7 @@ pub(super) fn campaign_setup(
         ai: None,
         ai_cap: None,
         team_size_pct: None,
+        xl: false,
         tickets,
         tickets_set: false,
         ticket_pct: 100,
@@ -288,8 +294,13 @@ pub(super) fn rebuilder(
         move |round: &RoundSetup, local, stop: &Stop| {
             let dir = assets_dir.join(&round.map);
             let layers = campaign_layers_for(&missions_dir, &round.map, &round.mode, None);
-            let (scene, load) =
+            let (mut scene, load) =
                 game::assets::load_battle_scene_with_layers(&dir, &round.mode, &layers)?;
+            scene.kill_objects(&game::mission::scene_kills(
+                &missions_dir,
+                &round.map,
+                &round.mode,
+            ));
             if let Some((path, Err(error))) = load.common {
                 anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
             }
@@ -311,6 +322,43 @@ pub(super) fn rebuilder(
 mod tests {
     use super::*;
     use game::netplay::{HumanSeat, PlayerProfile, RoundOptions};
+
+    #[test]
+    fn lan_rejects_campaign_rounds() {
+        let round = RoundSetup::instant_action(
+            "bf2_geo1",
+            "Campaign",
+            ["rep".into(), "cis".into()],
+            &ui::shell::SessionOptions::default(),
+            &game::profile::Profile::default(),
+        );
+        assert!(RoundSetup::decode(&round.encode())
+            .unwrap_err()
+            .to_string()
+            .contains("campaign is single-player only"));
+        assert!(battle_setup(&round, Path::new(""), Path::new(""))
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("campaign is single-player only"));
+    }
+
+    #[test]
+    fn lan_rejects_xl_rounds() {
+        for mode in ["xl", "XL"] {
+            let round = RoundSetup::instant_action(
+                "bf2_geo1",
+                mode,
+                ["rep".into(), "cis".into()],
+                &ui::shell::SessionOptions::default(),
+                &game::profile::Profile::default(),
+            );
+            assert!(RoundSetup::decode(&round.encode())
+                .unwrap_err()
+                .to_string()
+                .contains("XL is available in single-player Instant Action"));
+        }
+    }
 
     #[test]
     fn xl_launches_all_supported_eras_from_instant_action() {
@@ -350,7 +398,8 @@ mod tests {
             let (scene, load) =
                 game::assets::load_battle_scene(&assets.join(&row.key), mode.subst()).unwrap();
             assert!(load.layer.is_some(), "{} needs its Conquest layer", row.key);
-            for (team_pct, ticket_pct, size) in [(100, 100, 48), (200, 50, 96)] {
+            let base = ui::population::xl_team_size(&row.key).unwrap();
+            for (team_pct, ticket_pct, size) in [(100, 100, base), (200, 50, 2 * base)] {
                 let session = ui::shell::SessionOptions {
                     con_numbots: team_pct,
                     con_mult: ticket_pct,
@@ -377,7 +426,18 @@ mod tests {
                     "{}",
                     row.key
                 );
+                // XL's spawn capacity is its own team size at every Team Size,
+                // never the mission's Conquest tickets.
+                assert_eq!(
+                    walk.sim.battle.teams.map(|team| team.tickets()),
+                    [size; 2],
+                    "{} at {team_pct}% Team Size",
+                    row.key
+                );
                 assert!(walk.sim.is_xl());
+                for waves in &walk.sim.waves {
+                    assert_eq!((waves.delay, waves.interval), (10.0, 0.25), "{}", row.key);
+                }
                 assert!(walk.sim.battle.unlimited_reinforcements);
                 assert_eq!(walk.sim.time_limit, None);
                 assert!(!walk.sim.player_spawn_posts(0).is_empty());
@@ -397,7 +457,7 @@ mod tests {
                 assert!(!walk.sim.counts_in_cp(player, enemy_post));
                 let mut feed = game::event_feed::EventFeed::for_walk(&assets, "bf2", &walk);
                 let hud = super::super::battle::hud_model(&walk, &mut feed, 16.0 / 9.0);
-                assert_eq!(hud.team_points, Some(([0, 0], 350)));
+                assert_eq!(hud.team_points, Some(([0, 0], [350; 2])));
                 assert!(hud.capture.is_none() && hud.countdown.is_none());
                 walk.sim.units[player].soldier.pos = original_pos;
                 let start = std::time::Instant::now();
@@ -418,6 +478,117 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// XL smoke rounds at 100% Team Size, four per world (Kashyyyk splits
+    /// them across its two eras): two play to the 350 limit, two carry a
+    /// 90 s clock that must end them. Prints each round's end and the sim
+    /// tick cost per world (mean and p99). Run on demand:
+    /// `cargo test -p game --bin game xl_smoke_rounds -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "plays full XL rounds; minutes of CPU"]
+    fn xl_smoke_rounds() {
+        use ui::shell::{MapPick, Mode, ModePick, SidePick};
+
+        let missions = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
+        let assets = game::assets::baked_root();
+        if !missions.is_dir() || !assets.join("bf2_geo1/manifest.ron").is_file() {
+            eprintln!("SKIP: no owned Battlefront II bake and missions");
+            return;
+        }
+        let difficulty = core::skill::Difficulty::Normal;
+        let mode = Mode::Xl;
+        let mut ia = game::shell_ia::instant_action(&assets, missions, difficulty);
+        ia.add(MapPick::All, ModePick::One(mode), SidePick::AllEras);
+        let rows = ia.launch();
+        let options = ia.options;
+        // (row index, seed, clock in seconds)
+        let mut plan: Vec<(usize, u32, Option<u32>)> = Vec::new();
+        for (i, row) in rows.iter().enumerate() {
+            let eras = rows.iter().filter(|r| r.key == row.key).count() as u32;
+            let first = rows.iter().position(|r| r.key == row.key).unwrap() as u32;
+            let me = i as u32 - first;
+            for (seed, clock) in [(1, None), (2, None), (3, Some(90)), (4, Some(90))] {
+                if (seed - 1) % eras == me {
+                    plan.push((i, seed, clock));
+                }
+            }
+        }
+        const MAX_TICKS: u64 = 20 * 60 * core::TICK_HZ as u64;
+        let results = std::thread::scope(|s| {
+            let handles: Vec<_> = plan
+                .iter()
+                .map(|&(i, seed, clock)| {
+                    let row = &rows[i];
+                    let assets = &assets;
+                    s.spawn(move || {
+                        let (scene, _) = game::assets::load_battle_scene(
+                            &assets.join(&row.key),
+                            mode.subst(),
+                        )
+                        .unwrap();
+                        let session = ui::shell::SessionOptions {
+                            con_numbots: 100,
+                            ..options
+                        };
+                        let setup = shell_setup(
+                            missions,
+                            assets,
+                            &row.key,
+                            mode.subst(),
+                            &row.armies,
+                            &session,
+                            seed,
+                            difficulty,
+                        )
+                        .unwrap();
+                        let era = setup.mission.as_ref().unwrap().era.clone().unwrap();
+                        let mut walk = super::super::battle::make_walk(&scene, &setup).unwrap();
+                        assert!(walk.sim.is_xl());
+                        walk.sim.time_limit = clock;
+                        let mut ticks_us = Vec::new();
+                        while walk.sim.outcome.is_none() && walk.sim.tick < MAX_TICKS {
+                            let t = std::time::Instant::now();
+                            walk.step_tick(&[core::sim::PadState::default()]);
+                            ticks_us.push(t.elapsed().as_micros() as u64);
+                        }
+                        let points = walk.sim.team_points().map(|(p, _)| p);
+                        (row.key.clone(), era, seed, clock, walk.sim.outcome, walk.sim.tick, points, ticks_us)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect::<Vec<_>>()
+        });
+        let mut by_map: std::collections::BTreeMap<String, Vec<u64>> = Default::default();
+        let mut bad = Vec::new();
+        for (key, era, seed, clock, outcome, tick, points, ticks_us) in results {
+            let secs = tick as f64 / f64::from(core::TICK_HZ);
+            eprintln!(
+                "round {key} {era} seed {seed} clock {clock:?}: outcome {outcome:?} at {secs:.0} s, points {points:?}"
+            );
+            let ok = match clock {
+                None => outcome.is_some() && points.is_some_and(|p| p.contains(&350)),
+                Some(c) => {
+                    outcome.is_some()
+                        && (tick.abs_diff(u64::from(c) * u64::from(core::TICK_HZ)) <= 1
+                            || points.is_some_and(|p| p.contains(&350)))
+                }
+            };
+            if !ok {
+                bad.push(format!("{key} {era} seed {seed}"));
+            }
+            by_map.entry(key).or_default().extend(ticks_us);
+        }
+        for (key, mut us) in by_map {
+            us.sort_unstable();
+            let mean = us.iter().sum::<u64>() as f64 / us.len() as f64 / 1000.0;
+            let p99 = us[(us.len() * 99 / 100).min(us.len() - 1)] as f64 / 1000.0;
+            eprintln!(
+                "tick {key}: {} ticks, mean {mean:.2} ms, p99 {p99:.2} ms",
+                us.len()
+            );
+        }
+        assert!(bad.is_empty(), "rounds that did not end properly: {bad:?}");
     }
 
     fn summary(b: &BattleSetup) -> String {
@@ -441,6 +612,21 @@ mod tests {
             b.classes_dir,
             b.mission.as_ref().map_or(0, |m| m.ai_alive_cap),
         )
+    }
+
+    /// The shell's shared Assault option defaults to the limit both Hero
+    /// Assault and Space Assault play to (180, the original's), and Space
+    /// Assault plays to the option's value unchanged.
+    #[test]
+    fn the_shells_assault_limits_match_the_sim() {
+        assert_eq!(
+            ui::shell::ASSAULT_SCORE_DEFAULT as u32,
+            core::sim::deathmatch::ASSAULT_SCORE_LIMIT
+        );
+        assert_eq!(
+            ui::shell::ASSAULT_SCORE_DEFAULT as u32,
+            core::sim::DEFAULT_SCORE_LIMIT
+        );
     }
 
     /// A round set up from the shell's launch data, sent as bytes and

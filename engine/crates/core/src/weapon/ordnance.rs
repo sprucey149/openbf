@@ -83,7 +83,24 @@ pub struct OrdnanceClass {
     pub fat_ray: Option<super::FatRayClass>,
     pub beam: Option<super::BeamClass>,
     pub tow: Option<crate::vehicle::tow::TowClass>,
+    /// [ours] The round's reach as the disc authored it (`Velocity` x
+    /// `LifeSpan`, the longest over its charge points) when
+    /// [`OrdnanceClass::extend_bolt_reach`] lengthened its flight; `None`
+    /// for every other ordnance. The AI opens fire only within this
+    /// ([`super::WeaponClass::engage_range`]).
+    pub natural_reach: Option<f32>,
 }
+
+/// [ours] How far an infantry, vehicle or turret blaster bolt flies on
+/// every map, m (the maintainer, 2026-11-20: "normalize both games"; the
+/// short vehicle and building guns too). The discs' rifles reach
+/// 128 m on BF2 (160 m/s x 0.8 s) and 120 m on BF1 (80 m/s x 1.5 s), and a
+/// bolt across BF2 Coruscant's hall (111-190 m) died short of the far side.
+/// The speed stays; the `LifeSpan` grows to reach this. The AI's own
+/// opening range stays the disc's ([`OrdnanceClass::natural_reach`]).
+/// measure: the bots-only Hard / Elite proxy parity sweep against the
+/// pre-change branch (analysis/plan/FEATURE_SET.md, Combat).
+pub const BOLT_REACH: f32 = 200.0;
 
 impl Default for OrdnanceClass {
     fn default() -> Self {
@@ -113,6 +130,7 @@ impl Default for OrdnanceClass {
             fat_ray: None,
             beam: None,
             tow: None,
+            natural_reach: None,
         }
     }
 }
@@ -258,6 +276,41 @@ impl OrdnanceClass {
             damage,
             scales: blend.scales,
             shield_scale: blend.shield_scale,
+        }
+    }
+
+    /// [ours] Lengthen the round's `LifeSpan`, at its root and at every
+    /// charge point, so that `Velocity` x `LifeSpan` is at least
+    /// [`BOLT_REACH`]; the speed is kept. A round already reaching that far
+    /// is untouched. When anything changed, [`OrdnanceClass::natural_reach`]
+    /// keeps the authored reach. The class loader calls this for the
+    /// infantry, vehicle and turret blaster bolts of both games
+    /// (`game::normalize::lengthened_bolt`).
+    pub fn extend_bolt_reach(&mut self) {
+        let natural = self
+            .knots
+            .iter()
+            .map(|k| k.velocity * k.life_span)
+            .fold(self.velocity * self.life_span, f32::max);
+        let mut changed = false;
+        for (v, life) in std::iter::once((self.velocity, &mut self.life_span)).chain(
+            self.knots
+                .iter_mut()
+                .map(|k| (k.velocity, &mut k.life_span)),
+        ) {
+            if v <= 0.0 || v * *life >= BOLT_REACH {
+                continue;
+            }
+            let mut l = BOLT_REACH / v;
+            if v * l < BOLT_REACH {
+                // One ulp up when the quotient rounded short.
+                l = f32::from_bits(l.to_bits() + 1);
+            }
+            *life = l;
+            changed = true;
+        }
+        if changed && self.natural_reach.is_none() {
+            self.natural_reach = Some(natural);
         }
     }
 

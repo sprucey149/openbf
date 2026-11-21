@@ -26,8 +26,9 @@ pub(super) fn load_and_upload(
     r: &mut Renderer,
     dir: &std::path::Path,
     mode: &str,
+    kills: &[String],
 ) -> Result<(SceneGpu, game::assets::Scene)> {
-    load_and_upload_with_layers(r, dir, mode, &[])
+    load_and_upload_with_layers(r, dir, mode, &[], kills)
 }
 
 pub(super) fn load_and_upload_with_layers(
@@ -35,8 +36,10 @@ pub(super) fn load_and_upload_with_layers(
     dir: &std::path::Path,
     mode: &str,
     layers: &[String],
+    kills: &[String],
 ) -> Result<(SceneGpu, game::assets::Scene)> {
-    let (scene, load) = game::assets::load_battle_scene_with_layers(dir, mode, layers)?;
+    let (mut scene, load) = game::assets::load_battle_scene_with_layers(dir, mode, layers)?;
+    scene.kill_objects(kills);
     let gpu = upload_battle_scene(r, &scene, &load)?;
     Ok((gpu, scene))
 }
@@ -153,11 +156,6 @@ fn team_templates(
     sim: &mut core::sim::Sim,
 ) -> Result<[game::walk::TeamTemplate; 2]> {
     let hunt = b.mission.as_ref().filter(|m| m.is_hunt());
-    let health = hunt
-        .and_then(|m| m.hunt_health_percent)
-        .map_or([100; 2], |tiers| {
-            tiers[usize::from(b.difficulty.bytes()[0])]
-        });
     let defaults = game::roster::default_factions(&scene.manifest.source_game);
     let factions: [&str; 2] = match &b.teams {
         Some(t) => [t[0].as_str(), t[1].as_str()],
@@ -199,9 +197,6 @@ fn team_templates(
                 let mut table = Vec::new();
                 let mut visuals = Vec::new();
                 for c in &mut r.classes {
-                    if health[team] != 100 {
-                        c.max_health *= f32::from(health[team]) / 100.0;
-                    }
                     let uc = c.register(sim, &mut names);
                     // The speed the weapon fires at: a charge stage's, as
                     // `WeaponClass::shot_ordnance` takes it (the BF1 spear's
@@ -411,12 +406,17 @@ pub(super) fn make_walk_with_counts(
     let map_defaults = b
         .mission
         .as_ref()
-        .filter(|m| !b.xl && !m.is_hunt())
+        .filter(|m| !b.xl && !m.is_hunt() && !m.is_campaign())
         .and_then(|m| game::conquest_defaults::for_map(&m.map, m.era.as_deref() == Some("cw")));
     let defaults = b.team_size_pct.and(map_defaults);
     let team_pct = b.team_size_pct.unwrap_or(100);
     let resolved = if b.xl {
-        let combatants = ui::population::xl_team_counts(team_pct);
+        let base = b
+            .mission
+            .as_ref()
+            .and_then(|m| ui::population::xl_team_size(&m.map))
+            .ok_or_else(|| anyhow::anyhow!("XL has no team size for this map"))?;
+        let combatants = ui::population::xl_team_counts(base, team_pct);
         Some(game::conquest_defaults::Defaults {
             combatants,
             // Battle tracks spawn capacity in this field even with unlimited respawns.
@@ -427,8 +427,25 @@ pub(super) fn make_walk_with_counts(
     };
     let tickets = if b.tickets_set {
         [b.tickets; 2]
-    } else if let Some(d) = resolved {
+    } else if let Some(d) = resolved.filter(|_| b.xl) {
+        // XL's spawn capacity: its own team sizes, never the mission's tickets.
         d.tickets
+    } else if let (Some(d), Some(m)) = (defaults, b.mission.as_ref()) {
+        // Issue #171: the map's pair with a lone human's side shifted for this
+        // tier (`conquest_defaults::HUMAN_SHIFT`), then the reinforcement
+        // percentage. The round's humans: slot 0 on its seat plus a LAN
+        // round's others, the same on every peer.
+        let mut humans = b.opening_humans;
+        let seat = usize::from(b.player_team.min(1));
+        humans[seat] = humans[seat].saturating_add(1);
+        let base = game::conquest_defaults::human_tickets(
+            &m.map,
+            m.era.as_deref() == Some("cw"),
+            b.difficulty,
+            d.tickets,
+            humans,
+        );
+        ui::population::tickets(base, b.ticket_pct)
     } else {
         b.mission
             .as_ref()
@@ -454,40 +471,34 @@ pub(super) fn make_walk_with_counts(
     sim.time_limit = (b.time_limit > 0).then(|| b.time_limit * 60);
     if let Some(m) = &b.mission {
         sim.ai_alive_cap = m.ai_alive_cap;
-        m.apply_death_drains(&mut sim.battle);
         if m.is_hunt() {
             let tier = usize::from(b.difficulty.bytes()[0]);
-            let weights = m
-                .hunt_kill_values
-                .filter(|_| m.source_game == "bf1")
-                .map(|values| values[tier])
-                .or(m.hunt_points_per_kill)
-                .ok_or_else(|| anyhow::anyhow!("Hunt kill points are missing"))?;
-            anyhow::ensure!(
-                m.teams.len() == 2 && weights.into_iter().all(|n| n > 0),
-                "Hunt requires two teams and positive kill values"
-            );
+            anyhow::ensure!(m.teams.len() == 2, "Hunt requires two teams");
             sim.battle.unlimited_reinforcements = true;
             sim.time_limit = Some(if b.time_limit == 0 {
                 300
             } else {
                 b.time_limit * 60
             });
-            let members = m
-                .hunt_combatants
-                .map_or([m.teams[0].units, m.teams[1].units], |sizes| sizes[tier]);
+            // Each side's alive count, total units, points to win and bot
+            // skill scale: the mission's per-tier Hunt rows (OURS, the
+            // maintainer 2026-11-20 late: big sides, targets to match).
+            let round = m
+                .hunt_round(tier, b.score_limit)
+                .ok_or_else(|| anyhow::anyhow!("Hunt mission without Hunt rules"))?;
             anyhow::ensure!(
-                members.into_iter().all(|n| n > 0)
-                    && m.hunt_health_percent
-                        .is_none_or(|health| health[tier].into_iter().all(|n| n > 0)),
-                "Hunt requires positive team size and health"
+                round.units.into_iter().all(|n| n > 0),
+                "Hunt requires positive team sizes"
             );
-            sim.team_combatants = Some(members.map(|n| n.min(m.ai_alive_cap)));
-            sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::hunt(
-                b.score_limit,
-                members,
-                weights,
-            ));
+            sim.team_combatants = Some(round.alive);
+            anyhow::ensure!(
+                round.targets.into_iter().all(|n| n > 0),
+                "Hunt requires positive points to win"
+            );
+            sim.deathmatch = Some(
+                core::sim::deathmatch::Deathmatch::hunt_with_targets(round.targets, round.units)
+                    .with_skill_pct(round.skill_pct),
+            );
         }
         if m.is_hero_assault() {
             sim.time_limit = None;
@@ -527,6 +538,17 @@ pub(super) fn make_walk_with_counts(
     // `Scene::collision_world` — building it earlier misses every BF2 conquest
     // instance).
     scene.install_collision(&mut walk.sim);
+    // A Hunt's KillObject targets leave the scene at load
+    // (`Scene::kill_objects`); a caller that loaded the scene without them
+    // still gets a world without their bodies.
+    if let Some(kills) = b
+        .mission
+        .as_ref()
+        .map(|m| m.scene_kills())
+        .filter(|k| !k.is_empty())
+    {
+        scene.install_collision_without(&mut walk.sim, kills);
+    }
     walk.camera_blockers = game::camera_collide::CameraBlockers::from_scene(scene);
     if b.targets {
         walk.spawn_dummy_targets();
@@ -1118,22 +1140,23 @@ pub(super) fn hud_model(
         // A campaign shows team points only where its script turned them
         // on (`ShowTeamPoints`); its flags are the script's, not a CTF round.
         team_points: match walk.campaign.as_ref() {
-            Some(c) => c.team_points().map(|p| (p, 0)),
+            Some(c) => c.team_points().map(|p| (p, [0; 2])),
             None => walk
                 .sim
                 .space_team_points()
+                .map(|(points, limit)| (points, [limit; 2]))
                 .or_else(|| {
                     walk.sim.ctf.as_ref().map(|c| {
                         (
                             [c.team_points[0] as i32, c.team_points[1] as i32],
-                            c.score_limit,
+                            [c.score_limit; 2],
                         )
                     })
                 })
                 .or_else(|| {
                     walk.sim
                         .team_points()
-                        .map(|(points, limit)| (points.map(|p| p as i32), limit))
+                        .map(|(points, limits)| (points.map(|p| p as i32), limits))
                 }),
         },
         ctf: walk.sim.ctf.is_some() && walk.campaign.is_none(),
@@ -1470,6 +1493,10 @@ mod tests {
         include!("battle/native_spawn_tests.rs");
     }
 
+    mod space_ctf_kill_floor_tests {
+        include!("battle/space_ctf_kill_floor_tests.rs");
+    }
+
     /// HTGTW: use the battle's actual setup/install and feed constructors.
     /// The authored building is off its pivot: a radius-zero fallback cannot
     /// stand in for the collision bounds installed for acquisition.
@@ -1639,15 +1666,13 @@ mod tests {
         assert_eq!(scene.manifest.map, "naboo2");
         assert_eq!(setup.mission.as_ref().unwrap().map, "bf1_nab2");
         let mut walk = make_walk(&scene, &setup).unwrap();
-        assert_eq!(walk.sim.team_combatants, Some([19, 21]));
-        assert_eq!(
-            (
-                walk.sim.battle.teams[0].alive(),
-                walk.sim.battle.teams[1].alive()
-            ),
-            (19, 21)
-        );
-        assert_eq!((walk.sim.ai_limit(0), walk.sim.ai_limit(1)), (19, 20));
+        // The map's own row (`conquest_defaults`): its team sizes and tickets.
+        let d = game::conquest_defaults::for_map("bf1_nab2", false).unwrap();
+        let c = d.combatants;
+        assert_eq!(walk.sim.team_combatants, Some(c));
+        assert_eq!(walk.sim.battle.teams.map(|t| t.alive()), c);
+        // The human takes one of team 1's slots.
+        assert_eq!((walk.sim.ai_limit(0), walk.sim.ai_limit(1)), (c[0], c[1] - 1));
         assert_eq!(
             walk.sim
                 .units
@@ -1656,11 +1681,31 @@ mod tests {
                 .count(),
             1
         );
-        let d = game::conquest_defaults::for_map("bf1_nab2", false).unwrap();
         assert_eq!(walk.sim.battle.teams.map(|t| t.tickets()), d.tickets);
+        // Issue #171: at Hard the humans' side (team 1 here) gets the map's
+        // `HUMAN_SHIFT`, then the reinforcement percentage scales the pair.
+        setup.difficulty = core::skill::Difficulty::Hard;
+        setup.ticket_pct = 50;
+        let hard = make_walk(&scene, &setup).unwrap();
+        let shifted = game::conquest_defaults::human_tickets(
+            "bf1_nab2",
+            false,
+            core::skill::Difficulty::Hard,
+            d.tickets,
+            [0, 1],
+        );
+        assert_ne!(shifted, d.tickets, "bf1_nab2 GCW has a Hard shift");
+        assert_eq!(
+            hard.sim.battle.teams.map(|t| t.tickets()),
+            ui::population::tickets(shifted, 50)
+        );
+        setup.difficulty = Default::default();
+        setup.ticket_pct = 100;
         let before = walk.sim.battle.teams.map(|t| t.tickets());
+        // Team sizes scale by the percentage (capped at 32 a side).
+        let pct = |p: u32| ui::population::team_counts(c, p);
         walk.set_team_size_percent(50);
-        assert_eq!(walk.sim.battle.teams.map(|t| t.alive()), [10, 11]);
+        assert_eq!(walk.sim.battle.teams.map(|t| t.alive()), pct(50));
         assert_eq!(walk.sim.battle.teams.map(|t| t.tickets()), before);
         let pending: Vec<_> = walk
             .sim
@@ -1671,14 +1716,14 @@ mod tests {
             .map(|(i, u)| (i, u.gen, u.respawn_at))
             .collect();
         walk.set_team_size_percent(100);
-        assert_eq!((walk.sim.ai_limit(0), walk.sim.ai_limit(1)), (19, 20));
+        assert_eq!((walk.sim.ai_limit(0), walk.sim.ai_limit(1)), (c[0], c[1] - 1));
         assert_eq!(
             walk.sim.battle.teams.map(|t| t.alive()),
-            [10, 11],
+            pct(50),
             "raising the cap must not bypass respawn waves"
         );
         walk.set_team_size_percent(150);
-        assert_eq!(walk.sim.team_combatants, Some([29, 32]));
+        assert_eq!(walk.sim.team_combatants, Some(pct(150)));
         for (i, gen, at) in pending {
             let u = &walk.sim.units[i];
             assert_eq!((u.gen, u.respawn_at), (gen, at));
@@ -1699,10 +1744,10 @@ mod tests {
         walk.sim.units[p].team = 0;
         walk.sim.units[p].spec.team = 0;
         walk.step_tick(&[core::sim::PadState::default()]);
-        assert_eq!(walk.sim.ai_limit(1), 32);
+        assert_eq!(walk.sim.ai_limit(1), pct(150)[1]);
         assert_eq!(
             roster(&walk, 1),
-            32,
+            pct(150)[1],
             "the old team refills the human's slot"
         );
         // A plain map walk (no mission) takes no map defaults, even with a

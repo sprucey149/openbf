@@ -148,6 +148,11 @@ impl Mode {
         }
     }
 
+    /// The mode's name in the disc's English ("Conquest"; eli is Assault).
+    pub fn english(self) -> &'static str {
+        self.text().0 .1
+    }
+
     /// The row's icon (SHELL.LVL, §6; eli draws Assault's).
     pub fn icon(self) -> &'static str {
         match self {

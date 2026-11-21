@@ -229,6 +229,9 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::TowSeatLocked { unit } => {
                 format!("{tick},tow_seat_locked,{},,\n", unit.index)
             }
+            Event::HeroClassLocked { unit } => {
+                format!("{tick},hero_class_locked,{},,\n", unit.index)
+            }
             Event::ForceHit {
                 owner,
                 weapon_class,
@@ -440,11 +443,16 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                     core::sim::DeathCause::Stalled => "stalled",
                     core::sim::DeathCause::Water => "water",
                     core::sim::DeathCause::DamageRegion => "damage_region",
+                    core::sim::DeathCause::Embedded => "embedded",
                 };
                 format!("{tick},{kind},{},,{what}\n", unit.index)
             }
             Event::Relocated { unit, to, .. } => format!(
                 "{tick},relocated,{},,{:.2}:{:.2}:{:.2}\n",
+                unit.index, to.x, to.y, to.z
+            ),
+            Event::Rescued { unit, to, .. } => format!(
+                "{tick},rescued,{},,{:.2}:{:.2}:{:.2}\n",
                 unit.index, to.x, to.y, to.z
             ),
             Event::VehicleHit {
@@ -774,12 +782,16 @@ fn bench_camera(v: &ViewerArgs, scene: &game::assets::Scene, walk: &WalkSim) -> 
 
 pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
     let mut r = Renderer::new_headless(v.size.0, v.size.1).map_err(|e| anyhow!("renderer: {e}"))?;
-    let layers = match &v.mission {
-        Some(path) => game::mission::MissionDef::load(path)?.layers,
-        None => Vec::new(),
+    let (layers, kills) = match &v.mission {
+        Some(path) => {
+            let m = game::mission::MissionDef::load(path)?;
+            let kills = m.scene_kills().to_vec();
+            (m.layers, kills)
+        }
+        None => (Vec::new(), Vec::new()),
     };
     let (mut gpu, scene) =
-        super::battle::load_and_upload_with_layers(&mut r, &v.map, &v.mode, &layers)?;
+        super::battle::load_and_upload_with_layers(&mut r, &v.map, &v.mode, &layers, &kills)?;
 
     if v.scene_report {
         return scene_report(&scene, &gpu, &v.map);

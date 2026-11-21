@@ -134,6 +134,7 @@ impl Sim {
             hit_history: _,
             view_lags: _,
             nav_stats: _,
+            rescue_counts: _,
             ai_wall_ms: _,
             tick_cost: _,
             bot_census: _,
@@ -167,6 +168,7 @@ impl Sim {
             assist_armed,
             assist_lead_on,
             slot_assist,
+            rescue_off,
             // weapons, classes, modes
             weapon_classes,
             classes,
@@ -244,6 +246,9 @@ impl Sim {
             f.debug(&(team_handicap_on, cheats, slot_cheats, assist_intensity));
             f.debug(&(pad_look_sensitivity, assist_armed, assist_lead_on));
             f.debug(slot_assist);
+            if *rescue_off {
+                f.eat(b"RESCUE_OFF");
+            }
         });
         group("weapons", &mut |f| f.debug_sim(weapon_classes));
         group("classes", &mut |f| {

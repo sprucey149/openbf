@@ -172,9 +172,10 @@ impl<B: Eq + Hash + Copy> Edges<B> {
     }
 }
 
-/// Completed CPU data remains owned by its round. Drop joins even on close/error,
-/// so a later playlist row cannot overlap an abandoned parse. File IO itself is
-/// not cancellable; a close may wait for that one outstanding read/parse.
+/// Completed CPU data remains owned by its round. Drop joins (an error, a new
+/// round), so a later playlist row cannot overlap an abandoned parse. The
+/// game's close alone [`Worker::abandon`]s it: the process ends next, and the
+/// parse and sound decode may take many seconds on a slow PC.
 pub(super) struct Worker<T>(Option<JoinHandle<anyhow::Result<T>>>);
 
 impl<T: Send + 'static> Worker<T> {
@@ -186,6 +187,13 @@ impl<T: Send + 'static> Worker<T> {
                 .name("loading-scene".into())
                 .spawn(task)?,
         )))
+    }
+
+    /// The close's way out (`close.rs`): the thread is left running
+    /// unjoined and ends with the process. It holds CPU data only (the
+    /// scene's parse and the round's CPU side, no GPU objects).
+    pub(super) fn abandon(&mut self) {
+        drop(self.0.take());
     }
 
     pub(super) fn poll(&mut self) -> Option<anyhow::Result<T>> {
@@ -249,7 +257,14 @@ pub(super) fn prepare_round(
                 )
             })
             .unwrap_or_default();
-        let (scene, load) = game::assets::load_battle_scene_with_layers(&dir, &mode, &layers)?;
+        let (mut scene, load) = game::assets::load_battle_scene_with_layers(&dir, &mode, &layers)?;
+        if let Some(j) = &job {
+            let map = j
+                .net
+                .as_ref()
+                .map_or(j.name.as_str(), |(r, _)| r.map.as_str());
+            scene.kill_objects(&game::mission::scene_kills(&j.missions_dir, map, &mode));
+        }
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
         let round = job.map(|j| j.build(&scene)).transpose()?;
         Ok(Prepared {

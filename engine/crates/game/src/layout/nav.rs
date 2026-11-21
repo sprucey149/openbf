@@ -1,6 +1,7 @@
 //! Planning-graph construction for a baked map: `crate::layout::nav_graph`.
 //! Turns the manifest's PLAN, hints, barriers and named route sidecar into a
-//! `core::nav::NavGraph`, then applies the per-map OURS floor/approach fixes.
+//! `core::nav::NavGraph`, then applies the per-map floor/approach fixes, each
+//! labelled and planned where it is made.
 //! Pure load-time construction: no simulation state and no wall clock.
 //!
 //! Owned here: `nav_graph` and every routing fix it applies. The parent

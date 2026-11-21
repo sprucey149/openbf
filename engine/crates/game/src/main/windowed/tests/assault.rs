@@ -81,7 +81,12 @@ fn shell_hunt_launches_every_matchup_with_playable_models_and_session_rules() {
         let walk = &mut a.walk.as_mut().unwrap().0;
         let sim = &walk.sim;
         assert!(sim.is_hunt(), "{name}");
-        assert_eq!(sim.team_points(), Some(([0, 0], 70)), "{name}");
+        let tier = usize::from(a.setup.difficulty.bytes()[0]);
+        assert_eq!(
+            sim.team_points(),
+            Some(([0, 0], mission.hunt_targets(tier, 70))),
+            "{name}"
+        );
         assert_eq!(sim.time_limit, Some(600), "{name}");
         assert_eq!(sim.spawn_stage[0], core::sim::SpawnStage::Side, "{name}");
         let vis = a.soldier_vis.as_ref().unwrap();
@@ -159,7 +164,7 @@ fn shell_assault_preserves_authored_seats_options_and_spawn_flow() {
         (None, 100, 0, 50)
     );
     let w = &mut a.walk.as_mut().expect("battle").0;
-    assert_eq!(w.sim.team_points(), Some(([0, 0], 50)));
+    assert_eq!(w.sim.team_points(), Some(([0, 0], [50; 2])));
     assert!(w.sim.heroes.is_none());
     assert_eq!(w.sim.ai_alive_cap, 2);
     assert!(w.sim.time_limit.is_none());

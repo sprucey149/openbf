@@ -676,10 +676,7 @@ mod tests {
         );
         let rows: Vec<_> = pages.lists.iter().flat_map(|l| &l.rows).collect();
         let named = |n: &str| rows.iter().find(|r| r.name == n).copied();
-        let (maintainer, kai) = (
-            named("the maintainer").expect("host"),
-            named("Kai").expect("guest"),
-        );
+        let (maintainer, kai) = (named("the maintainer").expect("host"), named("Kai").expect("guest"));
         assert!(maintainer.me && maintainer.human && kai.human && !kai.me);
         assert!(rows.iter().all(|r| !r.name.starts_with("Player ")));
         let bots: Vec<_> = rows.iter().filter(|r| !r.human).map(|r| &r.name).collect();

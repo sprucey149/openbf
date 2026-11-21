@@ -7,9 +7,13 @@
 //!   port, the guests' cheat policy and the award policy
 //!   ([`ui::lobby::HostSetup`]; lag compensation is always on); Start Hosting opens the session and the
 //!   lobby.
-//! - **Join Game**: the LAN browser (`Find` to the limited broadcast and the
-//!   primary interface's /24 directed broadcast), Join by address (resolved
-//!   off the frame loop) and the recent hosts (the profile's).
+//! - **Join Game**: the LAN browser (`Find` to the limited broadcast, every
+//!   adapter's directed broadcast and, by unicast, every recent game's
+//!   address, which is what finds a game over Tailscale or WireGuard), this
+//!   computer's recent games (`game::netplay::recent`: each with its host's
+//!   answer, or "not hosting now"; Square / Space / a right-click forgets
+//!   one), Join by address (resolved off the frame loop) and Test
+//!   Connection. A recent game is written when the host accepts the player.
 //! - **The lobby** ([`Screen::Lobby`]): the host's own Instant Action
 //!   screen with a roster panel (name, ping, addon, team, ready; Kick). Its
 //!   map list and the addon heroes option are the intersection of every
@@ -76,6 +80,10 @@ pub(super) struct Lobby {
     pub groups: Vec<(&'static str, u64)>,
     /// The round in play (key, label), the host's.
     pub round_map: Option<(String, String)>,
+    /// The round in play's mode ("Conquest"), the host's discovery info.
+    pub round_mode: String,
+    /// This hosting session's random number (`HostInfo::session`).
+    pub host_session: u64,
     /// The round a guest sent its `Ready` for.
     ready_sent: Option<u32>,
     pub max_players: u8,
@@ -111,6 +119,8 @@ impl Default for Lobby {
             lines: VecDeque::new(),
             groups: Vec::new(),
             round_map: None,
+            round_mode: String::new(),
+            host_session: net::fresh_u64(),
             ready_sent: None,
             max_players: ui::lobby::DEFAULT_MAX_PLAYERS,
             lag_comp: true,
@@ -165,6 +175,55 @@ pub(super) struct JoinScreen {
     resolving: Option<(String, mpsc::Receiver<std::io::Result<SocketAddr>>)>,
     /// The latest "Test connection" (LAN §5b).
     test: Option<TestRun>,
+    /// The broadcast targets and each recent game's IPv4 address (by
+    /// index of the page's recent games), as last looked up.
+    broadcasts: Vec<SocketAddr>,
+    recent_addrs: Vec<Option<SocketAddr>>,
+    /// The lookup in flight: the addresses asked, and the answer.
+    lookup: Option<(Vec<String>, mpsc::Receiver<TargetLookup>)>,
+    looked_up: Option<Instant>,
+}
+
+/// How often Join Game looks its targets up again (a VPN coming up, an
+/// adapter added, a name that now resolves).
+const LOOKUP_EVERY_SECS: f32 = 30.0;
+
+/// One lookup of the browser's targets: the broadcasts, then each recent
+/// game's IPv4 address.
+type TargetLookup = (Vec<SocketAddr>, Vec<Option<SocketAddr>>);
+
+/// A recent game's address as the browser can ask it: IPv4 only (the
+/// browser's socket is IPv4); a name that does not resolve is `None`.
+fn resolve_v4(addr: &str) -> Option<SocketAddr> {
+    match net::transport::resolve(addr, net::DEFAULT_PORT) {
+        Ok(a @ SocketAddr::V4(_)) => Some(a),
+        _ => None,
+    }
+}
+
+/// The browser's targets: the broadcasts, then the recent games'
+/// addresses, once each.
+pub(super) fn join_targets(
+    broadcasts: &[SocketAddr],
+    recent: &[Option<SocketAddr>],
+) -> Vec<SocketAddr> {
+    let mut v: Vec<SocketAddr> = Vec::new();
+    for a in broadcasts.iter().chain(recent.iter().flatten()) {
+        if !v.contains(a) {
+            v.push(*a);
+        }
+    }
+    v
+}
+
+/// A guest's entry in the recent games: the host's name from the row the
+/// player pressed (until the roster names him), whether the host accepted
+/// (the entry is written), and the mode of the round last loaded.
+#[derive(Clone, Debug, Default)]
+pub(super) struct RecentNote {
+    pub name_hint: String,
+    pub recorded: bool,
+    pub mode: String,
 }
 
 /// A "Test connection" of a typed address: its lookup, then the test.
@@ -243,22 +302,12 @@ fn host_addresses(port: Option<u16>) -> Vec<String> {
     reach::host_addresses(&addrs, port)
 }
 
-/// The broadcast targets: the limited broadcast, and the /24 directed
-/// broadcast of the interface the default route leaves by (a UDP connect
-/// sends nothing). Without a crate for the interface list the mask is not
-/// known; a wrong guess only reaches nobody.
+/// The broadcast targets: the limited broadcast, and each IPv4 adapter's
+/// directed broadcast (`reach::directed_broadcasts`), on the default port.
 pub(super) fn browse_targets() -> Vec<SocketAddr> {
     let mut v = net::LanBrowser::default_targets();
-    let local = std::net::UdpSocket::bind("0.0.0.0:0").and_then(|s| {
-        s.connect("192.0.2.1:9")?;
-        s.local_addr()
-    });
-    if let Ok(SocketAddr::V4(a)) = local {
-        let o = a.ip().octets();
-        if a.ip().is_private() || a.ip().is_link_local() {
-            let b = std::net::Ipv4Addr::new(o[0], o[1], o[2], 255);
-            v.push(SocketAddr::from((b, net::DEFAULT_PORT)));
-        }
+    for b in reach::directed_broadcasts(&reach::ipv4_interfaces()) {
+        v.push(SocketAddr::from((b, net::DEFAULT_PORT)));
     }
     v
 }
@@ -276,18 +325,131 @@ impl MpPage {
         )))
     }
 
-    pub fn join(recent: Vec<String>) -> Self {
+    /// Join Game with this computer's recent games. The browser starts on
+    /// the limited broadcast; the adapters' broadcasts and the recent
+    /// games' addresses join it when their lookup (off the frame loop)
+    /// answers.
+    pub fn join(recent: Vec<ui::lobby::RecentRow>) -> Self {
         let browser = net::UdpTransport::client()
             .map_err(|e| eprintln!("lan browser: {e}"))
             .ok()
-            .map(|t| (net::LanBrowser::new(browse_targets()), t));
+            .map(|t| (net::LanBrowser::new(Vec::new()), t));
+        let n = recent.len();
         MpPage::Join(Box::new(JoinScreen {
             page: ui::lobby::JoinPage::new(recent),
             browser,
             clock: net::RealClock::new(),
             resolving: None,
             test: None,
+            broadcasts: net::LanBrowser::default_targets(),
+            recent_addrs: vec![None; n],
+            lookup: None,
+            looked_up: None,
         }))
+    }
+}
+
+impl JoinScreen {
+    /// Starts a lookup of the targets when one is due; takes its answer.
+    fn pump_targets(&mut self) {
+        let addrs: Vec<String> = self.page.recent.iter().map(|r| r.addr.clone()).collect();
+        if let Some((asked, rx)) = &self.lookup {
+            match rx.try_recv() {
+                Ok((broadcasts, resolved)) => {
+                    // A forget while it ran: ask again.
+                    if *asked == addrs {
+                        self.broadcasts = broadcasts;
+                        self.recent_addrs = resolved;
+                    } else {
+                        self.looked_up = None;
+                    }
+                    self.lookup = None;
+                    self.retarget();
+                }
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => self.lookup = None,
+            }
+        }
+        let due = self
+            .looked_up
+            .is_none_or(|t| t.elapsed().as_secs_f32() >= LOOKUP_EVERY_SECS);
+        if self.lookup.is_none() && due {
+            self.looked_up = Some(Instant::now());
+            let (tx, rx) = mpsc::channel();
+            let asked = addrs.clone();
+            // DNS (a MagicDNS name) can take seconds: off the frame loop.
+            std::thread::spawn(move || {
+                let resolved = asked.iter().map(|a| resolve_v4(a)).collect();
+                let _ = tx.send((browse_targets(), resolved));
+            });
+            self.lookup = Some((addrs, rx));
+        }
+    }
+
+    fn retarget(&mut self) {
+        if let Some((b, _)) = self.browser.as_mut() {
+            b.set_targets(join_targets(&self.broadcasts, &self.recent_addrs));
+        }
+    }
+
+    /// Recent game `i` was forgotten: its row and address go.
+    fn forgot(&mut self, i: usize, rows: Vec<ui::lobby::RecentRow>) {
+        if i < self.recent_addrs.len() {
+            self.recent_addrs.remove(i);
+        }
+        self.recent_addrs.resize(rows.len(), None);
+        self.page.set_recent(rows);
+        self.retarget();
+    }
+
+    /// The hosts heard, split between the recent games and the rest.
+    fn hosts_heard(&mut self, build: &str) {
+        let Some((b, _)) = self.browser.as_ref() else {
+            return;
+        };
+        let heard = b
+            .hosts()
+            .into_iter()
+            .map(|h| {
+                let info = HostInfo::of_found(&h);
+                game::netplay::recent::Heard {
+                    addr: h.addr,
+                    session: info.session,
+                    row: ui::lobby::FoundRow {
+                        addr: h.addr.to_string(),
+                        refusal: info.refusal(build),
+                        name: if info.name.is_empty() {
+                            h.addr.ip().to_string()
+                        } else {
+                            info.name
+                        },
+                        map: info.map,
+                        mode: info.mode,
+                        players: format!("{}/{}", info.players, info.max_players),
+                        ping_ms: h.rtt.as_millis_f64().round() as u32,
+                    },
+                }
+            })
+            .collect();
+        let (hosts, live) = game::netplay::recent::merge(heard, &self.recent_addrs);
+        self.page.set_hosts(hosts, live);
+    }
+
+    /// The host name a Connect of `text` is pressing, if a row shows one.
+    fn name_for(&self, text: &str) -> String {
+        let p = &self.page;
+        p.hosts
+            .iter()
+            .chain(p.recent.iter().filter_map(|r| r.live.as_ref()))
+            .find(|h| h.addr == text)
+            .map(|h| h.name.clone())
+            .or_else(|| {
+                p.recent
+                    .iter()
+                    .find(|r| r.addr == text)
+                    .map(|r| r.live.as_ref().map_or(r.name.clone(), |h| h.name.clone()))
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -308,6 +470,14 @@ pub(super) fn draw_mp(ctx: &ui::egui::Context, page: &mut MpPage) -> ui::lobby::
             for l in host_addresses(h.parsed_port()) {
                 lines.push((l, Color32::from_rgb(170, 210, 255)));
             }
+            if cfg!(target_os = "macos") {
+                lines.push((
+                    "macOS: allow incoming connections when asked; on macOS 15 also allow \
+                     Local Network for openbf (System Settings \u{2192} Privacy & Security)"
+                        .to_owned(),
+                    Color32::GRAY,
+                ));
+            }
             let cursor = h.cursor;
             let focus = std::mem::take(&mut h.focus_text);
             ui::lobby::draw_host_page(ctx, &rows, cursor, h.text_mut(), focus, &lines)
@@ -315,10 +485,23 @@ pub(super) fn draw_mp(ctx: &ui::egui::Context, page: &mut MpPage) -> ui::lobby::
         MpPage::Join(j) => {
             let rows = j.page.rows();
             let mut lines = Vec::new();
-            if j.page.hosts.is_empty() {
+            let live = j.page.recent.iter().any(|r| r.live.is_some());
+            if j.page.hosts.is_empty() && !live {
                 lines.push((
                     "Looking for games on this network\u{2026}".to_owned(),
                     Color32::LIGHT_GRAY,
+                ));
+            }
+            lines.push((
+                "Over Tailscale or WireGuard, games you joined before appear under Recent \
+                 games; a new one needs its address once."
+                    .to_owned(),
+                Color32::GRAY,
+            ));
+            if !j.page.recent.is_empty() {
+                lines.push((
+                    "Square / Space / right-click forgets the selected recent game".to_owned(),
+                    Color32::GRAY,
                 ));
             }
             if let Some(m) = &j.page.status {
@@ -351,6 +534,7 @@ impl App {
         &mut self,
         front: &mut FrontShell,
         input: ui::menu::MenuInput,
+        forget: bool,
         _dt: f32,
     ) -> Option<MpDone> {
         let build = game::netplay::build_id();
@@ -360,30 +544,12 @@ impl App {
                 (d, h.take_clicks())
             }
             MpPage::Join(j) => {
+                j.pump_targets();
                 if let Some((b, t)) = j.browser.as_mut() {
                     use net::Clock;
                     b.pump(j.clock.now(), t);
-                    let rows = b
-                        .hosts()
-                        .into_iter()
-                        .filter_map(|h| {
-                            let info = HostInfo::decode(&h.info)?;
-                            Some(ui::lobby::FoundRow {
-                                addr: h.addr.to_string(),
-                                refusal: info.refusal(&build),
-                                name: info.name,
-                                map: if info.map.is_empty() {
-                                    "in the lobby".into()
-                                } else {
-                                    info.map
-                                },
-                                players: format!("{}/{}", info.players, info.max_players),
-                                ping_ms: h.rtt.as_millis_f64().round() as u32,
-                            })
-                        })
-                        .collect();
-                    j.page.set_hosts(rows);
                 }
+                j.hosts_heard(&build);
                 if let Some(t) = j.test.as_mut() {
                     use net::Clock;
                     t.pump(j.clock.now(), &build);
@@ -402,7 +568,7 @@ impl App {
                 if resolved.is_some() {
                     j.resolving = None;
                 }
-                let d = resolved.or_else(|| j.page.step(input).map(MpDone::Join));
+                let d = resolved.or_else(|| j.page.step(input, forget).map(MpDone::Join));
                 (d, j.page.take_clicks())
             }
         };
@@ -419,6 +585,17 @@ impl App {
         front: &mut FrontShell,
         d: ui::lobby::PageDraw,
     ) -> Option<MpDone> {
+        if let (Some(i), Some(MpPage::Join(j))) = (d.secondary, front.mp.as_mut()) {
+            // A right-click on a recent game forgets it.
+            if matches!(j.page.row_ids().get(i), Some(ui::lobby::JoinRow::Recent(_))) {
+                j.page.cursor = i;
+                let forget = j.page.step(Default::default(), true).map(MpDone::Join);
+                for c in j.page.take_clicks() {
+                    front.menus.cues.play(c);
+                }
+                return forget;
+            }
+        }
         if d.clicked.is_none() && !d.submitted {
             return None;
         }
@@ -438,7 +615,10 @@ impl App {
                 if let Some(i) = d.clicked {
                     j.page.cursor = i;
                 }
-                (j.page.step(press).map(MpDone::Join), j.page.take_clicks())
+                (
+                    j.page.step(press, false).map(MpDone::Join),
+                    j.page.take_clicks(),
+                )
             }
         };
         for c in clicks {
@@ -479,8 +659,19 @@ impl App {
                     }
                 }
             }
+            MpDone::Join(JoinCommand::Forget(i)) => {
+                let recent = self.recent_games();
+                if recent.forget(i) {
+                    recent.save();
+                }
+                let rows = recent.rows(game::netplay::recent::now_unix());
+                if let Some(MpPage::Join(j)) = self.front.as_mut().and_then(|f| f.mp.as_mut()) {
+                    j.forgot(i, rows);
+                }
+            }
             MpDone::Join(JoinCommand::Connect(text)) => {
                 if let Some(MpPage::Join(j)) = self.front.as_mut().and_then(|f| f.mp.as_mut()) {
+                    self.join_name_hint = j.name_for(&text);
                     let (tx, rx) = mpsc::channel();
                     let lookup = text.clone();
                     // DNS can take seconds: off the frame loop.
@@ -545,19 +736,76 @@ impl App {
     }
 
     /// Join Game's Connect: the session is open (the lobby says when the
-    /// host answers); the address joins the recent hosts.
+    /// host answers); the address joins the recent games once the host
+    /// accepts ([`App::note_recent_game`]).
     fn join_from_shell(&mut self, text: &str, addr: SocketAddr) -> Result<()> {
         let mut args = self.lan_args(false);
         args.addr = Some(text.to_owned());
         let mut n = NetplaySession::join(args, self.lan_profile(), addr)?;
         n.status = format!("Connecting to {text}\u{2026}");
-        lb::remember_host(&mut self.profile.settings.recent_hosts, text);
-        if let Err(e) = self.profile.save() {
-            eprintln!("profile autosave failed: {e:#}");
-        }
+        n.recent.name_hint = std::mem::take(&mut self.join_name_hint);
         println!("lan: {}", n.status);
         self.netplay = Some(n);
         Ok(())
+    }
+
+    /// This computer's recent games, read (and seeded once from the active
+    /// profile's old list) on first use; kept nowhere in tests.
+    pub(super) fn recent_games(&mut self) -> &mut game::netplay::recent::RecentGames {
+        let legacy = &self.profile.settings.recent_hosts;
+        self.recent_games.get_or_insert_with(|| {
+            if cfg!(test) {
+                game::netplay::recent::RecentGames::in_memory()
+            } else {
+                let path = game::profile::data_dir().join(game::netplay::recent::FILE_NAME);
+                game::netplay::recent::RecentGames::load_or_import(&path, legacy)
+            }
+        })
+    }
+
+    /// Join Game's rows of the recent games.
+    pub(super) fn recent_rows(&mut self) -> Vec<ui::lobby::RecentRow> {
+        self.recent_games().rows(game::netplay::recent::now_unix())
+    }
+
+    /// A guest's recent game (module header): written when the host
+    /// accepts (`welcomed`), then kept up to date with the host's name and
+    /// the round last played; the file is written only on a change.
+    pub(super) fn note_recent_game(&mut self, welcomed: bool) {
+        let Some(n) = self.netplay.as_mut() else {
+            return;
+        };
+        if n.is_host() || !(welcomed || n.recent.recorded) {
+            return;
+        }
+        let Some(addr) = n.args.addr.clone() else {
+            return;
+        };
+        n.recent.recorded = true;
+        let name = n
+            .names()
+            .get(&0)
+            .cloned()
+            .unwrap_or_else(|| n.recent.name_hint.clone());
+        let map = match n.lobby.state.as_ref().map(|s| &s.phase) {
+            Some(LobbyPhase::InRound(label)) => label.clone(),
+            _ => String::new(),
+        };
+        let mode = if map.is_empty() {
+            String::new()
+        } else {
+            n.recent.mode.clone()
+        };
+        let recent = self.recent_games();
+        let mut changed = false;
+        if welcomed {
+            recent.remember(&addr, &name, game::netplay::recent::now_unix());
+            changed = true;
+        }
+        changed |= recent.update(&addr, &name, &map, &mode);
+        if changed {
+            recent.save();
+        }
     }
 
     /// The shell hands over to the lobby screen.
@@ -620,7 +868,7 @@ impl App {
             n.shutdown();
         }
         self.init_shell();
-        let recent = self.profile.settings.recent_hosts.clone();
+        let recent = self.recent_rows();
         let front = self
             .front
             .get_or_insert_with(|| FrontShell::new(&self.assets_dir));
@@ -917,6 +1165,7 @@ impl App {
         let setup = n.host_row_setup(&row, &session, &self.profile, pos);
         n.lobby.phase = LobbyPhase::InRound(row.label.clone());
         n.lobby.round_map = Some((row.key.clone(), row.label.clone()));
+        n.lobby.round_mode = row.mode.english().to_owned();
         n.lobby.ready.clear();
         n.lobby.results_at = None;
         self.session = session;
@@ -972,10 +1221,16 @@ impl App {
                 .as_ref()
                 .map(|(_, l)| l.clone())
                 .unwrap_or_default(),
+            mode: if n.lobby.round_map.is_some() {
+                n.lobby.round_mode.clone()
+            } else {
+                String::new()
+            },
             players: 1 + n.peer.guests().len() as u8,
             max_players: n.lobby.max_players,
             protocol: net::PROTOCOL,
             build: game::netplay::build_id(),
+            session: n.lobby.host_session,
         }
         .encode();
         if info != n.lobby.info_sent {
@@ -1272,6 +1527,95 @@ pub(crate) mod tests {
         (host, guest)
     }
 
+    /// The Tailscale fix, over UDP on this machine: a recent game is written
+    /// only once the host accepts the guest, under the host's name; the next
+    /// Join Game asks that address by unicast (no broadcast is needed to
+    /// reach it), shows the host's answer on the recent row, and one press
+    /// joins it.
+    #[test]
+    fn a_recent_game_is_written_on_welcome_and_found_again_by_unicast() {
+        let port = free_port();
+        let mut host = app();
+        host.profile.name = "Ann".into();
+        host.host_from_shell(4, port, 0, true).expect("hosting");
+        host.enter_lobby();
+        let mut guest = app();
+        guest.profile.name = "Bo".into();
+        // An address nobody hosts on: no welcome, no recent game.
+        let dead = free_port();
+        let dead_text = format!("127.0.0.1:{dead}");
+        guest
+            .join_from_shell(&dead_text, SocketAddr::from(([127, 0, 0, 1], dead)))
+            .expect("joining");
+        for _ in 0..50 {
+            guest.net_idle();
+            std::thread::sleep(std::time::Duration::from_millis(4));
+        }
+        assert!(
+            guest.recent_games().games.is_empty(),
+            "not before a welcome"
+        );
+        guest.netplay.take().unwrap().shutdown();
+        let text = format!("127.0.0.1:{port}");
+        guest
+            .join_from_shell(&text, SocketAddr::from(([127, 0, 0, 1], port)))
+            .expect("joining");
+        guest.enter_lobby();
+        run(&mut host, &mut guest, |_, g| {
+            g.recent_games
+                .as_ref()
+                .and_then(|r| r.games.first())
+                .is_some_and(|r| r.addr == text && r.name == "Ann" && r.last_joined_unix > 0)
+        });
+        assert_eq!(guest.recent_games().games.len(), 1);
+        guest.netplay.take().unwrap().shutdown();
+        // Join Game again: the recent game answers on its own row.
+        let mut front = FrontShell::new(&guest.assets_dir);
+        front.mp = Some(MpPage::join(guest.recent_rows()));
+        let live = |f: &FrontShell| match f.mp.as_ref() {
+            Some(MpPage::Join(j)) => j.page.recent.first().and_then(|r| r.live.clone()),
+            _ => None,
+        };
+        let start = Instant::now();
+        while live(&front).is_none() && start.elapsed().as_secs_f32() < 5.0 {
+            host.redraw_lobby(1.0 / 60.0).expect("host frame");
+            assert!(guest
+                .step_mp(&mut front, Default::default(), false, 1.0 / 60.0)
+                .is_none());
+            std::thread::sleep(std::time::Duration::from_millis(4));
+        }
+        let row = live(&front).expect("the recent game answered within 5 s");
+        assert_eq!(row.name, "Ann");
+        assert_eq!(row.refusal, None, "same build");
+        let Some(MpPage::Join(j)) = front.mp.as_ref() else {
+            unreachable!()
+        };
+        assert!(j.page.hosts.is_empty(), "listed once, on its recent row");
+        assert_eq!(
+            j.page.row_ids()[j.page.cursor],
+            ui::lobby::JoinRow::Recent(0)
+        );
+        assert!(j.page.rows()[j.page.cursor]
+            .label
+            .starts_with("Ann \u{2014} in the lobby"));
+        let press = ui::menu::MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert!(matches!(
+            guest.step_mp(&mut front, press, false, 1.0 / 60.0),
+            Some(MpDone::Join(ui::lobby::JoinCommand::Connect(t))) if t == text
+        ));
+        // Square forgets it, and the next Join Game no longer lists it.
+        let forget = guest.step_mp(&mut front, Default::default(), true, 1.0 / 60.0);
+        guest.front = Some(front);
+        guest.mp_done(forget.expect("forget"));
+        assert!(guest.recent_games().games.is_empty());
+        if let Some(n) = host.netplay.take() {
+            n.shutdown();
+        }
+    }
+
     /// Headless, over UDP on this machine: Start Hosting opens the lobby;
     /// a guest joins and draws the host's state (roster, phase); at the
     /// results it is ready by itself, so the host's ready check completes
@@ -1457,6 +1801,35 @@ pub(crate) mod tests {
             SocketAddr::from(([255, 255, 255, 255], net::DEFAULT_PORT))
         );
         assert!(t.iter().all(|a| a.port() == net::DEFAULT_PORT));
+    }
+
+    /// Join Game asks the broadcasts and, by unicast, every recent game
+    /// that resolved (over a tunnel the only way to hear it), once each.
+    #[test]
+    fn the_browser_asks_the_recent_games_by_unicast() {
+        let a = |s: &str| s.parse::<SocketAddr>().unwrap();
+        let broadcasts = [a("255.255.255.255:37450"), a("192.168.1.255:37450")];
+        let recent = [
+            Some(a("100.64.0.9:37450")),
+            None,
+            Some(a("100.64.0.9:37450")),
+            Some(a("10.0.0.4:40000")),
+        ];
+        assert_eq!(
+            join_targets(&broadcasts, &recent),
+            [
+                a("255.255.255.255:37450"),
+                a("192.168.1.255:37450"),
+                a("100.64.0.9:37450"),
+                a("10.0.0.4:40000"),
+            ]
+        );
+        assert_eq!(resolve_v4("10.0.0.4"), Some(a("10.0.0.4:37450")));
+        assert_eq!(
+            resolve_v4("[::1]:37450"),
+            None,
+            "the browser's socket is IPv4"
+        );
     }
 
     /// Issue #128: the LAN lobby is a menu too, and its frames keep the

@@ -27,6 +27,14 @@
 //! PS2's does for a seat with no player (B1 `FUN_0026d748` hands it the AI's
 //! own aim, `FUN_00236700`, B1:191963-191967); and it sees from its muzzle
 //! (`perception::scan`).
+//!
+//! A ground seat (a hover's, a walker's, a building turret's) fires the seat
+//! weapon its think chose (`seat_fight::pick`: weapon 0 on FIRE, weapon 1 on
+//! SECONDARY_FIRE) with that weapon's heat, and holds its fire at a vehicle
+//! none of its weapons may be used on (the PS2's seat refusal,
+//! `analysis/re-turret-ai.md` C9). OURS, PROVISIONAL: a hover driver's shot
+//! at a ground vehicle is on when the barrel's line crosses that vehicle's
+//! sphere, since the hull it is held to settles a few degrees off its aim.
 
 use super::gunner_foot::{charge, droid_aim, fire_discipline, seen_aim, tap, turret_aim, Meter};
 use super::state::AiState;
@@ -74,7 +82,18 @@ pub(super) fn aim(
     let (Some(s), Some(u)) = (sim.seat_look(me), sim.unit(me)) else {
         return None;
     };
-    let w = pilot_channel(sim, u, &s)?;
+    // A ground seat fires the weapon its think chose, and holds its fire at
+    // a vehicle none of its weapons may be used on (`seat_fight`).
+    let ground = super::seat_fight::seat_weapon(sim, u, st);
+    let hold = ground.is_some_and(|(_, h)| h);
+    let (k, w) = match ground {
+        Some((k, _)) => s.gun.weapons.get(k).map(|w| (k, w)).or(s
+            .gun
+            .weapons
+            .first()
+            .map(|w| (0, w)))?,
+        None => (0, pilot_channel(sim, u, &s)?),
+    };
     let wc = &sim.weapon_classes[w.class];
     let skill = sim.skill_of(u);
     let tier = sim.unit_tier(u);
@@ -100,11 +119,29 @@ pub(super) fn aim(
         let leg = sim.tow_leg_aim(me, &s, class);
         (leg, leg)
     } else {
+        // [ours] A proxy's hand aims a gun seat too (`proxy::hand`, its
+        // `seat` multiplier); a pilot keeps the flyer's own lead.
+        let hand = u.proxy_human.and_then(|p| p.hand);
         let point = enemy
             .map(|e| {
                 piloting
                     .then(|| led_flyer(sim, s.eye, e, speed))
                     .flatten()
+                    .or_else(|| {
+                        let h = hand?;
+                        let c = held?;
+                        Some(super::proxy::hand::aim(
+                            &h,
+                            me,
+                            sim.tick,
+                            c.first_seen,
+                            s.eye,
+                            e,
+                            speed,
+                            super::proxy::hand::Shooter::of(sim, u),
+                            super::proxy::hand::moving(sim, e),
+                        ))
+                    })
                     .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc, false))
             })
             .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc, false)))
@@ -155,7 +192,7 @@ pub(super) fn aim(
     // Card BRSTU: the seat gun's own heat, and its rounds - unlimited when
     // the class's `RoundsPerClip` is under 1 or the slot's `WeaponAmmo` is.
     let meter = Meter {
-        heat: seat_heat(sim, u).unwrap_or(0.0),
+        heat: seat_heat(sim, u, k).unwrap_or(0.0),
         unlimited: w.infinite || wc.infinite_ammo(),
     };
     fire_discipline(sim, me, u, st, wc, meter, &skill);
@@ -167,6 +204,27 @@ pub(super) fn aim(
         .and_then(|m| sim.vehicle(m.vehicle))
         .map(|v| v.pos + s.rot * s.gun.pivot);
     let reach = s.gun.aimer.yaw_rate.fmin(s.gun.aimer.pitch_rate) * crate::TICK_DT;
+    // OURS, PROVISIONAL (`seat_fight`): a hover driver's gun is held to the
+    // hull, which its steering turns toward the aim point but settles a few
+    // degrees off; against a ground vehicle the shot is on when the barrel's
+    // line crosses that vehicle's sphere (its blast sphere, else its seat
+    // sphere) at the aim point. measure: VEHICLE_CENSUS seat_vhit per seat_shot.
+    let hull = matches!(look, Look::Steering)
+        .then(|| ground.and(enemy))
+        .flatten()
+        .and_then(|e| sim.vehicle(e.mount?.vehicle))
+        .filter(|v| v.kind != VehicleKind::Flyer)
+        .map(|v| {
+            let r = sim.vehicle_blast_sphere(v).1;
+            if r > 0.0 {
+                r
+            } else {
+                sim.seat_setup
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .map_or(0.0, |x| x.radius)
+            }
+        });
     let shot = centre.zip(point).is_some_and(|(c, p)| {
         let cos_tol = fmath::sin_cos(AIM_TOLERANCE).1;
         let to = |q: glam::Vec3| (q - s.muzzle).normalize_or_zero();
@@ -185,6 +243,11 @@ pub(super) fn aim(
                 && !human_friend_on_nose(sim, u.team, s.muzzle, s.rot * glam::Vec3::Z)
         } else {
             to(p).dot(s.barrel) >= cos_tol
+                || hull.is_some_and(|r| {
+                    let off = p - s.muzzle;
+                    let along = off.dot(s.barrel);
+                    along > 0.0 && (off - s.barrel * along).length_squared() < r * r
+                })
                 || last
                     .zip(pivot)
                     .is_some_and(|(q, o)| to(q).dot(s.barrel) >= cos_tol && turned(q, o))
@@ -192,8 +255,9 @@ pub(super) fn aim(
         let range = (c - s.muzzle).length();
         let ready = tow.is_some()
             || held.is_some_and(|c| perception::fireable(&c, sim.tick, tier.reaction_ticks));
-        ready && on && range <= tow.map_or(wc.shot_range(), |class| class.initial_length)
-    });
+        ready && on && range <= tow.map_or(wc.engage_range(), |class| class.initial_length)
+    }) && !hold
+        && !(ground.is_some() && explosive_near_friend(sim, me, u.team, &s, wc, point));
     if wc.max_pressed_time > 0.0 {
         if centre.is_some() {
             let want_fire = shot && st.burst > 0 && sim.tick >= st.pause_until;
@@ -214,8 +278,51 @@ pub(super) fn aim(
     } else if shot && st.burst > 0 && sim.tick >= st.pause_until {
         pad.buttons |= buttons::FIRE;
     }
+    // The second seat weapon is on SECONDARY_FIRE (`sim::guns`).
+    if k == 1 && pad.buttons & buttons::FIRE != 0 {
+        pad.buttons = (pad.buttons & !buttons::FIRE) | buttons::SECONDARY_FIRE;
+    }
     at
 }
+
+/// OURS (card TKFIX's rule carried to a ground seat): a seat's missile or
+/// shell is not fired while a friend on foot is in its line of fire
+/// (`gunner_foot::item_line_blocked`) or within [`SEAT_BLAST_CLEAR`] of the
+/// aim point - the fighter tank's missile, newly fired at vehicles, killed
+/// the friends round its target. It holds against every target, a soldier
+/// as much as a vehicle (a tank shell or a mortar turret's round at a
+/// soldier with a friend beside him included). measure: VEHICLE_CENSUS
+/// teamkill by seat.
+fn explosive_near_friend(
+    sim: &Sim,
+    me: UnitHandle,
+    team: u8,
+    s: &crate::sim::SeatLook,
+    wc: &crate::weapon::WeaponClass,
+    point: Option<glam::Vec3>,
+) -> bool {
+    use crate::weapon::OrdKind;
+    let Some(p) = point else {
+        return false;
+    };
+    if !matches!(wc.ordnance.kind, OrdKind::Missile | OrdKind::Shell) && wc.guided.is_none() {
+        return false;
+    }
+    let right = s.barrel.cross(glam::Vec3::Y).normalize_or_zero();
+    let up = right.cross(s.barrel);
+    super::gunner_foot::item_line_blocked(sim, team, s.muzzle, (s.barrel, right, up), p, 0.0)
+        || sim.alive_units().any(|(h, o)| {
+            h != me
+                && o.team == team
+                && o.mount.is_none()
+                && o.soldier.pos.distance_squared(p) < SEAT_BLAST_CLEAR * SEAT_BLAST_CLEAR
+        })
+}
+
+/// OURS: a seat's explosive is held with a friend on foot this near its aim
+/// point, m - a little past the launchers' 4 m outer blast and the fighter
+/// tank missile's. measure: VEHICLE_CENSUS teamkill by seat.
+const SEAT_BLAST_CLEAR: f32 = 8.0;
 
 pub(super) fn free_fire(sim: &Sim, me: UnitHandle, st: &mut AiState, pad: &mut PadState) {
     let (Some(s), Some(u)) = (sim.seat_look(me), sim.unit(me)) else {
@@ -315,15 +422,15 @@ fn human_friend_on_nose(sim: &Sim, team: u8, from: glam::Vec3, nose: glam::Vec3)
     })
 }
 
-/// The heat of the first weapon of `u`'s seat gun.
-fn seat_heat(sim: &Sim, u: &crate::unit::Unit) -> Option<f32> {
+/// The heat of weapon `k` of `u`'s seat gun.
+fn seat_heat(sim: &Sim, u: &crate::unit::Unit, k: usize) -> Option<f32> {
     let m = u.mount?;
     let g = sim
         .vehicle(m.vehicle)?
         .guns
         .get(usize::from(m.seat))?
         .as_ref()?;
-    Some(g.weapons.first()?.heat)
+    Some(g.weapons.get(k)?.heat)
 }
 
 /// The sticks that turn a [`gun::Turn`] look toward `want` (the rest when

@@ -82,9 +82,9 @@ pub use rotating::PREVIOUS;
 /// human's fall damage (`fall_damage`), and (#173) the cheats (`header.cheats`,
 /// `header.cheats_now`, `cheats` event rows) and each hit's damage multipliers
 /// (`hit` `v[3]`, `v[4]`), so a playtest with a cheat on is never read as a
-/// rule bug.
+/// rule bug. 19 (#182 B4): the rescue's `embedded` death and `rescue` rows.
 /// An older file still reads.
-pub const SCHEMA: u32 = 18;
+pub const SCHEMA: u32 = 19;
 /// Net meter rows kept (60 s at 2 Hz).
 const NET_ROWS: usize = 120;
 
@@ -438,6 +438,12 @@ pub enum Ev {
     /// change, comma-separated (empty = all off); `v` = [the set after, the
     /// set before] as [`cheat_names`] bits.
     Cheats,
+    /// Issue #182 B4: the world killed unit a inside a solid or under the
+    /// ground, with no clear spot to put him back on.
+    Embedded,
+    /// Issue #182 B4: unit a, found inside a solid or under the ground, put
+    /// back on his last clear spot: at that spot; `v` = where he was.
+    Rescue,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -1141,6 +1147,7 @@ impl Ring {
                         DeathCause::Lost => Ev::Lost,
                         DeathCause::Stalled => Ev::Recycle,
                         DeathCause::Water | DeathCause::DamageRegion => Ev::Water,
+                        DeathCause::Embedded => Ev::Embedded,
                     },
                     unit.index as i32,
                     -1,
@@ -1150,6 +1157,10 @@ impl Ring {
                 Event::Relocated { unit, from, to } => {
                     v = from.to_array().iter().map(|&x| r2(x)).collect();
                     (Ev::Relocate, unit.index as i32, -1, -1, r2v(to.to_array()))
+                }
+                Event::Rescued { unit, from, to } => {
+                    v = from.to_array().iter().map(|&x| r2(x)).collect();
+                    (Ev::Rescue, unit.index as i32, -1, -1, r2v(to.to_array()))
                 }
                 Event::Respawn { unit } => (Ev::Spawn, unit.index as i32, -1, -1, at(unit)),
                 Event::Despawn { unit } => (Ev::Despawn, unit.index as i32, -1, -1, at(unit)),

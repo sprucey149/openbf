@@ -19,7 +19,11 @@ use crate::fmath::FloatExt;
 /// DEVIATION from that design, measured: the unit's level ALONE is not enough,
 /// because `ground_under` calls a terrain sheet more than
 /// [`crate::collision::TERRAIN_BURY`] above the feet "buried" and returns the
-/// sentinel for it. That rule is right for a soldier standing under an uncut
+/// sentinel for it when a SOLDIER face roofs the feet or the sheet is cut
+/// there. (Since issue #182 B3 a sheet with open sky between it and the feet
+/// is NOT buried: `ground_under` returns the sheet's height, so a fallback
+/// probed from below an unroofed sheet gets the surface, not NO_GROUND.)
+/// That rule is right for a soldier standing under an uncut
 /// heightfield and wrong for a hub UPHILL of one: on TAT1 the same waypoint
 /// [-464, 17, 51] resolved to `floor 16.9` for a unit at y 18.0 and to
 /// NO_GROUND for one at y 11.6, and the literal rule rejected 3,894 legs in

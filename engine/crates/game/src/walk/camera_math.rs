@@ -47,13 +47,15 @@ pub fn ps2_soldier_fovs(rules: core::soldier::GroundRules) -> (f32, f32) {
 
 /// The chase camera's (third-person, zoomed) FOVs in degrees: BF2's on every
 /// map - OURS, the one default camera of [`core::unit::camera_section`]
-/// (playtest 2026-10-28).
+/// (playtest 2026-10-28). trace: BF1's own chase FOVs, if the one-camera
+/// rule is revisited.
 pub fn chase_fovs() -> (f32, f32) {
     ps2_soldier_fovs(core::soldier::GroundRules::Bf2)
 }
 
 /// The chase camera's vertical FOV (radians) on every map: BF2's measured
 /// 52.06 deg - OURS, as [`chase_fovs`]. [`ps2_fov_y`] keeps each game's.
+/// trace: as [`chase_fovs`].
 pub fn chase_fov_y() -> f32 {
     ps2_fov_y("bf2")
 }
@@ -128,7 +130,8 @@ pub fn vehicle_pull_height(kind: core::vehicle::VehicleKind, top: Option<f32>) -
 }
 
 /// A seat's third-person camera (card VSEAT) as `(pull point, camera)`.
-/// PROVISIONAL — the PS2's camera frame for a vehicle is not ported, only its pull
+/// PROVISIONAL (trace: the vehicle camera frame of `FUN_001b58f0`) — the PS2's camera
+/// frame for a vehicle is not ported, only its pull
 /// point: `origin` on the vehicle, as the PS2's camera update takes its collision
 /// origin from the section's point on the frame (`FUN_001b58f0`, `FUN_001cef68`),
 /// which [`WalkSim::seat_pull_origin`] gives. The rest reads the seat's props the way

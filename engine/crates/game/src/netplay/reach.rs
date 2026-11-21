@@ -9,6 +9,13 @@
 //!   connect sends nothing. A ZeroTier address, or a WireGuard tunnel that
 //!   is not the default route, is not found this way. The Host page says "Not detected" rather
 //!   than guessing a tunnel or a second LAN interface.
+//! - Join Game's LAN search asks the limited broadcast and each IPv4
+//!   adapter's own broadcast address ([`directed_broadcasts`]: address OR
+//!   the inverted netmask), so a second network card, ZeroTier, Hamachi or
+//!   Radmin (which carry broadcast) are searched too, and a network that is
+//!   not a /24 gets its right address. Loopback, Tailscale (no broadcast)
+//!   and point-to-point (/31, /32) adapters are skipped. Without an adapter
+//!   list the default route's address stands in, with a /24 guess.
 //! - A connection test sends the discovery `Find` to the one address,
 //!   once a second (`net::LanBrowser`), and reports the first answer's
 //!   ping, host name and whether its build matches; no answer within
@@ -50,6 +57,45 @@ pub fn local_ipv4s() -> Vec<(Ipv4Addr, bool)> {
         }
     }
     v
+}
+
+/// The directed broadcast address of each adapter (`(address, netmask)`),
+/// once each, in order (module rules).
+pub fn directed_broadcasts(ifaces: &[(Ipv4Addr, Ipv4Addr)]) -> Vec<Ipv4Addr> {
+    let mut out = Vec::new();
+    for (ip, mask) in ifaces {
+        let m = u32::from(*mask);
+        if ip.is_loopback() || ip.is_unspecified() || is_tailscale(*ip) || m.leading_ones() > 30 {
+            continue;
+        }
+        let b = Ipv4Addr::from(u32::from(*ip) | !m);
+        if !out.contains(&b) {
+            out.push(b);
+        }
+    }
+    out
+}
+
+/// This machine's IPv4 adapters with their netmasks; without an adapter
+/// list, the default route's address as a /24 (module rules).
+pub fn ipv4_interfaces() -> Vec<(Ipv4Addr, Ipv4Addr)> {
+    match if_addrs::get_if_addrs() {
+        Ok(list) => list
+            .into_iter()
+            .filter_map(|i| match i.addr {
+                if_addrs::IfAddr::V4(v4) => Some((v4.ip, v4.netmask)),
+                _ => None,
+            })
+            .collect(),
+        Err(e) => {
+            eprintln!("lan browser: no adapter list ({e}); guessing a /24");
+            local_ipv4s()
+                .into_iter()
+                .filter(|(ip, vpn)| !vpn && (ip.is_private() || ip.is_link_local()))
+                .map(|(ip, _)| (ip, Ipv4Addr::new(255, 255, 255, 0)))
+                .collect()
+        }
+    }
 }
 
 /// Only the Host page's LAN and identifiable VPN endpoints. An invalid
@@ -138,7 +184,7 @@ impl ConnectionTest {
         let started = *self.started.get_or_insert(now);
         self.browser.pump(now, t);
         if let Some(h) = self.browser.hosts().into_iter().next() {
-            let info = HostInfo::decode(&h.info).unwrap_or_default();
+            let info = HostInfo::of_found(&h);
             self.state = TestState::Answered {
                 refusal: info.refusal(build),
                 name: if info.name.is_empty() {
@@ -203,6 +249,33 @@ mod tests {
         );
     }
 
+    /// Every adapter's own broadcast: a /24, a /16 and a /22 LAN, ZeroTier's
+    /// /24; loopback, Tailscale and point-to-point skipped; once each.
+    #[test]
+    fn reach_directed_broadcast_per_adapter() {
+        let ip = Ipv4Addr::new;
+        let ifaces = [
+            (ip(127, 0, 0, 1), ip(255, 0, 0, 0)),
+            (ip(192, 168, 1, 23), ip(255, 255, 255, 0)),
+            (ip(192, 168, 1, 24), ip(255, 255, 255, 0)),
+            (ip(10, 1, 2, 3), ip(255, 255, 0, 0)),
+            (ip(172, 16, 5, 9), ip(255, 255, 252, 0)),
+            (ip(100, 101, 102, 103), ip(255, 255, 255, 255)),
+            (ip(100, 64, 0, 7), ip(255, 192, 0, 0)),
+            (ip(10, 147, 17, 5), ip(255, 255, 255, 0)),
+            (ip(10, 9, 9, 1), ip(255, 255, 255, 254)),
+        ];
+        assert_eq!(
+            directed_broadcasts(&ifaces),
+            [
+                ip(192, 168, 1, 255),
+                ip(10, 1, 255, 255),
+                ip(172, 16, 7, 255),
+                ip(10, 147, 17, 255),
+            ]
+        );
+    }
+
     #[test]
     fn reach_host_addresses_do_not_invent_missing_routes_or_ports() {
         let unknown = ["LAN Address: Not detected", "VPN Address: Not detected"];
@@ -242,6 +315,7 @@ mod tests {
                 max_players: 8,
                 protocol: net::PROTOCOL,
                 build: build.into(),
+                ..Default::default()
             }
             .encode(),
         );
@@ -304,7 +378,7 @@ mod tests {
                 ..
             }
         ));
-        assert!(test_text("x", &got).contains("cannot join: another openbf build"));
+        assert!(test_text("x", &got).contains("cannot join: different version"));
     }
 
     /// Nobody there: "No answer" after the timeout, with what to check.

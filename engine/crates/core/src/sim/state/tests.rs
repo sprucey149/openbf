@@ -733,6 +733,107 @@ fn a_space_round_keeps_the_pre_171_team_rule() {
     assert_eq!(s.team_rows()[0].level, 18);
 }
 
+/// Issue #182 B3: a flat terrain sheet at `sheet` over the 128 m square at
+/// the origin, with these SOLDIER boxes `(centre, half)` and a cutter that
+/// cuts every x < 0 when `trench`.
+fn under_sheet(sheet: f32, boxes: &[(Vec3, Vec3)], trench: bool) -> Sim {
+    use crate::collision::{Body, Cutter, Layers, Shape};
+    let mut s = Sim::empty(1);
+    let bodies = boxes
+        .iter()
+        .map(|&(c, half)| {
+            Body::with_layers(
+                glam::Mat4::from_translation(c),
+                Shape::Box { half },
+                Layers::SOLDIER,
+            )
+        })
+        .collect();
+    let cutters = if trench {
+        vec![Cutter {
+            sphere: [0.0; 4],
+            planes: vec![glam::Vec4::new(1.0, 0.0, 0.0, 0.0)],
+        }]
+    } else {
+        Vec::new()
+    };
+    s.collision = crate::collision::CollisionWorld::new(bodies, cutters);
+    s.heightfield = Some(crate::heightfield::Heightfield {
+        size: 65,
+        unit: 2.0,
+        offset_x: 64.0,
+        offset_z: 64.0,
+        heights: vec![sheet; 65 * 65],
+    });
+    s
+}
+
+/// Issue #182 B3: feet that leave a 3 m deep cut trench across its edge,
+/// with no wall there, are under the sheet with the sky over them: the
+/// sheet is their ground (lifted out), not the trench floor's plane
+/// carried on under the map. Inside the cut the trench floor is.
+#[test]
+fn feet_past_cutter_edge_snap_to_terrain() {
+    let floor = (Vec3::new(-20.0, 1.75, 0.0), Vec3::new(20.0, 0.25, 20.0));
+    let s = under_sheet(5.0, &[floor], true);
+    assert!((s.ground_under(Vec3::new(-3.0, 2.0, 0.0), false) - 2.0).abs() < 1e-3);
+    let past = s.ground_under(Vec3::new(1.0, 2.0, 0.0), false);
+    assert!((past - 5.0).abs() < 1e-3, "past the edge: {past}");
+    // A soldier there is lifted out within a tick and is not embedded.
+    let mut s = s;
+    let h = s
+        .spawn(&crate::unit::UnitSpec::trooper(0, Vec3::new(1.0, 2.0, 0.0)))
+        .expect("spawned");
+    s.units[h.index as usize].soldier.pos = Vec3::new(1.0, 2.0, 0.0);
+    s.step(&[PadState::default()]);
+    let y = s.units[h.index as usize].soldier.pos.y;
+    assert!((y - 5.0).abs() < 0.05, "lifted onto the sheet: {y}");
+    assert!(s.embed_state(h).is_none());
+}
+
+/// Issue #182 B3: a pit's cutter (cut at x < 0 above y 3 only) that a
+/// soldier has fallen out the bottom of: the sheet has a hole over him, so
+/// it is no ground to lift him onto and he falls on.
+#[test]
+fn feet_under_a_pit_cutter_fall_on() {
+    let mut s = under_sheet(5.0, &[], false);
+    s.collision = crate::collision::CollisionWorld::new(
+        Vec::new(),
+        vec![crate::collision::Cutter {
+            sphere: [0.0; 4],
+            planes: vec![
+                glam::Vec4::new(1.0, 0.0, 0.0, 0.0),
+                glam::Vec4::new(0.0, -1.0, 0.0, 3.0),
+            ],
+        }],
+    );
+    let g = s.ground_under(Vec3::new(-1.0, 1.0, 0.0), false);
+    assert_eq!(g, crate::collision::NO_GROUND, "under the pit: {g}");
+    // Beside the pit the sheet is whole: lifted.
+    assert_eq!(s.ground_under(Vec3::new(1.0, 1.0, 0.0), false), 5.0);
+}
+
+/// Issue #182 B3's control (BF2 Polis Massa's cp5con): a base under an
+/// UNCUT sheet, with its own roof between the feet and the sheet, keeps
+/// its floor; the walk under the sheet goes on.
+#[test]
+fn tunnel_under_uncut_terrain_still_walks() {
+    let floor = (Vec3::new(0.0, 1.75, 0.0), Vec3::new(10.0, 0.25, 10.0));
+    let roof = (Vec3::new(0.0, 4.75, 0.0), Vec3::new(10.0, 0.25, 10.0));
+    let mut s = under_sheet(8.0, &[floor, roof], false);
+    let g = s.ground_under(Vec3::new(1.0, 2.0, 0.0), false);
+    assert!((g - 2.0).abs() < 1e-3, "the base floor: {g}");
+    let h = s
+        .spawn(&crate::unit::UnitSpec::trooper(0, Vec3::new(1.0, 2.0, 0.0)))
+        .expect("spawned");
+    s.units[h.index as usize].soldier.pos = Vec3::new(1.0, 2.0, 0.0);
+    for _ in 0..30 {
+        s.step(&[PadState::default()]);
+    }
+    let y = s.units[h.index as usize].soldier.pos.y;
+    assert!((y - 2.0).abs() < 0.05, "still in the base: {y}");
+}
+
 /// `SetAIDifficulty(a, b, level)` (FUN_002a2988 / FUN_002a29d8): a
 /// campaign's per-level pair moves the human team's bots by `a` and every
 /// other team's by `b`, clamped 1..20, at the port tier mapped to that

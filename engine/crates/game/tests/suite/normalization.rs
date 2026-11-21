@@ -1108,3 +1108,174 @@ fn print_table() {
         }
     }
 }
+
+/// [ours] (the maintainer, 2026-11-20) Every infantry, vehicle and turret
+/// blaster bolt of both games flies `BOLT_REACH` at its authored speed, and
+/// the AI opens fire within the disc's reach (`WeaponClass::engage_range`);
+/// the remote droids' blasters, snipers, BF2's 200 m shotguns and the
+/// guns already reaching 200 m keep theirs. A human's assist with a
+/// lengthened blaster keeps the disc's `LockOnRange`, takes full strength to
+/// the disc's reach and reaches the bolt's (`WeaponClass::give_bolt_assist`).
+/// Prints the census of the lengthened weapons.
+#[test]
+fn infantry_bolts_reach_200_m_in_both_games() {
+    use core::weapon::BOLT_REACH;
+    let Some(dir) = dir() else { return };
+    let bf1 = load_classdb(&dir, "bf1", &SIDES).unwrap();
+    let mut bf2 = load_classdb(&dir, "bf2", &SIDES).unwrap();
+    // BF2's map turrets (`tur_*`), as the turret loader adds them.
+    if dir.join("bf2_tur.ron").is_file() {
+        bf2.load(&dir.join("bf2_tur.ron")).unwrap();
+    }
+    for (db, weapon, speed, natural, lock) in [
+        (&bf1, "all_weap_inf_rifle", 80.0, Some(120.0), 64.0),
+        (&bf1, "imp_weap_inf_pistol", 75.0, Some(112.5), 64.0),
+        (&bf1, "cis_weap_inf_repeater", 80.0, Some(120.0), 80.0),
+        (&bf1, "imp_weap_inf_shotgun", 160.0, Some(120.0), 64.0),
+        (&bf1, "cis_weap_inf_wrist_shrapnel", 80.0, Some(120.0), 24.0),
+        (&bf1, "all_weap_inf_sniperrifle", 2000.0, None, 300.0),
+        (&bf1, "imp_weap_hover_fightertank_cannon", 180.0, None, 0.0),
+        (
+            &bf1,
+            "imp_weap_walk_atst_cannon_chin",
+            70.0,
+            Some(105.0),
+            100.0,
+        ),
+        (&bf1, "com_weap_bldg_gunturret", 80.0, Some(120.0), 0.0),
+        (&bf2, "all_weap_inf_rifle", 160.0, Some(128.0), 40.0),
+        (&bf2, "rep_weap_inf_pistol", 160.0, Some(128.0), 40.0),
+        (&bf2, "cis_weap_inf_wrist_blaster", 160.0, Some(128.0), 40.0),
+        (&bf2, "cis_weap_inf_wrist_trishot", 160.0, Some(128.0), 24.0),
+        (&bf2, "imp_weap_award_rifle", 160.0, Some(128.0), 40.0),
+        (&bf2, "rep_weap_inf_autoturret", 100.0, Some(80.0), 20.0),
+        (&bf2, "all_weap_inf_shotgun", 2000.0, None, 40.0),
+        (&bf2, "rep_weap_inf_chaingun", 20000.0, None, 48.0),
+        (&bf2, "all_weap_inf_sniper_rifle", 2000.0, None, 300.0),
+        (&bf2, "rep_weap_walk_atte_rear_gun", 2000.0, None, 1500.0),
+        (
+            &bf2,
+            "cis_weap_tread_snailtank_cannon",
+            300.0,
+            Some(195.0),
+            1500.0,
+        ),
+    ] {
+        let w = weapon_from_db(db, weapon).unwrap();
+        let o = w.shot_ordnance();
+        assert_eq!(o.velocity, speed, "{weapon}: the speed is kept");
+        assert_eq!(w.ordnance.natural_reach, natural, "{weapon}");
+        assert_eq!(w.lock_on_range, lock, "{weapon}: the disc's LockOnRange");
+        match natural {
+            Some(n) => {
+                assert!(w.shot_range() >= BOLT_REACH, "{weapon}: {}", w.shot_range());
+                assert!(w.shot_range() < BOLT_REACH + 0.01, "{weapon}");
+                assert!((w.engage_range() - n).abs() < 1e-3, "{weapon}");
+                // The acquisition and the reticle's cue reach the bolt's.
+                assert!(
+                    w.extreme_range >= BOLT_REACH,
+                    "{weapon}: {}",
+                    w.extreme_range
+                );
+                if lock <= 0.0 || lock >= BOLT_REACH {
+                    // No disc magnet, or one reaching past the bolt: as it was.
+                    assert_eq!(w.assist_full_range, 0.0, "{weapon}");
+                    assert_eq!(w.magnet_reach(), lock, "{weapon}");
+                } else {
+                    assert_eq!(w.assist_full_range, n, "{weapon}");
+                    assert!(w.magnet_reach() >= BOLT_REACH, "{weapon}");
+                    assert_eq!(w.assist_range_scale(n - 1.0), 1.0, "{weapon}");
+                    let mid = w.assist_range_scale((n + BOLT_REACH) / 2.0);
+                    assert!((mid - 0.5).abs() < 1e-3, "{weapon}: {mid}");
+                    assert!(w.assist_range_scale(BOLT_REACH) < 1e-4, "{weapon}");
+                }
+            }
+            None => assert_eq!(w.engage_range(), w.shot_range(), "{weapon}"),
+        }
+    }
+    // The remote droids' blasters keep the disc's reach (the maintainer:
+    // "remote droid blaster: keep at 60m"; BF2's at its 128 m).
+    for (db, weapon, reach) in [
+        (&bf1, "all_weap_inf_remotedroid_blaster", 60.0),
+        (&bf1, "imp_weap_inf_remotedroid_blaster", 60.0),
+        (&bf1, "rep_weap_inf_remotedroid_blaster", 60.0),
+        (&bf1, "cis_weap_inf_remotedroid_blaster", 60.0),
+        (&bf2, "imp_weap_inf_remotedroid_blaster", 128.0),
+        (&bf2, "cis_weap_inf_remotedroid_blaster", 128.0),
+    ] {
+        let w = weapon_from_db(db, weapon).unwrap();
+        assert_eq!(w.ordnance.natural_reach, None, "{weapon}");
+        assert!(
+            (w.shot_range() - reach).abs() < 1e-3,
+            "{weapon}: {}",
+            w.shot_range()
+        );
+        assert!((w.extreme_range - reach).abs() < 1e-3, "{weapon}");
+        assert_eq!(w.assist_full_range, 0.0, "{weapon}");
+    }
+    // The census: every lengthened weapon is an infantry, vehicle or turret
+    // one, and every bolt or bullet under 200 m but the remote droids' and
+    // the airborne guns' is lengthened.
+    for (game, db) in [("bf1", &bf1), ("bf2", &bf2)] {
+        let mut rows = Vec::new();
+        for name in sorted_names(db) {
+            if db.get(&name).is_none_or(|d| d.kind != "wpnc") {
+                continue;
+            }
+            let Ok(w) = weapon_from_db(db, &name) else {
+                continue;
+            };
+            let ord = db
+                .prop(&name, "OrdnanceName")
+                .map(|o| o.trim().to_ascii_lowercase());
+            let base = ord.as_deref().and_then(|o| db.engine_base(o));
+            let bolt = base.is_some_and(|b| {
+                b.eq_ignore_ascii_case("bolt") || b.eq_ignore_ascii_case("bullet")
+            });
+            match w.ordnance.natural_reach {
+                Some(n) => {
+                    assert!(
+                        [
+                            "_weap_inf_",
+                            "_weap_hero_",
+                            "_weap_award_",
+                            "_weap_droid_",
+                            "_weap_walk_",
+                            "_weap_hover_",
+                            "_weap_tread_",
+                            "_weap_bldg_",
+                            "tur_",
+                        ]
+                        .iter()
+                        .any(|p| name.contains(p)),
+                        "{game} {name} is not an infantry, vehicle or turret weapon"
+                    );
+                    assert!(
+                        !name.contains("remotedroid") && !name.contains("_weap_fly_"),
+                        "{game} {name}"
+                    );
+                    rows.push(format!(
+                        "{name} {n:.1}->{:.1} (lock {:.1}, assist full {:.1} to {:.1}, ai max {:.0}, knots {})",
+                        w.shot_range(),
+                        w.lock_on_range,
+                        w.assist_full_range,
+                        w.magnet_reach(),
+                        w.ai_range[2],
+                        w.ordnance.knots.len()
+                    ));
+                }
+                None if bolt
+                    && w.shot_range() < BOLT_REACH
+                    && w.ordnance.velocity > 0.0
+                    && !name.contains("remotedroid")
+                    && !name.contains("_weap_fly_") =>
+                {
+                    panic!("{game} {name}: a {:.1} m bolt left short", w.shot_range());
+                }
+                None => {}
+            }
+        }
+        eprintln!("{game} lengthened ({}): {}", rows.len(), rows.join(", "));
+        assert!(!rows.is_empty(), "{game}");
+    }
+}

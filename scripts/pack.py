@@ -15,11 +15,18 @@ recompiles and re-packs):
   3. extract the Lua scripts of the LVLs        -> extracted/bf{1,2}/lua/  (extract_lua.py)
   4. build the missions from the disc's own bytecode -> engine/missions/   (gen_missions.py --ps2-only)
      Includes the six Space Assault missions; OPENBF_BAKE_SPACE=0 leaves them out.
-  5. bake every asset                           -> engine/assets_baked/    (rebake.sh)
+  5. bake the asset groups that are not current -> engine/assets_baked/    (rebake.sh <group>)
+     Each scripts/rebake.sh group has a key: its version (engine/crates/bake/src/versions.rs), the content of what it
+     reads, its settings and, for audio, ffmpeg and the restoration (scripts/bake_cache.py). Only a group whose key
+     changed bakes again; --explain says why. A run stopped part-way goes on from the group it was in.
   6. copy the game, strip the copy, append assets_baked/ + missions/  -> --out
      Below about 3.9 GiB that is one file on every OS. From there on, also on every OS, --out is a small executable
      and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
      inside itself first, then for openbf.pak beside it; the two must stay together.
+
+--bake-only runs steps 2-5 and stops (only the `bake` tool is built): a development checkout's own engine/missions
+and engine/assets_baked, the ones its sweeps and tests read, stay current with the same cache as a pack, instead of
+drifting behind the tree (a hand-run rebake.sh records no keys, so nothing said when it went stale).
 
 Optional prepared packs: unzip under visual_packs/, then run the normal command.
 Each pack has pack.json; named mod folders may group packs recursively, for example
@@ -37,12 +44,18 @@ labelled separately; unsupported inputs are never claimed as consumed.
 
 The result plays from anywhere. It holds the games' own content, so it is for
 your machine only: never upload or share it. Needs
-cargo, python3, bash and ffmpeg (the bake encodes speech to OGG); `strip` is
-used when present. Tested on Linux and Windows (card WIN: Git for Windows' bash
-runs the bake; the output is dist/openbf.exe). Nobody has tried macOS yet: the
-scripts are written to run under its older bash and tools, and that is all. FAT32
+cargo, Python 3.10 or newer, bash and an ffmpeg with the libvorbis encoder (the
+bake encodes speech to OGG; both are checked before anything is built); `strip`
+is used when present. Tested on Linux and Windows (card WIN: Git for Windows'
+bash runs the bake; the output is dist/openbf.exe). macOS: the scripts run under
+its older bash and tools, and on a Mac pack.py warns about the setups that make
+the bake much slower (Rosetta, an iCloud-synced or external folder, little free
+space, no `caffeinate`). A full Mac build has not been timed yet. FAT32
 cannot hold a file of 4 GiB or more: --out needs a folder on another filesystem
 for a build that large.
+
+Every step line shows the time since the start, `== [mm:ss] ...`, and the run
+ends with each step's total, also when it fails or is stopped.
 """
 
 import argparse
@@ -55,8 +68,28 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
+MIN_PYTHON = (3, 10)
+
+
+def python_too_old(version, platform=sys.platform):
+    """Why this Python cannot run the build, or None. Checked before the build's own modules are imported, because
+    those use Python 3.10 syntax and would fail with a TypeError that names neither the version nor the fix."""
+    if tuple(version[:2]) >= MIN_PYTHON:
+        return None
+    have = ".".join(str(part) for part in version[:3])
+    fix = ("The python3 that comes with macOS is too old: `brew install python`, open a new Terminal window and check "
+           "that `python3 --version` says 3.10 or newer." if platform == "darwin"
+           else "Install Python 3.10 or newer and run pack.py with it.")
+    return f"pack: this is Python {have}; the build needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer. {fix}"
+
+
+if python_too_old(sys.version_info):
+    sys.exit(python_too_old(sys.version_info))
+
+import bake_cache
 import input_scan
 import pack_cache
 import visual_packs
@@ -133,8 +166,52 @@ def pack_summary(out, pak, split):
     return lines
 
 
+def clock(seconds):
+    """`mm:ss`, the minutes running on past 59 (a slow build reads `[95:12]`)."""
+    seconds = int(seconds)
+    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+
+class StepClock:
+    """How long each step took: the receipt a slow-build report needs."""
+
+    def __init__(self, now=time.monotonic):
+        self.now = now
+        self.reset()
+
+    def reset(self):
+        self.start, self.current, self.rows = None, None, []
+
+    def begin(self, name):
+        """Close the step that is running and start `name`; returns the seconds since the first step began."""
+        t = self.now()
+        if self.start is None:
+            self.start = t
+        self.close(t)
+        self.current = (name, t)
+        return t - self.start
+
+    def close(self, t=None):
+        if self.current is not None:
+            name, began = self.current
+            self.rows.append((name, (self.now() if t is None else t) - began))
+            self.current = None
+
+    def totals(self):
+        """One closing line, or None before any step began."""
+        if self.start is None:
+            return None
+        end = self.now()
+        self.close(end)
+        steps = ", ".join(f"{name.split(' ', 1)[0]} {clock(seconds)}" for name, seconds in self.rows)
+        return f"step times: {steps}; total {clock(end - self.start)}"
+
+
+CLOCK = StepClock()
+
+
 def step(msg):
-    print(f"\n== {msg}", flush=True)
+    print(f"\n== [{clock(CLOCK.begin(msg))}] {msg}", flush=True)
 
 
 def run(cmd, cwd=ROOT, env=None):
@@ -236,15 +313,108 @@ def need(tool, why):
         sys.exit(f"pack: `{tool}` is not on PATH ({why})")
 
 
-# What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
-BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
-               "scripts/global_sound_cache.py", "scripts/pack_cache.py", "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "scripts/restore_audio.py", "engine/crates/audio/src",
-               "scripts/gen_missions.py", "scripts/extract_lua.py", "engine/crates/bake/src/effect_names.txt",
-               "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
+DARWIN_FFMPEG = ("On macOS: `brew install ffmpeg-full` (plain `brew install ffmpeg` has no libvorbis), then put it first "
+                 "on PATH: `echo 'export PATH=\"$(brew --prefix ffmpeg-full)/bin:$PATH\"' >> ~/.zprofile` and open a new "
+                 "Terminal window.")
+
+
+def ffmpeg_problem(which=None, run=None, platform=None):
+    """Why the ffmpeg on PATH cannot make the bake's OGGs, or None. The bake asks for `-c:a libvorbis`; ffmpeg's own
+    `vorbis` encoder makes different bytes (and a different global-sound cache identity), so it is never a fallback."""
+    which, run, platform = which or shutil.which, run or subprocess.run, platform or sys.platform
+    fix = DARWIN_FFMPEG if platform == "darwin" else "Install an ffmpeg whose `ffmpeg -encoders` lists libvorbis."
+    ffmpeg = which("ffmpeg")
+    if ffmpeg is None:
+        return f"pack: `ffmpeg` is not on PATH (the bake encodes speech and effects to OGG). {fix}"
+    try:
+        listed = run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True, errors="replace",
+                     stdin=subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        return f"pack: `{ffmpeg} -encoders` did not run ({error}). {fix}"
+    if not re.search(r"^\s*A\S*\s+libvorbis\b", listed.stdout or "", re.MULTILINE):
+        return (f"pack: {ffmpeg} has no libvorbis encoder, and the bake encodes speech and effects to OGG with it. "
+                f"{fix} `ffmpeg -hide_banner -encoders | grep libvorbis` must print a line.")
+    return None
+
+
+def need_ffmpeg():
+    """Checked once, before anything is built: a missing encoder used to surface only at the voice step, deep in the bake."""
+    problem = ffmpeg_problem()
+    if problem:
+        sys.exit(problem)
+
+
+MAC_FREE_GB = 30  # a first build writes about 20-30 GB: extracted/, assets_baked/, target/ and dist/
+
+
+def mac_warnings(root, home, *, python_machine, arm64_hardware, translated, rustc_host, free_bytes, ancestors):
+    """Warnings, never refusals, for the Mac setups that make the bake much slower. All inputs are measured by the
+    caller (mac_facts), so this stays a pure function of them."""
+    warnings = []
+    if translated or (arm64_hardware and python_machine == "x86_64"):
+        warnings.append("Python runs under Rosetta (x86_64 on an Apple Silicon Mac): the bake will be 2-3x slower. "
+                        "Use an arm64 Terminal and Homebrew in /opt/homebrew (`uname -m` should say arm64).")
+    if arm64_hardware and rustc_host and rustc_host.startswith("x86_64"):
+        warnings.append(f"Rust builds for {rustc_host} on an Apple Silicon Mac: the bake tool runs under Rosetta, "
+                        "2-3x slower. Install Rust from https://rustup.rs in an arm64 Terminal.")
+    real = os.path.realpath(root)
+    synced = [os.path.join(home, "Desktop"), os.path.join(home, "Documents"), os.path.join(home, "Library", "Mobile Documents")]
+    if any(real == folder or real.startswith(folder + os.sep) for folder in synced):
+        warnings.append(f"the checkout is in {real}: with iCloud Drive on, macOS uploads (and may evict) the tens of "
+                        "thousands of files the build writes. A folder iCloud does not sync, such as ~/openbf, is much faster.")
+    elif real.startswith(os.path.join(os.sep, "Volumes") + os.sep):
+        warnings.append(f"the checkout is on an external volume ({real}): the build reads and writes about 20-30 GB; "
+                        "a folder on the internal disk is much faster.")
+    if free_bytes is not None and free_bytes < MAC_FREE_GB * 10**9:
+        warnings.append(f"{free_bytes / 10**9:.0f} GB free; a first build needs about {MAC_FREE_GB} GB.")
+    if "caffeinate" not in ancestors:
+        warnings.append("the Mac may sleep during the build: run it as `caffeinate -i python3 scripts/pack.py`, "
+                        "with the lid open and the charger in.")
+    return warnings
+
+
+def mac_facts():
+    """What mac_warnings reads, measured on this Mac; anything that cannot be read counts as unknown."""
+    import platform
+
+    def output(*cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    rustc = output("rustc", "-vV")
+    host = next((line.split(":", 1)[1].strip() for line in rustc.splitlines() if line.startswith("host:")), None)
+    try:
+        free = shutil.disk_usage(ROOT).free
+    except OSError:
+        free = None
+    ancestors, pid = [], os.getppid()
+    for _ in range(32):  # the parent chain, to see whether caffeinate started this run
+        line = output("ps", "-o", "ppid=,comm=", "-p", str(pid)).split(None, 1)
+        if len(line) != 2:
+            break
+        ancestors.append(os.path.basename(line[1].strip()))
+        if not line[0].isdigit() or int(line[0]) <= 1:
+            break
+        pid = int(line[0])
+    return dict(python_machine=platform.machine(), arm64_hardware=output("sysctl", "-n", "hw.optional.arm64") == "1",
+                translated=output("sysctl", "-n", "sysctl.proc_translated") == "1", rustc_host=host,
+                free_bytes=free, ancestors=ancestors)
+
+
+def warn_mac():
+    if sys.platform != "darwin":
+        return
+    for warning in mac_warnings(ROOT, os.path.expanduser("~"), **mac_facts()):
+        print(f"   macOS warning: {warning}", flush=True)
+
+
+# What the missions are made by: when any of it changes, they are stale and made again. (The bake's groups have their
+# own keys: scripts/bake_cache.py.)
 MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py",
                   "scripts/gameplay_missions.py", "engine/crates/manifest/data/gameplay/corrections-v1")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
-BAKE_STAMP = os.path.join(EXTRACTED, "bake_inputs.sha256")
 MISSION_STAMP = os.path.join(EXTRACTED, "mission_inputs.sha256")
 
 
@@ -257,12 +427,19 @@ def inputs_hash(paths, source_paths=None):
         full = os.path.join(ROOT, p)
         files = [full] if os.path.isfile(full) else sorted(
             os.path.join(d, f) for d, _, fs in os.walk(full) for f in fs
-            if f.endswith((".rs", ".toml", ".json")) and os.sep + "tests" not in d[len(full):])
+            if f.endswith((".rs", ".toml", ".json")) and not test_only(os.path.relpath(os.path.join(d, f), full)))
         for f in files:
             h.update(os.path.relpath(f, ROOT).replace(os.sep, "/").encode())
             with open(f, "rb") as source:
                 h.update(source.read().replace(b"\r\n", b"\n"))
     return h.hexdigest()
+
+
+def test_only(relative):
+    """Test and example sources change no output: tests/ and examples/ folders, tests.rs and *_tests.rs."""
+    parts = relative.replace(os.sep, "/").split("/")
+    name = parts[-1]
+    return any(part in ("tests", "examples") for part in parts[:-1]) or name == "tests.rs" or name.endswith("_tests.rs")
 
 
 def stale(stamp, paths, source_paths=None):
@@ -449,8 +626,8 @@ def map_texture_sources(baked, base_labels=None):
 
 def source_report(root, baked, missions, images, plan, extracted_used=(), images_used=(), rebaked=None, pc_roots=None, warnings=(), images_verified=()):
     """Only successful pack steps establish which inputs were consumed. `rebaked` is what the bake did this run: None
-    for nothing, "all", or a list of groups. "cached" means an input of the bake packed, not read this run: the bake's
-    stamp holds its path, so a bake made without it would have been made again."""
+    for nothing, "all", or a list of groups. "cached" means an input of the bake packed, not read this run: the group
+    keys hold its content, so a bake made without it would have been made again."""
     root = Path(root)
     inputs = []
     pc_roots = pc_roots or {}
@@ -474,7 +651,7 @@ def source_report(root, baked, missions, images, plan, extracted_used=(), images
             used = game in images_used
             note(image, f'{game} requested PS2 image', 'used' if used or game in images_verified else 'cached',
                  'extracted successfully this run' if used else
-                 'content verified this run; verified extraction reused' if game in images_verified else
+                 'identity checked this run (its digest is remembered by size, change time and inode; --rebake reads it again); verified extraction reused' if game in images_verified else
                  'not read or verified this run; cached extraction used')
         gameplay = (plan.get('games', {}).get(game) or {}).get('gameplay') or {}
         platform = gameplay_labels.get(gameplay.get('kind'))
@@ -587,6 +764,73 @@ def menu_font_input(value):
     return dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
+def group_versions(bake):
+    """`bake format-versions`: what each bake group's key starts from."""
+    return bake_cache.format_versions(bake)
+
+
+def pc_lvl_root(game, path):
+    """The _LVL_PC folder the bake reads under a chosen PC install (rebake.sh's find_pc_lvl), else the path itself."""
+    return find_pc_lvl_dirs(path).get(game, path) if os.path.isdir(path) else path
+
+
+def bake_group_inputs(plan, bake_env, images, bake_inputs, lua_root, memo):
+    """The content of every input the bake groups read, by the names bake_cache.INPUTS gives them. Content, not
+    paths: moving iso/ or an install changes nothing, a changed byte in what a group reads bakes it again."""
+    def tree(path):
+        return memo.tree(path) if path else None
+
+    gameplay = {"pc_only": bake_env.get("OPENBF_PC_ONLY") == "1"}
+    sound_trees = {}
+    for g in sorted(images):
+        gameplay[g] = bake_inputs.get(g + "_image") if images[g] else tree(lvl_root(g))
+        legacy = os.path.join(EXTRACTED, g, "sound", "DATA", "_LVL_PS2")
+        # rebake.sh reads an old extraction's separate sound tree only for a game with no image and no other tree.
+        sound_trees[g] = tree(legacy) if not images[g] and g not in GAMEPLAY_TREES and os.path.isdir(legacy) else None
+    number = {"bf1": "1", "bf2": "2"}
+    return dict(
+        gameplay=gameplay,
+        pc={g: tree(pc_lvl_root(g, bake_env[f"PC{n}"])) for g, n in number.items() if bake_env.get(f"PC{n}")},
+        xbox={g: tree(bake_env[f"XB{n}"]) for g, n in number.items() if bake_env.get(f"XB{n}")},
+        space=bake_inputs.get("space"),
+        maps={name: bake_env.get(name) for name in ("OPENBF_BF1_MAPS", "OPENBF_BF2_MAPS",
+                                                    "OPENBF_BF1_WITHHELD", "OPENBF_BF2_WITHHELD")},
+        menu_font=(bake_inputs.get("menu_font_core") or {}).get("sha256"),
+        sound_trees=sound_trees,
+        dlc=[tree(bake_env.get("OPENBF_DLC_DIR")), tree(bake_env.get("OPENBF_DLC_DONOR"))],
+        dlc_scripts=[memo.digest_if_file(os.path.join(ROOT, "scripts", name)) for name in ("bake_dlc.py", "dlc_inputs.py")],
+        lua=tree(lua_root),
+    )
+
+
+def bake_plan(store, keys, rebake):
+    """[(group, action, reason)]: what the bake does this run (bake_cache.plan)."""
+    return bake_cache.plan(store, keys, forced_groups(), rebake=rebake)
+
+
+def forced_groups():
+    """Groups whose key matches but whose output is known to be incomplete: retail music bodies or restored takes
+    missing (sounds, and common for the shell's), or a side baked before BF1 vehicle shadows."""
+    forced = {}
+    missing = missing_music(include_global=False)
+    if missing:
+        reason = f"{len(missing)} music files missing or incomplete"
+        forced["sounds"] = reason
+        if any("shell" in Path(path).parts for path in missing):
+            forced["common"] = reason
+    if missing_shadows():
+        forced["side"] = "no BF1 vehicle shadows in this bake"
+    return forced
+
+
+def clear_baked(path):
+    """Empty the bake folder for a bake from nothing. Never through a link: that folder is another checkout's."""
+    if os.path.islink(path):
+        sys.exit(f"pack: {path} is a link to another checkout's assets; pass --baked with a folder of your own")
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+
+
 def main():
     input_scan.tolerant_stdout()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -601,10 +845,17 @@ def main():
                     help="optional local PS2 BF2 CORE.LVL for the approved BF2 Light menu glyphs only; native PC/Xbox fallback uses different glyphs")
     ap.add_argument("--game-bin", default=None, help="use an already compiled game binary (skips step 1 cargo build)")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
-    ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
+    ap.add_argument("--rebake", action="store_true", help="bake every asset again, from an empty assets_baked/")
+    ap.add_argument("--bake-only", action="store_true", help="bring engine/missions and engine/assets_baked up to date "
+                    "(steps 2-5, with the bake cache) and stop: no game binary, no pack")
+    ap.add_argument("--explain", action="store_true", help="say for every bake group whether it was reused or why it bakes again")
+    ap.add_argument("--baked", default=None, help="the folder the bake writes (default: engine/assets_baked); one per input profile")
     ap.add_argument("--visual-packs", default=None, help="prepared pack folder or recursive lookup of packs/bundles (default: repo-root visual_packs/; discovery stops at pack.json)")
     ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
     a = ap.parse_args()
+    if a.baked:
+        global BAKED
+        BAKED = os.path.abspath(a.baked)
     try:
         packs, visual_report = visual_packs.discover(a.visual_packs or Path(ROOT) / "visual_packs", explicit=a.visual_packs is not None)
     except visual_packs.PackError as error:
@@ -624,8 +875,14 @@ def main():
             sys.exit(message.encode("utf-8", "backslashreplace").decode("utf-8"))
         if a.scan_only:
             return
-        with pack_cache.outputs_locked((EXTRACTED, BAKED, MISSIONS)):
-            build(a, out, plan, packs, visual_report)
+        CLOCK.reset()
+        try:
+            with pack_cache.outputs_locked((EXTRACTED, BAKED, MISSIONS)):
+                build(a, out, plan, packs, visual_report)
+        finally:
+            totals = CLOCK.totals()
+            if totals:
+                print(f"\n{totals}", flush=True)
 
 
 def build(a, out, plan, packs, visual_report):
@@ -656,8 +913,17 @@ def build(a, out, plan, packs, visual_report):
     images_used, extracted_used = set(), set()
     rebaked = None
 
+    # Both are needed by every run (the global-sound step always runs), so check before the first cargo build.
+    need_ffmpeg()
+    warn_mac()
+
     step("1/6 build bake + game (release)")
-    if a.game_bin:
+    if a.bake_only:
+        # A development checkout's own bake (the one its sweeps and tests read): keyed and current like a pack's.
+        need("cargo", "the standalone bake tool")
+        run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
+        bake, game = os.path.join(TARGET, "release", "bake" + EXE), None
+    elif a.game_bin:
         game = os.path.abspath(a.game_bin)
         if not os.path.isfile(game):
             sys.exit(f"pack: --game-bin `{game}` not found")
@@ -673,6 +939,11 @@ def build(a, out, plan, packs, visual_report):
         run(["cargo", "build", "--release", "-p", "game"], cwd=ENGINE)
         run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
         bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
+    try:
+        versions = group_versions(bake)
+    except ValueError as error:
+        sys.exit(f"pack: {error}")
+    memo = bake_cache.DigestMemo(os.path.join(EXTRACTED, "digests.json"), fresh=a.rebake)
 
     step("2/6 the discs")
     for g, image in images.items():
@@ -681,7 +952,8 @@ def build(a, out, plan, packs, visual_report):
         if g in GAMEPLAY_TREES:
             continue
         if image:
-            if pack_cache.extract_image(bake, "extract-iso", image, os.path.join(EXTRACTED, g, "lvl"), run):
+            if pack_cache.extract_image(bake, "extract-iso", image, os.path.join(EXTRACTED, g, "lvl"), run,
+                                        version=versions["groups"]["extract-iso"], fresh=a.rebake, memo=memo):
                 images_used.add(g)
             # A selected image's verified extraction takes precedence over an
             # unattested legacy sound/ tree, even when that tree still exists.
@@ -690,7 +962,8 @@ def build(a, out, plan, packs, visual_report):
             print(f"   {g}: no disc executable: foliage uses the numbers shipped with the source")
     for g, image, tree in input_scan.discs_to_extract(plan):
         destination = Path(tree).parent.parent
-        pack_cache.extract_image(bake, input_scan.XBOX_EXTRACT, image, destination, run)
+        pack_cache.extract_image(bake, input_scan.XBOX_EXTRACT, image, destination, run,
+                                 version=versions["groups"]["extract-iso"], fresh=a.rebake, memo=memo)
         receipt = destination.with_name(destination.name + ".image.json")
         bake_inputs["xbox_" + g] = json.loads(receipt.read_text(encoding="utf-8"))["identity"]
     bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
@@ -766,48 +1039,39 @@ def build(a, out, plan, packs, visual_report):
     if not a.retail_audio:
         bake_env["OPENBF_AUDIO_RESTORE_SCRIPT"] = str(Path(ROOT, "scripts", "restore_audio.py")).replace("\\", "/")
     bake_env["OPENBF_CONSOLE_LUA_ROOT"] = lua_root.replace("\\", "/")
-    baked = os.path.isfile(os.path.join(BAKED, "classes", "bf1_all.ron"))
-    why = stale(BAKE_STAMP, BAKE_INPUTS, bake_inputs) if baked else None
-    if a.rebake or not baked or why:
-        if why and not a.rebake:
-            print(f"   baking again: the bake in {BAKED} was {why}")
-        need("ffmpeg", "the bake encodes speech and effects to OGG")
+    rebake_sh = [bash, os.path.join(ROOT, "scripts", "rebake.sh")]
+    Path(EXTRACTED, "bake_inputs.sha256").unlink(missing_ok=True)  # the single whole-bake stamp this replaced
+    store = bake_cache.KeyStore(BAKED)
+    keys = bake_cache.group_keys(versions, bake_group_inputs(plan, bake_env, images, bake_inputs, lua_root, memo),
+                                 dict(ffmpeg=bake_cache.ffmpeg_identity(bake_env, memo),
+                                      restoration=bake_cache.restoration_identity(bake_env, memo)))
+    memo.save()
+    rows = bake_plan(store, keys, a.rebake)
+    to_bake = [group for group, action, _ in rows if action == "bake"]
+    print("\n".join(bake_cache.explain_lines(rows, verbose=a.explain)), flush=True)
+    if to_bake:
         if not a.retail_audio:
             print("   restoring audio locally during the bake")
-        Path(BAKE_STAMP).unlink(missing_ok=True)
-        if os.path.isdir(BAKED):
-            shutil.rmtree(BAKED)
+        if a.rebake or all(action != "hit" for _, action, _ in rows):
+            # Nothing in the folder is current: bake from empty, as the reference bake does.
+            store.drop_all()
+            clear_baked(BAKED)
+        if os.path.islink(BAKED):
+            print(f"   warning: {BAKED} is a link; these groups are baked into {os.path.realpath(BAKED)} with this "
+                  "checkout's code (pass --baked for a folder of your own)", flush=True)
         os.makedirs(BAKED, exist_ok=True)
-        run([bash, os.path.join(ROOT, "scripts", "rebake.sh")], **({"env": bake_env} if bake_env else {}))
-        rebaked = "all"
+        done = bake_cache.run_groups(store, keys, rows, lambda group: run([*rebake_sh, group], env=bake_env))
+        rebaked = "all" if set(done) >= set(bake_cache.ORDER) else done
         extracted_used.update(("bf1", "bf2"))
-    else:
-        print(f"   already baked ({BAKED}); --rebake bakes again")
-        missing = missing_music(include_global=False)
-        if n := len(missing):
-            print(f"   {n} music files missing or incomplete: rebaking the sound groups")
-            need("ffmpeg", "the bake encodes speech and effects to OGG")
-            Path(BAKE_STAMP).unlink(missing_ok=True)
-            groups = ["sounds"]
-            if any("shell" in Path(path).parts for path in missing):
-                groups.append("common")
-            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), *groups],
-                **({"env": bake_env} if bake_env else {}))
-            extracted_used.update(("bf1", "bf2"))
-            rebaked = groups
-        if missing_shadows():
-            print("   no BF1 vehicle shadows in this bake: rebaking the sides")
-            Path(BAKE_STAMP).unlink(missing_ok=True)
-            need("ffmpeg", "the bake encodes speech and effects to OGG")
-            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "side"], **({"env": bake_env} if bake_env else {}))
-            extracted_used.update(("bf1", "bf2"))
-            rebaked = (rebaked or []) + ["side"]
-    # Always plan both units, including a warm pack whose broad stamp matches.
+    # Always plan both units, including a warm pack whose groups all match.
     # The helper verifies and materializes the complete cached result before packing.
     bake_env["OPENBF_SKIP_GLOBAL_SOUND"] = "0"
     Path(global_result).unlink(missing_ok=True)
-    run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "global-sound"], env=bake_env)
+    run([*rebake_sh, "global-sound"], env=bake_env)
     global_actions = json.loads(Path(global_result).read_text(encoding="utf-8"))
+    if a.explain:
+        for row in global_actions:
+            print(f"   global-sound {row['game']}: {row['action']} ({row.get('reason', '')})")
     extracted_used.update(row["game"] for row in global_actions if row["action"] == "rebuilt")
     left = missing_music()
     if left:
@@ -816,14 +1080,10 @@ def build(a, out, plan, packs, visual_report):
     if left:
         sys.exit(f"pack: the BF1 sides were baked without vehicle shadows, e.g. {left[0]}")
 
-    if rebaked is not None:
-        os.makedirs(EXTRACTED, exist_ok=True)
-        stamp = Path(BAKE_STAMP)
-        next_stamp = stamp.with_suffix(".new")
-        next_stamp.write_text(inputs_hash(BAKE_INPUTS, bake_inputs) + "\n", encoding="utf-8")
-        next_stamp.replace(stamp)
-
     warnings = check_foliage(bake, plan)
+    if a.bake_only:
+        print(f"   bake only: {BAKED} and {MISSIONS} are current; no pack written")
+        return
 
     try:
         visual_replacements = visual_packs.resolve(packs, visual_report, BAKED)
@@ -871,10 +1131,11 @@ def build(a, out, plan, packs, visual_report):
                            pc_roots=pc_roots, warnings=warnings, images_verified={g for g, image in images.items() if image})
     report["visual_packs"] = visual_report
     report["global_sound"] = global_actions
+    report["bake_groups"] = [dict(group=group, action=action, reason=reason) for group, action, reason in rows]
     report["audio_restoration"] = not a.retail_audio
     if menu_font_core:
         report["inputs"].append(dict(path=menu_font_core, label="optional PS2 BF2 menu font source",
-            present=True, status="used" if rebaked == "all" else "cached",
+            present=True, status="used" if rebaked == "all" or "common" in (rebaked or ()) else "cached",
             reason="menu glyphs only; native HUD art and metrics retain their selected source",
             sha256=bake_inputs["menu_font_core"]["sha256"]))
     write_source_report(out, report)

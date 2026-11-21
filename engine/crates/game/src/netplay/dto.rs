@@ -321,6 +321,9 @@ impl RoundSetup {
         if s.mode.eq_ignore_ascii_case("campaign") {
             bail!("round setup: campaign is single-player only");
         }
+        if s.mode.eq_ignore_ascii_case(ui::shell::Mode::Xl.subst()) {
+            bail!("round setup: XL is available in single-player Instant Action");
+        }
         if s.humans
             .iter()
             .any(|h| usize::from(h.slot) >= net::MAX_SLOTS)

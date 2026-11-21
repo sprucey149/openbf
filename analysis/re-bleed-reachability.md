@@ -12,6 +12,12 @@ fixed-step command-post bleed preserves the ticket/live invariant, but a mission
 extra death drain reaches the same loop with its bleed rate at zero. The public
 `Battle` API also accepts directly assigned, unclamped bleed rates.
 
+**Update (2026-11-19, #171):** openbf no longer runs the mission death drain
+(analysis/plan/FEATURE_SET.md "Every death costs one ticket"), so the zero-bleed
+path below no longer arises in play. The loop stays as a guard for directly assigned
+bleed rates. The drain test is now
+`sim::round::tests::a_death_through_step_costs_one_ticket_and_sheds_no_ai`.
+
 ## Source chain
 
 - `[V-Rust]` `core/src/cp.rs:280–308`, `bf2_bleed_rate` / `apply_bleed`:

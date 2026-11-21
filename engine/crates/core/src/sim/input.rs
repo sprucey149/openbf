@@ -693,7 +693,7 @@ impl Sim {
                 };
                 (
                     c.extreme_range,
-                    c.lock_on_range,
+                    c.magnet_reach(),
                     c.lock_on_angle,
                     kind_bits,
                     c.target_team,
@@ -984,14 +984,9 @@ impl Sim {
         if p.mount.is_none() && weapon.rocket_launcher() && matches!(m, AimTarget::Unit(_)) {
             intensity *= 0.5;
         }
-        if sniper {
-            let reach = weapon.lock_on_range;
-            let full = match weapon.assist_full_range {
-                f if f > 0.0 => f,
-                _ => aim_assist::SNIPER_FADE_START * reach,
-            };
-            intensity *= aim_assist::sniper_range_scale((center - eye).length(), full, reach);
-        }
+        // A sniper rifle's curve (issue #164) and a lengthened blaster's
+        // (`WeaponClass::give_bolt_assist`); 1 for any other weapon.
+        intensity *= weapon.assist_range_scale((center - eye).length());
         aim_assist::apply(dt, &mut sticks, &env, &mut st, intensity);
         let out = if intensity <= 0.0 {
             *pad

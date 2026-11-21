@@ -1296,9 +1296,12 @@ impl Sim {
                         bot_jet: self.units[i].ai.jet.command(),
                     };
                     self.saber_gravity(i);
+                    let before = self.units[i].soldier.stance_snap();
                     self.units[i]
                         .soldier
                         .step_looking(dt, pad_i, &consts, rules, look, env);
+                    // Issue #182 B1: no growing into a stance with no room.
+                    self.keep_headroom(i, &before, dt);
                     let u = &mut self.units[i];
                     if stamina_cheat && u.is_player {
                         u.soldier.energy = consts.energy_bar;
@@ -1364,6 +1367,10 @@ impl Sim {
                 self.hold_at_walls(i, &from);
             }
             self.push_turrets(i, from);
+            // Issue #182 B2: no axis through a face (`sim/axis_clamp.rs`).
+            if stepped.is_some() && !corpse {
+                self.keep_axis_side(i, &from);
+            }
             // 3a'. The floor under the NEW feet, where the wall pass left them
             // (card STHOP, analysis/re-soldier-ground.md §3: the PS2 finds the
             // contact after the move; resolving before the wall pass judged a
@@ -1400,9 +1407,16 @@ impl Sim {
                 let velocity_before = s1.vel;
                 let vy_before = velocity_before.y;
                 let rules = self.ground_rules;
+                let before = self.units[i].soldier.stance_snap();
                 self.units[i]
                     .soldier
                     .resolve_ground(dt, fy, fnrm, from.base.y, rules);
+                // Issue #182 B1: the air's stance changes grow him too.
+                self.keep_headroom_on_ground(i, &before);
+                // Issue #182 B2: no axis up through a deck (`sim/axis_clamp.rs`).
+                if !corpse {
+                    self.keep_head_under(i, &from);
+                }
                 if self.units[i].soldier.grounded {
                     self.units[i].stood_on = floor_owner;
                 }
@@ -1503,6 +1517,9 @@ impl Sim {
             }
         }
 
+        // Issue #182 B4: a unit inside a solid or under the ground goes
+        // back to his last clear spot, or dies (`sim/rescue.rs`).
+        self.rescue_embedded();
         self.tick_soldier_water();
         self.tick_damage_regions();
         // Issue #173 [ours]: after this tick's fall, kill-floor and region
@@ -1641,6 +1658,9 @@ impl Sim {
             // (`weapon.rs`, `spread_per_shot`). A player keeps 1.0.
             let ai_spread_mult = (self.units[i].controller == Controller::Ai)
                 .then(|| self.skill_of(&self.units[i]).spread_mult);
+            // An eased Hunt bot's weapon that needs no aim runs slower
+            // (`Sim::hunt_weapon_dt`); everyone else's keeps `dt`.
+            let wdt = self.hunt_weapon_dt(&self.units[i], &self.weapon_classes[wc_idx], dt);
             let fire_empty;
             let reload_started = {
                 let wc = &self.weapon_classes[wc_idx];
@@ -1654,7 +1674,7 @@ impl Sim {
                 if p.pressed(buttons::RELOAD) {
                     u.weapon.start_reload_as(wc, infinite_ammo);
                 }
-                u.weapon.update(dt, wc, input, &mut self.lcg, &mut shots);
+                u.weapon.update(wdt, wc, input, &mut self.lcg, &mut shots);
                 // The empty click: a human's trigger press on a weapon that
                 // refuses it (PS2: the owner's player index >= 0,
                 // re-weapon-sounds.md §7.3).

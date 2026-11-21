@@ -34,6 +34,9 @@ ktx2.workspace = true
 wgpu.workspace = true
 # The shell movie's frames (card BSHLA): already in the tree through `image`.
 zune-jpeg = "0.5"
+# Join Game's LAN search asks every network adapter's broadcast address
+# (issue #168): the adapter list and netmasks, which std does not give.
+if-addrs = "0.15.0"
 
 # Keeping the display awake during a round (src/main/windowed/idle.rs): the
 # Wayland uses the desktop session's idle service. X11 resets the screen saver.

@@ -389,7 +389,11 @@ mod spawn_feedback;
 #[path = "windowed/tick_hook.rs"]
 mod tick_hook;
 pub(super) use lan::run_lan;
+#[path = "windowed/close.rs"]
+mod close;
+use close::CloseReason;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
     Shell,
     Loading,
@@ -748,9 +752,19 @@ struct App {
     pad_warning: Option<String>,
     /// Issue #168: the LAN session; `None` in single player.
     netplay: Option<lan::NetplaySession>,
+    /// This computer's recent LAN games, read at the first Join Game
+    /// (`game::netplay::recent`).
+    recent_games: Option<game::netplay::recent::RecentGames>,
+    /// The host name on the Join Game row last pressed (its recent game's
+    /// name until the roster names the host).
+    join_name_hint: String,
     /// Issue #168: a LAN round's end screens were left (the lobby next).
     net_round_over: bool,
     last: std::time::Instant,
+    /// A close asked for inside a frame, run by `about_to_wait` (`close.rs`).
+    close_pending: Option<CloseReason>,
+    /// The close ran (`App::close_now`): every later event is ignored.
+    closing: bool,
 }
 
 /// `OPENBF_AUTOPILOT=1` (dev, card HITCH): the player's pad walks forward,
@@ -853,6 +867,7 @@ fn stick_full(range: &input::StickRange, learned: bool) -> [f32; 2] {
 /// display connection the idle inhibit borrows, so that is let go without
 /// its teardown requests (the display drops the inhibit with the client).
 fn run_app(event_loop: winit::event_loop::EventLoop<()>, app: &mut App) -> Result<()> {
+    close::install_console_handler();
     if let Err(e) = event_loop.run_app(app) {
         if let Some(idle) = app.idle.take() {
             std::mem::forget(idle);
@@ -1019,8 +1034,12 @@ impl App {
             gilrs,
             pad_warning,
             netplay: None,
+            recent_games: None,
+            join_name_hint: String::new(),
             net_round_over: false,
             last: std::time::Instant::now(),
+            close_pending: None,
+            closing: false,
         }
     }
 
@@ -2356,7 +2375,19 @@ impl App {
 /// Shell entry: window + shell screen; battles start from the menu.
 pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()> {
     let (event_loop, mut app) = shell_app(assets_dir, missions_dir)?;
-    run_app(event_loop, &mut app)
+    run_app(event_loop, &mut app)?;
+    end_after_close(&app)
+}
+
+/// A player entry point's end (the shell, a LAN session): after a finished
+/// close the process ends at once (`close::end_process`), so the App's
+/// remaining drops, which join threads with no bound, never run. Nothing
+/// runs after these entry points return.
+fn end_after_close(app: &App) -> Result<()> {
+    if app.closing {
+        close::end_process();
+    }
+    Ok(())
 }
 
 /// The shell's profile before one is picked: the defaults, opening in the

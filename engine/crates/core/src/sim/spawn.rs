@@ -105,6 +105,9 @@ pub enum ClassRefusal {
     Points(u32),
     /// The member has not accepted this team's current hero offer.
     HeroUnavailable,
+    /// `[ours]` (2026-11-19): the member owns this team's hero, so the hero
+    /// is the only class he may take until it dies ([`Sim::hero_locked`]).
+    HeroLocked,
 }
 
 impl SideChoice {

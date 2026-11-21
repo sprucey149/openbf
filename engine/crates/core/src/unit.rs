@@ -355,6 +355,9 @@ pub struct Unit {
     /// — the push itself is already in `soldier.pos` — so no unit's motion,
     /// the player's least of all, depends on it.
     pub wall_push: Vec3,
+    /// Issue #182 B4: the last spot he stood clear and how long he has been
+    /// inside a solid (`sim/rescue.rs`).
+    pub rescue: crate::sim::Rescue,
     /// The flyer he stands on (`crate::sim` deck carry), `None` off one.
     pub deck: Option<Deck>,
     /// The vehicle whose hull he last stood on (B2 soldier +0x480): it deals
@@ -691,6 +694,7 @@ impl Unit {
             self.skill,
         ]);
         self.soldier.hash_into(eat);
+        self.rescue.hash_into(eat);
         eat(&self.health.cur.hash_bits().to_le_bytes());
         self.weapon.hash_into(eat);
         self.ai.hash_into(eat);
@@ -1477,6 +1481,7 @@ impl UnitSpec {
             spec: self.clone(),
             capture_posts: self.capture_posts,
             wall_push: Vec3::ZERO,
+            rescue: Default::default(),
             deck: None,
             stood_on: None,
             body: false,

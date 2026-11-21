@@ -75,7 +75,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
 
     // Card HYST: a hit, a near miss or a new enemy in sight since the last
     // think brings the next one forward (`crate::ai::wake`).
-    st.wake |= crate::ai::wake::events(sim, me, u, st);
+    let woke = crate::ai::wake::events(sim, me, u, st, &mut nt.levers);
+    st.wake |= woke;
     let woken = st.wake != 0 && sim.tick >= st.last_think + crate::ai::wake::GAP;
     let thinking = sim.tick >= st.next_think || woken;
     if thinking {
@@ -674,8 +675,17 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         && !sim.space_round();
     let reach = fight_reach(sim, u);
     let within = |p: Vec3| (p - eye).length_squared() <= reach * reach;
-    let faced = enemy.zip(seen).filter(|(e, _)| {
-        !walking_on || (within(e.capsule().center()) && (e.mount.is_none() || !st.arm.spare))
+    // [ours] A shooter the bot answers (`perception::RETURN_FIRE_TICKS`) is
+    // faced out to its round's reach.
+    let answered = |c: &crate::perception::Contact| {
+        c.handle
+            .unit()
+            .is_some_and(|h| crate::perception::answering(st, h, sim.tick))
+    };
+    let faced = enemy.zip(seen).filter(|(e, c)| {
+        !walking_on
+            || ((within(e.capsule().center()) || answered(c))
+                && (e.mount.is_none() || !st.arm.spare))
     });
     let faced_memory = memory.filter(|p| {
         !walking_on

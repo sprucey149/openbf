@@ -1396,3 +1396,17 @@ fn felucia_water_effects_skip_the_old_pose_after_a_hero_class_change() {
     vis.update(&walk, core::TICK_DT);
     assert!(vis.water_feet(&walk)[player].is_none());
 }
+
+/// The DLC Force ball's shells and Ventress's starblade are BLEND with the
+/// BF2 additive bit and draw additively; a retail weapon (OPAQUE or MASK,
+/// whatever its flags) never does, and a BLEND part without the bit stays a
+/// plain composite.
+#[test]
+fn only_blend_parts_with_the_additive_bit_add() {
+    use render::DrawLayer as L;
+    assert!(weapon_part_additive(L::Blend, 0x0101_0044));
+    assert!(weapon_part_additive(L::Blend, 0xe9));
+    assert!(!weapon_part_additive(L::Blend, 0x5));
+    assert!(!weapon_part_additive(L::Mask, 0x47));
+    assert!(!weapon_part_additive(L::Opaque, 0x41));
+}

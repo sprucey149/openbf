@@ -138,6 +138,10 @@ pub fn weapon_from_db(db: &ClassDb, weapon: &str) -> Result<WeaponClass> {
         });
     }
     w.give_sniper_assist();
+    w.give_bolt_assist();
+    for st in &mut w.stages {
+        st.class.give_bolt_assist();
+    }
     // A BF1 weapon leaves the cycle for BF2's award that stands for it.
     if !db.is_bf2() {
         if let Some((row, _)) = awards::bf1_award(&w.name) {
@@ -292,6 +296,14 @@ pub(super) fn fired_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
         {
             ord.life_span = 3.0;
         }
+    }
+    // [ours] Infantry, vehicle and turret blaster bolts fly BOLT_REACH on
+    // both games' maps.
+    if db
+        .engine_base(ord_name)
+        .is_some_and(|b| crate::normalize::lengthened_bolt(ord_name, b))
+    {
+        ord.extend_bolt_reach();
     }
     // Base ordnance expiry, shared by every family (B1 FUN_00272e98,
     // B1:195363–195367; B2 FUN_0030f988, B2:301804–301833).

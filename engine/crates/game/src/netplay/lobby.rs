@@ -25,8 +25,6 @@ use ui::shell::{
     State, ERAS, GROUPS, MODES,
 };
 
-/// How many recent hosts the profile keeps.
-pub const RECENT_HOSTS: usize = 8;
 /// How long the host waits for every player's `Ready` after a round.
 pub const READY_WAIT_SECS: f32 = 60.0;
 
@@ -36,10 +34,23 @@ pub struct HostInfo {
     pub name: String,
     /// The map in play or next (its label), empty in the lobby.
     pub map: String,
+    /// The mode in play ("Conquest"), empty in the lobby.
+    pub mode: String,
     pub players: u8,
     pub max_players: u8,
     pub protocol: u16,
     pub build: String,
+    /// A random number per hosting session: one host heard at several
+    /// addresses (its LAN and its VPN one) is listed once.
+    pub session: u64,
+}
+
+/// The part of [`HostInfo`] every build sends ([`HostInfo::decode_any`]).
+#[derive(Deserialize)]
+struct HostInfoCore {
+    name: String,
+    protocol: u16,
+    build: String,
 }
 
 impl HostInfo {
@@ -51,10 +62,34 @@ impl HostInfo {
         serde_json::from_slice(bytes).ok()
     }
 
+    /// The blob of any openbf build: the whole info when it is this
+    /// build's, else just the name, protocol and build every build sends
+    /// (so another version's host is listed as one, not dropped).
+    pub fn decode_any(bytes: &[u8]) -> Option<Self> {
+        Self::decode(bytes).or_else(|| {
+            let c: HostInfoCore = serde_json::from_slice(bytes).ok()?;
+            Some(Self {
+                name: c.name,
+                protocol: c.protocol,
+                build: c.build,
+                ..Default::default()
+            })
+        })
+    }
+
+    /// A discovery answer's info; the protocol is the answer's own (a host
+    /// on another version answers in its version). An unreadable blob is
+    /// an unnamed host of that protocol.
+    pub fn of_found(h: &net::FoundHost) -> Self {
+        let mut info = Self::decode_any(&h.info).unwrap_or_default();
+        info.protocol = h.protocol;
+        info
+    }
+
     /// Why this build cannot join it, if it cannot.
     pub fn refusal(&self, build: &str) -> Option<String> {
         if self.protocol != net::PROTOCOL || self.build != build {
-            Some("another openbf build".into())
+            Some("different version".into())
         } else if self.players >= self.max_players {
             Some("full".into())
         } else {
@@ -127,17 +162,6 @@ pub fn reject_text(reason: net::RejectReason, detail: &str, ours: &str) -> Strin
         R::Kicked if !detail.is_empty() => detail.to_owned(),
         R::Kicked => "The host removed you from the game".into(),
     }
-}
-
-/// Puts `addr` first in the recent hosts (once), keeping [`RECENT_HOSTS`].
-pub fn remember_host(recent: &mut Vec<String>, addr: &str) {
-    let addr = addr.trim();
-    if addr.is_empty() {
-        return;
-    }
-    recent.retain(|a| !a.eq_ignore_ascii_case(addr));
-    recent.insert(0, addr.to_owned());
-    recent.truncate(RECENT_HOSTS);
 }
 
 /// The player name to use: the profile's when it is valid

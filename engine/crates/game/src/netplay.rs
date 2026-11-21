@@ -23,6 +23,8 @@
 //! - [`lobby`]: [`LobbyState`] (the host's setup screen as the guests draw
 //!   it, maps by key), [`HostInfo`], [`GameNotice`], the content
 //!   restriction and the refusal texts.
+//! - [`recent`]: this computer's recent games and how Join Game matches
+//!   them to the hosts that answer.
 //! - [`predict`], [`view`]: local prediction ([`Predictor`]) and the
 //!   per-frame step and drawn view ([`LocalView`]) of a windowed peer.
 //! - [`virtual_net`]: several peers in one process on `net::LinkSim`, in
@@ -46,6 +48,7 @@ pub mod meter;
 pub mod peer;
 pub mod predict;
 pub mod reach;
+pub mod recent;
 pub mod selfcheck;
 pub mod view;
 pub mod virtual_net;

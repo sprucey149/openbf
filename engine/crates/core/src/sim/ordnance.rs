@@ -112,9 +112,11 @@ impl Sim {
                 );
             }
             let was_reloading = u.held[k].state.reloading();
+            // As channel 0's: an eased Hunt bot's no-aim weapon runs slower.
+            let wdt = self.hunt_weapon_dt(&self.units[i], wc, dt);
             self.units[i].held[k]
                 .state
-                .update(dt, wc, input, &mut self.lcg, &mut shots);
+                .update(wdt, wc, input, &mut self.lcg, &mut shots);
             // The empty click, as channel 0's (`re-weapon-sounds.md` 7.3): both
             // channels' current weapons are selected (B1 `FUN_0020cbd0`
             // 121397). A press on one out of ammunition does not take the

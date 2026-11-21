@@ -76,15 +76,16 @@ impl Sim {
     /// (`FUN_00356880`), and facing it (`CLASS_CHANGE_FACING`). Enemy and
     /// neutral posts never qualify; neither does a bot.
     ///
-    /// Hunt and campaign take [`Self::hunt_class_change_near`] for posts
-    /// whose capture region is absent or disabled by the script. Hero Assault, the other
-    /// deathmatch, keeps no class change.
+    /// Hunt, XL and campaign take [`Self::hunt_class_change_near`]: their
+    /// posts count no occupants ([`Self::counts_in_cp`]), or a script
+    /// disabled the capture region. Hero Assault, the other deathmatch,
+    /// keeps no class change.
     pub fn class_change_post(&self, i: usize) -> Option<usize> {
         let u = self.units.get(i)?;
         if !u.alive || !matches!(u.controller, Controller::Player { .. }) || u.mount.is_some() {
             return None;
         }
-        let hunt = self.is_hunt();
+        let hunt = self.is_hunt() || self.is_xl();
         let (fwd, _, _) = u.aim_frame();
         (0..self.cps.len()).find(|&ci| {
             let cp = &self.cps[ci];
@@ -139,6 +140,12 @@ impl Sim {
                 || self.enter_target(h).is_some()
                 || self.class_change_post(i).is_none()
             {
+                continue;
+            }
+            // `[ours]` (maintainer, 2026-11-19): a hero keeps his class
+            // until he dies; the use press only says so.
+            if self.hero_locked(s) {
+                self.events.push(Event::HeroClassLocked { unit: h });
                 continue;
             }
             let class = u.spec.class;
@@ -208,11 +215,16 @@ impl Sim {
 
     /// X on the live class screen: a refused class stays (as the class
     /// screen, `FUN_00364290`); the class he plays just closes it; another
-    /// swaps him in place ([`Sim::change_class`]).
+    /// swaps him in place ([`Sim::change_class`]). A hero's owner never
+    /// swaps (`[ours]` 2026-11-19, [`Sim::hero_locked`]): the screen closes.
     pub(in crate::sim) fn class_change_accept(&mut self, s: usize, team: u8, held: u32) {
         let Some(h) = self.players[s] else { return };
         let n = self.classes[usize::from(team.min(1))].len();
         let c = usize::from(self.spawn_choice[s]).min(n.saturating_sub(1));
+        if self.hero_locked(s) {
+            self.class_change_close(s, held);
+            return;
+        }
         if self.class_refusal(s, team, c).is_some() {
             return;
         }

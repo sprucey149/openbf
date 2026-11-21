@@ -82,7 +82,7 @@ impl App {
 
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        if self.window.is_some() {
+        if self.window.is_some() || self.closing {
             return;
         }
         // Issue #172: the saved display mode, unless a size is forced.
@@ -148,14 +148,20 @@ impl winit::application::ApplicationHandler for App {
                 }
             );
         }
-        match load_and_upload(&mut renderer, &map, &self.mode) {
+        let kills = self
+            .setup
+            .mission
+            .as_ref()
+            .map(|m| m.scene_kills().to_vec())
+            .unwrap_or_default();
+        match load_and_upload(&mut renderer, &map, &self.mode, &kills) {
             Ok((gpu, scene)) => {
                 if self.walk_requested {
                     let (walk, cube) = match self.battle_resources(&mut renderer, &scene, None) {
                         Ok(resources) => resources,
                         Err(error) => {
                             eprintln!("failed to start battle: {error:#}");
-                            event_loop.exit();
+                            self.request_close(super::CloseReason::Error);
                             return;
                         }
                     };
@@ -176,7 +182,7 @@ impl winit::application::ApplicationHandler for App {
             }
             Err(e) => {
                 eprintln!("failed to load map: {e:#}");
-                event_loop.exit();
+                self.request_close(super::CloseReason::Error);
                 return;
             }
         }
@@ -184,6 +190,17 @@ impl winit::application::ApplicationHandler for App {
         self.renderer = Some(renderer);
         self.note_window_size("opened");
         self.last = std::time::Instant::now();
+    }
+
+    /// A close asked for during the events (a Quit, a failure, the
+    /// console's close) runs here, once the events are handled.
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if super::close::console_close_requested() {
+            self.request_close(super::CloseReason::Console);
+        }
+        if let Some(reason) = self.close_pending.take() {
+            self.close_now(event_loop, reason);
+        }
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -209,6 +226,14 @@ impl winit::application::ApplicationHandler for App {
         event: winit::event::WindowEvent,
     ) {
         use winit::event::WindowEvent;
+        if self.closing {
+            return;
+        }
+        // First, before any screen's own key handling can take the event.
+        if matches!(event, WindowEvent::CloseRequested) {
+            self.close_now(event_loop, super::CloseReason::Window);
+            return;
+        }
         if game::input_icons::is_keyboard_or_mouse_use(&event) {
             self.icon_device.keyboard_or_mouse();
         }
@@ -257,17 +282,6 @@ impl winit::application::ApplicationHandler for App {
                 self.keys_held = 0;
                 self.keys_tapped = 0;
                 self.prev_menu_buttons = 0;
-            }
-            WindowEvent::CloseRequested => {
-                self.finish_loading();
-                if let Some((walk, _)) = self.walk.as_mut() {
-                    if !self.round_recorded {
-                        self.round_recorded = true;
-                        record_round(&mut self.profile, walk, self.feed.battle_stats());
-                    }
-                }
-                self.blackbox_exit();
-                event_loop.exit()
             }
             // F9: the playtest black box writes its snapshot (dev mode).
             WindowEvent::KeyboardInput {
@@ -368,7 +382,7 @@ impl winit::application::ApplicationHandler for App {
                     idle.set(awake);
                 }
                 if matches!(self.screen, Screen::Shell) {
-                    self.redraw_shell(event_loop, dt);
+                    self.redraw_shell(dt);
                     if let Some(w) = &self.window {
                         w.request_redraw();
                     }
@@ -377,7 +391,7 @@ impl winit::application::ApplicationHandler for App {
                 if matches!(self.screen, Screen::Lobby) {
                     if let Err(error) = self.redraw_lobby(dt) {
                         eprintln!("render: {error:#}");
-                        event_loop.exit();
+                        self.request_close(super::CloseReason::Error);
                         return;
                     }
                     if let Some(w) = &self.window {
@@ -388,7 +402,7 @@ impl winit::application::ApplicationHandler for App {
                 if matches!(self.screen, Screen::NetWait) {
                     if let Err(error) = self.redraw_net_wait() {
                         eprintln!("render: {error:#}");
-                        event_loop.exit();
+                        self.request_close(super::CloseReason::Error);
                         return;
                     }
                     if let Some(w) = &self.window {
@@ -399,7 +413,7 @@ impl winit::application::ApplicationHandler for App {
                 if matches!(self.screen, Screen::Loading) {
                     if let Err(error) = self.redraw_loading() {
                         eprintln!("render: {error:#}");
-                        event_loop.exit();
+                        self.request_close(super::CloseReason::Error);
                         return;
                     }
                     if let Some(w) = &self.window {
@@ -410,7 +424,7 @@ impl winit::application::ApplicationHandler for App {
                 if self.battle_movie_pending() {
                     if let Err(error) = self.redraw_battle_movie(dt) {
                         eprintln!("render: {error:#}");
-                        event_loop.exit();
+                        self.request_close(super::CloseReason::Error);
                     } else if let Some(w) = &self.window {
                         w.request_redraw();
                     }
@@ -1940,7 +1954,7 @@ impl winit::application::ApplicationHandler for App {
                     }
                     if let Err(e) = result {
                         eprintln!("render: {e}");
-                        event_loop.exit();
+                        self.request_close(super::CloseReason::Error);
                     }
                     if let Some(sound) =
                         binding_click.and_then(|row| self.activate_control_row(row))
@@ -1966,8 +1980,7 @@ impl winit::application::ApplicationHandler for App {
                 if self.quit_clicked {
                     self.quit_clicked = false;
                     if self.map.is_some() {
-                        self.blackbox_exit();
-                        event_loop.exit();
+                        self.request_close(super::CloseReason::Quit);
                     } else {
                         self.leave_battle();
                         // The round's end screens were left: the playlist's

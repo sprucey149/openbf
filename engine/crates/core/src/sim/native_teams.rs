@@ -73,6 +73,11 @@ pub(super) struct NativeTeam {
     draw: Option<NativeClassDraw>,
     spawn_posts: Vec<NativeSpawnPost>,
     waves: SpawnWaves,
+    /// The team's AI walks the Deathmatch goal ([`Sim::set_native_deathmatch`]).
+    deathmatch: bool,
+    /// Hostile to both armies whatever the authored relations say; the
+    /// relations still decide where it spawns ([`Sim::set_native_neutral`]).
+    neutral: bool,
     reinforcements: Option<u32>,
 }
 
@@ -83,10 +88,40 @@ impl Sim {
         self.team_relations.insert((from, to), friendly);
     }
 
-    /// A same-team unit and any explicitly friendly team are allies.
+    /// A same-team unit and any explicitly friendly team are allies; a
+    /// neutral native team ([`Sim::set_native_neutral`]) is nobody's ally.
     pub fn allied(&self, from: u8, to: u8) -> bool {
         from == to
-            || ((from >= 2 || to >= 2) && self.team_relations.get(&(from, to)) == Some(&true))
+            || (self.spawn_allied(from, to)
+                && !self.native_neutral(from)
+                && !self.native_neutral(to))
+    }
+
+    /// The authored relation alone: whether `owner`'s posts let `team` spawn
+    /// on their ally paths (CanTeamSpawnAt). A neutral native team keeps
+    /// the spawn places its relations give it.
+    fn spawn_allied(&self, owner: u8, team: u8) -> bool {
+        owner == team
+            || ((owner >= 2 || team >= 2) && self.team_relations.get(&(owner, team)) == Some(&true))
+    }
+
+    /// `[ours]` (maintainer, 2026-11-20): native `team` fights both armies
+    /// although its mission authors it as their friend (the Jawas of Mos
+    /// Eisley, friendly to both sides on both discs). It still spawns where
+    /// that friendship lets it: the armies' posts' ally paths. Its members
+    /// are nobody's team kill, and nobody is theirs.
+    pub fn set_native_neutral(&mut self, team: u8) {
+        if let Some(i) = self.native_team_index(team) {
+            self.native_teams[i].neutral = true;
+        }
+    }
+
+    /// Whether native `team` is neutral ([`Sim::set_native_neutral`]).
+    pub fn native_neutral(&self, team: u8) -> bool {
+        team >= 2
+            && self
+                .native_team_index(team)
+                .is_some_and(|i| self.native_teams[i].neutral)
     }
 
     pub fn hostile(&self, from: u8, to: u8) -> bool {
@@ -122,8 +157,29 @@ impl Sim {
                 next_slot: 0,
                 ..self.waves[0]
             },
+            deathmatch: false,
+            neutral: false,
             reinforcements: None,
         });
+    }
+
+    /// Native `team`'s bots walk the Deathmatch goal (half the time toward a
+    /// random hostile foe, else a random hub: `FUN_002c62a8`, the walk the
+    /// space deathmatch already takes) instead of hunting the nearest enemy.
+    /// The mission's `AddAIGoal(<locals>, "Deathmatch", 100)` (Jabba's
+    /// Palace). `[ours]` (maintainer, 2026-11-19): set for the Gamorreans
+    /// only, so they go after both armies; the other natives keep the hunt.
+    /// trace: the native Conquest goal order of the other locals teams.
+    pub fn set_native_deathmatch(&mut self, team: u8) {
+        if let Some(i) = self.native_team_index(team) {
+            self.native_teams[i].deathmatch = true;
+        }
+    }
+
+    /// Whether native `team` walks the Deathmatch goal.
+    pub fn native_deathmatch(&self, team: u8) -> bool {
+        self.native_team_index(team)
+            .is_some_and(|i| self.native_teams[i].deathmatch)
     }
 
     /// The class table a member spawned again draws from ([`draw_class`]).
@@ -330,7 +386,7 @@ impl Sim {
         let owner = cp.owner?;
         let nodes = if owner == team {
             &cp.def.spawn_nodes
-        } else if self.allied(owner, team) {
+        } else if self.spawn_allied(owner, team) {
             &self.ally_spawns.iter().find(|p| p.post == post)?.nodes
         } else {
             return None;
@@ -360,7 +416,7 @@ impl Sim {
                 self.cps
                     .get(post.post)
                     .and_then(|cp| cp.owner)
-                    .is_some_and(|owner| self.allied(owner, team))
+                    .is_some_and(|owner| self.spawn_allied(owner, team))
             })
             .map(|post| post.count)
             .fold(owned, u32::saturating_add);
@@ -455,6 +511,12 @@ impl Sim {
             eat(&entry.waves.timer.hash_bits().to_le_bytes());
             eat(&entry.waves.wave.to_le_bytes());
             eat(&entry.waves.next_slot.to_le_bytes());
+            if entry.deathmatch {
+                eat(b"native-deathmatch");
+            }
+            if entry.neutral {
+                eat(b"native-neutral");
+            }
             if let Some(n) = entry.reinforcements {
                 eat(b"native-reinf");
                 eat(&n.to_le_bytes());
@@ -703,6 +765,72 @@ mod tests {
             assert_eq!([0, 1].map(|team| sim.battle.teams[team].alive()), alive);
             assert_eq!(sim.waves, waves);
         }
+    }
+
+    /// The Jawas (maintainer, 2026-11-20): authored friendly to both armies,
+    /// a neutral native team fights both, still spawns on the posts' ally
+    /// paths, and its deaths cost nobody a ticket or count as a team kill;
+    /// a soldier it kills costs his side one ticket.
+    #[test]
+    fn a_neutral_native_fights_both_armies_and_keeps_its_ally_spawns() {
+        let mut sim = Sim::empty(4);
+        sim.heightfield = Some(crate::heightfield::Heightfield {
+            size: 2,
+            unit: 50.0,
+            offset_x: 25.0,
+            offset_z: 25.0,
+            heights: vec![0.0; 4],
+        });
+        let mut a = post(&mut sim, 0, -10.0);
+        a.count = 2;
+        let b = post(&mut sim, 1, 10.0);
+        sim.set_ally_spawns(vec![a, b]);
+        let mut soldier = UnitSpec::trooper(1, Vec3::Z * 20.0);
+        soldier.controller = Controller::Ai;
+        let enemy = sim.spawn(&soldier).unwrap();
+        soldier.team = 0;
+        soldier.pos = Vec3::Z * -20.0;
+        let ally = sim.spawn(&soldier).unwrap();
+        let mut native = UnitSpec::trooper(2, Vec3::ZERO);
+        native.controller = Controller::Ai;
+        sim.add_native_team(2, vec![native; 3]);
+        for army in [0, 1] {
+            sim.set_team_relation(2, army, true);
+            sim.set_team_relation(army, 2, true);
+        }
+        let friendly = sim.hash();
+        assert!(sim.allied(2, 0) && sim.allied(1, 2));
+        sim.set_native_neutral(2);
+        assert_ne!(sim.hash(), friendly, "the rule reaches the hash");
+        assert!(sim.native_neutral(2) && !sim.native_neutral(0));
+        for army in [0, 1] {
+            assert!(sim.hostile(2, army) && sim.hostile(army, 2), "{army}");
+        }
+        assert!(sim.allied(2, 2) && sim.hostile(0, 1));
+        sim.populate_native_teams();
+        let natives: Vec<_> = sim
+            .alive_units()
+            .filter(|(_, u)| u.team == 2)
+            .map(|(h, _)| h)
+            .collect();
+        assert_eq!(natives.len(), 3, "both posts' ally capacity");
+        assert!(natives
+            .iter()
+            .all(|h| sim.unit(*h).unwrap().spec.pos.x.abs() == 10.0));
+
+        let tickets = [0, 1].map(|team| sim.battle.teams[team].tickets());
+        for (native, killer) in natives[..2].iter().zip([enemy, ally]) {
+            sim.unit_killed(*native, Some(killer));
+            assert_eq!([0, 1].map(|team| sim.battle.teams[team].tickets()), tickets);
+        }
+        assert_eq!(sim.nav_stats.team_kills, 0, "nobody's team kill");
+        sim.unit_killed(ally, Some(natives[2]));
+        assert_eq!(
+            [0, 1].map(|team| sim.battle.teams[team].tickets()),
+            [tickets[0] - 1, tickets[1]],
+            "a soldier a native kills costs one ticket"
+        );
+        assert_eq!(sim.nav_stats.team_kills, 0);
     }
 
     #[test]

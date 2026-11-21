@@ -22,7 +22,7 @@
 //!   order), the viewer's team on the left.
 
 use crate::stats::SHOWN;
-use egui::{Align2, Color32, RichText};
+use egui::{Align2, Color32};
 
 /// How long the button must be held before the board shows (seconds).
 pub const SHOW_AFTER: f32 = 0.15;
@@ -144,84 +144,212 @@ pub fn ping_text(p: Ping) -> String {
     }
 }
 
-/// Draws the board centred, under the top of the screen.
+// `[ours]` (maintainer, 2026-11-19): the board fits the window at any
+// size and display scale. Its gaps are shell units, so they follow the text;
+// the number columns keep their measured width; the names share what is
+// left, and a name that does not fit is cut with "..." at the same text size;
+// only the rows that fit are shown, always with the viewer's own.
+/// The space kept clear of every screen edge (shell units).
+const GUTTER: f32 = 8.0;
+/// The board's top below the top of the screen (shell units).
+const TOP: f32 = 20.0;
+/// The frame's inner margin (shell units), across and down.
+const MARGIN: [f32; 2] = [6.0, 4.0];
+/// Between two columns, and its floor on a narrow window (shell units).
+const COLUMN_GAP: f32 = 6.0;
+const COLUMN_GAP_MIN: f32 = 2.0;
+/// Between the two teams (shell units), and its floor.
+const TEAM_GAP: f32 = 12.0;
+const TEAM_GAP_MIN: f32 = 4.0;
+/// Between two rows (shell units).
+const ROW_GAP: f32 = 1.0;
+/// The cut name's mark.
+const ELLIPSIS: &str = "...";
+
+/// The rows of a team the board shows when `fit` fit: the first ones in
+/// Team Stats' order, the viewer's row taking the last place when it would
+/// fall below the cut.
+pub fn shown_rows(rows: &[ScoreRow], fit: usize) -> Vec<&ScoreRow> {
+    let n = rows.len().min(fit).min(MAX_ROWS);
+    let mut out: Vec<&ScoreRow> = rows[..n].iter().collect();
+    if let Some(me) = rows.iter().position(|r| r.me) {
+        if me >= n && n > 0 {
+            out[n - 1] = &rows[me];
+        }
+    }
+    out
+}
+
+/// `text` cut to `room` points wide in `font` (with [`ELLIPSIS`]) when it
+/// is wider.
+fn fit_text(painter: &egui::Painter, text: &str, font: &egui::FontId, room: f32) -> String {
+    let width = |t: &str| {
+        painter
+            .layout_no_wrap(t.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    if width(text) <= room {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    for n in (1..chars.len()).rev() {
+        let cut: String = chars[..n].iter().collect::<String>().trim_end().to_owned() + ELLIPSIS;
+        if width(&cut) <= room {
+            return cut;
+        }
+    }
+    if width(ELLIPSIS) <= room {
+        ELLIPSIS.to_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// Draws the board centred under the top of the screen, inside it.
 pub fn draw_scoreboard(ctx: &egui::Context, b: &Scoreboard) {
-    use egui::{Area, Frame, Grid, Id, Margin};
+    use crate::typography::{egui_color, egui_font, egui_units, tint, ITEM, LIST};
+    use egui::{pos2, vec2, Id, LayerId, Order, Rect};
     let [enemy, _, friend] = crate::hud::RETICLE_COLORS;
-    Area::new(Id::new("scoreboard"))
-        .interactable(false)
-        .anchor(Align2::CENTER_TOP, egui::vec2(0.0, 48.0))
-        .show(ctx, |ui| {
-            Frame::new()
-                .fill(Color32::from_black_alpha(190))
-                .inner_margin(Margin::symmetric(14, 10))
-                .show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        for (k, team) in b.teams.iter().enumerate() {
-                            if k == 1 {
-                                ui.add_space(28.0);
-                            }
-                            let tint = color(if team.friend { friend } else { enemy });
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(&team.title)
-                                        .font(crate::typography::egui_font(
-                                            ctx,
-                                            &crate::typography::ITEM,
-                                        ))
-                                        .color(tint),
-                                );
-                                Grid::new(("scoreboard_team", k))
-                                    .num_columns(if b.ping_column { 5 } else { 4 })
-                                    .spacing([16.0, 2.0])
-                                    .show(ui, |ui| {
-                                        let head = |t: &str| {
-                                            crate::typography::egui_text(
-                                                ctx,
-                                                &crate::typography::LIST,
-                                                crate::typography::tint::NOTE,
-                                                t,
-                                            )
-                                        };
-                                        ui.label(head("Name"));
-                                        ui.label(head("Points"));
-                                        ui.label(head("Kills"));
-                                        ui.label(head("Deaths"));
-                                        if b.ping_column {
-                                            ui.label(head("Ping"));
-                                        }
-                                        ui.end_row();
-                                        for r in team.rows.iter().take(MAX_ROWS) {
-                                            let c = if r.me {
-                                                crate::typography::tint::ROW_ME
-                                            } else if r.human {
-                                                crate::typography::tint::ROW_HUMAN
-                                            } else {
-                                                crate::typography::tint::ROW_BOT
-                                            };
-                                            let cell = |t: String| {
-                                                crate::typography::egui_text(
-                                                    ctx,
-                                                    &crate::typography::LIST,
-                                                    c,
-                                                    &t,
-                                                )
-                                            };
-                                            ui.label(cell(r.name.clone()));
-                                            ui.label(cell(r.points.to_string()));
-                                            ui.label(cell(r.kills.to_string()));
-                                            ui.label(cell(r.deaths.to_string()));
-                                            if b.ping_column {
-                                                ui.label(cell(ping_text(r.ping)));
-                                            }
-                                            ui.end_row();
-                                        }
-                                    });
-                            });
-                        }
-                    });
-                });
-        });
+    let screen = ctx.content_rect();
+    let u = egui_units(ctx, 1.0);
+    let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new("scoreboard")));
+    let row_font = egui_font(ctx, &LIST);
+    let title_font = egui_font(ctx, &ITEM);
+    let case = |t: &str| LIST.case.apply(t).into_owned();
+    let width = |t: &str, f: &egui::FontId| {
+        painter
+            .layout_no_wrap(t.to_owned(), f.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    let row_h = painter
+        .layout_no_wrap("Ag".into(), row_font.clone(), Color32::WHITE)
+        .size()
+        .y;
+    let title_h = painter
+        .layout_no_wrap("Ag".into(), title_font.clone(), Color32::WHITE)
+        .size()
+        .y;
+
+    // The number columns: their header, a four-digit value or the widest
+    // value shown, whichever is wider.
+    let mut heads = vec!["Points", "Kills", "Deaths"];
+    if b.ping_column {
+        heads.push("Ping");
+    }
+    let rows = || b.teams.iter().flat_map(|t| t.rows.iter());
+    let numbers: Vec<f32> = heads
+        .iter()
+        .enumerate()
+        .map(|(c, h)| {
+            let widest = rows()
+                .map(|r| match c {
+                    0 => width(&r.points.to_string(), &row_font),
+                    1 => width(&r.kills.to_string(), &row_font),
+                    2 => width(&r.deaths.to_string(), &row_font),
+                    _ => width(&case(&ping_text(r.ping)), &row_font),
+                })
+                .fold(0.0, f32::max);
+            width(&case(h), &row_font)
+                .max(width("9999", &row_font))
+                .max(widest)
+        })
+        .collect();
+    let fixed: f32 = numbers.iter().sum();
+    let natural_name = rows()
+        .map(|r| width(&case(&r.name), &row_font))
+        .fold(width(&case("Name"), &row_font), f32::max);
+    let min_name = width(&case("MMM"), &row_font) + width(ELLIPSIS, &row_font);
+    let room = (screen.width() - 2.0 * GUTTER * u).max(0.0);
+    let cols = heads.len() as f32;
+    let board_w = |name: f32, gap: f32, team_gap: f32| {
+        2.0 * (name + fixed + cols * gap) + team_gap + 2.0 * MARGIN[0] * u
+    };
+    // Full gaps first; on a narrow window the gaps close to their floor
+    // before a name is cut below `min_name`.
+    let (mut gap, mut team_gap) = (COLUMN_GAP * u, TEAM_GAP * u);
+    let name_room = |gap: f32, team_gap: f32| {
+        (room - 2.0 * MARGIN[0] * u - team_gap) / 2.0 - fixed - cols * gap
+    };
+    if name_room(gap, team_gap) < min_name.min(natural_name) {
+        gap = COLUMN_GAP_MIN * u;
+        team_gap = TEAM_GAP_MIN * u;
+    }
+    let name_w = natural_name.min(name_room(gap, team_gap)).max(0.0);
+    let total_w = board_w(name_w, gap, team_gap).min(room.max(0.0));
+    let team_w = (total_w - 2.0 * MARGIN[0] * u - team_gap) / 2.0;
+
+    // Rows: as many as fit below the title and the header.
+    let line = row_h + ROW_GAP * u;
+    let top = screen.top() + TOP * u;
+    let below =
+        (screen.bottom() - GUTTER * u - top - 2.0 * MARGIN[1] * u - title_h - line).max(0.0);
+    let fit = ((below / line).floor() as usize).max(1);
+    let shown: [Vec<&ScoreRow>; 2] = [
+        shown_rows(&b.teams[0].rows, fit),
+        shown_rows(&b.teams[1].rows, fit),
+    ];
+    let n = shown[0].len().max(shown[1].len());
+    let total_h = 2.0 * MARGIN[1] * u + title_h + line * (n as f32 + 1.0);
+    let left = (screen.center().x - total_w / 2.0).max(screen.left());
+    let frame = Rect::from_min_size(pos2(left, top), vec2(total_w, total_h));
+    painter.rect_filled(frame, 0.0, Color32::from_black_alpha(190));
+
+    let clip = frame.intersect(screen);
+    let painter = painter.with_clip_rect(clip);
+    for (k, team) in b.teams.iter().enumerate() {
+        let x0 = frame.left() + MARGIN[0] * u + k as f32 * (team_w + team_gap);
+        let mut y = frame.top() + MARGIN[1] * u;
+        let tint_team = color(if team.friend { friend } else { enemy });
+        let title = fit_text(&painter, &team.title, &title_font, team_w);
+        painter.text(
+            pos2(x0, y),
+            Align2::LEFT_TOP,
+            title,
+            title_font.clone(),
+            tint_team,
+        );
+        y += title_h;
+        // A row: the name left in its column, the numbers right-aligned in
+        // theirs.
+        let draw_row = |y: f32, name: &str, cells: &[String], c: Color32| {
+            let name = fit_text(&painter, &case(name), &row_font, name_w);
+            painter.text(pos2(x0, y), Align2::LEFT_TOP, name, row_font.clone(), c);
+            let mut x = x0 + name_w;
+            for (cell, w) in cells.iter().zip(&numbers) {
+                x += gap + w;
+                painter.text(
+                    pos2(x, y),
+                    Align2::RIGHT_TOP,
+                    case(cell),
+                    row_font.clone(),
+                    c,
+                );
+            }
+        };
+        let head: Vec<String> = heads.iter().map(|h| h.to_string()).collect();
+        draw_row(y, "Name", &head, egui_color(tint::NOTE));
+        for r in &shown[k] {
+            y += line;
+            let c = if r.me {
+                tint::ROW_ME
+            } else if r.human {
+                tint::ROW_HUMAN
+            } else {
+                tint::ROW_BOT
+            };
+            let mut cells = vec![
+                r.points.to_string(),
+                r.kills.to_string(),
+                r.deaths.to_string(),
+            ];
+            if b.ping_column {
+                cells.push(ping_text(r.ping));
+            }
+            draw_row(y, &r.name, &cells, egui_color(c));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -329,5 +457,150 @@ mod tests {
         assert_eq!(ping_text(b.teams[0].rows[1].ping), "48");
         assert_eq!(ping_text(b.teams[1].rows[0].ping), "host");
         assert_eq!(ping_text(b.teams[0].rows[0].ping), "");
+    }
+
+    /// 32 rows a side with 20-character names, the viewer's row last (the
+    /// cut must keep it).
+    fn crowded(ping: bool) -> Scoreboard {
+        let team = |t: u8| ScoreTeam {
+            title: if t == 0 {
+                "Galactic Republic"
+            } else {
+                "Confederacy of Independent Systems"
+            }
+            .into(),
+            rows: (0..32)
+                .map(|i| ScoreRow {
+                    name: if i == 31 && t == 0 {
+                        "the maintainer".into()
+                    } else if i % 2 == 0 {
+                        format!("WWWWWWWWWWWWWWWWWW{i:02}")
+                    } else {
+                        format!("Commander_Bacara_{i:03}")
+                    },
+                    points: 120 - i,
+                    kills: 99 - i,
+                    deaths: i,
+                    ping: if ping && i % 3 == 0 {
+                        Ping::Ms(1000 + i as u32)
+                    } else {
+                        Ping::None
+                    },
+                    human: i % 3 == 0,
+                    me: i == 31 && t == 0,
+                })
+                .collect(),
+            friend: false,
+        };
+        Scoreboard::new([team(0), team(1)], 0, ping)
+    }
+
+    /// `[ours]` (2026-11-19): at every common window size in points
+    /// (1280x720 to 4K, and 1920x1080 / 2560x1440 / 4K at 125-150 %
+    /// Windows scale, which egui sees as fewer points), with 32 rows a side,
+    /// 20-character names and the Ping column on and off: every text lies
+    /// inside the window and its clip, no two cells of a line overlap, and
+    /// the viewer's row is drawn. Egui's own face stands in for the baked
+    /// one (the layout measures whichever face is installed).
+    #[test]
+    fn scoreboard_fits_every_window_and_keeps_the_viewers_row() {
+        let sizes = [
+            (640.0, 480.0),
+            (1024.0, 768.0),
+            (1280.0, 720.0),
+            (1280.0, 800.0),
+            (1366.0, 768.0),
+            (1440.0, 1080.0),
+            (1536.0, 864.0),
+            (1680.0, 1050.0),
+            (1920.0, 1080.0),
+            (1920.0, 1200.0),
+            (2048.0, 1152.0),
+            (2560.0, 1080.0),
+            (2560.0, 1440.0),
+            (3440.0, 1440.0),
+            (3840.0, 2160.0),
+        ];
+        for (w, h) in sizes {
+            for ping in [false, true] {
+                let b = crowded(ping);
+                let ctx = egui::Context::default();
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h));
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                };
+                let _ = ctx.run(input.clone(), |ctx| draw_scoreboard(ctx, &b));
+                let out = ctx.run(input, |ctx| draw_scoreboard(ctx, &b));
+                let mut texts = Vec::new();
+                for c in &out.shapes {
+                    match &c.shape {
+                        egui::Shape::Text(t) => {
+                            let r = egui::Rect::from_min_size(t.pos, t.galley.size());
+                            let inside = |outer: egui::Rect| {
+                                r.min.x >= outer.min.x - 0.5
+                                    && r.min.y >= outer.min.y - 0.5
+                                    && r.max.x <= outer.max.x + 0.5
+                                    && r.max.y <= outer.max.y + 0.5
+                            };
+                            assert!(
+                                inside(screen) && inside(c.clip_rect),
+                                "{w}x{h} ping {ping}: {:?} at {r:?}",
+                                t.galley.text()
+                            );
+                            texts.push((r, t.galley.text().to_owned()));
+                        }
+                        egui::Shape::Rect(f) => {
+                            assert!(screen.contains_rect(f.rect), "{w}x{h}: frame {:?}", f.rect)
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(
+                    texts.iter().any(|(_, t)| t == "THE MAINTAINER"),
+                    "{w}x{h} ping {ping}: the viewer's row"
+                );
+                assert!(
+                    texts.iter().any(|(_, t)| t == "DEATHS"),
+                    "{w}x{h}: the header"
+                );
+                if ping {
+                    assert!(
+                        texts.iter().any(|(_, t)| t == "PING"),
+                        "{w}x{h}: the ping header"
+                    );
+                }
+                // No two cells of one line overlap.
+                texts.sort_by(|a, b| {
+                    (a.0.min.y.round() as i32, a.0.min.x as i32)
+                        .cmp(&(b.0.min.y.round() as i32, b.0.min.x as i32))
+                });
+                for pair in texts.windows(2) {
+                    let (a, b) = (&pair[0], &pair[1]);
+                    if (a.0.min.y - b.0.min.y).abs() < 0.5 {
+                        assert!(
+                            a.0.max.x <= b.0.min.x + 0.5,
+                            "{w}x{h} ping {ping}: {:?} runs into {:?}",
+                            a.1,
+                            b.1
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The cut keeps the first rows and puts the viewer's row in the last
+    /// place; a board that fits shows every row.
+    #[test]
+    fn scoreboard_rows_cut_keeps_the_viewer() {
+        let b = crowded(false);
+        let rows = &b.teams[0].rows;
+        let shown = shown_rows(rows, 10);
+        assert_eq!(shown.len(), 10);
+        assert!(shown[9].me);
+        assert_eq!(shown[..9], rows.iter().take(9).collect::<Vec<_>>()[..]);
+        assert_eq!(shown_rows(rows, 99).len(), 32);
+        assert!(shown_rows(&b.teams[1].rows, 10).iter().all(|r| !r.me));
     }
 }

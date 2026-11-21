@@ -866,9 +866,10 @@ fn a_human_fresh_rocket_press_is_exempt_from_blast_holds() {
 fn same_log_same_hash_with_a_collision_world() {
     fn run(log: &InputLog, with_world: bool) -> u64 {
         // The player is spawned AFTER the ground exists: `Sim::new`
-        // spawns onto an empty sim, and since TERRAIN_BURY a unit that
-        // lands on NO_GROUND stays there (300 m under an uncut
-        // heightfield is underground, not a bank to climb).
+        // spawns onto an empty sim, and a unit that lands on NO_GROUND
+        // 300 m under an uncut heightfield is lifted back onto the sheet
+        // only when nothing roofs him (issue #182 B3); spawning him onto
+        // the ground keeps the replay off that path.
         let mut sim = Sim::empty(log.seed);
         sim.heightfield = Some(flat_ground());
         if with_world {

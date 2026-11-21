@@ -8,6 +8,8 @@
 //! Map defaults come from `game::conquest_defaults`, including calibrated
 //! tickets. `SWEEP_COMBATANTS=N` overrides both teams' combatant slots (1..64)
 //! for explicit stress/control runs. `SWEEP_TICKETS=A:B` overrides tickets;
+//! without it a stand-in's side gets the map's `conquest_defaults::HUMAN_SHIFT`
+//! for the tier (`SWEEP_HUMAN_SHIFT=0` turns that off);
 //! `SWEEP_TICKET_PCT=N` scales map-default tickets when no explicit pair is set.
 //! `SWEEP_TEAM_PCT=N` scales map-default combatants the way Instant Action's
 //! Team size percentage does (`ui::population::team_counts`: halves up, the
@@ -243,10 +245,16 @@
 //!
 //! `SWEEP_EMBED=1` (issue #182) adds `embed <key>:` lines: soldiers whose
 //! body no enemy within 10 m can see, that sight cannot leave, that are seen
-//! and not hit, or that have a floor over their feet (`Embed`).
-//! `SWEEP_NATIVES=1` installs the mission's native teams (BF1 Kashyyyk's
-//! Wookiees) after the opening wave, as the game does; the default sweep
-//! fields none.
+//! and not hit, or that have a floor over their feet (`Embed`). It also asks
+//! the embed oracle (`core::sim::Sim::embed_state`, the leak census's) of
+//! every unit every tick: an `embedx <key>:` line per run of one class for
+//! 6 ticks or more, and an `embedx <key>: summary` line of unit-ticks per
+//! class — on a normal round, the oracle's false positives.
+//! The mission's native teams (BF1 Kashyyyk's Wookiees) are installed after
+//! the opening wave, as the game does; `SWEEP_NATIVES=0` fields none. A
+//! native team the bake cannot field stops the sweep (exit 2).
+//! `SWEEP_JAWA_ARC=<share>` sets the native Jawas' arc caster damage share
+//! (`game::jawa::NATIVE_ARC_CASTER_SCALE`).
 //!
 //! ## The recycle list and the shares (card RCYC) — with either of the two
 //! EVERY use of the last resort (`core::ai` `RECYCLE_AFTER`: a bot that made
@@ -416,7 +424,7 @@
 //!   faction-swap copies of a balance run);
 //! - `SWEEP_PROXY=<team>:<average|good>[,skill=N][,reaction=TICKS]
 //!   [,view=X][,circles=0|1][,strafe=P][,roll=P][,move=P][,grenade=P]
-//!   [,hand=0|1][,hfloor=RAD][,hacquire=RAD][,hsettle=S][,hup=M][,head=0|1][,hunts=0|1][,class=N|-1][,mend=SHARE][,picks=0|1]`
+//!   [,hand=0|1][,hfloor=RAD][,hacquire=RAD][,hsettle=S][,hup=M][,htrack=S][,hair=X][,hseat=X][,head=0|1][,hunts=0|1][,class=N|-1][,mend=SHARE][,picks=0|1]`
 //!   makes the first bot of `<team>` on foot after the opening wave a HUMAN
 //!   PROXY (`core::ai::proxy`): the sim treats it as a human for every
 //!   human-only rule, it plays with that strength's fixed profile (the
@@ -491,6 +499,12 @@
 //!   defending, hunting and unassigned per team; `sidespost <key> cp<i>:`
 //!   per post, seconds owned, attackers and defenders sent, and captures, by
 //!   team. Read-only: the round is the round the sweep played.
+//!   `sidesev <key>:` every post owner change with who stood inside;
+//!   `sidespost2 <key> cp<i>:` seconds only team 0 / only team 1 / both
+//!   stood in the capture region, deaths and spawns within 40 m by team, and
+//!   the soldier nav-path metres to every post. `SWEEP_PARITY` adds parity
+//!   rows for a ladder arm ([`sweep_parity`]); `SWEEP_HANDICAP=0` turns the
+//!   Elite team handicap off.
 //!
 //! `--difficulty-check` adds the D1 rates of the bots facing the proxy and
 //! each group's lever counts per foot-minute to its tier table.
@@ -528,6 +542,13 @@
 //! destroyed which vehicle (`HeavyCensus`); beside it `<key>_s<seed>.tk.csv`,
 //! one line a team kill by a bot on foot (the weapon, blast or bolt, where
 //! the victim stood against the shooter's line to its target). Read-only.
+//!
+//! ## Vehicle-vs-vehicle census — `VEHICLE_CENSUS`
+//! `VEHICLE_CENSUS=<dir>` writes `<dir>/<key>_s<seed>.vv.csv`: what bots in
+//! vehicle seats fire at, the hull damage they deal, who destroyed which
+//! vehicle, 4 Hz samples of seated bots with an enemy vehicle in their seat
+//! guns' reach (`opp`) and holding it as their target (`eng`), post captures
+//! and stuck-left vehicles (`VehicleCensus`). Read-only.
 //!
 //! ## Bot-quality samples — `BOT_SAMPLES`
 //! `BOT_SAMPLES=<dir>` (card BOTM) writes `<dir>/<key>_s<seed>.csv`: every
@@ -684,6 +705,9 @@ fn parse_proxy(v: &str) -> Result<(u8, core::ai::proxy::Profile, String), String
             "hacquire" => p.hand.get_or_insert(Hand::DEFAULT).acquire = f,
             "hsettle" => p.hand.get_or_insert(Hand::DEFAULT).settle = f,
             "hup" => p.hand.get_or_insert(Hand::DEFAULT).up = f,
+            "htrack" => p.hand.get_or_insert(Hand::DEFAULT).track = f,
+            "hair" => p.hand.get_or_insert(Hand::DEFAULT).air = f,
+            "hseat" => p.hand.get_or_insert(Hand::DEFAULT).seat = f,
             "head" => p.headshots = f != 0.0,
             "hunts" => p.hunts = f != 0.0,
             "mend" => p.mend = f,
@@ -741,6 +765,30 @@ fn mission_mode(key: &str) -> &'static str {
 }
 
 /// [`mission_path`]'s mission, when the generator wrote one for this map.
+/// The authored native teams (`game::native_teams::install`'s: a Lua team 3
+/// or higher with a class) that `w` did not field, by authored team number.
+fn native_teams_missing(m: &game::mission::MissionDef, w: &game::walk::WalkSim) -> Vec<u8> {
+    m.local_teams
+        .iter()
+        .filter(|t| t.team >= 3 && !t.classes.is_empty())
+        .filter(|t| !w.native_teams.contains_key(&(t.team - 1)))
+        .map(|t| t.team)
+        .collect()
+}
+
+/// `team T alive N` for each native team (sim team 2 and up), for the
+/// `nativeteams` rows.
+fn native_alive(w: &game::walk::WalkSim) -> String {
+    w.native_teams
+        .keys()
+        .map(|&team| {
+            let n = w.sim.alive_units().filter(|(_, u)| u.team == team).count();
+            format!("team {team} alive {n}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn mission_for(key: &str, out: &mut String) -> Option<game::mission::MissionDef> {
     let path = mission_path(key);
     if !path.exists() {
@@ -802,6 +850,63 @@ struct SidesCensus {
     /// Per post: authored ATK and DEF values for team 0 / 1, bleed value,
     /// spawn weight, and position (x, z).
     vals: Vec<String>,
+    /// Issue #171 parity: every owner change, `secs:cp<i>:<from>><to>(a/b)`
+    /// with the units of team 0 / 1 counting inside the post's capture
+    /// region at that tick (`-` = nobody).
+    events: Vec<String>,
+    /// Per post, seconds with only team 0 / only team 1 / both inside its
+    /// capture region; deaths of team 0 / 1 within [`SIDES_NEAR`] m (the
+    /// nearest post); (re)spawns of team 0 / 1 likewise.
+    inbox: Vec<[u64; 3]>,
+    died: Vec<[u32; 2]>,
+    spawned: Vec<[u32; 2]>,
+    alive: Vec<bool>,
+    /// Soldier nav-path metres between the posts' hubs (`-` = no path or no
+    /// hub), one row per post.
+    nav: Vec<String>,
+}
+
+/// [`SidesCensus`]: a death or spawn this close (2-D metres) to its nearest
+/// post counts for that post.
+const SIDES_NEAR: f32 = 40.0;
+
+/// Soldier (jetless) nav-path length in metres from hub `from` to every hub:
+/// Dijkstra over the arcs a soldier may walk, hub centre to hub centre.
+fn nav_metres(g: &core::nav::NavGraph, from: u16) -> Vec<f32> {
+    let n = g.hubs.len();
+    let mut d = vec![f32::INFINITY; n];
+    let mut done = vec![false; n];
+    if usize::from(from) >= n {
+        return d;
+    }
+    d[usize::from(from)] = 0.0;
+    loop {
+        let mut best = None;
+        for i in 0..n {
+            if !done[i] && d[i].is_finite() && best.is_none_or(|b: usize| d[i] < d[b]) {
+                best = Some(i);
+            }
+        }
+        let Some(u) = best else { break };
+        done[u] = true;
+        for &a in &g.hubs[u].arcs {
+            let Some(arc) = g.arcs.get(usize::from(a)) else {
+                continue;
+            };
+            if !arc.allows(core::nav::Mover::SOLDIER) {
+                continue;
+            }
+            let v = usize::from(arc.other(u as u16));
+            if v >= n {
+                continue;
+            }
+            let w = d[u] + (g.hubs[v].pos - g.hubs[u].pos).length();
+            if w < d[v] {
+                d[v] = w;
+            }
+        }
+    }
+    d
 }
 
 impl SidesCensus {
@@ -840,11 +945,65 @@ impl SidesCensus {
                     )
                 })
                 .collect(),
+            events: Vec::new(),
+            inbox: vec![[0; 3]; sim.cps.len()],
+            died: vec![[0; 2]; sim.cps.len()],
+            spawned: vec![[0; 2]; sim.cps.len()],
+            alive: sim.units.iter().map(|u| u.alive).collect(),
+            nav: sim
+                .cps
+                .iter()
+                .map(|c| {
+                    let row = match (sim.nav.as_ref(), c.nav_hub) {
+                        (Some(g), Some(h)) => Some(nav_metres(g, h)),
+                        _ => None,
+                    };
+                    sim.cps
+                        .iter()
+                        .map(|o| match (row.as_ref(), o.nav_hub) {
+                            (Some(r), Some(h)) if r[usize::from(h)].is_finite() => {
+                                format!("{:.0}", r[usize::from(h)])
+                            }
+                            _ => "-".to_owned(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect(),
         }
+    }
+
+    /// The post nearest `p` within [`SIDES_NEAR`] (2-D).
+    fn near_post(sim: &core::sim::Sim, p: glam::Vec3) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+        for (i, c) in sim.cps.iter().enumerate() {
+            let d = ((c.def.pos.x - p.x).powi(2) + (c.def.pos.z - p.z).powi(2)).sqrt();
+            if d <= SIDES_NEAR && best.is_none_or(|(_, b)| d < b) {
+                best = Some((i, d));
+            }
+        }
+        best.map(|(i, _)| i)
     }
 
     fn observe(&mut self, sim: &core::sim::Sim) {
         self.ticks += 1;
+        if self.alive.len() < sim.units.len() {
+            self.alive.resize(sim.units.len(), false);
+        }
+        for (k, u) in sim.units.iter().enumerate() {
+            if u.alive != self.alive[k] && u.team < 2 {
+                let at = Self::near_post(sim, u.soldier.pos);
+                if let Some(i) = at {
+                    let slot = if u.alive {
+                        &mut self.spawned
+                    } else {
+                        &mut self.died
+                    };
+                    slot[i][usize::from(u.team)] += 1;
+                }
+            }
+            self.alive[k] = u.alive;
+        }
         let dt = 1.0 / core::TICK_HZ as f32;
         for t in 0..2 {
             let b = sim.battle.teams[t].bleed_per_sec;
@@ -859,6 +1018,16 @@ impl SidesCensus {
                 break;
             }
             if c.owner != self.owners[i] {
+                let inside = sim.cp_inside(i);
+                let who = |o: Option<u8>| o.map_or("-".to_owned(), |o| o.to_string());
+                self.events.push(format!(
+                    "{}:cp{i}:{}>{}({}/{})",
+                    self.ticks / u64::from(core::TICK_HZ),
+                    who(self.owners[i]),
+                    who(c.owner),
+                    inside[0],
+                    inside[1]
+                ));
                 if let Some(o) = c.owner.filter(|o| *o < 2) {
                     self.post[i][6 + usize::from(o)] += 1;
                     self.caps[usize::from(o)] += 1;
@@ -872,6 +1041,15 @@ impl SidesCensus {
         }
         if self.ticks.is_multiple_of(u64::from(core::TICK_HZ)) {
             self.samples += 1;
+            for i in 0..sim.cps.len().min(self.inbox.len()) {
+                let inside = sim.cp_inside(i);
+                match (inside[0] > 0, inside[1] > 0) {
+                    (true, false) => self.inbox[i][0] += 1,
+                    (false, true) => self.inbox[i][1] += 1,
+                    (true, true) => self.inbox[i][2] += 1,
+                    _ => {}
+                }
+            }
             for (i, c) in sim.cps.iter().enumerate() {
                 if let Some(o) = c.owner.filter(|o| *o < 2) {
                     self.owned_sum[usize::from(o)] += 1;
@@ -946,6 +1124,22 @@ impl SidesCensus {
                 )
             })
             .collect::<String>()
+            + &format!("sidesev {key}: {}\n", self.events.join(" "))
+            + &(0..self.inbox.len())
+                .map(|i| {
+                    format!(
+                        "sidespost2 {key} cp{i}: in-s {}/{}/{} | died {}/{} | spawned {}/{} | nav {}\n",
+                        self.inbox[i][0],
+                        self.inbox[i][1],
+                        self.inbox[i][2],
+                        self.died[i][0],
+                        self.died[i][1],
+                        self.spawned[i][0],
+                        self.spawned[i][1],
+                        self.nav.get(i).map_or("", String::as_str)
+                    )
+                })
+                .collect::<String>()
     }
 }
 
@@ -1035,6 +1229,62 @@ fn walker_pilots(sim: &core::sim::Sim, classes: &[String]) -> String {
         })
         .collect();
     format!("{total} ({})", list.join(", "))
+}
+
+/// `SWEEP_PARITY` (env, issue #171): extra Conquest parity rows applied after
+/// `game::layout::CONQUEST_PARITY`, `;`-separated, each
+/// `map:era:neutral:post`, `map:era:start:post:team` (1-based, 0 neutral) or
+/// `map:era:goals:post:team:atk:def` (0-based team) or
+/// `map:era:spawnw:post:weight` (the post's AI spawn weight) or
+/// `map:era:allydrop:post:i:j..` (drop those `AllyPath` nodes), era `gcw` or `cw`. A
+/// ladder arm without a rebuild; unset in the game.
+fn sweep_parity() -> Vec<(String, bool, game::layout::ParityFix)> {
+    use game::layout::ParityFix;
+    let Ok(v) = std::env::var("SWEEP_PARITY") else {
+        return Vec::new();
+    };
+    v.split(';')
+        .filter(|r| !r.trim().is_empty())
+        .map(|r| {
+            let f: Vec<&str> = r.trim().split(':').collect();
+            let n = |i: usize| -> i64 {
+                f.get(i)
+                    .and_then(|x| x.parse().ok())
+                    .unwrap_or_else(|| panic!("SWEEP_PARITY row {r:?}: field {i}"))
+            };
+            let cw = match f.get(1) {
+                Some(&"cw") => true,
+                Some(&"gcw") => false,
+                _ => panic!("SWEEP_PARITY row {r:?}: era gcw|cw"),
+            };
+            let fix = match f.get(2) {
+                Some(&"neutral") => ParityFix::NeutralStart(n(3) as usize),
+                Some(&"start") => ParityFix::StartTeam {
+                    post: n(3) as usize,
+                    team: n(4) as u8,
+                },
+                Some(&"spawnw") => ParityFix::SpawnWeight {
+                    post: n(3) as usize,
+                    weight: n(4) as f32,
+                },
+                Some(&"goals") => ParityFix::Goals {
+                    post: n(3) as usize,
+                    team: n(4) as usize,
+                    atk: n(5) as i32,
+                    def: n(6) as i32,
+                },
+                Some(&"allydrop") => ParityFix::AllyNodes {
+                    post: n(3) as usize,
+                    drop: f[4..]
+                        .iter()
+                        .map(|x| x.parse::<u32>().expect("allydrop node"))
+                        .fold(0, |m, i| m | (1 << i)),
+                },
+                _ => panic!("SWEEP_PARITY row {r:?}: kind neutral|start|spawnw|goals|allydrop"),
+            };
+            (f[0].to_owned(), cw, fix)
+        })
+        .collect()
 }
 
 /// `SWEEP_DIFFICULTY` (env): which tier the whole sweep runs at
@@ -1926,15 +2176,113 @@ struct Embed {
     /// Per unit index, per kind.
     runs: Vec<[Option<EmbedRun>; 4]>,
     lines: String,
+    /// The embed oracle (`Sim::embed_state`, leak census v2 A4), EVERY
+    /// tick: per unit, the class it is in now (gen, class, from, to, at,
+    /// body), the unit-ticks asked and in each class, and the runs of
+    /// [`ORACLE_RUN`] ticks or more (the length a rescue would wait).
+    oracle: Vec<Option<OracleRun>>,
+    asked: u64,
+    hits: [u64; 6],
+    runs6: [u32; 6],
 }
+
+/// One unit's run of one oracle class: (gen, class, from, to, at, body).
+type OracleRun = (u32, usize, u64, u64, glam::Vec3, Option<usize>);
+
+/// A rescue's patience (ticks): a run of one oracle class this long is what
+/// the planned rescue would act on, so each is a false positive to count
+/// on a normal bot round.
+const ORACLE_RUN: u64 = 6;
 
 fn embed_on() -> bool {
     std::env::var_os("SWEEP_EMBED").is_some()
 }
 
 impl Embed {
+    /// The oracle's per-tick pass ([`Embed::oracle`]).
+    fn observe_oracle(&mut self, key: &str, sim: &core::sim::Sim) {
+        // Issue #182 B4: each rescue, a put-back or a kill, where it was.
+        for ev in &sim.events {
+            let (what, unit, at) = match ev {
+                core::sim::Event::Rescued { unit, from, .. } => ("put-back", unit, *from),
+                core::sim::Event::EnvDeath {
+                    unit,
+                    cause: core::sim::DeathCause::Embedded,
+                } => (
+                    "killed",
+                    unit,
+                    sim.units
+                        .get(unit.index as usize)
+                        .map_or(glam::Vec3::ZERO, |u| u.soldier.pos),
+                ),
+                _ => continue,
+            };
+            let _ = writeln!(
+                self.lines,
+                "embedx {key}: rescue {what} unit {} tick {} at ({:.1},{:.1},{:.1})",
+                unit.index, sim.tick, at.x, at.y, at.z
+            );
+        }
+        self.oracle.resize(sim.units.len(), None);
+        for i in 0..sim.units.len() {
+            let h = sim.handle(i);
+            let e = sim.embed_state(h);
+            if sim.units[i].alive && sim.units[i].mount.is_none() {
+                self.asked += 1;
+            }
+            let now = e.index();
+            if let Some(c) = now {
+                self.hits[c] += 1;
+            }
+            let at = sim.units[i].soldier.pos;
+            match (self.oracle[i].as_mut(), now) {
+                (Some(r), Some(c)) if r.0 == h.gen && r.1 == c => r.3 = sim.tick,
+                (cur, _) => {
+                    let ended = cur.map(|r| *r);
+                    self.oracle[i] = now.map(|c| (h.gen, c, sim.tick, sim.tick, at, e.body()));
+                    if let Some((_, c, from, to, at, body)) = ended {
+                        self.close_oracle(key, i, c, from, to, at, body, sim);
+                    }
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn close_oracle(
+        &mut self,
+        key: &str,
+        i: usize,
+        c: usize,
+        from: u64,
+        to: u64,
+        at: glam::Vec3,
+        body: Option<usize>,
+        sim: &core::sim::Sim,
+    ) {
+        if to + 1 - from < ORACLE_RUN {
+            return;
+        }
+        self.runs6[c] += 1;
+        let inst = body
+            .and_then(|b| sim.collision.bodies().get(b))
+            .and_then(|b| b.instance);
+        let _ = writeln!(
+            self.lines,
+            "embedx {key}: {} unit {i} team {} player {} ticks {from}..{to} ({:.1} s) at ({:.1},{:.1},{:.1}) body {body:?} inst {inst:?}",
+            core::sim::EMBED_NAMES[c],
+            sim.units[i].team,
+            sim.units[i].is_player,
+            (to + 1 - from) as f32 / core::TICK_HZ as f32,
+            at.x,
+            at.y,
+            at.z,
+        );
+    }
+
     fn observe(&mut self, key: &str, sim: &core::sim::Sim) {
         use core::perception::{los, los_terrain, los_world};
+        self.observe_oracle(key, sim);
         if !sim.tick.is_multiple_of(EMBED_EVERY) {
             return;
         }
@@ -2053,6 +2401,27 @@ impl Embed {
     }
 
     fn finish(&mut self, key: &str, sim: &core::sim::Sim) -> String {
+        for i in 0..self.oracle.len() {
+            if let Some((_, c, from, to, at, body)) = self.oracle[i].take() {
+                self.close_oracle(key, i, c, from, to, at, body, sim);
+            }
+        }
+        let _ = writeln!(
+            self.lines,
+            "embedx {key}: summary unit_ticks {} rescues {} {} | {}",
+            self.asked,
+            sim.rescue_counts[0],
+            sim.rescue_counts[1],
+            core::sim::EMBED_NAMES
+                .iter()
+                .enumerate()
+                .map(|(k, n)| format!(
+                    "{n} {} ticks {} runs{ORACLE_RUN}",
+                    self.hits[k], self.runs6[k]
+                ))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
         for i in 0..self.runs.len() {
             for k in 0..EMBED_KINDS.len() {
                 if let Some(r) = self.runs[i][k].take() {
@@ -2061,6 +2430,69 @@ impl Embed {
             }
         }
         std::mem::take(&mut self.lines)
+    }
+}
+
+/// `NATIVE_CENSUS=1` (2026-11-19, the Gamorrean note): what the native teams
+/// (sim team 2 and up) did to each army this round, from the sim's events:
+/// the kills and the health their hits took per victim army, the natives
+/// each army killed, and the posts a native team captured or neutralised.
+/// STDERR only, like the other censuses:
+///
+/// ```text
+/// natives <key>: kills a0/a1 damage d0/d1 killed_by a0/a1 captured C neutralised N
+/// ```
+#[derive(Default)]
+struct NativeCensus {
+    kills: [u32; 2],
+    damage: [f64; 2],
+    killed_by: [u32; 2],
+    captured: u32,
+    neutralised: u32,
+}
+
+impl NativeCensus {
+    fn observe(&mut self, sim: &core::sim::Sim) {
+        use core::sim::Event;
+        let team = |h: &core::unit::UnitHandle| sim.units.get(h.index as usize).map(|u| u.team);
+        for ev in &sim.events {
+            match ev {
+                Event::Kill { shooter, victim } => match (team(shooter), team(victim)) {
+                    (Some(s), Some(v)) if s >= 2 && v < 2 => self.kills[usize::from(v)] += 1,
+                    (Some(s), Some(v)) if s < 2 && v >= 2 => self.killed_by[usize::from(s)] += 1,
+                    _ => {}
+                },
+                Event::Hit {
+                    shooter,
+                    victim,
+                    damage,
+                    ..
+                } => {
+                    if let (Some(s), Some(v)) = (team(shooter), team(victim)) {
+                        if s >= 2 && v < 2 {
+                            self.damage[usize::from(v)] += f64::from(*damage);
+                        }
+                    }
+                }
+                Event::Captured { team, .. } if *team >= 2 => self.captured += 1,
+                Event::Neutralized { by, .. } if *by >= 2 => self.neutralised += 1,
+                _ => {}
+            }
+        }
+    }
+
+    fn line(&self, key: &str) -> String {
+        format!(
+            "natives {key}: kills {}/{} damage {:.0}/{:.0} killed_by {}/{} captured {} neutralised {}\n",
+            self.kills[0],
+            self.kills[1],
+            self.damage[0],
+            self.damage[1],
+            self.killed_by[0],
+            self.killed_by[1],
+            self.captured,
+            self.neutralised
+        )
     }
 }
 
@@ -2145,7 +2577,9 @@ impl Deaths {
                         DeathCause::VehicleDestroyed => 3,
                         DeathCause::Blast => 4,
                         DeathCause::KillFloor => 5,
-                        DeathCause::UnderMap => 6,
+                        // Issue #182 B4: the rescue's kill, inside a solid
+                        // or under the ground, counts as `under`.
+                        DeathCause::UnderMap | DeathCause::Embedded => 6,
                         DeathCause::Lost => 7,
                         DeathCause::Stalled => 8,
                     },
@@ -4230,6 +4664,242 @@ impl HeavyCensus {
     }
 }
 
+/// `VEHICLE_CENSUS=<dir>` (issue "vehicles vs vehicles"; read-only): what the
+/// bots in VEHICLE seats fire at and what they hurt, counted over the round
+/// into `<dir>/<key>_s<seed>.vv.csv` as `kind,shooter,weapon,what,n,sum`:
+/// - `seat_shot`: a seated bot's shot - `shooter` `<vehicle class>/<pilot|
+///   gunner>`, the seat weapon, `what` the shooter's target (`veh_<kind>`
+///   a rider of that kind, `soldier`, `droid`, `item`, `none`);
+/// - `seat_vhit`: hull damage a seated bot dealt, `weapon` the target's class;
+/// - `vkill`: a vehicle destroyed, `shooter` `veh:<class>` for a seated
+///   killer, `foot:<weapon>` for one on foot, `player`, or `nobody`;
+/// - `kill` / `teamkill` / `selfkill` by seated bots (`shooter` as above);
+/// - `samp`, 4 Hz, per seated bot in a hover, walker or turret: `seated`
+///   always; `opp` it holds a SEEN contact riding a hostile vehicle within
+///   the shot range of one of its seat's first two weapons; `eng` its target
+///   is such a rider;
+/// - `round,ticks`, `cap,<team>` (post captures), `stuckmark` (a vehicle a
+///   driver left stuck, `Vehicle::stuck_at` newly set).
+///
+/// It only READS the sim.
+struct VehicleCensus {
+    path: std::path::PathBuf,
+    n: std::collections::BTreeMap<(&'static str, String, String, String), (u32, f32)>,
+    stuck: Vec<bool>,
+    ticks: u64,
+}
+
+impl VehicleCensus {
+    fn new(key: &str, seed: u32) -> Option<VehicleCensus> {
+        let dir = std::path::PathBuf::from(std::env::var_os("VEHICLE_CENSUS")?);
+        let _ = std::fs::create_dir_all(&dir);
+        Some(VehicleCensus {
+            path: dir.join(format!("{key}_s{seed}.vv.csv")),
+            n: Default::default(),
+            stuck: Vec::new(),
+            ticks: 0,
+        })
+    }
+
+    fn observe(&mut self, sim: &core::sim::Sim, classes: &[String], tick: u64) {
+        use core::sim::Event;
+        use core::vehicle::{SeatKind, VehicleKind};
+        self.ticks = tick;
+        let vclass = |c: u32| {
+            classes
+                .get(c as usize)
+                .cloned()
+                .unwrap_or_else(|| format!("class{c}"))
+        };
+        let wname = |c: usize| {
+            sim.weapon_classes
+                .get(c)
+                .map_or_else(|| "?".to_owned(), |w| w.name.clone())
+        };
+        // A slot's unit, alive or just dead.
+        let unit = |h: core::unit::UnitHandle| {
+            sim.units
+                .get(h.index as usize)
+                .filter(|u| u.gen == h.gen)
+        };
+        // A seated bot's seat: `<class>/<pilot|gunner>` and its vehicle.
+        let seat = |u: &core::unit::Unit| {
+            let m = u.mount?;
+            let v = sim.vehicles.get(m.vehicle.index as usize)?;
+            let kind = match v.seats.get(usize::from(m.seat)).map(|s| s.kind) {
+                Some(SeatKind::Pilot) => "pilot",
+                _ => "gunner",
+            };
+            Some((format!("{}/{kind}", vclass(v.class)), v))
+        };
+        let seated_bot = |h: core::unit::UnitHandle| unit(h).filter(|u| !u.is_player && u.mount.is_some());
+        let target = |u: &core::unit::Unit| -> String {
+            let Some(t) = u.ai.target else {
+                return "none".to_owned();
+            };
+            if t.droid().is_some() {
+                return "droid".to_owned();
+            }
+            if t.turret().is_some() {
+                return "item".to_owned();
+            }
+            let Some(e) = t.unit().and_then(|t| sim.unit(t)) else {
+                return "none".to_owned();
+            };
+            match e.mount.and_then(|m| sim.vehicle(m.vehicle)).map(|v| v.kind) {
+                Some(VehicleKind::Hover) => "veh_hover",
+                Some(VehicleKind::Walker) => "veh_walker",
+                Some(VehicleKind::Flyer) => "veh_flyer",
+                Some(VehicleKind::Turret) => "veh_turret",
+                None => "soldier",
+            }
+            .to_owned()
+        };
+        let mut add = |k: &'static str, a: String, b: String, c: String, x: f32| {
+            let e = self.n.entry((k, a, b, c)).or_default();
+            e.0 += 1;
+            e.1 += x;
+        };
+        for ev in &sim.events {
+            match *ev {
+                Event::Shot {
+                    unit: s,
+                    weapon_class,
+                    ..
+                } => {
+                    if let Some(u) = seated_bot(s) {
+                        if let Some((who, _)) = seat(u) {
+                            add("seat_shot", who, wname(weapon_class as usize), target(u), 0.0);
+                        }
+                    }
+                }
+                Event::VehicleHit {
+                    shooter: Some(s),
+                    vehicle,
+                    damage,
+                    ..
+                } => {
+                    if let Some(u) = seated_bot(s) {
+                        if let Some((who, _)) = seat(u) {
+                            let c = sim
+                                .vehicles
+                                .get(vehicle.index as usize)
+                                .map_or(u32::MAX, |v| v.class);
+                            add("seat_vhit", who, vclass(c), String::new(), damage);
+                        }
+                    }
+                }
+                Event::VehicleDestroyed { class, killer, .. } => {
+                    let by = match killer.and_then(unit) {
+                        None => "nobody".to_owned(),
+                        Some(u) if u.is_player => "player".to_owned(),
+                        Some(u) => match seat(u) {
+                            Some((who, _)) => format!("veh:{who}"),
+                            None => format!("foot:{}", wname(u.weapon_class)),
+                        },
+                    };
+                    add("vkill", by, vclass(class), String::new(), 0.0);
+                }
+                Event::Kill { shooter, victim } => {
+                    if let (Some(u), Some(v)) = (seated_bot(shooter), unit(victim)) {
+                        let k = if shooter == victim {
+                            "selfkill"
+                        } else if u.team == v.team {
+                            "teamkill"
+                        } else {
+                            "kill"
+                        };
+                        if let Some((who, _)) = seat(u) {
+                            let what = if v.mount.is_some() { "rider" } else { "foot" };
+                            add(k, who, String::new(), what.to_owned(), 0.0);
+                        }
+                    }
+                }
+                Event::Captured { team, .. } => {
+                    add("cap", team.to_string(), String::new(), String::new(), 0.0);
+                }
+                _ => {}
+            }
+        }
+        if self.stuck.len() < sim.vehicles.len() {
+            self.stuck.resize(sim.vehicles.len(), false);
+        }
+        for (i, v) in sim.vehicles.iter().enumerate() {
+            let now = v.stuck_at.is_some();
+            if now && !self.stuck[i] {
+                add("stuckmark", vclass(v.class), String::new(), String::new(), 0.0);
+            }
+            self.stuck[i] = now;
+        }
+        if (tick * 2) % 15 >= 2 {
+            return;
+        }
+        for (h, u) in sim.alive_units() {
+            if u.is_player {
+                continue;
+            }
+            let Some((who, v)) = seat(u) else {
+                continue;
+            };
+            if !matches!(
+                v.kind,
+                VehicleKind::Hover | VehicleKind::Walker | VehicleKind::Turret
+            ) {
+                continue;
+            }
+            add("samp", who.clone(), String::new(), "seated".to_owned(), 0.0);
+            let Some(s) = sim.seat_look(h) else {
+                continue;
+            };
+            let reach = s
+                .gun
+                .weapons
+                .iter()
+                .take(2)
+                .filter_map(|w| sim.weapon_classes.get(w.class))
+                .map(|wc| wc.shot_range())
+                .fold(0.0f32, f32::max);
+            let rider_in_reach = |o: core::unit::UnitHandle| {
+                sim.unit(o).is_some_and(|e| {
+                    e.mount.is_some_and(|m| m.vehicle != u.mount.unwrap().vehicle)
+                        && sim.hostile(u.team, e.team)
+                        && (e.capsule().center() - s.muzzle).length() <= reach
+                })
+            };
+            let opp = u
+                .ai
+                .contacts
+                .iter()
+                .flatten()
+                .any(|c| c.seen_now && c.handle.unit().is_some_and(rider_in_reach));
+            if opp {
+                add("samp", who.clone(), String::new(), "opp".to_owned(), 0.0);
+                let eng = u
+                    .ai
+                    .target
+                    .and_then(|t| u.ai.contacts.iter().flatten().find(|c| c.handle == t))
+                    .is_some_and(|c| c.seen_now && c.handle.unit().is_some_and(rider_in_reach));
+                if eng {
+                    add("samp", who, String::new(), "eng".to_owned(), 0.0);
+                }
+            }
+        }
+    }
+
+    fn finish(mut self) {
+        let t = self.ticks;
+        self.n
+            .insert(("round", String::new(), String::new(), String::new()), (1, t as f32));
+        let mut text = String::from("kind,shooter,weapon,what,n,sum\n");
+        for ((k, a, b, c), (n, x)) in &self.n {
+            let _ = writeln!(text, "{k},{a},{b},{c},{n},{x:.0}");
+        }
+        if let Err(e) = std::fs::write(&self.path, text) {
+            eprintln!("VEHICLE_CENSUS: {}: {e}", self.path.display());
+        }
+    }
+}
+
 /// The longest stuck run any alive unit showed after any tick, and whose it
 /// was: the census's own record of who set the scoreboard's `stuck_max`
 /// (which the sim keeps only as a number).
@@ -5009,7 +5679,14 @@ fn run_map(
 
     let mission = mission_for(key, &mut out);
     let mut layout = game::layout::MapLayout::from_manifest(&scene.manifest);
-    let applied = mission.as_ref().map(|m| layout.apply_mission(m));
+    let parity = sweep_parity();
+    let parity: Vec<(&str, bool, game::layout::ParityFix)> = parity
+        .iter()
+        .map(|(m, cw, f)| (m.as_str(), *cw, *f))
+        .collect();
+    let applied = mission
+        .as_ref()
+        .map(|m| layout.apply_mission_with(m, &parity));
 
     // The mission's ticket pools have to be in place before the sim
     // spawns anyone, so the battle census starts consistent.
@@ -5037,16 +5714,44 @@ fn run_map(
     let counts = cfg()
         .combatants
         .map_or(defaults.scaled(cfg().team_pct, 100).combatants, |n| [n; 2]);
+    // Issue #171: `SWEEP_TEAM_COMBATANTS=a:b`, a per-team pair for a
+    // bot-count ladder arm (overrides the line above).
+    let counts = std::env::var("SWEEP_TEAM_COMBATANTS")
+        .ok()
+        .and_then(|v| {
+            let (a, b) = v.split_once(':')?;
+            Some([a.parse().ok()?, b.parse().ok()?])
+        })
+        .unwrap_or(counts);
     let tickets = cfg().tickets.unwrap_or_else(|| match &mission {
         Some(m) if cfg().mission_tickets => m
             .tickets()
             .map(|n| core::sim::scale_reinforcements(n, cfg().ticket_pct)),
-        _ => defaults.scaled(100, cfg().ticket_pct).tickets,
+        // Issue #171: the stand-ins (and `SWEEP_HUMAN_TEAM`) are the round's
+        // humans for `conquest_defaults::HUMAN_SHIFT`, as the game's are;
+        // `SWEEP_HUMAN_SHIFT=0` plays the table's pair.
+        _ => {
+            let mut humans = sweep_human_team();
+            if std::env::var("SWEEP_HUMAN_SHIFT").as_deref() == Ok("0") {
+                humans = [0; 2];
+            } else {
+                let c = cfg();
+                let teams = c.proxy.iter().map(|p| p.0);
+                for t in teams.chain(c.more_proxies.iter().map(|p| p.0)) {
+                    humans[usize::from(t.min(1))] += 1;
+                }
+            }
+            let base = game::conquest_defaults::human_tickets(
+                key,
+                cfg().era_cw,
+                sim.difficulty,
+                defaults.tickets,
+                humans,
+            );
+            ui::population::tickets(base, cfg().ticket_pct)
+        }
     });
     sim.battle = core::battle::Battle::new(tickets);
-    if let Some(m) = &mission {
-        m.apply_death_drains(&mut sim.battle);
-    }
     sim.team_combatants = Some(counts);
     outln!(
         out,
@@ -5173,6 +5878,11 @@ fn run_map(
         m.apply_barriers(nav.as_mut());
     }
     let mut w = WalkSim::with_teams(sim, scene.heightfield(), glam::Vec3::ZERO, teams, nav);
+    // Issue #171: `SWEEP_HANDICAP=0` reports Elite with the host's team
+    // handicap (`team_handicap_on`, default on) switched off.
+    if std::env::var("SWEEP_HANDICAP").as_deref() == Ok("0") {
+        w.sim.team_handicap_on = false;
+    }
     // The class tables go in BEFORE `setup_conquest`, which is what makes its
     // AI loop use `Sim::spawn_ai` (the mission's mix) instead of the team
     // template. The player is already in as team 0 slot 0 with class 0 —
@@ -5235,9 +5945,13 @@ fn run_map(
         [counts[0].saturating_sub(1), counts[1]]
     };
     w.opening_wave(opening, true);
-    // `SWEEP_NATIVES=1` (issue #182): the mission's native teams (BF1
-    // Kashyyyk's Wookiees), installed as the game does after its wave.
-    if std::env::var("SWEEP_NATIVES").as_deref() == Ok("1") {
+    // The mission's native teams (BF1 Kashyyyk's Wookiees, BF2 Tatooine's
+    // Gamorreans), installed as the game does after its wave
+    // (`main/battle.rs`: every mission with local teams). `SWEEP_NATIVES=0`
+    // fields none. A native team the bake cannot field stops the sweep: a
+    // bake older than its native sides would otherwise measure a different
+    // round than the game plays (it once did, on every native map).
+    if std::env::var("SWEEP_NATIVES").as_deref() != Ok("0") {
         if let Some(m) = &mission {
             game::native_teams::install(
                 &mut w,
@@ -5247,10 +5961,35 @@ fn run_map(
                 m,
                 &scene.manifest,
             );
+            let missing: Vec<u8> = native_teams_missing(m, &w);
+            if !missing.is_empty() {
+                eprintln!(
+                    "{key}: native team(s) {missing:?} unavailable in {}: rebake (scripts/pack.py \
+                     --bake-only) or set SWEEP_NATIVES=0 to sweep without natives",
+                    classes_dir.display()
+                );
+                std::process::exit(2);
+            }
+        }
+        // `SWEEP_JAWA_ARC=<share>`: the natives' Jawa arc caster at this
+        // share of its damage instead of `game::jawa::NATIVE_ARC_CASTER_SCALE`
+        // (the measurement that picked it).
+        if let Some(share) = std::env::var("SWEEP_JAWA_ARC")
+            .ok()
+            .map(|v| v.parse::<f32>().expect("SWEEP_JAWA_ARC must be a number"))
+        {
+            for w in &mut w.sim.weapon_classes {
+                if w.name.eq_ignore_ascii_case(game::jawa::ARC_CASTER) {
+                    game::jawa::scale_arc_caster(w, share / game::jawa::NATIVE_ARC_CASTER_SCALE);
+                }
+            }
         }
     }
     let opened = [0u8, 1].map(|team| w.sim.alive_units().filter(|(_, u)| u.team == team).count());
     outln!(out, "    opening {key} alive {}/{}", opened[0], opened[1]);
+    if !w.native_teams.is_empty() {
+        outln!(out, "    nativeteams {key} opening {}", native_alive(&w));
+    }
     w.sim.extra_humans = seated;
     if !slot0_is_bot() {
         if let Some(p) = slot0_at() {
@@ -5358,6 +6097,7 @@ fn run_map(
     let mut longest = LongestRun::default();
     let mut noprog = NoProgress::default();
     let mut deaths = deaths_on().then(Deaths::default);
+    let mut natives = std::env::var_os("NATIVE_CENSUS").map(|_| NativeCensus::default());
     let mut embed = embed_on().then(Embed::default);
     let mut shots = std::env::var_os("SWEEP_SHOTS").map(|_| Shots::default());
     let mut snipe = std::env::var_os("SNIPE_CENSUS").map(|_| SnipeCensus::default());
@@ -5381,6 +6121,7 @@ fn run_map(
     let mut samples = Samples::new(key, seed);
     let mut bot_samples = BotSamples::new(key, seed);
     let mut heavy = HeavyCensus::new(key, seed);
+    let mut vv = VehicleCensus::new(key, seed);
     let mut blackbox = HeadlessBox::new(key, seed, &scene, &w);
     if let (Some(b), Some((_, profile, label))) = (blackbox.as_mut(), proxy_cfg.as_ref()) {
         b.proxy_note(profile, label);
@@ -5495,6 +6236,9 @@ fn run_map(
         }
         t += 1;
         sides.observe(&w.sim);
+        if let Some(n) = natives.as_mut() {
+            n.observe(&w.sim);
+        }
         if hash_every.is_some_and(|n| t.is_multiple_of(n)) {
             outln!(out, "    checkpoint {key} {t} {:016x}", w.sim.hash());
         }
@@ -5729,6 +6473,9 @@ fn run_map(
         if let Some(h) = heavy.as_mut() {
             h.observe(&w.sim, &vehicle_classes, t);
         }
+        if let Some(c) = vv.as_mut() {
+            c.observe(&w.sim, &vehicle_classes, t);
+        }
         if let Some(b) = blackbox.as_mut() {
             b.observe(&w, t);
         }
@@ -5817,6 +6564,9 @@ fn run_map(
     if let Some(h) = heavy {
         h.finish();
     }
+    if let Some(c) = vv {
+        c.finish();
+    }
     if let Some(b) = blackbox {
         b.finish(key);
     }
@@ -5859,6 +6609,9 @@ fn run_map(
             t as f32 / 30.0
         ),
         None => outln!(out, "{key:10} NO OUTCOME in {t} ticks  {tail}"),
+    }
+    if !w.native_teams.is_empty() {
+        outln!(out, "    nativeteams {key} end {}", native_alive(&w));
     }
     if w.sim.flyer_bots {
         outln!(out, "{}", flyer_census.line(key));
@@ -6431,6 +7184,9 @@ fn run_map(
     }
     if let Some(d) = &deaths {
         census.push_str(&d.line(key, &w.sim));
+    }
+    if let Some(n) = &natives {
+        census.push_str(&n.line(key));
     }
     if let Some(e) = embed.as_mut() {
         census.push_str(&e.finish(key, &w.sim));

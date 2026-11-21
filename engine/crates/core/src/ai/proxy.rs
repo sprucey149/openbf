@@ -19,9 +19,12 @@
 //!
 //! What stays a BOT's: the cheats (they test `is_player` only, so a proxy
 //! never gets them), spawning (waves, the alive-AI cap, the class draw),
-//! seats, and every rule about the unit as a SHOOTER (a bot's headshot gate,
-//! a bot's spread multiplier, the AI aim error). It gets no damage buff: its
-//! edge over a bot is only its fixed [`Profile`].
+//! seats (boarding and the seat's own firing discipline), and every rule
+//! about the unit as a SHOOTER (a bot's headshot gate, a bot's spread
+//! multiplier, the AI aim error) - except that a proxy with a `hand` aims
+//! on foot AND in a gun seat with that hand (`gunner::aim`,
+//! [`hand::Hand::seat`]). It gets no damage buff: its edge over a bot is
+//! only its fixed [`Profile`].
 //!
 //! [ours] The stronger stand-in (2026-10-29, the maintainer: "a little bit
 //! worse than how I played"): a proxy may also play by a player's rules
@@ -46,8 +49,8 @@
 //! does not replace still vary by tier, below): its aim skill, its reaction,
 //! what it does when hit, how readily it runs from a grenade, how far it
 //! sees and whether it strafes (circles) instead of standing. Two strengths,
-//! [`Strength::Average`] (PROVISIONAL) and [`Strength::Good`] (refitted to
-//! real players' Hard and Elite matches on 2026-11-19; its row says
+//! [`Strength::Average`] (PROVISIONAL) and [`Strength::Good`] (calibrated to
+//! a real player on one middle map, BF1 Naboo Plains, 2026-11-20; its row says
 //! which numbers the fit supports - `scripts/human_profile.py`,
 //! `analysis/difficulty-proposal.md` §5).
 //!
@@ -122,42 +125,57 @@ impl Strength {
                 mend: 0.0,
                 picks: false,
             },
-            // [ours] Refitted 2026-11-19 to real players: a brother's 25
-            // clean Hard and Elite LAN/solo Conquest logs (2026-11-14..17,
-            // 24 map/tier pairs, hero lives left out, award-weapon, Hunt and
-            // short-quit logs skipped), each replayed at its own map, tier,
-            // team, era, population and LAN rows with the known other
-            // humans as proxies and the class he played most
-            // (`human_profile.py calibrate --setup --mirror-class
-            // --skip-heroes`). Fresh seeds 5-8, 100 rounds: K/D 4.79 of
-            // 5.69, kills/min 3.24 of 4.00, accuracy 0.332 of 0.293, life
-            // 70 s of 59 - each within 20 %. Fit-supported: those four
-            // (`reaction_ticks`, `view_mult`, `mend` 0, `hand.floor`,
-            // `hand.acquire`). Not supported: seconds from sight to first
-            // hit (1.5 of 2.2 s), and the tier split (the proxy is under
-            // him at Elite, K/D 5.2 of 8.1, and over him at Hard, 4.5 of
-            // 3.7). `class` 0 stays the check's rifleman; he played the
-            // sniper most (class 3). Was (2026-10-29, the maintainer's
-            // Normal Yavin, set under him): reaction 6, view 2.0, mend
-            // 0.35, floor 0.006, acquire 0.06. The rest stays PROVISIONAL.
-            // replace: refit with more players' logs (team sizes and other
-            // humans written in the log header).
+            // [ours] Re-tuned 2026-11-20 on ONE middle map, BF1 Naboo Plains
+            // (the maintainer: tune the stand-in on a map in the middle, so
+            // it does better on easy-kill maps and worse on hard ones; never
+            // a fixed kill count). There a brother's kills/min sit at his own
+            // median (Hard 4.1, Elite 4.5; all 25 clean logs 4.0). Target:
+            // his 2 logs there, 9.3 min, 41 kills, 6 deaths - kills/min 4.43
+            // (95 % Poisson 3.2-6.0), K/D 6.8 (about 2-25: 6 deaths cannot
+            // pin it), one a 2.7-min Hard quit kept as his only Hard round
+            // there. Replayed at their own setups (`human_profile.py
+            // calibrate --setup --skip-heroes`).
+            //
+            // NOT a calibration result: on the same fresh seeds this row and
+            // the 2026-11-19 row (view 4.0, mend 0, acquire 0.1, track 0,
+            // seat 1) read the same, 48 rounds each, 95 % bootstrap:
+            // - his class, seeds 301-324: kills/min 3.86 [3.52,4.17] vs 3.68
+            //   [3.43,3.98], K/D 3.86 vs 3.71, life 43 vs 44 s, accuracy
+            //   0.31 vs 0.29;
+            // - the rifleman (as the per-map sweep plays), seeds 401-424:
+            //   kills/min 3.66 [3.38,3.96] vs 3.62 [3.31,3.97], K/D 3.07 vs
+            //   3.06, life 34 vs 36 s, accuracy 0.28 vs 0.25;
+            // - auto hit rate by range band (0-10/10-25/25-50/50-100/100+ m)
+            //   the same within noise, about 0.5/0.4/0.3/0.17/0.07 (his, all
+            //   25 logs: 0.41/0.30/0.18/0.12/0.03).
+            // The one real change is the share of shots past 100 m: 0.06-0.07
+            // here, 0.15-0.17 at view 4.0 (his 0.10), from `view_mult` 2.0.
+            // The rest is the maintainer's to keep or drop: `hand.track` 0.05 s
+            // (misses with crossing speed and own motion, decision 1; fitted,
+            // the logs carry no crossing speed), `hand.acquire` 0.06, `mend`
+            // 0.35 (a hurt player fetches health), `hand.seat` 2 (he hit 0.14
+            // from seats; the stand-in 0.24-0.29: seat fire is mostly blast
+            // shells and the seat's own discipline). The 61-map sweep
+            // (2026-11-20) ran this row. replace: refit with more players'
+            // logs and a shot row that carries the target's crossing speed.
             Strength::Good => Profile {
                 skill: 20,
                 reaction_ticks: 3,
                 react: [0.35, 0.25, 0.30],
                 grenade: 0.95,
-                view_mult: 4.0,
+                view_mult: 2.0,
                 circles: true,
                 hand: Some(hand::Hand {
                     floor: 0.002,
-                    acquire: 0.1,
+                    acquire: 0.06,
+                    track: 0.05,
+                    seat: 2.0,
                     ..hand::Hand::DEFAULT
                 }),
                 headshots: true,
                 hunts: true,
                 class: Some(0),
-                mend: 0.0,
+                mend: 0.35,
                 picks: true,
             },
         }

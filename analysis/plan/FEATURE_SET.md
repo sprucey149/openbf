@@ -100,6 +100,21 @@ and LAN are decisions for later work, not current tasks.
   its rates over the zoom divisor, as a soldier does. Bots and the mouse are unchanged.
   measure: controller play at long range on a large map, scoped and in turrets
   (`analysis/re-aim-assist.md` §10.10).
+- **(The maintainer, 2026-11-19 and 2026-11-20 evening, issue #182) Leaks and the rescue.**
+  OURS, PROVISIONAL; the PS2 has no such rules. Every map of both games is to be leak-free.
+  Real mesh holes are closed per site with added collision (vertices, ground, wall or
+  blocker solids are allowed). The wall clamp (B2) stops a soldier passing through a face,
+  sloped faces included. A soldier with no headroom to stand stays crouched. A unit found
+  inside a solid, shut in a closed mesh or under the terrain for 3 checks of 8 ticks, or
+  held still off the ground for 8 checks (falling, a jump hung in the air, or on a slope
+  in a walking stance while off the ground 4 ticks in 8), is put back on the last spot he
+  stood clear. With no such spot he dies, 1 ticket from his own team like a fall
+  (`DeathCause::Embedded`; an attacker's push credits the attacker); the slope case never
+  kills, it only puts back. The known-leak list is private, kept beside
+  the gate's baselines, and shrinks as sites are fixed; the public tree holds only its
+  header. Code: `core/src/sim/rescue.rs`, the census `game/examples/leak_census.rs`.
+  measure: the leak census's site and rescue counts per map, and tick cost per map
+  (accepted +2-24 %, on the optimisation list).
 
 ### Combat
 - SBD weapons (2026-10-27, issue #27): BF2's wrist blaster, tri-shot and wrist
@@ -107,6 +122,48 @@ and LAN are decisions for later work, not current tasks.
   Both discs' values and the source tests are recorded in `analysis/sbd-weapons.md`.
   SBD sounds follow the map's source game: BF1 on BF1 maps, BF2 on BF2 maps.
   This presentation choice does not change the shared gameplay numbers.
+- **Bolt reach (2026-11-20, ours).** Infantry, vehicle and turret blaster bolts fly 200 m on
+  both games' maps. This covers the bolt and bullet rounds of rifles, pistols, carbines,
+  repeaters, shotguns, bowcasters, wrist blasters and launchers, hero blasters, award weapons
+  and the probe droid; the deployed auto and defense turrets (80 m); and the vehicle, building
+  and map-turret guns under 200 m: BF1's AT-ST chin gun (105 m) and building gun turret
+  (120 m), and BF2's snail tank cannon (195 m) (`game::normalize::lengthened_bolt`,
+  `core::weapon::BOLT_REACH`). The speed stays as authored and the `LifeSpan` is lengthened.
+  Before the change, BF2's rifle reached 128 m (160 m/s x 0.8 s) and BF1's 120 m (80 m/s x
+  1.5 s). The remote droids' blasters keep the disc's reach (BF1 60 m, BF2 128 m; the
+  maintainer, 2026-11-20). Rounds that already reach 200 m keep their own range: snipers, BF2
+  shotguns, chainguns, the award pistols and every other vehicle gun; starfighter and
+  airspeeder guns are left out (all reach 200 m or more already). Bots still open fire only
+  within the disc's reach and the class `MaxRange` (`WeaponClass::engage_range`), on foot and
+  in seats. A bot on foot that is hit or near-missed by an enemy beyond that range, but within
+  200 m, searches for him. After the search it may return fire at him out to 200 m for 5 s
+  from the hit (`perception::RETURN_FIRE_TICKS`); a seated bot does not. The Good proxy's hand
+  plays by a player's rule and fires out to 200 m unprompted. A human's aim assist with a
+  lengthened blaster follows the sniper's shape (`WeaponClass::give_bolt_assist`): full
+  strength out to the disc's reach (112.5-128 m; 80 m for the deployed turrets, 105 m for the
+  AT-ST chin gun), then a straight fade to nothing at 200 m; the acquisition, the magnet and
+  the reticle's in-range cue reach 200 m. The disc's `LockOnRange` (40 m on BF2's rifles and
+  pistols, 64 m on BF1's, 80 m on the repeaters) is kept for the PS2's fade of the pull, so
+  within it the assist is as before and the pull still ends there; past it the slowdown and the
+  tracking carry on along the curve. A building turret gunner's assist runs full to the gun's
+  disc reach and fades to the lengthened one (`sim::seat_assist`). A gun whose disc magnet
+  already reaches past 200 m (the snail tank's `LockOnRange` 1500) keeps it. Snipers are
+  unchanged: their 300 m bolt (2000 m/s x 0.15 s) carries an assist at full strength to their
+  128 m `MaxRange`, fading to nothing at 300 m (BF2's award beam: 500 m). The bots' aim is
+  untouched. Measured 2026-11-20 against the pre-change branch on the same fresh seeds (awards
+  off). Bots-only Hard, 61 Conquest entries x 32 seeds: team 0 won 49.8 % before and 51.5 %
+  after; 19 and 21 of 61 entries were outside 40-60 %, about what chance gives at 32 seeds;
+  per-entry differences were within noise (sum of z² 56.2 on 61 degrees of freedom). Good proxy
+  against Elite bots on Coruscant, Hoth, Geonosis and Yavin (12 entries, 32 seeds per side): the
+  proxy's side won 44.0 % before and 43.0 % after (z² 26.5 on 24). The bot census
+  (`BOT_CENSUS`: note-hit, note-near, answer-fire) shows return fire in every entry: on
+  bots-only Hard a round notes about 78 shooters from hits and 530 from near misses, and the
+  trigger is held at a noted shooter for about 1000 bot-ticks. The vehicle and turret guns, measured
+  2026-11-20 against the infantry-only branch on the same seeds (bots-only Hard, 6
+  vehicle-heavy entries x 32 seeds: bf2_hot1 gcw, bf2_kas2 both eras, bf1_hot1 gcw, bf2_geo1
+  cw, bf1_rhn2 gcw): team 0 won 88/192 (45.8 %, Wilson 38.9-52.9) before and 91/192 (47.4 %,
+  40.5-54.4) after, no entry moving by more than 2 of 32; kills by seated bots 9674 and 9614,
+  vehicles destroyed 7640 and 7617 (`VEHICLE_CENSUS`).
 - **Weapon balance.** Keep the current openbf values. A future rebalance would record each weapon's
   change and retain the original-game measurements for comparison and rollback.
 - Awards & medals: **KEEP (BF2 system)** — earn permanent unlocks through
@@ -125,6 +182,10 @@ and LAN are decisions for later work, not current tasks.
   lists those choices and the original rosters.
 - Heroes are **killable, always** — no BF1 invincibility ("you see a hero and you just run
   away — no fun").
+- Hero lock ([ours] 2026-11-19): from the Yes on the hero offer until the hero dies, the
+  hero is the owner's only class; a post class change shows "Heroes can't change class".
+  Pause-menu Respawn (1 ticket, a death) is the way out. The disc lets an owner keep the
+  hero through lives in other classes (`RE:` hero spawn/possession flow).
 - Health (maintainer, 2026-10-30 — supersedes the September no-time-drain rule):
   regular BF2 conquest uses **BF2's standard hero health pool and saber-shaped health bar**.
   Health shrinks **with time and damage**, and **regenerates for killing enemies**. Use the
@@ -240,10 +301,18 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   `objectivetdm` starts both scores at zero and enables their display (start
   prototype pc 18–38). Its death callback awards points and checks the XL
   target (pc 20, 30, 46–56). These are zero-based bytecode instruction indices.
-  OURS: use the baked Conquest spawn layouts and the pre-launch Team Size
-  option (48 per side at 100%, up to 96). measure: live PC spawn placement and
-  population on each map and era, plus rendered frame rate in openbf.
-  Headless check on 2026-11-20 (`codex/instant-action-xl`, base `4250d394`).
+  Team sizes (maintainer, 2026-11-20): 100% Team Size is the PC game's own XL
+  size per side, read from each XL script's `SetupTeams`: Geonosis 80, Hoth
+  120, Kashyyyk 160 (both eras), both teams equal. Every XL script also sets
+  `SetSpawnDelay(10, 0.25)`, which is already the spawn-wave default. Team
+  Size scales these with no ceiling up to 200% (160 / 240 / 320 per side).
+  OURS: every Conquest post stays an XL spawn (the PC scripts remove some
+  posts; the maintainer kept them all). Players change class at their own
+  posts as in Hunt; posts capture nothing. LAN refuses XL rounds. Sim tick
+  cost at these sizes (2026-11-21, headless, 12 rounds at 100%): mean 7.5 /
+  8.1 / 11.4 ms, p99 18.8 / 19.8 / 24.6 ms on Geonosis / Hoth / Kashyyyk,
+  inside the 33 ms tick. Optimising for these sizes is planned work.
+  Headless check on 2026-11-20 (the PR branch, base `4250d394`).
   `cargo test -p core --lib sim::deathmatch::tests` passed 13 tests, including
   the winning kill at 350. `cargo test -p ui --lib team_points_tests` passed
   two HUD tests. `cargo test -p game --bin game xl_launches_all_supported_eras_from_instant_action -- --nocapture`
@@ -263,6 +332,96 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   the generator is an uncapturable post until destroyed, then removed. Build the measured
   PS2 behaviour and report any difference from the recollection in STATUS. This is the
   approved scope, not evidence that the lifecycle has already been implemented or verified.
+- **Every death costs one ticket (the maintainer, 2026-11-19; issue #171).** A death costs
+  its own team exactly one ticket on every map and in every ticket mode. Deliberate
+  difference: BF2 Death Star: Interior conquest (both eras) has its script charge Lua
+  team 1 (Rebels, Republic) a second ticket for each of its own deaths
+  (`OnCharacterDeathTeam` → `AddReinforcements(1, -1)` in `ScriptPostLoad`). openbf
+  drops that rule. The mission generator no longer extracts it, and the loader ignores
+  the `death_drains` field that older generated missions still carry. Modes scored by
+  flags or points (CTF, Hunt, Space Assault) keep their unlimited tickets, and their
+  points are scores, not tickets. Locals (team 2 and up) still pay none.
+  Starting tickets may differ per side for faction balance. No side may start with more
+  than 60 % of the pair's total.
+- **No weighted scoring outside Space Assault (the maintainer, 2026-11-19; Space Assault
+  excepted 2026-11-20).** Every enemy kill scores its team exactly one point in Hunt, CTF,
+  Hero Assault and the other point modes, whatever the victim (bot, human, hero) and
+  wherever it dies. Self-kills, team kills and deaths with no credited killer score 0
+  for bots and humans alike; nothing scores below zero. Deliberate differences from the
+  original games: Hunt ignores the scripts' `pointsPerKillATT/DEF` (BF2 Geonosis 1:2,
+  Hoth and Naboo 1:3, Kashyyyk 2:1) and openbf's own BF1 Hunt kill values. Every Hunt
+  keeps the disc's unit health, and openbf never rebalances a side by health or damage.
+  Hunt is for fun, so it fields big sides (OURS, the maintainer 2026-11-20 late): each
+  mission sets how many of each side are alive at once per difficulty
+  (`hunt_alive_caps`, at least 8 a side, a human counting toward his own) and each
+  side's total units (`hunt_units`), both free to go past the disc's counts. Soldiers
+  spawning on a node another soldier stands on step out to a free spot around it, and
+  a soldier whose spawn node has a live enemy within 20 m takes another node of his
+  post clear of enemies (BF2 Endor and BF2 Mos Eisley spawn both sides along one path).
+  Balance, in order: big sides for both; per-side points to win per difficulty
+  (`hunt_points_to_win`, neither side needing more than 60 % of the pair's total); more
+  alive at once for the side that loses too often (up to 16 extra, so at most 48 a side;
+  the sim tick at 48 a side measured 1.2-2.0 ms on average, p99 3-5.6 ms, against a
+  33 ms budget); then Hunt-only easier bots for a side (`hunt_skill_pct`, 30-100 %, the
+  maintainer 2026-11-21). An eased bot keeps its skill level and mainly misses more: its
+  aim point lands (100 / percent) squared times farther off (2x at 71 %, 4x at 50 %,
+  about 11x at 30 %). It reacts a little slower, never past 1 s of clear sight, and
+  fires weapons that need no aim (the arc casters, the incinerator, the flamethrowers)
+  at that percent of their rate. Humans and the human stand-in are never eased. No
+  other mode reads these fields.
+  Fitted values (2026-11-21, refitted with the reworked easing; bots only, every award
+  off, the 5-minute Hunt timer): every Hunt fields 32 alive a side on every difficulty
+  from a pool of 64; no row uses extra alive (8 or 16 more for the losing side gave no
+  consistent change in the kill split, since each extra soldier is also one more
+  target). Points to win run about 43-265 a side, so a median round lasts about
+  3.3-4 minutes with 27-110 kills a minute for both sides together. Easing falls on the
+  army side (30-75 %; most BF1 armies and BF2 Naboo at or near the 30 % floor) and on
+  the Jawas on both Mos Eisley maps (30-80 % on Easy to Hard); the original tiers stay
+  as they are on the other side. Judged on fresh seeds only (24 rounds a row, 40 where
+  the share landed within 5 points of 40/60), 44 of the 56 map and difficulty rows land
+  inside 40-60 % for team 0. Outside, at the 30 % floor and the 60/40 limit, where the
+  army still kills more than 1.5 times as fast: BF1 Geonosis Elite, BF1 Kashyyyk Islands
+  Elite, BF1 Kashyyyk Docks Hard and Elite, BF2 Hoth Easy, BF2 Kashyyyk Elite and all
+  four BF2 Naboo rows (the army wins 96-100 %). Also outside after two target fits:
+  BF1 Mos Eisley Normal (0.33) and BF2 Geonosis Hard (0.29). In Hunt a sticky throw (Ewok
+  spear, Gungan booma, thermal detonator) does
+  not take the one-thrower-per-target claim, so a group of natives can all throw at
+  the same soldier.
+  The Hunt score option defaults to "Per map", which plays those targets (50 each where a
+  mission sets none); any other value N keeps each map's split, scaled so the two targets
+  average N. At the timer the side further along toward its own target (the larger
+  share of it) wins (confirmed by the maintainer, 2026-11-20). The
+  battle HUD shows each side's points against its own target.
+  CTF (one point per capture) and Hero Assault (one per kill) were already even.
+  Personal score (scoreboard, hero and class unlocks, medals, career) is unchanged.
+- **Space Assault keeps the original BF2 scoring (the maintainer, 2026-11-20).** 180
+  points to win; an enemy bot killed 1, a human 2, a hero 5, a kill near a post 2; a
+  manned enemy fighter destroyed 3 (plus its riders' kills), an empty flyer or empty
+  armed building 1; a human's self-kill -1 and team kill -2 (bots never lose points);
+  each critical ship system its authored objective points (18 per system group). The
+  shell's Assault score option (shared with Hero Assault, default 180) is Space
+  Assault's points to win as shown. This is the rule set of LightVelox's Space Assault
+  work (PR #183); the overnight one-point-per-kill trial with a 50-point limit was
+  reverted.
+- **One Jawa for both games (the maintainer, 2026-11-20; OURS).** Every Jawa, on BF1 and
+  BF2 maps and in every mode, carries the fusion cutter and BF2's arc caster. BF1's
+  Jawa, a repair-only native on its disc, takes BF2's arc caster, the same weapon on
+  every map. In Hunt the Jawas are one of the two sides and the arc caster is at full
+  strength. In every other mode they are a neutral native team that attacks both armies
+  and both armies can shoot (on both discs they are friendly to both); they still spawn
+  where the map places them and take no command post, as before. Outside Hunt their arc
+  caster does 60 % of its damage: a deliberate, named exception to "no per-side damage
+  changes", chosen so the Mos Eisley Jawas are a real but smaller threat than the Dune
+  Sea's Tuskens. Killing a Jawa costs no side a ticket or a point and is nobody's team
+  kill; it scores the killer's personal score like any enemy kill. A soldier a Jawa
+  kills costs his side one ticket, like any death. Any native's death scores no team
+  point in the point modes. With the Jawas fighting, both Mos Eisley maps were refitted
+  for even sides: on BF1's map five of the Jawas' fourteen spawn spots, the ones crowding
+  one army's posts, are no longer used; BF2's Clone Wars map gives the CIS's exposed post
+  the same extra respawn weight as the Galactic Civil War map; and the starting tickets
+  of three rows moved (all within the 60 % cap). Both Mos Eisley Hunts field 32 a side
+  and are evened by points to win and by easing the Jawas (their arc caster fires less
+  often when eased; see the Hunt entry above).
 - CTF: **KEEP both variants, REWORK later** — the maintainer barely played it (childhood reason: the
   clone commander says "damn" when the flag drops — optional VO filter noted); needs a
   fun pass before it matters.
@@ -282,6 +441,12 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
     (BF1 has no class change) takes BF2's control-zone 5 m.
   - The Hunt class screen gives each native class its own name where the text tables
     share one ("Ewok Warrior", "Ewok Scout").
+  - A BF2 Hunt plays the original's Hunt world: the sublevel holding the mission's
+    `<map>_hunt` world, its posts and spawns, the script's barrier switches, and every
+    object its `KillObject` calls name removed from the scene (model and collision):
+    Hoth's Hunt opens the Echo Base back shields and removes the shield generator, as
+    the original does. The map boundary is the map's own (no Hunt sublevel carries
+    one).
 - BF1 Historical Campaigns: **DROP** (it is essentially curated conquest battles in movie
   order with narration stills/VO between; per the maintainer's rule that's not worth keeping —
   narration assets still get baked, revivable).

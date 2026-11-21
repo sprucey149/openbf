@@ -38,6 +38,7 @@
 
 mod abilities;
 mod awards;
+mod axis_clamp;
 mod beam;
 mod blast;
 mod bounds;
@@ -53,6 +54,7 @@ mod deck;
 mod doors;
 mod droid_death;
 mod droidekas;
+mod embed;
 mod emitter;
 mod fall_credit;
 mod fatray;
@@ -63,6 +65,7 @@ mod foot_lock;
 mod force;
 mod guided;
 mod guns;
+mod headroom;
 mod hero_bodies;
 pub mod heroes;
 mod hover_pairs;
@@ -80,6 +83,7 @@ mod pilot_threats;
 mod population;
 mod remotes;
 mod repair;
+mod rescue;
 #[cfg(test)]
 mod rider_health_tests;
 mod round;
@@ -126,6 +130,8 @@ pub use ctf::{
 pub use damage_regions::DamageRegion;
 pub use droid_death::PUSHED_DEAD_HEALTH;
 pub use droidekas::{capsule_of as droideka_capsule, FLOOR_SNAP as DROIDEKA_FLOOR_SNAP};
+pub use embed::{Embed, EMBED_NAMES, EMBED_OVERLAP, EMBED_UNDER};
+pub use rescue::{Rescue, RESCUE_EVERY, RESCUE_PATIENCE};
 pub use fall_credit::{ForcedMove, FORCED_GRACE, FORCED_MAX};
 pub use flyers::FlightLimits;
 pub use foot_lock::FootLock;

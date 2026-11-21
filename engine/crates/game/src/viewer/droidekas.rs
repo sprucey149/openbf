@@ -130,15 +130,25 @@ pub fn bubble_color(game: &str) -> [u8; 4] {
 }
 
 pub fn bubble_scale(on: bool, t: f32) -> Option<f32> {
+    shell_scale(on, t, BUBBLE_GROW, BUBBLE_SHRINK)
+}
+
+/// [`bubble_scale`] for a shell record's own `TurnOnTime` (`grow`) and
+/// `TurnOffTime` (`shrink`) (B2 `FUN_00460030`).
+pub fn shell_scale(on: bool, t: f32, grow: f32, shrink: f32) -> Option<f32> {
     if on {
-        let s = (t / BUBBLE_GROW).fmin(1.0);
+        let s = if grow > 0.0 {
+            (t / grow).fmin(1.0)
+        } else {
+            1.0
+        };
         Some(if s < 0.94 {
             s * 1.127_659_6
         } else {
             (1.0 - s) * 0.999_999 + 1.0
         })
-    } else if t < BUBBLE_SHRINK {
-        Some(1.0 - t / BUBBLE_SHRINK)
+    } else if t < shrink {
+        Some(1.0 - t / shrink)
     } else {
         None
     }
@@ -427,61 +437,95 @@ impl DroidekaVisuals {
                 continue;
             }
             let pos = u.droideka_point(c.shield.sphere.center);
-            let radius = c.shield.sphere.radius;
-            let inside = pos.distance_squared(cam.position) < radius * radius;
-            let shell = bubble_grid(pos, radius * f, cam, inside);
-            // Untextured on the GS: the halved byte IS the frame's (peak 48 80
-            // 96), where this path's `gs_unit` reads 128 as 1.0: half again.
-            let [cr, cg, cb, ca] = self.bubble_color;
-            let [cr, cg, cb] = [cr, cg, cb].map(|b| b / 2);
-            let colours: Vec<[u8; 4]> = shell
-                .iter()
-                .map(|v| {
-                    let a = if inside {
-                        BUBBLE_INSIDE_ALPHA
-                    } else {
-                        (f32::from(ca) * (BUBBLE_HAZE + (1.0 - BUBBLE_HAZE) * rim(v.theta))) as u8
-                    };
-                    [cr, cg, cb, a]
-                })
-                .collect();
-            let tris = bubble_indices()
-                .map(|i| (shell[i].pos, [0.0, 0.0], colours[i]))
-                .collect();
-            out.push(ParticleDraw {
-                shape: ParticleShape::Shaded { tris },
-                key: pos,
+            let look = ShellLook {
                 color: self.bubble_color,
+                specular_color: BUBBLE_SPEC_COLOR,
                 texture: self.bubble_texture,
-                additive: true,
-            });
-            if let Some(table) = self.bubble_spec {
-                let right = cam.right();
-                let uvs: Vec<[f32; 2]> = shell
-                    .iter()
-                    .map(|v| {
-                        render::spec_texcoord(
-                            BUBBLE_SPEC_POWER,
-                            v.normal,
-                            cam.position,
-                            v.pos,
-                            right,
-                            sun,
-                            true,
-                        )
-                    })
-                    .collect();
-                let tris = bubble_indices().map(|i| (shell[i].pos, uvs[i])).collect();
-                out.push(ParticleDraw {
-                    shape: ParticleShape::Mesh { tris },
-                    key: pos,
-                    color: BUBBLE_SPEC_COLOR,
-                    texture: Some(table),
-                    additive: true,
-                });
-            }
+                table: self.bubble_spec,
+            };
+            shell_draws(pos, c.shield.sphere.radius, f, cam, sun, &look, &mut out);
         }
         out
+    }
+}
+
+/// What a shell is drawn with: its record's `Color` and `SpecularColor`,
+/// the flat (white) sheet the rim pass multiplies and the shared `specular`
+/// table.
+#[derive(Clone, Copy, Debug)]
+pub struct ShellLook {
+    pub color: [u8; 4],
+    pub specular_color: [u8; 4],
+    pub texture: Option<TextureHandle>,
+    pub table: Option<TextureHandle>,
+}
+
+/// One raised shell's two passes at `pos`, `radius` (the record's) scaled
+/// by `f` ([`shell_scale`]): the rim, flat colour under the sin^6 alpha
+/// (from inside the unscaled radius, half the colour everywhere), and the
+/// additive specular table in `SpecularColor` over it (B2 `FUN_0046e378`).
+/// The droideka's shield and the DLC Force ball's (`crate::fx`'s shields)
+/// draw through it.
+pub fn shell_draws(
+    pos: Vec3,
+    radius: f32,
+    f: f32,
+    cam: &Camera,
+    sun: Vec3,
+    look: &ShellLook,
+    out: &mut Vec<ParticleDraw>,
+) {
+    let inside = pos.distance_squared(cam.position) < radius * radius;
+    let shell = bubble_grid(pos, radius * f, cam, inside);
+    // Untextured on the GS: the halved byte IS the frame's (peak 48 80
+    // 96), where this path's `gs_unit` reads 128 as 1.0: half again.
+    let [cr, cg, cb, ca] = look.color;
+    let [cr, cg, cb] = [cr, cg, cb].map(|b| b / 2);
+    let colours: Vec<[u8; 4]> = shell
+        .iter()
+        .map(|v| {
+            let a = if inside {
+                BUBBLE_INSIDE_ALPHA
+            } else {
+                (f32::from(ca) * (BUBBLE_HAZE + (1.0 - BUBBLE_HAZE) * rim(v.theta))) as u8
+            };
+            [cr, cg, cb, a]
+        })
+        .collect();
+    let tris = bubble_indices()
+        .map(|i| (shell[i].pos, [0.0, 0.0], colours[i]))
+        .collect();
+    out.push(ParticleDraw {
+        shape: ParticleShape::Shaded { tris },
+        key: pos,
+        color: look.color,
+        texture: look.texture,
+        additive: true,
+    });
+    if let Some(table) = look.table {
+        let right = cam.right();
+        let uvs: Vec<[f32; 2]> = shell
+            .iter()
+            .map(|v| {
+                render::spec_texcoord(
+                    BUBBLE_SPEC_POWER,
+                    v.normal,
+                    cam.position,
+                    v.pos,
+                    right,
+                    sun,
+                    true,
+                )
+            })
+            .collect();
+        let tris = bubble_indices().map(|i| (shell[i].pos, uvs[i])).collect();
+        out.push(ParticleDraw {
+            shape: ParticleShape::Mesh { tris },
+            key: pos,
+            color: look.specular_color,
+            texture: Some(table),
+            additive: true,
+        });
     }
 }
 

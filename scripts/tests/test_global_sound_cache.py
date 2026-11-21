@@ -15,6 +15,22 @@ import global_sound_cache as cache
 import pack_cache
 
 
+def versions_json(global_sound=1):
+    groups = dict.fromkeys(("tat1", "tat2", "maps", "common", "side", "dlc", "classes", "sounds", "global-sound",
+                            "load", "beep", "extract-iso"), 1)
+    groups["global-sound"] = global_sound
+    return json.dumps(dict(schema=1, target="test-os", groups=groups))
+
+
+VERSIONS = versions_json()
+
+
+def fake_bake(path, global_sound=1, note=""):
+    """A bake that answers only `format-versions`."""
+    path.write_text(f"#!{sys.executable}\n# {note}\nprint({versions_json(global_sound)!r})\n")
+    path.chmod(0o755)
+
+
 class GlobalSoundCache(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -301,6 +317,7 @@ class ShellCompatibility(unittest.TestCase):
             bake = root / "fake bake"
             bake.write_text("#!" + sys.executable + "\n" +
                             "import json, pathlib, sys\n"
+                            f"if sys.argv[1] == 'format-versions': print({VERSIONS!r}); sys.exit()\n"
                             "out = pathlib.Path(sys.argv[3]); out.mkdir(parents=True, exist_ok=True)\n"
                             "paths = sys.argv[2].split(',') + sys.argv[4].split(',')\n"
                             "(out / 'global.ron').write_text(json.dumps([pathlib.Path(p).read_text() for p in paths if p]))\n")
@@ -323,11 +340,11 @@ class ShellCompatibility(unittest.TestCase):
 
 @unittest.skipUnless(os.name != "nt", "POSIX executable fixture")
 class ToolIdentity(unittest.TestCase):
-    def test_binary_helper_ffmpeg_interpreter_and_restoration_identity(self):
+    def test_version_helper_ffmpeg_interpreter_and_restoration_identity(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             bake, worker, ffmpeg = root / "bake", root / "worker.py", root / "ffmpeg"
-            bake.write_bytes(b"bake A")
+            fake_bake(bake, note="A")
             worker.write_text("# worker A\n")
             ffmpeg.write_text("#!/bin/sh\necho version-A\n")
             ffmpeg.chmod(0o755)
@@ -345,8 +362,15 @@ class ToolIdentity(unittest.TestCase):
             self.assertNotEqual(cache.identity(bake, env), restored)
             ffmpeg.write_text("#!/bin/sh\necho version-B\n")
             self.assertNotEqual(cache.identity(bake, env)["ffmpeg"], restored["ffmpeg"])
-            bake.write_bytes(b"bake B")
-            self.assertNotEqual(cache.identity(bake, env)["bake"], restored["bake"])
+            ffmpeg.write_text("#!/bin/sh\necho version-A\n")
+            restored = cache.identity(bake, env)
+            # A rebuilt bake with the same global-sound version keeps the cache; a raised version does not.
+            fake_bake(bake, note="B")
+            self.assertEqual(cache.identity(bake, env), restored)
+            self.assertNotIn("bake", restored)
+            self.assertNotIn("code", restored)
+            fake_bake(bake, global_sound=2)
+            self.assertEqual(cache.identity(bake, env)["version"], 2)
 
 
 class PublicationGuard(unittest.TestCase):

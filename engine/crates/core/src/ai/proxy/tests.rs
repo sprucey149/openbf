@@ -136,15 +136,21 @@ fn the_targets_are_the_maintainers_and_fall_by_tier() {
 /// makes the shooter a proxy with a hand. Returns the shooter's shots over
 /// `ticks`.
 fn hand_shots(hand: bool, d: f32, ticks: u32) -> usize {
+    let rifle = crate::weapon::WeaponClass {
+        ai_range: [0.0, 12.0, 24.0],
+        ..crate::weapon::WeaponClass::bf1_rifle()
+    };
+    shots_with(rifle, hand, d, ticks)
+}
+
+/// [`hand_shots`] with weapon class `class` in the shooter's hands.
+fn shots_with(class: crate::weapon::WeaponClass, hand: bool, d: f32, ticks: u32) -> usize {
     let _style = crate::ai::tests::all_stand();
     use crate::sim::Event;
     let mut s = Sim::empty(5);
     s.ground_rules = crate::soldier::GroundRules::Bf1;
     s.cheats.infinite_ammo = true;
-    s.weapon_classes[0] = crate::weapon::WeaponClass {
-        ai_range: [0.0, 12.0, 24.0],
-        ..crate::weapon::WeaponClass::bf1_rifle()
-    };
+    s.weapon_classes[0] = class;
     let a = bot(&mut s, 0, Vec3::ZERO);
     let t = s
         .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -d)))
@@ -177,6 +183,33 @@ fn a_hand_fires_past_the_ai_range_and_without_pauses() {
     assert!(hand_shots(true, 40.0, 300) > 10, "the hand: 40 m");
     let (bot, hand) = (hand_shots(false, 8.0, 600), hand_shots(true, 8.0, 600));
     assert!(hand > bot * 3 / 2, "held trigger: bot {bot}, hand {hand}");
+}
+
+/// [ours] (the maintainer, 2026-11-20: bolts fly 200 m, bots open fire at
+/// the original range) A rifle whose bolt the disc authored to 32 m
+/// (80 m/s x 0.4 s), lengthened to 200 m, with a 64 m MaxRange: the disc's
+/// reach is the only gate. A bot holds its fire at a seen enemy 40 m off and
+/// fires at 25 m; a proxy's hand fires at 40 m, as a player may.
+#[test]
+fn the_discs_bolt_reach_is_a_bots_opening_range() {
+    let mut rifle = crate::weapon::WeaponClass {
+        ai_range: [0.0, 24.0, 64.0],
+        ..crate::weapon::WeaponClass::bf1_rifle()
+    };
+    rifle.ordnance.life_span = 0.4;
+    rifle.ordnance.extend_bolt_reach();
+    assert_eq!(rifle.engage_range(), 32.0, "the fixture's premise");
+    assert!(rifle.shot_range() >= crate::weapon::BOLT_REACH);
+    assert_eq!(
+        shots_with(rifle.clone(), false, 40.0, 300),
+        0,
+        "a bot at 40 m"
+    );
+    assert!(
+        shots_with(rifle.clone(), false, 25.0, 300) > 0,
+        "a bot at 25 m"
+    );
+    assert!(shots_with(rifle, true, 40.0, 300) > 10, "the hand at 40 m");
 }
 
 /// A hand proxy's weapons rest at a player's spread floor, now and after a
@@ -397,7 +430,12 @@ fn the_skill_runs_past_twenty_on_the_same_curves() {
 fn the_good_proxy_carries_the_fitted_features() {
     let g = Strength::Good.profile();
     assert!(g.hand.is_some() && g.headshots && g.hunts && g.picks);
-    assert_eq!((g.class, g.mend), (Some(0), 0.0));
+    assert_eq!((g.class, g.mend), (Some(0), 0.35));
+    let h = g.hand.unwrap();
+    assert!(
+        h.track > 0.0 && h.seat > 1.0,
+        "the stand-in's hand misses with motion and in a seat"
+    );
     let a = Strength::Average.profile();
     assert!(a.hand.is_none() && !a.headshots && !a.hunts && !a.picks);
     assert_eq!((a.class, a.mend), (None, 0.0));
@@ -756,6 +794,10 @@ fn the_proxy_reads_the_frozen_rows() {
 /// 3, view 4.0, no mending, hand floor 0.002 from 0.1) moved Easy
 /// 7efc85cee4eb5f2a -> 8784bda06a6b4c62 and Elite 0f21523a29eb72b6 ->
 /// 813b89e81f2d3ebf: the proxies' own profile changed.
+/// 2026-11-20 (the Good stand-in recalibrated on BF1 Naboo Plains: view
+/// 2.0, mending at 35 %, hand acquire 0.06, tracking lag 0.05 s, seat x2)
+/// moved Easy 8784bda06a6b4c62 -> 45bb6fa8dcd80411 and Elite
+/// 813b89e81f2d3ebf -> 790d6220186a4bc9: the proxies' own profile changed.
 #[test]
 fn an_all_proxy_skirmish_keeps_its_hash() {
     let run = |d: Difficulty| {
@@ -781,7 +823,7 @@ fn an_all_proxy_skirmish_keeps_its_hash() {
     let got = [run(Difficulty::Easy), run(Difficulty::Elite)];
     assert_eq!(
         got.map(|h| format!("{h:016x}")),
-        ["8784bda06a6b4c62", "813b89e81f2d3ebf"],
+        ["45bb6fa8dcd80411", "790d6220186a4bc9"],
         "the all-proxy skirmish moved"
     );
 }

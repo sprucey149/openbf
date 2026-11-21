@@ -81,15 +81,26 @@ possible once static map data moves behind an `Arc`.
 - The port is UDP **37450** by default and configurable. Hosts bind
   `0.0.0.0:37450`, and clients bind an ephemeral port.
 - **Discovery:**
-  - Clients send `Find` to the limited broadcast and to the /24 directed
-    broadcast of the interface the default route leaves by (the standard
-    library lists no interfaces, and no new crate is taken for it; a wrong
-    mask only reaches nobody). Hosts answer `Found` with name, map,
-    players, max players, protocol version and build id (`HostInfo`); Join
-    Game lists a host on another build dimmed with why.
+  - Clients send `Find` to the limited broadcast, to each IPv4 adapter's
+    directed broadcast (address OR inverted netmask, from the adapter list;
+    loopback, Tailscale and /31-/32 adapters skipped), and by unicast to
+    every recent game's address (resolved off the frame loop, every 30 s).
+    Hosts answer `Found` with name, map, mode, players, max players,
+    protocol version, build id and a random per-session number
+    (`HostInfo`); one host heard at several addresses is listed once.
+  - Discovery's first chunk has a frozen layout across protocol versions
+    (`packet::frozen_find_nonce` / `frozen_found`): a host answers another
+    version's `Find` (rate-limited, no peer opened) and the browser lists
+    it as "different version". Builds before this layout never answer
+    another version and stay unlisted.
   - **Join by address** (IP or host name, including Tailscale MagicDNS) is the
-    primary path, because Tailscale and WireGuard carry no broadcast.
-  - Recent hosts are remembered (the profile's last 8, newest first).
+    primary path for a game never joined, because Tailscale and WireGuard
+    carry no broadcast.
+  - Recent games are kept per computer (`openbf_data/recent_games.ron`,
+    the last 8, newest first), written when the host accepts the guest,
+    with the host's name. Join Game shows each with the host's answer or
+    "not hosting now"; one press rejoins, Square / Space / right-click
+    forgets.
 - **Timeouts:**
   - A connection is "having trouble" after 1.5 s of silence; the HUD meter
     shows it.
@@ -176,8 +187,9 @@ How it is played (`game/src/main/windowed/lobby.rs`):
   Kick buttons and a Hide / Players button.
   Every human starts at the side select ("Auto"); a per-player team
   preference is not offered yet.
-- Join Game: the hosts found on the LAN, Join by address (IP or host name,
-  optional `:port`, resolved off the frame loop) and the recent hosts.
+- Join Game: "Games on this network", then "Recent games", then Join by
+  address (IP or host name, optional `:port`, resolved off the frame loop),
+  Test Connection and Back. The cursor starts on the first joinable game.
 - Guests draw the host's screen from `LobbyState` with "The host is
   choosing…"; their input is Back (leave) and the same player list, which
   opens, moves and closes as the host's but has no Kick. The map list is

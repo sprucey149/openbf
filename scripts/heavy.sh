@@ -20,6 +20,9 @@ main() {
 
     LOCKS=${HEAVY_LOCKS:-"$(cd "$(dirname "$0")/.." && pwd)/engine/artifacts/loop"}
 SLOTS=${HEAVY_SLOTS:-3}
+# A machine-wide override: a number in $LOCKS/slots wins over HEAVY_SLOTS, so the slot
+# count can change while agents that pass HEAVY_SLOTS explicitly are already running.
+if [ -r "$LOCKS/slots" ]; then s=$(tr -dc 0-9 < "$LOCKS/slots"); [ -n "$s" ] && SLOTS=$s; fi
 GPU=0
 if [ "${1:-}" = "--gpu" ]; then GPU=1; shift; fi
 [ $# -gt 0 ] || { echo "usage: scripts/heavy.sh [--gpu] <cmd> [args...]" >&2; exit 2; }

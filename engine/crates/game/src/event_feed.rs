@@ -1119,6 +1119,9 @@ impl EventFeed {
                         tick,
                     );
                 }
+                Event::HeroClassLocked { unit } if unit == viewer => {
+                    self.say("Heroes can't change class".into(), message_color::OWN, tick);
+                }
                 Event::TowSeatLocked { unit } if unit == viewer => {
                     self.say(
                         "Seat switch available when the tow cable releases".into(),

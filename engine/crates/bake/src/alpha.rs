@@ -541,10 +541,12 @@ impl AlphaTable {
 /// alpha meaningful, OPAQUE otherwise. That is exactly what the renderer did
 /// for those models before the rule landed, so writing it on the material
 /// changes nothing for them while the runtime routes from the material rather
-/// than from the texture. No baked weapon segment has 0x02 or 0x04
-/// (`analysis/re-side-alpha.md` §1), so every one comes out OPAQUE; the
+/// than from the texture. Most baked weapon segments have neither 0x02 nor
+/// 0x04 and come out OPAQUE; the few retail ones that do (the fusion cutters'
+/// 0x7 and the launcher lens' 0x5) come out MASK, as they always drew. The
 /// soldiers take the disc's own per-segment rule instead
-/// (`crate::soldier::segment_blends`).
+/// (`crate::soldier::segment_blends`), and a held weapon's BF2 additive
+/// segments take [`weapon_alphas`]'.
 pub fn legacy_per_texture_or(m: &Model) -> Vec<SegmentAlpha> {
     let flags = crate::soldier::texture_flags(m);
     m.segments
@@ -568,6 +570,26 @@ pub fn legacy_per_texture_or(m: &Model) -> Vec<SegmentAlpha> {
             }
         })
         .collect()
+}
+
+/// BF2 MTRL 0x40: the segment adds to the frame (GS ALPHA 0x48, `Cs·As + Cd`).
+pub const BF2_ADDITIVE: u32 = 0x40;
+
+/// [`legacy_per_texture_or`] for a held weapon or a modelled round, except
+/// that a BF2 segment marked additive ([`BF2_ADDITIVE`]) is BLEND, which the
+/// runtime draws additively by its flags (`game::soldier_vis`). No retail
+/// weapon on either disc carries the bit; the DLC heroes' Force ball
+/// (`bubblev3`, 0x01010044 and 0xe9) and Ventress's starblade
+/// (0x01010045) do. Every other segment keeps the legacy verdict, so retail
+/// weapon GLBs do not move. BF1's 0x40 is its vertex-colour bit, not this.
+pub fn weapon_alphas(m: &Model) -> Vec<SegmentAlpha> {
+    let mut out = legacy_per_texture_or(m);
+    for (a, seg) in out.iter_mut().zip(&m.segments) {
+        if seg.bf2_material && seg.material_flags & BF2_ADDITIVE != 0 {
+            a.mode = AlphaMode::Blend;
+        }
+    }
+    out
 }
 
 /// D7 (PROVISIONAL): should the baked KTX2 keep its alpha channel?
@@ -1478,5 +1500,82 @@ mod tests {
         segment.textures.clear();
         segment.material_flags = 0x1010044;
         assert_eq!(table.segment(&segment).mode, AlphaMode::Opaque);
+    }
+
+    /// The held-weapon rule: a BF2 additive segment (0x40) is BLEND, which the
+    /// runtime draws additively; the retail fusion cutter (0x7) and launcher
+    /// lens (0x5) stay MASK and a plain lit segment (0x1) OPAQUE, as before;
+    /// BF1's 0x40 (its vertex-colour bit) is not additive.
+    #[test]
+    fn weapon_alphas_blend_only_bf2_additive_segments() {
+        fn seg(tex: &str, flags: u32, bf2: bool) -> Segment {
+            Segment {
+                vertex_count: 3,
+                index_count: 3,
+                bf2_material: bf2,
+                pc_geometry: false,
+                material_flags: flags,
+                render_type: RenderType::Absent,
+                spec_power: 0,
+                spec_color: 0,
+                uv_anim: [0, 0],
+                textures: vec![(0, tex.to_owned())],
+                bone: None,
+                group: None,
+                bmap: Vec::new(),
+                bind: Vec::new(),
+                wght: Vec::new(),
+                positions: Vec::new(),
+                normals: Vec::new(),
+                uvs: Vec::new(),
+                colors: None,
+                triangles: vec![[0, 1, 2]],
+            }
+        }
+        let m = Model {
+            name: "w".to_owned(),
+            bone_space: false,
+            vertex_box: mungefs::model::Aabb {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            vis_box: mungefs::model::Aabb {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            face_count: 6,
+            sphere: None,
+            segments: vec![
+                seg("bubble", 0x0101_0044, true),
+                seg("spec", 0xe9, true),
+                seg("cutter", 0x7, true),
+                seg("lens", 0x5, true),
+                seg("body", 0x1, true),
+                seg("bf1", 0x41, false),
+            ],
+        };
+        let modes: Vec<AlphaMode> = weapon_alphas(&m).iter().map(|a| a.mode).collect();
+        assert_eq!(
+            modes,
+            [
+                AlphaMode::Blend,
+                AlphaMode::Blend,
+                AlphaMode::Mask,
+                AlphaMode::Mask,
+                AlphaMode::Opaque,
+                AlphaMode::Opaque,
+            ]
+        );
+        let legacy: Vec<AlphaMode> = legacy_per_texture_or(&m).iter().map(|a| a.mode).collect();
+        assert_eq!(
+            &legacy[2..],
+            &modes[2..],
+            "non-additive segments keep the legacy verdict"
+        );
+        assert_eq!(
+            legacy[0],
+            AlphaMode::Mask,
+            "the shell was MASK, cut away at 193"
+        );
     }
 }

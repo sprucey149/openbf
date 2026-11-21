@@ -583,6 +583,7 @@ fn place_vehicle_chaingun(hud: &mut Hud) {
     }
 }
 
+mod fisto;
 mod grenade;
 
 /// The HUD's own art (`hud_*`) composites by its sheets' alpha
@@ -764,6 +765,19 @@ impl HudView {
             .and_then(|path| load_mesh(path).ok())
         {
             grenade::install(&mut hud, &mut art, &thermal);
+        }
+        // The DLC Force ball's icon, only beside the DLC bake's sheet for it.
+        if pak::is_file(
+            assets_dir
+                .join("side_bf2/textures")
+                .join(format!("{}.ktx2", fisto::SHEET)),
+        ) {
+            if let Some(donor) = mesh_files
+                .get(fisto::DONOR)
+                .and_then(|path| load_mesh(path).ok())
+            {
+                fisto::install(&mut hud, &mut art, &donor);
+            }
         }
         // The two faded pills belong behind the weapon images, including
         // bitmap fallbacks. Our per-model depth slices follow draw order,
@@ -1071,7 +1085,9 @@ impl HudView {
     /// row: a BF1 class keys BF2's table by its own name when its geometry
     /// has no entry, and a weapon with no BF2 mesh shows its icon sheet.
     pub fn weapon_mesh(&self, row: u8, w: &HudWeapon) -> (String, Option<String>) {
-        if let Some(mesh) = grenade::mesh_for(&self.hud, &self.art, row, w) {
+        if let Some(mesh) = grenade::mesh_for(&self.hud, &self.art, row, w)
+            .or_else(|| fisto::mesh_for(&self.hud, &self.art, row, w))
+        {
             return (mesh.to_owned(), Some(mesh.to_owned()));
         }
         let files = &self.mesh_files;

@@ -19,6 +19,9 @@ struct SpaceReport {
     stations_lost: u32,
     critical_lost: u32,
     critical_by_flyers: u32,
+    /// Critical-system points each team scored (credited enemy kills only),
+    /// so a round's points split into systems and kills.
+    system_points: [i32; 2],
     won_at: Option<u64>,
 }
 
@@ -36,6 +39,7 @@ impl SpaceReport {
             stations_lost: 0,
             critical_lost: 0,
             critical_by_flyers: 0,
+            system_points: [0; 2],
             won_at: None,
         })
     }
@@ -58,13 +62,22 @@ impl SpaceReport {
                     station, killer, ..
                 } => {
                     self.stations_lost += 1;
-                    if sim.space_assault.as_ref().is_some_and(|space| {
+                    let system = sim.space_assault.as_ref().and_then(|space| {
                         space
                             .critical
                             .iter()
-                            .any(|system| system.station == *station)
-                    }) {
+                            .find(|system| system.station == *station)
+                    });
+                    if let Some(system) = system {
                         self.critical_lost += 1;
+                        let owner = sim.stations.get(usize::from(*station)).and_then(|s| s.team);
+                        if let Some(team) = killer.and_then(|h| sim.unit(h)).map(|u| u.team) {
+                            if owner != Some(team) && system.points > 0 {
+                                if let Some(p) = self.system_points.get_mut(usize::from(team)) {
+                                    *p += system.points;
+                                }
+                            }
+                        }
                         if killer
                             .and_then(|h| sim.unit(h))
                             .and_then(|u| u.mount)
@@ -149,9 +162,13 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let mut no_human = false;
     let mut difficulty = core::skill::Difficulty::default();
     let mut proxy_team = None;
-    let mut hunt_counts = None;
-    let mut hunt_weights = None;
-    let mut hunt_health = None;
+    let mut hunt_targets = None;
+    let mut hunt_alive = None;
+    let mut hunt_units = None;
+    let mut hunt_skill = None;
+    let mut step_timing = false;
+    let mut hunt_timeline = false;
+    let mut score_limit = None;
     let mut stop_at_outcome = false;
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -181,16 +198,47 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 anyhow::ensure!(team < 2, "Hunt proxy team must be 0 or 1");
                 proxy_team = Some(team);
             }
-            "--hunt-counts" | "--hunt-weights" | "--hunt-health" => {
-                let values = it.next().context("Hunt override requires a:b")?;
+            "--hunt-targets" => {
+                let values = it.next().context("--hunt-targets <team0>:<team1>")?;
                 let (a, b) = values.split_once(':').context("expected a:b")?;
-                let (a, b) = (a.parse::<u16>()?, b.parse::<u16>()?);
-                anyhow::ensure!(a > 0 && b > 0, "Hunt override must be positive");
-                match flag.as_str() {
-                    "--hunt-counts" => hunt_counts = Some([u8::try_from(a)?, u8::try_from(b)?]),
-                    "--hunt-weights" => hunt_weights = Some([u8::try_from(a)?, u8::try_from(b)?]),
-                    _ => hunt_health = Some([a, b]),
-                }
+                let pair = [a.parse::<u32>()?, b.parse::<u32>()?];
+                anyhow::ensure!(pair.into_iter().all(|n| n > 0), "targets must be positive");
+                hunt_targets = Some(pair);
+            }
+            "--hunt-alive" => {
+                let values = it.next().context("--hunt-alive <team0>:<team1>")?;
+                let (a, b) = values.split_once(':').context("expected a:b")?;
+                let pair = [a.parse::<u32>()?, b.parse::<u32>()?];
+                anyhow::ensure!(
+                    pair.into_iter().all(|n| n > 0),
+                    "alive caps must be positive"
+                );
+                hunt_alive = Some(pair);
+            }
+            "--hunt-units" => {
+                let values = it.next().context("--hunt-units <team0>:<team1>")?;
+                let (a, b) = values.split_once(':').context("expected a:b")?;
+                let pair = [a.parse::<u32>()?, b.parse::<u32>()?];
+                anyhow::ensure!(pair.into_iter().all(|n| n > 0), "units must be positive");
+                hunt_units = Some(pair);
+            }
+            "--hunt-skill" => {
+                let values = it.next().context("--hunt-skill <team0 %>:<team1 %>")?;
+                let (a, b) = values.split_once(':').context("expected a:b")?;
+                let pair = [a.parse::<u32>()?, b.parse::<u32>()?];
+                let floor = core::sim::deathmatch::HUNT_SKILL_FLOOR;
+                anyhow::ensure!(
+                    pair.into_iter().all(|n| (floor..=100).contains(&n)),
+                    "Hunt skill percents must be {floor}..=100"
+                );
+                hunt_skill = Some(pair);
+            }
+            "--step-timing" => step_timing = true,
+            "--hunt-timeline" => hunt_timeline = true,
+            "--score-limit" => {
+                let n: u32 = it.next().context("--score-limit <points>")?.parse()?;
+                anyhow::ensure!(n > 0, "score limit must be positive");
+                score_limit = Some(n);
             }
             "--space-report" => {
                 space_report = Some(PathBuf::from(
@@ -261,20 +309,25 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     );
     anyhow::ensure!(
         mode == "hunt"
-            || (hunt_counts.is_none() && hunt_weights.is_none() && hunt_health.is_none()),
-        "Hunt overrides require --mode hunt"
+            || (hunt_targets.is_none()
+                && hunt_alive.is_none()
+                && hunt_units.is_none()
+                && hunt_skill.is_none()
+                && !hunt_timeline),
+        "Hunt targets, alive counts, units, skill and timeline require --mode hunt"
     );
     if let Some(m) = mission.as_mut().filter(|m| m.is_hunt()) {
-        if let Some(counts) = hunt_counts {
-            m.hunt_combatants = Some([counts.map(u32::from); 4]);
-            m.ai_alive_cap = u32::from(counts[0].max(counts[1]));
+        if let Some(pair) = hunt_targets {
+            m.hunt_points_to_win = Some([pair; 4]);
         }
-        if let Some(weights) = hunt_weights {
-            m.hunt_points_per_kill = Some(weights);
-            m.hunt_kill_values = None;
+        if let Some(pair) = hunt_alive {
+            m.hunt_alive_caps = Some([pair; 4]);
         }
-        if let Some(health) = hunt_health {
-            m.hunt_health_percent = Some([health; 4]);
+        if let Some(pair) = hunt_units {
+            m.hunt_units = Some(pair);
+        }
+        if let Some(pair) = hunt_skill {
+            m.hunt_skill_pct = Some([pair; 4]);
         }
     }
     let (mut sim, name) = if let Some(map) = map {
@@ -289,7 +342,13 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 bail!("map has no authored world layer for mode {mode}");
             }
         }
-        let (scene, load) = game::assets::load_battle_scene(&map, &mode)?;
+        let (mut scene, load) = game::assets::load_battle_scene(&map, &mode)?;
+        let killed = mission
+            .as_ref()
+            .map_or(0, |m| scene.kill_objects(m.scene_kills()));
+        if killed != 0 {
+            println!("mission: {killed} objects killed from the scene (KillObject)");
+        }
         if let Some((path, Err(error))) = load.common {
             bail!("common assets at {} unreadable: {error:#}", path.display());
         }
@@ -321,7 +380,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             tickets_set: false,
             ticket_pct: 100,
             time_limit: 0,
-            space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
+            space_score_limit: score_limit.unwrap_or(core::sim::DEFAULT_SCORE_LIMIT),
             cheats: Default::default(),
             teams: mission.as_ref().map(|m| m.factions()),
             classes_dir: map
@@ -336,11 +395,11 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             dlc_heroes: false,
             netplay_rows: false,
             opening_humans: [0; 2],
-            score_limit: if mode == "hunt" {
-                50
+            score_limit: score_limit.unwrap_or(if mode == "hunt" {
+                0
             } else {
                 core::sim::deathmatch::ASSAULT_SCORE_LIMIT
-            },
+            }),
         };
         let walk = super::battle::make_walk(&scene, &setup)?;
         (
@@ -389,16 +448,65 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     } else {
         None
     };
+    if mode == "hunt" {
+        let counts = [0u8, 1].map(|team| {
+            let points = sim.spawn_points(team);
+            let mut distinct: Vec<[u32; 3]> = points
+                .iter()
+                .map(|(p, _)| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()])
+                .collect();
+            distinct.sort_unstable();
+            distinct.dedup();
+            (sim.spawn_posts(team).len(), distinct.len())
+        });
+        println!(
+            "hunt spawns: team 0 {} posts {} nodes, team 1 {} posts {} nodes; alive {:?}, units {:?}, skill {:?} %",
+            counts[0].0,
+            counts[0].1,
+            counts[1].0,
+            counts[1].1,
+            sim.team_combatants,
+            sim.deathmatch.as_ref().map(|d| d.members),
+            [sim.hunt_skill_pct(0), sim.hunt_skill_pct(1)],
+        );
+    }
+    let mut step_times: Vec<u32> = Vec::new();
+    let mut alive_sum = [0u64; 2];
     let mut tally = game::blackbox::session::Tally::default();
     let mut hunt_end = None;
+    // --hunt-timeline: the tick of every Hunt point, per team. Targets never
+    // steer the round before it ends, so one long round answers any pair.
+    let mut timeline: [Vec<u64>; 2] = Default::default();
+    let mut seen = [0u32; 2];
     for _ in 0..ticks {
         let pads = match &mut frames {
             Some(frames) => frames.next().context("input exhausted")?,
             None => &idle,
         };
-        sim.step(pads);
+        if step_timing {
+            let start = std::time::Instant::now();
+            sim.step(pads);
+            step_times.push(start.elapsed().as_micros().min(u128::from(u32::MAX)) as u32);
+            for (_, u) in sim.alive_units() {
+                if let Some(n) = alive_sum.get_mut(usize::from(u.team)) {
+                    *n += 1;
+                }
+            }
+        } else {
+            sim.step(pads);
+        }
         if let Some(i) = proxy.filter(|_| hunt_end.is_none()) {
             tally.tick(&sim, Some((i, "proxy")));
+        }
+        if hunt_timeline && hunt_end.is_none() {
+            if let Some((points, _)) = sim.team_points() {
+                for team in 0..2 {
+                    for _ in seen[team]..points[team] {
+                        timeline[team].push(sim.tick);
+                    }
+                }
+                seen = points;
+            }
         }
         if mode == "hunt" && sim.outcome.is_some() && hunt_end.is_none() {
             hunt_end = Some(sim.tick);
@@ -420,12 +528,37 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             "space assault: points {points:?} of {limit}, outcome {:?}, tick {}",
             sim.outcome, sim.tick
         );
+        if let Some(report) = &report {
+            println!("space systems: points {:?}", report.system_points);
+        }
     }
     if mode == "hunt" {
-        if let Some((points, limit)) = sim.team_points() {
+        if let Some((points, limits)) = sim.team_points() {
             println!(
-                "hunt: points {points:?} of {limit}, outcome {:?}, end tick {hunt_end:?}",
+                "hunt: points {points:?} of {limits:?}, outcome {:?}, end tick {hunt_end:?}",
                 sim.outcome,
+            );
+        }
+        if hunt_timeline {
+            for (team, ticks) in timeline.iter().enumerate() {
+                let list: Vec<String> = ticks.iter().map(u64::to_string).collect();
+                println!("hunt timeline {team}: {}", list.join(","));
+            }
+        }
+    }
+    // Issue #171 parity screening: a 1-flag or Hero Assault round's result.
+    if let Some(c) = &sim.ctf {
+        println!(
+            "ctf: points {:?} of {}, outcome {:?}, tick {}",
+            c.team_points, c.score_limit, sim.outcome, sim.tick
+        );
+    }
+    if mode != "hunt" {
+        if let Some((points, limits)) = sim.team_points() {
+            let limit = limits[0];
+            println!(
+                "deathmatch: points {points:?} of {limit}, outcome {:?}, tick {}",
+                sim.outcome, sim.tick
             );
         }
     }
@@ -433,6 +566,24 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         println!(
             "hunt proxy: team {team}, kills {}, deaths {}, shots {}, hits {}",
             tally.out.kills, tally.out.deaths, tally.out.shots, tally.out.hits
+        );
+    }
+    // --step-timing: wall time of each Sim::step (the tick alone, not the
+    // trace writer), and the mean soldiers alive per side.
+    if !step_times.is_empty() {
+        let n = step_times.len();
+        let mean = step_times.iter().map(|&t| u64::from(t)).sum::<u64>() as f64 / n as f64;
+        let mut sorted = step_times.clone();
+        sorted.sort_unstable();
+        let at = |q: f64| sorted[((n as f64 - 1.0) * q).round() as usize];
+        println!(
+            "step timing: {n} ticks, mean {mean:.0} us, p50 {} us, p95 {} us, p99 {} us, max {} us; alive mean {:.1}:{:.1}",
+            at(0.5),
+            at(0.95),
+            at(0.99),
+            sorted[n - 1],
+            alive_sum[0] as f64 / n as f64,
+            alive_sum[1] as f64 / n as f64,
         );
     }
     println!("trace: {ticks} ticks -> {}", out.display());

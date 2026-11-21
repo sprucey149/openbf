@@ -407,23 +407,4 @@ mod tests {
         assert_eq!(front.menus.page, ShellPage::CampaignBattle);
         std::fs::remove_dir_all(dir).unwrap();
     }
-
-    #[test]
-    fn an_old_single_autosave_becomes_a_named_save() {
-        let dir = temp_dir("legacy");
-        let path = dir.join("legacy.ron");
-        std::fs::write(
-            &path,
-            r#"(name:"Rex",settings:(assist_intensity:0.5),career:(rounds:1,wins:1,kills:2,deaths:1,shots:10,hits:4,captures:1),campaign:(unlocked:7,completed_mask:63,training_prompted:true,active_mission:Some(6)))"#,
-        )
-        .unwrap();
-        let p = game::profile::Profile::load_from(&path);
-        assert_eq!(p.campaign.active_mission, None);
-        assert_eq!(p.campaign.saves.len(), 1);
-        assert_eq!(p.campaign.saves[0].name, "Rex");
-        assert_eq!(p.campaign.saves[0].turn, 6);
-        assert_eq!(p.campaign.unlocked, 7);
-        assert!(!ron::to_string(&p).unwrap().contains("active_mission"));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
 }

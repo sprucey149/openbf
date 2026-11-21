@@ -732,7 +732,7 @@ impl BattleSetup {
             netplay_rows: false,
             opening_humans: [0; 2],
             score_limit: if v.mode == "hunt" {
-                50
+                0
             } else {
                 core::sim::deathmatch::ASSAULT_SCORE_LIMIT
             },

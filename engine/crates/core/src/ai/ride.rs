@@ -732,6 +732,10 @@ pub(super) fn drive(
     let Some(v) = sim.vehicle(m.vehicle) else {
         return (pad, nt);
     };
+    // A ground seat's weapon and duel, once a think (`seat_fight`).
+    if thinking {
+        super::seat_fight::think(sim, me, st);
+    }
     if v.kind == VehicleKind::Turret {
         super::man::seated(sim, me, m, st, &mut pad, &mut nt, thinking);
         return (pad, nt);

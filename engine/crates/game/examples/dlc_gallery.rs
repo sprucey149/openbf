@@ -32,22 +32,37 @@ fn main() -> Result<()> {
         let body = side.join("soldiers").join(format!("{geometry}.glb"));
         let weapon = game::roster::weapon_geometry(&db, class)
             .map(|name| side.join("weapons").join(format!("{name}.glb")));
-        let (rgba, width, height) = game::gallery::unit_sheet_clothed(
-            &body,
-            weapon.as_deref(),
-            &set,
-            std::f32::consts::FRAC_PI_4,
-        )?;
-        let image = image::RgbaImage::from_raw(width, height, rgba)
-            .context("invalid DLC gallery dimensions")?;
-        let path = out.join(format!("{class}_front.png"));
-        image.save(&path)?;
-        println!(
-            "{}: {width}x{height}, family={} bank={}",
-            path.display(),
-            set.family,
-            set.bank
-        );
+        // Each hero's own thrown model in his hand too: Kit's Force ball,
+        // Ventress's starblade (both draw additive BF2 materials).
+        let thrown = if class == "dlc_hero_fisto" {
+            "bubblev3"
+        } else {
+            "cis_inf_weap_starblade"
+        };
+        for (view, held) in [
+            ("front", weapon),
+            (
+                thrown,
+                Some(side.join("weapons").join(format!("{thrown}.glb"))),
+            ),
+        ] {
+            let (rgba, width, height) = game::gallery::unit_sheet_clothed(
+                &body,
+                held.as_deref(),
+                &set,
+                std::f32::consts::FRAC_PI_4,
+            )?;
+            let image = image::RgbaImage::from_raw(width, height, rgba)
+                .context("invalid DLC gallery dimensions")?;
+            let path = out.join(format!("{class}_{view}.png"));
+            image.save(&path)?;
+            println!(
+                "{}: {width}x{height}, family={} bank={}",
+                path.display(),
+                set.family,
+                set.bank
+            );
+        }
     }
     Ok(())
 }

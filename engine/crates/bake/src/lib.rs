@@ -53,6 +53,7 @@ pub mod spec;
 pub mod terrain_glb;
 pub mod tier;
 pub mod turret_rig;
+pub mod versions;
 pub mod vehicle;
 mod vehicle_offsets;
 mod vehicle_render;

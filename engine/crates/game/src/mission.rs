@@ -97,23 +97,57 @@ pub struct LocalTeamDef {
     pub classes: Vec<(String, u32, Option<u32>)>,
 }
 
+/// A Hunt's points to win, for each side, when its mission sets no per-tier
+/// targets (the original's 50).
+pub const HUNT_SCORE_LIMIT: u32 = 50;
+
+/// One Hunt round's per-side rules, in mission team order
+/// ([`MissionDef::hunt_round`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HuntRound {
+    /// Points to win.
+    pub targets: [u32; 2],
+    /// Soldiers alive at once, a human included.
+    pub alive: [u32; 2],
+    /// Total units each side's alive soldiers come from.
+    pub units: [u32; 2],
+    /// Bot skill scale in percent (100 = the tier's own).
+    pub skill_pct: [u32; 2],
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MissionDef {
     pub map: String,
     pub mode: String,
     pub source_game: String,
-    /// Per-team kill values authored by the original Hunt mission.
+    /// Hunt-only points to win by difficulty, in mission team order (team
+    /// 0's target, team 1's), played when the session's Hunt score is "Per
+    /// map" (0). None plays [`HUNT_SCORE_LIMIT`] for both. Hunts field the
+    /// disc's own teams and health; these targets are their only balance
+    /// (OURS, the maintainer 2026-11-20), each side at most 60 % of the pair.
     #[serde(default)]
-    pub hunt_points_per_kill: Option<[u8; 2]>,
-    /// BF1 Hunt adaptation kill values by difficulty. BF2 uses its authored values.
+    pub hunt_points_to_win: Option<[[u32; 2]; 4]>,
+    /// Hunt-only alive counts by difficulty, in mission team order: how many
+    /// of each side may be alive at once, a human counting toward his own
+    /// side. Set, it may exceed the side's disc units (Hunt is for fun and
+    /// fields big sides, OURS, the maintainer 2026-11-20 late). None keeps
+    /// [`Self::ai_alive_cap`] for both, within each side's disc units.
     #[serde(default)]
-    pub hunt_kill_values: Option<[[u8; 2]; 4]>,
-    /// Hunt-only health percentages, in mission team order, by difficulty.
+    pub hunt_alive_caps: Option<[[u32; 2]; 4]>,
+    /// Hunt-only total units per side, in mission team order: the roster a
+    /// side's alive count is drawn from. A side whose pool exceeds its alive
+    /// count fills a dead soldier's place with a fresh one while he waits to
+    /// respawn. None keeps the disc's units; never below a tier's alive count
+    /// ([`Self::hunt_round`]).
     #[serde(default)]
-    pub hunt_health_percent: Option<[[u16; 2]; 4]>,
-    /// Hunt-only population by difficulty, including the player.
+    pub hunt_units: Option<[u32; 2]>,
+    /// Hunt-only bot ease by difficulty, in mission team order, in percent
+    /// (100 plays the tier as it is, 30 the lowest): a side's bots miss
+    /// more, react a little slower and fire no-aim weapons less often
+    /// (`core::sim::Sim::hunt_skill_pct`). OURS, the maintainer 2026-11-20
+    /// late and 2026-11-21: Hunt-only easier AI. No other mode reads it.
     #[serde(default)]
-    pub hunt_combatants: Option<[[u32; 2]; 4]>,
+    pub hunt_skill_pct: Option<[[u32; 2]; 4]>,
     /// PS2 `SetHeroClass` in Lua team order; BF1 identities use BF2 playable kits.
     #[serde(default)]
     pub heroes: Vec<(u8, String)>,
@@ -229,13 +263,6 @@ pub struct MissionDef {
     /// not modelled, like the arc blocks'.
     #[serde(default)]
     pub barriers: Vec<(String, bool)>,
-    /// `ScriptPostLoad`'s `OnCharacterDeathTeam(handler, t)` whose handler is
-    /// a bare `AddReinforcements(team, -n)`: a death on port team `on` also
-    /// costs port team `team` `tickets` (Lua team − 1), on top of the
-    /// objective's own one ([`MissionDef::apply_death_drains`]). BF2 Death
-    /// Star only (analysis/re-time-limit.md §6 [V][O]; queue DSD).
-    #[serde(default)]
-    pub death_drains: Vec<DeathDrain>,
     /// The commander's lines the script sets (card ANNC,
     /// analysis/re-announcer.md §2.2-2.4), consumed by `crate::announce`.
     /// Absent on a mission whose script sets none.
@@ -444,14 +471,6 @@ pub struct SpaceTurretsDef {
     pub turrets: Vec<String>,
 }
 
-/// One [`MissionDef::death_drains`] entry, port (0-based) teams.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub struct DeathDrain {
-    pub on: u8,
-    pub team: u8,
-    pub tickets: u32,
-}
-
 /// Rise of the Empire singleplayer campaign: the mission's movies, its
 /// unlimited pools, and its logic translated from the PS2 bytecode
 /// (`scripts/campaign_ir.py`, run by [`crate::campaign_script`]).
@@ -509,6 +528,20 @@ pub fn pick_index(missions: &[[String; 2]], armies: [&str; 2]) -> Option<(usize,
         }
     }
     (!missions.is_empty()).then_some((0, 0, false))
+}
+
+/// The objects a non-campaign battle of `mode` on `map` removes from the
+/// scene before it is drawn or collided with: a Hunt mission's `KillObject`
+/// list (BF2 Hoth's back shields and shield generator, Kashyyyk's flag
+/// bases). Other modes keep their scene as baked; a missing or unreadable
+/// mission removes nothing.
+pub fn scene_kills(dir: &Path, map: &str, mode: &str) -> Vec<String> {
+    if mode != "hunt" {
+        return Vec::new();
+    }
+    MissionDef::load(&dir.join(format!("{map}_hunt.ron")))
+        .map(|m| m.scene_kills().to_vec())
+        .unwrap_or_default()
 }
 
 /// The faction pairs of `map`'s mission files for `mode` in `dir` (each era
@@ -650,16 +683,6 @@ impl MissionDef {
             .sum()
     }
 
-    /// Load [`MissionDef::death_drains`] into the battle's
-    /// [`core::battle::Battle::death_drain`] table (teams past 1 ignored).
-    pub fn apply_death_drains(&self, battle: &mut core::battle::Battle) {
-        for d in &self.death_drains {
-            if d.on < 2 && d.team < 2 {
-                battle.death_drain[usize::from(d.on)][usize::from(d.team)] += d.tickets;
-            }
-        }
-    }
-
     /// Card MAIS: put [`MissionDef::ai`] into the sim (Lua team `t` is port
     /// team `t - 1`). Run once the posts are in (`WalkSim::add_posts`): a
     /// capture ban names its post. Answers the bans that found their post.
@@ -712,6 +735,79 @@ impl MissionDef {
         self.mode == "hunt"
     }
 
+    /// What this mission removes from the scene: a Hunt's `KillObject`
+    /// targets ([`Scene::kill_objects`](crate::assets::Scene::kill_objects));
+    /// nothing for any other mode.
+    pub fn scene_kills(&self) -> &[String] {
+        if self.is_hunt() {
+            &self.killed
+        } else {
+            &[]
+        }
+    }
+
+    /// A Hunt's points to win per side at difficulty `tier`. `session` is the
+    /// shell's Hunt score: 0 ("Per map") plays the mission's targets, any
+    /// other value N keeps the map's split and scales it so the two targets
+    /// average N (an even map plays N for both).
+    pub fn hunt_targets(&self, tier: usize, session: u32) -> [u32; 2] {
+        let map = self
+            .hunt_points_to_win
+            .map_or([HUNT_SCORE_LIMIT; 2], |rows| rows[tier.min(3)]);
+        if session == 0 {
+            return map;
+        }
+        let sum = u64::from(map[0]) + u64::from(map[1]);
+        if sum == 0 || map[0] == map[1] {
+            return [session; 2];
+        }
+        map.map(|x| {
+            let scaled = (2 * u64::from(session) * u64::from(x) + sum / 2) / sum;
+            u32::try_from(scaled).unwrap_or(u32::MAX).max(1)
+        })
+    }
+
+    /// How many of each Hunt side may be alive at once at difficulty `tier`:
+    /// the mission's per-tier count (any size, at least one), else the
+    /// alive-AI cap within the side's own units.
+    pub fn hunt_alive(&self, tier: usize) -> [u32; 2] {
+        match self.hunt_alive_caps {
+            Some(rows) => rows[tier.min(3)].map(|n| n.max(1)),
+            None => [0, 1].map(|t| self.teams[t].units.min(self.ai_alive_cap).max(1)),
+        }
+    }
+
+    /// Each Hunt side's total units at difficulty `tier`: the mission's pool,
+    /// else the disc's units, never fewer than the tier's alive count.
+    pub fn hunt_units_at(&self, tier: usize) -> [u32; 2] {
+        let alive = self.hunt_alive(tier);
+        let pool = self
+            .hunt_units
+            .unwrap_or([self.teams[0].units, self.teams[1].units]);
+        [0, 1].map(|t| pool[t].max(alive[t]))
+    }
+
+    /// Each Hunt side's bot ease in percent at difficulty `tier`
+    /// (`HUNT_SKILL_FLOOR`..=100; 100 without a row).
+    pub fn hunt_skill_at(&self, tier: usize) -> [u32; 2] {
+        let floor = core::sim::deathmatch::HUNT_SKILL_FLOOR;
+        self.hunt_skill_pct.map_or([100; 2], |rows| {
+            rows[tier.min(3)].map(|p| p.clamp(floor, 100))
+        })
+    }
+
+    /// The Hunt rules a round of this mission plays at difficulty `tier`
+    /// with session Hunt score `session`; `None` for every other mode, so
+    /// no Hunt field reaches a Conquest, CTF, Assault or campaign round.
+    pub fn hunt_round(&self, tier: usize, session: u32) -> Option<HuntRound> {
+        self.is_hunt().then(|| HuntRound {
+            targets: self.hunt_targets(tier, session),
+            alive: self.hunt_alive(tier),
+            units: self.hunt_units_at(tier),
+            skill_pct: self.hunt_skill_at(tier),
+        })
+    }
+
     pub fn is_campaign(&self) -> bool {
         self.mode == "campaign"
     }
@@ -760,6 +856,101 @@ mod tests {
             eprintln!("SKIP: no engine/missions/*.ron (scripts/pack.py generates them)");
         }
         none
+    }
+
+    // Pending maintainer decision (2026-11-20): a numeric session Hunt score keeps
+    // each map's split around that average, rather than applying it to both sides.
+    #[test]
+    fn a_hunt_plays_its_per_side_targets_and_a_session_score_keeps_the_split() {
+        let base = r#"(map: "x", mode: "hunt", source_game: "bf2", teams: [
+            (faction: "rep", units: 8, tickets: 999999),
+            (faction: "geo", units: 25, tickets: 999999)],
+            ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25)"#;
+        let even: MissionDef = ron::from_str(base).unwrap();
+        assert_eq!(even.hunt_targets(2, 0), [HUNT_SCORE_LIMIT; 2]);
+        assert_eq!(even.hunt_targets(2, 70), [70, 70]);
+        let split: MissionDef = ron::from_str(&base.replacen(
+            "teams:",
+            "hunt_points_to_win: Some(((30, 30), (36, 24), (60, 40), (25, 25))), teams:",
+            1,
+        ))
+        .unwrap();
+        assert_eq!(split.hunt_targets(0, 0), [30, 30]);
+        assert_eq!(split.hunt_targets(2, 0), [60, 40]);
+        assert_eq!(split.hunt_targets(2, 100), [120, 80]);
+        assert_eq!(split.hunt_targets(1, 10), [12, 8]);
+        assert_eq!(split.hunt_targets(3, 70), [70, 70]);
+        // A stale mission's removed balance fields are ignored, not applied.
+        let stale: MissionDef = ron::from_str(&base.replacen(
+            "teams:",
+            "hunt_health_percent: Some(((50, 400), (50, 400), (50, 400), (50, 400))), teams:",
+            1,
+        ))
+        .unwrap();
+        assert_eq!(stale.hunt_targets(2, 0), [HUNT_SCORE_LIMIT; 2]);
+    }
+
+    #[test]
+    fn a_hunt_sets_each_sides_alive_count_and_pool_above_the_disc() {
+        let base = r#"(map: "x", mode: "hunt", source_game: "bf2", teams: [
+            (faction: "rep", units: 8, tickets: 999999),
+            (faction: "geo", units: 25, tickets: 999999)],
+            ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25)"#;
+        let plain: MissionDef = ron::from_str(base).unwrap();
+        assert_eq!(
+            plain.hunt_alive(2),
+            [8, 16],
+            "no rows: the alive-AI cap, within each side's units"
+        );
+        assert_eq!(plain.hunt_units_at(2), [8, 25], "the disc's units");
+        assert_eq!(plain.hunt_skill_at(2), [100, 100]);
+        let big: MissionDef = ron::from_str(&base.replacen(
+            "teams:",
+            "hunt_alive_caps: Some(((24, 24), (24, 26), (40, 32), (0, 48))), \
+             hunt_units: Some((30, 30)), \
+             hunt_skill_pct: Some(((100, 100), (100, 80), (60, 100), (0, 300))), teams:",
+            1,
+        ))
+        .unwrap();
+        assert_eq!(big.hunt_alive(0), [24, 24], "above the disc's 8");
+        assert_eq!(big.hunt_alive(1), [24, 26], "one side two more");
+        assert_eq!(big.hunt_alive(3), [1, 48], "at least one");
+        assert_eq!(big.hunt_alive(9), [1, 48]);
+        assert_eq!(big.hunt_units_at(0), [30, 30]);
+        assert_eq!(
+            big.hunt_units_at(2),
+            [40, 32],
+            "never below the alive count"
+        );
+        assert_eq!(big.hunt_units_at(3), [30, 48]);
+        assert_eq!(big.hunt_skill_at(1), [100, 80]);
+        assert_eq!(big.hunt_skill_at(3), [30, 100], "clamped to 30..=100");
+        let round = big.hunt_round(2, 0).unwrap();
+        assert_eq!(
+            (round.alive, round.units, round.skill_pct),
+            ([40, 32], [40, 32], [60, 100])
+        );
+        assert_eq!(round.targets, [HUNT_SCORE_LIMIT; 2]);
+    }
+
+    #[test]
+    fn a_conquest_mission_ignores_every_hunt_field() {
+        let con: MissionDef = ron::from_str(
+            r#"(map: "x", mode: "con", source_game: "bf2",
+            hunt_points_to_win: Some(((10, 10), (10, 10), (10, 10), (10, 10))),
+            hunt_alive_caps: Some(((40, 40), (40, 40), (40, 40), (40, 40))),
+            hunt_units: Some((60, 60)),
+            hunt_skill_pct: Some(((10, 10), (10, 10), (10, 10), (10, 10))),
+            teams: [
+            (faction: "rep", units: 20, tickets: 150),
+            (faction: "cis", units: 20, tickets: 150)],
+            ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25)"#,
+        )
+        .unwrap();
+        for tier in 0..4 {
+            assert_eq!(con.hunt_round(tier, 0), None);
+        }
+        assert!(con.scene_kills().is_empty());
     }
 
     #[test]
@@ -1296,41 +1487,36 @@ mod tests {
         assert_eq!(m.factions(), ["imp".to_string(), "all".to_string()]);
     }
 
-    /// DSD: only the two Death Star RONs carry a death drain — Lua team 1's
-    /// own deaths cost it a second ticket — and it reaches the battle.
+    /// Every death costs exactly one ticket on BF2 Death Star conquest, both
+    /// eras, for both teams. The disc script charges team 0 a second ticket
+    /// per death; openbf drops that on purpose (analysis/plan/FEATURE_SET.md
+    /// "Every death costs one ticket"). A RON generated before the change
+    /// still carries `death_drains`; it must load and be ignored.
     #[test]
-    fn only_the_death_star_drains_a_second_ticket() {
+    fn a_death_star_death_costs_exactly_one_ticket() {
         if no_missions() {
             return;
         }
-        let mut with = Vec::new();
-        for e in std::fs::read_dir(missions_dir()).expect("missions dir") {
-            let p = e.expect("entry").path();
-            if p.extension().and_then(|x| x.to_str()) != Some("ron") {
-                continue;
-            }
-            let m = MissionDef::load(&p).expect("mission parses");
-            if !m.death_drains.is_empty() {
+        for name in ["bf2_dea1_con.ron", "bf2_dea1_con_cw.ron"] {
+            let m = MissionDef::load(&missions_dir().join(name)).expect("dea1 parses");
+            let start = m.tickets();
+            for dying in 0..2 {
+                let mut b = core::battle::Battle::new(start);
+                for t in &mut b.teams {
+                    t.alive_ai = 4;
+                    t.alive_players = 1;
+                }
+                b.on_death(dying, false);
+                b.on_death(dying, true);
+                let mut want = start;
+                want[dying] -= 2;
                 assert_eq!(
-                    m.death_drains,
-                    [DeathDrain {
-                        on: 0,
-                        team: 0,
-                        tickets: 1
-                    }],
-                    "{}",
-                    p.display()
+                    [b.teams[0].tickets(), b.teams[1].tickets()],
+                    want,
+                    "{name}: two team-{dying} deaths cost team {dying} two tickets"
                 );
-                with.push(p.file_name().unwrap().to_string_lossy().into_owned());
             }
         }
-        with.sort();
-        assert_eq!(with, ["bf2_dea1_con.ron", "bf2_dea1_con_cw.ron"]);
-
-        let m = MissionDef::load(&missions_dir().join("bf2_dea1_con.ron")).expect("dea1");
-        let mut b = core::battle::Battle::new(m.tickets());
-        m.apply_death_drains(&mut b);
-        assert_eq!(b.death_drain, [[1, 0], [0, 0]]);
     }
 
     /// Card SSELB acceptance 1: the mission RON carries the script's

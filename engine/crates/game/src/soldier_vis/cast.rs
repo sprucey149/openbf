@@ -23,12 +23,15 @@ pub(super) fn animation<'a>(
             .rfind(|field| field.keyword == manifest::combo::ComboKeyword::ThrowAnimation)?
             .text(0);
     }
-    let power = power.force.as_ref()?;
     // Area-effect SoldierAnimation names the victim pose (0x32d198),
     // while the caster uses the melee program's offhand fire animation.
-    let own = matches!(power.kind, core::hero_weapon::ForceKind::Emitter(_))
-        .then_some(power.animation.as_deref())
-        .flatten();
+    let own = match power.force.as_ref() {
+        Some(force) => matches!(force.kind, core::hero_weapon::ForceKind::Emitter(_))
+            .then_some(force.animation.as_deref())
+            .flatten(),
+        None if offhand_projectile(power, primary) => None,
+        None => return None,
+    };
     own.or_else(|| {
         // PS2 0x309d10 maps OffhandAnimation FIRE to the first fire slot.
         primary
@@ -45,6 +48,23 @@ pub(super) fn animation<'a>(
             })?
             .text(0)
     })
+}
+
+/// A melee hero's offhand power that throws a modelled round: Kit Fisto's
+/// Force ball, a cannon (`force_pull`'s child) firing a missile. The soldier
+/// animator takes the melee program's offhand FIRE pose for whatever offhand
+/// weapon fires (getter 0x33c438, called by 0x239bb0, B2:153915), not only
+/// for the emitter powers, so the ball's throw is Kit's `stand_useforce`
+/// (`fisto_sabre_stand_useforce_full`, 40 frames), started by its shot.
+pub(super) fn offhand_projectile(
+    power: &core::weapon::WeaponClass,
+    primary: &core::weapon::WeaponClass,
+) -> bool {
+    power.force.is_none()
+        && power.saber.is_none()
+        && power.saber_throw.is_none()
+        && power.ordnance.missile.is_some()
+        && primary.saber.is_some()
 }
 
 #[derive(Clone, Default)]
@@ -315,6 +335,83 @@ mod tests {
         assert_eq!(
             clock.pose(&clips, &class, "weapon", "cast", true),
             Some((2, 0.0))
+        );
+    }
+
+    fn melee_primary() -> core::weapon::WeaponClass {
+        use manifest::combo::{ComboDef, ComboField, ComboKeyword as K, ComboValue as V};
+        let mut primary = core::weapon::WeaponClass::default();
+        primary.saber = Some(Box::new(core::hero_weapon::SaberClass {
+            combo: ComboDef {
+                name_hash: 0,
+                fields: vec![ComboField {
+                    keyword: K::OffhandAnimation,
+                    args: vec![V::Text("stand_useforce".into()), V::Text("FIRE".into())],
+                    scoped: false,
+                    children: vec![],
+                }],
+            },
+            blades: vec![],
+            throw_edges: vec![],
+            deflect_edges: vec![],
+            weapon_bind: glam::Mat4::IDENTITY,
+            throw_bindings: vec![],
+            clips: vec![],
+            state_seconds: vec![],
+            damage: 0.0,
+            hit_sound: None,
+            deflect_sound: None,
+            hit_effect: None,
+            deflect_effect: None,
+        }));
+        primary
+    }
+
+    /// Kit Fisto's Force ball (a cannon firing a missile) throws with his
+    /// offhand FIRE pose, the whole authored clip (40 frames: 1.3 s), as an
+    /// emitter power does; a gun in a soldier's hands, or a melee hero's
+    /// buff with no round, plays no cast.
+    #[test]
+    fn a_melee_heros_thrown_ball_plays_the_offhand_fire_pose_to_its_end() {
+        let primary = melee_primary();
+        let mut ball = core::weapon::WeaponClass::default();
+        assert_eq!(animation(&ball, &primary), None, "no round, no cast");
+        ball.ordnance.missile = Some(core::missile::MissileClass::default());
+        assert!(offhand_projectile(&ball, &primary));
+        assert_eq!(animation(&ball, &primary), Some("stand_useforce"));
+        let rifle = core::weapon::WeaponClass::default();
+        assert!(!offhand_projectile(&ball, &rifle));
+        assert_eq!(animation(&ball, &rifle), None);
+
+        let class = ClassAnim {
+            family: "fisto".into(),
+            ..Default::default()
+        };
+        let clips = [Clip {
+            name: "fisto_rifle_stand_useforce_full".into(),
+            fps: 30.0,
+            frames: 40,
+            tracks: vec![],
+        }];
+        let mut clock = CastClock::default();
+        clock.start(1, 3);
+        let mut last = 0.0;
+        for tick in 2..60u64 {
+            clock.advance(1.0 / 30.0);
+            match clock.pose(&clips, &class, "saber", "stand_useforce", false) {
+                Some((3, age)) => last = age,
+                other => {
+                    assert!(other.is_none());
+                    break;
+                }
+            }
+            let _ = tick;
+        }
+        // Within a frame of its last (39 / 30 s): the clock's steps are
+        // summed floats.
+        assert!(
+            (last - 39.0 / 30.0).abs() <= 1.0 / 30.0 + 1e-4,
+            "played to its last frame: {last}"
         );
     }
 }

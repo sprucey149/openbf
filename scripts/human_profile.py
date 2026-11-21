@@ -15,6 +15,11 @@ SWEEP_PROXY and MATCHLOG_DIR).
       [--tol 0.2] [--skip-heroes]
       the human's summed profile against the proxy logs' summed profile,
       per metric, with the gap and OK / OFF against the tolerance
+  human_profile.py bins LOG [LOG ...] [--proxy LOG [LOG ...]]
+      shot-level hit rate by weapon kind (auto / scoped), his own movement
+      (still, move, strafe, air, vehicle) and the range to the enemy
+      nearest the ray, plus where his shots go by range: the shape a
+      stand-in's accuracy must follow (with --proxy: the two side by side)
   human_profile.py calibrate HUMAN_LOG [HUMAN_LOG ...] [--seeds 4]
       [--first-seed 1] [--grid skill=16,18,20 reaction=6,9] [--strength good]
       [--bin PATH] [--keep DIR] [--tol 0.2] [--fit kd,kills_min,...]
@@ -313,6 +318,98 @@ def show(args):
             print(f"  {k:13} {f.format(pr[k])}")
 
 
+# A shot "hits" when a hit by him on an enemy lands within BIN_WINDOW ticks
+# after it: the latest such shot whose nearest enemy was the victim, else
+# the latest shot. Melee and blast weapons are left out.
+BIN_WINDOW = 20
+RANGES = ((0, 10), (10, 25), (25, 50), (50, 100), (100, 1e9))
+
+
+def weapon_kind(name):
+    n = name or ""
+    if "sniper" in n:
+        return "scoped"
+    if any(k in n for k in ("rocket", "launcher", "mortar", "detonator", "grenade", "mine", "detpack", "emp")):
+        return "blast"
+    if "saber" in n:
+        return "melee"
+    return "auto"
+
+
+def own_motion(s):
+    if s is None:
+        return "?"
+    side, fwd, seat, stance = s[8], s[9], s[12], s[7]
+    if seat != -1:
+        return "vehicle"
+    if stance in (4, 5, 6, 7, 8):
+        return "air"
+    if abs(side) > 2.0:
+        return "strafe"
+    if (side * side + fwd * fwd) ** 0.5 > 2.0:
+        return "move"
+    return "still"
+
+
+def range_bin(r):
+    if r is None:
+        return None
+    for lo, hi in RANGES:
+        if r < hi:
+            return f"{lo}-{hi if hi < 1e9 else ''}"
+    return None
+
+
+def shot_bins(paths):
+    import bisect
+    import collections
+    tot = collections.defaultdict(lambda: [0, 0])
+    for path in paths:
+        head, rows, end = load(path, True)
+        u, team = head["unit"], head["team"]
+        wn = end.get("names", {}).get("weapons", [])
+        shots, last = [], None
+        for r in rows:
+            if r[0] == "s":
+                last = r
+            elif r[0] == "shot" and len(r) >= 11:
+                w = wn[r[2]] if r[2] is not None and r[2] < len(wn) else ""
+                shots.append([r[1], weapon_kind(w), r[8], range_bin(r[10]), own_motion(last), 0])
+        ts = [x[0] for x in shots]
+        for r in rows:
+            if r[0] != "hit" or r[2] != u or r[5] == team:
+                continue
+            tick, victim = r[1], r[3]
+            i = bisect.bisect_right(ts, tick) - 1
+            pick = next((j for j in range(i, -1, -1) if tick - ts[j] <= BIN_WINDOW and shots[j][2] == victim), None)
+            if pick is None and i >= 0 and tick - ts[i] <= BIN_WINDOW:
+                pick = i
+            if pick is not None:
+                shots[pick][5] = 1
+        for _, kind, _, rng, mot, hit in shots:
+            if kind in ("blast", "melee"):
+                continue
+            for key in ((kind,), (kind, "range", rng), (kind, "motion", mot), (kind, mot, rng)):
+                tot[key][0] += 1
+                tot[key][1] += hit
+    return tot
+
+
+def bins(args):
+    sets = [("him", shot_bins(args.logs))]
+    if args.proxy:
+        sets.append(("proxy", shot_bins(args.proxy)))
+    keys = sorted({k for _, t in sets for k in t}, key=lambda k: (k[0], len(k), str(k)))
+    print(f"{'bin':28}" + "".join(f" {n + ' shots':>11} {n + ' hit':>9} {'share':>6}" for n, _ in sets))
+    for k in keys:
+        cells = ""
+        for _, t in sets:
+            n, h = t.get(k, [0, 0])
+            whole = t.get((k[0],), [0, 0])[0]
+            cells += f" {n:11} {h / n if n else float('nan'):9.3f} {n / max(whole, 1):6.2f}"
+        print(f"{'/'.join(str(x) for x in k):28}{cells}")
+
+
 def gap(h, p):
     if h != h or p != p:
         return float("nan")
@@ -460,7 +557,7 @@ def calibrate(args):
     names = {"skill": "skill", "reaction": "reaction_ticks", "view": "view_mult", "circles": "circles",
              "strafe": "react[0]", "roll": "react[1]", "move": "react[2]", "grenade": "grenade",
              "hand": "hand (Some(Hand::DEFAULT) / None)", "hfloor": "hand.floor", "hacquire": "hand.acquire",
-             "hsettle": "hand.settle", "hup": "hand.up", "head": "headshots", "hunts": "hunts",
+             "hsettle": "hand.settle", "hup": "hand.up", "htrack": "hand.track", "hair": "hand.air", "hseat": "hand.seat", "head": "headshots", "hunts": "hunts",
              "class": "class", "mend": "mend", "picks": "picks"}
     for k, v in point.items():
         print(f"  {names.get(k, k)} = {v}")
@@ -483,6 +580,10 @@ def main():
     a.add_argument("--allow-cheats", action="store_true")
     a.add_argument("--skip-heroes", action="store_true")
     a.set_defaults(fn=compare)
+    a = sub.add_parser("bins")
+    a.add_argument("logs", nargs="+")
+    a.add_argument("--proxy", nargs="+")
+    a.set_defaults(fn=bins)
     a = sub.add_parser("calibrate")
     a.add_argument("human", nargs="+")
     a.add_argument("--seeds", type=int, default=4)

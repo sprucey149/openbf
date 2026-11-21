@@ -119,7 +119,9 @@ pub struct CommandPost {
     /// BF2's `AISpawnWeight` (re-command-walker-post §6 [O]: cp+0x11c, the
     /// constructor's 100.0, an instance key clamped ≥ 0): this post's weight
     /// in a bot's draw of where to spawn (`Sim::keep_or_draw_spawn_post`).
-    /// BF1 has no such key — every post keeps the default, a uniform draw.
+    /// BF1 has no such key — every post keeps the default, a uniform draw,
+    /// except where OURS #171 parity rows (`game::layout::CONQUEST_PARITY`
+    /// `SpawnWeight`) set unequal weights on a BF1 map: the draw is weighted there.
     /// Never changes after setup, so it is not part of the hash.
     pub ai_spawn_weight: f32,
     /// Card MAIS: `AICanCaptureCP(post, team, false)` - bit `t` set: team

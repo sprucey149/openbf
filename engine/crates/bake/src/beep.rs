@@ -99,27 +99,51 @@ pub fn bake_beep_with_path(
         std::fs::write(&wav_path, wav).with_context(|| stem.clone())?;
         // OGG via ffmpeg when available (kira plays both wav and ogg).
         let ogg_path = Path::new(outdir).join(format!("{stem}.ogg"));
-        if let Ok(st) = std::process::Command::new("ffmpeg")
-            .args(["-y", "-loglevel", "error", "-i"])
-            .arg(&wav_path)
-            .args(["-c:a", "libvorbis", "-qscale:a", "6"])
-            .arg(&ogg_path)
-            .status()
-        {
-            if st.success() {
-                let mut buf =
-                    std::fs::read(&ogg_path).with_context(|| ogg_path.display().to_string())?;
-                crate::ogg::pin_ogg_serial(&mut buf, ogg_serial(stem))
-                    .with_context(|| ogg_path.display().to_string())?;
-                std::fs::write(&ogg_path, &buf).with_context(|| ogg_path.display().to_string())?;
-                ogg_written = true;
-            }
+        if encode_ogg("ffmpeg", &wav_path, &ogg_path)? {
+            let mut buf =
+                std::fs::read(&ogg_path).with_context(|| ogg_path.display().to_string())?;
+            crate::ogg::pin_ogg_serial(&mut buf, ogg_serial(stem))
+                .with_context(|| ogg_path.display().to_string())?;
+            std::fs::write(&ogg_path, &buf).with_context(|| ogg_path.display().to_string())?;
+            ogg_written = true;
         }
     }
     Ok(BeepBake {
         outputs,
         ogg_written,
     })
+}
+
+/// Encode `wav` to `ogg` with `ffmpeg` (the program to start). Ok(false) when
+/// there is no such program, so a bake without ffmpeg keeps its WAVs as
+/// before. An ffmpeg that runs and fails is an error naming the file: before,
+/// it was skipped without a word (an ffmpeg without libvorbis, such as plain
+/// Homebrew ffmpeg, left the beep with no OGG and the bake went on).
+/// `-nostdin` and a null stdin keep ffmpeg off the terminal, so a bake run in
+/// the background is never stopped waiting for it (SIGTTIN). Neither changes
+/// the bytes it writes.
+fn encode_ogg(ffmpeg: &str, wav: &Path, ogg: &Path) -> Result<bool> {
+    let status = match std::process::Command::new(ffmpeg)
+        .args(["-nostdin", "-y", "-loglevel", "error", "-i"])
+        .arg(wav)
+        .args(["-c:a", "libvorbis", "-qscale:a", "6"])
+        .arg(ogg)
+        .stdin(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) => status,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error).with_context(|| format!("starting {ffmpeg}")),
+    };
+    if !status.success() {
+        let _ = std::fs::remove_file(ogg);
+        return Err(anyhow!(
+            "{ffmpeg} could not encode {} ({status}); the bake needs an ffmpeg with the \
+             libvorbis encoder (`ffmpeg -hide_banner -encoders | grep libvorbis`)",
+            ogg.display()
+        ));
+    }
+    Ok(true)
 }
 
 /// The serial the beep's `<stem>.ogg` carries: a hash of the file name and
@@ -134,6 +158,25 @@ fn ogg_serial(stem: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No ffmpeg at all keeps the old WAV-only result; an ffmpeg that runs
+    /// and fails (`false` stands in for one without libvorbis) is reported,
+    /// and its partial OGG is not left behind.
+    #[cfg(unix)]
+    #[test]
+    fn beep_ogg_encode_reports_a_failed_ffmpeg() {
+        let dir = std::env::temp_dir().join(format!("beep-encode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (wav, ogg) = (dir.join("t.wav"), dir.join("t.ogg"));
+        std::fs::write(&wav, crate::adpcm::wav_mono_s16(22050, &[0; 64])).unwrap();
+        let missing = dir.join("no-such-ffmpeg");
+        assert!(!encode_ogg(missing.to_str().unwrap(), &wav, &ogg).unwrap());
+        std::fs::write(&ogg, b"partial").unwrap();
+        let error = encode_ogg("false", &wav, &ogg).unwrap_err().to_string();
+        assert!(error.contains("t.ogg") && error.contains("libvorbis"), "{error}");
+        assert!(!ogg.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// The serials the three shipped `engine/assets_baked/audio/*.ogg` carry
     /// in all three of their pages (read from the bake of main `f4e4e76` with

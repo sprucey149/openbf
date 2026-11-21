@@ -842,6 +842,78 @@ fn weapon_fire_points_are_the_ram_values() {
     }
 }
 
+/// A one-sheet LVL: `name`, 4x4 32-bit, every texel alpha `alpha`.
+fn one_sheet_lvl(name: &str, alpha: u8) -> Vec<u8> {
+    let chunk = |tag: &[u8; 4], payload: &[u8]| {
+        let mut v = tag.to_vec();
+        v.extend((payload.len() as u32).to_le_bytes());
+        v.extend(payload);
+        while v.len() % 4 != 0 {
+            v.push(0);
+        }
+        v
+    };
+    let mut info = Vec::new();
+    for v in [4u16, 4, 32, 0] {
+        info.extend(v.to_le_bytes());
+    }
+    info.extend(0f32.to_le_bytes());
+    info.extend(1u16.to_le_bytes());
+    // One literal run of 16 [A, B, G, R] texels (`mungefs::rle`).
+    let mut body = vec![15u8];
+    for _ in 0..16 {
+        body.extend([alpha, 40, 80, 120]);
+    }
+    let mut name0 = name.as_bytes().to_vec();
+    name0.push(0);
+    let mut tex = chunk(b"NAME", &name0);
+    tex.extend(chunk(b"INFO", &info));
+    tex.extend(chunk(b"BODY", &body));
+    chunk(b"ucfb", &chunk(b"tex_", &tex))
+}
+
+fn written_alpha(dir: &Path, name: &str) -> Vec<u8> {
+    let bytes = std::fs::read(dir.join(format!("textures/{name}.ktx2"))).unwrap();
+    let r = ktx2::Reader::new(&bytes).unwrap();
+    let level0 = r.levels().next().unwrap();
+    level0
+        .data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| p[3])
+        .collect()
+}
+
+/// Kit Fisto's fist and foot models draw his body sheet with plain 0x1 after
+/// the body bake wrote it with its gloss mask (a 0xa9 specular-pass segment).
+/// The weapon's rewrite of the same file must keep that alpha: at 255 the
+/// power-2 pass lit his whole body.
+#[test]
+fn weapon_sharing_a_body_sheet_keeps_its_gloss_alpha() {
+    let lvl = one_sheet_lvl("body", 16);
+    let inner = mungefs::open(&lvl).unwrap();
+    let wanted = vec!["body".to_owned()];
+    let weapon: std::collections::HashMap<String, u32> = [("body".to_owned(), 0x1)].into();
+    let body: std::collections::HashMap<String, u32> =
+        [("body".to_owned(), 0xa9 | crate::detail::ALPHA_IS_MEANINGFUL)].into();
+    let root = std::env::temp_dir().join(format!("openbf_shared_sheet_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let (alone, merged) = (root.join("alone"), root.join("merged"));
+    bake_textures_flagged(inner, &wanted, &weapon, &alone, None).unwrap();
+    assert!(
+        written_alpha(&alone, "body").iter().all(|&a| a == 255),
+        "the weapon's own flags alone write the sheet opaque"
+    );
+    bake_textures_flagged(inner, &wanted, &merge_prior(weapon, &body), &merged, None).unwrap();
+    let alpha = written_alpha(&merged, "body");
+    assert!(alpha.iter().all(|&a| a == 16), "gloss mask kept: {alpha:?}");
+    // A sheet the body never wrote keeps the weapon's own decision.
+    let only: std::collections::HashMap<String, u32> = [("other".to_owned(), 0x1)].into();
+    assert_eq!(merge_prior(only.clone(), &body), only);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Unskinned helper wrappers absent from the pose rig (e.g.
 /// `gar_inf_nabooqueen`'s `root_a_spine` above `bone_a_spine`) fold into their
 /// children so clips run on the `zaf_` hierarchy without double-applying the

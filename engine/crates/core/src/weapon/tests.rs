@@ -1006,6 +1006,55 @@ fn give_sniper_assist_leaves_other_weapons_alone() {
     }
 }
 
+/// [ours] (the maintainer, 2026-11-20) A lengthened blaster's assist runs
+/// on the sniper's curve: full strength out to the disc's reach (BF1's
+/// rifle: 80 m/s x 1.5 s = 120 m), half at the midpoint to the bolt's
+/// 200 m (160 m), nothing at 200 m. The disc's `LockOnRange` (64 m) stays
+/// for the PS2's pull fade; the magnet, the acquisition and the reticle's
+/// cue reach 200 m. A rifle not lengthened, a remote droid kept at its
+/// reach and a gun without the disc's magnet are left alone.
+#[test]
+fn a_lengthened_blaster_assist_fades_from_the_disc_reach_to_200_m() {
+    let plain = WeaponClass::bf1_rifle();
+    let mut rifle = plain.clone();
+    rifle.ordnance.extend_bolt_reach();
+    rifle.give_bolt_assist();
+    assert_eq!(rifle.ordnance.natural_reach, Some(120.0));
+    assert_eq!(rifle.lock_on_range, plain.lock_on_range, "the disc's 64 m");
+    assert_eq!(rifle.assist_full_range, 120.0);
+    assert!(rifle.magnet_reach() >= BOLT_REACH && rifle.magnet_reach() < BOLT_REACH + 0.01);
+    assert!(rifle.extreme_range >= BOLT_REACH, "{}", rifle.extreme_range);
+    assert_eq!(rifle.assist_range_scale(30.0), 1.0);
+    assert_eq!(rifle.assist_range_scale(119.0), 1.0);
+    assert!((rifle.assist_range_scale(160.0) - 0.5).abs() < 1e-3);
+    assert!(rifle.assist_range_scale(BOLT_REACH + 0.01) == 0.0);
+    assert!(rifle.assist_range_scale(BOLT_REACH) < 1e-4);
+    // Before: the magnet ends at the disc's LockOnRange, no curve.
+    assert_eq!(plain.magnet_reach(), 64.0);
+    assert_eq!(plain.assist_range_scale(119.0), 1.0);
+    let mut again = plain.clone();
+    again.give_bolt_assist();
+    assert_eq!(again, plain, "a bolt not lengthened");
+    // A gun with no magnet (BF1's building turret: LockOnRange 0).
+    let mut gun = WeaponClass {
+        lock_on_range: 0.0,
+        ..plain.clone()
+    };
+    gun.ordnance.extend_bolt_reach();
+    let before = gun.clone();
+    gun.give_bolt_assist();
+    assert_eq!(gun, before);
+    assert_eq!(gun.assist_range_scale(150.0), 1.0);
+    // The sniper's curve is the one it had (full to 128 m, nothing at 300).
+    let mut sniper = disc_sniper(0.0);
+    sniper.give_sniper_assist();
+    let snapshot = sniper.clone();
+    sniper.give_bolt_assist();
+    assert_eq!(sniper, snapshot);
+    assert_eq!(sniper.assist_range_scale(128.0), 1.0);
+    assert!((sniper.assist_range_scale(214.0) - 0.5).abs() < 1e-3);
+}
+
 /// One update of a pressed-or-not trigger: whether it clicked, and its shots.
 fn press_update(w: &mut WeaponState, c: &WeaponClass, input: FireInput) -> (bool, usize) {
     let mut shots = Vec::new();

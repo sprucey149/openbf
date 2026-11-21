@@ -57,6 +57,7 @@ mod props;
 pub use props::prop_glow_draw;
 mod repair;
 pub mod ripple;
+pub mod shield;
 mod sky;
 mod space_dust;
 mod storm;
@@ -251,6 +252,11 @@ pub struct Library {
     effects: HashMap<u32, Arc<EffectDef>>,
     beams: HashMap<u32, manifest::FxBeam>,
     lightning: HashMap<u32, manifest::FxLightning>,
+    /// `Shield` records an ordnance names as its `TrailEffect` (the DLC
+    /// Force ball's `fisto_bubble`, [`shield`]).
+    shields: HashMap<u32, manifest::FxShield>,
+    /// The shared `specular` table the shells' second pass reads.
+    shield_table: Option<PathBuf>,
     /// The layers' `textures/` dirs, map first.
     texture_dirs: Vec<PathBuf>,
     model_dirs: Vec<PathBuf>,
@@ -279,9 +285,13 @@ impl Library {
         let mut effects = HashMap::new();
         let mut beams = HashMap::new();
         let mut lightning = HashMap::new();
+        let mut shields = HashMap::new();
         for set in sets {
             for b in set.beams {
                 beams.entry(b.hash).or_insert(b);
+            }
+            for s in set.shields {
+                shields.entry(s.hash).or_insert(s);
             }
             for b in set.lightning {
                 lightning.entry(b.hash).or_insert(b);
@@ -308,6 +318,8 @@ impl Library {
             effects,
             beams,
             lightning,
+            shields,
+            shield_table: None,
             texture_dirs: Vec::new(),
             model_dirs: Vec::new(),
         }
@@ -383,6 +395,7 @@ impl Library {
             }
         }
         let mut lib = Library::from_sets(era, sets, &mut Lcg(0x5eed_f00d));
+        lib.shield_table = Some(assets_dir.join("common_bf2/specular.ktx2"));
         lib.model_dirs = dirs.iter().map(|d| d.join("models")).collect();
         lib.texture_dirs = dirs.iter().map(|d| d.join("textures")).collect();
         let side = assets_dir.join(format!("side_{game}"));
@@ -406,6 +419,11 @@ impl Library {
 
     pub fn get(&self, name: &str) -> Option<&Arc<EffectDef>> {
         self.effects.get(&crate::classdb::fnv1a_lowercase(name))
+    }
+
+    /// The `Shield` record named `name` ([`shield`]).
+    pub fn shield(&self, name: &str) -> Option<&manifest::FxShield> {
+        self.shields.get(&crate::classdb::fnv1a_lowercase(name))
     }
 
     pub fn beam(&self, name: &str) -> Option<&manifest::FxBeam> {
@@ -814,6 +832,8 @@ pub struct Fx {
     pub shake: crate::camera_shake::CameraShake,
     /// This tick's blasts with a shake, and where, until [`Fx::ingest`].
     shake_blasts: Vec<(Vec3, core::impact::Shake)>,
+    /// The shells' rim sheet and specular table, once uploaded ([`shield`]).
+    shell_sheets: Option<shield::Sheets>,
 }
 
 impl std::fmt::Debug for Fx {
@@ -839,6 +859,12 @@ impl Fx {
             }
             for (key, value) in added.lightning {
                 lib.lightning.entry(key).or_insert(value);
+            }
+            for (key, value) in added.shields {
+                lib.shields.entry(key).or_insert(value);
+            }
+            if lib.shield_table.is_none() {
+                lib.shield_table = added.shield_table;
             }
             for dir in added.texture_dirs {
                 if !lib.texture_dirs.contains(&dir) {
@@ -1201,6 +1227,8 @@ impl Fx {
         extra: Vec<ParticleDraw>,
     ) {
         self.particle_lod_bias = walk.particle_lod_bias;
+        let mut extra = extra;
+        self.shell_draws(r, camera, &walk.sim, &mut extra);
         let saved = self.drawn_round_frames(&walk.sim);
         self.submit_zoomed(r, camera, walk.zoom_s, extra);
         self.restore_round_frames(saved);

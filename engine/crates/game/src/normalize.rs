@@ -485,6 +485,70 @@ pub fn is_infantry_damage(class: &str) -> bool {
     class.to_ascii_lowercase().contains("_weap_inf_")
 }
 
+/// The name parts of an infantry weapon's ordnance class in both games: a
+/// soldier's, a hero's, an award weapon's, a droid's own blaster
+/// (`imp_weap_droid_probe_blaster_ord`).
+const INFANTRY_ORDNANCE: &[&str] = &["_weap_inf_", "_weap_hero_", "_weap_award_", "_weap_droid_"];
+
+/// Infantry rounds that keep the disc's reach: the remote droids' blasters
+/// (the maintainer, 2026-11-20: "remote droid blaster: keep at 60m"; BF1's
+/// 60 m, BF2's 128 m).
+const KEEP_REACH: &[&str] = &["remotedroid"];
+
+/// The name parts of a vehicle's, a building turret's or a map turret's
+/// gun ordnance in both games (`imp_weap_walk_atst_cannon_chin1_ord`,
+/// `com_weap_bldg_gunturret_ord`, `cis_weap_tread_snailtank_cannon_ord`;
+/// BF2's map turrets are `tur_*`). The starfighters' and airspeeders'
+/// (`_weap_fly_`) are not among them.
+const GUN_ORDNANCE: &[&str] = &["_weap_walk_", "_weap_hover_", "_weap_tread_", "_weap_bldg_"];
+
+/// Gun rounds that are no blaster bolt, though their engine base is
+/// `bolt` or `bullet` (BF1's hover tank missiles are `bullet`s).
+const NOT_BLASTER: &[&str] = &["missile", "mortar", "flak", "torpedo", "launcher", "beam"];
+
+/// [ours] (the maintainer, 2026-11-20) Is ordnance class `name`, of engine
+/// base `base`, an infantry blaster bolt whose flight reaches
+/// [`core::weapon::BOLT_REACH`] on every map of either game? A `bolt` or
+/// `bullet` round ([`INFANTRY_ORDNANCE`]) of a rifle, pistol, carbine,
+/// repeater, chaingun, shotgun, bowcaster, wrist blaster or launcher, hero
+/// blaster, award weapon, probe droid or deployed turret (auto and defense
+/// turrets, named as infantry weapons); not a remote droid's
+/// ([`KEEP_REACH`]), nor a missile, shell, beam or emitter. A round reaching
+/// farther already (the snipers' 300 m, BF2's shotguns at 200 m, the award
+/// pistols) is left as it is by
+/// [`core::weapon::OrdnanceClass::extend_bolt_reach`].
+pub fn infantry_bolt(name: &str, base: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    bolt_base(base)
+        && INFANTRY_ORDNANCE.iter().any(|p| name.contains(p))
+        && !KEEP_REACH.iter().any(|p| name.contains(p))
+}
+
+/// [ours] (the maintainer, 2026-11-20: "short vehicle and building guns:
+/// yes to 200m") Is ordnance class `name`, of engine base `base`, a
+/// vehicle's or a turret's blaster bolt ([`GUN_ORDNANCE`], or a BF2 map
+/// turret's `tur_*`) that flies [`core::weapon::BOLT_REACH`] as an infantry
+/// bolt does? Not a missile, mortar, flak, torpedo or beam
+/// ([`NOT_BLASTER`]), nor a starfighter's or airspeeder's gun. The shipped
+/// ones under 200 m are BF1's AT-ST chin gun (105 m) and building gun
+/// turret (120 m) and BF2's snail tank cannon (195 m); the rest already
+/// reach 200 m and are left as they are.
+pub fn gun_bolt(name: &str, base: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    bolt_base(base)
+        && (GUN_ORDNANCE.iter().any(|p| name.contains(p)) || name.starts_with("tur_"))
+        && !NOT_BLASTER.iter().any(|p| name.contains(p))
+}
+
+/// [`infantry_bolt`] or [`gun_bolt`]: a round the class loader lengthens.
+pub fn lengthened_bolt(name: &str, base: &str) -> bool {
+    infantry_bolt(name, base) || gun_bolt(name, base)
+}
+
+fn bolt_base(base: &str) -> bool {
+    base.eq_ignore_ascii_case("bolt") || base.eq_ignore_ascii_case("bullet")
+}
+
 fn value(v: &str) -> Option<f32> {
     v.trim().parse().ok()
 }

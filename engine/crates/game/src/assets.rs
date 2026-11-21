@@ -452,6 +452,19 @@ pub fn resolve_campaign_layer_index(m: &Manifest, requested: &str) -> Option<usi
 }
 
 impl Scene {
+    /// Remove every instance a mission's `KillObject` calls name (any case):
+    /// its model and its collision leave the scene, as the original's
+    /// KillObject deletes the object. Returns how many instances went.
+    /// Bf2 Hoth's Hunt kills the Echo Base back shields (`echoback1`,
+    /// `echoback2`) and the shield generator (`shield`) this way.
+    pub fn kill_objects(&mut self, names: &[String]) -> usize {
+        let before = self.manifest.instances.len();
+        self.manifest
+            .instances
+            .retain(|i| !names.iter().any(|n| n.eq_ignore_ascii_case(&i.name)));
+        before - self.manifest.instances.len()
+    }
+
     fn merge_layer(&mut self, layer: ManifestLayer) -> String {
         self.manifest.regions.extend(layer.regions);
         self.manifest.instances.extend(layer.instances);
@@ -630,6 +643,16 @@ impl Scene {
         sim.boundary = crate::map_boundary::boundary(key, &self.manifest.paths);
     }
 
+    /// [`Scene::install_collision`] without the bodies of the instances
+    /// `names` (any case): a scene loaded before a mission's `KillObject`
+    /// targets were removed ([`Scene::kill_objects`]).
+    pub fn install_collision_without(&self, sim: &mut core::sim::Sim, names: &[String]) {
+        let doors_open = std::env::var("OPENBF_DOORS_SOLID").as_deref() != Ok("1");
+        let (world, doors, _) = self.collision_parts_without(doors_open, names);
+        sim.collision = world;
+        sim.doors = doors;
+    }
+
     /// Install the map's authored damage regions (a region name's `damage` prefix).
     pub fn install_damage_regions(&self, sim: &mut core::sim::Sim) {
         sim.damage_regions = self
@@ -689,20 +712,45 @@ impl Scene {
     /// tool's cost, paid once per battle.
     pub fn collision_body_labels(&self) -> Vec<String> {
         let doors_open = std::env::var("OPENBF_DOORS_SOLID").as_deref() != Ok("1");
-        self.collision_parts(doors_open)
+        let mut labels: Vec<String> = self
+            .collision_parts(doors_open)
             .2
             .into_iter()
             .map(|ii| {
                 let inst = &self.manifest.instances[ii as usize];
                 format!("{} {}", inst.class, inst.name)
             })
-            .collect()
+            .collect();
+        labels.extend(
+            crate::collision_fixes::added_solids(self.map_key())
+                .filter(|s| crate::collision_fixes::added_body(s).is_some())
+                .map(|s| format!("ours {}", s.name)),
+        );
+        labels
+    }
+
+    /// The map's folder name (`bf1_rhn2`): the key per-map tables use.
+    pub fn map_key(&self) -> &str {
+        self.dir.file_name().and_then(|n| n.to_str()).unwrap_or("")
     }
 
     /// [`Scene::collision_and_doors_with`], and the instance each body is of.
     fn collision_parts(
         &self,
         doors_open: bool,
+    ) -> (
+        core::collision::CollisionWorld,
+        Vec<core::door::Door>,
+        Vec<u32>,
+    ) {
+        self.collision_parts_without(doors_open, &[])
+    }
+
+    /// [`Scene::collision_parts`] skipping the instances named in `skip`.
+    fn collision_parts_without(
+        &self,
+        doors_open: bool,
+        skip: &[String],
     ) -> (
         core::collision::CollisionWorld,
         Vec<core::door::Door>,
@@ -719,6 +767,9 @@ impl Scene {
         let mut doors: Vec<Door> = Vec::new();
         let mut movers: Vec<(usize, core::collision::Aabb)> = Vec::new();
         for (ii, inst) in self.manifest.instances.iter().enumerate() {
+            if skip.iter().any(|n| n.eq_ignore_ascii_case(&inst.name)) {
+                continue;
+            }
             let Some(class) = self.resolve_class(&inst.class) else {
                 continue;
             };
@@ -865,11 +916,41 @@ impl Scene {
                 doors.push(d);
             }
         }
+        // The model-space solids this port adds to a geometry's every
+        // instance to close leak spots (`crate::collision_fixes::
+        // ADDED_MODEL_SOLIDS`), after every instance's own bodies, in
+        // instance order, each of its instance.
+        if !crate::collision_fixes::ADDED_MODEL_SOLIDS.is_empty() {
+            for (ii, inst) in self.manifest.instances.iter().enumerate() {
+                let Some(geom) = self
+                    .resolve_class(&inst.class)
+                    .filter(|c| {
+                        !c.base.eq_ignore_ascii_case("trap") && !c.base.eq_ignore_ascii_case("flag")
+                    })
+                    .and_then(|c| c.geometry.as_deref())
+                else {
+                    continue;
+                };
+                let m = crate::viewer::instance_matrix(inst.rotation, inst.translation);
+                for s in crate::collision_fixes::added_model_solids(geom) {
+                    if let Some(b) = crate::collision_fixes::shape_body(&s.shape, m) {
+                        bodies.push(b);
+                        of.push(ii as u32);
+                    }
+                }
+            }
+        }
         // Each body knows its instance (card TURR: a building turret's
         // camera ray passes its own building).
         for (b, &ii) in bodies.iter_mut().zip(&of) {
             b.instance = Some(ii);
         }
+        // The world-space solids this port adds to close leak spots
+        // (`crate::collision_fixes::ADDED_SOLIDS`), last, of no instance.
+        bodies.extend(
+            crate::collision_fixes::added_solids(self.map_key())
+                .filter_map(crate::collision_fixes::added_body),
+        );
         // `new`, not the struct literal: it builds the broad phase over the
         // bodies (`core::collision::world::BodyGrid`), which every soldier and
         // ordnance query on this world then reads instead of scanning all of
@@ -1708,6 +1789,16 @@ pub struct BattleLoad {
 /// through here. A COMMON bake that exists but will not load is not an
 /// error: the map still loads, and `BattleLoad::common` says why.
 pub fn load_battle_scene(dir: &Path, mode: &str) -> Result<(Scene, BattleLoad)> {
+    load_battle_scene_with_layers(dir, mode, &[])
+}
+
+/// Load a baked map with explicit mission-script world layers when provided or
+/// in `"campaign"` mode, falling back to `mode_layer_index` for standard modes.
+pub fn load_battle_scene_with_layers(
+    dir: &Path,
+    mode: &str,
+    layers: &[String],
+) -> Result<(Scene, BattleLoad)> {
     let mode = if mode == ui::shell::Mode::Xl.subst() {
         "con"
     } else {

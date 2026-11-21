@@ -32,7 +32,10 @@ pub const MAGIC: [u8; 4] = *b"OBF1";
 /// flight when the next round loads is dropped instead of compared.
 /// 8: `Start` carries the lead to tick 0, so every peer leaves its loading
 /// screen at one moment. 9: Ready carries the guest's current profile.
-pub const PROTOCOL: u16 = 9;
+/// 10: the third-playtest batch's simulation changes (hero class lock,
+/// one-point kills, vehicle-vs-vehicle seats, headroom/exit/terrain fixes),
+/// so builds before it cannot share a round with builds after it.
+pub const PROTOCOL: u16 = 10;
 /// The largest datagram either side sends or accepts.
 pub const MAX_DATAGRAM: usize = 1200;
 pub const HEADER_LEN: usize = 18;
@@ -501,6 +504,50 @@ pub fn raw_conn_id(bytes: &[u8]) -> Option<u32> {
         return None;
     }
     Some(u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]))
+}
+
+/// Discovery's frozen layout: these bytes never change between protocol
+/// versions, so a browser and a host on different versions can still list
+/// each other ("different version") instead of staying invisible.
+///
+/// ```text
+/// header (protocol = the sender's own), connection id 0
+/// then the first chunk: kind u8 | body length varint | body
+///   Find  (kind 7): nonce u64 LE (body length 8)
+///   Found (kind 8): nonce u64 LE, then the host's info blob
+/// ```
+///
+/// Anything after the first chunk is the sender's own protocol's business.
+/// The readers below check the magic, the connection id and this layout
+/// only; they never read the protocol's other chunks.
+fn frozen_first_chunk(bytes: &[u8], kind: u8) -> Option<&[u8]> {
+    if bytes.len() > MAX_DATAGRAM || raw_conn_id(bytes)? != 0 {
+        return None;
+    }
+    let mut r = Reader::new(&bytes[HEADER_LEN..]);
+    if r.u8().ok()? != kind {
+        return None;
+    }
+    let len = usize::try_from(r.var().ok()?).ok()?;
+    r.raw(len).ok()
+}
+
+/// The nonce of a `Find` in any protocol's datagram (the frozen layout).
+pub fn frozen_find_nonce(bytes: &[u8]) -> Option<u64> {
+    let body = frozen_first_chunk(bytes, K_FIND)?;
+    Some(u64::from_le_bytes(body.try_into().ok()?))
+}
+
+/// A `Found` in any protocol's datagram (the frozen layout): the sender's
+/// protocol, the nonce it echoes and its info blob.
+pub fn frozen_found(bytes: &[u8]) -> Option<(u16, u64, &[u8])> {
+    let body = frozen_first_chunk(bytes, K_FOUND)?;
+    if body.len() < 8 {
+        return None;
+    }
+    let protocol = u16::from_le_bytes([bytes[4], bytes[5]]);
+    let nonce = u64::from_le_bytes(body[..8].try_into().ok()?);
+    Some((protocol, nonce, &body[8..]))
 }
 
 /// A header-only datagram: the version answer and the base of discovery.

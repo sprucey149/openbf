@@ -6,8 +6,9 @@
 //! [`ArmState`]; the grenade test ([`grenade_forced`]: a 3 s window in every
 //! 30 s per bot, at once against a target in a group of its own side, BF2's
 //! difficulty roll on top) forces a grenade in range, one thrower per target
-//! and team (the explosive claim) and none with a friend by the target
-//! (OURS, [`friend_by`]). The gunner ([`super::gunner_foot`]) asks
+//! and team (the explosive claim; in Hunt not for `sticky` ordnance, which
+//! the original never throttles: [`claims`]) and none with a friend by the
+//! target (OURS, [`friend_by`]). The gunner ([`super::gunner_foot`]) asks
 //! [`armed`] what that means for the pad this tick and [`lob_aim`] for the
 //! aim of a throw: the PS2's low-arc ballistic solution ([`lob`]).
 //!
@@ -38,7 +39,9 @@
 //! vehicle; a bot holding one prefers a vehicle it can hurt as its target
 //! ([`vehicle_bonus`]); a weapon that reloads is kept against a vehicle; and
 //! a missile's line of fire is cleared of friends by what is walked before
-//! the rocket gets there (`gunner_foot::friend_in_line`).
+//! the rocket gets there (`gunner_foot::friend_in_line`). A bot in a ground
+//! vehicle's seat gets its vehicle preference from its seat guns instead
+//! ([`super::seat_fight`]).
 
 use super::brain::Tick;
 use super::draw::{unit_unit, SALT_ARM, SALT_NUMBER};
@@ -150,8 +153,12 @@ pub(super) struct Ask {
     /// The target stands in a group of its own side (BF2: such a soldier is
     /// exempt from the target-kind mask).
     pub group: bool,
-    /// A team mate holds the explosive claim on the target.
+    /// A friend stands by the target: no grenade at it.
     pub barred: bool,
+    /// A team mate holds the explosive claim on the target.
+    pub claim: bool,
+    /// Hunt: the claim does not cover `sticky` ordnance ([`claims`]).
+    pub sticky_unclaimed: bool,
     /// The grenade test forces a grenade in range.
     pub forced: bool,
     /// The coin between two weapons of one score.
@@ -329,7 +336,8 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
         // is not passed over - the bot with the one weapon that hurts it
         // reloads where it stands instead of walking on for the four seconds.
         let reloads = ask.bf2 && c.busy && ask.vehicle.is_none();
-        if c.idle() || (grenade && ask.barred) || reloads {
+        let claimed = ask.claim && !(ask.sticky_unclaimed && c.class.ordnance.sticky.is_some());
+        if c.idle() || (grenade && (ask.barred || claimed)) || reloads {
             continue;
         }
         // Card HVYW: a heavy weapon in a crowd is taken as a forced grenade
@@ -392,7 +400,7 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
             let fallback = if c.class.force.is_some() || c.class.saber_throw.is_some() {
                 max
             } else {
-                max.fmax(c.class.shot_range())
+                max.fmax(c.class.engage_range())
             };
             !in_range && ask.d2 < fallback * fallback && by_rule
         };
@@ -464,7 +472,7 @@ pub(super) fn sidearm(
     // would stand silent from 24 m.
     let keep = RIFLE_BACK
         .fmin(pistol.class.ai_range[2])
-        .fmin(pistol.class.shot_range());
+        .fmin(pistol.class.engage_range());
     // Never drawn past that reach either: a BF1 rifle's MinRange (20-32 m)
     // is wider than a pistol's, and the rifle fires there (the trigger asks
     // no MinRange).
@@ -475,6 +483,16 @@ pub(super) fn sidearm(
     }
     let [min, _, max] = pistol.class.ai_range;
     Some((pistol.slot, min < d && d < max))
+}
+
+/// Does a throw of `wc` take the explosive claim on its target? The original
+/// throttles `grenade` and `missile` ordnance only; every hand grenade on the
+/// BF2 disc is `sticky` (thermal detonators, the Gungan's booma, the Ewok's
+/// spear), so in Hunt a sticky throw is not
+/// claimed and no team mate's claim bars one. Elsewhere the port keeps its
+/// named deviation (module header): every thrown weapon is claimed.
+pub(super) fn claims(hunt: bool, wc: &WeaponClass) -> bool {
+    !(hunt && wc.ordnance.sticky.is_some())
 }
 
 /// The 3 s window of every 30 s in which bot number `n` considers its
@@ -565,10 +583,12 @@ fn friend_near(sim: &Sim, u: &Unit, at: Vec3, lead: f32, radius: f32) -> bool {
 /// of `u`'s HEAVY weapons can be used on it and reaches (a bot with a
 /// launcher takes the tank over the nearer rifleman), minus that when no
 /// weapon `u` holds can be used on it at all (a rifleman takes the soldier
-/// behind the tank he does not attack), else 0.
+/// behind the tank he does not attack), else 0. A bot in a ground vehicle's
+/// seat asks its seat guns instead (`super::seat_fight::bonus`); in any
+/// other seat, 0.
 pub fn vehicle_bonus(sim: &Sim, u: &Unit, o: &Unit) -> f32 {
     if u.mount.is_some() {
-        return 0.0;
+        return super::seat_fight::bonus(sim, u, o).unwrap_or(0.0);
     }
     match against_ride(sim, u, o) {
         None => 0.0,
@@ -619,7 +639,7 @@ pub(super) fn arms_for_soldier(sim: &Sim, u: &Unit) -> bool {
 /// [`vehicle_bonus`]'s size: the whole span of the choice's distance term
 /// (`perception::choose_target`: 200 at the muzzle, 100 at the view
 /// distance), so a vehicle in sight outranks any soldier.
-const VEHICLE_BONUS: f32 = 100.0;
+pub(super) const VEHICLE_BONUS: f32 = 100.0;
 
 /// The bot's own number 0..=100, drawn once (the PS2 controller's).
 pub(super) fn number(me: UnitHandle) -> u32 {
@@ -689,7 +709,7 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
     let group = sim.tick < st.arm.group_until;
     // The explosive claim: one bot of a team at a time on a soldier.
     let mine = st.arm.claim.filter(|c| c.0 == target && sim.tick < c.1);
-    let barred = sim.alive_units().any(|(h, o)| {
+    let claim = sim.alive_units().any(|(h, o)| {
         h != me
             && o.team == u.team
             && o.ai
@@ -697,7 +717,8 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
                 .claim
                 .is_some_and(|c| c.0 == target && sim.tick < c.1)
             && (mine.is_none() || h.index < me.index)
-    }) || if sim.is_hunt() {
+    });
+    let barred = if sim.is_hunt() {
         u.held.iter().any(|w| {
             let wc = &sim.weapon_classes[w.class];
             wc.thrown.is_some() && friend_near(sim, u, e.soldier.pos, 0.0, throw_clearance(sim, wc))
@@ -732,6 +753,8 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
         station: false,
         group,
         barred,
+        claim,
+        sticky_unclaimed: sim.is_hunt(),
         forced: grenade_forced(
             sim.ground_rules,
             number(me),
@@ -755,6 +778,10 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
     let thrown = pick.is_some_and(|(s, _)| {
         cands[usize::from(s)].is_some_and(|c: Cand| c.class.thrown.is_some())
     });
+    let claimed = pick.is_some_and(|(s, _)| {
+        cands[usize::from(s)]
+            .is_some_and(|c: Cand| c.class.thrown.is_some() && claims(sim.is_hunt(), c.class))
+    });
     // The standing fight against a vehicle is for a weapon in the hands
     // with the hull in its band. A grenade is thrown in passing, as at a
     // soldier, and a launcher inside its `MinRange` is fired on the way: a
@@ -771,7 +798,7 @@ pub(super) fn think(sim: &Sim, tk: &Tick, st: &mut AiState, enemy: Option<&Unit>
         && (vehicle.is_some() && ask.d2 > SPARE_BEYOND * SPARE_BEYOND
             || vehicle.is_none()
                 && cands[usize::from(u.weapon_slot).min(7)].is_some_and(|c: Cand| c.heavy));
-    st.arm.claim = if thrown {
+    st.arm.claim = if claimed {
         Some((target, mine.map_or(sim.tick + CLAIM, |c| c.1)))
     } else {
         st.arm.claim.filter(|c| sim.tick < c.1)
@@ -792,6 +819,8 @@ fn item_ask(
         bf2: sim.ground_rules == GroundRules::Bf2,
         group: false,
         barred: false,
+        claim: false,
+        sticky_unclaimed: false,
         forced,
         coin: unit_unit(me.index, sim.tick, me.gen, SALT_ARM) < 0.5,
         vehicle: None,
@@ -851,6 +880,8 @@ pub(super) fn think_station(sim: &Sim, tk: &Tick, st: &mut AiState, s: &crate::s
         bf2: sim.ground_rules == GroundRules::Bf2,
         group: false,
         barred: false,
+        claim: false,
+        sticky_unclaimed: false,
         forced: false,
         coin: unit_unit(me.index, sim.tick, me.gen, SALT_ARM) < 0.5,
         vehicle: None,
@@ -907,7 +938,9 @@ pub(super) enum Armed<'a> {
     Draw(u32),
     /// Channel 1's grenade is the firing weapon: aim the throw and, when it
     /// is the think's pick (`true`; `false` = only the throw under way), tap
-    /// SECONDARY_FIRE.
+    /// SECONDARY_FIRE. A channel-1 weapon that fires a SHELL (the BF2 Ewok's
+    /// rock) is armed the same way: its arc from the muzzle ([`lob_aim`]) and
+    /// its own channel's trigger.
     Thrown(&'a WeaponClass, bool),
     /// A chosen hero power uses the same offhand channel as human input.
     Secondary(&'a WeaponClass, &'a crate::weapon::WeaponState),
@@ -951,6 +984,10 @@ pub(super) fn armed<'a>(sim: &'a Sim, u: &'a Unit, st: &AiState) -> Armed<'a> {
         0 => Armed::Draw(buttons::SWITCH_WEAPON),
         _ if u.cur1 != Some(k as u8) => Armed::Draw(buttons::SWITCH_SECONDARY),
         _ if class.thrown.is_some() => Armed::Thrown(class, true),
+        // A shell on channel 1 is fired by SECONDARY_FIRE on its arc. `Hand`
+        // would press FIRE: the weapon in the hands went off instead, aimed
+        // as a bolt (an Ewok's spear thrown flat), and the rock never left.
+        _ if class.ordnance.kind == OrdKind::Shell => Armed::Thrown(class, true),
         _ if class.force.is_some() || class.saber_throw.is_some() => {
             Armed::Secondary(class, &u.held[k].state)
         }

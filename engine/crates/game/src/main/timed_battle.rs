@@ -27,11 +27,16 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
             v.mode
         );
     }
-    let layers = match &v.mission {
-        Some(path) => game::mission::MissionDef::load(path)?.layers,
-        None => Vec::new(),
+    let (layers, kills) = match &v.mission {
+        Some(path) => {
+            let m = game::mission::MissionDef::load(path)?;
+            let kills = m.scene_kills().to_vec();
+            (m.layers, kills)
+        }
+        None => (Vec::new(), Vec::new()),
     };
-    let (scene, load) = game::assets::load_battle_scene_with_layers(&v.map, &v.mode, &layers)?;
+    let (mut scene, load) = game::assets::load_battle_scene_with_layers(&v.map, &v.mode, &layers)?;
+    scene.kill_objects(&kills);
     if let Some((path, Err(error))) = load.common {
         anyhow::bail!("common assets at {} unreadable: {error:#}", path.display());
     }

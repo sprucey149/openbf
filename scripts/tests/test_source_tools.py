@@ -169,19 +169,6 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(missions.arc_calls50(f), [('loop', True)] * 5)
         self.assertEqual(missions.arc_calls50(f), original_startup(f, missions.ARC_VERBS))
 
-    def test_death_drains_stay_direct_and_branch_free(self):
-        handler = proto_calls([('AddReinforcements', [2.0, -3.0])])
-        branchy = proto_calls([('AddReinforcements', [2.0, -4.0])])
-        branchy.code.append(ins('TEST'))
-        extra = proto_calls([('AddReinforcements', [2.0, -5.0]), ('Other', [])])
-        indirect = proto_calls([('OnCharacterDeathTeam', [handler, 8.0])])
-        entry = proto_calls([('OnCharacterDeathTeam', [handler, 1.0]),
-                             ('OnCharacterDeathTeam', [branchy, 1.0]),
-                             ('OnCharacterDeathTeam', [extra, 1.0]), ('helper', [])])
-        f = globals_proto([('ScriptPostLoad', entry), ('helper', indirect)])
-        self.assertEqual(missions.death_drains50(f), [(1, 2, 3)])
-        self.assertEqual(missions.death_drains50(globals_proto([])), [])
-
     def arithmetic(self, op, x, y):
         p = missions.Proto()
         p.k = ['Result', x, y]
@@ -375,12 +362,12 @@ class PackTests(unittest.TestCase):
                         result.write_text(__import__('json').dumps(rows))
                 values = dict(ROOT=str(root), ENGINE=str(engine), EXTRACTED=str(root / 'extracted'),
                               BAKED=str(baked), MISSIONS=str(missions), TARGET=str(target),
-                              BAKE_STAMP=str(root / 'extracted/bake.sha'),
                               MISSION_STAMP=str(root / 'extracted/mission.sha'))
                 args = ['pack.py', '--out', str(out)] + (['--rebake'] if rebake else [])
                 with mock.patch.multiple(pack, **values), mock.patch.object(sys, 'argv', args), \
-                        mock.patch.object(pack, 'need'), mock.patch.object(pack, 'run', side_effect=run), \
+                        mock.patch.object(pack, 'need'), mock.patch.object(pack, 'need_ffmpeg'), mock.patch.object(pack, 'run', side_effect=run), \
                         mock.patch.object(pack, 'find_bash', return_value='bash'), \
+                        mock.patch.object(pack, 'group_versions', return_value={'schema': 1, 'target': 'test', 'groups': dict.fromkeys(pack.bake_cache.GROUPS + ('extract-iso',), 1)}), \
                         mock.patch.object(pack, 'stale', return_value=None), \
                         mock.patch.object(pack, 'inputs_hash', return_value='hash'), \
                         mock.patch.object(pack, 'missing_music', return_value=[]), \
@@ -478,36 +465,6 @@ class PackTests(unittest.TestCase):
             self.assertIn('error', pack.map_texture_sources(root)[0])
             manifest.write_text('(source_game: "bf1", textures: ["unfinished"')
             self.assertIn('error', pack.map_texture_sources(root)[0])
-
-    def test_shipping_inputs_invalidate_hash_and_fold_line_endings(self):
-        added = ('engine/crates/bake/src/effect_names.txt', 'engine/Cargo.toml', 'engine/Cargo.lock')
-        with tempfile.TemporaryDirectory() as temp, mock.patch.object(pack, 'ROOT', temp):
-            root = Path(temp)
-            contents = dict.fromkeys(added, b'line one\nline two\n')
-            contents.update({'engine/crates/bake/src/main.rs': b'fn main() {}\n',
-                             'engine/crates/manifest/src/lib.rs': b'// manifest\n',
-                             'engine/crates/mungefs/src/lib.rs': b'// munge\n',
-                             'scripts/rebake.sh': b'# rebake\n'})
-            for name, data in contents.items():
-                path = root / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
-            original = pack.inputs_hash(pack.BAKE_INPUTS)
-            self.assertEqual(original, pack.inputs_hash(pack.BAKE_INPUTS))
-            for name in added:
-                with self.subTest(input=name):
-                    path = root / name
-                    path.write_bytes(contents[name] + b'changed\n')
-                    self.assertNotEqual(original, pack.inputs_hash(pack.BAKE_INPUTS))
-                    path.write_bytes(contents[name].replace(b'\n', b'\r\n'))
-                    self.assertEqual(original, pack.inputs_hash(pack.BAKE_INPUTS))
-                    path.write_bytes(contents[name])
-            # Recreate files in reverse order; discovery must not depend on creation order.
-            for name in contents:
-                (root / name).unlink()
-            for name, data in reversed(list(contents.items())):
-                (root / name).write_bytes(data)
-            self.assertEqual(original, pack.inputs_hash(pack.BAKE_INPUTS))
 
 
 class AnalysisIndexTests(unittest.TestCase):

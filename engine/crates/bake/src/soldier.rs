@@ -44,9 +44,11 @@ mod lod;
 mod output;
 mod render_clips;
 pub(crate) use output::bake_flags;
+#[cfg(test)]
+use output::merge_prior;
 pub use output::{
-    bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, texture_flags,
-    weapon_nodes, BakedWeapon,
+    bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, bake_weapon_with,
+    texture_flags, weapon_flags, weapon_nodes, BakedWeapon,
 };
 
 pub struct BakedSoldier {
@@ -62,6 +64,10 @@ pub struct BakedSoldier {
     /// Model-space AABB over every baked segment, worn cloth included (so
     /// wider than the modl vis box on a BF2 cloth wearer).
     pub aabb: ([f32; 3], [f32; 3]),
+    /// The per-sheet flags its textures were written with ([`bake_flags`],
+    /// the cloths' and the class skins' added): what a later weapon bake
+    /// into the same folder must not downgrade ([`bake_weapon_with`]).
+    pub texture_flags: std::collections::HashMap<String, u32>,
 }
 
 /// Find the modl + skel pair named `model` in an LVL.

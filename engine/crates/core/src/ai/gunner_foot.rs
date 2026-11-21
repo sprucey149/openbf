@@ -281,7 +281,17 @@ pub(super) fn run(
         (AimRequest::Enemy(e, c), _) => {
             // [ours] A proxy's hand aims as a player does (`proxy::hand`).
             let p = match hand {
-                Some(h) => super::proxy::hand::aim(&h, me, sim.tick, c.first_seen, eye, e, speed),
+                Some(h) => super::proxy::hand::aim(
+                    &h,
+                    me,
+                    sim.tick,
+                    c.first_seen,
+                    eye,
+                    e,
+                    speed,
+                    super::proxy::hand::Shooter::of(sim, u),
+                    super::proxy::hand::moving(sim, e),
+                ),
                 None => seen_aim(sim, me, st, eye, e, speed, wc, swept),
             };
             let off = barred.and_then(|h| super::tokn::miss_offset(sim, me, h, eye, p));
@@ -439,6 +449,23 @@ pub(super) fn run(
             // Playtest C1: no shot while the bot flinches from a hit.
             let ready = ready && sim.tick >= st.flinch_until;
             let range = (at - eye).length();
+            // [ours] (the maintainer, 2026-11-20) A bot's trigger opens on
+            // an enemy within the disc's reach of the round
+            // (`WeaponClass::engage_range`), never the lengthened one; a
+            // shooter who shot at the bot from past it is answered out to
+            // the round's whole reach, past the class `MaxRange`
+            // (`perception::RETURN_FIRE_TICKS`). A proxy's hand plays by a
+            // player's rule and fires out to the lengthened reach
+            // (`WeaponClass::shot_range`) unprompted, as a player may.
+            let answer = held
+                .and_then(|c| c.handle.unit())
+                .is_some_and(|h| perception::answering(st, h, sim.tick))
+                && perception::return_band(sim, u).is_some();
+            let open = if answer {
+                wc.shot_range()
+            } else {
+                wc.engage_range()
+            };
             let eff_range = match *aim {
                 AimRequest::Station(s, _) => (range - s.sphere_radius).fmax(0.1),
                 _ => range,
@@ -467,13 +494,14 @@ pub(super) fn run(
                 // A cone cannot honour the token's harmless miss by offsetting
                 // the aim point, so a barred bot holds its fire.
                 Armed::Hand if wc.emitter.as_ref().is_some_and(|e| e.is_cone()) => {
-                    eff_range <= wc.shot_range()
+                    eff_range <= wc.engage_range()
                         && eff_range < wc.ai_range[2]
                         && !st.arm.spare
                         && barred.is_none()
                 }
+                Armed::Hand | Armed::Lobbed(_) if answer => eff_range <= open && !st.arm.spare,
                 Armed::Hand | Armed::Lobbed(_) => {
-                    eff_range <= wc.shot_range() && eff_range < wc.ai_range[2] && !st.arm.spare
+                    eff_range <= open && eff_range < wc.ai_range[2] && !st.arm.spare
                 }
                 Armed::Draw(_) => false,
                 Armed::Thrown(gc, live) => {
@@ -521,7 +549,7 @@ pub(super) fn run(
                 let thrown_out_of_range =
                     throw.is_some_and(|gc| !reaches || range >= gc.ai_range[2]);
                 let cone_out_of_range = wc.emitter.as_ref().is_some_and(|emitter| {
-                    emitter.is_cone() && range >= wc.shot_range().fmin(wc.ai_range[2])
+                    emitter.is_cone() && range >= wc.engage_range().fmin(wc.ai_range[2])
                 });
                 if thrown_out_of_range || cone_out_of_range {
                     close_on = enemy.filter(|e| e.mount.is_none()).map(|e| e.soldier.pos);
@@ -542,6 +570,15 @@ pub(super) fn run(
                 Some(_) => on_target && super::proxy::hand::holds(u.weapon.heat),
                 None => on_target && st.burst > 0 && sim.tick >= st.pause_until,
             };
+            // Census only: the trigger wanted at an answered shooter past
+            // the bot's opening range (`census::LV_ANSWER_FIRE`).
+            if want_fire
+                && answer
+                && hand.is_none()
+                && perception::return_band(sim, u).is_some_and(|(o, _)| range > o)
+            {
+                nt.levers |= super::census::LV_ANSWER_FIRE;
+            }
             if let Armed::Draw(button) = armed {
                 // The switch is an edge, and dead while a trigger is down.
                 if sim.tick.is_multiple_of(2) {
@@ -996,14 +1033,15 @@ pub(super) fn seen_aim(
         return aim;
     };
     // The cap is the shooter's skill's, under the tier's override (Elite).
+    // An eased Hunt bot's offset is widened past it (`Sim::hunt_aim_widen`).
     let cap = sim.skill_of(u).err_cap;
     let moving = e.soldier.vel.length() / e.consts.max_speed.fmax(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
         let vis = e.cloak.visibility();
-        let r = radius(1.0, 1.0, st.err, moving, vis, cap);
+        let r = radius(1.0, 1.0, st.err, moving, vis, cap) * sim.hunt_aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
-    let r = soldier_error_radius(e, cap);
+    let r = soldier_error_radius(e, cap) * sim.hunt_aim_widen(u);
     aim + error_vector(
         sim,
         me,
@@ -1137,12 +1175,12 @@ pub(super) fn droid_aim(
     let cap = sim.aim_err_cap(u);
     let moving = d.vel.length() / c.max_speed.fmax(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
-        let r = radius(1.0, 1.0, st.err, moving, 1.0, cap);
+        let r = radius(1.0, 1.0, st.err, moving, 1.0, cap) * sim.hunt_aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
     let owner = sim.unit(d.owner);
     let err = owner.map_or(0.0, |o| o.aim.err);
-    let r = radius(DROID_AIM_SIZE, 1.0, err, moving, 1.0, cap);
+    let r = radius(DROID_AIM_SIZE, 1.0, err, moving, 1.0, cap) * sim.hunt_aim_widen(u);
     let human = d.controlled && owner.is_some_and(|o| o.is_human());
     aim + bubble(
         sim,
@@ -1171,11 +1209,11 @@ pub(super) fn turret_aim(
     };
     let cap = sim.aim_err_cap(u);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
-        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap);
+        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
     let err = sim.unit(t.owner).map_or(st.err, |o| o.aim.err);
-    let r = radius(DROID_AIM_SIZE, 1.0, err, 0.0, 1.0, cap);
+    let r = radius(DROID_AIM_SIZE, 1.0, err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
     aim + bubble(
         sim,
         me,
@@ -1200,10 +1238,10 @@ pub(super) fn station_aim(
     };
     let cap = sim.aim_err_cap(u);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
-        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap);
+        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
-    let r = radius(DROID_AIM_SIZE, 1.0, st.err, 0.0, 1.0, cap);
+    let r = radius(DROID_AIM_SIZE, 1.0, st.err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
     aim + bubble(
         sim,
         me,

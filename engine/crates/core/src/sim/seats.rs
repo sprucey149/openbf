@@ -100,6 +100,10 @@ pub const EXIT_LIFT: f32 = 1.0;
 /// Card VMESH (ours): how many points round a body's box the exit tries
 /// when every one of §5's points is shut inside the body.
 pub const EXIT_OUT_DIRS: usize = 8;
+/// Issue #182 B6 (ours): the rings, in units of the exit's ρ, tried when
+/// every one of §5's points is embedded. measure: the census's exit pass
+/// on the Hoth bunkers (bf1_hot1, bf2_hot1).
+const EXIT_WIDER: [f32; 2] = [1.5, 2.0];
 /// §5.2: a nonzero move axis smaller than this is raised to it.
 pub const MOVE_FLOOR: f32 = 0.3;
 
@@ -754,6 +758,10 @@ impl Sim {
     ) -> Vec3 {
         let mut shut_in = None;
         let mut first_turret_spot = None;
+        // Issue #182 B6 (ours): a point the standing capsule is embedded at
+        // (inside a prim, overlapping a wall, under the terrain) is no exit
+        // either while a clear one exists: the first such is kept for last.
+        let mut first_embedded = None;
         for (k, &(x, z)) in EXIT_CANDIDATES.iter().enumerate() {
             let p = centre + right * (x * rho) + fwd * (z * rho) + Vec3::Y * EXIT_LIFT;
             if paths && k != 8 && self.first_hit(centre, p, hulls).is_some() {
@@ -765,6 +773,9 @@ impl Sim {
             // Card VMESH (ours): never a point shut inside a map body.
             match self.shut_in(p + Vec3::Y * SHUT_PROBE_UP) {
                 Some(b) => shut_in = shut_in.or(Some(b)),
+                None if !self.placement_clear(p) => {
+                    first_embedded.get_or_insert(p);
+                }
                 None => {
                     if prefer_walkable && !self.turret_exit_reaches_floor(p) {
                         first_turret_spot.get_or_insert(p);
@@ -797,6 +808,23 @@ impl Sim {
         if let Some(p) = first_turret_spot {
             return p;
         }
+        // Issue #182 B6 (ours): every one of §5's points was shut in or
+        // embedded (a bunker's wall 0.3 m from the ring): the same points
+        // further out, 1.5 and 2 rings, each with a clear line from the
+        // centre and a clear capsule.
+        for scale in EXIT_WIDER {
+            for &(x, z) in &EXIT_CANDIDATES[..8] {
+                let p = centre + (right * x + fwd * z) * (rho * scale) + Vec3::Y * EXIT_LIFT;
+                if paths && self.first_hit(centre, p, hulls).is_some() {
+                    continue;
+                }
+                if let Some(p) = self.exit_drop(p, drop, hulls).filter(|p| {
+                    self.shut_in(*p + Vec3::Y * SHUT_PROBE_UP).is_none() && self.placement_clear(*p)
+                }) {
+                    return p;
+                }
+            }
+        }
         // Card VMESH (ours): every candidate was inside a body - the
         // vehicle's centre is in it (a bike through Endor's cp2 boulder, a
         // walker's centre in its edge). Out past the body's box instead,
@@ -826,7 +854,24 @@ impl Sim {
                 }
             }
         }
-        centre
+        // Issue #182 B6 (ours): the bare centre only when a soldier fits
+        // there; one embedded in a body (a walker's pivot in a wall) loses
+        // to a dropped ring point that merely overlaps.
+        if self.placement_clear(centre) {
+            return centre;
+        }
+        first_embedded.unwrap_or(centre)
+    }
+
+    /// Issue #182 B6 (ours): does a standing soldier fit with his feet at
+    /// `p`? The embed oracle's solid classes (inside a prim or a mesh,
+    /// under the terrain, overlapping a body); off the level is the
+    /// caller's own test.
+    pub(crate) fn placement_clear(&self, p: Vec3) -> bool {
+        matches!(
+            self.embed_at(p, Stance::Stand),
+            super::Embed::None | super::Embed::OffLevel
+        )
     }
 
     /// OURS: a turret can drop a bot onto an isolated rim at the same
@@ -882,11 +927,16 @@ impl Sim {
 
     /// Card VMESH (ours): [`Self::shut_in`] where the body is WATERTIGHT
     /// (`Body::closed`: every edge shared by two faces, such as BF1 Endor's
-    /// cp2 boulder) - a solid nobody walks or drives into. The open shells
+    /// cp2 boulder) or a primitive (issue #182 B5: a box, cylinder or
+    /// sphere is solid) - a solid nobody walks or drives into. The open shells
     /// (rooms, trenches, caves, the hollow trunks) are left to the exit.
     pub fn shut_in_solid(&self, p: Vec3) -> Option<usize> {
-        self.shut_in(p)
-            .filter(|&b| self.collision.bodies().get(b).is_some_and(|b| b.closed))
+        self.shut_in(p).filter(|&b| {
+            self.collision
+                .bodies()
+                .get(b)
+                .is_some_and(|b| b.closed || !matches!(b.shape, crate::collision::Shape::Mesh(_)))
+        })
     }
 
     /// FUN_0020b918's placement of one candidate: lifted under a 5 m ray

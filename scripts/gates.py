@@ -18,7 +18,7 @@ Groups:
   sweep  round_to_outcome 60000 42 twice: the pair identical, and identical to <baseline_dir>/sweep_main_1.txt
   arena  arena 3000 42 flat all / arena 9000 42 tat2 all, twice each: pairs identical and identical to the baselines
   leak   leak_census (card LEAK) twice: the pair identical, and identical to <baseline_dir>/leak_main_1.txt; its footer's
-         `new` must be 0 (a leak site no line of game/examples/leak_census_accepted.txt covers)
+         `new` must be 0 (a leak site no line of <baseline_dir>/leak_census_accepted.txt, the private ratchet, covers)
   bake   scratch_bake.sh [--bake-groups] into <out>/bake, then cmp_bake.sh: DIFF / ONLY_IN_A must be 0 unless declared;
          a bake that wrote no file FAILS (a partial bake's ONLY_IN_B is not checked, so an empty one would pass).
          --bake-groups (the card's declared groups) on a diff that touches the bake code bakes EVERY group and FAILS on
@@ -398,7 +398,16 @@ class Gates:
                 return
             print(f"[gates] leak: {why}", flush=True)
         n0 = len(s.rows)
-        s._pair("leak", "leak_census", os.path.join(s.exp["baseline_dir"], "leak_main_1.txt"))
+        # The ratchet is private (half a megabyte, over export_public's budget): beside the baselines.
+        ratchet = os.path.abspath(os.path.join(s.exp["baseline_dir"], "leak_census_accepted.txt"))
+        if not os.path.exists(ratchet):
+            s.row("leak", "leak_census", 1, f"no ratchet at {ratchet}", "a private ratchet", "FAIL")
+            return
+        s.env["LEAK_ACCEPTED"] = ratchet
+        try:
+            s._pair("leak", "leak_census", os.path.join(s.exp["baseline_dir"], "leak_main_1.txt"))
+        finally:
+            s.env.pop("LEAK_ACCEPTED", None)
         if len(s.rows) > n0 and all(r["verdict"] != "FAIL" for r in s.rows[n0:]) and (
                 not os.path.exists(s.p("leak_1.txt")) or "new 0" in open(s.p("leak_1.txt")).read().splitlines()[-1]):
             mark_full(s.tree, LEAK_MARK)
@@ -873,7 +882,8 @@ def plan_leak(tree, base, mark=None):
     return False, f"{len(files)} changed file(s), none can move the census"
 
 
-BAKE_CODE = r"engine/crates/(mungefs|bake|manifest)/|scripts/(rebake|scratch_bake)\.sh"
+# Everything scripts/bake_versions.py counts as bake code (its SHARED and EXTRA), so a `neutral` record is always proven.
+BAKE_CODE = r"engine/crates/(mungefs|bake|manifest|audio|pak)/|engine/Cargo\.(toml|lock)$|scripts/(rebake|scratch_bake)\.sh|scripts/(bake_dlc|dlc_inputs|gen_missions|extract_lua)\.py"
 
 
 # ---------- fidelity (card FIDL) ----------

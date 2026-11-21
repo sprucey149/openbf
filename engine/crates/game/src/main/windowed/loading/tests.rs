@@ -107,10 +107,34 @@ fn worker_failure_panic_close_and_next_round_are_owned() {
         Ok(())
     })
     .unwrap();
-    drop(w); // same owner drop used by window close; joins, never detaches
+    drop(w); // an in-game round change's drop joins; only the close abandons
     assert!(ended.load(Ordering::SeqCst));
     let mut next = Worker::spawn(|| Ok(42)).unwrap();
     assert_eq!(await_worker(&mut next).unwrap(), 42);
+}
+
+#[test]
+fn close_detaches_a_blocked_loading_worker() {
+    let (release, wait) = mpsc::channel::<()>();
+    let ended = Arc::new(AtomicBool::new(false));
+    let end = ended.clone();
+    let mut w = Worker::<()>::spawn(move || {
+        let _ = wait.recv();
+        end.store(true, Ordering::SeqCst);
+        Ok(())
+    })
+    .unwrap();
+    let started = Instant::now();
+    w.abandon();
+    drop(w);
+    assert!(started.elapsed() < Duration::from_millis(100));
+    assert!(!ended.load(Ordering::SeqCst), "not joined");
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ended.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the detached thread still ends");
+        std::thread::yield_now();
+    }
 }
 
 #[test]
@@ -611,7 +635,7 @@ fn capture_loading_overlap_and_setup() {
         let hash = walk.sim.hash();
         a.renderer.as_mut().unwrap().clear_scene();
         let (direct_gpu, scene) =
-            super::super::load_and_upload(a.renderer.as_mut().unwrap(), &root.join(key), "con")
+            super::super::load_and_upload(a.renderer.as_mut().unwrap(), &root.join(key), "con", &[])
                 .unwrap();
         assert_eq!(direct_gpu.draws.len(), a.gpu.as_ref().unwrap().draws.len());
         let mut control = super::super::make_walk(&scene, &a.setup).unwrap();

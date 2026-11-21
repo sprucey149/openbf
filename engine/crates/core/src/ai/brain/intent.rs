@@ -118,8 +118,17 @@ pub(in crate::ai) fn compose_aim<'a>(
         && rules.faces_walk();
     let reach = fight_reach(sim, u);
     let within = |p: Vec3| (p - eye).length_squared() <= reach * reach;
-    let faced = frame.enemy.zip(frame.seen).filter(|(e, _)| {
-        !walking_on || (within(e.capsule().center()) && (e.mount.is_none() || !st.arm.spare))
+    // [ours] A shooter the bot answers (`perception::RETURN_FIRE_TICKS`) is
+    // faced out to its round's reach.
+    let answered = |c: &perception::Contact| {
+        c.handle
+            .unit()
+            .is_some_and(|h| perception::answering(st, h, sim.tick))
+    };
+    let faced = frame.enemy.zip(frame.seen).filter(|(e, c)| {
+        !walking_on
+            || ((within(e.capsule().center()) || answered(c))
+                && (e.mount.is_none() || !st.arm.spare))
     });
     let faced_memory = frame.memory.filter(|p| {
         !walking_on

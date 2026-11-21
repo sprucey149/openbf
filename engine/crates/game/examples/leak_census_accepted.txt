@@ -1,34 +1,55 @@
-# leak_census's accepted leaks (card LEAK). One line each: `<map|*> <class|*> [<x> <z>]  # <reason>`.
+# leak_census's accepted leaks (card LEAK, issue #182). One line each: `<map|*> <class|*> <x> <z> [<x> <z> ...]  # <reason>`,
+# or `<map|*> <class|*> *` for every site of that class. A line left with no pairs and no `*` covers NOTHING, and a
+# line with an odd or non-integer coordinate is ignored; both print on stderr and add `bad-accept-lines N` to the footer.
+# The cell has no floor band: a site on another storey of an accepted `x z` cell reads as accepted (the pinned per-map
+# counts still move).
 # A site (a class and a 4 m end cell, `x z` its centre in whole metres as the sites file prints it) is ACCEPTED
 # when a line covers it; every other site is NEW and fails the `leak` gate. The per-map counts on the census's
-# stdout are pinned byte for byte (<baseline_dir>/leak_main_1.txt), so an accepted class still fails the gate when
+# stdout are pinned byte for byte (<baseline_dir>/leak_main_1.txt), so an accepted site still fails the gate when
 # its count moves: a change that moves it declares `leak`.
 #
-# 2026-09-29, the first census: every class below is a named mechanism with a card that fixes it. A fix removes
-# its line here (or narrows it to the named residue) in the same landing.
-
-# The census's positive control, a KAS2 jump-in: from the deck of the platform at (5, 16.65, -7), a jump at the
-# hut's bamboo wall (body 386, kas2_bldg_platform_roof) ended inside the ring at y 17.38 — the wall pass pushed the
-# soldier through (tick 20: 0.84 m toward the hut's axis, re-soldier-walls §4.1, M3). Card WPSH fixed it: that
-# contact (triangle 5, the flare's inner skin, met from behind) is no longer taken. One sprint-jump site at the hut
-# stays in the residue below (a sliver triangle, card WPSR).
-# Replay: LEAK_NEAR=4.9,-7.06,14 LEAK_TRACE=1.28,4.66,jump leak_census bf1_kas2.
-
-# push: the wall pass itself moves the soldier's axis across a wall face (a push >= 0.25 m on the crossing tick).
-# WPSH took it 48,415 -> 1,212 runs (sub-steps, no far-side push, starts already inside a solid skipped); the
-# residue is several mechanisms (an eave's lower edge, a sloped step, a sliver triangle) — card WPSR.
-* push      # WPSR: the residue after WPSH (re-soldier-walls §4.2)
-# tunnel: the axis crosses a wall face with (almost) no push — the wall pass never answered. WTUN took it 9,587 -> 1,427
-# runs: a mesh body's deepest WALL contact now wins over a deeper overhang underside (BF1 BES1 body 26), and a
-# ceiling-like contact pushes by its horizontal part (BF2 DAG1's leaning boxes). The residue sampled is geometry
-# thinner or narrower than the soldier (a 0.54 m slot between a low slab and a sheet, BF1 NAB2 (-13, 17); a prop
-# of 0.2-0.4 m parts, BF2 POL1 body 837) where one contact per body fights itself — card WTHIN.
-* tunnel    # WTHIN: the residue after WTUN — thin and narrow geometry (re-soldier-walls §4.3)
-# ceiling / floor: the axis crosses a downward / upward face — push_out has no vertical response by design.
-* ceiling   # VCOL: no ceiling stop — heads through roofs, eaves and deck undersides
-* floor     # VCOL: crossings of upward faces — mechanism to name
-# end-state classes the first census did not validate.
-* closed    # LEAK2: ray parity breaks on open meshes (Endor's trees and rocks); the KAS2 control reads 4
-* buried    # LEAK2: under an uncut terrain it started above — triage
-* float     # LEAK2: not grounded after a 420-tick settle — triage
-* offmap    # LEAK2: none today; the census drives no run at the map edge yet
+# 2026-11-20, census v2 (issue #182 Phase A3; re-recorded after review with the wall pass driving inshell/underterrain/offlevel starts): the v1 wildcard lines (`* push`, `* tunnel`, `* ceiling`, `* floor`,
+# `* closed`, `* buried`, `* float`, `* offmap`) are gone. This is the RATCHET: every site the v2 census found at
+# the batch base (266dd51fa, whose sim is fc9fa1b45's), one class of one map per line, 16 sites to a
+# line, written by LEAK_WRITE_ACCEPTED and checked byte-identical over two runs. A NEW site fails the gate; a fix
+# deletes the cells it closes (the census prints which). None of these is "fine": each is a leak or an oracle false
+# positive still to be triaged. The per-map list, the class each site falls in, and the general fix (B1 headroom,
+# B2 axis clamp, B3 terrain burial, B5/B6 recovery and placement, C per-site mesh fixes) it needs are in the
+# issue #182 leak list; the classes `inshell` and `offlevel` carry measured false positives (A4) and do not drive
+# any rescue.
+#
+# 2026-11-20, re-recorded (issue #182 B1 headroom, B5/B6 exit placement and prims as
+# solids, B3 terrain burial), approved by the maintainer: every site the census finds with those fixes, written by
+# LEAK_WRITE_ACCEPTED and checked byte-identical over two runs. 64,609 sites to 46,107; the ratchet only shrinks
+# except where a fix moved a leak to another class or cell. Known reasons for the sites it adds (771 site keys in
+# the real-leak classes, triaged by the top sites per class): B3 lifts a soldier under an unroofed terrain sheet
+# back onto it, so a start no player can reach (one that used to fall to y -300) now shows as a `tunnel` or
+# `ceiling` crossing on its way up through a building or a Hoth trench overhang (bf1_hot1 tunnel -314 186,
+# bf2_pol1 ceiling 78 -14); B1 holds a rolled soldier low against a wall, and a held
+# prone that creeps or steps up into the wall and then rises is pushed back out across it (bf2_tat3 push -10 78 at
+# the reservoir, an `inshell` site at the base). No traced site is a new hole players reach; the rest
+# are not traced.
+#
+# 2026-11-20, re-recorded (issue #182 B4 rescue, B2 wall clamp), approved by the maintainer:
+# every site the census finds with them, written by LEAK_WRITE_ACCEPTED; the stdout was byte-identical over two runs
+# and a third run with this ratchet installed reproduced it with new 0. 46,107 sites to 44,368 (real-leak classes,
+# not inshell/offlevel, 14,560 to 12,812). The 15 site keys it adds are single-run reclassifications, none traced to a
+# new hole: a jet trooper's or a roll's path the wall clamp turned now ends at a neighbouring cell or class (the
+# Yavin temple interior, Mos Eisley and Felucia roofs), and two Mygeeto bridge rolls end in an inshell room.
+#
+# 2026-11-21, re-recorded (issue #182: every map leak-free), approved by the maintainer
+# 2026-11-20 with the batch's leak re-record. The sim: the wall pass pushes level out of a LIP (a floor-like face it
+# meets over the step), the axis clamps cast at the end stance's heights and the capsule's middle, gate on the axis
+# (not the skin) being outside the bodies, undo a descent's level move at a floor or slope and a rise through any
+# face, and the rescue puts back a soldier wedged falling in place. The map data: added SOLDIER-layer solids
+# (`game::collision_fixes`, Rhen Var's bridge piers and obelisk). The census (v3) judges a crossing by whether the
+# soldier came back from behind the face within 10 ticks (`clip`, no site), counts an open shell or off the level
+# reached with no crossing as legal ground (`room`, `offnav`), an overlap no deeper than 0.25 m as a `graze`, gives
+# the drive sim the round's kill floor, and covers the 7 BF2 space maps the native rebake added (41 maps). 65,056
+# sites on the current bake to 2,590 (real-leak classes 18,803 to 2,498). The site keys it adds are reclassified
+# ends of the fixed runs and the space maps' first record; the per-site list is in the private copy.
+#
+# The census's v1 positive control (card JWAL, fixed by WPSH): `bf1_kas2 push` round the hut on the platform at
+# (5, 16.65, -7). Replay: LEAK_NEAR=4.9,-7.06,14 LEAK_TRACE=1.28,4.66,jump leak_census bf1_kas2.
+# The ratchet's lines live in the gate's private copy, <baseline_dir>/leak_census_accepted.txt (read through
+# LEAK_ACCEPTED; it is this file with its lines). Run without LEAK_ACCEPTED, every site is NEW.

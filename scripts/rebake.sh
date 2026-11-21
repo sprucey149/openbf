@@ -237,6 +237,10 @@ want() {
   return 1
 }
 
+# Each stage line carries the time since rebake.sh started ([mm:ss], minutes running on past 59), so the log of a
+# slow build says which stage took the time. $SECONDS is bash 3.2's own clock.
+stage() { printf '== [%02d:%02d] %s ==\n' $((SECONDS / 60)) $((SECONDS % 60)) "$1"; }
+
 # Each bake owns a few subdirectories; clear those (and only those) so a
 # renamed or dropped output cannot linger as a stale file.
 clean() { local t; for t in "$@"; do rm -rf "$t"; done; }
@@ -247,11 +251,18 @@ if [ -L "$OUT" ] && { want side || want dlc; } && { [ -n "$OPENBF_DLC_DIR" ] || 
   echo "rebake: $OUT is a link to other assets; set REBAKE_OUT to a folder of your own" >&2; exit 2
 fi
 
-# A direct audio rebake can replace only some restored outputs. Let the next
-# pack resynchronize all groups before it records a consistent output.
-if [ "$OUT" = "$ROOT/engine/assets_baked" ] && [ "${OPENBF_INPUTS_CHOSEN:-0}" != 1 ] &&
-   { want sounds || want global-sound || want common || want side || want dlc || want beep; }; then
-  "$PYTHON" -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)' "$ROOT/extracted/bake_inputs.sha256"
+# Run by hand, this bake's inputs are not the ones scripts/pack.py keyed: drop the keys of the groups it rebakes
+# (scripts/bake_cache.py keeps them beside the resolved output folder), so the next pack bakes them again its own way.
+if [ "${OPENBF_INPUTS_CHOSEN:-0}" != 1 ]; then
+  "$PYTHON" - "$OUT" ${SEL[@]+"${SEL[@]}"} <<'PYKEYS'
+import os, sys
+from pathlib import Path
+real = Path(os.path.realpath(sys.argv[1]))
+keys = real.with_name(real.name + ".groups")
+groups = sys.argv[2:] or [p.stem for p in keys.glob("*.json")]
+for group in groups + (["dlc"] if "side" in groups else []):
+    (keys / f"{group}.json").unlink(missing_ok=True)
+PYKEYS
 fi
 
 # Every other ground map, baked to assets_baked/<game>_<lvl> (the LVL name,
@@ -285,19 +296,19 @@ fi
 
 
 if want tat1; then
-  echo "== TAT1 (BF1) =="
+  stage "TAT1 (BF1)"
   clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav" "$OUT/tat1/shadows"
   map_donors bf1 TAT/TAT1.LVL
   "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1" ${PC_ARG[@]+"${PC_ARG[@]}"}
 fi
 if want tat2; then
-  echo "== TAT2 (BF2) =="
+  stage "TAT2 (BF2)"
   clean "$OUT/tat2/models" "$OUT/tat2/textures" "$OUT/tat2/collision" "$OUT/tat2/nav" "$OUT/tat2/shadows"
   map_donors bf2 tat/tat2.lvl
   "$BAKE" map "$(ci "$B2" TAT/TAT2.LVL)" "$OUT/tat2" ${PC_ARG[@]+"${PC_ARG[@]}"}
 fi
 if want common; then
-  echo "== common assets =="
+  stage "common assets"
   clean "$OUT/common_bf1/models" "$OUT/common_bf1/textures" "$OUT/common_bf1/collision" \
         "$OUT/common_bf2/models" "$OUT/common_bf2/textures" "$OUT/common_bf2/collision" \
         "$OUT/common_bf1/fonts" "$OUT/common_bf1/locl" \
@@ -395,7 +406,7 @@ if want common; then
   fi
 fi
 if want side; then
-  echo "== soldiers + weapons + vehicles =="
+  stage "soldiers + weapons + vehicles"
   clean "$OUT/side_bf1/soldiers" "$OUT/side_bf1/weapons" "$OUT/side_bf1/textures" \
         "$OUT/side_bf2/soldiers" "$OUT/side_bf2/weapons" "$OUT/side_bf2/textures" \
         "$OUT/side_bf1/vehicles" "$OUT/side_bf2/vehicles" \
@@ -564,7 +575,7 @@ fi
 if want side || want dlc; then
   clean "$OUT/side_bf2/dlc_heroes.ron" "$OUT/classes/bf2_dlc.ron" "$OUT/side_bf2/dlc_sounds" "$OUT/side_bf2/effects/dlc"
   if [ -n "$OPENBF_DLC_DIR" ]; then
-    echo "== DLC heroes =="
+    stage "DLC heroes"
     mkdir -p "$OUT"
     # Its real path: the bake refuses to write through a link, and a link above the checkout (/home on some Linux
     # systems) is not one it needs to worry about.
@@ -574,7 +585,8 @@ if want side || want dlc; then
   fi
 fi
 if want classes; then
-  echo "== entity/weapon classes =="
+  stage "entity/weapon classes"
+  mkdir -p "$OUT/classes"
   "$BAKE" classes "$(ci "$B1" SIDE/ALL.LVL)"          "$OUT/classes/bf1_all.ron"
   "$BAKE" classes "$(ci "$B1" SIDE/IMP.LVL)"          "$OUT/classes/bf1_imp.ron"
   "$BAKE" classes "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/classes/bf1_common.ron"
@@ -602,7 +614,7 @@ if want sounds; then
   # banks per era"): the first three letters of a map name are its planet, so
   # bf1_kas1 and bf1_kas2 share KAS.LVL. The game loads <mapdir>/sounds/
   # sounds.ron, so each map dir gets its own copy of its planet's bank.
-  echo "== map sound banks =="
+  stage "map sound banks"
   # The game's CORE.LVL goes in too: a property's Inherit template (distances,
   # gain, rolloff) is there, not in the planet's LVL (card SNDT).
   # A PC install donates its own recordings for the samples a console disc
@@ -651,7 +663,7 @@ if want sounds; then
   # (analysis/re-sound-global.md §0.6; the per-map banks do not carry them).
   # Baked here rather than with the streams so that `sound-names` below sees
   # these two directories on a FRESH tree too.
-  echo "== resident global banks (CORE.LVL) =="
+  stage "resident global banks (CORE.LVL)"
   clean "$OUT/core_bf1/sounds" "$OUT/core_bf2/sounds"
   "$BAKE" sounds "$C1" "$OUT/core_bf1"
   "$BAKE" sounds "$C2" "$OUT/core_bf2"
@@ -659,7 +671,7 @@ if want sounds; then
   # scripts/audition.sh can lay a bank out under names a human can read.
   # Needs the baked classes, so it runs after them; harmless if they are
   # missing (the dictionary just gets smaller).
-  echo "== sound names =="
+  stage "sound names"
   LUA_ROOT="${OPENBF_CONSOLE_LUA_ROOT:-}"
   LUA_PATHS="$E/bf1/lua,$E/bf2/lua"
   [ -n "$LUA_ROOT" ] && LUA_PATHS="$LUA_ROOT/bf1,$LUA_ROOT/bf2"
@@ -681,11 +693,11 @@ if want global-sound && [ "${OPENBF_SKIP_GLOBAL_SOUND:-0}" != 1 ]; then
   # sound LVL goes in as the reference set (BF1 TEST.LVL is not shipped
   # content and is left out). Both write <id>.ogg keyed by SEGMENT ID — the
   # only name that data has.
-  echo "== global VO streams =="
+  stage "global VO streams"
   "$PYTHON" "$ROOT/scripts/global_sound_cache.py" --bake "$BAKE" --bf1 "$S1" --bf2 "$S2" --out "$OUT"
 fi
 if want load; then
-  echo "== load screens =="
+  stage "load screens"
   "$BAKE" load-layout "$(ci "$B1" LOAD/LOAD.LVL)" "$OUT/common_bf1"
   "$BAKE" loadscreen "$(ci "$B1" LOAD/TAT1.LVL)"   "$OUT/tat1"
   "$BAKE" loadscreen "$(ci "$B2" LOAD/TAT2.LVL)"   "$OUT/tat2"
@@ -694,7 +706,7 @@ if want load; then
 fi
 
 if want maps; then
-  echo "== other ground maps =="
+  stage "other ground maps"
   for p in $BF1_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
@@ -720,7 +732,7 @@ if want maps; then
   fi
 fi
 if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
-  echo "== space maps =="
+  stage "space maps"
   SKY_LVL="$(ci "$B2" SPA/SPA_SKY.LVL)"
   for n in SPA1 SPA3 SPA6 SPA7 SPA8 SPA9; do
     [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
@@ -743,7 +755,7 @@ if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
   done
 fi
 if want beep; then
-  echo "== BF1 loading beep =="
+  stage "BF1 loading beep"
   "$BAKE" beep "$(ci "$S1" CORE.LVL)" "$OUT/audio"
 fi
 # Compared with the PS2's counts shipped in the source, not with another bake: two bakes

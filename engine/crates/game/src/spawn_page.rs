@@ -88,6 +88,7 @@ pub fn page(
                     .text_by_hash(0x155a_b074, "Get %d more points to unlock!\r\n")
                     .replacen("%d", &n.to_string(), 1),
                 Some(ClassRefusal::HeroUnavailable) => String::from("Hero unavailable\n"),
+                Some(ClassRefusal::HeroLocked) => String::from("Heroes can't change class\n"),
                 None => String::new(),
             };
             let count = walk.sim.class_count(team, pick);

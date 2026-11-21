@@ -506,7 +506,8 @@ class PackScriptInstall(unittest.TestCase):
                     stack.enter_context(mock.patch.object(pack.input_scan, name, return_value=value))
                 for name, value in dict(resolve_pc_roots={}, console_lua_root=str(lua), git_tracked_missions=True,
                                         gameplay_correction_args=[], stale=None, missing_music=[], missing_shadows=[],
-                                        check_foliage=[], find_bash='bash').items():
+                                        bake_plan=[], group_versions={'schema': 1, 'target': 'test', 'groups': dict.fromkeys(pack.bake_cache.GROUPS + ('extract-iso',), 1)},
+                                        check_foliage=[], find_bash='bash', need_ffmpeg=None).items():
                     stack.enter_context(mock.patch.object(pack, name, return_value=value))
                 runner = stack.enter_context(mock.patch.object(pack, 'run', side_effect=run_cached))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))

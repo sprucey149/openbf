@@ -2,7 +2,7 @@
 
 use super::{
     AiState, ArmState, Behaviour, FightState, FlankState, MoverState, NavState, RoleState, Route,
-    SnipeBook, SteerPick, TposState, Vec3, WalkAsk, ERR_NO_TARGET,
+    SeatFight, SnipeBook, SteerPick, TposState, Vec3, WalkAsk, ERR_NO_TARGET,
 };
 use crate::fmath::FloatExt;
 
@@ -227,6 +227,8 @@ impl Default for AiState {
             role: RoleState::default(),
             flank: FlankState::default(),
             droid_rest: 0,
+            seat: SeatFight::default(),
+            shot_by: None,
         }
     }
 }
@@ -396,6 +398,15 @@ impl AiState {
         }
         if self.arcm != super::arcm::ArcmState::default() {
             self.arcm.hash_into(eat);
+        }
+        if self.seat != SeatFight::default() {
+            self.seat.hash_into(eat);
+        }
+        if let Some((h, t)) = self.shot_by {
+            eat(b"SHOTBY");
+            eat(&h.index.to_le_bytes());
+            eat(&h.gen.to_le_bytes());
+            eat(&t.to_le_bytes());
         }
     }
 }

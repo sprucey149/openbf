@@ -48,6 +48,13 @@
 //! manoeuvre runs) or routeless is `ride`'s. VBAIL checks the 20% health
 //! bail-out (H2) in `ride::drive` before steering. Not built: the boost
 //! (speed mode 3's senders are [H], §6).
+//!
+//! OURS, PROVISIONAL through the PS2's own path: a driver fighting an enemy
+//! ground vehicle (`seat_fight::hover_aim`) gives the steering an aim order
+//! ([`Order::aim`]) and, in a hover with a StrafeSpeed, bit 5 ("stand"), so
+//! §3's tail turns the hull to the enemy while throttle and strafe keep to
+//! the route; the PS2's senders of bit 5 are behaviour states that were not
+//! decoded (§1, §8). With no aim order the sticks are the transcription's.
 
 use super::gunner::Look;
 use super::route::{advance_route, progress, sub_point};
@@ -167,6 +174,10 @@ pub struct Order {
     pub since_state2: f32,
     /// Last tick's throttle and strafe: an invalid goal keeps them.
     pub held: [f32; 2],
+    /// The aim order's point (§3's tail turns to it in place of the type-2
+    /// point); `None` = no aim order. OURS, PROVISIONAL: set only by
+    /// `seat_fight::hover_aim`, a driver fighting an enemy vehicle.
+    pub aim: Option<Vec3>,
 }
 
 /// FUN_002a4400: a unit vector, (1, 0, 0) for a zero input.
@@ -262,13 +273,16 @@ pub(super) fn steer(k: &Class, m: &Body, o: &Order, goal: Option<Vec3>) -> [f32;
             }
         }
     }
-    // The tail: toward the aim point (type 2: along the travel outside R,
-    // else ahead) when stopped, fading with a strafe speed, or standing.
+    // The tail: toward the aim point (the aim order's; else type 2: along
+    // the travel outside R, else ahead) when stopped, fading with a strafe
+    // speed, or standing.
     let (turn, pitch) = match goal {
         Some(g) if !(no_goal || o.stand || (slowing && has_strafe)) => stick_to(k, m, g),
         _ => {
             let d = goal.map_or(Vec3::ZERO, |g| g - m.pos);
-            let p = if goal.is_some() && r * r < d.x * d.x + d.z * d.z {
+            let p = if let Some(a) = o.aim {
+                a
+            } else if goal.is_some() && r * r < d.x * d.x + d.z * d.z {
                 m.pos + unit(d) * AIM_REACH
             } else {
                 m.pos + m.fwd * AIM_REACH
@@ -471,11 +485,18 @@ pub(super) fn drive(
             sim.tick.saturating_sub(t) as f32 * crate::TICK_DT
         })
     };
+    // A driver fighting an enemy vehicle (`seat_fight::hover_aim`, OURS,
+    // PROVISIONAL through the PS2's bit-5 path): the aim order, and for a
+    // hover with a StrafeSpeed bit 5 ("stand") as well, so the tail turns
+    // the hull to the enemy while throttle and strafe keep to the route. A
+    // hover without one turns to it only where the tail already would.
+    let aim = super::seat_fight::hover_aim(sim, me, st);
     let order = Order {
         goal: Some(goal),
         path: st.route().is_some(),
         bit4: false,
-        stand: false,
+        stand: aim.is_some() && k.strafe_speed > EPS,
+        aim,
         probe,
         stuck: stuck(&mut ai, crate::TICK_DT, pos, node),
         since_end: secs(ai.ended_at),

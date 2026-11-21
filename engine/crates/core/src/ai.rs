@@ -110,6 +110,7 @@ mod mover;
 pub mod proxy;
 mod ride;
 pub(crate) mod route;
+pub(crate) mod seat_fight;
 pub mod snipe;
 mod stall;
 mod state;
@@ -146,8 +147,8 @@ pub(crate) use route::unit_goal_hub;
 pub use route::{first_leg, floor_walked};
 pub use state::{
     AiState, Behaviour, FightState, FlankState, HoldState, LostState, MoverState, NavTick,
-    RideState, RoleState, Round, Route, RouteSource, SnipeBook, SnipeState, StallState, SteerPick,
-    TposState, Walk, WalkAsk,
+    RideState, RoleState, Round, Route, RouteSource, SeatFight, SnipeBook, SnipeState, StallState,
+    SteerPick, TposState, Walk, WalkAsk,
 };
 pub use steer::{rotate_xz, way_ahead, Stop, StopKind};
 

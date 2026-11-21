@@ -114,7 +114,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
 
     // Card HYST: a hit, a near miss or a new enemy in sight since the last
     // think brings the next one forward (`crate::ai::wake`).
-    st.wake |= crate::ai::wake::events(sim, me, u, st);
+    let woke = crate::ai::wake::events(sim, me, u, st, &mut nt.levers);
+    st.wake |= woke;
     let woken = st.wake != 0 && sim.tick >= st.last_think + crate::ai::wake::GAP;
     let thinking = sim.tick >= st.next_think || woken;
     if thinking {

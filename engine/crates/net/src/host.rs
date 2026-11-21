@@ -27,7 +27,10 @@
 //!   once a second per address) so it can say "version mismatch".
 //! - Discovery: one `Found` per datagram however many `Find`s it carries,
 //!   at most every [`FOUND_EVERY`] per address (a browser asks once a
-//!   second), so the host is no reply amplifier.
+//!   second), so the host is no reply amplifier. A `Find` from another
+//!   protocol version (the frozen layout, `packet::frozen_find_nonce`) is
+//!   answered the same way, so that browser can list this host as another
+//!   version; it never opens a peer.
 
 mod admission;
 use admission::Hello;
@@ -457,8 +460,17 @@ impl HostCore {
             Ok(x) => x,
             Err(d) => {
                 self.drops.count(d);
-                if let (DropReason::Protocol(_), Some(id)) = (d, raw_conn_id(bytes)) {
-                    self.answer_version(from, id);
+                match (d, raw_conn_id(bytes)) {
+                    // A browser on another version asks in the frozen
+                    // layout: it hears this host's own `Found` and lists
+                    // it as "different version". No peer opens for it.
+                    (DropReason::Protocol(_), Some(0)) => {
+                        if let Some(nonce) = crate::packet::frozen_find_nonce(bytes) {
+                            self.answer_find(from, nonce);
+                        }
+                    }
+                    (DropReason::Protocol(_), Some(id)) => self.answer_version(from, id),
+                    _ => {}
                 }
                 return;
             }
@@ -472,15 +484,8 @@ impl HostCore {
                 Chunk::Find { nonce } => Some(*nonce),
                 _ => None,
             });
-            let due = self
-                .found_replies
-                .get(&from)
-                .is_none_or(|t| now.0 >= t.0 + FOUND_EVERY.0);
-            if let (Some(nonce), true) = (nonce, due) {
-                self.found_replies.insert(from, now);
-                let mut pw = bare_packet(0);
-                pw.found(nonce, &self.info);
-                self.outbox.push((from, pw.finish()));
+            if let Some(nonce) = nonce {
+                self.answer_find(from, nonce);
             }
             return;
         }
@@ -541,6 +546,23 @@ impl HostCore {
             }
         }
         self.drain_messages(h.conn);
+    }
+
+    /// Discovery's answer, at most every [`FOUND_EVERY`] per address. Its
+    /// first chunk is the `Found` in the frozen layout
+    /// (`packet::frozen_found`), whatever version asked.
+    fn answer_find(&mut self, from: SocketAddr, nonce: u64) {
+        let now = self.now;
+        let due = self
+            .found_replies
+            .get(&from)
+            .is_none_or(|t| now.0 >= t.0 + FOUND_EVERY.0);
+        if due {
+            self.found_replies.insert(from, now);
+            let mut pw = bare_packet(0);
+            pw.found(nonce, &self.info);
+            self.outbox.push((from, pw.finish()));
+        }
     }
 
     fn answer_version(&mut self, from: SocketAddr, conn: u32) {

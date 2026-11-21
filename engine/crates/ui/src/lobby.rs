@@ -10,10 +10,16 @@
 //!   compensation on or off, and the award policy (LAN §5b: Awards On, the
 //!   single player's default, lets each player's own earned awards apply;
 //!   Off, nobody's); Start Hosting checks the port (1..=65535).
-//! - Join: the hosts the LAN browser heard (a host on another build is
-//!   listed dimmed with why), a Join-by-address text box (IP or host name,
-//!   optional `:port`) and the recent hosts. Focus follows a host by its
-//!   address when the list changes under it.
+//! - Join: "Games on this network" (the hosts the LAN browser heard that
+//!   are not recent games; one on a different version is listed dimmed
+//!   with why), then "Recent games" (this computer's, newest first: the
+//!   host's answer when it is hosting, else "not hosting now", always
+//!   pressable; Square, Space or a right-click forgets one), then a
+//!   Join-by-address text box (IP or host name, optional `:port`), Test
+//!   Connection and Back. The cursor starts on the first joinable game,
+//!   else in the address box, and until the player presses something it
+//!   moves to the first joinable game that appears; after that the focus
+//!   follows its row by address when the lists change under it.
 //! - Text rows take the keyboard while focused: the shell's Back key does
 //!   not leave the page while one types (the caller drops the menu keys
 //!   while [`PageDraw::text_focus`] is set; Escape gives the focus back).
@@ -41,6 +47,8 @@ pub struct PageRow {
     pub value: Option<String>,
     pub enabled: bool,
     pub text: bool,
+    /// A section heading (never focused): drawn small, without a bar.
+    pub heading: bool,
 }
 
 impl PageRow {
@@ -50,6 +58,7 @@ impl PageRow {
             value,
             enabled: true,
             text: false,
+            heading: false,
         }
     }
 }
@@ -287,125 +296,282 @@ pub struct FoundRow {
     /// `ip:port`, what Connect joins.
     pub addr: String,
     pub name: String,
+    /// The map in play (its label), empty in the lobby.
     pub map: String,
+    /// The mode in play ("Conquest"), empty in the lobby.
+    pub mode: String,
     pub players: String,
     pub ping_ms: u32,
-    /// `None` = joinable, else why not (another build, full).
+    /// `None` = joinable, else why not (a different version, full).
     pub refusal: Option<String>,
+}
+
+impl FoundRow {
+    /// "Ann — Kashyyyk: Docks, Conquest" (with why it cannot be joined).
+    fn label(&self) -> String {
+        let place = match (self.map.is_empty(), self.mode.is_empty()) {
+            (true, _) => "in the lobby".to_owned(),
+            (false, true) => self.map.clone(),
+            (false, false) => format!("{}, {}", self.map, self.mode),
+        };
+        let mut label = format!("{} \u{2014} {place}", self.name);
+        if let Some(why) = &self.refusal {
+            label = format!("{label} ({why})");
+        }
+        label
+    }
+
+    fn value(&self) -> Option<String> {
+        Some(format!("{}  {} ms", self.players, self.ping_ms))
+    }
+}
+
+/// A game this computer joined before, as Join Game lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecentRow {
+    /// The address as it was joined: what Connect joins.
+    pub addr: String,
+    /// The host's player name when last joined ("" unknown).
+    pub name: String,
+    /// When it was last joined ("2 days ago", "" unknown).
+    pub joined: String,
+    /// The host's answer to this computer's question, while it is hosting.
+    pub live: Option<FoundRow>,
+}
+
+impl RecentRow {
+    pub fn new(
+        addr: impl Into<String>,
+        name: impl Into<String>,
+        joined: impl Into<String>,
+    ) -> Self {
+        Self {
+            addr: addr.into(),
+            name: name.into(),
+            joined: joined.into(),
+            live: None,
+        }
+    }
+
+    fn row(&self) -> PageRow {
+        match &self.live {
+            Some(h) => PageRow::plain(h.label(), h.value()),
+            None => {
+                let who = if self.name.is_empty() {
+                    &self.addr
+                } else {
+                    &self.name
+                };
+                let label = if self.joined.is_empty() {
+                    format!("{who} (not hosting now)")
+                } else {
+                    format!("{who} (not hosting now, joined {})", self.joined)
+                };
+                let value = (!self.name.is_empty()).then(|| self.addr.clone());
+                PageRow::plain(label, value)
+            }
+        }
+    }
 }
 
 /// Join Game's rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JoinRow {
+    /// "Games on this network" / "Recent games": a heading, never focused.
+    Heading(JoinSection),
     Host(usize),
+    Recent(usize),
     Address,
     /// "Test connection" for the typed address (LAN §5b).
     Test,
-    Recent(usize),
     Back,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JoinSection {
+    Found,
+    Recent,
 }
 
 /// What Join Game asks of the game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JoinCommand {
     /// Join this address (a found host's `ip:port`, the typed text or a
-    /// recent host).
+    /// recent game's address).
     Connect(String),
     /// Test the typed address: ask it the discovery question.
     Test(String),
+    /// Forget this recent game (its index in [`JoinPage::recent`]).
+    Forget(usize),
     Back,
+}
+
+/// A row by what it shows, so the focus follows it when the lists change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JoinKey {
+    Host(String),
+    Recent(String),
+    Other(JoinRow),
 }
 
 /// Join Game's page (module rules).
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct JoinPage {
+    /// The games found on the network that are not recent games.
     pub hosts: Vec<FoundRow>,
     pub address: String,
-    pub recent: Vec<String>,
+    pub recent: Vec<RecentRow>,
     pub cursor: usize,
     /// The connection's state or why the last one ended.
     pub status: Option<String>,
     /// The cursor just arrived on the address box (see [`HostSetup::focus_text`]).
     pub focus_text: bool,
+    /// The player has pressed something: the cursor no longer jumps to the
+    /// first game that appears.
+    touched: bool,
     clicks: Vec<MenuSound>,
 }
 
 impl JoinPage {
-    pub fn new(recent: Vec<String>) -> Self {
+    /// The page with this computer's recent games; the cursor starts on
+    /// the first game, else in the address box.
+    pub fn new(recent: Vec<RecentRow>) -> Self {
         let mut p = Self {
             recent,
             ..Default::default()
         };
-        p.cursor = p
-            .row_ids()
-            .iter()
-            .position(|r| *r == JoinRow::Address)
-            .unwrap_or(0);
-        p.focus_text = true;
+        p.home();
         p
     }
 
+    /// The first joinable game, else the address box (with the keyboard).
+    fn home(&mut self) {
+        let ids = self.row_ids();
+        let joinable = |r: &JoinRow| match r {
+            JoinRow::Host(i) => self.hosts[*i].refusal.is_none(),
+            JoinRow::Recent(i) => self.recent[*i]
+                .live
+                .as_ref()
+                .is_none_or(|h| h.refusal.is_none()),
+            _ => false,
+        };
+        let live_recent = ids.iter().position(|r| {
+            matches!(r, JoinRow::Recent(i) if self.recent[*i].live.is_some()) && joinable(r)
+        });
+        let first_host = ids
+            .iter()
+            .position(|r| matches!(r, JoinRow::Host(_)) && joinable(r));
+        self.cursor = live_recent
+            .or(first_host)
+            .or_else(|| {
+                ids.iter()
+                    .position(|r| matches!(r, JoinRow::Recent(_)) && joinable(r))
+            })
+            .or_else(|| ids.iter().position(|r| *r == JoinRow::Address))
+            .unwrap_or(0);
+        self.focus_text = ids[self.cursor] == JoinRow::Address;
+    }
+
     pub fn row_ids(&self) -> Vec<JoinRow> {
-        (0..self.hosts.len())
-            .map(JoinRow::Host)
-            .chain([JoinRow::Address, JoinRow::Test])
-            .chain((0..self.recent.len()).map(JoinRow::Recent))
-            .chain([JoinRow::Back])
-            .collect()
+        let mut v = Vec::new();
+        if !self.hosts.is_empty() {
+            v.push(JoinRow::Heading(JoinSection::Found));
+            v.extend((0..self.hosts.len()).map(JoinRow::Host));
+        }
+        if !self.recent.is_empty() {
+            v.push(JoinRow::Heading(JoinSection::Recent));
+            v.extend((0..self.recent.len()).map(JoinRow::Recent));
+        }
+        v.extend([JoinRow::Address, JoinRow::Test, JoinRow::Back]);
+        v
     }
 
     pub fn rows(&self) -> Vec<PageRow> {
         self.row_ids()
             .into_iter()
             .map(|r| match r {
+                JoinRow::Heading(s) => PageRow {
+                    enabled: false,
+                    heading: true,
+                    ..PageRow::plain(
+                        match s {
+                            JoinSection::Found => "Games on this network",
+                            JoinSection::Recent => "Recent games",
+                        },
+                        None,
+                    )
+                },
                 JoinRow::Host(i) => {
                     let h = &self.hosts[i];
-                    let mut label = format!("{} \u{2014} {}", h.name, h.map);
-                    if let Some(why) = &h.refusal {
-                        label = format!("{label} ({why})");
-                    }
                     PageRow {
                         enabled: h.refusal.is_none(),
-                        ..PageRow::plain(label, Some(format!("{}  {} ms", h.players, h.ping_ms)))
+                        ..PageRow::plain(h.label(), h.value())
                     }
                 }
+                // Always enabled: a host not answering may still be up
+                // (a firewall, a slow tunnel), and Enter tries it.
+                JoinRow::Recent(i) => self.recent[i].row(),
                 JoinRow::Address => PageRow {
                     text: true,
                     ..PageRow::plain("Join by Address", Some(self.address.clone()))
                 },
                 JoinRow::Test => PageRow::plain("Test Connection", None),
-                JoinRow::Recent(i) => PageRow::plain(format!("Recent: {}", self.recent[i]), None),
                 JoinRow::Back => PageRow::plain("Back", None),
             })
             .collect()
     }
 
-    /// Replaces the found hosts; the focus stays on the same host (by
-    /// address) or the same row below the list.
-    pub fn set_hosts(&mut self, hosts: Vec<FoundRow>) {
-        if hosts == self.hosts {
+    fn key(&self, r: JoinRow) -> JoinKey {
+        match r {
+            JoinRow::Host(i) => JoinKey::Host(self.hosts[i].addr.clone()),
+            JoinRow::Recent(i) => JoinKey::Recent(self.recent[i].addr.clone()),
+            r => JoinKey::Other(r),
+        }
+    }
+
+    /// Replaces the found games and the recent games' answers (`live`, by
+    /// index, the rest of each recent row kept); the focus follows its row.
+    /// Before the player presses anything it goes to the first joinable
+    /// game.
+    pub fn set_hosts(&mut self, hosts: Vec<FoundRow>, live: Vec<Option<FoundRow>>) {
+        let same_live = self
+            .recent
+            .iter()
+            .enumerate()
+            .all(|(i, r)| r.live == live.get(i).cloned().flatten());
+        if hosts == self.hosts && same_live {
             return;
         }
         let ids = self.row_ids();
-        let at = ids.get(self.cursor).copied();
-        let old = self.hosts.len();
-        let keep = match at {
-            Some(JoinRow::Host(i)) => self.hosts.get(i).map(|h| h.addr.clone()),
-            _ => None,
-        };
-        let new = hosts.len();
+        let at = ids.get(self.cursor).map(|r| self.key(*r));
+        let old_pos = self.cursor;
         self.hosts = hosts;
-        self.cursor = match (at, keep) {
-            (Some(JoinRow::Host(_)), Some(addr)) => self
-                .hosts
-                .iter()
-                .position(|h| h.addr == addr)
-                .unwrap_or(new),
-            (Some(JoinRow::Host(_)), None) => new,
-            _ => (self.cursor + new).saturating_sub(old),
-        };
+        for (i, r) in self.recent.iter_mut().enumerate() {
+            r.live = live.get(i).cloned().flatten();
+        }
+        self.settle(at, old_pos);
+    }
+
+    /// Replaces the recent games (after a Forget); the focus follows its
+    /// row, or the next one.
+    pub fn set_recent(&mut self, recent: Vec<RecentRow>) {
+        let ids = self.row_ids();
+        let at = ids.get(self.cursor).map(|r| self.key(*r));
+        let old_pos = self.cursor;
+        self.recent = recent;
+        self.settle(at, old_pos);
+    }
+
+    fn settle(&mut self, at: Option<JoinKey>, old_pos: usize) {
+        if !self.touched && self.address.trim().is_empty() {
+            self.home();
+            return;
+        }
+        let ids = self.row_ids();
+        self.cursor = at
+            .and_then(|k| ids.iter().position(|r| self.key(*r) == k))
+            .unwrap_or(old_pos.min(ids.len() - 1));
         let rows = self.rows();
-        self.cursor = self.cursor.min(rows.len() - 1);
         if !rows[self.cursor].enabled {
             self.cursor = follow(&rows, self.cursor, 1);
         }
@@ -415,11 +581,15 @@ impl JoinPage {
         std::mem::take(&mut self.clicks)
     }
 
-    /// One frame's presses.
-    pub fn step(&mut self, input: MenuInput) -> Option<JoinCommand> {
+    /// One frame's presses; `forget` is Square (Space): it forgets
+    /// the recent game under the cursor.
+    pub fn step(&mut self, input: MenuInput, forget: bool) -> Option<JoinCommand> {
         if input.back {
             self.clicks.push(MenuSound::Exit);
             return Some(JoinCommand::Back);
+        }
+        if input.up || input.down || input.confirm || forget {
+            self.touched = true;
         }
         let rows = self.rows();
         if input.up || input.down {
@@ -429,14 +599,20 @@ impl JoinPage {
         }
         let ids = self.row_ids();
         self.cursor = self.cursor.min(ids.len() - 1);
+        if forget {
+            if let JoinRow::Recent(i) = ids[self.cursor] {
+                self.clicks.push(MenuSound::Accept);
+                return Some(JoinCommand::Forget(i));
+            }
+        }
         if !input.confirm {
             return None;
         }
         let addr = match ids[self.cursor] {
             JoinRow::Host(i) if self.hosts[i].refusal.is_none() => self.hosts[i].addr.clone(),
-            JoinRow::Host(_) => String::new(),
+            JoinRow::Host(_) | JoinRow::Heading(_) => String::new(),
             JoinRow::Address | JoinRow::Test => self.address.trim().to_owned(),
-            JoinRow::Recent(i) => self.recent[i].clone(),
+            JoinRow::Recent(i) => self.recent[i].addr.clone(),
             JoinRow::Back => {
                 self.clicks.push(MenuSound::Exit);
                 return Some(JoinCommand::Back);
@@ -468,6 +644,8 @@ pub struct PageDraw {
     pub clicked: Option<usize>,
     /// Enter was pressed in a text box: press its row.
     pub submitted: bool,
+    /// A row was right-clicked (Join Game: forget that recent game).
+    pub secondary: Option<usize>,
 }
 
 /// The focused row's bar: the native stack's white bar, faint.
@@ -656,6 +834,11 @@ pub fn draw_page(
                     });
                     ui.add_space(8.0);
                     for (i, row) in rows.iter().enumerate() {
+                        if row.heading {
+                            ui.add_space(4.0);
+                            ui.label(egui_text(ctx, &BODY, tint::HELP, &row.label));
+                            continue;
+                        }
                         let focused = i == cursor;
                         let fg = if !row.enabled {
                             tint::DIMMED
@@ -709,6 +892,9 @@ pub fn draw_page(
                             let hit = frame.response.interact(egui::Sense::click());
                             if row.enabled && hit.clicked_by(egui::PointerButton::Primary) {
                                 out.clicked = Some(i);
+                            }
+                            if row.enabled && hit.clicked_by(egui::PointerButton::Secondary) {
+                                out.secondary = Some(i);
                             }
                         }
                     }

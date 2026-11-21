@@ -79,6 +79,10 @@ fn uses_legacy(sim: &Sim, me: UnitHandle) -> bool {
 }
 
 pub fn think(sim: &Sim, me: UnitHandle, state: &mut super::AiState) -> (PadState, super::NavTick) {
+    // A ground seat's fight ends with the seat (`seat_fight`).
+    if state.seat != super::SeatFight::default() && sim.unit(me).is_none_or(|u| u.mount.is_none()) {
+        state.seat = super::SeatFight::default();
+    }
     if uses_legacy(sim, me) {
         legacy::think(sim, me, state)
     } else {

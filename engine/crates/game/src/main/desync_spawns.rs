@@ -161,8 +161,13 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         .map(|h| format!("slot {} {:?} team {:?}", h.slot, h.name, h.team))
         .collect();
     println!("humans at the start: {}", humans.join(", "));
-    let (scene, load) = game::assets::load_battle_scene(&assets.join(&setup.map), &setup.mode)
+    let (mut scene, load) = game::assets::load_battle_scene(&assets.join(&setup.map), &setup.mode)
         .with_context(|| format!("loading {} from {}", setup.map, assets.display()))?;
+    scene.kill_objects(&game::mission::scene_kills(
+        &missions,
+        &setup.map,
+        &setup.mode,
+    ));
     if let Some((path, Err(error))) = load.common {
         bail!("common assets at {} unreadable: {error:#}", path.display());
     }

@@ -389,12 +389,16 @@ mod tests {
     /// the same bot in the open, in a shell open below (a hollow trunk:
     /// not watertight) or in a closed shell with a planning hub inside (a
     /// room the bots walk) is not. (BF1 Endor's cp2 boulder lies in the
-    /// post's region: one bot stood inside it for 806 s.)
+    /// post's region: one bot stood inside it for 806 s.) The watch is the
+    /// backstop under the leak rescue (`sim/rescue.rs`), which removes a
+    /// bot shut in a watertight body first, so it is measured here with
+    /// the rescue off; the last check is the rescue's own, sooner, kill.
     #[test]
     fn a_bot_shut_inside_a_closed_body_is_given_up_while_capturing() {
         // cp1's hub is at (40, 0, -40), its region 6 m round it.
         let run = |spot: Vec3, body: Option<(Vec3, bool)>| {
             let (mut sim, h) = l_sim();
+            sim.rescue_off = true;
             sim.units[h.index as usize].soldier.pos = spot;
             if let Some((centre, open_bottom)) = body {
                 sim.collision = CollisionWorld::new(
@@ -440,6 +444,25 @@ mod tests {
             None,
             "a hub inside"
         );
+        // With the rescue on (as in every game), the shut bot has no clear
+        // spot to go back to and dies `Embedded` well inside the bound.
+        let (mut sim, h) = l_sim();
+        sim.units[h.index as usize].soldier.pos = spot;
+        sim.collision = CollisionWorld::new(
+            vec![crate::collision::box_mesh(spot + up, Vec3::new(2.5, 3.0, 2.5), false)],
+            Vec::new(),
+        );
+        let mut embedded_at = None;
+        for _ in 0..crate::ai::SHUT_RECYCLE {
+            sim.step(&[PadState::default()]);
+            if sim.events.iter().any(|e| {
+                matches!(e, Event::EnvDeath { unit, cause: DeathCause::Embedded } if *unit == h)
+            }) {
+                embedded_at = Some(sim.tick);
+                break;
+            }
+        }
+        assert!(embedded_at.is_some(), "the rescue removes him first");
     }
 
     /// A bot holding a position (card HOLD) stays put by choice.

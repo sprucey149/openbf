@@ -269,7 +269,9 @@ pub struct HudModel {
     /// their count is posted as -1, which the reinforcement Text prints as
     /// "--" (`FUN_003ae6c0`, `analysis/re-hud.md` §2.3).
     pub unlimited_tickets: [bool; 2],
-    pub team_points: Option<([i32; 2], u32)>,
+    /// Each team's points and each team's own points to win (a Hunt may set
+    /// the sides different targets; every other mode repeats one limit).
+    pub team_points: Option<([i32; 2], [u32; 2])>,
     /// The mission script's popup, its text localized; the battle holds
     /// under it until the player dismisses it.
     pub popup: Option<HudPopup>,
@@ -620,8 +622,9 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             &format!("player1.team{slot}.textureDisable"),
             EventValue::None,
         );
-        if let Some((points, limit)) = m.team_points {
+        if let Some((points, limits)) = m.team_points {
             let pts = points[team];
+            let limit = limits[team];
             put(
                 &format!("player1.team{slot}.points"),
                 EventValue::Number(pts as f32),
@@ -1661,7 +1664,7 @@ mod team_points_tests {
         let model = HudModel {
             player_team: 1,
             tickets: [999_999; 2],
-            team_points: Some(([3, 7], 180)),
+            team_points: Some(([3, 7], [180; 2])),
             ..Default::default()
         };
         feed(&mut hud, &model, &|_| false);
@@ -1678,13 +1681,33 @@ mod team_points_tests {
     }
 
     #[test]
+    fn each_side_shows_its_own_points_to_win() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let model = HudModel {
+            player_team: 0,
+            tickets: [999_999; 2],
+            team_points: Some(([12, 9], [60, 40])),
+            ..Default::default()
+        };
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(
+            hud.last("player1.team1.pointsText"),
+            Some(&EventValue::Text("12/60".to_owned()))
+        );
+        assert_eq!(
+            hud.last("player1.team2.pointsText"),
+            Some(&EventValue::Text("9/40".to_owned()))
+        );
+    }
+
+    #[test]
     fn ctf_shows_flag_icon_and_single_score() {
         let mut hud = crate::hud_tree::fixture::target_hud();
         let model = HudModel {
             player_team: 1,
             ctf: true,
             tickets: [999_999; 2],
-            team_points: Some(([0, 1], 5)),
+            team_points: Some(([0, 1], [5; 2])),
             ..Default::default()
         };
         feed(&mut hud, &model, &|_| false);

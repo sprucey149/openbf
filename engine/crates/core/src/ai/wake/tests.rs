@@ -99,13 +99,25 @@ fn a_near_miss_wakes_the_bot() {
     let u = s.unit(a).expect("bot").clone();
     let past = |x: f32| bolt(Vec3::new(x, 1.0, 3.0), Vec3::new(0.0, 0.0, 300.0), 1, e);
     s.bolts.push(past(1.0));
-    assert_eq!(events(&s, a, &u, &u.ai) & NEAR, NEAR, "a metre off");
+    assert_eq!(
+        events(&s, a, &u, &mut u.ai.clone(), &mut 0) & NEAR,
+        NEAR,
+        "a metre off"
+    );
     s.bolts[0] = past(5.0);
-    assert_eq!(events(&s, a, &u, &u.ai) & NEAR, 0, "5 m off");
+    assert_eq!(
+        events(&s, a, &u, &mut u.ai.clone(), &mut 0) & NEAR,
+        0,
+        "5 m off"
+    );
     let mut own = past(0.5);
     own.team = 0;
     s.bolts[0] = own;
-    assert_eq!(events(&s, a, &u, &u.ai) & NEAR, 0, "a friend's");
+    assert_eq!(
+        events(&s, a, &u, &mut u.ai.clone(), &mut 0) & NEAR,
+        0,
+        "a friend's"
+    );
 }
 
 /// An enemy it holds no record of, in view within SIGHT and in the line of
@@ -121,7 +133,11 @@ fn a_new_enemy_in_sight_wakes_the_bot() {
         s.spawn(&UnitSpec::trooper(1, at)).expect("enemy");
         let u = s.unit(a).expect("bot").clone();
         let st = AiState::default();
-        assert_eq!(events(&s, a, &u, &st) & SEEN != 0, wakes, "enemy at {at}");
+        assert_eq!(
+            events(&s, a, &u, &mut st.clone(), &mut 0) & SEEN != 0,
+            wakes,
+            "enemy at {at}"
+        );
     }
     let (mut s, a, _, _) = scene(None);
     let e = s
@@ -134,7 +150,11 @@ fn a_new_enemy_in_sight_wakes_the_bot() {
         crate::perception::contact_of(&st, e).is_some(),
         "seen by the scan"
     );
-    assert_eq!(events(&s, a, &u, &st) & SEEN, 0, "known already");
+    assert_eq!(
+        events(&s, a, &u, &mut st.clone(), &mut 0) & SEEN,
+        0,
+        "known already"
+    );
 }
 
 #[test]

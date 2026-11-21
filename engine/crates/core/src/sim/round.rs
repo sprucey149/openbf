@@ -1,7 +1,7 @@
 //! The command posts and how the round ends: [`Sim::add_cp`] registers a
 //! post, and `update_cps` — step 6 — counts each post's occupants, applies
-//! the conquest bleed and D12's Elite team handicap, sheds excess AI after
-//! mission death drains, and decides the outcome (a team at 0 tickets,
+//! the conquest bleed and D12's Elite team handicap, sheds any excess AI,
+//! and decides the outcome (a team at 0 tickets,
 //! domination, or the time limit). The capture, defeat, handicap and time-limit
 //! tests live here.
 
@@ -174,9 +174,6 @@ impl Sim {
     }
 
     pub(super) fn update_cps(&mut self, dt: f32) {
-        if self.is_xl() {
-            return;
-        }
         let teams = self.battle.teams.len();
         for ci in 0..self.cps.len() {
             let inside = self.cp_inside(ci);
@@ -265,7 +262,7 @@ impl Sim {
                 std::cmp::Ordering::Equal => OUTCOME_DRAW,
             }
         } else if let Some(dm) = &self.deathmatch {
-            match dm.points[0].cmp(&dm.points[1]) {
+            match dm.timer_leader() {
                 std::cmp::Ordering::Greater => 0,
                 std::cmp::Ordering::Less => 1,
                 std::cmp::Ordering::Equal => OUTCOME_DRAW,
@@ -544,76 +541,70 @@ mod tests {
         }
     }
 
-    /// BLEED: Death Star's extra drain reaches the repair loop from valid
-    /// spawns, even with no CP majority. Keep both counters and units in sync.
+    /// A death through `step` costs its team exactly one ticket and, with no
+    /// CP majority, sheds no AI: counters and units stay in sync.
     #[test]
-    fn mission_death_drain_sheds_ai_through_step_without_cp_bleed() {
-        for extra in [0, 1] {
-            let mut s = Sim::empty(4);
-            s.heightfield = Some(flat_ground());
-            s.battle = Battle::new([3, 100]);
-            s.battle.death_drain[0][0] = extra;
-            for team in 0..2 {
-                s.add_cp(
-                    sphere_cp(
-                        "cp",
-                        Vec3::new(100.0 + team as f32 * 50.0, 0.0, 0.0),
-                        8.0,
-                        false,
-                    ),
-                    Some(team),
-                );
-            }
-            let player = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
-            let survivor = s
-                .spawn(&UnitSpec::trooper(0, Vec3::new(3.0, 0.0, 0.0)))
-                .unwrap();
-            let victim = s
-                .spawn(&UnitSpec::trooper(0, Vec3::new(6.0, 0.0, 0.0)))
-                .unwrap();
-            assert!(s.battle.teams[0].invariant_holds());
-            assert_eq!(s.battle.teams[0].alive(), 3);
-            s.death_regions.push(crate::region::Region::sphere(
-                s.unit(victim).unwrap().soldier.pos,
-                0.5,
-            ));
-            s.step(&[PadState::default()]);
-            let t = &s.battle.teams[0];
-            assert_eq!(t.bleed_per_sec, 0.0);
-            assert_eq!(t.tickets(), 2 - extra, "shedding spends no ticket");
-            assert_eq!(t.alive_players, 1);
-            assert_eq!(t.alive_ai, 1 - extra);
-            assert!(t.invariant_holds());
-            assert!(s.unit(player).unwrap().alive, "players are never shed");
-            let survivor_state = &s.units[survivor.index as usize];
-            assert_eq!(survivor_state.gen, survivor.gen);
-            assert_eq!(survivor_state.alive, extra == 0);
-            if extra > 0 {
-                assert_eq!(survivor_state.respawn_at, None);
-            }
-            let deaths: Vec<_> = s
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    Event::EnvDeath {
-                        unit,
-                        cause: crate::sim::DeathCause::DeathRegion,
-                    } => Some(*unit),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(deaths, vec![victim]);
-            let despawned: Vec<_> = s
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    Event::Despawn { unit } => Some(*unit),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(despawned, if extra > 0 { vec![survivor] } else { vec![] });
-            assert_eq!(s.outcome, None);
+    fn a_death_through_step_costs_one_ticket_and_sheds_no_ai() {
+        let mut s = Sim::empty(4);
+        s.heightfield = Some(flat_ground());
+        s.battle = Battle::new([3, 100]);
+        for team in 0..2 {
+            s.add_cp(
+                sphere_cp(
+                    "cp",
+                    Vec3::new(100.0 + team as f32 * 50.0, 0.0, 0.0),
+                    8.0,
+                    false,
+                ),
+                Some(team),
+            );
         }
+        let player = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        let survivor = s
+            .spawn(&UnitSpec::trooper(0, Vec3::new(3.0, 0.0, 0.0)))
+            .unwrap();
+        let victim = s
+            .spawn(&UnitSpec::trooper(0, Vec3::new(6.0, 0.0, 0.0)))
+            .unwrap();
+        assert!(s.battle.teams[0].invariant_holds());
+        assert_eq!(s.battle.teams[0].alive(), 3);
+        s.death_regions.push(crate::region::Region::sphere(
+            s.unit(victim).unwrap().soldier.pos,
+            0.5,
+        ));
+        s.step(&[PadState::default()]);
+        let t = &s.battle.teams[0];
+        assert_eq!(t.bleed_per_sec, 0.0);
+        assert_eq!(t.tickets(), 2, "one death, one ticket");
+        assert_eq!(t.alive_players, 1);
+        assert_eq!(t.alive_ai, 1);
+        assert!(t.invariant_holds());
+        assert!(s.unit(player).unwrap().alive, "players are never shed");
+        let survivor_state = &s.units[survivor.index as usize];
+        assert_eq!(survivor_state.gen, survivor.gen);
+        assert!(survivor_state.alive);
+        let deaths: Vec<_> = s
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::EnvDeath {
+                    unit,
+                    cause: crate::sim::DeathCause::DeathRegion,
+                } => Some(*unit),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deaths, vec![victim]);
+        let despawned: Vec<_> = s
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Despawn { unit } => Some(*unit),
+                _ => None,
+            })
+            .collect();
+        assert!(despawned.is_empty());
+        assert_eq!(s.outcome, None);
     }
 
     /// D12 (b): at Elite the team that HAS a human, facing a side that has

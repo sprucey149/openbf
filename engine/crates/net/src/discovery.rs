@@ -10,9 +10,17 @@
 //!   here.
 //! - A host not heard for [`FORGET_AFTER`] leaves the list. Join by address
 //!   is the primary path (tunnels carry no broadcast); discovery is a
-//!   convenience.
+//!   convenience. Over a tunnel the caller asks its remembered hosts by
+//!   unicast ([`LanBrowser::set_targets`], which keeps the hosts heard).
+//! - A host on another protocol version answers in discovery's frozen
+//!   layout (`packet::frozen_found`): it is listed with its own
+//!   [`FoundHost::protocol`], so the caller can show it as another
+//!   version. A host whose build predates the frozen answer never replies
+//!   to another version's `Find` and stays unlisted.
 
-use crate::packet::{bare_packet, parse_chunks, parse_header, Chunk, DEFAULT_PORT};
+use crate::packet::{
+    bare_packet, frozen_found, parse_chunks, parse_header, Chunk, DropReason, DEFAULT_PORT,
+};
 use crate::transport::Transport;
 use crate::Micros;
 use std::collections::BTreeMap;
@@ -30,6 +38,9 @@ pub struct FoundHost {
     pub info: Vec<u8>,
     pub rtt: Micros,
     pub last_seen: Micros,
+    /// The protocol its answer came in: [`crate::PROTOCOL`], or another
+    /// version's (it cannot be joined).
+    pub protocol: u16,
 }
 
 /// Finds hosts on the local network.
@@ -69,6 +80,21 @@ impl LanBrowser {
         }
     }
 
+    /// Asks `targets` from the next `Find` on (empty:
+    /// [`LanBrowser::default_targets`]); the hosts already heard stay.
+    pub fn set_targets(&mut self, targets: Vec<SocketAddr>) {
+        self.targets = if targets.is_empty() {
+            Self::default_targets()
+        } else {
+            targets
+        };
+    }
+
+    /// The addresses each `Find` goes to.
+    pub fn targets(&self) -> &[SocketAddr] {
+        &self.targets
+    }
+
     /// Hosts heard within [`FORGET_AFTER`], by address.
     pub fn hosts(&self) -> Vec<FoundHost> {
         self.hosts
@@ -102,8 +128,15 @@ impl LanBrowser {
     /// Takes a datagram from the browser's socket.
     pub fn handle_datagram(&mut self, now: Micros, from: SocketAddr, bytes: &[u8]) {
         self.now = now;
-        let Ok((h, body)) = parse_header(bytes) else {
-            return;
+        let (h, body) = match parse_header(bytes) {
+            Ok(x) => x,
+            Err(DropReason::Protocol(_)) => {
+                if let Some((protocol, nonce, info)) = frozen_found(bytes) {
+                    self.heard(now, from, nonce, info, protocol);
+                }
+                return;
+            }
+            Err(_) => return,
         };
         if h.conn != 0 {
             return;
@@ -113,21 +146,27 @@ impl LanBrowser {
         };
         for c in chunks {
             if let Chunk::Found { nonce, info } = c {
-                let Some(sent) = self.sent.get(&nonce) else {
-                    continue;
-                };
-                let rtt = now.saturating_sub(*sent);
-                self.hosts.insert(
-                    from,
-                    FoundHost {
-                        addr: from,
-                        info: info.to_vec(),
-                        rtt,
-                        last_seen: now,
-                    },
-                );
+                self.heard(now, from, nonce, info, h.protocol);
             }
         }
+    }
+
+    /// A `Found` for one of our nonces.
+    fn heard(&mut self, now: Micros, from: SocketAddr, nonce: u64, info: &[u8], protocol: u16) {
+        let Some(sent) = self.sent.get(&nonce) else {
+            return;
+        };
+        let rtt = now.saturating_sub(*sent);
+        self.hosts.insert(
+            from,
+            FoundHost {
+                addr: from,
+                info: info.to_vec(),
+                rtt,
+                last_seen: now,
+                protocol,
+            },
+        );
     }
 
     /// Sends due `Find`s and takes every waiting reply through `t`.

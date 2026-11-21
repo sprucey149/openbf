@@ -1,0 +1,53 @@
+{
+ "groups": {
+  "beep": {
+   "closure": "759fea617a142bff3725971f9d654733736c0208b9b9e0c3d19d3745c7933917",
+   "version": 2
+  },
+  "classes": {
+   "closure": "8f662154f3383dd57a63fc9384a97611f841ebe77ad5c19e82a12d0e06741c42",
+   "version": 2
+  },
+  "common": {
+   "closure": "c4a33c19bf7559e0d88351816b9592db86b7cb830f8be4fdcd272a25371f4312",
+   "version": 3
+  },
+  "dlc": {
+   "closure": "b2687f39555b6fb10665637a05b80bb669ea68b6c1082688b3892e833f63a18e",
+   "version": 3
+  },
+  "extract-iso": {
+   "closure": "6fd093e58841b29a6411193fe432667ce337a7f35cca488a919d0e35a5c6fa51",
+   "version": 2
+  },
+  "global-sound": {
+   "closure": "d25ea12c8af067cf8fad14e4ef806576824a2d14c8bea172db1c1ebfd6837c69",
+   "version": 2
+  },
+  "load": {
+   "closure": "ca8a43415c12c9a5d73e0c09f866ae141e6d100656306484883c1f13ffb9bc98",
+   "version": 2
+  },
+  "maps": {
+   "closure": "8f662154f3383dd57a63fc9384a97611f841ebe77ad5c19e82a12d0e06741c42",
+   "version": 2
+  },
+  "side": {
+   "closure": "8f662154f3383dd57a63fc9384a97611f841ebe77ad5c19e82a12d0e06741c42",
+   "version": 2
+  },
+  "sounds": {
+   "closure": "ff478ecaf792d35ce53811e31fba0c2615cf845498f16fde9bc4fcbebb559133",
+   "version": 2
+  },
+  "tat1": {
+   "closure": "8f662154f3383dd57a63fc9384a97611f841ebe77ad5c19e82a12d0e06741c42",
+   "version": 2
+  },
+  "tat2": {
+   "closure": "8f662154f3383dd57a63fc9384a97611f841ebe77ad5c19e82a12d0e06741c42",
+   "version": 2
+  }
+ },
+ "schema": 1
+}

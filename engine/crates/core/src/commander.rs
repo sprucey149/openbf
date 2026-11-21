@@ -627,7 +627,7 @@ pub fn plan(sim: &mut Sim, team: u8) {
                 def: p.def,
                 // Card MAIS (OURS, BF1 only): a post its bots may not
                 // capture (`AICanCaptureCP`) is not drawn to take; held, it
-                // is still defended.
+                // is still defended. trace: B1:182098-182205.
                 open: reach(hub, p) && exclude != Some(ci as u32) && (p.friendly || p.capturable),
             }));
             let r = roll(i as u32, sim.tick, gen);

@@ -1013,6 +1013,41 @@ fn a_riser_just_over_the_step_blocks_before_the_axis_crosses_it() {
     assert_eq!(low.push_out_soldier(&full), Vec3::ZERO);
 }
 
+/// Issue #182 (the LIP): a sloped face (n.y 0.62, walkable by its normal)
+/// whose low edge stands 0.8 m over the feet, over the step, as BF2
+/// Kashyyyk's `kas2_prop_rock_m16` does over the terrain. The ground query
+/// can never stand him on it, so the soldier's pass pushes the capsule back
+/// out level instead of letting it walk in under the lip. The same slope
+/// starting at his feet is a ramp, and is left to the ground query.
+#[test]
+fn a_sloped_lip_over_the_step_pushes_like_a_wall() {
+    // Rises 1.25 m per m in -z from y0 at z = -0.8 (n.y ~0.62).
+    let slope = |y0: f32| {
+        let p = |x: f32, z: f32| Vec3::new(x, y0 + (-0.8 - z) * 1.25, z);
+        vec![
+            [p(-5.0, -0.8), p(5.0, -0.8), p(5.0, -3.0)],
+            [p(-5.0, -0.8), p(5.0, -3.0), p(-5.0, -3.0)],
+        ]
+    };
+    let full = Capsule {
+        base: Vec3::new(0.0, 0.0, -0.6),
+        height: 1.9,
+        radius: 0.5,
+    };
+    let lip = CollisionWorld::new(vec![mesh_body(&slope(0.8))], Vec::new());
+    let push = lip.push_out_soldier(&full);
+    assert!(
+        push.z > 0.05 && push.x.abs() < 1e-4 && push.y == 0.0,
+        "pushed back out: {push}"
+    );
+    let ramp = CollisionWorld::new(vec![mesh_body(&slope(0.0))], Vec::new());
+    assert_eq!(
+        ramp.push_out_soldier(&full),
+        Vec3::ZERO,
+        "a ramp at the feet is climbed"
+    );
+}
+
 /// Card WPSH, M2 (`analysis/re-soldier-walls.md` §4): a BF2 sprint-jump
 /// (MaxSpeed 9 × 1.5 × 1.3 = 17.55 m/s, 0.585 m a tick) at a
 /// zero-thickness mesh sheet, from every phase of its last step before

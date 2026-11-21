@@ -878,10 +878,11 @@ fn unit_sheet_inner(
         Some(cpu) => crate::viewer::upload_submeshes(&mut r, &cpu)?
             .into_iter()
             .enumerate()
-            .map(|(k, (m, mat, layer, _))| {
+            .map(|(k, (m, mat, layer, flags))| {
                 let t = tex_for(&mut r, mat);
                 let spec = crate::soldier_vis::part_spec(&r, cpu.spec_pass(k));
-                (m, t, layer, spec)
+                let additive = crate::soldier_vis::weapon_part_additive(layer, flags);
+                (m, t, layer, spec, additive)
             })
             .collect(),
         None => Vec::new(),
@@ -949,14 +950,16 @@ fn unit_sheet_inner(
         }
         if let Some(hp) = hp {
             let global = palette[hp] * asset.skeleton.global_bind[hp];
-            for (m, t, layer, spec) in &weapon_parts {
+            for (m, t, layer, spec, additive) in &weapon_parts {
                 let mut cmd = DrawCmd::flat(*m, [0.9, 0.2, 0.2, 1.0], model * global);
                 if let Some(t) = t {
                     cmd.texture = Some(*t);
                     cmd.color = [1.0; 4];
                     // The weapon bake's own (legacy, per-texture) alpha
-                    // decision, written on the material — design D6.
+                    // decision, written on the material — design D6; a BF2
+                    // additive BLEND part adds, as in the game.
                     cmd.layer = *layer;
+                    cmd.additive = *additive;
                     if let Some((rgb, power)) = spec {
                         statics.push(DrawCmd::specular(*m, *t, *rgb, *power, model * global));
                     }

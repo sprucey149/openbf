@@ -28,6 +28,7 @@ pub mod path;
 pub mod plan;
 pub mod rle;
 pub mod sanm;
+pub mod shield;
 pub mod skel;
 pub mod sky;
 pub mod sound_props;

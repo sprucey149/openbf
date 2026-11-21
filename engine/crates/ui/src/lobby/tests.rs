@@ -314,67 +314,149 @@ fn found(addr: &str, refusal: Option<&str>) -> FoundRow {
         addr: addr.into(),
         name: "Host".into(),
         map: "Kashyyyk".into(),
+        mode: String::new(),
         players: "2/8".into(),
         ping_ms: 3,
         refusal: refusal.map(Into::into),
     }
 }
 
-/// Join Game: the found hosts, the address box and the recent hosts; a
-/// host on another build is dimmed and skipped; Connect carries the
+/// Join Game: the found hosts, the address box and the recent games; a
+/// host on another version is dimmed and skipped; Connect carries the
 /// address; an empty box is refused with the hint.
 #[test]
 fn join_page_rows_connect_and_refusals() {
-    let mut j = JoinPage::new(vec!["10.0.0.9:37450".into()]);
+    let mut j = JoinPage::new(Vec::new());
     assert_eq!(j.row_ids()[j.cursor], JoinRow::Address);
     assert!(j.focus_text, "the address box has the keyboard at once");
-    assert_eq!(j.step(press(|i| i.confirm = true)), None);
+    assert_eq!(j.step(press(|i| i.confirm = true), false), None);
     assert!(j.status.as_deref().unwrap().contains("address"));
     *j.text_mut().unwrap() = " studio-pc:40000 ".into();
     assert_eq!(
-        j.step(press(|i| i.confirm = true)),
+        j.step(press(|i| i.confirm = true), false),
         Some(JoinCommand::Connect("studio-pc:40000".into()))
     );
-    j.set_hosts(vec![
-        found("192.168.1.5:37450", None),
-        found("192.168.1.6:37450", Some("another openbf build")),
-    ]);
+    j.set_hosts(
+        vec![
+            found("192.168.1.5:37450", None),
+            found("192.168.1.6:37450", Some("different version")),
+        ],
+        Vec::new(),
+    );
     assert_eq!(j.row_ids()[j.cursor], JoinRow::Address, "focus kept");
     let rows = j.rows();
-    assert!(rows[0].enabled && !rows[1].enabled);
-    assert!(rows[1].label.ends_with("(another openbf build)"));
-    j.step(press(|i| i.up = true));
+    assert!(rows[0].heading && !rows[0].enabled);
+    assert_eq!(rows[0].label, "Games on this network");
+    assert!(rows[1].enabled && !rows[2].enabled);
+    assert!(rows[2].label.ends_with("(different version)"));
+    j.step(press(|i| i.up = true), false);
     assert_eq!(
         j.row_ids()[j.cursor],
         JoinRow::Host(0),
         "the dimmed host is skipped"
     );
     // A host appearing before it keeps the focus on the same address.
-    j.set_hosts(vec![
-        found("192.168.1.2:37450", None),
-        found("192.168.1.5:37450", None),
-    ]);
+    j.set_hosts(
+        vec![
+            found("192.168.1.2:37450", None),
+            found("192.168.1.5:37450", None),
+        ],
+        Vec::new(),
+    );
     assert_eq!(j.row_ids()[j.cursor], JoinRow::Host(1));
     assert_eq!(
-        j.step(press(|i| i.confirm = true)),
+        j.step(press(|i| i.confirm = true), false),
         Some(JoinCommand::Connect("192.168.1.5:37450".into()))
     );
-    j.step(press(|i| i.down = true));
-    j.step(press(|i| i.down = true));
+    j.step(press(|i| i.down = true), false);
+    j.step(press(|i| i.down = true), false);
     assert_eq!(j.row_ids()[j.cursor], JoinRow::Test);
     assert_eq!(j.rows()[j.cursor].label, "Test Connection");
     assert_eq!(
-        j.step(press(|i| i.confirm = true)),
+        j.step(press(|i| i.confirm = true), false),
         Some(JoinCommand::Test("studio-pc:40000".into())),
         "Test connection asks the typed address"
     );
-    j.step(press(|i| i.down = true));
+    assert_eq!(
+        j.step(press(|_| {}), true),
+        None,
+        "Forget only on a recent game"
+    );
+    assert_eq!(
+        j.step(press(|i| i.back = true), false),
+        Some(JoinCommand::Back)
+    );
+}
+
+/// Recent games: above the address box, labelled with the host's answer
+/// while it hosts and "not hosting now" (still pressable) when not; the
+/// cursor starts on the first game and jumps to one that answers until the
+/// player presses something; Square forgets the one under the cursor.
+#[test]
+fn join_page_recent_games_rows_cursor_and_forget() {
+    let recent = vec![
+        RecentRow::new("ann-pc", "Ann", "2 days ago"),
+        RecentRow::new("100.64.0.9", "", ""),
+    ];
+    let mut j = JoinPage::new(recent);
+    assert_eq!(
+        j.row_ids(),
+        [
+            JoinRow::Heading(JoinSection::Recent),
+            JoinRow::Recent(0),
+            JoinRow::Recent(1),
+            JoinRow::Address,
+            JoinRow::Test,
+            JoinRow::Back
+        ]
+    );
+    assert_eq!(
+        j.row_ids()[j.cursor],
+        JoinRow::Recent(0),
+        "starts on a game"
+    );
+    assert!(!j.focus_text);
+    let rows = j.rows();
+    assert_eq!(rows[0].label, "Recent games");
+    assert_eq!(rows[1].label, "Ann (not hosting now, joined 2 days ago)");
+    assert_eq!(rows[1].value.as_deref(), Some("ann-pc"));
+    assert!(rows[1].enabled, "an offline recent game stays pressable");
+    assert_eq!(rows[2].label, "100.64.0.9 (not hosting now)");
+    // The second answers: the cursor, untouched, moves to it.
+    let live = FoundRow {
+        mode: "Conquest".into(),
+        ..found("100.64.0.9:37450", None)
+    };
+    j.set_hosts(
+        vec![found("192.168.1.5:37450", None)],
+        vec![None, Some(live.clone())],
+    );
+    assert_eq!(j.row_ids()[j.cursor], JoinRow::Recent(1));
+    let rows = j.rows();
+    assert_eq!(rows[0].label, "Games on this network");
+    assert_eq!(rows[4].label, "Host \u{2014} Kashyyyk, Conquest");
+    assert_eq!(rows[4].value.as_deref(), Some("2/8  3 ms"));
+    assert_eq!(
+        j.step(press(|i| i.confirm = true), false),
+        Some(JoinCommand::Connect("100.64.0.9".into())),
+        "a recent game joins by the address it was joined at"
+    );
+    // Touched: a later list change keeps the focus on its row.
+    j.set_hosts(Vec::new(), vec![Some(live.clone()), Some(live)]);
+    assert_eq!(j.row_ids()[j.cursor], JoinRow::Recent(1));
+    assert_eq!(j.step(press(|_| {}), true), Some(JoinCommand::Forget(1)));
+    j.set_recent(vec![RecentRow::new("ann-pc", "Ann", "2 days ago")]);
+    assert_eq!(
+        j.row_ids()[j.cursor],
+        JoinRow::Address,
+        "the next row after the forgotten one"
+    );
+    j.step(press(|i| i.up = true), false);
     assert_eq!(j.row_ids()[j.cursor], JoinRow::Recent(0));
     assert_eq!(
-        j.step(press(|i| i.confirm = true)),
-        Some(JoinCommand::Connect("10.0.0.9:37450".into()))
+        j.step(press(|i| i.confirm = true), false),
+        Some(JoinCommand::Connect("ann-pc".into()))
     );
-    assert_eq!(j.step(press(|i| i.back = true)), Some(JoinCommand::Back));
 }
 
 fn roster() -> Vec<RosterRow> {

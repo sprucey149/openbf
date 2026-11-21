@@ -144,6 +144,10 @@ hooks; playtest 2026-10-30):
   soldier of the hero class ends the ownership and starts the respawn clock
   (FUN_0034f650 B2:346003-346033 -> FUN_003ef328). The health drain runs only
   on the hero soldier, so the saved hero spawns with full health.
+  [ours] 2026-11-19: the port does not keep this. From the Yes until the hero
+  dies, the hero is the owner's only class. A class change at a post is refused
+  with "Heroes can't change class" (`Sim::hero_locked`, `core::sim::heroes`).
+  Pause-menu Respawn, a death, is the way out.
 - The Yes press removes the soldier and flags the controller for the spawn
   screens (FUN_002b0548 B2:234886-234899), the same path as AcceptHero.
 - The combo state hash slots use FUN_00539308, FNV-1a over `c | 0x20`, which

@@ -149,8 +149,23 @@ fn weapon_pills_precede_both_rows_and_bitmap_fallback_in_nested_and_flat_layouts
                     .unwrap();
                 restored[i].z_order = 8;
             }
+            // The view also appends the spectate text rows; every element
+            // the layout had stays as it was.
+            let extra: Vec<&str> = restored[original.elems.len()..]
+                .iter()
+                .map(|e| e.name.as_str())
+                .collect();
+            assert_eq!(extra, [ui::hud::SPECTATE_ELEM, ui::hud::SPECTATE_HINT_ELEM]);
+            restored.truncate(original.elems.len());
             assert_eq!(format!("{restored:?}"), format!("{:?}", original.elems));
-            assert_eq!(view.hud.roots, original.roots);
+            let roots: Vec<_> = view
+                .hud
+                .roots
+                .iter()
+                .copied()
+                .filter(|&r| r < original.elems.len())
+                .collect();
+            assert_eq!(roots, original.roots);
         }
     }
 }

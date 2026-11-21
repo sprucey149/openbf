@@ -115,6 +115,11 @@ pub enum Event {
     TowSeatLocked {
         unit: UnitHandle,
     },
+    /// `[ours]` (2026-11-19): a hero pressed use at a command post, where
+    /// he may not change class ([`Sim::hero_locked`]).
+    HeroClassLocked {
+        unit: UnitHandle,
+    },
     Shot {
         unit: UnitHandle,
         /// The weapon class that fired: the unit's own on foot, the seat
@@ -385,6 +390,13 @@ pub enum Event {
         from: Vec3,
         to: Vec3,
     },
+    /// Issue #182 B4 (ours): a unit found inside a solid or under the
+    /// ground, put back on the last spot he stood clear (`sim/rescue.rs`).
+    Rescued {
+        unit: UnitHandle,
+        from: Vec3,
+        to: Vec3,
+    },
     /// Damage reached a vehicle's hull pool (card VDMG): a bolt (`shooter`
     /// set) or a collision (`None`). `damage` is what left the pool.
     VehicleHit {
@@ -583,6 +595,10 @@ pub enum DeathCause {
     Water,
     /// Worn down inside an authored damage region (Mustafar's lava).
     DamageRegion,
+    /// Issue #182 B4 (ours): found inside a solid or under the ground, with
+    /// no safe spot to put him back on (`sim/rescue.rs`). One ticket, like
+    /// a fall.
+    Embedded,
 }
 
 impl DeathCause {

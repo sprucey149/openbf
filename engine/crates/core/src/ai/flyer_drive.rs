@@ -616,6 +616,7 @@ fn bf1_sticks(
         since_end: f32::MAX,
         since_state2: 0.0,
         held: [v.input.throttle, v.input.strafe],
+        aim: None,
     };
     let [ahead, strafe, _, _] = hover_drive::steer(&k, &body, &order, Some(goal));
     let share = speed_share(goal - pos, forward, p);

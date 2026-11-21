@@ -123,6 +123,10 @@ pub(in super::super) fn retarget(
         }
         return;
     }
+    if u.team >= 2 && u.mount.is_none() && sim.native_deathmatch(u.team) {
+        retarget_deathmatch(sim, me, st, nt);
+        return;
+    }
     if u.team >= 2 || sim.deathmatch.is_some() {
         // PROVISIONAL, replace: trace the PS2 native Deathmatch and Conquest
         // goal orders. The main-army commander owns neither team's members.

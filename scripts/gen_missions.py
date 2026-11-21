@@ -672,42 +672,6 @@ def hangar_war_calls50(f, common):
     return out
 
 
-def death_drains50(f):
-    """The unconditional per-death ticket drains a BF2 mission registers.
-
-    `ScriptPostLoad`'s `OnCharacterDeathTeam(handler, team)` whose handler's
-    whole body is `AddReinforcements(<team>, -<n>)` with literals -- DEA1's
-    conquest scripts (analysis/re-time-limit.md §6 [V][O]).  This runs ON
-    TOP of `Objective:Start`'s own ticket per death.  Each is `(Lua team of
-    the dying character, Lua team drained, n)`; a handler with anything else
-    in it (a condition, another call) is not a plain drain and is skipped.
-    """
-    top = global_functions50(f)
-    p = top.get("ScriptPostLoad")
-    if p is None:
-        return []
-    base = _rk_base(f)
-    out = []
-    for c in calls50(p, base=base, recurse=False):
-        if c.name != "OnCharacterDeathTeam" or len(c.args) < 2 or \
-                not isinstance(c.args[0], Closure) or \
-                not isinstance(c.args[1], float):
-            continue
-        body = calls50(c.args[0].proto, base=base, recurse=False)
-        # A conditional body shows up as extra instructions, not extra calls:
-        # demand straight-line code (no jumps or tests) as well.
-        branchy = any(OPS50[i & 0x3F] in ("JMP", "EQ", "LT", "LE", "TEST",
-                                          "FORLOOP", "TFORLOOP")
-                      for i in c.args[0].proto.code)
-        if branchy or len(body) != 1 or body[0].name != "AddReinforcements":
-            continue
-        ba = body[0].args
-        if len(ba) == 2 and isinstance(ba[0], float) and \
-                isinstance(ba[1], float) and ba[1] < 0:
-            out.append((int(c.args[1]), int(ba[0]), int(-ba[1])))
-    return out
-
-
 def consts(f, want=None):
     """Every constant in a proto tree, optionally filtered by python type."""
     out = []
@@ -1099,82 +1063,174 @@ BF1_HUNT_ROSTERS = {
                  25, [("tat_inf_jawa", 25, None)]),
 }
 
-# openbf Hunt balance in mission team order. Rows are Easy, Normal, Hard
-# and Elite. Population includes the player. See issue #161 for validation.
-# Each tuple contains combatants, optional health percent and optional
-# BF1 points per kill. BF2 always reads points per kill from its scripts.
-HUNT_BALANCE = {
-    "bf1_end1": (
-        [[5, 24], [5, 28], [5, 28], [8, 42]],
-        [[62, 125], [65, 150], [60, 205], [65, 215]],
-        [[1, 1], [1, 1], [1, 1], [1, 1]],
-    ),
-    "bf1_geo1": (
-        [[10, 24], [8, 24], [8, 24], [8, 24]],
-        [[100, 205], [100, 200], [100, 280], [140, 340]],
-        [[1, 3], [1, 3], [1, 3], [1, 7]],
-    ),
-    "bf1_kas1": (
-        [[3, 24], [3, 24], [4, 36], [4, 36]],
-        [[45, 410], [45, 320], [45, 340], [45, 350]],
-        [[2, 1], [2, 1], [2, 1], [2, 1]],
-    ),
-    "bf1_kas2": (
-        [[4, 24], [4, 24], [6, 36], [6, 36]],
-        [[45, 440], [45, 435], [45, 370], [45, 380]],
-        [[2, 1], [2, 1], [2, 1], [2, 1]],
-    ),
-    "bf1_nab1": (
-        [[8, 18], [8, 18], [8, 26], [8, 18]],
-        [[100, 140], [100, 150], [70, 200], [100, 200]],
-        [[1, 3], [1, 3], [1, 4], [1, 3]],
-    ),
-    "bf1_nab2": (
-        [[15, 22], [15, 22], [15, 22], [17, 22]],
-        [[100, 135], [100, 135], [100, 115], [100, 135]],
-        None,
-    ),
-    "bf1_tat2": (
-        [[16, 6], [16, 8], [24, 12], [12, 8]],
-        [[300, 83], [280, 65], [280, 120], [280, 105]],
-        [[1, 1], [1, 1], [1, 1], [1, 1]],
-    ),
-    "bf2_end1": (
-        [[3, 24], [3, 28], [4, 28], [3, 28]],
-        [[62, 265], [65, 280], [55, 280], [65, 280]],
-        None,
-    ),
-    "bf2_geo1": (
-        [[10, 20], [8, 18], [8, 24], [6, 24]],
-        [[100, 100], [100, 100], [100, 135], [100, 145]],
-        None,
-    ),
-    "bf2_hot1": (
-        [[7, 24], [8, 24], [8, 24], [8, 25]],
-        [[90, 150], [90, 140], [90, 140], [80, 180]],
-        None,
-    ),
-    "bf2_kas2": (
-        [[5, 24], [5, 24], [4, 24], [5, 24]],
-        [[55, 190], [55, 190], [60, 210], [55, 220]],
-        None,
-    ),
-    "bf2_nab2": (
-        [[8, 16], [8, 18], [10, 16], [8, 16]],
-        [[100, 150], [100, 125], [100, 100], [100, 100]],
-        None,
-    ),
-    "tat1": (
-        [[21, 22], [20, 20], [21, 19], [22, 17]],
-        [[80, 175], [90, 155], [100, 100], [100, 100]],
-        None,
-    ),
-    "tat2": (
-        [[16, 8], [16, 10], [16, 10], [16, 14]],
-        [[185, 65], [185, 70], [150, 100], [145, 90]],
-        None,
-    ),
+# openbf Hunt points to win in mission team order, per tier (Easy, Normal,
+# Hard, Elite): (team 0's target, team 1's target). Every Hunt keeps the
+# disc's health and every kill scores one point for either side (no weighted
+# scoring, the maintainer 2026-11-19/20). Balance comes from these targets
+# (no side needs more than 60 % of the pair's total) and from the Hunt sides
+# below. A Hunt not listed plays 50 for each side.
+# Refitted 2026-11-21 with the reworked easing (30 % floor, aim error first):
+# bots-only, every award off, full rounds on the 5-minute Hunt clock (the side
+# further along toward its own target wins when it runs out). Targets in the
+# ratio of the two sides' kill rates over 40-56 tuning rounds, then judged on
+# 24 fresh seeds (40 within 0.05 of the 40/60 edge); see issue #161. Rows still
+# outside 40-60 are listed there, not forced.
+HUNT_POINT_TARGETS = {
+    "bf1_end1": [(94, 81), (109, 77), (99, 71), (104, 78)],
+    "bf1_geo1": [(55, 59), (50, 55), (57, 52), (64, 43)],
+    "bf1_kas1": [(146, 103), (155, 122), (168, 117), (211, 141)],
+    "bf1_kas2": [(105, 80), (117, 93), (135, 90), (136, 91)],
+    "bf1_nab1": [(92, 67), (98, 69), (77, 52), (83, 87)],
+    "bf1_nab2": [(194, 132), (207, 147), (180, 147), (183, 149)],
+    "bf1_tat2": [(62, 93), (68, 95), (82, 102), (88, 103)],
+    "bf2_end1": [(214, 175), (206, 177), (175, 157), (187, 161)],
+    "bf2_geo1": [(110, 90), (113, 90), (105, 87), (108, 78)],
+    "bf2_hot1": [(133, 89), (115, 80), (97, 88), (91, 111)],
+    "bf2_kas2": [(192, 145), (193, 149), (162, 132), (169, 113)],
+    "bf2_nab2": [(166, 111), (205, 137), (265, 177), (264, 176)],
+    "tat1": [(129, 93), (153, 118), (141, 139), (137, 147)],
+    "tat2": [(151, 185), (172, 222), (177, 224), (191, 215)],
 }
+
+# Largest share of a Hunt's combined targets one side may need (60/40 cap).
+HUNT_TARGET_CAP = 0.60
+
+# openbf Hunt sides (the maintainer 2026-11-20 late): Hunt is for fun, so no
+# side is ever a handful. Every side has at least HUNT_ALIVE_FLOOR soldiers
+# alive at once on every map and tier, a human counting toward his own side
+# (so he always has at least seven bot allies); the disc's unit counts are no
+# ceiling. Balance levers, in order: bigger sides for both, per-side points
+# to win within 60/40 (HUNT_POINT_TARGETS), extra alive for the side that
+# loses too often (HUNT_ALIVE_EXTRA), then Hunt-only easier bots
+# (HUNT_SKILL_PCT).
+HUNT_ALIVE_FLOOR = 8
+# The alive count per side of a Hunt HUNT_ALIVE does not list (BF2's session
+# default).
+HUNT_ALIVE_DEFAULT = 16
+# The most extra alive HUNT_ALIVE_EXTRA may give one side (the maintainer
+# 2026-11-21: no fixed limit, kept sensible for the tick time). 16 keeps a
+# Hunt at or under 48 a side, a level measured on bf2_end1, tat2, bf1_kas2
+# and bf2_hot1 at 48 a side (96 alive): a mean tick of 1.2-2.0 ms and a p99
+# of 3-5.6 ms against the 33 ms tick budget.
+HUNT_EXTRA_MAX = 16
+# The lowest Hunt skill percent (the maintainer 2026-11-21); the game clamps
+# to the same floor (core::sim::deathmatch::HUNT_SKILL_FLOOR).
+HUNT_SKILL_FLOOR = 30
+
+# Alive at once per side, in mission team order, per tier (Easy, Normal,
+# Hard, Elite). Not listed: HUNT_ALIVE_DEFAULT for both on every tier.
+# Every Hunt fields 32 a side (2026-11-21 fit).
+HUNT_ALIVE = {
+    "bf1_end1": [(32, 32)] * 4,
+    "bf1_geo1": [(32, 32)] * 4,
+    "bf1_kas1": [(32, 32)] * 4,
+    "bf1_kas2": [(32, 32)] * 4,
+    "bf1_nab1": [(32, 32)] * 4,
+    "bf1_nab2": [(32, 32)] * 4,
+    "bf1_tat2": [(32, 32)] * 4,
+    "bf2_end1": [(32, 32)] * 4,
+    "bf2_geo1": [(32, 32)] * 4,
+    "bf2_hot1": [(32, 32)] * 4,
+    "bf2_kas2": [(32, 32)] * 4,
+    "bf2_nab2": [(32, 32)] * 4,
+    "tat1": [(32, 32)] * 4,
+    "tat2": [(32, 32)] * 4,
+}
+
+# Extra alive at a time (0..HUNT_EXTRA_MAX), per tier, for the side that
+# loses too often once its targets reach the 60/40 cap: added on top of
+# HUNT_ALIVE. Not listed: none. None is used after the 2026-11-21 refit: 8
+# or 16 extra for the losing side gave no consistent change in the two sides'
+# kill split on any of the 47 rows screened (each extra soldier is also one
+# more target), so no row needed them.
+HUNT_ALIVE_EXTRA = {
+}
+
+# Total units per side (the pool the alive soldiers come from). Not listed:
+# the disc's units, never fewer than a tier's alive count (the game's rule,
+# MissionDef::hunt_units_at). A pool above the alive count fills a dead
+# soldier's place with a fresh one while he waits to respawn.
+HUNT_UNITS = {
+    "bf1_end1": (64, 64),
+    "bf1_geo1": (64, 64),
+    "bf1_kas1": (64, 64),
+    "bf1_kas2": (64, 64),
+    "bf1_nab1": (64, 64),
+    "bf1_nab2": (64, 64),
+    "bf1_tat2": (64, 64),
+    "bf2_end1": (64, 64),
+    "bf2_geo1": (64, 64),
+    "bf2_hot1": (64, 64),
+    "bf2_kas2": (64, 64),
+    "bf2_nab2": (64, 64),
+    "tat1": (64, 64),
+    "tat2": (64, 64),
+}
+
+# Hunt-only bot ease per side, in percent, per tier (100 = the tier as it
+# is, HUNT_SKILL_FLOOR the lowest): a side's eased bots keep their skill
+# level and mainly miss more (aim offset times (100 / percent) squared),
+# react a little slower (never past 1 s) and fire weapons that need no aim
+# (arc casters, flamers) at that percent of their rate. Not listed: 100 for
+# both.
+HUNT_SKILL_PCT = {
+    "bf1_end1": [(30, 100), (40, 100), (40, 100), (30, 100)],
+    "bf1_geo1": [(40, 100), (35, 100), (35, 100), (30, 100)],
+    "bf1_kas1": [(30, 100), (30, 100), (30, 100), (30, 100)],
+    "bf1_kas2": [(30, 100), (30, 100), (30, 100), (30, 100)],
+    "bf1_nab1": [(70, 100), (65, 100), (45, 100), (45, 100)],
+    "bf1_tat2": [(100, 45), (100, 50), (100, 80), (100, 100)],
+    "bf2_end1": [(65, 100), (55, 100), (45, 100), (45, 100)],
+    "bf2_geo1": [(50, 100), (50, 100), (45, 100), (45, 100)],
+    "bf2_hot1": [(30, 100), (30, 100), (100, 100), (100, 100)],
+    "bf2_kas2": [(45, 100), (40, 100), (30, 100), (30, 100)],
+    "bf2_nab2": [(30, 100), (30, 100), (30, 100), (30, 100)],
+    "tat1": [(75, 100), (100, 100), (100, 100), (100, 100)],
+    "tat2": [(100, 30), (100, 45), (100, 80), (100, 100)],
+}
+
+
+def hunt_alive_rows(key):
+    """Each tier's alive pair for Hunt `key`: HUNT_ALIVE (or the default)
+    plus HUNT_ALIVE_EXTRA."""
+    base = HUNT_ALIVE.get(key, [(HUNT_ALIVE_DEFAULT, HUNT_ALIVE_DEFAULT)] * 4)
+    extra = HUNT_ALIVE_EXTRA.get(key, [(0, 0)] * 4)
+    if len(base) != 4 or len(extra) != 4:
+        raise ValueError(f"{key}: Hunt alive and extra rows need four tiers")
+    return [tuple(a + x for a, x in zip(pair, more)) for pair, more in zip(base, extra)]
+
+
+def hunt_alive_ok(rows):
+    """Each tier's pair is two counts, each at least the floor."""
+    return len(rows) == 4 and all(
+        len(pair) == 2 and all(c >= HUNT_ALIVE_FLOOR for c in pair) for pair in rows)
+
+
+def hunt_extra_ok(rows):
+    """Each tier gives each side 0..HUNT_EXTRA_MAX extra alive."""
+    return len(rows) == 4 and all(
+        len(pair) == 2 and all(0 <= x <= HUNT_EXTRA_MAX for x in pair) for pair in rows)
+
+
+def hunt_skill_ok(rows):
+    """Each tier's pair is two percents in HUNT_SKILL_FLOOR..100."""
+    return len(rows) == 4 and all(
+        len(pair) == 2 and all(HUNT_SKILL_FLOOR <= p <= 100 for p in pair) for pair in rows)
+
+
+def hunt_units_ok(pair, alive_rows):
+    """Each side's pool covers its largest alive count."""
+    return len(pair) == 2 and all(
+        pair[t] >= max(row[t] for row in alive_rows) for t in range(2))
+
+
+def hunt_targets_ok(rows):
+    """Each tier's pair is positive and within the 60/40 cap."""
+    return len(rows) == 4 and all(
+        len(pair) == 2 and min(pair) > 0
+        and max(pair) <= HUNT_TARGET_CAP * sum(pair) + 1e-9
+        for pair in rows)
+
 
 OPTIONAL_SCRIPTS = {"cor1g_eli"}
 ASSAULT_SIDES = {"hero": "all", "villain": "imp"}
@@ -1702,20 +1758,16 @@ def ctf_facts50(f):
 
 
 def hunt_facts(calls):
-    """Read the teams and each team's points per kill from ObjectiveTDM."""
+    """Check ObjectiveTDM names both teams. Its pointsPerKill values are not
+    used: every Hunt kill scores one point (no weighted scoring)."""
     for call in calls:
         if call.name == "ObjectiveTDM:New" and len(call.args) > 1:
             options = call.args[1]
             if isinstance(options, dict):
-                weights = [None, None]
-                for role in ("ATT", "DEF"):
-                    team = options.get("team" + role)
-                    points = options.get("pointsPerKill" + role)
-                    if team not in (1, 2) or points not in (1, 2, 3):
-                        raise ValueError(f"unsupported Hunt team or kill value: {team}, {points}")
-                    weights[int(team) - 1] = int(points)
-                if None not in weights:
-                    return weights
+                teams = {options.get("team" + role) for role in ("ATT", "DEF")}
+                if teams != {1, 2}:
+                    raise ValueError(f"unsupported Hunt teams: {sorted(teams, key=str)}")
+                return True
     raise ValueError("Hunt mission has no complete ObjectiveTDM declaration")
 
 
@@ -1742,7 +1794,7 @@ def bf1_hunt(key, planet, era):
     m.local_teams = []
     m.attacking = 1
     m.cap = max(m.teams[0][1], m.teams[1][1])
-    m.hunt = [1, 1]
+    m.hunt = True
     m.posts, m.cps, m.killed = [], [], []
     m.ai_no_capture = []
     m.ai_aggr = [(target, d["ai_aggr"][team])
@@ -1755,7 +1807,6 @@ def bf1_hunt(key, planet, era):
             team_map = {native: 2}
         setattr(m, field, [(team_map[row[0]], *row[1:])
                            for row in getattr(m, field) if row[0] in team_map])
-    m.death_drains = []
     return m
 
 
@@ -2258,7 +2309,6 @@ def build_campaign(key, game, planet, era, ps2_name):
     m.door_locks = door_locks50(f)
     m.arc_blocks = arc_calls50(f)
     m.barriers = barrier_calls50(f)
-    m.death_drains = death_drains50(f)
 
     raw_tickets = [ps2["tickets"].get(t, -1) for t in (1, 2)]
     m.teams = [
@@ -2394,7 +2444,7 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
             raise ValueError(f"{game}/{ps2_name}: no canonical mission correction record")
     if is_hunt and (m.hunt is None or any(not d["classes"].get(team) or not d["units"].get(team)
                                           for team in (1, 2))):
-        raise ValueError(f"{game}/{ps2_name}: missing Hunt teams or kill values")
+        raise ValueError(f"{game}/{ps2_name}: missing Hunt teams")
     m.d = d
     # The voice-over setters exist only in the bytecode scan (the PC scan
     # never read them); a mission with no PS2 script carries none.
@@ -2442,8 +2492,10 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
                 m.arc_blocks.append((args[0], verb == ARC_VERBS[0]))
             elif verb == "SetProperty" and args[1].lower() == "islocked":
                 m.door_locks.append((args[0], args[2] in (1.0, "1")))
-    m.death_drains = death_drains50(f) if f is not None and game == "bf2" \
-        else []
+    # BF2 Death Star's ScriptPostLoad also charges Lua team 1 a second ticket
+    # per death (OnCharacterDeathTeam -> AddReinforcements(1, -1)). openbf
+    # drops it on purpose: every death costs exactly one ticket
+    # (analysis/plan/FEATURE_SET.md "Every death costs one ticket").
 
     def pick(field, t, label, default):
         """PS2 value if it has one, else the PC value; record disagreements."""
@@ -2501,6 +2553,11 @@ def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
     # calls ScriptCB_SetNumBots, so BF1's cap is the member pool itself
     # (re-tickets-spawn.md §2.5/§2.7) and BF2's is the 16 that
     # ObjectiveConquest:Start installs via ScriptCB_GetCONNumBots (§1.5).
+    # A BF2 Hunt (ObjectiveTDM) sets no count of its own: its Start calls
+    # ScriptCB_SetNumBots(ScriptCB_GetASSNumBots()) only when
+    # isCelebrityDeathmatch is set (objectivetdm.luac, Start pc 0-7), and no
+    # *_hunt.luac calls it, so a Hunt keeps the session's alive-AI count,
+    # whose ELF default is the same 16. A BF1 Hunt keeps BF1's member-pool cap.
     if d.get("numbots"):
         m.cap = d["numbots"]
     elif game == "bf1":
@@ -2646,7 +2703,7 @@ def ron(m):
     if mode == "hunt" and not (m.game == "bf1" and m.key in BF1_HUNT_ROSTERS):
         L.append("// Roster and map facts come from PS2 mission bytecode.")
     if mode == "hunt":
-        L.append("// The openbf balance table supplies per-difficulty adjustments.")
+        L.append("// The openbf Hunt table supplies per-difficulty points to win.")
         L.append("// Do not hand-edit — regenerate.")
     else:
         L.append("// every value is read out of the PS2 mission bytecode (the")
@@ -2673,15 +2730,35 @@ def ron(m):
     L.append('    mode: "%s",' % mode)
     L.append('    source_game: "%s",' % m.game)
     cap = m.cap
+    if m.hunt is not None and m.key in HUNT_POINT_TARGETS:
+        rows = HUNT_POINT_TARGETS[m.key]
+        if not hunt_targets_ok(rows):
+            raise ValueError(f"{m.key}: Hunt targets outside the 60/40 cap: {rows}")
+        L.append('    hunt_points_to_win: Some((%s)),'
+                 % ", ".join("(%d, %d)" % tuple(pair) for pair in rows))
     if m.hunt is not None:
-        L.append('    hunt_points_per_kill: Some((%d, %d)),' % tuple(m.hunt))
-        combatants, health, kill_values = HUNT_BALANCE[m.key]
-        for field, rows in (("combatants", combatants), ("health_percent", health),
-                            ("kill_values", kill_values)):
-            if rows is not None:
-                L.append(f'    hunt_{field}: Some(('
-                         + ", ".join("(%d, %d)" % tuple(pair) for pair in rows) + ")),")
-        cap = max(cap, max(n for row in combatants for n in row))
+        extra = HUNT_ALIVE_EXTRA.get(m.key, [(0, 0)] * 4)
+        if not hunt_extra_ok(extra):
+            raise ValueError(f"{m.key}: Hunt extra alive outside 0..{HUNT_EXTRA_MAX}: {extra}")
+        rows = hunt_alive_rows(m.key)
+        if not hunt_alive_ok(rows):
+            raise ValueError(
+                f"{m.key}: Hunt alive below the floor of {HUNT_ALIVE_FLOOR}: {rows}")
+        L.append('    hunt_alive_caps: Some((%s)),'
+                 % ", ".join("(%d, %d)" % tuple(pair) for pair in rows))
+        if m.key in HUNT_UNITS:
+            pool = HUNT_UNITS[m.key]
+            if not hunt_units_ok(pool, rows):
+                raise ValueError(f"{m.key}: Hunt units {pool} below an alive count: {rows}")
+            L.append('    hunt_units: Some((%d, %d)),' % tuple(pool))
+        if m.key in HUNT_SKILL_PCT:
+            skill = HUNT_SKILL_PCT[m.key]
+            if not hunt_skill_ok(skill):
+                raise ValueError(
+                    f"{m.key}: Hunt skill percents outside {HUNT_SKILL_FLOOR}..100: {skill}")
+            if any(p != 100 for pair in skill for p in pair):
+                L.append('    hunt_skill_pct: Some((%s)),'
+                         % ", ".join("(%d, %d)" % tuple(pair) for pair in skill))
     if m.heroes:
         L.append('    heroes: [%s],' % ", ".join(
             '(%d, "%s")' % (t, name) for t, name in m.heroes))
@@ -2844,15 +2921,6 @@ def ron(m):
         L.append("    barriers: [%s],"
                  % ", ".join('("%s", %s)' % (n, "true" if b else "false")
                              for n, b in m.barriers))
-    if m.death_drains:
-        L.append("    // ScriptPostLoad's OnCharacterDeathTeam -> AddReinforcements: "
-                 "a death on")
-        L.append("    // `on` also costs `team` these tickets, on top of the "
-                 "objective's one.")
-        L.append("    death_drains: [%s],"
-                 % ", ".join("(on: %d, team: %d, tickets: %d)"
-                             % (on - 1, t - 1, n)
-                             for on, t, n in m.death_drains))
     if m.vo_bleed or m.vo_low or m.vo_oob:
         L.append("    // The commander's lines, as the script sets them (Lua "
                  "team numbers, call")

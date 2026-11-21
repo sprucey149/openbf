@@ -38,7 +38,8 @@
 //! muzzle's line through the lead that lies as far out as the ray now
 //! meets, not onto the lead itself. Everything fades on one curve from
 //! [`TURRET_ASSIST_FULL`] of the reach to nothing at the reach
-//! (`aim_assist::sniper_range_scale`). Bots never come here (step 2 runs
+//! (`aim_assist::sniper_range_scale`); a gun whose bolt was lengthened to
+//! `weapon::BOLT_REACH` from the disc's natural reach to the lengthened one. Bots never come here (step 2 runs
 //! only for player slots), and a mouse-aimed pad is never pulled.
 //! measure: controller turret play on a crossing runner at half and three
 //! quarters of the gun's reach, unzoomed and zoomed, against the feel of
@@ -107,9 +108,16 @@ pub(super) fn seat_magnet(c: &WeaponClass) -> SeatMagnet {
     if c.ordnance.scales[3] > 0.0 {
         kinds |= 1 << 3;
     }
+    // [ours] (2026-11-20) A gun whose bolt was lengthened to BOLT_REACH
+    // keeps full strength out to the disc's reach and fades to nothing at
+    // the lengthened one (`WeaponClass::give_bolt_assist`).
+    let full = match c.ordnance.natural_reach {
+        Some(n) => n.fmin(reach),
+        None => TURRET_ASSIST_FULL * reach,
+    };
     SeatMagnet {
         reach,
-        full: TURRET_ASSIST_FULL * reach,
+        full,
         angle: if c.lock_on_angle > 0.0 {
             c.lock_on_angle
         } else {

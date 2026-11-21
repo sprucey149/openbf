@@ -7,6 +7,7 @@ Detection reads metadata only; it never extracts maps, scripts or other content.
 """
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 import os
 import struct
 
@@ -20,7 +21,7 @@ class DlcSource:
     path: Path
     platform: str
     size: int
-    member: str | None = None
+    member: Optional[str] = None  # not `str | None`: a dataclass evaluates it, and Python 3.9 cannot
     offset: int = 0
 
     def read_bytes(self):

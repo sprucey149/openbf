@@ -114,6 +114,8 @@ fn ask(d: f32) -> Ask {
         bf2: true,
         group: false,
         barred: false,
+        claim: false,
+        sticky_unclaimed: false,
         forced: false,
         coin: false,
         vehicle: None,
@@ -321,10 +323,19 @@ fn the_choice_prefers_range_then_plenty_then_score() {
     assert_eq!(pick(200, &forced(6.0)), Some((0, true)), "inside MinRange");
     assert_eq!(pick(200, &forced(30.0)), Some((0, true)), "past MaxRange");
     let barred = Ask {
-        barred: true,
+        claim: true,
         ..forced(16.0)
     };
     assert_eq!(pick(200, &barred), Some((0, true)), "a team mate's claim");
+    let by_friend = Ask {
+        barred: true,
+        ..forced(16.0)
+    };
+    assert_eq!(
+        pick(200, &by_friend),
+        Some((0, true)),
+        "a friend by the target"
+    );
     // A weapon ISSUED two rounds has not "plenty" (BF2): the endless pistol
     // takes over, in its range; an empty rifle is skipped at any range.
     assert_eq!(pick(2, &ask(16.0)), Some((1, true)));
@@ -592,15 +603,16 @@ fn the_throw_needs_a_clear_arc() {
     assert!(reaches(&sim), "a kerb under it");
 }
 
-/// The explosive claim (4.3): two bots of one team whose grenade windows
-/// are the same, one enemy 16 m in front of both — in each window only ONE
-/// of them throws at it.
-#[test]
-fn one_bot_of_a_team_throws_at_a_soldier_at_a_time() {
+/// Who threw at one enemy 16 m in front of two bots of one team whose
+/// grenade windows are the same, in each of three 30 s rounds of the window.
+fn throwers_by_round(hunt: bool) -> [usize; 3] {
     let _stand = super::super::tests::all_stand();
     let mut sim = Sim::empty(11);
     sim.ground_rules = GroundRules::Bf1;
     sim.heightfield = Some(flat());
+    if hunt {
+        sim.deathmatch = Some(crate::sim::deathmatch::Deathmatch::hunt(1000, [12, 12]));
+    }
     let th = sim.add_weapon_class(thermal());
     // Two unit slots whose numbers open the same window; the slots between
     // are filled with idle soldiers far away.
@@ -630,7 +642,6 @@ fn one_bot_of_a_team_throws_at_a_soldier_at_a_time() {
         .unwrap();
     sim.units[e.index as usize].health.max = 1e9;
     let hz = u64::from(TICK_HZ);
-    // Who threw in each 30 s round of the window.
     let mut by_round: [Vec<u32>; 3] = Default::default();
     for _ in 0..90 * hz {
         let h = &mut sim.units[e.index as usize].health;
@@ -646,7 +657,14 @@ fn one_bot_of_a_team_throws_at_a_soldier_at_a_time() {
             }
         }
     }
-    let rounds: Vec<usize> = by_round.iter().map(Vec::len).collect();
+    by_round.map(|r| r.len())
+}
+
+/// The explosive claim (4.3): in each window only ONE of the two bots
+/// throws at the enemy.
+#[test]
+fn one_bot_of_a_team_throws_at_a_soldier_at_a_time() {
+    let rounds = throwers_by_round(false);
     assert!(
         rounds.iter().sum::<usize>() >= 2,
         "throws by round {rounds:?}"
@@ -655,6 +673,86 @@ fn one_bot_of_a_team_throws_at_a_soldier_at_a_time() {
         rounds.iter().all(|&k| k <= 1),
         "throwers by round {rounds:?}"
     );
+}
+
+/// Hunt follows the original's throttle, which is for `grenade` and
+/// `missile` ordnance only: a `sticky` thermal
+/// detonator takes no claim, and both bots throw in the same window.
+#[test]
+fn a_hunt_sticky_grenade_takes_no_claim() {
+    assert!(claims(false, &thermal()) && !claims(true, &thermal()));
+    let rounds = throwers_by_round(true);
+    assert!(
+        rounds.iter().any(|&k| k == 2),
+        "throwers by round {rounds:?}"
+    );
+}
+
+/// A shell weapon on channel 1 (the BF2 Ewok's rock) is fired through its
+/// own channel when the choice takes it. It was armed as the weapon in the
+/// hands, so the bot pressed FIRE: its primary went off instead (an Ewok's
+/// spear thrown flat, as a bolt is aimed) and the rock never left. Here the
+/// primary is a repair tool, which the choice never takes.
+#[test]
+fn a_channel_one_shell_is_fired_on_its_own_trigger() {
+    let _stand = super::super::tests::all_stand();
+    let mut sim = Sim::empty(5);
+    sim.heightfield = Some(flat());
+    let tool = sim.add_weapon_class(WeaponClass {
+        name: "tool".into(),
+        repair: Some(crate::weapon::Repair::default()),
+        ..WeaponClass::default()
+    });
+    let rock = sim.add_weapon_class(WeaponClass {
+        name: "rock".into(),
+        rounds_per_clip: 1,
+        reload_time: 0.5,
+        shot_delay: [0.01; 2],
+        ai_range: [0.0, 30.0, 60.0],
+        ai_target_kind: 0x07,
+        ordnance: OrdnanceClass {
+            kind: OrdKind::Shell,
+            velocity: 40.0,
+            life_span: 5.0,
+            gravity: 1.5,
+            max_damage: 50.0,
+            scales: [1.0; 7],
+            ..OrdnanceClass::default()
+        },
+        ..WeaponClass::default()
+    });
+    let bot = sim
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            weapon_class: tool,
+            slots: std::sync::Arc::new([SlotSpec {
+                slot: 1,
+                channel: 1,
+                weapon_class: rock,
+                clips: 50,
+            }]),
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    let e = sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -20.0)))
+        .unwrap();
+    sim.units[e.index as usize].health.max = 1e9;
+    let mut rocks = 0;
+    for _ in 0..10 * TICK_HZ {
+        let h = &mut sim.units[e.index as usize].health;
+        h.cur = h.max;
+        sim.step(&[]);
+        rocks += sim
+            .events
+            .iter()
+            .filter(|ev| {
+                matches!(ev, Event::Shot { unit, weapon_class, .. }
+                    if *unit == bot && *weapon_class as usize == rock)
+            })
+            .count();
+    }
+    assert!(rocks >= 3, "{rocks} rocks in 10 s");
 }
 
 /// The stand to throw: a bot that circles its target stops for the throw —
@@ -1872,4 +1970,19 @@ fn a_snipers_pistol_is_for_a_target_close_or_coming_on() {
     let mut plain = cands(false);
     plain[0] = None;
     assert_eq!(sidearm(&plain, None, None, 6.0, false, true), None);
+}
+
+/// [ours] (2026-11-20) With nothing in range the fallback takes a weapon
+/// whose reach holds the target: a rifle's bolt lengthened to 200 m (the
+/// disc's 128 m, MaxRange 64) is taken at 110 m and not at 150 m - the
+/// disc's reach, not the lengthened one (`WeaponClass::engage_range`).
+#[test]
+fn the_fallback_reaches_the_discs_bolt_not_the_lengthened_one() {
+    let mut r = rifle();
+    assert_eq!(r.shot_range(), 128.0, "the fixture's premise");
+    r.ordnance.extend_bolt_reach();
+    assert!(r.shot_range() >= crate::weapon::BOLT_REACH);
+    let pick = |d| choose([cand(0, &r, Some(200))].into_iter(), &ask(d));
+    assert_eq!(pick(110.0), Some((0, false)), "within the disc's reach");
+    assert_eq!(pick(150.0), None, "past it");
 }

@@ -399,6 +399,31 @@ fn a_flying_ship_is_no_walk_target_and_a_soldier_on_foot_is() {
     assert_eq!(goals(&mut sim), 0, "a foe flying a ship is not");
 }
 
+/// A native team given the Deathmatch goal (`Sim::set_native_deathmatch`,
+/// Jabba's guards) walks it on a ground map; a native team without it
+/// keeps the nearest-enemy hunt and draws no walk goal.
+#[test]
+fn a_deathmatch_native_walks_the_deathmatch_goal_and_a_hunting_one_does_not() {
+    for deathmatch in [false, true] {
+        let (mut sim, h) = l_sim();
+        sim.add_native_team(2, Vec::new());
+        if deathmatch {
+            sim.set_native_deathmatch(2);
+        }
+        assert_eq!(sim.native_deathmatch(2), deathmatch);
+        let u = sim.unit_mut(h).unwrap();
+        u.team = 2;
+        u.spec.team = 2;
+        let goals = wander_goals(&mut sim, h, 120);
+        if deathmatch {
+            let hubs: std::collections::BTreeSet<u16> = goals.iter().map(|g| g.1).collect();
+            assert!(hubs.len() >= 2, "{goals:?}");
+        } else {
+            assert!(goals.is_empty(), "{goals:?}");
+        }
+    }
+}
+
 #[test]
 fn a_foot_bot_on_a_ground_map_takes_no_space_walk() {
     let (mut sim, h) = l_sim();

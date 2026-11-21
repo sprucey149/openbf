@@ -120,8 +120,8 @@ pub use emitter::{BurnClass, EmitterOrdnance, BURN_SLOTS};
 pub use fatray::FatRayClass;
 pub use ordnance::{
     blast_falloff, DamageDesc, ExplosionClass, Falloff, Health, HealthType, OrdBlend, OrdKind,
-    OrdKnot, OrdnanceClass, EXPLOSION_OFFSET, HASH_FALLOFF_DURATION, HASH_FALLOFF_END_DAMAGE,
-    HASH_FALLOFF_START, HASH_TEAM_BONUS_SCALE, SHELL_G,
+    OrdKnot, OrdnanceClass, BOLT_REACH, EXPLOSION_OFFSET, HASH_FALLOFF_DURATION,
+    HASH_FALLOFF_END_DAMAGE, HASH_FALLOFF_START, HASH_TEAM_BONUS_SCALE, SHELL_G,
 };
 pub use repair::Repair;
 
@@ -284,8 +284,10 @@ pub struct WeaponClass {
     /// the slowdown, the follow and the pull fade together, in a straight
     /// line, to nothing at `lock_on_range`, the round's own reach
     /// ([`WeaponClass::give_sniper_assist`], `aim_assist::sniper_range_scale`).
-    /// 0 = none (every weapon but a sniper rifle; a sniper that authors its
-    /// own `LockOnRange` fades from half of it). Not an ODF key.
+    /// 0 = none (a sniper that authors its own `LockOnRange` fades from half
+    /// of it). [ours] (2026-11-20) A blaster whose bolt was lengthened to
+    /// `BOLT_REACH` takes its disc reach here and fades to the bolt's
+    /// ([`WeaponClass::give_bolt_assist`]). Not an ODF key.
     /// measure: scoped controller play on a crossing runner at 100, 150,
     /// 200 and 250 m on a large map.
     pub assist_full_range: f32,

@@ -80,6 +80,14 @@ pub const LV_REACT_STAY: u32 = 1 << 20;
 pub const LV_POSITION_HIT: u32 = 1 << 21;
 /// Event: a bot walking its leg side-stepped a hit (the skill's coin).
 pub const LV_DODGE: u32 = 1 << 22;
+/// Event: a hit from past the bot's opening range noted its shooter
+/// (`AiState::shot_by`, the 200 m bolt reach's return fire).
+pub const LV_NOTE_HIT: u32 = 1 << 23;
+/// Event: a near miss from past the bot's opening range noted its shooter.
+pub const LV_NOTE_NEAR: u32 = 1 << 24;
+/// Event: a tick a bot's trigger was wanted at a noted shooter past its
+/// opening range (return fire; trigger ticks, not rounds).
+pub const LV_ANSWER_FIRE: u32 = 1 << 25;
 
 /// The report's name of each lever bit ("" = unused).
 pub const LEVER_NAMES: [&str; 32] = [
@@ -106,9 +114,9 @@ pub const LEVER_NAMES: [&str; 32] = [
     "react-stay",
     "position-hit",
     "dodge",
-    "",
-    "",
-    "",
+    "note-hit",
+    "note-near",
+    "answer-fire",
     "",
     "",
     "",

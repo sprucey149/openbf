@@ -93,6 +93,66 @@ fn answer_for_her_own_side(classes: &mut [BakedClass]) {
     }
 }
 
+/// Kit Fisto's Force ball: the add-on (PC and PS2 copies alike) tags it with
+/// the droideka's `hud_droideka_shield`, a droideka figure whose shield is a
+/// faint arc. `[ours]` it takes its own key, drawn by [`fisto_bubble_icon`]
+/// (`game::hud_feed`'s `fisto` places it where the droideka icon sits).
+/// Droidekas keep theirs.
+const FORCE_BUBBLE: &str = "dlc_weap_force_bubble";
+const DROIDEKA_HUD: &str = "hud_droideka_shield";
+pub const FISTO_BUBBLE_HUD: &str = "hud_fisto_bubble";
+
+fn fisto_hud_tag(classes: &mut [BakedClass]) {
+    let tag = mungefs::fnv1a_lowercase("HUDTag");
+    for class in classes.iter_mut().filter(|c| c.name == FORCE_BUBBLE) {
+        for (_, value) in class.props.iter_mut().filter(|p| p.0 == tag) {
+            if value.trim().eq_ignore_ascii_case(DROIDEKA_HUD) {
+                *value = FISTO_BUBBLE_HUD.to_owned();
+            }
+        }
+    }
+}
+
+/// `[ours]` the Force ball's HUD sheet, 64x64 like the weapon icons it sits
+/// among and in their ink: opaque, dark strokes on white. A ball (an outline)
+/// with a short shine arc inside its upper left; no droideka. Pure pixel
+/// code, so every bake writes the same bytes.
+pub fn fisto_bubble_icon() -> Vec<u8> {
+    const SIZE: usize = 64;
+    const INK: f32 = 14.0;
+    // Stroke coverage for a pixel whose centre is `d` from the stroke's
+    // middle line, `half` its half-width: a one-pixel ramp at the edges.
+    let cover = |d: f32, half: f32| (half + 0.5 - d.abs()).clamp(0.0, 1.0);
+    let centre = (SIZE as f32 - 1.0) * 0.5;
+    let mut out = Vec::with_capacity(SIZE * SIZE * 4);
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let (dx, dy) = (x as f32 - centre, y as f32 - centre);
+            let r = (dx * dx + dy * dy).sqrt();
+            let ring = cover(r - 22.0, 2.5);
+            // The shine: radius 15, from 200 to 250 degrees (screen y down,
+            // so the upper left), its ends rounded off over 6 degrees.
+            let angle = dy.atan2(dx).to_degrees().rem_euclid(360.0);
+            let along = ((angle - 200.0).min(250.0 - angle) / 6.0).clamp(0.0, 1.0);
+            let shine = cover(r - 15.0, 1.5) * along;
+            let ink = ring.max(shine);
+            let v = (255.0 - (255.0 - INK) * ink).round() as u8;
+            out.extend([v, v, v, 255]);
+        }
+    }
+    out
+}
+
+/// The flat sheet the Force ball's inner shell draws where the source copy
+/// lacks the `spec` texture it names (the PC `dlc.lvl` has none, nor do the
+/// PC core and common LVLs; the PS2 copy's is used whenever it is the source).
+/// `[ours]` the PS2 copy's sheet is one flat cyan, about (0, 192, 220) at
+/// alpha 125..178: this is that colour at its least alpha, 8x8.
+/// replace: none while a PC-only source lacks the sheet.
+pub fn fisto_spec_sheet() -> Vec<u8> {
+    [0u8, 192, 220, 125].repeat(64)
+}
+
 fn namespace(classes: &mut [BakedClass]) {
     let names: HashMap<_, _> = classes
         .iter()
@@ -145,7 +205,12 @@ pub fn bake(lvl: &Path, ingame: &Path, out: &Path, pc: Option<&Path>) -> Result<
     )?;
     let mut classes = hero_classes(&all)?;
     answer_for_her_own_side(&mut classes);
+    fisto_hud_tag(&mut classes);
     let mut result = HeroBake::default();
+    // The sheets the bodies were written with: a hero's weapon model that
+    // draws one of them (Kit's fists and foot draw his body sheet) bakes it
+    // again, and must keep the alpha the body decided.
+    let mut body_flags: HashMap<String, u32> = HashMap::new();
     for (hero, faction) in HEROES {
         let geometry = scalar(&classes, hero, "GeometryName")
             .with_context(|| format!("{hero}: no GeometryName"))?
@@ -182,6 +247,9 @@ pub fn bake(lvl: &Path, ingame: &Path, out: &Path, pc: Option<&Path>) -> Result<
         });
         result.soldiers.push(geometry);
         result.textures.extend(baked.textures);
+        for (name, flags) in baked.texture_flags {
+            *body_flags.entry(name).or_default() |= flags;
+        }
     }
     let inner = mungefs::open(&bytes)?;
     let chunks = mungefs::content_chunks(inner)?;
@@ -225,15 +293,37 @@ pub fn bake(lvl: &Path, ingame: &Path, out: &Path, pc: Option<&Path>) -> Result<
             }
         }
     }
+    let mut weapon_textures = Vec::new();
     for model in models {
-        crate::soldier::bake_weapon(
+        let baked = crate::soldier::bake_weapon_with(
             &lvl.to_string_lossy(),
             &model,
             &side.to_string_lossy(),
             pc_path.as_deref(),
+            &body_flags,
         )?;
+        weapon_textures.extend(baked.textures);
         result.weapons.push(model);
     }
+    // The Force ball's inner shell names `spec`; a source without it gets
+    // [`fisto_spec_sheet`] rather than an untextured solid ball.
+    if result.weapons.iter().any(|w| w == "bubblev3")
+        && !weapon_textures.iter().any(|t| t == "spec")
+    {
+        std::fs::create_dir_all(side.join("textures"))?;
+        std::fs::write(
+            side.join("textures/spec.ktx2"),
+            crate::ktx2w::write_rgba8(8, 8, &[fisto_spec_sheet()]),
+        )?;
+        result.textures.push("spec".to_owned());
+    }
+    std::fs::create_dir_all(side.join("textures"))?;
+    std::fs::write(
+        side.join("textures")
+            .join(format!("{FISTO_BUBBLE_HUD}.ktx2")),
+        crate::ktx2w::write_rgba8(64, 64, &[fisto_bubble_icon()]),
+    )?;
+    result.textures.push(FISTO_BUBBLE_HUD.to_owned());
     let flags = textures
         .iter()
         .map(|t| (t.clone(), crate::detail::ALPHA_IS_MEANINGFUL))
@@ -254,10 +344,11 @@ pub fn bake(lvl: &Path, ingame: &Path, out: &Path, pc: Option<&Path>) -> Result<
     result.textures.sort();
     result.textures.dedup();
     // Their effects stay in a layer of their own, read after every retail one.
-    crate::effects::bake_side(
+    crate::effects::bake_side_with(
         &lvl.to_string_lossy(),
         &side.join("effects").to_string_lossy(),
         "bf2",
+        true,
     )?;
     crate::dlc_output::install(side, &destination, &mut classes, &mut result)?;
     crate::dlc_output::replace_tree(&side.join("effects"), &destination.join("effects/dlc"))?;
@@ -421,6 +512,76 @@ mod tests {
             classes[1].props[0].1,
             "rep_off_response_hero_command      SC_Follow"
         );
+    }
+
+    #[test]
+    fn force_bubble_hud_tag_is_rewritten() {
+        let tag = "HUDTag";
+        let mut classes = vec![
+            class(
+                "dlc_weap_force_bubble",
+                "com_weap_inf_force_pull",
+                &[(tag, "hud_droideka_shield"), ("Label", "Shield")],
+            ),
+            class(
+                "cis_weap_inf_droideka_shield",
+                "cannon",
+                &[(tag, "hud_droideka_shield")],
+            ),
+            class(
+                "com_weap_inf_force_pull",
+                "cannon",
+                &[(tag, "hud_force_pull")],
+            ),
+        ];
+        fisto_hud_tag(&mut classes);
+        assert_eq!(classes[0].prop(tag), Some(FISTO_BUBBLE_HUD));
+        assert_eq!(
+            classes[0].prop("Label"),
+            Some("Shield"),
+            "the original name stays"
+        );
+        assert_eq!(classes[1].prop(tag), Some("hud_droideka_shield"));
+        assert_eq!(classes[2].prop(tag), Some("hud_force_pull"));
+        namespace(&mut classes);
+        assert_eq!(
+            classes[0].prop(tag),
+            Some(FISTO_BUBBLE_HUD),
+            "a key, not a class"
+        );
+    }
+
+    #[test]
+    fn fisto_bubble_icon_is_an_opaque_ball_in_the_weapon_icons_ink() {
+        let icon = fisto_bubble_icon();
+        assert_eq!(icon, fisto_bubble_icon(), "deterministic");
+        assert_eq!(icon.len(), 64 * 64 * 4);
+        let px = |x: usize, y: usize| &icon[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4];
+        assert!(icon
+            .chunks(4)
+            .all(|p| p[3] == 255 && p[0] == p[1] && p[1] == p[2]));
+        assert_eq!(px(32, 32), [255, 255, 255, 255], "clear inside");
+        assert_eq!(px(1, 1), [255, 255, 255, 255], "clear outside");
+        // The ring crosses the row through the centre 22 px out.
+        assert!(px(31 + 22, 31)[0] < 40 && px(31 - 22 + 1, 32)[0] < 40);
+        // The shine is in the upper left only.
+        let ink = |x: usize, y: usize| px(x, y)[0] < 128;
+        let r = 15.0f32;
+        let at = |deg: f32| {
+            let (s, c) = deg.to_radians().sin_cos();
+            (
+                (31.5 + r * c).round() as usize,
+                (31.5 + r * s).round() as usize,
+            )
+        };
+        let (x, y) = at(225.0);
+        assert!(ink(x, y), "shine at 225 degrees");
+        for deg in [45.0, 135.0, 315.0] {
+            let (x, y) = at(deg);
+            assert!(!ink(x, y), "no shine at {deg} degrees");
+        }
+        let dark = icon.chunks(4).filter(|p| p[0] < 128).count();
+        assert!((500..1200).contains(&dark), "{dark} ink texels");
     }
 
     #[test]

@@ -1661,13 +1661,9 @@ impl FactionRoster {
         };
         let hunt = hunt.is_some();
         let jawa = if hunt && game == "bf1" && factions.contains(&"jawa") {
-            // [ours] The BF1 Jawa is a neutral repairer. Its playable Hunt
-            // variant uses the BF2 Jawa's authored attack and keeps its
-            // own repair tool. measure: BF1 Mos Eisley both sides and tiers.
-            let mut jawa = ClassDb::default();
-            jawa.load(&classes_dir.join("bf2_des.ron"))?;
-            jawa.load(&classes_dir.join("bf2_ingame.ron"))?;
-            Some(jawa)
+            // [ours] Every Jawa carries BF2's arc caster beside its repair
+            // tool (`crate::jawa`); in Hunt at full strength.
+            Some(crate::jawa::donor(classes_dir)?)
         } else {
             None
         };
@@ -1724,30 +1720,7 @@ impl FactionRoster {
                     })?;
             if let Some(donor) = jawa.as_ref().filter(|_| f == "jawa") {
                 for class in &mut roster.classes {
-                    let original = class.weapon.clone();
-                    let original_hud = class.weapon_hud.clone();
-                    class.weapon = weapon_from_db(donor, "tat_weap_inf_jawa_arccaster")?;
-                    class.weapon_hud = weapon_hud(donor, &class.weapon.name);
-                    let slot = (0..8)
-                        .find(|slot| {
-                            *slot != class.weapon_slot
-                                && !class.held.iter().any(|w| w.slot == *slot)
-                        })
-                        .context("BF1 Hunt Jawa has no free repair-tool slot")?;
-                    class.held.push(HeldSlot {
-                        slot,
-                        channel: 0,
-                        clips: 0,
-                        weapon: original,
-                        hud: original_hud,
-                        geometry: class.weapon_geometry.clone(),
-                        first_person: class.first_person_weapon.clone(),
-                    });
-                    class.first_person_weapon =
-                        first_person_weapon(donor, &class.weapon.name, class.weapon.offhand_weapon);
-                    class.weapon_geometry = donor
-                        .prop(&class.weapon.name, "GeometryName")
-                        .map(str::to_owned);
+                    crate::jawa::arm(donor, class).context("BF1 Hunt Jawa")?;
                 }
             }
             if hunt && !skipped.is_empty() {
