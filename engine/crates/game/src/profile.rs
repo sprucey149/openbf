@@ -193,6 +193,9 @@ pub struct Settings {
     pub auto_quality: bool,
     #[serde(default)]
     pub terrain_lod: bool,
+    /// Hard directional shadows from nearby soldiers, vehicles and scenery.
+    #[serde(default = "yes")]
+    pub hard_shadows: bool,
     #[serde(default)]
     pub scene_softness: bool,
     #[serde(default)]
@@ -309,6 +312,7 @@ impl Settings {
         self.network_meter = defaults.network_meter;
         self.low_power_resolution = defaults.low_power_resolution;
         self.auto_quality = defaults.auto_quality;
+        self.hard_shadows = defaults.hard_shadows;
     }
 }
 
@@ -334,6 +338,7 @@ impl Default for Settings {
             invert_y: false,
             low_power_resolution: false,
             terrain_lod: false,
+            hard_shadows: true,
             scene_softness: false,
             auto_quality: true,
             viewpoint: crate::viewpoint::Viewpoint::default(),
@@ -733,10 +738,11 @@ mod tests {
     }
 
     #[test]
-    fn render_options_default_off_and_survive_profile_roundtrips() {
+    fn render_options_use_legacy_defaults_and_survive_profile_roundtrips() {
         let old: Settings = ron::from_str("(assist_intensity: 0.7)").unwrap();
         assert!(!old.terrain_lod && !old.scene_softness);
         assert!(!Settings::default().terrain_lod && !Settings::default().scene_softness);
+        assert!(old.hard_shadows && Settings::default().hard_shadows);
         for terrain_lod in [false, true] {
             for scene_softness in [false, true] {
                 let settings = Settings {
@@ -751,6 +757,14 @@ mod tests {
                 );
             }
         }
+        let mut settings = Settings {
+            hard_shadows: false,
+            ..Default::default()
+        };
+        let back: Settings = ron::from_str(&ron::to_string(&settings).unwrap()).unwrap();
+        assert!(!back.hard_shadows);
+        settings.reset_graphics();
+        assert!(settings.hard_shadows);
     }
 
     #[test]

@@ -746,6 +746,7 @@ impl Renderer {
         let gpu_timer = crate::gpu_timer::GpuTimer::new(&device, &queue);
 
         Ok(Self {
+            sun_shadow: None,
             shadows: crate::shadow::ShadowState::new(
                 &device,
                 format,

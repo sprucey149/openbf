@@ -336,13 +336,16 @@ pub(crate) fn upload(
     let positions: Vec<_> = vertices.iter().map(|v| v.position).collect();
     let normals: Vec<_> = vertices.iter().map(|v| v.normal).collect();
     let uvs: Vec<_> = vertices.iter().map(|v| v.uv).collect();
-    r.add_dynamic_mesh(&render::MeshData {
-        positions: &positions,
-        normals: &normals,
-        uvs: &uvs,
-        colors: None,
-        indices,
-    })
+    r.add_character_mesh(
+        &render::MeshData {
+            positions: &positions,
+            normals: &normals,
+            uvs: &uvs,
+            colors: None,
+            indices,
+        },
+        true,
+    )
 }
 
 #[cfg(test)]

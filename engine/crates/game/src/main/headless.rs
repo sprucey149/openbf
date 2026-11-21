@@ -786,6 +786,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
     }
 
     if let Some(log_path) = v.walk_replay.as_ref() {
+        r.set_sun_shadows(std::env::var("OPENBF_HARD_SHADOWS").as_deref() != Ok("0"));
         let log: InputLog =
             ron::from_str(&std::fs::read_to_string(log_path)?).context("parse walk log")?;
         let cube = upload_unit_cube(&mut r)?;

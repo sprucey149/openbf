@@ -271,6 +271,7 @@ fn setting_sound(
         | Row::InputIcons
         | Row::FlightControls
         | Row::CareerAwards
+        | Row::HardShadows
         | Row::WindowMode
             if input.confirm || input.left || input.right =>
         {
@@ -885,6 +886,7 @@ impl App {
                 invert_y: settings.invert_y,
                 low_power_resolution: settings.low_power_resolution,
                 terrain_lod: settings.terrain_lod,
+                hard_shadows: settings.hard_shadows,
                 scene_softness: settings.scene_softness,
                 auto_quality: settings.auto_quality,
                 window_mode: self.shown_window_mode(),
@@ -966,6 +968,7 @@ impl App {
                         fov_scale: self.profile.settings.fov_scale,
                         first_person: self.profile.settings.viewpoint.is_first(),
                         low_power_resolution: self.profile.settings.low_power_resolution,
+                        hard_shadows: self.profile.settings.hard_shadows,
                         auto_quality: self.profile.settings.auto_quality,
                         ..model
                     });
@@ -1468,6 +1471,7 @@ impl App {
             }
             MenuAction::ToggleFlightControls => s.flight_controls = s.flight_controls.toggled(),
             MenuAction::ToggleTerrainLod => s.terrain_lod = !s.terrain_lod,
+            MenuAction::ToggleHardShadows => s.hard_shadows = !s.hard_shadows,
             MenuAction::ToggleSceneSoftness => s.scene_softness = !s.scene_softness,
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
             MenuAction::ToggleLowPowerResolution => {

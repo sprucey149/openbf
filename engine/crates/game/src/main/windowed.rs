@@ -1705,6 +1705,7 @@ impl App {
         self.blackbox = start_blackbox(scene, &walk, &self.mode, setup, self.sounds.as_mut());
         self.matchlog = start_matchlog(scene, &walk, &self.mode, setup);
         let gpu = std::time::Instant::now();
+        renderer.set_sun_shadows(self.profile.settings.hard_shadows);
         self.fx.preload(renderer);
         self.soldier_vis = Some(game::soldier_vis::SoldierVisuals::for_walk(
             renderer,

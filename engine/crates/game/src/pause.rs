@@ -231,6 +231,7 @@ pub fn apply_menu_action(
         | MenuAction::ToggleFlightControls
         | MenuAction::ToggleInvertY
         | MenuAction::ToggleTerrainLod
+        | MenuAction::ToggleHardShadows
         | MenuAction::ToggleSceneSoftness
         | MenuAction::ToggleLowPowerResolution
         | MenuAction::SetAutoQuality(_)

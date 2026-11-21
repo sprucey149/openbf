@@ -103,6 +103,7 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         invert_y: false,
         low_power_resolution: false,
         terrain_lod: false,
+        hard_shadows: true,
         scene_softness: false,
         input_icons_label: label,
         icons,

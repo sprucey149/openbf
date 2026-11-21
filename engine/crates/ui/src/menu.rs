@@ -125,6 +125,7 @@ pub struct MenuModel {
     pub invert_y: bool,
     pub low_power_resolution: bool,
     pub terrain_lod: bool,
+    pub hard_shadows: bool,
     pub scene_softness: bool,
     /// Automatic quality (LAN §8b.2): the render scale follows the frame
     /// times; Low power resolution is then locked ([`row_locked`]).
@@ -200,6 +201,7 @@ pub enum MenuAction {
     ToggleInvertY,
     ToggleLowPowerResolution,
     ToggleTerrainLod,
+    ToggleHardShadows,
     ToggleSceneSoftness,
     /// Automatic quality on or off (LAN §8b.2).
     SetAutoQuality(bool),
@@ -362,6 +364,7 @@ pub enum Row {
     InvertY,
     LowPowerResolution,
     TerrainLod,
+    HardShadows,
     SceneSoftness,
     InputIcons,
     Quit,
@@ -449,7 +452,7 @@ pub fn rows(m: &MenuModel) -> Vec<Row> {
     }
 }
 
-/// What Cross (or a click) on a button row does; `None` on a setting row.
+/// What Cross (or a click) does directly on a row.
 pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
     Some(match row {
         Row::ClassPicker => MenuAction::OpenClassPicker,
@@ -477,6 +480,7 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
         Row::FpsCounter => MenuAction::SetFpsCounter(m.fps_counter.toggled()),
         Row::NetworkMeter => MenuAction::SetNetworkMeter(!m.network_meter),
         Row::AutoQuality => MenuAction::SetAutoQuality(!m.auto_quality),
+        Row::HardShadows => MenuAction::ToggleHardShadows,
         Row::PlayerName if row_locked(m, row).is_none() => MenuAction::EditPlayerName,
         Row::ResetGraphics => MenuAction::ResetGraphics,
         Row::CareerAwards => MenuAction::SetCareerAwards(m.career_awards_disabled),
@@ -609,6 +613,7 @@ pub(crate) fn is_value_row(row: Row) -> bool {
             | Row::FpsCounter
             | Row::NetworkMeter
             | Row::AutoQuality
+            | Row::HardShadows
             | Row::WindowMode
             | Row::Rumble
             | Row::MouseSensitivity
@@ -849,6 +854,7 @@ fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Ve
         Row::TerrainLod if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleTerrainLod)
         }
+        Row::HardShadows if single && adjust => actions.push(MenuAction::ToggleHardShadows),
         Row::SceneSoftness if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleSceneSoftness)
         }
@@ -1323,6 +1329,7 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
             ),
         ),
         Row::TerrainLod => ("Distant Terrain".into(), on_off(m.terrain_lod)),
+        Row::HardShadows => ("Hard Shadows".into(), on_off(m.hard_shadows)),
         Row::SceneSoftness => ("Scene Softness".into(), on_off(m.scene_softness)),
         Row::InvertY => ("Invert Mouse Y".into(), on_off(m.invert_y)),
         Row::LowPowerResolution => (
