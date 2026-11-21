@@ -4,6 +4,7 @@ The end-to-end test packs a small fixture with the production `pak` code at a lo
 """
 from pathlib import Path
 import os
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -253,6 +254,54 @@ class EndToEnd(unittest.TestCase):
                         self.game.parent / pack.PAK_NAME, f"assets={stale / 'x'}"], check=True, capture_output=True)
         self.assert_reads_the_fixture()
         self.assertNotEqual(self.read("assets/only_in_stale").returncode, 0)
+
+
+class MacOsBundle(unittest.TestCase):
+    """scripts/pack.py's --app-bundle layout, checked from any OS: nobody has run a macOS
+    build yet, so what is pinned is the invariant — the game, its archive and its data
+    folder stay beside each other inside Contents/MacOS, and Info.plist names the icon.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        d = Path(self.dir.name)
+        self.out = d / "openbf"
+        self.out.write_bytes(b"game binary")
+        (d / pack.PAK_NAME).write_bytes(pack.PACK_MAGIC + b"\0" * 200)
+        (d / "openbf_data").mkdir()
+        (d / "openbf_data" / "profile.json").write_text("{}")
+        self.icns = d / "openbf.icns"
+        self.icns.write_bytes(b"icns" + (12).to_bytes(4, "big"))
+
+    def test_the_bundle_holds_the_game_the_archive_and_the_icon(self):
+        app = pack.build_app_bundle(str(self.out), str(self.icns))
+        app_dir, game, pak, icon = pack.app_bundle_paths(str(self.out))
+        self.assertEqual(Path(app_dir).name, "openbf.app")
+        self.assertFalse(self.out.exists())  # the bundle takes the files, it does not copy them
+        plist = plistlib.loads((Path(app_dir) / "Contents" / "Info.plist").read_bytes())
+        self.assertEqual(plist["CFBundleExecutable"], pack.APP_NAME)
+        self.assertEqual(plist["CFBundleIconFile"], "openbf.icns")
+        self.assertEqual(plist["CFBundlePackageType"], "APPL")
+        self.assertEqual(Path(game).read_bytes(), b"game binary")
+        self.assertEqual(Path(pak).read_bytes(), pack.PACK_MAGIC + b"\0" * 200)
+        self.assertEqual(os.path.dirname(game), os.path.dirname(pak))  # the two travel together
+        self.assertTrue((Path(os.path.dirname(game)) / "openbf_data" / "profile.json").is_file())
+        self.assertEqual(Path(icon).read_bytes(), b"icns" + (12).to_bytes(4, "big"))
+        if not pack.WINDOWS:
+            self.assertTrue(os.stat(game).st_mode & 0o111, "the game inside the bundle is executable")
+
+    def test_the_desktop_entry_names_the_game_and_the_icon(self):
+        d = Path(self.dir.name)
+        template = d / "openbf.desktop.template"
+        template.write_text("Exec=@EXE@\nIcon=openbf\nStartupWMClass=openbf\n", encoding="utf-8")
+        dest = d / "openbf.desktop"
+        with mock.patch.object(pack, "DESKTOP_TEMPLATE", str(template)):
+            pack.write_desktop(str(d / "openbf"), str(dest))
+        text = dest.read_text(encoding="utf-8")
+        self.assertIn(str(d / "openbf"), text)
+        self.assertIn("Icon=openbf", text)
+        self.assertIn("StartupWMClass=openbf", text)
 
 
 if __name__ == "__main__":

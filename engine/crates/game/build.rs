@@ -19,6 +19,10 @@ use std::process::Command;
 #[path = "build_rules.rs"]
 mod build_rules;
 
+// The Windows application icon, added by `link.exe` from `branding/`.
+#[path = "build_icon.rs"]
+mod build_icon;
+
 fn git(args: &[&str]) -> Option<String> {
     git_bytes(args).map(|b| String::from_utf8_lossy(&b).trim().to_owned())
 }
@@ -112,4 +116,7 @@ fn main() {
         // of winit + App::resumed + make_walk exceed 1 MB. Match Linux's 8 MB.
         println!("cargo:rustc-link-arg-bin=game=/STACK:8388608");
     }
+    // The icon is data the OS reads, so a build without `rc.exe` is a warning, not
+    // a failure, and nothing at run time changes.
+    build_icon::link_icon();
 }

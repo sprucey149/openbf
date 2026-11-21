@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OpenBF
+Comment=Star Wars Battlefront 1 and 2, built from copies you own
+Exec=@EXE@
+Icon=openbf
+Terminal=false
+Categories=Game;StrategyGame;
+StartupWMClass=openbf

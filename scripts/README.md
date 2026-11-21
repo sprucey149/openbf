@@ -8,6 +8,7 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | script | what it does |
 |---|---|
 | `pack.py` | what you own in `iso/` to a self-contained game |
+| `install_linux.sh` | install the application entry and the icon-theme PNGs from `branding/` into `~/.local/share` |
 | `input_scan.py`, `console_input.py`, `dlc_inputs.py` | recognize inputs by content, and say what a build makes of them |
 | `rebake.sh`, `bake_dlc.py` | bake assets, and the two optional DLC heroes (`DLC.md`) |
 | `extract_lua.py`, `gen_missions.py`, `gameplay_missions.py` | mission files from the mod tools' Lua |

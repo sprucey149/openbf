@@ -7,3 +7,9 @@
 engine/crates/** text=auto eol=lf
 engine/Cargo.toml text eol=lf
 engine/Cargo.lock text eol=lf
+# Application branding (branding/) is project artwork, not game data: small,
+# regenerable containers that no text-conversion pass may touch (scripts/make_icons.py
+# writes them, and --check compares pixels).
+branding/** binary
+*.ico binary
+*.icns binary

@@ -20,6 +20,9 @@ recompiles and re-packs):
      Below about 3.9 GiB that is one file on every OS. From there on, also on every OS, --out is a small executable
      and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
      inside itself first, then for openbf.pak beside it; the two must stay together.
+On macOS --app-bundle (default there) turns that into dist/openbf.app: the game, openbf.pak and openbf_data/ inside
+Contents/MacOS, branding/macos/openbf.icns in Contents/Resources, and Info.plist naming CFBundleIconFile. On Linux
+dist/openbf.desktop is written beside the game, and scripts/install_linux.sh installs it with the icon theme files.
 
 Optional prepared packs: unzip under visual_packs/, then run the normal command.
 Each pack has pack.json; named mod folders may group packs recursively, for example
@@ -50,6 +53,7 @@ import glob
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -86,6 +90,13 @@ GAME_ELF = {"bf1": "SWBFRONT.ELF", "bf2": "SWBFRNT2.ELF"}
 PAK_NAME = "openbf.pak"
 FAT32_LIMIT = 2**32
 PACK_MAGIC = b"OPENBFPK"
+# Project branding, made by scripts/make_icons.py: tracked artwork, not game data.
+# The macOS bundle's icon and the Linux application entry.
+BRANDING = os.path.join(ROOT, "branding")
+ICNS = os.path.join(BRANDING, "macos", "openbf.icns")
+DESKTOP_TEMPLATE = os.path.join(BRANDING, "linux", "openbf.desktop.template")
+APP_NAME = "openbf"  # the packed game's own name, which the bundle and the entry use
+MACOS = sys.platform == "darwin"
 
 
 def carries_pack(path):
@@ -131,6 +142,60 @@ def pack_summary(out, pak, split):
     if os.path.getsize(pak) >= FAT32_LIMIT:
         lines[1] = f"{PAK_NAME} is 4 GiB or more and FAT32 cannot hold such a file: keep this build on another filesystem."
     return lines
+
+
+def info_plist():
+    """The bundle's Info.plist: the keys macOS reads for the game, its icon and its type.
+    CFBundleExecutable is the file inside Contents/MacOS, CFBundleIconFile is read from
+    Contents/Resources (branding/macos/openbf.icns, written by scripts/make_icons.py)."""
+    return plistlib.dumps({
+        "CFBundleExecutable": APP_NAME,
+        "CFBundleIdentifier": "com.openbf.openbf",
+        "CFBundleName": "OpenBF",
+        "CFBundleDisplayName": "OpenBF",
+        "CFBundlePackageType": "APPL",
+        "CFBundleIconFile": "openbf.icns",
+        "NSHighResolutionCapable": True,
+    })
+
+
+def app_bundle_paths(out):
+    """The bundle's own paths, so a test can name them: the app, the game, the archive
+    beside the game, and the icon in Resources."""
+    app = out + ".app"
+    macos = os.path.join(app, "Contents", "MacOS")
+    return app, os.path.join(macos, APP_NAME), os.path.join(macos, PAK_NAME), \
+        os.path.join(app, "Contents", "Resources", "openbf.icns")
+
+
+def build_app_bundle(out, icns):
+    """dist/openbf.app, made from the flat files just packed. The bundle takes them, it
+    does not copy them: the game, openbf.pak and openbf_data/ go inside Contents/MacOS,
+    because pak::find_archive and game::profile::data_dir look beside the running
+    executable, and Info.plist is what macOS reads to name the bundle and its icon.
+    """
+    app, game, _pak, icon = app_bundle_paths(out)
+    os.makedirs(os.path.dirname(game), exist_ok=True)
+    os.makedirs(os.path.dirname(icon), exist_ok=True)
+    with open(os.path.join(app, "Contents", "Info.plist"), "wb") as f:
+        f.write(info_plist())
+    os.replace(out, game)
+    os.chmod(game, 0o755)
+    for beside in (PAK_NAME, "openbf_data"):
+        source = os.path.join(os.path.dirname(out), beside)
+        if os.path.exists(source):
+            os.replace(source, os.path.join(os.path.dirname(game), beside))
+    shutil.copyfile(icns, icon)
+    return app
+
+
+def write_desktop(out, dest):
+    """The Linux application entry beside the game, with the packed game's path filled in.
+    Its file name, StartupWMClass and Icon key are all "openbf", which matches the packed
+    game and the icon-theme files scripts/install_linux.sh installs."""
+    template = Path(DESKTOP_TEMPLATE).read_text(encoding="utf-8")
+    with open(dest, "w", encoding="utf-8", newline="\n") as f:
+        f.write(template.replace("@EXE@", os.path.abspath(out)))
 
 
 def step(msg):
@@ -603,6 +668,10 @@ def main():
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
     ap.add_argument("--visual-packs", default=None, help="prepared pack folder or recursive lookup of packs/bundles (default: repo-root visual_packs/; discovery stops at pack.json)")
     ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
+    ap.add_argument("--app-bundle", action=argparse.BooleanOptionalAction, default=None,
+                    help="on macOS, write dist/openbf.app with the game, openbf.pak and openbf_data/ inside "
+                         "Contents/MacOS and branding/macos/openbf.icns in Contents/Resources "
+                         "(default: on for macOS, off elsewhere; --no-app-bundle keeps the flat file)")
     a = ap.parse_args()
     try:
         packs, visual_report = visual_packs.discover(a.visual_packs or Path(ROOT) / "visual_packs", explicit=a.visual_packs is not None)
@@ -863,8 +932,19 @@ def build(a, out, plan, packs, visual_report):
         for leftover in (new, new_pak):
             if os.path.exists(leftover):
                 os.remove(leftover)
+    lines = pack_summary(out, pak, split)  # read the files before a bundle takes them
+    bundle = a.app_bundle if a.app_bundle is not None else MACOS
+    if bundle:
+        if not os.path.isfile(ICNS):
+            sys.exit(f"pack: --app-bundle needs {ICNS}: run python3 scripts/make_icons.py")
+        app = build_app_bundle(out, ICNS)
+        lines.append(f"bundle: {app}. Run it from Finder. openbf.pak stays in Contents/MacOS, beside the game.")
+    elif not WINDOWS and os.path.isfile(DESKTOP_TEMPLATE):
+        desktop = os.path.join(os.path.dirname(out), "openbf.desktop")
+        write_desktop(out, desktop)
+        lines.append(f"entry: {desktop}. scripts/install_linux.sh installs it with the icon theme files.")
     print()
-    print("\n".join(pack_summary(out, pak, split)))
+    print("\n".join(lines))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
                            pc_roots=pc_roots, warnings=warnings, images_verified={g for g, image in images.items() if image})
