@@ -113,7 +113,7 @@ are used, and none of the pack's maps or other content. Turn on **DLC Heroes** i
 that have those heroes. The option starts off. These are the community's adapted versions of the heroes rather than the Xbox originals,
 and they have no voice lines of their own. Thanks to the pack's authors: its heroes are by Gogie and Ryan Hank,
 assembled by iamashaymin, with Xbox map conversions by SleepKiller. Without the folder, the game builds unchanged.
-Adding or removing it bakes everything again on the next run.
+Adding or removing it bakes only the DLC heroes and the sound names again on the next run.
 
 ### What the build does
 
@@ -121,14 +121,16 @@ Adding or removing it bakes everything again on the next run.
 `dist/openbf` (about 3 GB). A build of about 3.9 GiB or more becomes a small `dist/openbf` plus `dist/openbf.pak`,
 on every OS: keep the two together, and on a filesystem other than FAT32, which cannot hold a file of 4 GiB or more.
 Run the game from anywhere; it keeps your profile and its bug-report snapshots in an `openbf_data/` folder beside
-itself. Run the script again after pulling new code: it skips what is still current
-and bakes again only when the code that bakes has changed (that can take a while).
+itself. Run the script again after pulling new code: it skips what is still current. The bake is in parts (maps, sides,
+sounds, load screens and so on), and only a part whose output the new code changes is baked again:
+a pull that changes no baked output bakes nothing. `--explain` says, for each part, whether it was reused or why it is baked again. A build that was
+stopped goes on from the part it was in. A new ffmpeg bakes the sound parts again once.
 
 **`dist/openbf` and `dist/openbf.pak` contain the games' own content, so never upload or share them.**
 Everyone builds their own from their own copies of the games.
 
 Requirements on Linux:
-- Rust (https://rustup.rs), Python 3, bash, ffmpeg
+- Rust (https://rustup.rs), Python 3.10 or newer, bash, ffmpeg with the libvorbis encoder
 - ALSA and udev libraries (on Fedora: `alsa-lib-devel systemd-devel`; on Debian/Ubuntu: `libasound2-dev libudev-dev`)
 - A Vulkan-capable GPU, and a game controller or a keyboard and mouse
 
@@ -150,6 +152,44 @@ python scripts\pack.py
 dist\openbf.exe
 ```
 Your profile and snapshots are saved in `openbf_data\` beside `openbf.exe`.
+
+### macOS
+
+The same command builds `dist/openbf`. A Mac with Apple Silicon (M1 or later) is recommended; an Intel Mac
+works but bakes much more slowly. You need:
+- Apple's command line tools: `xcode-select --install` (the linker, `strip` and `git`)
+- Homebrew (https://brew.sh); finish its "Next steps" so `brew` is on your `PATH`
+- Python 3.10 or newer: `brew install python` (the `python3` that comes with macOS is 3.9, which is too old)
+- ffmpeg with the Vorbis encoder: `brew install ffmpeg-full`, then
+  `echo 'export PATH="$(brew --prefix ffmpeg-full)/bin:$PATH"' >> ~/.zprofile` and open a new Terminal window.
+  Plain `brew install ffmpeg` cannot encode the game's speech; `ffmpeg -hide_banner -encoders | grep libvorbis`
+  must print a line
+- Rust (https://rustup.rs): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- About 30 GB free, in a folder iCloud does not sync (not Desktop or Documents with iCloud Drive on), on the
+  internal disk
+- A game controller or a keyboard and mouse
+
+On Apple Silicon, check that nothing runs under Rosetta: `uname -m` and
+`file "$(command -v python3)" "$(realpath "$(command -v ffmpeg)")"` should all say arm64.
+
+In a new Terminal window:
+```
+git clone https://github.com/sprucey149/openbf.git
+cd openbf
+mkdir iso
+caffeinate -i python3 scripts/pack.py
+./dist/openbf
+```
+`caffeinate` keeps the Mac awake while it builds: leave the lid open and the charger in. `pack.py` checks Python
+and ffmpeg before it starts, warns about the setups above, and shows how long each step took. The first build
+compiles the game and bakes every asset; on a recent Apple Silicon Mac we expect roughly an hour, but a Mac build
+has not been timed yet, and an Intel Mac takes longer. Later runs reuse what is still current.
+`caffeinate -i python3 scripts/pack.py --retail-audio` is faster: it skips the local audio restoration and keeps the original
+audio. Switching it on or off bakes everything again once.
+If macOS asks whether openbf may accept incoming network connections, allow it for LAN games.
+
+If the build fails or seems stuck, open an issue with the whole `pack.py` output (including its last `==` line
+and the closing `step times:` line) and the output of `uname -m; sysctl -n sysctl.proc_translated`.
 
 ## Controls
 
