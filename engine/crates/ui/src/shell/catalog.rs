@@ -86,6 +86,16 @@ pub(super) const BF2_MAPS: [(&str, &[Mode], &[Mode]); 24] = {
 
 const OPTIONAL_ASSAULT: [&str; 1] = ["cor1"];
 
+/// The Battlefront II worlds and eras available for single-player XL.
+pub fn xl_eras(code: &str) -> &'static [Era] {
+    match code {
+        "geo1" => &[Era::Cw],
+        "hot1" => &[Era::Gcw],
+        "kas2" => &ERAS,
+        _ => &[],
+    }
+}
+
 fn bf1_hunt_era(code: &str) -> Option<Era> {
     match code {
         "end1" | "tat1" | "tat2" => Some(Era::Gcw),
@@ -259,7 +269,7 @@ impl MapEntry {
                         (p[0] == a[0] && p[1] == a[1]) || (p[0] == a[1] && p[1] == a[0])
                     })
             }
-            Side::Mixed(_) => mode != Mode::Eli && pairs.next().is_some(),
+            Side::Mixed(_) => !matches!(mode, Mode::Eli | Mode::Xl) && pairs.next().is_some(),
         }
     }
 
@@ -294,10 +304,23 @@ pub fn catalog(
         let key = baked
             .clone()
             .unwrap_or_else(|| format!("{}_{code}", game.tag()));
-        let missions = MODES
+        let missions: Vec<_> = MODES
             .into_iter()
+            .filter(|&mode| mode != Mode::Xl || (game == Game::Bf2 && !xl_eras(code).is_empty()))
             .flat_map(|m| missions(&key, m).into_iter().map(move |p| (m, p)))
             .collect();
+        let mut modes: [Vec<Mode>; 2] = modes;
+        if game == Game::Bf2 {
+            for &era in xl_eras(code) {
+                let armies = era.armies();
+                if missions.iter().any(|(mode, pair)| {
+                    let pair = pair.each_ref().map(String::as_str);
+                    *mode == Mode::Xl && (pair == armies || [pair[1], pair[0]] == armies)
+                }) {
+                    modes[era.index()].push(Mode::Xl);
+                }
+            }
+        }
         MapEntry {
             label: format!("{name} ({})", game.tag()),
             key,

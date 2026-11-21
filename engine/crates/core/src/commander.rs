@@ -415,7 +415,7 @@ struct PostInfo {
 /// think against the plan made this same tick.
 pub fn plan(sim: &mut Sim, team: u8) {
     let t = usize::from(team).min(1);
-    if sim.is_hunt() {
+    if sim.is_hunt() || sim.is_xl() {
         let plan = &mut sim.commander[t];
         plan.next_plan_tick = sim.tick + PLAN_PERIOD;
         plan.assignment.resize(sim.units.len(), None);

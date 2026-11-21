@@ -46,7 +46,12 @@ pub fn page(
             })
         }
         SpawnStage::Map => Some(SpawnPage::Map {
-            objective: if walk.sim.is_hunt() {
+            objective: if walk.sim.is_xl() {
+                format!(
+                    "Defeat enemies to score {} points.",
+                    core::sim::deathmatch::XL_SCORE_LIMIT
+                )
+            } else if walk.sim.is_hunt() {
                 "Defeat the opposing team to score points.".to_owned()
             } else {
                 feed.space_objective(me.team).unwrap_or_else(|| {

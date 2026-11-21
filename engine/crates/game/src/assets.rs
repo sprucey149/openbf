@@ -1708,16 +1708,11 @@ pub struct BattleLoad {
 /// through here. A COMMON bake that exists but will not load is not an
 /// error: the map still loads, and `BattleLoad::common` says why.
 pub fn load_battle_scene(dir: &Path, mode: &str) -> Result<(Scene, BattleLoad)> {
-    load_battle_scene_with_layers(dir, mode, &[])
-}
-
-/// Load a baked map with explicit mission-script world layers when provided or
-/// in `"campaign"` mode, falling back to `mode_layer_index` for standard modes.
-pub fn load_battle_scene_with_layers(
-    dir: &Path,
-    mode: &str,
-    layers: &[String],
-) -> Result<(Scene, BattleLoad)> {
+    let mode = if mode == ui::shell::Mode::Xl.subst() {
+        "con"
+    } else {
+        mode
+    };
     let mut scene = load_scene(dir)?;
     let layer = if mode.eq_ignore_ascii_case("campaign") || !layers.is_empty() {
         let merged = scene.apply_mission_layers(layers);

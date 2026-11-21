@@ -203,7 +203,7 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   kill floor every soldier dies, the invincibility cheat included. Built: KFLR 5b12384, BNDS (`core/src/sim/bounds.rs`,
   `core/src/ai`). "On the level" is ours and PROVISIONAL: the hubs' floors walked from the posts, the barriers, the
   collision.
-- **Unit counts (the maintainer, 2026-10-29):** Instant Action defaults to each map/era's
+- **Unit counts (the maintainer, 2026-10-29):** Standard Conquest defaults to each map/era's
   16–32 combatants per main team, preserving its side ratio; a human occupies one
   combatant slot. Team size and Reinforcements are percentages of that map's
   defaults (100%), with resolved counts and an equal-map average shown. The opening
@@ -231,6 +231,25 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 - Space Assault: **KEEP but needs rework** — least-loved mode; enhancement design DEFERRED.
 
 ### Modes & rules
+- **XL:** Single-player Instant Action on BF2 Geonosis (Clone Wars), Hoth
+  (Galactic Civil War), and Kashyyyk (both eras). Command posts are fixed spawn
+  locations. There is no capture meter, bleed, or domination. Each team starts
+  at `0/350`, an enemy kill earns a point, and 350 wins. Respawns are unlimited.
+  All four PC `mission.lvl` scripts configure `ObjectiveTDM:New` with 350
+  (`geo1c_xl` pc 28, `hot1g_xl` pc 13, `kas2c_xl` and `kas2g_xl` pc 15).
+  `objectivetdm` starts both scores at zero and enables their display (start
+  prototype pc 18–38). Its death callback awards points and checks the XL
+  target (pc 20, 30, 46–56). These are zero-based bytecode instruction indices.
+  OURS: use the baked Conquest spawn layouts and the pre-launch Team Size
+  option (48 per side at 100%, up to 96). measure: live PC spawn placement and
+  population on each map and era, plus rendered frame rate in openbf.
+  Headless check on 2026-11-20 (`codex/instant-action-xl`, base `4250d394`).
+  `cargo test -p core --lib sim::deathmatch::tests` passed 13 tests, including
+  the winning kill at 350. `cargo test -p ui --lib team_points_tests` passed
+  two HUD tests. `cargo test -p game --bin game xl_launches_all_supported_eras_from_instant_action -- --nocapture`
+  checked score and capture HUD state, spawns and fixed ownership for 120
+  ticks in each of eight cases. The release package loaded all four reused
+  maps and missions in headless traces. Full rounds remain for playtesting.
 - Conquest: **BF2 rules + BF1 no-overspawn invariant**: live units on a team may never
   exceed remaining reinforcements — when a player respawns into the last slots, excess AI
   despawn (e.g., 3 tickets left, 2 players + 1 AI alive; player dies & respawns → the AI
