@@ -203,47 +203,119 @@ fn is_xmv(segment: &[u8]) -> bool {
     segment.get(12..16) == Some(b"xobX")
 }
 
-/// One movie segment → its frames as JPEGs (ffmpeg through pipes).
-fn transcode(mpeg: &[u8]) -> Result<Vec<Vec<u8>>> {
-    let q = JPEG_QUALITY.to_string();
-    let is_bik = mpeg.get(..3) == Some(b"BIK");
-    let is_xbox = is_xmv(mpeg);
-    let fmt = if is_bik {
+/// The ffmpeg demuxer for a movie segment: PS2 MPEG-2, PC Bink or Xbox XMV.
+fn segment_format(segment: &[u8]) -> &'static str {
+    if segment.get(..3) == Some(b"BIK") {
         "bink"
-    } else if is_xbox {
+    } else if is_xmv(segment) {
         "xmv"
     } else {
         "mpeg"
-    };
+    }
+}
+
+/// Run ffmpeg over one segment with `args` between the input and the output,
+/// and return its exit status and what it wrote to stdout. The segment goes
+/// through a pipe, save an XMV: that demuxer seeks, and from a pipe it stops
+/// after the first few frames, so it reads a temporary file instead.
+fn run_ffmpeg(segment: &[u8], args: &[&str]) -> Result<(std::process::ExitStatus, Vec<u8>)> {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let fmt = segment_format(segment);
+    let file = (fmt == "xmv").then(|| {
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("openbf-movie-{}-{n}.xmv", std::process::id()))
+    });
+    struct Remove<'a>(Option<&'a Path>);
+    impl Drop for Remove<'_> {
+        fn drop(&mut self) {
+            if let Some(path) = self.0 {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    let _remove = Remove(file.as_deref());
     let mut cmd = Command::new("ffmpeg");
-    cmd.args(["-v", "error", "-f", fmt, "-i", "pipe:0", "-an"]);
-    if is_bik || is_xbox {
-        let scale = format!("scale={}:{}", MOVIE_SIZE[0], MOVIE_SIZE[1]);
-        cmd.args(["-vf", &scale]);
+    cmd.args(["-v", "error", "-f", fmt, "-i"]);
+    if let Some(path) = &file {
+        std::fs::write(path, segment).with_context(|| path.display().to_string())?;
+        cmd.arg(path).stdin(Stdio::null());
+    } else {
+        cmd.arg("pipe:0").stdin(Stdio::piped());
     }
     let mut child = cmd
-        .args(["-c:v", "mjpeg", "-q:v", &q, "-f", "image2pipe", "pipe:1"])
-        .stdin(Stdio::piped())
+        .args(args)
         .stdout(Stdio::piped())
         .spawn()
         .context("ffmpeg (the shell movie's transcode needs it on PATH)")?;
-    let mut stdin = child.stdin.take().expect("piped");
-    let data = mpeg.to_vec();
-    let feeder = std::thread::spawn(move || stdin.write_all(&data));
+    let feeder = child.stdin.take().map(|mut stdin| {
+        let data = segment.to_vec();
+        std::thread::spawn(move || stdin.write_all(&data))
+    });
     let out = child.wait_with_output()?;
-    feeder
-        .join()
-        .map_err(|_| anyhow!("ffmpeg feeder panicked"))?
-        .context("ffmpeg stdin")?;
-    if !out.status.success() {
-        bail!("ffmpeg failed ({})", out.status);
+    if let Some(feeder) = feeder {
+        let fed = feeder
+            .join()
+            .map_err(|_| anyhow!("ffmpeg feeder panicked"))?;
+        // ffmpeg may stop reading before the end of a segment (trailing bytes its
+        // demuxer rejects) yet exit cleanly with every frame: a closed pipe is then fine.
+        if out.status.success() {
+            match fed {
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                other => other.context("ffmpeg stdin")?,
+            }
+        }
     }
-    let frames = split_jpegs(&out.stdout);
+    Ok((out.status, out.stdout))
+}
+
+/// One movie segment → its frames as JPEGs.
+fn transcode(segment: &[u8]) -> Result<Vec<Vec<u8>>> {
+    let q = JPEG_QUALITY.to_string();
+    let scale = format!("scale={}:{}", MOVIE_SIZE[0], MOVIE_SIZE[1]);
+    let mut args = vec!["-an"];
+    if segment_format(segment) != "mpeg" {
+        args.extend(["-vf", &scale]);
+    }
+    args.extend(["-c:v", "mjpeg", "-q:v", &q, "-f", "image2pipe", "pipe:1"]);
+    let (status, stdout) = run_ffmpeg(segment, &args)?;
+    if !status.success() {
+        bail!("ffmpeg failed ({status})");
+    }
+    let frames = split_jpegs(&stdout);
     if frames.is_empty() {
         bail!("ffmpeg wrote no frames");
     }
     Ok(frames)
 }
+
+/// One Bink (PC) or XMV (Xbox) segment's sound as 48 kHz stereo samples, or
+/// `None` when it has none. These containers carry the sound beside the
+/// picture, where a PS2 segment's comes out of [`demux_pss_audio`]. `[ours]`:
+/// ffmpeg decodes it, as it does the picture; the rate and the downmix of
+/// Xbox's six-channel monologues are a bake choice.
+fn transcode_audio(segment: &[u8]) -> Result<Option<(u16, u32, Vec<i16>)>> {
+    if segment_format(segment) == "mpeg" {
+        return Ok(None);
+    }
+    let rate = MOVIE_AUDIO_RATE.to_string();
+    let (status, stdout) = run_ffmpeg(
+        segment,
+        &["-vn", "-map", "0:a:0?", "-ac", "2", "-ar", &rate, "-f", "s16le", "pipe:1"],
+    )?;
+    // The picture's transcode already vouches for the segment: a sound that
+    // will not decode leaves the movie silent rather than failing it.
+    if !status.success() || stdout.len() < 4 {
+        return Ok(None);
+    }
+    let pcm = stdout
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    Ok(Some((2, MOVIE_AUDIO_RATE, pcm)))
+}
+
+/// The rate [`transcode_audio`] writes a PC or Xbox movie's sound at.
+const MOVIE_AUDIO_RATE: u32 = 48_000;
 
 /// Where the shell and campaign movies sit on the PS2 disc.
 pub const MVS_ON_DISC: &str = "DATA/_LVL_PS2/MOVIES/SHELL.MVS";
@@ -275,6 +347,105 @@ pub fn read_movie_entry(path: &str, on_disc: &str) -> Result<Vec<u8>> {
 /// extract-iso` keeps this one file).
 pub fn read_movie(path: &str) -> Result<Vec<u8>> {
     read_movie_entry(path, MVS_ON_DISC)
+}
+
+/// Say which of `wanted` the copy did not supply: the campaign plays on
+/// without them (the front end skips a movie with no bake).
+fn report_absent(what: &str, wanted: &[&str], baked: &[ShellMovie]) {
+    let absent: Vec<&str> = wanted
+        .iter()
+        .copied()
+        .filter(|w| !baked.iter().any(|m| m.name == *w))
+        .collect();
+    if !absent.is_empty() {
+        println!("  {what} not in this copy, left out: {}", absent.join(" "));
+    }
+}
+
+/// One movie file the campaign cutscenes are read from.
+enum MovieFile {
+    /// An MVS on disk.
+    Path(String),
+    /// `INGAME.MVS` inside a PS2 disc image.
+    Ps2Disc(String),
+    /// A movie inside an Xbox disc image: (image, path on the disc).
+    XboxDisc(String, String),
+}
+
+impl MovieFile {
+    fn read(&self) -> Result<Vec<u8>> {
+        match self {
+            MovieFile::Path(path) => std::fs::read(path).with_context(|| path.clone()),
+            MovieFile::Ps2Disc(path) => {
+                read_movie_entry(path, INGAME_MVS_ON_DISC).with_context(|| path.clone())
+            }
+            MovieFile::XboxDisc(image, entry) => {
+                let f = std::fs::File::open(image).with_context(|| image.clone())?;
+                let mut disc = mungefs::xdvdfs::Xdvdfs::open(std::io::BufReader::new(f))
+                    .map_err(|e| anyhow!("{image}: {e}"))?;
+                let i = disc
+                    .find(entry)
+                    .ok_or_else(|| anyhow!("{image}: no {entry}"))?;
+                let file = disc.files[i].clone();
+                disc.read_file(&file)
+                    .map_err(|e| anyhow!("{image}: {entry}: {e}"))
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for MovieFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MovieFile::Path(path) | MovieFile::Ps2Disc(path) => f.write_str(path),
+            MovieFile::XboxDisc(image, entry) => write!(f, "{image}: {entry}"),
+        }
+    }
+}
+
+/// The movie files the campaign movie sources name. Each source is an MVS (PS2 and PC `INGAME.MVS`, PC and Xbox `CRAWL.MVS`, an Xbox
+/// planet's `<MAP>INGAME.MVS`) or a disc image read in place: a PS2 disc's
+/// `INGAME.MVS`, an Xbox disc's crawl and planet movies. Every copy names its
+/// segments by the movie's own name hash, so the files' order does not matter.
+fn campaign_movie_files(sources: &[String]) -> Result<Vec<MovieFile>> {
+    let mut out = Vec::new();
+    for source in sources {
+        let source = source.as_str();
+        let mut head = [0u8; 4];
+        {
+            use std::io::Read;
+            std::fs::File::open(source)
+                .and_then(|mut f| f.read_exact(&mut head))
+                .with_context(|| source.to_owned())?;
+        }
+        if &head == b"ucfb" {
+            out.push(MovieFile::Path(source.to_owned()));
+            continue;
+        }
+        let f = std::fs::File::open(source).with_context(|| source.to_owned())?;
+        if let Ok(disc) = mungefs::xdvdfs::Xdvdfs::open(std::io::BufReader::new(f)) {
+            let before = out.len();
+            let movies = format!("{}/movies/", crate::xbox::DATA_ROOT.to_ascii_lowercase());
+            for file in &disc.files {
+                let lower = file.path.to_ascii_lowercase();
+                let Some(name) = lower.strip_prefix(&movies) else {
+                    continue;
+                };
+                if name == "crawl.mvs" || name.ends_with("ingame.mvs") {
+                    out.push(MovieFile::XboxDisc(source.to_owned(), file.path.clone()));
+                }
+            }
+            if out.len() == before {
+                bail!("{source}: no campaign movies on the Xbox disc");
+            }
+            continue;
+        }
+        out.push(MovieFile::Ps2Disc(source.to_owned()));
+    }
+    if out.is_empty() {
+        bail!("no campaign movie source");
+    }
+    Ok(out)
 }
 
 fn find_sibling_ci(base: &str, target: &str) -> Option<String> {
@@ -427,6 +598,7 @@ fn bake_movie_group(
     struct Resolved<'a> {
         prop: &'a str,
         demux_audio: bool,
+        required: bool,
         segs: Vec<(usize, u32, String)>,
     }
 
@@ -473,6 +645,7 @@ fn bake_movie_group(
         resolved.push(Resolved {
             prop: spec.prop,
             demux_audio: spec.demux_audio,
+            required: spec.required,
             segs: items,
         });
     }
@@ -511,9 +684,13 @@ fn bake_movie_group(
                         );
                         files.push(name.clone());
                         if job.demux_audio {
-                            if let Some((ch, rate, mut samples)) = demux_pss_audio(bytes)
-                                .with_context(|| format!("{}: segment {k} audio", job.prop))?
-                            {
+                            let sound = if bytes.get(..3) == Some(b"BIK") || is_xmv(bytes) {
+                                transcode_audio(bytes)
+                            } else {
+                                demux_pss_audio(bytes)
+                            }
+                            .with_context(|| format!("{}: segment {k} audio", job.prop))?;
+                            if let Some((ch, rate, mut samples)) = sound {
                                 audio_fmt = Some((ch, rate));
                                 pcm_all.append(&mut samples);
                             }
@@ -544,12 +721,16 @@ fn bake_movie_group(
     });
 
     let mut out = Vec::with_capacity(resolved.len());
-    for slot in results {
-        out.push(
-            slot.into_inner()
-                .unwrap_or_else(|e| e.into_inner())
-                .unwrap()?,
-        );
+    for (job, slot) in resolved.iter().zip(results) {
+        match slot.into_inner().unwrap_or_else(|e| e.into_inner()).unwrap() {
+            Ok(movie) => out.push(movie),
+            // An optional movie (a campaign transition) that will not transcode is
+            // left out, as if the disc lacked it; the game plays on without it.
+            Err(e) if !job.required => {
+                eprintln!("warning: {} skipped: {e:#}", job.prop);
+            }
+            Err(e) => return Err(e),
+        }
     }
     Ok(out)
 }
@@ -566,8 +747,9 @@ pub fn bake_shell(
     bake_shell_with_campaign(shell_lvl, mvs_path, sound_lvl, core_lvl, out, None, None)
 }
 
-/// Bake the shell into `<out>/shell/` with explicit optional `INSHELL.LVL` and
-/// `INGAME.MVS` (or PS2 `.iso`) paths for the Rise of the Empire campaign cutscenes.
+/// Bake the shell into `<out>/shell/` with an explicit optional `INSHELL.LVL` and
+/// the movie files or disc images that hold the Rise of the Empire campaign
+/// cutscenes ([`campaign_movie_files`]).
 pub fn bake_shell_with_campaign(
     shell_lvl: &str,
     mvs_path: &str,
@@ -575,7 +757,7 @@ pub fn bake_shell_with_campaign(
     core_lvl: &str,
     out: &str,
     inshell_lvl: Option<&str>,
-    ingame_mvs: Option<&str>,
+    ingame_mvs: Option<&[String]>,
 ) -> Result<ShellIndex> {
     let dir = Path::new(out).join("shell");
     let lvl_bytes = std::fs::read(shell_lvl).with_context(|| shell_lvl.to_string())?;
@@ -642,44 +824,61 @@ pub fn bake_shell_with_campaign(
         }));
     }
     let mut movies = bake_movie_group(&shell_specs, lvl, &mvs, &segs, pc_shell, &movie_dir)?;
+    if pc_shell {
+        println!("  campaign transitions: the PC copy has none; the campaign plays without them");
+    } else {
+        report_absent("campaign transitions", &CAMPAIGN_TRANSITIONS, &movies);
+    }
 
-    // Campaign crawls & monologues (`INSHELL.LVL` + `INGAME.MVS`), if available.
+    // Campaign crawls & monologues (`INSHELL.LVL` + the movies that hold them), if available.
     let auto_inshell = inshell_lvl
         .map(str::to_owned)
         .or_else(|| find_sibling_ci(shell_lvl, "INSHELL.LVL"));
-    let auto_ingame = ingame_mvs.map(str::to_owned).or_else(|| {
-        find_sibling_ci(mvs_path, "INGAME.MVS").or_else(|| {
+    let auto_ingame = ingame_mvs.map(<[String]>::to_vec).or_else(|| {
+        let beside: Vec<String> = ["INGAME.MVS", "CRAWL.MVS"]
+            .iter()
+            .filter_map(|name| find_sibling_ci(mvs_path, name))
+            .collect();
+        if !beside.is_empty() {
+            Some(beside)
+        } else {
             mvs_path
                 .to_ascii_lowercase()
                 .ends_with(".iso")
-                .then(|| mvs_path.to_owned())
-        })
+                .then(|| vec![mvs_path.to_owned()])
+        }
     });
-    if let (Some(in_lvl_path), Some(in_mvs_path)) = (auto_inshell, auto_ingame) {
+    if let (Some(in_lvl_path), Some(in_mvs_paths)) = (auto_inshell, auto_ingame) {
         let explicit = inshell_lvl.is_some() && ingame_mvs.is_some();
-        let in_lvl_bytes = std::fs::read(&in_lvl_path).with_context(|| in_lvl_path.clone());
-        let in_mvs_res =
-            read_movie_entry(&in_mvs_path, INGAME_MVS_ON_DISC).with_context(|| in_mvs_path.clone());
-        match (in_lvl_bytes, in_mvs_res) {
-            (Ok(in_lvl_bytes), Ok(in_mvs)) => {
+        let found = std::fs::read(&in_lvl_path)
+            .with_context(|| in_lvl_path.clone())
+            .and_then(|bytes| Ok((bytes, campaign_movie_files(&in_mvs_paths)?)));
+        match found {
+            Ok((in_lvl_bytes, files)) => {
                 let in_lvl =
                     mungefs::open(&in_lvl_bytes).map_err(|e| anyhow!("{in_lvl_path}: {e}"))?;
-                let in_segs = mvs_segments(&in_mvs).with_context(|| in_mvs_path.clone())?;
-                let in_specs: Vec<MovieSpec<'_>> = INGAME_MOVIES
-                    .iter()
-                    .map(|&prop| MovieSpec {
-                        prop,
-                        prefix: "ig_",
-                        demux_audio: true,
-                        required: false,
-                    })
-                    .collect();
-                movies.extend(bake_movie_group(
-                    &in_specs, in_lvl, &in_mvs, &in_segs, false, &movie_dir,
-                )?);
+                let before = movies.len();
+                for file in &files {
+                    let in_mvs = file.read()?;
+                    let in_segs = mvs_segments(&in_mvs).with_context(|| file.to_string())?;
+                    let in_specs: Vec<MovieSpec<'_>> = INGAME_MOVIES
+                        .iter()
+                        .filter(|prop| !movies[before..].iter().any(|m| m.name == **prop))
+                        .map(|&prop| MovieSpec {
+                            prop,
+                            prefix: "ig_",
+                            demux_audio: true,
+                            required: false,
+                        })
+                        .collect();
+                    movies.extend(bake_movie_group(
+                        &in_specs, in_lvl, &in_mvs, &in_segs, false, &movie_dir,
+                    )?);
+                }
+                report_absent("campaign cutscenes", &INGAME_MOVIES, &movies[before..]);
             }
-            (Err(e), _) | (_, Err(e)) if explicit => return Err(e),
-            _ => {
+            Err(e) if explicit => return Err(e),
+            Err(_) => {
                 println!("  campaign cutscenes skipped (no INSHELL.LVL / INGAME.MVS)");
             }
         }
@@ -840,6 +1039,52 @@ mod tests {
                 "housing row {y}"
             );
         }
+    }
+
+    /// The campaign cutscenes come from whichever copy the player owns: a
+    /// loose MVS (PC `INGAME.MVS` + `CRAWL.MVS`) is read as is, anything else
+    /// as a disc image, and an empty list is refused rather than baking none.
+    #[test]
+    fn campaign_movie_sources_are_read_from_any_copy() {
+        let dir = std::env::temp_dir().join(format!("openbf-campaign-movies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mvs = dir.join("ingame.mvs");
+        let crawl = dir.join("crawl, en.mvs");
+        let disc = dir.join("disc.iso");
+        std::fs::write(&mvs, b"ucfb....").unwrap();
+        std::fs::write(&crawl, b"ucfb....").unwrap();
+        std::fs::write(&disc, vec![0u8; 4096]).unwrap();
+        let names = |files: Vec<MovieFile>| -> Vec<String> {
+            files
+                .into_iter()
+                .map(|f| match f {
+                    MovieFile::Path(p) => format!("mvs {p}"),
+                    MovieFile::Ps2Disc(p) => format!("ps2 {p}"),
+                    MovieFile::XboxDisc(p, e) => format!("xbox {p} {e}"),
+                })
+                .collect()
+        };
+        let path = |p: &Path| p.to_string_lossy().into_owned();
+        assert_eq!(
+            names(campaign_movie_files(&[path(&mvs), path(&crawl)]).unwrap()),
+            [format!("mvs {}", path(&mvs)), format!("mvs {}", path(&crawl))]
+        );
+        assert_eq!(
+            names(campaign_movie_files(&[path(&disc)]).unwrap()),
+            [format!("ps2 {}", path(&disc))]
+        );
+        assert!(campaign_movie_files(&[]).is_err());
+        assert!(campaign_movie_files(&[path(&dir.join("absent.mvs"))]).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn segment_formats_follow_their_headers() {
+        assert_eq!(segment_format(b"BIKi...."), "bink");
+        let mut xmv = vec![0u8; 16];
+        xmv[12..16].copy_from_slice(b"xobX");
+        assert_eq!(segment_format(&xmv), "xmv");
+        assert_eq!(segment_format(&[0, 0, 1, 0xba]), "mpeg");
     }
 
     #[test]

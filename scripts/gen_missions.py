@@ -2139,8 +2139,12 @@ def _eval_closure(cl, base, globs):
     return calls, regs
 
 
-def campaign_facts50(f):
-    """Extract startup world state (teams, classes, layers, movies) from BF2 campaign bytecode."""
+def campaign_facts50(f, canonical=None, context="campaign"):
+    """Extract startup world state (teams, classes, layers, movies) from BF2 campaign bytecode.
+
+    `canonical` (a PC or Xbox copy's correction record) replaces the startup
+    declarations it knows before the stages add their classes, so the copy's
+    own program still runs the objectives over the canonical setup."""
     base = _rk_base(f)
     globs = {"__root_base__": base}
     objs = []
@@ -2155,6 +2159,11 @@ def campaign_facts50(f):
 
     # Filter facts_from_calls to only startup (excluding closures evaluated below)
     d = facts_from_calls(startup_calls)
+    if canonical is not None:
+        # `killed` is left to the startup reading: the record also gathers the
+        # objects the objectives kill later, which must not die at the start.
+        from gameplay_missions import overlay
+        d = overlay(d, {k: v for k, v in canonical.items() if k != "killed"}, context=context)
     d["layers"] = [ly for ly in d["layers"] if ly.lower() not in _CAMP_SKY_ONLY]
     startup_classes = {t: [c[0].lower() for c in d["classes"].get(t, [])] for t in (1, 2)}
 
@@ -2266,12 +2275,72 @@ def _ti_num(v):
     return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == int(v) else None
 
 
+def load_campaign_script(game, script):
+    """A campaign script or library from whichever copy supplied the missions.
+
+    A campaign has no declaration table to stand in for its program, so a
+    table-only game still reads its own copy's bytecode: the extracted Lua
+    cache, else the fingerprinted donor's MISSION.LVL."""
+    f = load_ps2(game, script)
+    if f is None and game in TABLE_ONLY_GAMES:
+        path = os.path.join(PS2_BF1 if game == "bf1" else PS2_BF2, script + ".luac")
+        if os.path.exists(path):
+            with open(path, "rb") as fh:
+                body = fh.read()
+            if body[:4] == b"\x1bLua":
+                f = undump40(body) if body[4] == 0x40 else undump50(body)
+    return f if f is not None else load_donor_script(game, script)
+
+
+def campaign_program_table(game):
+    """The campaign programs beside the game's correction table (`scripts/campaign_programs.py`)."""
+    import json
+    import campaign_programs
+    from gameplay_missions import SOURCE_TABLES
+    table_path = SOURCE_TABLES.get(game)
+    if table_path is None:
+        raise ValueError(f"{game}: no correction table for the campaign programs")
+    path = table_path.with_name(table_path.stem + "-campaign.json")
+    table = CAMPAIGN_PROGRAMS.get(path)
+    if table is None:
+        table = campaign_programs.load(path)
+        # The copy was fingerprinted by its correction table; the programs must be for that same MISSION.LVL.
+        reference = json.loads(table_path.read_bytes())
+        expected = next(row["sha256"] for row in reference["files"] if row["file"] == "mission.lvl")
+        if table["mission_lvl"] != expected or table["game"] != game:
+            raise ValueError(f"{path}: made for another MISSION.LVL than {table_path}")
+        CAMPAIGN_PROGRAMS[path] = table
+    return table
+
+
+def canonical_campaign_script(game, name, script):
+    """A PC or Xbox copy's translated campaign script rebuilt as the console campaign's."""
+    if game not in GAMEPLAY_REFERENCES:
+        return script
+    import campaign_programs
+    return campaign_programs.canonical_script(campaign_program_table(game), name, script, context=f"{game}/{name}")
+
+
+def canonical_campaign_fields(game, name, m):
+    """The mission fields a PC or Xbox copy still gives otherwise after its correction record."""
+    if game not in GAMEPLAY_REFERENCES:
+        return
+    import campaign_programs
+    campaign_programs.apply_fields(m, campaign_program_table(game)["scripts"][name.lower()])
+
+
+CAMPAIGN_PROGRAMS = {}
+
+
 def build_campaign(key, game, planet, era, ps2_name):
     """Build a BF2 Rise of the Empire singleplayer campaign Mission."""
-    f = load_ps2(game, ps2_name)
+    f = load_campaign_script(game, ps2_name)
     if f is None:
-        raise ValueError(f"missing PS2 campaign script {ps2_name}.luac")
-    ps2, camp = campaign_facts50(f)
+        raise ValueError(f"missing campaign script {ps2_name}.luac")
+    canonical = GAMEPLAY_REFERENCES.get(game, {}).get(ps2_name.lower())
+    if canonical is None and game in GAMEPLAY_REFERENCES:
+        raise ValueError(f"{game}/{ps2_name}: no canonical mission correction record")
+    ps2, camp = campaign_facts50(f, canonical, context=f"{game}/{ps2_name}")
     m = Mission()
     m.key, m.game, m.era, m.ps2 = key, game, era, ps2_name
     m.pc = None
@@ -2347,8 +2416,9 @@ def build_campaign(key, game, planet, era, ps2_name):
 
     camp["infinite_tickets"] = (raw_tickets[0] <= 0, raw_tickets[1] <= 0)
     import campaign_ir
-    camp["script"] = campaign_ir.translate(f)
+    camp["script"] = canonical_campaign_script(game, ps2_name, campaign_ir.translate(f))
     m.campaign = camp
+    canonical_campaign_fields(game, ps2_name, m)
     return m
 
 
@@ -2363,10 +2433,10 @@ def campaign_libs(scripts):
         name = todo.pop().lower()
         if name in out:
             continue
-        f = load_ps2("bf2", name)
+        f = load_campaign_script("bf2", name)
         if f is None:
             raise ValueError(f"campaign library {name}.luac missing")
-        out[name] = campaign_ir.translate(f)
+        out[name] = canonical_campaign_script("bf2", name, campaign_ir.translate(f))
         todo += campaign_ir.do_files(out[name])
     return out
 
@@ -3135,7 +3205,8 @@ def main():
     camp_dir = os.path.join(OUT_DIR, "campaign")
     camp_scripts = []
     for key, game, planet, era, ps2 in CAMPAIGN_MISSIONS:
-        if load_ps2(game, ps2) is None:
+        if load_campaign_script(game, ps2) is None:
+            print("%s: no campaign script %s in the source, no campaign mission" % (key, ps2))
             continue
         m = build_campaign(key, game, planet, era, ps2)
         rel_name = os.path.join("campaign", f"{game}_{ps2}.ron")

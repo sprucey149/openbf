@@ -1103,6 +1103,14 @@ impl App {
                 }
                 has_movie = false;
             } else if let Some(m) = front.movie.as_mut() {
+                // A copy without the page's movie (the PC has no planet
+                // transitions, the Xbox no geo1tran1) shows the sub-menus'
+                // loop rather than a black backdrop.
+                let movie_name = if m.has(movie_name) {
+                    movie_name
+                } else {
+                    ui::shell_ps2::MOVIE_SUB
+                };
                 m.play(movie_name);
                 if let Some((rgba, w, h)) = m.frame(dt) {
                     if let Some(v) = front.view.as_mut() {

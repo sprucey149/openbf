@@ -384,9 +384,10 @@ fn spa2c_c_landing_in_enemy_hangar_completes_objective6() {
 
 #[test]
 fn campaign_space_missions_preserve_hangars_takeoffs_and_tickets() {
-    let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let missions_dir = crate_dir.join("../../missions");
-    let baked_dir = crate_dir.join("../../assets_baked");
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: campaign missions and baked assets required");
+        return;
+    };
     if !baked_dir.join("bf2_spa2").join("manifest.ron").exists() {
         eprintln!("SKIP: baked space assets required");
         return;

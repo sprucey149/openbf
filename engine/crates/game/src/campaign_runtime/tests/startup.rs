@@ -49,6 +49,11 @@ fn every_campaign_voice_line_resolves_in_its_battle_sound_library() {
         ("dea1g_c", "DEA_obj_31"),
         ("hot1g_c", "rep_off_com_report_us_overwhelmed"),
     ];
+    // Silent on some copies only: the map's bank names the line, but the PC
+    // and Xbox discs hold no audio for SPA1_obj_55 and the Xbox none for
+    // MUS_obj_01 (checked in every file of both trees). A build from such a
+    // copy plays them silent; a PS2 build plays them.
+    let copy_silent = [("spa1g_c", "SPA1_obj_55"), ("mus1c_c", "MUS_obj_01")];
     let mut missing = Vec::new();
     let mut counted = 0;
     for m in ui::campaign::RISE_OF_THE_EMPIRE {
@@ -70,6 +75,9 @@ fn every_campaign_voice_line_resolves_in_its_battle_sound_library() {
                         missing.push(format!("{}: {name} is listed silent but plays", m.script));
                     }
                 } else if lib.voice_take(name).is_none() {
+                    if copy_silent.contains(&(m.script, name)) {
+                        continue;
+                    }
                     missing.push(format!("{}: {call}({name}) has no take", m.script));
                 } else if call == "ScriptCB_SndPlaySound"
                     && name.to_ascii_lowercase().contains("_obj_")

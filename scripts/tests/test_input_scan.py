@@ -888,6 +888,8 @@ class Pack(unittest.TestCase):
         self.assertEqual(env['OPENBF_BF2_TREE'], str(self.top / 'extracted/xbox/bf2/Data/_LVL_XBOX'))
         self.assertNotIn('XB2', env)
         self.assertNotIn('BF2_CONSOLE_ISO', env)
+        # Its extraction keeps only the shell movie: the campaign cutscenes are read off the disc.
+        self.assertEqual(env['BF2_XBOX_DISC'], str(xbox))
         self.assertEqual([call[2] for call in calls if scan.XBOX_EXTRACT in call], [str(xbox)])
         self.assertEqual([Path(call[3]).parent.parent.name for call in calls if call[1:2] == ['extract-iso']], ['bf1'])
 

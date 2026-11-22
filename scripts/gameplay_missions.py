@@ -12,6 +12,8 @@ from pathlib import Path
 TEAM_MAPS = {'units', 'tickets', 'names', 'classes', 'heroes', 'ai_aggr', 'bird_types'}
 REQUIRED = {'units', 'tickets', 'names', 'classes'}
 SOURCE_SCRIPTS = {}
+# The correction table each game's facts came from (its campaign programs sit beside it).
+SOURCE_TABLES = {}
 
 
 def unknown(value):
@@ -62,6 +64,7 @@ def load(paths, sources=None, *, require_source=True):
                     raise ValueError(f'ambiguous canonical mission {game}/{title}')
                 missions[title] = row['facts']
         result[game] = missions
+        SOURCE_TABLES[game] = Path(path)
     return result
 
 

@@ -466,6 +466,16 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
     objective that names a weapon ("take out the sniper droids with the sniper rifle") also
     counts kills with the award that replaces it in the same kit (the award beam rifle), paired
     from the class data. The original reports the award's own class, so its kills never counted.
+  - **One campaign from any copy: the console campaign's rules (the maintainer,
+    2026-11-21).** Rise of the Empire builds from whichever Battlefront II copy the player
+    owns, and a PC or Xbox copy plays the console campaign's rules. Those copies' own
+    scripts differ: PC Geonosis adds a timer around the Mace Windu objective, PC Kashyyyk
+    wraps an objective's completion in a test, icons, victory delays and AI difficulty
+    numbers change, and their shield library splits the recharge between the linked
+    objects. Committed programs (`scripts/campaign_programs.py`, one table per copy beside
+    its correction table) rebuild the canonical translation out of the copy's own script,
+    checked by digest, so no console disc is needed. Lines whose audio a copy does not hold
+    play silent there; the PC has no planet transition movies.
 - Galactic Conquest: **KEEP, BF2 galaxy-map + credits version**; credits/reward economy
   needs a tuning pass. Research task R1: survey community GC mods on the PC ports for
   improvement ideas.

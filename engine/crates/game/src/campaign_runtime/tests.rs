@@ -189,9 +189,16 @@ pub(super) fn begin_objectives(
     }
 }
 
+/// The checkout's missions and bake, or another copy's: `OPENBF_CAMPAIGN_MISSIONS`
+/// and `OPENBF_CAMPAIGN_BAKED` point these tests at a PC, Xbox or mixed build's
+/// output, so the campaign is checked against whichever copy made it.
 pub(super) fn baked() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
-    let missions_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../missions");
-    let baked_dir = crate::assets::baked_root();
+    let missions_dir = std::env::var_os("OPENBF_CAMPAIGN_MISSIONS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../missions"));
+    let baked_dir = std::env::var_os("OPENBF_CAMPAIGN_BAKED")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(crate::assets::baked_root);
     (missions_dir.join("campaign/bf2_geo1c_c.ron").is_file()
         && baked_dir.join("bf2_geo1/manifest.ron").is_file())
     .then_some((missions_dir, baked_dir))

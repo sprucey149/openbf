@@ -414,11 +414,12 @@ fn main() -> Result<()> {
             println!("baked the terrain light texture -> {}/{name}.ktx2", args[3]);
             Ok(())
         }
-        Some("shell") if args.len() == 7 || (args.len() == 10 && args[7] == "--campaign") => {
+        Some("shell") if args.len() == 7 || (args.len() >= 10 && args[7] == "--campaign") => {
             // <SHELL.LVL> <MOVIES/SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <out>
-            // [--campaign <INSHELL.LVL> <MOVIES/INGAME.MVS_OR_ISO>]
-            let (inshell, ingame) = if args.len() == 10 {
-                (Some(ci(&args[8])), Some(ci(&args[9])))
+            // [--campaign <INSHELL.LVL> <MOVIE_OR_DISC>...]
+            let (inshell, ingame) = if args.len() >= 10 {
+                let sources: Vec<String> = args[9..].iter().map(|a| ci(a)).collect();
+                (Some(ci(&args[8])), Some(sources))
             } else {
                 (None, None)
             };

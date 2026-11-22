@@ -94,7 +94,7 @@ def main():
             link.unlink()
         link.symlink_to(target)
     env = {k: v for k, v in os.environ.items()
-           if k not in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE",
+           if k not in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "BF2_XBOX_DISC", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE",
                         "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE")}
     env.update(input_scan.bake_env(plan))
     env.pop("OPENBF_DLC_DIR", None)

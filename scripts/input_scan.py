@@ -567,6 +567,8 @@ def bake_env(plan):
                 env[f"XB{number}"] = donor["tree"]
         if game == "bf2" and gameplay.get("kind") == "ps2-disc":
             env["BF2_CONSOLE_ISO"] = gameplay["path"]
+        elif game == "bf2" and gameplay.get("kind") == "xbox-disc":
+            env["BF2_XBOX_DISC"] = gameplay["path"]
     if plan["dlc"]["used"]:
         env["OPENBF_DLC_DIR"] = plan["dlc"]["path"]
         if plan["dlc"]["donor"]:

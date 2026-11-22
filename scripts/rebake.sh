@@ -76,7 +76,7 @@ fi
 
 # Run by hand, the scan supplies what the command line left out. Its SCAN_* are
 # empty for anything not chosen. Under pack.py the choice arrives in the environment.
-SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""
+SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""; SCAN_BF2_XBOX_DISC=""
 SCAN_OPENBF_BF1_TREE=""; SCAN_OPENBF_BF2_TREE=""
 SCAN_OPENBF_DLC_DIR=""; SCAN_OPENBF_DLC_DONOR=""
 SCAN_OPENBF_BF1_WITHHELD=""; SCAN_OPENBF_BF2_WITHHELD=""
@@ -90,6 +90,8 @@ fi
 OPENBF_BF1_TREE="${OPENBF_BF1_TREE:-$SCAN_OPENBF_BF1_TREE}"
 OPENBF_BF2_TREE="${OPENBF_BF2_TREE:-$SCAN_OPENBF_BF2_TREE}"
 BF2_CONSOLE_ISO="${BF2_CONSOLE_ISO:-$SCAN_BF2_CONSOLE_ISO}"
+# An Xbox BF2 disc chosen for gameplay: the campaign cutscenes are read off it (its extraction keeps only SHELL.MVS).
+BF2_XBOX_DISC="${BF2_XBOX_DISC:-$SCAN_BF2_XBOX_DISC}"
 # Xbox texture donors: the trees `bake extract-xiso` wrote. Empty until pack.py chooses an Xbox disc.
 XB1="${XB1:-$SCAN_XB1}"; XB2="${XB2:-$SCAN_XB2}"
 # The optional DLC heroes' folder, and a second copy's larger textures. Empty without them.
@@ -381,11 +383,20 @@ if want common; then
     exit 2
   fi
   INSHELL="$(ci "$UI2" INSHELL.LVL)"
-  INGAME_MVS="$(ci "$UI2" MOVIES/INGAME.MVS)"
-  [ -f "$INGAME_MVS" ] || INGAME_MVS="${BF2_CONSOLE_ISO:-}"
+  # The campaign's crawls and cutscenes: MOVIES/INGAME.MVS (PS2, PC) and MOVIES/CRAWL.MVS (PC), else read off the
+  # chosen disc: a PS2 disc's INGAME.MVS, or an Xbox disc's CRAWL.MVS and per-planet <MAP>INGAME.MVS.
+  CAMP_MOVIES=()
+  for f in "$(ci "$UI2" MOVIES/INGAME.MVS)" "$(ci "$UI2" MOVIES/CRAWL.MVS)"; do
+    if [ -f "$f" ]; then CAMP_MOVIES+=("$f"); fi
+  done
+  if [ ${#CAMP_MOVIES[@]} -eq 0 ]; then
+    for f in "${BF2_CONSOLE_ISO:-}" "${BF2_XBOX_DISC:-}"; do
+      if [ -n "$f" ] && [ -f "$f" ]; then CAMP_MOVIES=("$f"); break; fi
+    done
+  fi
   CAMP_ARGS=()
-  if [ -f "$INSHELL" ] && [ -n "$INGAME_MVS" ] && [ -f "$INGAME_MVS" ]; then
-    CAMP_ARGS=(--campaign "$INSHELL" "$INGAME_MVS")
+  if [ -f "$INSHELL" ] && [ ${#CAMP_MOVIES[@]} -gt 0 ]; then
+    CAMP_ARGS=(--campaign "$INSHELL" "${CAMP_MOVIES[@]}")
   fi
   clean "$OUT/common_bf2/shell"
   SHELL_LVL="$(ci "$UI2" SHELL.LVL)"

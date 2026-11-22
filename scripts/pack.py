@@ -413,7 +413,8 @@ def warn_mac():
 # What the missions are made by: when any of it changes, they are stale and made again. (The bake's groups have their
 # own keys: scripts/bake_cache.py.)
 MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py",
-                  "scripts/gameplay_missions.py", "engine/crates/manifest/data/gameplay/corrections-v1")
+                  "scripts/gameplay_missions.py", "scripts/campaign_ir.py", "scripts/campaign_programs.py",
+                  "engine/crates/manifest/data/gameplay/corrections-v1")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
 MISSION_STAMP = os.path.join(EXTRACTED, "mission_inputs.sha256")
 
@@ -1020,7 +1021,7 @@ def build(a, out, plan, packs, visual_report):
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE", "OPENBF_AUDIO_RESTORE_SCRIPT"):
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "BF2_XBOX_DISC", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE", "OPENBF_AUDIO_RESTORE_SCRIPT"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
     for g, image in images.items():
