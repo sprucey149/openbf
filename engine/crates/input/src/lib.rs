@@ -437,6 +437,9 @@ pub struct ActivePad<Id> {
     /// A drifting stick keeps a pad awake but does not count here, so it
     /// cannot take the prompts off the keyboard.
     pub deliberate: u64,
+    /// Counts every press or stick/trigger value past [`DEADZONE`] on any
+    /// usable pad: the menu cursor hides when it moves (`kbm::LastInput`).
+    pub used: u64,
 }
 
 impl<Id> Default for ActivePad<Id> {
@@ -445,6 +448,7 @@ impl<Id> Default for ActivePad<Id> {
             id: None,
             last: None,
             deliberate: 0,
+            used: 0,
         }
     }
 }
@@ -457,6 +461,7 @@ impl<Id: Copy + PartialEq> ActivePad<Id> {
         if value.abs() < DEADZONE {
             return;
         }
+        self.used += 1;
         let idle = self
             .last
             .is_none_or(|t| now.saturating_duration_since(t) >= PAD_SWITCH_IDLE);

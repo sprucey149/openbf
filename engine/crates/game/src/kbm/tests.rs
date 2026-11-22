@@ -1099,3 +1099,79 @@ fn tab_shows_the_scoreboard_with_a_saved_layout_and_through_a_weapon_switch() {
         "release hides it"
     );
 }
+
+/// The menu cursor follows the last device used: pad input past the deadzone
+/// hides it; a key, a click, the wheel or a real mouse move shows it. Zero
+/// deltas, the first position after an entry and the game's own warp do not.
+#[test]
+fn the_last_device_used_decides_the_menu_cursor() {
+    use winit::dpi::PhysicalPosition;
+    use winit::event::{DeviceId, ElementState, TouchPhase};
+    let moved = |x: f64, y: f64| WindowEvent::CursorMoved {
+        device_id: DeviceId::dummy(),
+        position: PhysicalPosition::new(x, y),
+    };
+    let mut l = LastInput::default();
+    l.pad_inputs(0);
+    assert!(!l.pad_last(), "shown before any input");
+
+    // Deadzone: resting noise never reaches the count.
+    let mut pad = input::ActivePad::<u8>::default();
+    pad.input(0, input::DEADZONE * 0.5, std::time::Instant::now());
+    l.pad_inputs(pad.used);
+    assert!(!l.pad_last(), "stick noise inside the deadzone");
+    pad.input(0, 0.3, std::time::Instant::now());
+    l.pad_inputs(pad.used);
+    assert!(l.pad_last(), "a stick past the deadzone hides it");
+
+    // Nothing the player did with the mouse.
+    l.raw_motion(0.0, 0.0);
+    l.window_event(&WindowEvent::CursorEntered {
+        device_id: DeviceId::dummy(),
+    });
+    l.window_event(&moved(100.0, 100.0));
+    l.warped();
+    l.window_event(&moved(320.0, 240.0));
+    l.window_event(&moved(320.0, 240.0));
+    l.window_event(&WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state: ElementState::Released,
+        button: MouseButton::Left,
+    });
+    l.pad_inputs(pad.used);
+    assert!(
+        l.pad_last(),
+        "zero deltas, entry, warp and releases keep it hidden"
+    );
+
+    // A real move shows it, as a raw delta or a window position.
+    l.window_event(&moved(330.0, 240.0));
+    assert!(!l.pad_last(), "the pointer moved");
+    pad.input(0, 1.0, std::time::Instant::now());
+    l.pad_inputs(pad.used);
+    l.raw_motion(2.0, -1.0);
+    assert!(!l.pad_last(), "a raw mouse delta");
+
+    // A click, the wheel.
+    for e in [
+        WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state: ElementState::Pressed,
+            button: MouseButton::Left,
+        },
+        WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta: MouseScrollDelta::LineDelta(0.0, 1.0),
+            phase: TouchPhase::Moved,
+        },
+    ] {
+        pad.input(0, 1.0, std::time::Instant::now());
+        l.pad_inputs(pad.used);
+        assert!(l.pad_last());
+        l.window_event(&e);
+        assert!(!l.pad_last(), "{e:?}");
+    }
+    // A steady pad count does not hide it again.
+    l.pad_inputs(pad.used);
+    assert!(!l.pad_last());
+}

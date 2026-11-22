@@ -151,7 +151,20 @@ impl App {
                 self.campaign_save_command(front, cmd)
             }
             ui::shell_ps2::ShellCommand::LaunchCampaignMission { index } => {
-                front.queue_campaign_launch(index)
+                let Some(entry) = ui::campaign::RISE_OF_THE_EMPIRE.get(index) else {
+                    return;
+                };
+                match game::campaign_runtime::launch_problem(
+                    &self.missions_dir,
+                    &self.assets_dir,
+                    entry,
+                ) {
+                    Some(problem) => {
+                        eprintln!("campaign: {} cannot start: {problem}", entry.script);
+                        front.menus.campaign_notice = Some(problem);
+                    }
+                    None => front.queue_campaign_launch(index),
+                }
             }
             _ => {}
         }

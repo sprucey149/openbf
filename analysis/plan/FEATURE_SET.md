@@ -462,6 +462,10 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   disc; card FAMB).
 - BF2 story campaign: **KEEP**. Stretch idea (LATER): extend/mod the story or a small new
   storyline of our own.
+  - **Award weapons count for their base weapon's objectives (the maintainer, 2026-11-21).** An
+    objective that names a weapon ("take out the sniper droids with the sniper rifle") also
+    counts kills with the award that replaces it in the same kit (the award beam rifle), paired
+    from the class data. The original reports the award's own class, so its kills never counted.
 - Galactic Conquest: **KEEP, BF2 galaxy-map + credits version**; credits/reward economy
   needs a tuning pass. Research task R1: survey community GC mods on the PC ports for
   improvement ideas.

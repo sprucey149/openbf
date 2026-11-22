@@ -210,8 +210,14 @@ impl App {
             Some(w) => self.kbm.sync_grab(w, allowed),
             None => false,
         };
+        if touched {
+            // A new grab centres the pointer: that move is not the player's.
+            self.last_input.warped();
+        }
+        self.last_input.pad_inputs(self.active_pad.used);
+        let pad_last = self.last_input.pad_last();
         if let Some(o) = &mut self.overlay {
-            o.set_cursor_visible(cursor_shown(allowed, self.kbm.grabbed()));
+            o.set_cursor_visible(cursor_shown(allowed, self.kbm.grabbed(), pad_last));
             if touched {
                 o.refresh_cursor();
             }
@@ -220,9 +226,11 @@ impl App {
 }
 
 /// The menu cursor shows outside active gameplay only: a controller player who never
-/// clicks to grab the mouse still plays without a pointer over the battle. [ours]
-fn cursor_shown(active_gameplay: bool, grabbed: bool) -> bool {
-    !active_gameplay && !grabbed
+/// clicks to grab the mouse still plays without a pointer over the battle. Anywhere,
+/// pad input hides it until the keyboard or the mouse is used ([`game::kbm::LastInput`]).
+/// Visibility only: mouse look's grab follows its own rule. [ours]
+fn cursor_shown(active_gameplay: bool, grabbed: bool, pad_last: bool) -> bool {
+    !active_gameplay && !grabbed && !pad_last
 }
 
 impl Drop for App {
@@ -536,12 +544,38 @@ mod tests {
 
     #[test]
     fn the_cursor_hides_in_active_gameplay_grabbed_or_not() {
-        assert!(cursor_shown(false, false), "menus");
+        assert!(cursor_shown(false, false, false), "menus");
+        assert!(!cursor_shown(false, false, true), "menus on a pad");
         assert!(
-            !cursor_shown(true, false),
+            !cursor_shown(true, false, false),
             "a battle with no mouse grab (controller)"
         );
-        assert!(!cursor_shown(true, true), "a battle with the mouse grabbed");
+        assert!(
+            !cursor_shown(true, true, false),
+            "a battle with the mouse grabbed"
+        );
+    }
+
+    /// Pad input hides the menu cursor in the menus and the pause menu; a
+    /// mouse move shows it again, and a mouse player's grab still works.
+    #[test]
+    fn pad_input_hides_the_menu_cursor_until_the_mouse_moves() {
+        let mut a = battle();
+        a.paused = true;
+        a.sync_grab();
+        assert!(!a.last_input.pad_last(), "shown before any input");
+        a.active_pad.used += 1;
+        a.sync_grab();
+        assert!(a.last_input.pad_last(), "a press hides it");
+        a.last_input.raw_motion(3.0, 0.0);
+        a.sync_grab();
+        assert!(!a.last_input.pad_last(), "a mouse move shows it");
+        // Unpaused, a click still takes mouse look after pad input.
+        a.active_pad.used += 1;
+        a.paused = false;
+        a.kbm.click_in();
+        frame(&mut a);
+        assert!(a.kbm.grabbed(), "the grab does not depend on the cursor");
     }
 
     /// Issue #182: fullscreen menus draw the same arrow, with the same click

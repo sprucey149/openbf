@@ -1138,9 +1138,7 @@ impl World {
         } else {
             u.weapon_class
         };
-        sim.weapon_classes
-            .get(wc)
-            .map(|w| w.name.to_ascii_lowercase())
+        objective_weapon_name(sim, killer, wc)
     }
 
     fn note_hit(&mut self, obj: Ud, weapon: Option<String>) {
@@ -1149,6 +1147,63 @@ impl World {
             self.last_hit_weapon.push((obj, w));
         }
     }
+}
+
+/// The weapon an award weapon replaces, for objectives: an award
+/// (`MedalsTypeToUnlock` t) stands for the weapon in the same kit it
+/// locks out (`MedalsTypeToLock` t), so "kill 3 droids with the sniper
+/// rifle" counts the award beam rifle too. Any other weapon is itself.
+/// A named difference (maintainer, 2026-11-21): the original names the award's
+/// own class, so its kills never meet a base-weapon objective.
+fn base_weapon(sim: &Sim, u: &core::unit::Unit, wc: usize) -> usize {
+    let Some(t) = sim.weapon_classes.get(wc).and_then(|w| w.unlock_medal()) else {
+        return wc;
+    };
+    std::iter::once(u.weapon_class)
+        .chain(u.held.iter().map(|h| h.class))
+        .find(|&c| {
+            sim.weapon_classes
+                .get(c)
+                .is_some_and(|w| w.medal_lock == Some(t))
+        })
+        .unwrap_or(wc)
+}
+
+/// The class name `GetObjectLastHitWeaponClass` reports for a hit by
+/// `shooter`'s weapon class `wc` (an award as its base weapon).
+fn objective_weapon_name(sim: &Sim, shooter: UnitHandle, wc: usize) -> Option<String> {
+    let wc = sim
+        .units
+        .get(shooter.index as usize)
+        .map_or(wc, |u| base_weapon(sim, u, wc));
+    sim.weapon_classes
+        .get(wc)
+        .map(|w| w.name.to_ascii_lowercase())
+}
+
+/// Why campaign mission `entry` cannot start from this build, in words for the
+/// battle screen; `None` when its map is baked and its mission script loads.
+/// The launch checks this before the mission's movies, so a build without the
+/// map says so instead of playing the movies and dropping back to the screen.
+pub fn launch_problem(
+    missions_dir: &std::path::Path,
+    assets_dir: &std::path::Path,
+    entry: &ui::campaign::CampaignMissionEntry,
+) -> Option<String> {
+    if !pak::is_file(&assets_dir.join(entry.map).join("manifest.ron")) {
+        return Some(format!(
+            "This mission's map ({}) is not in this build. Run the pack again to bake it.",
+            entry.map
+        ));
+    }
+    if let Err(e) = crate::mission::MissionDef::load_campaign(missions_dir, entry.script) {
+        eprintln!("campaign: {} does not load: {e:#}", entry.script);
+        return Some(format!(
+            "This mission's script ({}) could not be read. Run the pack again.",
+            entry.script
+        ));
+    }
+    None
 }
 
 mod dispatch;

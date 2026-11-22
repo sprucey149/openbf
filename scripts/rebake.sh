@@ -734,7 +734,8 @@ fi
 if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
   stage "space maps"
   SKY_LVL="$(ci "$B2" SPA/SPA_SKY.LVL)"
-  for n in SPA1 SPA3 SPA6 SPA7 SPA8 SPA9; do
+  # SPA2 (Coruscant) and SPA4 (Mustafar) have no Instant Action mode; Rise of the Empire plays them.
+  for n in SPA1 SPA2 SPA3 SPA4 SPA6 SPA7 SPA8 SPA9; do
     [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
     case "$n" in
       SPA1) SKY=yav ;;

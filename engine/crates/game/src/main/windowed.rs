@@ -694,6 +694,9 @@ struct App {
     active_pad: input::ActivePad<gilrs::GamepadId>,
     /// Which device the Auto input icons follow.
     icon_device: game::input_icons::DeviceTracker,
+    /// Pad or keyboard and mouse, whichever was used last: a pad hides the
+    /// menu cursor until the keyboard or the mouse is used again.
+    last_input: game::kbm::LastInput,
     /// The menu bits the keyboard holds (the shell only: arrows, Enter as
     /// Cross + Start, Escape / Backspace as Back; card BSHLA).
     keys_held: u32,
@@ -1006,6 +1009,7 @@ impl App {
             rumble_effect: None,
             rumble_tick: Default::default(),
             icon_device: game::input_icons::DeviceTracker::default(),
+            last_input: game::kbm::LastInput::default(),
             keys_held: 0,
             keys_tapped: 0,
             pause_repeat: Default::default(),
@@ -1259,6 +1263,10 @@ impl App {
         self.active_campaign = Some(index);
         if !self.begin_loading_key(entry.map, "campaign".to_owned(), None) {
             self.active_campaign = None;
+            if let Some(f) = self.front.as_mut() {
+                f.menus.campaign_notice =
+                    Some("This mission could not load. The log says why.".to_owned());
+            }
             self.init_shell();
         }
     }

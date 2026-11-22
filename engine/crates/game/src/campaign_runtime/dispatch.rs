@@ -83,10 +83,7 @@ impl CampaignRuntime {
                     _ => None,
                 });
                 let weapon = match struck {
-                    Some(wc) => sim
-                        .weapon_classes
-                        .get(wc as usize)
-                        .map(|w| w.name.to_ascii_lowercase()),
+                    Some(wc) => objective_weapon_name(sim, s, wc as usize),
                     None => self.w.killer_weapon(sim, s),
                 };
                 self.w

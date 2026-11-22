@@ -527,6 +527,95 @@ fn a_walker_kill_keeps_the_weapon_of_its_last_hit() {
     assert_eq!(last, Some(rocket_name.as_str()));
 }
 
+/// geo1c's sniper objective asks `GetObjectLastHitWeaponClass` for
+/// `rep_weap_inf_sniper_rifle`: a kill with the award beam rifle, the
+/// award that replaces it in the Republic sniper's kit, reports the sniper
+/// rifle too. The pair comes from the class data (`MedalsTypeToUnlock` on
+/// the award, `MedalsTypeToLock` on the rifle).
+#[test]
+fn an_award_weapon_kill_counts_as_its_base_weapon() {
+    let Some((missions_dir, baked_dir)) = baked() else {
+        eprintln!("SKIP: geo1c_c mission and baked assets required");
+        return;
+    };
+    let (def, mut walk, mut rt) = setup_baked_campaign(&missions_dir, &baked_dir, "geo1c_c");
+    begin_objectives(&mut walk, &mut rt, &def);
+    let db = crate::roster::load_classdb(
+        &baked_dir.join("classes"),
+        "bf2",
+        &crate::roster::FACTION_ORDER,
+    )
+    .expect("class db");
+    let sniper = crate::roster::ClassRoster::build(&db, "rep_inf_ep2_sniper", 1, None)
+        .expect("rep_inf_ep2_sniper");
+    let kit: Vec<&core::weapon::WeaponClass> = std::iter::once(&sniper.weapon)
+        .chain(sniper.held.iter().map(|h| &h.weapon))
+        .collect();
+    let base = kit
+        .iter()
+        .find(|w| w.name.eq_ignore_ascii_case("rep_weap_inf_sniper_rifle"))
+        .expect("the sniper rifle");
+    let t = base
+        .medal_lock
+        .expect("the sniper rifle gives way to an award");
+    let award = kit
+        .iter()
+        .find(|w| w.unlock_medal() == Some(t))
+        .expect("the sniper rifle's award");
+    assert_ne!(award.name, base.name);
+    let shooter = walk.player;
+    let classes = &mut walk.sim.weapon_classes;
+    let (bi, ai) = (classes.len(), classes.len() + 1);
+    classes.push((*base).clone());
+    classes.push((*award).clone());
+    let u = &mut walk.sim.units[shooter.index as usize];
+    u.mount = None;
+    u.held = [(bi, 0), (ai, 4)]
+        .into_iter()
+        .map(|(c, slot)| core::unit::HeldWeapon {
+            slot,
+            channel: 0,
+            class: c,
+            state: core::weapon::WeaponState::new(&walk.sim.weapon_classes[c], true, 0),
+        })
+        .collect();
+    // geo1c fields no army here; the record is kept per victim, whoever
+    // it is, so the one unit stands in for the droid.
+    let victim = shooter;
+    let last_hit = |walk: &mut WalkSim, rt: &mut CampaignRuntime, wc: usize| {
+        walk.sim.units[shooter.index as usize].weapon_class = wc;
+        walk.sim.events.clear();
+        walk.sim
+            .events
+            .push(core::sim::Event::Kill { shooter, victim });
+        rt.step(
+            &mut walk.sim,
+            walk.player,
+            None,
+            &team_classes(&def),
+            &BTreeMap::new(),
+            &[],
+            core::TICK_DT,
+        );
+        let obj = Ud::Unit(victim.index, victim.gen);
+        rt.w.last_hit_weapon
+            .iter()
+            .find(|(o, _)| *o == obj)
+            .map(|(_, w)| w.clone())
+    };
+    let rifle = Some("rep_weap_inf_sniper_rifle".to_owned());
+    assert_eq!(
+        last_hit(&mut walk, &mut rt, ai),
+        rifle,
+        "the award counts as the rifle"
+    );
+    assert_eq!(
+        last_hit(&mut walk, &mut rt, bi),
+        rifle,
+        "the rifle is itself"
+    );
+}
+
 /// geo1c's script fills the goal manager (`core::goals`): its first
 /// objective adds a Deathmatch goal of weight 1 for each army beside the
 /// locals' Deathmatch 100 from `ScriptPostLoad`, and completing it deletes

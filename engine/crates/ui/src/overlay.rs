@@ -21,6 +21,8 @@ pub struct EguiOverlay {
     software_cursor: Option<SoftwareCursor>,
     /// Whether the last applied plan drew the cursor in software.
     software_shown: bool,
+    /// Whether the last applied plan showed the system cursor.
+    os_shown: bool,
     /// Issue #182: the window fills its monitor (a fullscreen the system
     /// chose, which `Window::fullscreen` may not report), read on resize.
     covers_monitor: bool,
@@ -176,6 +178,7 @@ impl EguiOverlay {
             cursor_pointer_present: false,
             software_cursor: None,
             software_shown: false,
+            os_shown: false,
             covers_monitor: false,
             reassert: CursorReassert::default(),
         }
@@ -198,6 +201,7 @@ impl EguiOverlay {
             cursor_pointer_present: false,
             software_cursor: None,
             software_shown: false,
+            os_shown: false,
             covers_monitor: false,
             reassert: CursorReassert::default(),
             renderer: egui_wgpu::Renderer::new(
@@ -298,6 +302,8 @@ impl EguiOverlay {
         self.cursor_dirty |= self.reassert.tick();
         self.cursor_dirty |= plan.software != self.software_shown;
         self.software_shown = plan.software;
+        self.cursor_dirty |= plan.os != self.os_shown;
+        self.os_shown = plan.os;
         let soft = if plan.software {
             self.software_cursor.as_mut().map(|c| {
                 let texture = c
@@ -334,7 +340,13 @@ impl EguiOverlay {
         self.cursor_pointer_present = pointer_present;
         if self.window_cursor.is_some() {
             // Keep egui's fallback an arrow; widget icons do not own this cursor.
-            out.platform_output.cursor_icon = egui::CursorIcon::Default;
+            // A hidden cursor (pad input, mouse look) is hidden for egui too,
+            // so its own pointer-entry update cannot show it again.
+            out.platform_output.cursor_icon = if plan.os {
+                egui::CursorIcon::Default
+            } else {
+                egui::CursorIcon::None
+            };
         }
         state.handle_platform_output(window, out.platform_output);
         // egui can restore its arrow on entry or focus changes. Apply the

@@ -337,6 +337,11 @@ pub struct ShellMenus {
     pub campaign_focus_toggle: bool,
     pub campaign_quit_confirm: bool,
     pub campaign_pause_options: bool,
+    /// Why the selected mission could not start (its map is not in this
+    /// build, or it failed to load), shown on the battle screen in place of
+    /// the briefing until the page changes. `[ours]`: the disc has no such
+    /// state.
+    pub campaign_notice: Option<String>,
     pub training_prompted: bool,
     ask_training_prompt: String,
     campaign_quit_prompt: String,
@@ -546,6 +551,7 @@ impl ShellMenus {
             campaign_focus_toggle: false,
             campaign_quit_confirm: false,
             campaign_pause_options: false,
+            campaign_notice: None,
             training_prompted: false,
             ask_training_prompt,
             campaign_quit_prompt,
@@ -685,6 +691,7 @@ impl ShellMenus {
     fn go(&mut self, page: Page) {
         self.page = page;
         self.on_page = 0.0;
+        self.campaign_notice = None;
         if page != Page::CampaignMenu {
             self.campaign_quit_confirm = false;
         }
@@ -1097,8 +1104,12 @@ impl Ctx<'_> {
                 HAlign::Left,
                 tint::TITLE,
             );
+            let (body, body_tint) = match m.campaign_notice.as_deref() {
+                Some(notice) => (notice, tint::WARNING),
+                None => (desc, tint::BODY),
+            };
             for (i, line) in self
-                .wrapped(&crate::typography::LIST, desc, 408.0)
+                .wrapped(&crate::typography::LIST, body, 408.0)
                 .iter()
                 .take(3)
                 .enumerate()
@@ -1109,7 +1120,7 @@ impl Ctx<'_> {
                     line,
                     (52.0, 340.0 + i as f32 * 16.0),
                     HAlign::Left,
-                    tint::BODY,
+                    body_tint,
                 );
             }
             self.help(size, true, Prompt::Accept, &m.campaign_launch_label);

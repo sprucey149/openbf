@@ -1037,5 +1037,69 @@ impl Kbm {
     }
 }
 
+/// Whether the player last used a pad or the keyboard and mouse, for the menu
+/// cursor: pad input hides it until the keyboard or the mouse is used again.
+/// Only real use counts: a key or button press, the wheel, a raw mouse delta
+/// that is not zero, or the pointer moving from where the window last saw it.
+/// A pointer position after an entry, a focus or size change or the game's own
+/// warp only sets the reference point. Before any input the cursor shows. [ours]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LastInput {
+    pad: bool,
+    /// [`input::ActivePad::used`] when last read.
+    pad_seen: u64,
+    /// The pointer's last window position; `None` until one is seen again.
+    pos: Option<(f64, f64)>,
+}
+
+impl LastInput {
+    /// The pad was the last device used.
+    pub fn pad_last(&self) -> bool {
+        self.pad
+    }
+
+    /// Catch up with the pads' input count once a frame.
+    pub fn pad_inputs(&mut self, used: u64) {
+        if used != self.pad_seen {
+            self.pad_seen = used;
+            self.pad = true;
+        }
+    }
+
+    /// A raw mouse delta (`DeviceEvent::MouseMotion`).
+    pub fn raw_motion(&mut self, dx: f64, dy: f64) {
+        if dx != 0.0 || dy != 0.0 {
+            self.pad = false;
+        }
+    }
+
+    /// The game moved the pointer itself (the grab's centring).
+    pub fn warped(&mut self) {
+        self.pos = None;
+    }
+
+    pub fn window_event(&mut self, event: &WindowEvent) {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let p = (position.x, position.y);
+                if self
+                    .pos
+                    .is_some_and(|q| (p.0 - q.0).abs() >= 1.0 || (p.1 - q.1).abs() >= 1.0)
+                {
+                    self.pad = false;
+                }
+                self.pos = Some(p);
+            }
+            WindowEvent::CursorEntered { .. }
+            | WindowEvent::CursorLeft { .. }
+            | WindowEvent::Focused(_)
+            | WindowEvent::Resized(_)
+            | WindowEvent::ScaleFactorChanged { .. } => self.pos = None,
+            e if crate::input_icons::is_keyboard_or_mouse_use(e) => self.pad = false,
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

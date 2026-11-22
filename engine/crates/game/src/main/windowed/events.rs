@@ -215,6 +215,7 @@ impl winit::application::ApplicationHandler for App {
         event: winit::event::DeviceEvent,
     ) {
         if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+            self.last_input.raw_motion(delta.0, delta.1);
             self.kbm.motion(delta.0, delta.1);
         }
     }
@@ -237,6 +238,7 @@ impl winit::application::ApplicationHandler for App {
         if game::input_icons::is_keyboard_or_mouse_use(&event) {
             self.icon_device.keyboard_or_mouse();
         }
+        self.last_input.window_event(&event);
         // Issue #172: loading owns every other key.
         if matches!(self.screen, Screen::Loading) && self.display_hotkey(&event) {
             return;

@@ -261,3 +261,63 @@ fn enable_command_post_vo_sets_the_flag_to_n_equals_one() {
         assert_eq!(rt.command_post_vo(), on, "n = {n}");
     }
 }
+
+/// Every Rise of the Empire map is in a normal pack: the ground maps in
+/// rebake.sh's BF2 list and the space maps in its space stage. A pack that
+/// left SPA2 out sent "Attack Coruscant" back to its own screen after the
+/// movie, every time.
+#[test]
+fn rebake_bakes_every_campaign_map() {
+    let script = include_str!("../../../../../../scripts/rebake.sh");
+    let ground = script
+        .lines()
+        .find_map(|l| l.strip_prefix("BF2_MAPS=\""))
+        .expect("rebake.sh has a default BF2_MAPS line")
+        .trim_end_matches('"')
+        .to_ascii_lowercase();
+    let stage = script
+        .split("stage \"space maps\"")
+        .nth(1)
+        .expect("rebake.sh has a space maps stage");
+    let space = stage
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("for n in "))
+        .expect("the space stage loops over its maps")
+        .to_ascii_lowercase();
+    let mut missing = Vec::new();
+    for m in ui::campaign::RISE_OF_THE_EMPIRE {
+        let lvl = m.map.strip_prefix("bf2_").expect("campaign maps are BF2's");
+        let baked = if lvl.starts_with("spa") {
+            space.split_whitespace().any(|n| n == lvl)
+        } else {
+            ground
+                .split_whitespace()
+                .any(|p| p.rsplit('/').next() == Some(lvl))
+        };
+        if !baked {
+            missing.push(m.map);
+        }
+    }
+    assert!(missing.is_empty(), "rebake.sh does not bake {missing:?}");
+}
+
+/// A build without a mission's map says so on the battle screen before any
+/// movie plays, instead of a silent return.
+#[test]
+fn launch_problem_names_a_map_missing_from_the_build() {
+    let dir = std::env::temp_dir().join(format!("openbf-launch-problem-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let coruscant = &ui::campaign::RISE_OF_THE_EMPIRE[2];
+    assert_eq!(coruscant.map, "bf2_spa2");
+    let problem = crate::campaign_runtime::launch_problem(&dir, &dir, coruscant)
+        .expect("no map baked is a problem");
+    assert!(problem.contains("bf2_spa2"), "{problem}");
+    // Map present, script absent: a script problem.
+    std::fs::create_dir_all(dir.join("bf2_spa2")).unwrap();
+    std::fs::write(dir.join("bf2_spa2/manifest.ron"), "()").unwrap();
+    let problem = crate::campaign_runtime::launch_problem(&dir, &dir, coruscant)
+        .expect("no mission script is a problem");
+    assert!(problem.contains("spa2c_c"), "{problem}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
