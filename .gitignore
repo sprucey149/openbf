@@ -34,3 +34,6 @@ desktop.ini
 # Written by the export (card PACK): data and build output stay local
 *.pack.lock
 *.global-sound.lock
+
+# Bake group cache keys written beside the bake
+engine/assets_baked.groups
