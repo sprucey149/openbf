@@ -191,6 +191,11 @@ If macOS asks whether openbf may accept incoming network connections, allow it f
 If the build fails or seems stuck, open an issue with the whole `pack.py` output (including its last `==` line
 and the closing `step times:` line) and the output of `uname -m; sysctl -n sysctl.proc_translated`.
 
+If the game itself fails, for example it stays on the loading screen, quit it and open an issue with its log file:
+the newest `openbf-<date>.log` in `dist/openbf_data/logs/` (`open dist/openbf_data/logs` in the `openbf` folder
+shows it in Finder; drag the file into the issue). The game keeps its last 5 logs there, and a map that fails to
+load also says why on screen.
+
 ## Controls
 
 The game is built around a controller and plays like the console originals, with their aim assist.
