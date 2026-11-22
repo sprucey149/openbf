@@ -76,8 +76,20 @@ not a complete alignment acceptance result.
 |---|---|
 | `sweep_seeds.py`, `bot_quality.py`, `bot_quality_ps2.json`, `loop_spells.py` | the round sweep over seeds, and bot movement against the PS2 |
 | `human_profile.py` | a player's profile from a match log, and the fit of the sweep's proxy to it |
+| `session_stats.py` | summarise a folder of dev-only session stats (one JSON per round) per map, era and tier: human and bot averages, win rates, ticket or point margins |
 | `calibrate_match_length.py` | measure match length and regenerate the menu's model |
 | `perf_matrix.py` | the detailed bench over every map |
+
+Session stats are a dev-only build: `python3 scripts/pack.py --session-stats`
+builds the game with the `session-stats` cargo feature (off by default; a
+checkout build takes `cargo build -p game --features session-stats`). Every
+round played, single player or LAN, host or guest, then writes one JSON file to
+`openbf_data/session_stats/` beside the game (`OPENBF_SESSION_STATS_DIR`
+overrides it); files older than 3 days are deleted at launch and at each write.
+The fields are listed in `engine/crates/game/src/session_stats.rs`. A flagged
+build keeps the LAN build id and lockstep stream, so it plays with unflagged
+builds of the same source. `game --headless --seconds N` writes one too.
+Summarise with `python3 scripts/session_stats.py openbf_data/session_stats`.
 
 ## Reverse engineering
 
