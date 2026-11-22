@@ -50,6 +50,9 @@ impl Sim {
                 eat(&[r.level]);
             }
         }
+        // Adaptive difficulty: only while its factor is off 0 (never in a
+        // bots-only round).
+        self.adaptive.hash_into(&mut eat);
         eat(&self.rng.state().to_le_bytes());
         eat(&self.lcg.state().to_le_bytes());
         if self.melee_lcg_active {
@@ -356,6 +359,14 @@ impl Sim {
                 for d in &self.doors {
                     eat(&[u8::from(d.locked)]);
                 }
+            }
+        }
+        // The animated props: nothing at all when there are none.
+        if !self.props.is_empty() {
+            eat(b"PROPS");
+            eat(&(self.props.len() as u32).to_le_bytes());
+            for p in &self.props {
+                p.hash_into(&mut eat);
             }
         }
         // The grenades on the ground (HOLD): nothing when there are none.

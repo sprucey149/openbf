@@ -28,6 +28,7 @@ pub mod grass;
 pub mod leaf;
 mod look;
 mod pickups;
+mod props;
 mod scene;
 pub mod stations;
 mod treads;

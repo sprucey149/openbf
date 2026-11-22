@@ -198,6 +198,13 @@ impl winit::application::ApplicationHandler for App {
         if super::close::console_close_requested() {
             self.request_close(super::CloseReason::Console);
         }
+        // A loading whose window gets no redraws still advances.
+        if !self.closing && self.close_pending.is_none() {
+            if let Err(error) = self.loading_unpainted() {
+                eprintln!("render: {error:#}");
+                self.request_close(super::CloseReason::Error);
+            }
+        }
         if let Some(reason) = self.close_pending.take() {
             self.close_now(event_loop, reason);
         }
@@ -1030,6 +1037,7 @@ impl winit::application::ApplicationHandler for App {
                             active_pad: &self.active_pad,
                             rumble_effect: &mut self.rumble_effect,
                             matchlog: self.matchlog.as_mut(),
+                            session_stats: self.session_stats.as_mut(),
                             frame_profile: self.frame_profile.as_mut(),
                         };
                         let feed = &mut self.feed;
@@ -1524,6 +1532,7 @@ impl winit::application::ApplicationHandler for App {
                         Some((walk, _)) => {
                             game::forest::submit_actors(r, &walk.sim);
                             gpu.pose_doors(&walk.sim.doors);
+                            gpu.hide_animated(&walk.sim.props);
                             if let Some(campaign) = walk.campaign.as_ref() {
                                 gpu.pose_world_anims(campaign.instance_poses());
                             }

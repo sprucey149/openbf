@@ -492,8 +492,10 @@ const INFANTRY_ORDNANCE: &[&str] = &["_weap_inf_", "_weap_hero_", "_weap_award_"
 
 /// Infantry rounds that keep the disc's reach: the remote droids' blasters
 /// (the maintainer, 2026-11-20: "remote droid blaster: keep at 60m"; BF1's
-/// 60 m, BF2's 128 m).
-const KEEP_REACH: &[&str] = &["remotedroid"];
+/// 60 m, BF2's 128 m) and the shotguns (the maintainer, 2026-11-22: "put the
+/// shotgun range back to the range the original game had"; BF1's 120 m,
+/// BF2's 200 m with its damage falling 65 to 15 over the flight).
+const KEEP_REACH: &[&str] = &["remotedroid", "shotgun"];
 
 /// The name parts of a vehicle's, a building turret's or a map turret's
 /// gun ordnance in both games (`imp_weap_walk_atst_cannon_chin1_ord`,
@@ -510,12 +512,11 @@ const NOT_BLASTER: &[&str] = &["missile", "mortar", "flak", "torpedo", "launcher
 /// base `base`, an infantry blaster bolt whose flight reaches
 /// [`core::weapon::BOLT_REACH`] on every map of either game? A `bolt` or
 /// `bullet` round ([`INFANTRY_ORDNANCE`]) of a rifle, pistol, carbine,
-/// repeater, chaingun, shotgun, bowcaster, wrist blaster or launcher, hero
+/// repeater, chaingun, bowcaster, wrist blaster or launcher, hero
 /// blaster, award weapon, probe droid or deployed turret (auto and defense
 /// turrets, named as infantry weapons); not a remote droid's
-/// ([`KEEP_REACH`]), nor a missile, shell, beam or emitter. A round reaching
-/// farther already (the snipers' 300 m, BF2's shotguns at 200 m, the award
-/// pistols) is left as it is by
+/// or a shotgun's ([`KEEP_REACH`]), nor a missile, shell, beam or emitter. A round reaching
+/// farther already (the snipers' 300 m, the award pistols) is left as it is by
 /// [`core::weapon::OrdnanceClass::extend_bolt_reach`].
 pub fn infantry_bolt(name: &str, base: &str) -> bool {
     let name = name.to_ascii_lowercase();

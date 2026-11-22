@@ -401,6 +401,32 @@ release; two short presses toggle it off. The exact native FIFO/time
 comparison is documented in `re-combo.md`. This establishes input/runtime
 behavior, not the native AI's choice of when to fire.
 
+[V] Combat block cycle (issue #189). Combat-helper entry `FUN_002ce648`
+sets helper+0x196 and a timer of now + random 3–6 s (0x40400000,
+0x40c00000). Its update `FUN_002cf458`, while the current weapon is melee
+(RTTI `DAT_00699f88`), flips +0x196 when the timer passes: on for random
+3–7 s (0x40400000, 0x40e00000), off for 1.5–4 s (0x3fc00000, 0x40800000),
+and writes it to the weapon's bit 15 at +0x198. Exit `FUN_002ceea8` clears
+the bit. The single-trigger routine `FUN_002baf70` clears it on every
+update that wants a melee press. The bit holds the combo's block button
+down. The port: `ai::melee::MeleeBrain::block` and the gunner hold
+`SWITCH_WEAPON` (the port's block button), except on a tick that wants a
+swing. The combo program then decides DEFLECT entry and exit, as for a
+player's held stream.
+
+[V] The combo `InputLock` parser stores a seven-bit mask; `All` is 0x7f
+(thrust, fire, secondary, jump, sprint, crouch, reload). It has no turn
+bit. The port's `All` had set its own TURN bit, which froze a bot's look
+through every attack and block. The port now masks TURN out of
+`InputLock`. A state's `TurnFactor` still slows a bot's turn.
+
+[V] Engagement: the attack ends beyond the chosen weapon's range + 10 m
+(`re-soldier-ai.md` 4.2), so close mode 7 runs within about 14 m of a
+saber's 4 m. The port's melee goal follows a seen target at any range.
+That was left in place: capping it at 14 m lowered conquest hero kills per
+life by about a third over 8 seeds (2.67 to 1.76 on bf2_myg1). Logged as
+an open difference.
+
 [H] Explicit Force/throw selection predicates and a live hero-AI
 combat/jump comparison remain open.
 The observed 27-chunk combo census contains ordinary button/posture/

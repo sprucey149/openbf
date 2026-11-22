@@ -1131,7 +1131,6 @@ fn infantry_bolts_reach_200_m_in_both_games() {
         (&bf1, "all_weap_inf_rifle", 80.0, Some(120.0), 64.0),
         (&bf1, "imp_weap_inf_pistol", 75.0, Some(112.5), 64.0),
         (&bf1, "cis_weap_inf_repeater", 80.0, Some(120.0), 80.0),
-        (&bf1, "imp_weap_inf_shotgun", 160.0, Some(120.0), 64.0),
         (&bf1, "cis_weap_inf_wrist_shrapnel", 80.0, Some(120.0), 24.0),
         (&bf1, "all_weap_inf_sniperrifle", 2000.0, None, 300.0),
         (&bf1, "imp_weap_hover_fightertank_cannon", 180.0, None, 0.0),
@@ -1202,6 +1201,10 @@ fn infantry_bolts_reach_200_m_in_both_games() {
         (&bf1, "cis_weap_inf_remotedroid_blaster", 60.0),
         (&bf2, "imp_weap_inf_remotedroid_blaster", 128.0),
         (&bf2, "cis_weap_inf_remotedroid_blaster", 128.0),
+        // The shotguns keep the disc's reach too (the maintainer, 2026-11-22).
+        (&bf1, "imp_weap_inf_shotgun", 120.0),
+        (&bf1, "all_weap_inf_shotgun", 120.0),
+        (&bf2, "all_weap_inf_shotgun", 200.0),
     ] {
         let w = weapon_from_db(db, weapon).unwrap();
         assert_eq!(w.ordnance.natural_reach, None, "{weapon}");
@@ -1251,7 +1254,9 @@ fn infantry_bolts_reach_200_m_in_both_games() {
                         "{game} {name} is not an infantry, vehicle or turret weapon"
                     );
                     assert!(
-                        !name.contains("remotedroid") && !name.contains("_weap_fly_"),
+                        !name.contains("remotedroid")
+                            && !name.contains("shotgun")
+                            && !name.contains("_weap_fly_"),
                         "{game} {name}"
                     );
                     rows.push(format!(
@@ -1268,6 +1273,7 @@ fn infantry_bolts_reach_200_m_in_both_games() {
                     && w.shot_range() < BOLT_REACH
                     && w.ordnance.velocity > 0.0
                     && !name.contains("remotedroid")
+                    && !name.contains("shotgun")
                     && !name.contains("_weap_fly_") =>
                 {
                     panic!("{game} {name}: a {:.1} m bolt left short", w.shot_range());

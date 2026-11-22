@@ -36,7 +36,9 @@
 //! `lag_comp` keeps the hit-volume history and compensates a LAN player's shots. Public types are
 //! re-exported here; shared test fixtures stay in this facade.
 
+pub mod adaptive;
 mod abilities;
+mod animated_props;
 mod awards;
 mod axis_clamp;
 mod beam;

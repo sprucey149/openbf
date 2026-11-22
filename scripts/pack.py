@@ -853,7 +853,12 @@ def main():
     ap.add_argument("--baked", default=None, help="the folder the bake writes (default: engine/assets_baked); one per input profile")
     ap.add_argument("--visual-packs", default=None, help="prepared pack folder or recursive lookup of packs/bundles (default: repo-root visual_packs/; discovery stops at pack.json)")
     ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
+    ap.add_argument("--session-stats", action="store_true",
+                    help="dev only: build the game with the session-stats feature (one JSON file per round in "
+                         "openbf_data/session_stats/; LAN still plays with builds without it)")
     a = ap.parse_args()
+    if a.session_stats and (a.game_bin or a.bake_only):
+        sys.exit("pack: --session-stats builds the game; it cannot apply to --game-bin or --bake-only")
     if a.baked:
         global BAKED
         BAKED = os.path.abspath(a.baked)
@@ -884,6 +889,11 @@ def main():
             totals = CLOCK.totals()
             if totals:
                 print(f"\n{totals}", flush=True)
+
+
+def game_features(a):
+    """The game's cargo features: `session-stats` with --session-stats (dev-only round logs)."""
+    return ["--features", "session-stats"] if getattr(a, "session_stats", False) else []
 
 
 def build(a, out, plan, packs, visual_report):
@@ -937,7 +947,7 @@ def build(a, out, plan, packs, visual_report):
         print(f"   using existing game binary: {game}")
     else:
         need("cargo", "the Rust toolchain, https://rustup.rs")
-        run(["cargo", "build", "--release", "-p", "game"], cwd=ENGINE)
+        run(["cargo", "build", "--release", "-p", "game"] + game_features(a), cwd=ENGINE)
         run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
         bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
     try:

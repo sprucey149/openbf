@@ -18,6 +18,10 @@
 //! `SWEEP_TICKET_PCT`) instead of the map defaults: with `SWEEP_COMBATANTS=16`
 //! it is the 16-per-side setup the difficulty tiers were tuned at.
 //! Both values and the resolved roster are printed in each `setup` row.
+//! The opening wave's bots enter over the first 10 s as in the game
+//! (`Sim::stagger_opening_ai`); `SWEEP_OPENING_STAGGER=0` spawns them all at
+//! once. `OPENING_CENSUS=1` prints each team's opening objectives at 10, 20
+//! and 30 s to stderr (`opening_line`).
 //!
 //! NOBODY is human here by default: slot 0 is vacated before the opening wave.
 //! The opening roster and respawn targets are the same combatant counts used
@@ -208,6 +212,14 @@
 //! 3,000 ticks.
 //! Between them a `grenades <key>:` line (card GRAI): the grenades the bots
 //! threw, in all and per weapon class.
+//!
+//! `SWEEP_WALLS=1` (issue #189) adds a `walls <key>:` line: the bots' trigger
+//! pulls on foot at a unit target, those whose line from the shot's origin
+//! to the target's centre and head was blocked when the bolt left (split by
+//! a pull on the shooter's think tick or after it, while walking a detour
+//! corner, and at a contact not seen now), the pulls whose bolt met the
+//! world short of an on-foot target, and the bot-ticks the trigger held for
+//! a blocked line (`NavStats::wall_held`).
 //!
 //! `SNIPE_CENSUS=1` adds a `snipe <key>:` line: the AI seconds on foot with a
 //! scoped rifle in hand and of those on a sniper's spot, the distance of
@@ -420,6 +432,10 @@
 //! - `SWEEP_ERA=cw` reads `missions/<key>_con_cw.ron` where there is one;
 //! - `SWEEP_FLYER_TRACE=1` adds a per-second line per ridden flyer (`=<n>`, one every n
 //!   ticks) to the flyer census row;
+//! - `SWEEP_ADAPTIVE=0` plays a human or stand-in round without adaptive
+//!   difficulty (`core::sim::adaptive`); `SWEEP_ADAPTIVE_TRACE=1` prints an
+//!   `adaptive <key> t=S factor=F target=PM bots=T tickets=A/B` line at each
+//!   of its updates while it applies;
 //! - `SWEEP_MISSION_DIR=<dir>` reads the missions from another folder (the
 //!   faction-swap copies of a balance run);
 //! - `SWEEP_PROXY=<team>:<average|good>[,skill=N][,reaction=TICKS]
@@ -1290,6 +1306,71 @@ fn sweep_parity() -> Vec<(String, bool, game::layout::ParityFix)> {
 /// `SWEEP_DIFFICULTY` (env): which tier the whole sweep runs at
 /// (`easy|normal|hard|elite`). Anything unparseable (`legendary` too) falls
 /// back to the default (Normal) and is reported in the header.
+/// `OPENING_CENSUS=1` (env, stderr only; reads the sim): where each team's
+/// bots are headed in the round's opening, at 10, 20 and 30 s. Per team:
+/// the bots alive, each bot's objective as the walk reads it (a hunter's
+/// nearest post first, else the commander's plan) counted per post, the
+/// biggest post's share, and the same count by the post each bot now
+/// stands nearest to.
+const OPENING_CENSUS_AT: [u64; 3] = [300, 600, 900];
+
+fn opening_line(key: &str, seed: u32, t: u64, sim: &core::sim::Sim) -> String {
+    use core::commander::Objective;
+    let mut out = format!("opening {key}: seed {seed} t {t}");
+    let name = |c: u32| {
+        sim.cps
+            .get(c as usize)
+            .map_or("?".to_string(), |p| p.def.name.clone())
+    };
+    for team in 0..2u8 {
+        let mut obj: std::collections::BTreeMap<String, u32> = Default::default();
+        let mut near: std::collections::BTreeMap<String, u32> = Default::default();
+        let mut alive = 0u32;
+        for (i, u) in sim.units.iter().enumerate() {
+            if !u.alive || u.team != team || u.controller != core::unit::Controller::Ai {
+                continue;
+            }
+            alive += 1;
+            let o = core::ai::proxy::objective(sim, u, i as u32);
+            let k = match o {
+                Some(Objective::Attack(c)) => format!("atk:{}", name(c)),
+                Some(Objective::Defend(c)) => format!("def:{}", name(c)),
+                Some(Objective::Hunt) => "hunt".into(),
+                None => "none".into(),
+            };
+            *obj.entry(k).or_default() += 1;
+            let n = sim
+                .cps
+                .iter()
+                .enumerate()
+                .map(|(c, p)| (c, (p.def.pos - u.soldier.pos).length_squared()))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map_or("-".to_string(), |(c, _)| name(c as u32));
+            *near.entry(n).or_default() += 1;
+        }
+        let share = |m: &std::collections::BTreeMap<String, u32>| {
+            m.values()
+                .max()
+                .map_or(0.0, |&x| x as f32 / alive.max(1) as f32)
+        };
+        let list = |m: &std::collections::BTreeMap<String, u32>| {
+            m.iter()
+                .map(|(k, v)| format!("{k} {v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        out.push_str(&format!(
+            " | team{team} alive {alive} goals {} top {:.2} [{}] near top {:.2} [{}]",
+            obj.len(),
+            share(&obj),
+            list(&obj),
+            share(&near),
+            list(&near)
+        ));
+    }
+    out
+}
+
 fn sweep_difficulty() -> core::skill::Difficulty {
     cfg().difficulty
 }
@@ -1888,6 +1969,99 @@ impl Shots {
             self.long.len()
         );
         out
+    }
+}
+
+/// `SWEEP_WALLS` (env, issue #189): bot trigger pulls on foot at a unit
+/// whose line from the shot's origin is blocked (module header).
+#[derive(Default)]
+struct WallCensus {
+    /// Pulls on foot at a live unit target (a multi-bolt salvo is one).
+    pulls: u64,
+    /// ...whose muzzle-to-target line was blocked (no clear ray to the
+    /// target's centre or head, `perception::sight_point`).
+    blocked: u64,
+    /// ...of those: on the shooter's think tick, after it, while walking a
+    /// detour corner, and with the contact not seen now.
+    on_think: u64,
+    stale: u64,
+    cornering: u64,
+    unseen: u64,
+    /// Pulls whose bolt meets the world before the target's range, the
+    /// line clear or not (an on-foot target).
+    wall_bolts: u64,
+    /// The tick each unit last pulled on.
+    last: Vec<u64>,
+}
+
+impl WallCensus {
+    fn observe(&mut self, sim: &core::sim::Sim) {
+        use core::perception;
+        for ev in &sim.events {
+            let core::sim::Event::Shot {
+                unit, origin, dir, ..
+            } = ev
+            else {
+                continue;
+            };
+            let i = unit.index as usize;
+            let Some(u) = sim.unit(*unit) else {
+                continue;
+            };
+            if u.is_player || u.mount.is_some() {
+                continue;
+            }
+            if self.last.len() <= i {
+                self.last.resize(i + 1, u64::MAX);
+            }
+            if std::mem::replace(&mut self.last[i], sim.tick) == sim.tick {
+                continue;
+            }
+            let Some(t) = u.ai.target.and_then(|f| f.unit()) else {
+                continue;
+            };
+            let Some(o) = sim.unit(t) else {
+                continue;
+            };
+            self.pulls += 1;
+            let hulls = perception::past_mounts(sim, *unit, t);
+            let buildings = perception::past_buildings(sim, *unit, t);
+            if perception::sight_point(sim, *origin, o, hulls, buildings).is_none() {
+                self.blocked += 1;
+                // The census reads the sim after the step: `sim.tick` is the
+                // shot's tick + 1.
+                if u.ai.last_think + 1 == sim.tick {
+                    self.on_think += 1;
+                } else {
+                    self.stale += 1;
+                }
+                self.cornering += u64::from(u.ai.route().is_some_and(|r| r.corner().is_some()));
+                self.unseen +=
+                    u64::from(!perception::contact_of(&u.ai, t).is_some_and(|c| c.seen_now));
+            }
+            if o.mount.is_none() {
+                let d = (o.capsule().center() - *origin).length();
+                if perception::reach(sim, *origin, *dir, d) < d - 0.5 {
+                    self.wall_bolts += 1;
+                }
+            }
+        }
+    }
+
+    fn line(&self, key: &str, sim: &core::sim::Sim) -> String {
+        format!(
+            "walls {key}: pulls {} blocked {} ({:.2} %) on_think {} stale {} cornering {} unseen {} | wall_bolts {} ({:.2} %) | held {} ticks\n",
+            self.pulls,
+            self.blocked,
+            100.0 * self.blocked as f64 / self.pulls.max(1) as f64,
+            self.on_think,
+            self.stale,
+            self.cornering,
+            self.unseen,
+            self.wall_bolts,
+            100.0 * self.wall_bolts as f64 / self.pulls.max(1) as f64,
+            sim.nav_stats.wall_held,
+        )
     }
 }
 
@@ -5933,6 +6107,11 @@ fn run_map(
     // Issue #171: `SWEEP_NETPLAY=1` plays the round as a LAN one
     // (`Sim::netplay_rows`).
     w.sim.netplay_rows = std::env::var("SWEEP_NETPLAY").as_deref() == Ok("1");
+    // Adaptive difficulty (`core::sim::adaptive`): `SWEEP_ADAPTIVE=0`
+    // plays a human or stand-in round without it, as before the rule.
+    if std::env::var("SWEEP_ADAPTIVE").as_deref() == Ok("0") {
+        w.sim.adaptive.enabled = false;
+    }
     if let Some((team, _, _)) = cfg().proxy {
         w.sim.extra_humans[team as usize] += 1;
         for (t, _) in cfg().more_proxies {
@@ -6058,6 +6237,13 @@ fn run_map(
             }
         }
     }
+    // The round-start entrance, as the game's battle setup does it
+    // (`Sim::stagger_opening_ai`): every bot but the proxies enters over the
+    // first 10 s. `SWEEP_OPENING_STAGGER=0` brings the whole army in at once,
+    // the disc's way (and this sweep's before the fourth playtest).
+    if std::env::var("SWEEP_OPENING_STAGGER").as_deref() != Ok("0") {
+        w.sim.stagger_opening_ai();
+    }
     let ally_team = proxy.as_ref().map_or(0, |(i, _)| w.sim.units[*i].team);
     let mut hfire = cfg().bot_census.then(HumanFire::default);
     // `MATCHLOG_DIR`: the proxy's whole-round match log.
@@ -6100,6 +6286,7 @@ fn run_map(
     let mut natives = std::env::var_os("NATIVE_CENSUS").map(|_| NativeCensus::default());
     let mut embed = embed_on().then(Embed::default);
     let mut shots = std::env::var_os("SWEEP_SHOTS").map(|_| Shots::default());
+    let mut walls = std::env::var_os("SWEEP_WALLS").map(|_| WallCensus::default());
     let mut snipe = std::env::var_os("SNIPE_CENSUS").map(|_| SnipeCensus::default());
     let mut droid_census = std::env::var_os("DROID_CENSUS").map(|_| DroidCensus::default());
     let mut jet_census = std::env::var_os("JET_CENSUS").map(|_| JetCensus::default());
@@ -6218,6 +6405,7 @@ fn run_map(
     let mut exit_floor = [0u32; 2];
     let mut exit_other = [0u32; 2];
     let timing = std::env::var_os("SWEEP_TIMING").is_some();
+    let adaptive_trace = std::env::var("SWEEP_ADAPTIVE_TRACE").as_deref() == Ok("1");
     let hash_every = std::env::var("SWEEP_HASH_EVERY")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
@@ -6225,6 +6413,7 @@ fn run_map(
     let mut tick_us = Vec::new();
     let mut flyer_census = FlyerCensus::default();
     let mut sides = SidesCensus::start(&w.sim);
+    let opening_census = std::env::var_os("OPENING_CENSUS").is_some();
     while t < max_ticks && w.sim.outcome.is_none() {
         let started = timing.then(std::time::Instant::now);
         w.step_tick(&idle);
@@ -6236,11 +6425,30 @@ fn run_map(
         }
         t += 1;
         sides.observe(&w.sim);
+        if opening_census && OPENING_CENSUS_AT.contains(&t) {
+            eprintln!("{}", opening_line(key, seed, t, &w.sim));
+        }
         if let Some(n) = natives.as_mut() {
             n.observe(&w.sim);
         }
         if hash_every.is_some_and(|n| t.is_multiple_of(n)) {
             outln!(out, "    checkpoint {key} {t} {:016x}", w.sim.hash());
+        }
+        // `SWEEP_ADAPTIVE_TRACE=1`: the adaptive factor every update.
+        let every = core::sim::adaptive::UPDATE_SECS * u64::from(core::TICK_HZ);
+        if adaptive_trace && w.sim.tick.is_multiple_of(every) {
+            if let Some(f) = w.sim.adaptive_factor() {
+                let a = &w.sim.adaptive;
+                outln!(
+                    out,
+                    "    adaptive {key} t={} factor={f:.3} target={} bots={} tickets={}/{}",
+                    w.sim.tick / u64::from(core::TICK_HZ),
+                    a.target_pm(),
+                    a.bot_team().unwrap_or(9),
+                    w.sim.battle.teams[0].tickets(),
+                    w.sim.battle.teams[1].tickets(),
+                );
+            }
         }
         if let Some((i, tally)) = proxy.as_mut() {
             tally.tick(&w.sim, Some((*i, "proxy")));
@@ -6527,6 +6735,9 @@ fn run_map(
         }
         if let Some(s) = shots.as_mut() {
             s.observe(&w.sim);
+        }
+        if let Some(c) = walls.as_mut() {
+            c.observe(&w.sim);
         }
         if let Some(s) = snipe.as_mut() {
             s.observe(&w.sim);
@@ -7196,6 +7407,9 @@ fn run_map(
     }
     if let Some(s) = shots.as_mut() {
         census.push_str(&s.line(key, &w.sim));
+    }
+    if let Some(c) = &walls {
+        census.push_str(&c.line(key, &w.sim));
     }
     if let Some(s) = snipe.as_mut() {
         census.push_str(&s.line(key));

@@ -205,7 +205,7 @@ pub fn think_levers(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState, tier: &Ti
         }
     }
     if u.team < 2 && sim.deathmatch.is_none() && sim.space_assault.is_none() {
-        if let Some(f) = super::proxy::front(sim, u) {
+        if let Some(f) = super::proxy::objective(sim, u, me.index) {
             if Some(f) != sim.commander[usize::from(u.team)].of(me.index) {
                 bits |= LV_HUNT;
             }

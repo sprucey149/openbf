@@ -568,7 +568,7 @@ fn every_actual_saber_human_turns_through_its_attacks_and_blocks() {
                     continue;
                 }
                 let state = u.weapon.melee.as_ref().expect(name);
-                locked_ticks += usize::from(state.input_lock & core::combo::TURN != 0);
+                locked_ticks += usize::from(state.input_lock != 0);
                 assert_ne!(yaw(&walk), before, "{name} {tag} tick {tick}");
             }
         }

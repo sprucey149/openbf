@@ -4,7 +4,7 @@ pub mod spread;
 
 use super::{
     class_share, walker_point, Carousel, ClassRefusal, SideChoice, SpawnStage, CAROUSEL,
-    CLASS_FLOOR, CLASS_SLIDE_TICKS, PEN_CELLS, SEAT_REACH, SPAWN_LIFT,
+    CLASS_FLOOR, CLASS_SLIDE_TICKS, OPENING_STAGGER_TICKS, PEN_CELLS, SEAT_REACH, SPAWN_LIFT,
 };
 use crate::aim_assist::AssistState;
 use crate::battle::SpawnOutcome;
@@ -964,6 +964,48 @@ impl Sim {
         Some(h)
     }
 
+    /// The round-start entrance (OURS, the fourth playtest's product default):
+    /// every bot of teams 0 and 1 the opening wave has just put on the field
+    /// leaves it again and waits a seeded delay of 0 to
+    /// [`OPENING_STAGGER_TICKS`] ticks, one draw of the sim's LCG per bot in
+    /// unit order, then comes in through the ordinary respawn (its post drawn
+    /// by `AISpawnWeight`, its class by the class weights, the reinforcement
+    /// gate; no ticket is spent). Humans and proxies (a stand-in human) are
+    /// left where they are. The disc spawns the whole opening army on one
+    /// tick (`FUN_002e7240`); `analysis/plan/FEATURE_SET.md` names this.
+    /// Every peer runs it on the same tick with the same seed, so a LAN
+    /// round's entrance is the same everywhere. Returns how many bots wait.
+    ///
+    /// measure: the opening's first contact time and the 30 s destination
+    /// spread (`round_to_outcome`'s `OPENING_CENSUS`) against a playtest.
+    pub fn stagger_opening_ai(&mut self) -> u32 {
+        let window = OPENING_STAGGER_TICKS as u32 + 1;
+        let mut held = 0;
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if !u.alive
+                || u.is_player
+                || u.team >= 2
+                || u.controller != Controller::Ai
+                || u.proxy_human.is_some()
+                || u.mount.is_some()
+            {
+                continue;
+            }
+            let t = usize::from(u.team);
+            let delay = u64::from(self.lcg.index(window));
+            let u = &mut self.units[i];
+            u.alive = false;
+            u.respawn_at = Some(self.tick + delay);
+            u.spawn_slot = None;
+            u.spawn_post = None;
+            let bt = &mut self.battle.teams[t];
+            bt.alive_ai = bt.alive_ai.saturating_sub(1);
+            held += 1;
+        }
+        held
+    }
+
     fn spawn_ai_with_slot_policy(
         &mut self,
         team: u8,
@@ -1371,7 +1413,8 @@ impl Sim {
                     // The hero's owner finds the hero chosen (FUN_00396a00
                     // selects its row on entry). The PS2 leaves any class
                     // his to pick; `[ours]` (2026-11-19) the hero is his only
-                    // row ([`Sim::hero_locked`]).
+                    // row ([`Sim::hero_locked`]) once he accepted - an owner
+                    // who died during the offer still sees every class.
                     if let Some(hero) = self.owned_hero_class(s, team) {
                         self.spawn_choice[s] = hero;
                     }
@@ -1601,9 +1644,9 @@ impl Sim {
                 return Some(ClassRefusal::HeroLocked);
             }
         }
-        // The locked hero is never refused for points: the offer is its
-        // unlock, and the lock leaves him no other row.
-        if hero && self.locked_hero_class(s, team).is_some() {
+        // The owned hero is never refused for points: the offer is its
+        // unlock (and the lock, once on, leaves him no other row).
+        if hero && self.owned_hero_class(s, team).is_some() {
             return None;
         }
         let cost = i64::from(self.spawn_cost(s, team, class));

@@ -1,6 +1,7 @@
 //! [ours] (the maintainer, 2026-10-30): a human hero always turns during an
-//! attack, whatever the combo's InputLock and TurnFactor author. Bots keep
-//! the PS2's lock.
+//! attack, whatever the combo's InputLock and TurnFactor author. A bot turns
+//! through an InputLock too (the PS2's lock is a seven-bit mask with no turn,
+//! `combo::output`) and keeps the state's TurnFactor.
 
 use super::*;
 
@@ -71,7 +72,7 @@ fn a_human_hero_turns_by_the_mouse_through_a_locked_swing() {
 }
 
 #[test]
-fn a_bot_hero_keeps_the_combos_turn_lock() {
+fn a_bot_hero_turns_through_an_inputlock_all_at_the_turn_factor() {
     let (mut sim, player, _) = swinging(locked_swing());
     sim.unit_mut(player).unwrap().controller = crate::unit::Controller::Ai;
     sim.unit_mut(player).unwrap().is_player = false;
@@ -81,8 +82,14 @@ fn a_bot_hero_keeps_the_combos_turn_lock() {
         ..Default::default()
     }];
     sim.saber_inputs(&mut pads);
-    assert_eq!((pads[0].rx, pads[0].mx), (0, 0));
-    assert!(sim.saber_look_locked(player.index as usize));
+    assert_eq!((pads[0].rx, pads[0].mx), (20000, 6000));
+    assert!(!sim.saber_look_locked(player.index as usize));
+    let state = sim.unit(player).unwrap().weapon.melee.as_ref().unwrap();
+    assert_ne!(
+        state.input_lock & crate::combo::JUMP,
+        0,
+        "All still locks Jump"
+    );
     let mut constants = sim.units[player.index as usize].consts;
     let full = constants.max_turn_speed;
     sim.saber_constants(player.index as usize, &mut constants);

@@ -152,6 +152,11 @@ pub struct HeroTeam {
     pub owner_gen: u32,
     /// Respawn "Never": a hero was accepted and is gone - no more offers.
     pub exhausted: bool,
+    /// `[ours]` (2026-11-22): the owner lost his soldier while the offer was
+    /// up and has not answered it yet. His class screen lists every class
+    /// with the hero row chosen; spawning as the hero accepts it (the hero
+    /// lock starts then), spawning in another class declines it.
+    pub pending: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -223,6 +228,10 @@ impl Heroes {
             eat(&t.ready_at.to_le_bytes());
             eat(&[t.kill_streak, u8::from(t.spawned), u8::from(t.exhausted)]);
             eat(&t.owner_gen.to_le_bytes());
+            // Hashed only while set, so runs that never see it keep their pins.
+            if t.pending {
+                eat(b"HPND");
+            }
             eat(&(t.declined.len() as u32).to_le_bytes());
             for member in &t.declined {
                 eat(&member.to_le_bytes());
@@ -409,9 +418,28 @@ impl Sim {
                 // An AI owner (a mode admitting AI candidates) that came
                 // back in another class has no hero life to wait for.
                 let ai_lost = !human && u.is_some_and(|u| u.alive) && !hero_now;
-                let gone = !kept || (state.spawned && !hero_now) || hero_died || ai_lost;
+                // `[ours]` (2026-11-22): an owner who had not answered the
+                // offer (he died while it was up) and came back in another
+                // class declined it; the cycle passes to the next member.
+                let declined =
+                    state.pending && human && kept && u.is_some_and(|u| u.alive) && !hero_now;
+                if declined {
+                    if let Some(slot) = u.and_then(|u| u.spec.player_slot) {
+                        if self.spawn_choice.get(usize::from(slot)) == Some(&class) {
+                            self.spawn_choice[usize::from(slot)] = 0;
+                        }
+                    }
+                    state.owner = None;
+                    state.pending = false;
+                    state.spawned = false;
+                    state.kill_streak = 0;
+                    state.declined.push(member);
+                }
+                let gone =
+                    !declined && (!kept || (state.spawned && !hero_now) || hero_died || ai_lost);
                 if gone {
                     state.owner = None;
+                    state.pending = false;
                     state.spawned = false;
                     state.kill_streak = 0;
                     state.declined.clear();
@@ -430,8 +458,10 @@ impl Sim {
                             continue;
                         }
                     }
-                } else {
+                } else if !declined {
                     state.spawned = hero_now;
+                    // On the field as the hero: accepted, the lock is on.
+                    state.pending &= !hero_now;
                 }
             }
             if let Some(offer) = state.offer {
@@ -473,6 +503,10 @@ impl Sim {
                         state.owner_gen = gen;
                         state.kill_streak = 0;
                         state.spawned = false;
+                        // A death is not a Yes: he chooses on the class
+                        // screen, unless the screens are off and he is
+                        // already back as the hero.
+                        state.pending = lost_soldier && !self.units[offer.member as usize].alive;
                     }
                     state.offer = None;
                 } else if slot.is_none()
@@ -621,6 +655,7 @@ impl Sim {
         state.owner_gen = gen;
         state.kill_streak = 0;
         state.spawned = self.units[member as usize].alive;
+        state.pending = false;
         self.heroes = Some(heroes);
         true
     }
@@ -704,7 +739,17 @@ impl Sim {
     /// The hero class slot `s` is locked to on `team` ([`Sim::hero_locked`]):
     /// the hero it owns, while that hero is a row it may take (the testing
     /// picker's hero outside the mission's roster is not).
+    /// An owner who has not answered the offer yet ([`HeroTeam::pending`])
+    /// is not locked.
     pub(crate) fn locked_hero_class(&self, s: usize, team: u8) -> Option<u8> {
+        let pending = self
+            .heroes
+            .as_ref()
+            .and_then(|h| h.teams.get(usize::from(team)))
+            .is_some_and(|t| t.pending);
+        if pending {
+            return None;
+        }
         self.owned_hero_class(s, team)
             .filter(|&hero| self.spawn_class_available(s, team, usize::from(hero)))
     }

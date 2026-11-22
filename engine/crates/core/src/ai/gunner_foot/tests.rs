@@ -1853,3 +1853,77 @@ fn the_swept_lead_counts_whole_ticks() {
         assert_eq!(p, near, "speed {speed}");
     }
 }
+
+/// Issue #189: a bot that saw its enemy on its last think holds its fire
+/// once a wall stands between them, before its next think, and that think
+/// drops the sighting; without the wall it fires on.
+#[test]
+fn a_bot_holds_fire_when_a_wall_cuts_its_line_between_thinks() {
+    use crate::collision::{Body, CollisionWorld, Shape};
+    use crate::sim::{Event, Sim};
+    use crate::unit::{Controller, UnitSpec};
+    let run = |wall: bool| {
+        let _style = crate::ai::tests::all_stand();
+        let mut s = Sim::empty(5);
+        s.ground_rules = crate::soldier::GroundRules::Bf2;
+        s.cheats.infinite_ammo = true;
+        let shooter = s
+            .spawn(&UnitSpec {
+                controller: Controller::Ai,
+                ..UnitSpec::trooper(0, Vec3::ZERO)
+            })
+            .unwrap();
+        let t = s
+            .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -12.0)))
+            .unwrap();
+        let shots = |s: &Sim| {
+            s.events
+                .iter()
+                .filter(|e| matches!(e, Event::Shot { unit, .. } if *unit == shooter))
+                .count()
+        };
+        // Fight until the bot is firing, and stop on the tick its think ran.
+        let mut fired = 0;
+        for _ in 0..600 {
+            s.step(&[PadState::default()]);
+            s.unit_mut(t).unwrap().health.cur = 300.0;
+            fired += shots(&s);
+            if fired > 3 && s.unit(shooter).unwrap().ai.last_think + 1 == s.tick {
+                break;
+            }
+        }
+        assert!(fired > 3, "the bot opened fire: {fired}");
+        if wall {
+            // A full-height wall between them, 6 m out, where they stand.
+            let y = s.unit(shooter).unwrap().soldier.pos.y;
+            s.collision = CollisionWorld::new(
+                vec![Body::new(
+                    glam::Mat4::from_translation(Vec3::new(0.0, y, -6.0)),
+                    Shape::Box {
+                        half: Vec3::new(10.0, 4.0, 0.25),
+                    },
+                )],
+                Vec::new(),
+            );
+        }
+        let held0 = s.nav_stats.wall_held;
+        let mut after = 0;
+        // Up to and including the next think.
+        for _ in 0..crate::ai::THINK_PERIOD {
+            s.step(&[PadState::default()]);
+            s.unit_mut(t).unwrap().health.cur = 300.0;
+            after += shots(&s);
+        }
+        let st = &s.unit(shooter).unwrap().ai;
+        let seen = perception::contact_of(st, t).is_some_and(|c| c.seen_now);
+        (after, s.nav_stats.wall_held - held0, seen)
+    };
+    let (open, held, seen) = run(false);
+    assert!(open > 0, "no wall: it fires on ({open})");
+    assert_eq!(held, 0, "no wall: nothing held");
+    assert!(seen, "no wall: still seen");
+    let (shots, held, seen) = run(true);
+    assert_eq!(shots, 0, "a wall: no shot into it");
+    assert!(held > 0, "a wall: the trigger held ({held} ticks)");
+    assert!(!seen, "a wall: the next think lost sight of him");
+}

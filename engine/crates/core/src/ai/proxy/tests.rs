@@ -283,6 +283,55 @@ fn a_hunting_proxy_goes_to_the_nearest_post_it_does_not_hold() {
     assert_eq!(front(&sim, sim.unit(a).unwrap()), Some(Objective::Hunt));
 }
 
+/// Fourth playtest (BF2 Coruscant's opening): an ordinary Elite bot keeps
+/// the commander's draw when it is a post to take, so an army out of one
+/// base does not all take the one nearest post; with a Defend plan, or none,
+/// it still goes to the nearest post it does not hold. A hunting proxy keeps
+/// the nearest post outright, and a Hard bot keeps the plan.
+#[test]
+fn an_elite_bot_keeps_the_commanders_attack_draw() {
+    use crate::commander::Objective;
+    let (mut sim, a, b) = field(Difficulty::Elite);
+    for c in &mut sim.cps {
+        c.owner = Some(0);
+    }
+    let n = sim.cps.len() as u32;
+    post(&mut sim, "far", Vec3::new(80.0, 0.0, 0.0), Some(1));
+    post(&mut sim, "near", Vec3::new(0.0, 0.0, 40.0), None);
+    let (far, near) = (n, n + 1);
+    let slots = sim.units.len();
+    let plan = &mut sim.commander[0];
+    plan.assignment.resize(slots, None);
+    let set = |sim: &mut Sim, o: Option<Objective>| {
+        sim.commander[0].assignment[a.index as usize] = o;
+    };
+    let obj = |sim: &Sim| objective(sim, sim.unit(a).unwrap(), a.index);
+    set(&mut sim, Some(Objective::Attack(far)));
+    assert_eq!(obj(&sim), Some(Objective::Attack(far)), "the draw stands");
+    set(&mut sim, Some(Objective::Defend(0)));
+    assert_eq!(
+        obj(&sim),
+        Some(Objective::Attack(near)),
+        "a hunter never holds"
+    );
+    set(&mut sim, None);
+    assert_eq!(obj(&sim), Some(Objective::Attack(near)), "not reached yet");
+    // A hunting proxy plays as one player: the nearest post.
+    set(&mut sim, Some(Objective::Attack(far)));
+    let p = Profile {
+        hunts: true,
+        ..Strength::Good.profile()
+    };
+    sim.set_proxy(a, Some(p));
+    assert_eq!(obj(&sim), Some(Objective::Attack(near)), "a proxy");
+    // A Hard bot does not hunt: the plan, whatever it is.
+    sim.set_proxy(a, None);
+    sim.difficulty = Difficulty::Hard;
+    set(&mut sim, Some(Objective::Defend(0)));
+    assert_eq!(obj(&sim), Some(Objective::Defend(0)), "Hard");
+    let _ = b;
+}
+
 /// A mending proxy under its share goes to the nearest standing health
 /// droid in reach, stays there until nearly whole, and never goes to one
 /// out of reach or destroyed; a bot whose tier has no `mend` never mends.

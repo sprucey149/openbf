@@ -737,6 +737,58 @@ fn htgtw_vehicle_only_weapon_excludes_building_turrets() {
     }
 }
 
+/// The maintainer (fourth playtest 2026-11-21): a sniper rifle gives no aim
+/// assist on a vehicle or an aircraft. An enemy hover tank or flyer on the
+/// crosshair is the reticle's pick but never the sniper's magnet, even when
+/// the round hurts vehicles (BF2's VehicleScale 0.1) or the class authors
+/// TargetVehicle; an enemy soldier on the same line still is; a rifle keeps
+/// its vehicle magnet.
+#[test]
+fn a_sniper_rifle_never_magnets_a_vehicle_or_an_aircraft() {
+    use crate::vehicle::VehicleKind;
+    for kind in [VehicleKind::Hover, VehicleKind::Flyer] {
+        for authored_vehicle_bit in [false, true] {
+            let (mut s, p, _) = range(&[]);
+            let v = put_vehicle(&mut s, kind);
+            s.vehicles[v.index as usize].team = Some(1);
+            let w = s.unit(p).unwrap().weapon_class;
+            let mut rifle = s.weapon_classes[w].clone();
+            let mut sniper = crate::weapon::tests::disc_sniper(0.1);
+            sniper.give_sniper_assist();
+            if authored_vehicle_bit {
+                sniper.target_kind |= 1 << 3;
+            }
+            s.weapon_classes[w] = sniper;
+            for fire_held in [false, true] {
+                s.acquire_magnet(0, p, fire_held);
+                assert_eq!(
+                    s.reticle_pick[0],
+                    Some((AimTarget::Vehicle(v), -1)),
+                    "{kind:?} picked"
+                );
+                assert_eq!(s.magnet[0], None, "{kind:?} {authored_vehicle_bit}");
+            }
+            // A magnet held from another weapon is dropped on the sniper.
+            s.magnet[0] = Some(AimTarget::Vehicle(v));
+            s.acquire_magnet(0, p, true);
+            assert_eq!(s.magnet[0], None, "{kind:?} held");
+            // Control: the player's own gun with TargetVehicle takes it.
+            rifle.target_kind = 1 << 3;
+            s.weapon_classes[w] = rifle;
+            s.acquire_magnet(0, p, false);
+            assert_eq!(s.magnet[0], Some(AimTarget::Vehicle(v)), "{kind:?} rifle");
+        }
+    }
+    // Control: the sniper still takes an enemy soldier on the line.
+    let (mut s, p, o) = range(&[(1, Vec3::new(0.0, 0.0, -20.0))]);
+    let w = s.unit(p).unwrap().weapon_class;
+    let mut sniper = crate::weapon::tests::disc_sniper(0.1);
+    sniper.give_sniper_assist();
+    s.weapon_classes[w] = sniper;
+    s.acquire_magnet(0, p, false);
+    assert_eq!(s.magnet[0], Some(AimTarget::Unit(o[0])));
+}
+
 #[test]
 fn htgtw_crossing_vehicle_assist_leads_in_its_travel_direction() {
     let (mut s, p, _) = range(&[]);

@@ -81,6 +81,9 @@ pub struct NavTick {
     /// 1 when this think withheld a shot it was on target for, because a
     /// friend stood in the line of fire (card FFLN).
     pub line_held: u32,
+    /// Issue #189: 1 when this tick withheld a shot it was on target for,
+    /// because the line from the muzzle to the target was blocked.
+    pub wall_held: u32,
     /// Card TPOS: this think asked the Tactician (1), and a candidate with
     /// cover from the target passed its filters (2) - B12's ceiling.
     pub tpos_query: u8,

@@ -415,6 +415,15 @@ pub(super) struct Candidate {
 /// @0x25f4a8, `analysis/re-aim-assist.md` §3.3).
 const STICKY_WIDEN: f32 = std::f32::consts::FRAC_PI_4;
 
+/// OURS (the maintainer, fourth playtest 2026-11-21): the kinds a sniper
+/// rifle's magnet never takes, HealthType Vehicle (every ground vehicle,
+/// walker and flyer of that type). The discs' snipers author
+/// `TargetVehicle 0` and no magnet at all; the port's sniper magnet
+/// (`WeaponClass::give_sniper_assist`) is an addition. Mounts that author
+/// HealthType Animal or Droid (tauntaun, kaadu, droideka) keep the
+/// disc's soldier kinds.
+pub const SNIPER_NO_MAGNET_KINDS: u32 = 1 << crate::weapon::HealthType::Vehicle as u32;
+
 /// OURS, PROVISIONAL: the aim stick's deflection toward a challenger, past
 /// which the player is steering to it ([`Sim::acquire_magnet_steering`]).
 pub const MAGNET_STEER: f32 = 0.2;
@@ -688,6 +697,12 @@ impl Sim {
                 // (issue #164).
                 let kind_bits = if p.mount.is_none() && c.rocket_launcher() {
                     c.target_kind | TARGET_SOLDIER_KINDS
+                } else if c.is_sniper_rifle() {
+                    // OURS (the maintainer, fourth playtest 2026-11-21): a
+                    // sniper rifle's magnet never takes a vehicle or an
+                    // aircraft (HealthType Vehicle), whatever its class
+                    // authors; the reticle's pick still reads it.
+                    c.target_kind & !SNIPER_NO_MAGNET_KINDS
                 } else {
                     c.target_kind
                 };

@@ -107,6 +107,11 @@ impl BindPose {
             .or_else(|| self.skels.find_model(model, false))
     }
 
+    /// The skeleton [`Self::pose`] poses `model` by.
+    pub fn skeleton(&self, model: &str) -> Option<&Skeleton> {
+        self.render_skel(model)
+    }
+
     /// The model in its bind pose, or `None` when that moves nothing (no
     /// skeleton, every bound bone at the identity).
     pub fn pose(&self, m: &Model) -> Result<Option<Model>, String> {

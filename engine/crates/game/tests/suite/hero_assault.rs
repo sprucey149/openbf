@@ -107,7 +107,7 @@ fn a_timed_battle_fields_concurrent_heroes_and_scores_kills() {
     assert_eq!(last.bleed, [0.0, 0.0]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("most distinct classes alive at once: [9, 8]"),
+        stdout.contains("most distinct classes alive at once: [10, 9]"),
         "{stdout}"
     );
 }

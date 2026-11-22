@@ -86,6 +86,9 @@ pub struct ClassVisual {
     /// The hash of the class's `FoleyFXClass` (card FOLY, `crate::foley`):
     /// which row of the map's foley table its steps play; 0 = none.
     pub foley_class: u32,
+    /// The class's `MinFootHeight`: a step needs a drawn foot below it
+    /// (`crate::foley::MIN_FOOT_HEIGHT` unset).
+    pub min_foot_height: Option<f32>,
     /// The class's `HurtSound` / `DeathSound` (card UCRY).
     pub cries: Cries,
     /// What picks the class's animation sets (card ANIML).
@@ -213,6 +216,7 @@ impl ClassVisual {
             first_person_held: Vec::new(),
             flee_like_a_hero: c.flee_like_a_hero,
             foley_class: c.foley_class,
+            min_foot_height: c.min_foot_height,
             cries: c.cries.clone(),
             anim: c.anim.clone(),
             skins: c.skins.clone(),

@@ -1268,3 +1268,75 @@ fn bots_retry_an_authored_node_when_the_picked_spawn_has_no_walkable_exit() {
     assert_eq!(sim.units[i].soldier.pos, approach);
     assert_eq!(sim.lcg.state(), draw.state(), "one original draw");
 }
+
+/// The round-start entrance (fourth playtest): the opening bots leave the
+/// field and come back over the first 10 s on seeded delays, the same for
+/// the same seed, with no ticket spent; the human stays on the field.
+#[test]
+fn the_opening_bots_enter_over_ten_seconds() {
+    let build = |seed: u32| {
+        let mut s = three_post_sim();
+        s.lcg = crate::lcg::GameLcg::new(seed);
+        let p = s
+            .spawn(&UnitSpec::player(0, Vec3::new(0.0, 0.0, 3.0)))
+            .unwrap();
+        for k in 0..12 {
+            s.spawn(&UnitSpec {
+                controller: Controller::Ai,
+                ..UnitSpec::trooper(0, Vec3::new(k as f32, 0.0, 0.0))
+            })
+            .unwrap();
+        }
+        (s, p)
+    };
+    let (mut s, p) = build(7);
+    let tickets = [0, 1].map(|t| s.battle.teams[t].tickets());
+    assert_eq!(s.stagger_opening_ai(), 12);
+    assert!(s.unit(p).is_some(), "the human is on the field");
+    assert_eq!(s.battle.teams[0].alive_ai + s.battle.teams[1].alive_ai, 0);
+    let delays: Vec<u64> = s.units[1..].iter().map(|u| u.respawn_at.unwrap()).collect();
+    assert!(
+        delays.iter().all(|&d| d <= OPENING_STAGGER_TICKS),
+        "{delays:?}"
+    );
+    assert!(
+        delays.iter().max() > delays.iter().min(),
+        "varied: {delays:?}"
+    );
+    let (mut again, _) = build(7);
+    again.stagger_opening_ai();
+    let same: Vec<u64> = again.units[1..]
+        .iter()
+        .map(|u| u.respawn_at.unwrap())
+        .collect();
+    assert_eq!(delays, same, "the same seed, the same entrance");
+    let (mut other, _) = build(8);
+    other.stagger_opening_ai();
+    let diff: Vec<u64> = other.units[1..]
+        .iter()
+        .map(|u| u.respawn_at.unwrap())
+        .collect();
+    assert_ne!(delays, diff, "another seed, another entrance");
+    let gens: Vec<u32> = s.units[1..].iter().map(|u| u.gen).collect();
+    let mut entered = vec![None; 13];
+    for _ in 0..=OPENING_STAGGER_TICKS + 1 {
+        s.step(&[PadState::default()]);
+        for (i, u) in s.units.iter().enumerate().skip(1) {
+            if u.alive && entered[i].is_none() {
+                entered[i] = Some(s.tick);
+            }
+        }
+    }
+    for i in 1..13 {
+        let at = entered[i].expect("every bot entered");
+        assert!(
+            at <= delays[i - 1] + 1,
+            "bot {i} at {at}, due {}",
+            delays[i - 1]
+        );
+        assert_ne!(s.units[i].gen, gens[i - 1], "a new life");
+    }
+    // (Team 1 holds no post here and bleeds; the bots are all team 0's.)
+    assert_eq!(s.battle.teams[0].tickets(), tickets[0], "no ticket spent");
+    assert_eq!(s.battle.teams[0].alive_ai + s.battle.teams[1].alive_ai, 12);
+}

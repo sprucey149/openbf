@@ -127,7 +127,7 @@ fn rest_local(skel: &Skeleton, i: usize) -> Mat4 {
 
 /// Every bone's MODEL-space transform at `frame` of `clip`. `None` on a
 /// skeleton whose parent links do not form a tree.
-fn pose(skel: &Skeleton, clip: &DecodedClip, frame: usize) -> Option<Vec<Mat4>> {
+pub(crate) fn pose(skel: &Skeleton, clip: &DecodedClip, frame: usize) -> Option<Vec<Mat4>> {
     let n = skel.bones.len();
     let local: Vec<Mat4> = (0..n)
         .map(|i| {

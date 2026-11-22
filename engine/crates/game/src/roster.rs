@@ -89,6 +89,8 @@ pub struct ClassRoster {
     pub weapon_hud: crate::walk::WeaponHud,
     /// The hash of the class's `FoleyFXClass` (card FOLY), 0 without one.
     pub foley_class: u32,
+    /// The class's `MinFootHeight` (`crate::foley::MIN_FOOT_HEIGHT` unset).
+    pub min_foot_height: Option<f32>,
     /// The class's `HurtSound` / `DeathSound` (card UCRY).
     pub cries: crate::walk::Cries,
     /// What picks the class's animation sets ([`class_anim`]).
@@ -1370,6 +1372,7 @@ impl ClassRoster {
             foley_class: db
                 .prop_hash(class, crate::foley::FOLEY_FX_CLASS)
                 .map_or(0, |v| crate::classdb::fnv1a_lowercase(v.trim())),
+            min_foot_height: db.prop_f32(class, "MinFootHeight"),
             cries: cries(db, class),
             jet,
             jet_look: if walker_droid {

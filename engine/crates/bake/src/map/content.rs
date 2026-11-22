@@ -378,6 +378,9 @@ pub(super) fn bake_content(
         }
     }
     let hdr = hdr.filter(|h| h.enable && kind == Content::Map);
+    // BF2's animated props (`crate::animated_prop`): their models get a
+    // skinned copy in `animated/` beside the rigid one.
+    let mut animated_models = crate::animated_prop::Models::of(&expanded);
     if let Some(h) = hdr {
         eprintln!(
             "hdr: on ({} bloom passes, weight {}, threshold {})",
@@ -542,6 +545,9 @@ pub(super) fn bake_content(
                 if crate::shadow::write_model(c, out, &shadow_skels)? > 0 {
                     render_alignment.shadow(&m.name, out)?;
                     render_groups.shadow(&m, out)?;
+                }
+                if kind == Content::Map && m.is_bf2() {
+                    animated_models.write(&m, &bind_pose, &alpha_table, out)?;
                 }
                 match bind_pose.pose(&m) {
                     Ok(Some(p)) => {
@@ -1678,6 +1684,23 @@ pub(super) fn bake_content(
             crate::entity_light::Miss::of(&source_game),
             &mut classes,
         );
+    }
+    // BF2's animated props and the ones other classes carry
+    // (`crate::animated_prop`); none writes no file.
+    if kind == Content::Map && source_game == "bf2" {
+        let (props, notes) =
+            crate::animated_prop::collect(&expanded, &attach_props, &|c| animated_models.drawn(c));
+        for n in notes {
+            eprintln!("animated prop {n}");
+        }
+        if !props.is_empty() {
+            eprintln!(
+                "animated props: {} classes, {} carried",
+                props.rigs.len(),
+                props.attached.len()
+            );
+        }
+        crate::animated_prop::write(out, &props)?;
     }
     if !(point_lights.is_empty() && entity_lights.is_empty()) {
         eprintln!(

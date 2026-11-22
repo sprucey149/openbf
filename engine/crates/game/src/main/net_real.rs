@@ -136,10 +136,29 @@ impl Scenes {
     }
 }
 
-/// One round's walk and feed.
+/// One round's walk and feed, and its dev-only session stats
+/// (`session-stats` feature): a flagged peer records the round while it
+/// hash-checks against unflagged ones.
 struct Round {
     walk: game::walk::WalkSim,
     feed: game::event_feed::EventFeed,
+    stats: Option<game::session_stats::SessionStats>,
+}
+
+impl Round {
+    /// Write the session stats, if any (`quit` before an outcome).
+    fn finish(&mut self) {
+        if let Some(s) = self.stats.as_mut() {
+            let reason = if self.walk.sim.outcome.is_some() {
+                "outcome"
+            } else {
+                "quit"
+            };
+            if let Some(p) = s.write(&self.walk, self.feed.round(), Some(&self.feed), reason) {
+                println!("session stats: wrote {}", p.display());
+            }
+        }
+    }
 }
 
 fn build(scenes: &mut Scenes, a: &Args, setup: &RoundSetup, local: u8) -> Result<Round> {
@@ -147,6 +166,18 @@ fn build(scenes: &mut Scenes, a: &Args, setup: &RoundSetup, local: u8) -> Result
     let scene = scenes.get(&a.assets, &setup.map, &setup.mode)?;
     let walk = super::round_setup::build_round(scene, setup, &a.missions, &a.assets, local)?;
     let feed = game::event_feed::EventFeed::for_walk(&a.assets, &scene.manifest.source_game, &walk);
+    let stats = game::session_stats::ENABLED.then(|| {
+        let info = game::session_stats::RoundInfo {
+            map: setup.map.clone(),
+            mode: setup.mode.clone(),
+            source_game: scene.manifest.source_game.clone(),
+            seed: setup.seed,
+            role: if local == 0 { "host" } else { "guest" }.into(),
+            local_slot: local,
+            ..Default::default()
+        };
+        game::session_stats::SessionStats::start(info, &walk, game::session_stats::dir())
+    });
     println!(
         "round built: {} {} in {:.1} s, static digest {:016x}",
         setup.map,
@@ -154,7 +185,7 @@ fn build(scenes: &mut Scenes, a: &Args, setup: &RoundSetup, local: u8) -> Result
         started.elapsed().as_secs_f64(),
         walk.sim.static_digest()
     );
-    Ok(Round { walk, feed })
+    Ok(Round { walk, feed, stats })
 }
 
 fn log_notices(notices: &[Notice]) {
@@ -170,7 +201,19 @@ fn log_notices(notices: &[Notice]) {
 fn play<L: Link>(peer: &mut Peer, link: &mut L, round: &mut Option<Round>, dt: f64) {
     if let Some(r) = round.as_mut() {
         let pad = game::netplay::virtual_net::scripted_pad(peer.local_slot, r.walk.sim.tick);
-        peer.frame(link, dt, pad, &mut r.walk, Some(&mut r.feed), |_, _, _| {});
+        let stats = &mut r.stats;
+        peer.frame(
+            link,
+            dt,
+            pad,
+            &mut r.walk,
+            Some(&mut r.feed),
+            |walk, _, _| {
+                if let Some(s) = stats.as_mut() {
+                    s.tick(walk);
+                }
+            },
+        );
     }
 }
 
@@ -299,6 +342,9 @@ pub(super) fn host(args: &[String]) -> Result<()> {
     });
     println!("{}", serde_json::to_string_pretty(&summary)?);
     let stats = peer.stats.clone();
+    if let Some(r) = round.as_mut() {
+        r.finish();
+    }
     link.shutdown();
     println!("{}", verdict(None, peak_guests, &stats)?);
     Ok(())
@@ -403,6 +449,9 @@ pub(super) fn join(args: &[String]) -> Result<()> {
     });
     println!("{}", serde_json::to_string_pretty(&summary)?);
     let stats = peer.stats.clone();
+    if let Some(r) = round.as_mut() {
+        r.finish();
+    }
     link.shutdown();
     // The host ending the session after the round started is the normal
     // end of its `--seconds`; anything else cut the check short.

@@ -224,6 +224,13 @@ impl SpawnWaves {
     }
 }
 
+/// OURS (the fourth playtest's product default): the round-start entrance's
+/// window, 10 s. The opening wave's bots come in over it, each after its own
+/// seeded delay ([`Sim::stagger_opening_ai`](super::Sim::stagger_opening_ai));
+/// the disc brings the whole army in on one tick. measure: a playtest of
+/// the opening against the 10 s window.
+pub const OPENING_STAGGER_TICKS: u64 = 300;
+
 /// A spawn node authored UNDER its floor is looked for from this far over the
 /// node (m). PROVISIONAL (ours).
 pub const SPAWN_LIFT: f32 = 3.0;

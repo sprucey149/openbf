@@ -4,8 +4,10 @@
 //! Flags (after the two paths): `--weapon <glb>` draws a weapon at
 //! hp_weapons, `--cell <px>` sets the per-pose cell width (default 256),
 //! `--dist <m>` the camera distance (default 4.5) — shrink it to inspect
-//! grip/orientation — and `--yaw <deg>` the model's yaw (default 180, facing
-//! the camera; 90 shows the profile).
+//! grip/orientation — `--yaw <deg>` the model's yaw (default 180, facing
+//! the camera; 90 shows the profile), and `--mesh <glb>` draws that GLB's
+//! mesh on the body's skeleton and clips (a `<model>.low.glb` LOD body,
+//! which has no clips of its own).
 #![allow(clippy::disallowed_methods)] // f32::max/min: a harness, not the LAN sim (LAN_MULTIPLAYER.md §7)
 
 use glam::{Mat4, Vec3};
@@ -35,7 +37,7 @@ fn main() -> anyhow::Result<()> {
                 skip = false;
                 continue;
             }
-            if a == "--weapon" || a == "--cell" || a == "--dist" || a == "--yaw" {
+            if a == "--weapon" || a == "--cell" || a == "--dist" || a == "--yaw" || a == "--mesh" {
                 skip = true;
                 continue;
             }
@@ -51,6 +53,12 @@ fn main() -> anyhow::Result<()> {
         })
         .collect();
     let asset = game::assets::load_skinned_glb(glb)?;
+    // `--mesh <glb>`: that GLB's mesh on this body's skeleton and clips.
+    let other = match flag("--mesh") {
+        Some(m) => Some(game::assets::load_skinned_glb(std::path::Path::new(&m))?.mesh),
+        None => None,
+    };
+    let drawn = other.as_ref().unwrap_or(&asset.mesh);
     // Textures live beside the model: <side>/textures/<material>.ktx2 (with
     // their `.dtl.ktx2` detail companions). Missing ones fall back to flat.
     let tex_dir = glb
@@ -69,7 +77,7 @@ fn main() -> anyhow::Result<()> {
         }
         cache[&name]
     };
-    let meshes: Vec<_> = game::viewer::upload_skinned(&mut r, &asset.mesh)?
+    let meshes: Vec<_> = game::viewer::upload_skinned(&mut r, drawn)?
         .into_iter()
         .map(|(m, mat, layer)| {
             let t = load_tex(&mut r, mat);

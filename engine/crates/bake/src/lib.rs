@@ -6,6 +6,7 @@ pub mod shadow;
 pub mod adpcm;
 pub mod alpha;
 pub mod anim_sets;
+pub mod animated_prop;
 pub mod attached_effects;
 mod audio_restore;
 pub mod beep;

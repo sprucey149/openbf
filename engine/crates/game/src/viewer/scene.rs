@@ -279,6 +279,22 @@ impl SceneGpu {
         }
     }
 
+    /// Take the static draws of every placed animated prop out of view
+    /// (`crate::animated_props`): `viewer::props` draws it posed instead.
+    /// The goldens never call it, so they keep the props as placed.
+    pub fn hide_animated(&mut self, props: &[core::animated_prop::AnimatedProp]) {
+        let away = Mat4::from_translation(Vec3::new(0.0, -1.0e6, 0.0));
+        for p in props.iter().filter(|p| p.setup.placed) {
+            for (ii, range) in &self.instance_draws {
+                if *ii as usize == p.setup.instance {
+                    for draw in &mut self.draws[range.clone()] {
+                        draw.model = away;
+                    }
+                }
+            }
+        }
+    }
+
     /// Pose every drawn door at its sim door's `open` (`core::door`): each
     /// moving submesh at `instance · D(open)`, the collision bodies' own
     /// rule. A door with no sim twin (`OPENBF_DOORS_SOLID=1`) stays shut.

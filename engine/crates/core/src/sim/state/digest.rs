@@ -67,6 +67,10 @@ impl Sim {
             tick: _,
             difficulty: _,
             team_difficulty: _,
+            // Adaptive difficulty: live state `Sim::hash` covers while its
+            // factor is off 0; `enabled` is on for every peer (only a sweep
+            // turns it off).
+            adaptive: _,
             // Issue #171: every LAN peer sets it in `install_humans`; what
             // it decides reaches `Sim::hash` through the team rows.
             netplay_rows: _,
@@ -204,6 +208,7 @@ impl Sim {
             // props
             cps,
             doors,
+            props: animated_props,
             vehicle_pads,
             building_turrets,
             stations,
@@ -299,6 +304,12 @@ impl Sim {
         });
         group("props", &mut |f| {
             f.debug_sim(&(cps, doors, vehicle_pads, stations));
+            if !animated_props.is_empty() {
+                f.count(animated_props.len());
+                for p in animated_props.iter() {
+                    f.debug(&p.setup);
+                }
+            }
             f.count(building_turrets.len());
             for t in building_turrets {
                 f.debug(&(&t.spec, t.rot, t.aim_sphere, t.instance, t.fall));

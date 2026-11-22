@@ -35,7 +35,10 @@ pub const MAGIC: [u8; 4] = *b"OBF1";
 /// 10: the third-playtest batch's simulation changes (hero class lock,
 /// one-point kills, vehicle-vs-vehicle seats, headroom/exit/terrain fixes),
 /// so builds before it cannot share a round with builds after it.
-pub const PROTOCOL: u16 = 10;
+/// 11: the fourth-playtest batch's simulation changes (adaptive difficulty,
+/// staggered round-start spawns, Elite opening posts, bots holding fire on
+/// a walled line, AI saber blocking, BF2 animated props), for the same reason.
+pub const PROTOCOL: u16 = 11;
 /// The largest datagram either side sends or accepts.
 pub const MAX_DATAGRAM: usize = 1200;
 pub const HEADER_LEN: usize = 18;

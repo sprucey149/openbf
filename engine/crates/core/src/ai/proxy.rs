@@ -508,6 +508,29 @@ pub fn front(sim: &Sim, u: &Unit) -> Option<crate::commander::Objective> {
     }))
 }
 
+/// The objective a unit's walk follows: [`front`]'s for a hunting unit,
+/// else the commander's plan.
+///
+/// [ours] A hunting ORDINARY bot (the Elite tier's `hunts` column) keeps the
+/// commander's draw when the draw is already a post to take: the draw is
+/// the PS2's own (one post by its authored value, per unit,
+/// `crate::commander::draw_post`), and the nearest-post rule applied to a
+/// whole army sent every bot that came out of one base to the one post
+/// nearest it (BF2 Coruscant's opening, the fourth playtest; measured top
+/// objective share 0.9-1.0 at 10 s on four of five maps). A hunter still
+/// never holds: a Defend or Hunt plan, or none yet, takes [`front`]'s post.
+/// A proxy plays as one player does and keeps [`front`] outright.
+pub fn objective(sim: &Sim, u: &Unit, unit_index: u32) -> Option<crate::commander::Objective> {
+    use crate::commander::Objective;
+    let planned = sim.commander[usize::from(u.team).min(1)].of(unit_index);
+    match (front(sim, u), planned) {
+        (Some(_), Some(Objective::Attack(c))) if u.proxy_human.is_none() => {
+            Some(Objective::Attack(c))
+        }
+        (hunt, planned) => hunt.or(planned),
+    }
+}
+
 /// The farthest (m) a mending unit goes for a health droid.
 pub const MEND_REACH: f32 = 80.0;
 /// The share of its health a mending unit stays at the droid for.

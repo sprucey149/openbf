@@ -636,9 +636,11 @@ impl Scene {
     /// The world and its doors, into a sim: what every caller that steps a
     /// [`core::sim::Sim`] on this scene does.
     pub fn install_collision(&self, sim: &mut core::sim::Sim) {
-        let (world, doors) = self.collision_and_doors();
+        let doors_open = std::env::var("OPENBF_DOORS_SOLID").as_deref() != Ok("1");
+        let (world, doors, _, props) = self.collision_parts(doors_open);
         sim.collision = world;
         sim.doors = doors;
+        sim.props = props;
         let key = self.dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
         sim.boundary = crate::map_boundary::boundary(key, &self.manifest.paths);
     }
@@ -648,9 +650,10 @@ impl Scene {
     /// targets were removed ([`Scene::kill_objects`]).
     pub fn install_collision_without(&self, sim: &mut core::sim::Sim, names: &[String]) {
         let doors_open = std::env::var("OPENBF_DOORS_SOLID").as_deref() != Ok("1");
-        let (world, doors, _) = self.collision_parts_without(doors_open, names);
+        let (world, doors, _, props) = self.collision_parts_without(doors_open, names);
         sim.collision = world;
         sim.doors = doors;
+        sim.props = props;
     }
 
     /// Install the map's authored damage regions (a region name's `damage` prefix).
@@ -702,7 +705,7 @@ impl Scene {
         &self,
         doors_open: bool,
     ) -> (core::collision::CollisionWorld, Vec<core::door::Door>) {
-        let (world, doors, _) = self.collision_parts(doors_open);
+        let (world, doors, _, _) = self.collision_parts(doors_open);
         (world, doors)
     }
 
@@ -742,6 +745,7 @@ impl Scene {
         core::collision::CollisionWorld,
         Vec<core::door::Door>,
         Vec<u32>,
+        Vec<core::animated_prop::AnimatedProp>,
     ) {
         self.collision_parts_without(doors_open, &[])
     }
@@ -755,6 +759,7 @@ impl Scene {
         core::collision::CollisionWorld,
         Vec<core::door::Door>,
         Vec<u32>,
+        Vec<core::animated_prop::AnimatedProp>,
     ) {
         use core::collision::{Body, CollisionWorld, Cutter, Layers, Shape, TriMesh};
         use core::door::{Door, DoorBody, Trigger};
@@ -766,6 +771,10 @@ impl Scene {
         let mut of: Vec<u32> = Vec::new();
         let mut doors: Vec<Door> = Vec::new();
         let mut movers: Vec<(usize, core::collision::Aabb)> = Vec::new();
+        // BF2's animated props (`crate::animated_props`): per instance, the
+        // bodies its own rig's bones move.
+        let animated = self.animated_props();
+        let mut prop_bodies: Vec<(usize, core::animated_prop::Body)> = Vec::new();
         for (ii, inst) in self.manifest.instances.iter().enumerate() {
             if skip.iter().any(|n| n.eq_ignore_ascii_case(&inst.name)) {
                 continue;
@@ -870,7 +879,7 @@ impl Scene {
                     Some((rig, n)) => crate::viewer::turret_pose::bind_of(rig, n) * local,
                     None => local,
                 };
-                let pm = m * local;
+                let mut pm = m * local;
                 // DR2: a prim the door's clip moves gets its world pose per
                 // frame, `instance · D(f) · XFRM`, and an envelope holding
                 // them all.
@@ -879,6 +888,37 @@ impl Scene {
                         .iter()
                         .find(|q| q.name.eq_ignore_ascii_case(&p.name))
                 });
+                let prop_motion = animated.rig(&inst.class).and_then(|r| {
+                    r.prims
+                        .iter()
+                        .find(|q| q.name.eq_ignore_ascii_case(&p.name))
+                });
+                if let Some(mo) = prop_motion {
+                    let frames = crate::animated_props::body_frames(m, &mo.frames, local);
+                    // Built where the idle's first frame puts it.
+                    if let Some((r, t)) = frames.first().and_then(|f| f.first()) {
+                        pm = glam::Mat4::from_rotation_translation(*r, *t);
+                    }
+                    let mut env = core::collision::Aabb::empty();
+                    for (r, t) in frames.iter().flatten() {
+                        let a = Body::with_layers(
+                            glam::Mat4::from_rotation_translation(*r, *t),
+                            shape.clone(),
+                            layers,
+                        )
+                        .aabb;
+                        env.add(a.min);
+                        env.add(a.max);
+                    }
+                    movers.push((bodies.len(), env));
+                    prop_bodies.push((
+                        ii,
+                        core::animated_prop::Body {
+                            body: bodies.len(),
+                            frames,
+                        },
+                    ));
+                }
                 if let (Some(dm), Some(door)) = (motion, door.as_mut()) {
                     let frames: Vec<(glam::Quat, glam::Vec3)> = dm
                         .motion
@@ -966,7 +1006,33 @@ impl Scene {
                 .collect(),
             movers,
         );
-        (world, doors, of)
+        let props = crate::animated_props::build(self, &animated, prop_bodies, skip);
+        (world, doors, of, props)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn collision_parts_for_test(
+        &self,
+    ) -> (
+        core::collision::CollisionWorld,
+        Vec<core::door::Door>,
+        Vec<u32>,
+        Vec<core::animated_prop::AnimatedProp>,
+    ) {
+        self.collision_parts(true)
+    }
+
+    /// The map's animated props (`manifest::animated_prop::FILE`); none when
+    /// the map has no file.
+    pub fn animated_props(&self) -> manifest::animated_prop::AnimatedProps {
+        let path = self.dir.join(manifest::animated_prop::FILE);
+        let Ok(text) = pak::read_to_string(&path) else {
+            return Default::default();
+        };
+        ron::from_str(&text).unwrap_or_else(|e| {
+            eprintln!("{}: {e}", path.display());
+            Default::default()
+        })
     }
 
     /// Resolve an instance class to the modl name to draw:

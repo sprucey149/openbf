@@ -5,6 +5,8 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -176,44 +178,271 @@ impl<B: Eq + Hash + Copy> Edges<B> {
 /// round), so a later playlist row cannot overlap an abandoned parse. The
 /// game's close alone [`Worker::abandon`]s it: the process ends next, and the
 /// parse and sound decode may take many seconds on a slow PC.
-pub(super) struct Worker<T>(Option<JoinHandle<anyhow::Result<T>>>);
+pub(super) struct Worker<T> {
+    handle: Option<JoinHandle<anyhow::Result<T>>>,
+    /// Set when the task has returned or panicked (the [`Heartbeat`]'s
+    /// `worker=` reading, from its own thread).
+    done: Arc<AtomicBool>,
+}
+
+/// Sets the worker's done flag however its task ends, a panic included.
+struct DoneOnDrop(Arc<AtomicBool>);
+impl Drop for DoneOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
 
 impl<T: Send + 'static> Worker<T> {
     pub(super) fn spawn(
         task: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<Self> {
-        Ok(Self(Some(
-            std::thread::Builder::new()
-                .name("loading-scene".into())
-                .spawn(task)?,
-        )))
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = DoneOnDrop(done.clone());
+        let handle = std::thread::Builder::new()
+            .name("loading-scene".into())
+            .spawn(move || {
+                let _flag = flag;
+                task()
+            })?;
+        Ok(Self {
+            handle: Some(handle),
+            done,
+        })
     }
 
     /// The close's way out (`close.rs`): the thread is left running
     /// unjoined and ends with the process. It holds CPU data only (the
     /// scene's parse and the round's CPU side, no GPU objects).
     pub(super) fn abandon(&mut self) {
-        drop(self.0.take());
+        drop(self.handle.take());
     }
 
     pub(super) fn poll(&mut self) -> Option<anyhow::Result<T>> {
-        if !self.0.as_ref()?.is_finished() {
+        if !self.handle.as_ref()?.is_finished() {
             return None;
         }
         Some(
-            self.0
+            self.handle
                 .take()
                 .unwrap()
                 .join()
                 .unwrap_or_else(|_| Err(anyhow::anyhow!("scene worker panicked"))),
         )
     }
+
+    /// Whether the task has ended (read from any thread).
+    pub(super) fn done_flag(&self) -> Arc<AtomicBool> {
+        self.done.clone()
+    }
 }
 
 impl<T> Drop for Worker<T> {
     fn drop(&mut self) {
-        if let Some(handle) = self.0.take() {
+        if let Some(handle) = self.handle.take() {
             let _ = handle.join();
+        }
+    }
+}
+
+/// `[ours]` How often a loading in progress prints its heartbeat line.
+/// measure: a slow machine's report; one line per 10 s is cheap.
+pub(super) const BEAT_EVERY: Duration = Duration::from_secs(10);
+/// `[ours]` No loading frame drawn for this long (a hidden or minimised
+/// window that gets no redraws): the event loop steps the loading itself,
+/// without painting (`App::loading_unpainted`).
+/// measure: frame gaps on a minimised macOS window.
+pub(super) const STALL: Duration = Duration::from_secs(1);
+/// How often that unpainted step runs while redraws stay away.
+const UNPAINTED_EVERY: Duration = Duration::from_millis(100);
+
+/// What a loading is doing, for its heartbeat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Phase {
+    /// The presentation plays; the worker parses and builds.
+    Presenting = 0,
+    /// The event thread uploads the scene to the GPU and installs the round.
+    Upload = 1,
+    /// A LAN round start: installed and held for the host's start.
+    Held = 2,
+}
+
+impl Phase {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Upload,
+            2 => Self::Held,
+            _ => Self::Presenting,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Presenting => "presenting",
+            Self::Upload => "gpu-upload",
+            Self::Held => "held",
+        }
+    }
+}
+
+/// The heartbeat line: enough to tell a slow parse (`worker=running`,
+/// frames climbing), a stalled event thread (frames stuck, the last frame
+/// long ago) and a stuck upload (`phase=gpu-upload`) apart in a log.
+pub(super) fn beat_line(
+    map: &str,
+    elapsed: Duration,
+    phase: Phase,
+    worker_done: bool,
+    frames: u64,
+    since_frame: Option<Duration>,
+) -> String {
+    let last =
+        since_frame.map_or_else(|| "never".to_owned(), |d| format!("{:.1}", d.as_secs_f64()));
+    format!(
+        "loading: heartbeat map={map} elapsed_s={:.1} phase={} worker={} frames={frames} \
+         last_frame_s_ago={last}",
+        elapsed.as_secs_f64(),
+        phase.name(),
+        if worker_done { "done" } else { "running" },
+    )
+}
+
+/// Whether the event loop should step a loading without painting: no
+/// frame (or, before the first, no start) for [`STALL`], and none of its
+/// own steps in the last [`UNPAINTED_EVERY`].
+pub(super) fn unpainted_due(
+    started: Instant,
+    last_paint: Option<Instant>,
+    last_unpainted: Option<Instant>,
+    now: Instant,
+) -> bool {
+    now.saturating_duration_since(last_paint.unwrap_or(started)) >= STALL
+        && last_unpainted.is_none_or(|t| now.saturating_duration_since(t) >= UNPAINTED_EVERY)
+}
+
+struct BeatState {
+    map: String,
+    started: Instant,
+    stop: AtomicBool,
+    frames: AtomicU64,
+    /// Milliseconds after `started` of the last frame drawn; `u64::MAX`
+    /// before the first.
+    last_frame_ms: AtomicU64,
+    phase: AtomicU8,
+    worker_done: Arc<AtomicBool>,
+}
+
+impl BeatState {
+    fn line(&self) -> String {
+        let elapsed = self.started.elapsed();
+        let last = self.last_frame_ms.load(Ordering::Relaxed);
+        beat_line(
+            &self.map,
+            elapsed,
+            Phase::from_u8(self.phase.load(Ordering::Relaxed)),
+            self.worker_done.load(Ordering::Acquire),
+            self.frames.load(Ordering::Relaxed),
+            (last != u64::MAX).then(|| elapsed.saturating_sub(Duration::from_millis(last))),
+        )
+    }
+}
+
+/// A loading's heartbeat: its own thread prints [`beat_line`] every
+/// [`BEAT_EVERY`] while the loading lives, so a log shows the loading's
+/// progress even when the event thread itself is stuck. The default has no
+/// thread (the tests' loadings). It also keeps the event thread's paint and
+/// unpainted-step times. Drop stops the thread at once.
+#[derive(Default)]
+pub(super) struct Heartbeat {
+    state: Option<Arc<BeatState>>,
+    thread: Option<JoinHandle<()>>,
+    pub last_paint: Option<Instant>,
+    pub last_unpainted: Option<Instant>,
+}
+
+impl Heartbeat {
+    pub(super) fn start(map: &str, started: Instant, worker_done: Arc<AtomicBool>) -> Self {
+        Self::start_with(map, started, worker_done, BEAT_EVERY, |line| {
+            println!("{line}")
+        })
+    }
+
+    /// [`Heartbeat::start`] with its period and its line's sink.
+    pub(super) fn start_with(
+        map: &str,
+        started: Instant,
+        worker_done: Arc<AtomicBool>,
+        every: Duration,
+        sink: impl Fn(String) + Send + 'static,
+    ) -> Self {
+        let state = Arc::new(BeatState {
+            map: map.to_owned(),
+            started,
+            stop: AtomicBool::new(false),
+            frames: AtomicU64::new(0),
+            last_frame_ms: AtomicU64::new(u64::MAX),
+            phase: AtomicU8::new(Phase::Presenting as u8),
+            worker_done,
+        });
+        let beat = state.clone();
+        let thread = std::thread::Builder::new()
+            .name("loading-heartbeat".into())
+            .spawn(move || {
+                let mut next = beat.started + every;
+                loop {
+                    let now = Instant::now();
+                    if beat.stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    if now >= next {
+                        sink(beat.line());
+                        next += every;
+                        continue;
+                    }
+                    std::thread::park_timeout(next - now);
+                }
+            });
+        let thread = match thread {
+            Ok(t) => Some(t),
+            Err(e) => {
+                eprintln!("loading: no heartbeat: {e}");
+                None
+            }
+        };
+        Self {
+            state: Some(state),
+            thread,
+            last_paint: None,
+            last_unpainted: None,
+        }
+    }
+
+    /// A loading frame was drawn.
+    pub(super) fn painted(&mut self, now: Instant) {
+        self.last_paint = Some(now);
+        if let Some(s) = &self.state {
+            s.frames.fetch_add(1, Ordering::Relaxed);
+            let ms = now.saturating_duration_since(s.started).as_millis();
+            s.last_frame_ms
+                .store(u64::try_from(ms).unwrap_or(u64::MAX - 1), Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn set_phase(&self, phase: Phase) {
+        if let Some(s) = &self.state {
+            s.phase.store(phase as u8, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Drop for Heartbeat {
+    fn drop(&mut self) {
+        if let Some(s) = &self.state {
+            s.stop.store(true, Ordering::Release);
+        }
+        if let Some(t) = self.thread.take() {
+            t.thread().unpark();
+            let _ = t.join();
         }
     }
 }
@@ -646,6 +875,9 @@ pub(super) struct Loading {
     /// A LAN round start's installed battle, held behind the last image
     /// until the host's start (issue #168).
     pub held: Option<super::Held>,
+    /// The heartbeat line, the frames drawn, and when this loading was
+    /// last drawn or stepped unpainted.
+    pub beat: Heartbeat,
 }
 
 /// Use the input layer's existing unified/raw HID filtering on loading too:

@@ -720,7 +720,7 @@ if want maps; then
   stage "other ground maps"
   for p in $BF1_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
-    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
+    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows" "$d/animated"
     map_donors bf1 "$p.LVL"
     "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"}
     LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
@@ -729,7 +729,7 @@ if want maps; then
   for p in $BF2_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf2_$n"
     planet=$(dirname "$p" | tr 'A-Z' 'a-z')
-    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
+    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows" "$d/animated"
     map_donors bf2 "$planet/$n.lvl"
     "$BAKE" map "$(ci "$B2" "$p.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"}
     LF="$(ci "$B2" "LOAD/$(basename "$p").LVL")"
@@ -759,7 +759,7 @@ if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
       SPA9) SKY=tat ;;
     esac
     d="$OUT/bf2_$(printf '%s' "$n" | tr 'A-Z' 'a-z')"
-    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
+    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows" "$d/animated"
     map_donors bf2 "spa/$(printf '%s' "$n" | tr 'A-Z' 'a-z').lvl"
     "$BAKE" map "$(ci "$B2" "SPA/$n.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"} --sky-sublevel "$SKY_LVL" "$SKY"
     LF="$(ci "$B2" LOAD/SPA.LVL)"

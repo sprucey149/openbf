@@ -140,6 +140,8 @@ pub struct VehicleVisuals {
     /// models, drawn with the vehicles so every draw site has them.
     items: super::pickups::PickupVisuals,
     pub(super) flags: super::pickups::FlagVisuals,
+    /// BF2's animated props (`super::props`): the rancor, Jabba, the trapdoor.
+    props: super::props::PropVisuals,
     chunks: HashMap<String, ClassVis>,
     textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
     texture_uploads: usize,
@@ -458,11 +460,21 @@ impl VehicleVisuals {
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
             flags: super::pickups::FlagVisuals::load(r, scene, cull),
+            props: Default::default(),
             chunks: HashMap::new(),
             textures: HashMap::new(),
             texture_uploads: 0,
             texture_cache_hits: 0,
         };
+        out.props = super::props::PropVisuals::load(
+            r,
+            scene,
+            &sides,
+            &mut out.textures,
+            &mut out.texture_uploads,
+            &mut out.texture_cache_hits,
+            (out.cull, out.spec_cull),
+        );
         for g in geometry {
             let parts = g.as_deref().and_then(|g| {
                 match upload_class(
@@ -727,6 +739,7 @@ impl VehicleVisuals {
         }
         r.set_shadow_triangles(&self.shadow_triangles);
         out.extend(self.items.draws(r, sim));
+        out.extend(self.props.draws(r, sim));
         if !sim.battle.campaign_rules {
             out.extend(self.flags.draws(sim));
         }

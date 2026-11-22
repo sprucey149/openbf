@@ -533,6 +533,19 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                     play(n, d.origin);
                 }
             }
+            // An animated prop's `KillSoldierSound` at the prop when its
+            // held soldier dies (the rancor's belch).
+            Event::PropKill { prop } => {
+                if let Some(n) = walk
+                    .sim
+                    .props
+                    .get(*prop as usize)
+                    .and_then(|p| p.setup.kill_sound.as_ref())
+                {
+                    let at = walk.sim.props[*prop as usize].setup.origin;
+                    play(n, at);
+                }
+            }
             // The player's own line (card SQACK, re-squad-orders.md section 2):
             // at the press, whether or not anyone is in reach; MOVE OUT and AT
             // EASE say the same one. The side's names, PROVISIONAL: the PS2

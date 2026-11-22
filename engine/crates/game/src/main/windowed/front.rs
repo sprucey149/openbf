@@ -1172,6 +1172,7 @@ impl App {
                 }
             }
             let warning = self.pad_warning.as_deref();
+            let notice = &mut self.load_notice;
             let mp = &mut front.mp;
             let name_edit = &mut front.name_edit;
             let mut mp_draw = None;
@@ -1208,6 +1209,7 @@ impl App {
                 if let Some(w) = warning {
                     ui::hud::draw_pad_warning(ctx, w);
                 }
+                notice.draw(ctx, std::time::Instant::now(), game::session_log::path());
             });
             front.text_focus = mp_draw.is_some_and(|d| d.text_focus);
             if let Some(d) = mp_draw {

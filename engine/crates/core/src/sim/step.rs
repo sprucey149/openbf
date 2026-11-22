@@ -908,6 +908,7 @@ impl Sim {
                 self.nav_stats.heard_contacts += u64::from(nt.heard);
                 self.nav_stats.told_contacts += u64::from(nt.told);
                 self.nav_stats.line_held += u64::from(nt.line_held);
+                self.nav_stats.wall_held += u64::from(nt.wall_held);
                 self.nav_stats.tpos_queries += u64::from(nt.tpos_query != 0);
                 self.nav_stats.tpos_ceiling += u64::from(nt.tpos_query == 2);
                 for (b, n) in self.nav_stats.tpos_ev.iter_mut().take(16).enumerate() {
@@ -1021,6 +1022,7 @@ impl Sim {
         }
 
         self.force_locks(&mut unit_pads);
+        self.prop_locks(&mut unit_pads);
         let guided_pads = self.guided_pads(&mut unit_pads);
         let droid_pads = if self.droids.is_empty() {
             Vec::new()
@@ -1120,6 +1122,9 @@ impl Sim {
         //     now, before anyone moves against their boxes (`crate::door`;
         //     the placement in the tick is PROVISIONAL).
         self.tick_doors(dt);
+        // 2b''. The animated props (`crate::animated_prop`): their triggers,
+        //     catches and kills, and the bodies their bones move.
+        self.tick_props(dt);
         // 2b'. Card TCOL: a building turret's prims on its gun's nodes,
         //     placed at the gun's pose (`BuildingTurret::posed`).
         self.pose_building_turrets();
@@ -1227,6 +1232,7 @@ impl Sim {
             let air_hold = self.units[i]
                 .choked
                 .and_then(|c| c.hold)
+                .or_else(|| self.prop_hold(i))
                 .filter(|_| self.units[i].alive);
             match self.units[i].controller {
                 _ if corpse => {
@@ -1590,6 +1596,7 @@ impl Sim {
                 || matches!(self.units[i].soldier.stance, Stance::Roll | Stance::Jump)
                 || self.units[i].soldier.no_fire()
                 || self.units[i].choked.is_some()
+                || self.prop_hold(i).is_some()
                 || self.units[i].droideka.as_ref().is_some_and(|d| d.no_fire());
             // A soldier with more slots than the one in its hands (GREN):
             // the channels decide whether FIRE reaches the primary.
@@ -1778,6 +1785,7 @@ impl Sim {
         self.tick_flyer_seek(dt);
         self.update_cps(dt);
         self.step_deathmatch();
+        self.tick_adaptive();
 
         // 7. Vehicle pads: follow the posts just updated, decay, spawn.
         self.tick_vehicle_pads(dt);

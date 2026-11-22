@@ -427,6 +427,74 @@ fn hero_offered_player_who_dies_during_the_offer_owns_the_hero() {
     sim.step(&[PadState::default()]);
     assert_eq!(sim.heroes.as_ref().unwrap().teams[0].owner, Some(p.index));
     assert_eq!(sim.spawn_choice[0], 1);
+    // `[ours]` (2026-11-22): a death is not a Yes - every class is listed,
+    // the hero row chosen, and no lock yet.
+    assert!(sim.heroes.as_ref().unwrap().teams[0].pending);
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![0, 1]);
+    assert!(!sim.hero_locked(0));
+    assert_eq!(sim.class_refusal(0, 0, 0), None);
+    assert_eq!(sim.class_refusal(0, 0, 1), None);
+}
+
+/// Drive slot 0 through the spawn map and the class screen, confirming
+/// `class` (pad presses only: the same inputs a LAN peer replays).
+fn respawn_on_screens_as(sim: &mut Sim, class: u8) -> UnitHandle {
+    for _ in 0..30 * 30 {
+        if let Some(h) = sim.players[0].filter(|h| sim.unit(*h).is_some_and(|u| u.alive)) {
+            return h;
+        }
+        match sim.spawn_stage[0] {
+            SpawnStage::Map => tap(sim, buttons::SPAWN_ACCEPT),
+            SpawnStage::Class if sim.spawn_choice[0] != class => {
+                tap(sim, buttons::SPAWN_CLASS_NEXT)
+            }
+            SpawnStage::Class => tap(sim, buttons::SPAWN_ACCEPT),
+            _ => sim.step(&[PadState::default()]),
+        }
+    }
+    panic!("never respawned");
+}
+
+/// Dying during the offer, then taking the hero on the class screen,
+/// accepts it: the lock starts with that hero life.
+#[test]
+fn hero_offer_death_then_hero_row_accepts_and_locks() {
+    let (mut sim, p) = screen_scene();
+    earn(&mut sim, p, 10);
+    sim.step(&[PadState::default()]);
+    sim.kill_environment(p, crate::sim::DeathCause::Suicide);
+    sim.step(&[PadState::default()]);
+    let hero = respawn_on_screens_as(&mut sim, 1);
+    assert!(sim.is_hero(hero));
+    sim.step(&[PadState::default()]);
+    let team = &sim.heroes.as_ref().unwrap().teams[0];
+    assert_eq!(team.owner, Some(p.index));
+    assert!(!team.pending && team.spawned);
+    assert!(sim.hero_locked(0));
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![1]);
+}
+
+/// Dying during the offer, then taking a normal class, declines it: no
+/// owner and no lock.
+#[test]
+fn hero_offer_death_then_normal_class_declines() {
+    let (mut sim, p) = screen_scene();
+    earn(&mut sim, p, 10);
+    sim.step(&[PadState::default()]);
+    sim.kill_environment(p, crate::sim::DeathCause::Suicide);
+    sim.step(&[PadState::default()]);
+    let me = respawn_on_screens_as(&mut sim, 0);
+    assert_eq!(sim.unit(me).unwrap().spec.class, 0);
+    sim.step(&[PadState::default()]);
+    let team = &sim.heroes.as_ref().unwrap().teams[0];
+    assert_eq!(team.owner, None);
+    assert!(!team.pending);
+    // The only candidate declined: the cycle waits out the respawn timer,
+    // as a No on the prompt does.
+    assert!(team.ready_at > sim.tick);
+    assert!(!sim.hero_locked(0));
+    assert_eq!(sim.spawn_class_indices(0, 0), vec![0]);
+    assert_eq!(sim.hero_offer(0), None);
 }
 
 /// Screens off (a headless run): an accepted owner whose respawn is refused

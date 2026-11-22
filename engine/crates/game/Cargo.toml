@@ -48,6 +48,10 @@ x11rb = "0.13"
 brain-shadow = ["core/brain-shadow"]
 # Count every heap allocation, for `--bench` runs that report it (`game::alloc_count`).
 alloc-count = []
+# Dev-only per-round JSON logs (`game::session_stats`), built by
+# `scripts/pack.py --session-stats`. Observes the sim only: the LAN build id
+# and lockstep stream are the same with it on or off.
+session-stats = []
 
 [[bin]]
 name = "game"

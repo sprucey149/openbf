@@ -16,7 +16,12 @@
 //!   from the sim's state: the PS2's movement clip by its chooser's rules
 //!   (§4.4), a distance phase, one step per half cycle of the clip's root
 //!   travel, left and right alternating; a walk step when a run starts and
-//!   when it stops. Only a drawn soldier steps ([`Who`]).
+//!   when it stops. Only a drawn soldier steps ([`Who`]). The PS2's step
+//!   also needs the foot to come down below the class's `MinFootHeight`
+//!   first ([`MIN_FOOT_HEIGHT`]): with the drawn feet ([`Foley::feel`]), a
+//!   step sounds only if a foot was that low within [`FOOT_WINDOW`] ticks, so
+//!   a soldier whose clip floats - the Emperor's sprint and glide, Vader's
+//!   sprint - makes none.
 //! - **Events** (§4.5): Jump, Land, Roll, Squat, and Prone / Stand where the
 //!   row has the slot (BF1's rows), for every soldier. `BodyFall` waits for a
 //!   thrown-soldier state. Nothing for the weapons' `*_mvt_*` keys (§5).
@@ -46,6 +51,20 @@ pub const WHO: Who = Who::InView;
 
 /// The foley template's max distance (§7): no start is heard past it.
 pub const REACH: f32 = 50.0;
+
+/// A step's foot must have been lower than this, model space, metres (§4.1:
+/// B1's literal; B2's default for a class with no `MinFootHeight`, §1.3).
+pub const MIN_FOOT_HEIGHT: f32 = 0.17;
+
+/// How recently a drawn foot must have been below its class's
+/// `MinFootHeight` for a step to sound, ticks. OURS: the PS2 starts each step
+/// at a foot's lift-off; the port keeps its distance phase and asks only that
+/// a foot was down lately. 0.5 s is over half a walk cycle (0.43 s at
+/// 3 m/s), and a walking or running clip has a foot under 0.17 m in every
+/// half cycle (lowest foot 0.13-0.14 m); the floating clips never come under
+/// 0.33 m (the Emperor's sprint 0.54, his glide 0.43, Vader's sprint 0.34).
+/// measure: the steps' count against the PS2's on a slow crouch-walk.
+pub const FOOT_WINDOW: u32 = 15;
 
 /// Ground covered per step by movement clip, metres. Forward is half the
 /// clip's root travel (`re-anim-keys.md` §5: run 4.014 m, walk 2.581 m per
@@ -415,6 +434,9 @@ pub struct Foley {
     pub table: Table,
     pub who: Who,
     tracks: Vec<Track>,
+    /// Per unit: ticks since a drawn foot was below its class's
+    /// `MinFootHeight`, `None` without a drawn pose ([`Foley::feel`]).
+    feet: Vec<Option<u32>>,
     droidekas: droideka::Feet,
 }
 
@@ -428,7 +450,31 @@ impl Foley {
             table,
             who: WHO,
             tracks: Vec::new(),
+            feet: Vec::new(),
             droidekas: droideka::Feet::default(),
+        }
+    }
+
+    /// The drawn feet of the tick about to be [`tick`](Foley::tick)ed: each
+    /// unit's posed model-space foot heights, `None` for one not drawn. A unit
+    /// never felt steps as it did before (the headless sound log).
+    pub fn feel(&mut self, walk: &WalkSim, heights: &[Option<[f32; 2]>]) {
+        self.feet.resize(walk.sim.units.len(), None);
+        for (i, u) in walk.sim.units.iter().enumerate() {
+            let Some(h) = heights.get(i).copied().flatten() else {
+                self.feet[i] = None;
+                continue;
+            };
+            let floor = walk
+                .team_template(u.team)
+                .class(u.spec.class)
+                .min_foot_height
+                .unwrap_or(MIN_FOOT_HEIGHT);
+            self.feet[i] = if h[0] < floor || h[1] < floor {
+                Some(0)
+            } else {
+                Some(self.feet[i].map_or(FOOT_WINDOW + 1, |ago| ago.saturating_add(1)))
+            };
         }
     }
 
@@ -524,9 +570,19 @@ impl Foley {
                 clip_bf2(fwd, side, u.consts.max_speed, t.clip)
             };
             let was = std::mem::replace(&mut t.clip, clip);
+            // §4.1: no foot came down lately (a floating clip): no sound.
+            let footed = self
+                .feet
+                .get(i)
+                .copied()
+                .flatten()
+                .is_none_or(|ago| ago <= FOOT_WINDOW);
             let mut step = |t: &mut Track, run: bool| {
                 let right = t.right_next;
                 t.right_next = !right;
+                if !footed {
+                    return;
+                }
                 start(match (run, right) {
                     (true, true) => row.run_right,
                     (true, false) => row.run_left,
@@ -706,6 +762,122 @@ mod tests {
         heard.extend(drive(&mut walk, idle, 90, 212));
         let kinds: Vec<u32> = heard.iter().map(|h| h.1).collect();
         assert_eq!(kinds, vec![5, 6], "{heard:?}");
+    }
+
+    /// §4.1: with drawn feet that never come under `MinFootHeight` (a
+    /// floating clip: the Emperor's sprint) a run makes no step, the start's
+    /// and stop's included; feet that touch down step as before; a jump still
+    /// lands.
+    #[test]
+    fn a_floating_soldier_makes_no_steps() {
+        use core::sim::{buttons, PadState};
+        let flat = core::heightfield::Heightfield {
+            size: 33,
+            unit: 8.0,
+            offset_x: 128.0,
+            offset_z: 128.0,
+            heights: vec![0.0; 33 * 33],
+        };
+        let mut walk = WalkSim::new(42, Vec3::ZERO, Some(flat));
+        walk.teams[0].classes[0].foley_class = 1;
+        let slots = FoleyRow {
+            class: 1,
+            walk_left: 1,
+            walk_right: 2,
+            run_left: 3,
+            run_right: 4,
+            jump: 5,
+            land: 6,
+            ..FoleyRow::default()
+        };
+        let mut foley = Foley::new(Table::new(vec![FoleyGroup {
+            name: crate::classdb::fnv1a_lowercase("terrain_foley"),
+            rows: vec![slots],
+        }]));
+        let player = walk.player.index as usize;
+        // `feet(tick)`: the player's drawn foot heights that tick.
+        let mut drive =
+            |walk: &mut WalkSim, pad: PadState, ticks: u32, feet: &dyn Fn(u32) -> [f32; 2]| {
+                let mut heard: Vec<u32> = Vec::new();
+                for i in 0..ticks {
+                    walk.step_tick(&[pad]);
+                    let mut heights = vec![None; walk.sim.units.len()];
+                    heights[player] = Some(feet(i));
+                    foley.feel(walk, &heights);
+                    let view = View::of(&walk.camera(), 16.0 / 9.0);
+                    foley.tick(walk, &view, |s| heard.push(s.hash));
+                }
+                heard
+            };
+        let idle = PadState::default();
+        let forward = PadState { ly: 32767, ..idle };
+        let float = |_: u32| [0.54f32, 0.6];
+        let mut heard = drive(&mut walk, idle, 30, &float);
+        heard.extend(drive(&mut walk, forward, 120, &float));
+        heard.extend(drive(&mut walk, idle, 60, &float));
+        assert!(heard.is_empty(), "{heard:?}");
+
+        // A running clip: one foot under 0.17 m in each half cycle.
+        let touch = |i: u32| match i % 9 {
+            0..=2 => [0.13f32, 0.4],
+            3..=5 => [0.4, 0.13],
+            _ => [0.4, 0.4],
+        };
+        let heard = drive(&mut walk, forward, 120, &touch);
+        assert!(heard.iter().filter(|&&h| h >= 3).count() >= 8, "{heard:?}");
+
+        // Floating again: the stop's walk step may still sound (a foot was
+        // down within the window), then a jump is only Jump and Land.
+        let mut heard = drive(&mut walk, idle, 60, &float);
+        heard.retain(|&h| h > 4);
+        let jump = PadState {
+            buttons: buttons::JUMP,
+            ..idle
+        };
+        heard.extend(drive(&mut walk, jump, 2, &float));
+        heard.extend(drive(&mut walk, idle, 90, &float));
+        assert_eq!(heard, vec![5, 6]);
+    }
+
+    /// The baked bodies (skips without them): the Emperor's sprint clip keeps
+    /// both feet over `MinFootHeight` in every frame, and so does Vader's,
+    /// while an Alliance soldier's run and sprint and a Jedi's sprint put a
+    /// foot under it.
+    #[test]
+    fn the_emperors_sprint_floats_and_a_soldiers_run_touches_down() {
+        let root = crate::assets::baked_root().join("side_bf2/soldiers");
+        if !root.join("imp_inf_darthsidious.glb").is_file() {
+            eprintln!("SKIP: baked BF2 soldiers required");
+            return;
+        }
+        let floor = |body: &str, clip: &str| {
+            let a = crate::assets::load_skinned_glb(&root.join(format!("{body}.glb"))).unwrap();
+            let c = &a.clips[crate::animator::find_clip(&a.clips, clip).unwrap()];
+            let feet = ["bone_l_foot", "bone_r_foot"].map(|b| a.skeleton.index_of(b).unwrap());
+            let mut low = f32::MAX;
+            for f in 0..c.frames {
+                let pal = a.skeleton.palette(&c.sample_frame(&a.skeleton, f).locals());
+                for b in feet {
+                    let y = (pal[b] * a.skeleton.global_bind[b])
+                        .transform_point3(Vec3::ZERO)
+                        .y;
+                    low = low.min(y);
+                }
+            }
+            low
+        };
+        let sprint = floor("imp_inf_darthsidious", "sidious_sabre_sprint_full");
+        assert!(sprint > 0.5, "{sprint}");
+        let vader = floor("imp_inf_darthvader", "vader_sabre_sprint_full");
+        assert!(vader > 0.3, "{vader}");
+        for (body, clip) in [
+            ("all_inf_soldier", "human_rifle_stand_runforward"),
+            ("all_inf_soldier", "human_rifle_sprint_full"),
+            ("rep_inf_ep3obiwan", "human_sabre_sprint_full"),
+        ] {
+            let low = floor(body, clip);
+            assert!(low < MIN_FOOT_HEIGHT, "{body} {clip}: {low}");
+        }
     }
 
     /// §4.4, BF1: forward 5.5 / 5.0, right 5.0 / 5.5, backward and left

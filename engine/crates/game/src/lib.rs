@@ -3,6 +3,7 @@
 #![cfg_attr(test, allow(clippy::disallowed_methods))]
 pub mod alloc_count;
 pub mod ambience;
+pub mod animated_props;
 pub mod animator;
 pub mod announce;
 pub mod assets;
@@ -68,6 +69,8 @@ pub mod round_end;
 pub mod round_stats;
 pub mod rumble;
 pub mod seated_bodies;
+pub mod session_log;
+pub mod session_stats;
 pub mod shell_ia;
 pub mod shell_movie;
 mod sim_pose;

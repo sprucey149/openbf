@@ -1110,3 +1110,109 @@ fn a_lan_guests_presses_never_skip_but_the_hosts_skip_ends_its_loading() {
         "the guest's loading lasted {ms:.1} ms of {duration:?}"
     );
 }
+
+/// A failed single-player load says so on screen, and a loading whose
+/// window gets no redraws still reaches its failure: the event loop's
+/// unpainted step polls the worker (the first Apple Silicon report).
+#[test]
+fn failed_loads_leave_a_notice_and_advance_without_redraws() {
+    let f = Fixture::new();
+    f.map("bf1_bes1", &[], false);
+    let mut a = app(f.0.clone());
+    let mut broken = row("bf1_bes1", ui::shell::Mode::Con);
+    broken.label = "Bespin: Cloud City".into();
+    a.start_playlist(
+        vec![row("missing", ui::shell::Mode::Con), broken],
+        Default::default(),
+    );
+    assert!(matches!(a.screen, super::super::Screen::Loading));
+    assert_eq!(
+        a.load_notice.lines(),
+        ["Couldn't load missing: this map is not baked"]
+    );
+    // No frame is ever drawn: only the unpainted steps run, once STALL has
+    // passed since the start.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    a.loading.as_mut().unwrap().started -= STALL;
+    while matches!(a.screen, super::super::Screen::Loading) {
+        assert!(Instant::now() < deadline, "the loading never failed");
+        a.loading_unpainted().unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(a.screen, super::super::Screen::Shell));
+    assert_eq!(a.load_notice.lines().len(), 2);
+    assert!(
+        a.load_notice.lines()[1].starts_with("Couldn't load Bespin: Cloud City: "),
+        "{:?}",
+        a.load_notice.lines()
+    );
+}
+
+#[test]
+fn unpainted_steps_wait_for_a_stall_and_are_spaced() {
+    let t0 = Instant::now();
+    assert!(!unpainted_due(t0, None, None, t0));
+    assert!(unpainted_due(t0, None, None, t0 + STALL));
+    let painted = t0 + Duration::from_secs(5);
+    assert!(!unpainted_due(t0, Some(painted), None, painted + STALL / 2));
+    let at = painted + STALL;
+    assert!(unpainted_due(t0, Some(painted), None, at));
+    assert!(!unpainted_due(t0, Some(painted), Some(at), at + Duration::from_millis(10)));
+    assert!(unpainted_due(t0, Some(painted), Some(at), at + Duration::from_millis(100)));
+}
+
+/// The heartbeat prints from its own thread while the loading lives,
+/// reads the worker's end and the frames drawn, and stops on drop.
+#[test]
+fn heartbeat_reports_worker_frames_and_phase_and_stops_on_drop() {
+    assert_eq!(
+        beat_line(
+            "bf2_hot1",
+            Duration::from_millis(20_040),
+            Phase::Upload,
+            true,
+            12,
+            None
+        ),
+        "loading: heartbeat map=bf2_hot1 elapsed_s=20.0 phase=gpu-upload worker=done \
+         frames=12 last_frame_s_ago=never"
+    );
+    let (tx, rx) = mpsc::channel::<String>();
+    let (release, wait) = mpsc::channel::<()>();
+    let mut worker = Worker::<()>::spawn(move || {
+        let _ = wait.recv();
+        Ok(())
+    })
+    .unwrap();
+    let started = Instant::now();
+    let mut beat = Heartbeat::start_with(
+        "bf2_hot1",
+        started,
+        worker.done_flag(),
+        Duration::from_millis(20),
+        move |line| {
+            let _ = tx.send(line);
+        },
+    );
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(first.contains("phase=presenting worker=running frames=0"), "{first}");
+    assert!(first.ends_with("last_frame_s_ago=never"), "{first}");
+    beat.painted(Instant::now());
+    beat.set_phase(Phase::Upload);
+    release.send(()).unwrap();
+    await_worker(&mut worker).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let line = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        if line.contains("phase=gpu-upload worker=done frames=1 ") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{line}");
+    }
+    let dropped = Instant::now();
+    drop(beat);
+    assert!(dropped.elapsed() < Duration::from_millis(500));
+    while rx.try_recv().is_ok() {}
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(rx.try_recv().is_err(), "no beat after drop");
+}

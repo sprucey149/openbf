@@ -908,8 +908,8 @@ pub(crate) fn disc_sniper(vehicle_scale: f32) -> WeaponClass {
 
 /// OURS (sniper aim assist, issue #164): a sniper rifle's magnet reaches as
 /// far as its round (the bolt's 300 m, a beam's `Range`), at full strength
-/// to its MaxRange; it keeps its 1° cone, and takes vehicles only when its
-/// round hurts them.
+/// to its MaxRange; it keeps its 1° cone, and never takes vehicles, even
+/// when its round hurts them (fourth playtest 2026-11-21).
 #[test]
 fn a_sniper_rifle_gets_a_narrow_magnet_to_its_rounds_reach() {
     let mut bf1 = disc_sniper(0.0);
@@ -947,7 +947,7 @@ fn a_sniper_rifle_gets_a_narrow_magnet_to_its_rounds_reach() {
     assert_eq!((bf1.target_team, bf1.target_kind & 0x1f), (1, 0b111));
     let mut bf2 = disc_sniper(0.1);
     bf2.give_sniper_assist();
-    assert_eq!(bf2.target_kind & 0x1f, 0b1111);
+    assert_eq!(bf2.target_kind & 0x1f, 0b111);
     // The AI's kinds are its own.
     assert_eq!(bf2.ai_target_kind, disc_sniper(0.1).ai_target_kind);
     // No MaxRange, no LockOnAngle, a short bolt: the fallbacks, the reach

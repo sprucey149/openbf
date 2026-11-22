@@ -103,7 +103,8 @@ pub(super) struct GunReport {
     /// Card FFLN: a friend stands in the line of fire at the seen enemy —
     /// the side to step to, away from him (+1 = the unit's right).
     pub line: Option<i8>,
-    /// The seen enemy's range from the muzzle (m); `None` with no seen enemy.
+    /// The seen enemy's range from the muzzle (m); `None` with no seen enemy,
+    /// or with its line from the muzzle blocked this tick (issue #189).
     pub range: Option<f32>,
     /// Card HVYW: the think's pick is a grenade the bot cannot throw from
     /// here (the arc does not reach, the target is outside its band or too
@@ -255,6 +256,9 @@ pub(super) fn run(
     // A space battle keeps the plain intercept (its rules are its own).
     let swept = rules.round.ground();
     let mut reaches = false;
+    // Issue #189: whether the aim's own sight ray this tick reached the seen
+    // enemy (`seen_aim_sighted`), for the trigger's line test below.
+    let mut sighted = None;
     let look_at = match (*aim, &armed) {
         // A grenade or a shell: the low-arc solution to the target's feet,
         // where it is to land. The tracked error moves that point over the
@@ -292,7 +296,11 @@ pub(super) fn run(
                     super::proxy::hand::Shooter::of(sim, u),
                     super::proxy::hand::moving(sim, e),
                 ),
-                None => seen_aim(sim, me, st, eye, e, speed, wc, swept),
+                None => {
+                    let (p, clear) = seen_aim_sighted(sim, me, st, eye, e, speed, wc, swept);
+                    sighted = clear;
+                    p
+                }
             };
             let off = barred.and_then(|h| super::tokn::miss_offset(sim, me, h, eye, p));
             p + off.unwrap_or(Vec3::ZERO)
@@ -437,6 +445,8 @@ pub(super) fn run(
     };
     let mut no_throw = false;
     let mut close_on = None;
+    // A saber swing wanted this tick (in reach and on target): no block.
+    let mut swing_wanted = false;
     let target = enemy
         .map(|e| {
             let ready =
@@ -562,6 +572,22 @@ pub(super) fn run(
                 None => AIM_TOLERANCE,
             };
             let on_target = ready && e_yaw.abs() < tol && e_pitch.abs() < tol && in_reach;
+            // Issue #189 (OURS): on target, and the line from the muzzle to
+            // the enemy is blocked — no shot ([`line_walled`]).
+            let walled = on_target
+                && line_walled(
+                    sim,
+                    me,
+                    u,
+                    eye,
+                    enemy,
+                    held,
+                    &armed,
+                    hand.is_some(),
+                    sighted,
+                );
+            nt.wall_held = u32::from(walled);
+            let on_target = on_target && !walled;
             // Card FFLN: on target, and a friend is in the way — no shot.
             nt.line_held = u32::from(on_target && line.is_some());
             let on_target = on_target && line.is_none();
@@ -606,12 +632,24 @@ pub(super) fn run(
                 }
                 st.charge_until = 0;
             } else if wc.max_pressed_time > 0.0 {
-                charge(sim, me, st, wc, &skill, want_fire, line.is_some(), pad);
+                // A charge drawn up is held through a blocked line, as
+                // through a friend's.
+                charge(
+                    sim,
+                    me,
+                    st,
+                    wc,
+                    &skill,
+                    want_fire,
+                    line.is_some() || walled,
+                    pad,
+                );
             } else if wc.trigger_single && hand.is_some() {
                 if super::proxy::hand::tap(&mut st.tap_gate, on_target) {
                     pad.buttons |= buttons::FIRE;
                 }
             } else if wc.trigger_single {
+                swing_wanted = wc.saber.is_some() && on_target;
                 // Card STTAP: a single-shot weapon fires on a fresh press
                 // only, so the bot TAPS it, by the PS2's own rule and not by
                 // D11's bursts (the PS2 sends it past the burst function).
@@ -622,7 +660,10 @@ pub(super) fn run(
                 pad.buttons |= buttons::FIRE;
             }
             nt.tokn_off = u8::from(barred.is_some() && pad.buttons & buttons::FIRE != 0);
-            Some(range)
+            // Issue #189: a blocked line is no range to stand and fight at;
+            // the bot walks on while it aims, until the line opens or the
+            // next think drops the target.
+            (!walled).then_some(range)
         }
         None => {
             if wc.trigger_single {
@@ -634,6 +675,33 @@ pub(super) fn run(
             None
         }
     };
+    // A saber in hand blocks on the PS2 combat cycle (`melee::MeleeBrain::block`):
+    // the combo's block button (`Sim::saber_inputs`) is held while the cycle
+    // is on, except while the bot wants a swing. A player stand-in's hand
+    // keeps a player's controls.
+    if wc.saber.is_some()
+        && matches!(armed, Armed::Hand)
+        && hand.is_none()
+        && u.mount.is_none()
+        && u.choked.is_none()
+    {
+        // The brain starts at combat entry only: `MeleeBrain::begin` also
+        // times the close-mode first jump (0-3 s), which an idle start
+        // would spend before the fight.
+        let combat = enemy.is_some() || memory.is_some();
+        let melee = if combat {
+            Some(
+                st.melee
+                    .get_or_insert_with(|| super::melee::MeleeBrain::begin(me, sim.tick)),
+            )
+        } else {
+            st.melee.as_mut()
+        };
+        let blocking = melee.is_some_and(|m| m.block(me, sim.tick, combat));
+        if blocking && !swing_wanted && pad.buttons & buttons::FIRE == 0 {
+            pad.buttons |= buttons::SWITCH_WEAPON;
+        }
+    }
     if matches!(armed, Armed::Secondary(..)) && pad.buttons & buttons::FIRE != 0 {
         pad.buttons = (pad.buttons & !buttons::FIRE) | buttons::SECONDARY_FIRE;
     }
@@ -644,6 +712,62 @@ pub(super) fn run(
         no_throw,
         close_on,
     })
+}
+
+/// Issue #189 (OURS): is bot `u`'s line of fire at the seen soldier `enemy`
+/// blocked? The trigger holds while it is: a bot cutting a corner, or whose
+/// target stepped behind a wall since its last think (perception looks once
+/// a think, [`crate::ai::THINK_PERIOD`], and also takes an enemy bot's own
+/// sighting of it as seen, `perception::seen_by`), fired into the wall on
+/// that sighting. The line is the shot's own: from the muzzle (a droideka's gun)
+/// to the target's centre or head, through the terrain and the ORDNANCE
+/// bodies past both riders' vehicles and buildings
+/// ([`perception::sight_point`], the scan's own test). A soldier on foot is
+/// answered by the aim's sight ray of this tick (`sighted`, no new ray);
+/// anyone else costs one ray, cast only on a tick the trigger would press.
+/// Not a proxy's hand (it plays by a player's rule), nor a thrown or lobbed
+/// round, whose arc may clear the wall; a droid, turret or station target is
+/// not tested. BF2's trigger casts no such ray: it holds only for 2 s after
+/// a bolt struck short of the target while the bot has not moved 1 m
+/// (`FUN_002b8028`, B2:239794, fed by `FUN_002b7fc8`); BF1's rule is not
+/// traced. The maintainer asked for a clear line (fourth playtest).
+/// measure: `SWEEP_WALLS` blocked pulls per round on bf2_cor1 / bf2_tan1 /
+/// bf2_tat3, before and after.
+#[allow(clippy::too_many_arguments)]
+fn line_walled(
+    sim: &Sim,
+    me: UnitHandle,
+    u: &Unit,
+    eye: Vec3,
+    enemy: Option<&Unit>,
+    held: Option<Contact>,
+    armed: &Armed,
+    proxy: bool,
+    sighted: Option<bool>,
+) -> bool {
+    let (Some(e), Some(h)) = (enemy, held.and_then(|c| c.handle.unit())) else {
+        return false;
+    };
+    if proxy
+        || matches!(
+            armed,
+            Armed::Thrown(..) | Armed::Lobbed(..) | Armed::Draw(_)
+        )
+    {
+        return false;
+    }
+    let origin = u.droideka_muzzle().unwrap_or(eye);
+    match sighted {
+        Some(clear) if origin == eye => !clear,
+        _ => perception::sight_point(
+            sim,
+            origin,
+            e,
+            perception::past_mounts(sim, me, h),
+            perception::past_buildings(sim, me, h),
+        )
+        .is_none(),
+    }
 }
 
 fn support_input(st: &mut AiState, pad: &mut PadState, input: Option<u32>) {
@@ -1016,13 +1140,34 @@ pub(super) fn seen_aim(
     wc: &WeaponClass,
     swept: bool,
 ) -> Vec3 {
+    seen_aim_sighted(sim, me, st, eye, e, speed, wc, swept).0
+}
+
+/// [`seen_aim`], and whether its sight ray from `eye` reached the target
+/// (`Some(clear)`) when it cast one: a soldier on foot aimed at from foot.
+/// Issue #189: the trigger reads the answer ([`run`]) instead of casting
+/// its own ray.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn seen_aim_sighted(
+    sim: &Sim,
+    me: UnitHandle,
+    st: &AiState,
+    eye: Vec3,
+    e: &Unit,
+    speed: f32,
+    wc: &WeaponClass,
+    swept: bool,
+) -> (Vec3, Option<bool>) {
     // Issue #182: a soldier on foot whose centre is behind a wall edge but
     // whose head shows is aimed at the head (`perception::sight_point`).
     let on_foot = e.mount.is_none() && sim.unit(me).is_some_and(|u| u.mount.is_none());
-    let c = match on_foot {
-        true => perception::sight_point(sim, eye, e, crate::collision::HullFilter::All, [None; 2])
-            .unwrap_or_else(|| e.capsule().center()),
-        false => e.capsule().center(),
+    let (c, clear) = match on_foot {
+        true => {
+            let p =
+                perception::sight_point(sim, eye, e, crate::collision::HullFilter::All, [None; 2]);
+            (p.unwrap_or_else(|| e.capsule().center()), Some(p.is_some()))
+        }
+        false => (e.capsule().center(), None),
     };
     let own = sim.unit(me).map_or(Vec3::ZERO, |u| u.soldier.vel);
     let aim = match swept {
@@ -1030,26 +1175,28 @@ pub(super) fn seen_aim(
         false => lead_point(c - eye, e.soldier.vel, speed).map_or(c, |rel| eye + rel),
     };
     let Some(u) = sim.unit(me) else {
-        return aim;
+        return (aim, clear);
     };
     // The cap is the shooter's skill's, under the tier's override (Elite).
-    // An eased Hunt bot's offset is widened past it (`Sim::hunt_aim_widen`).
+    // An eased Hunt bot's offset is widened past it, and an adaptive-difficulty
+    // drift scales it (`Sim::aim_widen`).
     let cap = sim.skill_of(u).err_cap;
     let moving = e.soldier.vel.length() / e.consts.max_speed.fmax(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
         let vis = e.cloak.visibility();
-        let r = radius(1.0, 1.0, st.err, moving, vis, cap) * sim.hunt_aim_widen(u);
-        return aim + bf1_error_dir(sim, me) * r;
+        let r = radius(1.0, 1.0, st.err, moving, vis, cap) * sim.aim_widen(u);
+        return (aim + bf1_error_dir(sim, me) * r, clear);
     }
-    let r = soldier_error_radius(e, cap) * sim.hunt_aim_widen(u);
-    aim + error_vector(
+    let r = soldier_error_radius(e, cap) * sim.aim_widen(u);
+    let off = error_vector(
         sim,
         me,
         e,
         error_dir(sim, me, u) * r,
         (aim - eye).length(),
         wc,
-    )
+    );
+    (aim + off, clear)
 }
 
 pub(crate) fn soldier_error_radius(target: &Unit, cap: f32) -> f32 {
@@ -1175,12 +1322,12 @@ pub(super) fn droid_aim(
     let cap = sim.aim_err_cap(u);
     let moving = d.vel.length() / c.max_speed.fmax(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
-        let r = radius(1.0, 1.0, st.err, moving, 1.0, cap) * sim.hunt_aim_widen(u);
+        let r = radius(1.0, 1.0, st.err, moving, 1.0, cap) * sim.aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
     let owner = sim.unit(d.owner);
     let err = owner.map_or(0.0, |o| o.aim.err);
-    let r = radius(DROID_AIM_SIZE, 1.0, err, moving, 1.0, cap) * sim.hunt_aim_widen(u);
+    let r = radius(DROID_AIM_SIZE, 1.0, err, moving, 1.0, cap) * sim.aim_widen(u);
     let human = d.controlled && owner.is_some_and(|o| o.is_human());
     aim + bubble(
         sim,
@@ -1209,11 +1356,11 @@ pub(super) fn turret_aim(
     };
     let cap = sim.aim_err_cap(u);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
-        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
+        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap) * sim.aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
     let err = sim.unit(t.owner).map_or(st.err, |o| o.aim.err);
-    let r = radius(DROID_AIM_SIZE, 1.0, err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
+    let r = radius(DROID_AIM_SIZE, 1.0, err, 0.0, 1.0, cap) * sim.aim_widen(u);
     aim + bubble(
         sim,
         me,
@@ -1238,10 +1385,10 @@ pub(super) fn station_aim(
     };
     let cap = sim.aim_err_cap(u);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
-        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
+        let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap) * sim.aim_widen(u);
         return aim + bf1_error_dir(sim, me) * r;
     }
-    let r = radius(DROID_AIM_SIZE, 1.0, st.err, 0.0, 1.0, cap) * sim.hunt_aim_widen(u);
+    let r = radius(DROID_AIM_SIZE, 1.0, st.err, 0.0, 1.0, cap) * sim.aim_widen(u);
     aim + bubble(
         sim,
         me,

@@ -420,12 +420,18 @@ mod tests {
                 let mission = setup.mission.as_ref().unwrap();
                 let mut walk = super::super::battle::make_walk(&scene, &setup).unwrap();
                 assert_eq!(walk.sim.team_combatants, Some([size; 2]), "{}", row.key);
-                assert_eq!(
-                    walk.sim.battle.teams.map(|team| team.alive()),
-                    [size; 2],
-                    "{}",
-                    row.key
-                );
+                // The opening bots wait off the field for their seeded entrance
+                // (`Sim::stagger_opening_ai`); they count with the ones on it.
+                let mut fielded = [0; 2];
+                for u in walk
+                    .sim
+                    .units
+                    .iter()
+                    .filter(|u| (u.alive || u.respawn_at.is_some()) && u.team < 2)
+                {
+                    fielded[usize::from(u.team)] += 1;
+                }
+                assert_eq!(fielded, [size; 2], "{}", row.key);
                 // XL's spawn capacity is its own team size at every Team Size,
                 // never the mission's Conquest tickets.
                 assert_eq!(
@@ -765,12 +771,14 @@ mod tests {
             assert!(sim.netplay_rows, "{case}");
             let want = core::skill::team_skill(d, humans);
             assert_eq!(sim.team_rows(), want, "{case}");
+            // The opening bots wait off the field for their seeded entrance
+            // (`Sim::stagger_opening_ai`); they keep the opening wave's row.
             let mut seen = [0; 2];
-            for u in sim
-                .units
-                .iter()
-                .filter(|u| u.alive && u.team < 2 && u.controller == core::unit::Controller::Ai)
-            {
+            for u in sim.units.iter().filter(|u| {
+                (u.alive || u.respawn_at.is_some())
+                    && u.team < 2
+                    && u.controller == core::unit::Controller::Ai
+            }) {
                 let t = usize::from(u.team);
                 seen[t] += 1;
                 // Under the old wiring the opening wave saw the host alone

@@ -46,6 +46,24 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
         setup.mission_file.as_deref().unwrap_or("none")
     );
     let mut walk = super::battle::make_walk(&scene, &setup)?;
+    // Diagnostics only (`HERO_CENSUS`): `TIMED_AI_HEROES=<unlock s>` lets bots
+    // take a conquest hero (Random, a 30 s respawn), `TIMED_BOTS_ONLY=1` gives
+    // the idle player's slot to a bot.
+    if let Some(secs) = std::env::var("TIMED_AI_HEROES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+    {
+        if let Some(h) = walk.sim.heroes.as_mut() {
+            h.rules.ai_candidates = true;
+            h.rules.unlock = core::sim::heroes::HeroUnlock::Timer(secs);
+            h.rules.assign = core::sim::heroes::HeroAssign::Random;
+            h.rules.respawn_ticks = Some(30 * u64::from(TICK_HZ));
+        }
+    }
+    if std::env::var("TIMED_BOTS_ONLY").is_ok_and(|v| v == "1") {
+        walk.sim.leave_human(0);
+    }
+    let mut census = super::hero_census::wanted().then(super::hero_census::HeroCensus::default);
     let map = v
         .map
         .file_name()
@@ -68,6 +86,33 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
         dir.clone(),
     )
     .context("black box")?;
+    // Dev-only session stats (`session-stats` feature): the round as a
+    // played one writes it, read beside it (the feed only reads the sim).
+    let mut stats = game::session_stats::ENABLED.then(|| {
+        let assets = v
+            .map
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default();
+        let feed =
+            game::event_feed::EventFeed::for_walk(&assets, &scene.manifest.source_game, &walk);
+        let info = game::session_stats::RoundInfo {
+            map: map.clone(),
+            mode: v.mode.clone(),
+            mission: setup.mission_file.clone().unwrap_or_default(),
+            source_game: scene.manifest.source_game.clone(),
+            seed: v.seed,
+            xl: setup.xl,
+            team_size_pct: setup.team_size_pct,
+            role: "headless".into(),
+            local_slot: walk.local_slot,
+        };
+        let dir = game::session_stats::dir();
+        (
+            game::session_stats::SessionStats::start(info, &walk, dir),
+            feed,
+        )
+    });
     let idle = [PadState::default()];
     let hz = u64::from(TICK_HZ);
     let mut most = [0usize; 2];
@@ -75,6 +120,15 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
     for tick in 1..=u64::from(seconds) * hz {
         walk.step_tick(&idle);
         black_box.tick(&walk, None);
+        if let Some(c) = census.as_mut() {
+            c.tick(&walk);
+        }
+        if let Some((s, feed)) = stats.as_mut() {
+            feed.tick(&walk.sim, walk.player);
+            drop(feed.take());
+            drop(feed.take_ambush());
+            s.tick(&walk);
+        }
         for team in 0..2u8 {
             let classes = fielded(&walk, team);
             most[usize::from(team)] = most[usize::from(team)].max(classes.len());
@@ -113,6 +167,19 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
             "team {team} fielded: {:?}",
             classes.keys().collect::<Vec<_>>()
         );
+    }
+    if let Some(c) = census {
+        print!("{}", c.report(walk.sim.tick));
+    }
+    if let Some((mut s, feed)) = stats {
+        let reason = if walk.sim.outcome.is_some() {
+            "outcome"
+        } else {
+            "quit"
+        };
+        if let Some(p) = s.write(&walk, feed.round(), Some(&feed), reason) {
+            println!("session stats: wrote {}", p.display());
+        }
     }
     let snapshot = black_box.snapshot("timed_battle", Some(&walk), None);
     let mode = &v.mode;

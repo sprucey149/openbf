@@ -520,6 +520,17 @@ pub enum Event {
     DoorLocked {
         door: u32,
     },
+    /// An animated prop started a one-shot clip (`crate::animated_prop`):
+    /// `prop` indexes [`Sim::props`].
+    PropTriggered {
+        prop: u32,
+        clip: u8,
+    },
+    /// An animated prop's held soldier died at its clip's end: its
+    /// `KillSoldierSound` plays at the prop.
+    PropKill {
+        prop: u32,
+    },
 }
 
 /// One of BF1's combat calls ([`Event::Call`]); on a BF2 map only

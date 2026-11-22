@@ -12,6 +12,7 @@ use glam::{Vec2, Vec3};
 
 const JUMP_DIRECTION: u32 = 0x6d_7a_01;
 const JUMP_DELAY: u32 = 0x6d_7a_02;
+const BLOCK_DELAY: u32 = 0x6d_7a_03;
 const PROBE: f32 = 25.0;
 pub(super) const AIM_TOLERANCE: f32 = std::f32::consts::FRAC_PI_4;
 
@@ -20,6 +21,10 @@ pub struct MeleeBrain {
     pub next_jump: u64,
     pub jump_tick: Option<u64>,
     pub jump_goal: Option<Vec3>,
+    /// The combat block cycle ([`MeleeBrain::block`]): held now, and the
+    /// tick it flips; 0 out of combat.
+    pub block: bool,
+    pub block_until: u64,
 }
 
 impl MeleeBrain {
@@ -45,6 +50,40 @@ impl MeleeBrain {
             }
             None => eat(&[0]),
         }
+        eat(&[u8::from(self.block)]);
+        eat(&self.block_until.to_le_bytes());
+    }
+
+    /// The PS2 combat helper's block cycle for a melee weapon in hand. Entry
+    /// to combat (B2 `FUN_002ce648`) turns block on for a random 3-6 s; the
+    /// update (`FUN_002cf458`) flips it when its time is up, on for 3-7 s,
+    /// off for 1.5-4 s, and writes the weapon's AI block bit (+0x198 bit 15),
+    /// which holds the combo's block button down; leaving combat
+    /// (`FUN_002ceea8`) clears it. `combat`: the bot has a target, seen or
+    /// remembered. The caller drops the hold on a tick it wants to swing:
+    /// the single-trigger routine clears the bit then (`FUN_002baf70`).
+    pub(super) fn block(&mut self, me: UnitHandle, tick: u64, combat: bool) -> bool {
+        if !combat {
+            self.block = false;
+            self.block_until = 0;
+            return false;
+        }
+        let until = |lo: f32, hi: f32| {
+            let s = lo + (hi - lo) * unit_unit(me.index, tick, me.gen, BLOCK_DELAY);
+            tick + (s * TICK_HZ as f32) as u64
+        };
+        if self.block_until == 0 {
+            self.block = true;
+            self.block_until = until(3.0, 6.0);
+        } else if tick > self.block_until {
+            self.block = !self.block;
+            self.block_until = if self.block {
+                until(3.0, 7.0)
+            } else {
+                until(1.5, 4.0)
+            };
+        }
+        self.block
     }
 }
 
@@ -154,6 +193,39 @@ mod tests {
         assert_eq!(jump_direction(toward, true, 1), Vec3::new(0.8, 0.0, -0.6));
         assert_eq!(jump_direction(toward, true, 2), Vec3::new(-0.8, 0.0, 0.6));
         assert_eq!(jump_direction(toward, false, 0), toward);
+    }
+
+    /// The PS2 combat block cycle: on for 3-6 s at combat entry, then on
+    /// 3-7 s / off 1.5-4 s, and off and re-armed out of combat.
+    #[test]
+    fn melee_block_cycle_follows_the_ps2_combat_helper() {
+        let hz = u64::from(TICK_HZ);
+        for gen in 1..40u32 {
+            let me = UnitHandle { index: 3, gen };
+            let mut m = MeleeBrain::default();
+            assert!(m.block(me, 100, true), "combat entry blocks");
+            let first = m.block_until - 100;
+            assert!((3 * hz..=6 * hz).contains(&first), "entry {first}");
+            let (mut tick, mut on, mut flips) = (100, true, 0);
+            while flips < 6 {
+                tick += 1;
+                let now = m.block(me, tick, true);
+                if now != on {
+                    let span = m.block_until - tick;
+                    let (lo, hi) = if now {
+                        (3 * hz, 7 * hz)
+                    } else {
+                        (3 * hz / 2, 4 * hz)
+                    };
+                    assert!((lo..=hi).contains(&span), "span {span} on {now}");
+                    on = now;
+                    flips += 1;
+                }
+            }
+            assert!(!m.block(me, tick + 1, false), "out of combat: no block");
+            assert_eq!(m.block_until, 0);
+            assert!(m.block(me, tick + 2, true), "a new fight blocks at once");
+        }
     }
 
     #[test]

@@ -5,6 +5,7 @@
 
 pub mod ai;
 pub mod aim_assist;
+pub mod animated_prop;
 pub mod announcer;
 pub mod autoturret;
 pub mod battle;

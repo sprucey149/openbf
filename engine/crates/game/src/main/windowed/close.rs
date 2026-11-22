@@ -152,6 +152,8 @@ pub(super) fn hard_exit(code: i32) -> ! {
 pub(super) fn end_process() -> ! {
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
+    // The session log's copy drains first (bounded).
+    game::session_log::finish();
     #[cfg(windows)]
     hard_exit(0);
     #[cfg(not(windows))]
@@ -345,6 +347,7 @@ impl App {
             );
             eprintln!("{line}");
             append_log(&dog_dir, &line);
+            game::session_log::finish();
             hard_exit(0)
         }) {
             // Armed until the process ends.
@@ -520,6 +523,7 @@ mod tests {
             shown: false,
             cues: None,
             held: None,
+            beat: Default::default(),
         });
         a.screen = Screen::Loading;
         let started = Instant::now();

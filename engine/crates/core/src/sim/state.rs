@@ -237,6 +237,11 @@ pub struct Sim {
     /// (`round_to_outcome`'s `SWEEP_HUMAN_TEAM`). An INPUT: it reaches the
     /// hash only through the per-team rows ([`Sim::team_rows`]).
     pub extra_humans: [u8; 2],
+    /// Adaptive difficulty ([`crate::sim::adaptive`]): the bots facing the
+    /// humans drift up to 10 % from the tier's strength. SIM STATE, hashed
+    /// only while its factor is off 0, so every bots-only round keeps its
+    /// hash.
+    pub adaptive: crate::sim::adaptive::Adaptive,
     /// Card MAIS: the AI settings the mission script sets ([`MissionAi`]).
     /// An INPUT like `omni_radius`, set by whoever builds the sim from the
     /// mission; NOT hashed. The default is every knob's engine default.
@@ -292,6 +297,10 @@ pub struct Sim {
     /// hashed — when there are any, so a map with no door (every BF1 map, the
     /// fixtures) hashes exactly as before the doors existed.
     pub doors: Vec<crate::door::Door>,
+    /// BF2's animated props (`crate::animated_prop`): the rancor, Jabba, the
+    /// trapdoor. Their clocks, blends and held soldiers are SIM STATE and
+    /// hashed — when there are any, so a map with none hashes as before.
+    pub props: Vec<crate::animated_prop::AnimatedProp>,
     /// The weapon classes: SETUP data, not hashed. Issue #168: shared with a
     /// clone ([`crate::shared::Shared`]); written only at setup.
     pub weapon_classes: crate::shared::Shared<Vec<WeaponClass>>,
@@ -868,6 +877,10 @@ pub struct NavStats {
     /// Card FFLN: bot-ticks a shot was withheld because a friend stood in
     /// the line of fire ([`crate::ai::NavTick::line_held`]). OUTPUT only.
     pub line_held: u64,
+    /// Issue #189: bot-ticks a shot was withheld because the line from the
+    /// muzzle to the target was blocked ([`crate::ai::NavTick::wall_held`]).
+    /// OUTPUT only.
+    pub wall_held: u64,
     /// Card TPOS: the Tactician's queries, and those in which a candidate
     /// with cover from the target passed its filters (B12's ceiling,
     /// [`crate::ai::NavTick::tpos_query`]). OUTPUT only.
@@ -1047,6 +1060,9 @@ impl Sim {
             let cap = t.reaction_ticks.max(super::deathmatch::HUNT_REACTION_MAX);
             t.reaction_ticks = ((t.reaction_ticks * 100 + pct / 2) / pct).min(cap);
         }
+        // Adaptive difficulty: the bot team's reaction drifts with the
+        // humans' standing (`crate::sim::adaptive`).
+        t.reaction_ticks = self.adaptive_reaction(team, t.reaction_ticks);
         t
     }
 
@@ -1185,6 +1201,7 @@ impl Sim {
             difficulty: crate::skill::Difficulty::default(),
             team_difficulty: [None; 2],
             extra_humans: [0; 2],
+            adaptive: crate::sim::adaptive::Adaptive::default(),
             mission_ai: MissionAi::default(),
             // BF2's omni; a BF1 map's builder sets 0.0 (RE §9.1).
             omni_radius: 10.0,
@@ -1205,6 +1222,7 @@ impl Sim {
             heightfield: None,
             collision: CollisionWorld::default(),
             doors: Vec::new(),
+            props: Vec::new(),
             weapon_classes: vec![WeaponClass::bf1_rifle()].into(),
             classes: [Vec::new(), Vec::new()],
             test_rosters: [None; 2],

@@ -134,9 +134,8 @@ pub(in super::super) fn retarget(
         retarget_hunt(sim, me, st, nearest_enemy, nt);
         return;
     }
-    let plan = &sim.commander[usize::from(u.team)];
-    // [ours] A hunting unit goes where the fight is (`proxy::front`).
-    let objective = super::super::proxy::front(sim, u).or(plan.of(me.index));
+    // [ours] A hunting unit goes where the fight is (`proxy::objective`).
+    let objective = super::super::proxy::objective(sim, u, me.index);
     match objective {
         // Card PARR: a last leg at a post walks to a point of its capture
         // region, not to its centre — but for a defender with a spot.

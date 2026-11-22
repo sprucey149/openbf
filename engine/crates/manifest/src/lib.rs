@@ -34,6 +34,7 @@ pub use environment::{
 pub mod shadow;
 
 pub mod anim_sets;
+pub mod animated_prop;
 pub mod cloth;
 pub mod combo;
 pub mod fpm;

@@ -93,6 +93,12 @@ and LAN are decisions for later work, not current tasks.
   MaxRange (`WeaponClass::assist_full_range`, 128 m), then its slowdown, follow and pull fade
   together to nothing at the round's own reach (300 m bolt, 500 m award beam). The PS2's
   LockOnRange fade on the pull is not applied to these weapons, so the fades do not stack.
+  A sniper rifle's magnet never takes a vehicle or an aircraft (HealthType Vehicle), on a
+  pad or a mouse, for every player, whatever its class authors (the maintainer, fourth
+  playtest 2026-11-21); the reticle still names and colours them. The discs' snipers author
+  `LockOnRange 0` and `TargetVehicle 0`, so the originals assist nothing with them; the
+  soldier-only magnet is the addition. Mounts that author HealthType Animal or Droid
+  (tauntaun, kaadu, droideka) keep it. Bots aim on their own path and are unchanged.
   A beam is led by its range per tick, the speed its sweep is judged at. A human on a pad
   in a building turret gets a turret assist out to the round's reach (full to three
   quarters of it), with a damped pull that follows the lead. BF1's PS2 building guns
@@ -124,15 +130,16 @@ and LAN are decisions for later work, not current tasks.
   This presentation choice does not change the shared gameplay numbers.
 - **Bolt reach (2026-11-20, ours).** Infantry, vehicle and turret blaster bolts fly 200 m on
   both games' maps. This covers the bolt and bullet rounds of rifles, pistols, carbines,
-  repeaters, shotguns, bowcasters, wrist blasters and launchers, hero blasters, award weapons
+  repeaters, bowcasters, wrist blasters and launchers, hero blasters, award weapons
   and the probe droid; the deployed auto and defense turrets (80 m); and the vehicle, building
   and map-turret guns under 200 m: BF1's AT-ST chin gun (105 m) and building gun turret
   (120 m), and BF2's snail tank cannon (195 m) (`game::normalize::lengthened_bolt`,
   `core::weapon::BOLT_REACH`). The speed stays as authored and the `LifeSpan` is lengthened.
   Before the change, BF2's rifle reached 128 m (160 m/s x 0.8 s) and BF1's 120 m (80 m/s x
   1.5 s). The remote droids' blasters keep the disc's reach (BF1 60 m, BF2 128 m; the
-  maintainer, 2026-11-20). Rounds that already reach 200 m keep their own range: snipers, BF2
-  shotguns, chainguns, the award pistols and every other vehicle gun; starfighter and
+  maintainer, 2026-11-20), and so do the shotguns (BF1 120 m; BF2 200 m, where each pellet's
+  damage falls from 65 to 15 over its 0.1 s flight; the maintainer, 2026-11-22). Rounds that already reach 200 m keep their own range: snipers,
+  chainguns, the award pistols and every other vehicle gun; starfighter and
   airspeeder guns are left out (all reach 200 m or more already). Bots still open fire only
   within the disc's reach and the class `MaxRange` (`WeaponClass::engage_range`), on foot and
   in seats. A bot on foot that is hit or near-missed by an enemy beyond that range, but within
@@ -186,6 +193,10 @@ and LAN are decisions for later work, not current tasks.
   hero is the owner's only class; a post class change shows "Heroes can't change class".
   Pause-menu Respawn (1 ticket, a death) is the way out. The disc lets an owner keep the
   hero through lives in other classes (`RE:` hero spawn/possession flow).
+  Death during the offer ([ours] 2026-11-22): as on the disc, the offered player who dies
+  before answering owns the hero, and his class screen lists every class with the hero row
+  chosen. The lock starts only when he spawns as the hero; spawning in a normal class
+  declines the offer (as a No would), where the disc kept him the owner for later lives.
 - Health (maintainer, 2026-10-30 — supersedes the September no-time-drain rule):
   regular BF2 conquest uses **BF2's standard hero health pool and saber-shaped health bar**.
   Health shrinks **with time and damage**, and **regenerates for killing enemies**. Use the
@@ -206,6 +217,12 @@ and LAN are decisions for later work, not current tasks.
   10 s after the move, or when he boards a vehicle (`FORCED_GRACE`, `FORCED_MAX`, [ours]
   PROVISIONAL, measure: plans). Water, lava and damage regions stay world deaths; his own
   blast never credits. The originals credit no fall (a named deviation).
+- AI saber pursuit ([ours], issue #189, recorded 2026-11-22): a bot holding a saber
+  closes on any target it sees. The PS2 ends its attack beyond the weapon's range plus
+  10 m, about 14 m for a saber (`re-bf2-hero-flow.md` §6). Capping the pursuit at 14 m
+  lowered conquest hero kills per life by about a third over 8 seeds. The block cycle
+  and the turn through `InputLock` follow the PS2. measure: an original-game hero
+  bot's pursuit distance before tightening this.
 
 ### AI
 
@@ -236,6 +253,36 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   Squad commands: follow / hold / disperse / clear, ≤ 6 bots within 20 m of the
   player. Design, evidence and phases: Log "AI decision". Space AI (P8) will be
   the same architecture.
+- **(the maintainer, fourth playtest 2026-11-21/22) Round-start entrance.** At round start
+  each bot enters after its own seeded delay of 0-10 s (one draw of the sim's LCG per bot,
+  in unit order, so every LAN peer sees the same entrance) instead of the whole opening army
+  appearing on one tick, as both discs do (BF2 `FUN_002e7240`). A delayed bot comes in through
+  the ordinary respawn: its post by `AISpawnWeight`, its class by the class weights, no ticket
+  spent. Humans and proxies spawn as before; after the window spawning is unchanged. Campaign
+  rounds (whose opening wave waits for the player's first spawn) are not staggered.
+  OURS, PROVISIONAL (`core::sim::spawn::OPENING_STAGGER_TICKS`, `Sim::stagger_opening_ai`);
+  measure: the opening against a playtest.
+- **(the maintainer, fourth playtest 2026-11-21/22) Elite bots split at the opening.** The
+  Elite tier's `hunts` column (attack the nearest post not held, never hold) applies to an
+  ordinary bot only when the commander has not already drawn it a post to take: a bot keeps its
+  own draw (the discs' rule, one post by its authored value per bot), so an army out of one base
+  no longer all heads for the one nearest post (BF2 Coruscant's archives). A Defend plan still
+  becomes the nearest post not held; a proxy keeps the nearest-post rule outright
+  (`core::ai::proxy::objective`). OURS, PROVISIONAL; measure: Elite parity on the next screen.
+- **(the maintainer, 2026-11-22, fourth playtest) Adaptive difficulty.** [ours] PROVISIONAL, no counterpart
+  in either original. At every tier, when the humans (players and stand-ins) are all on one side, that side's
+  enemy bots drift up to 10 % stronger or weaker than the tier's base: their aim error radius and their reaction
+  to a new contact scale by up to ±10 %. The drift follows the humans' standing against them, read every 10 s:
+  each side's remaining tickets as a share of its start (Space Assault, CTF, Hero Assault, Hunt and XL: points
+  as a share of the side's target), the humans' share minus the bots'. A lead within ±10 points (a 45/55 split)
+  is a dead band; past it the target rises linearly to the full 10 % at a 25/75 split, humans ahead making the
+  bots harder and humans behind making them easier, and each update closes a third of the gap. A side that cannot
+  lose tickets (campaign rules, unlimited reinforcements) reads as even. Off (factor exactly 1.0, not hashed) in
+  bots-only rounds and with humans on both sides, so bots-only parity sweeps and pins keep their numbers; the
+  humans' own bots and every stand-in never drift. Integer per-mille in core, so every LAN peer derives the same
+  factor. Built: `core/src/sim/adaptive.rs` (`Sim::adaptive_factor`, logged by the session-stats build);
+  `round_to_outcome`'s `SWEEP_ADAPTIVE=0` turns it off for a sweep.
+  measure: the session-stats factor timelines against the humans' win rates per tier before any retune.
 - **(the maintainer, 2026-10-01) AI class weights.** An AI spawn (and respawn) draws its class by weight: the team's alive-AI cap
   is shared out over its classes — the default class (the mission's first: the rifleman) 4 parts, a standard class 2, a
   special class 1 (the table's entries from the fifth on: BF2's officer and special slots, BF1's fifth class — the
@@ -277,6 +324,15 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   is its default alive-AI cap (NumBots, DAT_006004fc=16) over SetUnitCount=20 member
   pools; BF1 PS2 runs 25–32/team. Generated missions retain those original values;
   the approved Instant Action defaults are a named deviation.
+- **Bots do not fire into walls (the maintainer, fourth playtest, 2026-11-22; issue #189).** A bot on foot
+  holds its trigger on every tick its line from the muzzle (a droideka's gun) to the enemy soldier's centre or
+  head is blocked, and on that tick it does not stand to fight: it walks on, still aiming, until the line opens
+  or its next think drops the target. Perception looks once a think and also takes an enemy bot's own sighting,
+  so before this about 40 % of the bots' pulls on bf2_cor1 / bf2_tan1 / bf2_tat3 went into a wall. BF2's
+  trigger tests no line: it holds only for 2 s after a bolt struck short while the bot stands within 1 m
+  (`FUN_002b8028`); BF1's rule is not traced. Not a proxy's hand, a thrown or lobbed round, or a droid,
+  turret or station target. Ours: `core::ai::gunner_foot::line_walled`. measure: `SWEEP_WALLS` blocked pulls per round, before and
+  after; replace: if the originals' trigger is shown to test the line.
 
 ### Vehicles & space
 - Ground vehicle handling: **BF2** (verify BF1/BF2 similarity during RE; revisit if they
@@ -487,6 +543,23 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   elimination (no-respawn rounds — pairs well with no-overspawn taste), hero hunt
   (rotating hero vs squad). Pick 1–2 post-1.0.
 
+- **BF2 animated props (Jabba's Palace's rancor, Jabba, trapdoor, torture droid):**
+  BF2's `animatedprop` classes play their idle and their triggered clips, and an
+  animated prop a placed class carries on a hardpoint is drawn there (the rancor in
+  its pit, Jabba on his dais). The trapdoor in front of Jabba opens when someone
+  stands on its centre and drops him into the pit; the rancor grabs a soldier who
+  comes within 2 m of the spot in front of it, holds him in its hand and kills him
+  (one ticket, no killer, its belch) when the grab ends — the disc's update, B2
+  `FUN_002312c0` (`core::animated_prop`). The trapdoor's two leaves ride their
+  bones, so they now cover the hole they used to leave open. Differences
+  [ours, PROVISIONAL]: the triggers and the catch test the live units' feet; the
+  idle's start point is a fixed hash, not a random draw; the held soldier hangs
+  1 m under the rancor's hand without the `thrown_flail` animation (measure: the
+  PS2's held-soldier pose); the rancor itself has no collision body (trace: its
+  bone-parented prims on the PS2); `DisableForCloneWars` is not read (no BF2 map
+  sets it); the ambient `SoundProperty` of a carried prop is not played (trace:
+  the carrier's ambience on the PS2).
+
 ### Presentation & audio
 - Music mix (maintainer, 2026-11-05): battle music plays at **0.7 x** the disc's gain
   (about -3 dB) before the player's music volume option (`game::music::MUSIC_MIX`).
@@ -528,6 +601,13 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   loading frame as the last fallback. The first fresh button press opens a
   three-second skip prompt. A second fresh press while it is visible ends the
   presentation once the battle is ready.
+- **(the maintainer, fourth playtest 2026-11-21/22) No footsteps while a soldier floats.** A step sounds
+  only when one of the soldier's drawn feet came under its `MinFootHeight` (0.17 m by default) within the last
+  15 ticks (`game::foley::MIN_FOOT_HEIGHT`, `FOOT_WINDOW`), so the Emperor's floating sprint is silent. The
+  original applies the foot-height rule to drawn third-person soldiers; BF2's first person uses its distance rule
+  alone (`analysis/re-foley.md` §4.2-4.3). openbf applies the foot rule in every view, so a floating hero is silent
+  in first person too. OURS (the first-person gate); measure: Grievous and MagnaGuard steps in a playtest, whose
+  clips sit near the threshold.
 
 ### Cheats (session-scoped, BF2-style pause-menu codes)
 - From the originals: invincibility, infinite ammo.
@@ -707,6 +787,14 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   part of the multiplayer hold; card SSCR). Not current scope.
 - LAN: client-server UDP, **cap 16**, bots server-side. Internet matchmaking: DROP. Held until the maintainer says (M7).
 - Saves/profiles: modern format; awards/unlock progression persists per profile.
+- Load diagnostics (2026-11-22, #189, after an Apple Silicon player's game sat on the loading screen) are ours;
+  the originals have none. A single-player load that fails (the worker's error or panic, the GPU upload or round
+  start, a map that is not baked) shows "Couldn't load <map>: <reason>" over the menu and the next loading screen
+  for 20 s, with the session log's path (`game/src/main/windowed/load_notice.rs`), where it used to move on in
+  silence. The shell and a LAN launch also write stdout and stderr to `openbf_data/logs/openbf-<UTC time>.log`,
+  the newest 5 kept, a panic with its backtrace included (`game::session_log`, Unix only for now, `OPENBF_LOG=0`
+  turns it off). A loading prints a heartbeat every 10 s (phase, worker done, frames drawn, last frame) and both
+  sides of its GPU upload, and advances without redraws when the window gets none (`loading::STALL`).
 
 ### Dropped outright (never RE these binary regions)
 GameSpy + DNAS, EENet/PPP stack, NTGUI app, memory-card UI, USB headset/GSM voice, PS2

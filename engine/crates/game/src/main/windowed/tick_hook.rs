@@ -64,6 +64,7 @@ pub(super) struct TickHook<'a> {
     pub active_pad: &'a input::ActivePad<gilrs::GamepadId>,
     pub rumble_effect: &'a mut Option<gilrs::ff::Effect>,
     pub matchlog: Option<&'a mut game::matchlog::MatchLog>,
+    pub session_stats: Option<&'a mut game::session_stats::SessionStats>,
     pub frame_profile: Option<&'a mut game::frame_profile::FrameProfile>,
 }
 
@@ -95,6 +96,15 @@ impl TickHook<'_> {
             self.bolts.set_fire_points(points);
         }
         self.bolts.track(walk);
+        // The drawn feet: a step needs one that came down (card FOLY, §4.1).
+        if let (Some(foley), Some(vis)) = (self.foley.as_deref_mut(), self.soldier_vis.as_deref()) {
+            let heights: Vec<_> = vis
+                .water_feet(walk)
+                .into_iter()
+                .map(|f| f.map(|f| f.height))
+                .collect();
+            foley.feel(walk, &heights);
+        }
         if let (Some(audio), Some(sl)) = (self.audio.as_deref_mut(), self.sounds.as_deref_mut()) {
             let next = Selection::read(walk);
             if let Some(cue) = st.selection.movement_cue(next, walk.sim.ground_rules) {
@@ -145,6 +155,14 @@ impl TickHook<'_> {
             if walk.sim.outcome.is_some() && !m.written() {
                 if let Some(p) = m.write(&walk.sim, "outcome") {
                     println!("matchlog: wrote {}", p.display());
+                }
+            }
+        }
+        if let Some(s) = self.session_stats.as_deref_mut() {
+            s.tick(walk);
+            if walk.sim.outcome.is_some() && !s.written() {
+                if let Some(p) = s.write(walk, feed.round(), Some(feed), "outcome") {
+                    println!("session stats: wrote {}", p.display());
                 }
             }
         }

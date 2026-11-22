@@ -103,6 +103,10 @@
 //!   OPENBF_BLACKBOX_DIR=<dir>     its folder (default artifacts/playtest)
 //!   OPENBF_BLACKBOX_PANIC=<tick>  panic at that sim tick (the check that a
 //!                                 panic writes a snapshot)
+//!   OPENBF_LOG=0                  the shell and a LAN launch write no session
+//!                                 log (default: stdout and stderr are also
+//!                                 kept in openbf_data/logs, the newest 5;
+//!                                 game::session_log)
 //!   OPENBF_SQUAD_MARKER=1|0       that marker alone: 1 shows it without dev
 //!                                 mode, 0 hides it in dev mode
 //!   OPENBF_DOORS_SOLID=1          BF2 doors never open: shut walls, as baked
@@ -186,6 +190,8 @@ mod battle;
 mod desync_report;
 #[path = "main/desync_spawns.rs"]
 mod desync_spawns;
+#[path = "main/hero_census.rs"]
+mod hero_census;
 #[path = "main/headless.rs"]
 mod headless;
 #[path = "main/net_real.rs"]
@@ -269,11 +275,30 @@ struct ViewerArgs {
     bench_toggle: Option<&'static str>,
 }
 
+/// A player entry point (the shell, a LAN launch) with its session log
+/// (`game::session_log`): an error is printed as `main`'s own would be,
+/// before the log lets go of the streams.
+fn logged(run: impl FnOnce() -> Result<()>) -> Result<()> {
+    let log = game::session_log::start();
+    let result = run();
+    if log.is_some() {
+        if let Err(e) = &result {
+            eprintln!("Error: {e:?}");
+            game::session_log::finish();
+            std::process::exit(1);
+        }
+        game::session_log::finish();
+    }
+    result
+}
+
 fn main() -> Result<()> {
     // A packed build (card PACK) serves the default data directories from its
     // own file when they are not directories here; a dev checkout reads them.
     pak::mount(std::path::Path::new("assets_baked"), "assets_baked");
     pak::mount(std::path::Path::new("missions"), "missions");
+    // Dev-only (`session-stats` feature): old round files go at launch.
+    game::session_stats::prune_at_launch();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     let a = it.next().cloned().unwrap_or_else(|| "--shell".to_string());
@@ -290,7 +315,7 @@ fn main() -> Result<()> {
                     other => bail!("unknown shell flag: {other}"),
                 }
             }
-            run_shell(assets, missions)
+            logged(|| run_shell(assets, missions))
         }
         "--write-pack" => {
             // Card PACK (`scripts/pack.py` runs it): copy this executable to
@@ -355,8 +380,8 @@ fn main() -> Result<()> {
         "--static-digest" => static_digest::run(&args[1..]),
         "--net-host" => net_real::host(&args[1..]),
         "--net-join" => net_real::join(&args[1..]),
-        "--lan-host" => windowed::run_lan(&args[1..], true),
-        "--lan-join" => windowed::run_lan(&args[1..], false),
+        "--lan-host" => logged(|| windowed::run_lan(&args[1..], true)),
+        "--lan-join" => logged(|| windowed::run_lan(&args[1..], false)),
         "--desync-report" => desync_report::run(&args[1..]),
         "--desync-spawns" => desync_spawns::run(&args[1..]),
         "--sim-hash" => {

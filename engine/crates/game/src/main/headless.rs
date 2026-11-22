@@ -121,6 +121,7 @@ impl ReplayFrame {
         gpu.animate_water_live(r, cam.position)?;
         game::forest::submit_actors(r, &walk.sim);
         gpu.pose_doors(&walk.sim.doors);
+        gpu.hide_animated(&walk.sim.props);
         if let Some(campaign) = walk.campaign.as_ref() {
             gpu.pose_world_anims(campaign.instance_poses());
         }
@@ -492,6 +493,10 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::DoorOpened { door } => format!("{tick},door_opened,{door},,\n"),
             Event::DoorClosed { door } => format!("{tick},door_closed,{door},,\n"),
             Event::DoorLocked { door } => format!("{tick},door_locked,{door},,\n"),
+            Event::PropTriggered { prop, clip } => {
+                format!("{tick},prop_triggered,{prop},{clip},\n")
+            }
+            Event::PropKill { prop } => format!("{tick},prop_kill,{prop},,\n"),
             // `a` is the item class; a taken item's `b` is the taker and its
             // value what it gave (1 health, 2 ammo, 4 energy).
             Event::ItemDropped { item, .. } => format!("{tick},item_dropped,{item},,\n"),
@@ -637,6 +642,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         // ocean's patches, then every frame below.
         gpu.animate_water(&mut r, game::water_anim::clock(0.0), cam.position)?;
         gpu.pose_doors(&walk.sim.doors);
+        gpu.hide_animated(&walk.sim.props);
         if let Some(campaign) = walk.campaign.as_ref() {
             gpu.pose_world_anims(campaign.instance_poses());
         }

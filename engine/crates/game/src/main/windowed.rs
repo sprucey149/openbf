@@ -242,6 +242,46 @@ fn start_matchlog(
     Some(log)
 }
 
+/// The round's session stats (`game::session_stats`): only in a build with
+/// the `session-stats` feature. `host`: a LAN round's role (`None`: single
+/// player).
+fn start_session_stats(
+    scene: &game::assets::Scene,
+    walk: &WalkSim,
+    mode: &str,
+    setup: &BattleSetup,
+    host: Option<bool>,
+) -> Option<game::session_stats::SessionStats> {
+    if !game::session_stats::ENABLED {
+        return None;
+    }
+    let map = scene.dir.file_name().map_or_else(
+        || scene.manifest.map.clone(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let info = game::session_stats::RoundInfo {
+        map,
+        mode: mode.to_owned(),
+        mission: setup.mission_file.clone().unwrap_or_default(),
+        source_game: scene.manifest.source_game.clone(),
+        seed: setup.seed,
+        xl: setup.xl,
+        team_size_pct: setup.team_size_pct,
+        role: match host {
+            None => "single",
+            Some(true) => "host",
+            Some(false) => "guest",
+        }
+        .to_owned(),
+        local_slot: walk.local_slot,
+    };
+    Some(game::session_stats::SessionStats::start(
+        info,
+        walk,
+        game::session_stats::dir(),
+    ))
+}
+
 /// Hand the black box the one-shots the mixer was given since the last call.
 fn note_sounds(
     bb: &mut game::blackbox::BlackBox,
@@ -379,6 +419,8 @@ mod idle;
 /// The LAN session (issue #168).
 #[path = "windowed/lan.rs"]
 mod lan;
+#[path = "windowed/load_notice.rs"]
+mod load_notice;
 /// The multiplayer pages and the lobby (issue #168).
 #[path = "windowed/lobby.rs"]
 mod lobby;
@@ -592,6 +634,8 @@ struct App {
     assets_dir: PathBuf,
     missions_dir: PathBuf,
     loading: Option<Loading>,
+    /// A single-player load that failed, on screen (`load_notice`).
+    load_notice: load_notice::LoadNotice,
     loading_edges: loading::Edges<loading::Button>,
     loading_pad_blocked: bool,
     audio: Option<audio::Audio>,
@@ -643,6 +687,9 @@ struct App {
     blackbox: Option<game::blackbox::BlackBox>,
     /// Card DPRX: the whole round's record of the player (dev mode).
     matchlog: Option<game::matchlog::MatchLog>,
+    /// The dev-only session stats of the round (`game::session_stats`):
+    /// `None` unless the build has the `session-stats` feature.
+    session_stats: Option<game::session_stats::SessionStats>,
     snapshot_requested: bool,
     snapshot_notice: Option<(bool, std::time::Instant)>,
     /// Quit chosen in the pause menu; handled after the frame.
@@ -947,6 +994,7 @@ impl App {
             session: ui::shell::SessionOptions::default(),
             round_over: false,
             loading: None,
+            load_notice: Default::default(),
             loading_edges: Default::default(),
             loading_pad_blocked: false,
             audio,
@@ -995,6 +1043,7 @@ impl App {
             hud_view: None,
             blackbox: None,
             matchlog: None,
+            session_stats: None,
             snapshot_requested: false,
             snapshot_notice: None,
             prev_menu_buttons: 0,
@@ -1339,6 +1388,10 @@ impl App {
         let maps = game::assets::discover_maps(&self.assets_dir);
         let Some((name, _, dir)) = maps.into_iter().find(|(k, ..)| *k == key) else {
             eprintln!("playlist: {key} is not baked; skipped");
+            self.note_load_failure(
+                row.as_ref().map_or(key, |r| r.label.as_str()),
+                "this map is not baked",
+            );
             return false;
         };
         // The CPU parse and the round's CPU side (the walk, the sounds and
@@ -1349,6 +1402,10 @@ impl App {
             Ok(worker) => worker,
             Err(e) => {
                 eprintln!("loading worker: {e:#}");
+                self.note_load_failure(
+                    row.as_ref().map_or(key, |r| r.label.as_str()),
+                    &format!("the loading worker did not start: {e:#}"),
+                );
                 return false;
             }
         };
@@ -1378,9 +1435,13 @@ impl App {
         } else {
             loading::Playback::default()
         };
+        let started = std::time::Instant::now();
+        println!("loading: begin map={name} mode={}", self.mode);
+        let beat = loading::Heartbeat::start(&name, started, worker.done_flag());
         self.loading = Some(Loading {
             map_name: name,
-            started: std::time::Instant::now(),
+            started,
+            beat,
             playback,
             display,
             worker,
@@ -1404,6 +1465,38 @@ impl App {
     /// shown at the host's start. A join or a rejoin enters as soon as it
     /// is built.
     fn redraw_loading(&mut self) -> Result<()> {
+        self.step_loading(true)
+    }
+
+    /// The event loop's own step of a loading that gets no redraws (a
+    /// hidden or minimised window): after [`loading::STALL`] without a
+    /// frame, the worker is polled and the loading advances unpainted, so a
+    /// result (or a failure) is never left waiting for a redraw.
+    fn loading_unpainted(&mut self) -> Result<()> {
+        let now = std::time::Instant::now();
+        let due = matches!(self.screen, Screen::Loading)
+            && self.loading.as_mut().is_some_and(|l| {
+                let due = loading::unpainted_due(
+                    l.started,
+                    l.beat.last_paint,
+                    l.beat.last_unpainted,
+                    now,
+                );
+                if due {
+                    l.beat.last_unpainted = Some(now);
+                }
+                due
+            });
+        if due {
+            self.step_loading(false)?;
+        }
+        Ok(())
+    }
+
+    /// [`App::redraw_loading`]; `paint`: draw the frame (false: the
+    /// unpainted step of [`App::loading_unpainted`], which still counts as
+    /// the presentation's first frame).
+    fn step_loading(&mut self, paint: bool) -> Result<()> {
         self.pump_loading_pads();
         // The host's `Start` (and every other session event) first.
         self.net_idle();
@@ -1435,7 +1528,9 @@ impl App {
                 Ok(prepared) => l.ready = Some(prepared),
                 Err(e) => {
                     eprintln!("failed to prepare {}: {e:#}", l.map_name);
+                    let map = self.loading_label();
                     self.finish_loading();
+                    self.note_load_failure(&map, &format!("{e:#}"));
                     self.loading_failed();
                     return Ok(());
                 }
@@ -1479,12 +1574,15 @@ impl App {
                 },
             );
         }
-        if let (Some(r), Some(overlay), Some(window)) =
-            (&mut self.renderer, &mut self.overlay, &self.window)
+        let notice = &mut self.load_notice;
+        if let (true, Some(r), Some(overlay), Some(window)) =
+            (paint, &mut self.renderer, &mut self.overlay, &self.window)
         {
+            let now = std::time::Instant::now();
             let paint = overlay.begin(window, |ctx| {
                 l.display
                     .draw(ctx, &l.map_name, time, frame.as_ref(), prompt);
+                notice.draw(ctx, now, game::session_log::path());
             });
             if let Err(e) = r.render_with_overlay(
                 &Camera::default(),
@@ -1495,8 +1593,10 @@ impl App {
                 self.finish_loading();
                 return Err(e.into());
             }
+            l.beat.painted(std::time::Instant::now());
         }
         if next == loading::Next::Enter {
+            let map = self.loading_label();
             let mut l = self.finish_loading().expect("loading round");
             let prepared = l.ready.take().expect("ready CPU scene");
             println!(
@@ -1504,8 +1604,11 @@ impl App {
                 prepared.cpu_ms,
                 l.started.elapsed().as_secs_f64() * 1000.0
             );
+            // The heartbeat keeps going through the upload (`l` lives on).
+            l.beat.set_phase(loading::Phase::Upload);
             if let Err(e) = self.start_battle(l.map_name.clone(), prepared) {
                 eprintln!("failed to start {}: {e:#}", l.map_name);
+                self.note_load_failure(&map, &format!("{e:#}"));
                 self.loading_failed();
             }
         } else if next == loading::Next::Hold {
@@ -1526,6 +1629,7 @@ impl App {
         };
         let prepared = l.ready.take().expect("ready CPU scene");
         let name = l.map_name.clone();
+        l.beat.set_phase(loading::Phase::Upload);
         println!(
             "loading: cpu_parse_ms={:.3} presentation_wall_ms={:.3}",
             prepared.cpu_ms,
@@ -1534,6 +1638,7 @@ impl App {
         match self.install_battle(name.clone(), prepared) {
             Ok((setup, walk, cube, gpu)) => {
                 if let Some(l) = self.loading.as_mut() {
+                    l.beat.set_phase(loading::Phase::Held);
                     l.held = Some(Held {
                         setup,
                         walk,
@@ -1590,6 +1695,27 @@ impl App {
         self.loading_pad_blocked = self.any_pad_button_down();
         self.clear_loading_input();
         Some(l)
+    }
+
+    /// The loading's map for a notice: its playlist row's label, or the
+    /// map's name.
+    fn loading_label(&self) -> String {
+        self.current.as_ref().map_or_else(
+            || {
+                self.loading
+                    .as_ref()
+                    .map_or_else(String::new, |l| l.map_name.clone())
+            },
+            |r| r.label.clone(),
+        )
+    }
+
+    /// A single-player load of `map` failed for `reason`: say so on screen
+    /// (`load_notice`). A LAN round has its own refusal texts.
+    fn note_load_failure(&mut self, map: &str, reason: &str) {
+        if self.netplay.is_none() {
+            self.load_notice.push(map, reason);
+        }
     }
 
     fn loading_failed(&mut self) {
@@ -1731,6 +1857,13 @@ impl App {
         let cpu_ms = cpu.elapsed().as_secs_f64() * 1000.0;
         self.blackbox = start_blackbox(scene, &walk, &self.mode, setup, self.sounds.as_mut());
         self.matchlog = start_matchlog(scene, &walk, &self.mode, setup);
+        self.session_stats = start_session_stats(
+            scene,
+            &walk,
+            &self.mode,
+            setup,
+            self.netplay.as_ref().map(|n| n.is_host()),
+        );
         let gpu = std::time::Instant::now();
         renderer.set_sun_shadows(self.profile.settings.hard_shadows);
         self.fx.preload(renderer);
@@ -1804,8 +1937,13 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("no renderer"))?;
         let upload_started = std::time::Instant::now();
         let scene = prepared.scene;
+        // Both sides of the upload are printed as they happen, so a log
+        // that stops between them points at the GPU (the heartbeat goes on
+        // with `phase=gpu-upload`).
+        println!("loading: gpu upload begins map={name}");
         let gpu = super::battle::upload_battle_scene(renderer, &scene, &prepared.load)?;
         let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
+        println!("loading: gpu upload done map={name} upload_ms={upload_ms:.3}");
         let setup_started = std::time::Instant::now();
         let round = prepared.round;
         if round.is_none() {
@@ -1954,6 +2092,13 @@ impl App {
             }
         }
         self.matchlog = None;
+        // A battle left before its outcome still writes its session stats.
+        if let (Some(s), Some((walk, _))) = (self.session_stats.as_mut(), self.walk.as_ref()) {
+            if let Some(p) = s.write(walk, self.feed.round(), Some(&self.feed), "quit") {
+                println!("session stats: wrote {}", p.display());
+            }
+        }
+        self.session_stats = None;
     }
 
     fn game_audio_paused(&self) -> bool {

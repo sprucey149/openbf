@@ -667,8 +667,10 @@ impl WeaponClass {
     /// controller"): every disc sniper ships `LockOnRange 0`, so it never has
     /// a magnet. Give a sniper rifle one: the cone its own `LockOnAngle` (1°
     /// on every disc sniper, the rifle's), the kinds it may take soldiers,
-    /// animals and droids (the disc's bits) plus vehicles when its round hurts
-    /// them. Both games use the shared armor scale. The mouse rule stays: a
+    /// animals and droids (the disc's bits, `TargetVehicle 0` on every disc
+    /// sniper). It never takes vehicles or aircraft (the maintainer, fourth
+    /// playtest 2026-11-21; the acquisition masks them for any sniper rifle,
+    /// `Sim::acquire_magnet_steering`). The mouse rule stays: a
     /// mouse-aimed pad is never pulled (`Sim::step` stage 2). Only the human's
     /// magnet reads these fields; the AI's own kinds (`ai_target_kind`) are
     /// left as parsed.
@@ -699,9 +701,6 @@ impl WeaponClass {
         }
         self.target_team |= 1;
         self.target_kind |= TARGET_SOLDIER_KINDS;
-        if self.ordnance.scales[3] > 0.0 {
-            self.target_kind |= 1 << 3;
-        }
         self.extreme_range = self.extreme_range.fmax(self.lock_on_range);
     }
 

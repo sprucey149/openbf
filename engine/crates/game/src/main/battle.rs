@@ -799,6 +799,9 @@ pub(super) fn make_walk_with_counts(
             counts
         };
         walk.opening_wave(opening_counts, !b.spawn_set);
+        // The bots enter over the first 10 s, each on its own seeded delay
+        // (`Sim::stagger_opening_ai`); the humans spawn as before.
+        walk.sim.stagger_opening_ai();
         walk.sim.extra_humans = seated;
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.

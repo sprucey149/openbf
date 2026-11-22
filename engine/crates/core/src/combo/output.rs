@@ -170,12 +170,16 @@ impl ComboRuntime {
         if let Some(lock) = state.find(K::InputLock) {
             let value = number(lock, 0).map(|_| time(lock, 0, clip, duration));
             if value.is_none_or(|t| t <= 0.0 || self.time < t) {
+                // The PS2's InputLock is a seven-bit mask (B2 combo parser,
+                // `All` = 0x7f: thrust, fire, secondary, jump, sprint,
+                // crouch, reload): it never holds the turn, which the
+                // state's TurnFactor slows instead.
                 out.input_lock = conditions::mask(
                     lock,
                     usize::from(value.is_some()),
                     conditions::control,
                     ALL_CONTROLS,
-                );
+                ) & !crate::combo::TURN;
             }
         }
         if let Some(aligned) = state.find(K::AlignedToThrust) {
