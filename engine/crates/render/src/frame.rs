@@ -17,7 +17,9 @@
 //! the finished 3D frame before the overlay;
 //! [`FrameStats`] is what it submitted. The draw-order tests live here.
 
+mod output;
 mod submit;
+pub use output::{Frame, FrameTarget, ViewFov, ViewProjection};
 
 use crate::gpu_timer::GpuTimer;
 use crate::mesh::{GpuMesh, Instance};

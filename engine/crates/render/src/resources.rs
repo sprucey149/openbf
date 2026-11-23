@@ -1,5 +1,30 @@
 //! Allocation policies shared by render passes; instrumentation stays in `made`.
 
+/// Maximum number of per-resolution target sets cached per post-processing pass.
+pub(crate) const MAX_CACHED_SIZES: usize = 4;
+
+/// Move a matching cached target entry to the most-recently-used back slot, or
+/// return `false` if none matches.
+pub(crate) fn touch_cached<T>(cache: &mut Vec<T>, matches: impl FnMut(&T) -> bool) -> bool {
+    let Some(idx) = cache.iter().position(matches) else {
+        return false;
+    };
+    if idx + 1 != cache.len() {
+        let entry = cache.remove(idx);
+        cache.push(entry);
+    }
+    true
+}
+
+/// Insert a newly allocated target entry, evicting the least-recently-used one
+/// once [`MAX_CACHED_SIZES`] is reached.
+pub(crate) fn push_cached<T>(cache: &mut Vec<T>, entry: T) {
+    if cache.len() >= MAX_CACHED_SIZES {
+        cache.remove(0);
+    }
+    cache.push(entry);
+}
+
 pub(crate) fn buffer(
     device: &wgpu::Device,
     label: &str,

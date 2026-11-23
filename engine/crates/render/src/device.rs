@@ -335,6 +335,12 @@ impl Renderer {
         &self.device
     }
 
+    /// Command queue paired with [`Self::device`], for callers sampling or
+    /// copying an offscreen [`FrameTarget`](crate::FrameTarget).
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
     /// Block until the GPU has finished everything submitted so far.
     ///
     /// `render_frame` returns as soon as the queue is submitted, so timing it

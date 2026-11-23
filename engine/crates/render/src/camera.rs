@@ -4,7 +4,7 @@
 //! - `yaw = 0, pitch = 0` looks down **-Z**.
 //! - `yaw` rotates around **+Y**; positive yaw turns **left** (toward -X).
 //! - `pitch` rotates around the camera's right axis; positive pitch looks **up**.
-//! - Projection is `glam::Mat4::perspective_rh` (0..1 depth, wgpu clip space).
+//! - Projection uses reverse-Z in wgpu clip space (1 at near, 0 at far).
 //!
 //! Adapted from an earlier project's camera (`build_uniform`: `look_to_rh` + `perspective_rh`,
 //! view_proj = proj * view), simplified to a

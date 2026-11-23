@@ -316,10 +316,10 @@ impl SunShadow {
         r: &Renderer,
         encoder: &mut wgpu::CommandEncoder,
         frame: &wgpu::Texture,
+        depth_view: &wgpu::TextureView,
     ) -> u32 {
         let stencil = !r.shadows.is_empty();
-        let scene_depth = r
-            .depth_view
+        let scene_depth = depth_view
             .texture()
             .create_view(&wgpu::TextureViewDescriptor {
                 aspect: wgpu::TextureAspect::DepthOnly,
@@ -341,7 +341,7 @@ impl SunShadow {
         });
         if stencil {
             let view = frame.create_view(&Default::default());
-            r.shadows.write_stencil(encoder, &view, &r.depth_view);
+            r.shadows.write_stencil(encoder, &view, depth_view);
         }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sun shadow composite"),
@@ -355,7 +355,7 @@ impl SunShadow {
                 },
             })],
             depth_stencil_attachment: stencil.then_some(wgpu::RenderPassDepthStencilAttachment {
-                view: &r.depth_view,
+                view: depth_view,
                 depth_ops: None,
                 stencil_ops: None,
             }),

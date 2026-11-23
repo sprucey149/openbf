@@ -80,7 +80,7 @@ pub(crate) struct FilterState {
     params_buf: wgpu::Buffer,
     /// Two texels a sample (`box_sum` in the shader).
     sampler: wgpu::Sampler,
-    dest: Option<FilterDest>,
+    dests: Vec<FilterDest>,
     copyable: bool,
     warned: bool,
 }
@@ -164,7 +164,7 @@ impl FilterState {
             bgl,
             params_buf,
             sampler,
-            dest: None,
+            dests: Vec::new(),
             copyable,
             warned: false,
         }
@@ -245,7 +245,7 @@ impl Renderer {
         let mut words = params(&p, h);
         words[3] = f.softness;
         queue.write_buffer(&f.params_buf, 0, bytemuck::cast_slice(&words));
-        if matches!(&f.dest, Some(d) if (d.w, d.h) == (w, h)) {
+        if crate::resources::touch_cached(&mut f.dests, |d| (d.w, d.h) == (w, h)) {
             return;
         }
         // The copy carries a view without the sRGB suffix: `textureLoad`
@@ -299,14 +299,17 @@ impl Renderer {
                 ],
             },
         );
-        f.dest = Some(FilterDest {
-            copy,
-            rows_view,
-            rows_bg,
-            bg,
-            w,
-            h,
-        });
+        crate::resources::push_cached(
+            &mut f.dests,
+            FilterDest {
+                copy,
+                rows_view,
+                rows_bg,
+                bg,
+                w,
+                h,
+            },
+        );
     }
 
     /// Copy `src` (the finished 3D frame) and draw the filter over `view`:
@@ -335,7 +338,7 @@ impl Renderer {
         src: &wgpu::Texture,
         view: &wgpu::TextureView,
     ) -> u32 {
-        let Some(d) = &f.dest else {
+        let Some(d) = f.dests.last() else {
             return 0;
         };
         encoder.copy_texture_to_texture(

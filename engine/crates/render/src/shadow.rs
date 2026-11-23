@@ -406,7 +406,14 @@ impl ShadowState {
     }
 }
 impl crate::Renderer {
-    /// Submit BF1 shadow triangles for the next frame only; an empty slice disables the pass.
+    /// Submit BF1 shadow triangles for the next logical frame only; an empty
+    /// slice disables the pass.
+    ///
+    /// When rendering multiple views through [`Renderer::begin_frame`], queued
+    /// triangles remain active across every view in that [`Frame`](crate::Frame)
+    /// and are cleared automatically when the frame finishes or drops.
+    /// Standalone calls to [`Renderer::render_frame`] and
+    /// [`Renderer::render_frame_to`] clear the queue after rendering.
     pub fn set_shadow_triangles(&mut self, triangles: &[[f32; 3]]) {
         self.shadows.vertices.clear();
         self.shadows.vertices.extend_from_slice(triangles);

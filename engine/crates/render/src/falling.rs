@@ -216,23 +216,25 @@ impl Renderer {
             ..Default::default()
         };
     }
-    pub(crate) fn falling_draws(&mut self, camera: &Camera) -> Vec<ParticleDraw> {
-        let Some(texture) = self.falling.texture else {
-            return Vec::new();
-        };
-        if !self.falling.emitters.iter().any(|e| e.count > 0) {
-            return Vec::new();
+    pub(crate) fn update_falling(&mut self, camera: &Camera, (w, h): (u32, u32)) {
+        if self.falling.texture.is_none() || !self.falling.emitters.iter().any(|e| e.count > 0) {
+            return;
         }
-        let (w, h) = match &self.target {
-            crate::Target::Window { config, .. } => (config.width, config.height),
-            crate::Target::Headless { width, height, .. } => (*width, *height),
-        };
         self.falling.update(
             &self.leaves.objects,
             camera,
             w as f32 / h.max(1) as f32,
             self.falling.clock.unwrap_or(self.water_time),
         );
+    }
+
+    pub(crate) fn falling_draw_list(&self) -> Vec<ParticleDraw> {
+        let Some(texture) = self.falling.texture else {
+            return Vec::new();
+        };
+        if !self.falling.emitters.iter().any(|e| e.count > 0) {
+            return Vec::new();
+        }
         let mut draws: Vec<_> = self
             .falling
             .leaves

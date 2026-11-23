@@ -110,7 +110,7 @@ pub use dust::{Dust, DustConfig};
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
 pub use fog_cloud::FogCloud;
-pub use frame::{FrameStats, OverlayFn};
+pub use frame::{Frame, FrameStats, FrameTarget, OverlayFn, ViewFov, ViewProjection};
 pub use frame_ab::FrameAb;
 pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes};
 pub use leaf::{LeafClass, LeafObject, LeafSprite};

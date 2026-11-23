@@ -97,7 +97,9 @@ impl Mesh {
         }
     }
 }
-pub(super) fn build(config: &SunFlare, p: &[[f32; 4]; 10]) -> Vec<Vertex> {
+/// `center` is the pixel the view's forward ray meets: the image center for
+/// a symmetric camera, or the frustum's optical center for an asymmetric one.
+pub(super) fn build(config: &SunFlare, p: &[[f32; 4]; 10], center: Vec2) -> Vec<Vertex> {
     let origin = Vec2::new(p[0][0], p[0][1]);
     let scale = p[0][2];
     let source_radius = config.size * scale;
@@ -139,9 +141,8 @@ pub(super) fn build(config: &SunFlare, p: &[[f32; 4]; 10]) -> Vec<Vertex> {
             2.0,
         );
     }
-    let center = viewport * 0.5;
     let axis = origin - center;
-    let ndc = axis / center;
+    let ndc = axis / (viewport * 0.5);
     let fade = (1.0 - ndc.length_squared() * 0.5).max(0.0);
     let alpha_byte = (fade * p[7][3]).round();
     let [focal, facing, distance, alignment] = p[9];

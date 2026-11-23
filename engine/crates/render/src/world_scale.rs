@@ -93,6 +93,17 @@ impl WorldScale {
         if let Some(t) = self.targets.iter().find(|t| t.size == size) {
             return t.clone();
         }
+        let target = self.make_target(device, format, size);
+        self.targets.push(target.clone());
+        target
+    }
+
+    pub(super) fn make_target(
+        &self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        size: [u32; 2],
+    ) -> WorldTarget {
         let texture = crate::resources::texture_2d(
             device,
             "world target",
@@ -121,15 +132,13 @@ impl WorldScale {
                 ],
             },
         );
-        let target = WorldTarget {
+        WorldTarget {
             size,
             texture,
             view,
             depth: crate::device::create_depth_texture(device, size[0], size[1]),
             bind_group,
-        };
-        self.targets.push(target.clone());
-        target
+        }
     }
 
     /// Forget the targets: the window changed, and the sizes with it.
