@@ -6,6 +6,7 @@
 use super::missions::MaterializedMissions;
 use super::scan::{ci_path, detect_dlc, detect_hero_sounds, BuildPlan, GameId, GameSource};
 use super::ExecCtx;
+use crate::config::Platform;
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -40,6 +41,7 @@ const BF2_COMBO_SIDES: &[&str] = &[
 pub struct BakeTrees {
     pub bf1: Option<PathBuf>,
     pub bf2: PathBuf,
+    pub donors: DonorTrees,
     pub bf2_iso: Option<PathBuf>,
     pub lua_root: PathBuf,
     pub out_dir: PathBuf,
@@ -52,6 +54,95 @@ impl BakeTrees {
         let bf1 = self.bf1.as_deref().map(|tree| (GameId::Bf1, tree));
         bf1.into_iter().chain([(GameId::Bf2, self.bf2.as_path())])
     }
+}
+
+/// The LVL roots of the donor copies beside each game's primary: a PC
+/// install's `_LVL_PC` and an extracted Xbox disc's `_LVL_XBOX`
+/// (`rebake.sh`'s `PC1`, `PC2`, `XB1`, `XB2`).
+#[derive(Debug, Default)]
+pub struct DonorTrees {
+    pub pc1: Option<PathBuf>,
+    pub pc2: Option<PathBuf>,
+    pub xb1: Option<PathBuf>,
+    pub xb2: Option<PathBuf>,
+}
+
+impl DonorTrees {
+    /// Record `tree` as `game`'s `platform` donor. A PS2 copy is always the
+    /// primary, never a donor.
+    pub fn set(&mut self, game: GameId, platform: Platform, tree: PathBuf) {
+        let slot = match (game, platform) {
+            (GameId::Bf1, Platform::Pc) => &mut self.pc1,
+            (GameId::Bf2, Platform::Pc) => &mut self.pc2,
+            (GameId::Bf1, Platform::Xbox) => &mut self.xb1,
+            (GameId::Bf2, Platform::Xbox) => &mut self.xb2,
+            (_, Platform::Ps2) => return,
+        };
+        *slot = Some(tree);
+    }
+
+    fn pc(&self, game: GameId) -> Option<&Path> {
+        match game {
+            GameId::Bf1 => self.pc1.as_deref(),
+            GameId::Bf2 => self.pc2.as_deref(),
+        }
+    }
+
+    fn xbox(&self, game: GameId) -> Option<&Path> {
+        match game {
+            GameId::Bf1 => self.xb1.as_deref(),
+            GameId::Bf2 => self.xb2.as_deref(),
+        }
+    }
+
+    /// `game`'s donor roots, the PC's first.
+    fn roots(&self, game: GameId) -> impl Iterator<Item = &Path> {
+        self.pc(game).into_iter().chain(self.xbox(game))
+    }
+
+    /// Every donor copy of the LVL at `rel` that exists, comma-joined as one
+    /// argument, the PC's first (`rebake.sh` `map_donors` / `side_donors`);
+    /// `None` when there is none.
+    fn lvl(&self, game: GameId, rel: &str) -> Option<String> {
+        let found: Vec<String> = self
+            .roots(game)
+            .map(|root| ci_path(root, rel))
+            .filter(|p| p.is_file())
+            .map(|p| s(&p))
+            .collect();
+        (!found.is_empty()).then(|| found.join(","))
+    }
+
+    /// The donor copies of `game`'s CORE.LVL (`rebake.sh` `FONT_DONORS`).
+    fn cores(&self, game: GameId) -> Vec<String> {
+        self.roots(game)
+            .map(|root| ci_path(root, "CORE.LVL"))
+            .filter(|p| p.is_file())
+            .map(|p| s(&p))
+            .collect()
+    }
+
+    /// `--donor <root>` for each donor root (`rebake.sh` `fpm_donors`).
+    fn fpm_args(&self, game: GameId) -> Vec<String> {
+        self.roots(game)
+            .filter(|root| root.is_dir())
+            .flat_map(|root| ["--donor".to_owned(), s(root)])
+            .collect()
+    }
+
+    /// The PC donor's `SOUND/COMMON.BNK`, whose own recordings replace the
+    /// samples a console disc aliases (`rebake.sh` `donor_bnk`).
+    fn sound_bank(&self, game: GameId) -> Option<PathBuf> {
+        self.pc(game)
+            .map(|root| ci_path(root, "SOUND/COMMON.BNK"))
+            .filter(|p| p.is_file())
+    }
+}
+
+/// `args` with `donor` appended when there is one.
+fn with_donor(mut args: Vec<String>, donor: Option<String>) -> Vec<String> {
+    args.extend(donor);
+    args
 }
 
 fn s(p: &Path) -> String {
@@ -110,21 +201,27 @@ fn bake_tat(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
     if let Some(b1) = &trees.bf1 {
         ctx.log("== TAT1 (BF1) ==");
         ctx.run_bake(
-            &[
-                "map".into(),
-                s(&ci_path(b1, "TAT/TAT1.LVL")),
-                s(&trees.out_dir.join("tat1")),
-            ],
+            &with_donor(
+                vec![
+                    "map".into(),
+                    s(&ci_path(b1, "TAT/TAT1.LVL")),
+                    s(&trees.out_dir.join("tat1")),
+                ],
+                trees.donors.lvl(GameId::Bf1, "TAT/TAT1.LVL"),
+            ),
             &[],
         )?;
     }
     ctx.log("== TAT2 (BF2) ==");
     ctx.run_bake(
-        &[
-            "map".into(),
-            s(&ci_path(&trees.bf2, "TAT/TAT2.LVL")),
-            s(&trees.out_dir.join("tat2")),
-        ],
+        &with_donor(
+            vec![
+                "map".into(),
+                s(&ci_path(&trees.bf2, "TAT/TAT2.LVL")),
+                s(&trees.out_dir.join("tat2")),
+            ],
+            trees.donors.lvl(GameId::Bf2, "TAT/TAT2.LVL"),
+        ),
         &[],
     )
 }
@@ -156,6 +253,18 @@ fn bake_common(
         ],
         &[],
     )?;
+    // Fonts keep the primary's layout metrics; donors lend matching glyph art
+    // and larger same-art UI sheets (`rebake.sh` FONT_DONORS).
+    let core2 = s(&ci_path(&trees.bf2, "CORE.LVL"));
+    let font_donors2 = trees.donors.cores(GameId::Bf2);
+    if !font_donors2.is_empty() {
+        let mut fonts = vec!["fonts".into(), core2.clone(), s(&out2), String::new()];
+        fonts.extend(font_donors2.iter().cloned());
+        ctx.run_bake(&fonts, &[])?;
+        let mut art = vec!["ui-art".into(), core2, s(&out2)];
+        art.extend(font_donors2);
+        ctx.run_bake(&art, &[])?;
+    }
 
     if let Some(b1) = &trees.bf1 {
         ctx.run_bake(
@@ -187,23 +296,27 @@ fn bake_common(
         &[],
     )?;
 
-    if matches!(plan.bf2, GameSource::XboxIso(_)) {
-        let xbox_common = ci_path(&trees.bf2, "common.lvl");
+    let xbox_bf2 = if matches!(plan.bf2, GameSource::XboxIso(_)) {
+        Some(trees.bf2.as_path())
+    } else {
+        trees.donors.xbox(GameId::Bf2)
+    };
+    if let Some(xbox) = xbox_bf2 {
+        let xbox_common = ci_path(xbox, "common.lvl");
         if xbox_common.is_file() {
             ctx.run_bake(&["xbox-icons".into(), s(&xbox_common), s(&out2)], &[])?;
         }
     }
 
     if let Some(b1) = &trees.bf1 {
-        ctx.run_bake(
-            &[
-                "fonts".into(),
-                s(&ci_path(b1, "CORE.LVL")),
-                s(&out1),
-                "bf1_".into(),
-            ],
-            &[],
-        )?;
+        let mut fonts = vec![
+            "fonts".into(),
+            s(&ci_path(b1, "CORE.LVL")),
+            s(&out1),
+            "bf1_".into(),
+        ];
+        fonts.extend(trees.donors.cores(GameId::Bf1));
+        ctx.run_bake(&fonts, &[])?;
     }
 
     // Shell movies + campaign cutscenes/crawls.
@@ -265,7 +378,13 @@ fn bake_common(
     let gal_lvl = ci_path(&trees.bf2, "GAL/GAL1.LVL");
     if gal_lvl.is_file() {
         let gal_out = trees.out_dir.join("bf2_gal1");
-        ctx.run_bake(&["map".into(), s(&gal_lvl), s(&gal_out)], &[])?;
+        ctx.run_bake(
+            &with_donor(
+                vec!["map".into(), s(&gal_lvl), s(&gal_out)],
+                trees.donors.lvl(GameId::Bf2, "GAL/GAL1.LVL"),
+            ),
+            &[],
+        )?;
         let gal_snd = ci_path(&trees.bf2, "SOUND/GAL.LVL");
         if gal_snd.is_file() {
             ctx.run_bake(
@@ -304,13 +423,17 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
             ("SIDE/REP.LVL", "rep_inf_arctrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper"),
             ("SIDE/CIS.LVL", "cis_inf_bdroid,cis_inf_sbdroid"),
         ] {
-            ctx.run_bake(&[
-                    "soldier".into(),
-                    s(&ci_path(b1, lvl)),
-                    bodies.into(),
-                    s(&side1_out),
-                    a1s.clone(),
-                ],
+            ctx.run_bake(
+                &with_donor(
+                    vec![
+                        "soldier".into(),
+                        s(&ci_path(b1, lvl)),
+                        bodies.into(),
+                        s(&side1_out),
+                        a1s.clone(),
+                    ],
+                    trees.donors.lvl(GameId::Bf1, lvl),
+                ),
                 &env,
             )?;
         }
@@ -325,13 +448,17 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         ("SIDE/ALL.LVL", "all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie"),
         ("SIDE/IMP.LVL", "imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper"),
     ] {
-        ctx.run_bake(&[
-                "soldier".into(),
-                s(&ci_path(&trees.bf2, lvl)),
-                bodies.into(),
-                s(&side2_out),
-                a2_str.clone(),
-            ],
+        ctx.run_bake(
+            &with_donor(
+                vec![
+                    "soldier".into(),
+                    s(&ci_path(&trees.bf2, lvl)),
+                    bodies.into(),
+                    s(&side2_out),
+                    a2_str.clone(),
+                ],
+                trees.donors.lvl(GameId::Bf2, lvl),
+            ),
             &bf2_prone_env,
         )?;
     }
@@ -398,7 +525,13 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
             ("SIDE/REP.LVL", "rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle,rep_weap_inf_landmine"),
             ("SIDE/CIS.LVL", "cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_sniperrifle"),
         ] {
-            ctx.run_bake(&["weapon".into(), s(&ci_path(b1, lvl)), weaps.into(), s(&side1_out)], &[])?;
+            ctx.run_bake(
+                &with_donor(
+                    vec!["weapon".into(), s(&ci_path(b1, lvl)), weaps.into(), s(&side1_out)],
+                    trees.donors.lvl(GameId::Bf1, lvl),
+                ),
+                &[],
+            )?;
         }
     }
 
@@ -406,28 +539,41 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         ("SIDE/REP.LVL", "rep_weap_inf_chaingun,rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle"),
         ("SIDE/CIS.LVL", "cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_rifle,cis_weap_inf_sniperrifle,hud_cis_wristblaster,hud_cis_trishot,hud_cis_wristrocket,hud_droideka_shield"),
     ] {
-        ctx.run_bake(&["weapon".into(), s(&ci_path(&trees.bf2, lvl)), weaps.into(), s(&side2_out)], &[])?;
+        ctx.run_bake(
+            &with_donor(
+                vec!["weapon".into(), s(&ci_path(&trees.bf2, lvl)), weaps.into(), s(&side2_out)],
+                trees.donors.lvl(GameId::Bf2, lvl),
+            ),
+            &[],
+        )?;
     }
 
+    let cis2_donor = trees.donors.lvl(GameId::Bf2, "SIDE/CIS.LVL");
     if let (Some(b1), Some(a1s)) = (&trees.bf1, &a1_str) {
         ctx.run_bake(
-            &[
-                "droid-chunks".into(),
-                s(&ci_path(b1, "SIDE/CIS.LVL")),
-                s(&ci_path(&trees.bf2, "SIDE/CIS.LVL")),
-                a1s.clone(),
-                s(&trees.out_dir),
-            ],
+            &with_donor(
+                vec![
+                    "droid-chunks".into(),
+                    s(&ci_path(b1, "SIDE/CIS.LVL")),
+                    s(&ci_path(&trees.bf2, "SIDE/CIS.LVL")),
+                    a1s.clone(),
+                    s(&trees.out_dir),
+                ],
+                cis2_donor,
+            ),
             &[],
         )?;
     } else {
         ctx.run_bake(
-            &[
-                "droid-chunks".into(),
-                "--bf2-only".into(),
-                s(&ci_path(&trees.bf2, "SIDE/CIS.LVL")),
-                s(&trees.out_dir),
-            ],
+            &with_donor(
+                vec![
+                    "droid-chunks".into(),
+                    "--bf2-only".into(),
+                    s(&ci_path(&trees.bf2, "SIDE/CIS.LVL")),
+                    s(&trees.out_dir),
+                ],
+                cis2_donor,
+            ),
             &[],
         )?;
     }
@@ -436,7 +582,13 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         ("SIDE/ALL.LVL", "all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle"),
         ("SIDE/IMP.LVL", "imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle"),
     ] {
-        ctx.run_bake(&["weapon".into(), s(&ci_path(&trees.bf2, lvl)), weaps.into(), s(&side2_out)], &[])?;
+        ctx.run_bake(
+            &with_donor(
+                vec!["weapon".into(), s(&ci_path(&trees.bf2, lvl)), weaps.into(), s(&side2_out)],
+                trees.donors.lvl(GameId::Bf2, lvl),
+            ),
+            &[],
+        )?;
     }
 
     if let Some(a1s) = &a1_str {
@@ -470,11 +622,13 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
     // First-person cockpits (FPM).
     if let (Some(b1), Some(a1s)) = (&trees.bf1, &a1_str) {
         let mut args = vec!["fpm".into(), a1s.clone(), s(&side1_out)];
+        args.extend(trees.donors.fpm_args(GameId::Bf1));
         args.extend(collect_fpm_lvls(b1));
         ctx.run_bake(&args, &[])?;
     }
     {
         let mut args = vec!["fpm".into(), a2_str.clone(), s(&side2_out)];
+        args.extend(trees.donors.fpm_args(GameId::Bf2));
         args.extend(collect_fpm_lvls(&trees.bf2));
         ctx.run_bake(&args, &[])?;
     }
@@ -536,12 +690,19 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
             ("SIDE/GUN.LVL", "gun"),
             ("TAT/TAT1.LVL", "tat1"),
         ] {
+            // `rebake.sh` passes the side donors to the four sides only, not GUN or TAT1.
+            let donor = matches!(name, "all" | "cis" | "imp" | "rep")
+                .then(|| trees.donors.lvl(GameId::Bf1, lvl))
+                .flatten();
             ctx.run_bake(
-                &[
-                    "vehicle".into(),
-                    s(&ci_path(b1, lvl)),
-                    s(&side1_out.join("vehicles").join(name)),
-                ],
+                &with_donor(
+                    vec![
+                        "vehicle".into(),
+                        s(&ci_path(b1, lvl)),
+                        s(&side1_out.join("vehicles").join(name)),
+                    ],
+                    donor,
+                ),
                 &[],
             )?;
         }
@@ -553,11 +714,14 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         ("SIDE/CIS.LVL", "cis"),
     ] {
         ctx.run_bake(
-            &[
-                "vehicle".into(),
-                s(&ci_path(&trees.bf2, lvl)),
-                s(&side2_out.join("vehicles").join(name)),
-            ],
+            &with_donor(
+                vec![
+                    "vehicle".into(),
+                    s(&ci_path(&trees.bf2, lvl)),
+                    s(&side2_out.join("vehicles").join(name)),
+                ],
+                trees.donors.lvl(GameId::Bf2, lvl),
+            ),
             &[],
         )?;
     }
@@ -754,23 +918,27 @@ fn bake_map_sound(
     dir_name: &str,
     short: &str,
     core: &Path,
+    donor_bnk: Option<&Path>,
 ) -> Result<()> {
     let planet = short[..3.min(short.len())].to_ascii_uppercase();
     let sf = ci_path(sound_root, &format!("SOUND/{planet}.LVL"));
     if sf.is_file() {
-        ctx.run_bake(
-            &["sounds".into(), s(&sf), s(&out_dir.join(dir_name)), s(core)],
-            &[],
-        )?;
+        let mut args = vec!["sounds".into(), s(&sf), s(&out_dir.join(dir_name)), s(core)];
+        if let Some(bnk) = donor_bnk {
+            args.extend(["--donor-bnk".to_owned(), s(bnk)]);
+        }
+        ctx.run_bake(&args, &[])?;
     }
     Ok(())
 }
 
 fn bake_sounds(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
     ctx.log("== map sound banks ==");
+    let d1 = trees.donors.sound_bank(GameId::Bf1);
+    let d2 = trees.donors.sound_bank(GameId::Bf2);
     if let Some(b1) = &trees.bf1 {
         let c1 = ci_path(b1, "CORE.LVL");
-        bake_map_sound(ctx, b1, &trees.out_dir, "tat1", "tat1", &c1)?;
+        bake_map_sound(ctx, b1, &trees.out_dir, "tat1", "tat1", &c1, d1.as_deref())?;
         for map in BF1_MAPS {
             let short = map.rsplit('/').next().unwrap().to_ascii_lowercase();
             bake_map_sound(
@@ -780,11 +948,12 @@ fn bake_sounds(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
                 &format!("bf1_{short}"),
                 &short,
                 &c1,
+                d1.as_deref(),
             )?;
         }
     }
     let c2 = ci_path(&trees.bf2, "CORE.LVL");
-    bake_map_sound(ctx, &trees.bf2, &trees.out_dir, "tat2", "tat2", &c2)?;
+    bake_map_sound(ctx, &trees.bf2, &trees.out_dir, "tat2", "tat2", &c2, d2.as_deref())?;
     for map in BF2_MAPS {
         let short = map.rsplit('/').next().unwrap().to_ascii_lowercase();
         bake_map_sound(
@@ -794,6 +963,7 @@ fn bake_sounds(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
             &format!("bf2_{short}"),
             &short,
             &c2,
+            d2.as_deref(),
         )?;
     }
     for (spa, _) in BF2_SPACE_MAPS {
@@ -806,6 +976,7 @@ fn bake_sounds(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
                 &format!("bf2_{short}"),
                 &short,
                 &c2,
+                None,
             )?;
         }
     }
@@ -937,11 +1108,14 @@ fn bake_maps(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
                 .out_dir
                 .join(format!("bf1_{}", short.to_ascii_lowercase()));
             ctx.run_bake(
-                &[
-                    "map".into(),
-                    s(&ci_path(b1, &format!("{map}.LVL"))),
-                    s(&dir),
-                ],
+                &with_donor(
+                    vec![
+                        "map".into(),
+                        s(&ci_path(b1, &format!("{map}.LVL"))),
+                        s(&dir),
+                    ],
+                    trees.donors.lvl(GameId::Bf1, &format!("{map}.LVL")),
+                ),
                 &[],
             )?;
             let lf = ci_path(b1, &format!("LOAD/{short}.LVL"));
@@ -956,11 +1130,14 @@ fn bake_maps(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
             .out_dir
             .join(format!("bf2_{}", short.to_ascii_lowercase()));
         ctx.run_bake(
-            &[
-                "map".into(),
-                s(&ci_path(&trees.bf2, &format!("{map}.LVL"))),
-                s(&dir),
-            ],
+            &with_donor(
+                vec![
+                    "map".into(),
+                    s(&ci_path(&trees.bf2, &format!("{map}.LVL"))),
+                    s(&dir),
+                ],
+                trees.donors.lvl(GameId::Bf2, &format!("{map}.LVL")),
+            ),
             &[],
         )?;
         let lf = ci_path(&trees.bf2, &format!("LOAD/{short}.LVL"));
@@ -994,17 +1171,12 @@ fn bake_maps(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         let dir = trees
             .out_dir
             .join(format!("bf2_{}", spa.to_ascii_lowercase()));
-        ctx.run_bake(
-            &[
-                "map".into(),
-                s(&lvl),
-                s(&dir),
-                "--sky-sublevel".into(),
-                s(&sky_lvl),
-                (*sky).into(),
-            ],
-            &[],
-        )?;
+        let mut args = with_donor(
+            vec!["map".into(), s(&lvl), s(&dir)],
+            trees.donors.lvl(GameId::Bf2, &format!("SPA/{spa}.LVL")),
+        );
+        args.extend(["--sky-sublevel".into(), s(&sky_lvl), (*sky).into()]);
+        ctx.run_bake(&args, &[])?;
         if spa_load.is_file() {
             ctx.run_bake(&["loadscreen".into(), s(&spa_load), s(&dir)], &[])?;
         }
@@ -1040,4 +1212,50 @@ fn check_foliage(ctx: &ExecCtx, plan: &BuildPlan, trees: &BakeTrees) -> Result<(
         args.push("bf2".into());
     }
     ctx.run_bake(&args, &[])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn donor_copies_list_the_pc_before_the_xbox_and_skip_missing_files() {
+        let dir = std::env::temp_dir()
+            .join(format!("openbf_launcher_donor_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pc = dir.join("_LVL_PC");
+        let xbox = dir.join("_LVL_XBOX");
+        std::fs::create_dir_all(pc.join("SIDE")).unwrap();
+        std::fs::create_dir_all(xbox.join("SIDE")).unwrap();
+        std::fs::write(pc.join("SIDE").join("REP.LVL"), b"ucfb").unwrap();
+        std::fs::write(xbox.join("SIDE").join("REP.LVL"), b"ucfb").unwrap();
+        std::fs::write(xbox.join("SIDE").join("CIS.LVL"), b"ucfb").unwrap();
+
+        let mut donors = DonorTrees::default();
+        donors.set(GameId::Bf2, Platform::Xbox, xbox.clone());
+        donors.set(GameId::Bf2, Platform::Pc, pc.clone());
+        donors.set(GameId::Bf2, Platform::Ps2, dir.clone());
+
+        let rep = donors.lvl(GameId::Bf2, "SIDE/REP.LVL").unwrap();
+        assert_eq!(
+            rep,
+            format!(
+                "{},{}",
+                s(&ci_path(&pc, "SIDE/REP.LVL")),
+                s(&ci_path(&xbox, "SIDE/REP.LVL"))
+            )
+        );
+        assert_eq!(
+            donors.lvl(GameId::Bf2, "SIDE/CIS.LVL").unwrap(),
+            s(&ci_path(&xbox, "SIDE/CIS.LVL"))
+        );
+        assert_eq!(donors.lvl(GameId::Bf2, "SIDE/ALL.LVL"), None);
+        assert_eq!(donors.lvl(GameId::Bf1, "SIDE/REP.LVL"), None);
+        assert_eq!(
+            donors.fpm_args(GameId::Bf2),
+            vec!["--donor".to_owned(), s(&pc), "--donor".to_owned(), s(&xbox)]
+        );
+        assert!(donors.fpm_args(GameId::Bf1).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

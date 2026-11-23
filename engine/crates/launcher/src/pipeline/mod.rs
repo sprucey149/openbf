@@ -22,7 +22,7 @@ use crate::config::LauncherConfig;
 use crate::paths::{LauncherPaths, EXE_SUFFIX};
 use anyhow::{anyhow, bail, Context, Result};
 use missions::MaterializedMissions;
-use rebake::BakeTrees;
+use rebake::{BakeTrees, DonorTrees};
 use scan::{ci_path, BuildPlan, GameId, GameSource};
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader};
@@ -291,15 +291,31 @@ pub fn run_setup(
         sink,
     };
 
+    let describe = |game: GameId, primary: &GameSource| {
+        let donors: Vec<&str> = plan
+            .donors(game)
+            .iter()
+            .map(|d| d.platform().label())
+            .collect();
+        if donors.is_empty() {
+            primary.platform().label().to_owned()
+        } else {
+            format!(
+                "{}, donors {}",
+                primary.platform().label(),
+                donors.join(" + ")
+            )
+        }
+    };
     match &plan.bf1 {
         Some(bf1) => ctx.log(&format!(
             "Sources: Battlefront I ({}) + Battlefront II ({})",
-            bf1.platform().label(),
-            plan.bf2.platform().label()
+            describe(GameId::Bf1, bf1),
+            describe(GameId::Bf2, &plan.bf2)
         )),
         None => ctx.log(&format!(
             "Sources: Battlefront II only ({}; prone disabled, BF1 maps hidden)",
-            plan.bf2.platform().label()
+            describe(GameId::Bf2, &plan.bf2)
         )),
     }
     if let Some(dlc) = &plan.dlc_dir {
@@ -319,6 +335,13 @@ pub fn run_setup(
         None => None,
     };
     let bf2_tree = prepare_source_tree(&ctx, GameId::Bf2, &plan.bf2, &temp.dir)?;
+    let mut donors = DonorTrees::default();
+    for game in [GameId::Bf1, GameId::Bf2] {
+        for donor in plan.donors(game) {
+            let tree = prepare_source_tree(&ctx, game, donor, &temp.dir)?;
+            donors.set(game, donor.platform(), tree);
+        }
+    }
 
     // Step 3: extract Lua bytecode via embedded scripts.
     ctx.step(3, "extracting Lua scripts");
@@ -326,6 +349,7 @@ pub fn run_setup(
     let trees = BakeTrees {
         bf1: bf1_tree,
         bf2: bf2_tree,
+        donors,
         bf2_iso: plan.bf2.disc_image().map(Path::to_path_buf),
         lua_root: temp.dir.join("lua"),
         out_dir: temp.dir.join("assets_baked"),

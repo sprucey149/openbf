@@ -353,7 +353,7 @@ impl LauncherApp {
             !building,
         );
         if bf1_changed {
-            self.bf1_cleared = self.config.bf1.path.is_none();
+            self.bf1_cleared = !self.config.bf1.has_any();
             changed = true;
         }
         ui.add_space(21.0);
@@ -365,7 +365,7 @@ impl LauncherApp {
             !building,
         );
         if bf2_changed {
-            self.bf2_cleared = self.config.bf2.path.is_none();
+            self.bf2_cleared = !self.config.bf2.has_any();
             changed = true;
         }
         if changed {
@@ -374,7 +374,7 @@ impl LauncherApp {
 
         ui.add_space(24.0);
 
-        let bf1_ok = self.config.bf1.path.is_none() || self.bf1_present;
+        let bf1_ok = !self.config.bf1.has_any() || self.bf1_present;
         let sources_ok = self.bf2_present && bf1_ok;
         let can_build = self.can_build;
         let has_build_panel = self.last_build.is_some();
@@ -391,7 +391,7 @@ impl LauncherApp {
                 };
                 if primary_button(ui, label, Vec2::new(112.0, 32.0), sources_ok && can_build) {
                     let wake = Arc::clone(&self.wake);
-                    let with_bf1 = self.config.bf1.path.is_some();
+                    let with_bf1 = self.config.bf1.has_any();
                     let handle = BuildHandle::start(&self.paths, &self.config, move || wake());
                     self.building_with_bf1 = with_bf1;
                     self.last_build = Some(handle.snapshot());
@@ -497,7 +497,7 @@ impl LauncherApp {
                 .position(|a| *a == self.config.graphics_api)
                 .unwrap_or(0);
             if let Some(new_idx) =
-                dropdown_picker(ui, "graphics_api", 150.0, &labels, cur_idx, true)
+                dropdown_picker(ui, "graphics_api", 150.0, &labels, cur_idx, None, true)
             {
                 self.config.graphics_api = supported[new_idx];
                 changed = true;
@@ -697,33 +697,45 @@ fn source_row(
             .iter()
             .position(|p| *p == source.platform)
             .unwrap_or(0);
-        if let Some(new_idx) = dropdown_picker(ui, id_salt, 100.0, &labels, cur_idx, enabled) {
+        let title: Vec<(&str, bool)> = source
+            .title_parts()
+            .into_iter()
+            .map(|(p, shown)| (p.label(), shown))
+            .collect();
+        if let Some(new_idx) =
+            dropdown_picker(ui, id_salt, 150.0, &labels, cur_idx, Some(&title), enabled)
+        {
             let next = Platform::ALL[new_idx];
             if next != source.platform {
                 source.platform = next;
-                source.path = None;
                 changed = true;
             }
         }
 
-        let action = path_field(ui, &source.display_name(), source.path.is_some(), enabled);
+        let shown = source.platform;
+        let action = path_field(
+            ui,
+            &source.display_name(),
+            source.active_path().is_some(),
+            enabled,
+        );
         match action {
             Some(PathAction::Browse) => {
-                let picked = if source.platform.picks_folder() {
+                let picked = if shown.picks_folder() {
                     pick_folder(&format!("Select {label} (PC) folder"))
                 } else {
                     pick_disc_image(&format!(
                         "Select {label} ({}) disc image",
-                        source.platform.label()
+                        shown.label()
                     ))
                 };
                 if let Some(path) = picked {
-                    source.path = Some(path);
+                    source.set_path(shown, path);
                     changed = true;
                 }
             }
             Some(PathAction::Clear) => {
-                source.path = None;
+                source.clear(shown);
                 changed = true;
             }
             None => {}
@@ -781,12 +793,16 @@ fn paint_gradient(ui: &egui::Ui, rect: Rect, [tl, tr, br, bl]: [Color32; 4]) {
 }
 
 /// Custom 32px-tall white dropdown matching the mockup's `.platform-picker`.
+/// `title` replaces the closed box's text with parts joined by " + ", the
+/// flagged ones bold, cut with "…" when they do not fit; `None` shows the
+/// selected option.
 fn dropdown_picker(
     ui: &mut egui::Ui,
     id_salt: &str,
     width: f32,
     options: &[&str],
     selected: usize,
+    title: Option<&[(&str, bool)]>,
     enabled: bool,
 ) -> Option<usize> {
     let id = ui.make_persistent_id(id_salt);
@@ -813,12 +829,13 @@ fn dropdown_picker(
         StrokeKind::Inside,
     );
     let fg = if enabled { TEXT_PRIMARY } else { TEXT_MUTED };
-    let current = options.get(selected).copied().unwrap_or("");
-    ui.painter().text(
-        Pos2::new(rect.left() + 8.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        current,
-        regular_font(13.0),
+    let current = [(options.get(selected).copied().unwrap_or(""), false)];
+    let galley = ui
+        .painter()
+        .layout_job(picker_title(title.unwrap_or(&current), width - 32.0, fg));
+    ui.painter().galley(
+        Pos2::new(rect.left() + 8.0, rect.center().y - galley.size().y * 0.5),
+        galley,
         fg,
     );
 
@@ -898,6 +915,34 @@ fn dropdown_picker(
 
     ui.ctx().data_mut(|d| d.insert_temp(open_id, is_open));
     picked
+}
+
+/// One line of `parts` joined by " + ", the flagged ones bold, cut with "…"
+/// at `max_width`.
+fn picker_title(parts: &[(&str, bool)], max_width: f32, color: Color32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    for (idx, (text, bold)) in parts.iter().enumerate() {
+        if idx > 0 {
+            job.append(
+                " + ",
+                0.0,
+                egui::TextFormat::simple(regular_font(13.0), color),
+            );
+        }
+        let font = if *bold {
+            bold_font(13.0)
+        } else {
+            regular_font(13.0)
+        };
+        job.append(text, 0.0, egui::TextFormat::simple(font, color));
+    }
+    job.wrap = egui::text::TextWrapping {
+        max_width,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    job
 }
 
 fn readonly_path_box(ui: &mut egui::Ui, text: &str, selected: bool, width: f32) {
