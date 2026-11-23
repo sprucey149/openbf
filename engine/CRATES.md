@@ -1393,5 +1393,5 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `launcher/src/config.rs` 227 — persistent launcher config (BF1/BF2 sources, optional DLC folder, graphics API override) · `LauncherConfig`, `Platform`, `SourceConfig`, `GraphicsApi`.
 - `launcher/src/paths.rs` 321 — release vs checkout path discovery, O(1) `OPENBFPK` footer & BF1-presence check, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `has_valid_pak_footer`, `open_folder`.
 - `launcher/src/runner.rs` 401 — background `scripts/pack.py` runner (BF1+BF2 or BF2-only) with throttled progress updates and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `build_pack_command`, `launch_game`.
-- `launcher/src/ui.rs` 1131 — native `740×450` frameless egui launcher UI with system regular/bold fonts, cached filesystem state, and optional BF1 setup · `LauncherApp`, `Page`, `HostActions`.
+- `launcher/src/ui.rs` 1182 — native `740×450` frameless egui launcher UI with system regular/bold fonts, cached filesystem state, and optional BF1 setup · `LauncherApp`, `Page`, `DotState`, `HostActions`.
 - `launcher/src/main.rs` 320 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling.

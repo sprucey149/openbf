@@ -38,7 +38,16 @@ const BTN_HOVER: Color32 = Color32::from_rgb(0xea, 0xea, 0xe7);
 const BTN_BORDER: Color32 = Color32::from_rgb(0xc7, 0xc7, 0xc5);
 const CLOSE_HOVER: Color32 = Color32::from_rgb(0xc7, 0x42, 0x42);
 const DOT_MISSING: Color32 = Color32::from_rgb(0xc5, 0x45, 0x45);
+const DOT_BUILDING: Color32 = Color32::from_rgb(0xd4, 0x9b, 0x1a);
 const DOT_READY: Color32 = Color32::from_rgb(0x32, 0x9b, 0x50);
+
+/// Status indicator state for Battlefront I / Battlefront II.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DotState {
+    Missing,
+    Building,
+    Ready,
+}
 
 fn regular_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
@@ -73,6 +82,8 @@ pub struct LauncherApp {
     pub built_has_bf1: bool,
     bf1_present: bool,
     bf2_present: bool,
+    bf1_cleared: bool,
+    building_with_bf1: bool,
     has_pack_script: bool,
     build: Option<BuildHandle>,
     last_build: Option<BuildProgress>,
@@ -91,6 +102,8 @@ impl LauncherApp {
             built_has_bf1: false,
             bf1_present: false,
             bf2_present: false,
+            bf1_cleared: false,
+            building_with_bf1: false,
             has_pack_script: false,
             build: None,
             last_build: None,
@@ -144,20 +157,44 @@ impl LauncherApp {
         self.last_build = Some(snap);
         if finished {
             self.build = None;
+            self.building_with_bf1 = false;
             if succeeded {
-                self.refresh_fs_state();
+                self.bf1_cleared = false;
             }
+            self.refresh_fs_state();
         }
     }
 
-    /// Whether a game's status indicator should show green.
-    fn source_status_ready(
-        &self,
-        present: bool,
-        built_present: bool,
-        source: &SourceConfig,
-    ) -> bool {
-        present || (built_present && source.path.is_none())
+    /// Status dot state for Battlefront I:
+    /// - Yellow while a build including BF1 is running.
+    /// - Red while a BF2-only build is running, when BF1 was cleared, or when not set up.
+    /// - Green when the built game includes BF1.
+    pub fn bf1_dot_state(&self) -> DotState {
+        if self.build.is_some() {
+            if self.building_with_bf1 {
+                DotState::Building
+            } else {
+                DotState::Missing
+            }
+        } else if self.built_has_bf1 && !self.bf1_cleared {
+            DotState::Ready
+        } else {
+            DotState::Missing
+        }
+    }
+
+    /// Status dot state for Battlefront II:
+    /// - Yellow while building.
+    /// - Green when the built game is set up and ready.
+    /// - Red otherwise.
+    pub fn bf2_dot_state(&self) -> DotState {
+        if self.build.is_some() {
+            DotState::Building
+        } else if self.game_ready {
+            DotState::Ready
+        } else {
+            DotState::Missing
+        }
     }
 
     /// Install system regular/bold fonts and apply our light theme visuals once.
@@ -305,7 +342,7 @@ impl LauncherApp {
         ui.add_space(30.0);
 
         let mut changed = false;
-        changed |= source_row(
+        let bf1_changed = source_row(
             ui,
             "Battlefront I",
             "platform_bf1",
@@ -313,6 +350,10 @@ impl LauncherApp {
             !building,
             true,
         );
+        if bf1_changed {
+            self.bf1_cleared = self.config.bf1.path.is_none();
+            changed = true;
+        }
         ui.add_space(21.0);
         changed |= source_row(
             ui,
@@ -345,8 +386,10 @@ impl LauncherApp {
                 };
                 if primary_button(ui, label, Vec2::new(112.0, 32.0), sources_ok && has_pack) {
                     let wake = Arc::clone(&self.wake);
+                    let with_bf1 = self.config.bf1.path.is_some();
                     match BuildHandle::start(&self.paths, &self.config, move || wake()) {
                         Ok(handle) => {
+                            self.building_with_bf1 = with_bf1;
                             self.last_build = Some(handle.snapshot());
                             self.build = Some(handle);
                         }
@@ -519,10 +562,8 @@ impl LauncherApp {
 
     fn draw_status_dots(&self, ui: &mut egui::Ui) {
         let content_rect = ui.max_rect();
-        let bf1_ready =
-            self.source_status_ready(self.bf1_present, self.built_has_bf1, &self.config.bf1);
-        let bf2_ready =
-            self.source_status_ready(self.bf2_present, self.game_ready, &self.config.bf2);
+        let bf1_state = self.bf1_dot_state();
+        let bf2_state = self.bf2_dot_state();
 
         // Anchor directly to bottom-right of the main content area
         // (matching `.status { right: 32px; bottom: 28px; gap: 12px }`).
@@ -530,8 +571,8 @@ impl LauncherApp {
         let row2_y = content_rect.bottom() - 8.0;
         let row1_y = row2_y - 28.0;
 
-        paint_status_row(ui.painter(), right_x, row1_y, "Battlefront I", bf1_ready);
-        paint_status_row(ui.painter(), right_x, row2_y, "Battlefront II", bf2_ready);
+        paint_status_row(ui.painter(), right_x, row1_y, "Battlefront I", bf1_state);
+        paint_status_row(ui.painter(), right_x, row2_y, "Battlefront II", bf2_state);
     }
 
     fn draw_window_chrome(&self, ctx: &egui::Context, actions: &mut HostActions) {
@@ -567,11 +608,15 @@ fn paint_status_row(
     right_x: f32,
     center_y: f32,
     label: &str,
-    ready: bool,
+    state: DotState,
 ) {
     let dot_radius = 4.5;
     let dot_center = Pos2::new(right_x - dot_radius, center_y);
-    let dot_color = if ready { DOT_READY } else { DOT_MISSING };
+    let dot_color = match state {
+        DotState::Missing => DOT_MISSING,
+        DotState::Building => DOT_BUILDING,
+        DotState::Ready => DOT_READY,
+    };
     painter.circle_filled(dot_center, dot_radius, dot_color);
 
     // 11px gap between label and dot, text on the LEFT of the dot.
@@ -1106,25 +1151,31 @@ mod tests {
     }
 
     #[test]
-    fn status_dots_reflect_built_game_when_no_override_selected() {
+    fn status_dots_reflect_missing_cleared_building_and_ready() {
         let dir =
             std::env::temp_dir().join(format!("openbf_launcher_dots_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let paths = LauncherPaths::from_exe(&dir.join("openbf-launcher"), None);
         let mut app = LauncherApp::new(paths, || {});
 
-        assert!(!app.source_status_ready(app.bf1_present, app.built_has_bf1, &app.config.bf1));
-        assert!(!app.source_status_ready(app.bf2_present, app.game_ready, &app.config.bf2));
+        // Fresh install: both red.
+        assert_eq!(app.bf1_dot_state(), DotState::Missing);
+        assert_eq!(app.bf2_dot_state(), DotState::Missing);
 
-        // BF2-only build: BF2 dot is green while BF1 dot remains red.
+        // BF2-only built game: BF1 red, BF2 green.
         app.game_ready = true;
-        assert!(!app.source_status_ready(app.bf1_present, app.built_has_bf1, &app.config.bf1));
-        assert!(app.source_status_ready(app.bf2_present, app.game_ready, &app.config.bf2));
+        assert_eq!(app.bf1_dot_state(), DotState::Missing);
+        assert_eq!(app.bf2_dot_state(), DotState::Ready);
 
-        // Full BF1+BF2 build: both dots are green.
+        // Full BF1+BF2 built game: both green.
         app.built_has_bf1 = true;
-        assert!(app.source_status_ready(app.bf1_present, app.built_has_bf1, &app.config.bf1));
-        assert!(app.source_status_ready(app.bf2_present, app.game_ready, &app.config.bf2));
+        assert_eq!(app.bf1_dot_state(), DotState::Ready);
+        assert_eq!(app.bf2_dot_state(), DotState::Ready);
+
+        // Clearing BF1 immediately turns BF1 red while BF2 stays green.
+        app.bf1_cleared = true;
+        assert_eq!(app.bf1_dot_state(), DotState::Missing);
+        assert_eq!(app.bf2_dot_state(), DotState::Ready);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
