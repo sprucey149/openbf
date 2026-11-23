@@ -355,7 +355,8 @@ impl launcher::pipeline::ProgressSink for StdoutSink {
     }
 }
 
-/// `--<bf1|bf2>-<pc|ps2|xbox>` as its game and platform.
+/// `--<bf1|bf2>-<pc|ps2|xbox>` as its game and platform. A game may be
+/// named once per platform; every copy given feeds the build.
 fn source_flag(flag: &str) -> Option<(&str, launcher::config::Platform)> {
     let (game, platform) = flag.strip_prefix("--")?.split_once('-')?;
     let platform = launcher::config::Platform::ALL
@@ -392,7 +393,7 @@ fn run_headless_setup(args: &[String]) -> Result<()> {
                     &mut cfg.bf2
                 };
                 source.platform = platform;
-                source.path = Some(path);
+                source.set_path(platform, path);
             }
         }
     }

@@ -83,7 +83,35 @@ impl GameSource {
 pub struct BuildPlan {
     pub bf1: Option<GameSource>,
     pub bf2: GameSource,
+    /// The other copies of each game: texture, font, sound and model donors
+    /// beside the primary (PC install and/or Xbox disc).
+    pub bf1_donors: Vec<GameSource>,
+    pub bf2_donors: Vec<GameSource>,
     pub dlc_dir: Option<PathBuf>,
+}
+
+/// Which of a game's copies supplies gameplay data and base assets when
+/// several are chosen: PS2, then Xbox, then PC (`scripts/input_scan.py`
+/// `make_plan`). The others become donors.
+const PRIMARY_ORDER: [Platform; 3] = [Platform::Ps2, Platform::Xbox, Platform::Pc];
+
+/// Validate every copy chosen for `game` and split them into the primary
+/// and its donors. `None` when no copy is chosen.
+fn plan_game(
+    game: GameId,
+    source: &crate::config::SourceConfig,
+) -> Result<Option<(GameSource, Vec<GameSource>)>> {
+    let mut copies = Vec::new();
+    for platform in PRIMARY_ORDER {
+        if let Some(path) = source.path(platform) {
+            copies.push(validate_game_source(game, platform, path)?);
+        }
+    }
+    if copies.is_empty() {
+        return Ok(None);
+    }
+    let primary = copies.remove(0);
+    Ok(Some((primary, copies)))
 }
 
 impl BuildPlan {
@@ -91,17 +119,21 @@ impl BuildPlan {
         self.bf1.is_some()
     }
 
+    /// The donor copies of `game`.
+    pub fn donors(&self, game: GameId) -> &[GameSource] {
+        match game {
+            GameId::Bf1 => &self.bf1_donors,
+            GameId::Bf2 => &self.bf2_donors,
+        }
+    }
+
     /// Validate the user's selected BF1, BF2, and optional DLC paths.
     pub fn from_config(config: &LauncherConfig) -> Result<Self> {
-        let bf2_path = config
-            .bf2
-            .path
-            .as_deref()
+        let (bf2, bf2_donors) = plan_game(GameId::Bf2, &config.bf2)?
             .ok_or_else(|| anyhow!("Battlefront II source is required to build"))?;
-        let bf2 = validate_game_source(GameId::Bf2, config.bf2.platform, bf2_path)?;
-        let bf1 = match &config.bf1.path {
-            Some(p) => Some(validate_game_source(GameId::Bf1, config.bf1.platform, p)?),
-            None => None,
+        let (bf1, bf1_donors) = match plan_game(GameId::Bf1, &config.bf1)? {
+            Some((primary, donors)) => (Some(primary), donors),
+            None => (None, Vec::new()),
         };
         let dlc_dir = match &config.dlc_dir {
             Some(p) => {
@@ -112,7 +144,13 @@ impl BuildPlan {
             }
             None => None,
         };
-        Ok(Self { bf1, bf2, dlc_dir })
+        Ok(Self {
+            bf1,
+            bf2,
+            bf1_donors,
+            bf2_donors,
+            dlc_dir,
+        })
     }
 }
 
