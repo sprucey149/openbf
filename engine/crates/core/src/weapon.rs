@@ -680,6 +680,10 @@ pub struct FireInput {
     /// the reserve, then the clip, and nothing reloads. Both cheats: nothing
     /// is drawn at all (an endless weapon's rule).
     pub no_reload: bool,
+    /// `[ours]` The `cooldown` cheat: no firing delay. The refire period, the
+    /// first-salvo wind-up, the between-salvo gap and a chaingun's spin-up all
+    /// resolve instantly, so every gun fires at its fastest cadence.
+    pub no_cooldown: bool,
     /// The AI sniper distance table's yaw term for THIS tick, already scaled
     /// by the shooter's skill (`crate::ai::think` — brief D9). `None` for a
     /// human, for a bot with no target and for any class that fails
@@ -1060,8 +1064,10 @@ impl WeaponState {
         self.clip = self.clip.saturating_sub(cost);
     }
 
-    /// Trigger init (BF1 FUN_00288c58 / BF2 FUN_0032e758).
-    fn trigger(&mut self, c: &WeaponClass, lcg: &mut GameLcg) {
+    /// Trigger init (BF1 FUN_00288c58 / BF2 FUN_0032e758). With the `cooldown`
+    /// cheat, the refire period, the first-salvo wind-up and the spin-up are
+    /// all zero, so every gun fires at its fastest cadence.
+    fn trigger(&mut self, c: &WeaponClass, lcg: &mut GameLcg, no_cooldown: bool) {
         self.charge = if c.max_pressed_time > 0.0 {
             self.refire_accum / c.max_pressed_time
         } else {
@@ -1069,17 +1075,22 @@ impl WeaponState {
         };
         self.stage = c.stage_for(self.charge).min(usize::from(u8::MAX)) as u8;
         self.refire_accum = 0.0;
-        self.refire_time = lcg.uniform(c.shot_delay[0], c.shot_delay[1]);
+        self.refire_time = if no_cooldown { 0.0 } else { lcg.uniform(c.shot_delay[0], c.shot_delay[1]) };
         self.salvo_counter = c.salvo_count;
-        self.salvo_timer = c.initial_salvo_delay;
+        self.salvo_timer = if no_cooldown { 0.0 } else { c.initial_salvo_delay };
         self.spin_down = false;
-        self.spin = c.wind_up;
+        self.spin = if no_cooldown { 0.0 } else { c.wind_up };
     }
 
     /// B2 `FUN_0032ef58`: the firing state may return to idle. A running
     /// spin holds it; a release mid wind-up turns it into a wind-down as far
     /// along as the wind-up got; the cycle's end starts the full wind-down.
-    fn spin_finished(&mut self, c: &WeaponClass, blocked: bool, cheats: (bool, bool)) -> bool {
+    fn spin_finished(
+        &mut self,
+        c: &WeaponClass,
+        blocked: bool,
+        cheats: (bool, bool, bool),
+    ) -> bool {
         if self.spin > 0.0 {
             if !self.spin_down && !self.fire_predicate(c) {
                 self.spin_down = true;
@@ -1100,7 +1111,12 @@ impl WeaponState {
     }
 
     /// FUN_002891c0: the firing state may return to idle.
-    fn cycle_finished(&self, c: &WeaponClass, blocked: bool, cheats: (bool, bool)) -> bool {
+    fn cycle_finished(
+        &self,
+        c: &WeaponClass,
+        blocked: bool,
+        cheats: (bool, bool, bool),
+    ) -> bool {
         self.salvo_counter < 1
             && self.refire_time <= self.refire_accum
             && (c.trigger_single
@@ -1139,9 +1155,10 @@ impl WeaponState {
             blocked,
             infinite_ammo,
             no_reload,
+            no_cooldown,
             ai_dispersion,
         } = input;
-        let cheats = (infinite_ammo, no_reload);
+        let cheats = (infinite_ammo, no_reload, no_cooldown);
         // The PS2's AI writes `weapon+0x138` every aim tick, before anything
         // in the fire cycle can ask for a spread; ours arrives with the pad.
         self.ai_dispersion = ai_dispersion;
@@ -1194,7 +1211,9 @@ impl WeaponState {
         // held charge stopped at ShotDelay / MaxPressedTime (issue #29).
         if c.max_pressed_time > 0.0 && self.state == FireState::Idle && self.fire_cmd == 1 {
             self.refire_accum = 0.0;
-            self.refire_time = c.max_pressed_time;
+            // The `cooldown` cheat: a charge weapon's wind-up resolves
+            // instantly, so it fires at full charge on the first tick.
+            self.refire_time = if no_cooldown { 0.0 } else { c.max_pressed_time };
         }
 
         // Idle → trigger (weapon update state 0: active && fire predicate).
@@ -1206,7 +1225,7 @@ impl WeaponState {
             // A grenade weapon with nothing in the hand does not wind up.
             && (c.thrown.is_none() || self.can_pay(c, infinite_ammo, no_reload))
         {
-            self.trigger(c, lcg);
+            self.trigger(c, lcg, no_cooldown);
             self.state = FireState::Firing;
         }
 
@@ -1250,12 +1269,12 @@ impl WeaponState {
         &mut self,
         dt: f32,
         c: &WeaponClass,
-        gates: (bool, (bool, bool)),
+        gates: (bool, (bool, bool, bool)),
         ring: Option<Ring>,
         lcg: &mut GameLcg,
         shots: &mut Vec<ShotSpec>,
     ) {
-        let (blocked, (infinite_ammo, no_reload)) = gates;
+        let (blocked, (infinite_ammo, no_reload, no_cooldown)) = gates;
         if !self.active {
             self.salvo_counter = 0;
         }
@@ -1276,7 +1295,7 @@ impl WeaponState {
             return;
         }
         loop {
-            let take;
+            let mut take;
             if self.salvo_counter < 1 {
                 // Refire branch: accumulate up to the period, then gate.
                 let deficit = self.refire_time - self.refire_accum;
@@ -1293,7 +1312,16 @@ impl WeaponState {
                 }
                 self.refire_accum -= self.refire_time;
                 self.salvo_counter = c.salvo_count;
-                self.salvo_timer = c.initial_salvo_delay;
+                // The `cooldown` cheat: no between-salvo gap, so a salvo
+                // fires straight away. Same for the refire period at the end
+                // of a full cycle.
+                self.salvo_timer = if no_cooldown { 0.0 } else { c.initial_salvo_delay };
+                // With no delay, `take` would be 0 and the loop never consumes
+                // dt (an infinite spin). Consume just enough to make progress
+                // so the next iteration's salvo branch fires in the same tick.
+                if no_cooldown {
+                    take = FIRE_EPS;
+                }
             } else {
                 if self.salvo_timer <= 0.0 {
                     loop {
@@ -1328,18 +1356,29 @@ impl WeaponState {
                         self.spread = (self.spread + self.spread_mult * c.spread_per_shot)
                             .fmin(c.spread_limit);
                         self.salvo_counter = self.salvo_counter.saturating_sub(1);
-                        self.salvo_timer += lcg.uniform(c.salvo_delay[0], c.salvo_delay[1]);
+                        // The `cooldown` cheat: no between-salvo gap, so
+                        // salvo_timer stays 0 and every salvo fires in one tick.
+                        if !no_cooldown {
+                            self.salvo_timer += lcg.uniform(c.salvo_delay[0], c.salvo_delay[1]);
+                        }
                         if self.salvo_counter < 1 || 0.0 < self.salvo_timer {
                             break;
                         }
                     }
                 }
-                take = if self.salvo_timer < dt_left {
-                    self.salvo_timer
+                // With no delay, salvo_timer is 0, so `take` would be 0 and
+                // the loop never consumes dt. Consume all remaining dt so one
+                // burst fires per tick.
+                if no_cooldown {
+                    take = dt_left;
                 } else {
-                    dt_left
-                };
-                self.salvo_timer -= take;
+                    take = if self.salvo_timer < dt_left {
+                        self.salvo_timer
+                    } else {
+                        dt_left
+                    };
+                    self.salvo_timer -= take;
+                }
             }
             dt_left -= take;
             if dt_left <= FIRE_EPS {

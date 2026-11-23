@@ -50,6 +50,7 @@ fn fi(held: bool, cheat: bool) -> FireInput {
         blocked: false,
         infinite_ammo: cheat,
         no_reload: cheat,
+        no_cooldown: false,
         ai_dispersion: None,
     }
 }
@@ -583,6 +584,7 @@ fn ai_sniper_dispersion_reaches_the_weapon_yaw_slot() {
                 blocked: false,
                 infinite_ammo: true,
                 no_reload: true,
+                no_cooldown: false,
                 ai_dispersion: Some(want),
             },
             &mut lcg,

@@ -1644,12 +1644,13 @@ impl Sim {
             if self.cloak_input(i, None, fire_held, blocked) {
                 continue;
             }
-            let (infinite_ammo, no_reload) = self.ammo_cheats(i);
+            let (infinite_ammo, no_reload, no_cooldown) = self.ammo_cheats(i);
             let input = FireInput {
                 held: fire_held,
                 blocked,
                 infinite_ammo,
                 no_reload,
+                no_cooldown,
                 // Phase C D9: the AI sniper distance table's yaw term, chosen
                 // by this unit's own `think` this tick from its range to its
                 // target (`analysis/re-ai-sniper.md` §2). A player's is
