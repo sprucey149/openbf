@@ -1,0 +1,22 @@
+[package]
+name = "launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "openbf-launcher"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }
+pak = { path = "../pak" }
+pollster = { workspace = true }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal"] }
+ron = { workspace = true }
+serde = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }

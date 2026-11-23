@@ -21,6 +21,7 @@ module's `//!` header is its spec.
 | `audio` | kira playback behind the `backend` feature; the streamed music decoder | pak; kira (optional), anyhow |
 | `net` | LAN multiplayer: host-ordered lockstep transport, reliability, sessions, input scheduler, discovery, `LinkSim` (issue #168) | core; serde, zstd |
 | `game` | the binary + library: assets, viewer, play loop, LAN netplay, goldens | core, manifest, pak, input, render, ui, audio, net; glam, winit, gilrs, ron, serde(_json), gltf, ktx2, wgpu, anyhow, image; Linux/BSD: wayland-client, wayland-backend, wayland-protocols, x11rb (idle inhibit); dev: bake, mungefs |
+| `launcher` | standalone native `openbf-launcher` setup/launch GUI (separate from `game`) | pak; egui(-wgpu, -winit), wgpu, winit, pollster, rfd, ron, serde, anyhow |
 
 Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest`) → `game` → `core`, `render`, `ui`,
 `audio`. Use `scripts/size_report.sh` for current per-crate and total source, test and example counts.
@@ -1386,3 +1387,11 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/tests/suite/flyer_controls.rs` 357 — Classic movement through 45 owned flyer classes, including gunship translation and fighter steering, Geonosis natural spawn provenance and serial headless hangar visibility.
 
 - `game/tests/visual_packs.rs` 88 — explicit owned-payload native GLB/KTX2 imports and stock/install/remove archive checks; CPU only, requires local fixtures.
+
+## launcher — standalone native `openbf-launcher` GUI
+- `launcher/src/lib.rs` 12 — crate root and module exports.
+- `launcher/src/config.rs` 227 — persistent launcher config (BF1/BF2 sources, optional DLC folder, graphics API override) · `LauncherConfig`, `Platform`, `SourceConfig`, `GraphicsApi`.
+- `launcher/src/paths.rs` 281 — release vs checkout path discovery, O(1) `OPENBFPK` footer readiness check, and OS file-manager folder opening · `LauncherPaths`, `has_valid_pak_footer`, `open_folder`.
+- `launcher/src/runner.rs` 391 — background `scripts/pack.py` runner with throttled progress updates and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `build_pack_command`, `launch_game`.
+- `launcher/src/ui.rs` 1105 — native `740×450` frameless egui launcher UI with system regular/bold fonts and cached filesystem state · `LauncherApp`, `Page`, `HostActions`.
+- `launcher/src/main.rs` 320 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling.
