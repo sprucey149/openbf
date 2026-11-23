@@ -243,6 +243,12 @@ fn tables() -> Result<&'static [Table]> {
                 include_str!("../../manifest/data/gameplay/corrections-v1/bf2-pc-programs.json"),
             ),
             (
+                include_str!("../../manifest/data/gameplay/corrections-v1/bf2-pc-gog.json"),
+                include_str!(
+                    "../../manifest/data/gameplay/corrections-v1/bf2-pc-gog-programs.json"
+                ),
+            ),
+            (
                 include_str!("../../manifest/data/gameplay/corrections-v1/bf2-xbox.json"),
                 include_str!("../../manifest/data/gameplay/corrections-v1/bf2-xbox-programs.json"),
             ),
@@ -389,24 +395,58 @@ pub(super) fn correction(
                 .map(move |f| (t, f))
         })
         .collect();
-    match same_bytes_by_path(path, matches).as_slice() {
-        [one] => {
-            // A matching map from a modified install is not a matching source
-            // revision. Check the owning gameplay roots as well as this LVL.
-            if let Some(root) = source_root(path) {
-                for name in ["core.lvl", "mission.lvl"] {
-                    let expected = one.0.files.iter().find(|f| f.file.eq_ignore_ascii_case(name))
-                        .context("correction table lacks a source root fingerprint")?;
-                    let input = crate::join_ci(&root, name);
-                    let original = std::fs::read(&input).with_context(|| input.display().to_string())?;
-                    if digest(&original) != expected.sha256 {
-                        bail!("{}: unknown {platform} gameplay source root fingerprint; no corrections were applied", input.display());
-                    }
-                }
+    let matches = same_bytes_by_path(path, matches);
+    if matches.is_empty() {
+        bail!("{}: unknown {platform} gameplay source fingerprint {hash}; no corrections were applied. Supply a supported unmodified source or regenerate and review its PS2 corrections", path.display());
+    }
+    // A matching map from a modified install is not a matching source revision,
+    // and multiple official releases (e.g. Steam vs GOG v1.1) can share identical
+    // map/mission bytes while differing in core.lvl. Filter candidates against
+    // the owning install's core.lvl and mission.lvl fingerprints.
+    if let Some(root) = source_root(path) {
+        let core_path = crate::join_ci(&root, "core.lvl");
+        let mission_path = crate::join_ci(&root, "mission.lvl");
+        let core_hash = digest(
+            &std::fs::read(&core_path).with_context(|| core_path.display().to_string())?,
+        );
+        let mission_hash = digest(
+            &std::fs::read(&mission_path).with_context(|| mission_path.display().to_string())?,
+        );
+        let mut root_matched = Vec::new();
+        for &(table, file) in &matches {
+            let exp_core = table
+                .files
+                .iter()
+                .find(|f| f.file.eq_ignore_ascii_case("core.lvl"))
+                .context("correction table lacks a source root fingerprint")?;
+            let exp_mission = table
+                .files
+                .iter()
+                .find(|f| f.file.eq_ignore_ascii_case("mission.lvl"))
+                .context("correction table lacks a source root fingerprint")?;
+            if core_hash == exp_core.sha256 && mission_hash == exp_mission.sha256 {
+                root_matched.push((table, file));
             }
-            Ok(Some(*one))
         }
-        [] => bail!("{}: unknown {platform} gameplay source fingerprint {hash}; no corrections were applied. Supply a supported unmodified source or regenerate and review its PS2 corrections", path.display()),
+        return match root_matched.as_slice() {
+            [one] => Ok(Some(*one)),
+            [] => {
+                let bad = if matches.iter().any(|(t, _)| {
+                    t.files
+                        .iter()
+                        .any(|f| f.file.eq_ignore_ascii_case("core.lvl") && f.sha256 == core_hash)
+                }) {
+                    mission_path
+                } else {
+                    core_path
+                };
+                bail!("{}: unknown {platform} gameplay source root fingerprint; no corrections were applied", bad.display());
+            }
+            _ => bail!("{}: ambiguous gameplay source fingerprint {hash}", path.display()),
+        };
+    }
+    match matches.as_slice() {
+        [one] => Ok(Some(*one)),
         _ => bail!("{}: ambiguous gameplay source fingerprint {hash}", path.display()),
     }
 }

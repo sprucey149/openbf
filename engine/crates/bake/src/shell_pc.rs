@@ -8,14 +8,23 @@
 use sha2::{Digest, Sha256};
 
 pub(super) fn known_shell(raw: &[u8]) -> bool {
-    format!("{:x}", Sha256::digest(raw))
-        == "82335ab55e17689cd620ba174568e6a5481d4523b821549aa153a6b88a831009"
+    matches!(
+        format!("{:x}", Sha256::digest(raw)).as_str(),
+        // Steam retail PC BF2 SHELL.LVL
+        "82335ab55e17689cd620ba174568e6a5481d4523b821549aa153a6b88a831009"
+        // GOG.com v1.1 retail PC BF2 SHELL.LVL
+        | "7cde6a5fcb121653d4f647ce7a2b158305e88bad01bf55d14cfabcd4d0b3d00b"
+    )
 }
 
 pub(super) fn movie_order(raw: &[u8], property: &str) -> Option<Vec<u32>> {
-    if format!("{:x}", Sha256::digest(raw))
-        != "91f8c0629a6e247b302b2380fa77b3f24c7bea11da516dc9a8da10bd7fff9a94"
-    {
+    if !matches!(
+        format!("{:x}", Sha256::digest(raw)).as_str(),
+        // Steam retail PC BF2 MOVIES/SHELL.MVS
+        "91f8c0629a6e247b302b2380fa77b3f24c7bea11da516dc9a8da10bd7fff9a94"
+        // GOG.com v1.1 retail PC BF2 MOVIES/SHELL.MVS (identical 4 Bink segment IDs)
+        | "74bc379cc5b4f8efb2e7c2cdedd8ece9d005716a5116268dbddad95225f2da76"
+    ) {
         return None;
     }
     match property {
