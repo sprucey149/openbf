@@ -1078,7 +1078,10 @@ fn draw_fading_console(
 
     // Smooth vertical white fade over the top edge once lines scroll above it.
     let rect = scroll_out.inner.inner_rect;
-    if scroll_out.inner.state.offset.y > 0.5 || scroll_out.inner.content_size.y > rect.height() {
+    let content_h = scroll_out.inner.content_size.y;
+    let max_offset = (content_h - rect.height()).max(0.0);
+    let offset_y = scroll_out.inner.state.offset.y;
+    if offset_y > 0.5 || content_h > rect.height() {
         let fade_h = 28.0_f32.min(rect.height() * 0.45);
         let fade_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), fade_h));
         let top = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 255);
@@ -1091,6 +1094,61 @@ fn draw_fading_console(
         mesh.add_triangle(0, 1, 2);
         mesh.add_triangle(0, 2, 3);
         ui.painter().add(egui::Shape::mesh(mesh));
+    }
+
+    // Small clickable text at bottom-right to jump back to the latest line when scrolled up.
+    if max_offset > 1.0 && offset_y < max_offset - 4.0 {
+        let label = "↓ Scroll to bottom";
+        let font = regular_font(11.0);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label.to_string(), font.clone(), TEXT_MUTED);
+        let pad = Vec2::new(6.0, 2.0);
+        let btn_size = galley.size() + pad * 2.0;
+        let btn_rect = Rect::from_min_size(
+            Pos2::new(
+                rect.right() - btn_size.x - 8.0,
+                rect.bottom() - btn_size.y - 2.0,
+            ),
+            btn_size,
+        );
+        let resp = ui.interact(btn_rect, Id::new("setup_console_scroll_bottom"), Sense::click());
+        let hovered = resp.hovered();
+        if hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        // Soft seamless backing in BG_MAIN so the label stays readable over log lines.
+        let backing = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 235);
+        let fade_left = Rect::from_min_size(
+            Pos2::new(btn_rect.left() - 16.0, btn_rect.top()),
+            Vec2::new(16.0, btn_rect.height()),
+        );
+        let clear = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 0);
+        let mut fade = egui::Mesh::default();
+        fade.colored_vertex(fade_left.left_top(), clear);
+        fade.colored_vertex(fade_left.right_top(), backing);
+        fade.colored_vertex(fade_left.right_bottom(), backing);
+        fade.colored_vertex(fade_left.left_bottom(), clear);
+        fade.add_triangle(0, 1, 2);
+        fade.add_triangle(0, 2, 3);
+        ui.painter().add(egui::Shape::mesh(fade));
+        ui.painter().rect_filled(btn_rect, CornerRadius::ZERO, backing);
+
+        let color = if hovered { TEXT_PRIMARY } else { TEXT_MUTED };
+        ui.painter().text(
+            btn_rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            font,
+            color,
+        );
+
+        if resp.clicked() {
+            let mut state = scroll_out.inner.state;
+            state.offset.y = max_offset;
+            state.store(ui.ctx(), scroll_out.inner.id);
+            ui.ctx().request_repaint();
+        }
     }
 }
 

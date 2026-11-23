@@ -87,16 +87,16 @@ impl BuildHandle {
         let child_slot = Arc::new(Mutex::new(Some(child)));
         let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(on_update);
 
-        if let Some(out) = stdout {
+        let out_thread = stdout.map(|out| {
             let prog = Arc::clone(&progress);
             let wake = Arc::clone(&notify);
-            std::thread::spawn(move || pump_lines(out, prog, wake));
-        }
-        if let Some(err) = stderr {
+            std::thread::spawn(move || pump_lines(out, prog, wake))
+        });
+        let err_thread = stderr.map(|err| {
             let prog = Arc::clone(&progress);
             let wake = Arc::clone(&notify);
-            std::thread::spawn(move || pump_lines(err, prog, wake));
-        }
+            std::thread::spawn(move || pump_lines(err, prog, wake))
+        });
 
         let wait_prog = Arc::clone(&progress);
         let wait_cancel = Arc::clone(&cancel);
@@ -124,6 +124,15 @@ impl BuildHandle {
                 }
             };
 
+            // Wait for stdout/stderr readers to drain so trailing error lines
+            // are captured before we choose the failure summary.
+            if let Some(t) = out_thread {
+                let _ = t.join();
+            }
+            if let Some(t) = err_thread {
+                let _ = t.join();
+            }
+
             let mut p = wait_prog.lock().unwrap();
             p.running = false;
             if wait_cancel.load(Ordering::SeqCst) {
@@ -137,11 +146,8 @@ impl BuildHandle {
                         p.outcome = Some(BuildOutcome::Succeeded);
                     }
                     Some(Ok(st)) => {
-                        let detail = if p.last_line.is_empty() {
-                            format!("pack.py exited with status {st}")
-                        } else {
-                            p.last_line.clone()
-                        };
+                        let detail = pick_failure_line(&p.lines)
+                            .unwrap_or_else(|| format!("pack.py exited with status {st}"));
                         p.outcome = Some(BuildOutcome::Failed(detail));
                     }
                     Some(Err(e)) => {
@@ -343,9 +349,39 @@ pub fn launch_game(paths: &LauncherPaths, config: &LauncherConfig) -> Result<()>
     Ok(())
 }
 
+fn pick_failure_line(lines: &VecDeque<String>) -> Option<String> {
+    let is_noise = |line: &str| line.starts_with("step times:");
+    let is_error = |line: &str| {
+        line.starts_with("pack:")
+            || line.starts_with("Error:")
+            || line.starts_with("ERROR")
+            || line.contains("Error:")
+            || line.starts_with("rebake:")
+    };
+    lines
+        .iter()
+        .rev()
+        .find(|line| !is_noise(line) && is_error(line))
+        .or_else(|| lines.iter().rev().find(|line| !is_noise(line)))
+        .or_else(|| lines.back())
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picks_error_line_over_step_times_summary() {
+        let mut lines = VecDeque::new();
+        lines.push_back("== [00:00] 5/6 the bake".to_string());
+        lines.push_back("pack: failed (1): rebake.sh global-sound".to_string());
+        lines.push_back("step times: 1/6 00:00, 5/6 03:37; total 03:39".to_string());
+        assert_eq!(
+            pick_failure_line(&lines).as_deref(),
+            Some("pack: failed (1): rebake.sh global-sound")
+        );
+    }
 
     #[test]
     fn parses_pack_step_headers() {
