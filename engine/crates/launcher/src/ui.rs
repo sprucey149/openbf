@@ -83,6 +83,7 @@ pub struct LauncherApp {
     bf1_present: bool,
     bf2_present: bool,
     bf1_cleared: bool,
+    bf2_cleared: bool,
     building_with_bf1: bool,
     has_pack_script: bool,
     build: Option<BuildHandle>,
@@ -103,6 +104,7 @@ impl LauncherApp {
             bf1_present: false,
             bf2_present: false,
             bf1_cleared: false,
+            bf2_cleared: false,
             building_with_bf1: false,
             has_pack_script: false,
             build: None,
@@ -160,6 +162,7 @@ impl LauncherApp {
             self.building_with_bf1 = false;
             if succeeded {
                 self.bf1_cleared = false;
+                self.bf2_cleared = false;
             }
             self.refresh_fs_state();
         }
@@ -190,7 +193,7 @@ impl LauncherApp {
     pub fn bf2_dot_state(&self) -> DotState {
         if self.build.is_some() {
             DotState::Building
-        } else if self.game_ready {
+        } else if self.game_ready && !self.bf2_cleared {
             DotState::Ready
         } else {
             DotState::Missing
@@ -355,14 +358,18 @@ impl LauncherApp {
             changed = true;
         }
         ui.add_space(21.0);
-        changed |= source_row(
+        let bf2_changed = source_row(
             ui,
             "Battlefront II",
             "platform_bf2",
             &mut self.config.bf2,
             !building,
-            false,
+            true,
         );
+        if bf2_changed {
+            self.bf2_cleared = self.config.bf2.path.is_none();
+            changed = true;
+        }
         if changed {
             self.save_config();
         }
@@ -400,6 +407,13 @@ impl LauncherApp {
                     ui.add_space(10.0);
                     ui.label(
                         egui::RichText::new("scripts/pack.py not found")
+                            .font(regular_font(12.5))
+                            .color(DOT_MISSING),
+                    );
+                } else if self.bf1_present && !self.bf2_present {
+                    ui.add_space(10.0);
+                    ui.label(
+                        egui::RichText::new("Battlefront II is required to build")
                             .font(regular_font(12.5))
                             .color(DOT_MISSING),
                     );
@@ -1176,6 +1190,10 @@ mod tests {
         app.bf1_cleared = true;
         assert_eq!(app.bf1_dot_state(), DotState::Missing);
         assert_eq!(app.bf2_dot_state(), DotState::Ready);
+
+        // Clearing BF2 immediately turns BF2 red as well.
+        app.bf2_cleared = true;
+        assert_eq!(app.bf2_dot_state(), DotState::Missing);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
