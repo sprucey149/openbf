@@ -483,16 +483,10 @@ impl LauncherApp {
                 )
                 .truncate(),
             );
-            if snap.running && !snap.last_line.is_empty() {
-                ui.add_space(4.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&snap.last_line)
-                            .font(regular_font(11.5))
-                            .color(TEXT_MUTED),
-                    )
-                    .truncate(),
-                );
+            if !snap.lines.is_empty() {
+                ui.add_space(6.0);
+                let console_h = ui.available_height().max(48.0);
+                draw_fading_console(ui, bar_width, console_h, &snap.lines);
             }
         }
     }
@@ -1019,6 +1013,87 @@ fn chrome_button(ui: &mut egui::Ui, icon: ChromeIcon) -> bool {
     resp.clicked()
 }
 
+fn draw_fading_console(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    lines: &std::collections::VecDeque<String>,
+) {
+    // Borderless, backgroundless scroll area that merges directly into BG_MAIN.
+    let scroll_out = ui.scope(|ui| {
+        ui.set_max_width(width);
+        let style = ui.style_mut();
+        style.spacing.scroll = egui::style::ScrollStyle {
+            bar_width: 4.0,
+            bar_inner_margin: 2.0,
+            bar_outer_margin: 0.0,
+            floating: true,
+            floating_width: 4.0,
+            floating_allocated_width: 0.0,
+            foreground_color: false,
+            dormant_background_opacity: 0.0,
+            active_background_opacity: 0.0,
+            interact_background_opacity: 0.0,
+            dormant_handle_opacity: 0.18,
+            active_handle_opacity: 0.45,
+            interact_handle_opacity: 0.65,
+            ..style.spacing.scroll
+        };
+        egui::ScrollArea::vertical()
+            .id_salt("setup_console")
+            .max_width(width)
+            .max_height(height)
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(ui, |ui| {
+                ui.set_width(width);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                // Add top breathing room so the newest lines still read clearly
+                // once content scrolls into the top fade zone.
+                ui.add_space(10.0);
+                for line in lines {
+                    let color = if line.starts_with("== [") {
+                        TEXT_PRIMARY
+                    } else if line.starts_with("pack:")
+                        || line.starts_with("ERROR")
+                        || line.starts_with("Traceback")
+                        || line.contains("Error:")
+                    {
+                        DOT_MISSING
+                    } else {
+                        TEXT_MUTED
+                    };
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(line)
+                                .font(regular_font(11.5))
+                                .color(color),
+                        )
+                        .wrap(),
+                    );
+                }
+            })
+    });
+
+    // Smooth vertical white fade over the top edge once lines scroll above it.
+    let rect = scroll_out.inner.inner_rect;
+    if scroll_out.inner.state.offset.y > 0.5 || scroll_out.inner.content_size.y > rect.height() {
+        let fade_h = 28.0_f32.min(rect.height() * 0.45);
+        let fade_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), fade_h));
+        let top = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 255);
+        let bot = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 0);
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(fade_rect.left_top(), top);
+        mesh.colored_vertex(fade_rect.right_top(), top);
+        mesh.colored_vertex(fade_rect.right_bottom(), bot);
+        mesh.colored_vertex(fade_rect.left_bottom(), bot);
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(0, 2, 3);
+        ui.painter().add(egui::Shape::mesh(mesh));
+    }
+}
+
 fn draw_toast(ctx: &egui::Context, msg: &str) {
     let screen = ctx.viewport_rect();
     egui::Area::new(Id::new("launcher_toast"))
@@ -1148,6 +1223,17 @@ mod tests {
             )),
             ..Default::default()
         };
+
+        // Exercise the fading setup console with scrollable lines.
+        app.last_build = Some(BuildProgress {
+            running: true,
+            step_index: 2,
+            step_total: 6,
+            step_label: "the discs".to_string(),
+            last_line: "extracting...".to_string(),
+            lines: (0..25).map(|i| format!("line {i}")).collect(),
+            outcome: None,
+        });
 
         for page in [Page::Setup, Page::Options] {
             app.page = page;

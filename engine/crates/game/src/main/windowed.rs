@@ -2527,9 +2527,63 @@ impl App {
 
 /// Shell entry: window + shell screen; battles start from the menu.
 pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()> {
+    let hud_file = assets_dir.join("common_bf2/hud/1playerhud.ron");
+    if !pak::is_file(&hud_file) {
+        let msg = "OpenBF has not been set up yet (no baked game assets were found).\n\n\
+                   Run openbf-launcher (or scripts/pack.py) with your copy of Battlefront II first.";
+        show_startup_warning(msg);
+        anyhow::bail!("{msg}");
+    }
     let (event_loop, mut app) = shell_app(assets_dir, missions_dir)?;
     run_app(event_loop, &mut app)?;
     end_after_close(&app)
+}
+
+/// Show a native OS warning dialog before exiting when the game is opened
+/// directly without baked assets.
+fn show_startup_warning(message: &str) {
+    eprintln!("openbf: {message}");
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(
+                hwnd: *mut std::ffi::c_void,
+                text: *const u16,
+                caption: *const u16,
+                utype: u32,
+            ) -> i32;
+        }
+        let text: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+        let title: Vec<u16> = "OpenBF".encode_utf16().chain(std::iter::once(0)).collect();
+        // MB_OK (0x0) | MB_ICONWARNING (0x30)
+        unsafe {
+            MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), 0x30);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    "display alert \"OpenBF\" message {:?} as warning",
+                    message
+                ),
+            ])
+            .status();
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("zenity")
+            .args(["--warning", "--title=OpenBF", &format!("--text={message}")])
+            .status()
+            .or_else(|_| {
+                std::process::Command::new("kdialog")
+                    .args(["--sorry", message, "--title", "OpenBF"])
+                    .status()
+            });
+    }
 }
 
 /// A player entry point's end (the shell, a LAN session): after a finished

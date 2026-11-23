@@ -8,6 +8,7 @@
 use crate::config::{LauncherConfig, Platform};
 use crate::paths::LauncherPaths;
 use anyhow::{anyhow, bail, Context, Result};
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -20,6 +21,8 @@ use std::time::{Duration, Instant};
 /// Minimum interval between routine stdout/stderr UI repaints (step headers
 /// and completion always wake immediately).
 const WAKE_THROTTLE: Duration = Duration::from_millis(50);
+/// Maximum log lines retained for the embedded setup console.
+const MAX_CONSOLE_LINES: usize = 500;
 
 /// Live progress snapshot read by the UI each frame.
 #[derive(Clone, Debug, Default)]
@@ -29,6 +32,7 @@ pub struct BuildProgress {
     pub step_total: u8,
     pub step_label: String,
     pub last_line: String,
+    pub lines: VecDeque<String>,
     pub outcome: Option<BuildOutcome>,
 }
 
@@ -76,6 +80,7 @@ impl BuildHandle {
             step_total: 6,
             step_label: "Starting setup...".to_string(),
             last_line: String::new(),
+            lines: VecDeque::with_capacity(64),
             outcome: None,
         }));
         let cancel = Arc::new(AtomicBool::new(false));
@@ -195,6 +200,10 @@ fn pump_lines(
             }
             p.last_line.clear();
             p.last_line.push_str(trimmed);
+            if p.lines.len() >= MAX_CONSOLE_LINES {
+                p.lines.pop_front();
+            }
+            p.lines.push_back(trimmed.to_string());
         }
         let now = Instant::now();
         if step_changed || now.duration_since(last_wake) >= WAKE_THROTTLE {
