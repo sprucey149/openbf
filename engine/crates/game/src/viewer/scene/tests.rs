@@ -574,3 +574,14 @@ fn render_options_switch_live_without_reuploading_the_scene() {
         }
     }
 }
+
+#[test]
+fn terrain_detail_mips_promotes_opaque_pc_rgb_and_keeps_ps2_alpha() {
+    let pc = [108u8, 108, 108, 255, 148, 148, 148, 255];
+    assert_eq!(
+        terrain_detail_mips(&[&pc]),
+        Some(vec![vec![108, 108, 108, 108, 148, 148, 148, 148]])
+    );
+    let ps2 = [128u8, 128, 128, 107, 128, 128, 128, 150];
+    assert_eq!(terrain_detail_mips(&[&ps2]), None);
+}

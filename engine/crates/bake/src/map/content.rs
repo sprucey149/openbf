@@ -1353,6 +1353,12 @@ pub(super) fn bake_content(
         // draw would cut out along a mask nobody authored and the tier flip
         // would change the silhouette).
         let mut r = crate::tier::Resolved::from_ps2(t);
+        if terrain_detail
+            .as_ref()
+            .is_some_and(|(name, _)| name == &lower)
+        {
+            r.promote_rgb_to_alpha_if_opaque();
+        }
         let usage = crate::tier::Usage {
             sky: is_sky,
             alpha_carried: needs_alpha,
