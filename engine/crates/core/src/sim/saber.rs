@@ -35,14 +35,20 @@ impl Sim {
     pub(super) fn saber_inputs(&mut self, pads: &mut [PadState]) {
         for (i, pad) in pads.iter_mut().enumerate() {
             let wc = self.units[i].weapon_class;
-            if self.weapon_classes[wc].saber.is_none()
-                || !self.units[i].alive
+            let Some(class) = self.weapon_classes[wc].saber.as_ref() else {
+                continue;
+            };
+            if !self.units[i].alive
                 || self.units[i].mount.is_some()
                 || self.units[i].choked.is_some()
             {
                 continue;
             }
             let mut state = self.units[i].weapon.melee.take().unwrap_or_default();
+            if pad.tracked_combat.is_some() && self.units[i].is_human() && class.has_tracked_blade()
+            {
+                pad.buttons &= !buttons::FIRE;
+            }
             self.melee_lcg_active = true;
             state.movement_weight = (state.movement_weight
                 + if state.movement_active {
@@ -55,7 +61,6 @@ impl Sim {
             state.previous_yaw = self.units[i].soldier.yaw;
             state.previous_pitch = self.units[i].soldier.pitch;
             let u = &self.units[i];
-            let class = self.weapon_classes[wc].saber.as_ref().unwrap();
             let forward = PadState::axis(pad.ly);
             let strafe = PadState::axis(pad.lx);
             state.remember_thrust(&class.combo, forward, strafe);
@@ -172,7 +177,7 @@ impl Sim {
             state.turn_factor = out.turn_factor;
             state.input_lock = out.input_lock;
             if out.clear_hits {
-                state.hit.clear();
+                state.hit.retain(|hit| hit.record >= hits::TRACKED_RECORD);
             } else {
                 for cache in &mut state.hit {
                     cache.end += out.cache_shift;

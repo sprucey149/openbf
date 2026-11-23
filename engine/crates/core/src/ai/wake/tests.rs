@@ -46,6 +46,7 @@ fn first_think(s: &mut Sim, a: UnitHandle, st: &mut AiState, from: u64, to: u64)
 
 fn bolt(pos: Vec3, vel: Vec3, team: u8, owner: UnitHandle) -> Bolt {
     Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos,
         vel,

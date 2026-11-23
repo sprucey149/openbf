@@ -55,7 +55,7 @@ fn sticky_launch_uses_the_shots_charge_for_speed_and_life() {
                 })
                 .unwrap();
             s.unit_mut(owner).unwrap().soldier.pitch = 0.0;
-            s.soldier_shots(owner.index as usize, None, &[shot(charge)]);
+            s.soldier_shots(owner.index as usize, None, &[shot(charge)], None);
             let g = &s.stickies[0];
             let dir = sticky::throw_dir(Vec3::NEG_Z, 0.21);
             assert_eq!(g.vel, dir * speed, "era={bf2} charge={charge}");
@@ -89,7 +89,7 @@ fn unknotted_sticky_launch_preserves_the_original_instance_bits() {
                 0,
                 wc,
             );
-            s.soldier_shots(owner.index as usize, None, &[shot(charge)]);
+            s.soldier_shots(owner.index as usize, None, &[shot(charge)], None);
             let bytes = |g: &Sticky| {
                 let mut bytes = Vec::new();
                 g.hash_into(&mut |part| bytes.extend_from_slice(part));
@@ -126,7 +126,7 @@ fn blended_sticky_fuse_preserves_existing_contact_warning_rules() {
                 let target = s
                     .spawn(&UnitSpec::trooper(1, Vec3::new(20.0, 0.0, 0.0)))
                     .unwrap();
-                s.soldier_shots(owner.index as usize, None, &[shot(0.5)]);
+                s.soldier_shots(owner.index as usize, None, &[shot(0.5)], None);
                 let mut g = s.stickies.pop().unwrap();
                 assert_eq!(g.life, 0.75);
                 // Unarmed flight never spends the blended fuse.

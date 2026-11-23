@@ -72,6 +72,7 @@ impl Soldier {
                 self.lock_timer = GETUP_LOCK;
                 self.lock_hard = true;
                 self.fire_lock = true;
+                self.fire_flinch = false;
             }
             _ => {}
         }
@@ -159,6 +160,9 @@ impl Soldier {
     /// BF2's flinch: every input, the trigger included, is locked for
     /// `secs` (a longer lock already running is kept).
     fn flinch(&mut self, secs: f32) {
+        if !self.fire_lock || self.lock_timer <= 0.0 {
+            self.fire_flinch = true;
+        }
         self.lock_timer = self.lock_timer.fmax(secs);
         self.lock_hard = true;
         self.fire_lock = true;
@@ -217,6 +221,7 @@ impl Soldier {
         self.lock_timer = self.lock_timer.fmax(CHOKE_RELEASE_LOCK);
         self.fire_lock = true;
         self.choke_lock = true;
+        self.fire_flinch = false;
     }
 
     /// A Force Choke's release lock is running (flag 0x800 of the original's
@@ -236,6 +241,13 @@ impl Soldier {
         self.stance.knocked()
             || self.stance == Stance::Dead
             || (self.fire_lock && self.lock_timer > 0.0)
+    }
+
+    /// A controller still controls the drawn blade during a brief flinch.
+    /// Knockdown, recovery and choke still prevent a cut.
+    pub(crate) fn can_swing_tracked(&self) -> bool {
+        !self.no_fire()
+            || (self.fire_flinch && !self.stance.knocked() && self.stance != Stance::Dead)
     }
 
     /// Merged take-off (JUNI, re-stance-roll.md §4.3b): BF2

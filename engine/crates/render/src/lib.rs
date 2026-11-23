@@ -95,6 +95,7 @@ mod specular;
 mod stars;
 mod terrain_light;
 mod texture;
+mod visor;
 mod world_scale;
 
 pub use bloom::Bloom;
@@ -134,6 +135,7 @@ pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
 pub use texture::{DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
+pub use visor::{Visor, VisorEye, VisorPass};
 
 use mesh::GpuMesh;
 use std::sync::Arc;
@@ -282,6 +284,8 @@ pub struct Renderer {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     target: Target,
+    capture_flat: bool,
+    flat_frame: Option<FrameTarget>,
     /// Color format of the render target (surface or headless texture).
     format: wgpu::TextureFormat,
     depth_view: wgpu::TextureView,
@@ -293,6 +297,8 @@ pub struct Renderer {
     mask_pipeline: wgpu::RenderPipeline,
     /// Alpha-composited pass for materials the bake judged BLEND.
     blend_pipeline: wgpu::RenderPipeline,
+    /// Unoccluded alpha-composited world overlays (`DrawLayer::Overlay`).
+    overlay_pipeline: wgpu::RenderPipeline,
     additive_blend_pipeline: wgpu::RenderPipeline,
     fade_additive_blend_pipeline: wgpu::RenderPipeline,
     /// The WATER pass: alpha-composited with the depth WRITTEN and a

@@ -257,7 +257,7 @@ fn run_section(d: &DrawCmd) -> &'static str {
         DrawLayer::FarSheet => "far sheet",
         DrawLayer::Spec => "specular",
         DrawLayer::Water | DrawLayer::Speckle => "water",
-        DrawLayer::Blend => "blend",
+        DrawLayer::Blend | DrawLayer::Overlay => "blend",
     }
 }
 
@@ -361,6 +361,17 @@ fn blend_order(
             eye
         };
         (model.w_axis.truncate() - eye).length_squared()
+    });
+    order
+}
+
+/// Order [`DrawLayer::Overlay`] draws FAR TO NEAR by squared eye distance.
+fn overlay_order(draws: &[DrawCmd], keep: &[bool], eye: glam::Vec3) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..draws.len())
+        .filter(|&i| keep[i] && draws[i].layer == DrawLayer::Overlay)
+        .collect();
+    sort_far_to_near(&mut order, |i| {
+        draws[i].model.w_axis.truncate().distance_squared(eye)
     });
     order
 }
@@ -608,8 +619,8 @@ fn draw_key_layer(layer: DrawLayer) -> u32 {
         // after the main layer, tile by tile — `analysis/re-water.md` §1);
         // an add is order-free, so its runs instance like the others.
         DrawLayer::Speckle => 6,
-        // Blend draws are sorted far-to-near instead and never reach here.
-        DrawLayer::Blend => 7,
+        // Blend/overlay draws are sorted far-to-near instead and never reach here.
+        DrawLayer::Blend | DrawLayer::Overlay => 7,
     }
 }
 

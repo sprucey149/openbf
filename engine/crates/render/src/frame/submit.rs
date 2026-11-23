@@ -2,8 +2,8 @@
 use super::{
     blend_order, continue_pass, create_instance_buffer, create_palette_buffer,
     display_view_allowed, draw_key, draw_key_layer, draw_mesh, iface_dir, mark, may_move,
-    run_section, runs_key, skinned_go_before, sort_distance, sort_runs, Blended, DrawSort,
-    FrameStats, FrameTarget, OverlayFn, ViewProjection, WorldBox,
+    overlay_order, run_section, runs_key, skinned_go_before, sort_distance, sort_runs, Blended,
+    DrawSort, FrameStats, FrameTarget, OverlayFn, ViewProjection, WorldBox,
 };
 use crate::frustum;
 use crate::mesh::{self, GpuMesh, Instance};
@@ -26,6 +26,33 @@ impl Renderer {
         clear: [f64; 4],
         overlay: Option<OverlayFn<'_>>,
     ) -> Result<(), RenderError> {
+        if self.capture_flat {
+            let size: [u32; 2] = self.size().into();
+            let target = match self
+                .flat_frame
+                .take()
+                .filter(|target| target.size() == size)
+            {
+                Some(target) => target,
+                None => self.frame_target(size)?,
+            };
+            self.render_frame_to(
+                &target,
+                camera,
+                ViewProjection::Camera,
+                draws,
+                skinned,
+                clear,
+                overlay,
+            )?;
+            let result = if matches!(self.target, Target::Window { .. }) {
+                self.mirror_frame(&target, None)
+            } else {
+                Ok(())
+            };
+            self.flat_frame = Some(target);
+            return result;
+        }
         self.advance_sky();
         let size = self.size();
         self.update_falling(camera, size);
@@ -354,7 +381,9 @@ impl Renderer {
         shadow_casters.sort_unstable_by_key(|&i| crate::sun_shadow::caster_key(&draws[i]));
 
         let mut order = sort_runs(
-            (0..draws.len()).filter(|&i| keep[i] && draws[i].layer != DrawLayer::Blend),
+            (0..draws.len()).filter(|&i| {
+                keep[i] && !matches!(draws[i].layer, DrawLayer::Blend | DrawLayer::Overlay)
+            }),
             draws,
             &sorts,
         );
@@ -376,6 +405,9 @@ impl Renderer {
             Blended::World(i) => Some(i),
             Blended::Skinned(_) => None,
         }));
+        let overlays = overlay_order(draws, &keep, camera.position);
+        let overlay_base = order.len();
+        order.extend_from_slice(&overlays);
         // The sky shells take the first slots of the same instance buffer, so
         // every other index below is offset by `sky_base`.
         let sky_base = self.sky.len();
@@ -1126,6 +1158,7 @@ impl Renderer {
                         // Folds the fade in its own entry point.
                         (DrawLayer::TerrainLayer, _) => &self.terrain_layer_pipeline,
                         (DrawLayer::Spec, _) => unreachable!("bound above"),
+                        (DrawLayer::Overlay, _) => unreachable!("bound in overlay pass"),
                         (DrawLayer::Mask, false) => &self.mask_pipeline,
                         (DrawLayer::Mask, true) => &self.fade_mask_pipeline,
                         (_, false) => &self.pipeline,
@@ -1433,6 +1466,20 @@ impl Renderer {
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "softness");
             }
+        }
+        if !overlays.is_empty() && !ab.skips("blend") {
+            let mut pass = continue_pass(&mut encoder, &view, depth_view, "world overlays");
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, &self.globals_bg, &[]);
+            pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+            for (slot, &i) in overlays.iter().enumerate() {
+                let d = &draws[i];
+                pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
+                let inst = (sky_base + overlay_base + slot) as u32;
+                draw_mesh(&mut pass, &self.meshes[d.mesh.0 as usize], inst..inst + 1);
+                draw_calls += 1;
+            }
+            mark(&mut timer, &mut pass, "overlays");
         }
         if let Some(t) = &world_target {
             self.world_scale.upscale(&mut encoder, t, &frame_view);

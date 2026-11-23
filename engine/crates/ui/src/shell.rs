@@ -536,32 +536,39 @@ impl InstantAction {
         }
     }
 
-    /// Scroll at a pointer location (window coordinates `point` in window `size`).
+    /// Scroll at a pointer location. A mouse wheel can fall back to the focused
+    /// list, while a controller ray needs to be over the list itself.
     pub fn scroll_pointer(
         &mut self,
         point: Option<[f32; 2]>,
         size: Option<[f32; 2]>,
         delta: f32,
+        require_hover: bool,
     ) -> bool {
         if delta == 0.0 || !delta.is_finite() {
             return false;
         }
         match self.page {
             Page::Missions => {
-                if let (Some(point), Some(size)) = (point, size) {
-                    match crate::shell_ia::list_under_pointer(point, size) {
-                        Some(true) => return self.scroll_right(delta),
-                        Some(false) => return self.scroll_left(delta),
-                        None => {}
-                    }
-                }
-                if self.state == State::Playlist {
-                    self.scroll_right(delta)
-                } else {
-                    self.scroll_left(delta)
+                let list = point
+                    .zip(size)
+                    .and_then(|(p, s)| crate::shell_ia::list_under_pointer(p, s));
+                match list {
+                    Some(true) => self.scroll_right(delta),
+                    Some(false) => self.scroll_left(delta),
+                    None if require_hover => false,
+                    None if self.state == State::Playlist => self.scroll_right(delta),
+                    None => self.scroll_left(delta),
                 }
             }
-            Page::Group(..) => self.scroll_option(delta),
+            Page::Group(..)
+                if !require_hover
+                    || point
+                        .zip(size)
+                        .is_some_and(|(p, s)| crate::shell_ia::options_under_pointer(p, s)) =>
+            {
+                self.scroll_option(delta)
+            }
             _ => false,
         }
     }

@@ -139,6 +139,132 @@ pub struct PadState {
     /// once-only field: a repeated pad keeps it.
     #[serde(default, skip_serializing_if = "zero_u8")]
     pub view_lag: u8,
+    /// Offline VR aim for the two infantry weapon channels. A repeated tick
+    /// keeps the tracked pose and offline input logs record it.
+    #[serde(default, skip_serializing_if = "tracked_shots_empty")]
+    pub tracked_shots: [Option<TrackedShot>; 2],
+    /// Offline VR melee poses and a one-tick grenade release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracked_combat: Option<TrackedCombat>,
+}
+
+fn tracked_shots_empty(shots: &[Option<TrackedShot>; 2]) -> bool {
+    *shots == [None; 2]
+}
+
+fn millimetres(offset: glam::Vec3) -> [i16; 3] {
+    offset.to_array().map(|v| {
+        (v * 1000.0)
+            .round()
+            .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
+    })
+}
+
+fn metres(offset: [i16; 3]) -> glam::Vec3 {
+    glam::Vec3::from_array(offset.map(f32::from)) / 1000.0
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedCombat {
+    pub hands: [Option<TrackedHand>; 2],
+    #[serde(default, skip_serializing_if = "tracked_hands_empty")]
+    pub waypoints: [Option<TrackedHand>; 2],
+    pub motion_epoch: u16,
+    pub grenade: Option<TrackedThrow>,
+}
+
+fn tracked_hands_empty(hands: &[Option<TrackedHand>; 2]) -> bool {
+    *hands == [None; 2]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedHand {
+    offset: [i16; 3],
+    rotation: [i16; 4],
+}
+
+impl TrackedHand {
+    pub fn new(offset: glam::Vec3, rotation: glam::Quat) -> Self {
+        Self {
+            offset: millimetres(offset),
+            rotation: rotation.to_array().map(PadState::quantize),
+        }
+    }
+
+    pub(crate) fn pose(self) -> Option<(glam::Vec3, glam::Quat)> {
+        let q = glam::Quat::from_array(self.rotation.map(f32::from));
+        (q.length_squared() > 0.0).then(|| (metres(self.offset), q.normalize()))
+    }
+
+    pub(crate) fn hash_into(self, eat: &mut impl FnMut(&[u8])) {
+        for value in self.offset.into_iter().chain(self.rotation) {
+            eat(&value.to_le_bytes());
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedThrow {
+    pub weapon_class: u32,
+    pub slot: u8,
+    origin: [i16; 3],
+    velocity: [i16; 3],
+}
+
+impl TrackedThrow {
+    pub fn new(weapon_class: u32, slot: u8, origin: glam::Vec3, velocity: glam::Vec3) -> Self {
+        Self {
+            weapon_class,
+            slot,
+            origin: millimetres(origin),
+            velocity: millimetres(velocity),
+        }
+    }
+
+    pub(super) fn release(self, feet: glam::Vec3) -> (glam::Vec3, glam::Vec3) {
+        (feet + metres(self.origin), metres(self.velocity))
+    }
+}
+
+/// A sampled gun pose carried by tick inputs and replays. Offsets are in
+/// millimetres from the soldier's feet in world axes, so locomotion moves
+/// the muzzle with the player even on a frame that steps several ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedShot {
+    pub grip: [i16; 3],
+    pub muzzle: [i16; 3],
+    pub forward: [i16; 3],
+}
+
+impl TrackedShot {
+    pub fn new(grip: glam::Vec3, muzzle: glam::Vec3, forward: glam::Vec3) -> Self {
+        let millimetres = |offset: glam::Vec3| {
+            offset.to_array().map(|v| {
+                (v * 1000.0)
+                    .round()
+                    .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
+            })
+        };
+        Self {
+            grip: millimetres(grip),
+            muzzle: millimetres(muzzle),
+            forward: forward.to_array().map(PadState::quantize),
+        }
+    }
+
+    pub(super) fn grip(self, feet: glam::Vec3) -> glam::Vec3 {
+        feet + glam::Vec3::from_array(self.grip.map(f32::from)) / 1000.0
+    }
+
+    pub(super) fn ray(self, feet: glam::Vec3) -> Option<(glam::Vec3, glam::Vec3)> {
+        let f = glam::Vec3::from_array(self.forward.map(f32::from));
+        (f != glam::Vec3::ZERO).then(|| {
+            (
+                feet + glam::Vec3::from_array(self.muzzle.map(f32::from)) / 1000.0,
+                f.normalize(),
+            )
+        })
+    }
 }
 
 /// A mouse click's choice on a spawn screen, carried in the pad so a replay
@@ -247,11 +373,20 @@ impl PadState {
         self.clear_look();
         self.fire_lag = 0;
         self.pick = None;
+        if let Some(combat) = self.tracked_combat.as_mut() {
+            combat.waypoints = [None; 2];
+            combat.grenade = None;
+        }
     }
 
     /// Whether [`PadState::clear_once`] would change anything.
     pub fn has_once(&self) -> bool {
-        self.has_look() || self.fire_lag != 0 || self.pick.is_some()
+        self.has_look()
+            || self.fire_lag != 0
+            || self.pick.is_some()
+            || self.tracked_combat.is_some_and(|combat| {
+                combat.grenade.is_some() || !tracked_hands_empty(&combat.waypoints)
+            })
     }
 
     /// The fire lag of a press drawn `drawn` (0..1) of the way into the
@@ -437,12 +572,16 @@ pub enum Steer {
     Stick(glam::Vec2),
     /// The mouse (no assist; the PS2's tournament every tick).
     Mouse,
+    /// A tracked weapon points directly from its muzzle.
+    Tracked(TrackedShot),
 }
 
 impl Steer {
     /// The pad's steer.
     pub fn of(pad: &PadState) -> Self {
-        if pad.mouse_aim() {
+        if let Some(shot) = pad.tracked_shots[0] {
+            Steer::Tracked(shot)
+        } else if pad.mouse_aim() {
             Steer::Mouse
         } else {
             Steer::Stick(glam::Vec2::new(
@@ -720,7 +859,12 @@ impl Sim {
         let (pos, dir) = match (droid, seat) {
             (Some((muzzle, aim, _)), _) => (muzzle, aim),
             (None, Some(s)) => (s.eye, s.view),
-            (None, None) => p.aim_ray(self.ground_rules, self.views()),
+            (None, None) => match steer {
+                Steer::Tracked(shot) if p.mount.is_none() => shot
+                    .ray(p.soldier.pos)
+                    .unwrap_or_else(|| p.aim_ray(self.ground_rules, self.views())),
+                _ => p.aim_ray(self.ground_rules, self.views()),
+            },
         };
         let own = p.mount.map(|m| m.vehicle);
         let own_building = own.and_then(|h| self.vehicle(h)).and_then(|v| v.instance);
@@ -776,7 +920,7 @@ impl Sim {
             if s >= 0.0 && live(t) && grace {
                 valid = passes(&u) && (u.ctr - pos).length() <= lor + u.r;
                 best = match steer {
-                    Steer::Mouse => s,
+                    Steer::Mouse | Steer::Tracked(_) => s,
                     Steer::Stick(v) if v.length() > MAGNET_STEER => {
                         toward = Some((u.ctr, v));
                         s

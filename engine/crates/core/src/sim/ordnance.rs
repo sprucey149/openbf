@@ -3,11 +3,11 @@
 //! weapons' cycles (§2.3, §2.4) — the throw (§3.3) and the thrown grenades'
 //! flight, sweep, contact, fuse and blast (§4, [`crate::sticky`]).
 
-use super::input::{buttons, PadState};
+use super::input::{buttons, PadState, TrackedShot, TrackedThrow};
 use super::state::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
 use crate::fmath::FloatExt;
-use crate::projectile::{Bolt, Shooter};
+use crate::projectile::{Bolt, Hit, Shooter, TERRAIN_RAY_STEP};
 use crate::soldier::{GroundRules, Stance};
 use crate::sticky::{self, Anchor, Contact, Sticky, Surface};
 use crate::unit::Controller;
@@ -25,6 +25,27 @@ mod tracers;
 const HAZARD_BOUNCE_TIME: f32 = 1.5;
 
 impl Sim {
+    /// The selected throwable and whether its ammunition is ready.
+    pub fn tracked_grenade_slot(
+        &self,
+        owner: crate::unit::UnitHandle,
+    ) -> Option<(usize, u8, bool)> {
+        let unit = self.unit(owner)?;
+        let held = unit.held.get(usize::from(unit.cur1?))?;
+        let class = self.weapon_classes.get(held.class)?;
+        if class.thrown.is_none()
+            || class.ordnance.sticky.is_none()
+            || class.dispenses()
+            || class.mine.is_some()
+        {
+            return None;
+        }
+        let ready = held
+            .state
+            .tracked_throw_ready(class, self.ammo_cheats(owner.index as usize));
+        Some((held.class, held.slot, ready))
+    }
+
     /// Phase 4 for a soldier that holds more than one weapon: pick the
     /// active channel, step the two switch inputs, run every held weapon's
     /// cycle and throw what channel 1 released. Returns whether the PRIMARY
@@ -37,7 +58,12 @@ impl Sim {
     /// (wrapping, at once) and only while neither trigger is down.
     pub(super) fn held_weapons(&mut self, i: usize, p: &PadState, blocked: bool, dt: f32) -> bool {
         let pri = p.pressed(buttons::FIRE);
-        let sec = p.pressed(buttons::SECONDARY_FIRE);
+        let tracked = p
+            .tracked_combat
+            .filter(|_| matches!(self.units[i].controller, Controller::Player { .. }));
+        let tracked_grenade =
+            tracked.is_some() && self.tracked_grenade_slot(self.handle(i)).is_some();
+        let sec = p.pressed(buttons::SECONDARY_FIRE) && !tracked_grenade;
         // `infinite`: a free reload always refills, so never out of ammo.
         let (infinite, no_reload) = self.ammo_cheats(i);
 
@@ -68,6 +94,11 @@ impl Sim {
             }
             if edges & 2 != 0 {
                 self.switch_channel1(i);
+            }
+        }
+        if !blocked {
+            if let Some(release) = tracked.and_then(|combat| combat.grenade) {
+                self.release_tracked_grenade(i, release);
             }
         }
 
@@ -129,7 +160,10 @@ impl Sim {
             let refused = Some(k) == cur1
                 && u.is_player
                 && (u.held[k].state.press_clicks(wc, input, !shots.is_empty())
-                    || (!ch1_has_it && !blocked && self.pressed_now(i, buttons::SECONDARY_FIRE)));
+                    || (!tracked_grenade
+                        && !ch1_has_it
+                        && !blocked
+                        && self.pressed_now(i, buttons::SECONDARY_FIRE)));
             if refused {
                 self.push_fire_empty(i, class);
             }
@@ -142,9 +176,33 @@ impl Sim {
                     weapon_class: class as u32,
                 });
             }
-            self.soldier_shots(i, Some(k), &shots);
+            self.soldier_shots(i, Some(k), &shots, p.tracked_shots[1]);
         }
         held0
+    }
+
+    fn release_tracked_grenade(&mut self, i: usize, release: TrackedThrow) {
+        let Some((wc, slot, true)) = self.tracked_grenade_slot(self.handle(i)) else {
+            return;
+        };
+        if wc != release.weapon_class as usize || slot != release.slot {
+            return;
+        }
+        let unit = &self.units[i];
+        let held = usize::from(unit.cur1.unwrap());
+        let feet = unit.soldier.pos;
+        let (origin, velocity) = release.release(feet);
+        let eye = feet + Vec3::Y * unit.section().eye_y;
+        if self.tracked_barrier(eye, origin).is_some() {
+            return;
+        }
+        let class = &self.weapon_classes[wc];
+        let velocity = velocity.clamp_length_max(class.ordnance.charged(1.0).velocity.fmax(0.0));
+        let cheats = self.ammo_cheats(i);
+        self.units[i].held[held]
+            .state
+            .pay_tracked_throw(class, cheats);
+        self.launch_sticky(i, wc, 1.0, origin, velocity);
     }
 
     /// Whether `button` went down this tick for a human (`press_edges`).
@@ -209,17 +267,47 @@ impl Sim {
         });
     }
 
-    pub(super) fn soldier_shots(&mut self, i: usize, held_slot: Option<usize>, shots: &[ShotSpec]) {
+    pub(super) fn soldier_shots(
+        &mut self,
+        i: usize,
+        held_slot: Option<usize>,
+        shots: &[ShotSpec],
+        tracked: Option<TrackedShot>,
+    ) {
         if shots.is_empty() {
             return;
         }
         let u = &self.units[i];
         let class = held_slot.map_or(u.weapon_class, |k| u.held[k].class);
         let unit = self.handle(i);
-        // A human's shot leaves the fire point toward what the reticle's
-        // ray hits (card AIMA); a bot's leaves the chest along its aim
-        // (card FPNT has the fire point for bots).
-        let (origin, (fwd, right, up)) = self.shot_frame(i);
+        let tracked = tracked
+            .filter(|_| matches!(u.controller, Controller::Player { .. }) && u.droideka.is_none())
+            .and_then(|pose| {
+                pose.ray(u.soldier.pos)
+                    .map(|ray| (pose.grip(u.soldier.pos), ray))
+            });
+        let (origin, (fwd, right, up), obstruction) = match tracked {
+            Some((grip, (muzzle, fwd))) => {
+                // The shot keeps the gun's axis at any elevation. Sweep
+                // the reach from the soldier to the muzzle for solid cover
+                // before starting the ordinary projectile collision ray.
+                let eye = u.soldier.pos + Vec3::Y * u.section().eye_y;
+                let (origin, obstruction) = self
+                    .tracked_barrier(eye, grip)
+                    .or_else(|| self.tracked_barrier(grip, muzzle))
+                    .unwrap_or((muzzle, Hit::None));
+                let right = fwd.cross(Vec3::Y).normalize_or(u.aim_frame().1);
+                (
+                    origin,
+                    (fwd, right, right.cross(fwd).normalize()),
+                    obstruction,
+                )
+            }
+            None => {
+                let (origin, frame) = self.shot_frame(i);
+                (origin, frame, Hit::None)
+            }
+        };
         let who = Shooter {
             owner: unit,
             team: self.units[i].team,
@@ -390,13 +478,62 @@ impl Sim {
                 st.lock_target = None;
                 st.lock_held = 0.0;
             }
+            if obstruction != Hit::None {
+                bolt.end = origin;
+                bolt.hit = obstruction;
+                bolt.remaining = 0.0;
+                bolt.missile = None;
+            }
+            bolt.tracked_origin = tracked.is_some();
+            let beam_blocked =
+                obstruction != Hit::None && self.weapon_classes[stage].ordnance.beam.is_some();
             self.note_bolt_shot(&mut bolt, origin, dir);
-            self.launch_round(bolt, true);
+            if beam_blocked {
+                self.bolts.push(bolt);
+            } else {
+                self.launch_round(bolt, tracked.is_none());
+            }
             // The tracer rides the SAME ray the primary round took - it draws
             // no extra LCG step (the PS2 spawns both from one packet).
-            if secondary {
-                self.fire_secondary(who, stage, round, origin, dir, spec.charge);
+            if secondary && obstruction == Hit::None {
+                self.fire_secondary(
+                    who,
+                    stage,
+                    round,
+                    origin,
+                    dir,
+                    spec.charge,
+                    tracked.is_some(),
+                );
             }
+        }
+    }
+
+    fn tracked_barrier(&self, start: Vec3, end: Vec3) -> Option<(Vec3, Hit)> {
+        let delta = end - start;
+        let reach = delta.length();
+        if reach == 0.0 {
+            return None;
+        }
+        let dir = delta / reach;
+        let terrain = self.terrain_ray(start, dir, reach, TERRAIN_RAY_STEP);
+        let world = self.collision.ray_with(
+            start,
+            dir,
+            terrain.unwrap_or(reach),
+            Layers::ORDNANCE,
+            HullFilter::All,
+        );
+        match (world, terrain) {
+            (Some(hit), _) => Some((
+                start + dir * hit.t,
+                hit.owner.map_or_else(
+                    || crate::projectile::building_hit(&self.collision, hit.instance),
+                    |owner| Hit::Target(crate::projectile::Target::Vehicle(owner)),
+                ),
+            )),
+            (None, Some(t)) => Some((start + dir * t, Hit::Terrain)),
+            (None, None) => None,
         }
     }
 
@@ -462,9 +599,9 @@ impl Sim {
     /// bolts — the caller's business.
     pub(super) fn launch(&mut self, i: usize, wc: usize, charge: f32) -> bool {
         let class = &self.weapon_classes[wc];
-        let Some(sc) = class.ordnance.sticky.as_ref() else {
+        if class.ordnance.sticky.is_none() {
             return false;
-        };
+        }
         let u = &self.units[i];
         let (aim, _, _) = u.aim_frame();
         let thrown = class.thrown;
@@ -488,19 +625,20 @@ impl Sim {
             1.0
         };
         let origin = u.launch_origin(thrown.and_then(|t| t.release_hand(scale)));
+        let velocity = dir * class.ordnance.charged(charge).velocity;
+        self.launch_sticky(i, wc, charge, origin, velocity);
+        true
+    }
+
+    fn launch_sticky(&mut self, i: usize, wc: usize, charge: f32, origin: Vec3, velocity: Vec3) {
+        let class = &self.weapon_classes[wc];
+        let sc = class.ordnance.sticky.as_ref().unwrap();
+        let u = &self.units[i];
         let owner = self.handle(i);
         // Sticky inherits the shell/bullet/base charge evaluation
         // (B1 FUN_0027eb18:203821; B2 FUN_003207e8:313521).
         let blend = class.ordnance.charged(charge);
-        let mut g = Sticky::new(
-            origin,
-            dir * blend.velocity,
-            sc,
-            blend.life_span,
-            owner,
-            u.team,
-            wc,
-        );
+        let mut g = Sticky::new(origin, velocity, sc, blend.life_span, owner, u.team, wc);
         g.direct = (self.is_hunt() && blend.damage > 0.0).then_some((charge, 0.0, u.is_player));
         self.stickies.push(g);
         self.events.push(Event::Throw {
@@ -508,7 +646,6 @@ impl Sim {
             weapon_class: wc as u32,
             origin,
         });
-        true
     }
 
     /// Phase 5b: every thrown grenade's tick, in throw order — the fuse, the

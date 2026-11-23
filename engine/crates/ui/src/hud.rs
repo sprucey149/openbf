@@ -399,6 +399,17 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 pub use crate::hud_popup::HudPopup;
 
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
+    feed_with_reticle(hud, m, has_mesh, Some([0.5, m.reticle_y]));
+}
+
+/// Publish the stock HUD with an optional reticle position. Target health uses
+/// the gameplay aim pick independently of the rendered reticle.
+pub fn feed_with_reticle(
+    hud: &mut Hud,
+    m: &HudModel,
+    has_mesh: &dyn Fn(&str) -> bool,
+    reticle_position: Option<[f32; 2]>,
+) {
     crate::hud_popup::feed(hud, m.popup.as_ref(), m.objectives_updated, has_mesh);
     feed_lock(
         hud,
@@ -717,10 +728,10 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     feed_target(hud, target, has_mesh);
     feed_countdown(hud, m.countdown, has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
-    if let (Some(rel), true) = (m.reticle, alive) {
+    if let (Some(rel), true, Some(position)) = (m.reticle, alive, reticle_position) {
         put(
             "player1.weapon1.reticule.position",
-            EventValue::Position([0.5, m.reticle_y]),
+            EventValue::Position(position),
         );
         let c = match target {
             Some(t) => t.color(),
@@ -910,12 +921,16 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     hide(
         hud,
         "hud.gate.reticle",
-        alive && m.reticle.is_some(),
-        &[
-            "player1.weapon1.reticule.disable",
-            "player1.weapon1.target.disable",
-        ],
+        alive && m.reticle.is_some() && reticle_position.is_some(),
+        &["player1.weapon1.reticule.disable"],
         &["player1.weapon1.reticule.position"],
+    );
+    hide(
+        hud,
+        "hud.gate.target",
+        alive && m.reticle.is_some(),
+        &["player1.weapon1.target.disable"],
+        &[],
     );
     hide(
         hud,
@@ -1312,6 +1327,41 @@ mod tests {
             feed(&mut hud, &model, &|_| false);
             assert_eq!(hud.banner, None);
         }
+    }
+
+    #[test]
+    fn target_health_stays_visible_with_the_reticle_hidden() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut m = model();
+        m.reticle = Some(-1);
+        m.hit_body = Some(target_color::ENEMY);
+        m.target = Some(HudTarget {
+            id: 9,
+            name: "Target".into(),
+            health_fraction: 0.45,
+            relation: -1,
+            team0: false,
+            shield: None,
+        });
+        feed_with_reticle(&mut hud, &m, &|_| false, None);
+        assert_eq!(
+            hud.last("player1.weapon1.target.healthFraction"),
+            Some(&EventValue::Number(0.45)),
+        );
+        let fill = hud.find("player1targethealth_fill").unwrap();
+        assert!(hud.elems[fill].fader.state < 3);
+
+        let mut hud = crate::hud_tree::fixture::reticle_hud();
+        let reticle = hud.find("player1reticule").unwrap();
+        let hit = hud.find("player1reticule_hit").unwrap();
+        feed_with_reticle(&mut hud, &m, &|_| false, None);
+        assert_eq!(hud.alpha(reticle), 0.0);
+        assert_eq!(hud.alpha(hit), 0.0);
+        feed(&mut hud, &m, &|_| false);
+        assert!(hud.alpha(reticle) > 0.0);
+        feed_with_reticle(&mut hud, &m, &|_| false, None);
+        hud.advance(1.0);
+        assert_eq!(hud.alpha(reticle), 0.0);
     }
 
     #[test]

@@ -71,6 +71,8 @@ impl Player {
                         gen: r.next_u64() as u32,
                     }),
                     view_lag: 0,
+                    tracked_shots: [None; 2],
+                    tracked_combat: None,
                 }
             } else {
                 PadState {

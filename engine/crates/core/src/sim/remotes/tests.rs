@@ -18,6 +18,8 @@ const FORWARD: PadState = PadState {
     fire_lag: 0,
     pick: None,
     view_lag: 0,
+    tracked_shots: [None; 2],
+    tracked_combat: None,
 };
 
 fn setup(bf2: bool) -> (Sim, UnitHandle, usize) {

@@ -86,7 +86,38 @@ impl Renderer {
             .create_surface(window.clone())
             .map_err(|e| RenderError::Surface(e.to_string()))?;
         let (adapter, device, queue) = request_device(&instance, Some(&surface))?;
+        Self::finish_windowed(window, surface, adapter, device, queue, false, turn)
+    }
 
+    /// Use a graphics device selected by an external compositor. The desktop
+    /// mirror prefers an unpaced present mode so it does not pace the headset.
+    pub fn new_windowed_with_device(
+        window: Arc<winit::window::Window>,
+        surface: wgpu::Surface<'static>,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Result<Self, RenderError> {
+        Self::finish_windowed(
+            window,
+            surface,
+            adapter,
+            device,
+            queue,
+            true,
+            GpuTurn::take(),
+        )
+    }
+
+    fn finish_windowed(
+        window: Arc<winit::window::Window>,
+        surface: wgpu::Surface<'static>,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        unpaced: bool,
+        turn: GpuTurn,
+    ) -> Result<Self, RenderError> {
         // sRGB surface format selection: an earlier wgpu project's context.rs `from_parts`.
         let caps = surface.get_capabilities(&adapter);
         // An adapter that cannot present to this window reports no formats —
@@ -110,8 +141,9 @@ impl Renderer {
             caps.alpha_modes
         );
         let size = window.inner_size();
+        let no_vsync = std::env::var("OPENBF_NO_VSYNC").ok();
         let present_mode = pick_present_mode(
-            std::env::var("OPENBF_NO_VSYNC").ok().as_deref(),
+            no_vsync.as_deref().or(unpaced.then_some("1")),
             std::env::var("OPENBF_PRESENT").ok().as_deref(),
             &caps.present_modes,
         );

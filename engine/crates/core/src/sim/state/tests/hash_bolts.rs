@@ -6,6 +6,7 @@ use crate::vehicle::VehicleHandle;
 
 fn bolt() -> Bolt {
     Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::new(1.0, 2.0, 3.0),
         vel: Vec3::new(4.0, 5.0, 6.0),

@@ -203,7 +203,15 @@ impl HudPass {
                     },
                     operation: wgpu::BlendOperation::Add,
                 },
-                alpha: wgpu::BlendComponent::OVER,
+                alpha: if additive {
+                    wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::Zero,
+                        dst_factor: wgpu::BlendFactor::One,
+                        operation: wgpu::BlendOperation::Add,
+                    }
+                } else {
+                    wgpu::BlendComponent::OVER
+                },
             };
             // HUD meshes are mirrored and turned freely: no culling.
             crate::pipelines::PipelineDesc {
@@ -224,7 +232,17 @@ impl HudPass {
                     wgpu::CompareFunction::Always
                 }),
             }
-            .build(device, &shader, format)
+            // A visor starts with transparent pixels and needs the HUD's
+            // coverage in alpha. OVER also leaves an opaque desktop frame
+            // opaque, as it does for each native HUD draw.
+            .build_with_stencil(
+                device,
+                &shader,
+                format,
+                &[],
+                wgpu::ColorWrites::ALL,
+                wgpu::StencilState::default(),
+            )
         };
         let pipelines = [
             [pipeline(false, false, false), pipeline(false, true, false)],

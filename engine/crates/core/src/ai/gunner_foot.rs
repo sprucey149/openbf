@@ -77,7 +77,7 @@ pub(super) fn finish(pad: &mut PadState, mode: GunMode) {
                 my,
                 fire_lag,
                 pick,
-                view_lag: _,
+                ..
             } = pad;
             *rx = plan.rx;
             *ry = plan.ry;

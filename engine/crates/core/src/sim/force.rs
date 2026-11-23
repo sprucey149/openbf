@@ -119,8 +119,8 @@ impl Sim {
         target: UnitHandle,
         desc: DamageDesc,
         direction: glam::Vec3,
-    ) {
-        self.hero_damage_phases(i, target, desc, direction, false, true);
+    ) -> f32 {
+        self.hero_damage_phases(i, target, desc, direction, false, true)
     }
 
     /// Area damage passes both native shield and health flags. Physical blade
@@ -146,16 +146,16 @@ impl Sim {
         direction: glam::Vec3,
         shield: bool,
         direct: bool,
-    ) {
+    ) -> f32 {
         let Some(victim) = self.unit(target) else {
-            return;
+            return 0.0;
         };
         let friendly = victim.team == self.units[i].team;
         let caster_is_player = self.units[i].is_player;
         if (victim.is_player && self.cheats_of(victim).invincible)
             || (victim.is_player && friendly && !caster_is_player)
         {
-            return;
+            return 0.0;
         }
         let owner = self.handle(i);
         let seated_body = victim
@@ -187,6 +187,7 @@ impl Sim {
         } else {
             self.finish_unit_damage(target, Some(owner), damage, 0.0, direction);
         }
+        damage
     }
 
     /// A saber or Force shove. A droideka's mover owns its body and never

@@ -825,7 +825,7 @@ impl Sim {
                 self.launch_round_from(bolt, false, Some(beam_seat));
                 if self.weapon_classes[w.class].secondary.is_some() {
                     let round = st.weapons[k].count_secondary_round();
-                    self.fire_secondary(who, w.class, round, origin, d, spec.charge);
+                    self.fire_secondary(who, w.class, round, origin, d, spec.charge, false);
                 }
             }
             // The salvo's end leaves the fire state, which clears the ready

@@ -153,6 +153,16 @@ impl WorldScale {
         target: &WorldTarget,
         frame: &wgpu::TextureView,
     ) {
+        self.blit(encoder, target, frame, None);
+    }
+
+    pub(super) fn blit(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &WorldTarget,
+        frame: &wgpu::TextureView,
+        viewport: Option<[f32; 4]>,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("world upscale"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -170,6 +180,9 @@ impl WorldScale {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &target.bind_group, &[]);
+        if let Some([x, y, w, h]) = viewport {
+            pass.set_viewport(x, y, w, h, 0.0, 1.0);
+        }
         pass.draw(0..3, 0..1);
     }
 }

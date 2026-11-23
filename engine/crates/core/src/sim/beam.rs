@@ -99,8 +99,11 @@ impl Sim {
                 done.push(i);
             }
             if let Some(shot) = b.visual_shot.filter(|shot| shot.tick == self.tick) {
-                self.shot_flights
-                    .push(crate::projectile::ShotFlight { shot, end: b.end });
+                self.shot_flights.push(crate::projectile::ShotFlight {
+                    shot,
+                    end: b.end,
+                    tracked_origin: b.tracked_origin,
+                });
             }
         }
         // Where each beam's ray ended this tick: its round's end, or the

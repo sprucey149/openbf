@@ -24,6 +24,7 @@ impl Sim {
     /// round is a drawn line, so it flies its whole reach even through a wall
     /// the primary stopped on - and [`Sim::sweep_bolts`] skips its visual-only collision. Explosive
     /// secondaries still meet bodies even when their direct damage is zero.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::sim) fn fire_secondary(
         &mut self,
         who: Shooter,
@@ -32,6 +33,7 @@ impl Sim {
         origin: Vec3,
         dir: Vec3,
         charge: f32,
+        tracked_origin: bool,
     ) -> bool {
         let Some(sec) = self.weapon_classes[stage].secondary.as_ref() else {
             return false;
@@ -55,6 +57,7 @@ impl Sim {
             HullFilter::Static,
         );
         bolt.charge = charge;
+        bolt.tracked_origin = tracked_origin;
         if ord.is_tracer() && ord.explosion.is_none() {
             bolt.hit = Hit::None;
             bolt.remaining = ord.life_span;
@@ -131,12 +134,12 @@ mod tests {
             s.weapon_classes[gun].secondary.as_ref().unwrap().index,
             tracer
         );
-        s.soldier_shots(h.index as usize, None, &[shot()]);
+        s.soldier_shots(h.index as usize, None, &[shot()], None);
         assert_eq!(
             s.bolts.iter().map(|b| b.weapon_class).collect::<Vec<_>>(),
             vec![gun, tracer]
         );
-        s.soldier_shots(h.index as usize, None, &[shot()]);
+        s.soldier_shots(h.index as usize, None, &[shot()], None);
         assert_eq!(
             s.bolts.iter().map(|b| b.weapon_class).collect::<Vec<_>>(),
             vec![gun, tracer, gun, tracer]
@@ -147,22 +150,22 @@ mod tests {
     #[test]
     fn period_five_rides_the_first_and_the_sixth_round() {
         let (mut s, h, gun, tracer) = scene(5, 0.0);
-        s.soldier_shots(h.index as usize, None, &[shot(); 5]);
+        s.soldier_shots(h.index as usize, None, &[shot(); 5], None);
         assert_eq!(
             s.bolts.iter().map(|b| b.weapon_class).collect::<Vec<_>>(),
             vec![gun, tracer, gun, gun, gun, gun]
         );
         assert_eq!(s.unit(h).unwrap().weapon.secondary_rounds, 5);
-        s.soldier_shots(h.index as usize, None, &[shot()]);
+        s.soldier_shots(h.index as usize, None, &[shot()], None);
         assert_eq!(s.bolts.last().map(|b| b.weapon_class), Some(tracer));
-        s.soldier_shots(h.index as usize, None, &[shot()]);
+        s.soldier_shots(h.index as usize, None, &[shot()], None);
         assert_eq!(s.bolts.last().map(|b| b.weapon_class), Some(gun));
     }
 
     #[test]
     fn the_tracer_does_no_damage_and_dies_at_its_life_end() {
         let (mut s, h, _, tracer) = scene(1, 0.0);
-        s.soldier_shots(h.index as usize, None, &[shot()]);
+        s.soldier_shots(h.index as usize, None, &[shot()], None);
         assert_eq!(s.bolts[1].weapon_class, tracer);
         assert_eq!(
             s.weapon_classes[tracer]
@@ -189,7 +192,7 @@ mod tests {
     #[test]
     fn no_secondary_class_spawns_nothing_extra() {
         let mut s = Sim::new(11);
-        s.soldier_shots(0, None, &[shot()]);
+        s.soldier_shots(0, None, &[shot()], None);
         assert_eq!(s.bolts.len(), 1);
         assert_eq!(s.bolts[0].weapon_class, 0);
         assert_eq!(s.units[0].weapon.secondary_rounds, 0);
@@ -219,6 +222,7 @@ mod tests {
                 charge: 0.5,
                 ..shot()
             }],
+            None,
         );
         assert_eq!(
             s.bolts.iter().map(|b| b.weapon_class).collect::<Vec<_>>(),
@@ -232,7 +236,7 @@ mod tests {
         let (mut s, h, gun, round) = scene(1, 100.0);
         assert_ne!(round, usize::MAX);
         assert!(!s.weapon_classes[round].ordnance.is_tracer());
-        s.soldier_shots(h.index as usize, None, &[shot()]);
+        s.soldier_shots(h.index as usize, None, &[shot()], None);
         assert_eq!(
             s.bolts.iter().map(|b| b.weapon_class).collect::<Vec<_>>(),
             vec![gun, round]
@@ -303,6 +307,7 @@ mod tests {
             origin,
             dir,
             1.0,
+            false,
         );
         s.fly_bolts(crate::TICK_DT);
         assert!(s.bolts.is_empty());

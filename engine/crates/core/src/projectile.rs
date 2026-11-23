@@ -68,12 +68,15 @@ pub struct VisualShot {
 pub struct ShotFlight {
     pub shot: VisualShot,
     pub end: Vec3,
+    pub tracked_origin: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct Bolt {
     /// Presentation provenance, excluded from physics and the sim hash.
     pub visual_shot: Option<VisualShot>,
+    /// An exact tracked origin needs no presentation muzzle correction.
+    pub tracked_origin: bool,
     pub pos: Vec3,
     pub vel: Vec3,
     /// Seconds of flight left (+0x3c): LifeSpan, scaled by the hit fraction.
@@ -433,6 +436,7 @@ impl Bolt {
             life_span * (best_t / total)
         };
         Bolt {
+            tracked_origin: false,
             visual_shot: None,
             pos: origin,
             vel: dir * speed,

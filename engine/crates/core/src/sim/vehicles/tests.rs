@@ -213,6 +213,7 @@ fn atst() -> VehicleSpec {
 /// into vehicle `v`, landing at age 0.
 fn bolt_into(s: &Sim, owner: UnitHandle, wc: usize, v: VehicleHandle) -> Bolt {
     Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::X,

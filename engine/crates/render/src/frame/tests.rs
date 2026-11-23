@@ -72,6 +72,23 @@ fn the_blend_pass_interleaves_world_and_skinned_draws_far_to_near() {
     );
 }
 
+#[test]
+fn overlay_order_keeps_visible_overlay_draws_far_to_near() {
+    let at = |z: f32| Mat4::from_translation(glam::Vec3::new(0.0, 0.0, z));
+    let (m, t) = (MeshHandle::default(), TextureHandle(0));
+    let draws = [
+        DrawCmd::overlay(m, t, [1.0; 4], at(-2.0)),
+        DrawCmd::textured_blended(m, t, at(-20.0)),
+        DrawCmd::overlay(m, t, [1.0; 4], at(-9.0)),
+        DrawCmd::overlay(m, t, [1.0; 4], at(-30.0)),
+    ];
+    let keep = [true, true, true, false];
+    assert_eq!(
+        overlay_order(&draws, &keep, glam::Vec3::ZERO),
+        vec![2, 0]
+    );
+}
+
 /// Every draw is unculled unless a caller asks, and the ask survives the
 /// pass-selecting constructors — the far-scene cull is opt-in per draw,
 /// so a renderer with no policy behind it renders exactly as before.
@@ -136,6 +153,7 @@ fn every_run_section_can_be_left_out() {
         DrawLayer::Water,
         DrawLayer::Speckle,
         DrawLayer::Blend,
+        DrawLayer::Overlay,
     ] {
         let d = DrawCmd { layer, ..d };
         let section = run_section(&d);

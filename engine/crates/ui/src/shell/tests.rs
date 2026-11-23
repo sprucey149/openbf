@@ -805,7 +805,7 @@ fn list_scrolling_moves_top_without_moving_focus() {
     assert_eq!(m.play_list.top(), 0);
     let size = [640.0, 480.0];
     let pt_right = [400.0 * (640.0 / 512.0), 200.0];
-    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2.0));
+    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2.0, true));
     assert_eq!(
         m.play_list.top(),
         2,
@@ -815,13 +815,21 @@ fn list_scrolling_moves_top_without_moving_focus() {
 
     // scroll_pointer over left window scrolls map list
     let pt_left = [100.0 * (640.0 / 512.0), 200.0];
-    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1.0));
+    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1.0, true));
     assert_eq!(
         m.map_list.top(),
         0,
         "scroll_pointer over left window scrolls map list"
     );
     assert_eq!(m.map_list.at, 0, "focus unchanged without selecting");
+    assert!(!m.scroll_pointer(Some([0.0, 0.0]), Some(size), 1.0, true));
+    assert_eq!((m.map_list.top(), m.play_list.top()), (0, 2));
+    assert!(m.scroll_pointer(Some([0.0, 0.0]), Some(size), 1.0, false));
+    assert_eq!(
+        m.map_list.top(),
+        1,
+        "a mouse wheel still scrolls the focused list"
+    );
 }
 
 /// A trackpad sends fractions of a row: on an option group they add up

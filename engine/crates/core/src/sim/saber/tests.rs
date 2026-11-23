@@ -7,6 +7,12 @@ use crate::unit::{UnitHandle, UnitSpec};
 use crate::weapon::{ExplosionClass, WeaponClass};
 use manifest::combo::{ComboDef, ComboField as F, ComboKeyword as K, ComboValue as V};
 
+impl Sim {
+    fn saber_hits(&mut self) {
+        self.saber_hits_with(&[], &[]);
+    }
+}
+
 pub(super) fn field(keyword: K, args: Vec<V>, children: Vec<F>) -> F {
     F {
         keyword,
@@ -69,6 +75,7 @@ pub(super) fn saber(def: ComboDef) -> WeaponClass {
                 frames: vec![vec![segment]; 31],
             }],
             state_seconds: vec![0.0, 1.0],
+            hand_edges: Vec::new(),
             throw_edges: Vec::new(),
             deflect_edges: Vec::new(),
             weapon_bind: glam::Mat4::IDENTITY,
@@ -106,6 +113,416 @@ fn scene() -> (Sim, UnitHandle, UnitHandle) {
     });
     (sim, defender, shooter)
 }
+
+#[test]
+fn tracked_saber_hits_once_per_stroke_and_rearms_on_the_backswing() {
+    use crate::sim::{TrackedCombat, TrackedHand};
+    use glam::Quat;
+    let (mut sim, wielder, target) = scene();
+    let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+    class.damage = 0.0;
+    class.combo = program(vec![field(
+        K::Attack,
+        vec![],
+        vec![field(K::Damage, vec![V::Number(90.0)], vec![])],
+    )]);
+    class.blades[0].bone = "hp_weapons".into();
+    class.hand_edges.push(BladeSegment {
+        start: Vec3::ZERO,
+        end: Vec3::Z * 1.2,
+    });
+    sim.unit_mut(target).unwrap().soldier.pos = Vec3::new(0.0, 0.0, 0.9);
+    let health = sim.unit(target).unwrap().health.cur;
+    let sample = |sim: &mut Sim, x, motion_epoch| {
+        let mut pads = vec![PadState::default(); sim.units.len()];
+        pads[wielder.index as usize].tracked_combat = Some(TrackedCombat {
+            hands: [
+                None,
+                Some(TrackedHand::new(Vec3::new(x, 0.9, 0.0), Quat::IDENTITY)),
+            ],
+            motion_epoch,
+            grenade: None,
+            ..TrackedCombat::default()
+        });
+        sim.events.clear();
+        sim.saber_hits_with(&pads, &[]);
+        sim.tick += 1;
+        sim.unit(target).unwrap().health.cur
+    };
+    assert_eq!(sample(&mut sim, -0.6, 1), health);
+    assert_eq!(
+        sample(&mut sim, 0.6, 2),
+        health,
+        "a snap turn is not a swing"
+    );
+    let hit = sample(&mut sim, -0.25, 2);
+    assert_eq!(
+        hit,
+        health - 90.0,
+        "the blade crosses the target and deals the authored attack damage"
+    );
+    assert!(sim.events.iter().any(
+        |event| matches!(event, crate::sim::Event::SaberHandContact {
+        attacker, hand: 1, blocked: false, ..
+    } if *attacker == wielder)
+    ));
+    assert_eq!(sample(&mut sim, -0.8, 2), hit, "same stroke");
+    assert!(!sim
+        .events
+        .iter()
+        .any(|event| matches!(event, crate::sim::Event::SaberHandContact { .. })));
+    for _ in 0..10 {
+        assert_eq!(sample(&mut sim, -0.8, 2), hit);
+    }
+    let hit = sample(&mut sim, 0.8, 2);
+    assert_eq!(hit, health - 180.0);
+    for _ in 0..11 {
+        assert_eq!(sample(&mut sim, 0.8, 2), hit);
+    }
+    let hit = sample(&mut sim, -0.8, 2);
+    assert_eq!(hit, health - 270.0);
+    for _ in 0..11 {
+        assert_eq!(sample(&mut sim, -0.8, 2), hit);
+    }
+
+    let defender = sim.unit_mut(target).unwrap();
+    defender.weapon_class = 0;
+    defender.soldier.energy = 100.0;
+    defender.weapon.melee = Some(MeleeState {
+        deflect: Some(combo::Deflect {
+            min_angle: -110.0,
+            max_angle: 110.0,
+            energy_cost: 2.5,
+        }),
+        ..Default::default()
+    });
+    assert_eq!(sample(&mut sim, 0.8, 2), hit, "the enemy blocked the cut");
+    assert!(sim.events.iter().any(
+        |event| matches!(event, crate::sim::Event::SaberHandContact {
+        attacker, hand: 1, blocked: true, ..
+    } if *attacker == wielder)
+    ));
+}
+
+#[test]
+fn tracked_saber_keeps_the_rotating_tip_and_a_between_tick_wrist_cut() {
+    use crate::sim::{TrackedCombat, TrackedHand};
+    use glam::Quat;
+    let (mut sim, wielder, target) = scene();
+    let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+    class.blades[0].bone = "hp_weapons".into();
+    class.blades[0].width = 0.04;
+    class.hand_edges.push(BladeSegment {
+        start: Vec3::ZERO,
+        end: Vec3::Z * 1.2,
+    });
+    sim.unit_mut(target).unwrap().soldier.pos = Vec3::Z * 1.5;
+    let health = sim.unit(target).unwrap().health.cur;
+    let pose = |yaw| TrackedHand::new(Vec3::Y * 1.64, Quat::from_rotation_y(yaw));
+    let start = pose(-1.4);
+    let end = pose(1.4);
+    let mut pads = [PadState::default(); 2];
+    let i = wielder.index as usize;
+    pads[i].tracked_combat = Some(TrackedCombat {
+        hands: [None, Some(start)],
+        ..TrackedCombat::default()
+    });
+    sim.saber_hits_with(&pads, &[]);
+    sim.tick += 1;
+    assert_eq!(sim.unit(target).unwrap().health.cur, health);
+
+    // Both fixed-tick samples are at the same pose. The intermediate OpenXR
+    // sample records the excursion, including the rotation through the tip.
+    pads[i].tracked_combat.as_mut().unwrap().waypoints[1] = Some(end);
+    sim.saber_hits_with(&pads, &[]);
+    assert_eq!(sim.unit(target).unwrap().health.cur, health - 100.0);
+    sim.tick += 1;
+    assert!(pads[i].has_once());
+    pads[i].clear_once();
+    sim.saber_hits_with(&pads, &[]);
+    assert_eq!(sim.unit(target).unwrap().health.cur, health - 100.0);
+}
+
+#[test]
+fn tracked_saber_hits_moving_enemies_beside_the_player() {
+    use crate::sim::{TrackedCombat, TrackedHand};
+    use glam::Quat;
+
+    for side in [-1.0, 1.0] {
+        let (mut sim, wielder, target) = scene();
+        let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+        class.blades[0].bone = "hp_weapons".into();
+        class.hand_edges.push(BladeSegment {
+            start: Vec3::ZERO,
+            end: Vec3::Z * 1.2,
+        });
+        let rotation = Quat::from_rotation_y(side * std::f32::consts::FRAC_PI_2);
+        let pad = |z| PadState {
+            tracked_combat: Some(TrackedCombat {
+                hands: [
+                    None,
+                    Some(TrackedHand::new(Vec3::new(side * 0.35, 1.15, z), rotation)),
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let victim = sim.unit_mut(target).unwrap();
+        victim.soldier.pos = Vec3::new(side * 1.2, 0.0, 0.29);
+        let health = victim.health.cur;
+        sim.saber_hits_with(&[pad(0.0)], &[]);
+        sim.tick += 1;
+        let pads = [pad(-0.18)];
+        let starts = sim.saber_target_starts(&pads);
+        sim.unit_mut(target).unwrap().soldier.pos.z = 0.59;
+        let mut without_history = sim.clone();
+        without_history.saber_hits_with(&pads, &[]);
+        assert_eq!(without_history.unit(target).unwrap().health.cur, health);
+        sim.saber_hits_with(&pads, &starts);
+        assert_eq!(
+            sim.unit(target).unwrap().health.cur,
+            health - 100.0,
+            "side {side}"
+        );
+        assert_eq!(sim.unit(wielder).unwrap().soldier.yaw, 0.0);
+    }
+}
+
+#[test]
+fn tracked_saber_cut_from_the_side_is_outside_a_forward_guard() {
+    use crate::sim::{TrackedCombat, TrackedHand};
+    use glam::Quat;
+
+    for side in [-1.0, 1.0] {
+        let (mut sim, _, target) = scene();
+        let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+        class.blades[0].bone = "hp_weapons".into();
+        class.hand_edges.push(BladeSegment {
+            start: Vec3::ZERO,
+            end: Vec3::Z * 1.2,
+        });
+        let defender = sim.unit_mut(target).unwrap();
+        defender.weapon_class = 0;
+        defender.soldier.pos = Vec3::X * (side * 1.2);
+        defender.soldier.yaw = std::f32::consts::PI;
+        defender.soldier.energy = 100.0;
+        defender.weapon.melee = Some(MeleeState {
+            deflect: Some(combo::Deflect {
+                min_angle: -30.0,
+                max_angle: 30.0,
+                energy_cost: 2.5,
+            }),
+            ..Default::default()
+        });
+        let health = defender.health.cur;
+        for z in [0.6, -0.6] {
+            let palm = Vec3::new(side * 0.25, 1.15, z);
+            let rotation = Quat::from_rotation_y(side * std::f32::consts::FRAC_PI_2);
+            sim.saber_hits_with(
+                &[PadState {
+                    tracked_combat: Some(TrackedCombat {
+                        hands: [None, Some(TrackedHand::new(palm, rotation))],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                &[],
+            );
+            sim.tick += 1;
+        }
+        let defender = sim.unit(target).unwrap();
+        assert_eq!(defender.health.cur, health - 100.0, "side {side}");
+        assert_eq!(defender.soldier.energy, 100.0);
+    }
+}
+fn tracked_duel() -> (Sim, UnitHandle, UnitHandle) {
+    let (mut sim, wielder, target) = scene();
+    let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+    class.blades[0].bone = "hp_weapons".into();
+    class.hand_edges.push(BladeSegment {
+        start: Vec3::ZERO,
+        end: Vec3::Z * 1.2,
+    });
+    sim.unit_mut(target).unwrap().soldier.pos = Vec3::Z;
+    (sim, wielder, target)
+}
+
+fn sample_tracked_duel(sim: &mut Sim, at: Vec3, rotation: glam::Quat) {
+    use crate::sim::{TrackedCombat, TrackedHand};
+
+    sim.saber_hits_with(
+        &[PadState {
+            tracked_combat: Some(TrackedCombat {
+                hands: [None, Some(TrackedHand::new(at, rotation))],
+                ..TrackedCombat::default()
+            }),
+            ..PadState::default()
+        }],
+        &[],
+    );
+    sim.tick += 1;
+}
+
+#[test]
+fn tracked_saber_can_return_a_cut_during_a_standing_flinch() {
+    let (mut sim, wielder, target) = tracked_duel();
+    let left = Vec3::new(-0.7, 1.15, 0.0);
+    let right = Vec3::new(0.7, 1.15, 0.0);
+    let straight = glam::Quat::IDENTITY;
+    sample_tracked_duel(&mut sim, left, straight);
+    sample_tracked_duel(&mut sim, right, straight);
+    let health = sim.unit(target).unwrap().health.cur;
+    assert_eq!(health, 200.0, "the opening cut landed");
+    for _ in 0..11 {
+        sample_tracked_duel(&mut sim, right, straight);
+    }
+
+    let mut recovering = sim.clone();
+    let recovery = &mut recovering.unit_mut(wielder).unwrap().soldier;
+    recovery.fire_lock = true;
+    recovery.lock_timer = crate::soldier::GETUP_LOCK;
+    let counter = |sim: &mut Sim| {
+        sim.unit_mut(wielder).unwrap().soldier.grounded = true;
+        sim.hero_knock(wielder, Vec3::NEG_Z, 3.0, target);
+        assert!(sim.unit(wielder).unwrap().soldier.no_fire());
+    };
+    counter(&mut recovering);
+    sample_tracked_duel(&mut recovering, left, straight);
+    assert_eq!(recovering.unit(target).unwrap().health.cur, health);
+
+    counter(&mut sim);
+    assert!(!sim.unit(wielder).unwrap().soldier.stance.knocked());
+    let mut choked = sim.clone();
+    choked
+        .unit_mut(wielder)
+        .unwrap()
+        .soldier
+        .choke_release_lock();
+    sample_tracked_duel(&mut choked, left, straight);
+    assert_eq!(choked.unit(target).unwrap().health.cur, health);
+
+    let mut down = sim.clone();
+    down.unit_mut(wielder).unwrap().soldier.stance = crate::soldier::Stance::Tumble;
+    sample_tracked_duel(&mut down, left, straight);
+    assert_eq!(down.unit(target).unwrap().health.cur, health);
+
+    sample_tracked_duel(&mut sim, left, straight);
+    assert_eq!(sim.unit(target).unwrap().health.cur, health - 100.0);
+}
+
+#[test]
+fn tracked_saber_rearms_on_a_rounded_return() {
+    let (mut sim, _, target) = tracked_duel();
+    let health = sim.unit(target).unwrap().health.cur;
+    // Two passes through the defender, separated by a continuous rounded
+    // return. Every adjacent motion pair is less than 90 degrees apart.
+    for eighth in -2..=18 {
+        let yaw = eighth as f32 * std::f32::consts::FRAC_PI_8;
+        let at = Vec3::Y * 1.15 + glam::Quat::from_rotation_y(yaw) * Vec3::Z * 0.95;
+        sample_tracked_duel(&mut sim, at, glam::Quat::IDENTITY);
+        if eighth == 2 {
+            assert_eq!(
+                sim.unit(target).map(|unit| unit.health.cur),
+                Some(health - 100.0)
+            );
+        }
+    }
+    assert_eq!(
+        sim.unit(target).map(|unit| unit.health.cur),
+        Some(health - 200.0)
+    );
+}
+
+#[test]
+fn tracked_saber_keeps_both_edges_in_one_stroke() {
+    let (mut sim, _, target) = tracked_duel();
+    let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+    class.blades.push(class.blades[0].clone());
+    class.hand_edges.push(BladeSegment {
+        start: Vec3::ZERO,
+        end: -Vec3::Z * 1.2,
+    });
+    let defender = sim.unit_mut(target).unwrap();
+    defender.soldier.pos = -Vec3::Z;
+    let health = defender.health.cur;
+    // The rear edge lands the cut while both edges continue rotating.
+    for yaw in [-0.7, -0.4, -0.2, 0.0, 0.2, 0.4, 0.7] {
+        sample_tracked_duel(&mut sim, Vec3::Y * 1.15, glam::Quat::from_rotation_y(yaw));
+    }
+    assert_eq!(
+        sim.unit(target).map(|unit| unit.health.cur),
+        Some(health - 100.0)
+    );
+}
+
+#[test]
+fn tracked_saber_thrust_cooldowns_are_independent_per_hand_and_target() {
+    use crate::sim::{TrackedCombat, TrackedHand};
+
+    let (mut sim, _, target) = tracked_duel();
+    let class = sim.weapon_classes[0].saber.as_mut().unwrap();
+    let mut offhand = class.blades[0].clone();
+    offhand.bone = "bone_l_hand".into();
+    class.blades.push(offhand);
+    class.hand_edges.push(class.hand_edges[0]);
+    let other = sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.2, 0.0, 1.0)))
+        .unwrap();
+    for handle in [target, other] {
+        let health = &mut sim.unit_mut(handle).unwrap().health;
+        health.max = 500.0;
+        health.cur = health.max;
+    }
+    let sample = |sim: &mut Sim, z: [f32; 2], motion_epoch| {
+        let hands = z.map(|z| {
+            Some(TrackedHand::new(
+                Vec3::new(0.0, 1.15, z),
+                glam::Quat::IDENTITY,
+            ))
+        });
+        sim.events.clear();
+        sim.saber_hits_with(
+            &[PadState {
+                tracked_combat: Some(TrackedCombat {
+                    hands,
+                    motion_epoch,
+                    ..TrackedCombat::default()
+                }),
+                ..PadState::default()
+            }],
+            &[],
+        );
+        sim.tick += 1;
+        let health = [target, other].map(|handle| sim.unit(handle).unwrap().health.cur);
+        let hits = sim
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                crate::sim::Event::SaberHandContact {
+                    hand,
+                    blocked: false,
+                    ..
+                } => Some(*hand),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (health, hits)
+    };
+    assert_eq!(sample(&mut sim, [-1.0; 2], 0), ([500.0; 2], vec![]));
+    assert_eq!(sample(&mut sim, [0.0, -1.0], 0), ([400.0; 2], vec![0; 2]));
+    assert_eq!(sample(&mut sim, [-1.0, 0.0], 0), ([300.0; 2], vec![1; 2]));
+    for attempt in 2..12 {
+        let z = if attempt % 2 == 0 { 0.0 } else { -1.0 };
+        assert_eq!(
+            sample(&mut sim, [z; 2], 1),
+            ([300.0; 2], vec![]),
+            "tick {attempt} after left hit"
+        );
+    }
+    assert_eq!(sample(&mut sim, [0.0; 2], 1), ([200.0; 2], vec![0; 2]));
+    assert_eq!(sample(&mut sim, [-1.0; 2], 1), ([100.0; 2], vec![1; 2]));
+}
+
 fn impact(sim: &Sim, defender: UnitHandle, owner: UnitHandle, direction: Vec3) -> Bolt {
     let mut bolt = Bolt::fire(
         sim.unit(defender).unwrap().muzzle(),

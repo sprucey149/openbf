@@ -850,6 +850,10 @@ pub struct BoltPrims {
     pub posed: Option<[Vec3; 2]>,
 }
 
+/// Skip interpolation across larger moves in one tick, such as a rescue.
+/// PROVISIONAL, measure: compare the largest normal unit step with rescues.
+pub const UNIT_SNAP_M: f32 = 5.0;
+
 /// OURS (playtest 2026-10-28, BF1 Yavin 4: "I'd see the bullet hit the guy
 /// but nothing would happen"): how far behind the sim a human sees the
 /// soldiers he shoots at. The window draws the world blended between the

@@ -27,7 +27,7 @@ fn weapon() -> WeaponClass {
 
 #[test]
 fn physical_melee_hits_unperceived_bystanders_for_ai_and_player() {
-    for ai in [false, true] {
+    for (ai, tracked) in [(false, false), (true, false), (false, true)] {
         let (mut sim, owner, victim) = scene();
         sim.weapon_classes[0] = weapon();
         let u = sim.unit_mut(owner).unwrap();
@@ -38,15 +38,17 @@ fn physical_melee_hits_unperceived_bystanders_for_ai_and_player() {
         assert!(u.ai.contacts.iter().all(Option::is_none));
         sim.unit_mut(victim).unwrap().soldier.pos = Vec3::NEG_Z;
         let before = sim.unit(victim).unwrap().health.cur;
-        sim.saber_inputs(&mut [PadState {
+        let mut pads = [PadState {
             buttons: buttons::FIRE,
+            tracked_combat: tracked.then(crate::sim::TrackedCombat::default),
             ..Default::default()
-        }]);
-        sim.saber_hits();
+        }];
+        sim.saber_inputs(&mut pads);
+        sim.saber_hits_with(&pads, &[]);
         assert_eq!(
             sim.unit(victim).unwrap().health.cur,
             before - 100.0,
-            "ai={ai}"
+            "ai={ai}, tracked={tracked}"
         );
     }
 }

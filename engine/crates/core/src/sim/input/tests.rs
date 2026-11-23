@@ -133,9 +133,31 @@ fn different_seed_different_hash() {
 
 #[test]
 fn input_log_ron_round_trip() {
-    let log = demo_log();
+    let mut log = demo_log();
+    log.ticks[0].tracked_shots = [
+        Some(TrackedShot::new(
+            Vec3::Y,
+            Vec3::new(0.2, 1.5, -0.7),
+            Vec3::Y,
+        )),
+        Some(TrackedShot::new(
+            Vec3::Y,
+            Vec3::new(0.2, 1.4, -0.4),
+            Vec3::NEG_Y,
+        )),
+    ];
+    log.ticks[0].tracked_combat = Some(TrackedCombat {
+        waypoints: [
+            Some(TrackedHand::new(glam::Vec3::X, glam::Quat::IDENTITY)),
+            None,
+        ],
+        hands: [None, Some(TrackedHand::new(Vec3::Y, glam::Quat::IDENTITY))],
+        motion_epoch: 7,
+        grenade: Some(TrackedThrow::new(0, 1, Vec3::Y, Vec3::NEG_Z)),
+    });
     let s = ron::to_string(&log).unwrap();
     let back: InputLog = ron::from_str(&s).unwrap();
+    assert_eq!(back.ticks, log.ticks);
     assert_eq!(Sim::run_log(&log), Sim::run_log(&back));
 }
 

@@ -129,6 +129,49 @@ impl Renderer {
         }
     }
 
+    /// Also expose the finished desktop frame as a sampleable texture.
+    pub fn capture_flat_frame(&mut self, enabled: bool) {
+        self.capture_flat = enabled;
+    }
+
+    /// Most recent captured flat desktop frame when [`Self::capture_flat_frame`] is enabled.
+    pub fn flat_frame(&self) -> Option<&FrameTarget> {
+        self.flat_frame.as_ref().filter(|_| self.capture_flat)
+    }
+
+    /// Present an offscreen [`FrameTarget`] to the desktop window with optional overlay.
+    pub fn mirror_frame(
+        &mut self,
+        source: &FrameTarget,
+        overlay: Option<OverlayFn<'_>>,
+    ) -> Result<(), RenderError> {
+        self.shadows.clear();
+        let Some(frame) = self.acquire_window()? else {
+            return Ok(());
+        };
+        let view = frame.texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let (w, h) = self.size();
+        let [sw, sh] = source.size();
+        let scale = (w as f32 / sw as f32).min(h as f32 / sh as f32);
+        let (mw, mh) = (
+            (sw as f32 * scale).min(w as f32),
+            (sh as f32 * scale).min(h as f32),
+        );
+        self.world_scale.blit(
+            &mut encoder,
+            &source.0,
+            &view,
+            Some([(w as f32 - mw) * 0.5, (h as f32 - mh) * 0.5, mw, mh]),
+        );
+        if let Some(overlay) = overlay {
+            overlay(&self.device, &self.queue, &mut encoder, &view, [w, h]);
+        }
+        self.queue.submit([encoder.finish()]);
+        self.present_window(frame);
+        Ok(())
+    }
+
     /// Allocate an offscreen frame target compatible with this renderer's pipelines.
     pub fn frame_target(&self, size: [u32; 2]) -> Result<FrameTarget, RenderError> {
         let limit = self.device.limits().max_texture_dimension_2d;
@@ -915,5 +958,281 @@ mod tests {
             textures.is_empty(),
             "alternating view resolutions allocated GPU textures: {textures:?}"
         );
+    }
+
+    #[test]
+    #[ignore = "GPU referee: scripts/gpu_tests.sh"]
+    fn flat_capture_includes_the_games_overlay_and_restores_regular_rendering() {
+        let mut r = Renderer::new_headless(64, 48).unwrap();
+        let camera = Camera::default();
+        r.capture_flat_frame(true);
+        r.render_frame(
+            &camera,
+            &[],
+            &[],
+            [1.0, 0.0, 0.0, 1.0],
+            Some(&mut |_, _, encoder, view, size| {
+                assert_eq!(size, [64, 48]);
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+            }),
+        )
+        .unwrap();
+        let source = r.flat_frame().unwrap();
+        assert_eq!(&capture_target(&r, source)[..4], &[0, 0, 255, 255]);
+        r.capture_flat_frame(false);
+        assert!(r.flat_frame().is_none());
+        r.render(&camera, &[], [0.0, 1.0, 0.0, 1.0]).unwrap();
+        assert_eq!(&r.capture_rgba().unwrap().0[..4], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    #[ignore = "GPU referee: scripts/gpu_tests.sh"]
+    fn overlay_layer_draws_unoccluded_in_front_of_closer_geometry() {
+        use crate::{
+            DrawCmd, LightPath, MeshData, SamplerMode, TextureDesc, WrapV,
+        };
+        let mut r = Renderer::new_headless(64, 48).unwrap();
+        let quad = r
+            .add_mesh(&MeshData {
+                positions: &[
+                    [-2.0, -2.0, 0.0],
+                    [2.0, -2.0, 0.0],
+                    [-2.0, 2.0, 0.0],
+                    [2.0, 2.0, 0.0],
+                ],
+                normals: &[[0.0, 0.0, 1.0]; 4],
+                uvs: &[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+                colors: None,
+                indices: &[0, 1, 2, 2, 1, 3],
+            })
+            .unwrap();
+        let white = r
+            .add_texture(&TextureDesc {
+                width: 1,
+                height: 1,
+                mips: &[&[255, 255, 255, 255]],
+                sampler: SamplerMode::Nearest,
+                wrap_v: WrapV::Repeat,
+                srgb: true,
+                detail: None,
+                scroll: [0.0, 0.0],
+                uv_scale: [1.0, 1.0],
+                label: Some("overlay white"),
+            })
+            .unwrap();
+        let camera = Camera::default();
+        let draws = [
+            DrawCmd::flat(quad, [1.0, 0.0, 0.0, 1.0], Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -2.0)))
+                .with_light(LightPath::Unlit),
+            DrawCmd::overlay(
+                quad,
+                white,
+                [0.0, 1.0, 0.0, 1.0],
+                Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -5.0)),
+            ),
+        ];
+        r.render(&camera, &draws, [0.0, 0.0, 0.0, 1.0]).unwrap();
+        let rgba = r.capture_rgba().unwrap().0;
+        let center = &rgba[(24 * 64 + 32) * 4..][..4];
+        assert!(
+            center[1] > 200 && center[0] < 40,
+            "expected green overlay in front of closer red wall, got {center:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "GPU referee: scripts/gpu_tests.sh"]
+    fn stereo_visor_extends_fullscreen_fade_across_entire_eye_view() {
+        use crate::{Visor, VisorEye, VisorPass};
+        let mut r = Renderer::new_headless(128, 128).unwrap();
+        let eye = r.frame_target([128, 128]).unwrap();
+        let hud = r.frame_target([128, 72]).unwrap();
+        let camera = Camera::default();
+        let eyes = [-1.0, 1.0].map(|side| VisorEye {
+            offset: glam::Vec3::X * side * 0.032,
+            orientation: glam::Quat::from_rotation_y(-side * 0.12),
+            fov: ViewFov {
+                left: -1.1,
+                right: 1.1,
+                down: -1.3,
+                up: 1.3,
+            },
+        });
+        let visor = Visor::new(eyes);
+        let pass = VisorPass::new(r.device(), r.surface_format());
+
+        let clear_and_composite = |r: &mut Renderer, hud_clear: wgpu::Color| {
+            r.render_frame_to(
+                &eye,
+                &camera,
+                ViewProjection::Camera,
+                &[],
+                &[],
+                [0.8, 0.8, 0.8, 1.0],
+                None,
+            )
+            .unwrap();
+            let mut encoder = r.device().create_command_encoder(&Default::default());
+            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("clear hud"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: hud.view(),
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(hud_clear),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.draw(r, &mut encoder, &eye, &hud, &visor, 0);
+            r.queue().submit([encoder.finish()]);
+            capture_target(r, &eye)
+        };
+
+        let px = |rgba: &[u8], x: usize, y: usize| rgba[(y * 128 + x) * 4];
+        let clear_hud = clear_and_composite(&mut r, wgpu::Color::TRANSPARENT);
+        let baseline = px(&clear_hud, 0, 0);
+        assert!(
+            baseline >= 210,
+            "expected transparent HUD borders to leave exterior eye pixels un-darkened, got {baseline}"
+        );
+
+        let faded = clear_and_composite(
+            &mut r,
+            wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.6,
+            },
+        );
+        let corner = px(&faded, 0, 0);
+        let center = px(&faded, 64, 64);
+        assert!(
+            corner + 40 < baseline,
+            "expected full-screen fade to darken exterior eye pixels ({corner} vs {baseline})"
+        );
+        assert!(
+            (i16::from(corner) - i16::from(center)).abs() <= 4,
+            "expected uniform veil across exterior ({corner}) and visor center ({center})"
+        );
+    }
+
+    #[test]
+    #[ignore = "GPU referee: scripts/gpu_tests.sh"]
+    fn stereo_visor_composites_the_native_hud_edges_over_a_clear_center() {
+        use crate::hud::{HudBatch, HudPass, HudVertex};
+        use crate::{Visor, VisorEye, VisorPass};
+
+        let size = [128, 96];
+        let mut r = Renderer::new_headless(size[0], size[1]).unwrap();
+        let hud = r.frame_target(size).unwrap();
+        let eye = r.frame_target(size).unwrap();
+        let fov = ViewFov {
+            left: -1.2,
+            right: 0.95,
+            down: -0.9,
+            up: 0.95,
+        };
+        let eyes = [-1.0, 1.0].map(|side| VisorEye {
+            offset: Vec3::X * side * 0.034,
+            orientation: glam::Quat::from_rotation_y(-side * 0.09),
+            fov,
+        });
+        let visor = Visor::new(eyes);
+        let pass = VisorPass::new(r.device(), r.surface_format());
+        let mut native = HudPass::new(
+            r.device(),
+            r.queue(),
+            r.surface_format(),
+            r.display_view_format(),
+        );
+        let mut verts = Vec::new();
+        let mut indices = Vec::new();
+        for (x, y, color) in [
+            (44.0, 2.0, [1.0, 0.0, 0.0, 1.0]),
+            (2.0, 74.0, [0.0, 1.0, 0.0, 1.0]),
+            (104.0, 74.0, [1.0, 1.0, 1.0, 0.5]),
+        ] {
+            let base = verts.len() as u32;
+            verts.extend(
+                [[x, y], [x + 22.0, y], [x + 22.0, y + 20.0], [x, y + 20.0]].map(|[x, y]| {
+                    HudVertex {
+                        pos: [x, y, 0.0],
+                        uv: [0.0, 0.0],
+                        color,
+                    }
+                }),
+            );
+            indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        let batches = [HudBatch {
+            texture: None,
+            additive: false,
+            depth: false,
+            first: 0,
+            count: indices.len() as u32,
+        }];
+        let mut encoder = r.device().create_command_encoder(&Default::default());
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: hud.view(),
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        native.paint(
+            &verts,
+            &indices,
+            &batches,
+            r.device(),
+            r.queue(),
+            &mut encoder,
+            hud.view(),
+            size,
+        );
+        r.queue().submit([encoder.finish()]);
+        for index in 0..2 {
+            r.render_frame_to(
+                &eye,
+                &Camera::default(),
+                fov.into(),
+                &[],
+                &[],
+                [0.0, 0.0, 1.0, 1.0],
+                None,
+            )
+            .unwrap();
+            let mut encoder = r.device().create_command_encoder(&Default::default());
+            pass.draw(&r, &mut encoder, &eye, &hud, &visor, index);
+            r.queue().submit([encoder.finish()]);
+            let rgba = capture_target(&r, &eye);
+            let center = (48 * 128 + 64) * 4;
+            assert_eq!(&rgba[center..center + 4], &[0, 0, 255, 255]);
+            let pixels = rgba.chunks_exact(4);
+            assert!(pixels.clone().any(|p| p == [255, 0, 0, 255]));
+            assert!(pixels.clone().any(|p| p == [0, 255, 0, 255]));
+            assert!(pixels
+                .clone()
+                .any(|p| (125..=129).contains(&p[0]) && p[0] == p[1] && p[2] == 255));
+        }
     }
 }

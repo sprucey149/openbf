@@ -207,6 +207,7 @@ fn a_bolt_kill_is_decided_at_the_death_block_deterministically() {
             let v = spawn(&mut s, CIS, Vec3::new(6.0, 0.0, k as f32));
             s.units[v.index as usize].health.cur = 1.0;
             s.resolve_bolt(&Bolt {
+                tracked_origin: false,
                 visual_shot: None,
                 pos: Vec3::ZERO,
                 vel: Vec3::X * 40.0,

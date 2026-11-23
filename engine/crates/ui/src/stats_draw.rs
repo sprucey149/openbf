@@ -220,6 +220,27 @@ enum Icon {
     Square,
 }
 
+/// Hit-test the same Back, Select and Done prompts that the stats page draws.
+pub fn help_at(
+    font: Option<&manifest::hud::HudFont>,
+    stats: &StatsScreens,
+    point: [f32; 2],
+    size: [f32; 2],
+) -> crate::stats::Pad {
+    let (left, right) = match stats.page {
+        Page::Team => (&stats.texts.done, &stats.texts.select),
+        Page::Personal => (&stats.texts.back, &stats.texts.career_title),
+        Page::Career => (&stats.texts.back, &stats.texts.done),
+    };
+    let left = crate::spawn_draw::help_line_at(font, false, left, point, size);
+    crate::stats::Pad {
+        square: left && stats.page == Page::Team,
+        triangle: left && stats.page != Page::Team,
+        cross: crate::spawn_draw::help_line_at(font, true, right, point, size),
+        ..Default::default()
+    }
+}
+
 impl Ctx<'_> {
     /// A panel: its title tab (the shell's title bar pieces, as the class
     /// panel's) with the title centred, and its `border_3_pieces` box.

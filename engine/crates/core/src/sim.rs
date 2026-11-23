@@ -142,7 +142,8 @@ pub use hero_bodies::{
     nine_numbers, nine_yaw_limited, HeroRiderFrames, SeatedBodies, SeatedBody, SeatedKey, NINE_GRID,
 };
 pub use input::{
-    buttons, AimTarget, HeldEat, InputLog, PadState, ScreenPick, LOOK_SCALE, LOOK_UNIT,
+    buttons, AimTarget, HeldEat, InputLog, PadState, ScreenPick, TrackedCombat, TrackedHand,
+    TrackedShot, TrackedThrow, LOOK_SCALE, LOOK_UNIT,
 };
 pub use lock_on::{LockOn, LockTarget};
 pub use look::{LookPreview, MOUSE_STEER};

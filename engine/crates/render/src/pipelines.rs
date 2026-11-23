@@ -135,6 +135,13 @@ impl Renderer {
             ..PipelineDesc::world("map blend pipeline", &pipeline_layout, &vb)
         }
         .build(&device, &shader, format);
+        let overlay_pipeline = PipelineDesc {
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            depth_write: false,
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            ..PipelineDesc::world("map overlay pipeline", &pipeline_layout, &vb)
+        }
+        .build(&device, &shader, format);
         let additive = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -760,6 +767,8 @@ impl Renderer {
             device: Arc::new(device),
             queue: Arc::new(queue),
             target,
+            capture_flat: false,
+            flat_frame: None,
             depth_view,
             pipeline,
             globals_buf,
@@ -775,6 +784,7 @@ impl Renderer {
             instance_capacity,
             mask_pipeline,
             blend_pipeline,
+            overlay_pipeline,
             additive_blend_pipeline,
             fade_additive_blend_pipeline,
             water_pipeline,
