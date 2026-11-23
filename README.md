@@ -229,6 +229,17 @@ In a hover tank, speeder or flyer the mouse turns the vehicle, as the steering s
 in a walker it aims the walker. In a gunner's seat or a turret it turns the gun.
 Tested and working on Linux and Windows, with the NTSC-U PS2 releases (SLUS-20898 and SLUS-21240).
 
+## Mods & OpenBF VR
+
+Supported Windows and Linux builds bundle **OpenBF VR** (`openbf.vr`) as a disabled-by-default engine extension:
+
+1. Open **`openbf-launcher`**.
+2. Go to the **Mods** tab.
+3. Toggle **OpenBF VR** on (this saves to `openbf_data/extensions.ron` without recompiling).
+4. Start your OpenXR runtime/headset and click **Play**.
+
+To return to desktop play, disable **OpenBF VR** in the **Mods** tab (or click **Play in Desktop Mode** if OpenXR startup fails). See [docs/vr.md](docs/vr.md) for VR controls and troubleshooting, and [docs/extensions.md](docs/extensions.md) for the extension system architecture.
+
 ## How it was made
 
 The engine is written in Rust, with substantial help from AI agents and community contributors.

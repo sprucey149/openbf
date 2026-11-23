@@ -862,9 +862,13 @@ def main():
     ap.add_argument("--session-stats", action="store_true",
                     help="dev only: build the game with the session-stats feature (one JSON file per round in "
                          "openbf_data/session_stats/; LAN still plays with builds without it)")
+    ap.add_argument("--no-vr", action="store_true",
+                    help="build the game binary without the bundled OpenBF VR extension")
     a = ap.parse_args()
     if a.session_stats and (a.game_bin or a.bake_only):
         sys.exit("pack: --session-stats builds the game; it cannot apply to --game-bin or --bake-only")
+    if a.no_vr and (a.game_bin or a.bake_only):
+        sys.exit("pack: --no-vr builds the game; it cannot apply to --game-bin or --bake-only")
     if a.baked:
         global BAKED
         BAKED = os.path.abspath(a.baked)
@@ -899,8 +903,11 @@ def main():
 
 
 def game_features(a):
-    """The game's cargo features: `session-stats` with --session-stats (dev-only round logs)."""
-    return ["--features", "session-stats"] if getattr(a, "session_stats", False) else []
+    """The game's cargo features: `vr` is bundled by default unless `--no-vr` is passed."""
+    args = ["--no-default-features"] if getattr(a, "no_vr", False) else []
+    if getattr(a, "session_stats", False):
+        args += ["--features", "session-stats"]
+    return args
 
 
 def build(a, out, plan, packs, visual_report):
