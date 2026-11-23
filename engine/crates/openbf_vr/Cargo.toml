@@ -1,0 +1,25 @@
+[package]
+name = "openbf_vr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+core = { path = "../core" }
+extensions = { path = "../extensions", features = ["runtime"] }
+glam = { workspace = true }
+input = { path = "../input" }
+render = { path = "../render" }
+winit = { workspace = true }
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+ash = { version = "0.38", default-features = false, features = ["loaded"] }
+wgpu = { workspace = true, features = ["vulkan"] }
+
+[target.'cfg(windows)'.dependencies]
+# Windows OpenXR loaders are distributed with the application.
+openxr = { version = "0.22", features = ["static"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+openxr = { version = "0.22" }
