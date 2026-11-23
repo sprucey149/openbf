@@ -69,11 +69,11 @@ impl GameSource {
         }
     }
 
-    pub fn display_label(&self) -> &'static str {
+    /// The console disc image this source reads, `None` for a PC install.
+    pub fn disc_image(&self) -> Option<&Path> {
         match self {
-            GameSource::Ps2Iso(_) => "PS2",
-            GameSource::XboxIso(_) => "Xbox",
-            GameSource::PcLvlDir(_) => "PC",
+            GameSource::Ps2Iso(iso) | GameSource::XboxIso(iso) => Some(iso),
+            GameSource::PcLvlDir(_) => None,
         }
     }
 }
@@ -313,26 +313,14 @@ fn has_remaster_exe_beside(lvl_dir: &Path, stop_at: &Path) -> bool {
 /// install root, `GameData`, `GameData/Data`, or `_LVL_PC` directly).
 pub fn resolve_pc_lvl_dir(root: &Path, game: GameId) -> Result<PathBuf> {
     if looks_like_pc_lvl_dir(root, game) {
-        if has_remaster_exe_beside(root, root) {
-            bail!(
-                "{}: 64-bit Classic Collection is not supported; use the original 32-bit PC release",
-                game.title()
-            );
-        }
-        return Ok(root.to_path_buf());
+        return accept_pc_lvl_dir(root, root, game);
     }
 
     // Fast path: standard Steam/GOG/DVD layout.
     for rel in ["GameData/Data/_LVL_PC", "Data/_LVL_PC", "_LVL_PC"] {
         let cand = ci_path(root, rel);
         if cand.is_dir() && looks_like_pc_lvl_dir(&cand, game) {
-            if has_remaster_exe_beside(&cand, root) {
-                bail!(
-                    "{}: 64-bit Classic Collection is not supported; use the original 32-bit PC release",
-                    game.title()
-                );
-            }
-            return Ok(cand);
+            return accept_pc_lvl_dir(&cand, root, game);
         }
     }
 
@@ -354,13 +342,7 @@ pub fn resolve_pc_lvl_dir(root: &Path, game: GameId) -> Result<PathBuf> {
         subdirs.sort();
         for sub in subdirs {
             if looks_like_pc_lvl_dir(&sub, game) {
-                if has_remaster_exe_beside(&sub, root) {
-                    bail!(
-                        "{}: 64-bit Classic Collection is not supported; use the original 32-bit PC release",
-                        game.title()
-                    );
-                }
-                return Ok(sub);
+                return accept_pc_lvl_dir(&sub, root, game);
             }
             queue.push_back((sub, depth + 1));
         }
@@ -371,6 +353,18 @@ pub fn resolve_pc_lvl_dir(root: &Path, game: GameId) -> Result<PathBuf> {
         game.title(),
         root.display()
     )
+}
+
+/// `lvl_dir` as the game's data, unless a 64-bit Classic Collection exe sits
+/// beside it (between `lvl_dir` and `root`).
+fn accept_pc_lvl_dir(lvl_dir: &Path, root: &Path, game: GameId) -> Result<PathBuf> {
+    if has_remaster_exe_beside(lvl_dir, root) {
+        bail!(
+            "{}: 64-bit Classic Collection is not supported; use the original 32-bit PC release",
+            game.title()
+        );
+    }
+    Ok(lvl_dir.to_path_buf())
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +411,9 @@ fn inspect_dlc_lvl(f: &mut File, base: u64, size: u64) -> Result<Option<&'static
     }
     let head = read_slice(f, base, 8, base + size)?;
     let expected_len = u32::try_from(size - 8).unwrap_or(u32::MAX);
-    if &head[0..4] != b"ucfb" || u32::from_le_bytes([head[4], head[5], head[6], head[7]]) != expected_len {
+    if &head[0..4] != b"ucfb"
+        || u32::from_le_bytes([head[4], head[5], head[6], head[7]]) != expected_len
+    {
         return Ok(None);
     }
     let mut has_fisto = false;
@@ -553,8 +549,7 @@ fn detect_dlc_file(path: &Path) -> Vec<DlcSource> {
             if clean.contains('/') || clean.contains('\\') || clean == "." || clean == ".." {
                 return Vec::new();
             }
-            let extent_off =
-                u32::from_le_bytes([rec[2], rec[3], rec[4], rec[5]]) as u64 * SECTOR;
+            let extent_off = u32::from_le_bytes([rec[2], rec[3], rec[4], rec[5]]) as u64 * SECTOR;
             let extent_len = u32::from_le_bytes([rec[10], rec[11], rec[12], rec[13]]) as u64;
             if extent_off.saturating_add(extent_len) > size {
                 return Vec::new();
@@ -581,7 +576,15 @@ pub fn detect_dlc(root: &Path) -> Vec<DlcSource> {
     if root.is_file() {
         return detect_dlc_file(root);
     }
-    let mut found = Vec::new();
+    files_under(root)
+        .iter()
+        .flat_map(|p| detect_dlc_file(p))
+        .collect()
+}
+
+/// Every file below `root`, each directory's entries in sorted order.
+fn files_under(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -593,19 +596,11 @@ pub fn detect_dlc(root: &Path) -> Vec<DlcSource> {
             if p.is_dir() {
                 stack.push(p);
             } else if p.is_file() {
-                found.extend(detect_dlc_file(&p));
+                files.push(p);
             }
         }
     }
-    found
-}
-
-fn fnv1a_lowercase(name: &str) -> u32 {
-    let mut value = 2166136261u32;
-    for byte in name.bytes() {
-        value = (value ^ u32::from(byte | 0x20)).wrapping_mul(16777619);
-    }
-    value
+    files
 }
 
 /// Find the smallest sound LVL defining Fisto's bubble sounds under `root`.
@@ -613,36 +608,20 @@ pub fn detect_hero_sounds(root: &Path) -> Option<PathBuf> {
     if !root.is_dir() {
         return None;
     }
-    let wanted = fnv1a_lowercase("hero_weap_energyBall_throw").to_le_bytes();
+    let wanted = mungefs::fnv1a_lowercase("hero_weap_energyBall_throw").to_le_bytes();
     let mut best: Option<(usize, PathBuf)> = None;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else {
+    for p in files_under(root) {
+        if p.metadata().map_or(true, |m| m.len() > MAX_SOUND_LVL) {
+            continue;
+        }
+        let Ok(data) = std::fs::read(&p) else {
             continue;
         };
-        let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
-        entries.sort();
-        for p in entries {
-            if p.is_dir() {
-                stack.push(p);
-            } else if p.is_file() {
-                let Ok(meta) = p.metadata() else {
-                    continue;
-                };
-                if meta.len() > MAX_SOUND_LVL {
-                    continue;
-                }
-                let Ok(data) = std::fs::read(&p) else {
-                    continue;
-                };
-                if data.len() >= 4
-                    && &data[..4] == b"ucfb"
-                    && data.windows(4).any(|w| w == wanted)
-                    && best.as_ref().is_none_or(|(len, _)| data.len() < *len)
-                {
-                    best = Some((data.len(), p));
-                }
-            }
+        if data.starts_with(b"ucfb")
+            && data.windows(4).any(|w| w == wanted)
+            && best.as_ref().is_none_or(|(len, _)| data.len() < *len)
+        {
+            best = Some((data.len(), p));
         }
     }
     best.map(|(_, p)| p)
@@ -654,10 +633,8 @@ mod tests {
 
     #[test]
     fn resolves_pc_lvl_dir_from_install_root_and_rejects_missing() {
-        let dir = std::env::temp_dir().join(format!(
-            "openbf_launcher_scan_test_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("openbf_launcher_scan_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let lvl = dir.join("GameData").join("Data").join("_LVL_PC");
         std::fs::create_dir_all(&lvl).unwrap();
@@ -675,6 +652,9 @@ mod tests {
     #[test]
     fn fnv1a_lowercase_matches_python_hash() {
         // Matches dlc_inputs._fnv1a_lowercase("hero_weap_energyBall_throw").
-        assert_eq!(fnv1a_lowercase("hero_weap_energyBall_throw"), 0x8259_dc8a);
+        assert_eq!(
+            mungefs::fnv1a_lowercase("hero_weap_energyBall_throw"),
+            0x8259_dc8a
+        );
     }
 }

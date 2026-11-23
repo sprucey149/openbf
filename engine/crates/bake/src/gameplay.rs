@@ -395,7 +395,7 @@ pub(super) fn correction(
                 .map(move |f| (t, f))
         })
         .collect();
-    let matches = same_bytes_by_path(path, matches);
+    let mut matches = same_bytes_by_path(path, matches);
     if matches.is_empty() {
         bail!("{}: unknown {platform} gameplay source fingerprint {hash}; no corrections were applied. Supply a supported unmodified source or regenerate and review its PS2 corrections", path.display());
     }
@@ -404,51 +404,46 @@ pub(super) fn correction(
     // map/mission bytes while differing in core.lvl. Filter candidates against
     // the owning install's core.lvl and mission.lvl fingerprints.
     if let Some(root) = source_root(path) {
-        let core_path = crate::join_ci(&root, "core.lvl");
-        let mission_path = crate::join_ci(&root, "mission.lvl");
-        let core_hash = digest(
-            &std::fs::read(&core_path).with_context(|| core_path.display().to_string())?,
-        );
-        let mission_hash = digest(
-            &std::fs::read(&mission_path).with_context(|| mission_path.display().to_string())?,
-        );
+        let [core, mission] = ["core.lvl", "mission.lvl"].map(|name| crate::join_ci(&root, name));
+        let read_digest = |p: &Path| {
+            std::fs::read(p)
+                .map(|b| digest(&b))
+                .with_context(|| p.display().to_string())
+        };
+        let (core_hash, mission_hash) = (read_digest(&core)?, read_digest(&mission)?);
+        let mut core_known = false;
         let mut root_matched = Vec::new();
         for &(table, file) in &matches {
-            let exp_core = table
-                .files
-                .iter()
-                .find(|f| f.file.eq_ignore_ascii_case("core.lvl"))
-                .context("correction table lacks a source root fingerprint")?;
-            let exp_mission = table
-                .files
-                .iter()
-                .find(|f| f.file.eq_ignore_ascii_case("mission.lvl"))
-                .context("correction table lacks a source root fingerprint")?;
-            if core_hash == exp_core.sha256 && mission_hash == exp_mission.sha256 {
+            let core_ok = root_fingerprint(table, "core.lvl")? == core_hash;
+            let mission_ok = root_fingerprint(table, "mission.lvl")? == mission_hash;
+            core_known |= core_ok;
+            if core_ok && mission_ok {
                 root_matched.push((table, file));
             }
         }
-        return match root_matched.as_slice() {
-            [one] => Ok(Some(*one)),
-            [] => {
-                let bad = if matches.iter().any(|(t, _)| {
-                    t.files
-                        .iter()
-                        .any(|f| f.file.eq_ignore_ascii_case("core.lvl") && f.sha256 == core_hash)
-                }) {
-                    mission_path
-                } else {
-                    core_path
-                };
-                bail!("{}: unknown {platform} gameplay source root fingerprint; no corrections were applied", bad.display());
-            }
-            _ => bail!("{}: ambiguous gameplay source fingerprint {hash}", path.display()),
-        };
+        if root_matched.is_empty() {
+            let bad = if core_known { mission } else { core };
+            bail!("{}: unknown {platform} gameplay source root fingerprint; no corrections were applied", bad.display());
+        }
+        matches = root_matched;
     }
     match matches.as_slice() {
         [one] => Ok(Some(*one)),
-        _ => bail!("{}: ambiguous gameplay source fingerprint {hash}", path.display()),
+        _ => bail!(
+            "{}: ambiguous gameplay source fingerprint {hash}",
+            path.display()
+        ),
     }
+}
+
+/// The table's fingerprint of one of its source root's files (`core.lvl`, `mission.lvl`).
+fn root_fingerprint<'t>(table: &'t Table, name: &str) -> Result<&'t str> {
+    table
+        .files
+        .iter()
+        .find(|f| f.file.eq_ignore_ascii_case(name))
+        .map(|f| f.sha256.as_str())
+        .context("correction table lacks a source root fingerprint")
 }
 
 /// A disc can hold one file's bytes under two names (BF1 Xbox's `common/eng` and

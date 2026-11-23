@@ -21,7 +21,7 @@ module's `//!` header is its spec.
 | `audio` | kira playback behind the `backend` feature; the streamed music decoder | pak; kira (optional), anyhow |
 | `net` | LAN multiplayer: host-ordered lockstep transport, reliability, sessions, input scheduler, discovery, `LinkSim` (issue #168) | core; serde, zstd |
 | `game` | the binary + library: assets, viewer, play loop, LAN netplay, goldens | core, manifest, pak, input, render, ui, audio, net; glam, winit, gilrs, ron, serde(_json), gltf, ktx2, wgpu, anyhow, image; Linux/BSD: wayland-client, wayland-backend, wayland-protocols, x11rb (idle inhibit); dev: bake, mungefs |
-| `launcher` | standalone native `openbf-launcher` setup/launch GUI (separate from `game`) | pak; egui(-wgpu, -winit), wgpu, winit, pollster, rfd, ron, serde, anyhow |
+| `launcher` | standalone native `openbf-launcher` setup/launch GUI (separate from `game`) | pak, mungefs; egui(-wgpu, -winit), wgpu, winit, pollster, rfd, ron, serde, anyhow |
 
 Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest`) → `game` → `core`, `render`, `ui`,
 `audio`. Use `scripts/size_report.sh` for current per-crate and total source, test and example counts.
@@ -89,9 +89,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/dlc.rs` 437 — selective optional Kit Fisto/Ventress bake: namespaced dependency classes, their effect layer and sound bank · `bake`, `bake_sounds`.
 - `bake/src/dlc_attachment.rs` 106 — Fisto's separate head tentacles folded into his body with their own joints.
 - `bake/src/dlc_output.rs` 383 — temporary DLC staging, texture aliases and installation without retail asset replacement.
-- `bake/src/main.rs` 754 — the CLI, one subcommand per bake (`map`, `common`, `soldier`, `vehicle`, `effects`, `sounds`, …)
+- `bake/src/main.rs` 786 — the CLI, one subcommand per bake (`map`, `common`, `soldier`, `vehicle`, `effects`, `sounds`, …)
 - `bake/src/lib.rs` 206 — module roots, the RON layout every bake output uses (LF on every OS) · `pretty`, `write_ron`
-- `bake/src/gameplay.rs` 484 — apply a reviewed PS2 gameplay correction set before decoding a donor LVL; PS2 content is returned verbatim
+- `bake/src/gameplay.rs` 519 — apply a reviewed PS2 gameplay correction set before decoding a donor LVL; PS2 content is returned verbatim
 - `bake/src/gameplay/program.rs` 518 — the correction set's collision, skeleton and animation-bank programs · `Programs`
 - `bake/src/gameplay/rebuild.rs` 613 — rebuild corrected class chunks from the table · `chunk`
 - `bake/src/gameplay/terrain.rs` 250 — simulation heights inside the play/query bounds, separate full drawing heights · `apply_terrain`, `apply_render_heights`
@@ -170,7 +170,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/foliage.rs` 770 — terrain foliage placement/tint, path props and grasspatch bake → `foliage.bin` · `bake`, `place`, `tint`, `path_props`, `rng_table`, `grass_class`, `grass_atlas`; ELF-table dependency and arithmetic in the module header (`analysis/re-foliage.md`).
 - `bake/src/foliage/tests.rs` 509 — the placement and tint against instances read out of the PS2's RAM (the height is `game::viewer::foliage`'s); the ELF table and grass atlas, the grass class, the path props
 - `bake/src/sounds.rs` 930 — SOUND LVL bank/property/stream bake → WAVs and `sounds.ron` · `bake_sounds`; per-sublevel inheritance and engine-graph resolution in `read_sublevels` / `engines`; stream outputs in the module header.
-- `bake/src/audio_restore.rs` 151 — optional persistent Python PCM worker for bank tasks and voice encoder threads; little-endian requests, exact-size responses, EOF status checks and child cleanup · `AudioRestore`.
+- `bake/src/audio_restore.rs` 178 — optional persistent Python PCM worker for bank tasks and voice encoder threads; little-endian requests, exact-size responses, EOF status checks and child cleanup · `AudioRestore`.
 - `bake/src/audio_restore/tests.rs` 176 — synthetic worker protocol, reuse, disabled-byte stability and child lifecycle checks.
 - `bake/src/foley.rs` 87 — the LVL's foley tables → `<map>/sounds/foley.ron` (card FOLY; written by `bake sounds`) · `table`, `write`
 - `bake/src/sound_names.rs` 367 — names for hashed sound properties · `build_dictionary`
@@ -858,14 +858,14 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `ui/src/hud_popup.rs` 85 — campaign objective/hint popup events and objective-update reminder · `HudPopup`
 - `ui/src/hud_text.rs` 286 — HUD text wrapping and device/binding-aware control tokens
 - `ui/src/campaign_map.rs` 114 — campaign whole-map objective browser, selection, scrolling and device prompts · `Model`, `draw`
-- `ui/src/hud.rs` 1565 — HUD models/events, round-end banner geometry and egui compatibility drawing (the banner and stats use the HUD pass) · `HudModel`, `RoundEndModel`, `HudWeapon`, `HudTarget`, `HudMessage`, `HudStats`, `message_color`, `target_color`, `feed`, `draw_hud`, `draw_pad_warning`; event coverage in the module header.
+- `ui/src/hud.rs` 1877 — HUD models/events, round-end banner geometry and egui compatibility drawing (the banner and stats use the HUD pass) · `HudModel`, `RoundEndModel`, `HudWeapon`, `HudTarget`, `HudMessage`, `HudStats`, `message_color`, `target_color`, `feed`, `draw_hud`, `draw_pad_warning`; event coverage in the module header.
 - `ui/src/hud_tree.rs` 1493 — BF2 HUD tree state, events, fades/colours and message queue · `Hud`, `Elem`, `Fader`, `BarFlash`, `EventValue`, `MultiLine`, `Line`; interpretation scope in the module header (`analysis/re-hud.md`, `analysis/re-target-hud.md`, `analysis/re-event-messages.md`).
 - `ui/src/hud_tree/fixture.rs` 194 — existing shared HUD test fixtures; test-only module and visibility unchanged
 - `ui/src/hud_tree/styles.rs` 70 — HUD tree style tables: the 512×448 frame, hint, lock, flag, carrier and objective style names, and the event value kinds · `FRAME_W`, `FRAME_H`, `HintStyle`, `EventValue`, `HINT_STYLE_NAMES`, `FLAG_STYLE_NAMES`.
 - `ui/src/hud_flag.rs` 66 — CTF flag HUD feed: carried or dropped status, friendly and first-person checks, and team colours · `FlagStatus`, `feed`, `TEAM_COLORS`.
 - `ui/src/input_icons.rs` 629 — the one lookup every drawn control prompt goes through · `Icons`, `IconSet`, `Prompt`, `PadButton`, `pad_sheet`, `pad_name`
 - `ui/src/hud_tree/tests.rs` 531 — HUD-tree regressions for faders, messages, number colour, bar flashes and group tint · same private `hud_tree::tests` identities.
-- `ui/src/hud_draw.rs` 1511 — HUD layout → window-pixel triangles, mesh parts scrolled by the HUD clock · `draw`, `HudFrame`, `HudArt`, `anchor_shift`, `MESH_UNIT`; coordinate/Hor+ rules in the module header; spawn pages/veil route through `spawn_draw.rs`.
+- `ui/src/hud_draw.rs` 1573 — HUD layout → window-pixel triangles, mesh parts scrolled by the HUD clock · `draw`, `HudFrame`, `HudArt`, `anchor_shift`, `MESH_UNIT`; coordinate/Hor+ rules in the module header; spawn pages/veil route through `spawn_draw.rs`.
 - `ui/src/hud_capture.rs` 292 — command-post capture icon and direction mark · `CaptureIcon`, `Side`, `Mark`, `Part`, `picture`, `BOX`; split-colour layout and port additions in the module header (`analysis/re-capture-display.md` §3.3–4).
 - `ui/src/hud_ambush.rs` 316 — hit-direction chevrons and per-edge timers · `Ambush`, `Edge`, `edge`, `visible_box`, `SHEET`; direction, fade and measured/Hor+ layout rules in the module header (`analysis/re-hud-attacker.md`).
 - `ui/src/hud_map.rs` 830 — minimap and spawn-map model/layout · `MapModel`, `MapView`, `MapIcon`, `heading`, `view_radius`, `post_color`, `window_point`; view rules and unbuilt portions in the module header (`analysis/re-hud-map.md`); spawn page uses `spawn_draw.rs`.
@@ -881,7 +881,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `ui/src/menu/class_picker_tests.rs` 64 — existing class_picker_tests regressions extracted from the facade; logical test module paths and selectors unchanged
 - `ui/src/match_length.rs` 39 — generated mean Instant Action match length by team size and reinforcements (`scripts/calibrate_match_length.py`).
 - `ui/src/shell.rs` 919 — BF2 PS2 Instant Action screen and Session Options model: the merged both-games map list, the five states and every press, playlist add/remove/All/128 cap, option ranges/steps/defaults, dimmed rows, the launch list · `InstantAction`, `Launch`, `IaCommand`; rules and `[ours]` calls in the module header (`analysis/re-bf2-menus.md` §1, §2, §6, §7).
-- `ui/src/shell/catalog.rs` 331 — eras, both games' maps and the catalog built from them · `MapEntry`, `catalog`, `Era`, `BF1_MAPS`, `BF2_MAPS`
+- `ui/src/shell/catalog.rs` 384 — eras, both games' maps and the catalog built from them · `MapEntry`, `catalog`, `Era`, `BF1_MAPS`, `BF2_MAPS`
 - `ui/src/shell/options.rs` 399 — the Session Options page: groups, rows, values · `SessionOptions`, `Opt`, `Group`, `pieces`
 - `ui/src/shell/texts.rs` 399 — the screen's localized text · `IaTexts`, `OPTION_TEXTS`
 - `ui/src/shell/keys.rs` 238 — one frame of the screen's input · `InstantAction::step`
@@ -1175,7 +1175,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `render/src/falling/ground.rs` 294 — terrain gusts and actor contact impulses · `LeafActor`.
 - `render/tests/suite/particle_blend.rs` 443 — GPU referees for display-byte blending, masked scene blur and leaf/bird cutouts.
 
-- `bake/src/droid_chunks.rs` 587 — disc-derived SBD sections, five Magnaguard mesh cuts and collision spheres; every droid chunk model (the battle droid's too) with its sheets renamed `openbf_droid_*` so no living soldier sheet is replaced · `bake`, `manifest::DroidChunkManifest`; guard: `bake/tests/suite/side_steps.rs` 197 (no `rebake.sh side` step rewrites or shadows another's file).
+- `bake/src/droid_chunks.rs` 621 — disc-derived SBD sections, five Magnaguard mesh cuts and collision spheres; every droid chunk model (the battle droid's too) with its sheets renamed `openbf_droid_*` so no living soldier sheet is replaced · `bake`, `manifest::DroidChunkManifest`; guard: `bake/tests/suite/side_steps.rs` 197 (no `rebake.sh side` step rewrites or shadows another's file).
 - `game/examples/droid_chunks.rs` 104 — offscreen paired droid deaths through the normal class, event, soldier and effect render paths.
 ## BF2 hero modules
 
@@ -1390,13 +1390,13 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 ## launcher — standalone native `openbf-launcher` GUI
 - `launcher/src/lib.rs` 13 — crate root and module exports.
-- `launcher/src/config.rs` 227 — persistent launcher config (BF1/BF2 sources, optional DLC folder, graphics API override) · `LauncherConfig`, `Platform`, `SourceConfig`, `GraphicsApi`.
-- `launcher/src/paths.rs` 376 — release vs checkout path discovery, tool lookup (`bake`, base `game`), O(1) `OPENBFPK` footer & BF1-presence check, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `has_valid_pak_footer`, `open_folder`.
-- `launcher/src/runner.rs` 288 — background setup pipeline runner with ring-buffered console lines, 20 Hz throttled progress updates, error-line selection, and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `launch_game`.
-- `launcher/src/ui.rs` 1346 — native `740×450` frameless egui launcher UI starting on an empty main pane with status indicators, system regular/bold fonts, optional BF1 setup, and seamless top-fading build console with scroll-to-bottom control · `LauncherApp`, `Page`, `DotState`, `HostActions`.
-- `launcher/src/main.rs` 410 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling, window-close-before-spawn launch, `--audio-restore-worker`, and `--headless-setup` CLI modes.
-- `launcher/src/pipeline/mod.rs` 497 — Stage 2 native 6-step setup orchestrator with RAII staging temp cleanup and always-split `openbf.exe` + `openbf.pak` packing · `run_setup`, `ExecCtx`, `ProgressSink`.
-- `launcher/src/pipeline/scan.rs` 680 — native PS2/Xbox/PC source recognition, case-insensitive path resolution, and DLC hero/sound LVL content detection · `BuildPlan`, `GameId`, `GameSource`, `DlcSource`, `ci_path`, `detect_dlc`, `detect_hero_sounds`.
-- `launcher/src/pipeline/missions.rs` 245 — embedded mission-generation scripts and correction tables materialized into the setup temp directory for Lua extraction, mission generation, and shell credits · `MaterializedMissions`.
-- `launcher/src/pipeline/rebake.rs` 1083 — native Rust replacement for `scripts/rebake.sh`, `scripts/bake_dlc.py`, and `scripts/global_sound_cache.py` invoking `bake` subcommands directly without Git Bash · `BakeTrees`, `run_all_bake_groups`.
-- `launcher/src/pipeline/audio_restore.rs` 463 — native Rust PCM restoration worker matching `scripts/restore_audio.py` for dialogue, effects, and music · `process_pcm`, `run_worker`.
+- `launcher/src/config.rs` 217 — persistent launcher config (BF1/BF2 sources, optional DLC folder, graphics API override) · `LauncherConfig`, `Platform`, `SourceConfig`, `GraphicsApi`.
+- `launcher/src/paths.rs` 250 — release vs checkout path discovery, tool lookup (`bake`, base `game`), the built game's readiness and BF1 presence read through `pak::find_archive`, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `open_folder`.
+- `launcher/src/runner.rs` 259 — background setup pipeline runner with ring-buffered console lines, 20 Hz throttled progress updates, error-line selection, and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `launch_game`, `is_error_line`.
+- `launcher/src/ui.rs` 1347 — native `740×450` frameless egui launcher UI starting on an empty main pane with status indicators, system regular/bold fonts, optional BF1 setup, and seamless top-fading build console with scroll-to-bottom control · `LauncherApp`, `Page`, `DotState`, `HostActions`.
+- `launcher/src/main.rs` 407 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling, window-close-before-spawn launch, `--audio-restore-worker`, and `--headless-setup` CLI modes.
+- `launcher/src/pipeline/mod.rs` 499 — Stage 2 native 6-step setup orchestrator: tool checks (Python, ffmpeg), child-process running with streamed output and cancellation, RAII staging temp cleanup and always-split `openbf.exe` + `openbf.pak` packing · `run_setup`, `ExecCtx`, `ProgressSink`, `STEP_COUNT`, `args!`, `hide_console`.
+- `launcher/src/pipeline/scan.rs` 660 — native PS2/Xbox/PC source recognition, case-insensitive path resolution, and DLC hero/sound LVL content detection · `BuildPlan`, `GameId`, `GameSource`, `DlcSource`, `ci_path`, `detect_dlc`, `detect_hero_sounds`.
+- `launcher/src/pipeline/missions.rs` 229 — embedded mission-generation scripts and correction tables materialized into the setup temp directory for Lua extraction, mission generation, and shell credits · `MaterializedMissions`.
+- `launcher/src/pipeline/rebake.rs` 1043 — native Rust replacement for `scripts/rebake.sh`, `scripts/bake_dlc.py`, and `scripts/global_sound_cache.py` invoking `bake` subcommands directly without Git Bash · `BakeTrees`, `run_all_bake_groups`.
+- `launcher/src/pipeline/audio_restore.rs` 459 — native Rust PCM restoration worker matching `scripts/restore_audio.py` for dialogue, effects, and music · `process_pcm`, `run_worker`.

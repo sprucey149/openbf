@@ -13,6 +13,7 @@ anyhow = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 egui-winit = { workspace = true }
+mungefs = { path = "../mungefs" }
 pak = { path = "../pak" }
 pollster = { workspace = true }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal"] }

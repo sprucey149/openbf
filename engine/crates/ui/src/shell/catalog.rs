@@ -345,40 +345,39 @@ pub fn catalog(
         }
         out.push(entry(Game::Bf2, code, name, desc, [cw.to_vec(), gcw]));
     }
+    // A BF2-only build bakes no BF1 map, so Instant Action lists none.
     let include_bf1 = bakes.is_empty() || bakes.iter().any(|(_, g)| g == "bf1");
-    if include_bf1 {
-        for (code, key, english, cw, gcw) in BF1_MAPS {
-            let localized = text(Game::Bf1, key);
-            let name = localized.as_deref().unwrap_or(english).trim();
-            // The English BF1 table uses all caps. Keep any existing mixed case
-            // and the shared (bf1)/(bf2) suffix used by both menus.
-            let name = if name.chars().any(char::is_lowercase) {
-                name.to_owned()
-            } else {
-                name.split_whitespace()
-                    .map(|word| {
-                        let mut chars = word.chars();
-                        let first = chars
-                            .next()
-                            .expect("split_whitespace yields nonempty words");
-                        // typography: name data (BF1's capitals to Title Case)
-                        first
-                            .to_uppercase() // typography: name data
-                            .chain(chars.flat_map(char::to_lowercase))
-                            .collect::<String>()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
-            let mut modes = [cw, gcw].map(|on| if on { vec![Mode::Con] } else { Vec::new() });
-            if let Some(era) = bf1_hunt_era(code) {
-                let key = find(Game::Bf1, code).unwrap_or_else(|| format!("bf1_{code}"));
-                if !missions(&key, Mode::Hunt).is_empty() {
-                    modes[era.index()].push(Mode::Hunt);
-                }
+    for (code, key, english, cw, gcw) in BF1_MAPS.into_iter().filter(|_| include_bf1) {
+        let localized = text(Game::Bf1, key);
+        let name = localized.as_deref().unwrap_or(english).trim();
+        // The English BF1 table uses all caps. Keep any existing mixed case
+        // and the shared (bf1)/(bf2) suffix used by both menus.
+        let name = if name.chars().any(char::is_lowercase) {
+            name.to_owned()
+        } else {
+            name.split_whitespace()
+                .map(|word| {
+                    let mut chars = word.chars();
+                    let first = chars
+                        .next()
+                        .expect("split_whitespace yields nonempty words");
+                    // typography: name data (BF1's capitals to Title Case)
+                    first
+                        .to_uppercase() // typography: name data
+                        .chain(chars.flat_map(char::to_lowercase))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let mut modes = [cw, gcw].map(|on| if on { vec![Mode::Con] } else { Vec::new() });
+        if let Some(era) = bf1_hunt_era(code) {
+            let key = find(Game::Bf1, code).unwrap_or_else(|| format!("bf1_{code}"));
+            if !missions(&key, Mode::Hunt).is_empty() {
+                modes[era.index()].push(Mode::Hunt);
             }
-            out.push(entry(Game::Bf1, code, name.clone(), name, modes));
         }
+        out.push(entry(Game::Bf1, code, name.clone(), name, modes));
     }
     out.sort_by_key(|m| m.label.to_lowercase());
     out

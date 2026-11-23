@@ -6,13 +6,10 @@
 //! `dist/openbf(.exe)` at the repository root and `openbf_data/` sits beside it.
 
 use anyhow::{Context, Result};
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-const PACK_MAGIC: &[u8; 8] = b"OPENBFPK";
-const PACK_FOOTER_LEN: u64 = 32;
-const BF1_MARKER: &[u8] = b"assets_baked/common_bf1/common.ron";
+/// The archive entry only a build with Battlefront I carries.
+const BF1_MARKER: &str = "assets_baked/common_bf1/common.ron";
 
 /// Readiness of the built game binary/archive.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,13 +26,11 @@ pub const EXE_SUFFIX: &str = std::env::consts::EXE_SUFFIX;
 pub struct LauncherPaths {
     /// Directory containing `openbf-launcher`.
     pub exe_dir: PathBuf,
-    /// Directory containing `scripts/pack.py`, when available.
-    pub pack_root: Option<PathBuf>,
+    /// Repository checkout root (the folder holding `scripts/pack.py`), when
+    /// the launcher runs from one.
+    pub checkout_root: Option<PathBuf>,
     /// Target path of the playable game executable (`openbf(.exe)`).
     pub game_out: PathBuf,
-    /// Optional pre-built game binary to hand to `pack.py --game-bin` so a
-    /// release bundle never needs Rust/Cargo.
-    pub prebuilt_game_bin: Option<PathBuf>,
     /// Portable data folder (`openbf_data/`) beside the game executable.
     pub data_dir: PathBuf,
     /// Path to `openbf_data/launcher.ron`.
@@ -59,120 +54,67 @@ impl LauncherPaths {
             .filter(|p| !p.as_os_str().is_empty())
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        let checkout_root =
+            find_checkout_root(&exe_dir).or_else(|| cwd.and_then(find_checkout_root));
 
-        let pack_root = find_pack_root(&exe_dir).or_else(|| cwd.and_then(find_pack_root));
-
+        // A checkout build packs into the repository's `dist/`; a release
+        // folder keeps `openbf` right beside the launcher.
         let openbf_name = format!("openbf{EXE_SUFFIX}");
-        let game_name = format!("game{EXE_SUFFIX}");
-
-        // Release layout: `openbf(.exe)` sits right beside `openbf-launcher(.exe)`
-        // (or the launcher is not inside `engine/target/...`).
-        let in_cargo_target = exe_dir
-            .ancestors()
-            .any(|a| a.file_name().is_some_and(|n| n == "target"));
-
-        let (game_out, prebuilt_game_bin) = if in_cargo_target {
-            let out = pack_root
-                .as_ref()
-                .map(|r| r.join("dist").join(&openbf_name))
-                .unwrap_or_else(|| exe_dir.join(&openbf_name));
-            // In a checkout target dir, if `game(.exe)` is already built right
-            // beside the launcher in release mode, offer it as `--game-bin`.
-            let sibling_game = exe_dir.join(&game_name);
-            let is_release = exe_dir.file_name().is_some_and(|n| n == "release");
-            let prebuilt = (is_release && sibling_game.is_file()).then_some(sibling_game);
-            (out, prebuilt)
-        } else {
-            let out = exe_dir.join(&openbf_name);
-            let sibling_game = exe_dir.join(&game_name);
-            let prebuilt = if sibling_game.is_file() {
-                Some(sibling_game)
-            } else if out.is_file() {
-                Some(out.clone())
-            } else {
-                None
-            };
-            (out, prebuilt)
+        let game_out = match &checkout_root {
+            Some(root) if in_cargo_target(&exe_dir) => root.join("dist").join(&openbf_name),
+            _ => exe_dir.join(&openbf_name),
         };
 
-        let game_dir = game_out
+        let data_dir = game_out
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(&exe_dir);
-        let data_dir = game_dir.join("openbf_data");
-        let config_path = data_dir.join("launcher.ron");
-        let logs_dir = data_dir.join("logs");
-
+            .unwrap_or(&exe_dir)
+            .join("openbf_data");
         Self {
-            exe_dir,
-            pack_root,
-            game_out,
-            prebuilt_game_bin,
+            config_path: data_dir.join("launcher.ron"),
+            logs_dir: data_dir.join("logs"),
             data_dir,
-            config_path,
-            logs_dir,
+            exe_dir,
+            checkout_root,
+            game_out,
         }
-    }
-
-    /// Path to `scripts/pack.py` when a pack root was found.
-    pub fn pack_script(&self) -> Option<PathBuf> {
-        self.pack_root
-            .as_ref()
-            .map(|r| r.join("scripts").join("pack.py"))
-            .filter(|p| p.is_file())
     }
 
     /// Locate the compiled `bake` executable (`openbf_data/tools/bake`,
     /// beside the launcher, or in a checkout's `engine/target/{release,debug}`).
     pub fn bake_bin(&self) -> Option<PathBuf> {
         let name = format!("bake{EXE_SUFFIX}");
-        let mut candidates = vec![
+        [
             self.data_dir.join("tools").join(&name),
             self.exe_dir.join(&name),
-        ];
-        if let Some(root) = &self.pack_root {
-            candidates.push(root.join("engine").join("target").join("release").join(&name));
-            candidates.push(root.join("engine").join("target").join("debug").join(&name));
-        }
-        candidates.into_iter().find(|p| p.is_file())
+        ]
+        .into_iter()
+        .chain(self.checkout_targets(&name))
+        .find(|p| p.is_file())
     }
 
-    /// Locate the base game executable used by `--write-pack` (`game`, existing
-    /// `openbf` in a release folder, or a checkout's `engine/target/{release,debug}/game`).
+    /// Locate the base game executable used by `--write-pack`: `game` beside
+    /// the launcher, a release folder's existing `openbf`, or a checkout's
+    /// `engine/target/{release,debug}/game`.
     pub fn base_game_bin(&self) -> Option<PathBuf> {
-        if let Some(prebuilt) = &self.prebuilt_game_bin {
-            if prebuilt.is_file() {
-                return Some(prebuilt.clone());
-            }
-        }
-        let game_name = format!("game{EXE_SUFFIX}");
-        let mut candidates = vec![self.exe_dir.join(&game_name)];
-        if !self
-            .exe_dir
-            .ancestors()
-            .any(|a| a.file_name().is_some_and(|n| n == "target"))
-            && self.game_out.is_file()
-        {
-            candidates.push(self.game_out.clone());
-        }
-        if let Some(root) = &self.pack_root {
-            candidates.push(
-                root.join("engine")
-                    .join("target")
-                    .join("release")
-                    .join(&game_name),
-            );
-            candidates.push(
-                root.join("engine")
-                    .join("target")
-                    .join("debug")
-                    .join(&game_name),
-            );
-        }
-        candidates.into_iter().find(|p| p.is_file())
+        let name = format!("game{EXE_SUFFIX}");
+        let release_openbf = (!in_cargo_target(&self.exe_dir)).then(|| self.game_out.clone());
+        std::iter::once(self.exe_dir.join(&name))
+            .chain(release_openbf)
+            .chain(self.checkout_targets(&name))
+            .find(|p| p.is_file())
     }
 
-    /// True when the native Stage 2 setup tools (`bake` + base game binary) are present.
+    /// `engine/target/release/<name>` then `engine/target/debug/<name>` in the checkout.
+    fn checkout_targets(&self, name: &str) -> impl Iterator<Item = PathBuf> + '_ {
+        let name = name.to_owned();
+        self.checkout_root.iter().flat_map(move |root| {
+            let target = root.join("engine").join("target");
+            ["release", "debug"].map(|profile| target.join(profile).join(&name))
+        })
+    }
+
+    /// True when the native setup tools (`bake` + base game binary) are present.
     pub fn can_build(&self) -> bool {
         self.bake_bin().is_some() && self.base_game_bin().is_some()
     }
@@ -183,106 +125,47 @@ impl LauncherPaths {
         self.built_status().ready
     }
 
-    /// Inspect the built game archive without parsing its index into a map:
-    /// checks the 32-byte `OPENBFPK` footer and scans the raw index slice for
-    /// `assets_baked/common_bf1/common.ron` to report whether BF1 is included.
+    /// Open the built game's archive ([`pak::find_archive`]: inside `openbf`,
+    /// else `openbf.pak` beside it) and report whether it carries BF1.
     pub fn built_status(&self) -> BuiltStatus {
         if !self.game_out.is_file() {
             return BuiltStatus::default();
         }
-        if let Some(has_bf1) = inspect_pak_archive(&self.game_out) {
-            return BuiltStatus {
+        match pak::find_archive(&self.game_out) {
+            Some(archive) => BuiltStatus {
                 ready: true,
-                has_bf1,
-            };
-        }
-        if let Some(parent) = self.game_out.parent() {
-            let sidecar = parent.join(pak::PAK_NAME);
-            if sidecar.is_file() {
-                if let Some(has_bf1) = inspect_pak_archive(&sidecar) {
-                    return BuiltStatus {
-                        ready: true,
-                        has_bf1,
-                    };
-                }
-            }
-        }
-        BuiltStatus::default()
-    }
-}
-
-/// Fast O(1) validation of a `pak` archive's 32-byte trailing footer.
-pub fn has_valid_pak_footer(path: &Path) -> bool {
-    read_pak_footer(path).is_some()
-}
-
-/// Returns `Some(has_bf1)` for a valid `pak` archive, or `None` otherwise.
-fn inspect_pak_archive(path: &Path) -> Option<bool> {
-    let (mut file, at, len) = read_pak_footer(path)?;
-    // Cap index read to 64 MiB as a safety guard against corrupt files.
-    let len = usize::try_from(len).ok().filter(|&n| n <= 64 << 20)?;
-    file.seek(SeekFrom::Start(at)).ok()?;
-    let mut index = vec![0u8; len];
-    file.read_exact(&mut index).ok()?;
-    Some(index.windows(BF1_MARKER.len()).any(|w| w == BF1_MARKER))
-}
-
-fn read_pak_footer(path: &Path) -> Option<(File, u64, u64)> {
-    let mut file = File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    if size < PACK_FOOTER_LEN {
-        return None;
-    }
-    file.seek(SeekFrom::Start(size - PACK_FOOTER_LEN)).ok()?;
-    let mut footer = [0u8; PACK_FOOTER_LEN as usize];
-    file.read_exact(&mut footer).ok()?;
-    if &footer[..8] != PACK_MAGIC {
-        return None;
-    }
-    let start = u64::from_le_bytes(footer[8..16].try_into().unwrap());
-    let at = u64::from_le_bytes(footer[16..24].try_into().unwrap());
-    let len = u64::from_le_bytes(footer[24..32].try_into().unwrap());
-    (start <= at
-        && at
-            .checked_add(len)
-            .and_then(|end| end.checked_add(PACK_FOOTER_LEN))
-            == Some(size))
-    .then_some((file, at, len))
-}
-
-fn find_pack_root(start: &Path) -> Option<PathBuf> {
-    for dir in start.ancestors() {
-        if dir.join("scripts").join("pack.py").is_file() {
-            return Some(dir.to_path_buf());
+                has_bf1: archive.names().any(|n| n == BF1_MARKER),
+            },
+            None => BuiltStatus::default(),
         }
     }
-    None
+}
+
+fn in_cargo_target(dir: &Path) -> bool {
+    dir.ancestors()
+        .any(|a| a.file_name().is_some_and(|n| n == "target"))
+}
+
+fn find_checkout_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|dir| dir.join("scripts").join("pack.py").is_file())
+        .map(Path::to_path_buf)
 }
 
 /// Open a folder in the OS file manager, creating it first if needed.
 pub fn open_folder(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path).with_context(|| format!("creating {}", path.display()))?;
     #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(path)
-            .spawn()
-            .with_context(|| format!("opening {}", path.display()))?;
-    }
+    let opener = "explorer";
     #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(path)
-            .spawn()
-            .with_context(|| format!("opening {}", path.display()))?;
-    }
+    let opener = "open";
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn()
-            .with_context(|| format!("opening {}", path.display()))?;
-    }
+    let opener = "xdg-open";
+    std::process::Command::new(opener)
+        .arg(path)
+        .spawn()
+        .with_context(|| format!("opening {}", path.display()))?;
     Ok(())
 }
 
@@ -290,21 +173,26 @@ pub fn open_folder(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn release_layout_uses_sibling_openbf() {
+    fn scratch(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("openbf_launcher_paths_rel_{}", std::process::id()));
+            std::env::temp_dir().join(format!("openbf_launcher_{name}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("scripts")).unwrap();
         std::fs::write(dir.join("scripts").join("pack.py"), "# stub\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn release_layout_uses_sibling_openbf() {
+        let dir = scratch("paths_rel");
         let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
         let openbf = dir.join(format!("openbf{EXE_SUFFIX}"));
         std::fs::write(&openbf, b"stub").unwrap();
 
         let paths = LauncherPaths::from_exe(&exe, None);
-        assert_eq!(paths.pack_root.as_deref(), Some(dir.as_path()));
+        assert_eq!(paths.checkout_root.as_deref(), Some(dir.as_path()));
         assert_eq!(paths.game_out, openbf);
-        assert_eq!(paths.prebuilt_game_bin.as_deref(), Some(openbf.as_path()));
+        assert_eq!(paths.base_game_bin().as_deref(), Some(openbf.as_path()));
         assert_eq!(paths.logs_dir, dir.join("openbf_data").join("logs"));
         assert!(!paths.is_game_ready());
 
@@ -313,11 +201,7 @@ mod tests {
 
     #[test]
     fn cargo_target_layout_points_to_dist_openbf() {
-        let dir =
-            std::env::temp_dir().join(format!("openbf_launcher_paths_dev_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("scripts")).unwrap();
-        std::fs::write(dir.join("scripts").join("pack.py"), "# stub\n").unwrap();
+        let dir = scratch("paths_dev");
         let exe = dir
             .join("engine")
             .join("target")
@@ -325,51 +209,41 @@ mod tests {
             .join(format!("openbf-launcher{EXE_SUFFIX}"));
 
         let paths = LauncherPaths::from_exe(&exe, Some(&dir));
-        assert_eq!(paths.pack_root.as_deref(), Some(dir.as_path()));
+        assert_eq!(paths.checkout_root.as_deref(), Some(dir.as_path()));
         assert_eq!(
             paths.game_out,
             dir.join("dist").join(format!("openbf{EXE_SUFFIX}"))
         );
-        assert_eq!(paths.prebuilt_game_bin, None);
+        assert_eq!(paths.base_game_bin(), None);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn valid_and_invalid_pak_footers() {
-        let dir = std::env::temp_dir().join(format!(
-            "openbf_launcher_footer_test_{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+    fn built_status_reads_the_archive_index() {
+        let dir = scratch("built_status");
+        let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
+        let paths = LauncherPaths::from_exe(&exe, None);
+        let stub = dir.join("stub.exe");
+        std::fs::write(&stub, b"not an archive").unwrap();
+        std::fs::copy(&stub, &paths.game_out).unwrap();
+        assert_eq!(paths.built_status(), BuiltStatus::default());
 
-        let bad = dir.join("bad.pak");
-        std::fs::write(&bad, b"too short").unwrap();
-        assert!(!has_valid_pak_footer(&bad));
-
-        // Build a minimal valid footer: 16 bytes payload + 4 bytes index + 32 bytes footer = 52 bytes.
-        let good = dir.join("good.pak");
-        let mut bytes = vec![0u8; 20];
-        bytes.extend_from_slice(PACK_MAGIC);
-        bytes.extend_from_slice(&0u64.to_le_bytes()); // start = 0
-        bytes.extend_from_slice(&16u64.to_le_bytes()); // index offset = 16
-        bytes.extend_from_slice(&4u64.to_le_bytes()); // index len = 4
-        std::fs::write(&good, &bytes).unwrap();
-        assert!(has_valid_pak_footer(&good));
-        assert_eq!(inspect_pak_archive(&good), Some(false));
-
-        // Archive whose raw index contains the BF1 marker reports has_bf1 = true.
-        let with_bf1 = dir.join("with_bf1.pak");
-        let idx = BF1_MARKER;
-        let mut bytes2 = vec![0u8; 16];
-        bytes2.extend_from_slice(idx);
-        bytes2.extend_from_slice(PACK_MAGIC);
-        bytes2.extend_from_slice(&0u64.to_le_bytes());
-        bytes2.extend_from_slice(&16u64.to_le_bytes());
-        bytes2.extend_from_slice(&(idx.len() as u64).to_le_bytes());
-        std::fs::write(&with_bf1, &bytes2).unwrap();
-        assert_eq!(inspect_pak_archive(&with_bf1), Some(true));
+        let asset = dir.join("common.ron");
+        std::fs::write(&asset, b"()").unwrap();
+        for (name, has_bf1) in [
+            ("assets_baked/common_bf2/common.ron", false),
+            (BF1_MARKER, true),
+        ] {
+            pak::write_pack(&stub, &paths.game_out, &[(name.to_owned(), asset.clone())]).unwrap();
+            assert_eq!(
+                paths.built_status(),
+                BuiltStatus {
+                    ready: true,
+                    has_bf1
+                }
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

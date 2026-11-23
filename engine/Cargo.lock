@@ -1963,6 +1963,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "mungefs",
  "pak",
  "pollster",
  "rfd",

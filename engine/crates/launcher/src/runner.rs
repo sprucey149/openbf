@@ -10,7 +10,6 @@ use crate::paths::LauncherPaths;
 use crate::pipeline::{self, ProgressSink};
 use anyhow::{bail, Context, Result};
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -31,9 +30,18 @@ pub struct BuildProgress {
     pub step_index: u8,
     pub step_total: u8,
     pub step_label: String,
-    pub last_line: String,
     pub lines: VecDeque<String>,
     pub outcome: Option<BuildOutcome>,
+}
+
+impl BuildProgress {
+    /// Append a console line, dropping the oldest past [`MAX_CONSOLE_LINES`].
+    fn push_line(&mut self, line: String) {
+        if self.lines.len() >= MAX_CONSOLE_LINES {
+            self.lines.pop_front();
+        }
+        self.lines.push_back(line);
+    }
 }
 
 /// Terminal state of a completed build run.
@@ -76,12 +84,7 @@ impl ProgressSink for UiProgressSink {
             return;
         }
         if let Ok(mut p) = self.progress.lock() {
-            p.last_line.clear();
-            p.last_line.push_str(trimmed);
-            if p.lines.len() >= MAX_CONSOLE_LINES {
-                p.lines.pop_front();
-            }
-            p.lines.push_back(trimmed.to_string());
+            p.push_line(trimmed.to_string());
         }
         let should_wake = if let Ok(mut lw) = self.last_wake.lock() {
             let now = Instant::now();
@@ -106,13 +109,12 @@ impl BuildHandle {
         paths: &LauncherPaths,
         config: &LauncherConfig,
         on_update: impl Fn() + Send + Sync + 'static,
-    ) -> Result<Self> {
+    ) -> Self {
         let progress = Arc::new(Mutex::new(BuildProgress {
             running: true,
             step_index: 0,
-            step_total: 6,
+            step_total: pipeline::STEP_COUNT,
             step_label: "Starting setup...".to_string(),
-            last_line: String::new(),
             lines: VecDeque::with_capacity(64),
             outcome: None,
         }));
@@ -156,10 +158,7 @@ impl BuildHandle {
                     }
                     Err(e) => {
                         let err_str = format!("{e:#}");
-                        if p.lines.len() >= MAX_CONSOLE_LINES {
-                            p.lines.pop_front();
-                        }
-                        p.lines.push_back(format!("Error: {err_str}"));
+                        p.push_line(format!("Error: {err_str}"));
                         let detail = pick_failure_line(&p.lines).unwrap_or(err_str);
                         p.outcome = Some(BuildOutcome::Failed(detail));
                     }
@@ -169,11 +168,11 @@ impl BuildHandle {
             wait_wake();
         });
 
-        Ok(Self {
+        Self {
             progress,
             cancel,
             child: child_slot,
-        })
+        }
     }
 
     pub fn snapshot(&self) -> BuildProgress {
@@ -189,36 +188,6 @@ impl BuildHandle {
             }
         }
     }
-}
-
-pub(crate) fn find_python() -> Result<(PathBuf, &'static [&'static str])> {
-    #[cfg(target_os = "windows")]
-    let candidates: &[(&str, &[&str])] = &[("py", &["-3"]), ("python", &[]), ("python3", &[])];
-    #[cfg(not(target_os = "windows"))]
-    let candidates: &[(&str, &[&str])] = &[("python3", &[]), ("python", &[])];
-
-    for (bin, args) in candidates {
-        let mut check = Command::new(bin);
-        check
-            .args(*args)
-            .args([
-                "-c",
-                "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            check.creation_flags(CREATE_NO_WINDOW);
-        }
-        if check.status().is_ok_and(|s| s.success()) {
-            return Ok((PathBuf::from(bin), args));
-        }
-    }
-    bail!("Python 3.10+ not found on PATH (required for mission generation during setup)")
 }
 
 /// Launch the packed `openbf` game executable as a fully detached process.
@@ -252,19 +221,21 @@ pub fn launch_game(paths: &LauncherPaths, config: &LauncherConfig) -> Result<()>
     Ok(())
 }
 
+/// True for a console line that reports a failure (shown red, and preferred
+/// as the failure summary).
+pub(crate) fn is_error_line(line: &str) -> bool {
+    ["pack:", "rebake:", "ERROR", "Traceback"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+        || line.contains("Error:")
+}
+
 fn pick_failure_line(lines: &VecDeque<String>) -> Option<String> {
     let is_noise = |line: &str| line.starts_with("step times:");
-    let is_error = |line: &str| {
-        line.starts_with("pack:")
-            || line.starts_with("Error:")
-            || line.starts_with("ERROR")
-            || line.contains("Error:")
-            || line.starts_with("rebake:")
-    };
     lines
         .iter()
         .rev()
-        .find(|line| !is_noise(line) && is_error(line))
+        .find(|line| !is_noise(line) && is_error_line(line))
         .or_else(|| lines.iter().rev().find(|line| !is_noise(line)))
         .or_else(|| lines.back())
         .cloned()

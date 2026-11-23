@@ -5,7 +5,7 @@
 
 use crate::config::{GraphicsApi, LauncherConfig, Platform, SourceConfig};
 use crate::paths::{open_folder, LauncherPaths};
-use crate::runner::{BuildHandle, BuildOutcome, BuildProgress};
+use crate::runner::{is_error_line, BuildHandle, BuildOutcome, BuildProgress};
 use egui::{
     Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Id,
     Layout, Margin, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
@@ -48,6 +48,14 @@ pub enum DotState {
     Building,
     Ready,
 }
+
+/// Drop shadow under the dropdown menus.
+const POPUP_SHADOW: egui::epaint::Shadow = egui::epaint::Shadow {
+    offset: [0, 3],
+    blur: 6,
+    spread: 0,
+    color: Color32::from_black_alpha(20),
+};
 
 fn regular_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
@@ -125,10 +133,6 @@ impl LauncherApp {
         self.bf1_present = self.config.bf1.is_present();
         self.bf2_present = self.config.bf2.is_present();
         self.can_build = self.paths.can_build();
-    }
-
-    pub fn is_building(&self) -> bool {
-        self.build.is_some()
     }
 
     pub fn cancel_build_if_running(&self) {
@@ -226,12 +230,7 @@ impl LauncherApp {
         v.widgets.active.corner_radius = CornerRadius::ZERO;
         v.selection.bg_fill = MENU_HOVER;
         v.selection.stroke = Stroke::new(1.0, NAV_BAR);
-        v.popup_shadow = egui::epaint::Shadow {
-            offset: [0, 3],
-            blur: 6,
-            spread: 0,
-            color: Color32::from_black_alpha(20),
-        };
+        v.popup_shadow = POPUP_SHADOW;
         style.visuals = v;
         style.spacing.item_spacing = Vec2::new(8.0, 0.0);
         style
@@ -352,7 +351,6 @@ impl LauncherApp {
             "platform_bf1",
             &mut self.config.bf1,
             !building,
-            true,
         );
         if bf1_changed {
             self.bf1_cleared = self.config.bf1.path.is_none();
@@ -365,7 +363,6 @@ impl LauncherApp {
             "platform_bf2",
             &mut self.config.bf2,
             !building,
-            true,
         );
         if bf2_changed {
             self.bf2_cleared = self.config.bf2.path.is_none();
@@ -395,14 +392,10 @@ impl LauncherApp {
                 if primary_button(ui, label, Vec2::new(112.0, 32.0), sources_ok && can_build) {
                     let wake = Arc::clone(&self.wake);
                     let with_bf1 = self.config.bf1.path.is_some();
-                    match BuildHandle::start(&self.paths, &self.config, move || wake()) {
-                        Ok(handle) => {
-                            self.building_with_bf1 = with_bf1;
-                            self.last_build = Some(handle.snapshot());
-                            self.build = Some(handle);
-                        }
-                        Err(e) => self.show_toast(format!("{e}")),
-                    }
+                    let handle = BuildHandle::start(&self.paths, &self.config, move || wake());
+                    self.building_with_bf1 = with_bf1;
+                    self.last_build = Some(handle.snapshot());
+                    self.build = Some(handle);
                 }
                 if !can_build {
                     ui.add_space(10.0);
@@ -443,11 +436,7 @@ impl LauncherApp {
                 CornerRadius::ZERO,
                 Color32::from_rgb(0xe8, 0xe8, 0xe5),
             );
-            let fill_color = match &snap.outcome {
-                Some(BuildOutcome::Failed(_)) => DOT_MISSING,
-                Some(BuildOutcome::Succeeded) => DOT_READY,
-                _ => NAV_BAR,
-            };
+            let fill_color = outcome_color(snap.outcome.as_ref(), NAV_BAR);
             let fill_rect = Rect::from_min_size(
                 bar_rect.min,
                 Vec2::new(bar_rect.width() * frac.clamp(0.0, 1.0), bar_rect.height()),
@@ -471,11 +460,7 @@ impl LauncherApp {
                     }
                 }
             };
-            let status_color = match &snap.outcome {
-                Some(BuildOutcome::Failed(_)) => DOT_MISSING,
-                Some(BuildOutcome::Succeeded) => DOT_READY,
-                _ => TEXT_PRIMARY,
-            };
+            let status_color = outcome_color(snap.outcome.as_ref(), TEXT_PRIMARY);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(status_text)
@@ -522,24 +507,26 @@ impl LauncherApp {
         ui.add_space(21.0);
 
         // Optional DLC Heroes folder row.
-        let dlc_selected = self.config.dlc_dir.is_some();
         ui.horizontal(|ui| {
             row_label(ui, "DLC Heroes", 104.0);
-            let clear_w = if dlc_selected { 64.0 } else { 0.0 };
-            let field_w = (ui.available_width() - 69.0 - clear_w - 8.0).max(120.0);
-            {
-                let dlc_text = self.config.dlc_display_name();
-                readonly_path_box(ui, &dlc_text, dlc_selected, field_w);
-            }
-            if flat_button(ui, "Browse", Vec2::new(69.0, 32.0), !building) {
-                if let Some(dir) = pick_folder("Select DLC_XBOX folder") {
-                    self.config.dlc_dir = Some(dir);
+            let action = path_field(
+                ui,
+                &self.config.dlc_display_name(),
+                self.config.dlc_dir.is_some(),
+                !building,
+            );
+            match action {
+                Some(PathAction::Browse) => {
+                    if let Some(dir) = pick_folder("Select DLC_XBOX folder") {
+                        self.config.dlc_dir = Some(dir);
+                        changed = true;
+                    }
+                }
+                Some(PathAction::Clear) => {
+                    self.config.dlc_dir = None;
                     changed = true;
                 }
-            }
-            if dlc_selected && flat_button(ui, "Clear", Vec2::new(56.0, 32.0), !building) {
-                self.config.dlc_dir = None;
-                changed = true;
+                None => {}
             }
         });
         ui.add_space(6.0);
@@ -700,17 +687,12 @@ fn source_row(
     id_salt: &str,
     source: &mut SourceConfig,
     enabled: bool,
-    allow_clear: bool,
 ) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
         row_label(ui, label, 104.0);
 
-        let labels: [&str; 3] = [
-            Platform::Pc.label(),
-            Platform::Ps2.label(),
-            Platform::Xbox.label(),
-        ];
+        let labels = Platform::ALL.map(Platform::label);
         let cur_idx = Platform::ALL
             .iter()
             .position(|p| *p == source.platform)
@@ -724,34 +706,78 @@ fn source_row(
             }
         }
 
-        let show_clear = allow_clear && source.path.is_some();
-        let clear_w = if show_clear { 64.0 } else { 0.0 };
-        let field_w = (ui.available_width() - 69.0 - clear_w - 8.0).max(120.0);
-        {
-            let text = source.display_name();
-            readonly_path_box(ui, &text, source.path.is_some(), field_w);
-        }
-
-        if flat_button(ui, "Browse", Vec2::new(69.0, 32.0), enabled) {
-            let picked = if source.platform.picks_folder() {
-                pick_folder(&format!("Select {label} (PC) folder"))
-            } else {
-                pick_disc_image(&format!(
-                    "Select {label} ({}) disc image",
-                    source.platform.label()
-                ))
-            };
-            if let Some(path) = picked {
-                source.path = Some(path);
+        let action = path_field(ui, &source.display_name(), source.path.is_some(), enabled);
+        match action {
+            Some(PathAction::Browse) => {
+                let picked = if source.platform.picks_folder() {
+                    pick_folder(&format!("Select {label} (PC) folder"))
+                } else {
+                    pick_disc_image(&format!(
+                        "Select {label} ({}) disc image",
+                        source.platform.label()
+                    ))
+                };
+                if let Some(path) = picked {
+                    source.path = Some(path);
+                    changed = true;
+                }
+            }
+            Some(PathAction::Clear) => {
+                source.path = None;
                 changed = true;
             }
-        }
-        if show_clear && flat_button(ui, "Clear", Vec2::new(56.0, 32.0), enabled) {
-            source.path = None;
-            changed = true;
+            None => {}
         }
     });
     changed
+}
+
+/// A button pressed beside a [`path_field`].
+enum PathAction {
+    Browse,
+    Clear,
+}
+
+/// The read-only path box with its Browse button and, once a path is
+/// `selected`, a Clear button.
+fn path_field(ui: &mut egui::Ui, text: &str, selected: bool, enabled: bool) -> Option<PathAction> {
+    let clear_w = if selected { 64.0 } else { 0.0 };
+    let field_w = (ui.available_width() - 69.0 - clear_w - 8.0).max(120.0);
+    readonly_path_box(ui, text, selected, field_w);
+    if flat_button(ui, "Browse", Vec2::new(69.0, 32.0), enabled) {
+        Some(PathAction::Browse)
+    } else if selected && flat_button(ui, "Clear", Vec2::new(56.0, 32.0), enabled) {
+        Some(PathAction::Clear)
+    } else {
+        None
+    }
+}
+
+/// Red for a failed build, green for a finished one, `running` otherwise.
+fn outcome_color(outcome: Option<&BuildOutcome>, running: Color32) -> Color32 {
+    match outcome {
+        Some(BuildOutcome::Failed(_)) => DOT_MISSING,
+        Some(BuildOutcome::Succeeded) => DOT_READY,
+        _ => running,
+    }
+}
+
+/// `BG_MAIN` at `alpha`.
+fn bg_alpha(alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), alpha)
+}
+
+/// Fill `rect` with a gradient, one colour per corner (top-left, top-right,
+/// bottom-right, bottom-left).
+fn paint_gradient(ui: &egui::Ui, rect: Rect, [tl, tr, br, bl]: [Color32; 4]) {
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), tl);
+    mesh.colored_vertex(rect.right_top(), tr);
+    mesh.colored_vertex(rect.right_bottom(), br);
+    mesh.colored_vertex(rect.left_bottom(), bl);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 /// Custom 32px-tall white dropdown matching the mockup's `.platform-picker`.
@@ -828,12 +854,7 @@ fn dropdown_picker(
                     .fill(BG_MAIN)
                     .stroke(Stroke::new(1.0, MENU_BORDER))
                     .inner_margin(Margin::symmetric(0, 2))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 3],
-                        blur: 6,
-                        spread: 0,
-                        color: Color32::from_black_alpha(20),
-                    })
+                    .shadow(POPUP_SHADOW)
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         for (idx, opt) in options.iter().enumerate() {
@@ -1056,11 +1077,7 @@ fn draw_fading_console(
                 for line in lines {
                     let color = if line.starts_with("== [") {
                         TEXT_PRIMARY
-                    } else if line.starts_with("pack:")
-                        || line.starts_with("ERROR")
-                        || line.starts_with("Traceback")
-                        || line.contains("Error:")
-                    {
+                    } else if is_error_line(line) {
                         DOT_MISSING
                     } else {
                         TEXT_MUTED
@@ -1085,16 +1102,8 @@ fn draw_fading_console(
     if offset_y > 0.5 || content_h > rect.height() {
         let fade_h = 28.0_f32.min(rect.height() * 0.45);
         let fade_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), fade_h));
-        let top = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 255);
-        let bot = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 0);
-        let mut mesh = egui::Mesh::default();
-        mesh.colored_vertex(fade_rect.left_top(), top);
-        mesh.colored_vertex(fade_rect.right_top(), top);
-        mesh.colored_vertex(fade_rect.right_bottom(), bot);
-        mesh.colored_vertex(fade_rect.left_bottom(), bot);
-        mesh.add_triangle(0, 1, 2);
-        mesh.add_triangle(0, 2, 3);
-        ui.painter().add(egui::Shape::mesh(mesh));
+        let (top, bot) = (bg_alpha(255), bg_alpha(0));
+        paint_gradient(ui, fade_rect, [top, top, bot, bot]);
     }
 
     // Small clickable text at bottom-right to jump back to the latest line when scrolled up.
@@ -1113,36 +1122,29 @@ fn draw_fading_console(
             ),
             btn_size,
         );
-        let resp = ui.interact(btn_rect, Id::new("setup_console_scroll_bottom"), Sense::click());
+        let resp = ui.interact(
+            btn_rect,
+            Id::new("setup_console_scroll_bottom"),
+            Sense::click(),
+        );
         let hovered = resp.hovered();
         if hovered {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         // Soft seamless backing in BG_MAIN so the label stays readable over log lines.
-        let backing = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 235);
+        let backing = bg_alpha(235);
         let fade_left = Rect::from_min_size(
             Pos2::new(btn_rect.left() - 16.0, btn_rect.top()),
             Vec2::new(16.0, btn_rect.height()),
         );
-        let clear = Color32::from_rgba_unmultiplied(BG_MAIN.r(), BG_MAIN.g(), BG_MAIN.b(), 0);
-        let mut fade = egui::Mesh::default();
-        fade.colored_vertex(fade_left.left_top(), clear);
-        fade.colored_vertex(fade_left.right_top(), backing);
-        fade.colored_vertex(fade_left.right_bottom(), backing);
-        fade.colored_vertex(fade_left.left_bottom(), clear);
-        fade.add_triangle(0, 1, 2);
-        fade.add_triangle(0, 2, 3);
-        ui.painter().add(egui::Shape::mesh(fade));
-        ui.painter().rect_filled(btn_rect, CornerRadius::ZERO, backing);
+        let clear = bg_alpha(0);
+        paint_gradient(ui, fade_left, [clear, backing, backing, clear]);
+        ui.painter()
+            .rect_filled(btn_rect, CornerRadius::ZERO, backing);
 
         let color = if hovered { TEXT_PRIMARY } else { TEXT_MUTED };
-        ui.painter().text(
-            btn_rect.center(),
-            Align2::CENTER_CENTER,
-            label,
-            font,
-            color,
-        );
+        ui.painter()
+            .text(btn_rect.center(), Align2::CENTER_CENTER, label, font, color);
 
         if resp.clicked() {
             let mut state = scroll_out.inner.state;
@@ -1287,9 +1289,8 @@ mod tests {
         app.last_build = Some(BuildProgress {
             running: true,
             step_index: 2,
-            step_total: 6,
+            step_total: crate::pipeline::STEP_COUNT,
             step_label: "the discs".to_string(),
-            last_line: "extracting...".to_string(),
             lines: (0..25).map(|i| format!("line {i}")).collect(),
             outcome: None,
         });

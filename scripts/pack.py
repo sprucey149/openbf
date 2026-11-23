@@ -784,7 +784,7 @@ def bake_group_inputs(plan, bake_env, images, bake_inputs, lua_root, memo):
     def tree(path):
         return memo.tree(path) if path else None
 
-    has_bf1 = plan["games"]["bf1"]["gameplay"] is not None
+    has_bf1 = input_scan.has_bf1(plan)
     gameplay = {"pc_only": bake_env.get("OPENBF_PC_ONLY") == "1", "has_bf1": has_bf1}
     sound_trees = {}
     for g in sorted(images):
@@ -909,7 +909,7 @@ def build(a, out, plan, packs, visual_report):
     except ValueError as error:
         sys.exit(f"pack: {error}")
     menu_font_core = menu_font["path"] if menu_font else None
-    has_bf1 = plan["games"]["bf1"]["gameplay"] is not None
+    has_bf1 = input_scan.has_bf1(plan)
     active_games = ("bf1", "bf2") if has_bf1 else ("bf2",)
     pc_roots = {g: item["path"] for g in active_games
                 for item in plan["games"][g]["visual"] if item["kind"] == "pc-install"}

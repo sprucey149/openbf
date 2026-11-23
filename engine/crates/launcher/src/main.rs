@@ -2,7 +2,7 @@
 //!
 //! Opens a frameless `740×450` desktop window using the workspace's existing
 //! `winit`/`wgpu`/`egui` stack. A `UserEvent::Wake` proxy lets the background
-//! `pack.py` thread trigger repaints on new progress lines with zero polling.
+//! setup thread trigger repaints on new progress lines with zero polling.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -355,48 +355,45 @@ impl launcher::pipeline::ProgressSink for StdoutSink {
     }
 }
 
+/// `--<bf1|bf2>-<pc|ps2|xbox>` as its game and platform.
+fn source_flag(flag: &str) -> Option<(&str, launcher::config::Platform)> {
+    let (game, platform) = flag.strip_prefix("--")?.split_once('-')?;
+    let platform = launcher::config::Platform::ALL
+        .into_iter()
+        .find(|p| p.label().eq_ignore_ascii_case(platform))?;
+    matches!(game, "bf1" | "bf2").then_some((game, platform))
+}
+
 fn run_headless_setup(args: &[String]) -> Result<()> {
-    use launcher::config::{LauncherConfig, Platform};
+    use launcher::config::LauncherConfig;
     use std::path::PathBuf;
     use std::sync::{atomic::AtomicBool, Mutex};
 
     let mut cfg = LauncherConfig::default();
     let mut it = args.iter();
     while let Some(flag) = it.next() {
-        let mut val = || {
-            it.next()
-                .map(PathBuf::from)
-                .with_context(|| format!("missing path after {flag}"))
+        let source = match flag.as_str() {
+            "--dlc" => None,
+            _ => Some(
+                source_flag(flag)
+                    .with_context(|| format!("unknown --headless-setup flag: {flag}"))?,
+            ),
         };
-        match flag.as_str() {
-            "--bf1-ps2" => {
-                cfg.bf1.platform = Platform::Ps2;
-                cfg.bf1.path = Some(val()?);
+        let path = it
+            .next()
+            .map(PathBuf::from)
+            .with_context(|| format!("missing path after {flag}"))?;
+        match source {
+            None => cfg.dlc_dir = Some(path),
+            Some((game, platform)) => {
+                let source = if game == "bf1" {
+                    &mut cfg.bf1
+                } else {
+                    &mut cfg.bf2
+                };
+                source.platform = platform;
+                source.path = Some(path);
             }
-            "--bf1-xbox" => {
-                cfg.bf1.platform = Platform::Xbox;
-                cfg.bf1.path = Some(val()?);
-            }
-            "--bf1-pc" => {
-                cfg.bf1.platform = Platform::Pc;
-                cfg.bf1.path = Some(val()?);
-            }
-            "--bf2-ps2" => {
-                cfg.bf2.platform = Platform::Ps2;
-                cfg.bf2.path = Some(val()?);
-            }
-            "--bf2-xbox" => {
-                cfg.bf2.platform = Platform::Xbox;
-                cfg.bf2.path = Some(val()?);
-            }
-            "--bf2-pc" => {
-                cfg.bf2.platform = Platform::Pc;
-                cfg.bf2.path = Some(val()?);
-            }
-            "--dlc" => {
-                cfg.dlc_dir = Some(val()?);
-            }
-            other => anyhow::bail!("unknown --headless-setup flag: {other}"),
         }
     }
     let paths = LauncherPaths::discover();

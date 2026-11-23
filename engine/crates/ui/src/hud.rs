@@ -1075,17 +1075,22 @@ pub struct RoundEndModel {
     pub fade: f32,
 }
 
+/// The round-end banner's tint: red for a defeat, green otherwise.
+pub(crate) fn round_end_color(result: u8) -> [f32; 4] {
+    let [r, g, b] = if result == 1 {
+        [192.0, 64.0, 64.0]
+    } else {
+        [64.0, 192.0, 64.0]
+    };
+    [r / 255.0, g / 255.0, b / 255.0, 1.0]
+}
+
 /// BF1's banner sheet, size and UV halves (`re-round-end.md` §2.1 [V]).
 /// [ours] Both games use BF1's green victory and the same baked art.
 pub(crate) fn draw_round_end(result: u8, size: [f32; 2]) -> crate::hud_draw::HudFrame {
     use crate::hud_draw::{HudFrame, HudVertex};
     let defeat = result == 1;
-    let color = if defeat {
-        [192.0, 64.0, 64.0]
-    } else {
-        [64.0, 192.0, 64.0]
-    };
-    let color = [color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, 1.0];
+    let color = round_end_color(result);
     let scale = crate::hud_draw::frame_scale(size);
     let (hw, hh) = (128.0 * scale[0], 32.0 * scale[1]);
     let (cx, cy) = (size[0] * 0.5, size[1] * 0.5);
@@ -1319,8 +1324,10 @@ mod tests {
             fade: 0.0,
         });
         feed(&mut hud, &model, &|_| false);
-        let mut art = crate::hud_draw::HudArt::default();
-        art.no_bf1_victory_sheet = true;
+        let mut art = crate::hud_draw::HudArt {
+            no_bf1_victory_sheet: true,
+            ..Default::default()
+        };
         art.fonts.insert(
             "gamefont_large".into(),
             manifest::hud::HudFont {

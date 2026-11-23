@@ -146,13 +146,7 @@ fn ffmpeg_filter(
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    super::hide_console(&mut cmd);
 
     let mut child = cmd
         .spawn()
@@ -178,7 +172,9 @@ fn ffmpeg_filter(
     child_out
         .read_to_end(&mut stdout)
         .context("reading ffmpeg audio filter stdout")?;
-    let write_res = writer.join().map_err(|_| anyhow::anyhow!("ffmpeg writer panicked"))?;
+    let write_res = writer
+        .join()
+        .map_err(|_| anyhow::anyhow!("ffmpeg writer panicked"))?;
     let stderr = err_reader.join().unwrap_or_default();
     let status = child.wait().context("waiting for ffmpeg audio filter")?;
 
@@ -208,9 +204,8 @@ fn ffmpeg_filter(
 
 fn denoise(pcm: &[u8], rate: u32, floor: f64, ffmpeg: &str) -> Result<Vec<f64>> {
     let delay = 2 * (rate / 80);
-    let filters = format!(
-        "apad=pad_len={delay},afftdn=nr=6:nf={floor:.2}:gs=5,atrim=start_sample={delay}"
-    );
+    let filters =
+        format!("apad=pad_len={delay},afftdn=nr=6:nf={floor:.2}:gs=5,atrim=start_sample={delay}");
     let out = ffmpeg_filter(pcm, rate, 1, &filters, ffmpeg, "f32le")?;
     Ok(decode_f32le(&out))
 }
@@ -374,9 +369,7 @@ pub fn process_pcm(pcm: &[u8], rate: u32, kind: &str, ffmpeg: &str) -> Result<Ve
             output_power += restored_power[idx];
         }
     }
-    let peak = restored
-        .iter()
-        .fold(0.0_f64, |acc, &v| acc.max(v.abs()));
+    let peak = restored.iter().fold(0.0_f64, |acc, &v| acc.max(v.abs()));
     if output_power <= 0.0 || !output_power.is_finite() || !peak.is_finite() || peak <= 0.0 {
         return Ok(pcm.to_vec());
     }
@@ -437,7 +430,10 @@ mod tests {
     #[test]
     fn short_and_silent_buffers_pass_through_unchanged() {
         let short = vec![0u8; 100];
-        assert_eq!(process_pcm(&short, 22050, "effects", "ffmpeg").unwrap(), short);
+        assert_eq!(
+            process_pcm(&short, 22050, "effects", "ffmpeg").unwrap(),
+            short
+        );
         let silent = vec![0u8; 22050 * 2];
         assert_eq!(
             process_pcm(&silent, 22050, "dialogue", "ffmpeg").unwrap(),

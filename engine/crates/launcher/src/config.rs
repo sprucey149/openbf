@@ -60,20 +60,21 @@ impl SourceConfig {
         }
     }
 
-    /// Short display label for the read-only path field (zero-alloc for UTF-8 names).
+    /// Short display label for the read-only path field.
     pub fn display_name(&self) -> Cow<'_, str> {
-        let Some(path) = &self.path else {
-            return Cow::Borrowed("Not selected");
-        };
-        if let Some(name) = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .filter(|s| !s.is_empty())
-        {
-            Cow::Borrowed(name)
-        } else {
-            path.to_string_lossy()
-        }
+        path_label(self.path.as_deref())
+    }
+}
+
+/// A picked path's file name for a read-only field (the whole path when it
+/// has none, "Not selected" when nothing is picked).
+fn path_label(path: Option<&Path>) -> Cow<'_, str> {
+    let Some(path) = path else {
+        return Cow::Borrowed("Not selected");
+    };
+    match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) if !name.is_empty() => Cow::Borrowed(name),
+        _ => path.to_string_lossy(),
     }
 }
 
@@ -165,18 +166,7 @@ impl LauncherConfig {
 
     /// Short display label for the optional DLC Heroes directory.
     pub fn dlc_display_name(&self) -> Cow<'_, str> {
-        let Some(path) = &self.dlc_dir else {
-            return Cow::Borrowed("Not selected");
-        };
-        if let Some(name) = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .filter(|s| !s.is_empty())
-        {
-            Cow::Borrowed(name)
-        } else {
-            path.to_string_lossy()
-        }
+        path_label(self.dlc_dir.as_deref())
     }
 }
 

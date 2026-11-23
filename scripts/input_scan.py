@@ -458,9 +458,6 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
 
     has_bf1 = games["bf1"]["gameplay"] is not None
     has_bf2 = games["bf2"]["gameplay"] is not None
-    if require_all and not has_bf1 and not has_bf2 and bf2_only_on:
-        # Neither game found: ensure BF1 is also reported missing when nothing usable was supplied.
-        pass
     if any_pc:
         console = games["bf2"]["gameplay"]
         if not console or not console["verified"] or (console["kind"] == "pc-install" and not (combined_pc or pc_bf2_only)):
@@ -566,12 +563,17 @@ def withheld_maps(game, gameplay):
     return WITHHELD_MAPS.get((platform, game), ())
 
 
+def has_bf1(plan):
+    """True when the plan builds Battlefront I as well as Battlefront II (False for a BF2-only build)."""
+    return plan["games"]["bf1"]["gameplay"] is not None
+
+
 def bake_env(plan):
     """What the bake is told. Empty for anything not chosen, so the bake's default is the PS2-only one."""
     env = {}
     if (plan.get("source_plan") or {}).get("kind") == "pc-only":
         env["OPENBF_PC_ONLY"] = "1"
-    if (plan["games"]["bf1"].get("gameplay") is None) and (plan["games"]["bf2"].get("gameplay") is not None):
+    if not has_bf1(plan) and plan["games"]["bf2"]["gameplay"] is not None:
         env["OPENBF_HAS_BF1"] = "0"
     for game in GAMES:
         number = game[-1]

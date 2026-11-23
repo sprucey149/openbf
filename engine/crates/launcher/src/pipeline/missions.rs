@@ -5,10 +5,12 @@
 //! setup's temporary staging directory (which is deleted once packing finishes),
 //! keeping the game folder completely free of `scripts/` and `engine/` clutter.
 
+use super::rebake::BakeTrees;
 use super::scan::{ci_path, BuildPlan, GameId, GameSource};
-use super::ExecCtx;
+use super::{args, ExecCtx};
 use crate::config::Platform;
 use anyhow::{Context, Result};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 const EMBEDDED_PY: &[(&str, &str)] = &[
@@ -115,36 +117,18 @@ impl MaterializedMissions {
         })
     }
 
-    /// Extract compiled Lua bytecode from the active game LVLs into `lua_root`.
-    pub fn extract_lua(
-        &self,
-        ctx: &ExecCtx,
-        bf1_tree: Option<&Path>,
-        bf2_tree: &Path,
-        lua_root: &Path,
-    ) -> Result<()> {
+    /// Extract compiled Lua bytecode from the active game LVLs into `trees.lua_root`.
+    pub fn extract_lua(&self, ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         let script = self.scripts_dir.join("extract_lua.py");
-        type LuaJob<'a> = (GameId, &'a Path, &'static [(&'static str, &'static str)]);
-        let mut jobs: Vec<LuaJob<'_>> = Vec::new();
-        if let Some(t1) = bf1_tree {
-            jobs.push((GameId::Bf1, t1, BF1_LUA_LVLS));
-        }
-        jobs.push((GameId::Bf2, bf2_tree, BF2_LUA_LVLS));
-
-        for (game, tree, lvls) in jobs {
+        for (game, tree) in trees.games() {
+            let lvls = match game {
+                GameId::Bf1 => BF1_LUA_LVLS,
+                GameId::Bf2 => BF2_LUA_LVLS,
+            };
             for (sub, rel) in lvls {
-                ctx.check_cancelled()?;
-                let lvl = ci_path(tree, rel);
-                let out = lua_root.join(game.as_str()).join(sub);
+                let out = trees.lua_root.join(game.as_str()).join(sub);
                 std::fs::create_dir_all(&out)?;
-                let args: Vec<String> = vec![
-                    "-I".to_string(),
-                    script.to_string_lossy().into_owned(),
-                    lvl.to_string_lossy().into_owned(),
-                    "--out".to_string(),
-                    out.to_string_lossy().into_owned(),
-                ];
-                ctx.run_python(&args, &[])?;
+                ctx.run_python(&script, &args![ci_path(tree, rel), "--out", out], &[])?;
             }
         }
         Ok(())
@@ -155,41 +139,42 @@ impl MaterializedMissions {
         &self,
         ctx: &ExecCtx,
         plan: &BuildPlan,
-        bf1_tree: Option<&Path>,
-        bf2_tree: &Path,
-        lua_root: &Path,
+        trees: &BakeTrees,
         missions_out: &Path,
     ) -> Result<()> {
         ctx.check_cancelled()?;
         std::fs::create_dir_all(missions_out)?;
-        let script = self.scripts_dir.join("gen_missions.py");
-        let mut args = vec![
-            "-I".to_string(),
-            script.to_string_lossy().into_owned(),
-            "--ps2-only".to_string(),
-            "--lua-root".to_string(),
-            lua_root.to_string_lossy().into_owned(),
-            "--out".to_string(),
-            missions_out.to_string_lossy().into_owned(),
-            "--hunt".to_string(),
-            "--space".to_string(),
-        ];
+        let mut args = Vec::from(args![
+            "--ps2-only",
+            "--lua-root",
+            trees.lua_root,
+            "--out",
+            missions_out,
+            "--hunt",
+            "--space",
+        ]);
         if !plan.has_bf1() {
-            args.push("--bf2-only".to_string());
+            args.push("--bf2-only".into());
         }
 
         // Gameplay reference tables + sources for PC/Xbox primaries.
         let mut table_only_games: Vec<&'static str> = Vec::new();
-        if let (Some(src), Some(tree)) = (&plan.bf1, bf1_tree) {
+        if let (Some(src), Some(tree)) = (&plan.bf1, &trees.bf1) {
             self.push_correction_args(GameId::Bf1, src, tree, &mut args, &mut table_only_games);
         }
-        self.push_correction_args(GameId::Bf2, &plan.bf2, bf2_tree, &mut args, &mut table_only_games);
+        self.push_correction_args(
+            GameId::Bf2,
+            &plan.bf2,
+            &trees.bf2,
+            &mut args,
+            &mut table_only_games,
+        );
         for game in table_only_games {
-            args.push("--table-only-game".to_string());
-            args.push(game.to_string());
+            args.extend(args!["--table-only-game", game]);
         }
 
         ctx.run_python(
+            &self.scripts_dir.join("gen_missions.py"),
             &args,
             &[
                 ("OPENBF_GAMEPLAY_CORRECTIONS", None),
@@ -204,7 +189,7 @@ impl MaterializedMissions {
         game: GameId,
         source: &GameSource,
         tree: &Path,
-        args: &mut Vec<String>,
+        args: &mut Vec<OsString>,
         table_only: &mut Vec<&'static str>,
     ) {
         let plat_str = match source.platform() {
@@ -218,10 +203,14 @@ impl MaterializedMissions {
         let table = self
             .corrections_dir
             .join(format!("{}-{plat_str}.json", game.as_str()));
-        args.push("--gameplay-reference".to_string());
-        args.push(table.to_string_lossy().into_owned());
-        args.push("--gameplay-source".to_string());
-        args.push(format!("{}={}", game.as_str(), tree.to_string_lossy()));
+        let mut source_arg = OsString::from(format!("{}=", game.as_str()));
+        source_arg.push(tree);
+        args.extend(args![
+            "--gameplay-reference",
+            table,
+            "--gameplay-source",
+            source_arg
+        ]);
     }
 
     /// Generate `common_bf2/shell/credits.json` from BF2 `SHELL.LVL` for console builds.
@@ -231,15 +220,10 @@ impl MaterializedMissions {
         shell_lvl: &Path,
         credits_out: &Path,
     ) -> Result<()> {
-        ctx.check_cancelled()?;
-        let script = self.scripts_dir.join("gen_missions.py");
-        let args = vec![
-            "-I".to_string(),
-            script.to_string_lossy().into_owned(),
-            "--shell-credits".to_string(),
-            shell_lvl.to_string_lossy().into_owned(),
-            credits_out.to_string_lossy().into_owned(),
-        ];
-        ctx.run_python(&args, &[])
+        ctx.run_python(
+            &self.scripts_dir.join("gen_missions.py"),
+            &args!["--shell-credits", shell_lvl, credits_out],
+            &[],
+        )
     }
 }

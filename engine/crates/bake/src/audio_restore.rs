@@ -15,31 +15,30 @@ pub(crate) struct AudioRestore {
 }
 
 struct Config {
-    binary: Option<PathBuf>,
-    python: OsString,
-    script: PathBuf,
+    program: Program,
     kind: &'static str,
+}
+
+/// What serves the worker protocol: `openbf-launcher --audio-restore-worker`
+/// (`OPENBF_AUDIO_RESTORE_BIN`, preferred) or `scripts/restore_audio.py`
+/// under Python (`OPENBF_AUDIO_RESTORE_SCRIPT`).
+enum Program {
+    Binary(PathBuf),
+    Script { python: OsString, script: PathBuf },
 }
 
 impl AudioRestore {
     pub(crate) fn from_env(kind: &'static str) -> Self {
-        let config = if let Some(bin) = std::env::var_os("OPENBF_AUDIO_RESTORE_BIN") {
-            Some(Config {
-                binary: Some(bin.into()),
-                python: OsString::new(),
-                script: PathBuf::new(),
-                kind,
-            })
-        } else {
-            std::env::var_os("OPENBF_AUDIO_RESTORE_SCRIPT").map(|script| Config {
-                binary: None,
-                python: std::env::var_os("OPENBF_PYTHON").unwrap_or_else(|| "python3".into()),
-                script: script.into(),
-                kind,
-            })
-        };
+        let program = std::env::var_os("OPENBF_AUDIO_RESTORE_BIN")
+            .map(|bin| Program::Binary(bin.into()))
+            .or_else(|| {
+                std::env::var_os("OPENBF_AUDIO_RESTORE_SCRIPT").map(|script| Program::Script {
+                    python: std::env::var_os("OPENBF_PYTHON").unwrap_or_else(|| "python3".into()),
+                    script: script.into(),
+                })
+            });
         Self {
-            config,
+            config: program.map(|program| Config { program, kind }),
             worker: None,
             failed: false,
         }
@@ -85,24 +84,25 @@ struct Worker {
 
 impl Worker {
     fn spawn(config: &Config) -> Result<Self> {
-        let mut cmd = if let Some(bin) = &config.binary {
-            ensure!(
-                bin.is_absolute(),
-                "audio restoration binary must be absolute"
-            );
-            let mut c = Command::new(bin);
-            c.args(["--audio-restore-worker", config.kind]);
-            c
-        } else {
-            ensure!(
-                config.script.is_absolute(),
-                "audio restoration script must be absolute"
-            );
-            let mut c = Command::new(&config.python);
-            c.arg("-I")
-                .arg(&config.script)
-                .args(["--worker", config.kind]);
-            c
+        let mut cmd = match &config.program {
+            Program::Binary(bin) => {
+                ensure!(
+                    bin.is_absolute(),
+                    "audio restoration binary must be absolute"
+                );
+                let mut cmd = Command::new(bin);
+                cmd.args(["--audio-restore-worker", config.kind]);
+                cmd
+            }
+            Program::Script { python, script } => {
+                ensure!(
+                    script.is_absolute(),
+                    "audio restoration script must be absolute"
+                );
+                let mut cmd = Command::new(python);
+                cmd.arg("-I").arg(script).args(["--worker", config.kind]);
+                cmd
+            }
         };
         let mut child = cmd
             .stdin(Stdio::piped())
