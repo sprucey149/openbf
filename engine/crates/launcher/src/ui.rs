@@ -10,6 +10,9 @@ use egui::{
     Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Id,
     Layout, Margin, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
 };
+use extensions::profile::{ExtensionProfile, StartupErrorReport, StartupOverrides};
+use extensions::registry::ExtensionRegistry;
+use extensions::{ExtensionManifest, ExtensionOrigin, OPENBF_VR_ID};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -69,6 +72,7 @@ fn bold_font(size: f32) -> FontId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Setup,
+    Mods,
     Options,
 }
 
@@ -88,6 +92,10 @@ pub struct LauncherApp {
     pub page: Option<Page>,
     pub game_ready: bool,
     pub built_has_bf1: bool,
+    pub extension_catalog: Vec<ExtensionManifest>,
+    pub extension_profile: ExtensionProfile,
+    pub startup_error: Option<StartupErrorReport>,
+    pub launch_force_desktop: bool,
     bf1_present: bool,
     bf2_present: bool,
     bf1_cleared: bool,
@@ -109,6 +117,10 @@ impl LauncherApp {
             page: None,
             game_ready: false,
             built_has_bf1: false,
+            extension_catalog: Vec::new(),
+            extension_profile: ExtensionProfile::default(),
+            startup_error: None,
+            launch_force_desktop: false,
             bf1_present: false,
             bf2_present: false,
             bf1_cleared: false,
@@ -133,6 +145,9 @@ impl LauncherApp {
         self.bf1_present = self.config.bf1.is_present();
         self.bf2_present = self.config.bf2.is_present();
         self.can_build = self.paths.can_build();
+        self.extension_catalog = self.paths.probe_bundled_extensions();
+        self.extension_profile = ExtensionProfile::load(&self.paths.extensions_profile_path());
+        self.startup_error = StartupErrorReport::load(&self.paths.startup_error_path());
     }
 
     pub fn cancel_build_if_running(&self) {
@@ -147,6 +162,32 @@ impl LauncherApp {
         if let Err(e) = self.config.save(&self.paths.config_path) {
             self.show_toast(format!("Could not save settings: {e}"));
         }
+    }
+
+    fn save_extension_profile(&mut self) {
+        if let Err(e) = self
+            .extension_profile
+            .save(&self.paths.extensions_profile_path())
+        {
+            self.show_toast(format!("Could not save extension settings: {e}"));
+        }
+    }
+
+    fn clear_startup_error(&mut self) {
+        StartupErrorReport::clear(&self.paths.startup_error_path());
+        self.startup_error = None;
+    }
+
+    pub fn set_extension_enabled(&mut self, id: &str, enabled: bool) {
+        self.extension_profile.set_enabled(id, enabled);
+        self.save_extension_profile();
+    }
+
+    pub fn resolve_extensions(
+        &self,
+    ) -> Result<extensions::registry::ActivationPlan, Vec<extensions::registry::ResolutionError>> {
+        ExtensionRegistry::new(self.extension_catalog.iter().cloned())
+            .resolve(&self.extension_profile, &StartupOverrides::default())
     }
 
     fn show_toast(&mut self, msg: impl Into<String>) {
@@ -292,10 +333,14 @@ impl LauncherApp {
 
                 let play_enabled = self.game_ready && !building;
                 if sidebar_nav_button(ui, "Play", false, play_enabled) {
+                    self.launch_force_desktop = false;
                     actions.launch_and_close = true;
                 }
                 if sidebar_nav_button(ui, "Setup", self.page == Some(Page::Setup), true) {
                     self.page = Some(Page::Setup);
+                }
+                if sidebar_nav_button(ui, "Mods", self.page == Some(Page::Mods), true) {
+                    self.page = Some(Page::Mods);
                 }
                 if sidebar_nav_button(ui, "Options", self.page == Some(Page::Options), true) {
                     self.page = Some(Page::Options);
@@ -318,8 +363,13 @@ impl LauncherApp {
                 bottom: 28,
             }))
             .show(ctx, |ui| {
+                if self.startup_error.is_some() {
+                    self.draw_startup_error_banner(ui, building, &mut actions);
+                    ui.add_space(14.0);
+                }
                 match self.page {
                     Some(Page::Setup) => self.draw_setup_page(ui, building),
+                    Some(Page::Mods) => self.draw_mods_page(ui),
                     Some(Page::Options) => self.draw_options_page(ui, building),
                     None => {}
                 }
@@ -554,6 +604,332 @@ impl LauncherApp {
         if changed {
             self.save_config();
         }
+    }
+
+    fn draw_startup_error_banner(
+        &mut self,
+        ui: &mut egui::Ui,
+        building: bool,
+        actions: &mut HostActions,
+    ) {
+        let Some(report) = self.startup_error.clone() else {
+            return;
+        };
+        let mut clear_error = false;
+        let width = ui.available_width();
+        Frame::new()
+            .fill(Color32::from_rgb(0xfd, 0xf3, 0xf2))
+            .stroke(Stroke::new(1.0, DOT_MISSING))
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width((width - 24.0).max(160.0));
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 5.0);
+                ui.label(
+                    egui::RichText::new(format!("{} failed to start", report.extension_name))
+                        .font(bold_font(13.5))
+                        .color(DOT_MISSING),
+                );
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&report.summary)
+                            .font(regular_font(12.5))
+                            .color(TEXT_PRIMARY),
+                    )
+                    .wrap(),
+                );
+                if !report.details.trim().is_empty() {
+                    let details = truncate_banner_text(&report.details, 180);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!(
+                                "{details} (see openbf_data/logs/startup_error.log)"
+                            ))
+                            .font(regular_font(11.5))
+                            .color(TEXT_MUTED),
+                        )
+                        .wrap(),
+                    );
+                }
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    if report.can_retry_desktop
+                        && primary_button(
+                            ui,
+                            "Play in Desktop Mode",
+                            Vec2::new(156.0, 28.0),
+                            self.game_ready && !building,
+                        )
+                    {
+                        clear_error = true;
+                        self.launch_force_desktop = true;
+                        actions.launch_and_close = true;
+                    }
+                    if self.extension_profile.is_enabled(&report.extension_id)
+                        && flat_button(
+                            ui,
+                            &format!("Disable {}", report.extension_name),
+                            Vec2::new(144.0, 28.0),
+                            true,
+                        )
+                    {
+                        self.set_extension_enabled(&report.extension_id, false);
+                        clear_error = true;
+                        self.show_toast(format!("Disabled {}", report.extension_name));
+                    }
+                    if flat_button(ui, "Dismiss", Vec2::new(76.0, 28.0), true) {
+                        clear_error = true;
+                    }
+                });
+            });
+        if clear_error {
+            self.clear_startup_error();
+        }
+    }
+
+    fn draw_mods_page(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            egui::RichText::new("Mods")
+                .font(bold_font(17.0))
+                .color(TEXT_PRIMARY),
+        );
+        ui.add_space(20.0);
+
+        let catalog = self.extension_catalog.clone();
+        let resolution = self.resolve_extensions();
+        let dx12_with_vr = self.extension_profile.is_enabled(OPENBF_VR_ID)
+            && self.config.graphics_api == GraphicsApi::Dx12;
+
+        let scroll_h = (ui.available_height() - 62.0).max(96.0);
+        let width = ui.available_width();
+        egui::ScrollArea::vertical()
+            .id_salt("mods_list")
+            .max_width(width)
+            .max_height(scroll_h)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width((width - 8.0).max(160.0));
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 10.0);
+
+                match &resolution {
+                    Ok(plan) => {
+                        for warning in &plan.warnings {
+                            draw_notice_box(
+                                ui,
+                                Color32::from_rgb(0xff, 0xfb, 0xeb),
+                                DOT_BUILDING,
+                                DOT_BUILDING,
+                                warning,
+                            );
+                        }
+                    }
+                    Err(errs) => {
+                        for err in errs {
+                            draw_notice_box(
+                                ui,
+                                Color32::from_rgb(0xfd, 0xf3, 0xf2),
+                                DOT_MISSING,
+                                DOT_MISSING,
+                                &format!("Extension conflict: {err}"),
+                            );
+                        }
+                    }
+                }
+
+                if dx12_with_vr {
+                    draw_notice_box(
+                        ui,
+                        Color32::from_rgb(0xff, 0xfb, 0xeb),
+                        DOT_BUILDING,
+                        TEXT_PRIMARY,
+                        "Options -> Graphics API is Direct3D 12. OpenBF VR requires Vulkan for OpenXR interop and overrides Dx12 while active.",
+                    );
+                }
+
+                if catalog.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No mods found.")
+                            .font(regular_font(12.0))
+                            .color(TEXT_MUTED),
+                    );
+                } else {
+                    for manifest in &catalog {
+                        if let Some(next_enabled) = self.draw_extension_card(ui, manifest) {
+                            self.set_extension_enabled(&manifest.id, next_enabled);
+                        }
+                    }
+                }
+            });
+    }
+
+    fn draw_extension_card(
+        &self,
+        ui: &mut egui::Ui,
+        manifest: &ExtensionManifest,
+    ) -> Option<bool> {
+        let enabled = manifest.supported && self.extension_profile.is_enabled(&manifest.id);
+        let expand_id = ui.make_persistent_id(("ext_expanded", &manifest.id));
+        let mut expanded = ui
+            .ctx()
+            .data(|d| d.get_temp::<bool>(expand_id).unwrap_or(false));
+        let mut toggled = None;
+        let card_w = (ui.available_width() - 24.0).max(160.0);
+        Frame::new()
+            .fill(BG_MAIN)
+            .stroke(Stroke::new(
+                1.0,
+                if enabled { DOT_READY } else { INPUT_BORDER },
+            ))
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width(card_w);
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 5.0);
+
+                ui.horizontal(|ui| {
+                    let header_resp = ui
+                        .scope_builder(
+                            egui::UiBuilder::new()
+                                .id_salt(expand_id.with("header"))
+                                .sense(Sense::click()),
+                            |ui| {
+                                ui.horizontal(|ui| {
+                                    let (chev_rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(10.0, 16.0),
+                                        Sense::hover(),
+                                    );
+                                    let cx = chev_rect.center().x;
+                                    let cy = chev_rect.center().y;
+                                    let chev_stroke =
+                                        Stroke::new(1.3, Color32::from_rgb(0x55, 0x55, 0x55));
+                                    if expanded {
+                                        ui.painter().line_segment(
+                                            [
+                                                Pos2::new(cx - 3.5, cy - 1.5),
+                                                Pos2::new(cx, cy + 2.0),
+                                            ],
+                                            chev_stroke,
+                                        );
+                                        ui.painter().line_segment(
+                                            [
+                                                Pos2::new(cx, cy + 2.0),
+                                                Pos2::new(cx + 3.5, cy - 1.5),
+                                            ],
+                                            chev_stroke,
+                                        );
+                                    } else {
+                                        ui.painter().line_segment(
+                                            [Pos2::new(cx - 1.5, cy - 3.5), Pos2::new(cx + 2.0, cy)],
+                                            chev_stroke,
+                                        );
+                                        ui.painter().line_segment(
+                                            [Pos2::new(cx + 2.0, cy), Pos2::new(cx - 1.5, cy + 3.5)],
+                                            chev_stroke,
+                                        );
+                                    }
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&manifest.name)
+                                                .font(bold_font(14.0))
+                                                .color(TEXT_PRIMARY),
+                                        )
+                                        .selectable(false),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(format!("v{}", manifest.version))
+                                                .font(regular_font(12.0))
+                                                .color(TEXT_MUTED),
+                                        )
+                                        .selectable(false),
+                                    );
+                                    if manifest.origin == ExtensionOrigin::Bundled {
+                                        extension_badge(ui, manifest.origin.label(), false);
+                                    }
+                                });
+                            },
+                        )
+                        .response;
+                    if header_resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if header_resp.clicked() {
+                        expanded = !expanded;
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let status = if !manifest.supported {
+                            "Unsupported"
+                        } else if enabled {
+                            "Enabled"
+                        } else {
+                            "Disabled"
+                        };
+                        let status_color = if !manifest.supported {
+                            DOT_MISSING
+                        } else if enabled {
+                            DOT_READY
+                        } else {
+                            TEXT_MUTED
+                        };
+                        if extension_toggle(ui, &manifest.id, enabled, manifest.supported) {
+                            toggled = Some(!enabled);
+                        }
+                        ui.label(
+                            egui::RichText::new(status)
+                                .font(regular_font(12.0))
+                                .color(status_color),
+                        );
+                    });
+                });
+
+                if expanded {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&manifest.description)
+                                .font(regular_font(12.5))
+                                .color(TEXT_PRIMARY),
+                        )
+                        .wrap(),
+                    );
+                    ui.horizontal(|ui| {
+                        extension_badge(ui, manifest.kind.label(), true);
+                    });
+
+                    if !manifest.dependencies.is_empty() || !manifest.conflicts.is_empty() {
+                        let mut rel = Vec::new();
+                        if !manifest.dependencies.is_empty() {
+                            rel.push(format!("Requires: {}", manifest.dependencies.join(", ")));
+                        }
+                        if !manifest.conflicts.is_empty() {
+                            rel.push(format!("Conflicts: {}", manifest.conflicts.join(", ")));
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(rel.join("  |  "))
+                                    .font(regular_font(11.5))
+                                    .color(TEXT_MUTED),
+                            )
+                            .wrap(),
+                        );
+                    }
+                }
+
+                if !manifest.supported {
+                    let reason = manifest
+                        .unsupported_reason
+                        .as_deref()
+                        .unwrap_or("Not supported on this platform or build.");
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("Unavailable: {reason}"))
+                                .font(regular_font(11.5))
+                                .color(DOT_MISSING),
+                        )
+                        .wrap(),
+                    );
+                }
+            });
+        ui.ctx().data_mut(|d| d.insert_temp(expand_id, expanded));
+        toggled
     }
 
     fn draw_status_dots(&self, ui: &mut egui::Ui) {
@@ -1308,6 +1684,108 @@ fn pick_disc_image(title: &str) -> Option<PathBuf> {
         .pick_file()
 }
 
+fn truncate_banner_text(s: &str, max_chars: usize) -> String {
+    let single_line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = single_line.chars();
+    let head: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
+fn draw_notice_box(
+    ui: &mut egui::Ui,
+    fill: Color32,
+    border: Color32,
+    text_color: Color32,
+    text: &str,
+) {
+    let width = ui.available_width();
+    Frame::new()
+        .fill(fill)
+        .stroke(Stroke::new(1.0, border))
+        .inner_margin(Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width((width - 20.0).max(140.0));
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .font(regular_font(12.0))
+                        .color(text_color),
+                )
+                .wrap(),
+            );
+        });
+}
+
+fn extension_badge(ui: &mut egui::Ui, text: &str, small: bool) {
+    let (pad_x, pad_y, font_size, color) = if small {
+        (5, 1, 10.0, TEXT_MUTED)
+    } else {
+        (6, 2, 11.0, TEXT_NAV)
+    };
+    Frame::new()
+        .fill(BG_SIDEBAR)
+        .stroke(Stroke::new(1.0, BORDER_SIDEBAR))
+        .inner_margin(Margin::symmetric(pad_x, pad_y))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .font(regular_font(font_size))
+                        .color(color),
+                )
+                .selectable(false),
+            );
+        });
+}
+
+fn extension_toggle(ui: &mut egui::Ui, id_salt: &str, enabled: bool, interactive: bool) -> bool {
+    let _id = ui.make_persistent_id(("ext_toggle", id_salt));
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(36.0, 18.0), Sense::click());
+    let hovered = interactive && resp.hovered();
+    let track_fill = if !interactive {
+        Color32::from_rgb(0xe8, 0xe8, 0xe5)
+    } else if enabled {
+        DOT_READY
+    } else if hovered {
+        Color32::from_rgb(0xc8, 0xc8, 0xc4)
+    } else {
+        Color32::from_rgb(0xd8, 0xd8, 0xd4)
+    };
+    let track_border = if !interactive {
+        BORDER_SIDEBAR
+    } else if enabled {
+        DOT_READY
+    } else {
+        BTN_BORDER
+    };
+    ui.painter().rect(
+        rect,
+        CornerRadius::ZERO,
+        track_fill,
+        Stroke::new(1.0, track_border),
+        StrokeKind::Inside,
+    );
+    let knob_x = if enabled {
+        rect.right() - 16.0
+    } else {
+        rect.left() + 2.0
+    };
+    let knob_rect = Rect::from_min_size(Pos2::new(knob_x, rect.top() + 2.0), Vec2::new(14.0, 14.0));
+    ui.painter().rect_filled(
+        knob_rect,
+        CornerRadius::ZERO,
+        if interactive { BG_MAIN } else { BG_SIDEBAR },
+    );
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    interactive && resp.clicked()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1341,7 +1819,12 @@ mod tests {
         });
 
         assert_eq!(app.page, None);
-        for page in [None, Some(Page::Setup), Some(Page::Options)] {
+        for page in [
+            None,
+            Some(Page::Setup),
+            Some(Page::Mods),
+            Some(Page::Options),
+        ] {
             app.page = page;
             let out = ctx.run(input.clone(), |ctx| {
                 let actions = app.ui(ctx);
@@ -1352,6 +1835,175 @@ mod tests {
             });
             assert!(!out.shapes.is_empty());
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vr_extension_defaults_disabled_and_persists_toggle() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf_launcher_mods_persist_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = LauncherPaths::from_exe(&dir.join("openbf-launcher"), None);
+        let mut app = LauncherApp::new(paths.clone(), || {});
+
+        assert!(app
+            .extension_catalog
+            .iter()
+            .any(|m| m.id == OPENBF_VR_ID && m.origin == ExtensionOrigin::Bundled));
+        assert!(!app.extension_profile.is_enabled(OPENBF_VR_ID));
+
+        app.set_extension_enabled(OPENBF_VR_ID, true);
+        assert!(app.extension_profile.is_enabled(OPENBF_VR_ID));
+
+        let reloaded = LauncherApp::new(paths, || {});
+        assert!(reloaded.extension_profile.is_enabled(OPENBF_VR_ID));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn collect_shape_texts(shape: &egui::Shape, out: &mut Vec<(String, Rect)>) {
+        match shape {
+            egui::Shape::Text(t) => {
+                out.push((
+                    t.galley.text().to_owned(),
+                    Rect::from_min_size(t.pos, t.galley.size()),
+                ));
+            }
+            egui::Shape::Vec(items) => {
+                for s in items {
+                    collect_shape_texts(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn mods_cards_start_collapsed_and_expand_when_clicked() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf_launcher_mods_expand_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = LauncherPaths::from_exe(&dir.join("openbf-launcher"), None);
+        let mut app = LauncherApp::new(paths, || {});
+        app.page = Some(Page::Mods);
+
+        let ctx = egui::Context::default();
+        LauncherApp::configure_style(&ctx);
+        let base_input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                Pos2::ZERO,
+                Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+            )),
+            ..Default::default()
+        };
+
+        let _ = ctx.run(base_input.clone(), |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let out = ctx.run(base_input.clone(), |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let mut texts = Vec::new();
+        for clipped in &out.shapes {
+            collect_shape_texts(&clipped.shape, &mut texts);
+        }
+        let vr_header_rect = texts
+            .iter()
+            .find(|(text, _)| text == "OpenBF VR")
+            .expect("OpenBF VR header")
+            .1;
+        assert!(texts.iter().any(|(t, _)| t == "Bundled"));
+        assert!(!texts.iter().any(|(t, _)| t == "Engine Extension"));
+        assert!(!texts.iter().any(|(t, _)| t.contains("Capabilities")));
+        assert!(!texts
+            .iter()
+            .any(|(t, _)| t.contains("Active display backend")));
+        assert!(!texts
+            .iter()
+            .any(|(t, _)| t.contains("OpenXR stereo headset")));
+
+        // Click the header label to expand the card.
+        let pos = vr_header_rect.center();
+        let mut hover = base_input.clone();
+        hover.events = vec![egui::Event::PointerMoved(pos)];
+        let _ = ctx.run(hover, |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let mut down = base_input.clone();
+        down.events = vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        let _ = ctx.run(down, |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let mut up = base_input.clone();
+        up.events = vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        let out_expanded = ctx.run(up, |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let mut expanded_texts = Vec::new();
+        for clipped in &out_expanded.shapes {
+            collect_shape_texts(&clipped.shape, &mut expanded_texts);
+        }
+        assert!(
+            expanded_texts
+                .iter()
+                .any(|(t, _)| t.contains("OpenXR stereo headset")),
+            "expected expanded description at {pos:?}; got {expanded_texts:#?}"
+        );
+        assert!(expanded_texts.iter().any(|(t, _)| t == "Engine Extension"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn headless_ui_renders_startup_error_recovery_banner_without_panic() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf_launcher_error_banner_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = LauncherPaths::from_exe(&dir.join("openbf-launcher"), None);
+        let report = StartupErrorReport::new(
+            OPENBF_VR_ID,
+            "OpenBF VR",
+            "No compatible OpenXR runtime found.",
+            "xrEnumerateInstanceExtensionProperties returned ERROR_RUNTIME_UNAVAILABLE",
+            true,
+        );
+        report.save(&paths.startup_error_path()).unwrap();
+
+        let mut app = LauncherApp::new(paths, || {});
+        assert!(app.startup_error.is_some());
+        app.game_ready = true;
+        app.set_extension_enabled(OPENBF_VR_ID, true);
+
+        let ctx = egui::Context::default();
+        LauncherApp::configure_style(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                Pos2::ZERO,
+                Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run(input, |ctx| {
+            let _ = app.ui(ctx);
+        });
+        assert!(!out.shapes.is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

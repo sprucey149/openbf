@@ -139,6 +139,55 @@ impl LauncherPaths {
             None => BuiltStatus::default(),
         }
     }
+
+    /// Location of `extensions.ron` inside `openbf_data`.
+    pub fn extensions_profile_path(&self) -> PathBuf {
+        extensions::profile::profile_path(&self.data_dir)
+    }
+
+    /// Location of `last_startup_error.ron` inside `openbf_data`.
+    pub fn startup_error_path(&self) -> PathBuf {
+        extensions::profile::startup_error_path(&self.data_dir)
+    }
+
+    /// Discover bundled engine extensions by querying the built/base game binary
+    /// (`--list-extensions`), falling back to the compile-time catalog.
+    pub fn probe_bundled_extensions(&self) -> Vec<extensions::ExtensionManifest> {
+        let mut candidates = Vec::new();
+        if self.game_out.is_file() {
+            candidates.push(self.game_out.clone());
+        }
+        if let Some(base) = self.base_game_bin() {
+            if !candidates.contains(&base) {
+                candidates.push(base);
+            }
+        }
+        for bin in candidates {
+            if let Some(list) = query_extensions_from_bin(&bin) {
+                if !list.is_empty() {
+                    return list;
+                }
+            }
+        }
+        extensions::bundled_extensions_catalog(cfg!(any(windows, target_os = "linux")))
+    }
+}
+
+fn query_extensions_from_bin(bin: &Path) -> Option<Vec<extensions::ExtensionManifest>> {
+    let mut cmd = std::process::Command::new(bin);
+    cmd.arg("--list-extensions");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    ron::from_str(&text).ok()
 }
 
 fn in_cargo_target(dir: &Path) -> bool {
@@ -245,6 +294,24 @@ mod tests {
             );
         }
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extension_paths_and_fallback_catalog_work() {
+        let dir = scratch("ext_paths");
+        let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
+        let paths = LauncherPaths::from_exe(&exe, None);
+        assert_eq!(
+            paths.extensions_profile_path(),
+            paths.data_dir.join(extensions::profile::PROFILE_FILE)
+        );
+        assert_eq!(
+            paths.startup_error_path(),
+            paths.data_dir.join(extensions::profile::STARTUP_ERROR_FILE)
+        );
+        let catalog = paths.probe_bundled_extensions();
+        assert!(catalog.iter().any(|m| m.id == extensions::OPENBF_VR_ID));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
