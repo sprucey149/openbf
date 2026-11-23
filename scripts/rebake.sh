@@ -501,7 +501,7 @@ if want side; then
     if [ "$HAS_BF1" = 1 ]; then
       BF1_ANIMS="$A1" bake_native_side "$@"
     else
-      BF1_ANIMS="" bake_native_side "$@"
+      (unset BF1_ANIMS; bake_native_side "$@")
     fi
   }
   bake_bf2_native bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
