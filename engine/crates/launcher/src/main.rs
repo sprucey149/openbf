@@ -190,6 +190,7 @@ struct Host {
     gpu: Option<GpuState>,
     app: LauncherApp,
     next_repaint: Option<Instant>,
+    launch_on_exit: bool,
 }
 
 impl ApplicationHandler<UserEvent> for Host {
@@ -273,15 +274,19 @@ impl ApplicationHandler<UserEvent> for Host {
                 }
                 if actions.launch_and_close {
                     self.app.cancel_build_if_running();
-                    // Drop the launcher window and wgpu surface before spawning
-                    // the game so it releases the GPU immediately and never freezes.
+                    // Hide and destroy the launcher window + wgpu surface before
+                    // spawning the game (which runs after the event loop exits) so
+                    // the window vanishes immediately even if OS security scanning
+                    // delays CreateProcess on a large single-file openbf binary.
+                    gpu.window.set_visible(false);
                     self.gpu = None;
-                    let _ = launcher::runner::launch_game(&self.app.paths, &self.app.config);
+                    self.launch_on_exit = true;
                     event_loop.exit();
                     return;
                 }
                 if actions.close {
                     self.app.cancel_build_if_running();
+                    gpu.window.set_visible(false);
                     self.gpu = None;
                     event_loop.exit();
                     return;
@@ -314,7 +319,11 @@ fn main() -> Result<()> {
         gpu: None,
         app,
         next_repaint: None,
+        launch_on_exit: false,
     };
     event_loop.run_app(&mut host).context("running launcher")?;
+    if host.launch_on_exit {
+        let _ = launcher::runner::launch_game(&host.app.paths, &host.app.config);
+    }
     Ok(())
 }

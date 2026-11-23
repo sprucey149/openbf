@@ -77,7 +77,7 @@ pub struct HostActions {
 pub struct LauncherApp {
     pub paths: LauncherPaths,
     pub config: LauncherConfig,
-    pub page: Page,
+    pub page: Option<Page>,
     pub game_ready: bool,
     pub built_has_bf1: bool,
     bf1_present: bool,
@@ -98,7 +98,7 @@ impl LauncherApp {
         let mut app = Self {
             paths,
             config,
-            page: Page::Setup,
+            page: None,
             game_ready: false,
             built_has_bf1: false,
             bf1_present: false,
@@ -295,11 +295,11 @@ impl LauncherApp {
                 if sidebar_nav_button(ui, "Play", false, play_enabled) {
                     actions.launch_and_close = true;
                 }
-                if sidebar_nav_button(ui, "Setup", self.page == Page::Setup, true) {
-                    self.page = Page::Setup;
+                if sidebar_nav_button(ui, "Setup", self.page == Some(Page::Setup), true) {
+                    self.page = Some(Page::Setup);
                 }
-                if sidebar_nav_button(ui, "Options", self.page == Page::Options, true) {
-                    self.page = Page::Options;
+                if sidebar_nav_button(ui, "Options", self.page == Some(Page::Options), true) {
+                    self.page = Some(Page::Options);
                 }
 
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
@@ -320,8 +320,9 @@ impl LauncherApp {
             }))
             .show(ctx, |ui| {
                 match self.page {
-                    Page::Setup => self.draw_setup_page(ui, building),
-                    Page::Options => self.draw_options_page(ui, building),
+                    Some(Page::Setup) => self.draw_setup_page(ui, building),
+                    Some(Page::Options) => self.draw_options_page(ui, building),
+                    None => {}
                 }
                 self.draw_status_dots(ui);
             });
@@ -1293,7 +1294,8 @@ mod tests {
             outcome: None,
         });
 
-        for page in [Page::Setup, Page::Options] {
+        assert_eq!(app.page, None);
+        for page in [None, Some(Page::Setup), Some(Page::Options)] {
             app.page = page;
             let out = ctx.run(input.clone(), |ctx| {
                 let actions = app.ui(ctx);
