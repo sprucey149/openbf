@@ -85,6 +85,9 @@ pub struct HudArt {
     /// units, measured on this copy's art (`crate::shell_ia::device_screen`);
     /// `None` keeps the PS2 art's ([`crate::shell_ia::DEVICE_SCREEN`]).
     pub instant_device: Option<[f32; 4]>,
+    /// True on BF2-only builds where `common_bf1/ig_victory_defeat` is absent,
+    /// so the round-end banner falls back to BF2's title font.
+    pub no_bf1_victory_sheet: bool,
 }
 
 impl HudArt {
@@ -1036,7 +1039,42 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         return ctx.out;
     }
     if let Some(result) = hud.banner {
-        ctx.out = crate::hud::draw_round_end(result, size);
+        if art.no_bf1_victory_sheet {
+            let defeat = result == 1;
+            let text = if defeat { "DEFEAT" } else { "VICTORY" };
+            let col = if defeat {
+                [192.0 / 255.0, 64.0 / 255.0, 64.0 / 255.0, 1.0]
+            } else {
+                [64.0 / 255.0, 192.0 / 255.0, 64.0 / 255.0, 1.0]
+            };
+            if let Some(font) = ctx.face(crate::typography::Face::Large) {
+                let scale = frame_scale(size);
+                let k = 1.6;
+                let h = f32::from(font.line_height) * k * scale[1];
+                let screen = Screen {
+                    origin: [0.0, 0.0],
+                    scale: [1.0, 1.0],
+                };
+                ctx.run(
+                    usize::MAX,
+                    &Mat4::IDENTITY,
+                    &screen,
+                    font,
+                    &Run {
+                        text,
+                        at: (size[0] * 0.5, (size[1] - h) * 0.5),
+                        h_align: HAlign::Center,
+                        scale: [scale[0] * k, scale[1] * k],
+                        color: col,
+                        additive: false,
+                        shadow: true,
+                        tracking: 2.0 * scale[0],
+                    },
+                );
+            }
+        } else {
+            ctx.out = crate::hud::draw_round_end(result, size);
+        }
         if hud.banner_fade > 0.0 {
             ctx.quad(
                 usize::MAX,

@@ -446,7 +446,13 @@ pub(super) fn run(
     // a strafe) MOVES IN ITS STANCE — crouched or prone, at that stance's
     // speed — instead of standing up for every step and going down again
     // when it gets there.
-    let want = crate::commander::stance_of_code(st.want_stance);
+    let want = crate::commander::stance_of_code(st.want_stance).map(|w| {
+        if sim.prone_off && w == Stance::Prone {
+            Stance::Crouch
+        } else {
+            w
+        }
+    });
     let stance = u.soldier.stance;
     let in_stance = holding.is_some() && want == Some(stance);
     let aim = if must_walk {

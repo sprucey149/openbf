@@ -6,6 +6,35 @@ use manifest::{ClassDef, DroidChunkManifest, ManifestCollision, ManifestPrim};
 use mungefs::{fnv1a_lowercase as hash, model::Model, skel::Skeleton};
 use std::path::Path;
 
+/// BF2-only droid chunk bake: writes BF2's own `bdroid_chunk1..5` with aliased
+/// textures into `side_bf2/droid_chunks/` without requiring BF1 inputs.
+pub fn bake_bf2_only(bf2: &str, out: &Path, pc_cis: Option<&str>) -> Result<()> {
+    let bf2_resolved = crate::resolve_ci(bf2);
+    let pc_cis_resolved = pc_cis.map(crate::resolve_ci);
+    let b2 = crate::gameplay::read(&bf2_resolved)?;
+    let c2 = mungefs::content_chunks(mungefs::open(&b2)?)?;
+    let side = out.join("side_bf2/droid_chunks");
+    let meta = DroidChunkManifest::default();
+    for n in 1..=5 {
+        aliased_chunk(
+            &bf2_resolved,
+            &c2,
+            &format!("bdroid_chunk{n}"),
+            &side,
+            pc_cis_resolved.as_deref(),
+        )?;
+    }
+    crate::write_ron(&side.join("droid_chunks.ron"), &meta)?;
+    for entry in std::fs::read_dir(side.join("textures"))? {
+        let name = entry?.file_name();
+        ensure!(
+            name.to_string_lossy().starts_with("openbf_droid_"),
+            "bf2 droid chunks: {name:?} would shadow a living soldier's sheet"
+        );
+    }
+    Ok(())
+}
+
 /// Generate only the droid overlay; never modifies an input LVL. `pc_cis` is
 /// the PC install's CIS side LVL for the BF2 battle droid chunks' tier 2.
 pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>) -> Result<()> {

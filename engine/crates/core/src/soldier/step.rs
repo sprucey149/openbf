@@ -54,6 +54,20 @@ impl Soldier {
         look_scale: f32,
         env: AirEnv,
     ) {
+        self.step_looking_with_prone(dt, pad, c, rules, look_scale, env, true);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_looking_with_prone(
+        &mut self,
+        dt: f32,
+        pad: &PadState,
+        c: &SoldierConstants,
+        rules: GroundRules,
+        look_scale: f32,
+        env: AirEnv,
+        prone_allowed: bool,
+    ) {
         let fwd_in = PadState::axis(pad.ly);
         let strafe_in = PadState::axis(pad.lx);
         let turn_in = PadState::axis(pad.rx);
@@ -145,7 +159,13 @@ impl Soldier {
                             self.vel.z *= s;
                         }
                     } else if let Some(next) = (!Self::roll_predicate(fwd_in, strafe_in))
-                        .then(|| Self::stance_tap_target(self.stance, self.time_in_stance))
+                        .then(|| {
+                            Self::stance_tap_target_with(
+                                self.stance,
+                                self.time_in_stance,
+                                prone_allowed,
+                            )
+                        })
                         .flatten()
                     {
                         // Stationary: [`Soldier::stance_tap_target`].

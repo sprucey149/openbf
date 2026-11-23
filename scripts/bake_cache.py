@@ -49,6 +49,9 @@ INPUTS = {
     "beep": ("sound_trees",),
 }
 
+# Groups that belong exclusively to BF1 and are skipped on BF2-only builds.
+BF1_ONLY_GROUPS = frozenset(("tat1", "beep"))
+
 # What a finished group leaves behind. A key whose group's output is gone is not trusted.
 OUTPUTS = {
     "tat1": ("tat1/manifest.ron",),
@@ -60,6 +63,17 @@ OUTPUTS = {
     "sounds": ("core_bf1/sounds", "core_bf2/sounds"),
     "load": ("common_bf2/load",),
     "beep": ("audio/*.ogg",),
+}
+
+# BF2-only subset of OUTPUTS when BF1 is absent.
+OUTPUTS_BF2_ONLY = {
+    "tat2": ("tat2/manifest.ron",),
+    "maps": ("bf2_*/manifest.ron",),
+    "common": ("common_bf2/common.ron",),
+    "side": ("side_bf2/soldiers",),
+    "classes": ("classes/bf2_rep.ron",),
+    "sounds": ("core_bf2/sounds",),
+    "load": ("common_bf2/load",),
 }
 
 
@@ -231,8 +245,9 @@ class KeyStore:
             self.drop(group)
 
 
-def outputs_present(baked, group):
-    return all(any(Path(baked).glob(pattern)) for pattern in OUTPUTS.get(group, ()))
+def outputs_present(baked, group, has_bf1=True):
+    table = OUTPUTS if has_bf1 else OUTPUTS_BF2_ONLY
+    return all(any(Path(baked).glob(pattern)) for pattern in table.get(group, ()))
 
 
 FIELD_LABELS = {"version": "version", "target": "platform", "gameplay": "gameplay data", "pc": "PC install",
@@ -256,18 +271,20 @@ def why_stale(stored, record):
     return ("changed " + ", ".join(changed)) if changed else "key changed"
 
 
-def plan(store, keys, forced=None, rebake=False):
+def plan(store, keys, forced=None, rebake=False, has_bf1=True):
     """[(group, action, reason)] in ORDER. action is "bake", "hit" or "with <group>" (made by another group's run)."""
     forced = forced or {}
     rows, baking = [], set()
     for group in ORDER:
+        if not has_bf1 and group in BF1_ONLY_GROUPS:
+            continue
         if rebake:
             reason = "--rebake: every group from an empty folder"
         elif group in forced:
             reason = forced[group]
         else:
             reason = why_stale(store.read(group), keys[group])
-            if reason is None and not outputs_present(store.baked, group):
+            if reason is None and not outputs_present(store.baked, group, has_bf1=has_bf1):
                 reason = "its output is missing"
         carrier = next((g for g, made in ALSO_BAKES.items() if group in made and g in baking), None)
         if carrier:

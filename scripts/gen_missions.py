@@ -3110,6 +3110,8 @@ def main():
                     help="also write the six Space Assault missions")
     ap.add_argument("--hunt", action="store_true",
                     help="also generate the six BF2 Hunts and the BF1 Hunt adaptations")
+    ap.add_argument("--bf2-only", action="store_true",
+                    help="generate only Battlefront II missions (Instant Action, Hunt, Space, Campaign)")
     ap.add_argument("--gameplay-reference", action="append", default=[], metavar="TABLE",
                     help="absolute PS2 mission declarations from a fingerprinted correction table; repeat per game")
     ap.add_argument("--gameplay-source", action="append", default=[], metavar="GAME=SOURCE",
@@ -3163,6 +3165,8 @@ def main():
 
     rows, written = [], 0
     for key, game, planet, eras in MAPS + (HUNT_MAPS if args.hunt else []):
+        if args.bf2_only and game == "bf1":
+            continue
         for era in ("gcw", "cw"):
             if era not in eras:
                 continue
@@ -3188,7 +3192,7 @@ def main():
                 written += 1
             rows.append((os.path.basename(out), m))
 
-    if args.hunt:
+    if args.hunt and not args.bf2_only:
         for key, game, planet, eras in MAPS:
             if game != "bf1" or key not in BF1_HUNTS:
                 continue

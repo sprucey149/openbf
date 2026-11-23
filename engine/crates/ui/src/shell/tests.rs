@@ -1232,3 +1232,17 @@ fn hero_assault_pool_matches_the_mission() {
         "the help's pool follows the mission"
     );
 }
+
+#[test]
+fn bf2_only_catalog_hides_bf1_maps() {
+    let bakes = vec![
+        ("tat2".to_owned(), "bf2".to_owned()),
+        ("bf2_hot1".to_owned(), "bf2".to_owned()),
+    ];
+    let entries = catalog(&text, &bakes, &|_, _| Vec::new());
+    assert!(!entries.is_empty());
+    assert!(
+        entries.iter().all(|m| m.game == Game::Bf2),
+        "BF2-only bakes should hide unbaked BF1 maps from Instant Action"
+    );
+}

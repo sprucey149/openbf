@@ -80,6 +80,7 @@ SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""; SCA
 SCAN_OPENBF_BF1_TREE=""; SCAN_OPENBF_BF2_TREE=""
 SCAN_OPENBF_DLC_DIR=""; SCAN_OPENBF_DLC_DONOR=""
 SCAN_OPENBF_BF1_WITHHELD=""; SCAN_OPENBF_BF2_WITHHELD=""
+SCAN_OPENBF_HAS_BF1=""
 if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
   SCAN="$("$PYTHON" "$ROOT/scripts/input_scan.py" --root "$ROOT" --shell | tr -d '\r')" || exit 2
   eval "$SCAN"
@@ -87,6 +88,7 @@ if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
     PC1="$SCAN_PC1"; PC2="$SCAN_PC2"
   fi
 fi
+HAS_BF1="${OPENBF_HAS_BF1:-${SCAN_OPENBF_HAS_BF1:-1}}"
 OPENBF_BF1_TREE="${OPENBF_BF1_TREE:-$SCAN_OPENBF_BF1_TREE}"
 OPENBF_BF2_TREE="${OPENBF_BF2_TREE:-$SCAN_OPENBF_BF2_TREE}"
 BF2_CONSOLE_ISO="${BF2_CONSOLE_ISO:-$SCAN_BF2_CONSOLE_ISO}"
@@ -172,7 +174,11 @@ PYREF
   fi
   PC="${PC2:-}"
 fi
-echo "Gameplay data: BF1=${OPENBF_BF1_TREE:-PS2} BF2=${OPENBF_BF2_TREE:-PS2}"
+if [ "$HAS_BF1" = 1 ]; then
+  echo "Gameplay data: BF1=${OPENBF_BF1_TREE:-PS2} BF2=${OPENBF_BF2_TREE:-PS2}"
+else
+  echo "Gameplay data: BF1=none (BF2-only) BF2=${OPENBF_BF2_TREE:-PS2}"
+fi
 echo "Texture donors: PC BF1=${PC1:-none} PC BF2=${PC2:-none} Xbox BF1=${XB1:-none} Xbox BF2=${XB2:-none}"
 # Every copy of an LVL the bake may take a larger texture from, as ONE comma-joined argument (bake::tier):
 # empty arguments and absent files are skipped, so a partial install degrades to the PS2 alone.
@@ -298,10 +304,14 @@ fi
 
 
 if want tat1; then
-  stage "TAT1 (BF1)"
-  clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav" "$OUT/tat1/shadows"
-  map_donors bf1 TAT/TAT1.LVL
-  "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1" ${PC_ARG[@]+"${PC_ARG[@]}"}
+  if [ "$HAS_BF1" = 1 ]; then
+    stage "TAT1 (BF1)"
+    clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav" "$OUT/tat1/shadows"
+    map_donors bf1 TAT/TAT1.LVL
+    "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1" ${PC_ARG[@]+"${PC_ARG[@]}"}
+  elif [ ! -L "$OUT" ]; then
+    clean "$OUT/tat1"
+  fi
 fi
 if want tat2; then
   stage "TAT2 (BF2)"
@@ -315,7 +325,11 @@ if want common; then
         "$OUT/common_bf2/models" "$OUT/common_bf2/textures" "$OUT/common_bf2/collision" \
         "$OUT/common_bf1/fonts" "$OUT/common_bf1/locl" \
         "$OUT/common_bf2/fonts" "$OUT/common_bf2/hud" "$OUT/common_bf2/locl"
-  "$BAKE" common "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/common_bf1"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" common "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/common_bf1"
+  elif [ ! -L "$OUT" ]; then
+    clean "$OUT/common_bf1"
+  fi
   "$BAKE" common "$(ci "$UI2" INGAME.LVL)" "$OUT/common_bf2"
   # Fonts keep the selected source's layout metrics. Compare matching glyph
   # art only against copies explicitly selected by the input planner.
@@ -340,14 +354,14 @@ if want common; then
   fi
   # The specular pass's lookup table, from each game's own CORE.LVL (the
   # texels are identical on both discs; analysis/re-specular-pass.md §5).
-  "$BAKE" specular "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
+  [ "$HAS_BF1" = 1 ] && "$BAKE" specular "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
   "$BAKE" specular "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
   # BF2's terrain light pass texture (card FXBL, analysis/re-bolt.md §5.3):
   # BF1 draws no light on its terrain (§5.1).
   "$BAKE" omniproj "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
   # Each game's English text table (card EVMSG, analysis/re-event-messages.md):
   # the HUD's event lines, team, post and soldier names.
-  "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
+  [ "$HAS_BF1" = 1 ] && "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
   "$BAKE" locl "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
   # The original Xbox pad's button icons, from the Xbox BF2 disc the scan chose
   # or, run by hand, a dev tree's own extraction; under pack.py only what it
@@ -361,13 +375,15 @@ if want common; then
   fi
   # BF1's own bitmap fonts (card SQHUD: the squad cross's labels are BF1's
   # gamefont_tiny), prefixed so they sit beside BF2's in one name space.
-  FONT_DONORS=()
-  for donor in "${PC1:-}" "$XB1"; do
-    if [ -n "$donor" ] && [ -f "$(ci "$donor" CORE.LVL)" ]; then
-      FONT_DONORS+=("$(ci "$donor" CORE.LVL)")
-    fi
-  done
-  "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_ ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
+  if [ "$HAS_BF1" = 1 ]; then
+    FONT_DONORS=()
+    for donor in "${PC1:-}" "$XB1"; do
+      if [ -n "$donor" ] && [ -f "$(ci "$donor" CORE.LVL)" ]; then
+        FONT_DONORS+=("$(ci "$donor" CORE.LVL)")
+      fi
+    done
+    "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_ ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
+  fi
   # BF2's PS2 shell (card BSHLA, analysis/re-bf2-shell.md §1, §4): SHELL.LVL's
   # logo, the background movie's menu loops (ffmpeg transcodes them to frame
   # packs) and SOUND/SHELL.LVL's bank + music index. The movie is read from
@@ -436,20 +452,32 @@ if want side; then
   # mission fields BF2 SIDE/ALL + SIDE/IMP ones.
   # A BF1 soldier picked on a BF2 map throws BF2's throw: BF2_ANIMS lends BF2's
   # rifle throw clips to every BF1 soldier (bake::soldier::BORROWED_THROW, card GTHRW).
-  A1="$(ci "$B1" COMMON/ENG/COMMON.LVL)"
-  BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/ALL.LVL)" all_inf_marksperson,all_inf_marksperson_snow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_trooperfleet,all_inf_wookie "$OUT/side_bf1" "$A1" ${DS1_ALL:+"$DS1_ALL"}
-  BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/IMP.LVL)" imp_inf_atatpilot,imp_inf_atstpilot,imp_inf_darktrooper,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf1" "$A1" ${DS1_IMP:+"$DS1_IMP"}
-  BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf1" "$A1" ${DS1_REP:+"$DS1_REP"}
-  BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_sbdroid "$OUT/side_bf1" "$A1" ${DS1_CIS:+"$DS1_CIS"}
+  A1=""
+  if [ "$HAS_BF1" = 1 ]; then
+    A1="$(ci "$B1" COMMON/ENG/COMMON.LVL)"
+    BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/ALL.LVL)" all_inf_marksperson,all_inf_marksperson_snow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_trooperfleet,all_inf_wookie "$OUT/side_bf1" "$A1" ${DS1_ALL:+"$DS1_ALL"}
+    BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/IMP.LVL)" imp_inf_atatpilot,imp_inf_atstpilot,imp_inf_darktrooper,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf1" "$A1" ${DS1_IMP:+"$DS1_IMP"}
+    BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf1" "$A1" ${DS1_REP:+"$DS1_REP"}
+    BF2_ANIMS="$(ci "$B2" INGAME.LVL)" "$BAKE" soldier "$(ci "$B1" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_sbdroid "$OUT/side_bf1" "$A1" ${DS1_CIS:+"$DS1_CIS"}
+  elif [ ! -L "$OUT" ]; then
+    clean "$OUT/side_bf1"
+  fi
   # BF2 SIDE gets the PC-stock tier too, from the matching PC side LVL (the donors, above).
   # This is where the proportional gain is biggest: a first-person weapon
   # sheet is 128x64 on the PS2 and 512x256 on the PC.
-  # BF2 has no prone clips: BF1_ANIMS lends BF1's rifle prone set to every BF2
-  # soldier (bake::soldier::BORROWED_PRONE, issue #40; the bones share names).
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3spacepilot,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_REP:+"$DS2_REP"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_CIS:+"$DS2_CIS"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/ALL.LVL)" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_ALL:+"$DS2_ALL"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/IMP.LVL)" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_IMP:+"$DS2_IMP"}
+  # BF2 has no prone clips: when BF1 is present, BF1_ANIMS lends BF1's rifle prone
+  # set to every BF2 soldier (bake::soldier::BORROWED_PRONE, issue #40).
+  run_bf2_with_prone() {
+    if [ "$HAS_BF1" = 1 ]; then
+      BF1_ANIMS="$A1" "$@"
+    else
+      env -u BF1_ANIMS "$@"
+    fi
+  }
+  run_bf2_with_prone "$BAKE" soldier "$(ci "$B2" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3spacepilot,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_REP:+"$DS2_REP"}
+  run_bf2_with_prone "$BAKE" soldier "$(ci "$B2" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_CIS:+"$DS2_CIS"}
+  run_bf2_with_prone "$BAKE" soldier "$(ci "$B2" SIDE/ALL.LVL)" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_ALL:+"$DS2_ALL"}
+  run_bf2_with_prone "$BAKE" soldier "$(ci "$B2" SIDE/IMP.LVL)" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_IMP:+"$DS2_IMP"}
   # Native bodies share texture names with playable sides, with different
   # sheets. Keep their models and textures in a separate side directory.
   bake_native_side() {
@@ -461,72 +489,69 @@ if want side; then
   }
   clean "$OUT/side_bf1/locals" "$OUT/side_bf2/locals"
   A2="$(ci "$B2" INGAME.LVL)"
-  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear "$A1"
-  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" wok wok_inf_wookie wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher "$A1"
-  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A1"
-  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gar gar_inf_nabooguard gar_weap_inf_rifle,gar_weap_inf_pistol,gar_weap_inf_fusioncutter,gar_weap_inf_launcher,gar_weap_inf_thermaldetonator "$A1"
-  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A1"
-  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle "$A1"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian,geo_inf_acklay geo_weap_inf_blunderbuss,ack_weap_r_smash,ack_weap_l_smash "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" jed jed_inf_jedi,jed_inf_sith all_weap_inf_lightsabre,rep_weap_aalya_lightsabre,rep_weap_inf_lightsabre,cis_weap_inf_doublesabre "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gar gar_inf_nabooqueen,gar_inf_nabooguard,gar_inf_jediguard gar_weap_inf_rifle,gar_weap_inf_pistol,gar_weap_inf_launcher,gar_weap_inf_thermaldetonator "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" gam gam_inf_gamorreanguard gam_inf_weap_axe "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" snw hot_inf_wampa hot_inf_weap_l_smash,hot_inf_weap_r_smash,hot_inf_weap_head_smash "$A2"
-  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle,des_weap_inf_fusioncutter "$A2"
+  if [ "$HAS_BF1" = 1 ]; then
+    BF2_ANIMS="$A2" bake_native_side bf1 "$B1" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear "$A1"
+    BF2_ANIMS="$A2" bake_native_side bf1 "$B1" wok wok_inf_wookie wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher "$A1"
+    BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A1"
+    BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gar gar_inf_nabooguard gar_weap_inf_rifle,gar_weap_inf_pistol,gar_weap_inf_fusioncutter,gar_weap_inf_launcher,gar_weap_inf_thermaldetonator "$A1"
+    BF2_ANIMS="$A2" bake_native_side bf1 "$B1" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A1"
+    BF2_ANIMS="$A2" bake_native_side bf1 "$B1" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle "$A1"
+  fi
+  bake_bf2_native() {
+    if [ "$HAS_BF1" = 1 ]; then
+      BF1_ANIMS="$A1" bake_native_side "$@"
+    else
+      BF1_ANIMS="" bake_native_side "$@"
+    fi
+  }
+  bake_bf2_native bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
+  bake_bf2_native bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
+  bake_bf2_native bf2 "$B2" geo gen_inf_geonosian,geo_inf_acklay geo_weap_inf_blunderbuss,ack_weap_r_smash,ack_weap_l_smash "$A2"
+  bake_bf2_native bf2 "$B2" jed jed_inf_jedi,jed_inf_sith all_weap_inf_lightsabre,rep_weap_aalya_lightsabre,rep_weap_inf_lightsabre,cis_weap_inf_doublesabre "$A2"
+  bake_bf2_native bf2 "$B2" gar gar_inf_nabooqueen,gar_inf_nabooguard,gar_inf_jediguard gar_weap_inf_rifle,gar_weap_inf_pistol,gar_weap_inf_launcher,gar_weap_inf_thermaldetonator "$A2"
+  bake_bf2_native bf2 "$B2" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A2"
+  bake_bf2_native bf2 "$B2" gam gam_inf_gamorreanguard gam_inf_weap_axe "$A2"
+  bake_bf2_native bf2 "$B2" snw hot_inf_wampa hot_inf_weap_l_smash,hot_inf_weap_r_smash,hot_inf_weap_head_smash "$A2"
+  bake_bf2_native bf2 "$B2" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle,des_weap_inf_fusioncutter "$A2"
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
-  BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
+  run_bf2_with_prone "$BAKE" heroes "$B2" "$OUT/side_bf2"
   for s in ALL IMP REP CIS TUR DES WOK GAM EWK GEO JED GAR GUN SNW; do
     "$BAKE" combos "$(ci "$B2" "SIDE/$s.LVL")" "$OUT/side_bf2/combos/$(echo "$s" | tr 'A-Z' 'a-z').ron"
   done
-  # BF2's pistols are baked for the HUD's weapon row (card HUDW): the PS2
-  # shows a weapon's own model there, and every BF2 side's second weapon is
-  # its pistol (IMP's has been baked since the officer's primary names it).
-  # BF1's pistols too since card WHELD: a soldier holds the model of the
-  # weapon in his hand, and every class slot the sim can switch to must have
-  # its model (game/tests/suite/roster.rs `every_held_slots_hand_model_is_baked`).
-  "$BAKE" weapon  "$(ci "$B1" SIDE/ALL.LVL)" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_ALL:+"$DS1_ALL"}
-  "$BAKE" weapon  "$(ci "$B1" SIDE/IMP.LVL)" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_IMP:+"$DS1_IMP"}
-  "$BAKE" weapon  "$(ci "$B1" SIDE/REP.LVL)" rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle,rep_weap_inf_landmine "$OUT/side_bf1" ${DS1_REP:+"$DS1_REP"}
-  "$BAKE" weapon  "$(ci "$B1" SIDE/CIS.LVL)" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_CIS:+"$DS1_CIS"}
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" weapon  "$(ci "$B1" SIDE/ALL.LVL)" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_ALL:+"$DS1_ALL"}
+    "$BAKE" weapon  "$(ci "$B1" SIDE/IMP.LVL)" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_IMP:+"$DS1_IMP"}
+    "$BAKE" weapon  "$(ci "$B1" SIDE/REP.LVL)" rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle,rep_weap_inf_landmine "$OUT/side_bf1" ${DS1_REP:+"$DS1_REP"}
+    "$BAKE" weapon  "$(ci "$B1" SIDE/CIS.LVL)" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_CIS:+"$DS1_CIS"}
+  fi
   "$BAKE" weapon  "$(ci "$B2" SIDE/REP.LVL)" rep_weap_inf_chaingun,rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle "$OUT/side_bf2" ${DS2_REP:+"$DS2_REP"}
   "$BAKE" weapon  "$(ci "$B2" SIDE/CIS.LVL)" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_rifle,cis_weap_inf_sniperrifle,hud_cis_wristblaster,hud_cis_trishot,hud_cis_wristrocket,hud_droideka_shield "$OUT/side_bf2" ${DS2_CIS:+"$DS2_CIS"}
-  # [ours] BF1 SBD chunks on both games; reproducible Magnaguard mesh cuts.
-  # Every droid chunk model goes through here, never `bake weapon`: its sheets
-  # get an `openbf_droid_` name, so no living soldier's sheet is overwritten
-  # (a chunk's weapon bake made the battle droid's sheet opaque). After the
-  # soldier bake: the Magnaguard cuts draw its living sheets.
-  "$BAKE" droid-chunks "$(ci "$B1" SIDE/CIS.LVL)" "$(ci "$B2" SIDE/CIS.LVL)" "$A1" "$OUT" ${DS2_CIS:+"$DS2_CIS"}
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" droid-chunks "$(ci "$B1" SIDE/CIS.LVL)" "$(ci "$B2" SIDE/CIS.LVL)" "$A1" "$OUT" ${DS2_CIS:+"$DS2_CIS"}
+  else
+    "$BAKE" droid-chunks --bf2-only "$(ci "$B2" SIDE/CIS.LVL)" "$OUT" ${DS2_CIS:+"$DS2_CIS"}
+  fi
   "$BAKE" weapon  "$(ci "$B2" SIDE/ALL.LVL)" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf2" ${DS2_ALL:+"$DS2_ALL"}
   "$BAKE" weapon  "$(ci "$B2" SIDE/IMP.LVL)" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf2" ${DS2_IMP:+"$DS2_IMP"}
-  # The torpedo launcher's model is SHARED, not per-side: BF1 IMP/REP/CIS's
-  # `*_weap_inf_torpedo_launcher` and BF2 REP's all name `com_weap_inf_torpedo`,
-  # whose `modl` is in each game's common LVL and in no side LVL (measured:
-  # `bake weapon SIDE/ALL.LVL com_weap_inf_torpedo` -> "modl not found",
-  # COMMON.LVL/INGAME.LVL -> 474 verts, 494 tris).
-  # So is the thermal detonator's (card WHELD: drawn in the hand while a
-  # throw is wound up and before HideOnFire hides it), every side's
-  # `*_weap_inf_thermaldetonator` naming `com_weap_inf_grenadethermal`.
-  "$BAKE" weapon  "$A1"              com_weap_inf_torpedo,com_weap_inf_grenadethermal,com_weap_inf_grenadethermal_ord,com_weap_inf_landmine,com_weap_inf_landmine_placed,com_weap_inf_seismic_mine "$OUT/side_bf1"
+  [ "$HAS_BF1" = 1 ] && "$BAKE" weapon  "$A1"              com_weap_inf_torpedo,com_weap_inf_grenadethermal,com_weap_inf_grenadethermal_ord,com_weap_inf_landmine,com_weap_inf_landmine_placed,com_weap_inf_seismic_mine "$OUT/side_bf1"
   "$BAKE" weapon  "$(ci "$B2" INGAME.LVL)"   com_weap_inf_torpedo,com_weap_inf_grenadethermal,com_weap_inf_grenadethermal_ord,com_weap_inf_landmine,com_weap_inf_landmine_placed,com_weap_inf_seismic_mine,com_weap_inf_detpack,com_weap_missile "$OUT/side_bf2"
   "$BAKE" weapon  "$(ci "$B2" INGAME.LVL),$(ci "$B2" SIDE/REP.LVL)" com_weap_inf_dropturret "$OUT/side_bf2"
-  # First person (card FPA): every FPM LVL's arm model (the soldier class's
-  # `FirstPerson` key; cockpit models carry no hp_camera and are skipped) with
-  # the 11-column clip table's clips, and every `HighResGeometry` weapon.
   shopt -s nocaseglob nullglob
-  # nocaseglob does not reach a folder name with no wildcard in it: a tree with lowercase names has fpm/, not FPM/.
-  FPM1=("$(ci "$B1" FPM)"/*/*.LVL)
+  FPM1=()
+  [ "$HAS_BF1" = 1 ] && FPM1=("$(ci "$B1" FPM)"/*/*.LVL)
   FPM2=("$(ci "$B2" FPM)"/*/*.LVL)
   shopt -u nocaseglob nullglob
-  fpm_donors bf1
-  "$BAKE" fpm "$A1" "$OUT/side_bf1" ${FPM_DONORS[@]+"${FPM_DONORS[@]}"} ${FPM1[@]+"${FPM1[@]}"}
+  if [ "$HAS_BF1" = 1 ]; then
+    fpm_donors bf1
+    "$BAKE" fpm "$A1" "$OUT/side_bf1" ${FPM_DONORS[@]+"${FPM_DONORS[@]}"} ${FPM1[@]+"${FPM1[@]}"}
+  fi
   fpm_donors bf2
   "$BAKE" fpm "$(ci "$B2" INGAME.LVL)" "$OUT/side_bf2" ${FPM_DONORS[@]+"${FPM_DONORS[@]}"} ${FPM2[@]+"${FPM2[@]}"}
   W1ST=fusioncutter,launcher,pistol,rifle,sniperrifle
-  for g in 1 2; do
+  W1ST_GAMES="2"
+  [ "$HAS_BF1" = 1 ] && W1ST_GAMES="1 2"
+  for g in $W1ST_GAMES; do
     eval "G=\$B$g"
     for s in all imp rep cis; do
       x="$W1ST"
@@ -537,42 +562,35 @@ if want side; then
       "$BAKE" weapon "$(ci "$G" "SIDE/$(echo "$s" | tr a-z A-Z).LVL")" "$(echo "$x" | sed "s/[^,]*/${s}_1st_weap_inf_&/g")" "$OUT/side_bf$g" ${pc:+"$pc"}
     done
   done
-  "$BAKE" weapon  "$A1"            com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf1"
+  [ "$HAS_BF1" = 1 ] && "$BAKE" weapon  "$A1"            com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf1"
   "$BAKE" weapon  "$(ci "$B2" INGAME.LVL)" com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf2"
-  # Every vehicle class of the four sides (card VBAKE): models (every LOD),
-  # destruction chunks, collision, textures -> side_<game>/vehicles/<side>/.
-  "$BAKE" vehicle "$(ci "$B1" SIDE/ALL.LVL)" "$OUT/side_bf1/vehicles/all" ${DS1_ALL:+"$DS1_ALL"}
-  "$BAKE" vehicle "$(ci "$B1" SIDE/CIS.LVL)" "$OUT/side_bf1/vehicles/cis" ${DS1_CIS:+"$DS1_CIS"}
-  "$BAKE" vehicle "$(ci "$B1" SIDE/IMP.LVL)" "$OUT/side_bf1/vehicles/imp" ${DS1_IMP:+"$DS1_IMP"}
-  "$BAKE" vehicle "$(ci "$B1" SIDE/REP.LVL)" "$OUT/side_bf1/vehicles/rep" ${DS1_REP:+"$DS1_REP"}
-  # BF1 SIDE/GUN: Naboo Plains' missions read it (nab1c/nab1i/nab1c_h.luac)
-  # and three NAB1 pads key its gun_walk_kaadu for the defenders (card KAAD).
-  "$BAKE" vehicle "$(ci "$B1" SIDE/GUN.LVL)" "$OUT/side_bf1/vehicles/gun"
-  # BF1 TAT1's own skiff (tat_hover_skiff): its skin and FinAnimation clip, so the rudders, levers and three guns pose
-  # as the PS2 draws them (analysis/re-vehicle-pose.md 1). Its seats come from the map bake's classes.ron.
-  "$BAKE" vehicle "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/side_bf1/vehicles/tat1"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" vehicle "$(ci "$B1" SIDE/ALL.LVL)" "$OUT/side_bf1/vehicles/all" ${DS1_ALL:+"$DS1_ALL"}
+    "$BAKE" vehicle "$(ci "$B1" SIDE/CIS.LVL)" "$OUT/side_bf1/vehicles/cis" ${DS1_CIS:+"$DS1_CIS"}
+    "$BAKE" vehicle "$(ci "$B1" SIDE/IMP.LVL)" "$OUT/side_bf1/vehicles/imp" ${DS1_IMP:+"$DS1_IMP"}
+    "$BAKE" vehicle "$(ci "$B1" SIDE/REP.LVL)" "$OUT/side_bf1/vehicles/rep" ${DS1_REP:+"$DS1_REP"}
+    "$BAKE" vehicle "$(ci "$B1" SIDE/GUN.LVL)" "$OUT/side_bf1/vehicles/gun"
+    "$BAKE" vehicle "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/side_bf1/vehicles/tat1"
+  fi
   "$BAKE" vehicle "$(ci "$B2" SIDE/ALL.LVL)" "$OUT/side_bf2/vehicles/all" ${DS2_ALL:+"$DS2_ALL"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/IMP.LVL)" "$OUT/side_bf2/vehicles/imp" ${DS2_IMP:+"$DS2_IMP"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/REP.LVL)" "$OUT/side_bf2/vehicles/rep" ${DS2_REP:+"$DS2_REP"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/CIS.LVL)" "$OUT/side_bf2/vehicles/cis" ${DS2_CIS:+"$DS2_CIS"}
-  # MapTexture is class-authored, independent of the vehicle meshes' materials.
-  # Keep the sheets in the side texture directories the HUD already searches.
-  "$BAKE" map-icons "$OUT/side_bf1" "$(ci "$B1" SIDE/ALL.LVL)" "$(ci "$B1" SIDE/IMP.LVL)" \
-    "$(ci "$B1" SIDE/REP.LVL)" "$(ci "$B1" SIDE/CIS.LVL)" "$(ci "$B1" SIDE/GUN.LVL)"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" map-icons "$OUT/side_bf1" "$(ci "$B1" SIDE/ALL.LVL)" "$(ci "$B1" SIDE/IMP.LVL)" \
+      "$(ci "$B1" SIDE/REP.LVL)" "$(ci "$B1" SIDE/CIS.LVL)" "$(ci "$B1" SIDE/GUN.LVL)"
+  fi
   "$BAKE" map-icons "$OUT/side_bf2" "$(ci "$B2" SIDE/ALL.LVL)" "$(ci "$B2" SIDE/IMP.LVL)" \
     "$(ci "$B2" SIDE/REP.LVL)" "$(ci "$B2" SIDE/CIS.LVL)" "$(ci "$B2" SIDE/TUR.LVL)"
-  # Every side LVL's `fx__` particle effects + the textures/models they name
-  # (card FXP1, analysis/re-fx.md §1): BF2's sides carry per-class effects
-  # (IMP 8, SNW 6, CIS 5, ...); BF1's carry none, and a side with none writes
-  # nothing. ALL side LVLs, not only the four baked above: the runtime looks
-  # an effect up by hash through whatever side a mission loads.
-  SD1="$(ci "$B1" SIDE)"
-  for f in "$SD1"/*.[Ll][Vv][Ll]; do
-    [ -f "$f" ] || continue
-    base="${f##*/}"
-    s=$(printf '%s' "${base%.*}" | tr 'A-Z' 'a-z')
-    "$BAKE" effects "$f" "$OUT/side_bf1/effects/$s" bf1
-  done
+  if [ "$HAS_BF1" = 1 ]; then
+    SD1="$(ci "$B1" SIDE)"
+    for f in "$SD1"/*.[Ll][Vv][Ll]; do
+      [ -f "$f" ] || continue
+      base="${f##*/}"
+      s=$(printf '%s' "${base%.*}" | tr 'A-Z' 'a-z')
+      "$BAKE" effects "$f" "$OUT/side_bf1/effects/$s" bf1
+    done
+  fi
   SD2="$(ci "$B2" SIDE)"
   for f in "$SD2"/*.[Ll][Vv][Ll]; do
     [ -f "$f" ] || continue
@@ -598,21 +616,23 @@ fi
 if want classes; then
   stage "entity/weapon classes"
   mkdir -p "$OUT/classes"
-  "$BAKE" classes "$(ci "$B1" SIDE/ALL.LVL)"          "$OUT/classes/bf1_all.ron"
-  "$BAKE" classes "$(ci "$B1" SIDE/IMP.LVL)"          "$OUT/classes/bf1_imp.ron"
-  "$BAKE" classes "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/classes/bf1_common.ron"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" classes "$(ci "$B1" SIDE/ALL.LVL)"          "$OUT/classes/bf1_all.ron"
+    "$BAKE" classes "$(ci "$B1" SIDE/IMP.LVL)"          "$OUT/classes/bf1_imp.ron"
+    "$BAKE" classes "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/classes/bf1_common.ron"
+    "$BAKE" classes "$(ci "$B1" SIDE/REP.LVL)"          "$OUT/classes/bf1_rep.ron"
+    "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
+    for side in ewk wok geo des gun gar; do
+      "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
+    done
+  elif [ ! -L "$OUT" ]; then
+    rm -f "$OUT/classes"/bf1_*.ron
+  fi
   "$BAKE" classes "$(ci "$B2" SIDE/REP.LVL)"          "$OUT/classes/bf2_rep.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/CIS.LVL)"          "$OUT/classes/bf2_cis.ron"
   "$BAKE" classes "$(ci "$B2" INGAME.LVL)"            "$OUT/classes/bf2_ingame.ron"
-  # Bake all four factions per source game: game::roster::class_files loads
-  # the sides in play, including clone-wars on BF1 maps and GCW on BF2 maps.
-  "$BAKE" classes "$(ci "$B1" SIDE/REP.LVL)"          "$OUT/classes/bf1_rep.ron"
-  "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/ALL.LVL)"          "$OUT/classes/bf2_all.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/IMP.LVL)"          "$OUT/classes/bf2_imp.ron"
-  for side in ewk wok geo des gun gar; do
-    "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
-  done
   for side in ewk wok geo des gun snw gam jed gar; do
     "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
   done
@@ -653,13 +673,16 @@ if want sounds; then
       echo "  (no SOUND/$planet.LVL for $dir — skipped)"
     fi
   }
-  C1="$(ci "$B1" CORE.LVL)"
+  C1=""
+  [ "$HAS_BF1" = 1 ] && C1="$(ci "$B1" CORE.LVL)"
   C2="$(ci "$B2" CORE.LVL)"
-  bake_map_sounds "$S1" tat1 tat1 "$C1" "$D1"
+  if [ "$HAS_BF1" = 1 ]; then
+    bake_map_sounds "$S1" tat1 tat1 "$C1" "$D1"
+    for p in $BF1_MAPS; do
+      n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S1" "bf1_$n" "$n" "$C1" "$D1"
+    done
+  fi
   bake_map_sounds "$S2" tat2 tat2 "$C2" "$D2"
-  for p in $BF1_MAPS; do
-    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S1" "bf1_$n" "$n" "$C1" "$D1"
-  done
   for p in $BF2_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2" "$D2"
   done
@@ -669,24 +692,23 @@ if want sounds; then
       n=$(printf '%s' "$n" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2"
     done
   fi
-  # The RESIDENT bank both games load and never unload: CORE.LVL's `global`
-  # SampleBank + `snd_` — every shell/load sound, incl. shell_menu_accept
-  # (analysis/re-sound-global.md §0.6; the per-map banks do not carry them).
-  # Baked here rather than with the streams so that `sound-names` below sees
-  # these two directories on a FRESH tree too.
   stage "resident global banks (CORE.LVL)"
   clean "$OUT/core_bf1/sounds" "$OUT/core_bf2/sounds"
-  "$BAKE" sounds "$C1" "$OUT/core_bf1"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" sounds "$C1" "$OUT/core_bf1"
+  elif [ ! -L "$OUT" ]; then
+    clean "$OUT/core_bf1"
+  fi
   "$BAKE" sounds "$C2" "$OUT/core_bf2"
-  # Recover readable names for the hashed properties/samples so
-  # scripts/audition.sh can lay a bank out under names a human can read.
-  # Needs the baked classes, so it runs after them; harmless if they are
-  # missing (the dictionary just gets smaller).
   stage "sound names"
   LUA_ROOT="${OPENBF_CONSOLE_LUA_ROOT:-}"
-  LUA_PATHS="$E/bf1/lua,$E/bf2/lua"
-  [ -n "$LUA_ROOT" ] && LUA_PATHS="$LUA_ROOT/bf1,$LUA_ROOT/bf2"
-  # An array: a checkout's path can hold spaces.
+  if [ "$HAS_BF1" = 1 ]; then
+    LUA_PATHS="$E/bf1/lua,$E/bf2/lua"
+    [ -n "$LUA_ROOT" ] && LUA_PATHS="$LUA_ROOT/bf1,$LUA_ROOT/bf2"
+  else
+    LUA_PATHS="$E/bf2/lua"
+    [ -n "$LUA_ROOT" ] && LUA_PATHS="$LUA_ROOT/bf2"
+  fi
   SOUND_DIRS=()
   for d in "$OUT"/*/sounds; do
     if [ -d "$d" ]; then SOUND_DIRS+=("${d%/sounds}"); fi
@@ -694,23 +716,19 @@ if want sounds; then
   "$BAKE" sound-names "$OUT/classes" "$LUA_PATHS" ${SOUND_DIRS[@]+"${SOUND_DIRS[@]}"}
 fi
 if want global-sound && [ "${OPENBF_SKIP_GLOBAL_SOUND:-0}" != 1 ]; then
-  # The sound BOTH games keep outside the per-map banks (the maintainer's unified sound
-  # plan, PLAN Log 2026-09-08 (b); analysis/re-sound-global.md §5):
-  #  (i)  BF2 SOUND/GLOBAL.LVL — 29 mono VO streams. Music stays streamed.
-  #       The restored bake adds lossless cues at the indexed sample rates.
-  #  (ii) BF1 SOUND/CW.LVL + GCW.LVL — the four VO streams, including the
-  #       nine-command tactical chatter the per-map banks never carried.
-  # Only segments a shipped `snd_` script names are encoded, so every per-map
-  # sound LVL goes in as the reference set (BF1 TEST.LVL is not shipped
-  # content and is left out). Both write <id>.ogg keyed by SEGMENT ID — the
-  # only name that data has.
   stage "global VO streams"
-  "$PYTHON" "$ROOT/scripts/global_sound_cache.py" --bake "$BAKE" --bf1 "$S1" --bf2 "$S2" --out "$OUT"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$PYTHON" "$ROOT/scripts/global_sound_cache.py" --bake "$BAKE" --bf1 "$S1" --bf2 "$S2" --out "$OUT"
+  else
+    "$PYTHON" "$ROOT/scripts/global_sound_cache.py" --bake "$BAKE" --bf2 "$S2" --out "$OUT"
+  fi
 fi
 if want load; then
   stage "load screens"
-  "$BAKE" load-layout "$(ci "$B1" LOAD/LOAD.LVL)" "$OUT/common_bf1"
-  "$BAKE" loadscreen "$(ci "$B1" LOAD/TAT1.LVL)"   "$OUT/tat1"
+  if [ "$HAS_BF1" = 1 ]; then
+    "$BAKE" load-layout "$(ci "$B1" LOAD/LOAD.LVL)" "$OUT/common_bf1"
+    "$BAKE" loadscreen "$(ci "$B1" LOAD/TAT1.LVL)"   "$OUT/tat1"
+  fi
   "$BAKE" loadscreen "$(ci "$B2" LOAD/TAT2.LVL)"   "$OUT/tat2"
   "$BAKE" loadscreen "$(ci "$UI2" LOAD/COMMON.LVL)" "$OUT/common_bf2"
   "$BAKE" load-orbits "$(ci "$UI2" GAL/GAL1.LVL)" "$OUT/common_bf2"
@@ -718,14 +736,16 @@ fi
 
 if want maps; then
   stage "other ground maps"
-  for p in $BF1_MAPS; do
-    n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
-    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows" "$d/animated"
-    map_donors bf1 "$p.LVL"
-    "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"}
-    LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
-    [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
-  done
+  if [ "$HAS_BF1" = 1 ]; then
+    for p in $BF1_MAPS; do
+      n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
+      clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows" "$d/animated"
+      map_donors bf1 "$p.LVL"
+      "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"}
+      LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
+      [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
+    done
+  fi
   for p in $BF2_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf2_$n"
     planet=$(dirname "$p" | tr 'A-Z' 'a-z')
@@ -735,17 +755,13 @@ if want maps; then
     LF="$(ci "$B2" "LOAD/$(basename "$p").LVL")"
     [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
   done
-  # Card COVR: BF1 Yavin Temple takes BF2 Yavin Temple's Cover hints (same
-  # graph; bake::donor::DONORS). After both are baked; run again it replaces
-  # its own hints.
-  if [ -f "$OUT/bf1_yav1/manifest.ron" ] && [ -f "$OUT/bf2_yav1/manifest.ron" ]; then
+  if [ "$HAS_BF1" = 1 ] && [ -f "$OUT/bf1_yav1/manifest.ron" ] && [ -f "$OUT/bf2_yav1/manifest.ron" ]; then
     "$BAKE" donor-hints "$OUT"
   fi
 fi
 if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
   stage "space maps"
   SKY_LVL="$(ci "$B2" SPA/SPA_SKY.LVL)"
-  # SPA2 (Coruscant) and SPA4 (Mustafar) have no Instant Action mode; Rise of the Empire plays them.
   for n in SPA1 SPA2 SPA3 SPA4 SPA6 SPA7 SPA8 SPA9; do
     [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
     case "$n" in
@@ -767,12 +783,16 @@ if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
   done
 fi
 if want beep; then
-  stage "BF1 loading beep"
-  "$BAKE" beep "$(ci "$S1" CORE.LVL)" "$OUT/audio"
+  if [ "$HAS_BF1" = 1 ]; then
+    stage "BF1 loading beep"
+    "$BAKE" beep "$(ci "$S1" CORE.LVL)" "$OUT/audio"
+  elif [ ! -L "$OUT" ]; then
+    rm -f "$OUT/audio"/beep*
+  fi
 fi
-# Compared with the PS2's counts shipped in the source, not with another bake: two bakes
-# of one bad extraction agree with each other. A tree that is not the PS2's owes no such counts.
 if want tat1 || want tat2 || want maps; then
-  "$BAKE" check-foliage "$OUT" ${OPENBF_BF1_TREE:+--warn bf1} ${OPENBF_BF2_TREE:+--warn bf2}
+  WARN_BF1=""
+  [ "$HAS_BF1" = 1 ] && [ -n "${OPENBF_BF1_TREE:-}" ] && WARN_BF1="bf1"
+  "$BAKE" check-foliage "$OUT" ${WARN_BF1:+--warn "$WARN_BF1"} ${OPENBF_BF2_TREE:+--warn bf2}
 fi
 echo "rebake done -> $OUT"

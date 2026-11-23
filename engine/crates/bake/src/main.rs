@@ -252,6 +252,10 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Some("droid-chunks") if args.get(2).map(String::as_str) == Some("--bf2-only") && (args.len() == 5 || args.len() == 6) => {
+            let pc = args.get(5).map(|s| ci(s));
+            bake::droid_chunks::bake_bf2_only(&ci(&args[3]), Path::new(&args[4]), pc.as_deref())
+        }
         Some("droid-chunks") if args.len() == 6 || args.len() == 7 => {
             let pc = args.get(6).map(|s| ci(s));
             bake::droid_chunks::bake(

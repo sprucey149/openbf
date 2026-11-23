@@ -229,11 +229,6 @@ pub fn build_pack_command(paths: &LauncherPaths, config: &LauncherConfig) -> Res
         .as_ref()
         .ok_or_else(|| anyhow!("pack root not found"))?;
 
-    let bf1 = config
-        .bf1
-        .path
-        .as_ref()
-        .ok_or_else(|| anyhow!("Battlefront I source is not selected"))?;
     let bf2 = config
         .bf2
         .path
@@ -246,7 +241,11 @@ pub fn build_pack_command(paths: &LauncherPaths, config: &LauncherConfig) -> Res
     cmd.current_dir(pack_root);
     cmd.arg(&script);
 
-    push_source_arg(&mut cmd, 1, config.bf1.platform, bf1);
+    if let Some(bf1) = &config.bf1.path {
+        push_source_arg(&mut cmd, 1, config.bf1.platform, bf1);
+    } else {
+        cmd.arg("--bf2-only");
+    }
     push_source_arg(&mut cmd, 2, config.bf2.platform, bf2);
 
     // Passing `--iso-dir` keeps `pack.py` scoped strictly to the launcher's
@@ -385,6 +384,17 @@ mod tests {
         assert!(args.iter().any(|a| a == "--game-bin"));
         assert!(args.iter().any(|a| a == "--out"));
         assert!(args.iter().any(|a| a.ends_with("DLC_XBOX")));
+
+        // BF2-only omits --pc1/--iso1 and passes --bf2-only.
+        cfg.bf1.path = None;
+        let cmd_bf2 = build_pack_command(&paths, &cfg).expect("build bf2-only pack command");
+        let args_bf2: Vec<String> = cmd_bf2
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(!args_bf2.iter().any(|a| a == "--pc1" || a == "--iso1"));
+        assert!(args_bf2.iter().any(|a| a == "--bf2-only"));
+        assert!(args_bf2.iter().any(|a| a == "--iso2"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

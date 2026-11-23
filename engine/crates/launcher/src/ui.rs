@@ -70,6 +70,7 @@ pub struct LauncherApp {
     pub config: LauncherConfig,
     pub page: Page,
     pub game_ready: bool,
+    pub built_has_bf1: bool,
     bf1_present: bool,
     bf2_present: bool,
     has_pack_script: bool,
@@ -87,6 +88,7 @@ impl LauncherApp {
             config,
             page: Page::Setup,
             game_ready: false,
+            built_has_bf1: false,
             bf1_present: false,
             bf2_present: false,
             has_pack_script: false,
@@ -102,7 +104,9 @@ impl LauncherApp {
     /// Re-check cached filesystem flags (called at startup, on source changes,
     /// on build completion, and when the window regains focus — never per frame).
     pub fn refresh_fs_state(&mut self) {
-        self.game_ready = self.paths.is_game_ready();
+        let built = self.paths.built_status();
+        self.game_ready = built.ready;
+        self.built_has_bf1 = built.has_bf1;
         self.bf1_present = self.config.bf1.is_present();
         self.bf2_present = self.config.bf2.is_present();
         self.has_pack_script = self.paths.pack_script().is_some();
@@ -147,11 +151,13 @@ impl LauncherApp {
     }
 
     /// Whether a game's status indicator should show green.
-    ///
-    /// Green when the user selected a valid source on disk, OR when the game is
-    /// already built and ready to play and no new path has replaced it.
-    fn source_status_ready(&self, present: bool, source: &SourceConfig) -> bool {
-        present || (self.game_ready && source.path.is_none())
+    fn source_status_ready(
+        &self,
+        present: bool,
+        built_present: bool,
+        source: &SourceConfig,
+    ) -> bool {
+        present || (built_present && source.path.is_none())
     }
 
     /// Install system regular/bold fonts and apply our light theme visuals once.
@@ -305,6 +311,7 @@ impl LauncherApp {
             "platform_bf1",
             &mut self.config.bf1,
             !building,
+            true,
         );
         ui.add_space(21.0);
         changed |= source_row(
@@ -313,6 +320,7 @@ impl LauncherApp {
             "platform_bf2",
             &mut self.config.bf2,
             !building,
+            false,
         );
         if changed {
             self.save_config();
@@ -320,7 +328,8 @@ impl LauncherApp {
 
         ui.add_space(24.0);
 
-        let sources_ok = self.bf1_present && self.bf2_present;
+        let bf1_ok = self.config.bf1.path.is_none() || self.bf1_present;
+        let sources_ok = self.bf2_present && bf1_ok;
         let has_pack = self.has_pack_script;
         let has_build_panel = self.last_build.is_some();
         ui.horizontal(|ui| {
@@ -510,8 +519,10 @@ impl LauncherApp {
 
     fn draw_status_dots(&self, ui: &mut egui::Ui) {
         let content_rect = ui.max_rect();
-        let bf1_ready = self.source_status_ready(self.bf1_present, &self.config.bf1);
-        let bf2_ready = self.source_status_ready(self.bf2_present, &self.config.bf2);
+        let bf1_ready =
+            self.source_status_ready(self.bf1_present, self.built_has_bf1, &self.config.bf1);
+        let bf2_ready =
+            self.source_status_ready(self.bf2_present, self.game_ready, &self.config.bf2);
 
         // Anchor directly to bottom-right of the main content area
         // (matching `.status { right: 32px; bottom: 28px; gap: 12px }`).
@@ -635,6 +646,7 @@ fn source_row(
     id_salt: &str,
     source: &mut SourceConfig,
     enabled: bool,
+    allow_clear: bool,
 ) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -658,9 +670,13 @@ fn source_row(
             }
         }
 
-        let field_w = (ui.available_width() - 69.0 - 8.0).max(120.0);
-        let text = source.display_name();
-        readonly_path_box(ui, &text, source.path.is_some(), field_w);
+        let show_clear = allow_clear && source.path.is_some();
+        let clear_w = if show_clear { 64.0 } else { 0.0 };
+        let field_w = (ui.available_width() - 69.0 - clear_w - 8.0).max(120.0);
+        {
+            let text = source.display_name();
+            readonly_path_box(ui, &text, source.path.is_some(), field_w);
+        }
 
         if flat_button(ui, "Browse", Vec2::new(69.0, 32.0), enabled) {
             let picked = if source.platform.picks_folder() {
@@ -675,6 +691,10 @@ fn source_row(
                 source.path = Some(path);
                 changed = true;
             }
+        }
+        if show_clear && flat_button(ui, "Clear", Vec2::new(56.0, 32.0), enabled) {
+            source.path = None;
+            changed = true;
         }
     });
     changed
@@ -1093,12 +1113,18 @@ mod tests {
         let paths = LauncherPaths::from_exe(&dir.join("openbf-launcher"), None);
         let mut app = LauncherApp::new(paths, || {});
 
-        assert!(!app.source_status_ready(app.bf1_present, &app.config.bf1));
-        assert!(!app.source_status_ready(app.bf2_present, &app.config.bf2));
+        assert!(!app.source_status_ready(app.bf1_present, app.built_has_bf1, &app.config.bf1));
+        assert!(!app.source_status_ready(app.bf2_present, app.game_ready, &app.config.bf2));
 
+        // BF2-only build: BF2 dot is green while BF1 dot remains red.
         app.game_ready = true;
-        assert!(app.source_status_ready(app.bf1_present, &app.config.bf1));
-        assert!(app.source_status_ready(app.bf2_present, &app.config.bf2));
+        assert!(!app.source_status_ready(app.bf1_present, app.built_has_bf1, &app.config.bf1));
+        assert!(app.source_status_ready(app.bf2_present, app.game_ready, &app.config.bf2));
+
+        // Full BF1+BF2 build: both dots are green.
+        app.built_has_bf1 = true;
+        assert!(app.source_status_ready(app.bf1_present, app.built_has_bf1, &app.config.bf1));
+        assert!(app.source_status_ready(app.bf2_present, app.game_ready, &app.config.bf2));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

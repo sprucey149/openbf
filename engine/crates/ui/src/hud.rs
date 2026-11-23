@@ -1310,6 +1310,53 @@ mod tests {
     }
 
     #[test]
+    fn round_banner_falls_back_without_bf1_victory_sheet() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut model = model();
+        model.round_end = Some(RoundEndModel {
+            result: 0,
+            stats: None,
+            fade: 0.0,
+        });
+        feed(&mut hud, &model, &|_| false);
+        let mut art = crate::hud_draw::HudArt::default();
+        art.no_bf1_victory_sheet = true;
+        art.fonts.insert(
+            "gamefont_large".into(),
+            manifest::hud::HudFont {
+                name: "gamefont_large".into(),
+                line_height: 24,
+                pages: vec!["gamefont_large_0".into()],
+                glyphs: "VICTORYDEFA"
+                    .chars()
+                    .map(|ch| manifest::hud::HudGlyph {
+                        code: ch as u16,
+                        page: 0,
+                        advance: 13,
+                        x0: 0,
+                        x1: 12,
+                        y0: 0,
+                        y1: 20,
+                        uv: [0.0, 0.1, 0.0, 0.1],
+                    })
+                    .collect(),
+            },
+        );
+        let frame = crate::hud_draw::draw(&hud, &art, [1280.0, 896.0]);
+        assert!(
+            frame
+                .batches
+                .iter()
+                .all(|b| b.texture != "common_bf1/ig_victory_defeat"),
+            "must not emit missing BF1 sheet on BF2-only builds"
+        );
+        assert!(
+            !frame.verts.is_empty(),
+            "BF2 font fallback must draw the VICTORY text"
+        );
+    }
+
+    #[test]
     fn weapon_names_fade_and_reappear_when_either_row_changes() {
         use manifest::hud::{HudArg, HudLayout, HudNode};
         let node = |name: &str, value: HudArg| HudNode {

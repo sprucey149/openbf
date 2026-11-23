@@ -860,9 +860,15 @@ impl Soldier {
     /// a prone stands up. The stand and the prone take a tap after
     /// [`STANCE_TAP_WAIT`]; a crouch at once, so a quick double tap counts.
     pub fn stance_tap_target(stance: Stance, t: f32) -> Option<Stance> {
+        Self::stance_tap_target_with(stance, t, true)
+    }
+
+    /// Same as [`Self::stance_tap_target`], with prone gated by `prone_allowed`
+    /// (disabled on BF2-only builds that have no borrowed BF1 prone animations).
+    pub fn stance_tap_target_with(stance: Stance, t: f32, prone_allowed: bool) -> Option<Stance> {
         match stance {
             Stance::Stand | Stance::Sprint if t > STANCE_TAP_WAIT => Some(Stance::Crouch),
-            Stance::Crouch if t <= PRONE_DOUBLE_TAP => Some(Stance::Prone),
+            Stance::Crouch if prone_allowed && t <= PRONE_DOUBLE_TAP => Some(Stance::Prone),
             Stance::Crouch => Some(Stance::Stand),
             Stance::Prone if t > STANCE_TAP_WAIT => Some(Stance::Stand),
             _ => None,
