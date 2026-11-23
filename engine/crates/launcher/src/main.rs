@@ -306,6 +306,23 @@ impl ApplicationHandler<UserEvent> for Host {
 }
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(first) = args.first().map(String::as_str) {
+        match first {
+            "--audio-restore-worker" => {
+                let kind = args
+                    .get(1)
+                    .map(String::as_str)
+                    .context("--audio-restore-worker <dialogue|effects|music>")?;
+                return launcher::pipeline::audio_restore::run_worker(kind);
+            }
+            "--headless-setup" => {
+                return run_headless_setup(&args[1..]);
+            }
+            _ => {}
+        }
+    }
+
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .context("creating event loop")?;
@@ -326,4 +343,68 @@ fn main() -> Result<()> {
         let _ = launcher::runner::launch_game(&host.app.paths, &host.app.config);
     }
     Ok(())
+}
+
+struct StdoutSink;
+impl launcher::pipeline::ProgressSink for StdoutSink {
+    fn on_step(&self, index: u8, total: u8, label: &str) {
+        println!("[step {index}/{total}] {label}");
+    }
+    fn on_line(&self, line: &str) {
+        println!("{line}");
+    }
+}
+
+fn run_headless_setup(args: &[String]) -> Result<()> {
+    use launcher::config::{LauncherConfig, Platform};
+    use std::path::PathBuf;
+    use std::sync::{atomic::AtomicBool, Mutex};
+
+    let mut cfg = LauncherConfig::default();
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let mut val = || {
+            it.next()
+                .map(PathBuf::from)
+                .with_context(|| format!("missing path after {flag}"))
+        };
+        match flag.as_str() {
+            "--bf1-ps2" => {
+                cfg.bf1.platform = Platform::Ps2;
+                cfg.bf1.path = Some(val()?);
+            }
+            "--bf1-xbox" => {
+                cfg.bf1.platform = Platform::Xbox;
+                cfg.bf1.path = Some(val()?);
+            }
+            "--bf1-pc" => {
+                cfg.bf1.platform = Platform::Pc;
+                cfg.bf1.path = Some(val()?);
+            }
+            "--bf2-ps2" => {
+                cfg.bf2.platform = Platform::Ps2;
+                cfg.bf2.path = Some(val()?);
+            }
+            "--bf2-xbox" => {
+                cfg.bf2.platform = Platform::Xbox;
+                cfg.bf2.path = Some(val()?);
+            }
+            "--bf2-pc" => {
+                cfg.bf2.platform = Platform::Pc;
+                cfg.bf2.path = Some(val()?);
+            }
+            "--dlc" => {
+                cfg.dlc_dir = Some(val()?);
+            }
+            other => anyhow::bail!("unknown --headless-setup flag: {other}"),
+        }
+    }
+    let paths = LauncherPaths::discover();
+    launcher::pipeline::run_setup(
+        &paths,
+        &cfg,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(None)),
+        Arc::new(StdoutSink),
+    )
 }

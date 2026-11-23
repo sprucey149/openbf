@@ -187,9 +187,8 @@ pub fn bake_global_sound(
     let mut claimed: HashSet<u32> = HashSet::new();
     let mut unreferenced = 0usize;
     let mut ron_streams = Vec::new();
-    let restore_music =
-        !opts.index_only && std::env::var_os("OPENBF_AUDIO_RESTORE_SCRIPT").is_some();
     let mut music_worker = crate::audio_restore::AudioRestore::from_env("music");
+    let restore_music = !opts.index_only && music_worker.is_enabled();
     for (si, (src, s)) in streams.iter().enumerate() {
         let baked = s.channels == 1;
         let mut segs = Vec::new();

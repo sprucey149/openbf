@@ -1389,9 +1389,14 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/tests/visual_packs.rs` 88 — explicit owned-payload native GLB/KTX2 imports and stock/install/remove archive checks; CPU only, requires local fixtures.
 
 ## launcher — standalone native `openbf-launcher` GUI
-- `launcher/src/lib.rs` 12 — crate root and module exports.
+- `launcher/src/lib.rs` 13 — crate root and module exports.
 - `launcher/src/config.rs` 227 — persistent launcher config (BF1/BF2 sources, optional DLC folder, graphics API override) · `LauncherConfig`, `Platform`, `SourceConfig`, `GraphicsApi`.
-- `launcher/src/paths.rs` 321 — release vs checkout path discovery, O(1) `OPENBFPK` footer & BF1-presence check, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `has_valid_pak_footer`, `open_folder`.
-- `launcher/src/runner.rs` 410 — background `scripts/pack.py` runner (BF1+BF2 or BF2-only) with ring-buffered console lines, throttled progress updates, and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `build_pack_command`, `launch_game`.
-- `launcher/src/ui.rs` 1286 — native `740×450` frameless egui launcher UI with system regular/bold fonts, cached filesystem state, optional BF1 setup, and seamless top-fading build console · `LauncherApp`, `Page`, `DotState`, `HostActions`.
-- `launcher/src/main.rs` 320 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling.
+- `launcher/src/paths.rs` 376 — release vs checkout path discovery, tool lookup (`bake`, base `game`), O(1) `OPENBFPK` footer & BF1-presence check, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `has_valid_pak_footer`, `open_folder`.
+- `launcher/src/runner.rs` 288 — background setup pipeline runner with ring-buffered console lines, 20 Hz throttled progress updates, error-line selection, and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `launch_game`.
+- `launcher/src/ui.rs` 1346 — native `740×450` frameless egui launcher UI starting on an empty main pane with status indicators, system regular/bold fonts, optional BF1 setup, and seamless top-fading build console with scroll-to-bottom control · `LauncherApp`, `Page`, `DotState`, `HostActions`.
+- `launcher/src/main.rs` 410 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling, window-close-before-spawn launch, `--audio-restore-worker`, and `--headless-setup` CLI modes.
+- `launcher/src/pipeline/mod.rs` 497 — Stage 2 native 6-step setup orchestrator with RAII staging temp cleanup and always-split `openbf.exe` + `openbf.pak` packing · `run_setup`, `ExecCtx`, `ProgressSink`.
+- `launcher/src/pipeline/scan.rs` 680 — native PS2/Xbox/PC source recognition, case-insensitive path resolution, and DLC hero/sound LVL content detection · `BuildPlan`, `GameId`, `GameSource`, `DlcSource`, `ci_path`, `detect_dlc`, `detect_hero_sounds`.
+- `launcher/src/pipeline/missions.rs` 245 — embedded mission-generation scripts and correction tables materialized into the setup temp directory for Lua extraction, mission generation, and shell credits · `MaterializedMissions`.
+- `launcher/src/pipeline/rebake.rs` 1083 — native Rust replacement for `scripts/rebake.sh`, `scripts/bake_dlc.py`, and `scripts/global_sound_cache.py` invoking `bake` subcommands directly without Git Bash · `BakeTrees`, `run_all_bake_groups`.
+- `launcher/src/pipeline/audio_restore.rs` 463 — native Rust PCM restoration worker matching `scripts/restore_audio.py` for dialogue, effects, and music · `process_pcm`, `run_worker`.

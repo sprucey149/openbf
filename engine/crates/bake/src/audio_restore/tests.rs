@@ -20,6 +20,7 @@ impl Fixture {
     fn restore(&self) -> AudioRestore {
         AudioRestore {
             config: Some(Config {
+                binary: None,
                 python: "python3".into(),
                 script: self.0.join("worker.py"),
                 kind: "effects",

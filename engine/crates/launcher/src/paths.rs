@@ -122,6 +122,61 @@ impl LauncherPaths {
             .filter(|p| p.is_file())
     }
 
+    /// Locate the compiled `bake` executable (`openbf_data/tools/bake`,
+    /// beside the launcher, or in a checkout's `engine/target/{release,debug}`).
+    pub fn bake_bin(&self) -> Option<PathBuf> {
+        let name = format!("bake{EXE_SUFFIX}");
+        let mut candidates = vec![
+            self.data_dir.join("tools").join(&name),
+            self.exe_dir.join(&name),
+        ];
+        if let Some(root) = &self.pack_root {
+            candidates.push(root.join("engine").join("target").join("release").join(&name));
+            candidates.push(root.join("engine").join("target").join("debug").join(&name));
+        }
+        candidates.into_iter().find(|p| p.is_file())
+    }
+
+    /// Locate the base game executable used by `--write-pack` (`game`, existing
+    /// `openbf` in a release folder, or a checkout's `engine/target/{release,debug}/game`).
+    pub fn base_game_bin(&self) -> Option<PathBuf> {
+        if let Some(prebuilt) = &self.prebuilt_game_bin {
+            if prebuilt.is_file() {
+                return Some(prebuilt.clone());
+            }
+        }
+        let game_name = format!("game{EXE_SUFFIX}");
+        let mut candidates = vec![self.exe_dir.join(&game_name)];
+        if !self
+            .exe_dir
+            .ancestors()
+            .any(|a| a.file_name().is_some_and(|n| n == "target"))
+            && self.game_out.is_file()
+        {
+            candidates.push(self.game_out.clone());
+        }
+        if let Some(root) = &self.pack_root {
+            candidates.push(
+                root.join("engine")
+                    .join("target")
+                    .join("release")
+                    .join(&game_name),
+            );
+            candidates.push(
+                root.join("engine")
+                    .join("target")
+                    .join("debug")
+                    .join(&game_name),
+            );
+        }
+        candidates.into_iter().find(|p| p.is_file())
+    }
+
+    /// True when the native Stage 2 setup tools (`bake` + base game binary) are present.
+    pub fn can_build(&self) -> bool {
+        self.bake_bin().is_some() && self.base_game_bin().is_some()
+    }
+
     /// True when the game binary exists and carries baked assets (either
     /// appended to `openbf` or in `openbf.pak` beside it).
     pub fn is_game_ready(&self) -> bool {

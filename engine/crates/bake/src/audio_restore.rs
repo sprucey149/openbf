@@ -15,6 +15,7 @@ pub(crate) struct AudioRestore {
 }
 
 struct Config {
+    binary: Option<PathBuf>,
     python: OsString,
     script: PathBuf,
     kind: &'static str,
@@ -22,16 +23,30 @@ struct Config {
 
 impl AudioRestore {
     pub(crate) fn from_env(kind: &'static str) -> Self {
-        let config = std::env::var_os("OPENBF_AUDIO_RESTORE_SCRIPT").map(|script| Config {
-            python: std::env::var_os("OPENBF_PYTHON").unwrap_or_else(|| "python3".into()),
-            script: script.into(),
-            kind,
-        });
+        let config = if let Some(bin) = std::env::var_os("OPENBF_AUDIO_RESTORE_BIN") {
+            Some(Config {
+                binary: Some(bin.into()),
+                python: OsString::new(),
+                script: PathBuf::new(),
+                kind,
+            })
+        } else {
+            std::env::var_os("OPENBF_AUDIO_RESTORE_SCRIPT").map(|script| Config {
+                binary: None,
+                python: std::env::var_os("OPENBF_PYTHON").unwrap_or_else(|| "python3".into()),
+                script: script.into(),
+                kind,
+            })
+        };
         Self {
             config,
             worker: None,
             failed: false,
         }
+    }
+
+    pub(crate) fn is_enabled(&self) -> bool {
+        self.config.is_some()
     }
 
     pub(crate) fn apply(&mut self, rate: u32, pcm: &mut [i16]) -> Result<()> {
@@ -70,14 +85,26 @@ struct Worker {
 
 impl Worker {
     fn spawn(config: &Config) -> Result<Self> {
-        ensure!(
-            config.script.is_absolute(),
-            "audio restoration script must be absolute"
-        );
-        let mut child = Command::new(&config.python)
-            .arg("-I")
-            .arg(&config.script)
-            .args(["--worker", config.kind])
+        let mut cmd = if let Some(bin) = &config.binary {
+            ensure!(
+                bin.is_absolute(),
+                "audio restoration binary must be absolute"
+            );
+            let mut c = Command::new(bin);
+            c.args(["--audio-restore-worker", config.kind]);
+            c
+        } else {
+            ensure!(
+                config.script.is_absolute(),
+                "audio restoration script must be absolute"
+            );
+            let mut c = Command::new(&config.python);
+            c.arg("-I")
+                .arg(&config.script)
+                .args(["--worker", config.kind]);
+            c
+        };
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Inherit stderr so diagnostics cannot fill an undrained pipe or

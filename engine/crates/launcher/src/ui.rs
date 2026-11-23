@@ -85,7 +85,7 @@ pub struct LauncherApp {
     bf1_cleared: bool,
     bf2_cleared: bool,
     building_with_bf1: bool,
-    has_pack_script: bool,
+    can_build: bool,
     build: Option<BuildHandle>,
     last_build: Option<BuildProgress>,
     toast: Option<(String, Instant)>,
@@ -106,7 +106,7 @@ impl LauncherApp {
             bf1_cleared: false,
             bf2_cleared: false,
             building_with_bf1: false,
-            has_pack_script: false,
+            can_build: false,
             build: None,
             last_build: None,
             toast: None,
@@ -124,7 +124,7 @@ impl LauncherApp {
         self.built_has_bf1 = built.has_bf1;
         self.bf1_present = self.config.bf1.is_present();
         self.bf2_present = self.config.bf2.is_present();
-        self.has_pack_script = self.paths.pack_script().is_some();
+        self.can_build = self.paths.can_build();
     }
 
     pub fn is_building(&self) -> bool {
@@ -379,7 +379,7 @@ impl LauncherApp {
 
         let bf1_ok = self.config.bf1.path.is_none() || self.bf1_present;
         let sources_ok = self.bf2_present && bf1_ok;
-        let has_pack = self.has_pack_script;
+        let can_build = self.can_build;
         let has_build_panel = self.last_build.is_some();
         ui.horizontal(|ui| {
             if building {
@@ -392,7 +392,7 @@ impl LauncherApp {
                 } else {
                     "Build game"
                 };
-                if primary_button(ui, label, Vec2::new(112.0, 32.0), sources_ok && has_pack) {
+                if primary_button(ui, label, Vec2::new(112.0, 32.0), sources_ok && can_build) {
                     let wake = Arc::clone(&self.wake);
                     let with_bf1 = self.config.bf1.path.is_some();
                     match BuildHandle::start(&self.paths, &self.config, move || wake()) {
@@ -404,10 +404,10 @@ impl LauncherApp {
                         Err(e) => self.show_toast(format!("{e}")),
                     }
                 }
-                if !has_pack {
+                if !can_build {
                     ui.add_space(10.0);
                     ui.label(
-                        egui::RichText::new("scripts/pack.py not found")
+                        egui::RichText::new("bake or game binary not found")
                             .font(regular_font(12.5))
                             .color(DOT_MISSING),
                     );
