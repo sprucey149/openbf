@@ -77,16 +77,22 @@ fn volumes(scene: &Scene) -> Result<Vec<Volume>> {
         let Some(name) = prop("Texture") else {
             continue;
         };
-        if scene
-            .textures
-            .get(&name.to_ascii_lowercase())
-            .is_some_and(|t| t.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255))
-        {
+        let tex = scene.textures.get(&name.to_ascii_lowercase());
+        if tex.is_some_and(|t| t.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255)) {
             eprintln!(
                 "dust texture {name}: opaque legacy sheet; rebake the map to restore its alpha"
             );
             continue;
         }
+        let max_tex_alpha = tex
+            .and_then(|t| t.rgba.as_chunks::<4>().0.iter().map(|p| p[3]).max())
+            .unwrap_or(0);
+        let alpha = dust_alpha(
+            &scene.manifest.source_game,
+            name,
+            number("Alpha", 0.5),
+            max_tex_alpha,
+        );
         let config = render::DustConfig {
             display_gain: super::look::atmosphere_display_gain(&scene.manifest),
             min_pos: vector("MinPos", Vec3::new(-20.0, -1.0, -20.0)),
@@ -95,7 +101,7 @@ fn volumes(scene: &Scene) -> Result<Vec<Volume>> {
             max_vel: vector("MaxVel", Vec3::new(3.0, 1.0, 3.0)),
             size: [number("MinSize", 10.0), number("MaxSize", 15.0)],
             lifetime: [number("MinLifeTime", 2.0), number("MaxLifeTime", 3.0)],
-            color: [1.0, 1.0, 1.0, number("Alpha", 0.5)],
+            color: [1.0, 1.0, 1.0, alpha],
             count: number("NumParticles", 50.0).clamp(0.0, 4096.0) as usize,
             max_distance: number("MaxDistance", 500.0),
             height_scale: number("HeightScale", 0.2),
@@ -110,6 +116,25 @@ fn volumes(scene: &Scene) -> Result<Vec<Volume>> {
         });
     }
     Ok(out)
+}
+
+/// Normalize BF2 PC `whitedust` alpha to match the PS2 sheet.
+///
+/// PS2 `bf2_hot1` pre-attenuated `whitedust` (`A = 0..104`, avg `14.4`) with
+/// `Alpha = 1.0`, while PC `bf2_hot1` kept the un-dimmed sheet (`A = 0..241`,
+/// avg `69.1`) with `Alpha = 1.0` (~4.8x too opaque; BF1 Hoth used `Alpha = 0.2`
+/// on the same un-dimmed sheet). Scaling by `0.2` matches both PS2 BF2 Hoth
+/// and BF1 Hoth without changing PS2 `whitedust` or any other volume.
+fn dust_alpha(source_game: &str, texture_name: &str, raw_alpha: f32, max_tex_alpha: u8) -> f32 {
+    if source_game == "bf2"
+        && texture_name.eq_ignore_ascii_case("whitedust")
+        && raw_alpha > 0.5
+        && max_tex_alpha > 160
+    {
+        raw_alpha * 0.2
+    } else {
+        raw_alpha
+    }
 }
 
 #[cfg(test)]
@@ -163,5 +188,13 @@ mod tests {
         let legacy = super::volumes(&scene).unwrap();
         assert_eq!(legacy.len(), 1);
         assert_eq!(legacy[0].instances.len(), 7);
+    }
+
+    #[test]
+    fn pc_bf2_whitedust_scales_alpha_to_match_ps2_while_leaving_ps2_untouched() {
+        assert!((super::dust_alpha("bf2", "whitedust", 1.0, 241) - 0.2).abs() < 1e-6);
+        assert_eq!(super::dust_alpha("bf2", "whitedust", 1.0, 104), 1.0);
+        assert_eq!(super::dust_alpha("bf1", "whitedust", 0.2, 241), 0.2);
+        assert_eq!(super::dust_alpha("bf2", "hoth_mist", 0.5, 255), 0.5);
     }
 }
