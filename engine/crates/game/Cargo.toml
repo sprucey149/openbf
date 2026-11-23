@@ -13,6 +13,7 @@ sha2 = "0.10"
 [dependencies]
 image.workspace = true
 core = { path = "../core" }
+extensions = { path = "../extensions", features = ["runtime"] }
 manifest = { path = "../manifest" }
 pak = { path = "../pak" }
 input = { path = "../input" }
@@ -20,6 +21,7 @@ render = { path = "../render" }
 ui = { path = "../ui" }
 audio = { path = "../audio" }
 net = { path = "../net" }
+openbf_vr = { path = "../openbf_vr", optional = true }
 glam.workspace = true
 winit.workspace = true
 # The menu cursor is an SVG, rendered at the display's size at startup (no fonts or images needed).
@@ -45,6 +47,9 @@ zbus = "5.18"
 x11rb = "0.13"
 
 [features]
+default = ["vr"]
+# Bundled OpenBF VR OpenXR extension (Windows and Linux).
+vr = ["dep:openbf_vr"]
 brain-shadow = ["core/brain-shadow"]
 # Count every heap allocation, for `--bench` runs that report it (`game::alloc_count`).
 alloc-count = []

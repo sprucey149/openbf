@@ -7,6 +7,7 @@
 
 #[path = "battle/ctf_hud.rs"]
 mod ctf_hud;
+pub(super) use ctf_hud::{upload_world_marker_assets, world_objective_draws, WorldMarkerAssets};
 use ctf_hud::{hud_hints, marker_screen};
 
 #[path = "battle/vehicle_start.rs"]
@@ -1034,6 +1035,16 @@ pub(super) fn hud_model(
     feed: &mut game::event_feed::EventFeed,
     aspect: f32,
 ) -> ui::hud::HudModel {
+    hud_model_for_view(walk, feed, aspect, None)
+}
+
+/// [`hud_model`] with an optional stereo VR view camera/aspect for hint projection.
+pub(super) fn hud_model_for_view(
+    walk: &WalkSim,
+    feed: &mut game::event_feed::EventFeed,
+    aspect: f32,
+    stereo_view: Option<(&render::Camera, f32)>,
+) -> ui::hud::HudModel {
     let me = &walk.sim.units[walk.player.index as usize];
     let b = &walk.sim.battle;
     let droid = walk
@@ -1139,7 +1150,7 @@ pub(super) fn hud_model(
             .flatten(),
         lock: hud_lock(walk, feed, slot, aspect),
         incoming_missile: walk.sim.incoming_missile(slot),
-        hints: hud_hints(walk, feed, slot, aspect),
+        hints: hud_hints(walk, feed, slot, aspect, stereo_view),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,
         seat_health: me

@@ -275,7 +275,7 @@ fn upload_parts<'a>(
             // submesh inherited the WHOLE model's bounds and frustum culling
             // could only ever cull all of a model or none of it. Compacting
             // is what lets a split mesh — the terrain — be culled piecewise.
-            let sub = compact_submesh(cpu, idx);
+            let sub = compact_submesh(cpu.mesh_data(idx));
             add(&sub.mesh_data())
         }
         .map_err(|e| anyhow!("mesh upload: {e}"))?;
@@ -292,7 +292,7 @@ fn upload_parts<'a>(
 /// Vertices referenced by one submesh, in first-use order, with the indices
 /// rebased onto them. Order is deterministic (it follows the index stream),
 /// so the same model always uploads the same buffer.
-pub(super) struct CompactSubmesh {
+pub(crate) struct CompactSubmesh {
     pub(super) positions: Vec<[f32; 3]>,
     pub(super) normals: Vec<[f32; 3]>,
     pub(super) uvs: Vec<[f32; 2]>,
@@ -301,7 +301,7 @@ pub(super) struct CompactSubmesh {
 }
 
 impl CompactSubmesh {
-    pub(super) fn mesh_data(&self) -> MeshData<'_> {
+    pub(crate) fn mesh_data(&self) -> MeshData<'_> {
         MeshData {
             positions: &self.positions,
             normals: &self.normals,
@@ -312,28 +312,32 @@ impl CompactSubmesh {
     }
 }
 
-pub(super) fn compact_submesh(cpu: &CpuMesh, idx: &[u32]) -> CompactSubmesh {
-    let mut slot = vec![u32::MAX; cpu.positions.len()];
+pub(crate) fn compact_submesh(data: MeshData<'_>) -> CompactSubmesh {
+    let mut slot = vec![u32::MAX; data.positions.len()];
     let mut sub = CompactSubmesh {
         positions: Vec::new(),
         normals: Vec::new(),
         uvs: Vec::new(),
         colors: Vec::new(),
-        indices: Vec::with_capacity(idx.len()),
+        indices: Vec::with_capacity(data.indices.len()),
     };
-    for &i in idx {
+    for &i in data.indices {
         let i = i as usize;
         if i >= slot.len() {
             continue; // a malformed GLB; the renderer would reject it anyway
         }
         if slot[i] == u32::MAX {
             slot[i] = sub.positions.len() as u32;
-            sub.positions.push(cpu.positions[i]);
+            sub.positions.push(data.positions[i]);
             sub.normals
-                .push(cpu.normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]));
-            sub.uvs.push(cpu.uvs.get(i).copied().unwrap_or([0.0, 0.0]));
-            sub.colors
-                .push(cpu.colors.get(i).copied().unwrap_or([255; 4]));
+                .push(data.normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]));
+            sub.uvs.push(data.uvs.get(i).copied().unwrap_or([0.0, 0.0]));
+            sub.colors.push(
+                data.colors
+                    .and_then(|colors| colors.get(i))
+                    .copied()
+                    .unwrap_or([255; 4]),
+            );
         }
         sub.indices.push(slot[i]);
     }

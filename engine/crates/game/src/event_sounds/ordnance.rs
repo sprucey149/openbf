@@ -169,6 +169,7 @@ mod tests {
         let class = sim.add_weapon_class(w);
         assert!(sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).is_some());
         sim.bolts.push(Bolt {
+            tracked_origin: false,
             visual_shot: None,
             pos: Vec3::new(0.0, 0.0, -20.0),
             vel: Vec3::Z * 100.0,

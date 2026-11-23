@@ -270,6 +270,18 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 "{tick},saber_throw_hit,{weapon_class},,{:.2}:{:.2}:{:.2}\n",
                 pos.x, pos.y, pos.z
             ),
+            Event::SaberHandContact {
+                attacker,
+                hand,
+                pos,
+                blocked,
+            } => {
+                let kind = if *blocked { "saber_block" } else { "saber_hit" };
+                format!(
+                    "{tick},{kind},{},{hand},{:.2}:{:.2}:{:.2}\n",
+                    attacker.index, pos.x, pos.y, pos.z
+                )
+            }
             Event::HeroOffered { unit, class } => {
                 format!("{tick},hero_offer,{},{class},\n", unit.index)
             }

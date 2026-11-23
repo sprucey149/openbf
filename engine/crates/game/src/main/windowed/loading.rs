@@ -939,7 +939,7 @@ impl super::App {
         }
     }
 
-    fn loading_press(&mut self) {
+    pub(super) fn loading_press(&mut self) {
         if let Some(l) = self.loading.as_mut() {
             l.playback.press(l.started.elapsed());
         }

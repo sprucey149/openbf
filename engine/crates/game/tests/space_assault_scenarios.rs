@@ -130,6 +130,7 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
     // Step 2: Active homing missile targeting player vehicle 500m away
     let missile_pos = Vec3::new(0.0, 100.0, 500.0);
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: missile_pos,
         vel: Vec3::new(0.0, 0.0, -100.0),
@@ -279,6 +280,7 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
 
     // Case 1a: Blaster bolt (missile: None) hits station while shield > 0 -> Surface::Shield
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::Z,
@@ -320,6 +322,7 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
     // Case 1b: Torpedo / missile ordnance (missile: Some(...)) hits station while shield > 0 -> Surface::Shield
     sim.events.clear();
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::Z,
@@ -363,6 +366,7 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
     sim.stations[usize::from(station)].health.shield = 0.0;
     sim.events.clear();
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::Z,
@@ -399,6 +403,7 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
     // Unshielded station hit by torpedo:
     sim.events.clear();
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::Z,

@@ -4,6 +4,60 @@ use core::weapon::WeaponClass;
 use core::impact::Surface;
 use core::sim::{buttons, Event, PadState};
 
+#[test]
+fn tracked_bolt_uses_its_simulated_origin_even_with_a_different_drawn_muzzle() {
+    use core::collision::{Body, Shape};
+    use core::sim::TrackedShot;
+
+    for (direction, wall) in [(Vec3::Y, false), (Vec3::NEG_Z, true)] {
+        let floor = core::heightfield::Heightfield {
+            size: 2,
+            unit: 10.0,
+            offset_x: 5.0,
+            offset_z: 5.0,
+            heights: vec![0.0; 4],
+        };
+        let mut walk = WalkSim::new(7, Vec3::ZERO, Some(floor));
+        if wall {
+            walk.sim.collision.push_body(Body::new(
+                glam::Mat4::from_translation(Vec3::new(0.0, 1.0, -0.8)),
+                Shape::Box {
+                    half: Vec3::new(2.0, 1.0, 0.05),
+                },
+            ));
+        }
+        walk.step_tick(&[PadState {
+            buttons: buttons::FIRE | buttons::FIRST_PERSON,
+            tracked_shots: [
+                Some(TrackedShot::new(
+                    Vec3::Y,
+                    Vec3::new(0.3, 1.3, -0.5),
+                    direction,
+                )),
+                None,
+            ],
+            ..Default::default()
+        }]);
+        let origin = walk
+            .sim
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Shot { unit, origin, .. } if *unit == walk.player => Some(*origin),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(walk.sim.bolts.is_empty(), wall);
+        let mut bolts = BoltVis::default();
+        let mut wrong = vec![None; walk.sim.units.len()];
+        wrong[walk.player.index as usize] = Some(origin + Vec3::X);
+        bolts.set_fire_points(wrong);
+        bolts.track(&walk);
+        let (start, _) = bolts.lines()[0];
+        assert!(start.abs_diff_eq(origin, 1e-5), "{start} vs {origin}");
+    }
+}
+
 fn surface_walk(slope: f32, building: bool, heightfield: bool, pitch: usize) -> WalkSim {
     let h = core::heightfield::Heightfield {
         size: 33,
@@ -873,6 +927,7 @@ fn missile_round(seed: u32) -> (WeaponClass, core::projectile::Bolt) {
     });
     let mut lcg = core::lcg::GameLcg::new(seed);
     let mut b = core::projectile::Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::new(1.0, 1.6, -2.0),
         vel: Vec3::NEG_Z * 40.0,

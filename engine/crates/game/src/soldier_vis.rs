@@ -815,6 +815,7 @@ pub struct SoldierVisuals {
     /// Reused across generations; respawning resets CPU state, not GPU buffers.
     cloth_meshes: std::collections::HashMap<(usize, usize, usize), render::MeshHandle>,
     pub fp: first_person::FirstPersonVisuals,
+    tracked_arms: Vec<tracked::Arms>,
 }
 
 /// Seconds a corpse stays drawn, counted from the death (`dead_for`), unless
@@ -890,6 +891,8 @@ mod water;
 pub use water::WaterFeet;
 mod saber;
 mod saber_trail;
+mod tracked;
+pub use tracked::TrackedGun;
 
 #[cfg(test)]
 mod tests;

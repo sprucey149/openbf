@@ -1,6 +1,144 @@
 use super::*;
 
 #[test]
+fn tracked_sabers_share_the_primary_grip_frame_and_collision_for_each_hand() {
+    let root = assets::baked_root();
+    if !pak::exists(root.join("side_bf2/heroes.ron")) {
+        eprintln!("SKIP: BF2 hero bake absent");
+        return;
+    }
+    let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep", "cis"]).unwrap();
+    let grip = emitter_frame(&root, "rep_weap_inf_lightsabre", "hp_fire").unwrap();
+    for (hero, weapon) in [
+        ("rep_hero_aalya", "rep_weap_lightsaber_aalya"),
+        ("cis_hero_grievous", "cis_weap_grievoussabers"),
+    ] {
+        let class = saber_class(&db, hero, weapon).unwrap();
+        let bindings = blade_bindings(&root, &db, weapon).unwrap();
+        let mut hands = [false; 2];
+        for (binding, edge) in bindings.iter().zip(class.hand_edges) {
+            let Some(hand) = binding.blade.tracked_hand() else {
+                assert_eq!(binding.tracked_mount, Mat4::IDENTITY);
+                continue;
+            };
+            assert!(!std::mem::replace(&mut hands[hand], true));
+            let emitter = emitter_frame(
+                &root,
+                binding.geometry.as_deref().unwrap(),
+                &binding.blade.node,
+            )
+            .unwrap();
+            assert!(
+                (binding.tracked_mount * emitter).abs_diff_eq(grip, 1e-5),
+                "{hero} hand {hand}"
+            );
+            assert!(edge.start.abs_diff_eq(grip.w_axis.truncate(), 1e-5));
+            assert!((edge.end - edge.start)
+                .abs_diff_eq(grip.z_axis.truncate() * binding.blade.length, 1e-5));
+        }
+        assert_eq!(hands, [true; 2]);
+    }
+}
+
+#[test]
+fn tracked_cuts_defeat_full_health_targets_with_either_hand() {
+    use core::sim::{PadState, Sim, TrackedCombat, TrackedHand};
+    use core::unit::UnitSpec;
+    use core::weapon::WeaponClass;
+    use glam::Quat;
+
+    let root = assets::baked_root();
+    if !pak::exists(root.join("side_bf2/heroes.ron")) {
+        eprintln!("SKIP: BF2 hero bake absent");
+        return;
+    }
+    let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep", "all"]).unwrap();
+    for (hero, weapon_name, hand, damage, bearing) in [
+        (
+            "rep_hero_macewindu",
+            "rep_weap_lightsaber",
+            1,
+            300,
+            Vec3::NEG_X,
+        ),
+        ("rep_hero_macewindu", "rep_weap_lightsaber", 1, 300, Vec3::X),
+        (
+            "rep_hero_aalya",
+            "rep_weap_lightsaber_aalya",
+            0,
+            400,
+            Vec3::NEG_Z,
+        ),
+    ] {
+        let saber = saber_class(&db, hero, weapon_name).unwrap();
+        assert_eq!(saber.damage, 0.0, "{hero}: normal cuts supply combo damage");
+        let edge = saber
+            .blades
+            .iter()
+            .zip(&saber.hand_edges)
+            .find_map(|(blade, &edge)| (blade.tracked_hand() == Some(hand)).then_some(edge))
+            .unwrap();
+        let rotation = Quat::from_rotation_arc((edge.end - edge.start).normalize(), bearing);
+        let target_pos = bearing * 0.9;
+        let center = target_pos + Vec3::Y * 1.15 - rotation * edge.start.lerp(edge.end, 0.5);
+        let mut sim = Sim::empty(7);
+        let weapon = sim.add_weapon_class(WeaponClass {
+            saber: Some(Box::new(saber)),
+            ..WeaponClass::default()
+        });
+        let rifle = sim.add_weapon_class(WeaponClass::bf1_rifle());
+        let wielder = sim
+            .spawn(&UnitSpec {
+                weapon_class: weapon,
+                ..UnitSpec::player(0, Vec3::ZERO)
+            })
+            .unwrap();
+        let target = sim
+            .spawn(&UnitSpec {
+                weapon_class: rifle,
+                max_health: 1200.0,
+                ..UnitSpec::trooper(1, target_pos)
+            })
+            .unwrap();
+        for cut in 0..=1200 / damage {
+            let offset = if cut % 2 == 0 { -0.7 } else { 0.7 };
+            let mut hands = [None; 2];
+            hands[hand] = Some(TrackedHand::new(
+                center + bearing.cross(Vec3::Y) * offset,
+                rotation,
+            ));
+            let pad = PadState {
+                tracked_combat: Some(TrackedCombat {
+                    hands,
+                    ..TrackedCombat::default()
+                }),
+                ..PadState::default()
+            };
+            sim.step(&[pad]);
+            assert_eq!(
+                sim.units[target.index as usize].health.cur,
+                (1200 - cut * damage) as f32,
+                "{hero}: cut {cut}"
+            );
+            if cut > 0 {
+                assert!(
+                    sim.events.iter().any(
+                        |event| matches!(event, core::sim::Event::SaberHandContact {
+                    attacker, hand: side, blocked: false, ..
+                } if *attacker == wielder && usize::from(*side) == hand)
+                    ),
+                    "{hero}: cut feedback"
+                );
+                for _ in 1..2 * core::TICK_HZ / 5 {
+                    sim.step(&[pad]);
+                }
+            }
+        }
+        assert!(!sim.units[target.index as usize].alive, "{hero}");
+    }
+}
+
+#[test]
 fn every_bf2_saber_hero_uses_authored_edges_and_moving_clip_tracks() {
     let root = assets::baked_root();
     if !pak::exists(root.join("side_bf2/heroes.ron")) {

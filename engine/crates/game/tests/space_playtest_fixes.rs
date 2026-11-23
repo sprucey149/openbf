@@ -420,6 +420,7 @@ fn render_blend_captures_trail_only_missile_bolts_with_no_mesh() {
     });
     let shooter = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: Some(VisualShot { tick: 1, event: 0 }),
         pos: Vec3::new(0.0, 0.0, -10.0),
         vel: Vec3::new(0.0, 0.0, -350.0),
@@ -538,6 +539,7 @@ fn baked_spa1_capital_hull_shields_and_missile_trail_interpolation() {
         .unwrap();
     let hull_pos = sim.stations[usize::from(hull_station)].pos;
     sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: Some(VisualShot { tick: 1, event: 0 }),
         pos: hull_pos + Vec3::Z * 10.0,
         vel: Vec3::NEG_Z * 500.0,
@@ -607,6 +609,7 @@ fn baked_spa1_capital_hull_shields_and_missile_trail_interpolation() {
     trail_sim.tick = 1;
     let shot = Some(VisualShot { tick: 1, event: 0 });
     trail_sim.bolts.push(Bolt {
+        tracked_origin: false,
         visual_shot: shot,
         pos: Vec3::ZERO,
         vel: Vec3::new(0.0, 0.0, -360.0),

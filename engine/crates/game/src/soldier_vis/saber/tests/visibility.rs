@@ -22,6 +22,7 @@ fn scene(edges: usize, hidden_edges: u8) -> (WalkSim, SoldierVisuals) {
             },
             geometry: None,
             glow_texture: None,
+            tracked_mount: Mat4::IDENTITY,
             local: BladeSegment {
                 start: Vec3::ZERO,
                 end: Vec3::Y,
@@ -35,6 +36,7 @@ fn scene(edges: usize, hidden_edges: u8) -> (WalkSim, SoldierVisuals) {
             fields: vec![],
         },
         blades: bindings.iter().map(|b| b.blade.clone()).collect(),
+        hand_edges: Vec::new(),
         throw_edges: vec![],
         deflect_edges: vec![],
         weapon_bind: Mat4::IDENTITY,
@@ -111,6 +113,7 @@ fn scene(edges: usize, hidden_edges: u8) -> (WalkSim, SoldierVisuals) {
     });
     visuals.units.resize_with(player + 1, UnitVisual::default);
     visuals.units[player].gen = u.gen;
+    visuals.units[player].body = Some((u.team, u.spec.class, Some(0)));
     assert_eq!(visuals.posed(&walk).len(), 1, "visible CPU body control");
     (walk, visuals)
 }
@@ -138,5 +141,126 @@ fn byte_visibility_controls_actual_trail_counts_and_audio_at_the_eighth_edge() {
         // The draw caller must reject the ninth programmatic edge before its
         // texture lookup, even when no GPU texture has been uploaded.
         visuals.saber_draws(&walk);
+    }
+}
+
+#[cfg(all(feature = "vr", any(windows, target_os = "linux")))]
+#[test]
+#[ignore = "requires a GPU and the local BF2 saber bake"]
+fn tracked_saber_draws_the_baked_blade_with_the_body_hidden() {
+    let root = crate::assets::baked_root();
+    if !root
+        .join("side_bf2/weapons/imp_weap_inf_lightsabre.nodes.ron")
+        .is_file()
+    {
+        eprintln!("SKIP: Vader's local saber bake is absent");
+        return;
+    }
+    let (mut walk, mut vis) = scene(1, 0);
+    walk.sim.unit_mut(walk.player).unwrap().first_person = true;
+    assert!(walk.player_body_hidden());
+    assert!(vis.saber_draws(&walk).is_empty());
+    let mut team = crate::walk::TeamTemplate::default_trooper();
+    team.faction = "imp".into();
+    team.classes[0].name = "imp_hero_darthvader".into();
+    let mut renderer = Renderer::new_headless(192, 192).unwrap();
+    vis.sabers = vis.load_sabers(Some(&mut renderer), &root, &[team.clone(), team]);
+    let at = Mat4::from_rotation_translation(
+        glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+        Vec3::new(0.25, -0.5, -1.6),
+    );
+    let mut blades = Vec::new();
+    vis.tracked_saber_draws(&walk, [None, Some(at)], &mut blades);
+    let blade = vis.saber_visual(0, 0).unwrap().bindings[0].segment(at);
+    assert!(blades.iter().any(|draw| matches!(
+        draw.shape, ParticleShape::CappedRibbon { head, .. } if head == blade.end
+    )));
+    let mut hilts = Vec::new();
+    vis.tracked_draws(&walk, [None, Some(at)], &mut hilts);
+    assert!(!hilts.is_empty());
+
+    let camera = render::Camera::default();
+    let clear = [0.0, 0.0, 0.0, 1.0];
+    renderer
+        .render_frame(&camera, &[], &[], clear, None)
+        .unwrap();
+    let background = renderer.capture_rgba().unwrap().0;
+    renderer.set_particles(blades);
+    renderer
+        .render_frame(&camera, &[], &[], clear, None)
+        .unwrap();
+    let rendered = renderer.capture_rgba().unwrap().0;
+    assert_ne!(
+        rendered, background,
+        "the tracked blade is visible in a headless frame"
+    );
+}
+
+#[cfg(all(feature = "vr", any(windows, target_os = "linux")))]
+#[test]
+#[ignore = "requires a GPU and the local BF2 hero bake"]
+fn tracked_sabers_draw_aligned_hilts_and_forearms_for_dual_wielders() {
+    let root = crate::assets::baked_root();
+    let cases = [
+        ("rep", "rep_hero_aalya", "rep_inf_aaylasecura"),
+        ("cis", "cis_hero_grievous", "cis_inf_generalgrevious"),
+    ];
+    if cases.iter().any(|(_, _, geometry)| {
+        !root
+            .join(format!("side_bf2/soldiers/{geometry}.glb"))
+            .is_file()
+    }) {
+        eprintln!("SKIP: local dual-wield hero bakes are absent");
+        return;
+    }
+    let mut renderer = Renderer::new_headless(192, 192).unwrap();
+    for (faction, hero, geometry) in cases {
+        let (mut walk, mut vis) = scene(1, 0);
+        walk.sim.unit_mut(walk.player).unwrap().first_person = true;
+        vis.assets[0] = SoldierVisuals::load_body(
+            Some(&mut renderer),
+            &root,
+            "bf2",
+            geometry,
+            &mut HashMap::new(),
+        )
+        .unwrap();
+        vis.load_tracked_arms(&mut renderer);
+        let mut team = crate::walk::TeamTemplate::default_trooper();
+        team.faction = faction.into();
+        team.classes[0].name = hero.into();
+        vis.sabers = vis.load_sabers(Some(&mut renderer), &root, &[team.clone(), team]);
+
+        for (side, x) in [(0, -0.27), (1, 0.27)] {
+            let at = Mat4::from_translation(Vec3::new(x, -0.42, -1.55));
+            let mut mounts = [None; 2];
+            mounts[side] = Some(at);
+            let mut hilts = Vec::new();
+            vis.tracked_saber_hilts(&walk, mounts, &mut hilts);
+            let visual = vis.saber_visual(0, 0).unwrap();
+            let binding = visual
+                .bindings
+                .iter()
+                .find(|b| b.blade.tracked_hand() == Some(side))
+                .unwrap();
+            let matrix = at * binding.tracked_mount;
+            assert!(
+                !hilts.is_empty() && hilts.iter().all(|d| d.model.abs_diff_eq(matrix, 1e-5)),
+                "{hero} hand {side}"
+            );
+
+            let mut draws = Vec::new();
+            vis.tracked_draws(&walk, mounts, &mut draws);
+            assert!(
+                draws.len() > hilts.len(),
+                "{hero} hand {side} draws a forearm"
+            );
+            let tip = binding.segment(matrix).end;
+            let mut blades = Vec::new();
+            vis.tracked_saber_draws(&walk, mounts, &mut blades);
+            assert!(blades.iter().any(|draw| matches!(
+                draw.shape, ParticleShape::CappedRibbon { head, .. } if head.abs_diff_eq(tip, 1e-5)
+            )), "{hero} hand {side} blade stays on the emitter");
+        }
     }
 }

@@ -470,6 +470,7 @@ impl SoldierVisuals {
             hover_nine: Default::default(),
             cloth_meshes: HashMap::new(),
             fp: Default::default(),
+            tracked_arms: Vec::new(),
         }
     }
 
@@ -1364,6 +1365,22 @@ impl SoldierVisuals {
         out
     }
 
+    pub(super) fn body_skin(&self, team: u8, class: u8, low: bool) -> &[Option<TextureHandle>] {
+        let rows = if low { &self.low_skins } else { &self.skins };
+        let row = self
+            .native
+            .get(&team)
+            .map_or(&rows[usize::from(team.min(1))], |side| {
+                if low {
+                    &side.low_skins
+                } else {
+                    &side.skins
+                }
+            });
+        row.get(usize::from(class).min(row.len().saturating_sub(1)))
+            .map_or(&[][..], Vec::as_slice)
+    }
+
     /// The parts of `team`'s class `class` (its skins over body `sa`) at
     /// `model` posed by `palette`, each with its specular second pass.
     fn body_draws(
@@ -1376,20 +1393,7 @@ impl SoldierVisuals {
         out: &mut Vec<SkinnedDrawCmd>,
     ) {
         let low = sa.asset.name.ends_with("_low1") || sa.asset.name.ends_with(".low");
-        let rows = if low { &self.low_skins } else { &self.skins };
-        let row = self
-            .native
-            .get(&team)
-            .map_or(&rows[usize::from(team.min(1))], |side| {
-                if low {
-                    &side.low_skins
-                } else {
-                    &side.skins
-                }
-            });
-        let skin = row
-            .get(usize::from(class).min(row.len().saturating_sub(1)))
-            .map_or(&[][..], Vec::as_slice);
+        let skin = self.body_skin(team, class, low);
         for (k, (mesh, tex, layer, spec)) in sa.meshes.iter().enumerate() {
             if live_cloth && sa.cloths.iter().any(|c| c.raw.part == k) {
                 continue;

@@ -243,6 +243,72 @@ impl SoldierVisuals {
         bone.eq_ignore_ascii_case("hp_weapons") && self.flying_transform(walk, index).is_some()
     }
 
+    pub(super) fn tracked_saber_hilts(
+        &self,
+        walk: &WalkSim,
+        mounts: [Option<Mat4>; 2],
+        out: &mut Vec<render::DrawCmd>,
+    ) -> bool {
+        let Some(unit) = walk.sim.unit(walk.player) else {
+            return false;
+        };
+        let Some(visual) = self.saber_visual(unit.team, unit.spec.class) else {
+            return false;
+        };
+        if walk.sim.weapon_classes[unit.weapon_class].saber.is_none() {
+            return false;
+        }
+        let flying = self
+            .flying_transform(walk, walk.player.index as usize)
+            .is_some();
+        let mut handled_right = flying;
+        for (bone, hilt) in &visual.hilts {
+            if flying && bone.eq_ignore_ascii_case("hp_weapons") {
+                continue;
+            }
+            let Some(binding) = visual
+                .bindings
+                .iter()
+                .find(|binding| binding.blade.bone == *bone)
+            else {
+                continue;
+            };
+            let side = binding.blade.tracked_hand();
+            handled_right |= side == Some(1) && !hilt.parts.is_empty();
+            if let Some(mount) = side.and_then(|side| mounts[side]) {
+                hilt.part_draws(mount * binding.tracked_mount, out);
+            }
+        }
+        handled_right
+    }
+
+    pub fn tracked_saber_draws(
+        &self,
+        walk: &WalkSim,
+        mounts: [Option<Mat4>; 2],
+        out: &mut Vec<ParticleDraw>,
+    ) {
+        let Some(unit) = walk.sim.unit(walk.player) else {
+            return;
+        };
+        let Some(visual) = self.saber_visual(unit.team, unit.spec.class) else {
+            return;
+        };
+        if walk.sim.weapon_classes[unit.weapon_class].saber.is_none() {
+            return;
+        }
+        for (edge, binding) in visual.bindings.iter().enumerate() {
+            if !core::hero_weapon::blade_visible(0, edge)
+                || self.primary_saber_flying(walk, walk.player.index as usize, &binding.blade.bone)
+            {
+                continue;
+            }
+            if let Some(mount) = binding.blade.tracked_hand().and_then(|side| mounts[side]) {
+                edge_draws(visual, edge, binding, mount * binding.tracked_mount, out);
+            }
+        }
+    }
+
     pub fn saber_hilts(&self, walk: &WalkSim) -> Vec<render::DrawCmd> {
         let mut out = Vec::new();
         for (i, asset, model, palette) in self.posed(walk) {

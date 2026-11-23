@@ -169,6 +169,28 @@ impl SoldierVisuals {
     /// Select once for this camera, before body/weapon/cloth draw lists.
     /// Audio, attachment queries and simulation retain all soldiers.
     pub fn prepare_view(&mut self, walk: &WalkSim, camera: &render::Camera, aspect: f32) {
+        self.prepare_visible(walk, camera, aspect, [camera.view_proj(aspect)]);
+    }
+
+    /// Choose one shared soldier LOD for multiple views (such as stereo eyes),
+    /// including a soldier visible to only one eye at the frustum edge.
+    pub fn prepare_stereo_view(
+        &mut self,
+        walk: &WalkSim,
+        center: &render::Camera,
+        aspect: f32,
+        eyes: [glam::Mat4; 2],
+    ) {
+        self.prepare_visible(walk, center, aspect, eyes);
+    }
+
+    fn prepare_visible<const N: usize>(
+        &mut self,
+        walk: &WalkSim,
+        camera: &render::Camera,
+        aspect: f32,
+        views: [glam::Mat4; N],
+    ) {
         if !self.lod_view.enabled {
             self.lod_view.choices.clear();
             return;
@@ -178,17 +200,18 @@ impl SoldierVisuals {
             .choices
             .resize(walk.sim.units.len(), Choice::Hidden);
         self.lod_view.queue.clear();
-        let vp = camera.view_proj(aspect);
-        let r = [vp.row(0), vp.row(1), vp.row(2), vp.row(3)];
-        let planes = [
-            r[3] + r[0],
-            r[3] - r[0],
-            r[3] + r[1],
-            r[3] - r[1],
-            r[2],
-            r[3] - r[2],
-        ]
-        .map(|p| p / p.truncate().length());
+        let frusta = views.map(|vp| {
+            let r = [vp.row(0), vp.row(1), vp.row(2), vp.row(3)];
+            [
+                r[3] + r[0],
+                r[3] - r[0],
+                r[3] + r[1],
+                r[3] - r[1],
+                r[2],
+                r[3] - r[2],
+            ]
+            .map(|p| p / p.truncate().length())
+        });
         let view = camera.view();
         let zoom = walk.zoom_s;
         let tan_y = (camera.fov_y * 0.5).tan();
@@ -220,10 +243,11 @@ impl SoldierVisuals {
             let model = v.seat_model.unwrap_or_else(|| super::model_of(&u.soldier));
             let center = model.transform_point3(Vec3::from_slice(&sphere[..3]));
             let radius = sphere[3] + SPHERE_MARGIN;
-            if planes
-                .iter()
-                .any(|p: &Vec4| p.dot(center.extend(1.0)) < -radius)
-            {
+            if frusta.iter().all(|planes| {
+                planes
+                    .iter()
+                    .any(|p: &Vec4| p.dot(center.extend(1.0)) < -radius)
+            }) {
                 continue;
             }
             let p = view.transform_point3(center);

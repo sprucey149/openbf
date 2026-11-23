@@ -512,6 +512,7 @@ pub(super) fn draw_in(
     match layer {
         DrawLayer::Mask => DrawCmd::textured_masked(mesh, texture, model),
         DrawLayer::Blend => DrawCmd::textured_blended(mesh, texture, model),
+        DrawLayer::Overlay => DrawCmd::overlay(mesh, texture, [1.0; 4], model),
         DrawLayer::Opaque
         | DrawLayer::Water
         | DrawLayer::Spec

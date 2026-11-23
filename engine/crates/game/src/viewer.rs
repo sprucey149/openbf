@@ -54,6 +54,7 @@ pub use look::{
 pub use scene::{
     install_spec_table, route_untextured, sky_wrap_v, upload_scene, DoorDraw, SceneGpu, Untextured,
 };
+pub(crate) use upload::compact_submesh;
 pub use upload::{
     upload_billboard_quad, upload_cpu_texture, upload_cpu_texture_scrolling, upload_fx_sprite,
     upload_skinned, upload_submeshes, upload_texture_file, upload_texture_file_scrolling,

@@ -51,6 +51,11 @@
 //!     --spawn x,z                 explicit walk spawn (otherwise mission/post start)
 //!     --vehicle <name>            start walk seated in a matching vehicle class
 //!     --headless                  no window; render offscreen
+//!     --vr                        enable bundled OpenBF VR extension for this launch
+//!     --desktop | --no-vr         force desktop display backend (recovery override)
+//!     --enable-ext <id>           enable an engine extension for this launch
+//!     --disable-ext <id>          disable an engine extension for this launch
+//!     --list-extensions           print discovered bundled extensions and exit
 //!     --capture-frame <out.png>   headless-render one frame to PNG
 //!     --hud                       headless: paint the HUD onto captures (walk mode)
 //!     --walk-replay <log.ron>     headless walk: step an input log
@@ -192,6 +197,8 @@ mod desync_report;
 mod desync_spawns;
 #[path = "main/hero_census.rs"]
 mod hero_census;
+#[path = "main/extensions_host.rs"]
+mod extensions_host;
 #[path = "main/headless.rs"]
 mod headless;
 #[path = "main/net_real.rs"]
@@ -220,6 +227,7 @@ use windowed::{run_shell, run_windowed};
 struct ViewerArgs {
     map: PathBuf,
     headless: bool,
+    overrides: extensions::profile::StartupOverrides,
     seconds: Option<u32>,
     capture_frame: Option<PathBuf>,
     walk: bool,
@@ -299,23 +307,55 @@ fn main() -> Result<()> {
     pak::mount(std::path::Path::new("missions"), "missions");
     // Dev-only (`session-stats` feature): old round files go at launch.
     game::session_stats::prune_at_launch();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let (args, global_overrides, vr_requested) = extract_extension_flags(&raw_args)?;
     let mut it = args.iter();
     let a = it.next().cloned().unwrap_or_else(|| "--shell".to_string());
+    if vr_requested
+        && matches!(
+            a.as_str(),
+            "--write-pack"
+                | "--aim-replay"
+                | "--sim-trace"
+                | "--net-soak"
+                | "--static-digest"
+                | "--net-host"
+                | "--net-join"
+                | "--desync-report"
+                | "--desync-spawns"
+                | "--sim-hash"
+                | "--replay"
+                | "--headless"
+        )
+    {
+        bail!("--vr requires an interactive windowed session");
+    }
     match a.as_str() {
+        "--list-extensions" => extensions_host::print_extensions_ron(),
         "--shell" => {
             let mut assets = PathBuf::from("assets_baked");
             let mut missions = PathBuf::from("missions");
-            while let Some(f) = it.next() {
+            let rest = if args.first().is_some_and(|s| s == "--shell") {
+                &args[1..]
+            } else {
+                args.as_slice()
+            };
+            let mut shell_it = rest.iter();
+            while let Some(f) = shell_it.next() {
                 match f.as_str() {
-                    "--assets" => assets = PathBuf::from(it.next().context("--assets <dir>")?),
+                    "--assets" => {
+                        assets = PathBuf::from(shell_it.next().context("--assets <dir>")?)
+                    }
                     "--missions" => {
-                        missions = PathBuf::from(it.next().context("--missions <dir>")?)
+                        missions = PathBuf::from(shell_it.next().context("--missions <dir>")?)
                     }
                     other => bail!("unknown shell flag: {other}"),
                 }
             }
-            logged(|| run_shell(assets, missions))
+            logged(|| {
+                let resolved = extensions_host::resolve_startup(&global_overrides, true)?;
+                run_shell(assets, missions, resolved)
+            })
         }
         "--write-pack" => {
             // Card PACK (`scripts/pack.py` runs it): copy this executable to
@@ -409,9 +449,10 @@ fn main() -> Result<()> {
             let mut v = ViewerArgs {
                 map: PathBuf::from(it.next().context("--map <baked-dir>")?),
                 headless: false,
+                overrides: global_overrides.clone(),
                 seconds: None,
                 capture_frame: None,
-                walk: false,
+                walk: vr_requested,
                 targets: false,
                 seed: 42,
                 difficulty: None,
@@ -563,6 +604,15 @@ fn main() -> Result<()> {
                     other => bail!("unknown viewer flag: {other}"),
                 }
             }
+            let interactive = v.seconds.is_none() && !v.bench && !v.headless;
+            if !interactive
+                && v.overrides
+                    .enable
+                    .iter()
+                    .any(|id| id == extensions::OPENBF_VR_ID)
+            {
+                bail!("--vr requires an interactive game");
+            }
             if v.capture_frame.is_some() && !v.headless && v.bench_toggle.is_none() {
                 bail!("--capture-frame requires --headless or --bench-toggle");
             }
@@ -576,10 +626,76 @@ fn main() -> Result<()> {
             } else if v.headless {
                 run_headless(&v)
             } else {
-                run_windowed(v)
+                let resolved = extensions_host::resolve_startup(&v.overrides, true)?;
+                run_windowed(v, resolved)
             }
         }
         other => bail!("unknown flag: {other}"),
+    }
+}
+
+fn extract_extension_flags(
+    args: &[String],
+) -> Result<(Vec<String>, extensions::profile::StartupOverrides, bool)> {
+    let mut rest = Vec::with_capacity(args.len());
+    let mut overrides = extensions::profile::StartupOverrides::default();
+    let mut vr_requested = false;
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--vr" => {
+                overrides.enable.push(extensions::OPENBF_VR_ID.to_string());
+                vr_requested = true;
+            }
+            "--desktop" | "--no-vr" => {
+                overrides.force_desktop = true;
+            }
+            "--enable-ext" => {
+                let id = it.next().context("--enable-ext <id>")?.clone();
+                if id == extensions::OPENBF_VR_ID {
+                    vr_requested = true;
+                }
+                overrides.enable.push(id);
+            }
+            "--disable-ext" => {
+                let id = it.next().context("--disable-ext <id>")?.clone();
+                overrides.disable.push(id);
+            }
+            _ => rest.push(flag.clone()),
+        }
+    }
+    Ok((rest, overrides, vr_requested))
+}
+
+#[cfg(test)]
+mod cli_extension_flag_tests {
+    use super::extract_extension_flags;
+
+    #[test]
+    fn desktop_flag_strips_cleanly_before_sim_hash() {
+        let args: Vec<String> = ["--desktop", "--sim-hash", "100"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let (rest, overrides, vr) = extract_extension_flags(&args).unwrap();
+        assert_eq!(rest, ["--sim-hash", "100"]);
+        assert!(overrides.force_desktop);
+        assert!(!vr);
+    }
+
+    #[test]
+    fn vr_flag_marks_vr_requested() {
+        let args: Vec<String> = ["--vr", "--headless"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let (rest, overrides, vr) = extract_extension_flags(&args).unwrap();
+        assert_eq!(rest, ["--headless"]);
+        assert!(overrides
+            .enable
+            .iter()
+            .any(|id| id == extensions::OPENBF_VR_ID));
+        assert!(vr);
     }
 }
 

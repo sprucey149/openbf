@@ -96,6 +96,7 @@ fn saber_visual_reads_native_team_entry() {
             },
             geometry: None,
             glow_texture: None,
+            tracked_mount: Mat4::IDENTITY,
             local: core::hero_weapon::BladeSegment {
                 start: Vec3::ZERO,
                 end: Vec3::Y,

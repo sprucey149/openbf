@@ -382,6 +382,7 @@ mod tests {
             w.ordnance.impact.as_mut().unwrap().trail = Some(crate::fx::BF1_IMPACT.into());
             let wc = sim.add_weapon_class(w);
             let first = Bolt {
+                tracked_origin: false,
                 visual_shot: tagged_identical
                     .then_some(core::projectile::VisualShot { tick: 0, event: 0 }),
                 pos: Vec3::ZERO,
@@ -672,6 +673,7 @@ mod tests {
         });
         let wc = sim.add_weapon_class(w);
         let mut bolt = Bolt {
+            tracked_origin: false,
             visual_shot: None,
             pos: Vec3::ZERO,
             vel: Vec3::NEG_Z * 40.0,

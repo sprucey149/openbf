@@ -581,6 +581,7 @@ fn a_round_carries_its_trail_until_it_is_gone() {
     let wc = sim.add_weapon_class(w);
     let vel = Vec3::new(30.0, 0.0, -40.0);
     let bolt = |weapon_class| Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::new(0.0, 1.0, 0.0),
         vel,

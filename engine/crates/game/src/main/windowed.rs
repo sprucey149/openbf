@@ -8,10 +8,14 @@
 mod display;
 #[path = "windowed/events.rs"]
 mod events;
+#[path = "windowed/xr.rs"]
+mod xr;
+
+use super::extensions_host::ResolvedStartup;
 
 use super::battle::{
-    hud_model, load_and_upload, load_hud_view, make_walk, spawn_model, squad_icons, stats_pages,
-    walk_draws,
+    hud_model_for_view, load_and_upload, load_hud_view, make_walk, spawn_model, squad_icons,
+    stats_pages, upload_world_marker_assets, walk_draws, world_objective_draws, WorldMarkerAssets,
 };
 use super::{BattleSetup, ViewerArgs};
 use anyhow::Result;
@@ -52,10 +56,10 @@ fn play_event_sounds(
     aspect: f32,
     walk: &WalkSim,
     muted: Option<u32>,
+    listener: &game::sounds::Listener,
 ) {
-    let listener = game::event_sounds::listener(walk);
     game::event_sounds::each_off_handle(walk, listener.pos, |name, pos| {
-        sl.play(audio, name, pos, &listener);
+        sl.play(audio, name, pos, listener);
     });
     // A human's shots and empty clicks, which share a weapon's handle.
     let mut asks = Vec::new();
@@ -64,55 +68,51 @@ fn play_event_sounds(
             asks.push(a);
         }
     });
-    sl.play_weapon_voices(audio, &asks, &listener);
+    sl.play_weapon_voices(audio, &asks, listener);
     // The hurt and death cries, one voice per unit (card UCRY).
     let mut asks = Vec::new();
     game::event_sounds::cries(walk, |c| {
         let hash = c.name.map_or(0, game::classdb::fnv1a_lowercase);
         asks.push((c.unit, hash, c.pos));
     });
-    sl.play_cries(audio, &asks, &listener);
+    sl.play_cries(audio, &asks, listener);
     // The stations' ambient chatter, one handle per station (card PWST).
-    sl.play_station_ambient(audio, &game::event_sounds::station_asks(walk), &listener);
+    sl.play_station_ambient(audio, &game::event_sounds::station_asks(walk), listener);
     // The sounds of the explosions' effects (`Fx::take_sounds`).
     for (name, pos) in effects {
-        sl.play(audio, name, *pos, &listener);
+        sl.play(audio, name, *pos, listener);
     }
     // The layers whose delay ends this tick (card WSND).
-    sl.update(audio, core::TICK_DT, &listener);
+    sl.update(audio, core::TICK_DT, listener);
     // The vehicles' engine layers (card VSND).
     let mut voices = Vec::new();
     engines.tick(walk, |h, l| sl.engine(h, l), &mut voices);
-    sl.loop_voices(audio, &voices, &listener);
+    sl.loop_voices(audio, &voices, listener);
     // The jets' turn-on and turn-off (card JETP2), at the soldier.
     for s in engines.take_jet_shots() {
         match s.kind {
             game::engine_sound::JetShotKind::Boost { rising } => {
-                sl.play_boost(audio, s.unit, &s.name, rising, s.pos, &listener);
+                sl.play_boost(audio, s.unit, &s.name, rising, s.pos, listener);
             }
             _ => {
-                sl.play(audio, &s.name, s.pos, &listener);
+                sl.play(audio, &s.name, s.pos, listener);
             }
         }
     }
-    sl.play_repair_loops(audio, &walk.sim, &listener);
-    sl.play_shield_loops(audio, &walk.sim, &listener);
-    sl.play_choke_loops(audio, &game::event_sounds::choke_loops(walk), &listener);
-    sl.walker_fire_loops(audio, walk, &listener);
-    sl.play_overheat_loops(audio, &walk.sim, &listener);
-    sl.play_turret_sounds(audio, walk, &listener);
-    sl.guided_loops(audio, &walk.sim, &listener);
-    sl.play_hero_blades(audio, walk, &listener);
-    sl.play_hero_samples(
-        audio,
-        &game::event_sounds::hero_sample_asks(walk),
-        &listener,
-    );
+    sl.play_repair_loops(audio, &walk.sim, listener);
+    sl.play_shield_loops(audio, &walk.sim, listener);
+    sl.play_choke_loops(audio, &game::event_sounds::choke_loops(walk), listener);
+    sl.walker_fire_loops(audio, walk, listener);
+    sl.play_overheat_loops(audio, &walk.sim, listener);
+    sl.play_turret_sounds(audio, walk, listener);
+    sl.guided_loops(audio, &walk.sim, listener);
+    sl.play_hero_blades(audio, walk, listener);
+    sl.play_hero_samples(audio, &game::event_sounds::hero_sample_asks(walk), listener);
     // The soldiers' steps and stance sounds (card FOLY).
     if let Some(foley) = foley {
         let view = game::foley::View::of(&walk.camera(), aspect);
         foley.tick(walk, &view, |s| {
-            sl.play_by_hash(audio, s.hash, s.pos, &listener);
+            sl.play_by_hash(audio, s.hash, s.pos, listener);
         });
     }
 }
@@ -125,12 +125,12 @@ fn play_ambience(
     sl: &mut game::sounds::SoundLib,
     ambience: &game::ambience::Ambience,
     walk: &WalkSim,
+    listener: &game::sounds::Listener,
 ) {
-    let listener = game::event_sounds::listener(walk);
     if walk.sim.outcome.is_some() {
         sl.stop_ambient();
     } else {
-        sl.ambient_voices(audio, ambience, &listener);
+        sl.ambient_voices(audio, ambience, listener);
         if game::dev::on() && walk.sim.tick.is_multiple_of(10 * core::TICK_HZ as u64) {
             eprintln!(
                 "ambience: {} of {} emitters sounding",
@@ -676,6 +676,7 @@ struct App {
     bolts: game::bolt_vis::BoltVis,
     fx_quad: Option<MeshHandle>,
     fx_sprite: Option<render::TextureHandle>,
+    world_markers: Option<WorldMarkerAssets>,
     /// D11's two icons: `squad_cmd_highlight` over a commanded bot,
     /// `squad_cmd_cross` on a Hold's anchor.
     squad_icons: (Option<render::TextureHandle>, Option<render::TextureHandle>),
@@ -784,7 +785,12 @@ struct App {
     /// declared before `window` so it goes first.
     idle: Option<idle::IdleInhibit>,
     window: Option<Arc<winit::window::Window>>,
+    data_dir: PathBuf,
+    display_ext_meta: Option<(String, String)>,
+    early_display: Option<Box<dyn extensions::runtime::EarlyDisplayContext>>,
+    display_ext: Option<Box<dyn extensions::runtime::ActiveDisplayExtension>>,
     renderer: Option<Renderer>,
+    failure: Option<anyhow::Error>,
     gpu: Option<SceneGpu>,
     walk: Option<(WalkSim, MeshHandle)>,
     /// Animated soldier models (per team) — `None` before a battle starts.
@@ -924,10 +930,16 @@ fn run_app(event_loop: winit::event_loop::EventLoop<()>, app: &mut App) -> Resul
         }
         return Err(e.into());
     }
+    if let Some(error) = app.failure.take() {
+        if let Some((ext_id, ext_name)) = &app.display_ext_meta {
+            super::extensions_host::report_startup_error(&app.data_dir, ext_id, ext_name, &error);
+        }
+        return Err(error);
+    }
     Ok(())
 }
 
-pub(super) fn run_windowed(v: ViewerArgs) -> Result<()> {
+pub(super) fn run_windowed(v: ViewerArgs, resolved: ResolvedStartup) -> Result<()> {
     let event_loop = winit::event_loop::EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
     let profile = if std::env::var_os("OPENBF_PROFILE").is_some() {
@@ -964,6 +976,9 @@ pub(super) fn run_windowed(v: ViewerArgs) -> Result<()> {
     app.cam = camera_from(v.cam);
     app.walk_requested = v.walk;
     app.mode = v.mode;
+    app.data_dir = resolved.data_dir;
+    app.display_ext_meta = resolved.display_ext_meta;
+    app.early_display = resolved.early_display;
     run_app(event_loop, &mut app)
 }
 
@@ -1039,6 +1054,7 @@ impl App {
             bolts: game::bolt_vis::BoltVis::default(),
             fx_quad: None,
             fx_sprite: None,
+            world_markers: None,
             squad_icons: (None, None),
             hud_view: None,
             blackbox: None,
@@ -1077,7 +1093,12 @@ impl App {
             cheats,
             idle: None,
             window: None,
+            data_dir: extensions::profile::discover_data_dir(),
+            display_ext_meta: None,
+            early_display: None,
+            display_ext: None,
             renderer: None,
+            failure: None,
             gpu: None,
             walk: None,
             soldier_vis: None,
@@ -1781,6 +1802,7 @@ impl App {
         let dir = self.assets_dir.clone();
         self.squad_icons = squad_icons(renderer, &dir);
         self.hud_view = load_hud_view(&dir, renderer);
+        self.world_markers = Some(upload_world_marker_assets(renderer, self.hud_view.as_ref()));
         self.bolts = game::bolt_vis::BoltVis::new(&self.assets_dir, &scene.manifest.source_game);
         renderer.set_sky_seed(
             game::classdb::fnv1a_lowercase(&scene.manifest.map) ^ setup.seed.rotate_left(11),
@@ -1873,6 +1895,13 @@ impl App {
             scene,
             &walk,
         ));
+        if let Some(vis) = self
+            .soldier_vis
+            .as_mut()
+            .filter(|_| self.display_ext.is_some())
+        {
+            vis.load_tracked_arms(renderer);
+        }
         self.vehicle_vis = game::viewer::VehicleVisuals::load(
             renderer,
             scene,
@@ -2289,6 +2318,7 @@ impl App {
             r.clear_scene();
         }
         self.hud_view = None;
+        self.world_markers = None;
         // Drop every held or playing battle sound so nothing leaks over the shell.
         if let Some(a) = self.audio.as_mut() {
             a.clear_game_bus();
@@ -2430,6 +2460,21 @@ impl App {
             self.reset_control_device();
         }
         let shell = matches!(self.screen, Screen::Shell);
+        if let Some(ext) = &self.display_ext {
+            let btns = ext.menu_buttons();
+            if btns.pause {
+                now |= 64;
+            }
+            if btns.back {
+                now |= 32;
+            }
+            if btns.east {
+                now |= game::kbm::MENU_EAST;
+            }
+            if btns.confirm {
+                now |= 16;
+            }
+        }
         now |= game::kbm::menu_bits(self.keys_held, shell);
         let tapped = game::kbm::menu_bits(std::mem::take(&mut self.keys_tapped), shell);
         let north_backs = self.paused;
@@ -2526,7 +2571,11 @@ impl App {
 }
 
 /// Shell entry: window + shell screen; battles start from the menu.
-pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()> {
+pub(super) fn run_shell(
+    assets_dir: PathBuf,
+    missions_dir: PathBuf,
+    resolved: ResolvedStartup,
+) -> Result<()> {
     let hud_file = assets_dir.join("common_bf2/hud/1playerhud.ron");
     if !pak::is_file(&hud_file) {
         let msg = "OpenBF has not been set up yet (no baked game assets were found).\n\n\
@@ -2535,6 +2584,9 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
         anyhow::bail!("{msg}");
     }
     let (event_loop, mut app) = shell_app(assets_dir, missions_dir)?;
+    app.data_dir = resolved.data_dir;
+    app.display_ext_meta = resolved.display_ext_meta;
+    app.early_display = resolved.early_display;
     run_app(event_loop, &mut app)?;
     end_after_close(&app)
 }

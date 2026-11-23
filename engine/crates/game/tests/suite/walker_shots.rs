@@ -438,6 +438,7 @@ fn recorded_identical_shots_keep_their_own_first_flight_endpoints() {
         w.sim.shot_flights.push(ShotFlight {
             shot: VisualShot { tick: 0, event },
             end: Vec3::Z * distance,
+            tracked_origin: false,
         });
     }
     for distance in [10.0, 5.0] {
@@ -540,7 +541,11 @@ fn simultaneous_atte_rounds(difference: f32, first_hits: bool, later_hit: bool) 
         b.pos = origin;
         b.end = origin + direction * 100.0;
         b.advance(core::TICK_DT);
-        w.sim.shot_flights.push(ShotFlight { shot, end: b.end });
+        w.sim.shot_flights.push(ShotFlight {
+            shot,
+            end: b.end,
+            tracked_origin: false,
+        });
         w.sim.bolts.push(b);
         w.sim.events.push(Event::Shot {
             unit: w.player,

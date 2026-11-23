@@ -24,6 +24,8 @@ pub struct BladeBinding {
     pub geometry: Option<String>,
     pub glow_texture: Option<String>,
     pub local: BladeSegment,
+    /// Place a bone-authored hilt in the same grip frame as a primary hilt in VR.
+    pub(crate) tracked_mount: Mat4,
 }
 
 impl BladeBinding {
@@ -220,10 +222,37 @@ fn edges(db: &ClassDb, weapon: &str) -> Result<Vec<Edge>> {
     Ok(result)
 }
 
+fn emitter_frame(root: &Path, model: &str, name: &str) -> Result<Mat4> {
+    let side = root.join("side_bf2");
+    let mut path = manifest::weapon_nodes_path(&side, model);
+    if !pak::is_file(&path) {
+        path = manifest::weapon_nodes_path(&side.join("locals"), model);
+    }
+    let nodes: manifest::WeaponNodes = ron::from_str(
+        &pak::read_to_string(&path)
+            .with_context(|| format!("{} (rebake BF2 heroes)", path.display()))?,
+    )?;
+    let node = nodes
+        .iter()
+        .find(|n| n.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| anyhow!("{model}: no node {name}"))?;
+    let axes = node
+        .axes
+        .ok_or_else(|| anyhow!("{model}: blade node axes missing; rebake BF2 heroes"))?;
+    let frame = Mat4::from_cols(
+        Vec3::from(axes[0]).extend(0.0),
+        Vec3::from(axes[1]).extend(0.0),
+        Vec3::from(axes[2]).extend(0.0),
+        Vec3::from(node.pos).extend(1.0),
+    );
+    physical::matrix(frame)?;
+    Ok(frame)
+}
+
 /// Parse the authored edges and resolve the corresponding weapon node frames.
 /// A pre-hero bake with positions alone must be rebaked before enabling melee.
 pub fn blade_bindings(root: &Path, db: &ClassDb, weapon: &str) -> Result<Vec<BladeBinding>> {
-    edges(db, weapon)?
+    let mut bindings: Vec<_> = edges(db, weapon)?
         .into_iter()
         .map(|edge| {
             // Wampa paw and head edges have zero base length. Their combo
@@ -233,52 +262,56 @@ pub fn blade_bindings(root: &Path, db: &ClassDb, weapon: &str) -> Result<Vec<Bla
             } else {
                 edge.blade.length
             };
-            let local = match &edge.geometry {
-                Some(model) => {
-                    let side = root.join("side_bf2");
-                    let mut path = manifest::weapon_nodes_path(&side, model);
-                    if !pak::is_file(&path) {
-                        path = manifest::weapon_nodes_path(&side.join("locals"), model);
-                    }
-                    let nodes: manifest::WeaponNodes = ron::from_str(
-                        &pak::read_to_string(&path)
-                            .with_context(|| format!("{} (rebake BF2 heroes)", path.display()))?,
-                    )?;
-                    let node = nodes
-                        .iter()
-                        .find(|n| n.name.eq_ignore_ascii_case(&edge.blade.node))
-                        .ok_or_else(|| anyhow!("{model}: no node {}", edge.blade.node))?;
-                    let axes = node.axes.ok_or_else(|| {
-                        anyhow!("{model}: blade node axes missing; rebake BF2 heroes")
-                    })?;
-                    if node
-                        .pos
-                        .iter()
-                        .chain(axes.iter().flatten())
-                        .any(|n| !n.is_finite())
-                    {
-                        bail!("{model}: nonfinite physical blade node {}", node.name);
-                    }
-                    let start = Vec3::from(node.pos);
-                    BladeSegment {
-                        start,
-                        end: start + Vec3::from(axes[2]) * track_length,
-                    }
-                }
-                None => BladeSegment {
-                    start: edge.offset,
-                    end: edge.offset + edge.direction * track_length,
-                },
+            let emitter = edge
+                .geometry
+                .as_deref()
+                .map(|model| emitter_frame(root, model, &edge.blade.node))
+                .transpose()?;
+            let (start, direction) = emitter.map_or((edge.offset, edge.direction), |frame| {
+                (frame.w_axis.truncate(), frame.z_axis.truncate())
+            });
+            let local = BladeSegment {
+                start,
+                end: start + direction * track_length,
             };
             physical::edge(local)?;
-            Ok(BladeBinding {
-                blade: edge.blade,
-                geometry: edge.geometry,
-                glow_texture: edge.glow_texture,
-                local,
-            })
+            Ok((
+                BladeBinding {
+                    blade: edge.blade,
+                    geometry: edge.geometry,
+                    glow_texture: edge.glow_texture,
+                    local,
+                    tracked_mount: Mat4::IDENTITY,
+                },
+                emitter,
+            ))
         })
-        .collect()
+        .collect::<Result<_>>()?;
+    let hand_mounted = |binding: &BladeBinding| {
+        binding.blade.length > 0.0
+            && binding.blade.bone != "hp_weapons"
+            && binding.blade.tracked_hand().is_some()
+    };
+    if bindings
+        .iter()
+        .any(|(b, emitter)| hand_mounted(b) && emitter.is_some())
+    {
+        let grip = bindings
+            .iter()
+            .find_map(|(b, emitter)| (b.blade.bone == "hp_weapons").then_some(*emitter).flatten())
+            // Grievous has no hp_weapons attachment. His hilts share the
+            // Republic hilt geometry, baked in different hand frames.
+            .or_else(|| emitter_frame(root, "rep_weap_inf_lightsabre", "hp_fire").ok());
+        if let Some(grip) = grip {
+            for (binding, emitter) in &mut bindings {
+                if let Some(emitter) = emitter.filter(|_| hand_mounted(binding)) {
+                    binding.tracked_mount = grip * emitter.inverse();
+                    physical::matrix(binding.tracked_mount)?;
+                }
+            }
+        }
+    }
+    Ok(bindings.into_iter().map(|(binding, _)| binding).collect())
 }
 
 fn animation_names(combo: &ComboDef) -> BTreeSet<String> {
@@ -563,6 +596,10 @@ pub fn saber_class(db: &ClassDb, soldier: &str, weapon: &str) -> Result<SaberCla
     let throw_bindings = throw_bind::bindings(db, soldier, &combo, &asset, &sets, &family, &banks)?;
     let class = SaberClass {
         combo,
+        hand_edges: bindings
+            .iter()
+            .map(|binding| binding.segment(binding.tracked_mount))
+            .collect(),
         blades: bindings.into_iter().map(|b| b.blade).collect(),
         throw_edges,
         deflect_edges,

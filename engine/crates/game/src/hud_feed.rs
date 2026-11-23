@@ -279,6 +279,20 @@ pub fn hud_weapon(
 /// shows the settled HUD, not the first instant of its 3 s fade-in.
 const SETTLE_SECONDS: f32 = 10.0;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldMarkerStyle {
+    pub texture_dir: PathBuf,
+    pub texture_name: String,
+    pub rect: [f32; 4],
+    pub uv: [f32; 4],
+    pub color: [f32; 3],
+    pub friendly: Option<[f32; 3]>,
+    pub alpha: f32,
+    pub min_scale: f32,
+    pub max_scale: f32,
+    pub additive: bool,
+}
+
 pub struct HudView {
     hud: Hud,
     art: HudArt,
@@ -685,6 +699,16 @@ impl HudView {
         ui::spawn_draw::help_at(font, page, point, size)
     }
 
+    pub fn stats_help_at(
+        &self,
+        stats: &ui::stats::StatsScreens,
+        point: [f32; 2],
+        size: [f32; 2],
+    ) -> ui::stats::Pad {
+        let font = self.art.menu_font(ui::typography::HELP.face.role());
+        ui::stats_draw::help_at(font, stats, point, size)
+    }
+
     /// Hit-test Instant Action using the same font metrics as its draw pass.
     pub fn instant_target(
         &self,
@@ -861,7 +885,21 @@ impl HudView {
     /// Feed `model`, advance the fades by `dt` seconds and lay the HUD out
     /// for a `size` window. The first call settles the fades.
     pub fn update(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) {
-        self.feed(model, dt);
+        self.update_with_reticle(model, dt, size, Some([0.5, model.reticle_y]));
+    }
+
+    pub fn update_without_reticle(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) {
+        self.update_with_reticle(model, dt, size, None);
+    }
+
+    fn update_with_reticle(
+        &mut self,
+        model: &HudModel,
+        dt: f32,
+        size: [u32; 2],
+        position: Option<[f32; 2]>,
+    ) {
+        self.feed(model, dt, position);
         let frame = ui::hud_draw::draw(&self.hud, &self.art, size.map(|v| v as f32));
         self.install_frame(frame);
     }
@@ -872,13 +910,15 @@ impl HudView {
         page: &ui::hud_draw::campaign::Model,
         size: [u32; 2],
     ) {
-        self.feed(model, 0.0);
+        // The campaign map is a full-screen overlay: no reticle (also the VR
+        // path's choice for overlay screens, which hide the crosshair).
+        self.feed(model, 0.0, None);
         let frame =
             ui::hud_draw::campaign::draw(&self.hud, &self.art, page, size.map(|v| v as f32));
         self.install_frame(frame);
     }
 
-    fn feed(&mut self, model: &HudModel, dt: f32) {
+    fn feed(&mut self, model: &HudModel, dt: f32, reticle_position: Option<[f32; 2]>) {
         // Each weapon row's model, else its icon sheet ([`Self::weapon_mesh`]).
         let mut model = model.clone();
         for (row, w) in [(1, &mut model.weapon), (2, &mut model.weapon2)] {
@@ -905,9 +945,12 @@ impl HudView {
         {
             let files = &self.mesh_files;
             let meshes = &self.art.meshes;
-            ui::hud::feed(&mut self.hud, &model, &|n: &str| {
-                files.contains_key(n) || meshes.contains_key(n)
-            });
+            ui::hud::feed_with_reticle(
+                &mut self.hud,
+                &model,
+                &|n: &str| files.contains_key(n) || meshes.contains_key(n),
+                reticle_position,
+            );
         }
         if let Some(dir) = model.space.as_ref().and_then(|m| m.sheet_dir.as_ref()) {
             if !self.texture_dirs.contains(dir) {
@@ -967,7 +1010,7 @@ impl HudView {
         anim: &ui::pause_draw::Animation,
         size: [u32; 2],
     ) {
-        self.feed(hud, 0.0);
+        self.feed(hud, 0.0, Some([0.5, hud.reticle_y]));
         self.install_frame(ui::pause_draw::draw(
             &self.hud,
             &self.art,
@@ -1184,6 +1227,73 @@ impl HudView {
     /// (`ui::hud_map::window_point`).
     pub fn map_point(&self, world: [f32; 2], clamp: bool, size: [u32; 2]) -> Option<[f32; 2]> {
         ui::hud_map::window_point(&self.hud, world, clamp, [size[0] as f32, size[1] as f32])
+    }
+
+    /// Spawn/map/objective marker template resolved from the loaded HUD layout.
+    pub fn world_marker_styles(
+        &self,
+    ) -> ([Option<WorldMarkerStyle>; 2], [Option<WorldMarkerStyle>; 2]) {
+        let resolve = |style: Option<ui::hud_tree::HintStyle>| -> Option<WorldMarkerStyle> {
+            let style = style?;
+            let e = self.hud.elems.get(style.elem)?;
+            if e.rect.w <= 0.0 || e.rect.h <= 0.0 {
+                return None;
+            }
+            let raw = self.art.icons.layout_sheet(e.texture.as_deref()?);
+            let (sheet, _) = match raw.strip_suffix(ui::hud_draw::SCROLL_SHEET) {
+                Some(s) => (s, true),
+                None => (raw, false),
+            };
+            let (sheet, _) = match sheet.strip_suffix(ui::hud_draw::OPAQUE_SHEET) {
+                Some(s) => (s, true),
+                None => (sheet, false),
+            };
+            let (layer, sheet) = match sheet.split_once('/') {
+                Some((l, s)) => (Some(l), s),
+                None => (None, sheet),
+            };
+            let path = self
+                .texture_dirs
+                .iter()
+                .filter(|d| {
+                    layer.is_none_or(|l| {
+                        d.parent().and_then(|p| p.file_name()) == Some(std::ffi::OsStr::new(l))
+                    })
+                })
+                .map(|d| d.join(format!("{sheet}.ktx2")))
+                .find(|p| pak::is_file(p))?;
+            let texture_dir = path.parent()?.to_path_buf();
+            let texture_name = sheet.to_owned();
+            let sx = (4.0 / 3.0) / ui::hud_tree::FRAME_W;
+            let sy = 1.0 / ui::hud_tree::FRAME_H;
+            let (rx0, ry0) = e.rect.origin();
+            Some(WorldMarkerStyle {
+                texture_dir,
+                texture_name,
+                rect: [
+                    rx0 * sx,
+                    -(ry0 + e.rect.h) * sy,
+                    (rx0 + e.rect.w) * sx,
+                    -ry0 * sy,
+                ],
+                uv: e.tex_coords,
+                color: e.color,
+                friendly: style.friendly,
+                alpha: e.alpha,
+                min_scale: style.min_scale,
+                max_scale: style.max_scale,
+                additive: e.additive,
+            })
+        };
+        let objective = [
+            resolve(self.hud.objective_styles[0]),
+            resolve(self.hud.objective_styles[1]),
+        ];
+        let flag = [
+            resolve(self.hud.flag_styles[0]),
+            resolve(self.hud.flag_styles[1]),
+        ];
+        (objective, flag)
     }
 
     /// The layout's Map element `Scale`, which the spawn map page is drawn

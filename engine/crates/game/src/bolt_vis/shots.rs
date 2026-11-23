@@ -203,6 +203,7 @@ mod tests {
                     event,
                 },
                 end: Vec3::Z * if event == 0 { 2.0 } else { 100.0 },
+                tracked_origin: false,
             });
         }
         let mut survivor = bolt(&w, class, Vec3::Z);

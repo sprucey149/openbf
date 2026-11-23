@@ -726,12 +726,22 @@ impl WalkSim {
     }
 
     pub fn apply_sprint_latch(&self, latch: &mut input::SprintLatch, pad: PadState) -> PadState {
+        self.apply_sprint_latch_with_buffer(latch, pad, false)
+    }
+
+    pub fn apply_sprint_latch_with_buffer(
+        &self,
+        latch: &mut input::SprintLatch,
+        pad: PadState,
+        buffer_start: bool,
+    ) -> PadState {
         let weapon = self.sim.units[self.player.index as usize].weapon_class;
-        latch.apply_with_fire_cancel(
+        latch.apply_with_start_buffer(
             pad,
             self.player_on_foot(),
             self.soldier().stance == core::soldier::Stance::Sprint,
             self.sim.weapon_classes[weapon].saber.is_none(),
+            buffer_start,
         )
     }
 
