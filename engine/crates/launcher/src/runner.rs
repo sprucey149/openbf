@@ -59,7 +59,9 @@ impl BuildHandle {
         on_update: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self> {
         let mut cmd = build_pack_command(paths, config)?;
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         #[cfg(target_os = "windows")]
         {
@@ -306,6 +308,7 @@ fn find_python() -> Result<(PathBuf, &'static [&'static str])> {
                 "-c",
                 "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
             ])
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
