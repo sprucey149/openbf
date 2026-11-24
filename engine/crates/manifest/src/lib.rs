@@ -1357,6 +1357,10 @@ pub struct FxBeam {
     pub name: String,
     pub color: [u8; 4],
     pub flare_intensity: f32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub entity_light: bool,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub pulse_period: f32,
     #[serde(
         default = "default_beam_intensity",
         skip_serializing_if = "is_default_beam_intensity"
@@ -1532,3 +1536,11 @@ pub struct DroidChunkManifest {
 
 #[cfg(test)]
 mod tests;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}

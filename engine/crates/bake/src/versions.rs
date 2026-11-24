@@ -18,7 +18,7 @@ pub const SCHEMA: u32 = 1;
 pub const GROUP_VERSIONS: &[(&str, u32)] = &[
     ("tat1", 4),
     ("tat2", 5),
-    ("maps", 6),
+    ("maps", 7),
     ("common", 5),
     ("side", 4),
     ("dlc", 5),

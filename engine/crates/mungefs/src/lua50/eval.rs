@@ -179,10 +179,11 @@ pub struct EvalEnv {
     trace: Option<StandaloneTrace>,
 }
 
-/// Evaluation inputs for the standalone single-player environment. Random
+/// Evaluation inputs for the standalone environment. Random
 /// choices are enumerated by the importer, never made by the analyzer.
 #[derive(Debug, Clone, Default)]
 struct StandaloneTrace {
+    multiplayer: bool,
     random_pick: Option<i64>,
     random_range: Option<(i64, i64)>,
     scripts: Arc<BTreeMap<String, Proto>>,
@@ -728,7 +729,7 @@ fn eval_proto(
                             ret_override = match name.as_str() {
                                 // Registration sees an installation with no separate addons.
                                 "ScriptCB_IsFileExist" => Some(LuaVal::Num(0.0)),
-                                "ScriptCB_InMultiplayer" => Some(LuaVal::Bool(false)),
+                                "ScriptCB_InMultiplayer" => Some(LuaVal::Bool(trace.multiplayer)),
                                 "CreateTimer" => call_args.first().cloned(),
                                 "CreateEffect" => call_args
                                     .first()
@@ -941,16 +942,17 @@ pub fn analyze_mission_script(proto: Proto) -> MissionScriptAnalysis {
     }
 }
 
-/// Analyze all values of a bounded first random choice used by mission setup.
+/// Analyze a bounded first random choice and the multiplayer setup.
 /// Equivalent world selections are coalesced by the addon inspector.
 pub(crate) fn analyze_standalone_variants(
     proto: &Proto,
     scripts: &Arc<BTreeMap<String, Proto>>,
-) -> Vec<MissionScriptAnalysis> {
-    let run = |random_pick| {
+) -> (Vec<MissionScriptAnalysis>, MissionScriptAnalysis) {
+    let run = |random_pick, multiplayer| {
         let mut env = new_env(proto.clone());
         env.trace = Some(StandaloneTrace {
             random_pick,
+            multiplayer,
             scripts: Arc::clone(scripts),
             ..Default::default()
         });
@@ -971,21 +973,23 @@ pub(crate) fn analyze_standalone_variants(
             postload_calls,
         }
     };
-    let first = run(None);
+    let first = run(None, false);
+    let multiplayer = run(None, true);
     let Some((lo, hi)) = first
         .env
         .trace
         .as_ref()
         .and_then(|trace| trace.random_range)
     else {
-        return vec![first];
+        return (vec![first], multiplayer);
     };
     if !matches!(hi.checked_sub(lo), Some(1..=15)) {
-        return vec![first];
+        return (vec![first], multiplayer);
     }
-    std::iter::once(first)
-        .chain((lo + 1..=hi).map(|pick| run(Some(pick))))
-        .collect()
+    let single_player = std::iter::once(first)
+        .chain((lo + 1..=hi).map(|pick| run(Some(pick), false)))
+        .collect();
+    (single_player, multiplayer)
 }
 
 fn follow_local_helpers(

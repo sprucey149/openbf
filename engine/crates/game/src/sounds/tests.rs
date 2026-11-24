@@ -66,6 +66,42 @@ fn both_games_resolve_the_empty_clicks_to_an_audible_take() {
 }
 
 #[test]
+#[ignore = "requires the prepared KTH cache in OPENBF_KTH_TEST_DATA"]
+fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
+    let root = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
+    let map = root.join("mod_cache/mod_kth/assets/mod_kth__kth_dawn");
+    let mut lib = SoundLib::load(&map).expect("baked KTH bank");
+    let manifest: manifest::Manifest =
+        ron::from_str(&std::fs::read_to_string(map.join("manifest.ron")).unwrap()).unwrap();
+    let emitters = manifest
+        .layers
+        .iter()
+        .flat_map(|layer| &layer.regions)
+        .filter_map(crate::ambience::region_emitter)
+        .collect::<Vec<_>>();
+    let amb = crate::ambience::Ambience { emitters };
+    let region = |name| amb.emitters.iter().position(|e| e.sound == name).unwrap();
+    for (name, expected_gain) in [("kth_amb_dawn", 0.378), ("kth_disco_dawn", 0.2646)] {
+        let i = region(name);
+        let e = &amb.emitters[i];
+        let AmbientTake::Stream(take) = lib.ambient_take(e).unwrap() else {
+            panic!("{name}")
+        };
+        assert_eq!((take.format, take.channels), (5, 2));
+        let inside = lib.ambient_heard(&amb, e.pos);
+        assert!((inside.iter().find(|h| h.index == i).unwrap().gain - expected_gain).abs() < 1e-5);
+        let outside = lib.ambient_heard(&amb, e.pos + Vec3::X * (e.max.unwrap() + 1.0));
+        assert_eq!(outside.iter().find(|h| h.index == i).unwrap().gain, 0.0);
+        let mut reader = audio::TakeReader::open(take).unwrap();
+        assert!(reader
+            .next_block()
+            .unwrap()
+            .iter()
+            .any(|p| p[0].abs() > 1e-4));
+    }
+}
+
+#[test]
 fn attenuation_and_pan_shapes() {
     // The rifle fire's CORE template on BF1: 5 - 400 m, rolloff 6.
     let mut p = SoundProp {

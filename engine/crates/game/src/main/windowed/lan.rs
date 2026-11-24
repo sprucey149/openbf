@@ -469,6 +469,13 @@ impl NetplaySession {
 
     /// Every connected human seated, the host's cheat policy.
     fn seat_humans(&self, mut setup: RoundSetup, profile: &game::profile::Profile) -> RoundSetup {
+        setup.map = game::mods_runtime::select_world_variant(
+            &setup.map,
+            &setup.mode,
+            &setup.armies,
+            setup.seed,
+            true,
+        );
         setup.cheat_policy = self.args.cheats;
         setup.awards = self.lobby.awards;
         setup.humans.push(HumanSeat {

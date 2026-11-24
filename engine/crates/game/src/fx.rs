@@ -1311,7 +1311,9 @@ impl Fx {
                 a.draws(self.tick, camera, tex, &mut out);
             }
         }
-        out.extend(self.beams.iter().map(props::Glow::draw));
+        for beam in &self.beams {
+            beam.append_draws(self.tick, camera, &mut out);
+        }
         if let Some(lib) = &self.library {
             out.extend(self.force.draws(camera, |name| {
                 sheet(r, &lib.texture_dirs, &mut self.textures, name)
@@ -1351,8 +1353,9 @@ impl Fx {
                 self.spawn(effect, frame);
                 if let Some(lib) = &self.library {
                     if let Some(beam) = lib.beam(effect) {
-                        self.beams
-                            .push(props::Glow::new(beam, frame, lib.era, None));
+                        self.beams.push(
+                            props::Glow::new(beam, frame, lib.era, None).started_at(self.tick),
+                        );
                     }
                 }
             }

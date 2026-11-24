@@ -117,6 +117,9 @@ pub struct InspectedMission {
     pub layers: Vec<String>,
     pub world_loads: Vec<AddonWorldLoad>,
     pub world_variant: Vec<String>,
+    pub single_player_weight: u8,
+    pub multiplayer_variant: bool,
+    pub shares_variant_entry: bool,
     pub world_events: WorldEvents,
     pub teams: Vec<ParsedTeam>,
     pub local_teams: Vec<LocalTeamDef>,
@@ -200,6 +203,7 @@ pub struct AddonMapGroup<'a> {
     pub display_name: String,
     pub description: String,
     pub source_lvl_rel: String,
+    pub variant_title: Option<String>,
     pub source_lvl_path: Option<PathBuf>,
     pub loadscreen_lvl_path: Option<PathBuf>,
     pub world_loads: Vec<AddonWorldLoad>,
@@ -358,6 +362,10 @@ impl AddonInspection {
                 })
                 .unwrap_or_else(|| (self.display_name.clone(), self.description.clone()));
 
+            let variant_title = list
+                .iter()
+                .any(|m| m.shares_variant_entry)
+                .then(|| title.clone());
             let title = if variant.is_empty() {
                 title
             } else {
@@ -371,6 +379,7 @@ impl AddonInspection {
                 map_key,
                 legacy_code: legacy_stem,
                 display_name: title,
+                variant_title,
                 description: desc,
                 source_lvl_rel,
                 source_lvl_path,
@@ -1128,17 +1137,36 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                         lvl_pc.as_deref(),
                     )
                 };
-                let mut seen = BTreeSet::new();
-                let mut variants: Vec<_> =
-                    lua50::analyze_standalone_variants(proto, &script_protos)
-                        .iter()
-                        .map(fold)
-                        .filter(|m| seen.insert(m.world_loads.clone()))
-                        .collect();
+                let (single_player, multiplayer) =
+                    lua50::analyze_standalone_variants(proto, &script_protos);
+                let mut variants: Vec<InspectedMission> = Vec::new();
+                for mut mission in single_player.iter().map(fold) {
+                    if let Some(previous) = variants
+                        .iter_mut()
+                        .find(|m| m.world_loads == mission.world_loads)
+                    {
+                        previous.single_player_weight += 1;
+                    } else {
+                        mission.single_player_weight = 1;
+                        variants.push(mission);
+                    }
+                }
+                let mut multiplayer = fold(&multiplayer);
+                if let Some(m) = variants
+                    .iter_mut()
+                    .find(|m| m.world_loads == multiplayer.world_loads)
+                {
+                    m.multiplayer_variant = true;
+                } else if !multiplayer.world_loads.is_empty() {
+                    multiplayer.multiplayer_variant = true;
+                    variants.push(multiplayer);
+                }
                 if variants.len() == 1 && variants[0].world_loads.len() <= 1 {
                     // Keep the original declarative extraction for single-archive scripts.
                     let mut mission = fold(&lua50::analyze_mission_script(proto.clone()));
                     mission.world_loads.clear();
+                    mission.single_player_weight = 1;
+                    mission.multiplayer_variant = true;
                     variants = vec![mission];
                 }
                 if variants.len() > 1 && variants.iter().all(|m| m.world_loads.len() == 1) {
@@ -1161,7 +1189,9 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                             .collect();
                     }
                 }
+                let shares_variant_entry = variants.len() > 1;
                 for mut mission in variants {
+                    mission.shares_variant_entry = shares_variant_entry;
                     for load in &mission.world_loads {
                         if let Some(c) = canon_norm(&load.path) {
                             referenced_lvls_canon.insert(c);

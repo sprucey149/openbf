@@ -212,6 +212,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
                 mode: pm.mission.mode.clone(),
                 era: pm.mission.era.clone(),
                 mission_ron: pm.mission_ron.clone(),
+                single_player_weight: pm.mission.single_player_weight,
+                multiplayer_variant: pm.mission.multiplayer_variant,
                 supported,
                 unsupported_reason: reason,
             });
@@ -223,6 +225,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             display_name: g.display_name.clone(),
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
+            variant_title: g.variant_title.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
             missions: planned_missions,

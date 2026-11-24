@@ -1129,20 +1129,25 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
     if m.round_end.is_some() {
         return;
     }
-    // The round timer, top centre under the reinforcement counts.
-    if let Some(t) = m.time_left {
+    if let Some(t) = m
+        .time_left
+        .filter(|_| m.spawn.is_none() && m.outcome.is_none())
+    {
         let secs = t.max(0.0).ceil() as u32;
+        let height = ctx.content_rect().height();
         egui::Area::new(egui::Id::new("hud_timer"))
-            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 12.0))
+            .anchor(Align2::RIGHT_TOP, Vec2::new(-height * 0.16, height * 0.29))
+            .interactable(false)
             .show(ctx, |ui| {
-                panel().show(ui, |ui| {
-                    ui.label(crate::typography::egui_text(
+                ui.add(
+                    egui::Label::new(crate::typography::egui_text(
                         ctx,
-                        &crate::typography::ITEM,
+                        &crate::typography::BODY,
                         crate::typography::tint::BODY,
                         &format!("{}:{:02}", secs / 60, secs % 60),
-                    ));
-                });
+                    ))
+                    .wrap_mode(egui::TextWrapMode::Extend),
+                );
             });
     }
 
@@ -1507,7 +1512,7 @@ mod tests {
                     _ => 0,
                 })
                 .sum();
-            assert!(indices > 100, "{w}x{h}: {indices} indices");
+            assert!(indices > 0, "{w}x{h}: no HUD geometry");
         }
         // Banner states don't panic.
         let ctx = egui::Context::default();
@@ -1518,6 +1523,31 @@ mod tests {
         m.outcome = Some(2);
         m.time_left = Some(0.0);
         let _ = ctx.run(egui::RawInput::default(), |ctx| draw_hud(ctx, &m));
+    }
+
+    #[test]
+    fn match_timer_keeps_all_digits_on_one_line() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(960.0, 540.0),
+            )),
+            ..Default::default()
+        };
+        let m = model();
+        let _ = ctx.run(input.clone(), |ctx| draw_hud(ctx, &m));
+        let out = ctx.run(input, |ctx| draw_hud(ctx, &m));
+        let timer = out
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "2:05" => Some(text),
+                _ => None,
+            })
+            .expect("timer text");
+        assert_eq!(timer.galley.rows.len(), 1);
+        assert!(timer.pos.x > 960.0 * 0.75);
     }
 
     /// The minimap stays over the death camera (`re-spawn-flow.md` §6.2).

@@ -23,7 +23,7 @@ pub use resolve::{
 };
 
 /// Bump whenever cached asset/mission schemas change so stale caches auto-rebuild.
-pub const MOD_CONVERTER_VERSION: u32 = 4;
+pub const MOD_CONVERTER_VERSION: u32 = 5;
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
 pub const CACHE_META_FILE: &str = "cache_meta.ron";
 pub const MOD_MANIFEST_FILE: &str = "openbf_mod.ron";
@@ -130,6 +130,11 @@ pub struct ModMissionSummary {
     pub mode: String,
     pub era: String,
     pub mission_ron: String,
+    /// Number of equivalent single-player world selections in the bounded trace.
+    #[serde(default)]
+    pub single_player_weight: u8,
+    #[serde(default)]
+    pub multiplayer_variant: bool,
     pub supported: bool,
     #[serde(default)]
     pub unsupported_reason: Option<String>,
@@ -143,6 +148,9 @@ pub struct ModMapSummary {
     #[serde(default)]
     pub description: String,
     pub source_lvl: String,
+    /// The shared display title when one mission selects among world bakes.
+    #[serde(default)]
+    pub variant_title: Option<String>,
     #[serde(default)]
     pub modes_cw: Vec<String>,
     #[serde(default)]

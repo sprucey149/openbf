@@ -66,6 +66,9 @@ impl Fx {
 pub(super) struct Glow {
     beam: render::Beam,
     color: [u8; 4],
+    entity_flare: Option<f32>,
+    pulse_period: f32,
+    start_tick: u64,
 }
 
 impl Glow {
@@ -100,6 +103,52 @@ impl Glow {
                 }),
             },
             color: def.color,
+            entity_flare: def.entity_light.then_some(def.flare_intensity),
+            pulse_period: def.pulse_period,
+            start_tick: 0,
+        }
+    }
+
+    pub(super) fn started_at(mut self, tick: u64) -> Self {
+        self.start_tick = tick;
+        self
+    }
+
+    pub(super) fn append_draws(
+        &self,
+        tick: u64,
+        camera: &render::Camera,
+        out: &mut Vec<render::ParticleDraw>,
+    ) {
+        let t = tick.saturating_sub(self.start_tick) as f32 * core::TICK_DT;
+        let factor = if self.pulse_period > 0.0 {
+            1.0 - (2.0 * (t / self.pulse_period).fract() - 1.0).abs()
+        } else {
+            1.0
+        };
+        if self.entity_flare.is_none() || self.beam.length > 0.0 {
+            let mut draw = self.draw();
+            if let render::ParticleShape::Beam(beam) = &mut draw.shape {
+                beam.intensity *= factor;
+            }
+            out.push(draw);
+        }
+        if let Some(flare) = self.entity_flare {
+            let alpha = (f32::from(self.color[3]) * flare * factor).round() as u8;
+            let distance = camera.position.distance(self.beam.base);
+            if alpha > 0 && (self.beam.visible <= 0.0 || distance < self.beam.visible) {
+                let rz = self.beam.cross.map_or(self.beam.r0, |cross| cross.r0z);
+                let radius = (self.beam.r0 + rz) * 0.5;
+                let [r, g, b, _] = self.color;
+                out.extend(crate::holo::lens_flare(
+                    self.beam.base,
+                    radius,
+                    alpha,
+                    1.0,
+                    [r, g, b],
+                    camera,
+                ));
+            }
         }
     }
 

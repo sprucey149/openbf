@@ -240,6 +240,7 @@ pub struct MapEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModMapEntry {
     pub key: String,
+    pub variant_keys: Vec<String>,
     pub legacy_code: String,
     pub name: String,
     pub disambiguator: String,
@@ -413,15 +414,20 @@ pub fn catalog_with_mods(
         *name_counts.entry(m.name.to_ascii_lowercase()).or_insert(0) += 1;
     }
     for m in mod_maps {
-        let missions: Vec<_> = MODES
+        let mut missions = Vec::new();
+        for mode in MODES
             .into_iter()
-            .filter(|&mode| m.modes.iter().any(|era_modes| era_modes.contains(&mode)))
-            .flat_map(|mode| {
-                missions_fn(&m.key, mode)
-                    .into_iter()
-                    .map(move |pair| (mode, pair))
-            })
-            .collect();
+            .filter(|mode| m.modes.iter().any(|era_modes| era_modes.contains(mode)))
+        {
+            for key in &m.variant_keys {
+                for pair in missions_fn(key, mode) {
+                    let mission = (mode, pair);
+                    if !missions.contains(&mission) {
+                        missions.push(mission);
+                    }
+                }
+            }
+        }
         let duplicate = name_counts
             .get(&m.name.to_ascii_lowercase())
             .is_some_and(|&c| c > 1);

@@ -1379,7 +1379,7 @@ impl SoundLib {
             let Some((p, _)) = self.find(e.hash) else {
                 continue;
             };
-            let p = crate::ambience::with_distances(e, &p);
+            let (p, _) = self.ambient_property(e, &p);
             let dist = (e.pos - ears).length();
             let level = attenuation(dist, &p);
             out.push(AmbientHeard {
@@ -1390,6 +1390,25 @@ impl SoundLib {
             });
         }
         out
+    }
+
+    /// PC region streams are placed voices even when the take itself is
+    /// marked 2-D. An unnamed bus on these regions uses the ambience mix.
+    /// measure: retail PC stream-region gain and default routing.
+    fn ambient_property(&self, e: &crate::ambience::Emitter, p: &SoundProp) -> (SoundProp, bool) {
+        let mut p = crate::ambience::with_distances(e, p);
+        let pc_region = e.kind == crate::ambience::Kind::Stream
+            && p.stream
+                .zip(p.segments.first())
+                .and_then(|(stream, &(segment, _))| self.music_takes.get(&(stream, segment)))
+                .is_some_and(|take| take.format == 5);
+        if pc_region {
+            p.flat = false;
+            if p.bus == 0 {
+                p.bus = fnv1a_lowercase("ambience");
+            }
+        }
+        (p, pc_region)
     }
 
     /// Play the world's emitters for `listener`, once per stepped tick
@@ -1413,7 +1432,7 @@ impl SoundLib {
             let Some((p, core)) = self.find(e.hash) else {
                 continue;
             };
-            let p = crate::ambience::with_distances(e, &p);
+            let (p, pc_region) = self.ambient_property(e, &p);
             let ears = if p.flat {
                 (h.gain, h.gain)
             } else {
@@ -1421,8 +1440,14 @@ impl SoundLib {
             };
             let (db, pan) = mixer_pair(ears);
             if let Some(take) = self.stream_take(&p) {
+                let db = if pc_region {
+                    level_db((ears.0 + ears.1) * 0.5)
+                } else {
+                    db
+                };
                 let v = self.ambient.entry(h.index).or_insert_with(|| {
-                    let v = audio.play_stream(take, db, p.looping);
+                    // BF2 retries finished region streams (re-ambience-music.md §1.7).
+                    let v = audio.play_stream(take, db, p.looping || pc_region);
                     AmbientVoice::Stream(v.map_err(|e| eprintln!("ambience: {e:#}")).ok())
                 });
                 if let AmbientVoice::Stream(Some(v)) = v {

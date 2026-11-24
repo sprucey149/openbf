@@ -1357,7 +1357,14 @@ impl App {
     /// Shell → loading screen (BF1 sequence + beep), then the battle of
     /// `row`; `false` when its map is not baked.
     fn begin_loading(&mut self, row: ui::shell::Launch) -> bool {
-        let (key, mode) = (row.key.clone(), row.mode.subst().to_owned());
+        let mode = row.mode.subst().to_owned();
+        let key = game::mods_runtime::select_world_variant(
+            &row.key,
+            &mode,
+            &row.armies,
+            42u32.wrapping_add(self.profile.career.rounds),
+            false,
+        );
         self.begin_loading_key(&key, mode, Some(row))
     }
 

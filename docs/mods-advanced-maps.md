@@ -1,16 +1,16 @@
 # Advanced legacy maps
 
-Copy the original `KTH` folder into `openbf_data/mods/KTH` and enable **Kothlis: Sea Haven** on the launcher’s Mods tab. The launcher prepares the cache automatically. Instant Action lists **Cloudy**, **Dawn**, **Dusk**, **Night**, and **Rain** separately so players can choose the environment. The original Battlefront II presents one map entry and chooses the weather randomly before a single-player round. [FelipeGabe’s release and original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20)
+Copy the original `KTH` folder into `openbf_data/mods/KTH` and enable **Kothlis: Sea Haven** on the launcher’s Mods tab. The launcher prepares the cache automatically. Instant Action lists **Kothlis: Sea Haven** once and selects Cloudy, Dawn, Dusk, Night, or Rain for each standalone round. The LAN host uses the fixed weather scripted for the chosen mode and era. [FelipeGabe’s release and original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20)
 
-Each variant offers Conquest, two-flag Capture the Flag, and the authored sniper Hunt in both the Clone Wars and Galactic Civil War. Registrations guarded by checks for Dark Times, Battlefront Extreme, Beach Troopers, or Republic Commando stay out of the standalone menu. ABR can be enabled at the same time. The bundled VR extension keeps its own enabled state.
+Conquest, two-flag Capture the Flag, and sniper Hunt are available in both eras. Choose Clone Wars Hunt to play the Republic’s Clone Sharpshooter. Galactic Civil War Hunt fields the Empire’s Scout Trooper. Registrations guarded by checks for Dark Times, Battlefront Extreme, Beach Troopers, or Republic Commando stay out of the standalone menu. ABR can be enabled at the same time. The bundled VR extension keeps its own enabled state.
 
 ## How the addon is handled
 
-- `mungefs::addon::parse_addme_script` follows Lua 5.0 conditional branches in the standalone environment. Every file check is evaluated inside the standalone model without querying other installed addons. `analyze_standalone_variants` enumerates a bounded integer choice during setup, reads embedded helper definitions from the addon, and records the ordered `ReadDataFile` selections. [Lua 5.0 instruction semantics](https://www.lua.org/source/5.0/lopcodes.h.html)
+- `mungefs::addon::parse_addme_script` follows Lua 5.0 conditional branches in the standalone environment. Every file check is evaluated inside the standalone model without querying other installed addons. `analyze_standalone_variants` enumerates a bounded integer choice during setup, reads embedded addon helper definitions, and records the ordered `ReadDataFile` selections. The cache retains the selection weight per single-player world and the multiplayer branch per mission. [Lua 5.0 instruction semantics](https://www.lua.org/source/5.0/lopcodes.h.html)
 - The installed addon has one primary world archive and a companion archive with five named selectors. Each companion sublevel carries its own terrain, sky, and lighting. The primary archive contributes the selected mode, weather, and shared day/evening layers. The selected world uses the existing PC model, material, collision, terrain, navigation, and effect readers. The minimap sheet and five variant load screens come from the addon. Variant-exclusive assets keep their own manifests. Byte-identical files share storage where the cache filesystem supports hard links.
 - The PC texture decoder accepts signed D3D9 `V8U8` bump data. The converter keeps signed U and V in the linear RG channels and computes a positive up component for the existing normal-water shader. [Microsoft’s D3D9 bump-map format reference](https://learn.microsoft.com/en-us/windows/win32/direct3d9/bump-map-pixel-formats)
 - `mungefs::addon::world_events::compile` extracts fixed actions from reachable environment callbacks. Instant Action uses the existing world-animation player, which moves collision bodies and rendered instances together. The environment action list supports named station destruction, one-shot delays, route and barrier changes, object kills, and named effects at world objects or path points. No legacy script executes during play.
-- The converter can bake one addon-owned sound archive per map group, including PC IMA stereo streams. Variants share that audio bake. The runtime resolves its local properties first and supplements them with the stock planet bank the mission names.
+- The converter can bake one addon-owned sound archive per map group, including PC IMA stereo streams. Variants share that audio bake. The runtime resolves local properties first and supplements them with the mission’s stock planet bank. PC regional streams honor the authored distance and loop as long as the battle runs. Unnamed region buses use OpenBF’s ambience mix. Original PC output gain still needs a matching capture.
 
 ## Compatibility evidence
 
@@ -18,22 +18,26 @@ The original Battlefront II installation was verified by the user on November 24
 
 | Check | Result |
 | --- | --- |
-| Launcher discovery | The launcher’s scanner found KTH and ABR from one isolated `OPENBF_DATA_DIR`. KTH exposed five entries with six missions each. ABR retained its four missions. |
+| Launcher discovery | The launcher’s scanner found KTH and ABR from one isolated `OPENBF_DATA_DIR`. KTH’s cache contains five worlds and six missions per world. Instant Action exposes one KTH row with those six era and mode combinations. ABR retained its four missions. |
 | Packaged launch | The game and converter were run from an isolated installation using an existing stock `openbf.pak`. All 30 KTH variant, era, and mode combinations built a battle with their stock classes. The headless sweep found six Conquest posts, four CTF posts, and two Hunt posts per world, plus two authored death regions. Separate launches with one mod disabled mounted and played the other. |
 | Outcomes and navigation | A seeded Rain Conquest round ended on tickets at 98 s with a 20-ticket override. A seeded Dawn Hunt reached its 50-point target at 148 s. The Night CTF bot run stayed active through 180 s. The Dawn CTF referee carried the enemy flag into the authored capture volume five times and reached victory. |
 | Environmental event | The Dawn Conquest referee destroys the installed map's named trigger. The command post is disabled and the delayed world pose changes. The normal battle loader supplies the map, station, post, and animation data. |
 | Cache | The packaged launch prepared both mods. A warm launch reused both metadata files. Changing an isolated KTH source file rebuilt KTH and reused ABR. After restoring KTH, the packaged game rebuilt its cache and launched ABR. `fsutil hardlink list` confirmed one shared collision mesh across all five KTH variant directories. |
-| Audio conversion | The packaged cache contains two KTH sample banks, four WAV files, and a shared PC IMA stream body with eleven indexed stereo segments. Playback and variant-specific music still need an interactive check. |
+| Audio conversion | The cache contains two KTH sample banks, four WAV files, and eleven indexed stereo segments. The installed Dawn streams decoded as stereo IMA and measured silent outside their authored radii. Relative loudness still needs an interactive comparison. |
 | Stock determinism | Baseline and candidate packaged binaries both returned `71dabcfadf689bff` for `--no-mods --desktop --sim-hash 100`. Their 15-second stock Geonosis Conquest traces also matched with four AI per team. |
 | VR | The game built with the bundled OpenXR extension. The saved-VR-profile test confirmed that headless and explicit desktop launches still work. Hardware play and stereo captures are pending. |
 | PC water | The serial GPU referee verified normal-mapped refraction, reflection, and responsiveness to changing normal samples. |
-| Visual comparison | Five headless captures show the separate sky, geometry, terrain, foliage, and weather choices. The daytime boardwalk, roofs, and palms correspond to the author's screenshots. The night overview remains darker than the published night boardwalk. Matched outdoor, interior, and water views still need a comparison in the original game. [Original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20) |
+| Visual comparison | Five headless captures show the separate sky, geometry, terrain, foliage, and weather choices. The daytime boardwalk, roofs, and palms correspond to the author's screenshots. The map’s authored `EntityLight` effects supply static Dusk beams and pulsing Night beams. A headless Dusk Hunt capture shows the colored lights and the timer on one line below the minimap. Matched original-game outdoor and water views remain pending. [Battlefront II Mod Tools lighting documentation](https://sites.google.com/site/swbf2modtoolsdocumentation/bf2_lighting) [Original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20) |
 
 ### Reproduce the checks
 
 Place the player's KTH and ABR copies in the isolated `OPENBF_DATA_DIR/mods` and prepare them through the launcher or a packaged launch. The two data-dependent test variables point to that data directory and a directory of baked stock class RONs.
 
+The tested pack contains 128×64 PS2 first-person sniper sheets for the Republic and Empire. The stock PC archives contain 512×256 versions. The existing Classic Plus baker rejects both PC copies under its same-art check, which reproduced the resolution difference independently of KTH.
+
 ```text
+cargo test --manifest-path engine/Cargo.toml -p game --lib kothlis -- --ignored
+cargo test --manifest-path engine/Cargo.toml -p ui --lib match_timer_keeps_all_digits_on_one_line
 cargo test --manifest-path engine/Cargo.toml -p launcher --lib discovers_kothlis_and_abr_with_only_standalone_missions -- --ignored
 cargo test --manifest-path engine/Cargo.toml -p game --bin game --features vr addon_destroyed_station_runs_authored_animation_and_timer_actions -- --ignored
 cargo test --manifest-path engine/Cargo.toml -p game --bin game --features vr addon_two_flag_uses_authored_pickup_and_capture_volumes -- --ignored
@@ -48,4 +52,4 @@ The `mungefs` library suite ran 205 tests successfully, with three ignored data-
 
 ## Integration with side conversion
 
-The addon converter continues to use `classes.ron` and the shared `ModCacheMeta` schema. The converter version is four so caches built by the single-world importer are rebuilt. Side conversion can use the same classes writer and cache schema. A combined branch should coordinate the converter version if it changes emitted side assets as well.
+The addon converter continues to use `classes.ron` and the shared `ModCacheMeta` schema. Converter version five rebuilds caches that lack mission weather selection and the new effect records. Side conversion can use the same classes writer and cache schema. A combined branch should coordinate the converter version if it changes emitted side assets as well.
