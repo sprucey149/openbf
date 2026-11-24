@@ -24,7 +24,7 @@ The original Battlefront II installation was verified by the user on November 24
 | Environmental event | The Dawn Conquest referee destroys the installed map's named trigger. The command post is disabled and the delayed world pose changes. The normal battle loader supplies the map, station, post, and animation data. |
 | Cache | The packaged launch prepared both mods. A warm launch reused both metadata files. Changing an isolated KTH source file rebuilt KTH and reused ABR. After restoring KTH, the packaged game rebuilt its cache and launched ABR. `fsutil hardlink list` confirmed one shared collision mesh across all five KTH variant directories. |
 | Audio conversion | The packaged cache contains two KTH sample banks, four WAV files, and a shared PC IMA stream body with eleven indexed stereo segments. Playback and variant-specific music still need an interactive check. |
-| Stock determinism | Baseline and candidate packaged binaries both returned `71dabcfadf689bff` for `--no-mods --desktop --sim-hash 100`. |
+| Stock determinism | Baseline and candidate packaged binaries both returned `71dabcfadf689bff` for `--no-mods --desktop --sim-hash 100`. Their 15-second stock Geonosis Conquest traces also matched with four AI per team. |
 | VR | The game built with the bundled OpenXR extension. The saved-VR-profile test confirmed that headless and explicit desktop launches still work. Hardware play and stereo captures are pending. |
 | PC water | The serial GPU referee verified normal-mapped refraction, reflection, and responsiveness to changing normal samples. |
 | Visual comparison | Five headless captures show the separate sky, geometry, terrain, foliage, and weather choices. The daytime boardwalk, roofs, and palms correspond to the author's screenshots. The night overview remains darker than the published night boardwalk. Matched outdoor, interior, and water views still need a comparison in the original game. [Original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20) |
@@ -39,6 +39,7 @@ cargo test --manifest-path engine/Cargo.toml -p game --bin game --features vr ad
 cargo test --manifest-path engine/Cargo.toml -p game --bin game --features vr addon_two_flag_uses_authored_pickup_and_capture_volumes -- --ignored
 openbf --desktop --map assets_baked/mod_kth__kth_rain --mission missions/mod_kth__kth_rain_con.ron --mode con --headless --seconds 180 --walk --ai 12 --tickets 20
 openbf --no-mods --desktop --sim-hash 100
+openbf --desktop --no-mods --map assets_baked/bf2_geo1 --mission missions/bf2_geo1_con.ron --mode con --headless --seconds 15 --walk --ai 4
 ```
 
 Set `OPENBF_KTH_TEST_DATA` to the isolated data directory and `OPENBF_KTH_TEST_CLASSES` to the stock class directory. The tests use locally sourced assets. Interactive mouse/keyboard, controller, and headset play still need a human check. Fish and bird flocks, movie previews, and general-purpose Lua timer or trigger APIs remain outside the translated environment action set.
