@@ -960,6 +960,37 @@ pub(super) fn make_walk_with_counts(
                     }
                     st
                 };
+                let flag_names: Vec<&str> = if ctf_state.mode == core::sim::CtfMode::TwoFlag {
+                    let names = [
+                        ctf_def.flags[0].name.as_str(),
+                        ctf_def.flags[1].name.as_str(),
+                    ];
+                    if swapped {
+                        vec![names[1], names[0]]
+                    } else {
+                        names.to_vec()
+                    }
+                } else {
+                    vec![ctf_def.flag.as_str()]
+                };
+                // FUN_0035d2f8 (B2:343280-343287, PC 0x57e7b7) starts a homed
+                // flag's return timer at its class Lifespan.
+                let flag_classes = game::walk::hunt_post_classes(
+                    &b.classes_dir,
+                    &scene.dir,
+                    &scene.manifest.source_game,
+                )?;
+                for (flag, name) in ctf_state.flags.iter_mut().zip(flag_names) {
+                    let lifespan = scene
+                        .manifest
+                        .instances
+                        .iter()
+                        .find(|i| i.name.eq_ignore_ascii_case(name))
+                        .and_then(|i| flag_classes.prop_f32(&i.class, "Lifespan"));
+                    if let Some(lifespan) = lifespan {
+                        flag.drop_timeout = lifespan;
+                    }
+                }
                 let space_ctf = ctf_state.is_space();
                 if ctf_def.hide_cps {
                     for cp in &mut walk.sim.cps {
