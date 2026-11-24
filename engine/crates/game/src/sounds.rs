@@ -365,6 +365,42 @@ impl Bank {
         self.import_props(&source, names);
     }
 
+    fn resolve_core_templates(&mut self, core: &Bank) {
+        let path = self.dir.join(manifest::SOUND_TEMPLATE_FALLBACKS);
+        if !pak::is_file(&path) {
+            return;
+        }
+        let templates = pak::read_to_string(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|text| {
+                Ok(ron::from_str::<Vec<manifest::SoundTemplateFallback>>(
+                    &text,
+                )?)
+            });
+        let templates = match templates {
+            Ok(templates) => templates,
+            Err(error) => {
+                eprintln!("sounds: {}: {error:#}", path.display());
+                return;
+            }
+        };
+        for fallback in templates {
+            let Some(parent) = core.props.get(&fallback.template) else {
+                continue;
+            };
+            if let Some(sound) = self.by_level.get_mut(&(fallback.level, fallback.name)) {
+                fallback.apply(sound, parent);
+            }
+            if let Some(sound) = self
+                .props
+                .get_mut(&fallback.name)
+                .filter(|p| p.level == fallback.level)
+            {
+                fallback.apply(sound, parent);
+            }
+        }
+    }
+
     fn import_props(&mut self, source: &Bank, mut pending: Vec<u32>) {
         self.import_props_with(source, &mut pending, false);
     }
@@ -805,7 +841,7 @@ impl SoundLib {
     /// maps and tat2 → `bf2`). A map dir with no readable manifest gets its own
     /// bank only — there is nothing that says which disc's speech it would use.
     pub fn load(map_dir: &Path) -> Option<SoundLib> {
-        let map = Bank::load(&map_dir.join("sounds"))?;
+        let mut map = Bank::load(&map_dir.join("sounds"))?;
         let game = pak::read_to_string(map_dir.join("manifest.ron"))
             .ok()
             .and_then(|txt| ron::from_str::<manifest::ManifestHead>(&txt).ok())
@@ -834,6 +870,9 @@ impl SoundLib {
             }
             _ => (None, PathBuf::new(), HashMap::new()),
         };
+        if let Some(core) = &core {
+            map.resolve_core_templates(core);
+        }
         // The map's own streams, baked beside its bank (item VO).
         let map_streams_dir = map_dir.join("sounds").join("streams");
         let m = read_index(&map_streams_dir.join("streams.ron"));
@@ -1416,12 +1455,6 @@ impl SoundLib {
                 .is_some_and(|take| take.format == 5);
         if pc_region && p.bus == 0 {
             p.bus = fnv1a_lowercase("ambience");
-            if p.flat && e.min == e.max && e.max.is_some() {
-                // A flat region with one radius supplies a map-wide bed at
-                // full level. Give tracks without a mixer bus headroom.
-                // measure: retail PC gain for flat, unnamed ambient beds.
-                p.gain *= 0.25;
-            }
         }
         (p, pc_region)
     }

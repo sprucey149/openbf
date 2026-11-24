@@ -65,10 +65,18 @@ fn both_games_resolve_the_empty_clicks_to_an_audible_take() {
     }
 }
 
+fn installed_kth_bank(map: &Path) -> SoundLib {
+    let mut lib = SoundLib::load(map).expect("baked KTH bank");
+    let core_dir = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_CORE_SOUNDS").unwrap());
+    let core = Bank::load(&core_dir).expect("baked stock CORE sound bank");
+    lib.map.resolve_core_templates(&core);
+    lib
+}
+
 fn installed_kth_ambience(weather: &str) -> (SoundLib, crate::ambience::Ambience) {
     let root = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
     let map = root.join(format!("mod_cache/mod_kth/assets/mod_kth__kth_{weather}"));
-    let lib = SoundLib::load(&map).expect("baked KTH bank");
+    let lib = installed_kth_bank(&map);
     let manifest: manifest::Manifest =
         ron::from_str(&std::fs::read_to_string(map.join("manifest.ron")).unwrap()).unwrap();
     let emitters = manifest
@@ -85,7 +93,7 @@ fn installed_kth_ambience(weather: &str) -> (SoundLib, crate::ambience::Ambience
 fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
     let (mut lib, amb) = installed_kth_ambience("dawn");
     let region = |name| amb.emitters.iter().position(|e| e.sound == name).unwrap();
-    for (name, expected_gain) in [("kth_amb_dawn", 0.0945), ("kth_disco_dawn", 0.2646)] {
+    for (name, expected_gain) in [("kth_amb_dawn", 0.378), ("kth_disco_dawn", 0.2646)] {
         let i = region(name);
         let e = &amb.emitters[i];
         let AmbientTake::Stream(take) = lib.ambient_take(e).unwrap() else {
@@ -143,12 +151,47 @@ fn kothlis_live_mixer_starts_the_club_track_inside_its_region() {
     assert_eq!(lib.ambient_playing(), 2, "venue music joins the surf");
     lib.ambient_voices(&mut audio, &amb, &outside);
     assert_eq!(lib.ambient_playing(), 1, "venue music stops outside");
+}
 
-    let quiet = lib.ambient_heard(&amb, outside.pos);
-    lib.set_user_volumes(1.0, 1.0);
-    let heard = lib.ambient_heard(&amb, outside.pos);
-    assert_eq!(quiet.len(), 2);
-    assert!(heard.iter().any(|h| h.level > 0.0 && h.gain <= 0.10));
+#[test]
+#[ignore = "requires the actual addon cache and stock CORE sound bank"]
+fn kothlis_fountain_inherits_stock_distance_and_mixer_bus() {
+    let root = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
+    let map = root.join("mod_cache/mod_kth/assets/mod_kth__kth_dusk");
+    let mut lib = installed_kth_bank(&map);
+    let (prop, _) = lib
+        .find_named("fountain")
+        .expect("installed fountain property");
+    assert_eq!(
+        (prop.min_distance, prop.max_distance, prop.rolloff),
+        (2.0, 50.0, 2.0)
+    );
+    assert!(!prop.flat);
+    assert!(prop.looping);
+    assert_eq!(prop.bus, fnv1a_lowercase("ambience"));
+    assert_eq!(prop.gain, 0.7, "addon override");
+
+    let scene = crate::assets::load_scene(&map).unwrap();
+    let db = crate::ambience::class_db(&map, &map.join("classes"), "bf2");
+    let emitters: Vec<_> = scene
+        .manifest
+        .layers
+        .iter()
+        .flat_map(|layer| &layer.instances)
+        .filter_map(|instance| crate::ambience::instance_emitter(instance, &db, true))
+        .filter(|e| e.hash == prop.name_hash)
+        .collect();
+    let amb = crate::ambience::Ambience { emitters };
+    assert_eq!(amb.emitters.len(), 6);
+    let camera = Vec3::new(-74.99, 0.69, 184.27);
+    let heard = lib.ambient_heard(&amb, camera);
+    assert!(heard.iter().all(|h| h.gain == 0.0));
+    let near = lib.ambient_heard(&amb, amb.emitters[0].pos);
+    assert!((near[0].gain - 0.2646).abs() < 1e-5);
+    let take = lib
+        .ambient_take(&amb.emitters[0])
+        .expect("authored fountain sample");
+    assert!(matches!(take, AmbientTake::File(path) if path.is_file()));
 }
 
 #[test]

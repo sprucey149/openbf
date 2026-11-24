@@ -162,7 +162,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
                 link_tree(previous, &sound_out)?;
             } else {
                 let core = insp.core_lvl.as_deref().map(Path::to_string_lossy);
-                match crate::sounds::bake_sounds(
+                match crate::sounds::bake_addon_sounds(
                     &snd_lvl.to_string_lossy(),
                     &map_out_str,
                     core.as_deref(),
