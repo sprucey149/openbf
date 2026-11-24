@@ -430,14 +430,17 @@ fn run_convert_queue(
         snap.generation = snap.generation.saturating_add(1);
         match result {
             Ok(()) => {
-                snap.failed_fingerprints.remove(mod_id);
+                let status = converted_status(&cache_dir, &fp, &bake);
+                if let ModCacheStatus::Failed(err) = &status {
+                    snap.failed_fingerprints
+                        .insert(mod_id.clone(), (fp.clone(), err.clone()));
+                } else {
+                    snap.failed_fingerprints.remove(mod_id);
+                }
                 if let Some(item) = snap.mods.get_mut(mod_id) {
                     item.progress_pct = 100;
                     item.progress_msg = "Ready".into();
-                    item.cache_status = match ModCacheMeta::load(&cache_dir) {
-                        Some(meta) => meta.validate(&cache_dir, &fp),
-                        None => ModCacheStatus::Failed("missing cache metadata".into()),
-                    };
+                    item.cache_status = status;
                 }
             }
             Err(err) => {
@@ -451,6 +454,25 @@ fn run_convert_queue(
         }
         drop(snap);
         wake();
+    }
+}
+
+/// The cache a finished conversion left behind. A cache that still reads as
+/// stale is a failure, never queued again: a `bake` older than this launcher
+/// writes an older converter version every time, and requeueing it loops.
+fn converted_status(cache_dir: &Path, fingerprint: &str, bake: &Path) -> ModCacheStatus {
+    match ModCacheMeta::load(cache_dir).map(|meta| meta.validate(cache_dir, fingerprint)) {
+        None => ModCacheStatus::Failed("missing cache metadata".into()),
+        Some(ModCacheStatus::Stale { reason } | ModCacheStatus::Failed(reason)) => {
+            ModCacheStatus::Failed(format!(
+                "conversion finished but the cache is still stale ({reason}); `{}` may be older than the launcher",
+                bake.display()
+            ))
+        }
+        Some(ModCacheStatus::NeedsConversion) => {
+            ModCacheStatus::Failed("conversion finished but wrote no cache".into())
+        }
+        Some(status) => status,
     }
 }
 
@@ -558,5 +580,53 @@ mod tests {
         assert!(!ids3.contains(&"content.abr_one".to_owned()));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_conversion_that_leaves_a_stale_cache_fails_instead_of_requeueing() {
+        let cache =
+            std::env::temp_dir().join(format!("openbf-worker-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&cache);
+        std::fs::create_dir_all(&cache).unwrap();
+        let bake = Path::new("bake.exe");
+        assert!(matches!(
+            converted_status(&cache, "fp", bake),
+            ModCacheStatus::Failed(_)
+        ));
+
+        let mut meta = ModCacheMeta {
+            schema_version: extensions::mods::MOD_CACHE_SCHEMA_VERSION,
+            converter_version: extensions::mods::MOD_CONVERTER_VERSION - 1,
+            mod_id: "content.abr".into(),
+            namespace: "mod_abr".into(),
+            source_fingerprint: "fp".into(),
+            legacy_addon_id: None,
+            display_name: "ABR".into(),
+            version: None,
+            author: None,
+            description: String::new(),
+            mod_type: ModContentType::LegacyMapAddon,
+            maps: Vec::new(),
+            dependencies: Vec::new(),
+            conflicts: Vec::new(),
+            declared_overrides: Vec::new(),
+            has_locl: false,
+            warnings: Vec::new(),
+        };
+        meta.save_atomic(&cache).unwrap();
+        let status = converted_status(&cache, "fp", bake);
+        assert!(
+            matches!(&status, ModCacheStatus::Failed(e) if e.contains("bake.exe")),
+            "{status:?}"
+        );
+        assert!(!matches!(
+            status,
+            ModCacheStatus::NeedsConversion | ModCacheStatus::Stale { .. }
+        ));
+
+        meta.converter_version = extensions::mods::MOD_CONVERTER_VERSION;
+        meta.save_atomic(&cache).unwrap();
+        assert_eq!(converted_status(&cache, "fp", bake), ModCacheStatus::Ready);
+        let _ = std::fs::remove_dir_all(&cache);
     }
 }
