@@ -19,7 +19,11 @@ use game::walk::WalkSim;
 /// Per-frame state the tick hook carries from one tick to the next.
 pub(super) struct TickState {
     pub selection: Selection,
-    pub medals_seen: core::sim::MedalCounts,
+    /// Each seated human slot's medal counts already announced (`EventFeed::note_medals`):
+    /// the viewer's own lines and the spectator lines for the other humans all
+    /// compare against this, so a peer announces each medal once (LAN §5b). A
+    /// slot not in the map has no career yet; its opening is taken on the first tick.
+    pub medals_seen: std::collections::BTreeMap<u8, core::sim::MedalCounts>,
     pub previous_mount: Option<core::vehicle::Mount>,
     pub stuck_alarm: bool,
     pub tick_pad: core::sim::PadState,
@@ -33,9 +37,25 @@ impl TickState {
         pad: core::sim::PadState,
         aspect: f32,
     ) -> Self {
+        // Seed every seated human slot from its installed career, so the
+        // spectator lines start at each player's opening counts and never
+        // replay a medal earned before this viewer joined (LAN §5b). In single
+        // player this is just slot 0's profile career.
+        let mut medals_seen = std::collections::BTreeMap::new();
+        for &slot in walk.netplay.profiles.keys() {
+            if let Some(counts) = walk.sim.slot_medal_counts(usize::from(slot)) {
+                medals_seen.insert(slot, counts);
+            }
+        }
+        // The local slot always has its own profile's career (single player), so
+        // seed it from the passed-in `medals` when no netplay map carried it.
+        let local = walk.local_slot;
+        if !medals_seen.contains_key(&local) {
+            medals_seen.insert(local, medals);
+        }
         Self {
             selection: Selection::read(walk),
-            medals_seen: medals,
+            medals_seen,
             previous_mount: walk.sim.unit(walk.player).and_then(|u| u.mount),
             stuck_alarm: false,
             tick_pad: pad,

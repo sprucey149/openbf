@@ -1210,13 +1210,15 @@ fn a_lan_guest_reads_and_saves_its_own_slots_medals() {
     let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
     feed.set_opening_medals(&walk);
     assert_eq!(feed.round().opening_medals, Some(guest));
-    let mut seen = guest;
+    // Seeded from each seated slot's opening: the host's slot 0 starts at its
+    // own counts, so viewing as slot 1 announces nothing for it.
+    let mut seen = std::collections::BTreeMap::from([(0u8, host), (1u8, guest)]);
     feed.note_medals(&walk.sim, player, walk.local_slot, &mut seen);
     assert!(
         feed.take().is_empty(),
         "the host's medals are not announced"
     );
-    assert_eq!(seen, guest);
+    assert_eq!(seen.get(&1), Some(&guest));
     // A joiner whose slot has no career yet keeps its saved medals.
     walk.set_local_slot(2);
     assert!(!walk.flush_career_progress(&mut profile));
@@ -1231,12 +1233,12 @@ fn medals_earned_without_bonuses_are_announced_and_flushed_to_the_career() {
     profile.settings.career_awards = false;
     profile.career.medals[8] = 3;
     profile.career.medals[0] = 20;
-    let mut seen = profile.career.medals;
-    walk.sim.install_medal_career(player, seen);
+    let mut seen = std::collections::BTreeMap::from([(0u8, profile.career.medals)]);
+    walk.sim.install_medal_career(player, profile.career.medals);
     walk.sim.set_career_award_bonuses(false);
     walk.sim.score_medal_points(player, 36);
     let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
-    feed.round.opening_medals = Some(seen);
+    feed.round.opening_medals = Some(profile.career.medals);
     feed.note_medals(&walk.sim, player, 0, &mut seen);
     let messages = feed.take();
     assert_eq!(messages.last().unwrap().text, "War Hero");
@@ -1249,7 +1251,7 @@ fn medals_earned_without_bonuses_are_announced_and_flushed_to_the_career() {
 
     // Final stats still see an award after profile autosave when the HUD's
     // notification path has already advanced its seen counts.
-    seen = profile.career.medals;
+    seen.insert(0u8, profile.career.medals);
     feed.note_medals(&walk.sim, player, 0, &mut seen);
     let stats = crate::round_stats::screens(
         &walk.sim,
@@ -1281,11 +1283,12 @@ fn the_medal_name_precedes_a_newly_active_bonus() {
     for (career_count, bonus) in [(0, false), (3, true), (63, true), (64, false)] {
         let mut walk = crate::walk::WalkSim::new(7, Vec3::ZERO, None);
         let player = walk.player;
-        let mut seen = [0; core::sim::MEDAL_THRESHOLDS.len()];
-        seen[8] = career_count;
-        walk.sim.install_medal_career(player, seen);
+        let mut opening = [0; core::sim::MEDAL_THRESHOLDS.len()];
+        opening[8] = career_count;
+        walk.sim.install_medal_career(player, opening);
         walk.sim.score_medal_points(player, 36);
         let mut feed = EventFeed::new(texts(), ["all", "imp"], &[]);
+        let mut seen = std::collections::BTreeMap::from([(0u8, opening)]);
         feed.note_medals(&walk.sim, player, 0, &mut seen);
         let messages = feed.take();
         let messages: Vec<_> = messages
@@ -1301,6 +1304,77 @@ fn the_medal_name_precedes_a_newly_active_bonus() {
         feed.note_medals(&walk.sim, player, 0, &mut seen);
         assert!(feed.take().is_empty());
     }
+}
+
+/// LAN §5b: a peer announces every human's earned medal once. The viewer keeps
+/// his own medal line unchanged; each other seated human gets a spectator line
+/// "<name> earned <award>" in their team colour as the viewer sees it, and a
+/// second call with the advanced seen map replays nothing (dedup).
+#[test]
+fn other_humans_get_a_spectator_award_line_in_their_team_colour() {
+    use ui::hud::message_color;
+    let mut s = scene();
+    // me is team 1 (slot 0); a guest human on team 0 (the enemy) in slot 1.
+    let guest = s
+        .sim
+        .spawn(&UnitSpec::player_in_slot(1, 0, Vec3::new(44.0, 0.0, 0.0)))
+        .expect("guest");
+    // Each starts at 3 War Hero (index 8); one more point earns the next.
+    let opening = [0; 9];
+    s.sim.install_slot_medal_career(0, s.me, opening);
+    s.sim.install_slot_medal_career(1, guest, opening);
+    s.feed.set_player_names([(0, "Dawg"), (1, "Kai")]);
+    // Seed the seen map from each slot's opening, as TickState::new does.
+    let mut seen = std::collections::BTreeMap::from([(0u8, opening), (1u8, opening)]);
+
+    s.sim.score_medal_points(s.me, 36); // me earns War Hero
+    s.sim.score_medal_points(guest, 36); // Kai earns War Hero
+    s.feed.note_medals(&s.sim, s.me, 0, &mut seen);
+    let lines: Vec<(String, [u8; 3])> = s
+        .feed
+        .take()
+        .into_iter()
+        .map(|m| (m.text, m.color))
+        .collect();
+
+    // The viewer's own medal line is the unchanged MEDAL-coloured name.
+    assert!(
+        lines.contains(&("War Hero".to_owned(), message_color::MEDAL)),
+        "the viewer keeps his own award notification"
+    );
+    // Kai, on the enemy team, gets a spectator line in ENEMY colour.
+    assert!(
+        lines.contains(&("Kai earned War Hero".to_owned(), message_color::ENEMY)),
+        "the other human gets a spectator line in the viewer's enemy colour"
+    );
+
+    // A second call with the advanced map replays nothing (dedup / catch-up).
+    s.feed.note_medals(&s.sim, s.me, 0, &mut seen);
+    assert!(s.feed.take().is_empty(), "no medal is announced twice");
+
+    // An ally human gets a spectator line in OWN colour.
+    let mut ally = scene();
+    let friend = ally
+        .sim
+        .spawn(&UnitSpec::player_in_slot(1, 1, Vec3::new(44.0, 0.0, 0.0)))
+        .expect("friend");
+    let opening = [0; 9];
+    ally.sim.install_slot_medal_career(0, ally.me, opening);
+    ally.sim.install_slot_medal_career(1, friend, opening);
+    ally.feed.set_player_names([(0, "Dawg"), (1, "Palpatine")]);
+    let mut seen = std::collections::BTreeMap::from([(0u8, opening), (1u8, opening)]);
+    ally.sim.score_medal_points(friend, 36);
+    ally.feed.note_medals(&ally.sim, ally.me, 0, &mut seen);
+    let lines: Vec<(String, [u8; 3])> = ally
+        .feed
+        .take()
+        .into_iter()
+        .map(|m| (m.text, m.color))
+        .collect();
+    assert!(
+        lines.contains(&("Palpatine earned War Hero".to_owned(), message_color::OWN)),
+        "an allied human's spectator line is in the viewer's own colour"
+    );
 }
 
 #[test]

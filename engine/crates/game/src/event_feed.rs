@@ -754,59 +754,103 @@ impl EventFeed {
         self.round.opening_medals = walk.local_medal_counts();
     }
 
-    /// Medals player slot `slot` (the viewer's) earned since `seen`.
+    /// Medals player slot `slot` (the viewer's) earned since `seen`, plus a
+    /// spectator line for every other seated human who earned one. The
+    /// viewer's own lines are unchanged (`issue #130`); the others get
+    /// `[ours]` "<name> earned <award>" in their team colour as the viewer
+    /// sees it, on the same message queue (LAN §5b). `seen` tracks every
+    /// human slot's opening counts, so a peer announces each medal once.
     pub fn note_medals(
         &mut self,
         sim: &Sim,
         viewer: UnitHandle,
         slot: u8,
-        seen: &mut core::sim::MedalCounts,
+        seen: &mut std::collections::BTreeMap<u8, core::sim::MedalCounts>,
     ) {
-        let slot = usize::from(slot);
-        let Some(counts) = sim.slot_medal_counts(slot) else {
-            return;
-        };
         use crate::round_stats::{CAREER_MEDAL_ORDER, MEDAL_NAMES};
-        for id in CAREER_MEDAL_ORDER {
-            if counts[id] <= seen[id] {
-                continue;
-            }
-            let (key, label) = MEDAL_NAMES[id];
-            // BF2 queues the medal on earning (FUN_0035fd50) and the award
-            // on activation (FUN_00360200). The HUD admits one line at a time.
-            let name = self.screen_text(&format!("game.awards.medal.{key}"), label);
-            self.say(name, message_color::MEDAL, sim.tick);
-            if !sim.slot_career_award_bonuses(slot)
-                || core::sim::medal_level(counts[id]) == 0
-                || core::sim::medal_level(seen[id]) == 3
-            {
-                continue;
-            }
-            let Some(unit) = sim
-                .unit(viewer)
-                .filter(|u| sim.award_bits(u) & (1 << id) != 0)
-            else {
-                continue;
-            };
-            let award = if core::sim::WEAPON_MEDALS & (1 << id) != 0 {
-                let Some(class) = std::iter::once(unit.weapon_class)
-                    .chain(unit.held.iter().map(|w| w.class))
-                    .filter_map(|class| sim.weapon_classes.get(class))
-                    .find(|class| class.unlock_medal() == Some(id as i8))
+
+        // The viewer's own medals, exactly as before (issue #130): the medal
+        // line on earning and the award bonus on activation.
+        let slot_u8 = slot;
+        let slot = usize::from(slot);
+        if let Some(counts) = sim.slot_medal_counts(slot) {
+            let opening = seen
+                .get(&slot_u8)
+                .copied()
+                .unwrap_or([0; core::sim::MEDAL_THRESHOLDS.len()]);
+            for id in CAREER_MEDAL_ORDER {
+                if counts[id] <= opening[id] {
+                    continue;
+                }
+                let (key, label) = MEDAL_NAMES[id];
+                // BF2 queues the medal on earning (FUN_0035fd50) and the award
+                // on activation (FUN_00360200). The HUD admits one line at a time.
+                let name = self.screen_text(&format!("game.awards.medal.{key}"), label);
+                self.say(name, message_color::MEDAL, sim.tick);
+                if !sim.slot_career_award_bonuses(slot)
+                    || core::sim::medal_level(counts[id]) == 0
+                    || core::sim::medal_level(opening[id]) == 3
+                {
+                    continue;
+                }
+                let Some(unit) = sim
+                    .unit(viewer)
+                    .filter(|u| sim.award_bits(u) & (1 << id) != 0)
                 else {
                     continue;
                 };
-                Some(class.name.as_str())
-            } else if sim.medal_effect(unit, id as u16) {
-                None
-            } else {
+                let award = if core::sim::WEAPON_MEDALS & (1 << id) != 0 {
+                    let Some(class) = std::iter::once(unit.weapon_class)
+                        .chain(unit.held.iter().map(|w| w.class))
+                        .filter_map(|class| sim.weapon_classes.get(class))
+                        .find(|class| class.unlock_medal() == Some(id as i8))
+                    else {
+                        continue;
+                    };
+                    Some(class.name.as_str())
+                } else if sim.medal_effect(unit, id as u16) {
+                    None
+                } else {
+                    continue;
+                };
+                if let Some(message) = self.award_bonus(key, award) {
+                    self.say(message, message_color::YELLOW, sim.tick);
+                }
+            }
+            seen.insert(slot as u8, counts);
+        }
+
+        // [ours] The other seated humans' medals: a spectator line for each
+        // earned since that slot's opening, naming the player and the award.
+        let my_team = sim.units[viewer.index as usize].team;
+        let others: Vec<u8> = seen.keys().copied().filter(|&s| s != slot_u8).collect();
+        for other in others {
+            let Some(counts) = sim.slot_medal_counts(usize::from(other)) else {
                 continue;
             };
-            if let Some(message) = self.award_bonus(key, award) {
-                self.say(message, message_color::YELLOW, sim.tick);
+            let opening = seen[&other];
+            let mut lines: Vec<String> = Vec::new();
+            for id in CAREER_MEDAL_ORDER {
+                if counts[id] <= opening[id] {
+                    continue;
+                }
+                let (key, label) = MEDAL_NAMES[id];
+                lines.push(self.screen_text(&format!("game.awards.medal.{key}"), label));
+            }
+            seen.insert(other, counts);
+            if let Some(unit) = sim.players.get(usize::from(other)).copied().flatten() {
+                let team = sim.units[unit.index as usize].team;
+                let color = if sim.allied(my_team, team) {
+                    message_color::OWN
+                } else {
+                    message_color::ENEMY
+                };
+                let who = self.unit_name(sim, unit);
+                for award in lines {
+                    self.say(format!("{who} earned {award}"), color, sim.tick);
+                }
             }
         }
-        *seen = counts;
     }
 
     /// The boundary's warning in the map's game's words (`re-boundary.md` T4).
