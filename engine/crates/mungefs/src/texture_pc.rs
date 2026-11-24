@@ -91,6 +91,8 @@ pub enum PixelFormat {
     L8,
     /// 51 — 16 bpp alpha + luminance.
     A8L8,
+    /// 60 — 16 bpp, two signed bump-map components, U then V.
+    V8U8,
     /// `DXT1` fourcc — BC1, 8 B / 4×4 block, 1-bit alpha.
     Dxt1,
     /// `DXT3` fourcc — BC2, 16 B / block, explicit 4-bit alpha.
@@ -113,6 +115,7 @@ impl PixelFormat {
             28 => A8,
             50 => L8,
             51 => A8L8,
+            60 => V8U8,
             0x3154_5844 => Dxt1,
             0x3354_5844 => Dxt3,
             0x3554_5844 => Dxt5,
@@ -131,6 +134,7 @@ impl PixelFormat {
             A8 => 28,
             L8 => 50,
             A8L8 => 51,
+            V8U8 => 60,
             Dxt1 => 0x3154_5844,
             Dxt3 => 0x3354_5844,
             Dxt5 => 0x3554_5844,
@@ -147,6 +151,7 @@ impl PixelFormat {
             A8 => "A8",
             L8 => "L8",
             A8L8 => "A8L8",
+            V8U8 => "V8U8",
             Dxt1 => "DXT1",
             Dxt3 => "DXT3",
             Dxt5 => "DXT5",
@@ -166,7 +171,7 @@ impl PixelFormat {
     pub fn bytes_per_texel(self) -> usize {
         match self {
             A8R8G8B8 | X8R8G8B8 => 4,
-            R5G6B5 | A1R5G5B5 | A4R4G4B4 | A8L8 => 2,
+            R5G6B5 | A1R5G5B5 | A4R4G4B4 | A8L8 | V8U8 => 2,
             A8 | L8 => 1,
             _ => 0,
         }
@@ -195,6 +200,7 @@ impl PixelFormat {
             A8R8G8B8 => 100,
             X8R8G8B8 => 96,
             A8L8 => 92,
+            V8U8 => 92,
             L8 => 88,
             Dxt5 => 80,
             Dxt3 => 76,
@@ -457,6 +463,16 @@ fn decode_linear(format: PixelFormat, texels: usize, body: &[u8], out: &mut [u8]
             L8 => [px[0], px[0], px[0], 255],
             // Low byte luminance, high byte alpha.
             A8L8 => [px[0], px[0], px[0], px[1]],
+            V8U8 => {
+                // The normal-water shader samples linear RGBA. Store the two
+                // signed components as UNORM and reconstruct the up component.
+                let signed = |byte: u8| f32::from((byte as i8).max(-127)) / 127.0;
+                let unorm = |component: f32| ((component * 0.5 + 0.5) * 255.0).round() as u8;
+                let u = signed(px[0]);
+                let v = signed(px[1]);
+                let up = (1.0 - u * u - v * v).max(0.0).sqrt();
+                [unorm(u), unorm(v), unorm(up), 255]
+            }
             Dxt1 | Dxt3 | Dxt5 => unreachable!("block format in decode_linear"),
         };
         out[i * 4..i * 4 + 4].copy_from_slice(&c);
@@ -796,6 +812,19 @@ mod tests {
         let buf = synth_tex("weird", 0x3254_5844, 4, 4, &[vec![0u8; 16]]);
         let e = Texture::parse(&only_chunk(&buf)).unwrap_err();
         assert!(matches!(e, UcfbError::Unsupported(_)), "{e}");
+    }
+
+    #[test]
+    fn decodes_signed_bump_vectors_for_linear_normal_sampling() {
+        let pixels = decode(60, 3, 1, &[0, 0, 127, 0, 0, 128]).unwrap();
+        assert_eq!(
+            pixels,
+            [128, 128, 255, 255, 255, 128, 128, 255, 128, 0, 128, 255]
+        );
+        assert!(matches!(
+            decode(60, 1, 1, &[0]),
+            Err(UcfbError::Truncated(1))
+        ));
     }
 
     /// A corrupt `mipLevel` must not blow up the shift.

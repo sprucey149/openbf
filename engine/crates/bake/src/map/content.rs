@@ -20,6 +20,7 @@ pub(super) fn bake_content(
     kind: Content,
     pc_lvl: Option<&str>,
     sky_sublevel: Option<(&str, &str)>,
+    addon: Option<super::AddonMapInput<'_>>,
 ) -> Result<Manifest> {
     let galaxy = kind == Content::Map
         && Path::new(lvl_path)
@@ -30,12 +31,21 @@ pub(super) fn bake_content(
         .map(crate::tier::PcTextures::load)
         .transpose()
         .with_context(|| format!("PC override LVL for {lvl_path}"))?;
-    let crate::gameplay::Level {
-        gameplay: buf,
-        original,
-        water_mask,
-    } = crate::gameplay::read_level(lvl_path).with_context(|| lvl_path.to_string())?;
-    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
+    let level = addon
+        .is_none()
+        .then(|| crate::gameplay::read_level(lvl_path))
+        .transpose()
+        .with_context(|| lvl_path.to_string())?;
+    let (buf, original, water_mask) = match (&level, &addon) {
+        (_, Some(input)) => (input.bytes, None, None),
+        (Some(level), None) => (
+            level.gameplay.as_slice(),
+            level.original.as_deref(),
+            level.water_mask,
+        ),
+        (None, None) => unreachable!(),
+    };
+    let inner = mungefs::open(buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir);
     std::fs::create_dir_all(out.join("models"))?;
     std::fs::create_dir_all(out.join("textures"))?;
@@ -228,12 +238,21 @@ pub(super) fn bake_content(
                             );
                         }
                     }
-                    b"lght" => {}
+                    b"lght" if addon.is_none() => {}
                     _ => layer_chunks.push(item),
                 }
             }
             if !group.is_empty() {
-                mode_layers.push(ModeLayer { group, plan, plnp });
+                let selector = addon
+                    .as_ref()
+                    .and_then(|input| input.selectors.get(&sub.tag_u32()))
+                    .cloned();
+                mode_layers.push(ModeLayer {
+                    group,
+                    selector,
+                    plan,
+                    plnp,
+                });
             }
         }
     }
@@ -1555,9 +1574,18 @@ pub(super) fn bake_content(
         };
         let refs: Vec<&mungefs::world::World> = group.iter().collect();
         let nav = nav_block(graph, &refs);
+        let mut world_names: Vec<_> = group.iter().map(|g| g.name.clone()).collect();
+        if let Some(selector) = &ml.selector {
+            if !world_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(selector))
+            {
+                world_names.push(selector.clone());
+            }
+        }
         layers.push(ManifestLayer {
             name: group[0].name.clone(),
-            worlds: group.iter().map(|g| g.name.clone()).collect(),
+            worlds: world_names,
             regions: group
                 .iter()
                 .flat_map(|g| g.regions.iter().map(region_entry))

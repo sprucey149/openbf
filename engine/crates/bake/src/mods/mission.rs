@@ -2,7 +2,8 @@
 //! facts into OpenBF [`MissionDef`]-compatible RON files.
 
 use anyhow::{bail, Result};
-use mungefs::addon::InspectedMission;
+use manifest::world_events::{Action, Anchor, WorldEvents};
+use mungefs::addon::{InspectedMission, WorldAction, WorldEffectAnchor};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -107,7 +108,31 @@ struct MissionDefRon {
     camera_shots: Vec<[f32; 7]>,
     ai: AiSettingsRon,
     layers: Vec<String>,
+    #[serde(skip_serializing_if = "WorldEvents::is_empty")]
+    world_events: WorldEvents,
     source: String,
+}
+
+fn world_action(action: &WorldAction) -> Action {
+    match action {
+        WorldAction::PlayAnimation(name) => Action::PlayAnimation(name.clone()),
+        WorldAction::PauseAnimation(name) => Action::PauseAnimation(name.clone()),
+        WorldAction::KillObject(name) => Action::KillObject(name.clone()),
+        WorldAction::Barrier(name, enable) => Action::Barrier(name.clone(), *enable),
+        WorldAction::Arc(name, block) => Action::Arc(name.clone(), *block),
+        WorldAction::Effect(effect, anchor) => Action::Effect(
+            effect.clone(),
+            match anchor {
+                WorldEffectAnchor::Object(name) => Anchor::Object(name.clone()),
+                WorldEffectAnchor::PathPoint(path, index) => {
+                    Anchor::PathPoint(path.clone(), *index)
+                }
+            },
+        ),
+        WorldAction::After(seconds, actions) => {
+            Action::After(*seconds, actions.iter().map(world_action).collect())
+        }
+    }
 }
 
 /// Convert a statically analyzed legacy BF2 mission into OpenBF mission RON.
@@ -236,6 +261,15 @@ pub fn mission_to_ron(map_key: &str, m: &InspectedMission) -> Result<String> {
             no_capture: m.ai_no_capture.clone(),
         },
         layers: m.layers.clone(),
+        world_events: WorldEvents {
+            start: m.world_events.start.iter().map(world_action).collect(),
+            object_destroyed: m
+                .world_events
+                .object_destroyed
+                .iter()
+                .map(|(name, actions)| (name.clone(), actions.iter().map(world_action).collect()))
+                .collect(),
+        },
         source: format!("addon:{}", m.script_name),
     };
 

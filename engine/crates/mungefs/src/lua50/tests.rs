@@ -148,3 +148,41 @@ fn evaluates_addme_table_insertion_and_dynamic_warnings() {
         .iter()
         .any(|u| u.api == "OnObjectKillName" && u.detail.contains("door01")));
 }
+
+#[test]
+fn standalone_registration_respects_dependency_guard() {
+    let rk = 128;
+    let constants = [
+        LuaConst::Str("ScriptCB_IsFileExist".into()),
+        LuaConst::Str("../../addon/Optional/SIDE/optional.lvl".into()),
+        LuaConst::Num(1.0),
+        LuaConst::Str("AddDownloadableContent".into()),
+        LuaConst::Str("DEMO".into()),
+        LuaConst::Str("demo_optional".into()),
+        LuaConst::Str("democ_con".into()),
+    ];
+    let code = [
+        ins_abx(Op50::GetGlobal, 0, 0),
+        ins_abx(Op50::LoadK, 1, 1),
+        ins_abc(Op50::Call, 0, 2, 2),
+        ins_abc(Op50::Eq, 0, 0, rk + 2),
+        ins_abx(Op50::Jmp, 0, 131_071 + 4),
+        ins_abx(Op50::GetGlobal, 0, 3),
+        ins_abx(Op50::LoadK, 1, 4),
+        ins_abx(Op50::LoadK, 2, 5),
+        ins_abc(Op50::Call, 0, 3, 1),
+        ins_abx(Op50::GetGlobal, 0, 3),
+        ins_abx(Op50::LoadK, 1, 4),
+        ins_abx(Op50::LoadK, 2, 6),
+        ins_abc(Op50::Call, 0, 3, 1),
+        ins_abc(Op50::Return, 0, 1, 0),
+    ];
+    let env = evaluate_standalone_registration(undump(&make_chunk(&constants, &code)).unwrap());
+    let registered: Vec<_> = env
+        .calls
+        .iter()
+        .filter(|call| call.func == "AddDownloadableContent")
+        .filter_map(|call| call.args[1].as_str())
+        .collect();
+    assert_eq!(registered, ["democ_con"]);
+}

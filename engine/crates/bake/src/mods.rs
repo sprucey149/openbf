@@ -3,6 +3,7 @@
 
 pub mod convert;
 pub mod mission;
+mod world;
 
 use extensions::mods::{
     compute_mod_fingerprint, merge_optional_manifest, read_explicit_manifest, DiscoveredMod,

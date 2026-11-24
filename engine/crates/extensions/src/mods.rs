@@ -23,7 +23,7 @@ pub use resolve::{
 };
 
 /// Bump whenever cached asset/mission schemas change so stale caches auto-rebuild.
-pub const MOD_CONVERTER_VERSION: u32 = 3;
+pub const MOD_CONVERTER_VERSION: u32 = 4;
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
 pub const CACHE_META_FILE: &str = "cache_meta.ron";
 pub const MOD_MANIFEST_FILE: &str = "openbf_mod.ron";

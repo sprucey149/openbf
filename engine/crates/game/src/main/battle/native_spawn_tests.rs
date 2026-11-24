@@ -50,6 +50,114 @@ fn load_from(
     make_walk(&scene, &setup).expect("ordinary Conquest fixture")
 }
 
+fn kth_walk(mode: &str) -> (game::assets::Scene, WalkSim) {
+    let data =
+        PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").expect("isolated addon test data"));
+    let classes_dir =
+        PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_CLASSES").expect("stock class data"));
+    let cache = data.join("mod_cache/mod_kth");
+    let key = "mod_kth__kth_dawn";
+    let mission =
+        game::mission::MissionDef::load(&cache.join(format!("missions/{key}_{mode}.ron"))).unwrap();
+    let (scene, _) = game::assets::load_battle_scene_with_layers(
+        &cache.join("assets").join(key),
+        mode,
+        &mission.layers,
+    )
+    .unwrap();
+    let setup = BattleSetup {
+        seed: 42,
+        difficulty: Default::default(),
+        spawn: (0.0, 0.0),
+        spawn_set: false,
+        targets: false,
+        ai: Some(0),
+        ai_cap: None,
+        team_size_pct: None,
+        xl: false,
+        tickets: 250,
+        tickets_set: false,
+        ticket_pct: 100,
+        time_limit: 0,
+        score_limit: 180,
+        space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
+        cheats: Default::default(),
+        teams: Some(mission.factions()),
+        classes_dir,
+        mission: Some(mission),
+        vehicle: None,
+        mission_file: None,
+        player_team: 0,
+        heroes: None,
+        dlc_heroes: false,
+        netplay_rows: false,
+        opening_humans: [0; 2],
+    };
+    let walk = make_walk(&scene, &setup).unwrap();
+    (scene, walk)
+}
+
+#[test]
+#[ignore = "requires the user's converted addon and baked stock classes"]
+fn addon_destroyed_station_runs_authored_animation_and_timer_actions() {
+    let (scene, mut walk) = kth_walk("con");
+    let station = walk
+        .sim
+        .stations
+        .iter()
+        .position(|station| {
+            station.instance.is_some_and(|i| {
+                scene.manifest.instances[i as usize]
+                    .name
+                    .eq_ignore_ascii_case("collapse_trigger")
+            })
+        })
+        .expect("authored trigger resolves to a destructible station");
+    let mut events = walk
+        .world_events
+        .take()
+        .expect("loaded environment program");
+    walk.sim.kill_station(station as u16, Some(walk.player));
+    events.step(&mut walk.sim);
+    assert!(walk
+        .sim
+        .cps
+        .iter()
+        .any(|cp| cp.def.name.eq_ignore_ascii_case("cp1") && cp.killed));
+    let started = events.instance_poses().clone();
+    walk.world_events = Some(events);
+    for _ in 0..(2 * core::TICK_HZ) {
+        walk.step_tick(&[PadState::default()]);
+    }
+    assert_ne!(&started, walk.world_instance_poses().unwrap());
+}
+
+#[test]
+#[ignore = "requires the user's converted addon and baked stock classes"]
+fn addon_two_flag_uses_authored_pickup_and_capture_volumes() {
+    use core::sim::ctf::FlagStatus;
+
+    let (_, mut walk) = kth_walk("ctf");
+    let ctf = walk.sim.ctf.as_ref().expect("authored two-flag mode");
+    assert_eq!(ctf.flags.len(), 2);
+    assert_eq!(ctf.score_limit, 5);
+    let enemy = ctf.flags[1].current_pos;
+    let destination = ctf.capture_regions[0].pos;
+    let player = walk.player;
+    for score in 1..=ctf.score_limit {
+        walk.sim.unit_mut(player).unwrap().soldier.pos = enemy;
+        walk.step_tick(&[PadState::default()]);
+        assert_eq!(
+            walk.sim.ctf.as_ref().unwrap().flags[1].status,
+            FlagStatus::Carried { carrier: player }
+        );
+        walk.sim.unit_mut(player).unwrap().soldier.pos = destination;
+        walk.step_tick(&[PadState::default()]);
+        assert_eq!(walk.sim.ctf.as_ref().unwrap().team_points, [score, 0]);
+    }
+    assert_eq!(walk.sim.outcome, Some(0));
+}
+
 #[test]
 fn gamorrean_resolver_requires_matching_game_and_class() {
     let dir = std::env::temp_dir().join(format!("openbf-gamorrean-{}", std::process::id()));

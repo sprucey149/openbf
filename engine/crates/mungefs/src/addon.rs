@@ -13,6 +13,8 @@ use std::path::{Component, Path, PathBuf};
 use crate::lua50::{self, LuaVal, UnsupportedScriptFeature};
 use crate::{locl, open, UcfbError};
 
+mod world_events;
+
 const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_LVL_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
@@ -73,6 +75,36 @@ pub struct ParsedCtf {
 pub type LocalTeamClasses = Vec<(String, u32, Option<u32>)>;
 pub type LocalTeamDef = (u8, u32, LocalTeamClasses);
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AddonWorldLoad {
+    pub rel_path: String,
+    pub path: PathBuf,
+    pub selectors: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum WorldEffectAnchor {
+    Object(String),
+    PathPoint(String, usize),
+}
+
+#[derive(Debug, Clone)]
+pub enum WorldAction {
+    PlayAnimation(String),
+    PauseAnimation(String),
+    KillObject(String),
+    Barrier(String, bool),
+    Arc(String, bool),
+    Effect(String, WorldEffectAnchor),
+    After(f32, Vec<WorldAction>),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorldEvents {
+    pub start: Vec<WorldAction>,
+    pub object_destroyed: Vec<(String, Vec<WorldAction>)>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InspectedMission {
     pub script_name: String,
@@ -83,6 +115,9 @@ pub struct InspectedMission {
     pub map_lvl_path: Option<PathBuf>,
     pub loadscreen_lvl_path: Option<PathBuf>,
     pub layers: Vec<String>,
+    pub world_loads: Vec<AddonWorldLoad>,
+    pub world_variant: Vec<String>,
+    pub world_events: WorldEvents,
     pub teams: Vec<ParsedTeam>,
     pub local_teams: Vec<LocalTeamDef>,
     pub local_team_relations: Vec<(u8, u8, bool)>,
@@ -167,6 +202,7 @@ pub struct AddonMapGroup<'a> {
     pub source_lvl_rel: String,
     pub source_lvl_path: Option<PathBuf>,
     pub loadscreen_lvl_path: Option<PathBuf>,
+    pub world_loads: Vec<AddonWorldLoad>,
     pub custom_side_lvls: Vec<(String, PathBuf)>,
     pub custom_sound_lvls: Vec<(String, PathBuf)>,
     pub modes_cw: Vec<String>,
@@ -179,24 +215,55 @@ impl AddonInspection {
     /// Group inspected missions by target map LVL under `namespace`, computing
     /// exact mission RON filenames compatible with `game::mission::pick`.
     pub fn map_groups(&self, namespace: &str) -> Vec<AddonMapGroup<'_>> {
-        let mut by_lvl: BTreeMap<String, Vec<&InspectedMission>> = BTreeMap::new();
+        let mut by_lvl = BTreeMap::<_, Vec<&InspectedMission>>::new();
         for m in &self.missions {
             let key = m
                 .map_lvl_rel
                 .clone()
                 .unwrap_or_else(|| self.legacy_addon_id.clone().unwrap_or_else(|| "map".into()));
-            by_lvl.entry(key).or_default().push(m);
+            let companion_loads: Vec<_> = m
+                .world_loads
+                .iter()
+                .filter(|load| Some(&load.path) != m.map_lvl_path.as_ref())
+                .cloned()
+                .collect();
+            by_lvl
+                .entry((key, companion_loads, m.world_variant.clone()))
+                .or_default()
+                .push(m);
         }
 
         let mut used_map_keys: BTreeSet<String> = BTreeSet::new();
         let mut groups = Vec::new();
-        for (source_lvl_rel, list) in by_lvl {
+        for ((source_lvl_rel, companion_loads, primary_variant), list) in by_lvl {
             let legacy_stem = Path::new(&source_lvl_rel)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("map")
                 .to_ascii_lowercase();
-            let base_key = format!("{namespace}__{legacy_stem}");
+            let variant = companion_loads
+                .iter()
+                .flat_map(|load| &load.selectors)
+                .chain(&primary_variant)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("_");
+            let slug: String = variant
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        '_'
+                    }
+                })
+                .take(48)
+                .collect();
+            let base_key = if slug.is_empty() {
+                format!("{namespace}__{legacy_stem}")
+            } else {
+                format!("{namespace}__{legacy_stem}_{slug}")
+            };
             let mut map_key = base_key.clone();
             let mut n = 2usize;
             while !used_map_keys.insert(map_key.clone()) {
@@ -206,6 +273,27 @@ impl AddonInspection {
 
             let source_lvl_path = list.iter().find_map(|m| m.map_lvl_path.clone());
             let loadscreen_lvl_path = list.iter().find_map(|m| m.loadscreen_lvl_path.clone());
+            let mut world_loads: Vec<AddonWorldLoad> = Vec::new();
+            if !companion_loads.is_empty() || !primary_variant.is_empty() {
+                for load in list.iter().flat_map(|m| &m.world_loads) {
+                    if let Some(previous) = world_loads
+                        .iter_mut()
+                        .find(|previous| previous.path == load.path)
+                    {
+                        for selector in &load.selectors {
+                            if !previous
+                                .selectors
+                                .iter()
+                                .any(|s| s.eq_ignore_ascii_case(selector))
+                            {
+                                previous.selectors.push(selector.clone());
+                            }
+                        }
+                    } else {
+                        world_loads.push(load.clone());
+                    }
+                }
+            }
 
             let mut modes_cw_set = BTreeSet::new();
             let mut modes_gcw_set = BTreeSet::new();
@@ -270,6 +358,15 @@ impl AddonInspection {
                 })
                 .unwrap_or_else(|| (self.display_name.clone(), self.description.clone()));
 
+            let title = if variant.is_empty() {
+                title
+            } else {
+                let mut suffix = variant.replace('_', " ");
+                if let Some(first) = suffix.get_mut(..1) {
+                    first.make_ascii_uppercase();
+                }
+                format!("{title} ({suffix})")
+            };
             groups.push(AddonMapGroup {
                 map_key,
                 legacy_code: legacy_stem,
@@ -278,6 +375,7 @@ impl AddonInspection {
                 source_lvl_rel,
                 source_lvl_path,
                 loadscreen_lvl_path,
+                world_loads,
                 custom_side_lvls: side_map.into_iter().collect(),
                 custom_sound_lvls: sound_map.into_iter().collect(),
                 modes_cw: modes_cw_set.into_iter().collect(),
@@ -366,6 +464,20 @@ fn read_bounded(root_canon: &Path, path: &Path, max_bytes: u64) -> Result<Vec<u8
         ));
     }
     fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))
+}
+
+fn archive_has_base_world(root_canon: &Path, path: &Path) -> bool {
+    read_bounded(root_canon, path, MAX_LVL_BYTES)
+        .ok()
+        .and_then(|bytes| {
+            let root = open(&bytes).ok()?;
+            Some(
+                crate::chunks(root)
+                    .flatten()
+                    .any(|chunk| &chunk.tag == b"wrld"),
+            )
+        })
+        .unwrap_or(false)
 }
 
 struct TreeFacts {
@@ -556,7 +668,7 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
             continue;
         }
         let proto = lua50::undump(&sc.body).map_err(|e| format!("addme.script Lua 5.0: {e}"))?;
-        let env = lua50::evaluate_toplevel(proto);
+        let env = lua50::evaluate_standalone_registration(proto);
         summary.unsupported.extend(env.unsupported.clone());
         summary.warnings.extend(env.warnings.clone());
         processed = true;
@@ -964,6 +1076,7 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
     }
 
     // Inspect mission scripts.
+    let mut base_world_archives = BTreeMap::new();
     for ml_path in &mission_lvls {
         let Ok(bytes) = read_bounded(&root_canon, ml_path, MAX_LVL_BYTES) else {
             out.errors
@@ -978,7 +1091,17 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                 continue;
             }
         };
-        for sc in scripts {
+        let script_protos = std::sync::Arc::new(
+            scripts
+                .iter()
+                .filter_map(|sc| {
+                    lua50::undump(&sc.body)
+                        .ok()
+                        .map(|proto| (sc.name.to_ascii_lowercase(), proto))
+                })
+                .collect::<BTreeMap<_, _>>(),
+        );
+        for sc in &scripts {
             if is_helper_script_name(&sc.name) || !sc.body.starts_with(b"\x1bLua") {
                 continue;
             }
@@ -995,16 +1118,65 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                 ));
                 continue;
             }
-            match lua50::undump(&sc.body) {
-                Ok(proto) => {
-                    let analysis = lua50::analyze_mission_script(proto);
-                    let mission = fold_calls(
-                        &analysis,
+            if let Some(proto) = script_protos.get(&low_name) {
+                let fold = |analysis: &lua50::MissionScriptAnalysis| {
+                    fold_calls(
+                        analysis,
                         &sc.name,
                         registered,
                         &root_canon,
                         lvl_pc.as_deref(),
-                    );
+                    )
+                };
+                let mut seen = BTreeSet::new();
+                let mut variants: Vec<_> =
+                    lua50::analyze_standalone_variants(proto, &script_protos)
+                        .iter()
+                        .map(fold)
+                        .filter(|m| seen.insert(m.world_loads.clone()))
+                        .collect();
+                if variants.len() == 1 && variants[0].world_loads.len() <= 1 {
+                    // Keep the original declarative extraction for single-archive scripts.
+                    let mut mission = fold(&lua50::analyze_mission_script(proto.clone()));
+                    mission.world_loads.clear();
+                    variants = vec![mission];
+                }
+                if variants.len() > 1 && variants.iter().all(|m| m.world_loads.len() == 1) {
+                    let common: Vec<_> = variants[0].world_loads[0]
+                        .selectors
+                        .iter()
+                        .filter(|selector| {
+                            variants
+                                .iter()
+                                .all(|m| m.world_loads[0].selectors.contains(selector))
+                        })
+                        .cloned()
+                        .collect();
+                    for mission in &mut variants {
+                        mission.world_variant = mission.world_loads[0]
+                            .selectors
+                            .iter()
+                            .filter(|selector| !common.contains(selector))
+                            .cloned()
+                            .collect();
+                    }
+                }
+                for mut mission in variants {
+                    for load in &mission.world_loads {
+                        if let Some(c) = canon_norm(&load.path) {
+                            referenced_lvls_canon.insert(c);
+                        }
+                    }
+                    let base_world = mission.world_loads.iter().find(|load| {
+                        *base_world_archives
+                            .entry(load.path.clone())
+                            .or_insert_with(|| archive_has_base_world(&root_canon, &load.path))
+                    });
+                    if let Some(base) = base_world.or_else(|| mission.world_loads.last()) {
+                        mission.map_lvl_rel = Some(base.rel_path.clone());
+                        mission.map_lvl_path = Some(base.path.clone());
+                        mission.layers = base.selectors.clone();
+                    }
                     if let Some(p) = &mission.map_lvl_path {
                         if let Some(c) = canon_norm(p) {
                             referenced_lvls_canon.insert(c);
@@ -1037,12 +1209,11 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                     }
                     out.missions.push(mission);
                 }
-                Err(e) => {
-                    out.warnings.push(format!(
-                        "Mission script '{}' failed Lua 5.0 decoding: {e}",
-                        sc.name
-                    ));
-                }
+            } else if let Err(e) = lua50::undump(&sc.body) {
+                out.warnings.push(format!(
+                    "Mission script '{}' failed Lua 5.0 decoding: {e}",
+                    sc.name
+                ));
             }
         }
     }

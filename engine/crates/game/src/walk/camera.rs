@@ -828,13 +828,8 @@ impl WalkSim {
 
     /// Live pose of any animated station or campaign world instance (doors).
     pub(super) fn live_instance_pose(&self, instance: u32) -> Option<Mat4> {
-        self.station_pose(instance).or_else(|| {
-            self.campaign
-                .as_ref()?
-                .instance_poses()
-                .get(&instance)
-                .copied()
-        })
+        self.station_pose(instance)
+            .or_else(|| self.world_instance_poses()?.get(&instance).copied())
     }
 
     /// The props and vehicles the drawn chase camera sees through now (ours,

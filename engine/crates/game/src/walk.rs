@@ -263,6 +263,7 @@ pub struct WalkSim {
     pub blend: crate::render_blend::Blend,
     /// Rise of the Empire sequential campaign state (active on campaign missions only).
     pub campaign: Option<crate::campaign_runtime::CampaignRuntime>,
+    pub world_events: Option<crate::campaign_runtime::WorldEventRuntime>,
     accum: f32,
 }
 
@@ -444,6 +445,7 @@ impl WalkSim {
             native_teams: Default::default(),
             blend: crate::render_blend::Blend::default(),
             campaign: None,
+            world_events: None,
             accum: 0.0,
         }
     }
@@ -924,6 +926,7 @@ impl WalkSim {
             spectate: self.spectate,
             blend: crate::render_blend::Blend::default(),
             campaign: self.campaign.clone(),
+            world_events: self.world_events.clone(),
             accum: self.accum,
         }
     }
@@ -1010,6 +1013,7 @@ impl WalkSim {
             spectate: _,
             blend: _,
             campaign: _,
+            world_events,
             accum: _,
         } = replayed;
         self.sim = sim;
@@ -1021,6 +1025,7 @@ impl WalkSim {
         self.netplay = netplay;
         self.teams = teams;
         self.native_teams = native_teams;
+        self.world_events = world_events;
         self.blend.reset();
         let slot = self.local_slot;
         self.set_local_slot(slot);
@@ -1135,6 +1140,13 @@ impl WalkSim {
         self.respawn_requested = true;
     }
 
+    pub fn world_instance_poses(&self) -> Option<&std::collections::BTreeMap<u32, glam::Mat4>> {
+        self.campaign
+            .as_ref()
+            .map(|rt| rt.instance_poses())
+            .or_else(|| self.world_events.as_ref().map(|rt| rt.instance_poses()))
+    }
+
     /// One fixed tick (also the headless/replay entry — no accumulator).
     /// `pads` is indexed by player slot; slot [`WalkSim::local_slot`] is
     /// [`WalkSim::player`].
@@ -1166,6 +1178,9 @@ impl WalkSim {
         self.refill_after_side_change();
         if self.sim.outcome.is_none() {
             campaign::step(self);
+            if let Some(events) = &mut self.world_events {
+                events.step(&mut self.sim);
+            }
         }
         self.track_class_kills(kills_before);
         self.follow_backdrop();

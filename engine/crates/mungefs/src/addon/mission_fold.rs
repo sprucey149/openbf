@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use super::{resolve_inside_lvl_pc, InspectedMission, ParsedCtf, ParsedCtfFlag, ParsedTeam};
+use super::{
+    resolve_inside_lvl_pc, AddonWorldLoad, InspectedMission, ParsedCtf, ParsedCtfFlag, ParsedTeam,
+};
 use crate::lua50::{self, LuaCall, LuaVal, MissionScriptAnalysis};
 
 fn norm_faction(raw: &str) -> String {
@@ -30,6 +32,10 @@ pub(super) fn fold_calls(
         unsupported_features: analysis.env.unsupported.clone(),
         ..Default::default()
     };
+    let (world_events, translated) = super::world_events::compile(analysis);
+    m.world_events = world_events;
+    m.unsupported_features
+        .retain(|feature| !translated.contains(&feature.api));
 
     let all_calls: Vec<&LuaCall> = analysis
         .init_calls
@@ -99,6 +105,14 @@ pub(super) fn fold_calls(
                             if let Some(pc) = lvl_pc {
                                 if let Some((_, p)) = resolve_inside_lvl_pc(root_canon, pc, first) {
                                     m.custom_sound_lvls.push((stem, p));
+                                    if let Some((archive, level)) = inner.rsplit_once(';') {
+                                        let planet = archive
+                                            .rsplit('/')
+                                            .next()
+                                            .unwrap_or(archive)
+                                            .trim_end_matches(".lvl");
+                                        m.sound_banks.push((planet.to_owned(), level.to_owned()));
+                                    }
                                 }
                             }
                         } else if inner.contains(".lvl") {
@@ -106,8 +120,19 @@ pub(super) fn fold_calls(
                                 if let Some((rel, abs)) =
                                     resolve_inside_lvl_pc(root_canon, pc, first)
                                 {
-                                    m.map_lvl_rel = Some(rel);
-                                    m.map_lvl_path = Some(abs);
+                                    m.map_lvl_rel = Some(rel.clone());
+                                    m.map_lvl_path = Some(abs.clone());
+                                    m.world_loads.push(AddonWorldLoad {
+                                        rel_path: rel,
+                                        path: abs,
+                                        selectors: a
+                                            .iter()
+                                            .skip(1)
+                                            .filter_map(LuaVal::as_str)
+                                            .filter(|s| !s.is_empty())
+                                            .map(str::to_owned)
+                                            .collect(),
+                                    });
                                 } else {
                                     m.map_lvl_rel = Some(norm[3..].to_owned());
                                 }

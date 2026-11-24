@@ -41,6 +41,7 @@ pub mod fpm;
 pub mod hud;
 pub mod shell;
 pub mod world_anim;
+pub mod world_events;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestInstance {

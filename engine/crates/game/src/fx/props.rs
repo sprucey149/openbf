@@ -69,7 +69,12 @@ pub(super) struct Glow {
 }
 
 impl Glow {
-    fn new(def: &manifest::FxBeam, frame: Frame, era: Era, view: Option<render::FarFade>) -> Self {
+    pub(super) fn new(
+        def: &manifest::FxBeam,
+        frame: Frame,
+        era: Era,
+        view: Option<render::FarFade>,
+    ) -> Self {
         let axis = frame.rot * Vec3::from(def.direction);
         Self {
             beam: render::Beam {

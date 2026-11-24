@@ -877,14 +877,19 @@ impl SoundLib {
         })
     }
 
-    /// Load `map_dir`'s own bank if baked, or fall back to matching stock planet
-    /// sound banks declared by `sound_banks` (and `core_bf2` + `audio/global_bf2`).
+    /// Load the map's bank and the stock banks named by an addon mission.
+    /// Local definitions win while the stock references fill missing audio.
     pub fn load_with_fallback(
         map_dir: &Path,
         sound_banks: &[(String, String)],
     ) -> Option<SoundLib> {
-        if let Some(lib) = SoundLib::load(map_dir) {
-            return Some(lib);
+        let local = SoundLib::load(map_dir);
+        let addon = map_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("mod_"));
+        if local.is_some() && (!addon || sound_banks.is_empty()) {
+            return local;
         }
         let game = pak::read_to_string(map_dir.join("manifest.ron"))
             .ok()
@@ -928,6 +933,29 @@ impl SoundLib {
             if fallback_bank.is_some() {
                 break;
             }
+        }
+        if let Some(mut local) = local {
+            if let (Some(bank), Some(dir)) = (fallback_bank, fallback_dir) {
+                let mut names: Vec<_> = bank.props.keys().copied().collect();
+                names.sort_unstable();
+                local.map.import_props_with(&bank, &mut names, true);
+                for (name, record) in bank.music {
+                    local.map.music.entry(name).or_insert(record);
+                }
+                let dir = dir.join("sounds/streams");
+                let index = read_index(&dir.join("streams.ron"));
+                note_indexed(&index, &mut local.indexed);
+                note_music(&index, &dir, &mut local.music_takes);
+                for (id, rel) in index.files {
+                    if let Ok(path) = std::path::absolute(dir.join(rel)) {
+                        local
+                            .map_stream_files
+                            .entry(id)
+                            .or_insert_with(|| path.to_string_lossy().into_owned());
+                    }
+                }
+            }
+            return Some(local);
         }
         let mut core = Bank::load(&root.join(format!("core_{game}")).join("sounds"));
         if let Some(core_bank) = &mut core {

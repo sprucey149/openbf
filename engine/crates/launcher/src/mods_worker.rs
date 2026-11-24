@@ -583,6 +583,30 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the user's installed addon and isolated conversion cache"]
+    fn discovers_kothlis_and_abr_with_only_standalone_missions() {
+        let data = PathBuf::from(
+            std::env::var_os("OPENBF_KTH_TEST_DATA").expect("isolated addon test data"),
+        );
+        let (mods, ids) = scan_mods_sync(&data).unwrap();
+        assert!(ids.contains(&"content.kth".to_owned()));
+        assert!(ids.contains(&"content.abr".to_owned()));
+        let kth = &mods["content.kth"];
+        assert_eq!(kth.maps.len(), 5);
+        for map in &kth.maps {
+            assert_eq!(map.missions.len(), 6, "{}", map.map_key);
+            assert!(map.missions.iter().all(|mission| mission.supported));
+            assert_eq!(map.modes_cw, ["con", "ctf", "hunt"]);
+            assert_eq!(map.modes_gcw, ["con", "ctf", "hunt"]);
+        }
+        assert_eq!(
+            cache_status_for(kth, &data, &BTreeMap::new()),
+            ModCacheStatus::Ready
+        );
+        assert_eq!(mods["content.abr"].maps[0].missions.len(), 4);
+    }
+
+    #[test]
     fn a_conversion_that_leaves_a_stale_cache_fails_instead_of_requeueing() {
         let cache =
             std::env::temp_dir().join(format!("openbf-worker-stale-{}", std::process::id()));
