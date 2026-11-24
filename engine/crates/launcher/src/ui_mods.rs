@@ -23,12 +23,23 @@ impl LauncherApp {
         self.mods_worker.trigger_scan(self.paths.data_dir.clone());
     }
 
+    fn all_visible_mod_ids(&self, folder_ids: &[String]) -> Vec<String> {
+        let mut ids: Vec<String> = folder_ids.to_vec();
+        for ext in &self.extension_catalog {
+            if !ids.iter().any(|existing| existing == &ext.id) {
+                ids.push(ext.id.clone());
+            }
+        }
+        ids
+    }
+
     pub(crate) fn poll_mods(&mut self, ctx: Option<&egui::Context>) {
         let snap = self.mods_worker.snapshot();
         if snap.generation != self.last_synced_mod_gen {
             self.last_synced_mod_gen = snap.generation;
+            let visible_ids = self.all_visible_mod_ids(&snap.folder_ids);
             let prev_order = self.extension_profile.order.clone();
-            self.extension_profile.reconcile_order(&snap.folder_ids);
+            self.extension_profile.reconcile_order(&visible_ids);
             if self.extension_profile.order != prev_order {
                 self.save_extension_profile();
             }
@@ -81,19 +92,15 @@ impl LauncherApp {
     }
 
     pub fn move_mod_up(&mut self, id: &str) {
-        if self
-            .extension_profile
-            .move_up(id, &self.mods_snapshot.folder_ids)
-        {
+        let visible_ids = self.all_visible_mod_ids(&self.mods_snapshot.folder_ids);
+        if self.extension_profile.move_up(id, &visible_ids) {
             self.save_extension_profile();
         }
     }
 
     pub fn move_mod_down(&mut self, id: &str) {
-        if self
-            .extension_profile
-            .move_down(id, &self.mods_snapshot.folder_ids)
-        {
+        let visible_ids = self.all_visible_mod_ids(&self.mods_snapshot.folder_ids);
+        if self.extension_profile.move_down(id, &visible_ids) {
             self.save_extension_profile();
         }
     }
@@ -262,48 +269,43 @@ impl LauncherApp {
                     }
                 }
 
-                let ordered_ids: Vec<String> = self
+                let all_visible = self.all_visible_mod_ids(&snap.folder_ids);
+                let ordered_all: Vec<String> = self
                     .extension_profile
-                    .ordered_visible(&snap.folder_ids)
+                    .ordered_visible(&all_visible)
                     .into_iter()
                     .map(str::to_owned)
                     .collect();
 
-                if !ordered_ids.is_empty() {
-                    let conflict_ids: BTreeSet<String> = content_resolution
-                        .as_ref()
-                        .map(|p| {
-                            p.conflicts
-                                .iter()
-                                .flat_map(|c| {
-                                    std::iter::once(c.winner_id.clone())
-                                        .chain(c.overridden_ids.iter().cloned())
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                let conflict_ids: BTreeSet<String> = content_resolution
+                    .as_ref()
+                    .map(|p| {
+                        p.conflicts
+                            .iter()
+                            .flat_map(|c| {
+                                std::iter::once(c.winner_id.clone())
+                                    .chain(c.overridden_ids.iter().cloned())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-                    let total = ordered_ids.len();
-                    for (idx, mod_id) in ordered_ids.iter().enumerate() {
-                        if let Some(state) = snap.mods.get(mod_id) {
-                            self.draw_content_mod_card(
-                                ui,
-                                state,
-                                idx,
-                                total,
-                                conflict_ids.contains(mod_id),
-                            );
-                        }
+                let total = ordered_all.len();
+                for (idx, item_id) in ordered_all.iter().enumerate() {
+                    if let Some(state) = snap.mods.get(item_id) {
+                        self.draw_content_mod_card(
+                            ui,
+                            state,
+                            idx,
+                            total,
+                            conflict_ids.contains(item_id),
+                        );
+                    } else if let Some(manifest) = catalog.iter().find(|m| m.id == *item_id) {
+                        self.draw_extension_card(ui, manifest, idx, total);
                     }
                 }
 
-                for manifest in &catalog {
-                    if let Some(next_enabled) = self.draw_extension_card(ui, manifest) {
-                        self.set_extension_enabled(&manifest.id, next_enabled);
-                    }
-                }
-
-                if ordered_ids.is_empty() {
+                if snap.folder_ids.is_empty() {
                     draw_notice_box(
                         ui,
                         BG_SIDEBAR,
@@ -349,6 +351,7 @@ impl LauncherApp {
         let mut expanded = ui
             .ctx()
             .data(|d| d.get_temp::<bool>(expand_id).unwrap_or(false));
+        let mut action = None;
         let card_w = (ui.available_width() - 24.0).max(160.0);
 
         let border_color = if !playable || matches!(state.cache_status, ModCacheStatus::Failed(_)) {
@@ -371,7 +374,7 @@ impl LauncherApp {
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_width(card_w);
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 5.0);
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 5.0);
 
                 ui.horizontal(|ui| {
                     let header_resp = ui
@@ -381,18 +384,28 @@ impl LauncherApp {
                                 .sense(Sense::click()),
                             |ui| {
                                 ui.horizontal(|ui| {
+                                    draw_expand_chevron(ui, expanded);
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&info.display_name)
-                                                .font(bold_font(13.5))
+                                                .font(bold_font(14.0))
                                                 .color(TEXT_PRIMARY),
                                         )
                                         .selectable(false),
                                     );
-                                    if let Some(leg) = &info.legacy_addon_id {
-                                        extension_badge(ui, leg, true);
+                                    if let Some(ver) = &info.version {
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(format!("v{ver}"))
+                                                    .font(regular_font(12.0))
+                                                    .color(TEXT_MUTED),
+                                            )
+                                            .selectable(false),
+                                        );
                                     }
-                                    extension_badge(ui, info.mod_type.label(), true);
+                                    if let Some(leg) = &info.legacy_addon_id {
+                                        extension_badge(ui, leg, false);
+                                    }
                                     if has_override_conflict && enabled {
                                         extension_badge(ui, "Override", true);
                                     }
@@ -407,32 +420,16 @@ impl LauncherApp {
                         expanded = !expanded;
                     }
 
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if extension_toggle(ui, &info.id, enabled, playable) {
-                            self.set_content_mod_enabled(&info.id, !enabled);
-                        }
-                        if order_arrow_button(ui, false, idx + 1 < total) {
-                            self.move_mod_down(&info.id);
-                        }
-                        if order_arrow_button(ui, true, idx > 0) {
-                            self.move_mod_up(&info.id);
-                        }
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(format!("#{}", idx + 1))
-                                    .font(bold_font(12.0))
-                                    .color(TEXT_MUTED),
-                            )
-                            .selectable(false),
-                        );
-                        let (status_text, status_color) =
-                            content_status_badge(playable, enabled, state);
-                        ui.label(
-                            egui::RichText::new(status_text)
-                                .font(regular_font(11.5))
-                                .color(status_color),
-                        );
-                    });
+                    let status = content_status_badge(playable, enabled, state);
+                    action = draw_card_right_controls(
+                        ui,
+                        &info.id,
+                        enabled,
+                        playable,
+                        idx,
+                        total,
+                        status.as_ref().map(|(s, c)| (s.as_str(), *c)),
+                    );
                 });
 
                 if matches!(state.cache_status, ModCacheStatus::Converting) {
@@ -490,36 +487,35 @@ impl LauncherApp {
                 }
 
                 if expanded {
-                    ui.add_space(2.0);
+                    if !info.description.is_empty() {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&info.description)
+                                    .font(regular_font(12.5))
+                                    .color(TEXT_PRIMARY),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    ui.horizontal(|ui| {
+                        extension_badge(ui, info.mod_type.label(), true);
+                    });
                     let mut meta_parts = vec![
                         format!("Folder: {}", info.folder_name),
                         format!("ID: {}", info.id),
                         format!("Namespace: {}", info.namespace),
                     ];
-                    if let Some(ver) = &info.version {
-                        meta_parts.push(format!("v{ver}"));
-                    }
                     if let Some(author) = &info.author {
                         meta_parts.push(format!("Author: {author}"));
                     }
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(meta_parts.join("  |  "))
-                                .font(regular_font(11.0))
+                                .font(regular_font(11.5))
                                 .color(TEXT_MUTED),
                         )
                         .wrap(),
                     );
-                    if !info.description.is_empty() {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&info.description)
-                                    .font(regular_font(12.0))
-                                    .color(TEXT_PRIMARY),
-                            )
-                            .wrap(),
-                        );
-                    }
                     for map in &info.maps {
                         let cw = if map.modes_cw.is_empty() {
                             "-".to_owned()
@@ -609,19 +605,27 @@ impl LauncherApp {
                 }
             });
         ui.ctx().data_mut(|d| d.insert_temp(expand_id, expanded));
+        match action {
+            Some(CardControlAction::Toggle) => self.set_content_mod_enabled(&info.id, !enabled),
+            Some(CardControlAction::MoveUp) => self.move_mod_up(&info.id),
+            Some(CardControlAction::MoveDown) => self.move_mod_down(&info.id),
+            None => {}
+        }
     }
 
     pub(crate) fn draw_extension_card(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         manifest: &ExtensionManifest,
-    ) -> Option<bool> {
+        idx: usize,
+        total: usize,
+    ) {
         let enabled = manifest.supported && self.extension_profile.is_enabled(&manifest.id);
         let expand_id = ui.make_persistent_id(("ext_expanded", &manifest.id));
         let mut expanded = ui
             .ctx()
             .data(|d| d.get_temp::<bool>(expand_id).unwrap_or(false));
-        let mut toggled = None;
+        let mut action = None;
         let card_w = (ui.available_width() - 24.0).max(160.0);
         Frame::new()
             .fill(BG_MAIN)
@@ -642,43 +646,7 @@ impl LauncherApp {
                                 .sense(Sense::click()),
                             |ui| {
                                 ui.horizontal(|ui| {
-                                    let (chev_rect, _) = ui
-                                        .allocate_exact_size(Vec2::new(10.0, 16.0), Sense::hover());
-                                    let cx = chev_rect.center().x;
-                                    let cy = chev_rect.center().y;
-                                    let chev_stroke =
-                                        Stroke::new(1.3, Color32::from_rgb(0x55, 0x55, 0x55));
-                                    if expanded {
-                                        ui.painter().line_segment(
-                                            [
-                                                Pos2::new(cx - 3.5, cy - 1.5),
-                                                Pos2::new(cx, cy + 2.0),
-                                            ],
-                                            chev_stroke,
-                                        );
-                                        ui.painter().line_segment(
-                                            [
-                                                Pos2::new(cx, cy + 2.0),
-                                                Pos2::new(cx + 3.5, cy - 1.5),
-                                            ],
-                                            chev_stroke,
-                                        );
-                                    } else {
-                                        ui.painter().line_segment(
-                                            [
-                                                Pos2::new(cx - 1.5, cy - 3.5),
-                                                Pos2::new(cx + 2.0, cy),
-                                            ],
-                                            chev_stroke,
-                                        );
-                                        ui.painter().line_segment(
-                                            [
-                                                Pos2::new(cx + 2.0, cy),
-                                                Pos2::new(cx - 1.5, cy + 3.5),
-                                            ],
-                                            chev_stroke,
-                                        );
-                                    }
+                                    draw_expand_chevron(ui, expanded);
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&manifest.name)
@@ -709,30 +677,16 @@ impl LauncherApp {
                         expanded = !expanded;
                     }
 
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let status = if !manifest.supported {
-                            "Unsupported"
-                        } else if enabled {
-                            "Enabled"
-                        } else {
-                            "Disabled"
-                        };
-                        let status_color = if !manifest.supported {
-                            DOT_MISSING
-                        } else if enabled {
-                            DOT_READY
-                        } else {
-                            TEXT_MUTED
-                        };
-                        if extension_toggle(ui, &manifest.id, enabled, manifest.supported) {
-                            toggled = Some(!enabled);
-                        }
-                        ui.label(
-                            egui::RichText::new(status)
-                                .font(regular_font(12.0))
-                                .color(status_color),
-                        );
-                    });
+                    let status = (!manifest.supported).then_some(("Unsupported", DOT_MISSING));
+                    action = draw_card_right_controls(
+                        ui,
+                        &manifest.id,
+                        enabled,
+                        manifest.supported,
+                        idx,
+                        total,
+                        status,
+                    );
                 });
 
                 if expanded {
@@ -783,28 +737,107 @@ impl LauncherApp {
                 }
             });
         ui.ctx().data_mut(|d| d.insert_temp(expand_id, expanded));
-        toggled
+        match action {
+            Some(CardControlAction::Toggle) => self.set_extension_enabled(&manifest.id, !enabled),
+            Some(CardControlAction::MoveUp) => self.move_mod_up(&manifest.id),
+            Some(CardControlAction::MoveDown) => self.move_mod_down(&manifest.id),
+            None => {}
+        }
     }
+}
+
+#[derive(Clone, Copy)]
+enum CardControlAction {
+    Toggle,
+    MoveUp,
+    MoveDown,
+}
+
+fn draw_expand_chevron(ui: &mut egui::Ui, expanded: bool) {
+    let (chev_rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 16.0), Sense::hover());
+    let cx = chev_rect.center().x;
+    let cy = chev_rect.center().y;
+    let chev_stroke = Stroke::new(1.3, Color32::from_rgb(0x55, 0x55, 0x55));
+    if expanded {
+        ui.painter().line_segment(
+            [Pos2::new(cx - 3.5, cy - 1.5), Pos2::new(cx, cy + 2.0)],
+            chev_stroke,
+        );
+        ui.painter().line_segment(
+            [Pos2::new(cx, cy + 2.0), Pos2::new(cx + 3.5, cy - 1.5)],
+            chev_stroke,
+        );
+    } else {
+        ui.painter().line_segment(
+            [Pos2::new(cx - 1.5, cy - 3.5), Pos2::new(cx + 2.0, cy)],
+            chev_stroke,
+        );
+        ui.painter().line_segment(
+            [Pos2::new(cx + 2.0, cy), Pos2::new(cx - 1.5, cy + 3.5)],
+            chev_stroke,
+        );
+    }
+}
+
+fn draw_card_right_controls(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    enabled: bool,
+    interactive: bool,
+    idx: usize,
+    total: usize,
+    status: Option<(&str, Color32)>,
+) -> Option<CardControlAction> {
+    let mut action = None;
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if extension_toggle(ui, id_salt, enabled, interactive) {
+            action = Some(CardControlAction::Toggle);
+        }
+        if order_arrow_button(ui, false, idx + 1 < total) {
+            action = Some(CardControlAction::MoveDown);
+        }
+        if order_arrow_button(ui, true, idx > 0) {
+            action = Some(CardControlAction::MoveUp);
+        }
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!("#{}", idx + 1))
+                    .font(bold_font(12.0))
+                    .color(TEXT_MUTED),
+            )
+            .selectable(false),
+        );
+        if let Some((status_text, status_color)) = status {
+            ui.label(
+                egui::RichText::new(status_text)
+                    .font(regular_font(12.0))
+                    .color(status_color),
+            );
+        }
+    });
+    action
 }
 
 fn content_status_badge(
     playable: bool,
     enabled: bool,
     state: &DiscoveredModState,
-) -> (String, Color32) {
+) -> Option<(String, Color32)> {
     if !playable {
-        return (state.discovered.compatibility.label().into(), DOT_MISSING);
+        return Some((state.discovered.compatibility.label().into(), DOT_MISSING));
     }
     if !enabled {
-        return ("Disabled".into(), TEXT_MUTED);
+        return None;
     }
     match &state.cache_status {
-        ModCacheStatus::Ready => ("Ready".into(), DOT_READY),
-        ModCacheStatus::Converting => (format!("Converting {}%", state.progress_pct), DOT_BUILDING),
-        ModCacheStatus::NeedsConversion => ("Pending".into(), DOT_BUILDING),
-        ModCacheStatus::Stale { .. } => ("Rebuild".into(), DOT_BUILDING),
-        ModCacheStatus::Failed(_) => ("Failed".into(), DOT_MISSING),
-        ModCacheStatus::NotApplicable => ("Unsupported".into(), DOT_MISSING),
+        ModCacheStatus::Ready => None,
+        ModCacheStatus::Converting => {
+            Some((format!("Converting {}%", state.progress_pct), DOT_BUILDING))
+        }
+        ModCacheStatus::NeedsConversion => Some(("Pending".into(), DOT_BUILDING)),
+        ModCacheStatus::Stale { .. } => Some(("Rebuild".into(), DOT_BUILDING)),
+        ModCacheStatus::Failed(_) => Some(("Failed".into(), DOT_MISSING)),
+        ModCacheStatus::NotApplicable => Some(("Unsupported".into(), DOT_MISSING)),
     }
 }
 
@@ -930,23 +963,73 @@ mod tests {
         assert!(!rendered.iter().any(|(t, _)| t == "Engine Extensions"));
         assert!(!rendered.iter().any(|(t, _)| t == "Content Mods"));
         assert!(!rendered.iter().any(|(t, _)| t.contains("Higher in list")));
+        assert!(!rendered.iter().any(|(t, _)| t == "Ready"));
+        assert!(!rendered.iter().any(|(t, _)| t == "Enabled"));
+        assert!(!rendered.iter().any(|(t, _)| t == "Disabled"));
+        assert!(!rendered.iter().any(|(t, _)| t.contains("Folder: AlphaMod")));
 
         let alpha_rect = rendered
             .iter()
             .find(|(t, _)| t == "AlphaMod")
             .expect("AlphaMod")
             .1;
+        let vr_rect = rendered
+            .iter()
+            .find(|(t, _)| t == "OpenBF VR")
+            .expect("OpenBF VR")
+            .1;
         let order1_rect = rendered.iter().find(|(t, _)| t == "#1").expect("#1").1;
+        let order3_rect = rendered.iter().find(|(t, _)| t == "#3").expect("#3").1;
+        assert!(rendered.iter().any(|(t, _)| t == "#2"));
         assert!(
             order1_rect.left() > alpha_rect.right(),
             "expected #1 right of title: {order1_rect:?} vs {alpha_rect:?}"
         );
+        assert!(
+            order3_rect.left() > vr_rect.right(),
+            "expected #3 right of OpenBF VR title: {order3_rect:?} vs {vr_rect:?}"
+        );
         assert!(rendered.iter().any(|(t, _)| t == "BetaMod"));
-        assert!(rendered.iter().any(|(t, _)| t == "OpenBF VR"));
 
-        // Reorder BetaMod above AlphaMod, toggle BetaMod disabled, verify order persists across restart.
+        // Clicking a content mod header expands its details just like OpenBF VR.
+        let click_pos = alpha_rect.center();
+        for pressed in [None, Some(true), Some(false)] {
+            let mut ev = input.clone();
+            ev.events = match pressed {
+                None => vec![egui::Event::PointerMoved(click_pos)],
+                Some(p) => vec![egui::Event::PointerButton {
+                    pos: click_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: p,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            };
+            let out_click = ctx.run(ev, |ctx| {
+                let _ = app.ui(ctx);
+            });
+            if pressed == Some(false) {
+                let mut expanded_texts = Vec::new();
+                for clipped in &out_click.shapes {
+                    collect_texts(&clipped.shape, &mut expanded_texts);
+                }
+                assert!(
+                    expanded_texts
+                        .iter()
+                        .any(|(t, _)| t.contains("Folder: AlphaMod")),
+                    "expected expanded metadata for AlphaMod; got {expanded_texts:#?}"
+                );
+            }
+        }
+
+        // Reorder BetaMod and OpenBF VR, toggle BetaMod disabled, verify unified & content order persist.
         app.move_mod_up("content.betamod");
+        app.move_mod_up(OPENBF_VR_ID);
         app.set_content_mod_enabled("content.betamod", false);
+        assert_eq!(
+            app.extension_profile
+                .ordered_visible(&app.all_visible_mod_ids(&app.mods_snapshot.folder_ids)),
+            vec!["content.betamod", OPENBF_VR_ID, "content.alphamod"]
+        );
         assert_eq!(
             app.extension_profile
                 .ordered_visible(&app.mods_snapshot.folder_ids),
@@ -955,6 +1038,12 @@ mod tests {
 
         let mut reloaded = LauncherApp::new(paths.clone(), || {});
         wait_for_scan(&mut reloaded, &ctx, &input);
+        assert_eq!(
+            reloaded
+                .extension_profile
+                .ordered_visible(&reloaded.all_visible_mod_ids(&reloaded.mods_snapshot.folder_ids)),
+            vec!["content.betamod", OPENBF_VR_ID, "content.alphamod"]
+        );
         assert_eq!(
             reloaded
                 .extension_profile
@@ -987,6 +1076,8 @@ mod tests {
         reloaded.save_extension_profile();
         // BetaMod is above AlphaMod, but AlphaMod depends on BetaMod -> order error blocks Play!
         assert!(reloaded.play_blocking_reason().is_some());
+        // Step past OpenBF VR (#2) and BetaMod (#1) so AlphaMod sits above its dependency.
+        reloaded.move_mod_up("content.alphamod");
         reloaded.move_mod_up("content.alphamod");
         // Cache is still pending conversion (or failed without bake), so fix dependency error is cleared:
         assert!(resolve_content_mods(
