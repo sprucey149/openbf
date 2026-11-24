@@ -122,8 +122,8 @@ impl ReplayFrame {
         game::forest::submit_actors(r, &walk.sim);
         gpu.pose_doors(&walk.sim.doors);
         gpu.hide_animated(&walk.sim.props);
-        if let Some(campaign) = walk.campaign.as_ref() {
-            gpu.pose_world_anims(campaign.instance_poses());
+        if let Some(poses) = walk.world_instance_poses() {
+            gpu.pose_world_anims(poses);
         }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
@@ -665,8 +665,8 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         gpu.animate_water(&mut r, game::water_anim::clock(0.0), cam.position)?;
         gpu.pose_doors(&walk.sim.doors);
         gpu.hide_animated(&walk.sim.props);
-        if let Some(campaign) = walk.campaign.as_ref() {
-            gpu.pose_world_anims(campaign.instance_poses());
+        if let Some(poses) = walk.world_instance_poses() {
+            gpu.pose_world_anims(poses);
         }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);

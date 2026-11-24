@@ -342,6 +342,21 @@ pub struct MusicVoice {
 }
 
 impl MusicVoice {
+    /// Whether the streaming backend is still playing this voice.
+    pub fn playing(&self) -> bool {
+        #[cfg(feature = "backend")]
+        {
+            use kira::sound::PlaybackState;
+            let state = match &self.inner {
+                MusicHandle::Authored(inner) => inner.state(),
+                MusicHandle::Restored(inner) => inner.state(),
+            };
+            state == PlaybackState::Playing
+        }
+        #[cfg(not(feature = "backend"))]
+        false
+    }
+
     /// The level (0 = unity) reached over `secs`.
     pub fn set_volume(&mut self, volume_db: f32, secs: f32) {
         #[cfg(feature = "backend")]

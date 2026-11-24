@@ -69,6 +69,8 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 
 ## 5. Legacy BF2 Addon Compatibility Report
 
+See the [advanced legacy map compatibility report](mods-advanced-maps.md) for Kothlis: Sea Haven 2.0, including the five Instant Action variants and the verified behavior of each mode.
+
 ### Verified Acceptance Target: Abregado-Rae: Venezia (`ABR`)
 
 Tested headlessly end-to-end against the retail-modded `ABR` addon copied into an isolated `OPENBF_DATA_DIR` (original source folder verified unchanged via SHA-256 before and after every test):

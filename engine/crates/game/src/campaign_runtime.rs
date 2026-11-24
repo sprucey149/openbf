@@ -29,6 +29,9 @@ use manifest::Manifest;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
+mod world_events;
+pub use world_events::WorldEventRuntime;
+
 /// A scripted callback's event (`On<Kind>` registers, `Release<Kind>` drops).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EventKind {

@@ -294,6 +294,12 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Some("pc-first-person") if args.len() == 4 => {
+            let count =
+                bake::fpm::bake_pc_first_person_weapons(Path::new(&ci(&args[2])), &args[3])?;
+            println!("baked {count} PC first-person weapon models -> {}", args[3]);
+            Ok(())
+        }
         Some("shadows") if args.len() == 4 => {
             let count = bake::shadow::bake(Path::new(&ci(&args[2])), Path::new(&args[3]))?;
             println!("baked {count} BF1 shadow models -> {}", args[3]);

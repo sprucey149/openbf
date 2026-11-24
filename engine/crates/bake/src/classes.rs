@@ -56,11 +56,14 @@ impl ClassProps for BakedClass {
 
 pub fn bake_classes(lvl_path: &str, out_ron: &str) -> Result<Vec<BakedClass>> {
     let buf = crate::gameplay::read(lvl_path).with_context(|| lvl_path.to_string())?;
-    let classes = read_classes(&buf, &CLASS_TAGS, MalformedClass::Strict)?;
-    let out = std::path::Path::new(out_ron);
+    write_baked_classes(&buf, std::path::Path::new(out_ron))
+}
+
+pub(crate) fn write_baked_classes(buf: &[u8], out: &std::path::Path) -> Result<Vec<BakedClass>> {
+    let classes = read_classes(buf, &CLASS_TAGS, MalformedClass::Strict)?;
     crate::write_ron(out, &classes)?;
     if let (Some(dir), Some(file)) = (out.parent(), out.file_name()) {
-        let order = damage_load_order(&buf)?;
+        let order = damage_load_order(buf)?;
         crate::write_ron(&dir.join(DAMAGE_ORDER_DIR).join(file), &order)?;
     }
     Ok(classes)

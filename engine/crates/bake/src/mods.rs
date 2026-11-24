@@ -3,6 +3,7 @@
 
 pub mod convert;
 pub mod mission;
+mod world;
 
 use extensions::mods::{
     compute_mod_fingerprint, merge_optional_manifest, read_explicit_manifest, DiscoveredMod,
@@ -66,6 +67,7 @@ pub fn inspect_mod_folder(
             display_name: g.display_name.clone(),
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
+            variant_title: g.variant_title.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
             missions: g
@@ -76,6 +78,8 @@ pub fn inspect_mod_folder(
                     mode: pm.mission.mode.clone(),
                     era: pm.mission.era.clone(),
                     mission_ron: pm.mission_ron.clone(),
+                    single_player_weight: pm.mission.single_player_weight,
+                    multiplayer_variant: pm.mission.multiplayer_variant,
                     supported: pm.mission.supported,
                     unsupported_reason: pm.mission.unsupported_reason.clone(),
                 })

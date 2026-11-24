@@ -185,3 +185,36 @@ pub fn bake_fpms(
     }
     Ok(())
 }
+
+/// Keep the PC models and their own texture sheets together for PC addon
+/// presentation. The standard side bake keeps its own platform assets.
+pub fn bake_pc_first_person_weapons(pc_root: &std::path::Path, out: &str) -> anyhow::Result<usize> {
+    use anyhow::Context;
+
+    let mut count = 0;
+    for side in ["ALL", "IMP", "REP", "CIS"] {
+        let lvl = crate::resolve_ci(
+            &pc_root
+                .join("SIDE")
+                .join(format!("{side}.LVL"))
+                .to_string_lossy(),
+        );
+        let data = std::fs::read(&lvl).with_context(|| lvl.clone())?;
+        let inner = mungefs::open(&data).map_err(|e| anyhow::anyhow!("{lvl}: {e}"))?;
+        let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow::anyhow!("{lvl}: {e}"))?;
+        let models: std::collections::BTreeSet<_> = chunks
+            .iter()
+            .filter(|c| &c.tag == b"modl")
+            .filter_map(|c| c.child_string(b"NAME"))
+            .filter(|n| {
+                n.contains("_1st_weap_")
+                    && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            })
+            .collect();
+        for model in models {
+            crate::soldier::bake_weapon(&lvl, &model, out, None)?;
+            count += 1;
+        }
+    }
+    Ok(count)
+}

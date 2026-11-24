@@ -87,10 +87,11 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `mungefs/src/stream.rs` 330 — music/VO streams · `Stream`
 - `mungefs/src/terrain/pc.rs` 500 — PC BF2 `tern` height/texture/color/cutters decoder alongside PS2/Xbox readers · `decode_pc_terrain`
 - `mungefs/src/lua50.rs` 569 — bounded static Lua 5.0 LVL bytecode parser and table extractor (never executes arbitrary code) · `Chunk`, `Value`, `parse`
-- `mungefs/src/lua50/eval.rs` 791 — deterministic bounded opcode evaluator for `addme.script` and mission scripts · `eval_script`
+- `mungefs/src/lua50/eval.rs` 961 — bounded opcode evaluator for registration and finite single-player mission branches · `evaluate_standalone_registration`, `analyze_standalone_variants`
 - `mungefs/src/lua50/tests.rs` 150 — Lua 5.0 static extractor unit tests.
 - `mungefs/src/addon.rs` 1167 — generic legacy BF2 addon folder inspector (`addme.script`, `mission.lvl`, world LVLs, `locl`, unused-LVL isolation) · `inspect_addon_dir`, `AddonInspection`, `AddonMapGroup`
 - `mungefs/src/addon/mission_fold.rs` 770 — static folding of evaluated Lua mission setup (Conquest, 1-flag/2-flag CTF, teams, classes, heroes, spawns, audio) · `fold_mission`
+- `mungefs/src/addon/world_events.rs` 129 — bounded extraction of world animation, destruction, effect, and timer actions from mission setup and reachable callbacks · `compile`
 - `mungefs/src/addon/tests.rs` 117 — addon inspection and mission-folding unit regressions.
 - `mungefs/src/world_anim.rs` 145 — a `wrld` chunk's `anim` / `anmg` object animations and groups for the campaign scripts: 41-byte POSK/ROTK keys with tangents, play-at-load and NOHI flags · `Key`, `Anim`, `Group`, `WorldAnims`, `parse`; byte layout in the module header.
 
@@ -207,6 +208,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/mods.rs` 128 — CLI handlers for `bake mod-inspect` and `bake mod-convert` plus module exports · `inspect`, `convert`.
 - `bake/src/mods/mission.rs` 243 — emits translated native OpenBF mission RONs (`mod_<ns>__*.ron`, incl. 2-flag CTF & audio/hero tables) into a mod's cache.
 - `bake/src/mods/convert.rs` 350 — versioned content-mod conversion into `openbf_data/mod_cache/<namespace>/` without touching source mod files · `convert_mod`, `emit_progress`.
+- `bake/src/mods/world.rs` 132 — assemble mission-selected companion and primary LVL sublevels, then share byte-identical files inside the addon cache · `read_world`, `SharedWorldFiles`
 
 ## manifest — the schema
 - `manifest/src/lib.rs` 1468 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `LoadingLayout`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
@@ -218,6 +220,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `manifest/src/tests.rs` 1467 — the round trip: what the bake writes, the runtime reads
 - `manifest/src/tests/hud_files.rs` 62 — HUD layout files round trip.
 - `manifest/src/world_anim.rs` 46 — the `world_anims.ron` bake↔runtime schema: per-world animation and group records tagged with the `wrld` that carries them so unloaded mode layers play nothing · `FILE`, `WorldAnimKey`, `WorldAnim`, `WorldAnimGroup`, `WorldAnims`.
+- `manifest/src/world_events.rs` 27 — closed action and anchor types for an Instant Action environment program · `WorldEvents`, `Action`, `Anchor`
 - `manifest/src/animated_prop.rs` 129 — the `animated_props.ron` bake↔runtime schema: animated prop rigs and the props classes carry on hardpoints; absent on maps with none · `FILE`, `AnimatedProps`, `AnimatedRig`, `AttachedProp`, `PropClip`, `PropTrigger`, `PropAttach`, `PropPrim`.
 
 ## core — the sim (tick order: the header of `core/src/sim.rs`)
@@ -559,6 +562,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/main/windowed/front/campaign_saves.rs` 429 — the shell's Rise of the Empire save glue: save-date formatting, profile save sync, New Game, save-command dispatch and the save-name keyboard step · `sync_campaign_saves`, `start_campaign_new_game`, `campaign_save_command`, `step_save_name` (all `pub(super)`).
 - `game/src/main/windowed/front/gal.rs` 318 — the 3D spinning-planet campaign battle backdrop (`bf2_gal1`): `GAL1.LVL` rotate/tilt and star-glow animation, camera from the placed `<planet>_camera` instance · `load`, `advance_and_build` (`pub(super)`).
 - `game/src/campaign_runtime.rs` 1150 — campaign script state, objectives, world/map markers and live flag identities · `CampaignRuntime`, `CampaignMarker`
+- `game/src/campaign_runtime/world_events.rs` 143 — Instant Action environment actions, fixed-tick delays, and shared world-animation state · `WorldEventRuntime`
 - `game/src/campaign_runtime/dispatch.rs` 458 — sim-event and state-change dispatch, including character generation tracking and timers.
 - `game/src/campaign_runtime/markers.rs` 80 — the runtime's world/map marker state and queries.
 - `game/src/campaign_runtime/objectives.rs` 81 — the runtime's objective and popup state.

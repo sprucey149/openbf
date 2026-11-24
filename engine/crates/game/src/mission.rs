@@ -120,6 +120,8 @@ pub struct MissionDef {
     pub map: String,
     pub mode: String,
     pub source_game: String,
+    #[serde(default)]
+    pub world_events: manifest::world_events::WorldEvents,
     /// Hunt-only points to win by difficulty, in mission team order (team
     /// 0's target, team 1's), played when the session's Hunt score is "Per
     /// map" (0). None plays [`HUNT_SCORE_LIMIT`] for both. Hunts field the

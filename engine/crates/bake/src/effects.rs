@@ -388,7 +388,14 @@ fn beam(b: &LightBeamConfig, is_pc: bool) -> Option<FxBeam> {
         name: b.name.clone(),
         color: b.color?,
         flare_intensity: b.flare_intensity,
-        beam_intensity: if is_pc { b.beam_intensity } else { 1.0 },
+        entity_light: b.entity_light,
+        corona_flare: is_pc && !b.entity_light && b.length == 0.0 && b.flare_intensity > 0.0,
+        pulse_period: b.pulse_period,
+        beam_intensity: if is_pc || b.entity_light {
+            b.beam_intensity
+        } else {
+            1.0
+        },
         length: b.length,
         initial_radius: b.initial_radius,
         final_radius: b.final_radius,

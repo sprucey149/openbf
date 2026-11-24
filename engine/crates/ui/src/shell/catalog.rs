@@ -240,6 +240,7 @@ pub struct MapEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModMapEntry {
     pub key: String,
+    pub variant_keys: Vec<String>,
     pub legacy_code: String,
     pub name: String,
     pub disambiguator: String,
@@ -285,12 +286,20 @@ impl MapEntry {
     }
 
     pub(super) fn launch_armies(&self, mode: Mode, side: Side) -> [String; 2] {
+        let armies = side.armies();
         if mode == Mode::Hunt {
-            if let Some((_, pair)) = self.missions.iter().find(|(m, _)| *m == mode) {
+            let mut pairs = self.missions.iter().filter(|(m, _)| *m == mode);
+            // Addons can register Hunt in both eras. Pick the era's
+            // authored pairing before using the retail native-faction row.
+            let exact = pairs.clone().find(|(_, pair)| {
+                let pair = pair.each_ref().map(String::as_str);
+                pair == armies || [pair[1], pair[0]] == armies
+            });
+            if let Some((_, pair)) = exact.or_else(|| pairs.next()) {
                 return pair.clone();
             }
         }
-        side.armies().map(str::to_owned)
+        armies.map(str::to_owned)
     }
 }
 
@@ -413,15 +422,20 @@ pub fn catalog_with_mods(
         *name_counts.entry(m.name.to_ascii_lowercase()).or_insert(0) += 1;
     }
     for m in mod_maps {
-        let missions: Vec<_> = MODES
+        let mut missions = Vec::new();
+        for mode in MODES
             .into_iter()
-            .filter(|&mode| m.modes.iter().any(|era_modes| era_modes.contains(&mode)))
-            .flat_map(|mode| {
-                missions_fn(&m.key, mode)
-                    .into_iter()
-                    .map(move |pair| (mode, pair))
-            })
-            .collect();
+            .filter(|mode| m.modes.iter().any(|era_modes| era_modes.contains(mode)))
+        {
+            for key in &m.variant_keys {
+                for pair in missions_fn(key, mode) {
+                    let mission = (mode, pair);
+                    if !missions.contains(&mission) {
+                        missions.push(mission);
+                    }
+                }
+            }
+        }
         let duplicate = name_counts
             .get(&m.name.to_ascii_lowercase())
             .is_some_and(|&c| c > 1);

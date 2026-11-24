@@ -437,7 +437,7 @@ if want side; then
   clean "$OUT/side_bf1/soldiers" "$OUT/side_bf1/weapons" "$OUT/side_bf1/textures" \
         "$OUT/side_bf2/soldiers" "$OUT/side_bf2/weapons" "$OUT/side_bf2/textures" \
         "$OUT/side_bf1/vehicles" "$OUT/side_bf2/vehicles" \
-        "$OUT/side_bf1/fpm" "$OUT/side_bf2/fpm" \
+        "$OUT/side_bf1/fpm" "$OUT/side_bf2/fpm" "$OUT/side_bf2/pc_first_person" \
         "$OUT/side_bf1/effects" "$OUT/side_bf2/effects" \
         "$OUT/side_bf1/droid_chunks" "$OUT/side_bf2/droid_chunks" \
         "$OUT/droid_effects" "$OUT/classes/droid_chunks.ron"
@@ -583,6 +583,9 @@ if want side; then
   done
   [ "$HAS_BF1" = 1 ] && "$BAKE" weapon  "$A1"            com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf1"
   "$BAKE" weapon  "$(ci "$B2" INGAME.LVL)" com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf2"
+  if [ -n "$PC" ]; then
+    "$BAKE" pc-first-person "$PC" "$OUT/side_bf2/pc_first_person"
+  fi
   # Every vehicle class of the four sides (card VBAKE): models (every LOD),
   # destruction chunks, collision, textures -> side_<game>/vehicles/<side>/.
   if [ "$HAS_BF1" = 1 ]; then

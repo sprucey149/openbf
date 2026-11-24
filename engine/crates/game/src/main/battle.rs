@@ -792,6 +792,16 @@ pub(super) fn make_walk_with_counts(
                 walk.camera_blockers
                     .set_excluded(rt.excluded_camera_instances());
                 walk.campaign = Some(rt);
+            } else if !m.world_events.is_empty() {
+                let rt = game::campaign_runtime::WorldEventRuntime::new(
+                    m.world_events.clone(),
+                    scene,
+                    &layout,
+                    &walk.post_keys,
+                    &walk.sim,
+                );
+                walk.camera_blockers.mark_moving(rt.animated_instances());
+                walk.world_events = Some(rt);
             }
         }
         // A LAN round's other humans are seated after this wave

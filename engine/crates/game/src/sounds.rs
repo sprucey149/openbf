@@ -365,6 +365,42 @@ impl Bank {
         self.import_props(&source, names);
     }
 
+    fn resolve_core_templates(&mut self, core: &Bank) {
+        let path = self.dir.join(manifest::SOUND_TEMPLATE_FALLBACKS);
+        if !pak::is_file(&path) {
+            return;
+        }
+        let templates = pak::read_to_string(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|text| {
+                Ok(ron::from_str::<Vec<manifest::SoundTemplateFallback>>(
+                    &text,
+                )?)
+            });
+        let templates = match templates {
+            Ok(templates) => templates,
+            Err(error) => {
+                eprintln!("sounds: {}: {error:#}", path.display());
+                return;
+            }
+        };
+        for fallback in templates {
+            let Some(parent) = core.props.get(&fallback.template) else {
+                continue;
+            };
+            if let Some(sound) = self.by_level.get_mut(&(fallback.level, fallback.name)) {
+                fallback.apply(sound, parent);
+            }
+            if let Some(sound) = self
+                .props
+                .get_mut(&fallback.name)
+                .filter(|p| p.level == fallback.level)
+            {
+                fallback.apply(sound, parent);
+            }
+        }
+    }
+
     fn import_props(&mut self, source: &Bank, mut pending: Vec<u32>) {
         self.import_props_with(source, &mut pending, false);
     }
@@ -805,7 +841,7 @@ impl SoundLib {
     /// maps and tat2 → `bf2`). A map dir with no readable manifest gets its own
     /// bank only — there is nothing that says which disc's speech it would use.
     pub fn load(map_dir: &Path) -> Option<SoundLib> {
-        let map = Bank::load(&map_dir.join("sounds"))?;
+        let mut map = Bank::load(&map_dir.join("sounds"))?;
         let game = pak::read_to_string(map_dir.join("manifest.ron"))
             .ok()
             .and_then(|txt| ron::from_str::<manifest::ManifestHead>(&txt).ok())
@@ -834,6 +870,9 @@ impl SoundLib {
             }
             _ => (None, PathBuf::new(), HashMap::new()),
         };
+        if let Some(core) = &core {
+            map.resolve_core_templates(core);
+        }
         // The map's own streams, baked beside its bank (item VO).
         let map_streams_dir = map_dir.join("sounds").join("streams");
         let m = read_index(&map_streams_dir.join("streams.ron"));
@@ -877,14 +916,19 @@ impl SoundLib {
         })
     }
 
-    /// Load `map_dir`'s own bank if baked, or fall back to matching stock planet
-    /// sound banks declared by `sound_banks` (and `core_bf2` + `audio/global_bf2`).
+    /// Load the map's bank and the stock banks named by an addon mission.
+    /// Local definitions win while the stock references fill missing audio.
     pub fn load_with_fallback(
         map_dir: &Path,
         sound_banks: &[(String, String)],
     ) -> Option<SoundLib> {
-        if let Some(lib) = SoundLib::load(map_dir) {
-            return Some(lib);
+        let local = SoundLib::load(map_dir);
+        let addon = map_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("mod_"));
+        if local.is_some() && (!addon || sound_banks.is_empty()) {
+            return local;
         }
         let game = pak::read_to_string(map_dir.join("manifest.ron"))
             .ok()
@@ -928,6 +972,29 @@ impl SoundLib {
             if fallback_bank.is_some() {
                 break;
             }
+        }
+        if let Some(mut local) = local {
+            if let (Some(bank), Some(dir)) = (fallback_bank, fallback_dir) {
+                let mut names: Vec<_> = bank.props.keys().copied().collect();
+                names.sort_unstable();
+                local.map.import_props_with(&bank, &mut names, true);
+                for (name, record) in bank.music {
+                    local.map.music.entry(name).or_insert(record);
+                }
+                let dir = dir.join("sounds/streams");
+                let index = read_index(&dir.join("streams.ron"));
+                note_indexed(&index, &mut local.indexed);
+                note_music(&index, &dir, &mut local.music_takes);
+                for (id, rel) in index.files {
+                    if let Ok(path) = std::path::absolute(dir.join(rel)) {
+                        local
+                            .map_stream_files
+                            .entry(id)
+                            .or_insert_with(|| path.to_string_lossy().into_owned());
+                    }
+                }
+            }
+            return Some(local);
         }
         let mut core = Bank::load(&root.join(format!("core_{game}")).join("sounds"));
         if let Some(core_bank) = &mut core {
@@ -1351,9 +1418,22 @@ impl SoundLib {
             let Some((p, _)) = self.find(e.hash) else {
                 continue;
             };
-            let p = crate::ambience::with_distances(e, &p);
+            let (p, pc_region) = self.ambient_property(e, &p);
             let dist = (e.pos - ears).length();
-            let level = attenuation(dist, &p);
+            let level = if pc_region && p.flat {
+                // A recorded stereo bed retains its mix. Fade it across
+                // the region's authored inner and outer distances.
+                let outer = p.mute_distance.unwrap_or(p.max_distance);
+                if dist >= outer {
+                    0.0
+                } else if dist <= p.min_distance {
+                    1.0
+                } else {
+                    (outer - dist) / (outer - p.min_distance)
+                }
+            } else {
+                attenuation(dist, &p)
+            };
             out.push(AmbientHeard {
                 index,
                 dist,
@@ -1362,6 +1442,21 @@ impl SoundLib {
             });
         }
         out
+    }
+
+    /// An unnamed PC region stream bus uses the ambience mix.
+    /// measure: retail PC stream-region gain, fade curve and default routing.
+    fn ambient_property(&self, e: &crate::ambience::Emitter, p: &SoundProp) -> (SoundProp, bool) {
+        let mut p = crate::ambience::with_distances(e, p);
+        let pc_region = e.kind == crate::ambience::Kind::Stream
+            && p.stream
+                .zip(p.segments.first())
+                .and_then(|(stream, &(segment, _))| self.music_takes.get(&(stream, segment)))
+                .is_some_and(|take| take.format == 5);
+        if pc_region && p.bus == 0 {
+            p.bus = fnv1a_lowercase("ambience");
+        }
+        (p, pc_region)
     }
 
     /// Play the world's emitters for `listener`, once per stepped tick
@@ -1385,7 +1480,7 @@ impl SoundLib {
             let Some((p, core)) = self.find(e.hash) else {
                 continue;
             };
-            let p = crate::ambience::with_distances(e, &p);
+            let (p, pc_region) = self.ambient_property(e, &p);
             let ears = if p.flat {
                 (h.gain, h.gain)
             } else {
@@ -1393,8 +1488,24 @@ impl SoundLib {
             };
             let (db, pan) = mixer_pair(ears);
             if let Some(take) = self.stream_take(&p) {
+                if pc_region && h.level <= 0.0 {
+                    // Start the recorded bed when the listener enters it.
+                    self.ambient.remove(&h.index);
+                    continue;
+                }
+                let db = if pc_region && p.flat {
+                    level_db(h.gain)
+                } else if pc_region {
+                    level_db((ears.0 + ears.1) * 0.5)
+                } else {
+                    db
+                };
                 let v = self.ambient.entry(h.index).or_insert_with(|| {
-                    let v = audio.play_stream(take, db, p.looping);
+                    // BF2 retries finished region streams (re-ambience-music.md §1.7).
+                    let v = audio.play_stream(take, db, p.looping || pc_region);
+                    if v.is_ok() && std::env::var_os("OPENBF_AMBIENCE_TRACE").is_some() {
+                        eprintln!("ambience: started {} at {db:.1} dB", e.sound);
+                    }
                     AmbientVoice::Stream(v.map_err(|e| eprintln!("ambience: {e:#}")).ok())
                 });
                 if let AmbientVoice::Stream(Some(v)) = v {
@@ -1484,7 +1595,7 @@ impl SoundLib {
             .values()
             .filter(|v| match v {
                 AmbientVoice::Loop(v) => v.is_some(),
-                AmbientVoice::Stream(v) => v.is_some(),
+                AmbientVoice::Stream(v) => v.as_ref().is_some_and(audio::MusicVoice::playing),
                 AmbientVoice::Shot { .. } => true,
             })
             .count()

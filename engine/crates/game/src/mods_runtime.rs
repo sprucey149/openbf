@@ -67,6 +67,105 @@ pub fn active_mod_maps() -> Vec<ModMapEntry> {
         .clone()
 }
 
+fn catalog_entries(maps: &[ModMapSummary], folder: &str) -> Vec<ModMapEntry> {
+    let mut entries: Vec<ModMapEntry> = Vec::new();
+    let mut groups = BTreeMap::new();
+    for map in maps {
+        let modes = [
+            parse_modes_list(&map.modes_cw),
+            parse_modes_list(&map.modes_gcw),
+        ];
+        if let Some(title) = &map.variant_title {
+            let group = (map.source_lvl.as_str(), title.as_str());
+            if let Some(&index) = groups.get(&group) {
+                let entry: &mut ModMapEntry = &mut entries[index];
+                entry.variant_keys.push(map.map_key.clone());
+                for (all, variant) in entry.modes.iter_mut().zip(modes) {
+                    for mode in variant {
+                        if !all.contains(&mode) {
+                            all.push(mode);
+                        }
+                    }
+                }
+                continue;
+            }
+            groups.insert(group, entries.len());
+        }
+        entries.push(ModMapEntry {
+            key: map.map_key.clone(),
+            legacy_code: map.legacy_code.clone(),
+            name: map
+                .variant_title
+                .as_ref()
+                .unwrap_or(&map.display_name)
+                .clone(),
+            disambiguator: folder.to_owned(),
+            description: map.description.clone(),
+            modes,
+            variant_keys: vec![map.map_key.clone()],
+        });
+    }
+    entries
+}
+
+/// Resolve a catalog row to one concrete world before mission or asset loading.
+pub fn select_world_variant(
+    key: &str,
+    mode: &str,
+    armies: &[String; 2],
+    seed: u32,
+    multiplayer: bool,
+) -> String {
+    let state = RUNTIME_STATE.read().unwrap_or_else(|e| e.into_inner());
+    let Some(row) = state
+        .mod_maps
+        .iter()
+        .find(|row| row.key == key && row.variant_keys.len() > 1)
+    else {
+        return key.to_owned();
+    };
+    let maps = state.active.iter().flat_map(|m| &m.maps);
+    let era = if armies.iter().any(|a| a == "rep" || a == "cis") {
+        "cw"
+    } else {
+        "gcw"
+    };
+    choose_world_variant(row, maps, mode, era, seed, multiplayer)
+        .unwrap_or(key)
+        .to_owned()
+}
+
+fn choose_world_variant<'a>(
+    row: &'a ModMapEntry,
+    maps: impl Iterator<Item = &'a ModMapSummary>,
+    mode: &str,
+    era: &str,
+    seed: u32,
+    multiplayer: bool,
+) -> Option<&'a str> {
+    let mut candidates = Vec::new();
+    for map in maps.filter(|m| row.variant_keys.contains(&m.map_key)) {
+        for mission in map
+            .missions
+            .iter()
+            .filter(|m| m.supported && m.mode == mode && m.era == era)
+        {
+            if multiplayer && mission.multiplayer_variant {
+                return Some(&map.map_key);
+            }
+            candidates.extend(std::iter::repeat_n(
+                map.map_key.as_str(),
+                usize::from(mission.single_player_weight),
+            ));
+        }
+    }
+    if candidates.is_empty() {
+        return None;
+    }
+    let choice = core::rng::SimRng::new(seed).next_rand() as usize % candidates.len();
+    Some(candidates[choice])
+}
+
 /// Snapshot of currently mounted content mods in priority order (index 0 = highest).
 pub fn active_mods() -> Vec<MountedMod> {
     RUNTIME_STATE
@@ -427,17 +526,10 @@ pub fn mount_enabled_mods(
                     },
                 });
             }
-            let modes_cw = parse_modes_list(&map.modes_cw);
-            let modes_gcw = parse_modes_list(&map.modes_gcw);
-            report.mod_maps.push(ModMapEntry {
-                key: map.map_key.clone(),
-                legacy_code: map.legacy_code.clone(),
-                name: map.display_name.clone(),
-                disambiguator: entry.folder_name.clone(),
-                description: map.description.clone(),
-                modes: [modes_cw, modes_gcw],
-            });
         }
+        report
+            .mod_maps
+            .extend(catalog_entries(&meta.maps, &entry.folder_name));
 
         // Custom side packages (<namespace>_side_<side>).
         if let Ok(rd) = std::fs::read_dir(&assets_cache) {
@@ -635,6 +727,7 @@ mod tests {
                 display_name: format!("Map {folder}"),
                 description: String::new(),
                 source_lvl: "ABR/ABR.lvl".into(),
+                variant_title: None,
                 modes_cw: Vec::new(),
                 modes_gcw: vec!["con".into()],
                 missions: vec![ModMissionSummary {
@@ -642,6 +735,8 @@ mod tests {
                     mode: "con".into(),
                     era: "gcw".into(),
                     mission_ron,
+                    single_player_weight: 1,
+                    multiplayer_variant: true,
                     supported: true,
                     unsupported_reason: None,
                 }],
@@ -654,6 +749,125 @@ mod tests {
             warnings: Vec::new(),
         };
         meta.save_atomic(&cache).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires the prepared KTH cache in OPENBF_KTH_TEST_DATA"]
+    fn kothlis_catalog_uses_one_row_and_selects_authored_weather() {
+        let data = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
+        let cache = data.join("mod_cache/mod_kth");
+        let meta = ModCacheMeta::load(&cache).unwrap();
+        let rows = catalog_entries(&meta.maps, "KTH");
+        assert_eq!(rows.len(), 1);
+        use ui::shell::{IaCommand, IaInput, IaTexts, InstantAction, ModePick, PointerTarget};
+        let missions = cache.join("missions");
+        let maps = ui::shell::catalog_with_mods(
+            &|_, _| None,
+            &[],
+            &|key, mode| crate::mission::pairs(&missions, key, mode.subst()),
+            &rows,
+        );
+        let mut shell = InstantAction::new(
+            maps,
+            IaTexts::new(&|_, english| english.to_owned()),
+            Default::default(),
+        );
+        let confirm = IaInput {
+            menu: ui::menu::MenuInput {
+                confirm: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let kothlis = shell
+            .map_rows()
+            .iter()
+            .position(|r| r.text.contains("Kothlis"))
+            .unwrap();
+        assert!(shell.focus_pointer(PointerTarget::Map(kothlis)));
+        shell.step(confirm, 0.0);
+        let hunt = shell
+            .mode_picks()
+            .iter()
+            .position(|m| *m == ModePick::One(Mode::Hunt))
+            .unwrap();
+        assert!(shell.focus_pointer(PointerTarget::Mode(hunt)));
+        shell.step(confirm, 0.0);
+        let clone_wars = shell
+            .side_rows()
+            .iter()
+            .position(|row| row.text == "Clone Wars")
+            .unwrap();
+        assert!(shell.focus_pointer(PointerTarget::Era(clone_wars)));
+        shell.step(confirm, 0.0);
+        let Some(IaCommand::Launch(rows_to_launch)) = shell.step(confirm, 0.0) else {
+            panic!("Clone Wars Hunt did not launch");
+        };
+        assert_eq!(rows_to_launch.len(), 1);
+        assert_eq!(rows_to_launch[0].armies, ["rep", "cis"]);
+
+        let row = &rows[0];
+        assert_eq!(row.variant_keys.len(), 5);
+        for (mode, multiplayer_weather) in [
+            ("con", ["dawn", "rain"]),
+            ("ctf", ["night", "dusk"]),
+            ("hunt", ["dusk", "night"]),
+        ] {
+            for (era, weather) in ["cw", "gcw"].into_iter().zip(multiplayer_weather) {
+                let choose = |seed, multiplayer| {
+                    choose_world_variant(row, meta.maps.iter(), mode, era, seed, multiplayer)
+                        .unwrap()
+                };
+                let seen = (42..142)
+                    .map(|seed| choose(seed, false))
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(seen.len(), 5, "{mode}/{era}");
+                assert_eq!(
+                    choose(42, true),
+                    format!("mod_kth__kth_{weather}"),
+                    "{mode}/{era}"
+                );
+            }
+        }
+        for (weather, effect, pulse) in [
+            ("dusk", "parcan_light_blue_static", 0.0),
+            ("night", "parcan_light_blue", 2.0),
+        ] {
+            let path = cache.join(format!("assets/mod_kth__kth_{weather}/effects.ron"));
+            let fx: manifest::FxSet =
+                ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let beam = fx.beams.iter().find(|beam| beam.name == effect).unwrap();
+            assert!(beam.entity_light);
+            assert_eq!(beam.color, [0, 185, 240, 255]);
+            assert_eq!(beam.length, 9.0);
+            assert_eq!(beam.pulse_period, pulse);
+        }
+
+        let dusk = cache.join("assets/mod_kth__kth_dusk/effects.ron");
+        let fx: manifest::FxSet = ron::from_str(&std::fs::read_to_string(dusk).unwrap()).unwrap();
+        let corona = fx
+            .beams
+            .iter()
+            .find(|beam| beam.name == "kth_main_discolight")
+            .unwrap();
+        assert!(corona.corona_flare);
+        assert_eq!(corona.flare_intensity, 0.7);
+        let pick = |armies| {
+            crate::mission::pick(&cache.join("missions"), "mod_kth__kth_dusk", "hunt", armies)
+                .unwrap()
+        };
+        let cw = pick(["rep", "cis"]);
+        let gcw = pick(["imp", "all"]);
+        assert!(cw
+            .mission
+            .class_load_order
+            .iter()
+            .any(|c| c.request == "rep_inf_ep3_sniper"));
+        assert!(gcw
+            .mission
+            .class_load_order
+            .iter()
+            .any(|c| c.request == "imp_inf_sniper"));
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use super::{
-    rk_base, LuaConst, Op50, Proto, MAX_CALL_DEPTH, MAX_EVAL_STEPS, MAX_TABLES, MAX_TABLE_ENTRIES,
+    rk_base, LuaConst, Op50, Proto, MAX_CALL_DEPTH, MAX_EVAL_STEPS, MAX_STRING_BYTES, MAX_TABLES,
+    MAX_TABLE_ENTRIES,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,6 +44,9 @@ pub enum LuaVal {
     Method(String, String),
     Object(String),
     Builtin(String),
+    Effect(String),
+    MatrixObject(String),
+    MatrixPath(String, usize),
     Closure { path: Vec<usize>, ups: Vec<LuaVal> },
     Unknown(String),
 }
@@ -171,6 +176,18 @@ pub struct EvalEnv {
     pub steps: usize,
     pub unsupported: Vec<UnsupportedScriptFeature>,
     pub warnings: Vec<String>,
+    trace: Option<StandaloneTrace>,
+}
+
+/// Evaluation inputs for the standalone environment. Random
+/// choices are enumerated by the importer, never made by the analyzer.
+#[derive(Debug, Clone, Default)]
+struct StandaloneTrace {
+    multiplayer: bool,
+    random_pick: Option<i64>,
+    random_range: Option<(i64, i64)>,
+    scripts: Arc<BTreeMap<String, Proto>>,
+    loaded_scripts: BTreeSet<String>,
 }
 
 impl EvalEnv {
@@ -279,6 +296,7 @@ fn new_env(proto: Proto) -> EvalEnv {
         steps: 0,
         unsupported: Vec::new(),
         warnings: Vec::new(),
+        trace: None,
     };
     let sp = env.alloc_table().unwrap();
     let mp = env.alloc_table().unwrap();
@@ -327,6 +345,23 @@ fn new_env(proto: Proto) -> EvalEnv {
     env
 }
 
+fn jump_target(next: usize, bx: usize, end: usize) -> usize {
+    next.checked_add_signed(bx as isize - 131_071)
+        .filter(|&target| target < end)
+        .unwrap_or(end)
+}
+
+fn comparison(op: Op50, lhs: &LuaVal, rhs: &LuaVal) -> Option<bool> {
+    match (lhs, rhs) {
+        (LuaVal::Global(_) | LuaVal::Unknown(_), _)
+        | (_, LuaVal::Global(_) | LuaVal::Unknown(_)) => None,
+        _ if op == Op50::Eq => Some(lhs == rhs),
+        (LuaVal::Num(l), LuaVal::Num(r)) => Some(if op == Op50::Lt { l < r } else { l <= r }),
+        (LuaVal::Str(l), LuaVal::Str(r)) => Some(if op == Op50::Lt { l < r } else { l <= r }),
+        _ => None,
+    }
+}
+
 fn const_to_val(c: &LuaConst) -> LuaVal {
     match c {
         LuaConst::Nil => LuaVal::Nil,
@@ -354,13 +389,12 @@ fn eval_proto(
     for (i, v) in args.iter().enumerate() {
         regs.insert(i, v.clone());
     }
-    let mut skip = 0usize;
-
-    for (idx, &ins) in proto.code.iter().enumerate() {
-        if skip > 0 {
-            skip -= 1;
-            continue;
-        }
+    let exact = env.trace.is_some();
+    let mut pc = 0;
+    let mut open_top = None;
+    while let Some(&ins) = proto.code.get(pc) {
+        let idx = pc;
+        pc += 1;
         env.steps += 1;
         if env.steps > MAX_EVAL_STEPS {
             env.warnings
@@ -412,6 +446,9 @@ fn eval_proto(
             }
             Op50::LoadBool => {
                 regs.insert(a, LuaVal::Bool(b != 0));
+                if exact && c != 0 {
+                    pc += 1;
+                }
             }
             Op50::GetGlobal => {
                 if let Some(LuaConst::Str(name)) = proto.constants.get(bx) {
@@ -542,8 +579,13 @@ fn eval_proto(
                 regs.insert(a, val);
             }
             Op50::Not => {
-                let val = rk(b, &regs)
-                    .is_truthy()
+                let operand = rk(b, &regs);
+                let truth = if exact && matches!(operand, LuaVal::Num(_)) {
+                    Some(true)
+                } else {
+                    operand.is_truthy()
+                };
+                let val = truth
                     .map(|t| LuaVal::Bool(!t))
                     .unwrap_or_else(|| LuaVal::Unknown("not".into()));
                 regs.insert(a, val);
@@ -552,14 +594,19 @@ fn eval_proto(
                 let mut joined = String::new();
                 let mut ok = true;
                 for slot in b..=c {
-                    match regs.get(&slot) {
-                        Some(LuaVal::Str(s)) => joined.push_str(s),
-                        Some(LuaVal::Num(n)) => joined.push_str(&format!("{n}")),
+                    let text = match regs.get(&slot) {
+                        Some(LuaVal::Str(s)) => std::borrow::Cow::Borrowed(s.as_str()),
+                        Some(LuaVal::Num(n)) => std::borrow::Cow::Owned(format!("{n}")),
                         _ => {
                             ok = false;
                             break;
                         }
+                    };
+                    if joined.len() + text.len() > MAX_STRING_BYTES {
+                        ok = false;
+                        break;
                     }
+                    joined.push_str(&text);
                 }
                 regs.insert(
                     a,
@@ -601,7 +648,7 @@ fn eval_proto(
                         _ => caps.push(LuaVal::Unknown("upval".into())),
                     }
                 }
-                skip = nups;
+                pc += nups;
                 regs.insert(
                     a,
                     LuaVal::Closure {
@@ -616,8 +663,11 @@ fn eval_proto(
                     .cloned()
                     .unwrap_or_else(|| LuaVal::Unknown(format!("r{a}")));
                 let nargs = if b == 0 {
-                    let top = regs.keys().copied().max().unwrap_or(a);
-                    top.saturating_sub(a)
+                    if exact {
+                        open_top.take().unwrap_or(a + 1).saturating_sub(a + 1)
+                    } else {
+                        regs.keys().copied().max().unwrap_or(a).saturating_sub(a)
+                    }
                 } else {
                     b.saturating_sub(1)
                 };
@@ -667,7 +717,62 @@ fn eval_proto(
                         }
                     }
                     LuaVal::Global(name) => {
-                        env.check_dynamic_call(name, &call_args);
+                        let loaded = if exact && name == "ScriptCB_DoFile" {
+                            load_addon_script(env, &call_args, depth)
+                        } else {
+                            false
+                        };
+                        if !loaded {
+                            env.check_dynamic_call(name, &call_args);
+                        }
+                        if let Some(trace) = env.trace.as_mut() {
+                            ret_override = match name.as_str() {
+                                // Registration sees an installation with no separate addons.
+                                "ScriptCB_IsFileExist" => Some(LuaVal::Num(0.0)),
+                                "ScriptCB_InMultiplayer" => Some(LuaVal::Bool(trace.multiplayer)),
+                                "CreateTimer" => call_args.first().cloned(),
+                                "CreateEffect" => call_args
+                                    .first()
+                                    .and_then(LuaVal::as_str)
+                                    .map(|name| LuaVal::Effect(name.to_owned())),
+                                "GetEntityMatrix" => call_args
+                                    .first()
+                                    .and_then(LuaVal::as_str)
+                                    .map(|name| LuaVal::MatrixObject(name.to_owned())),
+                                "GetPathPoint" => call_args
+                                    .first()
+                                    .and_then(LuaVal::as_str)
+                                    .zip(
+                                        call_args
+                                            .get(1)
+                                            .and_then(LuaVal::as_i64)
+                                            .and_then(|i| usize::try_from(i).ok()),
+                                    )
+                                    .map(|(path, index)| {
+                                        LuaVal::MatrixPath(path.to_owned(), index)
+                                    }),
+                                "math.random" | "random" => {
+                                    let range = match call_args.as_slice() {
+                                        [hi] => hi.as_i64().map(|hi| (1, hi)),
+                                        [lo, hi] => lo.as_i64().zip(hi.as_i64()),
+                                        _ => None,
+                                    };
+                                    if trace.random_range.is_none() {
+                                        trace.random_range = range;
+                                    }
+                                    range.map(|(lo, hi)| {
+                                        LuaVal::Num(
+                                            trace
+                                                .random_pick
+                                                .filter(|n| (lo..=hi).contains(n))
+                                                .unwrap_or(lo)
+                                                as f64,
+                                        )
+                                    })
+                                }
+                                _ => None,
+                            };
+                        }
                         env.calls.push(LuaCall {
                             func: name.clone(),
                             args: call_args,
@@ -689,6 +794,9 @@ fn eval_proto(
 
                 if op == Op50::Call {
                     let nrets = if c == 0 { 1 } else { c.saturating_sub(1) };
+                    if exact {
+                        open_top = (c == 0).then_some(a + nrets);
+                    }
                     for i in 0..nrets {
                         let v = if i == 0 {
                             ret_override
@@ -699,8 +807,27 @@ fn eval_proto(
                         };
                         regs.insert(a + i, v);
                     }
+                } else if exact {
+                    return;
                 }
             }
+            Op50::Jmp if exact => pc = jump_target(pc, bx, proto.code.len()),
+            Op50::Eq | Op50::Lt | Op50::Le if exact => {
+                let compare = comparison(op, &rk(b, &regs), &rk(c, &regs));
+                if compare != Some(a != 0) {
+                    pc += 1;
+                }
+            }
+            Op50::Test if exact => {
+                let val = regs.get(&b).cloned().unwrap_or(LuaVal::Nil);
+                let truth = matches!(val, LuaVal::Num(_)) || val.is_truthy().unwrap_or(false);
+                if truth == (c != 0) {
+                    regs.insert(a, val);
+                } else {
+                    pc += 1;
+                }
+            }
+            Op50::Return if exact => return,
             Op50::Return
             | Op50::SetUpval
             | Op50::Jmp
@@ -716,10 +843,39 @@ fn eval_proto(
     }
 }
 
+fn load_addon_script(env: &mut EvalEnv, args: &[LuaVal], depth: usize) -> bool {
+    let Some(name) = args.first().and_then(LuaVal::as_str) else {
+        return false;
+    };
+    if is_known_standard_dofile(name) || depth >= MAX_CALL_DEPTH {
+        return false;
+    }
+    let Some(trace) = env.trace.as_mut() else {
+        return false;
+    };
+    let key = name.to_ascii_lowercase();
+    let Some(script) = trace.scripts.get(&key) else {
+        return false;
+    };
+    if trace.loaded_scripts.insert(key) {
+        let index = env.root.protos.len();
+        env.root.protos.push(script.clone());
+        eval_proto(env, &[index], &[], &[], true, depth + 1);
+    }
+    true
+}
+
 /// Evaluate top-level statements (ideal for `addme.script`), allowing calls to
 /// local helper closures defined in the chunk up to `MAX_CALL_DEPTH`.
 pub fn evaluate_toplevel(proto: Proto) -> EvalEnv {
     let mut env = new_env(proto);
+    eval_proto(&mut env, &[], &[], &[], true, 0);
+    env
+}
+
+pub(crate) fn evaluate_standalone_registration(proto: Proto) -> EvalEnv {
+    let mut env = new_env(proto);
+    env.trace = Some(StandaloneTrace::default());
     eval_proto(&mut env, &[], &[], &[], true, 0);
     env
 }
@@ -732,6 +888,23 @@ pub struct MissionScriptAnalysis {
     pub env: EvalEnv,
     pub init_calls: Vec<LuaCall>,
     pub postload_calls: Vec<LuaCall>,
+}
+
+impl MissionScriptAnalysis {
+    pub(crate) fn callback_calls(&self, callback: &LuaVal) -> Vec<LuaCall> {
+        let LuaVal::Closure { path, ups } = callback else {
+            return Vec::new();
+        };
+        let mut env = self.env.clone();
+        let steps = env.steps;
+        env.calls.clear();
+        eval_proto(&mut env, path, &[], ups, true, 0);
+        if steps <= MAX_EVAL_STEPS && env.steps <= MAX_EVAL_STEPS {
+            env.calls
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 /// Analyze a BF2 mission script (`ScriptInit` + `ScriptPostLoad`).
@@ -767,6 +940,56 @@ pub fn analyze_mission_script(proto: Proto) -> MissionScriptAnalysis {
         init_calls,
         postload_calls,
     }
+}
+
+/// Analyze a bounded first random choice and the multiplayer setup.
+/// Equivalent world selections are coalesced by the addon inspector.
+pub(crate) fn analyze_standalone_variants(
+    proto: &Proto,
+    scripts: &Arc<BTreeMap<String, Proto>>,
+) -> (Vec<MissionScriptAnalysis>, MissionScriptAnalysis) {
+    let run = |random_pick, multiplayer| {
+        let mut env = new_env(proto.clone());
+        env.trace = Some(StandaloneTrace {
+            random_pick,
+            multiplayer,
+            scripts: Arc::clone(scripts),
+            ..Default::default()
+        });
+        eval_proto(&mut env, &[], &[], &[], true, 0);
+        let mut run_hook = |name| {
+            if let Some(LuaVal::Closure { path, ups }) = env.globals.get(name).cloned() {
+                eval_proto(&mut env, &path, &[], &ups, true, 0);
+            }
+            env.calls.len()
+        };
+        let init_end = run_hook("ScriptInit");
+        run_hook("ScriptPostLoad");
+        let init_calls = env.calls[..init_end].to_vec();
+        let postload_calls = env.calls[init_end..].to_vec();
+        MissionScriptAnalysis {
+            env,
+            init_calls,
+            postload_calls,
+        }
+    };
+    let first = run(None, false);
+    let multiplayer = run(None, true);
+    let Some((lo, hi)) = first
+        .env
+        .trace
+        .as_ref()
+        .and_then(|trace| trace.random_range)
+    else {
+        return (vec![first], multiplayer);
+    };
+    if !matches!(hi.checked_sub(lo), Some(1..=15)) {
+        return (vec![first], multiplayer);
+    }
+    let single_player = std::iter::once(first)
+        .chain((lo + 1..=hi).map(|pick| run(Some(pick), false)))
+        .collect();
+    (single_player, multiplayer)
 }
 
 fn follow_local_helpers(

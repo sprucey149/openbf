@@ -680,6 +680,17 @@ fn bake_sides(ctx: &ExecCtx, trees: &BakeTrees) -> Result<()> {
         &[],
     )?;
 
+    if let Some(pc) = trees.donors.pc(GameId::Bf2) {
+        ctx.run_bake(
+            &[
+                "pc-first-person".into(),
+                s(pc),
+                s(&side2_out.join("pc_first_person")),
+            ],
+            &[],
+        )?;
+    }
+
     // Vehicles.
     if let Some(b1) = &trees.bf1 {
         for (lvl, name) in [

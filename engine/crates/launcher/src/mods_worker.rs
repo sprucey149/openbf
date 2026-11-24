@@ -214,6 +214,7 @@ fn inspect_folder_entry(entry: &ModFolderEntry) -> DiscoveredMod {
             display_name: g.display_name.clone(),
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
+            variant_title: g.variant_title.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
             missions: g
@@ -224,6 +225,8 @@ fn inspect_folder_entry(entry: &ModFolderEntry) -> DiscoveredMod {
                     mode: pm.mission.mode.clone(),
                     era: pm.mission.era.clone(),
                     mission_ron: pm.mission_ron.clone(),
+                    single_player_weight: pm.mission.single_player_weight,
+                    multiplayer_variant: pm.mission.multiplayer_variant,
                     supported: pm.mission.supported,
                     unsupported_reason: pm.mission.unsupported_reason.clone(),
                 })
@@ -580,6 +583,30 @@ mod tests {
         assert!(!ids3.contains(&"content.abr_one".to_owned()));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "requires the user's installed addon and isolated conversion cache"]
+    fn discovers_kothlis_and_abr_with_only_standalone_missions() {
+        let data = PathBuf::from(
+            std::env::var_os("OPENBF_KTH_TEST_DATA").expect("isolated addon test data"),
+        );
+        let (mods, ids) = scan_mods_sync(&data).unwrap();
+        assert!(ids.contains(&"content.kth".to_owned()));
+        assert!(ids.contains(&"content.abr".to_owned()));
+        let kth = &mods["content.kth"];
+        assert_eq!(kth.maps.len(), 5);
+        for map in &kth.maps {
+            assert_eq!(map.missions.len(), 6, "{}", map.map_key);
+            assert!(map.missions.iter().all(|mission| mission.supported));
+            assert_eq!(map.modes_cw, ["con", "ctf", "hunt"]);
+            assert_eq!(map.modes_gcw, ["con", "ctf", "hunt"]);
+        }
+        assert_eq!(
+            cache_status_for(kth, &data, &BTreeMap::new()),
+            ModCacheStatus::Ready
+        );
+        assert_eq!(mods["content.abr"].maps[0].missions.len(), 4);
     }
 
     #[test]

@@ -1260,6 +1260,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
     let mod_maps = vec![
         ModMapEntry {
             key: "mod_abr__abr".into(),
+            variant_keys: vec!["mod_abr__abr".into()],
             legacy_code: "abr".into(),
             name: "Abregado-Rae: Venezia".into(),
             disambiguator: "ABR".into(),
@@ -1268,6 +1269,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
         },
         ModMapEntry {
             key: "mod_abr_v2__abr".into(),
+            variant_keys: vec!["mod_abr_v2__abr".into()],
             legacy_code: "abr".into(),
             name: "Abregado-Rae: Venezia".into(),
             disambiguator: "ABR_v2".into(),

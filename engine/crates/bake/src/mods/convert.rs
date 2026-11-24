@@ -1,5 +1,6 @@
 //! Atomic legacy BF2 addon converter -> versioned `openbf_data/mod_cache/<ns>/`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -10,6 +11,7 @@ use mungefs::addon::read_core_locl;
 
 use super::inspect_mod_folder;
 use super::mission::mission_to_ron;
+use super::world::{link_tree, read_world, SharedWorldFiles};
 
 pub struct ConvertOptions<'a> {
     pub mod_dir: &'a Path,
@@ -80,6 +82,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     let mut warnings = discovered.warnings.clone();
     let mut maps_baked = 0usize;
     let mut missions_written = 0usize;
+    let mut shared_world_files = SharedWorldFiles::default();
+    let mut sound_bakes: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
 
     let total_steps = groups.len().max(1);
     for (gi, g) in groups.iter().enumerate() {
@@ -104,10 +108,22 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         let map_lvl_str = map_lvl.to_string_lossy();
         let map_out_str = map_out.to_string_lossy();
 
-        crate::map::bake_map(&map_lvl_str, &map_out_str, None)
-            .with_context(|| format!("baking map LVL {}", map_lvl.display()))?;
-        crate::classes::bake_classes(&map_lvl_str, &map_out.join("classes.ron").to_string_lossy())
-            .with_context(|| format!("baking classes for {}", map_lvl.display()))?;
+        if g.world_loads.is_empty() {
+            crate::map::bake_map(&map_lvl_str, &map_out_str, None)
+                .with_context(|| format!("baking map LVL {}", map_lvl.display()))?;
+        } else {
+            let world = read_world(&g.world_loads, map_lvl)
+                .with_context(|| format!("reading the archive selection for {}", g.display_name))?;
+            crate::map::bake_addon_map(
+                &map_lvl_str,
+                &map_out_str,
+                crate::map::AddonMapInput {
+                    bytes: &world.bytes,
+                    selectors: &world.selectors,
+                },
+            )
+            .with_context(|| format!("baking selected world {}", g.display_name))?;
+        }
         maps_baked += 1;
 
         if let Some(load_lvl) = &g.loadscreen_lvl_path {
@@ -120,6 +136,10 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
                     load_lvl.display()
                 ));
             }
+        }
+
+        if !g.world_loads.is_empty() {
+            shared_world_files.share(&map_out)?;
         }
 
         for (side, side_lvl) in &g.custom_side_lvls {
@@ -136,11 +156,35 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             }
         }
 
-        for (snd_name, snd_lvl) in &g.custom_sound_lvls {
-            warnings.push(format!(
-                "Custom sound archive `{snd_name}` ({}) requires external stock audio core references and may fall back to stock audio.",
-                snd_lvl.display()
-            ));
+        if let Some((snd_name, snd_lvl)) = g.custom_sound_lvls.first() {
+            let sound_out = map_out.join("sounds");
+            if let Some(previous) = sound_bakes.get(snd_lvl) {
+                link_tree(previous, &sound_out)?;
+            } else {
+                let core = insp.core_lvl.as_deref().map(Path::to_string_lossy);
+                match crate::sounds::bake_addon_sounds(
+                    &snd_lvl.to_string_lossy(),
+                    &map_out_str,
+                    core.as_deref(),
+                ) {
+                    Ok(_) => {
+                        sound_bakes.insert(snd_lvl.clone(), sound_out);
+                    }
+                    Err(e) => {
+                        if sound_out.is_dir() {
+                            std::fs::remove_dir_all(&sound_out)?;
+                        }
+                        warnings.push(format!(
+                            "Custom sound archive `{snd_name}` could not be converted ({e:#})."
+                        ));
+                    }
+                }
+            }
+            for (extra, _) in g.custom_sound_lvls.iter().skip(1) {
+                warnings.push(format!(
+                    "Additional custom sound archive `{extra}` is not supported for this map."
+                ));
+            }
         }
 
         let mut planned_missions = Vec::with_capacity(g.missions.len());
@@ -168,6 +212,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
                 mode: pm.mission.mode.clone(),
                 era: pm.mission.era.clone(),
                 mission_ron: pm.mission_ron.clone(),
+                single_player_weight: pm.mission.single_player_weight,
+                multiplayer_variant: pm.mission.multiplayer_variant,
                 supported,
                 unsupported_reason: reason,
             });
@@ -179,6 +225,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             display_name: g.display_name.clone(),
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
+            variant_title: g.variant_title.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
             missions: planned_missions,
