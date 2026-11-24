@@ -8,6 +8,7 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | script | what it does |
 |---|---|
 | `pack.py` | what you own in `iso/` to a self-contained game; `--bake-only` keeps a checkout's own `engine/missions` and `engine/assets_baked` current with the same cache |
+| `make_icons.py`, `install_linux.sh` | the app icon's containers for each OS from the clone trooper `pack.py` renders from your bake (`engine/branding_baked/`), and installing the Linux application entry and icon into `~/.local/share` |
 | `input_scan.py`, `console_input.py`, `dlc_inputs.py` | recognize inputs by content, and say what a build makes of them |
 | `rebake.sh`, `bake_dlc.py` | bake assets, and the two optional DLC heroes (`DLC.md`) |
 | `bake_cache.py`, `bake_versions.py` | which bake groups a pack redoes (version, input content, audio tools; `pack.py --explain` says why), and the landing guard that makes a bake-code change bump its groups or prove them unchanged |
@@ -76,7 +77,7 @@ not a complete alignment acceptance result.
 |---|---|
 | `sweep_seeds.py`, `bot_quality.py`, `bot_quality_ps2.json`, `loop_spells.py` | the round sweep over seeds, and bot movement against the PS2 |
 | `human_profile.py` | a player's profile from a match log, and the fit of the sweep's proxy to it |
-| `session_stats.py` | summarise a folder of dev-only session stats (one JSON per round) per map, era and tier: human and bot averages, win rates, ticket or point margins |
+| `session_stats.py` | summarise a folder of dev-only session stats (one JSON per round) per map, era and tier: human and bot averages, win rates, ticket or point margins, hero and normal class kills and deaths, and a hero table |
 | `calibrate_match_length.py` | measure match length and regenerate the menu's model |
 | `perf_matrix.py` | the detailed bench over every map |
 
@@ -86,10 +87,14 @@ checkout build takes `cargo build -p game --features session-stats`). Every
 round played, single player or LAN, host or guest, then writes one JSON file to
 `openbf_data/session_stats/` beside the game (`OPENBF_SESSION_STATS_DIR`
 overrides it); files older than 3 days are deleted at launch and at each write.
-The fields are listed in `engine/crates/game/src/session_stats.rs`. A flagged
+The fields are listed in `engine/crates/game/src/session_stats.rs`. Since
+schema 2 a round also lists every unit life (class, spawn and end, how it
+ended, its kills and damage), per-class totals, and each hero's unlock, offer
+and lives, so a high score can be traced to the hero turns. A flagged
 build keeps the LAN build id and lockstep stream, so it plays with unflagged
 builds of the same source. `game --headless --seconds N` writes one too.
-Summarise with `python3 scripts/session_stats.py openbf_data/session_stats`.
+Summarise with `python3 scripts/session_stats.py openbf_data/session_stats`
+(`--hero-lives` also lists every hero life).
 
 ## Reverse engineering
 
