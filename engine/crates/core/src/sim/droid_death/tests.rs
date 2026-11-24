@@ -333,3 +333,56 @@ fn a_blast_kill_bursts_more_often_than_a_bolt_kill() {
     // 840 +- 3 sigma (11.6 each).
     assert!((805..=875).contains(&n), "{n} of 1000");
 }
+
+/// A native (team 2, a Tusken beside a Clone Wars battle) carries a class
+/// index into its own table, not the CIS army's: even a marked native whose
+/// index lines up with a CIS droid class falls and leaves a body, while the
+/// marked droid beside it still bursts. A native class that does have a
+/// chunk death bursts with its own explosion.
+#[test]
+fn a_native_beside_the_cis_falls_and_leaves_a_body() {
+    let mut s = sim(7);
+    let member = UnitSpec {
+        controller: crate::unit::Controller::Ai,
+        drops: DropTable::from_pairs(&[(0, 1.0)]),
+        ..UnitSpec::trooper(2, Vec3::ZERO)
+    };
+    s.add_native_team(2, vec![member]);
+    let tusken = s
+        .spawn_native_member(2, (Vec3::new(4.0, 0.0, 0.0), 0.0), None)
+        .unwrap();
+    let droid = spawn(&mut s, CIS, Vec3::new(-4.0, 0.0, 0.0));
+    assert_eq!(s.units[tusken.index as usize].spec.class, 0);
+    assert!(s.burst_explosion(2, 0).is_none());
+    for _ in 0..50 {
+        assert!(!marked_death(&mut s, tusken), "a Tusken never bursts");
+        let t = &s.units[tusken.index as usize];
+        assert!(t.body && t.soldier.stance == Stance::Dead, "a corpse");
+        assert!(marked_death(&mut s, droid), "a marked droid bursts");
+    }
+    // A native class with its own chunk geometry keeps its own burst.
+    s.set_native_chunk_deaths(
+        2,
+        vec![Some(ChunkDeath {
+            frequency: 0.0,
+            explosion: Some(droid_exp()),
+        })],
+    );
+    assert!(s.burst_explosion(2, 0).is_some());
+    assert!(marked_death(&mut s, tusken));
+}
+
+/// A fresh life of `h` marked by a push, killed by 500, its death block
+/// run; whether it burst.
+fn marked_death(s: &mut Sim, h: UnitHandle) -> bool {
+    let i = h.index as usize;
+    reset(s, h);
+    s.units[i].chunk_mark = true;
+    s.units[i].health.cur = -500.0;
+    s.unit_killed(h, None);
+    s.events.clear();
+    s.death_block(i);
+    let burst = bursts(s) == 1;
+    assert_eq!(burst, s.units[i].burst);
+    burst
+}

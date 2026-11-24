@@ -36,6 +36,10 @@ pub struct ContentManifest {
     /// Deterministic digest over active content mod load order + override stack.
     #[serde(default)]
     pub override_digest: String,
+    /// `[ours]` The player's OS and CPU ([`target`]), for the host's log
+    /// only (`netplay::diag`); empty from a build that does not send it.
+    #[serde(default)]
+    pub target: String,
 }
 
 /// FNV-1a 64 over `bytes`.
@@ -59,6 +63,7 @@ impl ContentManifest {
         m.addon_heroes = crate::dlc::installed(assets_dir);
         m.active_mods = crate::mods_runtime::active_mod_fingerprints();
         m.override_digest = crate::mods_runtime::override_digest();
+        m.target = target();
         m
     }
 
@@ -70,6 +75,7 @@ impl ContentManifest {
             return Self::default();
         };
         let mut out = first.clone();
+        out.target.clear();
         for m in it {
             out.maps.retain(|k| m.maps.contains(k));
             out.games.retain(|g| m.games.contains(g));

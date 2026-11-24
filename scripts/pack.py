@@ -23,6 +23,14 @@ recompiles and re-packs):
      Below about 3.9 GiB that is one file on every OS. From there on, also on every OS, --out is a small executable
      and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
      inside itself first, then for openbf.pak beside it; the two must stay together.
+     Before the copy, the app icon is rendered from the bake (`game --render-icon`: the clone trooper's helmet) into
+     engine/branding_baked/ and scripts/make_icons.py writes each OS's container there; on Windows the game is built
+     again so game.exe carries the .ico (OPENBF_ICON, engine/crates/game/build_icon.rs). If the render fails, a
+     one-line note says so and the pack goes on without an icon. No icon art is committed (docs/branding.md).
+On macOS --app-bundle (default there) turns that into dist/openbf.app: the game, openbf.pak and openbf_data/ inside
+Contents/MacOS (an existing bundle's openbf_data/ is kept, and a flat dist/openbf_data/ from an older pack is moved
+in), the rendered openbf.icns in Contents/Resources, and Info.plist naming CFBundleIconFile. On Linux
+dist/openbf.desktop is written beside the game, and scripts/install_linux.sh installs it with the icon theme files.
 
 --bake-only runs steps 2-5 and stops (only the `bake` tool is built): a development checkout's own engine/missions
 and engine/assets_baked, the ones its sweeps and tests read, stay current with the same cache as a pack, instead of
@@ -63,6 +71,7 @@ import glob
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -119,6 +128,16 @@ GAME_ELF = {"bf1": "SWBFRONT.ELF", "bf2": "SWBFRNT2.ELF"}
 PAK_NAME = "openbf.pak"
 FAT32_LIMIT = 2**32
 PACK_MAGIC = b"OPENBFPK"
+# The Linux application entry's template: committed text, no art.
+DESKTOP_TEMPLATE = os.path.join(ROOT, "branding", "linux", "openbf.desktop.template")
+# The app icon, rendered at pack time from the player's own bake and git-ignored: the
+# master `game --render-icon` writes and the containers scripts/make_icons.py derives.
+ICON_DIR = os.path.join(ENGINE, "branding_baked")
+ICON_MASTER = os.path.join(ICON_DIR, "openbf.png")
+ICO = os.path.join(ICON_DIR, "windows", "openbf.ico")
+ICNS = os.path.join(ICON_DIR, "macos", "openbf.icns")
+APP_NAME = "openbf"  # the packed game's own name, which the bundle and the entry use
+MACOS = sys.platform == "darwin"
 
 
 def carries_pack(path):
@@ -164,6 +183,128 @@ def pack_summary(out, pak, split):
     if os.path.getsize(pak) >= FAT32_LIMIT:
         lines[1] = f"{PAK_NAME} is 4 GiB or more and FAT32 cannot hold such a file: keep this build on another filesystem."
     return lines
+
+
+def info_plist():
+    """The bundle's Info.plist: the keys macOS reads for the game, its icon and its type.
+    CFBundleExecutable is the file inside Contents/MacOS, CFBundleIconFile is read from
+    Contents/Resources (the openbf.icns scripts/make_icons.py writes from the rendered icon)."""
+    return plistlib.dumps({
+        "CFBundleExecutable": APP_NAME,
+        "CFBundleIdentifier": "com.openbf.openbf",
+        "CFBundleName": "OpenBF",
+        "CFBundleDisplayName": "OpenBF",
+        "CFBundlePackageType": "APPL",
+        "CFBundleIconFile": "openbf.icns",
+        "NSHighResolutionCapable": True,
+    })
+
+
+def app_bundle_paths(out):
+    """The bundle's own paths, so a test can name them: the app, the game, the archive
+    beside the game, and the icon in Resources."""
+    app = out + ".app"
+    macos = os.path.join(app, "Contents", "MacOS")
+    return app, os.path.join(macos, APP_NAME), os.path.join(macos, PAK_NAME), \
+        os.path.join(app, "Contents", "Resources", "openbf.icns")
+
+
+def merge_into(source, dest):
+    """Move the tree `source` into `dest` without losing either side: what `dest` lacks is
+    moved in, a folder both have is merged, and a file both have keeps `dest`'s copy (the
+    one the game in the bundle has been writing). Returns the paths left behind in
+    `source`, which is removed once it is empty."""
+    if not os.path.exists(dest):
+        os.replace(source, dest)
+        return []
+    left = []
+    for name in sorted(os.listdir(source)):
+        src, dst = os.path.join(source, name), os.path.join(dest, name)
+        if not os.path.exists(dst):
+            os.replace(src, dst)
+        elif os.path.isdir(src) and os.path.isdir(dst):
+            left += merge_into(src, dst)
+        else:
+            left.append(src)
+    if not left:
+        os.rmdir(source)
+    return left
+
+
+def build_app_bundle(out, icns=None):
+    """dist/openbf.app, made from the flat files just packed. The bundle takes them, it
+    does not copy them: the game, openbf.pak and openbf_data/ go inside Contents/MacOS,
+    because pak::find_archive and game::profile::data_dir look beside the running
+    executable, and Info.plist is what macOS reads to name the bundle and its icon.
+
+    Packing again over a bundle keeps its openbf_data/ (profiles, saves, logs); a flat
+    openbf_data/ beside --out, from a pack before the bundle, is merged in. A bundle's
+    openbf.pak from an earlier split build goes when this build is one file. `icns` is
+    None when no icon was rendered: the bundle keeps the one it has, if any.
+    Returns (the app, the paths of an old flat openbf_data/ not moved in).
+    """
+    app, game, pak, icon = app_bundle_paths(out)
+    os.makedirs(os.path.dirname(game), exist_ok=True)
+    os.makedirs(os.path.dirname(icon), exist_ok=True)
+    with open(os.path.join(app, "Contents", "Info.plist"), "wb") as f:
+        f.write(info_plist())
+    os.replace(out, game)
+    os.chmod(game, 0o755)
+    flat_pak = os.path.join(os.path.dirname(out), PAK_NAME)
+    if os.path.exists(flat_pak):
+        os.replace(flat_pak, pak)
+    elif os.path.exists(pak):
+        os.remove(pak)  # the game is one file now and reads itself first
+    left = []
+    flat_data = os.path.join(os.path.dirname(out), "openbf_data")
+    if os.path.isdir(flat_data):
+        left = merge_into(flat_data, os.path.join(os.path.dirname(game), "openbf_data"))
+    if icns and os.path.isfile(icns):
+        shutil.copyfile(icns, icon)
+    return app, left
+
+
+def make_icon(game, baked, icon_dir=ICON_DIR, runner=subprocess.run):
+    """Render the app icon from the bake and write every OS's container beside it.
+    Never fails the pack: on any failure it prints one line and returns False, and the
+    game is packed without a new icon (a previous render's containers stay)."""
+    master = os.path.join(icon_dir, "openbf.png")
+    fresh = master + ".new.png"
+    try:
+        os.makedirs(icon_dir, exist_ok=True)
+        rendered = runner([game, "--render-icon", fresh, "--assets", baked], capture_output=True, text=True)
+        if rendered.returncode or not os.path.isfile(fresh):
+            reason = (rendered.stderr or rendered.stdout or "").strip().splitlines()
+            raise RuntimeError(reason[-1] if reason else f"exit {rendered.returncode}")
+        os.replace(fresh, master)
+        made = runner([sys.executable, os.path.join(ROOT, "scripts", "make_icons.py"), "--out", icon_dir],
+                      capture_output=True, text=True)
+        if made.returncode:
+            reason = (made.stderr or made.stdout or "").strip().splitlines()
+            raise RuntimeError("make_icons: " + (reason[-1] if reason else f"exit {made.returncode}"))
+    except (OSError, RuntimeError) as error:
+        print(f"   note: no app icon this time ({error}); the game is packed without a new one", flush=True)
+        return False
+    finally:
+        if os.path.exists(fresh):
+            os.remove(fresh)
+    print(f"   app icon: {master} (the clone trooper from your own bake)", flush=True)
+    return True
+
+
+def cargo_env():
+    """cargo's environment with OPENBF_ICON naming the rendered .ico, which
+    engine/crates/game/build_icon.rs embeds in game.exe on Windows when it is there."""
+    return dict(os.environ, OPENBF_ICON=ICO)
+
+
+def write_desktop(out, dest):
+    """The Linux application entry beside the game, with the packed game's path filled in.
+    Its file name, StartupWMClass and Icon key are all "openbf", which matches the packed
+    game and the icon-theme files scripts/install_linux.sh installs."""
+    template = Path(DESKTOP_TEMPLATE).read_text(encoding="utf-8")
+    with open(dest, "w", encoding="utf-8", newline="\n") as f:
+        f.write(template.replace("@EXE@", os.path.abspath(out)))
 
 
 def clock(seconds):
@@ -857,6 +998,10 @@ def main():
     ap.add_argument("--baked", default=None, help="the folder the bake writes (default: engine/assets_baked); one per input profile")
     ap.add_argument("--visual-packs", default=None, help="prepared pack folder or recursive lookup of packs/bundles (default: repo-root visual_packs/; discovery stops at pack.json)")
     ap.add_argument("--retail-audio", action="store_true", help="keep the original audio presentation")
+    ap.add_argument("--app-bundle", action=argparse.BooleanOptionalAction, default=None,
+                    help="on macOS, write dist/openbf.app with the game, openbf.pak and openbf_data/ inside "
+                         "Contents/MacOS and the rendered openbf.icns in Contents/Resources "
+                         "(default: on for macOS, off elsewhere; --no-app-bundle keeps the flat file)")
     ap.add_argument("--bf2-only", action="store_true",
                     help="build from Battlefront II alone (ignore any cached extracted/bf1 tree)")
     ap.add_argument("--session-stats", action="store_true",
@@ -964,7 +1109,7 @@ def build(a, out, plan, packs, visual_report):
         print(f"   using existing game binary: {game}")
     else:
         need("cargo", "the Rust toolchain, https://rustup.rs")
-        run(["cargo", "build", "--release", "-p", "game"] + game_features(a), cwd=ENGINE)
+        run(["cargo", "build", "--release", "-p", "game"] + game_features(a), cwd=ENGINE, env=cargo_env())
         run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
         bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
     try:
@@ -1126,6 +1271,9 @@ def build(a, out, plan, packs, visual_report):
     print("\n".join(visual_packs.summary(visual_report)), flush=True)
 
     step("6/6 pack")
+    if make_icon(game, BAKED) and WINDOWS and not a.game_bin:
+        # build.rs watches the .ico it embeds: this relinks game.exe with the icon, or does nothing.
+        run(["cargo", "build", "--release", "-p", "game"] + game_features(a), cwd=ENGINE, env=cargo_env())
     os.makedirs(os.path.dirname(out), exist_ok=True)
     tmp = os.path.join(os.path.dirname(out), "pack-tmp" + EXE)  # Windows runs only a name ending in .exe
     shutil.copyfile(game, tmp)
@@ -1158,8 +1306,21 @@ def build(a, out, plan, packs, visual_report):
         for leftover in (new, new_pak):
             if os.path.exists(leftover):
                 os.remove(leftover)
+    lines = pack_summary(out, pak, split)  # read the files before a bundle takes them
+    bundle = a.app_bundle if a.app_bundle is not None else MACOS
+    if bundle:
+        app, left = build_app_bundle(out, ICNS)
+        lines.append(f"bundle: {app}. Run it from Finder. openbf.pak and openbf_data/ stay in Contents/MacOS, "
+                     "beside the game.")
+        if left:
+            lines.append(f"   {len(left)} file(s) of the old {os.path.join(os.path.dirname(out), 'openbf_data')} "
+                         "were already in the bundle and were left where they are, e.g. " + left[0])
+    elif not WINDOWS and os.path.isfile(DESKTOP_TEMPLATE):
+        desktop = os.path.join(os.path.dirname(out), "openbf.desktop")
+        write_desktop(out, desktop)
+        lines.append(f"entry: {desktop}. scripts/install_linux.sh installs it with the icon theme files.")
     print()
-    print("\n".join(pack_summary(out, pak, split)))
+    print("\n".join(lines))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
                            pc_roots=pc_roots, warnings=warnings, images_verified={g for g, image in images.items() if image})

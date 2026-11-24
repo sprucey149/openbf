@@ -41,6 +41,7 @@ pub mod apply;
 pub mod command;
 pub mod content;
 pub mod desync;
+pub mod diag;
 pub mod dto;
 pub mod link;
 pub mod lobby;

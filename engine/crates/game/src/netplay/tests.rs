@@ -80,8 +80,7 @@ fn netplay_content_intersection() {
         maps: maps.iter().map(|k| (*k).to_owned()).collect(),
         games: games.iter().map(|g| (*g).to_owned()).collect(),
         addon_heroes: addon,
-        active_mods: Vec::new(),
-        override_digest: String::new(),
+        ..ContentManifest::default()
     };
     let a = m(&["bf1_tat2", "bf2_kas2", "bf2_cor1"], &["bf1", "bf2"], true);
     let b = m(&["bf2_kas2", "bf2_cor1"], &["bf2"], true);
@@ -1417,6 +1416,65 @@ fn netplay_udp_peers_with_different_loads_start_together() {
     for g in guests {
         g.link.shutdown();
     }
+}
+
+/// The fourth LAN playtest: a charge weapon's charge on the HUD ring, on
+/// the host and on a guest, with prediction and drawing on as the window
+/// runs them. Every class's weapon is made a 2.5 s charge weapon (the BF2
+/// arc caster's MaxPressedTime) on every peer alike; the scripted pads hold
+/// FIRE for 1.5 s at a time. Each peer's HUD gauge for its own soldier is
+/// read from its confirmed sim after each frame. The window builds the HUD
+/// model between `draw_in` and `draw_out`, but the predicted pose it swaps in
+/// writes only the pose (`UnitPose::write_to`), never the weapon, so that is
+/// the state the HUD reads. A guest's charge starts a round trip after its
+/// press, as every input of its own does.
+#[test]
+fn netplay_a_held_charge_fills_each_peers_own_ring() {
+    let builder: Builder = Box::new(|s: &RoundSetup, local: u8, _node: usize| {
+        // The fixture with a command post per side, so both humans spawn.
+        let mut walk = super::smooth_tests::fixture(s, local)?;
+        for c in &mut walk.sim.weapon_classes {
+            c.max_pressed_time = 2.5;
+        }
+        Ok((walk, Some(crate::event_feed::EventFeed::default())))
+    });
+    let mut v = VirtualNet::new(
+        11,
+        clean_link(),
+        "test-build",
+        seat(0).profile.encode(),
+        builder,
+    );
+    v.predict = true;
+    v.draw = true;
+    v.nodes[0].peer.report_dir = None;
+    v.host_load(&setup());
+    assert!(v.run_until(5_000, |v| v.host_tick() >= 30));
+    let g = v.join("G", 61, seat(1).profile.encode(), 16.7);
+    v.nodes[g].peer.report_dir = None;
+    assert!(v.run_until(20_000, |v| v.nodes[g].peer.mode() == Mode::Playing));
+    let mut peak = [0.0f32; 2];
+    let mut held_frames = [0u32; 2];
+    v.run_until(20_000, |v| {
+        for (k, n) in [0, g].into_iter().enumerate() {
+            let node = &v.nodes[n];
+            let Some(walk) = node.walk.as_ref() else {
+                continue;
+            };
+            let me = &walk.sim.units[walk.player.index as usize];
+            if me.alive && me.weapon.fire_cmd > 0 {
+                held_frames[k] += 1;
+            }
+            let gauge = crate::hud_feed::weapon_gauge(walk);
+            peak[k] = peak[k].max(gauge.charge.unwrap_or(0.0));
+        }
+        false
+    });
+    println!("held frames {held_frames:?}, peak charge {peak:?}");
+    assert!(held_frames.iter().all(|h| *h > 0), "{held_frames:?}");
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+    assert!(peak[0] > 0.3, "the host's ring: {peak:?}");
+    assert!(peak[1] > 0.3, "the guest's ring: {peak:?}");
 }
 
 // The build id's rules (game/build.rs), with their own tests.

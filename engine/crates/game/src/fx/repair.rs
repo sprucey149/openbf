@@ -54,9 +54,11 @@ impl Fx {
         }
     }
 
+    /// Put the repair pulses and the charge glows (`fx/charge.rs`) on the
+    /// drawn weapon tips, `points` by unit index.
     pub fn set_repair_origins(&mut self, points: &[Option<Vec3>]) {
         for effect in &mut self.live {
-            if let Some((h, _)) = effect.repair {
+            if let Some((h, _)) = effect.repair.or(effect.charge) {
                 if let Some(Some(pos)) = points.get(h.index as usize) {
                     if effect.t == 0.0 {
                         let delta = *pos - effect.frame.pos;

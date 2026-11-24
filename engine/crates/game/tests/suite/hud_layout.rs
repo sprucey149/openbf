@@ -1101,6 +1101,7 @@ fn gauge_model(ring: f32, refire: f32, overheated: bool) -> ui::hud::HudModel {
             ring,
             refire,
             overheated,
+            charge: None,
         },
         ..hot1_post_a()
     }

@@ -47,6 +47,26 @@ Fielded offsets: cis default (0, −0.11, 0.05), cis_inf_rifleman (super droid) 
 | lower/upper | 0.57 at (0,0.57,0.15) / (0, 1.9s−0.42, 0.15) | upper (0, 1.6s−0.42, 0.15) | medium/upper/lower/medium2 as BF2 |
 Head index 2 in every posture -> BF1 default HitLocation {2, ×3} (B1:122725) [V].
 
+### 1.1 openbf: the prims on the drawn model (OURS, 2026-11-23)
+
+Fourth LAN playtest: "hit boxes in crouch or prone seemed messed up". Two deviations, `core::unit` body.rs:
+
+- **Size from the model.** The port's prims stood at the lists' places sized by `CollisionRootScale`, which most
+  classes leave at 1 whatever their model: an Ewok (drawn head 1.05 m) was hit as a trooper, Vader's drawn head
+  (1.94 m) stood over his head sphere (1.65 m, r 0.17). BF2's per-frame head move reads a table per animation bank,
+  not per model (above); what it gives an Ewok or Vader is not measured. openbf places the head and torso spheres on each model's BF2 head and ribcage points (table above) in the stand,
+  crouch and prone rifle idles at 0.1333 s, and sizes the rest of the list by the drawn standing head's height over
+  the clone trooper's 1.673 m. `game::roster::STANCE_BODY` holds the rows (98 models, both games); where a class
+  authors `CollisionRootScale` the two agree within 0.04 (Wookiee 1.149 / 1.15, Jawa 0.581 / 0.6, Yoda 0.382 / 0.42).
+  Trooper rig: stand head (−0.024, 1.673, 0.131), torso (0.112, 1.252, −0.154); crouch head (−0.066, 1.261, 0.207);
+  prone head (−0.086, 0.313, 0.699) — the prone list's (−0.07, 0.28, 0.75) within 5 cm; the prone rig's bones run
+  z −1.17 to +1.10 (rifle forward), the prone box −1.12 to +0.62.
+- **Prone changes follow the clip.** The stance changes on the press but BF1's prone clips (both games in openbf) run
+  40 frames down and 45 up. The posture is the one whose head height the trooper's drawn head is nearest: from a stand,
+  standing to frame 9, crouched to 16; from a crouch, crouched to 15; up to a stand, prone to frame 30, crouched to 36;
+  up to a crouch, prone to 31. Tumble and get-up take the crouch list, roll the prone list (as `capsule_height`).
+- measure: a PS2 Ewok's and Vader's head prims in RAM against the drawn heads.
+
 ## 2. Which prim a bolt hits [V]
 - Bolts vs units = the per-frame prev->current sweep (B2 FUN_0030fad0, B1 FUN_00273128), not the spawn ray (re-ordnance-kinds §2).
 - Sweep -> FUN_00161c60 (disasm 0x161cac: passes &manager+0xe0 as the prim-index out, and filter byte 1) -> FUN_00163078 -> per object FUN_00162f60

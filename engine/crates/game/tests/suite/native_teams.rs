@@ -99,3 +99,39 @@ fn bf1_geonosians_fly_on_their_bf2_twins_jet_rules() {
     assert_eq!(bf1.consts.jet_acceleration, bf2.consts.jet_acceleration);
     assert_eq!(bf1.consts.jet_control, bf2.consts.jet_control);
 }
+
+/// The original class data behind the natives' deaths: no native soldier
+/// class on either disc has chunk geometry, so each falls and leaves a body;
+/// the CIS soldier droids fielded beside them in the Clone Wars do.
+#[test]
+fn natives_have_no_chunk_death_and_cis_droids_do() {
+    for (game, class) in [
+        ("bf1", "tat_inf_tuskenraider"),
+        ("bf1", "tat_inf_tuskenhunter"),
+        ("bf1", "tat_inf_jawa"),
+        ("bf1", "geo_inf_geonosian"),
+        ("bf1", "wok_inf_warrior"),
+        ("bf1", "gun_inf_soldier"),
+        ("bf1", "ewk_inf_trooper"),
+        ("bf2", "tat_inf_tuskenraider"),
+        ("bf2", "tat_inf_tuskenhunter"),
+        ("bf2", "tat_inf_jawa"),
+        ("bf2", "geo_inf_geonosian"),
+        ("bf2", "wok_inf_warrior"),
+        ("bf2", "gun_inf_soldier"),
+        ("bf2", "ewk_inf_trooper"),
+        ("bf2", "gam_inf_gamorreanguard"),
+    ] {
+        let (_, r) = roster(game, class);
+        assert!(r.chunk.is_none(), "{game} {class}");
+    }
+    for (game, class) in [
+        ("bf1", "cis_inf_battledroid"),
+        ("bf2", "cis_inf_default_rifleman"),
+    ] {
+        let classes = game::assets::baked_root().join("classes");
+        let db = load_classdb(&classes, game, &["cis"]).unwrap();
+        let r = ClassRoster::build(&db, class, 1, None).unwrap();
+        assert!(r.chunk.is_some(), "{game} {class}");
+    }
+}

@@ -255,6 +255,8 @@ pub fn install(
             Vec::new()
         };
         walk.sim.add_native_team_with_posts(team, members, posts);
+        walk.sim
+            .set_native_chunk_deaths(team, table.iter().map(|c| c.chunk.clone()).collect());
         walk.sim.set_native_class_draw(
             team,
             core::sim::NativeClassDraw {

@@ -23,7 +23,8 @@ fn check_disc_values(name: &str, w: &WeaponClass) {
     assert_eq!(w.reload_time, 2.0, "{name}");
     let c = &d.item;
     let b = c.body;
-    assert_eq!((b.max_health, b.lifetime), (50.0, 60.0), "{name}");
+    // The disc authors 50; ours plays 30 (`normalize::SHARED_HEALTH`).
+    assert_eq!((b.max_health, b.lifetime), (30.0, 60.0), "{name}");
     assert_eq!((b.turn_speed, b.pitch_speed), (3.8, 3.8), "{name}");
     assert!((b.pitch_limits[1] - 35.0 * DEG).abs() < 1e-5, "{name}");
     assert!(b.wraps(), "{name}");
@@ -40,7 +41,9 @@ fn check_disc_values(name: &str, w: &WeaponClass) {
             g.ordnance.life_span,
             g.ordnance.max_damage
         ),
-        (100.0, 0.8, 100.0),
+        // The disc's 0.8 s, lengthened to fly 200 m at 100 m/s
+        // (`normalize::lengthened_bolt`, the maintainer's 2026-11-20 rule).
+        (100.0, 2.0, 100.0),
         "{name}"
     );
 }

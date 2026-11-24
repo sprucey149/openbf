@@ -116,6 +116,49 @@ fn a_lagged_shot_hits_the_strafing_target_where_its_shooter_saw_him() {
     assert!(!hit, "view_lag 0 misses");
 }
 
+/// Playtest 2026-11-22 (hit volumes): the rewound bodies keep the posture
+/// and head they had. A soldier lies prone facing +X (his head 0.7 m to
+/// the shooter's right of his feet), then stands; a shot with a 3-tick lag
+/// aimed at where his head lay meets it, the same shot unlagged meets
+/// nothing (the standing prims are over his feet).
+#[test]
+fn a_lagged_shot_meets_the_prone_head_its_shooter_saw() {
+    let shot = |view_lag: u8| {
+        let (mut s, shooter, target) = range();
+        let i = target.index as usize;
+        s.units[i].soldier.yaw = -std::f32::consts::FRAC_PI_2;
+        s.units[i].soldier.stance = crate::soldier::Stance::Prone;
+        for _ in 0..6 {
+            s.step(&[PadState::default(), PadState::default()]);
+        }
+        let prims = s.unit(target).unwrap().bolt_prims();
+        assert_eq!(prims.posture, crate::unit::Posture::Prone);
+        let head = prims.pos + Vec3::new(prims.head.z, prims.head.y, prims.head.x);
+        s.units[i].soldier.stance = crate::soldier::Stance::Stand;
+        aim_at(&mut s, shooter, head);
+        let fire = PadState {
+            buttons: buttons::FIRE,
+            view_lag,
+            ..Default::default()
+        };
+        let mut hit = false;
+        for k in 0..3 {
+            let pads = [
+                if k == 0 { fire } else { PadState::default() },
+                PadState::default(),
+            ];
+            s.step(&pads);
+            hit |= s
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Hit { victim, .. } if *victim == target));
+        }
+        hit
+    };
+    assert!(shot(3), "the rewound prone head");
+    assert!(!shot(0), "standing now: nothing where his head lay");
+}
+
 #[test]
 fn a_lagged_shot_still_hits_a_target_that_has_stepped_behind_a_wall() {
     // The documented trade-off: inside the window a target can be hit just

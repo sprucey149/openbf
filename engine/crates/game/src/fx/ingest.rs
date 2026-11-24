@@ -40,6 +40,7 @@ impl Fx {
         }
         self.follow_rounds(sim);
         self.follow_repairs(sim);
+        self.follow_charges(sim);
         self.follow_buffs(sim);
         self.ingest_force(sim);
         self.follow_burns(sim);

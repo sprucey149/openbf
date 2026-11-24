@@ -630,3 +630,47 @@ fn ours_sets_both_games_sniper_rifles() {
         Some(SHARED_RULES[0].person)
     );
 }
+
+/// The maintainer's fourth LAN playtest: the deployed auto-turret's 50
+/// health drops to 30, so a rifle bolt (8 on Building) takes 4, a pistol
+/// bolt (6) 5 and a rocket 1. A side's child class inherits it; the placed
+/// and space-battle wall or ceiling turrets keep their own health.
+#[test]
+fn ours_lowers_only_the_deployed_auto_turrets_health() {
+    let props = [("MaxHealth", "50.0"), ("Lifetime", "60.0")];
+    let mut turret = def("com_bldg_inf_autoturret", "entc", "portableturret", &props);
+    shared_rules(&mut turret);
+    assert_eq!(all(&turret, "MaxHealth"), [30.0]);
+    assert_eq!(all(&turret, "Lifetime"), [60.0]);
+    let hits = |health: f32, per_hit: f32| {
+        let (mut h, mut n) = (health, 0);
+        while h > 0.0 {
+            h -= per_hit;
+            n += 1;
+        }
+        n
+    };
+    let (rifle, pistol, rocket) = (80.0f32 * 0.1, 60.0f32 * 0.1, 500.0f32);
+    assert_eq!(
+        [hits(50.0, rifle), hits(50.0, pistol), hits(50.0, rocket)],
+        [7, 9, 1]
+    );
+    assert_eq!(
+        [hits(30.0, rifle), hits(30.0, pistol), hits(30.0, rocket)],
+        [4, 5, 1]
+    );
+
+    for (name, base) in [
+        ("rep_bldg_inf_autoturret", "com_bldg_inf_autoturret"),
+        ("imp_bldg_boxturret", "armedbuilding"),
+        ("all_bldg_moncal_roundturret", "armedbuilding"),
+        ("tur_bldg_chaingun_tripod", "armedbuilding"),
+    ] {
+        let d = def(name, "entc", base, &props);
+        let mut after = d.clone();
+        shared_rules(&mut after);
+        assert_eq!(after, d, "{name}");
+    }
+    assert!(shared_class("com_bldg_inf_autoturret"));
+    assert!(!shared_class("imp_bldg_boxturret"));
+}

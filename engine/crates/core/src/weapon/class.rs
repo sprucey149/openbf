@@ -205,6 +205,7 @@ impl WeaponClass {
             fire_sound: Some("all_weap_inf_rifle_fire".into()),
             fire_loop_sound: None,
             muzzle_effect: None,
+            charge_up_effect: None,
             reload_sound: Some("all_weap_inf_reload_med".into()),
             empty_sound: Some("com_weap_inf_ammo_empty".into()),
             change_sound: Some("all_weap_inf_equip_med".into()),
@@ -601,6 +602,11 @@ impl WeaponClass {
         w.fire_sound = sound("FireSound");
         w.fire_loop_sound = sound("FireLoopSound");
         w.muzzle_effect = src.prop("MuzzleFlashEffect").map(|s| s.trim().to_owned());
+        w.charge_up_effect = src
+            .prop("ChargeUpEffect")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
         w.reload_sound = sound("ReloadSound");
         w.empty_sound = sound("FireEmptySound");
         w.change_sound = sound("WeaponChangeSound");

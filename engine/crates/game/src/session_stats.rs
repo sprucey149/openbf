@@ -47,19 +47,49 @@
 //!   [`SessionStats::adaptive`] probe, core's [`Sim::adaptive_factor`];
 //!   `null` while the rule is off for the round (bots only, humans on both
 //!   sides).
+//!
+//! Lives and heroes (schema 2, additive):
+//! - `lives`: one row per unit LIFE (a spawn: the unit's generation), humans
+//!   and bots: the class played (`hero` when it is a hero class),
+//!   `spawn_tick`, `end_tick`, how it ended and the `kills`, `team_kills`,
+//!   damage, `shots` and `hits` of that life alone (the slot row's rules,
+//!   credited by the shooter's handle, so a grenade landing after its
+//!   thrower died counts for the life that threw it). A life's `kills` are
+//!   enemy kills only; the slot row's `kills` is the stats page's net count
+//!   (a team kill or suicide takes one off).
+//! - `end`: `killed` (an enemy's `Event::Kill`), `team_killed`, `suicide`,
+//!   `drained` (a hero's time drain: `Event::EnvDeath` with
+//!   `HeroExhausted`, or a kill credited to the hero's last attacker on a
+//!   tick nothing hit him, his health within two ticks' drain of 0),
+//!   `forced` (a fall after a push, credited to its
+//!   attacker), `env` (the world; `cause` says how), `despawned` (taken off
+//!   with no death: accepting a hero), `removed` (gone without an event)
+//!   or `round_end` (alive when the file was written). `killed_by` is the
+//!   killer's unit, side and class in the life that killed.
+//! - A life's or class total's `deaths` counts the ends that are deaths
+//!   (all but `despawned`, `removed` and `round_end`).
+//! - Each slot row gains `hero_kills`, `hero_deaths`, `hero_damage_dealt`
+//!   and `by_class` (its lives summed per class); `class_totals` sums every
+//!   life per team, human or bot, and class (the bots' per-team split).
+//! - `heroes`: the hero class per side, each of the hero manager's
+//!   `unlocks`, its `offers` to humans, and `lives`: every hero life with
+//!   its `unlocked_tick`, `offered_tick` and `accepted_tick` (the manager
+//!   making him the owner) when known. Hero Assault has no unlock: every
+//!   class is a hero there.
 
 use crate::walk::WalkSim;
-use core::sim::{Event, Sim, OUTCOME_DRAW};
+use core::sim::{DeathCause, Event, Sim, OUTCOME_DRAW};
+use core::unit::UnitHandle;
 use core::TICK_HZ;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The cargo feature `session-stats` is on.
 pub const ENABLED: bool = cfg!(feature = "session-stats");
 /// The file format; bump when a field changes meaning.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 /// Seconds between two timeline samples.
 pub const SAMPLE_SECS: u64 = 10;
 /// Files older than this are deleted (3 days).
@@ -149,6 +179,112 @@ struct Tally {
     damage_taken: f64,
     human: bool,
     slot: Option<u8>,
+    /// The index in [`SessionStats::lives`] of the slot's latest life.
+    life: Option<usize>,
+}
+
+/// How a life ended.
+#[derive(Clone, Debug)]
+struct LifeEnd {
+    tick: u64,
+    how: &'static str,
+    cause: Option<DeathCause>,
+    /// The killer's handle and life ([`SessionStats::lives`] index).
+    by: Option<(UnitHandle, Option<usize>)>,
+}
+
+impl LifeEnd {
+    fn death(&self) -> bool {
+        !matches!(self.how, "despawned" | "removed" | "round_end")
+    }
+}
+
+/// One unit life: a spawn of a slot, until its death or removal.
+#[derive(Clone, Debug)]
+struct Life {
+    unit: u32,
+    gen: u32,
+    human: bool,
+    slot: Option<u8>,
+    team: u8,
+    class: String,
+    hero: bool,
+    spawn_tick: u64,
+    end: Option<LifeEnd>,
+    kills: u32,
+    team_kills: u32,
+    shots: u64,
+    hits: u64,
+    damage_dealt: f64,
+    vehicle_damage_dealt: f64,
+    damage_taken: f64,
+    unlocked_tick: Option<u64>,
+    offered_tick: Option<u64>,
+    accepted_tick: Option<u64>,
+    /// Health on the last tick seen alive (tells a drain's death).
+    last_health: f32,
+}
+
+/// Lives summed per class.
+#[derive(Clone, Debug, Default)]
+struct ClassSum {
+    hero: bool,
+    lives: u32,
+    kills: u32,
+    team_kills: u32,
+    deaths: u32,
+    damage_dealt: f64,
+    vehicle_damage_dealt: f64,
+    damage_taken: f64,
+    shots: u64,
+    hits: u64,
+    alive_s: f64,
+}
+
+impl ClassSum {
+    fn add(&mut self, l: &Life, end_tick: u64) {
+        self.hero |= l.hero;
+        self.lives += 1;
+        self.kills += l.kills;
+        self.team_kills += l.team_kills;
+        self.deaths += u32::from(l.end.as_ref().is_some_and(LifeEnd::death));
+        self.damage_dealt += l.damage_dealt;
+        self.vehicle_damage_dealt += l.vehicle_damage_dealt;
+        self.damage_taken += l.damage_taken;
+        self.shots += l.shots;
+        self.hits += l.hits;
+        let end = l.end.as_ref().map_or(end_tick, |e| e.tick);
+        self.alive_s += end.saturating_sub(l.spawn_tick) as f64 / f64::from(TICK_HZ);
+    }
+
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "hero": self.hero,
+            "lives": self.lives,
+            "kills": self.kills,
+            "team_kills": self.team_kills,
+            "deaths": self.deaths,
+            "damage_dealt": round1(self.damage_dealt),
+            "vehicle_damage_dealt": round1(self.vehicle_damage_dealt),
+            "damage_taken": round1(self.damage_taken),
+            "shots": self.shots,
+            "hits": self.hits,
+            "alive_s": round1(self.alive_s),
+        })
+    }
+}
+
+/// The hero manager's moments, as seen tick by tick.
+#[derive(Clone, Debug, Default)]
+struct HeroLog {
+    was_unlocked: [bool; 2],
+    owner: [Option<u32>; 2],
+    /// (team, tick) of each unlock.
+    unlocks: Vec<(u8, u64)>,
+    /// (tick, unit, team) of each offer.
+    offers: Vec<(u64, UnitHandle, u8)>,
+    /// (team, member, tick) of each new owner.
+    accepts: Vec<(u8, u32, u64)>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -171,6 +307,11 @@ pub struct SessionStats {
     timeline: Vec<Sample>,
     next_sample: u64,
     units: Vec<Tally>,
+    /// Every unit life, in spawn order.
+    lives: Vec<Life>,
+    /// (unit index, generation) -> [`Self::lives`] index.
+    life_of: HashMap<(u32, u32), usize>,
+    hero_log: HeroLog,
     /// Every cheat id ON at any tick, session-wide or for a human's slot.
     cheats_ever: BTreeSet<&'static str>,
     decided: Option<(u64, &'static str)>,
@@ -216,12 +357,16 @@ impl SessionStats {
             timeline: Vec::with_capacity(256),
             next_sample: walk.sim.tick,
             units: Vec::new(),
+            lives: Vec::new(),
+            life_of: HashMap::new(),
+            hero_log: HeroLog::default(),
             cheats_ever: BTreeSet::new(),
             decided: None,
             dir,
             written: false,
             adaptive: Sim::adaptive_factor,
         };
+        s.observe_heroes(&walk.sim);
         s.observe_units(walk);
         s
     }
@@ -250,6 +395,17 @@ impl SessionStats {
             let class =
                 spawned.then(|| walk.team_template(u.team).class(u.spec.class).name.clone());
             let human = u.is_player && u.proxy_human.is_none();
+            let open = self.units.get(i).and_then(|t| t.life);
+            if alive && open.is_none_or(|l| self.lives[l].gen != u.gen) {
+                if let Some(l) = open {
+                    self.end_life(l, sim.tick, "removed", None, None);
+                }
+                let l = self.new_life(walk, i);
+                self.tally(i).life = Some(l);
+            }
+            if let Some(l) = self.units.get(i).and_then(|t| t.life).filter(|_| alive) {
+                self.lives[l].last_health = u.health.cur;
+            }
             let t = self.tally(i);
             t.was_alive = alive;
             if alive || !t.seen {
@@ -269,6 +425,207 @@ impl SessionStats {
         }
     }
 
+    /// Open a life for unit `i`'s current spawn.
+    fn new_life(&mut self, walk: &WalkSim, i: usize) -> usize {
+        let sim = &walk.sim;
+        let u = &sim.units[i];
+        let team = u.team;
+        let hero = sim.hero_unit(u);
+        let log = &self.hero_log;
+        let unlocked_tick = log
+            .unlocks
+            .iter()
+            .rev()
+            .find(|(t, _)| *t == team)
+            .map(|(_, k)| *k)
+            .filter(|_| hero);
+        let offered_tick = log
+            .offers
+            .iter()
+            .rev()
+            .find(|(k, h, _)| h.index as usize == i && unlocked_tick.is_none_or(|un| *k >= un))
+            .map(|(k, _, _)| *k)
+            .filter(|_| hero);
+        let accepted_tick = log
+            .accepts
+            .iter()
+            .rev()
+            .find(|(t, m, _)| *t == team && *m as usize == i)
+            .map(|(_, _, k)| *k)
+            .filter(|_| hero);
+        let l = self.lives.len();
+        self.lives.push(Life {
+            unit: i as u32,
+            gen: u.gen,
+            human: u.is_player && u.proxy_human.is_none(),
+            slot: u.spec.player_slot,
+            team,
+            class: walk.team_template(team).class(u.spec.class).name.clone(),
+            hero,
+            spawn_tick: sim.tick,
+            end: None,
+            kills: 0,
+            team_kills: 0,
+            shots: 0,
+            hits: 0,
+            damage_dealt: 0.0,
+            vehicle_damage_dealt: 0.0,
+            damage_taken: 0.0,
+            unlocked_tick,
+            offered_tick,
+            accepted_tick,
+            last_health: u.health.cur,
+        });
+        self.life_of.insert((i as u32, u.gen), l);
+        l
+    }
+
+    /// End life `l`, unless an event already ended it (a tentative
+    /// `removed` gives way to the event that says why).
+    fn end_life(
+        &mut self,
+        l: usize,
+        tick: u64,
+        how: &'static str,
+        cause: Option<DeathCause>,
+        by: Option<(UnitHandle, Option<usize>)>,
+    ) {
+        let life = &mut self.lives[l];
+        if life.end.as_ref().is_none_or(|e| e.how == "removed") {
+            life.end = Some(LifeEnd {
+                tick,
+                how,
+                cause,
+                by,
+            });
+        }
+    }
+
+    fn life(&mut self, h: UnitHandle) -> Option<&mut Life> {
+        let l = *self.life_of.get(&(h.index, h.gen))?;
+        Some(&mut self.lives[l])
+    }
+
+    /// The hero manager's unlocks, offers and new owners this tick.
+    fn observe_heroes(&mut self, sim: &Sim) {
+        let log = &mut self.hero_log;
+        if let Some(h) = &sim.heroes {
+            for (team, st) in h.teams.iter().enumerate() {
+                if st.unlocked && !log.was_unlocked[team] {
+                    log.unlocks.push((team as u8, sim.tick));
+                }
+                log.was_unlocked[team] = st.unlocked;
+                if let Some(m) = st.owner.filter(|m| log.owner[team] != Some(*m)) {
+                    log.accepts.push((team as u8, m, sim.tick));
+                }
+                log.owner[team] = st.owner;
+            }
+        }
+        for e in &sim.events {
+            if let Event::HeroOffered { unit, .. } = *e {
+                let team = sim.units.get(unit.index as usize).map_or(0, |u| u.team);
+                log.offers.push((sim.tick, unit, team));
+            }
+        }
+    }
+
+    /// The lives that ended this tick: the kill and death events, then any
+    /// open life whose soldier is gone without one.
+    fn observe_ends(&mut self, sim: &Sim) {
+        // A tick's drain: a hero this close to 0 with nothing hitting him
+        // died of it, though the kill goes to his last attacker.
+        let drain_step = sim
+            .heroes
+            .as_ref()
+            .map_or(0.0, |h| h.rules.health.time_drain_per_second)
+            / TICK_HZ as f32;
+        let hit_now: BTreeSet<(u32, u32)> = sim
+            .events
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Hit { victim, .. } => Some((victim.index, victim.gen)),
+                _ => None,
+            })
+            .collect();
+        for e in &sim.events {
+            match *e {
+                Event::Kill { shooter, victim } => {
+                    let Some(&v) = self.life_of.get(&(victim.index, victim.gen)) else {
+                        continue;
+                    };
+                    let k = self.life_of.get(&(shooter.index, shooter.gen)).copied();
+                    let vteam = self.lives[v].team;
+                    let kteam = k
+                        .map(|k| self.lives[k].team)
+                        .or_else(|| sim.units.get(shooter.index as usize).map(|u| u.team));
+                    let how = if shooter == victim {
+                        "suicide"
+                    } else if kteam.is_some_and(|t| sim.allied(t, vteam)) {
+                        "team_killed"
+                    } else if self.lives[v].hero
+                        && drain_step > 0.0
+                        && self.lives[v].last_health <= 2.0 * drain_step
+                        && !hit_now.contains(&(victim.index, victim.gen))
+                    {
+                        "drained"
+                    } else {
+                        "killed"
+                    };
+                    if let Some(k) = k.filter(|_| shooter != victim) {
+                        if how == "team_killed" {
+                            self.lives[k].team_kills += 1;
+                        } else {
+                            self.lives[k].kills += 1;
+                        }
+                    }
+                    self.end_life(v, sim.tick, how, None, Some((shooter, k)));
+                }
+                Event::ForcedDeath { unit, cause } => {
+                    if let Some(&v) = self.life_of.get(&(unit.index, unit.gen)) {
+                        if let Some(end) = self.lives[v].end.as_mut() {
+                            if matches!(end.how, "killed" | "drained") {
+                                end.how = "forced";
+                            }
+                            end.cause = Some(cause);
+                        }
+                    }
+                }
+                Event::EnvDeath { unit, cause } => {
+                    if let Some(&v) = self.life_of.get(&(unit.index, unit.gen)) {
+                        let how = if cause == DeathCause::HeroExhausted {
+                            "drained"
+                        } else {
+                            "env"
+                        };
+                        self.end_life(v, sim.tick, how, Some(cause), None);
+                    }
+                }
+                Event::Despawn { unit } => {
+                    if let Some(&v) = self.life_of.get(&(unit.index, unit.gen)) {
+                        self.end_life(v, sim.tick, "despawned", None, None);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for t in &self.units {
+            let Some(l) = t.life else { continue };
+            let life = &mut self.lives[l];
+            let gone = sim
+                .units
+                .get(life.unit as usize)
+                .is_none_or(|u| !u.alive || u.gen != life.gen);
+            if life.end.is_none() && gone {
+                life.end = Some(LifeEnd {
+                    tick: sim.tick,
+                    how: "removed",
+                    cause: None,
+                    by: None,
+                });
+            }
+        }
+    }
+
     fn enemy_unit(sim: &Sim, team: u8, i: usize) -> bool {
         sim.units.get(i).is_some_and(|v| !sim.allied(team, v.team))
     }
@@ -276,7 +633,12 @@ impl SessionStats {
     fn observe_events(&mut self, sim: &Sim) {
         for e in &sim.events {
             match *e {
-                Event::Shot { unit, .. } => self.tally(unit.index as usize).shots += 1,
+                Event::Shot { unit, .. } => {
+                    self.tally(unit.index as usize).shots += 1;
+                    if let Some(l) = self.life(unit) {
+                        l.shots += 1;
+                    }
+                }
                 Event::Hit {
                     direct,
                     shooter,
@@ -286,15 +648,25 @@ impl SessionStats {
                 } => {
                     let (s, v) = (shooter.index as usize, victim.index as usize);
                     self.tally(v).damage_taken += f64::from(damage);
+                    if let Some(l) = self.life(victim) {
+                        l.damage_taken += f64::from(damage);
+                    }
                     let team = sim.units.get(s).map(|u| u.team);
                     if s != v && team.is_some_and(|t| Self::enemy_unit(sim, t, v)) {
                         let t = self.tally(s);
                         t.damage_dealt += f64::from(damage);
                         t.hits += u64::from(direct);
+                        if let Some(l) = self.life(shooter) {
+                            l.damage_dealt += f64::from(damage);
+                            l.hits += u64::from(direct);
+                        }
                     }
                 }
                 Event::FallDamage { victim, damage, .. } => {
                     self.tally(victim.index as usize).damage_taken += f64::from(damage);
+                    if let Some(l) = self.life(victim) {
+                        l.damage_taken += f64::from(damage);
+                    }
                 }
                 Event::VehicleHit {
                     shooter: Some(shooter),
@@ -317,7 +689,12 @@ impl SessionStats {
                         let t = self.tally(s);
                         t.vehicle_damage_dealt += f64::from(damage);
                         // A bolt or blast; a direct one has a direction.
-                        t.hits += u64::from(dir.is_some() && damage > 0.0);
+                        let hit = u64::from(dir.is_some() && damage > 0.0);
+                        t.hits += hit;
+                        if let Some(l) = self.life(shooter) {
+                            l.vehicle_damage_dealt += f64::from(damage);
+                            l.hits += hit;
+                        }
                     }
                 }
                 Event::TurretHit {
@@ -329,6 +706,9 @@ impl SessionStats {
                     let s = shooter.index as usize;
                     if sim.units.get(s).is_some_and(|u| !sim.allied(u.team, team)) {
                         self.tally(s).vehicle_damage_dealt += f64::from(damage);
+                        if let Some(l) = self.life(shooter) {
+                            l.vehicle_damage_dealt += f64::from(damage);
+                        }
                     }
                 }
                 _ => {}
@@ -363,8 +743,10 @@ impl SessionStats {
     /// One stepped tick: after `Sim::step`, while its events are there.
     pub fn tick(&mut self, walk: &WalkSim) {
         let sim = &walk.sim;
+        self.observe_heroes(sim);
         self.observe_units(walk);
         self.observe_events(sim);
+        self.observe_ends(sim);
         self.observe_cheats(sim);
         if self.decided.is_none() && sim.outcome.is_some() {
             self.decided = Some((sim.tick, how_decided(sim)));
@@ -399,6 +781,104 @@ impl SessionStats {
                 t => serde_json::json!(format!("team{t}")),
             }
         };
+        let name_of = |i: usize| names.map(|f| f.unit_name(sim, sim.handle(i)));
+        let life_row = |l: &Life| -> serde_json::Value {
+            let end = l.end.as_ref();
+            let killed_by = end.and_then(|e| e.by).map(|(h, k)| match k {
+                Some(k) => {
+                    let kl = &self.lives[k];
+                    serde_json::json!({
+                        "unit": kl.unit,
+                        "human": kl.human,
+                        "slot": kl.slot,
+                        "team": kl.team,
+                        "side": side(kl.team),
+                        "class": kl.class,
+                        "hero": kl.hero,
+                    })
+                }
+                None => serde_json::json!({ "unit": h.index }),
+            });
+            serde_json::json!({
+                "unit": l.unit,
+                "human": l.human,
+                "slot": l.slot,
+                "team": l.team,
+                "side": side(l.team),
+                "class": l.class,
+                "hero": l.hero,
+                "spawn_tick": l.spawn_tick,
+                "end_tick": end.map_or(end_tick.max(l.spawn_tick), |e| e.tick),
+                "end": end.map_or("round_end", |e| e.how),
+                "cause": end.and_then(|e| e.cause).map(|c| format!("{c:?}")),
+                "killed_by": killed_by,
+                "kills": l.kills,
+                "team_kills": l.team_kills,
+                "damage_dealt": round1(l.damage_dealt),
+                "vehicle_damage_dealt": round1(l.vehicle_damage_dealt),
+                "damage_taken": round1(l.damage_taken),
+                "shots": l.shots,
+                "hits": l.hits,
+            })
+        };
+        let lives: Vec<_> = self.lives.iter().map(&life_row).collect();
+        // Per slot and class, and per (team, human, class).
+        let mut slot_classes: BTreeMap<u32, BTreeMap<&str, ClassSum>> = BTreeMap::new();
+        let mut totals: BTreeMap<(u8, bool, &str), ClassSum> = BTreeMap::new();
+        for l in &self.lives {
+            slot_classes
+                .entry(l.unit)
+                .or_default()
+                .entry(&l.class)
+                .or_default()
+                .add(l, end_tick);
+            totals
+                .entry((l.team, l.human, &l.class))
+                .or_default()
+                .add(l, end_tick);
+        }
+        let class_totals: Vec<_> = totals
+            .iter()
+            .map(|((team, human, class), sum)| {
+                let mut v = sum.json();
+                v["team"] = serde_json::json!(team);
+                v["side"] = side(*team);
+                v["human"] = serde_json::json!(human);
+                v["class"] = serde_json::json!(class);
+                v
+            })
+            .collect();
+        let hero_lives: Vec<_> = self
+            .lives
+            .iter()
+            .filter(|l| l.hero)
+            .map(|l| {
+                let mut v = life_row(l);
+                v["name"] = serde_json::json!(name_of(l.unit as usize));
+                v["unlocked_tick"] = serde_json::json!(l.unlocked_tick);
+                v["offered_tick"] = serde_json::json!(l.offered_tick);
+                v["accepted_tick"] = serde_json::json!(l.accepted_tick);
+                v
+            })
+            .collect();
+        let hero_classes = [0u8, 1].map(|t| {
+            sim.hero_class(t)
+                .map(|c| walk.team_template(t).class(c).name.clone())
+        });
+        let heroes = serde_json::json!({
+            "hero_assault": sim.hero_assault(),
+            "classes": hero_classes,
+            "unlocks": self.hero_log.unlocks.iter().map(|(team, tick)| serde_json::json!({
+                "team": team, "side": side(*team), "tick": tick,
+            })).collect::<Vec<_>>(),
+            "offers": self.hero_log.offers.iter().map(|(tick, h, team)| serde_json::json!({
+                "tick": tick,
+                "unit": h.index,
+                "slot": sim.units.get(h.index as usize).and_then(|u| u.spec.player_slot),
+                "team": team,
+            })).collect::<Vec<_>>(),
+            "lives": hero_lives,
+        });
         let mut sizes = [0u32; 2];
         let mut human_sides = BTreeSet::new();
         let mut players = Vec::new();
@@ -422,7 +902,20 @@ impl SessionStats {
                 }));
             }
             let accuracy = (t.shots > 0).then(|| t.hits.min(t.shots) as f64 / t.shots as f64);
+            let by_class = slot_classes.get(&(i as u32));
+            let hero_sum = |f: fn(&ClassSum) -> f64| -> f64 {
+                by_class.map_or(0.0, |m| m.values().filter(|c| c.hero).map(f).sum())
+            };
+            let by_class_json: serde_json::Map<String, serde_json::Value> = by_class
+                .into_iter()
+                .flatten()
+                .map(|(c, sum)| ((*c).to_owned(), sum.json()))
+                .collect();
             players.push(serde_json::json!({
+                "hero_kills": hero_sum(|c| f64::from(c.kills)) as u32,
+                "hero_deaths": hero_sum(|c| f64::from(c.deaths)) as u32,
+                "hero_damage_dealt": round1(hero_sum(|c| c.damage_dealt)),
+                "by_class": by_class_json,
                 "unit": i,
                 "human": t.human,
                 "slot": t.slot,
@@ -494,6 +987,9 @@ impl SessionStats {
             "time_limit_s": sim.time_limit,
             "timeline": timeline,
             "players": players,
+            "class_totals": class_totals,
+            "heroes": heroes,
+            "lives": lives,
         })
     }
 
@@ -685,6 +1181,157 @@ mod tests {
         let players = v["players"].as_array().unwrap();
         assert_eq!(players.len(), watched.sim.units.len());
         assert!(players.iter().any(|p| p["human"] == true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A round where the human and a bot each play the hero: both get a
+    /// hero life (accepted tick, class, end) beside their ordinary life,
+    /// the human's kill of the bot hero is a hero kill, and the class
+    /// totals split hero from ordinary classes.
+    #[test]
+    fn hero_lives_and_class_totals() {
+        let mut walk = WalkSim::new(7, glam::Vec3::ZERO, None);
+        let p = walk.player;
+        let u = &walk.sim.units[p.index as usize];
+        let class = core::unit::UnitClass {
+            consts: u.spec.consts,
+            max_health: u.health.max,
+            health_type: u.spec.health_type,
+            weapon_class: u.weapon_class,
+            total_clips: 6,
+            weapon_slot: u.weapon_slot,
+            slots: u.spec.slots.clone(),
+            jet: false,
+            capture_posts: true,
+            drops: Default::default(),
+            chunk: None,
+            droideka: None,
+            min: 1,
+            max: None,
+            unlock_points: 0,
+        };
+        for team in 0..2 {
+            walk.sim.classes[team] = vec![class.clone(), class.clone()];
+            let mut hero = walk.teams[team].classes[0].clone();
+            hero.name = format!("hero{team}");
+            walk.teams[team].classes.truncate(1);
+            walk.teams[team].classes.push(hero);
+        }
+        walk.sim.heroes = Some(core::sim::heroes::Heroes::new([Some(1), Some(1)]));
+        // A post per side to respawn the heroes at.
+        for (team, x) in [(0u8, 0.0f32), (1, 60.0)] {
+            let pos = glam::Vec3::new(x, 0.0, 0.0);
+            let (capture_time, neutralize_time) = core::cp::CpDef::class_times(true);
+            walk.sim.add_cp(
+                core::cp::CpDef {
+                    name: format!("cp{team}"),
+                    pos,
+                    capture: core::region::Region::sphere(pos, 8.0),
+                    control: None,
+                    value_bleed: 10,
+                    value_atk: [10; 2],
+                    value_def: [10; 2],
+                    spawn_nodes: vec![(pos, 0.0)],
+                    capture_time,
+                    neutralize_time,
+                },
+                Some(team),
+            );
+        }
+        let spec = walk.teams[1].spec(
+            1,
+            glam::Vec3::new(30.0, 0.0, 0.0),
+            0.0,
+            core::unit::Controller::Ai,
+            0,
+        );
+        let bot = walk.sim.spawn(&spec).expect("an enemy bot").index as usize;
+        let dir =
+            std::env::temp_dir().join(format!("openbf_session_heroes_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let info = RoundInfo {
+            map: "test".into(),
+            mode: "con".into(),
+            role: "single".into(),
+            ..Default::default()
+        };
+        let mut stats = SessionStats::start(info, &walk, dir.clone());
+        let idle = [core::sim::PadState::default()];
+        let run = |walk: &mut WalkSim, stats: &mut SessionStats, n: u64| {
+            for _ in 0..n {
+                walk.step_tick(&idle);
+                stats.tick(walk);
+            }
+        };
+        run(&mut walk, &mut stats, 2 * u64::from(TICK_HZ));
+        let accepted = walk.sim.tick;
+        walk.sim.events.clear();
+        assert!(walk.sim.accept_scripted_hero(p.index));
+        assert!(walk.sim.accept_scripted_hero(bot as u32));
+        stats.tick(&walk);
+        run(&mut walk, &mut stats, u64::from(TICK_HZ));
+        let hero_p = walk.sim.handle(p.index as usize);
+        let hero_b = walk.sim.handle(bot);
+        assert!(walk.sim.is_hero(hero_p) && walk.sim.is_hero(hero_b));
+        let killed = walk.sim.tick;
+        walk.sim.events.clear();
+        walk.sim.kill_unit_by(hero_b, Some(hero_p));
+        stats.tick(&walk);
+        run(&mut walk, &mut stats, u64::from(TICK_HZ));
+        let round = crate::round_stats::RoundStats::default();
+        let v = stats.json(&walk, &round, None, "quit");
+        assert_eq!(v["schema"], 2);
+        let heroes = &v["heroes"];
+        assert_eq!(heroes["classes"], serde_json::json!(["hero0", "hero1"]));
+        let hl = heroes["lives"].as_array().unwrap();
+        assert_eq!(hl.len(), 2, "{hl:#?}");
+        let human = hl.iter().find(|l| l["human"] == true).unwrap();
+        let botl = hl.iter().find(|l| l["human"] == false).unwrap();
+        assert_eq!(human["unit"], p.index);
+        assert_eq!(human["class"], format!("hero{}", human["team"]));
+        assert_eq!(human["accepted_tick"], accepted);
+        assert_eq!(human["spawn_tick"], accepted);
+        assert_eq!(human["kills"], 1);
+        assert_eq!(human["end"], "round_end");
+        assert_eq!(botl["unit"], bot);
+        assert_eq!(botl["accepted_tick"], accepted);
+        assert_eq!(botl["end"], "killed");
+        assert_eq!(botl["end_tick"], killed);
+        assert_eq!(botl["killed_by"]["unit"], p.index);
+        assert_eq!(botl["killed_by"]["hero"], true);
+        assert_eq!(botl["killed_by"]["human"], true);
+        // Their ordinary lives before: ended by the accept, no death.
+        let lives = v["lives"].as_array().unwrap();
+        for unit in [u64::from(p.index), bot as u64] {
+            let first = lives.iter().find(|l| l["unit"] == unit).unwrap();
+            assert_eq!(first["hero"], false);
+            assert_eq!(first["end"], "despawned");
+            assert_eq!(first["end_tick"], accepted);
+        }
+        // The human's row: one hero kill, split by class.
+        let row = v["players"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["unit"] == p.index)
+            .unwrap();
+        assert_eq!(row["hero_kills"], 1);
+        assert_eq!(row["hero_deaths"], 0);
+        let hero_name = human["class"].as_str().unwrap();
+        assert_eq!(row["by_class"][hero_name]["hero"], true);
+        assert_eq!(row["by_class"][hero_name]["kills"], 1);
+        let totals = v["class_totals"].as_array().unwrap();
+        let bot_hero = totals
+            .iter()
+            .find(|t| t["human"] == false && t["hero"] == true)
+            .unwrap();
+        assert_eq!(
+            (bot_hero["lives"].clone(), bot_hero["deaths"].clone()),
+            (1.into(), 1.into())
+        );
+        assert!(totals
+            .iter()
+            .any(|t| t["human"] == false && t["hero"] == false && t["team"] == botl["team"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

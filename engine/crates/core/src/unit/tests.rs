@@ -7,14 +7,8 @@ use super::*;
 /// `CollisionRootScale` reaches further.
 #[test]
 fn a_soldiers_bolt_prims_are_the_ps2s() {
-    let at = |stance, scale| BoltPrims {
-        pos: Vec3::ZERO,
-        yaw: 0.0,
-        stance,
-        scale,
-        posed: None,
-    };
-    let stand = at(Stance::Stand, 1.0);
+    let at = |posture, scale| BoltPrims::new(Vec3::ZERO, 0.0, posture, scale, None);
+    let stand = at(Posture::Stand, 1.0);
     // From 20 m to his right, level, toward him.
     let shot = |p: &BoltPrims, y: f32, z: f32| {
         p.hit(Vec3::new(20.0, y, z), Vec3::NEG_X, 40.0)
@@ -34,7 +28,7 @@ fn a_soldiers_bolt_prims_are_the_ps2s() {
     let down = stand.hit(Vec3::new(0.0, 10.0, -0.16), Vec3::NEG_Y, 20.0);
     assert_eq!(down.map(|(_, z)| z), Some(HitZone::Head));
     // Prone: the head 0.28 m up and 0.75 m ahead (-Z); the body behind.
-    let prone = at(Stance::Prone, 1.0);
+    let prone = at(Posture::Prone, 1.0);
     assert_eq!(shot(&prone, 0.28, -0.75), Some(HitZone::Head));
     assert_eq!(shot(&prone, 0.2, 0.2), Some(HitZone::Body));
     assert_eq!(shot(&prone, 1.0, 0.0), None, "over a prone soldier");
@@ -47,7 +41,7 @@ fn a_soldiers_bolt_prims_are_the_ps2s() {
     assert_eq!(from_side.map(|(_, z)| z), Some(HitZone::Head));
     // The wookiee's 1.15: his head at 1.9 m.
     assert_eq!(
-        shot(&at(Stance::Stand, 1.15), 1.9, -0.16),
+        shot(&at(Posture::Stand, 1.15), 1.9, -0.16),
         Some(HitZone::Head)
     );
     assert_eq!(shot(&stand, 1.9, -0.16), None);
@@ -62,11 +56,8 @@ fn a_seated_riders_prims_sit_on_his_drawn_head_and_torso() {
     let head = Vec3::new(0.0, 1.825, 0.1);
     let torso = Vec3::new(0.0, 1.3, 0.0);
     let p = BoltPrims {
-        pos: Vec3::ZERO,
-        yaw: 0.0,
-        stance: Stance::Stand,
-        scale: 1.0,
         posed: Some([head, torso]),
+        ..BoltPrims::new(Vec3::ZERO, 0.0, Posture::Stand, 1.0, None)
     };
     // His facing (+z in his frame) is world -Z at yaw 0.
     let shot = |p: &BoltPrims, y: f32, z: f32| {
@@ -101,6 +92,146 @@ fn a_seated_riders_prims_sit_on_his_drawn_head_and_torso() {
     assert_eq!(shot(&q, 1.6, 0.0), Some(HitZone::Head));
     // Over the body cylinder's top (the torso centre's height).
     assert_eq!(shot(&q, 1.35, 0.0), Some(HitZone::Torso));
+}
+
+/// `game::roster::STANCE_BODY`'s rows: BF2's clone trooper, Vader, and
+/// BF1's Ewok.
+fn row(p: [[f32; 3]; 5]) -> StanceBody {
+    let v = |i: usize| Vec3::from_array(p[i]);
+    StanceBody {
+        head: [v(0), v(1), v(2)],
+        torso: [v(3), v(4)],
+    }
+}
+const TROOPER: [[f32; 3]; 5] = [
+    [-0.024, 1.673, 0.131],
+    [-0.066, 1.261, 0.207],
+    [-0.086, 0.313, 0.699],
+    [0.112, 1.252, -0.154],
+    [0.092, 0.914, -0.161],
+];
+const VADER: [[f32; 3]; 5] = [
+    [-0.037, 1.942, 0.129],
+    [-0.077, 1.436, 0.215],
+    [-0.098, 0.344, 0.721],
+    [0.128, 1.444, -0.181],
+    [0.108, 1.023, -0.199],
+];
+const EWOK_BF1: [[f32; 3]; 5] = [
+    [-0.070, 1.021, 0.131],
+    [-0.128, 0.765, 0.184],
+    [-0.071, 0.221, 0.579],
+    [0.108, 0.723, -0.144],
+    [0.107, 0.581, -0.142],
+];
+
+/// A level shot from 20 m to his right (he faces -Z at yaw 0, so his
+/// frame's z is world -z) at height `y` and his-frame depth `z`.
+fn side_shot(p: &BoltPrims, y: f32, z: f32) -> Option<HitZone> {
+    p.hit(Vec3::new(20.0, y, -z), Vec3::NEG_X, 40.0)
+        .map(|(_, zone)| zone)
+}
+
+/// Playtest 2026-11-22 ("hit boxes in crouch or prone seemed messed up"):
+/// a crouched trooper is hit on his drawn crouched head and chest, and a
+/// shot at standing head height or just over his head misses him.
+#[test]
+fn a_crouched_soldier_is_hit_where_he_crouches() {
+    let body = row(TROOPER);
+    let p = BoltPrims::new(Vec3::ZERO, 0.0, Posture::Crouch, 1.0, Some(&body));
+    assert_eq!(side_shot(&p, 1.261, 0.207), Some(HitZone::Head));
+    assert_eq!(side_shot(&p, 0.914, -0.161), Some(HitZone::Torso));
+    assert_eq!(side_shot(&p, 0.3, 0.0), Some(HitZone::Body));
+    assert_eq!(side_shot(&p, 1.673, 0.131), None, "standing head height");
+    assert_eq!(side_shot(&p, 1.5, 0.1), None, "over his head");
+    // From above: his head first.
+    let down = p.hit(Vec3::new(-0.066, 10.0, -0.207), Vec3::NEG_Y, 20.0);
+    assert_eq!(down.map(|(_, z)| z), Some(HitZone::Head));
+}
+
+/// The same playtest: a prone trooper's head lies at the front end, 0.7 m
+/// ahead of his feet's point and 0.31 m up; his body is a box along his
+/// facing from behind his feet to his shoulders. Over his body, beyond his
+/// feet or beside him a shot misses; turned, it all turns with him.
+#[test]
+fn a_prone_soldier_is_hit_on_his_head_and_along_his_body() {
+    let body = row(TROOPER);
+    let p = BoltPrims::new(Vec3::ZERO, 0.0, Posture::Prone, 1.0, Some(&body));
+    assert_eq!(side_shot(&p, 0.313, 0.699), Some(HitZone::Head));
+    assert_eq!(side_shot(&p, 0.2, -0.25), Some(HitZone::Body), "his hips");
+    assert_eq!(side_shot(&p, 0.2, -1.0), Some(HitZone::Body), "his legs");
+    assert_eq!(
+        side_shot(&p, 0.2, 0.5),
+        Some(HitZone::Body),
+        "his shoulders"
+    );
+    assert_eq!(side_shot(&p, 0.2, -1.2), None, "past his feet");
+    assert_eq!(side_shot(&p, 0.6, -0.25), None, "over his back");
+    assert_eq!(side_shot(&p, 1.15, 0.0), None, "standing chest height");
+    assert_eq!(side_shot(&p, 0.313, 0.95), None, "past his head");
+    // A shot along his length from in front meets the head before the body.
+    let front = p.hit(Vec3::new(-0.086, 0.313, -20.0), Vec3::Z, 40.0);
+    assert_eq!(front.map(|(_, z)| z), Some(HitZone::Head));
+    // From above onto his back, and onto his head.
+    let back = p.hit(Vec3::new(0.0, 10.0, 0.4), Vec3::NEG_Y, 20.0);
+    assert_eq!(back.map(|(_, z)| z), Some(HitZone::Body));
+    let head = p.hit(Vec3::new(-0.086, 10.0, -0.699), Vec3::NEG_Y, 20.0);
+    assert_eq!(head.map(|(_, z)| z), Some(HitZone::Head));
+    // Facing +X, lying along X: his head at x +0.7.
+    let turned = BoltPrims::new(
+        Vec3::ZERO,
+        -std::f32::consts::FRAC_PI_2,
+        Posture::Prone,
+        1.0,
+        Some(&body),
+    );
+    let from_side = turned.hit(Vec3::new(0.699, 0.313, 20.0), Vec3::NEG_Z, 40.0);
+    assert_eq!(from_side.map(|(_, z)| z), Some(HitZone::Head));
+    let legs = turned.hit(Vec3::new(-1.0, 0.2, 20.0), Vec3::NEG_Z, 40.0);
+    assert_eq!(legs.map(|(_, z)| z), Some(HitZone::Body));
+    assert!(turned
+        .hit(Vec3::new(-1.2, 0.2, 20.0), Vec3::NEG_Z, 40.0)
+        .is_none());
+}
+
+/// The same playtest: a class's height is his model's. Vader (drawn head
+/// 1.94 m, no `CollisionRootScale`) is hit in the head at 1.94 m, where a
+/// trooper is not; an Ewok (1.02 m, no `CollisionRootScale` either) is
+/// missed at 1.4 m, which met a trooper-sized Ewok before; crouched and
+/// prone they keep their own sizes.
+#[test]
+fn a_tall_and_a_short_class_are_hit_at_their_own_heights() {
+    let at = |rows: [[f32; 3]; 5], posture| {
+        BoltPrims::new(Vec3::ZERO, 0.0, posture, 1.0, Some(&row(rows)))
+    };
+    let (vader, trooper, ewok) = (
+        at(VADER, Posture::Stand),
+        at(TROOPER, Posture::Stand),
+        at(EWOK_BF1, Posture::Stand),
+    );
+    assert!((vader.scale - 1.942 / 1.673).abs() < 1e-6);
+    assert_eq!(side_shot(&vader, 1.942, 0.129), Some(HitZone::Head));
+    assert_eq!(side_shot(&trooper, 1.942, 0.129), None);
+    assert_eq!(side_shot(&trooper, 1.673, 0.131), Some(HitZone::Head));
+    assert_eq!(side_shot(&ewok, 1.021, 0.131), Some(HitZone::Head));
+    assert_eq!(side_shot(&ewok, 1.4, 0.0), None, "over the Ewok");
+    let old_ewok = BoltPrims::new(Vec3::ZERO, 0.0, Posture::Stand, 1.0, None);
+    assert!(side_shot(&old_ewok, 1.4, 0.0).is_some());
+    assert_eq!(side_shot(&ewok, 0.723, -0.144), Some(HitZone::Torso));
+    // Crouched: Vader's head at 1.44 m, over the trooper's crouch.
+    let (vader_c, trooper_c) = (at(VADER, Posture::Crouch), at(TROOPER, Posture::Crouch));
+    assert_eq!(side_shot(&vader_c, 1.436, 0.215), Some(HitZone::Head));
+    assert_eq!(side_shot(&trooper_c, 1.5, 0.215), None);
+    assert_eq!(side_shot(&vader_c, 1.5, 0.215), Some(HitZone::Head));
+    // Prone: the Ewok is shorter along the ground too.
+    let (ewok_p, trooper_p) = (at(EWOK_BF1, Posture::Prone), at(TROOPER, Posture::Prone));
+    assert_eq!(side_shot(&ewok_p, 0.221, 0.579), Some(HitZone::Head));
+    assert_eq!(side_shot(&trooper_p, 0.2, -1.0), Some(HitZone::Body));
+    assert_eq!(side_shot(&ewok_p, 0.2, -1.0), None, "past the Ewok's feet");
+    assert_eq!(side_shot(&ewok_p, 0.3, 0.0), None, "over the Ewok's back");
+    // No row: the posture lists at `CollisionRootScale`, as before.
+    let listed = BoltPrims::new(Vec3::ZERO, 0.0, Posture::Prone, 1.15, None);
+    assert_eq!(listed.head, Vec3::new(0.0, 0.28 * 1.15, 0.75 * 1.15));
 }
 
 const DT: f32 = AimBlock::PERIOD as f32 * crate::TICK_DT;

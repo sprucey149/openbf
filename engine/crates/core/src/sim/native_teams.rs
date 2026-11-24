@@ -79,6 +79,9 @@ pub(super) struct NativeTeam {
     /// relations still decide where it spawns ([`Sim::set_native_neutral`]).
     neutral: bool,
     reinforcements: Option<u32>,
+    /// Each native class's own chunk death, by the class index its members
+    /// carry ([`Sim::set_native_chunk_deaths`]); empty means none bursts.
+    chunks: Vec<Option<crate::unit::ChunkDeath>>,
 }
 
 impl Sim {
@@ -160,6 +163,7 @@ impl Sim {
             deathmatch: false,
             neutral: false,
             reinforcements: None,
+            chunks: Vec::new(),
         });
     }
 
@@ -187,6 +191,35 @@ impl Sim {
         if let Some(i) = self.native_team_index(team) {
             self.native_teams[i].draw = Some(draw);
         }
+    }
+
+    /// Native `team`'s chunk deaths, one per class of its own table (the
+    /// class index its members' specs carry). A native is not one of the
+    /// armies, so it never borrows an army's class: a Tusken fielded beside
+    /// the CIS falls and leaves a body unless its own class has chunk
+    /// geometry.
+    pub fn set_native_chunk_deaths(
+        &mut self,
+        team: u8,
+        chunks: Vec<Option<crate::unit::ChunkDeath>>,
+    ) {
+        if let Some(i) = self.native_team_index(team) {
+            self.native_teams[i].chunks = chunks;
+        }
+    }
+
+    /// Native `team`'s class `class` chunk death, `None` for a class without
+    /// one or a team that is not native.
+    pub(super) fn native_chunk_death(
+        &self,
+        team: u8,
+        class: u8,
+    ) -> Option<&crate::unit::ChunkDeath> {
+        let i = self.native_team_index(team)?;
+        self.native_teams[i]
+            .chunks
+            .get(usize::from(class))?
+            .as_ref()
     }
 
     /// Set a native/local team's reinforcement count (`None` = unlimited,

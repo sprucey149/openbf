@@ -2,7 +2,7 @@
 //! 0016a710): move the ray start back by width, expand each primitive by
 //! that radius, and preserve the supplied length. No headshot multiplier.
 
-use super::{ray_sphere, ray_upright_cylinder, ray_yawed_box, BoltPrims, Stance, Vec3};
+use super::{BoltPrims, Vec3};
 use crate::fmath::FloatExt;
 
 impl BoltPrims {
@@ -31,77 +31,24 @@ impl BoltPrims {
         {
             return None;
         }
-        let (sy, cy) = crate::fmath::sin_cos(self.yaw);
-        let right = Vec3::new(cy, 0.0, -sy);
-        let forward = Vec3::new(-sy, 0.0, -cy);
-        let p = start - direction * radius - self.pos;
-        let from = Vec3::new(p.dot(right), p.y, p.dot(forward));
-        let dir = Vec3::new(direction.dot(right), direction.y, direction.dot(forward));
-        let hit = |t: Option<f32>| t.filter(|&t| t == 0.0 || t < length);
-        let sphere = |center, r| hit(ray_sphere(from, dir, center, r + radius));
-        let cylinder = |center, r, hh| {
-            hit(ray_upright_cylinder(
-                from,
-                dir,
-                center,
-                r + radius,
-                hh + radius,
-            ))
-        };
-        let nearest = |a: Option<f32>, b: Option<f32>| match (a, b) {
-            (Some(a), Some(b)) => Some(a.fmin(b)),
-            (a, b) => a.or(b),
-        };
-        let s = self.scale;
-        let head = 0.17 * s.fmax(1.0);
-        if let Some([h, t]) = self.posed {
-            let (torso, hh) = self.posed_sizes(h, t);
-            return nearest(
-                nearest(sphere(h, head), sphere(t, torso)),
-                cylinder(Vec3::new(0.0, hh, 0.0), 0.35, hh),
-            );
-        }
-        match self.stance {
-            Stance::Prone | Stance::Roll | Stance::Dead => nearest(
-                sphere(Vec3::new(0.0, 0.28 * s, 0.75 * s), head),
-                hit(ray_yawed_box(
-                    from,
-                    dir,
-                    Vec3::new(0.0, 0.2, -0.25 * s),
-                    Vec3::X,
-                    Vec3::Z,
-                    Vec3::new(0.25, 0.2, 0.87 * s) + Vec3::splat(radius),
-                )),
-            ),
-            Stance::Crouch => nearest(
-                nearest(
-                    sphere(Vec3::new(0.0, 1.2 * s, 0.25), head),
-                    sphere(Vec3::new(0.0, 0.7 * s, 0.0), 0.4 * s),
-                ),
-                cylinder(Vec3::new(0.0, 0.35 * s, 0.0), 0.35, 0.35 * s),
-            ),
-            _ => nearest(
-                nearest(
-                    sphere(Vec3::new(0.0, 1.65 * s, 0.16), head),
-                    sphere(Vec3::new(0.0, 1.15 * s, 0.0), 0.4 * s),
-                ),
-                cylinder(Vec3::new(0.0, 0.55 * s, 0.0), 0.35, 0.55 * s),
-            ),
-        }
+        let (from, dir) = self.to_local(start - direction * radius, direction);
+        self.prims()
+            .iter()
+            .filter_map(|(prim, _)| {
+                prim.ray(from, dir, radius)
+                    .filter(|&t| t == 0.0 || t < length)
+            })
+            .reduce(|a, b| a.fmin(b))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::unit::Posture;
+
     fn body() -> BoltPrims {
-        BoltPrims {
-            pos: Vec3::ZERO,
-            yaw: 0.0,
-            stance: Stance::Stand,
-            scale: 1.0,
-            posed: None,
-        }
+        BoltPrims::new(Vec3::ZERO, 0.0, Posture::Stand, 1.0, None)
     }
 
     #[test]
@@ -137,8 +84,7 @@ mod tests {
 
     #[test]
     fn prone_box_uses_expanded_square_corners_in_its_rotated_frame() {
-        let mut body = body();
-        body.stance = Stance::Prone;
+        let mut body = BoltPrims::new(Vec3::ZERO, 0.0, Posture::Prone, 1.0, None);
         let local_start = Vec3::new(0.34, 0.49, -1.0);
         assert!(body.melee_hit(local_start, Vec3::Z, 2.0, 0.1));
         assert!(!body.melee_hit(Vec3::new(0.36, 0.49, -1.0), Vec3::Z, 2.0, 0.1));

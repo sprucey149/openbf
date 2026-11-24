@@ -11,7 +11,10 @@ use crate::soldier::{GroundRules, Soldier, SoldierConstants, Stance};
 use crate::weapon::{Health, HealthType, WeaponClass, WeaponState};
 use glam::Vec3;
 
+mod body;
 mod melee;
+
+pub use body::{list_points, Posture, Prim, StanceBody, TROOPER_HEAD_Y};
 
 /// Where a bot's next life starts (card BSPN; re-command-walker-post §6
 /// [O]): one of the sim's command posts by index, or a live command walker —
@@ -438,22 +441,24 @@ impl Unit {
     /// FUN_002517e8 B2:170187-170556, analysis/re-hitzones.md). BF2's posture
     /// lists on both games' maps (BF1 has no torso and a taller body; one
     /// gameplay), placed in the soldier's frame (+z his facing) and scaled
-    /// by `CollisionRootScale` `s` (the head's radius by max(s, 1)). The
-    /// head's place is the posture list's; BF2 moves it each frame to a
-    /// point of the animation (FUN_0024f350), not ported (PROVISIONAL).
+    /// by the body's size `s` (the head's radius by max(s, 1)). BF2 moves
+    /// the head and torso each frame to points of the animation
+    /// (FUN_0024f350); here they stand on his model's points in each
+    /// posture's idle, and the posture follows a prone change's clip
+    /// (OURS, `unit/body.rs`; measure: a PS2 Ewok's head prim in RAM).
     pub fn bolt_hit(&self, from: Vec3, dir: Vec3, max_t: f32) -> Option<(f32, HitZone)> {
         self.bolt_prims().hit(from, dir, max_t)
     }
 
     /// What [`Unit::bolt_hit`] reads of him, taken once a tick by the sweep.
     pub fn bolt_prims(&self) -> BoltPrims {
-        BoltPrims {
-            pos: self.soldier.pos,
-            yaw: self.soldier.yaw,
-            stance: self.soldier.stance,
-            scale: self.consts.collision_scale,
-            posed: None,
-        }
+        BoltPrims::new(
+            self.soldier.pos,
+            self.soldier.yaw,
+            Posture::of(&self.soldier),
+            self.consts.collision_scale,
+            self.consts.stance_body.as_ref(),
+        )
     }
 
     /// Aim frame from yaw/pitch (render::Camera convention: yaw 0 = -Z,
@@ -834,14 +839,21 @@ impl Unit {
     }
 }
 
-/// A soldier's place, turn, stance and `CollisionRootScale`: all a bolt's
-/// test of his prims reads (`Unit::bolt_hit`).
+/// A soldier's place, turn, posture, size and head and torso: all a bolt's
+/// test of his prims reads (`Unit::bolt_hit`; built by [`BoltPrims::new`],
+/// the shapes in `unit/body.rs`).
 #[derive(Clone, Copy, Debug)]
 pub struct BoltPrims {
     pub pos: Vec3,
     pub yaw: f32,
-    pub stance: Stance,
+    pub posture: Posture,
+    /// The body's size against a trooper's: his model's
+    /// ([`StanceBody::scale`]), else `CollisionRootScale`.
     pub scale: f32,
+    /// The head's and torso's centres in his frame (x right, y up from the
+    /// feet, z his facing) in `posture` (prone: no torso).
+    pub head: Vec3,
+    pub torso: Vec3,
     /// A seated rider's drawn head and torso centres in his frame (x right,
     /// y up, z his facing; `crate::sim::SeatedBody`): they stand in for the
     /// posture's, as BF2 moves the head and torso onto the animation's
@@ -906,10 +918,8 @@ impl BoltPrims {
     pub fn bounds(&self) -> (Vec3, Vec3) {
         let r = 1.2 * self.scale.fmax(1.0);
         let mut top = 2.1 * self.scale.fmax(1.0);
-        if let Some(p) = self.posed {
-            for c in p {
-                top = top.fmax(c.y + 0.4 * self.scale.fmax(1.0));
-            }
+        for c in self.posed.unwrap_or([self.head, self.torso]) {
+            top = top.fmax(c.y + 0.4 * self.scale.fmax(1.0));
         }
         (
             self.pos - Vec3::new(r, 0.0, r),
@@ -933,75 +943,17 @@ impl BoltPrims {
         (torso_r, (0.5 * torso.y).fmax(0.05))
     }
 
-    /// See [`Unit::bolt_hit`].
+    /// See [`Unit::bolt_hit`]: the nearest of [`BoltPrims::prims`] along
+    /// the ray within `max_t`.
     pub fn hit(&self, from: Vec3, dir: Vec3, max_t: f32) -> Option<(f32, HitZone)> {
-        let s = self.scale;
-        let (sy, cy) = fmath::sin_cos(self.yaw);
-        let fwd = Vec3::new(-sy, 0.0, -cy);
-        let right = Vec3::new(cy, 0.0, -sy);
-        let at = |x: f32, y: f32, z: f32| self.pos + right * x + Vec3::Y * y + fwd * z;
-        let head_r = 0.17 * s.fmax(1.0);
+        let (from, dir) = self.to_local(from, dir);
         let mut best: Option<(f32, HitZone)> = None;
-        let mut take = |t: Option<f32>, z: HitZone| {
-            if let Some(t) = t.filter(|t| *t <= max_t && best.is_none_or(|b| *t < b.0)) {
-                best = Some((t, z));
-            }
-        };
-        if let Some([head, torso]) = self.posed {
-            let (torso_r, body_hh) = self.posed_sizes(head, torso);
-            take(
-                ray_sphere(from, dir, at(head.x, head.y, head.z), head_r),
-                HitZone::Head,
-            );
-            take(
-                ray_sphere(from, dir, at(torso.x, torso.y, torso.z), torso_r),
-                HitZone::Torso,
-            );
-            take(
-                ray_upright_cylinder(from, dir, at(0.0, body_hh, 0.0), 0.35, body_hh),
-                HitZone::Body,
-            );
-            return best;
-        }
-        match self.stance {
-            Stance::Prone | Stance::Roll | Stance::Dead => {
-                take(
-                    ray_sphere(from, dir, at(0.0, 0.28 * s, 0.75 * s), head_r),
-                    HitZone::Head,
-                );
-                let half = Vec3::new(0.25, 0.2, 0.87 * s);
-                let c = at(0.0, 0.2, -0.25 * s);
-                take(ray_yawed_box(from, dir, c, right, fwd, half), HitZone::Body);
-            }
-            Stance::Crouch => {
-                take(
-                    ray_sphere(from, dir, at(0.0, 1.2 * s, 0.25), head_r),
-                    HitZone::Head,
-                );
-                take(
-                    ray_sphere(from, dir, at(0.0, 0.7 * s, 0.0), 0.4 * s),
-                    HitZone::Torso,
-                );
-                let c = at(0.0, 0.35 * s, 0.0);
-                take(
-                    ray_upright_cylinder(from, dir, c, 0.35, 0.35 * s),
-                    HitZone::Body,
-                );
-            }
-            _ => {
-                take(
-                    ray_sphere(from, dir, at(0.0, 1.65 * s, 0.16), head_r),
-                    HitZone::Head,
-                );
-                take(
-                    ray_sphere(from, dir, at(0.0, 1.15 * s, 0.0), 0.4 * s),
-                    HitZone::Torso,
-                );
-                let c = at(0.0, 0.55 * s, 0.0);
-                take(
-                    ray_upright_cylinder(from, dir, c, 0.35, 0.55 * s),
-                    HitZone::Body,
-                );
+        for (prim, zone) in self.prims() {
+            if let Some(t) = prim
+                .ray(from, dir, 0.0)
+                .filter(|t| *t <= max_t && best.is_none_or(|b| *t < b.0))
+            {
+                best = Some((t, zone));
             }
         }
         best

@@ -798,7 +798,7 @@ impl Chunks {
                     pos: _,
                     scale,
                 } => {
-                    let name = &walk.teams[usize::from(*team).min(1)].class(*class).name;
+                    let name = &walk.team_template(*team).class(*class).name;
                     let u = &walk.sim.units[unit.index as usize];
                     let nodes = self.posed_nodes.remove(&unit.index);
                     self.launch_posed(

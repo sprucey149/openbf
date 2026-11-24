@@ -82,6 +82,7 @@ fn main() -> Result<()> {
                 ring: num("HUD_HEAT").unwrap_or(0.0),
                 refire: num("HUD_REFIRE").unwrap_or(0.0),
                 overheated: num("HUD_REFIRE").is_some(),
+                charge: None,
             }
         },
         leaving: std::env::var("HUD_LEAVING").ok(),

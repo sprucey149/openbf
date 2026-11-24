@@ -52,6 +52,18 @@ pub struct HudGauge {
     pub refire: f32,
     /// Either row's weapon is locked: the "OVERHEATED!" line.
     pub overheated: bool,
+    /// The first row's charge while its trigger is held, 0..1 (the ring shows
+    /// it too); `None` when it is not charging. 1 is a full charge
+    /// ([`HudGauge::charged`]).
+    pub charge: Option<f32>,
+}
+
+impl HudGauge {
+    /// The held charge is full: the weapon's full-charge glow is at its
+    /// brightest (`game::fx`'s charge glow).
+    pub fn charged(&self) -> bool {
+        self.charge.is_some_and(|c| c >= 1.0)
+    }
 }
 
 /// The element of the "Leaving Battlefield" line ([`add_leaving_line`]).

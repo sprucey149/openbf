@@ -242,6 +242,11 @@ fn note_load(last: &mut Option<u32>, round_id: u32, joining: bool) -> bool {
     rejoin
 }
 
+/// A diagnostic line for the session log only (`netplay::diag`).
+fn log(line: &str) {
+    println!("lan: {line}");
+}
+
 /// A pause-menu cheat row's meaning on the host's Cheats page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CheatRow {
@@ -293,6 +298,9 @@ pub(super) struct NetplaySession {
     names: std::collections::BTreeMap<u8, String>,
     /// A guest's entry in this computer's recent games (`lobby.rs`).
     pub recent: super::lobby::RecentNote,
+    /// The session's diagnostic log lines (`netplay::diag`) and its clock.
+    diag: game::netplay::diag::Diag,
+    began: Instant,
 }
 
 impl NetplaySession {
@@ -397,6 +405,8 @@ impl NetplaySession {
             round_in_play: None,
             names: Default::default(),
             recent: Default::default(),
+            diag: Default::default(),
+            began: Instant::now(),
         }
     }
 
@@ -495,6 +505,12 @@ impl NetplaySession {
         self.view.reset();
         self.lobby.groups = walk.sim.static_digest_groups();
         self.peer.round_built(&mut self.link, walk);
+        if !self.is_host() {
+            let t = self.now_s();
+            if let Some(line) = self.diag.built(t) {
+                log(&line);
+            }
+        }
     }
 
     /// The round in play was decided (its outcome stepped): the host ends
@@ -566,6 +582,11 @@ impl NetplaySession {
         }
     }
 
+    /// The session time for a diagnostic line (`netplay::diag`).
+    fn now_s(&self) -> f64 {
+        self.began.elapsed().as_secs_f64()
+    }
+
     /// One frame of the session's events: the rounds to build, the lines
     /// to show, the end.
     pub fn poll(&mut self) -> Vec<NetAction> {
@@ -595,6 +616,9 @@ impl NetplaySession {
                         self.recent.mode = m.english().to_owned();
                     }
                     let rejoin = note_load(&mut self.round_in_play, round_id, joining);
+                    let what = format!("{} {}", setup.map, setup.mode);
+                    let t = self.now_s();
+                    log(&self.diag.load_began(t, round_id, &what, joining, []));
                     for h in &setup.humans {
                         self.names.insert(h.slot, h.name.clone());
                     }
@@ -625,6 +649,15 @@ impl NetplaySession {
                     reconnect,
                 } => {
                     self.names.insert(slot, name.clone());
+                    let target = self
+                        .peer
+                        .guests()
+                        .get(&slot)
+                        .and_then(|g| g.content.as_ref())
+                        .map(|c| c.target.clone())
+                        .unwrap_or_default();
+                    let t = self.now_s();
+                    log(&self.diag.joined(t, slot, &name, &target, reconnect));
                     out.push(NetAction::Line(format!(
                         "{name} {}",
                         if reconnect { "reconnected" } else { "joined" }
@@ -661,11 +694,32 @@ impl NetplaySession {
                     "{} entered the battle",
                     self.name_of(slot)
                 ))),
-                Notice::PlayerLeft { slot, reason } => out.push(NetAction::Line(format!(
-                    "{} {}",
-                    self.name_of(slot),
-                    Self::left_text(reason)
-                ))),
+                Notice::PlayerLeft { slot, reason } => {
+                    let (t, name) = (self.now_s(), self.name_of(slot));
+                    log(&self.diag.left(t, slot, &name, reason));
+                    out.push(NetAction::Line(format!(
+                        "{name} {}",
+                        Self::left_text(reason)
+                    )));
+                }
+                Notice::GuestTrouble { slot, on } => {
+                    let (t, name) = (self.now_s(), self.name_of(slot));
+                    if let Some(line) = self.diag.guest_trouble(t, slot, &name, on) {
+                        log(&line);
+                    }
+                }
+                Notice::HostTrouble(on) => {
+                    let t = self.now_s();
+                    if let Some(line) = self.diag.host_trouble(t, on) {
+                        log(&line);
+                    }
+                }
+                Notice::GuestLoaded { slot } => {
+                    let (t, name) = (self.now_s(), self.name_of(slot));
+                    if let Some(line) = self.diag.guest_loaded(t, slot, &name) {
+                        log(&line);
+                    }
+                }
                 Notice::DigestMismatch { slot, start, .. } => {
                     let label = self
                         .lobby
@@ -786,6 +840,17 @@ impl NetplaySession {
                 }
                 Notice::Started { begin_in_s } => {
                     self.start = Some((Instant::now(), begin_in_s));
+                    let t = self.now_s();
+                    let names = self.names.clone();
+                    let name_of = |s: u8| {
+                        names
+                            .get(&s)
+                            .cloned()
+                            .unwrap_or_else(|| format!("Player {}", u32::from(s) + 1))
+                    };
+                    if let Some(line) = self.diag.started(t, name_of) {
+                        log(&line);
+                    }
                 }
             }
         }
@@ -803,7 +868,15 @@ impl NetplaySession {
         self.started = true;
         self.start = None;
         let bytes = self.peer.host_load(&mut self.link, setup);
-        RoundSetup::decode(&bytes)
+        let setup = RoundSetup::decode(&bytes)?;
+        let local = self.peer.local_slot;
+        let guests = setup.humans.iter().map(|h| h.slot).filter(|&s| s != local);
+        let what = format!("{} {}", setup.map, setup.mode);
+        let t = self.now_s();
+        log(&self
+            .diag
+            .load_began(t, self.peer.round_id(), &what, false, guests));
+        Ok(setup)
     }
 
     /// The pad this frame hands the session: neutral while paused (the sim

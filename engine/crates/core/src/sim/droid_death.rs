@@ -13,9 +13,12 @@ impl Sim {
     /// The explosion a [`Event::DroidBurst`] of `team`'s class `class`
     /// detonated (the game's effect and sound read its look).
     pub fn burst_explosion(&self, team: u8, class: u8) -> Option<&crate::weapon::ExplosionClass> {
+        if team >= 2 {
+            return self.native_chunk_death(team, class)?.explosion.as_ref();
+        }
         let c = self
             .classes
-            .get(usize::from(team.min(1)))?
+            .get(usize::from(team))?
             .get(usize::from(class))?;
         c.chunk
             .as_ref()
@@ -24,11 +27,19 @@ impl Sim {
     }
 
     /// The chunk death of the unit at `i`'s class, `None` for a class
-    /// without one (no chunk geometry) or a sim without class tables.
+    /// without one (no chunk geometry) or a sim without class tables. A
+    /// native (team 2 and up) reads its own team's classes
+    /// ([`Sim::set_native_chunk_deaths`]), never an army's: its class index
+    /// is into the native table, and reading army 1's table at that index
+    /// let Clone Wars Tuskens burst like the CIS droid class they lined up
+    /// with.
     pub(super) fn chunk_death_of(&self, i: usize) -> Option<&ChunkDeath> {
         let u = &self.units[i];
+        if u.team >= 2 {
+            return self.native_chunk_death(u.team, u.spec.class);
+        }
         self.classes
-            .get(usize::from(u.team.min(1)))?
+            .get(usize::from(u.team))?
             .get(usize::from(u.spec.class))?
             .chunk
             .as_ref()

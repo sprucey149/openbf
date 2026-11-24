@@ -448,15 +448,56 @@ pub const SHARED_RULES: &[SharedRow] = &[
     },
 ];
 
-/// Apply [`SHARED_RULES`] to one class definition of either game. A side's child
-/// class (`all_weap_inf_sniper_rifle_ord`) inherits the `com_` class's
-/// damage, so only the class that authors it moves.
+/// An entity class both games take at the maintainer's `MaxHealth`.
+pub struct SharedHealthRow {
+    pub class: &'static str,
+    pub health: f32,
+}
+
+/// [ours] The maintainer, fourth LAN playtest (2026-11-23): "The deployable
+/// auto turret healths should be brought down a bit so they get destroyed in
+/// fewer hits. This shouldn't change the autoturrets attached to walls or
+/// ceilings like the ones in space battles." The deployed auto-turret
+/// (`com_bldg_inf_autoturret`, the `portableturret` every BF2 side's
+/// dispenser drops; the four side classes inherit its health) goes from the
+/// disc's 50 to 30, Building health type as before. A rifle bolt (80 x
+/// BuildingScale 0.1 = 8) takes it in 4 instead of 7, a pistol bolt (60 x
+/// 0.1 = 6) in 5 instead of 9, and a rocket still in 1. Placed and
+/// space-battle wall or ceiling turrets are armed buildings of their own
+/// classes and keep the health they author.
+///
+/// measure: the maintainer's next LAN playtest (do deployed turrets now fall
+/// in a satisfying number of hits, and not too easily); replace: the value
+/// from that verdict.
+pub const SHARED_HEALTH: &[SharedHealthRow] = &[SharedHealthRow {
+    class: "com_bldg_inf_autoturret",
+    health: 30.0,
+}];
+
+/// Is `name` a class one of the maintainer's shared rows ([`SHARED_RULES`],
+/// [`SHARED_HEALTH`]) rewrites?
+pub fn shared_class(name: &str) -> bool {
+    SHARED_RULES.iter().any(|r| matches(r.class, name))
+        || SHARED_HEALTH.iter().any(|r| matches(r.class, name))
+}
+
+/// Apply [`SHARED_RULES`] and [`SHARED_HEALTH`] to one class definition of
+/// either game. A side's child class (`all_weap_inf_sniper_rifle_ord`,
+/// `all_bldg_inf_autoturret`) inherits the `com_` class's value, so only the
+/// class that authors it moves.
 pub fn shared_rules(def: &mut ClassDef) {
-    if !matches!(def.kind.as_str(), "ordc" | "expc") {
-        return;
-    }
-    if let Some(row) = SHARED_RULES.iter().find(|r| matches(r.class, &def.name)) {
-        land(def, Some(row.person));
+    match def.kind.as_str() {
+        "ordc" | "expc" => {
+            if let Some(row) = SHARED_RULES.iter().find(|r| matches(r.class, &def.name)) {
+                land(def, Some(row.person));
+            }
+        }
+        "entc" => {
+            if let Some(row) = SHARED_HEALTH.iter().find(|r| matches(r.class, &def.name)) {
+                set(def, &["MaxHealth"], row.health);
+            }
+        }
+        _ => {}
     }
 }
 

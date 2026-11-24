@@ -4,6 +4,7 @@ The end-to-end test packs a small fixture with the production `pak` code at a lo
 """
 from pathlib import Path
 import os
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -253,6 +254,175 @@ class EndToEnd(unittest.TestCase):
                         self.game.parent / pack.PAK_NAME, f"assets={stale / 'x'}"], check=True, capture_output=True)
         self.assert_reads_the_fixture()
         self.assertNotEqual(self.read("assets/only_in_stale").returncode, 0)
+
+
+class MacOsBundle(unittest.TestCase):
+    """scripts/pack.py's --app-bundle layout, checked from any OS: nobody has run a macOS
+    build yet, so what is pinned is the invariant — the game, its archive and its data
+    folder stay beside each other inside Contents/MacOS, and Info.plist names the icon.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        d = Path(self.dir.name)
+        self.out = d / "openbf"
+        self.out.write_bytes(b"game binary")
+        (d / pack.PAK_NAME).write_bytes(pack.PACK_MAGIC + b"\0" * 200)
+        (d / "openbf_data").mkdir()
+        (d / "openbf_data" / "profile.json").write_text("{}")
+        self.icns = d / "openbf.icns"
+        self.icns.write_bytes(b"icns" + (12).to_bytes(4, "big"))
+
+    def test_the_bundle_holds_the_game_the_archive_and_the_icon(self):
+        app, left = pack.build_app_bundle(str(self.out), str(self.icns))
+        self.assertEqual(left, [])
+        app_dir, game, pak, icon = pack.app_bundle_paths(str(self.out))
+        self.assertEqual(app, app_dir)
+        self.assertEqual(Path(app_dir).name, "openbf.app")
+        self.assertFalse(self.out.exists())  # the bundle takes the files, it does not copy them
+        plist = plistlib.loads((Path(app_dir) / "Contents" / "Info.plist").read_bytes())
+        self.assertEqual(plist["CFBundleExecutable"], pack.APP_NAME)
+        self.assertEqual(plist["CFBundleIconFile"], "openbf.icns")
+        self.assertEqual(plist["CFBundlePackageType"], "APPL")
+        self.assertEqual(Path(game).read_bytes(), b"game binary")
+        self.assertEqual(Path(pak).read_bytes(), pack.PACK_MAGIC + b"\0" * 200)
+        self.assertEqual(os.path.dirname(game), os.path.dirname(pak))  # the two travel together
+        self.assertTrue((Path(os.path.dirname(game)) / "openbf_data" / "profile.json").is_file())
+        self.assertEqual(Path(icon).read_bytes(), b"icns" + (12).to_bytes(4, "big"))
+        if not pack.WINDOWS:
+            self.assertTrue(os.stat(game).st_mode & 0o111, "the game inside the bundle is executable")
+
+    def repack(self, game=b"new game", pak=True):
+        """A later pack's flat output beside the bundle: a new game, and its archive or none."""
+        d = Path(self.dir.name)
+        self.out.write_bytes(game)
+        if pak:
+            (d / pack.PAK_NAME).write_bytes(pack.PACK_MAGIC + b"\1" * 200)
+
+    def bundle_data(self):
+        _app, game, _pak, _icon = pack.app_bundle_paths(str(self.out))
+        return Path(os.path.dirname(game)) / "openbf_data"
+
+    def test_packing_again_keeps_the_profiles_in_the_bundle(self):
+        pack.build_app_bundle(str(self.out), str(self.icns))
+        (self.bundle_data() / "profile.json").write_text('{"name": "played since"}')
+        (self.bundle_data() / "logs").mkdir()
+        (self.bundle_data() / "logs" / "openbf-2026-11-23.log").write_text("log")
+        self.repack()
+        _app, left = pack.build_app_bundle(str(self.out), str(self.icns))
+        self.assertEqual(left, [])
+        self.assertEqual((self.bundle_data() / "profile.json").read_text(), '{"name": "played since"}')
+        self.assertTrue((self.bundle_data() / "logs" / "openbf-2026-11-23.log").is_file())
+        _app, game, pak, _icon = pack.app_bundle_paths(str(self.out))
+        self.assertEqual(Path(game).read_bytes(), b"new game")
+        self.assertEqual(Path(pak).read_bytes(), pack.PACK_MAGIC + b"\1" * 200)
+
+    def test_an_older_flat_data_folder_is_moved_into_an_existing_bundle(self):
+        d = Path(self.dir.name)
+        pack.build_app_bundle(str(self.out), str(self.icns))
+        (self.bundle_data() / "saves").mkdir()
+        (self.bundle_data() / "saves" / "bundle.sav").write_text("bundle")
+        # An older flat pack's data beside the bundle: one file the bundle lacks, one it has.
+        (d / "openbf_data" / "saves").mkdir(parents=True)
+        (d / "openbf_data" / "saves" / "flat.sav").write_text("flat")
+        (d / "openbf_data" / "profile.json").write_text('{"name": "older"}')
+        self.repack()
+        _app, left = pack.build_app_bundle(str(self.out), str(self.icns))
+        self.assertEqual((self.bundle_data() / "saves" / "flat.sav").read_text(), "flat")
+        self.assertEqual((self.bundle_data() / "saves" / "bundle.sav").read_text(), "bundle")
+        self.assertEqual((self.bundle_data() / "profile.json").read_text(), "{}")  # the bundle's copy wins
+        self.assertEqual(left, [str(d / "openbf_data" / "profile.json")])  # the other stays, not lost
+        self.assertEqual((d / "openbf_data" / "profile.json").read_text(), '{"name": "older"}')
+        self.assertFalse((d / "openbf_data" / "saves").exists())
+
+    def test_a_flat_data_folder_alone_is_moved_in_whole(self):
+        d = Path(self.dir.name)
+        pack.build_app_bundle(str(self.out), str(self.icns))
+        shutil.rmtree(self.bundle_data())
+        (d / "openbf_data").mkdir()
+        (d / "openbf_data" / "profile.json").write_text('{"name": "flat"}')
+        self.repack()
+        _app, left = pack.build_app_bundle(str(self.out), str(self.icns))
+        self.assertEqual(left, [])
+        self.assertFalse((d / "openbf_data").exists())
+        self.assertEqual((self.bundle_data() / "profile.json").read_text(), '{"name": "flat"}')
+
+    def test_a_one_file_build_drops_the_old_archive_and_no_icon_keeps_the_old_one(self):
+        pack.build_app_bundle(str(self.out), str(self.icns))
+        self.repack(pak=False)
+        pack.build_app_bundle(str(self.out), None)
+        _app, game, pak, icon = pack.app_bundle_paths(str(self.out))
+        self.assertFalse(os.path.exists(pak))
+        self.assertTrue(os.path.isfile(icon))
+        self.assertEqual(Path(game).read_bytes(), b"new game")
+
+    def test_a_bundle_without_a_rendered_icon_still_builds(self):
+        _app, _left = pack.build_app_bundle(str(self.out), None)
+        _app, game, _pak, icon = pack.app_bundle_paths(str(self.out))
+        self.assertTrue(os.path.isfile(game))
+        self.assertFalse(os.path.exists(icon))
+
+    def test_the_desktop_entry_names_the_game_and_the_icon(self):
+        d = Path(self.dir.name)
+        template = d / "openbf.desktop.template"
+        template.write_text("Exec=@EXE@\nIcon=openbf\nStartupWMClass=openbf\n", encoding="utf-8")
+        dest = d / "openbf.desktop"
+        with mock.patch.object(pack, "DESKTOP_TEMPLATE", str(template)):
+            pack.write_desktop(str(d / "openbf"), str(dest))
+        text = dest.read_text(encoding="utf-8")
+        self.assertIn(str(d / "openbf"), text)
+        self.assertIn("Icon=openbf", text)
+        self.assertIn("StartupWMClass=openbf", text)
+
+    def test_the_committed_desktop_template_is_text_with_the_keys(self):
+        text = Path(pack.DESKTOP_TEMPLATE).read_text(encoding="utf-8")
+        for key in ("Exec=@EXE@", "Icon=openbf", "StartupWMClass=openbf"):
+            self.assertIn(key, text)
+
+
+class AppIcon(unittest.TestCase):
+    """pack.py renders the icon from the bake and never fails the pack over it."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.icons = Path(self.dir.name) / "branding_baked"
+
+    def test_a_failed_render_is_one_note_and_no_failure(self):
+        def runner(command, **kwargs):
+            return mock.Mock(returncode=1, stdout="", stderr="Error: no clone trooper is baked under x\n")
+        with mock.patch("builtins.print") as printed:
+            self.assertFalse(pack.make_icon("game", "baked", str(self.icons), runner=runner))
+        (line,) = [c.args[0] for c in printed.call_args_list]
+        self.assertIn("no app icon", line)
+        self.assertIn("no clone trooper", line)
+        self.assertFalse((self.icons / "openbf.png").exists())
+
+    def test_a_missing_game_binary_is_a_note_too(self):
+        def runner(command, **kwargs):
+            raise FileNotFoundError(command[0])
+        with mock.patch("builtins.print"):
+            self.assertFalse(pack.make_icon("no-such-game", "baked", str(self.icons), runner=runner))
+
+    def test_a_render_writes_the_master_then_the_containers(self):
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append(command)
+            if "--render-icon" in command:
+                self.assertEqual(command[command.index("--assets") + 1], "baked")
+                Path(command[2]).write_bytes(b"png")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch("builtins.print"):
+            self.assertTrue(pack.make_icon("game", "baked", str(self.icons), runner=runner))
+        self.assertEqual((self.icons / "openbf.png").read_bytes(), b"png")
+        self.assertEqual(calls[1][1:], [str(Path(pack.ROOT) / "scripts" / "make_icons.py"), "--out", str(self.icons)])
+        self.assertEqual(sorted(p.name for p in self.icons.iterdir()), ["openbf.png"])
+
+    def test_cargo_is_told_where_the_ico_is(self):
+        self.assertEqual(pack.cargo_env()["OPENBF_ICON"], pack.ICO)
+        self.assertTrue(pack.ICO.startswith(pack.ICON_DIR))
 
 
 class PythonVersionGate(unittest.TestCase):

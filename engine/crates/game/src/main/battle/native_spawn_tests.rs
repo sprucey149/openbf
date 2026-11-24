@@ -345,6 +345,68 @@ fn tusken_deterministic() {
     }
 }
 
+/// Kill the unit at `i` with its chunk mark set (a marked droid always
+/// bursts) and run its death block; whether it burst, and whether a body
+/// is left.
+fn marked_death(w: &mut WalkSim, i: usize) -> (bool, bool) {
+    let h = w.sim.handle(i);
+    w.sim.units[i].chunk_mark = true;
+    w.sim.kill_unit_by(h, None);
+    w.sim.step(&[PadState::default()]);
+    let burst = w
+        .sim
+        .events
+        .iter()
+        .any(|e| matches!(e, core::sim::Event::DroidBurst { unit, .. } if *unit == h));
+    (burst, w.sim.units[i].body)
+}
+
+/// The Dune Sea in both eras: every Tusken falls and leaves a body, even
+/// marked for chunks, and never bursts like a droid (the fourth LAN
+/// playtest saw Clone Wars Tuskens explode: their class index read the CIS
+/// army's table). A marked CIS droid still bursts.
+#[test]
+#[ignore = "owned retail bakes; set TUSKEN_ASSETS and TUSKEN_MISSIONS"]
+fn tuskens_fall_and_leave_bodies_in_both_eras() {
+    for era in ["tat1_con", "tat1_con_cw"] {
+        let mut w = dune(era);
+        assert!(w.sim.burst_explosion(2, 0).is_none() && w.sim.burst_explosion(2, 1).is_none());
+        let tuskens: Vec<usize> = w
+            .sim
+            .alive_units()
+            .filter(|(_, u)| u.team == 2)
+            .map(|(h, _)| h.index as usize)
+            .collect();
+        for i in tuskens {
+            let (burst, body) = marked_death(&mut w, i);
+            assert!(
+                !burst && body,
+                "{era}: Tusken {i} burst={burst} body={body}"
+            );
+        }
+        let mut t = 0;
+        let army = loop {
+            if let Some((h, _)) = w
+                .sim
+                .alive_units()
+                .find(|(_, u)| u.team == 1 && u.spec.class == 0)
+            {
+                break h.index as usize;
+            }
+            w.sim.step(&[PadState::default()]);
+            t += 1;
+            assert!(t < 3000, "{era}: an army-1 rifleman spawns");
+        };
+        let (burst, body) = marked_death(&mut w, army);
+        if era.ends_with("_cw") {
+            assert!(burst && !body, "{era}: a marked CIS droid bursts");
+        } else {
+            assert!(!burst && body, "{era}: a marked Rebel falls");
+        }
+        println!("{era}: Tuskens fall; army-1 soldier burst={burst}");
+    }
+}
+
 // Isolate capture/respawn from combat while retaining actual authored floors,
 // posts, capture regions, wave clocks, death and spawn code. Natural AI runs
 // separately in the deterministic tests.
