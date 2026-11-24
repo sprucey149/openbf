@@ -48,7 +48,7 @@ openbf --desktop --no-mods --map assets_baked/bf2_geo1 --mission missions/bf2_ge
 
 Set `OPENBF_KTH_TEST_DATA` to the isolated data directory and `OPENBF_KTH_TEST_CLASSES` to the stock class directory. The tests use locally sourced assets. Interactive mouse/keyboard, controller, and headset play still need a human check. Fish and bird flocks, movie previews, and general-purpose Lua timer or trigger APIs remain outside the translated environment action set.
 
-The `mungefs` library suite ran 205 tests successfully, with three ignored data-dependent tests. The serial GPU check was `scripts/gpu_tests.sh --render --test suite water_normal_refracts_floor_and_reflects_above_plane`. The bake version lock check passed. The full cross-source bake and alignment gates still need their independent stock reference bakes.
+The playtest follow-up at `847a12c3` passed 206 `mungefs` library tests with three ignored, 12 HUD tests, two installed-KTH tests, and the installed KTH/ABR launcher discovery test. The release package rebuilt both addon caches. It captured Dusk Hunt with the Republic sniper, reused the cache for ABR Conquest, and reproduced the stock desktop hash and the Geonosis trace. The serial GPU check was `scripts/gpu_tests.sh --render --test suite water_normal_refracts_floor_and_reflects_above_plane`. The bake version lock check passed. The full cross-source bake and alignment gates still need their independent stock reference bakes.
 
 ## Integration with side conversion
 
