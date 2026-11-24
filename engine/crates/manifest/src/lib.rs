@@ -1359,6 +1359,8 @@ pub struct FxBeam {
     pub flare_intensity: f32,
     #[serde(default, skip_serializing_if = "is_false")]
     pub entity_light: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub corona_flare: bool,
     #[serde(default, skip_serializing_if = "is_zero_f32")]
     pub pulse_period: f32,
     #[serde(

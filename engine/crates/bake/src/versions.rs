@@ -16,11 +16,11 @@ pub const SCHEMA: u32 = 1;
 
 /// One entry per `REBAKE_GROUPS` group in scripts/rebake.sh, plus `extract-iso`.
 pub const GROUP_VERSIONS: &[(&str, u32)] = &[
-    ("tat1", 4),
-    ("tat2", 5),
-    ("maps", 7),
+    ("tat1", 5),
+    ("tat2", 6),
+    ("maps", 8),
     ("common", 5),
-    ("side", 4),
+    ("side", 5),
     ("dlc", 5),
     ("classes", 3),
     ("sounds", 2),

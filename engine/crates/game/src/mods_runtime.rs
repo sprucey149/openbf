@@ -795,6 +795,16 @@ mod tests {
             assert_eq!(beam.length, 9.0);
             assert_eq!(beam.pulse_period, pulse);
         }
+
+        let dusk = cache.join("assets/mod_kth__kth_dusk/effects.ron");
+        let fx: manifest::FxSet = ron::from_str(&std::fs::read_to_string(dusk).unwrap()).unwrap();
+        let corona = fx
+            .beams
+            .iter()
+            .find(|beam| beam.name == "kth_main_discolight")
+            .unwrap();
+        assert!(corona.corona_flare);
+        assert_eq!(corona.flare_intensity, 0.7);
         let pick = |armies| {
             crate::mission::pick(&cache.join("missions"), "mod_kth__kth_dusk", "hunt", armies)
                 .unwrap()

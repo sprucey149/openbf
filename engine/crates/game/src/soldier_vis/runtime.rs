@@ -117,8 +117,14 @@ impl SoldierVisuals {
         scene: &crate::assets::Scene,
         walk: &WalkSim,
     ) -> Self {
-        let mut vis = Self::load(r, assets_dir, &scene.manifest.source_game, &walk.teams);
         let game = &scene.manifest.source_game;
+        let pc_addon = game == "bf2"
+            && scene
+                .dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("mod_"));
+        let mut vis = Self::load_with_side(r, assets_dir, game, &walk.teams, false, pc_addon);
         if walk.sim.is_hunt() {
             for (team, template) in walk.teams.iter().enumerate() {
                 if !crate::roster::FACTION_ORDER.contains(&template.faction.as_str()) {
@@ -197,7 +203,7 @@ impl SoldierVisuals {
         let mut unused = template.clone();
         unused.classes.clear();
         let teams = [template.clone(), unused];
-        let mut added = Self::load_with_side(r, root, game, &teams, true);
+        let mut added = Self::load_with_side(r, root, game, &teams, true, false);
         // Native teams were skipped by `load_with_side`'s saber pass. Build
         // them here so a campaign Jedi's blade is drawn like any other hero's.
         let mut native_sabers = added.load_sabers(Some(&mut *r), root, &teams);
@@ -249,7 +255,7 @@ impl SoldierVisuals {
         game: &str,
         teams: &[TeamTemplate; 2],
     ) -> Self {
-        Self::load_with_side(r, assets_dir, game, teams, false)
+        Self::load_with_side(r, assets_dir, game, teams, false, false)
     }
 
     fn load_with_side(
@@ -258,6 +264,7 @@ impl SoldierVisuals {
         game: &str,
         teams: &[TeamTemplate; 2],
         native: bool,
+        pc_addon: bool,
     ) -> Self {
         let side_game = if native {
             format!("{game}/locals")
@@ -294,6 +301,7 @@ impl SoldierVisuals {
                 game,
                 teams,
                 &mut cache,
+                pc_addon,
             );
             if teams
                 .iter()
@@ -396,7 +404,7 @@ impl SoldierVisuals {
         let mut s = Self::assemble(plan, teams, bodies, weapons, None);
         s.bf2 = game.eq_ignore_ascii_case("bf2");
         s.fp = super::first_person::FirstPersonVisuals::load(
-            None, assets_dir, game, teams, &mut cache,
+            None, assets_dir, game, teams, &mut cache, false,
         );
         if teams
             .iter()

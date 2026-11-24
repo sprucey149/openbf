@@ -1379,9 +1379,22 @@ impl SoundLib {
             let Some((p, _)) = self.find(e.hash) else {
                 continue;
             };
-            let (p, _) = self.ambient_property(e, &p);
+            let (p, pc_region) = self.ambient_property(e, &p);
             let dist = (e.pos - ears).length();
-            let level = attenuation(dist, &p);
+            let level = if pc_region && p.flat {
+                // A recorded stereo bed retains its mix. Fade it across
+                // the region's authored inner and outer distances.
+                let outer = p.mute_distance.unwrap_or(p.max_distance);
+                if dist >= outer {
+                    0.0
+                } else if dist <= p.min_distance {
+                    1.0
+                } else {
+                    (outer - dist) / (outer - p.min_distance)
+                }
+            } else {
+                attenuation(dist, &p)
+            };
             out.push(AmbientHeard {
                 index,
                 dist,
@@ -1392,9 +1405,8 @@ impl SoundLib {
         out
     }
 
-    /// PC region streams are placed voices even when the take itself is
-    /// marked 2-D. An unnamed bus on these regions uses the ambience mix.
-    /// measure: retail PC stream-region gain and default routing.
+    /// An unnamed PC region stream bus uses the ambience mix.
+    /// measure: retail PC stream-region gain, fade curve and default routing.
     fn ambient_property(&self, e: &crate::ambience::Emitter, p: &SoundProp) -> (SoundProp, bool) {
         let mut p = crate::ambience::with_distances(e, p);
         let pc_region = e.kind == crate::ambience::Kind::Stream
@@ -1402,11 +1414,8 @@ impl SoundLib {
                 .zip(p.segments.first())
                 .and_then(|(stream, &(segment, _))| self.music_takes.get(&(stream, segment)))
                 .is_some_and(|take| take.format == 5);
-        if pc_region {
-            p.flat = false;
-            if p.bus == 0 {
-                p.bus = fnv1a_lowercase("ambience");
-            }
+        if pc_region && p.bus == 0 {
+            p.bus = fnv1a_lowercase("ambience");
         }
         (p, pc_region)
     }
@@ -1440,7 +1449,9 @@ impl SoundLib {
             };
             let (db, pan) = mixer_pair(ears);
             if let Some(take) = self.stream_take(&p) {
-                let db = if pc_region {
+                let db = if pc_region && p.flat {
+                    level_db(h.gain)
+                } else if pc_region {
                     level_db((ears.0 + ears.1) * 0.5)
                 } else {
                     db

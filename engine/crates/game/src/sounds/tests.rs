@@ -90,6 +90,14 @@ fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
         assert_eq!((take.format, take.channels), (5, 2));
         let inside = lib.ambient_heard(&amb, e.pos);
         assert!((inside.iter().find(|h| h.index == i).unwrap().gain - expected_gain).abs() < 1e-5);
+        let halfway = (e.min.unwrap() + e.max.unwrap()) * 0.5;
+        let middle = lib.ambient_heard(&amb, e.pos + Vec3::X * halfway);
+        if e.min != e.max {
+            assert!(
+                (middle.iter().find(|h| h.index == i).unwrap().gain - expected_gain * 0.5).abs()
+                    < 1e-5
+            );
+        }
         let outside = lib.ambient_heard(&amb, e.pos + Vec3::X * (e.max.unwrap() + 1.0));
         assert_eq!(outside.iter().find(|h| h.index == i).unwrap().gain, 0.0);
         let mut reader = audio::TakeReader::open(take).unwrap();
@@ -99,6 +107,17 @@ fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
             .iter()
             .any(|p| p[0].abs() > 1e-4));
     }
+    // Camera position in the packaged Dawn Hunt playtest, looking into the venue.
+    let at_disco = Vec3::new(-117.47, 9.73, 87.99);
+    let heard = lib.ambient_heard(&amb, at_disco);
+    assert!(
+        heard
+            .iter()
+            .find(|h| h.index == region("kth_disco_dawn"))
+            .unwrap()
+            .gain
+            > 0.16
+    );
 }
 
 #[test]

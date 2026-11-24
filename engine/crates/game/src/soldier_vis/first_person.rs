@@ -63,6 +63,7 @@ impl FirstPersonVisuals {
         game: &str,
         teams: &[TeamTemplate; 2],
         cache: &mut HashMap<String, Option<TextureHandle>>,
+        pc_addon: bool,
     ) -> Self {
         let mut models = Vec::new();
         let mut model_games = Vec::new();
@@ -120,11 +121,24 @@ impl FirstPersonVisuals {
                 c.arms = c.arms.and_then(|k| loaded[k]);
             }
         }
+        let mut pc_textures = HashMap::new();
         let weapons = guns
             .iter()
             .zip(&gun_games)
             .map(|(g, game)| {
-                SoldierVisuals::load_weapon(r.as_deref_mut(), assets_dir, game, g, cache)
+                let (variant, textures) = if pc_addon
+                    && game == "bf2"
+                    && crate::assets::texture_tier() == crate::assets::TextureTier::Pc
+                    && pak::is_file(
+                        assets_dir
+                            .join("side_bf2/pc_first_person/weapons")
+                            .join(format!("{g}.glb")),
+                    ) {
+                    ("bf2/pc_first_person", &mut pc_textures)
+                } else {
+                    (game.as_str(), &mut *cache)
+                };
+                SoldierVisuals::load_weapon(r.as_deref_mut(), assets_dir, variant, g, textures)
             })
             .collect();
         Self {
@@ -439,6 +453,7 @@ mod tests {
                 if bf2 { "bf2" } else { "bf1" },
                 &teams,
                 &mut HashMap::new(),
+                false,
             );
             assert_eq!(loaded.classes[0][0].bf2, bf2);
         }

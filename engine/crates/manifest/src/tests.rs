@@ -1429,6 +1429,7 @@ fn an_effect_set_round_trips_through_ron() {
         }],
         beams: vec![FxBeam {
             entity_light: false,
+            corona_flare: false,
             pulse_period: 0.0,
             hash: 0x3388_1368,
             name: "Blue_halo".into(),
