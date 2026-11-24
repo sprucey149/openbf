@@ -27,6 +27,11 @@ python3 scripts/pack.py
 ./dist/openbf
 ```
 
+The game's icon is a clone trooper's helmet, which `pack.py` draws from your own copy of the games when it packs.
+On Windows it is inside `dist\openbf.exe`. On macOS it is the icon of `dist/openbf.app`. On Linux,
+`scripts/install_linux.sh` adds the game and its icon to your applications menu. If the icon cannot be drawn,
+`pack.py` says so in one line and packs the game anyway (see [branding](docs/branding.md)).
+
 ### What you need
 
 - **Both games.** You need a copy of Battlefront (BF1) and a copy of Battlefront II (BF2).
@@ -155,7 +160,7 @@ Your profile and snapshots are saved in `openbf_data\` beside `openbf.exe`.
 
 ### macOS
 
-The same command builds `dist/openbf`. A Mac with Apple Silicon (M1 or later) is recommended; an Intel Mac
+The same command builds `dist/openbf.app`. A Mac with Apple Silicon (M1 or later) is recommended; an Intel Mac
 works but bakes much more slowly. You need:
 - Apple's command line tools: `xcode-select --install` (the linker, `strip` and `git`)
 - Homebrew (https://brew.sh); finish its "Next steps" so `brew` is on your `PATH`
@@ -178,7 +183,7 @@ git clone https://github.com/sprucey149/openbf.git
 cd openbf
 mkdir iso
 caffeinate -i python3 scripts/pack.py
-./dist/openbf
+open dist/openbf.app
 ```
 `caffeinate` keeps the Mac awake while it builds: leave the lid open and the charger in. `pack.py` checks Python
 and ffmpeg before it starts, warns about the setups above, and shows how long each step took. The first build
@@ -187,13 +192,16 @@ has not been timed yet, and an Intel Mac takes longer. Later runs reuse what is 
 `caffeinate -i python3 scripts/pack.py --retail-audio` is faster: it skips the local audio restoration and keeps the original
 audio. Switching it on or off bakes everything again once.
 If macOS asks whether openbf may accept incoming network connections, allow it for LAN games.
+The app keeps your profile, saves and logs inside itself, in `dist/openbf.app/Contents/MacOS/openbf_data/`. Packing
+again keeps them, and a `dist/openbf_data/` folder from a pack made before the app existed is moved into the app.
 
 If the build fails or seems stuck, open an issue with the whole `pack.py` output (including its last `==` line
 and the closing `step times:` line) and the output of `uname -m; sysctl -n sysctl.proc_translated`.
 
 If the game itself fails, for example it stays on the loading screen, quit it and open an issue with its log file:
-the newest `openbf-<date>.log` in `dist/openbf_data/logs/` (`open dist/openbf_data/logs` in the `openbf` folder
-shows it in Finder; drag the file into the issue). The game keeps its last 5 logs there, and a map that fails to
+the newest `openbf-<date>.log` in `dist/openbf.app/Contents/MacOS/openbf_data/logs/`
+(`open dist/openbf.app/Contents/MacOS/openbf_data/logs` in the `openbf` folder shows it in Finder; drag the file into
+the issue). The game keeps its last 5 logs there, and a map that fails to
 load also says why on screen.
 
 ## Controls
