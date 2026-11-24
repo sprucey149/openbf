@@ -142,6 +142,8 @@ impl ReplayFrame {
             walk.campaign.as_ref().map(|c| c.hidden_instances()),
         );
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
+        self.vehicle_vis
+            .set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| self.vis.jet_frames(walk)));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.vehicle_vis.campaign_flags(&walk));
         draws.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
@@ -673,6 +675,8 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         gpu.pose_ctf(&walk.sim, walk.player);
         let mut draws = gpu.draws.clone();
         walk_draws(cube, &walk, &mut draws, Some(&vis));
+        vehicle_vis.set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
+        vehicle_vis.set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| vis.jet_frames(&walk)));
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
         draws.extend(vehicle_vis.campaign_flags(&walk));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));
@@ -856,6 +860,11 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         if let Some(specs) = super::battle::ctf_flag_specs(replay_setup.mission.as_ref(), &walk) {
             vehicle_vis.configure_ctf_flags(&mut r, &scene, &specs);
         }
+        vehicle_vis.set_ctf_flag_classes(super::battle::ctf_flag_classes(
+            replay_setup.mission.as_ref(),
+            &walk,
+            &scene,
+        ));
         vehicle_vis.set_treads(walk.hover_treads.clone());
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
         let quad = game::viewer::upload_billboard_quad(&mut r)?;

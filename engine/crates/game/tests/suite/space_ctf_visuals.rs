@@ -246,3 +246,105 @@ fn live_space_flag_models_replace_home_on_all_maps() {
         }
     }
 }
+
+/// 2-flag CTF draws each flag's banner (its `<model>.cloths.ron` cloth) with
+/// the pole, home, dropped and carried, in the viewer's relation colour
+/// (`com_item_flag` sets both Colorize flags): the viewer's own flag blue,
+/// the other team's red, on the carrier's back when carried.
+#[test]
+#[ignore]
+fn ground_two_flag_banners_draw_in_relation_colour() {
+    let root = game::assets::baked_root();
+    let scene = game::assets::load_scene(&root.join("bf2_kas2")).unwrap();
+    let mut renderer = render::Renderer::new_headless(320, 240).unwrap();
+    renderer.cull = false;
+    let mut visuals = game::viewer::VehicleVisuals::load(&mut renderer, &scene, &root, &[]);
+    visuals.configure_ctf_flags(
+        &mut renderer,
+        &scene,
+        &[
+            (
+                Some("com_icon_republic_flag".into()),
+                Some("com_icon_republic_flag_carried".into()),
+            ),
+            (
+                Some("com_icon_cis_flag".into()),
+                Some("com_icon_cis_flag_carried".into()),
+            ),
+        ],
+    );
+    let homes = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 0.0, 0.0)];
+    let mut sim = core::sim::Sim::empty(7);
+    let viewer = sim.spawn(&core::unit::UnitSpec::trooper(0, homes[0])).unwrap();
+    sim.ctf = Some(core::sim::CtfState::new_two_flag(
+        5, homes[0], homes[1], homes[1], homes[0],
+    ));
+    visuals.set_ctf_viewer(sim.unit(viewer).map(|u| u.team));
+    let near = |draws: &[render::DrawCmd], at: Vec3| -> Vec<render::DrawCmd> {
+        draws
+            .iter()
+            .filter(|d| d.model.w_axis.truncate().distance(at) < 3.0)
+            .cloned()
+            .collect()
+    };
+    let mut frames = Vec::new();
+    for _ in 0..30 {
+        sim.tick += 1;
+        frames = visuals.draws(&mut renderer, &sim, &[]);
+    }
+    for (k, home) in homes.iter().enumerate() {
+        let flag = near(&frames, *home);
+        assert!(flag.len() >= 2, "flag {k}: pole and banner, got {}", flag.len());
+        let c = flag[0].color;
+        assert!(flag.iter().all(|d| d.color == c), "flag {k}: one tint");
+        if k == 0 {
+            assert!(c[2] > c[0] * 10.0, "own flag must read blue: {c:?}");
+        } else {
+            assert!(c[0] > c[2] * 2.0, "enemy flag must read red: {c:?}");
+        }
+    }
+    let out = root.parent().unwrap().join("artifacts/lead_tmp/ctf-banners");
+    std::fs::create_dir_all(&out).unwrap();
+    let shoot = |renderer: &mut render::Renderer, draws: &[render::DrawCmd], at: Vec3, label: &str| {
+        let camera = game::viewer::look_at(at + Vec3::new(0.0, 0.4, 2.6), at + Vec3::Y * 0.2);
+        renderer
+            .render(&camera, &[], [0.01, 0.01, 0.01, 1.0])
+            .unwrap();
+        let (background, _, _) = renderer.capture_rgba().unwrap();
+        renderer.render(&camera, draws, [0.01, 0.01, 0.01, 1.0]).unwrap();
+        let (rgba, w, h) = renderer.capture_rgba().unwrap();
+        let changed = rgba
+            .chunks_exact(4)
+            .zip(background.chunks_exact(4))
+            .filter(|(a, b)| (0..3).any(|i| a[i].abs_diff(b[i]) > 8))
+            .count();
+        std::fs::write(
+            out.join(format!("{label}.png")),
+            render::encode_png(&rgba, w, h).unwrap(),
+        )
+        .unwrap();
+        changed
+    };
+    let pole_only: Vec<_> = near(&frames, homes[0]).into_iter().take(1).collect();
+    let pole_pixels = shoot(&mut renderer, &pole_only, homes[0], "own-pole");
+    let own_pixels = shoot(&mut renderer, &near(&frames, homes[0]), homes[0], "own-home");
+    assert!(
+        own_pixels > pole_pixels * 4,
+        "the banner must cover far more than the pole: {own_pixels} vs {pole_pixels}"
+    );
+    let thief = sim
+        .spawn(&core::unit::UnitSpec::trooper(1, homes[0]))
+        .unwrap();
+    let carrier_pos = homes[0] + Vec3::new(2.0, 0.0, 0.0);
+    sim.unit_mut(thief).unwrap().soldier.pos = carrier_pos;
+    sim.ctf.as_mut().unwrap().flags[0].status = core::sim::FlagStatus::Carried { carrier: thief };
+    for _ in 0..30 {
+        sim.tick += 1;
+        frames = visuals.draws(&mut renderer, &sim, &[]);
+    }
+    let carried = near(&frames, carrier_pos + Vec3::Y * 1.5);
+    assert!(carried.len() >= 2, "carried pole and banner");
+    assert!(carried[0].color[2] > carried[0].color[0] * 10.0);
+    let pixels = shoot(&mut renderer, &carried, carrier_pos + Vec3::Y * 1.5, "own-carried");
+    assert!(pixels > 200, "carried banner visible: {pixels}");
+}

@@ -31,6 +31,35 @@ fn space_flag_announcements_resolve_to_audible_takes() {
     }
 }
 
+/// Every line 2-flag CTF can ask on a Clone Wars ground map
+/// (`crate::announce::two_flag_line`, `objectivectf.luac`'s
+/// `gSoundEventsCTF_src`) is in the map's bank.
+#[test]
+fn two_flag_announcements_resolve_to_audible_takes() {
+    let root = crate::assets::baked_root();
+    let map = root.join("bf2_kas2");
+    if !map.join("sounds/sounds.ron").is_file() {
+        eprintln!("SKIP: bf2_kas2 sounds are not baked");
+        return;
+    }
+    let mut lib = SoundLib::load(&map).expect("kas2 sound bank");
+    for faction in ["rep", "cis"] {
+        for event in ["taken", "dropped", "captured"] {
+            for own in [false, true] {
+                let name = crate::announce::two_flag_line(faction, event, own)
+                    .unwrap_or_else(|| panic!("no {faction} {event} line"));
+                let take = lib
+                    .prepare_voice(name)
+                    .unwrap_or_else(|| panic!("missing {name}"));
+                assert!(
+                    take.path.is_file() && take.secs > 0.0 && take.gain > 0.0,
+                    "{name}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn both_games_resolve_the_cutters_loop_to_an_audible_take() {
     let root = crate::assets::baked_root();

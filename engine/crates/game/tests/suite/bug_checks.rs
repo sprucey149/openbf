@@ -160,6 +160,7 @@ fn hud_model(dead: bool) -> ui::hud::HudModel {
         flag_status: None,
         lock: None,
         hints: Vec::new(),
+        flag_timers: Vec::new(),
         seat_health: None,
         incoming_missile: None,
         space: None,

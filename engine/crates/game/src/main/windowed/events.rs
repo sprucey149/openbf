@@ -1441,6 +1441,15 @@ impl winit::application::ApplicationHandler for App {
                         r.set_sun_shadows(self.profile.settings.hard_shadows);
                         self.vehicle_vis
                             .set_tick_share(game::render_blend::share(walk));
+                        self.vehicle_vis
+                            .set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
+                        self.vehicle_vis.set_flag_ribcage(
+                            walk.sim
+                                .ctf
+                                .as_ref()
+                                .and(self.soldier_vis.as_ref())
+                                .map(|v| v.jet_frames(walk)),
+                        );
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
                         extra.extend(self.vehicle_vis.campaign_flags(walk));
                         extra.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));

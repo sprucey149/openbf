@@ -970,6 +970,37 @@ pub(super) fn make_walk_with_counts(
                     }
                     st
                 };
+                let flag_names: Vec<&str> = if ctf_state.mode == core::sim::CtfMode::TwoFlag {
+                    let names = [
+                        ctf_def.flags[0].name.as_str(),
+                        ctf_def.flags[1].name.as_str(),
+                    ];
+                    if swapped {
+                        vec![names[1], names[0]]
+                    } else {
+                        names.to_vec()
+                    }
+                } else {
+                    vec![ctf_def.flag.as_str()]
+                };
+                // FUN_0035d2f8 (B2:343280-343287, PC 0x57e7b7) starts a homed
+                // flag's return timer at its class Lifespan.
+                let flag_classes = game::walk::hunt_post_classes(
+                    &b.classes_dir,
+                    &scene.dir,
+                    &scene.manifest.source_game,
+                )?;
+                for (flag, name) in ctf_state.flags.iter_mut().zip(flag_names) {
+                    let lifespan = scene
+                        .manifest
+                        .instances
+                        .iter()
+                        .find(|i| i.name.eq_ignore_ascii_case(name))
+                        .and_then(|i| flag_classes.prop_f32(&i.class, "Lifespan"));
+                    if let Some(lifespan) = lifespan {
+                        flag.drop_timeout = lifespan;
+                    }
+                }
                 let space_ctf = ctf_state.is_space();
                 if ctf_def.hide_cps {
                     for cp in &mut walk.sim.cps {
@@ -1192,6 +1223,45 @@ pub(super) fn ctf_flag_specs(
     )
 }
 
+/// Each sim flag's placed class, in `walk.sim.ctf`'s flag order (the
+/// battle setup's: a 2-flag pair swapped like [`ctf_flag_specs`]), by its
+/// instance name. `None` for a flag with no placed instance.
+pub(super) fn ctf_flag_classes(
+    mission: Option<&game::mission::MissionDef>,
+    walk: &WalkSim,
+    scene: &game::assets::Scene,
+) -> Vec<Option<String>> {
+    let Some((m, ctf)) = mission.and_then(|m| Some((m, m.ctf.as_ref()?))) else {
+        return Vec::new();
+    };
+    let mut names: Vec<&str> = if ctf.flags.is_empty() {
+        vec![ctf.flag.as_str()]
+    } else {
+        ctf.flags.iter().map(|f| f.name.as_str()).collect()
+    };
+    let swapped = ctf.flags.len() >= 2
+        && m.teams[0]
+            .faction
+            .eq_ignore_ascii_case(&walk.teams[1].faction)
+        && m.teams[1]
+            .faction
+            .eq_ignore_ascii_case(&walk.teams[0].faction);
+    if swapped {
+        names.swap(0, 1);
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            scene
+                .manifest
+                .instances
+                .iter()
+                .find(|i| i.name.eq_ignore_ascii_case(name))
+                .map(|i| i.class.clone())
+        })
+        .collect()
+}
+
 fn hud_lock(
     walk: &WalkSim,
     feed: &game::event_feed::EventFeed,
@@ -1358,6 +1428,7 @@ pub(super) fn hud_model_for_view(
         lock: hud_lock(walk, feed, slot, aspect),
         incoming_missile: walk.sim.incoming_missile(slot),
         hints: hud_hints(walk, feed, slot, aspect, stereo_view),
+        flag_timers: ctf_hud::flag_timers(walk, aspect, stereo_view),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,
         seat_health: me

@@ -73,6 +73,25 @@ impl Part {
     }
 }
 
+/// One banner of a flag model: its `<geometry>.cloths.ron` cloth (baked by
+/// `bake::cloth::item_cloths`), the CLTH texture and its triangle list.
+struct FlagCloth {
+    def: crate::cloth::Definition,
+    texture: Option<TextureHandle>,
+    indices: Vec<u32>,
+}
+
+/// A live flag's banner state: the geometry it was started for (loose or
+/// carried), one state per cloth.
+struct FlagClothLive {
+    geometry: String,
+    states: Vec<crate::cloth::State>,
+}
+
+/// The cloth frame's only "bone": the flag model's root, at identity (the
+/// bake folds `Bind(PRNT)` into the frame).
+const FLAG_ROOT: [Mat4; 1] = [Mat4::IDENTITY];
+
 #[derive(Default)]
 pub struct FlagVisuals {
     loose: Vec<Part>,
@@ -80,6 +99,19 @@ pub struct FlagVisuals {
     ground_loose: Vec<Part>,
     ground_carried: Vec<Part>,
     team_ground: [Option<(Vec<Part>, Vec<Part>)>; 2],
+    /// The geometry names behind `ground_loose` / `ground_carried` and each
+    /// `team_ground` pair, which key `cloths`.
+    ground_geometry: [Option<String>; 2],
+    team_geometry: [Option<(String, String)>; 2],
+    cloths: HashMap<String, Vec<std::sync::Arc<FlagCloth>>>,
+    cloth_live: Vec<Option<FlagClothLive>>,
+    cloth_meshes: HashMap<(usize, String, usize), MeshHandle>,
+    clock: Option<f32>,
+    /// The ground flag class's `DroppedColorize` / `CarriedColorize`
+    /// (`com_item_flag`: both `1`), indexed by carried.
+    colorize: [bool; 2],
+    viewer_team: Option<u8>,
+    bf1: bool,
     cull: Option<f32>,
     home_rotation: Quat,
     campaign: HashMap<String, (Vec<Part>, Vec<Part>)>,
@@ -87,6 +119,10 @@ pub struct FlagVisuals {
     /// The map's `Effect("HDR")` is on, so a lens flare lands ×2
     /// (`glow_draws`).
     hdr: bool,
+    /// Each unit's drawn `bone_ribcage` ([`Self::set_ribcage`]).
+    ribcage: Option<Vec<Option<Mat4>>>,
+    /// Each CTF flag's placed class ([`Self::set_ctf_classes`]).
+    ctf_classes: Vec<Option<String>>,
 }
 
 struct FlagGlow {
@@ -97,10 +133,48 @@ struct FlagGlow {
     omni: f32,
 }
 
+/// The flag draw's colour (`FUN_0035e720`, B2:343900-344050; PC 0x57eff0):
+/// with the class's `DroppedColorize` (not carried) or `CarriedColorize`
+/// (carried) set, the model and its cloths take the viewer's team-table
+/// colour for the flag's team (PS2 table +100 + 4 x team, PC +0x68), as a
+/// linear tint of the display bytes (`SceneGpu::marker_tint`'s rule). The
+/// one-flag neutral flag is team 0, the table's (192, 192, 192); a 2-flag
+/// flag is the viewer's own (friend) or the other team's (enemy). Its
+/// alpha, table alpha x fade x min(timer + 1, 1), stays 1: the port resets
+/// a flag at timer 0.
+pub(crate) fn flag_tint(
+    mode: core::sim::CtfMode,
+    flag_team: u8,
+    viewer_team: Option<u8>,
+    bf1: bool,
+) -> Option<[f32; 3]> {
+    use crate::point_light::Relation;
+    let rel = match mode {
+        core::sim::CtfMode::OneFlag => Relation::Neutral,
+        core::sim::CtfMode::TwoFlag if viewer_team? == flag_team => Relation::Friend,
+        core::sim::CtfMode::TwoFlag => Relation::Enemy,
+    };
+    Some(crate::holo::relation_rgb(rel, bf1).map(|x| render::srgb_decode(f32::from(x) / 255.0)))
+}
+
+/// Where a flag draws, and whether it is carried. A loose flag stands at
+/// its position. A flag carried on foot is the carrier's posed bone: the
+/// soldier draw `FUN_00239bb0` (B2:154800-154846) sets the flag's matrix to
+/// the bone the flag's +0x480 CRC names (class +0x3fc, prop 0x826bffda,
+/// default 0xe5b51072 = crc32_lower("bone_ribcage")) and ignores
+/// `CarriedOffset`; the loose draw `FUN_0035e6f8` runs only without a
+/// carrier, so a carrier that is not drawn shows no flag. `ribcage` is
+/// `SoldierVisuals::jet_frames` (that bone, by unit index); with none (no
+/// soldier models) the flag keeps the offset pose.
+/// OURS: a mounted carrier keeps `CarriedOffset` on the vehicle; the vehicle
+/// draw `FUN_001f3f58` (B2:105217-105274) poses it on the vehicle's
+/// flag +0x484 bone (default 0x698aed8a = "bone_spine3") and draws nothing
+/// without one. replace: that bone lookup.
 fn flag_pose(
     sim: &core::sim::Sim,
     flag: &core::sim::Flag,
     home_rotation: Quat,
+    ribcage: Option<&[Option<Mat4>]>,
 ) -> Option<(bool, Mat4)> {
     match flag.status {
         core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => Some((
@@ -114,7 +188,12 @@ fn flag_pose(
                     let vehicle = sim.vehicle(mount.vehicle)?;
                     (vehicle.pos, vehicle.rot)
                 }
-                None => (unit.soldier.pos, Quat::from_rotation_y(unit.soldier.yaw)),
+                None => {
+                    if let Some(frames) = ribcage {
+                        return Some((true, (*frames.get(carrier.index as usize)?)?));
+                    }
+                    (unit.soldier.pos, Quat::from_rotation_y(unit.soldier.yaw))
+                }
             };
             Some((
                 true,
@@ -129,6 +208,7 @@ impl FlagVisuals {
         let mut out = Self {
             cull,
             hdr: scene.manifest.hdr.is_some(),
+            bf1: scene.manifest.source_game.eq_ignore_ascii_case("bf1"),
             ..Self::default()
         };
         if let Some(instance) = scene
@@ -155,6 +235,8 @@ impl FlagVisuals {
                 .join("classes")
                 .join(format!("{}_ingame.ron", scene.manifest.source_game)),
         );
+        let set = |key: &str| db.prop_f32("com_item_flag", key).is_some_and(|v| v != 0.0);
+        out.colorize = [set("DroppedColorize"), set("CarriedColorize")];
         for class in db
             .names()
             .filter(|name| db.engine_base(name) == Some("flag"))
@@ -201,9 +283,16 @@ impl FlagVisuals {
         ] {
             if out.ground_loose.is_empty() {
                 out.ground_loose = load_flag_parts(r, scene, Some(name));
+                if !out.ground_loose.is_empty() {
+                    out.ground_geometry[0] = Some(out.note_cloths(r, scene, name));
+                }
             }
             if out.ground_carried.is_empty() {
-                out.ground_carried = load_flag_parts(r, scene, Some(&format!("{name}_carried")));
+                let carried = format!("{name}_carried");
+                out.ground_carried = load_flag_parts(r, scene, Some(&carried));
+                if !out.ground_carried.is_empty() {
+                    out.ground_geometry[1] = Some(out.note_cloths(r, scene, &carried));
+                }
             }
         }
         if out.ground_loose.is_empty() {
@@ -216,6 +305,7 @@ impl FlagVisuals {
         }
         if out.ground_carried.is_empty() {
             out.ground_carried = out.ground_loose.clone();
+            out.ground_geometry[1] = out.ground_geometry[0].clone();
         }
         for (team_idx, candidates) in [
             (
@@ -238,15 +328,19 @@ impl FlagVisuals {
             for name in candidates {
                 let loose = load_flag_parts(r, scene, Some(name));
                 if !loose.is_empty() {
-                    let carried = {
-                        let c = load_flag_parts(r, scene, Some(&format!("{name}_carried")));
-                        if c.is_empty() {
-                            loose.clone()
-                        } else {
-                            c
-                        }
+                    let carried_name = format!("{name}_carried");
+                    let c = load_flag_parts(r, scene, Some(&carried_name));
+                    let (carried, carried_name) = if c.is_empty() {
+                        (loose.clone(), name.to_owned())
+                    } else {
+                        (c, carried_name)
                     };
+                    let names = (
+                        out.note_cloths(r, scene, name),
+                        out.note_cloths(r, scene, &carried_name),
+                    );
                     out.team_ground[team_idx] = Some((loose, carried));
+                    out.team_geometry[team_idx] = Some(names);
                     break;
                 }
             }
@@ -296,37 +390,78 @@ impl FlagVisuals {
         out
     }
 
-    pub fn draws(&self, sim: &core::sim::Sim) -> Vec<DrawCmd> {
+    /// The viewer's sim team, for the flags' relation colour ([`flag_tint`]).
+    pub fn set_viewer_team(&mut self, team: Option<u8>) {
+        self.viewer_team = team;
+    }
+
+    /// Each unit's drawn `bone_ribcage` by unit index
+    /// (`SoldierVisuals::jet_frames`), where a flag carried on foot draws
+    /// ([`flag_pose`]); `None` keeps the `CarriedOffset` pose.
+    pub fn set_ribcage(&mut self, frames: Option<Vec<Option<Mat4>>>) {
+        self.ribcage = frames;
+    }
+
+    /// Every live CTF flag's model, and its banners stepped to `sim`'s time
+    /// (`share` into the next tick). The cloth steps by the frame's time like
+    /// a soldier's (`SoldierVisuals::step_cloths`), in the flag's frame, and
+    /// restarts when the flag swaps between its loose and carried model.
+    pub fn draws(&mut self, r: &mut Renderer, sim: &core::sim::Sim, share: f32) -> Vec<DrawCmd> {
         let mut out = Vec::new();
-        let Some(ctf) = &sim.ctf else { return out };
+        let Some(ctf) = &sim.ctf else {
+            self.cloth_live.clear();
+            self.clock = None;
+            return out;
+        };
+        let now = (sim.tick as f32 + share) * core::TICK_DT;
+        let dt = self.clock.map_or(0.0, |t| now - t);
+        self.clock = Some(now);
         let is_space = ctf.is_space();
-        for flag in &ctf.flags {
-            let Some((carried, m)) = flag_pose(sim, flag, self.home_rotation) else {
+        self.cloth_live.resize_with(ctf.flags.len(), || None);
+        for (index, flag) in ctf.flags.iter().enumerate() {
+            let Some((carried, m)) =
+                flag_pose(sim, flag, self.home_rotation, self.ribcage.as_deref())
+            else {
+                self.cloth_live[index] = None;
                 continue;
             };
-            let parts: &[Part] = if is_space {
+            let team = usize::from(flag.team);
+            let (parts, geometry): (&[Part], Option<&String>) = if is_space {
                 if carried {
-                    &self.carried
+                    (&self.carried, None)
                 } else {
-                    &self.loose
+                    (&self.loose, None)
                 }
-            } else if let Some((tl, tc)) = self
-                .team_ground
-                .get(usize::from(flag.team))
-                .and_then(|o| o.as_ref())
-            {
+            } else if let Some((tl, tc)) = self.team_ground.get(team).and_then(|o| o.as_ref()) {
+                let names = self.team_geometry.get(team).and_then(|o| o.as_ref());
                 if carried {
-                    tc
+                    (tc, names.map(|n| &n.1))
                 } else {
-                    tl
+                    (tl, names.map(|n| &n.0))
                 }
             } else if carried {
-                &self.ground_carried
+                (&self.ground_carried, self.ground_geometry[1].as_ref())
             } else {
-                &self.ground_loose
+                (&self.ground_loose, self.ground_geometry[0].as_ref())
             };
+            let tint = (!is_space && self.colorize[usize::from(carried)])
+                .then(|| flag_tint(ctf.mode, flag.team, self.viewer_team, self.bf1))
+                .flatten();
+            let tinted = |mut draw: DrawCmd| {
+                if let Some([r, g, b]) = tint {
+                    draw.color = [r, g, b, draw.color[3]];
+                }
+                draw
+            };
+            // `FUN_0035e720`'s colorize branch: a model with cloths draws its
+            // own mesh in `DAT_0076c200` (ff ff ff ff) at the team alpha and
+            // only the cloths take the relation colour.
+            let banners =
+                geometry.is_some_and(|g| self.cloths.get(g).is_some_and(|c| !c.is_empty()));
+            let mut lift = 0.0f32;
             for part in parts {
                 let pose = if !is_space && !carried && part.floor_lift > 0.0 {
+                    lift = lift.fmax(part.floor_lift);
                     Mat4::from_translation(Vec3::Y * part.floor_lift) * m
                 } else {
                     m
@@ -339,10 +474,82 @@ impl FlagVisuals {
                 .with_light(part.light)
                 .with_lit(part.lit(pose));
                 draw.additive = part.additive;
-                out.push(draw);
+                out.push(if banners { draw } else { tinted(draw) });
+            }
+            let pose = Mat4::from_translation(Vec3::Y * lift) * m;
+            let light = parts.first().map_or(LightPath::Lit, |p| p.light);
+            let lit = parts.first().and_then(|p| p.lit(pose));
+            let Some(geometry) = geometry.cloned() else {
+                self.cloth_live[index] = None;
+                continue;
+            };
+            let defs = self.cloths.get(&geometry).cloned().unwrap_or_default();
+            if defs.is_empty() {
+                self.cloth_live[index] = None;
+                continue;
+            }
+            let slot = &mut self.cloth_live[index];
+            if slot.as_ref().is_none_or(|l| l.geometry != geometry) {
+                *slot = Some(FlagClothLive {
+                    states: defs
+                        .iter()
+                        .map(|c| {
+                            let seed = c.def.raw.name.bytes().fold(index as u32, |h, b| {
+                                (h ^ u32::from(b)).wrapping_mul(0x1000193)
+                            });
+                            crate::cloth::State::new(&c.def, pose, &FLAG_ROOT, seed)
+                        })
+                        .collect(),
+                    geometry: geometry.clone(),
+                });
+            }
+            let Some(live) = slot.as_mut() else { continue };
+            for (k, (c, state)) in defs.iter().zip(&mut live.states).enumerate() {
+                state.step(&c.def, pose, &FLAG_ROOT, dt);
+                let vertices = state.vertices(&c.def, &FLAG_ROOT);
+                let key = (index, geometry.clone(), k);
+                let mesh = match crate::cloth::upload(
+                    r,
+                    self.cloth_meshes.get(&key).copied(),
+                    &vertices,
+                    &c.indices,
+                ) {
+                    Ok(mesh) => mesh,
+                    Err(e) => {
+                        eprintln!("flag cloth upload: {e}");
+                        continue;
+                    }
+                };
+                self.cloth_meshes.insert(key, mesh);
+                let draw = match c.texture {
+                    Some(texture) => DrawCmd::textured(mesh, texture, pose),
+                    None => DrawCmd::flat(mesh, [0.6, 0.6, 0.6, 1.0], pose),
+                }
+                .with_cull(self.cull)
+                .with_light(light)
+                .with_lit(lit);
+                out.push(tinted(draw));
             }
         }
         out
+    }
+
+    /// Load `geometry`'s banners once, beside its GLB in the scene or the
+    /// common bake (`manifest::cloth::item_path`), and return the key they
+    /// sit under. A model with no companion has none; a broken one is
+    /// reported and draws its pole alone.
+    fn note_cloths(
+        &mut self,
+        r: &mut Renderer,
+        scene: &crate::assets::Scene,
+        geometry: &str,
+    ) -> String {
+        let key = geometry.to_ascii_lowercase();
+        if !self.cloths.contains_key(&key) {
+            let loaded = load_flag_cloths(r, scene, geometry);
+            self.cloths.insert(key.clone(), loaded);
+        }
+        key
     }
 
     pub fn set_team_flag_models(
@@ -353,16 +560,55 @@ impl FlagVisuals {
     ) {
         for (idx, (loose_name, carried_name)) in models.iter().take(2).enumerate() {
             let loose = load_flag_parts(r, scene, loose_name.as_deref());
-            if !loose.is_empty() {
-                let carried = load_flag_parts(r, scene, carried_name.as_deref());
-                let carried = if carried.is_empty() {
-                    loose.clone()
-                } else {
-                    carried
-                };
-                self.team_ground[idx] = Some((loose, carried));
-            }
+            let Some(loose_name) = loose_name.as_deref().filter(|_| !loose.is_empty()) else {
+                continue;
+            };
+            let carried = load_flag_parts(r, scene, carried_name.as_deref());
+            let (carried, carried_name) = match carried_name.as_deref() {
+                Some(name) if !carried.is_empty() => (carried, name),
+                _ => (loose.clone(), loose_name),
+            };
+            let names = (
+                self.note_cloths(r, scene, loose_name),
+                self.note_cloths(r, scene, carried_name),
+            );
+            self.team_ground[idx] = Some((loose, carried));
+            self.team_geometry[idx] = Some(names);
         }
+    }
+
+    /// Each live flag's index in `sim.ctf` and its class: a campaign's
+    /// script flags, else the CTF round's placed flags
+    /// ([`Self::set_ctf_classes`]). Every flag class carries its
+    /// `LightOdf` (EntityItem ctor `FUN_00224fb8`, re-point-lights.md §4:
+    /// every CTF flag's is `flaglight`). A carried flag's light is off: the
+    /// pickup `FUN_0035d050` (B2:343074-343077) switches the flag's
+    /// EntityLight (+0x2b0) off through `FUN_00228570` (active byte +0x2a0
+    /// cleared, `FUN_004519b8` takes it off the light manager's list), and
+    /// the drop `FUN_0035d2f8` (B2:343271-343278) and the reset home
+    /// `FUN_0035d7c8` (B2:343449-343454) switch it on again through
+    /// `FUN_00228530` (`FUN_00451948` files it back). Its flare is that
+    /// light's, so it goes with it.
+    fn glow_flags<'a>(&'a self, walk: &'a crate::walk::WalkSim) -> Vec<(usize, &'a str)> {
+        let Some(ctf) = &walk.sim.ctf else {
+            return Vec::new();
+        };
+        let loose = |i: usize| ctf.flags.get(i).is_some_and(|f| f.carrier().is_none());
+        let flags: Vec<(usize, &str)> = match &walk.campaign {
+            Some(campaign) => campaign.flag_objects().collect(),
+            None => self
+                .ctf_classes
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| Some((i, c.as_deref()?)))
+                .collect(),
+        };
+        flags.into_iter().filter(|&(i, _)| loose(i)).collect()
+    }
+
+    /// Each sim CTF flag's placed class, in `sim.ctf`'s flag order.
+    pub fn set_ctf_classes(&mut self, classes: Vec<Option<String>>) {
+        self.ctf_classes = classes;
     }
 
     /// The item light's lens flare (re-point-lights.md §10). The light ctor
@@ -390,15 +636,16 @@ impl FlagVisuals {
         walk: &crate::walk::WalkSim,
         camera: &render::Camera,
     ) -> Vec<render::ParticleDraw> {
-        let (Some(campaign), Some(ctf)) = (&walk.campaign, &walk.sim.ctf) else {
+        let Some(ctf) = &walk.sim.ctf else {
             return Vec::new();
         };
-        campaign
-            .flag_objects()
+        self.glow_flags(walk)
+            .into_iter()
             .filter_map(|(index, class)| {
                 let def = self.glows.get(class)?;
                 let flag = ctf.flags.get(index)?;
-                let (_, matrix) = flag_pose(&walk.sim, flag, Quat::IDENTITY)?;
+                let (_, matrix) =
+                    flag_pose(&walk.sim, flag, Quat::IDENTITY, self.ribcage.as_deref())?;
                 let pos = matrix.w_axis.truncate();
                 let d2 = pos.distance_squared(camera.position);
                 let far = def.distance * def.distance;
@@ -429,19 +676,22 @@ impl FlagVisuals {
     /// The item's `LightOdf` EntityLight as a light (EntityItem ctor
     /// `FUN_00224fb8`, re-point-lights.md §4): a non-Static omni of the
     /// light class's Color and OmniRadius — `flaglight`'s 225 255 255, r 10
-    /// — that lights the models and the terrain around the holocron.
-    /// PROVISIONAL: at the item's origin, the light's own offset is not
-    /// traced. trace: `FUN_00224fb8`'s light placement.
+    /// — that lights the models and the terrain around the flag (or holocron).
+    /// At the item's origin: the ctor places the light at the item's +0x150
+    /// with an identity rotation (B2:138182-138196), and the item's matrix
+    /// setters `FUN_00225de0` / `FUN_00225f88` move it to the new matrix's
+    /// translation (`FUN_00452588`, B2:138995-138999).
     fn item_lights(&self, walk: &crate::walk::WalkSim) -> Vec<(Vec3, [u8; 3], f32)> {
-        let (Some(campaign), Some(ctf)) = (&walk.campaign, &walk.sim.ctf) else {
+        let Some(ctf) = &walk.sim.ctf else {
             return Vec::new();
         };
-        campaign
-            .flag_objects()
+        self.glow_flags(walk)
+            .into_iter()
             .filter_map(|(index, class)| {
                 let def = self.glows.get(class).filter(|d| d.omni > 0.0)?;
                 let flag = ctf.flags.get(index)?;
-                let (_, matrix) = flag_pose(&walk.sim, flag, Quat::IDENTITY)?;
+                let (_, matrix) =
+                    flag_pose(&walk.sim, flag, Quat::IDENTITY, self.ribcage.as_deref())?;
                 Some((
                     matrix.w_axis.truncate(),
                     [def.color[0], def.color[1], def.color[2]],
@@ -464,7 +714,9 @@ impl FlagVisuals {
             let Some((loose, carried_parts)) = self.campaign.get(class) else {
                 continue;
             };
-            let Some((carried, matrix)) = flag_pose(sim, flag, Quat::IDENTITY) else {
+            let Some((carried, matrix)) =
+                flag_pose(sim, flag, Quat::IDENTITY, self.ribcage.as_deref())
+            else {
                 continue;
             };
             let parts = if carried { carried_parts } else { loose };
@@ -509,6 +761,84 @@ impl super::vehicles::VehicleVisuals {
     ) {
         self.flags.set_team_flag_models(r, scene, specs);
     }
+
+    /// Each CTF flag's placed class, whose `LightOdf` glows on it
+    /// (`campaign_glows`, `campaign_lights`).
+    pub fn set_ctf_flag_classes(&mut self, classes: Vec<Option<String>>) {
+        self.flags.set_ctf_classes(classes);
+    }
+}
+
+/// `geometry`'s banners from the first of the scene and the common bake that
+/// holds its companion, each with its CLTH texture.
+fn load_flag_cloths(
+    r: &mut Renderer,
+    scene: &crate::assets::Scene,
+    geometry: &str,
+) -> Vec<std::sync::Arc<FlagCloth>> {
+    let common = common_dir(scene);
+    let Some((dir, path)) = [scene.dir.as_path(), common.as_path()]
+        .into_iter()
+        .map(|dir| (dir, manifest::cloth::item_path(dir, geometry)))
+        .find(|(_, p)| pak::exists(p))
+    else {
+        return Vec::new();
+    };
+    let read = || -> Result<Vec<manifest::cloth::Cloth>> {
+        Ok(ron::from_str(&pak::read_to_string(&path)?)?)
+    };
+    let raw = match read() {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!(
+                "{}: {e:#}; the flag draws without its banner",
+                path.display()
+            );
+            return Vec::new();
+        }
+    };
+    raw.into_iter()
+        .filter_map(|c| {
+            let texture = c.texture.clone().and_then(|name| {
+                scene
+                    .textures
+                    .get(&name.to_ascii_lowercase())
+                    .and_then(|t| super::upload::upload_cpu_texture(r, t, &name).ok())
+                    .or_else(|| {
+                        upload_texture_file(r, &dir.join("textures"), &name)
+                            .ok()
+                            .flatten()
+                    })
+            });
+            let indices = c.triangles.iter().flatten().copied().collect();
+            let skel = crate::skin::Skeleton::new(
+                vec![c.parent.clone()],
+                vec![None],
+                vec![Mat4::IDENTITY],
+            );
+            match crate::cloth::Definition::new(c, &skel) {
+                Ok(def) => Some(std::sync::Arc::new(FlagCloth {
+                    def,
+                    texture,
+                    indices,
+                })),
+                Err(e) => {
+                    eprintln!("{}: {e:#}; the flag draws without it", path.display());
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn common_dir(scene: &crate::assets::Scene) -> PathBuf {
+    let common_name = format!("common_{}", scene.manifest.source_game);
+    scene
+        .dir
+        .parent()
+        .map(|root| root.join(&common_name))
+        .filter(|cd| pak::is_dir(cd))
+        .unwrap_or_else(|| PathBuf::from("assets_baked").join(&common_name))
 }
 
 /// Script-created flags need no placed instance. Their class selects both
@@ -521,13 +851,7 @@ fn load_flag_parts(
     let Some(geometry) = geometry else {
         return Vec::new();
     };
-    let common_name = format!("common_{}", scene.manifest.source_game);
-    let common = scene
-        .dir
-        .parent()
-        .map(|root| root.join(&common_name))
-        .filter(|cd| pak::is_dir(cd))
-        .unwrap_or_else(|| PathBuf::from("assets_baked").join(&common_name));
+    let common = common_dir(scene);
     let loaded = [scene.dir.as_path(), common.as_path()]
         .into_iter()
         .find_map(|dir| load_glb(&dir.join("models").join(format!("{geometry}.glb"))).ok());
@@ -754,6 +1078,32 @@ mod tests {
         assert!(art.campaign_draws(&sim, &campaign).is_empty());
     }
 
+    /// The 2-flag banners take the viewer's relation colour, the one-flag
+    /// neutral flag the table's neutral grey; with no viewer a 2-flag flag
+    /// is left untinted.
+    #[test]
+    fn flag_tint_follows_the_viewer_relation() {
+        use core::sim::CtfMode::{OneFlag, TwoFlag};
+        let lin = |rgb: [u8; 3]| rgb.map(|x| render::srgb_decode(f32::from(x) / 255.0));
+        assert_eq!(
+            flag_tint(TwoFlag, 1, Some(1), false),
+            Some(lin([1, 86, 213]))
+        );
+        assert_eq!(
+            flag_tint(TwoFlag, 0, Some(1), false),
+            Some(lin([200, 100, 100]))
+        );
+        assert_eq!(
+            flag_tint(OneFlag, 0, Some(1), false),
+            Some(lin([192, 192, 192]))
+        );
+        assert_eq!(
+            flag_tint(OneFlag, 0, None, false),
+            Some(lin([192, 192, 192]))
+        );
+        assert_eq!(flag_tint(TwoFlag, 0, None, false), None);
+    }
+
     /// BF1 hides an item for its last 2 s (life 1 -> -1); BF2 never.
     #[test]
     fn bf1_hides_the_item_for_its_last_two_seconds() {
@@ -765,11 +1115,42 @@ mod tests {
         assert!(item_drawn(false, -0.9));
     }
 
+    /// On foot the carried flag is the carrier's drawn `bone_ribcage`
+    /// (`FUN_00239bb0`), not `CarriedOffset`; an undrawn carrier shows none.
+    #[test]
+    fn foot_carried_flag_rides_the_carrier_ribcage() {
+        let mut sim = core::sim::Sim::empty(1);
+        let mut flag = core::sim::Flag::new_team_flag(0, glam::Vec3::ZERO, 15.0);
+        let unit = sim
+            .spawn(&core::unit::UnitSpec::trooper(
+                1,
+                glam::Vec3::new(4.0, 0.0, 2.0),
+            ))
+            .unwrap();
+        flag.status = core::sim::FlagStatus::Carried { carrier: unit };
+        let bone = Mat4::from_rotation_translation(
+            Quat::from_rotation_z(1.2),
+            glam::Vec3::new(4.0, 1.3, 2.1),
+        );
+        let mut frames = vec![None; sim.units.len()];
+        frames[unit.index as usize] = Some(bone);
+        assert_eq!(
+            flag_pose(&sim, &flag, Quat::IDENTITY, Some(&frames)),
+            Some((true, bone))
+        );
+        frames[unit.index as usize] = None;
+        assert_eq!(flag_pose(&sim, &flag, Quat::IDENTITY, Some(&frames)), None);
+        let (_, offset) = flag_pose(&sim, &flag, Quat::IDENTITY, None).unwrap();
+        let soldier = &sim.unit(unit).unwrap().soldier;
+        let expect = soldier.pos + Quat::from_rotation_y(soldier.yaw) * flag.carried_offset;
+        assert!((offset.w_axis.truncate() - expect).length() < 1e-5);
+    }
+
     #[test]
     fn space_flag_uses_live_state_and_carrier_pose() {
         let mut sim = core::sim::Sim::empty(1);
         let mut flag = core::sim::Flag::new_space_neutral(glam::Vec3::new(1.0, 2.0, 3.0));
-        let (carried, home) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
+        let (carried, home) = flag_pose(&sim, &flag, Quat::IDENTITY, None).unwrap();
         assert!(!carried);
         assert_eq!(home.w_axis.truncate(), flag.home_pos);
         flag.current_pos = glam::Vec3::new(20.0, 30.0, 40.0);
@@ -777,7 +1158,7 @@ mod tests {
             timer: 5.0,
             pickup_cooldown: 0.0,
         };
-        let (carried, dropped) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
+        let (carried, dropped) = flag_pose(&sim, &flag, Quat::IDENTITY, None).unwrap();
         assert!(!carried);
         assert_eq!(dropped.w_axis.truncate(), flag.current_pos);
         let unit = sim
@@ -801,7 +1182,7 @@ mod tests {
         let rot = Quat::from_rotation_z(0.5) * Quat::from_rotation_y(1.0);
         let vehicle = sim.vehicle_mut(flyer).unwrap();
         (vehicle.pos, vehicle.rot) = (pos, rot);
-        let (carried, pose) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
+        let (carried, pose) = flag_pose(&sim, &flag, Quat::IDENTITY, None).unwrap();
         assert!(carried);
         assert_eq!(pose.w_axis.truncate(), pos + rot * flag.carried_offset);
         assert!((pose.transform_vector3(glam::Vec3::Z) - rot * glam::Vec3::Z).length() < 0.001);

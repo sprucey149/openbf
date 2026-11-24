@@ -274,6 +274,7 @@ pub struct HudModel {
     pub lock: Option<HudLock>,
     pub incoming_missile: Option<f32>,
     pub hints: Vec<crate::hud_tree::HintMarker>,
+    pub flag_timers: Vec<crate::hud_tree::FlagTimer>,
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
@@ -431,6 +432,7 @@ pub fn feed_with_reticle(
         has_mesh,
     );
     hud.hint_markers.clone_from(&m.hints);
+    hud.flag_timers.clone_from(&m.flag_timers);
     crate::hud_flag::feed(hud, m.flag_status, has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
@@ -1255,6 +1257,7 @@ mod tests {
             lock: None,
             incoming_missile: None,
             hints: Vec::new(),
+            flag_timers: Vec::new(),
             team_points: None,
             unlimited_tickets: [false; 2],
             popup: None,

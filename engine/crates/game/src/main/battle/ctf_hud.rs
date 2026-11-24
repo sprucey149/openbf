@@ -36,6 +36,90 @@ pub(super) fn marker_screen(view_proj: glam::Mat4, pos: glam::Vec3) -> ([f32; 2]
     ([x, y], on_screen)
 }
 
+/// The loose flag model's SPHR `[x, y, z, r]` (BF2 INGAME.LVL, the same on
+/// all five `com_icon_*_flag` modls). OURS: the countdown measures the flag
+/// object by it; replace: the placed flag geometry's own SPHR once the
+/// common bake writes model spheres (`bake::glb::model_sphere`); trace: the
+/// object sphere `FUN_00384078` reads (entity +0x10/+0x14, else +0x20) is
+/// that SPHR.
+const FLAG_SPHERE: [f32; 4] = [-0.008_202_18, -0.104_106_43, 0.0, 0.731_743_9];
+
+/// The countdown's alpha at `distance` metres from the camera: opaque to
+/// 20 m, then 4/255 less per whole metre, gone at 84 m (B2 `FUN_00384078`
+/// 369360-369380, PC 0x599c32 `0x14f - 4 * trunc(d)`).
+pub(super) fn flag_timer_alpha(distance: f32) -> Option<f32> {
+    if distance <= 20.0 {
+        return Some(1.0);
+    }
+    let a = 255 - (distance as i32 - 20) * 4;
+    (a > 0).then(|| a as f32 / 255.0)
+}
+
+/// Every dropped flag's return countdown. `FUN_00383b98` (B2:369071, PC
+/// 0x5996a0) lists a flag on drop when it has a home and a finite timer, and
+/// `FUN_00383d68` takes it off on pickup or reset. `FUN_00384078` anchors the
+/// text 1.2 sphere radii above the object's sphere centre and draws it only
+/// in front of the camera.
+pub(super) fn flag_timers(
+    walk: &WalkSim,
+    aspect: f32,
+    stereo_view: Option<(&render::Camera, f32)>,
+) -> Vec<ui::hud_tree::FlagTimer> {
+    let Some(ctf) = walk.sim.ctf.as_ref().filter(|_| walk.campaign.is_none()) else {
+        return Vec::new();
+    };
+    let (camera, view_aspect) = stereo_view.map_or_else(
+        || (walk.camera(), aspect),
+        |(cam, stereo_aspect)| (*cam, stereo_aspect),
+    );
+    let view_proj = camera.view_proj(view_aspect);
+    ctf.flags
+        .iter()
+        .filter_map(|flag| {
+            let core::sim::FlagStatus::Dropped { timer, .. } = flag.status else {
+                return None;
+            };
+            let anchor =
+                flag.current_pos + glam::Vec3::Y * (FLAG_SPHERE[1] + 1.2 * FLAG_SPHERE[3]);
+            let clip = view_proj * anchor.extend(1.0);
+            if clip.w <= 0.0 {
+                return None;
+            }
+            let alpha = flag_timer_alpha((anchor - camera.position).length())?;
+            Some(ui::hud_tree::FlagTimer {
+                ndc: [clip.x / clip.w, -clip.y / clip.w],
+                seconds: timer.ceil() as i32,
+                alpha,
+            })
+        })
+        .collect()
+}
+
+/// The 2-flag script's own marker for `flag`, as `viewer_team` sees it.
+/// `objectivectf.luac` proto root.9.2 (called from OnFlagReset, OnFlagPickUp
+/// and OnFlagDrop) shows the flag's yellow `mapIcon` entity marker only to
+/// the opposing team (proto root.9.0, `MapAddEntityMarker` team mask
+/// `1 << team` in `FUN_0018eda8`). While the flag is carried the entity
+/// marker is removed and a yellow `capRegionMarker` goes on its
+/// `captureRegion` for that same team. A flag's own team never gets the
+/// script marker; it sees only the engine's carrier marker.
+fn two_flag_marker(
+    ctf: &core::sim::CtfState,
+    flag: &core::sim::Flag,
+    viewer_team: u8,
+) -> Option<(glam::Vec3, bool)> {
+    if flag.team == viewer_team {
+        return None;
+    }
+    match flag.status {
+        core::sim::FlagStatus::Carried { .. } => ctf
+            .capture_regions
+            .get(usize::from(viewer_team))
+            .map(|r| (r.pos, true)),
+        _ => Some((flag.current_pos, false)),
+    }
+}
+
 fn ctf_flag_target(
     walk: &WalkSim,
     ctf: &core::sim::CtfState,
@@ -46,23 +130,8 @@ fn ctf_flag_target(
         let (pos, delivery) = game::minimap::ctf_marker(&walk.sim, flag, me_team)?;
         (pos, delivery, true)
     } else {
-        match flag.status {
-            core::sim::FlagStatus::Carried { carrier } if carrier == walk.player => (
-                ctf.capture_regions
-                    .get(usize::from(me_team))
-                    .map_or(flag.current_pos, |r| r.pos),
-                false,
-                true,
-            ),
-            core::sim::FlagStatus::Carried { carrier } => (
-                flag.current_pos,
-                false,
-                walk.sim
-                    .unit(carrier)
-                    .is_some_and(|u| walk.sim.allied(me_team, u.team)),
-            ),
-            _ => (flag.current_pos, false, true),
-        }
+        let (pos, delivery) = two_flag_marker(ctf, flag, me_team)?;
+        (pos, delivery, true)
     };
     let pos = if delivery {
         pos + glam::Vec3::Y * 1.3
@@ -605,6 +674,111 @@ mod tests {
             .iter()
             .any(|h| h.carrier && h.friendly && !h.on_screen));
         assert!(hints.iter().any(|h| h.objective && !h.on_screen));
+    }
+
+    fn two_flag_walk() -> (WalkSim, u8, glam::Vec3, glam::Vec3) {
+        let mut walk = WalkSim::new(1, glam::Vec3::ZERO, None);
+        let camera = walk.camera();
+        let team = walk.sim.unit(walk.player).unwrap().team;
+        let own_home = camera.position + camera.forward() * 30.0;
+        let enemy_home = camera.position + camera.forward() * 60.0;
+        let homes = if team == 0 {
+            [own_home, enemy_home]
+        } else {
+            [enemy_home, own_home]
+        };
+        walk.sim.ctf = Some(core::sim::CtfState::new_two_flag(
+            5, homes[0], homes[1], homes[1], homes[0],
+        ));
+        (walk, team, own_home, enemy_home)
+    }
+
+    /// objectivectf.luac root.9.2: a flag's marker goes to the other team
+    /// only, on the flag while it is loose and on its capture region while
+    /// it is carried.
+    #[test]
+    fn two_flag_marker_follows_the_script() {
+        let (mut walk, team, _, enemy_home) = two_flag_walk();
+        let ctf = walk.sim.ctf.clone().unwrap();
+        let own = &ctf.flags[usize::from(team)];
+        let enemy = &ctf.flags[usize::from(1 - team)];
+        assert_eq!(two_flag_marker(&ctf, own, team), None);
+        assert_eq!(two_flag_marker(&ctf, enemy, team), Some((enemy_home, false)));
+        let mate = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(team, enemy_home))
+            .unwrap();
+        let ctf = walk.sim.ctf.as_mut().unwrap();
+        ctf.flags[usize::from(1 - team)].status = core::sim::FlagStatus::Carried { carrier: mate };
+        let ctf = walk.sim.ctf.clone().unwrap();
+        assert_eq!(
+            two_flag_marker(&ctf, &ctf.flags[usize::from(1 - team)], team),
+            Some((ctf.capture_regions[usize::from(team)].pos, true))
+        );
+    }
+
+    /// An enemy carrying the viewer's flag shows the engine's red carrier
+    /// marker alone: the script puts no marker on that flag for its own team.
+    #[test]
+    fn enemy_carrier_of_our_flag_has_no_flag_marker() {
+        let (mut walk, team, own_home, _) = two_flag_walk();
+        let thief = walk
+            .sim
+            .spawn(&core::unit::UnitSpec::trooper(1 - team, own_home))
+            .unwrap();
+        walk.sim.unit_mut(thief).unwrap().soldier.pos = own_home;
+        let ctf = walk.sim.ctf.as_mut().unwrap();
+        ctf.flags[usize::from(team)].status = core::sim::FlagStatus::Carried { carrier: thief };
+        let mut feed = game::event_feed::EventFeed::default();
+        let hints = hud_hints(&walk, &mut feed, 0, 16.0 / 9.0, None);
+        let carriers: Vec<_> = hints.iter().filter(|h| h.carrier).collect();
+        assert_eq!(carriers.len(), 1);
+        assert!(!carriers[0].friendly);
+        assert_eq!(carriers[0].tint, Some([175.0, 0.0, 0.0]));
+        let flags: Vec<_> = hints.iter().filter(|h| h.flag).collect();
+        assert_eq!(flags.len(), 1, "only the enemy flag at its home");
+        assert!(!flags[0].objective);
+    }
+
+    /// FUN_00384078: opaque to 20 m, then 4/255 off per whole metre.
+    #[test]
+    fn flag_timer_fades_past_twenty_metres() {
+        assert_eq!(flag_timer_alpha(5.0), Some(1.0));
+        assert_eq!(flag_timer_alpha(20.0), Some(1.0));
+        assert_eq!(flag_timer_alpha(20.5), Some(1.0));
+        assert_eq!(flag_timer_alpha(21.0), Some(251.0 / 255.0));
+        assert_eq!(flag_timer_alpha(83.9), Some(3.0 / 255.0));
+        assert_eq!(flag_timer_alpha(84.0), None);
+    }
+
+    /// A dropped flag in front of the camera counts its whole seconds up
+    /// (ceil), 1.2 model radii over its sphere centre; one at home, or
+    /// behind the camera, has none.
+    #[test]
+    fn dropped_flag_shows_its_countdown() {
+        let (mut walk, team, own_home, _) = two_flag_walk();
+        assert!(flag_timers(&walk, 16.0 / 9.0, None).is_empty());
+        let ctf = walk.sim.ctf.as_mut().unwrap();
+        ctf.flags[usize::from(team)].status = core::sim::FlagStatus::Dropped {
+            timer: 7.2,
+            pickup_cooldown: 0.0,
+        };
+        let timers = flag_timers(&walk, 16.0 / 9.0, None);
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].seconds, 8);
+        let camera = walk.camera();
+        let anchor = own_home + glam::Vec3::Y * (FLAG_SPHERE[1] + 1.2 * FLAG_SPHERE[3]);
+        assert_eq!(
+            Some(timers[0].alpha),
+            flag_timer_alpha((anchor - camera.position).length())
+        );
+        assert!(timers[0].alpha < 1.0);
+        let (ndc, _) = marker_screen(camera.view_proj(16.0 / 9.0), anchor);
+        assert!((timers[0].ndc[0] - ndc[0]).abs() < 1e-4);
+        assert!((timers[0].ndc[1] - ndc[1]).abs() < 1e-4);
+        let mut turned = camera;
+        turned.yaw += std::f32::consts::PI;
+        assert!(flag_timers(&walk, 16.0 / 9.0, Some((&turned, 16.0 / 9.0))).is_empty());
     }
 
     #[test]
