@@ -67,6 +67,17 @@ pub struct LockMarker {
     pub pulse: f32,
 }
 
+/// One dropped flag's return countdown, drawn by code, not by the layout
+/// (B2 `FUN_00384078` 369300-369420, PC 0x5999a0-0x599cc8): `"%d"` of the
+/// ceiling of the flag's timer, `gamefont_tiny`, centred on and standing on
+/// `ndc` (`FUN_005a5bd0(.., 2, 1)`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlagTimer {
+    pub ndc: [f32; 2],
+    pub seconds: i32,
+    pub alpha: f32,
+}
+
 /// The fader (`re-hud.md` §2.1 [V][O], `FUN_003afca8` ff.): 0 hidden → 1 in →
 /// 2 hold → 3 sustain → 4 out → 0. A zero time skips its state; the hold
 /// defaults to forever.
@@ -668,6 +679,7 @@ pub struct Hud {
     pub carrier_styles: [Option<HintStyle>; 4],
     pub objective_styles: [Option<HintStyle>; 4],
     pub hint_markers: Vec<HintMarker>,
+    pub flag_timers: Vec<FlagTimer>,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// The squad order cross this frame (`crate::hud_squad`); `None` draws
     /// none.
@@ -824,6 +836,7 @@ impl Hud {
             carrier_styles: [None; 4],
             objective_styles: [None; 4],
             hint_markers: Vec::new(),
+            flag_timers: Vec::new(),
             space: None,
             squad: None,
             capture: None,

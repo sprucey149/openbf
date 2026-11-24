@@ -1910,10 +1910,16 @@ impl App {
             &self.assets_dir,
             &walk.vehicle_geometry,
         );
-        if let Some(specs) = super::battle::ctf_flag_specs(self.setup.mission.as_ref(), &walk) {
+        if let Some(specs) = super::battle::ctf_flag_specs(setup.mission.as_ref(), &walk) {
             self.vehicle_vis
                 .configure_ctf_flags(renderer, scene, &specs);
         }
+        self.vehicle_vis
+            .set_ctf_flag_classes(super::battle::ctf_flag_classes(
+                setup.mission.as_ref(),
+                &walk,
+                scene,
+            ));
         self.vehicle_vis.set_treads(walk.hover_treads.clone());
         let lit_chunks = self.vehicle_vis.load_chunks(
             renderer,

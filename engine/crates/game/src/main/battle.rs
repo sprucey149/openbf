@@ -1213,6 +1213,45 @@ pub(super) fn ctf_flag_specs(
     )
 }
 
+/// Each sim flag's placed class, in `walk.sim.ctf`'s flag order (the
+/// battle setup's: a 2-flag pair swapped like [`ctf_flag_specs`]), by its
+/// instance name. `None` for a flag with no placed instance.
+pub(super) fn ctf_flag_classes(
+    mission: Option<&game::mission::MissionDef>,
+    walk: &WalkSim,
+    scene: &game::assets::Scene,
+) -> Vec<Option<String>> {
+    let Some((m, ctf)) = mission.and_then(|m| Some((m, m.ctf.as_ref()?))) else {
+        return Vec::new();
+    };
+    let mut names: Vec<&str> = if ctf.flags.is_empty() {
+        vec![ctf.flag.as_str()]
+    } else {
+        ctf.flags.iter().map(|f| f.name.as_str()).collect()
+    };
+    let swapped = ctf.flags.len() >= 2
+        && m.teams[0]
+            .faction
+            .eq_ignore_ascii_case(&walk.teams[1].faction)
+        && m.teams[1]
+            .faction
+            .eq_ignore_ascii_case(&walk.teams[0].faction);
+    if swapped {
+        names.swap(0, 1);
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            scene
+                .manifest
+                .instances
+                .iter()
+                .find(|i| i.name.eq_ignore_ascii_case(name))
+                .map(|i| i.class.clone())
+        })
+        .collect()
+}
+
 fn hud_lock(
     walk: &WalkSim,
     feed: &game::event_feed::EventFeed,
@@ -1379,6 +1418,7 @@ pub(super) fn hud_model_for_view(
         lock: hud_lock(walk, feed, slot, aspect),
         incoming_missile: walk.sim.incoming_missile(slot),
         hints: hud_hints(walk, feed, slot, aspect, stereo_view),
+        flag_timers: ctf_hud::flag_timers(walk, aspect, stereo_view),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,
         seat_health: me

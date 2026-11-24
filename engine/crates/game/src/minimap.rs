@@ -7,7 +7,7 @@
 use crate::classdb::ClassDb;
 use crate::walk::WalkSim;
 use core::fmath::FloatExt;
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use manifest::{Manifest, ManifestRegion};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,17 @@ const CONE_COS: f32 = 0.913_545_5; // cos 24°
 /// `[ours]`, PROVISIONAL: "while the unit fires" = a shot within this many seconds.
 const FIRING_SECONDS: f32 = 0.5;
 
+/// Where the marker over a flag carrier sits (`FUN_00179c10`,
+/// B2:20236-20345): the carrier's collision sphere centre (the object at
+/// entity +0xf0: its sphere at +0x20, or the cell copy at
+/// `*(+0x10) + 0x40 + 16·(+0x14)`, read by `FUN_00164ff8` / `FUN_00164ff0`),
+/// for a soldier (type 0x20) raised 0.4 along the matrix's up row
+/// (0x3ecccccd), then the local offset (0, min(0.7 r, 4), 0), or
+/// (0, 0.3, −0.2 r) for the viewer's own object, through the matrix. A
+/// soldier's sphere is `core::sim::soldier_blast_sphere` (the same
+/// entity +0x110 sphere a blast reads, re-vehicle-death.md §3).
+/// PROVISIONAL: those sphere values are measured in BF1 RAM.
+/// measure: the BF2 soldier's entity +0x110.
 pub fn carrier_marker(
     sim: &core::sim::Sim,
     carrier: core::unit::UnitHandle,
@@ -68,8 +79,16 @@ pub fn carrier_marker(
         };
         Some((vehicle.pos + vehicle.rot * offset, friendly))
     } else {
+        let (lift, radius) = core::sim::soldier_blast_sphere(unit.soldier.stance);
+        let offset = if carrier == viewer {
+            Vec3::new(0.0, 0.3, -0.2 * radius)
+        } else {
+            Vec3::Y * (0.7 * radius).fmin(4.0)
+        };
         Some((
-            unit.soldier.pos + Vec3::Y * (0.7 * unit.capsule().height).fmin(4.0),
+            unit.soldier.pos
+                + Vec3::Y * (lift + 0.4)
+                + Quat::from_rotation_y(unit.soldier.yaw) * offset,
             friendly,
         ))
     }
@@ -863,6 +882,26 @@ mod tests {
         assert!(carrier_marker(&sim, carrier, viewer).unwrap().1);
         sim.unit_mut(carrier).unwrap().alive = false;
         assert!(carrier_marker(&sim, carrier, viewer).is_none());
+    }
+
+    #[test]
+    fn soldier_carrier_marker_rides_his_collision_sphere() {
+        let mut sim = core::sim::Sim::empty(1);
+        let viewer = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, Vec3::ZERO))
+            .unwrap();
+        let carrier = sim
+            .spawn(&core::unit::UnitSpec::trooper(1, Vec3::new(2.0, 3.0, 4.0)))
+            .unwrap();
+        let feet = sim.unit(carrier).unwrap().soldier.pos;
+        let (point, _) = carrier_marker(&sim, carrier, viewer).unwrap();
+        let (lift, radius) = core::sim::soldier_blast_sphere(core::soldier::Stance::Stand);
+        assert_eq!((lift, radius), (1.0, 1.462_635));
+        assert!((point - (feet + Vec3::Y * (1.4 + 0.7 * radius))).length() < 1e-3);
+        let (own, _) = carrier_marker(&sim, carrier, carrier).unwrap();
+        assert!((own.y - (feet.y + 1.4 + 0.3)).abs() < 1e-3);
+        let flat = own - feet;
+        assert!((Vec3::new(flat.x, 0.0, flat.z).length() - 0.2 * radius).abs() < 1e-3);
     }
 
     #[test]

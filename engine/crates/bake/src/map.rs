@@ -462,6 +462,11 @@ pub fn bake_common(lvl_path: &str, outdir: &str, pc_lvl: Option<&str>) -> Result
         texture_tier2: m.texture_tier2,
     };
     crate::write_ron(&Path::new(outdir).join("common.ron"), &cm)?;
+    let lvl = std::fs::read(lvl_path)?;
+    let inner = mungefs::open(&lvl).map_err(|e| anyhow::anyhow!("{e}"))?;
+    for (model, cloths) in crate::cloth::item_cloths(inner)? {
+        crate::write_ron(&manifest::cloth::item_path(Path::new(outdir), &model), &cloths)?;
+    }
     // BF2's HUD layouts, fonts and extra sheets (card BHUD); a no-op for an
     // LVL with no `hud_` chunk.
     if let Some(h) = crate::hud::bake_hud(lvl_path, outdir)? {

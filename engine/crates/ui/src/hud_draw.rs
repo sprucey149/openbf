@@ -278,6 +278,9 @@ pub(crate) struct Run<'a> {
     pub(crate) tracking: f32,
 }
 
+/// The countdown's colour, the same on PS2 (B2 `FUN_00384078`) and PC
+/// (0x599c52, BGRA bytes f2 a7 43): (67, 167, 242), whatever the flag's team.
+const FLAG_TIMER_RGB: [f32; 3] = [67.0, 167.0, 242.0];
 const HINT_SCALE_FAR: f32 = 0.25;
 const HINT_SCALE_NEAR: f32 = 0.7;
 const LOCK_RAMP_NEAR: f32 = 200.0;
@@ -451,6 +454,44 @@ impl<'a> Ctx<'a> {
                 &Mat4::from_scale(Vec3::splat(s)),
                 &screen,
                 &quad,
+            );
+        }
+    }
+
+    fn flag_timers(&mut self, size: [f32; 2]) {
+        let hud = self.hud;
+        if hud.flag_timers.is_empty() {
+            return;
+        }
+        let Some(font) = self.face(crate::typography::Face::Tiny) else {
+            return;
+        };
+        let scale = frame_scale(size);
+        let height = f32::from(font.line_height) * scale[1];
+        let screen = Screen {
+            origin: [0.0, 0.0],
+            scale: [1.0, 1.0],
+        };
+        for t in &hud.flag_timers {
+            let text = t.seconds.to_string();
+            self.run(
+                usize::MAX,
+                &Mat4::IDENTITY,
+                &screen,
+                font,
+                &Run {
+                    text: &text,
+                    at: (
+                        (t.ndc[0] * 0.5 + 0.5) * size[0],
+                        (t.ndc[1] * 0.5 + 0.5) * size[1] - height,
+                    ),
+                    h_align: HAlign::Center,
+                    scale,
+                    color: color(FLAG_TIMER_RGB, t.alpha),
+                    additive: false,
+                    shadow: false,
+                    tracking: 0.0,
+                },
             );
         }
     }
@@ -1186,6 +1227,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
     }
     if tree {
         ctx.hint_markers(size, scale);
+        ctx.flag_timers(size);
         ctx.lock_marker(size, scale);
     }
     // The capture icon: a root group of the PS2's own (card CPBAR).

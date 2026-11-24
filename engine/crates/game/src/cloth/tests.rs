@@ -163,6 +163,7 @@ fn sheet() -> Cloth {
         drag: 0.,
         mass: 1.,
         max_acceleration: 20.,
+        texture: None,
     }
 }
 
@@ -254,6 +255,7 @@ fn pins_use_noncommuting_live_bone_and_cloth_frames() {
         drag: -2.,
         mass: 1.,
         max_acceleration: 20.,
+        texture: None,
     };
     let def = Definition::new(raw, &skel).unwrap();
     let local_pin = (root * child)
