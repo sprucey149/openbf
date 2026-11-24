@@ -53,3 +53,5 @@ The playtest follow-up at `847a12c3` passed 206 `mungefs` library tests with thr
 ## Integration with side conversion
 
 The addon converter continues to use `classes.ron` and the shared `ModCacheMeta` schema. Converter version six rebuilds addon caches to include the authored corona flares. Side conversion can use the same classes writer and cache schema. A combined branch should coordinate the converter version if it changes emitted side assets as well.
+
+The PC first-person mesh, nodes, and texture paths live under `side_bf2/pc_first_person`. The battle loader uses these together for stock BF2 weapons in PC addon rounds. Private side namespaces continue to resolve their own assets. A global side replacement that supplies alternate PC first-person artwork should package its matching models and sheets together under this path.
