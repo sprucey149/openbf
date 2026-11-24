@@ -146,6 +146,13 @@ impl winit::application::ApplicationHandler for App {
             self.last = std::time::Instant::now();
             return;
         };
+        let preload = game::assets::prefetch::load_key(&map, &self.mode);
+        let warm = std::thread::Builder::new()
+            .name("loading-prefetch".into())
+            .spawn({
+                let key = preload.clone();
+                move || game::assets::prefetch::warm(&key)
+            });
         let sound_banks = self
             .setup
             .mission
@@ -177,6 +184,10 @@ impl winit::application::ApplicationHandler for App {
             .as_ref()
             .map(|m| m.scene_kills().to_vec())
             .unwrap_or_default();
+        if let Ok(n) = warm.map(|h| h.join().unwrap_or(0)) {
+            println!("loading: prefetch key={preload} decoded={n}");
+        }
+        let _preload = game::assets::prefetch::record(&preload);
         match super::super::battle::load_and_upload_with_layers(
             &mut renderer,
             &map,

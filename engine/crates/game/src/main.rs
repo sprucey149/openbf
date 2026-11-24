@@ -307,6 +307,7 @@ fn main() -> Result<()> {
     pak::mount(std::path::Path::new("missions"), "missions");
     // Dev-only (`session-stats` feature): old round files go at launch.
     game::session_stats::prune_at_launch();
+    game::blackbox::warm_checkout();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     let (args, global_overrides, vr_requested, no_mods) = extract_extension_flags(&raw_args)?;
     let mut it = args.iter();

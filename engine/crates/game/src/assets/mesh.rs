@@ -47,6 +47,10 @@ pub struct SkinnedAsset {
 /// carry JOINTS_0/WEIGHTS_0, animations become clips (one key per frame;
 /// fps from the sampler times, `extras.fps` when present).
 pub fn load_skinned_glb(path: &Path) -> Result<SkinnedAsset> {
+    super::prefetch::skinned(path, || decode_skinned_glb(path))
+}
+
+pub(super) fn decode_skinned_glb(path: &Path) -> Result<SkinnedAsset> {
     use crate::skin::{BoneXform, Clip, Skeleton};
     let (doc, buffers, _) =
         gltf::import_slice(pak::read(path).with_context(|| path.display().to_string())?)
@@ -249,6 +253,10 @@ pub fn load_glb(path: &Path) -> Result<CpuMesh> {
 /// (card WSKN, `bake::glb::model_to_glb_joints`); empty when no primitive
 /// carries joints, and `[0; 4]` for a vertex of one that does not.
 pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
+    super::prefetch::glb(path, || decode_glb_joints(path))
+}
+
+pub(super) fn decode_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
     let (doc, buffers, _) =
         gltf::import_slice(pak::read(path).with_context(|| path.display().to_string())?)
             .map_err(|e| anyhow!("{e}"))?;

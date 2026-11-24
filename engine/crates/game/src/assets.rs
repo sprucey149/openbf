@@ -2,6 +2,7 @@
 //! CPU-side scene data for the renderer. Runtime never touches LVL.
 
 mod mesh;
+pub mod prefetch;
 pub mod presentation;
 mod render_ground;
 use core::fmath::FloatExt;
@@ -1948,6 +1949,10 @@ pub fn load_ktx2(bytes: &[u8]) -> Result<CpuTexture> {
 /// mip chain. The detail companion is the PS2's either way: it is a
 /// modulated x2 overlay the disc authored, not a resolution tier.
 pub fn load_texture(dir: &Path, name: &str) -> Result<CpuTexture> {
+    prefetch::texture(dir, name, || decode_texture(dir, name))
+}
+
+fn decode_texture(dir: &Path, name: &str) -> Result<CpuTexture> {
     let tier2 = (texture_tier() == TextureTier::Pc)
         .then(|| dir.join(format!("{name}.tier2.ktx2")))
         .filter(|p| pak::is_file(p));

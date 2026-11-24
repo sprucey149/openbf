@@ -1972,6 +1972,10 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("no renderer"))?;
         let upload_started = std::time::Instant::now();
         let scene = prepared.scene;
+        let _preload = game::assets::prefetch::record(&game::assets::prefetch::load_key(
+            &scene.dir,
+            &self.mode,
+        ));
         // Both sides of the upload are printed as they happen, so a log
         // that stops between them points at the GPU (the heartbeat goes on
         // with `phase=gpu-upload`).

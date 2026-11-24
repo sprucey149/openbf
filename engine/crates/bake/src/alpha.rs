@@ -582,9 +582,25 @@ pub const BF2_ADDITIVE: u32 = 0x40;
 /// (`bubblev3`, 0x01010044 and 0xe9) and Ventress's starblade
 /// (0x01010045) do. Every other segment keeps the legacy verdict, so retail
 /// weapon GLBs do not move. BF1's 0x40 is its vertex-colour bit, not this.
+///
+/// A PC-geometry segment takes its own word, not the per-texture OR: a PC
+/// weapon sheet is shared by its body and its small cutout or lens segments
+/// (`rep_1st_weap_inf_rifle`: 0x3 sight, 0xa9 body; `imp_1st_weap_inf_rifle`:
+/// 0xa5 lens, 0xa9 body), where the PS2 gives each its own sheet, and the
+/// body's alpha is its gloss, so the OR cut away the whole first-person gun.
+/// The BF2 disc draws by the segment's own word (`re-material-flags.md` §2,
+/// `FUN_0058ed70`, the 0x02 row [V]). OURS for the PC executable,
+/// trace: its segment draw state for 0x02 and 0x04.
 pub fn weapon_alphas(m: &Model) -> Vec<SegmentAlpha> {
     let mut out = legacy_per_texture_or(m);
     for (a, seg) in out.iter_mut().zip(&m.segments) {
+        if seg.pc_geometry {
+            a.mode = if seg.material_flags & crate::detail::ALPHA_IS_MEANINGFUL != 0 {
+                AlphaMode::Mask
+            } else {
+                AlphaMode::Opaque
+            };
+        }
         if seg.bf2_material && seg.material_flags & BF2_ADDITIVE != 0 {
             a.mode = AlphaMode::Blend;
         }
@@ -1576,6 +1592,59 @@ mod tests {
             legacy[0],
             AlphaMode::Mask,
             "the shell was MASK, cut away at 193"
+        );
+    }
+
+    /// A PC weapon sheet shared by a 0x3 sight and a 0xa9 glossmapped body:
+    /// only the sight is cut out, the body is drawn whole.
+    #[test]
+    fn weapon_alphas_pc_segments_take_their_own_word() {
+        let seg = |flags: u32| Segment {
+            vertex_count: 3,
+            index_count: 3,
+            bf2_material: true,
+            pc_geometry: true,
+            material_flags: flags,
+            render_type: RenderType::Bf2(0),
+            spec_power: 0,
+            spec_color: 0,
+            uv_anim: [0, 0],
+            textures: vec![(0, "rep_1st_weap_inf_rifle".to_owned())],
+            bone: None,
+            group: None,
+            bmap: Vec::new(),
+            bind: Vec::new(),
+            wght: Vec::new(),
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            colors: None,
+            triangles: vec![[0, 1, 2]],
+        };
+        let m = Model {
+            name: "rep_1st_weap_inf_rifle".to_owned(),
+            bone_space: false,
+            vertex_box: mungefs::model::Aabb {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            vis_box: mungefs::model::Aabb {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            face_count: 3,
+            sphere: None,
+            segments: vec![seg(0x3), seg(0x1), seg(0xa9), seg(0xa5)],
+        };
+        let modes: Vec<AlphaMode> = weapon_alphas(&m).iter().map(|a| a.mode).collect();
+        assert_eq!(
+            modes,
+            [
+                AlphaMode::Mask,
+                AlphaMode::Opaque,
+                AlphaMode::Opaque,
+                AlphaMode::Mask,
+            ]
         );
     }
 }
