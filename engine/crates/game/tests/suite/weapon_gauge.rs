@@ -385,3 +385,58 @@ fn ps2_reload_publishes_to_bf2_reticle_bits_for_both_source_games() {
         }
     }
 }
+
+/// The maintainer's fourth LAN playtest: the arc caster's charge did not show.
+/// Every arc caster a player can carry fills the ring while held and reports a
+/// full charge: BF2's dark trooper and Jawa (counted weapons, the ring's charge
+/// rule as BF2 has it) and BF1's clone pilot, whose arc caster is unlimited and
+/// heats per shot, so the heat rule alone left its ring empty while charging.
+#[test]
+fn every_arc_caster_fills_the_ring_and_reports_a_full_charge() {
+    let root = game::assets::baked_root();
+    for (game, side, class) in [
+        ("bf2", "imp", "imp_inf_dark_trooper"),
+        ("bf2", "des", "tat_inf_jawa"),
+        ("bf1", "rep", "rep_inf_clone_pilot"),
+    ] {
+        // The desert natives are no army: their classes load as the Jawa's own.
+        let db = if side == "des" {
+            game::jawa::donor(&root.join("classes"))
+        } else {
+            load_classdb(&root.join("classes"), game, &[side])
+        };
+        let Ok(db) = db else {
+            eprintln!("SKIP: no {game} {side} class bake");
+            continue;
+        };
+        let roster = ClassRoster::build(&db, class, 0, None).unwrap();
+        let w = &roster.weapon;
+        assert!(w.name.contains("arccaster"), "{class} holds {}", w.name);
+        let max = w.max_pressed_time;
+        println!(
+            "{class}: {} {max} s, unlimited {}",
+            w.name,
+            w.infinite_ammo()
+        );
+        let mut walk = walk_of(&roster);
+        let gauge = |walk: &game::walk::WalkSim| game::hud_feed::weapon_gauge(walk);
+        assert_eq!(gauge(&walk).charge, None, "{class}: not pressed");
+        let ticks = (max * 0.5 / core::TICK_DT).round() as usize;
+        for _ in 0..ticks {
+            walk.step_tick(&[FIRE]);
+        }
+        let half = gauge(&walk);
+        assert!((half.ring - 0.5).abs() < 0.1, "{class}: half way: {half:?}");
+        assert_eq!(half.charge, Some(half.ring), "{class}");
+        assert!(!half.charged(), "{class}: half is not full");
+        for _ in 0..ticks * 3 {
+            walk.step_tick(&[FIRE]);
+        }
+        let full = gauge(&walk);
+        assert_eq!(full.ring, 1.0, "{class}: held past MaxPressedTime");
+        assert!(full.charged(), "{class}: full");
+        walk.step_tick(&[PadState::default()]);
+        walk.step_tick(&[PadState::default()]);
+        assert_eq!(gauge(&walk).charge, None, "{class}: released");
+    }
+}

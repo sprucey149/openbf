@@ -440,6 +440,10 @@ pub struct EventFeed {
     /// Presentation only, never read by the sim. A slot with no name falls
     /// back to "Player N".
     player_names: std::collections::BTreeMap<u8, String>,
+    /// `[ours]` Each human slot's team the last time it had a soldier, so an
+    /// award announced while that player waits to respawn still gets its
+    /// team colour (`note_medals`). Presentation only.
+    slot_teams: std::collections::BTreeMap<u8, u8>,
     /// The vehicle and building-turret classes' names, by `Vehicle::class`
     /// ([`Texts::class_name`], else the class's `Label`, else its ODF name).
     vehicles: Vec<String>,
@@ -509,6 +513,7 @@ impl EventFeed {
             classes: self.classes.clone(),
             native_classes: self.native_classes.clone(),
             player_names: self.player_names.clone(),
+            slot_teams: self.slot_teams.clone(),
             vehicles: self.vehicles.clone(),
             stations: self.stations.clone(),
             out: Vec::new(),
@@ -551,6 +556,7 @@ impl EventFeed {
             classes: _,
             native_classes: _,
             player_names: _,
+            slot_teams: _,
             vehicles: _,
             stations: _,
             out: _,
@@ -598,6 +604,7 @@ impl EventFeed {
             classes: [Vec::new(), Vec::new()],
             native_classes: Default::default(),
             player_names: Default::default(),
+            slot_teams: Default::default(),
             vehicles: Vec::new(),
             stations: Vec::new(),
             order_labels: ORDER_LABELS.map(|l| texts.order_label(l)),
@@ -822,7 +829,25 @@ impl EventFeed {
 
         // [ours] The other seated humans' medals: a spectator line for each
         // earned since that slot's opening, naming the player and the award.
-        let my_team = sim.units[viewer.index as usize].team;
+        // Every seated human's team while it has a soldier (a dead player
+        // keeps the last one), and the viewer's own: its live soldier, else
+        // its slot's last team. `viewer` may be stale while the viewer waits
+        // to respawn, so it is never read by index alone.
+        for &s in seen.keys() {
+            if let Some(u) = sim
+                .players
+                .get(usize::from(s))
+                .copied()
+                .flatten()
+                .and_then(|h| sim.unit(h))
+            {
+                self.slot_teams.insert(s, u.team);
+            }
+        }
+        let my_team = sim
+            .unit(viewer)
+            .map(|u| u.team)
+            .or_else(|| self.slot_teams.get(&slot_u8).copied());
         let others: Vec<u8> = seen.keys().copied().filter(|&s| s != slot_u8).collect();
         for other in others {
             let Some(counts) = sim.slot_medal_counts(usize::from(other)) else {
@@ -838,17 +863,21 @@ impl EventFeed {
                 lines.push(self.screen_text(&format!("game.awards.medal.{key}"), label));
             }
             seen.insert(other, counts);
-            if let Some(unit) = sim.players.get(usize::from(other)).copied().flatten() {
-                let team = sim.units[unit.index as usize].team;
-                let color = if sim.allied(my_team, team) {
-                    message_color::OWN
-                } else {
-                    message_color::ENEMY
-                };
-                let who = self.unit_name(sim, unit);
-                for award in lines {
-                    self.say(format!("{who} earned {award}"), color, sim.tick);
-                }
+            if lines.is_empty() {
+                continue;
+            }
+            // By slot, not by soldier: a player waiting to respawn has none.
+            let color = match (my_team, self.slot_teams.get(&other)) {
+                (Some(mine), Some(&theirs)) if !sim.allied(mine, theirs) => message_color::ENEMY,
+                _ => message_color::OWN,
+            };
+            let who = self
+                .player_names
+                .get(&other)
+                .cloned()
+                .unwrap_or_else(|| format!("Player {}", u32::from(other) + 1));
+            for award in lines {
+                self.say(format!("{who} earned {award}"), color, sim.tick);
             }
         }
     }

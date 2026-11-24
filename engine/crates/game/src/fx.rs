@@ -44,6 +44,7 @@
 
 mod abilities;
 mod arc;
+mod charge;
 mod children;
 pub mod chunks;
 pub mod draw;
@@ -466,6 +467,12 @@ pub struct LiveEffect {
     hover_water: Option<VehicleHandle>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
+    /// The soldier and weapon class whose `ChargeUpEffect` this is
+    /// (`fx/charge.rs`).
+    charge: Option<(UnitHandle, usize)>,
+    /// Every draw's colour and alpha are scaled by this, 0..1: a charge
+    /// glow's charge (`fx/charge.rs`); 1 for every other effect.
+    glow: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,6 +526,8 @@ impl LiveEffect {
             hover_water: None,
             burn: None,
             float: None,
+            charge: None,
+            glow: 1.0,
         };
         fx.advance(0.0);
         fx
@@ -618,6 +627,28 @@ impl LiveEffect {
     ) {
         let era = self.def.era;
         let d = (self.frame.pos - eye).dot(forward);
+        let first = out.len();
+        self.draw_instances(era, d, eye, forward, zoom, bias, assets, out);
+        if self.glow < 1.0 {
+            let k = self.glow.clamp(0.0, 1.0);
+            for draw in &mut out[first..] {
+                draw.color = draw.color.map(|c| (f32::from(c) * k) as u8);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_instances(
+        &self,
+        era: Era,
+        d: f32,
+        eye: Vec3,
+        forward: Vec3,
+        zoom: f32,
+        bias: f32,
+        assets: &mut dyn FxAssets,
+        out: &mut Vec<ParticleDraw>,
+    ) {
         for (i, inst) in self.instances.iter().enumerate() {
             if inst.is_dead() {
                 continue;

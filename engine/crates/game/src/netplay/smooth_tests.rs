@@ -79,7 +79,7 @@ impl Lcg {
 
 /// The fixture battle with a command post per side, so a joining guest's
 /// spawn screens have a post to accept.
-fn fixture(setup: &RoundSetup, local: u8) -> anyhow::Result<WalkSim> {
+pub(super) fn fixture(setup: &RoundSetup, local: u8) -> anyhow::Result<WalkSim> {
     let mut walk = WalkSim::new(setup.seed, Vec3::ZERO, None);
     walk.spawn_dummy_targets();
     walk.local_slot = local;

@@ -34,6 +34,8 @@ fn portable_damage_effects_follow_health_bands_repair_and_death() {
         0.0,
     );
     t.land(Vec3::new(3.0, 0.0, 4.0), Vec3::Y);
+    // Health as shares of its MaxHealth (the disc's 50, ours 30).
+    let max = c.body.max_health;
     sim.turrets.push(t);
     let lib = Library::load(&root, &root.join("common_bf2"), "bf2", &["rep"]);
     for name in ["com_sfx_vehiclespark", "com_sfx_smokeplume"] {
@@ -50,8 +52,8 @@ fn portable_damage_effects_follow_health_bands_repair_and_death() {
     };
     fx.ingest_sim(&sim);
     assert!(active(&fx).is_empty());
-    for (hp, name) in [(25.0, "com_sfx_vehiclespark"), (14.0, "com_sfx_smokeplume")] {
-        sim.turrets[0].health = hp;
+    for (share, name) in [(0.5, "com_sfx_vehiclespark"), (0.28, "com_sfx_smokeplume")] {
+        sim.turrets[0].health = share * max;
         fx.ingest_sim(&sim);
         fx.ingest_sim(&sim);
         assert_eq!(active(&fx), [name]);
@@ -90,10 +92,10 @@ fn portable_damage_effects_follow_health_bands_repair_and_death() {
             .unwrap();
         }
     }
-    sim.turrets[0].health = 50.0;
+    sim.turrets[0].health = max;
     fx.ingest_sim(&sim);
     assert!(active(&fx).is_empty(), "repair stops damage effects");
-    sim.turrets[0].health = 10.0;
+    sim.turrets[0].health = 0.2 * max;
     fx.ingest_sim(&sim);
     assert_eq!(active(&fx), ["com_sfx_smokeplume"]);
     sim.turrets.clear();

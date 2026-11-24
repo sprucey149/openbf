@@ -122,6 +122,87 @@ fn v6_sprint_ramp_and_hysteresis() {
     assert_eq!(s.stance, Stance::Stand);
 }
 
+/// Playtest 2026-11-22 (hit volumes): through a prone change his prims
+/// follow the clip (`unit/body.rs`), not the stance: going down from a
+/// stand he is hit standing for 9 frames, crouched to frame 16, then
+/// prone; getting up to a stand, prone to frame 30, crouched to 36. A
+/// stand-up refused for headroom keeps the change's record.
+#[test]
+fn prone_changes_hit_in_the_clips_posture() {
+    use crate::unit::Posture;
+    let c = SoldierConstants::default();
+    let mut s = Soldier::new(Vec3::ZERO);
+    let press = PadState {
+        buttons: buttons::ROLL_STANCE,
+        ..Default::default()
+    };
+    let release = PadState::default();
+    let cycle = |s: &mut Soldier, wait: usize| {
+        run(s, &release, &c, wait);
+        tick(s, &press, &c);
+    };
+    cycle(&mut s, 20);
+    assert_eq!(Posture::of(&s), Posture::Crouch);
+    assert_eq!(s.prone_from, None, "crouching is no prone change");
+    // Down from a crouch: crouched for 15 frames (0.5 s).
+    cycle(&mut s, 20);
+    assert_eq!(
+        (s.stance, s.prone_from),
+        (Stance::Prone, Some(Stance::Crouch))
+    );
+    let mut seen = Vec::new();
+    for _ in 0..20 {
+        seen.push(Posture::of(&s));
+        tick(&mut s, &release, &c);
+    }
+    let crouched = seen.iter().take_while(|p| **p == Posture::Crouch).count();
+    assert_eq!(crouched, 15, "{seen:?}");
+    assert!(seen[crouched..].iter().all(|p| *p == Posture::Prone));
+    // Up to a stand: prone 30 frames, crouched 6, then standing.
+    cycle(&mut s, 30);
+    assert_eq!(
+        (s.stance, s.prone_from),
+        (Stance::Stand, Some(Stance::Prone))
+    );
+    let mut seen = Vec::new();
+    for _ in 0..45 {
+        seen.push(Posture::of(&s));
+        tick(&mut s, &release, &c);
+    }
+    let prone = seen.iter().take_while(|p| **p == Posture::Prone).count();
+    let crouched = seen[prone..]
+        .iter()
+        .take_while(|p| **p == Posture::Crouch)
+        .count();
+    assert_eq!((prone, crouched), (30, 6), "{seen:?}");
+    assert!(seen[36..].iter().all(|p| *p == Posture::Stand));
+    // Down from a stand: standing 9 frames, crouched 7.
+    s.stance = Stance::Stand;
+    s.prone_from = None;
+    s.lock_timer = 0.0;
+    let snap = s.stance_snap();
+    s.change_stance(Stance::Prone, &c);
+    let mut seen = Vec::new();
+    for _ in 0..20 {
+        seen.push(Posture::of(&s));
+        tick(&mut s, &release, &c);
+    }
+    let stood = seen.iter().take_while(|p| **p == Posture::Stand).count();
+    assert_eq!(stood, 9, "{seen:?}");
+    assert_eq!(seen[9..16], [Posture::Crouch; 7], "{seen:?}");
+    assert_eq!(seen[16], Posture::Prone);
+    // Any other change clears it; a refused change restores it.
+    let mut held = s.clone();
+    held.hold_low(Stance::Stand, &snap, DT);
+    assert_eq!(held.prone_from, None);
+    let before = s.stance_snap();
+    s.change_stance(Stance::Stand, &c);
+    s.hold_low(Stance::Prone, &before, DT);
+    assert_eq!(s.prone_from, Some(Stance::Stand));
+    s.set_stance(Stance::Jump);
+    assert_eq!(s.prone_from, None);
+}
+
 #[test]
 fn v7_contextual_button_cycles_or_rolls() {
     let c = SoldierConstants::default();

@@ -21,8 +21,9 @@ pub(super) struct TickState {
     pub selection: Selection,
     /// Each seated human slot's medal counts already announced (`EventFeed::note_medals`):
     /// the viewer's own lines and the spectator lines for the other humans all
-    /// compare against this, so a peer announces each medal once (LAN §5b). A
-    /// slot not in the map has no career yet; its opening is taken on the first tick.
+    /// compare against this, so a peer announces each medal once (LAN §5b).
+    /// Rebuilt every frame from the slots' current counts (`TickState::new`),
+    /// so a frame announces only what its own ticks earned.
     pub medals_seen: std::collections::BTreeMap<u8, core::sim::MedalCounts>,
     pub previous_mount: Option<core::vehicle::Mount>,
     pub stuck_alarm: bool,

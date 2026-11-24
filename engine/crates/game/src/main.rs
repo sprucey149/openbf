@@ -74,6 +74,10 @@
 //!     --bench-player-cam          bench from the player's eye, not the overview
 //!     --bench-toggle <what>       `shadows` or `soldier-lod`: time that feature off
 //!                                 and on in alternating blocks of the same frames
+//!   --render-icon <out.png> [--assets <dir>] [--size <px>]
+//!                                 headless: the app icon, a clone trooper's
+//!                                 helmet from the bake on a transparent
+//!                                 square (default 1024 px; scripts/pack.py)
 //!   --write-pack <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...
 //!                                 copy this executable to <out> with each
 //!                                 <dir> appended as the archive's <name>/;
@@ -316,6 +320,27 @@ fn main() -> Result<()> {
                 }
             }
             logged(|| run_shell(assets, missions))
+        }
+        "--render-icon" => {
+            let usage = "--render-icon <out.png> [--assets <dir>] [--size <px>]";
+            let out = PathBuf::from(it.next().context(usage)?);
+            let mut assets = PathBuf::from("assets_baked");
+            let mut size = game::icon::ICON_SIZE;
+            while let Some(f) = it.next() {
+                match f.as_str() {
+                    "--assets" => assets = PathBuf::from(it.next().context(usage)?),
+                    "--size" => size = it.next().context(usage)?.parse().context("--size")?,
+                    other => bail!("unknown --render-icon flag: {other}"),
+                }
+            }
+            let rgba = game::icon::render_icon(&assets, size)?;
+            let png = render::encode_png(&rgba, size, size).map_err(|e| anyhow!("png: {e}"))?;
+            if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&out, png).with_context(|| out.display().to_string())?;
+            println!("icon: {}", out.display());
+            Ok(())
         }
         "--write-pack" => {
             // Card PACK (`scripts/pack.py` runs it): copy this executable to

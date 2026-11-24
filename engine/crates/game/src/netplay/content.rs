@@ -30,6 +30,10 @@ pub struct ContentManifest {
     pub games: BTreeSet<String>,
     /// The Kit Fisto and Asajj Ventress addon is installed.
     pub addon_heroes: bool,
+    /// `[ours]` The player's OS and CPU ([`target`]), for the host's log
+    /// only (`netplay::diag`); empty from a build that does not send it.
+    #[serde(default)]
+    pub target: String,
 }
 
 /// FNV-1a 64 over `bytes`.
@@ -51,6 +55,7 @@ impl ContentManifest {
             m.games.insert(game.to_ascii_lowercase());
         }
         m.addon_heroes = crate::dlc::installed(assets_dir);
+        m.target = target();
         m
     }
 
@@ -62,6 +67,7 @@ impl ContentManifest {
             return Self::default();
         };
         let mut out = first.clone();
+        out.target.clear();
         for m in it {
             out.maps.retain(|k| m.maps.contains(k));
             out.games.retain(|g| m.games.contains(g));

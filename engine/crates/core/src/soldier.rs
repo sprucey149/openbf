@@ -126,6 +126,11 @@ pub struct SoldierConstants {
     /// 1.15, BF2's snipers 0.95): the bolt prims' scale (`Unit::bolt_hit`,
     /// issue #41; analysis/re-hitzones.md).
     pub collision_scale: f32,
+    /// The class model's drawn head and torso per posture, set by the game
+    /// layer per model (`game::roster::STANCE_BODY`): the bolt prims stand
+    /// on these and take its height in place of `collision_scale`
+    /// ([`crate::unit::StanceBody`]). `None` for a model not in the table.
+    pub stance_body: Option<crate::unit::StanceBody>,
     /// BF2 grenade release scales the class hand offset by `SkeletonRootScale`
     /// (FUN_00337b80, B2:329765–329795), independently of collision scale.
     pub skeleton_root_scale: f32,
@@ -203,6 +208,7 @@ impl Default for SoldierConstants {
             prone_up_lock: 44.5 / 30.0,
             aim_size: 1.0,
             collision_scale: 1.0,
+            stance_body: None,
             skeleton_root_scale: 1.0,
             collision_damage_immune: false,
             collision_threshold: [10.0, 3.0, 0.0],
@@ -533,6 +539,11 @@ pub struct Soldier {
     /// in it. He stands (or crouches) on his own once there is room. `None`
     /// in every ordinary tick, and then not hashed.
     pub held_low: Option<Stance>,
+    /// The stance a commanded prone change left (`Prone` for a get-up),
+    /// while he is in the stance it went to: his hit volumes follow the
+    /// change's clip ([`crate::unit::Posture::of`]). Cleared by every other
+    /// stance change; hashed only when `Some`.
+    pub prone_from: Option<Stance>,
     /// The previous tick's pad word — the EDGE source for every contextual
     /// button, and (Phase D) for the squad commands `Sim::step` phase 0b reads.
     /// NOT hashed: it is a copy of a pad the input log already determines, so a
@@ -812,6 +823,7 @@ impl Soldier {
             jump_animation_serial: 0,
             platform_vel: None,
             held_low: None,
+            prone_from: None,
             prev_buttons: 0,
         }
     }
@@ -896,6 +908,7 @@ impl Soldier {
     /// (`prone_down_lock` / `prone_up_lock`); crouch <-> stand is instant
     /// (both games).
     fn change_stance(&mut self, next: Stance, c: &SoldierConstants) {
+        let from = self.stance;
         if next == Stance::Prone {
             self.lock_timer = c.prone_down_lock;
             self.lock_hard = true;
@@ -904,6 +917,9 @@ impl Soldier {
             self.lock_hard = true;
         }
         self.set_stance(next);
+        if next == Stance::Prone || from == Stance::Prone {
+            self.prone_from = Some(from);
+        }
     }
 
     fn set_stance(&mut self, s: Stance) {
@@ -924,6 +940,7 @@ impl Soldier {
         }
         self.stance = s;
         self.time_in_stance = 0.0;
+        self.prone_from = None;
         if !s.knocked() {
             self.knock_rules = KNOCK_RULES;
         }
@@ -1285,6 +1302,10 @@ impl Soldier {
             eat(b"HELD_LOW");
             eat(&[low as u8]);
         }
+        if let Some(from) = self.prone_from {
+            eat(b"PRONE_FROM");
+            eat(&[from as u8]);
+        }
     }
 
     /// Issue #182 B1: what a stance change this tick may have to undo.
@@ -1295,6 +1316,7 @@ impl Soldier {
             stand_age: self.stand_age,
             lock_timer: self.lock_timer,
             lock_hard: self.lock_hard,
+            prone_from: self.prone_from,
         }
     }
 
@@ -1312,6 +1334,7 @@ impl Soldier {
             self.stand_age = before.stand_age + dt;
             self.lock_timer = (before.lock_timer - dt).fmax(0.0);
             self.lock_hard = before.lock_hard && self.lock_timer > 0.0;
+            self.prone_from = before.prone_from;
         } else {
             self.set_stance(low);
         }
@@ -1335,6 +1358,7 @@ pub struct StanceSnap {
     pub stand_age: f32,
     pub lock_timer: f32,
     pub lock_hard: bool,
+    pub prone_from: Option<Stance>,
 }
 
 mod air;

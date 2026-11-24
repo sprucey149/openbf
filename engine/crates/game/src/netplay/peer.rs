@@ -259,6 +259,18 @@ pub enum Notice {
         slot: u8,
         reason: LeaveReason,
     },
+    /// The host: nothing heard from guest `slot` for 1.5 s (`on`), or heard
+    /// again. For the log (`netplay::diag`).
+    GuestTrouble {
+        slot: u8,
+        on: bool,
+    },
+    /// A guest: nothing heard from the host for 1.5 s, or heard again.
+    HostTrouble(bool),
+    /// The host: guest `slot` reported `Loaded` for the round loading.
+    GuestLoaded {
+        slot: u8,
+    },
     /// A guest's copy builds a different round ("plays differently"):
     /// its static digest, or (`start`) its tick-0 `Sim::hash` with equal
     /// static digests.
@@ -816,7 +828,10 @@ impl Peer {
                 round_id,
                 static_digest,
                 hash0,
-            } if round_id == self.round_id => self.check_digest(slot, static_digest, hash0, out),
+            } if round_id == self.round_id => {
+                out.push(Notice::GuestLoaded { slot });
+                self.check_digest(slot, static_digest, hash0, out);
+            }
             NetEvent::AllLoaded { round_id } if round_id == self.round_id => {
                 self.all_loaded = true;
                 self.maybe_start(link);
@@ -980,7 +995,8 @@ impl Peer {
                     out.push(Notice::PeerReady { slot });
                 }
             }
-            NetEvent::Refused { .. } | NetEvent::Trouble { .. } => {}
+            NetEvent::Trouble { slot, on } => out.push(Notice::GuestTrouble { slot, on }),
+            NetEvent::Refused { .. } => {}
         }
     }
 
@@ -1126,7 +1142,7 @@ impl Peer {
                 None => out.push(Notice::Message(b)),
             },
             ClientEvent::Chat { slot, text } => out.push(Notice::Chat { slot, text }),
-            ClientEvent::Trouble(_) => {}
+            ClientEvent::Trouble(on) => out.push(Notice::HostTrouble(on)),
             ClientEvent::Disconnected(r) => {
                 self.mode = Mode::Disconnected;
                 out.push(Notice::Disconnected(r));
@@ -2047,7 +2063,13 @@ mod tests {
                 &mut out,
             );
         }
-        assert!(out.is_empty(), "nothing to compare with yet");
+        assert!(
+            matches!(
+                out.as_slice(),
+                [Notice::GuestLoaded { slot: 1 }, Notice::GuestLoaded { slot: 2 }]
+            ),
+            "only the log's notices: nothing to compare with yet: {out:?}"
+        );
         (peer.static_digest, peer.hash0) = (Some(7), Some(0));
         peer.check_early_digests();
         let n = peer.poll(&mut core);

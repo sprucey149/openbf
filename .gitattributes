@@ -7,3 +7,6 @@
 engine/crates/** text=auto eol=lf
 engine/Cargo.toml text eol=lf
 engine/Cargo.lock text eol=lf
+# The Linux application entry's template: a desktop session reads it as LF text. No icon art is
+# committed: scripts/pack.py renders it from the player's own bake (docs/branding.md).
+branding/linux/openbf.desktop.template text eol=lf

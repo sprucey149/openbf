@@ -366,6 +366,11 @@ pub struct WeaponClass {
     pub fire_sound: Option<String>,
     pub fire_loop_sound: Option<String>,
     pub muzzle_effect: Option<String>,
+    /// `ChargeUpEffect`: the particle effect a charge weapon shows at its
+    /// fire point while the trigger is held, brightening with the charge
+    /// (BF2 `com_sfx_chargeup`, BF1 `chargeup`; `game::fx` draws it).
+    /// Presentation only: the sim never reads it.
+    pub charge_up_effect: Option<String>,
     pub reload_sound: Option<String>,
     pub empty_sound: Option<String>,
     pub change_sound: Option<String>,
@@ -579,6 +584,7 @@ impl Default for WeaponClass {
             fire_sound: None,
             fire_loop_sound: None,
             muzzle_effect: None,
+            charge_up_effect: None,
             reload_sound: None,
             empty_sound: None,
             change_sound: None,
@@ -965,11 +971,13 @@ impl WeaponState {
     }
 
     /// A charge weapon's charge while the trigger is held, 0..1; `None` when it
-    /// is not charging (BF2 weapon state 3, `FUN_0032ee30`; the HUD reads it).
+    /// is not charging (BF2 weapon state 3, `FUN_0032ee30`; an overheated
+    /// weapon is in state 5 instead). The HUD and the charge glow read it.
     pub fn charging(&self, c: &WeaponClass) -> Option<f32> {
         let holding = c.max_pressed_time > 0.0
             && self.state == FireState::Idle
             && self.active
+            && !self.overheated
             && !self.reloading()
             && self.fire_cmd > 0;
         holding.then(|| (self.refire_accum / c.max_pressed_time).clamp(0.0, 1.0))

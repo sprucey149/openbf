@@ -151,14 +151,15 @@ fn fire_on_it(s: &mut Scene, secs: f32) -> (Vec<f32>, Option<TurretEnd>) {
 }
 
 /// The maintainer's report, as played: the reticle dead on the turret, a
-/// rifle's bolts. 80 at building scale 0.1 = 8 a bolt on its 50 health.
+/// rifle's bolts. 80 at building scale 0.1 = 8 a bolt on its 30 health
+/// (ours, `normalize::SHARED_HEALTH`; the disc's 50 took 7).
 #[test]
 fn a_rifle_on_the_reticle_destroys_an_enemy_auto_turret() {
     let Some(mut s) = scene("rep_inf_ep3_rifleman", 15.0) else {
         return;
     };
     let (seen, end) = fire_on_it(&mut s, 10.0);
-    let low = seen.iter().copied().fold(50.0f32, f32::min);
+    let low = seen.iter().copied().fold(f32::MAX, f32::min);
     assert_eq!(end, Some(TurretEnd::Destroyed), "health only got to {low}");
 }
 
@@ -184,7 +185,7 @@ fn crouched_on_the_reticle_a_rifle_still_destroys_it() {
         };
         s.w.sim.unit_mut(s.me).unwrap().soldier.stance = Stance::Crouch;
         let (seen, end) = fire_on_it(&mut s, 6.0);
-        let low = seen.iter().copied().fold(50.0f32, f32::min);
+        let low = seen.iter().copied().fold(f32::MAX, f32::min);
         assert_eq!(end, Some(TurretEnd::Destroyed), "at {dist} m: {low} left");
     }
 }
@@ -290,7 +291,7 @@ fn a_friends_cutter_mends_a_hurt_one() {
         }
     }
     assert!(best > 10.0, "the cutter did nothing: {best}");
-    assert!(best <= 50.0, "past its MaxHealth: {best}");
+    assert!(best <= 30.0, "past its MaxHealth (ours, 30): {best}");
 }
 
 /// The class sweep: BF2 Hoth's placed self-piloted tripod guns are armed

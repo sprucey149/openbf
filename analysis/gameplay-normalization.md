@@ -17,8 +17,9 @@ and Republic rifles had one x6 step); the award beam rifle keeps its one x6 step
 the head, 840 kills every non-hero up to the 800-health Wookiee, and no body hit kills a
 full-health soldier of 300 or more (natives under 280 health, the Jawa, Ewok, Gungan and
 Geonosian, stay one body hit, accepted). Every other body-hit count is unchanged: trooper 2,
-heavy 2 (560 against 550), Wookiee 3. This is the one place BF2's classes change
-(`normalize::SHARED_RULES`); BF1's rifle meets the same 280 through its row. Weapon values stay the
+heavy 2 (560 against 550), Wookiee 3. BF2's classes change only here
+(`normalize::SHARED_RULES`) and for the deployed auto-turret's health (`normalize::SHARED_HEALTH`, 50 to 30,
+2026-11-23); BF1's rifle meets the same 280 through its row. Weapon values stay the
 same in both games: no per-game exceptions. Tests: `normalization::
 sniper_hits_to_kill_every_kind_of_soldier`, `bf2_classes_change_only_by_ours`.
 
@@ -56,7 +57,8 @@ a map whose manifest says `source_game: "bf1"` (it holds the map's own vehicles,
 props). BF1 classes never inherit from one another, so one definition at a time is exact.
 `ClassDb::disc()` reads the disc's own numbers (tests and the tables below). BF2's class
 files and a BF2 map's `classes.ron` are read as written, except for the rows of
-`normalize::SHARED_RULES` (the sniper rifles, 2026-11-14), which set both games alike.
+`normalize::SHARED_RULES` (the sniper rifles, 2026-11-14) and `normalize::SHARED_HEALTH` (the
+deployed auto-turret, 2026-11-23), which set both games alike.
 
 ## The rules
 

@@ -106,15 +106,25 @@ pub fn weapon_rows(walk: &crate::walk::WalkSim) -> [Option<HudWeapon>; 2] {
 }
 
 /// What one weapon shows on the ring (`analysis/re-heat-hud.md` 2, `FUN_003b3398`):
-/// an unlimited weapon its heat, a counted one its charge while held. The refire
+/// a charge weapon its charge while held, else an unlimited weapon its heat. The refire
 /// bits show reload/firing progress or overheat recovery. Only reads the sim's
 /// state. BF1 maps show BF1's heat on BF2's ring, as PLAN puts BF2's HUD
 /// on every map.
 pub fn gauge_of(c: &core::weapon::WeaponClass, s: &core::weapon::WeaponState) -> HudGauge {
-    let ring = if c.infinite_ammo() {
-        s.heat.clamp(0.0, 1.0)
-    } else {
-        s.charging(c).unwrap_or(0.0)
+    // While the trigger is held the ring shows the charge, whatever the
+    // weapon's ammunition. BF2 sends heat in the charge state only for a
+    // counted weapon, but BF2 has no unlimited charge weapon. BF1's arc
+    // caster is one (RoundsPerClip 0, heat per shot), and BF1's own weapon
+    // panel shows its charge in the charge state before its heat
+    // (`FUN_002c0400` B1:250764-250782: in state 4, BF1's charge state, the
+    // bar is accumulator / MaxPressedTime, `re-weapon-charge.md` §2, before
+    // the heat branch; `re-heat-hud.md` 4). On BF2's ring,
+    // which every map draws, the heat rule alone left that charge unshown.
+    let charge = s.charging(c);
+    let ring = match charge {
+        Some(f) => f,
+        None if c.infinite_ammo() => s.heat.clamp(0.0, 1.0),
+        None => 0.0,
     };
     // FUN_003b3398 B2:409971-409992 publishes remaining progress on
     // the reticle's refire bits. Our reload timer counts down, whereas
@@ -136,6 +146,7 @@ pub fn gauge_of(c: &core::weapon::WeaponClass, s: &core::weapon::WeaponState) ->
         ring,
         refire,
         overheated: s.overheated,
+        charge,
     }
 }
 

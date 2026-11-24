@@ -45,6 +45,7 @@ pub mod heroes;
 pub mod hit_flash;
 pub mod holo;
 pub mod hud_feed;
+pub mod icon;
 pub mod input_icons;
 pub mod kbm;
 pub mod layout;

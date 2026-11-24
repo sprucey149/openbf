@@ -38,6 +38,7 @@ fn manifest(keys: &[&str], addon: bool) -> ContentManifest {
         maps: keys.iter().map(|k| (*k).to_owned()).collect(),
         games: ["bf2".to_owned()].into(),
         addon_heroes: addon,
+        ..ContentManifest::default()
     }
 }
 

@@ -134,3 +134,21 @@ fn a_reloading_charge_weapon_reports_no_charge() {
     assert!(w.reloading());
     assert_eq!(w.charging(&c), None);
 }
+
+/// BF1's arc caster heats per shot: overheated, a held trigger is not a charge
+/// (BF2's state 5, not 3), so the ring keeps showing the heat.
+#[test]
+fn an_overheated_charge_weapon_reports_no_charge() {
+    let c = WeaponClass {
+        max_pressed_time: 1.0,
+        ..WeaponClass::bf1_rifle()
+    };
+    let mut w = WeaponState::with_clips(&c, true, 3);
+    let (mut lcg, mut shots) = (GameLcg::new(1), Vec::new());
+    for _ in 0..15 {
+        w.update(DT30, &c, fi(true, false), &mut lcg, &mut shots);
+    }
+    assert!(w.charging(&c).is_some_and(|f| f > 0.0));
+    w.overheated = true;
+    assert_eq!(w.charging(&c), None);
+}

@@ -2460,6 +2460,93 @@ fn aim_sizes_are_the_baked_models_boxes() {
     }
 }
 
+/// Playtest 2026-11-22 (hit volumes): `STANCE_BODY` row by row against the
+/// baked rigs - BF2's head and torso points in the stand, crouch and prone
+/// rifle idles at frame 4 - and every baked soldier model in it but the
+/// three it names; a class takes its model's row of the game it is drawn
+/// from: the Ewok's head 1.02 m up on BF1, Vader's 1.94 m.
+#[test]
+fn stance_bodies_are_the_baked_models_poses() {
+    let root = game::assets::baked_root();
+    let mut rows = 0;
+    for game in ["bf1", "bf2"] {
+        let side = root.join(format!("side_{game}"));
+        if !side.join("soldiers").is_dir() {
+            eprintln!("SKIP: no {game} side bake");
+            return;
+        }
+        for dir in [side.join("soldiers"), side.join("locals/soldiers")] {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in entries {
+                let name = e.expect("entry").file_name().to_string_lossy().into_owned();
+                let Some(model) = name.strip_suffix(".glb").filter(|m| !m.ends_with(".low")) else {
+                    continue;
+                };
+                let row = game::roster::STANCE_BODY
+                    .iter()
+                    .find(|(g, m, _)| *g == game && *m == model);
+                let asset = game::assets::load_skinned_glb(&dir.join(&name)).expect(model);
+                let points = stance_points(&asset);
+                match (row, points) {
+                    (Some((_, _, want)), Some(got)) => {
+                        rows += 1;
+                        for (w, g) in want.iter().zip(got) {
+                            let g = (g * 1000.0).round() / 1000.0;
+                            assert!(
+                                (glam::Vec3::from_array(*w) - g).abs().max_element() < 1.5e-3,
+                                "{game} {model}: the table's {w:?}, the rig's {g:?}"
+                            );
+                        }
+                    }
+                    (None, Some(got)) => assert!(
+                        model == "geo_inf_acklay",
+                        "{game} {model} has no STANCE_BODY row: {got:?}"
+                    ),
+                    (Some(_), None) => panic!("{game} {model}: a row but no pose"),
+                    (None, None) => assert!(
+                        ["cis_inf_asajjventress", "rep_inf_kitfisto"].contains(&model),
+                        "{game} {model}: no pose"
+                    ),
+                }
+            }
+        }
+    }
+    assert_eq!(rows, game::roster::STANCE_BODY.len());
+    let Some(dir) = classes_dir() else { return };
+    let height = |game: &str, class: &str| {
+        let db = load_classdb_all(&dir, game);
+        let c = ClassRoster::build(&db, class, 0, None).expect(class);
+        c.consts.stance_body.expect(class).head[0].y
+    };
+    assert_eq!(height("bf2", "imp_hero_darthvader"), 1.942);
+    assert_eq!(height("bf2", "rep_inf_ep3_rifleman"), 1.673);
+    assert_eq!(height("bf2", "all_hero_chewbacca"), 1.922);
+    assert_eq!(height("bf1", "all_inf_soldier"), 1.634);
+}
+
+/// BF2's head and torso points (bone_head x (0.035, 0.03, 0), bone_ribcage
+/// x (-0.12, -0.05, 0)) in the stand, crouch and prone rifle idles at frame
+/// 4: [stand head, crouch head, prone head, stand torso, crouch torso].
+fn stance_points(asset: &game::assets::SkinnedAsset) -> Option<[glam::Vec3; 5]> {
+    let sk = &asset.skeleton;
+    let (head, rib) = (sk.index_of("bone_head")?, sk.index_of("bone_ribcage")?);
+    let pose = |stance: &str| {
+        let clip = &asset.clips
+            [game::animator::find_clip(&asset.clips, &format!("human_rifle_{stance}_idle_emote"))?];
+        let pose = clip.sample_frame(sk, 4);
+        let palette = sk.palette(&pose.locals());
+        let at = |b: usize, off: glam::Vec3| (palette[b] * sk.global_bind[b]).transform_point3(off);
+        Some((
+            at(head, glam::Vec3::new(0.035, 0.03, 0.0)),
+            at(rib, glam::Vec3::new(-0.12, -0.05, 0.0)),
+        ))
+    };
+    let (stand, crouch, prone) = (pose("stand")?, pose("crouch")?, pose("prone")?);
+    Some([stand.0, crouch.0, prone.0, stand.1, crouch.1])
+}
+
 /// Card CLSE4 (`analysis/re-soldier-ai.md` 20.3), data-gated: the burst keys
 /// reach the sim's weapon classes from the BAKED class db. BF2 stores them by
 /// hash; its flyer weapons (here a child of `com_weap_veh_fly_chaingun`) and

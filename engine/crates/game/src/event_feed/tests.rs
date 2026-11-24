@@ -1377,6 +1377,43 @@ fn other_humans_get_a_spectator_award_line_in_their_team_colour() {
     );
 }
 
+/// A human who earns a medal while waiting to respawn (no soldier in his
+/// slot) is still announced, by his slot's name and his last team's colour.
+#[test]
+fn a_human_waiting_to_respawn_is_still_announced() {
+    use ui::hud::message_color;
+    let mut s = scene();
+    let guest = s
+        .sim
+        .spawn(&UnitSpec::player_in_slot(1, 0, Vec3::new(44.0, 0.0, 0.0)))
+        .expect("guest");
+    let opening = [0; 9];
+    s.sim.install_slot_medal_career(0, s.me, opening);
+    s.sim.install_slot_medal_career(1, guest, opening);
+    s.feed.set_player_names([(0, "Dawg"), (1, "Kai")]);
+    let mut seen = std::collections::BTreeMap::from([(0u8, opening), (1u8, opening)]);
+    // A frame while Kai has a soldier: his team is remembered.
+    s.feed.note_medals(&s.sim, s.me, 0, &mut seen);
+    assert!(s.feed.take().is_empty());
+    // His medal lands after his soldier left the slot (a late grenade kill).
+    s.sim.score_medal_points(guest, 36);
+    s.sim.players[1] = None;
+    s.feed.note_medals(&s.sim, s.me, 0, &mut seen);
+    let lines: Vec<(String, [u8; 3])> = s
+        .feed
+        .take()
+        .into_iter()
+        .map(|m| (m.text, m.color))
+        .collect();
+    assert!(
+        lines.contains(&("Kai earned War Hero".to_owned(), message_color::ENEMY)),
+        "announced by slot, in his last team's colour: {lines:?}"
+    );
+    assert!(lines
+        .iter()
+        .all(|(t, c)| t.starts_with("Kai earned ") && *c == message_color::ENEMY));
+}
+
 #[test]
 fn a_pilot_flashes_when_their_hull_is_damaged_and_a_gunner_does_not() {
     use core::vehicle::{Mount, SeatKind, VehicleKind, VehicleSpec};

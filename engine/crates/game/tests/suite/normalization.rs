@@ -7,7 +7,7 @@ use core::weapon::{DamageDesc, ExplosionClass, Health, HealthType, OrdnanceClass
 use game::classdb::{fnv1a_lowercase, ClassDb, ClassDef};
 use game::normalize::{
     health_row, is_infantry_damage, vehicles, BF1_SCALE, HEALTH, KEYS, PERSON_DAMAGE,
-    REFERENCE_HEALTH, SHARED_RULES,
+    REFERENCE_HEALTH, SHARED_HEALTH,
 };
 use game::roster::{load_classdb, weapon_from_db, ClassRoster, ClassSrc, FactionRoster};
 use std::path::PathBuf;
@@ -631,8 +631,8 @@ fn hits_to_kill_are_pinned() {
 }
 
 /// BF2 is the reference: none of its classes change but the maintainer's
-/// own rows ([`SHARED_RULES`], the sniper rifles), so no space unit or other weapon
-/// does.
+/// own rows ([`SHARED_RULES`], the sniper rifles; [`SHARED_HEALTH`], the
+/// deployed auto-turret), so no space unit or other weapon does.
 #[test]
 fn bf2_classes_change_only_by_ours() {
     if dir().is_none() {
@@ -645,20 +645,64 @@ fn bf2_classes_change_only_by_ours() {
     let mut changed = Vec::new();
     for name in names {
         if now.get(&name) != disc.get(&name) {
-            assert!(
-                SHARED_RULES.iter().any(|r| pattern_matches(r.class, &name)),
-                "{name} changed"
-            );
+            assert!(game::normalize::shared_class(&name), "{name} changed");
             changed.push(name);
         }
     }
     assert_eq!(
         changed,
         [
+            "com_bldg_inf_autoturret",
             "com_weap_award_sniper_rifle_ord",
             "com_weap_inf_sniper_rifle_ord"
         ]
     );
+}
+
+/// The maintainer's fourth LAN playtest: deployed auto-turrets drop from the
+/// disc's 50 health to [`SHARED_HEALTH`]'s 30, on every BF2 side, while the
+/// space battles' wall and ceiling turrets, and every other class a BF2
+/// map's own class file holds, keep the disc's numbers.
+#[test]
+fn only_deployed_auto_turrets_lose_health() {
+    if dir().is_none() {
+        return;
+    }
+    let (now, disc) = (all_classes("bf2", false), all_classes("bf2", true));
+    for side in SIDES {
+        let class = format!("{side}_bldg_inf_autoturret");
+        assert_eq!(disc.prop_f32(&class, "MaxHealth"), Some(50.0), "{class}");
+        assert_eq!(
+            now.prop_f32(&class, "MaxHealth"),
+            Some(SHARED_HEALTH[0].health),
+            "{class}"
+        );
+    }
+    assert_eq!(SHARED_HEALTH[0].health, 30.0);
+    let root = game::assets::baked_root();
+    let mut space_turrets = 0;
+    for n in [1, 2, 3, 4, 6, 7, 8, 9] {
+        let map = root.join(format!("bf2_spa{n}"));
+        let (mut now, mut disc) = (ClassDb::default(), ClassDb::disc());
+        if now.load_map(&map).unwrap() == 0 {
+            eprintln!("SKIP bf2_spa{n}: no map class bake");
+            continue;
+        }
+        disc.load_map(&map).unwrap();
+        let names = sorted_names(&disc);
+        assert_eq!(names, sorted_names(&now), "bf2_spa{n}");
+        for name in names {
+            assert_eq!(now.get(&name), disc.get(&name), "bf2_spa{n} {name}");
+            let lower = name.to_ascii_lowercase();
+            if lower.contains("turret") && disc.prop_f32(&name, "MaxHealth").is_some() {
+                space_turrets += 1;
+            }
+        }
+    }
+    if root.join("bf2_spa1").is_dir() {
+        assert!(space_turrets > 0, "no space turret class with health found");
+    }
+    eprintln!("space-map turret classes with authored health, unchanged: {space_turrets}");
 }
 
 /// The maintainer 2026-11-14: a sniper's head hit kills any non-hero in one

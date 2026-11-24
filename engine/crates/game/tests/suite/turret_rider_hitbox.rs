@@ -333,9 +333,10 @@ fn build_zone_gunner_is_hit_where_drawn(class: &str) {
         assert_ne!(logged, Struck::Gunner(840.0), "look {dl}: the logged ray");
     }
     if class == "cis_inf_officer" {
-        // Control: without the seat poses his bolt prims stand in the
-        // standing posture's places and his drawn head is over the head
-        // prim, past its 0.17 m radius.
+        // Without the seat poses his bolt prims stand on his model's
+        // standing idle (`STANCE_BODY`, the MagnaGuard's 1.895 m head):
+        // this gunner stands at his gun, so the head prim is near his
+        // drawn head too. The posture lists' 1.65 m head was 0.18 m off.
         s.walk.sim.seated_bodies = None;
         s.look = (face, 0.0);
         for _ in 0..3 {
@@ -345,7 +346,7 @@ fn build_zone_gunner_is_hit_where_drawn(class: &str) {
         let (_, head, _) = drawn(&s);
         let gap = head.distance(head_prim(&s));
         println!("{class} without seat poses: head prim {gap:.3} off the drawn head");
-        assert!(gap > 0.17, "without seat poses the gap is {gap:.3} m");
+        assert!(gap < 0.12, "without seat poses the gap is {gap:.3} m");
     }
 }
 

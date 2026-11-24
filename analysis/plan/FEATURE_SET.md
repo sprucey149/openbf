@@ -44,6 +44,11 @@ and LAN are decisions for later work, not current tasks.
   300 or more; the award beam rifle does 560; every army sniper rifle zooms x2 then x8, the
   beam rifle one x6 step. The Tusken sniper keeps 200 and its own zoom
   ([soldier rulebook](../gameplay-normalization.md)).
+- **Deployed auto-turrets (2026-11-23, ours).** The auto-turret a BF2 soldier deploys has 30
+  health instead of the disc's 50 (`com_bldg_inf_autoturret`, `game::normalize::SHARED_HEALTH`),
+  so a rifle destroys it in 4 bolts instead of 7 and a pistol in 5 instead of 9. A rocket still
+  takes one. Wall and ceiling turrets on space battles and other placed turrets keep their own
+  health. measure: the maintainer's next LAN playtest.
 - **Droidekas** sprint only as a ball, on the shared bar, and the ball jump spends that bar too.
 
 ### Movement & feel
