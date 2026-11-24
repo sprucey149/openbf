@@ -562,18 +562,55 @@ pub struct Meta {
     pub env: Vec<(String, String)>,
 }
 
+/// The working tree's commit and whether it differs, asked of `git` once per
+/// process. OURS: the console subsystem child gets no window on Windows and
+/// the answer is cached, so neither a console flash nor the two spawns land
+/// on every battle load.
+struct Checkout {
+    commit: String,
+    dirty: bool,
+}
+
+static CHECKOUT: std::sync::OnceLock<Checkout> = std::sync::OnceLock::new();
+
+fn git(args: &[&str]) -> Option<String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+}
+
+fn checkout() -> &'static Checkout {
+    CHECKOUT.get_or_init(|| Checkout {
+        commit: git(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into()),
+        dirty: git(&["status", "--porcelain", "-uno"]).is_some_and(|s| !s.is_empty()),
+    })
+}
+
+/// Asks `git` on a background thread so the first battle's snapshot finds
+/// the answer ready.
+pub fn warm_checkout() {
+    let _ = std::thread::Builder::new()
+        .name("blackbox-git".into())
+        .spawn(|| {
+            checkout();
+        });
+}
+
 impl Meta {
     /// The battle's own fields, plus the commit, the build time and the
     /// environment read from the process.
     pub fn for_run(map: &str, mode: &str, source_game: &str, seed: u32, difficulty: &str) -> Meta {
-        let git = |args: &[&str]| {
-            std::process::Command::new("git")
-                .args(args)
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-        };
         // The game's own switches; the loop launcher's variables are not.
         const LAUNCHER: [&str; 5] = [
             "OPENBF_JOB",
@@ -594,8 +631,8 @@ impl Meta {
             difficulty: difficulty.to_owned(),
             mission: String::new(),
             player_team: 0,
-            commit: git(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into()),
-            dirty: git(&["status", "--porcelain", "-uno"]).is_some_and(|s| !s.is_empty()),
+            commit: checkout().commit.clone(),
+            dirty: checkout().dirty,
             build_commit: env!("OPENBF_BUILD_COMMIT").to_owned(),
             build_dirty: env!("OPENBF_BUILD_DIRTY") == "1",
             build_time: std::env::current_exe()
