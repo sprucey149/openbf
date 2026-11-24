@@ -76,8 +76,8 @@ fn humans_slot_cheats_reach_only_their_own_slot() {
         s.cheats,
         "an unknown slot reads the session's"
     );
-    assert_eq!(s.ammo_cheats(p0.index as usize), (false, false));
-    assert_eq!(s.ammo_cheats(p1.index as usize), (true, false));
+    assert_eq!(s.ammo_cheats(p0.index as usize), (false, false, false));
+    assert_eq!(s.ammo_cheats(p1.index as usize), (true, false, false));
     s.kill_environment(p0, DeathCause::Water);
     s.kill_environment(p1, DeathCause::Water);
     assert!(s.unit(p0).is_none(), "slot 0 has no cheat");

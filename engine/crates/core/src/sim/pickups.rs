@@ -262,7 +262,7 @@ impl Sim {
                 continue;
             }
             // Both ammo cheats: the use was never drawn, so nothing to give back.
-            let (infinite, no_reload) = self.ammo_cheats(i);
+            let (infinite, no_reload, _no_cooldown) = self.ammo_cheats(i);
             let u = &mut self.units[i];
             let wc = &self.weapon_classes[class];
             if wc.infinite_ammo() || (infinite && no_reload) {

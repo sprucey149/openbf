@@ -410,6 +410,7 @@ fn an_eased_hunt_bot_fires_a_weapon_that_needs_no_aim_less_often() {
             blocked: false,
             infinite_ammo: true,
             no_reload: true,
+            no_cooldown: false,
             ai_dispersion: None,
         };
         for _ in 0..90 {

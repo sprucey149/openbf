@@ -47,12 +47,13 @@ impl Sim {
             && u.soldier.energy < cost
             && !self.cheats_of(u).infinite_stamina
             && self.pressed_now(i, button);
+        let no_cooldown = self.ammo_cheats(i).2;
         let u = &mut self.units[i];
         let state = match held_slot {
             Some(k) => &mut u.held[k].state,
             None => &mut u.weapon,
         };
-        if state.repair_tick(wc, held && target.is_some(), blocked, dt) {
+        if state.repair_tick(wc, held && target.is_some(), blocked, dt, no_cooldown) {
             if let Some(target) = target {
                 self.fire_repair(i, class, target);
             }

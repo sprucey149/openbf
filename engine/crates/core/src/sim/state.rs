@@ -55,6 +55,13 @@ pub struct Cheats {
     /// `[ours]` The clip never empties: shots draw from the reserve, then
     /// from the clip, with no reload. With `infinite_ammo` nothing is drawn.
     pub no_reload: bool,
+    /// `[ours]` No firing delay: every gun fires at its fastest cadence — the
+    /// refire period (`ShotDelay`), the first-salvo wind-up (`InitialSalvoDelay`),
+    /// the between-salvo gap (`SalvoDelay`) and a chaingun's spin-up all resolve
+    /// instantly. Snipers and shotguns lose their long cooldown. Player units
+    /// only, like the ammo cheats. `replace:` the PS2 has no such cheat; this is
+    /// openbf's own, measured by the cadence test in `game/tests/suite/cheat_ammo.rs`.
+    pub no_cooldown: bool,
     /// Sprint energy never drains, and `[ours]` neither does a jet class's
     /// jet fuel (one cheat for both, 2026-10-28).
     pub infinite_stamina: bool,
@@ -84,11 +91,12 @@ pub struct Cheats {
 
 impl Cheats {
     /// Registry view: (id, label, enabled) in menu order.
-    pub fn entries(&self) -> [(&'static str, &'static str, bool); 10] {
+    pub fn entries(&self) -> [(&'static str, &'static str, bool); 11] {
         [
             ("invincible", "Invincibility (sos)", self.invincible),
             ("ammo", "Infinite ammo (ammo)", self.infinite_ammo),
             ("clip", "No reloading (clip)", self.no_reload),
+            ("cooldown", "No shot cooldown", self.no_cooldown),
             ("stamina", "Infinite stamina (run)", self.infinite_stamina),
             ("classes", "Unlock all classes (all)", self.all_classes),
             ("awards", "Award weapons", self.all_awards),
@@ -120,6 +128,7 @@ impl Cheats {
             "invincible" => self.invincible = !self.invincible,
             "ammo" => self.infinite_ammo = !self.infinite_ammo,
             "clip" => self.no_reload = !self.no_reload,
+            "cooldown" => self.no_cooldown = !self.no_cooldown,
             "stamina" => self.infinite_stamina = !self.infinite_stamina,
             "classes" => self.all_classes = !self.all_classes,
             "awards" => self.all_awards = !self.all_awards,
@@ -1418,12 +1427,17 @@ impl Sim {
         self.weapon_classes.len() - 1
     }
 
-    /// Unit `i`'s (`infinite_ammo`, `no_reload`) cheats: a player's only,
-    /// on foot and in a seat (the PS2 asks for a human controller).
-    pub(crate) fn ammo_cheats(&self, i: usize) -> (bool, bool) {
+    /// Unit `i`'s (`infinite_ammo`, `no_reload`, `no_cooldown`) cheats: a
+    /// player's only, on foot and in a seat (the PS2 asks for a human
+    /// controller).
+    pub(crate) fn ammo_cheats(&self, i: usize) -> (bool, bool, bool) {
         let player = self.units[i].is_player;
         let c = self.unit_cheats(i);
-        (player && c.infinite_ammo, player && c.no_reload)
+        (
+            player && c.infinite_ammo,
+            player && c.no_reload,
+            player && c.no_cooldown,
+        )
     }
 
     /// The cheats player slot `slot` plays under: its own set
