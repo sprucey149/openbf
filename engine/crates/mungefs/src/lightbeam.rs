@@ -7,6 +7,7 @@ pub const LIGHT_BEAM: u32 = 0xe865_1328;
 mod key {
     pub const COLOR: u32 = 0x3d7e_6258;
     pub const FLARE_INTENSITY: u32 = 0x633e_d9d4;
+    pub const BEAM_INTENSITY: u32 = 0x7509_6fab;
     pub const INITIAL_WIDTH: u32 = 0x1414_bf95;
     pub const FINAL_WIDTH: u32 = 0xaa67_1039;
     pub const FADE_LENGTH: u32 = 0x20c3_51fb;
@@ -22,6 +23,7 @@ pub struct LightBeamConfig {
     pub name: String,
     pub color: Option<[u8; 4]>,
     pub flare_intensity: f32,
+    pub beam_intensity: f32,
     pub length: f32,
     pub initial_radius: [f32; 2],
     pub final_radius: [f32; 2],
@@ -38,6 +40,7 @@ impl LightBeamConfig {
             name,
             color: None,
             flare_intensity: 1.0,
+            beam_intensity: 1.0,
             length: 10.0,
             initial_radius: [1.0, 1.0],
             final_radius: [1.0, 1.0],
@@ -81,6 +84,7 @@ impl LightBeamConfig {
                     b.color = Some([byte(0), byte(1), byte(2), alpha]);
                 }
                 key::FLARE_INTENSITY => b.flare_intensity = v(0).unwrap_or(0.0),
+                key::BEAM_INTENSITY => b.beam_intensity = v(0).unwrap_or(0.0).max(0.0),
                 key::INITIAL_WIDTH => {
                     let a = v(0).unwrap_or(0.0);
                     b.initial_radius = if n < 2 {
@@ -169,6 +173,7 @@ mod tests {
             ("LightBeam", LIGHT_BEAM),
             ("Color", key::COLOR),
             ("FlareIntensity", key::FLARE_INTENSITY),
+            ("BeamIntensity", key::BEAM_INTENSITY),
             ("InitialWidth", key::INITIAL_WIDTH),
             ("FinalWidth", key::FINAL_WIDTH),
             ("FadeLength", key::FADE_LENGTH),
@@ -205,7 +210,10 @@ mod tests {
         assert_eq!(b.initial_radius, [0.4, 0.1]);
         assert_eq!(b.final_radius, [0.65, 0.4]);
         assert_eq!((b.fade_factor, b.fade_length), (0.3, 0.8));
-        assert_eq!((b.flare_intensity, b.draw_distance), (0.0, 300.0));
+        assert_eq!(
+            (b.flare_intensity, b.beam_intensity, b.draw_distance),
+            (0.0, 0.5, 300.0)
+        );
         assert_eq!(b.direction, [0.0, 1.0, 0.0]);
     }
 
@@ -226,10 +234,20 @@ mod tests {
         assert_eq!(b.length, 0.0);
         assert_eq!(b.initial_radius, [0.5, 0.5]);
         assert_eq!(b.final_radius, [0.1, 0.1]);
+        assert_eq!(b.beam_intensity, 1.0);
         assert_eq!(
             (b.fade_factor, b.fade_length, b.draw_distance),
             (0.2, 1.0, 0.0)
         );
+        let clamped = parse(
+            "clamped_halo",
+            vec![
+                data(key::COLOR, &[255.0, 255.0, 255.0, 255.0], &[]),
+                data(key::BEAM_INTENSITY, &[-0.25], &[]),
+            ],
+        )
+        .unwrap();
+        assert_eq!(clamped.beam_intensity, 0.0);
     }
 
     #[test]

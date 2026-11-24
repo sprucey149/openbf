@@ -302,15 +302,29 @@ const SPECULAR_DEFAULT: [f32; 4] = [192.0, 160.0, 192.0, 192.0];
 /// pre-`fx__` bake get the zero default: no view-angle term, no speckle.
 /// A missing `SpeckleAmbientColor` is 0, `LightAzimAndElev` (1, 0) (what
 /// every map authors), `SpeckleCoordShift` (10, 10) — fallbacks only.
+/// Whether `water` uses the PC normal-mapped reflective/refractive shader.
+///
+/// PC Battlefront II maps author `NormalMapTextures`, `RefractionColor`,
+/// `ReflectionColor`, and `FresnelMinMax` alongside a fallback `MainTexture`
+/// (with no PS2 `MinDiffuseColor` / `MaxDiffuseColor` LUTs), whereas zero
+/// stock PS2 maps author `NormalMapTextures`.
+pub(crate) fn normal_water_config(
+    water: &manifest::ManifestWater,
+) -> Option<&manifest::ManifestNormalWater> {
+    let cfg = water.config.as_ref().filter(|c| !c.ocean)?;
+    let normal = cfg.normal_maps.as_ref()?;
+    if water.texture.is_none() || (cfg.min_diffuse.is_none() && cfg.max_diffuse.is_none()) {
+        Some(normal)
+    } else {
+        None
+    }
+}
+
 pub fn water_shading(
     lighting: &manifest::ManifestLighting,
     water: Option<&manifest::ManifestWater>,
 ) -> render::WaterShading {
-    if let Some(n) = water
-        .filter(|w| w.texture.is_none())
-        .and_then(|w| w.config.as_ref())
-        .and_then(|c| c.normal_maps.as_ref())
-    {
+    if let Some(n) = water.and_then(normal_water_config) {
         return render::WaterShading {
             specular: n.reflection.map(|v| (v / 255.0).clamp(0.0, 1.0)),
             speckle_axis: Vec3::new(

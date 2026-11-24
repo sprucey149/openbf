@@ -428,7 +428,7 @@ pub(crate) fn continue_pass<'e>(
 /// are shaded (BF2 KAM1 at its spawn: models 9.9 -> 6.8 ms on an Intel iGPU
 /// at 2880x1920). The model and its LOWD never share a pixel, so the order
 /// moves no colour.
-fn draw_key(d: &DrawCmd) -> (u32, u32, u32, u32) {
+pub(crate) fn draw_key(d: &DrawCmd) -> (u32, u32, u32, u32) {
     (
         draw_key_layer(d.layer),
         matches!(d.lod, Some(l) if l.side == crate::draw::LodSide::Lowd) as u32,
@@ -494,18 +494,28 @@ struct DrawSort {
     may_discard: bool,
 }
 
-/// [`runs_key`]'s key: layer, LOWD, whether the draw keeps its mesh order, mesh,
-/// texture, band, may discard.
-type RunKey = (u32, u32, u32, u32, u32, u32, bool);
+/// [`runs_key`]'s key: layer, normal-mapped water flag, LOWD, whether the
+/// draw keeps its mesh order, mesh, texture, band, may discard.
+type RunKey = (u32, bool, u32, u32, u32, u32, u32, bool);
 
 /// One draw's run: [`draw_key`], its place and its band. Draws with equal keys
 /// are one instanced draw call.
 fn runs_key(d: &DrawCmd, s: DrawSort) -> (RunKey, f32) {
     let (layer, lowd, mesh, texture) = draw_key(d);
+    let water_normal = d.layer == DrawLayer::Water && d.light == LightPath::WaterNormal;
     let fixed = u32::from(s.near.is_none());
     let band = s.near.map_or(0, split_band);
     (
-        (layer, lowd, fixed, mesh, texture, band, s.may_discard),
+        (
+            layer,
+            water_normal,
+            lowd,
+            fixed,
+            mesh,
+            texture,
+            band,
+            s.may_discard,
+        ),
         s.near.unwrap_or(0.0),
     )
 }
@@ -559,12 +569,14 @@ fn sort_runs(
 const KEY_FIXED: u32 = 73;
 
 /// A run key and a draw's place as one integer that sorts as the pair does:
-/// layer 6 bits, LOWD, fixed, mesh, texture, band 8 bits, may discard, place.
+/// layer 6 bits, normal-mapped water bit, LOWD, fixed, mesh, texture, band 8 bits,
+/// may discard, place.
 /// The sort is most of a frame's own work and compares these many times over.
 fn packed_key(key: RunKey, place: f32) -> u128 {
-    let (layer, lowd, fixed, mesh, texture, band, may_discard) = key;
+    let (layer, water_normal, lowd, fixed, mesh, texture, band, may_discard) = key;
     debug_assert!(layer < 64);
-    u128::from(layer) << 107
+    u128::from(layer) << 108
+        | u128::from(water_normal) << 107
         | u128::from(lowd) << 106
         | u128::from(fixed) << 105
         | u128::from(mesh) << 73

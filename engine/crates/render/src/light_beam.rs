@@ -60,6 +60,8 @@ pub struct Beam {
     pub view: Option<FarFade>,
     /// The displayed value of a colour byte of 128 (module doc).
     pub gs_rgb: f32,
+    /// PC `BeamIntensity` scalar on view alpha (default 1.0 for PS2 / holograms).
+    pub intensity: f32,
     pub top: f32,
     pub cross: Option<Cross>,
 }
@@ -179,6 +181,9 @@ fn distance_factor(b: &Beam, camera: &Camera, d2: f32) -> Option<f32> {
 
 /// The view's factor `f` and axial fraction `g`, or `None` when culled.
 pub fn view_factor(b: &Beam, camera: &Camera) -> Option<(f32, f32)> {
+    if !b.intensity.is_finite() || b.intensity <= 0.0 {
+        return None;
+    }
     let v = b.base - camera.position;
     let d2 = v.length_squared();
     let distance = distance_factor(b, camera, d2)?;
@@ -191,7 +196,7 @@ pub fn view_factor(b: &Beam, camera: &Camera) -> Option<(f32, f32)> {
     };
     let off_axis = (v - b.axis * ax).length() - camera.near;
     let g = ax / if b.r0 * b.r0 < d2 { d2.sqrt() } else { b.r0 };
-    let mut f = (1.0 - g * g) * distance;
+    let mut f = (1.0 - g * g) * distance * b.intensity;
     if off_axis < 0.0 {
         f = 0.0;
     } else if off_axis < r_eye {
@@ -285,6 +290,9 @@ pub fn vertices(b: &Beam, rgba: [u8; 4], camera: &Camera) -> Vec<GrassVertex> {
 }
 
 pub fn glow_vertices(b: &Beam, rgba: [u8; 4], camera: &Camera) -> Vec<GrassVertex> {
+    if !b.intensity.is_finite() || b.intensity <= 0.0 {
+        return Vec::new();
+    }
     let eye = camera.position;
     let fwd = camera.forward();
     let inner = b.r1;
@@ -305,9 +313,13 @@ pub fn glow_vertices(b: &Beam, rgba: [u8; 4], camera: &Camera) -> Vec<GrassVerte
         }
         f *= (gap - inner) / (outer - inner);
     }
+    f *= b.intensity;
     let half = |v: u8| f32::from((u16::from(v) + 1) >> 1);
     let rgb = [rgba[0], rgba[1], rgba[2]].map(|c| half(c) / 128.0 * b.gs_rgb);
     let centre_alpha = (f32::from(rgba[3]) * f + 0.5).clamp(0.0, 255.0) as u8;
+    if centre_alpha == 0 {
+        return Vec::new();
+    }
     let ring_alpha = (f32::from(centre_alpha) * b.top) as u8;
     let right = camera.right();
     let up = right.cross(fwd).normalize_or_zero();
@@ -354,6 +366,7 @@ mod tests {
             visible: 200.0,
             view: None,
             gs_rgb: 1.0,
+            intensity: 1.0,
             top: TOP_ALPHA,
             cross: None,
         }
@@ -469,6 +482,7 @@ mod tests {
             visible: 300.0,
             view: None,
             gs_rgb: 1.0,
+            intensity: 1.0,
             top: 0.3,
             cross: Some(Cross {
                 x: Vec3::X,
@@ -744,5 +758,43 @@ mod tests {
         for far in [f32::INFINITY, f32::NAN, 0.0] {
             assert!(vertices(&b, [255; 4], &Camera { far, ..camera }).is_empty());
         }
+    }
+
+    #[test]
+    fn beam_intensity_scales_both_beam_and_glow_alpha_and_drops_zero() {
+        let cam = Camera::default();
+        let dim_beam = Beam {
+            intensity: 0.05,
+            ..post()
+        };
+        let v = vertices(&dim_beam, [255, 253, 209, 255], &cam);
+        let peak = v.iter().map(|p| p.color[3]).fold(0.0, f32::max);
+        // 255 * 0.05 * 0.98 ≈ 12 -> half(12) = 6 -> 6 / 128.0
+        assert!(peak > 0.0 && peak <= 7.0 / 128.0, "peak={peak}");
+        assert!(vertices(
+            &Beam {
+                intensity: 0.0,
+                ..post()
+            },
+            [255; 4],
+            &cam,
+        )
+        .is_empty());
+
+        let dim_glow = Beam {
+            intensity: 0.05,
+            ..glow()
+        };
+        let gv = vertices(&dim_glow, [255, 253, 209, 255], &cam);
+        assert_eq!(gv[2].color[3], 7.0 / 128.0);
+        assert!(vertices(
+            &Beam {
+                intensity: 0.0,
+                ..glow()
+            },
+            [255; 4],
+            &cam,
+        )
+        .is_empty());
     }
 }

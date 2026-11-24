@@ -9,13 +9,10 @@ use crate::mods_worker::DiscoveredModState;
 use crate::paths::open_folder;
 use crate::ui::{
     bold_font, draw_notice_box, extension_badge, extension_toggle, flat_button, regular_font,
-    LauncherApp, BG_MAIN, BG_SIDEBAR, BORDER_SIDEBAR, BTN_BORDER, DOT_BUILDING, DOT_MISSING,
-    DOT_READY, INPUT_BORDER, TEXT_MUTED, TEXT_PRIMARY,
+    LauncherApp, BG_MAIN, BG_SIDEBAR, DOT_BUILDING, DOT_MISSING, DOT_READY, INPUT_BORDER,
+    TEXT_MUTED, TEXT_PRIMARY,
 };
-use egui::{
-    Align, Color32, CornerRadius, Frame, Layout, Margin, Pos2, Rect, Sense, Stroke, StrokeKind,
-    Vec2,
-};
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Pos2, Rect, Sense, Stroke, Vec2};
 use extensions::mods::{resolve_content_mods, DiscoveredMod, ModCacheStatus};
 use extensions::{ExtensionManifest, ExtensionOrigin, OPENBF_VR_ID};
 use std::collections::BTreeSet;
@@ -154,23 +151,11 @@ impl LauncherApp {
 
     pub(crate) fn draw_mods_page(&mut self, ui: &mut egui::Ui) {
         let mods_dir = self.paths.mods_dir();
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Mods")
-                    .font(bold_font(17.0))
-                    .color(TEXT_PRIMARY),
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if flat_button(ui, "Refresh", Vec2::new(72.0, 24.0), true) {
-                    self.refresh_fs_state();
-                }
-                if flat_button(ui, "Open Mods Folder", Vec2::new(124.0, 24.0), true) {
-                    if let Err(e) = open_folder(&mods_dir) {
-                        self.show_toast(format!("Could not open mods folder: {e}"));
-                    }
-                }
-            });
-        });
+        ui.label(
+            egui::RichText::new("Mods")
+                .font(bold_font(17.0))
+                .color(TEXT_PRIMARY),
+        );
         ui.add_space(12.0);
 
         let catalog = self.extension_catalog.clone();
@@ -183,7 +168,8 @@ impl LauncherApp {
             snap.mods.values().map(|s| s.discovered.clone()).collect();
         let content_resolution = resolve_content_mods(&discovered_vec, &self.extension_profile);
 
-        let scroll_h = (ui.available_height() - 54.0).max(96.0);
+        let footer_h = 44.0;
+        let scroll_h = (ui.available_height() - footer_h).max(96.0);
         let width = ui.available_width();
         egui::ScrollArea::vertical()
             .id_salt("mods_list")
@@ -259,10 +245,7 @@ impl LauncherApp {
                                 Color32::from_rgb(0xff, 0xfb, 0xeb),
                                 DOT_BUILDING,
                                 TEXT_PRIMARY,
-                                &format!(
-                                    "Override priority active (higher in list wins): {}",
-                                    summary.join("; ")
-                                ),
+                                &format!("Override conflicts: {}", summary.join("; ")),
                             );
                         }
                     }
@@ -279,42 +262,6 @@ impl LauncherApp {
                     }
                 }
 
-                // Engine Extensions section (capability-based, not user-ordered).
-                ui.label(
-                    egui::RichText::new("Engine Extensions")
-                        .font(bold_font(12.5))
-                        .color(TEXT_MUTED),
-                );
-                if catalog.is_empty() {
-                    ui.label(
-                        egui::RichText::new("No bundled engine extensions found.")
-                            .font(regular_font(12.0))
-                            .color(TEXT_MUTED),
-                    );
-                } else {
-                    for manifest in &catalog {
-                        if let Some(next_enabled) = self.draw_extension_card(ui, manifest) {
-                            self.set_extension_enabled(&manifest.id, next_enabled);
-                        }
-                    }
-                }
-
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Content Mods")
-                            .font(bold_font(12.5))
-                            .color(TEXT_MUTED),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new("Higher in list = higher override priority")
-                                .font(regular_font(11.0))
-                                .color(TEXT_MUTED),
-                        );
-                    });
-                });
-
                 let ordered_ids: Vec<String> = self
                     .extension_profile
                     .ordered_visible(&snap.folder_ids)
@@ -322,18 +269,7 @@ impl LauncherApp {
                     .map(str::to_owned)
                     .collect();
 
-                if ordered_ids.is_empty() {
-                    draw_notice_box(
-                        ui,
-                        BG_SIDEBAR,
-                        INPUT_BORDER,
-                        TEXT_MUTED,
-                        &format!(
-                            "No legacy mods found in {}. Copy a Battlefront II addon folder (such as ABR/) into mods/ and click Refresh.",
-                            mods_dir.display()
-                        ),
-                    );
-                } else {
+                if !ordered_ids.is_empty() {
                     let conflict_ids: BTreeSet<String> = content_resolution
                         .as_ref()
                         .map(|p| {
@@ -360,7 +296,42 @@ impl LauncherApp {
                         }
                     }
                 }
+
+                for manifest in &catalog {
+                    if let Some(next_enabled) = self.draw_extension_card(ui, manifest) {
+                        self.set_extension_enabled(&manifest.id, next_enabled);
+                    }
+                }
+
+                if ordered_ids.is_empty() {
+                    draw_notice_box(
+                        ui,
+                        BG_SIDEBAR,
+                        INPUT_BORDER,
+                        TEXT_MUTED,
+                        &format!(
+                            "No legacy mods found in {}. Copy a Battlefront II addon folder (such as ABR/) into mods/ and click Refresh.",
+                            mods_dir.display()
+                        ),
+                    );
+                }
             });
+
+        // Bottom-left action controls opposite the bottom-right BF1/BF2 status indicators.
+        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if flat_button(ui, "Open Mods Folder", Vec2::new(124.0, 26.0), true) {
+                    if let Err(e) = open_folder(&mods_dir) {
+                        self.show_toast(format!("Could not open mods folder: {e}"));
+                    }
+                }
+                if flat_button(ui, "Refresh", Vec2::new(72.0, 26.0), true) {
+                    self.refresh_fs_state();
+                }
+            });
+        });
     }
 
     fn draw_content_mod_card(
@@ -403,15 +374,6 @@ impl LauncherApp {
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 5.0);
 
                 ui.horizontal(|ui| {
-                    extension_badge(ui, &format!("#{}", idx + 1), true);
-
-                    if small_order_button(ui, "^", idx > 0) {
-                        self.move_mod_up(&info.id);
-                    }
-                    if small_order_button(ui, "v", idx + 1 < total) {
-                        self.move_mod_down(&info.id);
-                    }
-
                     let header_resp = ui
                         .scope_builder(
                             egui::UiBuilder::new()
@@ -449,6 +411,20 @@ impl LauncherApp {
                         if extension_toggle(ui, &info.id, enabled, playable) {
                             self.set_content_mod_enabled(&info.id, !enabled);
                         }
+                        if order_arrow_button(ui, false, idx + 1 < total) {
+                            self.move_mod_down(&info.id);
+                        }
+                        if order_arrow_button(ui, true, idx > 0) {
+                            self.move_mod_up(&info.id);
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("#{}", idx + 1))
+                                    .font(bold_font(12.0))
+                                    .color(TEXT_MUTED),
+                            )
+                            .selectable(false),
+                        );
                         let (status_text, status_color) =
                             content_status_badge(playable, enabled, state);
                         ui.label(
@@ -832,29 +808,27 @@ fn content_status_badge(
     }
 }
 
-fn small_order_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
+fn order_arrow_button(ui: &mut egui::Ui, up: bool, enabled: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(18.0, 22.0), Sense::click());
     let hovered = enabled && resp.hovered();
-    let bg = if !enabled {
-        BG_SIDEBAR
+    let color = if !enabled {
+        Color32::from_rgb(0xcc, 0xcc, 0xcc)
     } else if hovered {
-        Color32::from_rgb(0xea, 0xea, 0xe7)
+        TEXT_PRIMARY
     } else {
-        BG_MAIN
+        Color32::from_rgb(0x7a, 0x7a, 0x7a)
     };
-    ui.painter().rect(
-        rect,
-        CornerRadius::ZERO,
-        bg,
-        Stroke::new(1.0, if enabled { BTN_BORDER } else { BORDER_SIDEBAR }),
-        StrokeKind::Inside,
+    let c = rect.center();
+    let tip_y = if up { c.y - 2.5 } else { c.y + 2.5 };
+    let base_y = if up { c.y + 2.0 } else { c.y - 2.0 };
+    let stroke = Stroke::new(1.6, color);
+    ui.painter().line_segment(
+        [Pos2::new(c.x - 4.0, base_y), Pos2::new(c.x, tip_y)],
+        stroke,
     );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        regular_font(11.0),
-        if enabled { TEXT_PRIMARY } else { TEXT_MUTED },
+    ui.painter().line_segment(
+        [Pos2::new(c.x, tip_y), Pos2::new(c.x + 4.0, base_y)],
+        stroke,
     );
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -869,9 +843,12 @@ mod tests {
     use crate::ui::{Page, WINDOW_HEIGHT, WINDOW_WIDTH};
     use egui::{Pos2, Rect, Vec2};
 
-    fn collect_texts(shape: &egui::Shape, out: &mut Vec<String>) {
+    fn collect_texts(shape: &egui::Shape, out: &mut Vec<(String, Rect)>) {
         match shape {
-            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+            egui::Shape::Text(t) => out.push((
+                t.galley.text().to_owned(),
+                Rect::from_min_size(t.pos, t.galley.size()),
+            )),
             egui::Shape::Vec(items) => {
                 for s in items {
                     collect_texts(s, out);
@@ -928,11 +905,44 @@ mod tests {
         for clipped in &out.shapes {
             collect_texts(&clipped.shape, &mut rendered);
         }
-        assert!(rendered.iter().any(|t| t == "Open Mods Folder"));
-        assert!(rendered.iter().any(|t| t == "Refresh"));
-        assert!(!rendered.iter().any(|t| t.contains("Import Mod")));
-        assert!(rendered.iter().any(|t| t == "AlphaMod"));
-        assert!(rendered.iter().any(|t| t == "BetaMod"));
+        let open_rect = rendered
+            .iter()
+            .find(|(t, _)| t == "Open Mods Folder")
+            .expect("Open Mods Folder")
+            .1;
+        let refresh_rect = rendered
+            .iter()
+            .find(|(t, _)| t == "Refresh")
+            .expect("Refresh")
+            .1;
+        let bf2_rect = rendered
+            .iter()
+            .find(|(t, _)| t == "Battlefront II")
+            .expect("Battlefront II")
+            .1;
+        // Footer buttons sit at the bottom-left opposite the bottom-right status indicators.
+        assert!(open_rect.center().y > WINDOW_HEIGHT - 80.0);
+        assert!(refresh_rect.center().y > WINDOW_HEIGHT - 80.0);
+        assert!(open_rect.right() < bf2_rect.left());
+        assert!(refresh_rect.right() < bf2_rect.left());
+
+        assert!(!rendered.iter().any(|(t, _)| t.contains("Import Mod")));
+        assert!(!rendered.iter().any(|(t, _)| t == "Engine Extensions"));
+        assert!(!rendered.iter().any(|(t, _)| t == "Content Mods"));
+        assert!(!rendered.iter().any(|(t, _)| t.contains("Higher in list")));
+
+        let alpha_rect = rendered
+            .iter()
+            .find(|(t, _)| t == "AlphaMod")
+            .expect("AlphaMod")
+            .1;
+        let order1_rect = rendered.iter().find(|(t, _)| t == "#1").expect("#1").1;
+        assert!(
+            order1_rect.left() > alpha_rect.right(),
+            "expected #1 right of title: {order1_rect:?} vs {alpha_rect:?}"
+        );
+        assert!(rendered.iter().any(|(t, _)| t == "BetaMod"));
+        assert!(rendered.iter().any(|(t, _)| t == "OpenBF VR"));
 
         // Reorder BetaMod above AlphaMod, toggle BetaMod disabled, verify order persists across restart.
         app.move_mod_up("content.betamod");

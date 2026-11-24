@@ -210,12 +210,10 @@ pub fn decode(d: f32) -> f32 {
 }
 
 /// The CPU twin of the world shader's light sum (`shade_unfogged` /
-/// `gs_lit` in `shader.wgsl`; card LSUM, `analysis/re-kamino-decks.md` §2
-/// `[O]`). It is not compiled from the shader: the GPU referee
-/// `light_path::the_lit_sum_is_made_in_display_units` is what holds the two
-/// together. The PS2's VU1 adds the ambient, the directional lights and the
-/// local lights in GS (display) units, clamps at 255/128, and the GS
-/// multiplies the sum into the texel once.
+/// `vertex_lighting` in `shader.wgsl`; PC D3D9 `normal_shader.xml` and PS2 GS
+/// `MODULATE`). Both PC Direct3D 9 and the PS2 VU1+GS sum lights in display
+/// (sRGB) units and multiply `texel_display * lighting_display` in display
+/// units, clamped at white.
 ///
 /// `texel` is linear; each `terms` entry is a LINEAR light colour (as
 /// [`Lighting`] holds them) and its weight (n.l, d⁴, the hemisphere blend);
@@ -223,7 +221,7 @@ pub fn decode(d: f32) -> f32 {
 /// colour the shader writes.
 pub fn light_sum(texel: f32, terms: &[(f32, f32)], point: f32) -> f32 {
     let sum: f32 = terms.iter().map(|&(c, w)| encode(c) * w).sum::<f32>() + point;
-    texel * decode(sum.clamp(0.0, 255.0 / 128.0))
+    decode((encode(texel.max(0.0)) * sum.clamp(0.0, 255.0 / 128.0)).min(1.0))
 }
 
 /// One directional sun plus a hemisphere ambient, and optional distance fog.
@@ -377,24 +375,26 @@ mod tests {
         let (a, s, nl) = (100.0 / 255.0, 105.0 / 255.0, 0.906);
         let t = decode(0.5);
         let got = light_sum(t, &[(decode(a), 1.0), (decode(s), nl)], 0.0);
-        // A pure power law would make this exact; the sRGB toe leaves 2 %.
+        // Display-unit multiply matches D3D9 shader & GS MODULATE directly.
         let want = 0.5 * (a + s * nl);
         assert!(
-            (encode(got) - want).abs() < 0.01,
+            (encode(got) - want).abs() < 1e-6,
             "{} vs {want}",
             encode(got)
         );
         let linear = t * (decode(a) + decode(s) * nl);
         assert!(got / linear > 1.35, "{got} vs the linear sum {linear}");
-        // One term alone is the product either way.
         let one = light_sum(t, &[(decode(s), 1.0)], 0.0);
-        assert!((one - t * decode(s)).abs() < 1e-6);
+        assert!((encode(one) - 0.5 * s).abs() < 1e-6);
+        assert!(one > t * decode(s));
     }
 
-    /// The VU clamps the sum at 255/128 before the GS multiplies.
+    /// The VU clamps the sum at 255/128 before multiplying in display units and clamping at white.
     #[test]
     fn the_sum_clamps_at_the_gs_maximum() {
-        let over = light_sum(0.25, &[(1.0, 1.0), (1.0, 1.0)], 1.0);
-        assert_eq!(over, 0.25 * decode(255.0 / 128.0));
+        let under = light_sum(decode(0.4), &[(1.0, 1.0), (1.0, 1.0)], 1.0);
+        assert!((under - decode(0.4 * 255.0 / 128.0)).abs() < 1e-6);
+        let over = light_sum(decode(0.6), &[(1.0, 1.0), (1.0, 1.0)], 1.0);
+        assert_eq!(over, 1.0);
     }
 }

@@ -83,10 +83,7 @@ fn overlay_order_keeps_visible_overlay_draws_far_to_near() {
         DrawCmd::overlay(m, t, [1.0; 4], at(-30.0)),
     ];
     let keep = [true, true, true, false];
-    assert_eq!(
-        overlay_order(&draws, &keep, glam::Vec3::ZERO),
-        vec![2, 0]
-    );
+    assert_eq!(overlay_order(&draws, &keep, glam::Vec3::ZERO), vec![2, 0]);
 }
 
 /// Every draw is unculled unless a caller asks, and the ask survives the
@@ -199,15 +196,16 @@ fn a_packed_key_sorts_as_the_key_and_place_do() {
             assert_eq!(total_order(f).cmp(&total_order(g)), f.total_cmp(&g));
         }
     }
-    let keys: [RunKey; 8] = [
-        (0, 0, 0, 0, 0, 0, false),
-        (0, 0, 0, 0, 0, 0, true),
-        (0, 0, 0, 0, 0, 1, false),
-        (0, 0, 0, 0, u32::MAX, 0, false),
-        (0, 0, 0, u32::MAX, 0, 0, false),
-        (0, 0, 1, 0, 0, 0, false),
-        (0, 1, 0, 0, 0, 0, false),
-        (6, 0, 0, 0, 0, 0, false),
+    let keys: [RunKey; 9] = [
+        (0, false, 0, 0, 0, 0, 0, false),
+        (0, false, 0, 0, 0, 0, 0, true),
+        (0, false, 0, 0, 0, 0, 1, false),
+        (0, false, 0, 0, 0, u32::MAX, 0, false),
+        (0, false, 0, 0, u32::MAX, 0, 0, false),
+        (0, false, 0, 1, 0, 0, 0, false),
+        (0, false, 1, 0, 0, 0, 0, false),
+        (5, true, 0, 0, 0, 0, 0, false),
+        (6, false, 0, 0, 0, 0, 0, false),
     ];
     for w in keys.windows(2) {
         assert!(packed_key(w[0], 512.0) < packed_key(w[1], -1.0));

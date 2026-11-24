@@ -1431,6 +1431,7 @@ fn an_effect_set_round_trips_through_ron() {
             name: "Blue_halo".into(),
             color: [50, 177, 219, 255],
             flare_intensity: 0.0,
+            beam_intensity: 1.0,
             length: 1.0,
             initial_radius: [0.4, 0.1],
             final_radius: [0.65, 0.4],
@@ -1444,8 +1445,16 @@ fn an_effect_set_round_trips_through_ron() {
         shields: Vec::new(),
     };
     let text = ron::ser::to_string_pretty(&set, ron::ser::PrettyConfig::default()).unwrap();
+    assert!(!text.contains("beam_intensity"));
     let back: FxSet = ron::from_str(&text).unwrap();
     assert_eq!(back, set);
+
+    let mut dim = set;
+    dim.beams[0].beam_intensity = 0.05;
+    let dim_text = ron::ser::to_string_pretty(&dim, ron::ser::PrettyConfig::default()).unwrap();
+    assert!(dim_text.contains("beam_intensity"));
+    let dim_back: FxSet = ron::from_str(&dim_text).unwrap();
+    assert_eq!(dim_back, dim);
 }
 
 /// The HUD bake (card BHUD): a layout tree with both argument kinds, a leaf

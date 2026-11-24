@@ -73,7 +73,7 @@ struct Globals {
     water_grid_dims: vec2<u32>, water_grid_range: vec2<f32>,
     water_grid_colors: array<vec4<u32>, 16>,
     water_fog_color: vec3<f32>, water_fog_on: f32,
-    water_fog_range: vec2<f32>, _pad_water_fog: vec2<f32>,
+    water_fog_range: vec2<f32>, water_clip_y: f32, water_clip_on: f32,
     // BF1's character ambient, flat, for LIGHT_CHARACTER draws while
     // character_ambient_on is 1 (`render::Lighting::character_ambient`).
     character_ambient: vec3<f32>, character_ambient_on: f32,
@@ -348,14 +348,22 @@ fn bayer4(p: vec2<f32>) -> f32 {
 }
 
 // PS2 detail modulation. The GS multiplies the two texels as stored, i.e. in
-// gamma space; our base texel arrives linearised by the sRGB sampler, so the
-// equivalent linear-space factor is pow(d, 2.2) (gamma 2.2 approximates the
-// sRGB curve). Alpha is untouched — the alpha test must see the base alpha.
-fn detail_factor(uv: vec2<f32>) -> f32 {
+// gamma space; `detail_factor_display` returns the raw `detail.a * 2` multiplier
+// for display-unit shading paths, and `detail_factor` raises it to 2.2 for the
+// linear unlit/glow paths. Alpha is untouched — the alpha test must see the
+// base alpha.
+fn detail_factor_display(uv: vec2<f32>) -> f32 {
     if material.detail.y == 0.0 || material.detail.w > 0.0 {
         return 1.0;
     }
-    let d = textureSample(t_detail, s_color, uv * material.detail.x).a * 2.0;
+    return textureSample(t_detail, s_color, uv * material.detail.x).a * 2.0;
+}
+
+fn detail_factor(uv: vec2<f32>) -> f32 {
+    let d = detail_factor_display(uv);
+    if d == 1.0 {
+        return 1.0;
+    }
     return pow(d, 2.2);
 }
 
@@ -394,6 +402,9 @@ fn fs_main(raw: VsOut) -> @location(0) vec4<f32> {
 fn far_cull(in: VsOut) {
     if !CULLS {
         return;
+    }
+    if globals.water_clip_on > 0.5 && in.world_pos.y < globals.water_clip_y {
+        discard;
     }
     let u = bayer4(in.clip_pos.xy);
     if in.view_dist > mix(in.cull.x, in.cull.y, u)
@@ -575,26 +586,31 @@ fn vertex_lighting(in: VsOut, lights: vec4<u32>) -> vec3<f32> {
     let local = point_sum(in.world_pos, in.world_normal, lights);
     let dynamic_g = sun_g * (1.0 - globals.sun_static)
         + light2_g * (1.0 - globals.light2_static) + local;
-    var lit: vec3<f32>;
+    // Both PC Direct3D 9 (`normal_shader.xml`: `mul r0.xyz, t0, v0`) and PS2
+    // GS hardware (`MODULATE`) sum lights in display (sRGB) units AND
+    // multiply vertex colour / texel in display units.
+    let vcol_g = linear_to_srgb(max(in.color.rgb, vec3<f32>(0.0)));
     switch in.light {
         case LIGHT_IFACE: {
             let sum = (IFACE_AMBIENT + max(dot(n, -globals.iface_dir), 0.0)) * in.color.rgb;
-            lit = gs_lit(vec3<f32>(1.0), sum);
+            return clamp(sum, vec3<f32>(0.0), vec3<f32>(GS_MAX));
         }
         case LIGHT_PRELIT: {
-            lit = gs_lit(in.color.rgb, dynamic_g);
+            return min(vcol_g * clamp(dynamic_g, vec3<f32>(0.0), vec3<f32>(GS_MAX)), vec3<f32>(GS_MAX));
         }
         case LIGHT_PRELIT_ADD: {
-            lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + dynamic_g);
+            return clamp(vcol_g + dynamic_g, vec3<f32>(0.0), vec3<f32>(GS_MAX));
         }
         case LIGHT_VERTEX_LIT: {
-            lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + local);
+            return clamp(vcol_g + local, vec3<f32>(0.0), vec3<f32>(GS_MAX));
         }
         default: {
-            lit = gs_lit(in.color.rgb, ambient_g + sun_g + light2_g + local);
+            return min(
+                vcol_g * clamp(ambient_g + sun_g + light2_g + local, vec3<f32>(0.0), vec3<f32>(GS_MAX)),
+                vec3<f32>(GS_MAX),
+            );
         }
     }
-    return linear_to_srgb(lit);
 }
 
 fn emission_gain(texel_alpha: f32, in: VsOut) -> f32 {
@@ -612,7 +628,10 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
     let base = texel * in.color;
     let detail = detail_factor(uv);
     if vertex_lit_path(in.light) {
-        return vec4<f32>(texel.rgb * detail * srgb_to_linear(in.lighting), base.a);
+        let tex_g = linear_to_srgb(max(texel.rgb, vec3<f32>(0.0)));
+        let d_g = detail_factor_display(uv);
+        let out_g = min(tex_g * d_g * max(in.lighting, vec3<f32>(0.0)), vec3<f32>(1.0));
+        return vec4<f32>(srgb_to_linear(out_g), base.a);
     }
     let tex = texel.rgb * detail;
     var rgb: vec3<f32>;
@@ -638,8 +657,11 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
         }
         default: {
             // LIGHT_TERRAIN: the heightfield's GS vertex byte, 0x80 = 1.0,
-            // reaching 1.94 on BF1; the GS clamps the product at 255.
-            rgb = min(tex * srgb_to_linear(in.color.rgb * (255.0 / 128.0)), vec3<f32>(1.0));
+            // reaching 1.94 on BF1; multiply in display units like PC D3D9
+            // terrain shading and PS2 GS MODULATE, clamping at white.
+            let tex_g = linear_to_srgb(max(texel.rgb, vec3<f32>(0.0)));
+            let d_g = detail_factor_display(uv);
+            rgb = srgb_to_linear(min(tex_g * d_g * (in.color.rgb * (255.0 / 128.0)), vec3<f32>(1.0)));
         }
     }
     if in.light == LIGHT_TERRAIN && material.detail.w > 0.0 {
@@ -651,16 +673,6 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
         }
     }
     return vec4<f32>(rgb, base.a);
-}
-
-// A texel (linear) under a light summed in GS units: the VU clamps the sum
-// at 255/128, the GS multiplies it into the texel. The sum is decoded once
-// and multiplied into the linear texel. The GS's own arithmetic -- the texel
-// in display units, the product clamped at white -- scored worse over the
-// 954 PCSX2 pairs (10.052 against 9.742 mean block error, card LSUM), so the
-// frame buffer's clamp is not modelled here.
-fn gs_lit(texel: vec3<f32>, light: vec3<f32>) -> vec3<f32> {
-    return texel * srgb_to_linear(clamp(light, vec3<f32>(0.0), vec3<f32>(GS_MAX)));
 }
 
 // The PS2's fog (`analysis/re-fog-amount.md` §8, [O]; the curve PROVISIONAL,

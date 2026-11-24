@@ -1342,12 +1342,25 @@ pub struct FxLightning {
     pub child_color: Option<[f32; 4]>,
 }
 
+fn default_beam_intensity() -> f32 {
+    1.0
+}
+
+fn is_default_beam_intensity(v: &f32) -> bool {
+    (*v - 1.0).abs() <= f32::EPSILON
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FxBeam {
     pub hash: u32,
     pub name: String,
     pub color: [u8; 4],
     pub flare_intensity: f32,
+    #[serde(
+        default = "default_beam_intensity",
+        skip_serializing_if = "is_default_beam_intensity"
+    )]
+    pub beam_intensity: f32,
     pub length: f32,
     pub initial_radius: [f32; 2],
     pub final_radius: [f32; 2],

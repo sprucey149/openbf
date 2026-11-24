@@ -87,8 +87,8 @@ mod point_light;
 mod rand;
 mod resources;
 mod shadow;
-mod sun_shadow;
 mod sun_flare;
+mod sun_shadow;
 pub use shadow::ShadowMesh;
 mod sky;
 mod specular;
@@ -96,6 +96,7 @@ mod stars;
 mod terrain_light;
 mod texture;
 mod visor;
+mod water_reflect;
 mod world_scale;
 
 pub use bloom::Bloom;
@@ -239,7 +240,9 @@ struct Globals {
     water_fog_color: [f32; 3],
     water_fog_on: f32,
     water_fog_range: [f32; 2],
-    _pad_water_fog: [f32; 2],
+    /// Horizontal reflection clip plane Y and enable flag (`1.0` during planar reflection pass).
+    water_clip_y: f32,
+    water_clip_on: f32,
     /// [`Lighting::character_ambient`], read by [`LightPath::Character`]
     /// draws when `character_ambient_on` is 1.
     character_ambient: [f32; 3],
@@ -434,6 +437,7 @@ pub struct Renderer {
     bloom: bloom::BloomState,
     particle_blur: particle_blur::ParticleBlur,
     heat_character_mask: wgpu::RenderPipeline,
+    water_reflect: water_reflect::WaterReflectState,
     spec_buf: wgpu::Buffer,
     spec_bg: Option<wgpu::BindGroup>,
     /// The disc's mirrored specular light (`analysis/re-specular-pass.md` §4,

@@ -687,3 +687,35 @@ fn terrain_lod_requires_a_drawable_sheet_and_preserves_world_ranges() {
     let no_far = ranges(lighting.near_scene_range, Some(0.0));
     assert_eq!(terrain_lod_range(true, true, &no_far, Some(&sky)), None);
 }
+
+#[test]
+fn normal_water_config_accepts_pc_maps_with_main_texture_and_rejects_ps2_and_ocean() {
+    let pc_normals = manifest::ManifestNormalWater {
+        textures: vec!["water_normalmap_0".into()],
+        fps: 8.0,
+        reflection: [90.0, 102.0, 130.0, 200.0],
+        refraction: [5.0, 217.0, 255.0, 255.0],
+        fresnel: [0.4, 0.7],
+    };
+    let mut pc_water = water_cfg([0.0; 4], [0.0; 4], false, false);
+    pc_water.texture = Some("nab2_water".into());
+    {
+        let cfg = pc_water.config.as_mut().unwrap();
+        cfg.min_diffuse = None;
+        cfg.max_diffuse = None;
+        cfg.normal_maps = Some(pc_normals.clone());
+    }
+    assert!(normal_water_config(&pc_water).is_some());
+    let shading = water_shading(&manifest::ManifestLighting::default(), Some(&pc_water));
+    assert_eq!(shading.speckle_axis, Vec3::new(0.4, 0.7, 0.0));
+
+    // Ocean never selects normal-mapped flat water.
+    let mut ocean = pc_water.clone();
+    ocean.config.as_mut().unwrap().ocean = true;
+    assert!(normal_water_config(&ocean).is_none());
+
+    // PS2 water with MainTexture + diffuse LUTs does not select it either.
+    let mut ps2_water = water_cfg([10.0; 4], [80.0; 4], false, false);
+    ps2_water.texture = Some("kas2_water".into());
+    assert!(normal_water_config(&ps2_water).is_none());
+}

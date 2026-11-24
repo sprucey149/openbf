@@ -660,6 +660,16 @@ impl Renderer {
             Target::Window { config, .. } => config.usage.contains(wgpu::TextureUsages::COPY_SRC),
             Target::Headless { .. } => true,
         };
+        let water_reflect = crate::water_reflect::WaterReflectState::new(
+            &device,
+            &globals_bgl,
+            &texture_bgl,
+            &palette_bgl,
+            &points_buf,
+            format,
+            display_target,
+            display_format.is_some(),
+        );
         // The DomeInfo frame filter (card BFLT, `filter.rs`): its own
         // full-screen pipeline over a copy of the finished 3D frame.
         let filter = crate::filter::FilterState::new(&device, format, copyable);
@@ -846,6 +856,7 @@ impl Renderer {
             bloom,
             particle_blur,
             heat_character_mask,
+            water_reflect,
             spec_buf,
             spec_bg: None,
             spec_mirror: true,

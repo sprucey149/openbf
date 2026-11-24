@@ -85,6 +85,7 @@ impl Glow {
                     Era::Bf1 => 0.5,
                     Era::Bf2 => 1.0,
                 },
+                intensity: def.beam_intensity,
                 top: def.fade_factor,
                 cross: Some(render::Cross {
                     x: frame.rot.x_axis,

@@ -60,6 +60,9 @@ pub struct Collected {
     /// the bytes it had.
     pub shields: Vec<ShieldConfig>,
     pub write_shields: bool,
+    /// PC maps and addons honor `LightBeam.BeamIntensity` (defaults to 1.0 on
+    /// PS2 so retail PS2 `effects.ron` stays byte-identical).
+    pub is_pc: bool,
     /// Copies of an already-seen NAME whose tree differs from the first.
     pub differing_copies: Vec<u32>,
 }
@@ -71,6 +74,17 @@ impl Collected {
     ) -> Result<Collected> {
         let mut out = Collected::default();
         for c in chunks {
+            if &c.tag == b"tex_" && c.child(b"FMT_").is_some() {
+                out.is_pc = true;
+                continue;
+            }
+            if &c.tag == b"modl"
+                && c.children_tagged(b"segm")
+                    .any(|s| mungefs::model::is_pc_geometry(&s))
+            {
+                out.is_pc = true;
+                continue;
+            }
             if &c.tag != b"fx__" {
                 continue;
             }
@@ -189,7 +203,11 @@ impl Collected {
         let set = FxSet {
             game: game.to_owned(),
             effects: self.effects.iter().map(|e| effect(e, &names)).collect(),
-            beams: self.beams.iter().filter_map(beam).collect(),
+            beams: self
+                .beams
+                .iter()
+                .filter_map(|b| beam(b, self.is_pc))
+                .collect(),
             lightning: self.lightning.iter().map(lightning).collect(),
             shields,
         };
@@ -364,12 +382,13 @@ fn lightning(b: &LightningBoltConfig) -> FxLightning {
     }
 }
 
-fn beam(b: &LightBeamConfig) -> Option<FxBeam> {
+fn beam(b: &LightBeamConfig, is_pc: bool) -> Option<FxBeam> {
     Some(FxBeam {
         hash: mungefs::fnv1a_lowercase(&b.name),
         name: b.name.clone(),
         color: b.color?,
         flare_intensity: b.flare_intensity,
+        beam_intensity: if is_pc { b.beam_intensity } else { 1.0 },
         length: b.length,
         initial_radius: b.initial_radius,
         final_radius: b.final_radius,
@@ -532,7 +551,7 @@ mod tests {
         let mut v = tag.to_vec();
         v.extend((payload.len() as u32).to_le_bytes());
         v.extend(payload);
-        while v.len() % 4 != 0 {
+        while !v.len().is_multiple_of(4) {
             v.push(0);
         }
         v
@@ -608,6 +627,41 @@ mod tests {
         let back: FxSet =
             ron::from_str(&std::fs::read_to_string(dir.join(EFFECTS_FILE)).unwrap()).unwrap();
         assert_eq!(back.shields, set.shields);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pc_chunks_preserve_beam_intensity_while_ps2_chunks_keep_unity() {
+        let mut beam_body = data("LightBeam", &[], &["fountain_halo"]);
+        beam_body.extend(chunk(
+            b"SCOP",
+            &[
+                data("Color", &[255.0, 253.0, 209.0, 255.0], &[]),
+                data("Length", &[6.0], &[]),
+                data("BeamIntensity", &[0.05], &[]),
+            ]
+            .concat(),
+        ));
+        let fx_bytes = chunk(b"fx__", &beam_body);
+        let pc_tex_bytes = chunk(b"tex_", &chunk(b"FMT_", &[]));
+        let ps2_tex_bytes = chunk(b"tex_", &chunk(b"NAME", b"ps2\0"));
+        let fx_chunk = mungefs::chunks(&fx_bytes).next().unwrap().unwrap();
+        let pc_tex = mungefs::chunks(&pc_tex_bytes).next().unwrap().unwrap();
+        let ps2_tex = mungefs::chunks(&ps2_tex_bytes).next().unwrap().unwrap();
+
+        let dir = std::env::temp_dir().join(format!("openbf_fx_beam_int_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let ps2 = Collected::from_chunks([&ps2_tex, &fx_chunk]).unwrap();
+        let ps2_set = ps2.write(&dir, "bf2", &[], &[]).unwrap().unwrap();
+        assert_eq!(ps2_set.beams[0].beam_intensity, 1.0);
+        let ps2_ron = std::fs::read_to_string(dir.join(EFFECTS_FILE)).unwrap();
+        assert!(!ps2_ron.contains("beam_intensity"));
+
+        let pc = Collected::from_chunks([&pc_tex, &fx_chunk]).unwrap();
+        let pc_set = pc.write(&dir, "bf2", &[], &[]).unwrap().unwrap();
+        assert_eq!(pc_set.beams[0].beam_intensity, 0.05);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

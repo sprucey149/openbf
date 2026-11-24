@@ -235,7 +235,8 @@ impl Renderer {
             water_fog_color: water_fog.map_or([0.0; 3], |f| f.color),
             water_fog_on: f32::from(u8::from(water_fog.is_some())),
             water_fog_range: water_fog.map_or([0.0, 1.0], |f| [f.near, f.far]),
-            _pad_water_fog: [0.0; 2],
+            water_clip_y: 0.0,
+            water_clip_on: 0.0,
             character_ambient: self.lighting.character_ambient.unwrap_or([0.0; 3]),
             character_ambient_on: f32::from(u8::from(self.lighting.character_ambient.is_some())),
             iface_dir: iface_dir(camera).to_array(),
@@ -511,6 +512,32 @@ impl Renderer {
             light: draws[i].light as u32,
             ..bytemuck::Zeroable::zeroed()
         }));
+        let water_normal_y = crate::water_reflect::water_normal_height(&self.meshes, draws, &keep);
+        let reflect_setup = water_normal_y.map(|water_y| {
+            let sky_base_instances = instances[..sky_base].to_vec();
+            let setup = self.build_water_reflect_setup(
+                water_y,
+                camera,
+                view_proj,
+                &globals,
+                &self.sky,
+                &sky_base_instances,
+                atmosphere_time,
+                draws,
+                |d| {
+                    !self.cull
+                        || (switched(d)
+                            && (self.meshes.get(d.mesh.0 as usize).is_none() || shows(d)))
+                },
+                &mut instances,
+            );
+            self.queue.write_buffer(
+                &self.water_reflect.reflect_globals_buf,
+                0,
+                bytemuck::bytes_of(&setup.globals),
+            );
+            setup
+        });
         if !instances.is_empty() {
             if instances.len() > self.instance_capacity {
                 self.instance_capacity = instances.len().next_power_of_two();
@@ -749,6 +776,10 @@ impl Renderer {
         if softness {
             self.prepare_softness(width, height);
         }
+        let water_targets = reflect_setup.as_ref().map(|_| {
+            self.water_reflect
+                .prepare_targets(&self.device, self.format, [width, height])
+        });
 
         // Acquire the frame's color view.
         let acquire = std::time::Instant::now();
@@ -799,7 +830,7 @@ impl Renderer {
         // A scaled world draws in its own target, frame and depth, until the
         // upscale below.
         let world_target = ((width, height) != (frame_width, frame_height)
-            || (particle_blur
+            || ((particle_blur || reflect_setup.is_some())
                 && !frame_texture
                     .usage()
                     .contains(wgpu::TextureUsages::COPY_SRC)))
@@ -823,6 +854,22 @@ impl Renderer {
                 ..Default::default()
             })
         });
+        if let (Some(setup), Some(wt)) = (&reflect_setup, &water_targets) {
+            draw_calls += self.draw_water_reflection(
+                &mut encoder,
+                wt,
+                setup,
+                &sky_order,
+                sky_solid_count,
+                draws,
+                clear,
+                camera.position.y,
+                ab.skips("sky"),
+            );
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "water reflection");
+            }
+        }
         {
             // Render pass shape from an earlier wgpu project's main.rs "Main Render Pass".
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -939,7 +986,7 @@ impl Renderer {
             // FarSheet → Spec → Water → Speckle (`draw_key`), the skinned
             // opaque draws between Spec and Water.
             let mut run_start = 0;
-            let mut bound_layer: Option<(DrawLayer, bool)> = None;
+            let mut bound_layer: Option<(DrawLayer, bool, bool)> = None;
             // The base terrain's runs (mesh, instances) for the terrain light
             // pass, which ends this pass once the terrain's layers are down
             // (before the first run past `TerrainLayer`) and resumes it.
@@ -949,6 +996,7 @@ impl Renderer {
             // The GPU timer's section of the runs being drawn (`run_section`).
             let mut section: Option<&'static str> = None;
             let mut water_display_active = false;
+            let mut water_scene_copied = false;
             while run_start <= blend_base {
                 let key = (run_start < blend_base).then(|| draw_key(&draws[order[run_start]]));
                 let at_shadow = Some(run_start) == shadow_before;
@@ -1006,12 +1054,8 @@ impl Renderer {
                     }
                     if water_display_active {
                         drop(pass);
-                        pass = continue_pass(
-                            &mut encoder,
-                            &view,
-                            depth_view,
-                            "after terrain layers",
-                        );
+                        pass =
+                            continue_pass(&mut encoder, &view, depth_view, "after terrain layers");
                         pass.set_bind_group(0, &self.globals_bg, &[]);
                         water_display_active = false;
                     }
@@ -1052,12 +1096,8 @@ impl Renderer {
                         draw_calls +=
                             self.shadows
                                 .draw(&mut encoder, frame_texture, &view, depth_view);
-                        pass = continue_pass(
-                            &mut encoder,
-                            &view,
-                            depth_view,
-                            "after vehicle shadows",
-                        );
+                        pass =
+                            continue_pass(&mut encoder, &view, depth_view, "after vehicle shadows");
                         mark(&mut timer, &mut pass, "vehicle shadows");
                         pass.set_bind_group(0, &self.globals_bg, &[]);
                     }
@@ -1078,16 +1118,34 @@ impl Renderer {
                 }
 
                 let d = &draws[order[run_start]];
+                let is_water_normal =
+                    d.layer == DrawLayer::Water && d.light == LightPath::WaterNormal;
                 let water_display = water_view.is_some()
                     && matches!(
                         d.layer,
                         DrawLayer::TerrainLayer | DrawLayer::Water | DrawLayer::Speckle
                     );
-                if water_display != water_display_active {
+                let need_refract_copy =
+                    is_water_normal && !water_scene_copied && water_targets.is_some();
+                if water_display != water_display_active || need_refract_copy {
                     if let Some(l) = section.take() {
                         mark(&mut timer, &mut pass, l);
                     }
                     drop(pass);
+                    if need_refract_copy {
+                        if let Some(wt) = &water_targets {
+                            encoder.copy_texture_to_texture(
+                                frame_texture.as_image_copy(),
+                                wt.scene_tex.as_image_copy(),
+                                wgpu::Extent3d {
+                                    width,
+                                    height,
+                                    depth_or_array_layers: 1,
+                                },
+                            );
+                        }
+                        water_scene_copied = true;
+                    }
                     pass = continue_pass(
                         &mut encoder,
                         if water_display {
@@ -1135,36 +1193,44 @@ impl Renderer {
                         pass.set_pipeline(&self.spec_pipeline);
                         pass.set_bind_group(2, &self.palette_bg, &[0]);
                         pass.set_bind_group(3, spec_bg, &[]);
-                        bound_layer = Some((DrawLayer::Spec, may_discard));
+                        bound_layer = Some((DrawLayer::Spec, false, may_discard));
                     }
-                } else if bound_layer != Some((d.layer, may_discard)) {
-                    let clean = &self.no_discard;
-                    pass.set_pipeline(match (d.layer, fade) {
-                        (DrawLayer::Water, _) if !may_discard => &clean.water,
-                        (DrawLayer::TerrainLayer, _) if !may_discard => &clean.terrain_layer,
-                        (DrawLayer::Mask, false) if !may_discard => &clean.mask,
-                        (DrawLayer::Mask, true) if !may_discard => &clean.fade_mask,
-                        (DrawLayer::Opaque, false) if !may_discard => &clean.opaque,
-                        (DrawLayer::Opaque, true) if !may_discard => &clean.fade,
-                        // The water pass carries its own fade (see
-                        // `water_pipeline`), so it takes the same pipeline
-                        // either way.
-                        (DrawLayer::Water, _) => &self.water_pipeline,
-                        // Additive, faded in its own entry point like the
-                        // water it lies on (see `speckle_pipeline`).
-                        (DrawLayer::Speckle, _) => &self.speckle_pipeline,
-                        // No fade twin: no sheet is drawn on a fade map.
-                        (DrawLayer::FarSheet, _) => &self.far_sheet_pipeline,
-                        // Folds the fade in its own entry point.
-                        (DrawLayer::TerrainLayer, _) => &self.terrain_layer_pipeline,
-                        (DrawLayer::Spec, _) => unreachable!("bound above"),
-                        (DrawLayer::Overlay, _) => unreachable!("bound in overlay pass"),
-                        (DrawLayer::Mask, false) => &self.mask_pipeline,
-                        (DrawLayer::Mask, true) => &self.fade_mask_pipeline,
-                        (_, false) => &self.pipeline,
-                        (_, true) => &self.fade_pipeline,
-                    });
-                    bound_layer = Some((d.layer, may_discard));
+                } else if bound_layer != Some((d.layer, is_water_normal, may_discard)) {
+                    if is_water_normal {
+                        if let Some(wt) = &water_targets {
+                            pass.set_pipeline(&self.water_reflect.pipeline);
+                            pass.set_bind_group(2, &self.palette_bg, &[0]);
+                            pass.set_bind_group(3, &wt.bg, &[]);
+                        }
+                    } else {
+                        let clean = &self.no_discard;
+                        pass.set_pipeline(match (d.layer, fade) {
+                            (DrawLayer::Water, _) if !may_discard => &clean.water,
+                            (DrawLayer::TerrainLayer, _) if !may_discard => &clean.terrain_layer,
+                            (DrawLayer::Mask, false) if !may_discard => &clean.mask,
+                            (DrawLayer::Mask, true) if !may_discard => &clean.fade_mask,
+                            (DrawLayer::Opaque, false) if !may_discard => &clean.opaque,
+                            (DrawLayer::Opaque, true) if !may_discard => &clean.fade,
+                            // The water pass carries its own fade (see
+                            // `water_pipeline`), so it takes the same pipeline
+                            // either way.
+                            (DrawLayer::Water, _) => &self.water_pipeline,
+                            // Additive, faded in its own entry point like the
+                            // water it lies on (see `speckle_pipeline`).
+                            (DrawLayer::Speckle, _) => &self.speckle_pipeline,
+                            // No fade twin: no sheet is drawn on a fade map.
+                            (DrawLayer::FarSheet, _) => &self.far_sheet_pipeline,
+                            // Folds the fade in its own entry point.
+                            (DrawLayer::TerrainLayer, _) => &self.terrain_layer_pipeline,
+                            (DrawLayer::Spec, _) => unreachable!("bound above"),
+                            (DrawLayer::Overlay, _) => unreachable!("bound in overlay pass"),
+                            (DrawLayer::Mask, false) => &self.mask_pipeline,
+                            (DrawLayer::Mask, true) => &self.fade_mask_pipeline,
+                            (_, false) => &self.pipeline,
+                            (_, true) => &self.fade_pipeline,
+                        });
+                    }
+                    bound_layer = Some((d.layer, is_water_normal, may_discard));
                 }
                 pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
                 draw_mesh(
