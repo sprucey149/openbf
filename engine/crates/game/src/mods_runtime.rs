@@ -759,6 +759,53 @@ mod tests {
         let meta = ModCacheMeta::load(&cache).unwrap();
         let rows = catalog_entries(&meta.maps, "KTH");
         assert_eq!(rows.len(), 1);
+        use ui::shell::{IaCommand, IaInput, IaTexts, InstantAction, ModePick, PointerTarget};
+        let missions = cache.join("missions");
+        let maps = ui::shell::catalog_with_mods(
+            &|_, _| None,
+            &[],
+            &|key, mode| crate::mission::pairs(&missions, key, mode.subst()),
+            &rows,
+        );
+        let mut shell = InstantAction::new(
+            maps,
+            IaTexts::new(&|_, english| english.to_owned()),
+            Default::default(),
+        );
+        let confirm = IaInput {
+            menu: ui::menu::MenuInput {
+                confirm: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let kothlis = shell
+            .map_rows()
+            .iter()
+            .position(|r| r.text.contains("Kothlis"))
+            .unwrap();
+        assert!(shell.focus_pointer(PointerTarget::Map(kothlis)));
+        shell.step(confirm, 0.0);
+        let hunt = shell
+            .mode_picks()
+            .iter()
+            .position(|m| *m == ModePick::One(Mode::Hunt))
+            .unwrap();
+        assert!(shell.focus_pointer(PointerTarget::Mode(hunt)));
+        shell.step(confirm, 0.0);
+        let clone_wars = shell
+            .side_rows()
+            .iter()
+            .position(|row| row.text == "Clone Wars")
+            .unwrap();
+        assert!(shell.focus_pointer(PointerTarget::Era(clone_wars)));
+        shell.step(confirm, 0.0);
+        let Some(IaCommand::Launch(rows_to_launch)) = shell.step(confirm, 0.0) else {
+            panic!("Clone Wars Hunt did not launch");
+        };
+        assert_eq!(rows_to_launch.len(), 1);
+        assert_eq!(rows_to_launch[0].armies, ["rep", "cis"]);
+
         let row = &rows[0];
         assert_eq!(row.variant_keys.len(), 5);
         for (mode, multiplayer_weather) in [

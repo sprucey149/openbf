@@ -65,12 +65,10 @@ fn both_games_resolve_the_empty_clicks_to_an_audible_take() {
     }
 }
 
-#[test]
-#[ignore = "requires the prepared KTH cache in OPENBF_KTH_TEST_DATA"]
-fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
+fn installed_kth_ambience(weather: &str) -> (SoundLib, crate::ambience::Ambience) {
     let root = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
-    let map = root.join("mod_cache/mod_kth/assets/mod_kth__kth_dawn");
-    let mut lib = SoundLib::load(&map).expect("baked KTH bank");
+    let map = root.join(format!("mod_cache/mod_kth/assets/mod_kth__kth_{weather}"));
+    let lib = SoundLib::load(&map).expect("baked KTH bank");
     let manifest: manifest::Manifest =
         ron::from_str(&std::fs::read_to_string(map.join("manifest.ron")).unwrap()).unwrap();
     let emitters = manifest
@@ -78,10 +76,16 @@ fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
         .iter()
         .flat_map(|layer| &layer.regions)
         .filter_map(crate::ambience::region_emitter)
-        .collect::<Vec<_>>();
-    let amb = crate::ambience::Ambience { emitters };
+        .collect();
+    (lib, crate::ambience::Ambience { emitters })
+}
+
+#[test]
+#[ignore = "requires the prepared KTH cache in OPENBF_KTH_TEST_DATA"]
+fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
+    let (mut lib, amb) = installed_kth_ambience("dawn");
     let region = |name| amb.emitters.iter().position(|e| e.sound == name).unwrap();
-    for (name, expected_gain) in [("kth_amb_dawn", 0.378), ("kth_disco_dawn", 0.2646)] {
+    for (name, expected_gain) in [("kth_amb_dawn", 0.0945), ("kth_disco_dawn", 0.2646)] {
         let i = region(name);
         let e = &amb.emitters[i];
         let AmbientTake::Stream(take) = lib.ambient_take(e).unwrap() else {
@@ -118,6 +122,33 @@ fn kothlis_pc_ambience_uses_region_distance_and_ambience_bus() {
             .gain
             > 0.16
     );
+}
+
+#[test]
+#[ignore = "requires the installed KTH cache and an audio device"]
+fn kothlis_live_mixer_starts_the_club_track_inside_its_region() {
+    let (mut lib, amb) = installed_kth_ambience("night");
+    let mut audio = audio::Audio::new().expect("live audio device");
+    lib.set_user_volumes(0.001, 1.0);
+
+    let listener = |pos| Listener { pos, yaw: 0.0 };
+    let outside = listener(Vec3::new(-74.99, 0.69, 184.27));
+    let inside = listener(Vec3::new(-110.0, 9.0, 87.0));
+    let allow_start = || std::thread::sleep(std::time::Duration::from_millis(150));
+    lib.ambient_voices(&mut audio, &amb, &outside);
+    allow_start();
+    assert_eq!(lib.ambient_playing(), 1, "surf plays at the spawn camera");
+    lib.ambient_voices(&mut audio, &amb, &inside);
+    allow_start();
+    assert_eq!(lib.ambient_playing(), 2, "venue music joins the surf");
+    lib.ambient_voices(&mut audio, &amb, &outside);
+    assert_eq!(lib.ambient_playing(), 1, "venue music stops outside");
+
+    let quiet = lib.ambient_heard(&amb, outside.pos);
+    lib.set_user_volumes(1.0, 1.0);
+    let heard = lib.ambient_heard(&amb, outside.pos);
+    assert_eq!(quiet.len(), 2);
+    assert!(heard.iter().any(|h| h.level > 0.0 && h.gain <= 0.10));
 }
 
 #[test]

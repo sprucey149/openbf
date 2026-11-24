@@ -1416,6 +1416,12 @@ impl SoundLib {
                 .is_some_and(|take| take.format == 5);
         if pc_region && p.bus == 0 {
             p.bus = fnv1a_lowercase("ambience");
+            if p.flat && e.min == e.max && e.max.is_some() {
+                // A flat region with one radius supplies a map-wide bed at
+                // full level. Give tracks without a mixer bus headroom.
+                // measure: retail PC gain for flat, unnamed ambient beds.
+                p.gain *= 0.25;
+            }
         }
         (p, pc_region)
     }
@@ -1449,6 +1455,11 @@ impl SoundLib {
             };
             let (db, pan) = mixer_pair(ears);
             if let Some(take) = self.stream_take(&p) {
+                if pc_region && h.level <= 0.0 {
+                    // Start the recorded bed when the listener enters it.
+                    self.ambient.remove(&h.index);
+                    continue;
+                }
                 let db = if pc_region && p.flat {
                     level_db(h.gain)
                 } else if pc_region {
@@ -1459,6 +1470,9 @@ impl SoundLib {
                 let v = self.ambient.entry(h.index).or_insert_with(|| {
                     // BF2 retries finished region streams (re-ambience-music.md §1.7).
                     let v = audio.play_stream(take, db, p.looping || pc_region);
+                    if v.is_ok() && std::env::var_os("OPENBF_AMBIENCE_TRACE").is_some() {
+                        eprintln!("ambience: started {} at {db:.1} dB", e.sound);
+                    }
                     AmbientVoice::Stream(v.map_err(|e| eprintln!("ambience: {e:#}")).ok())
                 });
                 if let AmbientVoice::Stream(Some(v)) = v {
@@ -1548,7 +1562,7 @@ impl SoundLib {
             .values()
             .filter(|v| match v {
                 AmbientVoice::Loop(v) => v.is_some(),
-                AmbientVoice::Stream(v) => v.is_some(),
+                AmbientVoice::Stream(v) => v.as_ref().is_some_and(audio::MusicVoice::playing),
                 AmbientVoice::Shot { .. } => true,
             })
             .count()

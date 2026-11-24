@@ -286,12 +286,20 @@ impl MapEntry {
     }
 
     pub(super) fn launch_armies(&self, mode: Mode, side: Side) -> [String; 2] {
+        let armies = side.armies();
         if mode == Mode::Hunt {
-            if let Some((_, pair)) = self.missions.iter().find(|(m, _)| *m == mode) {
+            let mut pairs = self.missions.iter().filter(|(m, _)| *m == mode);
+            // Addons can register Hunt in both eras. Pick the era's
+            // authored pairing before using the retail native-faction row.
+            let exact = pairs.clone().find(|(_, pair)| {
+                let pair = pair.each_ref().map(String::as_str);
+                pair == armies || [pair[1], pair[0]] == armies
+            });
+            if let Some((_, pair)) = exact.or_else(|| pairs.next()) {
                 return pair.clone();
             }
         }
-        side.armies().map(str::to_owned)
+        armies.map(str::to_owned)
     }
 }
 
