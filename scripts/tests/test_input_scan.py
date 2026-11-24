@@ -424,7 +424,7 @@ class Matrix(unittest.TestCase):
                 root = Path(temp) / 'iso'
                 root.mkdir()
                 self.build(root, bf1, bf2, dlc, unknown)
-                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on, pc_primary=False)
+                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on, pc_primary=False, bf2_only_supported=False)
                 sources1, sources2 = set(bf1.split('+')), set(bf2.split('+'))
                 console1 = 'ps2' in sources1 or ('xbox' in sources1 and xbox_on)
                 console2 = 'ps2' in sources2 or ('xbox' in sources2 and xbox_on)
@@ -477,7 +477,7 @@ class Matrix(unittest.TestCase):
                 root = Path(temp) / 'iso'
                 root.mkdir()
                 self.build(root, bf1, bf2, False, False)
-                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on, pc_primary=True)
+                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on, pc_primary=True, bf2_only_supported=False)
                 sources1, sources2 = set(bf1.split('+')), set(bf2.split('+'))
                 console2 = 'ps2' in sources2 or ('xbox' in sources2 and xbox_on)
                 primary1 = 'ps2' in sources1 or ('xbox' in sources1 and xbox_on) or 'pc' in sources1
@@ -506,6 +506,7 @@ class Messages(unittest.TestCase):
         # These read the refusal texts of each switch position, whichever way the switches are set today.
         options.setdefault('xbox_supported', False)
         options.setdefault('pc_primary', False)
+        options.setdefault('bf2_only_supported', False)
         return scan.scan([self.root], **options)['refusals']
 
     def test_nothing_at_all(self):
@@ -546,13 +547,29 @@ class Messages(unittest.TestCase):
         self.assertEqual(cached['games'], plan['games'])
         self.assertEqual(cached['source_plan'], plan['source_plan'])
 
-    def test_single_pc_games_still_need_both_games(self):
-        for game in ('bf1', 'bf2'):
-            with self.subTest(game=game), tempfile.TemporaryDirectory() as temp:
-                pc_install(Path(temp) / 'pc', game)
-                plan = scan.scan([temp])
-                self.assertTrue(plan['refusals'])
-                self.assertIn('both games needed', ' '.join(plan['refusals']))
+    def test_single_pc_bf1_refused_and_bf2_only_accepted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pc_install(Path(temp) / 'pc', 'bf1')
+            plan = scan.scan([temp])
+            self.assertTrue(plan['refusals'])
+            self.assertIn('both games needed', ' '.join(plan['refusals']))
+        for kind in ('ps2', 'xbox', 'pc'):
+            with self.subTest(bf2=kind), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp) / 'iso'
+                root.mkdir()
+                if kind == 'ps2':
+                    iso_image(root / 'bf2.iso', 'bf2')
+                elif kind == 'xbox':
+                    xbox_image(root / 'bf2.xiso', 'bf2')
+                else:
+                    pc_install(root / 'bf2_pc', 'bf2')
+                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'))
+                self.assertEqual(plan['refusals'], [])
+                self.assertIsNone(plan['games']['bf1']['gameplay'])
+                self.assertIsNotNone(plan['games']['bf2']['gameplay'])
+                env = scan.bake_env(plan)
+                self.assertEqual(env.get('OPENBF_HAS_BF1'), '0')
+                self.assertEqual(env.get('OPENBF_PC_ONLY') == '1', kind == 'pc')
 
     def test_xbox_until_it_is_switched_on(self):
         disc = xbox_image(self.root / 'x', 'bf2')

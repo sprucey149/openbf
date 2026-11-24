@@ -85,6 +85,9 @@ pub struct HudArt {
     /// units, measured on this copy's art (`crate::shell_ia::device_screen`);
     /// `None` keeps the PS2 art's ([`crate::shell_ia::DEVICE_SCREEN`]).
     pub instant_device: Option<[f32; 4]>,
+    /// True on BF2-only builds where `common_bf1/ig_victory_defeat` is absent,
+    /// so the round-end banner falls back to text (`DrawCtx::round_end_text`).
+    pub no_bf1_victory_sheet: bool,
 }
 
 impl HudArt {
@@ -698,6 +701,41 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// The round-end banner as text, for a BF2-only build with no BF1
+    /// `ig_victory_defeat` sheet: VICTORY or DEFEAT in BF2's large face,
+    /// centred, in the sheet's own tint ([`crate::hud::round_end_color`]).
+    /// `[ours]` the 1.6x size and 2px tracking stand in for the sheet's
+    /// 256x64 banner. replace: BF2's own round-end presentation
+    /// (`analysis/re-round-end.md`).
+    fn round_end_text(&mut self, result: u8, size: [f32; 2]) {
+        const SIZE: f32 = 1.6;
+        let Some(font) = self.face(crate::typography::Face::Large) else {
+            return;
+        };
+        let scale = frame_scale(size);
+        let height = f32::from(font.line_height) * SIZE * scale[1];
+        let screen = Screen {
+            origin: [0.0, 0.0],
+            scale: [1.0, 1.0],
+        };
+        self.run(
+            usize::MAX,
+            &Mat4::IDENTITY,
+            &screen,
+            font,
+            &Run {
+                text: if result == 1 { "DEFEAT" } else { "VICTORY" },
+                at: (size[0] * 0.5, (size[1] - height) * 0.5),
+                h_align: HAlign::Center,
+                scale: [scale[0] * SIZE, scale[1] * SIZE],
+                color: crate::hud::round_end_color(result),
+                additive: false,
+                shadow: true,
+                tracking: 2.0 * scale[0],
+            },
+        );
+    }
+
     /// The menu face's metric set for `face` (`crate::typography`).
     pub(crate) fn face(&self, face: crate::typography::Face) -> Option<&'a HudFont> {
         self.art.menu_font(face.role())
@@ -1036,7 +1074,11 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         return ctx.out;
     }
     if let Some(result) = hud.banner {
-        ctx.out = crate::hud::draw_round_end(result, size);
+        if art.no_bf1_victory_sheet {
+            ctx.round_end_text(result, size);
+        } else {
+            ctx.out = crate::hud::draw_round_end(result, size);
+        }
         if hud.banner_fade > 0.0 {
             ctx.quad(
                 usize::MAX,

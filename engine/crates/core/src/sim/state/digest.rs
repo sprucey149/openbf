@@ -173,6 +173,7 @@ impl Sim {
             assist_lead_on,
             slot_assist,
             rescue_off,
+            prone_off,
             // weapons, classes, modes
             weapon_classes,
             classes,
@@ -253,6 +254,9 @@ impl Sim {
             f.debug(slot_assist);
             if *rescue_off {
                 f.eat(b"RESCUE_OFF");
+            }
+            if *prone_off {
+                f.eat(b"PRONE_OFF");
             }
         });
         group("weapons", &mut |f| f.debug_sim(weapon_classes));

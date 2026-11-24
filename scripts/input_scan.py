@@ -42,6 +42,8 @@ XBOX_EXTRACT = "extract-xiso"
 DLC_SUPPORTED = True
 # A PC BF1 install can be BF1's only source with nothing beyond the public code and the player's own files.
 PC_PRIMARY_SUPPORTED = True
+# A BF2 copy (PS2, Xbox or PC) can build on its own without BF1; BF1-only remains refused (the shell and HUD are BF2's).
+BF2_ONLY_SUPPORTED = True
 # Differently partitioned structures are drawn from exact shared resources
 # or lower-detail, own-copy textured stand-ins. All maps are now included;
 # their availability does not establish complete render/collision alignment.
@@ -369,11 +371,12 @@ def console_needed_message(xbox, where):
 
 
 def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_supported=None, dlc_supported=None,
-              pc_primary=None, extracted=None, require_all=True):
-    """Choose from what the scan found. `require_all` False skips the one-source-per-game refusals (a partial rebake)."""
+              pc_primary=None, extracted=None, require_all=True, bf2_only_supported=None):
+    """Choose from what the scan found. `require_all` False skips the missing-game refusals (a partial rebake)."""
     xbox_on = XBOX_SUPPORTED if xbox_supported is None else xbox_supported
     dlc_on = DLC_SUPPORTED if dlc_supported is None else dlc_supported
     pc_on = PC_PRIMARY_SUPPORTED if pc_primary is None else pc_primary
+    bf2_only_on = BF2_ONLY_SUPPORTED if bf2_only_supported is None else bf2_only_supported
     trees = trees or {}
     found = [dict(row) for row in found]
     where = ", ".join(str(root) for root in roots[:1]) or "iso/"
@@ -384,10 +387,18 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
         return [row for row in found if row["kind"] == kind and row["game"] == game and row["status"] == "found"]
 
     any_pc = any(row["kind"] == "pc-install" for row in found)
-    combined_pc = pc_on and all(of_kind("pc-install", game) for game in GAMES)
-    if combined_pc and not any(row["kind"] in ("ps2-disc", "xbox-disc") for row in found):
-        # A cache beside a previous build is not an input to the explicitly
-        # supplied PC pair. Never let it quietly become a console donor.
+    pc_bf1, pc_bf2 = of_kind("pc-install", "bf1"), of_kind("pc-install", "bf2")
+    has_bf1_console = bool(
+        of_kind("ps2-disc", "bf1")
+        or (of_kind("xbox-disc", "bf1") and xbox_on)
+        or (trees.get("bf1") or {}).get("usable")
+    )
+    has_bf1_input = bool(has_bf1_console or pc_bf1)
+    combined_pc = pc_on and bool(pc_bf1 and pc_bf2)
+    pc_bf2_only = pc_on and bf2_only_on and bool(pc_bf2) and not has_bf1_input
+    if (combined_pc or pc_bf2_only) and not any(row["kind"] in ("ps2-disc", "xbox-disc") for row in found):
+        # A cache beside a previous build is not an input to an explicitly
+        # supplied PC setup. Never let it quietly become a console donor.
         trees = {}
     for game in GAMES:
         ps2, xbox, pc = of_kind("ps2-disc", game), of_kind("xbox-disc", game), of_kind("pc-install", game)
@@ -402,7 +413,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
             gameplay = dict(kind="xbox-disc", path=xbox[0]["path"], verified=True)
             if extracted:
                 gameplay["tree"] = xbox_tree(extracted, game)
-        elif pc and pc_on and (game == "bf1" or combined_pc):
+        elif pc and pc_on and (game == "bf1" or combined_pc or (game == "bf2" and pc_bf2_only)):
             gameplay = dict(kind="pc-install", path=pc[0]["path"], verified=True)
         elif xbox:
             refusals.append(f"{short}: found the Xbox disc {xbox[0]['path']}, but Xbox input is not supported yet. "
@@ -411,7 +422,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
             refusals.append(f"{short}: found the PC install {pc[0]['path']}. This selection needs verified "
                             "BF1 PS2 gameplay input for missions, classes and collision. "
                             f"Add {add_message(game, xbox_on, pc_on)} to {where}.")
-        elif not (pc and game == "bf2") and require_all:
+        elif not (pc and game == "bf2") and require_all and not (game == "bf1" and bf2_only_on):
             refusals.append(f"{short}: no source found. Add {add_message(game, xbox_on, pc_on)} to {where}.")
 
         if pc and game == "bf1" and gameplay and gameplay["kind"] == "ps2-extracted" and not gameplay["verified"]:
@@ -445,21 +456,26 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
                 row.update(status="unused", reason=row["reason"] + f"; another PS2 copy is in use ({ps2[0]['path']})")
         games[game] = dict(title=TITLE[game], gameplay=gameplay, visual=visual)
 
+    has_bf1 = games["bf1"]["gameplay"] is not None
+    has_bf2 = games["bf2"]["gameplay"] is not None
     if any_pc:
         console = games["bf2"]["gameplay"]
-        if not console or not console["verified"] or (console["kind"] == "pc-install" and not combined_pc):
+        if not console or not console["verified"] or (console["kind"] == "pc-install" and not (combined_pc or pc_bf2_only)):
             refusals.append(console_needed_message(xbox_on, where))
 
-    # Only the new two-PC primary configuration changes the shared-resource
-    # routing. Existing console/PC1 mixes retain their established donors.
-    pc_only = all((games[g]["gameplay"] or {}).get("kind") == "pc-install" for g in GAMES)
+    active = [g for g in GAMES if games[g]["gameplay"] is not None]
+    pc_only = has_bf2 and all(games[g]["gameplay"]["kind"] == "pc-install" for g in active)
     source_plan = None
     if pc_only:
-        source_plan = dict(kind="pc-only", console_donors=False,
+        source_plan = dict(kind="pc-only", console_donors=False, bf1_present=has_bf1,
                            missions="fingerprinted canonical tables; PC scripts supply presentation",
                            shared_ui=games["bf2"]["gameplay"]["path"],
                            shell_sound=games["bf2"]["gameplay"]["path"],
-                           borrowed_animations={g: games[g]["gameplay"]["path"] for g in GAMES})
+                           borrowed_animations={g: games[g]["gameplay"]["path"] for g in active})
+    elif has_bf2 and not has_bf1:
+        source_plan = dict(kind="bf2-only", console_donors=True, bf1_present=False,
+                           shared_ui=games["bf2"]["gameplay"]["path"],
+                           shell_sound=games["bf2"]["gameplay"]["path"])
 
     dlc = dict(present=False, path=None, donor=None, used=False)
     # PS2 geometry first, as everywhere; a PC copy beside it can still lend the heroes its larger textures.
@@ -518,7 +534,7 @@ def explicit_inputs(discs, pc_roots):
     return found, errors
 
 
-def scan(roots, discs=None, pc_roots=None, extracted=None, named_root=None, **options):
+def scan(roots, discs=None, pc_roots=None, extracted=None, named_root=None, ignore_extracted_bf1=False, **options):
     """Scan the roots and choose. Named inputs come first, so they win over anything else found. Paths come back
     absolute: the bake runs from another directory. `named_root` is a folder the user asked for, so it must exist."""
     named, errors = explicit_inputs(discs or {}, pc_roots or {})
@@ -537,6 +553,8 @@ def scan(roots, discs=None, pc_roots=None, extracted=None, named_root=None, **op
                 seen.add(real)
                 found.append(row)
     trees = extracted_trees(extracted) if extracted else None
+    if ignore_extracted_bf1 and trees:
+        trees = {g: v for g, v in trees.items() if g != "bf1"}
     return make_plan(found, trees, strays, roots, errors, extracted=extracted, **options)
 
 
@@ -545,11 +563,18 @@ def withheld_maps(game, gameplay):
     return WITHHELD_MAPS.get((platform, game), ())
 
 
+def has_bf1(plan):
+    """True when the plan builds Battlefront I as well as Battlefront II (False for a BF2-only build)."""
+    return plan["games"]["bf1"]["gameplay"] is not None
+
+
 def bake_env(plan):
     """What the bake is told. Empty for anything not chosen, so the bake's default is the PS2-only one."""
     env = {}
     if (plan.get("source_plan") or {}).get("kind") == "pc-only":
         env["OPENBF_PC_ONLY"] = "1"
+    if not has_bf1(plan) and plan["games"]["bf2"]["gameplay"] is not None:
+        env["OPENBF_HAS_BF1"] = "0"
     for game in GAMES:
         number = game[-1]
         chosen = plan["games"][game]
@@ -589,8 +614,12 @@ def discs_to_extract(plan):
 
 def summary_lines(plan):
     lines = ["Inputs (recognized by content):"]
-    if (plan.get("source_plan") or {}).get("kind") == "pc-only":
-        lines.append("  PC-only: both games; canonical mission tables; BF2 UI and shell audio from PC BF2; no console donors")
+    sp = plan.get("source_plan") or {}
+    if sp.get("kind") == "pc-only":
+        which = "both games" if sp.get("bf1_present", True) else "BF2 only (BF1 omitted)"
+        lines.append(f"  PC-only: {which}; canonical mission tables; BF2 UI and shell audio from PC BF2; no console donors")
+    elif sp.get("kind") == "bf2-only":
+        lines.append("  BF2-only: BF1 omitted (BF2 maps, campaign, and shell; prone disabled)")
     label = {"ps2-disc": "PS2 disc", "ps2-extracted": "PS2 data extracted earlier", "xbox-disc": "Xbox disc", "pc-install": "PC install"}
     for game in GAMES:
         chosen = plan["games"][game]

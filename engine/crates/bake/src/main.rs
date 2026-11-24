@@ -252,6 +252,12 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Some("droid-chunks")
+            if args.get(2).is_some_and(|a| a == "--bf2-only") && matches!(args.len(), 5 | 6) =>
+        {
+            let pc = args.get(5).map(|s| ci(s));
+            bake::droid_chunks::bake_bf2_only(&ci(&args[3]), Path::new(&args[4]), pc.as_deref())
+        }
         Some("droid-chunks") if args.len() == 6 || args.len() == 7 => {
             let pc = args.get(6).map(|s| ci(s));
             bake::droid_chunks::bake(
@@ -622,6 +628,7 @@ fn main() -> Result<()> {
                  \x20 bake weapon     <side.lvl[,lvl]> <model[,model]> <outdir> [pc.lvl]\n\
                  \x20 bake fpm        <anim.lvl> <outdir> <fpm.lvl>...\n\
                  \x20 bake droid-chunks <bf1-cis.lvl> <bf2-cis.lvl> <bf1-common.lvl> <outroot> [pc-cis.lvl]\n\
+                 \x20 bake droid-chunks --bf2-only <bf2-cis.lvl> <outroot> [pc-cis.lvl]\n\
                  \x20 bake vehicle    <side.lvl> <outdir> [pc.lvl]     every vehicle class: models, chunks, collision\n\
                  \x20 bake shadows    <file.lvl> <outdir>            BF1 shadow sidecars only\n\
                  \x20 bake effects    <side.lvl> <outdir> bf1|bf2   fx__ particle effects + their textures/models\n\

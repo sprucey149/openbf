@@ -246,7 +246,7 @@ def build(game, root, output, bake, env, tools, cache=None, fresh=False, staging
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--bake", required=True)
-    ap.add_argument("--bf1", required=True)
+    ap.add_argument("--bf1", default="")
     ap.add_argument("--bf2", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -261,9 +261,12 @@ def main():
             if cache:
                 locks.enter_context(lock(Path(cache) / ".lock"))
             tools = identity(args.bake, env)
+            games = [(g, r) for g, r in (("bf1", args.bf1), ("bf2", args.bf2)) if r]
+            if not args.bf1:
+                discard(output / "global_bf1")
             results = [build(game, root, output / ("global_" + game), args.bake, env, tools, cache,
                              env.get("OPENBF_GLOBAL_FRESH") == "1", staging=bake_root.parent)
-                       for game, root in (("bf1", args.bf1), ("bf2", args.bf2))]
+                       for game, root in games]
             if env.get("OPENBF_GLOBAL_RESULT"):
                 write_json(env["OPENBF_GLOBAL_RESULT"], results)
 

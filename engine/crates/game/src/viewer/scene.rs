@@ -1109,6 +1109,27 @@ fn upload_atmosphere(
     Ok(())
 }
 
+fn terrain_detail_mips(mips: &[&[u8]]) -> Option<Vec<Vec<u8>>> {
+    let opaque = mips
+        .iter()
+        .all(|mip| mip.chunks_exact(4).all(|px| px[3] == 255));
+    if !opaque {
+        return None;
+    }
+    Some(
+        mips.iter()
+            .map(|mip| {
+                let mut out = mip.to_vec();
+                for px in out.chunks_exact_mut(4) {
+                    px[3] =
+                        ((u16::from(px[0]) + u16::from(px[1]) + u16::from(px[2]) + 1) / 3) as u8;
+                }
+                out
+            })
+            .collect(),
+    )
+}
+
 fn get_terrain_texture(
     r: &mut Renderer,
     scene: &Scene,
@@ -1135,6 +1156,16 @@ fn get_terrain_texture(
     };
     let mips = base.mips();
     let detail_mips = detail.mips();
+    let promoted = terrain_detail_mips(&detail_mips);
+    let promoted_refs: Vec<&[u8]> = promoted
+        .as_ref()
+        .map(|mips| mips.iter().map(Vec::as_slice).collect())
+        .unwrap_or_default();
+    let active_detail_mips = if promoted.is_some() {
+        &promoted_refs[..]
+    } else {
+        &detail_mips[..]
+    };
     let handle = r
         .add_texture(&render::TextureDesc {
             width: base.width,
@@ -1146,7 +1177,7 @@ fn get_terrain_texture(
             detail: Some(render::DetailDesc {
                 width: detail.width,
                 height: detail.height,
-                mips: &detail_mips,
+                mips: active_detail_mips,
                 scale: 8.0,
                 world_patch: *patch,
             }),

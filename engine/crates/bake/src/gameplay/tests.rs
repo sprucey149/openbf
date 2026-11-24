@@ -310,7 +310,7 @@ fn one_file_under_two_names_takes_the_row_of_its_own_path() {
 #[test]
 fn generated_correction_schemas_load() {
     let loaded = tables().unwrap();
-    assert_eq!(loaded.len(), 4);
+    assert_eq!(loaded.len(), 5);
     for table in loaded {
         assert!(!table.files.is_empty());
     }

@@ -1087,17 +1087,22 @@ pub struct RoundEndModel {
     pub fade: f32,
 }
 
+/// The round-end banner's tint: red for a defeat, green otherwise.
+pub(crate) fn round_end_color(result: u8) -> [f32; 4] {
+    let [r, g, b] = if result == 1 {
+        [192.0, 64.0, 64.0]
+    } else {
+        [64.0, 192.0, 64.0]
+    };
+    [r / 255.0, g / 255.0, b / 255.0, 1.0]
+}
+
 /// BF1's banner sheet, size and UV halves (`re-round-end.md` §2.1 [V]).
 /// [ours] Both games use BF1's green victory and the same baked art.
 pub(crate) fn draw_round_end(result: u8, size: [f32; 2]) -> crate::hud_draw::HudFrame {
     use crate::hud_draw::{HudFrame, HudVertex};
     let defeat = result == 1;
-    let color = if defeat {
-        [192.0, 64.0, 64.0]
-    } else {
-        [64.0, 192.0, 64.0]
-    };
-    let color = [color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, 1.0];
+    let color = round_end_color(result);
     let scale = crate::hud_draw::frame_scale(size);
     let (hw, hh) = (128.0 * scale[0], 32.0 * scale[1]);
     let (cx, cy) = (size[0] * 0.5, size[1] * 0.5);
@@ -1319,6 +1324,55 @@ mod tests {
             feed(&mut hud, &model, &|_| false);
             assert_eq!(hud.banner, None);
         }
+    }
+
+    #[test]
+    fn round_banner_falls_back_without_bf1_victory_sheet() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut model = model();
+        model.round_end = Some(RoundEndModel {
+            result: 0,
+            stats: None,
+            fade: 0.0,
+        });
+        feed(&mut hud, &model, &|_| false);
+        let mut art = crate::hud_draw::HudArt {
+            no_bf1_victory_sheet: true,
+            ..Default::default()
+        };
+        art.fonts.insert(
+            "gamefont_large".into(),
+            manifest::hud::HudFont {
+                name: "gamefont_large".into(),
+                line_height: 24,
+                pages: vec!["gamefont_large_0".into()],
+                glyphs: "VICTORYDEFA"
+                    .chars()
+                    .map(|ch| manifest::hud::HudGlyph {
+                        code: ch as u16,
+                        page: 0,
+                        advance: 13,
+                        x0: 0,
+                        x1: 12,
+                        y0: 0,
+                        y1: 20,
+                        uv: [0.0, 0.1, 0.0, 0.1],
+                    })
+                    .collect(),
+            },
+        );
+        let frame = crate::hud_draw::draw(&hud, &art, [1280.0, 896.0]);
+        assert!(
+            frame
+                .batches
+                .iter()
+                .all(|b| b.texture != "common_bf1/ig_victory_defeat"),
+            "must not emit missing BF1 sheet on BF2-only builds"
+        );
+        assert!(
+            !frame.verts.is_empty(),
+            "BF2 font fallback must draw the VICTORY text"
+        );
     }
 
     #[test]

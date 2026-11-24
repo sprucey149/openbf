@@ -471,36 +471,56 @@ pub(super) fn prepare_round(
     job: Option<super::round_prep::RoundJob>,
 ) -> anyhow::Result<Worker<Prepared>> {
     Worker::spawn(move || {
-        let started = Instant::now();
-        let layers = job
-            .as_ref()
-            .map(|j| {
-                let script = j
-                    .campaign_index
-                    .map(|i| ui::campaign::RISE_OF_THE_EMPIRE[i].script);
-                super::super::round_setup::campaign_layers_for(
-                    &j.missions_dir,
-                    &j.name,
-                    &mode,
-                    script,
-                )
-            })
-            .unwrap_or_default();
-        let (mut scene, load) = game::assets::load_battle_scene_with_layers(&dir, &mode, &layers)?;
-        if let Some(j) = &job {
-            let map = j
-                .net
-                .as_ref()
-                .map_or(j.name.as_str(), |(r, _)| r.map.as_str());
-            scene.kill_objects(&game::mission::scene_kills(&j.missions_dir, map, &mode));
-        }
-        let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let round = job.map(|j| j.build(&scene)).transpose()?;
-        Ok(Prepared {
-            scene,
-            load,
-            cpu_ms,
-            round,
+        let key = game::assets::prefetch::load_key(&dir, &mode);
+        std::thread::scope(|s| {
+            let warm = std::thread::Builder::new()
+                .name("loading-prefetch".into())
+                .spawn_scoped(s, || {
+                    let t = Instant::now();
+                    let n = game::assets::prefetch::warm(&key);
+                    (n, t.elapsed().as_secs_f64() * 1000.0)
+                });
+            let prepared = (|| -> anyhow::Result<Prepared> {
+                let started = Instant::now();
+                let layers = job
+                    .as_ref()
+                    .map(|j| {
+                        let script = j
+                            .campaign_index
+                            .map(|i| ui::campaign::RISE_OF_THE_EMPIRE[i].script);
+                        super::super::round_setup::campaign_layers_for(
+                            &j.missions_dir,
+                            &j.name,
+                            &mode,
+                            script,
+                        )
+                    })
+                    .unwrap_or_default();
+                let (mut scene, load) =
+                    game::assets::load_battle_scene_with_layers(&dir, &mode, &layers)?;
+                if let Some(j) = &job {
+                    let map = j
+                        .net
+                        .as_ref()
+                        .map_or(j.name.as_str(), |(r, _)| r.map.as_str());
+                    scene.kill_objects(&game::mission::scene_kills(&j.missions_dir, map, &mode));
+                }
+                let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
+                let round = job.map(|j| j.build(&scene)).transpose()?;
+                Ok(Prepared {
+                    scene,
+                    load,
+                    cpu_ms,
+                    round,
+                })
+            })();
+            if let Ok((n, ms)) = warm.map(|h| h.join().unwrap_or((0, 0.0))) {
+                println!("loading: prefetch key={key} decoded={n} warm_ms={ms:.3}");
+            }
+            if prepared.is_err() {
+                game::assets::prefetch::discard();
+            }
+            prepared
         })
     })
 }

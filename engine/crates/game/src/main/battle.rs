@@ -398,6 +398,12 @@ pub(super) fn make_walk_with_counts(
     scene.install_water(&mut sim);
     scene.install_damage_regions(&mut sim);
     sim.ground_rules = core::soldier::GroundRules::for_game(&scene.manifest.source_game);
+    // BF2-only builds omit BF1's borrowed prone animations; disable prone so
+    // soldiers cannot enter a prone hitbox without prone animations.
+    if let Some(assets_root) = scene.dir.parent() {
+        sim.prone_off =
+            pak::is_dir(assets_root.join("side_bf2")) && !pak::is_dir(assets_root.join("side_bf1"));
+    }
     sim.item_pool = game::roster::item_pool(&scene.manifest.source_game, &scene.manifest.map);
     sim.cheats = b.cheats;
     // Map defaults belong to a conquest (a mission); a plain map walk has none.

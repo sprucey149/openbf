@@ -157,3 +157,33 @@ fn the_bots_mirror_matches_the_step() {
         tick(&mut s, &PadState::default(), &c);
     }
 }
+
+#[test]
+fn prone_off_never_enters_prone_and_updates_static_digest() {
+    let c = SoldierConstants::default();
+    let mut s = crouched(&c);
+    run(&mut s, &PadState::default(), &c, 4);
+    s.step_looking_with_prone(
+        DT,
+        &tap(),
+        &c,
+        GroundRules::Bf2,
+        1.0,
+        AirEnv::default(),
+        false,
+    );
+    assert_eq!(
+        s.stance,
+        Stance::Stand,
+        "double-tapping crouch with prone disabled stands up instead of going prone"
+    );
+
+    let sim_default = crate::sim::Sim::empty(7);
+    let mut sim_bf2_only = crate::sim::Sim::empty(7);
+    sim_bf2_only.prone_off = true;
+    assert_ne!(
+        sim_default.static_digest(),
+        sim_bf2_only.static_digest(),
+        "prone_off must participate in the LAN static digest"
+    );
+}

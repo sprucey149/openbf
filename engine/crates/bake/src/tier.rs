@@ -418,6 +418,25 @@ impl Resolved {
         }
     }
 
+    /// BF2 PC stores `DTLX` terrain-detail maps (`hoth_detail`, etc.) as RGB
+    /// luminance with `alpha = 255` everywhere, while PS2 stores the signal in
+    /// alpha (`shader.wgsl` reads `.a * 2.0`). Promote RGB average into alpha
+    /// when every mip texel is opaque; leave PS2 alpha-channel detail maps as-is.
+    pub fn promote_rgb_to_alpha_if_opaque(&mut self) {
+        let opaque = self
+            .mips
+            .iter()
+            .all(|m| m.as_chunks::<4>().0.iter().all(|px| px[3] == 255));
+        if !opaque {
+            return;
+        }
+        for m in &mut self.mips {
+            for px in m.as_chunks_mut::<4>().0 {
+                px[3] = ((u16::from(px[0]) + u16::from(px[1]) + u16::from(px[2]) + 1) / 3) as u8;
+            }
+        }
+    }
+
     /// Give this texture `base`'s alpha channel, resampled to its own
     /// dimensions — box-averaged where it shrinks, nearest where it grows.
     ///
@@ -1246,5 +1265,26 @@ mod tests {
         };
         r.make_opaque();
         assert_eq!(r.mips[0], vec![9, 9, 9, 255, 9, 9, 9, 255]);
+    }
+
+    #[test]
+    fn promote_rgb_to_alpha_if_opaque_normalizes_pc_detail_and_leaves_ps2_alpha_alone() {
+        let mut pc = Resolved {
+            width: 1,
+            height: 2,
+            mips: vec![vec![120, 120, 120, 255, 148, 148, 148, 255]],
+            tier: Tier::Ps2,
+        };
+        pc.promote_rgb_to_alpha_if_opaque();
+        assert_eq!(pc.mips[0], vec![120, 120, 120, 120, 148, 148, 148, 148]);
+
+        let mut ps2 = Resolved {
+            width: 1,
+            height: 2,
+            mips: vec![vec![128, 128, 128, 107, 128, 128, 128, 150]],
+            tier: Tier::Ps2,
+        };
+        ps2.promote_rgb_to_alpha_if_opaque();
+        assert_eq!(ps2.mips[0], vec![128, 128, 128, 107, 128, 128, 128, 150]);
     }
 }

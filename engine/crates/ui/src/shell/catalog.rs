@@ -345,7 +345,9 @@ pub fn catalog(
         }
         out.push(entry(Game::Bf2, code, name, desc, [cw.to_vec(), gcw]));
     }
-    for (code, key, english, cw, gcw) in BF1_MAPS {
+    // A BF2-only build bakes no BF1 map, so Instant Action lists none.
+    let include_bf1 = bakes.is_empty() || bakes.iter().any(|(_, g)| g == "bf1");
+    for (code, key, english, cw, gcw) in BF1_MAPS.into_iter().filter(|_| include_bf1) {
         let localized = text(Game::Bf1, key);
         let name = localized.as_deref().unwrap_or(english).trim();
         // The English BF1 table uses all caps. Keep any existing mixed case

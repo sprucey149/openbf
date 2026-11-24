@@ -860,7 +860,8 @@ def check_foliage(bake, plan):
     source report."""
     command = [bake, "check-foliage", BAKED]
     for game, chosen in sorted(plan["games"].items()):
-        if (chosen["gameplay"] or {}).get("kind") not in ("ps2-disc", "ps2-extracted"):
+        gameplay = chosen["gameplay"]
+        if gameplay and gameplay.get("kind") not in ("ps2-disc", "ps2-extracted"):
             command += ["--warn", game]
     print("   $ " + " ".join(command), flush=True)
     result = subprocess.run(command, capture_output=True, text=True)
@@ -870,10 +871,12 @@ def check_foliage(bake, plan):
     return [line[len("WARNING: "):] for line in result.stdout.splitlines() if line.startswith("WARNING: ")]
 
 
-def console_lua_root():
+def console_lua_root(games=None):
     """A content-keyed console-only cache cannot inherit old PC mission scripts."""
     digest = hashlib.sha256(inputs_hash(MISSION_INPUTS).encode())
-    for game, libraries in LUA.items():
+    selected = tuple(games) if games is not None else tuple(LUA)
+    for game in selected:
+        libraries = LUA[game]
         for group, library in libraries.items():
             source = ci_path(lvl_root(game), library)
             digest.update((game + "/" + group).encode())
@@ -922,7 +925,8 @@ def bake_group_inputs(plan, bake_env, images, bake_inputs, lua_root, memo):
     def tree(path):
         return memo.tree(path) if path else None
 
-    gameplay = {"pc_only": bake_env.get("OPENBF_PC_ONLY") == "1"}
+    has_bf1 = input_scan.has_bf1(plan)
+    gameplay = {"pc_only": bake_env.get("OPENBF_PC_ONLY") == "1", "has_bf1": has_bf1}
     sound_trees = {}
     for g in sorted(images):
         gameplay[g] = bake_inputs.get(g + "_image") if images[g] else tree(lvl_root(g))
@@ -945,12 +949,12 @@ def bake_group_inputs(plan, bake_env, images, bake_inputs, lua_root, memo):
     )
 
 
-def bake_plan(store, keys, rebake):
+def bake_plan(store, keys, rebake, has_bf1=True):
     """[(group, action, reason)]: what the bake does this run (bake_cache.plan)."""
-    return bake_cache.plan(store, keys, forced_groups(), rebake=rebake)
+    return bake_cache.plan(store, keys, forced_groups(has_bf1=has_bf1), rebake=rebake, has_bf1=has_bf1)
 
 
-def forced_groups():
+def forced_groups(has_bf1=True):
     """Groups whose key matches but whose output is known to be incomplete: retail music bodies or restored takes
     missing (sounds, and common for the shell's), or a side baked before BF1 vehicle shadows."""
     forced = {}
@@ -960,7 +964,7 @@ def forced_groups():
         forced["sounds"] = reason
         if any("shell" in Path(path).parts for path in missing):
             forced["common"] = reason
-    if missing_shadows():
+    if has_bf1 and missing_shadows():
         forced["side"] = "no BF1 vehicle shadows in this bake"
     return forced
 
@@ -998,6 +1002,8 @@ def main():
                     help="on macOS, write dist/openbf.app with the game, openbf.pak and openbf_data/ inside "
                          "Contents/MacOS and the rendered openbf.icns in Contents/Resources "
                          "(default: on for macOS, off elsewhere; --no-app-bundle keeps the flat file)")
+    ap.add_argument("--bf2-only", action="store_true",
+                    help="build from Battlefront II alone (ignore any cached extracted/bf1 tree)")
     ap.add_argument("--session-stats", action="store_true",
                     help="dev only: build the game with the session-stats feature (one JSON file per round in "
                          "openbf_data/session_stats/; LAN still plays with builds without it)")
@@ -1016,7 +1022,8 @@ def main():
         sys.exit(f"pack: --out {out} must be a file outside engine/")
     named_pc = resolve_pc_roots(a.pc_dir, a.pc1 or os.environ.get("PC1"), a.pc2 or os.environ.get("PC2"))
     roots = [a.iso_dir] if a.iso_dir else input_scan.default_roots(ROOT)
-    plan = input_scan.scan(roots, {"bf1": a.iso1, "bf2": a.iso2}, named_pc, EXTRACTED, a.iso_dir)
+    plan = input_scan.scan(roots, {"bf1": a.iso1, "bf2": a.iso2}, named_pc, EXTRACTED, a.iso_dir,
+                           ignore_extracted_bf1=a.bf2_only)
     with pack_cache.outputs_locked((out, os.path.join(os.path.dirname(out), ".openbf-pack"))):
         print("\n".join(input_scan.summary_lines(plan)))
         input_scan.write_summary(plan, out)
@@ -1047,12 +1054,15 @@ def build(a, out, plan, packs, visual_report):
     except ValueError as error:
         sys.exit(f"pack: {error}")
     menu_font_core = menu_font["path"] if menu_font else None
-    pc_roots = {g: item["path"] for g, chosen in plan["games"].items()
-                for item in chosen["visual"] if item["kind"] == "pc-install"}
-    images = {g: chosen["gameplay"]["path"] if chosen["gameplay"]["kind"] == "ps2-disc" else None
-              for g, chosen in plan["games"].items()}
+    has_bf1 = input_scan.has_bf1(plan)
+    active_games = ("bf1", "bf2") if has_bf1 else ("bf2",)
+    pc_roots = {g: item["path"] for g in active_games
+                for item in plan["games"][g]["visual"] if item["kind"] == "pc-install"}
+    images = {g: plan["games"][g]["gameplay"]["path"] if plan["games"][g]["gameplay"]["kind"] == "ps2-disc" else None
+              for g in active_games}
     GAMEPLAY_TREES.clear()
-    for g, chosen in plan["games"].items():
+    for g in active_games:
+        chosen = plan["games"][g]
         if chosen["gameplay"].get("tree"):
             GAMEPLAY_TREES[g] = chosen["gameplay"]["tree"]
         elif chosen["gameplay"]["kind"] == "pc-install":
@@ -1125,9 +1135,10 @@ def build(a, out, plan, packs, visual_report):
     bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
 
     step("3/6 the Lua scripts")
-    lua_root = console_lua_root()
-    extracted_used.update(LUA)  # those source LVLs were read to key the console cache
-    for g, lvls in LUA.items():
+    lua_root = console_lua_root(active_games)
+    extracted_used.update(active_games)  # those source LVLs were read to key the console cache
+    for g in active_games:
+        lvls = LUA[g]
         for sub, lvl in lvls.items():
             d = os.path.join(lua_root, g, sub)
             if os.path.isfile(os.path.join(d, ".complete")):
@@ -1147,14 +1158,15 @@ def build(a, out, plan, packs, visual_report):
     correction_args = gameplay_correction_args(plan)
     # Keep the full Lua cache for sound names. For each PC primary the mission
     # tables must supply the required facts even when that cache is populated.
-    table_only = [game for game, chosen in plan["games"].items() if chosen["gameplay"]["kind"] == "pc-install"]
+    table_only = [game for game in active_games if plan["games"][game]["gameplay"]["kind"] == "pc-install"]
     table_only_args = [arg for game in table_only for arg in ("--table-only-game", game)]
     mission_env = dict(os.environ)
     for name in ("OPENBF_GAMEPLAY_CORRECTIONS", "OPENBF_GAMEPLAY_SOURCE_BF1", "OPENBF_GAMEPLAY_SOURCE_BF2"):
         mission_env.pop(name, None)
     space = os.environ.get("OPENBF_BAKE_SPACE", "1") != "0"
     bake_inputs["space"] = space
-    mission_inputs = {"console_lua": lua_root, "corrections": correction_args, "table_only": table_only, "space": space}
+    mission_inputs = {"console_lua": lua_root, "corrections": correction_args, "table_only": table_only,
+                      "space": space, "has_bf1": has_bf1}
     why = stale(MISSION_STAMP, MISSION_INPUTS, mission_inputs) if have and not tracked else None
     if have and (tracked or (not a.rebake and not pc_roots and why is None)):
         print(f"   already there ({MISSIONS})")
@@ -1166,9 +1178,11 @@ def build(a, out, plan, packs, visual_report):
         with tempfile.TemporaryDirectory(prefix="missions-", dir=os.path.dirname(MISSIONS)) as staging:
             command = [sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"),
                        "--ps2-only", "--lua-root", lua_root, "--out", staging, "--hunt"]
+            if not has_bf1:
+                command.append("--bf2-only")
             run(command + (["--space"] if space else []) + correction_args + table_only_args, env=mission_env)
             pack_cache.replace_tree(staging, MISSIONS)
-        extracted_used.update(("bf1", "bf2"))
+        extracted_used.update(active_games)
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:
             fh.write(inputs_hash(MISSION_INPUTS, mission_inputs) + "\n")
@@ -1176,7 +1190,7 @@ def build(a, out, plan, packs, visual_report):
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "BF2_XBOX_DISC", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE", "OPENBF_AUDIO_RESTORE_SCRIPT"):
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "BF2_XBOX_DISC", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_HAS_BF1", "OPENBF_MENU_FONT_CORE", "OPENBF_AUDIO_RESTORE_SCRIPT"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
     for g, image in images.items():
@@ -1202,7 +1216,7 @@ def build(a, out, plan, packs, visual_report):
                                  dict(ffmpeg=bake_cache.ffmpeg_identity(bake_env, memo),
                                       restoration=bake_cache.restoration_identity(bake_env, memo)))
     memo.save()
-    rows = bake_plan(store, keys, a.rebake)
+    rows = bake_plan(store, keys, a.rebake, has_bf1=has_bf1)
     to_bake = [group for group, action, _ in rows if action == "bake"]
     print("\n".join(bake_cache.explain_lines(rows, verbose=a.explain)), flush=True)
     if to_bake:
@@ -1217,9 +1231,10 @@ def build(a, out, plan, packs, visual_report):
                   "checkout's code (pass --baked for a folder of your own)", flush=True)
         os.makedirs(BAKED, exist_ok=True)
         done = bake_cache.run_groups(store, keys, rows, lambda group: run([*rebake_sh, group], env=bake_env))
-        rebaked = "all" if set(done) >= set(bake_cache.ORDER) else done
-        extracted_used.update(("bf1", "bf2"))
-    # Always plan both units, including a warm pack whose groups all match.
+        expected_groups = set(bake_cache.ORDER) if has_bf1 else set(bake_cache.ORDER) - bake_cache.BF1_ONLY_GROUPS
+        rebaked = "all" if set(done) >= expected_groups else done
+        extracted_used.update(active_games)
+    # Always plan active units, including a warm pack whose groups all match.
     # The helper verifies and materializes the complete cached result before packing.
     bake_env["OPENBF_SKIP_GLOBAL_SOUND"] = "0"
     Path(global_result).unlink(missing_ok=True)
@@ -1232,9 +1247,10 @@ def build(a, out, plan, packs, visual_report):
     left = missing_music()
     if left:
         sys.exit(f"pack: {len(left)} music files missing or incomplete after the bake, e.g. {left[0]}")
-    left = missing_shadows()
-    if left:
-        sys.exit(f"pack: the BF1 sides were baked without vehicle shadows, e.g. {left[0]}")
+    if has_bf1:
+        left = missing_shadows()
+        if left:
+            sys.exit(f"pack: the BF1 sides were baked without vehicle shadows, e.g. {left[0]}")
 
     warnings = check_foliage(bake, plan)
     if a.bake_only:

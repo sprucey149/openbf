@@ -731,6 +731,8 @@ impl HudView {
         let transforms: manifest::hud::HudLayout = read_ron(&common.join("hud/hudtransforms.ron"))?;
         let index: manifest::hud::HudIndex = read_ron(&common.join("hud/index.ron"))?;
         let mut art = HudArt::default();
+        art.no_bf1_victory_sheet =
+            !pak::is_file(assets_dir.join("common_bf1/textures/ig_victory_defeat.ktx2"));
         let mut distance_pages = HashMap::new();
         let fonts_dir = common.join("fonts");
         for f in &index.fonts {

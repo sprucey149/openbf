@@ -18,10 +18,13 @@ impl Fixture {
     }
 
     fn restore(&self) -> AudioRestore {
+        self.restore_with("python3".into(), self.0.join("worker.py"))
+    }
+
+    fn restore_with(&self, python: OsString, script: PathBuf) -> AudioRestore {
         AudioRestore {
             config: Some(Config {
-                python: "python3".into(),
-                script: self.0.join("worker.py"),
+                program: Program::Script { python, script },
                 kind: "effects",
             }),
             worker: None,
@@ -129,16 +132,17 @@ fn failed_write_discards_worker_and_never_restarts() {
 #[test]
 fn invalid_configuration_fails_without_starting_worker() {
     let fixture = Fixture::new(ECHO);
-    let mut restore = fixture.restore();
-    restore.config.as_mut().unwrap().script = "relative.py".into();
+    let mut restore = fixture.restore_with("python3".into(), "relative.py".into());
     assert!(restore
         .apply(22050, &mut [1])
         .unwrap_err()
         .to_string()
         .contains("must be absolute"));
     assert!(restore.worker.is_none());
-    let mut restore = fixture.restore();
-    restore.config.as_mut().unwrap().python = fixture.0.join("missing-python").into();
+    let mut restore = fixture.restore_with(
+        fixture.0.join("missing-python").into(),
+        fixture.0.join("worker.py"),
+    );
     assert!(restore.apply(22050, &mut [1]).is_err());
     assert!(restore.worker.is_none());
 }

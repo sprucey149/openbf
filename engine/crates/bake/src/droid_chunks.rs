@@ -6,6 +6,51 @@ use manifest::{ClassDef, DroidChunkManifest, ManifestCollision, ManifestPrim};
 use mungefs::{fnv1a_lowercase as hash, model::Model, skel::Skeleton};
 use std::path::Path;
 
+/// A BF2-only build's droid overlay: BF2's own `bdroid_chunk1..5` alone. With
+/// no BF1 disc there are no SBD chunk profiles, BF1 chunk models or BF1
+/// explosion effects to lend, so the manifest stays empty of those.
+pub fn bake_bf2_only(bf2: &str, out: &Path, pc_cis: Option<&str>) -> Result<()> {
+    let bf2 = crate::resolve_ci(bf2);
+    let pc_cis = pc_cis.map(crate::resolve_ci);
+    let b2 = crate::gameplay::read(&bf2)?;
+    let c2 = mungefs::content_chunks(mungefs::open(&b2)?)?;
+    let side = out.join("side_bf2/droid_chunks");
+    native_chunks(&bf2, &c2, &side, pc_cis.as_deref())?;
+    crate::write_ron(
+        &side.join("droid_chunks.ron"),
+        &DroidChunkManifest::default(),
+    )?;
+    ensure_aliased_sheets(&side, "bf2")
+}
+
+/// The battle droid's own chunks, from this game's disc. Baked here rather
+/// than by `bake weapon`, which would overwrite the living droid's sheet with
+/// an opaque copy.
+fn native_chunks(
+    lvl: &str,
+    chunks: &[mungefs::Chunk<'_>],
+    side: &Path,
+    pc: Option<&str>,
+) -> Result<()> {
+    for n in 1..=5 {
+        aliased_chunk(lvl, chunks, &format!("bdroid_chunk{n}"), side, pc)?;
+    }
+    Ok(())
+}
+
+/// Every sheet a chunk bake wrote carries the `openbf_droid_` prefix, so none
+/// replaces a living soldier's texture of the same name.
+fn ensure_aliased_sheets(side: &Path, game: &str) -> Result<()> {
+    for entry in std::fs::read_dir(side.join("textures"))? {
+        let name = entry?.file_name();
+        ensure!(
+            name.to_string_lossy().starts_with("openbf_droid_"),
+            "{game} droid chunks: {name:?} would shadow a living soldier's sheet"
+        );
+    }
+    Ok(())
+}
+
 /// Generate only the droid overlay; never modifies an input LVL. `pc_cis` is
 /// the PC install's CIS side LVL for the BF2 battle droid chunks' tier 2.
 pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>) -> Result<()> {
@@ -126,17 +171,12 @@ pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>
                 meta.nodes.push((model.into(), crate::hardpoints::of(skel)));
             }
         }
-        // The battle droid's own chunks, from this game's disc. Baked here
-        // rather than by `bake weapon`, which would overwrite the living
-        // droid's sheet with an opaque copy.
         let (lvl, native, pc) = if game == "bf1" {
             (bf1, &c1, None)
         } else {
             (bf2, &c2, pc_cis)
         };
-        for n in 1..=5 {
-            aliased_chunk(lvl, native, &format!("bdroid_chunk{n}"), &side, pc)?;
-        }
+        native_chunks(lvl, native, &side, pc)?;
         // The same BF1 models and prims on both games' maps.
         for n in 1..=5 {
             let model = format!("sbdroid_chunk{n}");
@@ -185,13 +225,7 @@ pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>
             // side_bf2/textures (the soldier bake's, both tiers).
         }
         crate::write_ron(&side.join("droid_chunks.ron"), &meta)?;
-        for entry in std::fs::read_dir(side.join("textures"))? {
-            let name = entry?.file_name();
-            ensure!(
-                name.to_string_lossy().starts_with("openbf_droid_"),
-                "{game} droid chunks: {name:?} would shadow a living soldier's sheet"
-            );
-        }
+        ensure_aliased_sheets(&side, game)?;
     }
     // The BF1 explosion and chunk trail retain BF1's particle rules and sheets.
     let bytes = crate::gameplay::read(common)?;

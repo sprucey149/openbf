@@ -717,6 +717,10 @@ pub struct Sim {
     /// Every game the port runs leaves it `false`; a session setting in the
     /// static digest, only when set.
     pub rescue_off: bool,
+    /// BF2-only builds have no borrowed BF1 prone animations, so soldiers do
+    /// not enter `Stance::Prone`. Defaults to `false`; hashed into the static
+    /// digest's `session` group only when set so full builds stay bit-identical.
+    pub prone_off: bool,
     /// Card HITCH: wall-clock ms the last [`Sim::step`] spent on the AI (the
     /// commander's plan, the turret offers, the team board and every bot's
     /// think) - the windowed game's frame recorder reads it. A measurement
@@ -1354,6 +1358,7 @@ impl Sim {
             nav_stats: NavStats::default(),
             rescue_counts: [0; 2],
             rescue_off: false,
+            prone_off: false,
             ai_wall_ms: 0.0,
             tick_cost: TickCost::default(),
             bot_census: Default::default(),

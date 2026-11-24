@@ -1303,9 +1303,16 @@ impl Sim {
                     };
                     self.saber_gravity(i);
                     let before = self.units[i].soldier.stance_snap();
-                    self.units[i]
-                        .soldier
-                        .step_looking(dt, pad_i, &consts, rules, look, env);
+                    let prone_allowed = !self.prone_off;
+                    self.units[i].soldier.step_looking_with_prone(
+                        dt,
+                        pad_i,
+                        &consts,
+                        rules,
+                        look,
+                        env,
+                        prone_allowed,
+                    );
                     // Issue #182 B1: no growing into a stance with no room.
                     self.keep_headroom(i, &before, dt);
                     let u = &mut self.units[i];

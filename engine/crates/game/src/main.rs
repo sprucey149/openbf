@@ -303,6 +303,7 @@ fn main() -> Result<()> {
     pak::mount(std::path::Path::new("missions"), "missions");
     // Dev-only (`session-stats` feature): old round files go at launch.
     game::session_stats::prune_at_launch();
+    game::blackbox::warm_checkout();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     let a = it.next().cloned().unwrap_or_else(|| "--shell".to_string());
