@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 audio = { path = "../audio", default-features = false }
+extensions = { path = "../extensions" }
 mungefs = { path = "../mungefs" }
 manifest = { path = "../manifest" }
 glam.workspace = true

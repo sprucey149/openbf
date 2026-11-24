@@ -416,51 +416,55 @@ impl AiGoals {
             GoalKind::Deathmatch => Some(Steer::Deathmatch),
             GoalKind::Destroy => g.target.map(Steer::Destroy),
             GoalKind::Defend => g.target.map(Steer::Defend),
-            GoalKind::CtfOffense => Some(self.ctf_steer(h, g)),
+            GoalKind::CtfOffense | GoalKind::CtfDefense => Some(self.ctf_steer(h, g)),
             _ => None,
         }
     }
 
-    /// Unit `h`'s CTF offense agent, while it is a member of a CTFOffense
+    /// Unit `h`'s CTF agent, while it is a member of a CTFOffense or CtfDefense
     /// goal.
     pub fn ctf_of(&self, h: UnitHandle) -> Option<CtfMember> {
         let g = self.of(h.index as usize, h.gen)?;
         let m = (*self.ctf.get(h.index as usize)?)?;
-        (g.kind == GoalKind::CtfOffense && m.goal == g.id && m.life == h.gen).then_some(m)
+        (matches!(g.kind, GoalKind::CtfOffense | GoalKind::CtfDefense)
+            && m.goal == g.id
+            && m.life == h.gen)
+            .then_some(m)
     }
 
     fn ctf_steer(&self, h: UnitHandle, g: &Goal) -> Steer {
-        let (
+        let Some(m) = self.ctf_of(h) else {
+            return Steer::Stand;
+        };
+        let (region, flag) = match g.target {
             Some(GoalTarget::Ctf {
                 region,
                 flag: Some(f),
-            }),
-            Some(m),
-        ) = (g.target, self.ctf_of(h))
-        else {
-            return Steer::Stand;
+            }) => (region, f),
+            Some(GoalTarget::Flag(f)) => (Vec3::ZERO, f),
+            _ => return Steer::Stand,
         };
         match (m.step, m.carrier) {
-            (CtfStep::Fetch, _) => Steer::Go(GoalTarget::Flag(f)),
+            (CtfStep::Fetch, _) => Steer::Go(GoalTarget::Flag(flag)),
             (CtfStep::Carry, _) => Steer::Go(GoalTarget::Point(region)),
             (CtfStep::Escort, Some(c)) => Steer::Escort {
                 carrier: c,
                 offset: m.offset,
             },
             (CtfStep::Chase, Some(c)) => Steer::Go(GoalTarget::Unit(c)),
-            (CtfStep::Guard | CtfStep::Cover, _) => Steer::Defend(GoalTarget::Flag(f)),
+            (CtfStep::Guard | CtfStep::Cover, _) => Steer::Defend(GoalTarget::Flag(flag)),
             (CtfStep::Escort | CtfStep::Chase, None) => Steer::Stand,
         }
     }
 
     /// Unit `h`'s defend helper, while it is a member of a Defend goal or a
-    /// CTFOffense member guards or covers its flag.
+    /// CTF member guards or covers its flag.
     pub fn hold_of(&self, h: UnitHandle) -> Option<DefendHold> {
         let g = self.of(h.index as usize, h.gen)?;
         let hold = (*self.hold.get(h.index as usize)?)?;
         let defends = match g.kind {
             GoalKind::Defend => true,
-            GoalKind::CtfOffense => self
+            GoalKind::CtfOffense | GoalKind::CtfDefense => self
                 .ctf_of(h)
                 .is_some_and(|m| matches!(m.step, CtfStep::Guard | CtfStep::Cover)),
             _ => false,
@@ -689,7 +693,26 @@ fn ctf_agent(sim: &Sim, i: usize) -> Option<CtfMember> {
     let g = sim
         .ai_goals
         .of(i, u.gen)
-        .filter(|g| g.kind == GoalKind::CtfOffense)?;
+        .filter(|g| matches!(g.kind, GoalKind::CtfOffense | GoalKind::CtfDefense))?;
+    if g.kind == GoalKind::CtfDefense {
+        let Some(GoalTarget::Flag(f)) = g.target else {
+            return None;
+        };
+        let flag = sim.ctf.as_ref()?.flags.get(usize::from(f))?;
+        let carrier = flag.carrier();
+        let step = match flag.status {
+            crate::sim::ctf::FlagStatus::AtHome => CtfStep::Guard,
+            crate::sim::ctf::FlagStatus::Dropped { .. } => CtfStep::Fetch,
+            crate::sim::ctf::FlagStatus::Carried { .. } => CtfStep::Chase,
+        };
+        return Some(CtfMember {
+            goal: g.id,
+            life: u.gen,
+            step,
+            carrier,
+            offset: Vec3::ZERO,
+        });
+    }
     let Some(GoalTarget::Ctf { flag: Some(f), .. }) = g.target else {
         return None;
     };
@@ -837,6 +860,10 @@ fn defend_hold(sim: &Sim, i: usize) -> Option<DefendHold> {
             (CtfStep::Guard | CtfStep::Cover, GoalTarget::Ctf { flag: Some(f), .. }) => {
                 GoalTarget::Flag(f)
             }
+            _ => return None,
+        },
+        GoalKind::CtfDefense => match (sim.ai_goals.ctf_of(sim.handle(i))?.step, g.target?) {
+            (CtfStep::Guard, GoalTarget::Flag(f)) => GoalTarget::Flag(f),
             _ => return None,
         },
         _ => return None,

@@ -80,6 +80,8 @@ fn netplay_content_intersection() {
         maps: maps.iter().map(|k| (*k).to_owned()).collect(),
         games: games.iter().map(|g| (*g).to_owned()).collect(),
         addon_heroes: addon,
+        active_mods: Vec::new(),
+        override_digest: String::new(),
     };
     let a = m(&["bf1_tat2", "bf2_kas2", "bf2_cor1"], &["bf1", "bf2"], true);
     let b = m(&["bf2_kas2", "bf2_cor1"], &["bf2"], true);

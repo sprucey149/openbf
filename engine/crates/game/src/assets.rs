@@ -1873,7 +1873,21 @@ pub fn load_battle_scene_with_layers(
     let mut scene = load_scene(dir)?;
     let layer = if mode.eq_ignore_ascii_case("campaign") || !layers.is_empty() {
         let merged = scene.apply_mission_layers(layers);
-        (!merged.is_empty()).then(|| merged.join(", "))
+        if !mode.eq_ignore_ascii_case("campaign") {
+            let fallback = if merged.is_empty() {
+                scene.apply_mode_layer(mode)
+            } else {
+                None
+            };
+            scene.manifest.spawn_only_posts = matches!(mode, "eli" | "hunt");
+            if let Some(name) = fallback {
+                Some(name)
+            } else {
+                (!merged.is_empty()).then(|| merged.join(", "))
+            }
+        } else {
+            (!merged.is_empty()).then(|| merged.join(", "))
+        }
     } else {
         anyhow::ensure!(
             (mode == "hunt" && scene.manifest.source_game == "bf1")
@@ -1883,10 +1897,15 @@ pub fn load_battle_scene_with_layers(
         );
         scene.apply_mode_layer(mode)
     };
+    let common_name = format!("common_{}", scene.manifest.source_game);
     let common = dir
         .parent()
-        .map(|p| p.join(format!("common_{}", scene.manifest.source_game)))
+        .map(|p| p.join(&common_name))
         .filter(|cd| pak::exists(cd.join("common.ron")))
+        .or_else(|| {
+            let root = Path::new("assets_baked").join(&common_name);
+            pak::exists(root.join("common.ron")).then_some(root)
+        })
         .map(|cd| {
             let added = load_common(&cd).map(|c| scene.merge_common(c));
             (cd, added)

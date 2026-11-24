@@ -7,7 +7,9 @@
 //! directory convention.
 
 pub mod config;
+pub mod mods_worker;
 pub mod paths;
 pub mod pipeline;
 pub mod runner;
 pub mod ui;
+pub mod ui_mods;

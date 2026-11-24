@@ -7,7 +7,9 @@ OpenBF supports modular **engine extensions** cleanly separated from the core si
 - **Runtime activation without recompiling:** Bundled extensions are compiled into supported release builds and enabled or disabled at runtime in `openbf_data/extensions.ron` (typically toggled in `openbf-launcher` under **Mods**).
 - **Zero intrusion on desktop & headless paths:** When an extension is disabled—or suppressed by `--desktop`, `--no-vr`, `--headless`, `--sim-hash`, or LAN multiplayer—desktop rendering, simulation determinism, and multiplayer lockstep streams behave identically to vanilla OpenBF.
 - **Deterministic simulation authority:** Only `core` owns weapon rules, projectile simulation, cooldowns, ammo, collision, and damage. Extensions observe read-only `SimView` snapshots and feed quantized deterministic inputs (`PadState::tracked_shots`, `PadState::tracked_combat`, `Steer::Tracked`) through engine interfaces.
-- **Ready for future third-party mods without premature ABI lock-in:** The declarative manifest, origin tagging (`Bundled` vs. `ThirdParty`), dependency/conflict graph, and launcher **Mods** tab already model third-party entries, while deferring a dynamic C/Rust plugin ABI or legacy BF2 addon importer to future milestones.
+- **Filesystem content mods live alongside engine extensions in `extensions.ron` (schema v2):** Content mods discovered from `openbf_data/mods/` share persistent enabled toggles in `openbf_data/extensions.ron`, while maintaining strict separation of concerns:
+  - Content mods (`content.<slug>`) carry an explicit user-managed `order` (`#1` first = higher override priority), isolated map/mission namespaces, declared explicit stock overrides, and versioned native asset caches in `openbf_data/mod_cache/` (see [docs/mods.md](mods.md)).
+  - Engine extensions (`openbf.vr`) remain bundled, capability-resolved modules whose display backend selection never depends on arbitrary content-mod load order. Arbitrary third-party native DLL plugins remain unsupported.
 
 ## Crate Architecture
 

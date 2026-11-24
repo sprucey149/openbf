@@ -56,7 +56,10 @@ impl fmt::Display for ResolutionError {
                 "extension `{id}` requires missing or disabled dependency `{dependency}`"
             ),
             Self::ExplicitConflict { id, conflict } => {
-                write!(f, "extension `{id}` conflicts with active extension `{conflict}`")
+                write!(
+                    f,
+                    "extension `{id}` conflicts with active extension `{conflict}`"
+                )
             }
             Self::ExclusiveCapabilityConflict {
                 capability,
@@ -135,7 +138,7 @@ impl ExtensionRegistry {
         let mut candidate_ids = BTreeSet::new();
 
         for (id, enabled) in &profile.enabled {
-            if !*enabled {
+            if !*enabled || id.starts_with("content.") {
                 continue;
             }
             if !self.manifests.contains_key(id) {
@@ -318,6 +321,9 @@ mod tests {
             conflicts: vec![],
             supported: true,
             unsupported_reason: None,
+            author: None,
+            order_sensitive: false,
+            legacy_addon_id: None,
         }
     }
 
@@ -424,9 +430,7 @@ mod tests {
         ));
 
         profile.set_enabled("a.base", true);
-        let ok = reg
-            .resolve(&profile, &StartupOverrides::default())
-            .unwrap();
+        let ok = reg.resolve(&profile, &StartupOverrides::default()).unwrap();
         assert_eq!(ok.active, vec!["a.base", "b.addon"]);
 
         profile.set_enabled("c.rival", true);
@@ -437,5 +441,17 @@ mod tests {
             conflict[0],
             ResolutionError::ExplicitConflict { .. }
         ));
+    }
+
+    #[test]
+    fn enabled_content_mods_do_not_warn_or_affect_display_backend() {
+        let reg = ExtensionRegistry::new([bundled_vr_manifest(true)]);
+        let mut profile = ExtensionProfile::default();
+        profile.set_enabled("content.abr", true);
+        profile.set_enabled("content.overhaul", true);
+        profile.order = vec!["content.overhaul".into(), "content.abr".into()];
+        let plan = reg.resolve(&profile, &StartupOverrides::default()).unwrap();
+        assert!(plan.warnings.is_empty());
+        assert_eq!(plan.display_backend, DisplayBackendSelection::Desktop);
     }
 }

@@ -14,6 +14,7 @@ use super::scene::draw_in;
 use super::upload::{upload_submeshes, upload_texture_file};
 use crate::assets::load_glb;
 use anyhow::Result;
+use core::fmath::FloatExt;
 use glam::{Mat4, Quat, Vec3};
 use render::{DrawCmd, DrawLayer, LightPath, MeshHandle, Renderer, TextureHandle};
 use std::collections::HashMap;
@@ -23,12 +24,14 @@ use std::path::{Path, PathBuf};
 pub const BF1_HIDE_LIFE: f32 = 1.0;
 
 /// One drawn submesh of an item model.
+#[derive(Clone)]
 struct Part {
     mesh: MeshHandle,
     texture: Option<TextureHandle>,
     layer: DrawLayer,
     light: LightPath,
     additive: bool,
+    floor_lift: f32,
     /// The model's sphere in its own space: every model draw gathers the
     /// local lights for it (`re-point-lights.md` §5), the item's own
     /// `LightOdf` omni among them (§4).
@@ -44,12 +47,20 @@ impl Part {
         layer: DrawLayer,
         additive: bool,
     ) -> Self {
+        let min_y = cpu
+            .positions
+            .iter()
+            .map(|p| p[1])
+            .reduce(FloatExt::fmin)
+            .unwrap_or(0.0);
+        let floor_lift = (-min_y - core::sim::ctf::GROUND_FLAG_CLEARANCE).fmax(0.0);
         Self {
             mesh,
             texture,
             layer,
             light: cpu.light_path(k),
             additive,
+            floor_lift,
             sphere: crate::point_light::model_sphere(cpu, Mat4::IDENTITY),
         }
     }
@@ -66,6 +77,9 @@ impl Part {
 pub struct FlagVisuals {
     loose: Vec<Part>,
     carried: Vec<Part>,
+    ground_loose: Vec<Part>,
+    ground_carried: Vec<Part>,
+    team_ground: [Option<(Vec<Part>, Vec<Part>)>; 2],
     cull: Option<f32>,
     home_rotation: Quat,
     campaign: HashMap<String, (Vec<Part>, Vec<Part>)>,
@@ -129,14 +143,18 @@ impl FlagVisuals {
             ));
         }
         let mut db = crate::classdb::ClassDb::default();
-        if let Some(root) = scene.dir.parent() {
-            let _ = db.load_map(&scene.dir);
-            let _ = db.load(
-                &root
-                    .join("classes")
-                    .join(format!("{}_ingame.ron", scene.manifest.source_game)),
-            );
-        }
+        let common_dir = scene
+            .dir
+            .parent()
+            .filter(|p| pak::is_dir(p.join(format!("common_{}", scene.manifest.source_game))))
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("assets_baked"));
+        let _ = db.load_map(&scene.dir);
+        let _ = db.load(
+            &common_dir
+                .join("classes")
+                .join(format!("{}_ingame.ron", scene.manifest.source_game)),
+        );
         for class in db
             .names()
             .filter(|name| db.engine_base(name) == Some("flag"))
@@ -169,6 +187,69 @@ impl FlagVisuals {
                     load_flag_parts(r, scene, db.prop(class, "CarriedGeometryName")),
                 ),
             );
+        }
+        // Generic ground flag models from scene or common_<game> (`com_icon_neutral_flag`,
+        // faction icon flags, or `com_item_flag` class) so non-space CTF draws
+        // actual flags without requiring a placed space-flag instance.
+        for name in [
+            "com_icon_neutral_flag",
+            "com_icon_imperial_flag",
+            "com_icon_alliance_flag",
+            "com_icon_republic_flag",
+            "com_icon_cis_flag",
+            "com_icon_flag",
+        ] {
+            if out.ground_loose.is_empty() {
+                out.ground_loose = load_flag_parts(r, scene, Some(name));
+            }
+            if out.ground_carried.is_empty() {
+                out.ground_carried = load_flag_parts(r, scene, Some(&format!("{name}_carried")));
+            }
+        }
+        if out.ground_loose.is_empty() {
+            if let Some((l, c)) = out.campaign.get("com_item_flag") {
+                out.ground_loose = l.clone();
+                if out.ground_carried.is_empty() {
+                    out.ground_carried = c.clone();
+                }
+            }
+        }
+        if out.ground_carried.is_empty() {
+            out.ground_carried = out.ground_loose.clone();
+        }
+        for (team_idx, candidates) in [
+            (
+                0usize,
+                [
+                    "com_icon_alliance_flag",
+                    "com_icon_republic_flag",
+                    "com_icon_neutral_flag",
+                ],
+            ),
+            (
+                1usize,
+                [
+                    "com_icon_imperial_flag",
+                    "com_icon_cis_flag",
+                    "com_icon_neutral_flag",
+                ],
+            ),
+        ] {
+            for name in candidates {
+                let loose = load_flag_parts(r, scene, Some(name));
+                if !loose.is_empty() {
+                    let carried = {
+                        let c = load_flag_parts(r, scene, Some(&format!("{name}_carried")));
+                        if c.is_empty() {
+                            loose.clone()
+                        } else {
+                            c
+                        }
+                    };
+                    out.team_ground[team_idx] = Some((loose, carried));
+                    break;
+                }
+            }
         }
         let additive_bit = crate::fx::draw::additive_bit(
             if scene.manifest.source_game.eq_ignore_ascii_case("bf1") {
@@ -218,24 +299,70 @@ impl FlagVisuals {
     pub fn draws(&self, sim: &core::sim::Sim) -> Vec<DrawCmd> {
         let mut out = Vec::new();
         let Some(ctf) = &sim.ctf else { return out };
+        let is_space = ctf.is_space();
         for flag in &ctf.flags {
             let Some((carried, m)) = flag_pose(sim, flag, self.home_rotation) else {
                 continue;
             };
-            let parts = if carried { &self.carried } else { &self.loose };
+            let parts: &[Part] = if is_space {
+                if carried {
+                    &self.carried
+                } else {
+                    &self.loose
+                }
+            } else if let Some((tl, tc)) = self
+                .team_ground
+                .get(usize::from(flag.team))
+                .and_then(|o| o.as_ref())
+            {
+                if carried {
+                    tc
+                } else {
+                    tl
+                }
+            } else if carried {
+                &self.ground_carried
+            } else {
+                &self.ground_loose
+            };
             for part in parts {
+                let pose = if !is_space && !carried && part.floor_lift > 0.0 {
+                    Mat4::from_translation(Vec3::Y * part.floor_lift) * m
+                } else {
+                    m
+                };
                 let mut draw = match part.texture {
-                    Some(texture) => draw_in(part.layer, part.mesh, texture, m),
-                    None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], m),
+                    Some(texture) => draw_in(part.layer, part.mesh, texture, pose),
+                    None => DrawCmd::flat(part.mesh, [0.6, 0.6, 0.6, 1.0], pose),
                 }
                 .with_cull(self.cull)
                 .with_light(part.light)
-                .with_lit(part.lit(m));
+                .with_lit(part.lit(pose));
                 draw.additive = part.additive;
                 out.push(draw);
             }
         }
         out
+    }
+
+    pub fn set_team_flag_models(
+        &mut self,
+        r: &mut Renderer,
+        scene: &crate::assets::Scene,
+        models: &[(Option<String>, Option<String>)],
+    ) {
+        for (idx, (loose_name, carried_name)) in models.iter().take(2).enumerate() {
+            let loose = load_flag_parts(r, scene, loose_name.as_deref());
+            if !loose.is_empty() {
+                let carried = load_flag_parts(r, scene, carried_name.as_deref());
+                let carried = if carried.is_empty() {
+                    loose.clone()
+                } else {
+                    carried
+                };
+                self.team_ground[idx] = Some((loose, carried));
+            }
+        }
     }
 
     /// The item light's lens flare (re-point-lights.md §10). The light ctor
@@ -374,6 +501,14 @@ impl super::vehicles::VehicleVisuals {
             .map(|c| self.flags.campaign_draws(&walk.sim, c))
             .unwrap_or_default()
     }
+    pub fn configure_ctf_flags(
+        &mut self,
+        r: &mut Renderer,
+        scene: &crate::assets::Scene,
+        specs: &[(Option<String>, Option<String>)],
+    ) {
+        self.flags.set_team_flag_models(r, scene, specs);
+    }
 }
 
 /// Script-created flags need no placed instance. Their class selects both
@@ -386,10 +521,13 @@ fn load_flag_parts(
     let Some(geometry) = geometry else {
         return Vec::new();
     };
-    let Some(root) = scene.dir.parent() else {
-        return Vec::new();
-    };
-    let common = root.join(format!("common_{}", scene.manifest.source_game));
+    let common_name = format!("common_{}", scene.manifest.source_game);
+    let common = scene
+        .dir
+        .parent()
+        .map(|root| root.join(&common_name))
+        .filter(|cd| pak::is_dir(cd))
+        .unwrap_or_else(|| PathBuf::from("assets_baked").join(&common_name));
     let loaded = [scene.dir.as_path(), common.as_path()]
         .into_iter()
         .find_map(|dir| load_glb(&dir.join("models").join(format!("{geometry}.glb"))).ok());

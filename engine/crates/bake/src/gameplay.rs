@@ -328,10 +328,23 @@ fn source_platform(path: &Path, bytes: &[u8]) -> Result<Option<&'static str>> {
 }
 
 pub(crate) fn source_game(path: &Path) -> Result<Option<&'static str>> {
-    let Some(root) = source_root(path) else {
-        return Ok(None);
+    let addon = is_addon(path);
+    let mission = match source_root(path) {
+        Some(root) => crate::join_ci(&root, "MISSION.LVL"),
+        None if addon => {
+            if let Some(m) = path
+                .ancestors()
+                .skip(1)
+                .map(|dir| crate::join_ci(dir, "MISSION.LVL"))
+                .find(|p| p.is_file())
+            {
+                m
+            } else {
+                return Ok(Some("bf2"));
+            }
+        }
+        None => return Ok(None),
     };
-    let mission = crate::join_ci(&root, "MISSION.LVL");
     let bytes = std::fs::read(&mission).with_context(|| mission.display().to_string())?;
     let inner = mungefs::open(&bytes).map_err(|e| anyhow!("{e}"))?;
     for c in mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))? {
@@ -341,33 +354,54 @@ pub(crate) fn source_game(path: &Path) -> Result<Option<&'static str>> {
                     return match body.payload.get(4) {
                         Some(0x40) => Ok(Some("bf1")),
                         Some(0x50) => Ok(Some("bf2")),
+                        _ if addon => return Ok(Some("bf2")),
                         _ => bail!("unknown gameplay mission Lua generation"),
                     };
                 }
             }
         }
     }
+    if addon {
+        return Ok(Some("bf2"));
+    }
     bail!("cannot identify gameplay source game from mission contents")
 }
 
-/// The optional hero pack is an addon, not a game source: it answers to its own
-/// checks in `crate::dlc`, and no correction table can name a pack in any format.
-/// `dlc::bake` names its one LVL here so the reference disc's reads stay gated.
-pub(crate) fn exempt_addon(path: &Path) {
-    let mut exempt = ADDONS.lock().unwrap_or_else(|e| e.into_inner());
-    if !exempt.iter().any(|p| p == path) {
-        exempt.push(path.to_owned());
+fn norm_cmp_path(path: &Path) -> String {
+    let s = path.to_string_lossy().replace('\\', "/");
+    let stripped = s.strip_prefix("//?/").unwrap_or(&s);
+    if cfg!(windows) {
+        stripped.to_ascii_lowercase()
+    } else {
+        stripped.to_owned()
     }
 }
 
-static ADDONS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+/// The optional hero pack or legacy mod LVL is an addon, not a game source:
+/// reference disc reads stay strictly gated by correction tables.
+pub fn exempt_addon(path: &Path) {
+    let mut keys = Vec::with_capacity(2);
+    keys.push(norm_cmp_path(path));
+    if let Ok(canon) = std::fs::canonicalize(path) {
+        keys.push(norm_cmp_path(&canon));
+    }
+    let mut exempt = ADDONS.lock().unwrap_or_else(|e| e.into_inner());
+    for k in keys {
+        if !exempt.iter().any(|p| p == &k) {
+            exempt.push(k);
+        }
+    }
+}
+
+static ADDONS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn is_addon(path: &Path) -> bool {
-    ADDONS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    let raw = norm_cmp_path(path);
+    let canon = std::fs::canonicalize(path).ok().map(|p| norm_cmp_path(&p));
+    let exempt = ADDONS.lock().unwrap_or_else(|e| e.into_inner());
+    exempt
         .iter()
-        .any(|p| p == path)
+        .any(|p| p == &raw || canon.as_ref().is_some_and(|c| c == p))
 }
 
 pub(super) fn correction(

@@ -712,6 +712,11 @@ impl Terrain {
             .filter(|pchs| is_xbox_pchs(pchs))
             .map(|pchs| parse_xbox_patches(&pchs, n, patch_edge))
             .transpose()?;
+        let pc = tern
+            .child(b"PCHS")
+            .filter(|pchs| xbox.is_none() && pc::is_pc_pchs(pchs))
+            .map(|pchs| pc::parse_pc_patches(&pchs, n, patch_edge, info.grid_unit))
+            .transpose()?;
 
         // PCHS -> PTCH, one record per 8x8-cell RENDER patch, row-major.
         // PS2 `INFO` is 14 B: `u16 layerMask, u16 count, i16 heightMin,
@@ -722,7 +727,10 @@ impl Terrain {
         // replacement mesh the PS2 draws instead of the grid there.
         let mut patch_layer_masks = Vec::new();
         let mut patch_meshes = Vec::new();
-        if let Some(pchs) = tern.child(b"PCHS").filter(|_| xbox.is_none()) {
+        if let Some(pchs) = tern
+            .child(b"PCHS")
+            .filter(|_| xbox.is_none() && pc.is_none())
+        {
             for patch in pchs.children().flatten() {
                 if &patch.tag != b"PTCH" {
                     continue;
@@ -792,9 +800,10 @@ impl Terrain {
             patch_edge,
         )
         .map_or_else(|| vec![Vec::new(); patch_layer_masks.len()], |(a, _)| a);
-        let (colr, patch_layer_masks, patch_meshes, patch_alpha) = match xbox {
-            Some(x) => (Some(x.colr), x.masks, x.meshes, x.alpha),
-            None => (colr, patch_layer_masks, patch_meshes, patch_alpha),
+        let (colr, patch_layer_masks, patch_meshes, patch_alpha) = match (xbox, pc) {
+            (Some(x), _) => (Some(x.colr), x.masks, x.meshes, x.alpha),
+            (None, Some(p)) => (Some(p.colr), p.masks, p.meshes, p.alpha),
+            (None, None) => (colr, patch_layer_masks, patch_meshes, patch_alpha),
         };
 
         // CUTS holds its own INFO (the cutter count) followed by one CUTR per
@@ -1084,6 +1093,8 @@ fn parse_lowres(lowr: &Chunk<'_>, half: f32) -> Option<LowResSheet> {
         patches,
     })
 }
+
+mod pc;
 
 #[cfg(test)]
 mod tests;

@@ -7,6 +7,7 @@
 
 pub mod shadow;
 
+pub mod addon;
 pub mod anim;
 pub mod cloth;
 pub mod coll;
@@ -22,6 +23,7 @@ pub mod iso;
 pub mod light;
 pub mod lightbeam;
 pub mod locl;
+pub mod lua50;
 pub mod model;
 pub mod particle;
 pub mod path;

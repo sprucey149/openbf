@@ -34,6 +34,7 @@ fn texts() -> Texts {
         entries,
     };
     Texts {
+        mods: Vec::new(),
         bf2: Some(std::sync::Arc::new(table.clone())),
         map: Some(std::sync::Arc::new(table)),
         bf1_map: false,
@@ -1470,4 +1471,35 @@ fn single_player_lines_name_the_human_by_his_profile() {
         [format!("{bot} killed Dawg")]
     );
     assert_eq!(s.feed.unit_name(&s.sim, me), "Dawg");
+}
+
+#[test]
+fn mod_locl_tables_resolve_in_priority_order_and_clear() {
+    use manifest::hud::{locl_key, HudLocl};
+    use std::sync::Arc;
+
+    let h_shared = locl_key("level.abr.cp1");
+    let h_low = locl_key("level.abr.cp2");
+    let high = Arc::new(HudLocl {
+        language: "english".into(),
+        entries: vec![(h_shared, "High Harbor".into())],
+    });
+    let low = Arc::new(HudLocl {
+        language: "english".into(),
+        entries: vec![
+            (h_shared, "Low Harbor".into()),
+            (h_low, "Low Bridge".into()),
+        ],
+    });
+    super::set_mod_locls(vec![high, low]);
+    let dir = std::env::temp_dir().join(format!("openbf-locl-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let texts = super::Texts::load(&dir, "bf2");
+    assert_eq!(texts.post_name("level.abr.cp1"), "High Harbor");
+    assert_eq!(texts.post_name("level.abr.cp2"), "Low Bridge");
+    super::clear_mod_locls();
+    let cleared = super::Texts::load(&dir, "bf2");
+    assert_eq!(cleared.post_name("level.abr.cp1"), "Command Post");
+    let _ = std::fs::remove_dir_all(&dir);
 }

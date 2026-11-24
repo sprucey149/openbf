@@ -30,8 +30,9 @@ pub const OPTION_ROWS: usize = 5;
 /// `ScriptCB_GetNetGameDefaults`' non-network branch).
 pub const MAX_BOTS: i32 = 16;
 /// The modes the port's sim can run (§7 dims the rest).
-pub const PORT_MODES: [Mode; 6] = [
+pub const PORT_MODES: [Mode; 7] = [
     Mode::Con,
+    Mode::Ctf,
     Mode::Eli,
     Mode::Assault,
     Mode::OneFlag,

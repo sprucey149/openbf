@@ -1254,3 +1254,47 @@ fn bf2_only_catalog_hides_bf1_maps() {
         "BF2-only bakes should hide unbaked BF1 maps from Instant Action"
     );
 }
+
+#[test]
+fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
+    let mod_maps = vec![
+        ModMapEntry {
+            key: "mod_abr__abr".into(),
+            legacy_code: "abr".into(),
+            name: "Abregado-Rae: Venezia".into(),
+            disambiguator: "ABR".into(),
+            description: "Swamp canal city".into(),
+            modes: [vec![Mode::Con, Mode::Ctf], vec![Mode::Con, Mode::Ctf]],
+        },
+        ModMapEntry {
+            key: "mod_abr_v2__abr".into(),
+            legacy_code: "abr".into(),
+            name: "Abregado-Rae: Venezia".into(),
+            disambiguator: "ABR_v2".into(),
+            description: "Remaster".into(),
+            modes: [vec![Mode::Ctf], vec![Mode::Ctf]],
+        },
+    ];
+    let bakes = vec![
+        ("mod_abr__abr".to_owned(), "bf2".to_owned()),
+        ("mod_abr_v2__abr".to_owned(), "bf2".to_owned()),
+    ];
+    let missions = |key: &str, mode: Mode| {
+        if key.starts_with("mod_abr") && matches!(mode, Mode::Con | Mode::Ctf) {
+            vec![
+                ["all".to_owned(), "imp".to_owned()],
+                ["rep".to_owned(), "cis".to_owned()],
+            ]
+        } else {
+            Vec::new()
+        }
+    };
+    let list = catalog_with_mods(&text, &bakes, &missions, &mod_maps);
+    let abr1 = list.iter().find(|m| m.key == "mod_abr__abr").unwrap();
+    let abr2 = list.iter().find(|m| m.key == "mod_abr_v2__abr").unwrap();
+    assert_ne!(abr1.label, abr2.label);
+    assert!(abr1.label.contains("(mod)"));
+    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Gcw)));
+    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Cw)));
+    assert!(abr1.runnable(Mode::Con, Side::Mixed(0)));
+}

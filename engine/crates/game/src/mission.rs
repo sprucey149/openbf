@@ -387,6 +387,17 @@ pub struct AiSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CtfFlagDef {
+    pub name: String,
+    pub home_region: String,
+    pub capture_region: String,
+    #[serde(default)]
+    pub geometry: Option<String>,
+    #[serde(default)]
+    pub carried_geometry: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CtfDef {
     pub flag: String,
     pub home_region: String,
@@ -400,6 +411,10 @@ pub struct CtfDef {
     pub hide_cps: bool,
     #[serde(default)]
     pub score_limit: Option<u32>,
+    #[serde(default)]
+    pub two_flag: bool,
+    #[serde(default)]
+    pub flags: Vec<CtfFlagDef>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -733,6 +748,10 @@ impl MissionDef {
 
     pub fn is_hunt(&self) -> bool {
         self.mode == "hunt"
+    }
+
+    pub fn is_ctf(&self) -> bool {
+        self.ctf.is_some() || matches!(self.mode.as_str(), "ctf" | "1flag")
     }
 
     /// What this mission removes from the scene: a Hunt's `KillObject`
@@ -1617,6 +1636,81 @@ mod tests {
                 m.ai_alive_cap
             );
         }
+    }
+
+    #[test]
+    fn legacy_and_two_flag_ctf_missions_parse() {
+        let one_flag: MissionDef = ron::from_str(
+            r#"(
+                map: "bf2_spa1",
+                mode: "1flag",
+                source_game: "bf2",
+                teams: [
+                    (faction: "all", units: 16, tickets: 150),
+                    (faction: "imp", units: 16, tickets: 150),
+                ],
+                ai_alive_cap: 16,
+                spawn_delay: 10.0,
+                spawn_interval: 0.25,
+                ctf: Some((
+                    flag: "flag",
+                    home_region: "flag_home",
+                    capture_region_att: "att_cap",
+                    capture_region_def: "def_cap",
+                )),
+            )"#,
+        )
+        .unwrap();
+        let c1 = one_flag.ctf.as_ref().unwrap();
+        assert!(!c1.two_flag);
+        assert!(c1.flags.is_empty());
+        assert!(one_flag.is_ctf());
+
+        let two_flag: MissionDef = ron::from_str(
+            r#"(
+                map: "mod_abr__abr",
+                mode: "ctf",
+                source_game: "bf2",
+                teams: [
+                    (faction: "all", units: 16, tickets: 150),
+                    (faction: "imp", units: 16, tickets: 150),
+                ],
+                ai_alive_cap: 16,
+                spawn_delay: 10.0,
+                spawn_interval: 0.25,
+                ctf: Some((
+                    flag: "com_item_flag",
+                    home_region: "flag1_home",
+                    capture_region_att: "flag1_cap",
+                    capture_region_def: "flag2_cap",
+                    hide_cps: true,
+                    score_limit: Some(5),
+                    two_flag: true,
+                    flags: [
+                        (
+                            name: "com_item_flag",
+                            home_region: "flag1_home",
+                            capture_region: "flag1_cap",
+                            geometry: Some("imp_icon_flag"),
+                            carried_geometry: Some("imp_icon_flag_carried"),
+                        ),
+                        (
+                            name: "com_item_flag",
+                            home_region: "flag2_home",
+                            capture_region: "flag2_cap",
+                            geometry: Some("all_icon_flag"),
+                            carried_geometry: Some("all_icon_flag_carried"),
+                        ),
+                    ],
+                )),
+            )"#,
+        )
+        .unwrap();
+        let c2 = two_flag.ctf.as_ref().unwrap();
+        assert!(c2.two_flag);
+        assert_eq!(c2.flags.len(), 2);
+        assert_eq!(c2.flags[0].geometry.as_deref(), Some("imp_icon_flag"));
+        assert!(two_flag.is_ctf());
     }
 }
 

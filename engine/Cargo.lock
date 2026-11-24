@@ -355,6 +355,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "audio",
+ "extensions",
  "glam",
  "gltf",
  "ktx2",
@@ -1141,6 +1142,7 @@ dependencies = [
  "render",
  "ron",
  "serde",
+ "sha2",
  "winit",
 ]
 

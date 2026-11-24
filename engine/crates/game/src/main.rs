@@ -195,12 +195,12 @@ mod battle;
 mod desync_report;
 #[path = "main/desync_spawns.rs"]
 mod desync_spawns;
-#[path = "main/hero_census.rs"]
-mod hero_census;
 #[path = "main/extensions_host.rs"]
 mod extensions_host;
 #[path = "main/headless.rs"]
 mod headless;
+#[path = "main/hero_census.rs"]
+mod hero_census;
 #[path = "main/net_real.rs"]
 mod net_real;
 #[path = "main/net_soak.rs"]
@@ -308,7 +308,7 @@ fn main() -> Result<()> {
     // Dev-only (`session-stats` feature): old round files go at launch.
     game::session_stats::prune_at_launch();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
-    let (args, global_overrides, vr_requested) = extract_extension_flags(&raw_args)?;
+    let (args, global_overrides, vr_requested, no_mods) = extract_extension_flags(&raw_args)?;
     let mut it = args.iter();
     let a = it.next().cloned().unwrap_or_else(|| "--shell".to_string());
     if vr_requested
@@ -352,6 +352,12 @@ fn main() -> Result<()> {
                     other => bail!("unknown shell flag: {other}"),
                 }
             }
+            let _ = game::mods_runtime::mount_enabled_mods(
+                &extensions::profile::discover_data_dir(),
+                &assets,
+                &missions,
+                no_mods,
+            );
             logged(|| {
                 let resolved = extensions_host::resolve_startup(&global_overrides, true)?;
                 run_shell(assets, missions, resolved)
@@ -420,8 +426,8 @@ fn main() -> Result<()> {
         "--static-digest" => static_digest::run(&args[1..]),
         "--net-host" => net_real::host(&args[1..]),
         "--net-join" => net_real::join(&args[1..]),
-        "--lan-host" => logged(|| windowed::run_lan(&args[1..], true)),
-        "--lan-join" => logged(|| windowed::run_lan(&args[1..], false)),
+        "--lan-host" => logged(|| windowed::run_lan(&args[1..], true, no_mods)),
+        "--lan-join" => logged(|| windowed::run_lan(&args[1..], false, no_mods)),
         "--desync-report" => desync_report::run(&args[1..]),
         "--desync-spawns" => desync_spawns::run(&args[1..]),
         "--sim-hash" => {
@@ -616,6 +622,18 @@ fn main() -> Result<()> {
             if v.capture_frame.is_some() && !v.headless && v.bench_toggle.is_none() {
                 bail!("--capture-frame requires --headless or --bench-toggle");
             }
+            let assets_root = v
+                .map
+                .parent()
+                .filter(|p| p.join("common_bf2").is_dir() || p.join("common_bf1").is_dir())
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("assets_baked"));
+            let _ = game::mods_runtime::mount_enabled_mods(
+                &extensions::profile::discover_data_dir(),
+                &assets_root,
+                std::path::Path::new("missions"),
+                no_mods,
+            );
             if let Some(seconds) = v.seconds {
                 if !v.headless {
                     bail!("--seconds requires --headless");
@@ -636,10 +654,16 @@ fn main() -> Result<()> {
 
 fn extract_extension_flags(
     args: &[String],
-) -> Result<(Vec<String>, extensions::profile::StartupOverrides, bool)> {
+) -> Result<(
+    Vec<String>,
+    extensions::profile::StartupOverrides,
+    bool,
+    bool,
+)> {
     let mut rest = Vec::with_capacity(args.len());
     let mut overrides = extensions::profile::StartupOverrides::default();
     let mut vr_requested = false;
+    let mut no_mods = false;
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -649,6 +673,9 @@ fn extract_extension_flags(
             }
             "--desktop" | "--no-vr" => {
                 overrides.force_desktop = true;
+            }
+            "--no-mods" => {
+                no_mods = true;
             }
             "--enable-ext" => {
                 let id = it.next().context("--enable-ext <id>")?.clone();
@@ -664,7 +691,7 @@ fn extract_extension_flags(
             _ => rest.push(flag.clone()),
         }
     }
-    Ok((rest, overrides, vr_requested))
+    Ok((rest, overrides, vr_requested, no_mods))
 }
 
 #[cfg(test)]
@@ -677,25 +704,27 @@ mod cli_extension_flag_tests {
             .into_iter()
             .map(String::from)
             .collect();
-        let (rest, overrides, vr) = extract_extension_flags(&args).unwrap();
+        let (rest, overrides, vr, no_mods) = extract_extension_flags(&args).unwrap();
         assert_eq!(rest, ["--sim-hash", "100"]);
         assert!(overrides.force_desktop);
         assert!(!vr);
+        assert!(!no_mods);
     }
 
     #[test]
     fn vr_flag_marks_vr_requested() {
-        let args: Vec<String> = ["--vr", "--headless"]
+        let args: Vec<String> = ["--vr", "--no-mods", "--headless"]
             .into_iter()
             .map(String::from)
             .collect();
-        let (rest, overrides, vr) = extract_extension_flags(&args).unwrap();
+        let (rest, overrides, vr, no_mods) = extract_extension_flags(&args).unwrap();
         assert_eq!(rest, ["--headless"]);
         assert!(overrides
             .enable
             .iter()
             .any(|id| id == extensions::OPENBF_VR_ID));
         assert!(vr);
+        assert!(no_mods);
     }
 }
 

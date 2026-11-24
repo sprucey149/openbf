@@ -14,6 +14,7 @@ runtime = ["dep:core", "dep:render", "dep:input", "dep:glam", "dep:winit"]
 anyhow = { workspace = true }
 ron = { workspace = true }
 serde = { workspace = true }
+sha2 = "0.10"
 
 core = { path = "../core", optional = true }
 render = { path = "../render", optional = true }

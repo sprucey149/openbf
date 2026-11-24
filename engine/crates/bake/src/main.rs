@@ -589,6 +589,8 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("mod-inspect") if args.len() == 3 => mod_inspect(Path::new(&args[2])),
+        Some("mod-convert") if args.len() >= 4 => mod_convert(&args[2..]),
         _ => {
             eprintln!(
                 "usage:\n\
@@ -632,6 +634,8 @@ fn main() -> Result<()> {
                  \x20 bake vehicle    <side.lvl> <outdir> [pc.lvl]     every vehicle class: models, chunks, collision\n\
                  \x20 bake shadows    <file.lvl> <outdir>            BF1 shadow sidecars only\n\
                  \x20 bake effects    <side.lvl> <outdir> bf1|bf2   fx__ particle effects + their textures/models\n\
+                 \x20 bake mod-inspect <mod_dir>                    discover legacy BF2 addon metadata (RON)\n\
+                 \x20 bake mod-convert <mod_dir> <cache_dir> [--mod-id <id>] [--namespace <ns>]  convert addon into cache\n\
                  \nscripts/rebake.sh runs all of these over the extracted discs."
             );
             bail!("bad arguments");
@@ -747,6 +751,61 @@ fn tex_dump(lvl_path: &str, outdir: &str) -> Result<()> {
         n += 1;
     }
     println!("wrote {n} textures to {outdir}");
+    Ok(())
+}
+
+fn mod_inspect(path: &Path) -> Result<()> {
+    let folder = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mod")
+        .to_owned();
+    let id = extensions::mods::stable_mod_id(&folder, std::slice::from_ref(&folder), None);
+    let ns = extensions::mods::namespace_prefix(&id);
+    let (discovered, _) = bake::mods::inspect_mod_folder(path, &id, &ns);
+    println!(
+        "{}",
+        ron::ser::to_string_pretty(&discovered, bake::pretty())?
+    );
+    Ok(())
+}
+
+fn mod_convert(args: &[String]) -> Result<()> {
+    let mod_dir = Path::new(&args[0]);
+    let cache_dir = Path::new(&args[1]);
+    let folder = mod_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mod")
+        .to_owned();
+    let mut mod_id = extensions::mods::stable_mod_id(&folder, std::slice::from_ref(&folder), None);
+    let mut namespace = extensions::mods::namespace_prefix(&mod_id);
+    let mut rest = args[2..].iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            "--mod-id" => {
+                mod_id = rest.next().context("--mod-id needs a value")?.clone();
+            }
+            "--namespace" => {
+                namespace = rest.next().context("--namespace needs a value")?.clone();
+            }
+            other => bail!("bake mod-convert: unknown option {other:?}"),
+        }
+    }
+    let report = bake::mods::convert_mod_to_cache(&bake::mods::ConvertOptions {
+        mod_dir,
+        cache_dir,
+        mod_id,
+        namespace,
+        emit_progress: true,
+    })?;
+    println!(
+        "mod-convert `{}`: {} map(s), {} mission(s) -> {}",
+        report.meta.display_name,
+        report.maps_baked,
+        report.missions_written,
+        cache_dir.display()
+    );
     Ok(())
 }
 

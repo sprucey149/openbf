@@ -5,6 +5,7 @@
 //! validating dependencies/conflicts, and surfacing startup failures) and the
 //! `game` runtime (with `--features runtime` enabled).
 
+pub mod mods;
 pub mod profile;
 pub mod registry;
 #[cfg(feature = "runtime")]
@@ -110,6 +111,12 @@ pub struct ExtensionManifest {
     pub supported: bool,
     #[serde(default)]
     pub unsupported_reason: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub order_sensitive: bool,
+    #[serde(default)]
+    pub legacy_addon_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -154,6 +161,9 @@ pub fn bundled_vr_manifest(vr_compiled: bool) -> ExtensionManifest {
         conflicts: Vec::new(),
         supported,
         unsupported_reason,
+        author: Some("OpenBF".to_string()),
+        order_sensitive: false,
+        legacy_addon_id: None,
     }
 }
 

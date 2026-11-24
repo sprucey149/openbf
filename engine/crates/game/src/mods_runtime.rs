@@ -1,0 +1,747 @@
+//! Runtime discovery, auto-conversion, validation, priority ordering, and
+//! VFS mounting for filesystem-based legacy Battlefront II content mods.
+//!
+//! Strictly avoids linking LVL/Lua parsers (`mungefs`) into `game`: pre-converted
+//! mods are loaded directly from `openbf_data/mod_cache/`, and missing/stale
+//! enabled mods are prepared via the external `bake mod-convert` tool.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, RwLock};
+
+use anyhow::{bail, Context, Result};
+use extensions::mods::{
+    compute_mod_fingerprint, content_mod_multiplayer_digest, list_mod_folders, mod_cache_path,
+    resolve_content_mods, DiscoveredMod, ModCacheMeta, ModCacheStatus, ModCompatibility,
+    ModFolderEntry, ModMapSummary, ResourceOverrideConflict,
+};
+use extensions::profile::{mods_dir, profile_path, ExtensionProfile};
+use manifest::hud::HudLocl;
+use pak::{clear_overlays, set_overlays, OverlayLayer, OverlayRule};
+use ui::shell::{ModMapEntry, Mode, MODES};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountedMod {
+    pub mod_id: String,
+    pub namespace: String,
+    pub folder_name: String,
+    pub display_name: String,
+    pub legacy_addon_id: Option<String>,
+    pub cache_dir: PathBuf,
+    pub source_fingerprint: String,
+    pub maps: Vec<ModMapSummary>,
+    pub declared_overrides: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MountedModsReport {
+    pub disabled: bool,
+    pub active: Vec<MountedMod>,
+    pub mod_maps: Vec<ModMapEntry>,
+    pub active_fingerprints: Vec<(String, String)>,
+    pub override_digest: String,
+    pub conflicts: Vec<ResourceOverrideConflict>,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+static RUNTIME_STATE: RwLock<MountedModsReport> = RwLock::new(MountedModsReport {
+    disabled: false,
+    active: Vec::new(),
+    mod_maps: Vec::new(),
+    active_fingerprints: Vec::new(),
+    override_digest: String::new(),
+    conflicts: Vec::new(),
+    warnings: Vec::new(),
+    errors: Vec::new(),
+});
+
+/// Snapshot of active mod maps for Instant Action catalog injection.
+pub fn active_mod_maps() -> Vec<ModMapEntry> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .mod_maps
+        .clone()
+}
+
+/// Snapshot of currently mounted content mods in priority order (index 0 = highest).
+pub fn active_mods() -> Vec<MountedMod> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .active
+        .clone()
+}
+
+/// Active `(mod_id, source_fingerprint)` pairs in priority order.
+pub fn active_mod_fingerprints() -> Vec<(String, String)> {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .active_fingerprints
+        .clone()
+}
+
+/// Canonical digest over active mod IDs, fingerprints, and priority order.
+pub fn override_digest() -> String {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .override_digest
+        .clone()
+}
+
+/// Latest mount report (including conflicts/warnings/errors).
+pub fn current_report() -> MountedModsReport {
+    RUNTIME_STATE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Clear all active runtime mod overlays, localization tables, and state.
+pub fn clear_runtime_mods() {
+    clear_overlays();
+    crate::event_feed::clear_mod_locls();
+    let mut state = RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner());
+    *state = MountedModsReport::default();
+}
+
+/// Locate `bake` for automatic cache preparation when a mod is launched directly
+/// without having opened the launcher first.
+pub fn locate_bake_bin(data_dir: &Path) -> Option<PathBuf> {
+    if let Some(env_bin) = std::env::var_os("OPENBF_BAKE_BIN") {
+        let p = PathBuf::from(env_bin);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let name = format!("bake{}", std::env::consts::EXE_SUFFIX);
+    let mut candidates = Vec::new();
+    candidates.push(data_dir.join("tools").join(&name));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(&name));
+            candidates.push(dir.join("openbf_data").join("tools").join(&name));
+            for anc in dir.ancestors().take(5) {
+                let target = anc.join("engine").join("target");
+                candidates.push(target.join("release").join(&name));
+                candidates.push(target.join("debug").join(&name));
+                let local_target = anc.join("target");
+                candidates.push(local_target.join("release").join(&name));
+                candidates.push(local_target.join("debug").join(&name));
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(
+            cwd.join("engine")
+                .join("target")
+                .join("release")
+                .join(&name),
+        );
+        candidates.push(cwd.join("engine").join("target").join("debug").join(&name));
+        candidates.push(cwd.join("openbf_data").join("tools").join(&name));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// Convert or refresh one mod folder via external `bake mod-convert`.
+pub fn convert_mod_with_bake(
+    bake_bin: &Path,
+    mod_dir: &Path,
+    cache_dir: &Path,
+    mod_id: &str,
+    namespace: &str,
+) -> Result<()> {
+    let out = Command::new(bake_bin)
+        .arg("mod-convert")
+        .arg(mod_dir)
+        .arg(cache_dir)
+        .arg("--mod-id")
+        .arg(mod_id)
+        .arg("--namespace")
+        .arg(namespace)
+        .output()
+        .with_context(|| format!("running {}", bake_bin.display()))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        bail!(
+            "mod conversion failed for `{}` (exit {:?}): {}{}",
+            mod_dir.display(),
+            out.status.code(),
+            stderr.trim(),
+            if stderr.trim().is_empty() {
+                stdout.trim()
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(())
+}
+
+fn parse_modes_list(strs: &[String]) -> Vec<Mode> {
+    let mut out = Vec::new();
+    for s in strs {
+        if let Some(m) = MODES
+            .into_iter()
+            .find(|cand| cand.subst().eq_ignore_ascii_case(s))
+        {
+            if !out.contains(&m) {
+                out.push(m);
+            }
+        }
+    }
+    out
+}
+
+fn load_cached_or_convert(
+    entry: &ModFolderEntry,
+    data_dir: &Path,
+    report: &mut MountedModsReport,
+) -> Option<(ModCacheMeta, PathBuf)> {
+    if let Some(err) = &entry.symlink_error {
+        report
+            .errors
+            .push(format!("Mod `{}` rejected: {err}", entry.folder_name));
+        return None;
+    }
+    let fp = match compute_mod_fingerprint(&entry.path) {
+        Ok(f) => f.digest,
+        Err(e) => {
+            report.errors.push(format!(
+                "Failed to fingerprint mod `{}`: {e}",
+                entry.folder_name
+            ));
+            return None;
+        }
+    };
+    let cache_dir = mod_cache_path(data_dir, &entry.namespace);
+    let existing = ModCacheMeta::load(&cache_dir);
+    let status = match &existing {
+        Some(meta) if meta.mod_id == entry.mod_id => meta.validate(&cache_dir, &fp),
+        Some(_) => ModCacheStatus::Stale {
+            reason: "mod identity changed".into(),
+        },
+        None => ModCacheStatus::NeedsConversion,
+    };
+
+    if matches!(status, ModCacheStatus::Ready) {
+        if let Some(meta) = existing {
+            return Some((meta, cache_dir));
+        }
+    }
+
+    let Some(bake_bin) = locate_bake_bin(data_dir) else {
+        report.errors.push(format!(
+            "Mod `{}` needs conversion ({}) but `bake` executable was not found.",
+            entry.folder_name,
+            status.label()
+        ));
+        return None;
+    };
+    println!(
+        "mods: preparing `{}` ({}) -> {}",
+        entry.folder_name,
+        entry.mod_id,
+        cache_dir.display()
+    );
+    if let Err(e) = convert_mod_with_bake(
+        &bake_bin,
+        &entry.path,
+        &cache_dir,
+        &entry.mod_id,
+        &entry.namespace,
+    ) {
+        report.errors.push(format!(
+            "Mod `{}` preparation failed: {e}",
+            entry.folder_name
+        ));
+        return None;
+    }
+
+    let Some(meta) = ModCacheMeta::load(&cache_dir) else {
+        report.errors.push(format!(
+            "Mod `{}` converted without producing cache metadata.",
+            entry.folder_name
+        ));
+        return None;
+    };
+    match meta.validate(&cache_dir, &fp) {
+        ModCacheStatus::Ready => Some((meta, cache_dir)),
+        other => {
+            report.errors.push(format!(
+                "Mod `{}` cache validation failed after conversion ({}).",
+                entry.folder_name,
+                other.label()
+            ));
+            None
+        }
+    }
+}
+
+fn discovered_from_cache(entry: &ModFolderEntry, meta: &ModCacheMeta) -> DiscoveredMod {
+    DiscoveredMod {
+        id: entry.mod_id.clone(),
+        namespace: entry.namespace.clone(),
+        folder_name: entry.folder_name.clone(),
+        root_dir: entry.path.clone(),
+        content_root: Some(entry.path.clone()),
+        legacy_addon_id: meta.legacy_addon_id.clone(),
+        display_name: meta.display_name.clone(),
+        version: meta.version.clone(),
+        author: meta.author.clone(),
+        description: meta.description.clone(),
+        mod_type: meta.mod_type,
+        compatibility: if meta.warnings.is_empty() {
+            ModCompatibility::Supported
+        } else {
+            ModCompatibility::PartialWithWarnings
+        },
+        source_fingerprint: meta.source_fingerprint.clone(),
+        maps: meta.maps.clone(),
+        dependencies: meta.dependencies.clone(),
+        conflicts: meta.conflicts.clone(),
+        declared_overrides: meta.declared_overrides.clone(),
+        custom_sides: Vec::new(),
+        warnings: meta.warnings.clone(),
+        errors: Vec::new(),
+        unused_lvls: Vec::new(),
+    }
+}
+
+/// Scan `openbf_data/mods/`, ensure caches for enabled mods from `extensions.ron`,
+/// validate dependencies and load order, and mount VFS & localization overlays.
+pub fn mount_enabled_mods(
+    data_dir: &Path,
+    assets_dir: &Path,
+    missions_dir: &Path,
+    disable_mods: bool,
+) -> MountedModsReport {
+    clear_overlays();
+    crate::event_feed::clear_mod_locls();
+
+    let _ = pak::mount(assets_dir, "assets_baked");
+    let _ = pak::mount(missions_dir, "missions");
+
+    if disable_mods {
+        let rep = MountedModsReport {
+            disabled: true,
+            ..Default::default()
+        };
+        *RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner()) = rep.clone();
+        return rep;
+    }
+
+    let mut report = MountedModsReport::default();
+    let profile = ExtensionProfile::load(&profile_path(data_dir));
+    let mdir = mods_dir(data_dir);
+    let folders = match list_mod_folders(&mdir) {
+        Ok(list) => list,
+        Err(e) => {
+            report
+                .errors
+                .push(format!("Could not scan {}: {e}", mdir.display()));
+            *RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner()) = report.clone();
+            return report;
+        }
+    };
+
+    let mut by_id: BTreeMap<String, ModFolderEntry> = BTreeMap::new();
+    let mut visible_ids = Vec::with_capacity(folders.len());
+    for entry in folders {
+        if profile.is_enabled(&entry.mod_id) {
+            visible_ids.push(entry.mod_id.clone());
+            by_id.insert(entry.mod_id.clone(), entry);
+        }
+    }
+    if visible_ids.is_empty() {
+        *RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner()) = report.clone();
+        return report;
+    }
+
+    let ordered_enabled = profile.ordered_visible(&visible_ids);
+    let mut cache_by_id: BTreeMap<String, (ModFolderEntry, ModCacheMeta, PathBuf)> =
+        BTreeMap::new();
+    let mut discovered_list = Vec::new();
+
+    for &mod_id in &ordered_enabled {
+        let Some(entry) = by_id.get(mod_id) else {
+            continue;
+        };
+        if let Some((meta, cache_dir)) = load_cached_or_convert(entry, data_dir, &mut report) {
+            discovered_list.push(discovered_from_cache(entry, &meta));
+            cache_by_id.insert(mod_id.to_owned(), (entry.clone(), meta, cache_dir));
+        }
+    }
+
+    let plan = match resolve_content_mods(&discovered_list, &profile) {
+        Ok(p) => p,
+        Err(errs) => {
+            for err in errs {
+                let msg = err.to_string();
+                eprintln!("mods: {msg}");
+                report.errors.push(msg);
+            }
+            *RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner()) = report.clone();
+            return report;
+        }
+    };
+
+    report.conflicts = plan.conflicts.clone();
+    report.warnings = plan.warnings.clone();
+    for conflict in &report.conflicts {
+        eprintln!(
+            "mods: override conflict on `{}` — `{}` wins over {}",
+            conflict.resource_path,
+            conflict.winner_name,
+            conflict.overridden_names.join(", ")
+        );
+    }
+    for err in &report.errors {
+        eprintln!("mods: {err}");
+    }
+
+    let mut overlays: Vec<OverlayLayer> = Vec::new();
+    let mut locls: Vec<Arc<HudLocl>> = Vec::new();
+
+    for mod_id in &plan.active_order {
+        let Some((entry, meta, cache_dir)) = cache_by_id.get(mod_id) else {
+            continue;
+        };
+        let assets_cache = cache_dir.join("assets");
+        for map in &meta.maps {
+            let map_dir = assets_cache.join(&map.map_key);
+            if map_dir.is_dir() {
+                overlays.push(OverlayLayer {
+                    id: mod_id.clone(),
+                    mount_name: "assets_baked".into(),
+                    rule: OverlayRule::NamespaceDir {
+                        prefix: map.map_key.clone(),
+                        disk_dir: map_dir,
+                    },
+                });
+            }
+            let modes_cw = parse_modes_list(&map.modes_cw);
+            let modes_gcw = parse_modes_list(&map.modes_gcw);
+            report.mod_maps.push(ModMapEntry {
+                key: map.map_key.clone(),
+                legacy_code: map.legacy_code.clone(),
+                name: map.display_name.clone(),
+                disambiguator: entry.folder_name.clone(),
+                description: map.description.clone(),
+                modes: [modes_cw, modes_gcw],
+            });
+        }
+
+        // Custom side packages (<namespace>_side_<side>).
+        if let Ok(rd) = std::fs::read_dir(&assets_cache) {
+            let mut side_dirs: Vec<(String, PathBuf)> = rd
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    if !p.is_dir() {
+                        return None;
+                    }
+                    let name = p.file_name()?.to_str()?.to_owned();
+                    let side_prefix = format!("{}_side_", meta.namespace);
+                    name.starts_with(&side_prefix).then_some((name, p))
+                })
+                .collect();
+            side_dirs.sort_by(|a, b| a.0.cmp(&b.0));
+            for (prefix, disk_dir) in side_dirs {
+                overlays.push(OverlayLayer {
+                    id: mod_id.clone(),
+                    mount_name: "assets_baked".into(),
+                    rule: OverlayRule::NamespaceDir { prefix, disk_dir },
+                });
+            }
+        }
+
+        let missions_cache = cache_dir.join("missions");
+        if missions_cache.is_dir() {
+            overlays.push(OverlayLayer {
+                id: mod_id.clone(),
+                mount_name: "missions".into(),
+                rule: OverlayRule::NamespacePrefix {
+                    prefix: format!("{}__", meta.namespace),
+                    disk_dir: missions_cache,
+                },
+            });
+        }
+
+        if !meta.declared_overrides.is_empty() {
+            let override_assets = cache_dir.join("overrides").join("assets");
+            if override_assets.is_dir() {
+                let allowed_paths: BTreeSet<String> = meta
+                    .declared_overrides
+                    .iter()
+                    .map(|p| {
+                        p.replace('\\', "/")
+                            .trim_start_matches('/')
+                            .to_ascii_lowercase()
+                    })
+                    .collect();
+                overlays.push(OverlayLayer {
+                    id: mod_id.clone(),
+                    mount_name: "assets_baked".into(),
+                    rule: OverlayRule::Overrides {
+                        allowed_paths,
+                        disk_dir: override_assets,
+                    },
+                });
+            }
+        }
+
+        if meta.has_locl {
+            let locl_path = cache_dir.join("locl").join("english.ron");
+            if let Ok(text) = std::fs::read_to_string(&locl_path) {
+                if let Ok(tbl) = ron::from_str::<HudLocl>(&text) {
+                    locls.push(Arc::new(tbl));
+                }
+            }
+        }
+
+        report
+            .active_fingerprints
+            .push((mod_id.clone(), meta.source_fingerprint.clone()));
+        report.active.push(MountedMod {
+            mod_id: mod_id.clone(),
+            namespace: meta.namespace.clone(),
+            folder_name: entry.folder_name.clone(),
+            display_name: meta.display_name.clone(),
+            legacy_addon_id: meta.legacy_addon_id.clone(),
+            cache_dir: cache_dir.clone(),
+            source_fingerprint: meta.source_fingerprint.clone(),
+            maps: meta.maps.clone(),
+            declared_overrides: meta.declared_overrides.clone(),
+            warnings: meta.warnings.clone(),
+        });
+    }
+
+    let override_pairs: Vec<(&str, &str)> = report
+        .active
+        .iter()
+        .zip(report.active_fingerprints.iter())
+        .filter(|(m, _)| !m.declared_overrides.is_empty() || !m.maps.is_empty())
+        .map(|(_, (id, fp))| (id.as_str(), fp.as_str()))
+        .collect();
+    let digest = content_mod_multiplayer_digest(&override_pairs, !report.active.is_empty());
+    report.override_digest = if digest == 0 {
+        String::new()
+    } else {
+        format!("{digest:016x}")
+    };
+
+    set_overlays(overlays);
+    crate::event_feed::set_mod_locls(locls);
+
+    if !report.active.is_empty() {
+        println!(
+            "mods: mounted {} content mod(s): {}",
+            report.active.len(),
+            report
+                .active
+                .iter()
+                .enumerate()
+                .map(|(i, m)| format!("#{} {} ({})", i + 1, m.display_name, m.mod_id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    *RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner()) = report.clone();
+    report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use extensions::mods::{
+        ModContentType, ModMissionSummary, MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
+    };
+    use extensions::profile::ExtensionProfile;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn make_cached_mod(
+        data_dir: &Path,
+        folder: &str,
+        id: &str,
+        ns: &str,
+        map_key: &str,
+        override_text: &str,
+        locl_cp1: &str,
+    ) {
+        let mod_dir = mods_dir(data_dir).join(folder);
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("marker.txt"), folder).unwrap();
+        let fp = compute_mod_fingerprint(&mod_dir).unwrap();
+
+        let cache = mod_cache_path(data_dir, ns);
+        let map_dir = cache.join("assets").join(map_key);
+        std::fs::create_dir_all(&map_dir).unwrap();
+        std::fs::write(
+            map_dir.join("manifest.ron"),
+            format!("(map: \"{map_key}\", source_game: \"bf2\", terrain_name: None, sky_name: None, terrain_glb: None, models: [], textures: [], classes: [], geometries: [], regions: [], instances: [], collision: [], layers: [])"),
+        )
+        .unwrap();
+
+        let missions_dir = cache.join("missions");
+        std::fs::create_dir_all(&missions_dir).unwrap();
+        let mission_ron = format!("{map_key}_con.ron");
+        std::fs::write(
+            missions_dir.join(&mission_ron),
+            format!("(map: \"{map_key}\", mode: \"con\", source_game: \"bf2\", teams: [(faction: \"all\", units: 16, tickets: 150), (faction: \"imp\", units: 16, tickets: 150)], ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25)"),
+        )
+        .unwrap();
+
+        let ov_path = cache
+            .join("overrides")
+            .join("assets")
+            .join("side_bf2/classes/all.ron");
+        std::fs::create_dir_all(ov_path.parent().unwrap()).unwrap();
+        std::fs::write(&ov_path, override_text).unwrap();
+
+        let locl_path = cache.join("locl").join("english.ron");
+        std::fs::create_dir_all(locl_path.parent().unwrap()).unwrap();
+        let tbl = HudLocl {
+            language: "english".into(),
+            entries: vec![(manifest::hud::locl_key("level.abr.cp1"), locl_cp1.into())],
+        };
+        std::fs::write(&locl_path, ron::to_string(&tbl).unwrap()).unwrap();
+
+        let meta = ModCacheMeta {
+            schema_version: MOD_CACHE_SCHEMA_VERSION,
+            converter_version: MOD_CONVERTER_VERSION,
+            mod_id: id.into(),
+            namespace: ns.into(),
+            source_fingerprint: fp.digest,
+            legacy_addon_id: Some("ABR".into()),
+            display_name: format!("Mod {folder}"),
+            version: None,
+            author: None,
+            description: String::new(),
+            mod_type: ModContentType::LegacyHybridAddon,
+            maps: vec![ModMapSummary {
+                map_key: map_key.into(),
+                legacy_code: "abr".into(),
+                display_name: format!("Map {folder}"),
+                description: String::new(),
+                source_lvl: "ABR/ABR.lvl".into(),
+                modes_cw: Vec::new(),
+                modes_gcw: vec!["con".into()],
+                missions: vec![ModMissionSummary {
+                    script_name: format!("{ns}_con"),
+                    mode: "con".into(),
+                    era: "gcw".into(),
+                    mission_ron,
+                    supported: true,
+                    unsupported_reason: None,
+                }],
+                sound_planets: Vec::new(),
+            }],
+            dependencies: Vec::new(),
+            conflicts: Vec::new(),
+            declared_overrides: vec!["side_bf2/classes/all.ron".into()],
+            has_locl: true,
+            warnings: Vec::new(),
+        };
+        meta.save_atomic(&cache).unwrap();
+    }
+
+    #[test]
+    fn load_order_governs_overrides_and_disabling_clears_overlays() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("openbf-mods-rt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let assets = root.join("assets_baked");
+        let missions = root.join("missions");
+        let data = root.join("openbf_data");
+        std::fs::create_dir_all(assets.join("side_bf2/classes")).unwrap();
+        std::fs::create_dir_all(&missions).unwrap();
+        std::fs::write(assets.join("side_bf2/classes/all.ron"), "stock").unwrap();
+
+        make_cached_mod(
+            &data,
+            "ABR_A",
+            "content.abr_a",
+            "mod_abr_a",
+            "mod_abr_a__abr",
+            "alpha_override",
+            "Alpha CP",
+        );
+        make_cached_mod(
+            &data,
+            "ABR_B",
+            "content.abr_b",
+            "mod_abr_b",
+            "mod_abr_b__abr",
+            "beta_override",
+            "Beta CP",
+        );
+
+        let mut profile = ExtensionProfile::default();
+        profile.set_enabled("content.abr_a", true);
+        profile.set_enabled("content.abr_b", true);
+        profile.order = vec!["content.abr_a".into(), "content.abr_b".into()];
+        profile.save(&profile_path(&data)).unwrap();
+
+        let rep1 = mount_enabled_mods(&data, &assets, &missions, false);
+        assert!(rep1.errors.is_empty(), "{:?}", rep1.errors);
+        assert_eq!(rep1.conflicts.len(), 1);
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/classes/all.ron")).unwrap(),
+            "alpha_override"
+        );
+        assert!(pak::exists(assets.join("mod_abr_a__abr/manifest.ron")));
+        assert!(pak::exists(assets.join("mod_abr_b__abr/manifest.ron")));
+        assert_eq!(
+            crate::event_feed::Texts::load(&assets, "bf2").post_name("level.abr.cp1"),
+            "Alpha CP"
+        );
+
+        // Swap priority: B above A -> B wins overrides and localization while both maps coexist.
+        profile.order = vec!["content.abr_b".into(), "content.abr_a".into()];
+        profile.save(&profile_path(&data)).unwrap();
+        let rep2 = mount_enabled_mods(&data, &assets, &missions, false);
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/classes/all.ron")).unwrap(),
+            "beta_override"
+        );
+        assert_ne!(rep1.override_digest, rep2.override_digest);
+        assert_eq!(
+            crate::event_feed::Texts::load(&assets, "bf2").post_name("level.abr.cp1"),
+            "Beta CP"
+        );
+
+        // Disable B -> A remains active and wins cleanly.
+        profile.set_enabled("content.abr_b", false);
+        profile.save(&profile_path(&data)).unwrap();
+        mount_enabled_mods(&data, &assets, &missions, false);
+        assert!(!pak::exists(assets.join("mod_abr_b__abr/manifest.ron")));
+        assert!(pak::exists(assets.join("mod_abr_a__abr/manifest.ron")));
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/classes/all.ron")).unwrap(),
+            "alpha_override"
+        );
+
+        // --no-mods restores stock cleanly.
+        let disabled = mount_enabled_mods(&data, &assets, &missions, true);
+        assert!(disabled.disabled);
+        assert!(active_mod_maps().is_empty());
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/classes/all.ron")).unwrap(),
+            "stock"
+        );
+
+        clear_runtime_mods();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

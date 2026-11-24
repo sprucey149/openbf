@@ -1269,7 +1269,7 @@ mod tests {
             .map(|i| MapEntry {
                 key: format!("test{i}"),
                 game: Game::Bf2,
-                code: "t",
+                code: "t".to_string(),
                 label: format!("Test {i}"),
                 description: String::new(),
                 modes: [vec![Mode::Con], Vec::new()],
@@ -1365,7 +1365,7 @@ mod tests {
         let map = MapEntry {
             key: "test".into(),
             game: Game::Bf2,
-            code: "t",
+            code: "t".to_string(),
             label: "Test map".into(),
             description: String::new(),
             modes: [vec![Mode::Con], Vec::new()],
@@ -1471,7 +1471,7 @@ mod tests {
         let entry = |label: &str, baked: bool| MapEntry {
             key: label.into(),
             game: crate::shell::Game::Bf2,
-            code: "x",
+            code: "x".to_string(),
             label: label.into(),
             description: String::new(),
             modes: [vec![Mode::Con], Vec::new()],

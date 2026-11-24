@@ -602,7 +602,17 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
     // Split load from upload: they have different fixes (parsing vs GPU
     // residency), so one number for both would hide which is the problem.
     let t = Instant::now();
-    let (scene, load) = game::assets::load_battle_scene(std::path::Path::new(&v.map), &v.mode)?;
+    let bench_layers = v
+        .mission
+        .as_ref()
+        .and_then(|p| game::mission::MissionDef::load(p).ok())
+        .map(|m| m.layers)
+        .unwrap_or_default();
+    let (scene, load) = game::assets::load_battle_scene_with_layers(
+        std::path::Path::new(&v.map),
+        &v.mode,
+        &bench_layers,
+    )?;
     // A common set that exists but will not load must say so: benching the
     // map without its shared props would read as a speed-up.
     if let Some((cd, Err(e))) = &load.common {
@@ -843,6 +853,9 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
         let mut vehicle_vis =
             game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
+        if let Some(specs) = super::battle::ctf_flag_specs(replay_setup.mission.as_ref(), &walk) {
+            vehicle_vis.configure_ctf_flags(&mut r, &scene, &specs);
+        }
         vehicle_vis.set_treads(walk.hover_treads.clone());
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
         let quad = game::viewer::upload_billboard_quad(&mut r)?;

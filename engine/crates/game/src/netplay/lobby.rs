@@ -136,6 +136,16 @@ pub fn digest_mismatch_text(map: &str, host: &[(String, u64)], ours: &[(&str, u6
     format!("Your copy of {map} plays differently from the host's ({group})")
 }
 
+/// Diagnostic explaining when a guest's active content mods or load order differ from the host.
+pub fn mod_mismatch_reason(host: &ContentManifest, guest: &ContentManifest) -> Option<String> {
+    if host.override_digest != guest.override_digest {
+        return Some(
+            "Active mod load order or overrides differ from host (match mods and load order in Mods tab).".into(),
+        );
+    }
+    None
+}
+
 /// A refused or ended connection as the player reads it.
 pub fn reject_text(reason: net::RejectReason, detail: &str, ours: &str) -> String {
     use net::RejectReason as R;

@@ -209,8 +209,14 @@ impl LanArgs {
 }
 
 /// `game --lan-host` / `--lan-join`: the windowed game in a LAN session.
-pub(in super::super) fn run_lan(args: &[String], host: bool) -> Result<()> {
+pub(in super::super) fn run_lan(args: &[String], host: bool, no_mods: bool) -> Result<()> {
     let a = LanArgs::parse(args, host)?;
+    let _ = game::mods_runtime::mount_enabled_mods(
+        &extensions::profile::discover_data_dir(),
+        &a.assets,
+        &a.missions,
+        no_mods,
+    );
     let (event_loop, mut app) = super::shell_app(a.assets.clone(), a.missions.clone())?;
     let mut profile = PlayerProfile::from_profile(&app.profile);
     if let Some(n) = &a.name {

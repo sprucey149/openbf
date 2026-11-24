@@ -145,6 +145,16 @@ impl LauncherPaths {
         extensions::profile::profile_path(&self.data_dir)
     }
 
+    /// Location of `openbf_data/mods/` (filesystem source of truth for legacy mods).
+    pub fn mods_dir(&self) -> PathBuf {
+        extensions::profile::mods_dir(&self.data_dir)
+    }
+
+    /// Location of `openbf_data/mod_cache/` (versioned converted asset cache).
+    pub fn mod_cache_dir(&self) -> PathBuf {
+        extensions::profile::mod_cache_dir(&self.data_dir)
+    }
+
     /// Location of `last_startup_error.ron` inside `openbf_data`.
     pub fn startup_error_path(&self) -> PathBuf {
         extensions::profile::startup_error_path(&self.data_dir)

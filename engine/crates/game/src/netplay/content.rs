@@ -30,6 +30,12 @@ pub struct ContentManifest {
     pub games: BTreeSet<String>,
     /// The Kit Fisto and Asajj Ventress addon is installed.
     pub addon_heroes: bool,
+    /// Enabled content mod IDs + source fingerprints in active load order.
+    #[serde(default)]
+    pub active_mods: Vec<(String, String)>,
+    /// Deterministic digest over active content mod load order + override stack.
+    #[serde(default)]
+    pub override_digest: String,
 }
 
 /// FNV-1a 64 over `bytes`.
@@ -51,6 +57,8 @@ impl ContentManifest {
             m.games.insert(game.to_ascii_lowercase());
         }
         m.addon_heroes = crate::dlc::installed(assets_dir);
+        m.active_mods = crate::mods_runtime::active_mod_fingerprints();
+        m.override_digest = crate::mods_runtime::override_digest();
         m
     }
 
@@ -66,6 +74,10 @@ impl ContentManifest {
             out.maps.retain(|k| m.maps.contains(k));
             out.games.retain(|g| m.games.contains(g));
             out.addon_heroes &= m.addon_heroes;
+            out.active_mods.retain(|pair| m.active_mods.contains(pair));
+            if out.override_digest != m.override_digest {
+                out.override_digest = "MISMATCH".to_owned();
+            }
         }
         out
     }

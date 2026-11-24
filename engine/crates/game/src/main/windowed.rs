@@ -13,9 +13,11 @@ mod xr;
 
 use super::extensions_host::ResolvedStartup;
 
+#[cfg(test)]
+use super::battle::load_and_upload;
 use super::battle::{
-    hud_model_for_view, load_and_upload, load_hud_view, make_walk, spawn_model, squad_icons,
-    stats_pages, upload_world_marker_assets, walk_draws, world_objective_draws, WorldMarkerAssets,
+    hud_model_for_view, load_hud_view, make_walk, spawn_model, squad_icons, stats_pages,
+    upload_world_marker_assets, walk_draws, world_objective_draws, WorldMarkerAssets,
 };
 use super::{BattleSetup, ViewerArgs};
 use anyhow::Result;
@@ -1908,6 +1910,10 @@ impl App {
             &self.assets_dir,
             &walk.vehicle_geometry,
         );
+        if let Some(specs) = super::battle::ctf_flag_specs(self.setup.mission.as_ref(), &walk) {
+            self.vehicle_vis
+                .configure_ctf_flags(renderer, scene, &specs);
+        }
         self.vehicle_vis.set_treads(walk.hover_treads.clone());
         let lit_chunks = self.vehicle_vis.load_chunks(
             renderer,
@@ -2618,10 +2624,7 @@ fn show_startup_warning(message: &str) {
         let _ = std::process::Command::new("osascript")
             .args([
                 "-e",
-                &format!(
-                    "display alert \"OpenBF\" message {:?} as warning",
-                    message
-                ),
+                &format!("display alert \"OpenBF\" message {:?} as warning", message),
             ])
             .status();
     }

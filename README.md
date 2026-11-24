@@ -231,12 +231,14 @@ Tested and working on Linux and Windows, with the NTSC-U PS2 releases (SLUS-2089
 
 ## Mods & OpenBF VR
 
-Supported Windows and Linux builds bundle **OpenBF VR** (`openbf.vr`) as a disabled-by-default engine extension:
+OpenBF automatically discovers legacy **Star Wars Battlefront II (2005)** addon folders copied into `openbf_data/mods/` (with manual `#1, #2, ...` load-order controls, isolated namespaces, and a versioned conversion cache in `openbf_data/mod_cache/`—no import button or manual registration required). See [docs/mods.md](docs/mods.md) for folder layout, load-order rules, and legacy addon compatibility details.
+
+Supported Windows and Linux builds also bundle **OpenBF VR** (`openbf.vr`) as a disabled-by-default engine extension:
 
 1. Open **`openbf-launcher`**.
 2. Go to the **Mods** tab.
-3. Toggle **OpenBF VR** on (this saves to `openbf_data/extensions.ron` without recompiling).
-4. Start your OpenXR runtime/headset and click **Play**.
+3. Enable content mods (using **Up** / **Down** to set override priority) and/or toggle **OpenBF VR** on (this saves to `openbf_data/extensions.ron` without recompiling).
+4. Start your OpenXR runtime/headset if using VR, wait for any mod cache conversion to finish, and click **Play**.
 
 To return to desktop play, disable **OpenBF VR** in the **Mods** tab (or click **Play in Desktop Mode** if OpenXR startup fails). See [docs/vr.md](docs/vr.md) for VR controls and troubleshooting, and [docs/extensions.md](docs/extensions.md) for the extension system architecture.
 

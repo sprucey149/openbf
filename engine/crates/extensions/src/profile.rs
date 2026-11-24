@@ -13,12 +13,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const PROFILE_FILE: &str = "extensions.ron";
 /// File name of the last extension startup failure report inside `openbf_data/`.
 pub const STARTUP_ERROR_FILE: &str = "last_startup_error.ron";
+/// Subdirectory under `openbf_data/` containing user-copied legacy BF2 mod folders.
+pub const MODS_DIR: &str = "mods";
+/// Subdirectory under `openbf_data/` holding generated versioned native mod caches.
+pub const MOD_CACHE_DIR: &str = "mod_cache";
 /// Environment variable overriding `openbf_data/` location for both launcher and game.
 pub const DATA_DIR_ENV: &str = "OPENBF_DATA_DIR";
 /// Environment variable set by the launcher when spawning `openbf`.
 pub const LAUNCHED_BY_LAUNCHER_ENV: &str = "OPENBF_LAUNCHED_BY_LAUNCHER";
 
-const CURRENT_SCHEMA_VERSION: u32 = 1;
+const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
@@ -55,7 +59,7 @@ impl ExtensionProfile {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Self::default();
         };
-        ron::from_str(&text).unwrap_or_default()
+        ron::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default()
     }
 
     /// Save profile atomically to `path`.
@@ -71,6 +75,103 @@ impl ExtensionProfile {
     /// Update the enabled flag for `id`.
     pub fn set_enabled(&mut self, id: &str, enabled: bool) {
         self.enabled.insert(id.to_string(), enabled);
+    }
+
+    /// Reconcile persistent `order` with the currently discovered content mod IDs.
+    ///
+    /// Preserves the relative order of all previously recorded IDs — including
+    /// temporarily disabled or removed folders so re-adding restores priority —
+    /// deduplicates entries, and appends newly discovered IDs in alphabetical
+    /// order at the end.
+    pub fn reconcile_order(&mut self, discovered_ids: &[String]) {
+        self.schema_version = CURRENT_SCHEMA_VERSION;
+        let mut seen = std::collections::BTreeSet::new();
+        self.order.retain(|id| seen.insert(id.clone()));
+
+        let mut new_ids: Vec<String> = discovered_ids
+            .iter()
+            .filter(|id| seen.insert((*id).clone()))
+            .cloned()
+            .collect();
+        new_ids.sort();
+        self.order.extend(new_ids);
+    }
+
+    /// Return currently discovered IDs ordered by `self.order` (index 0 =
+    /// highest override priority), placing any unrecorded IDs alphabetically at
+    /// the end.
+    pub fn ordered_visible<'a>(&self, discovered_ids: &'a [String]) -> Vec<&'a str> {
+        let mut rank: BTreeMap<&str, usize> = BTreeMap::new();
+        for (idx, id) in self.order.iter().enumerate() {
+            rank.entry(id.as_str()).or_insert(idx);
+        }
+        let mut out: Vec<&'a str> = discovered_ids.iter().map(String::as_str).collect();
+        out.sort_by(|a, b| match (rank.get(a), rank.get(b)) {
+            (Some(ra), Some(rb)) => ra.cmp(rb),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.cmp(b),
+        });
+        out
+    }
+
+    /// Move `id` up one position among currently visible mods (giving it higher
+    /// override priority), persisting across hidden/removed IDs without dead clicks.
+    pub fn move_up(&mut self, id: &str, visible_ids: &[String]) -> bool {
+        self.reconcile_order(visible_ids);
+        let ordered: Vec<String> = self
+            .ordered_visible(visible_ids)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let Some(pos) = ordered.iter().position(|x| x == id) else {
+            return false;
+        };
+        if pos == 0 {
+            return false;
+        }
+        let neighbor = &ordered[pos - 1];
+        let Some(i_cur) = self.order.iter().position(|x| x == id) else {
+            return false;
+        };
+        let Some(i_prev) = self.order.iter().position(|x| x == neighbor) else {
+            return false;
+        };
+        self.order.swap(i_cur, i_prev);
+        true
+    }
+
+    /// Move `id` down one position among currently visible mods.
+    pub fn move_down(&mut self, id: &str, visible_ids: &[String]) -> bool {
+        self.reconcile_order(visible_ids);
+        let ordered: Vec<String> = self
+            .ordered_visible(visible_ids)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let Some(pos) = ordered.iter().position(|x| x == id) else {
+            return false;
+        };
+        if pos + 1 >= ordered.len() {
+            return false;
+        }
+        let neighbor = &ordered[pos + 1];
+        let Some(i_cur) = self.order.iter().position(|x| x == id) else {
+            return false;
+        };
+        let Some(i_next) = self.order.iter().position(|x| x == neighbor) else {
+            return false;
+        };
+        self.order.swap(i_cur, i_next);
+        true
+    }
+
+    /// 1-based visual priority rank (`#1` = highest override priority).
+    pub fn priority_rank(&self, id: &str, visible_ids: &[String]) -> Option<usize> {
+        self.ordered_visible(visible_ids)
+            .into_iter()
+            .position(|x| x == id)
+            .map(|i| i + 1)
     }
 }
 
@@ -161,8 +262,7 @@ pub fn resolve_data_dir(
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let checkout_root =
-        find_checkout_root(&exe_dir).or_else(|| cwd.and_then(find_checkout_root));
+    let checkout_root = find_checkout_root(&exe_dir).or_else(|| cwd.and_then(find_checkout_root));
     if let Some(root) = checkout_root.filter(|_| in_cargo_target(&exe_dir)) {
         return root.join("dist").join("openbf_data");
     }
@@ -185,6 +285,14 @@ pub fn startup_error_path(data_dir: &Path) -> PathBuf {
     data_dir.join(STARTUP_ERROR_FILE)
 }
 
+pub fn mods_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(MODS_DIR)
+}
+
+pub fn mod_cache_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(MOD_CACHE_DIR)
+}
+
 fn in_cargo_target(dir: &Path) -> bool {
     dir.ancestors()
         .any(|a| a.file_name().is_some_and(|n| n == "target"))
@@ -197,7 +305,7 @@ fn find_checkout_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn write_ron_atomic<T: Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
+pub(crate) fn write_ron_atomic<T: Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
@@ -320,6 +428,64 @@ mod tests {
         assert_eq!(
             resolve_data_dir(&release_exe, None, Some(custom.as_os_str())),
             custom
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loads_v1_profile_and_preserves_order_across_disable_remove_and_new_mods() {
+        let dir = scratch("order_reconcile");
+        let path = profile_path(&dir);
+        let v1 = "(schema_version: 1, enabled: {\"openbf.vr\": true, \"content.a\": true}, order: [\"content.b\", \"content.a\"])";
+        std::fs::write(&path, v1).unwrap();
+
+        let mut profile = ExtensionProfile::load(&path);
+        assert!(profile.is_enabled(crate::OPENBF_VR_ID));
+        assert!(profile.is_enabled("content.a"));
+
+        // Removing content.b temporarily while keeping visible [content.a, content.c]
+        let visible_without_b = vec!["content.a".to_string(), "content.c".to_string()];
+        profile.reconcile_order(&visible_without_b);
+        assert_eq!(
+            profile.ordered_visible(&visible_without_b),
+            ["content.a", "content.c"]
+        );
+        assert_eq!(profile.order, ["content.b", "content.a", "content.c"]);
+
+        // Re-adding content.b restores its saved higher priority above content.a!
+        let visible_restored = vec![
+            "content.c".to_string(),
+            "content.b".to_string(),
+            "content.a".to_string(),
+        ];
+        assert_eq!(
+            profile.ordered_visible(&visible_restored),
+            ["content.b", "content.a", "content.c"]
+        );
+
+        // Removing content.a temporarily while moving content.c above content.b still works without dead clicks.
+        let visible_bc = vec!["content.b".to_string(), "content.c".to_string()];
+        assert!(profile.move_up("content.c", &visible_bc));
+        assert_eq!(
+            profile.ordered_visible(&visible_bc),
+            ["content.c", "content.b"]
+        );
+        assert_eq!(profile.priority_rank("content.c", &visible_bc), Some(1));
+        assert_eq!(profile.priority_rank("content.b", &visible_bc), Some(2));
+        assert!(!profile.move_up("content.c", &visible_bc));
+        assert!(!profile.move_down("content.b", &visible_bc));
+
+        // Disabling a mod keeps its exact order slot.
+        profile.set_enabled("content.c", false);
+        assert_eq!(profile.priority_rank("content.c", &visible_bc), Some(1));
+
+        profile.save(&path).unwrap();
+        let reloaded = ExtensionProfile::load(&path);
+        assert_eq!(reloaded.schema_version, 2);
+        assert_eq!(
+            reloaded.ordered_visible(&visible_bc),
+            ["content.c", "content.b"]
         );
 
         let _ = std::fs::remove_dir_all(&dir);

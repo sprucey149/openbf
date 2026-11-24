@@ -85,6 +85,13 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `mungefs/src/soundbank.rs` 344 — `SampleBank` samples · `SampleBank`
 - `mungefs/src/sound_props.rs` 702 — `snd_` properties, layered/parameterized sounds and `mus_` music records · `SoundProp`, `find_named_sublevels`, `MusicRecord`, `find_music`; graph, bus and take-lock fields in the module header and record docs.
 - `mungefs/src/stream.rs` 330 — music/VO streams · `Stream`
+- `mungefs/src/terrain/pc.rs` 500 — PC BF2 `tern` height/texture/color/cutters decoder alongside PS2/Xbox readers · `decode_pc_terrain`
+- `mungefs/src/lua50.rs` 569 — bounded static Lua 5.0 LVL bytecode parser and table extractor (never executes arbitrary code) · `Chunk`, `Value`, `parse`
+- `mungefs/src/lua50/eval.rs` 791 — deterministic bounded opcode evaluator for `addme.script` and mission scripts · `eval_script`
+- `mungefs/src/lua50/tests.rs` 150 — Lua 5.0 static extractor unit tests.
+- `mungefs/src/addon.rs` 1167 — generic legacy BF2 addon folder inspector (`addme.script`, `mission.lvl`, world LVLs, `locl`, unused-LVL isolation) · `inspect_addon_dir`, `AddonInspection`, `AddonMapGroup`
+- `mungefs/src/addon/mission_fold.rs` 770 — static folding of evaluated Lua mission setup (Conquest, 1-flag/2-flag CTF, teams, classes, heroes, spawns, audio) · `fold_mission`
+- `mungefs/src/addon/tests.rs` 117 — addon inspection and mission-folding unit regressions.
 - `mungefs/src/world_anim.rs` 145 — a `wrld` chunk's `anim` / `anmg` object animations and groups for the campaign scripts: 41-byte POSK/ROTK keys with tangents, play-at-load and NOHI flags · `Key`, `Anim`, `Group`, `WorldAnims`, `parse`; byte layout in the module header.
 
 ## bake — the `bake` binary (groups: `scripts/rebake.sh`)
@@ -197,6 +204,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/xbox.rs` 863 — `bake xbox` and `bake xbox-prints`: an Xbox disc's maps, and the PS2 gameplay hashes every bake from one is held to · `bake_xbox`, `print_map`, `write_prints`
 - `bake/src/donor.rs` 304 — Card COVR: a BF1 map's Cover hints from the BF2 version of the same map (lead_tmp botre xbox_pc note finding 1). BF2's Yavin Temple authors 973
 - `bake/src/world_anims.rs` 68 — `bake world-anims <LVL> <map dir>`: writes every `wrld`'s animations and groups to `<map dir>/world_anims.ron` (`bake map` writes it too); backfills maps baked before the file existed · `read`, `bake`.
+- `bake/src/mods.rs` 128 — CLI handlers for `bake mod-inspect` and `bake mod-convert` plus module exports · `inspect`, `convert`.
+- `bake/src/mods/mission.rs` 243 — emits translated native OpenBF mission RONs (`mod_<ns>__*.ron`, incl. 2-flag CTF & audio/hero tables) into a mod's cache.
+- `bake/src/mods/convert.rs` 350 — versioned content-mod conversion into `openbf_data/mod_cache/<namespace>/` without touching source mod files · `convert_mod`, `emit_progress`.
 
 ## manifest — the schema
 - `manifest/src/lib.rs` 1468 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `LoadingLayout`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
@@ -575,6 +585,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/world_anim.rs` 496 — the runtime world-animation player the campaign scripts drive (`PlayAnimation`, `PauseAnimation`, `RewindAnimation`, `PlayAnimationFromTo`, `SetAnimationStartPoint`): per-world base matrices, keyed pos/rot and instance poses from `manifest::world_anim::FILE` · `WorldAnimPlayer`, `load`, `play`, `pause`, `rewind`, `play_from_to`, `set_start_point`, `step`, `instance_poses`, `animated_instances`.
 - `game/src/main/windowed/front/profiles.rs` 583 — profile selection after Start and rebinding the shell to the selected save · `App::step_profiles`.
 - `game/src/lib.rs` 83 — module roots
+- `game/src/mods_runtime.rs` 747 — runtime content-mod discovery, automatic `bake mod-convert` caching, dependency/conflict checks, load-order VFS/locl overlay mounting, and multiplayer override digest · `mount_enabled_mods`, `active_mod_maps`, `override_digest`.
 - `game/src/world_fingerprint.rs` 101 — baked world compatibility identity for a future multiplayer handshake.
 - `game/src/assets.rs` 1839 — baked-map loading into a CPU scene, texture tiers, collision/hull body extraction, the vehicles' hit locations (OURS: BF1's weak spots) and mesh-reader re-exports · `load_scene`, `Scene`, `TextureTier`, `mode_layer_index`, `body_layers`, `hull_parts`, `hit_locations`, `BF1_WEAK_SPOTS`, `BF1_ADDED_WEAK_SPOTS`, `added_weak_parts`.
 - `game/src/assets/tests.rs` 406 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
@@ -857,6 +868,7 @@ archive. The archive is the one inside the executable, else `openbf.pak` in its 
 --write-pack <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...` writes the packed copy (`scripts/pack.py` runs it
 on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak` from there on, on every OS; unfinished packed builds keep dev mode on by default (`OPENBF_DEV=0` disables it; `dev::on`).
 - `pak/src/lib.rs` 881 — packed/disk runtime data facade · `Archive`, `write_pack`, `write_pack_at`, `replace_sources`, `find_archive`, `collect`, `mount`, `packed`, `read`, `read_dir`, `open`, `Reader`; archive layout, deduplication and mount policy in the module/API docs.
+- `pak/src/overlay.rs` 264 — virtual overlay stack separating isolated mod namespaces (`NamespaceDir`, `NamespacePrefix`) from priority-ordered explicit overrides (`Overrides`) over disk or packed mounts · `set_overlays`, `clear_overlays`, `OverlayLayer`, `OverlayRule`.
 - `pak/examples/pack_load.rs` — writes and reads a pack as the game does (`scripts/tests/test_pack_limits.py`) and measures load cost: `bench <dir> <scratch> [rounds]` times reading every file raw and zstd.
 - `pak/src/tests.rs` 530 — round trip, re-pack, a damaged footer, ranged reads, dedupe, disk fallback and atomic source substitutions
 
@@ -1402,6 +1414,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `launcher/src/paths.rs` 250 — release vs checkout path discovery, tool lookup (`bake`, base `game`), the built game's readiness and BF1 presence read through `pak::find_archive`, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `open_folder`.
 - `launcher/src/runner.rs` 259 — background setup pipeline runner with ring-buffered console lines, 20 Hz throttled progress updates, error-line selection, and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `launch_game`, `is_error_line`.
 - `launcher/src/ui.rs` 1347 — native `740×450` frameless egui launcher UI starting on an empty main pane with status indicators, system regular/bold fonts, optional BF1 setup, and seamless top-fading build console with scroll-to-bottom control · `LauncherApp`, `Page`, `DotState`, `HostActions`.
+- `launcher/src/mods_worker.rs` 562 — background filesystem mod discovery, SHA-256 cache validation, and sequential `bake mod-convert` progress worker · `ModsWorker`, `ModsSnapshot`, `DiscoveredModState`.
+- `launcher/src/ui_mods.rs` 995 — launcher Mods tab UI separating bundled engine extensions from filesystem-discovered content mods with Up/Down priority controls and conflict/progress diagnostics (no Import button).
 - `launcher/src/main.rs` 407 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling, window-close-before-spawn launch, `--audio-restore-worker`, and `--headless-setup` CLI modes.
 - `launcher/src/pipeline/mod.rs` 499 — Stage 2 native 6-step setup orchestrator: tool checks (Python, ffmpeg), child-process running with streamed output and cancellation, RAII staging temp cleanup and always-split `openbf.exe` + `openbf.pak` packing · `run_setup`, `ExecCtx`, `ProgressSink`, `STEP_COUNT`, `args!`, `hide_console`.
 - `launcher/src/pipeline/scan.rs` 660 — native PS2/Xbox/PC source recognition, case-insensitive path resolution, and DLC hero/sound LVL content detection · `BuildPlan`, `GameId`, `GameSource`, `DlcSource`, `ci_path`, `detect_dlc`, `detect_hero_sounds`.
@@ -1414,6 +1428,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `extensions/src/profile.rs` 327 — portable data-directory discovery (`OPENBF_DATA_DIR`), atomic RON extension preferences (extensions.ron in openbf_data, disabled by default), CLI overrides and startup error reports (`last_startup_error.ron`) · `ExtensionProfile`, `StartupOverrides`, `StartupErrorReport`, `resolve_data_dir`, `discover_data_dir`
 - `extensions/src/registry.rs` 441 — capability/conflict validation, exclusive display backend selection, and deterministic topological extension ordering · `ExtensionRegistry`, `DisplayBackendSelection`, `ActivationPlan`, `ResolutionError`
 - `extensions/src/runtime.rs` 201 — opt-in `runtime` feature traits and shared value types bridging `game` and bundled engine extensions · `EngineExtension`, `EarlyDisplayContext`, `ActiveDisplayExtension`, `SimView`, `FrameContext`, `FrameDirectives`, `StereoView`, `TrackedGun`, `EyeClipQuery`, `ListenerPose`
+- `extensions/src/mods.rs` 542 — shared content-mod manifest, namespace slugification, folder discovery (mods dir in `openbf_data`), optional mod metadata merging, and versioned cache status (`ModCacheMeta`) · `DiscoveredMod`, `ModCacheStatus`, `ModFolderEntry`, `list_mod_folders`
+- `extensions/src/mods/fingerprint.rs` 149 — deterministic recursive source-folder SHA-256 fingerprinting with symlink guardrails · `compute_mod_fingerprint`, `content_mod_multiplayer_digest`
+- `extensions/src/mods/resolve.rs` 388 — dependency validation, ordering conflict diagnostics, and load-order override precedence resolution (`resolve_content_mods`) · `ContentModPlan`, `ResourceOverrideConflict`, `ContentModError`
 
 ## openbf_vr — bundled OpenBF VR OpenXR extension (`openbf.vr`)
 - `openbf_vr/src/lib.rs` 79 — extension entrypoint (`VrExtension`) and platform-gated OpenXR integration (`windows` / `linux` active, clean unsupported stub elsewhere) · `VrExtension`

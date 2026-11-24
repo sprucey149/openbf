@@ -38,7 +38,24 @@ fn manifest(keys: &[&str], addon: bool) -> ContentManifest {
         maps: keys.iter().map(|k| (*k).to_owned()).collect(),
         games: ["bf2".to_owned()].into(),
         addon_heroes: addon,
+        active_mods: Vec::new(),
+        override_digest: String::new(),
     }
+}
+
+#[test]
+fn mod_override_digest_mismatch_is_detected() {
+    let mut host = manifest(&["mod_abr__abr"], false);
+    host.active_mods = vec![("content.abr".into(), "aaa".into())];
+    host.override_digest = "1111222233334444".into();
+    let mut guest = host.clone();
+    assert_eq!(mod_mismatch_reason(&host, &guest), None);
+    guest.override_digest = "9999888877776666".into();
+    assert!(mod_mismatch_reason(&host, &guest).is_some());
+    assert_eq!(
+        ContentManifest::intersect([&host, &guest]).override_digest,
+        "MISMATCH"
+    );
 }
 
 fn add(ia: &mut InstantAction, key: &str) {

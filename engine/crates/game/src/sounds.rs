@@ -719,9 +719,10 @@ fn note_indexed(g: &GlobalRon, out: &mut HashMap<u32, bool>) {
 
 impl SoundLib {
     /// [`SoundLib::load`] for a battle of `mission` (card SNDE): the
-    /// sub-level its script loads first.
+    /// sub-level its script loads first, falling back to stock planet sound
+    /// banks when a mod map ships no custom sound bank of its own.
     pub fn load_for(map_dir: &Path, mission: &crate::mission::MissionDef) -> Option<SoundLib> {
-        let mut lib = SoundLib::load(map_dir)?;
+        let mut lib = SoundLib::load_with_fallback(map_dir, &mission.sound)?;
         let f = mission.factions();
         lib.for_battle(
             map_dir,
@@ -871,6 +872,129 @@ impl SoundLib {
             handed: None,
             rate_mul: 1.0,
             buses,
+            effects_volume: 1.0,
+            dialogue_volume: 1.0,
+        })
+    }
+
+    /// Load `map_dir`'s own bank if baked, or fall back to matching stock planet
+    /// sound banks declared by `sound_banks` (and `core_bf2` + `audio/global_bf2`).
+    pub fn load_with_fallback(
+        map_dir: &Path,
+        sound_banks: &[(String, String)],
+    ) -> Option<SoundLib> {
+        if let Some(lib) = SoundLib::load(map_dir) {
+            return Some(lib);
+        }
+        let game = pak::read_to_string(map_dir.join("manifest.ron"))
+            .ok()
+            .and_then(|txt| ron::from_str::<manifest::ManifestHead>(&txt).ok())
+            .map(|h| h.source_game)
+            .unwrap_or_else(|| "bf2".into());
+        let root = map_dir
+            .parent()
+            .filter(|p| {
+                pak::is_dir(p.join(format!("core_{game}")))
+                    || pak::is_dir(p.join("audio"))
+                    || pak::is_dir(p.join("common_bf2"))
+            })
+            .unwrap_or_else(|| Path::new("assets_baked"));
+        let mut fallback_dir: Option<PathBuf> = None;
+        let mut fallback_bank: Option<Bank> = None;
+        for (planet, sublevel) in sound_banks {
+            let p = planet.to_ascii_lowercase();
+            let sub_low = sublevel.to_ascii_lowercase();
+            let sub_stem = sub_low
+                .trim_end_matches("gcw")
+                .trim_end_matches("cw")
+                .trim_end_matches('_');
+            let candidates = [
+                format!("bf2_{sub_stem}"),
+                format!("bf2_{p}1"),
+                format!("bf2_{p}2"),
+                format!("bf2_{p}3"),
+                format!("bf1_{sub_stem}"),
+                format!("{p}1"),
+                format!("{p}2"),
+            ];
+            for cand in candidates {
+                let sdir = root.join(&cand).join("sounds");
+                if let Some(bank) = Bank::load(&sdir) {
+                    fallback_dir = Some(root.join(cand));
+                    fallback_bank = Some(bank);
+                    break;
+                }
+            }
+            if fallback_bank.is_some() {
+                break;
+            }
+        }
+        let mut core = Bank::load(&root.join(format!("core_{game}")).join("sounds"));
+        if let Some(core_bank) = &mut core {
+            core_bank.import_sbd_sounds(root, &game);
+            if game == "bf1" {
+                core_bank.import_buff_sounds(root);
+            }
+            if game == "bf2" {
+                core_bank.import_dlc_sounds(root);
+            }
+        }
+        let map = fallback_bank.unwrap_or_else(|| Bank {
+            dir: root.join(format!("core_{game}")).join("sounds"),
+            props: HashMap::new(),
+            by_level: HashMap::new(),
+            sample_paths: HashMap::new(),
+            engines: HashMap::new(),
+            music: HashMap::new(),
+            triggers: Vec::new(),
+        });
+        let mut indexed: HashMap<u32, bool> = HashMap::new();
+        let mut music_takes = HashMap::new();
+        let global_dir = root.join("audio").join(format!("global_{game}"));
+        let g = read_index(&global_dir.join("global.ron"));
+        note_indexed(&g, &mut indexed);
+        note_music(&g, &global_dir, &mut music_takes);
+        let stream_root = fallback_dir.as_deref().unwrap_or(map_dir);
+        let map_streams_dir = stream_root.join("sounds").join("streams");
+        let m = read_index(&map_streams_dir.join("streams.ron"));
+        note_indexed(&m, &mut indexed);
+        note_music(&m, &map_streams_dir, &mut music_takes);
+        Some(SoundLib {
+            map,
+            levels: fallback_dir
+                .as_deref()
+                .map(|d| crate::foley::sublevels(d, ["", ""], &[]))
+                .unwrap_or_default(),
+            foreign: Vec::new(),
+            core,
+            global_dir,
+            global_files: g.files.into_iter().collect(),
+            map_streams_dir,
+            map_stream_files: m.files.into_iter().collect(),
+            timers: Vec::new(),
+            now: 0.0,
+            menu_now: 0.0,
+            next_ok: HashMap::new(),
+            take_ok: HashMap::new(),
+            indexed,
+            music_takes,
+            cache: HashMap::new(),
+            loops: HashMap::new(),
+            loop_draws: HashMap::new(),
+            walker_gains: HashMap::new(),
+            turret_whirs: HashMap::new(),
+            ambient: HashMap::new(),
+            cries: HashMap::new(),
+            boosts: HashMap::new(),
+            weapon_handles: HashMap::new(),
+            station_voices: HashMap::new(),
+            hero_voices: HashMap::new(),
+            hero_blades: Vec::new(),
+            seed: 0x1234_5678,
+            played: 0,
+            handed: None,
+            rate_mul: 1.0,
+            buses: bus_table(&game),
             effects_volume: 1.0,
             dialogue_volume: 1.0,
         })

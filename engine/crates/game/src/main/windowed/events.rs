@@ -3,10 +3,10 @@
 use super::spawn_feedback::draw_snapshot_notice;
 use super::tick_hook::{TickHook, TickState};
 use super::{
-    apply_pause_action, autopilot_pad, hud_model_for_view, hud_title, lan, load_and_upload, mouse,
-    note_sounds, rain_splashes, record_round, spawn_model, start_take, stats_pages,
-    tracked_velocity, walk_draws, window_attributes, window_size_env, world_objective_draws, App,
-    Arc, DrawCmd, PadState, Screen, CLEAR,
+    apply_pause_action, autopilot_pad, hud_model_for_view, hud_title, lan, mouse, note_sounds,
+    rain_splashes, record_round, spawn_model, start_take, stats_pages, tracked_velocity,
+    walk_draws, window_attributes, window_size_env, world_objective_draws, App, Arc, DrawCmd,
+    PadState, Screen, CLEAR,
 };
 use core::fmath::FloatExt;
 
@@ -146,7 +146,13 @@ impl winit::application::ApplicationHandler for App {
             self.last = std::time::Instant::now();
             return;
         };
-        self.sounds = game::sounds::SoundLib::load(&map);
+        let sound_banks = self
+            .setup
+            .mission
+            .as_ref()
+            .map(|m| m.sound.clone())
+            .unwrap_or_default();
+        self.sounds = game::sounds::SoundLib::load_with_fallback(&map, &sound_banks);
         self.sync_audio_levels();
         self.music_voice = None;
         if let Some(sl) = &self.sounds {
@@ -159,13 +165,25 @@ impl winit::application::ApplicationHandler for App {
                 }
             );
         }
+        let layers = self
+            .setup
+            .mission
+            .as_ref()
+            .map(|m| m.layers.clone())
+            .unwrap_or_default();
         let kills = self
             .setup
             .mission
             .as_ref()
             .map(|m| m.scene_kills().to_vec())
             .unwrap_or_default();
-        match load_and_upload(&mut renderer, &map, &self.mode, &kills) {
+        match super::super::battle::load_and_upload_with_layers(
+            &mut renderer,
+            &map,
+            &self.mode,
+            &layers,
+            &kills,
+        ) {
             Ok((gpu, scene)) => {
                 if self.walk_requested {
                     let (walk, cube) = match self.battle_resources(&mut renderer, &scene, None) {
@@ -1529,7 +1547,12 @@ impl winit::application::ApplicationHandler for App {
                         w as f32 / h.max(1) as f32
                     });
                     let stereo_cam = stereo_view.as_ref().map(|v| (&v.camera, v.aspect));
-                    hud = Some(hud_model_for_view(walk, &mut self.feed, hud_aspect, stereo_cam));
+                    hud = Some(hud_model_for_view(
+                        walk,
+                        &mut self.feed,
+                        hud_aspect,
+                        stereo_cam,
+                    ));
                     // Issue #182: the teammate view's hint names the device in use.
                     if let Some(sp) = hud.as_mut().and_then(|m| m.spectate.as_mut()) {
                         if !sp.hint.is_empty() {
@@ -1700,7 +1723,9 @@ impl winit::application::ApplicationHandler for App {
                                 vis.tracked_grenade_draws(walk, class, at, &mut draws);
                             }
                         }
-                        if let (Some(quad), Some(markers)) = (self.fx_quad, self.world_markers.as_ref()) {
+                        if let (Some(quad), Some(markers)) =
+                            (self.fx_quad, self.world_markers.as_ref())
+                        {
                             draws.extend(world_objective_draws(walk, &view.camera, quad, markers));
                         }
                         let result = ext.draw_stereo_eyes(r, &view, &draws, &skinned, clear);
@@ -1715,8 +1740,7 @@ impl winit::application::ApplicationHandler for App {
                         false
                     };
                     r.capture_flat_frame(
-                        !ext_stereo
-                            && self.display_ext.as_ref().is_some_and(|ext| ext.has_frame()),
+                        !ext_stereo && self.display_ext.as_ref().is_some_and(|ext| ext.has_frame()),
                     );
                     if !ext_stereo {
                         if let (Some(vis), Some((walk, _))) =

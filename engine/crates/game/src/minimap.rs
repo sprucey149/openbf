@@ -616,28 +616,66 @@ impl MapStatic {
                 number: None,
             }));
         }
-        if let Some(ctf) = sim
-            .ctf
-            .as_ref()
-            .filter(|ctf| walk.campaign.is_none() && ctf.mode == core::sim::CtfMode::OneFlag)
-        {
-            for flag in &ctf.flags {
-                let Some((pos, delivery)) = ctf_marker(sim, flag, own) else {
-                    continue;
-                };
-                markers.push(MapIcon {
-                    pos: [pos.x, pos.z],
-                    texture: if delivery {
-                        "hud_objective_icon_circle"
+        if let Some(ctf) = sim.ctf.as_ref().filter(|_| walk.campaign.is_none()) {
+            if ctf.mode == core::sim::CtfMode::OneFlag {
+                for flag in &ctf.flags {
+                    let Some((pos, delivery)) = ctf_marker(sim, flag, own) else {
+                        continue;
+                    };
+                    markers.push(MapIcon {
+                        pos: [pos.x, pos.z],
+                        texture: if delivery {
+                            "hud_objective_icon_circle"
+                        } else {
+                            "hud_target_flag_onscreen"
+                        }
+                        .into(),
+                        scale: 0.9 + 3.0 * (clock % 1.0),
+                        color: [223, 223, 32],
+                        heading: None,
+                        number: None,
+                    });
+                }
+            } else {
+                let mut draw_delivery = false;
+                for flag in &ctf.flags {
+                    let team_color = if flag.team == own {
+                        [70, 140, 255]
                     } else {
-                        "hud_target_flag_onscreen"
+                        [235, 65, 65]
+                    };
+                    let color = match flag.status {
+                        core::sim::FlagStatus::Carried { carrier } => {
+                            if carrier == walk.player {
+                                draw_delivery = true;
+                                continue;
+                            }
+                            [223, 223, 32]
+                        }
+                        core::sim::FlagStatus::Dropped { .. } => [223, 223, 32],
+                        core::sim::FlagStatus::AtHome => team_color,
+                    };
+                    markers.push(MapIcon {
+                        pos: [flag.current_pos.x, flag.current_pos.z],
+                        texture: "hud_flag_icon".into(),
+                        scale: 2.2,
+                        color,
+                        heading: None,
+                        number: None,
+                    });
+                }
+                if draw_delivery {
+                    if let Some(goal) = ctf.capture_regions.get(usize::from(own)) {
+                        markers.push(MapIcon {
+                            pos: [goal.pos.x, goal.pos.z],
+                            texture: "hud_objective_icon_circle".into(),
+                            scale: 0.9 + 3.0 * (clock % 1.0),
+                            color: [223, 223, 32],
+                            heading: None,
+                            number: None,
+                        });
                     }
-                    .into(),
-                    scale: 0.9 + 3.0 * (clock % 1.0),
-                    color: [223, 223, 32],
-                    heading: None,
-                    number: None,
-                });
+                }
             }
         }
         MapModel {

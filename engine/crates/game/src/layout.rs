@@ -449,6 +449,15 @@ impl MapLayout {
     }
 
     pub fn from_mission_manifest(m: &Manifest, hunt: bool, campaign: bool) -> MapLayout {
+        Self::from_mission_manifest_mode(m, hunt, campaign, false)
+    }
+
+    pub fn from_mission_manifest_mode(
+        m: &Manifest,
+        hunt: bool,
+        campaign: bool,
+        ctf: bool,
+    ) -> MapLayout {
         let region = |name: &str| -> Option<Region> {
             let r = m
                 .regions
@@ -472,7 +481,7 @@ impl MapLayout {
                 Some(name) => Some(name),
                 None if space_post => match prop(&inst.props, PROP_CONTROL_REGION) {
                     Some(name) => Some(name),
-                    None if m.spawn_only_posts || campaign => None,
+                    None if m.spawn_only_posts || campaign || ctf => None,
                     None => continue,
                 },
                 None if hunt_post || campaign_post => None,

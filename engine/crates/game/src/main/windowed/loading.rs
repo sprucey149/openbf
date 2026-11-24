@@ -478,10 +478,11 @@ pub(super) fn prepare_round(
                 let script = j
                     .campaign_index
                     .map(|i| ui::campaign::RISE_OF_THE_EMPIRE[i].script);
-                super::super::round_setup::campaign_layers_for(
+                super::super::round_setup::mission_layers_for(
                     &j.missions_dir,
                     &j.name,
                     &mode,
+                    Some(&j.row_armies),
                     script,
                 )
             })

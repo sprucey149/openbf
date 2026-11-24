@@ -155,6 +155,8 @@ pub mod points {
 /// table), with the disc's text as the fallback when no bake is at hand.
 #[derive(Debug, Clone)]
 pub struct Texts {
+    /// Active content mod localization tables in load-order priority (`[0]` highest).
+    mods: Vec<std::sync::Arc<HudLocl>>,
     /// BF2's table: the lines, the team names, the soldier names (shared:
     /// a feed's copy shares it).
     bf2: Option<std::sync::Arc<HudLocl>>,
@@ -162,6 +164,20 @@ pub struct Texts {
     map: Option<std::sync::Arc<HudLocl>>,
     /// The map is a BF1 map: its names are upper case on the disc.
     bf1_map: bool,
+}
+
+static MOD_LOCLS: std::sync::RwLock<Vec<std::sync::Arc<HudLocl>>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Install active content-mod localization tables in load-order priority (`[0]` wins).
+pub fn set_mod_locls(tables: Vec<std::sync::Arc<HudLocl>>) {
+    let mut guard = MOD_LOCLS.write().unwrap_or_else(|e| e.into_inner());
+    *guard = tables;
+}
+
+/// Remove all content-mod localization overlays, restoring stock-only text.
+pub fn clear_mod_locls() {
+    set_mod_locls(Vec::new());
 }
 
 const KILLED: (u32, &str) = (0xacc1_eef7, "%s killed %s");
@@ -227,7 +243,8 @@ fn display_name(text: &str, bf1: bool) -> Option<String> {
 
 impl Texts {
     /// The tables `bake locl` wrote under `assets_dir`, for a map of
-    /// `source_game`. Missing tables fall back to the built-in lines.
+    /// `source_game`, overlaid by any active mod localization tables in priority order.
+    /// Missing tables fall back to the built-in lines.
     pub fn load(assets_dir: &Path, source_game: &str) -> Self {
         let bf1_map = source_game.eq_ignore_ascii_case("bf1");
         let bf2 = read_locl(&assets_dir.join("common_bf2")).map(std::sync::Arc::new);
@@ -239,55 +256,65 @@ impl Texts {
         } else {
             bf2.clone()
         };
-        Self { bf2, map, bf1_map }
+        let mods = MOD_LOCLS.read().unwrap_or_else(|e| e.into_inner()).clone();
+        Self {
+            mods,
+            bf2,
+            map,
+            bf1_map,
+        }
     }
 
     /// Only the built-in lines (tests, a bake with no text).
     pub fn builtin() -> Self {
         Self {
+            mods: Vec::new(),
             bf2: None,
             map: None,
             bf1_map: false,
         }
     }
 
-    /// An order's name on the cross: BF1's own table on a BF1 map, else
-    /// BF2's, else the disc's English.
+    /// An order's name on the cross: active mods first, then BF1's own table on
+    /// a BF1 map, else BF2's, else the disc's English.
     fn order_label(&self, (key, fallback): (&str, &str)) -> String {
         let hash = manifest::hud::locl_key(key);
-        [&self.map, &self.bf2]
-            .into_iter()
-            .flatten()
+        self.mods
+            .iter()
+            .chain([&self.map, &self.bf2].into_iter().flatten())
             .find_map(|l| l.get(hash))
             .unwrap_or(fallback)
             .to_owned()
     }
 
     fn line(&self, (hash, fallback): (u32, &str)) -> String {
-        self.bf2
-            .as_ref()
-            .and_then(|l| l.get(hash))
+        self.mods
+            .iter()
+            .chain(self.bf2.as_ref())
+            .find_map(|l| l.get(hash))
             .unwrap_or(fallback)
             .to_owned()
     }
 
-    /// The BF2 table's text under the key path `key`, line ends and the
-    /// trailing blank lines kept as the disc has them; `None` without one.
+    /// The BF2 (or overriding mod) table's text under key path `key`.
     pub fn bf2_text(&self, key: &str) -> Option<&str> {
-        self.bf2.as_ref()?.text(key)
+        self.mods
+            .iter()
+            .find_map(|l| l.text(key))
+            .or_else(|| self.bf2.as_ref()?.text(key))
     }
 
-    /// The map's game's table's text under `key` (BF1's own for a BF1
-    /// map); `None` without one.
+    /// The map's game's table's text under `key` (mods first, then BF1/BF2).
     pub fn map_text(&self, key: &str) -> Option<&str> {
-        self.map.as_ref()?.text(key)
+        self.mods
+            .iter()
+            .find_map(|l| l.text(key))
+            .or_else(|| self.map.as_ref()?.text(key))
     }
 
     /// A team's name: `common.sides.<faction>.name` ("Rebels", "Empire").
     pub fn team_name(&self, faction: &str) -> String {
-        self.bf2
-            .as_ref()
-            .and_then(|l| l.text(&format!("common.sides.{faction}.name")))
+        self.bf2_text(&format!("common.sides.{faction}.name"))
             .filter(|t| !t.trim().is_empty())
             .map_or_else(
                 || match faction {
@@ -305,59 +332,58 @@ impl Texts {
             )
     }
 
-    /// A post's name by its key path (`level.<map>.<label>`: [D] the path
-    /// that names 227 of the discs' 248 posts, and BF1 KAS2's CP5 "PIER ONE"
-    /// as the PS2 printed it), else "Command Post" (the PS2's own fallback,
-    /// §1 [V]).
+    /// A post's name by its key path (`level.<map>.<label>`), else "Command Post".
     pub fn post_name(&self, key: &str) -> String {
-        self.map
-            .as_ref()
-            .and_then(|l| l.text(key))
+        self.mods
+            .iter()
+            .find_map(|l| l.text(key))
+            .or_else(|| self.map.as_ref().and_then(|l| l.text(key)))
             .and_then(|t| display_name(t, self.bf1_map))
             .unwrap_or_else(|| self.line(COMMAND_POST))
     }
 
-    /// A soldier class's name as the spawn screen prints it (card SPSEL):
-    /// class `<side>_<rest>` is keyed `entity.<side>.<rest>` in both games'
-    /// tables ("rep_inf_ep3_sniper" → "Clone Sharpshooter", BF1
-    /// "all_inf_smuggler" → "WOOKIEE SMUGGLER", title-cased like the post
-    /// names), the map's own game's table first. `None` when neither has it.
+    /// A soldier class's name as the spawn screen prints it.
     pub fn class_name(&self, class: &str) -> Option<String> {
         let (side, rest) = class.split_once('_')?;
         let hash = manifest::hud::locl_key(&format!("entity.{side}.{rest}"));
-        let (text, bf1) = [(&self.map, self.bf1_map), (&self.bf2, false)]
-            .into_iter()
-            .find_map(|(l, bf1)| Some((l.as_ref()?.get(hash)?, bf1)))?;
+        let (text, bf1) = self
+            .mods
+            .iter()
+            .map(|l| (l.get(hash), false))
+            .chain([
+                (self.map.as_ref().and_then(|l| l.get(hash)), self.bf1_map),
+                (self.bf2.as_ref().and_then(|l| l.get(hash)), false),
+            ])
+            .find_map(|(t, bf1)| Some((t?, bf1)))?;
         display_name(text, bf1)
     }
 
-    /// A weapon class's name: `<side>_<kind>_<rest>` is keyed
-    /// `weapons.<side>.<kind>.<rest>`, the map's own game's table first;
-    /// our own award (`roster::awards::own_texts`) has our own name when no
-    /// table has one.
+    /// A weapon class's name.
     pub fn weapon_name(&self, class: &str) -> Option<String> {
         let (side, rest) = class.split_once('_')?;
         let (kind, rest) = rest.split_once('_')?;
         let key = format!("weapons.{side}.{kind}.{rest}");
-        [(&self.map, self.bf1_map), (&self.bf2, false)]
-            .into_iter()
-            .find_map(|(table, bf1)| display_name(table.as_ref()?.text(&key)?, bf1))
+        self.mods
+            .iter()
+            .map(|l| (l.text(&key), false))
+            .chain([
+                (self.map.as_ref().and_then(|l| l.text(&key)), self.bf1_map),
+                (self.bf2.as_ref().and_then(|l| l.text(&key)), false),
+            ])
+            .find_map(|(t, bf1)| display_name(t?, bf1))
             .or_else(|| Some(crate::roster::awards::own_texts(class)?.0.to_owned()))
     }
 
-    /// The line an earned award shows (issue #130): BF2's
-    /// `game.awards.bonus.<medal>` (`medal` as `round_stats::MEDAL_NAMES` keys
-    /// it), or our own for an award weapon of ours, `award` being the class
-    /// the medal unlocks in the player's kit (the Heavy Blast Cannon on a BF1
-    /// map, where BF2's text would name the flechette).
+    /// The line an earned award shows.
     pub fn award_bonus(&self, medal: &str, award: Option<&str>) -> Option<String> {
         if let Some((_, line)) = award.and_then(crate::roster::awards::own_texts) {
             return Some(line.to_owned());
         }
         let key = format!("game.awards.bonus.{medal}");
-        [&self.map, &self.bf2]
-            .into_iter()
-            .find_map(|table| display_name(table.as_ref()?.text(&key)?, false))
+        self.mods
+            .iter()
+            .chain([&self.map, &self.bf2].into_iter().flatten())
+            .find_map(|table| display_name(table.text(&key)?, false))
     }
 
     /// The side's name lists, `<side>.firstnames.01` … and `.lastnames.01` …

@@ -7,8 +7,8 @@
 
 #[path = "battle/ctf_hud.rs"]
 mod ctf_hud;
-pub(super) use ctf_hud::{upload_world_marker_assets, world_objective_draws, WorldMarkerAssets};
 use ctf_hud::{hud_hints, marker_screen};
+pub(super) use ctf_hud::{upload_world_marker_assets, world_objective_draws, WorldMarkerAssets};
 
 #[path = "battle/vehicle_start.rs"]
 mod vehicle_start;
@@ -23,6 +23,7 @@ use render::{DrawCmd, MeshHandle, Renderer};
 /// Walk-mode soldier marker tint (orange — reads on sand and rock).
 const MARKER_COLOR: [f32; 4] = [0.9, 0.45, 0.1, 1.0];
 
+#[cfg(test)]
 pub(super) fn load_and_upload(
     r: &mut Renderer,
     dir: &std::path::Path,
@@ -577,10 +578,11 @@ pub(super) fn make_walk_with_counts(
         })
         .or_else(|| b.vehicle.is_some().then_some([0, 0]));
     let mut vehicle_classes: Vec<String> = Vec::new();
-    let mut layout = game::layout::MapLayout::from_mission_manifest(
+    let mut layout = game::layout::MapLayout::from_mission_manifest_mode(
         &scene.manifest,
         hunt,
         b.mission.as_ref().is_some_and(|m| m.is_campaign()),
+        b.mission.as_ref().is_some_and(|m| m.is_ctf()),
     );
     if let Some(m) = b.mission.as_ref().filter(|m| m.is_hunt()) {
         // Hoth and Theed register hazards by name in the Hunt scripts.
@@ -835,14 +837,48 @@ pub(super) fn make_walk_with_counts(
                 let score_limit = ctf_def
                     .score_limit
                     .unwrap_or(core::sim::DEFAULT_CTF_SCORE_LIMIT);
-                let find_region = |name: &str| -> glam::Vec3 {
-                    scene
+                let find_region = |name: &str| -> (glam::Vec3, Option<f32>) {
+                    if let Some(r) = scene
                         .manifest
                         .regions
                         .iter()
                         .find(|r| r.name.eq_ignore_ascii_case(name))
-                        .map(|r| glam::Vec3::from(r.translation))
-                        .or_else(|| {
+                    {
+                        let r_obj = core::region::Region::from_rows(
+                            &r.shape,
+                            r.rotation,
+                            r.translation,
+                            r.size,
+                        );
+                        let radius = r_obj.map(|reg| match reg.shape {
+                            core::region::Shape::Sphere => reg.w,
+                            core::region::Shape::Cylinder => reg.size.x,
+                            core::region::Shape::Box => {
+                                core::fmath::FloatExt::fmax(reg.size.x, reg.size.z)
+                            }
+                        });
+                        return (
+                            glam::Vec3::from(r.translation),
+                            radius.map(|rad| rad.clamp(2.5, 25.0)),
+                        );
+                    }
+                    let pos = scene
+                        .manifest
+                        .instances
+                        .iter()
+                        .find(|i| i.name.eq_ignore_ascii_case(name))
+                        .map(|i| glam::Vec3::from(i.translation))
+                        .unwrap_or(glam::Vec3::ZERO);
+                    (pos, None)
+                };
+                let mission_factions = [m.teams[0].faction.as_str(), m.teams[1].faction.as_str()];
+                let sim_factions = [
+                    walk.teams[0].faction.as_str(),
+                    walk.teams[1].faction.as_str(),
+                ];
+                let find_instance = |name: &str| -> Option<glam::Vec3> {
+                    (!name.is_empty())
+                        .then(|| {
                             scene
                                 .manifest
                                 .instances
@@ -850,28 +886,159 @@ pub(super) fn make_walk_with_counts(
                                 .find(|i| i.name.eq_ignore_ascii_case(name))
                                 .map(|i| glam::Vec3::from(i.translation))
                         })
-                        .unwrap_or(glam::Vec3::ZERO)
+                        .flatten()
                 };
-                let home_pos = find_region(&ctf_def.home_region);
-                let mission_factions = [m.teams[0].faction.as_str(), m.teams[1].faction.as_str()];
-                let sim_factions = [
-                    walk.teams[0].faction.as_str(),
-                    walk.teams[1].faction.as_str(),
-                ];
-                let goals = ctf_capture_goals(
-                    mission_factions,
-                    sim_factions,
-                    find_region(&ctf_def.capture_region_att),
-                    find_region(&ctf_def.capture_region_def),
-                );
-                let ctf_state = core::sim::CtfState::new_space_one_flag(
-                    score_limit,
-                    home_pos,
-                    goals[0],
-                    goals[1],
-                );
+                let swapped = mission_factions[0].eq_ignore_ascii_case(sim_factions[1])
+                    && mission_factions[1].eq_ignore_ascii_case(sim_factions[0]);
+                let is_two_flag = ctf_def.two_flag || ctf_def.flags.len() >= 2;
+                let mut ctf_state = if is_two_flag && ctf_def.flags.len() >= 2 {
+                    let (f0, f1) = if swapped {
+                        (&ctf_def.flags[1], &ctf_def.flags[0])
+                    } else {
+                        (&ctf_def.flags[0], &ctf_def.flags[1])
+                    };
+                    let home0 =
+                        find_instance(&f0.name).unwrap_or_else(|| find_region(&f0.home_region).0);
+                    let home1 =
+                        find_instance(&f1.name).unwrap_or_else(|| find_region(&f1.home_region).0);
+                    let (goal0, r0) = find_region(&f1.capture_region);
+                    let (goal1, r1) = find_region(&f0.capture_region);
+                    let goal0 = if f1.capture_region.is_empty() {
+                        home0
+                    } else {
+                        goal0
+                    };
+                    let goal1 = if f0.capture_region.is_empty() {
+                        home1
+                    } else {
+                        goal1
+                    };
+                    let mut st =
+                        core::sim::CtfState::new_two_flag(score_limit, home0, goal0, home1, goal1);
+                    if let Some(rad) = r0 {
+                        st.capture_regions[0].radius = rad;
+                    }
+                    if let Some(rad) = r1 {
+                        st.capture_regions[1].radius = rad;
+                    }
+                    st
+                } else {
+                    let (home_pos, _) = find_region(&ctf_def.home_region);
+                    let (att_pos, att_r) = find_region(&ctf_def.capture_region_att);
+                    let (def_pos, def_r) = find_region(&ctf_def.capture_region_def);
+                    let goals = ctf_capture_goals(mission_factions, sim_factions, att_pos, def_pos);
+                    let radii = if swapped {
+                        [def_r, att_r]
+                    } else {
+                        [att_r, def_r]
+                    };
+                    let space_map = m.map.contains("_spa")
+                        || scene
+                            .manifest
+                            .instances
+                            .iter()
+                            .any(|i| i.class.eq_ignore_ascii_case("com_icon_spaceflag"));
+                    let mut st = if space_map {
+                        core::sim::CtfState::new_space_one_flag(
+                            score_limit,
+                            home_pos,
+                            goals[0],
+                            goals[1],
+                        )
+                    } else {
+                        core::sim::CtfState::new_ground_one_flag(
+                            score_limit,
+                            home_pos,
+                            goals[0],
+                            goals[1],
+                        )
+                    };
+                    for (region, rad) in st.capture_regions.iter_mut().zip(radii) {
+                        if let Some(rad) = rad {
+                            region.radius = rad;
+                        }
+                    }
+                    st
+                };
+                let space_ctf = ctf_state.is_space();
+                if ctf_def.hide_cps {
+                    for cp in &mut walk.sim.cps {
+                        cp.capturable = false;
+                    }
+                }
+                if !space_ctf && walk.sim.ai_goals.idle() {
+                    if ctf_state.mode == core::sim::CtfMode::TwoFlag {
+                        let g0 = ctf_state.capture_regions[0].pos;
+                        let g1 = ctf_state.capture_regions[1].pos;
+                        walk.sim.ai_goals.add(
+                            0,
+                            core::goals::GoalKind::CtfOffense,
+                            70.0,
+                            Some(core::goals::GoalTarget::Ctf {
+                                region: g0,
+                                flag: Some(1),
+                            }),
+                        );
+                        walk.sim.ai_goals.add(
+                            0,
+                            core::goals::GoalKind::CtfDefense,
+                            30.0,
+                            Some(core::goals::GoalTarget::Flag(0)),
+                        );
+                        walk.sim.ai_goals.add(
+                            1,
+                            core::goals::GoalKind::CtfOffense,
+                            70.0,
+                            Some(core::goals::GoalTarget::Ctf {
+                                region: g1,
+                                flag: Some(0),
+                            }),
+                        );
+                        walk.sim.ai_goals.add(
+                            1,
+                            core::goals::GoalKind::CtfDefense,
+                            30.0,
+                            Some(core::goals::GoalTarget::Flag(1)),
+                        );
+                    } else {
+                        let g0 = ctf_state.capture_regions[0].pos;
+                        let g1 = ctf_state.capture_regions[1].pos;
+                        walk.sim.ai_goals.add(
+                            0,
+                            core::goals::GoalKind::CtfOffense,
+                            80.0,
+                            Some(core::goals::GoalTarget::Ctf {
+                                region: g0,
+                                flag: Some(0),
+                            }),
+                        );
+                        walk.sim.ai_goals.add(
+                            1,
+                            core::goals::GoalKind::CtfOffense,
+                            80.0,
+                            Some(core::goals::GoalTarget::Ctf {
+                                region: g1,
+                                flag: Some(0),
+                            }),
+                        );
+                    }
+                }
+                // Drop ground flags straight onto settled floors at round start.
+                if !space_ctf {
+                    for flag in &mut ctf_state.flags {
+                        if let Some((floor, _)) = walk
+                            .sim
+                            .ground_point_hit_under_n(flag.home_pos, flag.home_pos.y + 0.5)
+                        {
+                            let settled_y = floor + core::sim::ctf::GROUND_FLAG_CLEARANCE;
+                            flag.home_pos.y = settled_y;
+                            flag.current_pos.y = settled_y;
+                            flag.landed = true;
+                        }
+                    }
+                }
                 walk.sim.install_ctf(ctf_state);
-                walk.sim.flyer_bots = true;
+                walk.sim.flyer_bots = space_ctf;
             }
             walk.voice = Some(game::announce::Commander::for_battle(m, &layout, &walk));
             // ...and the music is the script's too, by the reinforcements
@@ -983,6 +1150,36 @@ fn ctf_capture_goals(
         }
     }
     goals
+}
+
+/// Flag mesh specs (`(loose_geometry, carried_geometry)`) aligned to sim team slots.
+pub(super) fn ctf_flag_specs(
+    mission: Option<&game::mission::MissionDef>,
+    walk: &WalkSim,
+) -> Option<Vec<(Option<String>, Option<String>)>> {
+    let m = mission?;
+    let ctf = m.ctf.as_ref()?;
+    if ctf.flags.is_empty() {
+        return None;
+    }
+    let swapped = ctf.flags.len() >= 2
+        && m.teams[0]
+            .faction
+            .eq_ignore_ascii_case(&walk.teams[1].faction)
+        && m.teams[1]
+            .faction
+            .eq_ignore_ascii_case(&walk.teams[0].faction);
+    let ordered: Vec<&game::mission::CtfFlagDef> = if swapped {
+        vec![&ctf.flags[1], &ctf.flags[0]]
+    } else {
+        ctf.flags.iter().collect()
+    };
+    Some(
+        ordered
+            .into_iter()
+            .map(|f| (f.geometry.clone(), f.carried_geometry.clone()))
+            .collect(),
+    )
 }
 
 fn hud_lock(
@@ -1184,18 +1381,58 @@ pub(super) fn hud_model_for_view(
             .sim
             .ctf
             .as_ref()
-            .filter(|c| walk.campaign.is_none() && c.mode == core::sim::CtfMode::OneFlag)
-            .and_then(|c| c.flags.first())
-            .and_then(|flag| match flag.status {
-                core::sim::FlagStatus::AtHome => None,
-                core::sim::FlagStatus::Dropped { .. } => Some(ui::hud_flag::FlagStatus::Dropped),
-                core::sim::FlagStatus::Carried { carrier } => {
-                    walk.sim
-                        .unit(carrier)
-                        .map(|unit| ui::hud_flag::FlagStatus::Carried {
-                            friendly: walk.sim.allied(me.team, unit.team),
-                            player_first_person: carrier == walk.player && walk.first_person(),
-                        })
+            .filter(|_| walk.campaign.is_none())
+            .and_then(|c| {
+                if c.mode == core::sim::CtfMode::OneFlag {
+                    c.flags.first().and_then(|flag| match flag.status {
+                        core::sim::FlagStatus::AtHome => None,
+                        core::sim::FlagStatus::Dropped { .. } => {
+                            Some(ui::hud_flag::FlagStatus::Dropped)
+                        }
+                        core::sim::FlagStatus::Carried { carrier } => {
+                            walk.sim.unit(carrier).map(|unit| {
+                                ui::hud_flag::FlagStatus::Carried {
+                                    friendly: walk.sim.allied(me.team, unit.team),
+                                    player_first_person: carrier == walk.player
+                                        && walk.first_person(),
+                                }
+                            })
+                        }
+                    })
+                } else {
+                    let player_carrying = c.flags.iter().any(|f| {
+                        matches!(f.status, core::sim::FlagStatus::Carried { carrier } if carrier == walk.player)
+                    });
+                    if player_carrying {
+                        return Some(ui::hud_flag::FlagStatus::Carried {
+                            friendly: true,
+                            player_first_person: walk.first_person(),
+                        });
+                    }
+                    let friendly_carried = c.flags.iter().any(|f| {
+                        f.team != me.team
+                            && matches!(f.status, core::sim::FlagStatus::Carried { carrier } if walk.sim.unit(carrier).is_some_and(|u| walk.sim.allied(me.team, u.team)))
+                    });
+                    if friendly_carried {
+                        return Some(ui::hud_flag::FlagStatus::Carried {
+                            friendly: true,
+                            player_first_person: false,
+                        });
+                    }
+                    let enemy_carried = c.flags.iter().any(|f| {
+                        f.team == me.team
+                            && matches!(f.status, core::sim::FlagStatus::Carried { carrier } if walk.sim.unit(carrier).is_some_and(|u| !walk.sim.allied(me.team, u.team)))
+                    });
+                    if enemy_carried {
+                        return Some(ui::hud_flag::FlagStatus::Carried {
+                            friendly: false,
+                            player_first_person: false,
+                        });
+                    }
+                    c.flags
+                        .iter()
+                        .any(|f| matches!(f.status, core::sim::FlagStatus::Dropped { .. }))
+                        .then_some(ui::hud_flag::FlagStatus::Dropped)
                 }
             }),
         space: space_status,
@@ -1692,7 +1929,10 @@ mod tests {
         assert_eq!(walk.sim.team_combatants, Some(c));
         assert_eq!(walk.sim.battle.teams.map(|t| t.alive()), c);
         // The human takes one of team 1's slots.
-        assert_eq!((walk.sim.ai_limit(0), walk.sim.ai_limit(1)), (c[0], c[1] - 1));
+        assert_eq!(
+            (walk.sim.ai_limit(0), walk.sim.ai_limit(1)),
+            (c[0], c[1] - 1)
+        );
         assert_eq!(
             walk.sim
                 .units
@@ -1736,7 +1976,10 @@ mod tests {
             .map(|(i, u)| (i, u.gen, u.respawn_at))
             .collect();
         walk.set_team_size_percent(100);
-        assert_eq!((walk.sim.ai_limit(0), walk.sim.ai_limit(1)), (c[0], c[1] - 1));
+        assert_eq!(
+            (walk.sim.ai_limit(0), walk.sim.ai_limit(1)),
+            (c[0], c[1] - 1)
+        );
         assert_eq!(
             walk.sim.battle.teams.map(|t| t.alive()),
             pct(50),

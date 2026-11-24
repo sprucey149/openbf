@@ -218,12 +218,12 @@ pub(super) const BF1_MAPS: [(&str, &str, &str, bool, bool); 16] = [
 /// One map of the merged list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapEntry {
-    /// The bake's directory (`bf2_hot1`, the legacy `tat2`), else
+    /// The bake's directory (`bf2_hot1`, `mod_abr__abr`, the legacy `tat2`), else
     /// `<game>_<code>` for a map that is not baked.
     pub key: String,
     pub game: Game,
-    pub code: &'static str,
-    /// "<name> (bf1)" / "<name> (bf2)" (§7).
+    pub code: String,
+    /// "<name> (bf1)" / "<name> (bf2)" / "<name> (mod)" (§7).
     pub label: String,
     /// The info box's text: BF2's `mapname.description.<code>`; `[ours]`
     /// BF1 has none on its disc (§6), so its name stands alone.
@@ -234,6 +234,17 @@ pub struct MapEntry {
     pub baked: bool,
     /// The faction pairs of the port's mission files, per mode.
     pub missions: Vec<(Mode, [String; 2])>,
+}
+
+/// Active mod map metadata passed into [`catalog_with_mods`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModMapEntry {
+    pub key: String,
+    pub legacy_code: String,
+    pub name: String,
+    pub disambiguator: String,
+    pub description: String,
+    pub modes: [Vec<Mode>; 2],
 }
 
 impl MapEntry {
@@ -292,6 +303,16 @@ pub fn catalog(
     bakes: &[(String, String)],
     missions: &dyn Fn(&str, Mode) -> Vec<[String; 2]>,
 ) -> Vec<MapEntry> {
+    catalog_with_mods(text, bakes, missions, &[])
+}
+
+/// Build the merged map list including active content mod maps (`mod_maps`).
+pub fn catalog_with_mods(
+    text: &dyn Fn(Game, &str) -> Option<String>,
+    bakes: &[(String, String)],
+    missions_fn: &dyn Fn(&str, Mode) -> Vec<[String; 2]>,
+    mod_maps: &[ModMapEntry],
+) -> Vec<MapEntry> {
     let find = |game: Game, code: &str| {
         let prefixed = format!("{}_{code}", game.tag());
         bakes
@@ -299,19 +320,19 @@ pub fn catalog(
             .find(|(k, g)| *k == prefixed || (k == code && g == game.tag()))
             .map(|(k, _)| k.clone())
     };
-    let entry = |game: Game, code: &'static str, name: String, desc: String, modes| {
-        let baked = find(game, code);
+    let entry = |game: Game, code: String, name: String, desc: String, modes| {
+        let baked = find(game, &code);
         let key = baked
             .clone()
             .unwrap_or_else(|| format!("{}_{code}", game.tag()));
         let missions: Vec<_> = MODES
             .into_iter()
-            .filter(|&mode| mode != Mode::Xl || (game == Game::Bf2 && !xl_eras(code).is_empty()))
-            .flat_map(|m| missions(&key, m).into_iter().map(move |p| (m, p)))
+            .filter(|&mode| mode != Mode::Xl || (game == Game::Bf2 && !xl_eras(&code).is_empty()))
+            .flat_map(|m| missions_fn(&key, m).into_iter().map(move |p| (m, p)))
             .collect();
         let mut modes: [Vec<Mode>; 2] = modes;
         if game == Game::Bf2 {
-            for &era in xl_eras(code) {
+            for &era in xl_eras(&code) {
                 let armies = era.armies();
                 if missions.iter().any(|(mode, pair)| {
                     let pair = pair.each_ref().map(String::as_str);
@@ -340,10 +361,16 @@ pub fn catalog(
             .map_or_else(|| name.clone(), |t| t.trim_end().to_owned());
         let mut gcw = gcw.to_vec();
         let key = find(Game::Bf2, code).unwrap_or_else(|| format!("bf2_{code}"));
-        if OPTIONAL_ASSAULT.contains(&code) && !missions(&key, Mode::Eli).is_empty() {
+        if OPTIONAL_ASSAULT.contains(&code) && !missions_fn(&key, Mode::Eli).is_empty() {
             gcw.push(Mode::Eli);
         }
-        out.push(entry(Game::Bf2, code, name, desc, [cw.to_vec(), gcw]));
+        out.push(entry(
+            Game::Bf2,
+            code.to_owned(),
+            name,
+            desc,
+            [cw.to_vec(), gcw],
+        ));
     }
     // A BF2-only build bakes no BF1 map, so Instant Action lists none.
     let include_bf1 = bakes.is_empty() || bakes.iter().any(|(_, g)| g == "bf1");
@@ -373,12 +400,50 @@ pub fn catalog(
         let mut modes = [cw, gcw].map(|on| if on { vec![Mode::Con] } else { Vec::new() });
         if let Some(era) = bf1_hunt_era(code) {
             let key = find(Game::Bf1, code).unwrap_or_else(|| format!("bf1_{code}"));
-            if !missions(&key, Mode::Hunt).is_empty() {
+            if !missions_fn(&key, Mode::Hunt).is_empty() {
                 modes[era.index()].push(Mode::Hunt);
             }
         }
-        out.push(entry(Game::Bf1, code, name.clone(), name, modes));
+        out.push(entry(Game::Bf1, code.to_owned(), name.clone(), name, modes));
     }
+
+    let mut name_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for m in mod_maps {
+        *name_counts.entry(m.name.to_ascii_lowercase()).or_insert(0) += 1;
+    }
+    for m in mod_maps {
+        let missions: Vec<_> = MODES
+            .into_iter()
+            .filter(|&mode| m.modes.iter().any(|era_modes| era_modes.contains(&mode)))
+            .flat_map(|mode| {
+                missions_fn(&m.key, mode)
+                    .into_iter()
+                    .map(move |pair| (mode, pair))
+            })
+            .collect();
+        let duplicate = name_counts
+            .get(&m.name.to_ascii_lowercase())
+            .is_some_and(|&c| c > 1);
+        let label = if duplicate && !m.disambiguator.is_empty() {
+            format!("{} [{}] (mod)", m.name, m.disambiguator)
+        } else {
+            format!("{} (mod)", m.name)
+        };
+        let is_baked =
+            bakes.is_empty() || bakes.iter().any(|(k, _)| k == &m.key) || !missions.is_empty();
+        out.push(MapEntry {
+            key: m.key.clone(),
+            game: Game::Bf2,
+            code: m.legacy_code.clone(),
+            label,
+            description: m.description.clone(),
+            modes: m.modes.clone(),
+            baked: is_baked,
+            missions,
+        });
+    }
+
     out.sort_by_key(|m| m.label.to_lowercase());
     out
 }
