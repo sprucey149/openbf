@@ -154,36 +154,3 @@ fn infinite_ammo_no_reload_and_both_on_the_stormtrooper_rifle() {
     assert!(both.last().unwrap().shots > 275);
     assert!(longest_gap(&both) <= steady);
 }
-
-/// The `cooldown` cheat: no firing delay. On the stormtrooper rifle, held on
-/// FIRE with `no_reload` so ammo never blocks, every shot comes out on its own
-/// tick — a gap of 1 — which is strictly faster than the rifle's natural refire
-/// cadence (`steady`). This exercises the full sim path (step -> FireInput ->
-/// fire_cycle), the same path a sniper or shotgun takes.
-#[test]
-fn no_cooldown_fires_every_tick_on_the_stormtrooper_rifle() {
-    let Some(plain) = hold_fire(Cheats::default()) else {
-        return;
-    };
-    // The rifle's natural cadence: the longest gap between shots before any
-    // reload. A sniper/shotgun has a far larger one; the cheat collapses all.
-    let first_reload = plain.iter().position(|t| t.reloading).unwrap();
-    let steady = longest_gap(&plain[..first_reload]) + 1;
-
-    let fast = hold_fire(Cheats {
-        no_cooldown: true,
-        no_reload: true,
-        infinite_ammo: true,
-        ..Default::default()
-    })
-    .unwrap();
-    // Nothing drawn, nothing reloaded; shots keep coming.
-    for (i, t) in fast.iter().enumerate() {
-        assert_eq!((t.clip, t.spare, t.reloading), (55, 220, false), "tick {i}");
-    }
-    // Every shot on its own tick: the longest gap is a single tick.
-    assert_eq!(longest_gap(&fast), 1, "fires every tick");
-    // Strictly faster than the natural cadence.
-    assert!(steady > 1, "the rifle's natural refire period is {steady} ticks");
-    assert!(fast.last().unwrap().shots > plain.last().unwrap().shots);
-}

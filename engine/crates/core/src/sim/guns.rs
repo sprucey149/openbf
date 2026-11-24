@@ -551,8 +551,8 @@ impl Sim {
         let team = driver.map_or(self.vehicles[vi].team.unwrap_or(u8::MAX), |i| {
             self.units[i].team
         });
-        let (infinite_cheat, no_reload_cheat, no_cooldown_cheat) =
-            driver.map_or((false, false, false), |i| self.ammo_cheats(i));
+        let (infinite_cheat, no_reload_cheat) =
+            driver.map_or((false, false), |i| self.ammo_cheats(i));
         // On foot's D9 spread multiplier and the fairness record (step 4).
         let ai_spread_mult = driver
             .filter(|_| ai)
@@ -655,7 +655,6 @@ impl Sim {
                 blocked: flight_blocked,
                 infinite_ammo: infinite_cheat,
                 no_reload: no_reload_cheat,
-                no_cooldown: no_cooldown_cheat,
                 ai_dispersion: None,
             };
             shots.clear();

@@ -50,7 +50,6 @@ fn fi(held: bool, cheat: bool) -> FireInput {
         blocked: false,
         infinite_ammo: cheat,
         no_reload: cheat,
-        no_cooldown: false,
         ai_dispersion: None,
     }
 }
@@ -584,7 +583,6 @@ fn ai_sniper_dispersion_reaches_the_weapon_yaw_slot() {
                 blocked: false,
                 infinite_ammo: true,
                 no_reload: true,
-                no_cooldown: false,
                 ai_dispersion: Some(want),
             },
             &mut lcg,
@@ -1206,6 +1204,43 @@ fn an_empty_thrown_weapon_stays_idle_and_clicks() {
     w.spare = 0;
     assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
     assert_eq!(w.state, FireState::Idle);
+}
+
+/// The no-reload cheat drops a grenade's gap between throws and nothing else:
+/// a plain gun keeps its ShotDelay.
+#[test]
+fn no_reload_cheat_drops_only_the_grenade_gap() {
+    let gap = |thrown: bool, cheat: bool| {
+        let mut c = WeaponClass::bf1_rifle();
+        c.shot_delay = [1.0, 1.0];
+        c.trigger_single = false;
+        if thrown {
+            c.thrown = Some(Thrown {
+                shot_elevate: 0.21,
+                hide_on_fire: true,
+                hand: None,
+                native_thermal_hand: false,
+            });
+        }
+        let mut w = WeaponState::new(&c, true, 50);
+        let mut lcg = GameLcg::new(1);
+        let mut shots = Vec::new();
+        let mut fired = 0;
+        for _ in 0..90 {
+            shots.clear();
+            let input = FireInput {
+                infinite_ammo: false,
+                ..fi(true, cheat)
+            };
+            w.update(DT30, &c, input, &mut lcg, &mut shots);
+            if !shots.is_empty() {
+                fired += shots.len();
+            }
+        }
+        fired
+    };
+    assert!(gap(true, true) > 2 * gap(true, false));
+    assert_eq!(gap(false, true), gap(false, false));
 }
 
 fn spin_class() -> WeaponClass {

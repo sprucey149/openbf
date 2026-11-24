@@ -16,7 +16,7 @@ egui-winit = { workspace = true }
 mungefs = { path = "../mungefs" }
 pak = { path = "../pak" }
 pollster = { workspace = true }
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 ron = { workspace = true }
 serde = { workspace = true }
 wgpu = { workspace = true }

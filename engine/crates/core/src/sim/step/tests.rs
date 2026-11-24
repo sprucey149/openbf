@@ -939,7 +939,6 @@ fn an_ai_units_weapon_carries_the_skills_spread_multiplier() {
                 blocked: false,
                 infinite_ammo: true,
                 no_reload: true,
-                no_cooldown: false,
                 ai_dispersion: None,
             },
             &mut lcg,
@@ -1018,7 +1017,7 @@ fn infinite_stamina_cheat_pins_energy() {
     assert_eq!(p.soldier.stance, crate::soldier::Stance::Sprint);
     let mut c = Cheats::default();
     c.toggle("stamina");
-    assert!(c.infinite_stamina && c.is_on("stamina"));
+    assert!(c.infinite_stamina && c.entries()[3].2);
 }
 
 /// A human at the origin on flat ground, facing -Z, the spread off, with

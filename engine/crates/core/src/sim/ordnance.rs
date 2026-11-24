@@ -39,7 +39,7 @@ impl Sim {
         let pri = p.pressed(buttons::FIRE);
         let sec = p.pressed(buttons::SECONDARY_FIRE);
         // `infinite`: a free reload always refills, so never out of ammo.
-        let (infinite, no_reload, no_cooldown) = self.ammo_cheats(i);
+        let (infinite, no_reload) = self.ammo_cheats(i);
 
         // The active channel.
         let ch1_has_it = self.units[i].cur1.is_some_and(|k| {
@@ -93,7 +93,6 @@ impl Sim {
                 blocked,
                 infinite_ammo: infinite,
                 no_reload,
-                no_cooldown,
                 ai_dispersion: None,
             };
             shots.clear();

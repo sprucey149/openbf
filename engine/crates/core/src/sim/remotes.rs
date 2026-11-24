@@ -411,7 +411,6 @@ impl Sim {
                 blocked: false,
                 infinite_ammo: false,
                 no_reload: false,
-                no_cooldown: false,
                 ai_dispersion: None,
             };
             d.blaster.update(

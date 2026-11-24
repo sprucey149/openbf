@@ -38,7 +38,6 @@ impl WeaponState {
         held: bool,
         blocked: bool,
         dt: f32,
-        no_cooldown: bool,
     ) -> bool {
         self.fire_cmd = if held {
             self.fire_cmd.max(0).saturating_add(1)
@@ -53,9 +52,7 @@ impl WeaponState {
             return false;
         }
         self.state = FireState::Firing;
-        // The `cooldown` cheat: no firing delay, so the repair tool fires on
-        // every held tick.
-        if !no_cooldown && self.refire_accum > super::FIRE_EPS {
+        if self.refire_accum > super::FIRE_EPS {
             return false;
         }
         self.refire_accum += c.shot_delay[0];
