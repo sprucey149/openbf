@@ -10,6 +10,8 @@ __pycache__/
 
 # Written by the export (card PACK): data and build output stay local
 engine/assets_baked/
+# The app icon pack.py renders from your bake (docs/branding.md)
+engine/branding_baked/
 engine/missions/
 engine/artifacts/
 engine/target/
