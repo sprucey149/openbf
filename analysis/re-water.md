@@ -935,3 +935,75 @@ The current local black box is Dagobah seed 220 at tick 209, player feet
 (25.76, 0.83, -107.0), camera (28.05, 4.2, -107.24). Its build header still says
 `daf1d59f84b2+dirty` while the checkout field says `af2d62158cad+dirty`, so it
 cannot identify this working-tree implementation for acceptance.
+
+### 9.8 The PC underwater tint (2026-11-24, `UnderwaterColor`)
+
+The maintainer's comparison on the PC BF2 mod map Abregado-Rae: Venezia (`ABR`)
+showed the original laying a blue-green colour over the part of the view under
+the water, cut by a straight line across the screen, with the soldier only
+faintly visible beneath it. The port drew nothing there. The PS2 dispatcher
+(`FUN_005755b0`, 695990–696012) has no such pass, and no console LVL authors
+the key (all 320 extracted LVLs searched for a `DATA` record with its hash).
+This is a PC-only rule. [O]
+
+**The key.** ABR's `fx__ Effect("Water")` carries `0x362c5fff` =
+(61, 124, 144, 128), which the port recorded as unknown. Its FNV-1a preimage is
+`UnderwaterColor`. In GOG `BattlefrontII.exe`, the Water property switch at
+0x6ead90 packs it into the colour word at 0x1fec558 (0x6eae42–0x6eae4e, through
+the clamp-and-pack helper 0x6eac80). The level reset 0x6ea490 sets that word to
+0xffffffff, and the drawing function 0x6eb39b is its only other reader. [V]
+
+**The draw.** 0x6cf320 is the render-object slot reached through vtable
+0x7daacc (0x6cf150). It returns on a dry map (0x1d76c2c), on the far pass
+(flag 0x20000), and on the ocean path (0x1d76c14). The height is
+LAYR + bob, `[0x1d79350] + [0x1d76c34]`. When the camera is more than the
+near-plane corner distance above the water it returns early. Otherwise it
+builds the camera's four near-plane corners and runs one Sutherland–Hodgman
+pass over them against the water plane (0x6cf610–0x6cf722). It keeps corners at
+or under the height and emits the crossing points (interpolated in NDC from the
+static corner table at 0x1fee5a4). For each corner it also calls the wet-cell
+water query 0x6cffc0. That query is the same clamped `WMAP` lookup returning
+LAYR + bob as PS2 `FUN_005613c8`. The polygon is drawn only when at least one
+corner is wet. 0x6eb180 maps the NDC vertices to pixels and draws them as a fan
+with the colour's bytes / 255 (0x6eb393–0x6eb423). It uses shader 0x867ca0 and
+flags 0x200 (0x6eb43e–0x6eb463), gated on the byte at 0x7fe800. [V]
+
+**Measured against the maintainer's PC frame.** Below the line the pixels sit
+at (48, 76, 79) ± 4. The night scene under them is dark, so
+`0.5 · (61, 124, 144) + 0.5 · scene` gives these values: it is an alpha blend at
+128/255, in display bytes. [M, one frame]
+
+**The port.** The bake carries the key as `ManifestWaterConfig::underwater_color`,
+which is omitted when absent, so PS2 bakes keep their bytes. `MOD_CONVERTER_VERSION`
+is 3, so cached mods convert again. Each frame, `game::fx::underwater`
+applies the PC gates to the render camera: not an ocean, and a near-plane
+corner over a sim wet cell. Its level is the manifest's layer plus the drawn
+surface's renderer-clock bob. `render::underwater` draws one full-screen
+triangle. It unprojects every pixel to the near plane (reverse-Z depth 1) and
+keeps the pixels at or under the level, which is the clipped polygon's
+coverage for any projection. It blends `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` through
+the frame's non-sRGB view after the frame filter, before the world overlays
+and the HUD. Without that view it blends the linearised colour.
+
+Not applied: the reset's opaque white default for a PC map that has water but
+no key, and the zoom branch at 0x6cf40a. The port's near plane is its own.
+PROVISIONAL, trace: PC camera+0x130. The tint's place against the first-person
+weapon is also PROVISIONAL, trace: the render-object order of 0x7daacc.
+
+**Drowning is unchanged.** §9.5's rule already runs on ABR. The manifest has
+level −1.3 and 116 wet cells. The black box `dist/openbf_data/playtest/last.json`
+(build 9b8a0521, ABR conquest) shows the player's eye under the surface three
+times. Each stay was shorter than the 90-update timer: ticks 2565–2640
+(2.5 s), about 2715, and 2775–2835 (2.0 s). Health stayed at 218.45 after the
+fall damage at 2565. That snapshot shows no missed tick. No PC soldier water
+block has been read; this note assumes PC drowning matches the PS2 3 s / 30 / 1 s
+rule. trace: the PC soldier update's caller of 0x6cffc0.
+
+Checks: `cargo test -p mungefs --lib fx` (14), `-p manifest --lib` (28),
+`-p render --lib -- underwater camera` (13), `-p game --lib -- fx::underwater
+fx::ripple` (9), `-p bake --lib water_glb` (11), `-p extensions --lib` (15),
+and the GPU referee `cargo test -p render --test suite underwater -- --ignored
+--test-threads=1` (3: the bottom half of a level-0 view is 50 % (61, 124, 144)
+over black, the top half is untouched, and levels under and over the whole near
+plane give none and all). Base `21fd70e9` with the working-tree changes. Not yet
+checked: the tint in a packed playtest against the maintainer's frame.

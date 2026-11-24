@@ -63,6 +63,7 @@ mod space_dust;
 mod storm;
 mod trail;
 mod turret;
+mod underwater;
 mod vehicle_damage;
 mod water_contact;
 
@@ -815,6 +816,8 @@ pub struct Fx {
     jet_frames: Vec<Option<Mat4>>,
     burn_frames: Vec<Vec<Option<Mat4>>>,
     water: ripple::Water,
+    /// PC BF2's underwater tint as the map authored it (`underwater.rs`).
+    underwater: Option<underwater::Underwater>,
     water_contact: water_contact::State,
     chunks: chunks::Chunks,
     attached: Vec<props::Attached>,
@@ -1229,6 +1232,7 @@ impl Fx {
         self.particle_lod_bias = walk.particle_lod_bias;
         let mut extra = extra;
         self.shell_draws(r, camera, &walk.sim, &mut extra);
+        self.tint_underwater(r, camera, &walk.sim);
         let saved = self.drawn_round_frames(&walk.sim);
         self.submit_zoomed(r, camera, walk.zoom_s, extra);
         self.restore_round_frames(saved);

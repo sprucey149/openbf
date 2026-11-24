@@ -755,6 +755,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/fx/sky.rs` 128 — dome-attached decorative effects, authored hardpoints and rotation.
 - `game/src/fx/storm.rs` 139 — BF2 Kamino lightning groups, skybolt placement and temporary dome, fog and sun lighting, including the ocean. See `analysis/re-weather.md` §§7–8 and `analysis/re-kamino.md` §2.
 - `game/src/fx/water_contact.rs` 385 — soldier water-contact clocks, class-authored entry/fall splashes and posed-foot wakes, using the existing ripple and floating-effect pools; issue #115, `analysis/re-water.md` section 9.6.
+- `game/src/fx/underwater.rs` 107 — PC BF2's underwater tint per frame: the map's `UnderwaterColor`, the drawn surface's level and the wet near-plane corner gate · `Underwater`, `Fx::tint_underwater`; `analysis/re-water.md` section 9.8.
 - `game/src/fx/ingest.rs` 393 — a tick's sim events into live effects · `Fx::ingest_sim`
 - `game/src/fx/abilities.rs` 95 — officer activation effects and timed recipient auras · `follow_buffs`.
 - `game/src/fx/repair.rs` 72 — repair-pulse muzzle effects, owner following and initial-burst placement at the drawn weapon tip.
@@ -829,6 +830,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/visor.rs` 233 — stereo 16:9 curved helmet visor pass (`visor.wgsl`), projection math and per-eye compositing of the native HUD onto each rendered stereo target · `Visor`, `VisorEye`, `VisorPass`
 - `render/src/visor/tests.rs` 24 — curved visor projection, aspect and seam unit regressions.
 - `render/src/water_reflect.rs` 290 — planar reflection pass and scene-refraction targets for PC `LightPath::WaterNormal` (`water_normal.wgsl`) · `WaterReflectState`, `mirror_y_matrix`, `reflect_view_proj`.
+- `render/src/underwater.rs` 183 — PC BF2's `UnderwaterColor` over the view whose near plane is under the water, blended in display bytes before the world overlays and HUD · `UnderwaterTint`, `Renderer::set_underwater`; `analysis/re-water.md` section 9.8.
+- `render/src/underwater.wgsl` 35 — full-screen near-plane unprojection and level test for `underwater.rs` · `vs_underwater`, `fs_underwater`.
 - `render/src/grass.rs` 553 — grasspatch sprite buffers and draws (also shared by leaves) · `Renderer::set_grass`, `GrassClass`, `GrassPatch`, `GrassSprite`, `sprite_quad`; view geometry/fade in the module header; GS blend remains PROVISIONAL ([O]).
 - `render/src/leaf.rs` 378 — leafpatch per-view sprite buffers and object draws over the grass pass · `Renderer::set_leaves`, `LeafClass`, `LeafObject`, `LeafSprite`; twist, wind and fades in the module header (`analysis/re-leafpatch.md` §6–§7); BF2 lighting remains PROVISIONAL.
 - `render/src/light_beam.rs` 748 — command-post hologram lightbeam geometry and visibility · `Beam`, `vertices`, `view_factor`, `fan`, `crosses_near`; fan/alpha rules and near-plane caveat in the module header (CPHOL).

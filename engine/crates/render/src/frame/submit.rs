@@ -1533,6 +1533,23 @@ impl Renderer {
                 t.mark(&mut encoder, "softness");
             }
         }
+        // PC BF2's underwater tint over the finished 3D frame, before the
+        // world overlays and the HUD (`underwater.rs`). Its place against the
+        // first-person model is PROVISIONAL, trace: the PC render-object
+        // order of vtable 0x7daacc against the weapon's draw.
+        if self.underwater.tint.is_some() && !ab.skips("underwater") {
+            let display = frame_display_view.as_ref();
+            draw_calls += self.underwater_pass(
+                &mut encoder,
+                display.unwrap_or(&view),
+                display.is_some(),
+                view_proj,
+                [width, height],
+            );
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "underwater");
+            }
+        }
         if !overlays.is_empty() && !ab.skips("blend") {
             let mut pass = continue_pass(&mut encoder, &view, depth_view, "world overlays");
             pass.set_pipeline(&self.overlay_pipeline);

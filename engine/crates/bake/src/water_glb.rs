@@ -182,6 +182,9 @@ pub fn manifest_config(c: &WaterConfig, w: &Water) -> ManifestWaterConfig {
         light_azim_and_elev: c.light_azim_and_elev,
         patch_divisions: c.patch_divisions,
         lod_decimation: c.lod_decimation,
+        underwater_color: c
+            .underwater_color
+            .filter(|v| v.iter().all(|x| x.is_finite())),
     }
 }
 

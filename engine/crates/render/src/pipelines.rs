@@ -674,6 +674,7 @@ impl Renderer {
         // full-screen pipeline over a copy of the finished 3D frame.
         let filter = crate::filter::FilterState::new(&device, format, copyable);
         let softness = crate::filter::FilterState::new(&device, format, copyable);
+        let underwater = crate::underwater::UnderwaterState::new(&device, format);
         let particle_blur =
             crate::particle_blur::ParticleBlur::new(&device, format, &globals_bgl, &texture_bgl);
         let heat_character_mask = PipelineDesc {
@@ -853,6 +854,7 @@ impl Renderer {
             filter,
             softness,
             sun_flare: None,
+            underwater,
             bloom,
             particle_blur,
             heat_character_mask,

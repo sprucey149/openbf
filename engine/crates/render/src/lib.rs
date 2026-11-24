@@ -45,7 +45,8 @@
 //! the terrain), `point_light` (card BPNT: BF2's local lights on models —
 //! the list, the per-model gather, the shader's table), `leaf` (card LEAF:
 //! the leaf patches, on the grass's buffers and pipeline), `filter` (card
-//! BFLT: the DomeInfo frame filter), `light_beam` (card CPHOL: the
+//! BFLT: the DomeInfo frame filter), `underwater` (PC BF2's tint over the
+//! view under the water plane), `light_beam` (card CPHOL: the
 //! "lightbeam" particle's eye-facing fan), `affine` (BF2's screen-space
 //! vertex-colour blend: the guard band, the layer bit and their CPU twin)
 //! and `hud` (card BHUD2: the HUD pass). `hud` and `affine` are public
@@ -95,6 +96,7 @@ mod specular;
 mod stars;
 mod terrain_light;
 mod texture;
+mod underwater;
 mod visor;
 mod water_reflect;
 mod world_scale;
@@ -132,6 +134,7 @@ pub use sky::{
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
 pub use sun_flare::SunFlare;
+pub use underwater::UnderwaterTint;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
@@ -434,6 +437,9 @@ pub struct Renderer {
     filter: filter::FilterState,
     softness: filter::FilterState,
     sun_flare: Option<sun_flare::State>,
+    /// PC BF2's underwater tint (`underwater.rs`): its pipelines and this
+    /// frame's level and colour ([`Renderer::set_underwater`]).
+    underwater: underwater::UnderwaterState,
     bloom: bloom::BloomState,
     particle_blur: particle_blur::ParticleBlur,
     heat_character_mask: wgpu::RenderPipeline,
@@ -532,6 +538,7 @@ impl Renderer {
         self.set_fog_cloud(None);
         self.set_dust(Vec::new());
         self.set_sun_flare(None);
+        self.set_underwater(None);
         self.set_sky_particles(Vec::new());
         self.set_terrain_lights(Default::default());
         self.set_frame_filter(None);

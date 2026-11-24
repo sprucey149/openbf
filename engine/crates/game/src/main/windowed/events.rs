@@ -1709,6 +1709,7 @@ impl winit::application::ApplicationHandler for App {
                             r.set_leaf_time(None);
                             r.set_leaf_actors(Vec::new());
                             r.set_bolts(Vec::new());
+                            r.set_underwater(None);
                             r.set_particles(Vec::new());
                             r.set_terrain_lights(Default::default());
                         }

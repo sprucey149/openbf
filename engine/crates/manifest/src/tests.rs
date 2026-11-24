@@ -558,6 +558,7 @@ fn full_water_config() -> ManifestWaterConfig {
         light_azim_and_elev: Some([1.0, 0.0]),
         patch_divisions: Some([4.0, 4.0]),
         lod_decimation: Some(8.0),
+        underwater_color: None,
     }
 }
 

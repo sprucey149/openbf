@@ -104,6 +104,7 @@ mod key {
     pub const SPECKLE_TILE: u32 = 0xdba6_9cc0; // "SpeckleTile"
     pub const SPECKLE_SCROLL_SPEED: u32 = 0xe9b9_1268; // "SpeckleScrollSpeed"
     pub const SPECKLE_COORD_SHIFT: u32 = 0x6ee8_0757; // "SpeckleCoordShift"
+    pub const UNDERWATER_COLOR: u32 = 0x362c_5fff; // "UnderwaterColor"
     pub const LIGHT_AZIM_AND_ELEV: u32 = 0x9a4f_3cc1; // "LightAzimAndElev"
                                                       // `Effect("HDR")`, B2 FUN_00455f30 (`analysis/re-glow.md` §2.1).
     pub const ENABLE: u32 = 0xaf8b_b8ce; // "Enable"
@@ -195,6 +196,10 @@ pub struct WaterConfig {
     pub refraction_color: Option<[f32; 4]>,
     pub reflection_color: Option<[f32; 4]>,
     pub fresnel_min_max: Option<[f32; 2]>,
+    /// PC only, 0..255 RGBA: the colour PC BF2 lays over the part of the
+    /// screen whose near plane lies under the water (`analysis/re-water.md`
+    /// §9.8). No PS2 map authors it.
+    pub underwater_color: Option<[f32; 4]>,
     /// The texture that paints the surface (§3). Authored on all 12.
     pub main_texture: Option<String>,
     /// Blended over the base on an `OceanEnable` map (§3). Both KAM1s only.
@@ -753,6 +758,7 @@ fn from_scope(effect: &ConfigNode) -> WaterConfig {
             0x5aa5_a3bd => w.refraction_color = c.f4(),
             0x8a81_de8b => w.reflection_color = c.f4(),
             0x8f7c_fa82 => w.fresnel_min_max = Some(c.floats_or_zero()),
+            key::UNDERWATER_COLOR => w.underwater_color = c.f4(),
             key::MAIN_TEXTURE => w.main_texture = non_empty(c.string.clone()),
             key::FOAM_TEXTURE => w.foam_texture = non_empty(c.string.clone()),
             key::TILE => w.tile = Some(c.floats_or_zero()),
@@ -867,6 +873,7 @@ mod tests {
             ("SpeckleScrollSpeed", key::SPECKLE_SCROLL_SPEED),
             ("SpeckleCoordShift", key::SPECKLE_COORD_SHIFT),
             ("LightAzimAndElev", key::LIGHT_AZIM_AND_ELEV),
+            ("UnderwaterColor", key::UNDERWATER_COLOR),
             ("Enable", key::ENABLE),
             ("NumBloomPasses", key::NUM_BLOOM_PASSES),
             ("MaxTotalWeight", key::MAX_TOTAL_WEIGHT),
@@ -970,7 +977,10 @@ mod tests {
             data(0x5aa5_a3bd, &[90.0, 112.0, 90.0, 150.0], &[]),
             data(0x8a81_de8b, &[200.0; 4], &[]),
             data(0x8f7c_fa82, &[0.2, 0.5], &[]),
+            data(0x362c_5fff, &[61.0, 124.0, 144.0, 128.0], &[]),
         ]);
+        assert_eq!(w.underwater_color, Some([61.0, 124.0, 144.0, 128.0]));
+        assert!(w.unknown.is_empty());
         let n = w.normal_maps.unwrap();
         assert_eq!(n.textures.len(), 16);
         assert_eq!(n.textures[15], "water_normalmap_15");
