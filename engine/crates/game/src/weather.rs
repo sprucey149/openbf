@@ -640,6 +640,9 @@ pub struct Weather {
     /// The re-roll clock.
     clock: f32,
     splash_timer: f32,
+    /// The split views' own splash clocks, by local player index ([`Weather::view_splashes`]);
+    /// the single view keeps `splash_timer`.
+    view_timers: Vec<f32>,
     rng: Lcg,
     /// Where the flake's sheet is looked for, map first; and the sheet once
     /// asked for (`Some(None)`: in no layer).
@@ -691,6 +694,7 @@ impl Weather {
             shadows,
             clock: 0.0,
             splash_timer: 0.0,
+            view_timers: Vec::new(),
             rng,
             texture_dirs: Vec::new(),
             sheet: None,
@@ -757,6 +761,20 @@ impl Weather {
         camvel: Vec3,
     ) -> Vec<ParticleDraw> {
         let (w, h) = r.size();
+        self.frame_draws_sized(r, camera, camvel, [w, h])
+    }
+
+    /// [`Weather::frame_draws`] for a view of `size` pixels (issue #194 B13: a splitscreen
+    /// cell, whose aspect and height are not the window's). Its [`Weather::look`] flags the rain
+    /// shadows that view sees.
+    pub fn frame_draws_sized(
+        &mut self,
+        r: &mut Renderer,
+        camera: &Camera,
+        camvel: Vec3,
+        size: [u32; 2],
+    ) -> Vec<ParticleDraw> {
+        let [w, h] = size;
         let view = View::from_camera(camera, w as f32 / h.max(1) as f32);
         let sheet = self.sheet(r);
         self.draws(&view, camvel, sheet, h as f32)
@@ -881,6 +899,34 @@ impl Weather {
         out
     }
 
+    /// The splashes of one frame for several views (issue #194 B13, splitscreen): for each view
+    /// in order, its [`Weather::look`] and then its [`Weather::splashes`] with the rate divided
+    /// among the views, so each view's splashes read that view's own rain shadows (never the
+    /// last view's). Each view is keyed by its local player index and runs on its own splash
+    /// clock against its own interval, so a view whose footprint shrinks (looking down) still
+    /// gets its share rather than having the others drain a shared clock. `ground` as for
+    /// [`Weather::splashes`]. The single view keeps calling [`Weather::splashes`] alone, on the
+    /// one-view clock, reading its last frame's look.
+    pub fn view_splashes(
+        &mut self,
+        dt: f32,
+        views: &[(usize, View)],
+        ground: &mut dyn FnMut(Vec3) -> Option<Vec3>,
+    ) -> Vec<Vec3> {
+        let n = u32::try_from(views.len()).unwrap_or(u32::MAX);
+        let mut out = Vec::new();
+        for (slot, view) in views {
+            if self.view_timers.len() <= *slot {
+                self.view_timers.resize(slot + 1, 0.0);
+            }
+            std::mem::swap(&mut self.splash_timer, &mut self.view_timers[*slot]);
+            self.look(view);
+            out.extend(self.splashes(dt, view, n, ground));
+            std::mem::swap(&mut self.splash_timer, &mut self.view_timers[*slot]);
+        }
+        out
+    }
+
     /// The splashes of one frame (§5): where each lands. `views` is BF2's
     /// divisor of the rate (1 in BF1 whatever the split); `ground` drops a
     /// point given at the ray's top (50 m over the camera) straight down
@@ -928,5 +974,190 @@ impl Weather {
             out.push(hit);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    //! Issue #194 B13: rain per splitscreen view.
+    use super::*;
+
+    fn rain() -> Precip {
+        Precip {
+            streaks: true,
+            texture: None,
+            particle_size: 0.02,
+            range: 30.0,
+            color: [180, 180, 200, 255],
+            alpha: [0.0, 1.0],
+            count: 16,
+            velocity: 20.0,
+            velocity_range: 1.0,
+            streak_seconds: 0.1,
+            cross_scale: 1.0,
+            axial_scale: 1.0,
+            rotation: 0.0,
+            rotation_range: 0.0,
+            ground_effect: Some("com_sfx_rainsplash".into()),
+            ground_per_sec: 7.0,
+            ground_spread: 8.0,
+        }
+    }
+
+    /// A level view 10 m up at `x`, looking down -z.
+    fn level(x: f32) -> View {
+        View {
+            pos: Vec3::new(x, 10.0, 0.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+            near: 0.5,
+            zoom: 1.0,
+            tan_h: 0.637,
+            tan_v: 0.488,
+        }
+    }
+
+    /// A roof over the far half of the view at x = 0's splash footprint (z < -6.5).
+    fn roof() -> Shadow {
+        Shadow {
+            kind: ShadowKind::AaBox,
+            center: Vec3::new(0.0, 0.0, -11.0),
+            size: Vec3::new(50.0, 20.0, 4.5),
+            in_view: false,
+        }
+    }
+
+    fn flat(top: Vec3) -> Option<Vec3> {
+        Some(Vec3::new(top.x, 0.0, top.z))
+    }
+
+    fn under_roof(hits: &[Vec3]) -> usize {
+        hits.iter()
+            .filter(|h| h.x.abs() < 100.0 && h.z < -11.0 + 4.5 + 1.0 - 1e-4)
+            .count()
+    }
+
+    /// P1 stands 1 km away and cannot see the roof; P2 stands by it. Each view looks right
+    /// before its own splashes, so none of P2's lands under the roof, whatever P1 saw.
+    #[test]
+    fn each_views_splashes_read_its_own_look() {
+        let (far, near) = (level(1000.0), level(0.0));
+        let mut w = Weather::new(rain(), Wind::still(), vec![roof()], 9);
+        w.look(&near);
+        assert!(w.shadows[0].in_view, "P2 sees the roof");
+        w.look(&far);
+        assert!(!w.shadows[0].in_view, "P1 does not");
+        let mut landed = Vec::new();
+        for _ in 0..600 {
+            landed.extend(w.view_splashes(1.0 / 60.0, &[(0, far), (1, near)], &mut flat));
+        }
+        let p2 = landed.iter().filter(|h| h.x.abs() < 100.0).count();
+        let p1 = landed.len() - p2;
+        assert!(p1 > 0 && p2 > 0, "{p1} {p2}");
+        assert_eq!(under_roof(&landed), 0, "P2's splashes read P2's look");
+        // The control: every look first leaves P1's flags for P2's splashes, and they fall
+        // under the roof.
+        let mut w = Weather::new(rain(), Wind::still(), vec![roof()], 9);
+        let mut wrong = Vec::new();
+        for _ in 0..600 {
+            w.look(&near);
+            w.look(&far);
+            wrong.extend(w.splashes(1.0 / 60.0, &near, 2, &mut flat));
+        }
+        assert!(under_roof(&wrong) > 0, "the control discriminates");
+    }
+
+    /// Two views share one view's splash rate between them.
+    #[test]
+    fn two_views_share_one_rate() {
+        let views = [(0, level(1000.0)), (1, level(-1000.0))];
+        let mut one = Weather::new(rain(), Wind::still(), Vec::new(), 9);
+        let mut two = Weather::new(rain(), Wind::still(), Vec::new(), 9);
+        let (mut a, mut b) = (0usize, 0usize);
+        for _ in 0..600 {
+            a += one.splashes(1.0 / 60.0, &views[0].1, 1, &mut flat).len();
+            b += two.view_splashes(1.0 / 60.0, &views, &mut flat).len();
+        }
+        assert!(a > 100);
+        assert!((a as f32 - b as f32).abs() <= 3.0, "{a} {b}");
+    }
+
+    /// A view looking straight down at `x`, 10 m up: its splash footprint is shallower than a
+    /// level view's, so its interval is longer.
+    fn down(x: f32) -> View {
+        View {
+            pos: Vec3::new(x, 10.0, 0.0),
+            x: Vec3::X,
+            y: Vec3::NEG_Z,
+            z: Vec3::Y,
+            ..level(x)
+        }
+    }
+
+    /// P1 looks down (longer interval), P2 looks level: each view's splashes come at its own
+    /// footprint's rate, not drained by the other view through a shared clock.
+    #[test]
+    fn a_view_looking_down_keeps_its_share() {
+        let (p1, p2) = (down(1000.0), level(-1000.0));
+        let (dt, frames) = (1.0 / 240.0, 2400);
+        let expect = |v: &View| {
+            let p = rain();
+            let (lo, hi) = splash_box(p.ground_spread, v);
+            let i = splash_interval(
+                p.ground_spread,
+                p.ground_per_sec / 2.0,
+                hi.x - lo.x,
+                hi.z - lo.z,
+            );
+            dt * frames as f32 / i
+        };
+        let (e1, e2) = (expect(&p1), expect(&p2));
+        assert!(e1 < e2, "down's footprint is smaller: {e1} {e2}");
+        let mut w = Weather::new(rain(), Wind::still(), Vec::new(), 9);
+        let mut landed = Vec::new();
+        for _ in 0..frames {
+            landed.extend(w.view_splashes(dt, &[(0, p1), (1, p2)], &mut flat));
+        }
+        let a = landed.iter().filter(|h| h.x > 0.0).count() as f32;
+        let b = landed.len() as f32 - a;
+        assert!(
+            (a - e1).abs() <= 2.0 && (b - e2).abs() <= 2.0,
+            "{a}/{e1} {b}/{e2}"
+        );
+        // The control: one clock shared by both views starves the one looking down.
+        let mut w = Weather::new(rain(), Wind::still(), Vec::new(), 9);
+        let mut shared = Vec::new();
+        for _ in 0..frames {
+            shared.extend(w.splashes(dt, &p1, 2, &mut flat));
+            shared.extend(w.splashes(dt, &p2, 2, &mut flat));
+        }
+        let a = shared.iter().filter(|h| h.x > 0.0).count() as f32;
+        assert!(a < e1 * 0.5, "the control discriminates: {a}/{e1}");
+    }
+
+    /// `frame_draws` is `frame_draws_sized` at the renderer's size, draw for draw.
+    #[test]
+    #[ignore = "requires a headless GPU adapter"]
+    fn frame_draws_is_frame_draws_sized_at_the_renderer_size() {
+        let mut r = render::Renderer::new_headless(640, 360).expect("headless GPU");
+        let camera = Camera {
+            position: Vec3::new(0.0, 10.0, 0.0),
+            ..Camera::default()
+        };
+        let vel = Vec3::new(1.0, 0.0, 2.0);
+        let mut a = Weather::new(rain(), Wind::still(), vec![roof()], 5);
+        let mut b = Weather::new(rain(), Wind::still(), vec![roof()], 5);
+        let da = a.frame_draws(&mut r, &camera, vel);
+        let db = b.frame_draws_sized(&mut r, &camera, vel, [640, 360]);
+        assert!(!da.is_empty());
+        assert_eq!(da, db);
+        assert_eq!(
+            a.shadows.iter().map(|s| s.in_view).collect::<Vec<_>>(),
+            b.shadows.iter().map(|s| s.in_view).collect::<Vec<_>>()
+        );
+        // A tall cell is not the window: other draws.
+        let mut c = Weather::new(rain(), Wind::still(), vec![roof()], 5);
+        assert_ne!(da, c.frame_draws_sized(&mut r, &camera, vel, [320, 360]));
     }
 }

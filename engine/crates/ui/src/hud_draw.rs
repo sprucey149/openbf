@@ -26,6 +26,14 @@ pub mod campaign;
 #[path = "hud_text.rs"]
 mod text;
 
+#[cfg(test)]
+#[path = "hud_frame_identity.rs"]
+pub(crate) mod frame_identity;
+
+#[cfg(test)]
+#[path = "hud_frame_tests.rs"]
+mod frame_tests;
+
 /// Frame pixels per Model3D mesh unit: 1 / (0.01 × 1.24) (`re-hud.md` §2.4
 /// [V] `FUN_0059fdb0`, DAT_0060c7b8).
 pub const MESH_UNIT: f32 = 1.0 / (0.01 * 1.24);
@@ -226,6 +234,359 @@ pub fn anchor_shift(fx: f32, size: [f32; 2]) -> f32 {
     }
 }
 
+/// `a + b`, with `a` itself when `b` is 0 (so a single window's numbers keep
+/// their exact bits, a `-0.0` included).
+fn plus(a: f32, b: f32) -> f32 {
+    if b == 0.0 {
+        a
+    } else {
+        a + b
+    }
+}
+
+/// Where a HUD root hangs up and down in a screen taller than its 4:3 box
+/// (`[ours]`, splitscreen amendment B, `SPLITSCREEN.md` 18.1 item 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VAnchor {
+    Top,
+    #[default]
+    Centre,
+    Bottom,
+}
+
+impl VAnchor {
+    /// The share of the spare height above the box.
+    fn share(self) -> f32 {
+        match self {
+            VAnchor::Top => 0.0,
+            VAnchor::Centre => 0.5,
+            VAnchor::Bottom => 1.0,
+        }
+    }
+}
+
+/// PROVISIONAL `[ours]` roots whose box centre would pick the wrong edge, by a
+/// part of their name (lower case): the weapon panel, the jet pack bar and the
+/// vehicle seats hang at the bottom, the countdowns and the flag readout at
+/// the top, the popups and the spawn and hacking messages in the middle.
+/// measure: the maintainer's look at the split captures (B6).
+const V_ANCHOR_TABLE: [(&str, VAnchor); 10] = [
+    ("weaponinformation", VAnchor::Bottom),
+    ("jetpackbar", VAnchor::Bottom),
+    ("vehicleseatinggroup", VAnchor::Bottom),
+    ("objectivetimergroup", VAnchor::Top),
+    ("victorytimergroup", VAnchor::Top),
+    ("defeattimergroup", VAnchor::Top),
+    ("flags", VAnchor::Top),
+    ("hintpopup", VAnchor::Centre),
+    ("spawnmessage", VAnchor::Centre),
+    ("spawnvehicle", VAnchor::Centre),
+];
+
+/// The table's entries that keep a root centred, beside [`V_ANCHOR_TABLE`]
+/// (the reticle is placed by its projected point; when it has none it stays
+/// in the middle too).
+const V_ANCHOR_CENTRE: [&str; 3] = ["borderbox", "hacking", "reticule"];
+
+/// The rule for root `root` of `hud`: the table, else where the centre of its
+/// subtree's frame-space box falls (above 0.4 of the frame Top, below 0.6
+/// Bottom, else Centre).
+pub(crate) fn root_v_anchor(hud: &Hud, root: usize) -> VAnchor {
+    let name = hud.elems[root].name.to_ascii_lowercase();
+    if let Some((_, a)) = V_ANCHOR_TABLE.iter().find(|(k, _)| name.contains(k)) {
+        return *a;
+    }
+    if V_ANCHOR_CENTRE.iter().any(|k| name.contains(k)) {
+        return VAnchor::Centre;
+    }
+    let mut b = [f32::MAX, f32::MIN];
+    subtree_y(hud, root, &Mat4::IDENTITY, &mut b);
+    if b[0] > b[1] {
+        return VAnchor::Centre;
+    }
+    let c = (b[0] + b[1]) * 0.5 / FRAME_H;
+    if c < 0.4 {
+        VAnchor::Top
+    } else if c > 0.6 {
+        VAnchor::Bottom
+    } else {
+        VAnchor::Centre
+    }
+}
+
+/// Where root `root`'s rects (element origins for a mesh) reach up and down
+/// in the screen `f`, in pixels: top, bottom. `None` when it has nothing.
+pub fn root_y_span(hud: &Hud, root: usize, f: &Frame) -> Option<[f32; 2]> {
+    let mut b = [f32::MAX, f32::MIN];
+    subtree_y(hud, root, &Mat4::IDENTITY, &mut b);
+    let e = &hud.elems[root];
+    let s = f.tree(e.pos.x / FRAME_W, hud.v_anchor(root));
+    (b[0] <= b[1]).then(|| [b[0], b[1]].map(|y| s.origin[1] + s.scale[1] * y))
+}
+
+/// Where root `root`'s rects (element origins for a mesh) reach in the screen `f`, in pixels:
+/// left, top, right, bottom ([`root_y_span`] with its x). `None` when it has nothing. Issue #194:
+/// the split round timer's tests keep it clear of the feed and the minimap with it.
+pub fn root_span(hud: &Hud, root: usize, f: &Frame) -> Option<[f32; 4]> {
+    let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    subtree_xy(hud, root, &Mat4::IDENTITY, &mut b);
+    let e = &hud.elems[root];
+    let s = f.tree(e.pos.x / FRAME_W, hud.v_anchor(root));
+    (b[0] <= b[2] && b[1] <= b[3]).then(|| {
+        [
+            s.origin[0] + s.scale[0] * b[0],
+            s.origin[1] + s.scale[1] * b[1],
+            s.origin[0] + s.scale[0] * b[2],
+            s.origin[1] + s.scale[1] * b[3],
+        ]
+    })
+}
+
+/// Grow `b` (min y, max y) by element `i`'s frame-space extent under `parent`.
+fn subtree_y(hud: &Hud, i: usize, parent: &Mat4, b: &mut [f32; 2]) {
+    let mut xy = [f32::MAX, b[0], f32::MIN, b[1]];
+    subtree_xy(hud, i, parent, &mut xy);
+    *b = [xy[1], xy[3]];
+}
+
+/// Grow `b` (min x, min y, max x, max y) by element `i`'s frame-space extent under `parent`.
+fn subtree_xy(hud: &Hud, i: usize, parent: &Mat4, b: &mut [f32; 4]) {
+    let e = &hud.elems[i];
+    if e.is_segment {
+        return;
+    }
+    let m = *parent * e.local();
+    let (ox, oy) = e.rect.origin();
+    let mut grow = |x: f32, y: f32| {
+        let p = m.transform_point3(Vec3::new(x, y, 0.0));
+        b[0] = b[0].min(p.x);
+        b[1] = b[1].min(p.y);
+        b[2] = b[2].max(p.x);
+        b[3] = b[3].max(p.y);
+    };
+    match e.kind {
+        Kind::Group => {
+            let m = m * Mat4::from_translation(Vec3::new(ox, oy, 0.0));
+            for &c in &e.children {
+                subtree_xy(hud, c, &m, b);
+            }
+        }
+        _ => {
+            grow(ox, oy);
+            grow(ox + e.rect.w, oy + e.rect.h);
+        }
+    }
+}
+
+/// The screen a HUD is laid out for (`[ours]`, `SPLITSCREEN.md` 18.1 item
+/// 5): a 4:3 box `box_h` high, its items pushed to the screen's edges, and
+/// the rectangle a projected point's 0..1 position maps over.
+///
+/// [`Frame::window`] is the single view's: the box is the window's height
+/// and its numbers are [`frame_scale`] and [`anchor_shift`] exactly, a
+/// window narrower than 4:3 included. [`Frame::cell`] is a split cell's:
+/// the box fits inside the cell (times the HUD size setting), x keeps the
+/// thirds rule on the spare width, y hangs each root at the top, the
+/// middle or the bottom of the spare height ([`VAnchor`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    /// The screen in pixels (the window, or the cell, whose top-left is 0, 0).
+    pub size: [f32; 2],
+    /// The 4:3 box's height.
+    pub box_h: f32,
+    /// x, y, w, h: where a projected point's 0..1 lands (a split cell's
+    /// unwidened 4:3 band, `game::split_layout::ui_rect` relative to the cell).
+    pub proj: [f32; 4],
+    /// y, h: the centred panel's band ([`Frame::panel`]), the projection's,
+    /// so the class page's boxes stay on the 3D line-up and the game's
+    /// `class_at` band at every HUD size (the setting does not shrink it).
+    pub panel: [f32; 2],
+}
+
+impl Frame {
+    /// The single view's window (today's layout).
+    pub fn window(size: [f32; 2]) -> Self {
+        Frame {
+            size,
+            box_h: size[1],
+            proj: [0.0, 0.0, size[0], size[1]],
+            panel: [0.0, size[1]],
+        }
+    }
+
+    /// A split cell `size` pixels with the HUD size setting `hud_k` (1.0
+    /// Full): the box is `min(h, 0.75 w) * hud_k` high; the projection is
+    /// the cell, or for a cell narrower than 4:3 the 4:3 band its width,
+    /// centred up and down in whole pixels by `game::split_layout::ui_rect`'s
+    /// own integer rule (`w * 3 / 4` and `(h - band) / 2`, both floored), so
+    /// the reticle, the markers and the panel sit on the band the 3D
+    /// line-up and `fit_fov_y` use. The panel is the projection's height
+    /// whatever `hud_k` is.
+    pub fn cell(size: [f32; 2], hud_k: f32) -> Self {
+        let [w, h] = size;
+        let proj = if w * 3.0 >= h * 4.0 {
+            [0.0, 0.0, w, h]
+        } else {
+            let (wi, hi) = (w.max(0.0) as u64, h.max(0.0) as u64);
+            let band = (wi * 3 / 4).max(1);
+            [0.0, (hi.saturating_sub(band) / 2) as f32, w, band as f32]
+        };
+        Frame {
+            size,
+            box_h: h.min(0.75 * w) * hud_k,
+            proj,
+            panel: [proj[1], proj[3]],
+        }
+    }
+
+    /// The same frame projecting over `proj` (x, y, w, h in the screen).
+    pub fn with_proj(self, proj: [f32; 4]) -> Self {
+        Frame { proj, ..self }
+    }
+
+    pub fn box_w(&self) -> f32 {
+        4.0 / 3.0 * self.box_h
+    }
+
+    /// Screen pixels per frame pixel.
+    pub fn scale(&self) -> [f32; 2] {
+        let h = self.box_h;
+        [
+            OVERFILL[0].1 / FRAME_W * (4.0 / 3.0) * h,
+            OVERFILL[1].1 / FRAME_H * h,
+        ]
+    }
+
+    /// The width and height the screen has beyond the box.
+    pub fn extra(&self) -> [f32; 2] {
+        [
+            self.size[0] - 4.0 / 3.0 * self.box_h,
+            self.size[1] - self.box_h,
+        ]
+    }
+
+    /// [`anchor_shift`] on this frame's spare width.
+    pub fn shift_x(&self, fx: f32) -> f32 {
+        let extra = self.extra()[0];
+        if fx < 1.0 / 3.0 {
+            0.0
+        } else if fx > 2.0 / 3.0 {
+            extra
+        } else {
+            extra * 0.5
+        }
+    }
+
+    /// How far down an item anchored `v` moves.
+    pub fn shift_y(&self, v: VAnchor) -> f32 {
+        let extra = self.extra()[1];
+        if extra == 0.0 {
+            0.0
+        } else {
+            extra * v.share()
+        }
+    }
+
+    /// The screen pixel of a projected point `p` (0..1 of the projection).
+    pub fn project(&self, p: [f32; 2]) -> [f32; 2] {
+        let [x, y, w, h] = self.proj;
+        [plus(p[0] * w, x), plus(p[1] * h, y)]
+    }
+
+    /// The screen pixel of an off-screen marker clamped to the projection's edge box
+    /// (`ndc`, -1..1 of the projection, scaled toward its target until its larger coordinate
+    /// is the clamp edge): the same direction from the centre and the same edge share, but of
+    /// the whole screen (the cell), not the projection. A split cell narrower than 4:3 projects
+    /// through its 4:3 band, whose edge box would stop the markers well short of the cell's top
+    /// and bottom edges, where the rest of its HUD sits. Where the projection is the screen
+    /// (the single view, a wide cell) it is [`Frame::project`].
+    pub fn project_edge(&self, ndc: [f32; 2]) -> [f32; 2] {
+        let [x, y, w, h] = self.proj;
+        let [sw, sh] = self.size;
+        if x == 0.0 && y == 0.0 && w == sw && h == sh {
+            return self.project([ndc[0] * 0.5 + 0.5, ndc[1] * 0.5 + 0.5]);
+        }
+        let edge = ndc[0].abs().max(ndc[1].abs());
+        // In screen-sized shares: the direction kept, then clamped to the screen's own box.
+        let d = [ndc[0] * w / sw.max(1.0), ndc[1] * h / sh.max(1.0)];
+        let bound = d[0].abs().max(d[1].abs());
+        let k = if bound > 0.0 { edge / bound } else { 0.0 };
+        [(d[0] * k * 0.5 + 0.5) * sw, (d[1] * k * 0.5 + 0.5) * sh]
+    }
+
+    /// A HUD root's frame → screen mapping for an element at frame fraction
+    /// `fx` across, anchored `v` up and down.
+    pub(crate) fn tree(&self, fx: f32, v: VAnchor) -> Screen {
+        Screen {
+            origin: [
+                OVERFILL[0].0 * self.box_w() + self.shift_x(fx),
+                plus(OVERFILL[1].0 * self.box_h, self.shift_y(v)),
+            ],
+            scale: self.scale(),
+        }
+    }
+
+    /// [`Frame::tree`] in the minimap's and the spawn legend's own
+    /// arithmetic (`crate::hud_map`), which they keep bit for bit.
+    pub(crate) fn tree_map(&self, fx: f32, v: VAnchor) -> Screen {
+        Screen {
+            origin: [
+                OVERFILL[0].0 * 4.0 / 3.0 * self.box_h + self.shift_x(fx),
+                plus(OVERFILL[1].0 * self.box_h, self.shift_y(v)),
+            ],
+            scale: self.scale(),
+        }
+    }
+
+    /// The panel screen (spawn pages, stats pages): the screen on the
+    /// `panel` band, centred in this one (the projection's band), its footers
+    /// at the real bottom. It does not shrink with the HUD
+    /// size setting, as the class page's 3D line-up and `class_at` do not.
+    pub fn panel(&self) -> Panel {
+        let [dy, h] = self.panel;
+        Panel {
+            size: [self.size[0], h],
+            dy,
+            bottom: self.size[1],
+        }
+    }
+}
+
+/// A centred panel's screen ([`Frame::panel`]): laid out for `size`, moved
+/// down `dy`, its help lines at `bottom`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Panel {
+    pub size: [f32; 2],
+    pub dy: f32,
+    pub bottom: f32,
+}
+
+impl Panel {
+    /// The shell's screen under anchor `a` (`crate::spawn_draw::screen_at`), moved down.
+    pub(crate) fn screen(&self, a: crate::spawn_draw::Anchor) -> Screen {
+        let mut s = crate::spawn_draw::screen_at(self.size, a);
+        s.origin[1] = plus(s.origin[1], self.dy);
+        s
+    }
+
+    /// The HUD tree's own mapping in the panel's screen for an element at `fx`.
+    pub(crate) fn tree(&self, fx: f32) -> Screen {
+        let mut s = Frame::window(self.size).tree_map(fx, VAnchor::Top);
+        s.origin[1] = plus(s.origin[1], self.dy);
+        s
+    }
+}
+
+/// `[ours]` A name tag's line is never drawn shorter than this many screen pixels, though the
+/// event feed beside it may be (issue #194 B22: four quarter cells of a 1280x720 window at the
+/// smallest HUD Size drew 5-pixel tags). measure: split capture b22_tags_four_hud_small,
+/// 1280x720, four views, smallest HUD Size; the 11 px floor awaits the maintainer's playtest.
+pub const NAME_TAG_MIN_PX: f32 = 11.0;
+
+/// The element index a name tag's glyph boxes carry in [`HudFrame::boxes`] (no tree element
+/// draws them; issue #194 B22).
+pub const NAME_TAG_BOX: usize = usize::MAX - 1;
+
 pub(crate) fn color(rgb: [f32; 3], alpha: f32) -> [f32; 4] {
     [
         (rgb[0] / 255.0).clamp(0.0, 1.0),
@@ -385,7 +746,8 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn hint_markers(&mut self, size: [f32; 2], scale: [f32; 2]) {
+    fn hint_markers(&mut self, f: &Frame) {
+        let scale = f.scale();
         let hud = self.hud;
         for marker in &hud.hint_markers {
             let styles = if marker.carrier {
@@ -426,10 +788,11 @@ impl<'a> Ctx<'a> {
                     s = s * (1.0 - pulse) + 0.9;
                 }
             }
-            let at = [
-                (marker.ndc[0] * 0.5 + 0.5) * size[0],
-                (marker.ndc[1] * 0.5 + 0.5) * size[1],
-            ];
+            let at = if marker.on_screen {
+                f.project([marker.ndc[0] * 0.5 + 0.5, marker.ndc[1] * 0.5 + 0.5])
+            } else {
+                f.project_edge(marker.ndc)
+            };
             let screen = Screen { origin: at, scale };
             let (x0, y0) = e.rect.origin();
             let quad = Quad {
@@ -458,7 +821,7 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn flag_timers(&mut self, size: [f32; 2]) {
+    fn flag_timers(&mut self, f: &Frame) {
         let hud = self.hud;
         if hud.flag_timers.is_empty() {
             return;
@@ -466,7 +829,7 @@ impl<'a> Ctx<'a> {
         let Some(font) = self.face(crate::typography::Face::Tiny) else {
             return;
         };
-        let scale = frame_scale(size);
+        let scale = f.scale();
         let height = f32::from(font.line_height) * scale[1];
         let screen = Screen {
             origin: [0.0, 0.0],
@@ -474,6 +837,7 @@ impl<'a> Ctx<'a> {
         };
         for t in &hud.flag_timers {
             let text = t.seconds.to_string();
+            let [x, y] = f.project([t.ndc[0] * 0.5 + 0.5, t.ndc[1] * 0.5 + 0.5]);
             self.run(
                 usize::MAX,
                 &Mat4::IDENTITY,
@@ -481,10 +845,7 @@ impl<'a> Ctx<'a> {
                 font,
                 &Run {
                     text: &text,
-                    at: (
-                        (t.ndc[0] * 0.5 + 0.5) * size[0],
-                        (t.ndc[1] * 0.5 + 0.5) * size[1] - height,
-                    ),
+                    at: (x, y - height),
                     h_align: HAlign::Center,
                     scale,
                     color: color(FLAG_TIMER_RGB, t.alpha),
@@ -496,7 +857,8 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn lock_marker(&mut self, size: [f32; 2], scale: [f32; 2]) {
+    fn lock_marker(&mut self, f: &Frame) {
+        let scale = f.scale();
         let hud = self.hud;
         let Some(marker) = hud.lock_marker else {
             return;
@@ -509,10 +871,11 @@ impl<'a> Ctx<'a> {
         let Some(texture) = e.texture.as_deref().map(|t| self.art.icons.layout_sheet(t)) else {
             return;
         };
-        let at = [
-            (marker.ndc[0] * 0.5 + 0.5) * size[0],
-            (marker.ndc[1] * 0.5 + 0.5) * size[1],
-        ];
+        let at = if marker.on_screen {
+            f.project([marker.ndc[0] * 0.5 + 0.5, marker.ndc[1] * 0.5 + 0.5])
+        } else {
+            f.project_edge(marker.ndc)
+        };
         let screen = Screen { origin: at, scale };
         let (x0, y0) = e.rect.origin();
         let quad = Quad {
@@ -748,12 +1111,13 @@ impl<'a> Ctx<'a> {
     /// `[ours]` the 1.6x size and 2px tracking stand in for the sheet's
     /// 256x64 banner. replace: BF2's own round-end presentation
     /// (`analysis/re-round-end.md`).
-    fn round_end_text(&mut self, result: u8, size: [f32; 2]) {
+    fn round_end_text(&mut self, result: u8, f: &Frame) {
         const SIZE: f32 = 1.6;
         let Some(font) = self.face(crate::typography::Face::Large) else {
             return;
         };
-        let scale = frame_scale(size);
+        let size = f.size;
+        let scale = f.scale();
         let height = f32::from(font.line_height) * SIZE * scale[1];
         let screen = Screen {
             origin: [0.0, 0.0],
@@ -775,6 +1139,70 @@ impl<'a> Ctx<'a> {
                 tracking: 2.0 * scale[0],
             },
         );
+    }
+
+    /// The other players' names over their heads (LAN §5b, issue #194 B22): in the event feed's
+    /// own font and text scale (its message box's, `gamefont_tiny` without one) at this frame's
+    /// scale (a split cell's includes the HUD Size setting), so a tag reads as the kill-feed line
+    /// beside it. Placed in the screen's own pixels (never through `f.project`: a tall cell's
+    /// 4:3 band is not the projection the tags were placed with), centred, bottom on the anchor,
+    /// shadowed, in the reticle's friend or enemy colour faded by distance.
+    fn name_tags(&mut self, f: &Frame) {
+        let hud = self.hud;
+        if hud.name_tags.is_empty() {
+            return;
+        }
+        let (font, text_scale) = match hud.message_box(crate::hud::MESSAGE_EVENT) {
+            Some(i) => {
+                // The box's own text scale under its and its groups' Scale records, as its
+                // lines draw (`Ctx::element` carries each parent's matrix down).
+                let mut k = hud.elems[i].text_scale;
+                let mut at = Some(i);
+                while let Some(j) = at {
+                    let e = &hud.elems[j];
+                    k = [k[0] * e.scale.x.abs(), k[1] * e.scale.y.abs()];
+                    at = e.parent;
+                }
+                (hud.elems[i].font.as_str(), k)
+            }
+            None => (crate::hud_tree::DEFAULT_FONT, [1.0, 1.0]),
+        };
+        let Some(font) = self.art.fonts.get(font) else {
+            return;
+        };
+        let k = f.scale();
+        let mut scale = [text_scale[0] * k[0], text_scale[1] * k[1]];
+        let mut height = f32::from(font.line_height) * scale[1];
+        // Never below a readable size over the world (a quarter cell at the smallest HUD Size).
+        if height > 0.0 && height < NAME_TAG_MIN_PX {
+            let up = NAME_TAG_MIN_PX / height;
+            scale = scale.map(|v| v * up);
+            height = NAME_TAG_MIN_PX;
+        }
+        let screen = Screen {
+            origin: [0.0, 0.0],
+            scale: [1.0, 1.0],
+        };
+        let [enemy, _, friend] = crate::hud::RETICLE_COLORS;
+        for t in &hud.name_tags {
+            let rgb = if t.friend { friend } else { enemy };
+            self.run(
+                NAME_TAG_BOX,
+                &Mat4::IDENTITY,
+                &screen,
+                font,
+                &Run {
+                    text: &t.name,
+                    at: (t.at[0], t.at[1] - height),
+                    h_align: HAlign::Center,
+                    scale,
+                    color: color(rgb.map(f32::from), t.alpha),
+                    additive: false,
+                    shadow: true,
+                    tracking: 0.0,
+                },
+            );
+        }
     }
 
     /// The menu face's metric set for `face` (`crate::typography`).
@@ -1080,6 +1508,24 @@ pub fn draw_shell_options(
     ctx.out
 }
 
+/// A split battle cell's lost-controller notice over the whole cell (`size`, its pixels), in
+/// the menu face with its button glyph (`crate::shell_ps2::players::LostCell`).
+pub fn draw_lost_cell(
+    hud: &Hud,
+    art: &HudArt,
+    notice: &crate::shell_ps2::players::LostCell,
+    size: [f32; 2],
+) -> HudFrame {
+    let mut ctx = Ctx {
+        hud,
+        art,
+        out: HudFrame::default(),
+        clip: None,
+    };
+    ctx.lost_cell(notice, size);
+    ctx.out
+}
+
 /// The shell background and the profile picker painted with the BF2 atlas.
 pub fn draw_shell_profiles(
     hud: &Hud,
@@ -1105,7 +1551,13 @@ pub fn draw_shell_profiles(
 pub const RETICLE_GROUP: &str = "player1reticule";
 
 pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
-    draw_tree(hud, art, size, None)
+    draw_in(hud, art, &Frame::window(size))
+}
+
+/// [`draw`] for the screen `f`: a split cell's ([`Frame::cell`]) or the
+/// single window's ([`Frame::window`], the same as [`draw`]).
+pub fn draw_in(hud: &Hud, art: &HudArt, f: &Frame) -> HudFrame {
+    draw_tree(hud, art, f, None)
 }
 
 /// [`draw`] with the [`RETICLE_GROUP`] laid out apart, for a view that places
@@ -1113,7 +1565,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
 /// window). The second frame is empty while no tree is drawn.
 pub fn draw_detached(hud: &Hud, art: &HudArt, size: [f32; 2]) -> (HudFrame, HudFrame) {
     let reticle = hud.find(RETICLE_GROUP);
-    let frame = draw_tree(hud, art, size, reticle);
+    let frame = draw_tree(hud, art, &Frame::window(size), reticle);
     let tree = hud.shell.is_none()
         && hud.banner.is_none()
         && hud.stats.is_none()
@@ -1136,7 +1588,8 @@ pub fn draw_detached(hud: &Hud, art: &HudArt, size: [f32; 2]) -> (HudFrame, HudF
     (frame, ctx.out)
 }
 
-fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> HudFrame {
+fn draw_tree(hud: &Hud, art: &HudArt, f: &Frame, skip: Option<usize>) -> HudFrame {
+    let size = f.size;
     let mut ctx = Ctx {
         hud,
         art,
@@ -1152,9 +1605,9 @@ fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> Hu
     }
     if let Some(result) = hud.banner {
         if art.no_bf1_victory_sheet {
-            ctx.round_end_text(result, size);
+            ctx.round_end_text(result, f);
         } else {
-            ctx.out = crate::hud::draw_round_end(result, size);
+            ctx.out = crate::hud::draw_round_end(result, f);
         }
         if hud.banner_fade > 0.0 {
             ctx.quad(
@@ -1178,11 +1631,9 @@ fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> Hu
         return ctx.out;
     }
     if let Some(st) = &hud.stats {
-        ctx.stats_page(st, size);
+        ctx.stats_page(st, f);
         return ctx.out;
     }
-    let scale = frame_scale(size);
-    let box_w = 4.0 / 3.0 * size[1];
     // A spawn screen (card SSELB) dims the backdrop under everything; the
     // page says whether the tree still draws under it.
     let tree = match &hud.spawn {
@@ -1214,7 +1665,12 @@ fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> Hu
     // The sniper scope (`crate::hud_scope`): under the tree, so the target
     // readout and the reticle stay over it.
     if let Some(v) = hud.scope.as_ref().filter(|_| tree) {
-        ctx.scope(v, size);
+        ctx.scope(v, f);
+    }
+    // The other players' names over the world, under every HUD panel; a scope covers the world,
+    // so none over it (issue #194 B22).
+    if tree && hud.scope.is_none() {
+        ctx.name_tags(f);
     }
     let mut order: Vec<usize> = if tree { hud.roots.clone() } else { Vec::new() };
     order.retain(|r| Some(*r) != skip);
@@ -1237,21 +1693,12 @@ fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> Hu
             // that window pixel.
             Some(p) => (
                 Screen {
-                    origin: [p[0] * size[0], p[1] * size[1]],
-                    scale,
+                    origin: f.project(p),
+                    scale: f.scale(),
                 },
                 Mat4::from_translation(Vec3::new(-e.pos.x, -e.pos.y, 0.0)),
             ),
-            None => (
-                Screen {
-                    origin: [
-                        OVERFILL[0].0 * box_w + anchor_shift(anchor_x, size),
-                        OVERFILL[1].0 * size[1],
-                    ],
-                    scale,
-                },
-                Mat4::IDENTITY,
-            ),
+            None => (f.tree(anchor_x, hud.v_anchor(r)), Mat4::IDENTITY),
         };
         ctx.element(r, &parent, &screen);
         if let Some(status) = hud
@@ -1263,25 +1710,25 @@ fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> Hu
         }
     }
     if tree {
-        ctx.hint_markers(size, scale);
-        ctx.flag_timers(size);
-        ctx.lock_marker(size, scale);
+        ctx.hint_markers(f);
+        ctx.flag_timers(f);
+        ctx.lock_marker(f);
     }
     // The capture icon: a root group of the PS2's own (card CPBAR).
     if let Some(icon) = hud.capture.as_ref().filter(|_| tree) {
-        ctx.capture(icon, size);
+        ctx.capture(icon, f);
     }
     // The hit-direction chevrons: one of the PS2's code-drawn pieces (card
     // HATK).
     if tree {
-        ctx.ambush(&hud.ambush, size);
+        ctx.ambush(&hud.ambush, f);
     }
     // BF1's squad order cross: over everything, like the PS2's own group.
     if let Some(sq) = hud.squad.as_ref().filter(|_| tree) {
-        ctx.squad(sq, size);
+        ctx.squad(sq, f);
     }
     if let Some(page) = &hud.spawn {
-        ctx.spawn_page(page, size);
+        ctx.spawn_page(page, &f.panel());
     }
     ctx.out
 }
@@ -1648,5 +2095,200 @@ mod damage_flash_tests {
         assert!(draw(&hud, &HudArt::default(), [1280.0, 720.0])
             .verts
             .is_empty());
+    }
+}
+
+/// Issue #194 B22: the name tags draw natively, in the event feed's own font.
+#[cfg(test)]
+mod name_tag_tests {
+    use super::*;
+    use crate::hud::NameTagDraw;
+    use manifest::hud::{HudArg, HudGlyph, HudLayout, HudNode};
+
+    fn node(name: &str, args: &[HudArg], children: Vec<HudNode>) -> HudNode {
+        HudNode {
+            name: name.into(),
+            args: args.to_vec(),
+            children,
+        }
+    }
+
+    /// A HUD whose only element is the event feed's message box, in `feedfont` at 0.8 x 0.9.
+    fn feed_hud() -> Hud {
+        let s = |v: &str| HudArg::Str(v.into());
+        let n = HudArg::Num;
+        let layout = HudLayout {
+            name: "t".into(),
+            nodes: vec![node(
+                "MultiLineText",
+                &[s("player1messages")],
+                vec![
+                    node("TextFont", &[s("FeedFont")], vec![]),
+                    node("TextScale", &[n(0.8), n(0.9)], vec![]),
+                    node("EventText", &[s(crate::hud::MESSAGE_EVENT)], vec![]),
+                ],
+            )],
+        };
+        let none = HudLayout {
+            name: "none".into(),
+            nodes: vec![],
+        };
+        Hud::new(&layout, &none)
+    }
+
+    /// A font on page `page` with a 10-texel glyph for every character of `chars`.
+    fn font(name: &str, page: &str, chars: &str) -> HudFont {
+        HudFont {
+            name: name.into(),
+            line_height: 12,
+            pages: vec![page.into()],
+            glyphs: chars
+                .chars()
+                .map(|c| HudGlyph {
+                    code: c as u32 as _,
+                    page: 0,
+                    advance: 8,
+                    x0: 0,
+                    x1: 7,
+                    y0: 1,
+                    y1: 11,
+                    uv: [0.0, 1.0, 0.0, 1.0],
+                })
+                .collect(),
+        }
+    }
+
+    const LETTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    /// The name keyboard's symbols page (`shell_ps2::profiles`).
+    const SYMBOLS: &str = "0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+    fn art() -> HudArt {
+        let mut art = HudArt::default();
+        let all = format!("{LETTERS}{SYMBOLS}");
+        art.fonts
+            .insert("feedfont".into(), font("feedfont", "feedpage", &all));
+        art.fonts.insert(
+            crate::hud_tree::DEFAULT_FONT.into(),
+            font("tiny", "tinypage", &all),
+        );
+        art
+    }
+
+    fn tag(name: &str, at: [f32; 2]) -> NameTagDraw {
+        NameTagDraw {
+            at,
+            name: name.into(),
+            friend: true,
+            alpha: 1.0,
+        }
+    }
+
+    fn tag_boxes(f: &HudFrame) -> Vec<[f32; 4]> {
+        f.boxes
+            .iter()
+            .filter(|(e, _)| *e == NAME_TAG_BOX)
+            .map(|(_, b)| *b)
+            .collect()
+    }
+
+    #[test]
+    fn name_tags_draw_in_the_hud_font() {
+        let art = art();
+        let mut hud = feed_hud();
+        // Wide quarter cell: the tag's glyphs are the feed font's, inside the cell.
+        let f = Frame::cell([1280.0, 720.0], 1.0);
+        hud.name_tags = vec![tag("Han", [640.0, 360.0])];
+        let out = draw_in(&hud, &art, &f);
+        assert!(!out.batches.is_empty());
+        assert!(
+            out.batches.iter().all(|b| b.texture == "feedpage"),
+            "the feed's font page, not the default font's"
+        );
+        let boxes = tag_boxes(&out);
+        assert_eq!(boxes.len(), 3, "one quad per letter");
+        // The feed's text scale times the cell's frame scale.
+        let k = f.scale();
+        let w = boxes[0][2] - boxes[0][0];
+        assert!((w - 7.0 * 0.8 * k[0]).abs() < 1e-3, "{w}");
+        for b in &boxes {
+            assert!(b[0] >= 0.0 && b[2] <= 1280.0 && b[1] >= 0.0 && b[3] <= 720.0);
+            assert!(b[3] <= 360.0 + 1e-3, "bottom on the anchor: {b:?}");
+        }
+        // The HUD Size setting shrinks the tag with the feed.
+        let small = draw_in(&hud, &art, &Frame::cell([1280.0, 720.0], 0.7));
+        let ws = tag_boxes(&small)[0];
+        assert!((ws[2] - ws[0]) < w * 0.75);
+        // A tiny cell: never shorter than the floor (glyph ink 10 of a 12-texel line).
+        let tiny = draw_in(&hud, &art, &Frame::cell([160.0, 90.0], 0.7));
+        let t = tag_boxes(&tiny)[0];
+        assert!(
+            (t[3] - t[1]) >= NAME_TAG_MIN_PX * 10.0 / 12.0 - 1e-3,
+            "{t:?}"
+        );
+        // No feed in the layout: the default font.
+        let mut bare = Hud::new(
+            &HudLayout {
+                name: "e".into(),
+                nodes: vec![],
+            },
+            &HudLayout {
+                name: "e".into(),
+                nodes: vec![],
+            },
+        );
+        bare.name_tags = hud.name_tags.clone();
+        let out = draw_in(&bare, &art, &f);
+        assert!(out.batches.iter().all(|b| b.texture == "tinypage"));
+    }
+
+    /// A tall cell (3 or 4 players): the tag stays at its full-cell pixel, not moved onto the
+    /// cell's 4:3 band.
+    #[test]
+    fn name_tags_sit_at_their_full_cell_pixel_in_a_tall_cell() {
+        let art = art();
+        let mut hud = feed_hud();
+        let f = Frame::cell([480.0, 1000.0], 1.0);
+        assert!(f.proj[1] > 0.0, "a banded cell");
+        hud.name_tags = vec![tag("Leia", [240.0, 100.0])];
+        let boxes = tag_boxes(&draw_in(&hud, &art, &f));
+        assert_eq!(boxes.len(), 4);
+        let left = boxes.iter().map(|b| b[0]).fold(f32::MAX, f32::min);
+        let right = boxes.iter().map(|b| b[2]).fold(f32::MIN, f32::max);
+        let bottom = boxes.iter().map(|b| b[3]).fold(f32::MIN, f32::max);
+        // Centred on x 240 (the last advance's slack aside), bottom at y 100.
+        let k = f.scale();
+        assert!(((left + right) * 0.5 - 240.0).abs() <= 2.0 * 0.8 * k[0] + 1e-3);
+        let height = (12.0 * 0.9 * k[1]).max(NAME_TAG_MIN_PX);
+        assert!(
+            bottom <= 100.0 + 1e-3 && bottom >= 100.0 - height,
+            "{bottom}"
+        );
+    }
+
+    /// Every character of the name keyboard draws a quad when the feed's font has it; one the
+    /// font lacks is dropped, the same as in a feed line (`Ctx::run`).
+    #[test]
+    fn name_tags_cover_the_name_keyboard() {
+        let art = art();
+        let mut hud = feed_hud();
+        let f = Frame::window([1280.0, 720.0]);
+        let drawn = SYMBOLS.chars().count();
+        hud.name_tags = vec![tag(SYMBOLS, [640.0, 360.0])];
+        assert_eq!(tag_boxes(&draw_in(&hud, &art, &f)).len(), drawn);
+        hud.name_tags = vec![tag(LETTERS, [640.0, 360.0])];
+        assert_eq!(tag_boxes(&draw_in(&hud, &art, &f)).len(), LETTERS.len());
+        hud.name_tags = vec![tag("Han\u{2603}", [640.0, 360.0])];
+        assert_eq!(tag_boxes(&draw_in(&hud, &art, &f)).len(), 3);
+    }
+
+    /// A sniper scope covers the world: no tags over it.
+    #[test]
+    fn name_tags_hide_under_the_scope() {
+        let art = art();
+        let mut hud = feed_hud();
+        hud.name_tags = vec![tag("Han", [320.0, 180.0])];
+        hud.scope = Some(crate::hud_scope::ScopeView);
+        let out = draw_in(&hud, &art, &Frame::window([640.0, 360.0]));
+        assert!(tag_boxes(&out).is_empty());
     }
 }

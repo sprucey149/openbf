@@ -30,6 +30,11 @@ pub const MAX_TARGET: usize = 64;
 pub const MAX_DESYNC_ROWS: usize = 128;
 /// The most values in one row of a [`Msg::DesyncHashes`].
 pub const MAX_DESYNC_WIDTH: u8 = 8;
+/// The most players one machine brings (splitscreen): its first player
+/// plus [`MAX_EXTRA_LOCALS`] more.
+pub const MAX_LOCALS: usize = 4;
+/// The most extra local players a `Hello` carries.
+pub const MAX_EXTRA_LOCALS: usize = MAX_LOCALS - 1;
 /// Ticks covered by one compressed log chunk.
 pub const LOG_CHUNK_TICKS: u32 = 2048;
 
@@ -81,6 +86,34 @@ pub struct RosterEntry {
     pub profile: Vec<u8>,
 }
 
+/// A machine's extra local player in its `Hello` (splitscreen, local
+/// index 1..): its seat, name and opaque profile. `seat` is the player's
+/// stable seat on the machine's Players screen (1..[`MAX_LOCALS`]; seat 0
+/// is the `Hello`'s own player), and the locals come in rising seat order.
+/// The rejoin token is derived from the `Hello`'s and the seat
+/// ([`local_token`]), so a rejoin with a different line-up reclaims each
+/// seat's own slot, never another seat's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocalHello {
+    pub seat: u8,
+    pub name: String,
+    pub profile: Vec<u8>,
+}
+
+/// The rejoin token of the player in seat `idx` on a machine whose
+/// `Hello` carries `token`: `token` itself for seat 0, otherwise a mix of
+/// both, so a machine's slots are reclaimed together by one token.
+pub fn local_token(token: u64, idx: u8) -> u64 {
+    if idx == 0 {
+        return token;
+    }
+    // SplitMix64's finalizer over the token and the index.
+    let mut z = token ^ u64::from(idx).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 /// A reliable-channel message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Msg {
@@ -91,10 +124,15 @@ pub enum Msg {
         token: u64,
         content: Vec<u8>,
         profile: Vec<u8>,
+        /// The machine's other local players in rising seat order (at most
+        /// [`MAX_EXTRA_LOCALS`]); empty for one player.
+        locals: Vec<LocalHello>,
     },
+    /// `slot` is local 0's; `extra` holds locals 1.. in `Hello` order.
     Welcome {
         slot: u8,
         max_players: u8,
+        extra: Vec<u8>,
     },
     Reject {
         reason: RejectReason,
@@ -149,9 +187,12 @@ pub enum Msg {
         target: String,
     },
     Leave,
+    /// Local player `local` of the sending machine is ready for round
+    /// `round_id` (0: its first player).
     Ready {
         round_id: u32,
         profile: Vec<u8>,
+        local: u8,
     },
     Request(Vec<u8>),
     Notice(Vec<u8>),
@@ -176,6 +217,15 @@ pub enum Msg {
         width: u8,
         values: Vec<u64>,
     },
+    /// Local player `local` of the sending machine lost its pad
+    /// (splitscreen): the host hands its slot to a bot until `LocalBack`.
+    LocalAway {
+        local: u8,
+    },
+    /// Local player `local`'s pad is back: the host seats its slot again.
+    LocalBack {
+        local: u8,
+    },
 }
 
 impl Msg {
@@ -189,6 +239,7 @@ impl Msg {
                 token,
                 content,
                 profile,
+                locals,
             } => {
                 w.u8(1);
                 w.u16(*protocol);
@@ -197,11 +248,25 @@ impl Msg {
                 w.u64(*token);
                 w.bytes(content);
                 w.bytes(profile);
+                w.u8(locals.len() as u8);
+                for l in locals {
+                    w.u8(l.seat);
+                    w.str(&l.name);
+                    w.bytes(&l.profile);
+                }
             }
-            Msg::Welcome { slot, max_players } => {
+            Msg::Welcome {
+                slot,
+                max_players,
+                extra,
+            } => {
                 w.u8(2);
                 w.u8(*slot);
                 w.u8(*max_players);
+                w.u8(extra.len() as u8);
+                for s in extra {
+                    w.u8(*s);
+                }
             }
             Msg::Reject { reason, detail } => {
                 w.u8(3);
@@ -286,10 +351,15 @@ impl Msg {
                 w.str(target);
             }
             Msg::Leave => w.u8(11),
-            Msg::Ready { round_id, profile } => {
+            Msg::Ready {
+                round_id,
+                profile,
+                local,
+            } => {
                 w.u8(12);
                 w.var((*round_id).into());
                 w.bytes(profile);
+                w.u8(*local);
             }
             Msg::Request(b) => {
                 w.u8(13);
@@ -330,6 +400,14 @@ impl Msg {
                     w.u64(*v);
                 }
             }
+            Msg::LocalAway { local } => {
+                w.u8(19);
+                w.u8(*local);
+            }
+            Msg::LocalBack { local } => {
+                w.u8(20);
+                w.u8(*local);
+            }
         }
         w.buf
     }
@@ -337,18 +415,58 @@ impl Msg {
     pub fn decode(bytes: &[u8]) -> WireResult<Msg> {
         let mut r = Reader::new(bytes);
         let m = match r.u8()? {
-            1 => Msg::Hello {
-                protocol: r.u16()?,
-                build: r.str(MAX_BUILD)?,
-                name: r.str(MAX_NAME_CHARS * 4)?,
-                token: r.u64()?,
-                content: r.bytes(MAX_CONTENT)?.to_vec(),
-                profile: r.bytes(MAX_PROFILE)?.to_vec(),
-            },
-            2 => Msg::Welcome {
-                slot: r.u8()?,
-                max_players: r.u8()?,
-            },
+            1 => {
+                let protocol = r.u16()?;
+                let build = r.str(MAX_BUILD)?;
+                let name = r.str(MAX_NAME_CHARS * 4)?;
+                let token = r.u64()?;
+                let content = r.bytes(MAX_CONTENT)?.to_vec();
+                let profile = r.bytes(MAX_PROFILE)?.to_vec();
+                let n = usize::from(r.u8()?);
+                if n > MAX_EXTRA_LOCALS {
+                    return Err(WireError::TooLong);
+                }
+                let mut locals: Vec<LocalHello> = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let seat = r.u8()?;
+                    // Seats 1.. in rising order: distinct, never seat 0's.
+                    let after = locals.last().map_or(0, |l| l.seat);
+                    if seat <= after || usize::from(seat) >= MAX_LOCALS {
+                        return Err(WireError::BadValue);
+                    }
+                    locals.push(LocalHello {
+                        seat,
+                        name: r.str(MAX_NAME_CHARS * 4)?,
+                        profile: r.bytes(MAX_PROFILE)?.to_vec(),
+                    });
+                }
+                Msg::Hello {
+                    protocol,
+                    build,
+                    name,
+                    token,
+                    content,
+                    profile,
+                    locals,
+                }
+            }
+            2 => {
+                let slot = r.u8()?;
+                let max_players = r.u8()?;
+                let n = usize::from(r.u8()?);
+                if n > MAX_EXTRA_LOCALS {
+                    return Err(WireError::TooLong);
+                }
+                let mut extra = Vec::with_capacity(n);
+                for _ in 0..n {
+                    extra.push(r.u8()?);
+                }
+                Msg::Welcome {
+                    slot,
+                    max_players,
+                    extra,
+                }
+            }
             3 => Msg::Reject {
                 reason: RejectReason::from_tag(r.u8()?)?,
                 detail: r.str(MAX_DETAIL)?,
@@ -419,6 +537,7 @@ impl Msg {
             12 => Msg::Ready {
                 round_id: r.var32()?,
                 profile: r.bytes(MAX_PROFILE)?.to_vec(),
+                local: r.u8()?,
             },
             13 => Msg::Request(r.bytes(MAX_REQUEST)?.to_vec()),
             14 => Msg::Notice(r.bytes(MAX_NOTICE)?.to_vec()),
@@ -456,6 +575,17 @@ impl Msg {
                     first_tick,
                     width,
                     values,
+                }
+            }
+            19 | 20 => {
+                let local = r.u8()?;
+                if usize::from(local) >= MAX_LOCALS {
+                    return Err(WireError::BadValue);
+                }
+                if bytes[0] == 19 {
+                    Msg::LocalAway { local }
+                } else {
+                    Msg::LocalBack { local }
                 }
             }
             _ => return Err(WireError::BadValue),

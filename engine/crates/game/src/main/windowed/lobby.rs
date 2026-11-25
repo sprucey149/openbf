@@ -717,6 +717,35 @@ impl App {
         p
     }
 
+    /// The Players screen's further seats as this machine's LAN players
+    /// (issue #194 B19), when the Multiplayer page was opened from the
+    /// Splitscreen mode list (`App.split_party`): each seated seat 1-3 with
+    /// its Ready (or lent) profile, seat order. Empty otherwise.
+    fn lan_locals(&self) -> Vec<super::lan::LanLocal> {
+        use game::local_seats::SeatProfile;
+        let (Some(owners), Some(front)) = (self.split_party.as_ref(), self.front.as_ref()) else {
+            return Vec::new();
+        };
+        (1..input::owners::MAX_LOCAL_PLAYERS)
+            .filter(|&seat| owners.is_seated(seat))
+            .filter_map(|seat| {
+                let p = match front.party.profile(seat) {
+                    SeatProfile::Ready(p) => Some(p),
+                    SeatProfile::Lent(_) => self.split_profiles[seat].as_ref(),
+                    _ => None,
+                }?;
+                let mut profile = PlayerProfile::from_profile(p);
+                profile.name = lb::player_name(&p.name);
+                Some(super::lan::LanLocal {
+                    seat: seat as u8,
+                    name: profile.name.clone(),
+                    profile,
+                    slot: None,
+                })
+            })
+            .collect()
+    }
+
     /// Host Game's Start Hosting: the session is open, the lobby next.
     fn host_from_shell(
         &mut self,
@@ -730,6 +759,7 @@ impl App {
         args.cheats = cheat_policy;
         let mut n = NetplaySession::host(args, self.lan_profile(), max_players, lag_comp)?;
         n.peer.cheat_policy = cheat_policy;
+        n.add_host_locals(self.lan_locals());
         println!("lan: {}", n.status);
         self.netplay = Some(n);
         Ok(())
@@ -741,7 +771,7 @@ impl App {
     fn join_from_shell(&mut self, text: &str, addr: SocketAddr) -> Result<()> {
         let mut args = self.lan_args(false);
         args.addr = Some(text.to_owned());
-        let mut n = NetplaySession::join(args, self.lan_profile(), addr)?;
+        let mut n = NetplaySession::join_locals(args, self.lan_profile(), addr, self.lan_locals())?;
         n.status = format!("Connecting to {text}\u{2026}");
         n.recent.name_hint = std::mem::take(&mut self.join_name_hint);
         println!("lan: {}", n.status);
@@ -856,7 +886,8 @@ impl App {
                 if !matches!(n.lobby.phase, LobbyPhase::Results { .. }) {
                     n.round_decided();
                 }
-                n.lobby.ready.insert(0);
+                // The host's machine (all its own players) is ready.
+                n.lobby.ready.insert(n.peer.machine_of(0));
             }
         }
     }
@@ -1004,9 +1035,9 @@ impl App {
             let n = self.netplay.as_mut().expect("session");
             match n.lobby.phase.clone() {
                 LobbyPhase::Results { .. } => {
-                    let guests: Vec<u8> = n.peer.guests().keys().copied().collect();
+                    // Ready is a machine's (B19): one answer for all its players.
                     let ready = &n.lobby.ready;
-                    let all = guests.iter().all(|s| ready.contains(s));
+                    let all = n.peer.guests().values().all(|g| ready.contains(&g.machine));
                     let waited = n
                         .lobby
                         .results_at
@@ -1057,6 +1088,7 @@ impl App {
                         profile: n.current_profile(&self.profile).encode(),
                     });
                 }
+                n.ready_locals(round);
             }
             if input.back {
                 front.menus.cues.play(MenuSound::Exit);
@@ -1227,7 +1259,7 @@ impl App {
             } else {
                 String::new()
             },
-            players: 1 + n.peer.guests().len() as u8,
+            players: (n.peer.local_count() + n.peer.guests().len()) as u8,
             max_players: n.lobby.max_players,
             protocol: net::PROTOCOL,
             build: game::netplay::build_id(),
@@ -1261,11 +1293,15 @@ impl App {
             (Some(LobbyPhase::InRound(map)), _) => Some(format!(
                 "The host is playing {map}; you join the next round"
             )),
-            (Some(LobbyPhase::Results { ready }), _) => Some(format!(
-                "Waiting for other players ({}/{} ready)",
-                ready.len(),
-                roster.len()
-            )),
+            (Some(LobbyPhase::Results { ready }), _) => {
+                // Counted by machine: one Ready answers for its players (B19).
+                let machines: BTreeSet<u8> = roster.iter().map(|r| r.machine).collect();
+                Some(format!(
+                    "Waiting for other players ({}/{} ready)",
+                    ready.iter().filter(|m| machines.contains(m)).count(),
+                    machines.len()
+                ))
+            }
         };
         let lines = n.lobby.lines();
         let banner = n.banner_text().map(str::to_owned);
@@ -1352,18 +1388,29 @@ impl App {
     }
 }
 
-/// The host removes `slot` from the game (the roster's Kick, by pointer or
-/// pad).
-fn lobby_kick(n: &mut NetplaySession, slot: u8) {
-    if !n.is_host() || slot == 0 {
+/// The host removes guest `machine` (its first slot) from the game, every
+/// player on it (the roster's Kick, by pointer or pad; B19). The host's own
+/// players are never kicked.
+fn lobby_kick(n: &mut NetplaySession, machine: u8) {
+    if !n.is_host() || n.peer.host_local(machine) {
         return;
     }
-    let name = n.peer.guests().get(&slot).map_or_else(
-        || format!("Player {}", u32::from(slot) + 1),
-        |g| g.name.clone(),
-    );
-    n.link.host(net::HostCommand::Kick { slot, ban: false });
-    n.lobby.say(format!("{name} was removed from the game"));
+    let rows = roster_rows(n);
+    let mut names = ui::lobby::machine_names(&rows, machine);
+    if names.is_empty() {
+        names = format!("Player {}", u32::from(machine) + 1);
+    }
+    // The network core kicks the slot's whole connection.
+    n.link.host(net::HostCommand::Kick {
+        slot: machine,
+        ban: false,
+    });
+    let were = if rows.iter().filter(|r| r.machine == machine).count() > 1 {
+        "were"
+    } else {
+        "was"
+    };
+    n.lobby.say(format!("{names} {were} removed from the game"));
 }
 
 /// The roster panel's rows: the host's own roster, or the one the host
@@ -1379,18 +1426,20 @@ fn roster_rows(n: &NetplaySession) -> Vec<ui::lobby::RosterRow> {
             .map(|s| s.roster.clone())
             .unwrap_or_default()
     };
-    players
+    let rows = players
         .into_iter()
         .map(|p| {
+            // Ready is the machine's (B19).
             let ready = match &n.lobby.phase {
-                LobbyPhase::Results { ready } if host => ready.contains(&p.slot),
+                LobbyPhase::Results { ready } if host => ready.contains(&p.machine),
                 _ => match n.lobby.state.as_ref().map(|s| &s.phase) {
-                    Some(LobbyPhase::Results { ready }) => ready.contains(&p.slot),
+                    Some(LobbyPhase::Results { ready }) => ready.contains(&p.machine),
                     _ => false,
                 },
             };
             ui::lobby::RosterRow {
                 slot: p.slot,
+                machine: p.machine,
                 name: p.name,
                 ping_ms: p.ping_ms,
                 addon: p.addon,
@@ -1400,7 +1449,8 @@ fn roster_rows(n: &NetplaySession) -> Vec<ui::lobby::RosterRow> {
                 ready,
             }
         })
-        .collect()
+        .collect();
+    ui::lobby::group_rows(rows)
 }
 
 impl NetplaySession {
@@ -1443,19 +1493,44 @@ fn host_roster(n: &NetplaySession) -> Vec<LobbyPlayer> {
             .collect(),
         NetLink::Client(_) => Default::default(),
     };
+    // The host's own players (B19): slot 0, then its further locals with the
+    // unique names the network core gave them.
+    let own = n.locals.iter().filter_map(|l| {
+        let slot = l.slot.filter(|s| n.peer.host_local(*s))?;
+        Some(LobbyPlayer {
+            slot,
+            machine: 0,
+            name: l.name.clone(),
+            ping_ms: None,
+            addon: n.lobby.content.addon_heroes,
+            team: None,
+        })
+    });
     std::iter::once(LobbyPlayer {
         slot: 0,
+        machine: 0,
         name: n.profile.name.clone(),
         ping_ms: None,
         addon: n.lobby.content.addon_heroes,
         team: None,
     })
-    .chain(n.peer.guests().iter().map(|(slot, g)| LobbyPlayer {
-        slot: *slot,
-        name: g.name.clone(),
-        ping_ms: Some(pings.get(slot).copied().unwrap_or(0)),
-        addon: g.content.as_ref().is_some_and(|c| c.addon_heroes),
-        team: None,
+    .chain(own)
+    .chain(n.peer.guests().iter().map(|(slot, g)| {
+        LobbyPlayer {
+            slot: *slot,
+            machine: g.machine,
+            name: g.name.clone(),
+            // A machine's one link: its first slot's figures.
+            ping_ms: Some(
+                pings
+                    .get(slot)
+                    .or_else(|| pings.get(&g.machine))
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            addon: g.content.as_ref().is_some_and(|c| c.addon_heroes),
+            team: None,
+        }
     }))
     .collect()
 }
@@ -1696,6 +1771,134 @@ pub(crate) mod tests {
         });
         let why = guest.netplay.as_ref().unwrap().ended.clone().unwrap().0;
         assert_eq!(why, "The host removed you from the game");
+        for mut a in [host, guest] {
+            if let Some(n) = a.netplay.take() {
+                n.shutdown();
+            }
+        }
+    }
+
+    /// Issue #194 B19, headless over UDP on this machine: the host plays with
+    /// a second local player (Rex) and a guest machine joins with two (Bo and
+    /// Leia). Every roster groups the rows by machine (the host's own first,
+    /// a machine's first player before its further one), the round's seats
+    /// carry the host's local with its own profile, one Ready answers for the
+    /// guest machine, the host's own player is never kicked, and a kick from
+    /// Leia's row removes the whole guest machine.
+    #[test]
+    fn a_two_player_guest_machine_groups_readies_and_is_kicked_whole() {
+        let port = free_port();
+        let mut host = app();
+        host.profile.name = "Ann".into();
+        host.host_from_shell(4, port, 0, true).expect("hosting");
+        let local = |base: PlayerProfile, seat: u8, name: &str, medals: u32| {
+            let mut profile = base;
+            profile.name = name.into();
+            profile.medals[0] = medals;
+            super::super::lan::LanLocal {
+                seat,
+                name: name.into(),
+                profile,
+                slot: None,
+            }
+        };
+        let rex = local(host.lan_profile(), 1, "Rex", 5);
+        host.netplay.as_mut().unwrap().add_host_locals(vec![rex]);
+        host.enter_lobby();
+        let mut guest = app();
+        guest.profile.name = "Bo".into();
+        let mut args = guest.lan_args(false);
+        args.addr = Some(format!("127.0.0.1:{port}"));
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let leia = local(guest.lan_profile(), 2, "Leia", 0);
+        let n = NetplaySession::join_locals(args, guest.lan_profile(), addr, vec![leia])
+            .expect("joining");
+        guest.netplay = Some(n);
+        guest.enter_lobby();
+        let state = |a: &App| a.netplay.as_ref().and_then(|n| n.lobby.state.clone());
+        run(&mut host, &mut guest, |_, g| {
+            state(g).is_some_and(|s| s.roster.len() == 4)
+        });
+        let rows = |a: &App| {
+            roster_rows(a.netplay.as_ref().unwrap())
+                .into_iter()
+                .map(|r| (r.name.clone(), r.machine, r.follows()))
+                .collect::<Vec<_>>()
+        };
+        let bo = guest.netplay.as_ref().unwrap().peer.local_slot;
+        let leia_slot = guest.netplay.as_ref().unwrap().locals[0]
+            .slot
+            .expect("Leia's slot");
+        assert_ne!(bo, 0);
+        let want = vec![
+            ("Ann".to_owned(), 0, false),
+            ("Rex".to_owned(), 0, true),
+            ("Bo".to_owned(), bo, false),
+            ("Leia".to_owned(), bo, true),
+        ];
+        assert_eq!(rows(&host), want, "the host's roster, grouped");
+        assert_eq!(rows(&guest), want, "the guest's copy, grouped the same");
+        {
+            let n = host.netplay.as_ref().unwrap();
+            let rex = n.locals[0].slot.expect("Rex's slot");
+            assert!(n.peer.host_local(rex) && !n.peer.host_local(bo));
+            assert_eq!(n.peer.machine_of(leia_slot), bo);
+            let setup = n.host_setup("bf2", &host.session, &host.profile);
+            let seats: Vec<_> = setup
+                .humans
+                .iter()
+                .map(|h| (h.slot, h.name.as_str()))
+                .collect();
+            assert_eq!(
+                seats,
+                [(0, "Ann"), (rex, "Rex"), (bo, "Bo"), (leia_slot, "Leia")]
+            );
+            assert_eq!(setup.humans[1].profile.medals[0], 5, "Rex's own profile");
+        }
+        // The results' ready check: the guest machine's one Ready answers.
+        {
+            let n = host.netplay.as_mut().unwrap();
+            n.lobby.phase = LobbyPhase::Results { ready: Vec::new() };
+            n.lobby.ready.insert(0);
+            n.lobby.results_at = Some(Instant::now());
+        }
+        run(&mut host, &mut guest, |h, _| {
+            h.netplay.as_ref().unwrap().lobby.phase == LobbyPhase::Choosing
+        });
+        // The host's own Rex: no kick.
+        let n = host.netplay.as_mut().unwrap();
+        let rex = n.locals[0].slot.unwrap();
+        lobby_kick(n, rex);
+        assert_eq!(roster_rows(n).len(), 4, "the host's own player stays");
+        // From Leia's row the pad asks for, then kicks, her machine.
+        let table = roster_rows(n);
+        let mut nav = ui::lobby::RosterNav::default();
+        nav.input(true, Default::default(), &table, true);
+        nav.focus = table.iter().position(|r| r.slot == leia_slot);
+        let accept = ui::menu::MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert_eq!(nav.input(false, accept, &table, true), None);
+        let machine = nav.input(false, accept, &table, true);
+        assert_eq!(machine, Some(bo), "the machine, by its first slot");
+        lobby_kick(n, bo);
+        run(&mut host, &mut guest, |h, g| {
+            g.netplay.as_ref().is_some_and(|n| n.ended.is_some())
+                && h.netplay.as_ref().unwrap().peer.guests().is_empty()
+        });
+        assert_eq!(
+            rows(&host),
+            want[..2].to_vec(),
+            "both of the machine's players left"
+        );
+        let lines = host.netplay.as_mut().unwrap().lobby.lines();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "Bo and Leia were removed from the game"),
+            "{lines:?}"
+        );
         for mut a in [host, guest] {
             if let Some(n) = a.netplay.take() {
                 n.shutdown();

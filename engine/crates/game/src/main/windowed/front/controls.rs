@@ -12,6 +12,9 @@ pub(in super::super) struct Controls {
     pub(in super::super) capture: Option<Capture>,
     pub(in super::super) original: Vec<Binding>,
     pub(in super::super) message: Option<String>,
+    /// Issue #194 (B10): the Players-screen seat whose profile the page edits; 0 is the
+    /// host's (`App.profile`), the shell's and single player's always.
+    pub(in super::super) seat: usize,
 }
 
 pub(in super::super) enum Layout {
@@ -101,7 +104,13 @@ impl Controls {
             cursor: 0,
             capture: None,
             message,
+            seat: 0,
         }
+    }
+
+    /// The page edits seat `seat`'s profile (a split player's Game Menu, issue #194 B10).
+    pub(in super::super) fn for_seat(self, seat: usize) -> Self {
+        Self { seat, ..self }
     }
 
     pub(in super::super) fn keyboard(&self) -> bool {

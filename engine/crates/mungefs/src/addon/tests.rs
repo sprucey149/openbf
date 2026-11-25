@@ -122,7 +122,11 @@ fn detects_single_wrapper_layout_and_core_locl() {
 
 #[test]
 fn real_abr_inspection_when_present() {
-    let abr = Path::new(r"E:\Projects\bf1+bf2\star_wars_battlefront2 modded\GameData\addon\ABR");
+    // `OPENBF_ABR_ADDON` names a local copy of the ABR addon (`GameData/addon/ABR`).
+    let Some(abr) = std::env::var_os("OPENBF_ABR_ADDON") else {
+        return;
+    };
+    let abr = Path::new(&abr);
     if !abr.is_dir() {
         return;
     }

@@ -864,6 +864,10 @@ pub struct Fx {
     /// The local player's camera shake ([`crate::camera_shake`]), fed by
     /// this tick's blasts in [`Fx::ingest`].
     pub shake: crate::camera_shake::CameraShake,
+    /// Each further local player's camera shake, by local index less one (issue #194 B13,
+    /// `SPLITSCREEN.md` 18.1 item 6): `shake` stays the first player's. Empty with one local
+    /// player. Read through [`Fx::shake_of`].
+    more_shakes: Vec<crate::camera_shake::CameraShake>,
     /// This tick's blasts with a shake, and where, until [`Fx::ingest`].
     shake_blasts: Vec<(Vec3, core::impact::Shake)>,
     /// The shells' rim sheet and specular table, once uploaded ([`shield`]).
@@ -1405,29 +1409,64 @@ impl Fx {
         });
     }
 
+    /// Local player `i`'s camera shake (0 is the first player's, [`Fx::shake`]); `None` for a
+    /// player the shakes have not met yet.
+    pub fn shake_of(&self, i: usize) -> Option<&crate::camera_shake::CameraShake> {
+        match i {
+            0 => Some(&self.shake),
+            _ => self.more_shakes.get(i - 1),
+        }
+    }
+
     /// This tick's blasts shake the local player's camera, measured from
     /// the object he controls: his vehicle when seated, else his soldier,
     /// each by its blast sphere; none while dead (B2:288300-288322). Then
     /// one camera update of a tick: the PS2's camera ran once per 30 Hz
     /// frame. OURS: a gunner measures from the vehicle he rides, where the
     /// PS2 asks his controlled turret. trace: B2:288305 vtable +0x24.
+    ///
+    /// Split (issue #194 B13): the blasts are collected once and measured from every awake local
+    /// player's own controlled object into that player's shake; an away player's (a bot may hold
+    /// their handle) takes none and only decays. One local player: the first player's alone, as
+    /// before.
     fn shake_player(&mut self, walk: &WalkSim) {
         let sim = &walk.sim;
-        let from = sim.unit(walk.player).filter(|u| u.alive).map(|u| {
-            match sim.seat_of(walk.player).and_then(|(h, _)| sim.vehicle(h)) {
-                Some(v) => (v.pos, sim.vehicle_blast_sphere(v).1),
-                None => (
-                    u.soldier.pos,
-                    core::sim::soldier_blast_sphere(u.soldier.stance).1,
-                ),
+        let n = walk.local_count();
+        let from = |h: core::unit::UnitHandle| {
+            sim.unit(h).filter(|u| u.alive).map(|u| {
+                match sim.seat_of(h).and_then(|(v, _)| sim.vehicle(v)) {
+                    Some(v) => (v.pos, sim.vehicle_blast_sphere(v).1),
+                    None => (
+                        u.soldier.pos,
+                        core::sim::soldier_blast_sphere(u.soldier.stance).1,
+                    ),
+                }
+            })
+        };
+        let awake_from = |i: usize| {
+            if n > 1 && walk.is_suspended(i) {
+                None
+            } else {
+                from(walk.local_unit(i))
             }
-        });
+        };
+        let first = awake_from(0);
+        self.more_shakes.resize_with(n - 1, Default::default);
+        let more: Vec<_> = (1..n).map(awake_from).collect();
         for (pos, shake) in std::mem::take(&mut self.shake_blasts) {
-            if let Some((at, w)) = from {
+            if let Some((at, w)) = first {
                 self.shake.blast(&shake, at.distance(pos), w);
+            }
+            for (s, f) in self.more_shakes.iter_mut().zip(&more) {
+                if let Some((at, w)) = f {
+                    s.blast(&shake, at.distance(pos), *w);
+                }
             }
         }
         self.shake.tick(core::TICK_DT);
+        for s in &mut self.more_shakes {
+            s.tick(core::TICK_DT);
+        }
     }
 
     pub fn update(&mut self, dt: f32) {

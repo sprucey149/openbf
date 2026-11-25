@@ -304,6 +304,38 @@ fn logged(run: impl FnOnce() -> Result<()>) -> Result<()> {
     result
 }
 
+/// Debug splitscreen (issue #194): `--local-players <2..=4>` seats that many people on the
+/// windowed battle and `--local-keyboard` makes player 0 the keyboard-and-mouse player. Both are
+/// taken out of the arguments wherever they stand, so every windowed entry accepts them.
+fn split_flags(args: Vec<String>) -> Result<Vec<String>> {
+    let mut rest = Vec::with_capacity(args.len());
+    let (mut players, mut keyboard) = (None, false);
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--local-players" => {
+                let n: usize = it
+                    .next()
+                    .context("--local-players <2..4>")?
+                    .parse()
+                    .context("--local-players <2..4>")?;
+                if !(2..=4).contains(&n) {
+                    bail!("--local-players takes 2, 3 or 4");
+                }
+                players = Some(n);
+            }
+            "--local-keyboard" => keyboard = true,
+            _ => rest.push(a),
+        }
+    }
+    match players {
+        Some(n) => windowed::set_split_config(n, keyboard),
+        None if keyboard => bail!("--local-keyboard needs --local-players"),
+        None => {}
+    }
+    Ok(rest)
+}
+
 fn main() -> Result<()> {
     // A packed build (card PACK) serves the default data directories from its
     // own file when they are not directories here; a dev checkout reads them.
@@ -314,6 +346,10 @@ fn main() -> Result<()> {
     game::blackbox::warm_checkout();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     let (args, global_overrides, vr_requested, no_mods) = extract_extension_flags(&raw_args)?;
+    if vr_requested && args.iter().any(|a| a == "--local-players") {
+        bail!("--vr plays one player: it does not combine with --local-players");
+    }
+    let args = split_flags(args)?;
     let mut it = args.iter();
     let a = it.next().cloned().unwrap_or_else(|| "--shell".to_string());
     if vr_requested

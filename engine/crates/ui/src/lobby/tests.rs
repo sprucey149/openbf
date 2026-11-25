@@ -462,13 +462,14 @@ fn join_page_recent_games_rows_cursor_and_forget() {
 fn roster() -> Vec<RosterRow> {
     let row = |slot: u8, name: &str| RosterRow {
         slot,
+        machine: slot,
         name: name.into(),
         ping_ms: (slot != 0).then_some(40),
         addon: false,
         team: "Auto".into(),
         ready: false,
     };
-    vec![row(0, "the maintainer"), row(1, "Kai"), row(2, "Sam")]
+    vec![row(0, "Rex"), row(1, "Kai"), row(2, "Sam")]
 }
 
 /// Issue #168, the first VPN playtest: the host's player list with a pad.
@@ -528,10 +529,10 @@ fn roster_list_opens_moves_kicks_and_closes_with_a_pad() {
         "the question is Sam's now"
     );
     assert_eq!(nav.input(false, accept, &kai_gone, true), Some(2));
-    // Sam leaves while asked, the pad falls back to the maintainer: no question.
+    // Sam leaves while asked, the pad falls back to Rex: no question.
     nav.input(false, accept, &kai_gone, true);
     nav.input(false, none, &kai_gone[..1], true);
-    assert_eq!(nav.confirm, None, "disarmed on the maintainer");
+    assert_eq!(nav.confirm, None, "disarmed on Rex");
     assert_eq!(
         RosterPrompts::default().line(&nav, &kai_gone[..1], true),
         "Up / Down: move \u{b7} : close"
@@ -560,6 +561,90 @@ fn roster_list_opens_moves_kicks_and_closes_with_a_pad() {
     assert_eq!(nav.focus, Some(0), "held to the last row");
     nav.input(false, none, &[], true);
     assert!(!nav.active());
+}
+
+/// Splitscreen B19: a roster with several players on one machine. The host
+/// (slot 0) has a second player who took slot 3 after two guest machines
+/// joined: Kai alone (slot 1), and Han with Leia (slots 2 and 4, Leia
+/// seated later). The rows group by machine, the host's own first, each
+/// machine's first player before its further ones; the host's players are
+/// never kicked, and a kick from any row of Han's machine asks for and
+/// removes the whole machine.
+#[test]
+fn roster_rows_group_by_machine_and_kick_a_whole_machine() {
+    let row = |slot: u8, machine: u8, name: &str| RosterRow {
+        slot,
+        machine,
+        name: name.into(),
+        ping_ms: (machine != 0).then_some(40),
+        addon: false,
+        team: "Auto".into(),
+        ready: false,
+    };
+    let rows = group_rows(vec![
+        row(0, 0, "Rex"),
+        row(1, 1, "Kai"),
+        row(2, 2, "Han"),
+        row(3, 0, "Rex_1"),
+        row(4, 2, "Leia"),
+    ]);
+    let order: Vec<(u8, &str)> = rows.iter().map(|r| (r.slot, r.name.as_str())).collect();
+    assert_eq!(
+        order,
+        [
+            (0, "Rex"),
+            (3, "Rex_1"),
+            (1, "Kai"),
+            (2, "Han"),
+            (4, "Leia")
+        ],
+        "the host's own players first, then each machine, its first player first"
+    );
+    assert!(rows[0].host_side() && rows[1].host_side() && !rows[2].host_side());
+    assert!(rows[1].follows() && rows[4].follows() && !rows[3].follows());
+    assert_eq!(machine_names(&rows, 2), "Han and Leia");
+    assert_eq!(machine_names(&rows, 1), "Kai");
+    let accept = press(|i| i.confirm = true);
+    let none = MenuInput::default();
+    let mut nav = RosterNav::default();
+    nav.input(true, none, &rows, true);
+    // The host's second player is the host's: no kick.
+    nav.input(false, press(|i| i.down = true), &rows, true);
+    assert_eq!(nav.focus, Some(1));
+    assert_eq!(nav.input(false, accept, &rows, true), None);
+    assert_eq!(nav.confirm, None, "the host's own player is never kicked");
+    assert_eq!(
+        RosterPrompts::default().line(&nav, &rows, true),
+        "Up / Down: move \u{b7} : close"
+    );
+    // Leia's row asks for her whole machine.
+    nav.focus = Some(4);
+    assert_eq!(nav.input(false, accept, &rows, true), None);
+    assert_eq!(nav.confirm, Some(2), "asks for Han's machine");
+    assert_eq!(
+        RosterPrompts::default().line(&nav, &rows, true),
+        "Kick Han and Leia? : kick \u{b7} : cancel"
+    );
+    // Moving to Han's row (the same machine) drops the question as any move
+    // does; asked again there, the second Accept kicks machine 2.
+    nav.input(false, press(|i| i.up = true), &rows, true);
+    assert_eq!((nav.focus, nav.confirm), (Some(3), None));
+    assert_eq!(nav.input(false, accept, &rows, true), None);
+    assert_eq!(nav.input(false, accept, &rows, true), Some(2));
+    // Kai alone is his own machine.
+    nav.focus = Some(2);
+    nav.input(false, accept, &rows, true);
+    assert_eq!(nav.input(false, accept, &rows, true), Some(1));
+    // The machine leaves while asked: the question is not handed on.
+    nav.focus = Some(3);
+    nav.input(false, accept, &rows, true);
+    let gone = group_rows(vec![row(0, 0, "Rex"), row(3, 0, "Rex_1"), row(1, 1, "Kai")]);
+    nav.focus = Some(2);
+    assert_eq!(
+        nav.input(false, accept, &gone, true),
+        None,
+        "Kai not kicked unasked"
+    );
 }
 
 /// The roster's help line names the set's own buttons: Square / X / Space

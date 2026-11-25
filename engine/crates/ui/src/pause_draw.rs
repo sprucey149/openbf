@@ -534,10 +534,21 @@ pub(crate) fn draw_stack(ctx: &mut Ctx<'_>, m: &MenuModel, anim: &Animation, siz
             prompt,
         );
     }
+    let line_h = BODY.size + 2.0;
     if let Some(outcome) = &m.outcome_line {
         let [left, top, right, _] = layout.title;
-        let rect = [left, top - 3.0 - BODY.size - 2.0, right, top - 3.0];
+        let rect = [left, top - 3.0 - line_h, right, top - 3.0];
         ctx.text_in(&s, &BODY, outcome, rect, tint::HELP);
+    }
+    if let Some(who) = &m.paused_by {
+        let [left, top, right, _] = layout.title;
+        let above = if m.outcome_line.is_some() {
+            line_h
+        } else {
+            0.0
+        };
+        let rect = [left, top - 3.0 - line_h - above, right, top - 3.0 - above];
+        ctx.text_in(&s, &BODY, who, rect, tint::HELP);
     }
 
     // The rows, at their (eased) place, cut at the list's window.
@@ -626,4 +637,61 @@ pub(crate) fn draw_stack(ctx: &mut Ctx<'_>, m: &MenuModel, anim: &Animation, siz
     // the centered stack's scale.
     ctx.help_bottom([size[0], help_h], false, Prompt::Back, "Back", size[1]);
     ctx.help_bottom([size[0], help_h], true, Prompt::Accept, "Select", size[1]);
+}
+
+#[cfg(test)]
+mod help_fit_tests {
+    use super::*;
+
+    /// The help paragraph's room under the stack at `size`: the narrowest stack (the original's
+    /// share of the viewport) widened as `draw_stack` widens it, inside the safe area.
+    fn help_room(size: [f32; 2]) -> f32 {
+        let s = menu_screen(size);
+        let bar = (size[0] / s.scale[0] * STACK_VIEWPORT_WIDTH).min(FRAME_W);
+        let [l, r] = safe_x(&s, size);
+        let x0 = (CENTRE_X - 0.5 * bar - 64.0).max(l);
+        let x1 = (CENTRE_X + 0.5 * bar + 64.0).min(r);
+        x1 - x0 - 2.0 * TEXT_INSET
+    }
+
+    /// A screen row's help on the Splitscreen page with three or four seated wraps to two lines
+    /// at most at 16:9 and 16:10 (the old text took three, its last a lone word, nearly on the
+    /// footer), and the two-seat help to one.
+    #[test]
+    fn split_screen_help_fits_two_lines() {
+        let font = crate::shell_ia::tests::small_font();
+        let lines = |m: &menu::MenuModel, size| {
+            let help = menu::row_help(m, menu::Row::SplitScreen(1)).unwrap();
+            typography::wrap(&font, &BODY, &help, help_room(size)).len()
+        };
+        let model = |seated| menu::MenuModel {
+            split: Some(menu::SplitMenu {
+                seated,
+                cells: [0, 1, 2, 3],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for size in [
+            [1920.0, 1080.0],
+            [3840.0, 2160.0],
+            [1920.0, 1200.0],
+            [1280.0, 720.0],
+        ] {
+            for seated in [[true, true, true, false], [true; 4]] {
+                assert!(lines(&model(seated), size) <= 2, "{size:?} {seated:?}");
+            }
+            assert_eq!(
+                lines(&model([true, true, false, false]), size),
+                1,
+                "{size:?}"
+            );
+            let old = "Left/Right moves this player's screen through the four places in \
+                       reading order. Whoever was there takes this one.";
+            assert!(
+                typography::wrap(&font, &BODY, old, help_room(size)).len() > 2,
+                "the measure sees the old wrap ({size:?})"
+            );
+        }
+    }
 }

@@ -103,10 +103,15 @@ impl Scene {
         });
         let mut voice = self.walk.voice.take().expect("voice");
         let heard = &mut self.heard;
-        voice.frame(&self.walk.sim, self.walk.player, 1.0 / HZ as f32, |l| {
-            heard.push((tick, l.name.clone(), l.take));
-            Some(TAKE_SECS)
-        });
+        voice.frame(
+            &self.walk.sim,
+            Some(self.walk.player),
+            1.0 / HZ as f32,
+            |l| {
+                heard.push((tick, l.name.clone(), l.take));
+                Some(TAKE_SECS)
+            },
+        );
         self.walk.voice = Some(voice);
     }
 

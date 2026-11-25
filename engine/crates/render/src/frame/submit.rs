@@ -3,7 +3,7 @@ use super::{
     blend_order, continue_pass, create_instance_buffer, create_palette_buffer,
     display_view_allowed, draw_key, draw_key_layer, draw_mesh, iface_dir, mark, may_move,
     overlay_order, run_section, runs_key, skinned_go_before, sort_distance, sort_runs, Blended,
-    DrawSort, FrameStats, FrameTarget, OverlayFn, ViewProjection, WorldBox,
+    DrawSort, FrameStats, FrameTarget, OverlayFn, ViewProjection, ViewSlot, WorldBox,
 };
 use crate::frustum;
 use crate::mesh::{self, GpuMesh, Instance};
@@ -56,7 +56,7 @@ impl Renderer {
         self.advance_sky();
         let size = self.size();
         self.update_falling(camera, size);
-        self.render_view(
+        self.render_scene(
             camera,
             ViewProjection::Camera,
             draws,
@@ -65,6 +65,7 @@ impl Renderer {
             overlay,
             None,
             true,
+            None,
         )
     }
 
@@ -88,7 +89,7 @@ impl Renderer {
     ) -> Result<(), RenderError> {
         self.advance_sky();
         self.update_falling(camera, target.size().into());
-        self.render_view(
+        self.render_scene(
             camera,
             projection,
             draws,
@@ -97,11 +98,48 @@ impl Renderer {
             overlay,
             Some(target),
             true,
+            None,
         )
     }
 
+    /// One view of a frame shared by several (issue #194). Draws the world from `camera` at
+    /// the slot's size into its own target, blits it into the slot's rectangle of the window,
+    /// and records the overlay (which receives the slot's width and height; the caller's pass
+    /// sets the viewport to the rectangle). Acquire once at the first view, one submit per
+    /// view, present at the last. A view at a time: every shared buffer is written by this view
+    /// and submitted before the next view writes it.
+    pub fn render_view(
+        &mut self,
+        slot: ViewSlot,
+        camera: &Camera,
+        draws: &[DrawCmd],
+        skinned: &[SkinnedDrawCmd],
+        clear: [f64; 4],
+        overlay: Option<OverlayFn<'_>>,
+    ) -> Result<(), RenderError> {
+        // The sky's clock is the frame's, not each view's.
+        if slot.first {
+            self.advance_sky();
+        }
+        let size = self.size();
+        self.update_falling(camera, size);
+        self.render_scene(
+            camera,
+            ViewProjection::Camera,
+            draws,
+            skinned,
+            clear,
+            overlay,
+            None,
+            true,
+            Some(slot),
+        )
+    }
+
+    /// One view: into `external` when given, else the renderer's own target, or the `slot`
+    /// rectangle of the window when given (a split view, [`Renderer::render_view`]).
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn render_view(
+    pub(super) fn render_scene(
         &mut self,
         camera: &Camera,
         projection: ViewProjection,
@@ -111,8 +149,15 @@ impl Renderer {
         overlay: Option<OverlayFn<'_>>,
         external: Option<&FrameTarget>,
         clear_shadows: bool,
+        slot: Option<ViewSlot>,
     ) -> Result<(), RenderError> {
-        let size = external.map_or_else(|| self.size(), |target| target.size().into());
+        let slot = slot.filter(|_| external.is_none());
+        let first = slot.is_none_or(|s| s.first);
+        let size = match (external, slot) {
+            (Some(target), _) => target.size().into(),
+            (None, Some(s)) => (s.rect[2], s.rect[3]),
+            (None, None) => self.size(),
+        };
         let leaves = self.falling_draw_list();
         for d in skinned {
             let Some(mesh) = self.skinned_meshes.get(d.mesh.0 as usize) else {
@@ -813,7 +858,23 @@ impl Renderer {
 
         // Acquire the frame's color view.
         let acquire = std::time::Instant::now();
-        let frame = if external.is_none() && matches!(self.target, Target::Window { .. }) {
+        // A later split view of a present takes the image the first one acquired; if the first
+        // one found the surface lost, the whole present is skipped.
+        let held = if first {
+            self.held_frame = None;
+            None
+        } else {
+            match self.held_frame.take() {
+                Some((f, _)) => Some(f),
+                None if external.is_none() && matches!(self.target, Target::Window { .. }) => {
+                    return Ok(())
+                }
+                None => None,
+            }
+        };
+        let frame = if held.is_some() {
+            held
+        } else if external.is_none() && matches!(self.target, Target::Window { .. }) {
             let Some(frame) = self.acquire_window()? else {
                 return Ok(());
             };
@@ -840,7 +901,8 @@ impl Renderer {
             });
         // The GPU timer, when on (`gpu_timer.rs`): out of `self` for the
         // frame, so the passes can mark it while they borrow the rest.
-        let mut timer = self.gpu_timer.take();
+        // One timed view per present: the timer's ring is per present.
+        let mut timer = if first { self.gpu_timer.take() } else { None };
         if let Some(t) = &mut timer {
             t.begin(&self.device, &mut encoder);
         }
@@ -860,6 +922,7 @@ impl Renderer {
         // A scaled world draws in its own target, frame and depth, until the
         // upscale below.
         let world_target = ((width, height) != (frame_width, frame_height)
+            || slot.is_some()
             || ((particle_blur || reflect_setup.is_some())
                 && !frame_texture
                     .usage()
@@ -1597,7 +1660,13 @@ impl Renderer {
             mark(&mut timer, &mut pass, "overlays");
         }
         if let Some(t) = &world_target {
-            self.world_scale.upscale(&mut encoder, t, &frame_view);
+            self.world_scale.upscale_into(
+                &mut encoder,
+                t,
+                &frame_view,
+                slot.map(|s| s.rect),
+                first,
+            );
             draw_calls += 1;
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "upscale");
@@ -1631,6 +1700,14 @@ impl Renderer {
             t.submitted();
             self.gpu_timer = Some(t);
         }
+        // Not the last split view: keep the image for the next one.
+        let frame = match frame {
+            Some(f) if slot.is_some_and(|s| !s.last) => {
+                self.held_frame = Some((f, frame_view.clone()));
+                None
+            }
+            other => other,
+        };
         if let Some(frame) = frame {
             self.present_window(frame);
         }

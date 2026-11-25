@@ -9,6 +9,16 @@
 //!   clock. Peers and players live in ordered maps.
 //! - Slot 0 is the host's own player. Its pads go through the same input
 //!   queue as everyone's ([`HostCore::submit_input`]).
+//! - The host machine may have more local players (splitscreen):
+//!   [`HostCore::add_local`] gives each the lowest free slot (which may lie
+//!   above guests' slots), with no connection ("host locals",
+//!   [`HostCore::host_local`]), and returns the unique name it gave. They are in the
+//!   roster and seated like slot 0, loaded from the start, never reserved,
+//!   kicked, benched or timed out, and their pads go in through
+//!   [`HostCore::submit_input_for`], numbered with slot 0's sequence. The
+//!   host's locals are one machine for the grouped close and the late
+//!   seating (`scheduler` rules), as a guest machine's are. Guests take the
+//!   lowest slots left.
 //! - A new connection id is accepted only from a packet that carries
 //!   reliable unit 0 (a `Hello`), and only while fewer than 64 handshakes
 //!   are open. Packets from a known id at another address are dropped.
@@ -16,6 +26,42 @@
 //!   barrier (`Busy`), then a slot: the same session token reclaims its old
 //!   slot (connected or reserved), otherwise the lowest free slot below
 //!   `max_players` (`Full` when none). Mid-round joins are accepted.
+//! - A machine may bring several local players (splitscreen): its `Hello`
+//!   lists locals 1.. after its first player, and admission takes one slot
+//!   per local at once or refuses the whole `Hello` (`Full` when they do not
+//!   all fit). Each local names its stable seat (0 for the `Hello`'s own
+//!   player) and its token is [`crate::local_token`]`(token, seat)`, so a
+//!   rejoin reclaims every seat's own slot whatever the line-up; a reclaimed
+//!   slot keeps its name only while its player still asks for that name. `Welcome` returns local 0's slot and
+//!   the others in order; each slot gets its own `PlayerJoined`. The
+//!   connection's round messages (`Loaded`, hash reports, `CaughtUp`,
+//!   `Resync`) speak for all of its slots; `Ready` names its local. A leave,
+//!   a timeout, a kick or a bench of any of its slots acts on the whole
+//!   machine, with one `PlayerLeft` (and one `Trouble`) per slot; a kick of
+//!   a reserved slot also frees the machine's other reserved slots.
+//! - A machine counts for hash agreement and the fell-behind drop while any
+//!   of its slots plays the round (its connection reports for all of them,
+//!   keyed by local 0's slot). A machine seated only in part at the load
+//!   barrier gets a `PeerCaughtUp` for each unseated slot once it is live,
+//!   so the game adds them as it adds a late joiner.
+//! - A local whose pad is lost (a guest's `LocalAway { local }`, or
+//!   [`HostCore::set_local_away`] for the host's own, slot 0 included)
+//!   leaves the round with a `RemoveHuman` (a bot holds the slot) and
+//!   [`NetEvent::LocalAway`]; it is never seated while away (`add_human`
+//!   refuses it, `load_round` leaves it out). Its machine plays on: it
+//!   still counts for hashes while any other slot is seated, and its
+//!   pacing comes from the first seated local. When the pad is back
+//!   (`LocalBack`), a removal its away queued and not yet closed is
+//!   cancelled; otherwise a slot waiting in the round's late list is
+//!   released (as `LocalBack`, not `PeerCaughtUp`) once its machine is
+//!   live, and a slot of a live machine (one on the running round's stream,
+//!   so not benched) gets [`NetEvent::LocalBack`], on which the
+//!   host game seats it with `add_human` (the queue lines up with its
+//!   siblings, `scheduler` rules). A new link (a rejoin) starts not away.
+//! - A machine's inputs share one sequence: `Inputs` feeds local 0's slot,
+//!   `LocalInputs { idx }` local `idx`'s (an index with no slot is a bad
+//!   chunk). Its status reports `input_through` as the slowest of its slots
+//!   and the pacing figures of local 0's.
 //! - A player who leaves or times out keeps slot and name for
 //!   [`crate::RESERVE_FOR`] for the same token. A kick frees the slot.
 //! - Silence: "trouble" after [`crate::TROUBLE_AFTER`], dropped after
@@ -34,6 +80,7 @@
 
 mod admission;
 use admission::Hello;
+pub use admission::{full_detail, parse_full_detail};
 mod round;
 
 use crate::bundle::TickBundle;
@@ -132,6 +179,11 @@ pub enum LeaveReason {
 pub enum NetEvent {
     PlayerJoined {
         slot: u8,
+        /// Its machine (splitscreen, issue #194 B19): local 0's slot of the
+        /// connection that holds it ([`HostCore::machine_slots`]'s first),
+        /// `slot` itself for a one-player machine. The lobby groups and
+        /// kicks by it.
+        machine: u8,
         name: String,
         content: Vec<u8>,
         profile: Vec<u8>,
@@ -206,6 +258,24 @@ pub enum NetEvent {
         round_id: u32,
         profile: Vec<u8>,
     },
+    /// Local player `slot`'s pad went away (a guest's `LocalAway` or
+    /// [`HostCore::set_local_away`]): its slot leaves the round (a
+    /// `RemoveHuman`, which the host core schedules itself) and is not
+    /// seated again until it is back.
+    LocalAway {
+        slot: u8,
+    },
+    /// Local player `slot`'s pad is back while its machine plays round
+    /// `round_id` and the slot is out of it: the host game seats it again
+    /// with `add_human`, as after `PeerCaughtUp` (the returning queue lines
+    /// up with its machine's other locals). A slot back before its seat
+    /// was taken keeps it, and one whose machine is still catching up gets
+    /// `PeerCaughtUp` instead; neither gets this event.
+    LocalBack {
+        slot: u8,
+        round_id: u32,
+        tick: u32,
+    },
     Request {
         slot: u8,
         data: Vec<u8>,
@@ -214,11 +284,22 @@ pub enum NetEvent {
         slot: u8,
         text: String,
     },
+    /// The answer to [`crate::HostCommand::AddLocal`] (splitscreen B19):
+    /// the host machine's player in Players-screen seat `seat` got `slot`
+    /// and the unique `name` [`HostCore::add_local`] gave it, or the
+    /// reason it was refused: [`RejectReason::Full`] (no free slot),
+    /// [`RejectReason::Busy`] (a round loading) or
+    /// [`RejectReason::BadName`].
+    LocalAdded {
+        seat: u8,
+        added: Result<(u8, String), RejectReason>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Handshake,
+    /// Joined; the slot of its local 0 (the others are [`Peer::extra`]).
     Joined(u8),
     Closing(Micros),
 }
@@ -226,6 +307,8 @@ enum Phase {
 struct Peer {
     conn: Conn,
     phase: Phase,
+    /// The slots of the machine's locals 1.. (splitscreen), in order.
+    extra: Vec<u8>,
     /// The catch-up stream this peer is on (0: none).
     stream: u32,
     stream_round: u32,
@@ -237,6 +320,13 @@ struct Peer {
     /// for new ticks, otherwise only for an ack, a resend or a heartbeat).
     /// Reset with every new stream.
     sent_through: u32,
+    /// The slot whose queue paces the machine's status, the offset added
+    /// to its starvation count and the count last put in a status
+    /// (`build_for`). With one local the slot never changes and the offset
+    /// stays 0, so its status bytes are unchanged.
+    pace_slot: Option<u8>,
+    starved_offset: u32,
+    starved_sent: u32,
 }
 
 pub(crate) struct Player {
@@ -244,6 +334,14 @@ pub(crate) struct Player {
     token: u64,
     profile: Vec<u8>,
     conn: Option<u32>,
+    /// Its machine's `Hello` token (its own token is derived from it and
+    /// its seat): a kick of a reserved slot takes the machine's other
+    /// reserved slots with it.
+    machine: u64,
+    /// One of the host machine's own players (slot 0 and every
+    /// [`HostCore::add_local`] slot): no connection, never reserved,
+    /// kicked or timed out.
+    host_local: bool,
     queue: SlotQueue,
     reserved_until: Option<Micros>,
     /// A human in the current round's bundles.
@@ -255,6 +353,21 @@ pub(crate) struct Player {
     /// Stepping a catch-up stream (a join, a reconnect, a resync) until
     /// its `CaughtUp`.
     catching_up: bool,
+    /// Its pad is away (`LocalAway`, [`HostCore::set_local_away`]): out of
+    /// the round and never seated until it is back.
+    away: bool,
+}
+
+impl Player {
+    /// The machine whose locals close and seat together (`scheduler`
+    /// rules): a guest's connection, or the host's own machine (`u64::MAX`,
+    /// above every connection id). `None` for a reserved slot.
+    fn machine_key(&self) -> Option<u64> {
+        match self.conn {
+            Some(c) => Some(u64::from(c)),
+            None => self.host_local.then_some(u64::MAX),
+        }
+    }
 }
 
 /// One connected player's link figures.
@@ -309,6 +422,12 @@ pub struct HostCore {
     pub(crate) round: round::RoundState,
     pub drops: DropCounts,
     oversize_bundles: u64,
+    /// The host's own pacing slot ([`HostCore::host_pace_slot`]) as of the
+    /// last update, and the offset that keeps its starvation count one
+    /// running count across a change (as a guest's status does).
+    host_pace: u8,
+    host_starved_offset: u32,
+    host_starved_sent: u32,
 }
 
 impl HostCore {
@@ -322,12 +441,15 @@ impl HostCore {
                 token: 0,
                 profile: config.profile.clone(),
                 conn: None,
+                machine: 0,
+                host_local: true,
                 queue: SlotQueue::new(config.queue_target),
                 reserved_until: None,
                 active: false,
                 loaded: true,
                 seen_tick: 0,
                 catching_up: false,
+                away: false,
             },
         );
         Self {
@@ -349,6 +471,9 @@ impl HostCore {
             round: round::RoundState::default(),
             drops: DropCounts::default(),
             oversize_bundles: 0,
+            host_pace: 0,
+            host_starved_offset: 0,
+            host_starved_sent: 0,
         }
     }
 
@@ -365,12 +490,237 @@ impl HostCore {
     /// tick the host was viewing (its sim's `tick`: the bundles it has
     /// stepped), stamped into `view_lag` at the close like a guest's.
     pub fn submit_input(&mut self, pad: PadState, view_tick: u32) {
+        self.submit_input_for(0, pad, view_tick);
+    }
+
+    /// [`HostCore::submit_input`] for one of the host's own players
+    /// (module rules): `slot` 0 or a slot [`HostCore::add_local`] gave. The
+    /// host game submits every one of its locals once per frame, a missing
+    /// pad as a neutral one, so they all number the same sequences. A
+    /// slot that is no host local is ignored.
+    pub fn submit_input_for(&mut self, slot: u8, pad: PadState, view_tick: u32) {
         let pad = crate::bundle::strip_tracked_inputs(pad);
         let running = self.round.accepts_inputs();
-        if let Some(p) = self.players.get_mut(&0) {
+        if let Some(p) = self.players.get_mut(&slot).filter(|p| p.host_local) {
             let queue = running && p.active;
             p.queue.push(pad, view_tick, self.now, queue);
         }
+    }
+
+    /// Adds one of the host machine's own extra players (splitscreen) as
+    /// `name` with `profile` (module rules): the lowest free slot below
+    /// `max_players` (any free slot, not "slots 1-3": guests may already
+    /// hold the low ones, so callers ask [`HostCore::host_local`]), its
+    /// name made unique like a guest's. Returns the slot and the name it
+    /// was given, the one the roster and every guest show. Refused with
+    /// [`RejectReason::Busy`] while a round is loading,
+    /// [`RejectReason::BadName`] for a name no guest could join with, and
+    /// [`RejectReason::Full`] when no slot is free. The slot is seated by the next
+    /// `load_round` (or `add_human` in a running round, at once or later)
+    /// like any other.
+    ///
+    /// Call it between frames, before any [`HostCore::submit_input_for`] of
+    /// the frame: the new queue is numbered from slot 0's last sequence,
+    /// so a call after some locals submitted this frame leaves it one
+    /// sequence out of step for good.
+    pub fn add_local(
+        &mut self,
+        name: &str,
+        profile: Vec<u8>,
+    ) -> Result<(u8, String), RejectReason> {
+        // The order a guest machine's Hello is judged in (admission).
+        if !crate::msg::valid_name(name) {
+            return Err(RejectReason::BadName);
+        }
+        if self.round.is_loading() {
+            return Err(RejectReason::Busy);
+        }
+        let slot = (1..self.config.max_players)
+            .find(|s| !self.players.contains_key(s))
+            .ok_or(RejectReason::Full)?;
+        let name = crate::msg::unique_name(name, |n| {
+            self.players
+                .values()
+                .any(|p| p.name.eq_ignore_ascii_case(n))
+        });
+        let head = &self.players[&0].queue;
+        // Every local submits once a frame, so between frames they all
+        // stand on the same sequence; a mismatch means a mid-frame call.
+        debug_assert!(
+            self.players
+                .values()
+                .filter(|p| p.host_local)
+                .all(|p| p.queue.recv_through() == head.recv_through()),
+            "add_local between submit_input_for calls of one frame"
+        );
+        let mut queue = SlotQueue::new(self.config.queue_target);
+        // Numbered with the host's other locals (`scheduler` rules).
+        queue.start_beside(head);
+        self.players.insert(
+            slot,
+            Player {
+                name: name.clone(),
+                token: 0,
+                profile,
+                conn: None,
+                machine: 0,
+                host_local: true,
+                queue,
+                reserved_until: None,
+                active: false,
+                loaded: true,
+                seen_tick: 0,
+                catching_up: false,
+                away: false,
+            },
+        );
+        Ok((slot, name))
+    }
+
+    /// [`HostCore::add_local`] for a threaded session, whose caller cannot
+    /// read a return value: the answer comes back as
+    /// [`NetEvent::LocalAdded`] for `seat` (splitscreen B19).
+    pub fn add_local_event(&mut self, seat: u8, name: &str, profile: Vec<u8>) {
+        let added = self.add_local(name, profile);
+        self.events.push_back(NetEvent::LocalAdded { seat, added });
+    }
+
+    /// Takes away a host's extra player from [`HostCore::add_local`]: its
+    /// slot is freed and, in a round, a bot takes its place. False when
+    /// `slot` is slot 0 or no host local.
+    pub fn remove_local(&mut self, slot: u8) -> bool {
+        if slot == 0 || !self.host_local(slot) {
+            return false;
+        }
+        let p = self.players.remove(&slot).expect("host local");
+        self.round.remove_human(slot, p.active);
+        self.check_all_loaded();
+        self.follow_host_pace();
+        true
+    }
+
+    /// One of the host machine's own players' pad went away (`away`) or
+    /// came back (module rules; slot 0 included). The slot leaves the round
+    /// with a `RemoveHuman` and [`NetEvent::LocalAway`]; once back,
+    /// [`NetEvent::LocalBack`] asks the host game to seat it again. False
+    /// when `slot` is no host local.
+    pub fn set_local_away(&mut self, slot: u8, away: bool) -> bool {
+        if !self.host_local(slot) {
+            return false;
+        }
+        self.mark_away(slot, away);
+        true
+    }
+
+    /// Whether `slot`'s pad is away (`LocalAway`, [`HostCore::set_local_away`]).
+    pub fn is_away(&self, slot: u8) -> bool {
+        self.players.get(&slot).is_some_and(|p| p.away)
+    }
+
+    /// `slot`'s pad went away or came back (module rules).
+    pub(crate) fn mark_away(&mut self, slot: u8, away: bool) {
+        let Some(p) = self.players.get_mut(&slot) else {
+            return;
+        };
+        if p.away == away {
+            return;
+        }
+        p.away = away;
+        let active = p.active;
+        let (host_local, catching_up, conn) = (p.host_local, p.catching_up, p.conn);
+        if away {
+            self.round.remove_human(slot, active);
+            self.events.push_back(NetEvent::LocalAway { slot });
+            return;
+        }
+        // Live: the host's own, or a machine on this round's stream (a
+        // benched machine keeps its link but gets no bundles).
+        let live = host_local
+            || (!catching_up
+                && conn
+                    .and_then(|id| self.peers.get(&id))
+                    .is_some_and(|pr| pr.stream_round == self.round.id));
+        // Back before the removal its own away queued closed: it keeps its
+        // seat. An unseated slot's removal (the load's tick-0 one) stays.
+        if active && self.round.cancel_remove(slot) {
+            return;
+        }
+        if self.round.late_locals.contains(&slot) {
+            // Released as a return (`LocalBack`), not a late joiner.
+            if !self.round.returned.contains(&slot) {
+                self.round.returned.push(slot);
+            }
+            self.release_late_locals();
+            return;
+        }
+        if self.round.is_running() && !active && live {
+            self.events.push_back(NetEvent::LocalBack {
+                slot,
+                round_id: self.round.id,
+                tick: self.round.next_tick(),
+            });
+        }
+    }
+
+    /// The host machine's playing local whose queue paces it: slot 0, or
+    /// while slot 0's pad is away the first seated host local (as a guest
+    /// machine's status does).
+    pub fn host_pace_slot(&self) -> u8 {
+        if self.players.get(&0).is_some_and(|p| p.active) {
+            return 0;
+        }
+        self.players
+            .iter()
+            .find(|(_, p)| p.host_local && p.active)
+            .map_or(0, |(s, _)| *s)
+    }
+
+    /// The host's pacing figures for its own [`crate::InputPacer`]: depth
+    /// and starvations of [`HostCore::host_pace_slot`], the count kept
+    /// running across a change of slot. Slot 0's own while it plays.
+    pub fn host_pacing(&self) -> (u8, u32) {
+        match self.players.get(&self.host_pace) {
+            Some(p) => (
+                p.queue.depth,
+                p.queue.starved.wrapping_add(self.host_starved_offset),
+            ),
+            None => (0, self.host_starved_sent),
+        }
+    }
+
+    /// The host's published input slack ([`HostCore::host_pace_slot`]'s).
+    pub fn host_slack_us(&self) -> Option<i64> {
+        self.players
+            .get(&self.host_pace)
+            .and_then(|p| p.queue.slack_us())
+    }
+
+    /// Moves the host's pacing to [`HostCore::host_pace_slot`], keeping
+    /// the starvation count running.
+    fn follow_host_pace(&mut self) {
+        let pace = self.host_pace_slot();
+        if pace != self.host_pace {
+            self.host_starved_offset = self
+                .host_starved_sent
+                .wrapping_sub(self.players[&pace].queue.starved);
+            self.host_pace = pace;
+        }
+        self.host_starved_sent = self.host_pacing().1;
+    }
+
+    /// Whether `slot` is one of the host machine's own players: slot 0 and
+    /// the slots of [`HostCore::add_local`].
+    pub fn host_local(&self, slot: u8) -> bool {
+        self.players.get(&slot).is_some_and(|p| p.host_local)
+    }
+
+    /// The host machine's own players' slots, slot 0 first.
+    pub fn host_locals(&self) -> Vec<u8> {
+        self.players
+            .iter()
+            .filter(|(_, p)| p.host_local)
+            .map(|(s, _)| *s)
+            .collect()
     }
 
     /// Sets the discovery reply blob (name, map, players, ...), truncated to
@@ -392,7 +742,7 @@ impl HostCore {
     pub fn players(&self) -> Vec<(u8, String)> {
         self.players
             .iter()
-            .filter(|(s, p)| **s == 0 || p.conn.is_some())
+            .filter(|(_, p)| p.host_local || p.conn.is_some())
             .map(|(s, p)| (*s, p.name.clone()))
             .collect()
     }
@@ -445,6 +795,35 @@ impl HostCore {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Every slot connection `id` holds, local 0 first (none before it
+    /// joined).
+    fn conn_slots(&self, id: u32) -> Vec<u8> {
+        match self.peers.get(&id) {
+            Some(Peer {
+                phase: Phase::Joined(s),
+                extra,
+                ..
+            }) => std::iter::once(*s).chain(extra.iter().copied()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The slots of `slot`'s machine while it is connected (local 0 first),
+    /// else `slot` alone.
+    pub fn machine_slots(&self, slot: u8) -> Vec<u8> {
+        let slots = self
+            .players
+            .get(&slot)
+            .and_then(|p| p.conn)
+            .map(|id| self.conn_slots(id))
+            .unwrap_or_default();
+        if slots.contains(&slot) {
+            slots
+        } else {
+            vec![slot]
+        }
     }
 
     pub(crate) fn send_to_slot(&mut self, slot: u8, msg: &Msg) {
@@ -508,12 +887,16 @@ impl HostCore {
                 Peer {
                     conn: Conn::new(h.conn, from, now),
                     phase: Phase::Handshake,
+                    extra: Vec::new(),
                     stream: 0,
                     stream_round: 0,
                     stream_start: 0,
                     next_needed: 0,
                     trouble: false,
                     sent_through: 0,
+                    pace_slot: None,
+                    starved_offset: 0,
+                    starved_sent: 0,
                 },
             );
         }
@@ -541,6 +924,19 @@ impl HostCore {
                 Chunk::Inputs(body) => {
                     if let Phase::Joined(slot) = phase {
                         self.take_inputs(slot, body);
+                    }
+                }
+                Chunk::LocalInputs { idx, data } => {
+                    let slot = match phase {
+                        Phase::Joined(_) => self
+                            .peers
+                            .get(&h.conn)
+                            .and_then(|p| p.extra.get(usize::from(idx) - 1).copied()),
+                        _ => None,
+                    };
+                    match slot {
+                        Some(slot) => self.take_inputs(slot, data),
+                        None => self.drops.bad_chunk += 1,
                     }
                 }
                 _ => self.drops.bad_chunk += 1,
@@ -618,6 +1014,7 @@ impl HostCore {
                         token,
                         content,
                         profile,
+                        locals,
                     },
                 ) => {
                     let hello = Hello {
@@ -627,6 +1024,7 @@ impl HostCore {
                         token,
                         content,
                         profile,
+                        locals,
                     };
                     self.admit(id, hello);
                 }
@@ -644,12 +1042,32 @@ impl HostCore {
                 (Phase::Joined(slot), Msg::Request(data)) => {
                     self.events.push_back(NetEvent::Request { slot, data });
                 }
-                (Phase::Joined(slot), Msg::Ready { round_id, profile }) => {
-                    self.events.push_back(NetEvent::PeerReady {
+                (
+                    Phase::Joined(_),
+                    Msg::Ready {
+                        round_id,
+                        profile,
+                        local,
+                    },
+                ) => match self.conn_slots(id).get(usize::from(local)) {
+                    Some(&slot) => self.events.push_back(NetEvent::PeerReady {
                         slot,
                         round_id,
                         profile,
-                    });
+                    }),
+                    None => self.drops.bad_message += 1,
+                },
+                (Phase::Joined(_), m @ (Msg::LocalAway { .. } | Msg::LocalBack { .. })) => {
+                    let (Msg::LocalAway { local } | Msg::LocalBack { local }) = m else {
+                        unreachable!()
+                    };
+                    let away = matches!(m, Msg::LocalAway { .. });
+                    match self.conn_slots(id).get(usize::from(local)) {
+                        Some(&slot) => {
+                            self.mark_away(slot, away);
+                        }
+                        None => self.drops.bad_message += 1,
+                    }
                 }
                 (Phase::Joined(slot), m) => {
                     if !self.round_message(slot, m) {
@@ -665,6 +1083,7 @@ impl HostCore {
     pub fn update(&mut self, now: Micros) -> Vec<(SocketAddr, Vec<u8>)> {
         self.now = now;
         self.round_update();
+        self.follow_host_pace();
         self.expire(now);
         let lobby = if self.lobby_dirty && now.0 >= self.lobby_sent.0 + LOBBY_INTERVAL.0 {
             self.lobby_dirty = false;
@@ -714,7 +1133,7 @@ impl HostCore {
                     continue;
                 }
                 Phase::Handshake => continue,
-                Phase::Joined(slot) => {
+                Phase::Joined(_) => {
                     if silence >= limit {
                         self.drop_peer(id, LeaveReason::Timeout);
                         continue;
@@ -722,24 +1141,30 @@ impl HostCore {
                     let trouble = silence >= TROUBLE_AFTER;
                     if trouble != peer.trouble {
                         peer.trouble = trouble;
-                        self.events
-                            .push_back(NetEvent::Trouble { slot, on: trouble });
+                        for s in self.conn_slots(id) {
+                            self.events.push_back(NetEvent::Trouble {
+                                slot: s,
+                                on: trouble,
+                            });
+                        }
                         if !trouble {
                             // Heard again: half the fell-behind limit to report.
                             let grace = self
                                 .round
                                 .next_tick()
                                 .saturating_sub(self.config.fell_behind_ticks / 2);
-                            if let Some(p) = self.players.get_mut(&slot) {
-                                p.seen_tick = p.seen_tick.max(grace);
+                            for s in self.conn_slots(id) {
+                                if let Some(p) = self.players.get_mut(&s) {
+                                    p.seen_tick = p.seen_tick.max(grace);
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        self.players.retain(|s, p| {
-            *s == 0 || p.conn.is_some() || p.reserved_until.is_some_and(|t| now < t)
+        self.players.retain(|_, p| {
+            p.host_local || p.conn.is_some() || p.reserved_until.is_some_and(|t| now < t)
         });
         self.version_replies.retain(|_, t| now.0 < t.0 + 10_000_000);
         self.found_replies
@@ -754,14 +1179,38 @@ impl HostCore {
         if !new_ticks && !peer.conn.wants_send(now, HEARTBEAT) {
             return;
         }
+        // The pacing figures are the first playing local's (the machine
+        // paces all its locals under one clock; local 0 unless its pad is
+        // away, whose queue no longer closes); `input_through` is the
+        // slowest of its slots, so the client keeps every local's
+        // unreceived inputs.
         let status = match peer.phase {
             Phase::Joined(slot) => self.players.get(&slot).map(|p| {
-                (
-                    p.queue.recv_through(),
-                    p.queue.depth,
-                    p.queue.starved,
-                    p.queue.slack_us(),
-                )
+                let slots = peer
+                    .extra
+                    .iter()
+                    .filter_map(|s| self.players.get(s).map(|x| (*s, x)));
+                let through = slots
+                    .clone()
+                    .map(|(_, x)| x.queue.recv_through())
+                    .fold(p.queue.recv_through(), u32::min);
+                let (pace_slot, pace) = if p.active {
+                    (slot, p)
+                } else {
+                    slots.clone().find(|(_, x)| x.active).unwrap_or((slot, p))
+                };
+                // The starvation count the client sees stays one running
+                // count when pacing moves to another local (a jump or a
+                // fall would read as a burst of starvations).
+                if peer.pace_slot != Some(pace_slot) {
+                    if peer.pace_slot.is_some() {
+                        peer.starved_offset = peer.starved_sent.wrapping_sub(pace.queue.starved);
+                    }
+                    peer.pace_slot = Some(pace_slot);
+                }
+                let starved = pace.queue.starved.wrapping_add(peer.starved_offset);
+                peer.starved_sent = starved;
+                (through, pace.queue.depth, starved, pace.queue.slack_us())
             }),
             _ => None,
         };
@@ -801,12 +1250,13 @@ impl HostCore {
 
     /// The net meter.
     pub fn stats(&self) -> HostStats {
-        let local = &self.players[&0].queue;
+        // Slot 0's, or while its pad is away the playing host local's.
+        let (local_depth, local_starved) = self.host_pacing();
         HostStats {
             tick: self.round.next_tick(),
-            local_depth: local.depth,
-            local_starved: local.starved,
-            local_slack_us: local.slack_us(),
+            local_depth,
+            local_starved,
+            local_slack_us: self.host_slack_us(),
             peers: self
                 .peers
                 .values()
@@ -862,7 +1312,7 @@ impl HostCore {
     pub(crate) fn roster(&self) -> Vec<RosterEntry> {
         self.players
             .iter()
-            .filter(|(s, p)| **s == 0 || p.conn.is_some())
+            .filter(|(_, p)| p.host_local || p.conn.is_some())
             .map(|(s, p)| RosterEntry {
                 slot: *s,
                 name: p.name.clone(),

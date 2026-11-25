@@ -11,7 +11,12 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod splitscreen;
 mod store;
+pub use splitscreen::{
+    setting_scope, HudSize, SettingScope, SplitscreenSettings, TwoPlayerSplit, IDENTITY_CELLS,
+    SETTING_SCOPES,
+};
 pub use store::{valid_name_char, List, Store, NAME_LIMIT};
 
 // The UI's save-name text box owns its own limit (ui cannot depend on game);
@@ -233,6 +238,10 @@ pub struct Settings {
     /// computer's `recent_games.ron` once (`netplay::recent`).
     #[serde(default)]
     pub recent_hosts: Vec<String>,
+    /// Issue #194: the Splitscreen options, read from the host (P1) profile.
+    /// A profile without the field, or with part of it, takes the defaults.
+    #[serde(default)]
+    pub splitscreen: SplitscreenSettings,
 }
 
 impl Settings {
@@ -356,6 +365,7 @@ impl Default for Settings {
             team_size_pct: 100,
             reinforcement_pct: 100,
             recent_hosts: Vec::new(),
+            splitscreen: SplitscreenSettings::default(),
         }
     }
 }
@@ -511,6 +521,12 @@ pub struct Profile {
     pub campaign: CampaignProgress,
     #[serde(skip)]
     slot: Option<store::Slot>,
+    /// Issue #194: a splitscreen seat's profile ([`Store::bind`],
+    /// [`Store::create_quiet`], [`Profile::into_seat`]). Without a catalog
+    /// slot it saves nowhere: never to the `$OPENBF_PROFILE` dev file, which
+    /// belongs to the host.
+    #[serde(skip)]
+    seat: bool,
 }
 
 /// A loaded mouse sensitivity, kept on the menu's row: an out-of-range or
@@ -566,6 +582,7 @@ impl Profile {
         self.settings.mouse_sensitivity = clamp_mouse_sensitivity(self.settings.mouse_sensitivity);
         self.settings.fov_scale = crate::walk::clamp_fov_scale(self.settings.fov_scale);
         self.settings.free_fullscreen_key();
+        self.settings.splitscreen.normalize();
         self.campaign.unlocked = self
             .campaign
             .unlocked
@@ -591,14 +608,32 @@ impl Profile {
     fn save_with(&self, dev: Option<&Path>) -> Result<()> {
         match (&self.slot, dev) {
             (Some(slot), _) => slot.save(self),
-            (None, Some(path)) => self.save_to(path),
-            (None, None) => Ok(()),
+            (None, Some(path)) if !self.seat => self.save_to(path),
+            (None, _) => Ok(()),
         }
     }
 
     /// The profile saves somewhere ([`Profile::save`] writes a file).
     pub fn persists(&self) -> bool {
-        self.slot.is_some() || Self::path().is_some()
+        self.slot.is_some() || (!self.seat && Self::path().is_some())
+    }
+
+    /// The catalog id this profile saves to; `None` for one with no slot.
+    /// Seats use it to refuse a profile another seat holds.
+    pub fn id(&self) -> Option<u64> {
+        self.slot.as_ref().map(|s| s.id())
+    }
+
+    /// Mark this profile as a splitscreen seat's: with no catalog slot it
+    /// then saves nowhere, never to the `$OPENBF_PROFILE` dev file.
+    pub fn into_seat(mut self) -> Self {
+        self.seat = true;
+        self
+    }
+
+    /// A splitscreen seat's profile ([`Profile::into_seat`]).
+    pub fn is_seat(&self) -> bool {
+        self.seat
     }
 
     /// Atomically save to an explicit file.
@@ -709,6 +744,96 @@ mod tests {
         let kept = std::fs::read_to_string(&legacy).unwrap();
         let _ = std::fs::remove_file(&legacy);
         assert_eq!(kept, "(name: \"Tester\")");
+    }
+
+    /// Issue #194 (B1): a seat's profile with no catalog slot never writes
+    /// the `$OPENBF_PROFILE` dev file (the host's), and does not persist.
+    #[test]
+    fn a_slotless_seat_profile_never_writes_the_dev_file() {
+        let dir = std::env::temp_dir().join(format!("openbf-seat-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dev.ron");
+        let seat = Profile {
+            name: "P2".into(),
+            ..Default::default()
+        }
+        .into_seat();
+        assert!(seat.id().is_none());
+        seat.save_with(Some(&path)).unwrap();
+        assert!(!path.exists(), "a seat profile wrote the dev file");
+        std::fs::write(&path, "(name: \"Host\")").unwrap();
+        seat.save_with(Some(&path)).unwrap();
+        let kept = std::fs::read_to_string(&path).unwrap();
+        assert!(!seat.persists());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(kept, "(name: \"Host\")");
+    }
+
+    /// Issue #194 (B1): `SETTING_SCOPES` names every `Settings` field
+    /// exactly once, and nothing else.
+    #[test]
+    fn every_setting_has_one_scope() {
+        let text = ron::to_string(&Settings::default()).unwrap();
+        let ron::Value::Map(map) = ron::from_str::<ron::Value>(&text).unwrap() else {
+            panic!("Settings did not serialize as a map");
+        };
+        let mut fields: Vec<String> = map
+            .keys()
+            .map(|k| match k {
+                ron::Value::String(s) => s.clone(),
+                other => panic!("unexpected key {other:?}"),
+            })
+            .collect();
+        fields.sort();
+        let mut listed: Vec<String> = SETTING_SCOPES.iter().map(|(n, _)| n.to_string()).collect();
+        listed.sort();
+        assert_eq!(listed, fields);
+        assert_eq!(setting_scope("invert_y"), Some(SettingScope::Player));
+        assert_eq!(setting_scope("difficulty"), Some(SettingScope::Host));
+        assert_eq!(setting_scope("splitscreen"), Some(SettingScope::Host));
+        assert_eq!(setting_scope("nope"), None);
+    }
+
+    /// Issue #194 (B1): `normalize` keeps any permutation and resets the
+    /// rest to the identity; the default is written by hand.
+    #[test]
+    fn splitscreen_cells_normalise_to_a_permutation() {
+        let d = SplitscreenSettings::default();
+        assert!(d.name_tags);
+        assert_eq!(d.cells, IDENTITY_CELLS);
+        assert_eq!(
+            d.two_player.layout(),
+            crate::split_layout::TwoPlayer::SideBySide
+        );
+        assert_eq!(HudSize::Smaller.k(), 0.85);
+        for bad in [[0, 0, 1, 2], [0, 1, 2, 4], [255; 4], [3, 3, 3, 3]] {
+            let mut s = SplitscreenSettings { cells: bad, ..d };
+            s.normalize();
+            assert_eq!(s.cells, IDENTITY_CELLS, "{bad:?}");
+        }
+        let mut s = SplitscreenSettings {
+            cells: [1, 3, 0, 2],
+            ..d
+        };
+        s.normalize();
+        assert_eq!(s.cells, [1, 3, 0, 2]);
+        let mut s = SplitscreenSettings {
+            two_player: TwoPlayerSplit::Unknown,
+            hud_size: HudSize::Unknown,
+            ..d
+        };
+        s.normalize();
+        assert_eq!(s, d);
+        // The dev single file normalises on load too.
+        let p: Profile = ron::from_str("(name: \"X\", settings: (splitscreen: (cells: (1, 1, 1, 1))), career: (rounds: 0, wins: 0, kills: 0, deaths: 0, shots: 0, hits: 0, captures: 0))").unwrap();
+        assert_eq!(p.settings.splitscreen.cells, [1, 1, 1, 1]);
+        let dir = std::env::temp_dir().join(format!("openbf-split-norm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.ron");
+        p.save_to(&path).unwrap();
+        let back = Profile::load_from(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(back.settings.splitscreen.cells, IDENTITY_CELLS);
     }
 
     /// The dev override still saves the single file it names.

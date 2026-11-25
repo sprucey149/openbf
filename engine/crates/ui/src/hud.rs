@@ -382,7 +382,27 @@ pub struct HudModel {
     /// The sniper scope's overlay (`crate::hud_scope`); `None` = not scoped.
     /// While it is up the weapon panel is off (BF2's `weaponsDisable`).
     pub scope: Option<crate::hud_scope::ScopeView>,
+    /// The other players' names over their heads (LAN §5b, issue #194 B22), drawn in the
+    /// event feed's font under the HUD's panels; empty in a one-player battle.
+    pub name_tags: Vec<NameTagDraw>,
 }
+
+/// One player's name over his head, as the HUD pass draws it (issue #194 B22): in the event
+/// feed's font and scale, centred on `at` with its bottom there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NameTagDraw {
+    /// The anchor in the screen's own pixels (a split cell's, from its top-left; the window's
+    /// for a single view), placed with that view's camera at the screen's aspect.
+    pub at: [f32; 2],
+    pub name: String,
+    /// On the viewer's side: the HUD's friend colour, else enemy ([`RETICLE_COLORS`]).
+    pub friend: bool,
+    /// 0..1, the distance fade.
+    pub alpha: f32,
+}
+
+/// The event the feed's lines arrive on; its message box sets the name tags' font.
+pub const MESSAGE_EVENT: &str = "player1.message";
 
 pub use crate::hud_flag::TEAM_COLORS;
 
@@ -601,6 +621,7 @@ pub fn feed_with_reticle(
     }
     hud.spawn = m.spawn.clone();
     hud.scope = m.scope.filter(|_| alive);
+    hud.name_tags.clone_from(&m.name_tags);
     hud.banner = m
         .round_end
         .as_ref()
@@ -780,11 +801,7 @@ pub fn feed_with_reticle(
             EventValue::Color(msg.color),
             has_mesh,
         );
-        hud.send(
-            "player1.message",
-            EventValue::Text(msg.text.clone()),
-            has_mesh,
-        );
+        hud.send(MESSAGE_EVENT, EventValue::Text(msg.text.clone()), has_mesh);
     }
 
     // The statistics (`FUN_003b5de8` [V]): each number that differs from the
@@ -1116,11 +1133,13 @@ pub(crate) fn round_end_color(result: u8) -> [f32; 4] {
 
 /// BF1's banner sheet, size and UV halves (`re-round-end.md` §2.1 [V]).
 /// [ours] Both games use BF1's green victory and the same baked art.
-pub(crate) fn draw_round_end(result: u8, size: [f32; 2]) -> crate::hud_draw::HudFrame {
+/// Centred in the screen `f`, sized by its 4:3 box.
+pub(crate) fn draw_round_end(result: u8, f: &crate::hud_draw::Frame) -> crate::hud_draw::HudFrame {
     use crate::hud_draw::{HudFrame, HudVertex};
     let defeat = result == 1;
     let color = round_end_color(result);
-    let scale = crate::hud_draw::frame_scale(size);
+    let size = f.size;
+    let scale = f.scale();
     let (hw, hh) = (128.0 * scale[0], 32.0 * scale[1]);
     let (cx, cy) = (size[0] * 0.5, size[1] * 0.5);
     let v = if defeat { 0.5 } else { 0.0 };
@@ -1138,7 +1157,9 @@ pub(crate) fn draw_round_end(result: u8, size: [f32; 2]) -> crate::hud_draw::Hud
     frame
 }
 
-/// The egui half of the HUD for this frame (module doc).
+/// The egui half of the HUD for this frame (module doc), over the whole window.
+/// The round timer sits at the top right under the minimap, hidden under the spawn page and the
+/// outcome banner; a split cell's timer is [`draw_hud_in`]'s.
 pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
     if m.round_end.is_some() {
         return;
@@ -1164,8 +1185,99 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
                 );
             });
     }
+    draw_banner_in(ctx, m, ctx.content_rect(), 0, 1.0);
+}
 
-    // Center banner for a round without the native round-end presentation.
+/// A split cell's round timer top, as a share of the cell's HUD box height
+/// ([`crate::hud_draw::Frame::box_h`]): in the reinforcement counts' row
+/// (`player1teams`, 0.073 to 0.151 of the box), centred on it. The timer sits
+/// left of the counts ([`SPLIT_COUNTS_HALF`]), so it stays clear of the target
+/// name and its health bar between them and, well below, of the BF2 reticle
+/// drawn at the PS2 aim point (`SPLITSCREEN.md` 18.1 item 6).
+/// `game`'s `split_hud_edges` test checks it against the real BF2 layout.
+pub const SPLIT_TIMER_TOP: f32 = 0.067;
+
+/// How far left of the cell's centre the reinforcement counts reach, a share
+/// of the cell's HUD box height: `player1teams`' half width (0.31) and room for
+/// a fourth digit of the left count, which grows away from the centre. The
+/// split round timer ends [`SPLIT_TIMER_GAP`] left of this.
+pub const SPLIT_COUNTS_HALF: f32 = 0.38;
+
+/// The space between a split cell's counts and its round timer, a share of the HUD box height.
+pub const SPLIT_TIMER_GAP: f32 = 0.03;
+
+/// A split cell's round timer box at most, width and height as shares of the cell's HUD box
+/// height (its text scales with the box: measured 0.156 by 0.08 at 1080p).
+pub const SPLIT_TIMER_SIZE: [f32; 2] = [0.18, 0.09];
+
+/// The egui half of the HUD in `rect` (points): the round timer's top centre `timer_at` (x, y)
+/// points from the top centre of `rect`, the banner at its centre, the banner's offset and all
+/// text times `scale`. Issue #194 B8: one per split view, in its cell, salted by view, the timer
+/// in the cell's counts row ([`SPLIT_TIMER_TOP`]), left of the counts ([`SPLIT_COUNTS_HALF`]);
+/// salt 0 keeps the bare Ids. The whole window's timer is [`draw_hud`]'s (top right); its banner is
+/// this one's with the window's rect, salt 0 and scale 1.
+pub fn draw_hud_in(
+    ctx: &egui::Context,
+    m: &HudModel,
+    rect: egui::Rect,
+    salt: usize,
+    scale: f32,
+    timer_at: [f32; 2],
+) {
+    if m.round_end.is_some() {
+        return;
+    }
+    let id = |name: &'static str| match salt {
+        0 => egui::Id::new(name),
+        s => egui::Id::new((name, s)),
+    };
+    let sized = |t: RichText, style: &crate::typography::TextStyle| {
+        if scale == 1.0 {
+            t
+        } else {
+            t.size((crate::typography::egui_font(ctx, style).size * scale).max(1.0))
+        }
+    };
+    // The round timer, top centre, hidden under the spawn page and the outcome banner.
+    if let Some(t) = m
+        .time_left
+        .filter(|_| m.spawn.is_none() && m.outcome.is_none())
+    {
+        let secs = t.max(0.0).ceil() as u32;
+        egui::Area::new(id("hud_timer"))
+            .constrain_to(rect)
+            .anchor(Align2::CENTER_TOP, Vec2::new(timer_at[0], timer_at[1]))
+            .show(ctx, |ui| {
+                panel().show(ui, |ui| {
+                    ui.label(sized(
+                        crate::typography::egui_text(
+                            ctx,
+                            &crate::typography::ITEM,
+                            crate::typography::tint::BODY,
+                            &format!("{}:{:02}", secs / 60, secs % 60),
+                        ),
+                        &crate::typography::ITEM,
+                    ));
+                });
+            });
+    }
+
+    draw_banner_in(ctx, m, rect, salt, scale);
+}
+
+/// The centre banner of a round without the native round-end presentation, in `rect`.
+fn draw_banner_in(ctx: &egui::Context, m: &HudModel, rect: egui::Rect, salt: usize, scale: f32) {
+    let id = |name: &'static str| match salt {
+        0 => egui::Id::new(name),
+        s => egui::Id::new((name, s)),
+    };
+    let sized = |t: RichText, style: &crate::typography::TextStyle| {
+        if scale == 1.0 {
+            t
+        } else {
+            t.size((crate::typography::egui_font(ctx, style).size * scale).max(1.0))
+        }
+    };
     let banner = round_banner(m.outcome, &m.team_names).map(|text| {
         let color = match m.outcome {
             Some(w) if w != 2 => TEAM_COLORS[usize::from(w.min(1))],
@@ -1174,15 +1286,17 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
         (text, color)
     });
     if let Some((text, color)) = banner {
-        egui::Area::new(egui::Id::new("hud_banner"))
-            .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -40.0))
+        egui::Area::new(id("hud_banner"))
+            .constrain_to(rect)
+            .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -40.0 * scale))
             .show(ctx, |ui| {
                 panel().show(ui, |ui| {
-                    ui.label(
+                    ui.label(sized(
                         RichText::new(text)
                             .font(crate::typography::egui_font(ctx, &crate::typography::TITLE))
                             .color(color),
-                    );
+                        &crate::typography::TITLE,
+                    ));
                 });
             });
     }
@@ -1301,6 +1415,7 @@ mod tests {
             ambush: Vec::new(),
             spawn: None,
             scope: None,
+            name_tags: Vec::new(),
         }
     }
 
@@ -1968,5 +2083,137 @@ mod spectate_tests {
         hud.advance(0.1);
         assert_eq!(shown(&hud, SPECTATE_ELEM), None, "off again");
         assert_eq!(shown(&hud, SPECTATE_HINT_ELEM), None);
+    }
+}
+
+/// Issue #194 B8: the egui half per split view.
+#[cfg(test)]
+mod draw_hud_in_tests {
+    use super::*;
+
+    /// `draw_hud` as one self-contained function (the reference the salt-0 path must equal).
+    fn old_draw_hud(ctx: &egui::Context, m: &HudModel) {
+        if m.round_end.is_some() {
+            return;
+        }
+        if let Some(t) = m
+            .time_left
+            .filter(|_| m.spawn.is_none() && m.outcome.is_none())
+        {
+            let secs = t.max(0.0).ceil() as u32;
+            let height = ctx.content_rect().height();
+            egui::Area::new(egui::Id::new("hud_timer"))
+                .anchor(Align2::RIGHT_TOP, Vec2::new(-height * 0.16, height * 0.29))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    ui.add(
+                        egui::Label::new(crate::typography::egui_text(
+                            ctx,
+                            &crate::typography::BODY,
+                            crate::typography::tint::BODY,
+                            &format!("{}:{:02}", secs / 60, secs % 60),
+                        ))
+                        .wrap_mode(egui::TextWrapMode::Extend),
+                    );
+                });
+        }
+        let banner = round_banner(m.outcome, &m.team_names).map(|text| {
+            let color = match m.outcome {
+                Some(w) if w != 2 => TEAM_COLORS[usize::from(w.min(1))],
+                _ => Color32::WHITE,
+            };
+            (text, color)
+        });
+        if let Some((text, color)) = banner {
+            egui::Area::new(egui::Id::new("hud_banner"))
+                .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -40.0))
+                .show(ctx, |ui| {
+                    panel().show(ui, |ui| {
+                        ui.label(
+                            RichText::new(text)
+                                .font(crate::typography::egui_font(ctx, &crate::typography::TITLE))
+                                .color(color),
+                        );
+                    });
+                });
+        }
+    }
+
+    fn model() -> HudModel {
+        HudModel {
+            time_left: Some(125.0),
+            outcome: Some(1),
+            team_names: ["rep".into(), "cis".into()],
+            ..HudModel::default()
+        }
+    }
+
+    /// The frame's shapes and every layer's areas after a few warm-up passes, as a string.
+    fn shapes(size: [f32; 2], ui: impl Fn(&egui::Context)) -> (String, egui::Context) {
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(size[0], size[1]),
+            )),
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            let _ = ctx.run(input(), &ui);
+        }
+        let out = ctx.run(input(), &ui);
+        (format!("{:?}", out.shapes), ctx)
+    }
+
+    /// `draw_hud` (salt 0, the window's rect, scale 1) paints exactly what it painted before.
+    #[test]
+    fn draw_hud_with_salt_0_is_unchanged() {
+        for size in [[640.0, 480.0], [1280.0, 720.0], [1280.0, 1024.0]] {
+            // With the outcome banner up (the timer hides) and mid-round (the timer alone).
+            for m in [
+                model(),
+                HudModel {
+                    outcome: None,
+                    ..model()
+                },
+            ] {
+                let (old, _) = shapes(size, |ctx| old_draw_hud(ctx, &m));
+                let (new, _) = shapes(size, |ctx| draw_hud(ctx, &m));
+                assert_eq!(old, new, "{size:?}");
+                assert!(old.contains("Text"), "the timer or banner drew");
+            }
+        }
+    }
+
+    /// In a cell, the timer hangs `timer_at` below the cell's top centre (mid-round) and the
+    /// banner sits in its middle (the round decided, the timer hidden), each on its own salted
+    /// area.
+    #[test]
+    fn draw_hud_in_a_cell_stays_in_the_cell() {
+        let m = model();
+        let cell = egui::Rect::from_min_size(egui::pos2(642.0, 0.0), egui::vec2(638.0, 720.0));
+        let area_in = |ctx: &egui::Context, name: &'static str| {
+            ctx.memory(|mem| mem.area_rect(egui::Id::new((name, 2_usize))))
+        };
+        let mid_round = HudModel {
+            outcome: None,
+            ..model()
+        };
+        let (_, ctx) = shapes([1280.0, 720.0], |ctx| {
+            draw_hud_in(ctx, &mid_round, cell, 2, 1.0, [0.0, 100.0]);
+        });
+        let timer = area_in(&ctx, "hud_timer").expect("the salted timer");
+        let (_, ctx) = shapes([1280.0, 720.0], |ctx| {
+            draw_hud_in(ctx, &m, cell, 2, 1.0, [0.0, 100.0]);
+        });
+        assert!(area_in(&ctx, "hud_timer").is_none(), "no timer under the banner");
+        let area = |name: &'static str| area_in(&ctx, name).expect("the salted area");
+        assert!(cell.contains_rect(timer), "{timer:?} in {cell:?}");
+        assert!((timer.center().x - cell.center().x).abs() < 1.0);
+        assert!((timer.top() - 100.0).abs() < 1.0);
+        let banner = area("hud_banner");
+        assert!(cell.contains_rect(banner), "{banner:?} in {cell:?}");
+        assert!((banner.center().x - cell.center().x).abs() < 1.0);
+        assert!(ctx.memory(|mem| mem.area_rect(egui::Id::new("hud_timer")).is_none()));
     }
 }

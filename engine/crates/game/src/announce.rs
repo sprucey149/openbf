@@ -279,9 +279,14 @@ pub struct Commander {
     gating: bool,
     /// Card UVO2: a BF2 battle's unit voice (`crate::vo`); None on BF1.
     pub vo: Option<crate::vo::Vo>,
-    /// The player's line for leaving the boundary, set for the battle.
-    leaving_line: Option<String>,
-    /// The player's flown droid or flyer was outside at the last [`Commander::leaving`].
+    /// Each team's line for leaving the boundary, set for the battle: the followed player's
+    /// team picks it (splitscreen: the first awake player may be on either side).
+    leaving_lines: [Option<String>; 2],
+    /// The unit [`Commander::leaving`] followed last: a new one (a respawn, or splitscreen's
+    /// voice moving to another player) starts with no excursion.
+    leaving_unit: Option<UnitHandle>,
+    /// The followed player's flown droid or flyer was outside at the last
+    /// [`Commander::leaving`].
     was_leaving: bool,
     pub space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
     speaker_asks: Vec<SpeakerAsk>,
@@ -348,7 +353,8 @@ impl Commander {
             script_sounds: Vec::new(),
             gating: false,
             vo: None,
-            leaving_line: None,
+            leaving_lines: [None, None],
+            leaving_unit: None,
             was_leaving: false,
             space_round: None,
             speaker_asks: Vec::new(),
@@ -394,12 +400,8 @@ impl Commander {
             vo.space = sim.space_round();
             c.vo = Some(vo);
         }
-        c.leaving_line = leaving_line(
-            &mission.voice,
-            mission_factions,
-            factions,
-            usize::from(walk.player_team()),
-        );
+        c.leaving_lines =
+            [0, 1].map(|team| leaving_line(&mission.voice, mission_factions, factions, team));
         c
     }
 
@@ -491,16 +493,29 @@ impl Commander {
     /// Say the player's leaving line when his flown droid starts a countdown: once an
     /// excursion, to him alone (`re-boundary.md` T1, T5). Returns it when asked. Once
     /// per stepped tick (`WalkSim::step_tick`).
+    /// Splitscreen: `player` is the first awake local player, and the line is his team's.
     pub fn leaving(&mut self, sim: &Sim, player: UnitHandle) -> Option<Line> {
-        self.leaving_now(sim.is_leaving(player))
+        self.follow_leaving(player);
+        let team = sim
+            .units
+            .get(player.index as usize)
+            .map_or(0, |u| usize::from(u.team.min(1)));
+        self.leaving_now(sim.is_leaving(player), team)
     }
 
-    fn leaving_now(&mut self, now: bool) -> Option<Line> {
+    fn follow_leaving(&mut self, player: UnitHandle) {
+        if self.leaving_unit != Some(player) {
+            self.leaving_unit = Some(player);
+            self.was_leaving = false;
+        }
+    }
+
+    fn leaving_now(&mut self, now: bool, team: usize) -> Option<Line> {
         let started = now && !self.was_leaving;
         self.was_leaving = now;
         // Crossing the line again and again queues it once: the queue does not
         // read the line's `PlayInterval`, which keeps the PS2's from repeating.
-        let name = self.leaving_line.as_deref().filter(|n| {
+        let name = self.leaving_lines[team.min(1)].as_deref().filter(|n| {
             started && !self.queue.waiting(n) && !self.stream_queues.values().any(|q| q.waiting(n))
         })?;
         let line = Line::commander(name);
@@ -845,12 +860,13 @@ impl Commander {
 
     /// The calls asked since the last call, through the sound bank's gates
     /// (`SoundLib::ask_line`: the take's lock, the property's interval and
-    /// chance, the level at `ears`): what passes joins the voice queue.
+    /// chance, the level at the ear of `ears` nearest the caller): what
+    /// passes joins the voice queue.
     /// Returns every ask with its outcome (a log's view).
     pub fn gate_calls(
         &mut self,
         sounds: &mut crate::sounds::SoundLib,
-        ears: glam::Vec3,
+        ears: impl crate::sounds::Ears,
     ) -> Vec<(CallAsk, Result<Line, crate::sounds::Refused>)> {
         self.gating = true;
         let mut asks = std::mem::take(&mut self.calls_asked);
@@ -890,8 +906,8 @@ impl Commander {
                 continue;
             }
             // BF2 steps past a locked take (card UVO2); its subject's own
-            // line is 2-D at the ears.
-            let at = if a.own { ears } else { a.pos };
+            // line is 2-D at the (first) ears.
+            let at = if a.own { ears.first() } else { a.pos };
             let r = match &a.name {
                 Some(n) => sounds.ask_line_with(n, at, ears, self.vo.is_some()),
                 None => Err(crate::sounds::Refused::Unknown),
@@ -1001,11 +1017,12 @@ impl Commander {
     pub fn frame(
         &mut self,
         sim: &Sim,
-        player: UnitHandle,
+        player: Option<UnitHandle>,
         dt: f32,
         mut play: impl FnMut(&Line) -> Option<f32>,
     ) -> Option<Line> {
-        let me = sim.unit(player);
+        // `None` (splitscreen, every local player away): the last listener's side is kept.
+        let me = player.and_then(|p| sim.unit(p));
         if let Some(u) = me {
             self.announcer.set_listener(usize::from(u.team));
         }
@@ -1095,14 +1112,14 @@ mod leaving_tests {
     fn the_line_is_asked_once_an_excursion() {
         let lines = BattleLines::default();
         let mut c = Commander::new(lines, ["imp", "all"], 0, Vec::new(), Vec::new());
-        assert_eq!(c.leaving_now(true), None, "a script with no line");
-        c.leaving_now(false);
-        c.leaving_line = Some("Impleaving".into());
-        let said = [true, true, true, false, false].map(|now| c.leaving_now(now).is_some());
+        assert_eq!(c.leaving_now(true, 0), None, "a script with no line");
+        c.leaving_now(false, 0);
+        c.leaving_lines[0] = Some("Impleaving".into());
+        let said = [true, true, true, false, false].map(|now| c.leaving_now(now, 0).is_some());
         assert_eq!(said, [true, false, false, false, false]);
         c.queue.step(0.0, |_| Some(1.0));
-        assert!(c.leaving_now(true).is_some(), "the next excursion");
-        let line = c.leaving_now(false);
+        assert!(c.leaving_now(true, 0).is_some(), "the next excursion");
+        let line = c.leaving_now(false, 0);
         assert_eq!(line, None);
     }
 
@@ -1110,13 +1127,40 @@ mod leaving_tests {
     fn crossing_the_edge_again_and_again_queues_the_line_once() {
         let lines = BattleLines::default();
         let mut c = Commander::new(lines, ["imp", "all"], 0, Vec::new(), Vec::new());
-        c.leaving_line = Some("Impleaving".into());
-        let said = [true, false, true, false, true].map(|now| c.leaving_now(now).is_some());
+        c.leaving_lines[0] = Some("Impleaving".into());
+        let said = [true, false, true, false, true].map(|now| c.leaving_now(now, 0).is_some());
         assert_eq!(said, [true, false, false, false, false]);
         // It has started, so the next crossing may say it again.
         c.queue.step(0.0, |_| Some(1.0));
-        c.leaving_now(false);
-        assert!(c.leaving_now(true).is_some());
+        c.leaving_now(false, 0);
+        assert!(c.leaving_now(true, 0).is_some());
+    }
+
+    /// Issue #194 B12: the voice's followed unit changes (splitscreen's first awake player, or
+    /// a respawn): the new one starts with no excursion, and his team's line is said.
+    #[test]
+    fn a_new_followed_unit_starts_its_own_excursion() {
+        let lines = BattleLines::default();
+        let mut c = Commander::new(lines, ["imp", "all"], 0, Vec::new(), Vec::new());
+        c.leaving_lines = [Some("Impleaving".into()), Some("Allleaving".into())];
+        let p1 = UnitHandle { index: 1, gen: 0 };
+        let p2 = UnitHandle { index: 2, gen: 0 };
+        c.follow_leaving(p1);
+        assert_eq!(
+            c.leaving_now(true, 0).map(|l| l.name),
+            Some("Impleaving".into())
+        );
+        // P1 drops mid-excursion; P2, outside on the other side, leads: his line, not swallowed.
+        c.follow_leaving(p2);
+        assert_eq!(
+            c.leaving_now(true, 1).map(|l| l.name),
+            Some("Allleaving".into())
+        );
+        // Back to P1, still outside: no stale edge from P2's excursion either way.
+        c.queue.step(0.0, |_| Some(1.0));
+        c.follow_leaving(p1);
+        assert!(c.leaving_now(true, 0).is_some());
+        assert_eq!(c.leaving_now(true, 0), None, "once an excursion");
     }
 
     #[test]

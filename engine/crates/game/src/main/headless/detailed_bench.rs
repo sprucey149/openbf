@@ -118,6 +118,34 @@ fn memory_kb() -> serde_json::Value {
 }
 
 #[inline(never)]
+/// `OPENBF_BENCH_PLAYER=script`: one human who plays by a fixed script instead of standing
+/// still, so a run exercises the player path (spawn screens, walking, turning, firing, jumping,
+/// reloading, the weapon switch, the action key, respawn and the spawn screens after a death)
+/// and its hashes can pin that path before it is refactored (issue #194, phase 0). Pure in the
+/// tick number: the same ticks give the same pads on every machine.
+fn scripted_pad(k: u32) -> core::sim::PadState {
+    use core::sim::buttons;
+    let tap = |period: u32, at: u32, bit: u32| if k % period == at { bit } else { 0 };
+    let mut b = 0;
+    if k % 40 < 15 {
+        b |= buttons::FIRE;
+    }
+    b |= tap(97, 0, buttons::JUMP) | tap(150, 0, buttons::ACTION) | tap(200, 100, buttons::RELOAD);
+    b |= tap(250, 10, buttons::SWITCH_WEAPON) | tap(90, 0, buttons::RESPAWN);
+    // Spawn screens: accept on every other early tick, then now and then (after a death).
+    if k < 8 && k % 2 == 0 || k % 75 == 0 {
+        b |= buttons::SPAWN_ACCEPT;
+    }
+    // Walk forward; turn in a slow sweep that reverses so the player does not walk off in a line.
+    let turn = if (k / 120) % 2 == 0 { 2500 } else { -2500 };
+    core::sim::PadState {
+        ly: 20000,
+        rx: if k % 3 == 0 { turn } else { 0 },
+        buttons: b,
+        ..Default::default()
+    }
+}
+
 fn measured_tick(walk: &mut WalkSim, pad: &[core::sim::PadState]) {
     walk.step_tick(pad);
 }
@@ -196,23 +224,37 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         );
     }
     let initial_hash = format!("{:016x}", walk.sim.hash());
-    let pad = [core::sim::PadState::default()];
+    let scripted = std::env::var("OPENBF_BENCH_PLAYER").is_ok_and(|s| s == "script");
+    let idle = [core::sim::PadState::default()];
     let mut ticks = Vec::with_capacity(v.bench_ticks as usize);
     let mut slowest = SlowTicks::default();
     let mut hashes = Vec::new();
     let mut cameras = Vec::new();
     let targets = target_ticks();
     let counter = InstrCounter::new();
+    // The scripted player's life: deaths and (re)spawns seen, so a gate can show it covered them.
+    let mut life = (0u32, 0u32);
+    let mut was_alive = walk.sim.unit(walk.player).is_some_and(|u| u.alive);
     let memory_after_setup = memory_kb();
     for k in 0..v.bench_ticks {
         let t = Instant::now();
         let mark = Mark::now(&counter);
-        if targets.contains(&(k + 1)) {
-            targeted_tick(&mut walk, &pad);
+        let pad = if scripted {
+            [scripted_pad(k)]
         } else {
-            measured_tick(&mut walk, &pad);
+            idle.clone()
+        };
+        let pad = &pad[..];
+        if targets.contains(&(k + 1)) {
+            targeted_tick(&mut walk, pad);
+        } else {
+            measured_tick(&mut walk, pad);
         }
         let spent = mark.since(&counter);
+        let is_alive = walk.sim.unit(walk.player).is_some_and(|u| u.alive);
+        life.0 += u32::from(was_alive && !is_alive);
+        life.1 += u32::from(!was_alive && is_alive);
+        was_alive = is_alive;
         let wall = ms(t);
         let mut cost = game::frame_profile::TickCosts::default();
         cost.add(&walk.sim.tick_cost, |u| {
@@ -241,6 +283,7 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         "schema": 3, "map": v.map, "seed": v.seed, "size": [v.size.0, v.size.1],
         "ai": v.ai, "initial_alive": initial_alive, "alive_after_sim": alive(&walk),
         "total_per_side": total,
+        "player_script": scripted, "player_deaths": life.0, "player_spawns": life.1,
         "native_alive": walk.sim.units.iter().filter(|u| u.alive && u.team >= 2).count(),
         "vehicles_alive": walk.sim.vehicles.iter().filter(|v| v.alive).count(),
         "initial_hash": initial_hash, "sim_hash": sim_hash, "tick_hashes": hashes,

@@ -32,7 +32,7 @@
 //! them current. The zoom sounds (`ScopeDisplayZoomIn` / `Out`) are not
 //! ported here.
 
-use crate::hud_draw::{color, Ctx, Quad, Screen};
+use crate::hud_draw::{color, Ctx, Frame, Quad, Screen};
 use glam::Mat4;
 
 /// The scope picture's sheet: BF2's (INGAME.LVL), on every map. BF1's
@@ -47,7 +47,13 @@ pub struct ScopeView;
 /// x0, y0, x1, y1; uv u0, v0, u1, v1). The 4:3 box first (four quads),
 /// then the side fills when the window is wider.
 pub fn quads(size: [f32; 2]) -> Vec<([f32; 4], [f32; 4])> {
-    let [w, h] = size;
+    quads_in(&Frame::window(size))
+}
+
+/// [`quads`] for the screen `f`: the picture over its projection rectangle
+/// (a split cell's 4:3 band), the band's sides filled the same way.
+pub fn quads_in(f: &Frame) -> Vec<([f32; 4], [f32; 4])> {
+    let [px, py, w, h] = f.proj;
     let bw = (4.0 / 3.0 * h).min(w);
     let x0 = (w - bw) * 0.5;
     let (cx, cy) = (x0 + bw * 0.5, h * 0.5);
@@ -64,16 +70,58 @@ pub fn quads(size: [f32; 2]) -> Vec<([f32; 4], [f32; 4])> {
             out.push(([rect_x.0, cy, rect_x.1, h], [0.0, v.1, 0.0, v.0]));
         }
     }
+    if px != 0.0 || py != 0.0 {
+        for (r, _) in &mut out {
+            *r = [r[0] + px, r[1] + py, r[2] + px, r[3] + py];
+        }
+    }
+    out
+}
+
+/// The black above and below the picture in a screen taller than its
+/// projection (a split cell narrower than 4:3); none in a single window.
+pub fn bars_in(f: &Frame) -> Vec<[f32; 4]> {
+    let [px, py, pw, ph] = f.proj;
+    let [w, h] = f.size;
+    let mut out = Vec::new();
+    if py > 0.0 {
+        out.push([0.0, 0.0, w, py]);
+    }
+    if py + ph < h {
+        out.push([0.0, py + ph, w, h]);
+    }
+    if px > 0.0 {
+        out.push([0.0, py, px, py + ph]);
+    }
+    if px + pw < w {
+        out.push([px + pw, py, w, py + ph]);
+    }
     out
 }
 
 impl Ctx<'_> {
-    pub(crate) fn scope(&mut self, _: &ScopeView, size: [f32; 2]) {
+    pub(crate) fn scope(&mut self, _: &ScopeView, f: &Frame) {
         let s = Screen {
             origin: [0.0, 0.0],
             scale: [1.0, 1.0],
         };
-        for (rect, uv) in quads(size) {
+        for rect in bars_in(f) {
+            self.quad(
+                usize::MAX,
+                &Mat4::IDENTITY,
+                &s,
+                &Quad {
+                    rect,
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    texture: "white",
+                    additive: false,
+                    shadow: false,
+                    boxed: false,
+                },
+            );
+        }
+        for (rect, uv) in quads_in(f) {
             self.quad(
                 usize::MAX,
                 &Mat4::IDENTITY,
@@ -121,5 +169,29 @@ mod tests {
         let covered: f32 = q.iter().map(|(r, _)| (r[2] - r[0]) * (r[3] - r[1])).sum();
         assert_eq!(covered, 1280.0 * 720.0);
         assert!(q[4..].iter().all(|(_, uv)| uv[0] == 0.0 && uv[2] == 0.0));
+    }
+
+    /// A tall split cell: the round picture sits in the cell's 4:3 band,
+    /// black above and below it, nothing stretched.
+    #[test]
+    fn a_tall_cell_keeps_the_picture_in_its_band() {
+        let f = Frame::cell([900.0, 1600.0], 1.0);
+        let q = quads_in(&f);
+        assert_eq!(q.len(), 4);
+        let band = 900.0 * 0.75;
+        // `ui_rect`'s whole pixels: (1600 - 675) / 2 floored.
+        let top = 462.0;
+        assert_eq!(q[0].0, [0.0, top, 450.0, top + band * 0.5]);
+        assert_eq!(q[3].0[3], top + band);
+        let b = bars_in(&f);
+        assert_eq!(
+            b,
+            vec![[0.0, 0.0, 900.0, top], [0.0, top + band, 900.0, 1600.0]]
+        );
+        assert!(bars_in(&Frame::window([640.0, 480.0])).is_empty());
+        assert_eq!(
+            quads_in(&Frame::window([1280.0, 720.0])),
+            quads([1280.0, 720.0])
+        );
     }
 }

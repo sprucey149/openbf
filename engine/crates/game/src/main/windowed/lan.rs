@@ -103,6 +103,9 @@ impl Link for NetLink {
     fn submit_input(&mut self, pad: PadState, view_tick: u32) {
         link!(self, x => x.submit_input(pad, view_tick))
     }
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32) {
+        link!(self, x => x.submit_inputs(pads, view_tick))
+    }
     fn pacing(&self) -> (u8, u32) {
         link!(self, x => x.pacing())
     }
@@ -132,6 +135,9 @@ impl Link for NetLink {
     }
     fn host(&mut self, cmd: HostCommand) {
         link!(self, x => Link::host(x, cmd))
+    }
+    fn set_local_away(&mut self, local: u8, slot: u8, away: bool) {
+        link!(self, x => Link::set_local_away(x, local, slot, away))
     }
 }
 
@@ -257,6 +263,20 @@ enum CheatRow {
     Cheat(u8),
 }
 
+/// A further player of this machine in a LAN session (splitscreen, issue
+/// #194 B19): a Players-screen seat (1-3) with its profile. The host's get
+/// their slot and unique name from `HostCommand::AddLocal`; a guest's go
+/// in its `Hello` and get their slots with `Welcome`.
+#[derive(Clone, Debug)]
+pub(super) struct LanLocal {
+    pub seat: u8,
+    /// The name asked for, then the unique one the host gave.
+    pub name: String,
+    pub profile: PlayerProfile,
+    /// Its slot once the host gave one.
+    pub slot: Option<u8>,
+}
+
 /// The windowed game's LAN session (module header).
 pub(super) struct NetplaySession {
     pub peer: Peer,
@@ -264,6 +284,8 @@ pub(super) struct NetplaySession {
     pub view: LocalView,
     pub args: LanArgs,
     pub profile: PlayerProfile,
+    /// This machine's further players, seat order (splitscreen B19).
+    pub locals: Vec<LanLocal>,
     /// The round the loading screen is building.
     pub loading: Option<RoundSetup>,
     /// The round's start (`Notice::Started`): when it was heard and how
@@ -354,6 +376,18 @@ impl NetplaySession {
 
     /// Joins the host at `host`.
     pub fn join(args: LanArgs, profile: PlayerProfile, host: std::net::SocketAddr) -> Result<Self> {
+        Self::join_locals(args, profile, host, Vec::new())
+    }
+
+    /// Joins the host at `host` with this machine's further players
+    /// `locals` (splitscreen B19): its `Hello` asks a slot for each, all or
+    /// none.
+    pub fn join_locals(
+        args: LanArgs,
+        profile: PlayerProfile,
+        host: std::net::SocketAddr,
+        locals: Vec<LanLocal>,
+    ) -> Result<Self> {
         let build = game::netplay::build_id();
         let transport = UdpTransport::client().context("bind a UDP port")?;
         // One token per game process (LAN §4.5): a rejoin reclaims the slot
@@ -363,10 +397,19 @@ impl NetplaySession {
         config.profile = profile.encode();
         let content = game::netplay::ContentManifest::scan(&args.assets);
         config.content = content.encode();
+        config.locals = locals
+            .iter()
+            .map(|l| net::msg::LocalHello {
+                seat: l.seat,
+                name: l.name.clone(),
+                profile: l.profile.encode(),
+            })
+            .collect();
         let status = format!("Connecting to {host}\u{2026}");
         let link = NetLink::Client(NetSession::join(config, host, transport));
         let mut n = Self::with(args, profile, link, Peer::client(), status);
         n.lobby.content = content;
+        n.locals = locals;
         Ok(n)
     }
 
@@ -388,6 +431,7 @@ impl NetplaySession {
             view: LocalView::new(),
             args,
             profile,
+            locals: Vec::new(),
             loading: None,
             start: None,
             started: false,
@@ -408,6 +452,24 @@ impl NetplaySession {
             diag: Default::default(),
             began: Instant::now(),
         }
+    }
+
+    /// The host seats this machine's further players `locals`
+    /// (splitscreen B19), between frames: each asks the network core for a
+    /// slot ([`Notice::LocalAdded`] answers). Called as the session opens,
+    /// before any round's inputs.
+    pub fn add_host_locals(&mut self, locals: Vec<LanLocal>) {
+        if !self.is_host() {
+            return;
+        }
+        for l in &locals {
+            self.link.host(HostCommand::AddLocal {
+                seat: l.seat,
+                name: l.name.clone(),
+                profile: l.profile.encode(),
+            });
+        }
+        self.locals.extend(locals);
     }
 
     /// When this peer's loading screen ends for the round's start (module
@@ -477,6 +539,51 @@ impl NetplaySession {
         current
     }
 
+    /// Each further local's session profile from its seat's lent profile as the round left it
+    /// (issue #194 B20): its medals, class unlocks, assist and awards row carry into the next
+    /// round (the host seats its own from `locals`, a guest sends them in [`Self::ready_locals`]).
+    /// The session name stays.
+    pub(super) fn refresh_local_profiles(
+        &mut self,
+        seat_profiles: &[Option<game::profile::Profile>; 4],
+    ) {
+        for l in &mut self.locals {
+            if let Some(p) = seat_profiles
+                .get(usize::from(l.seat))
+                .and_then(Option::as_ref)
+                .filter(|_| l.seat != 0)
+            {
+                let mut fresh = PlayerProfile::from_profile(p);
+                fresh.name.clone_from(&l.profile.name);
+                for (count, had) in fresh.medals.iter_mut().zip(l.profile.medals) {
+                    *count = (*count).max(had);
+                }
+                l.profile = fresh;
+            }
+        }
+    }
+
+    /// A guest's Ready for each of its further locals, with its own profile (issue #194 B20,
+    /// `ClientCommand::ReadyLocal`): the host seats each of this machine's players on its own
+    /// medals and unlocks next round.
+    pub(super) fn ready_locals(&self, round_id: u32) {
+        let NetLink::Client(s) = &self.link else {
+            return;
+        };
+        for i in 1..net::MAX_LOCALS {
+            let Some(slot) = self.peer.local_slot_of(i) else {
+                break;
+            };
+            if let Some(l) = self.locals.iter().find(|l| l.slot == Some(slot)) {
+                s.send(net::ClientCommand::ReadyLocal {
+                    local: i as u8,
+                    round_id,
+                    profile: l.profile.encode(),
+                });
+            }
+        }
+    }
+
     /// Every connected human seated, the host's cheat policy.
     fn seat_humans(&self, mut setup: RoundSetup, profile: &game::profile::Profile) -> RoundSetup {
         setup.map = game::mods_runtime::select_world_variant(
@@ -495,6 +602,18 @@ impl NetplaySession {
             cheats: 0,
             profile: self.current_profile(profile),
         });
+        // The host machine's further players (B19), each with its seat's profile.
+        for l in &self.locals {
+            if let Some(slot) = l.slot.filter(|s| self.peer.host_local(*s)) {
+                setup.humans.push(HumanSeat {
+                    slot,
+                    name: l.name.clone(),
+                    team: None,
+                    cheats: 0,
+                    profile: l.profile.clone(),
+                });
+            }
+        }
         for (slot, g) in self.peer.guests() {
             setup.humans.push(HumanSeat {
                 slot: *slot,
@@ -583,6 +702,14 @@ impl NetplaySession {
     /// the one the host last sent).
     fn learn_names(&mut self) {
         for p in self.roster() {
+            // This machine's further players (B19) take the unique name the
+            // host gave them, profile too (a guest's are only told it here).
+            if let Some(l) = self.locals.iter_mut().find(|l| l.slot == Some(p.slot)) {
+                if l.name != p.name {
+                    l.name.clone_from(&p.name);
+                    l.profile.name.clone_from(&p.name);
+                }
+            }
             if self.names.get(&p.slot) != Some(&p.name) {
                 self.names.insert(p.slot, p.name);
             }
@@ -604,6 +731,11 @@ impl NetplaySession {
         for n in self.peer.poll(&mut self.link) {
             match n {
                 Notice::Welcome { slot } => {
+                    // A guest's further players' slots, in its `Hello`'s order (B19).
+                    let extra: Vec<u8> = self.peer.extra_locals().iter().map(|q| q.slot).collect();
+                    for (l, s) in self.locals.iter_mut().zip(extra) {
+                        l.slot = Some(s);
+                    }
                     self.status = format!("Connected as player {slot}; waiting for the round");
                     out.push(NetAction::Welcomed);
                 }
@@ -674,10 +806,9 @@ impl NetplaySession {
                         .guests()
                         .get(&slot)
                         .and_then(|g| g.content.as_ref());
-                    if let Some(reason) = game::netplay::lobby::guest_mod_mismatch(
-                        &self.lobby.content,
-                        guest_content,
-                    ) {
+                    if let Some(reason) =
+                        game::netplay::lobby::guest_mod_mismatch(&self.lobby.content, guest_content)
+                    {
                         let line = format!("{name}: {reason}");
                         self.lobby.say(line.clone());
                         out.push(NetAction::Line(line));
@@ -766,9 +897,33 @@ impl NetplaySession {
                     self.lobby.say(line.clone());
                     out.push(NetAction::Line(line));
                 }
+                // Ready is a machine's (B19): its local 0 speaks for it.
                 Notice::PeerReady { slot } => {
-                    self.lobby.ready.insert(slot);
+                    self.lobby.ready.insert(self.peer.machine_of(slot));
                 }
+                Notice::LocalAdded { seat, added } => match added {
+                    Ok((slot, name)) => {
+                        if let Some(l) = self.locals.iter_mut().find(|l| l.seat == seat) {
+                            l.slot = Some(slot);
+                            l.name.clone_from(&name);
+                            l.profile.name.clone_from(&name);
+                        }
+                        self.names.insert(slot, name.clone());
+                        let t = self.now_s();
+                        log(&self.diag.joined(t, slot, &name, "", false));
+                        out.push(NetAction::LocalsChanged);
+                    }
+                    Err(reason) => {
+                        let name = self
+                            .locals
+                            .iter()
+                            .find(|l| l.seat == seat)
+                            .map_or_else(|| format!("Player {}", seat + 1), |l| l.name.clone());
+                        self.locals.retain(|l| l.seat != seat);
+                        self.lobby
+                            .say(game::netplay::lobby::local_refusal_text(&name, reason));
+                    }
+                },
                 Notice::Lobby(bytes) => self.lobby.receive(&bytes),
                 Notice::Message(bytes) => {
                     if let Some(text) = self.game_notice(&bytes) {
@@ -904,15 +1059,22 @@ impl NetplaySession {
         pad
     }
 
-    /// The cheat rows the pause menu shows (module rules): a guest's
-    /// allowed cheats for its own slot; the host's target row then every
-    /// cheat for that target.
-    pub fn cheat_entries(&mut self, walk: &WalkSim) -> Vec<(&'static str, &'static str, bool)> {
+    /// The cheat rows the pause menu of the local player on `slot` shows
+    /// (module rules): the host's first player gets the target row then
+    /// every cheat for that target; anyone else their own slot's cheats
+    /// (cheats are per slot in LAN), a guest's only those the host allows
+    /// (issue #194: a further player's page is theirs, not the first
+    /// player's).
+    pub fn cheat_entries(
+        &mut self,
+        walk: &WalkSim,
+        slot: u8,
+    ) -> Vec<(&'static str, &'static str, bool)> {
         let all = core::sim::Cheats::default().entries();
         let bits_of = |slot: u8| cheat_bits(&walk.sim.cheats_for_slot(usize::from(slot)));
         let mut rows = Vec::new();
         let mut out = Vec::new();
-        if self.is_host() {
+        if self.is_host() && slot == self.peer.local_slot {
             let humans: Vec<u8> = walk.netplay.profiles.keys().copied().collect();
             if self.cheat_target != ALL_SLOTS && !humans.contains(&self.cheat_target) {
                 self.cheat_target = ALL_SLOTS;
@@ -934,8 +1096,13 @@ impl NetplaySession {
                 out.push((e.0, e.1, on(i)));
             }
         } else {
-            let mine = bits_of(self.peer.local_slot);
-            let policy = walk.netplay.cheat_policy;
+            let mine = bits_of(slot);
+            // The host machine sets any cheat; a guest asks within the policy.
+            let policy = if self.is_host() {
+                u32::MAX
+            } else {
+                walk.netplay.cheat_policy
+            };
             for (i, e) in all.iter().enumerate() {
                 // Allowed ones, and any still on (switching off is always allowed).
                 if policy & 1 << i != 0 || mine & 1 << i != 0 {
@@ -948,11 +1115,17 @@ impl NetplaySession {
         out
     }
 
-    /// Switch cheat `id` for the host's target or the guest's own slot.
-    fn toggle_cheat(&mut self, walk: &WalkSim, id: u8) {
+    /// Switch cheat `id` as the local player on `opener_slot`: for the
+    /// host's target when that is the host's first player, else for
+    /// `opener_slot` itself.
+    fn toggle_cheat(&mut self, walk: &WalkSim, id: u8, opener_slot: u8) {
         let bit = 1u32 << id;
         if self.is_host() {
-            let slot = self.cheat_target;
+            let slot = if opener_slot == self.peer.local_slot {
+                self.cheat_target
+            } else {
+                opener_slot
+            };
             let on = match slot {
                 ALL_SLOTS => !walk
                     .netplay
@@ -964,10 +1137,10 @@ impl NetplaySession {
             self.peer
                 .host_command(&mut self.link, &GameCommand::SetSlotCheat { slot, id, on });
         } else {
-            let on =
-                cheat_bits(&walk.sim.cheats_for_slot(usize::from(self.peer.local_slot))) & bit == 0;
+            let slot = opener_slot;
+            let on = cheat_bits(&walk.sim.cheats_for_slot(usize::from(slot))) & bit == 0;
             self.peer
-                .request(&mut self.link, &GameRequest::CheatToggle { id, on });
+                .request(&mut self.link, &GameRequest::CheatToggle { slot, id, on });
         }
     }
 
@@ -981,22 +1154,29 @@ impl NetplaySession {
     }
 
     /// A pause-menu action in a LAN round (module rules). True when it was
-    /// handled here; the single-player path runs otherwise.
+    /// handled here; the single-player path runs otherwise. `opener_slot` is
+    /// the slot of the local player the action acts as, and `profile` their
+    /// own profile (`None`: a seat with no profile, nothing of theirs is
+    /// saved): a further player's per-player row is theirs (issue #194 B20).
     #[allow(clippy::too_many_arguments)]
     pub fn pause_action(
         &mut self,
         walk: &WalkSim,
         a: ui::menu::MenuAction,
+        opener_slot: u8,
         paused: &mut bool,
         menu: &mut game::pause::PauseMenu,
-        profile: &mut game::profile::Profile,
+        mut profile: Option<&mut game::profile::Profile>,
         session: &mut ui::shell::SessionOptions,
     ) -> bool {
         use ui::menu::MenuAction;
         let host = self.is_host();
-        let save = |profile: &mut game::profile::Profile| {
-            if let Err(e) = profile.save() {
-                eprintln!("profile autosave failed: {e:#}");
+        let mut save = |edit: &dyn Fn(&mut game::profile::Profile)| {
+            if let Some(profile) = profile.as_deref_mut() {
+                edit(profile);
+                if let Err(e) = profile.save() {
+                    eprintln!("profile autosave failed: {e:#}");
+                }
             }
         };
         match a {
@@ -1008,7 +1188,7 @@ impl NetplaySession {
                     self.peer
                         .host_command(&mut self.link, &GameCommand::SetAwardPolicy { on });
                 }
-                Some(CheatRow::Cheat(id)) => self.toggle_cheat(walk, id),
+                Some(CheatRow::Cheat(id)) => self.toggle_cheat(walk, id, opener_slot),
                 None => {}
             },
             MenuAction::SetAiCap(c) => {
@@ -1016,10 +1196,9 @@ impl NetplaySession {
                     let pct = c.clamp(10, ui::population::MAX_TEAM_PCT);
                     self.peer
                         .host_command(&mut self.link, &GameCommand::SetTeamSize { pct });
-                    profile.settings.team_size_pct = pct;
+                    save(&|p| p.settings.team_size_pct = pct);
                     session.con_numbots = pct as i32;
                     session.num_bots = session.con_numbots;
-                    save(profile);
                 }
             }
             MenuAction::SetReinforcements(c) => {
@@ -1027,9 +1206,8 @@ impl NetplaySession {
                     let pct = c.clamp(10, 500);
                     self.peer
                         .host_command(&mut self.link, &GameCommand::SetReinforcements { pct });
-                    profile.settings.reinforcement_pct = pct;
+                    save(&|p| p.settings.reinforcement_pct = pct);
                     session.con_mult = pct as i32;
-                    save(profile);
                 }
             }
             MenuAction::SetCareerAwards(on) => {
@@ -1037,20 +1215,22 @@ impl NetplaySession {
                 if host {
                     self.peer.host_command(
                         &mut self.link,
-                        &GameCommand::SetCareerAwards { slot: 0, on },
+                        &GameCommand::SetCareerAwards {
+                            slot: opener_slot,
+                            on,
+                        },
                     );
                 }
-                profile.settings.career_awards = on;
-                save(profile);
+                save(&|p| p.settings.career_awards = on);
             }
             // Sim inputs fixed by the round's setup: kept for the next one.
             MenuAction::SetAssist(v) => {
-                profile.settings.assist_intensity = game::profile::clamp_assist_intensity(v);
-                save(profile);
+                save(&|p| {
+                    p.settings.assist_intensity = game::profile::clamp_assist_intensity(v);
+                });
             }
             MenuAction::SetPadLookSensitivity(v) => {
-                profile.settings.pad_look_sensitivity = game::profile::clamp_pad_look(v);
-                save(profile);
+                save(&|p| p.settings.pad_look_sensitivity = game::profile::clamp_pad_look(v));
             }
             MenuAction::Respawn => {
                 if *paused
@@ -1071,15 +1251,42 @@ impl NetplaySession {
         true
     }
 
-    /// A Morse word typed on the Cheats page (module rules); the HUD line.
+    /// [`Self::pause_action`] as local player `opener` of this machine (issue #194 B20): a
+    /// further player's per-player rows write their own seat's lent profile and their own slot,
+    /// never the first player's. A further player's Respawn is left to the walk
+    /// (`local_seats::lan_pads`): `false`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn opener_pause_action(
+        &mut self,
+        walk: &WalkSim,
+        a: ui::menu::MenuAction,
+        opener: usize,
+        paused: &mut bool,
+        menu: &mut game::pause::PauseMenu,
+        host: &mut game::profile::Profile,
+        seat_profiles: &mut [Option<game::profile::Profile>; 4],
+        seats: Option<&game::local_seats::Seats<gilrs::GamepadId>>,
+        session: &mut ui::shell::SessionOptions,
+    ) -> bool {
+        if opener > 0 && a == ui::menu::MenuAction::Respawn {
+            return false;
+        }
+        let slot = walk.local_slot_of(opener);
+        let profile = super::menu_actions::opener_profile(host, seat_profiles, seats, opener);
+        self.pause_action(walk, a, slot, paused, menu, profile, session)
+    }
+
+    /// A Morse word typed on the Cheats page of the local player on `local`
+    /// (module rules): it changes that player's own slot (issue #194); the
+    /// HUD line.
     pub fn morse_word(
         &mut self,
         word: &str,
+        local: u8,
         walk: &mut WalkSim,
         cheats: &mut game::cheats::Session,
     ) -> String {
         let host = self.is_host();
-        let local = self.peer.local_slot;
         let mine = cheat_bits(&walk.sim.cheats_for_slot(usize::from(local)));
         let mut want = None;
         if let Some(id) = core::sim::Cheats::id_for_word(word) {
@@ -1112,8 +1319,14 @@ impl NetplaySession {
                 } else if on && policy & 1 << id == 0 {
                     refused = true;
                 } else {
-                    self.peer
-                        .request(&mut self.link, &GameRequest::CheatToggle { id, on });
+                    self.peer.request(
+                        &mut self.link,
+                        &GameRequest::CheatToggle {
+                            slot: local,
+                            id,
+                            on,
+                        },
+                    );
                 }
             }
             return if refused {
@@ -1282,6 +1495,9 @@ pub(super) enum NetAction {
     /// The round ended without being decided (the host abandoned it): to
     /// the lobby's results with this line, as after a decided round.
     RoundOver(String),
+    /// This machine's further players changed (splitscreen B19): a round
+    /// in play makes its walk's locals the peer's.
+    LocalsChanged,
 }
 
 /// Draws the net meter panel (top right, under the FPS counter's corner);
@@ -1310,46 +1526,6 @@ pub(super) fn draw_meter(ctx: &ui::egui::Context, m: &NetMeter, quality: Option<
                     }
                 });
         });
-}
-
-/// Draws the other players' names over their heads (LAN §5b,
-/// `game::name_tags`): the HUD's friend or enemy colour, faded with
-/// distance, under the HUD's own panels.
-pub(super) fn draw_name_tags(
-    ctx: &ui::egui::Context,
-    tags: &[game::name_tags::NameTag],
-    view_proj: glam::Mat4,
-) {
-    use ui::egui::{Align2, Color32, Id, LayerId, Order};
-    let screen = ctx.content_rect();
-    let painter = ctx.layer_painter(LayerId::new(Order::Background, Id::new("name_tags")));
-    let [enemy, _, friend] = ui::hud::RETICLE_COLORS;
-    for t in tags {
-        let Some([x, y]) =
-            game::name_tags::to_screen(view_proj, t.at, [screen.width(), screen.height()])
-        else {
-            continue;
-        };
-        let rgb = if t.friend { friend } else { enemy };
-        let a = (t.alpha * 255.0).round() as u8;
-        let pos = screen.min + ui::egui::vec2(x, y);
-        let font = ui::typography::egui_font(ctx, &ui::typography::LIST);
-        let name = ui::typography::LIST.case.apply(&t.name);
-        painter.text(
-            pos + ui::egui::vec2(1.0, 1.0),
-            Align2::CENTER_BOTTOM,
-            &name,
-            font.clone(),
-            Color32::from_black_alpha(a / 2 + a / 4),
-        );
-        painter.text(
-            pos,
-            Align2::CENTER_BOTTOM,
-            &name,
-            font,
-            Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a),
-        );
-    }
 }
 
 /// Draws a centred banner (a desync, the session's end).
@@ -1408,6 +1584,15 @@ impl App {
                     }
                 }
                 NetAction::Welcomed => self.note_recent_game(true),
+                NetAction::LocalsChanged => {
+                    if let (Some(n), Some((walk, _))) = (self.netplay.as_ref(), self.walk.as_mut())
+                    {
+                        if walk.local_slot_of(0) == n.peer.local_slot {
+                            n.peer.sync_walk_locals(walk);
+                        }
+                    }
+                    self.relay_lan_split();
+                }
                 NetAction::Ended(text) => {
                     println!("lan: session ended: {text}");
                     if let Some(n) = self.netplay.as_mut() {
@@ -1425,14 +1610,111 @@ impl App {
         self.net_names_to_feed();
     }
 
+    /// A running LAN round's local line-up changed (issue #194 B20): the split views are laid
+    /// out again for the walk's locals, each player who stays keeping their seat, pad, input
+    /// and feed; a player who left takes nobody else's cell. With no split left for several
+    /// locals (no Players-screen party), the further ones are marked away so bots hold their
+    /// slots rather than leaving soldiers standing on neutral pads.
+    pub(super) fn relay_lan_split(&mut self) {
+        let Some((walk, _)) = self.walk.as_mut() else {
+            return;
+        };
+        let Some(n) = self.netplay.as_mut() else {
+            return;
+        };
+        let lan_seats = super::split::lan_seats_of(&n.locals, self.split_party.as_ref(), walk);
+        let same = self.split.as_ref().is_some_and(|s| {
+            s.inputs.len() == lan_seats.len()
+                && (0..lan_seats.len()).all(|k| s.seats.seat_number(k) == lan_seats[k])
+        });
+        if same {
+            return;
+        }
+        let old = self.split.take();
+        let party = match (old.as_ref(), self.split_party.as_ref()) {
+            (Some(o), Some(p)) => Some(o.party_back(p)),
+            (None, Some(p)) => Some(p.clone()),
+            (Some(o), None) => Some(o.seats.party_owners()),
+            (None, None) => None,
+        };
+        let viewpoint = self.profile.settings.viewpoint;
+        let fresh = party
+            .as_ref()
+            .and_then(|p| super::split::seat_lan(walk, &lan_seats, viewpoint, p));
+        // Each further player's feed by seat: the ones who stay keep theirs.
+        let old_seats: Vec<usize> = old.as_ref().map_or_else(Vec::new, |o| {
+            (0..o.inputs.len())
+                .map(|k| o.seats.seat_number(k))
+                .collect()
+        });
+        let mut feeds: Vec<Option<game::event_feed::EventFeed>> =
+            std::mem::take(&mut self.split_feeds)
+                .into_iter()
+                .map(Some)
+                .collect();
+        self.split_feeds = (1..walk.local_count())
+            .map(|k| {
+                let seat = lan_seats.get(k).copied();
+                old_seats
+                    .iter()
+                    .position(|s| Some(*s) == seat)
+                    .filter(|&j| j > 0)
+                    .and_then(|j| feeds.get_mut(j - 1).and_then(Option::take))
+                    .unwrap_or_else(|| {
+                        let mut f = game::event_feed::EventFeed::for_walk(
+                            &self.assets_dir,
+                            &self.split_source_game,
+                            walk,
+                        );
+                        walk.with_local(k, |w| f.set_opening_medals(w));
+                        f
+                    })
+            })
+            .collect();
+        match fresh {
+            Some(mut f) => {
+                // A newcomer's own view and FOV, as `install_seat_profiles` gives them at the
+                // round's start (the ones who stay keep theirs below).
+                for k in 1..f.inputs.len() {
+                    let seat = f.seats.seat_number(k);
+                    if let Some(p) = self.split_profiles.get(seat).and_then(Option::as_ref) {
+                        f.inputs[k].set_viewpoint(p.settings.viewpoint);
+                        let fov = game::walk::clamp_fov_scale(p.settings.fov_scale);
+                        walk.with_local(k, |w| w.fov_scale = fov);
+                    }
+                }
+                if let Some(o) = old {
+                    f.carry_from(o);
+                }
+                println!("split: this machine's LAN players changed; views laid out again");
+                self.split = Some(f);
+            }
+            None => {
+                if walk.local_count() > 1 {
+                    eprintln!(
+                        "split: this machine's LAN players changed with no split; \
+                         the further players are away"
+                    );
+                    for k in 1..walk.local_count() {
+                        n.peer.set_local_away(&mut n.link, k, true);
+                    }
+                }
+            }
+        }
+        self.name_tags
+            .resize_with(walk.local_count().max(1), Default::default);
+        self.feed_names();
+    }
+
     /// The kill feed and the stats pages name every human by his session
     /// name, on every peer (issue #168). Presentation only: the sim never
     /// sees a name.
     pub(super) fn net_names_to_feed(&mut self) {
         if let Some(n) = self.netplay.as_ref() {
             let names = n.names().iter().map(|(slot, name)| (*slot, name.as_str()));
-            self.feed.set_player_names(names);
+            self.names.set(names);
         }
+        self.feed_names();
     }
 
     /// A round to build: the battle in play (if any) goes, the loading
@@ -1469,7 +1751,11 @@ impl App {
                 ));
             }
             self.screen = Screen::NetWait;
+            return;
         }
+        // Issue #194 B20: the further players play the round on their seats' profiles (their
+        // view, pads and the round's record), as an offline split round lends them.
+        self.lend_split_profiles();
     }
 
     /// The round this guest was given cannot be built here: the host is
@@ -1580,6 +1866,141 @@ mod tests {
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn host_on_free_port() -> NetplaySession {
+        let port = std::net::UdpSocket::bind("127.0.0.1:0")
+            .and_then(|s| s.local_addr())
+            .map(|a| a.port())
+            .unwrap();
+        let args = LanArgs::parse(&["--port".to_owned(), port.to_string()], true).unwrap();
+        let mut profile = PlayerProfile::decode_or_default(&[]);
+        profile.name = "Host".into();
+        NetplaySession::host(args, profile, 4, true).unwrap()
+    }
+
+    /// Issue #194: the host's first player's Cheats page picks a target; a further player of the
+    /// host's machine gets their own slot's cheats, with no target row, and a toggle there acts
+    /// on their own row list.
+    #[test]
+    fn lan_a_further_players_cheats_page_is_their_own_slot() {
+        let mut n = host_on_free_port();
+        let mut walk = WalkSim::new(42, glam::Vec3::ZERO, None);
+        walk.adopt_local(2);
+        let first = n.cheat_entries(&walk, walk.local_slot_of(0));
+        assert_eq!(first[0].0, "lan_target");
+        assert_eq!(n.cheat_rows[0], CheatRow::Target);
+        let further = n.cheat_entries(&walk, 2);
+        let all = core::sim::Cheats::default().entries().len();
+        assert_eq!(further.len(), all, "every cheat, for their own slot");
+        assert!(further
+            .iter()
+            .all(|e| e.0 != "lan_target" && e.0 != "lan_awards"));
+        assert!(n.cheat_rows.iter().all(|r| matches!(r, CheatRow::Cheat(_))));
+    }
+
+    /// Issue #194 B20 review: a further player's Game Menu rows in a LAN round write their own
+    /// seat's profile, never the first player's; their Respawn is left to their own view.
+    #[test]
+    fn lan_a_further_players_game_menu_rows_are_their_own() {
+        use ui::menu::MenuAction;
+        let mut n = host_on_free_port();
+        let mut walk = WalkSim::new(42, glam::Vec3::ZERO, None);
+        walk.adopt_local(2);
+        let mut host = game::profile::Profile::default();
+        host.settings.pad_look_sensitivity = 1.0;
+        host.settings.career_awards = true;
+        let mut seat_profiles: [Option<game::profile::Profile>; 4] = Default::default();
+        seat_profiles[1] = Some(host.clone());
+        let seats = game::local_seats::Seats::<gilrs::GamepadId>::new(2, true);
+        let (mut paused, mut menu) = (true, game::pause::PauseMenu::default());
+        let mut session = ui::shell::SessionOptions::default();
+        let mut act = |n: &mut NetplaySession,
+                       host: &mut game::profile::Profile,
+                       seat_profiles: &mut [Option<game::profile::Profile>; 4],
+                       a: MenuAction,
+                       opener: usize| {
+            n.opener_pause_action(
+                &walk,
+                a,
+                opener,
+                &mut paused,
+                &mut menu,
+                host,
+                seat_profiles,
+                Some(&seats),
+                &mut session,
+            )
+        };
+        assert!(act(
+            &mut n,
+            &mut host,
+            &mut seat_profiles,
+            MenuAction::SetPadLookSensitivity(1.7),
+            1
+        ));
+        assert!(act(
+            &mut n,
+            &mut host,
+            &mut seat_profiles,
+            MenuAction::SetCareerAwards(false),
+            1
+        ));
+        assert!(act(
+            &mut n,
+            &mut host,
+            &mut seat_profiles,
+            MenuAction::SetAssist(0.25),
+            1
+        ));
+        let p2 = seat_profiles[1].as_ref().unwrap();
+        assert_eq!(
+            p2.settings.pad_look_sensitivity,
+            game::profile::clamp_pad_look(1.7)
+        );
+        assert!(!p2.settings.career_awards);
+        assert_eq!(
+            p2.settings.assist_intensity,
+            game::profile::clamp_assist_intensity(0.25)
+        );
+        assert_eq!(
+            host.settings.pad_look_sensitivity, 1.0,
+            "P1's own is untouched"
+        );
+        assert!(host.settings.career_awards);
+        // P1's own row is still P1's.
+        assert!(act(
+            &mut n,
+            &mut host,
+            &mut seat_profiles,
+            MenuAction::SetPadLookSensitivity(1.3),
+            0
+        ));
+        assert_eq!(
+            host.settings.pad_look_sensitivity,
+            game::profile::clamp_pad_look(1.3)
+        );
+        // A further player's Respawn goes to their own view, not the session's.
+        assert!(!act(
+            &mut n,
+            &mut host,
+            &mut seat_profiles,
+            MenuAction::Respawn,
+            1
+        ));
+        // The next round seats the further player on their profile as it is now.
+        n.locals.push(LanLocal {
+            seat: 1,
+            name: "Han".into(),
+            profile: PlayerProfile {
+                name: "Han".into(),
+                ..PlayerProfile::default()
+            },
+            slot: Some(2),
+        });
+        n.refresh_local_profiles(&seat_profiles);
+        assert_eq!(n.locals[0].profile.name, "Han");
+        assert!(!n.locals[0].profile.award_bonuses);
     }
 
     /// Second review of issue #168: a round the host abandons (its game

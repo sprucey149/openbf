@@ -22,6 +22,28 @@ use crate::walk::WalkSim;
 use net::{SessionCommand, TickBundle, TEAM_AUTO};
 use std::collections::BTreeMap;
 
+/// An `AddHuman` team that seats the slot again as it was when its last
+/// `RemoveHuman` took it out (issue #194 B20, a local's pad back in a LAN
+/// round): on the same side, with the round's medal career, assist, cheats
+/// and class-screen points ([`RoundState::kept`]). A slot with nothing kept
+/// joins as [`TEAM_AUTO`] does. The net core passes the team through.
+pub const TEAM_KEPT: u8 = 254;
+
+/// What a `RemoveHuman` took from a seated slot, for a [`TEAM_KEPT`] return.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeptSlot {
+    /// The side it played on; `None` when the slot's unit handle was stale (the side goes
+    /// as [`TEAM_AUTO`] picks it, the career still comes back).
+    pub team: Option<u8>,
+    pub keep: core::sim::SlotKeep,
+    /// The slot's class-screen points at the removal.
+    pub points: i32,
+    /// The profile the slot was playing on (its class unlocks, award-bonus switch as the
+    /// Game Menu last set it): a [`TEAM_KEPT`] return installs this, not the `AddHuman`'s
+    /// bytes, which may be older (every peer keeps the same, from the bundles).
+    pub profile: Option<PlayerProfile>,
+}
+
 /// The lockstep round's per-slot game state, kept in `WalkSim::netplay`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RoundState {
@@ -39,6 +61,11 @@ pub struct RoundState {
     pub ended: bool,
     /// A lockstep round (set by [`install_humans`]).
     pub active: bool,
+    /// Each removed slot's side and round career, kept for a [`TEAM_KEPT`]
+    /// return (issue #194 B20); every peer keeps the same, from the bundles.
+    pub kept: BTreeMap<u8, KeptSlot>,
+    /// Points a slot seated again with [`TEAM_KEPT`] carries into its gate.
+    pub carried: BTreeMap<u8, i32>,
 }
 
 /// What one command did, for the harness and the HUD's notices.
@@ -58,12 +85,23 @@ pub enum Applied {
     Ended,
 }
 
-/// Give `slot` its profile's sim inputs: assist, medal career, award
-/// bonuses, cheats, class costs.
+/// Give `slot` its profile's sim inputs: cheats, then [`install_local_profile`].
 fn install_profile(walk: &mut WalkSim, slot: u8, profile: PlayerProfile, cheats: u32) {
+    walk.sim
+        .set_slot_cheats(usize::from(slot), Some(cheats_from_bits(cheats)));
+    install_local_profile(walk, slot, &profile);
+}
+
+/// Give `slot` its profile's sim inputs: assist, medal career, award
+/// bonuses, class costs (kept in `walk.netplay.profiles` for [`gate_slot`]);
+/// its round points count from now. Issue #194: a splitscreen seat's profile
+/// goes in through here too, at its first seating only (`SPLITSCREEN.md`
+/// 18.2 B3). Never after `WalkSim::resume_local_player`: that gives back the
+/// round's career through `Sim::restore_slot`, and a new install would reset
+/// its progress, earned medals and activations and its points' baseline.
+pub fn install_local_profile(walk: &mut WalkSim, slot: u8, profile: &PlayerProfile) {
     let s = usize::from(slot);
     let space = walk.space_battle();
-    walk.sim.set_slot_cheats(s, Some(cheats_from_bits(cheats)));
     walk.sim
         .set_slot_assist(s, Some(profile.assist.to_sim(space)));
     if let Some(Some(life)) = walk.sim.players.get(s).copied() {
@@ -71,7 +109,7 @@ fn install_profile(walk: &mut WalkSim, slot: u8, profile: PlayerProfile, cheats:
         walk.sim
             .set_slot_career_award_bonuses(s, profile.award_bonuses && !walk.netplay.awards_off);
     }
-    walk.netplay.profiles.insert(slot, profile);
+    walk.netplay.profiles.insert(slot, profile.clone());
     walk.netplay.baseline.insert(slot, None);
 }
 
@@ -141,17 +179,52 @@ pub fn apply(walk: &mut WalkSim, cmd: &SessionCommand) -> Applied {
             team,
             profile,
         } => {
-            let team = (*team != TEAM_AUTO && *team < 2).then_some(*team);
-            let ok = walk.sim.join_human(usize::from(*slot), team).is_ok();
-            if ok {
-                install_profile(walk, *slot, PlayerProfile::decode_or_default(profile), 0);
+            let kept = walk
+                .netplay
+                .kept
+                .remove(slot)
+                .filter(|_| *team == TEAM_KEPT);
+            let team = match &kept {
+                Some(k) => k.team,
+                None => (*team != TEAM_AUTO && *team < 2).then_some(*team),
+            };
+            let joined = walk.sim.join_human(usize::from(*slot), team);
+            let ok = joined.is_ok();
+            if let Ok(life) = joined {
+                let profile = kept
+                    .as_ref()
+                    .and_then(|k| k.profile.clone())
+                    .unwrap_or_else(|| PlayerProfile::decode_or_default(profile));
+                install_profile(walk, *slot, profile, 0);
+                // A pad back (B20): the round's career, assist and cheats as
+                // the removal left them, and its points carried on.
+                if let Some(k) = kept {
+                    let s = usize::from(*slot);
+                    walk.sim.restore_slot(s, life, k.keep);
+                    // The kept career's award switch is the removal's; a Game Menu or host
+                    // policy change made while the pad was gone holds (the profile has it).
+                    let own = walk
+                        .netplay
+                        .profiles
+                        .get(slot)
+                        .is_some_and(|p| p.award_bonuses);
+                    walk.sim
+                        .set_slot_career_award_bonuses(s, own && !walk.netplay.awards_off);
+                    walk.netplay.carried.insert(*slot, k.points);
+                } else {
+                    walk.netplay.carried.remove(slot);
+                }
                 if *slot == walk.local_slot {
                     walk.set_local_slot(*slot);
+                } else if walk.local_count() > 1 {
+                    // An adopted local of this machine (issue #194 B18).
+                    walk.follow_locals();
                 }
             }
             Applied::Joined { slot: *slot, ok }
         }
         SessionCommand::RemoveHuman { slot } => {
+            keep_removed(walk, *slot);
             let bot = walk.sim.leave_human(usize::from(*slot));
             walk.netplay.profiles.remove(slot);
             walk.netplay.baseline.remove(slot);
@@ -168,6 +241,46 @@ pub fn apply(walk: &mut WalkSim, cmd: &SessionCommand) -> Applied {
             walk.netplay.ended = true;
             Applied::Ended
         }
+    }
+}
+
+/// Before a `RemoveHuman`: what the slot holds that a [`TEAM_KEPT`] return
+/// gives back (its side, round career and points), when it holds a unit. A
+/// local of a machine with several also banks its soldier's counters in its
+/// round carry (presentation: its stats pages), as an offline split
+/// player's suspend does.
+fn keep_removed(walk: &mut WalkSim, slot: u8) {
+    let s = usize::from(slot);
+    let Some(Some(h)) = walk.sim.players.get(s).copied() else {
+        return;
+    };
+    let Some(u) = walk.sim.units.get(h.index as usize) else {
+        return;
+    };
+    // A stale handle (its index reused) is another unit's: neither its side nor its record.
+    let live = u.gen == h.gen;
+    let team = live.then(|| u.team.min(1));
+    let (kills, deaths) = if live { (u.kills, u.deaths) } else { (0, 0) };
+    let points = walk.sim.spawn_points.get(s).copied().unwrap_or(0);
+    let keep = walk.sim.keep_slot(s);
+    let profile = walk.netplay.profiles.get(&slot).cloned();
+    walk.netplay.kept.insert(
+        slot,
+        KeptSlot {
+            team,
+            keep,
+            points,
+            profile,
+        },
+    );
+    // Only a machine with several locals (one local's LAN round is as it was).
+    let locals = if walk.local_count() > 1 {
+        walk.local_count()
+    } else {
+        0
+    };
+    if let (Some(i), Some(team)) = ((0..locals).find(|&i| walk.local_slot_of(i) == slot), team) {
+        walk.bank_removed_local(i, kills, deaths, team);
     }
 }
 
@@ -221,6 +334,16 @@ pub fn apply_game(walk: &mut WalkSim, cmd: &GameCommand) {
         GameCommand::SetReinforcements { pct } => walk.reinforcement_pct = pct.clamp(10, 500),
         GameCommand::SetCareerAwards { slot, on } => {
             let allowed = !walk.netplay.awards_off;
+            // An away slot's kept profile follows too: it comes back on this switch.
+            for (s, k) in walk.netplay.kept.iter_mut() {
+                if let Some(p) = k
+                    .profile
+                    .as_mut()
+                    .filter(|_| slot == ALL_SLOTS || *s == slot)
+                {
+                    p.award_bonuses = on;
+                }
+            }
             for s in slots_of(walk, slot) {
                 if let Some(p) = walk.netplay.profiles.get_mut(&s) {
                     p.award_bonuses = on;
@@ -250,23 +373,51 @@ pub fn apply_game(walk: &mut WalkSim, cmd: &GameCommand) {
 pub fn gate(walk: &mut WalkSim, round: Option<&crate::round_stats::RoundStats>) {
     let slots: Vec<u8> = walk.netplay.profiles.keys().copied().collect();
     for slot in slots {
-        let s = usize::from(slot);
-        let Some(Some(h)) = walk.sim.players.get(s).copied() else {
-            continue;
-        };
-        let raw = round
-            .and_then(|r| r.units.get(h.index as usize))
-            .map_or(0, |u| u.points);
-        let base = walk.netplay.baseline.entry(slot).or_insert(None);
-        let base = *base.get_or_insert(raw);
-        walk.sim.set_spawn_points(s, raw - base);
-        let kills = walk.netplay.profiles[&slot].unlock_kills;
-        crate::unlocks::apply_slot_costs(walk, s, &|u| {
-            crate::unlocks::UNLOCKABLES
-                .iter()
-                .position(|x| x.key == u.key)
-                .map_or(0, |i| kills[i])
-        });
+        let carried = walk.netplay.carried.get(&slot).copied().unwrap_or(0);
+        gate_slot(walk, round, slot, carried);
+    }
+}
+
+/// One human slot's class screen gate ([`gate`]): nothing for a slot with no
+/// installed profile or no seated human. `carried`: points the slot had
+/// before its baseline was last taken (a split player's dropped controller,
+/// `WalkSim::carried_points`); 0 in a LAN round.
+pub fn gate_slot(
+    walk: &mut WalkSim,
+    round: Option<&crate::round_stats::RoundStats>,
+    slot: u8,
+    carried: i32,
+) {
+    let s = usize::from(slot);
+    let Some(kills) = walk.netplay.profiles.get(&slot).map(|p| p.unlock_kills) else {
+        return;
+    };
+    let Some(Some(h)) = walk.sim.players.get(s).copied() else {
+        return;
+    };
+    let raw = round
+        .and_then(|r| r.units.get(h.index as usize))
+        .map_or(0, |u| u.points);
+    let base = walk.netplay.baseline.entry(slot).or_insert(None);
+    let base = *base.get_or_insert(raw);
+    walk.sim.set_spawn_points(s, raw - base + carried);
+    crate::unlocks::apply_slot_costs(walk, s, &|u| {
+        crate::unlocks::UNLOCKABLES
+            .iter()
+            .position(|x| x.key == u.key)
+            .map_or(0, |i| kills[i])
+    });
+}
+
+/// Issue #194, an offline split round: the class screen gate of every local
+/// player after the first (the first keeps `unlocks::set_player_gate`), each
+/// from its own seat profile ([`install_local_profile`]), its points carried
+/// over a dropped controller. Nothing with one local player.
+pub fn gate_locals(walk: &mut WalkSim, round: Option<&crate::round_stats::RoundStats>) {
+    for k in 1..walk.local_count() {
+        let slot = walk.local_slot_of(k);
+        let carried = walk.carried_points(k);
+        gate_slot(walk, round, slot, carried);
     }
 }
 

@@ -1,7 +1,7 @@
 //! Sound playback: prepared voices, one-shots, cries, station starts and delayed layers.
 //! Shared state, lookup, loop voices, mixing and rules remain in the parent sounds module.
 use super::{
-    attenuation, decode_noted, ears_3d, mixer_pair, side, Cry, Handed, Listener, LoopRequest,
+    attenuation, decode_noted, ears_3d, mixer_pair, side, Cry, Ears, Handed, Listener, LoopRequest,
     LoopSource, Refused, SoundLib, Start, Timer, WeaponAsk, CHATTER_KEY_MAX, LAYER_TIMERS,
 };
 use crate::classdb::fnv1a_lowercase;
@@ -266,7 +266,7 @@ impl SoundLib {
         let path = self.take_path_by_hash(hash, nth)?;
         let pitch = (p.pitch * self.rate_mul).fmax(0.05);
         let secs = self.voice_secs(&path)? / pitch;
-        let dist = (pos - listener.pos).length();
+        let dist = listener.dist(pos);
         let gain = p.gain * attenuation(dist, &p);
         let a = gain * self.bus_of(&p);
         let ears = if p.flat {
@@ -317,7 +317,7 @@ impl SoundLib {
     /// key is that level x its bus (a chatter template's Bias 0,
     /// re-announcer.md 1.5), kept under a commander line's. Returns the
     /// line for the voice queue, or why not.
-    pub fn ask_line(&mut self, name: &str, pos: Vec3, ears: Vec3) -> Result<Line, Refused> {
+    pub fn ask_line(&mut self, name: &str, pos: Vec3, ears: impl Ears) -> Result<Line, Refused> {
         self.ask_line_with(name, pos, ears, false)
     }
 
@@ -329,7 +329,7 @@ impl SoundLib {
         &mut self,
         name: &str,
         pos: Vec3,
-        ears: Vec3,
+        ears: impl Ears,
         step: bool,
     ) -> Result<Line, Refused> {
         let hash = line_hash(name);
@@ -373,7 +373,7 @@ impl SoundLib {
         if p.play_probability.is_some_and(|pr| pr < self.next_rand()) {
             return Err(Refused::Probability);
         }
-        let level = attenuation((pos - ears).length(), &p);
+        let level = attenuation(ears.dist(pos), &p);
         if level <= 0.0 {
             return Err(Refused::Far);
         }
@@ -441,10 +441,7 @@ impl SoundLib {
         let mut starts = Vec::new();
         self.start(fnv1a_lowercase(name), Vec3::ZERO, Vec3::ZERO, &mut starts);
         if let Some(audio) = audio {
-            let ear = Listener {
-                pos: Vec3::ZERO,
-                yaw: 0.0,
-            };
+            let ear = Listener::new(Vec3::ZERO, 0.0);
             self.mix(audio, &starts, &ear);
         }
         starts
@@ -460,7 +457,7 @@ impl SoundLib {
         listener: &Listener,
     ) -> bool {
         let mut starts = Vec::new();
-        self.start(hash, pos, listener.pos, &mut starts);
+        self.start(hash, pos, listener, &mut starts);
         self.mix(audio, &starts, listener)
     }
 
@@ -468,7 +465,7 @@ impl SoundLib {
     /// heard by `listener` now. Once per stepped tick, after its events.
     pub fn update(&mut self, audio: &mut audio::Audio, dt: f32, listener: &Listener) {
         let mut starts = Vec::new();
-        self.tick(dt, listener.pos, &mut starts);
+        self.tick(dt, listener, &mut starts);
         self.mix(audio, &starts, listener);
     }
 
@@ -485,7 +482,7 @@ impl SoundLib {
         unit: u32,
         hash: u32,
         pos: Vec3,
-        ears: Vec3,
+        ears: impl Ears,
         out: &mut Vec<Start>,
     ) -> bool {
         let cut = self.cries.remove(&unit).is_some_and(|c| c.ends > self.now);
@@ -514,7 +511,7 @@ impl SoundLib {
     /// only the LAST ask's start, if its draw let it start: a cry cut in the
     /// tick it began is never heard (a shotgun's eight pellets on one unit
     /// are one cry, not eight starts summed in the mixer).
-    pub fn cries(&mut self, asks: &[(u32, u32, Vec3)], ears: Vec3) -> Vec<(u32, Start)> {
+    pub fn cries(&mut self, asks: &[(u32, u32, Vec3)], ears: impl Ears) -> Vec<(u32, Start)> {
         let mut last: Vec<(u32, Option<Start>)> = Vec::new();
         for &(unit, hash, pos) in asks {
             let mut out = Vec::new();
@@ -537,7 +534,7 @@ impl SoundLib {
         asks: &[(u32, u32, Vec3)],
         listener: &Listener,
     ) {
-        for (unit, s) in self.cries(asks, listener.pos) {
+        for (unit, s) in self.cries(asks, listener) {
             let shot = self.mix_shot(audio, &s, listener);
             if let Some(c) = self.cries.get_mut(&unit) {
                 c.shot = shot;
@@ -556,14 +553,7 @@ impl SoundLib {
         let ears = s.ears(listener);
         let (db, pan) = mixer_pair(ears);
         let shot = audio.play_shot(&self.cache[&s.path], db, f64::from(pitch), pan);
-        self.note(
-            s.hash,
-            &s.path,
-            s.gain,
-            ears,
-            pitch,
-            (s.pos - listener.pos).length(),
-        );
+        self.note(s.hash, &s.path, s.gain, ears, pitch, listener.dist(s.pos));
         self.played += 1;
         shot
     }
@@ -574,7 +564,7 @@ impl SoundLib {
         name: &str,
         rising: bool,
         pos: Vec3,
-        ears: Vec3,
+        ears: impl Ears,
     ) -> Option<Start> {
         let sounding = self.boosts.get(&vehicle).is_some_and(|c| c.ends > self.now);
         if sounding && !rising {
@@ -600,7 +590,7 @@ impl SoundLib {
         pos: Vec3,
         listener: &Listener,
     ) {
-        if let Some(s) = self.boost(vehicle, name, rising, pos, listener.pos) {
+        if let Some(s) = self.boost(vehicle, name, rising, pos, listener) {
             let shot = self.mix_shot(audio, &s, listener);
             if let Some(c) = self.boosts.get_mut(&vehicle) {
                 c.shot = shot;
@@ -621,7 +611,7 @@ impl SoundLib {
     pub fn weapon_voices(
         &mut self,
         asks: &[WeaponAsk],
-        ears: Vec3,
+        ears: impl Ears,
     ) -> Vec<(Option<(u32, u32)>, Start)> {
         let now = self.now;
         self.weapon_handles.retain(|_, v| {
@@ -669,7 +659,7 @@ impl SoundLib {
         asks: &[WeaponAsk],
         listener: &Listener,
     ) {
-        for (key, s) in self.weapon_voices(asks, listener.pos) {
+        for (key, s) in self.weapon_voices(asks, listener) {
             let shot = self.mix_shot(audio, &s, listener);
             let voice = key
                 .and_then(|k| self.weapon_handles.get_mut(&k))
@@ -686,7 +676,7 @@ impl SoundLib {
     /// `PlayProbability`, its range: B1 `FUN_002a9750` 235630, B2
     /// `FUN_003674c0` 362446 ask every update while the handle is inactive);
     /// what starts holds the handle for the take's length.
-    pub fn station_ambient(&mut self, asks: &[(u16, u32, Vec3)], ears: Vec3) -> Vec<Start> {
+    pub fn station_ambient(&mut self, asks: &[(u16, u32, Vec3)], ears: impl Ears) -> Vec<Start> {
         let mut out = Vec::new();
         for &(station, hash, pos) in asks {
             if self
@@ -723,7 +713,7 @@ impl SoundLib {
         self.station_voices
             .retain(|id, _| asks.iter().any(|(i, _, _)| i == id));
         for ask in asks {
-            for s in self.station_ambient(std::slice::from_ref(ask), listener.pos) {
+            for s in self.station_ambient(std::slice::from_ref(ask), listener) {
                 let shot = self.mix_shot(audio, &s, listener);
                 if let Some(v) = self.station_voices.get_mut(&ask.0) {
                     v.shot = shot;
@@ -761,7 +751,7 @@ impl SoundLib {
     /// record starts each layer of delay exactly 0 at once and arms a timer
     /// for any other, at delay + deviation x U(-1, 1), which [`SoundLib::tick`]
     /// fires at `pos` (B1 `FUN_0045ca08`, B2 `FUN_0054fa38`).
-    pub fn start(&mut self, hash: u32, pos: Vec3, ears: Vec3, out: &mut Vec<Start>) {
+    pub fn start(&mut self, hash: u32, pos: Vec3, ears: impl Ears, out: &mut Vec<Start>) {
         let Some((p, _)) = self.find(hash) else {
             return;
         };
@@ -775,7 +765,7 @@ impl SoundLib {
             // PROVISIONAL: the PS2 ranks a waiting layer by its level x a
             // priority term (B1 `FUN_0045bec0`); this is level x priority.
             let value = self.find(*l).map_or(0.0, |(lp, _)| {
-                attenuation((pos - ears).length(), &lp) * lp.priority
+                attenuation(ears.dist(pos), &lp) * lp.priority
             });
             let timer = Timer {
                 sound: *l,
@@ -804,7 +794,7 @@ impl SoundLib {
 
     /// One property's own take (a layer's sound is a `soundproperties`: the
     /// PS2's parser keeps no other, so a layer never nests).
-    fn start_prop(&mut self, hash: u32, pos: Vec3, ears: Vec3, out: &mut Vec<Start>) {
+    fn start_prop(&mut self, hash: u32, pos: Vec3, ears: impl Ears, out: &mut Vec<Start>) {
         self.start_prop_with(hash, pos, ears, None, out);
     }
 
@@ -814,7 +804,7 @@ impl SoundLib {
         &mut self,
         hash: u32,
         pos: Vec3,
-        ears: Vec3,
+        ears: impl Ears,
         emitter: Option<&crate::ambience::Emitter>,
         out: &mut Vec<Start>,
     ) {
@@ -851,7 +841,7 @@ impl SoundLib {
             return;
         };
         // Refused at level 0 (B1 `FUN_004599e0` 518974).
-        let level = attenuation((pos - ears).length(), &p);
+        let level = attenuation(ears.dist(pos), &p);
         if level <= 0.0 {
             return;
         }
@@ -879,7 +869,7 @@ impl SoundLib {
     /// Advance the waiting layers by `dt`: one whose time has passed starts
     /// (its level taken now, at the position it was armed with), then the
     /// others age (B1 `FUN_0045be28`, run once per sound update).
-    pub fn tick(&mut self, dt: f32, ears: Vec3, out: &mut Vec<Start>) {
+    pub fn tick(&mut self, dt: f32, ears: impl Ears, out: &mut Vec<Start>) {
         let mut due = Vec::new();
         self.timers.retain_mut(|t| {
             // The slack is f32 rounding of a summed dt (0.3 s is 9 ticks at 30 Hz).

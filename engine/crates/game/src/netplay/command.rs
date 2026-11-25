@@ -95,8 +95,10 @@ impl GameCommand {
 /// A guest's ask of the host.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameRequest {
-    /// The pause menu's Cheats row or a Morse word, for the asker's slot.
-    CheatToggle { id: u8, on: bool },
+    /// The pause menu's Cheats row or a Morse word, for `slot`: one of the
+    /// asking machine's own players (its local 0 or a further splitscreen
+    /// player, issue #194), whoever opened that player's menu.
+    CheatToggle { slot: u8, id: u8, on: bool },
     /// A mid-round joiner built round `round_id` (LAN §4.3, §4.5): its
     /// static digest and tick-0 `Sim::hash`, checked as a round-start
     /// guest's `Loaded` is (a joiner sends no `Loaded`: the host would take
@@ -142,12 +144,23 @@ pub enum Refusal {
     /// A round report, not a command ([`GameRequest::Built`],
     /// [`GameRequest::LeftRound`]).
     NotACommand,
+    /// The slot is not one of the asking machine's players.
+    NotYours,
 }
 
 /// The command a guest's request becomes, or why not (module rules).
-pub fn validate_request(slot: u8, req: &GameRequest, policy: u32) -> Result<GameCommand, Refusal> {
+/// `machine` is every slot of the asking machine (its local 0's first): a
+/// machine changes only its own players' cheats.
+pub fn validate_request(
+    machine: &[u8],
+    req: &GameRequest,
+    policy: u32,
+) -> Result<GameCommand, Refusal> {
     match *req {
-        GameRequest::CheatToggle { id, on } => {
+        GameRequest::CheatToggle { slot, id, on } => {
+            if !machine.contains(&slot) {
+                return Err(Refusal::NotYours);
+            }
             if id >= CHEAT_COUNT {
                 return Err(Refusal::UnknownCheat);
             }
@@ -161,7 +174,11 @@ pub fn validate_request(slot: u8, req: &GameRequest, policy: u32) -> Result<Game
 }
 
 /// [`validate_request`] from the request's bytes.
-pub fn validate_request_bytes(slot: u8, bytes: &[u8], policy: u32) -> Result<GameCommand, Refusal> {
+pub fn validate_request_bytes(
+    machine: &[u8],
+    bytes: &[u8],
+    policy: u32,
+) -> Result<GameCommand, Refusal> {
     let req = GameRequest::decode(bytes).ok_or(Refusal::Malformed)?;
-    validate_request(slot, &req, policy)
+    validate_request(machine, &req, policy)
 }

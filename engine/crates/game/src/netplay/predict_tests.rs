@@ -216,10 +216,9 @@ fn the_swapped_aim_folds_the_rest_of_the_inputs() {
 impl Predictor {
     /// A predictor holding the same ledger (re-predicting from scratch).
     fn clone_for_test(&self) -> Predictor {
-        Predictor {
-            ledger: self.ledger.clone(),
-            ..Predictor::new()
-        }
+        let mut p = Predictor::new();
+        p.main.ledger = self.main.ledger.clone();
+        p
     }
 }
 
@@ -270,7 +269,7 @@ fn drawing_a_predicted_saber_swing_or_block_leaves_the_confirmed_sim_unchanged()
         assert_eq!(view.predictor.depth(), pending.len());
         // The copy's swing or block as its poses would hold it.
         let mut drawn = w.sim.units[i].clone();
-        for p in &mut view.predictor.poses {
+        for p in &mut view.predictor.main.poses {
             drawn.weapon.melee = Some(melee(predicted, 0.033 * p.seq as f32));
             p.unit.melee = UnitPose::of(&drawn).melee;
         }
@@ -294,4 +293,94 @@ fn drawing_a_predicted_saber_swing_or_block_leaves_the_confirmed_sim_unchanged()
         }
     }
     assert_eq!(swapped, 18, "every frame drew the predicted pose");
+}
+
+/// Issue #194 B18: a machine with two local players predicts both slots in
+/// the one copy, each from its own pending inputs (neither repeats a stale
+/// pad), and each local's poses are what the confirmed steps over the same
+/// two input rows do. Both are drawn swapped in at once and swapped out
+/// again with the confirmed sim unchanged.
+#[test]
+fn prediction_of_two_local_slots_matches_the_confirmed_steps() {
+    let mut w = crate::walk::two_locals_walk();
+    crate::walk::spawn_locals(&mut w);
+    let mine = [run(0.2, 0), run(0.4, 0), run(0.0, 0), run(-0.3, 0)];
+    let theirs = [run(-0.5, 0), run(-0.5, 0), run(0.6, 0), run(0.1, 0)];
+    let mut p = Predictor::new();
+    p.set_extra_slots(&[1]);
+    p.update_locals(&w.sim, 0, &mine, &[&theirs], 1.0 / 60.0);
+    assert_eq!(p.depth(), 4);
+    assert_eq!(p.stats.mode, PredictMode::Full);
+    assert_eq!((p.poses_of(0).len(), p.poses_of(1).len()), (5, 5));
+    assert_eq!(p.poses_of(0), p.poses());
+    assert_ne!(p.poses_of(0)[4].index, p.poses_of(1)[4].index);
+    let hash = w.sim.hash();
+    let unit = |w: &WalkSim, k: usize| UnitPose::of(&w.sim.units[w.local_unit(k).index as usize]);
+    let confirmed = [unit(&w, 0), unit(&w, 1)];
+    assert!(p.swap_in_local(0, &mut w, 1.0, &[], 0.0));
+    assert!(p.swap_in_local(1, &mut w, 1.0, &[], 0.0));
+    assert!(p.swapped());
+    for (k, before) in confirmed.iter().enumerate() {
+        let drawn = unit(&w, k);
+        assert!(
+            drawn.pos.distance(before.pos) > 0.1,
+            "local {k} drawn ahead"
+        );
+        assert_eq!(drawn.pos, p.poses_of(k)[4].unit.pos);
+    }
+    p.swap_out(&mut w);
+    assert!(!p.swapped());
+    assert_eq!(w.sim.hash(), hash, "the prediction reached the sim");
+    for (n, (a, b)) in mine.iter().zip(&theirs).enumerate() {
+        w.step_tick(&[*a, *b]);
+        for k in 0..2 {
+            let want = &p.poses_of(k)[n + 1];
+            assert_eq!(want.tick, w.sim.tick);
+            let got = unit(&w, k);
+            assert_eq!(
+                (got.pos, got.yaw, got.pitch),
+                (want.unit.pos, want.unit.yaw, want.unit.pitch),
+                "local {k} after input {n}"
+            );
+        }
+    }
+    // One local predicted alone stays the old single-slot prediction.
+    let mut alone = Predictor::new();
+    let mut same = Predictor::new();
+    alone.update(&w.sim, 0, &mine, 1.0 / 60.0);
+    same.update_locals(&w.sim, 0, &mine, &[], 1.0 / 60.0);
+    assert_eq!(alone.poses(), same.poses());
+}
+
+/// Issue #194 B18 review: two locals whose pending queues differ (one seated
+/// late). The copy goes as deep as the longer queue, but the shorter one's
+/// poses stop at its own inputs (`depth_of`, where its look fold starts);
+/// when its queue grows into the ticks the copy stepped with a repeated pad,
+/// the prediction starts over and equals one made fresh from both queues.
+#[test]
+fn prediction_of_uneven_local_queues_stops_each_at_its_own_inputs() {
+    let mut w = crate::walk::two_locals_walk();
+    crate::walk::spawn_locals(&mut w);
+    let mine = [run(0.2, 0), run(0.4, 0), run(0.0, 0), run(-0.3, 0)];
+    let theirs = [run(-0.5, 0), run(0.6, 0), run(0.1, 0)];
+    let mut p = Predictor::new();
+    p.set_extra_slots(&[1]);
+    assert_eq!(
+        (p.index_of_slot(0), p.index_of_slot(1), p.index_of_slot(7)),
+        (Some(0), Some(1), None)
+    );
+    p.update_locals(&w.sim, 0, &mine, &[&theirs[..2]], 1.0 / 60.0);
+    assert_eq!((p.depth(), p.depth_of(0), p.depth_of(1)), (4, 4, 2));
+    assert_eq!((p.poses_of(0).len(), p.poses_of(1).len()), (5, 3));
+    let base = p.poses_of(1)[0].seq;
+    assert_eq!(p.poses_of(1).last().unwrap().seq, base + 2);
+    // Local 1's third input arrives; the confirmed sim has not moved.
+    p.update_locals(&w.sim, 0, &mine, &[&theirs], 1.0 / 60.0);
+    assert_eq!((p.depth(), p.depth_of(1)), (4, 3));
+    let mut fresh = Predictor::new();
+    fresh.set_extra_slots(&[1]);
+    fresh.update_locals(&w.sim, 0, &mine, &[&theirs], 1.0 / 60.0);
+    for k in 0..2 {
+        assert_eq!(p.poses_of(k), fresh.poses_of(k), "local {k}");
+    }
 }

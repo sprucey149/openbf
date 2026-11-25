@@ -945,3 +945,105 @@ fn an_ability_cast_queues_its_effect_sound() {
     fx.ingest_sim(&sim);
     assert_eq!(fx.take_sounds(), [("buff_rage_fire".to_owned(), pos)]);
 }
+
+/// Issue #194 B13: a blast's camera shake per local player.
+mod split_shake {
+    use super::*;
+    use crate::camera_shake::CameraShake;
+    use crate::walk::{posts_walk, spawn_locals, two_locals_walk};
+
+    const BLAST: core::impact::Shake = core::impact::Shake {
+        amount: 1.0,
+        inner: 0.0,
+        outer: 35.0,
+        length: 1.0,
+    };
+
+    fn soldier_at(walk: &WalkSim, i: usize) -> (Vec3, f32) {
+        let u = walk.sim.unit(walk.local_unit(i)).unwrap();
+        (
+            u.soldier.pos,
+            core::sim::soldier_blast_sphere(u.soldier.stance).1,
+        )
+    }
+
+    fn turned(s: Option<&CameraShake>) -> String {
+        format!("{:?}", s.unwrap().apply(render::Camera::default()))
+    }
+
+    /// A blast beside P2 shakes P2's camera; P1, 300 m away, stays still.
+    #[test]
+    fn a_blast_beside_p2_shakes_p2_and_leaves_p1_alone() {
+        let mut walk = two_locals_walk();
+        spawn_locals(&mut walk);
+        let (p2, _) = soldier_at(&walk, 1);
+        let mut fx = Fx::default();
+        fx.shake_blasts.push((p2 + Vec3::new(5.0, 0.0, 0.0), BLAST));
+        fx.shake_player(&walk);
+        assert!(fx.shake_of(1).unwrap().is_shaking(), "P2 shakes");
+        assert!(!fx.shake_of(0).unwrap().is_shaking(), "P1 is far");
+        // And the other way round.
+        let (p1, _) = soldier_at(&walk, 0);
+        let mut fx = Fx::default();
+        fx.shake_blasts.push((p1 + Vec3::new(5.0, 0.0, 0.0), BLAST));
+        fx.shake_player(&walk);
+        assert!(fx.shake_of(0).unwrap().is_shaking());
+        assert!(!fx.shake_of(1).unwrap().is_shaking());
+    }
+
+    /// P2's view camera turns by P2's own shake (`view_camera`'s `shake`).
+    #[test]
+    fn p2s_view_camera_carries_p2s_shake() {
+        let mut walk = two_locals_walk();
+        spawn_locals(&mut walk);
+        let (p2, _) = soldier_at(&walk, 1);
+        let mut fx = Fx::default();
+        fx.shake_blasts.push((p2 + Vec3::new(5.0, 0.0, 0.0), BLAST));
+        fx.shake_player(&walk);
+        let cell = [640, 0, 640, 720];
+        let look = core::sim::PadState::default();
+        let still = crate::render_blend::view_camera(&mut walk, 1, cell, &look, None);
+        let shaken = crate::render_blend::view_camera(&mut walk, 1, cell, &look, fx.shake_of(1));
+        assert_ne!(format!("{still:?}"), format!("{shaken:?}"));
+        assert_eq!(
+            format!("{shaken:?}"),
+            format!("{:?}", fx.shake_of(1).unwrap().apply(still))
+        );
+    }
+
+    /// An away player's shake takes no blast (a bot may hold their handle).
+    #[test]
+    fn an_away_player_takes_no_shake() {
+        let mut walk = two_locals_walk();
+        spawn_locals(&mut walk);
+        let (p2, _) = soldier_at(&walk, 1);
+        walk.suspend_local_player(1).expect("P2 was playing");
+        let mut fx = Fx::default();
+        fx.shake_blasts.push((p2 + Vec3::new(5.0, 0.0, 0.0), BLAST));
+        fx.shake_player(&walk);
+        assert!(!fx.shake_of(1).unwrap().is_shaking());
+    }
+
+    /// One local player: the first player's shake runs the same sequence as before (one
+    /// `CameraShake` fed every blast from the player's soldier), and no further shake exists.
+    #[test]
+    fn one_players_shake_sequence_is_unchanged() {
+        let mut walk = posts_walk();
+        spawn_locals(&mut walk);
+        let (at, w) = soldier_at(&walk, 0);
+        let mut fx = Fx::default();
+        let mut old = CameraShake::default();
+        for tick in 0..60 {
+            if tick % 7 == 0 {
+                let pos = at + Vec3::new(3.0 + tick as f32 * 0.25, 0.0, 1.0);
+                fx.shake_blasts.push((pos, BLAST));
+                old.blast(&BLAST, at.distance(pos), w);
+            }
+            fx.shake_player(&walk);
+            old.tick(core::TICK_DT);
+            assert_eq!(turned(fx.shake_of(0)), turned(Some(&old)), "tick {tick}");
+            assert!(fx.shake_of(1).is_none());
+        }
+        assert!(fx.shake.is_shaking());
+    }
+}

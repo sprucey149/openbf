@@ -1083,6 +1083,7 @@ fn leave_battle_clears_pause_state_and_sounds() {
     a.paused = true;
     a.pause_menu.cursor = 3;
     a.front = Some(front::FrontShell::new(&PathBuf::new()));
+    a.split_rumble = vec![Default::default(), Default::default()];
 
     a.leave_battle();
 
@@ -1092,6 +1093,10 @@ fn leave_battle_clears_pause_state_and_sounds() {
     assert!(a.sounds.is_none());
     assert!(a.foley.is_none());
     assert!(a.weather.is_none());
+    assert!(
+        a.split_rumble.is_empty(),
+        "the further players' rumble starts fresh next round"
+    );
 }
 
 #[test]
@@ -1144,4 +1149,127 @@ fn campaign_relaunch_preserves_class_whitelist_and_side_rules() {
             "run {run}: Geonosis initially restricts player to 1 whitelisted class"
         );
     }
+}
+
+/// Issue #194 (`SPLITSCREEN.md` 18.2, B6): the pointer is the keyboard player's wherever they
+/// sit. With the keyboard on local player 1 (slot 1, the right cell of two side by side), the
+/// step reads their spawn page, hit-tests their own cell's layout (`game::split_ui::cell_frame`)
+/// and puts the pick in the keyboard's pad, which is theirs; player 0's screens never move. A
+/// point over the same post in player 0's cell does nothing.
+#[test]
+fn a_keyboard_player_at_local_one_clicks_a_post_on_their_own_spawn_page() {
+    use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SpawnStage};
+    let mut a = App::new(
+        Default::default(),
+        Default::default(),
+        setup(None),
+        None,
+        None,
+        None,
+        Default::default(),
+    );
+    a.screen = Screen::Battle;
+    let mut walk = game::walk::WalkSim::new(42, glam::Vec3::ZERO, None);
+    for (x, team) in [(0.0, 0u8), (-200.0, 1), (-300.0, 1)] {
+        let pos = glam::Vec3::new(x, 0.0, 0.0);
+        walk.sim.add_cp(
+            core::cp::CpDef {
+                name: format!("cp{x}"),
+                pos,
+                capture: core::region::Region::sphere(pos, 10.0),
+                control: None,
+                value_bleed: 1,
+                value_atk: [1, 1],
+                value_def: [1, 1],
+                spawn_nodes: vec![(pos + glam::Vec3::Z, 0.0)],
+                capture_time: 10.0,
+                neutralize_time: 10.0,
+            },
+            Some(team),
+        );
+    }
+    walk.add_local_player(1, Some(1)).expect("slot 1 is free");
+    walk.minimap = Some(game::minimap::MapStatic {
+        sheet_dir: PathBuf::new(),
+        image: None,
+        bounds: Some(([0.0, 0.0], 400.0)),
+        north: 0.0,
+        turn: 0.0,
+        posts: std::collections::HashMap::new(),
+        soldiers: vec![game::minimap::ClassIcon {
+            texture: None,
+            scale: 1.0,
+            view: [50.0; 4],
+        }],
+        vehicles: Vec::new(),
+        structures: Vec::new(),
+        droids: std::collections::HashMap::new(),
+    });
+    // Player 1 behind their spawn map, on their team's first post; player 0 untouched.
+    let stage0 = walk.sim.spawn_stage[0];
+    if walk.sim.spawn_stage[1] != SpawnStage::Map {
+        assert!(
+            walk.sim.open_spawn_screens(1, false),
+            "slot 1's screens open"
+        );
+    }
+    assert_eq!(walk.sim.spawn_stage[1], SpawnStage::Map);
+    let post0 = walk.sim.spawn_post_choice[0];
+    a.walk = Some((walk, render::MeshHandle::default()));
+    fn sim(a: &App) -> &core::sim::Sim {
+        &a.walk.as_ref().unwrap().0.sim
+    }
+    let tick = |a: &mut App| {
+        let pad = a.kbm.pad(PadState::default());
+        a.walk
+            .as_mut()
+            .unwrap()
+            .0
+            .step_tick(&[PadState::default(), pad]);
+        a.kbm.consumed(&pad, 1);
+        pad
+    };
+    let k = glam::Vec3::splat(0.6);
+    let cells = game::split_layout::cells(2, 1280, 720, game::split_layout::TwoPlayer::SideBySide);
+    let (left, right) = (cells[0], cells[1]);
+    let frame = game::split_ui::cell_frame(right, 1.0);
+    let walk = &a.walk.as_ref().unwrap().0;
+    let map = walk.minimap.as_ref().unwrap().spawn_model(walk, 1);
+    let in_cell = ui::hud_map::spawn_window_point_in(&map, k, [-300.0, 0.0], true, &frame)
+        .expect("post 2 is drawn");
+    let at =
+        |cell: game::split_layout::Cell| [in_cell[0] + cell[0] as f32, in_cell[1] + cell[1] as f32];
+    let view = Some((1, right));
+
+    // Over the same post's place in player 0's cell: not the keyboard player's screen.
+    a.shell_pointer.moved_to(at(left));
+    a.shell_pointer.click();
+    a.step_spawn_pointer_in(1.0, Some(k), view);
+    assert_eq!(a.kbm.pad(PadState::default()).pick, None, "another cell");
+
+    // Over post 2 in their own cell: hover selects it for slot 1.
+    a.shell_pointer.moved_to(at(right));
+    a.step_spawn_pointer_in(1.0, Some(k), view);
+    let pad = tick(&mut a);
+    assert_eq!(
+        pad.pick,
+        Some(ScreenPick::Post(2)),
+        "hover picks in their cell"
+    );
+    assert_eq!(
+        sim(&a).spawn_post_choice[1],
+        Some(core::unit::SpawnPost::Post(2))
+    );
+    // The click on it accepts: player 1 goes on to their class page.
+    a.shell_pointer.click();
+    a.step_spawn_pointer_in(1.0, Some(k), view);
+    let pad = tick(&mut a);
+    assert_ne!(pad.buttons & SPAWN_ACCEPT, 0, "the click accepts");
+    assert_eq!(sim(&a).spawn_stage[1], SpawnStage::Class);
+    // Player 0's screens never moved, and the swap gave the walk back to player 0.
+    assert_eq!(sim(&a).spawn_stage[0], stage0);
+    assert_eq!(sim(&a).spawn_post_choice[0], post0);
+    let walk = &a.walk.as_ref().unwrap().0;
+    assert_eq!(walk.local_slot_of(0), 0);
+    assert_eq!(walk.local_slot_of(1), 1);
 }

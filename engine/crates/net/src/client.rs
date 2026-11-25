@@ -3,10 +3,15 @@
 //!
 //! Rules:
 //! - Clock-injected like the host core: nothing reads a clock.
-//! - Inputs: [`ClientCore::submit_input`] numbers each input tick from 1.
+//! - Inputs: [`ClientCore::submit_inputs`] numbers each input tick from 1.
 //!   Each carries the confirmed tick its player was viewing (the client
 //!   sim's `tick`, the bundles it has stepped), for the host's lag
-//!   compensation stamp.
+//!   compensation stamp. A machine with several local players submits one
+//!   pad per local under the one sequence; local 0's go in the `Inputs`
+//!   chunk (bytes unchanged from one player), each extra local's in its own
+//!   `LocalInputs` chunk with the same base and count, so every local's
+//!   slot receives the same sequences in the same datagram. The host's
+//!   `input_through` is the slowest of the machine's slots.
 //!   Every packet carries every input the host has not acknowledged (as many
 //!   as fit), delta-coded from the last acknowledged one. There is no resend
 //!   timer; the next packet covers a loss.
@@ -25,7 +30,7 @@
 
 use crate::bundle::{decompress_log, TickBundle};
 use crate::conn::{Conn, ConnStats};
-use crate::msg::{Msg, RejectReason, RosterEntry};
+use crate::msg::{LocalHello, Msg, RejectReason, RosterEntry, MAX_LOCALS};
 use crate::packet::{
     decode_bundles_head, decode_bundles_rest, encode_inputs, parse_chunks, parse_header,
     raw_conn_id, Chunk, DropCounts, DropReason, CHUNK_OVERHEAD, PROTOCOL,
@@ -48,6 +53,11 @@ pub struct ClientConfig {
     pub token: u64,
     pub content: Vec<u8>,
     pub profile: Vec<u8>,
+    /// This machine's other local players (splitscreen) in rising seat
+    /// order; empty for one player. Each gets its own slot, all or none.
+    /// [`ClientCore::new`] keeps the first [`crate::msg::MAX_EXTRA_LOCALS`]
+    /// (a longer list would be a `Hello` the host cannot read).
+    pub locals: Vec<LocalHello>,
     /// Random, nonzero, new for every connection attempt.
     pub conn_id: u32,
 }
@@ -60,6 +70,7 @@ impl ClientConfig {
             token,
             content: Vec::new(),
             profile: Vec::new(),
+            locals: Vec::new(),
             conn_id: crate::fresh_conn_id(),
         }
     }
@@ -85,9 +96,11 @@ pub enum ClientState {
 /// What the client game hears from its network core.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientEvent {
+    /// `slot` is local 0's; `extra` the slots of locals 1.., in order.
     Welcome {
         slot: u8,
         max_players: u8,
+        extra: Vec<u8>,
     },
     Rejected {
         reason: RejectReason,
@@ -155,12 +168,19 @@ pub struct ClientCore {
     now: Micros,
     conn: Conn,
     state: ClientState,
+    /// The slots of locals 1.. once welcomed.
+    extra: Vec<u8>,
+    /// Locals whose pad is away ([`ClientCore::set_local_away`]); told to
+    /// the host as they change, and again on `Welcome`.
+    away: [bool; MAX_LOCALS],
     events: VecDeque<ClientEvent>,
-    /// Unacknowledged inputs: sequence, pad, view tick.
-    inputs: VecDeque<(u32, PadState, u32)>,
+    /// Unacknowledged inputs: sequence, each local's pad (locals past
+    /// `1 + extra.len()` unused), view tick.
+    inputs: VecDeque<(u32, [PadState; MAX_LOCALS], u32)>,
     next_input: u32,
     input_acked: u32,
-    acked_pad: PadState,
+    /// Each local's pad of sequence `input_acked` (the delta base).
+    acked_pads: [PadState; MAX_LOCALS],
     inputs_dirty: bool,
     depth: u8,
     starved: u32,
@@ -185,7 +205,13 @@ pub struct ClientCore {
 
 impl ClientCore {
     /// Starts connecting to `host`; the `Hello` goes out on the first update.
-    pub fn new(config: ClientConfig, host: SocketAddr, now: Micros) -> Self {
+    pub fn new(mut config: ClientConfig, host: SocketAddr, now: Micros) -> Self {
+        debug_assert!(
+            config.locals.len() <= crate::msg::MAX_EXTRA_LOCALS,
+            "a Hello carries at most {} extra locals",
+            crate::msg::MAX_EXTRA_LOCALS
+        );
+        config.locals.truncate(crate::msg::MAX_EXTRA_LOCALS);
         let mut conn = Conn::new(config.conn_id, host, now);
         conn.send_reliable(
             &Msg::Hello {
@@ -195,6 +221,7 @@ impl ClientCore {
                 token: config.token,
                 content: config.content.clone(),
                 profile: config.profile.clone(),
+                locals: config.locals.clone(),
             }
             .encode(),
         );
@@ -204,11 +231,13 @@ impl ClientCore {
             now,
             conn,
             state: ClientState::Connecting,
+            extra: Vec::new(),
+            away: [false; MAX_LOCALS],
             events: VecDeque::new(),
             inputs: VecDeque::new(),
             next_input: 1,
             input_acked: 0,
-            acked_pad: PadState::default(),
+            acked_pads: [PadState::default(); MAX_LOCALS],
             inputs_dirty: false,
             depth: 0,
             starved: 0,
@@ -240,6 +269,22 @@ impl ClientCore {
         match self.state {
             ClientState::Connected { slot } => Some(slot),
             _ => None,
+        }
+    }
+
+    /// Every slot this machine holds, local 0 first (empty until welcomed).
+    pub fn slots(&self) -> Vec<u8> {
+        self.slot()
+            .into_iter()
+            .chain(self.extra.iter().copied())
+            .collect()
+    }
+
+    /// The slot of local player `idx` (0: the first), once welcomed.
+    pub fn local_slot(&self, idx: u8) -> Option<u8> {
+        match idx {
+            0 => self.slot(),
+            i => self.slot().and(self.extra.get(usize::from(i) - 1).copied()),
         }
     }
 
@@ -284,17 +329,61 @@ impl ClientCore {
 
     /// Sends one input tick's pad, made while the player was viewing the
     /// confirmed sim at `view_tick` (its `Sim::tick`: how many bundles it
-    /// had stepped). Returns its sequence number.
+    /// had stepped). Returns its sequence number. On a machine with several
+    /// locals the others send a neutral pad ([`ClientCore::submit_inputs`]).
     pub fn submit_input(&mut self, pad: PadState, view_tick: u32) -> Option<u32> {
+        self.submit_inputs(&[pad], view_tick)
+    }
+
+    /// Sends one input tick for every local player under one sequence:
+    /// `pads[i]` is local `i`'s (a missing one is a neutral pad, one past
+    /// the machine's locals is ignored). All were made while viewing the
+    /// confirmed sim at `view_tick`. Returns the sequence number.
+    pub fn submit_inputs(&mut self, pads: &[PadState], view_tick: u32) -> Option<u32> {
         if !self.connected() {
             return None;
         }
-        let pad = crate::bundle::strip_tracked_inputs(pad);
+        let mut row = [PadState::default(); MAX_LOCALS];
+        for (r, p) in row.iter_mut().zip(pads.iter().take(self.locals())) {
+            *r = crate::bundle::strip_tracked_inputs(*p);
+        }
         let seq = self.next_input;
         self.next_input += 1;
-        self.inputs.push_back((seq, pad, view_tick));
+        self.inputs.push_back((seq, row, view_tick));
         self.inputs_dirty = true;
         Some(seq)
+    }
+
+    /// How many local players this machine plays (1 until welcomed).
+    pub fn locals(&self) -> usize {
+        1 + self.extra.len()
+    }
+
+    /// Local player `local`'s pad went away (`away`) or came back
+    /// (splitscreen). The host takes the local's slot out of the round (a
+    /// bot holds it) and, when it is back, tells its game to seat it again;
+    /// the machine's other locals play on. Only a change is sent; before the
+    /// welcome it is kept and sent with it. An index past
+    /// [`crate::msg::MAX_LOCALS`] is ignored.
+    pub fn set_local_away(&mut self, local: u8, away: bool) {
+        let Some(flag) = self.away.get_mut(usize::from(local)) else {
+            return;
+        };
+        if *flag == away {
+            return;
+        }
+        *flag = away;
+        self.send(if away {
+            Msg::LocalAway { local }
+        } else {
+            Msg::LocalBack { local }
+        });
+    }
+
+    /// Whether local player `local`'s pad is away
+    /// ([`ClientCore::set_local_away`]).
+    pub fn local_away(&self, local: u8) -> bool {
+        self.away.get(usize::from(local)).copied().unwrap_or(false)
     }
 
     /// The round is built: its static gameplay digest and tick-0 hash.
@@ -356,8 +445,20 @@ impl ClientCore {
         self.send(Msg::Resync);
     }
 
+    /// The first local player is ready for `round_id` with `profile`.
     pub fn ready(&mut self, round_id: u32, profile: Vec<u8>) {
-        self.send(Msg::Ready { round_id, profile });
+        self.ready_local(0, round_id, profile);
+    }
+
+    /// Local player `local` is ready (the host hears it for that local's
+    /// slot; an index this machine was not given a slot for is dropped
+    /// there).
+    pub fn ready_local(&mut self, local: u8, round_id: u32, profile: Vec<u8>) {
+        self.send(Msg::Ready {
+            round_id,
+            profile,
+            local,
+        });
     }
 
     /// An opaque request for the host game.
@@ -458,11 +559,11 @@ impl ClientCore {
 
     fn take_status(&mut self, through: u32, depth: u8, starved: u32) {
         if through > self.input_acked && through < self.next_input {
-            while let Some(&(seq, pad, _)) = self.inputs.front() {
+            while let Some(&(seq, pads, _)) = self.inputs.front() {
                 if seq > through {
                     break;
                 }
-                self.acked_pad = pad;
+                self.acked_pads = pads;
                 self.inputs.pop_front();
             }
             self.input_acked = through;
@@ -523,11 +624,25 @@ impl ClientCore {
 
     fn take_message(&mut self, msg: Msg) {
         match msg {
-            Msg::Welcome { slot, max_players } => {
+            Msg::Welcome {
+                slot,
+                max_players,
+                extra,
+            } => {
                 if self.state == ClientState::Connecting {
                     self.state = ClientState::Connected { slot };
-                    self.events
-                        .push_back(ClientEvent::Welcome { slot, max_players });
+                    self.extra.clone_from(&extra);
+                    // Pads lost before the welcome: the host hears them now.
+                    for local in 0..self.locals().min(MAX_LOCALS) {
+                        if self.away[local] {
+                            self.send(Msg::LocalAway { local: local as u8 });
+                        }
+                    }
+                    self.events.push_back(ClientEvent::Welcome {
+                        slot,
+                        max_players,
+                        extra,
+                    });
                 }
             }
             Msg::Reject { reason, detail } => self.end(
@@ -682,17 +797,40 @@ impl ClientCore {
             return Vec::new();
         }
         let status = (self.stream != 0).then_some((self.stream, self.next_needed));
-        let pads: Vec<(PadState, u32)> = self.inputs.iter().map(|(_, p, v)| (*p, *v)).collect();
-        let (acked, acked_pad) = (self.input_acked, self.acked_pad);
+        let k = self.locals();
+        let columns: Vec<Vec<(PadState, u32)>> = (0..k)
+            .map(|i| self.inputs.iter().map(|(_, p, v)| (p[i], *v)).collect())
+            .collect();
+        let (acked, acked_pads) = (self.input_acked, self.acked_pads);
         let packets = self.conn.build(now, |pw| {
             if let Some((stream, next)) = status {
                 pw.client_status(stream, next);
             }
-            if !pads.is_empty() {
-                let budget = pw.room().saturating_sub(CHUNK_OVERHEAD + 128);
-                let (body, n) = encode_inputs(acked, &acked_pad, &pads, budget);
+            if !columns[0].is_empty() {
+                // Every local gets an equal share and the same count, so
+                // their slots stay on the same sequence. One local: the
+                // whole room, as before.
+                let overhead = k * CHUNK_OVERHEAD + (k - 1) + 128;
+                let budget = pw.room().saturating_sub(overhead) / k;
+                let coded: Vec<(Vec<u8>, usize)> = columns
+                    .iter()
+                    .zip(&acked_pads)
+                    .map(|(col, base)| encode_inputs(acked, base, col, budget))
+                    .collect();
+                let n = coded.iter().map(|c| c.1).min().unwrap_or(0);
                 if n > 0 {
-                    pw.inputs(&body);
+                    for (i, (body, m)) in coded.into_iter().enumerate() {
+                        let body = if m == n {
+                            body
+                        } else {
+                            encode_inputs(acked, &acked_pads[i], &columns[i][..n], budget).0
+                        };
+                        if i == 0 {
+                            pw.inputs(&body);
+                        } else {
+                            pw.local_inputs(i as u8, &body);
+                        }
+                    }
                 }
             }
         });

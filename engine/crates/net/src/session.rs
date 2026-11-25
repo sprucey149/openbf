@@ -46,6 +46,22 @@ pub trait SessionCore: Send + 'static {
 pub enum HostCommand {
     /// The host player's pad and the confirmed tick it was viewing.
     SubmitInput(PadState, u32),
+    /// [`HostCore::submit_input_for`]: one of the host's own players' pad
+    /// (`slot` 0 or a host local) and the confirmed tick it was viewing.
+    SubmitInputFor {
+        slot: u8,
+        pad: PadState,
+        view_tick: u32,
+    },
+    /// Every host local's pad of one frame (`(slot, pad)`, slot 0 first)
+    /// and the confirmed tick they were viewing, applied in one go: the
+    /// network thread can close a tick between two commands, so one
+    /// command per slot could split a frame's pads across two ticks and
+    /// put the locals' queues out of step (`HostCore::submit_input_for`).
+    SubmitInputsFor {
+        pads: Vec<(u8, PadState)>,
+        view_tick: u32,
+    },
     SetLobby(Vec<u8>),
     SetInfo(Vec<u8>),
     /// [`HostCore::load_round`]: the opaque setup and the slots it seats.
@@ -55,6 +71,12 @@ pub enum HostCommand {
     },
     StartRound,
     EndRound,
+    /// [`HostCore::set_profile`]: the profile `slot`'s later `AddHuman`
+    /// carries.
+    SetProfile {
+        slot: u8,
+        profile: Vec<u8>,
+    },
     AddHuman {
         slot: u8,
         team: u8,
@@ -81,6 +103,20 @@ pub enum HostCommand {
         data: Vec<u8>,
     },
     Chat(String),
+    /// [`HostCore::set_local_away`]: a host local's pad went or came back.
+    SetLocalAway {
+        slot: u8,
+        away: bool,
+    },
+    /// [`HostCore::add_local_event`]: a further player of the host's own
+    /// machine (Players-screen `seat`), answered by
+    /// [`crate::NetEvent::LocalAdded`]. Send it between frames, before the
+    /// frame's inputs (splitscreen B19).
+    AddLocal {
+        seat: u8,
+        name: String,
+        profile: Vec<u8>,
+    },
 }
 
 /// What the client game asks of its network thread.
@@ -88,6 +124,9 @@ pub enum HostCommand {
 pub enum ClientCommand {
     /// The pad and the confirmed tick its player was viewing.
     SubmitInput(PadState, u32),
+    /// [`ClientCore::submit_inputs`]: every local player's pad under one
+    /// sequence, and the confirmed tick they were viewing.
+    SubmitInputs(Vec<PadState>, u32),
     Loaded {
         round_id: u32,
         static_digest: u64,
@@ -111,9 +150,20 @@ pub enum ClientCommand {
         round_id: u32,
         profile: Vec<u8>,
     },
+    /// [`ClientCore::ready_local`]: another local player is ready.
+    ReadyLocal {
+        local: u8,
+        round_id: u32,
+        profile: Vec<u8>,
+    },
     Request(Vec<u8>),
     Chat(String),
     Leave,
+    /// [`ClientCore::set_local_away`]: a local's pad went or came back.
+    SetLocalAway {
+        local: u8,
+        away: bool,
+    },
 }
 
 impl SessionCore for HostCore {
@@ -132,6 +182,16 @@ impl SessionCore for HostCore {
     fn apply(&mut self, cmd: HostCommand) {
         match cmd {
             HostCommand::SubmitInput(p, view) => self.submit_input(p, view),
+            HostCommand::SubmitInputFor {
+                slot,
+                pad,
+                view_tick,
+            } => self.submit_input_for(slot, pad, view_tick),
+            HostCommand::SubmitInputsFor { pads, view_tick } => {
+                for (slot, pad) in pads {
+                    self.submit_input_for(slot, pad, view_tick);
+                }
+            }
             HostCommand::SetLobby(s) => self.set_lobby(s),
             HostCommand::SetInfo(i) => self.set_info(i),
             HostCommand::LoadRound { setup, humans } => {
@@ -139,6 +199,9 @@ impl SessionCore for HostCore {
             }
             HostCommand::StartRound => self.start_round(),
             HostCommand::EndRound => self.end_round(),
+            HostCommand::SetProfile { slot, profile } => {
+                self.set_profile(slot, profile);
+            }
             HostCommand::AddHuman { slot, team } => {
                 self.add_human(slot, team);
             }
@@ -157,6 +220,14 @@ impl SessionCore for HostCore {
             }
             HostCommand::Notice { slot, data } => self.send_notice(slot, data),
             HostCommand::Chat(t) => self.chat(&t),
+            HostCommand::SetLocalAway { slot, away } => {
+                self.set_local_away(slot, away);
+            }
+            HostCommand::AddLocal {
+                seat,
+                name,
+                profile,
+            } => self.add_local_event(seat, &name, profile),
         }
     }
 
@@ -191,6 +262,9 @@ impl SessionCore for ClientCore {
             ClientCommand::SubmitInput(p, view) => {
                 self.submit_input(p, view);
             }
+            ClientCommand::SubmitInputs(pads, view) => {
+                self.submit_inputs(&pads, view);
+            }
             ClientCommand::Loaded {
                 round_id,
                 static_digest,
@@ -206,9 +280,15 @@ impl SessionCore for ClientCore {
             } => self.desync_hashes(tick, first_tick, width, values),
             ClientCommand::RequestResync => self.request_resync(),
             ClientCommand::Ready { round_id, profile } => self.ready(round_id, profile),
+            ClientCommand::ReadyLocal {
+                local,
+                round_id,
+                profile,
+            } => self.ready_local(local, round_id, profile),
             ClientCommand::Request(d) => self.request(d),
             ClientCommand::Chat(t) => self.chat(&t),
             ClientCommand::Leave => self.leave(),
+            ClientCommand::SetLocalAway { local, away } => self.set_local_away(local, away),
         }
     }
 

@@ -259,7 +259,7 @@ impl<'a> Frame<'a> {
             self.renderer.update_falling(camera, target.size().into());
             self.falling_updated = true;
         }
-        self.renderer.render_view(
+        self.renderer.render_scene(
             camera,
             projection,
             draws,
@@ -268,6 +268,7 @@ impl<'a> Frame<'a> {
             overlay,
             Some(target),
             false,
+            None,
         )
     }
 
@@ -286,7 +287,7 @@ impl<'a> Frame<'a> {
             self.renderer.update_falling(camera, size);
             self.falling_updated = true;
         }
-        self.renderer.render_view(
+        self.renderer.render_scene(
             camera,
             ViewProjection::Camera,
             draws,
@@ -295,6 +296,7 @@ impl<'a> Frame<'a> {
             overlay,
             None,
             false,
+            None,
         )
     }
 
@@ -798,7 +800,10 @@ mod tests {
             rgba.chunks_exact(4)
                 .any(|p| i16::from(p[1]) - i16::from(p[0]) > 40)
         };
-        assert!(has_green_leaf(&view_a), "first view should show spawned leaf");
+        assert!(
+            has_green_leaf(&view_a),
+            "first view should show spawned leaf"
+        );
         assert!(
             !has_green_leaf(&view_b),
             "second view in same logical frame must not spawn new leaf_b"
@@ -857,8 +862,7 @@ mod tests {
         let mut r = Renderer::new_headless(64, 48).unwrap();
         let target = r.frame_target([128, 64]).unwrap();
         let white_tex = solid_tex(&mut r, &[255, 255, 255, 255], "blur mask");
-        r.set_omniproj(Some((1, 1, &[128, 128, 128, 255])))
-            .unwrap();
+        r.set_omniproj(Some((1, 1, &[128, 128, 128, 255]))).unwrap();
         r.set_terrain_lights(TerrainLights {
             lights: vec![TerrainLight {
                 pos: Vec3::new(0.0, 0.0, -4.0),
@@ -907,10 +911,8 @@ mod tests {
                 indices: &[0, 1, 2, 2, 1, 3],
             })
             .unwrap();
-        let draws = [
-            DrawCmd::flat(quad, [0.9, 0.9, 0.9, 1.0], Mat4::IDENTITY)
-                .with_light(LightPath::Terrain),
-        ];
+        let draws = [DrawCmd::flat(quad, [0.9, 0.9, 0.9, 1.0], Mat4::IDENTITY)
+            .with_light(LightPath::Terrain)];
         let camera = Camera::default();
         let clear = [0.0, 0.0, 0.0, 1.0];
 
@@ -928,7 +930,9 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            frame.render_frame(&camera, &draws, &[], clear, None).unwrap();
+            frame
+                .render_frame(&camera, &draws, &[], clear, None)
+                .unwrap();
             frame.finish();
         }
 
@@ -949,7 +953,9 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            frame.render_frame(&camera, &draws, &[], clear, None).unwrap();
+            frame
+                .render_frame(&camera, &draws, &[], clear, None)
+                .unwrap();
             frame.finish();
         }
 
@@ -1000,9 +1006,7 @@ mod tests {
     #[test]
     #[ignore = "GPU referee: scripts/gpu_tests.sh"]
     fn overlay_layer_draws_unoccluded_in_front_of_closer_geometry() {
-        use crate::{
-            DrawCmd, LightPath, MeshData, SamplerMode, TextureDesc, WrapV,
-        };
+        use crate::{DrawCmd, LightPath, MeshData, SamplerMode, TextureDesc, WrapV};
         let mut r = Renderer::new_headless(64, 48).unwrap();
         let quad = r
             .add_mesh(&MeshData {
@@ -1035,8 +1039,12 @@ mod tests {
             .unwrap();
         let camera = Camera::default();
         let draws = [
-            DrawCmd::flat(quad, [1.0, 0.0, 0.0, 1.0], Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -2.0)))
-                .with_light(LightPath::Unlit),
+            DrawCmd::flat(
+                quad,
+                [1.0, 0.0, 0.0, 1.0],
+                Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -2.0)),
+            )
+            .with_light(LightPath::Unlit),
             DrawCmd::overlay(
                 quad,
                 white,

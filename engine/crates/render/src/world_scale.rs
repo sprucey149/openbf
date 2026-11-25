@@ -146,22 +146,53 @@ impl WorldScale {
         self.targets.clear();
     }
 
-    /// Draw `target` over the whole of `frame`.
+    /// Draw `target` over the whole of `frame` (the tests' blit; a frame draws through
+    /// [`WorldScale::upscale_into`]).
+    #[cfg(test)]
     pub fn upscale(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &WorldTarget,
         frame: &wgpu::TextureView,
     ) {
-        self.blit(encoder, target, frame, None);
+        self.upscale_into(encoder, target, frame, None, true);
     }
 
+    /// Draw `target` over `rect` (x, y, width, height in frame pixels) of `frame`, or all of it.
+    /// `clear` blacks the frame first; the later views of one present keep what the earlier ones
+    /// drew (issue #194).
+    pub fn upscale_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &WorldTarget,
+        frame: &wgpu::TextureView,
+        rect: Option<[u32; 4]>,
+        clear: bool,
+    ) {
+        let viewport = rect.map(|[x, y, w, h]| [x as f32, y as f32, w as f32, h as f32]);
+        self.draw(encoder, target, frame, viewport, rect, clear);
+    }
+
+    /// Draw `target` into the `viewport` (x, y, width, height, fractional frame pixels) of a
+    /// cleared `frame`: the desktop mirror's letterbox.
     pub(super) fn blit(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &WorldTarget,
         frame: &wgpu::TextureView,
         viewport: Option<[f32; 4]>,
+    ) {
+        self.draw(encoder, target, frame, viewport, None, true);
+    }
+
+    fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &WorldTarget,
+        frame: &wgpu::TextureView,
+        viewport: Option<[f32; 4]>,
+        scissor: Option<[u32; 4]>,
+        clear: bool,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("world upscale"),
@@ -170,7 +201,11 @@ impl WorldScale {
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load: if clear {
+                        wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -178,11 +213,14 @@ impl WorldScale {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &target.bind_group, &[]);
         if let Some([x, y, w, h]) = viewport {
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
         }
+        if let Some([x, y, w, h]) = scissor {
+            pass.set_scissor_rect(x, y, w, h);
+        }
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &target.bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 }

@@ -115,7 +115,7 @@ pub use dust::{Dust, DustConfig};
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
 pub use fog_cloud::FogCloud;
-pub use frame::{Frame, FrameStats, FrameTarget, OverlayFn, ViewFov, ViewProjection};
+pub use frame::{Frame, FrameStats, FrameTarget, OverlayFn, ViewFov, ViewProjection, ViewSlot};
 pub use frame_ab::FrameAb;
 pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes};
 pub use leaf::{LeafClass, LeafObject, LeafSprite};
@@ -135,12 +135,12 @@ pub use sky::{
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
 pub use sun_flare::SunFlare;
-pub use underwater::UnderwaterTint;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
 pub use texture::{BumpDesc, DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
 pub use reticle::{ReticlePass, WorldReticle};
+pub use underwater::UnderwaterTint;
 pub use visor::{Visor, VisorEye, VisorPass};
 
 use mesh::GpuMesh;
@@ -352,6 +352,9 @@ pub struct Renderer {
     /// adapter has timestamp queries (`gpu_timer.rs`); read by
     /// [`Renderer::gpu_sections`].
     gpu_timer: Option<gpu_timer::GpuTimer>,
+    /// The window's frame between the views of one present (`render_view`): acquired by the
+    /// first view, presented by the last (issue #194).
+    held_frame: Option<(wgpu::SurfaceTexture, wgpu::TextureView)>,
     /// CPU ms the last `render_frame` waited to acquire the window's frame
     /// (the vsync / frame-latency wait); 0 headless.
     acquire_ms: f64,

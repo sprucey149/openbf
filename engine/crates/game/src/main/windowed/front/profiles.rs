@@ -185,6 +185,11 @@ impl App {
         let Some(store) = self.profile_store.as_ref() else {
             return false;
         };
+        // Issue #194: profiles P2-P4 hold are greyed here and refused (`title_refuses`).
+        let held = front.party.guest_ids();
+        if let Some(pick) = front.picker.as_mut() {
+            pick.taken = held;
+        }
         let Some(pick) = front.picker.as_mut() else {
             let cue = match (front.menus.page, frame.start, frame.menu.back) {
                 (ShellPage::Title, true, _) => MenuSound::Accept,
@@ -234,6 +239,11 @@ impl App {
     fn profile_action(&mut self, front: &mut FrontShell, action: Target) {
         let pick = front.picker.as_mut().unwrap();
         let store = self.profile_store.as_ref().unwrap();
+        if game::local_seats::title_refuses(pick, action) {
+            pick.message = Some(game::local_seats::TAKEN.into());
+            front.cue(MenuSound::Error);
+            return;
+        }
         let result = match action {
             Target::Profile(i) => store.select(pick.names[i].0).map(Some),
             Target::Create => {
@@ -341,33 +351,9 @@ impl App {
         };
         match result {
             Ok(Some(profile)) => {
-                self.profile = profile;
-                super::super::display::hold_window_mode(&mut self.display.held, &mut self.profile);
-                self.apply_window_mode();
-                self.kbm.follow(&self.profile.settings);
-                self.kbm.release_keys();
-                self.refresh_context_bindings();
-                if let Some(g) = &self.gilrs {
-                    self.pad_warning = input::log_pads_with(
-                        g,
-                        &self.profile.settings.controller_bindings,
-                        &self.active_pad,
-                    );
-                }
+                self.apply_host_profile(front, profile);
                 self.session = Default::default();
                 front.ia = None;
-                if let (Some(voice), Some((gain, _))) = (&mut front.music, &front.music_takes) {
-                    voice.set_volume(
-                        game::sounds::level_db(*gain * self.profile.settings.music_volume),
-                        0.1,
-                    );
-                } else {
-                    front.music_replay = true;
-                }
-                front
-                    .menus
-                    .set_campaign_unlocked(self.profile.campaign.unlocked);
-                front.menus.campaign_saves.current = None;
                 front.menus.profile_selected();
                 front.picker = None;
                 front.cue(MenuSound::Accept);
@@ -384,6 +370,43 @@ impl App {
         }
     }
 
+    /// `profile` becomes the current profile (seat 0's, the host's): its window mode, keys,
+    /// bindings, pad warning, music level and campaign unlocks. The title picker also resets
+    /// the session and goes to the main menu; the Players screen's seat 0 picker calls only
+    /// this, so the other seats and the session options stay as they were (issue #194).
+    pub(super) fn apply_host_profile(
+        &mut self,
+        front: &mut FrontShell,
+        profile: game::profile::Profile,
+    ) {
+        self.profile = profile;
+        // The save list's current save was the old profile's.
+        front.menus.campaign_saves.current = None;
+        super::super::display::hold_window_mode(&mut self.display.held, &mut self.profile);
+        self.apply_window_mode();
+        self.kbm.follow(&self.profile.settings);
+        self.kbm.release_keys();
+        self.refresh_context_bindings();
+        if let Some(g) = &self.gilrs {
+            self.pad_warning = input::log_pads_with(
+                g,
+                &self.profile.settings.controller_bindings,
+                &self.active_pad,
+            );
+        }
+        if let (Some(voice), Some((gain, _))) = (&mut front.music, &front.music_takes) {
+            voice.set_volume(
+                game::sounds::level_db(*gain * self.profile.settings.music_volume),
+                0.1,
+            );
+        } else {
+            front.music_replay = true;
+        }
+        front
+            .menus
+            .set_campaign_unlocked(self.profile.campaign.unlocked);
+    }
+
     pub(in super::super) fn profile_keyboard(&mut self, event: &winit::event::WindowEvent) -> bool {
         use winit::{
             event::WindowEvent,
@@ -392,11 +415,15 @@ impl App {
         let Some(front) = self.front.as_mut() else {
             return false;
         };
-        if !front
-            .picker
-            .as_ref()
-            .or(front.save_name.as_ref())
-            .is_some_and(|p| matches!(p.page, Page::Name { .. }))
+        let seat_typing = front.menus.page == ShellPage::Players
+            && front.picker.is_none()
+            && front.party.keyboard_typing();
+        if !seat_typing
+            && !front
+                .picker
+                .as_ref()
+                .or(front.save_name.as_ref())
+                .is_some_and(|p| matches!(p.page, Page::Name { .. }))
         {
             return false;
         }
@@ -518,6 +545,109 @@ mod tests {
         step(&mut app, &mut front, confirm, false, 0);
         assert_eq!(app.profile.name, "Pilot");
         assert_eq!(app.profile.career.kills, 25);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Issue #194: seat 0's pick on the Players screen changes the current profile and
+    /// nothing else: the page, the session options and the Instant Action screen stay.
+    #[test]
+    fn a_seat_zero_pick_keeps_the_players_screen_and_the_session() {
+        let dir = std::env::temp_dir().join(format!("openbf-profile-seat0-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        let store = Store::new(dir.clone());
+        let mut app = App::new(
+            PathBuf::new(),
+            PathBuf::new(),
+            super::super::super::tests::setup(None),
+            None,
+            None,
+            None,
+            Default::default(),
+        );
+        app.profile_store = Some(store.clone());
+        app.profile = store.create("Ann", Difficulty::Normal).unwrap();
+        let mut front = FrontShell::new(&dir);
+        front.menus.open_page(ShellPage::Players);
+        app.session.num_bots = 17;
+        let session = app.session;
+        let mut cy = store.create_quiet("Cy", Difficulty::Hard).unwrap();
+        cy.settings.music_volume = 0.25;
+        app.apply_host_profile(&mut front, cy);
+        assert_eq!(app.profile.name, "Cy");
+        assert_eq!(app.profile.settings.difficulty, Difficulty::Hard);
+        assert_eq!(
+            front.menus.page,
+            ShellPage::Players,
+            "the Players screen stays"
+        );
+        assert_eq!(app.session, session, "the session options as they were");
+        assert!(front.picker.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Issue #194 review: P2-P4's profiles go into every split round that starts loading (the
+    /// next round and a Restart Mission included), come back on the shell, and stay on their
+    /// seats when nothing loads.
+    #[test]
+    fn split_profiles_are_lent_every_round_and_back_on_the_shell() {
+        use game::local_seats::{PartyEnv, PartyFrame, SeatProfile};
+        let dir = std::env::temp_dir().join(format!("openbf-split-lend-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::new(
+            PathBuf::new(),
+            PathBuf::new(),
+            super::super::super::tests::setup(None),
+            None,
+            None,
+            None,
+            Default::default(),
+        );
+        let mut front = FrontShell::new(&dir);
+        // The keyboard on seat 1 (a pad seat needs a real gilrs id); with no catalog it sits
+        // at once on an unsaved "Player 2".
+        let mut kb = input::owners::PadOwners::<gilrs::GamepadId>::default();
+        kb.join_keyboard();
+        let owners = kb.unpacked(&[1]);
+        front.set_party(owners.clone());
+        let env = PartyEnv {
+            store: None,
+            host_id: None,
+            difficulty: Difficulty::Normal,
+        };
+        front.party.step(&PartyFrame::default(), &env);
+        assert!(matches!(front.party.profile(1), SeatProfile::Ready(p) if p.name == "Player 2"));
+        app.front = Some(front);
+        app.split_party = Some(owners);
+        let lent = |app: &App| app.split_profiles[1].as_ref().map(|p| p.name.clone());
+        let on_seat = |app: &App| {
+            matches!(
+                app.front.as_ref().unwrap().party.profile(1),
+                SeatProfile::Ready(_)
+            )
+        };
+        // A launch whose rows all fail to load lends nothing.
+        app.start_playlist(Vec::new(), Default::default());
+        assert_eq!(lent(&app), None);
+        assert!(on_seat(&app));
+        for round in 1..=3 {
+            // A round starts loading (`next_round`), then leaves the battle (the round's end,
+            // or Restart Mission) before the next one loads.
+            app.lend_split_profiles();
+            assert_eq!(lent(&app).as_deref(), Some("Player 2"), "round {round}");
+            assert!(
+                !on_seat(&app),
+                "round {round}: one live copy, in the battle"
+            );
+            app.leave_battle();
+            assert_eq!(lent(&app), None, "round {round}");
+            assert!(on_seat(&app), "round {round}: back on its seat");
+        }
+        // A load that fails after the lend (the worker's error) returns to the shell too.
+        app.lend_split_profiles();
+        app.init_shell();
+        assert!(on_seat(&app));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

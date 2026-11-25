@@ -48,10 +48,55 @@ pub fn listener(walk: &WalkSim) -> Listener {
         .map(|me| me.soldier.pos);
     // B1 FUN_0019f080 and B2 FUN_001ba080 offset the listener along the
     // camera's back axis. A scope keeps the tracked body's collision origin.
-    Listener {
-        pos: scope_anchor.unwrap_or(cam.position) - cam.forward() * 2.0,
-        yaw: cam.yaw,
+    Listener::new(
+        scope_anchor.unwrap_or(cam.position) - cam.forward() * 2.0,
+        cam.yaw,
+    )
+}
+
+/// Where the mix is heard from with every local player (issue #194,
+/// `SPLITSCREEN.md` 8 and 18.1 item 6): [`listener`] of the first local
+/// player who is not away ([`WalkSim::first_awake`]), then each further awake
+/// player's ear in `more`, in local order, and every ear's velocity in
+/// `vels` for the ordnance hums. With one local player it is [`listener`],
+/// untouched. With everyone away no player's camera is read (each may now
+/// follow a bot's unit): the last awake ears are held, still.
+pub fn listeners(walk: &mut WalkSim) -> Listener {
+    if walk.local_count() == 1 {
+        return listener(walk);
     }
+    let awake: Vec<usize> = (0..walk.local_count())
+        .filter(|&i| !walk.is_suspended(i))
+        .collect();
+    let Some((&first, rest)) = awake.split_first() else {
+        // Nobody awake since the round began has nothing held: the battle's
+        // origin, a neutral ear.
+        return Listener {
+            vels: Some([Vec3::ZERO; 4]),
+            ..walk
+                .held_ears
+                .unwrap_or_else(|| Listener::new(Vec3::ZERO, 0.0))
+        };
+    };
+    let vel = |walk: &WalkSim, i: usize| {
+        walk.sim
+            .unit(walk.local_unit(i))
+            .map_or(Vec3::ZERO, |u| u.soldier.vel)
+    };
+    let head = walk.with_local(first, |w| listener(w));
+    let mut vels = [Vec3::ZERO; 4];
+    vels[0] = vel(walk, first);
+    let mut more = Vec::with_capacity(rest.len());
+    for (j, &i) in rest.iter().take(3).enumerate() {
+        more.push(walk.with_local(i, |w| listener(w).pos));
+        vels[1 + j] = vel(walk, i);
+    }
+    let ears = Listener {
+        vels: Some(vels),
+        ..head.with_more(more)
+    };
+    walk.held_ears = Some(ears);
+    ears
 }
 
 /// `play(name, pos)` for each sound this tick's events start, heard from
@@ -918,11 +963,11 @@ impl SoundLog {
         let mut starts = Vec::new();
         let lib = &mut self.lib;
         let mut row = |src: &str, name: &str, pos: Vec3| {
-            let d = (pos - ears).length();
+            let d = heard.dist(pos);
             let _ = writeln!(csv, "{tick},{src},{name},-1,{d:.1}");
             if let Some(lib) = lib.as_mut() {
                 let hash = crate::classdb::fnv1a_lowercase(name);
-                lib.start(hash, pos, ears, &mut starts);
+                lib.start(hash, pos, &heard, &mut starts);
             }
         };
         each(walk, ears, |name, pos| row("event", name, pos));
@@ -934,7 +979,7 @@ impl SoundLog {
         // last ask per unit (`SoundLib::cries`), in the `start` rows.
         let mut asks = Vec::new();
         cries(walk, |c| {
-            let d = (c.pos - ears).length();
+            let d = heard.dist(c.pos);
             let src = if c.death { "death" } else { "hurt" };
             let name = c.name.unwrap_or("-");
             let _ = writeln!(csv, "{tick},{src},{name},{},{d:.1}", c.unit);
@@ -942,30 +987,30 @@ impl SoundLog {
             asks.push((c.unit, hash, c.pos));
         });
         if let Some(lib) = lib.as_mut() {
-            starts.extend(lib.cries(&asks, ears).into_iter().map(|(_, s)| s));
+            starts.extend(lib.cries(&asks, &heard).into_iter().map(|(_, s)| s));
         }
         // Card PWST: the stations' ambient asks start in the `start` rows.
         if let Some(lib) = lib.as_mut() {
-            starts.extend(lib.station_ambient(&station_asks(walk), ears));
+            starts.extend(lib.station_ambient(&station_asks(walk), &heard));
             for (name, pos) in lib.hero_blade_changes(walk) {
                 lib.start(
                     crate::classdb::fnv1a_lowercase(&name),
                     pos,
-                    ears,
+                    &heard,
                     &mut starts,
                 );
             }
             starts.extend(
-                lib.hero_samples(&hero_sample_asks(walk), ears)
+                lib.hero_samples(&hero_sample_asks(walk), &heard)
                     .into_iter()
                     .map(|(_, s)| s),
             );
         }
         if let Some(lib) = lib.as_mut() {
-            lib.tick(core::TICK_DT, ears, &mut starts);
+            lib.tick(core::TICK_DT, &heard, &mut starts);
         }
         for s in &starts {
-            let d = (s.pos - ears).length();
+            let d = heard.dist(s.pos);
             let name = self
                 .names
                 .get(&s.hash)
@@ -989,7 +1034,7 @@ impl SoundLog {
             // gain` (the level by distance with the emitter's distances, the
             // gain with the property's and the bus's).
             if tick.is_multiple_of(core::TICK_HZ as usize) {
-                for h in lib.ambient_heard(&self.ambience, ears) {
+                for h in lib.ambient_heard(&self.ambience, &heard) {
                     let e = &self.ambience.emitters[h.index];
                     if h.level > 0.0 {
                         let _ = writeln!(
@@ -1012,7 +1057,7 @@ impl SoundLog {
             // Card JETP2: a `jet` row per jet one-shot, `name|TurnOn` /
             // `TurningOff` / `TurnOff`, `unit` the soldier.
             for j in self.engines.take_jet_shots() {
-                let d = (j.pos - ears).length();
+                let d = heard.dist(j.pos);
                 let _ = writeln!(csv, "{tick},jet,{}|{:?},{},{d:.1}", j.name, j.kind, j.unit);
             }
             if tick.is_multiple_of(core::TICK_HZ as usize) {
@@ -1021,7 +1066,7 @@ impl SoundLog {
                     n.unwrap_or_else(|| format!("{h:08x}"))
                 };
                 for v in &voices {
-                    let d = (v.pos - ears).length();
+                    let d = heard.dist(v.pos);
                     let _ = writeln!(
                         csv,
                         "{tick},engine,{}/{}/{:.3}/{:.3}/{:.3},{},{d:.1}",
@@ -1044,7 +1089,7 @@ impl SoundLog {
             let view = crate::foley::View::of(&walk.camera(), 16.0 / 9.0);
             let names = &self.names;
             foley.tick(walk, &view, |s| {
-                let d = (s.pos - ears).length();
+                let d = heard.dist(s.pos);
                 let name = names
                     .get(&s.hash)
                     .cloned()
@@ -1064,11 +1109,11 @@ impl SoundLog {
     /// line started (commander lines, squad answers and calls alike).
     pub fn voice(&mut self, tick: usize, walk: &mut WalkSim) {
         use std::fmt::Write as _;
-        let ears = listener(walk).pos;
+        let heard = listener(walk);
         let (Some(lib), Some(v)) = (self.lib.as_mut(), walk.voice.as_mut()) else {
             return;
         };
-        for (a, r) in v.gate_calls(lib, ears) {
+        for (a, r) in v.gate_calls(lib, &heard) {
             // A low-health voice asks every tick its handle is idle (card
             // UTALK): only the lines it queues are rows.
             let every_tick = matches!(
@@ -1088,7 +1133,7 @@ impl SoundLog {
                 Err(crate::sounds::Refused::Far) => "far",
                 Err(crate::sounds::Refused::Unknown) => "unknown",
             };
-            let d = (a.pos - ears).length();
+            let d = heard.dist(a.pos);
             let _ = writeln!(
                 self.csv,
                 "{tick},call,{}|{:?}|{outcome},{},{d:.1}",
@@ -1100,9 +1145,11 @@ impl SoundLog {
         for name in v.gate_script_sounds(lib) {
             let _ = writeln!(self.csv, "{tick},script,{name},-1,0.0");
         }
-        let started = v.frame(&walk.sim, walk.player, core::TICK_DT, |l| lib.line_secs(l));
+        let started = v.frame(&walk.sim, Some(walk.player), core::TICK_DT, |l| {
+            lib.line_secs(l)
+        });
         if let Some(l) = started {
-            let d = l.at.map_or(0.0, |p| (p - ears).length());
+            let d = l.at.map_or(0.0, |p| heard.dist(p));
             let _ = writeln!(self.csv, "{tick},voice,{},-1,{d:.1}", l.name);
         }
     }

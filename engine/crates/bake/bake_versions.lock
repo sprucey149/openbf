@@ -1,51 +1,55 @@
 {
  "groups": {
   "beep": {
-   "closure": "7cd98b3b1d83b1972b3f28852b1bb5aa391b1736301b838442f51f916e89f7a5",
+   "closure": "f052a9e4a1f1cd24ea6674cba4448ac5ea17b4e561991afb60e56d7aa7d4e029",
    "version": 2
   },
+  "catalog": {
+   "closure": "883c9ff53531c63df81292c2cb6c70eed39d84fd7906550937907ac1f910478e",
+   "version": 1
+  },
   "classes": {
-   "closure": "afd1a71ba4ccf179885d5efbc31a657d8f0810185a28a69567bc5a84b8e51e4a",
+   "closure": "883c9ff53531c63df81292c2cb6c70eed39d84fd7906550937907ac1f910478e",
    "version": 3
   },
   "common": {
-   "closure": "6c1783b2a09fed082e944e6aa15ed9d974233b0714348d195702b04d8e302a6d",
+   "closure": "002842cabcded434a8f51d25aebd6f2b2223f6b2c5284625ed1b024d82437bff",
    "version": 7
   },
   "dlc": {
-   "closure": "4670bfe7e6ee559b686a7fedf02486d23a73474bd573648fd6e918bacdd80479",
+   "closure": "fc60043c0020c4873541c14fe1c00b165d90a1160a4d412f97c85c76c342576f",
    "version": 5
   },
   "extract-iso": {
-   "closure": "b1164df909b2ef95dd69b014071ec17a90e59f6645fe327661bc801e384f290a",
+   "closure": "64a42e8f15d71ea19a88720312ec61c0208b528d090ea11d6542bdc29215142f",
    "version": 2
   },
   "global-sound": {
-   "closure": "3bd93b5ec507d2b862235aea7145437e99edd5e423056b48831bb54db2c9771c",
+   "closure": "acafa8b0dc7999660877572d88fe45900dddc657b54f1fed72c35cccf1d829c2",
    "version": 2
   },
   "load": {
-   "closure": "cb212ae23b51de2d084c0d8fbdd54eb78325cce1b25c6a06c5170aedbd5d2837",
+   "closure": "63ebd08022797ee9eef560b5f9157282d79804cf3bd94514961a20811b82474d",
    "version": 2
   },
   "maps": {
-   "closure": "afd1a71ba4ccf179885d5efbc31a657d8f0810185a28a69567bc5a84b8e51e4a",
+   "closure": "883c9ff53531c63df81292c2cb6c70eed39d84fd7906550937907ac1f910478e",
    "version": 8
   },
   "side": {
-   "closure": "afd1a71ba4ccf179885d5efbc31a657d8f0810185a28a69567bc5a84b8e51e4a",
+   "closure": "883c9ff53531c63df81292c2cb6c70eed39d84fd7906550937907ac1f910478e",
    "version": 5
   },
   "sounds": {
-   "closure": "b2a0fc28434b54cb741d186020d95de22521e9b2037091e7f541ddc89720f972",
+   "closure": "4c3e84844e8f975aedee3ebdeef7fa0478f47a9fdf68228f1ffc3d4bcd2e12a1",
    "version": 2
   },
   "tat1": {
-   "closure": "afd1a71ba4ccf179885d5efbc31a657d8f0810185a28a69567bc5a84b8e51e4a",
+   "closure": "883c9ff53531c63df81292c2cb6c70eed39d84fd7906550937907ac1f910478e",
    "version": 5
   },
   "tat2": {
-   "closure": "afd1a71ba4ccf179885d5efbc31a657d8f0810185a28a69567bc5a84b8e51e4a",
+   "closure": "883c9ff53531c63df81292c2cb6c70eed39d84fd7906550937907ac1f910478e",
    "version": 6
   }
  },

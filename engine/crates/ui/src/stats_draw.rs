@@ -20,7 +20,7 @@
 //! `[ours]` Hor+: the pages keep the 4:3 box at the window's centre, the help
 //! lines their edges, as the other shell pages.
 
-use crate::hud_draw::{Ctx, Quad, Screen};
+use crate::hud_draw::{Ctx, Frame, Panel, Quad, Screen};
 use crate::hud_tree::HAlign;
 use crate::input_icons::{IconSet, Prompt};
 use crate::spawn_draw::{screen_at, Anchor, HELP_DROP, ICON, ICON_GAP, SAFE_X, TITLE_PIECES};
@@ -177,6 +177,18 @@ pub fn draw_end_movie(
     movie: bool,
     size: [f32; 2],
 ) -> crate::hud_draw::HudFrame {
+    draw_end_movie_in(hud, art, movie, &Frame::window(size))
+}
+
+/// [`draw_end_movie`] in the screen `f`: black over all of it, the clip in
+/// its centred panel.
+pub fn draw_end_movie_in(
+    hud: &crate::hud_tree::Hud,
+    art: &crate::hud_draw::HudArt,
+    movie: bool,
+    f: &Frame,
+) -> crate::hud_draw::HudFrame {
+    let size = f.size;
     let mut ctx = Ctx {
         hud,
         art,
@@ -202,7 +214,7 @@ pub fn draw_end_movie(
     );
     if movie {
         ctx.sheet(
-            &screen_at(size, Anchor::Centre),
+            &f.panel().screen(Anchor::Centre),
             [0.0, 0.0, 512.0, 448.0],
             [0.0, 0.0, 1.0, 1.0],
             crate::shell_ps2::MOVIE_SHEET,
@@ -232,11 +244,23 @@ pub fn help_at(
         Page::Personal => (&stats.texts.back, &stats.texts.career_title),
         Page::Career => (&stats.texts.back, &stats.texts.done),
     };
-    let left = crate::spawn_draw::help_line_at(font, false, left, point, size);
+    let left = crate::spawn_draw::help_line_at(
+        font,
+        false,
+        left,
+        point,
+        &crate::hud_draw::Frame::window(size),
+    );
     crate::stats::Pad {
         square: left && stats.page == Page::Team,
         triangle: left && stats.page != Page::Team,
-        cross: crate::spawn_draw::help_line_at(font, true, right, point, size),
+        cross: crate::spawn_draw::help_line_at(
+            font,
+            true,
+            right,
+            point,
+            &crate::hud_draw::Frame::window(size),
+        ),
         ..Default::default()
     }
 }
@@ -265,13 +289,15 @@ impl Ctx<'_> {
 
     /// A help line: the pad icon at the safe area's edge, its label beside
     /// it on the inside (`crate::spawn_draw`'s numbers).
-    fn stats_help(&mut self, size: [f32; 2], right: bool, icon: Icon, text: &str) {
+    fn stats_help(&mut self, p: &Panel, right: bool, icon: Icon, text: &str) {
         let (a, ix) = if right {
             (Anchor::Right, SAFE_X[1] - ICON[0])
         } else {
             (Anchor::Left, SAFE_X[0])
         };
-        let s = screen_at(size, a);
+        // At the panel's real bottom (`Ctx::help_bottom`).
+        let mut s = screen_at(p.size, a);
+        s.origin[1] += p.bottom - p.size[1];
         let y = crate::spawn_draw::HELP_Y;
         let top = y - ICON[1] * 0.5;
         match icon {
@@ -333,17 +359,19 @@ impl Ctx<'_> {
     }
 
     /// The stats page up, alone over black.
-    pub(crate) fn stats_page(&mut self, st: &StatsScreens, size: [f32; 2]) {
-        self.stats_black(size);
-        let s = screen_at(size, Anchor::Centre);
+    /// Over black in the whole screen `f`, the page in its centred panel.
+    pub(crate) fn stats_page(&mut self, st: &StatsScreens, f: &Frame) {
+        self.stats_black(f.size);
+        let p = f.panel();
+        let s = p.screen(Anchor::Centre);
         match st.page {
-            Page::Team => self.team_stats(&s, st, size),
-            Page::Personal => self.personal_stats(&s, st, size),
-            Page::Career => self.career_stats(&s, st, size),
+            Page::Team => self.team_stats(&s, st, &p),
+            Page::Personal => self.personal_stats(&s, st, &p),
+            Page::Career => self.career_stats(&s, st, &p),
         }
     }
 
-    fn team_stats(&mut self, s: &Screen, st: &StatsScreens, size: [f32; 2]) {
+    fn team_stats(&mut self, s: &Screen, st: &StatsScreens, p: &Panel) {
         let tab = [PANEL_X[0], TAB[0], PANEL_X[1], TAB[1]];
         self.stats_panel(s, tab, &st.texts.team_title, TEAM_BOX);
         self.stats_panel(s, AWARDS_TAB, &st.texts.awards_title, AWARDS_BOX);
@@ -411,8 +439,8 @@ impl Ctx<'_> {
                 self.text(s, &LIST, &fitted, at, HAlign::Right, WINNER);
             }
         }
-        self.stats_help(size, false, Icon::Square, &st.texts.done);
-        self.stats_help(size, true, Icon::Cross, &st.texts.select);
+        self.stats_help(p, false, Icon::Square, &st.texts.done);
+        self.stats_help(p, true, Icon::Cross, &st.texts.select);
     }
 
     /// The two scroll wedges of a list centred at `cx`.
@@ -430,7 +458,7 @@ impl Ctx<'_> {
         self.sheet(s, [cx, y0, cx + hw, y1], [1.0, v0, 0.0, v1], tex, 1.0);
     }
 
-    fn personal_stats(&mut self, s: &Screen, st: &StatsScreens, size: [f32; 2]) {
+    fn personal_stats(&mut self, s: &Screen, st: &StatsScreens, p: &Panel) {
         let tab = [PANEL_X[0], TAB[0], PANEL_X[1], TAB[1]];
         let title = st
             .player_row()
@@ -473,8 +501,8 @@ impl Ctx<'_> {
                 self.text(s, &LIST, &fitted, at, HAlign::Left, WHITE);
             }
         }
-        self.stats_help(size, false, Icon::Triangle, &st.texts.back);
-        self.stats_help(size, true, Icon::Cross, &st.texts.career_title);
+        self.stats_help(p, false, Icon::Triangle, &st.texts.back);
+        self.stats_help(p, true, Icon::Cross, &st.texts.career_title);
     }
 
     /// Career names must remain complete. Use the shared role and its
@@ -495,7 +523,7 @@ impl Ctx<'_> {
         }
     }
 
-    fn career_stats(&mut self, s: &Screen, st: &StatsScreens, size: [f32; 2]) {
+    fn career_stats(&mut self, s: &Screen, st: &StatsScreens, p: &Panel) {
         let tab = [PANEL_X[0], TAB[0], PANEL_X[1], TAB[1]];
         self.stats_panel(s, tab, &st.texts.career_title, CAREER_BOXES[0]);
         self.stats_box(s, CAREER_BOXES[1]);
@@ -573,8 +601,8 @@ impl Ctx<'_> {
                 self.text(s, &LIST, line, at, HAlign::Left, WHITE);
             }
         }
-        self.stats_help(size, false, Icon::Triangle, &st.texts.back);
-        self.stats_help(size, true, Icon::Cross, &st.texts.done);
+        self.stats_help(p, false, Icon::Triangle, &st.texts.back);
+        self.stats_help(p, true, Icon::Cross, &st.texts.done);
     }
 }
 

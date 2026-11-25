@@ -139,7 +139,7 @@ fn typography_captures() {
     sm.page = ui::shell_ps2::Page::Main;
     sm.covered = true;
     let picker =
-        ui::shell_ps2::profiles::Picker::new(vec![(1, "the maintainer".into()), (2, "Kai".into())], Some(1));
+        ui::shell_ps2::profiles::Picker::new(vec![(1, "Rex".into()), (2, "Kai".into())], Some(1));
     view.update_shell_profiles(&sm, false, &picker, size);
     paint(&mut r, &mut view);
     save(&out, "profiles", &r);
@@ -479,6 +479,7 @@ fn typography_captures() {
         let rows = vec![
             ui::lobby::RosterRow {
                 slot: 0,
+                machine: 0,
                 name: "Host".into(),
                 ping_ms: None,
                 addon: false,
@@ -487,14 +488,47 @@ fn typography_captures() {
             },
             ui::lobby::RosterRow {
                 slot: 1,
+                machine: 1,
                 name: "Kai".into(),
                 ping_ms: Some(42),
                 addon: false,
                 team: "CIS".into(),
                 ready: false,
             },
+            // Issue #194 B19: a host local and a guest machine of two.
+            ui::lobby::RosterRow {
+                slot: 3,
+                machine: 0,
+                name: "Rex".into(),
+                ping_ms: None,
+                addon: false,
+                team: "Republic".into(),
+                ready: true,
+            },
+            ui::lobby::RosterRow {
+                slot: 2,
+                machine: 2,
+                name: "Han".into(),
+                ping_ms: Some(31),
+                addon: true,
+                team: "Auto".into(),
+                ready: true,
+            },
+            ui::lobby::RosterRow {
+                slot: 4,
+                machine: 2,
+                name: "Leia".into(),
+                ping_ms: Some(31),
+                addon: true,
+                team: "Auto".into(),
+                ready: true,
+            },
         ];
-        let mut nav = ui::lobby::RosterNav::default();
+        let rows = ui::lobby::group_rows(rows);
+        let mut nav = ui::lobby::RosterNav {
+            focus: Some(4),
+            ..Default::default()
+        };
         let prompts = ui::lobby::RosterPrompts {
             open: "Tab".into(),
             accept: "Enter".into(),

@@ -394,8 +394,11 @@ mod tests {
 
     #[test]
     fn converts_real_abr_addon_cleanly_without_touching_source() {
-        let src_abr =
-            Path::new(r"E:\Projects\bf1+bf2\star_wars_battlefront2 modded\GameData\addon\ABR");
+        // `OPENBF_ABR_ADDON` names a local copy of the ABR addon (`GameData/addon/ABR`).
+        let Some(src_abr) = std::env::var_os("OPENBF_ABR_ADDON") else {
+            return;
+        };
+        let src_abr = Path::new(&src_abr);
         if !src_abr.is_dir() {
             return;
         }

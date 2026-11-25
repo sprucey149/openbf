@@ -182,12 +182,38 @@ pub fn reject_text(reason: net::RejectReason, detail: &str, ours: &str) -> Strin
                 format!("The host runs a different openbf build (host: {host}, you: {ours})")
             }
         }
-        R::Full => "The game is full".into(),
+        R::Full => match net::host::parse_full_detail(detail) {
+            // A machine bringing several players is let in all or none.
+            Some((room, wanted)) if room > 0 && wanted > room => format!(
+                "The game has room for {room} more player{}; {wanted} are on this computer. \
+                 Join with fewer players",
+                if room == 1 { "" } else { "s" }
+            ),
+            _ => "The game is full".into(),
+        },
         R::Busy => "The host is loading a battle; try again in a moment".into(),
         R::Banned => "The host removed you from this game".into(),
         R::BadName => "The host refused your player name (Options → Game Options)".into(),
         R::Kicked if !detail.is_empty() => detail.to_owned(),
         R::Kicked => "The host removed you from the game".into(),
+    }
+}
+
+/// A further player of the host's own machine the host core refused
+/// (`HostCore::add_local`), in [`reject_text`]'s words: the lobby line for
+/// that player.
+pub fn local_refusal_text(name: &str, reason: net::RejectReason) -> String {
+    use net::RejectReason as R;
+    match reason {
+        R::Full => format!("{name} could not join: the game is full"),
+        R::Busy => {
+            format!("{name} could not join: the host is loading a battle; try again in a moment")
+        }
+        R::BadName => format!(
+            "{name} could not join: the player name is not allowed (Options → Game Options)"
+        ),
+        // The core refuses a host local only for the three above.
+        R::Version | R::Banned | R::Kicked => format!("{name} could not join this game"),
     }
 }
 
@@ -266,6 +292,10 @@ pub enum LobbyPhase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LobbyPlayer {
     pub slot: u8,
+    /// Its machine (splitscreen, issue #194 B19): the first slot of the
+    /// machine it plays on, 0 for the host's own players.
+    #[serde(default)]
+    pub machine: u8,
     pub name: String,
     /// `None` for the host.
     pub ping_ms: Option<u32>,

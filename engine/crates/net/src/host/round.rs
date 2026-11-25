@@ -59,7 +59,7 @@
 //! [`HostConfig::fell_behind_ticks`]: super::HostConfig::fell_behind_ticks
 //! [`FELL_BEHIND_TEXT`]: super::FELL_BEHIND_TEXT
 
-use super::{HostCore, NetEvent, Phase};
+use super::{HostCore, NetEvent, Phase, Player};
 use crate::bundle::{
     compress_log, pad_wire_len, SessionCommand, TickBundle, MAX_COMMANDS, MAX_COMMAND_BYTES,
     MAX_PAD_BYTES,
@@ -104,6 +104,13 @@ pub(crate) struct RoundState {
     next_stream: u32,
     /// Connected guests this round's seats missed: they join once it starts.
     pub late: Vec<u8>,
+    /// The unseated slots of machines seated in part: each gets a
+    /// `PeerCaughtUp` once its machine is live in the running round, so the
+    /// game adds it as it adds a late joiner (module rules).
+    pub late_locals: Vec<u8>,
+    /// Those of `late_locals` whose pad came back: released as
+    /// `LocalBack` (a return), not `PeerCaughtUp` (a late joiner).
+    pub returned: Vec<u8>,
     all_loaded_sent: bool,
     host_hashes: BTreeMap<u32, u64>,
     peer_hashes: BTreeMap<(u32, u8), u64>,
@@ -155,6 +162,15 @@ impl RoundState {
         if active && !cancelled && !queued {
             self.pending.push_back(SessionCommand::RemoveHuman { slot });
         }
+    }
+
+    /// Cancels `slot`'s `RemoveHuman` not yet closed (its pad came back in
+    /// time); returns whether there was one.
+    pub fn cancel_remove(&mut self, slot: u8) -> bool {
+        let before = self.pending.len();
+        self.pending
+            .retain(|c| !matches!(c, SessionCommand::RemoveHuman { slot: s } if *s == slot));
+        self.pending.len() != before
     }
 
     fn chunk(&mut self, i: usize) -> Vec<u8> {
@@ -225,24 +241,38 @@ impl HostCore {
         seats.sort_unstable();
         seats.dedup();
         for (s, p) in self.players.iter_mut() {
-            p.active = seats.binary_search(s).is_ok() && (*s == 0 || p.conn.is_some());
-            p.loaded = *s == 0;
+            p.active =
+                seats.binary_search(s).is_ok() && (p.host_local || p.conn.is_some()) && !p.away;
+            p.loaded = p.host_local;
             p.queue.clear();
         }
+        self.round.late.clear();
+        self.round.late_locals.clear();
+        self.round.returned.clear();
         for s in seats {
             let here = self.players.get(&s).is_some_and(|p| p.active);
-            if s != 0 && !here {
+            // A host local whose pad is away waits like a guest machine's
+            // unseated local (`late_locals`) for its return.
+            if self.players.get(&s).is_some_and(|p| p.host_local && p.away) {
+                self.round.late_locals.push(s);
+            }
+            if !here {
                 self.round
                     .pending
                     .push_back(SessionCommand::RemoveHuman { slot: s });
             }
         }
         let mut ids = Vec::new();
-        self.round.late.clear();
         for (id, peer) in &self.peers {
             if let Phase::Joined(s) = peer.phase {
-                if self.players.get(&s).is_some_and(|p| p.active) {
+                let active = |x: &u8| self.players.get(x).is_some_and(|p| p.active);
+                let mut all = std::iter::once(&s).chain(&peer.extra);
+                if all.clone().any(active) {
                     ids.push(*id);
+                    // Seated in part: the rest join once the round runs.
+                    self.round
+                        .late_locals
+                        .extend(all.by_ref().filter(|x| !active(x)).copied());
                 } else {
                     self.round.late.push(s);
                 }
@@ -265,10 +295,10 @@ impl HostCore {
         self.round.phase = RoundPhase::Running {
             start: self.now + lead,
         };
-        for (s, p) in self.players.iter_mut() {
+        for p in self.players.values_mut() {
             p.seen_tick = 0;
             // A guest still loading at a barrier timeout starts late.
-            p.catching_up = *s != 0 && !p.loaded;
+            p.catching_up = !p.host_local && !p.loaded;
         }
         let lead_us = u32::try_from(lead.0).unwrap_or(u32::MAX);
         let start = Msg::Start {
@@ -292,6 +322,47 @@ impl HostCore {
                 self.start_stream(pid, true);
             }
         }
+        self.release_late_locals();
+    }
+
+    /// `PeerCaughtUp` for each of [`RoundState::late_locals`] whose machine
+    /// is live in the running round (loaded, not catching up); a slot that
+    /// left or got seated meanwhile is dropped from the list.
+    pub(crate) fn release_late_locals(&mut self) {
+        if !self.round.is_running() {
+            return;
+        }
+        let (round_id, tick) = (self.round.id, self.round.next_tick());
+        let mut waiting = Vec::new();
+        for slot in std::mem::take(&mut self.round.late_locals) {
+            let Some(p) = self.players.get(&slot) else {
+                continue;
+            };
+            let here = p.host_local || p.conn.is_some_and(|id| self.peers.contains_key(&id));
+            if p.active || !here {
+                continue;
+            }
+            // Away: it waits for its pad (`LocalBack` releases it).
+            if p.away || !p.loaded || p.catching_up {
+                waiting.push(slot);
+                continue;
+            }
+            if self.round.returned.contains(&slot) {
+                self.events.push_back(NetEvent::LocalBack {
+                    slot,
+                    round_id,
+                    tick,
+                });
+            } else {
+                self.events.push_back(NetEvent::PeerCaughtUp {
+                    slot,
+                    round_id,
+                    tick,
+                });
+            }
+        }
+        self.round.returned.retain(|s| waiting.contains(s));
+        self.round.late_locals = waiting;
     }
 
     /// The start's lead (module rules): the slowest guest `Start` goes to.
@@ -315,8 +386,25 @@ impl HostCore {
         }
     }
 
+    /// The profile a later `AddHuman` of `slot` carries: the game sets
+    /// each slot's latest (a guest's `Ready` profile, a host local's seat
+    /// profile as the last round left it) when it loads a round, so a
+    /// player seated after the round started (a late local, a pad back)
+    /// plays on it rather than on the one its `Hello` brought. Returns
+    /// whether `slot` is a player.
+    pub fn set_profile(&mut self, slot: u8, profile: Vec<u8>) -> bool {
+        match self.players.get_mut(&slot) {
+            Some(p) => {
+                p.profile = profile;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Schedules `AddHuman` for a connected guest not yet in the round
-    /// (after its `PeerCaughtUp`). Returns whether it was scheduled.
+    /// (after its `PeerCaughtUp` or `LocalBack`). Returns whether it was
+    /// scheduled; refused for a slot whose pad is away.
     pub fn add_human(&mut self, slot: u8, team: u8) -> bool {
         if !self.round.is_running() {
             return false;
@@ -329,7 +417,13 @@ impl HostCore {
             .pending
             .iter()
             .any(|c| matches!(c, SessionCommand::AddHuman { slot: s, .. } if *s == slot));
-        if p.active || pending || (slot != 0 && p.conn.is_none()) {
+        // A guest's slot plays only while its machine is on this round's
+        // stream (a benched machine keeps its link, not its bundles).
+        let streaming = p
+            .conn
+            .and_then(|id| self.peers.get(&id))
+            .is_some_and(|pr| pr.stream_round == self.round.id);
+        if p.active || pending || p.away || (!p.host_local && !streaming) {
             return false;
         }
         let profile = p.profile.clone();
@@ -339,6 +433,14 @@ impl HostCore {
             profile,
         });
         true
+    }
+
+    /// Takes one playing slot out of the round without marking it away
+    /// (the scheduler tests' bare removal; a lost pad is `mark_away`).
+    #[cfg(test)]
+    pub(crate) fn unseat(&mut self, slot: u8) {
+        let active = self.players.get(&slot).is_some_and(|p| p.active);
+        self.round.remove_human(slot, active);
     }
 
     /// Schedules an opaque game command. Refused past
@@ -389,11 +491,11 @@ impl HostCore {
         if self.round.agreed_through.is_some_and(|t| tick <= t) {
             return;
         }
+        // A machine's hash speaks for all its slots (module rules).
         let live: Vec<u8> = self
-            .players
-            .iter()
-            .filter(|(s, p)| **s != 0 && p.active && p.conn.is_some() && !p.catching_up)
-            .map(|(s, _)| *s)
+            .live_machines()
+            .into_iter()
+            .map(|(s, _, _)| s)
             .collect();
         let r = &mut self.round;
         let (agreed, differed) = r.agreement.entry(tick).or_default();
@@ -438,7 +540,7 @@ impl HostCore {
         let all = self
             .players
             .iter()
-            .filter(|(s, p)| p.active && (**s == 0 || p.conn.is_some()))
+            .filter(|(_, p)| p.active && (p.host_local || p.conn.is_some()))
             .all(|(_, p)| p.loaded);
         if all {
             self.round.all_loaded_sent = true;
@@ -460,21 +562,24 @@ impl HostCore {
                     return false;
                 }
                 let live = self.round.next_tick();
-                if let Some(p) = self.players.get_mut(&slot) {
-                    p.loaded = true;
-                    if p.catching_up {
-                        // Loaded after the start: behind from here on.
-                        p.catching_up = false;
-                        p.seen_tick = p.seen_tick.max(live);
+                for s in self.machine_slots(slot) {
+                    if let Some(p) = self.players.get_mut(&s) {
+                        p.loaded = true;
+                        if p.catching_up {
+                            // Loaded after the start: behind from here on.
+                            p.catching_up = false;
+                            p.seen_tick = p.seen_tick.max(live);
+                        }
                     }
+                    self.events.push_back(NetEvent::PeerLoaded {
+                        slot: s,
+                        round_id,
+                        static_digest,
+                        hash0,
+                    });
                 }
-                self.events.push_back(NetEvent::PeerLoaded {
-                    slot,
-                    round_id,
-                    static_digest,
-                    hash0,
-                });
                 self.check_all_loaded();
+                self.release_late_locals();
                 true
             }
             Msg::HashReport {
@@ -486,8 +591,10 @@ impl HostCore {
                     // Stale: sent before this round loaded.
                     return true;
                 }
-                if let Some(p) = self.players.get_mut(&slot) {
-                    p.seen_tick = p.seen_tick.max(tick);
+                for s in self.machine_slots(slot) {
+                    if let Some(p) = self.players.get_mut(&s) {
+                        p.seen_tick = p.seen_tick.max(tick);
+                    }
                 }
                 if let Some(h) = self.round.host_hashes.get(&tick).copied() {
                     self.compare_hash(slot, tick, h, hash);
@@ -504,15 +611,20 @@ impl HostCore {
                 if round_id != self.round.id || !self.round.is_running() {
                     return true;
                 }
-                if let Some(p) = self.players.get_mut(&slot) {
-                    p.catching_up = false;
-                    p.seen_tick = p.seen_tick.max(tick);
+                let slots = self.machine_slots(slot);
+                // Every slot of the machine hears `PeerCaughtUp` here.
+                self.round.late_locals.retain(|x| !slots.contains(x));
+                for s in slots {
+                    if let Some(p) = self.players.get_mut(&s) {
+                        p.catching_up = false;
+                        p.seen_tick = p.seen_tick.max(tick);
+                    }
+                    self.events.push_back(NetEvent::PeerCaughtUp {
+                        slot: s,
+                        round_id,
+                        tick,
+                    });
                 }
-                self.events.push_back(NetEvent::PeerCaughtUp {
-                    slot,
-                    round_id,
-                    tick,
-                });
                 true
             }
             Msg::DesyncHashes {
@@ -535,8 +647,10 @@ impl HostCore {
                 true
             }
             Msg::Resync => {
-                if let Some(p) = self.players.get_mut(&slot) {
-                    p.catching_up = true;
+                for s in self.machine_slots(slot) {
+                    if let Some(p) = self.players.get_mut(&s) {
+                        p.catching_up = true;
+                    }
                 }
                 let id = self.players.get(&slot).and_then(|p| p.conn);
                 if let Some(id) = id {
@@ -581,14 +695,16 @@ impl HostCore {
             );
         }
         let round_id = r.id;
+        if joining {
+            for s in self.conn_slots(id) {
+                if let Some(p) = self.players.get_mut(&s) {
+                    p.catching_up = true;
+                }
+            }
+        }
         let Some(peer) = self.peers.get_mut(&id) else {
             return;
         };
-        if let (true, Phase::Joined(slot)) = (joining, peer.phase) {
-            if let Some(p) = self.players.get_mut(&slot) {
-                p.catching_up = true;
-            }
-        }
         peer.stream = stream;
         peer.stream_round = round_id;
         peer.stream_start = log_len;
@@ -618,6 +734,34 @@ impl HostCore {
         self.drop_fallen_behind();
     }
 
+    /// The guest machines playing this round (module rules): each by its
+    /// local 0's slot (its reports' key), with its link's trouble flag and
+    /// the newest tick any of its seated slots is known to have stepped.
+    /// A machine counts while any of its slots is seated and none of them
+    /// is catching up, whichever local that is.
+    fn live_machines(&self) -> Vec<(u8, bool, u32)> {
+        let mut out = Vec::new();
+        for (id, peer) in &self.peers {
+            let Phase::Joined(s) = peer.phase else {
+                continue;
+            };
+            let slots: Vec<&Player> = self
+                .conn_slots(*id)
+                .iter()
+                .filter_map(|x| self.players.get(x))
+                .filter(|p| p.conn == Some(*id))
+                .collect();
+            let seated = slots.iter().filter(|p| p.active);
+            let seen = seated.clone().map(|p| p.seen_tick).max();
+            if let Some(seen) = seen {
+                if !slots.iter().any(|p| p.catching_up) {
+                    out.push((s, peer.trouble, seen));
+                }
+            }
+        }
+        out
+    }
+
     /// The fell-behind drop (module rules).
     fn drop_fallen_behind(&mut self) {
         let limit = self.config.fell_behind_ticks;
@@ -626,21 +770,13 @@ impl HostCore {
         }
         let now = self.round.next_tick();
         // A silent link is the timeout's business, not this check's.
-        let heard = |id: Option<u32>| {
-            id.and_then(|id| self.peers.get(&id))
-                .is_some_and(|peer| !peer.trouble)
-        };
         let fallen: Vec<u8> = self
-            .players
-            .iter()
-            .filter(|(s, p)| {
-                **s != 0
-                    && p.active
-                    && heard(p.conn)
-                    && !p.catching_up
-                    && now > p.seen_tick.saturating_add(limit + REPORT_SLACK)
+            .live_machines()
+            .into_iter()
+            .filter(|(_, trouble, seen)| {
+                !trouble && now > seen.saturating_add(limit + REPORT_SLACK)
             })
-            .map(|(s, _)| *s)
+            .map(|(s, _, _)| s)
             .collect();
         for slot in fallen {
             self.kick_with(
@@ -659,12 +795,48 @@ impl HostCore {
         // commands can be fitted beside their pads.
         let cap = self.config.lag_comp_cap;
         let now = self.now;
-        let mut pads: BTreeMap<u8, (PadState, u32)> = self
-            .players
-            .iter_mut()
-            .filter(|(_, p)| p.active)
-            .map(|(s, p)| (*s, (p.queue.close(tick, cap, now), p.queue.consumed_seq())))
-            .collect();
+        // One machine's locals that hold the same queued inputs close
+        // together (`scheduler` rules), so they consume the same sequence.
+        let mut by_conn: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
+        for (s, p) in self.players.iter().filter(|(_, p)| p.active) {
+            if let Some(c) = p.machine_key() {
+                by_conn.entry(c).or_default().push(*s);
+            }
+        }
+        let mut groups: Vec<Vec<u8>> = Vec::new();
+        for slots in by_conn.into_values().filter(|g| g.len() > 1) {
+            let mut classes: Vec<Vec<u8>> = Vec::new();
+            for s in slots {
+                let q = &self.players[&s].queue;
+                match classes
+                    .iter_mut()
+                    .find(|c| self.players[&c[0]].queue.same_queued(q))
+                {
+                    Some(c) => c.push(s),
+                    None => classes.push(vec![s]),
+                }
+            }
+            groups.extend(classes.into_iter().filter(|c| c.len() > 1));
+        }
+        let mut pads: BTreeMap<u8, (PadState, u32)> = BTreeMap::new();
+        for slots in groups {
+            let mut qs: Vec<&mut crate::scheduler::SlotQueue> = self
+                .players
+                .iter_mut()
+                .filter(|(s, _)| slots.contains(s))
+                .map(|(_, p)| &mut p.queue)
+                .collect();
+            let closed = crate::scheduler::SlotQueue::close_group(&mut qs, tick, cap, now);
+            for ((s, pad), q) in slots.iter().zip(closed).zip(&qs) {
+                pads.insert(*s, (pad, q.consumed_seq()));
+            }
+        }
+        for (s, p) in self.players.iter_mut().filter(|(_, p)| p.active) {
+            if let std::collections::btree_map::Entry::Vacant(e) = pads.entry(*s) {
+                e.insert((p.queue.close(tick, cap, now), p.queue.consumed_seq()));
+            }
+        }
+
         // Each pad's bytes against either base a stream codes it with.
         let prev: &[(u8, PadState)] = self.round.log.last().map_or(&[], |b| b.pads.as_slice());
         let mut pad_bytes: BTreeMap<u8, usize> = pads
@@ -707,11 +879,32 @@ impl HostCore {
         for c in &commands {
             match c {
                 SessionCommand::AddHuman { slot, .. } => {
+                    // A sibling local already playing (same connection,
+                    // stepped this tick) to line the seated slot up with
+                    // (`scheduler` rules).
+                    let sib = self
+                        .players
+                        .get(slot)
+                        .and_then(|p| p.machine_key())
+                        .and_then(|c| {
+                            self.players
+                                .iter()
+                                .find(|(s, x)| {
+                                    **s != *slot
+                                        && x.active
+                                        && x.machine_key() == Some(c)
+                                        && pads.contains_key(s)
+                                })
+                                .map(|(s, x)| (x.queue.clone(), pads[s].0.view_lag))
+                        });
                     if let Some(p) = self.players.get_mut(slot) {
                         p.active = true;
-                        p.queue.clear();
                         p.seen_tick = p.seen_tick.max(tick);
-                        let pad = p.queue.close(tick, cap, now);
+                        let seated = sib.and_then(|(q, lag)| p.queue.seat_beside(&q, lag));
+                        let pad = seated.unwrap_or_else(|| {
+                            p.queue.clear();
+                            p.queue.close(tick, cap, now)
+                        });
                         pads.insert(*slot, (pad, p.queue.consumed_seq()));
                     }
                 }

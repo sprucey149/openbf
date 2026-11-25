@@ -24,6 +24,13 @@ pub trait Link {
     /// `view_tick`: the confirmed tick the player was looking at (the
     /// local sim's tick), which the host turns into `PadState::view_lag`.
     fn submit_input(&mut self, pad: PadState, view_tick: u32);
+    /// One input tick of every local player of this machine (splitscreen,
+    /// issue #194 B18) under one sequence: `(slot, pad)` with local 0
+    /// first. The host submits each of its own slots
+    /// ([`HostCore::submit_input_for`]); a guest sends them in its locals'
+    /// order ([`ClientCore::submit_inputs`]). With one local
+    /// [`Link::submit_input`] is used, as before.
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32);
     /// This peer's queue depth and starvation count, from the host.
     fn pacing(&self) -> (u8, u32);
     /// This peer's input slack the host published (µs, `net::scheduler`).
@@ -43,6 +50,11 @@ pub trait Link {
     fn desync_hashes(&mut self, tick: u32, first_tick: u32, width: u8, values: Vec<u64>);
     /// A host command (a no-op on a guest).
     fn host(&mut self, cmd: HostCommand);
+    /// Local player `local` of this machine (its slot `slot`) lost its pad
+    /// (`away`) or got it back (splitscreen B17/B20): the host's
+    /// [`HostCore::set_local_away`] by slot, a guest's
+    /// [`ClientCore::set_local_away`] by local index.
+    fn set_local_away(&mut self, local: u8, slot: u8, away: bool);
 }
 
 impl Link for HostCore {
@@ -55,11 +67,18 @@ impl Link for HostCore {
     fn submit_input(&mut self, pad: PadState, view_tick: u32) {
         HostCore::submit_input(self, pad, view_tick);
     }
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32) {
+        for (slot, pad) in pads {
+            HostCore::submit_input_for(self, *slot, *pad, view_tick);
+        }
+    }
+    // Slot 0's figures while it plays (the playing host local's while its
+    // pad is away).
     fn pacing(&self) -> (u8, u32) {
-        HostCore::pacing(self, 0).unwrap_or((0, 0))
+        HostCore::host_pacing(self)
     }
     fn slack_us(&self) -> Option<i64> {
-        HostCore::slack_us(self, 0)
+        HostCore::host_slack_us(self)
     }
     fn jitter_ticks(&self) -> f64 {
         0.0
@@ -75,6 +94,9 @@ impl Link for HostCore {
     fn host(&mut self, cmd: HostCommand) {
         SessionCore::apply(self, cmd);
     }
+    fn set_local_away(&mut self, _: u8, slot: u8, away: bool) {
+        HostCore::set_local_away(self, slot, away);
+    }
 }
 
 impl Link for ClientCore {
@@ -86,6 +108,10 @@ impl Link for ClientCore {
     }
     fn submit_input(&mut self, pad: PadState, view_tick: u32) {
         ClientCore::submit_input(self, pad, view_tick);
+    }
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32) {
+        let pads: Vec<PadState> = pads.iter().map(|(_, p)| *p).collect();
+        ClientCore::submit_inputs(self, &pads, view_tick);
     }
     fn pacing(&self) -> (u8, u32) {
         ClientCore::pacing(self)
@@ -115,6 +141,9 @@ impl Link for ClientCore {
         ClientCore::desync_hashes(self, tick, first_tick, width, values);
     }
     fn host(&mut self, _: HostCommand) {}
+    fn set_local_away(&mut self, local: u8, _: u8, away: bool) {
+        ClientCore::set_local_away(self, local, away);
+    }
 }
 
 impl Link for NetSession<HostCore> {
@@ -126,6 +155,13 @@ impl Link for NetSession<HostCore> {
     }
     fn submit_input(&mut self, pad: PadState, view_tick: u32) {
         self.send(HostCommand::SubmitInput(pad, view_tick));
+    }
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32) {
+        // One command: the network thread may close a tick between two.
+        self.send(HostCommand::SubmitInputsFor {
+            pads: pads.to_vec(),
+            view_tick,
+        });
     }
     fn pacing(&self) -> (u8, u32) {
         let s = self.stats();
@@ -148,6 +184,9 @@ impl Link for NetSession<HostCore> {
     fn host(&mut self, cmd: HostCommand) {
         self.send(cmd);
     }
+    fn set_local_away(&mut self, _: u8, slot: u8, away: bool) {
+        self.send(HostCommand::SetLocalAway { slot, away });
+    }
 }
 
 impl Link for NetSession<ClientCore> {
@@ -159,6 +198,10 @@ impl Link for NetSession<ClientCore> {
     }
     fn submit_input(&mut self, pad: PadState, view_tick: u32) {
         self.send(ClientCommand::SubmitInput(pad, view_tick));
+    }
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32) {
+        let pads = pads.iter().map(|(_, p)| *p).collect();
+        self.send(ClientCommand::SubmitInputs(pads, view_tick));
     }
     fn pacing(&self) -> (u8, u32) {
         let s = self.stats();
@@ -198,4 +241,7 @@ impl Link for NetSession<ClientCore> {
         });
     }
     fn host(&mut self, _: HostCommand) {}
+    fn set_local_away(&mut self, local: u8, _: u8, away: bool) {
+        self.send(ClientCommand::SetLocalAway { local, away });
+    }
 }

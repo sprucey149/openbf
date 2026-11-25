@@ -447,6 +447,9 @@ pub struct Preview {
     /// The window's aspect, as [`Self::draws_live`]'s renderer says it; 4:3 for
     /// the entries with no renderer.
     aspect: Option<f32>,
+    /// A split view's UI rectangle's aspect ([`crate::split_layout::ui_view`]), which replaces
+    /// the window's: the line-up is fitted to the view's own screen, never the window.
+    view_aspect: Option<f32>,
     /// The widest of the classes shown.
     outline: Option<(Vec<u8>, Outline)>,
     /// The line-up's move under the window's aspect and the camera's tangent
@@ -489,6 +492,13 @@ impl Preview {
         self.compose(None, vis, page, cam, dt, |_, team, class, model, dt| {
             specialized(team, class, model, dt)
         })
+    }
+
+    /// Lay the soldiers out for a screen of `aspect` (a split view's UI rectangle,
+    /// [`crate::split_layout::ui_view`], whose field of view the caller's camera then carries)
+    /// instead of the window's; `None` for the window's.
+    pub fn set_view_aspect(&mut self, aspect: Option<f32>) {
+        self.view_aspect = aspect;
     }
 
     /// Issue #128: the raw class of the line-up soldier under the window point
@@ -568,6 +578,7 @@ impl Preview {
                 shown: who,
                 lineup: line.map(|(team, class, _)| (team, class)),
                 aspect: self.aspect,
+                view_aspect: self.view_aspect,
                 ..Default::default()
             };
         }
@@ -609,7 +620,8 @@ impl Preview {
             self.animators.resize_with(n, Animator::default);
             self.cloths.resize_with(n, PreviewCloth::default);
             let (sin, cos) = core::fmath::sin_cos(cam.fov_y * 0.5);
-            let (aspect, tan_v) = (self.aspect.unwrap_or(4.0 / 3.0), sin / cos);
+            let aspect = self.view_aspect.or(self.aspect).unwrap_or(4.0 / 3.0);
+            let tan_v = sin / cos;
             if self.outline.as_ref().is_none_or(|(of, _)| of != classes) {
                 self.outline = Some((classes.to_vec(), team_outline(vis, team, classes)));
                 self.fit = None;

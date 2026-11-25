@@ -4891,11 +4891,8 @@ impl VehicleCensus {
                 .map_or_else(|| "?".to_owned(), |w| w.name.clone())
         };
         // A slot's unit, alive or just dead.
-        let unit = |h: core::unit::UnitHandle| {
-            sim.units
-                .get(h.index as usize)
-                .filter(|u| u.gen == h.gen)
-        };
+        let unit =
+            |h: core::unit::UnitHandle| sim.units.get(h.index as usize).filter(|u| u.gen == h.gen);
         // A seated bot's seat: `<class>/<pilot|gunner>` and its vehicle.
         let seat = |u: &core::unit::Unit| {
             let m = u.mount?;
@@ -4906,7 +4903,8 @@ impl VehicleCensus {
             };
             Some((format!("{}/{kind}", vclass(v.class)), v))
         };
-        let seated_bot = |h: core::unit::UnitHandle| unit(h).filter(|u| !u.is_player && u.mount.is_some());
+        let seated_bot =
+            |h: core::unit::UnitHandle| unit(h).filter(|u| !u.is_player && u.mount.is_some());
         let target = |u: &core::unit::Unit| -> String {
             let Some(t) = u.ai.target else {
                 return "none".to_owned();
@@ -4943,7 +4941,13 @@ impl VehicleCensus {
                 } => {
                     if let Some(u) = seated_bot(s) {
                         if let Some((who, _)) = seat(u) {
-                            add("seat_shot", who, wname(weapon_class as usize), target(u), 0.0);
+                            add(
+                                "seat_shot",
+                                who,
+                                wname(weapon_class as usize),
+                                target(u),
+                                0.0,
+                            );
                         }
                     }
                 }
@@ -5001,7 +5005,13 @@ impl VehicleCensus {
         for (i, v) in sim.vehicles.iter().enumerate() {
             let now = v.stuck_at.is_some();
             if now && !self.stuck[i] {
-                add("stuckmark", vclass(v.class), String::new(), String::new(), 0.0);
+                add(
+                    "stuckmark",
+                    vclass(v.class),
+                    String::new(),
+                    String::new(),
+                    0.0,
+                );
             }
             self.stuck[i] = now;
         }
@@ -5035,24 +5045,23 @@ impl VehicleCensus {
                 .fold(0.0f32, f32::max);
             let rider_in_reach = |o: core::unit::UnitHandle| {
                 sim.unit(o).is_some_and(|e| {
-                    e.mount.is_some_and(|m| m.vehicle != u.mount.unwrap().vehicle)
+                    e.mount
+                        .is_some_and(|m| m.vehicle != u.mount.unwrap().vehicle)
                         && sim.hostile(u.team, e.team)
                         && (e.capsule().center() - s.muzzle).length() <= reach
                 })
             };
-            let opp = u
-                .ai
-                .contacts
-                .iter()
-                .flatten()
-                .any(|c| c.seen_now && c.handle.unit().is_some_and(rider_in_reach));
+            let opp =
+                u.ai.contacts
+                    .iter()
+                    .flatten()
+                    .any(|c| c.seen_now && c.handle.unit().is_some_and(rider_in_reach));
             if opp {
                 add("samp", who.clone(), String::new(), "opp".to_owned(), 0.0);
-                let eng = u
-                    .ai
-                    .target
-                    .and_then(|t| u.ai.contacts.iter().flatten().find(|c| c.handle == t))
-                    .is_some_and(|c| c.seen_now && c.handle.unit().is_some_and(rider_in_reach));
+                let eng =
+                    u.ai.target
+                        .and_then(|t| u.ai.contacts.iter().flatten().find(|c| c.handle == t))
+                        .is_some_and(|c| c.seen_now && c.handle.unit().is_some_and(rider_in_reach));
                 if eng {
                     add("samp", who, String::new(), "eng".to_owned(), 0.0);
                 }
@@ -5062,8 +5071,10 @@ impl VehicleCensus {
 
     fn finish(mut self) {
         let t = self.ticks;
-        self.n
-            .insert(("round", String::new(), String::new(), String::new()), (1, t as f32));
+        self.n.insert(
+            ("round", String::new(), String::new(), String::new()),
+            (1, t as f32),
+        );
         let mut text = String::from("kind,shooter,weapon,what,n,sum\n");
         for ((k, a, b, c), (n, x)) in &self.n {
             let _ = writeln!(text, "{k},{a},{b},{c},{n},{x:.0}");

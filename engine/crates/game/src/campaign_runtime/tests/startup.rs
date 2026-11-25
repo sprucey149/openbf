@@ -222,7 +222,7 @@ fn nab2g_c_objective_line_waits_for_the_commander_line_on_its_slot() {
     let lines = ["imp_off_com_report_us_overwhelmed", "NAB_obj_22"];
     let mut played = Vec::new();
     let frame = |v: &mut crate::announce::Commander, played: &mut Vec<String>| {
-        let _ = v.frame(&walk.sim, walk.player, core::TICK_DT, |line| {
+        let _ = v.frame(&walk.sim, Some(walk.player), core::TICK_DT, |line| {
             if lines.contains(&line.name.as_str()) {
                 played.push(line.name.clone());
             }

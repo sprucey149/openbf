@@ -295,16 +295,42 @@ pub(super) fn open_spawn_screens(walk: &mut WalkSim, mission: Option<&game::miss
     walk.follow_backdrop();
 }
 
+/// Debug splitscreen (issue #194, `--local-players N`): seat `players - 1` more people on this
+/// walk, each behind their own spawn screens as the first player is, and give each the mission's
+/// camera shots as a backdrop. A slot that cannot be seated is reported and left out.
+pub(super) fn seat_local_players(
+    walk: &mut WalkSim,
+    players: usize,
+    mission: Option<&game::mission::MissionDef>,
+) {
+    let side_choice = mission.map_or(true, |m| m.allows_side_select());
+    for slot in 1..players.min(4) as u8 {
+        if let Err(e) = walk.add_local_player(slot, None) {
+            eprintln!("splitscreen: player slot {slot} could not be seated: {e:?}");
+            break;
+        }
+        if !walk.sim.open_spawn_screens(usize::from(slot), side_choice) {
+            eprintln!("spawn screens: slot {slot} holds no live unit; its respawn stays automatic");
+            continue;
+        }
+        let i = walk.local_count() - 1;
+        walk.with_local(i, |w| {
+            w.backdrop = mission.and_then(|m| {
+                game::spawn_backdrop::Backdrop::new(
+                    m.camera_shots(),
+                    game::spawn_backdrop::LCG_RESEED,
+                )
+            });
+            w.follow_backdrop();
+        });
+    }
+}
+
 /// The end of the round as the HUD draws it (issue #33): the result, then
 /// the stats pages (issue #50) once they are made.
 fn round_end_model(r: &game::round_end::RoundEnd) -> ui::hud::RoundEndModel {
-    use game::round_end::Result;
     ui::hud::RoundEndModel {
-        result: match r.result {
-            Result::Victory => 0,
-            Result::Defeat => 1,
-            Result::Draw => 2,
-        },
+        result: r.result.banner(),
         stats: r.stats.clone(),
         fade: r.fade(),
     }
@@ -1557,6 +1583,8 @@ pub(super) fn hud_model_for_view(
             walk.player.index as usize,
             game::capture_feed::Rules::PORT,
         ),
+        // Filled by the window's frame for a LAN or split view (`events.rs`).
+        name_tags: Vec::new(),
     }
 }
 
@@ -1600,15 +1628,9 @@ pub(super) fn spectate_label(
     })
 }
 
-/// Spawn screen model while the player is dead and the round is live; None
-/// otherwise. The post list is the sim's ([`core::sim::Sim::player_spawn_posts`]:
-/// the team's posts, then its live command walkers) and the selection is the
-/// sim's spawn-map pick for this player's slot (card SPSEL), as is the class
-/// row; the class names come from the disc's text through `feed`.
-pub(super) fn spawn_model(
-    walk: &WalkSim,
-    feed: &game::event_feed::EventFeed,
-) -> Option<ui::spawn::SpawnModel> {
+/// Whether [`spawn_model`] has a spawn screen for `walk.player` this frame
+/// (it is `Some` exactly when this is true), without building it.
+pub(super) fn spawn_screen_up(walk: &WalkSim) -> bool {
     let me = &walk.sim.units[walk.player.index as usize];
     let slot = me.spec.player_slot.map_or(0, usize::from);
     // Issue #28: a live player has a spawn screen only while the class
@@ -1618,22 +1640,36 @@ pub(super) fn spawn_model(
     // `FUN_0038c7a0` → `FUN_00397840` on state 4; `FUN_0038cb28` reopens).
     let hidden = alive_screen && walk.campaign.as_ref().is_some_and(|c| c.popup().is_some());
     if (me.alive && !alive_screen) || hidden || walk.sim.outcome.is_some() {
-        return None;
+        return false;
     }
     // Issue #182: the teammate view hides the spawn screens until a spawn
     // is possible again.
     if walk.spectating() {
-        return None;
+        return false;
     }
     // Ground death views wait for the native spawn map, including a dead
     // rider's held seat camera. No legacy waiting panel covers either view.
-    if !me.alive
+    !(!me.alive
         && !walk.space_battle()
         && walk.sim.spawn_screens
-        && walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Accepted)
-    {
+        && walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Accepted))
+}
+
+/// Spawn screen model while the player is dead and the round is live; None
+/// otherwise. The post list is the sim's ([`core::sim::Sim::player_spawn_posts`]:
+/// the team's posts, then its live command walkers) and the selection is the
+/// sim's spawn-map pick for this player's slot (card SPSEL), as is the class
+/// row; the class names come from the disc's text through `feed`.
+pub(super) fn spawn_model(
+    walk: &WalkSim,
+    feed: &game::event_feed::EventFeed,
+) -> Option<ui::spawn::SpawnModel> {
+    if !spawn_screen_up(walk) {
         return None;
     }
+    let me = &walk.sim.units[walk.player.index as usize];
+    let slot = me.spec.player_slot.map_or(0, usize::from);
+    let alive_screen = walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Alive);
     let b = &walk.sim.battle;
     let list = walk.sim.player_spawn_posts(me.team);
     let selected = walk
@@ -2237,6 +2273,7 @@ mod tests {
                 ticks += 1;
                 assert!(ticks < 200, "the spawn map never opened");
                 let model = spawn_model(&walk, &feed);
+                assert_eq!(model.is_some(), spawn_screen_up(&walk), "tick {ticks}");
                 if walk.sim.spawn_stage[0] == SpawnStage::Accepted {
                     match space {
                         false => assert!(model.is_none(), "tick {ticks}"),

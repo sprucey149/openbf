@@ -167,10 +167,37 @@ fn codec_messages_round_trip() {
             token: u64::MAX,
             content: vec![1; 3000],
             profile: vec![2; 40],
+            locals: vec![],
+        },
+        Msg::Hello {
+            protocol: PROTOCOL,
+            build: "abc".into(),
+            name: "One".into(),
+            token: 7,
+            content: vec![1; 30],
+            profile: vec![2; 4],
+            locals: vec![
+                crate::LocalHello {
+                    seat: 1,
+                    name: "Two".into(),
+                    profile: vec![3; 5],
+                },
+                crate::LocalHello {
+                    seat: 3,
+                    name: "Three".into(),
+                    profile: vec![],
+                },
+            ],
         },
         Msg::Welcome {
             slot: 3,
             max_players: 16,
+            extra: vec![],
+        },
+        Msg::Welcome {
+            slot: 3,
+            max_players: 16,
+            extra: vec![4, 6, 9],
         },
         Msg::Reject {
             reason: RejectReason::Full,
@@ -223,6 +250,12 @@ fn codec_messages_round_trip() {
         Msg::Ready {
             round_id: 2,
             profile: vec![1, 2, 3],
+            local: 0,
+        },
+        Msg::Ready {
+            round_id: 2,
+            profile: vec![1],
+            local: 2,
         },
         Msg::Request(vec![1, 2]),
         Msg::Notice(vec![3]),
@@ -243,6 +276,8 @@ fn codec_messages_round_trip() {
             width: 6,
             values: (0..360).collect(),
         },
+        Msg::LocalAway { local: 0 },
+        Msg::LocalBack { local: 3 },
     ];
     for m in msgs {
         let b = m.encode();
@@ -255,6 +290,8 @@ fn codec_messages_round_trip() {
     }
     assert!(Msg::decode(&[0]).is_err());
     assert!(Msg::decode(&[99]).is_err());
+    // A local index past the machine's most locals fails.
+    assert!(Msg::decode(&[19, 4]).is_err() && Msg::decode(&[20, 4]).is_err());
     // Desync rows: a width outside 1..=8 or more than 128 rows fail.
     let rows = |width: u8, rows: u64| {
         let mut w = crate::wire::Writer::new();
@@ -276,15 +313,15 @@ fn codec_messages_round_trip() {
     assert!(rows(1, 129).is_err());
     assert!(crate::msg::valid_name("Stormtrooper TK-421"));
     let taken = [
-        "the maintainer".to_string(),
-        "playtest_1".into(),
+        "Rex".to_string(),
+        "rex_1".into(),
         "x".repeat(24),
         format!("{}_1", "x".repeat(22)),
     ];
     let free =
         |n: &str| crate::msg::unique_name(n, |c| taken.iter().any(|t| t.eq_ignore_ascii_case(c)));
     assert_eq!(free("Ann"), "Ann");
-    assert_eq!(free("THE MAINTAINER"), "playtest_2");
+    assert_eq!(free("REX"), "REX_2");
     let long = free(&"x".repeat(24));
     assert_eq!(long, format!("{}_2", "x".repeat(22)));
     assert!(crate::msg::valid_name(&long));
@@ -394,6 +431,69 @@ fn codec_bundle_bounds_hold_at_their_extremes() {
     let mut w = Writer::new();
     full.write(&mut w, &[]);
     assert_eq!(w.len(), 2 + max * MAX_PAD_BYTES);
+}
+
+/// Splitscreen admission (PROTOCOL 12): a one-player `Hello` is its old
+/// fields plus a zero count; more than three extra locals fail the decode;
+/// derived tokens keep local 0's and differ from each other.
+#[test]
+fn codec_hello_locals_bounded_and_tokens_derived() {
+    let one = Msg::Hello {
+        protocol: PROTOCOL,
+        build: "b".into(),
+        name: "Solo".into(),
+        token: 5,
+        content: vec![],
+        profile: vec![1],
+        locals: vec![],
+    };
+    let b = one.encode();
+    assert_eq!(*b.last().unwrap(), 0, "no extra locals");
+    assert_eq!(Msg::decode(&b).unwrap(), one);
+    let local = |seat: u8, n: &str| crate::LocalHello {
+        seat,
+        name: n.into(),
+        profile: vec![],
+    };
+    let four = Msg::Hello {
+        protocol: PROTOCOL,
+        build: "b".into(),
+        name: "Solo".into(),
+        token: 5,
+        content: vec![],
+        profile: vec![1],
+        locals: vec![local(1, "A"), local(2, "B"), local(3, "C"), local(3, "D")],
+    };
+    assert!(Msg::decode(&four.encode()).is_err());
+    // Seats are 1..MAX_LOCALS in rising order: seat 0, a repeat, a fall or
+    // seat 4 is refused.
+    for seats in [[0, 1], [2, 2], [3, 1], [1, 4]] {
+        let bad = Msg::Hello {
+            protocol: PROTOCOL,
+            build: "b".into(),
+            name: "Solo".into(),
+            token: 5,
+            content: vec![],
+            profile: vec![1],
+            locals: vec![local(seats[0], "A"), local(seats[1], "B")],
+        };
+        assert!(Msg::decode(&bad.encode()).is_err(), "{seats:?}");
+    }
+    let welcome = Msg::Welcome {
+        slot: 1,
+        max_players: 16,
+        extra: vec![2, 3, 4, 5],
+    };
+    assert!(Msg::decode(&welcome.encode()).is_err());
+    let t = 0x1234_5678_9abc_def0;
+    assert_eq!(crate::local_token(t, 0), t);
+    let all: Vec<u64> = (0..4).map(|i| crate::local_token(t, i)).collect();
+    for i in 0..4 {
+        for j in i + 1..4 {
+            assert_ne!(all[i], all[j]);
+        }
+    }
+    assert_ne!(crate::local_token(t, 1), crate::local_token(t + 1, 1));
 }
 
 #[test]

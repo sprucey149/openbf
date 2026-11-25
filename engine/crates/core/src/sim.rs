@@ -114,7 +114,7 @@ mod weak_lock;
 
 pub use awards::{
     medal_level, medal_threshold, MedalCounts, DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL,
-    MEDAL_THRESHOLDS, TECHNICIAN_MEDAL, WEAPON_MEDALS,
+    SlotKeep, MEDAL_THRESHOLDS, TECHNICIAN_MEDAL, WEAPON_MEDALS,
 };
 pub use beam::{Beam, SeatBeam};
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};

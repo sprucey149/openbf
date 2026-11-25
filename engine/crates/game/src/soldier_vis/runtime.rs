@@ -451,7 +451,7 @@ impl SoldierVisuals {
             own_model: Default::default(),
             outlines: Default::default(),
             lod_view: Default::default(),
-            muted_shot: None,
+            muted_shot: (0, Vec::new()),
             low_skins: Default::default(),
             assets,
             weapons,
@@ -755,11 +755,13 @@ impl SoldierVisuals {
     /// [`SoldierVisuals::update`] reads the last tick's shots itself; a frame
     /// that steps several ticks calls this after each
     /// (`WalkSim::advance_with`) so an earlier tick's shot still flashes.
-    /// Issue #168: the local unit's shot at a confirmed tick (tick, unit
-    /// index) whose feedback a LAN peer's prediction already gave
-    /// ([`SoldierVisuals::predicted_shot`]); None clears it.
-    pub fn mute_shot(&mut self, shot: Option<(u64, u32)>) {
-        self.muted_shot = shot;
+    /// Issue #168: the local units' shots at a confirmed tick whose feedback
+    /// a LAN peer's prediction already gave ([`SoldierVisuals::predicted_shot`];
+    /// every local player of the machine, issue #194 B20); none clears it.
+    pub fn mute_shots(&mut self, tick: u64, units: &[u32]) {
+        self.muted_shot.0 = tick;
+        self.muted_shot.1.clear();
+        self.muted_shot.1.extend_from_slice(units);
     }
 
     /// Issue #168: a LAN peer's predicted own shot: unit `unit`'s muzzle
@@ -881,7 +883,7 @@ impl SoldierVisuals {
             ) else {
                 continue;
             };
-            if v.gen == u.gen && self.muted_shot != Some((walk.sim.tick, unit.index)) {
+            if v.gen == u.gen && !shot_muted(&self.muted_shot, walk.sim.tick, unit.index) {
                 v.shot_tick = Some(walk.sim.tick);
                 v.shot_class = Some(*weapon_class as usize);
                 v.shot_ordinal =
@@ -1701,4 +1703,10 @@ impl SoldierVisuals {
         }
         Some((body, gun))
     }
+}
+
+/// Was unit `unit`'s shot at `tick` already fed back by the prediction
+/// ([`SoldierVisuals::mute_shots`])?
+fn shot_muted(muted: &(u64, Vec<u32>), tick: u64, unit: u32) -> bool {
+    muted.0 == tick && muted.1.contains(&unit)
 }

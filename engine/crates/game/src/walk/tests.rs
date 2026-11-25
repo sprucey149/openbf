@@ -1197,8 +1197,15 @@ fn a_ground_rider_lost_with_the_hull_holds_the_seat_view_past_four_seconds() {
             assert_ne!(w.camera().position, view);
         } else {
             assert_eq!(w.camera().position, view);
+            // The ears sit 2 m behind the held view along its back axis
+            // (`event_sounds::listener`), as for any camera: they stay with it.
             let ears = crate::event_sounds::listener(&w);
-            assert_eq!(ears.pos, view, "the ears stay with the held view");
+            let behind = view - w.camera().forward() * 2.0;
+            assert!(
+                (ears.pos - behind).length() < 1e-4,
+                "the ears stay with the held view: {:?} vs {behind:?}",
+                ears.pos
+            );
         }
     }
 }

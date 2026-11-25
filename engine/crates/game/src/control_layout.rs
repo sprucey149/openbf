@@ -306,6 +306,15 @@ pub fn current(walk: &crate::walk::WalkSim) -> Option<ControlContext> {
     })
 }
 
+/// Local player `i`'s context ([`current`] read through their own unit; 0 is the first
+/// player). An away player, or a seat the walk does not have, has none.
+pub fn current_of(walk: &mut crate::walk::WalkSim, i: usize) -> Option<ControlContext> {
+    if i >= walk.local_count() || walk.is_suspended(i) {
+        return None;
+    }
+    walk.with_local(i, |w| current(w))
+}
+
 pub fn keyboard_name(t: Trigger) -> String {
     use winit::event::MouseButton;
     match t {
@@ -340,6 +349,42 @@ pub fn gamepad_name(button: Button, set: IconSet) -> String {
 mod tests {
     use super::*;
     use winit::keyboard::KeyCode;
+
+    /// Each local player's context is read from their own unit: the first player in a
+    /// vehicle leaves the second, on foot, on the infantry table.
+    #[test]
+    fn each_local_player_has_their_own_context() {
+        let mut walk = crate::walk::WalkSim::new(7, glam::Vec3::ZERO, None);
+        let second = walk.add_local_player(1, Some(1)).expect("slot 1 is free");
+        for (u, slot) in [(walk.player, 0usize), (second, 1)] {
+            walk.sim.units[u.index as usize].alive = true;
+            walk.sim.spawn_stage[slot] = core::sim::SpawnStage::Accepted;
+        }
+        let v = walk.sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+            kind: core::vehicle::VehicleKind::Hover,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: glam::Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![core::vehicle::SeatKind::Pilot],
+        });
+        walk.sim.units[walk.player.index as usize].mount = Some(core::vehicle::Mount {
+            vehicle: v,
+            seat: 0,
+        });
+        assert_eq!(current_of(&mut walk, 0), Some(ControlContext::Vehicle));
+        assert_eq!(current_of(&mut walk, 1), Some(ControlContext::Infantry));
+        assert_eq!(current_of(&mut walk, 2), None, "no third seat");
+        assert_eq!(
+            current(&walk),
+            Some(ControlContext::Vehicle),
+            "the walk is put back"
+        );
+    }
 
     #[test]
     fn the_stock_contexts_fit_each_device_and_keep_their_actions() {

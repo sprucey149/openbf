@@ -23,7 +23,8 @@
 //! draws the disc as a fan with that rim instead of a second texture stage.
 
 use crate::hud_draw::{
-    anchor_shift, color, frame_scale, mesh_frame, Ctx, HudVertex, Quad, Run, Screen, OVERFILL,
+    anchor_shift, color, frame_scale, mesh_frame, Ctx, Frame, HudVertex, Panel, Quad, Run, Screen,
+    OVERFILL,
 };
 use crate::hud_tree::{Elem, HAlign, Hud, Kind, FRAME_H, FRAME_W};
 use glam::{Mat4, Vec3};
@@ -238,23 +239,35 @@ impl MapModel {
 /// window (posts `clamp` to the rim; a unit beyond it is `None`) — the same
 /// mapping [`crate::hud_draw::draw`] lays the Map element out by.
 pub fn window_point(hud: &Hud, world: [f32; 2], clamp: bool, size: [f32; 2]) -> Option<[f32; 2]> {
+    window_point_in(hud, world, clamp, &Frame::window(size))
+}
+
+/// [`window_point`] in the screen `f`: the minimap at its root's edge, the
+/// Spawn view in the centred panel ([`Frame::panel`]).
+pub fn window_point_in(hud: &Hud, world: [f32; 2], clamp: bool, f: &Frame) -> Option<[f32; 2]> {
     let map = hud.map.as_ref()?;
-    let e = hud
+    let i = hud
         .roots
         .iter()
-        .map(|r| &hud.elems[*r])
-        .find(|e| e.kind == Kind::Map)?;
+        .copied()
+        .find(|r| hud.elems[*r].kind == Kind::Map)?;
+    let e = &hud.elems[i];
     let (uv, _) = map.place(world, clamp)?;
-    let (base, fx) = match map.view {
-        MapView::Small => (e.local(), e.pos.x / FRAME_W),
-        MapView::Spawn | MapView::Large => (spawn_base(e.scale), POSITION_SPAWN[0]),
+    let (base, s) = match map.view {
+        MapView::Small => (e.local(), f.tree_map(e.pos.x / FRAME_W, hud.v_anchor(i))),
+        MapView::Spawn | MapView::Large => (spawn_base(e.scale), f.panel().tree(POSITION_SPAWN[0])),
     };
     let p = map.group(&base).transform_point3(map.local(uv));
-    let sc = frame_scale(size);
-    Some([
-        OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(fx, size) + sc[0] * p.x,
-        OVERFILL[1].0 * size[1] + sc[1] * p.y,
-    ])
+    Some(at(&s, p))
+}
+
+/// A frame point `p` through `s`, in the order [`window_point`] has always
+/// added its terms.
+fn at(s: &Screen, p: Vec3) -> [f32; 2] {
+    [
+        s.origin[0] + s.scale[0] * p.x,
+        s.origin[1] + s.scale[1] * p.y,
+    ]
 }
 
 /// The Map element's `Scale` in `hud`'s layout, which the Spawn view is
@@ -277,15 +290,22 @@ pub fn spawn_window_point(
     clamp: bool,
     size: [f32; 2],
 ) -> Option<[f32; 2]> {
+    spawn_window_point_in(map, scale, world, clamp, &Frame::window(size))
+}
+
+/// [`spawn_window_point`] in the screen `f` (the page's centred panel).
+pub fn spawn_window_point_in(
+    map: &MapModel,
+    scale: Vec3,
+    world: [f32; 2],
+    clamp: bool,
+    f: &Frame,
+) -> Option<[f32; 2]> {
     let (uv, _) = map.place(world, clamp)?;
     let p = map
         .group(&spawn_base(scale))
         .transform_point3(map.local(uv));
-    let sc = frame_scale(size);
-    Some([
-        OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(POSITION_SPAWN[0], size) + sc[0] * p.x,
-        OVERFILL[1].0 * size[1] + sc[1] * p.y,
-    ])
+    Some(at(&f.panel().tree(POSITION_SPAWN[0]), p))
 }
 
 /// Hit-test command posts on the spawn map view drawn at the Map element's
@@ -299,10 +319,22 @@ pub fn hit_spawn_post<T: Copy>(
     size: [f32; 2],
     max_dist: f32,
 ) -> Option<T> {
+    hit_spawn_post_in(map, scale, posts, point, &Frame::window(size), max_dist)
+}
+
+/// [`hit_spawn_post`] in the screen `f`, `point` in its pixels.
+pub fn hit_spawn_post_in<T: Copy>(
+    map: &MapModel,
+    scale: Vec3,
+    posts: &[(T, glam::Vec3)],
+    point: [f32; 2],
+    f: &Frame,
+    max_dist: f32,
+) -> Option<T> {
     posts
         .iter()
         .filter_map(|(post, pos)| {
-            let pt = spawn_window_point(map, scale, [pos.x, pos.z], true, size)?;
+            let pt = spawn_window_point_in(map, scale, [pos.x, pos.z], true, f)?;
             let dx = point[0] - pt[0];
             let dy = point[1] - pt[1];
             let dist = (dx * dx + dy * dy).sqrt();
@@ -339,7 +371,7 @@ impl Ctx<'_> {
 
     /// The Spawn view (card SSELB): the Map element's own sprites at
     /// `PositionSpawn`, whatever its fader says (the page is the switch).
-    pub(crate) fn map_spawn(&mut self, size: [f32; 2]) {
+    pub(crate) fn map_spawn(&mut self, p: &Panel) {
         let hud = self.hud;
         let Some(map) = hud
             .map
@@ -357,13 +389,7 @@ impl Ctx<'_> {
             return;
         };
         let e = &hud.elems[i];
-        let s = Screen {
-            origin: [
-                OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(POSITION_SPAWN[0], size),
-                OVERFILL[1].0 * size[1],
-            ],
-            scale: frame_scale(size),
-        };
+        let s = p.tree(POSITION_SPAWN[0]);
         self.map_view(i, e, map, &spawn_base(e.scale), &s, e.alpha);
     }
 

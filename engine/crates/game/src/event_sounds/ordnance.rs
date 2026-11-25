@@ -84,22 +84,34 @@ pub struct Hum {
     pub pitch: f32,
 }
 
-/// This tick's hums, nearest the listener first: one per round in
-/// `sim.bolts` whose class authors `OrdnanceSound`, at most
-/// [`HUM_VOICES`]. The count is the slice of `out` that is set; the array
-/// is the hot loop's (no allocation per tick).
+/// This tick's hums, nearest an ear first: one per round in `sim.bolts`
+/// whose class authors `OrdnanceSound`, at most [`HUM_VOICES`]. The count
+/// is the slice of `out` that is set; the array is the hot loop's (no
+/// allocation per tick). With several ears each round is pitched from the
+/// ear nearest it.
 pub fn hums(sim: &core::sim::Sim, listener: &Listener) -> ([Option<Hum>; HUM_VOICES], usize) {
-    let ears = listener.pos;
-    // The listener is the local player's ears: its own velocity joins the
-    // doppler's `d1` (the PS2 reads the listener's too).
-    let ears_vel = sim
-        .units
-        .iter()
-        .find(|u| u.is_player)
-        .map_or(Vec3::ZERO, |u| u.soldier.vel);
+    // The listener's velocity joins the doppler's `d1` (the PS2 reads the
+    // listener's too). Splitscreen: each ear's own, which the listener
+    // carries (`Listener::vels`, `event_sounds::listeners`). One player: the
+    // first `is_player` unit's velocity, which is the first ear's; with no
+    // carried velocities any other ear is taken as still.
+    let first_vel = match listener.vels {
+        Some(_) => Vec3::ZERO,
+        None => sim
+            .units
+            .iter()
+            .find(|u| u.is_player)
+            .map_or(Vec3::ZERO, |u| u.soldier.vel),
+    };
     let mut best: [(f32, Option<Hum>); HUM_VOICES] = [(f32::INFINITY, None); HUM_VOICES];
     let mut n = 0;
     for b in &sim.bolts {
+        let (k, ears) = listener.nearest(b.pos);
+        let ears_vel = match listener.vels {
+            Some(v) => v[k],
+            None if ears == listener.pos => first_vel,
+            None => Vec3::ZERO,
+        };
         let Some(h) = hum_of(sim, b, ears, ears_vel) else {
             continue;
         };
@@ -192,13 +204,7 @@ mod tests {
     }
 
     fn list(sim: &Sim) -> Vec<Hum> {
-        let (out, n) = hums(
-            sim,
-            &Listener {
-                pos: Vec3::ZERO,
-                yaw: 0.0,
-            },
-        );
+        let (out, n) = hums(sim, &Listener::new(Vec3::ZERO, 0.0));
         out[..n].iter().flatten().copied().collect()
     }
 
@@ -267,6 +273,54 @@ mod tests {
         assert!(
             got.iter().all(|h| h.pos.z > -(HUM_VOICES as f32) - 1.0),
             "the nearest rounds keep their voice: {got:?}"
+        );
+    }
+
+    /// Splitscreen (plan SPLITSCREEN 18.2 B11): with a second ear the
+    /// round is ranked and pitched from the ear nearest it, so ear 2 next to
+    /// the round hears the same closing pitch a lone listener there would.
+    #[test]
+    fn a_second_ear_pitches_the_round_it_stands_by() {
+        let sim = sim_with(Some("com_weap_inf_ord_hum_sm"));
+        let alone = list(&sim);
+        let far_p1 = Listener::new(Vec3::new(0.0, 0.0, 5000.0), 0.0).with_more([Vec3::ZERO]);
+        let (out, n) = hums(&sim, &far_p1);
+        let shared: Vec<Hum> = out[..n].iter().flatten().copied().collect();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0].key, alone[0].key);
+        assert!(
+            (shared[0].pitch - alone[0].pitch).abs() < 1e-6,
+            "{} vs {}",
+            shared[0].pitch,
+            alone[0].pitch
+        );
+    }
+
+    /// Splitscreen (plan SPLITSCREEN 18.2 B12): with the ears' velocities
+    /// carried (`Listener::vels`), the round is pitched with the velocity of
+    /// the ear nearest it, not the first `is_player` unit's.
+    #[test]
+    fn a_second_ear_pitches_with_its_own_velocity() {
+        let sim = sim_with(Some("com_weap_inf_ord_hum_sm"));
+        let b = &sim.bolts[0];
+        let moving = -Vec3::Z * 50.0;
+        let far = Listener::new(Vec3::new(0.0, 0.0, 5000.0), 0.0).with_more([Vec3::ZERO]);
+        let ears = Listener {
+            vels: Some([Vec3::ZERO, moving, Vec3::ZERO, Vec3::ZERO]),
+            ..far
+        };
+        let pitch = |l: &Listener| {
+            let (out, n) = hums(&sim, l);
+            assert_eq!(n, 1);
+            out[0].expect("a hum").pitch
+        };
+        let (got, still) = (pitch(&ears), pitch(&far));
+        let want = doppler(b.pos, b.vel, Vec3::ZERO, moving)
+            / doppler(b.pos, b.vel, Vec3::ZERO, Vec3::ZERO);
+        assert_ne!(got, still, "ear 2's own motion moves the pitch");
+        assert!(
+            (got / still - want).abs() < 1e-4,
+            "{got} / {still} vs {want}"
         );
     }
 

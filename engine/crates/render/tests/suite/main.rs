@@ -22,5 +22,6 @@ mod specular;
 mod sun_flare;
 mod underwater;
 mod uv_scroll;
+mod views;
 mod water_pass;
 mod world_scale;

@@ -127,73 +127,60 @@ fn netplay_content_scan_ignores_manifest_bytes() {
     assert_eq!(common.maps.iter().collect::<Vec<_>>(), ["bf2_kas2"]);
 }
 
-/// Guests ask only for their own slot and only for allowed cheats; off is
-/// always allowed; junk is refused.
+/// Guests ask only for their own machine's slots and only for allowed
+/// cheats; off is always allowed; junk is refused.
 #[test]
 fn netplay_requests_are_checked_against_the_policy() {
     let stamina = cheat_index("stamina").unwrap();
     let classes = cheat_index("classes").unwrap();
     let policy = 1 << stamina;
-    let ok = validate_request(
-        3,
-        &GameRequest::CheatToggle {
-            id: stamina,
-            on: true,
-        },
-        policy,
-    );
+    let toggle = |slot, id, on| GameRequest::CheatToggle { slot, id, on };
+    // Machine 3 also holds slot 5 (a further splitscreen player).
+    let machine = [3, 5];
     assert_eq!(
-        ok,
+        validate_request(&machine, &toggle(3, stamina, true), policy),
         Ok(GameCommand::SetSlotCheat {
             slot: 3,
             id: stamina,
             on: true
         })
     );
-    let no = validate_request(
-        3,
-        &GameRequest::CheatToggle {
-            id: classes,
-            on: true,
-        },
-        policy,
-    );
-    assert_eq!(no, Err(Refusal::NotAllowed));
-    let off = validate_request(
-        3,
-        &GameRequest::CheatToggle {
-            id: classes,
-            on: false,
-        },
-        policy,
+    assert_eq!(
+        validate_request(&machine, &toggle(5, stamina, true), policy),
+        Ok(GameCommand::SetSlotCheat {
+            slot: 5,
+            id: stamina,
+            on: true
+        }),
+        "a further player's toggle is their own slot's"
     );
     assert_eq!(
-        off,
+        validate_request(&machine, &toggle(4, stamina, true), policy),
+        Err(Refusal::NotYours),
+        "another machine's slot"
+    );
+    assert_eq!(
+        validate_request(&machine, &toggle(3, classes, true), policy),
+        Err(Refusal::NotAllowed)
+    );
+    assert_eq!(
+        validate_request(&machine, &toggle(3, classes, false), policy),
         Ok(GameCommand::SetSlotCheat {
             slot: 3,
             id: classes,
             on: false
         })
     );
-    let bad = validate_request(
-        3,
-        &GameRequest::CheatToggle {
-            id: CHEAT_COUNT,
-            on: true,
-        },
-        ALL_CHEATS,
-    );
-    assert_eq!(bad, Err(Refusal::UnknownCheat));
     assert_eq!(
-        validate_request_bytes(1, b"{", policy),
+        validate_request(&machine, &toggle(3, CHEAT_COUNT, true), ALL_CHEATS),
+        Err(Refusal::UnknownCheat)
+    );
+    assert_eq!(
+        validate_request_bytes(&[1], b"{", policy),
         Err(Refusal::Malformed)
     );
-    let req = GameRequest::CheatToggle {
-        id: stamina,
-        on: true,
-    };
     assert_eq!(
-        validate_request_bytes(1, &req.encode(), policy).map(|_| ()),
+        validate_request_bytes(&[1], &toggle(1, stamina, true).encode(), policy).map(|_| ()),
         Ok(())
     );
     for bits in [0, 1, 0b1010, ALL_CHEATS] {
@@ -1480,3 +1467,682 @@ fn netplay_a_held_charge_fills_each_peers_own_ring() {
 // The build id's rules (game/build.rs), with their own tests.
 #[path = "../../build_rules.rs"]
 mod build_rules;
+
+/// Issue #194 B18 (`SPLITSCREEN.md` 18.2): a host with one player and a
+/// guest machine with two local players, on a 3 % loss link with
+/// prediction and drawing on. The guest's two slots are adopted by its walk
+/// and seated by the bundles; over 600 ticks every peer's hash matches on
+/// every tick, both guest locals spawn and move on every machine, both
+/// locals' pending queues stay the same length on every frame (also after a
+/// late seat: local 1's pad goes away and comes back), and drawing never
+/// reaches the confirmed sim.
+#[test]
+fn netplay_a_guest_with_two_local_players_plays_in_lockstep() {
+    let link = LinkParams {
+        latency: Micros::from_millis(20),
+        jitter: Micros::from_millis(5),
+        loss: 0.03,
+        duplicate: 0.01,
+        reorder: 0.01,
+    };
+    // The fixture with a post per side, so the joiners' spawn screens have
+    // one to accept.
+    let builder: Builder = Box::new(|s: &RoundSetup, local: u8, _node: usize| {
+        Ok((
+            super::smooth_tests::fixture(s, local)?,
+            Some(crate::event_feed::EventFeed::default()),
+        ))
+    });
+    let mut v = VirtualNet::new(17, link, "test-build", seat(0).profile.encode(), builder);
+    v.nodes[0].peer.report_dir = None;
+    v.predict = true;
+    v.draw = true;
+    v.host_load(&setup());
+    assert!(v.run_until(5_000, |v| v.host_tick() >= 30));
+    let local = net::LocalHello {
+        seat: 1,
+        name: "Guest2".into(),
+        profile: seat(2).profile.encode(),
+    };
+    let g = v.join_locals("Guest", 71, seat(1).profile.encode(), 15.0, vec![local]);
+    v.nodes[g].peer.report_dir = None;
+    assert!(v.run_until(20_000, |v| {
+        v.nodes[g].peer.mode() == Mode::Playing
+            && v.nodes[g]
+                .walk
+                .as_ref()
+                .is_some_and(|w| w.local_count() == 2 && !w.is_suspended(0) && !w.is_suspended(1))
+    }));
+    let (s0, s1) = (
+        v.nodes[g].peer.local_slot,
+        v.nodes[g].peer.extra_locals()[0].slot,
+    );
+    assert_eq!((s0, s1), (1, 2));
+    for slot in [s0, s1] {
+        assert!(
+            v.nodes[0]
+                .applied
+                .iter()
+                .any(|(_, a)| matches!(a, Applied::Joined { slot: s, ok: true } if *s == slot)),
+            "slot {slot} seated"
+        );
+    }
+    // Where each guest local's soldier is, on the guest's walk and the host's.
+    let at = |v: &VirtualNet, node: usize, slot: u8| {
+        let w = v.nodes[node].walk.as_ref().unwrap();
+        w.sim
+            .players
+            .get(usize::from(slot))
+            .copied()
+            .flatten()
+            .and_then(|h| w.sim.unit(h))
+            .filter(|u| u.alive)
+            .map(|u| u.soldier.pos)
+    };
+    let start = v.nodes[g].peer.next_tick();
+    let mut seen: [Vec<glam::Vec3>; 2] = Default::default();
+    let mut late_seat_from = None;
+    while v.nodes[g].peer.next_tick() < start + 600 {
+        v.run_until(250, |_| false);
+        let t = v.nodes[g].peer.next_tick() - start;
+        for (k, slot) in [s0, s1].into_iter().enumerate() {
+            if let Some(p) = at(&v, g, slot) {
+                seen[k].push(p);
+            }
+            // The guest's walk follows each local to its slot's unit.
+            let w = v.nodes[g].walk.as_ref().unwrap();
+            if !w.is_suspended(k) {
+                assert_eq!(Some(w.local_unit(k)), w.sim.players[usize::from(slot)]);
+            }
+        }
+        // A late seat: local 1's pad away from tick 250 to 400.
+        let c = v.nodes[g].link.client_mut().unwrap();
+        if (250..400).contains(&t) && !c.local_away(1) {
+            c.set_local_away(1, true);
+        } else if t >= 400 && c.local_away(1) {
+            c.set_local_away(1, false);
+            late_seat_from = Some(v.nodes[g].local_pending.len());
+        }
+    }
+    let host = &v.nodes[0];
+    assert!(
+        host.applied
+            .iter()
+            .any(|(_, a)| matches!(a, Applied::Left { slot, .. } if *slot == s1)),
+        "local 1 went away"
+    );
+    assert!(
+        host.applied
+            .iter()
+            .filter(|(_, a)| matches!(a, Applied::Joined { slot, ok: true } if *slot == s1))
+            .count()
+            >= 2,
+        "local 1 was seated again"
+    );
+    let gw = v.nodes[g].walk.as_ref().unwrap();
+    assert!(!gw.is_suspended(1) && !gw.is_waiting(1), "local 1 back");
+    for (k, ps) in seen.iter().enumerate() {
+        assert!(ps.len() >= 4, "local {k} spawned: {} samples", ps.len());
+        let moved = ps.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>();
+        assert!(moved > 5.0, "local {k} moved {moved} m");
+    }
+    for slot in [s0, s1] {
+        assert!(at(&v, 0, slot).is_some() || at(&v, g, slot).is_none());
+    }
+    let rows = &v.nodes[g].local_pending;
+    let from = late_seat_from.expect("local 1 came back");
+    assert!(
+        rows.len() > from + 100,
+        "{} frames, {from} before the late seat",
+        rows.len()
+    );
+    let off: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r[0] != r[1])
+        .take(5)
+        .collect();
+    assert!(off.is_empty(), "pending queues differ: {off:?}");
+    assert!(rows.iter().any(|r| r[0] > 0), "inputs were pending");
+    assert!(
+        v.checker.checks >= u64::from(v.nodes[g].peer.next_tick()),
+        "{}",
+        v.checker.checks
+    );
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+    assert_eq!(host.peer.stats.desyncs + v.nodes[g].peer.stats.desyncs, 0);
+    assert_eq!(v.draws.changed, 0, "{:?}", v.draws.first_changed);
+    let predicted = &v.nodes[g].predicted_locals;
+    assert!(
+        predicted.len() == 2 && predicted[0] > 100 && predicted[1] > 100,
+        "both locals predicted: {predicted:?}"
+    );
+}
+
+/// Issue #194 B18: the host adds one of its own local players mid-round
+/// (`HostCore::add_local`, [`Peer::set_extra_slots`],
+/// `WalkSim::adopt_local`, then `AddHuman`): the new local's pacer follows
+/// local 0's input clock, so from its seating on both locals' pending
+/// queues hold the same count on every frame, both slots are in every
+/// bundle, the new local is waiting (not away) until the bundle seats it,
+/// and its own pad moves its own soldier.
+#[test]
+fn netplay_a_host_local_added_mid_round_keeps_its_queue_beside_local_zero() {
+    let mut core = net::HostCore::new(net::HostConfig::new("test-build", "Host"));
+    let mut peer = Peer::host();
+    let bytes = peer.host_load(&mut core, &setup());
+    let mut walk = super::smooth_tests::fixture(&RoundSetup::decode(&bytes).unwrap(), 0).unwrap();
+    peer.round_built(&mut core, &mut walk);
+    let mut view = LocalView::new();
+    let mut now = Micros::from_millis(1);
+    let mut added = None;
+    let (mut rows, mut both_in_bundles) = (0, 0);
+    let mut path = Vec::new();
+    for frame in 0..600u32 {
+        core.update(now);
+        peer.poll(&mut core);
+        if frame == 90 {
+            let (slot, _) = core.add_local("Second", seat(1).profile.encode()).unwrap();
+            peer.set_extra_slots(&[slot]);
+            walk.adopt_local(slot);
+            assert!(walk.is_waiting(1) && walk.is_suspended(1));
+            Link::host(
+                &mut core,
+                net::HostCommand::AddHuman {
+                    slot,
+                    team: net::TEAM_AUTO,
+                },
+            );
+            added = Some(slot);
+        }
+        let spawn = |f: u32| {
+            if f % 20 < 5 {
+                core::sim::buttons::SPAWN_ACCEPT
+            } else {
+                0
+            }
+        };
+        let mine = PadState {
+            buttons: spawn(frame),
+            ..PadState::default()
+        };
+        let second = PadState {
+            ly: PadState::quantize(1.0),
+            rx: PadState::quantize(0.2),
+            buttons: spawn(frame + 10),
+            ..PadState::default()
+        };
+        // Uneven frames, so local 0's input clock is mid-tick when the
+        // second local is added.
+        let dt = (1.0 + 0.4 * core::fmath::sin_cos(frame as f32 * 0.7).0) / 60.0;
+        view.frame_locals(
+            &mut peer,
+            &mut core,
+            dt,
+            &[mine, second],
+            &mut walk,
+            None,
+            |_, b, _, _| {
+                both_in_bundles += usize::from(added.is_some_and(|s| b.pad(s).is_some()));
+            },
+        );
+        if let Some(slot) = added {
+            let seated = walk
+                .sim
+                .players
+                .get(usize::from(slot))
+                .is_some_and(Option::is_some);
+            if seated {
+                assert!(!walk.is_waiting(1));
+                assert_eq!(
+                    peer.pending_inputs_of(0).len(),
+                    peer.pending_inputs_of(1).len(),
+                    "frame {frame}"
+                );
+                rows += 1;
+                if let Some(u) = walk.sim.unit(walk.local_unit(1)).filter(|u| u.alive) {
+                    path.push(u.soldier.pos);
+                }
+            }
+        }
+        now = now + Micros((f64::from(dt) * 1e6) as u64);
+    }
+    assert!(rows > 400, "{rows} frames with both seated");
+    assert!(both_in_bundles > 200, "{both_in_bundles}");
+    let moved = path.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>();
+    assert!(moved > 5.0, "the second local moved {moved} m");
+}
+
+/// Issue #194 B19: the host's own further players come from
+/// `HostCommand::AddLocal` (the threaded session's form of
+/// `HostCore::add_local`), answered by `Notice::LocalAdded` with the slot
+/// and the unique name; the peer takes each as one of its locals, counts it
+/// as the host's machine, and the walk's locals follow the peer's:
+/// adopted at the round's build, and one the host lets go is released.
+#[test]
+fn netplay_host_locals_are_the_hosts_machine_and_the_walk_follows_the_peer() {
+    let mut core = net::HostCore::new(net::HostConfig::new("test-build", "Host"));
+    let mut peer = Peer::host();
+    for (k, name) in [(1u8, "Host"), (2, "Leia")] {
+        Link::host(
+            &mut core,
+            net::HostCommand::AddLocal {
+                seat: k,
+                name: name.into(),
+                profile: seat(k).profile.encode(),
+            },
+        );
+    }
+    let added: Vec<_> = peer
+        .poll(&mut core)
+        .into_iter()
+        .filter_map(|n| match n {
+            Notice::LocalAdded { seat, added } => Some((seat, added)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        added,
+        [
+            (1, Ok((1, "Host_1".to_owned()))),
+            (2, Ok((2, "Leia".to_owned())))
+        ],
+        "each seat's slot and its unique name"
+    );
+    assert_eq!(peer.local_slots(), [0, 1, 2]);
+    assert!(peer.host_local(0) && peer.host_local(1) && peer.host_local(2));
+    assert!(!peer.host_local(3));
+    assert_eq!((peer.machine_of(1), peer.machine_of(2)), (0, 0));
+    assert_eq!(peer.machine_of(5), 5, "an unknown slot is its own machine");
+    let mut s = setup();
+    s.humans.push(seat(1));
+    s.humans.push(seat(2));
+    let bytes = peer.host_load(&mut core, &s);
+    let mut walk = super::smooth_tests::fixture(&RoundSetup::decode(&bytes).unwrap(), 0).unwrap();
+    peer.round_built(&mut core, &mut walk);
+    let slots = |w: &crate::walk::WalkSim| {
+        (0..w.local_count())
+            .map(|i| w.local_slot_of(i))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(slots(&walk), [0, 1, 2], "adopted at the build");
+    // The host lets local 1 go: the walk releases it, local 2 stays.
+    assert!(core.remove_local(1));
+    peer.set_extra_slots(&[2]);
+    peer.sync_walk_locals(&mut walk);
+    assert_eq!(slots(&walk), [0, 2]);
+    // A one-player machine's peer and walk: nothing to do.
+    peer.set_extra_slots(&[]);
+    peer.sync_walk_locals(&mut walk);
+    assert_eq!(slots(&walk), [0]);
+    peer.sync_walk_locals(&mut walk);
+    assert_eq!(slots(&walk), [0]);
+}
+
+/// Issue #194 B20 (B17's game side): a removal keeps the slot's side and
+/// round career, and a [`TEAM_KEPT`] return gives them back: the same
+/// team, the medal career with its progress, assist and cheats, and the
+/// class-screen points carried into the gate. `TEAM_AUTO` keeps the old
+/// rule (a fresh career from the profile, the side select).
+#[test]
+fn netplay_a_kept_return_has_its_old_side_and_round_career() {
+    let mut s = setup();
+    let mut second = seat(2);
+    second.team = Some(1);
+    second.profile.medals = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+    s.humans.push(second.clone());
+    let fresh = |kept: bool| {
+        let mut walk = super::smooth_tests::fixture(&s, 0).unwrap();
+        let h = walk.sim.players[2].unwrap();
+        // Round progress the profile does not have.
+        walk.sim.score_medal_points(h, 7);
+        walk.sim.set_spawn_points(2, 40);
+        let before = walk.sim.keep_slot(2);
+        assert!(before.has_career());
+        apply(&mut walk, &net::SessionCommand::RemoveHuman { slot: 2 });
+        assert!(walk.sim.players[2].is_none());
+        assert_eq!(walk.netplay.kept[&2].team, Some(1));
+        assert_eq!(walk.netplay.kept[&2].points, 40);
+        let team = if kept { TEAM_KEPT } else { net::TEAM_AUTO };
+        let applied = apply(
+            &mut walk,
+            &net::SessionCommand::AddHuman {
+                slot: 2,
+                team,
+                profile: second.profile.encode(),
+            },
+        );
+        assert_eq!(applied, Applied::Joined { slot: 2, ok: true });
+        let h = walk.sim.players[2].unwrap();
+        (walk, before.following(h))
+    };
+    let (mut walk, before) = fresh(true);
+    let h = walk.sim.players[2].unwrap();
+    assert_eq!(walk.sim.units[h.index as usize].team, 1, "the old side");
+    assert_eq!(walk.sim.keep_slot(2), before, "the round career as it was");
+    assert!(walk.netplay.kept.is_empty());
+    gate(&mut walk, None);
+    assert_eq!(walk.sim.spawn_points[2], 40, "points carried into the gate");
+    let (auto, before) = fresh(false);
+    assert_ne!(
+        auto.sim.keep_slot(2),
+        before,
+        "TEAM_AUTO installs a fresh career"
+    );
+    assert!(!auto.netplay.carried.contains_key(&2));
+}
+
+/// Finding lan-addhuman-stale-session-profile: a [`TEAM_KEPT`] return
+/// installs the profile the slot was playing on, not the `AddHuman`'s bytes
+/// (the net core's copy, which may be the session-start one): class unlocks
+/// earned since and a Career Awards switch made in the Game Menu (before or
+/// during the pad's absence) both survive the pad's loss and return.
+#[test]
+fn netplay_a_kept_return_keeps_its_unlocks_and_awards_switch() {
+    let mut s = setup();
+    let mut second = seat(2);
+    second.profile.unlock_kills = [9, 60, 120, 3, 7, 0, 0, 1];
+    second.profile.award_bonuses = true;
+    s.humans.push(second.clone());
+    // What the net core would still hold from the session's start.
+    let mut stale = second.profile.clone();
+    stale.unlock_kills = [0; 8];
+    stale.award_bonuses = true;
+    for during in [false, true] {
+        let mut walk = super::smooth_tests::fixture(&s, 0).unwrap();
+        let off =
+            net::SessionCommand::Game(GameCommand::SetCareerAwards { slot: 2, on: false }.encode());
+        if !during {
+            apply(&mut walk, &off);
+        }
+        apply(&mut walk, &net::SessionCommand::RemoveHuman { slot: 2 });
+        if during {
+            apply(&mut walk, &off);
+        }
+        let applied = apply(
+            &mut walk,
+            &net::SessionCommand::AddHuman {
+                slot: 2,
+                team: TEAM_KEPT,
+                profile: stale.encode(),
+            },
+        );
+        assert_eq!(applied, Applied::Joined { slot: 2, ok: true });
+        let p = &walk.netplay.profiles[&2];
+        assert_eq!(p.unlock_kills, second.profile.unlock_kills, "unlocks kept");
+        assert!(!p.award_bonuses, "the switch kept (during: {during})");
+        assert!(!walk.sim.slot_career_award_bonuses(2));
+    }
+    // TEAM_AUTO (a first seating) still takes the command's profile.
+    let mut walk = super::smooth_tests::fixture(&s, 0).unwrap();
+    apply(&mut walk, &net::SessionCommand::RemoveHuman { slot: 2 });
+    apply(
+        &mut walk,
+        &net::SessionCommand::AddHuman {
+            slot: 2,
+            team: net::TEAM_AUTO,
+            profile: stale.encode(),
+        },
+    );
+    assert_eq!(walk.netplay.profiles[&2].unlock_kills, [0; 8]);
+}
+
+/// Issue #194 B20 (B17's game side): in a LAN round a guest's second local
+/// player loses its pad and gets it back through the window's own lost-pad
+/// path under `netplay.active` (`local_seats::lan_presence` over the
+/// machine's `Seats`, so [`Peer::set_local_away`] alone), with no
+/// `suspend_local_player`, `resume_local_player` or profile install: the
+/// round's only commands for its slot are one `RemoveHuman` and one
+/// `AddHuman`, it comes back on the same side with the same medal career,
+/// the other local plays on, both locals' queues stay equal, and every
+/// machine's hashes match. Then the guest's link is replaced (a new peer)
+/// with that pad unplugged: asked again on the new link, the slot stays out.
+#[test]
+fn netplay_a_guest_locals_pad_goes_and_comes_back_through_the_session_only() {
+    let link = LinkParams {
+        latency: Micros::from_millis(20),
+        jitter: Micros::from_millis(5),
+        loss: 0.03,
+        duplicate: 0.01,
+        reorder: 0.01,
+    };
+    let builder: Builder = Box::new(|s: &RoundSetup, local: u8, _node: usize| {
+        Ok((
+            super::smooth_tests::fixture(s, local)?,
+            Some(crate::event_feed::EventFeed::default()),
+        ))
+    });
+    let mut v = VirtualNet::new(23, link, "test-build", seat(0).profile.encode(), builder);
+    v.nodes[0].peer.report_dir = None;
+    v.predict = true;
+    v.host_load(&setup());
+    assert!(v.run_until(5_000, |v| v.host_tick() >= 30));
+    let mut second = seat(2).profile;
+    second.medals = [2, 1, 0, 0, 0, 0, 0, 0, 0];
+    let local = net::LocalHello {
+        seat: 1,
+        name: "Guest2".into(),
+        profile: second.encode(),
+    };
+    let g = v.join_locals("Guest", 73, seat(1).profile.encode(), 15.0, vec![local]);
+    v.nodes[g].peer.report_dir = None;
+    assert!(v.run_until(20_000, |v| {
+        v.nodes[g].walk.as_ref().is_some_and(|w| {
+            w.local_count() == 2
+                && !w.is_suspended(0)
+                && !w.is_suspended(1)
+                && w.sim.units[w.local_unit(1).index as usize].alive
+        })
+    }));
+    let s1 = v.nodes[g].peer.extra_locals()[0].slot;
+    let team_of = |v: &VirtualNet, node: usize| {
+        let w = v.nodes[node].walk.as_ref().unwrap();
+        w.sim.players[usize::from(s1)].map(|h| w.sim.units[h.index as usize].team)
+    };
+    let team = team_of(&v, 0).expect("seated");
+    let career_before = v.nodes[0]
+        .walk
+        .as_ref()
+        .unwrap()
+        .sim
+        .keep_slot(usize::from(s1));
+    let applied_from = v.nodes[0].applied.len();
+    // The guest machine's seats: pad 10 is local 0's, pad 11 local 1's.
+    let mut seats = crate::local_seats::Seats::<u8>::new(2, false);
+    assert_eq!((seats.offer(10), seats.offer(11)), (Some(0), Some(1)));
+    let presence = |v: &mut VirtualNet, seats: &crate::local_seats::Seats<u8>| {
+        let n = &mut v.nodes[g];
+        let w = n.walk.as_ref().unwrap();
+        let slots: Vec<u8> = (0..w.local_count()).map(|k| w.local_slot_of(k)).collect();
+        crate::local_seats::lan_presence(seats, &slots, &mut n.peer, &mut n.link)
+    };
+    assert!(presence(&mut v, &seats).is_empty(), "nothing to say");
+    seats.gone(11);
+    assert!(presence(&mut v, &seats).is_empty());
+    assert!(v.nodes[g].peer.local_away(1) && !v.nodes[g].peer.local_away(0));
+    assert!(v.run_until(5_000, |v| v.nodes[g]
+        .walk
+        .as_ref()
+        .is_some_and(|w| w.is_suspended(1))));
+    // Away: only that slot is out; the other local plays on.
+    v.run_until(1_500, |_| false);
+    {
+        let w = v.nodes[g].walk.as_ref().unwrap();
+        assert!(w.is_suspended(1) && !w.is_waiting(1) && !w.is_suspended(0));
+        let kept = &v.nodes[0].walk.as_ref().unwrap().netplay.kept[&s1];
+        assert_eq!(kept.team, Some(team));
+    }
+    assert!(presence(&mut v, &seats).is_empty(), "asked once");
+    assert_eq!(seats.offer(11), Some(1), "the pad is back on its own seat");
+    assert_eq!(presence(&mut v, &seats), vec![1]);
+    assert!(v.run_until(5_000, |v| v.nodes[g]
+        .walk
+        .as_ref()
+        .is_some_and(|w| !w.is_suspended(1))));
+    v.run_until(100, |_| false);
+    for node in [0, g] {
+        assert_eq!(team_of(&v, node), Some(team), "node {node}: the same side");
+        let w = v.nodes[node].walk.as_ref().unwrap();
+        let h = w.sim.players[usize::from(s1)].unwrap();
+        assert_eq!(
+            w.sim.keep_slot(usize::from(s1)),
+            career_before.clone().following(h),
+            "node {node}: the same round career"
+        );
+    }
+    let ours: Vec<_> = v.nodes[0].applied[applied_from..]
+        .iter()
+        .filter(|(_, a)| {
+            matches!(a, Applied::Joined { slot, .. } | Applied::Left { slot, .. } if *slot == s1)
+        })
+        .map(|(_, a)| a.clone())
+        .collect();
+    assert_eq!(ours.len(), 2, "{ours:?}");
+    assert!(matches!(ours[0], Applied::Left { .. }));
+    assert!(matches!(ours[1], Applied::Joined { ok: true, .. }));
+    v.run_until(2_000, |_| false);
+    let rows = &v.nodes[g].local_pending;
+    assert!(
+        rows.iter().rev().take(60).all(|r| r[0] == r[1]),
+        "queues equal"
+    );
+    // A new link with local 1's pad still unplugged: the window asks again.
+    v.cut(g, true);
+    v.run_until(500, |_| false);
+    v.reconnect(g, seat(1).profile.encode());
+    // The new peer has heard of no lost pad: once welcomed (its slots known),
+    // the seats say it again, as the window's frames ask every frame.
+    seats.gone(11);
+    assert!(v.run_until(10_000, |v| v.nodes[g].peer.local_count() == 2));
+    let slots = [1, 2];
+    let n = &mut v.nodes[g];
+    assert!(crate::local_seats::lan_presence(&seats, &slots, &mut n.peer, &mut n.link).is_empty());
+    assert!(n.peer.local_away(1));
+    let rejoined_from = v.nodes[0].applied.len();
+    assert!(v.run_until(30_000, |v| v.nodes[g]
+        .walk
+        .as_ref()
+        .is_some_and(|w| w.local_count() == 2 && !w.is_suspended(0))));
+    v.run_until(3_000, |_| false);
+    let w = v.nodes[g].walk.as_ref().unwrap();
+    assert!(w.is_suspended(1), "the unplugged local stays out");
+    assert!(
+        !v.nodes[0].applied[rejoined_from..]
+            .iter()
+            .any(|(_, a)| matches!(a, Applied::Joined { slot, ok: true } if *slot == s1)),
+        "never seated while away"
+    );
+    assert_eq!(v.checker.mismatch_count, 0, "{:?}", v.checker.mismatches);
+    assert_eq!(
+        v.nodes[0].peer.stats.desyncs + v.nodes[g].peer.stats.desyncs,
+        0
+    );
+}
+
+/// Issue #194 B20: a LAN frame's pads go out in the session's local order,
+/// each from its own slot, and a further local's Game Menu Respawn (asked of
+/// its own view, `WalkSim::take_respawn_of`) rides its own pad once.
+#[test]
+fn netplay_lan_pads_carry_each_locals_pad_and_its_respawn() {
+    let mut core = net::HostCore::new(net::HostConfig::new("test-build", "Host"));
+    let mut peer = Peer::host();
+    let bytes = peer.host_load(&mut core, &setup());
+    let mut walk = super::smooth_tests::fixture(&RoundSetup::decode(&bytes).unwrap(), 0).unwrap();
+    let slot = 3;
+    peer.set_extra_slots(&[slot]);
+    peer.round_built(&mut core, &mut walk);
+    assert_eq!(walk.local_count(), 2);
+    let mut by_slot = vec![PadState::default(); usize::from(slot) + 1];
+    by_slot[0].lx = 11;
+    by_slot[usize::from(slot)].lx = 22;
+    walk.with_local(1, |w| w.request_respawn());
+    let pads = crate::local_seats::lan_pads(&peer, &mut walk, &by_slot);
+    assert_eq!(pads.len(), 2);
+    assert_eq!((pads[0].lx, pads[1].lx), (11, 22));
+    assert_eq!(pads[0].buttons & core::sim::buttons::RESPAWN, 0);
+    assert_ne!(
+        pads[1].buttons & core::sim::buttons::RESPAWN,
+        0,
+        "P2's respawn"
+    );
+    let again = crate::local_seats::lan_pads(&peer, &mut walk, &by_slot);
+    assert_eq!(again[1].buttons & core::sim::buttons::RESPAWN, 0, "once");
+}
+
+/// Issue #194: a guest machine's further player's Cheats toggle names its
+/// own slot, and the host changes only that slot's cheats, on every walk;
+/// a request for a slot of another machine is refused.
+#[test]
+fn netplay_a_guest_further_players_cheat_toggle_changes_only_their_slot() {
+    let link = LinkParams {
+        latency: Micros::from_millis(10),
+        jitter: Micros::from_millis(2),
+        loss: 0.0,
+        duplicate: 0.0,
+        reorder: 0.0,
+    };
+    let builder: Builder = Box::new(|s: &RoundSetup, local: u8, _node: usize| {
+        Ok((super::smooth_tests::fixture(s, local)?, None))
+    });
+    let mut v = VirtualNet::new(29, link, "test-build", seat(0).profile.encode(), builder);
+    v.nodes[0].peer.report_dir = None;
+    v.host_load(&setup());
+    assert!(v.run_until(5_000, |v| v.host_tick() >= 30));
+    let local = net::LocalHello {
+        seat: 1,
+        name: "Guest2".into(),
+        profile: seat(2).profile.encode(),
+    };
+    let g = v.join_locals("Guest", 79, seat(1).profile.encode(), 15.0, vec![local]);
+    v.nodes[g].peer.report_dir = None;
+    assert!(v.run_until(20_000, |v| {
+        v.nodes[g].peer.mode() == Mode::Playing
+            && v.nodes[g]
+                .walk
+                .as_ref()
+                .is_some_and(|w| w.local_count() == 2)
+    }));
+    let (s0, s1) = (
+        v.nodes[g].peer.local_slot,
+        v.nodes[g].peer.extra_locals()[0].slot,
+    );
+    assert_eq!(v.nodes[0].peer.machine_slots(s0), [s0, s1]);
+    let stamina = cheat_index("stamina").unwrap();
+    let bits = |v: &VirtualNet, node: usize, slot: u8| {
+        cheat_bits(
+            &v.nodes[node]
+                .walk
+                .as_ref()
+                .unwrap()
+                .sim
+                .cheats_for_slot(usize::from(slot)),
+        )
+    };
+    v.request(
+        g,
+        &GameRequest::CheatToggle {
+            slot: s1,
+            id: stamina,
+            on: true,
+        },
+    );
+    assert!(v.run_until(5_000, |v| bits(v, 0, s1) & 1 << stamina != 0
+        && bits(v, g, s1) & 1 << stamina != 0));
+    for node in [0, g] {
+        assert_eq!(bits(&v, node, s0), 0, "local 0's slot untouched");
+        assert_eq!(bits(&v, node, 0), 0, "the host's slot untouched");
+    }
+    // The host's own slot is not this machine's to change.
+    let refused = v.nodes[0].peer.stats.refused;
+    v.request(
+        g,
+        &GameRequest::CheatToggle {
+            slot: 0,
+            id: stamina,
+            on: true,
+        },
+    );
+    assert!(v.run_until(5_000, |v| v.nodes[0].peer.stats.refused > refused));
+    v.run_until(500, |_| false);
+    assert_eq!(bits(&v, 0, 0), 0);
+}

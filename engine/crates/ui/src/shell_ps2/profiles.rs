@@ -3,7 +3,7 @@
 use crate::{
     hud_draw::{Ctx, Screen},
     hud_tree::{HAlign, FRAME_H, FRAME_W},
-    input_icons::{pad_sheet, IconSet, PadButton, Prompt},
+    input_icons::{pad_sheet, IconSet, Icons, PadButton, Prompt},
     scroll::{ScrollView, MARGIN},
     spawn_draw::{item_pieces, HELP_Y, ROW_H, ROW_PITCH, SAFE_X, TITLE_PIECES},
     typography::{tint, BODY, ITEM, TEXT_INSET, TITLE},
@@ -57,7 +57,7 @@ pub enum Target {
     Symbols,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Page {
     #[default]
     List,
@@ -70,7 +70,7 @@ pub enum Page {
     Delete(u64),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Picker {
     pub names: Vec<(u64, String)>,
     pub page: Page,
@@ -82,6 +82,12 @@ pub struct Picker {
     pub name_title: Option<String>,
     /// The name list's view ([`crate::scroll`]).
     view: ScrollView,
+    /// Issue #194 (`SPLITSCREEN.md` 18.1 item 1): ids another seat holds, greyed and refused
+    /// (one profile on one seat only). The game sets it every frame.
+    pub taken: Vec<u64>,
+    /// A Players screen seat's picker: no Delete (delete only from the title picker), North
+    /// for the symbols page (East is Back there).
+    pub seat: bool,
 }
 
 impl Picker {
@@ -93,6 +99,8 @@ impl Picker {
             message: None,
             name_title: None,
             view: ScrollView::default(),
+            taken: Vec::new(),
+            seat: false,
         };
         if let Some(index) = picker
             .names
@@ -148,6 +156,27 @@ impl Picker {
             _ => return None,
         };
         self.names.get(i).map(|(id, name)| (*id, name.as_str()))
+    }
+
+    /// Is name `i` held by another seat?
+    pub fn is_taken(&self, i: usize) -> bool {
+        self.names
+            .get(i)
+            .is_some_and(|(id, _)| self.taken.contains(id))
+    }
+
+    /// The focused name, when another seat holds it: Select and Delete refuse it.
+    pub fn selected_taken(&self) -> bool {
+        matches!(self.focus, Target::Profile(i) if self.is_taken(i))
+    }
+
+    /// Focus the name with this id (or Create when it is not listed), the list's view snapped
+    /// to it: a seat's picker reopened on its own profile.
+    pub fn focus_id(&mut self, id: Option<u64>) {
+        if let Some(i) = self.names.iter().position(|(key, _)| Some(*key) == id) {
+            self.set_focus(Target::Profile(i));
+            self.view.snap();
+        }
     }
 
     pub fn edit_name(&mut self, suggested: String) {
@@ -320,7 +349,7 @@ impl Picker {
                     );
                 }
                 push(CREATE, Target::Create, "Create".into());
-                if self.selected().is_some() {
+                if self.selected().is_some() && !self.seat {
                     push(
                         [369.0, 366.0, 497.0, 394.0],
                         Target::Delete,
@@ -380,10 +409,16 @@ impl Picker {
     }
 
     pub fn target(&self, point: [f32; 2], size: [f32; 2]) -> Option<Target> {
-        if size.into_iter().any(|v| v <= 0.0) {
+        self.target_in(point, [0.0, 0.0, size[0], size[1]])
+    }
+
+    /// [`Picker::target`] for a picker drawn in the window rectangle `rect` (x0, y0, x1, y1),
+    /// a Players screen region ([`draw_in`]).
+    pub fn target_in(&self, point: [f32; 2], rect: [f32; 4]) -> Option<Target> {
+        if rect[2] - rect[0] <= 0.0 || rect[3] - rect[1] <= 0.0 {
             return None;
         }
-        let s = screen(size);
+        let s = screen_in(rect);
         let [x, y] = std::array::from_fn(|i| (point[i] - s.origin[i]) / s.scale[i]);
         self.layout()
             .into_iter()
@@ -402,10 +437,16 @@ fn wrap(i: usize, direction: isize, count: usize) -> usize {
 }
 
 fn screen(size: [f32; 2]) -> Screen {
+    screen_in([0.0, 0.0, size[0], size[1]])
+}
+
+/// The 4:3 shell box centred in the window rectangle `rect` (x0, y0, x1, y1).
+pub(crate) fn screen_in([x0, y0, x1, y1]: [f32; 4]) -> Screen {
+    let size = [x1 - x0, y1 - y0];
     let height = size[1].min(size[0] * 0.75);
     let width = height * 4.0 / 3.0;
     Screen {
-        origin: [(size[0] - width) / 2.0, (size[1] - height) / 2.0],
+        origin: [x0 + (size[0] - width) / 2.0, y0 + (size[1] - height) / 2.0],
         scale: [width / FRAME_W, height / FRAME_H],
     }
 }
@@ -424,6 +465,35 @@ pub fn back_at(point: [f32; 2], size: [f32; 2], picker: bool) -> bool {
 
 pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
     let s = screen(size);
+    let icons = ctx.art.icons;
+    draw_body(ctx, picker, &s, icons);
+    let height = FRAME_H * s.scale[1];
+    let bottom = s.origin[1] + height;
+    ctx.help_bottom([size[0], height], false, Prompt::Back, "Back", bottom);
+    ctx.help_bottom([size[0], height], true, Prompt::Accept, "Select", bottom);
+}
+
+/// The picker in the window rectangle `rect` (x0, y0, x1, y1): one Players screen region, a
+/// whole shell screen of its own (issue #194), its footer at the bottom of its box.
+pub(crate) fn draw_in(ctx: &mut Ctx<'_>, picker: &Picker, rect: [f32; 4], icons: Icons) {
+    let s = screen_in(rect);
+    draw_body(ctx, picker, &s, icons);
+    ctx.help_icon_on(&s, false, seat_back_icon(icons), "Back");
+    ctx.help_icon_on(&s, true, icons.sheet(Prompt::Accept), "Select");
+}
+
+/// A seat's Back is East (B / Circle) on a pad, Esc on the keyboard (`SPLITSCREEN.md` 18.1
+/// item 1: North is not Back on the Players screen).
+pub(crate) fn seat_back_icon(icons: Icons) -> &'static str {
+    if icons.set == IconSet::KeyboardMouse {
+        icons.sheet(Prompt::Back)
+    } else {
+        pad_sheet(icons.set, PadButton::East)
+    }
+}
+
+fn draw_body(ctx: &mut Ctx<'_>, picker: &Picker, s: &Screen, icons: Icons) {
+    let s = *s;
     let (title, left, right, top) = match picker.page {
         Page::List => ("Pick a Profile", 104.0, 408.0, 68.0),
         Page::Name { .. } => (
@@ -473,7 +543,10 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
         let focused = target == picker.focus;
         let name = matches!(target, Target::Profile(_));
         ctx.clip = name.then_some([f32::MIN, wy0, f32::MAX, wy1]);
-        let style = if focused {
+        let taken = matches!(target, Target::Profile(i) if picker.is_taken(i));
+        let style = if taken {
+            tint::DIMMED
+        } else if focused {
             tint::SELECTED
         } else {
             tint::UNSELECTED
@@ -505,10 +578,15 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
             &ITEM
         };
         let icon = match target {
-            Target::Delete => Some(ctx.art.icons.sheet(Prompt::Done)),
-            Target::Symbols if ctx.art.icons.set != IconSet::KeyboardMouse => {
-                Some(pad_sheet(ctx.art.icons.set, PadButton::East))
-            }
+            Target::Delete => Some(icons.sheet(Prompt::Done)),
+            Target::Symbols if icons.set != IconSet::KeyboardMouse => Some(pad_sheet(
+                icons.set,
+                if picker.seat {
+                    PadButton::North
+                } else {
+                    PadButton::East
+                },
+            )),
             _ => None,
         };
         let (x, align) = if let Some(icon) = icon {
@@ -537,10 +615,6 @@ pub(crate) fn draw(ctx: &mut Ctx<'_>, picker: &Picker, size: [f32; 2]) {
         let line = [24.0, 343.0, 488.0, 343.0 + BODY.size];
         ctx.text_in(&s, &BODY, message, line, tint::TITLE);
     }
-    let height = FRAME_H * s.scale[1];
-    let bottom = s.origin[1] + height;
-    ctx.help_bottom([size[0], height], false, Prompt::Back, "Back", bottom);
-    ctx.help_bottom([size[0], height], true, Prompt::Accept, "Select", bottom);
 }
 
 #[cfg(test)]

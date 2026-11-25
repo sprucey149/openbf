@@ -71,38 +71,54 @@ impl App {
         self.walk.is_some() && matches!(self.screen, Screen::Battle)
     }
 
+    /// The local player the mouse looks for: the keyboard-and-mouse player when split, `None`
+    /// with nobody on it (`SPLITSCREEN.md` section 15), else the first player.
+    fn mouse_seat(&self) -> Option<usize> {
+        match self.split.as_ref().filter(|_| self.split_on()) {
+            Some(s) => s.seats.keyboard_player(),
+            None => Some(0),
+        }
+    }
+
+    /// Split: the mouse looks for the keyboard-and-mouse player only, and with nobody on it
+    /// it never grabs (`SPLITSCREEN.md` section 15).
     pub(super) fn can_grab(&self) -> bool {
+        self.can_grab_of(self.mouse_seat())
+    }
+
+    fn can_grab_of(&self, who: Option<usize>) -> bool {
         self.focused
             && self.in_battle()
-            && !self.paused
+            // A LAN split Game Menu stops only its opener (issue #194 B20).
+            && (!self.paused || self.lan_menu_view().is_some_and(|v| who != Some(v)))
             && !self.battle_movie_pending()
             && self.walk.as_ref().is_some_and(|(walk, _)| {
-                walk.sim.outcome.is_none()
-                    && walk.sim.unit(walk.player).is_some_and(|u| {
-                        let slot = u.spec.player_slot.map_or(0, usize::from);
-                        u.alive
-                            && walk.sim.spawn_stage.get(slot) != Some(&core::sim::SpawnStage::Alive)
-                    })
+                walk.sim.outcome.is_none() && who.is_some_and(|who| on_field(walk, who))
             })
     }
 
-    /// The focused player of a round in play is behind the spawn screens:
-    /// dead (the death camera, the spawn pages), not yet on the field, or on
-    /// a post's class screen (issue #28). The pause menu does not count.
+    /// The mouse player of a round in play ([`App::mouse_seat`], wherever they sit when split)
+    /// is behind the spawn screens: dead (the death camera, the spawn pages), not yet on the
+    /// field, or on a post's class screen (issue #28). The pause menu does not count, nor does
+    /// a player who is away. Read with the walk unswapped (`WalkSim::swap_local_view`).
     fn on_spawn_screen(&self) -> bool {
+        self.on_spawn_screen_of(self.mouse_seat())
+    }
+
+    fn on_spawn_screen_of(&self, who: Option<usize>) -> bool {
         self.focused
             && self.in_battle()
             && self.walk.as_ref().is_some_and(|(walk, _)| {
                 walk.sim.outcome.is_none()
-                    && !walk.sim.unit(walk.player).is_some_and(|u| {
-                        let slot = u.spec.player_slot.map_or(0, usize::from);
-                        u.alive
-                            && walk.sim.spawn_stage.get(slot) != Some(&core::sim::SpawnStage::Alive)
+                    && who.is_some_and(|who| {
+                        !(who > 0 && walk.is_suspended(who)) && !on_field(walk, who)
                     })
             })
     }
 
-    /// Issue #128: whether this frame hands mouse look back after a spawn.
+    /// Issue #128: whether this frame hands mouse look back after a spawn to the mouse player
+    /// ([`App::mouse_seat`], so a keyboard player on a later seat gets it back on their own
+    /// spawn, not the first player's).
     /// The spawn screens free the pointer for their own clicks; once the
     /// player is on the field again the grab returns without the click that
     /// would otherwise take it (`Kbm::click_in`), so no click is eaten and
@@ -114,7 +130,12 @@ impl App {
     /// (`buttons::MOUSE_AIM` turns the aim assist off).
     /// Focus loss or leaving the round forgets it; a pause keeps it.
     fn regrab_after_spawn(&mut self, allowed: bool) -> bool {
-        if self.on_spawn_screen() {
+        self.regrab_after_spawn_as(self.on_spawn_screen(), allowed)
+    }
+
+    /// [`App::regrab_after_spawn`] with the mouse player's [`App::on_spawn_screen`] given.
+    fn regrab_after_spawn_as(&mut self, on_spawn_screen: bool, allowed: bool) -> bool {
+        if on_spawn_screen {
             if !self.behind_spawn_screens {
                 // This sync runs before the grab is let go (`App::sync_grab`).
                 self.behind_spawn_screens = true;
@@ -131,9 +152,13 @@ impl App {
     }
 
     /// Issue #128: the pointer accepted a spawn screen, so the spawn hands
-    /// mouse look back ([`App::regrab_after_spawn`]).
+    /// mouse look back ([`App::regrab_after_spawn`]). Called with the walk unswapped.
     pub(super) fn note_pointer_spawn(&mut self) {
-        if self.on_spawn_screen() {
+        self.note_pointer_spawn_of(self.mouse_seat());
+    }
+
+    fn note_pointer_spawn_of(&mut self, who: Option<usize>) {
+        if self.on_spawn_screen_of(who) {
             self.spawn_regrab = true;
         }
     }
@@ -216,13 +241,30 @@ impl App {
         }
         self.last_input.pad_inputs(self.active_pad.used);
         let pad_last = self.last_input.pad_last();
+        // Split with nobody on the keyboard and mouse: no pointer over the battle at all.
+        let mouse_unseated = self
+            .split
+            .as_ref()
+            .is_some_and(|s| self.split_on() && s.seats.keyboard_player().is_none());
         if let Some(o) = &mut self.overlay {
-            o.set_cursor_visible(cursor_shown(allowed, self.kbm.grabbed(), pad_last));
+            o.set_cursor_visible(
+                !mouse_unseated && cursor_shown(allowed, self.kbm.grabbed(), pad_last),
+            );
             if touched {
                 o.refresh_cursor();
             }
         }
     }
+}
+
+/// Local player `who` is on the field: alive and not on a post's class screen (issue #28).
+/// The walk must be unswapped, so `local_unit(who)` is theirs.
+fn on_field(walk: &game::walk::WalkSim, who: usize) -> bool {
+    !(who > 0 && walk.is_suspended(who))
+        && walk.sim.unit(walk.local_unit(who)).is_some_and(|u| {
+            let slot = u.spec.player_slot.map_or(0, usize::from);
+            u.alive && walk.sim.spawn_stage.get(slot) != Some(&core::sim::SpawnStage::Alive)
+        })
 }
 
 /// The menu cursor shows outside active gameplay only: a controller player who never
@@ -389,6 +431,65 @@ mod tests {
         a.paused = false;
         frame(&mut a);
         assert!(!a.kbm.grabbed(), "a pause is not a spawn");
+    }
+
+    /// Issue #194 (B6) with #128: the keyboard on local player 1 while player 0 (a pad) lies
+    /// dead behind their own screens. Mouse look follows player 1 alone: their death frees the
+    /// pointer, their pointer accept hands it back on the frame they spawn, and so does a
+    /// keyboard spawn after a death with mouse look held; player 0's screens never hold it.
+    #[test]
+    fn a_keyboard_player_on_a_later_seat_gets_mouse_look_back_on_their_own_spawn() {
+        use core::sim::SpawnStage;
+        let mut a = battle();
+        a.walk
+            .as_mut()
+            .unwrap()
+            .0
+            .add_local_player(1, Some(1))
+            .expect("slot 1 is free");
+        let who = Some(1);
+        let set1 = |a: &mut App, alive: bool, stage: SpawnStage| {
+            let walk = &mut a.walk.as_mut().unwrap().0;
+            let h = walk.local_unit(1);
+            walk.sim.units[h.index as usize].alive = alive;
+            walk.sim.spawn_stage[1] = stage;
+        };
+        // `App::sync_grab` with the mouse on local player 1.
+        let frame1 = |a: &mut App| {
+            let allowed = a.can_grab_of(who);
+            let on_spawn = a.on_spawn_screen_of(who);
+            if a.regrab_after_spawn_as(on_spawn, allowed) {
+                a.kbm.click_in();
+            }
+            a.kbm.sync_grab_with(allowed, |_| Ok::<_, ()>(())).unwrap();
+        };
+        // Player 0 dead behind their screens throughout.
+        set(&mut a, false, SpawnStage::Map);
+        set1(&mut a, true, SpawnStage::Accepted);
+        a.kbm.click_in();
+        frame1(&mut a);
+        assert!(a.kbm.grabbed(), "player 1 plays with the mouse");
+
+        // (a) Player 1 dies with mouse look held, then spawns from the keyboard.
+        set1(&mut a, false, SpawnStage::Class);
+        frame1(&mut a);
+        assert!(!a.kbm.grabbed(), "free on player 1's spawn screen");
+        set1(&mut a, true, SpawnStage::Accepted);
+        frame1(&mut a);
+        assert!(a.kbm.grabbed(), "back on player 1's spawn, not player 0's");
+
+        // (b) Player 1's pointer accepts their spawn screen: back the frame they spawn.
+        set1(&mut a, false, SpawnStage::Class);
+        frame1(&mut a);
+        a.spawn_regrab = false; // only the pointer's accept may set it now
+        a.note_pointer_spawn_of(who);
+        set1(&mut a, true, SpawnStage::Accepted);
+        frame1(&mut a);
+        assert!(a.kbm.grabbed(), "the pointer accept hands mouse look back");
+        assert!(
+            !a.on_spawn_screen_of(who) && a.on_spawn_screen_of(Some(0)),
+            "player 0 still behind their own screens"
+        );
     }
 
     /// Issue #128 (the maintainer plays on a controller): a controller

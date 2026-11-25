@@ -303,78 +303,46 @@ struct Saved {
     vehicle: Option<(usize, core::vehicle::Vehicle)>,
 }
 
-/// The local prediction (module rules).
-pub struct Predictor {
-    /// Off: plain delay.
-    pub enabled: bool,
-    pub max_depth: usize,
-    pub budget_ms: f64,
-    sim: Option<Sim>,
-    /// The confirmed tick the copy was cloned at.
-    base_tick: u64,
-    /// Pending inputs stepped into the copy.
-    applied: usize,
-    /// The copy's local poses: the base tick's, then one per predicted tick.
+/// One local slot's part of the prediction: its poses, correction, shot
+/// ledger and what is swapped in for it (module rules). Local 0's is
+/// [`Predictor`]'s own; each further local player of the machine (issue #194
+/// B18) has one more, all stepped in the one predicted copy.
+#[derive(Clone, Debug, Default)]
+struct Track {
+    slot: u8,
+    /// The copy's poses of this slot's unit: the base tick's, then one per
+    /// of its own pending inputs stepped (none past them, module rules).
     poses: Vec<LocalPose>,
+    /// How many of this slot's own pending inputs the copy has stepped: the
+    /// predictor's depth for this local (at most [`Predictor::depth`]).
+    real: usize,
     ease: Ease,
     ledger: ShotLedger,
     /// The copy's running shot counts.
     pred_counts: BTreeMap<(u32, u32), u64>,
-    /// Every human slot's last bundle pad, repeated.
-    others: Vec<PadState>,
-    /// The newest local input the confirmed sim consumed.
+    /// The newest input of this slot the confirmed sim consumed.
     through: u32,
-    /// The local poses after the last two confirmed ticks stepped.
+    /// This slot's poses after the last two confirmed ticks stepped.
     confirmed: [Option<LocalPose>; 2],
-    retry: f32,
-    clone_ms: Option<f64>,
-    step_ms: Option<f64>,
-    pub stats: PredictStats,
     saved: Option<Saved>,
     shots: Vec<PredictedShot>,
 }
 
-impl Default for Predictor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Predictor {
-    pub fn new() -> Self {
+impl Track {
+    fn new(slot: u8) -> Self {
         Self {
-            enabled: true,
-            max_depth: MAX_DEPTH,
-            budget_ms: FRAME_BUDGET_MS,
-            sim: None,
-            base_tick: 0,
-            applied: 0,
-            poses: Vec::new(),
-            ease: Ease::default(),
-            ledger: ShotLedger::default(),
-            pred_counts: BTreeMap::new(),
-            others: Vec::new(),
-            through: 0,
-            confirmed: [None, None],
-            retry: 0.0,
-            clone_ms: None,
-            step_ms: None,
-            stats: PredictStats::default(),
-            saved: None,
-            shots: Vec::new(),
+            slot,
+            ..Self::default()
         }
     }
 
-    /// A stepped bundle, `sim` after it: the pads other humans repeat in the
-    /// prediction, the newest input of `slot` it consumed, and the local
-    /// pose it left.
-    pub fn note_bundle(&mut self, b: &TickBundle, sim: &Sim, slot: u8) {
-        if let Some(seq) = b.consumed(slot) {
+    fn note_bundle(&mut self, b: &TickBundle, sim: &Sim) {
+        if let Some(seq) = b.consumed(self.slot) {
             self.through = seq;
         }
         let pose = sim
             .players
-            .get(usize::from(slot))
+            .get(usize::from(self.slot))
             .copied()
             .flatten()
             .and_then(|h| LocalPose::of(sim, h))
@@ -383,222 +351,39 @@ impl Predictor {
                 ..p
             });
         self.confirmed = [self.confirmed[1].take(), pose];
-        self.others.clear();
-        for (slot, pad) in &b.pads {
-            let s = usize::from(*slot);
-            if self.others.len() <= s {
-                self.others.resize(s + 1, PadState::default());
-            }
-            self.others[s] = net::bundle::repeat_pad(pad);
-        }
-    }
-
-    /// A confirmed tick just stepped: counts the local unit's shots; true
-    /// when its shot feedback this tick was already given (mute it).
-    pub fn confirm_shots(&mut self, sim: &Sim, local: UnitHandle) -> bool {
-        self.ledger.confirm(&sim.events, local.index)
-    }
-
-    /// The drawn correction offset now.
-    pub fn ease(&self) -> &Ease {
-        &self.ease
-    }
-
-    /// The shot ledger (for the meter and tests).
-    pub fn ledger(&self) -> &ShotLedger {
-        &self.ledger
-    }
-
-    /// The predicted copy, when one is held.
-    pub fn sim(&self) -> Option<&Sim> {
-        self.sim.as_ref()
-    }
-
-    /// The local poses of the current prediction (base tick first).
-    pub fn poses(&self) -> &[LocalPose] {
-        &self.poses
-    }
-
-    /// Ticks predicted (the copy's lead over the confirmed sim).
-    pub fn depth(&self) -> usize {
-        self.applied
-    }
-
-    /// Forget everything (a new round, a rejoin).
-    pub fn reset(&mut self) {
-        let (enabled, max_depth, budget_ms) = (self.enabled, self.max_depth, self.budget_ms);
-        *self = Self {
-            enabled,
-            max_depth,
-            budget_ms,
-            ..Self::new()
-        };
-    }
-
-    /// How many ticks this frame can afford (module rules).
-    fn afford(&mut self, want: usize, rebase: bool, dt: f32) -> usize {
-        let want = want.min(self.max_depth);
-        if want == 0 {
-            return 0;
-        }
-        let clone = if rebase {
-            self.clone_ms.unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        let room = self.budget_ms - clone;
-        let n = match self.step_ms {
-            _ if room <= 0.0 => 0,
-            Some(s) if s > 0.0 => (room / s).floor() as usize,
-            _ => want,
-        };
-        if n == 0 {
-            self.retry -= dt;
-            if self.retry <= 0.0 {
-                self.retry = RETRY_SECS;
-                return 1;
-            }
-            return 0;
-        }
-        n.min(want)
-    }
-
-    fn smooth(old: Option<f64>, v: f64) -> Option<f64> {
-        Some(old.map_or(v, |o| o + (v - o) * 0.2))
-    }
-
-    /// One frame: re-predict from `confirmed` when it moved on (or step the
-    /// copy over newly sent inputs), measure, ease. `slot` is the local
-    /// player slot, `pending` its inputs sent and not yet stepped. Returns
-    /// the local unit's predicted shots to feed back now.
-    pub fn update(
-        &mut self,
-        confirmed: &Sim,
-        slot: u8,
-        pending: &[PadState],
-        dt: f32,
-    ) -> &[PredictedShot] {
-        debug_assert!(self.saved.is_none(), "update while swapped in");
-        self.shots.clear();
-        self.ease.advance(dt);
-        let local = confirmed.players.get(usize::from(slot)).copied().flatten();
-        let Some(local) = local.filter(|_| self.enabled) else {
-            self.sim = None;
-            self.poses.clear();
-            self.applied = 0;
-            self.ease.clear();
-            self.stats = PredictStats {
-                pending: pending.len(),
-                ..PredictStats::default()
-            };
-            return &self.shots;
-        };
-        let started = Instant::now();
-        let rebase =
-            self.sim.is_none() || self.base_tick != confirmed.tick || pending.len() < self.applied;
-        let allowed = self.afford(pending.len(), rebase, dt);
-        let old = if rebase {
-            let old = std::mem::take(&mut self.poses);
-            let t0 = Instant::now();
-            self.sim = Some(confirmed.clone());
-            self.clone_ms = Self::smooth(self.clone_ms, t0.elapsed().as_secs_f64() * 1e3);
-            self.base_tick = confirmed.tick;
-            self.applied = 0;
-            self.pred_counts = self.ledger.counts();
-            let through = self.through;
-            self.poses
-                .extend(LocalPose::of(confirmed, local).map(|p| LocalPose { seq: through, ..p }));
-            Some(old)
-        } else {
-            None
-        };
-        let sim = self.sim.as_mut().expect("predicted copy");
-        let mut pads = self.others.clone();
-        let s = usize::from(slot);
-        if pads.len() <= s {
-            pads.resize(s + 1, PadState::default());
-        }
-        while self.applied < allowed.max(self.applied.min(pending.len())) {
-            if self.applied >= allowed || started.elapsed().as_secs_f64() * 1e3 > self.budget_ms {
-                break;
-            }
-            pads[s] = pending[self.applied];
-            let t0 = Instant::now();
-            sim.step_predicted(&pads);
-            self.step_ms = Self::smooth(self.step_ms, t0.elapsed().as_secs_f64() * 1e3);
-            self.applied += 1;
-            if let Some(h) = sim.players.get(s).copied().flatten() {
-                self.ledger.predicted(
-                    &mut self.pred_counts,
-                    &sim.events,
-                    h.index,
-                    sim.tick,
-                    &mut self.shots,
-                );
-                let seq = self.through + self.applied as u32;
-                self.poses
-                    .extend(LocalPose::of(sim, h).map(|p| LocalPose { seq, ..p }));
-            }
-        }
-        if let Some(old) = old {
-            self.correct(&old);
-        }
-        let cost = started.elapsed().as_secs_f64() * 1e3;
-        self.stats = PredictStats {
-            mode: match (self.applied, pending.len()) {
-                (0, _) => PredictMode::Off,
-                (a, p) if a < p => PredictMode::Reduced,
-                _ => PredictMode::Full,
-            },
-            depth: self.applied,
-            pending: pending.len(),
-            cost_ms: cost,
-            clone_ms: self.clone_ms.unwrap_or(0.0),
-            step_ms: self.step_ms.unwrap_or(0.0),
-            ..self.stats.clone()
-        };
-        &self.shots
     }
 
     /// Error easing against the previous prediction (module rules): the
-    /// pose after the newest input both predictions hold.
-    fn correct(&mut self, old: &[LocalPose]) {
-        let Some((o, n)) = self
+    /// pose after the newest input both predictions hold. Returns the
+    /// error eased, if any.
+    fn correct(&mut self, old: &[LocalPose]) -> Option<f32> {
+        let (o, n) = self
             .poses
             .iter()
             .rev()
-            .find_map(|n| old.iter().find(|o| o.seq == n.seq).map(|o| (o, n)))
-        else {
-            return;
-        };
+            .find_map(|n| old.iter().find(|o| o.seq == n.seq).map(|o| (o, n)))?;
         if !o.same_life(n) {
             self.ease.clear();
-            return;
+            return None;
         }
         let d = o.unit.pos - n.unit.pos;
         let len = d.length();
         if len > UNIT_SNAP_M {
             self.ease.clear();
-            return;
+            return None;
         }
         let yaw = lerp_angle(n.unit.yaw, o.unit.yaw, 1.0) - n.unit.yaw;
         let pitch = o.unit.pitch - n.unit.pitch;
         if len < ERROR_FLOOR_M && yaw.abs() < 1e-5 && pitch.abs() < 1e-5 {
-            return;
+            return None;
         }
         self.ease.add(d, yaw, pitch);
-        self.stats.corrections += 1;
-        self.stats.last_error_m = len;
+        Some(len)
     }
 
-    /// Writes the predicted local pose into `walk` for drawing: `frac` of the
-    /// way from the pose before the newest input to the pose after it
-    /// (module rules), plus the correction, aimed by `look_pads` (the inputs
-    /// not predicted, the open input tick last) folded on at `share`.
-    /// Returns whether it wrote; [`Predictor::swap_out`] must follow before
-    /// anything but drawing reads `walk`.
-    pub fn swap_in(
+    fn swap_in(
         &mut self,
+        sim: Option<&Sim>,
         walk: &mut WalkSim,
         frac: f32,
         look_pads: &[PadState],
@@ -607,7 +392,7 @@ impl Predictor {
         if self.saved.is_some() {
             return false;
         }
-        let (Some(cur), Some(sim)) = (self.poses.last(), self.sim.as_ref()) else {
+        let (Some(cur), Some(sim)) = (self.poses.last(), sim) else {
             return false;
         };
         // Nothing predicted: the confirmed tick before the newest.
@@ -685,8 +470,7 @@ impl Predictor {
         true
     }
 
-    /// The values [`Predictor::swap_in`] overwrote, back (a no-op without one).
-    pub fn swap_out(&mut self, walk: &mut WalkSim) {
+    fn swap_out(&mut self, walk: &mut WalkSim) {
         let Some(s) = self.saved.take() else {
             return;
         };
@@ -699,10 +483,441 @@ impl Predictor {
             }
         }
     }
+}
+
+/// The local prediction (module rules).
+pub struct Predictor {
+    /// Off: plain delay.
+    pub enabled: bool,
+    pub max_depth: usize,
+    pub budget_ms: f64,
+    sim: Option<Sim>,
+    /// The confirmed tick the copy was cloned at.
+    base_tick: u64,
+    /// Pending inputs stepped into the copy.
+    applied: usize,
+    /// Local 0's slot's part (its slot is the one `update` names).
+    main: Track,
+    /// Each further local player's part, local 1 first (issue #194 B18).
+    extra: Vec<Track>,
+    /// Every human slot's last bundle pad, repeated (the local slots' are
+    /// replaced by their pending inputs while predicting).
+    others: Vec<PadState>,
+    retry: f32,
+    clone_ms: Option<f64>,
+    step_ms: Option<f64>,
+    pub stats: PredictStats,
+}
+
+impl Default for Predictor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Predictor {
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            max_depth: MAX_DEPTH,
+            budget_ms: FRAME_BUDGET_MS,
+            sim: None,
+            base_tick: 0,
+            applied: 0,
+            main: Track::default(),
+            extra: Vec::new(),
+            others: Vec::new(),
+            retry: 0.0,
+            clone_ms: None,
+            step_ms: None,
+            stats: PredictStats::default(),
+        }
+    }
+
+    /// The further local players' slots (issue #194 B18), local 1 first: each
+    /// is predicted from its own pending inputs in the same copy. A slot
+    /// already held keeps its part; a new one starts empty.
+    pub fn set_extra_slots(&mut self, slots: &[u8]) {
+        if self.extra.iter().map(|t| t.slot).eq(slots.iter().copied()) {
+            return;
+        }
+        let old = std::mem::take(&mut self.extra);
+        self.extra = slots
+            .iter()
+            .map(|&s| {
+                old.iter()
+                    .find(|t| t.slot == s)
+                    .cloned()
+                    .unwrap_or_else(|| Track::new(s))
+            })
+            .collect();
+    }
+
+    fn track(&self, i: usize) -> Option<&Track> {
+        match i {
+            0 => Some(&self.main),
+            _ => self.extra.get(i - 1),
+        }
+    }
+
+    fn track_mut(&mut self, i: usize) -> Option<&mut Track> {
+        match i {
+            0 => Some(&mut self.main),
+            _ => self.extra.get_mut(i - 1),
+        }
+    }
+
+    /// A stepped bundle, `sim` after it: the pads other humans repeat in the
+    /// prediction, the newest input of `slot` it consumed, and the local
+    /// pose it left (and each further local's, issue #194 B18).
+    pub fn note_bundle(&mut self, b: &TickBundle, sim: &Sim, slot: u8) {
+        self.main.slot = slot;
+        self.main.note_bundle(b, sim);
+        for t in &mut self.extra {
+            t.note_bundle(b, sim);
+        }
+        self.others.clear();
+        for (slot, pad) in &b.pads {
+            let s = usize::from(*slot);
+            if self.others.len() <= s {
+                self.others.resize(s + 1, PadState::default());
+            }
+            self.others[s] = net::bundle::repeat_pad(pad);
+        }
+    }
+
+    /// A confirmed tick just stepped: counts the local unit's shots; true
+    /// when its shot feedback this tick was already given (mute it).
+    pub fn confirm_shots(&mut self, sim: &Sim, local: UnitHandle) -> bool {
+        self.main.ledger.confirm(&sim.events, local.index)
+    }
+
+    /// [`Predictor::confirm_shots`] for local player `i`'s unit `local` (0 is
+    /// the first; false for a local with no part).
+    pub fn confirm_shots_of(&mut self, i: usize, sim: &Sim, local: UnitHandle) -> bool {
+        self.track_mut(i)
+            .is_some_and(|t| t.ledger.confirm(&sim.events, local.index))
+    }
+
+    /// The drawn correction offset now.
+    pub fn ease(&self) -> &Ease {
+        &self.main.ease
+    }
+
+    /// The shot ledger (for the meter and tests).
+    pub fn ledger(&self) -> &ShotLedger {
+        &self.main.ledger
+    }
+
+    /// The predicted copy, when one is held.
+    pub fn sim(&self) -> Option<&Sim> {
+        self.sim.as_ref()
+    }
+
+    /// The local poses of the current prediction (base tick first).
+    pub fn poses(&self) -> &[LocalPose] {
+        &self.main.poses
+    }
+
+    /// Local player `i`'s poses of the current prediction (0 is the first).
+    pub fn poses_of(&self, i: usize) -> &[LocalPose] {
+        self.track(i).map_or(&[], |t| &t.poses)
+    }
+
+    /// Local player `i`'s predicted shots to feed back now (0 is the first,
+    /// what [`Predictor::update`] returned).
+    pub fn shots_of(&self, i: usize) -> &[PredictedShot] {
+        self.track(i).map_or(&[], |t| &t.shots)
+    }
+
+    /// Ticks predicted (the copy's lead over the confirmed sim).
+    pub fn depth(&self) -> usize {
+        self.applied
+    }
+
+    /// Local player `i`'s own pending inputs in its predicted pose (0 is the
+    /// first): [`Predictor::depth`] cut to its own queue, the pads its look
+    /// fold starts after.
+    pub fn depth_of(&self, i: usize) -> usize {
+        self.track(i).map_or(0, |t| t.real)
+    }
+
+    /// The local player index (0 is the first) whose part predicts `slot`.
+    pub fn index_of_slot(&self, slot: u8) -> Option<usize> {
+        std::iter::once(&self.main)
+            .chain(&self.extra)
+            .position(|t| t.slot == slot)
+    }
+
+    /// Forget everything (a new round, a rejoin). The further locals' slots
+    /// stay, their parts start over.
+    pub fn reset(&mut self) {
+        let (enabled, max_depth, budget_ms) = (self.enabled, self.max_depth, self.budget_ms);
+        let extra = self.extra.iter().map(|t| Track::new(t.slot)).collect();
+        *self = Self {
+            enabled,
+            max_depth,
+            budget_ms,
+            extra,
+            ..Self::new()
+        };
+    }
+
+    /// How many ticks this frame can afford (module rules).
+    fn afford(&mut self, want: usize, rebase: bool, dt: f32) -> usize {
+        let want = want.min(self.max_depth);
+        if want == 0 {
+            return 0;
+        }
+        let clone = if rebase {
+            self.clone_ms.unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let room = self.budget_ms - clone;
+        let n = match self.step_ms {
+            _ if room <= 0.0 => 0,
+            Some(s) if s > 0.0 => (room / s).floor() as usize,
+            _ => want,
+        };
+        if n == 0 {
+            self.retry -= dt;
+            if self.retry <= 0.0 {
+                self.retry = RETRY_SECS;
+                return 1;
+            }
+            return 0;
+        }
+        n.min(want)
+    }
+
+    fn smooth(old: Option<f64>, v: f64) -> Option<f64> {
+        Some(old.map_or(v, |o| o + (v - o) * 0.2))
+    }
+
+    /// One frame: re-predict from `confirmed` when it moved on (or step the
+    /// copy over newly sent inputs), measure, ease. `slot` is the local
+    /// player slot, `pending` its inputs sent and not yet stepped. Returns
+    /// the local unit's predicted shots to feed back now.
+    pub fn update(
+        &mut self,
+        confirmed: &Sim,
+        slot: u8,
+        pending: &[PadState],
+        dt: f32,
+    ) -> &[PredictedShot] {
+        self.update_locals(confirmed, slot, pending, &[], dt)
+    }
+
+    /// [`Predictor::update`] for a machine with several local players (issue
+    /// #194 B18): `extra_pending[k]` is local `k + 1`'s pending inputs (its
+    /// slot set by [`Predictor::set_extra_slots`]). One copy is stepped
+    /// with every local slot playing its own pending input (the other
+    /// humans repeat their last pads), so the depth is the longest pending
+    /// queue's. Past a local's own shorter queue (a slot seated late) the
+    /// copy repeats its last pending input (its bundle pad when none is
+    /// pending), but its poses and shots stop at its own inputs
+    /// ([`Predictor::depth_of`]); its queue growing into the repeated ticks
+    /// re-predicts from the confirmed sim. Each local's poses, shots and
+    /// correction are its own; the meter's correction figures are local
+    /// 0's.
+    pub fn update_locals(
+        &mut self,
+        confirmed: &Sim,
+        slot: u8,
+        pending: &[PadState],
+        extra_pending: &[&[PadState]],
+        dt: f32,
+    ) -> &[PredictedShot] {
+        debug_assert!(
+            self.main.saved.is_none() && self.extra.iter().all(|t| t.saved.is_none()),
+            "update while swapped in"
+        );
+        self.main.slot = slot;
+        self.main.shots.clear();
+        self.main.ease.advance(dt);
+        for t in &mut self.extra {
+            t.shots.clear();
+            t.ease.advance(dt);
+        }
+        let unit_of = |s: u8| confirmed.players.get(usize::from(s)).copied().flatten();
+        let local = unit_of(slot);
+        let any_extra = self.extra.iter().any(|t| unit_of(t.slot).is_some());
+        let want = extra_pending
+            .iter()
+            .map(|p| p.len())
+            .fold(pending.len(), usize::max);
+        if !self.enabled || (local.is_none() && !any_extra) {
+            self.sim = None;
+            self.applied = 0;
+            for t in std::iter::once(&mut self.main).chain(self.extra.iter_mut()) {
+                t.poses.clear();
+                t.ease.clear();
+                t.real = 0;
+            }
+            self.stats = PredictStats {
+                pending: want,
+                ..PredictStats::default()
+            };
+            return &self.main.shots;
+        }
+        let started = Instant::now();
+        // Each track's own queue length, local 0 first.
+        let own: Vec<usize> = std::iter::once(pending.len())
+            .chain((0..self.extra.len()).map(|k| extra_pending.get(k).map_or(0, |p| p.len())))
+            .collect();
+        // A local the copy stepped past its own inputs (repeating its last)
+        // whose queue has grown since: those ticks hold the wrong pad.
+        let stale = std::iter::once(&self.main)
+            .chain(&self.extra)
+            .zip(&own)
+            .any(|(t, &n)| t.real < self.applied && n > t.real);
+        let rebase =
+            self.sim.is_none() || self.base_tick != confirmed.tick || want < self.applied || stale;
+        let allowed = self.afford(want, rebase, dt);
+        let mut olds: Vec<Vec<LocalPose>> = Vec::new();
+        if rebase {
+            let t0 = Instant::now();
+            self.sim = Some(confirmed.clone());
+            self.clone_ms = Self::smooth(self.clone_ms, t0.elapsed().as_secs_f64() * 1e3);
+            self.base_tick = confirmed.tick;
+            self.applied = 0;
+            for t in std::iter::once(&mut self.main).chain(self.extra.iter_mut()) {
+                olds.push(std::mem::take(&mut t.poses));
+                t.real = 0;
+                t.pred_counts = t.ledger.counts();
+                let through = t.through;
+                if let Some(h) = unit_of(t.slot) {
+                    t.poses.extend(
+                        LocalPose::of(confirmed, h).map(|p| LocalPose { seq: through, ..p }),
+                    );
+                }
+            }
+        }
+        let sim = self.sim.as_mut().expect("predicted copy");
+        let mut pads = self.others.clone();
+        let top = self
+            .extra
+            .iter()
+            .map(|t| usize::from(t.slot))
+            .fold(usize::from(slot), usize::max);
+        if pads.len() <= top {
+            pads.resize(top + 1, PadState::default());
+        }
+        while self.applied < allowed.max(self.applied.min(want)) {
+            if self.applied >= allowed || started.elapsed().as_secs_f64() * 1e3 > self.budget_ms {
+                break;
+            }
+            let a = self.applied;
+            if let Some(p) = pending.get(a) {
+                pads[usize::from(slot)] = *p;
+            }
+            for (t, p) in self.extra.iter().zip(extra_pending) {
+                if let Some(p) = p.get(a) {
+                    pads[usize::from(t.slot)] = *p;
+                }
+            }
+            let t0 = Instant::now();
+            sim.step_predicted(&pads);
+            self.step_ms = Self::smooth(self.step_ms, t0.elapsed().as_secs_f64() * 1e3);
+            self.applied += 1;
+            for (t, &n) in std::iter::once(&mut self.main)
+                .chain(self.extra.iter_mut())
+                .zip(&own)
+            {
+                // Past its own inputs: a repeated pad, no pose of its own.
+                if a >= n {
+                    continue;
+                }
+                t.real += 1;
+                if let Some(h) = sim.players.get(usize::from(t.slot)).copied().flatten() {
+                    t.ledger.predicted(
+                        &mut t.pred_counts,
+                        &sim.events,
+                        h.index,
+                        sim.tick,
+                        &mut t.shots,
+                    );
+                    let seq = t.through + t.real as u32;
+                    t.poses
+                        .extend(LocalPose::of(sim, h).map(|p| LocalPose { seq, ..p }));
+                }
+            }
+        }
+        for (i, (t, old)) in std::iter::once(&mut self.main)
+            .chain(self.extra.iter_mut())
+            .zip(&olds)
+            .enumerate()
+        {
+            // The meter's figures are local 0's own.
+            if let Some(len) = t.correct(old).filter(|_| i == 0) {
+                self.stats.corrections += 1;
+                self.stats.last_error_m = len;
+            }
+        }
+        let cost = started.elapsed().as_secs_f64() * 1e3;
+        self.stats = PredictStats {
+            mode: match (self.applied, want) {
+                (0, _) => PredictMode::Off,
+                (a, p) if a < p => PredictMode::Reduced,
+                _ => PredictMode::Full,
+            },
+            depth: self.applied,
+            pending: want,
+            cost_ms: cost,
+            clone_ms: self.clone_ms.unwrap_or(0.0),
+            step_ms: self.step_ms.unwrap_or(0.0),
+            ..self.stats.clone()
+        };
+        &self.main.shots
+    }
+
+    /// Writes the predicted local pose into `walk` for drawing: `frac` of the
+    /// way from the pose before the newest input to the pose after it
+    /// (module rules), plus the correction, aimed by `look_pads` (the inputs
+    /// not predicted, the open input tick last) folded on at `share`.
+    /// Returns whether it wrote; [`Predictor::swap_out`] must follow before
+    /// anything but drawing reads `walk`.
+    pub fn swap_in(
+        &mut self,
+        walk: &mut WalkSim,
+        frac: f32,
+        look_pads: &[PadState],
+        share: f32,
+    ) -> bool {
+        self.swap_in_local(0, walk, frac, look_pads, share)
+    }
+
+    /// [`Predictor::swap_in`] for local player `i` (0 is the first), its own
+    /// look pads; [`Predictor::swap_out`] puts back every one swapped in.
+    pub fn swap_in_local(
+        &mut self,
+        i: usize,
+        walk: &mut WalkSim,
+        frac: f32,
+        look_pads: &[PadState],
+        share: f32,
+    ) -> bool {
+        let sim = self.sim.as_ref();
+        let track = match i {
+            0 => Some(&mut self.main),
+            _ => self.extra.get_mut(i - 1),
+        };
+        track.is_some_and(|t| t.swap_in(sim, walk, frac, look_pads, share))
+    }
+
+    /// The values every [`Predictor::swap_in`] overwrote, back, the last one
+    /// first (a no-op without one).
+    pub fn swap_out(&mut self, walk: &mut WalkSim) {
+        for t in self.extra.iter_mut().rev() {
+            t.swap_out(walk);
+        }
+        self.main.swap_out(walk);
+    }
 
     /// Whether a predicted pose is swapped in now.
     pub fn swapped(&self) -> bool {
-        self.saved.is_some()
+        self.main.saved.is_some() || self.extra.iter().any(|t| t.saved.is_some())
     }
 }
 

@@ -8,16 +8,21 @@
 mod display;
 #[path = "windowed/events.rs"]
 mod events;
+#[path = "windowed/split.rs"]
+mod split;
 #[path = "windowed/xr.rs"]
 mod xr;
+
+pub(crate) use split::set_config as set_split_config;
 
 use super::extensions_host::ResolvedStartup;
 
 #[cfg(test)]
 use super::battle::load_and_upload;
 use super::battle::{
-    hud_model_for_view, load_hud_view, make_walk, spawn_model, squad_icons, stats_pages,
-    upload_world_marker_assets, walk_draws, world_objective_draws, WorldMarkerAssets,
+    hud_model, hud_model_for_view, load_hud_view, make_walk, spawn_model, spawn_screen_up,
+    squad_icons, stats_pages, upload_world_marker_assets, walk_draws, world_objective_draws,
+    WorldMarkerAssets,
 };
 use super::{BattleSetup, ViewerArgs};
 use anyhow::Result;
@@ -46,8 +51,9 @@ fn start_take(
         .ok()
 }
 /// Start the sounds of the tick the sim just stepped (`game::event_sounds`).
-/// `muted`: a LAN peer's own unit whose fire sound this tick the prediction
-/// already played (issue #168).
+/// `muted`: a LAN peer's own units (every local player's, issue #194 B20)
+/// whose fire sound this tick the prediction already played (issue #168). `listener` and `view` are every awake local
+/// player's ears and views (`TickHook::ears_and_views`).
 #[allow(clippy::too_many_arguments)]
 fn play_event_sounds(
     audio: &mut audio::Audio,
@@ -55,10 +61,10 @@ fn play_event_sounds(
     foley: Option<&mut game::foley::Foley>,
     engines: &mut game::engine_sound::EngineSounds,
     effects: &[(String, glam::Vec3)],
-    aspect: f32,
-    walk: &WalkSim,
-    muted: Option<u32>,
     listener: &game::sounds::Listener,
+    view: &game::foley::View,
+    walk: &WalkSim,
+    muted: &[u32],
 ) {
     game::event_sounds::each_off_handle(walk, listener.pos, |name, pos| {
         sl.play(audio, name, pos, listener);
@@ -66,7 +72,7 @@ fn play_event_sounds(
     // A human's shots and empty clicks, which share a weapon's handle.
     let mut asks = Vec::new();
     game::event_sounds::weapon_asks(walk, |a| {
-        if a.click || Some(a.unit) != muted {
+        if a.click || !muted.contains(&a.unit) {
             asks.push(a);
         }
     });
@@ -112,8 +118,7 @@ fn play_event_sounds(
     sl.play_hero_samples(audio, &game::event_sounds::hero_sample_asks(walk), listener);
     // The soldiers' steps and stance sounds (card FOLY).
     if let Some(foley) = foley {
-        let view = game::foley::View::of(&walk.camera(), aspect);
-        foley.tick(walk, &view, |s| {
+        foley.tick(walk, view, |s| {
             sl.play_by_hash(audio, s.hash, s.pos, listener);
         });
     }
@@ -349,20 +354,42 @@ fn tracked_velocity(walk: &WalkSim) -> glam::Vec3 {
 /// This frame's rain splashes (re-weather.md §5): each point dropped by a
 /// ray from 50 m over the camera, 100 m down, onto terrain or buildings —
 /// the ordnance ray's mask — and the map's `GroundEffect` started there.
+///
+/// Split (issue #194 B13, `cells` set): once per awake local player's camera, P1's first, each
+/// at its cell's aspect and drawn (`fit_fov_y`) field with the splash rate divided among them,
+/// each view on its own splash clock with its look right before its splashes
+/// (`Weather::view_splashes`). Not split: the first player's camera alone, as
+/// before.
 fn rain_splashes(
     w: &mut game::weather::Weather,
     fx: &mut game::fx::Fx,
-    walk: &WalkSim,
+    walk: &mut WalkSim,
     aspect: f32,
+    cells: Option<&[game::split_layout::Cell]>,
     dt: f32,
 ) {
     let Some(name) = w.precip.ground_effect.clone() else {
         return;
     };
-    let view = game::weather::View::from_camera(&walk.camera(), aspect);
+    let views: Option<Vec<(usize, game::weather::View)>> = cells.map(|cells| {
+        let awake: Vec<usize> = (0..walk.local_count().min(cells.len()))
+            .filter(|&i| !walk.is_suspended(i))
+            .collect();
+        awake
+            .into_iter()
+            .map(|i| {
+                let c = cells[i];
+                let aspect = c[2] as f32 / c[3].max(1) as f32;
+                // The field the cell draws: a cell narrower than 4:3 is widened.
+                let mut cam = walk.camera_of(i);
+                cam.fov_y = game::split_layout::fit_fov_y(cam.fov_y, aspect);
+                (i, game::weather::View::from_camera(&cam, aspect))
+            })
+            .collect()
+    });
     let sim = &walk.sim;
     let down = glam::Vec3::NEG_Y;
-    let hits = w.splashes(dt, &view, 1, &mut |top| {
+    let mut ground = |top: glam::Vec3| {
         let body = sim
             .collision
             .ray(top, down, 100.0, core::collision::Layers::ORDNANCE)
@@ -373,7 +400,14 @@ fn rain_splashes(
             (a, b) => a.or(b)?,
         };
         Some(top + down * t)
-    });
+    };
+    let hits = match views {
+        Some(views) => w.view_splashes(dt, &views, &mut ground),
+        None => {
+            let view = game::weather::View::from_camera(&walk.camera(), aspect);
+            w.splashes(dt, &view, 1, &mut ground)
+        }
+    };
     for hit in hits {
         fx.spawn(&name, game::fx::emitter::Frame::at(hit));
     }
@@ -512,6 +546,12 @@ enum SpawnPointerAct {
 /// opened: the second click of a double click that left the last screen
 /// only selects on this one. measure: live mouse play on the spawn screens.
 const SPAWN_SCREEN_SETTLE: f32 = 0.45;
+
+/// Window point `pos` in `cell`'s own pixels, `None` outside the cell.
+fn in_cell(pos: [f32; 2], cell: game::split_layout::Cell) -> Option<[f32; 2]> {
+    let p = [pos[0] - cell[0] as f32, pos[1] - cell[1] as f32];
+    (p[0] >= 0.0 && p[1] >= 0.0 && p[0] < cell[2] as f32 && p[1] < cell[3] as f32).then_some(p)
+}
 
 /// Issue #128, the shell's pointer model on the spawn screens: fresh motion
 /// over a row selects it where `hover_picks` (the side rows and the map's
@@ -666,7 +706,10 @@ struct App {
     paused: bool,
     pause_menu: game::pause::PauseMenu,
     controls: Option<front::Controls>,
+    /// The keyboard and mouse's context: the keyboard player's own unit's.
     binding_context: Option<ui::menu::ControlContext>,
+    /// The first player's context, whose pad `context_gamepad` maps.
+    gamepad_context: Option<ui::menu::ControlContext>,
     context_gamepad: Option<input::Mapping>,
     /// Placeholder muzzle/impact effects (visual only — `game::fx`).
     fx: game::fx::Fx,
@@ -729,7 +772,8 @@ struct App {
     score_hold: ui::scoreboard::Hold,
     campaign_map: Option<usize>,
     /// The other players' names over their heads (LAN §5b).
-    name_tags: game::name_tags::NameTags,
+    /// One per local view (issue #194 B8; the single view's is the first).
+    name_tags: Vec<game::name_tags::NameTags>,
     /// The window's inner size, display scale and frame size last logged
     /// (`events.rs`, `note_window_size`).
     window_note: Option<(u32, u32, f64, (u32, u32))>,
@@ -774,6 +818,55 @@ struct App {
     /// (`game::pause::resume_pad`).
     resume_gate: core::sim::HeldEat,
     view_toggle: game::viewpoint::ViewToggle,
+    /// Debug splitscreen (`--local-players`, issue #194): the per-player input and seats while
+    /// several people share this walk; `None` otherwise, and then none of its code runs.
+    split: Option<split::SplitState>,
+    /// Split: the extra players' own message feeds (presentation only: they never score; the
+    /// round's one scoring feed is `feed`).
+    split_feeds: Vec<game::event_feed::EventFeed>,
+    /// The round's source game, for a further player's feed made mid-round (issue #194 B20: a
+    /// LAN round's line-up changed).
+    split_source_game: String,
+    /// Split: each extra player's spawn-screen soldiers (view `i` uses `[i - 1]`).
+    split_previews: Vec<game::spawn_preview::Preview>,
+    /// Split: the extra players' rumble state, one per player after the first.
+    split_rumble: Vec<split::ExtraRumble>,
+    /// Split: the render call's time in milliseconds, smoothed, for the fps counter's note.
+    split_render_ms: f32,
+    /// Split: the local player who opened the Game Menu; only their device drives it
+    /// (`SPLITSCREEN.md` sections 4 and 15).
+    pause_owner: Option<usize>,
+    /// Split: the local player who opened the Game Menu, kept when the menu passes to another
+    /// driver (`split::menu_driver`): the per-player rows, Respawn and the Controls editor stay
+    /// the opener's (issue #194 B10); `pause_owner` only picks whose pad drives it. The bool: the
+    /// keyboard opened it with nobody playing on it (the menu says so, not "Paused by" a name).
+    pause_opened_by: Option<(usize, bool)>,
+    /// Split: last frame's Start on each seated player's own pad (by local index), so any of
+    /// them opens the Game Menu, not only the active pad.
+    split_start_prev: Vec<bool>,
+    /// Split: the seat whose own pad pressed Start this frame (unpaused only).
+    split_start_seat: Option<usize>,
+    /// The pad the Game Menu's owner drives it with, last frame (`pause_owner_pad`): when it
+    /// changes the menu reads another pad, whose held buttons are no fresh press.
+    prev_menu_owner: Option<Option<gilrs::GamepadId>>,
+    /// Issue #194: the Players screen's seats for the playlist launched from the Splitscreen mode
+    /// list, kept through every round of it (and written back from the match, so a pad that came
+    /// back under a new id keeps its seat). `None` for every other launch.
+    split_party: Option<split::Party>,
+    /// Issue #194 (`SPLITSCREEN.md` 18.1 item 1): P2-P4's profiles while a split battle plays,
+    /// by Players screen seat number, moved out of the Players screen's seats at launch and
+    /// back in `leave_battle`; the one live copy (seat 0 is `profile`).
+    split_profiles: [Option<game::profile::Profile>; 4],
+    /// Issue #194 (`SPLITSCREEN.md` 18.1 item 3): the battle's one table of human names by
+    /// slot (the single player's profile, the split seats' profiles, the LAN session names);
+    /// every feed copies it when its generation moves ([`App::feed_names`]).
+    names: game::player_names::PlayerNames,
+    /// The `names` generation the feeds last copied; `None` once the feeds are new.
+    names_fed: Option<u64>,
+    /// The keyboard's own menu edges this frame (no pad merged in), for the Players screen, which
+    /// must tell Enter from a pad's A.
+    key_menu_edges: u32,
+    prev_key_menu: u32,
     /// `OPENBF_AUTOPILOT=1` in dev mode: [`autopilot_pad`] drives the player.
     autopilot: bool,
     /// `OPENBF_QUIT_AT=<s>` in dev mode: the game quits (as the window's
@@ -1035,6 +1128,7 @@ impl App {
             pause_menu: game::pause::PauseMenu::default(),
             controls: None,
             binding_context: None,
+            gamepad_context: None,
             context_gamepad: None,
             quit_clicked: false,
             restart_clicked: false,
@@ -1067,7 +1161,7 @@ impl App {
             prev_menu_buttons: 0,
             score_hold: Default::default(),
             campaign_map: None,
-            name_tags: Default::default(),
+            name_tags: vec![Default::default()],
             window_note: None,
             gameplay_stick: GameplayStick::default(),
             stick_range: input::StickRange::default(),
@@ -1090,6 +1184,23 @@ impl App {
             sprint_latch: input::SprintLatch::default(),
             resume_gate: core::sim::HeldEat::default(),
             view_toggle: game::viewpoint::ViewToggle::default(),
+            split: None,
+            split_feeds: Vec::new(),
+            split_source_game: String::new(),
+            split_previews: Vec::new(),
+            split_rumble: Vec::new(),
+            split_render_ms: 0.0,
+            pause_owner: None,
+            pause_opened_by: None,
+            split_start_prev: Vec::new(),
+            split_start_seat: None,
+            prev_menu_owner: None,
+            split_party: None,
+            split_profiles: Default::default(),
+            names: Default::default(),
+            names_fed: None,
+            key_menu_edges: 0,
+            prev_key_menu: 0,
             autopilot: false,
             quit_at: None,
             cheats,
@@ -1135,22 +1246,82 @@ impl App {
     /// element's `map_scale` (`None`: no HUD pass draws the map, so the
     /// pointer finds no post there).
     fn step_spawn_pointer_at(&mut self, dt: f32, map_scale: Option<glam::Vec3>) {
+        let view = self.split_cells().and_then(|cells| {
+            let k = self.keyboard_seat();
+            cells.get(k).map(|cell| (k, *cell))
+        });
+        self.step_spawn_pointer_in(dt, map_scale, view);
+    }
+
+    /// [`App::step_spawn_pointer_at`] for the keyboard player's view: `None` the single view
+    /// (the window), `Some((k, cell))` split, local player `k`'s spawn pages laid out in `cell`
+    /// (`game::split_ui::cell_frame`). The step runs with player `k`'s view swapped in as the
+    /// walk's own (`WalkSim::swap_local_view`), so it reads their spawn stage and posts; their
+    /// picks and taps go into the keyboard's pad, which is theirs (`split.rs`). A pointer outside
+    /// the cell, or a player who is away, does nothing.
+    pub(super) fn step_spawn_pointer_in(
+        &mut self,
+        dt: f32,
+        map_scale: Option<glam::Vec3>,
+        view: Option<(usize, game::split_layout::Cell)>,
+    ) {
+        let k = view.map_or(0, |v| v.0);
+        if k == 0 {
+            if self.step_spawn_pointer_view(dt, map_scale, view) {
+                self.note_pointer_spawn();
+            }
+            return;
+        }
+        let seated = self
+            .walk
+            .as_ref()
+            .is_some_and(|(w, _)| k < w.local_count() && !w.is_suspended(k));
+        if !seated {
+            self.spawn_clicks.step(dt);
+            let _ = self.shell_pointer.take_frame();
+            return;
+        }
+        let swap = |a: &mut App| {
+            if let Some((w, _)) = a.walk.as_mut() {
+                w.swap_local_view(k);
+            }
+        };
+        swap(self);
+        let accepted = self.step_spawn_pointer_view(dt, map_scale, view);
+        swap(self);
+        // Issue #128's hand-back reads the keyboard player with the walk unswapped.
+        if accepted {
+            self.note_pointer_spawn();
+        }
+    }
+
+    /// One pointer step on the spawn pages of the walk's own player (swapped in when split);
+    /// `true` when the pointer accepted a spawn screen (the caller notes it for issue #128).
+    fn step_spawn_pointer_view(
+        &mut self,
+        dt: f32,
+        map_scale: Option<glam::Vec3>,
+        view: Option<(usize, game::split_layout::Cell)>,
+    ) -> bool {
         use core::sim::{buttons, SideChoice, SpawnStage};
         self.spawn_clicks.step(dt);
         if self.paused {
-            return;
+            return false;
         }
         // Issue #182: behind the teammate view the spawn screens are hidden;
-        // a click steps to the next teammate (presentation only).
+        // a click steps to the next teammate (presentation only). Split: only a click in
+        // the keyboard player's own cell.
         if let Some((walk, _)) = self.walk.as_mut().filter(|(w, _)| w.spectating()) {
-            if let Some((_, true)) = self.shell_pointer.take_frame() {
-                walk.spectate_cycle(1);
+            if let Some((pos, true)) = self.shell_pointer.take_frame() {
+                if view.is_none_or(|(_, cell)| in_cell(pos, cell).is_some()) {
+                    walk.spectate_cycle(1);
+                }
             }
             self.spawn_clicks.clear();
-            return;
+            return false;
         }
         let Some((walk, _)) = self.walk.as_ref() else {
-            return;
+            return false;
         };
         // The player's unit even while dead behind the screens, as the
         // spawn page reads it (`Sim::unit` sees only a live one, which put
@@ -1164,18 +1335,36 @@ impl App {
             self.spawn_clicks.clear();
         }
         if stage == SpawnStage::Accepted {
-            return;
+            return false;
         }
         let Some((pos, click)) = self.shell_pointer.take_frame() else {
-            return;
+            return false;
         };
         let size = self.renderer.as_ref().map_or([640.0, 480.0], |r| {
             let (w, h) = r.size();
             [w as f32, h as f32]
         });
+        // Split: the keyboard player's spawn pages are laid out in their own cell
+        // (`game::split_ui::cell_frame`), not the window; `pos` goes into the cell's pixels.
+        let (pos, frame) = match view {
+            Some((_, cell)) => {
+                let Some(p) = in_cell(pos, cell) else {
+                    return false;
+                };
+                let hud_k = self.profile.settings.splitscreen.hud_size.k();
+                (p, game::split_ui::cell_frame(cell, hud_k))
+            }
+            None => (pos, ui::hud_draw::Frame::window(size)),
+        };
+        // The class line-up stands on the 4:3 band (the window itself when not split).
+        let band = frame.proj;
+        let preview = match view {
+            Some((k, _)) if k > 0 => self.split_previews.get(k - 1),
+            _ => Some(&self.spawn_preview),
+        };
         let (over, selected) = match stage {
             SpawnStage::Side => (
-                ui::spawn_draw::side_row_at(pos, size, 3).map(SpawnTarget::Side),
+                ui::spawn_draw::side_row_at_in(pos, &frame, 3).map(SpawnTarget::Side),
                 walk.sim.side_choice.get(slot).map(|c| {
                     SpawnTarget::Side(match c {
                         SideChoice::Team1 => 0,
@@ -1189,7 +1378,7 @@ impl App {
                     (Some(minimap), Some(scale)) => {
                         let map = minimap.spawn_model(walk, slot);
                         let posts = walk.sim.player_spawn_posts(team);
-                        ui::hud_map::hit_spawn_post(&map, scale, &posts, pos, size, 28.0)
+                        ui::hud_map::hit_spawn_post_in(&map, scale, &posts, pos, &frame, 28.0)
                     }
                     _ => None,
                 };
@@ -1199,14 +1388,16 @@ impl App {
                 )
             }
             SpawnStage::Class | SpawnStage::Alive => (
-                self.spawn_preview
-                    .class_at(pos, size)
+                preview
+                    .and_then(|p| {
+                        p.class_at([pos[0] - band[0], pos[1] - band[1]], [band[2], band[3]])
+                    })
                     .map(SpawnTarget::Class),
                 walk.sim
                     .spawn_class_choice(slot, team)
                     .map(|c| SpawnTarget::Class(c as u8)),
             ),
-            SpawnStage::Accepted => return,
+            SpawnStage::Accepted => return false,
         };
         let over = match click {
             true => self.spawn_clicks.double(pos).or(over),
@@ -1225,7 +1416,10 @@ impl App {
             .hud_view
             .as_ref()
             .filter(|_| click && !self.cheats.hud_hidden)
-            .and_then(|v| v.spawn_help_at(pos, size));
+            .and_then(|v| match view {
+                Some((k, _)) => v.spawn_help_at_in(k, pos, &frame),
+                None => v.spawn_help_at(pos, size),
+            });
         let hover_picks = matches!(stage, SpawnStage::Side | SpawnStage::Map);
         let settled = self.spawn_clicks.settled();
         let act = spawn_pointer_act(hover_picks, over, selected, help, click, settled);
@@ -1237,8 +1431,9 @@ impl App {
             self.spawn_clicks.clicked(picked, pos);
         }
         let Some(act) = act else {
-            return;
+            return false;
         };
+        let accepted = matches!(act, SpawnPointerAct::Accept(_));
         let sound = match act {
             SpawnPointerAct::Pick(target) => {
                 self.kbm.set_pick(target.pick());
@@ -1251,7 +1446,6 @@ impl App {
                     self.spawn_clicks.send(target);
                 }
                 self.kbm.tap_bits(buttons::SPAWN_ACCEPT);
-                self.note_pointer_spawn();
                 Some(ui::shell_feel::MenuSound::Accept)
             }
             SpawnPointerAct::Back => {
@@ -1262,6 +1456,7 @@ impl App {
         if let (Some(sound), Some(sl)) = (sound, self.sounds.as_mut()) {
             sl.play_2d(self.audio.as_mut(), sound.name());
         }
+        accepted
     }
 
     /// Fly-cam: left stick moves (yaw-relative), right stick looks, triggers
@@ -1310,6 +1505,11 @@ impl App {
     /// Back to the shell's screens (the Instant Action screen keeps its
     /// playlist and options in `FrontShell`).
     fn init_shell(&mut self) {
+        // Issue #194: back on the shell, by any way (a left battle, a load that failed), the
+        // seats' profiles return to their seats, moved, as the battle left them.
+        if let Some(front) = self.front.as_mut() {
+            front.give_back_seat_profiles(&mut self.split_profiles);
+        }
         self.screen = Screen::Shell;
         self.sync_grab();
     }
@@ -1332,6 +1532,7 @@ impl App {
         };
         self.playlist.clear();
         self.current = None;
+        self.split_party = None;
         self.active_campaign = Some(index);
         if !self.begin_loading_key(entry.map, "campaign".to_owned(), None) {
             self.active_campaign = None;
@@ -1348,10 +1549,23 @@ impl App {
     fn next_round(&mut self) -> bool {
         while let Some(row) = self.playlist.pop_front() {
             if self.begin_loading(row) {
+                self.lend_split_profiles();
                 return true;
             }
         }
         false
+    }
+
+    /// Issue #194: every split round that starts loading takes P2-P4's Ready profiles from
+    /// their seats (`SPLITSCREEN.md` 18.1 item 1: the next match or map takes them again);
+    /// [`App::init_shell`] gives them back whichever way the round ends.
+    fn lend_split_profiles(&mut self) {
+        if self.split_party.is_none() {
+            return;
+        }
+        if let Some(front) = self.front.as_mut() {
+            front.lend_seat_profiles(&mut self.split_profiles);
+        }
     }
 
     /// Shell → loading screen (BF1 sequence + beep), then the battle of
@@ -1878,11 +2092,42 @@ impl App {
                 );
             }
         }
+        // Each further local player's own message feed, whichever way the round loaded (the
+        // loading worker's extras carry the round's one feed only): a split player without
+        // one has no HUD model, so no HUD and no spawn screen.
+        self.split_previews.clear();
+        // A new round's sim starts again at tick 0: the further players' rumble (its fire gate is an
+        // absolute tick, its last mount a unit of the old round) starts fresh with it.
+        self.split_rumble.clear();
+        // A LAN round's locals are the session's (issue #194 B20): one feed each.
+        let players = match self.netplay.as_ref() {
+            Some(n) if self.split_party.is_some() => n.peer.local_count(),
+            _ => split::wanted_players(self.split_party.as_ref()),
+        };
+        self.split_source_game
+            .clone_from(&scene.manifest.source_game);
+        self.split_feeds = split::extra_feeds(
+            &self.assets_dir,
+            &scene.manifest.source_game,
+            &walk,
+            players,
+        );
         // A single-player round names its human by the profile, as a LAN
-        // round does by the session names (`lan::net_names_to_feed`).
+        // round does by the session names (`lan::net_names_to_feed`); the
+        // new battle's feeds start from a new table.
+        self.names.clear();
+        self.names_fed = None;
+        // Each round's views start with fresh sight answers, one set for the single view.
+        self.name_tags = vec![Default::default()];
         if let Some(name) = single_player_name(lockstep, &self.profile.name) {
-            self.feed.set_player_names([(0, name.as_str())]);
+            self.names.set([(0, name.as_str())]);
         }
+        // `App::feed_names`, by field (`setup` still borrows `self`).
+        self.feed.set_player_names(self.names.iter());
+        for feed in &mut self.split_feeds {
+            feed.set_player_names(self.names.iter());
+        }
+        self.names_fed = Some(self.names.generation());
         if let Some(sl) = self.sounds.as_mut() {
             sl.rate_mul = self.cheats.sfx_rate();
         }
@@ -1987,8 +2232,7 @@ impl App {
         let upload_started = std::time::Instant::now();
         let scene = prepared.scene;
         let _preload = game::assets::prefetch::record(&game::assets::prefetch::load_key(
-            &scene.dir,
-            &self.mode,
+            &scene.dir, &self.mode,
         ));
         // Both sides of the upload are printed as they happen, so a log
         // that stops between them points at the GPU (the heartbeat goes on
@@ -2093,6 +2337,18 @@ impl App {
         if let Err(e) = self.profile.save() {
             eprintln!("profile autosave failed: {e:#}");
         }
+        let mut walk = walk;
+        let lan_seats = self.lan_split_seats(&walk);
+        self.split = split::seat(
+            &mut walk,
+            setup.mission.as_ref(),
+            lan_seats.as_deref(),
+            self.profile.settings.viewpoint,
+            self.split_party.as_ref(),
+        );
+        self.say_split_seat_failed(&walk);
+        self.install_seat_profiles(&mut walk);
+        self.name_split_players(&walk);
         self.walk = Some((walk, cube));
         self.gpu = Some(gpu);
         self.setup = setup;
@@ -2301,6 +2557,33 @@ impl App {
     /// (issue #168).
     fn leave_battle(&mut self) {
         self.campaign_map = None;
+        // Issue #194: each further local player's round goes to their own seat's profile, by the
+        // seats as the match had them (snapshotted before the split state ends below).
+        let seats = self
+            .walk
+            .as_ref()
+            .map(|(w, _)| {
+                split::round_seat_numbers(
+                    self.split.as_ref(),
+                    self.netplay.as_ref(),
+                    self.split_party.as_ref(),
+                    w,
+                )
+            })
+            .unwrap_or_default();
+        // Issue #194: the seats as the match left them go back to the Players screen and to the
+        // playlist's next round; the split state itself ends with the walk.
+        if let Some(split) = self.split.take() {
+            // The keyboard's mouse settings and keys are the host's again.
+            self.kbm.follow(&self.profile.settings);
+            self.refresh_context_bindings();
+            if let Some(party) = self.split_party.as_mut() {
+                *party = split.party_back(party);
+                if let Some(front) = self.front.as_mut() {
+                    front.set_party(party.clone());
+                }
+            }
+        }
         let finished_campaign = self.active_campaign.take();
         let finished_round = finished_campaign.is_some() && self.round_over;
         let won_campaign = finished_round
@@ -2326,11 +2609,19 @@ impl App {
         }
         self.rumble_effect = None;
         self.rumble_tick = Default::default();
+        // The further players' rumble too: its fire gate is a tick of the round just left.
+        self.split_rumble.clear();
         self.blackbox_exit();
         if let Some((walk, _)) = self.walk.as_mut() {
             if !self.round_recorded {
                 self.round_recorded = true;
                 record_round(&mut self.profile, walk, self.feed.battle_stats());
+                career::record_split_rounds(
+                    &mut self.split_profiles,
+                    walk,
+                    &self.split_feeds,
+                    &seats,
+                );
             }
         }
         self.walk = None;
@@ -2401,6 +2692,21 @@ impl App {
     /// 256 R1, 512 Square, 1024 / 2048 a value step left / right.
     fn menu_edges(&mut self) -> u32 {
         let mut now = 0u32;
+        // Split: every seated player's own pad (by local index) and the keyboard's player.
+        let split_live = self.split_on();
+        let (seat_pads, keyboard_player): (Vec<Option<gilrs::GamepadId>>, Option<usize>) =
+            match self.split.as_ref().filter(|_| split_live) {
+                Some(s) => (
+                    (0..s.inputs.len()).map(|i| s.seats.pad_of(i)).collect(),
+                    s.seats.keyboard_player(),
+                ),
+                None => (Vec::new(), None),
+            };
+        self.split_start_seat = None;
+        if !split_live {
+            self.split_start_prev.clear();
+        }
+        let mut seat_live: Vec<bool> = Vec::new();
         if let Some(g) = &mut self.gilrs {
             let was = self.active_pad.id;
             let map = &self.profile.settings.controller_bindings;
@@ -2417,9 +2723,41 @@ impl App {
                     loading::pad_buttons_down(g),
                 );
             }
-            if let Some((_, pad)) =
-                input::active_gamepad(g, &self.active_pad).filter(|_| !self.loading_pad_blocked)
-            {
+            // Each seated player's own pad is connected now (after this frame's pump).
+            seat_live = seat_pads
+                .iter()
+                .map(|id| id.is_some_and(|id| g.connected_gamepad(id).is_some()))
+                .collect();
+            // Split: Start on any seated player's own pad (the active pad is only one of them).
+            if split_live {
+                let pressed: Vec<bool> = seat_pads
+                    .iter()
+                    .map(|id| {
+                        id.and_then(|id| g.connected_gamepad(id))
+                            .is_some_and(|p| p.is_pressed(gilrs::Button::Start))
+                    })
+                    .collect();
+                let edge = split::seat_start_edge(&mut self.split_start_prev, &pressed);
+                self.split_start_seat = edge.filter(|_| !self.paused && !self.loading_pad_blocked);
+            }
+        }
+        if split_live && self.paused && self.gilrs.is_some() {
+            self.settle_split_menu(keyboard_player, &seat_live);
+        }
+        let owner_pad = self.pause_owner_pad();
+        let keyboard_drives = self.pause_keyboard_drives();
+        // The menu's source pad changed (its owner set, passed on or cleared): this frame's
+        // held buttons on the new source are not fresh presses.
+        let source_changed = owner_pad != self.prev_menu_owner;
+        self.prev_menu_owner = owner_pad;
+        if let Some(g) = &mut self.gilrs {
+            // Split with the Game Menu open: only its opener's pad drives it.
+            let pad = match owner_pad {
+                Some(Some(id)) => g.connected_gamepad(id).map(|p| (id, p)),
+                Some(None) => None,
+                None => input::active_gamepad(g, &self.active_pad),
+            };
+            if let Some((_, pad)) = pad.filter(|_| !self.loading_pad_blocked) {
                 use gilrs::Button;
                 let bits = [
                     (Button::DPadUp, 1),
@@ -2438,6 +2776,10 @@ impl App {
                     if pad.is_pressed(b) {
                         now |= bit;
                     }
+                }
+                // Split, unpaused: Start comes from the seats' own pads (above), not this one.
+                if split_live && !self.paused {
+                    now &= !64;
                 }
                 if matches!(self.screen, Screen::Shell) && pad.is_pressed(Button::East) {
                     now |= game::kbm::MENU_EAST;
@@ -2500,33 +2842,60 @@ impl App {
                 now |= 16;
             }
         }
-        now |= game::kbm::menu_bits(self.keys_held, shell);
-        let tapped = game::kbm::menu_bits(std::mem::take(&mut self.keys_tapped), shell);
+        let held = if keyboard_drives { self.keys_held } else { 0 };
+        now |= game::kbm::menu_bits(held, shell);
+        let tapped = std::mem::take(&mut self.keys_tapped);
+        let tapped = game::kbm::menu_bits(if keyboard_drives { tapped } else { 0 }, shell);
+        let keys_now = game::kbm::menu_bits(held, shell);
+        self.key_menu_edges = game::kbm::menu_edges(keys_now, self.prev_key_menu, tapped, false);
+        self.prev_key_menu = keys_now;
         let north_backs = self.paused;
-        let edges = game::kbm::menu_edges(now, self.prev_menu_buttons, tapped, north_backs);
+        let prev = if source_changed {
+            now
+        } else {
+            self.prev_menu_buttons
+        };
+        let mut edges = game::kbm::menu_edges(now, prev, tapped, north_backs);
         self.prev_menu_buttons = now;
+        if self.split_start_seat.is_some() {
+            edges |= 64;
+        }
         edges
     }
 
+    /// The keyboard's table follows the player who holds the keyboard (split: any seat the
+    /// Players screen gave it), the first player's pad table follows the first player.
     fn sync_binding_context(&mut self) {
-        let context = self
-            .walk
-            .as_ref()
-            .and_then(|(walk, _)| game::control_layout::current(walk));
-        if context != self.binding_context {
-            self.binding_context = context;
+        let seat = self.keyboard_seat();
+        let (keyboard, gamepad) = match self.walk.as_mut() {
+            Some((walk, _)) => {
+                let first = game::control_layout::current_of(walk, 0);
+                let keyboard = match seat {
+                    0 => first,
+                    k => game::control_layout::current_of(walk, k),
+                };
+                (keyboard, first)
+            }
+            None => (None, None),
+        };
+        if keyboard != self.binding_context || gamepad != self.gamepad_context {
+            self.binding_context = keyboard;
+            self.gamepad_context = gamepad;
             self.refresh_context_bindings();
         }
     }
 
     fn refresh_context_bindings(&mut self) {
+        // The keys are the keyboard player's own (split: their seat's profile), the first
+        // player's pad table the host's.
+        let keyboard =
+            game::control_layout::context_bindings(self.binding_context, self.keyboard_settings());
         let settings = &self.profile.settings;
-        let keyboard = game::control_layout::context_bindings(self.binding_context, settings);
         self.kbm.swap_context(
             &keyboard,
             game::control_layout::look_scale(self.binding_context),
         );
-        self.context_gamepad = self.binding_context.and_then(|context| {
+        self.context_gamepad = self.gamepad_context.and_then(|context| {
             game::control_layout::gamepad(context, settings.gamepad_layouts.get(context))
         });
     }

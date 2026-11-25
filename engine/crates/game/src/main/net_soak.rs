@@ -28,6 +28,11 @@
 //!     PS2 host with PC and Xbox guests; unset, every peer uses --assets
 //!     and --missions
 //!   --report-dir DIR [the black box's desync/]: where desync reports go
+//!   --locals N [1]: guest 1's machine seats N players (splitscreen B20): its
+//!     further players join with it and play their own scripted pads; its
+//!     second player's pad goes away at --away-at T [1300] and comes back at
+//!     --back-at T [1500] (the window's lost-pad path, `Peer::set_local_away`),
+//!     and must come back on its old side. With 1 nothing differs.
 //!   --perturb-at T: the instrument check; at host tick T guest 1's sim is
 //!     nudged (a unit moved 1 cm), so the run must report mismatches and a
 //!     desync (and that guest rejoins); exits non-zero like any failure
@@ -84,6 +89,9 @@ pub(super) struct SoakArgs {
     pub peer_assets: Vec<PathBuf>,
     pub peer_missions: Vec<PathBuf>,
     pub report_dir: Option<PathBuf>,
+    pub locals: usize,
+    pub away_at: u32,
+    pub back_at: u32,
 }
 
 impl Default for SoakArgs {
@@ -117,6 +125,9 @@ impl Default for SoakArgs {
             peer_assets: Vec::new(),
             peer_missions: Vec::new(),
             report_dir: None,
+            locals: 1,
+            away_at: 1300,
+            back_at: 1500,
         }
     }
 }
@@ -162,11 +173,19 @@ impl SoakArgs {
                     a.peer_missions = val()?.split(',').map(PathBuf::from).collect()
                 }
                 "--report-dir" => a.report_dir = Some(val()?.into()),
+                "--locals" => a.locals = val()?.parse()?,
+                "--away-at" => a.away_at = val()?.parse()?,
+                "--back-at" => a.back_at = val()?.parse()?,
                 other => bail!("unknown --net-soak flag: {other}"),
             }
         }
         anyhow::ensure!((2..=16).contains(&a.peers), "--peers wants 2..=16");
         anyhow::ensure!(!a.draw || a.predict, "--draw wants --predict");
+        anyhow::ensure!(
+            (1..=net::MAX_LOCALS).contains(&a.locals),
+            "--locals wants 1..={}",
+            net::MAX_LOCALS
+        );
         anyhow::ensure!(
             a.peer_missions.is_empty() || a.peer_missions.len() == a.peer_assets.len(),
             "--peer-missions wants one entry per --peer-assets entry"
@@ -336,6 +355,24 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let late = guests; // node index of the mid-round joiner
     let starters = if guests >= 2 { guests - 1 } else { guests };
     for i in 1..=starters {
+        if i == 1 && a.locals > 1 {
+            // Guest 1's further players (splitscreen B20), seats 1.. of its machine.
+            let locals = (1..a.locals)
+                .map(|k| net::LocalHello {
+                    seat: k as u8,
+                    name: format!("Peer1_{k}"),
+                    profile: scripted_profile(10 + k as u8).encode(),
+                })
+                .collect();
+            vnet.join_locals(
+                "Peer1",
+                101,
+                scripted_profile(1).encode(),
+                16.7 + 1.3,
+                locals,
+            );
+            continue;
+        }
         vnet.join(
             &format!("Peer{i}"),
             100 + i as u64,
@@ -369,14 +406,34 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let stamina = u32::from(cheat_index("stamina").expect("stamina"));
     let clip = u32::from(cheat_index("clip").expect("clip"));
     setup.cheat_policy = 1 << stamina | 1 << clip;
-    for slot in 0..=starters as u8 {
-        setup.humans.push(HumanSeat {
-            slot,
-            name: format!("Peer{slot}"),
-            team: None,
-            cheats: 0,
-            profile: scripted_profile(slot),
-        });
+    if a.locals > 1 {
+        // Every starter machine's players, each by the slot the host gave it.
+        for n in &vnet.nodes[..=starters] {
+            for (k, slot) in n.peer.local_slots().into_iter().enumerate() {
+                let (name, profile) = match k {
+                    0 => (format!("Peer{slot}"), scripted_profile(slot)),
+                    _ => (format!("Peer1_{k}"), scripted_profile(10 + k as u8)),
+                };
+                setup.humans.push(HumanSeat {
+                    slot,
+                    name,
+                    team: None,
+                    cheats: 0,
+                    profile,
+                });
+            }
+        }
+        setup.humans.sort_by_key(|h| h.slot);
+    } else {
+        for slot in 0..=starters as u8 {
+            setup.humans.push(HumanSeat {
+                slot,
+                name: format!("Peer{slot}"),
+                team: None,
+                cheats: 0,
+                profile: scripted_profile(slot),
+            });
+        }
     }
     vnet.host_load(&setup);
     let report_dir = a
@@ -393,6 +450,9 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let asker = 1usize;
     let cut = if guests >= 2 { 2usize } else { 1 };
     let mut done = [false; 6];
+    // Guest 1's second player's away and back (`--locals`): the host's view of
+    // its slot's side when it went, and whether it went and came back.
+    let mut away = LocalsAway::default();
     let mut joiner_pos: Option<(glam::Vec3, f32)> = None;
     let mut joiner_alive_ticks = 0u32;
     // Slot 1's and the asker's cheats once both requests had time to land.
@@ -427,6 +487,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             vnet.request(
                 asker,
                 &GameRequest::CheatToggle {
+                    slot: vnet.nodes[asker].peer.local_slot,
                     id: stamina as u8,
                     on: true,
                 },
@@ -437,6 +498,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             vnet.request(
                 asker,
                 &GameRequest::CheatToggle {
+                    slot: vnet.nodes[asker].peer.local_slot,
                     id: classes,
                     on: true,
                 },
@@ -463,6 +525,9 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                     host_nudged = Some(vnet.nodes[0].peer.next_tick());
                 }
             }
+        }
+        if a.locals > 1 {
+            away.step(&a, &mut vnet, t);
         }
         if !done[5] && t >= a.rejoin_at {
             done[5] = true;
@@ -547,7 +612,89 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         cheat_sample,
         (row_us, nudged_tick, host_nudged),
         &check_wall_ms,
+        &away,
     )
+}
+
+/// `--locals`: guest 1's second player's pad goes and comes back (module
+/// header), as the window's lost-pad path asks it.
+#[derive(Default)]
+struct LocalsAway {
+    slot: Option<u8>,
+    /// The slot's side on the host when its pad went, and after it came back.
+    team_before: Option<u8>,
+    team_after: Option<u8>,
+    sent_away: bool,
+    sent_back: bool,
+}
+
+impl LocalsAway {
+    fn team(vnet: &VirtualNet, slot: u8) -> Option<u8> {
+        let w = vnet.nodes[0].walk.as_ref()?;
+        let h = w.sim.players.get(usize::from(slot)).copied().flatten()?;
+        Some(w.sim.units[h.index as usize].team)
+    }
+
+    fn step(&mut self, a: &SoakArgs, vnet: &mut VirtualNet, t: u32) {
+        if self.slot.is_none() {
+            self.slot = vnet.nodes[1].peer.local_slot_of(1);
+        }
+        let Some(slot) = self.slot else {
+            return;
+        };
+        if !self.sent_away && t >= a.away_at {
+            self.sent_away = true;
+            self.team_before = Self::team(vnet, slot);
+            vnet.set_local_away(1, 1, true);
+        }
+        if self.sent_away && !self.sent_back && t >= a.back_at {
+            self.sent_back = true;
+            vnet.set_local_away(1, 1, false);
+        }
+        if self.sent_back && self.team_after.is_none() {
+            self.team_after = Self::team(vnet, slot);
+        }
+    }
+
+    /// What the summary says of it, and its failures.
+    fn report(
+        &self,
+        a: &SoakArgs,
+        host: &game::netplay::virtual_net::Node,
+        ran: impl Fn(u32) -> bool,
+        failures: &mut Vec<String>,
+    ) -> serde_json::Value {
+        let slot = self.slot;
+        let left = host.applied.iter().any(|(t, ap)| {
+            matches!(ap, game::netplay::Applied::Left { slot: s, .. } if Some(*s) == slot)
+                && *t >= a.away_at
+        });
+        let back = host.applied.iter().any(|(t, ap)| {
+            matches!(ap, game::netplay::Applied::Joined { slot: s, ok: true } if Some(*s) == slot)
+                && *t >= a.back_at
+        });
+        if ran(a.away_at + 300) && !left {
+            failures.push("guest 1's second player was not taken out".to_owned());
+        }
+        if ran(a.back_at + 300) {
+            if !back {
+                failures.push("guest 1's second player was not seated again".to_owned());
+            } else if self.team_after != self.team_before {
+                failures.push(format!(
+                    "guest 1's second player came back on side {:?}, left on {:?}",
+                    self.team_after, self.team_before
+                ));
+            }
+        }
+        serde_json::json!({
+            "count": a.locals,
+            "away_slot": slot,
+            "taken_out": left,
+            "seated_again": back,
+            "team_before": self.team_before,
+            "team_after": self.team_after,
+        })
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -565,6 +712,7 @@ fn summarize(
     cheat_sample: Option<(u32, u32)>,
     (row_us, nudged_tick, host_nudged): (Option<f64>, Option<u32>, Option<u32>),
     check_wall_ms: &[f64],
+    away: &LocalsAway,
 ) -> Result<()> {
     let cut = usize::from(vnet.nodes[cut_node].peer.local_slot);
     let asker = vnet.nodes[asker_node].peer.local_slot;
@@ -744,7 +892,8 @@ fn summarize(
             failures.push("the reconnected guest was not added back".to_owned());
         }
     }
-    let summary = serde_json::json!({
+    let locals = (a.locals > 1).then(|| away.report(a, host, ran, &mut failures));
+    let mut summary = serde_json::json!({
         "map": a.map,
         "game": game_name,
         "mode": a.mode,
@@ -800,6 +949,9 @@ fn summarize(
         "per_peer": peers,
         "failures": failures,
     });
+    if let Some(l) = locals {
+        summary["locals"] = l;
+    }
     let text = serde_json::to_string_pretty(&summary)?;
     println!("{text}");
     if let Some(out) = &a.out {

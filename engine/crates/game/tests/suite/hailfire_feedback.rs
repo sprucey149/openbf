@@ -332,6 +332,8 @@ fn hailfire_gatling_has_an_audible_loop_from_the_players_seat() {
             let listener = game::sounds::Listener {
                 pos: m.walk.camera().position,
                 yaw: m.walk.camera().yaw,
+                more: [None; 3],
+                vels: None,
             };
             let voice = game::engine_sound::Voice {
                 vehicle: h.index,

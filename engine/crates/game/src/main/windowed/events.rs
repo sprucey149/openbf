@@ -21,25 +21,31 @@ const MENU_BACK: u32 = 32;
 const MENU_START: u32 = 64;
 
 /// The in-battle scoreboard of `walk` (LAN §5b, `game::round_stats::scoreboard`):
-/// a LAN round names its humans by their session names and gives them a
-/// ping; single player has no Ping column.
+/// every human by the feed's names (`App.names`: the profile, the split seats'
+/// profiles or the LAN session names; issue #194 B4), and a LAN round gives
+/// them a ping; single player has no Ping column.
 fn scoreboard_model(
     walk: &game::walk::WalkSim,
     feed: &game::event_feed::EventFeed,
     titles: [String; 2],
     net: Option<&lan::NetplaySession>,
 ) -> ui::scoreboard::Scoreboard {
+    let roster = net.map(|n| n.roster()).unwrap_or_default();
+    scoreboard_of(walk, feed, titles, net.map(|_| roster.as_slice()))
+}
+
+/// [`scoreboard_model`] from the roster alone (`None` off LAN), for tests.
+pub(super) fn scoreboard_of(
+    walk: &game::walk::WalkSim,
+    feed: &game::event_feed::EventFeed,
+    titles: [String; 2],
+    roster: Option<&[game::netplay::lobby::LobbyPlayer]>,
+) -> ui::scoreboard::Scoreboard {
     use ui::scoreboard::Ping;
     let sim = &walk.sim;
-    let roster = net.map(|n| n.roster()).unwrap_or_default();
-    let unit = |i: usize| {
-        sim.units[i]
-            .spec
-            .player_slot
-            .filter(|_| net.is_some())
-            .and_then(|s| roster.iter().find(|p| p.slot == s))
-            .map_or_else(|| feed.unit_name(sim, sim.handle(i)), |p| p.name.clone())
-    };
+    let net = roster;
+    let roster = roster.unwrap_or_default();
+    let unit = |i: usize| feed.unit_name(sim, sim.handle(i));
     let ping = |slot: u8| match roster.iter().find(|p| p.slot == slot) {
         Some(p) => p.ping_ms.map_or(Ping::Host, Ping::Ms),
         None => Ping::None,
@@ -216,6 +222,18 @@ impl winit::application::ApplicationHandler for App {
                         self.profile.career.kills,
                         self.profile.career.deaths
                     );
+                    let mut walk = walk;
+                    let lan_seats = self.lan_split_seats(&walk);
+                    self.split = super::split::seat(
+                        &mut walk,
+                        self.setup.mission.as_ref(),
+                        lan_seats.as_deref(),
+                        self.profile.settings.viewpoint,
+                        self.split_party.as_ref(),
+                    );
+                    self.say_split_seat_failed(&walk);
+                    self.install_seat_profiles(&mut walk);
+                    self.name_split_players(&walk);
                     self.walk = Some((walk, cube));
                     self.start_frame_record();
                 }
@@ -519,11 +537,59 @@ impl winit::application::ApplicationHandler for App {
                 let mut spawn: Option<ui::spawn::SpawnModel> = None;
                 // A death camera or a dead rider's held seat view is up.
                 let icons = self.current_icons();
+                // Debug splitscreen (`--local-players`, issue #194): the views' cells in the
+                // window. `None` for every ordinary game, and then no line below changes.
+                let split_cells = self.split_cells();
+                let split_on = split_cells.is_some();
+                let split_keyboard = self
+                    .split
+                    .as_ref()
+                    .is_some_and(|s| s.seats.keyboard_player().is_some());
+                // The local player on the keyboard and mouse (0 when not split): the mouse's look
+                // preview below is view 0's only when it is theirs.
+                let keyboard_seat = self.keyboard_seat();
+                // Players whose controller is gone: their cells show the notice, and nothing of
+                // theirs is read (`WalkSim::is_suspended`).
+                let mut view_away: Vec<bool> = self.away_flags();
+                // Split: each player's own HUD model, by local index (`None` for a player who
+                // is away). Presentation only; the scoring feed is `self.feed` alone.
+                let mut split_models: Vec<Option<ui::hud::HudModel>> = Vec::new();
+                // Split: whether each view's spawn screens are up (issue #194 B8: no name tags
+                // there), by local index; view 0's is `spawn` itself.
+                let mut split_spawn_up: Vec<bool> = Vec::new();
+                let view_aspect = split_cells
+                    .as_ref()
+                    .map(|c| c[0][2] as f32 / c[0][3].max(1) as f32);
+                // Split: what the HUD models project onto, the cell's 4:3 band
+                // (`game::split_layout::ui_rect`, the part of the widened field the unwidened
+                // camera covers; `ui::hud_draw::Frame::cell`'s `proj`), not the cell, which
+                // `view_aspect` stays for `fit_fov_y`.
+                let band_aspect = split_cells.as_ref().map(|c| {
+                    let band = game::split_layout::ui_rect(c[0]);
+                    band[2] as f32 / band[3].max(1) as f32
+                });
                 let mut menu: Option<ui::menu::MenuModel> = None;
                 let mut edges = if self.walk.is_some() {
                     self.menu_edges()
                 } else {
                     0
+                };
+                // Split at the round's end: each player's own menu edges, for their own stats
+                // pages (issue #194 B9). Empty otherwise. Read every split frame so a button
+                // held as the round ends is not a fresh press on its first frame.
+                let seat_edges = if split_on {
+                    let edges = self.seat_menu_edges();
+                    let ended = self
+                        .walk
+                        .as_ref()
+                        .is_some_and(|(w, _)| w.sim.outcome.is_some());
+                    if ended {
+                        edges
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
                 };
                 let campaign_browser = self.netplay.is_none()
                     && self.walk.as_ref().is_some_and(|(w, _)| {
@@ -588,9 +654,24 @@ impl winit::application::ApplicationHandler for App {
                 if let Some(sounds) = self.sounds.as_mut() {
                     sounds.advance_menu_clock(elapsed);
                 }
-                if self.walk.is_some() && self.controls.is_none() && edges & 64 != 0 {
+                // Split: Start from an unseated pad opens nothing; the opener owns the menu.
+                let opener = split_on.then(|| self.pause_opener(self.key_menu_edges & 64 != 0));
+                let start = edges & 64 != 0 && (self.paused || !matches!(opener, Some(None)));
+                if self.walk.is_some() && self.controls.is_none() && start {
                     if !self.pause_menu.class_picker {
                         self.paused = !self.paused;
+                        if self.paused {
+                            self.pause_owner = opener.flatten();
+                            // Esc with nobody on the keyboard: it opens the menu as the lowest
+                            // seat still here (`split::free_keyboard_opener`), the keyboard keeps
+                            // driving it, and the menu says the keyboard did.
+                            let by_keys = self.key_menu_edges & 64 != 0
+                                && self
+                                    .split
+                                    .as_ref()
+                                    .is_some_and(|s| s.seats.keyboard_player().is_none());
+                            self.pause_opened_by = self.pause_owner.map(|o| (o, by_keys));
+                        }
                     }
                     self.pause_menu.reset();
                     self.shell_pointer.take_frame();
@@ -606,9 +687,44 @@ impl winit::application::ApplicationHandler for App {
                         }
                     }
                 }
+                if !self.paused {
+                    self.pause_owner = None;
+                    self.pause_opened_by = None;
+                }
                 self.sync_grab();
                 self.sync_pause_audio();
+                // Split draws the same Game Menu as single player, over the whole window
+                // (`game::split_ui`).
                 let native_pause = self.hud_view.as_ref().is_some_and(|v| v.can_draw_pause());
+                // Split: each player's own prompt icons, and the menu's are its opener's.
+                let split_icons = if split_on {
+                    self.split_icons()
+                } else {
+                    Vec::new()
+                };
+                // Split: the Game Menu's opener, whose profile its rows edit, and its driver now,
+                // whose pad drives it and whose icons it shows (they differ once the opener's pad
+                // is gone, `split::menu_driver`).
+                let menu_owner = self
+                    .pause_opened_by
+                    .map(|(o, _)| o)
+                    .or(self.pause_owner)
+                    .filter(|_| split_on && self.paused);
+                let menu_driver = self.pause_owner.filter(|_| split_on && self.paused);
+                // Split: the mouse is the keyboard player's; the egui fallback menu's clicks
+                // count only when the keyboard drives the menu (issue #194 B10).
+                let egui_pointer_ok = !split_on || split_keyboard && self.pause_keyboard_drives();
+                // Split: the Game Menu's opener (the keyboard's player when the menu opened some
+                // other way, a lost focus).
+                let split_pause_owner = self.pause_owner.unwrap_or_else(|| self.keyboard_seat());
+                // A LAN round's Game Menu covers only its opener's cell (issue #194 B20).
+                let lan_menu_view = self.lan_menu_view();
+                let lan_menu_cell = lan_menu_view
+                    .and_then(|v| split_cells.as_ref().and_then(|c| c.get(v).copied()));
+                let icons = match menu_driver.and_then(|o| split_icons.get(o)) {
+                    Some(i) if self.paused => *i,
+                    _ => icons,
+                };
                 let mut binding_menu = self.controls.is_some();
                 if binding_menu {
                     let input = ui::menu::MenuInput {
@@ -670,9 +786,17 @@ impl winit::application::ApplicationHandler for App {
                         );
                     }
                 }
+                // Split: every player's own pad was sampled this frame (their boards follow it).
+                let mut split_sampled = false;
                 let camera = if self.walk.is_some() {
-                    self.step_spawn_pointer(dt);
+                    // The pointer is the keyboard player's, on their own cell and spawn pages
+                    // (`App::step_spawn_pointer`); with nobody on the keyboard it acts on nothing.
+                    if !split_on || split_keyboard {
+                        self.step_spawn_pointer(dt);
+                    }
+                    // OpenBF VR drives one player's view: never a split battle's.
                     let ext_infantry = self.netplay.is_none()
+                        && !split_on
                         && self
                             .display_ext
                             .as_ref()
@@ -680,113 +804,213 @@ impl winit::application::ApplicationHandler for App {
                             .is_some_and(|(ext, (walk, _))| {
                                 ext.is_infantry(&super::xr::sim_view(walk))
                             });
-                    let pad = if self.paused {
-                        self.kbm.drop_taps();
-                        game::pause::hold_for_resume(&mut self.resume_gate);
-                        PadState::default()
-                    } else if popup_up {
-                        self.kbm.drop_taps();
-                        // The press that closes a popup is not also a jump:
-                        // whatever is still down waits for its release.
-                        game::pause::hold_for_resume(&mut self.resume_gate);
-                        PadState::default()
-                    } else if self
+                    let lan_split = split_on && self.netplay.is_some() && !self.autopilot;
+                    // Which branch takes this frame's pads (`split::frame_pads`): the round's end
+                    // comes ahead of the popups, as an offline round's end holds the game like
+                    // one (`round_end_held`) yet split pads still come and go under it.
+                    let round_over = self
                         .walk
                         .as_ref()
-                        .is_some_and(|(walk, _)| walk.sim.outcome.is_some())
-                    {
-                        // Results and the banner use menu_edges only. Continue the
-                        // scene with a neutral pad so the D-pad never gives orders.
-                        self.kbm.drop_taps();
-                        PadState::default()
-                    } else {
-                        let walk = &self.walk.as_ref().expect("battle walk").0;
-                        let on_foot = walk.player_on_foot();
-                        let space = walk.space_battle();
-                        let pad = match self.autopilot {
-                            true => autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick)),
-                            false => {
-                                let controls =
-                                    walk.flight_controls(self.profile.settings.flight_controls);
-                                let look = if controls.is_some() {
-                                    1.0
-                                } else {
-                                    walk.pad_look_for_seat(
-                                        self.profile.settings.pad_look_sensitivity,
-                                    )
-                                };
-                                let pad = self.sample_pad(look, on_foot && !space);
-                                if let Some(bb) = self.blackbox.as_mut() {
-                                    bb.stick(self.stick_sample.0, self.stick_sample.1);
-                                }
-                                let pad = self
-                                    .display_ext
-                                    .as_ref()
-                                    .filter(|_| self.netplay.is_none())
-                                    .map_or(pad, |ext| {
-                                        let walk = &self.walk.as_ref().expect("battle walk").0;
-                                        ext.seat_sticks(&super::xr::sim_view(walk), pad, look)
-                                    });
-                                let pad = match controls {
-                                    Some(_) => self.kbm.flyer_pad(
-                                        self.walk
-                                            .as_ref()
-                                            .expect("battle walk")
-                                            .0
-                                            .map_flight_sticks(
-                                                self.profile.settings.flight_controls,
-                                                pad,
-                                            )
-                                            .expect("flight controls selected"),
-                                    ),
-                                    None => self.kbm.pad(pad),
-                                };
-                                let pad = self
-                                    .display_ext
-                                    .as_ref()
-                                    .filter(|_| self.netplay.is_none())
-                                    .map_or(pad, |ext| {
-                                        let walk = &self.walk.as_ref().expect("battle walk").0;
-                                        ext.transform_pad(&super::xr::sim_view(walk), pad)
-                                    });
-                                game::pause::resume_pad(&mut self.resume_gate, pad)
+                        .is_some_and(|(walk, _)| walk.sim.outcome.is_some());
+                    use super::split::FramePads;
+                    let pad = match super::split::frame_pads(
+                        self.paused,
+                        lan_split,
+                        popup_up,
+                        round_over,
+                    ) {
+                        FramePads::LanMenu => {
+                            // A LAN round runs on under the Game Menu (issue #194 B20): the players
+                            // who did not open it keep playing on their own pads; the menu's driver
+                            // (and the keyboard, when it drives the menu) stands still.
+                            self.sample_split_pads();
+                            split_sampled = true;
+                            view_away = self.away_flags();
+                            let driver = self
+                                .pause_owner
+                                .filter(|_| !self.lan_menu_by_free_keyboard());
+                            let keys = self.pause_keyboard_drives();
+                            if keys {
+                                self.kbm.drop_taps();
                             }
-                        };
-                        let walk = &self.walk.as_ref().expect("battle walk").0;
-                        if let Some(ext) = self.display_ext.as_ref().filter(|_| ext_infantry) {
-                            ext.apply_sprint_latch(
-                                &super::xr::sim_view(walk),
-                                &mut self.sprint_latch,
-                                pad,
-                            )
-                        } else {
-                            walk.apply_sprint_latch(&mut self.sprint_latch, pad)
+                            if let Some(split) = self.split.as_mut() {
+                                let keyboard = split.seats.keyboard_player();
+                                for i in 0..split.pads.len() {
+                                    if Some(i) == driver || (keys && keyboard == Some(i)) {
+                                        game::pause::hold_for_resume(
+                                            &mut split.inputs[i].resume_gate,
+                                        );
+                                        split.pads[i] = PadState::default();
+                                        if let Some(l) = split.looks.get_mut(i) {
+                                            *l = PadState::default();
+                                        }
+                                    }
+                                }
+                            }
+                            // The first player's pad: the session makes it neutral while paused
+                            // (`frame_pad`), so it is taken from the seats here.
+                            self.split
+                                .as_ref()
+                                .and_then(|s| s.pads.first().copied())
+                                .unwrap_or_default()
+                        }
+                        FramePads::Paused => {
+                            self.kbm.drop_taps();
+                            game::pause::hold_for_resume(&mut self.resume_gate);
+                            if let Some(split) = self.split.as_mut() {
+                                for p in &mut split.inputs {
+                                    game::pause::hold_for_resume(&mut p.resume_gate);
+                                }
+                            }
+                            PadState::default()
+                        }
+                        FramePads::RoundEnd => {
+                            // Results and the banner use menu_edges only. Continue the
+                            // scene with a neutral pad so the D-pad never gives orders.
+                            self.kbm.drop_taps();
+                            // Split: pads still come and go, so a player whose pad returns during
+                            // the stats is seated and gets their own pages (issue #194 B9).
+                            if split_on && !self.autopilot {
+                                self.seat_split_pads();
+                                view_away = self.away_flags();
+                            }
+                            PadState::default()
+                        }
+                        FramePads::Popup => {
+                            self.kbm.drop_taps();
+                            // The press that closes a popup is not also a jump:
+                            // whatever is still down waits for its release.
+                            game::pause::hold_for_resume(&mut self.resume_gate);
+                            PadState::default()
+                        }
+                        FramePads::Play if split_on && !self.autopilot => {
+                            // Each player's own pad (`split.rs`); the first one is this frame's.
+                            self.sample_split_pads();
+                            split_sampled = true;
+                            view_away = self.away_flags();
+                            if let Some(bb) = self.blackbox.as_mut() {
+                                bb.stick(self.stick_sample.0, self.stick_sample.1);
+                            }
+                            self.split
+                                .as_ref()
+                                .map_or(PadState::default(), |s| s.pads[0])
+                        }
+                        FramePads::Play => {
+                            let walk = &self.walk.as_ref().expect("battle walk").0;
+                            let on_foot = walk.player_on_foot();
+                            let space = walk.space_battle();
+                            let pad = match self.autopilot {
+                                true => {
+                                    autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick))
+                                }
+                                false => {
+                                    let controls =
+                                        walk.flight_controls(self.profile.settings.flight_controls);
+                                    let look = if controls.is_some() {
+                                        1.0
+                                    } else {
+                                        walk.pad_look_for_seat(
+                                            self.profile.settings.pad_look_sensitivity,
+                                        )
+                                    };
+                                    let pad = self.sample_pad(look, on_foot && !space);
+                                    if let Some(bb) = self.blackbox.as_mut() {
+                                        bb.stick(self.stick_sample.0, self.stick_sample.1);
+                                    }
+                                    let pad = self
+                                        .display_ext
+                                        .as_ref()
+                                        .filter(|_| self.netplay.is_none())
+                                        .map_or(pad, |ext| {
+                                            let walk = &self.walk.as_ref().expect("battle walk").0;
+                                            ext.seat_sticks(&super::xr::sim_view(walk), pad, look)
+                                        });
+                                    let pad = match controls {
+                                        Some(_) => self.kbm.flyer_pad(
+                                            self.walk
+                                                .as_ref()
+                                                .expect("battle walk")
+                                                .0
+                                                .map_flight_sticks(
+                                                    self.profile.settings.flight_controls,
+                                                    pad,
+                                                )
+                                                .expect("flight controls selected"),
+                                        ),
+                                        None => self.kbm.pad(pad),
+                                    };
+                                    let pad = self
+                                        .display_ext
+                                        .as_ref()
+                                        .filter(|_| self.netplay.is_none())
+                                        .map_or(pad, |ext| {
+                                            let walk = &self.walk.as_ref().expect("battle walk").0;
+                                            ext.transform_pad(&super::xr::sim_view(walk), pad)
+                                        });
+                                    game::pause::resume_pad(&mut self.resume_gate, pad)
+                                }
+                            };
+                            let walk = &self.walk.as_ref().expect("battle walk").0;
+                            if let Some(ext) = self.display_ext.as_ref().filter(|_| ext_infantry) {
+                                ext.apply_sprint_latch(
+                                    &super::xr::sim_view(walk),
+                                    &mut self.sprint_latch,
+                                    pad,
+                                )
+                            } else {
+                                walk.apply_sprint_latch(&mut self.sprint_latch, pad)
+                            }
                         }
                     };
-                    if self.view_toggle.pressed(&pad) && !ext_infantry {
+                    if !split_on && self.view_toggle.pressed(&pad) && !ext_infantry {
                         let s = &mut self.profile.settings;
                         s.viewpoint = s.viewpoint.toggled();
                         if let Err(e) = self.profile.save() {
                             eprintln!("profile autosave failed: {e:#}");
                         }
                     }
-                    let viewpoint = if ext_infantry {
-                        game::viewpoint::Viewpoint::First
+                    // Split: each player's own viewpoint is stamped with the sim's pads.
+                    let pad = if split_on {
+                        pad
+                    } else if ext_infantry {
+                        game::viewpoint::Viewpoint::First.stamp(pad)
                     } else {
-                        self.profile.settings.viewpoint
+                        self.profile.settings.viewpoint.stamp(pad)
                     };
-                    let pad = viewpoint.stamp(pad);
                     // The scoreboard is held on Select / View (never with the
                     // seat chord) or Tab, read as the key (LAN §5b, #182).
                     game::kbm::step_scoreboard(&mut self.score_hold, &self.kbm, &pad, dt);
+                    // Split: each player's board is held on their own pad (issue #194 B9).
+                    if split_on {
+                        self.step_split_score_holds(split_sampled, dt);
+                    }
                     // A LAN round: the pad is neutral while paused (the sim
                     // runs on), and carries a confirmed Respawn (issue #168).
-                    let paused_now = self.paused;
+                    // Split: the first player's pad is neutral only when they drive the menu
+                    // (`lan_split` above sampled everyone else's).
+                    let paused_now = self.paused
+                        && !(lan_split
+                            && (self.pause_owner.is_some_and(|o| o != 0)
+                                || self.lan_menu_by_free_keyboard()));
                     let pad = match self.netplay.as_mut() {
                         Some(n) => n.frame_pad(pad, paused_now),
                         None => pad,
                     };
                     let paused = self.paused;
+                    // Split: the Game Menu names its owner by profile name: the opener, or
+                    // whoever it passed to once the opener's pad is gone.
+                    let paused_by = self.paused_by_line(menu_owner, menu_driver);
+                    // Split: the Splitscreen page's rows by player name (issue #194 B22).
+                    let split_names = self
+                        .split
+                        .as_ref()
+                        .filter(|_| split_on)
+                        .map(|s| self.split_seat_names(&s.seats))
+                        .unwrap_or_default();
+                    // Split: the mouse is the keyboard player's; with nobody on it, or the menu
+                    // someone else's, its clicks and wheel do nothing there.
+                    let pause_pointer_ok =
+                        !split_on || split_keyboard && self.pause_keyboard_drives();
                     let (walk, cube) = self.walk.as_mut().unwrap();
                     // A FIRE press fires where the reticle was drawn.
                     let mut pad = walk.blend.stamp(pad);
@@ -809,8 +1033,12 @@ impl winit::application::ApplicationHandler for App {
                             class_picker_available: false,
                             bindings: None,
                             class_choices: self.pause_menu.class_picker_model(walk),
+                            // A LAN round: the opener's own slot's (issue #194).
                             cheats: match self.netplay.as_mut() {
-                                Some(n) => n.cheat_entries(walk),
+                                Some(n) => n.cheat_entries(
+                                    walk,
+                                    super::menu_actions::opener_slot(walk, menu_owner),
+                                ),
                                 None => walk.sim.cheats.entries().to_vec(),
                             },
                             assist_intensity: walk.sim.assist_intensity,
@@ -861,8 +1089,22 @@ impl winit::application::ApplicationHandler for App {
                             restart_available: self.current.is_some()
                                 || self.active_campaign.is_some(),
                             texts: game::pause::texts(&self.feed),
-                            respawn_label: game::pause::respawn_label(walk, &self.feed),
+                            // Split: Respawn is the opener's own.
+                            respawn_label: match menu_owner.filter(|o| *o > 0) {
+                                Some(o) => walk
+                                    .with_local(o, |w| game::pause::respawn_label(w, &self.feed)),
+                                None => game::pause::respawn_label(walk, &self.feed),
+                            },
                             in_shell: None,
+                            paused_by: paused_by.clone(),
+                            // Issue #194: a split match's Options has the Splitscreen page.
+                            split: self.split.as_ref().filter(|_| split_on).map(|s| {
+                                super::menu_actions::split_menu(
+                                    &self.profile.settings.splitscreen,
+                                    super::menu_actions::seated_of(&s.seats),
+                                )
+                            }),
+                            split_names: split_names.clone(),
                             outcome_line: walk.sim.outcome.map(|w| match w {
                                 core::sim::OUTCOME_DRAW => "Time up — both teams win".to_string(),
                                 _ => format!(
@@ -870,7 +1112,28 @@ impl winit::application::ApplicationHandler for App {
                                     walk.teams[usize::from(w.min(1))].faction
                                 ),
                             }),
+                            shared_rows: false,
+                            own_cheats: self.netplay.is_some(),
                         };
+                        // Split: a player after the first sees their own settings (issue #194 B10).
+                        if let (Some(o), Some(s)) = (menu_owner, self.split.as_ref()) {
+                            let settings = super::split::seat_settings(
+                                &self.profile,
+                                &self.split_profiles,
+                                &s.seats,
+                                o,
+                            );
+                            let name = self
+                                .split_profiles
+                                .get(s.seats.seat_number(o))
+                                .and_then(Option::as_ref)
+                                .map(|p| p.name.as_str());
+                            super::menu_actions::opener_model(&mut model, walk, settings, name, o);
+                            // The view the opener plays in now, whatever their profile holds.
+                            if let Some(input) = s.inputs.get(o) {
+                                model.first_person = input.viewpoint().is_first();
+                            }
+                        }
                         const ADJUST: u32 =
                             game::kbm::MENU_ADJUST_LEFT | game::kbm::MENU_ADJUST_RIGHT;
                         const PAGE: u32 = game::kbm::MENU_L1 | game::kbm::MENU_R1;
@@ -900,29 +1163,43 @@ impl winit::application::ApplicationHandler for App {
                                 || model.class_choices.is_some()
                                 || matches!(self.pause_menu.page, ui::menu::PausePage::Settings(_)),
                         );
-                        let pointer = self.shell_pointer.take_frame();
-                        let wheel = self.shell_pointer.take_wheel();
+                        let pointer = self.shell_pointer.take_frame().filter(|_| pause_pointer_ok);
+                        let wheel = match pause_pointer_ok {
+                            true => self.shell_pointer.take_wheel(),
+                            false => {
+                                self.shell_pointer.take_wheel();
+                                0.0
+                            }
+                        };
                         let from = model.cursor;
                         let target = if native_pause {
-                            let target = match (pointer, self.renderer.as_ref()) {
-                                (Some((point, true)), Some(r)) => {
-                                    let (w, h) = r.size();
-                                    ui::pause_draw::target(
-                                        &model,
-                                        &self.pause_menu.animation,
-                                        point,
-                                        [w as f32, h as f32],
-                                    )
+                            // The menu's own frame: the window, or a LAN round's opener's cell.
+                            let menu_frame = match (lan_menu_cell, self.renderer.as_ref()) {
+                                (Some(c), _) => {
+                                    Some(([c[0] as f32, c[1] as f32], [c[2] as f32, c[3] as f32]))
                                 }
+                                (None, Some(r)) => {
+                                    let (w, h) = r.size();
+                                    Some(([0.0, 0.0], [w as f32, h as f32]))
+                                }
+                                (None, None) => None,
+                            };
+                            let target = match (pointer, menu_frame) {
+                                (Some((point, true)), Some((at, size))) => ui::pause_draw::target(
+                                    &model,
+                                    &self.pause_menu.animation,
+                                    [point[0] - at[0], point[1] - at[1]],
+                                    size,
+                                ),
                                 _ => None,
                             };
                             if target.is_none() && wheel != 0.0 {
-                                if let Some((w, h)) = self.renderer.as_ref().map(|r| r.size()) {
+                                if let Some((_, size)) = menu_frame {
                                     ui::pause_draw::scroll(
                                         &model,
                                         &self.pause_menu.animation,
                                         wheel,
-                                        [w as f32, h as f32],
+                                        size,
                                     );
                                 }
                             }
@@ -946,11 +1223,12 @@ impl winit::application::ApplicationHandler for App {
                         // edges (the cursor wiggle while typing is authentic).
                         let on_cheats = self.pause_menu.page == ui::menu::PausePage::Cheats;
                         let word_line = match self.netplay.as_mut().filter(|_| on_cheats) {
-                            // A LAN round: the word goes to the host (issue #168).
-                            Some(n) => self
-                                .cheats
-                                .word(input)
-                                .map(|w| n.morse_word(w, walk, &mut self.cheats)),
+                            // A LAN round: the word goes to the host (issue #168), for the
+                            // opener's own slot (issue #194).
+                            Some(n) => self.cheats.word(input).map(|w| {
+                                let slot = super::menu_actions::opener_slot(walk, menu_owner);
+                                n.morse_word(w, slot, walk, &mut self.cheats)
+                            }),
                             None => on_cheats
                                 .then(|| self.cheats.feed(input, &mut walk.sim))
                                 .flatten(),
@@ -971,46 +1249,83 @@ impl winit::application::ApplicationHandler for App {
                         let mut quit = false;
                         for a in actions {
                             if let ui::menu::MenuAction::EditBindings(device, context) = a {
-                                self.controls = Some(super::front::Controls::new(
+                                // Split: the opener's own profile's layouts (issue #194 B10).
+                                self.controls = super::split::controls_for(
+                                    &self.profile,
+                                    &self.split_profiles,
+                                    self.split.as_ref(),
+                                    menu_owner,
                                     device,
                                     context,
-                                    &self.profile.settings,
-                                ));
-                                binding_menu = true;
+                                );
+                                if self.controls.is_some() {
+                                    binding_menu = true;
+                                } else {
+                                    self.feed.say(
+                                        super::split::NO_PROFILE_BINDINGS.to_owned(),
+                                        ui::hud::message_color::YELLOW,
+                                        walk.sim.tick,
+                                    );
+                                }
                             }
                             self.restart_clicked |= a == ui::menu::MenuAction::Restart;
                             if let ui::menu::MenuAction::SetWindowMode(m) = a {
                                 self.display.requested = Some(m);
                             }
+                            // Split: the opener's own player takes the action (Respawn
+                            // kills their soldier, not the first player's), and a per-player
+                            // row writes their own profile; a host row acts as the first
+                            // player on the host's (issue #194 B10, `menu_actions::acting_local`).
+                            let opener = super::menu_actions::acting_local(menu_owner, a);
+                            // A LAN round's cheats are the opener's own slot's (issue #194).
+                            let lan_opener = super::menu_actions::lan_acting_local(menu_owner, a);
+                            // A LAN round: a further player's Respawn is asked of their own
+                            // view in the walk, which the frame puts in their pad
+                            // (`local_seats::lan_pads`, issue #194 B20); the session's own takes the
+                            // first player's.
+                            // A further player's per-player rows write their own profile and
+                            // slot (`NetplaySession::opener_pause_action`).
                             if self.netplay.as_mut().is_some_and(|n| {
-                                n.pause_action(
+                                n.opener_pause_action(
                                     walk,
                                     a,
+                                    lan_opener,
                                     &mut self.paused,
                                     &mut self.pause_menu,
                                     &mut self.profile,
+                                    &mut self.split_profiles,
+                                    self.split.as_ref().map(|s| &s.seats),
                                     &mut self.session,
                                 )
                             }) {
                                 continue;
                             }
-                            quit |= apply_pause_action(
-                                walk,
-                                a,
-                                &mut self.paused,
-                                &mut self.pause_menu,
-                                &mut self.cheats,
-                                &mut self.profile,
-                                &mut self.session,
-                                &mut self.kbm,
-                                self.music_voice.as_mut(),
-                            );
+                            let act = |w: &mut game::walk::WalkSim| {
+                                apply_pause_action(
+                                    w,
+                                    a,
+                                    &mut self.paused,
+                                    &mut self.pause_menu,
+                                    &mut self.cheats,
+                                    &mut self.profile,
+                                    &mut self.session,
+                                    &mut self.kbm,
+                                    &mut self.split_profiles,
+                                    self.split.as_mut().map(|s| (&s.seats, &mut s.inputs[..])),
+                                    opener,
+                                    self.music_voice.as_mut(),
+                                )
+                            };
+                            quit |= walk.with_local(opener, act);
                             if matches!(a, ui::menu::MenuAction::SetRumble(_)) {
-                                game::rumble::preview(
+                                super::menu_actions::preview_rumble(
                                     self.gilrs.as_mut(),
                                     &self.active_pad,
                                     &mut self.rumble_effect,
-                                    self.profile.settings.rumble_strength,
+                                    &self.profile,
+                                    &self.split_profiles,
+                                    self.split.as_mut(),
+                                    opener,
                                 );
                             }
                         }
@@ -1018,7 +1333,7 @@ impl winit::application::ApplicationHandler for App {
                             self.quit_clicked = true;
                         }
                         if !binding_menu {
-                            menu = Some(ui::menu::MenuModel {
+                            let mut after = ui::menu::MenuModel {
                                 difficulty: game::shell_ia::ia_level(
                                     self.profile.settings.difficulty,
                                 ),
@@ -1034,7 +1349,10 @@ impl winit::application::ApplicationHandler for App {
                                 page: model.page.map(|_| self.pause_menu.page),
                                 popup: self.pause_menu.confirm,
                                 cheats: match self.netplay.as_mut() {
-                                    Some(n) => n.cheat_entries(walk),
+                                    Some(n) => n.cheat_entries(
+                                        walk,
+                                        super::menu_actions::opener_slot(walk, menu_owner),
+                                    ),
                                     None => walk.sim.cheats.entries().to_vec(),
                                 },
                                 assist_intensity: walk.sim.assist_intensity,
@@ -1068,8 +1386,36 @@ impl winit::application::ApplicationHandler for App {
                                 window_mode: self.display.shown(self.profile.settings.window_mode),
                                 input_icons_label: self.profile.settings.input_icons.label(),
                                 first_person: self.profile.settings.viewpoint.is_first(),
+                                split: self.split.as_ref().filter(|_| split_on).map(|s| {
+                                    super::menu_actions::split_menu(
+                                        &self.profile.settings.splitscreen,
+                                        super::menu_actions::seated_of(&s.seats),
+                                    )
+                                }),
+                                split_names: split_names.clone(),
+                                shared_rows: false,
                                 ..model
-                            });
+                            };
+                            if let (Some(o), Some(s)) = (menu_owner, self.split.as_ref()) {
+                                let settings = super::split::seat_settings(
+                                    &self.profile,
+                                    &self.split_profiles,
+                                    &s.seats,
+                                    o,
+                                );
+                                let name = self
+                                    .split_profiles
+                                    .get(s.seats.seat_number(o))
+                                    .and_then(Option::as_ref)
+                                    .map(|p| p.name.as_str());
+                                super::menu_actions::opener_model(
+                                    &mut after, walk, settings, name, o,
+                                );
+                                if let Some(input) = s.inputs.get(o) {
+                                    after.first_person = input.viewpoint().is_first();
+                                }
+                            }
+                            menu = Some(after);
                         }
                     }
                     // A LAN round steps on under its pause menu (issue #168).
@@ -1102,14 +1448,74 @@ impl winit::application::ApplicationHandler for App {
                             // (UNLK3). A LAN round gates every slot itself
                             // (`netplay::gate`).
                             let points = self.feed.stats(&walk.sim, walk.player).points;
+                            // Split: the first player's points carried over a dropped
+                            // controller, as the others' (`WalkSim::first_gate_points`).
+                            let points = match split_on {
+                                true => walk.first_gate_points(points),
+                                false => points,
+                            };
                             game::unlocks::set_player_gate(walk, points, &self.profile.career);
+                            // Split: every further player's gate from their own seat profile
+                            // (issue #194); nothing with one local player.
+                            if split_on {
+                                game::netplay::gate_locals(walk, Some(self.feed.round()));
+                            }
                         }
                         // Station serving is observed for every sim tick, even when a
                         // frame catches up several ticks before posing the scene.
                         if let Some(gpu) = self.gpu.as_mut() {
                             gpu.step_stations(&walk.sim);
                         }
+                        // Split: every player's pad, by slot (`SplitState::finish_pads`).
+                        let split_pads: Vec<PadState> = match self.split.as_ref() {
+                            Some(s) if split_on => s.finish_pads(pad, walk),
+                            _ => Vec::new(),
+                        };
+                        let pads_now: &[PadState] = if split_pads.is_empty() {
+                            std::slice::from_ref(&pad)
+                        } else {
+                            &split_pads
+                        };
                         let mut st = TickState::new(walk, self.profile.career.medals, pad, aspect);
+                        // Split: each cell's aspect, for the foley's views (issue #194 B12).
+                        if let Some(cells) = split_cells.as_ref() {
+                            st.view_aspects = cells
+                                .iter()
+                                .map(|c| c[2] as f32 / c[3].max(1) as f32)
+                                .collect();
+                        }
+                        // Split: the first player's rumble goes to their own pad.
+                        let split_pad0 = self.split.as_ref().filter(|_| split_on).map(|s| {
+                            let mut a = input::ActivePad::default();
+                            a.id = s.seats.pad_of(0);
+                            a
+                        });
+                        let split_feeds = &mut self.split_feeds;
+                        let split_rumble = &mut self.split_rumble;
+                        let split_pads_ids: Vec<Option<gilrs::GamepadId>> = match &self.split {
+                            Some(s) if split_on => {
+                                (0..walk.local_count()).map(|i| s.seats.pad_of(i)).collect()
+                            }
+                            _ => Vec::new(),
+                        };
+                        if split_on {
+                            split_rumble.resize_with(walk.local_count() - 1, Default::default);
+                        }
+                        // Each player's own rumble settings, from their seat's profile.
+                        let split_rumble_cfg: Vec<(f32, bool)> = match &self.split {
+                            Some(s) if split_on => (0..walk.local_count())
+                                .map(|i| {
+                                    let p = super::split::seat_settings(
+                                        &self.profile,
+                                        &self.split_profiles,
+                                        &s.seats,
+                                        i,
+                                    );
+                                    (p.rumble_strength, p.rumble_on_fire)
+                                })
+                                .collect(),
+                            _ => Vec::new(),
+                        };
                         let mut hook = TickHook {
                             gpu: self.gpu.as_mut(),
                             fx: &mut self.fx,
@@ -1126,8 +1532,11 @@ impl winit::application::ApplicationHandler for App {
                             rumble_on_fire: self.profile.settings.rumble_on_fire,
                             rumble_tick: &mut self.rumble_tick,
                             gilrs: self.gilrs.as_mut(),
-                            active_pad: &self.active_pad,
-                            rumble_effect: &mut self.rumble_effect,
+                            active_pad: split_pad0.as_ref().unwrap_or(&self.active_pad),
+                            rumble_effect: match self.split.as_mut().filter(|_| split_on) {
+                                Some(s) => &mut s.inputs[0].rumble_effect,
+                                None => &mut self.rumble_effect,
+                            },
                             matchlog: self.matchlog.as_mut(),
                             session_stats: self.session_stats.as_mut(),
                             frame_profile: self.frame_profile.as_mut(),
@@ -1153,19 +1562,70 @@ impl winit::application::ApplicationHandler for App {
                                 // Sim first (LAN §8b.1): the frame's whole
                                 // wall time, so a late frame steps every
                                 // bundle that came due before it draws.
-                                let report = n.view.frame(
-                                    &mut n.peer,
-                                    &mut n.link,
-                                    elapsed.fmin(1.0),
-                                    net::bundle::strip_tracked_inputs(pad),
-                                    walk,
-                                    Some(feed),
-                                    |w, _, f, muted| {
-                                        if let Some(f) = f.filter(|_| !catching_up) {
+                                // Split (issue #194 B20): every local's own pad, in the
+                                // session's local order; one local keeps the frame as it was.
+                                let local_pads: Vec<PadState> = if split_on {
+                                    game::local_seats::lan_pads(&n.peer, walk, &split_pads)
+                                } else {
+                                    Vec::new()
+                                };
+                                let report = if local_pads.is_empty() {
+                                    n.view.frame(
+                                        &mut n.peer,
+                                        &mut n.link,
+                                        elapsed.fmin(1.0),
+                                        net::bundle::strip_tracked_inputs(pad),
+                                        walk,
+                                        Some(feed),
+                                        |w, _, f, muted| {
+                                            if let Some(f) = f.filter(|_| !catching_up) {
+                                                hook.tick(w, f, &mut st, true, u8::from(muted));
+                                            }
+                                        },
+                                    )
+                                } else {
+                                    n.view.frame_locals(
+                                        &mut n.peer,
+                                        &mut n.link,
+                                        elapsed.fmin(1.0),
+                                        &local_pads,
+                                        walk,
+                                        Some(feed),
+                                        |w, _, f, muted| {
+                                            let Some(f) = f.filter(|_| !catching_up) else {
+                                                return;
+                                            };
                                             hook.tick(w, f, &mut st, true, muted);
-                                        }
-                                    },
-                                );
+                                            // Each further player's own feed reads their unit
+                                            // for their messages; the round's one feed scored
+                                            // every human (`netplay::score`), so nothing here
+                                            // writes the sim. Their own pads rumble.
+                                            for k in 1..w.local_count() {
+                                                if w.is_suspended(k) {
+                                                    continue;
+                                                }
+                                                let unit = w.local_unit(k);
+                                                if let Some(sf) = split_feeds.get_mut(k - 1) {
+                                                    sf.tick(&w.sim, unit);
+                                                }
+                                                if let Some(r) = split_rumble.get_mut(k - 1) {
+                                                    let cfg = split_rumble_cfg
+                                                        .get(k)
+                                                        .copied()
+                                                        .unwrap_or_default();
+                                                    r.tick(w, k, &mut hook, &split_pads_ids, cfg);
+                                                }
+                                            }
+                                            super::split::note_split_medals(
+                                                w,
+                                                f,
+                                                &mut st.medals_seen,
+                                                split_feeds,
+                                                &mut st.views_seen,
+                                            );
+                                        },
+                                    )
+                                };
                                 if let Some(at) = report.corrected {
                                     // The host's game was replaced by its
                                     // replay (LAN §4.7): the prediction and
@@ -1177,14 +1637,34 @@ impl winit::application::ApplicationHandler for App {
                                         "lan: the game was corrected from the check at tick {at}"
                                     );
                                 }
-                                self.kbm.consumed(&pad, 1);
+                                // Split: the keyboard player's own pad gives back their
+                                // mouse look (as offline below).
+                                let fed = match self.split.as_ref() {
+                                    Some(s) if split_on => super::split::keyboard_pad(
+                                        s.seats.keyboard_player(),
+                                        &s.pads,
+                                        pad,
+                                    ),
+                                    _ => pad,
+                                };
+                                self.kbm.consumed(&fed, 1);
                                 walk.blend.consumed(1);
                                 n.update_meter(Some(walk), report.ticks);
                                 if let Some(bb) = self.blackbox.as_mut() {
                                     bb.net(walk.sim.tick, &n.meter);
                                 }
-                                // Own shot feedback from the prediction, at once.
-                                let shots = n.view.shots();
+                                // Own shot feedback from the prediction, at once: every
+                                // local player's of this machine (issue #194 B20), each
+                                // muted in the confirmed bundle's sounds (`hook.tick`).
+                                let mut shots = n.view.shots().to_vec();
+                                for k in 1..walk.local_count() {
+                                    if !walk.is_suspended(k) {
+                                        shots.extend_from_slice(
+                                            n.view.shots_of_slot(walk.local_slot_of(k)),
+                                        );
+                                    }
+                                }
+                                let shots = &shots[..];
                                 if !shots.is_empty() {
                                     if let (Some(psim), Some(audio), Some(sl)) = (
                                         n.view.predictor.sim(),
@@ -1204,7 +1684,7 @@ impl winit::application::ApplicationHandler for App {
                                         game::event_sounds::weapon_asks_of(psim, &events, |a| {
                                             asks.push(a)
                                         });
-                                        let listener = game::event_sounds::listener(walk);
+                                        let listener = game::event_sounds::listeners(walk);
                                         sl.play_weapon_voices(audio, &asks, &listener);
                                     }
                                     if let Some(vis) = self.soldier_vis.as_mut() {
@@ -1224,12 +1704,55 @@ impl winit::application::ApplicationHandler for App {
                             }
                             None if popup_up => {}
                             None => {
-                                let ticks =
-                                    walk.advance_while(dt, std::slice::from_ref(&pad), |walk| {
-                                        hook.tick(walk, feed, &mut st, false, false);
-                                        !walk.campaign.as_ref().is_some_and(|c| c.has_movies())
-                                    });
-                                self.kbm.consumed(&pad, ticks);
+                                let ticks = walk.advance_while(dt, pads_now, |walk| {
+                                    hook.tick(walk, feed, &mut st, false, 0);
+                                    // Split: the other players' feeds read their own unit for
+                                    // their messages, and the positive points each returns feed
+                                    // that player's medal career (as `heroes::tick` does the
+                                    // first's; issue #194). The round's scores stay `feed`'s.
+                                    for k in 1..walk.local_count() {
+                                        if let (Some(f), false) =
+                                            (split_feeds.get_mut(k - 1), walk.is_suspended(k))
+                                        {
+                                            let unit = walk.local_unit(k);
+                                            let points = f.tick(&walk.sim, unit);
+                                            walk.sim.score_medal_points(unit, points);
+                                        }
+                                        // Each seated player's own pad rumbles for their unit.
+                                        if let Some(r) = split_rumble.get_mut(k - 1) {
+                                            if !walk.is_suspended(k) {
+                                                let cfg = split_rumble_cfg
+                                                    .get(k)
+                                                    .copied()
+                                                    .unwrap_or_default();
+                                                r.tick(walk, k, &mut hook, &split_pads_ids, cfg);
+                                            }
+                                        }
+                                    }
+                                    // Every view's medal lines, after all the points are in:
+                                    // a later player's medal reaches the earlier views this
+                                    // tick (issue #194 B4).
+                                    if walk.local_count() > 1 {
+                                        super::split::note_split_medals(
+                                            walk,
+                                            feed,
+                                            &mut st.medals_seen,
+                                            split_feeds,
+                                            &mut st.views_seen,
+                                        );
+                                    }
+                                    !walk.campaign.as_ref().is_some_and(|c| c.has_movies())
+                                });
+                                // The keyboard player's own pad gives back their mouse look.
+                                let fed = match self.split.as_ref() {
+                                    Some(s) if split_on => super::split::keyboard_pad(
+                                        s.seats.keyboard_player(),
+                                        &s.pads,
+                                        pad,
+                                    ),
+                                    _ => pad,
+                                };
+                                self.kbm.consumed(&fed, ticks);
                                 walk.blend.consumed(ticks);
                                 if let Some(ext) = self.display_ext.as_mut() {
                                     ext.on_sim_ticks_consumed(ticks);
@@ -1242,6 +1765,21 @@ impl winit::application::ApplicationHandler for App {
                                 eprintln!("profile autosave failed: {e:#}");
                             }
                         }
+                        // A LAN round's further players flush into their own lent profiles even
+                        // on one view (issue #194 B20).
+                        if split_on || (self.netplay.is_some() && walk.local_count() > 1) {
+                            let seats = super::split::round_seat_numbers(
+                                self.split.as_ref(),
+                                self.netplay.as_ref(),
+                                self.split_party.as_ref(),
+                                walk,
+                            );
+                            super::career::flush_split_careers(
+                                &mut self.split_profiles,
+                                walk,
+                                &seats,
+                            );
+                        }
                         if let Some(c) = walk.campaign.as_mut() {
                             for msg in c.take_messages() {
                                 let text = feed.localize_or_raw(&msg);
@@ -1253,8 +1791,11 @@ impl winit::application::ApplicationHandler for App {
                                 m.script_calls.extend(calls);
                             }
                         }
-                        look = if popup_up {
+                        look = if popup_up || (split_on && !split_keyboard) {
                             self.kbm.clear_look();
+                            PadState::default()
+                        } else if split_on && keyboard_seat != 0 {
+                            // The mouse is a later player's: their pad took its look.
                             PadState::default()
                         } else {
                             self.kbm.look()
@@ -1275,7 +1816,14 @@ impl winit::application::ApplicationHandler for App {
                             .advance_frame(self.soldier_vis.as_mut(), walk, &look, world_dt);
                         if let Some(w) = self.weather.as_mut() {
                             w.update(world_dt);
-                            rain_splashes(w, &mut self.fx, walk, aspect, world_dt);
+                            rain_splashes(
+                                w,
+                                &mut self.fx,
+                                walk,
+                                aspect,
+                                split_cells.as_deref(),
+                                world_dt,
+                            );
                         }
                         if let (Some(audio), Some(sl)) = (self.audio.as_mut(), self.sounds.as_mut())
                         {
@@ -1283,22 +1831,27 @@ impl winit::application::ApplicationHandler for App {
                             // voice queue, and an idle voice starts its head.
                             // A squad answer plays the take drawn for it,
                             // at its unit.
+                            // Every awake local player's ears; the voice follows the first
+                            // awake one (issue #194 B12; `first_awake_unit` is the walk's own
+                            // player with one local player, and `None` while everyone is away:
+                            // the voice keeps its last side). OpenBF VR: the headset's ears.
                             let ears = self
                                 .display_ext
                                 .as_ref()
-                                .filter(|_| self.netplay.is_none())
+                                .filter(|_| self.netplay.is_none() && walk.local_count() == 1)
                                 .and_then(|ext| ext.stereo_view(&super::xr::sim_view(walk)))
                                 .map(|view| super::xr::listener(&view))
-                                .unwrap_or_else(|| game::event_sounds::listener(walk));
+                                .unwrap_or_else(|| game::event_sounds::listeners(walk));
+                            let voice_unit = walk.first_awake_unit();
                             if let Some(v) = walk.voice.as_mut() {
                                 let tick = walk.sim.tick;
                                 // The units' combat calls through the
                                 // bank's gates join the queue first.
-                                v.gate_calls(sl, ears.pos);
+                                v.gate_calls(sl, &ears);
                                 for name in v.gate_script_sounds(sl) {
                                     sl.play_voice(audio, &name);
                                 }
-                                v.frame(&walk.sim, walk.player, dt, |line| {
+                                v.frame(&walk.sim, voice_unit, dt, |line| {
                                     if let Some(bb) = self.blackbox.as_mut() {
                                         bb.voice(tick, &line.name);
                                     }
@@ -1323,6 +1876,10 @@ impl winit::application::ApplicationHandler for App {
                         // frame runs with or without a sound device (card
                         // MUSV: the dev log is the window's referee); only
                         // the voice needs one.
+                        // Split: the music follows the first local player who is not away
+                        // (issue #194 B12); the walk's own player with one local player. With
+                        // everyone away (`None`) it keeps the last side heard.
+                        let music_unit = walk.first_awake_unit();
                         if let (Some(m), Some(sl)) = (walk.music.as_mut(), self.sounds.as_ref()) {
                             if !m.bound() {
                                 let missing = m.bind(sl);
@@ -1336,7 +1893,7 @@ impl winit::application::ApplicationHandler for App {
                             }
                             let db = game::sounds::level_db;
                             let tickets = [0, 1].map(|t| walk.sim.battle.teams[t].tickets());
-                            for c in m.frame(&walk.sim, walk.player, dt) {
+                            for c in m.frame(&walk.sim, music_unit, dt) {
                                 if game::dev::on() {
                                     eprintln!("{}", m.log_line(&c, tickets));
                                 }
@@ -1395,7 +1952,11 @@ impl winit::application::ApplicationHandler for App {
                         Some(n) => n.view.draw_in(walk),
                         None => game::render_blend::blend_in_looking(walk, &look),
                     }
-                    if !self.paused && self.netplay.is_none() && super::xr::live_view(walk) {
+                    if !self.paused
+                        && self.netplay.is_none()
+                        && !split_on
+                        && super::xr::live_view(walk)
+                    {
                         stereo_view = self
                             .display_ext
                             .as_ref()
@@ -1453,8 +2014,7 @@ impl winit::application::ApplicationHandler for App {
                         r.set_sun_shadows(self.profile.settings.hard_shadows);
                         self.vehicle_vis
                             .set_tick_share(game::render_blend::share(walk));
-                        self.vehicle_vis
-                            .set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
+                        super::split::set_ctf_viewer(&mut self.vehicle_vis, walk);
                         self.vehicle_vis.set_flag_ribcage(
                             walk.sim
                                 .ctf
@@ -1472,9 +2032,11 @@ impl winit::application::ApplicationHandler for App {
                         extra.extend(self.deka_vis.draws(r, &walk.sim));
                     }
                     if let Some(vis) = self.soldier_vis.as_mut() {
-                        let aspect = self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
-                            let (w, h) = r.size();
-                            w as f32 / h as f32
+                        let aspect = view_aspect.unwrap_or_else(|| {
+                            self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
+                                let (w, h) = r.size();
+                                w as f32 / h as f32
+                            })
                         });
                         if let Some(view) = stereo_view {
                             super::xr::prepare_soldiers(&view, walk, vis);
@@ -1498,25 +2060,29 @@ impl winit::application::ApplicationHandler for App {
                     // the banner is down; when they are left, the next
                     // playlist map or the shell.
                     if walk.sim.outcome.is_some() && !self.paused {
-                        let pad = ui::stats::Pad {
-                            up: edges & 1 != 0,
-                            down: edges & 2 != 0,
-                            left: edges & 4 != 0,
-                            right: edges & 8 != 0,
-                            cross: edges & 16 != 0,
-                            triangle: edges & 32 != 0,
-                            l1: edges & game::kbm::MENU_L1 != 0,
-                            r1: edges & game::kbm::MENU_R1 != 0,
-                            square: edges & game::kbm::MENU_SQUARE != 0,
+                        // Split: each player's pages follow their own pad (issue #194 B9); the
+                        // first player's shared round end takes P1's own presses, not any pad's.
+                        let seat_pads: Vec<ui::stats::Pad> = seat_edges
+                            .iter()
+                            .map(|&e| super::split::stats_pad(e))
+                            .collect();
+                        let pad = match seat_pads.first() {
+                            Some(&p0) if split_on => p0,
+                            _ => super::split::stats_pad(edges),
                         };
                         let pad = super::xr::stats_pointer(
                             pad,
                             walk,
-                            self.display_ext.as_deref(),
+                            self.display_ext.as_deref().filter(|_| !split_on),
                             self.renderer.as_ref(),
                             self.hud_view.as_ref(),
                             &mut self.shell_pointer,
                         );
+                        // Any player may skip the end movie.
+                        let skip = seat_pads
+                            .iter()
+                            .chain(std::iter::once(&pad))
+                            .any(|p| p.cross || p.triangle);
                         let music_secs = walk.music.as_ref().and_then(|m| {
                             let team = walk.sim.units.get(walk.player.index as usize)?.team;
                             m.end_music_secs(usize::from(team), walk.sim.outcome?)
@@ -1525,8 +2091,23 @@ impl winit::application::ApplicationHandler for App {
                             && self.active_campaign
                                 == Some(ui::campaign::RISE_OF_THE_EMPIRE.len() - 1)
                             && walk.sim.outcome == Some(0);
-                        let (mut done, cue) =
+                        let (mut done, mut cue) =
                             walk.follow_round_end(dt, pad, music_secs, !credits_after_outro);
+                        let first_away = split_on && walk.is_suspended(0);
+                        if let (true, Some(r), Some(split)) =
+                            (split_on, walk.round_end.as_mut(), self.split.as_mut())
+                        {
+                            let n = split.stats.len().min(seat_pads.len());
+                            if n > 1 {
+                                let views = r.step_views(
+                                    &seat_pads[1..n],
+                                    &mut split.stats[1..n],
+                                    first_away,
+                                );
+                                cue = cue.or(views);
+                                done |= r.done();
+                            }
+                        }
                         if let (Some(cue), Some(sounds)) = (cue, self.sounds.as_mut()) {
                             sounds.play_2d(self.audio.as_mut(), cue.name());
                         }
@@ -1538,7 +2119,7 @@ impl winit::application::ApplicationHandler for App {
                                 &mut self.end_movie_voice,
                                 self.profile.settings.dialogue_volume,
                                 dt,
-                                pad.cross || pad.triangle,
+                                skip,
                             );
                             if let (Some((rgba, w, h)), Some(v)) = (frame, self.hud_view.as_mut()) {
                                 v.set_movie_frame(rgba, w, h);
@@ -1555,9 +2136,39 @@ impl winit::application::ApplicationHandler for App {
                         }
                         if walk.round_end.as_ref().is_some_and(|r| r.wants_stats()) {
                             let pages = stats_pages(walk, &self.feed, &self.profile.career);
+                            let players = walk.local_count();
                             if let Some(r) = walk.round_end.as_mut() {
                                 r.stats = Some(pages);
+                                // Split: the stats end once every player has left their own
+                                // pages, not on the first Done (issue #194).
+                                if split_on {
+                                    r.hold_for_players(players);
+                                }
                             }
+                            // Split: every further player's own pages (issue #194 B9).
+                            if let (true, Some(split)) = (split_on, self.split.as_mut()) {
+                                split.stats = vec![None; players];
+                            }
+                        }
+                        // Split, pages up: make any further player's that are missing (made
+                        // now, or that player was away and is back) (issue #194 B9).
+                        if let (true, Some(split), true) = (
+                            split_on,
+                            self.split.as_mut(),
+                            walk.round_end
+                                .as_ref()
+                                .is_some_and(|r| r.stats.is_some() && !r.done()),
+                        ) {
+                            let seats: Vec<usize> = (0..walk.local_count())
+                                .map(|k| split.seats.seat_number(k))
+                                .collect();
+                            super::split::fill_split_stats_pages(
+                                walk,
+                                &self.split_feeds,
+                                &self.split_profiles,
+                                &seats,
+                                &mut split.stats,
+                            );
                         }
                     }
                     if walk.sim.outcome.is_some() && !self.outcome_reported {
@@ -1571,20 +2182,58 @@ impl winit::application::ApplicationHandler for App {
                     if walk.sim.outcome.is_some() && !self.round_recorded {
                         self.round_recorded = true;
                         record_round(&mut self.profile, walk, self.feed.battle_stats());
+                        let seats = super::split::round_seat_numbers(
+                            self.split.as_ref(),
+                            self.netplay.as_ref(),
+                            self.split_party.as_ref(),
+                            walk,
+                        );
+                        super::career::record_split_rounds(
+                            &mut self.split_profiles,
+                            walk,
+                            &self.split_feeds,
+                            &seats,
+                        );
+                        // A LAN round: the next round seats each further player on their
+                        // profile as this one left it (issue #194 B20).
+                        if let Some(n) = self.netplay.as_mut() {
+                            n.refresh_local_profiles(&self.split_profiles);
+                        }
                     }
                     // The tick hook above has read the events; the model
                     // carries the new lines to the HUD's message box.
-                    let hud_aspect = self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
-                        let (w, h) = r.size();
-                        w as f32 / h.max(1) as f32
+                    let hud_aspect = band_aspect.unwrap_or_else(|| {
+                        self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
+                            let (w, h) = r.size();
+                            w as f32 / h.max(1) as f32
+                        })
                     });
-                    let stereo_cam = stereo_view.as_ref().map(|v| (&v.camera, v.aspect));
-                    hud = Some(hud_model_for_view(
-                        walk,
-                        &mut self.feed,
-                        hud_aspect,
-                        stereo_cam,
-                    ));
+                    // A suspended first player's handle may name a bot: no HUD model reads it.
+                    hud = Some(if view_away.first().copied().unwrap_or(false) {
+                        ui::hud::HudModel::default()
+                    } else {
+                        let stereo_cam = stereo_view.as_ref().map(|v| (&v.camera, v.aspect));
+                        hud_model_for_view(walk, &mut self.feed, hud_aspect, stereo_cam)
+                    });
+                    if split_on {
+                        let feeds = &mut self.split_feeds;
+                        split_models.push(
+                            hud.clone()
+                                .filter(|_| !view_away.first().copied().unwrap_or(false)),
+                        );
+                        split_spawn_up.push(false);
+                        let stats = self.split.as_ref().map(|s| &s.stats[..]);
+                        for (model, spawn_up) in super::split::further_view_models(
+                            walk,
+                            feeds,
+                            &view_away,
+                            hud_aspect,
+                            stats.unwrap_or(&[]),
+                        ) {
+                            split_models.push(model);
+                            split_spawn_up.push(spawn_up);
+                        }
+                    }
                     // Issue #182: the teammate view's hint names the device in use.
                     if let Some(sp) = hud.as_mut().and_then(|m| m.spectate.as_mut()) {
                         if !sp.hint.is_empty() {
@@ -1609,11 +2258,21 @@ impl winit::application::ApplicationHandler for App {
                     if let Some(m) = hud.as_mut().filter(|_| paused) {
                         m.capture = None;
                     }
+                    for m in split_models.iter_mut().flatten().filter(|_| paused) {
+                        m.capture = None;
+                    }
                     // Spawn screen while dead: the post and class it shows
                     // are the sim's (card SPSEL), moved by the pad bits.
                     spawn =
                         spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
-                    let camera = self.fx.shake.apply(walk.camera());
+                    if let Some(up) = split_spawn_up.first_mut() {
+                        *up = spawn.is_some();
+                    }
+                    let mut camera = self.fx.shake.apply(walk.camera());
+                    // Split: a cell narrower than 4:3 keeps a 4:3 screen's width of view.
+                    if let Some(aspect) = view_aspect {
+                        camera.fov_y = game::split_layout::fit_fov_y(camera.fov_y, aspect);
+                    }
                     let camera = stereo_view.map_or(camera, |view| view.camera);
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
@@ -1653,6 +2312,12 @@ impl winit::application::ApplicationHandler for App {
                 }
 
                 let frozen = self.frozen();
+                // Split: the cells of players who have left their stats pages, with the names
+                // the round still waits for (issue #194).
+                let split_waiting = match split_cells.as_ref() {
+                    Some(cells) => self.split_waiting(cells, &view_away),
+                    None => Vec::new(),
+                };
                 if let (false, Some(r), Some(gpu)) =
                     (credits_handoff, &mut self.renderer, &mut self.gpu)
                 {
@@ -1722,7 +2387,16 @@ impl winit::application::ApplicationHandler for App {
                             particles.extend(self.holos.draws(&gpu.holo, walk, &camera));
                             particles.extend(self.vehicle_vis.campaign_glows(walk, &camera));
                             if let Some(w) = self.weather.as_mut() {
-                                particles.extend(w.frame_draws(r, &camera, tracked_velocity(walk)));
+                                // Split: view 0's rain at its cell's aspect and height (B13).
+                                particles.extend(match split_cells.as_deref() {
+                                    Some([c, ..]) => w.frame_draws_sized(
+                                        r,
+                                        &camera,
+                                        tracked_velocity(walk),
+                                        [c[2], c[3]],
+                                    ),
+                                    _ => w.frame_draws(r, &camera, tracked_velocity(walk)),
+                                });
                             }
                             self.fx.submit_walk(r, &camera, walk, particles);
                         }
@@ -1776,7 +2450,9 @@ impl winit::application::ApplicationHandler for App {
                         false
                     };
                     r.capture_flat_frame(
-                        !ext_stereo && self.display_ext.as_ref().is_some_and(|ext| ext.has_frame()),
+                        !ext_stereo
+                            && !split_on
+                            && self.display_ext.as_ref().is_some_and(|ext| ext.has_frame()),
                     );
                     if !ext_stereo {
                         if let (Some(vis), Some((walk, _))) =
@@ -1795,11 +2471,21 @@ impl winit::application::ApplicationHandler for App {
                         .filter(|_| self.hud_view.is_some() && !self.cheats.hud_hidden);
                     if let Some(vis) = self.soldier_vis.as_ref() {
                         let step = if frozen { 0.0 } else { dt };
+                        // Split: the soldiers stand in P1's UI rectangle, not the window.
+                        let ui_view = split_cells
+                            .as_ref()
+                            .and_then(|c| c.first())
+                            .map(|cell| game::split_layout::ui_view(camera.fov_y, *cell));
+                        self.spawn_preview.set_view_aspect(ui_view.map(|v| v.1));
+                        let preview_camera = render::Camera {
+                            fov_y: ui_view.map_or(camera.fov_y, |v| v.0),
+                            ..camera
+                        };
                         let (body, gun) = self.spawn_preview.draws_live(
                             r,
                             vis,
                             page,
-                            &camera,
+                            &preview_camera,
                             step,
                             |r, team, class, model, dt| {
                                 let c = self
@@ -1823,6 +2509,52 @@ impl winit::application::ApplicationHandler for App {
                     if let Some((walk, _)) = self.walk.as_mut() {
                         draw_out(&mut self.netplay, walk);
                     }
+                    // Issue #194 B8: every view's camera, once per frame and outside any blend
+                    // (`game::render_blend::view_camera`); each further view's draw lists and every
+                    // view's name tags read it. View 0 keeps the camera above (its shake
+                    // included); each further view turns in its own shake (B13,
+                    // `Fx::shake_of`). One view: that camera alone.
+                    let view_cameras: Vec<render::Camera> =
+                        match (split_cells.as_deref(), self.walk.as_mut()) {
+                            (Some(cells), Some((walk, _))) => {
+                                let looks = self
+                                    .split
+                                    .as_ref()
+                                    .map(|s| s.looks.clone())
+                                    .unwrap_or_default();
+                                let fx = &self.fx;
+                                let mut lan_view = self.netplay.as_mut().map(|n| &mut n.view);
+                                (0..cells.len())
+                                    .map(|i| match i {
+                                        0 => camera,
+                                        // Nothing of an away player's is read.
+                                        _ if view_away.get(i).copied().unwrap_or(false) => {
+                                            render::Camera::default()
+                                        }
+                                        // A LAN round: their look over their pending inputs
+                                        // and their predicted pose (B20).
+                                        _ if lan_view.is_some() => {
+                                            game::render_blend::view_camera_with(
+                                                walk,
+                                                i,
+                                                cells[i],
+                                                fx.shake_of(i),
+                                                lan_view.as_deref_mut().expect("LAN view"),
+                                            )
+                                        }
+                                        _ => game::render_blend::view_camera(
+                                            walk,
+                                            i,
+                                            cells[i],
+                                            &looks.get(i).copied().unwrap_or_default(),
+                                            // Their own shake (B13).
+                                            fx.shake_of(i),
+                                        ),
+                                    })
+                                    .collect()
+                            }
+                            _ => vec![camera],
+                        };
                     let hud_hidden = self.cheats.hud_hidden;
                     let pad_warning = self.pad_warning.clone();
                     let snapshot_notice = self
@@ -1845,8 +2577,85 @@ impl winit::application::ApplicationHandler for App {
                             .as_ref()
                             .is_some_and(|r| r.playing_movie().is_some())
                     });
+                    // The other players' names over their heads (LAN §5b; split, issue #194 B8),
+                    // each view's seen from its own camera, handed to that view's HUD model: the
+                    // HUD pass draws them in the event feed's font under its panels (B22). Shown
+                    // only where the HUD itself shows: not with the `hud` cheat, under a split
+                    // Game Menu, behind a spawn screen, for an away player or at the round's end.
+                    // A LAN Game Menu lays out the menu, not the HUD, so they hide under it too.
+                    match (&self.walk, &self.netplay, hud.as_mut(), &split_cells) {
+                        (Some((walk, _)), _, Some(_), Some(cells))
+                            if self.profile.settings.splitscreen.name_tags =>
+                        {
+                            let names = &self.names;
+                            let name = |slot: u8| Some(names.name_or_default(slot));
+                            // A LAN round's menu covers its opener's cell only (B20).
+                            let covered_at = |i: usize| {
+                                hud_hidden
+                                    || (split_on
+                                        && native_pause
+                                        && lan_menu_view.is_none_or(|v| v == i))
+                            };
+                            // One per view: a round with fewer views keeps no stale answers.
+                            self.name_tags.resize_with(cells.len(), Default::default);
+                            for (i, cell) in cells.iter().enumerate() {
+                                let shown = !covered_at(i)
+                                    && !view_away.get(i).copied().unwrap_or(true)
+                                    && !split_spawn_up.get(i).copied().unwrap_or(true);
+                                let (Some(tags), Some(cam)) =
+                                    (self.name_tags.get_mut(i), view_cameras.get(i))
+                                else {
+                                    continue;
+                                };
+                                // An away view has no model: its tags still start fresh on return.
+                                let Some(Some(model)) = split_models.get_mut(i) else {
+                                    tags.clear();
+                                    continue;
+                                };
+                                if !shown || model.round_end.is_some() {
+                                    tags.clear();
+                                    continue;
+                                }
+                                let viewer = walk.local_unit(i);
+                                model.name_tags = game::name_tags::cell_tags(
+                                    tags, &walk.sim, viewer, cam, *cell, dt, &name,
+                                );
+                            }
+                        }
+                        (Some((walk, _)), Some(n), Some(model), None)
+                            if spawn.is_none() && model.round_end.is_none() && !hud_hidden =>
+                        {
+                            // Seated players only, named from the one table (`App.names`,
+                            // the session names it was given this frame).
+                            let roster = n.roster();
+                            let names = &self.names;
+                            let name = |slot: u8| {
+                                roster
+                                    .iter()
+                                    .find(|p| p.slot == slot)
+                                    .map(|p| names.get(slot).unwrap_or(&p.name).to_owned())
+                            };
+                            let seen = self.name_tags[0].update(
+                                &walk.sim,
+                                walk.player,
+                                camera.position,
+                                dt,
+                                &name,
+                            );
+                            let size = [w as f32, h as f32];
+                            model.name_tags = game::name_tags::placed(
+                                &seen,
+                                camera.view_proj(size[0] / size[1].max(1.0)),
+                                size,
+                            );
+                        }
+                        _ => self.name_tags.iter_mut().for_each(|t| t.clear()),
+                    }
                     let mut reticle_shown = false;
                     let mut hud_view = match (&mut self.hud_view, &hud) {
+                        // Split: each view's own HUD, or the Game Menu over them all, is laid out
+                        // and painted in the views' overlays (`game::split_ui`).
+                        (Some(hv), Some(_)) if split_on => Some(hv),
                         (Some(hv), Some(model)) => {
                             hv.set_icons(icons);
                             if end_movie {
@@ -1988,9 +2797,47 @@ impl winit::application::ApplicationHandler for App {
                         .and_then(|n| n.banner_text().map(str::to_owned));
                     // Not on the spawn screens (Select is the previous
                     // class there), under the menu or at the round's end.
+                    // Split: each view's own board, held on its own pad and drawn in its own
+                    // cell (issue #194 B9), under the same rules as the single view's, and
+                    // sized with that cell's HUD.
+                    let board_k = self.profile.settings.splitscreen.hud_size.k();
+                    let split_boards: Vec<(
+                        game::split_layout::Cell,
+                        usize,
+                        ui::scoreboard::Scoreboard,
+                    )> = match (&split_cells, self.walk.as_mut(), self.split.as_ref()) {
+                        (Some(cells), Some((walk, _)), Some(split))
+                            if walk.campaign.is_none() && menu.is_none() =>
+                        {
+                            let mut boards = Vec::new();
+                            for (i, cell) in cells.iter().enumerate() {
+                                let Some(model) = split_models.get(i).and_then(Option::as_ref)
+                                else {
+                                    continue;
+                                };
+                                let feed = match i {
+                                    0 => Some(&self.feed),
+                                    _ => self.split_feeds.get(i - 1),
+                                };
+                                let shown = split.score_holds.get(i).is_some_and(|h| h.shown());
+                                if let (true, Some(feed), None, None) =
+                                    (shown, feed, &model.spawn, &model.round_end)
+                                {
+                                    let titles = model.team_names.clone();
+                                    let net = self.netplay.as_ref();
+                                    let board = walk
+                                        .with_local(i, |w| scoreboard_model(w, feed, titles, net));
+                                    boards.push((*cell, i, board));
+                                }
+                            }
+                            boards
+                        }
+                        _ => Vec::new(),
+                    };
                     let scoreboard = match (&self.walk, &hud) {
                         (Some((walk, _)), Some(model))
-                            if walk.campaign.is_none()
+                            if !split_on
+                                && walk.campaign.is_none()
                                 && self.score_hold.shown()
                                 && spawn.is_none()
                                 && menu.is_none()
@@ -2005,50 +2852,125 @@ impl winit::application::ApplicationHandler for App {
                         }
                         _ => None,
                     };
-                    // A LAN round: the other players' names over their
-                    // heads, seen from this camera (LAN §5b).
-                    let name_tags = match (&self.walk, &self.netplay, &hud) {
-                        (Some((walk, _)), Some(n), Some(model))
-                            if spawn.is_none() && model.round_end.is_none() =>
-                        {
-                            let roster = n.roster();
-                            let name = |slot: u8| {
-                                roster
-                                    .iter()
-                                    .find(|p| p.slot == slot)
-                                    .map(|p| p.name.clone())
-                            };
-                            let tags = self.name_tags.update(
-                                &walk.sim,
-                                walk.player,
-                                camera.position,
-                                dt,
-                                &name,
-                            );
-                            Some((tags, camera.view_proj(w as f32 / h.max(1) as f32)))
-                        }
-                        _ => {
-                            self.name_tags.clear();
-                            None
-                        }
+                    let render_t0 = std::time::Instant::now();
+                    // `native_pause` already implies a menu (`native_pause && menu.is_some()`
+                    // above), so this hides the split cells' tags, timer and banner exactly when
+                    // the single view hides `draw_hud`.
+                    let split_menu_up = split_on && native_pause && lan_menu_view.is_none();
+                    // A LAN round's Game Menu covers its opener's cell only (issue #194 B20).
+                    let menu_cell_of =
+                        |i: usize| split_on && native_pause && lan_menu_view == Some(i);
+                    let hud_k = self.profile.settings.splitscreen.hud_size.k();
+                    // Split: the cells of players who have left their stats pages, with the
+                    // names the round still waits for (issue #194).
+                    let waiting = match split_menu_up {
+                        true => Vec::new(),
+                        false => split_waiting
+                            .into_iter()
+                            .filter(|(c, _)| Some(*c) != lan_menu_cell.filter(|_| native_pause))
+                            .collect(),
                     };
                     let result = match (&mut self.overlay, &self.window, hud) {
                         (Some(overlay), Some(window), Some(model)) => {
                             let mut clicked: Vec<ui::menu::MenuAction> = Vec::new();
+                            // Each away view's lost-controller notice, painted in its cell's
+                            // HUD pass (`SplitUi::lost`) with the button glyphs.
+                            let notices: Vec<Option<ui::shell_ps2::players::LostCell>> =
+                                match &split_cells {
+                                    // Under the Game Menu the away cells stay dark without the
+                                    // notice (it would cover the menu).
+                                    Some(cells) if !split_menu_up => (0..cells.len())
+                                        .map(|i| {
+                                            let away = view_away.get(i).copied().unwrap_or(false);
+                                            if !away || menu_cell_of(i) {
+                                                return None;
+                                            }
+                                            let mut lines = super::split::lost_notice({
+                                                let slot = self
+                                                    .walk
+                                                    .as_ref()
+                                                    .map_or(i as u8, |(w, _)| w.local_slot_of(i));
+                                                // Unnamed: the number from the Players
+                                                // screen, as `battle_names` would give.
+                                                match (self.names.get(slot), &self.split) {
+                                                    (Some(n), _) => n.to_owned(),
+                                                    (None, Some(s)) => super::split::local_name(
+                                                        &s.seats,
+                                                        i,
+                                                        &self.profile.name,
+                                                        &self.split_profiles,
+                                                    ),
+                                                    (None, None) => {
+                                                        self.names.name_or_default(slot)
+                                                    }
+                                                }
+                                            });
+                                            // A returning pad asking whose it is: say so.
+                                            if let Some(l) = super::split::pick_line(
+                                                self.split.as_ref(),
+                                                self.gilrs.as_ref(),
+                                                &self.profile,
+                                                &self.split_profiles,
+                                                self.icon_device.device(),
+                                                i,
+                                                &lines.name,
+                                            ) {
+                                                (lines.glyph, lines.action) = (Some(l.0), l.1);
+                                            }
+                                            Some(lines)
+                                        })
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                            // Split: the fps counter follows the FPS Counter option as in single
+                            // player; when it is up, it adds the view count and the previous
+                            // frames' render time (the CPU time of the views' draw lists, submits
+                            // and present, smoothed) to read the real cost.
+                            let split_note = split_cells.as_ref().map(|c| {
+                                format!(
+                                    "{} views, render {:.1} ms{}",
+                                    c.len(),
+                                    self.split_render_ms,
+                                    self.quality_note
+                                        .as_deref()
+                                        .map_or(String::new(), |n| format!(" · {n}"))
+                                )
+                            });
                             let paint = overlay.begin(window, |ctx| {
+                                for (cell, text) in &waiting {
+                                    game::split_ui::draw_waiting_line(ctx, *cell, text);
+                                }
                                 ui::menu::draw_fps_counter_note(
                                     ctx,
                                     ui::menu::FpsCounter::from_index(
                                         self.profile.settings.fps_counter,
                                     ),
                                     self.frame_seconds,
-                                    self.quality_note.as_deref(),
+                                    split_note.as_deref().or(self.quality_note.as_deref()),
                                 );
-                                if let Some((tags, vp)) = name_tags.as_ref().filter(|_| !hud_hidden)
+                                // Split (issue #194 B8): each awake view's round timer and banner
+                                // in its own cell, under its team counts.
+                                if let (Some(cells), false) =
+                                    (split_cells.as_ref(), hud_hidden || split_menu_up)
                                 {
-                                    lan::draw_name_tags(ctx, tags, *vp);
+                                    for (i, cell) in cells.iter().enumerate() {
+                                        if menu_cell_of(i) {
+                                            continue;
+                                        }
+                                        if let Some(Some(m)) = split_models.get(i) {
+                                            let t = game::name_tags::cell_text(ctx, *cell, hud_k);
+                                            ui::hud::draw_hud_in(
+                                                ctx,
+                                                m,
+                                                t.rect,
+                                                i + 1,
+                                                t.scale,
+                                                t.timer_at,
+                                            );
+                                        }
+                                    }
                                 }
-                                if !hud_hidden && !native_pause {
+                                if !hud_hidden && !native_pause && !split_on {
                                     ui::hud::draw_hud(ctx, &model);
                                     if let Some(s) = &spawn {
                                         // The PS2's screen is the HUD pass's;
@@ -2077,6 +2999,13 @@ impl winit::application::ApplicationHandler for App {
                                     } else {
                                         clicked = ui::menu::draw_menu(ctx, m);
                                     }
+                                    // Split: the mouse is the keyboard player's; on a menu
+                                    // someone else drives, its clicks do nothing (as the
+                                    // native pause's, issue #194 B10).
+                                    if !egui_pointer_ok {
+                                        clicked.clear();
+                                        binding_click = None;
+                                    }
                                 }
                                 if let Some(w) = &pad_warning {
                                     ui::hud::draw_pad_warning(ctx, w);
@@ -2092,6 +3021,21 @@ impl winit::application::ApplicationHandler for App {
                                 }
                                 if let Some(b) = &scoreboard {
                                     ui::scoreboard::draw_scoreboard(ctx, b);
+                                }
+                                let ppp = ctx.pixels_per_point().fmax(0.1);
+                                for (cell, i, b) in &split_boards {
+                                    let [x, y, w, h] = cell.map(|v| v as f32 / ppp);
+                                    let rect = ui::egui::Rect::from_min_size(
+                                        ui::egui::pos2(x, y),
+                                        ui::egui::vec2(w, h),
+                                    );
+                                    ui::scoreboard::draw_scoreboard_in(
+                                        ctx,
+                                        rect,
+                                        i + 1,
+                                        board_k,
+                                        b,
+                                    );
                                 }
                             });
                             let (n, bytes) = paint.texture_uploads();
@@ -2109,80 +3053,246 @@ impl winit::application::ApplicationHandler for App {
                                 }
                                 for a in clicked {
                                     if let ui::menu::MenuAction::EditBindings(device, context) = a {
-                                        self.controls = Some(super::front::Controls::new(
+                                        // Split: the opener's own profile's layouts (B10).
+                                        self.controls = super::split::controls_for(
+                                            &self.profile,
+                                            &self.split_profiles,
+                                            self.split.as_ref(),
+                                            menu_owner,
                                             device,
                                             context,
-                                            &self.profile.settings,
-                                        ));
+                                        );
+                                        if self.controls.is_none() {
+                                            self.feed.say(
+                                                super::split::NO_PROFILE_BINDINGS.to_owned(),
+                                                ui::hud::message_color::YELLOW,
+                                                walk.sim.tick,
+                                            );
+                                        }
                                     }
                                     self.restart_clicked |= a == ui::menu::MenuAction::Restart;
                                     if let ui::menu::MenuAction::SetWindowMode(m) = a {
                                         self.display.requested = Some(m);
                                     }
+                                    let opener = super::menu_actions::acting_local(menu_owner, a);
+                                    // A LAN round's cheats are the opener's own slot's (issue #194).
+                                    let lan_opener =
+                                        super::menu_actions::lan_acting_local(menu_owner, a);
+                                    // A further player's LAN rows are theirs (B20, as above).
                                     if self.netplay.as_mut().is_some_and(|n| {
-                                        n.pause_action(
+                                        n.opener_pause_action(
                                             walk,
                                             a,
+                                            lan_opener,
                                             &mut self.paused,
                                             &mut self.pause_menu,
                                             &mut self.profile,
+                                            &mut self.split_profiles,
+                                            self.split.as_ref().map(|s| &s.seats),
                                             &mut self.session,
                                         )
                                     }) {
                                         continue;
                                     }
-                                    self.quit_clicked |= apply_pause_action(
-                                        walk,
-                                        a,
-                                        &mut self.paused,
-                                        &mut self.pause_menu,
-                                        &mut self.cheats,
-                                        &mut self.profile,
-                                        &mut self.session,
-                                        &mut self.kbm,
-                                        self.music_voice.as_mut(),
-                                    );
+                                    let act = |w: &mut game::walk::WalkSim| {
+                                        apply_pause_action(
+                                            w,
+                                            a,
+                                            &mut self.paused,
+                                            &mut self.pause_menu,
+                                            &mut self.cheats,
+                                            &mut self.profile,
+                                            &mut self.session,
+                                            &mut self.kbm,
+                                            &mut self.split_profiles,
+                                            self.split
+                                                .as_mut()
+                                                .map(|s| (&s.seats, &mut s.inputs[..])),
+                                            opener,
+                                            self.music_voice.as_mut(),
+                                        )
+                                    };
+                                    self.quit_clicked |= walk.with_local(opener, act);
                                     if matches!(a, ui::menu::MenuAction::SetRumble(_)) {
-                                        game::rumble::preview(
+                                        super::menu_actions::preview_rumble(
                                             self.gilrs.as_mut(),
                                             &self.active_pad,
                                             &mut self.rumble_effect,
-                                            self.profile.settings.rumble_strength,
+                                            &self.profile,
+                                            &self.split_profiles,
+                                            self.split.as_mut(),
+                                            opener,
                                         );
                                     }
                                 }
                             }
-                            let draw_overlay: render::OverlayFn<'_> =
-                                &mut |dev, q, enc, view, size| {
-                                    if let Some(hv) = hud_view.as_mut() {
-                                        hv.paint(dev, q, enc, view, size);
-                                    }
-                                    overlay.paint(&paint, dev, q, enc, view, size)
+                            match (split_cells.as_deref(), self.walk.as_mut()) {
+                                (Some(cells), Some((walk, cube))) => {
+                                    // Split: the egui overlay (pause menu, counters) paints
+                                    // once, over the whole window, after the last view.
+                                    let window = r.size();
+                                    let split_ui = game::split_ui::SplitUi {
+                                        models: &split_models,
+                                        icons: &split_icons,
+                                        dt: hud_dt,
+                                        hidden: hud_hidden,
+                                        pause: menu.as_ref().filter(|_| native_pause).map(|m| {
+                                            game::split_ui::SplitPause {
+                                                owner: split_pause_owner,
+                                                menu: m,
+                                                anim: &self.pause_menu.animation,
+                                                in_view: lan_menu_view,
+                                            }
+                                        }),
+                                        window: [window.0, window.1],
+                                        views: cells.len(),
+                                        hud_k: self.profile.settings.splitscreen.hud_size.k(),
+                                        lost: &notices,
+                                    };
+                                    let looks = self
+                                        .split
+                                        .as_ref()
+                                        .map(|s| s.looks.clone())
+                                        .unwrap_or_default();
+                                    // Each view's spawn page, for its soldiers (as view 0's).
+                                    let split_pages: Vec<Option<ui::spawn_draw::SpawnPage>> =
+                                        split_models
+                                            .iter()
+                                            .map(|m| {
+                                                m.as_ref()
+                                                    .and_then(|m| m.spawn.clone())
+                                                    .filter(|_| !hud_hidden)
+                                            })
+                                            .collect();
+                                    let mut parts = super::split::ViewParts {
+                                        walk,
+                                        cube: *cube,
+                                        gpu,
+                                        soldier_vis: self.soldier_vis.as_mut(),
+                                        vehicle_vis: &mut self.vehicle_vis,
+                                        deka_vis: &mut self.deka_vis,
+                                        fx: &mut self.fx,
+                                        holos: &self.holos,
+                                        weather: self.weather.as_mut(),
+                                        bolts: &mut self.bolts,
+                                        fx_quad: self.fx_quad,
+                                        fx_sprite: self.fx_sprite,
+                                        squad_icons: self.squad_icons,
+                                        previews: &mut self.split_previews,
+                                        pages: &split_pages,
+                                        preview_dt: if frozen { 0.0 } else { dt },
+                                        // A LAN round's views draw their predicted poses (B20).
+                                        lan_view: self.netplay.as_mut().map(|n| &mut n.view),
+                                    };
+                                    super::split::render_views(
+                                        &mut parts,
+                                        r,
+                                        cells,
+                                        (&draws, &skinned),
+                                        &view_cameras,
+                                        &looks,
+                                        &view_away,
+                                        clear,
+                                        Some(&mut |dev, q, enc, view, _size| {
+                                            overlay.paint(
+                                                &paint,
+                                                dev,
+                                                q,
+                                                enc,
+                                                view,
+                                                [window.0, window.1],
+                                            )
+                                        }),
+                                        Some(&mut |i, cell, dev, q, enc, view| {
+                                            if let Some(hv) = hud_view.as_mut() {
+                                                split_ui.paint(hv, i, cell, dev, q, enc, view);
+                                            }
+                                        }),
+                                    )
+                                    .map_err(anyhow::Error::from)
+                                }
+                                _ => {
+                                    let draw_overlay: render::OverlayFn<'_> =
+                                        &mut |dev, q, enc, view, size| {
+                                            if let Some(hv) = hud_view.as_mut() {
+                                                hv.paint(dev, q, enc, view, size);
+                                            }
+                                            overlay.paint(&paint, dev, q, enc, view, size)
+                                        };
+                                    super::xr::render_battle(
+                                        r,
+                                        &camera,
+                                        &draws,
+                                        &skinned,
+                                        clear,
+                                        Some(draw_overlay),
+                                        self.display_ext.as_deref_mut().filter(|_| ext_stereo),
+                                    )
+                                }
+                            }
+                        }
+                        _ => match (split_cells.as_deref(), self.walk.as_mut()) {
+                            (Some(cells), Some((walk, cube))) => {
+                                let looks = self
+                                    .split
+                                    .as_ref()
+                                    .map(|s| s.looks.clone())
+                                    .unwrap_or_default();
+                                let mut parts = super::split::ViewParts {
+                                    walk,
+                                    cube: *cube,
+                                    gpu,
+                                    soldier_vis: self.soldier_vis.as_mut(),
+                                    vehicle_vis: &mut self.vehicle_vis,
+                                    deka_vis: &mut self.deka_vis,
+                                    fx: &mut self.fx,
+                                    holos: &self.holos,
+                                    weather: self.weather.as_mut(),
+                                    bolts: &mut self.bolts,
+                                    fx_quad: self.fx_quad,
+                                    fx_sprite: self.fx_sprite,
+                                    squad_icons: self.squad_icons,
+                                    previews: &mut self.split_previews,
+                                    pages: &[],
+                                    preview_dt: 0.0,
+                                    lan_view: self.netplay.as_mut().map(|n| &mut n.view),
                                 };
-                            super::xr::render_battle(
+                                super::split::render_views(
+                                    &mut parts,
+                                    r,
+                                    cells,
+                                    (&draws, &skinned),
+                                    &view_cameras,
+                                    &looks,
+                                    &view_away,
+                                    clear,
+                                    None,
+                                    None,
+                                )
+                                .map_err(anyhow::Error::from)
+                            }
+                            _ => super::xr::render_battle(
                                 r,
                                 &camera,
                                 &draws,
                                 &skinned,
                                 clear,
-                                Some(draw_overlay),
+                                None,
                                 self.display_ext.as_deref_mut().filter(|_| ext_stereo),
-                            )
-                        }
-                        _ => super::xr::render_battle(
-                            r,
-                            &camera,
-                            &draws,
-                            &skinned,
-                            clear,
-                            None,
-                            self.display_ext.as_deref_mut().filter(|_| ext_stereo),
-                        ),
+                            ),
+                        },
                     };
                     if let Some(p) = self.frame_profile.as_mut() {
                         p.lap("render_ms");
                         let tick = self.walk.as_ref().map_or(0, |w| w.0.sim.tick);
                         p.end(f64::from(dt) * 1000.0, tick, r);
+                    }
+                    if split_on {
+                        let ms = render_t0.elapsed().as_secs_f32() * 1000.0;
+                        self.split_render_ms += (ms - self.split_render_ms) * 0.1;
+                        if let Some(hv) = hud_view.as_mut() {
+                            hv.select_player(0);
+                        }
                     }
                     if let Err(error) = result {
                         eprintln!("render: {error:#}");

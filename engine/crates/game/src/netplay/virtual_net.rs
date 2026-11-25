@@ -43,6 +43,11 @@
 //!   hero offers and hold block now and then ([`scripted_hero_pad`]), so a
 //!   human plays a saber hero whose swings and blocks are predicted and
 //!   drawn ([`Node::hero_frames`], [`Node::melee_frames`]).
+//! - Several local players (issue #194 B18, [`VirtualNet::join_locals`]): a
+//!   guest machine's further locals play their own scripted pads, all sent
+//!   under one sequence ([`Peer::frame_locals`]); with prediction every
+//!   local slot is predicted. [`Node::local_pending`] records, per frame,
+//!   each local's pending queue length.
 
 use super::{Link, LinkEvent, LocalView, Notice, Peer, RoundSetup};
 use crate::event_feed::EventFeed;
@@ -178,6 +183,9 @@ impl Link for NodeLink {
     fn submit_input(&mut self, pad: PadState, view_tick: u32) {
         both!(self, x => Link::submit_input(x.as_mut(), pad, view_tick))
     }
+    fn submit_inputs(&mut self, pads: &[(u8, PadState)], view_tick: u32) {
+        both!(self, x => Link::submit_inputs(x.as_mut(), pads, view_tick))
+    }
     fn pacing(&self) -> (u8, u32) {
         both!(self, x => Link::pacing(x.as_ref()))
     }
@@ -207,6 +215,9 @@ impl Link for NodeLink {
     }
     fn host(&mut self, cmd: HostCommand) {
         both!(self, x => Link::host(x.as_mut(), cmd))
+    }
+    fn set_local_away(&mut self, local: u8, slot: u8, away: bool) {
+        both!(self, x => Link::set_local_away(x.as_mut(), local, slot, away))
     }
 }
 
@@ -315,6 +326,13 @@ pub struct Node {
     /// (a swing or a block) on.
     pub hero_frames: u64,
     pub melee_frames: u64,
+    /// Per frame with further locals: each local's pending inputs, local 0
+    /// first, while every local slot is seated (module rules).
+    pub local_pending: Vec<Vec<usize>>,
+    /// Frames each local (local 0 first) had predicted ticks drawn ahead.
+    pub predicted_locals: Vec<u64>,
+    /// The further locals' `Hello` entries, kept for a reconnect.
+    locals: Vec<net::LocalHello>,
 }
 
 impl Node {
@@ -369,6 +387,9 @@ impl Node {
             predict_off: 0,
             hero_frames: 0,
             melee_frames: 0,
+            local_pending: Vec::new(),
+            predicted_locals: Vec::new(),
+            locals: Vec::new(),
         }
     }
 }
@@ -461,9 +482,16 @@ impl VirtualNet {
         self.host().next_tick()
     }
 
-    fn client_core(&mut self, name: &str, token: u64, profile: Vec<u8>) -> ClientCore {
+    fn client_core(
+        &mut self,
+        name: &str,
+        token: u64,
+        profile: Vec<u8>,
+        locals: Vec<net::LocalHello>,
+    ) -> ClientCore {
         let mut config = ClientConfig::new(self.build.clone(), name, token);
         config.profile = profile;
+        config.locals = locals;
         self.conn_ids += 1;
         config.conn_id = self.conn_ids;
         ClientCore::new(config, addr(0), self.now)
@@ -471,10 +499,23 @@ impl VirtualNet {
 
     /// A guest connects; returns its node index.
     pub fn join(&mut self, name: &str, token: u64, profile: Vec<u8>, frame_ms: f64) -> usize {
+        self.join_locals(name, token, profile, frame_ms, Vec::new())
+    }
+
+    /// A guest machine with further local players (`locals`, seats 1..)
+    /// connects; returns its node index (module rules).
+    pub fn join_locals(
+        &mut self,
+        name: &str,
+        token: u64,
+        profile: Vec<u8>,
+        frame_ms: f64,
+        locals: Vec<net::LocalHello>,
+    ) -> usize {
         let i = self.nodes.len();
         let a = addr(i);
         self.sim.add_endpoint(a);
-        let core = self.client_core(name, token, profile);
+        let core = self.client_core(name, token, profile, locals.clone());
         let mut node = Node::new(
             name,
             token,
@@ -485,8 +526,16 @@ impl VirtualNet {
         );
         node.next_frame = self.now;
         node.connected_at = self.now;
+        node.locals = locals;
         self.nodes.push(node);
         i
+    }
+
+    /// Node `i`'s local player `local` lost its pad (`away`) or got it back,
+    /// as the window's lost-pad path asks it ([`Peer::set_local_away`]).
+    pub fn set_local_away(&mut self, i: usize, local: usize, away: bool) {
+        let n = &mut self.nodes[i];
+        n.peer.set_local_away(&mut n.link, local, away);
     }
 
     /// Cut node `i` off the network (or restore it).
@@ -499,7 +548,8 @@ impl VirtualNet {
     pub fn reconnect(&mut self, i: usize, profile: Vec<u8>) {
         self.cut(i, false);
         let (name, token) = (self.nodes[i].name.clone(), self.nodes[i].token);
-        let core = self.client_core(&name, token, profile);
+        let locals = self.nodes[i].locals.clone();
+        let core = self.client_core(&name, token, profile, locals);
         let node = &mut self.nodes[i];
         node.link = NodeLink::Client(Box::new(core));
         node.peer = Peer::client();
@@ -648,6 +698,15 @@ impl VirtualNet {
                 n.marks_made += 1;
             }
             let slot = n.peer.local_slot;
+            // The further locals' own scripted pads (module rules).
+            let mut pads = vec![pad];
+            for q in n.peer.extra_locals() {
+                pads.push(if self.heroes {
+                    scripted_hero_pad(q.slot, walk.sim.tick)
+                } else {
+                    scripted_pad(q.slot, walk.sim.tick)
+                });
+            }
             let dt = n.frame.as_secs_f64();
             if self.predict && n.view.is_none() {
                 n.view = Some(LocalView::new());
@@ -674,21 +733,38 @@ impl VirtualNet {
             // With prediction the window's own per-frame step: the frame,
             // then the prediction over the inputs still pending.
             let report = match n.view.as_mut() {
-                Some(view) => view.frame(
+                Some(view) => view.frame_locals(
                     &mut n.peer,
                     &mut n.link,
                     dt as f32,
-                    pad,
+                    &pads,
                     walk,
                     n.feed.as_mut(),
                     |w, b, _, _| on_tick(w, b),
                 ),
-                None => n
-                    .peer
-                    .frame(&mut n.link, dt, pad, walk, n.feed.as_mut(), |w, b, _| {
-                        on_tick(w, b)
-                    }),
+                None => {
+                    n.peer
+                        .frame_locals(&mut n.link, dt, &pads, walk, n.feed.as_mut(), |w, b, _| {
+                            on_tick(w, b)
+                        })
+                }
             };
+            if !n.peer.extra_locals().is_empty()
+                && (0..n.peer.local_count()).all(|k| {
+                    n.peer.local_slot_of(k).is_some_and(|s| {
+                        walk.sim
+                            .players
+                            .get(usize::from(s))
+                            .is_some_and(Option::is_some)
+                    })
+                })
+            {
+                n.local_pending.push(
+                    (0..n.peer.local_count())
+                        .map(|k| n.peer.pending_inputs_of(k).len())
+                        .collect(),
+                );
+            }
             // A marker held across several sent ticks is one rising edge.
             for p in &report.submitted {
                 let m = mark_of(p);
@@ -706,6 +782,12 @@ impl VirtualNet {
             }
             if let Some(view) = n.view.as_mut() {
                 let p = &view.predictor;
+                let locals = n.peer.local_count();
+                n.predicted_locals
+                    .resize(locals.max(n.predicted_locals.len()), 0);
+                for (k, frames) in n.predicted_locals.iter_mut().take(locals).enumerate() {
+                    *frames += u64::from(p.poses_of(k).len() > 1);
+                }
                 if p.depth() > 0 {
                     n.predict_ms.push(p.stats.cost_ms);
                     n.predict_depth.push(p.depth() as u32);

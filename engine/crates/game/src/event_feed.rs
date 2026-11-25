@@ -787,6 +787,29 @@ impl EventFeed {
         self.round.opening_medals = walk.local_medal_counts();
     }
 
+    /// The seen map a frame's medal lines start from ([`EventFeed::note_medals`]): every
+    /// seated human slot at its installed career's counts now, so the spectator lines start at
+    /// each player's opening counts and never replay a medal earned before this viewer joined
+    /// (LAN §5b). The humans are a LAN round's `netplay.profiles` and, in a split round, every
+    /// local player's slot (issue #194 B4: each view announces the others' medals). The first
+    /// local slot is `own` (its profile's career) when no slot carried it, so in single player
+    /// this is just slot 0 at `own`.
+    pub fn medals_seen(
+        walk: &crate::walk::WalkSim,
+        own: core::sim::MedalCounts,
+    ) -> std::collections::BTreeMap<u8, core::sim::MedalCounts> {
+        let mut seen = std::collections::BTreeMap::new();
+        let lan = walk.netplay.profiles.keys().filter(|_| walk.netplay.active);
+        let locals = (1..walk.local_count()).map(|k| walk.local_slot_of(k));
+        for slot in lan.copied().chain(locals) {
+            if let Some(counts) = walk.sim.slot_medal_counts(usize::from(slot)) {
+                seen.insert(slot, counts);
+            }
+        }
+        seen.entry(walk.local_slot).or_insert(own);
+        seen
+    }
+
     /// Medals player slot `slot` (the viewer's) earned since `seen`, plus a
     /// spectator line for every other seated human who earned one. The
     /// viewer's own lines are unchanged (`issue #130`); the others get
@@ -1121,6 +1144,19 @@ impl EventFeed {
         } else {
             bonuses * points::OBJECTIVE_KILL
         }
+    }
+
+    /// [`EventFeed::tick`] for a split first player who is away (issue #194 B22): the round is
+    /// scored for everyone as ever, but `viewer` may name the stand-in bot's unit, so the
+    /// viewer's own shots, hits and captures (what their profile records,
+    /// [`EventFeed::battle_stats`]) stay as they were: none of the bot's reach the profile.
+    pub fn tick_away(&mut self, sim: &Sim, viewer: UnitHandle) -> u32 {
+        let kept = self.battle;
+        let lines = self.tick(sim, viewer);
+        self.battle.shots = kept.shots;
+        self.battle.hits = kept.hits;
+        self.battle.captures = kept.captures;
+        lines
     }
 
     /// Read the sim's events if its tick is new. `viewer` is the local

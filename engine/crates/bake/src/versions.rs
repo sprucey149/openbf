@@ -27,6 +27,7 @@ pub const GROUP_VERSIONS: &[(&str, u32)] = &[
     ("global-sound", 2),
     ("load", 2),
     ("beep", 2),
+    ("catalog", 1),
     ("extract-iso", 2),
 ];
 

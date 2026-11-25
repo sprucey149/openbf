@@ -150,9 +150,72 @@ pub struct MenuModel {
     pub respawn_label: Option<String>,
     /// Round result line, if the round is over.
     pub outcome_line: Option<String>,
+    /// `[ours]` Splitscreen: who opened the Game Menu ("Paused by Leia"), a line over the title.
+    pub paused_by: Option<String>,
     /// The shell's settings page (card BSHLA: Options → Game / Audio
     /// Options): titled by `title`, its first row "Back", no Quit row.
     pub in_shell: Option<String>,
+    /// Issue #194: a split match (or the Splitscreen mode list): Options
+    /// gains the Splitscreen page, with these values.
+    pub split: Option<SplitMenu>,
+    /// Issue #194 B22: each seat's profile name, by seat (0 is P1), for the Splitscreen page's
+    /// screen rows; `None` labels the row by its seat number ("P3").
+    pub split_names: [Option<String>; 4],
+    /// Issue #194 (B10): the Game Menu's opener is not P1, so its rows
+    /// show the opener's own settings and the host's rows say they are
+    /// shared ([`row_scope`], [`SHARED_HELP`]).
+    pub shared_rows: bool,
+    /// A LAN round: cheats are per player (one slot each), so the Cheats
+    /// page is the opener's own, not a host row ([`row_help`],
+    /// [`OWN_CHEATS_HELP`]).
+    pub own_cheats: bool,
+}
+
+/// The Splitscreen options page's values (issue #194, `SPLITSCREEN.md`
+/// 18.1 item 4): the host profile's settings and who sits in the match.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SplitMenu {
+    /// Two players one over the other (else side by side).
+    pub top_and_bottom: bool,
+    /// Which Players-screen seats (P1..P4) are in the match.
+    pub seated: [bool; 4],
+    /// Each seat's 2x2 grid position, 0 top-left to 3 bottom-right (a
+    /// permutation).
+    pub cells: [u8; 4],
+    pub name_tags: bool,
+    /// The split HUD's size: 0 Full, 1 Smaller, 2 Smallest.
+    pub hud_size: u8,
+}
+
+/// The HUD size row's choices, by [`SplitMenu::hud_size`].
+pub const HUD_SIZES: [&str; 3] = ["Full", "Smaller", "Smallest"];
+
+impl SplitMenu {
+    /// How many seats are in the match.
+    pub fn seated_count(&self) -> usize {
+        self.seated.iter().filter(|s| **s).count()
+    }
+
+    /// Where seat `seat`'s screen is, as its row shows it: with two seated
+    /// the side it has of the two (by the seats' grid values), else its grid
+    /// place.
+    pub fn screen_label(&self, seat: usize) -> &'static str {
+        let Some(&mine) = self.cells.get(seat) else {
+            return "";
+        };
+        if self.seated_count() == 2 {
+            let first = (0..4)
+                .filter(|&j| j != seat && self.seated[j])
+                .all(|j| (mine, seat) < (self.cells[j], j));
+            return match (self.top_and_bottom, first) {
+                (false, true) => "Left",
+                (false, false) => "Right",
+                (true, true) => "Top",
+                (true, false) => "Bottom",
+            };
+        }
+        ["Top Left", "Top Right", "Bottom Left", "Bottom Right"][usize::from(mine % 4)]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -185,6 +248,19 @@ pub enum MenuAction {
     /// Issue #168: the shell's Player name row opens its text box.
     EditPlayerName,
     EditBindings(SettingsPage, ControlContext),
+    /// Issue #194, the Splitscreen options: two players top and bottom (else
+    /// side by side).
+    SetSplitTwoPlayer(bool),
+    /// A screen row's step on seat `seat` (0 is P1; the row is labelled by the seat's player,
+    /// [`MenuModel::split_names`]); the caller moves it
+    /// (`game::split_layout::move_seat`).
+    MoveSplitScreen {
+        seat: u8,
+        right: bool,
+    },
+    SetSplitNameTags(bool),
+    /// The HUD size row, an index into [`HUD_SIZES`].
+    SetSplitHudSize(u8),
     /// Map-relative team size percentage, 10..=[`crate::population::MAX_TEAM_PCT`].
     SetAiCap(u32),
     SetReinforcements(u32),
@@ -374,6 +450,28 @@ pub enum Row {
     Restart,
     /// A sub-page's first row: back to the Game Menu.
     PageBack,
+    /// Issue #194, the Splitscreen options: Two players, one screen row per
+    /// seated seat (0 is P1, labelled by its player's name or "P#"), Name tags,
+    /// HUD size.
+    SplitTwoPlayers,
+    SplitScreen(u8),
+    SplitNameTags,
+    SplitHudSize,
+}
+
+/// The Splitscreen page's rows after Back: one screen row per seated seat.
+fn split_rows(m: &MenuModel) -> Vec<Row> {
+    let Some(split) = m.split else {
+        return Vec::new();
+    };
+    std::iter::once(Row::SplitTwoPlayers)
+        .chain(
+            (0..4u8)
+                .filter(|&s| split.seated[usize::from(s)])
+                .map(Row::SplitScreen),
+        )
+        .chain([Row::SplitNameTags, Row::SplitHudSize])
+        .collect()
 }
 
 /// The settings rows, in order: the shell's settings page and the Game
@@ -427,8 +525,17 @@ pub fn rows(m: &MenuModel) -> Vec<Row> {
             v.push(Row::Quit);
             v
         }
+        // Issue #194: a split match has its Splitscreen page last.
         Some(PausePage::Options) => std::iter::once(Row::PageBack)
             .chain(SettingsPage::CATEGORIES.map(Row::Settings))
+            .chain(
+                m.split
+                    .is_some()
+                    .then_some(Row::Settings(SettingsPage::Splitscreen)),
+            )
+            .collect(),
+        Some(PausePage::Settings(SettingsPage::Splitscreen)) => std::iter::once(Row::PageBack)
+            .chain(split_rows(m))
             .collect(),
         Some(PausePage::Settings(page)) => std::iter::once(Row::PageBack)
             .chain(page.rows().iter().copied())
@@ -510,7 +617,28 @@ pub fn population_row(m: &MenuModel, row: Row) -> Option<(&'static str, String)>
 /// Reinforcements say what an average match looks like at their values. In a
 /// battle a Reinforcements change applies from the next round. Button prompts
 /// says what it is for.
+/// In a split match whose Game Menu someone other than P1 opened
+/// ([`MenuModel::shared_rows`]), a host row's help ends with
+/// [`SHARED_HELP`].
+/// A LAN round's Cheats page ([`MenuModel::own_cheats`]) is the opener's own:
+/// [`OWN_CHEATS_HELP`] instead.
 pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
+    let own = own_row_help(m, row);
+    if !m.shared_rows || row_scope(row) != Some(RowScope::Host) {
+        return own;
+    }
+    let shared = match row {
+        Row::Cheats | Row::Cheat(_) if m.own_cheats => OWN_CHEATS_HELP,
+        Row::ResetGraphics => RESET_SHARED_HELP,
+        _ => SHARED_HELP,
+    };
+    Some(match own {
+        Some(help) => format!("{help}\n{shared}"),
+        None => shared.to_owned(),
+    })
+}
+
+fn own_row_help(m: &MenuModel, row: Row) -> Option<String> {
     if let Some(why) = row_locked(m, row) {
         return Some(why.to_owned());
     }
@@ -534,6 +662,12 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             }
         }),
         Row::Difficulty if m.in_shell.is_none() => Some("Changes apply from the next round.".into()),
+        Row::SplitScreen(_) if m.split.is_some_and(|s| s.seated_count() == 2) => {
+            Some("Swaps the two players' screens.".into())
+        }
+        Row::SplitScreen(_) => Some(SPLIT_SCREEN_HELP.into()),
+        Row::SplitNameTags => Some("Names over the other players' heads.".into()),
+        Row::SplitHudSize => Some("The size of each player's HUD in their part of the screen.".into()),
         Row::Cheat(k) => m
             .cheats
             .get(k)
@@ -577,6 +711,155 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
     }
 }
 
+/// Issue #194 (`SPLITSCREEN.md` 18.1 item 6): whose profile a Game Menu
+/// settings row edits in a split match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowScope {
+    /// The player who opened the menu: their own profile.
+    Player,
+    /// Shared by the match: the host's (P1's) profile.
+    Host,
+}
+
+/// The help line a [`RowScope::Host`] row adds when the Game Menu's opener
+/// is not P1 ([`MenuModel::shared_rows`]).
+/// The help of a screen row on the Splitscreen page with three or four seated: two lines at
+/// most at 16:9 (`pause_draw`'s `split_screen_help_fits_two_lines`).
+pub const SPLIT_SCREEN_HELP: &str =
+    "Left/Right moves this player's screen; whoever was there swaps with them.";
+
+pub const SHARED_HELP: &str = "Shared: this changes P1's profile for every player.";
+
+/// [`SHARED_HELP`] for the Cheats rows in a LAN round ([`MenuModel::own_cheats`]): each player's
+/// cheats are their own slot's there.
+pub const OWN_CHEATS_HELP: &str = "Yours: this changes only your own soldier's cheats.";
+
+/// [`SHARED_HELP`] for Reset to Defaults on the Graphics page: the opener's own FOV and view
+/// reset, the rest of the page is the host's.
+pub const RESET_SHARED_HELP: &str =
+    "Shared: resets P1's graphics for every player; your FOV and view reset for you only.";
+
+/// Whose profile `row` edits; `None` for a row that edits no setting
+/// (Resume, Respawn, Quit, a popup's Yes / No, a page's Back, the class
+/// picker). The pages that only open other pages are the scope of what
+/// they hold: Controls and its two device pages are the player's, the
+/// Splitscreen page and Cheats the host's.
+pub fn row_scope(row: Row) -> Option<RowScope> {
+    use RowScope::{Host, Player};
+    Some(match row {
+        Row::Assist
+        | Row::Viewpoint
+        | Row::Fov
+        | Row::Rumble
+        | Row::RumbleOnFire
+        | Row::CareerAwards
+        | Row::MouseSensitivity
+        | Row::PadLookSensitivity
+        | Row::FlightControls
+        | Row::InvertY
+        | Row::InputIcons
+        | Row::PlayerName
+        | Row::EditBindings(_)
+        | Row::Binding(_)
+        | Row::Settings(SettingsPage::Controls)
+        | Row::Settings(SettingsPage::KeyboardMouse)
+        | Row::Settings(SettingsPage::Gamepad) => Player,
+        Row::Difficulty
+        | Row::AiCap
+        | Row::Reinforcements
+        | Row::Music
+        | Row::EffectsVolume
+        | Row::DialogueVolume
+        | Row::GraphicsQuality
+        | Row::AutoQuality
+        | Row::WindowMode
+        | Row::ResetGraphics
+        | Row::FpsCounter
+        | Row::NetworkMeter
+        | Row::LowPowerResolution
+        | Row::TerrainLod
+        | Row::HardShadows
+        | Row::SceneSoftness
+        | Row::Cheats
+        | Row::Cheat(_)
+        | Row::Settings(SettingsPage::Splitscreen)
+        | Row::SplitTwoPlayers
+        | Row::SplitScreen(_)
+        | Row::SplitNameTags
+        | Row::SplitHudSize => Host,
+        Row::Settings(SettingsPage::Game)
+        | Row::Settings(SettingsPage::Audio)
+        | Row::Settings(SettingsPage::Graphics)
+        | Row::ClassPicker
+        | Row::ClassBack
+        | Row::ClassChoice(_)
+        | Row::Resume
+        | Row::Respawn
+        | Row::No
+        | Row::Yes
+        | Row::Quit
+        | Row::Options
+        | Row::Restart
+        | Row::PageBack => return None,
+    })
+}
+
+/// Whose profile action `a` changes, as [`row_scope`] says of the row that
+/// makes it; `None` for an action that changes no setting.
+pub fn action_scope(a: MenuAction) -> Option<RowScope> {
+    use RowScope::{Host, Player};
+    Some(match a {
+        MenuAction::SetAssist(_)
+        | MenuAction::SetFov(_)
+        | MenuAction::SetRumble(_)
+        | MenuAction::ToggleRumbleOnFire
+        | MenuAction::SetCareerAwards(_)
+        | MenuAction::SetMouseSensitivity(_)
+        | MenuAction::SetPadLookSensitivity(_)
+        | MenuAction::ToggleFlightControls
+        | MenuAction::ToggleInvertY
+        | MenuAction::CycleInputIcons(_)
+        | MenuAction::ToggleViewpoint
+        | MenuAction::EditPlayerName
+        | MenuAction::EditBindings(..) => Player,
+        MenuAction::ToggleCheat(_)
+        | MenuAction::SetDifficulty(_)
+        | MenuAction::SetEffectsVolume(_)
+        | MenuAction::SetDialogueVolume(_)
+        | MenuAction::SetFpsCounter(_)
+        | MenuAction::SetNetworkMeter(_)
+        | MenuAction::SetSplitTwoPlayer(_)
+        | MenuAction::MoveSplitScreen { .. }
+        | MenuAction::SetSplitNameTags(_)
+        | MenuAction::SetSplitHudSize(_)
+        | MenuAction::SetAiCap(_)
+        | MenuAction::SetReinforcements(_)
+        | MenuAction::ResetGraphics
+        | MenuAction::SetMusic(_)
+        | MenuAction::ToggleLowPowerResolution
+        | MenuAction::ToggleTerrainLod
+        | MenuAction::ToggleHardShadows
+        | MenuAction::ToggleSceneSoftness
+        | MenuAction::SetAutoQuality(_)
+        | MenuAction::SetWindowMode(_) => Host,
+        MenuAction::OpenClassPicker
+        | MenuAction::CloseClassPicker
+        | MenuAction::SelectClass(_)
+        | MenuAction::SetClassTab(_)
+        | MenuAction::Resume
+        | MenuAction::RequestRespawn
+        | MenuAction::CancelPopup
+        | MenuAction::Respawn
+        | MenuAction::OpenPage(_)
+        | MenuAction::ClosePage
+        | MenuAction::RequestQuit
+        | MenuAction::RequestRestart
+        | MenuAction::Restart
+        | MenuAction::Denied
+        | MenuAction::Quit => return None,
+    })
+}
+
 /// Why a row cannot change here, if it cannot: such a row is drawn greyed
 /// with this reason as its help, and takes no step.
 pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
@@ -593,6 +876,9 @@ pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
         Row::PlayerName => Some("Your profile's name. Choose or create a profile after Start."),
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team Size is fixed in this battle: it has no map team sizes to scale.")
+        }
+        Row::SplitTwoPlayers if m.split.is_some_and(|s| s.seated_count() > 2) => {
+            Some("Three or four players share the screen in a 2x2 grid.")
         }
         _ => None,
     }
@@ -621,6 +907,10 @@ pub(crate) fn is_value_row(row: Row) -> bool {
             | Row::FlightControls
             | Row::CareerAwards
             | Row::InputIcons
+            | Row::SplitTwoPlayers
+            | Row::SplitScreen(_)
+            | Row::SplitNameTags
+            | Row::SplitHudSize
     )
 }
 
@@ -868,6 +1158,35 @@ fn navigate_steps(m: &MenuModel, input: MenuInput, step: StepSize) -> (usize, Ve
         }
         Row::Viewpoint if single && (input.confirm || adjust) => {
             actions.push(MenuAction::ToggleViewpoint)
+        }
+        // Issue #194: Cross steps on too, as Button prompts.
+        Row::SplitTwoPlayers if single && (input.confirm || adjust) => {
+            if let Some(s) = m.split {
+                actions.push(MenuAction::SetSplitTwoPlayer(!s.top_and_bottom));
+            }
+        }
+        Row::SplitScreen(seat) if single && (input.confirm || adjust) => {
+            actions.push(MenuAction::MoveSplitScreen {
+                seat,
+                right: !input.left,
+            });
+        }
+        Row::SplitNameTags if single && (input.confirm || adjust) => {
+            if let Some(s) = m.split {
+                actions.push(MenuAction::SetSplitNameTags(!s.name_tags));
+            }
+        }
+        Row::SplitHudSize if single && (input.confirm || adjust) => {
+            if let Some(s) = m.split {
+                let n = HUD_SIZES.len() as u8;
+                let i = s.hud_size.min(n - 1);
+                let next = if input.left {
+                    (i + n - 1) % n
+                } else {
+                    (i + 1) % n
+                };
+                actions.push(MenuAction::SetSplitHudSize(next));
+            }
         }
         _ => {}
     }
@@ -1338,6 +1657,36 @@ pub(crate) fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
         ),
         Row::Quit if m.page.is_some() => (m.texts.quit.clone(), None),
         Row::Quit => ("Quit to Desktop".into(), None),
+        Row::SplitTwoPlayers => (
+            "Two Players".into(),
+            Some(
+                if m.split.is_some_and(|s| s.top_and_bottom) {
+                    "Top and Bottom"
+                } else {
+                    "Side by Side"
+                }
+                .into(),
+            ),
+        ),
+        // The seat's player by name, their screen's place beside it (issue #194 B22); the
+        // native panel ends a name too long for its row in an ellipsis (`text_in`).
+        Row::SplitScreen(seat) => (
+            m.split_names
+                .get(usize::from(seat))
+                .cloned()
+                .flatten()
+                .unwrap_or_else(|| format!("P{}", seat + 1)),
+            m.split.map(|s| s.screen_label(usize::from(seat)).into()),
+        ),
+        Row::SplitNameTags => (
+            "Name Tags".into(),
+            on_off(m.split.is_some_and(|s| s.name_tags)),
+        ),
+        Row::SplitHudSize => (
+            "HUD Size".into(),
+            m.split
+                .map(|s| HUD_SIZES[usize::from(s.hud_size).min(HUD_SIZES.len() - 1)].into()),
+        ),
     }
 }
 
@@ -1696,3 +2045,6 @@ mod pointer_navigation_tests;
 
 #[cfg(test)]
 mod game_menu_tests;
+
+#[cfg(test)]
+mod split_menu_tests;

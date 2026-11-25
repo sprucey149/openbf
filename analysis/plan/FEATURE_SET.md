@@ -1,6 +1,6 @@
 ## LOCKED FEATURE SET (maintainer's decisions, from 2026-08-30)
 
-Current scope is Instant Action, including flying vehicles, space battles and space maps. Items for other modes, splitscreen
+Current scope is Instant Action, including flying vehicles, space battles and space maps. Splitscreen (up to 4 players, with LAN) is planned in `analysis/plan/SPLITSCREEN.md` (issue #194). Items for other modes
 and LAN are decisions for later work, not current tasks.
 
 ### Standing decisions

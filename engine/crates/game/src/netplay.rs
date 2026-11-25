@@ -54,7 +54,10 @@ pub mod selfcheck;
 pub mod view;
 pub mod virtual_net;
 
-pub use apply::{apply, gate, install_humans, joining_humans, score, step, Applied, RoundState};
+pub use apply::{
+    apply, gate, gate_locals, gate_slot, install_humans, install_local_profile, joining_humans,
+    score, step, Applied, KeptSlot, RoundState, TEAM_KEPT,
+};
 pub use command::{
     cheat_bits, cheat_index, cheats_from_bits, validate_request, validate_request_bytes,
     GameCommand, GameRequest, LeftWhy, Refusal, ALL_CHEATS, ALL_SLOTS, CHEAT_COUNT,

@@ -290,6 +290,14 @@ pub fn hud_weapon(
 /// shows the settled HUD, not the first instant of its 3 s fade-in.
 const SETTLE_SECONDS: f32 = 10.0;
 
+/// One player's HUD state: the tree and the fades that follow their own unit. Everything else
+/// in [`HudView`] (art, textures, the GPU pass, the scratch geometry) is shared by every view.
+struct PlayerHud {
+    hud: Hud,
+    leaving: ui::hud::LeavingPulse,
+    settled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldMarkerStyle {
     pub texture_dir: PathBuf,
@@ -313,6 +321,14 @@ struct ReticleLayout {
 
 pub struct HudView {
     hud: Hud,
+    /// What [`build_hud`] needs to make another player's tree.
+    assets_dir: PathBuf,
+    layout: manifest::hud::HudLayout,
+    transforms: manifest::hud::HudLayout,
+    /// Whose state `hud`, `leaving` and `settled` hold (0 is the first player), and the others'
+    /// parked states by player index (the active player's entry is `None`).
+    active: usize,
+    parked: Vec<Option<PlayerHud>>,
     art: HudArt,
     /// Built at the first paint, where the device is at hand.
     pass: Option<HudPass>,
@@ -694,6 +710,72 @@ fn batch_height(verts: &[HudVertex], indices: &[u32], first: u32, count: u32) ->
     (hi - lo).fmax(0.0)
 }
 
+/// One player's HUD tree from the layout, with the installs every copy gets. The art it adds to
+/// `art` is keyed, so building it again for another player replaces rather than duplicates.
+fn build_hud(
+    assets_dir: &Path,
+    layout: &manifest::hud::HudLayout,
+    transforms: &manifest::hud::HudLayout,
+    mesh_files: &HashMap<String, PathBuf>,
+    art: &mut HudArt,
+) -> Hud {
+    let common = assets_dir.join("common_bf2");
+    let mut layout = layout.clone();
+    ui::hud::add_leaving_line(&mut layout);
+    ui::hud::add_spectate_lines(&mut layout);
+    let mut hud = Hud::new(&layout, transforms);
+    let bf2_weapons = assets_dir.join("side_bf2/weapons");
+    place_secondary_cutters(&mut hud, |name| {
+        mesh_files
+            .get(name)
+            .is_some_and(|path| path.parent() == Some(bf2_weapons.as_path()))
+    });
+    place_vehicle_chaingun(&mut hud);
+    // Fit Instant Action's command bars to this copy's device art.
+    art.instant_device = instant_device(assets_dir);
+    if let Some(thermal) = mesh_files
+        .get("hud_thermaldetonator")
+        .and_then(|path| load_mesh(path).ok())
+    {
+        grenade::install(&mut hud, art, &thermal);
+    }
+    // The DLC Force ball's icon, only beside the DLC bake's sheet for it.
+    if pak::is_file(
+        assets_dir
+            .join("side_bf2/textures")
+            .join(format!("{}.ktx2", fisto::SHEET)),
+    ) {
+        if let Some(donor) = mesh_files
+            .get(fisto::DONOR)
+            .and_then(|path| load_mesh(path).ok())
+        {
+            fisto::install(&mut hud, art, &donor);
+        }
+    }
+    // The two faded pills belong behind the weapon images, including
+    // bitmap fallbacks. Our per-model depth slices follow draw order,
+    // so the source ZOrder(8) would shade the default-128 item groups.
+    // Change only these siblings' presentation order; retain their
+    // transforms, alpha and internal mesh depth (also in flat PC trees).
+    for name in ["player1weapon1backdrop", "player1weapon2backdrop"] {
+        if let Some(i) = hud.find(name) {
+            if hud.elems[i].kind == Kind::Model3D {
+                hud.elems[i].z_order = u8::MAX;
+            }
+        }
+    }
+    hud.set_fonts(&art.fonts);
+    // The layout's own labels ("Victory In"), from BF2's text table.
+    if let Some(locl) = crate::event_feed::read_locl(&common) {
+        hud.set_texts(&|key| {
+            let t = locl.get(manifest::hud::locl_key(key))?;
+            Some(t.trim().to_owned())
+        });
+    }
+    ui::hud::place_countdown_labels(&mut hud);
+    hud
+}
+
 impl HudView {
     /// Hit-test the shell's actually laid-out, visible menu rows.
     pub fn shell_row_at(
@@ -729,6 +811,25 @@ impl HudView {
         let page = self.hud.spawn.as_ref()?;
         let font = self.art.menu_font(ui::typography::HELP.face.role());
         ui::spawn_draw::help_at(font, page, point, size)
+    }
+
+    /// [`HudView::spawn_help_at`] for local player `i`'s spawn page (their HUD state, selected
+    /// or parked, [`HudView::select_player`]) laid out in the screen `f` (a split cell,
+    /// `point` in its pixels).
+    pub fn spawn_help_at_in(
+        &self,
+        i: usize,
+        point: [f32; 2],
+        f: &ui::hud_draw::Frame,
+    ) -> Option<ui::spawn_draw::Help> {
+        let hud = if i == self.active {
+            &self.hud
+        } else {
+            &self.parked.get(i)?.as_ref()?.hud
+        };
+        let page = hud.spawn.as_ref()?;
+        let font = self.art.menu_font(ui::typography::HELP.face.role());
+        ui::spawn_draw::help_at_in(font, page, point, f)
     }
 
     pub fn stats_help_at(
@@ -805,59 +906,7 @@ impl HudView {
             assets_dir.join("side_bf2/locals/weapons"),
             assets_dir.join("side_bf1/locals/weapons"),
         ]);
-        let mut layout = layout;
-        ui::hud::add_leaving_line(&mut layout);
-        ui::hud::add_spectate_lines(&mut layout);
-        let mut hud = Hud::new(&layout, &transforms);
-        let bf2_weapons = assets_dir.join("side_bf2/weapons");
-        place_secondary_cutters(&mut hud, |name| {
-            mesh_files
-                .get(name)
-                .is_some_and(|path| path.parent() == Some(bf2_weapons.as_path()))
-        });
-        place_vehicle_chaingun(&mut hud);
-        // Fit Instant Action's command bars to this copy's device art.
-        art.instant_device = instant_device(assets_dir);
-        if let Some(thermal) = mesh_files
-            .get("hud_thermaldetonator")
-            .and_then(|path| load_mesh(path).ok())
-        {
-            grenade::install(&mut hud, &mut art, &thermal);
-        }
-        // The DLC Force ball's icon, only beside the DLC bake's sheet for it.
-        if pak::is_file(
-            assets_dir
-                .join("side_bf2/textures")
-                .join(format!("{}.ktx2", fisto::SHEET)),
-        ) {
-            if let Some(donor) = mesh_files
-                .get(fisto::DONOR)
-                .and_then(|path| load_mesh(path).ok())
-            {
-                fisto::install(&mut hud, &mut art, &donor);
-            }
-        }
-        // The two faded pills belong behind the weapon images, including
-        // bitmap fallbacks. Our per-model depth slices follow draw order,
-        // so the source ZOrder(8) would shade the default-128 item groups.
-        // Change only these siblings' presentation order; retain their
-        // transforms, alpha and internal mesh depth (also in flat PC trees).
-        for name in ["player1weapon1backdrop", "player1weapon2backdrop"] {
-            if let Some(i) = hud.find(name) {
-                if hud.elems[i].kind == Kind::Model3D {
-                    hud.elems[i].z_order = u8::MAX;
-                }
-            }
-        }
-        hud.set_fonts(&art.fonts);
-        // The layout's own labels ("Victory In"), from BF2's text table.
-        if let Some(locl) = crate::event_feed::read_locl(&common) {
-            hud.set_texts(&|key| {
-                let t = locl.get(manifest::hud::locl_key(key))?;
-                Some(t.trim().to_owned())
-            });
-        }
-        ui::hud::place_countdown_labels(&mut hud);
+        let hud = build_hud(assets_dir, &layout, &transforms, &mesh_files, &mut art);
         let pause_art = [ui::typography::ITEM.face, ui::typography::BODY.face]
             .iter()
             .all(|face| art.menu_font(face.role()).is_some())
@@ -865,6 +914,11 @@ impl HudView {
                 .all(|sheet| pak::is_file(common.join("textures").join(format!("{sheet}.ktx2"))));
         Ok(Self {
             hud,
+            assets_dir: assets_dir.to_path_buf(),
+            layout,
+            transforms,
+            active: 0,
+            parked: Vec::new(),
             art,
             pass: None,
             format,
@@ -901,6 +955,33 @@ impl HudView {
             movie: None,
             movie_frame: None,
         })
+    }
+
+    /// Make player `i`'s HUD state the one `update` feeds and `paint` draws (a new player's tree
+    /// is built on first use). Player 0 is the one every ordinary game has.
+    pub fn select_player(&mut self, i: usize) {
+        if i == self.active {
+            return;
+        }
+        if self.parked.len() <= i.max(self.active) {
+            self.parked.resize_with(i.max(self.active) + 1, || None);
+        }
+        let mut next = self.parked[i].take().unwrap_or_else(|| PlayerHud {
+            hud: build_hud(
+                &self.assets_dir,
+                &self.layout,
+                &self.transforms,
+                &self.mesh_files,
+                &mut self.art,
+            ),
+            leaving: Default::default(),
+            settled: false,
+        });
+        std::mem::swap(&mut self.hud, &mut next.hud);
+        std::mem::swap(&mut self.leaving, &mut next.leaving);
+        std::mem::swap(&mut self.settled, &mut next.settled);
+        self.parked[self.active] = Some(next);
+        self.active = i;
     }
 
     /// The icons the control prompts draw from the next layout on.
@@ -968,6 +1049,15 @@ impl HudView {
     ) {
         self.feed(model, dt, position);
         let frame = ui::hud_draw::draw(&self.hud, &self.art, size.map(|v| v as f32));
+        self.install_frame(frame);
+    }
+
+    /// [`HudView::update`] laid out for the screen `f`: a split cell's whole rectangle
+    /// ([`ui::hud_draw::Frame::cell`]), its items at the cell's edges, its projected pieces on
+    /// the cell's 4:3 band (`f.proj`), its spawn and stats pages centred in the band.
+    pub fn update_in(&mut self, model: &HudModel, dt: f32, f: &ui::hud_draw::Frame) {
+        self.feed(model, dt, Some([0.5, model.reticle_y]));
+        let frame = ui::hud_draw::draw_in(&self.hud, &self.art, f);
         self.install_frame(frame);
     }
 
@@ -1063,6 +1153,18 @@ impl HudView {
                 }
             }
         }
+    }
+
+    /// A split cell's lost-controller notice over the whole cell (`size`, its pixels), in its
+    /// HUD pass (`ui::hud_draw::draw_lost_cell`); paint it into the cell with
+    /// [`HudView::paint_in`].
+    pub fn update_lost(&mut self, notice: &ui::shell_ps2::players::LostCell, size: [u32; 2]) {
+        self.install_frame(ui::hud_draw::draw_lost_cell(
+            &self.hud,
+            &self.art,
+            notice,
+            size.map(|v| v as f32),
+        ));
     }
 
     pub fn can_draw_pause(&self) -> bool {
@@ -1276,6 +1378,16 @@ impl HudView {
             })
     }
 
+    /// The glyph boxes of the name tags the last layout drew (issue #194 B22,
+    /// [`ui::hud_draw::NAME_TAG_BOX`]), shadows left out.
+    pub fn name_tag_boxes(&self) -> Vec<[f32; 4]> {
+        self.boxes
+            .iter()
+            .filter(|(e, _)| *e == ui::hud_draw::NAME_TAG_BOX)
+            .map(|(_, b)| *b)
+            .collect()
+    }
+
     /// The squad cross's part `part` as the last [`HudView::update`] drew
     /// it: its window box and alpha.
     pub fn squad_part(&self, part: ui::hud_squad::Part) -> Option<([f32; 4], f32)> {
@@ -1373,6 +1485,31 @@ impl HudView {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         size: [u32; 2],
+    ) {
+        self.paint_rect(device, queue, encoder, view, size, None);
+    }
+
+    /// Paint the last [`HudView::update`] (laid out for the rectangle's size) into `rect` (x, y,
+    /// width, height) of the window's image: one view's cell of a split screen.
+    pub fn paint_in(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        rect: [u32; 4],
+    ) {
+        self.paint_rect(device, queue, encoder, view, [rect[2], rect[3]], Some(rect));
+    }
+
+    fn paint_rect(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        size: [u32; 2],
+        rect: Option<[u32; 4]>,
     ) {
         let (format, display) = (self.format, self.display);
         let pass = self
@@ -1517,16 +1654,28 @@ impl HudView {
                 count: b.count,
             });
         }
-        pass.paint(
-            &self.verts,
-            &self.indices,
-            &batches,
-            device,
-            queue,
-            encoder,
-            view,
-            size,
-        );
+        match rect {
+            Some(rect) => pass.paint_in(
+                &self.verts,
+                &self.indices,
+                &batches,
+                device,
+                queue,
+                encoder,
+                view,
+                rect,
+            ),
+            None => pass.paint(
+                &self.verts,
+                &self.indices,
+                &batches,
+                device,
+                queue,
+                encoder,
+                view,
+                size,
+            ),
+        }
     }
 }
 

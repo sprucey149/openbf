@@ -1106,7 +1106,7 @@ fn an_order_shows_the_cross_and_no_line() {
     }
 }
 
-/// Card SQHUD's count (the maintainer, INBOX 2026-09-30): the units the order
+/// Card SQHUD's count (Rex, INBOX 2026-09-30): the units the order
 /// changed. FOLLOW ME with five in reach shows 2, HOLD POSITION with
 /// three shows 3, a release the number released, nobody no number.
 #[test]
@@ -1545,24 +1545,21 @@ fn lan_lines_name_the_humans_by_their_session_names() {
     let (me, r0) = (s.me, s.rebels[0]);
     let bot = s.feed.unit_name(&s.sim, r0);
     assert_eq!(s.feed.unit_name(&s.sim, guest), "Player 2");
-    s.feed.set_player_names([(0, "the maintainer"), (1, "Kai")]);
+    s.feed.set_player_names([(0, "Rex"), (1, "Kai")]);
     let kill = |shooter, victim| Event::Kill { shooter, victim };
     let said = |lines: Vec<HudMessage>| lines.into_iter().map(|l| l.text).collect::<Vec<_>>();
     assert_eq!(
         said(happen(&mut s, &[kill(r0, me)])),
-        [format!("{bot} killed the maintainer")]
+        [format!("{bot} killed Rex")]
     );
-    assert_eq!(
-        said(happen(&mut s, &[kill(me, guest)])),
-        ["the maintainer killed Kai"]
-    );
+    assert_eq!(said(happen(&mut s, &[kill(me, guest)])), ["Rex killed Kai"]);
     assert_eq!(
         said(happen(&mut s, &[kill(guest, guest)])),
         ["Kai killed himself"]
     );
     assert_eq!(s.feed.unit_name(&s.sim, r0), bot, "a bot keeps its name");
     // Kai left the roster: his name stays for the round's lines and stats.
-    s.feed.set_player_names([(0, "the maintainer")]);
+    s.feed.set_player_names([(0, "Rex")]);
     assert_eq!(s.feed.unit_name(&s.sim, guest), "Kai");
 }
 
@@ -1582,6 +1579,112 @@ fn single_player_lines_name_the_human_by_his_profile() {
         [format!("{bot} killed Dawg")]
     );
     assert_eq!(s.feed.unit_name(&s.sim, me), "Dawg");
+}
+
+/// Issue #194 B4: a split battle's names come from the one table (`PlayerNames`), and each
+/// local player's own feed names both players by their profiles: a kill, a team kill and a
+/// death between P1 ("Luke") and P2 ("Han") read the same in P1's feed and in P2's.
+#[test]
+fn split_feeds_name_both_players_by_profile_in_kills_team_kills_and_deaths() {
+    let mut s = scene();
+    // P2 on the other team (the Rebels) in slot 1.
+    let han = s
+        .sim
+        .spawn(&UnitSpec::player_in_slot(1, 0, Vec3::new(44.0, 0.0, 0.0)))
+        .expect("P2");
+    let me = s.me;
+    let mut names = crate::player_names::PlayerNames::default();
+    names.set([(0, "Luke"), (1, "Han")]);
+    let mut p2_feed = EventFeed::new(texts(), ["all", "imp"], &["level.hoth.cp5".to_string()]);
+    s.feed.set_player_names(names.iter());
+    p2_feed.set_player_names(names.iter());
+    // Both views see every line, each through their own feed and unit.
+    let mut both = |s: &mut Scene, events: &[Event]| -> [Vec<String>; 2] {
+        s.sim.tick += 1;
+        s.sim.events = events.to_vec();
+        s.feed.tick(&s.sim, s.me);
+        p2_feed.tick(&s.sim, han);
+        let said = |l: Vec<HudMessage>| l.into_iter().map(|m| m.text).collect::<Vec<_>>();
+        [said(s.feed.take()), said(p2_feed.take())]
+    };
+    let kill = |shooter, victim| Event::Kill { shooter, victim };
+    let [p1, p2] = both(&mut s, &[kill(han, me)]);
+    assert_eq!(p1, ["Han killed Luke"]);
+    assert_eq!(p2, p1);
+    // P2 joins P1's team: P1's kill on him is a team kill.
+    s.sim.units[han.index as usize].team = 1;
+    let [p1, p2] = both(&mut s, &[kill(me, han)]);
+    assert_eq!(p1, ["Luke killed Han - [TK]"]);
+    assert_eq!(p2, p1);
+    let fell = Event::EnvDeath {
+        unit: han,
+        cause: DeathCause::Fall,
+    };
+    let [p1, p2] = both(&mut s, &[fell]);
+    assert_eq!(p1, ["Han died"]);
+    assert_eq!(p2, p1);
+    for line in [&p1, &p2].into_iter().flatten() {
+        assert!(!line.contains("Player "), "{line}");
+    }
+}
+
+/// Issue #194 B4: in a split battle every view starts its frame from every local slot's
+/// counts (`EventFeed::medals_seen`). P2 earns a medal: P2's own feed shows the medal line,
+/// P1's shows "Han earned ...", and neither repeats it. With one local player the seen map is
+/// still slot 0 at its profile's counts alone.
+#[test]
+fn p2s_medal_shows_in_p2s_feed_and_as_earned_in_p1s() {
+    use ui::hud::message_color;
+    let mut w = crate::walk::WalkSim::new(7, Vec3::ZERO, None);
+    let opening = [0; 9];
+    assert_eq!(
+        EventFeed::medals_seen(&w, opening),
+        std::collections::BTreeMap::from([(0u8, opening)]),
+        "one player: the own slot only"
+    );
+    let p2 = w.add_local_player(1, Some(1)).expect("slot 1 is free");
+    w.sim.install_medal_career(w.player, opening);
+    w.sim.install_slot_medal_career(1, p2, opening);
+    let mut names = crate::player_names::PlayerNames::default();
+    names.set([(0, "Luke"), (1, "Han")]);
+    let new_feed = || {
+        let mut f = EventFeed::new(texts(), ["all", "imp"], &[]);
+        f.set_player_names(names.iter());
+        f
+    };
+    let (mut p1_feed, mut p2_feed) = (new_feed(), new_feed());
+    let mut seen = [(); 2].map(|_| EventFeed::medals_seen(&w, opening));
+    assert!(seen[0].contains_key(&0) && seen[0].contains_key(&1));
+
+    let lines = |f: &mut EventFeed| -> Vec<(String, [u8; 3])> {
+        f.take().into_iter().map(|m| (m.text, m.color)).collect()
+    };
+    // The game's order on a tick: P1's view notes first (the tick hook), then P2's feed scores
+    // P2's points, then every view notes again (the windowed loop's second pass).
+    p1_feed.note_medals(&w.sim, w.local_unit(0), w.local_slot_of(0), &mut seen[0]);
+    assert!(lines(&mut p1_feed).is_empty(), "nothing earned yet");
+    w.sim.score_medal_points(w.local_unit(1), 36); // Han earns War Hero
+    p1_feed.note_medals(&w.sim, w.local_unit(0), w.local_slot_of(0), &mut seen[0]);
+    p2_feed.note_medals(&w.sim, w.local_unit(1), w.local_slot_of(1), &mut seen[1]);
+    let (p1, p2) = (lines(&mut p1_feed), lines(&mut p2_feed));
+    assert!(
+        p2.contains(&("War Hero".to_owned(), message_color::MEDAL)),
+        "P2 sees their own medal line: {p2:?}"
+    );
+    assert!(
+        p2.iter().all(|(t, _)| !t.contains("earned")),
+        "P2 is not told about their own medal as a spectator: {p2:?}"
+    );
+    assert!(
+        p1.iter().any(|(t, _)| t == "Han earned War Hero"),
+        "P1 sees P2's medal by P2's profile name: {p1:?}"
+    );
+    p1_feed.note_medals(&w.sim, w.local_unit(0), 0, &mut seen[0]);
+    p2_feed.note_medals(&w.sim, w.local_unit(1), 1, &mut seen[1]);
+    assert!(
+        p1_feed.take().is_empty() && p2_feed.take().is_empty(),
+        "once only"
+    );
 }
 
 #[test]

@@ -8,14 +8,22 @@
 //!   --net-host [--port P] [--map KEY] [--mode M] [--teams a,b]
 //!              [--players N] [--wait S] [--seconds S] [--name NAME]
 //!   --net-join ADDR[:PORT] [--seconds S] [--name NAME]
-//!   both: [--assets DIR] [--missions DIR]
+//!   both: [--assets DIR] [--missions DIR] [--locals N] [--away S]
 //!
-//! The host waits until `--players` humans (itself included, default 2) are
-//! connected or `--wait` seconds (default 60) pass, starts the round and
-//! plays `--seconds` (default 60) of it; a guest that connects later joins
-//! mid-round. A guest plays `--seconds` from the moment its round starts
-//! playing, or until the host ends; it gives up `GIVE_UP` seconds after that
-//! budget if its round never starts.
+//! The host waits until `--players` humans (every machine's locals and
+//! itself included, default 2) are connected or `--wait` seconds (default
+//! 60) pass, starts the round and plays `--seconds` (default 60) of it, or
+//! until the round's outcome (then it ends the round for everyone); a guest
+//! that connects later joins mid-round. A guest plays `--seconds` from the
+//! moment its round starts playing, or until the host ends; it gives up
+//! `GIVE_UP` seconds after that budget if its round never starts.
+//!
+//! `--locals N` (1 to 4, default 1; issue #194): this machine plays N
+//! players, each on its own scripted pad, as a splitscreen machine does (a
+//! guest's `Hello` asks a slot for each, all or none; the host adds its own
+//! with `HostCommand::AddLocal`). `--away S`: S seconds into the round the
+//! machine's last local loses its pad for `AWAY_FOR` seconds, then gets it
+//! back (`Peer::set_local_away`: the round seats it again as it left).
 //!
 //! The last line is the verdict ([`verdict`]): `PASS` with the number of
 //! hash checks, or exit status 1 when nothing was compared (no other player,
@@ -33,6 +41,11 @@ const STATUS_EVERY: Duration = Duration::from_secs(2);
 /// A guest whose round has not started this long after its `--seconds`
 /// stops waiting.
 const GIVE_UP: f64 = 120.0;
+/// How long an `--away` local's pad stays gone.
+const AWAY_FOR: f64 = 10.0;
+/// The host lingers this long after its round ended, so the guests step and
+/// hash-check its last ticks before its link closes.
+const LINGER: Duration = Duration::from_secs(3);
 
 /// The soak's verdict: a pass needs another player, at least one hash
 /// check, equal static digests and no desync. `trouble` says why the session
@@ -69,6 +82,8 @@ struct Args {
     assets: PathBuf,
     missions: PathBuf,
     addr: Option<String>,
+    locals: usize,
+    away: Option<f64>,
 }
 
 fn parse(args: &[String], join: bool) -> Result<Args> {
@@ -84,6 +99,8 @@ fn parse(args: &[String], join: bool) -> Result<Args> {
         assets: "assets_baked".into(),
         missions: "missions".into(),
         addr: None,
+        locals: 1,
+        away: None,
     };
     let mut it = args.iter();
     if join {
@@ -106,6 +123,15 @@ fn parse(args: &[String], join: bool) -> Result<Args> {
             "--name" => a.name = Some(val()?.clone()),
             "--assets" => a.assets = val()?.into(),
             "--missions" => a.missions = val()?.into(),
+            "--locals" => {
+                a.locals = val()?.parse()?;
+                anyhow::ensure!(
+                    (1..=net::MAX_LOCALS).contains(&a.locals),
+                    "--locals 1 to {}",
+                    net::MAX_LOCALS
+                );
+            }
+            "--away" => a.away = Some(val()?.parse()?),
             other => bail!("unknown flag: {other}"),
         }
     }
@@ -197,15 +223,22 @@ fn log_notices(notices: &[Notice]) {
     }
 }
 
-/// Steps one frame of a built round with the scripted pad.
+/// Steps one frame of a built round with every local player's scripted pad
+/// (local 0 first).
 fn play<L: Link>(peer: &mut Peer, link: &mut L, round: &mut Option<Round>, dt: f64) {
     if let Some(r) = round.as_mut() {
-        let pad = game::netplay::virtual_net::scripted_pad(peer.local_slot, r.walk.sim.tick);
+        let tick = r.walk.sim.tick;
+        let pads: Vec<_> = (0..peer.local_count())
+            .map(|k| {
+                let slot = peer.local_slot_of(k).unwrap_or(peer.local_slot);
+                game::netplay::virtual_net::scripted_pad(slot, tick)
+            })
+            .collect();
         let stats = &mut r.stats;
-        peer.frame(
+        peer.frame_locals(
             link,
             dt,
-            pad,
+            &pads,
             &mut r.walk,
             Some(&mut r.feed),
             |walk, _, _| {
@@ -215,6 +248,42 @@ fn play<L: Link>(peer: &mut Peer, link: &mut L, round: &mut Option<Round>, dt: f
             },
         );
     }
+}
+
+/// `--away`'s phase: 0 before, 1 while the last local's pad is gone, 2 once
+/// it is back. `played` is the seconds since the round started.
+fn step_away<L: Link>(peer: &mut Peer, link: &mut L, a: &Args, played: f64, phase: &mut u8) {
+    let Some(at) = a.away else {
+        return;
+    };
+    let last = peer.local_count().saturating_sub(1);
+    let slot = peer.local_slot_of(last);
+    if *phase == 0 && played >= at {
+        peer.set_local_away(link, last, true);
+        *phase = 1;
+        println!("local {last} (slot {slot:?}): pad away");
+    } else if *phase == 1 && played >= at + AWAY_FOR {
+        peer.set_local_away(link, last, false);
+        *phase = 2;
+        println!("local {last} (slot {slot:?}): pad back");
+    }
+}
+
+/// Every local player's slot and whether the round seats it now.
+fn seated(peer: &Peer, round: &Option<Round>) -> Vec<(u8, bool)> {
+    (0..peer.local_count())
+        .filter_map(|k| peer.local_slot_of(k))
+        .map(|s| {
+            let on = round.as_ref().is_some_and(|r| {
+                r.walk
+                    .sim
+                    .players
+                    .get(usize::from(s))
+                    .is_some_and(Option::is_some)
+            });
+            (s, on)
+        })
+        .collect()
 }
 
 pub(super) fn host(args: &[String]) -> Result<()> {
@@ -227,6 +296,24 @@ pub(super) fn host(args: &[String]) -> Result<()> {
     config.profile = profile.encode();
     let mut link: NetSession<HostCore> = NetSession::host(config, transport);
     let mut peer = Peer::host();
+    // The host machine's further players (splitscreen B19), each on its own profile.
+    let local_profile = |k: usize| {
+        let mut p = super::net_soak::scripted_profile(10 + k as u8);
+        p.name = format!("{}_{k}", profile.name);
+        p
+    };
+    for k in 1..a.locals {
+        let p = local_profile(k);
+        Link::host(
+            &mut link,
+            net::HostCommand::AddLocal {
+                seat: k as u8,
+                name: p.name.clone(),
+                profile: p.encode(),
+            },
+        );
+    }
+    let mut host_locals: BTreeMap<u8, (String, game::netplay::PlayerProfile)> = BTreeMap::new();
     let mut scenes = Scenes::default();
     // Load the map before anyone waits on it.
     let source_game = scenes
@@ -250,12 +337,26 @@ pub(super) fn host(args: &[String]) -> Result<()> {
     let mut last = Instant::now();
     let mut status = Instant::now();
     let mut peak_guests = 0;
+    let mut away_phase = 0;
+    let mut ended_at: Option<Instant> = None;
     loop {
         let notices = peer.poll(&mut link);
         log_notices(&notices);
+        for n in &notices {
+            if let Notice::LocalAdded {
+                seat,
+                added: Ok((slot, name)),
+            } = n
+            {
+                let mut p = local_profile(usize::from(*seat));
+                p.name.clone_from(name);
+                host_locals.insert(*slot, (name.clone(), p));
+            }
+        }
         peak_guests = peak_guests.max(peer.guests().len());
-        let ready =
-            1 + peer.guests().len() >= a.players || opened.elapsed().as_secs_f64() >= a.wait;
+        let humans = peer.local_count() + peer.guests().len();
+        let locals_in = peer.local_count() >= a.locals;
+        let ready = locals_in && (humans >= a.players || opened.elapsed().as_secs_f64() >= a.wait);
         if round.is_none() && ready {
             let armies = a
                 .teams
@@ -275,6 +376,15 @@ pub(super) fn host(args: &[String]) -> Result<()> {
                 cheats: 0,
                 profile: profile.clone(),
             });
+            for (slot, (name, p)) in &host_locals {
+                setup.humans.push(HumanSeat {
+                    slot: *slot,
+                    name: name.clone(),
+                    team: None,
+                    cheats: 0,
+                    profile: p.clone(),
+                });
+            }
             for (slot, g) in peer.guests() {
                 setup.humans.push(HumanSeat {
                     slot: *slot,
@@ -298,6 +408,25 @@ pub(super) fn host(args: &[String]) -> Result<()> {
         let dt = last.elapsed().as_secs_f64();
         last = Instant::now();
         play(&mut peer, &mut link, &mut round, dt);
+        if let Some(t) = started_at {
+            step_away(
+                &mut peer,
+                &mut link,
+                &a,
+                t.elapsed().as_secs_f64(),
+                &mut away_phase,
+            );
+        }
+        // The round's outcome: the host ends its bundles for everyone (LAN §4.8).
+        if ended_at.is_none() && round.as_ref().is_some_and(|r| r.walk.sim.outcome.is_some()) {
+            Link::host(&mut link, net::HostCommand::EndRound);
+            ended_at = Some(Instant::now());
+            println!(
+                "round decided at tick {}: outcome {:?}",
+                peer.next_tick(),
+                round.as_ref().and_then(|r| r.walk.sim.outcome)
+            );
+        }
         if status.elapsed() >= STATUS_EVERY {
             status = Instant::now();
             let s = link.stats();
@@ -323,9 +452,12 @@ pub(super) fn host(args: &[String]) -> Result<()> {
                 peer.pacer().dilation(),
             );
         }
-        let done = started_at.is_some_and(|t| t.elapsed().as_secs_f64() >= a.seconds)
-            || peer.mode() == Mode::Ended;
-        if done {
+        let timed_out = started_at.is_some_and(|t| t.elapsed().as_secs_f64() >= a.seconds);
+        if timed_out && ended_at.is_none() {
+            Link::host(&mut link, net::HostCommand::EndRound);
+            ended_at = Some(Instant::now());
+        }
+        if ended_at.is_some_and(|t| t.elapsed() >= LINGER) {
             break;
         }
         std::thread::sleep(FRAME.saturating_sub(last.elapsed()));
@@ -337,6 +469,9 @@ pub(super) fn host(args: &[String]) -> Result<()> {
         "ticks": peer.next_tick(),
         "guests": peer.guests().len(),
         "peak_guests": peak_guests,
+        "locals": seated(&peer, &round),
+        "away": away_phase,
+        "outcome": round.as_ref().and_then(|r| r.walk.sim.outcome),
         "stats": peer.stats,
         "net": link.stats(),
     });
@@ -362,6 +497,14 @@ pub(super) fn join(args: &[String]) -> Result<()> {
     let mut config = ClientConfig::new(game::netplay::build_id(), profile.name.clone(), token);
     config.profile = profile.encode();
     config.content = game::netplay::ContentManifest::scan(&a.assets).encode();
+    // This machine's further players (splitscreen B19): its `Hello` asks a slot for each.
+    config.locals = (1..a.locals)
+        .map(|k| net::LocalHello {
+            seat: k as u8,
+            name: format!("{}_{k}", profile.name),
+            profile: super::net_soak::scripted_profile(20 + k as u8).encode(),
+        })
+        .collect();
     let mut link: NetSession<ClientCore> = NetSession::join(config, host, transport);
     let mut peer = Peer::client();
     let mut scenes = Scenes::default();
@@ -377,6 +520,7 @@ pub(super) fn join(args: &[String]) -> Result<()> {
     let mut status = Instant::now();
     let mut end = None;
     let mut host_left = false;
+    let mut away_phase = 0;
     loop {
         let notices = peer.poll(&mut link);
         log_notices(&notices);
@@ -410,6 +554,15 @@ pub(super) fn join(args: &[String]) -> Result<()> {
         let dt = last.elapsed().as_secs_f64();
         last = Instant::now();
         play(&mut peer, &mut link, &mut round, dt);
+        if let Some(t) = started_at {
+            step_away(
+                &mut peer,
+                &mut link,
+                &a,
+                t.elapsed().as_secs_f64(),
+                &mut away_phase,
+            );
+        }
         if status.elapsed() >= STATUS_EVERY {
             status = Instant::now();
             let s = link.stats();
@@ -440,6 +593,9 @@ pub(super) fn join(args: &[String]) -> Result<()> {
     let summary = serde_json::json!({
         "role": "guest",
         "slot": peer.local_slot,
+        "locals": seated(&peer, &round),
+        "away": away_phase,
+        "outcome": round.as_ref().and_then(|r| r.walk.sim.outcome),
         "build": game::netplay::build_id(),
         "target": game::netplay::target(),
         "ticks": peer.next_tick(),

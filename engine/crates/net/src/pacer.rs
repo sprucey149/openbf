@@ -111,6 +111,20 @@ impl InputPacer {
         }
     }
 
+    /// A pacer for another local player of this machine (splitscreen over
+    /// LAN): this one's input clock and controller, with no pads of its
+    /// own yet. Fed the same frames and the same host reports, the two
+    /// send the same number of input ticks every frame (the count is the
+    /// clock's alone; the pads only merge within a tick), so every local's
+    /// inputs number the same sequences.
+    pub fn follower(&self) -> Self {
+        Self {
+            runs: VecDeque::new(),
+            last_sent: PadState::default(),
+            ..self.clone()
+        }
+    }
+
     /// The current input clock dilation (−0.04..=0.04).
     pub fn dilation(&self) -> f64 {
         self.rate

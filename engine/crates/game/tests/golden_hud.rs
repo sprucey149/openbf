@@ -80,6 +80,7 @@ fn model() -> ui::hud::HudModel {
         hit_body: None,
         spawn: None,
         scope: None,
+        name_tags: Vec::new(),
     }
 }
 

@@ -50,7 +50,7 @@ pub use host::{
     HostConfig, HostCore, HostStats, LeaveReason, NetEvent, PeerStats, DEFAULT_LAG_COMP_CAP,
 };
 pub use linksim::{LinkParams, LinkSim, LinkSimTransport};
-pub use msg::{RejectReason, RosterEntry};
+pub use msg::{local_token, LocalHello, RejectReason, RosterEntry, MAX_LOCALS};
 pub use pacer::{InputPacer, Playback};
 pub use packet::{DEFAULT_PORT, MAX_DATAGRAM, PROTOCOL};
 pub use session::{ClientCommand, HostCommand, NetSession, SessionCore};

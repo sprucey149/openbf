@@ -19,7 +19,7 @@ With --base (land.py passes main) and a card, `check` also refuses a `rebake=` g
 
 Closures: every group depends on the bake's main.rs and lib.rs, the mungefs, manifest, audio and pak crates, the
 workspace manifests, the part of Cargo.lock the bake builds from and scripts/rebake.sh. The visual groups (tat1, tat2,
-maps, common, side, dlc, classes) depend on all of bake/src: their bakers share most modules. sounds, global-sound,
+maps, common, side, dlc, classes, and catalog, the mods' stock resource catalog) depend on all of bake/src: their bakers share most modules. sounds, global-sound,
 beep and load depend only on the modules their entry modules reach. extract-iso depends on the shared set (mungefs
 holds the PS2 extractor) plus bake/src/xbox.rs (the Xbox one). Test-only files (tests/, examples/, tests.rs,
 *_tests.rs, a trailing #[cfg(test)] module) and versions.rs itself are left out.
@@ -42,7 +42,7 @@ SCHEMA = 1
 SHARED = ("engine/crates/bake/Cargo.toml", "engine/crates/bake/src/main.rs", "engine/crates/bake/src/lib.rs",
           "engine/crates/mungefs", "engine/crates/manifest", "engine/crates/audio", "engine/crates/pak",
           "engine/Cargo.toml", "scripts/rebake.sh")
-VISUAL = ("tat1", "tat2", "maps", "common", "side", "dlc", "classes")
+VISUAL = ("tat1", "tat2", "maps", "common", "side", "dlc", "classes", "catalog")
 # The modules each small group's subcommands call (bake/src/main.rs), from which its closure is found.
 ENTRY = {"sounds": ("sounds", "sound_names"), "global-sound": ("global_sound",), "beep": ("beep",),
          "load": ("loadscreen",), "extract-iso": ()}

@@ -516,6 +516,11 @@ impl VehicleVisuals {
         self.flags.set_viewer_team(team);
     }
 
+    /// Each CTF flag's relation colour for the viewer set last ([`Self::set_ctf_viewer`]).
+    pub fn ctf_flag_tints(&self, sim: &core::sim::Sim) -> Vec<Option<[f32; 3]>> {
+        self.flags.viewer_tints(sim)
+    }
+
     /// Each unit's drawn `bone_ribcage` (`SoldierVisuals::jet_frames`),
     /// where a flag carried on foot draws.
     pub fn set_flag_ribcage(&mut self, frames: Option<Vec<Option<Mat4>>>) {

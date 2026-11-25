@@ -430,6 +430,53 @@ impl HudPass {
         view: &wgpu::TextureView,
         size: [u32; 2],
     ) {
+        self.paint_rect(
+            vertices, indices, batches, device, queue, encoder, view, size, None,
+        );
+    }
+
+    /// Like [`HudPass::paint`], into the rectangle `rect` (x, y, w, h in `view` pixels) of a
+    /// larger target: the vertices are laid out for the rectangle's size, the viewport and the
+    /// scissor are the rectangle, and the depth target is the whole view's size (an attachment
+    /// must match the colour's).
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_in(
+        &mut self,
+        vertices: &[HudVertex],
+        indices: &[u32],
+        batches: &[HudBatch],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        rect: [u32; 4],
+    ) {
+        self.paint_rect(
+            vertices,
+            indices,
+            batches,
+            device,
+            queue,
+            encoder,
+            view,
+            [rect[2], rect[3]],
+            Some(rect),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_rect(
+        &mut self,
+        vertices: &[HudVertex],
+        indices: &[u32],
+        batches: &[HudBatch],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        size: [u32; 2],
+        rect: Option<[u32; 4]>,
+    ) {
         if batches.is_empty() || vertices.is_empty() || size[0] == 0 || size[1] == 0 {
             return;
         }
@@ -471,10 +518,18 @@ impl HudPass {
             bytemuck::cast_slice(indices),
             wgpu::BufferUsages::INDEX,
         );
-        if !matches!(&self.depth, Some((_, s)) if *s == size) {
+        // The depth attachment matches the colour target, which is the whole window for a rect.
+        let target = match rect {
+            Some(_) => {
+                let t = view.texture();
+                [t.width(), t.height()]
+            }
+            None => size,
+        };
+        if !matches!(&self.depth, Some((_, s)) if *s == target) {
             self.depth = Some((
-                crate::device::create_depth_texture(device, size[0], size[1]),
-                size,
+                crate::device::create_depth_texture(device, target[0], target[1]),
+                target,
             ));
         }
         let (Some((vbuf, _)), Some((ibuf, _)), Some((depth, _))) =
@@ -511,6 +566,10 @@ impl HudPass {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
+        if let Some([x, y, w, h]) = rect {
+            pass.set_viewport(x as f32, y as f32, w as f32, h as f32, 0.0, 1.0);
+            pass.set_scissor_rect(x, y, w, h);
+        }
         pass.set_bind_group(0, &self.screen_bg, &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);

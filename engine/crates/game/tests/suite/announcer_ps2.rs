@@ -475,7 +475,7 @@ fn a_sim_battle_speaks_through_the_frame_hook() {
                 _ => {}
             }
         }
-        let line = voice.frame(&walk.sim, walk.player, DT, |_| Some(2.0));
+        let line = voice.frame(&walk.sim, Some(walk.player), DT, |_| Some(2.0));
         asked.extend(voice.asked.iter().map(|l| l.name.clone()));
         if let Some(l) = line {
             assert!(t + 1e-3 >= busy_until, "{} cut a line off at {t}", l.name);
@@ -593,7 +593,7 @@ fn uta1_last_stand_bleeds_three_seconds_at_every_post_event() {
             last_event = t;
             k += 1;
         }
-        voice.frame(&walk.sim, walk.player, DT, |_| Some(2.0));
+        voice.frame(&walk.sim, Some(walk.player), DT, |_| Some(2.0));
         let rate = voice.script_bleed.as_ref().unwrap().rates();
         assert_eq!(rate[0], 0.0, "CIS never bleeds in this scene");
         for l in &voice.asked {

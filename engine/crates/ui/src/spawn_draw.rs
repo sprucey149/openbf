@@ -32,7 +32,7 @@
 //! Hor+: the stack and the panel keep their place relative to the centre,
 //! a left help line to the left edge, a right one to the right edge.
 
-use crate::hud_draw::{anchor_shift, color, frame_scale, Ctx, Quad, Screen, OVERFILL};
+use crate::hud_draw::{color, Ctx, Frame, Panel, Quad, Screen};
 use crate::hud_tree::{HAlign, FRAME_H, FRAME_W};
 use crate::input_icons::Prompt;
 use glam::{Mat4, Vec3};
@@ -299,13 +299,21 @@ impl Ctx<'_> {
         bottom: f32,
     ) {
         let icon = self.art.icons.sheet(prompt);
-        let (a, ix) = if right {
-            (Anchor::Right, SAFE_X[1] - ICON[0])
-        } else {
-            (Anchor::Left, SAFE_X[0])
-        };
+        let a = if right { Anchor::Right } else { Anchor::Left };
         let mut s = screen_at(size, a);
         s.origin[1] += bottom - size[1];
+        self.help_icon_on(&s, right, icon, text);
+    }
+
+    /// A help line on the shell screen `s` itself (a Players screen region's box, issue #194):
+    /// `icon` at its safe area's edge, `text` beside it on the inside.
+    pub(crate) fn help_icon_on(&mut self, s: &Screen, right: bool, icon: &str, text: &str) {
+        let s = *s;
+        let ix = if right {
+            SAFE_X[1] - ICON[0]
+        } else {
+            SAFE_X[0]
+        };
         let top = HELP_Y - ICON[1] * 0.5;
         self.sheet(
             &s,
@@ -346,7 +354,13 @@ impl Ctx<'_> {
         );
     }
 
-    pub(crate) fn spawn_page(&mut self, page: &SpawnPage, size: [f32; 2]) {
+    /// A help line in the panel `p`, at its real bottom.
+    fn panel_help(&mut self, p: &Panel, right: bool, prompt: Prompt, text: &str) {
+        self.help_bottom(p.size, right, prompt, text, p.bottom);
+    }
+
+    /// The page in the centred panel `p` ([`crate::hud_draw::Frame::panel`]).
+    pub(crate) fn spawn_page(&mut self, page: &SpawnPage, p: &Panel) {
         match page {
             SpawnPage::Side {
                 title,
@@ -354,7 +368,7 @@ impl Ctx<'_> {
                 selected,
                 select,
             } => {
-                let s = screen_at(size, Anchor::Centre);
+                let s = p.screen(Anchor::Centre);
                 let [x0, x1] = SIDE_STACK_X;
                 let lh = TITLE.size;
                 let cx = (x0 + x1) * 0.5;
@@ -377,12 +391,12 @@ impl Ctx<'_> {
                     let mid = r[1] + (ROW_H - ITEM.size) * 0.5;
                     self.text(&s, &ITEM, text, (cx, mid), HAlign::Center, style);
                 }
-                self.help(size, true, Prompt::SpawnAccept, select);
+                self.panel_help(p, true, Prompt::SpawnAccept, select);
             }
             SpawnPage::Map { objective, legend } => {
-                self.map_spawn(size);
-                self.map_legend(size, legend);
-                self.objective(size, objective);
+                self.map_spawn(p);
+                self.map_legend(p, legend);
+                self.objective(p, objective);
             }
             SpawnPage::Class {
                 title,
@@ -391,7 +405,7 @@ impl Ctx<'_> {
                 accept,
                 ..
             } => {
-                let s = screen_at(size, Anchor::Centre);
+                let s = p.screen(Anchor::Centre);
                 self.bar(&s, CLASS_TAB, TITLE_PIECES);
                 self.text_in(&s, &TITLE, title, CLASS_TAB, tint::TITLE);
                 self.bordered(&s, CLASS_BOX);
@@ -401,8 +415,8 @@ impl Ctx<'_> {
                     let line = self.ellipsized(&BODY, line, room);
                     self.text(&s, &BODY, &line, at, HAlign::Left, tint::BODY);
                 }
-                self.help(size, false, Prompt::SpawnBack, back);
-                self.help(size, true, Prompt::SpawnAccept, accept);
+                self.panel_help(p, false, Prompt::SpawnBack, back);
+                self.panel_help(p, true, Prompt::SpawnAccept, accept);
             }
         }
     }
@@ -415,23 +429,11 @@ fn objective_lines(font: &manifest::hud::HudFont, text: &str) -> Vec<String> {
     crate::typography::wrap(font, &LIST, &flat, width)
 }
 
-/// The HUD tree's mapping (`crate::hud_draw::draw`'s root screen) for an
-/// element at viewport x `fx`.
-fn tree_screen(size: [f32; 2], fx: f32) -> Screen {
-    Screen {
-        origin: [
-            OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(fx, size),
-            OVERFILL[1].0 * size[1],
-        ],
-        scale: frame_scale(size),
-    }
-}
-
 impl Ctx<'_> {
     /// The spawn map's legend: the post icon, the D-pad and the three
     /// lines; a text's leading `{btna}` is the accept icon, a line high.
-    fn map_legend(&mut self, size: [f32; 2], texts: &[String; 3]) {
-        let s = tree_screen(size, LEGEND_AT[0]);
+    fn map_legend(&mut self, p: &Panel, texts: &[String; 3]) {
+        let s = p.tree(LEGEND_AT[0]);
         let at = |x: f32, y: f32| ((LEGEND_AT[0] + x) * FRAME_W, (LEGEND_AT[1] + y) * FRAME_H);
         let full = [0.0, 0.0, 1.0, 1.0];
         let rect = |[x, y, w, h]: [f32; 4]| {
@@ -471,11 +473,11 @@ impl Ctx<'_> {
     }
 
     /// The mission's objective, word-wrapped to its list's width.
-    fn objective(&mut self, size: [f32; 2], text: &str) {
+    fn objective(&mut self, p: &Panel, text: &str) {
         let Some(font) = self.face(LIST.face) else {
             return;
         };
-        let s = tree_screen(size, OBJECTIVE_AT[0]);
+        let s = p.tree(OBJECTIVE_AT[0]);
         let lines = objective_lines(font, text);
         let pitch = LIST.line;
         let x = OBJECTIVE_AT[0] * FRAME_W + OBJECTIVE_INSET[0];
@@ -490,13 +492,25 @@ impl Ctx<'_> {
 /// Where a shell-space point lands in a `size` window under the centre
 /// anchor (tests and the golden's checks).
 pub fn window_point(p: [f32; 2], size: [f32; 2]) -> [f32; 2] {
-    screen_at(size, Anchor::Centre).map(Vec3::new(p[0], p[1], 0.0))
+    window_point_in(p, &Frame::window(size))
+}
+
+/// [`window_point`] in the screen `f` (its centred panel).
+pub fn window_point_in(p: [f32; 2], f: &Frame) -> [f32; 2] {
+    f.panel()
+        .screen(Anchor::Centre)
+        .map(Vec3::new(p[0], p[1], 0.0))
 }
 
 /// Hit-test the "Select a team" screen rows in a `size` window.
 /// Returns `Some(row_idx)` where 0 = Team 1, 1 = Team 2, 2 = Auto Assign.
 pub fn side_row_at(point: [f32; 2], size: [f32; 2], row_count: usize) -> Option<usize> {
-    let s = screen_at(size, Anchor::Centre);
+    side_row_at_in(point, &Frame::window(size), row_count)
+}
+
+/// [`side_row_at`] in the screen `f`, `point` in its pixels.
+pub fn side_row_at_in(point: [f32; 2], f: &Frame, row_count: usize) -> Option<usize> {
+    let s = f.panel().screen(Anchor::Centre);
     let sx = (point[0] - s.origin[0]) / s.scale[0];
     let sy = (point[1] - s.origin[1]) / s.scale[1];
     let [x0, x1] = SIDE_STACK_X;
@@ -529,12 +543,24 @@ pub const HELP_PAD: [f32; 2] = [4.0, 12.0];
 /// The window point of the middle of a help line's icon (left or `right`)
 /// in a `size` window ([`Ctx::help`]'s layout).
 pub fn help_icon_point(size: [f32; 2], right: bool) -> [f32; 2] {
+    help_icon_point_in(&Frame::window(size), right)
+}
+
+/// [`help_icon_point`] in the screen `f` (the footer at its real bottom).
+pub fn help_icon_point_in(f: &Frame, right: bool) -> [f32; 2] {
     let (a, ix) = if right {
         (Anchor::Right, SAFE_X[1] - ICON[0])
     } else {
         (Anchor::Left, SAFE_X[0])
     };
-    screen_at(size, a).map(Vec3::new(ix + ICON[0] * 0.5, HELP_Y, 0.0))
+    help_screen(&f.panel(), a).map(Vec3::new(ix + ICON[0] * 0.5, HELP_Y, 0.0))
+}
+
+/// The screen a help line under anchor `a` is laid out in ([`Ctx::help_bottom`]).
+fn help_screen(p: &Panel, a: Anchor) -> Screen {
+    let mut s = screen_at(p.size, a);
+    s.origin[1] += p.bottom - p.size[1];
+    s
 }
 
 /// Which of `page`'s help lines holds the window point `point` of a `size`
@@ -547,6 +573,16 @@ pub fn help_at(
     point: [f32; 2],
     size: [f32; 2],
 ) -> Option<Help> {
+    help_at_in(font, page, point, &Frame::window(size))
+}
+
+/// [`help_at`] in the screen `f`, `point` in its pixels.
+pub fn help_at_in(
+    font: Option<&manifest::hud::HudFont>,
+    page: &SpawnPage,
+    point: [f32; 2],
+    f: &Frame,
+) -> Option<Help> {
     let lines: Vec<(bool, &str, Help)> = match page {
         SpawnPage::Side { select, .. } => vec![(true, select.as_str(), Help::Accept)],
         SpawnPage::Class { back, accept, .. } => vec![
@@ -555,17 +591,19 @@ pub fn help_at(
         ],
         SpawnPage::Map { .. } => Vec::new(),
     };
-    lines.into_iter().find_map(|(right, text, help)| {
-        help_line_at(font, right, text, point, size).then_some(help)
-    })
+    lines
+        .into_iter()
+        .find_map(|(right, text, help)| help_line_at(font, right, text, point, f).then_some(help))
 }
 
+/// Whether the point `point` of the screen `f` is on one help line (its icon and label, the
+/// right-hand one when `right`), padded by [`HELP_PAD`].
 pub(crate) fn help_line_at(
     font: Option<&manifest::hud::HudFont>,
     right: bool,
     text: &str,
     point: [f32; 2],
-    size: [f32; 2],
+    f: &Frame,
 ) -> bool {
     let width = font.map_or(8.0 * text.chars().count() as f32, |f| {
         crate::typography::width(f, &HELP, text)
@@ -577,7 +615,7 @@ pub(crate) fn help_line_at(
         let ix = SAFE_X[0];
         (Anchor::Left, ix, ix + ICON[0] + ICON_GAP + width)
     };
-    let s = screen_at(size, a);
+    let s = help_screen(&f.panel(), a);
     let sx = (point[0] - s.origin[0]) / s.scale[0];
     let sy = (point[1] - s.origin[1]) / s.scale[1];
     sx >= x0 - HELP_PAD[0] && sx <= x1 + HELP_PAD[0] && (sy - HELP_Y).abs() <= HELP_PAD[1]

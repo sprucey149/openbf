@@ -39,6 +39,7 @@ use core::sim::{buttons, PadState};
 use gilrs::Button;
 
 mod flight;
+pub mod owners;
 
 pub use flight::{flyer_sticks, FlightControls};
 
@@ -656,7 +657,7 @@ pub fn usable_pads<Id>(
         .collect()
 }
 
-fn usable_ids(g: &gilrs::Gilrs) -> Vec<gilrs::GamepadId> {
+pub fn usable_ids(g: &gilrs::Gilrs) -> Vec<gilrs::GamepadId> {
     usable_pads(
         g.gamepads()
             .map(|(id, pad)| (id, pad_kind(&pad), hw_id(&pad))),

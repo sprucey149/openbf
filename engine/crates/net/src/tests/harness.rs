@@ -103,6 +103,26 @@ pub struct Client {
     pub auto_load: bool,
     /// When the last `Start` arrived.
     pub start_at: Option<Micros>,
+    /// FNV-1a over every datagram this client sent, in order.
+    pub sent_hash: u64,
+    /// Extra local players on this machine: each submits a pad of its own
+    /// (from `extra_rng`) beside every pad of `player`, under one sequence.
+    pub extra_locals: usize,
+    pub extra_rng: Lcg,
+    /// What each extra local submitted.
+    pub extra_submitted: Vec<Vec<PadState>>,
+}
+
+/// How [`Net`] hands the host's players' pads to its core.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostSubmit {
+    /// `submit_input_for` per slot, between updates.
+    Direct,
+    /// One [`HostCommand::SubmitInputsFor`] per frame, as `NetSession` sends.
+    Session,
+    /// One [`HostCommand::SubmitInputFor`] per slot with the thread's update
+    /// run between slot 0's and the rest (the old per-slot stream).
+    TornSession,
 }
 
 pub struct Net {
@@ -110,6 +130,19 @@ pub struct Net {
     pub now: Micros,
     pub host: HostCore,
     pub host_player: Player,
+    /// The host's extra local players ([`HostCore::add_local`] slots): each
+    /// submits a pad of its own (from `host_extra_rng`) beside every pad of
+    /// `host_player`.
+    pub host_extra: Vec<u8>,
+    pub host_extra_rng: Lcg,
+    /// What each of `host_extra` submitted.
+    pub host_extra_submitted: Vec<Vec<PadState>>,
+    /// How the host's players' pads go in: straight to the core, or as the
+    /// threaded session applies its commands.
+    pub host_submit: HostSubmit,
+    host_torn_sends: Vec<(SocketAddr, Vec<u8>)>,
+    /// Ticks the `TornSession` update closed between two slots' commands.
+    pub host_torn_closes: u32,
     pub clients: Vec<Client>,
     pub host_bundles: Vec<TickBundle>,
     /// When each of `host_bundles` closed.
@@ -121,6 +154,8 @@ pub struct Net {
     pub host_events: Vec<(Micros, NetEvent)>,
     /// Per slot, the queue depth at each closed tick.
     pub depths: Vec<Vec<u8>>,
+    /// FNV-1a over every datagram the host sent, in order.
+    pub host_sent_hash: u64,
 }
 
 impl Net {
@@ -133,6 +168,12 @@ impl Net {
             now: Micros::from_millis(1),
             host: HostCore::new(config),
             host_player: Player::new(6.9, 1.0, seed ^ 77),
+            host_extra: Vec::new(),
+            host_extra_rng: Lcg(0x4057 ^ seed),
+            host_extra_submitted: Vec::new(),
+            host_submit: HostSubmit::Direct,
+            host_torn_sends: Vec::new(),
+            host_torn_closes: 0,
             clients: Vec::new(),
             host_bundles: Vec::new(),
             host_bundle_at: Vec::new(),
@@ -140,6 +181,7 @@ impl Net {
             record_sends: false,
             host_events: Vec::new(),
             depths: vec![Vec::new(); MAX_SLOTS],
+            host_sent_hash: 0xcbf2_9ce4_8422_2325,
         }
     }
 
@@ -171,6 +213,10 @@ impl Net {
             alive: true,
             auto_load: true,
             start_at: None,
+            sent_hash: 0xcbf2_9ce4_8422_2325,
+            extra_locals: 0,
+            extra_rng: Lcg(0x5eed ^ u64::from(idx)),
+            extra_submitted: Vec::new(),
         });
         self.clients.len() - 1
     }
@@ -187,18 +233,65 @@ impl Net {
             }
         }
         // The host player's frames go in before the tick clock runs.
-        let pacing = self.host.pacing(0).unwrap_or((0, 0));
+        // Slot 0's pacing, or the playing host local's while its pad is away.
+        let pacing = self.host.host_pacing();
         // The host plays each bundle as it closes: it views the newest.
         let view = self.host_bundles.len() as u32;
-        let slack = self.host.slack_us(0);
+        let slack = self.host.host_slack_us();
         for p in self.host_player.frames(now, pacing, slack) {
-            self.host.submit_input(p, view);
             self.host_player.submitted.push(p);
+            self.host_extra_submitted
+                .resize(self.host_extra.len(), Vec::new());
+            let mut row = vec![(0, p)];
+            for (k, slot) in self.host_extra.iter().enumerate() {
+                let q = random_pad(&mut self.host_extra_rng);
+                row.push((*slot, q));
+                self.host_extra_submitted[k].push(q);
+            }
+            match self.host_submit {
+                HostSubmit::Direct => {
+                    for (slot, pad) in row {
+                        self.host.submit_input_for(slot, pad, view);
+                    }
+                }
+                HostSubmit::Session => SessionCore::apply(
+                    &mut self.host,
+                    HostCommand::SubmitInputsFor {
+                        pads: row,
+                        view_tick: view,
+                    },
+                ),
+                HostSubmit::TornSession => {
+                    // The thread woke between two slots' commands and ran
+                    // its update at the tick deadline.
+                    for (i, (slot, pad)) in row.into_iter().enumerate() {
+                        if i == 1 {
+                            let t = self.host.next_tick();
+                            self.host_torn_sends.extend(self.host.update(now));
+                            self.host_torn_closes += self.host.next_tick() - t;
+                        }
+                        SessionCore::apply(
+                            &mut self.host,
+                            HostCommand::SubmitInputFor {
+                                slot,
+                                pad,
+                                view_tick: view,
+                            },
+                        );
+                    }
+                }
+            }
         }
         let before = self.host.next_tick();
-        for (to, b) in self.host.update(now) {
+        let mut sends = std::mem::take(&mut self.host_torn_sends);
+        sends.extend(self.host.update(now));
+        for (to, b) in sends {
             if self.record_sends && carries_bundles(&b) {
                 self.bundle_sends.push((self.host.next_tick(), to));
+            }
+            for byte in &b {
+                self.host_sent_hash =
+                    (self.host_sent_hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3);
             }
             self.sim.send(now, addr(0), to, &b);
         }
@@ -216,6 +309,11 @@ impl Net {
                     self.host_player.playing = true;
                     self.host_events.push((now, e));
                 }
+                // As the host game does: a returning pad is seated again.
+                NetEvent::LocalBack { slot, .. } => {
+                    self.host_events.push((now, e));
+                    self.host.add_human(slot, TEAM_AUTO);
+                }
                 e => self.host_events.push((now, e)),
             }
         }
@@ -231,11 +329,28 @@ impl Net {
             // The client views the bundles it has received.
             let view = c.bundles.len() as u32;
             for p in pads {
-                if c.core.submit_input(p, view).is_some() {
+                if c.extra_locals == 0 {
+                    if c.core.submit_input(p, view).is_some() {
+                        c.player.submitted.push(p);
+                    }
+                    continue;
+                }
+                let mut all = vec![p];
+                for _ in 0..c.extra_locals {
+                    all.push(random_pad(&mut c.extra_rng));
+                }
+                if c.core.submit_inputs(&all, view).is_some() {
                     c.player.submitted.push(p);
+                    c.extra_submitted.resize(c.extra_locals, Vec::new());
+                    for (k, q) in all[1..].iter().enumerate() {
+                        c.extra_submitted[k].push(*q);
+                    }
                 }
             }
             for (to, b) in c.core.update(now) {
+                for byte in &b {
+                    c.sent_hash = (c.sent_hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3);
+                }
                 self.sim.send(now, c.addr, to, &b);
             }
             while let Some(e) = c.core.poll_event() {
@@ -310,6 +425,17 @@ impl Net {
 
     pub fn host_event(&self, f: impl Fn(&NetEvent) -> bool) -> Option<(Micros, NetEvent)> {
         self.host_events.iter().find(|(_, e)| f(e)).cloned()
+    }
+}
+
+/// An extra local's pad: mouse, stick and a FIRE press now and then.
+pub fn random_pad(r: &mut Lcg) -> PadState {
+    PadState {
+        mx: r.upto(60) as i32 - 30,
+        my: r.upto(30) as i32 - 15,
+        lx: (r.upto(2000) as i16) - 1000,
+        buttons: if r.unit() < 0.2 { buttons::FIRE } else { 0 },
+        ..PadState::default()
     }
 }
 

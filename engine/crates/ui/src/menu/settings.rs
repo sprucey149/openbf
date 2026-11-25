@@ -31,6 +31,11 @@ pub enum SettingsPage {
     Controls,
     KeyboardMouse,
     Gamepad,
+    /// Issue #194: the Splitscreen options (the host's profile), in a split
+    /// match's Options and from the Splitscreen mode list
+    /// ([`super::MenuModel::split`]). Its rows follow the seated players
+    /// ([`super::rows`]).
+    Splitscreen,
 }
 
 impl SettingsPage {
@@ -44,6 +49,7 @@ impl SettingsPage {
             Self::Controls => "Controls",
             Self::KeyboardMouse => "Keyboard / Mouse",
             Self::Gamepad => "Gamepad",
+            Self::Splitscreen => "Splitscreen Options",
         }
     }
 
@@ -92,6 +98,8 @@ impl SettingsPage {
                 EditBindings(Vehicle),
                 EditBindings(Starfighter),
             ],
+            // Built from the model's seats (`super::split_rows`).
+            Self::Splitscreen => &[],
         }
     }
 }

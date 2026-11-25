@@ -256,6 +256,82 @@ fn frame(m: ShellMenus) -> crate::hud_draw::HudFrame {
     crate::hud_draw::draw(&hud, &art, [640.0, 480.0])
 }
 
+/// A split battle cell's lost notice as the HUD pass lays it out in a 640 x 360 cell, with
+/// [`frame`]'s font.
+fn lost_frame(notice: &players::LostCell) -> crate::hud_draw::HudFrame {
+    use crate::hud_draw::HudArt;
+    use crate::hud_tree::Hud;
+    use manifest::hud::{HudFont, HudGlyph, HudLayout};
+    let font = HudFont {
+        name: BUTTON_FONT.into(),
+        line_height: 22,
+        pages: vec!["page0".into()],
+        glyphs: (32u8..127)
+            .map(|code| HudGlyph {
+                code: u16::from(code),
+                page: 0,
+                advance: 10,
+                x0: 0,
+                x1: 10,
+                y0: 2,
+                y1: 14,
+                uv: [0.0, 0.1, 0.0, 0.1],
+            })
+            .collect(),
+    };
+    let mut art = HudArt::default();
+    art.fonts.insert(BUTTON_FONT.into(), font);
+    let empty = HudLayout {
+        name: "t".into(),
+        nodes: Vec::new(),
+    };
+    let hud = Hud::new(&empty, &empty);
+    crate::hud_draw::draw_lost_cell(&hud, &art, notice, [640.0, 360.0])
+}
+
+/// Finding pick-line-spells-button-as-text: a split cell's lost notice fills the cell and draws
+/// the pick line's button as its glyph, never spelled; the acting line is the largest of the
+/// three and full white.
+#[test]
+fn the_lost_cell_draws_its_buttons_glyph_and_a_bright_acting_line() {
+    use crate::input_icons::{pad_sheet, IconSet, PadButton};
+    let a = pad_sheet(IconSet::XboxOne, PadButton::South);
+    let notice = players::LostCell {
+        notice: "Controller disconnected".into(),
+        name: "Han".into(),
+        action: "Play as Han".into(),
+        glyph: Some(a),
+    };
+    let f = lost_frame(&notice);
+    let sheets: Vec<&str> = f.batches.iter().map(|b| b.texture.as_str()).collect();
+    assert_eq!(sheets.first(), Some(&"white"), "the cell is filled first");
+    assert!(sheets.contains(&a), "{sheets:?}");
+    // The acting line is ITEM-sized (the name's TITLE size) and full white, unlike the old
+    // small grey note.
+    assert!(crate::typography::ITEM.size >= crate::typography::TITLE.size);
+    let white = f
+        .verts
+        .iter()
+        .filter(|v| v.color.iter().all(|c| (c - 1.0).abs() < 1e-4))
+        .count();
+    let letters = |t: &str| t.chars().filter(|c| *c != ' ').count();
+    assert!(
+        white >= 4 * (letters("Han") + letters("Play as Han")),
+        "the name and the acting line in full white ({white} verts)"
+    );
+    let plain = players::LostCell {
+        glyph: None,
+        action: "Reconnect and press any button".into(),
+        ..notice
+    };
+    let sheets: Vec<String> = lost_frame(&plain)
+        .batches
+        .iter()
+        .map(|b| b.texture.clone())
+        .collect();
+    assert!(!sheets.iter().any(|t| t == a));
+}
+
 /// The main menu as the HUD pass lays it out: the dimmed rows' labels
 /// are drawn grey 110 (§3.3), every glyph of both of them.
 #[test]
@@ -712,4 +788,405 @@ fn credits_is_a_stackless_page_that_returns_to_singleplayer() {
     // Cross, Back/Triangle or Start all leave for Singleplayer.
     m.step(press(|i| i.back = true), false, 0.1);
     assert_eq!(m.page, Page::Singleplayer);
+}
+
+fn dimmed_verts(m: &ShellMenus) -> usize {
+    let f = frame(m.clone());
+    let grey = DIMMED_GREY / 255.0;
+    f.verts
+        .iter()
+        .filter(|v| v.color[..3].iter().all(|c| (c - grey).abs() < 1e-4))
+        .count()
+}
+
+/// Issue #194: the Splitscreen row is live while a pad is connected and
+/// dimmed (and skipped) while none is, re-evaluated whenever the game says.
+#[test]
+fn splitscreen_is_live_with_a_pad_and_dimmed_without() {
+    let mut m = menus();
+    m.step(MenuInput::default(), true, 5.0);
+    m.step(MenuInput::default(), false, 5.0);
+    let glyphs = "Splitscreen".len();
+    assert!(!m.main.rows[2].enabled, "no pad: dimmed by default");
+    assert_eq!(dimmed_verts(&m), 4 * glyphs);
+    m.set_splitscreen_available(true);
+    assert!(m.main.rows[2].enabled);
+    assert_eq!(dimmed_verts(&m), 0, "drawn live");
+    m.step(press(|i| i.down = true), false, 0.1);
+    m.step(press(|i| i.down = true), false, 0.1);
+    assert_eq!(
+        m.main.rows[m.main.focus].id,
+        RowId::Splitscreen,
+        "focus reaches it"
+    );
+    // The last pad goes while it is focused: it dims and focus moves on.
+    m.set_splitscreen_available(false);
+    assert!(!m.main.rows[2].enabled);
+    assert_eq!(m.main.rows[m.main.focus].id, RowId::Options);
+    assert_eq!(dimmed_verts(&m), 4 * glyphs);
+    m.step(press(|i| i.up = true), false, 0.1);
+    assert_eq!(
+        m.main.rows[m.main.focus].id,
+        RowId::Multiplayer,
+        "skipped again"
+    );
+    // Plugged in again: it opens the Players screen.
+    m.set_splitscreen_available(true);
+    m.step(press(|i| i.down = true), false, 0.1);
+    assert_eq!(m.step(press(|i| i.confirm = true), false, 0.1), None);
+    assert_eq!(m.page, Page::Players);
+    assert_eq!(m.movie(), MOVIE_SUB);
+}
+
+/// The Players screen hears no merged menu input (the game tells one pad
+/// from another); it leaves for the main menu or continues to the mode list.
+#[test]
+fn the_players_screen_leads_to_the_split_mode_list() {
+    let mut m = menus();
+    m.open_page(Page::Players);
+    assert_eq!(m.stack(), None);
+    for i in [
+        press(|i| i.back = true),
+        press(|i| i.confirm = true),
+        press(|i| i.down = true),
+    ] {
+        assert_eq!(m.step(i, true, 0.1), None);
+        assert_eq!(m.page, Page::Players);
+    }
+    m.leave_players();
+    assert_eq!(m.page, Page::Main);
+    m.open_page(Page::Players);
+    m.set_training_prompted(true);
+    m.players_continue();
+    assert_eq!(m.page, Page::SplitModes);
+    let rows: Vec<_> = m
+        .split_modes
+        .rows
+        .iter()
+        .map(|r| (r.id, r.enabled))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (RowId::RiseOfTheEmpire, false),
+            (RowId::GalacticConquest, false),
+            (RowId::InstantAction, true),
+            (RowId::Multiplayer, true),
+            (RowId::SplitscreenOptions, true),
+        ],
+        "no Training; Instant Action, Multiplayer and the options live"
+    );
+    assert_eq!(
+        m.split_modes.rows[m.split_modes.focus].id,
+        RowId::InstantAction
+    );
+    // Issue #194 B19: Multiplayer opens the LAN page for the seats, and its
+    // Back returns to this list (not Main).
+    assert!(m.split_modes.rows[3].enabled);
+    m.step(press(|i| i.down = true), false, 0.1);
+    assert_eq!(
+        m.split_modes.rows[m.split_modes.focus].id,
+        RowId::Multiplayer
+    );
+    m.step(press(|i| i.confirm = true), false, 0.1);
+    assert_eq!(m.page, Page::Multiplayer);
+    assert!(m.multiplayer_split);
+    m.step(press(|i| i.back = true), false, 0.1);
+    assert_eq!(m.page, Page::SplitModes);
+    m.split_modes.focus = 3;
+    m.step(press(|i| i.down = true), false, 0.1);
+    // Issue #194 B7: the options row under the modes opens the Splitscreen page.
+    assert_eq!(
+        m.split_modes.rows[m.split_modes.focus].id,
+        RowId::SplitscreenOptions
+    );
+    assert_eq!(
+        m.step(press(|i| i.confirm = true), false, 0.1),
+        Some(ShellCommand::Settings(
+            crate::menu::SettingsPage::Splitscreen
+        ))
+    );
+    // Back on the list the focus is the options row that opened the page.
+    m.uncover();
+    assert_eq!(m.page, Page::SplitModes);
+    assert_eq!(
+        m.split_modes.rows[m.split_modes.focus].id,
+        RowId::SplitscreenOptions
+    );
+    m.step(press(|i| i.up = true), false, 0.1);
+    assert_eq!(
+        m.split_modes.rows[m.split_modes.focus].id,
+        RowId::Multiplayer
+    );
+    m.step(press(|i| i.up = true), false, 0.1);
+    assert_eq!(
+        m.split_modes.rows[m.split_modes.focus].id,
+        RowId::InstantAction
+    );
+    assert_eq!(
+        m.step(press(|i| i.confirm = true), false, 0.1),
+        Some(ShellCommand::InstantAction)
+    );
+    // The Instant Action screen closes over this list: it comes back.
+    m.uncover();
+    assert_eq!(m.page, Page::SplitModes);
+    m.step(press(|i| i.back = true), false, 0.1);
+    assert_eq!(m.page, Page::Players);
+    // The single player list is untouched.
+    assert_eq!(m.singleplayer.rows[0].id, RowId::Training);
+    assert_eq!(m.singleplayer.rows.len(), 4);
+}
+
+#[test]
+fn the_players_screen_draws_its_regions_and_hits_continue() {
+    use crate::input_icons::IconSet;
+    use players::{PlayerCell, PlayersHit};
+    use profiles::{Picker, Target};
+    let mut m = menus();
+    m.open_page(Page::Players);
+    m.on_page = 2.0;
+    let ready = |name: &str| PlayerCell::Seated {
+        name: name.into(),
+        device: "Xbox controller".into(),
+        icons: IconSet::XboxOne,
+        career: "3 kills".into(),
+        lost: false,
+        rechoose: false,
+    };
+    m.players.cells[0] = ready("Ann");
+    m.players.keyboard_free = true;
+    let f = frame(m.clone());
+    assert!(f.batches.iter().any(|b| b.texture == "border_3_pieces"));
+    assert!(!m.players.can_start());
+    let size = [1280.0, 720.0];
+    // The 2x2 grid from the start (issue #194 B22), each quarter a whole shell screen.
+    let regions = players::regions(size);
+    assert_eq!(
+        regions,
+        vec![
+            (0, [0.0, 0.0, 640.0, 360.0]),
+            (1, [640.0, 0.0, 1280.0, 360.0]),
+            (2, [0.0, 360.0, 640.0, 720.0]),
+            (3, [640.0, 360.0, 1280.0, 720.0])
+        ]
+    );
+    // A region's Continue, in its own 4:3 box (480 x 360 centred in 640 x 360).
+    let at = |rect: [f32; 4], [x0, y0, x1, y1]: [f32; 4]| {
+        let s = profiles::screen_in(rect);
+        [
+            s.origin[0] + (x0 + x1) * 0.5 * s.scale[0],
+            s.origin[1] + (y0 + y1) * 0.5 * s.scale[1],
+        ]
+    };
+    let top = regions[0].1;
+    assert_eq!(
+        players::hit(&m, at(top, players::CONTINUE_BAR), size),
+        None,
+        "Continue waits for a second player"
+    );
+    // P2 chooses: still no Continue, and the pointer lands on P2's picker's own rows.
+    let mut pick = Picker::new(vec![(7, "Ann".into()), (9, "Bob".into())], None);
+    pick.seat = true;
+    pick.taken = vec![7];
+    assert!(pick.is_taken(0) && !pick.is_taken(1));
+    m.players.cells[1] = PlayerCell::Picking {
+        picker: pick.clone(),
+        device: "Keyboard and mouse".into(),
+        icons: IconSet::KeyboardMouse,
+        lost: false,
+    };
+    assert!(m.players.picking() && !m.players.can_start());
+    // Two seated: the same grid, P3 and P4 showing their join prompts.
+    let grid = players::regions(size);
+    assert_eq!(grid.len(), 4);
+    assert_eq!(grid[1].1, [640.0, 0.0, 1280.0, 360.0]);
+    let top = grid[0].1;
+    assert_eq!(players::hit(&m, at(top, players::CONTINUE_BAR), size), None);
+    let p2 = grid[1].1;
+    let create = pick
+        .target_in(at(p2, [110.0, 276.0, 402.0, 304.0]), p2)
+        .expect("a picker row");
+    assert_eq!(create, Target::Create);
+    assert_eq!(
+        players::hit(&m, at(p2, [110.0, 276.0, 402.0, 304.0]), size),
+        Some(PlayersHit::Picker(1, Target::Create))
+    );
+    let f2 = frame(m.clone());
+    assert!(!f2.batches.is_empty());
+    // P2 is Ready: Continue is live on every Ready card.
+    m.players.cells[1] = ready("Bob");
+    assert!(m.players.can_start());
+    assert_eq!(
+        players::hit(&m, at(top, players::CONTINUE_BAR), size),
+        Some(PlayersHit::Continue)
+    );
+    // P3 joins: P1 top left to P4 bottom right; P4's region is open.
+    m.players.cells[2] = ready("Cy");
+    let grid = players::regions(size);
+    assert_eq!(grid.len(), 4);
+    assert_eq!(grid[0].1, [0.0, 0.0, 640.0, 360.0]);
+    assert_eq!(grid[3].1, [640.0, 360.0, 1280.0, 720.0]);
+    assert_eq!(
+        players::hit(&m, at(grid[2].1, players::CONTINUE_BAR), size),
+        Some(PlayersHit::Continue)
+    );
+    assert_eq!(
+        players::hit(&m, at(grid[3].1, players::CONTINUE_BAR), size),
+        None
+    );
+    let f4 = frame(m.clone());
+    assert!(f4.batches.len() >= f.batches.len());
+    m.page = Page::Main;
+    assert_eq!(
+        players::hit(&m, at(grid[0].1, players::CONTINUE_BAR), size),
+        None
+    );
+}
+
+/// Issue #194 B22: the Players screen's regions are the 2x2 grid whoever is seated, so nothing
+/// moves as players join; and a quarter's shell screen at 16:9 is the size a half's was.
+#[test]
+fn players_regions_stay_put() {
+    let size = [1920.0, 1080.0];
+    let grid = players::regions(size);
+    assert_eq!(grid.len(), 4);
+    let s = profiles::screen_in(grid[0].1);
+    let half = profiles::screen_in([0.0, 0.0, 1920.0, 540.0]);
+    assert_eq!(s.scale, half.scale, "the picker does not shrink at 16:9");
+    // The same regions for 0, 1, 2 and 4 seated (`regions` takes no seats at all), and the
+    // frame draws for each.
+    let mut m = menus();
+    m.open_page(Page::Players);
+    m.on_page = 2.0;
+    for n in [0, 1, 2, 4] {
+        for i in 0..n {
+            m.players.cells[i] = players::PlayerCell::Seated {
+                name: format!("Rex {i}"),
+                device: "Xbox controller".into(),
+                icons: crate::input_icons::IconSet::XboxOne,
+                career: String::new(),
+                lost: false,
+                rechoose: false,
+            };
+        }
+        assert_eq!(players::regions(size), grid, "{n} seated");
+        assert!(!frame(m.clone()).batches.is_empty());
+    }
+}
+
+/// Issue #194 B22: the open quarters' join line shows the waiting pads' own Accept and Start
+/// glyphs when they are one family (DualShock 4: Cross and Options), names Cross/A and Start
+/// in words when mixed, and stands on the same line either way; a lost seat shows its own pad's
+/// glyphs to come back.
+#[test]
+fn players_join_prompt_uses_the_waiting_pads_glyph() {
+    use crate::input_icons::{pad_sheet, IconSet, Icons, PadButton, Prompt};
+    let mut m = menus();
+    m.open_page(Page::Players);
+    m.on_page = 2.0;
+    let sheets = |f: &crate::hud_draw::HudFrame| -> Vec<String> {
+        f.batches.iter().map(|b| b.texture.clone()).collect()
+    };
+    let accept = Icons::of(IconSet::Ds4).sheet(Prompt::Accept);
+    let start = pad_sheet(IconSet::Ds4, PadButton::Start);
+    m.players.join_icons = Some(IconSet::Ds4);
+    let ds4 = sheets(&frame(m.clone()));
+    assert!(ds4.iter().any(|t| t == accept), "{ds4:?}");
+    assert!(ds4.iter().any(|t| t == start), "{ds4:?}");
+    m.players.join_icons = None;
+    let mixed = sheets(&frame(m.clone()));
+    assert!(!mixed.iter().any(|t| t == start), "{mixed:?}");
+    assert!(players::TEXT_JOIN.1.contains("Cross/A") && players::TEXT_JOIN.1.contains("Start"));
+    assert!(!players::TEXT_JOIN.1.to_lowercase().contains("a button"));
+    // A lost seat: its own pad's glyphs.
+    m.players.cells[1] = players::PlayerCell::Seated {
+        name: "Leia".into(),
+        device: "DualShock 4".into(),
+        icons: IconSet::Ds4,
+        career: String::new(),
+        lost: true,
+        rechoose: false,
+    };
+    let lost = sheets(&frame(m.clone()));
+    assert!(lost.iter().any(|t| t == start), "{lost:?}");
+}
+
+/// Finding players-continue-live-but-refused-duplicate-profile: when the party refuses Continue
+/// (two seats Ready on one profile) every Ready card's Continue is dim, the pointer cannot hit
+/// it, and no Accept "Continue" help shows; the sharing cards say so in place of "Ready".
+#[test]
+fn a_blocked_party_never_shows_continue_live() {
+    use crate::input_icons::{pad_sheet, IconSet, PadButton};
+    let mut m = menus();
+    m.open_page(Page::Players);
+    m.on_page = 2.0;
+    let ready = |name: &str| players::PlayerCell::Seated {
+        name: name.into(),
+        device: "Xbox controller".into(),
+        icons: IconSet::XboxOne,
+        career: String::new(),
+        lost: false,
+        rechoose: false,
+    };
+    m.players.cells[0] = ready("Ann");
+    m.players.cells[1] = ready("Cy");
+    m.players.cells[2] = ready("Cy");
+    let accept = pad_sheet(IconSet::XboxOne, PadButton::South);
+    let sheets = |m: &ShellMenus| -> Vec<String> {
+        frame(m.clone())
+            .batches
+            .iter()
+            .map(|b| b.texture.clone())
+            .collect()
+    };
+    assert!(m.players.can_start());
+    assert!(sheets(&m).iter().any(|t| t == accept), "live: A Continue");
+    m.players.blocked = true;
+    m.players.twice = [false, true, true, false];
+    assert!(!m.players.can_start());
+    let size = [1280.0, 720.0];
+    let s = profiles::screen_in(players::regions(size)[1].1);
+    let [x0, y0, x1, y1] = players::CONTINUE_BAR;
+    let at = [
+        s.origin[0] + (x0 + x1) * 0.5 * s.scale[0],
+        s.origin[1] + (y0 + y1) * 0.5 * s.scale[1],
+    ];
+    assert_eq!(players::hit(&m, at, size), None);
+    assert!(
+        !sheets(&m).iter().any(|t| t == accept),
+        "no A Continue help"
+    );
+    assert_eq!(players::TEXT_TWICE.1, "Same profile twice");
+}
+
+/// Finding players-screen-lost-seat-cannot-be-freed: a lost guest seat that a held Select can
+/// empty shows the seated pads' Select glyph under "Come back"; one that cannot shows nothing.
+#[test]
+fn a_removable_lost_seat_shows_the_select_glyph() {
+    use crate::input_icons::{pad_sheet, IconSet, PadButton};
+    let mut m = menus();
+    m.open_page(Page::Players);
+    m.on_page = 2.0;
+    m.players.cells[1] = players::PlayerCell::Seated {
+        name: "Leia".into(),
+        device: "DualShock 4".into(),
+        icons: IconSet::Ds4,
+        career: String::new(),
+        lost: true,
+        rechoose: false,
+    };
+    let select = pad_sheet(IconSet::XboxOne, PadButton::Select);
+    let sheets = |m: &ShellMenus| -> Vec<String> {
+        frame(m.clone())
+            .batches
+            .iter()
+            .map(|b| b.texture.clone())
+            .collect()
+    };
+    assert!(!sheets(&m).iter().any(|t| t == select));
+    m.players.removable[1] = true;
+    m.players.remove_icons = Some(IconSet::XboxOne);
+    assert!(sheets(&m).iter().any(|t| t == select), "{:?}", sheets(&m));
+    m.players.remove_icons = None;
+    assert!(!sheets(&m).iter().any(|t| t == select), "mixed pads: words");
 }

@@ -9,8 +9,9 @@
 //!   the profile picker here (§9.3). The legal / logo screens are skipped.
 //! - **Main Menu** (`ifs_main`): logo + stack 10 units lower than the
 //!   others: Singleplayer, Multiplayer (issue #168: LAN play), Splitscreen
-//!   disabled (until card SSCR; the PS2's own dimmed style: label grey 110,
-//!   focus skips it, §3.3), Options,
+//!   (issue #194: live while a gamepad is connected, set each frame by the
+//!   game through [`ShellMenus::set_splitscreen_available`]; without one the
+//!   PS2's own dimmed style: label grey 110, focus skips it, §3.3), Options,
 //!   then `[ours]` **Quit Game**, which exits. The PC's `ifs_main` ends in a
 //!   quit row ("Exit To Windows") that the PS2 hides (`re-bf2-menus.md`,
 //!   ifs_main list order); the port shows it with its own label.
@@ -20,6 +21,12 @@
 //! - `[ours]` **Multiplayer** (issue #168, `LAN_MULTIPLAYER.md` §4): LAN
 //!   Host Game and LAN Join Game live, Online dimmed with
 //!   [`TEXT_ONLINE_NOTE`] under the stack (no dedicated server exists).
+//! - `[ours]` **Players** (issue #194, [`players`]): who plays on this
+//!   machine, a cell per player; the game seats them and fills
+//!   [`ShellMenus::players`]. Then **Splitscreen**'s mode list
+//!   (`SPLITSCREEN.md` §3): Rise of the Empire and Galactic Conquest
+//!   dimmed, Instant Action and Multiplayer (each seat its own view in a LAN
+//!   round, [`SPLIT_LAN_LIVE`]) live, Training never.
 //!
 //! The stack's geometry is the frames' [M] rule (§3.2), not the Lua's
 //! left-justify formula (which does not reproduce them, §3.2 [H]): labels
@@ -48,6 +55,7 @@
 
 mod campaign;
 pub mod campaign_saves;
+pub mod players;
 pub mod profiles;
 
 use crate::hud_draw::Ctx;
@@ -126,6 +134,11 @@ pub enum Page {
     /// `[ours]` the end-of-campaign credits crawl. The game draws the crawl
     /// (no stack, no shell movie); any skip input leaves for Singleplayer.
     Credits,
+    /// `[ours]` issue #194: who plays on this machine ([`players`]). No
+    /// stack: the game hears each pad on its own and drives the page.
+    Players,
+    /// `[ours]` issue #194: the modes several players here can play.
+    SplitModes,
 }
 
 /// Every button the port shows; the label is the disc's text.
@@ -169,6 +182,8 @@ pub enum RowId {
     AudioOptions,
     GraphicsOptions,
     Controls,
+    /// `[ours]` issue #194: the Splitscreen mode list's options row.
+    SplitscreenOptions,
     /// `[ours]` Multiplayer's rows (issue #168).
     LanHost,
     LanJoin,
@@ -222,6 +237,8 @@ impl RowId {
             RowId::AudioOptions => ("ifs.SoundOpt.title", "Audio Options"),
             RowId::GraphicsOptions => ("openbf.graphicsoptions", "Graphics Options"),
             RowId::Controls => ("ifs.controls.Vehicle_Unit", "Controls"),
+            // Our own key (issue #194).
+            RowId::SplitscreenOptions => ("openbf.split.options", "Splitscreen Options"),
             // Our own keys (issue #168).
             RowId::LanHost => ("openbf.mp.lanhost", "LAN: Host Game"),
             RowId::LanJoin => ("openbf.mp.lanjoin", "LAN: Join Game"),
@@ -235,6 +252,11 @@ pub const TEXT_PROMPT: (&str, &str) = ("ifs.start.press_start", "Press START But
 pub const TEXT_MAIN: (&str, &str) = ("ifs.main.title", "Main Menu");
 pub const TEXT_BACK: (&str, &str) = ("common.back", "Back");
 pub const TEXT_SELECT: (&str, &str) = ("common.select", "Select");
+/// Whether the Splitscreen mode list's Multiplayer row is live (issue #194):
+/// B19 brings the seats into a LAN session and B20 gives each its own pad
+/// and view in a LAN round.
+pub(crate) const SPLIT_LAN_LIVE: bool = true;
+
 /// Why the Multiplayer page's Online row is dimmed (issue #168).
 pub const TEXT_ONLINE_NOTE: (&str, &str) = (
     "openbf.mp.online_note",
@@ -331,6 +353,11 @@ pub struct ShellMenus {
     pub campaign_saves: campaign_saves::CampaignSaves,
     pub options: Stack,
     pub multiplayer: Stack,
+    /// Issue #194: the Splitscreen mode list after the Players screen.
+    pub split_modes: Stack,
+    /// Issue #194: the Players screen's cells, set by the game each frame.
+    pub players: players::PlayersView,
+    pub players_texts: players::Texts,
     pub campaign_unlocked: u8,
     pub campaign_selected: usize,
     pub campaign_view_all: bool,
@@ -343,6 +370,10 @@ pub struct ShellMenus {
     /// state.
     pub campaign_notice: Option<String>,
     pub training_prompted: bool,
+    /// Splitscreen B19: the Multiplayer page was opened from the Splitscreen
+    /// mode list, so its Host Game and Join Game take the Players screen's
+    /// seats along and its Back returns to that list.
+    pub multiplayer_split: bool,
     ask_training_prompt: String,
     campaign_quit_prompt: String,
     training_label: String,
@@ -545,6 +576,22 @@ impl ShellMenus {
                 0.0,
             ),
             multiplayer,
+            split_modes: stack(
+                text(players::TEXT_TITLE.0, players::TEXT_TITLE.1),
+                vec![
+                    row(RowId::RiseOfTheEmpire, false),
+                    row(RowId::GalacticConquest, false),
+                    row(RowId::InstantAction, true),
+                    // Issue #194 B19/B20: LAN with the seats as one
+                    // machine's players (see [`SPLIT_LAN_LIVE`]).
+                    row(RowId::Multiplayer, SPLIT_LAN_LIVE),
+                    row(RowId::SplitscreenOptions, true),
+                ],
+                true,
+                0.0,
+            ),
+            players: Default::default(),
+            players_texts: players::Texts::new(text),
             campaign_unlocked: 1,
             campaign_selected: 0,
             campaign_view_all: false,
@@ -553,6 +600,7 @@ impl ShellMenus {
             campaign_pause_options: false,
             campaign_notice: None,
             training_prompted: false,
+            multiplayer_split: false,
             ask_training_prompt,
             campaign_quit_prompt,
             training_label,
@@ -575,6 +623,40 @@ impl ShellMenus {
         };
         menus.rebuild_campaign_stacks();
         menus
+    }
+
+    /// Issue #194: the Splitscreen row is live while a gamepad is connected
+    /// (`SPLITSCREEN.md` §15: the keyboard is always there and joins on the
+    /// Players screen). The game calls this every frame, so a pad plugged in
+    /// or out shows at once. Focus leaves the row when it dims under it.
+    pub fn set_splitscreen_available(&mut self, on: bool) {
+        let Some(k) = self
+            .main
+            .rows
+            .iter()
+            .position(|r| r.id == RowId::Splitscreen)
+        else {
+            return;
+        };
+        if self.main.rows[k].enabled == on {
+            return;
+        }
+        self.main.rows[k].enabled = on;
+        if !on && self.main.focus == k {
+            self.main.focus = self.main.follow(1);
+        }
+    }
+
+    /// The Players screen's Back with nobody seated: the main menu.
+    pub fn leave_players(&mut self) {
+        self.cues.play(MenuSound::Exit);
+        self.go(Page::Main);
+    }
+
+    /// The Players screen's Continue: the Splitscreen mode list.
+    pub fn players_continue(&mut self) {
+        self.cues.play(MenuSound::Accept);
+        self.go(Page::SplitModes);
     }
 
     pub fn training_prompted(&self) -> bool {
@@ -609,7 +691,8 @@ impl ShellMenus {
 
     pub fn stack(&self) -> Option<&Stack> {
         match self.page {
-            Page::Title | Page::CampaignBattle | Page::Credits => None,
+            Page::Title | Page::CampaignBattle | Page::Credits | Page::Players => None,
+            Page::SplitModes => Some(&self.split_modes),
             Page::Main => Some(&self.main),
             Page::Singleplayer => Some(&self.singleplayer),
             Page::AskTraining => Some(&self.ask_training),
@@ -628,7 +711,8 @@ impl ShellMenus {
 
     fn stack_mut(&mut self) -> Option<&mut Stack> {
         match self.page {
-            Page::Title | Page::CampaignBattle | Page::Credits => None,
+            Page::Title | Page::CampaignBattle | Page::Credits | Page::Players => None,
+            Page::SplitModes => Some(&mut self.split_modes),
             Page::Main => Some(&mut self.main),
             Page::Singleplayer => Some(&mut self.singleplayer),
             Page::AskTraining => Some(&mut self.ask_training),
@@ -699,9 +783,12 @@ impl ShellMenus {
         // PS2) whatever was left (menuref "Singleplayer", `ia_enter_back`).
         if page == Page::Main {
             self.campaign_pause_options = false;
+            self.multiplayer_split = false;
         } else if page == Page::Singleplayer {
             self.campaign_pause_options = false;
             self.singleplayer.focus = self.singleplayer.first();
+        } else if page == Page::SplitModes {
+            self.split_modes.focus = self.split_modes.first();
         } else if page == Page::AskTraining {
             self.ask_training.focus = self.ask_training.first();
         } else if page == Page::RiseNewLoad {
@@ -725,8 +812,15 @@ impl ShellMenus {
     /// The page over the screen closed: this screen is entered again, so it
     /// plays its exit click and its entrance (template Enter main.f10 pc 48,
     /// re-bf2-menus §4.1 [V]).
+    ///
+    /// The SplitModes list keeps its focus: its pages (Instant Action, the
+    /// Splitscreen settings) open from their own rows, so Back lands there.
     pub fn uncover(&mut self) {
+        let keep = (self.page == Page::SplitModes).then_some(self.split_modes.focus);
         self.go(self.page);
+        if let Some(focus) = keep {
+            self.split_modes.focus = focus;
+        }
         self.cues.play(MenuSound::Exit);
     }
 
@@ -772,6 +866,11 @@ impl ShellMenus {
         if self.page == Page::CampaignSaves {
             return self.step_campaign_saves(input);
         }
+        if self.page == Page::Players {
+            // The game drives it (`leave_players`, `players_continue`): the
+            // merged menu input cannot tell one pad from another.
+            return None;
+        }
         if self.page == Page::CampaignMenu {
             if self.campaign_quit_confirm {
                 if input.back {
@@ -791,6 +890,8 @@ impl ShellMenus {
                 Page::Main => Page::Title,
                 Page::AskTraining | Page::RiseNewLoad => Page::Singleplayer,
                 Page::RiseOfTheEmpire => Page::RiseNewLoad,
+                Page::SplitModes => Page::Players,
+                Page::Multiplayer if self.multiplayer_split => Page::SplitModes,
                 Page::Options if self.campaign_pause_options => {
                     self.campaign_pause_options = false;
                     Page::CampaignMenu
@@ -902,7 +1003,11 @@ impl ShellMenus {
                 self.go(Page::RiseOfTheEmpire);
             }
             RowId::Options => self.go(Page::Options),
-            RowId::Multiplayer => self.go(Page::Multiplayer),
+            RowId::Multiplayer => {
+                self.multiplayer_split = self.page == Page::SplitModes;
+                self.go(Page::Multiplayer);
+            }
+            RowId::Splitscreen => self.go(Page::Players),
             RowId::LanHost => return Some(ShellCommand::HostGame),
             RowId::LanJoin => return Some(ShellCommand::JoinGame),
             RowId::InstantAction => return Some(ShellCommand::InstantAction),
@@ -917,6 +1022,11 @@ impl ShellMenus {
             }
             RowId::Controls => {
                 return Some(ShellCommand::Settings(crate::menu::SettingsPage::Controls))
+            }
+            RowId::SplitscreenOptions => {
+                return Some(ShellCommand::Settings(
+                    crate::menu::SettingsPage::Splitscreen,
+                ))
             }
             RowId::QuitGame => return Some(ShellCommand::Quit),
             _ => {}
@@ -967,7 +1077,9 @@ impl ShellMenus {
             | Page::AskTraining
             | Page::RiseNewLoad
             | Page::Options
-            | Page::Multiplayer => MOVIE_SUB,
+            | Page::Multiplayer
+            | Page::Players
+            | Page::SplitModes => MOVIE_SUB,
         }
     }
 
@@ -1128,6 +1240,10 @@ impl Ctx<'_> {
         }
         if m.page == Page::CampaignSaves {
             self.campaign_saves_page(m, size);
+            return;
+        }
+        if m.page == Page::Players {
+            self.players_page(m, size);
             return;
         }
         let Some(stack) = m.stack() else {

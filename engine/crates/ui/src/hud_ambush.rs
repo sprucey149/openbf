@@ -23,7 +23,7 @@
 //! `[ours]` Hor+: sizes scale with the window height, the side chevrons keep
 //! their offset from the window's left / right edges, the end ones centre.
 
-use crate::hud_draw::{color, Ctx, Quad, Screen};
+use crate::hud_draw::{color, Ctx, Frame, Quad, Screen, VAnchor};
 use glam::{Mat4, Vec3};
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -126,15 +126,29 @@ impl Ambush {
 /// The chevron's quad for `e` in a `size` window: the transform that puts
 /// its apex on the screen and turns it, and the sheet's full rect in window
 /// pixels about the apex (the visible texels sized as [`Place`]).
-fn placement(e: Edge, size: [f32; 2]) -> (Mat4, [f32; 4]) {
-    let k = size[1] / 480.0;
+///
+/// In a split cell ([`Frame::cell`]) the chevrons are sized by the frame's
+/// box, the side ones at the middle of the cell's height, the top and
+/// bottom ones at the cell's own edges.
+fn placement(e: Edge, f: &Frame) -> (Mat4, [f32; 4]) {
+    let size = f.size;
+    let k = f.box_h / 480.0;
+    let side_y = {
+        let y = SIDE_Y * k;
+        let dy = f.shift_y(VAnchor::Centre);
+        if dy == 0.0 {
+            y
+        } else {
+            y + dy
+        }
+    };
     let p = match e {
         Edge::Left | Edge::Right => &SIDE,
         Edge::Top | Edge::Bottom => &END,
     };
     let apex = match e {
-        Edge::Left => [p.inset * k, SIDE_Y * k],
-        Edge::Right => [size[0] - p.inset * k, SIDE_Y * k],
+        Edge::Left => [p.inset * k, side_y],
+        Edge::Right => [size[0] - p.inset * k, side_y],
         Edge::Bottom => [size[0] * 0.5, size[1] - p.inset * k],
         Edge::Top => [size[0] * 0.5, p.inset * k],
     };
@@ -149,7 +163,7 @@ fn placement(e: Edge, size: [f32; 2]) -> (Mat4, [f32; 4]) {
 }
 
 impl Ctx<'_> {
-    pub(crate) fn ambush(&mut self, a: &Ambush, size: [f32; 2]) {
+    pub(crate) fn ambush(&mut self, a: &Ambush, f: &Frame) {
         let s = Screen {
             origin: [0.0, 0.0],
             scale: [1.0, 1.0],
@@ -159,7 +173,7 @@ impl Ctx<'_> {
             if alpha <= 0.0 {
                 continue;
             }
-            let (m, rect) = placement(e, size);
+            let (m, rect) = placement(e, f);
             let first = self.out.verts.len();
             self.quad(
                 usize::MAX,
@@ -183,7 +197,12 @@ impl Ctx<'_> {
 
 /// The visible chevron's window box for `e` (the sheet's drawn texels).
 pub fn visible_box(e: Edge, size: [f32; 2]) -> [f32; 4] {
-    let (m, rect) = placement(e, size);
+    visible_box_in(e, &Frame::window(size))
+}
+
+/// [`visible_box`] in the screen `f`.
+pub fn visible_box_in(e: Edge, f: &Frame) -> [f32; 4] {
+    let (m, rect) = placement(e, f);
     let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
     let corners = [
         (

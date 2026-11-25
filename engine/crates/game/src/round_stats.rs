@@ -662,7 +662,7 @@ mod tests {
             .map(|i| feed.unit_name(sim, sim.handle(i)))
             .collect();
         assert_eq!(feed.unit_name(sim, guest), "Player 2", "before the names");
-        feed.set_player_names([(0, "the maintainer"), (1, "Kai")]);
+        feed.set_player_names([(0, "Rex"), (1, "Kai")]);
         let mut r = RoundStats::default();
         r.kill(sim, guest, w.player);
         let unit = |i: usize| feed.unit_name(sim, sim.handle(i));
@@ -676,13 +676,13 @@ mod tests {
         );
         let rows: Vec<_> = pages.lists.iter().flat_map(|l| &l.rows).collect();
         let named = |n: &str| rows.iter().find(|r| r.name == n).copied();
-        let (maintainer, kai) = (named("the maintainer").expect("host"), named("Kai").expect("guest"));
-        assert!(maintainer.me && maintainer.human && kai.human && !kai.me);
+        let (rex, kai) = (named("Rex").expect("host"), named("Kai").expect("guest"));
+        assert!(rex.me && rex.human && kai.human && !kai.me);
         assert!(rows.iter().all(|r| !r.name.starts_with("Player ")));
         let bots: Vec<_> = rows.iter().filter(|r| !r.human).map(|r| &r.name).collect();
         assert_eq!(bots.len(), bot_names.len());
         assert!(bots.iter().all(|n| bot_names.contains(n)), "{bots:?}");
-        let nemesis = &maintainer
+        let nemesis = &rex
             .personal
             .iter()
             .find(|(l, _)| l == "Nemesis")
@@ -691,7 +691,7 @@ mod tests {
         assert_eq!(nemesis, "Kai (1)");
         let board = scoreboard(sim, &r, w.player, &unit, ["A".into(), "B".into()], None);
         let board: Vec<_> = board.teams.iter().flat_map(|t| &t.rows).collect();
-        assert!(board.iter().any(|r| r.name == "the maintainer" && r.human));
+        assert!(board.iter().any(|r| r.name == "Rex" && r.human));
         assert!(board.iter().any(|r| r.name == "Kai" && r.human));
     }
 

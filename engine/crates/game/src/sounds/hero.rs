@@ -1,6 +1,6 @@
 //! Hero sample handles: looping weapon hum and the soldier's breathing.
 
-use super::{Cry, Listener, LoopRequest, LoopSource, SoundLib, Start};
+use super::{Cry, Ears, Listener, LoopRequest, LoopSource, SoundLib, Start};
 use core::fmath::FloatExt;
 use core::unit::UnitHandle;
 use glam::Vec3;
@@ -92,7 +92,7 @@ impl SoundLib {
     pub fn hero_samples(
         &mut self,
         asks: &[(UnitHandle, String, Vec3)],
-        ears: Vec3,
+        ears: impl Ears,
     ) -> Vec<(UnitHandle, Start)> {
         self.hero_voices.retain(|(h, hash), _| {
             asks.iter()
@@ -160,7 +160,7 @@ impl SoundLib {
         }
         self.loops
             .retain(|k, _| !matches!(k, LoopSource::Hero(..)) || live.contains(k));
-        for (unit, start) in self.hero_samples(asks, listener.pos) {
+        for (unit, start) in self.hero_samples(asks, listener) {
             let shot = self.mix_shot(audio, &start, listener);
             if let Some(voice) = self.hero_voices.get_mut(&(unit, start.hash)) {
                 voice.shot = shot;

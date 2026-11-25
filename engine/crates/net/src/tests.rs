@@ -5,8 +5,11 @@
 //!
 //! [`LinkSim`]: crate::LinkSim
 
+mod away;
 mod codec;
 mod harness;
+mod inputs;
+mod locals;
 mod reliable;
 mod session;
 mod soak;

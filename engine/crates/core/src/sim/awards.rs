@@ -38,7 +38,32 @@ pub fn medal_threshold(medal: usize, count: u32) -> u32 {
     }
 }
 
-#[derive(Clone)]
+/// A player slot's cheats, aim assist and medal career, kept across a leave and rejoin
+/// ([`Sim::keep_slot`], [`Sim::restore_slot`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlotKeep {
+    cheats: Option<super::Cheats>,
+    assist: Option<super::AssistProfile>,
+    career: Option<MedalCareer>,
+}
+
+impl SlotKeep {
+    /// Does it hold a medal career?
+    pub fn has_career(&self) -> bool {
+        self.career.is_some()
+    }
+
+    /// The same keep with its career following `life`, as [`Sim::restore_slot`] gives it back:
+    /// compares a slot before a leave with the slot after its rejoin.
+    pub fn following(mut self, life: UnitHandle) -> Self {
+        if let Some(c) = self.career.as_mut() {
+            c.life = life;
+        }
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct MedalCareer {
     life: UnitHandle,
     counts: MedalCounts,
@@ -191,6 +216,30 @@ impl Sim {
             preserve_on_respawn: false,
             bonuses: true,
         });
+    }
+
+    /// What player slot `slot` holds that a leave clears and a rejoin on the same machine should
+    /// give back (issue #194): its cheats, aim assist and medal career.
+    pub fn keep_slot(&self, slot: usize) -> SlotKeep {
+        SlotKeep {
+            cheats: self.slot_cheats.get(slot).copied().flatten(),
+            assist: self.slot_assist.get(slot).cloned().flatten(),
+            career: self.medal_careers.get(slot).cloned().flatten(),
+        }
+    }
+
+    /// Give slot `slot` back what [`Sim::keep_slot`] kept; its career follows the unit `life`
+    /// the slot now holds.
+    pub fn restore_slot(&mut self, slot: usize, life: UnitHandle, keep: SlotKeep) {
+        self.set_slot_cheats(slot, keep.cheats);
+        self.set_slot_assist(slot, keep.assist);
+        if let Some(mut career) = keep.career {
+            career.life = life;
+            if self.medal_careers.len() <= slot {
+                self.medal_careers.resize_with(slot + 1, || None);
+            }
+            self.medal_careers[slot] = Some(career);
+        }
     }
 
     /// Issue #168: drop player slot `slot`'s career (a player who left).

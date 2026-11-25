@@ -1,9 +1,7 @@
 //! Route active display/spatial extensions and controller pointers through the game UI.
 
 use super::App;
-use extensions::runtime::{
-    ActiveDisplayExtension, FrameContext, SimView, StereoView,
-};
+use extensions::runtime::{ActiveDisplayExtension, FrameContext, SimView, StereoView};
 
 pub(super) fn live_view(walk: &game::walk::WalkSim) -> bool {
     walk.sim.outcome.is_none()
@@ -28,10 +26,7 @@ pub(super) fn sim_view(walk: &game::walk::WalkSim) -> SimView<'_> {
 }
 
 pub(super) fn listener(view: &StereoView) -> game::sounds::Listener {
-    game::sounds::Listener {
-        pos: view.listener.pos,
-        yaw: view.listener.yaw,
-    }
+    game::sounds::Listener::new(view.listener.pos, view.listener.yaw)
 }
 
 pub(super) fn prepare_soldiers(
@@ -50,8 +45,7 @@ pub(super) fn place_tracked_muzzle(
     visuals: &game::soldier_vis::SoldierVisuals,
     points: &mut [Option<glam::Vec3>],
 ) {
-    if let Some((mount, slot)) =
-        view.hand_mounts[1].zip(points.get_mut(walk.player.index as usize))
+    if let Some((mount, slot)) = view.hand_mounts[1].zip(points.get_mut(walk.player.index as usize))
     {
         if let Some(point) = visuals.tracked_fire_point(walk, mount) {
             *slot = Some(point);
@@ -142,7 +136,10 @@ impl App {
             (Some(walk), Some(vis)) if stereo_allowed => vis.tracked_guns(walk),
             _ => [None; 2],
         };
-        let window_size = self.renderer.as_ref().map_or([1280, 720], |r| r.size().into());
+        let window_size = self
+            .renderer
+            .as_ref()
+            .map_or([1280, 720], |r| r.size().into());
         let sim_snap = walk.map(sim_view);
         let ctx = FrameContext {
             sim: sim_snap.as_ref(),

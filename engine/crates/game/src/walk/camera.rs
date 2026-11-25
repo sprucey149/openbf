@@ -407,16 +407,12 @@ impl WalkSim {
         let Some(winner) = self.sim.outcome else {
             return (false, None);
         };
+        // The first player's side, the one the shared sting plays for (an away first player's
+        // handle may name a bot's unit: their side at the drop).
+        let team = self.viewer_team();
         let r = self.round_end.get_or_insert_with(|| {
-            use crate::round_end::{Result, RoundEnd};
-            let me = self.sim.units[self.player.index as usize].team;
-            let result = if winner == core::sim::OUTCOME_DRAW {
-                Result::Draw
-            } else if winner == me {
-                Result::Victory
-            } else {
-                Result::Defeat
-            };
+            use crate::round_end::{result_for, RoundEnd};
+            let result = result_for(winner, team);
             // `FUN_00381110` plays the end movie when the winners mask has
             // bit 2, the script's team 1 (sim team 0): a draw sets both.
             let movie = self

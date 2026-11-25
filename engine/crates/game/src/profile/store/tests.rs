@@ -116,3 +116,180 @@ fn an_unreadable_catalog_is_preserved() {
     assert!(store.create("New", Difficulty::Normal).is_err());
     assert_eq!(fs::read(&path).unwrap(), exhausted.as_bytes());
 }
+
+/// Issue #194 (B1): a seat's pick or new profile never moves `last`, so the
+/// title picker offers the host's profile next launch.
+#[test]
+fn bind_and_create_quiet_keep_last() {
+    let dir = Scratch::new();
+    let store = Store::new(dir.0.clone());
+    let host = store.create("Host", Difficulty::Hard).unwrap();
+    let host_id = host.id().unwrap();
+    let other = store.create("Other", Difficulty::Normal).unwrap();
+    let other_id = other.id().unwrap();
+    store.select(host_id).unwrap();
+    assert_eq!(store.list().unwrap().last, Some(host_id));
+
+    let bound = store.bind(other_id).unwrap();
+    assert_eq!(bound.id(), Some(other_id));
+    assert_eq!(bound.name, "Other");
+    assert!(bound.is_seat());
+    assert_eq!(store.list().unwrap().last, Some(host_id));
+
+    let quiet = store.create_quiet("Guest", Difficulty::Hard).unwrap();
+    assert!(quiet.is_seat());
+    assert_eq!(quiet.settings.difficulty, Difficulty::Hard);
+    let quiet_id = quiet.id().unwrap();
+    assert!(quiet_id != host_id && quiet_id != other_id);
+    let list = store.list().unwrap();
+    assert_eq!(list.last, Some(host_id));
+    assert_eq!(list.names.len(), 3);
+    // The name rules still hold.
+    assert!(store.create_quiet("host", Difficulty::Normal).is_err());
+    assert!(store.create_quiet("  ", Difficulty::Normal).is_err());
+    assert!(store.bind(999).is_err());
+
+    // A seat's profile saves to its own entry.
+    let mut quiet = quiet;
+    quiet.career.kills = 5;
+    quiet.save().unwrap();
+    assert_eq!(store.bind(quiet_id).unwrap().career.kills, 5);
+    assert_eq!(store.select(host_id).unwrap().career.kills, 0);
+    // The title picker's create still moves `last`.
+    let next = store.create("Next", Difficulty::Normal).unwrap();
+    assert!(!next.is_seat());
+    assert_eq!(store.list().unwrap().last, next.id());
+}
+
+/// The catalog file as an older build wrote it, with each profile's
+/// `settings` given as RON text.
+fn catalog_text(entries: &[(u64, &str, &str)]) -> String {
+    let profiles: Vec<String> = entries
+        .iter()
+        .map(|(id, name, settings)| {
+            format!(
+                "{id}: (name: \"{name}\", settings: {settings}, career: (rounds: 0, wins: 0, \
+                 kills: {id}, deaths: 0, shots: 0, hits: 0, captures: 0))"
+            )
+        })
+        .collect();
+    format!(
+        "(profiles: {{{}}}, last: Some(0), next: {})",
+        profiles.join(", "),
+        entries.len()
+    )
+}
+
+/// Issue #194 (B1): an older file loads the Splitscreen defaults; a partly
+/// missing entry loads; a bad `cells` (not a permutation, or the wrong
+/// length, range or type) reads as the identity, a non-bool `name_tags` as
+/// on; an unknown
+/// `two_player` or `hud_size` loads as the default and the other profiles in
+/// the file still load.
+#[test]
+fn splitscreen_settings_load_from_any_catalog() {
+    use crate::profile::{HudSize, SplitscreenSettings, TwoPlayerSplit, IDENTITY_CELLS};
+    let dir = Scratch::new();
+    fs::write(
+        dir.0.join("profiles.ron"),
+        catalog_text(&[
+            (0, "Old", "(difficulty: hard)"),
+            (1, "Partial", "(splitscreen: (name_tags: false))"),
+            (
+                2,
+                "BadCells",
+                "(splitscreen: (cells: (0, 0, 7, 1), two_player: TopAndBottom))",
+            ),
+            (
+                3,
+                "Future",
+                "(splitscreen: (two_player: Diagonal, hud_size: Tiny, cells: (3, 2, 1, 0)))",
+            ),
+            (
+                4,
+                "Short",
+                "(splitscreen: (cells: (0, 1, 2), name_tags: false))",
+            ),
+            (
+                5,
+                "Wide",
+                "(splitscreen: (cells: (300, 0, 1, 2), name_tags: 3))",
+            ),
+            (
+                6,
+                "Long",
+                "(splitscreen: (cells: (3, 2, 1, 0, 4), name_tags: \"no\"))",
+            ),
+            (
+                7,
+                "Odd",
+                "(splitscreen: (cells: \"left\", two_player: TopAndBottom))",
+            ),
+            (8, "Negative", "(splitscreen: (cells: (-1, 0, 1, 2)))"),
+        ]),
+    )
+    .unwrap();
+    let store = Store::new(dir.0.clone());
+    let list = store.list().unwrap();
+    assert_eq!(list.names.len(), 9);
+
+    let old = store.select(0).unwrap();
+    assert_eq!(old.settings.difficulty, Difficulty::Hard);
+    assert_eq!(old.settings.splitscreen, SplitscreenSettings::default());
+    assert!(old.settings.splitscreen.name_tags);
+    assert_eq!(old.settings.splitscreen.cells, IDENTITY_CELLS);
+    assert_eq!(
+        old.settings.splitscreen.two_player,
+        TwoPlayerSplit::SideBySide
+    );
+    assert_eq!(old.settings.splitscreen.hud_size, HudSize::Full);
+
+    let partial = store.bind(1).unwrap().settings.splitscreen;
+    assert!(!partial.name_tags);
+    assert_eq!(partial.cells, IDENTITY_CELLS);
+    assert_eq!(partial.two_player, TwoPlayerSplit::SideBySide);
+
+    let bad = store.bind(2).unwrap().settings.splitscreen;
+    assert_eq!(bad.cells, IDENTITY_CELLS);
+    assert_eq!(bad.two_player, TwoPlayerSplit::TopAndBottom);
+
+    let future = store.bind(3).unwrap();
+    assert_eq!(future.career.kills, 3);
+    let s = future.settings.splitscreen;
+    assert_eq!(s.two_player, TwoPlayerSplit::SideBySide);
+    assert_eq!(s.hud_size, HudSize::Full);
+    assert_eq!(s.cells, [3, 2, 1, 0]);
+
+    // The wrong length, range or type reads as the default, field by field.
+    let short = store.bind(4).unwrap().settings.splitscreen;
+    assert_eq!(short.cells, IDENTITY_CELLS);
+    assert!(!short.name_tags);
+    for id in [5, 6, 8] {
+        let s = store.bind(id).unwrap().settings.splitscreen;
+        assert_eq!(s.cells, IDENTITY_CELLS, "{id}");
+        assert!(s.name_tags, "{id}");
+    }
+    let odd = store.bind(7).unwrap().settings.splitscreen;
+    assert_eq!(odd.cells, IDENTITY_CELLS);
+    assert_eq!(odd.two_player, TwoPlayerSplit::TopAndBottom);
+}
+
+/// The Splitscreen options round-trip through the catalog.
+#[test]
+fn splitscreen_settings_round_trip() {
+    use crate::profile::{HudSize, SplitscreenSettings, TwoPlayerSplit};
+    let dir = Scratch::new();
+    let store = Store::new(dir.0.clone());
+    let mut p = store.create("Host", Difficulty::Normal).unwrap();
+    let id = p.id().unwrap();
+    let chosen = SplitscreenSettings {
+        two_player: TwoPlayerSplit::TopAndBottom,
+        cells: [2, 0, 3, 1],
+        name_tags: false,
+        hud_size: HudSize::Smallest,
+    };
+    p.settings.splitscreen = chosen;
+    p.save().unwrap();
+    assert_eq!(store.select(id).unwrap().settings.splitscreen, chosen);
+    assert_eq!(store.bind(id).unwrap().settings, p.settings);
+}

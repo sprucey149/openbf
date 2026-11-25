@@ -50,6 +50,18 @@ pub type OverlayFn<'a> = &'a mut dyn FnMut(
     [u32; 2],
 );
 
+/// One view of a frame shared by several (splitscreen, issue #194): the pixel rectangle of the
+/// window it fills and its place among the views of this present. The first view acquires the
+/// window's image and clears it, the last presents it. All views of a present have the same
+/// width and height, so the size-keyed bloom, filter and world targets are made once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewSlot {
+    /// x, y, width, height in window pixels.
+    pub rect: [u32; 4],
+    pub first: bool,
+    pub last: bool,
+}
+
 impl Renderer {
     // ── Frame ────────────────────────────────────────────────────────────────
 

@@ -869,7 +869,7 @@ fn spa2c_c_objective6_hangar_voice_plays_immediately_over_background_streams() {
     v.ask_script_sounds(vec!["common_objComplete".into()]);
     let _ = v.gate_script_sounds(&lib);
     let mut played = Vec::new();
-    let _ = v.frame(&walk.sim, walk.player, core::TICK_DT, |line| {
+    let _ = v.frame(&walk.sim, Some(walk.player), core::TICK_DT, |line| {
         played.push(line.name.clone());
         if line.name == "common_objComplete" {
             Some(10.0)
@@ -898,7 +898,7 @@ fn spa2c_c_objective6_hangar_voice_plays_immediately_over_background_streams() {
         script_lines.extend(rt.take_sounds());
         v.ask_script_sounds(script_lines);
         assert!(v.gate_script_sounds(&lib).is_empty());
-        let _ = v.frame(&walk.sim, walk.player, core::TICK_DT, |line| {
+        let _ = v.frame(&walk.sim, Some(walk.player), core::TICK_DT, |line| {
             played.push(line.name.clone());
             lib.voice_take(&line.name).map(|(_, _, s)| s)
         });

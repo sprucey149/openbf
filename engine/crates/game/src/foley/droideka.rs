@@ -146,8 +146,10 @@ impl Feet {
                 .and_then(Option::as_deref);
             let active = u.alive
                 && u.mount.is_none()
-                && (u.soldier.pos - view.eye).length_squared() <= REACH * REACH
-                && (who == Who::InReach || u.is_player || view.sees(u.soldier.pos));
+                && view.any(|v| {
+                    (u.soldier.pos - v.eye).length_squared() <= REACH * REACH
+                        && (who == Who::InReach || u.is_player || v.sees(u.soldier.pos))
+                });
             let Some((deka, steps)) = u
                 .droideka
                 .as_ref()

@@ -200,10 +200,112 @@ pub struct Census {
     pub cut: usize,
 }
 
+/// Where the mix is heard from. One player: `pos` and `yaw`, and `more` is
+/// empty. Splitscreen (plan SPLITSCREEN 8, 18.1 item 6): the other awake
+/// local players' ears in `more`; a 3-D sound is levelled from the ear
+/// nearest it ([`Listener::ear`]) and centred, since one pair of speakers
+/// has no single yaw that is right for every player.
+/// OURS: measure: the maintainer's listening check after the splitscreen
+/// audio wiring (section 11 question 4).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Listener {
     pub pos: Vec3,
     /// Engine yaw (0 = −Z, positive left).
     pub yaw: f32,
+    /// The other local players' ears, in local order; `None` past the last.
+    pub more: [Option<Vec3>; 3],
+    /// Splitscreen: each ear's velocity, `pos`'s first and then `more`'s in
+    /// order, for the ordnance hums' doppler
+    /// ([`crate::event_sounds::ordnance::hums`]). `None` (one player, the
+    /// tests): the hums take the first `is_player` unit's velocity for `pos`
+    /// and hold every other ear still, as they always have.
+    pub vels: Option<[Vec3; 4]>,
+}
+
+impl Listener {
+    /// One player's ears.
+    pub fn new(pos: Vec3, yaw: f32) -> Self {
+        Listener {
+            pos,
+            yaw,
+            more: [None; 3],
+            vels: None,
+        }
+    }
+
+    /// `self` with `ears` added after the first, up to three (the rest are
+    /// dropped).
+    pub fn with_more(mut self, ears: impl IntoIterator<Item = Vec3>) -> Self {
+        for (slot, e) in self.more.iter_mut().zip(ears) {
+            *slot = Some(e);
+        }
+        self
+    }
+
+    /// More than one ear: every 3-D sound is centred.
+    pub fn shared(&self) -> bool {
+        self.more.iter().any(Option::is_some)
+    }
+
+    /// The listed ear nearest `at` (`pos` on a tie, then local order). With
+    /// one ear it is `pos`, untouched.
+    pub fn ear(&self, at: Vec3) -> Vec3 {
+        self.nearest(at).1
+    }
+
+    /// [`Listener::ear`] with its place: 0 for `pos`, `1 + j` for `more[j]`.
+    pub fn nearest(&self, at: Vec3) -> (usize, Vec3) {
+        let mut best = (0, self.pos);
+        if !self.shared() {
+            return best;
+        }
+        let mut d = (at - best.1).length_squared();
+        for (j, e) in self.more.iter().enumerate() {
+            let Some(e) = *e else { continue };
+            let de = (at - e).length_squared();
+            if de < d {
+                (best, d) = ((1 + j, e), de);
+            }
+        }
+        best
+    }
+
+    /// Metres from `at` to the nearest ear.
+    pub fn dist(&self, at: Vec3) -> f32 {
+        (at - self.ear(at)).length()
+    }
+}
+
+/// What a sound's level is measured from: a bare point (one ear, the
+/// referees' and tests' form) or a [`Listener`] with every local player's
+/// ears.
+pub trait Ears: Copy {
+    /// The ear nearest `at`.
+    fn ear(self, at: Vec3) -> Vec3;
+    /// The first ear (local player 0's, or the first awake one's).
+    fn first(self) -> Vec3;
+    /// Metres from `at` to the nearest ear.
+    fn dist(self, at: Vec3) -> f32 {
+        (at - self.ear(at)).length()
+    }
+}
+
+impl Ears for Vec3 {
+    fn ear(self, _at: Vec3) -> Vec3 {
+        self
+    }
+    fn first(self) -> Vec3 {
+        self
+    }
+}
+
+impl Ears for &Listener {
+    fn ear(self, at: Vec3) -> Vec3 {
+        Listener::ear(self, at)
+    }
+    fn first(self) -> Vec3 {
+        self.pos
+    }
 }
 
 /// What a definition plays, for the referees: (stream, segment ids, sample
@@ -1242,7 +1344,7 @@ impl SoundLib {
         listener: &Listener,
     ) -> Option<((f32, f32), f32)> {
         let (p, _) = self.find(sound)?;
-        let d = (pos - listener.pos).length();
+        let d = listener.dist(pos);
         if !p.flat && d >= p.mute_distance.unwrap_or(p.max_distance) {
             return None;
         }
@@ -1412,14 +1514,18 @@ impl SoundLib {
     /// not hold): the PS2's level function ([`attenuation`]) with the
     /// emitter's distances in place of the property's where the world set
     /// them (`crate::ambience::with_distances`).
-    pub fn ambient_heard(&self, amb: &crate::ambience::Ambience, ears: Vec3) -> Vec<AmbientHeard> {
+    pub fn ambient_heard(
+        &self,
+        amb: &crate::ambience::Ambience,
+        ears: impl Ears,
+    ) -> Vec<AmbientHeard> {
         let mut out = Vec::new();
         for (index, e) in amb.emitters.iter().enumerate() {
             let Some((p, _)) = self.find(e.hash) else {
                 continue;
             };
             let (p, pc_region) = self.ambient_property(e, &p);
-            let dist = (e.pos - ears).length();
+            let dist = ears.dist(e.pos);
             let level = if pc_region && p.flat {
                 // A recorded stereo bed retains its mix. Fade it across
                 // the region's authored inner and outer distances.
@@ -1475,7 +1581,7 @@ impl SoundLib {
         amb: &crate::ambience::Ambience,
         listener: &Listener,
     ) {
-        for h in self.ambient_heard(amb, listener.pos) {
+        for h in self.ambient_heard(amb, listener) {
             let e = &amb.emitters[h.index];
             let Some((p, core)) = self.find(e.hash) else {
                 continue;
@@ -1522,7 +1628,7 @@ impl SoundLib {
                     continue;
                 }
                 let mut starts = Vec::new();
-                self.start_prop_with(e.hash, e.pos, listener.pos, Some(e), &mut starts);
+                self.start_prop_with(e.hash, e.pos, listener, Some(e), &mut starts);
                 self.mix(audio, &starts, listener);
                 let secs = starts.first().map_or(0.0, |s| {
                     let len = self.cache.get(&s.path).map_or(0.0, |d| d.duration_secs());
@@ -1822,7 +1928,7 @@ impl SoundLib {
                 audio::Bus::Game
             };
             audio.play_oneshot_on(bus, &self.cache[&s.path], db, f64::from(pitch), pan);
-            let dist = (s.pos - listener.pos).length();
+            let dist = listener.dist(s.pos);
             self.note(s.hash, &s.path, s.gain, ears, pitch, dist);
             self.played += 1;
             any = true;

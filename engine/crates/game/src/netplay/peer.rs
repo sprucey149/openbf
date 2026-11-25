@@ -122,6 +122,21 @@
 //!   sides write a report into [`Peer::report_dir`] (the guest sends its
 //!   rows to the host first), announced by [`Notice::DesyncReport`].
 //! - Nothing here reads a clock: frame times are the caller's.
+//! - Several local players (splitscreen over LAN, issue #194 B18): local 0
+//!   is [`Peer::local_slot`]; each further one is a [`LocalQueue`] with its
+//!   slot, its own pending inputs and its own [`InputPacer`] that follows
+//!   local 0's clock ([`InputPacer::follower`]). Every frame all pacers get
+//!   the same `dt` and the same host report, so they send the same number
+//!   of input ticks, and each tick goes out for every local under one
+//!   sequence ([`Link::submit_inputs`]). The host closes a machine's slots
+//!   together (`net` grouped close), so every bundle's `consumed` trims
+//!   each local's pending queue by the same count: the queues stay equal
+//!   while their slots are seated. A guest's extra slots come with
+//!   `Welcome`; the host's are given by its caller
+//!   ([`Peer::set_extra_slots`], after `HostCore::add_local`). At the
+//!   round's build each extra slot is adopted by the walk
+//!   ([`WalkSim::adopt_local`]): bundles seat it, never `join_human`. With
+//!   one local nothing here differs from before.
 
 use super::desync::{self, BundleLog, DesyncReport, HashRing, Side};
 pub use super::link::{Link, LinkEvent};
@@ -258,6 +273,13 @@ pub enum Notice {
     PlayerLeft {
         slot: u8,
         reason: LeaveReason,
+    },
+    /// The host: a further player of its own machine (Players-screen
+    /// `seat`) got a slot and its unique name, now one of
+    /// [`Peer::extra_locals`], or was refused and why (splitscreen B19).
+    LocalAdded {
+        seat: u8,
+        added: Result<(u8, String), RejectReason>,
     },
     /// The host: nothing heard from guest `slot` for 1.5 s (`on`), or heard
     /// again. For the log (`netplay::diag`).
@@ -396,10 +418,68 @@ pub struct PeerStats {
 /// A guest as the host knows it.
 #[derive(Clone, Debug)]
 pub struct Guest {
+    /// Its machine: local 0's slot of the connection holding it
+    /// (`NetEvent::PlayerJoined`), its own slot for a one-player machine
+    /// (splitscreen B19).
+    pub machine: u8,
     pub name: String,
     pub profile: super::PlayerProfile,
     /// `None` when its `Hello` carried no readable manifest.
     pub content: Option<super::ContentManifest>,
+}
+
+/// A further local player of this machine (module rules).
+#[derive(Clone, Debug)]
+pub struct LocalQueue {
+    /// Its player slot.
+    pub slot: u8,
+    pacer: InputPacer,
+    pending: VecDeque<PadState>,
+    pending_seq: VecDeque<u32>,
+    /// The slot is a human in the round's bundles.
+    active: bool,
+}
+
+impl LocalQueue {
+    fn new(slot: u8, clock: &InputPacer) -> Self {
+        Self {
+            slot,
+            pacer: clock.follower(),
+            pending: VecDeque::new(),
+            pending_seq: VecDeque::new(),
+            active: false,
+        }
+    }
+
+    /// Its inputs sent and not yet stepped (none while its slot is not in
+    /// the round).
+    pub fn pending_inputs(&self) -> &VecDeque<PadState> {
+        static NONE: VecDeque<PadState> = VecDeque::new();
+        if self.active {
+            &self.pending
+        } else {
+            &NONE
+        }
+    }
+
+    /// Its input pacer (the open tick, the phase).
+    pub fn pacer(&self) -> &InputPacer {
+        &self.pacer
+    }
+
+    /// Drops the inputs a stepped bundle consumed (module rules).
+    fn consumed(&mut self, b: &TickBundle) {
+        match b.consumed(self.slot) {
+            Some(s) => {
+                self.active = true;
+                while self.pending_seq.front().is_some_and(|q| *q <= s) {
+                    self.pending_seq.pop_front();
+                    self.pending.pop_front();
+                }
+            }
+            None => self.active = false,
+        }
+    }
 }
 
 /// One machine's lockstep driver (module header).
@@ -414,6 +494,8 @@ pub struct Peer {
     pending: VecDeque<PadState>,
     /// Each pending input's sequence.
     pending_seq: VecDeque<u32>,
+    /// This machine's further local players, in local order (module rules).
+    extra: Vec<LocalQueue>,
     /// Inputs submitted this session.
     sent: u32,
     round_id: u32,
@@ -485,6 +567,9 @@ pub struct Peer {
     reported: BTreeSet<u8>,
     /// Notices raised outside [`Peer::poll`], given out by the next one.
     later: Vec<Notice>,
+    /// Which of this machine's locals (by local index) have lost their pad
+    /// (splitscreen B20, [`Peer::set_local_away`]).
+    away: Vec<bool>,
 }
 
 /// A guest's rows at `tick` (`Msg::DesyncHashes`), as report text.
@@ -534,6 +619,7 @@ impl Peer {
             next_tick: 0,
             pending: VecDeque::new(),
             pending_seq: VecDeque::new(),
+            extra: Vec::new(),
             sent: 0,
             round_id: 0,
             joining: false,
@@ -574,6 +660,7 @@ impl Peer {
             awaiting: BTreeMap::new(),
             reported: BTreeSet::new(),
             later: Vec::new(),
+            away: Vec::new(),
         }
     }
 
@@ -609,6 +696,163 @@ impl Peer {
     /// The input pacer (its dilation for the meter).
     pub fn pacer(&self) -> &InputPacer {
         &self.pacer
+    }
+
+    /// This machine's further local players (module rules), local 1 first.
+    pub fn extra_locals(&self) -> &[LocalQueue] {
+        &self.extra
+    }
+
+    /// How many people play on this machine: 1 plus the extra locals.
+    pub fn local_count(&self) -> usize {
+        1 + self.extra.len()
+    }
+
+    /// Local player `i`'s slot (0 is [`Peer::local_slot`]).
+    pub fn local_slot_of(&self, i: usize) -> Option<u8> {
+        match i {
+            0 => Some(self.local_slot),
+            _ => self.extra.get(i - 1).map(|q| q.slot),
+        }
+    }
+
+    /// Local player `i`'s pending inputs ([`Peer::pending_inputs`] for 0).
+    pub fn pending_inputs_of(&self, i: usize) -> &VecDeque<PadState> {
+        static NONE: VecDeque<PadState> = VecDeque::new();
+        match i {
+            0 => self.pending_inputs(),
+            _ => self
+                .extra
+                .get(i - 1)
+                .map_or(&NONE, LocalQueue::pending_inputs),
+        }
+    }
+
+    /// Local player `i`'s input pacer ([`Peer::pacer`] for 0).
+    pub fn pacer_of(&self, i: usize) -> &InputPacer {
+        match i {
+            0 => &self.pacer,
+            _ => self.extra.get(i - 1).map_or(&self.pacer, LocalQueue::pacer),
+        }
+    }
+
+    /// Every slot of this machine's players, local 0 first.
+    pub fn local_slots(&self) -> Vec<u8> {
+        (0..self.local_count())
+            .filter_map(|i| self.local_slot_of(i))
+            .collect()
+    }
+
+    /// Whether `slot` is one of the host machine's own players (slot 0 and
+    /// the host's further locals; splitscreen B19). Always false on a
+    /// guest, which reads the roster's machines instead.
+    pub fn host_local(&self, slot: u8) -> bool {
+        self.host && (slot == self.local_slot || self.extra.iter().any(|q| q.slot == slot))
+    }
+
+    /// `slot`'s machine, as its local 0's slot (splitscreen B19): 0 for the
+    /// host's own players, a guest's `machine`, else `slot` itself.
+    pub fn machine_of(&self, slot: u8) -> u8 {
+        if self.host_local(slot) {
+            return self.local_slot;
+        }
+        self.guests.get(&slot).map_or(slot, |g| g.machine)
+    }
+
+    /// Every slot of `slot`'s machine, its local 0 (`slot` itself for a
+    /// request's sender) first: a guest machine's further players are the
+    /// guests whose [`Guest::machine`] it is (splitscreen, issue #194).
+    pub fn machine_slots(&self, slot: u8) -> Vec<u8> {
+        if self.host_local(slot) {
+            return self.local_slots();
+        }
+        let machine = self.machine_of(slot);
+        std::iter::once(machine)
+            .chain(
+                self.guests
+                    .iter()
+                    .filter(|(s, g)| **s != machine && g.machine == machine)
+                    .map(|(s, _)| *s),
+            )
+            .collect()
+    }
+
+    /// The walk's further locals made the same as this peer's (splitscreen
+    /// B19): a slot the peer let go (a kick, a host local leaving) is
+    /// released from the walk, a slot it gained is adopted. Afterwards the
+    /// walk's local slots equal [`Peer::local_slots`].
+    pub fn sync_walk_locals(&self, walk: &mut WalkSim) {
+        let ours = self.local_slots();
+        let theirs: Vec<u8> = (0..walk.local_count())
+            .map(|i| walk.local_slot_of(i))
+            .collect();
+        for s in theirs.iter().skip(1).filter(|s| !ours.contains(s)) {
+            walk.release_local(*s);
+        }
+        for s in ours.iter().skip(1) {
+            walk.adopt_local(*s);
+        }
+        if cfg!(debug_assertions) {
+            let mut walk_slots: Vec<u8> = (0..walk.local_count())
+                .map(|i| walk.local_slot_of(i))
+                .collect();
+            let mut ours = ours;
+            walk_slots.sort_unstable();
+            ours.sort_unstable();
+            assert_eq!(walk_slots, ours, "the walk's local slots equal the peer's");
+        }
+    }
+
+    /// Local player `i` of this machine lost its pad (`away`) or got it back
+    /// (splitscreen B17/B20): the session takes its slot out of the round
+    /// (`RemoveHuman`, a bot plays it on) and seats it again on its old side
+    /// with its round career ([`super::TEAM_KEPT`]). Nothing else in the walk
+    /// changes here: the bundles do it on every peer alike. Only a change is
+    /// sent; [`Peer::local_away`] answers what was last asked. A new peer
+    /// (a new link) starts with none away, so the caller asks again for every
+    /// local whose pad is still missing.
+    pub fn set_local_away<L: Link>(&mut self, link: &mut L, i: usize, away: bool) {
+        // A guest before its `Welcome` knows no slots yet: its core keeps the
+        // flag and sends it with the welcome (by local index).
+        let slot = match self.local_slot_of(i) {
+            Some(slot) => slot,
+            None if !self.host && i < net::MAX_LOCALS => 0,
+            None => return,
+        };
+        if self.local_away(i) == away {
+            return;
+        }
+        if self.away.len() <= i {
+            self.away.resize(i + 1, false);
+        }
+        self.away[i] = away;
+        link.set_local_away(i as u8, slot, away);
+    }
+
+    /// Whether local player `i`'s pad was last said to be away
+    /// ([`Peer::set_local_away`]).
+    pub fn local_away(&self, i: usize) -> bool {
+        self.away.get(i).copied().unwrap_or(false)
+    }
+
+    /// The slots of this machine's further local players (module rules): a
+    /// guest's come with `Welcome`; the host's caller gives the ones
+    /// `HostCore::add_local` returned. Between frames only. A slot already
+    /// held keeps its queue; a new one starts on local 0's input clock. The
+    /// walk adopts them at the next [`Peer::round_built`] (or now through
+    /// [`WalkSim::adopt_local`] by the caller, in a running round).
+    pub fn set_extra_slots(&mut self, slots: &[u8]) {
+        let old = std::mem::take(&mut self.extra);
+        self.extra = slots
+            .iter()
+            .filter(|s| **s != self.local_slot)
+            .map(|&slot| {
+                old.iter()
+                    .find(|q| q.slot == slot)
+                    .cloned()
+                    .unwrap_or_else(|| LocalQueue::new(slot, &self.pacer))
+            })
+            .collect();
     }
 
     /// The playback controller (its target for the meter).
@@ -670,6 +914,11 @@ impl Peer {
         self.queue.clear();
         self.pending.clear();
         self.pending_seq.clear();
+        for q in &mut self.extra {
+            q.pending.clear();
+            q.pending_seq.clear();
+            q.active = false;
+        }
         self.next_tick = 0;
         self.playback = Playback::new();
         self.built = false;
@@ -724,6 +973,15 @@ impl Peer {
         self.cheat_policy = setup.cheat_policy;
         self.joining = false;
         self.mode = Mode::Loading;
+        // Each seat's profile as this round seats it (a guest's `Ready`, a host local's seat
+        // profile as the last round left it): a later `AddHuman` of the slot (a late local, a
+        // pad back) carries it, not the one its `Hello` brought (`HostCore::set_profile`).
+        for h in &setup.humans {
+            link.host(HostCommand::SetProfile {
+                slot: h.slot,
+                profile: h.profile.encode(),
+            });
+        }
         // The setup's seats are the round's humans (net seats no one else).
         let humans = setup.humans.iter().map(|h| h.slot).collect();
         link.host(HostCommand::LoadRound {
@@ -796,12 +1054,14 @@ impl Peer {
         match e {
             NetEvent::PlayerJoined {
                 slot,
+                machine,
                 name,
                 reconnect,
                 content,
                 profile,
             } => {
                 let guest = Guest {
+                    machine,
                     name: name.clone(),
                     profile: super::PlayerProfile::decode_or_default(&profile),
                     content: super::ContentManifest::decode(&content),
@@ -830,7 +1090,11 @@ impl Peer {
                 hash0,
             } if round_id == self.round_id => {
                 out.push(Notice::GuestLoaded { slot });
-                self.check_digest(slot, static_digest, hash0, out);
+                // A machine's slots all carry its one digest: it is checked
+                // (and counted) once, by its local 0's (B14's follow-up).
+                if self.machine_of(slot) == slot {
+                    self.check_digest(slot, static_digest, hash0, out);
+                }
             }
             NetEvent::AllLoaded { round_id } if round_id == self.round_id => {
                 self.all_loaded = true;
@@ -965,7 +1229,11 @@ impl Peer {
                         out.push(Notice::LeftRound { slot, why, groups });
                     }
                 }
-                _ => match validate_request_bytes(slot, &data, self.cheat_policy) {
+                _ => match validate_request_bytes(
+                    &self.machine_slots(slot),
+                    &data,
+                    self.cheat_policy,
+                ) {
                     Ok(cmd) => link.host(HostCommand::IssueCommand(cmd.encode())),
                     Err(why) => {
                         self.stats.refused += 1;
@@ -974,6 +1242,15 @@ impl Peer {
                 },
             },
             NetEvent::Chat { slot, text } => out.push(Notice::Chat { slot, text }),
+            NetEvent::LocalAdded { seat, added } => {
+                if let Ok((slot, _)) = &added {
+                    let mut slots = self.local_slots();
+                    slots.remove(0);
+                    slots.push(*slot);
+                    self.set_extra_slots(&slots);
+                }
+                out.push(Notice::LocalAdded { seat, added });
+            }
             NetEvent::PeerReady {
                 slot,
                 round_id,
@@ -996,14 +1273,23 @@ impl Peer {
                 }
             }
             NetEvent::Trouble { slot, on } => out.push(Notice::GuestTrouble { slot, on }),
-            NetEvent::Refused { .. } => {}
+            // A local's pad came back: seated again as its pad's loss left
+            // it, on its old side with its round career (B20, `TEAM_KEPT`).
+            NetEvent::LocalBack { slot, round_id, .. } if round_id == self.round_id => {
+                link.host(HostCommand::AddHuman {
+                    slot,
+                    team: super::TEAM_KEPT,
+                });
+            }
+            NetEvent::LocalBack { .. } | NetEvent::LocalAway { .. } | NetEvent::Refused { .. } => {}
         }
     }
 
     fn client_event<L: Link>(&mut self, link: &mut L, e: ClientEvent, out: &mut Vec<Notice>) {
         match e {
-            ClientEvent::Welcome { slot, .. } => {
+            ClientEvent::Welcome { slot, extra, .. } => {
                 self.local_slot = slot;
+                self.set_extra_slots(&extra);
                 out.push(Notice::Welcome { slot });
             }
             ClientEvent::Rejected { reason, detail } => {
@@ -1154,6 +1440,9 @@ impl Peer {
     /// asked for.
     pub fn round_built<L: Link>(&mut self, link: &mut L, walk: &mut WalkSim) {
         walk.set_local_slot(self.local_slot);
+        for q in &self.extra {
+            walk.adopt_local(q.slot);
+        }
         let digest = walk.sim.static_digest();
         let hash0 = walk.sim.hash();
         self.static_groups = walk.sim.static_digest_groups();
@@ -1266,11 +1555,25 @@ impl Peer {
         dt: f64,
         pad: PadState,
         walk: &mut WalkSim,
+        feed: Option<&mut EventFeed>,
+        each: impl FnMut(&mut WalkSim, &TickBundle, Option<&mut EventFeed>),
+    ) -> FrameReport {
+        self.frame_locals(link, dt, &[pad], walk, feed, each)
+    }
+
+    /// [`Peer::frame`] with every local player's pad, local 0 first (module
+    /// rules); a missing one is a neutral pad.
+    pub fn frame_locals<L: Link>(
+        &mut self,
+        link: &mut L,
+        dt: f64,
+        pads: &[PadState],
+        walk: &mut WalkSim,
         mut feed: Option<&mut EventFeed>,
         each: impl FnMut(&mut WalkSim, &TickBundle, Option<&mut EventFeed>),
     ) -> FrameReport {
         let corrected = self.poll_self_check(link, walk, feed.as_deref_mut());
-        let mut report = self.frame_steps(link, dt, pad, walk, feed, each);
+        let mut report = self.frame_steps(link, dt, pads, walk, feed, each);
         report.corrected = corrected;
         report
     }
@@ -1282,7 +1585,7 @@ impl Peer {
         &mut self,
         link: &mut L,
         dt: f64,
-        pad: PadState,
+        pads: &[PadState],
         walk: &mut WalkSim,
         mut feed: Option<&mut EventFeed>,
         mut each: impl FnMut(&mut WalkSim, &TickBundle, Option<&mut EventFeed>),
@@ -1302,8 +1605,46 @@ impl Peer {
             self.pacer.feedback(depth, starved);
             self.pacer.slack(link.slack_us());
             let view_tick = u32::try_from(walk.sim.tick).unwrap_or(u32::MAX);
-            for p in self.pacer.frame(dt.fmin(MAX_INPUT_FRAME_S), pad) {
-                link.submit_input(p, view_tick);
+            let input_dt = dt.fmin(MAX_INPUT_FRAME_S);
+            let pad = pads.first().copied().unwrap_or_default();
+            let sent = self.pacer.frame(input_dt, pad);
+            // The further locals' ticks: their pacers follow local 0's clock,
+            // so each sends as many (module rules); a count that still
+            // differs is held to local 0's, the last pad repeated.
+            let mut extra: Vec<Vec<PadState>> = Vec::with_capacity(self.extra.len());
+            for (k, q) in self.extra.iter_mut().enumerate() {
+                q.pacer.feedback(depth, starved);
+                q.pacer.slack(link.slack_us());
+                let own = pads.get(k + 1).copied().unwrap_or_default();
+                let mut ticks = q.pacer.frame(input_dt, own);
+                debug_assert_eq!(
+                    ticks.len(),
+                    sent.len(),
+                    "local {} off local 0's clock",
+                    k + 1
+                );
+                let last = ticks.last().map_or(own, net::bundle::repeat_pad);
+                ticks.resize(sent.len(), last);
+                extra.push(ticks);
+            }
+            for (i, p) in sent.into_iter().enumerate() {
+                if self.extra.is_empty() {
+                    link.submit_input(p, view_tick);
+                } else {
+                    let mut row = Vec::with_capacity(1 + self.extra.len());
+                    row.push((self.local_slot, p));
+                    for (q, ticks) in self.extra.iter_mut().zip(&extra) {
+                        let e = ticks[i];
+                        row.push((q.slot, e));
+                        q.pending.push_back(e);
+                        q.pending_seq.push_back(self.sent + 1);
+                        if q.pending.len() > PENDING_KEPT {
+                            q.pending.pop_front();
+                            q.pending_seq.pop_front();
+                        }
+                    }
+                    link.submit_inputs(&row, view_tick);
+                }
                 report.submitted.push(p);
                 self.stats.inputs_sent += 1;
                 self.sent += 1;
@@ -1402,6 +1743,9 @@ impl Peer {
             }
             None => self.active = false,
         }
+        for q in &mut self.extra {
+            q.consumed(b);
+        }
         self.next_tick = b.tick + 1;
         self.stats.ticks_stepped += 1;
         report.ticks += 1;
@@ -1467,6 +1811,7 @@ impl Peer {
             round_id: self.round_id,
             slot,
             local_slot: self.local_slot,
+            local_slots: self.local_slots(),
             tick,
             columns: desync::COLUMNS.iter().map(|c| (*c).to_owned()).collect(),
             host,
@@ -2066,7 +2411,10 @@ mod tests {
         assert!(
             matches!(
                 out.as_slice(),
-                [Notice::GuestLoaded { slot: 1 }, Notice::GuestLoaded { slot: 2 }]
+                [
+                    Notice::GuestLoaded { slot: 1 },
+                    Notice::GuestLoaded { slot: 2 }
+                ]
             ),
             "only the log's notices: nothing to compare with yet: {out:?}"
         );

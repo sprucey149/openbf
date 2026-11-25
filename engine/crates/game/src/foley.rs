@@ -393,10 +393,15 @@ pub struct Sound {
 }
 
 /// What the camera draws: the PS2 poses - and so steps - only those.
+/// Splitscreen (issue #194, `SPLITSCREEN.md` 18.1 item 6): the other awake
+/// local players' views in `more`, and a soldier sounds when any view draws
+/// him ([`View::any`]).
 #[derive(Debug, Clone, Copy)]
 pub struct View {
     pub eye: Vec3,
     pub view_proj: Mat4,
+    /// The further views' eyes and projections, in local order.
+    pub more: [Option<(Vec3, Mat4)>; 3],
 }
 
 impl View {
@@ -404,7 +409,40 @@ impl View {
         View {
             eye: cam.position,
             view_proj: cam.view_proj(aspect),
+            more: [None; 3],
         }
+    }
+
+    /// A view that draws no soldier, its eye at `eye` (splitscreen with every
+    /// local player away: no cell draws the battle, so no foley sounds).
+    pub fn blind(eye: Vec3) -> View {
+        View {
+            eye,
+            view_proj: Mat4::ZERO,
+            more: [None; 3],
+        }
+    }
+
+    /// `self` with `views` added after the first, up to three (the rest are
+    /// dropped; their own `more` is not read).
+    pub fn with_more(mut self, views: impl IntoIterator<Item = View>) -> View {
+        for (slot, v) in self.more.iter_mut().zip(views) {
+            *slot = Some((v.eye, v.view_proj));
+        }
+        self
+    }
+
+    /// `test` passes for this view or one of `more`. With one view it is
+    /// `test(self)`.
+    pub(crate) fn any(&self, mut test: impl FnMut(&View) -> bool) -> bool {
+        test(self)
+            || self.more.iter().flatten().any(|&(eye, view_proj)| {
+                test(&View {
+                    eye,
+                    view_proj,
+                    more: [None; 3],
+                })
+            })
     }
 
     /// A soldier standing at `feet` is on screen (his 2 m, either end).
@@ -554,8 +592,11 @@ impl Foley {
             if !(s.grounded && walking(s.stance)) {
                 continue;
             }
-            let drawn = (s.pos - view.eye).length() <= REACH
-                && (self.who == Who::InReach || u.is_player || view.sees(s.pos));
+            let who = self.who;
+            let drawn = view.any(|v| {
+                (s.pos - v.eye).length() <= REACH
+                    && (who == Who::InReach || u.is_player || v.sees(s.pos))
+            });
             if !drawn {
                 t.clip = Clip::IDLE;
                 t.dist = 0.0;

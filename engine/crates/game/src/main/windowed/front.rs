@@ -28,6 +28,8 @@ mod controls;
 mod credits;
 #[path = "front/gal.rs"]
 mod gal;
+#[path = "front/players.rs"]
+mod players;
 #[path = "front/profiles.rs"]
 mod profiles;
 
@@ -99,6 +101,14 @@ pub(super) struct FrontShell {
     pub(super) text_focus: bool,
     /// Game Options' Player name box is open: the text and its refusal.
     name_edit: Option<(String, Option<String>)>,
+    /// Issue #194: the Players screen's seats, kept for the session (the shell lives across
+    /// battles), and each connected pad's held buttons last frame.
+    pub(super) party: game::local_seats::Party<gilrs::GamepadId>,
+    party_held: Vec<players::PadHeld>,
+    /// The keyboard seat's held arrows repeat on the Players screen.
+    party_key_repeat: ui::shell_feel::HoldRepeat,
+    /// The keyboard's Tab held toward emptying a lost seat (`PartyPress::remove`).
+    party_key_remove: game::local_seats::RemoveHold,
 }
 
 impl FrontShell {
@@ -156,6 +166,37 @@ impl FrontShell {
             mp: None,
             text_focus: false,
             name_edit: None,
+            party: Default::default(),
+            party_held: Vec::new(),
+            party_key_repeat: Default::default(),
+            party_key_remove: Default::default(),
+        }
+    }
+
+    /// The seats as a split match left them.
+    pub(super) fn set_party(&mut self, owners: input::owners::PadOwners<gilrs::GamepadId>) {
+        self.party.set_owners(owners);
+    }
+
+    /// Each split round moves P2-P4's Ready profiles into the battle (`App.split_profiles`, by
+    /// seat number), never a copy (`SPLITSCREEN.md` 18.1 item 1).
+    pub(super) fn lend_seat_profiles(&mut self, to: &mut [Option<game::profile::Profile>; 4]) {
+        for (seat, slot) in to.iter_mut().enumerate().skip(1) {
+            if let Some(p) = self.party.lend(seat) {
+                *slot = Some(p);
+            }
+        }
+    }
+
+    /// The battle is over: the seats' profiles come back to their seats as it left them.
+    pub(super) fn give_back_seat_profiles(
+        &mut self,
+        from: &mut [Option<game::profile::Profile>; 4],
+    ) {
+        for (seat, slot) in from.iter_mut().enumerate() {
+            if let Some(p) = slot.take() {
+                self.party.give_back(seat, p);
+            }
         }
     }
 
@@ -296,7 +337,32 @@ fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
     }
 }
 
+/// Which seats the Players screen's party holds.
+fn party_seated<Id: Copy + PartialEq>(owners: &input::owners::PadOwners<Id>) -> [bool; 4] {
+    std::array::from_fn(|i| owners.is_seated(i))
+}
+
 impl App {
+    /// The Players screen's seats' names for the Splitscreen page's rows (issue #194 B22,
+    /// `MenuModel::split_names`): P1 the current profile, a further seat its Ready or lent
+    /// profile, through the single-player name filter; `None` for an open, picking or unnamed
+    /// seat.
+    fn party_seat_names(
+        &self,
+        party: &game::local_seats::Party<gilrs::GamepadId>,
+    ) -> [Option<String>; 4] {
+        use game::local_seats::SeatProfile;
+        std::array::from_fn(|seat| {
+            let name = match party.profile(seat) {
+                SeatProfile::Host => Some(self.profile.name.as_str()),
+                SeatProfile::Ready(p) => Some(p.name.as_str()),
+                SeatProfile::Lent(_) => self.split_profiles[seat].as_ref().map(|p| p.name.as_str()),
+                SeatProfile::Open | SeatProfile::Picking(_) => None,
+            };
+            name.and_then(|n| super::single_player_name(false, n))
+        })
+    }
+
     pub(super) fn queue_battle_movies(&mut self) {
         if !self.in_battle() || self.netplay.is_some() {
             return;
@@ -379,7 +445,16 @@ impl App {
                 if controls.original == controls.layout.complete() {
                     return Some(MenuSound::Exit);
                 }
-                let settings = &mut self.profile.settings;
+                // Issue #194 (B10): a split player's page writes their own seat's profile.
+                let seat = controls.seat;
+                let profile = match seat {
+                    0 => Some(&mut self.profile),
+                    _ => self.split_profiles.get_mut(seat).and_then(Option::as_mut),
+                };
+                let Some(profile) = profile else {
+                    return Some(MenuSound::Exit);
+                };
+                let settings = &mut profile.settings;
                 match controls.layout {
                     Layout::Keyboard(items) => settings
                         .keyboard_layouts
@@ -388,12 +463,23 @@ impl App {
                         .gamepad_layouts
                         .set(controls.context, items.into_iter().flatten().collect()),
                 }
+                if let Err(e) = profile.save() {
+                    eprintln!("profile autosave failed: {e:#}");
+                }
+                if seat != 0 {
+                    // Their pad table is rebuilt from the new layouts on its next sample.
+                    if let Some(split) = self.split.as_mut() {
+                        let n = split.inputs.len();
+                        if let Some(k) =
+                            (0..n).find(|&k| super::split::profile_seat(&split.seats, k) == seat)
+                        {
+                            split.inputs[k].relayout();
+                        }
+                    }
+                }
                 self.refresh_context_bindings();
                 self.kbm.release_keys();
                 self.sprint_latch = input::SprintLatch::default();
-                if let Err(e) = self.profile.save() {
-                    eprintln!("profile autosave failed: {e:#}");
-                }
                 Some(MenuSound::Exit)
             }
             1 => {
@@ -438,6 +524,9 @@ impl App {
     }
 
     pub(super) fn step_controls(&mut self, input: ui::menu::MenuInput) -> Option<MenuSound> {
+        // Split: the pad of the player whose profile the page edits captures, even when the
+        // menu has passed to someone else (issue #194 B10, `App::controls_pad`).
+        let owner = self.controls_pad();
         let controls = self.controls.as_mut()?;
         let keyboard = controls.keyboard();
         if let Some(capture) = controls.capture.as_mut() {
@@ -451,10 +540,12 @@ impl App {
             if keyboard {
                 return None;
             }
-            let pad = self
-                .gilrs
-                .as_ref()
-                .and_then(|g| input::active_gamepad(g, &self.active_pad));
+            let pad = self.gilrs.as_ref().and_then(|g| match owner {
+                Some(Some(id)) => g.connected_gamepad(id).map(|p| (id, p)),
+                // Split: the player whose profile this is has no pad; nobody else's captures.
+                Some(None) => None,
+                None => input::active_gamepad(g, &self.active_pad),
+            });
             let Some((id, pad)) = pad else {
                 return Some(controls.cancel("Controller disconnected; binding unchanged"));
             };
@@ -508,7 +599,10 @@ impl App {
             ("Back".into(), String::new()),
             ("Restore defaults".into(), String::new()),
         ];
-        let set = self.icon_device.set(self.profile.settings.input_icons);
+        // Split: the editing seat's own icon choice on their own pad (issue #194 B10).
+        let set = self
+            .editor_icon_set(controls.seat)
+            .unwrap_or_else(|| self.icon_device.set(self.profile.settings.input_icons));
         let values = match &controls.layout {
             Layout::Keyboard(items) => items
                 .iter()
@@ -660,6 +754,7 @@ impl App {
             .front
             .take()
             .unwrap_or_else(|| FrontShell::new(&self.assets_dir));
+        let (party_pads, party_presses) = self.poll_party_pads(&mut front, dt);
         if front.menus.page == ui::shell_ps2::Page::Credits {
             // The UI page owns navigation (any skip leaves for Singleplayer
             // with its own Exit cue); `Crawl` stays the game-side renderer it
@@ -899,6 +994,17 @@ impl App {
                 cursor,
                 page: Some(page),
                 in_shell: Some(String::new()),
+                // Issue #194: the Splitscreen page (the Splitscreen mode list's row), for the
+                // Players screen's seats.
+                split: (page == PausePage::Settings(ui::menu::SettingsPage::Splitscreen)).then(
+                    || {
+                        super::menu_actions::split_menu(
+                            &settings.splitscreen,
+                            party_seated(front.party.owners()),
+                        )
+                    },
+                ),
+                split_names: self.party_seat_names(&front.party),
                 ..Default::default()
             };
             front.settings_animation.advance(dt);
@@ -972,6 +1078,13 @@ impl App {
                         low_power_resolution: self.profile.settings.low_power_resolution,
                         hard_shadows: self.profile.settings.hard_shadows,
                         auto_quality: self.profile.settings.auto_quality,
+                        split: model.split.map(|_| {
+                            super::menu_actions::split_menu(
+                                &self.profile.settings.splitscreen,
+                                party_seated(front.party.owners()),
+                            )
+                        }),
+                        split_names: self.party_seat_names(&front.party),
                         ..model
                     });
         } else if !front.cutscenes.is_empty() {
@@ -990,6 +1103,8 @@ impl App {
                     wheel,
                 },
             );
+        } else if front.menus.page == ui::shell_ps2::Page::Players && front.picker.is_none() {
+            self.step_players(&mut front, party_pads, party_presses, pointer, wheel, dt);
         } else if !self.step_profiles(
             &mut front,
             profiles::FrameInput {
@@ -1034,10 +1149,16 @@ impl App {
                 Some(ui::shell_ps2::ShellCommand::Settings(page)) => {
                     front.settings = Some((PausePage::Settings(page), 0));
                 }
+                // Issue #194 B19: opened from the Splitscreen mode list, the
+                // session takes the Players screen's seats along.
                 Some(ui::shell_ps2::ShellCommand::HostGame) => {
+                    self.split_party = (front.menus.multiplayer_split && front.party.can_start())
+                        .then(|| front.party.owners().clone());
                     front.mp = Some(super::lobby::MpPage::host());
                 }
                 Some(ui::shell_ps2::ShellCommand::JoinGame) => {
+                    self.split_party = (front.menus.multiplayer_split && front.party.can_start())
+                        .then(|| front.party.owners().clone());
                     front.mp = Some(super::lobby::MpPage::join(self.recent_rows()));
                 }
                 Some(ui::shell_ps2::ShellCommand::Quit) => quit = true,
@@ -1266,11 +1387,17 @@ impl App {
             sounds.set_user_volumes(s.effects_volume, s.dialogue_volume);
         }
         front.play_cues(self.audio.as_mut(), dt);
+        // Issue #194: an Instant Action launched over the Splitscreen mode list plays with the
+        // Players screen's seats, in their order; any other launch plays alone.
+        let split_launch = (front.menus.page == ui::shell_ps2::Page::SplitModes
+            && front.party.can_start())
+        .then(|| front.party.owners().clone());
         self.front = Some(front);
         if quit {
             self.request_close(super::CloseReason::Quit);
         }
         if let Some((rows, options)) = launch {
+            self.split_party = split_launch;
             self.start_playlist(rows, options);
         }
         if let Some(index) = launch_campaign {
@@ -1498,6 +1625,17 @@ impl App {
             }
             MenuAction::CycleInputIcons(dir) => s.input_icons = s.input_icons.cycled(dir),
             MenuAction::ToggleViewpoint => s.viewpoint = s.viewpoint.toggled(),
+            // Issue #194: the Splitscreen page, from the Splitscreen mode list.
+            MenuAction::SetSplitTwoPlayer(_)
+            | MenuAction::MoveSplitScreen { .. }
+            | MenuAction::SetSplitNameTags(_)
+            | MenuAction::SetSplitHudSize(_) => {
+                super::menu_actions::apply_split_setting(
+                    &mut s.splitscreen,
+                    a,
+                    party_seated(front.party.owners()),
+                );
+            }
         }
         if matches!(a, MenuAction::SetRumble(_)) {
             game::rumble::preview(

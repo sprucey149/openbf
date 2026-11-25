@@ -32,8 +32,12 @@ pub fn attenuation(dist: f32, p: &SoundProp) -> f32 {
     }
 }
 /// Where a sound at `pos` sits for `listener`: the direction to it dotted
-/// with the listener's right, -1 (left) .. 1 (right); 0 at the listener.
+/// with the listener's right, -1 (left) .. 1 (right); 0 at the listener,
+/// and 0 (centred) for a listener with more than one ear.
 pub fn side(listener: &Listener, pos: Vec3) -> f32 {
+    if listener.shared() {
+        return 0.0;
+    }
     let (sy, cy) = listener.yaw.sin_cos();
     let right = Vec3::new(cy, 0.0, -sy);
     let d = pos - listener.pos;

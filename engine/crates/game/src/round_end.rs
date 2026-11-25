@@ -65,6 +65,29 @@ pub enum Result {
     Draw,
 }
 
+/// How the round went for a viewer on `team`, the round decided for `outcome` (the winning
+/// team, or `core::sim::OUTCOME_DRAW`). Each split view takes its own (issue #194 B22).
+pub fn result_for(outcome: u8, team: u8) -> Result {
+    if outcome == core::sim::OUTCOME_DRAW {
+        Result::Draw
+    } else if outcome == team {
+        Result::Victory
+    } else {
+        Result::Defeat
+    }
+}
+
+impl Result {
+    /// The HUD's banner code (`ui::hud::RoundEndModel::result`): 0 victory, 1 defeat, 2 draw.
+    pub fn banner(self) -> u8 {
+        match self {
+            Result::Victory => 0,
+            Result::Defeat => 1,
+            Result::Draw => 2,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RoundEnd {
     pub result: Result,
@@ -83,6 +106,9 @@ pub struct RoundEnd {
     pub stats: Option<StatsScreens>,
     /// The end movie to play after the banner ([`Phase::Movie`]).
     pub movie: Option<String>,
+    /// Splitscreen (issue #194): which local players have left their own stats pages, by local
+    /// index ([`RoundEnd::hold_for_players`]); empty with one player, whose Done ends the stats.
+    left: Vec<bool>,
 }
 
 impl RoundEnd {
@@ -112,6 +138,7 @@ impl RoundEnd {
             show_stats: true,
             stats: None,
             movie,
+            left: Vec::new(),
         }
     }
 
@@ -183,24 +210,19 @@ impl RoundEnd {
             Phase::Movie => None,
             Phase::Stats => {
                 self.idle = if pad.any() { 0.0 } else { self.idle + dt };
-                let quit = self.stats.as_mut().and_then(|s| {
-                    let before = s.selection();
-                    let command = s.input(pad);
-                    let after = s.selection();
-                    sound = if command == Some(Command::Quit)
-                        || matches!(
-                            (before.0, after.0),
-                            (Page::Personal, Page::Team) | (Page::Career, Page::Personal)
-                        ) {
-                        Some(MenuSound::Exit)
-                    } else if before.0 != after.0 {
-                        Some(MenuSound::Accept)
-                    } else {
-                        (before != after).then_some(MenuSound::Select)
-                    };
+                // Split: the first player's pages close on their Done; the stats end when every
+                // player has left theirs ([`RoundEnd::step_views`]).
+                let first_left = self.left.first().copied().unwrap_or(false);
+                let quit = self.stats.as_mut().filter(|_| !first_left).and_then(|s| {
+                    let (command, cue) = step_pages(s, pad);
+                    sound = cue;
                     command
-                });
-                (self.idle >= STATS_IDLE_SECS || quit == Some(Command::Quit)).then_some(Phase::Done)
+                }) == Some(Command::Quit);
+                if let (true, Some(l)) = (quit, self.left.first_mut()) {
+                    *l = true;
+                }
+                (self.idle >= STATS_IDLE_SECS || quit && self.left.is_empty())
+                    .then_some(Phase::Done)
             }
             Phase::Done => None,
         };
@@ -215,6 +237,84 @@ impl RoundEnd {
     pub fn done(&self) -> bool {
         self.phase == Phase::Done
     }
+
+    /// Splitscreen (issue #194): the stats pages are `players` local players' each; from now on
+    /// a Done closes only its own player's pages, and the stats end when every player here has
+    /// left theirs ([`RoundEnd::step_views`]) or nobody has pressed for the idle time.
+    pub fn hold_for_players(&mut self, players: usize) {
+        self.left = vec![false; players];
+    }
+
+    /// Has local player `i` left their own stats pages (split, [`RoundEnd::hold_for_players`])?
+    pub fn has_left(&self, i: usize) -> bool {
+        self.left.get(i).copied().unwrap_or(false)
+    }
+
+    /// Splitscreen (issue #194 B9): one frame of the further players' own stats pages, after
+    /// [`RoundEnd::step`] has stepped the first player's. `views[i]` is player `i + 1`'s pages
+    /// (`None`: away, or not made yet) and `pads[i]` their own pad's presses; `first_away`: the
+    /// first player is away. Each cursor follows its own pad only. Any press keeps the pages up
+    /// (the idle quit counts from the last press of anyone's). A Done closes that player's pages
+    /// alone; the stats end for everyone once every player here (the first included, unless
+    /// away; a `None` view is away) has left theirs. The sound of the first press that made one.
+    pub fn step_views(
+        &mut self,
+        pads: &[Pad],
+        views: &mut [Option<StatsScreens>],
+        first_away: bool,
+    ) -> Option<MenuSound> {
+        if self.phase != Phase::Stats {
+            return None;
+        }
+        if self.left.len() < views.len() + 1 {
+            self.left.resize(views.len() + 1, false);
+        }
+        let mut sound = None;
+        for (k, (pad, view)) in pads.iter().zip(views.iter_mut()).enumerate() {
+            let Some(s) = view.as_mut().filter(|_| !self.left[k + 1]) else {
+                continue;
+            };
+            if pad.any() {
+                self.idle = 0.0;
+            }
+            let (command, cue) = step_pages(s, *pad);
+            sound = sound.or(cue);
+            if command == Some(Command::Quit) {
+                self.left[k + 1] = true;
+            }
+        }
+        let everyone = (first_away || self.left[0])
+            && views
+                .iter()
+                .enumerate()
+                .all(|(k, v)| v.is_none() || self.left[k + 1]);
+        if everyone {
+            self.phase = Phase::Done;
+            self.secs = 0.0;
+            self.idle = 0.0;
+        }
+        sound
+    }
+}
+
+/// One frame of one player's stats pages: the command `pad` gave and the menu sound it makes
+/// (Exit on leaving or going back a page, Accept on going forward, Select on a cursor move).
+pub fn step_pages(s: &mut StatsScreens, pad: Pad) -> (Option<Command>, Option<MenuSound>) {
+    let before = s.selection();
+    let command = s.input(pad);
+    let after = s.selection();
+    let sound = if command == Some(Command::Quit)
+        || matches!(
+            (before.0, after.0),
+            (Page::Personal, Page::Team) | (Page::Career, Page::Personal)
+        ) {
+        Some(MenuSound::Exit)
+    } else if before.0 != after.0 {
+        Some(MenuSound::Accept)
+    } else {
+        (before != after).then_some(MenuSound::Select)
+    };
+    (command, sound)
 }
 
 /// Decode a one-shot movie's sound track once per clip and expose its newest
@@ -394,6 +494,115 @@ mod flow_tests {
         assert!(!r.done(), "Triangle does nothing on Team Stats");
         r.step(0.1, press(|p| p.square = true));
         assert!(r.done(), "Square: Done");
+    }
+
+    /// Issue #194 B9: each split player's stats pages follow their own pad only. P2's cross
+    /// opens P2's Personal page and leaves P1's on Team Stats; P1's down moves P1's cursor
+    /// alone; P2's press keeps the pages up past P1's idle; an away player's `None` takes
+    /// nothing. Integration finding: P2's Done closes P2's pages only; the stats end once P1
+    /// has left too.
+    #[test]
+    fn each_split_players_pages_follow_their_own_pad() {
+        let mut r = RoundEnd::start(Result::Victory, &shots(), 7, None, None);
+        r.step(5.1, Pad::default());
+        r.step(FADE_SECS, Pad::default());
+        r.stats = Some(pages());
+        r.hold_for_players(3);
+        let mut views = vec![Some(pages()), None];
+        let none = [Pad::default(), Pad::default()];
+        assert_eq!(r.step_views(&none, &mut views, false), None);
+        r.step(0.1, Pad::default());
+        let cue = r.step_views(
+            &[press(|p| p.cross = true), press(|p| p.cross = true)],
+            &mut views,
+            false,
+        );
+        assert_eq!(cue, Some(MenuSound::Accept));
+        assert_eq!(
+            views[0].as_ref().unwrap().page,
+            Page::Personal,
+            "P2's page moved"
+        );
+        assert_eq!(r.stats.as_ref().unwrap().page, Page::Team, "P1's did not");
+        assert!(views[1].is_none(), "the away player's stays empty");
+        r.step(0.1, press(|p| p.down = true));
+        assert_eq!(
+            views[0].as_ref().unwrap().personal_row,
+            0,
+            "P1's pad moves P2's nothing"
+        );
+        // P1 idle for 29 s while P2 keeps pressing: the pages stay up.
+        for _ in 0..29 {
+            r.step(1.0, Pad::default());
+            r.step_views(&[press(|p| p.up = true), Pad::default()], &mut views, false);
+        }
+        r.step(1.5, Pad::default());
+        assert!(!r.done(), "P2's presses keep the pages up");
+        r.step_views(
+            &[press(|p| p.square = true), Pad::default()],
+            &mut views,
+            false,
+        );
+        assert!(!r.done(), "P2's Done closes P2's pages only");
+        assert!(r.has_left(1) && !r.has_left(0));
+        let page = views[0].as_ref().unwrap().page;
+        r.step_views(
+            &[press(|p| p.triangle = true), Pad::default()],
+            &mut views,
+            false,
+        );
+        assert_eq!(
+            views[0].as_ref().unwrap().page,
+            page,
+            "left pages take no input"
+        );
+        r.step(0.1, press(|p| p.square = true));
+        assert!(!r.done(), "a frame's views are stepped after P1's");
+        r.step_views(&none, &mut views, false);
+        assert!(r.done(), "everyone here has left (P3 is away)");
+        assert_eq!(
+            r.step_views(
+                &[press(|p| p.cross = true), Pad::default()],
+                &mut views,
+                false
+            ),
+            None
+        );
+    }
+
+    /// Integration finding (issue #194): in split, P1's Done does not end the stats while P2 reads
+    /// theirs; an away P1 is not waited for; the idle time still ends them for everyone.
+    #[test]
+    fn split_stats_end_when_every_player_has_left() {
+        let start = || {
+            let mut r = RoundEnd::start(Result::Victory, &shots(), 7, None, None);
+            r.step(5.1, Pad::default());
+            r.step(FADE_SECS, Pad::default());
+            r.stats = Some(pages());
+            r.hold_for_players(2);
+            r
+        };
+        let mut r = start();
+        let mut views = vec![Some(pages())];
+        r.step(0.1, press(|p| p.square = true));
+        r.step_views(&[Pad::default()], &mut views, false);
+        assert!(!r.done() && r.has_left(0), "P1 waits for P2");
+        r.step(0.1, Pad::default());
+        r.step_views(&[press(|p| p.square = true)], &mut views, false);
+        assert!(r.done(), "both have left");
+
+        let mut r = start();
+        r.step(0.1, Pad::default());
+        r.step_views(&[press(|p| p.square = true)], &mut views, true);
+        assert!(r.done(), "P1 is away: P2's Done is the last");
+
+        let mut r = start();
+        r.step(0.1, press(|p| p.square = true));
+        for _ in 0..31 {
+            r.step(1.0, Pad::default());
+            r.step_views(&[Pad::default()], &mut views, false);
+        }
+        assert!(r.done(), "nobody pressed for the idle time");
     }
 
     /// A won campaign round fades to black after the banner, then plays its

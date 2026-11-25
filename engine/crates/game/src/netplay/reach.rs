@@ -306,10 +306,10 @@ mod tests {
 
     fn host_on_loopback(build: &str) -> (HostCore, UdpTransport) {
         let t = UdpTransport::bind("127.0.0.1:0").expect("loopback socket");
-        let mut host = HostCore::new(HostConfig::new(build, "the maintainer"));
+        let mut host = HostCore::new(HostConfig::new(build, "Rex"));
         host.set_info(
             HostInfo {
-                name: "the maintainer".into(),
+                name: "Rex".into(),
                 map: String::new(),
                 players: 1,
                 max_players: 8,
@@ -367,7 +367,7 @@ mod tests {
         let TestState::Answered { name, refusal, .. } = &got else {
             panic!("no answer: {got:?}");
         };
-        assert_eq!((name.as_str(), refusal), ("the maintainer", &None));
+        assert_eq!((name.as_str(), refusal), ("Rex", &None));
         assert!(test_text("x", &got).contains("same build"));
         let mut other = ConnectionTest::new(at);
         let got = run(&mut other, Some((&mut host, &mut t)), "build-b");

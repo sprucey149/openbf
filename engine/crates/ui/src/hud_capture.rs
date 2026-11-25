@@ -16,7 +16,7 @@
 //! line that says which way it moves (the maintainer's "which way", which the PS2 does
 //! not answer; FEEL_NOTES).
 
-use crate::hud_draw::{color, Ctx, Quad, Screen};
+use crate::hud_draw::{color, Ctx, Frame, Quad, Screen, VAnchor};
 use crate::hud_tree::{FRAME_H, FRAME_W};
 use glam::{Mat4, Vec3};
 
@@ -86,17 +86,25 @@ pub enum Part {
 
 /// Frame pixels → window pixels for a `size` window: the 4:3 picture keeps
 /// its place at the right edge.
-pub(crate) fn screen(size: [f32; 2]) -> Screen {
-    let box_w = 4.0 / 3.0 * size[1];
+/// In a split cell ([`Frame::cell`]) the box is the frame's, at the cell's
+/// top-right, so the picture stays under the minimap, flags and timer column
+/// (all `VAnchor::Top`).
+pub(crate) fn screen(f: &Frame) -> Screen {
+    let box_w = 4.0 / 3.0 * f.box_h;
     Screen {
-        origin: [size[0] - box_w, 0.0],
-        scale: [box_w / FRAME_W, size[1] / FRAME_H],
+        origin: [f.size[0] - box_w, f.shift_y(VAnchor::Top)],
+        scale: [box_w / FRAME_W, f.box_h / FRAME_H],
     }
 }
 
 /// The picture's window box in a `size` window.
 pub fn picture(size: [f32; 2]) -> [f32; 4] {
-    let s = screen(size);
+    picture_in(&Frame::window(size))
+}
+
+/// [`picture`] in the screen `f`.
+pub fn picture_in(f: &Frame) -> [f32; 4] {
+    let s = screen(f);
     let a = s.map(Vec3::new(BOX[0], BOX[1], 0.0));
     let b = s.map(Vec3::new(BOX[2], BOX[3], 0.0));
     [a[0], a[1], b[0], b[1]]
@@ -117,8 +125,8 @@ impl Ctx<'_> {
         }
     }
 
-    pub(crate) fn capture(&mut self, icon: &CaptureIcon, size: [f32; 2]) {
-        let s = screen(size);
+    pub(crate) fn capture(&mut self, icon: &CaptureIcon, f: &Frame) {
+        let s = screen(f);
         let none = usize::MAX;
         let f = icon.split.clamp(0.0, 1.0);
         let [x0, y0, x1, y1] = BOX;

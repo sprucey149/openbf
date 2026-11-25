@@ -823,6 +823,7 @@ impl Renderer {
             sky_seed: 0,
             frame_stats: FrameStats::default(),
             gpu_timer,
+            held_frame: None,
             acquire_ms: 0.0,
             cull: true,
             frame_ab: crate::FrameAb::default(),

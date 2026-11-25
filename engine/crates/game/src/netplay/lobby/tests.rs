@@ -89,6 +89,7 @@ fn lobby_state_round_trips_and_maps_the_playlist_by_key() {
     s.cheat_policy = 0b11;
     s.roster.push(LobbyPlayer {
         slot: 2,
+        machine: 2,
         name: "Ann".into(),
         ping_ms: Some(31),
         addon: false,
@@ -204,6 +205,22 @@ fn reject_reasons_read_as_plain_text() {
     );
     assert!(reject_text(R::Version, "", "x").contains("host: unknown, you: x"));
     assert_eq!(reject_text(R::Full, "", "x"), "The game is full");
+    // A machine whose players do not all fit says how many would.
+    assert_eq!(
+        reject_text(R::Full, &net::host::full_detail(1, 2), "x"),
+        "The game has room for 1 more player; 2 are on this computer. Join with fewer players"
+    );
+    assert!(reject_text(R::Full, &net::host::full_detail(2, 3), "x")
+        .starts_with("The game has room for 2 more players; 3 are"));
+    assert_eq!(
+        reject_text(R::Full, &net::host::full_detail(0, 2), "x"),
+        "The game is full"
+    );
+    assert_eq!(
+        reject_text(R::Full, &net::host::full_detail(5, 1), "x"),
+        "The game is full",
+        "a lone player is never told about room it has"
+    );
     assert!(reject_text(R::Busy, "", "x").contains("loading"));
     assert!(reject_text(R::Banned, "", "x").contains("removed"));
     assert!(reject_text(R::BadName, "", "x").contains("player name"));
@@ -324,4 +341,20 @@ fn next_playable_row_skips_what_a_later_joiner_lacks() {
 fn the_session_token_is_one_per_process() {
     assert_eq!(session_token(), session_token());
     assert_ne!(session_token(), 0);
+}
+
+/// A host's own further player the core refuses gets a lobby line naming
+/// the player and the reason, in `reject_text`'s words.
+#[test]
+fn refused_host_local_line_names_the_reason() {
+    use net::RejectReason as R;
+    assert_eq!(
+        local_refusal_text("Leia", R::Full),
+        "Leia could not join: the game is full"
+    );
+    assert_eq!(
+        local_refusal_text("Leia", R::Busy),
+        "Leia could not join: the host is loading a battle; try again in a moment"
+    );
+    assert!(local_refusal_text("Leia", R::BadName).contains("player name is not allowed"));
 }

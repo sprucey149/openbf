@@ -55,6 +55,8 @@ pub(crate) use camera_math::{
 };
 #[cfg(test)]
 pub(crate) use test_support::turret_test_walk;
+#[cfg(test)]
+pub(crate) use test_support::{posts_walk, spawn_locals, two_locals_walk};
 pub use visual::{
     faction_row, ClassVisual, Cries, DroidHud, TargetDraw, TeamTemplate, WeaponHud,
     LOW_HEALTH_THRESHOLD,
@@ -130,6 +132,13 @@ pub struct WalkSim {
     /// Humans per team at the last tick (`refill_after_side_change`).
     pub(crate) human_teams: Option<[u32; 2]>,
     pending_class_kills: std::collections::BTreeMap<String, u32>,
+    /// The local player's counters from before a dropped controller (issue #194, split only).
+    round_carry: locals::RoundCarry,
+    /// The further people playing on this machine (issue #194); empty with one local player.
+    pub locals: Vec<locals::LocalPlayer>,
+    /// Split (issue #194 B12): the last awake players' ears
+    /// (`event_sounds::listeners`), heard from while every local player is away.
+    pub(crate) held_ears: Option<crate::sounds::Listener>,
     /// The local player's unit: player slot [`WalkSim::local_slot`]
     /// (`Sim::players[local_slot]`).
     pub player: UnitHandle,
@@ -392,6 +401,7 @@ impl WalkSim {
             reinforcement_pct: 100,
             human_teams: None,
             pending_class_kills: Default::default(),
+            round_carry: Default::default(),
             respawn_requested: false,
             class_picker: None,
             camera_blockers: CameraBlockers::default(),
@@ -447,6 +457,8 @@ impl WalkSim {
             campaign: None,
             world_events: None,
             accum: 0.0,
+            locals: Vec::new(),
+            held_ears: None,
         }
     }
 
@@ -871,6 +883,9 @@ impl WalkSim {
             reinforcement_pct: self.reinforcement_pct,
             human_teams: self.human_teams,
             pending_class_kills: Default::default(),
+            round_carry: Default::default(),
+            locals: Vec::new(),
+            held_ears: None,
             player: self.player,
             local_slot: self.local_slot,
             netplay: self.netplay.clone(),
@@ -938,7 +953,8 @@ impl WalkSim {
     /// - From the replay, the game: `sim`, `netplay`, `human_teams`, the
     ///   population settings, `teams` and `native_teams` (a command may add
     ///   a class), and `player` (followed again from the local slot).
-    /// - Kept, the career: the pending class kills are the live walk's,
+    /// - Kept, the career: the pending class kills (and the split players'
+    ///   dropped-controller counters, `round_carry`) are the live walk's,
     ///   kills since the last flush. The replay's count from its own start
     ///   and would credit kills already flushed a second time; the medal
     ///   counts are the sim's, so the replay's.
@@ -958,6 +974,9 @@ impl WalkSim {
             reinforcement_pct,
             human_teams,
             pending_class_kills: _,
+            round_carry: _,
+            locals: _,
+            held_ears: _,
             player,
             local_slot: _,
             netplay,
@@ -1029,6 +1048,9 @@ impl WalkSim {
         self.blend.reset();
         let slot = self.local_slot;
         self.set_local_slot(slot);
+        // Every further local player too (issue #194 B18): the replay's units
+        // may sit at other indices or generations.
+        self.follow_locals();
     }
 
     /// One lockstep tick (issue #168): `bundle`'s pads by player slot (a
@@ -1151,6 +1173,20 @@ impl WalkSim {
     /// `pads` is indexed by player slot; slot [`WalkSim::local_slot`] is
     /// [`WalkSim::player`].
     pub fn step_tick(&mut self, pads: &[PadState]) {
+        // The people on this machine besides the first (issue #194): their reads before the
+        // step, and their pending respawn presses as pad bits. None with one local player.
+        let extras = self.locals_before();
+        let extra_respawns: Vec<bool> = extras.iter().map(|e| e.1).collect();
+        let with_respawns;
+        // In a LAN round a further local's respawn is in the pad its machine
+        // submitted (`walk::locals` module header): one machine's own press
+        // here would part its sim from the others'.
+        let pads = if extra_respawns.contains(&true) && !self.netplay.active {
+            with_respawns = self.pads_with_local_respawns(pads, &extra_respawns);
+            &with_respawns[..]
+        } else {
+            pads
+        };
         let old_mount = self.sim.unit(self.player).and_then(|u| u.mount);
         let old_camera = self.camera();
         let kills_before = self.sim.units[self.player.index as usize].kills;
@@ -1183,9 +1219,66 @@ impl WalkSim {
             }
         }
         self.track_class_kills(kills_before);
+        self.step_view(pads, old_mount, &old_camera, killer_before);
+        for (k, (before, _)) in extras.into_iter().enumerate() {
+            // An adopted LAN local (B18) the bundles have not seated yet has no
+            // view to step; on the tick they seat it, its `before` was read from
+            // another unit, so its class kills start from the next tick.
+            let was_seated = self.locals[k].seated;
+            self.with_local(k + 1, |w| {
+                // A respawn gives the slot a new generation: follow it.
+                if let Some(Some(h)) = w.sim.players.get(usize::from(w.local_slot)) {
+                    w.player = *h;
+                }
+            });
+            if !was_seated {
+                let held = self
+                    .sim
+                    .players
+                    .get(usize::from(self.locals[k].slot))
+                    .is_some_and(Option::is_some);
+                self.locals[k].seated = held;
+                continue;
+            }
+            self.with_local(k + 1, |w| {
+                w.track_class_kills(before.kills);
+                w.step_view(pads, before.mount, &before.camera, before.killer);
+            });
+        }
+        // The squad's answers to this tick's orders join the voice queue;
+        // the units' combat calls wait for the sound bank's gates
+        // (`Commander::gate_calls`).
+        // Split: the voice follows the first local player who is not away (issue #194 B12);
+        // the walk's own player with one local player. Its per-player lines (orders, leaving,
+        // cockpit, loudspeakers) are that player's alone, and nobody's while everyone is away.
+        let heard = self.first_awake_unit();
+        if let Some(v) = self.voice.as_mut() {
+            if let Some(heard) = heard {
+                v.orders(&self.sim, heard);
+                v.leaving(&self.sim, heard);
+            }
+            v.calls(&self.sim, &self.teams);
+            if let Some(heard) = heard {
+                v.cockpit(&self.sim, heard, &self.vehicle_sounds);
+                v.loudspeakers(&self.sim, heard, &self.sound_triggers, &self.teams);
+            }
+        }
+    }
+
+    /// The per-player part of a tick, after the sim has stepped: the spawn backdrop, the death
+    /// and spectator cameras, the zoom and every camera state, the seat view. It reads and
+    /// writes the walk's own view fields, so for a further local player it runs inside
+    /// [`WalkSim::with_local`].
+    fn step_view(
+        &mut self,
+        pads: &[PadState],
+        old_mount: Option<core::vehicle::Mount>,
+        old_camera: &Camera,
+        killer_before: Option<UnitHandle>,
+    ) {
         self.follow_backdrop();
         self.step_death_cam();
-        self.notice_death(&old_camera, killer_before);
+        self.notice_death(old_camera, killer_before);
         self.step_spectate(pads.get(usize::from(self.local_slot)));
         // The camera's zoom follows the player's (`re-zoom.md` §5): S and
         // the FOV ease toward their targets, and rest exactly once there.
@@ -1212,12 +1305,12 @@ impl WalkSim {
         self.cam_jet_lag = self.next_cam_jet_lag();
         self.step_cam_pull();
         self.cam_flyer = self.next_cam_flyer(old_camera.position);
-        self.cam_gunner = self.next_cam_gunner(&old_camera);
-        self.cam_exit = self.next_cam_exit(old_mount.is_some(), &old_camera);
+        self.cam_gunner = self.next_cam_gunner(old_camera);
+        self.cam_exit = self.next_cam_exit(old_mount.is_some(), old_camera);
         self.cam_guided = self.next_cam_guided(old_camera.position);
         let owner = self.cam_owner_now();
         let handed = owner.is_some() && self.cam_owner.is_some() && owner != self.cam_owner;
-        self.cam_handover = self.next_cam_handover(handed, &old_camera);
+        self.cam_handover = self.next_cam_handover(handed, old_camera);
         self.cam_owner = owner;
         self.feed_handover();
         let me = self.sim.units.get(self.player.index as usize);
@@ -1227,16 +1320,6 @@ impl WalkSim {
             self.seat_view_timer = (self.seat_view_timer - core::TICK_DT).fmax(0.0);
         }
         self.seat_view = self.next_seat_view();
-        // The squad's answers to this tick's orders join the voice queue;
-        // the units' combat calls wait for the sound bank's gates
-        // (`Commander::gate_calls`).
-        if let Some(v) = self.voice.as_mut() {
-            v.orders(&self.sim, self.player);
-            v.leaving(&self.sim, self.player);
-            v.calls(&self.sim, &self.teams);
-            v.cockpit(&self.sim, self.player, &self.vehicle_sounds);
-            v.loudspeakers(&self.sim, self.player, &self.sound_triggers, &self.teams);
-        }
     }
 
     fn track_class_kills(&mut self, kills_before: u32) {
@@ -1298,15 +1381,29 @@ impl WalkSim {
         stats: crate::profile::BattleStats,
     ) {
         self.flush_career_progress(profile);
-        let me = &self.sim.units[self.player.index as usize];
+        // Issue #194: a split player away at the end has no unit of theirs (a bot may hold the
+        // index), and one who came back has a fresh unit: their banked counters and side count.
+        let carry = self.round_carry;
+        let vacant = self
+            .sim
+            .players
+            .get(usize::from(self.local_slot))
+            .is_none_or(|p| p.is_none());
+        let (kills, deaths, team) = match carry.team {
+            Some(team) if vacant => (0, 0, team),
+            _ => {
+                let me = &self.sim.units[self.player.index as usize];
+                (me.kills, me.deaths, me.team)
+            }
+        };
         let won = self
             .sim
             .outcome
-            .map(|winner| winner == me.team || winner == core::sim::OUTCOME_DRAW);
+            .map(|winner| winner == team || winner == core::sim::OUTCOME_DRAW);
         profile.record_round(
             won,
-            me.kills,
-            me.deaths,
+            carry.kills.saturating_add(kills),
+            carry.deaths.saturating_add(deaths),
             stats.shots,
             stats.hits,
             stats.captures,
@@ -1379,12 +1476,14 @@ impl WalkSim {
 mod camera;
 mod death_camera;
 mod flyer_camera;
+mod locals;
 mod spectate;
 pub use camera::{CamOwner, Handover, DEATH_VIEW_HOLD};
 pub use death_camera::DeathCam;
 pub use flyer_camera::{
     guided_section, FlyerCam, FlyerSection, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE,
 };
+pub use locals::{LocalPlayer, LocalView, Suspended};
 pub use spectate::{Spectate, SPECTATE_HOLD_TICKS};
 pub use walker_view::walker_section;
 

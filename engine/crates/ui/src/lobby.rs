@@ -911,12 +911,53 @@ pub fn draw_page(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RosterRow {
     pub slot: u8,
+    /// The player's machine (splitscreen, issue #194 B19): its first
+    /// player's slot, 0 for the host's own players, `slot` for a machine
+    /// of one. The rows of a machine sit together ([`group_rows`]); ready
+    /// and kick are the machine's.
+    pub machine: u8,
     pub name: String,
-    /// `None` for the host itself.
+    /// `None` for the host's own players.
     pub ping_ms: Option<u32>,
     pub addon: bool,
     pub team: String,
     pub ready: bool,
+}
+
+impl RosterRow {
+    /// One of the host machine's own players (never kicked).
+    pub fn host_side(&self) -> bool {
+        self.machine == 0
+    }
+
+    /// A further player of its machine, drawn under the machine's first.
+    pub fn follows(&self) -> bool {
+        self.slot != self.machine
+    }
+}
+
+/// The roster's rows grouped by machine (splitscreen B19): the host's own
+/// players first, then each guest machine in slot order of its first
+/// player, each machine's first player before its further ones. Slots never
+/// renumber, so a machine's rows stay where they are as others come and go.
+pub fn group_rows(mut rows: Vec<RosterRow>) -> Vec<RosterRow> {
+    rows.sort_by_key(|r| (r.machine, r.follows(), r.slot));
+    rows
+}
+
+/// The names of `machine`'s players in `rows`, joined for a line
+/// ("Han and Leia", "Han, Leia and Rex").
+pub fn machine_names(rows: &[RosterRow], machine: u8) -> String {
+    let names: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.machine == machine)
+        .map(|r| r.name.as_str())
+        .collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// `[ours]` The roster panel's own input (issue #168, the first VPN
@@ -927,16 +968,18 @@ pub struct RosterRow {
 /// and a second Accept kicks; Back cancels that question, else closes the
 /// list (hidden), as Square does. While the list holds the input the
 /// screen under it gets none. The mouse keeps its Kick buttons and has a
-/// Hide / Players button.
+/// Hide / Players button. Splitscreen B19: a kick is a machine's, from any
+/// of its rows; the host's own players are never kicked.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RosterNav {
     /// The list is closed: only its "Players" tab shows.
     pub hidden: bool,
     /// The row the pad is on while the list holds the input.
     pub focus: Option<usize>,
-    /// The guest (by slot) whose kick waits for a second Accept. It holds
-    /// only while the pad is on his row: a roster that shifts under the
-    /// pad (he left) drops the question rather than hand it to the next.
+    /// The guest machine (by its first slot) whose kick waits for a second
+    /// Accept. It holds only while the pad is on one of its rows: a roster
+    /// that shifts under the pad (it left) drops the question rather than
+    /// hand it to the next.
     pub confirm: Option<u8>,
 }
 
@@ -957,12 +1000,12 @@ impl RosterNav {
     /// The focused row while its kick waits for a second Accept.
     pub fn asking<'a>(&self, rows: &'a [RosterRow]) -> Option<&'a RosterRow> {
         let r = rows.get(self.focus?)?;
-        (self.confirm == Some(r.slot)).then_some(r)
+        (self.confirm == Some(r.machine)).then_some(r)
     }
 
     /// One frame of the pad and keys: `toggle` is the Square edge. Returns
-    /// the slot to kick (only with `kick`, the host's, never the host's own
-    /// row). Call it before the screen under the panel steps, and give that
+    /// the machine to kick, by its first slot (only with `kick`, the host's,
+    /// never the host's own players). Call it before the screen under the panel steps, and give that
     /// screen no input when it returns with [`RosterNav::active`] or when
     /// `toggle` was pressed.
     pub fn input(
@@ -990,7 +1033,7 @@ impl RosterNav {
         }
         let at = at.min(rows.len() - 1);
         self.focus = Some(at);
-        if self.confirm != Some(rows[at].slot) {
+        if self.confirm != Some(rows[at].machine) {
             self.confirm = None;
         }
         if toggle || (m.back && self.confirm.is_none()) {
@@ -1012,12 +1055,12 @@ impl RosterNav {
             self.confirm = None;
             return None;
         }
-        if m.confirm && kick && rows[at].slot != 0 {
+        if m.confirm && kick && !rows[at].host_side() {
             if self.confirm.is_some() {
                 self.confirm = None;
-                return Some(rows[at].slot);
+                return Some(rows[at].machine);
             }
-            self.confirm = Some(rows[at].slot);
+            self.confirm = Some(rows[at].machine);
         }
         None
     }
@@ -1053,11 +1096,13 @@ impl RosterPrompts {
         let Some(at) = nav.focus else {
             return format!("{}: players list", self.open);
         };
-        let guest = rows.get(at).filter(|r| kick && r.slot != 0);
+        let guest = rows.get(at).filter(|r| kick && !r.host_side());
         match guest {
-            Some(r) if nav.confirm == Some(r.slot) => format!(
+            Some(r) if nav.confirm == Some(r.machine) => format!(
                 "Kick {}? {}: kick \u{b7} {}: cancel",
-                r.name, self.accept, self.back
+                machine_names(rows, r.machine),
+                self.accept,
+                self.back
             ),
             Some(_) => format!(
                 "Up / Down: move \u{b7} {}: kick \u{b7} {}: close",
@@ -1068,10 +1113,13 @@ impl RosterPrompts {
     }
 }
 
-/// Draws the lobby's roster panel (top right); with `kick`, every guest's
-/// row has a Kick button. `nav` is the pad's place in it (its focused row
+/// Draws the lobby's roster panel (top right), `rows` as [`group_rows`]
+/// orders them: a machine's further players are indented under its first,
+/// whose row alone shows the shared ping and addon and, with `kick`, the
+/// machine's Kick button. `nav` is the pad's place in it (its focused row
 /// is marked, a closed list is a "Players" tab) and its Hide / Players
-/// button sets it. Returns the slot whose Kick was clicked.
+/// button sets it. Returns the machine (its first slot) whose Kick was
+/// clicked.
 pub fn draw_roster(
     ctx: &egui::Context,
     title: &str,
@@ -1122,10 +1170,21 @@ pub fn draw_roster(
                             ui.end_row();
                             for (k, r) in rows.iter().enumerate() {
                                 let focused = nav.focus == Some(k);
+                                let shown = if r.follows() {
+                                    // Indented under the machine's first player; the
+                                    // menu face has no box-drawing glyphs.
+                                    format!("  + {}", r.name)
+                                } else {
+                                    r.name.clone()
+                                };
+                                let r = &RosterRow {
+                                    name: shown,
+                                    ..r.clone()
+                                };
                                 let name = match (focused, r.ready) {
-                                    (true, true) => format!("\u{25b6} {} \u{2713}", r.name),
+                                    (true, true) => format!("\u{25b6} {} \u{b7} Ready", r.name),
                                     (true, false) => format!("\u{25b6} {}", r.name),
-                                    (false, true) => format!("{} \u{2713}", r.name),
+                                    (false, true) => format!("{} \u{b7} Ready", r.name),
                                     (false, false) => r.name.clone(),
                                 };
                                 let tint = if focused {
@@ -1139,18 +1198,28 @@ pub fn draw_roster(
                                     text = text.background_color(egui_color(FOCUS_BG));
                                 }
                                 ui.label(text);
-                                ui.label(cell(
-                                    &r.ping_ms
-                                        .map_or_else(|| "host".into(), |p| format!("{p} ms")),
-                                ));
-                                ui.label(cell(if r.addon { "Yes" } else { "No" }));
+                                if r.follows() {
+                                    // The machine's link and content: its first row's.
+                                    ui.label("");
+                                    ui.label("");
+                                } else {
+                                    ui.label(cell(
+                                        &r.ping_ms
+                                            .map_or_else(|| "host".into(), |p| format!("{p} ms")),
+                                    ));
+                                    ui.label(cell(if r.addon { "Yes" } else { "No" }));
+                                }
                                 ui.label(cell(&r.team));
-                                if kick && r.slot != 0 {
-                                    let armed = focused && nav.confirm == Some(r.slot);
-                                    let button =
-                                        egui::Button::new(cell("Kick")).selected(armed || focused);
+                                if kick && !r.host_side() && !r.follows() {
+                                    let on_machine = nav
+                                        .focus
+                                        .and_then(|f| rows.get(f))
+                                        .is_some_and(|f| f.machine == r.machine);
+                                    let armed = on_machine && nav.confirm == Some(r.machine);
+                                    let button = egui::Button::new(cell("Kick"))
+                                        .selected(armed || on_machine);
                                     if ui.add(button).clicked() {
-                                        kicked = Some(r.slot);
+                                        kicked = Some(r.machine);
                                     }
                                 } else {
                                     ui.label("");

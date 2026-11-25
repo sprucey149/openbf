@@ -395,6 +395,17 @@ impl FlagVisuals {
         self.viewer_team = team;
     }
 
+    /// Each CTF flag's relation colour for the viewer set last ([`flag_tint`]), by flag: what a
+    /// colourised ground flag draws in. Empty without CTF.
+    pub fn viewer_tints(&self, sim: &core::sim::Sim) -> Vec<Option<[f32; 3]>> {
+        sim.ctf.as_ref().map_or_else(Vec::new, |ctf| {
+            ctf.flags
+                .iter()
+                .map(|f| flag_tint(ctf.mode, f.team, self.viewer_team, self.bf1))
+                .collect()
+        })
+    }
+
     /// Each unit's drawn `bone_ribcage` by unit index
     /// (`SoldierVisuals::jet_frames`), where a flag carried on foot draws
     /// ([`flag_pose`]); `None` keeps the `CarriedOffset` pose.

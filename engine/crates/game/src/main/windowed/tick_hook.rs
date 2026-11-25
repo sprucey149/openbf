@@ -18,51 +18,102 @@ use game::walk::WalkSim;
 
 /// Per-frame state the tick hook carries from one tick to the next.
 pub(super) struct TickState {
-    pub selection: Selection,
+    /// Each local player's spawn picker, by local index (issue #194 B12); `None` while that
+    /// player is away. One entry with one local player.
+    pub selection: Vec<Option<Selection>>,
     /// Each seated human slot's medal counts already announced (`EventFeed::note_medals`):
     /// the viewer's own lines and the spectator lines for the other humans all
     /// compare against this, so a peer announces each medal once (LAN §5b).
     /// Rebuilt every frame from the slots' current counts (`TickState::new`),
     /// so a frame announces only what its own ticks earned.
     pub medals_seen: std::collections::BTreeMap<u8, core::sim::MedalCounts>,
+    /// Split (issue #194 B4): the same for each further local player's own feed, views 1-3,
+    /// seeded alike; empty with one local player.
+    pub views_seen: Vec<std::collections::BTreeMap<u8, core::sim::MedalCounts>>,
     pub previous_mount: Option<core::vehicle::Mount>,
     pub stuck_alarm: bool,
     pub tick_pad: core::sim::PadState,
     pub aspect: f32,
+    /// Split (issue #194 B12): each local player's cell aspect, by local index, for the foley's
+    /// views; empty with one local player (the window's `aspect`).
+    pub view_aspects: Vec<f32>,
 }
 
 impl TickState {
     pub fn new(
-        walk: &WalkSim,
+        walk: &mut WalkSim,
         medals: core::sim::MedalCounts,
         pad: core::sim::PadState,
         aspect: f32,
     ) -> Self {
-        // Seed every seated human slot from its installed career, so the
-        // spectator lines start at each player's opening counts and never
-        // replay a medal earned before this viewer joined (LAN §5b). In single
-        // player this is just slot 0's profile career.
-        let mut medals_seen = std::collections::BTreeMap::new();
-        for &slot in walk.netplay.profiles.keys() {
-            if let Some(counts) = walk.sim.slot_medal_counts(usize::from(slot)) {
-                medals_seen.insert(slot, counts);
-            }
-        }
-        // The local slot always has its own profile's career (single player), so
-        // seed it from the passed-in `medals` when no netplay map carried it.
-        let local = walk.local_slot;
-        if !medals_seen.contains_key(&local) {
-            medals_seen.insert(local, medals);
-        }
+        // Every seated human slot from its installed career, so the spectator
+        // lines start at each player's opening counts (`EventFeed::medals_seen`);
+        // in single player just slot 0's profile career.
+        let medals_seen = game::event_feed::EventFeed::medals_seen(walk, medals);
+        // Split: each further player's feed starts from the same counts (issue #194 B4).
+        let views_seen = match walk.local_count() {
+            1 => Vec::new(),
+            n => vec![medals_seen.clone(); n - 1],
+        };
         Self {
-            selection: Selection::read(walk),
+            selection: selections(walk),
             medals_seen,
+            views_seen,
             previous_mount: walk.sim.unit(walk.player).and_then(|u| u.mount),
             stuck_alarm: false,
             tick_pad: pad,
             aspect,
+            view_aspects: Vec::new(),
         }
     }
+}
+
+/// Every local player's spawn picker (issue #194 B12): each read as that player
+/// ([`WalkSim::with_local`]), `None` for a player who is away, whose screens
+/// a bot now holds.
+fn selections(walk: &mut WalkSim) -> Vec<Option<Selection>> {
+    (0..walk.local_count())
+        .map(|i| {
+            (walk.local_count() == 1 || !walk.is_suspended(i))
+                .then(|| walk.with_local(i, |w| Selection::read(w)))
+        })
+        .collect()
+}
+
+/// Where this tick's sounds are heard from and which soldiers' foley sounds
+/// (issue #194 B12, `SPLITSCREEN.md` 18.1 item 6): every awake local player's
+/// ears (`event_sounds::listeners`) and views, each view at its own cell's
+/// aspect and widened field (`split_layout::fit_fov_y`), the first awake
+/// player's first. With one local player: `listener(walk)` and the camera at
+/// the window's `aspect`, as before. With every local player away no camera is
+/// read (each may follow a bot's unit): the held ears and a view that draws nobody.
+pub(super) fn ears_and_views(
+    walk: &mut WalkSim,
+    aspect: f32,
+    view_aspects: &[f32],
+) -> (game::sounds::Listener, game::foley::View) {
+    let listener = game::event_sounds::listeners(walk);
+    if walk.local_count() == 1 {
+        return (listener, game::foley::View::of(&walk.camera(), aspect));
+    }
+    let awake: Vec<usize> = (0..walk.local_count())
+        .filter(|&i| !walk.is_suspended(i))
+        .collect();
+    let mut views = awake
+        .into_iter()
+        .map(|i| {
+            let a = view_aspects.get(i).copied().unwrap_or(aspect);
+            let mut cam = walk.camera_of(i);
+            cam.fov_y = game::split_layout::fit_fov_y(cam.fov_y, a);
+            game::foley::View::of(&cam, a)
+        })
+        .collect::<Vec<_>>()
+        .into_iter();
+    let view = match views.next() {
+        Some(first) => first.with_more(views),
+        None => game::foley::View::blind(listener.pos),
+    };
+    (listener, view)
 }
 
 /// The App's fields the hook uses, borrowed for one frame.
@@ -98,15 +149,20 @@ impl TickHook<'_> {
         feed: &mut game::event_feed::EventFeed,
         st: &mut TickState,
         lockstep: bool,
-        muted: bool,
+        muted: u8,
     ) {
         let hook_t0 = std::time::Instant::now();
-        let local = walk.player.index;
+        // Bit `k`: local `k`'s shot this tick was fed back by the prediction (issue #194 B20:
+        // every local player of this machine, not only the first).
+        let muted: Vec<u32> = (0..walk.local_count().min(8))
+            .filter(|k| muted >> k & 1 != 0)
+            .map(|k| walk.local_unit(k).index)
+            .collect();
         if let Some(gpu) = self.gpu.as_deref_mut() {
             gpu.step_stations(&walk.sim);
         }
         if let Some(vis) = self.soldier_vis.as_deref_mut() {
-            vis.mute_shot(muted.then_some((walk.sim.tick, local)));
+            vis.mute_shots(walk.sim.tick, &muted);
         }
         self.fx.ingest_posed(walk, self.soldier_vis.as_deref());
         let effect_sounds = self.fx.take_sounds();
@@ -135,34 +191,49 @@ impl TickHook<'_> {
             foley.feel(walk, &heights);
         }
         if let (Some(audio), Some(sl)) = (self.audio.as_deref_mut(), self.sounds.as_deref_mut()) {
-            let next = Selection::read(walk);
-            if let Some(cue) = st.selection.movement_cue(next, walk.sim.ground_rules) {
-                sl.play_2d(Some(audio), cue);
+            // Each awake player's own picker moves play its cue (2-D: every player hears it).
+            let next = selections(walk);
+            for (was, now) in st.selection.iter().zip(&next) {
+                if let (Some(was), Some(now)) = (was, now) {
+                    if let Some(cue) = was.movement_cue(*now, walk.sim.ground_rules) {
+                        sl.play_2d(Some(audio), cue);
+                    }
+                }
             }
             st.selection = next;
-            let default_listener = game::event_sounds::listener(walk);
+            let (listener, view) = ears_and_views(walk, st.aspect, &st.view_aspects);
+            // OpenBF VR: the headset's ears (one local player only).
             let listener = self
                 .display_ext
-                .filter(|_| !lockstep)
+                .filter(|_| !lockstep && walk.local_count() == 1)
                 .and_then(|ext| ext.stereo_view(&super::xr::sim_view(walk)))
-                .map_or(default_listener, |view| super::xr::listener(&view));
+                .map_or(listener, |view| super::xr::listener(&view));
             play_event_sounds(
                 audio,
                 sl,
                 self.foley.as_deref_mut(),
                 self.engines,
                 &effect_sounds,
-                st.aspect,
-                walk,
-                muted.then_some(local),
                 &listener,
+                &view,
+                walk,
+                &muted,
             );
             // The auras' loops (the War Hero's crackle).
             sl.play_buff_loops(audio, &buff_loops, &listener);
             play_ambience(audio, sl, self.ambience, walk, &listener);
         }
         if !lockstep {
-            game::heroes::tick(walk, feed);
+            if walk.local_count() > 1 && walk.is_suspended(0) {
+                // Split, the first player away: their handle may name a bot's unit, so the feed
+                // still scores the round for everyone but credits no medal points to it
+                // (issue #194; the further players' feeds are skipped the same way), nor the
+                // bot's shots, hits and captures to their profile (B22).
+                feed.tick_away(&walk.sim, walk.player);
+                game::heroes::scores(&mut walk.sim, feed);
+            } else {
+                game::heroes::tick(walk, feed);
+            }
         }
         feed.note_medals(&walk.sim, walk.player, walk.local_slot, &mut st.medals_seen);
         if let Some(bb) = self.blackbox.as_deref_mut() {

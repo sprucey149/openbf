@@ -804,6 +804,64 @@ pub fn blend_in_looking(walk: &mut WalkSim, look: &PadState) {
     }
 }
 
+/// Issue #194 (splitscreen B8): local player `i`'s camera this frame for a view of `cell` (window
+/// pixels), with the world and that player's look blended in exactly as their view's draw lists
+/// are built (`main/windowed/split.rs`, `build_view`), then both blends put back, so the walk
+/// leaves as it came. Call it outside any blend, once per view per frame; the view's draws and
+/// its name tags both read the result, so they cannot differ. A cell narrower than 4:3 keeps a
+/// 4:3 screen's width of view ([`crate::split_layout::fit_fov_y`]). `i == 0` is the walk's own
+/// player (the window keeps its own shaken camera for that view). `shake` is that player's own
+/// camera shake (issue #194 B13, `Fx::shake_of(i)`), turned in before the field is fitted, as
+/// view 0's is; `None` leaves the camera unshaken.
+pub fn view_camera(
+    walk: &mut WalkSim,
+    i: usize,
+    cell: crate::split_layout::Cell,
+    look: &PadState,
+    shake: Option<&crate::camera_shake::CameraShake>,
+) -> render::Camera {
+    let aspect = cell[2] as f32 / cell[3].max(1) as f32;
+    walk.blend_in();
+    let camera = walk.with_local(i, |w| {
+        blend_in_looking(w, look);
+        let mut camera = w.camera();
+        if let Some(s) = shake {
+            camera = s.apply(camera);
+        }
+        camera.fov_y = crate::split_layout::fit_fov_y(camera.fov_y, aspect);
+        w.blend_out();
+        camera
+    });
+    walk.blend_out();
+    camera
+}
+
+/// [`view_camera`] in a LAN round (issue #194 B20): local player `i`'s look folded over their
+/// pending inputs and their predicted pose (`netplay::LocalView::draw_in_local`), as view 0's
+/// camera is made with `LocalView::draw_in`, then put back (`LocalView::draw_out`).
+pub fn view_camera_with(
+    walk: &mut WalkSim,
+    i: usize,
+    cell: crate::split_layout::Cell,
+    shake: Option<&crate::camera_shake::CameraShake>,
+    view: &mut crate::netplay::LocalView,
+) -> render::Camera {
+    let aspect = cell[2] as f32 / cell[3].max(1) as f32;
+    walk.blend_in();
+    let camera = walk.with_local(i, |w| {
+        view.draw_in_local(w);
+        let mut camera = w.camera();
+        if let Some(s) = shake {
+            camera = s.apply(camera);
+        }
+        camera.fov_y = crate::split_layout::fit_fov_y(camera.fov_y, aspect);
+        view.draw_out(w);
+        camera
+    });
+    walk.blend_out();
+    camera
+}
+
 /// Issue #168 (LAN §6): the look a lockstep peer draws - `sim`'s aim for
 /// `h` folded over `pads` (the inputs sent and not yet stepped, then the
 /// input tick still open, last), [`Sim::look_preview_over`]. A held stick in
@@ -1320,5 +1378,103 @@ mod tests {
         assert_eq!(plain.sim.hash(), drawn.sim.hash());
         assert_eq!(plain.camera().position, drawn.camera().position);
         assert!(moved_between_ticks > 100, "{moved_between_ticks}");
+    }
+
+    /// Issue #194 B21: P2 boards a speeder and then a flyer. View 1's camera (`view_camera`, as
+    /// the window's `view_cameras[1]`) follows the vehicle's camera: it stays near the vehicle as
+    /// it moves, and P2's flyer camera state is P2's own. P1's camera is the one a twin round
+    /// where P2 never boards gives, bit for bit.
+    #[test]
+    fn view_cameras_follow_p2s_vehicle_and_flyer() {
+        use core::vehicle::{flyer::FlyerParams, SeatKind, VehicleKind, VehicleSpec};
+        let cell: crate::split_layout::Cell = [0, 0, 640, 720];
+        let look = PadState::default();
+        let spec = |kind, pos| VehicleSpec {
+            kind,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        };
+        let setup = || {
+            let mut w = crate::walk::two_locals_walk();
+            w.sim.flyer_params = vec![Some(FlyerParams::default())];
+            crate::walk::spawn_locals(&mut w);
+            let at = w.sim.unit(w.local_unit(1)).unwrap().soldier.pos;
+            let speeder = w
+                .sim
+                .spawn_vehicle(&spec(VehicleKind::Hover, at + Vec3::new(3.0, 0.0, 0.0)));
+            let flyer = w
+                .sim
+                .spawn_vehicle(&spec(VehicleKind::Flyer, at + Vec3::new(-6.0, 0.0, 0.0)));
+            (w, speeder, flyer)
+        };
+        let (mut w, speeder, flyer) = setup();
+        let (mut twin, _, _) = setup();
+        let pads = [PadState::default(); 2];
+        let step = |w: &mut WalkSim, n: usize| {
+            for _ in 0..n {
+                w.step_tick(&pads);
+            }
+        };
+        let on_foot = view_camera(&mut w, 1, cell, &look, None).position;
+        let p2 = w.local_unit(1);
+        let near = |cam: Vec3, v: Vec3, what: &str| {
+            let d = (cam - v).length();
+            assert!(d < 20.0, "{what}: view 1's camera {d} m from the vehicle");
+        };
+
+        // The speeder.
+        assert!(w.sim.seat_unit(p2, speeder, 0));
+        step(&mut w, 10);
+        step(&mut twin, 10);
+        let v = w.sim.vehicle(speeder).unwrap().pos;
+        let cam = view_camera(&mut w, 1, cell, &look, None).position;
+        near(cam, v, "speeder");
+        assert!(
+            (cam - on_foot).length() > 0.5,
+            "the seat camera, not the foot one"
+        );
+        // It moves: the camera goes with it.
+        w.sim.vehicle_mut(speeder).unwrap().pos += Vec3::new(40.0, 0.0, 0.0);
+        step(&mut w, 30);
+        step(&mut twin, 30);
+        let v = w.sim.vehicle(speeder).unwrap().pos;
+        near(
+            view_camera(&mut w, 1, cell, &look, None).position,
+            v,
+            "speeder moved",
+        );
+        let p1 = view_camera(&mut w, 0, cell, &look, None);
+        let p1_twin = view_camera(&mut twin, 0, cell, &look, None);
+        assert_eq!(p1.position, p1_twin.position, "P1's camera is untouched");
+        assert_eq!(p1.forward(), p1_twin.forward());
+
+        // The flyer, hovering above its pad.
+        w.sim.unseat_unit(p2);
+        assert!(w.sim.seat_unit(p2, flyer, 0));
+        w.sim.vehicle_mut(flyer).unwrap().pos.y = 30.0;
+        step(&mut w, 10);
+        step(&mut twin, 10);
+        assert!(
+            w.with_local(1, |w| w.cam_flyer.is_some()),
+            "P2's flyer camera"
+        );
+        assert!(w.cam_flyer.is_none(), "P1 flies nothing");
+        let v = w.sim.vehicle(flyer).unwrap().pos;
+        near(
+            view_camera(&mut w, 1, cell, &look, None).position,
+            v,
+            "flyer",
+        );
+        let p1 = view_camera(&mut w, 0, cell, &look, None);
+        let p1_twin = view_camera(&mut twin, 0, cell, &look, None);
+        assert_eq!(p1.position, p1_twin.position, "P1's camera is untouched");
+        assert_eq!(p1.forward(), p1_twin.forward());
     }
 }

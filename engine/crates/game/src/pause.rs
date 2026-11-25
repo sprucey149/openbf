@@ -148,8 +148,11 @@ pub fn apply_menu_action(
         }
         MenuAction::ClosePage => {
             if let Some((page, row)) = menu.page.parent() {
+                // Issue #194: looked up with the split rows on, so Back from the Splitscreen
+                // page lands on its own Options row (it is last: no other row moves).
                 let model = ui::menu::MenuModel {
                     page: Some(page),
+                    split: Some(Default::default()),
                     ..Default::default()
                 };
                 menu.page = page;
@@ -238,8 +241,69 @@ pub fn apply_menu_action(
         | MenuAction::SetAutoQuality(_)
         | MenuAction::SetWindowMode(_)
         | MenuAction::CycleInputIcons(_)
-        | MenuAction::ToggleViewpoint => {}
+        | MenuAction::ToggleViewpoint
+        | MenuAction::SetSplitTwoPlayer(_)
+        | MenuAction::MoveSplitScreen { .. }
+        | MenuAction::SetSplitNameTags(_)
+        | MenuAction::SetSplitHudSize(_) => {}
     }
+}
+
+/// Issue #194 (`SPLITSCREEN.md` 18.1 item 6, B10): [`apply_menu_action`] for the Game Menu
+/// opened by local player `opener`, called with that player swapped in
+/// (`WalkSim::with_local(opener)`). A player after the first sets their own slot's aim assist,
+/// pad look and award bonuses ([`apply_slot_setting`]), never the session's (which are the
+/// first player's); everything else is [`apply_menu_action`]. `opener` 0 is exactly
+/// [`apply_menu_action`].
+pub fn apply_opener_action(
+    walk: &mut WalkSim,
+    a: ui::menu::MenuAction,
+    paused: &mut bool,
+    menu: &mut PauseMenu,
+    opener: usize,
+) {
+    if opener > 0 && apply_slot_setting(walk, a) {
+        return;
+    }
+    apply_menu_action(walk, a, paused, menu);
+}
+
+/// A per-player setting from the Game Menu on the swapped-in player's own slot
+/// (`walk.local_slot`): aim assist and pad look through `Sim::set_slot_assist`, the award
+/// bonuses through `Sim::set_slot_career_award_bonuses`, and the slot's installed profile
+/// (`walk.netplay.profiles`) kept in step. True when `a` was one of them. The FOV needs nothing
+/// here: `WalkSim::fov_scale` is swapped per player (`LocalView`).
+pub fn apply_slot_setting(walk: &mut WalkSim, a: ui::menu::MenuAction) -> bool {
+    use ui::menu::MenuAction;
+    let slot = walk.local_slot;
+    let s = usize::from(slot);
+    match a {
+        MenuAction::SetAssist(v) => {
+            let mut p = walk.sim.assist_profile(s);
+            p.intensity = crate::profile::clamp_assist_intensity(v);
+            walk.sim.set_slot_assist(s, Some(p));
+            if let Some(installed) = walk.netplay.profiles.get_mut(&slot) {
+                installed.assist.intensity = p.intensity;
+            }
+        }
+        MenuAction::SetPadLookSensitivity(v) => {
+            let mut p = walk.sim.assist_profile(s);
+            p.pad_look_sensitivity = walk.pad_look_for_battle(v);
+            walk.sim.set_slot_assist(s, Some(p));
+            if let Some(installed) = walk.netplay.profiles.get_mut(&slot) {
+                installed.assist.pad_look_sensitivity = crate::profile::clamp_pad_look(v);
+            }
+        }
+        MenuAction::SetCareerAwards(on) => {
+            let awards_off = walk.netplay.awards_off;
+            walk.sim.set_slot_career_award_bonuses(s, on && !awards_off);
+            if let Some(installed) = walk.netplay.profiles.get_mut(&slot) {
+                installed.award_bonuses = on;
+            }
+        }
+        _ => return false,
+    }
+    true
 }
 
 /// The rows' share of a paused frame's edges: D-pad Left/Right are the
@@ -547,6 +611,38 @@ mod tests {
             ui::menu::navigate(&popup, rows_input(right, false, false, true)).0,
             1
         );
+    }
+
+    /// Issue #194 (B7): Back from the Splitscreen page lands on its own Options row (the
+    /// last), and Back from the other pages still on theirs.
+    #[test]
+    fn back_from_the_splitscreen_page_returns_to_its_options_row() {
+        let mut walk = crate::walk::WalkSim::new(7, glam::Vec3::ZERO, None);
+        let (mut paused, mut menu) = (true, PauseMenu::default());
+        let split = PausePage::Settings(SettingsPage::Splitscreen);
+        apply_menu_action(
+            &mut walk,
+            MenuAction::OpenPage(split),
+            &mut paused,
+            &mut menu,
+        );
+        menu.cursor = 3;
+        apply_menu_action(&mut walk, MenuAction::ClosePage, &mut paused, &mut menu);
+        assert_eq!((menu.page, menu.cursor), (PausePage::Options, 5));
+        let options = MenuModel {
+            page: Some(PausePage::Options),
+            split: Some(Default::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            rows(&options)[menu.cursor],
+            Row::Settings(SettingsPage::Splitscreen)
+        );
+        for (page, at) in [(SettingsPage::Game, 1), (SettingsPage::Controls, 4)] {
+            menu.page = PausePage::Settings(page);
+            apply_menu_action(&mut walk, MenuAction::ClosePage, &mut paused, &mut menu);
+            assert_eq!((menu.page, menu.cursor), (PausePage::Options, at));
+        }
     }
 
     /// Playtest A6: a sub-page's Back returns to the row that opened it; a
@@ -918,5 +1014,36 @@ mod tests {
             after > 0.0 && (before - after) <= 1.0 + 1.0e-3,
             "kept, clamped at most a row: {before} -> {after}"
         );
+    }
+
+    /// Issue #194 (B10): P2's assist from their own Game Menu sets slot 1's profile and leaves
+    /// the session's `assist_intensity` (the first player's); opener 0 is today's action.
+    #[test]
+    fn p2s_assist_is_their_slots_and_p1s_the_sessions() {
+        let mut walk = crate::walk::WalkSim::new(7, glam::Vec3::ZERO, None);
+        walk.add_local_player(1, Some(1)).expect("slot 1 is free");
+        let (mut paused, mut menu) = (true, PauseMenu::default());
+        let session = walk.sim.assist_intensity;
+        walk.with_local(1, |w| {
+            apply_opener_action(w, MenuAction::SetAssist(0.25), &mut paused, &mut menu, 1)
+        });
+        assert_eq!(walk.sim.assist_intensity, session);
+        assert_eq!(walk.sim.assist_profile(1).intensity, 0.25);
+        assert_eq!(walk.sim.assist_profile(0).intensity, session);
+        apply_opener_action(
+            &mut walk,
+            MenuAction::SetAssist(0.75),
+            &mut paused,
+            &mut menu,
+            0,
+        );
+        assert_eq!(walk.sim.assist_intensity, 0.75);
+        assert_eq!(walk.sim.assist_profile(1).intensity, 0.25);
+        // Anything else is the plain action, the opener's own player swapped in.
+        walk.with_local(1, |w| {
+            apply_opener_action(w, MenuAction::SetFov(1.2), &mut paused, &mut menu, 1)
+        });
+        assert_eq!(walk.with_local(1, |w| w.fov_scale), 1.2);
+        assert_ne!(walk.fov_scale, 1.2);
     }
 }

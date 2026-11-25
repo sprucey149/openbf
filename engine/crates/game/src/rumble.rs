@@ -85,6 +85,25 @@ pub fn preview(
     *effect = input::rumble(g, id, [motor(1.0, 280), motor(1.0, 280)], strength);
 }
 
+/// [`preview`] on a given pad (issue #194 B10: a split player's own, from their Game Menu);
+/// nothing when `id` is `None`.
+pub fn preview_pad(
+    g: Option<&mut gilrs::Gilrs>,
+    id: Option<gilrs::GamepadId>,
+    effect: &mut Option<gilrs::ff::Effect>,
+    strength: f32,
+) {
+    *effect = None;
+    if strength <= 0.0 {
+        return;
+    }
+    let (Some(g), Some(id)) = (g, id) else { return };
+    if g.connected_gamepad(id).is_none() {
+        return;
+    }
+    *effect = input::rumble(g, id, [motor(1.0, 280), motor(1.0, 280)], strength);
+}
+
 fn damage_pulse(damage: f32, remaining: f32, maximum: f32) -> Option<Pulse> {
     if damage <= 0.0 || damage <= 0.02 * remaining || maximum <= 0.0 {
         return None;

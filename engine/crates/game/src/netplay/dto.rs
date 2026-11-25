@@ -222,12 +222,17 @@ impl Default for PlayerProfile {
 }
 
 impl PlayerProfile {
+    /// `p`'s kills toward each unlockable class (`unlock_kills`), from its career as it stands.
+    pub fn unlock_kills_of(p: &crate::profile::Profile) -> [u32; 8] {
+        std::array::from_fn(|i| crate::unlocks::UNLOCKABLES[i].kills(&p.career))
+    }
+
     pub fn from_profile(p: &crate::profile::Profile) -> Self {
         let s = &p.settings;
         Self {
             name: p.name.chars().take(net::msg::MAX_NAME_CHARS).collect(),
             medals: p.career.medals,
-            unlock_kills: std::array::from_fn(|i| crate::unlocks::UNLOCKABLES[i].kills(&p.career)),
+            unlock_kills: Self::unlock_kills_of(p),
             assist: AssistSettings {
                 intensity: s.assist_intensity,
                 pad_look_sensitivity: s.pad_look_sensitivity,

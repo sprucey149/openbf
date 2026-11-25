@@ -208,14 +208,44 @@ fn fit_text(painter: &egui::Painter, text: &str, font: &egui::FontId, room: f32)
 
 /// Draws the board centred under the top of the screen, inside it.
 pub fn draw_scoreboard(ctx: &egui::Context, b: &Scoreboard) {
-    use crate::typography::{egui_color, egui_font, egui_units, tint, ITEM, LIST};
+    draw_scoreboard_in(ctx, ctx.content_rect(), 0, 1.0, b);
+}
+
+/// [`draw_scoreboard`] inside `screen` (egui points), sized for it as a window of that size
+/// would be: a splitscreen view's board in its own cell (issue #194 B9). `salt` keeps each
+/// view's layer apart; 0 is the single view's own layer, and with the whole window and 0 the
+/// output is [`draw_scoreboard`]'s. `hud_k` is the splitscreen HUD size's factor (1 for the
+/// single view), so a cell's board shrinks with that cell's HUD.
+pub fn draw_scoreboard_in(
+    ctx: &egui::Context,
+    screen: egui::Rect,
+    salt: usize,
+    hud_k: f32,
+    b: &Scoreboard,
+) {
+    use crate::typography::{egui_color, egui_font, egui_units, menu_height, tint, ITEM, LIST};
     use egui::{pos2, vec2, Id, LayerId, Order, Rect};
     let [enemy, _, friend] = crate::hud::RETICLE_COLORS;
-    let screen = ctx.content_rect();
-    let u = egui_units(ctx, 1.0);
-    let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new("scoreboard")));
-    let row_font = egui_font(ctx, &LIST);
-    let title_font = egui_font(ctx, &ITEM);
+    // The cell's size against the window's: 1 for the whole window.
+    let window = ctx.content_rect();
+    let k = if screen == window {
+        1.0
+    } else {
+        menu_height([screen.width(), screen.height()])
+            / menu_height([window.width(), window.height()]).max(f32::MIN_POSITIVE)
+    } * hud_k;
+    let u = egui_units(ctx, 1.0) * k;
+    let id = match salt {
+        0 => Id::new("scoreboard"),
+        s => Id::new(("scoreboard", s)),
+    };
+    let painter = ctx.layer_painter(LayerId::new(Order::Middle, id));
+    let scaled = |mut f: egui::FontId| {
+        f.size = (f.size * k).max(1.0);
+        f
+    };
+    let row_font = scaled(egui_font(ctx, &LIST));
+    let title_font = scaled(egui_font(ctx, &ITEM));
     let case = |t: &str| LIST.case.apply(t).into_owned();
     let width = |t: &str, f: &egui::FontId| {
         painter
@@ -431,14 +461,14 @@ mod tests {
                 title: "Republic".into(),
                 rows: vec![
                     row("Bot A", 3, 1, 0, Ping::None),
-                    row("the maintainer", 5, 2, 1, Ping::Host),
+                    row("Rex", 5, 2, 1, Ping::Host),
                 ],
                 ..Default::default()
             },
             ScoreTeam {
                 title: "CIS".into(),
                 rows: vec![
-                    row("playtest_1", 4, 2, 2, Ping::Ms(48)),
+                    row("Rex_1", 4, 2, 2, Ping::Ms(48)),
                     row("Bot B", 4, 2, 1, Ping::None),
                 ],
                 ..Default::default()
@@ -450,10 +480,10 @@ mod tests {
         let names: Vec<&str> = b.teams[0].rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(
             names,
-            ["Bot B", "playtest_1"],
+            ["Bot B", "Rex_1"],
             "equal points: fewer deaths first"
         );
-        assert_eq!(b.teams[1].rows[0].name, "the maintainer");
+        assert_eq!(b.teams[1].rows[0].name, "Rex");
         assert_eq!(ping_text(b.teams[0].rows[1].ping), "48");
         assert_eq!(ping_text(b.teams[1].rows[0].ping), "host");
         assert_eq!(ping_text(b.teams[0].rows[0].ping), "");
@@ -472,7 +502,7 @@ mod tests {
             rows: (0..32)
                 .map(|i| ScoreRow {
                     name: if i == 31 && t == 0 {
-                        "the maintainer".into()
+                        "Rex".into()
                     } else if i % 2 == 0 {
                         format!("WWWWWWWWWWWWWWWWWW{i:02}")
                     } else {
@@ -557,7 +587,7 @@ mod tests {
                     }
                 }
                 assert!(
-                    texts.iter().any(|(_, t)| t == "THE MAINTAINER"),
+                    texts.iter().any(|(_, t)| t == "REX"),
                     "{w}x{h} ping {ping}: the viewer's row"
                 );
                 assert!(
@@ -586,6 +616,78 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// Issue #194 B9: the whole window with salt 0 draws exactly the single view's board, and a
+    /// split cell's board (side by side, top and bottom, the 2x2 grid) keeps every shape inside
+    /// its own cell with the viewer's row drawn.
+    #[test]
+    fn a_split_views_board_stays_in_its_cell() {
+        let shapes = |out: &egui::FullOutput| -> Vec<String> {
+            out.shapes
+                .iter()
+                .map(|c| format!("{:?} {:?}", c.clip_rect, c.shape))
+                .collect()
+        };
+        for ping in [false, true] {
+            let b = crowded(ping);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            };
+            let ctx = egui::Context::default();
+            let _ = ctx.run(input.clone(), |ctx| draw_scoreboard(ctx, &b));
+            let old = ctx.run(input.clone(), |ctx| draw_scoreboard(ctx, &b));
+            let ctx = egui::Context::default();
+            let _ = ctx.run(input.clone(), |ctx| {
+                draw_scoreboard_in(ctx, screen, 0, 1.0, &b)
+            });
+            let new = ctx.run(input.clone(), |ctx| {
+                draw_scoreboard_in(ctx, screen, 0, 1.0, &b)
+            });
+            assert_eq!(shapes(&old), shapes(&new), "the single view is unchanged");
+            let cells = [
+                [0.0, 0.0, 960.0, 1080.0],
+                [960.0, 0.0, 960.0, 1080.0],
+                [0.0, 540.0, 1920.0, 540.0],
+                [960.0, 540.0, 960.0, 540.0],
+            ];
+            for ((salt, [x, y, w, h]), hud_k) in cells
+                .into_iter()
+                .enumerate()
+                .flat_map(|c| [(c, 1.0), (c, 0.7)])
+            {
+                let cell = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h));
+                let ctx = egui::Context::default();
+                let draw = |ctx: &egui::Context| draw_scoreboard_in(ctx, cell, salt + 1, hud_k, &b);
+                let _ = ctx.run(input.clone(), draw);
+                let out = ctx.run(input.clone(), draw);
+                let mut me = false;
+                for c in &out.shapes {
+                    match &c.shape {
+                        egui::Shape::Text(t) => {
+                            let r = egui::Rect::from_min_size(t.pos, t.galley.size());
+                            assert!(
+                                cell.expand(0.5).contains_rect(r),
+                                "cell {cell:?}: {:?} at {r:?}",
+                                t.galley.text()
+                            );
+                            me |= t.galley.text() == "REX";
+                        }
+                        egui::Shape::Rect(f) => {
+                            assert!(
+                                cell.contains_rect(f.rect),
+                                "cell {cell:?}: frame {:?}",
+                                f.rect
+                            )
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(me, "cell {cell:?} shows the viewer's row");
             }
         }
     }

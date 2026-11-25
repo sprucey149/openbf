@@ -256,6 +256,10 @@ pub struct DesyncReport {
     pub slot: u8,
     /// The writer's own slot (0 on the host).
     pub local_slot: u8,
+    /// Every slot of the writer's machine, local 0 first (splitscreen,
+    /// issue #194 B19); left out for a machine of one player.
+    #[serde(default, skip_serializing_if = "one_or_none")]
+    pub local_slots: Vec<u8>,
     /// The hash check's tick.
     pub tick: u32,
     pub columns: Vec<String>,
@@ -279,6 +283,10 @@ pub struct DesyncReport {
     /// check equalled the host's replay (they had not parted).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agreeing_guests: Vec<u8>,
+}
+
+fn one_or_none(slots: &[u8]) -> bool {
+    slots.len() <= 1
 }
 
 impl DesyncReport {

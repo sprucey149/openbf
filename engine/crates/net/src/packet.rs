@@ -38,7 +38,12 @@ pub const MAGIC: [u8; 4] = *b"OBF1";
 /// 11: the fourth-playtest batch's simulation changes (adaptive difficulty,
 /// staggered round-start spawns, Elite opening posts, bots holding fire on
 /// a walled line, AI saber blocking, BF2 animated props), for the same reason.
-pub const PROTOCOL: u16 = 11;
+/// 12: a machine may bring several local players (splitscreen): `Hello`
+/// lists them, `Welcome` returns their slots, `Ready` names its local,
+/// a `LocalInputs` chunk carries each extra local's pads, and
+/// `LocalAway` / `LocalBack` take a local whose pad dropped out of the
+/// round and seat it again.
+pub const PROTOCOL: u16 = 12;
 /// The largest datagram either side sends or accepts.
 pub const MAX_DATAGRAM: usize = 1200;
 pub const HEADER_LEN: usize = 18;
@@ -59,6 +64,7 @@ const K_BUNDLES: u8 = 5;
 const K_RELIABLE: u8 = 6;
 const K_FIND: u8 = 7;
 const K_FOUND: u8 = 8;
+const K_LOCAL_INPUTS: u8 = 9;
 
 /// The fixed packet header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +147,13 @@ pub enum Chunk<'a> {
         next_needed: u32,
     },
     Inputs(&'a [u8]),
+    /// The inputs of a machine's extra local player `idx` (1..; local 0
+    /// sends [`Chunk::Inputs`]), numbered in the same sequence as local 0's
+    /// and coded the same way.
+    LocalInputs {
+        idx: u8,
+        data: &'a [u8],
+    },
     Bundles(&'a [u8]),
     Reliable {
         unit: u32,
@@ -188,6 +201,17 @@ pub fn parse_chunks(mut body: &[u8]) -> WireResult<Vec<Chunk<'_>>> {
             K_INPUTS => {
                 out.push(Chunk::Inputs(data));
                 continue;
+            }
+            K_LOCAL_INPUTS => {
+                let idx = c.u8()?;
+                if idx == 0 {
+                    return Err(WireError::BadValue);
+                }
+                let n = c.remaining();
+                Chunk::LocalInputs {
+                    idx,
+                    data: c.raw(n)?,
+                }
             }
             K_BUNDLES => {
                 out.push(Chunk::Bundles(data));
@@ -293,6 +317,16 @@ impl PacketWriter {
 
     pub fn inputs(&mut self, body: &[u8]) {
         self.chunk(K_INPUTS, body);
+    }
+
+    /// Extra local player `idx`'s inputs body (one byte more than
+    /// [`PacketWriter::inputs`]).
+    pub fn local_inputs(&mut self, idx: u8, body: &[u8]) {
+        debug_assert!(idx != 0, "local 0 sends plain inputs");
+        let mut b = Writer::with_capacity(body.len() + 1);
+        b.u8(idx);
+        b.raw(body);
+        self.chunk(K_LOCAL_INPUTS, &b.buf);
     }
 
     pub fn bundles(&mut self, body: &[u8]) {

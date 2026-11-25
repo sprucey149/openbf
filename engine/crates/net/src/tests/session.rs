@@ -524,14 +524,14 @@ fn session_names_are_unique_in_join_order() {
     net.run_until(5_000, |n| n.clients[a].core.slot().is_some());
     let b = net.join(2, "HOST", 2, Player::new(10.0, 1.0, 2));
     net.run_until(5_000, |n| n.clients[b].core.slot().is_some());
-    let c = net.join(3, "the maintainer", 3, Player::new(10.0, 1.0, 3));
+    let c = net.join(3, "Rex", 3, Player::new(10.0, 1.0, 3));
     net.run_until(5_000, |n| n.clients[c].core.slot().is_some());
     let names = |n: &Net| -> Vec<String> { n.host.players().into_iter().map(|p| p.1).collect() };
-    assert_eq!(names(&net), ["Host", "host_1", "HOST_2", "the maintainer"]);
+    assert_eq!(names(&net), ["Host", "host_1", "HOST_2", "Rex"]);
     // The same token again keeps its session name, whatever it sends.
     let back = net.join(4, "Host", 2, Player::new(10.0, 1.0, 4));
     net.run_until(5_000, |n| n.clients[back].core.slot().is_some());
-    assert_eq!(names(&net), ["Host", "host_1", "HOST_2", "the maintainer"]);
+    assert_eq!(names(&net), ["Host", "host_1", "HOST_2", "Rex"]);
     let joined: Vec<String> = net
         .host_events
         .iter()
@@ -540,7 +540,7 @@ fn session_names_are_unique_in_join_order() {
             _ => None,
         })
         .collect();
-    assert_eq!(joined, ["host_1", "HOST_2", "the maintainer", "HOST_2"]);
+    assert_eq!(joined, ["host_1", "HOST_2", "Rex", "HOST_2"]);
 }
 
 /// Round 2 shorter than round 1 still gets a bundle datagram to every guest

@@ -414,6 +414,18 @@ impl App {
                 if !self.round_recorded {
                     self.round_recorded = true;
                     super::record_round(&mut self.profile, walk, self.feed.battle_stats());
+                    let seats = super::split::round_seat_numbers(
+                        self.split.as_ref(),
+                        self.netplay.as_ref(),
+                        self.split_party.as_ref(),
+                        walk,
+                    );
+                    super::career::record_split_rounds(
+                        &mut self.split_profiles,
+                        walk,
+                        &self.split_feeds,
+                        &seats,
+                    );
                 }
             }
         }

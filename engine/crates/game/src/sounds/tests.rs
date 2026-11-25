@@ -168,7 +168,7 @@ fn kothlis_live_mixer_starts_the_club_track_inside_its_region() {
     let mut audio = audio::Audio::new().expect("live audio device");
     lib.set_user_volumes(0.001, 1.0);
 
-    let listener = |pos| Listener { pos, yaw: 0.0 };
+    let listener = |pos| Listener::new(pos, 0.0);
     let outside = listener(Vec3::new(-74.99, 0.69, 184.27));
     let inside = listener(Vec3::new(-110.0, 9.0, 87.0));
     let allow_start = || std::thread::sleep(std::time::Duration::from_millis(150));
@@ -279,6 +279,8 @@ fn attenuation_and_pan_shapes() {
     let l = Listener {
         pos: Vec3::ZERO,
         yaw: 0.0,
+        more: [None; 3],
+        vels: None,
     };
     assert_eq!(
         side(&l, Vec3::new(10.0, 0.0, 0.0)),
@@ -337,6 +339,8 @@ fn a_start_hands_each_ear_the_ps2s_level() {
     let l = Listener {
         pos: Vec3::ZERO,
         yaw: 0.0,
+        more: [None; 3],
+        vels: None,
     };
     let bus = fnv1a_lowercase;
     let shot = SoundProp {
@@ -1075,6 +1079,8 @@ fn weapon_voices_hold_their_mixer_shots_through_a_click() {
     let listener = Listener {
         pos: Vec3::ZERO,
         yaw: 0.0,
+        more: [None; 3],
+        vels: None,
     };
     let ask = |name: &str, click| WeaponAsk {
         unit: 1,
@@ -1387,6 +1393,8 @@ fn positional_rate_and_product_floor() {
     let listener = Listener {
         pos: Vec3::ZERO,
         yaw: 0.0,
+        more: [None; 3],
+        vels: None,
     };
     let hash = fnv1a_lowercase("rep_test_voice");
     let seed = sl.seed;
@@ -1463,6 +1471,8 @@ fn voicep_public_callers() {
     let listener = Listener {
         pos: Vec3::ZERO,
         yaw: 0.0,
+        more: [None; 3],
+        vels: None,
     };
     for mul in [1.0, 0.3] {
         sl.rate_mul = mul;
@@ -1712,4 +1722,208 @@ fn pause_click_intervals_from_the_bf2_battle_bank() {
         assert_eq!(sl.play_2d(None, select).len(), 1);
     }
     assert_eq!(sl.now, 0.0);
+}
+
+/// Splitscreen (plan SPLITSCREEN 18.2 B11): one ear is today's listener to
+/// the bit; a second ear hears what is near it at its own level, centred,
+/// and a sound beyond every ear is culled.
+#[test]
+fn a_one_ear_listener_measures_from_pos_to_the_bit() {
+    let l = Listener::new(Vec3::new(3.25, -1.5, 7.125), 0.7);
+    assert!(!l.shared());
+    for at in [
+        Vec3::ZERO,
+        Vec3::new(10.1, 0.3, -44.9),
+        Vec3::new(-1e3, 2.0, 0.5),
+    ] {
+        assert_eq!(l.ear(at), l.pos);
+        assert_eq!(l.dist(at).to_bits(), (at - l.pos).length().to_bits());
+        assert_eq!(
+            Ears::dist(&l, at).to_bits(),
+            Ears::dist(l.pos, at).to_bits()
+        );
+    }
+    // Four ears at most: a fifth is dropped.
+    let more = (1..=4).map(|i| Vec3::X * i as f32);
+    let l = Listener::new(Vec3::ZERO, 0.0).with_more(more);
+    assert_eq!(
+        l.more,
+        [Some(Vec3::X), Some(Vec3::X * 2.0), Some(Vec3::X * 3.0)]
+    );
+    assert_eq!(l.ear(Vec3::X * 9.0), Vec3::X * 3.0);
+    // A tie keeps the first ear.
+    let l = Listener::new(Vec3::X, 0.0).with_more([-Vec3::X]);
+    assert_eq!(l.ear(Vec3::ZERO), Vec3::X);
+}
+
+#[test]
+fn a_second_ear_hears_a_shot_at_its_own_gain_centred() {
+    let mut sl = lib();
+    let hash = fnv1a_lowercase("exp_high");
+    let p1 = Vec3::ZERO;
+    let ear2 = Vec3::new(1000.0, 0.0, 0.0);
+    let two = Listener::new(p1, 0.0).with_more([ear2]);
+    assert!(two.shared());
+    // 60 m right of ear 2 (past its 30 m minimum): P1 is 1060 m away, past
+    // the 450 m maximum, so only ear 2 can hear it.
+    let at = ear2 + Vec3::new(60.0, 0.0, 0.0);
+    let mut got = Vec::new();
+    sl.start(hash, at, &two, &mut got);
+    let mut alone = Vec::new();
+    sl.start(hash, at, &Listener::new(ear2, 0.0), &mut alone);
+    let (s, a) = (got.pop().expect("ear 2 hears it"), alone.pop().unwrap());
+    near(s.gain, a.gain);
+    near(s.gain, attenuation(60.0, &prop("exp_high", 1)));
+    assert!(s.gain < 1.0, "levelled at ear 2's own 60 m");
+    // Alone, ear 2 hears it hard right; shared, it is centred with the same
+    // amplitude.
+    let full = a.gain * a.bus;
+    assert!(close(a.ears(&Listener::new(ear2, 0.0)), (0.0, full)));
+    assert!(close(s.ears(&two), (0.5 * full, 0.5 * full)));
+    assert_eq!(side(&two, at), 0.0);
+    // P1 alone hears nothing there.
+    let mut p1_only = Vec::new();
+    sl.start(hash, at, &Listener::new(p1, 0.0), &mut p1_only);
+    assert!(p1_only.is_empty());
+}
+
+#[test]
+fn a_sound_beyond_every_ear_is_culled() {
+    let mut sl = lib();
+    let two = Listener::new(Vec3::ZERO, 0.0).with_more([Vec3::new(1000.0, 0.0, 0.0)]);
+    // 500 m from ear 2 and over 1100 m from P1: past both 450 m maxima.
+    let at = Vec3::new(1000.0, 0.0, 500.0);
+    let mut out = Vec::new();
+    sl.start(fnv1a_lowercase("exp_high"), at, &two, &mut out);
+    assert!(out.is_empty(), "{out:?}");
+    let voice = crate::engine_sound::Voice {
+        vehicle: 0,
+        soldier: false,
+        layer: 0,
+        record: 0,
+        sound: fnv1a_lowercase("exp_high"),
+        pos: at,
+        gain_factor: 1.0,
+        pitch_factor: 1.0,
+        speed: 0.0,
+    };
+    assert!(sl.engine_level(&voice, &two).is_none());
+    // A unit's line is refused as far from every ear, and asked again with
+    // ear 2 beside the caller it passes.
+    assert!(matches!(
+        sl.ask_line("exp_high", at, &two),
+        Err(Refused::Far)
+    ));
+    let near_two = Listener::new(Vec3::ZERO, 0.0).with_more([at + Vec3::X]);
+    assert!(sl.ask_line("exp_high", at, &near_two).is_ok());
+}
+
+#[test]
+fn a_looping_voice_regains_when_the_second_ear_walks_up() {
+    let sl = lib();
+    let pos = Vec3::new(1000.0, 0.0, 0.0);
+    let voice = crate::engine_sound::Voice {
+        vehicle: 0,
+        soldier: false,
+        layer: 0,
+        record: 0,
+        sound: fnv1a_lowercase("exp_high"),
+        pos,
+        gain_factor: 1.0,
+        pitch_factor: 1.0,
+        speed: 0.0,
+    };
+    // The voice's level is asked every tick (`play_loop_voice`): out of
+    // every ear's range it is not played; as ear 2 walks up it comes back
+    // and grows, centred, to full inside the minimum distance.
+    let mut last = 0.0;
+    for z in [600.0, 300.0, 100.0, 20.0] {
+        let two = Listener::new(Vec3::ZERO, 0.0).with_more([pos + Vec3::new(0.0, 0.0, z)]);
+        let got = sl.engine_level(&voice, &two).map_or(0.0, |((l, r), _)| {
+            assert!((l - r).abs() < 1e-6, "centred at {z} m: {l} {r}");
+            l + r
+        });
+        if z > 450.0 {
+            assert_eq!(got, 0.0, "{z} m");
+        } else {
+            assert!(got > last, "{z} m: {got} after {last}");
+        }
+        last = got;
+    }
+    near(last, 1.0);
+}
+
+/// Issue #194 B12 (`SPLITSCREEN.md` 18.2): `fire` steps a tick with local
+/// player `who` holding FIRE, and returns that tick's shot asks of `who`.
+fn fire_once(w: &mut crate::walk::WalkSim, who: usize) -> Vec<WeaponAsk> {
+    for c in &mut w.sim.weapon_classes {
+        c.fire_sound = Some("exp_high".into());
+    }
+    let mut pads = vec![core::sim::PadState::default(); w.local_count()];
+    let unit = w.local_unit(who);
+    for _ in 0..30 {
+        pads[usize::from(w.local_slot_of(who))].buttons = core::sim::buttons::FIRE;
+        w.step_tick(&pads);
+        let mut asks = Vec::new();
+        crate::event_sounds::weapon_asks(w, |a| {
+            if a.unit == unit.index && !a.click {
+                asks.push(a);
+            }
+        });
+        if !asks.is_empty() {
+            return asks;
+        }
+    }
+    panic!("local player {who} never fired");
+}
+
+/// Issue #194 B12 acceptance: on the two-locals walk (P1 at team 0's post,
+/// P2 300 m west at team 1's), P2's shot is handed at near-full gain from
+/// P2's own ear, centred, where P1's ear alone hears it far quieter.
+#[test]
+fn p2s_shot_is_handed_at_near_full_gain_from_p2s_ear() {
+    let mut w = crate::walk::two_locals_walk();
+    crate::walk::spawn_locals(&mut w);
+    let asks = fire_once(&mut w, 1);
+    let both = crate::event_sounds::listeners(&mut w);
+    assert!(both.shared(), "two awake players: two ears");
+    assert_eq!(
+        both.more[0],
+        Some(w.camera_of(1).position - w.camera_of(1).forward() * 2.0)
+    );
+    let p1_only = crate::event_sounds::listener(&w);
+    assert!(!p1_only.shared());
+    let mut sl = lib();
+    let heard = sl.weapon_voices(&asks, &both);
+    let (_, s) = heard.first().expect("P2's shot is handed");
+    assert!(both.dist(s.pos) < 30.0, "P2's ear is by the muzzle");
+    assert!(s.gain > 0.95, "near-full gain: {}", s.gain);
+    assert_eq!(side(&both, s.pos), 0.0, "centred");
+    let mut sl = lib();
+    let alone = sl.weapon_voices(&asks, &p1_only);
+    let quiet = alone.first().map_or(0.0, |(_, s)| s.gain);
+    assert!(quiet < 0.5 * s.gain, "P1's ear alone: {quiet}");
+}
+
+/// Issue #194 B12: with one local player `listeners` is `listener` to the
+/// bit, so every one-player row the mixer is handed stays as it was.
+#[test]
+fn one_local_listeners_hand_the_same_rows_as_listener() {
+    let mut w = crate::walk::posts_walk();
+    crate::walk::spawn_locals(&mut w);
+    let asks = fire_once(&mut w, 0);
+    let old = crate::event_sounds::listener(&w);
+    let new = crate::event_sounds::listeners(&mut w);
+    assert_eq!(new, old);
+    assert_eq!(new.vels, None);
+    let rows = |l: &Listener| {
+        let mut sl = lib();
+        sl.weapon_voices(&asks, l)
+            .into_iter()
+            .map(|(k, s)| (k, s.hash, s.gain.to_bits(), s.pitch.to_bits(), s.pos))
+            .collect::<Vec<_>>()
+    };
+    let (a, b) = (rows(&old), rows(&new));
+    assert!(!a.is_empty());
+    assert_eq!(a, b);
 }

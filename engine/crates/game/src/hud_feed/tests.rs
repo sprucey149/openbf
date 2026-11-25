@@ -374,3 +374,21 @@ fn reticle_relation_reads_the_views_own_slot() {
     assert_eq!(reticle_relation(&sim, 1), 1);
     assert_eq!(reticle_relation(&sim, 5), 0, "a slot past the table");
 }
+
+/// Each player's HUD keeps its own fades: parking one and selecting another leaves both as they
+/// were, and the shared art is not rebuilt.
+#[test]
+#[ignore = "needs the baked assets"]
+fn each_players_hud_state_is_kept_apart() {
+    let assets = crate::assets::baked_root();
+    let mut view = HudView::load(&assets, wgpu::TextureFormat::Bgra8UnormSrgb, None).unwrap();
+    view.update(&HudModel::default(), 0.1, [640, 360]);
+    assert!(view.settled);
+    view.select_player(1);
+    assert!(!view.settled, "player 1 starts fresh");
+    view.update(&HudModel::default(), 0.1, [640, 360]);
+    view.select_player(0);
+    assert!(view.settled && view.active == 0);
+    view.select_player(1);
+    assert!(view.settled, "player 1's own state came back");
+}

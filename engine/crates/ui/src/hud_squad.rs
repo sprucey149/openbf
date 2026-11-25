@@ -22,7 +22,7 @@
 //! Hor+ — the cross keeps its 4:3 offset from the window's right edge. A BF2
 //! battle shows the same cross (the BF2 disc ships neither sheet).
 
-use crate::hud_draw::{color, run_width, Ctx, Quad, Run, Screen};
+use crate::hud_draw::{color, run_width, Ctx, Frame, Quad, Run, Screen, VAnchor};
 use crate::hud_tree::{HAlign, FRAME_H, FRAME_W};
 use glam::{Mat4, Vec3};
 
@@ -134,26 +134,40 @@ pub enum Part {
 
 /// Element units → window pixels for a `size` window: the cross's centre is
 /// the origin, and the 4:3 picture keeps its place at the right edge.
-pub(crate) fn screen(size: [f32; 2]) -> Screen {
-    let box_w = 4.0 / 3.0 * size[1];
+/// In a split cell ([`Frame::cell`]) the box is the frame's, at the cell's
+/// bottom-right corner.
+pub(crate) fn screen(f: &Frame) -> Screen {
+    let box_w = 4.0 / 3.0 * f.box_h;
+    let y = CENTRE[1] / FRAME_H * f.box_h;
+    let dy = f.shift_y(VAnchor::Bottom);
     Screen {
         origin: [
-            size[0] - box_w + CENTRE[0] / FRAME_W * box_w,
-            CENTRE[1] / FRAME_H * size[1],
+            f.size[0] - box_w + CENTRE[0] / FRAME_W * box_w,
+            if dy == 0.0 { y } else { y + dy },
         ],
-        scale: [box_w / FRAME_W, size[1] / FRAME_H * Y_UNIT],
+        scale: [box_w / FRAME_W, f.box_h / FRAME_H * Y_UNIT],
     }
 }
 
 /// Where the cross's centre and arm `arm`'s label anchor land in a `size`
 /// window.
 pub fn centre(size: [f32; 2]) -> [f32; 2] {
-    screen(size).map(Vec3::ZERO)
+    centre_in(&Frame::window(size))
 }
 
 pub fn label_anchor(arm: u8, size: [f32; 2]) -> [f32; 2] {
+    label_anchor_in(arm, &Frame::window(size))
+}
+
+/// [`centre`] in the screen `f`.
+pub fn centre_in(f: &Frame) -> [f32; 2] {
+    screen(f).map(Vec3::ZERO)
+}
+
+/// [`label_anchor`] in the screen `f`.
+pub fn label_anchor_in(arm: u8, f: &Frame) -> [f32; 2] {
     let (x, y, ..) = LABELS[usize::from(arm.min(3))];
-    screen(size).map(Vec3::new(x, y, 0.0))
+    screen(f).map(Vec3::new(x, y, 0.0))
 }
 
 /// A label's glyph run: white, the Shadow style.
@@ -201,12 +215,12 @@ impl Ctx<'_> {
         }
     }
 
-    pub(crate) fn squad(&mut self, sq: &SquadCross, size: [f32; 2]) {
+    pub(crate) fn squad(&mut self, sq: &SquadCross, f: &Frame) {
         let alpha = sq.alpha();
         if sq.timer < 0.0 || alpha <= 0.0 {
             return;
         }
-        let s = screen(size);
+        let s = screen(f);
         let none = usize::MAX;
         let sheet = |rect: [f32; 4], texture: &'static str| Quad {
             rect,

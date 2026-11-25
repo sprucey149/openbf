@@ -812,7 +812,7 @@ fn capture_guest_window_menus() {
             match page {
                 None => {
                     let mut picker = ui::shell_ps2::profiles::Picker::new(
-                        vec![(1, "the maintainer".into()), (2, "Kai".into())],
+                        vec![(1, "Rex".into()), (2, "Kai".into())],
                         Some(1),
                     );
                     if name == "name" {

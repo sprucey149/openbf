@@ -296,3 +296,123 @@ fn capture_shell() {
             .unwrap();
     }
 }
+
+/// Issue #194 (`SPLITSCREEN.md` 18.2 B2, B22): the Players screen, always the 2x2 grid: one seat
+/// picking with three open quarters (their join glyphs), two seats (P1 Ready on a pad, P2
+/// choosing on the keyboard), four (P1 Ready, P2 on its name keyboard, P3 Ready with its pad
+/// gone and a held Select able to empty it, P4 open), four pickers, and two seats Ready on one
+/// profile (Continue refused), over the shell movie, at 4:3, 16:9, 21:9 and 1024x768.
+#[test]
+#[ignore = "requires a GPU adapter + the BF2 common bake"]
+fn capture_players() {
+    use ui::input_icons::IconSet;
+    use ui::shell_ps2::players::PlayerCell;
+    use ui::shell_ps2::profiles::{Picker, Target};
+    use ui::shell_ps2::{Page, ShellMenus};
+    common::force_ps2_tier();
+    let out = out_dir();
+    let assets = game::assets::baked_root();
+    game::shell_movie::load_index(&assets).expect("the shell index");
+    let texts = game::event_feed::Texts::load(&assets, "bf2");
+    let text = |key: &str, english: &str| {
+        texts
+            .bf2_text(key)
+            .map_or_else(|| english.to_owned(), |t| t.trim_end().to_owned())
+    };
+    let movie = game::shell_movie::ShellMovie::load(&assets).expect("the shell bake");
+    let mut m = ShellMenus::new(&text);
+    m.open_page(Page::Players);
+    m.on_page = 5.0;
+    m.clock = 0.0;
+    let names: Vec<(u64, String)> = ["Ann", "Bob", "Cy", "Dee", "Eve", "Finn"]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (i as u64, n.to_string()))
+        .collect();
+    let mut pick = Picker::new(names, None);
+    pick.seat = true;
+    pick.taken = vec![0];
+    pick.set_focus(Target::Profile(2));
+    // Issue #194 B22: one seat picking in the top-left quarter, three open quarters showing the
+    // waiting DualShock 4s' Cross and Options glyphs; and four pickers at once.
+    let mut one = m.clone();
+    one.players.cells[0] = PlayerCell::Picking {
+        picker: pick.clone(),
+        device: "Xbox controller".into(),
+        icons: IconSet::XboxOne,
+        lost: false,
+    };
+    one.players.join_icons = Some(IconSet::Ds4);
+    let mut pickers = one.clone();
+    for (i, icons) in [IconSet::Ds4, IconSet::Ds2, IconSet::KeyboardMouse]
+        .into_iter()
+        .enumerate()
+    {
+        pickers.players.cells[i + 1] = PlayerCell::Picking {
+            picker: pick.clone(),
+            device: "Pad".into(),
+            icons,
+            lost: false,
+        };
+    }
+    let ready = |name: &str, icons, device: &str, lost| PlayerCell::Seated {
+        name: name.into(),
+        device: device.into(),
+        icons,
+        career: "25 kills   310 points   4 rounds".into(),
+        lost,
+        rechoose: true,
+    };
+    m.players.cells[0] = ready("Ann", IconSet::XboxOne, "Xbox controller", false);
+    m.players.cells[1] = PlayerCell::Picking {
+        picker: pick.clone(),
+        device: "Keyboard and mouse".into(),
+        icons: IconSet::KeyboardMouse,
+        lost: false,
+    };
+    let two = m.clone();
+    let mut naming = pick;
+    naming.edit_name("Player 1".into());
+    m.players.cells[1] = PlayerCell::Picking {
+        picker: naming,
+        device: "DualShock 4".into(),
+        icons: IconSet::Ds4,
+        lost: false,
+    };
+    m.players.cells[2] = ready("Cy", IconSet::Ds2, "DualShock 2", true);
+    m.players.keyboard_free = true;
+    // P3's pad is gone: a held Select on a seated pad (P1's Xbox pad) empties the seat.
+    m.players.removable[2] = true;
+    m.players.remove_icons = Some(IconSet::XboxOne);
+    let four = m.clone();
+    // Findings players-continue-live-but-refused-duplicate-profile: P2 and P3 Ready on one
+    // profile; the party refuses Continue, so no card shows it live, and both cards say why.
+    let mut twice = m;
+    twice.players.cells[1] = ready("Cy", IconSet::Ds4, "DualShock 4", false);
+    twice.players.cells[2] = ready("Cy", IconSet::Ds2, "DualShock 2", false);
+    twice.players.removable = [false; 4];
+    twice.players.twice = [false, true, true, false];
+    twice.players.blocked = true;
+    let (rgba, w, h) = movie.frame_now(two.movie(), 0, 150).expect("movie frame");
+    let sizes = SIZES.into_iter().chain([("1024x768", [1024, 768])]);
+    for (label, size) in sizes {
+        for (name, menus) in [
+            ("1", &one),
+            ("2", &two),
+            ("4", &four),
+            ("4pickers", &pickers),
+            ("twice", &twice),
+        ] {
+            frame(
+                size,
+                |v| {
+                    v.set_movie_frame(rgba.clone(), w, h);
+                    v.update_shell(menus, true, size)
+                },
+                Panel::None,
+            )
+            .save(out.join(format!("players_{name}_{label}.png")))
+            .unwrap();
+        }
+    }
+}

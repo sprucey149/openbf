@@ -228,6 +228,7 @@ fn model() -> MenuModel {
         texts: Default::default(),
         respawn_label: Some("Respawn".into()),
         outcome_line: None,
+        paused_by: None,
         in_shell: None,
         ..Default::default()
     }
@@ -846,7 +847,10 @@ fn render_options_toggle_from_shell_and_pause_options() {
         assert_eq!(row_text(&m, Row::TerrainLod).1.as_deref(), Some("On"));
         assert_eq!(row_text(&m, Row::SceneSoftness).1.as_deref(), Some("On"));
         assert_eq!(row_text(&m, Row::HardShadows).1.as_deref(), Some("On"));
-        let index = rows(&m).iter().position(|r| *r == Row::HardShadows).unwrap();
+        let index = rows(&m)
+            .iter()
+            .position(|r| *r == Row::HardShadows)
+            .unwrap();
         let (_, actions) = crate::pause_draw::click(
             &mut m,
             &crate::pause_draw::Animation::default(),

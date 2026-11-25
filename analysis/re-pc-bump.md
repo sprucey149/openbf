@@ -18,7 +18,7 @@ Tags: `[R]` = read here from the bytecode or the exe. `[M]` = measured on the da
 
 ## 1. Sources
 
-- `core.lvl`: `E:\Projects\bf1+bf2\star_wars_battlefront2\GameData\data\_lvl_pc\core.lvl`.
+- `core.lvl`: `GameData/data/_lvl_pc/core.lvl` in a BF2 PC install.
   - It holds 30 top-level `SHDR` chunks, each `RTYP` / `NAME` / `INFO` / `PIPE`.
   - `PIPE` = `INFO`, `VSP_` (a pool of `VS__`), `PSP_` (a pool of `PS__`) and `STAT` entries.
   - Each `STAT` = `INFO` (state id, pass count) and `PASS` children. A `PASS` = `INFO` flags, `PVS_` (vertex format,

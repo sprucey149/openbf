@@ -67,6 +67,9 @@ pub struct BattleMusic {
     /// The campaign script's calls this frame, applied by
     /// [`BattleMusic::apply_script`] where the bank is at hand.
     pub script_calls: Vec<InGameMusic>,
+    /// The team the last [`BattleMusic::frame`] heard as: splitscreen keeps it while every
+    /// local player is away.
+    heard_team: usize,
 }
 
 /// A campaign script's in-game music call.
@@ -114,6 +117,7 @@ impl BattleMusic {
                 ..ScriptMusic::default()
             },
             script_calls: Vec::new(),
+            heard_team: 0,
         }
     }
 
@@ -372,8 +376,11 @@ impl BattleMusic {
     }
 
     /// [`BattleMusic::observe`] from the sim.
-    pub fn frame(&mut self, sim: &Sim, player: UnitHandle, dt: f32) -> Vec<Change> {
-        let me = sim.unit(player);
+    ///
+    /// `player` is `None` in splitscreen while every local player is away: no unit's own music,
+    /// and the last side heard is kept.
+    pub fn frame(&mut self, sim: &Sim, player: Option<UnitHandle>, dt: f32) -> Vec<Change> {
+        let me = player.and_then(|p| sim.unit(p));
         for &(_, _, index) in &self.hero_tracks {
             if let Some(music) = self.player.musics.get_mut(index) {
                 music.wanted = false;
@@ -381,7 +388,7 @@ impl BattleMusic {
         }
         // OURS (maintainer, 2026-11-05): Hero Assault plays its heroes'
         // music too, though `tat2g_eli` switches hero music off.
-        let hero = sim.is_hero(player) || sim.hero_assault();
+        let hero = player.is_some_and(|p| sim.is_hero(p)) || sim.hero_assault();
         if sim.outcome.is_none() && hero {
             let track = me.and_then(|u| {
                 self.hero_tracks
@@ -396,10 +403,10 @@ impl BattleMusic {
         }
         // The slot's team, dead or alive: a battle that ends while the
         // player waits to respawn plays HIS team's end music.
-        let listener = sim
-            .units
-            .get(player.index as usize)
-            .map_or(0, |u| usize::from(u.team));
+        if let Some(u) = player.and_then(|p| sim.units.get(p.index as usize)) {
+            self.heard_team = usize::from(u.team);
+        }
+        let listener = self.heard_team;
         self.observe(
             dt,
             listener,
@@ -594,19 +601,68 @@ mod tests {
         let mut m = BattleMusic::new(&MusicCalls::default(), true, [150; 2]);
         m.set_hero_music(vec![(0, 0, "hero_theme".into())]);
         m.bind_with(track);
-        let changes = m.frame(&sim, hero, core::TICK_DT);
+        let changes = m.frame(&sim, Some(hero), core::TICK_DT);
         assert!(changes
             .iter()
             .any(|c| matches!(c, Change::Started { music: 0, .. })));
         assert!(m.player.musics[0].wanted);
         sim.units[hero.index as usize].alive = false;
-        m.frame(&sim, hero, core::TICK_DT);
+        m.frame(&sim, Some(hero), core::TICK_DT);
         assert!(!m.player.musics[0].wanted);
         // Authored minimum playback and fade still own the audible stop.
         for _ in 0..210 {
-            m.frame(&sim, hero, core::TICK_DT);
+            m.frame(&sim, Some(hero), core::TICK_DT);
         }
         assert!(m.player.current().is_none());
+    }
+
+    /// Issue #194 B12 (`SPLITSCREEN.md` 18.2): the window frames the music on
+    /// `WalkSim::first_awake_unit`, so with P1's controller gone the battle
+    /// music is P2's side's, and with both playing it is P1's as before.
+    #[test]
+    fn music_follows_p2_while_p1_is_suspended() {
+        use crate::walk::WalkSim;
+        let mut w = crate::walk::two_locals_walk();
+        crate::walk::spawn_locals(&mut w);
+        let team = |w: &WalkSim, i: usize| w.sim.unit(w.local_unit(i)).unwrap().team;
+        assert_eq!((team(&w, 0), team(&w, 1)), (0, 1));
+        let heard = |w: &WalkSim| {
+            let mut m = BattleMusic::new(&calls(), false, [200, 200]);
+            m.bind_with(track);
+            let mut lines = Vec::new();
+            for _ in 0..(3.0 / core::TICK_DT) as usize {
+                for c in m.frame(&w.sim, w.first_awake_unit(), core::TICK_DT) {
+                    if matches!(c, Change::Started { .. }) {
+                        lines.push(m.line(&c));
+                    }
+                }
+            }
+            lines
+        };
+        // Port team 0 is the script's team 1, `cis`; port team 1 is `rep`.
+        let both = heard(&w);
+        assert!(!both.is_empty(), "a battle is heard");
+        assert!(both.iter().all(|l| l.contains(" cis_")), "{both:?}");
+        let _away = w.suspend_local_player(0).expect("P1 was playing");
+        let p2 = heard(&w);
+        assert!(!p2.is_empty(), "P2 hears the battle");
+        assert!(p2.iter().all(|l| l.contains(" rep_")), "{p2:?}");
+        // Everyone away: nobody's (possibly a bot's) unit is read, and the side heard last
+        // (P2's) is kept.
+        let mut m = BattleMusic::new(&calls(), false, [200, 200]);
+        m.bind_with(track);
+        m.frame(&w.sim, w.first_awake_unit(), core::TICK_DT);
+        let _away2 = w.suspend_local_player(1).expect("P2 was playing");
+        assert_eq!(w.first_awake_unit(), None);
+        let mut held = Vec::new();
+        for _ in 0..(3.0 / core::TICK_DT) as usize {
+            for c in m.frame(&w.sim, None, core::TICK_DT) {
+                if matches!(c, Change::Started { .. }) {
+                    held.push(m.line(&c));
+                }
+            }
+        }
+        assert!(held.iter().all(|l| l.contains(" rep_")), "{held:?}");
     }
 
     fn calls() -> MusicCalls {

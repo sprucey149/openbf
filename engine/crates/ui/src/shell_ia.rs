@@ -935,7 +935,7 @@ impl Ctx<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     const BUTTON_FONT: &str = "gamefont_large";
     const SMALL_FONT: &str = "gamefont_small";
@@ -957,7 +957,7 @@ mod tests {
         7, 6, 11, 5, 15, 11, 11, 12, 12, 10, 11, 7, 12, 11, 16, 13, 11, 11, 11, 3, 11, 12,
     ];
 
-    fn small_font() -> HudFont {
+    pub(crate) fn small_font() -> HudFont {
         use manifest::hud::HudGlyph;
         HudFont {
             name: SMALL_FONT.into(),

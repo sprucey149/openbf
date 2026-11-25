@@ -709,12 +709,18 @@ pub struct Hud {
     pub banner: Option<u8>,
     /// The black drawn over the banner and the scene, 0 to 1.
     pub banner_fade: f32,
+    /// The other players' names over their heads this frame (LAN §5b, issue #194), in the
+    /// screen's own pixels; drawn in the event feed's font ([`crate::hud::NameTagDraw`]).
+    pub name_tags: Vec<crate::hud::NameTagDraw>,
     /// Per font: each glyph's pen advance in texels (what a MultiLineText
     /// wraps its words by). Empty until [`Hud::set_fonts`].
     advances: HashMap<String, HashMap<u32, f32>>,
     /// Seconds of HUD time, wrapped at [`CLOCK_WRAP`]: what a scrolling mesh
     /// part's UVs move by (`crate::hud_draw`).
     pub clock: f32,
+    /// Per element: how its root hangs up and down in a split cell's screen
+    /// (`crate::hud_draw::VAnchor`), set once by [`Hud::new`].
+    pub v_anchors: Vec<crate::hud_draw::VAnchor>,
 }
 
 /// `[ours]` [`Hud::clock`] wraps here so the f32 never grows coarse. A BF2
@@ -849,8 +855,10 @@ impl Hud {
             stats: None,
             banner: None,
             banner_fade: 0.0,
+            name_tags: Vec::new(),
             advances: HashMap::new(),
             clock: 0.0,
+            v_anchors: Vec::new(),
         };
         for n in &layout.nodes {
             let lname = n.name.to_ascii_lowercase();
@@ -864,7 +872,27 @@ impl Hud {
                 hud.transform(t);
             }
         }
+        hud.v_anchors = vec![Default::default(); hud.elems.len()];
+        for k in 0..hud.roots.len() {
+            let r = hud.roots[k];
+            let a = crate::hud_draw::root_v_anchor(&hud, r);
+            hud.mark_anchor(r, a);
+        }
         hud
+    }
+
+    fn mark_anchor(&mut self, i: usize, a: crate::hud_draw::VAnchor) {
+        self.v_anchors[i] = a;
+        for k in 0..self.elems[i].children.len() {
+            let c = self.elems[i].children[k];
+            self.mark_anchor(c, a);
+        }
+    }
+
+    /// How element `i`'s root hangs up and down in a split cell
+    /// ([`Hud::v_anchors`]; Centre for an element made later).
+    pub fn v_anchor(&self, i: usize) -> crate::hud_draw::VAnchor {
+        self.v_anchors.get(i).copied().unwrap_or_default()
     }
 
     fn listen(&mut self, n: &HudNode, elem: usize, what: Listen) {
@@ -1202,6 +1230,16 @@ impl Hud {
             }),
             _ => {}
         }
+    }
+
+    /// The message box that takes `event`'s text as its lines (the event feed for
+    /// [`crate::hud::MESSAGE_EVENT`]), if the layout has one.
+    pub fn message_box(&self, event: &str) -> Option<usize> {
+        self.listeners
+            .get(&event.to_ascii_lowercase())?
+            .iter()
+            .find(|(i, what)| *what == Listen::Text && self.elems[*i].lines.is_some())
+            .map(|(i, _)| *i)
     }
 
     /// Find an element by name (case-blind).

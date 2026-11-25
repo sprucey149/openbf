@@ -31,6 +31,10 @@ pub(super) struct Slot {
 }
 
 impl Slot {
+    pub(super) fn id(&self) -> u64 {
+        self.id
+    }
+
     pub(super) fn save(&self, profile: &Profile) -> Result<()> {
         self.store.update(|catalog| {
             *catalog
@@ -51,10 +55,16 @@ struct Catalog {
 
 impl Catalog {
     fn insert(&mut self, profile: Profile) -> Result<u64> {
+        let id = self.insert_quiet(profile)?;
+        self.last = Some(id);
+        Ok(id)
+    }
+
+    /// [`Catalog::insert`] without moving `last`.
+    fn insert_quiet(&mut self, profile: Profile) -> Result<u64> {
         let id = self.next;
         self.next = id.checked_add(1).context("Profile IDs exhausted")?;
         self.profiles.insert(id, profile);
-        self.last = Some(id);
         Ok(id)
     }
 }
@@ -154,7 +164,41 @@ impl Store {
         })
     }
 
+    /// Issue #194: a splitscreen seat's pick (P2-P4). [`Store::select`]
+    /// without moving `last`, so the title picker still offers the host's
+    /// profile next launch, and without writing the catalog. The profile is
+    /// marked as a seat's ([`Profile::into_seat`]). Seat 0 (the host) never
+    /// comes through here: its re-pick on the Players screen goes through
+    /// [`Store::select`] / [`Store::create`], which move `last` and leave the
+    /// profile unmarked. `bind` does not refuse an id another seat already
+    /// holds (two holders would overwrite each other's saves); the pickers
+    /// grey those out by [`Profile::id`].
+    pub fn bind(&self, id: u64) -> Result<Profile> {
+        self.access(|c| {
+            let profile = c.profiles.get(&id).context("Profile was deleted")?.clone();
+            Ok((self.attach(id, profile).into_seat(), false))
+        })
+    }
+
     pub fn create(&self, name: &str, difficulty: core::skill::Difficulty) -> Result<Profile> {
+        self.create_in(name, difficulty, true)
+    }
+
+    /// Issue #194: a seat's new profile. [`Store::create`] without moving
+    /// `last`; `difficulty` is the host's (seat pickers have no Difficulty
+    /// page). The profile is marked as a seat's. Seats 1-3 only; seat 0 uses
+    /// [`Store::create`].
+    pub fn create_quiet(&self, name: &str, difficulty: core::skill::Difficulty) -> Result<Profile> {
+        self.create_in(name, difficulty, false)
+            .map(Profile::into_seat)
+    }
+
+    fn create_in(
+        &self,
+        name: &str,
+        difficulty: core::skill::Difficulty,
+        move_last: bool,
+    ) -> Result<Profile> {
         let name = name.trim();
         if name.is_empty() {
             bail!("Enter at least one character");
@@ -174,7 +218,11 @@ impl Store {
                 ..Profile::default()
             };
             profile.settings.difficulty = difficulty;
-            let id = c.insert(profile.clone())?;
+            let id = if move_last {
+                c.insert(profile.clone())?
+            } else {
+                c.insert_quiet(profile.clone())?
+            };
             Ok(self.attach(id, profile))
         })
     }
