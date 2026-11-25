@@ -80,6 +80,7 @@ not a complete alignment acceptance result.
 | `session_stats.py` | summarise a folder of dev-only session stats (one JSON per round) per map, era and tier: human and bot averages, win rates, ticket or point margins, hero and normal class kills and deaths, and a hero table |
 | `calibrate_match_length.py` | measure match length and regenerate the menu's model |
 | `perf_matrix.py` | the detailed bench over every map |
+| `one_player_gate.py` | pins the one-human path before the splitscreen refactor (#194): the sim hash every 30 ticks of a scripted human (`OPENBF_BENCH_PLAYER=script`) on `bf1_hot1`, `bf2_uta1` and `bf2_spa1`, plus the LAN lockstep soak's counts and static digest, in `engine/crates/game/tests/data/one_player_gate.json`. Needs the game binary and local bakes; `--update` rewrites the rows when a sim change is meant to move them |
 
 Session stats are a dev-only build: `python3 scripts/pack.py --session-stats`
 builds the game with the `session-stats` cargo feature (off by default; a
