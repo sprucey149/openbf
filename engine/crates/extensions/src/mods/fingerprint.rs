@@ -140,6 +140,8 @@ pub fn compute_mod_fingerprint_cached(
     cache: &FileHashCache,
 ) -> io::Result<FingerprintResult> {
     let root_canon = fs::canonicalize(mod_root)?;
+    let mut visited_dirs: std::collections::BTreeSet<PathBuf> =
+        std::collections::BTreeSet::from([root_canon.clone()]);
     let mut files: Vec<(String, PathBuf, fs::Metadata)> = Vec::new();
     let mut warnings = Vec::new();
     let mut stack = vec![(mod_root.to_path_buf(), 0usize)];
@@ -179,7 +181,18 @@ pub fn compute_mod_fingerprint_cached(
                 continue;
             };
             if meta.is_dir() {
-                stack.push((p, depth + 1));
+                match fs::canonicalize(&p) {
+                    Ok(canon) if canon.starts_with(&root_canon) => {
+                        if visited_dirs.insert(canon) {
+                            stack.push((p, depth + 1));
+                        } else {
+                            warnings.push(format!("Fingerprint skipped cyclic directory `{rel}`"));
+                        }
+                    }
+                    _ => {
+                        warnings.push(format!("Fingerprint skipped escaping directory `{rel}`"));
+                    }
+                }
             } else if meta.is_file() {
                 if files.len() >= MAX_FILES {
                     return Err(io::Error::new(
@@ -245,6 +258,34 @@ mod tests {
         let fp3 = compute_mod_fingerprint(&dir).unwrap();
         assert_ne!(fp1.digest, fp3.digest);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repeated_file_hash_cache_saves_leave_no_temp_files() {
+        let dir = tmp_dir("cache_save");
+        let sample = dir.join("sample.lvl");
+        fs::write(&sample, b"hello").unwrap();
+
+        let cache = FileHashCache::load(&dir);
+        let meta = fs::metadata(&sample).unwrap();
+        let h1 = cache.sha256_of(&sample, &meta).unwrap();
+        cache.save();
+
+        fs::write(&sample, b"hello-updated").unwrap();
+        let meta2 = fs::metadata(&sample).unwrap();
+        let h2 = cache.sha256_of(&sample, &meta2).unwrap();
+        assert_ne!(h1, h2);
+        cache.save();
+
+        let reloaded = FileHashCache::load(&dir);
+        assert_eq!(reloaded.sha256_of(&sample, &meta2).unwrap(), h2);
+
+        let cache_dir = dir.join("cache");
+        for entry in fs::read_dir(&cache_dir).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            assert!(!name.contains(".tmp"), "stale temp file left behind: {name}");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }

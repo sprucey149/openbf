@@ -1252,6 +1252,7 @@ pub fn class_patch_with_mode(
     ClassPatchFile {
         schema: CLASS_PATCH_SCHEMA,
         source: source.to_owned(),
+        full,
         classes,
     }
 }

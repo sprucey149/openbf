@@ -40,15 +40,26 @@ pub struct LauncherPaths {
 }
 
 impl LauncherPaths {
-    /// Discover paths from the current executable and working directory.
+    /// Discover paths from the current executable, working directory, and `OPENBF_DATA_DIR`.
     pub fn discover() -> Self {
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("openbf-launcher"));
         let cwd = std::env::current_dir().ok();
-        Self::from_exe(&exe, cwd.as_deref())
+        let env = std::env::var_os(extensions::profile::DATA_DIR_ENV);
+        Self::from_exe_with_env(&exe, cwd.as_deref(), env.as_deref())
     }
 
-    /// Pure constructor for deterministic testing.
+    /// Pure constructor for deterministic testing (without `OPENBF_DATA_DIR`).
     pub fn from_exe(exe_path: &Path, cwd: Option<&Path>) -> Self {
+        Self::from_exe_with_env(exe_path, cwd, None)
+    }
+
+    /// Pure constructor honoring an explicit `OPENBF_DATA_DIR` override while
+    /// keeping executable and packaged asset discovery tied to `exe_path`.
+    pub fn from_exe_with_env(
+        exe_path: &Path,
+        cwd: Option<&Path>,
+        data_dir_env: Option<&std::ffi::OsStr>,
+    ) -> Self {
         let exe_dir = exe_path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -65,11 +76,7 @@ impl LauncherPaths {
             _ => exe_dir.join(&openbf_name),
         };
 
-        let data_dir = game_out
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(&exe_dir)
-            .join("openbf_data");
+        let data_dir = extensions::profile::resolve_data_dir(exe_path, cwd, data_dir_env);
         Self {
             config_path: data_dir.join("launcher.ron"),
             logs_dir: data_dir.join("logs"),
@@ -335,6 +342,28 @@ mod tests {
         );
         let catalog = paths.probe_bundled_extensions();
         assert!(catalog.iter().any(|m| m.id == extensions::OPENBF_VR_ID));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn data_dir_env_override_keeps_exe_and_game_out_intact() {
+        let dir = scratch("env_override");
+        let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
+        let custom = dir.join("isolated_user_data");
+
+        let paths = LauncherPaths::from_exe_with_env(&exe, None, Some(custom.as_os_str()));
+        assert_eq!(paths.exe_dir, dir);
+        assert_eq!(paths.game_out, dir.join(format!("openbf{EXE_SUFFIX}")));
+        assert_eq!(paths.data_dir, custom);
+        assert_eq!(paths.config_path, custom.join("launcher.ron"));
+        assert_eq!(paths.mods_dir(), custom.join("mods"));
+        assert_eq!(paths.mod_cache_dir(), custom.join("mod_cache"));
+        assert_eq!(paths.extensions_profile_path(), custom.join("extensions.ron"));
+        assert_eq!(
+            paths.startup_error_path(),
+            custom.join("last_startup_error.ron")
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -596,8 +596,10 @@ fn overlays_isolate_namespaces_and_respect_priority_on_disk_and_archive() {
             id: "hi".into(),
             mount_name: "assets_baked".into(),
             rule: OverlayRule::Overrides {
-                allowed_paths: BTreeSet::from(["common_bf2/shared.ron".into()]),
-                disk_dir: mod_hi_ov.clone(),
+                entries: BTreeMap::from([(
+                    "common_bf2/shared.ron".into(),
+                    Some(mod_hi_ov.join("common_bf2/shared.ron")),
+                )]),
                 scope: None,
             },
         };
@@ -605,8 +607,10 @@ fn overlays_isolate_namespaces_and_respect_priority_on_disk_and_archive() {
             id: "lo".into(),
             mount_name: "assets_baked".into(),
             rule: OverlayRule::Overrides {
-                allowed_paths: BTreeSet::from(["common_bf2/shared.ron".into()]),
-                disk_dir: mod_lo_ov.clone(),
+                entries: BTreeMap::from([(
+                    "common_bf2/shared.ron".into(),
+                    Some(mod_lo_ov.join("common_bf2/shared.ron")),
+                )]),
                 scope: None,
             },
         };
@@ -703,4 +707,94 @@ fn overlays_isolate_namespaces_and_respect_priority_on_disk_and_archive() {
     unmount_for_test(&mount_disk);
     unmount_for_test(&mount_missions);
     let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn overlay_canonical_keys_handle_mixed_case_removals_and_patch_stack() {
+    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::temp_dir().join(format!("openbf_pak_ov_case_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    let stock_dir = d.join("stock");
+    let hi_dir = d.join("hi");
+    let lo_dir = d.join("lo");
+    std::fs::create_dir_all(stock_dir.join("side_bf2/textures")).unwrap();
+    std::fs::create_dir_all(hi_dir.join("side_bf2/textures")).unwrap();
+    std::fs::create_dir_all(hi_dir.join("classes")).unwrap();
+    std::fs::create_dir_all(lo_dir.join("classes")).unwrap();
+
+    std::fs::write(stock_dir.join("side_bf2/textures/trooper.ktx2"), b"stock-tex").unwrap();
+    std::fs::write(stock_dir.join("side_bf2/textures/cloth.ktx2"), b"stock-cloth").unwrap();
+    std::fs::write(stock_dir.join("side_bf2/textures/fallback.ktx2"), b"stock-fb").unwrap();
+    std::fs::write(hi_dir.join("side_bf2/textures/trooper.ktx2"), b"hi-tex").unwrap();
+    std::fs::write(hi_dir.join("classes/bf2_imp.patch.ron"), "hi-patch").unwrap();
+    std::fs::write(lo_dir.join("classes/bf2_imp.patch.ron"), "lo-patch").unwrap();
+
+    mount(&stock_dir, "assets_baked");
+    set_overlays(vec![
+        OverlayLayer {
+            id: "hi".into(),
+            mount_name: "assets_baked".into(),
+            rule: OverlayRule::Overrides {
+                entries: BTreeMap::from([
+                    (
+                        "side_bf2/textures/trooper.ktx2".into(),
+                        Some(hi_dir.join("side_bf2/textures/trooper.ktx2")),
+                    ),
+                    ("side_bf2/textures/cloth.ktx2".into(), None),
+                    (
+                        "classes/bf2_imp.patch.ron".into(),
+                        Some(hi_dir.join("classes/bf2_imp.patch.ron")),
+                    ),
+                ]),
+                scope: Some("bf2".into()),
+            },
+        },
+        OverlayLayer {
+            id: "lo".into(),
+            mount_name: "assets_baked".into(),
+            rule: OverlayRule::Overrides {
+                entries: BTreeMap::from([(
+                    "classes/bf2_imp.patch.ron".into(),
+                    Some(lo_dir.join("classes/bf2_imp.patch.ron")),
+                )]),
+                scope: Some("bf2".into()),
+            },
+        },
+    ]);
+
+    set_overlay_scope(Some("bf2"));
+    assert_eq!(
+        read(stock_dir.join("SIDE_BF2/Textures/Trooper.KTX2")).unwrap(),
+        b"hi-tex"
+    );
+    assert!(!is_file(stock_dir.join("side_bf2/textures/cloth.ktx2")));
+    assert_eq!(
+        read(stock_dir.join("side_bf2/textures/fallback.ktx2")).unwrap(),
+        b"stock-fb"
+    );
+    assert_eq!(
+        read_override_stack(stock_dir.join("CLASSES/BF2_IMP.PATCH.RON")).unwrap(),
+        vec!["hi-patch".to_owned(), "lo-patch".to_owned()]
+    );
+
+    set_overlay_scope(Some("bf1"));
+    assert_eq!(
+        read(stock_dir.join("side_bf2/textures/trooper.ktx2")).unwrap(),
+        b"stock-tex"
+    );
+    assert!(is_file(stock_dir.join("side_bf2/textures/cloth.ktx2")));
+    assert!(read_override_stack(stock_dir.join("classes/bf2_imp.patch.ron"))
+        .unwrap()
+        .is_empty());
+
+    set_overlay_scope(None);
+    assert_eq!(
+        read(stock_dir.join("side_bf2/textures/trooper.ktx2")).unwrap(),
+        b"hi-tex"
+    );
+
+    clear_overlays();
+    set_overlay_scope(None);
+    unmount_for_test(&stock_dir);
+    let _ = std::fs::remove_dir_all(&d);
 }

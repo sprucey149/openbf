@@ -81,15 +81,10 @@ impl FactsCache {
         if !std::mem::take(&mut *self.dirty.lock().unwrap()) {
             return;
         }
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         let entries = self.entries.lock().unwrap();
-        if let Ok(text) = ron::to_string(&*entries) {
-            let tmp = path.with_extension("ron.tmp");
-            if std::fs::write(&tmp, text).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
-            }
+        if let Err(err) = extensions::profile::write_ron_atomic(path, &*entries, "LVL facts cache")
+        {
+            eprintln!("modscan: failed to save {}: {err:#}", path.display());
         }
     }
 }

@@ -296,21 +296,20 @@ impl ModIndexCache {
             schema_version: MOD_INDEX_SCHEMA_VERSION,
             entries: self.entries.clone(),
         };
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(text) = ron::to_string(&file) {
-            let tmp = path.with_extension("ron.tmp");
-            if std::fs::write(&tmp, text).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
-            }
+        if let Err(err) = extensions::profile::write_ron_atomic(path, &file, "mod index cache") {
+            eprintln!("launcher: failed to save {}: {err:#}", path.display());
         }
     }
 }
 
 /// Fast metadata-only directory tree stamp (zero file content reads).
+/// Enforces root-boundary containment, skips escaping symlinks, prevents
+/// directory cycles, and bounds file count.
 /// Returns `(stamp_hex, total_file_bytes, max_mtime_ns)`.
 fn dir_tree_stamp(mod_root: &Path) -> std::io::Result<(String, u64, u128)> {
+    const MAX_STAMP_FILES: usize = 10_000;
+    let root_canon = std::fs::canonicalize(mod_root)?;
+    let mut visited_dirs: BTreeSet<PathBuf> = BTreeSet::from([root_canon.clone()]);
     let mut rows: Vec<(String, u64, u128)> = Vec::new();
     let mut stack = vec![(mod_root.to_path_buf(), 0usize)];
     let mut total_bytes = 0u64;
@@ -324,12 +323,28 @@ fn dir_tree_stamp(mod_root: &Path) -> std::io::Result<(String, u64, u128)> {
         };
         for entry in entries.flatten() {
             let p = entry.path();
+            let Ok(smeta) = std::fs::symlink_metadata(&p) else {
+                continue;
+            };
+            if smeta.file_type().is_symlink() {
+                match std::fs::canonicalize(&p) {
+                    Ok(target) if target.starts_with(&root_canon) => {}
+                    _ => continue,
+                }
+            }
             let Ok(meta) = std::fs::metadata(&p) else {
                 continue;
             };
             if meta.is_dir() {
-                stack.push((p, depth + 1));
+                if let Ok(canon) = std::fs::canonicalize(&p) {
+                    if canon.starts_with(&root_canon) && visited_dirs.insert(canon) {
+                        stack.push((p, depth + 1));
+                    }
+                }
             } else if meta.is_file() {
+                if rows.len() >= MAX_STAMP_FILES {
+                    break;
+                }
                 let rel = p
                     .strip_prefix(mod_root)
                     .unwrap_or(&p)

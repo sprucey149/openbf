@@ -435,6 +435,7 @@ impl App {
         self.hud_view = None;
         self.gpu = None;
         self.walk = None;
+        pak::set_overlay_scope(None);
         self.overlay = None;
         self.renderer = None;
 

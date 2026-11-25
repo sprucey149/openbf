@@ -1,59 +1,47 @@
-# Advanced legacy maps
+# Advanced Legacy Addon Maps
 
-Copy the original `KTH` folder into `openbf_data/mods/KTH` and enable **Kothlis: Sea Haven** on the launcher’s Mods tab. The launcher prepares the cache automatically. Instant Action lists **Kothlis: Sea Haven** once and selects Cloudy, Dawn, Dusk, Night, or Rain for each standalone round. The LAN host uses the fixed weather scripted for the chosen mode and era. [FelipeGabe’s release and original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20)
+OpenBF supports multi-variant legacy Battlefront II (2005) addon maps that select among multiple weather or time-of-day world archives, author custom sound banks and lighting, or wire simple environmental world events in compiled Lua.
 
-Conquest, two-flag Capture the Flag, and sniper Hunt are available in both eras. Choose Clone Wars Hunt to play the Republic’s Clone Sharpshooter. Galactic Civil War Hunt fields the Empire’s Scout Trooper. Registrations guarded by checks for Dark Times, Battlefront Extreme, Beach Troopers, or Republic Commando stay out of the standalone menu. ABR can be enabled at the same time. The bundled VR extension keeps its own enabled state.
+Copy an addon folder into `openbf_data/mods/` and enable it in the launcher's **Mods** tab. When a map defines multiple weather or time-of-day variants, Instant Action lists the map once and selects a variant according to the mission's single-player weights; LAN hosts use the fixed multiplayer variant scripted for the chosen mode and era.
 
-## How the addon is handled
+---
 
-- `mungefs::addon::parse_addme_script` follows Lua 5.0 conditional branches in the standalone environment. Every file check is evaluated inside the standalone model without querying other installed addons. `analyze_standalone_variants` enumerates a bounded integer choice during setup, reads embedded addon helper definitions, and records the ordered `ReadDataFile` selections. The cache retains the selection weight per single-player world and the multiplayer branch per mission. [Lua 5.0 instruction semantics](https://www.lua.org/source/5.0/lopcodes.h.html)
-- The installed addon has one primary world archive and a companion archive with five named selectors. Each companion sublevel carries its own terrain, sky, and lighting. The primary archive contributes the selected mode, weather, and shared day/evening layers. The selected world uses the existing PC model, material, collision, terrain, navigation, and effect readers. The minimap sheet and five variant load screens come from the addon. Variant-exclusive assets keep their own manifests. Byte-identical files share storage where the cache filesystem supports hard links.
-- The PC texture decoder accepts signed D3D9 `V8U8` bump data. The converter keeps signed U and V in the linear RG channels and computes a positive up component for the existing normal-water shader. [Microsoft’s D3D9 bump-map format reference](https://learn.microsoft.com/en-us/windows/win32/direct3d9/bump-map-pixel-formats)
-- `mungefs::addon::world_events::compile` extracts fixed actions from reachable environment callbacks. Instant Action uses the existing world-animation player, which moves collision bodies and rendered instances together. The environment action list supports named station destruction, one-shot delays, route and barrier changes, object kills, and named effects at world objects or path points. No legacy script executes during play.
-- The converter can bake one addon-owned sound archive per map group, including PC IMA stereo streams. Variants share that audio bake. The runtime resolves local properties first and supplements them with the mission’s stock planet bank. PC regional streams loop during the battle. Authored flat stereo beds keep their stereo mix and fade between the inner and outer region distances. Unnamed region buses use OpenBF’s ambience mix. Addon sound inheritance is resolved against the packaged CORE sound bank where the addon references a stock template. This restores the authored spatial mode, ranges, looping, and bus while keeping overrides in the addon. The venue track starts on entering its region. Original PC output gain still needs a matching recording.
+## How Multi-Variant Addons Are Handled
 
-## Compatibility evidence
+- **Static Lua 5.0 branch analysis (`mungefs::lua50`, `mungefs::addon`):** `mungefs::addon::parse_addme_script` evaluates Lua 5.0 conditional branches in a standalone environment (without querying other installed addons, so registrations guarded by third-party mod checks stay out of standalone Instant Action). `analyze_standalone_variants` enumerates bounded integer choices during setup, reads embedded helper definitions, and records ordered `ReadDataFile` selections along with single-player weights and the multiplayer branch.
+- **Primary + companion world assembly (`bake::mods::world`):** Addons that split per-variant terrain, sky, and lighting into a companion archive alongside a shared primary world archive are assembled per variant into isolated map directories (`assets_baked/mod_<slug>__<variant>/`). Each variant keeps its own manifest, minimap, and load screen, while byte-identical files across variants share storage via hard links where supported by the cache filesystem.
+- **PC normal-mapped water (`mungefs::texture_pc`):** The PC texture decoder accepts signed D3D9 `V8U8` bump data, storing signed U/V in linear RG channels and reconstructing a positive up component for the normal-water shader.
+- **Static world events (`mungefs::addon::world_events::compile`):** Extracts a closed set of deterministic environment actions from reachable mission callbacks (named station destruction, one-shot delays, world animations moving collision and rendered instances together, route/barrier toggles, object kills, and named effects at world objects or path points). No legacy Lua executes at runtime.
+- **Addon sound banks & CORE template inheritance (`bake::sounds::bake_addon_sounds`):** Bakes one addon-owned sound archive per map group (including PC IMA stereo streams), shared across variants. Runtime audio resolves local sound properties first, inherits missing spatial/bus/rolloff defaults from the packaged stock CORE sound bank when an addon references a stock template, and supplements with the mission's stock planet bank. Regional stereo ambience fades between authored inner and outer radii.
+- **PC first-person weapon presentation:** When built with a local PC Battlefront II source, PC first-person weapon meshes and textures are packaged under `side_bf2/pc_first_person` and used in PC addon rounds under Classic Plus, while stock maps and strict tier keep their regular side assets.
 
-The original Battlefront II installation was verified by the user on November 24, 2026. OpenBF work and comparisons started from `915df64e9f93c171c1827e40f95dca6e3c045011`. The installed KTH folder stayed read-only. Its 22-file SHA-256 inventory matched after inspection and testing. All generated assets and captures stayed outside Git.
+---
 
-| Check | Result |
-| --- | --- |
-| Launcher discovery | The launcher’s scanner found KTH and ABR from one isolated `OPENBF_DATA_DIR`. KTH’s cache contains five worlds and six missions per world. Instant Action exposes one KTH row with those six era and mode combinations. ABR retained its four missions. |
-| Packaged launch | The game and converter were run from an isolated installation using an existing stock `openbf.pak`. All 30 KTH variant, era, and mode combinations built a battle with their stock classes. The headless sweep found six Conquest posts, four CTF posts, and two Hunt posts per world, plus two authored death regions. Separate launches with one mod disabled mounted and played the other. |
-| Outcomes and navigation | A seeded Rain Conquest round ended on tickets at 98 s with a 20-ticket override. A seeded Dawn Hunt reached its 50-point target at 148 s. The Night CTF bot run stayed active through 180 s. The Dawn CTF referee carried the enemy flag into the authored capture volume five times and reached victory. |
-| Environmental event | The Dawn Conquest referee destroys the installed map's named trigger. The command post is disabled and the delayed world pose changes. The normal battle loader supplies the map, station, post, and animation data. |
-| Cache | The packaged launch prepared both mods. A warm launch reused both metadata files. Changing an isolated KTH source file rebuilt KTH and reused ABR. After restoring KTH, the packaged game rebuilt its cache and launched ABR. `fsutil hardlink list` confirmed one shared collision mesh across all five KTH variant directories. |
-| Audio conversion | The cache contains two KTH sample banks, four WAV files, and eleven indexed stereo segments. The installed Dawn streams decoded as stereo IMA and measured silent outside their authored radii. Relative loudness still needs an interactive comparison. |
-| Stock determinism | Baseline and candidate packaged binaries both returned `71dabcfadf689bff` for `--no-mods --desktop --sim-hash 100`. Their 15-second stock Geonosis Conquest traces also matched with four AI per team. |
-| VR | The game built with the bundled OpenXR extension. The saved-VR-profile test confirmed that headless and explicit desktop launches still work. Hardware play and stereo captures are pending. |
-| PC water | The serial GPU referee verified normal-mapped refraction, reflection, and responsiveness to changing normal samples. |
-| Visual comparison | Five headless captures show the separate sky, geometry, terrain, foliage, and weather choices. The daytime boardwalk, roofs, and palms correspond to the author's screenshots. The map’s authored `EntityLight` effects supply static Dusk beams and pulsing Night beams. A headless Dusk Hunt capture shows the colored lights and the timer on one line below the minimap. PC zero-length beams with flare intensity also draw the starbursts around the white sources. Matched original-game outdoor and water views remain pending. [Battlefront II Mod Tools lighting documentation](https://sites.google.com/site/swbf2modtoolsdocumentation/bf2_lighting) [Original-game screenshots](https://www.moddb.com/games/star-wars-battlefront-ii/addons/kothlis-sea-haven-20) |
+## Verification Summary
 
-### Reproduce the checks
+Verified against a multi-variant PC BF2 addon map (5 weather/time-of-day variants, 6 era/mode combinations per variant, custom sound archive, authored `EntityLight` beams/flares, normal-mapped water, and a destructible-station world event) in an isolated `OPENBF_DATA_DIR`, keeping the original addon folder read-only (SHA-256 inventory verified unchanged before and after):
 
-Place the player's KTH and ABR copies in the isolated `OPENBF_DATA_DIR/mods` and prepare them through the launcher or a packaged launch. The two data-dependent test variables point to that data directory and a directory of baked stock class RONs.
+| Area | Verification Status |
+|---|---|
+| Launcher discovery & coexistence | **Verified (automated + headless):** Discovered simultaneously alongside a single-world addon map in one `OPENBF_DATA_DIR`; exposed as a single Instant Action row covering all 6 era/mode combinations while filtering out cross-mod-guarded registrations. |
+| Packaged launch & all variants | **Verified (headless against `openbf.pak`):** All 30 variant/era/mode combinations built and loaded with stock classes, expected command posts, and authored death regions; enabling/disabling individual mods works cleanly. |
+| Outcomes & two-flag CTF | **Verified (headless):** Seeded Conquest, Hunt, and two-flag CTF runs completed to victory or stayed active through full runs with authored pickup/capture volumes. |
+| World events | **Verified (automated):** Destroying the authored trigger object disabled its command post and ran the delayed world animation. |
+| Cache reuse & hardlinks | **Verified (packaged):** Warm launches reused cache metadata; editing one source file rebuilt only that mod's cache; hardlinks confirmed shared identical collision meshes across variants. |
+| Audio conversion & template inheritance | **Verified (automated + muted Windows device test):** Decoded stereo IMA streams and sample banks; inherited stock CORE spatial/rolloff/bus templates so distant loops attenuate to silence beyond their cutoff radius. Relative PC loudness against a retail recording remains pending. |
+| PC water shader | **Verified (serial GPU test):** `scripts/gpu_tests.sh --render --test suite water_normal_refracts_floor_and_reflects_above_plane` passed. |
+| Stock determinism | **Verified:** Baseline and candidate packaged binaries matched `--no-mods --desktop --sim-hash 100` (`71dabcfadf689bff`) and 15-second stock Geonosis Conquest traces. |
+| Interactive play, live LAN, and VR hardware | **Pending manual verification:** Interactive keyboard/mouse, controller, live LAN audio/weather sync, and headset play remain pending human playtests. |
 
-The Republic and Empire PC first-person sniper models carry different meshes and 512×256 sheets. The stock PS2 versions use 128×64 sheets. A build with a local PC Battlefront II source packages the PC first-person meshes and their sheets together. PC addon rounds use that presentation in Classic Plus when available. The stock map render path and strict tier use their regular side assets.
+### Known Limitations
 
-```text
-cargo test --manifest-path engine/Cargo.toml -p game --lib kothlis -- --ignored
-cargo test --manifest-path engine/Cargo.toml -p ui --lib match_timer_keeps_all_digits_on_one_line
-cargo test --manifest-path engine/Cargo.toml -p launcher --lib discovers_kothlis_and_abr_with_only_standalone_missions -- --ignored
-cargo test --manifest-path engine/Cargo.toml -p game --bin game --features vr addon_destroyed_station_runs_authored_animation_and_timer_actions -- --ignored
-cargo test --manifest-path engine/Cargo.toml -p game --bin game --features vr addon_two_flag_uses_authored_pickup_and_capture_volumes -- --ignored
-openbf --desktop --map assets_baked/mod_kth__kth_rain --mission missions/mod_kth__kth_rain_con.ron --mode con --headless --seconds 180 --walk --ai 12 --tickets 20
-openbf --no-mods --desktop --sim-hash 100
-openbf --desktop --no-mods --map assets_baked/bf2_geo1 --mission missions/bf2_geo1_con.ron --mode con --headless --seconds 15 --walk --ai 4
-```
+- Ambient fish/bird flocks, movie previews, and general-purpose Lua timer or trigger APIs outside the closed world-event action set are not translated.
+- Only one custom sound archive per map group is converted; additional custom sound archives emit a warning.
+- Original PC audio output gain still needs a matched retail recording for final relative loudness calibration.
 
-Set `OPENBF_KTH_TEST_DATA` to the isolated data directory, `OPENBF_KTH_TEST_CLASSES` to the stock class directory, and `OPENBF_KTH_TEST_CORE_SOUNDS` to the stock BF2 CORE `sounds` directory containing `sounds.ron`. The tests use locally sourced assets. Interactive mouse/keyboard, controller, and headset play still need a human check. Fish and bird flocks, movie previews, and general-purpose Lua timer or trigger APIs remain outside the translated environment action set.
+---
 
-The playtest follow-up at `847a12c3` passed 206 `mungefs` library tests with three ignored, 12 HUD tests, two installed-KTH tests, and the installed KTH/ABR launcher discovery test. The next packaged follow-up baked 23 first-person weapon models from the local PC sources and checked the two 512×256 sniper sheets inside the pack. The Dusk replay loaded the PC Republic sniper and reported the venue stream at 0.257–0.263 linear gain near the photographed entrance. The installed KTH tests checked the Dawn stream at the reported playtest camera, the Dusk corona effect, and the six era and mode selections. Windows listening level and live LAN still need checks. The release package rebuilt both addon caches. It captured Dusk Hunt with the Republic sniper, reused the cache for ABR Conquest, and reproduced the stock desktop hash and the Geonosis trace. The serial GPU check was `scripts/gpu_tests.sh --render --test suite water_normal_refracts_floor_and_reflects_above_plane`. The bake version lock check passed. The full cross-source bake and alignment gates still need their independent stock reference bakes.
+## Integration Notes
 
-## Integration with side conversion
-
-The addon converter continues to use `classes.ron` and the shared `ModCacheMeta` schema. Converter version seven rebuilds addon caches to preserve sound references to stock templates. Side conversion can use the same classes writer and cache schema. A combined branch should coordinate the converter version if it changes emitted side assets as well.
-
-The PC first-person mesh, nodes, and texture paths live under `side_bf2/pc_first_person`. The battle loader uses these together for stock BF2 weapons in PC addon rounds. Private side namespaces continue to resolve their own assets. A global side replacement that supplies alternate PC first-person artwork should package its matching models and sheets together under this path.
-
-The follow-up on the Night Hunt report reproduced the Instant Action bug with the installed cache and the menu’s own input path. Hunt now prefers the authored army pair for the chosen era. A Windows audio-device test at muted diagnostic volume held one stream at the reported team-selection camera, two inside the venue, and one again on leaving. The later fountain report exposed the missing template inheritance. The prior Dusk replay logged six full-gain fountain loops even at distances of 29–97 m. The KTH archive overrides the fountain gain to 0.7 and sets rolloff 2. The stock CORE template supplies 3D mode, 2 m minimum, 50 m cutoff, and the ambience bus. The inherited fields are applied through the same bank loader for all addon sounds. The packaged Dusk replay now reports two fountain loops at the same listener position, at 0.0095 and 0.0074 linear gain. Four fountains beyond 50 m are silent. The four installed-KTH tests passed, including the fountain template regression and live Windows stream test.
+- Addon conversion shares `classes.ron` and `ModCacheMeta` (`MOD_CONVERTER_VERSION`) with generic stock resource replacement conversion.
+- Global side replacements that supply alternate PC first-person weapon artwork override `side_bf2/pc_first_person` paths cleanly; private addon side namespaces remain isolated.

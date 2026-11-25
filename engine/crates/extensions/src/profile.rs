@@ -305,7 +305,7 @@ fn find_checkout_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-pub(crate) fn write_ron_atomic<T: Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
+pub fn write_ron_atomic<T: Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
@@ -317,7 +317,10 @@ pub(crate) fn write_ron_atomic<T: Serialize>(path: &Path, value: &T, label: &str
         .with_context(|| format!("serializing {label}"))?;
     let tmp = path.with_extension(format!("ron.tmp.{}", std::process::id()));
     std::fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
-    replace_file(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
+    if let Err(err) = replace_file(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err).with_context(|| format!("replacing {}", path.display()));
+    }
     Ok(())
 }
 

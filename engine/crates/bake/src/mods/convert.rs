@@ -280,6 +280,12 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     };
     let _ = std::fs::remove_dir_all(staging.join("scratch"));
     warnings.extend(replaced.warnings.iter().cloned());
+    if !discovered.declared_overrides.is_empty() {
+        warnings.push(
+            "Manifest `overrides` entries are not supported by automatic conversion; use legacy LVL replacement files instead."
+                .into(),
+        );
+    }
     let declared_overrides = Vec::new();
 
     progress(opts.emit_progress, 95, "Finalizing versioned cache...");

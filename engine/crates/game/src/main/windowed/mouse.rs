@@ -236,6 +236,7 @@ fn cursor_shown(active_gameplay: bool, grabbed: bool, pad_last: bool) -> bool {
 impl Drop for App {
     fn drop(&mut self) {
         self.finish_loading();
+        pak::set_overlay_scope(None);
         self.release_mouse();
     }
 }

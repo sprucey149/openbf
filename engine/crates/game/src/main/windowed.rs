@@ -1749,6 +1749,7 @@ impl App {
     }
 
     fn loading_failed(&mut self) {
+        pak::set_overlay_scope(None);
         if let Some(r) = self.renderer.as_mut() {
             r.clear_scene();
         }
@@ -2333,6 +2334,7 @@ impl App {
             }
         }
         self.walk = None;
+        pak::set_overlay_scope(None);
         self.music_voice = None;
         self.gpu = None;
         // The map's sky and look stay in the renderer otherwise, and the

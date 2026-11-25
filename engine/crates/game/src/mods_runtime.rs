@@ -5,7 +5,7 @@
 //! mods are loaded directly from `openbf_data/mod_cache/`, and missing/stale
 //! enabled mods are prepared via the external `bake mod-convert` tool.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, RwLock};
@@ -14,7 +14,7 @@ use anyhow::{bail, Context, Result};
 use extensions::mods::catalog::StockCatalogs;
 use extensions::mods::{
     compute_mod_fingerprint_cached, content_mod_multiplayer_digest, list_mod_folders,
-    mod_cache_path, resolve_content_mods, DiscoveredMod, FileHashCache, ModCacheMeta,
+    mod_cache_path, resolve_content_mods_isolated, DiscoveredMod, FileHashCache, ModCacheMeta,
     ModCacheStatus, ModCompatibility, ModFolderEntry, ModMapSummary, ResourceOverrideConflict,
     TargetSelections,
 };
@@ -544,18 +544,18 @@ pub fn mount_enabled_mods(
         }
     }
 
-    let plan = match resolve_content_mods(&discovered_list, &profile) {
-        Ok(p) => p,
-        Err(errs) => {
-            for err in errs {
-                let msg = err.to_string();
-                eprintln!("mods: {msg}");
-                report.errors.push(msg);
-            }
-            *RUNTIME_STATE.write().unwrap_or_else(|e| e.into_inner()) = report.clone();
-            return report;
+    let (plan, resolution_errors) = resolve_content_mods_isolated(&discovered_list, &profile);
+    if !resolution_errors.is_empty() {
+        for err in &resolution_errors {
+            let msg = err.to_string();
+            eprintln!("mods: {msg}");
+            report.errors.push(msg);
         }
-    };
+        eprintln!(
+            "mods: isolated {} incompatible/conflicting mod error(s); unrelated valid mods remain active. Fix or disable conflicting mods in openbf-launcher -> Mods tab, or launch with `--no-mods`.",
+            resolution_errors.len()
+        );
+    }
 
     report.conflicts = plan.conflicts.clone();
     report.warnings = plan.warnings.clone();
@@ -596,30 +596,6 @@ pub fn mount_enabled_mods(
             .mod_maps
             .extend(catalog_entries(&meta.maps, &entry.folder_name));
 
-        // Custom side packages (<namespace>_side_<side>).
-        if let Ok(rd) = std::fs::read_dir(&assets_cache) {
-            let mut side_dirs: Vec<(String, PathBuf)> = rd
-                .flatten()
-                .filter_map(|e| {
-                    let p = e.path();
-                    if !p.is_dir() {
-                        return None;
-                    }
-                    let name = p.file_name()?.to_str()?.to_owned();
-                    let side_prefix = format!("{}_side_", meta.namespace);
-                    name.starts_with(&side_prefix).then_some((name, p))
-                })
-                .collect();
-            side_dirs.sort_by(|a, b| a.0.cmp(&b.0));
-            for (prefix, disk_dir) in side_dirs {
-                overlays.push(OverlayLayer {
-                    id: mod_id.clone(),
-                    mount_name: "assets_baked".into(),
-                    rule: OverlayRule::NamespaceDir { prefix, disk_dir },
-                });
-            }
-        }
-
         let missions_cache = cache_dir.join("missions");
         if missions_cache.is_dir() {
             overlays.push(OverlayLayer {
@@ -635,44 +611,53 @@ pub fn mount_enabled_mods(
         if !meta.declared_overrides.is_empty() {
             let override_assets = cache_dir.join("overrides").join("assets");
             if override_assets.is_dir() {
-                let allowed_paths: BTreeSet<String> = meta
-                    .declared_overrides
-                    .iter()
-                    .map(|p| {
-                        p.replace('\\', "/")
-                            .trim_start_matches('/')
-                            .to_ascii_lowercase()
-                    })
-                    .collect();
-                overlays.push(OverlayLayer {
-                    id: mod_id.clone(),
-                    mount_name: "assets_baked".into(),
-                    rule: OverlayRule::Overrides {
-                        allowed_paths,
-                        disk_dir: override_assets,
-                        scope: None,
-                    },
-                });
+                let mut entries: BTreeMap<String, Option<PathBuf>> = BTreeMap::new();
+                for p in &meta.declared_overrides {
+                    let norm = p.replace('\\', "/").trim_start_matches('/').to_owned();
+                    let lower = norm.to_ascii_lowercase();
+                    let disk_path = override_assets.join(&norm);
+                    if disk_path.is_file() {
+                        entries.insert(lower, Some(disk_path));
+                    }
+                }
+                if !entries.is_empty() {
+                    overlays.push(OverlayLayer {
+                        id: mod_id.clone(),
+                        mount_name: "assets_baked".into(),
+                        rule: OverlayRule::Overrides {
+                            entries,
+                            scope: None,
+                        },
+                    });
+                }
             }
         }
 
         // Stock replacements: one layer per game, so a BF2 side replacement
-        // never reaches a BF1 battle (`pak::set_overlay_scope`).
+        // never reaches a BF1 battle (`pak::set_overlay_scope`). Each entry
+        // maps its canonical lowercase key to its exact on-disk path (or
+        // `None` when explicitly removed), avoiding case-sensitivity bugs.
         let override_assets = cache_dir.join("overrides").join("assets");
-        let mut by_game: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+        let mut by_game: BTreeMap<&str, BTreeMap<String, Option<PathBuf>>> = BTreeMap::new();
         for out in &meta.replacement_outputs {
+            let norm = out.path.replace('\\', "/").trim_start_matches('/').to_owned();
+            let lower = norm.to_ascii_lowercase();
+            let target = if out.removed {
+                None
+            } else {
+                Some(override_assets.join(&norm))
+            };
             by_game
                 .entry(out.game.key())
                 .or_default()
-                .insert(out.path.replace('\\', "/").to_ascii_lowercase());
+                .insert(lower, target);
         }
-        for (game, allowed_paths) in by_game {
+        for (game, entries) in by_game {
             overlays.push(OverlayLayer {
                 id: mod_id.clone(),
                 mount_name: "assets_baked".into(),
                 rule: OverlayRule::Overrides {
-                    allowed_paths,
-                    disk_dir: override_assets.clone(),
+                    entries,
                     scope: Some(game.to_owned()),
                 },
             });
@@ -710,10 +695,13 @@ pub fn mount_enabled_mods(
     }
     inputs.hashes.save();
 
-    // Online play compares these: a mod that adds maps, overrides stock
-    // files or changes gameplay through a replacement must match on every
-    // machine. A purely cosmetic replacement (textures, models, class
-    // presentation) does not take part, so players may differ in it.
+    // Online play compares global gameplay-affecting overrides: a mod that
+    // overrides stock files or changes gameplay through a replacement must
+    // match on every machine. Additional unused addon maps are intersected
+    // per-map via `ContentManifest::maps` so having an extra map installed
+    // does not block stock play; purely cosmetic replacements stay out of
+    // this digest (and `Sim::static_digest` remains the final authority at
+    // round load).
     let digest_fps: Vec<String> = report
         .active
         .iter()
@@ -731,9 +719,7 @@ pub fn mount_enabled_mods(
         .iter()
         .zip(report.active_fingerprints.iter())
         .zip(digest_fps.iter())
-        .filter(|((m, _), _)| {
-            !m.declared_overrides.is_empty() || !m.maps.is_empty() || m.replaces_gameplay
-        })
+        .filter(|((m, _), _)| !m.declared_overrides.is_empty() || m.replaces_gameplay)
         .map(|((_, (id, _)), fp)| (id.as_str(), fp.as_str()))
         .collect();
     let digest = content_mod_multiplayer_digest(&override_pairs, !report.active.is_empty());
@@ -767,6 +753,7 @@ pub fn mount_enabled_mods(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use extensions::mods::{
         compute_mod_fingerprint, ModContentType, ModMissionSummary, ReplacementOutput,
         MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
@@ -865,7 +852,7 @@ mod tests {
             replacement_key: String::new(),
             replacement_outputs: Vec::new(),
             unsupported: Vec::new(),
-            catalog_digest: String::new(),
+            catalog_digest: StockCatalogs::digest_with(&|_| None),
             target_choices: BTreeMap::new(),
         };
         meta.save_atomic(&cache).unwrap();
@@ -1133,7 +1120,7 @@ mod tests {
                 },
             ],
             unsupported: Vec::new(),
-            catalog_digest: String::new(),
+            catalog_digest: stock_catalog_digest(&assets),
             target_choices: BTreeMap::new(),
         };
         meta.save_atomic(&cache).unwrap();

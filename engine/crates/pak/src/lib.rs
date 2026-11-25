@@ -739,6 +739,30 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     })
 }
 
+/// Read every in-scope override layer's copy of `path` as UTF-8, ordered from
+/// highest priority (`#1`) to lowest. Stops at any layer that explicitly hides
+/// `path`. Returns an empty `Vec` when no overlay layer provides `path`.
+pub fn read_override_stack(path: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let path = path.as_ref();
+    let Some(m) = match_mount(path) else {
+        return Ok(Vec::new());
+    };
+    let files = overlay::resolve_override_stack(&m.mount_name, &m.rel_key);
+    let mut out = Vec::with_capacity(files.len());
+    for file in files {
+        let bytes = std::fs::read(&file)?;
+        count(bytes.len());
+        let text = String::from_utf8(bytes).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: not UTF-8", file.display()),
+            )
+        })?;
+        out.push(text);
+    }
+    Ok(out)
+}
+
 pub fn is_file(path: impl AsRef<Path>) -> bool {
     match place_for_file(path.as_ref()) {
         Place::Disk(p) => p.is_file(),

@@ -100,9 +100,20 @@ impl ClassDb {
                 .context("parse classes.ron")?;
         // A replacement mod's class changes ride beside the stock file
         // (`manifest::class_patch`), served only for the mod's own game
-        // (`pak::set_overlay_scope`).
+        // (`pak::set_overlay_scope`). Full replacements shadow lower-priority
+        // patches to the same side; partial patches compose with #1 winning.
         let patch_path = manifest::class_patch::patch_path(path);
-        if pak::is_file(&patch_path) {
+        let overlay_patches = pak::read_override_stack(&patch_path)
+            .with_context(|| patch_path.display().to_string())?;
+        if !overlay_patches.is_empty() {
+            let mut patches = Vec::with_capacity(overlay_patches.len());
+            for text in overlay_patches {
+                let patch: manifest::class_patch::ClassPatchFile = ron::from_str(&text)
+                    .with_context(|| format!("parse {}", patch_path.display()))?;
+                patches.push(patch);
+            }
+            manifest::class_patch::apply_stack(&mut defs, &patches);
+        } else if pak::is_file(&patch_path) {
             let patch: manifest::class_patch::ClassPatchFile = ron::from_str(
                 &pak::read_to_string(&patch_path)
                     .with_context(|| patch_path.display().to_string())?,

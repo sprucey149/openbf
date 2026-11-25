@@ -827,6 +827,7 @@ impl App {
         if self.loading.is_some() {
             self.finish_loading();
         }
+        pak::set_overlay_scope(None);
         if self.walk.is_some() {
             let n = self.netplay.take();
             self.leave_battle();

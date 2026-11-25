@@ -1,7 +1,7 @@
 //! Virtual overlay stack for namespaced content mods and priority-ordered
 //! explicit resource overrides over immutable stock mounts.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
 
@@ -11,14 +11,15 @@ pub enum OverlayRule {
     NamespaceDir { prefix: String, disk_dir: PathBuf },
     /// Dedicated filename prefix directly inside a mount (e.g. `missions/mod_abr__*.ron`).
     NamespacePrefix { prefix: String, disk_dir: PathBuf },
-    /// Explicit stock/shared resource override: only relative paths in
-    /// `allowed_paths` participate in load-order precedence. A layer with a
-    /// `scope` (`"bf1"` / `"bf2"`) serves only while [`set_overlay_scope`]
-    /// names that game: a BF2 side replacement must not reach a BF1 battle
-    /// that borrows BF2's weapon kit.
+    /// Explicit stock/shared resource override: maps canonical lowercase
+    /// relative paths to `Some(actual_disk_path)` (preserving the real
+    /// filesystem casing on case-sensitive OSes) or `None` when the override
+    /// explicitly removes/hides the stock file. A layer with a `scope`
+    /// (`"bf1"` / `"bf2"`) serves only while [`set_overlay_scope`] names that
+    /// game: a BF2 side replacement must not reach a BF1 battle that borrows
+    /// BF2's weapon kit.
     Overrides {
-        allowed_paths: BTreeSet<String>,
-        disk_dir: PathBuf,
+        entries: BTreeMap<String, Option<PathBuf>>,
         scope: Option<String>,
     },
 }
@@ -150,22 +151,49 @@ pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<Resolved> 
         if layer.mount_name != mount_name {
             continue;
         }
-        if let OverlayRule::Overrides {
-            allowed_paths,
-            disk_dir,
-            scope,
-        } = &layer.rule
-        {
-            if in_scope(scope) && allowed_paths.contains(&lower_key) {
-                return Some(match join_rel(disk_dir, rel_key) {
-                    Some(cand) if cand.is_file() => Resolved::File(cand),
-                    _ => Resolved::Removed,
-                });
+        if let OverlayRule::Overrides { entries, scope } = &layer.rule {
+            if in_scope(scope) {
+                if let Some(entry) = entries.get(&lower_key) {
+                    return match entry {
+                        Some(path) if path.is_file() => Some(Resolved::File(path.clone())),
+                        Some(_) => None,
+                        None => Some(Resolved::Removed),
+                    };
+                }
             }
         }
     }
 
     None
+}
+
+/// All in-scope override files for `(mount_name, rel_key)` in priority order
+/// (index 0 = highest priority). Stops at any layer that explicitly removes
+/// the path (`None`), so lower-priority layers cannot resurface removed files.
+pub(crate) fn resolve_override_stack(mount_name: &str, rel_key: &str) -> Vec<PathBuf> {
+    if rel_key.is_empty() || !is_safe_rel(rel_key) {
+        return Vec::new();
+    }
+    let layers = OVERLAYS.read().unwrap_or_else(|e| e.into_inner());
+    let lower_key = rel_key.to_ascii_lowercase();
+    let mut out = Vec::new();
+    for layer in layers.iter() {
+        if layer.mount_name != mount_name {
+            continue;
+        }
+        if let OverlayRule::Overrides { entries, scope } = &layer.rule {
+            if in_scope(scope) {
+                if let Some(entry) = entries.get(&lower_key) {
+                    match entry {
+                        Some(path) if path.is_file() => out.push(path.clone()),
+                        Some(_) => {}
+                        None => break,
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// True if an active overlay layer provides directory `(mount_name, rel_key)`.
@@ -207,14 +235,12 @@ pub(crate) fn has_dir(mount_name: &str, rel_key: &str) -> bool {
                     return true;
                 }
             }
-            OverlayRule::Overrides {
-                allowed_paths,
-                scope,
-                ..
-            } => {
+            OverlayRule::Overrides { entries, scope } => {
                 if in_scope(scope)
                     && !lower_key.is_empty()
-                    && allowed_paths.iter().any(|ap| ap.starts_with(&lower_prefix))
+                    && entries
+                        .iter()
+                        .any(|(ap, p)| p.is_some() && ap.starts_with(&lower_prefix))
                 {
                     return true;
                 }
@@ -282,15 +308,14 @@ pub(crate) fn children_for(mount_name: &str, rel_key: &str) -> Vec<String> {
                     }
                 }
             }
-            OverlayRule::Overrides {
-                allowed_paths,
-                scope,
-                ..
-            } => {
+            OverlayRule::Overrides { entries, scope } => {
                 if !in_scope(scope) {
                     continue;
                 }
-                for ap in allowed_paths {
+                for (ap, path) in entries {
+                    if path.is_none() {
+                        continue;
+                    }
                     let tail = if lower_prefix.is_empty() {
                         ap.as_str()
                     } else if let Some(rest) = ap.strip_prefix(&lower_prefix) {

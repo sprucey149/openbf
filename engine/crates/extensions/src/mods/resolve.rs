@@ -244,6 +244,52 @@ pub fn resolve_content_mods(
     })
 }
 
+/// Resolve enabled content mods while isolating invalid, cyclic, conflicting,
+/// or missing-dependency mods (and any mods that depend on them) so unrelated
+/// valid content mods can still mount safely.
+///
+/// Every isolated failure is returned alongside the surviving plan; explicit
+/// conflicts isolate both sides rather than guessing a winner.
+pub fn resolve_content_mods_isolated(
+    mods: &[DiscoveredMod],
+    profile: &ExtensionProfile,
+) -> (ContentResolutionPlan, Vec<ContentResolutionError>) {
+    let mut active_mods: Vec<DiscoveredMod> = mods.to_vec();
+    let mut collected_errors: Vec<ContentResolutionError> = Vec::new();
+    let mut removed: BTreeSet<String> = BTreeSet::new();
+
+    loop {
+        match resolve_content_mods(&active_mods, profile) {
+            Ok(plan) => return (plan, collected_errors),
+            Err(errs) => {
+                let mut newly_removed = BTreeSet::new();
+                for err in errs {
+                    match &err {
+                        ContentResolutionError::InvalidOrUnsupported { id, .. }
+                        | ContentResolutionError::MissingDependency { id, .. }
+                        | ContentResolutionError::DependencyCycle { id }
+                        | ContentResolutionError::DependencyOrderViolation { id, .. } => {
+                            newly_removed.insert(id.clone());
+                        }
+                        ContentResolutionError::ExplicitConflict { id, conflict, .. } => {
+                            newly_removed.insert(id.clone());
+                            newly_removed.insert(conflict.clone());
+                        }
+                    }
+                    if !collected_errors.contains(&err) {
+                        collected_errors.push(err);
+                    }
+                }
+                if newly_removed.is_empty() || newly_removed.is_subset(&removed) {
+                    return (ContentResolutionPlan::default(), collected_errors);
+                }
+                removed.extend(newly_removed);
+                active_mods.retain(|m| !removed.contains(&m.id));
+            }
+        }
+    }
+}
+
 fn detect_cycle<'a>(
     id: &'a str,
     by_id: &BTreeMap<&'a str, &'a DiscoveredMod>,
@@ -442,5 +488,48 @@ mod tests {
         assert_eq!(plan.conflicts[0].resource_path, "bf2 pc:side/imp.lvl");
         assert_eq!(plan.conflicts[0].winner_id, "content.top");
         assert_eq!(plan.conflicts[0].overridden_ids, ["content.bottom"]);
+    }
+
+    #[test]
+    fn isolated_resolution_keeps_unrelated_valid_mods_active() {
+        let valid = sample_mod("content.valid", "Valid Map", None);
+        let mut broken = sample_mod("content.broken", "Broken Mod", None);
+        broken.compatibility = ModCompatibility::Invalid("corrupt archive".into());
+        let mut dependent = sample_mod("content.dep", "Needs Broken", None);
+        dependent.dependencies.push("content.broken".into());
+        let mut c1 = sample_mod("content.c1", "Conflict 1", None);
+        let c2 = sample_mod("content.c2", "Conflict 2", None);
+        c1.conflicts.push("content.c2".into());
+
+        let mut profile = ExtensionProfile::default();
+        for id in [
+            "content.valid",
+            "content.broken",
+            "content.dep",
+            "content.c1",
+            "content.c2",
+        ] {
+            profile.set_enabled(id, true);
+        }
+        profile.order = vec![
+            "content.dep".into(),
+            "content.broken".into(),
+            "content.valid".into(),
+            "content.c1".into(),
+            "content.c2".into(),
+        ];
+
+        let (plan, errors) =
+            resolve_content_mods_isolated(&[valid, broken, dependent, c1, c2], &profile);
+        assert_eq!(plan.active_order, ["content.valid"]);
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ContentResolutionError::InvalidOrUnsupported { id, .. } if id == "content.broken")));
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ContentResolutionError::MissingDependency { id, .. } if id == "content.dep")));
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ContentResolutionError::ExplicitConflict { .. })));
     }
 }

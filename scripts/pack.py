@@ -231,6 +231,26 @@ def merge_into(source, dest):
     return left
 
 
+def install_companion_bin(src, dst_dir, name):
+    """Copy a companion executable (`openbf-launcher`, `bake`) beside `openbf` atomically."""
+    if not src or not os.path.isfile(src):
+        return None
+    dst = os.path.join(dst_dir, name)
+    tmp = dst + ".new"
+    try:
+        shutil.copyfile(src, tmp)
+        os.chmod(tmp, 0o755)
+        if not WINDOWS and shutil.which("strip"):
+            run(["strip", tmp])
+        os.replace(tmp, dst)
+    except PermissionError:
+        sys.exit(f"pack: {dst} is in use: close it and run pack.py again")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return dst
+
+
 def build_app_bundle(out, icns=None):
     """dist/openbf.app, made from the flat files just packed. The bundle takes them, it
     does not copy them: the game, openbf.pak and openbf_data/ go inside Contents/MacOS,
@@ -1090,7 +1110,8 @@ def build(a, out, plan, packs, visual_report):
     need_ffmpeg()
     warn_mac()
 
-    step("1/6 build bake + game (release)")
+    step("1/6 build bake + game + launcher (release)")
+    launcher_bin = None
     if a.bake_only:
         # A development checkout's own bake (the one its sweeps and tests read): keyed and current like a pack's.
         need("cargo", "the standalone bake tool")
@@ -1106,12 +1127,20 @@ def build(a, out, plan, packs, visual_report):
         if not os.path.isfile(bake):
             need("cargo", "the standalone bake tool")
             run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
+        for cand in (os.path.join(os.path.dirname(game), "openbf-launcher" + EXE),
+                     os.path.join(TARGET, "release", "openbf-launcher" + EXE)):
+            if os.path.isfile(cand):
+                launcher_bin = cand
+                break
         print(f"   using existing game binary: {game}")
     else:
         need("cargo", "the Rust toolchain, https://rustup.rs")
         run(["cargo", "build", "--release", "-p", "game"] + game_features(a), cwd=ENGINE, env=cargo_env())
         run(["cargo", "build", "--release", "-p", "bake"], cwd=ENGINE)
-        bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
+        run(["cargo", "build", "--release", "-p", "launcher"], cwd=ENGINE, env=cargo_env())
+        bake = os.path.join(TARGET, "release", "bake" + EXE)
+        game = os.path.join(TARGET, "release", "game" + EXE)
+        launcher_bin = os.path.join(TARGET, "release", "openbf-launcher" + EXE)
     try:
         versions = group_versions(bake)
     except ValueError as error:
@@ -1307,9 +1336,16 @@ def build(a, out, plan, packs, visual_report):
             if os.path.exists(leftover):
                 os.remove(leftover)
     lines = pack_summary(out, pak, split)  # read the files before a bundle takes them
+    out_dir = os.path.dirname(out)
+    installed_launcher = install_companion_bin(launcher_bin, out_dir, "openbf-launcher" + EXE)
+    installed_bake = install_companion_bin(bake, out_dir, "bake" + EXE)
     bundle = a.app_bundle if a.app_bundle is not None else MACOS
     if bundle:
         app, left = build_app_bundle(out, ICNS)
+        macos_dir = os.path.join(app, "Contents", "MacOS")
+        for companion in (installed_launcher, installed_bake):
+            if companion and os.path.isfile(companion):
+                os.replace(companion, os.path.join(macos_dir, os.path.basename(companion)))
         lines.append(f"bundle: {app}. Run it from Finder. openbf.pak and openbf_data/ stay in Contents/MacOS, "
                      "beside the game.")
         if left:
@@ -1319,6 +1355,9 @@ def build(a, out, plan, packs, visual_report):
         desktop = os.path.join(os.path.dirname(out), "openbf.desktop")
         write_desktop(out, desktop)
         lines.append(f"entry: {desktop}. scripts/install_linux.sh installs it with the icon theme files.")
+    if installed_launcher or installed_bake:
+        companions = [os.path.basename(p) for p in (installed_launcher, installed_bake) if p]
+        lines.append("companions: " + ", ".join(companions) + " (native launcher & automatic mod converter).")
     print()
     print("\n".join(lines))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")

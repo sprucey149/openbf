@@ -669,17 +669,25 @@ impl NetplaySession {
                         "{name} {}",
                         if reconnect { "reconnected" } else { "joined" }
                     )));
-                    // A mid-round joiner without the map waits in the lobby
-                    // (one with it is checked by its build's digests).
-                    let lacks = |key: &str| {
-                        self.peer
-                            .guests()
-                            .get(&slot)
-                            .and_then(|g| g.content.as_ref())
-                            .is_some_and(|c| !c.maps.contains(key))
-                    };
-                    if let Some((key, label)) = self.lobby.round_map.clone() {
-                        if lacks(&key) {
+                    let guest_content = self
+                        .peer
+                        .guests()
+                        .get(&slot)
+                        .and_then(|g| g.content.as_ref());
+                    if let Some(reason) = game::netplay::lobby::guest_mod_mismatch(
+                        &self.lobby.content,
+                        guest_content,
+                    ) {
+                        let line = format!("{name}: {reason}");
+                        self.lobby.say(line.clone());
+                        out.push(NetAction::Line(line));
+                        if self.lobby.round_map.is_some() {
+                            self.bench(slot, GameNotice::BackToLobby(reason));
+                        }
+                    } else if let Some((key, label)) = self.lobby.round_map.clone() {
+                        // A mid-round joiner without the map waits in the lobby
+                        // (one with it is checked by its build's digests).
+                        if guest_content.is_some_and(|c| !c.maps.contains(&key)) {
                             self.bench(
                                 slot,
                                 GameNotice::BackToLobby(format!(

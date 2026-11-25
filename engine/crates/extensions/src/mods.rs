@@ -21,8 +21,8 @@ use crate::profile::write_ron_atomic;
 pub use fingerprint::{compute_mod_fingerprint, compute_mod_fingerprint_cached, FileHashCache};
 pub use replace::{Capability, OpStatus, ResourceOp, TargetChoice, TargetSelections};
 pub use resolve::{
-    content_mod_multiplayer_digest, resolve_content_mods, ContentResolutionError,
-    ContentResolutionPlan, ResourceOverrideConflict,
+    content_mod_multiplayer_digest, resolve_content_mods, resolve_content_mods_isolated,
+    ContentResolutionError, ContentResolutionPlan, ResourceOverrideConflict,
 };
 
 /// Bump whenever cached asset/mission schemas change so stale caches auto-rebuild.
@@ -301,22 +301,23 @@ pub struct ModCacheMeta {
 impl ModCacheMeta {
     /// The replacement key this cache still answers to, for a reader that
     /// cannot resolve replacements itself (the game): the cache's own key
-    /// while the stock catalogs and the player's target choices are the ones
-    /// it was converted with, otherwise a key no cache carries, which reads
-    /// as stale. A cache with no replacements answers regardless.
+    /// while the stock catalogs and the player's target choices match what it
+    /// was converted with. A pure addon map (with maps, no replacement ops,
+    /// and no target choices) stays valid across stock catalog updates; any
+    /// other mod (including one previously unresolved when catalogs were
+    /// absent) invalidates when the stock catalog or target choices change.
     pub fn expected_replacement_key(
         &self,
         catalog_digest: &str,
         choices: &BTreeMap<String, TargetChoice>,
     ) -> String {
-        if self.resource_ops.is_empty() {
+        if self.catalog_digest == catalog_digest && &self.target_choices == choices {
             return self.replacement_key.clone();
         }
-        if self.catalog_digest == catalog_digest && &self.target_choices == choices {
-            self.replacement_key.clone()
-        } else {
-            "inputs-changed".into()
+        if self.resource_ops.is_empty() && !self.maps.is_empty() && choices.is_empty() {
+            return self.replacement_key.clone();
         }
+        "inputs-changed".into()
     }
 
     pub fn path_in(cache_dir: &Path) -> PathBuf {
@@ -655,4 +656,70 @@ pub fn collect_map_modes_summary(map: &ModMapSummary) -> BTreeMap<&'static str, 
     out.insert("gcw", map.modes_gcw.clone());
     out.insert("cw", map.modes_cw.clone());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_meta(maps: Vec<ModMapSummary>, catalog_digest: &str) -> ModCacheMeta {
+        ModCacheMeta {
+            schema_version: MOD_CACHE_SCHEMA_VERSION,
+            converter_version: MOD_CONVERTER_VERSION,
+            mod_id: "content.test".into(),
+            namespace: "mod_test".into(),
+            source_fingerprint: "fp".into(),
+            legacy_addon_id: None,
+            display_name: "Test".into(),
+            version: None,
+            author: None,
+            description: String::new(),
+            mod_type: ModContentType::LegacyAssetPack,
+            maps,
+            dependencies: Vec::new(),
+            conflicts: Vec::new(),
+            declared_overrides: Vec::new(),
+            has_locl: false,
+            warnings: Vec::new(),
+            resource_ops: Vec::new(),
+            replacement_key: "empty".into(),
+            replacement_outputs: Vec::new(),
+            unsupported: Vec::new(),
+            catalog_digest: catalog_digest.into(),
+            target_choices: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn unresolved_replacement_mod_invalidates_when_catalog_appears() {
+        let meta = empty_meta(Vec::new(), "");
+        let choices = BTreeMap::new();
+        assert_eq!(meta.expected_replacement_key("", &choices), "empty");
+        assert_eq!(
+            meta.expected_replacement_key("new-catalog-sha256", &choices),
+            "inputs-changed"
+        );
+    }
+
+    #[test]
+    fn pure_addon_map_stays_valid_across_catalog_updates() {
+        let map = ModMapSummary {
+            map_key: "mod_test__m1".into(),
+            legacy_code: "M1".into(),
+            display_name: "Map 1".into(),
+            description: String::new(),
+            source_lvl: "m1.lvl".into(),
+            variant_title: None,
+            modes_cw: vec!["con".into()],
+            modes_gcw: Vec::new(),
+            missions: Vec::new(),
+            sound_planets: Vec::new(),
+        };
+        let meta = empty_meta(vec![map], "");
+        let choices = BTreeMap::new();
+        assert_eq!(
+            meta.expected_replacement_key("new-catalog-sha256", &choices),
+            "empty"
+        );
+    }
 }

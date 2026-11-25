@@ -239,7 +239,7 @@ Tested and working on Linux and Windows, with the NTSC-U PS2 releases (SLUS-2089
 
 ## Mods & OpenBF VR
 
-OpenBF automatically discovers legacy **Star Wars Battlefront II (2005)** addon folders copied into `openbf_data/mods/` (with manual `#1, #2, ...` load-order controls, isolated namespaces, and a versioned conversion cache in `openbf_data/mod_cache/`—no import button or manual registration required). See [docs/mods.md](docs/mods.md) for folder layout, load-order rules, and legacy addon compatibility details.
+OpenBF automatically discovers legacy **Star Wars Battlefront II (2005)** mod folders copied into `openbf_data/mods/`—including classic addon maps (`addme.script` + `mission.lvl`), `side/` and `fpm/` replacement packs, `_LVL_PC/` trees, and loose `.lvl` world replacements—with manual `#1, #2, ...` load-order controls, isolated namespaces, game-scoped overrides, and a versioned conversion cache in `openbf_data/mod_cache/` (no import button or manual registration required). See [docs/mods.md](docs/mods.md) for usage and [docs/modding-architecture.md](docs/modding-architecture.md) for the technical architecture.
 
 Supported Windows and Linux builds also bundle **OpenBF VR** (`openbf.vr`) as a disabled-by-default engine extension:
 

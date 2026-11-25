@@ -23,12 +23,21 @@ pub fn patch_path(class_file: &std::path::Path) -> std::path::PathBuf {
     class_file.with_file_name(format!("{stem}.patch.ron"))
 }
 
+fn default_full() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClassPatchFile {
     pub schema: u32,
     /// The mod LVL and the stock LVL the patch was computed between, for the
     /// player and for diagnostics.
     pub source: String,
+    /// `true` when produced from a `Full` LVL replacement (a coherent side
+    /// replacement that shadows lower-priority patches to the same side),
+    /// `false` for a partial `Patch` that composes over lower-priority layers.
+    #[serde(default = "default_full")]
+    pub full: bool,
     pub classes: Vec<ClassPatch>,
 }
 
@@ -107,6 +116,26 @@ pub fn apply(defs: &mut Vec<ClassDef>, patch: &ClassPatchFile) {
     }
 }
 
+/// Apply a priority-ordered stack of class patches (`index 0` = highest
+/// priority `#1`) to `defs` in place.
+///
+/// Coherence rules:
+/// - A `Full` LVL replacement is a coherent resource set: the highest-priority
+///   `full == true` patch shadows every lower-priority patch targeting the
+///   same side file so incompatible full replacements are never mixed.
+/// - Partial patches (`full == false`) above that cutoff compose from lowest
+///   to highest priority so independent class changes compose and `#1` wins
+///   deterministically on any conflicting class or property.
+pub fn apply_stack(defs: &mut Vec<ClassDef>, patches_hi_to_lo: &[ClassPatchFile]) {
+    let cutoff = patches_hi_to_lo
+        .iter()
+        .position(|p| p.full)
+        .map_or(patches_hi_to_lo.len(), |idx| idx + 1);
+    for patch in patches_hi_to_lo[..cutoff].iter().rev() {
+        apply(defs, patch);
+    }
+}
+
 /// The patch that turns `stock` (the stock PC classes) into `modded` (the
 /// mod's).
 pub fn diff(stock: &[ClassDef], modded: &[ClassDef], source: &str) -> ClassPatchFile {
@@ -167,6 +196,7 @@ pub fn diff(stock: &[ClassDef], modded: &[ClassDef], source: &str) -> ClassPatch
     ClassPatchFile {
         schema: CLASS_PATCH_SCHEMA,
         source: source.to_owned(),
+        full: true,
         classes,
     }
 }
@@ -216,6 +246,89 @@ mod tests {
         assert_eq!(
             patch_path(std::path::Path::new("classes/bf2_imp.ron")),
             std::path::Path::new("classes/bf2_imp.patch.ron")
+        );
+    }
+
+    #[test]
+    fn apply_stack_composes_partial_patches_and_isolates_full_replacements() {
+        let base_defs = || {
+            vec![
+                def("trooper", &[(1, "stock_hp"), (2, "stock_tex")]),
+                def("sniper", &[(1, "stock_sniper"), (2, "stock_sniper_tex")]),
+            ]
+        };
+        let patch_a = ClassPatchFile {
+            schema: CLASS_PATCH_SCHEMA,
+            source: "mod_a".into(),
+            full: false,
+            classes: vec![ClassPatch::Change {
+                name: "trooper".into(),
+                base: None,
+                set: vec![(2, vec!["a_tex".into()])],
+                remove: vec![],
+            }],
+        };
+        let patch_b = ClassPatchFile {
+            schema: CLASS_PATCH_SCHEMA,
+            source: "mod_b".into(),
+            full: false,
+            classes: vec![
+                ClassPatch::Change {
+                    name: "trooper".into(),
+                    base: None,
+                    set: vec![(2, vec!["b_tex".into()])],
+                    remove: vec![],
+                },
+                ClassPatch::Change {
+                    name: "sniper".into(),
+                    base: None,
+                    set: vec![(2, vec!["b_sniper_tex".into()])],
+                    remove: vec![],
+                },
+            ],
+        };
+
+        // Two partial patches: #1 (mod_a) wins on conflicting `trooper`,
+        // while independent `sniper` change from #2 (mod_b) composes cleanly.
+        let mut defs = base_defs();
+        apply_stack(&mut defs, &[patch_a.clone(), patch_b.clone()]);
+        assert_eq!(
+            defs.iter().find(|c| c.name == "trooper").unwrap().props,
+            vec![(1, "stock_hp".into()), (2, "a_tex".into())]
+        );
+        assert_eq!(
+            defs.iter().find(|c| c.name == "sniper").unwrap().props,
+            vec![(1, "stock_sniper".into()), (2, "b_sniper_tex".into())]
+        );
+
+        // Full replacement #1 over Full replacement #2: #1 is coherent and
+        // shadows #2 completely (sniper stays stock, never mixed with #2).
+        let mut full_a = patch_a.clone();
+        full_a.full = true;
+        let mut full_b = patch_b.clone();
+        full_b.full = true;
+        let mut defs_full = base_defs();
+        apply_stack(&mut defs_full, &[full_a, full_b.clone()]);
+        assert_eq!(
+            defs_full.iter().find(|c| c.name == "trooper").unwrap().props,
+            vec![(1, "stock_hp".into()), (2, "a_tex".into())]
+        );
+        assert_eq!(
+            defs_full.iter().find(|c| c.name == "sniper").unwrap().props,
+            vec![(1, "stock_sniper".into()), (2, "stock_sniper_tex".into())]
+        );
+
+        // Partial patch #1 over Full replacement #2: #2 forms the coherent
+        // base and #1 overlays its change on top (#1 wins on trooper).
+        let mut defs_mixed = base_defs();
+        apply_stack(&mut defs_mixed, &[patch_a, full_b]);
+        assert_eq!(
+            defs_mixed.iter().find(|c| c.name == "trooper").unwrap().props,
+            vec![(1, "stock_hp".into()), (2, "a_tex".into())]
+        );
+        assert_eq!(
+            defs_mixed.iter().find(|c| c.name == "sniper").unwrap().props,
+            vec![(1, "stock_sniper".into()), (2, "b_sniper_tex".into())]
         );
     }
 }
