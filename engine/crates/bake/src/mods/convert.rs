@@ -261,7 +261,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     // Stock replacements: every active resource operation, translated onto
     // the stock bake's own outputs (`super::replace`).
     let replaced = if discovered.active_ops().next().is_some() {
-        progress(opts.emit_progress, 88, "Converting stock replacements...");
+        let (pct_start, pct_end) = if groups.is_empty() { (10u8, 95u8) } else { (82u8, 95u8) };
+        progress(opts.emit_progress, pct_start, "Converting stock replacements...");
         let abs: BTreeMap<String, PathBuf> = insp
             .stock_override_lvls
             .iter()
@@ -273,6 +274,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             opts.env,
             &staging.join("overrides").join("assets"),
             &staging.join("scratch"),
+            (pct_start, pct_end),
             &mut |pct, msg| progress(opts.emit_progress, pct, msg),
         )?
     } else {

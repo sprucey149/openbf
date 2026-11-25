@@ -530,6 +530,8 @@ impl LauncherApp {
                 });
 
                 if matches!(state.cache_status, ModCacheStatus::Converting) {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs(1));
                     let frac = (state.progress_pct as f32 / 100.0).clamp(0.0, 1.0);
                     let (bar_rect, _) =
                         ui.allocate_exact_size(Vec2::new(card_w, 6.0), Sense::hover());
@@ -541,11 +543,26 @@ impl LauncherApp {
                     );
                     ui.painter()
                         .rect_filled(fill_rect, CornerRadius::ZERO, DOT_BUILDING);
-                    ui.label(
-                        egui::RichText::new(&state.progress_msg)
-                            .font(regular_font(11.0))
-                            .color(TEXT_MUTED),
-                    );
+                    ui.horizontal(|ui| {
+                        let elapsed = state.convert_started_at.map_or_else(String::new, |t| {
+                            let secs = t.elapsed().as_secs();
+                            if secs >= 60 {
+                                format!(" ({}m {:02}s)", secs / 60, secs % 60)
+                            } else {
+                                format!(" ({secs}s)")
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(format!("{}{elapsed}", state.progress_msg))
+                                .font(regular_font(11.0))
+                                .color(TEXT_MUTED),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if flat_button(ui, "Cancel", Vec2::new(62.0, 22.0), true) {
+                                self.mods_worker.cancel_conversion();
+                            }
+                        });
+                    });
                 }
 
                 if let ModCacheStatus::Failed(err) = &state.cache_status {

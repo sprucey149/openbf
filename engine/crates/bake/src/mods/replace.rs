@@ -59,6 +59,7 @@ pub fn convert_replacements(
     env: &ModEnv,
     out: &Path,
     scratch: &Path,
+    pct_range: (u8, u8),
     progress: &mut dyn FnMut(u8, &str),
 ) -> Result<Replaced> {
     let mut r = Replaced::default();
@@ -86,10 +87,22 @@ pub fn convert_replacements(
         }
     }
 
+    let (pct_min, pct_max) = pct_range;
+    let pct_span = u64::from(pct_max.saturating_sub(pct_min));
+    let total_bytes: u64 = active
+        .iter()
+        .map(|op| op.source_size.max(1))
+        .sum::<u64>()
+        .max(1);
+    let mut done_bytes = 0u64;
+
     let mut written: BTreeMap<String, ReplacementOutput> = BTreeMap::new();
     for (i, op) in active.iter().enumerate() {
-        let pct = 88 + ((i * 10) / active.len().max(1)) as u8;
-        progress(pct, &format!("Converting {}...", op.source));
+        let op_bytes = op.source_size.max(1);
+        let op_start = pct_min + ((done_bytes * pct_span) / total_bytes) as u8;
+        let op_end = pct_min + (((done_bytes + op_bytes) * pct_span) / total_bytes) as u8;
+        done_bytes += op_bytes;
+        progress(op_start, &format!("Converting {}...", op.source));
         let (Some(target), Some(src)) = (op.target.clone(), abs.get(&op.source_key())) else {
             r.warnings
                 .push(format!("{}: source file not found; skipped", op.source));
@@ -118,6 +131,8 @@ pub fn convert_replacements(
             handled: BTreeSet::new(),
             addon_models: BTreeSet::new(),
             r: &mut r,
+            pct_range: (op_start, op_end.max(op_start)),
+            progress,
         };
         let result = match classify(target.game, &target.path) {
             Kind::Side(_) if stock_lvl.outputs.is_empty() => {
@@ -274,6 +289,8 @@ struct Job<'a> {
     /// Models the mod's classes attach through `GeometryAddon`.
     addon_models: BTreeSet<String>,
     r: &'a mut Replaced,
+    pct_range: (u8, u8),
+    progress: &'a mut dyn FnMut(u8, &str),
 }
 
 /// How a changed model is baked, by the stock output it replaces.
@@ -285,6 +302,13 @@ enum ModelKind {
 }
 
 impl Job<'_> {
+    fn sub_progress(&mut self, done: usize, total: usize, detail: &str) {
+        let (lo, hi) = self.pct_range;
+        let span = usize::from(hi.saturating_sub(lo));
+        let pct = lo + ((done.min(total) * span) / total.max(1)) as u8;
+        (self.progress)(pct, &format!("Converting {} ({detail})...", self.op.source));
+    }
+
     fn g(&self) -> &'static str {
         self.target.game.key()
     }
@@ -503,9 +527,12 @@ impl Job<'_> {
         let mut flags: HashMap<String, u32> = HashMap::new();
         let mut produced_textures: BTreeSet<String> = BTreeSet::new();
 
-        for (m, kind) in &wanted {
+        let total_models = wanted.len().max(1);
+        let total_units = total_models + 2;
+        for (mi, (m, kind)) in wanted.iter().enumerate() {
             match kind {
                 ModelKind::Soldier => {
+                    self.sub_progress(mi, total_units, &format!("soldier {}/{total_models}: {m}", mi + 1));
                     let Some((dir, anims)) = &primary else { continue };
                     let lvl = crate::join_ci(dir, &format!("{}.LVL", self.target_stem_upper()));
                     let res = crate::soldier::bake_soldier_anims(
@@ -540,6 +567,7 @@ impl Job<'_> {
                     }
                 }
                 ModelKind::Weapon => {
+                    self.sub_progress(mi, total_units, &format!("weapon {}/{total_models}: {m}", mi + 1));
                     match crate::soldier::bake_weapon_with(&src_s, m, &side_out_s, Some(&src_s), &flags) {
                         Ok(w) => {
                             produced_textures.extend(w.textures.iter().map(|t| t.to_ascii_lowercase()));
@@ -563,6 +591,7 @@ impl Job<'_> {
         if wanted.values().any(|k| *k == ModelKind::Vehicle)
             || self.changed("coll").iter().any(|c| vehicle_models.contains(c))
         {
+            self.sub_progress(total_models, total_units, "vehicles");
             let vout = self.staging.join(&vehicle_dir);
             match crate::vehicle::bake_vehicles(&src_s, &vout.to_string_lossy(), Some(&src_s)) {
                 Ok(v) => {
@@ -619,6 +648,7 @@ impl Job<'_> {
             }
         }
         if !tex_only.is_empty() {
+            self.sub_progress(total_models + 1, total_units, &format!("{} textures", tex_only.len()));
             let inner = mungefs::open(mod_buf).map_err(|e| anyhow!("{e}"))?;
             for c in mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))? {
                 if &c.tag != b"modl" {

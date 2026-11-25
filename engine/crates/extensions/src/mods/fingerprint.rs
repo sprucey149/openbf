@@ -24,7 +24,7 @@ pub const FILE_HASH_CACHE: &str = "cache/file_hashes.ron";
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct HashEntry {
     len: u64,
-    mtime_ns: u128,
+    mtime_ns: u64,
     sha256: String,
 }
 
@@ -37,11 +37,11 @@ pub struct FileHashCache {
     dirty: Mutex<bool>,
 }
 
-pub fn mtime_ns(meta: &fs::Metadata) -> u128 {
+pub fn mtime_ns(meta: &fs::Metadata) -> u64 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_nanos())
+        .map_or(0, |d| d.as_nanos().min(u64::MAX as u128) as u64)
 }
 
 impl FileHashCache {

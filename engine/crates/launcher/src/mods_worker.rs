@@ -15,10 +15,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
+
+/// Inactivity watchdog for `bake mod-convert`: if the converter produces zero
+/// stdout/stderr activity for this long, terminate it cleanly as stalled.
+const CONVERT_STALL_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Uncached mods up to this total size are deep-inspected inline during initial
 /// discovery (~few ms); larger uncached mods appear in the list immediately via
@@ -42,6 +47,7 @@ pub struct DiscoveredModState {
     pub cache_unsupported: Vec<String>,
     pub progress_pct: u8,
     pub progress_msg: String,
+    pub convert_started_at: Option<Instant>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -84,18 +90,45 @@ enum WorkerCmd {
 pub struct ModsWorker {
     tx: Sender<WorkerCmd>,
     state: Arc<Mutex<ModsSnapshot>>,
+    active_child: Arc<Mutex<Option<Child>>>,
+    cancel_convert: Arc<AtomicBool>,
+}
+
+impl Drop for ModsWorker {
+    fn drop(&mut self) {
+        self.cancel_conversion();
+    }
 }
 
 impl ModsWorker {
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let (tx, rx) = mpsc::channel::<WorkerCmd>();
         let state = Arc::new(Mutex::new(ModsSnapshot::default()));
+        let active_child: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+        let cancel_convert = Arc::new(AtomicBool::new(false));
         let state_bg = Arc::clone(&state);
+        let child_bg = Arc::clone(&active_child);
+        let cancel_bg = Arc::clone(&cancel_convert);
         std::thread::Builder::new()
             .name("launcher-mods-worker".into())
-            .spawn(move || worker_loop(rx, state_bg, wake))
+            .spawn(move || worker_loop(rx, state_bg, child_bg, cancel_bg, wake))
             .expect("spawn mods worker thread");
-        Self { tx, state }
+        Self {
+            tx,
+            state,
+            active_child,
+            cancel_convert,
+        }
+    }
+
+    /// Cancel the currently running `bake mod-convert` subprocess (if any).
+    pub fn cancel_conversion(&self) {
+        self.cancel_convert.store(true, Ordering::SeqCst);
+        if let Ok(mut guard) = self.active_child.lock() {
+            if let Some(child) = guard.as_mut() {
+                let _ = child.kill();
+            }
+        }
     }
 
     pub fn snapshot(&self) -> ModsSnapshot {
@@ -158,6 +191,8 @@ impl ModsWorker {
 fn worker_loop(
     rx: mpsc::Receiver<WorkerCmd>,
     state: Arc<Mutex<ModsSnapshot>>,
+    active_child: Arc<Mutex<Option<Child>>>,
+    cancel_convert: Arc<AtomicBool>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
     let mut cache = WorkerCache::default();
@@ -185,6 +220,7 @@ fn worker_loop(
         }
 
         if let Some(env) = last_scan {
+            cleanup_orphaned_staging(&env.data_dir);
             run_scan(&env, &mut cache, &state);
             wake();
         }
@@ -198,8 +234,25 @@ fn worker_loop(
                 &mod_ids,
                 force_retry,
                 &state,
+                &active_child,
+                &cancel_convert,
                 &wake,
             );
+        }
+    }
+}
+
+/// Remove orphaned `*.staging.*` directories left behind by killed or crashed
+/// conversions when no conversion is currently active.
+fn cleanup_orphaned_staging(data_dir: &Path) {
+    let cache_root = extensions::profile::mod_cache_dir(data_dir);
+    let Ok(rd) = std::fs::read_dir(&cache_root) else {
+        return;
+    };
+    for entry in rd.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.contains(".staging.") && entry.path().is_dir() {
+            let _ = std::fs::remove_dir_all(entry.path());
         }
     }
 }
@@ -793,12 +846,12 @@ fn run_scan(env: &ModsEnv, cache: &mut WorkerCache, state: &Arc<Mutex<ModsSnapsh
                 } else {
                     cache_status_for(&info, data_dir, &snap.failed_fingerprints)
                 };
-                let (progress_pct, progress_msg) = snap
+                let (progress_pct, progress_msg, convert_started_at) = snap
                     .mods
                     .get(&id)
                     .filter(|_| prev_converting)
-                    .map_or((0, String::new()), |m| {
-                        (m.progress_pct, m.progress_msg.clone())
+                    .map_or((0, String::new(), None), |m| {
+                        (m.progress_pct, m.progress_msg.clone(), m.convert_started_at)
                     });
                 let (cache_warnings, cache_unsupported) =
                     if inspected && matches!(cache_status, ModCacheStatus::Ready) {
@@ -819,6 +872,7 @@ fn run_scan(env: &ModsEnv, cache: &mut WorkerCache, state: &Arc<Mutex<ModsSnapsh
                         cache_unsupported,
                         progress_pct,
                         progress_msg,
+                        convert_started_at,
                     },
                 );
             }
@@ -957,10 +1011,13 @@ fn run_convert_queue(
     mod_ids: &[String],
     force_retry: bool,
     state: &Arc<Mutex<ModsSnapshot>>,
+    active_child: &Arc<Mutex<Option<Child>>>,
+    cancel_convert: &Arc<AtomicBool>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let data_dir = env.data_dir.as_path();
     for mod_id in mod_ids {
+        cancel_convert.store(false, Ordering::SeqCst);
         let task = {
             let mut snap = state.lock().unwrap_or_else(|e| e.into_inner());
             let ModsSnapshot {
@@ -1001,6 +1058,7 @@ fn run_convert_queue(
             item.cache_status = ModCacheStatus::Converting;
             item.progress_pct = 0;
             item.progress_msg = "Starting conversion...".into();
+            item.convert_started_at = Some(Instant::now());
             let mod_dir = item.discovered.root_dir.clone();
             let ns = item.discovered.namespace.clone();
             let fp = item.discovered.source_fingerprint.clone();
@@ -1016,14 +1074,24 @@ fn run_convert_queue(
         };
         wake();
 
-        let result = run_bake_convert(&bake, env, &mod_dir, &cache_dir, mod_id, &ns, |pct, msg| {
-            let mut snap = state.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(item) = snap.mods.get_mut(mod_id) {
-                item.progress_pct = pct;
-                item.progress_msg = msg.to_owned();
-            }
-            wake();
-        });
+        let result = run_bake_convert(
+            &bake,
+            env,
+            &mod_dir,
+            &cache_dir,
+            mod_id,
+            &ns,
+            active_child,
+            cancel_convert,
+            |pct, msg| {
+                let mut snap = state.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(item) = snap.mods.get_mut(mod_id) {
+                    item.progress_pct = pct;
+                    item.progress_msg = msg.to_owned();
+                }
+                wake();
+            },
+        );
 
         let mut snap = state.lock().unwrap_or_else(|e| e.into_inner());
         snap.converting_id = None;
@@ -1046,6 +1114,7 @@ fn run_convert_queue(
                 if let Some(item) = snap.mods.get_mut(mod_id) {
                     item.progress_pct = 100;
                     item.progress_msg = "Ready".into();
+                    item.convert_started_at = None;
                     item.cache_status = status;
                     item.cache_warnings = cache_warnings;
                     item.cache_unsupported = cache_unsupported;
@@ -1056,6 +1125,7 @@ fn run_convert_queue(
                 snap.failed_fingerprints
                     .insert(mod_id.clone(), (fp, err_str.clone()));
                 if let Some(item) = snap.mods.get_mut(mod_id) {
+                    item.convert_started_at = None;
                     item.cache_status = ModCacheStatus::Failed(err_str);
                 }
             }
@@ -1091,6 +1161,7 @@ fn converted_status(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_bake_convert(
     bake: &Path,
     env: &ModsEnv,
@@ -1098,6 +1169,8 @@ fn run_bake_convert(
     cache_dir: &Path,
     mod_id: &str,
     namespace: &str,
+    active_child: &Arc<Mutex<Option<Child>>>,
+    cancel_convert: &Arc<AtomicBool>,
     mut on_progress: impl FnMut(u8, &str),
 ) -> anyhow::Result<()> {
     let mut cmd = Command::new(bake);
@@ -1126,20 +1199,66 @@ fn run_bake_convert(
         .map_err(|e| anyhow::anyhow!("launching `{}`: {e}", bake.display()))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    if let Ok(mut slot) = active_child.lock() {
+        *slot = Some(child);
+    }
+
+    let last_activity = Arc::new(Mutex::new(Instant::now()));
+    let finished = Arc::new(AtomicBool::new(false));
+    let timed_out = Arc::new(AtomicBool::new(false));
+
+    let err_activity = Arc::clone(&last_activity);
     let stderr_handle = std::thread::spawn(move || {
         stderr
             .map(|s| {
-                BufReader::new(s)
-                    .lines()
-                    .map_while(Result::ok)
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                let mut lines = Vec::new();
+                for line in BufReader::new(s).lines().map_while(Result::ok) {
+                    if let Ok(mut t) = err_activity.lock() {
+                        *t = Instant::now();
+                    }
+                    lines.push(line);
+                }
+                lines.join("\n")
             })
             .unwrap_or_default()
     });
 
+    // Inactivity watchdog: if `bake` produces zero stdout/stderr output for
+    // `CONVERT_STALL_TIMEOUT`, terminate it so the UI never hangs forever.
+    let wd_activity = Arc::clone(&last_activity);
+    let wd_finished = Arc::clone(&finished);
+    let wd_timed_out = Arc::clone(&timed_out);
+    let wd_child = Arc::clone(active_child);
+    let wd_cancel = Arc::clone(cancel_convert);
+    let watchdog = std::thread::spawn(move || {
+        while !wd_finished.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_secs(2));
+            if wd_finished.load(Ordering::SeqCst) {
+                break;
+            }
+            let stalled = wd_activity
+                .lock()
+                .map(|t| t.elapsed() >= CONVERT_STALL_TIMEOUT)
+                .unwrap_or(false);
+            if wd_cancel.load(Ordering::SeqCst) || stalled {
+                if stalled && !wd_cancel.load(Ordering::SeqCst) {
+                    wd_timed_out.store(true, Ordering::SeqCst);
+                }
+                if let Ok(mut slot) = wd_child.lock() {
+                    if let Some(c) = slot.as_mut() {
+                        let _ = c.kill();
+                    }
+                }
+                break;
+            }
+        }
+    });
+
     if let Some(out) = stdout {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
+            if let Ok(mut t) = last_activity.lock() {
+                *t = Instant::now();
+            }
             if let Some(rest) = line.strip_prefix("PROGRESS ") {
                 if let Some((pct_str, msg)) = rest.split_once(' ') {
                     if let Ok(pct) = pct_str.parse::<u8>() {
@@ -1150,8 +1269,26 @@ fn run_bake_convert(
         }
     }
 
-    let status = child.wait()?;
+    finished.store(true, Ordering::SeqCst);
+    let child_opt = active_child.lock().ok().and_then(|mut s| s.take());
+    let status = match child_opt {
+        Some(mut c) => c.wait()?,
+        None => anyhow::bail!("conversion process handle lost"),
+    };
+    let _ = watchdog.join();
     let err_txt = stderr_handle.join().unwrap_or_default();
+
+    if cancel_convert.load(Ordering::SeqCst) {
+        cleanup_orphaned_staging(&env.data_dir);
+        anyhow::bail!("Cancelled by user (click Retry to convert again)");
+    }
+    if timed_out.load(Ordering::SeqCst) {
+        cleanup_orphaned_staging(&env.data_dir);
+        anyhow::bail!(
+            "Timed out after {} minutes with no progress (stalled)",
+            CONVERT_STALL_TIMEOUT.as_secs() / 60
+        );
+    }
     if !status.success() {
         anyhow::bail!(
             "exit {:?}{}",

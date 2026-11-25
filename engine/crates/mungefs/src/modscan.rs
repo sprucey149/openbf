@@ -26,7 +26,7 @@ pub const LVL_FACTS_CACHE: &str = "cache/lvl_facts.ron";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct FactsEntry {
     len: u64,
-    mtime_ns: u128,
+    mtime_ns: u64,
     facts: LvlFacts,
 }
 
