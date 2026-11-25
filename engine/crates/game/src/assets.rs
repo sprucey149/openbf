@@ -307,6 +307,10 @@ pub struct CpuTexture {
     /// PS2 detail companion (`<base>.dtl.ktx2`), modulated x2 over the base
     /// at the same UVs — see `bake::detail` / RE_LOG "BF1 detail textures".
     pub detail: Option<Box<CpuTexture>>,
+    /// PC normal-map companion (`<base>.bump.ktx2`, `bake::bump`): a PC BF2
+    /// material with `MTRL` bit 0x20 draws this sheet per-pixel lit
+    /// (`render::BumpDesc`).
+    pub bump: Option<Box<CpuTexture>>,
 }
 
 impl CpuTexture {
@@ -1950,12 +1954,13 @@ pub fn load_ktx2(bytes: &[u8]) -> Result<CpuTexture> {
         rgba: level0.data.to_vec(),
         extra_mips,
         detail: None,
+        bump: None,
     })
 }
 
 /// Load the texture `name` at [`texture_tier`], plus its `<name>.dtl.ktx2`
 /// detail companion when the bake wrote one (the file's presence is the PS2
-/// detailCompressed flag).
+/// detailCompressed flag) and its `<name>.bump.ktx2` PC normal map likewise.
 ///
 /// At [`TextureTier::Pc`] the override `<name>.tier2.ktx2` wins WHEN IT
 /// EXISTS — see [`Manifest::texture_tier2`] for which — and it brings its own
@@ -1977,6 +1982,11 @@ fn decode_texture(dir: &Path, name: &str) -> Result<CpuTexture> {
     if let Ok(bytes) = pak::read(dir.join(format!("{name}.dtl.ktx2"))) {
         tex.detail = Some(Box::new(
             load_ktx2(&bytes).with_context(|| format!("{name}.dtl"))?,
+        ));
+    }
+    if let Ok(bytes) = pak::read(dir.join(format!("{name}.bump.ktx2"))) {
+        tex.bump = Some(Box::new(
+            load_ktx2(&bytes).with_context(|| format!("{name}.bump"))?,
         ));
     }
     Ok(tex)

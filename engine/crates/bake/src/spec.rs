@@ -22,6 +22,14 @@
 //! p, "rgb": [r, g, b]}` or `{"power": p, "rgb": null}` for "the sun colour".
 //! No BF2 word on the disc carries 0x100 beside 0x80 (0/469, §1), so the env
 //! pass that would displace this one is not modelled.
+//!
+//! A PC-authored bump segment (`crate::bump::companion`) keeps the same JSON
+//! but draws the PC's pass instead (`analysis/re-pc-bump.md` §3): its colour
+//! is the material's specular bytes / 255, the `c0` the exe uploads
+//! (`0x702df0`, `[material + 0x24..0x30]`), and the renderer reads the power
+//! as the PC's cube-channel select, not as a table column.
+//! trace: the PC `MTRL` loader that fills `[material + 0x24]`, to confirm
+//! the /255.
 
 use anyhow::{anyhow, Result};
 use mungefs::model::Segment;
@@ -52,6 +60,13 @@ pub fn spec_pass(seg: &Segment) -> Option<SpecPass> {
     if seg.bf2_material {
         if f & 0x80 == 0 || f & 0x04 != 0 {
             return None;
+        }
+        if crate::bump::companion(seg).is_some() {
+            let unit = |b: u8| f32::from(b) / 255.0;
+            return Some(SpecPass {
+                power: seg.spec_power,
+                rgb: Some([unit(bytes[0]), unit(bytes[1]), unit(bytes[2])]),
+            });
         }
         let half = |b: u8| ((u32::from(b) + 1) >> 1) as f32 / 128.0;
         Some(SpecPass {
@@ -199,6 +214,17 @@ mod tests {
             colors: None,
             triangles: Vec::new(),
         }
+    }
+
+    /// A PC bump segment's colour is the material's bytes / 255.
+    #[test]
+    fn a_pc_bump_segment_takes_the_unit_colour() {
+        let mut s = seg(true, 0xa9, 1, 0xff00_80ff);
+        s.pc_geometry = true;
+        s.textures = vec![(0, "atrt_diff".into()), (1, "atrt_normal".into())];
+        let p = spec_pass(&s).unwrap();
+        assert_eq!(p.power, 1);
+        assert_eq!(p.rgb, Some([1.0, 128.0 / 255.0, 0.0]));
     }
 
     /// BF2: 0x80 draws the pass, halved into GS units (0xff → 1.0, 0x80 →

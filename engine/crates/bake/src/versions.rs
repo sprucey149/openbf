@@ -19,7 +19,7 @@ pub const GROUP_VERSIONS: &[(&str, u32)] = &[
     ("tat1", 5),
     ("tat2", 6),
     ("maps", 8),
-    ("common", 6),
+    ("common", 7),
     ("side", 5),
     ("dlc", 5),
     ("classes", 3),

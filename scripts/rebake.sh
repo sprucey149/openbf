@@ -359,6 +359,13 @@ if want common; then
   # BF2's terrain light pass texture (card FXBL, analysis/re-bolt.md §5.3):
   # BF1 draws no light on its terrain (§5.1).
   "$BAKE" omniproj "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
+  # The PC bump materials' specular cube, from a PC BF2 install's own core
+  # (bake::bump, analysis/re-pc-bump.md); without one the pass draws nothing.
+  if [ -n "${PC2:-}" ] && [ -f "$(ci "$PC2" CORE.LVL)" ]; then
+    "$BAKE" pc-spec-cube "$(ci "$PC2" CORE.LVL)" "$OUT/common_bf2"
+  else
+    "$BAKE" pc-spec-cube "" "$OUT/common_bf2"
+  fi
   # Each game's English text table (card EVMSG, analysis/re-event-messages.md):
   # the HUD's event lines, team, post and soldier names.
   [ "$HAS_BF1" = 1 ] && "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"

@@ -11,6 +11,7 @@ pub mod attached_effects;
 mod audio_restore;
 pub mod beep;
 pub mod bind_pose;
+pub mod bump;
 pub mod classes;
 pub mod cloth;
 pub mod combo;

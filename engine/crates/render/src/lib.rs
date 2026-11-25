@@ -138,7 +138,7 @@ pub use underwater::UnderwaterTint;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
-pub use texture::{DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
+pub use texture::{BumpDesc, DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
 pub use visor::{Visor, VisorEye, VisorPass};
 
 use mesh::GpuMesh;
@@ -446,6 +446,10 @@ pub struct Renderer {
     water_reflect: water_reflect::WaterReflectState,
     spec_buf: wgpu::Buffer,
     spec_bg: Option<wgpu::BindGroup>,
+    /// The `specular` table's view and sampler ([`Renderer::set_specular_table`]).
+    spec_table: Option<(wgpu::TextureView, wgpu::Sampler)>,
+    /// The PC cube's +Y face ([`Renderer::set_pc_spec_cube`]).
+    pc_spec_cube: Option<wgpu::TextureView>,
     /// The disc's mirrored specular light (`analysis/re-specular-pass.md` §4,
     /// `[O]`): on by default; off takes the consistent `d = L·R`. PROVISIONAL
     /// — how the mismatch LOOKS on the PS2 wants an in-map capture.

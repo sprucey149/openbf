@@ -86,6 +86,7 @@ fn make_test_texture() -> CpuTexture {
         rgba: vec![255; 16],
         extra_mips: Vec::new(),
         detail: None,
+        bump: None,
     }
 }
 

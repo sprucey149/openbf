@@ -78,7 +78,7 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 
 - Conventional PC `_LVL_PC` addon maps referencing stock BF2 sides, classes, weapons, vehicles, and planet sound banks.
 - Standard `addme.script` + `mission.lvl` mission scripts (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), including multi-variant single-player world selection with fixed multiplayer branches.
-- PC `tern` terrain (with PC directional lighting), PC DXT1/DXT3/DXT5/A8R8G8B8 textures, PC `V8U8` normal-mapped water, static collision meshes, world instances/regions/layers, `plan`/`plnp` nav graphs, `core.lvl` localized text tables, addon load screens, and addon sound banks with stock CORE template inheritance.
+- PC `tern` terrain (with PC directional lighting), PC DXT1/DXT3/DXT5/A8R8G8B8 textures, PC `V8U8` normal-mapped water, PC bump and glossmap specular materials (`MTRL` 0x20 / 0x08, specular cube from a PC BF2 `core.lvl`), static collision meshes, world instances/regions/layers, `plan`/`plnp` nav graphs, `core.lvl` localized text tables, addon load screens, and addon sound banks with stock CORE template inheritance.
 - Generic stock LVL replacements for playable `side/*.lvl` files (class patches, soldiers, weapons, vehicles, side effects, textures), `fpm/...` first-person arm LVLs, stock world LVLs (both texture-only fast path and full world re-bake), and `load/<map>.lvl` load screens.
 
 ### Not Supported / Skipped with Diagnostics
@@ -87,4 +87,4 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 - Custom third-party native DLL plugins.
 - Full custom non-stock side LVL model/texture/animation authoring inside addon maps.
 - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles and worn cloth render without cloth physics).
-- Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, non-water normal/bump maps, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.
+- Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, normal maps on materials without the PC bump flag, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.

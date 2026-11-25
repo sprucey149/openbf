@@ -289,6 +289,16 @@ fn bake_common(
         ],
         &[],
     )?;
+    // The PC bump materials' specular cube, from a PC BF2 install's own core
+    // (`bake::bump`, analysis/re-pc-bump.md); without one the pass draws nothing.
+    let pc_core2 = trees
+        .donors
+        .pc(GameId::Bf2)
+        .map(|d| ci_path(d, "CORE.LVL"))
+        .filter(|p| p.is_file())
+        .map(|p| s(&p))
+        .unwrap_or_default();
+    ctx.run_bake(&["pc-spec-cube".into(), pc_core2, s(&out2)], &[])?;
     if let Some(b1) = &trees.bf1 {
         ctx.run_bake(&["locl".into(), s(&ci_path(b1, "CORE.LVL")), s(&out1)], &[])?;
     }

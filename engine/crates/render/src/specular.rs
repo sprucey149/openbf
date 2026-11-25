@@ -21,13 +21,18 @@
 //! an additive blend (One, One), so the sRGB target ends where the GS would.
 //! Its depth test is `LessEqual` on the base's own depth, no depth write
 //! (§7: the pass shares its base's Z and a nearer later draw covers it).
+//!
+//! A texture with a PC normal map ([`crate::BumpDesc`]) draws the PC's pass
+//! instead (`analysis/re-pc-bump.md` §3, `fs_spec`'s `pc_bump_spec`): it
+//! samples the PC core's `specularcubemap`, whose +Y face
+//! [`Renderer::set_pc_spec_cube`] installs; without one it adds nothing.
 
 use crate::bindings;
 use crate::texture::upload_levels;
 use crate::{RenderError, Renderer};
 use glam::Vec3;
 
-/// The shader's `SpecParams` (group 3, binding 2): 16 bytes.
+/// The shader's `SpecParams` (group 3, binding 2): 32 bytes.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct SpecParams {
@@ -35,6 +40,10 @@ pub(crate) struct SpecParams {
     pub cam_right: [f32; 3],
     /// 1 = the disc's mirrored light (`d = 2(X·L)(X·R) − L·R`), 0 = `L·R`.
     pub mirror: f32,
+    /// 1 = the PC cube face is installed (binding 3), 0 = it is not and a PC
+    /// bump draw's pass adds nothing.
+    pub pc_cube: f32,
+    pub _pad: [f32; 3],
 }
 
 /// The pass's texture coordinate for one vertex: `(power / 255, 0.5 +
@@ -74,7 +83,8 @@ impl Renderer {
         table: Option<(u32, u32, &[u8])>,
     ) -> Result<(), RenderError> {
         let Some((w, h, rgba)) = table else {
-            self.spec_bg = None;
+            self.spec_table = None;
+            self.rebuild_spec_bg();
             return Ok(());
         };
         let view = upload_levels(
@@ -99,30 +109,78 @@ impl Renderer {
                 ..Default::default()
             },
         );
+        self.spec_table = Some((view, sampler));
+        self.rebuild_spec_bg();
+        Ok(())
+    }
+
+    /// Install the +Y face of the PC core's `specularcubemap` (`bake
+    /// pc-spec-cube`: 128×128 RGBA8), or remove it with `None`. Uploaded
+    /// LINEAR, one level, and sampled with the table's sampler at a
+    /// coordinate inside the face (`pc_bump_spec` in `shader.wgsl`).
+    ///
+    /// OURS: bilinear without mips; the PC binds it on stage 3 of
+    /// `0x702449` under sampler states not read.
+    /// trace: `0x702449`'s `SetSamplerState` calls, for its filter.
+    pub fn set_pc_spec_cube(&mut self, face: Option<(u32, u32, &[u8])>) -> Result<(), RenderError> {
+        self.pc_spec_cube = match face {
+            Some((w, h, rgba)) => Some(upload_levels(
+                &self.device,
+                &self.queue,
+                w,
+                h,
+                &[rgba],
+                false,
+                Some("pc specular cube"),
+            )?),
+            None => None,
+        };
+        self.rebuild_spec_bg();
+        Ok(())
+    }
+
+    /// Whether [`Renderer::set_pc_spec_cube`] installed a face.
+    pub(crate) fn has_pc_spec_cube(&self) -> bool {
+        self.pc_spec_cube.is_some()
+    }
+
+    fn rebuild_spec_bg(&mut self) {
+        let Some((view, sampler)) = &self.spec_table else {
+            self.spec_bg = None;
+            return;
+        };
         self.spec_bg = Some(crate::made::bind_group(
             &self.device,
             &wgpu::BindGroupDescriptor {
                 label: Some("specular bg"),
                 layout: &self.spec_bgl,
                 entries: &[
-                    bindings::texture_view(0, &view),
-                    bindings::sampler(1, &sampler),
+                    bindings::texture_view(0, view),
+                    bindings::sampler(1, sampler),
                     bindings::entire_buffer(2, &self.spec_buf),
+                    // No cube: the table, unread (`spec.pc_cube` is 0).
+                    bindings::texture_view(3, self.pc_spec_cube.as_ref().unwrap_or(view)),
                 ],
             },
         ));
-        Ok(())
     }
 }
 
-/// Group 3 of the specular pipeline: the table, its sampler, [`SpecParams`].
+/// Group 3 of the specular pipeline: the table, its sampler, [`SpecParams`],
+/// the PC cube face.
 pub(crate) fn spec_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("specular bgl"),
         entries: &[
             bindings::texture_layout(0, true),
             bindings::sampler_layout(1),
-            bindings::uniform_layout(2, wgpu::ShaderStages::VERTEX, false, None),
+            bindings::uniform_layout(
+                2,
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                false,
+                None,
+            ),
+            bindings::texture_layout(3, true),
         ],
     })
 }
@@ -132,8 +190,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spec_params_is_one_uniform_row() {
-        assert_eq!(std::mem::size_of::<SpecParams>(), 16);
+    fn spec_params_is_two_uniform_rows() {
+        assert_eq!(std::mem::size_of::<SpecParams>(), 32);
     }
 
     /// A known camera and sun: the eye straight above a floor (N = +Y), the

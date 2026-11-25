@@ -569,6 +569,7 @@ mod tests {
             rgba: vec![0; 4 * 4 * 4],
             extra_mips: vec![],
             detail: None,
+            bump: None,
         };
         let t = CpuTexture {
             width: 2,
@@ -576,6 +577,7 @@ mod tests {
             rgba: vec![0; 2 * 2 * 4],
             extra_mips: vec![vec![0; 4]],
             detail: Some(Box::new(detail)),
+            bump: None,
         };
         // The function `SceneStats::of` sums, not a copy of its arithmetic:
         // dropping the detail term there must fail here.

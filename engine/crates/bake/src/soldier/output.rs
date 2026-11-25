@@ -658,7 +658,8 @@ pub(crate) fn bake_flags(m: &mungefs::model::Model) -> std::collections::HashMap
 
 /// Bake the `tex_` chunks named in `wanted` (lowercase) from an LVL to
 /// `<out>/textures/<name>.ktx2`; side LVLs repeat textures, so each is
-/// written once. Returns the names written.
+/// written once. Returns the names written. A sheet a PC bump material of
+/// the LVL draws gets its normal map beside it (`crate::bump`).
 ///
 /// `tex_flags` carries the per-texture material flags gathered from the models
 /// being baked: a texture no material marks cutout or transparent is written
@@ -691,6 +692,7 @@ pub fn bake_textures_flagged(
         .filter_map(|c| mungefs::texture::Texture::parse(c).ok())
         .collect();
 
+    let bumps = crate::bump::lvl_companions(inner)?;
     let mut textures: Vec<String> = Vec::new();
     let mut tier2_written = 0usize;
     for t in &all {
@@ -738,6 +740,7 @@ pub fn bake_textures_flagged(
         // detail-compressed base outright (exclusion 1), so a base and its
         // companion cannot come from two different tiers.
         crate::detail::write_detail_for(&dir, t, &all)?;
+        crate::bump::write_bump_for(&dir, &name, &bumps, &all)?;
         textures.push(name);
     }
     if pc.is_some() {

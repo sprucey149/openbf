@@ -540,7 +540,23 @@ pub fn install_spec_table(r: &mut Renderer, assets_dir: &Path, game: &str) -> Re
         None => None,
     };
     r.set_specular_table(table.as_ref().map(|t| (t.width, t.height, &t.rgba[..])))
-        .map_err(|e| anyhow!("specular table: {e}"))
+        .map_err(|e| anyhow!("specular table: {e}"))?;
+    install_pc_spec_cube(r, assets_dir)
+}
+
+/// Install the PC core's specular cube face, `common_bf2/pc_specularcube.ktx2`
+/// (`bake pc-spec-cube`, `bake::bump`), that a PC bump material's specular
+/// pass samples (`analysis/re-pc-bump.md` §3). On every map: a PC-authored
+/// sheet is a mod's, whatever game the map is. A tree baked without a PC BF2
+/// install has none, and those passes add nothing.
+fn install_pc_spec_cube(r: &mut Renderer, assets_dir: &Path) -> Result<()> {
+    let path = assets_dir.join("common_bf2").join("pc_specularcube.ktx2");
+    let face = match Some(path).filter(|p| pak::is_file(p)) {
+        Some(p) => Some(crate::assets::load_ktx2(&pak::read(&p)?)?),
+        None => None,
+    };
+    r.set_pc_spec_cube(face.as_ref().map(|t| (t.width, t.height, &t.rgba[..])))
+        .map_err(|e| anyhow!("pc specular cube: {e}"))
 }
 
 /// Install BF2's terrain light texture, `common_bf2/com_sfx_omniproj.ktx2`
@@ -1169,6 +1185,7 @@ fn get_terrain_texture(
     };
     let handle = r
         .add_texture(&render::TextureDesc {
+            bump: None,
             width: base.width,
             height: base.height,
             mips: &mips,

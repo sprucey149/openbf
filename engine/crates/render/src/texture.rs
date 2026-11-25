@@ -51,6 +51,19 @@ pub struct DetailDesc<'a> {
     pub world_patch: f32,
 }
 
+/// A PC Battlefront II normal map (`TNAM` slot 1 of a material with `MTRL`
+/// bit 0x20, baked beside its diffuse as `<name>.bump.ktx2` by
+/// `bake::bump`): tangent-space normal in RGB (`_bx2`), the specular pass's
+/// gloss weight in alpha. `shader.wgsl`'s `bump_lit` draws a texture that
+/// carries one by the PC's per-pixel rule (`analysis/re-pc-bump.md`).
+#[derive(Debug, Clone, Copy)]
+pub struct BumpDesc<'a> {
+    pub width: u32,
+    pub height: u32,
+    /// Mip chain, level 0 first (same rules as `TextureDesc::mips`).
+    pub mips: &'a [&'a [u8]],
+}
+
 /// CPU-side description of one texture upload.
 #[derive(Debug, Clone, Copy)]
 pub struct TextureDesc<'a> {
@@ -67,6 +80,8 @@ pub struct TextureDesc<'a> {
     pub srgb: bool,
     /// Optional PS2 detail map modulated over this texture.
     pub detail: Option<DetailDesc<'a>>,
+    /// Optional PC normal map; see [`BumpDesc`].
+    pub bump: Option<BumpDesc<'a>>,
     /// UV units per second; zero for static materials. BF2 models use baked
     /// byte/255 rates and the 255 s material clock. Water uses the wrapped
     /// `time` clock and its `fx__ Effect("Water")` velocity / INFO5 (magnitude
@@ -101,10 +116,12 @@ struct Views {
     sampler: wgpu::Sampler,
     detail: Option<wgpu::TextureView>,
     display: wgpu::TextureView,
+    bump: Option<wgpu::TextureView>,
 }
 
-/// `MaterialParams` in `shader.wgsl`: detail, scroll, then the UV offset.
-const PARAMS_LEN: usize = 12;
+/// `MaterialParams` in `shader.wgsl`: detail, scroll, the UV offset, then
+/// the PC bump switch.
+const PARAMS_LEN: usize = 16;
 /// The byte offset of `MaterialParams::offset`.
 const OFFSET_AT: u64 = 32;
 
@@ -132,6 +149,13 @@ impl GpuTexture {
         let detail_view = match &desc.detail {
             Some(d) => Some(upload_levels(
                 device, queue, d.width, d.height, d.mips, false, desc.label,
+            )?),
+            None => None,
+        };
+        // A normal map is a vector, never colour: upload it linear too.
+        let bump_view = match &desc.bump {
+            Some(b) => Some(upload_levels(
+                device, queue, b.width, b.height, b.mips, false, desc.label,
             )?),
             None => None,
         };
@@ -176,12 +200,17 @@ impl GpuTexture {
             0.0,
             0.0,
             0.0,
+            f32::from(u8::from(bump_view.is_some())),
+            0.0,
+            0.0,
+            0.0,
         ];
         let views = Views {
             view,
             sampler,
             detail: detail_view,
             display: display_view,
+            bump: bump_view,
         };
         Ok(Self::bind(device, layout, desc.label, views, params))
     }
@@ -215,6 +244,9 @@ impl GpuTexture {
                     bindings::texture_view(2, views.detail.as_ref().unwrap_or(&views.view)),
                     bindings::entire_buffer(3, &params_buf),
                     bindings::texture_view(4, &views.display),
+                    // No normal map: the base view, unread (`material.bump.x`
+                    // is 0).
+                    bindings::texture_view(5, views.bump.as_ref().unwrap_or(&views.view)),
                 ],
             },
         );

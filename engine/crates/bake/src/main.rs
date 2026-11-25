@@ -6,7 +6,7 @@
 //!
 //! Run `bake` with no arguments for the full usage table (tex-dump, pc-tex,
 //! xbox, xbox-prints, map, common, classes, loadscreen, sounds, sound-names, global-sound, beep,
-//! specular, omniproj, soldier, weapon, vehicle, effects, locl, fonts). scripts/rebake.sh runs all of them
+//! specular, omniproj, pc-spec-cube, soldier, weapon, vehicle, effects, locl, fonts). scripts/rebake.sh runs all of them
 //! over the extracted discs; `extract-iso` makes those (scripts/pack.py). `format-versions` prints the version of
 //! each output group (`bake::versions`), which pack.py keys its per-group bake cache on.
 
@@ -430,6 +430,20 @@ fn main() -> Result<()> {
             println!("baked the terrain light texture -> {}/{name}.ktx2", args[3]);
             Ok(())
         }
+        Some("pc-spec-cube") if args.len() == 4 => {
+            let out = Path::new(&args[3]).join(bake::bump::CUBE_FILE);
+            if args[2].is_empty() {
+                match std::fs::remove_file(&out) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                    _ => {}
+                }
+                println!("no PC core.lvl: the PC bump specular pass draws nothing");
+            } else {
+                bake::bump::bake_cube(&ci(&args[2]), &args[3])?;
+                println!("baked the PC specular cube's +Y face -> {}", out.display());
+            }
+            Ok(())
+        }
         Some("shell") if args.len() == 7 || (args.len() >= 10 && args[7] == "--campaign") => {
             // <SHELL.LVL> <MOVIES/SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <out>
             // [--campaign <INSHELL.LVL> <MOVIE_OR_DISC>...]
@@ -635,6 +649,7 @@ fn main() -> Result<()> {
                  \x20 bake beep       <core.lvl>   <outdir>       BF1 loading beep renders\n\
                  \x20 bake specular   <core.lvl>   <outdir>       the specular pass's lookup table\n\
                  \x20 bake omniproj   <core.lvl>   <outdir>       BF2's terrain light texture\n\
+                 \x20 bake pc-spec-cube <PC core.lvl|empty> <outdir> the PC bump specular cube (+Y face)\n\
                  \x20 bake locl       <core.lvl>   <outdir>       the English text table\n\
                  \x20 bake fonts      <core.lvl>   <outdir> <prefix> [donor-core ...] [--menu-font-core PS2-CORE.LVL]  native HUD + local BF2 Light menu\n\
                  \x20 bake ui-art     <core.lvl>   <outdir> [donor-core ...]  largest same-art UI sheets\n\

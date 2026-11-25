@@ -99,6 +99,7 @@ pub fn upload_fx_sprite(r: &mut Renderer) -> Result<TextureHandle> {
         wrap_v: render::WrapV::Repeat,
         srgb: true,
         detail: None,
+        bump: None,
         scroll: [0.0, 0.0],
         uv_scale: [1.0, 1.0],
         label: Some("fx sprite"),
@@ -113,8 +114,8 @@ pub fn upload_fx_sprite(r: &mut Renderer) -> Result<TextureHandle> {
 /// a genuinely tiling pair can be handled without hunting through shaders.
 pub const DETAIL_UV_SCALE: f32 = 1.0;
 
-/// Upload one decoded texture (+ its detail companion, when the bake wrote
-/// one) and return its handle.
+/// Upload one decoded texture (+ its detail and PC normal-map companions,
+/// when the bake wrote them) and return its handle.
 pub fn upload_cpu_texture(r: &mut Renderer, t: &CpuTexture, label: &str) -> Result<TextureHandle> {
     upload_cpu_texture_inner(r, t, label, [0.0, 0.0], [1.0, 1.0], render::WrapV::Repeat)
 }
@@ -151,6 +152,7 @@ pub(super) fn upload_flat_water_texture(
         wrap_v: render::WrapV::Repeat,
         srgb: false,
         detail: None,
+        bump: None,
         scroll,
         uv_scale,
         label: Some(label),
@@ -170,6 +172,7 @@ pub(super) fn upload_cpu_texture_inner(
 ) -> Result<TextureHandle> {
     let mips = t.mips();
     let detail_mips = t.detail.as_ref().map(|d| d.mips()).unwrap_or_default();
+    let bump_mips = t.bump.as_ref().map(|b| b.mips()).unwrap_or_default();
     r.add_texture(&TextureDesc {
         width: t.width,
         height: t.height,
@@ -183,6 +186,11 @@ pub(super) fn upload_cpu_texture_inner(
             mips: &detail_mips,
             scale: DETAIL_UV_SCALE,
             world_patch: 0.0,
+        }),
+        bump: t.bump.as_ref().map(|b| render::BumpDesc {
+            width: b.width,
+            height: b.height,
+            mips: &bump_mips,
         }),
         scroll,
         uv_scale,

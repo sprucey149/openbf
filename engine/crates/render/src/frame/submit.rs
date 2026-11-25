@@ -277,6 +277,8 @@ impl Renderer {
         let spec = crate::specular::SpecParams {
             cam_right: camera.right().normalize_or_zero().to_array(),
             mirror: if self.spec_mirror { 1.0 } else { 0.0 },
+            pc_cube: if self.has_pc_spec_cube() { 1.0 } else { 0.0 },
+            _pad: [0.0; 3],
         };
         self.queue
             .write_buffer(&self.spec_buf, 0, bytemuck::bytes_of(&spec));

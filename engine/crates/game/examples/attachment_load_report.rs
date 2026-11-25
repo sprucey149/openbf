@@ -476,6 +476,7 @@ mod tests {
             rgba: vec![rgb, 0, 0, 255],
             extra_mips: vec![],
             detail: None,
+            bump: None,
         };
         assert_eq!(
             alpha_semantics(&texture(0)).unwrap(),
@@ -490,6 +491,7 @@ mod tests {
             rgba: vec![255; 15],
             extra_mips: vec![],
             detail: None,
+            bump: None,
         };
         assert!(alpha_semantics(&t).is_err());
     }

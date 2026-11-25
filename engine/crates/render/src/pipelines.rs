@@ -52,8 +52,16 @@ impl Renderer {
                 // Detail map (PS2 `<name>_dtl` companion). Materials without
                 // one bind the base view here and switch it off in params.
                 bindings::texture_layout(2, true),
-                bindings::uniform_layout(3, wgpu::ShaderStages::FRAGMENT, false, None),
+                // The vertex stage reads `material.bump` (`vertex_lighting`).
+                bindings::uniform_layout(
+                    3,
+                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    false,
+                    None,
+                ),
                 bindings::texture_layout(4, true),
+                // PC normal map (`crate::BumpDesc`); the base view without one.
+                bindings::texture_layout(5, true),
             ],
         });
 
@@ -749,6 +757,7 @@ impl Renderer {
                 wrap_v: WrapV::Repeat,
                 srgb: false,
                 detail: None,
+                bump: None,
                 scroll: [0.0, 0.0],
                 uv_scale: [1.0, 1.0],
                 label: Some("white"),
@@ -861,6 +870,8 @@ impl Renderer {
             water_reflect,
             spec_buf,
             spec_bg: None,
+            spec_table: None,
+            pc_spec_cube: None,
             spec_mirror: true,
             lighting: Lighting::default(),
             character_light_regions: Vec::new(),

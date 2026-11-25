@@ -354,6 +354,7 @@ pub(crate) fn objective_marker_texture(r: &mut render::Renderer) -> Option<rende
         wrap_v: render::WrapV::ClampToEdge,
         srgb: true,
         detail: None,
+        bump: None,
         scroll: [0.0, 0.0],
         uv_scale: [1.0, 1.0],
         label: Some("objective marker fallback"),

@@ -221,6 +221,7 @@ fn the_rim_matches_the_ps2_frame() {
             rgba: vec![255; 4],
             extra_mips: Vec::new(),
             detail: None,
+            bump: None,
         },
         "droideka_shield",
     )
