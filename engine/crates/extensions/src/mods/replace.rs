@@ -823,12 +823,17 @@ pub fn mod_capabilities(ops: &[ResourceOp]) -> Vec<Capability> {
 }
 
 /// Cache key of a mod's replacement plan: which sources go where, against
-/// which stock catalog. A change re-runs conversion.
+/// which stock catalog. A change re-runs conversion. A mod with no
+/// replacement operations (a pure addon map) replaces nothing, so its key
+/// leaves the stock catalog out and stays stable across stock rebakes, as
+/// `ModCacheMeta::expected_replacement_key` already treats it.
 pub fn replacement_key(ops: &[ResourceOp], catalogs: &StockCatalogs) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(b"openbf-replacements-v1\0");
-    h.update(catalogs.digest.as_bytes());
+    if !ops.is_empty() {
+        h.update(catalogs.digest.as_bytes());
+    }
     for op in ops {
         h.update(op.source_key().as_bytes());
         h.update([0]);
@@ -851,6 +856,19 @@ pub fn replacement_key(ops: &[ResourceOp], catalogs: &StockCatalogs) -> String {
 mod tests {
     use super::super::catalog::{StockCatalog, CATALOG_GENERATOR_VERSION, CATALOG_SCHEMA_VERSION};
     use super::*;
+
+    #[test]
+    fn an_addon_only_key_ignores_the_stock_catalog() {
+        let old = StockCatalogs {
+            digest: "old".into(),
+            ..StockCatalogs::default()
+        };
+        let new = StockCatalogs {
+            digest: "new".into(),
+            ..StockCatalogs::default()
+        };
+        assert_eq!(replacement_key(&[], &old), replacement_key(&[], &new));
+    }
 
     fn res(tag: &str, name: &str, digest: u64) -> LvlResource {
         LvlResource {

@@ -87,17 +87,20 @@ impl LauncherPaths {
         }
     }
 
-    /// Locate the compiled `bake` executable (`openbf_data/tools/bake`,
-    /// beside the launcher, or in a checkout's `engine/target/{release,debug}`).
+    /// Locate the compiled `bake` executable (beside the launcher,
+    /// `openbf_data/tools/bake`, or in a checkout's
+    /// `engine/target/{release,debug}`), preferring one that writes this
+    /// build's mod converter version (`extensions::mods::pick_bake_bin`).
     pub fn bake_bin(&self) -> Option<PathBuf> {
         let name = format!("bake{EXE_SUFFIX}");
-        [
-            self.data_dir.join("tools").join(&name),
-            self.exe_dir.join(&name),
-        ]
-        .into_iter()
-        .chain(self.checkout_targets(&name))
-        .find(|p| p.is_file())
+        extensions::mods::pick_bake_bin(
+            [
+                self.exe_dir.join(&name),
+                self.data_dir.join("tools").join(&name),
+            ]
+            .into_iter()
+            .chain(self.checkout_targets(&name)),
+        )
     }
 
     /// The stock bake a mod scan resolves replacements against and a

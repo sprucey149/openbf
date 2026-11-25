@@ -518,30 +518,37 @@ impl Job<'_> {
 
         let side_out = self.staging.join(format!("side_{g}"));
         let side_out_s = side_out.to_string_lossy().into_owned();
-        let primary = if wanted.values().any(|k| *k == ModelKind::Soldier) {
-            Some(self.sibling_dir()?)
+        let src_s = self.src.to_string_lossy().into_owned();
+        let has_soldiers = wanted.values().any(|k| *k == ModelKind::Soldier);
+        let has_weapons = wanted.values().any(|k| *k == ModelKind::Weapon);
+        let total_models = wanted.len().max(1);
+        let total_units = total_models + 2;
+        let side_cache = if has_soldiers {
+            let (dir, anims) = self.sibling_dir()?;
+            let lvl = crate::join_ci(&dir, &format!("{}.LVL", self.target_stem_upper()));
+            self.sub_progress(0, total_units, "loading side & animation banks");
+            Some(
+                crate::soldier::SideBakeCache::load(
+                    &lvl.to_string_lossy(),
+                    Some(&anims.to_string_lossy()),
+                    Some(&src_s),
+                )?
+                .low_needs_same_sheets(),
+            )
+        } else if has_weapons {
+            Some(crate::soldier::SideBakeCache::load(&src_s, None, Some(&src_s))?)
         } else {
             None
         };
-        let src_s = self.src.to_string_lossy().into_owned();
         let mut flags: HashMap<String, u32> = HashMap::new();
         let mut produced_textures: BTreeSet<String> = BTreeSet::new();
 
-        let total_models = wanted.len().max(1);
-        let total_units = total_models + 2;
         for (mi, (m, kind)) in wanted.iter().enumerate() {
             match kind {
                 ModelKind::Soldier => {
                     self.sub_progress(mi, total_units, &format!("soldier {}/{total_models}: {m}", mi + 1));
-                    let Some((dir, anims)) = &primary else { continue };
-                    let lvl = crate::join_ci(dir, &format!("{}.LVL", self.target_stem_upper()));
-                    let res = crate::soldier::bake_soldier_anims(
-                        &lvl.to_string_lossy(),
-                        m,
-                        Some(&anims.to_string_lossy()),
-                        &side_out_s,
-                        Some(&src_s),
-                    );
+                    let Some(cache) = &side_cache else { continue };
+                    let res = cache.bake_soldier(m, &side_out_s);
                     match res {
                         Ok(b) => {
                             for (name, f) in b.texture_flags {
@@ -568,7 +575,11 @@ impl Job<'_> {
                 }
                 ModelKind::Weapon => {
                     self.sub_progress(mi, total_units, &format!("weapon {}/{total_models}: {m}", mi + 1));
-                    match crate::soldier::bake_weapon_with(&src_s, m, &side_out_s, Some(&src_s), &flags) {
+                    let res = match &side_cache {
+                        Some(cache) => cache.bake_weapon(m, &side_out_s, &flags),
+                        None => crate::soldier::bake_weapon_with(&src_s, m, &side_out_s, Some(&src_s), &flags),
+                    };
+                    match res {
                         Ok(w) => {
                             produced_textures.extend(w.textures.iter().map(|t| t.to_ascii_lowercase()));
                             self.mark_model(m);
@@ -660,8 +671,15 @@ impl Job<'_> {
                     }
                 }
             }
-            let pc = crate::tier::PcTextures::load(&src_s)?;
-            let done = crate::soldier::bake_textures_flagged(inner, &tex_only, &flags, &side_out, Some(&pc))?;
+            let loaded_pc;
+            let pc_ref = match side_cache.as_ref().and_then(|c| c.pc_textures()) {
+                Some(pc) => pc,
+                None => {
+                    loaded_pc = crate::tier::PcTextures::load(&src_s)?;
+                    &loaded_pc
+                }
+            };
+            let done = crate::soldier::bake_textures_flagged(inner, &tex_only, &flags, &side_out, Some(pc_ref))?;
             for t in done {
                 self.mark("tex_", &t);
             }

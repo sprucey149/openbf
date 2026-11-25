@@ -140,13 +140,23 @@ pub(super) fn bake_or_skip(
     skeleton: &Skeleton,
     out: &Path,
     pc: Option<&crate::tier::PcTextures>,
+    same_sheets: bool,
 ) -> Vec<String> {
-    bake(inner, buf, high, skeleton, out, pc).unwrap_or_else(|e| {
+    bake(inner, buf, high, skeleton, out, pc, same_sheets).unwrap_or_else(|e| {
         eprintln!("soldier {}: {e:#}, no low model", high.name);
         Vec::new()
     })
 }
 
+/// `same_sheets`: keep the low model only when it draws with at least one
+/// sheet of the high model. OURS, for a replacement side: a mod that
+/// re-authors a soldier's high model and leaves its stock `_low1` would
+/// otherwise swap the far crowd to a different character under the PS2's
+/// four-body budget (52 of 56 such pairs in one HD side pack); without the
+/// low model the soldier keeps its high model at every distance. Stock
+/// sides keep the disc's pairing (the BF2 Wookiee's `_low1` draws the
+/// `wok_inf_wookiewarrior` sheet). replace: the mod's own low-detail rule,
+/// were one authored; measure: the far-crowd frame cost on an HD side.
 fn bake(
     inner: &[u8],
     buf: &[u8],
@@ -154,6 +164,7 @@ fn bake(
     skeleton: &Skeleton,
     out: &Path,
     pc: Option<&crate::tier::PcTextures>,
+    same_sheets: bool,
 ) -> Result<Vec<String>> {
     std::fs::create_dir_all(out.join("soldiers"))?;
     std::fs::create_dir_all(out.join("textures"))?;
@@ -162,6 +173,18 @@ fn bake(
         return Ok(Vec::new());
     };
     let (model, low_skeleton) = find_soldier(inner, &name)?;
+    if same_sheets {
+        let sheets = |m: &Model| -> std::collections::BTreeSet<String> {
+            m.segments
+                .iter()
+                .filter_map(crate::alpha::segment_texture)
+                .map(str::to_ascii_lowercase)
+                .collect()
+        };
+        if sheets(high).is_disjoint(&sheets(&model)) {
+            bail!("{name} shares no texture with {}", high.name);
+        }
+    }
     let mut low = to_skinned_model(&model, &low_skeleton)?;
     let high_bones = bones_of(skeleton);
     let high_bind = crate::skin_glb::global_binds(&high_bones);
@@ -489,8 +512,8 @@ mod tests {
         let (model, skeleton) = super::find_soldier(inner, "rep_inf_trooper").unwrap();
         let elsewhere = mungefs::open(&cis).unwrap();
         let dir = std::env::temp_dir().join(format!("openbf-lod-skip-{}", std::process::id()));
-        assert!(super::bake(elsewhere, &rep, &model, &skeleton, &dir, None).is_err());
-        let baked = super::bake_or_skip(elsewhere, &rep, &model, &skeleton, &dir, None);
+        assert!(super::bake(elsewhere, &rep, &model, &skeleton, &dir, None, false).is_err());
+        let baked = super::bake_or_skip(elsewhere, &rep, &model, &skeleton, &dir, None, false);
         assert!(baked.is_empty());
         assert!(!dir.join("soldiers/rep_inf_trooper.lod.ron").exists());
         std::fs::remove_dir_all(&dir).unwrap();
@@ -518,7 +541,7 @@ mod tests {
             let (model, skeleton) = super::find_soldier(inner, geometry).unwrap();
             let dir = std::env::temp_dir()
                 .join(format!("openbf-soldier-lod-{game}-{}", std::process::id()));
-            super::bake(inner, &bytes, &model, &skeleton, &dir, None).unwrap();
+            super::bake(inner, &bytes, &model, &skeleton, &dir, None, false).unwrap();
             let meta: manifest::SoldierLod = ron::from_str(
                 &std::fs::read_to_string(dir.join(format!("soldiers/{geometry}.lod.ron"))).unwrap(),
             )

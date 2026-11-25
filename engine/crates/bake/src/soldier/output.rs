@@ -79,6 +79,548 @@ fn lender_path(name: &str) -> Option<std::ffi::OsString> {
     }
 }
 
+/// Pre-loaded side LVL, PC texture table, and animation/class/rig context
+/// shared across every soldier and weapon baked from one side LVL.
+///
+/// Avoids re-reading gigabyte-scale side LVLs and re-parsing all four faction
+/// LVLs + animation banks for every individual soldier/weapon model.
+pub struct SideBakeCache {
+    buf: Vec<u8>,
+    original: Option<Vec<u8>>,
+    pc: Option<crate::tier::PcTextures>,
+    own_classes: Vec<manifest::ClassDef>,
+    own_combos: Option<manifest::combo::ComboSet>,
+    anim: Option<AnimBakeCache>,
+    low_same_sheets: bool,
+}
+
+struct AnimBakeCache {
+    abuf: Vec<u8>,
+    sides: Vec<Vec<u8>>,
+    lender_buf: Option<Vec<u8>>,
+    sanm: Option<mungefs::sanm::SoldierAnimations>,
+    bf1: bool,
+    classes_pose: Vec<manifest::ClassDef>,
+    classes_plan: Vec<manifest::ClassDef>,
+    rigs: Vec<mungefs::anim::Rig>,
+    human_rig: Option<mungefs::anim::Rig>,
+}
+
+impl SideBakeCache {
+    pub fn load(
+        lvl_path: &str,
+        anim_lvl: Option<&str>,
+        pc_lvl: Option<&str>,
+    ) -> Result<Self> {
+        let lvl_resolved = crate::resolve_ci(lvl_path);
+        let lvl_path = lvl_resolved.as_str();
+        let pc_resolved = pc_lvl.map(crate::resolve_ci);
+        let pc = pc_resolved
+            .as_deref()
+            .map(crate::tier::PcTextures::load)
+            .transpose()?;
+        let (buf, original) =
+            crate::gameplay::read_with_original(lvl_path).with_context(|| lvl_path.to_string())?;
+        let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
+        let own_classes = anim_sets::bf2::side_classes(&buf)?;
+        let mut own_combos = None;
+
+        let anim = if let Some(anim_path) = anim_lvl {
+            let anim_resolved = crate::resolve_ci(anim_path);
+            let abuf =
+                crate::gameplay::read(&anim_resolved).with_context(|| anim_resolved.clone())?;
+            let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
+            let sanm = mungefs::sanm::find_sanm(ainner).map_err(|e| anyhow!("{e}"))?;
+            let bf1 = sanm.is_none();
+            if sanm.is_some() {
+                own_combos = crate::combo::baked_combos_from_lvl(&buf).ok();
+            }
+            let sides: Vec<Vec<u8>> = match sanm {
+                Some(_) => ["ALL", "IMP", "REP", "CIS"]
+                    .iter()
+                    .filter_map(|s| {
+                        Path::new(lvl_path)
+                            .parent()
+                            .map(|parent| crate::join_ci(parent, &format!("{s}.LVL")))
+                    })
+                    .filter(|path| path.is_file())
+                    .map(crate::gameplay::read)
+                    .collect::<Result<_>>()?,
+                None => Vec::new(),
+            };
+            let mut classes_pose = own_classes.clone();
+            let anim_rigs = mungefs::anim::find_rigs(ainner).map_err(|e| anyhow!("{e}"))?;
+            let mut rigs = mungefs::anim::find_rigs(inner).map_err(|e| anyhow!("{e}"))?;
+            let human_rig = super::human_rig(anim_rigs.iter().chain(&rigs)).cloned();
+            rigs.extend(anim_rigs);
+            let mut classes_plan = if sanm.is_some() {
+                anim_sets::bf2::side_classes(&abuf)?
+            } else {
+                Vec::new()
+            };
+            for side in &sides {
+                let s_inner = mungefs::open(side).map_err(|e| anyhow!("{e}"))?;
+                let s_classes = anim_sets::bf2::side_classes(side)?;
+                classes_pose.extend(s_classes.iter().cloned());
+                if sanm.is_some() {
+                    classes_plan.extend(s_classes);
+                }
+                rigs.extend(mungefs::anim::find_rigs(s_inner).map_err(|e| anyhow!("{e}"))?);
+            }
+            if sanm.is_some() {
+                for class in &own_classes {
+                    if !classes_plan
+                        .iter()
+                        .any(|c| c.kind == class.kind && c.name == class.name)
+                    {
+                        classes_plan.push(class.clone());
+                    }
+                }
+            }
+            let lender = if sanm.is_some() {
+                "BF1_ANIMS"
+            } else {
+                "BF2_ANIMS"
+            };
+            let lender_buf = match lender_path(lender) {
+                Some(p) => {
+                    let resolved = crate::resolve_ci(&p.to_string_lossy());
+                    Some(crate::gameplay::read(&resolved).with_context(|| format!("{p:?}"))?)
+                }
+                None => None,
+            };
+            Some(AnimBakeCache {
+                abuf,
+                sides,
+                lender_buf,
+                sanm,
+                bf1,
+                classes_pose,
+                classes_plan,
+                rigs,
+                human_rig,
+            })
+        } else {
+            None
+        };
+
+        Ok(Self {
+            buf,
+            original,
+            pc,
+            own_classes,
+            own_combos,
+            anim,
+            low_same_sheets: false,
+        })
+    }
+
+    /// Bake a soldier's low model only when it shares a sheet with its high
+    /// model (a replacement side; `lod::bake`).
+    pub fn low_needs_same_sheets(mut self) -> Self {
+        self.low_same_sheets = true;
+        self
+    }
+
+    pub fn pc_textures(&self) -> Option<&crate::tier::PcTextures> {
+        self.pc.as_ref()
+    }
+
+    pub fn bake_soldier(&self, model: &str, outdir: &str) -> Result<BakedSoldier> {
+        let inner = mungefs::open(&self.buf).map_err(|e| anyhow!("{e}"))?;
+        let (m, mut skel) = find_soldier(inner, model)?;
+        crate::dlc_attachment::canonical_bind(inner, &mut skel)?;
+        let mut sm = if let Some(original) = &self.original {
+            let original_inner = mungefs::open(original).map_err(|e| anyhow!("{e}"))?;
+            let (_, donor_skel) = find_soldier(original_inner, model)?;
+            super::skinned_model_from_donor(&m, &skel, &donor_skel)?
+        } else {
+            rigid_or_skinned_model(&m, &skel)?
+        };
+        let mut flags = bake_flags(&m);
+        let cloths = crate::cloth::worn_cloths(inner, &m.name, &skel)?;
+        for c in &cloths {
+            let alpha = if c.segment.blend {
+                crate::detail::TRANSPARENT
+            } else {
+                0
+            };
+            *flags
+                .entry(c.segment.texture.to_ascii_lowercase())
+                .or_default() |= alpha;
+        }
+        let cloth_names: Vec<String> = cloths.iter().map(|c| c.name.clone()).collect();
+        let first_cloth = sm.segments.len();
+        let mut physics = Vec::with_capacity(cloths.len());
+        for (k, c) in cloths.into_iter().enumerate() {
+            physics.push(manifest::cloth::Cloth {
+                part: first_cloth + k,
+                ..c.physics
+            });
+            sm.segments.push(c.segment);
+        }
+        crate::dlc_attachment::append_fisto_tentacles(inner, &mut sm)?;
+        let out = Path::new(outdir);
+        std::fs::create_dir_all(out.join("soldiers"))?;
+        std::fs::create_dir_all(out.join("textures"))?;
+
+        let mut clips = Vec::new();
+        let mut bf1 = false;
+        let mut meta = SoldierAnims::default();
+        if let Some(anim) = &self.anim {
+            bf1 = anim.bf1;
+            let ainner = mungefs::open(&anim.abuf).map_err(|e| anyhow!("{e}"))?;
+            let mut banks = mungefs::anim::find_banks(ainner).map_err(|e| anyhow!("{e}"))?;
+            let anim_banks = banks.len();
+            banks.extend(mungefs::anim::find_banks(inner).map_err(|e| anyhow!("{e}"))?);
+            for side in &anim.sides {
+                let s_inner = mungefs::open(side).map_err(|e| anyhow!("{e}"))?;
+                banks.extend(mungefs::anim::find_banks(s_inner).map_err(|e| anyhow!("{e}"))?);
+            }
+            let lender_banks = match &anim.lender_buf {
+                Some(b) => {
+                    let l_inner = mungefs::open(b).map_err(|e| anyhow!("{e}"))?;
+                    mungefs::anim::find_banks(l_inner).map_err(|e| anyhow!("{e}"))?
+                }
+                None => Vec::new(),
+            };
+            let pose = pose_rig(&anim.classes_pose, &m.name, &anim.rigs, anim.sanm.is_some());
+            let attached = match &pose {
+                Some(pose) => super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons")?,
+                None => false,
+            };
+            let folded = match pose.as_ref().map(|p| &p.rig).or(anim.human_rig.as_ref()) {
+                Some(rig) => super::fold_unrigged_ancestors(&mut skel, rig, &sm),
+                None => false,
+            };
+            if attached || folded {
+                sm.bones = super::bones_of(&skel);
+            }
+            let bones: Vec<String> = skel.bones.iter().map(|b| b.name.clone()).collect();
+            let plan = match &anim.sanm {
+                None => anim_sets::plan_bf1(&anim_sets::bf1::inventory(&banks), &bones),
+                Some(sanm) => {
+                    let mut reg = anim_sets::bf2::Registry::shipped();
+                    let soldiers = reg.register(&anim.classes_plan);
+                    let mut families: Vec<usize> = soldiers
+                        .iter()
+                        .filter(|c| c.geometry.eq_ignore_ascii_case(&m.name))
+                        .map(|c| c.family)
+                        .collect();
+                    families.sort_unstable();
+                    families.dedup();
+                    if families.is_empty() {
+                        families.push(0);
+                    }
+                    let inv = anim_sets::Inventory::new(&banks);
+                    anim_sets::plan_bf2(&inv, &reg, &families, sanm, &bones)
+                }
+            };
+            let human: Vec<&AnimBank> = banks[..anim_banks]
+                .iter()
+                .filter(|b| b.name.starts_with("human"))
+                .collect();
+            let mut wanted: Vec<(String, &AnimBank, usize)> = Vec::new();
+            for name in SOLDIER_CLIPS.iter().chain(SEAT_CLIPS) {
+                match find_clip(&human, name) {
+                    Some((full, bank, k)) => wanted.push((full, bank, k)),
+                    None => meta.missing.push((*name).to_string()),
+                }
+            }
+            for (c, bank) in plan.sets.clips.iter().zip(&plan.banks) {
+                if wanted.iter().any(|w| w.0 == c.name) {
+                    continue;
+                }
+                let found = banks
+                    .iter()
+                    .filter(|b| b.name == *bank)
+                    .find_map(|b| Some((b, b.clip_index(&c.name)?)));
+                let (b, k) = found.ok_or_else(|| anyhow!("{}: not in bank {bank}", c.name))?;
+                wanted.push((c.name.clone(), b, k));
+            }
+            if anim.sanm.is_some() {
+                let all: Vec<&AnimBank> = banks.iter().collect();
+                let families: std::collections::BTreeSet<_> = plan
+                    .sets
+                    .bf2
+                    .iter()
+                    .map(|f| f.family.as_str())
+                    .chain(["human"])
+                    .collect();
+                for family in families {
+                    if let Some((name, bank, k)) = find_clip(&all, &format!("{family}_choking")) {
+                        if !wanted.iter().any(|w| w.0 == name) {
+                            wanted.push((name, bank, k));
+                        }
+                    }
+                }
+                let bindings = crate::combo::model_bindings(&anim.classes_pose, &m.name);
+                if !bindings.is_empty() {
+                    let own = match &self.own_combos {
+                        Some(c) => c.clone(),
+                        None => crate::combo::baked_combos_from_lvl(&self.buf)?,
+                    };
+                    let inv = anim_sets::Inventory::new(&banks);
+                    let mut model_combos = manifest::combo::ComboSet {
+                        scope_provenance: own.scope_provenance,
+                        ..manifest::combo::ComboSet::default()
+                    };
+                    for binding in bindings {
+                        let combo = own
+                            .combos
+                            .iter()
+                            .find(|c| c.name_hash == binding.name_hash)
+                            .with_context(|| {
+                                format!("{}: missing combo 0x{:08x}", m.name, binding.name_hash)
+                            })?;
+                        let (extra, missing) =
+                            crate::combo::resolve_animation_clips(&inv, &binding, combo);
+                        meta.missing.extend(
+                            missing
+                                .into_iter()
+                                .map(|s| format!("combo:{}:{s}", binding.family)),
+                        );
+                        for clip in extra {
+                            if wanted.iter().any(|w| w.0 == clip.name) {
+                                continue;
+                            }
+                            let (bank, index) = banks
+                                .iter()
+                                .filter(|b| b.name == clip.bank)
+                                .find_map(|b| Some((b, b.clip_index(&clip.name)?)))
+                                .with_context(|| {
+                                    format!("{}: not in bank {}", clip.name, clip.bank)
+                                })?;
+                            wanted.push((clip.name, bank, index));
+                        }
+                        if !model_combos.combos.contains(combo) {
+                            model_combos.combos.push(combo.clone());
+                        }
+                    }
+                    crate::write_ron(
+                        &out.join("soldiers").join(format!("{}.combos.ron", m.name)),
+                        &model_combos,
+                    )?;
+                }
+            }
+            let mut sets = plan.sets;
+            let lent = if anim.sanm.is_some() {
+                BORROWED_PRONE
+            } else {
+                BORROWED_THROW
+            };
+            let lender_human: Vec<&AnimBank> = lender_banks
+                .iter()
+                .filter(|b| b.name.starts_with("human"))
+                .collect();
+            let mut borrowed = Vec::new();
+            for name in lent.iter().chain(if anim.sanm.is_none() {
+                BORROWED_BF2_STATUS
+            } else {
+                &[]
+            }) {
+                if wanted.iter().any(|w| w.0 == *name) || lender_human.is_empty() {
+                    continue;
+                }
+                if let Some((full, bank, k)) = find_clip(&lender_human, name) {
+                    meta.missing.retain(|m| m != name);
+                    borrowed.push(full.clone());
+                    wanted.push((full, bank, k));
+                }
+            }
+            let mut motions = manifest::anim_sets::ClipMotions::new();
+            for (name, bank, k) in wanted {
+                let mut decoded = bank.decode_clip(k).map_err(|e| anyhow!("{name}: {e}"))?;
+                let root = decoded
+                    .tracks
+                    .iter()
+                    .find(|t| t.bone_crc == crc32_lower("DummyRoot"));
+                motions.insert(
+                    name.clone(),
+                    root.map_or_else(
+                        || vec![[0.0; 3]; usize::from(decoded.frames)],
+                        |t| t.translations.clone(),
+                    ),
+                );
+                if borrowed.contains(&name) {
+                    let height = ["dummyroot", "bone_root", "bone_pelvis"].map(crc32_lower);
+                    for t in decoded
+                        .tracks
+                        .iter_mut()
+                        .filter(|t| !t.translated && !height.contains(&t.bone_crc))
+                    {
+                        if let Some(b) = skel.bones.iter().find(|b| b.crc == t.bone_crc) {
+                            t.translations.fill(b.t);
+                        }
+                    }
+                }
+                if plan.measured.contains(&name) {
+                    if let Some(v) = anim_sets::root_speed(&name, &decoded, anim.sanm.is_some()) {
+                        sets.root_speed.insert(name.clone(), v);
+                    }
+                }
+                let (tracks, root_motion) = clip_to_tracks(&decoded, &skel, pose.as_ref());
+                clips.push(Clip {
+                    name: name.clone(),
+                    fps: 30.0,
+                    frames: u32::from(decoded.frames),
+                    tracks,
+                });
+                meta.clips.push(ClipMeta {
+                    name,
+                    frames: u32::from(decoded.frames),
+                    bank: bank.name.clone(),
+                    root_motion,
+                });
+            }
+            crate::write_ron(
+                &out.join("soldiers").join(format!("{}.anims.ron", m.name)),
+                &meta,
+            )?;
+            crate::write_ron(&manifest::anim_sets::path(out, &m.name), &sets)?;
+            crate::write_ron(&manifest::anim_sets::motion_path(out, &m.name), &motions)?;
+        }
+        let glb = skinned_to_glb(&sm, &clips)?;
+        std::fs::write(out.join("soldiers").join(format!("{}.glb", m.name)), glb)?;
+        let companion = manifest::cloth::path(out, &m.name);
+        if physics.is_empty() {
+            crate::remove_optional_file(&companion)?;
+        } else {
+            crate::write_ron(&companion, &physics)?;
+        }
+        let render_path = out
+            .join("soldiers")
+            .join(format!("{}.render-clips.glb", m.name));
+        if let Some(corrected) = super::render_clips::corrected_clips(
+            m.segments.iter().any(|s| s.pc_geometry),
+            bf1,
+            &sm,
+            &clips,
+        )? {
+            let skeleton = crate::skin_glb::SkinnedModel {
+                segments: Vec::new(),
+                ..sm.clone()
+            };
+            std::fs::write(&render_path, skinned_to_glb(&skeleton, &corrected)?)?;
+        } else if render_path.exists() {
+            std::fs::remove_file(&render_path)?;
+        }
+
+        let mut wanted: Vec<String> = sm
+            .segments
+            .iter()
+            .map(|s| s.texture.to_ascii_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let skins = model_skins(&m, &self.own_classes);
+        for (tex, group) in &skins.overrides {
+            let replaced = skins.groups.get(group).into_iter().flatten();
+            let f = replaced.filter_map(|t| flags.get(t)).fold(0, |a, f| a | f);
+            flags.insert(tex.clone(), f);
+            wanted.push(tex.clone());
+        }
+        let file = manifest::SoldierSkins {
+            groups: skins.groups.clone(),
+            overrides: skins.overrides.iter().map(|o| o.0.clone()).collect(),
+        };
+        crate::write_ron(
+            &out.join("soldiers").join(format!("{}.skins.ron", m.name)),
+            &file,
+        )?;
+        let mut textures = bake_textures_flagged(inner, &wanted, &flags, out, self.pc.as_ref())?;
+        for texture in super::lod::bake_or_skip(
+            inner,
+            &self.buf,
+            &m,
+            &skel,
+            out,
+            self.pc.as_ref(),
+            self.low_same_sheets,
+        ) {
+            if !textures.contains(&texture) {
+                textures.push(texture);
+            }
+        }
+        for (tex, _) in &skins.overrides {
+            if !textures.contains(tex) {
+                eprintln!(
+                    "soldier {}: override texture {tex} is not in the LVL",
+                    m.name
+                );
+            }
+        }
+
+        let (min, max) =
+            crate::gltf_bin::min_max3(sm.segments.iter().flat_map(|s| s.positions.iter()));
+        Ok(BakedSoldier {
+            name: m.name.clone(),
+            clips: clips.len(),
+            missing_clips: meta.missing.clone(),
+            bones: skel.bones.len(),
+            vertices: sm.segments.iter().map(|s| s.positions.len()).sum(),
+            triangles: sm.segments.iter().map(|s| s.triangles.len()).sum(),
+            textures,
+            cloths: cloth_names,
+            aabb: (min, max),
+            texture_flags: flags,
+        })
+    }
+
+    pub fn bake_weapon(
+        &self,
+        model: &str,
+        outdir: &str,
+        prior: &std::collections::HashMap<String, u32>,
+    ) -> Result<BakedWeapon> {
+        let inner = mungefs::open(&self.buf).map_err(|e| anyhow!("{e}"))?;
+        let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+        let m = chunks
+            .iter()
+            .filter(|c| &c.tag == b"modl")
+            .filter_map(|c| Model::parse(c).ok())
+            .find(|m| m.name.eq_ignore_ascii_case(model))
+            .ok_or_else(|| anyhow!("modl {model} not found"))?;
+        let m = if m.bone_space {
+            crate::bind_pose::BindPose::of(&chunks)
+                .pose(&m)
+                .map_err(|e| anyhow!("{model}: {e}"))?
+                .ok_or_else(|| anyhow!("{model} is a bone-space model with no skeleton"))?
+        } else {
+            m
+        };
+        let out = Path::new(outdir);
+        std::fs::create_dir_all(out.join("weapons"))?;
+        std::fs::write(
+            out.join("weapons").join(format!("{}.glb", m.name)),
+            if m.name.to_ascii_lowercase().starts_with("hud_") {
+                crate::glb::hud_model_to_glb(&m, &crate::alpha::legacy_per_texture_or(&m))?
+            } else {
+                crate::glb::model_to_glb(&m, &crate::alpha::weapon_alphas(&m), false)?
+            },
+        )?;
+        let wanted: Vec<String> = m
+            .segments
+            .iter()
+            .filter_map(crate::alpha::segment_texture)
+            .map(|n| n.to_ascii_lowercase())
+            .collect();
+        let flags = weapon_flags(&m, prior);
+        let textures = bake_textures_flagged(inner, &wanted, &flags, out, self.pc.as_ref())?;
+        let nodes = weapon_nodes(&chunks, &m.name);
+        std::fs::write(
+            manifest::weapon_nodes_path(out, &m.name),
+            ron::ser::to_string_pretty(&nodes, crate::pretty())?,
+        )?;
+        Ok(BakedWeapon {
+            name: m.name.clone(),
+            nodes: nodes.len(),
+            vertices: m.segments.iter().map(|s| s.positions.len()).sum(),
+            triangles: m.segments.iter().map(|s| s.triangles.len()).sum(),
+            textures,
+        })
+    }
+}
+
 pub fn bake_soldier_anims(
     lvl_path: &str,
     model: &str,
@@ -86,419 +628,7 @@ pub fn bake_soldier_anims(
     outdir: &str,
     pc_lvl: Option<&str>,
 ) -> Result<BakedSoldier> {
-    let lvl_resolved = crate::resolve_ci(lvl_path);
-    let lvl_path = lvl_resolved.as_str();
-    let pc_resolved = pc_lvl.map(crate::resolve_ci);
-    let pc = pc_resolved
-        .as_deref()
-        .map(crate::tier::PcTextures::load)
-        .transpose()?;
-    let (buf, original) =
-        crate::gameplay::read_with_original(lvl_path).with_context(|| lvl_path.to_string())?;
-    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
-    let (m, mut skel) = find_soldier(inner, model)?;
-    crate::dlc_attachment::canonical_bind(inner, &mut skel)?;
-    // Some addon soldiers store skinned vertices in model space (INFO[0]=0).
-    // The converter already handles both spaces and validates bone bindings.
-    let mut sm = if let Some(original) = &original {
-        // A donor's stored vertex indices address its own node order.
-        let original_inner = mungefs::open(original).map_err(|e| anyhow!("{e}"))?;
-        let (_, donor_skel) = find_soldier(original_inner, model)?;
-        super::skinned_model_from_donor(&m, &skel, &donor_skel)?
-    } else {
-        rigid_or_skinned_model(&m, &skel)?
-    };
-    // BF2's cloth, rest shape pinned to its bones (card CLOTH; the step is
-    // CLOTH2). A sheet only a cloth draws is opaque unless the class says
-    // Transparent.
-    let mut flags = bake_flags(&m);
-    let cloths = crate::cloth::worn_cloths(inner, &m.name, &skel)?;
-    for c in &cloths {
-        let alpha = if c.segment.blend {
-            crate::detail::TRANSPARENT
-        } else {
-            0
-        };
-        *flags
-            .entry(c.segment.texture.to_ascii_lowercase())
-            .or_default() |= alpha;
-    }
-    let cloth_names: Vec<String> = cloths.iter().map(|c| c.name.clone()).collect();
-    let first_cloth = sm.segments.len();
-    let mut physics = Vec::with_capacity(cloths.len());
-    for (k, c) in cloths.into_iter().enumerate() {
-        physics.push(manifest::cloth::Cloth {
-            part: first_cloth + k,
-            ..c.physics
-        });
-        sm.segments.push(c.segment);
-    }
-    // Keep the source body's cloth part indices stable. The separately
-    // attached tentacles are appended after those parts, never between them.
-    crate::dlc_attachment::append_fisto_tentacles(inner, &mut sm)?;
-    let out = Path::new(outdir);
-    std::fs::create_dir_all(out.join("soldiers"))?;
-    std::fs::create_dir_all(out.join("textures"))?;
-
-    let mut clips = Vec::new();
-    let mut bf1 = false;
-    let mut meta = SoldierAnims::default();
-    if let Some(anim_path) = anim_lvl {
-        let anim_resolved = crate::resolve_ci(anim_path);
-        let abuf = crate::gameplay::read(&anim_resolved).with_context(|| anim_resolved.clone())?;
-        let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
-        let sanm = mungefs::sanm::find_sanm(ainner).map_err(|e| anyhow!("{e}"))?;
-        bf1 = sanm.is_none();
-        // BF2's sets take every soldier side's classes and banks (a level
-        // loads two sides; `anim_sets::bf2::Registry::register`).
-        let sides: Vec<Vec<u8>> = match sanm {
-            Some(_) => ["ALL", "IMP", "REP", "CIS"]
-                .iter()
-                .filter_map(|s| {
-                    Path::new(lvl_path)
-                        .parent()
-                        .map(|parent| crate::join_ci(parent, &format!("{s}.LVL")))
-                })
-                .filter(|path| path.is_file())
-                .map(crate::gameplay::read)
-                .collect::<Result<_>>()?,
-            None => Vec::new(),
-        };
-        let mut banks = mungefs::anim::find_banks(ainner).map_err(|e| anyhow!("{e}"))?;
-        let anim_banks = banks.len();
-        // The requested side can also be JED or a native side, outside the
-        // four faction LVLs loaded below.
-        banks.extend(mungefs::anim::find_banks(inner).map_err(|e| anyhow!("{e}"))?);
-        for side in &sides {
-            let inner = mungefs::open(side).map_err(|e| anyhow!("{e}"))?;
-            banks.extend(mungefs::anim::find_banks(inner).map_err(|e| anyhow!("{e}"))?);
-        }
-        // The pose rig (card USKN): the model's classes are in its own side
-        // LVL (BF2: and the sides beside it); the `zaf_` rigs in the side
-        // LVLs and the animation LVL.
-        let mut classes = anim_sets::bf2::side_classes(&buf)?;
-        let mut rigs = mungefs::anim::find_rigs(inner).map_err(|e| anyhow!("{e}"))?;
-        rigs.extend(mungefs::anim::find_rigs(ainner).map_err(|e| anyhow!("{e}"))?);
-        for side in &sides {
-            classes.extend(anim_sets::bf2::side_classes(side)?);
-            rigs.extend(
-                mungefs::anim::find_rigs(mungefs::open(side).map_err(|e| anyhow!("{e}"))?)
-                    .map_err(|e| anyhow!("{e}"))?,
-            );
-        }
-        let pose = pose_rig(&classes, &m.name, &rigs, sanm.is_some());
-        if let Some(pose) = &pose {
-            let attached = super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons")?;
-            let folded = super::fold_unrigged_ancestors(&mut skel, &pose.rig, &sm);
-            if attached || folded {
-                sm.bones = super::bones_of(&skel);
-            }
-        }
-        let bones: Vec<String> = skel.bones.iter().map(|b| b.name.clone()).collect();
-        let plan = match &sanm {
-            None => anim_sets::plan_bf1(&anim_sets::bf1::inventory(&banks), &bones),
-            Some(sanm) => {
-                let mut classes = anim_sets::bf2::side_classes(&abuf)?;
-                for side in &sides {
-                    classes.extend(anim_sets::bf2::side_classes(side)?);
-                }
-                // A requested addon/native side need not be one of the four
-                // retail factions. Preserve first-wins retail registration.
-                for class in anim_sets::bf2::side_classes(&buf)? {
-                    if !classes
-                        .iter()
-                        .any(|c| c.kind == class.kind && c.name == class.name)
-                    {
-                        classes.push(class);
-                    }
-                }
-                let mut reg = anim_sets::bf2::Registry::shipped();
-                let soldiers = reg.register(&classes);
-                // The families of the classes on this model; a model no
-                // class names is posed as `human`.
-                let mut families: Vec<usize> = soldiers
-                    .iter()
-                    .filter(|c| c.geometry.eq_ignore_ascii_case(&m.name))
-                    .map(|c| c.family)
-                    .collect();
-                families.sort_unstable();
-                families.dedup();
-                if families.is_empty() {
-                    families.push(0);
-                }
-                let inv = anim_sets::Inventory::new(&banks);
-                anim_sets::plan_bf2(&inv, &reg, &families, sanm, &bones)
-            }
-        };
-        // The clips `game::animator` plays today (card ANIML replaces the
-        // list by the sets), then every clip a set names.
-        let human: Vec<&AnimBank> = banks[..anim_banks]
-            .iter()
-            .filter(|b| b.name.starts_with("human"))
-            .collect();
-        let mut wanted: Vec<(String, &AnimBank, usize)> = Vec::new();
-        for name in SOLDIER_CLIPS.iter().chain(SEAT_CLIPS) {
-            match find_clip(&human, name) {
-                Some((full, bank, k)) => wanted.push((full, bank, k)),
-                None => meta.missing.push((*name).to_string()),
-            }
-        }
-        for (c, bank) in plan.sets.clips.iter().zip(&plan.banks) {
-            if wanted.iter().any(|w| w.0 == c.name) {
-                continue;
-            }
-            // The first bank of that name that holds the clip: the one the
-            // inventory took (two side LVLs may carry a bank of one name).
-            let found = banks
-                .iter()
-                .filter(|b| b.name == *bank)
-                .find_map(|b| Some((b, b.clip_index(&c.name)?)));
-            let (b, k) = found.ok_or_else(|| anyhow!("{}: not in bank {bank}", c.name))?;
-            wanted.push((c.name.clone(), b, k));
-        }
-        if sanm.is_some() {
-            // Force choke uses a custom animation outside the ordinary set
-            // slots: B2 FUN_00239850 defaults to CRC 144ebf32 (human_choking).
-            // Include a model family's authored equivalent when it exists.
-            let all: Vec<&AnimBank> = banks.iter().collect();
-            let families: std::collections::BTreeSet<_> = plan
-                .sets
-                .bf2
-                .iter()
-                .map(|f| f.family.as_str())
-                .chain(["human"])
-                .collect();
-            for family in families {
-                if let Some((name, bank, k)) = find_clip(&all, &format!("{family}_choking")) {
-                    if !wanted.iter().any(|w| w.0 == name) {
-                        wanted.push((name, bank, k));
-                    }
-                }
-            }
-            let bindings = crate::combo::model_bindings(&classes, &m.name);
-            if !bindings.is_empty() {
-                let own = crate::combo::baked_combos_from_lvl(&buf)?;
-                let inv = anim_sets::Inventory::new(&banks);
-                let mut model_combos = manifest::combo::ComboSet {
-                    scope_provenance: own.scope_provenance,
-                    ..manifest::combo::ComboSet::default()
-                };
-                for binding in bindings {
-                    let combo = own
-                        .combos
-                        .iter()
-                        .find(|c| c.name_hash == binding.name_hash)
-                        .with_context(|| {
-                            format!("{}: missing combo 0x{:08x}", m.name, binding.name_hash)
-                        })?;
-                    let (extra, missing) =
-                        crate::combo::resolve_animation_clips(&inv, &binding, combo);
-                    meta.missing.extend(
-                        missing
-                            .into_iter()
-                            .map(|s| format!("combo:{}:{s}", binding.family)),
-                    );
-                    for clip in extra {
-                        if wanted.iter().any(|w| w.0 == clip.name) {
-                            continue;
-                        }
-                        let (bank, index) = banks
-                            .iter()
-                            .filter(|b| b.name == clip.bank)
-                            .find_map(|b| Some((b, b.clip_index(&clip.name)?)))
-                            .with_context(|| format!("{}: not in bank {}", clip.name, clip.bank))?;
-                        wanted.push((clip.name, bank, index));
-                    }
-                    if !model_combos.combos.contains(combo) {
-                        model_combos.combos.push(combo.clone());
-                    }
-                }
-                crate::write_ron(
-                    &out.join("soldiers").join(format!("{}.combos.ron", m.name)),
-                    &model_combos,
-                )?;
-            }
-        }
-        let mut sets = plan.sets;
-        // BF2 has no prone clips (`missing`); BF1's rifle prone clips are
-        // borrowed when `BF1_ANIMS` names BF1's COMMON.LVL (issue #40, one
-        // gameplay: a BF2 soldier goes prone too). A BF1 soldier borrows
-        // BF2's throw when `BF2_ANIMS` names BF2's INGAME.LVL (card GTHRW, for
-        // a BF2 map's class picker). The two games' soldier bones share names.
-        let (lender, lent) = match &sanm {
-            Some(_) => ("BF1_ANIMS", BORROWED_PRONE),
-            None => ("BF2_ANIMS", BORROWED_THROW),
-        };
-        let lender_buf = match lender_path(lender) {
-            Some(p) => {
-                let resolved = crate::resolve_ci(&p.to_string_lossy());
-                Some(crate::gameplay::read(&resolved).with_context(|| format!("{p:?}"))?)
-            }
-            None => None,
-        };
-        let lender_banks = match &lender_buf {
-            Some(b) => {
-                let inner = mungefs::open(b).map_err(|e| anyhow!("{e}"))?;
-                mungefs::anim::find_banks(inner).map_err(|e| anyhow!("{e}"))?
-            }
-            None => Vec::new(),
-        };
-        let lender_human: Vec<&AnimBank> = lender_banks
-            .iter()
-            .filter(|b| b.name.starts_with("human"))
-            .collect();
-        let mut borrowed = Vec::new();
-        for name in lent.iter().chain(if sanm.is_none() {
-            BORROWED_BF2_STATUS
-        } else {
-            &[]
-        }) {
-            if wanted.iter().any(|w| w.0 == *name) || lender_human.is_empty() {
-                continue;
-            }
-            if let Some((full, bank, k)) = find_clip(&lender_human, name) {
-                meta.missing.retain(|m| m != name);
-                borrowed.push(full.clone());
-                wanted.push((full, bank, k));
-            }
-        }
-        let mut motions = manifest::anim_sets::ClipMotions::new();
-        for (name, bank, k) in wanted {
-            let mut decoded = bank.decode_clip(k).map_err(|e| anyhow!("{name}: {e}"))?;
-            let root = decoded
-                .tracks
-                .iter()
-                .find(|t| t.bone_crc == crc32_lower("DummyRoot"));
-            motions.insert(
-                name.clone(),
-                root.map_or_else(
-                    || vec![[0.0; 3]; usize::from(decoded.frames)],
-                    |t| t.translations.clone(),
-                ),
-            );
-            if borrowed.contains(&name) {
-                // The lender's bone lengths are not this model's: a bone the clip
-                // does not move keeps the model's own rest offset - but the
-                // root and the pelvis, which carry the body's height on the
-                // floor (a prone idle holds them low and still).
-                let height = ["dummyroot", "bone_root", "bone_pelvis"].map(crc32_lower);
-                for t in decoded
-                    .tracks
-                    .iter_mut()
-                    .filter(|t| !t.translated && !height.contains(&t.bone_crc))
-                {
-                    if let Some(b) = skel.bones.iter().find(|b| b.crc == t.bone_crc) {
-                        t.translations.fill(b.t);
-                    }
-                }
-            }
-            if plan.measured.contains(&name) {
-                if let Some(v) = anim_sets::root_speed(&name, &decoded, sanm.is_some()) {
-                    sets.root_speed.insert(name.clone(), v);
-                }
-            }
-            let (tracks, root_motion) = clip_to_tracks(&decoded, &skel, pose.as_ref());
-            clips.push(Clip {
-                name: name.clone(),
-                fps: 30.0,
-                frames: u32::from(decoded.frames),
-                tracks,
-            });
-            meta.clips.push(ClipMeta {
-                name,
-                frames: u32::from(decoded.frames),
-                bank: bank.name.clone(),
-                root_motion,
-            });
-        }
-        crate::write_ron(
-            &out.join("soldiers").join(format!("{}.anims.ron", m.name)),
-            &meta,
-        )?;
-        crate::write_ron(&manifest::anim_sets::path(out, &m.name), &sets)?;
-        crate::write_ron(&manifest::anim_sets::motion_path(out, &m.name), &motions)?;
-    }
-    let glb = skinned_to_glb(&sm, &clips)?;
-    std::fs::write(out.join("soldiers").join(format!("{}.glb", m.name)), glb)?;
-    // Every wearer steps its cloth, not only heroes: the PS2 builds an
-    // EntityCloth for each name on the soldier's gmod list at spawn
-    // (FUN_00234a68, re-cloth 2) and steps it while drawn (re-cloth 4).
-    let companion = manifest::cloth::path(out, &m.name);
-    if physics.is_empty() {
-        crate::remove_optional_file(&companion)?;
-    } else {
-        crate::write_ron(&companion, &physics)?;
-    }
-    let render_path = out
-        .join("soldiers")
-        .join(format!("{}.render-clips.glb", m.name));
-    if let Some(corrected) = super::render_clips::corrected_clips(
-        m.segments.iter().any(|s| s.pc_geometry),
-        bf1,
-        &sm,
-        &clips,
-    )? {
-        let skeleton = crate::skin_glb::SkinnedModel {
-            segments: Vec::new(),
-            ..sm.clone()
-        };
-        std::fs::write(&render_path, skinned_to_glb(&skeleton, &corrected)?)?;
-    } else if render_path.exists() {
-        std::fs::remove_file(&render_path)?;
-    }
-
-    let mut wanted: Vec<String> = sm
-        .segments
-        .iter()
-        .map(|s| s.texture.to_ascii_lowercase())
-        .filter(|t| !t.is_empty())
-        .collect();
-    // The class skins (card USKN): the model's override groups and every
-    // override texture its side's classes name, drawn with the flags of
-    // the textures they replace.
-    let skins = model_skins(&m, &anim_sets::bf2::side_classes(&buf)?);
-    for (tex, group) in &skins.overrides {
-        let replaced = skins.groups.get(group).into_iter().flatten();
-        let f = replaced.filter_map(|t| flags.get(t)).fold(0, |a, f| a | f);
-        flags.insert(tex.clone(), f);
-        wanted.push(tex.clone());
-    }
-    let file = manifest::SoldierSkins {
-        groups: skins.groups.clone(),
-        overrides: skins.overrides.iter().map(|o| o.0.clone()).collect(),
-    };
-    crate::write_ron(
-        &out.join("soldiers").join(format!("{}.skins.ron", m.name)),
-        &file,
-    )?;
-    let mut textures = bake_textures_flagged(inner, &wanted, &flags, out, pc.as_ref())?;
-    for texture in super::lod::bake_or_skip(inner, &buf, &m, &skel, out, pc.as_ref()) {
-        if !textures.contains(&texture) {
-            textures.push(texture);
-        }
-    }
-    for (tex, _) in &skins.overrides {
-        if !textures.contains(tex) {
-            eprintln!(
-                "soldier {}: override texture {tex} is not in the LVL",
-                m.name
-            );
-        }
-    }
-
-    let (min, max) = crate::gltf_bin::min_max3(sm.segments.iter().flat_map(|s| s.positions.iter()));
-    Ok(BakedSoldier {
-        name: m.name.clone(),
-        clips: clips.len(),
-        missing_clips: meta.missing.clone(),
-        bones: skel.bones.len(),
-        vertices: sm.segments.iter().map(|s| s.positions.len()).sum(),
-        triangles: sm.segments.iter().map(|s| s.triangles.len()).sum(),
-        textures,
-        cloths: cloth_names,
-        aabb: (min, max),
-        texture_flags: flags,
-    })
+    SideBakeCache::load(lvl_path, anim_lvl, pc_lvl)?.bake_soldier(model, outdir)
 }
 
 /// Per-texture OR of the material flags of the segments that use it.

@@ -120,7 +120,7 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 - Built into a sibling `.staging.<pid>` directory and committed via directory rename swap (`swap_dir`) so interrupted conversions never corrupt an existing cache.
 - Governed by `cache_meta.ron` (`ModCacheMeta`), validated on every launcher scan and game startup (`ModCacheMeta::validate`):
   - `schema_version == MOD_CACHE_SCHEMA_VERSION` (currently `1`)
-  - `converter_version == MOD_CONVERTER_VERSION` (currently `9`)
+  - `converter_version == MOD_CONVERTER_VERSION` (currently `11`)
   - `source_fingerprint` (SHA-256 over relative paths, sizes, and file SHA-256s of the mod folder)
   - `replacement_key` (derived from active `ResourceOp`s; validated via `catalog_digest` and `target_choices` when replacements are present)
   - Presence and path-safety checks on every expected `manifest.ron`, mission RON, `locl/english.ron`, and non-removed `replacement_outputs` file on disk.

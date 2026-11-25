@@ -266,6 +266,8 @@ struct StockStamp {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ModIndexEntry {
+    #[serde(default)]
+    converter_version: u32,
     tree_stamp: String,
     catalog_digest: String,
     target_choices: BTreeMap<String, TargetChoice>,
@@ -309,7 +311,8 @@ impl ModIndexCache {
         choices: &BTreeMap<String, TargetChoice>,
     ) -> Option<DiscoveredMod> {
         let e = self.entries.get(mod_id)?;
-        if e.tree_stamp == tree_stamp
+        if e.converter_version == MOD_CONVERTER_VERSION
+            && e.tree_stamp == tree_stamp
             && e.catalog_digest == catalog_digest
             && &e.target_choices == choices
         {
@@ -330,6 +333,7 @@ impl ModIndexCache {
         self.entries.insert(
             mod_id,
             ModIndexEntry {
+                converter_version: MOD_CONVERTER_VERSION,
                 tree_stamp,
                 catalog_digest,
                 target_choices,
@@ -1149,10 +1153,17 @@ fn converted_status(
     {
         None => ModCacheStatus::Failed("missing cache metadata".into()),
         Some(ModCacheStatus::Stale { reason } | ModCacheStatus::Failed(reason)) => {
-            ModCacheStatus::Failed(format!(
-                "conversion finished but the cache is still stale ({reason}); `{}` may be older than the launcher",
-                bake.display()
-            ))
+            let written = ModCacheMeta::load(cache_dir).map(|m| m.converter_version);
+            if written.is_some_and(|v| v != MOD_CONVERTER_VERSION) {
+                ModCacheStatus::Failed(format!(
+                    "conversion finished but the cache is still stale ({reason}); `{}` may be older than the launcher",
+                    bake.display()
+                ))
+            } else {
+                ModCacheStatus::Failed(format!(
+                    "conversion finished but the cache is still stale ({reason})"
+                ))
+            }
         }
         Some(ModCacheStatus::NeedsConversion) => {
             ModCacheStatus::Failed("conversion finished but wrote no cache".into())

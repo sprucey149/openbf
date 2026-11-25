@@ -48,7 +48,7 @@ pub(crate) use output::bake_flags;
 use output::merge_prior;
 pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, bake_weapon_with,
-    set_lender, texture_flags, weapon_flags, weapon_nodes, BakedWeapon,
+    set_lender, texture_flags, weapon_flags, weapon_nodes, BakedWeapon, SideBakeCache,
 };
 
 pub struct BakedSoldier {
@@ -480,77 +480,127 @@ pub(crate) fn append_rig_attachment(
     Ok(true)
 }
 
-/// Fold any unskinned helper bone `p` absent from the pose `rig` whose
-/// children all declare `p`'s own parent `gp` as their rig parent (such as
-/// `gar_inf_nabooqueen`'s `root_a_spine` between `bone_root` and
-/// `bone_a_spine`). The `zaf_` rig has no `root_a_spine` joint, and PS2 runs
-/// clips on the `zaf_` hierarchy (`FUN_00533d38`, `FUN_0057e988`); keeping
-/// `root_a_spine` active above `bone_a_spine` applies its +90° Y bind
-/// rotation a second time on top of clips that already rotate `bone_a_spine`
-/// in `bone_root` space. Folding `p`'s bind transform into each child `c` and
-/// resetting `p` to identity preserves bone indices and global bind poses.
+/// The default soldier rig: the human `zaf_` rig (BF1 `human_animation_0`,
+/// BF2 `human_0`; equal joints, `mungefs::anim` test
+/// `bf1_bf2_diveforward_identical`). Both games pose a class with no own
+/// `SkeletonName` on it (`analysis/re-soldier-skeleton-skins.md` §2, the
+/// default rig's load in BF1 `FUN_0022d828` / BF2 `FUN_00281228`).
+pub(crate) fn human_rig<'a>(
+    rigs: impl IntoIterator<Item = &'a mungefs::anim::Rig>,
+) -> Option<&'a mungefs::anim::Rig> {
+    let bone_root = crc32_lower("bone_root");
+    rigs.into_iter().find(|r| {
+        r.name.to_ascii_lowercase().starts_with("human") && r.joint(bone_root).is_some()
+    })
+}
+
+/// Re-parent every model bone the pose `rig` knows under the bone its rig
+/// joint names as parent, keeping its global bind. Both games build the pose
+/// on the `zaf_` hierarchy, parent × local per rig joint (BF2
+/// `FUN_00533d38`…`FUN_00534a70`, BF1 `FUN_00440928`; `FUN_0057e988`), and
+/// the model's own `skel` never enters the draw
+/// (`analysis/re-soldier-skeleton-skins.md` §0.2, §1). A model `skel` may
+/// put extra helper bones between two rig bones: `gar_inf_nabooqueen`'s
+/// `root_a_spine` between `bone_root` and `bone_a_spine`, or a PC mod's
+/// `root_l_upperarm` / `root_l_hand` / `root_neck` wrappers. Left in the
+/// GLB hierarchy, each wrapper's bind applies again on top of a clip that
+/// already rotates and translates its child in the rig parent's space, and
+/// the limbs twist off the body. A wrapper left childless, unskinned and
+/// unrigged is reset to identity. Bone indices and global binds are kept.
 pub(crate) fn fold_unrigged_ancestors(
     skel: &mut Skeleton,
     rig: &mungefs::anim::Rig,
     sm: &SkinnedModel,
 ) -> bool {
-    let mut changed = false;
-    loop {
-        let mut step = false;
-        for p in 0..skel.bones.len() {
-            let Some(gp) = skel.bones[p].parent else {
-                continue;
-            };
-            if rig.joint(skel.bones[p].crc).is_some() {
+    let n = skel.bones.len();
+    let local = |b: &mungefs::skel::SkelBone| {
+        (
+            Mat3::from_cols(
+                Vec3::from_array(b.rows[0]),
+                Vec3::from_array(b.rows[1]),
+                Vec3::from_array(b.rows[2]),
+            ),
+            Vec3::from_array(b.t),
+        )
+    };
+    let mut global: Vec<Option<(Mat3, Vec3)>> = vec![None; n];
+    for i in 0..n {
+        let mut chain = vec![i];
+        while let Some(p) = skel.bones[chain[chain.len() - 1]].parent {
+            if global[p].is_some() || chain.len() > n {
+                break;
+            }
+            chain.push(p);
+        }
+        for &b in chain.iter().rev() {
+            if global[b].is_some() {
                 continue;
             }
-            let skinned_to_p = sm.segments.iter().any(|seg| {
+            let (m, t) = local(&skel.bones[b]);
+            global[b] = Some(match skel.bones[b].parent.and_then(|p| global[p]) {
+                Some((pm, pt)) => (pm * m, pm * t + pt),
+                None => (m, t),
+            });
+        }
+    }
+    let skinned: Vec<bool> = (0..n)
+        .map(|b| {
+            sm.segments.iter().any(|seg| {
                 seg.weights.iter().zip(&seg.joints).any(|(w, j)| {
                     w.iter()
                         .zip(j)
-                        .any(|(&wi, &ji)| wi > 0.0 && usize::from(ji) == p)
+                        .any(|(&wi, &ji)| wi > 0.0 && usize::from(ji) == b)
                 })
-            });
-            if skinned_to_p {
-                continue;
+            })
+        })
+        .collect();
+    let descends_from = |skel: &Skeleton, mut b: usize, ancestor: usize| {
+        for _ in 0..=n {
+            if b == ancestor {
+                return true;
             }
-            let children: Vec<usize> = (0..skel.bones.len())
-                .filter(|&c| skel.bones[c].parent == Some(p))
-                .collect();
-            if children.is_empty() {
-                continue;
+            match skel.bones[b].parent {
+                Some(p) => b = p,
+                None => return false,
             }
-            let gp_crc = skel.bones[gp].crc;
-            if !children.iter().all(|&c| {
-                rig.joint(skel.bones[c].crc)
-                    .is_some_and(|j| j.parent_crc == gp_crc)
-            }) {
-                continue;
-            }
-            let m_p = Mat3::from_cols(
-                Vec3::from_array(skel.bones[p].rows[0]),
-                Vec3::from_array(skel.bones[p].rows[1]),
-                Vec3::from_array(skel.bones[p].rows[2]),
-            );
-            let t_p = Vec3::from_array(skel.bones[p].t);
-            for c in children {
-                let m_c = Mat3::from_cols(
-                    Vec3::from_array(skel.bones[c].rows[0]),
-                    Vec3::from_array(skel.bones[c].rows[1]),
-                    Vec3::from_array(skel.bones[c].rows[2]),
-                );
-                let t_c = Vec3::from_array(skel.bones[c].t);
-                skel.bones[c].parent = Some(gp);
-                skel.bones[c].rows = (m_p * m_c).to_cols_array_2d();
-                skel.bones[c].t = (m_p * t_c + t_p).to_array();
-            }
+        }
+        true
+    };
+    let mut changed = false;
+    let mut left = Vec::new();
+    for c in 0..n {
+        let Some(joint) = rig.joint(skel.bones[c].crc) else {
+            continue;
+        };
+        if joint.parent_crc == 0 {
+            continue;
+        }
+        let Some(r) = skel.bones.iter().position(|b| b.crc == joint.parent_crc) else {
+            continue;
+        };
+        let Some(p) = skel.bones[c].parent else {
+            continue;
+        };
+        if p == r || descends_from(skel, r, c) {
+            continue;
+        }
+        let (Some((m_r, t_r)), Some((m_c, t_c))) = (global[r], global[c]) else {
+            continue;
+        };
+        let inv = m_r.inverse();
+        skel.bones[c].parent = Some(r);
+        skel.bones[c].rows = (inv * m_c).to_cols_array_2d();
+        skel.bones[c].t = (inv * (t_c - t_r)).to_array();
+        left.push(p);
+        changed = true;
+    }
+    for p in left {
+        if rig.joint(skel.bones[p].crc).is_none()
+            && !skinned[p]
+            && !skel.bones.iter().any(|b| b.parent == Some(p))
+        {
             skel.bones[p].rows = Mat3::IDENTITY.to_cols_array_2d();
             skel.bones[p].t = [0.0; 3];
-            step = true;
-            changed = true;
-        }
-        if !step {
-            break;
         }
     }
     changed

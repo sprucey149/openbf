@@ -29,8 +29,52 @@ pub use resolve::{
 /// 8: legacy resource replacements (stock catalog, class patches, re-baked
 /// side models and textures).
 /// 9: PC terrain & foliage directional lighting from `normal_terrain_shader.xml`.
-pub const MOD_CONVERTER_VERSION: u32 = 9;
+/// 10: soldier skeletons re-parented onto the pose rig's hierarchy (helper
+/// `root_*` bones between rig bones no longer double-apply their bind).
+/// 11: a modded soldier whose `_low1` shares no texture sheet with its high
+/// model gets no far LOD (the stock low body was drawn far off).
+pub const MOD_CONVERTER_VERSION: u32 = 11;
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
+
+/// The `bake` subcommand that prints the [`MOD_CONVERTER_VERSION`] it writes.
+pub const BAKE_CONVERTER_VERSION_ARG: &str = "mod-converter-version";
+
+/// The [`MOD_CONVERTER_VERSION`] a `bake` binary writes, or `None` when it
+/// cannot run or predates [`BAKE_CONVERTER_VERSION_ARG`].
+pub fn bake_converter_version(bin: &Path) -> Option<u32> {
+    let mut cmd = std::process::Command::new(bin);
+    cmd.arg(BAKE_CONVERTER_VERSION_ARG)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// The first existing `bake` among `candidates` that writes this build's
+/// [`MOD_CONVERTER_VERSION`], else the first existing one. A stale copy left
+/// in an earlier search location can no longer shadow the matching `bake`
+/// shipped beside the game and launcher.
+pub fn pick_bake_bin(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    let mut seen: Vec<PathBuf> = Vec::new();
+    for path in candidates {
+        if path.is_file() && !seen.contains(&path) {
+            seen.push(path);
+        }
+    }
+    seen.iter()
+        .find(|p| bake_converter_version(p) == Some(MOD_CONVERTER_VERSION))
+        .or_else(|| seen.first())
+        .cloned()
+}
 pub const CACHE_META_FILE: &str = "cache_meta.ron";
 pub const MOD_MANIFEST_FILE: &str = "openbf_mod.ron";
 
@@ -661,6 +705,23 @@ pub fn collect_map_modes_summary(map: &ModMapSummary) -> BTreeMap<&'static str, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pick_bake_bin_skips_missing_and_falls_back_to_the_first_existing() {
+        let dir = std::env::temp_dir().join(format!("openbf_pick_bake_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        fs::write(&a, b"not a bake").unwrap();
+        fs::write(&b, b"not a bake").unwrap();
+        assert_eq!(bake_converter_version(&a), None);
+        assert_eq!(
+            pick_bake_bin([dir.join("missing"), a.clone(), b.clone()]),
+            Some(a.clone())
+        );
+        assert_eq!(pick_bake_bin([dir.join("missing")]), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     fn empty_meta(maps: Vec<ModMapSummary>, catalog_digest: &str) -> ModCacheMeta {
         ModCacheMeta {

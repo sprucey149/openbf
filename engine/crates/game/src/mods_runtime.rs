@@ -227,10 +227,10 @@ pub fn locate_bake_bin(data_dir: &Path) -> Option<PathBuf> {
     }
     let name = format!("bake{}", std::env::consts::EXE_SUFFIX);
     let mut candidates = Vec::new();
-    candidates.push(data_dir.join("tools").join(&name));
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join(&name));
+            candidates.push(data_dir.join("tools").join(&name));
             candidates.push(dir.join("openbf_data").join("tools").join(&name));
             for anc in dir.ancestors().take(5) {
                 let target = anc.join("engine").join("target");
@@ -252,7 +252,8 @@ pub fn locate_bake_bin(data_dir: &Path) -> Option<PathBuf> {
         candidates.push(cwd.join("engine").join("target").join("debug").join(&name));
         candidates.push(cwd.join("openbf_data").join("tools").join(&name));
     }
-    candidates.into_iter().find(|p| p.is_file())
+    candidates.push(data_dir.join("tools").join(&name));
+    extensions::mods::pick_bake_bin(candidates)
 }
 
 /// Where `bake mod-convert` reads the stock bake from: the asset directory
