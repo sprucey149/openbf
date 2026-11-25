@@ -239,6 +239,7 @@ pub struct SprintLatch {
     on: bool,
     prev_down: bool,
     seen: bool,
+    moved: bool,
     age: u32,
 }
 
@@ -251,10 +252,23 @@ impl SprintLatch {
 
     pub fn apply_with_fire_cancel(
         &mut self,
+        pad: PadState,
+        on_foot: bool,
+        sprinting: bool,
+        fire_cancels_sprint: bool,
+    ) -> PadState {
+        self.apply_with_start_buffer(pad, on_foot, sprinting, fire_cancels_sprint, false)
+    }
+
+    /// With `buffer_start`, a click can wait for stick travel until the usual
+    /// sprint start timeout. Letting go of the stick after moving still cancels.
+    pub fn apply_with_start_buffer(
+        &mut self,
         mut pad: PadState,
         on_foot: bool,
         sprinting: bool,
         fire_cancels_sprint: bool,
+        buffer_start: bool,
     ) -> PadState {
         let down = pad.buttons & buttons::SPRINT != 0;
         let edge = down && !self.prev_down;
@@ -266,20 +280,23 @@ impl SprintLatch {
         if edge {
             self.on = !self.on;
             self.seen = false;
+            self.moved = false;
             self.age = 0;
         }
+        let moving = pad.ly >= SPRINT_KEEP_LY;
         if self.on {
             self.age += 1;
             self.seen |= sprinting;
+            self.moved |= moving;
             if (self.seen && !sprinting && !edge)
                 || (!self.seen && self.age > SPRINT_WAIT)
-                || pad.ly < SPRINT_KEEP_LY
+                || (!moving && (!buffer_start || self.moved))
                 || (fire_cancels_sprint && pad.pressed(buttons::FIRE))
             {
                 self.on = false;
             }
         }
-        if self.on {
+        if self.on && moving {
             pad.buttons |= buttons::SPRINT;
         }
         pad
@@ -708,6 +725,12 @@ fn dz(v: f32) -> f32 {
 /// or [`STICK_FULL`]) reads as 1.
 fn move_axis(v: f32, full: f32) -> f32 {
     (dz(v) / full).clamp(-1.0, 1.0)
+}
+
+/// A left-stick axis as the sim reads it, for a stick no gilrs pad reports
+/// (a motion controller's).
+pub fn drive_axis(v: f32) -> i16 {
+    PadState::quantize(move_axis(v, STICK_FULL))
 }
 
 /// A right-stick axis as the sim reads it: the deadzone, [`LOOK_SCALE`] and

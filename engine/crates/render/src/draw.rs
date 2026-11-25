@@ -84,6 +84,9 @@ pub enum DrawLayer {
     /// in ascending LTEX order, which is the order the PS2 composites them.
     /// World draws only; lit like the base ([`LightPath::Terrain`]).
     TerrainLayer,
+    /// Unoccluded world overlay (`LightPath::Unlit`, alpha-blended with depth
+    /// compare `Always` and no depth write), drawn after post-world filters.
+    Overlay,
 }
 
 /// How the world shader lights a static draw — the PS2 VU1 program its
@@ -462,6 +465,22 @@ impl DrawCmd {
     pub fn textured_blended(mesh: MeshHandle, texture: TextureHandle, model: Mat4) -> Self {
         Self {
             layer: DrawLayer::Blend,
+            ..Self::textured(mesh, texture, model)
+        }
+    }
+
+    /// As [`DrawCmd::textured`], drawn unoccluded over the finished 3D scene
+    /// (`DrawLayer::Overlay`, [`LightPath::Unlit`]).
+    pub fn overlay(
+        mesh: MeshHandle,
+        texture: TextureHandle,
+        color: [f32; 4],
+        model: Mat4,
+    ) -> Self {
+        Self {
+            color,
+            layer: DrawLayer::Overlay,
+            light: LightPath::Unlit,
             ..Self::textured(mesh, texture, model)
         }
     }

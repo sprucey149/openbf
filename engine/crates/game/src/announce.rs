@@ -123,6 +123,80 @@ pub const ANSWER_TAKES: u8 = 3;
 /// `ai_rep` / `ai_cis` is locked 1.0 s, of `ai_all` / `ai_imp` 2.0 s (RE
 /// section 3, gate 1). From the RE's table: the bake does not carry a
 /// segment's interval.
+/// `objectivectf.luac`'s `gSoundEventsCTF_src`: per faction, the line for
+/// each 2-flag event, `_att` for the team that does not own the flag and
+/// `_def` for the flag's own team (`soundevent_ctf.luac`
+/// `SoundEvent_BroadcastVO(event, enemy, owner)` broadcasts
+/// `[enemy][event.."_att"]` to the enemy and `[owner][event.."_def"]` to the
+/// owner). The script keys only these four factions.
+const TWO_FLAG_LINES: [(&str, [(&str, &str); 8]); 4] = [
+    (
+        "all",
+        [
+            ("taken_att", "all_impFlag_take_all"),
+            ("dropped_att", "all_impFlag_drop_all"),
+            ("taken_def", "all_allFlag_take_imp"),
+            ("dropped_def", "all_allFlag_drop_imp"),
+            ("returned_att", "all_allFlag_returned"),
+            ("returned_def", "all_impFlag_returned"),
+            ("captured_att", "all_allFlag_score"),
+            ("captured_def", "all_impFlag_score"),
+        ],
+    ),
+    (
+        "imp",
+        [
+            ("taken_att", "imp_allFlag_take_imp"),
+            ("dropped_att", "imp_allFlag_drop_imp"),
+            ("taken_def", "imp_impFlag_take_all"),
+            ("dropped_def", "imp_impFlag_drop_all"),
+            ("returned_att", "imp_impFlag_returned"),
+            ("returned_def", "imp_allFlag_returned"),
+            ("captured_att", "imp_impFlag_score"),
+            ("captured_def", "imp_allFlag_score"),
+        ],
+    ),
+    (
+        "rep",
+        [
+            ("taken_att", "rep_cisFlag_take_rep"),
+            ("dropped_att", "rep_cisFlag_drop_rep"),
+            ("taken_def", "rep_repFlag_take_cis"),
+            ("dropped_def", "rep_repFlag_drop_cis"),
+            ("returned_att", "rep_repFlag_returned"),
+            ("returned_def", "rep_cisFlag_returned"),
+            ("captured_att", "rep_repFlag_score"),
+            ("captured_def", "rep_cisFlag_score"),
+        ],
+    ),
+    (
+        "cis",
+        [
+            ("taken_att", "cis_repFlag_take_cis"),
+            ("dropped_att", "cis_repFlag_drop_cis"),
+            ("taken_def", "cis_cisFlag_take_rep"),
+            ("dropped_def", "cis_cisFlag_drop_rep"),
+            ("returned_att", "cis_cisFlag_returned"),
+            ("returned_def", "cis_repFlag_returned"),
+            ("captured_att", "cis_cisFlag_score"),
+            ("captured_def", "cis_repFlag_score"),
+        ],
+    ),
+];
+
+/// The 2-flag line `faction` hears for `event` (`taken`, `dropped`,
+/// `returned`, `captured`) on a flag it owns (`own`) or not.
+pub fn two_flag_line(faction: &str, event: &str, own: bool) -> Option<&'static str> {
+    let key = format!("{event}_{}", if own { "def" } else { "att" });
+    TWO_FLAG_LINES
+        .iter()
+        .find(|(f, _)| *f == faction)?
+        .1
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, name)| *name)
+}
+
 pub fn answer_lock_secs(faction: &str) -> f32 {
     match faction {
         "all" | "imp" => 2.0,
@@ -478,11 +552,11 @@ impl Commander {
     }
 
     fn flag_calls(&mut self, sim: &Sim) {
-        if !sim
-            .ctf
-            .as_ref()
-            .is_some_and(|ctf| ctf.mode == core::sim::CtfMode::OneFlag)
-        {
+        let Some(ctf) = sim.ctf.as_ref() else {
+            return;
+        };
+        if ctf.mode == core::sim::CtfMode::TwoFlag {
+            self.two_flag_calls(sim, ctf);
             return;
         }
         let listener = self.announcer.listener();
@@ -515,6 +589,44 @@ impl Commander {
             };
             self.queue.ask(Line::commander(&name));
             self.last_flag_voice = Some(sim.tick);
+        }
+    }
+
+    /// `objectivectf.luac` proto 9.1, run for pickup (`taken`), drop
+    /// (`dropped`) and capture (`captured`): with more than 3 s of mission
+    /// time since the last (`lastVOPlayTime`, first -10000), broadcast
+    /// [`two_flag_line`] to each team and restart the gate. The script's
+    /// `returned` needs the owner to carry its flag, which `AllowTeamPickup`
+    /// 0 forbids, and a timed reset (`OnFlagReset`, proto 9.5) asks for
+    /// none. OURS: the script also needs the mission's `multiplayerRules`,
+    /// which every shipped CTF mission sets; the port does not read it.
+    /// replace: the mission's `multiplayerRules`.
+    fn two_flag_calls(&mut self, sim: &Sim, ctf: &core::sim::CtfState) {
+        let listener = self.announcer.listener();
+        let Some(faction) = self.factions.get(listener) else {
+            return;
+        };
+        for event in &sim.events {
+            let (flag, name) = match *event {
+                core::sim::Event::FlagPickedUp { flag, .. } => (flag, "taken"),
+                core::sim::Event::FlagDropped { flag, .. } => (flag, "dropped"),
+                core::sim::Event::FlagCaptured { flag, .. } => (flag, "captured"),
+                _ => continue,
+            };
+            let Some(flag) = ctf.flags.get(usize::from(flag)) else {
+                continue;
+            };
+            if self
+                .last_flag_voice
+                .is_some_and(|tick| sim.tick.saturating_sub(tick) <= 3 * u64::from(core::TICK_HZ))
+            {
+                continue;
+            }
+            self.last_flag_voice = Some(sim.tick);
+            let own = usize::from(flag.team) == listener;
+            if let Some(line) = two_flag_line(faction, name, own) {
+                self.queue.ask(Line::commander(line));
+            }
         }
     }
 
@@ -1061,6 +1173,50 @@ mod tests {
         sim.tick += 3 * u64::from(core::TICK_HZ) + 1;
         commander.flag_calls(&sim);
         assert!(commander.queue.waiting("imp_impFlag_score"));
+    }
+
+    /// 2-flag CTF voices each event from the listener's side of the flag:
+    /// the enemy flag taken is `_att`, our own flag dropped is `_def`, the
+    /// 3 s gate holds a second event, and a capture of the enemy flag is the
+    /// capturing side's `captured_att`.
+    #[test]
+    fn two_flag_voice_follows_the_flag_owner_with_cooldown() {
+        let mut sim = Sim::empty(1);
+        let (a, b) = (glam::Vec3::X * -50.0, glam::Vec3::X * 50.0);
+        sim.ctf = Some(core::sim::CtfState::new_two_flag(3, a, b, b, a));
+        let carrier = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, glam::Vec3::ZERO))
+            .unwrap();
+        let mut commander =
+            Commander::new(BattleLines::default(), ["rep", "cis"], 0, vec![], vec![]);
+        sim.events.push(core::sim::Event::FlagPickedUp {
+            flag: 1,
+            unit: carrier,
+            team: 0,
+        });
+        commander.flag_calls(&sim);
+        assert!(commander.queue.waiting("rep_cisFlag_take_rep"));
+        sim.events.clear();
+        sim.events.push(core::sim::Event::FlagDropped {
+            flag: 0,
+            unit: carrier,
+            team: 1,
+            pos: glam::Vec3::ZERO,
+        });
+        commander.flag_calls(&sim);
+        assert!(!commander.queue.waiting("rep_repFlag_drop_cis"));
+        sim.tick += 3 * u64::from(core::TICK_HZ) + 1;
+        commander.flag_calls(&sim);
+        assert!(commander.queue.waiting("rep_repFlag_drop_cis"));
+        sim.events.clear();
+        sim.events.push(core::sim::Event::FlagCaptured {
+            flag: 1,
+            unit: carrier,
+            team: 0,
+        });
+        sim.tick += 3 * u64::from(core::TICK_HZ) + 1;
+        commander.flag_calls(&sim);
+        assert!(commander.queue.waiting("rep_repFlag_score"));
     }
 
     /// A script's four bleeding and four low-reinforcement calls: team 1 is

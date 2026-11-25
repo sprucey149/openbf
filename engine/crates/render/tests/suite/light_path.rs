@@ -147,15 +147,16 @@ fn each_path_takes_the_vu1_terms_it_should() {
     let c = f32::from(C) / 255.0;
 
     // Lit (0x1bb/0x1e6 then 0x521): c × (ambient + sun + Light2) — every
-    // light, the Static sun included. The hemisphere blends its two colours
-    // in GS units (card LSUM): half the sky's display value.
+    // light, the Static sun included, multiplied in display units (PC D3D9
+    // `normal_shader.xml` and PS2 GS `MODULATE`).
+    let lit_ch = light_sum(c, &[(0.25, 1.0)], 0.0);
     close(
         shot(LightPath::Lit),
-        [c * 0.25, c * 0.25, light_sum(c, &[(0.5, 0.5)], 0.0)],
+        [lit_ch, lit_ch, light_sum(c, &[(0.5, 0.5)], 0.0)],
         "lit",
     );
     // Prelit (§3): no ambient, the Static sun skipped, Light2 kept, × c.
-    close(shot(LightPath::Prelit), [0.0, c * 0.25, 0.0], "prelit");
+    close(shot(LightPath::Prelit), [0.0, lit_ch, 0.0], "prelit");
     // Prelit, COL0 ADDED (0x537): c + the non-Static lights, in GS units.
     let add = light_sum(1.0, &[(c, 1.0), (0.25, 1.0)], 0.0);
     close(shot(LightPath::PrelitAdd), [c, add, c], "prelit_add");

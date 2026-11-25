@@ -42,6 +42,21 @@ fn manifest(keys: &[&str], addon: bool) -> ContentManifest {
     }
 }
 
+#[test]
+fn mod_override_digest_mismatch_is_detected() {
+    let mut host = manifest(&["mod_abr__abr"], false);
+    host.active_mods = vec![("content.abr".into(), "aaa".into())];
+    host.override_digest = "1111222233334444".into();
+    let mut guest = host.clone();
+    assert_eq!(mod_mismatch_reason(&host, &guest), None);
+    guest.override_digest = "9999888877776666".into();
+    assert!(mod_mismatch_reason(&host, &guest).is_some());
+    assert_eq!(
+        ContentManifest::intersect([&host, &guest]).override_digest,
+        "MISMATCH"
+    );
+}
+
 fn add(ia: &mut InstantAction, key: &str) {
     let i = index(ia, key);
     let before = ia.playlist.len();

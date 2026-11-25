@@ -1,0 +1,26 @@
+[package]
+name = "extensions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Full engine runtime traits (enabled by `game` and engine extension crates,
+# disabled by `launcher` so the setup GUI avoids linking core/render/input).
+runtime = ["dep:core", "dep:render", "dep:input", "dep:glam", "dep:winit"]
+
+[build-dependencies]
+sha2 = "0.10"
+
+[dependencies]
+anyhow = { workspace = true }
+ron = { workspace = true }
+serde = { workspace = true }
+sha2 = "0.10"
+
+core = { path = "../core", optional = true }
+render = { path = "../render", optional = true }
+input = { path = "../input", optional = true }
+glam = { workspace = true, optional = true }
+winit = { workspace = true, optional = true }

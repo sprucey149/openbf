@@ -182,7 +182,7 @@ fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup 
 
 /// The skiff at the origin facing +Z (yaw 0), the player 6 m ahead of its
 /// nose facing it (−Z). `pilot_gun` arms the pilot seat too.
-fn world(pilot_gun: bool) -> (Sim, UnitHandle, VehicleHandle) {
+pub(super) fn world(pilot_gun: bool) -> (Sim, UnitHandle, VehicleHandle) {
     let mut s = Sim::empty(1);
     s.heightfield = Some(flat_ground());
     s.hover_params = vec![Some(skiff())];
@@ -228,7 +228,7 @@ fn world(pilot_gun: bool) -> (Sim, UnitHandle, VehicleHandle) {
     (s, p, v)
 }
 
-fn pad(buttons: u32) -> PadState {
+pub(super) fn pad(buttons: u32) -> PadState {
     PadState {
         buttons,
         ..PadState::default()
@@ -236,7 +236,7 @@ fn pad(buttons: u32) -> PadState {
 }
 
 /// Press and release `b`.
-fn tap(s: &mut Sim, b: u32) {
+pub(super) fn tap(s: &mut Sim, b: u32) {
     s.step(&[pad(b)]);
     s.step(&[pad(0)]);
 }

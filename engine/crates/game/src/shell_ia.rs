@@ -73,7 +73,12 @@ fn catalog_action(
         Mode::Xl => Vec::new(),
         _ => crate::mission::pairs(missions_dir, key, mode.subst()),
     };
-    let maps = ui::shell::catalog(&text, &bakes, &missions);
+    let maps = ui::shell::catalog_with_mods(
+        &text,
+        &bakes,
+        &missions,
+        &crate::mods_runtime::active_mod_maps(),
+    );
     let texts = IaTexts::new(&|key, english| {
         bf2.bf2_text(key)
             .map_or_else(|| english.to_owned(), |t| t.trim_end().to_owned())

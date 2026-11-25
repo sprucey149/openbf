@@ -278,6 +278,9 @@ pub(crate) struct Run<'a> {
     pub(crate) tracking: f32,
 }
 
+/// The countdown's colour, the same on PS2 (B2 `FUN_00384078`) and PC
+/// (0x599c52, BGRA bytes f2 a7 43): (67, 167, 242), whatever the flag's team.
+const FLAG_TIMER_RGB: [f32; 3] = [67.0, 167.0, 242.0];
 const HINT_SCALE_FAR: f32 = 0.25;
 const HINT_SCALE_NEAR: f32 = 0.7;
 const LOCK_RAMP_NEAR: f32 = 200.0;
@@ -451,6 +454,44 @@ impl<'a> Ctx<'a> {
                 &Mat4::from_scale(Vec3::splat(s)),
                 &screen,
                 &quad,
+            );
+        }
+    }
+
+    fn flag_timers(&mut self, size: [f32; 2]) {
+        let hud = self.hud;
+        if hud.flag_timers.is_empty() {
+            return;
+        }
+        let Some(font) = self.face(crate::typography::Face::Tiny) else {
+            return;
+        };
+        let scale = frame_scale(size);
+        let height = f32::from(font.line_height) * scale[1];
+        let screen = Screen {
+            origin: [0.0, 0.0],
+            scale: [1.0, 1.0],
+        };
+        for t in &hud.flag_timers {
+            let text = t.seconds.to_string();
+            self.run(
+                usize::MAX,
+                &Mat4::IDENTITY,
+                &screen,
+                font,
+                &Run {
+                    text: &text,
+                    at: (
+                        (t.ndc[0] * 0.5 + 0.5) * size[0],
+                        (t.ndc[1] * 0.5 + 0.5) * size[1] - height,
+                    ),
+                    h_align: HAlign::Center,
+                    scale,
+                    color: color(FLAG_TIMER_RGB, t.alpha),
+                    additive: false,
+                    shadow: false,
+                    tracking: 0.0,
+                },
             );
         }
     }
@@ -1059,7 +1100,43 @@ pub fn draw_shell_profiles(
     ctx.out
 }
 
+/// The layout's centre reticle group: the cross, its hit marks and the ammo,
+/// refire and heat rings around it.
+pub const RETICLE_GROUP: &str = "player1reticule";
+
 pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
+    draw_tree(hud, art, size, None)
+}
+
+/// [`draw`] with the [`RETICLE_GROUP`] laid out apart, for a view that places
+/// it in the world: (everything else, the reticle at the middle of a `size`
+/// window). The second frame is empty while no tree is drawn.
+pub fn draw_detached(hud: &Hud, art: &HudArt, size: [f32; 2]) -> (HudFrame, HudFrame) {
+    let reticle = hud.find(RETICLE_GROUP);
+    let frame = draw_tree(hud, art, size, reticle);
+    let tree = hud.shell.is_none()
+        && hud.banner.is_none()
+        && hud.stats.is_none()
+        && hud.spawn.as_ref().is_none_or(|page| page.keeps_tree());
+    let mut ctx = Ctx {
+        hud,
+        art,
+        out: HudFrame::default(),
+        clip: None,
+    };
+    if let Some(r) = reticle.filter(|_| tree) {
+        let screen = Screen {
+            origin: [0.5 * size[0], 0.5 * size[1]],
+            scale: frame_scale(size),
+        };
+        let at = hud.elems[r].pos;
+        let parent = Mat4::from_translation(Vec3::new(-at.x, -at.y, 0.0));
+        ctx.element(r, &parent, &screen);
+    }
+    (frame, ctx.out)
+}
+
+fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> HudFrame {
     let mut ctx = Ctx {
         hud,
         art,
@@ -1140,6 +1217,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         ctx.scope(v, size);
     }
     let mut order: Vec<usize> = if tree { hud.roots.clone() } else { Vec::new() };
+    order.retain(|r| Some(*r) != skip);
     order.reverse();
     order.sort_by_key(|c| std::cmp::Reverse(hud.elems[*c].z_order));
     for r in order {
@@ -1186,6 +1264,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
     }
     if tree {
         ctx.hint_markers(size, scale);
+        ctx.flag_timers(size);
         ctx.lock_marker(size, scale);
     }
     // The capture icon: a root group of the PS2's own (card CPBAR).

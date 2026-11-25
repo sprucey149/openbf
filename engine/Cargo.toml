@@ -13,6 +13,8 @@ members = [
     "crates/net",
     "crates/game",
     "crates/launcher",
+    "crates/extensions",
+    "crates/openbf_vr",
 ]
 
 [workspace.package]

@@ -299,6 +299,7 @@ fn a_player_killed_before_their_bolt_lands_still_gets_class_credit() {
         walk.sim.units[victim.index as usize].health.cur = 1.0;
         let end = walk.sim.units[victim.index as usize].aim_point();
         walk.sim.bolts.push(Bolt {
+            tracked_origin: false,
             visual_shot: None,
             pos: end,
             vel: Vec3::ZERO,

@@ -83,8 +83,9 @@ pub use rotating::PREVIOUS;
 /// `header.cheats_now`, `cheats` event rows) and each hit's damage multipliers
 /// (`hit` `v[3]`, `v[4]`), so a playtest with a cheat on is never read as a
 /// rule bug. 19 (#182 B4): the rescue's `embedded` death and `rescue` rows.
+/// 20: tracked saber cuts and blocks include the striking hand and contact spot.
 /// An older file still reads.
-pub const SCHEMA: u32 = 19;
+pub const SCHEMA: u32 = 20;
 /// Net meter rows kept (60 s at 2 Hz).
 const NET_ROWS: usize = 120;
 
@@ -424,6 +425,9 @@ pub enum Ev {
     /// = [damage, b's health after it, the round's age in s: -1 for a
     /// blast] (schema 8; a blast was 0 before schema 11).
     Hit,
+    /// Unit a's tracked saber cut or was blocked, from controller b.
+    SaberHit,
+    SaberBlock,
     FallDamage,
     /// Bot a, stalled, moved on where no human saw it (card UNSN): at its
     /// new spot; `v` = where it stood.
@@ -1138,6 +1142,22 @@ impl Ring {
                     v = vec![r2(damage), r2(health_left)];
                     (Ev::FallDamage, victim.index as i32, -1, -1, at(victim))
                 }
+                Event::SaberHandContact {
+                    attacker,
+                    hand,
+                    pos,
+                    blocked,
+                } if human(attacker) => (
+                    if blocked {
+                        Ev::SaberBlock
+                    } else {
+                        Ev::SaberHit
+                    },
+                    attacker.index as i32,
+                    i32::from(hand),
+                    weapon(attacker),
+                    r2v(pos.to_array()),
+                ),
                 Event::VehicleHit {
                     shooter,
                     vehicle,

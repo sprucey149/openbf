@@ -80,6 +80,10 @@ fn untextured_zero_length_melee_edges_keep_their_axis_for_combo_reach() {
         prop("AttachedFirePoint", "bone_head 1 0 0 0 0 0"),
         prop("LightSaberLength", "0.0"),
         prop("LightSaberWidth", "0.08"),
+        prop("OffhandGeometryName", "paw_mesh"),
+        prop("OffhandFirePointName", "hp_fire bone_l_hand"),
+        prop("LightSaberLength", "0.0"),
+        prop("LightSaberWidth", "0.08"),
     ];
     let fixture = Fixture::new(vec![
         crate::classdb::ClassDef {
@@ -95,10 +99,22 @@ fn untextured_zero_length_melee_edges_keep_their_axis_for_combo_reach() {
             props: vec![prop("LightSaberTexture", "lightsabre")],
         },
     ]);
+    let side = std::path::Path::new("side_bf2");
+    for (model, x) in [("paw_mesh", 1.0), ("rep_weap_inf_lightsabre", 0.0)] {
+        fixture.write(
+            &manifest::weapon_nodes_path(side, model),
+            &vec![manifest::ManifestHardpoint {
+                name: "hp_fire".into(),
+                pos: [x, 0.0, 0.0],
+                axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+            }],
+        );
+    }
     let bindings = blade_bindings(&fixture.root, &fixture.db, "paw").unwrap();
     let binding = &bindings[0];
     assert_eq!(binding.blade.length, 0.0);
     assert_eq!(binding.local.end - binding.local.start, Vec3::X);
+    assert_eq!(bindings[1].tracked_mount, Mat4::IDENTITY);
     assert!(blade_bindings(&fixture.root, &fixture.db, "visible_paw").is_err());
 }
 
@@ -158,6 +174,7 @@ fn binding() -> BladeBinding {
         },
         geometry: None,
         glow_texture: None,
+        tracked_mount: Mat4::IDENTITY,
         local: BladeSegment {
             start: Vec3::ZERO,
             end: Vec3::Z * 1.2,

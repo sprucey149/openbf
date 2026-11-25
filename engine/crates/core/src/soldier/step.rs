@@ -82,6 +82,7 @@ impl Soldier {
         if self.lock_timer <= 0.0 {
             self.lock_hard = false;
             self.fire_lock = false;
+            self.fire_flinch = false;
             self.choke_lock = false;
         }
         // Jet fuel (card JETP): BF2 recharges it outside the jet stances,

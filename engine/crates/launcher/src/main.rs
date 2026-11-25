@@ -340,7 +340,12 @@ fn main() -> Result<()> {
     };
     event_loop.run_app(&mut host).context("running launcher")?;
     if host.launch_on_exit {
-        let _ = launcher::runner::launch_game(&host.app.paths, &host.app.config);
+        let _ = launcher::runner::launch_game(
+            &host.app.paths,
+            &host.app.config,
+            host.app.launch_force_desktop,
+            &host.app.extension_profile,
+        );
     }
     Ok(())
 }

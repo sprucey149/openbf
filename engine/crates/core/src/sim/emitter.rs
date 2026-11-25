@@ -627,7 +627,7 @@ mod tests {
         let target = s
             .spawn(&UnitSpec::trooper(1, Vec3::new(6.0, 0.0, 0.0)))
             .unwrap();
-        s.soldier_shots(unit.index as usize, None, &[shot()]);
+        s.soldier_shots(unit.index as usize, None, &[shot()], None);
         assert!(s.bolts.is_empty(), "an emitter spawns no bolt");
         assert!(hits(&s).is_empty(), "a zero-damage link deals no damage");
         assert_eq!(s.unit(target).unwrap().health.cur, 300.0);
@@ -647,7 +647,7 @@ mod tests {
         let target = s
             .spawn(&UnitSpec::trooper(1, Vec3::new(6.0, 0.0, 0.0)))
             .unwrap();
-        s.soldier_shots(unit.index as usize, None, &[shot()]);
+        s.soldier_shots(unit.index as usize, None, &[shot()], None);
         let u = s.unit(target).unwrap();
         assert!(u.soldier.stance.knocked(), "thrown");
         assert_eq!(u.forced_by.map(|f| f.by), Some(unit));
@@ -754,6 +754,7 @@ mod tests {
                 pitch_spread: 0.0,
                 yaw_spread: 0.0,
             }],
+            None,
         );
         assert!(s.bolts.is_empty(), "an emitter spawns no bolt");
         assert_eq!(s.unit(target).unwrap().health.cur, 50.0);

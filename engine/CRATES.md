@@ -20,8 +20,10 @@ module's `//!` header is its spec.
 | `input` | gilrs pad → `PadState` | core; gilrs |
 | `audio` | kira playback behind the `backend` feature; the streamed music decoder | pak; kira (optional), anyhow |
 | `net` | LAN multiplayer: host-ordered lockstep transport, reliability, sessions, input scheduler, discovery, `LinkSim` (issue #168) | core; serde, zstd |
-| `game` | the binary + library: assets, viewer, play loop, LAN netplay, goldens | core, manifest, pak, input, render, ui, audio, net; glam, winit, gilrs, ron, serde(_json), gltf, ktx2, wgpu, anyhow, image; Linux/BSD: wayland-client, wayland-backend, wayland-protocols, x11rb (idle inhibit); dev: bake, mungefs |
-| `launcher` | standalone native `openbf-launcher` setup/launch GUI (separate from `game`) | pak, mungefs; egui(-wgpu, -winit), wgpu, winit, pollster, rfd, ron, serde, anyhow |
+| `extensions` | bundled engine extension manifests, atomic profiles, conflict/capability resolution, startup error reports, optional `runtime` host traits | anyhow, ron, serde; optional `runtime`: core, render, input, glam, winit |
+| `openbf_vr` | bundled `openbf.vr` OpenBF VR OpenXR backend, stereo eye rendering, visor HUD, physical melee/grenade/aiming rig | extensions (`runtime`), core, input, render, glam, wgpu, anyhow; Windows/Linux: openxr, ash |
+| `game` | the binary + library: assets, viewer, play loop, LAN netplay, goldens, extension host | core, extensions (`runtime`), manifest, pak, input, render, ui, audio, net, optional `openbf_vr` (`vr`); glam, winit, gilrs, ron, serde(_json), gltf, ktx2, wgpu, anyhow, image; Linux/BSD: wayland-client, wayland-backend, wayland-protocols, x11rb (idle inhibit); dev: bake, mungefs |
+| `launcher` | standalone native `openbf-launcher` setup/Mods/launch GUI (separate from `game`) | extensions (no `runtime`), pak, mungefs; egui(-wgpu, -winit), wgpu, winit, pollster, rfd, ron, serde, anyhow |
 
 Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest`) → `game` → `core`, `render`, `ui`,
 `audio`. Use `scripts/size_report.sh` for current per-crate and total source, test and example counts.
@@ -83,7 +85,17 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `mungefs/src/soundbank.rs` 344 — `SampleBank` samples · `SampleBank`
 - `mungefs/src/sound_props.rs` 702 — `snd_` properties, layered/parameterized sounds and `mus_` music records · `SoundProp`, `find_named_sublevels`, `MusicRecord`, `find_music`; graph, bus and take-lock fields in the module header and record docs.
 - `mungefs/src/stream.rs` 330 — music/VO streams · `Stream`
+- `mungefs/src/terrain/pc.rs` 500 — PC BF2 `tern` height/texture/color/cutters decoder alongside PS2/Xbox readers · `decode_pc_terrain`
+- `mungefs/src/lua50.rs` 569 — bounded static Lua 5.0 LVL bytecode parser and table extractor (never executes arbitrary code) · `Chunk`, `Value`, `parse`
+- `mungefs/src/lua50/eval.rs` 961 — bounded opcode evaluator for registration and finite single-player mission branches · `evaluate_standalone_registration`, `analyze_standalone_variants`
+- `mungefs/src/lua50/tests.rs` 150 — Lua 5.0 static extractor unit tests.
+- `mungefs/src/addon.rs` 1167 — generic legacy BF2 addon folder inspector (`addme.script`, `mission.lvl`, world LVLs, `locl`, unused-LVL isolation) · `inspect_addon_dir`, `AddonInspection`, `AddonMapGroup`
+- `mungefs/src/addon/mission_fold.rs` 770 — static folding of evaluated Lua mission setup (Conquest, 1-flag/2-flag CTF, teams, classes, heroes, spawns, audio) · `fold_mission`
+- `mungefs/src/addon/world_events.rs` 129 — bounded extraction of world animation, destruction, effect, and timer actions from mission setup and reachable callbacks · `compile`
+- `mungefs/src/addon/tests.rs` 117 — addon inspection and mission-folding unit regressions.
 - `mungefs/src/world_anim.rs` 145 — a `wrld` chunk's `anim` / `anmg` object animations and groups for the campaign scripts: 41-byte POSK/ROTK keys with tangents, play-at-load and NOHI flags · `Key`, `Anim`, `Group`, `WorldAnims`, `parse`; byte layout in the module header.
+- `mungefs/src/inventory.rs` 366 — generic `ucfb` LVL resource inventory: SHA-256, detected game/platform, sublevel hashes, per-chunk FNV-1a-64 digests and per-class property digests · `scan_file`, `scan_bytes`, `sha256_hex`
+- `mungefs/src/modscan.rs` 311 — shared mod-folder scanner combining addon inspection, cached LVL facts and stock-catalog target resolution · `inspect_mod_folder`, `ScanContext`, `FactsCache`
 
 ## bake — the `bake` binary (groups: `scripts/rebake.sh`)
 - `bake/src/dlc.rs` 437 — selective optional Kit Fisto/Ventress bake: namespaced dependency classes, their effect layer and sound bank · `bake`, `bake_sounds`.
@@ -195,6 +207,12 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/xbox.rs` 863 — `bake xbox` and `bake xbox-prints`: an Xbox disc's maps, and the PS2 gameplay hashes every bake from one is held to · `bake_xbox`, `print_map`, `write_prints`
 - `bake/src/donor.rs` 304 — Card COVR: a BF1 map's Cover hints from the BF2 version of the same map (lead_tmp botre xbox_pc note finding 1). BF2's Yavin Temple authors 973
 - `bake/src/world_anims.rs` 68 — `bake world-anims <LVL> <map dir>`: writes every `wrld`'s animations and groups to `<map dir>/world_anims.ron` (`bake map` writes it too); backfills maps baked before the file existed · `read`, `bake`.
+- `bake/src/mods.rs` 128 — CLI handlers for `bake mod-inspect` and `bake mod-convert` plus module exports · `inspect`, `convert`.
+- `bake/src/mods/mission.rs` 243 — emits translated native OpenBF mission RONs (`mod_<ns>__*.ron`, incl. 2-flag CTF & audio/hero tables) into a mod's cache.
+- `bake/src/mods/convert.rs` 350 — versioned content-mod conversion into `openbf_data/mod_cache/<namespace>/` without touching source mod files · `convert_mod`, `emit_progress`.
+- `bake/src/mods/world.rs` 132 — assemble mission-selected companion and primary LVL sublevels, then share byte-identical files inside the addon cache · `read_world`, `SharedWorldFiles`
+- `bake/src/mods/replace.rs` 1387 — generic stock LVL replacement converter (SIDE classes/soldiers/weapons/vehicles/effects, FPM arms, world textures/maps, load screens, removed companions, patch vs full mode) · `convert_replacements`, `class_patch`, `Replaced`
+- `bake/src/stock.rs` 530 — stock asset reader (directory or packed archive), stock source resolver (PC/PS2/Xbox dirs or ISOs), and stock resource catalog writer (`bake stock-catalog`, `bake stock-record`) · `StockAssets`, `StockSources`, `write_catalog`, `map_output_dir`, `stock_outputs`
 
 ## manifest — the schema
 - `manifest/src/lib.rs` 1468 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `LoadingLayout`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
@@ -206,7 +224,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `manifest/src/tests.rs` 1467 — the round trip: what the bake writes, the runtime reads
 - `manifest/src/tests/hud_files.rs` 62 — HUD layout files round trip.
 - `manifest/src/world_anim.rs` 46 — the `world_anims.ron` bake↔runtime schema: per-world animation and group records tagged with the `wrld` that carries them so unloaded mode layers play nothing · `FILE`, `WorldAnimKey`, `WorldAnim`, `WorldAnimGroup`, `WorldAnims`.
+- `manifest/src/world_events.rs` 27 — closed action and anchor types for an Instant Action environment program · `WorldEvents`, `Action`, `Anchor`
 - `manifest/src/animated_prop.rs` 129 — the `animated_props.ron` bake↔runtime schema: animated prop rigs and the props classes carry on hardpoints; absent on maps with none · `FILE`, `AnimatedProps`, `AnimatedRig`, `AttachedProp`, `PropClip`, `PropTrigger`, `PropAttach`, `PropPrim`.
+- `manifest/src/class_patch.rs` 221 — side class patch sidecar schema (`<classes>.patch.ron`) and deterministic application over stock `ClassDef` lists · `ClassPatchFile`, `ClassPatch`, `patch_path`, `apply`
 
 ## core — the sim (tick order: the header of `core/src/sim.rs`)
 
@@ -526,6 +546,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/main/windowed.rs` 2424 — windowed shell/loading/battle state machine (the battle setup is `round_setup::shell_setup`; a LAN round's is the host's `RoundSetup`, built by `round_setup::build_round` with nothing local written into its sim) (the window opens maximized: `window_attributes`), the Instant Action playlist played row by row (a LAN round's end goes to the lobby: `net_round_over`, a LAN load that fails too), per-tick event/audio and black-box hooks, pause/cheats and profile autosave (a LAN round's pause never freezes the battle: `App::frozen`), including newly earned class kills · `App`, `run_windowed`, `run_shell`, `run_lan`, `play_event_sounds`, `start_take`.
 - `game/src/main/windowed/tests.rs` 636 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
 - `game/src/main/windowed/events.rs` 1942 — native window lifecycle and application event dispatch; the battle frame steps the single-player accumulator or a LAN peer's `LocalView` through one tick hook, draws the net meter (F7) and banners, the lobby screen (`Screen::Lobby`), a decided LAN round's `round_decided` · `ApplicationHandler for App`; headless automation never starts this path
+- `game/src/main/extensions_host.rs` 324 — bundled extension discovery (`--list-extensions`), CLI overrides (`--vr`/`--desktop`/`--no-vr`/`--enable-ext`/`--disable-ext`), capability resolution, startup error reporting (`last_startup_error.ron` + `startup_error.log`), and launcher relaunch on startup failure · `resolve_startup`, `report_startup_error`, `clear_startup_error`, `print_extensions_ron`
+- `game/src/main/windowed/xr.rs` 179 — per-frame host routing between `App` (`game`) and an active `ActiveDisplayExtension` (`extensions::runtime`), stereo eye preparation (`live_view`, `prepare_soldiers`, `place_tracked_muzzle`), menu cursor forwarding, stats screen pointing, and battle frame presentation · `App::renderer_for_window`, `App::begin_display_ext_frame`, `App::finish_redraw`, `render_battle`
 - `game/src/main/windowed/tick_hook.rs` 159 — what the window does after every stepped tick, shared by single player and a LAN peer: stations, effects, shot points, event sounds and ambience, medal lines, black box, rumble, match log, session stats, frame record; a LAN tick skips single player's score write and mutes a predicted own shot · `TickHook`, `TickState`.
 - `game/src/main/windowed/lan.rs` 1505 — the window's LAN session (issue #168): `--lan-host` / `--lan-join` straight into a networked Instant Action round, the session's events (loads, HUD lines, plain refusal texts, the end banner), the host's round start and its rounds for playlist rows, the host benching a guest whose copy plays differently or who lacks the map (`GameNotice`, `HostCommand::Bench`), the round's `EndRound` and ready check (an abandoned round goes to the same results, `NetAction::RoundOver`), pause actions as host commands or guest requests (Respawn as the RESPAWN bit, the host's cheat target), Morse words, the net meter's figures and panel · `NetplaySession` (`open`, `host`, `join`, `host_row_setup`, `round_decided`), `NetLink`, `LanArgs`, `NetAction`, `draw_meter`, `draw_banner`, `run_lan`.
 - `game/src/main/windowed/spawn_feedback.rs` 72 — original navigation cues for accepted spawn picks (the local slot's screens) and the developer snapshot notice above the menus.
@@ -545,6 +567,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/main/windowed/front/campaign_saves.rs` 429 — the shell's Rise of the Empire save glue: save-date formatting, profile save sync, New Game, save-command dispatch and the save-name keyboard step · `sync_campaign_saves`, `start_campaign_new_game`, `campaign_save_command`, `step_save_name` (all `pub(super)`).
 - `game/src/main/windowed/front/gal.rs` 318 — the 3D spinning-planet campaign battle backdrop (`bf2_gal1`): `GAL1.LVL` rotate/tilt and star-glow animation, camera from the placed `<planet>_camera` instance · `load`, `advance_and_build` (`pub(super)`).
 - `game/src/campaign_runtime.rs` 1150 — campaign script state, objectives, world/map markers and live flag identities · `CampaignRuntime`, `CampaignMarker`
+- `game/src/campaign_runtime/world_events.rs` 143 — Instant Action environment actions, fixed-tick delays, and shared world-animation state · `WorldEventRuntime`
 - `game/src/campaign_runtime/dispatch.rs` 458 — sim-event and state-change dispatch, including character generation tracking and timers.
 - `game/src/campaign_runtime/markers.rs` 80 — the runtime's world/map marker state and queries.
 - `game/src/campaign_runtime/objectives.rs` 81 — the runtime's objective and popup state.
@@ -571,6 +594,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/world_anim.rs` 496 — the runtime world-animation player the campaign scripts drive (`PlayAnimation`, `PauseAnimation`, `RewindAnimation`, `PlayAnimationFromTo`, `SetAnimationStartPoint`): per-world base matrices, keyed pos/rot and instance poses from `manifest::world_anim::FILE` · `WorldAnimPlayer`, `load`, `play`, `pause`, `rewind`, `play_from_to`, `set_start_point`, `step`, `instance_poses`, `animated_instances`.
 - `game/src/main/windowed/front/profiles.rs` 583 — profile selection after Start and rebinding the shell to the selected save · `App::step_profiles`.
 - `game/src/lib.rs` 83 — module roots
+- `game/src/mods_runtime.rs` 747 — runtime content-mod discovery, automatic `bake mod-convert` caching, dependency/conflict checks, load-order VFS/locl overlay mounting, and multiplayer override digest · `mount_enabled_mods`, `active_mod_maps`, `override_digest`.
 - `game/src/world_fingerprint.rs` 101 — baked world compatibility identity for a future multiplayer handshake.
 - `game/src/assets.rs` 1839 — baked-map loading into a CPU scene, texture tiers, collision/hull body extraction, the vehicles' hit locations (OURS: BF1's weak spots) and mesh-reader re-exports · `load_scene`, `Scene`, `TextureTier`, `mode_layer_index`, `body_layers`, `hull_parts`, `hit_locations`, `BF1_WEAK_SPOTS`, `BF1_ADDED_WEAK_SPOTS`, `added_weak_parts`.
 - `game/src/assets/tests.rs` 406 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
@@ -705,6 +729,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/soldier_vis/runtime/animation.rs` 311 — advance soldier animation from the current sim · `SoldierVisuals::update`, `update_with` and foot-step animation
 - `game/src/soldier_vis/water.rs` 31 — posed left/right foot positions in model and world space for water contact: `WaterFeet`, `SoldierVisuals::water_feet`.
 - `game/src/soldier_vis/first_person.rs` 481 — the player's first-person arms and weapon: loading per class, the clip choice and playback each frame, the draw and the muzzle on the 1st-person gun · `FirstPersonVisuals`, `first_person_draws`; `analysis/re-first-person-arms.md` §5-§6.
+- `game/src/soldier_vis/tracked.rs` 511 — first-person tracked controller forearms, hands, held weapons, saber mounts, muzzle points, and held grenade visuals driven by spatial hand transforms · `tracked_draws`, `tracked_saber_draws`, `tracked_grenade_draws`, `tracked_guns`, `tracked_fire_point`
 - `game/src/soldier_vis/lod.rs` 584 — per-camera PS2 soldier budgets/density, ten-body far queue, reusable selection scratch and low-companion validation; presentation only.
 - `game/src/soldier_vis/grenade.rs` 168 — grenade strength variants, a class picked from the other disc fitted to the map's throw (`fit_throw_to_map`), and pack drop-action selection, including instant-release dispensers.
 - `game/src/soldier_vis/grenade/tests.rs` 742 — real grenade and eight-faction pack drop-animation regressions, standing and moving, and the throw each map fields, the pause menu's picked class included.
@@ -739,6 +764,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/fx/sky.rs` 128 — dome-attached decorative effects, authored hardpoints and rotation.
 - `game/src/fx/storm.rs` 139 — BF2 Kamino lightning groups, skybolt placement and temporary dome, fog and sun lighting, including the ocean. See `analysis/re-weather.md` §§7–8 and `analysis/re-kamino.md` §2.
 - `game/src/fx/water_contact.rs` 385 — soldier water-contact clocks, class-authored entry/fall splashes and posed-foot wakes, using the existing ripple and floating-effect pools; issue #115, `analysis/re-water.md` section 9.6.
+- `game/src/fx/underwater.rs` 107 — PC BF2's underwater tint per frame: the map's `UnderwaterColor`, the drawn surface's level and the wet near-plane corner gate · `Underwater`, `Fx::tint_underwater`; `analysis/re-water.md` section 9.8.
 - `game/src/fx/ingest.rs` 393 — a tick's sim events into live effects · `Fx::ingest_sim`
 - `game/src/fx/abilities.rs` 95 — officer activation effects and timed recipient auras · `follow_buffs`.
 - `game/src/fx/repair.rs` 72 — repair-pulse muzzle effects, owner following and initial-burst placement at the drawn weapon tip.
@@ -805,10 +831,16 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/pipelines.rs` 1000 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
 - `render/src/frame.rs` 623 — frame submission, culling, instancing, pass/draw ordering and overlay · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
 - `render/src/frame/submit.rs` 1428 — frame validation, instance/palette uploads and ordered render-pass submission · `Renderer::render_frame`; frame helpers and public paths remain in the facade
+- `render/src/frame/output.rs` 1103 — multi-view `begin_frame`/`Frame`/`render_to(..., ViewProjection::Asymmetric(fov), ...)`/`finish`, flat panel capture (`capture_flat_frame`/`flat_frame`), desktop eye mirroring (`mirror_frame`), and stereo visor GPU composition tests
 - `render/src/frame/tests.rs` 373 — frame sort keys, pass ordering and interface light regressions.
 - `render/src/frame_ab.rs` 136 — per-frame interleaved pricing states for the bench (`OPENBF_FRAMEAB`) · `FrameAb`.
 - `render/src/world_scale.rs` 180 — world upscaling and optional edge smoothing before the full-resolution HUD · `Renderer::set_world_scale`, `Renderer::set_world_antialiasing`, `world_scale.wgsl`.
 - `render/src/hud.rs` 521 — window-pixel HUD rendering (clamped and repeating sheets) from `ui::hud_draw` · `HudPass`, `HudVertex`, `HudBatch`, `HudTexture`; display-value blending and mesh depth rules in the module header (`Renderer::display_view_format`).
+- `render/src/visor.rs` 233 — stereo 16:9 curved helmet visor pass (`visor.wgsl`), projection math and per-eye compositing of the native HUD onto each rendered stereo target · `Visor`, `VisorEye`, `VisorPass`
+- `render/src/visor/tests.rs` 24 — curved visor projection, aspect and seam unit regressions.
+- `render/src/water_reflect.rs` 290 — planar reflection pass and scene-refraction targets for PC `LightPath::WaterNormal` (`water_normal.wgsl`) · `WaterReflectState`, `mirror_y_matrix`, `reflect_view_proj`.
+- `render/src/underwater.rs` 183 — PC BF2's `UnderwaterColor` over the view whose near plane is under the water, blended in display bytes before the world overlays and HUD · `UnderwaterTint`, `Renderer::set_underwater`; `analysis/re-water.md` section 9.8.
+- `render/src/underwater.wgsl` 35 — full-screen near-plane unprojection and level test for `underwater.rs` · `vs_underwater`, `fs_underwater`.
 - `render/src/grass.rs` 553 — grasspatch sprite buffers and draws (also shared by leaves) · `Renderer::set_grass`, `GrassClass`, `GrassPatch`, `GrassSprite`, `sprite_quad`; view geometry/fade in the module header; GS blend remains PROVISIONAL ([O]).
 - `render/src/leaf.rs` 378 — leafpatch per-view sprite buffers and object draws over the grass pass · `Renderer::set_leaves`, `LeafClass`, `LeafObject`, `LeafSprite`; twist, wind and fades in the module header (`analysis/re-leafpatch.md` §6–§7); BF2 lighting remains PROVISIONAL.
 - `render/src/light_beam.rs` 748 — command-post hologram lightbeam geometry and visibility · `Beam`, `vertices`, `view_factor`, `fan`, `crosses_near`; fan/alpha rules and near-plane caveat in the module header (CPHOL).
@@ -849,6 +881,7 @@ archive. The archive is the one inside the executable, else `openbf.pak` in its 
 --write-pack <out> [--pak <file>] [--split-at <bytes>] [--replacements <json>] <name>=<dir>...` writes the packed copy (`scripts/pack.py` runs it
 on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak` from there on, on every OS; unfinished packed builds keep dev mode on by default (`OPENBF_DEV=0` disables it; `dev::on`).
 - `pak/src/lib.rs` 881 — packed/disk runtime data facade · `Archive`, `write_pack`, `write_pack_at`, `replace_sources`, `find_archive`, `collect`, `mount`, `packed`, `read`, `read_dir`, `open`, `Reader`; archive layout, deduplication and mount policy in the module/API docs.
+- `pak/src/overlay.rs` 264 — virtual overlay stack separating isolated mod namespaces (`NamespaceDir`, `NamespacePrefix`) from priority-ordered explicit overrides (`Overrides`) over disk or packed mounts · `set_overlays`, `clear_overlays`, `OverlayLayer`, `OverlayRule`.
 - `pak/examples/pack_load.rs` — writes and reads a pack as the game does (`scripts/tests/test_pack_limits.py`) and measures load cost: `bench <dir> <scratch> [rounds]` times reading every file raw and zstd.
 - `pak/src/tests.rs` 530 — round trip, re-pack, a damaged footer, ranged reads, dedupe, disk fallback and atomic source substitutions
 
@@ -1394,9 +1427,31 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `launcher/src/paths.rs` 250 — release vs checkout path discovery, tool lookup (`bake`, base `game`), the built game's readiness and BF1 presence read through `pak::find_archive`, and OS file-manager folder opening · `LauncherPaths`, `BuiltStatus`, `open_folder`.
 - `launcher/src/runner.rs` 259 — background setup pipeline runner with ring-buffered console lines, 20 Hz throttled progress updates, error-line selection, and detached `openbf` launch · `BuildHandle`, `BuildProgress`, `BuildOutcome`, `launch_game`, `is_error_line`.
 - `launcher/src/ui.rs` 1347 — native `740×450` frameless egui launcher UI starting on an empty main pane with status indicators, system regular/bold fonts, optional BF1 setup, and seamless top-fading build console with scroll-to-bottom control · `LauncherApp`, `Page`, `DotState`, `HostActions`.
+- `launcher/src/mods_worker.rs` 562 — background filesystem mod discovery, SHA-256 cache validation, and sequential `bake mod-convert` progress worker · `ModsWorker`, `ModsSnapshot`, `DiscoveredModState`.
+- `launcher/src/ui_mods.rs` 995 — launcher Mods tab UI separating bundled engine extensions from filesystem-discovered content mods with Up/Down priority controls and conflict/progress diagnostics (no Import button).
 - `launcher/src/main.rs` 407 — `winit` + `wgpu` + `egui` desktop host binary (`openbf-launcher`) with wait-only idle scheduling, window-close-before-spawn launch, `--audio-restore-worker`, and `--headless-setup` CLI modes.
 - `launcher/src/pipeline/mod.rs` 499 — Stage 2 native 6-step setup orchestrator: tool checks (Python, ffmpeg), child-process running with streamed output and cancellation, RAII staging temp cleanup and always-split `openbf.exe` + `openbf.pak` packing · `run_setup`, `ExecCtx`, `ProgressSink`, `STEP_COUNT`, `args!`, `hide_console`.
 - `launcher/src/pipeline/scan.rs` 660 — native PS2/Xbox/PC source recognition, case-insensitive path resolution, and DLC hero/sound LVL content detection · `BuildPlan`, `GameId`, `GameSource`, `DlcSource`, `ci_path`, `detect_dlc`, `detect_hero_sounds`.
 - `launcher/src/pipeline/missions.rs` 229 — embedded mission-generation scripts and correction tables materialized into the setup temp directory for Lua extraction, mission generation, and shell credits · `MaterializedMissions`.
 - `launcher/src/pipeline/rebake.rs` 1043 — native Rust replacement for `scripts/rebake.sh`, `scripts/bake_dlc.py`, and `scripts/global_sound_cache.py` invoking `bake` subcommands directly without Git Bash · `BakeTrees`, `run_all_bake_groups`.
 - `launcher/src/pipeline/audio_restore.rs` 459 — native Rust PCM restoration worker matching `scripts/restore_audio.py` for dialogue, effects, and music · `process_pcm`, `run_worker`.
+
+## extensions — bundled engine extension registry, profiles and runtime contracts
+- `extensions/src/lib.rs` 163 — stable identifiers (`OPENBF_VR_ID`), declarative manifests, capability enums and bundled catalog metadata · `ExtensionManifest`, `ExtensionKind`, `ExtensionOrigin`, `Capability`, `ExclusiveCapability`, `bundled_vr_manifest`, `bundled_extensions_catalog`
+- `extensions/src/profile.rs` 327 — portable data-directory discovery (`OPENBF_DATA_DIR`), atomic RON extension preferences (extensions.ron in openbf_data, disabled by default), CLI overrides and startup error reports (`last_startup_error.ron`) · `ExtensionProfile`, `StartupOverrides`, `StartupErrorReport`, `resolve_data_dir`, `discover_data_dir`
+- `extensions/src/registry.rs` 441 — capability/conflict validation, exclusive display backend selection, and deterministic topological extension ordering · `ExtensionRegistry`, `DisplayBackendSelection`, `ActivationPlan`, `ResolutionError`
+- `extensions/src/runtime.rs` 201 — opt-in `runtime` feature traits and shared value types bridging `game` and bundled engine extensions · `EngineExtension`, `EarlyDisplayContext`, `ActiveDisplayExtension`, `SimView`, `FrameContext`, `FrameDirectives`, `StereoView`, `TrackedGun`, `EyeClipQuery`, `ListenerPose`
+- `extensions/src/mods.rs` 542 — shared content-mod manifest, namespace slugification, folder discovery (mods dir in `openbf_data`), optional mod metadata merging, and versioned cache status (`ModCacheMeta`) · `DiscoveredMod`, `ModCacheStatus`, `ModFolderEntry`, `list_mod_folders`
+- `extensions/src/mods/fingerprint.rs` 149 — deterministic recursive source-folder SHA-256 fingerprinting with symlink guardrails · `compute_mod_fingerprint`, `content_mod_multiplayer_digest`
+- `extensions/src/mods/resolve.rs` 434 — dependency validation, ordering conflict diagnostics, and load-order override precedence resolution (`resolve_content_mods`, covering declared overrides and active stock replacements) · `ContentResolutionPlan`, `ResourceOverrideConflict`, `ContentResolutionError`
+- `extensions/src/mods/catalog.rs` 482 — stock resource catalog schema, loader/digester (`assets_baked/catalog/`), target identifiers and persisted launcher stock sources (`stock_sources.ron`) · `StockCatalog`, `StockCatalogs`, `StockBakeInfo`, `LvlFacts`, `TargetRef`, `StockSourceList`
+- `extensions/src/mods/replace.rs` 1047 — evidence-based replacement target resolution, resource/gameplay diffing, capability derivation, persistent target selections (`mod_targets.ron`) and cache replacement keys · `resolve_replacements`, `ResourceOp`, `Capability`, `OpStatus`, `ReplacementMode`, `TargetSelections`, `replacement_key`
+
+## openbf_vr — bundled OpenBF VR OpenXR extension (`openbf.vr`)
+- `openbf_vr/src/lib.rs` 79 — extension entrypoint (`VrExtension`) and platform-gated OpenXR integration (`windows` / `linux` active, clean unsupported stub elsewhere) · `VrExtension`
+- `openbf_vr/src/actions.rs` 357 — OpenXR action sets, multi-controller profiles (Oculus Touch, Valve Index, WMR, Vive, KHR Simple), pose sampling and haptic pulses · `Actions`, `Input`, `Pose`, `Hand`, `ControllerMotion`
+- `openbf_vr/src/gesture.rs` 261 — motion-controller cursor interaction (`MenuCursor`), velocity-based left-hand grenade throwing (`GrenadeGesture`) and lightsaber waypoint sampling (`SaberSamples`)
+- `openbf_vr/src/graphics.rs` 333 — OpenXR Vulkan instance/device negotiation (`XR_KHR_vulkan_enable2`), `openbf_vr::graphics::Surface` swapchains and `wgpu::Device` creation for `Renderer::new_windowed_with_device`
+- `openbf_vr/src/panel.rs` 235 — curved 3D shell/menu quad placement and ray-quad UV hit-testing for flat menus rendered in VR space · `Placement`
+- `openbf_vr/src/rig.rs` 801 — standing/local-space tracking origin, eye collision clipping (`EyeClipQuery`), snap-turn, stereo hand mounts, two-handed foregrip alignment, sprint latch and spatial pad construction · `Rig`
+- `openbf_vr/src/session.rs` 919 — OpenXR session lifecycle, stereo per-eye `Renderer::begin_frame()` / `ViewProjection::Asymmetric` rendering, visor HUD composition, desktop eye mirror and orderly `shutdown()` · `Runtime`, `Vr`

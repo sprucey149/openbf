@@ -365,6 +365,7 @@ impl HostCore {
     /// tick the host was viewing (its sim's `tick`: the bundles it has
     /// stepped), stamped into `view_lag` at the close like a guest's.
     pub fn submit_input(&mut self, pad: PadState, view_tick: u32) {
+        let pad = crate::bundle::strip_tracked_inputs(pad);
         let running = self.round.accepts_inputs();
         if let Some(p) = self.players.get_mut(&0) {
             let queue = running && p.active;

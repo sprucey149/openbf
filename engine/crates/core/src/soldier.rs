@@ -515,6 +515,8 @@ pub struct Soldier {
     /// The get-up's lock also holds the trigger (§2: the PS2 clears the
     /// trigger bytes while S+0xc0c runs).
     pub fire_lock: bool,
+    /// A standing or airborne flinch caused the active trigger lock.
+    fire_flinch: bool,
     /// The running lock is a Force Choke's release lock
     /// ([`Soldier::choke_release_lock`]): it also holds off the sprint and
     /// the air's jump / jet tap, and a landing does not shorten it.
@@ -816,6 +818,7 @@ impl Soldier {
             knock_draw: 0.0,
             knock_rules: KNOCK_RULES,
             fire_lock: false,
+            fire_flinch: false,
             choke_lock: false,
             fuel: 0.0,
             drown_in: 3 * crate::TICK_HZ,
@@ -1275,7 +1278,8 @@ impl Soldier {
         // These latches carry history that energy and lock duration do not.
         let latches = u8::from(self.energy_depleted)
             | (u8::from(self.lock_hard) << 1)
-            | (u8::from(self.choke_lock) << 2);
+            | (u8::from(self.choke_lock) << 2)
+            | (u8::from(self.fire_flinch && self.fire_lock && self.lock_timer > 0.0) << 3);
         if latches != 0 {
             eat(b"SOLDIER_LATCH");
             eat(&[latches]);

@@ -25,6 +25,12 @@ pub struct Handover {
 const SOLDIER_MOVE_TENSION: f32 = 15.0;
 const EXIT_SETTLED_SQUARED: f32 = 1.0e-6;
 
+impl extensions::runtime::EyeClipQuery for WalkSim {
+    fn clip_tracked_eye(&self, anchor: Vec3, tracked: Vec3) -> Vec3 {
+        Self::clip_tracked_eye(self, anchor, tracked)
+    }
+}
+
 impl WalkSim {
     pub fn camera(&self) -> Camera {
         let cam = self.camera_track().0;
@@ -143,6 +149,12 @@ impl WalkSim {
             }
         }
         from + track * f
+    }
+
+    /// Keep headset or tracked eye translation inside the scenery using the
+    /// camera's existing blocker and terrain queries.
+    pub fn clip_tracked_eye(&self, anchor: Vec3, tracked: Vec3) -> Vec3 {
+        self.handover_clear(anchor, tracked)
     }
 
     pub(super) fn feed_handover(&mut self) {
@@ -816,13 +828,8 @@ impl WalkSim {
 
     /// Live pose of any animated station or campaign world instance (doors).
     pub(super) fn live_instance_pose(&self, instance: u32) -> Option<Mat4> {
-        self.station_pose(instance).or_else(|| {
-            self.campaign
-                .as_ref()?
-                .instance_poses()
-                .get(&instance)
-                .copied()
-        })
+        self.station_pose(instance)
+            .or_else(|| self.world_instance_poses()?.get(&instance).copied())
     }
 
     /// The props and vehicles the drawn chase camera sees through now (ours,

@@ -11,6 +11,7 @@ mod input;
 mod output;
 pub(crate) mod thrust;
 mod timing;
+pub(crate) use output::tracked_swing_damage;
 pub use output::{AttackWindow, ComboOutput, Deflect, Gravity, Movement};
 use timing::{add as ee_add, mul as ee_mul, sub as ee_sub};
 

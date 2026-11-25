@@ -307,6 +307,10 @@ pub struct CpuTexture {
     /// PS2 detail companion (`<base>.dtl.ktx2`), modulated x2 over the base
     /// at the same UVs — see `bake::detail` / RE_LOG "BF1 detail textures".
     pub detail: Option<Box<CpuTexture>>,
+    /// PC normal-map companion (`<base>.bump.ktx2`, `bake::bump`): a PC BF2
+    /// material with `MTRL` bit 0x20 draws this sheet per-pixel lit
+    /// (`render::BumpDesc`).
+    pub bump: Option<Box<CpuTexture>>,
 }
 
 impl CpuTexture {
@@ -1735,7 +1739,20 @@ pub fn load_loading_galaxy(map_dir: &Path) -> Option<(String, CpuTexture)> {
         .then(|| load_loading_image(map_dir, name))?
 }
 
+/// Point the replacement overlays at the game of the map in `dir`
+/// ([`pak::set_overlay_scope`]): a BF2 side replacement serves a BF2 battle
+/// and never a BF1 one, even where the BF1 battle reads BF2's files.
+/// Called before anything of the battle is read, the prefetch included.
+pub fn scope_overlays_to_map(dir: &Path) {
+    let game = pak::read_to_string(dir.join("manifest.ron"))
+        .ok()
+        .and_then(|t| ron::from_str::<manifest::ManifestHead>(&t).ok())
+        .map(|h| h.source_game.to_ascii_lowercase());
+    pak::set_overlay_scope(game.as_deref());
+}
+
 pub fn load_scene(dir: &Path) -> Result<Scene> {
+    scope_overlays_to_map(dir);
     let manifest: Manifest =
         ron::from_str(&pak::read_to_string(dir.join("manifest.ron")).context("manifest.ron")?)
             .context("parse manifest.ron")?;
@@ -1874,7 +1891,21 @@ pub fn load_battle_scene_with_layers(
     let mut scene = load_scene(dir)?;
     let layer = if mode.eq_ignore_ascii_case("campaign") || !layers.is_empty() {
         let merged = scene.apply_mission_layers(layers);
-        (!merged.is_empty()).then(|| merged.join(", "))
+        if !mode.eq_ignore_ascii_case("campaign") {
+            let fallback = if merged.is_empty() {
+                scene.apply_mode_layer(mode)
+            } else {
+                None
+            };
+            scene.manifest.spawn_only_posts = matches!(mode, "eli" | "hunt");
+            if let Some(name) = fallback {
+                Some(name)
+            } else {
+                (!merged.is_empty()).then(|| merged.join(", "))
+            }
+        } else {
+            (!merged.is_empty()).then(|| merged.join(", "))
+        }
     } else {
         anyhow::ensure!(
             (mode == "hunt" && scene.manifest.source_game == "bf1")
@@ -1884,10 +1915,15 @@ pub fn load_battle_scene_with_layers(
         );
         scene.apply_mode_layer(mode)
     };
+    let common_name = format!("common_{}", scene.manifest.source_game);
     let common = dir
         .parent()
-        .map(|p| p.join(format!("common_{}", scene.manifest.source_game)))
+        .map(|p| p.join(&common_name))
         .filter(|cd| pak::exists(cd.join("common.ron")))
+        .or_else(|| {
+            let root = Path::new("assets_baked").join(&common_name);
+            pak::exists(root.join("common.ron")).then_some(root)
+        })
         .map(|cd| {
             let added = load_common(&cd).map(|c| scene.merge_common(c));
             (cd, added)
@@ -1918,12 +1954,13 @@ pub fn load_ktx2(bytes: &[u8]) -> Result<CpuTexture> {
         rgba: level0.data.to_vec(),
         extra_mips,
         detail: None,
+        bump: None,
     })
 }
 
 /// Load the texture `name` at [`texture_tier`], plus its `<name>.dtl.ktx2`
 /// detail companion when the bake wrote one (the file's presence is the PS2
-/// detailCompressed flag).
+/// detailCompressed flag) and its `<name>.bump.ktx2` PC normal map likewise.
 ///
 /// At [`TextureTier::Pc`] the override `<name>.tier2.ktx2` wins WHEN IT
 /// EXISTS — see [`Manifest::texture_tier2`] for which — and it brings its own
@@ -1945,6 +1982,11 @@ fn decode_texture(dir: &Path, name: &str) -> Result<CpuTexture> {
     if let Ok(bytes) = pak::read(dir.join(format!("{name}.dtl.ktx2"))) {
         tex.detail = Some(Box::new(
             load_ktx2(&bytes).with_context(|| format!("{name}.dtl"))?,
+        ));
+    }
+    if let Ok(bytes) = pak::read(dir.join(format!("{name}.bump.ktx2"))) {
+        tex.bump = Some(Box::new(
+            load_ktx2(&bytes).with_context(|| format!("{name}.bump"))?,
         ));
     }
     Ok(tex)

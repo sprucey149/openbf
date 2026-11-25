@@ -33,6 +33,8 @@ fn random_pad(r: &mut Lcg) -> PadState {
         fire_lag: if small { 0 } else { r.next_u64() as u8 },
         pick,
         view_lag: if small { 0 } else { r.upto(8) as u8 },
+        tracked_shots: [None; 2],
+        tracked_combat: None,
     }
 }
 
@@ -357,6 +359,8 @@ fn codec_bundle_bounds_hold_at_their_extremes() {
             gen: u32::MAX,
         }),
         view_lag: 1,
+        tracked_shots: [None; 2],
+        tracked_combat: None,
     };
     assert_eq!(
         pad_wire_len(&widest, u32::MAX, &PadState::default()),
@@ -390,4 +394,40 @@ fn codec_bundle_bounds_hold_at_their_extremes() {
     let mut w = Writer::new();
     full.write(&mut w, &[]);
     assert_eq!(w.len(), 2 + max * MAX_PAD_BYTES);
+}
+
+#[test]
+fn wire_codec_never_transmits_or_retains_tracked_vr_inputs() {
+    use core::sim::{TrackedCombat, TrackedShot};
+    let vr_pad = PadState {
+        lx: 123,
+        buttons: 1,
+        tracked_shots: [
+            Some(TrackedShot {
+                grip: [0, 1000, 0],
+                muzzle: [100, 1400, -300],
+                forward: [0, 0, i16::MIN],
+            }),
+            None,
+        ],
+        tracked_combat: Some(TrackedCombat {
+            motion_epoch: 7,
+            ..Default::default()
+        }),
+        ..PadState::default()
+    };
+    let dirty_base = PadState {
+        tracked_shots: vr_pad.tracked_shots,
+        tracked_combat: vr_pad.tracked_combat,
+        ..PadState::default()
+    };
+    let mut w = Writer::new();
+    write_pad(&mut w, &vr_pad, &dirty_base);
+    let mut rd = Reader::new(&w.buf);
+    let decoded = read_pad(&mut rd, &dirty_base).unwrap();
+    assert!(rd.is_done());
+    assert_eq!(decoded.lx, 123);
+    assert_eq!(decoded.buttons, 1);
+    assert_eq!(decoded.tracked_shots, [None; 2]);
+    assert_eq!(decoded.tracked_combat, None);
 }

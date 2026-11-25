@@ -556,23 +556,31 @@ pub fn help_at(
         SpawnPage::Map { .. } => Vec::new(),
     };
     lines.into_iter().find_map(|(right, text, help)| {
-        let width = font.map_or(8.0 * text.chars().count() as f32, |f| {
-            crate::typography::width(f, &HELP, text)
-        });
-        let (a, x0, x1) = if right {
-            let ix = SAFE_X[1] - ICON[0];
-            (Anchor::Right, ix - ICON_GAP - width, ix + ICON[0])
-        } else {
-            let ix = SAFE_X[0];
-            (Anchor::Left, ix, ix + ICON[0] + ICON_GAP + width)
-        };
-        let s = screen_at(size, a);
-        let sx = (point[0] - s.origin[0]) / s.scale[0];
-        let sy = (point[1] - s.origin[1]) / s.scale[1];
-        let inside =
-            sx >= x0 - HELP_PAD[0] && sx <= x1 + HELP_PAD[0] && (sy - HELP_Y).abs() <= HELP_PAD[1];
-        inside.then_some(help)
+        help_line_at(font, right, text, point, size).then_some(help)
     })
+}
+
+pub(crate) fn help_line_at(
+    font: Option<&manifest::hud::HudFont>,
+    right: bool,
+    text: &str,
+    point: [f32; 2],
+    size: [f32; 2],
+) -> bool {
+    let width = font.map_or(8.0 * text.chars().count() as f32, |f| {
+        crate::typography::width(f, &HELP, text)
+    });
+    let (a, x0, x1) = if right {
+        let ix = SAFE_X[1] - ICON[0];
+        (Anchor::Right, ix - ICON_GAP - width, ix + ICON[0])
+    } else {
+        let ix = SAFE_X[0];
+        (Anchor::Left, ix, ix + ICON[0] + ICON_GAP + width)
+    };
+    let s = screen_at(size, a);
+    let sx = (point[0] - s.origin[0]) / s.scale[0];
+    let sy = (point[1] - s.origin[1]) / s.scale[1];
+    sx >= x0 - HELP_PAD[0] && sx <= x1 + HELP_PAD[0] && (sy - HELP_Y).abs() <= HELP_PAD[1]
 }
 
 #[cfg(test)]

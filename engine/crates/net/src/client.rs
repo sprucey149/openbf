@@ -289,6 +289,7 @@ impl ClientCore {
         if !self.connected() {
             return None;
         }
+        let pad = crate::bundle::strip_tracked_inputs(pad);
         let seq = self.next_input;
         self.next_input += 1;
         self.inputs.push_back((seq, pad, view_tick));

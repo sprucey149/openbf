@@ -334,6 +334,13 @@ pub enum Event {
         weapon_class: u32,
         deflect: bool,
     },
+    /// Confirmed contact for the attacking VR controller's haptics.
+    SaberHandContact {
+        attacker: UnitHandle,
+        hand: u8,
+        pos: Vec3,
+        blocked: bool,
+    },
     /// The thrown saber's `HitSound`, which the PS2 plays at the first victim
     /// of the update (B2 FUN_0031d688), not at the thrower.
     SaberThrowHit {

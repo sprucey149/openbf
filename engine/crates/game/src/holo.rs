@@ -597,6 +597,7 @@ fn draw_holo(
             visible: c.visible,
             view: None,
             gs_rgb: if bf1 { 0.5 } else { 1.0 },
+            intensity: 1.0,
             top: render::BEAM_TOP_ALPHA,
             cross: None,
         }),

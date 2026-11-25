@@ -30,16 +30,13 @@
 mod projectile_tests;
 mod walker;
 use core::fmath::FloatExt;
+pub use core::unit::UNIT_SNAP_M;
 pub use walker::WalkerPose;
 
 use crate::walk::WalkSim;
 use core::sim::{LookPreview, PadState};
 use glam::{Quat, Vec3};
 
-/// A unit that moved farther than this in one tick is drawn where it is
-/// (150 m/s: no soldier runs or flies that fast; a respawn or a rescue
-/// spawn does). PROVISIONAL.
-pub const UNIT_SNAP_M: f32 = 5.0;
 /// The same for a vehicle (300 m/s). PROVISIONAL.
 pub const VEHICLE_SNAP_M: f32 = 10.0;
 const WALKER_HEADING_BLEND: f32 = 0.1;

@@ -287,6 +287,9 @@ fn render(
     let t = Instant::now();
     let mut r = Renderer::new_headless(v.size.0, v.size.1).map_err(|e| anyhow!("{e}"))?;
     r.cull = !v.no_cull;
+    if std::env::var("OPENBF_HARD_SHADOWS").as_deref() == Ok("1") {
+        r.set_sun_shadows(true);
+    }
     report["device_ms"] = json!(ms(t));
     report["adapter"] = json!(format!("{:?}", r.adapter_info()));
     let t = Instant::now();
@@ -486,11 +489,26 @@ fn step_world(v: &ViewerArgs, gpu: &mut SceneGpu, walk: &mut WalkSim, frame: &mu
     frame.fx.ingest_posed(walk, Some(&frame.vis));
     drop(frame.fx.take_sounds());
     frame.vis.update(walk, core::TICK_DT);
-    let mut points = frame.vis.fire_points(walk);
+    let mut points = frame
+        .vis
+        .tick_fire_points(walk, |i| frame.fx.needs_repair_origin(i));
     frame.deka_vis.fire_points(&walk.sim, &mut points);
     frame.fx.set_repair_origins(&points);
     frame.bolts.set_fire_points(points);
-    frame.fx.set_jet_frames(frame.vis.jet_frames(walk));
+    let jets = if walk
+        .sim
+        .units
+        .iter()
+        .any(|u| u.alive && u.soldier.stance.jetting())
+        || !frame.fx.jets().is_empty()
+    {
+        frame.vis.jet_frames_where(walk, |i, u| {
+            u.soldier.stance.jetting() || frame.fx.has_jet_for(i)
+        })
+    } else {
+        Vec::new()
+    };
+    frame.fx.set_jet_frames(jets);
     frame.fx.update(core::TICK_DT);
     if let Some(w) = frame.weather.as_mut() {
         w.update(core::TICK_DT);

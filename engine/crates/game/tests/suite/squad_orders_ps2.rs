@@ -188,6 +188,8 @@ const IDLE: PadState = PadState {
     fire_lag: 0,
     pick: None,
     view_lag: 0,
+    tracked_shots: [None; 2],
+    tracked_combat: None,
 };
 const WALK: PadState = PadState {
     lx: 0,
@@ -200,6 +202,8 @@ const WALK: PadState = PadState {
     fire_lag: 0,
     pick: None,
     view_lag: 0,
+    tracked_shots: [None; 2],
+    tracked_combat: None,
 };
 
 fn taken_within(s: &Scene, at: u64) -> (usize, f32) {

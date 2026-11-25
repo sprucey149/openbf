@@ -122,8 +122,8 @@ impl ReplayFrame {
         game::forest::submit_actors(r, &walk.sim);
         gpu.pose_doors(&walk.sim.doors);
         gpu.hide_animated(&walk.sim.props);
-        if let Some(campaign) = walk.campaign.as_ref() {
-            gpu.pose_world_anims(campaign.instance_poses());
+        if let Some(poses) = walk.world_instance_poses() {
+            gpu.pose_world_anims(poses);
         }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
@@ -142,6 +142,8 @@ impl ReplayFrame {
             walk.campaign.as_ref().map(|c| c.hidden_instances()),
         );
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
+        self.vehicle_vis
+            .set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| self.vis.flag_ribcage_frames(walk)));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.vehicle_vis.campaign_flags(&walk));
         draws.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
@@ -170,7 +172,7 @@ impl ReplayFrame {
             &self.holos,
             &items,
         );
-        let mut points = self.vis.fire_points(walk);
+        let mut points = self.vis.flash_fire_points(walk);
         self.deka_vis.fire_points(&walk.sim, &mut points);
         let mut particles = self.vis.flash_draws_at(walk, &points);
         particles.extend(self.vis.saber_draws(walk));
@@ -270,6 +272,18 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 "{tick},saber_throw_hit,{weapon_class},,{:.2}:{:.2}:{:.2}\n",
                 pos.x, pos.y, pos.z
             ),
+            Event::SaberHandContact {
+                attacker,
+                hand,
+                pos,
+                blocked,
+            } => {
+                let kind = if *blocked { "saber_block" } else { "saber_hit" };
+                format!(
+                    "{tick},{kind},{},{hand},{:.2}:{:.2}:{:.2}\n",
+                    attacker.index, pos.x, pos.y, pos.z
+                )
+            }
             Event::HeroOffered { unit, class } => {
                 format!("{tick},hero_offer,{},{class},\n", unit.index)
             }
@@ -590,7 +604,17 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
     // Split load from upload: they have different fixes (parsing vs GPU
     // residency), so one number for both would hide which is the problem.
     let t = Instant::now();
-    let (scene, load) = game::assets::load_battle_scene(std::path::Path::new(&v.map), &v.mode)?;
+    let bench_layers = v
+        .mission
+        .as_ref()
+        .and_then(|p| game::mission::MissionDef::load(p).ok())
+        .map(|m| m.layers)
+        .unwrap_or_default();
+    let (scene, load) = game::assets::load_battle_scene_with_layers(
+        std::path::Path::new(&v.map),
+        &v.mode,
+        &bench_layers,
+    )?;
     // A common set that exists but will not load must say so: benching the
     // map without its shared props would read as a speed-up.
     if let Some((cd, Err(e))) = &load.common {
@@ -643,14 +667,16 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         gpu.animate_water(&mut r, game::water_anim::clock(0.0), cam.position)?;
         gpu.pose_doors(&walk.sim.doors);
         gpu.hide_animated(&walk.sim.props);
-        if let Some(campaign) = walk.campaign.as_ref() {
-            gpu.pose_world_anims(campaign.instance_poses());
+        if let Some(poses) = walk.world_instance_poses() {
+            gpu.pose_world_anims(poses);
         }
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
         gpu.pose_ctf(&walk.sim, walk.player);
         let mut draws = gpu.draws.clone();
         walk_draws(cube, &walk, &mut draws, Some(&vis));
+        vehicle_vis.set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
+        vehicle_vis.set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| vis.flag_ribcage_frames(&walk)));
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
         draws.extend(vehicle_vis.campaign_flags(&walk));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));
@@ -831,6 +857,14 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
         let mut vehicle_vis =
             game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
+        if let Some(specs) = super::battle::ctf_flag_specs(replay_setup.mission.as_ref(), &walk) {
+            vehicle_vis.configure_ctf_flags(&mut r, &scene, &specs);
+        }
+        vehicle_vis.set_ctf_flag_classes(super::battle::ctf_flag_classes(
+            replay_setup.mission.as_ref(),
+            &walk,
+            &scene,
+        ));
         vehicle_vis.set_treads(walk.hover_treads.clone());
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
         let quad = game::viewer::upload_billboard_quad(&mut r)?;
@@ -916,11 +950,26 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
                 sl.voice(tick, &mut walk);
             }
             frame.vis.update(&walk, core::TICK_DT);
-            let mut fire_points = frame.vis.fire_points(&walk);
+            let mut fire_points = frame
+                .vis
+                .tick_fire_points(&walk, |i| frame.fx.needs_repair_origin(i));
             frame.deka_vis.fire_points(&walk.sim, &mut fire_points);
             frame.fx.set_repair_origins(&fire_points);
             frame.bolts.set_fire_points(fire_points);
-            frame.fx.set_jet_frames(frame.vis.jet_frames(&walk));
+            let jets = if walk
+                .sim
+                .units
+                .iter()
+                .any(|u| u.alive && u.soldier.stance.jetting())
+                || !frame.fx.jets().is_empty()
+            {
+                frame.vis.jet_frames_where(&walk, |i, u| {
+                    u.soldier.stance.jetting() || frame.fx.has_jet_for(i)
+                })
+            } else {
+                Vec::new()
+            };
+            frame.fx.set_jet_frames(jets);
             frame.fx.set_burn_frames(frame.vis.burn_frames(&walk));
             frame.fx.advance_space_dust(&walk, core::TICK_DT);
             frame.fx.update(core::TICK_DT);

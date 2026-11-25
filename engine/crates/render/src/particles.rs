@@ -770,6 +770,7 @@ mod tests {
                 visible: 100.0,
                 view: None,
                 gs_rgb: 1.0,
+                intensity: 1.0,
                 top: 0.25,
                 cross: None,
             }),

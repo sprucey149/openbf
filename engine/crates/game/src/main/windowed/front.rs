@@ -1306,7 +1306,16 @@ impl App {
             let lines = -wheel;
             let point = self.shell_pointer.pos();
             let size = self.renderer.as_ref().map(|r| r.size());
-            ia.scroll_pointer(point, size.map(|(w, h)| [w as f32, h as f32]), lines);
+            let require_hover = self
+                .display_ext
+                .as_ref()
+                .is_some_and(|ext| ext.has_menu_pointer());
+            ia.scroll_pointer(
+                point,
+                size.map(|(w, h)| [w as f32, h as f32]),
+                lines,
+                require_hover,
+            );
         }
         let pointer = if wheel != 0.0 && !click {
             None

@@ -66,6 +66,7 @@ impl Fx {
                     rgba: vec![255; 4],
                     extra_mips: Vec::new(),
                     detail: None,
+                    bump: None,
                 },
                 "ordnance_shell",
             )

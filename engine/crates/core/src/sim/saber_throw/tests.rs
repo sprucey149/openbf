@@ -25,6 +25,7 @@ fn scene() -> (Sim, UnitHandle, UnitHandle) {
                 texture: "blade".into(),
                 trail_color: None,
             }],
+            hand_edges: Vec::new(),
             throw_edges: vec![edge],
             deflect_edges: vec![edge],
             weapon_bind: Mat4::from_translation(Vec3::Y * 1.15),

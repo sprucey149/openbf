@@ -22,6 +22,7 @@ fn station_impact_uses_shield_remaining_after_the_hit() {
     sim.stations.push(station);
     let shooter = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
     let bolt = Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::Z,
@@ -79,6 +80,7 @@ fn diagnostic_counters_check_the_shooters_generation() {
     assert_eq!(replacement.index, old.index);
     assert_ne!(replacement.gen, old.gen);
     let bolt = |owner| Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::X,
         vel: -Vec3::X,
@@ -181,6 +183,7 @@ fn a_bots_bolt_spares_a_human_of_its_team_and_not_a_bot() {
     let bot = s.spawn(&UnitSpec::trooper(0, Vec3::X * 3.0)).unwrap();
     let friend = s.spawn(&UnitSpec::trooper(0, Vec3::X * 6.0)).unwrap();
     let bolt = |owner: UnitHandle, victim: UnitHandle, shooter_is_player: bool| Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::X,
@@ -232,6 +235,7 @@ fn a_killing_bolt_kicks_the_body() {
     s.units[v.index as usize].health.cur = 1.0;
     let dir = Vec3::new(3.0, 0.0, 4.0);
     s.resolve_bolt(&Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: dir * 40.0,
@@ -293,6 +297,7 @@ fn a_rocket_explodes_where_it_lands() {
         s.weapon_classes.len() - 1
     };
     let bolt = |owner: UnitHandle, wc: usize, hit: Hit, end: Vec3| Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: end,
         vel: Vec3::new(0.0, -100.0, 0.0),
@@ -991,6 +996,90 @@ fn world_model_blocks_bolts() {
         .any(|e| matches!(e, Event::BoltExpired { .. })));
 }
 
+#[test]
+fn tracked_muzzle_shots_use_the_controller_ray_at_vertical_pitch_and_near_cover() {
+    use crate::collision::{Body, Shape};
+    use crate::sim::TrackedShot;
+    use glam::Mat4;
+
+    let tip = Vec3::new(0.3, 1.4, -0.7);
+    for (direction, wall_z, end) in [
+        (Vec3::Y, None, None),
+        (Vec3::NEG_Y, None, Some(Vec3::new(tip.x, 0.0, tip.z))),
+        (
+            Vec3::NEG_Z,
+            Some(-0.95),
+            Some(Vec3::new(tip.x, tip.y, -0.9)),
+        ),
+        (Vec3::NEG_Z, Some(-0.35), None),
+    ] {
+        let mut sim = Sim::empty(7);
+        sim.heightfield = Some(flat_ground());
+        let rifle = &mut sim.weapon_classes[0];
+        rifle.posture_spread = [[0.0; 3]; 3];
+        rifle.spread_per_shot = 0.0;
+        rifle.spread_threshold = 0.0;
+        rifle.spread_limit = 0.0;
+        rifle.pitch_spread = 0.0;
+        rifle.yaw_spread = 0.0;
+        rifle.shot_tilts.clear();
+        let player = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        if let Some(z) = wall_z {
+            sim.collision.push_body(Body::new(
+                Mat4::from_translation(Vec3::new(0.0, 1.5, z)),
+                Shape::Box {
+                    half: Vec3::new(2.0, 1.0, 0.05),
+                },
+            ));
+        }
+
+        sim.step(&[PadState {
+            tracked_shots: [
+                Some(TrackedShot::new(
+                    Vec3::new(tip.x, tip.y, -0.25),
+                    tip,
+                    direction,
+                )),
+                None,
+            ],
+            ..fire()
+        }]);
+        let (origin, dir) = sim
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Shot {
+                    unit, origin, dir, ..
+                } if *unit == player => Some((*origin, *dir)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(dir.abs_diff_eq(direction, 1e-6), "{dir} vs {direction}");
+        let flight = sim.shot_flights.first().unwrap();
+        assert!(flight.tracked_origin);
+        if wall_z == Some(-0.35) {
+            assert!((origin.z + 0.3).abs() < 1e-5, "covered tip: {origin}");
+            assert_eq!(flight.end, origin);
+            assert!(sim.bolts.is_empty());
+            assert!(sim.events.iter().any(|e| matches!(e, Event::Impact { .. })));
+        } else {
+            assert!(origin.abs_diff_eq(tip, 1e-5), "{origin} vs {tip}");
+            if let Some(end) = end {
+                if direction == Vec3::NEG_Y {
+                    // The sampled terrain ray can stop slightly above the sheet.
+                    assert!(flight.end.y.abs() <= crate::projectile::TERRAIN_RAY_STEP / 16.0);
+                    assert!(flight.end.with_y(0.0).abs_diff_eq(end, 1e-5));
+                } else {
+                    assert!(flight.end.abs_diff_eq(end, 2e-3), "{} vs {end}", flight.end);
+                }
+            } else {
+                assert!(sim.bolts[0].vel.normalize().abs_diff_eq(direction, 1e-6));
+                assert!(flight.end.y > tip.y);
+            }
+        }
+    }
+}
+
 /// Cheats: invincible player takes no damage; infinite ammo never reloads.
 #[test]
 fn cheats_invincible_and_infinite_ammo() {
@@ -1157,6 +1246,7 @@ fn a_pellet_landing_in_its_first_update_does_its_full_damage() {
         let pos = feet + Vec3::new(-dist, height, 0.0);
         let vel = Vec3::X * 2000.0;
         s.bolts.push(Bolt {
+            tracked_origin: false,
             visual_shot: None,
             pos,
             vel,
@@ -1210,6 +1300,7 @@ fn explosion_expire_is_independent_of_flight_kind_and_uses_final_position() {
             let victim = sim.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
             let hp = sim.unit(victim).unwrap().health.cur;
             let b = Bolt {
+                tracked_origin: false,
                 visual_shot: None,
                 pos: Vec3::Y,
                 vel: Vec3::Z,

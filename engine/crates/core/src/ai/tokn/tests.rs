@@ -171,6 +171,7 @@ fn shot(owner: UnitHandle, hit: crate::projectile::Hit) -> crate::projectile::Bo
     let pos = Vec3::new(0.0, 1.2, -2.0);
     let vel = Vec3::new(0.0, 0.0, 300.0);
     crate::projectile::Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos,
         vel,

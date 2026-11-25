@@ -1627,3 +1627,68 @@ fn a_ctf_offense_member_guards_escorts_chases_and_fetches() {
         Some(Steer::Go(GoalTarget::Flag(0)))
     );
 }
+
+#[test]
+fn a_ctf_defense_member_guards_returns_dropped_and_chases_carrier() {
+    use crate::goals::{CtfStep, GoalTarget, Steer};
+    use crate::sim::ctf::{CtfState, FlagStatus};
+    let mut sim = world(&[Some(0), None, None]);
+    let home0 = Vec3::new(10.0, 0.0, 0.0);
+    let home1 = Vec3::new(90.0, 0.0, 0.0);
+    sim.ctf = Some(CtfState::new_two_flag(5, home0, home0, home1, home1));
+    sim.ai_goals
+        .add(
+            0,
+            crate::goals::GoalKind::CtfDefense,
+            100.0,
+            Some(GoalTarget::Flag(0)),
+        )
+        .expect("goal");
+
+    let think = |sim: &mut Sim| {
+        sim.tick += 1;
+        for u in &mut sim.units {
+            u.ai.last_think = sim.tick - 1;
+        }
+        crate::goals::step(sim);
+    };
+
+    // Flag at home -> Guard / Defend own flag.
+    think(&mut sim);
+    assert_eq!(
+        sim.ai_goals.ctf_of(sim.handle(0)).map(|m| m.step),
+        Some(CtfStep::Guard)
+    );
+    assert_eq!(
+        sim.ai_goals.steer(sim.handle(0)),
+        Some(Steer::Defend(GoalTarget::Flag(0)))
+    );
+
+    // Flag dropped -> Fetch to touch-return it.
+    sim.ctf.as_mut().unwrap().flags[0].status = FlagStatus::Dropped {
+        timer: 30.0,
+        pickup_cooldown: 0.0,
+    };
+    think(&mut sim);
+    assert_eq!(
+        sim.ai_goals.ctf_of(sim.handle(0)).map(|m| m.step),
+        Some(CtfStep::Fetch)
+    );
+    assert_eq!(
+        sim.ai_goals.steer(sim.handle(0)),
+        Some(Steer::Go(GoalTarget::Flag(0)))
+    );
+
+    // Flag carried by enemy unit 4 -> Chase carrier.
+    let carrier = sim.handle(4);
+    sim.ctf.as_mut().unwrap().flags[0].status = FlagStatus::Carried { carrier };
+    think(&mut sim);
+    assert_eq!(
+        sim.ai_goals.ctf_of(sim.handle(0)).map(|m| m.step),
+        Some(CtfStep::Chase)
+    );
+    assert_eq!(
+        sim.ai_goals.steer(sim.handle(0)),
+        Some(Steer::Go(GoalTarget::Unit(carrier)))
+    );
+}

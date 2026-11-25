@@ -250,6 +250,23 @@ pub(crate) fn list_under_pointer(point: [f32; 2], size: [f32; 2]) -> Option<bool
         })
 }
 
+pub(crate) fn options_under_pointer(point: [f32; 2], size: [f32; 2]) -> bool {
+    if size[0] <= 0.0 || size[1] <= 0.0 {
+        return false;
+    }
+    let [x, y] = shell_point(point, size);
+    let [left, top, right, bottom] = OPTIONS_WINDOW;
+    (left..=right).contains(&x) && (top..=bottom).contains(&y)
+}
+
+fn shell_point(point: [f32; 2], size: [f32; 2]) -> [f32; 2] {
+    let box_w = 4.0 / 3.0 * size[1];
+    [
+        (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0),
+        point[1] / (size[1] / 448.0),
+    ]
+}
+
 /// Hit-test the visible row geometry used by the Instant Action renderer.
 pub fn pointer_target(
     ia: &InstantAction,
@@ -261,9 +278,7 @@ pub fn pointer_target(
     if size[0] <= 0.0 || size[1] <= 0.0 {
         return None;
     }
-    let box_w = 4.0 / 3.0 * size[1];
-    let x = (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0);
-    let y = point[1] / (size[1] / 448.0);
+    let [x, y] = shell_point(point, size);
     match ia.page {
         Page::Missions => {
             let layout = MissionLayout::new(size);
@@ -1254,7 +1269,7 @@ mod tests {
             .map(|i| MapEntry {
                 key: format!("test{i}"),
                 game: Game::Bf2,
-                code: "t",
+                code: "t".to_string(),
                 label: format!("Test {i}"),
                 description: String::new(),
                 modes: [vec![Mode::Con], Vec::new()],
@@ -1350,7 +1365,7 @@ mod tests {
         let map = MapEntry {
             key: "test".into(),
             game: Game::Bf2,
-            code: "t",
+            code: "t".to_string(),
             label: "Test map".into(),
             description: String::new(),
             modes: [vec![Mode::Con], Vec::new()],
@@ -1456,7 +1471,7 @@ mod tests {
         let entry = |label: &str, baked: bool| MapEntry {
             key: label.into(),
             game: crate::shell::Game::Bf2,
-            code: "x",
+            code: "x".to_string(),
             label: label.into(),
             description: String::new(),
             modes: [vec![Mode::Con], Vec::new()],

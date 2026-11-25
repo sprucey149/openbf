@@ -352,6 +352,7 @@ mod tests {
                 }],
             },
             blades: vec![],
+            hand_edges: Vec::new(),
             throw_edges: vec![],
             deflect_edges: vec![],
             weapon_bind: glam::Mat4::IDENTITY,

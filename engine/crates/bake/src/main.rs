@@ -6,13 +6,13 @@
 //!
 //! Run `bake` with no arguments for the full usage table (tex-dump, pc-tex,
 //! xbox, xbox-prints, map, common, classes, loadscreen, sounds, sound-names, global-sound, beep,
-//! specular, omniproj, soldier, weapon, vehicle, effects, locl, fonts). scripts/rebake.sh runs all of them
+//! specular, omniproj, pc-spec-cube, soldier, weapon, vehicle, effects, locl, fonts). scripts/rebake.sh runs all of them
 //! over the extracted discs; `extract-iso` makes those (scripts/pack.py). `format-versions` prints the version of
 //! each output group (`bake::versions`), which pack.py keys its per-group bake cache on.
 
 use anyhow::{bail, Context, Result};
 use std::io::BufWriter;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Every file under the disc's `DATA/_LVL_PS2/` but its FMV (`MOVIES/`, 1-1.2
 /// GB a disc) to `<out>/DATA/_LVL_PS2/...` (card PACK: the user's own ISO is
@@ -196,6 +196,10 @@ fn main() -> Result<()> {
             println!("baked {sounds} DLC hero sounds");
             Ok(())
         }
+        Some(extensions::mods::BAKE_CONVERTER_ID_ARG) if args.len() == 2 => {
+            println!("{}", extensions::mods::MOD_CONVERTER_ID);
+            Ok(())
+        }
         Some("format-versions") if args.len() == 2 => {
             println!("{}", bake::versions::format_versions_json());
             Ok(())
@@ -292,6 +296,12 @@ fn main() -> Result<()> {
                     w.name, w.vertices, w.triangles, w.nodes, w.textures, args[4]
                 );
             }
+            Ok(())
+        }
+        Some("pc-first-person") if args.len() == 4 => {
+            let count =
+                bake::fpm::bake_pc_first_person_weapons(Path::new(&ci(&args[2])), &args[3])?;
+            println!("baked {count} PC first-person weapon models -> {}", args[3]);
             Ok(())
         }
         Some("shadows") if args.len() == 4 => {
@@ -418,6 +428,20 @@ fn main() -> Result<()> {
             let name = bake::spec::OMNIPROJ_NAME;
             bake::spec::bake_core_texture(&ci(&args[2]), name, &args[3])?;
             println!("baked the terrain light texture -> {}/{name}.ktx2", args[3]);
+            Ok(())
+        }
+        Some("pc-spec-cube") if args.len() == 4 => {
+            let out = Path::new(&args[3]).join(bake::bump::CUBE_FILE);
+            if args[2].is_empty() {
+                match std::fs::remove_file(&out) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                    _ => {}
+                }
+                println!("no PC core.lvl: the PC bump specular pass draws nothing");
+            } else {
+                bake::bump::bake_cube(&ci(&args[2]), &args[3])?;
+                println!("baked the PC specular cube's +Y face -> {}", out.display());
+            }
             Ok(())
         }
         Some("shell") if args.len() == 7 || (args.len() >= 10 && args[7] == "--campaign") => {
@@ -589,12 +613,22 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("mod-inspect") if args.len() >= 3 => mod_inspect(&args[2..]),
+        Some("mod-convert") if args.len() >= 4 => mod_convert(&args[2..]),
+        Some("stock-catalog") if args.len() == 6 => stock_catalog(&args[2..]),
+        Some("stock-record") if args.len() >= 5 => stock_record(&args[2..]),
+        Some("lvl-inventory") if args.len() == 3 => {
+            let f = mungefs::inventory::scan_file(Path::new(&ci(&args[2])))?;
+            println!("{}", ron::ser::to_string_pretty(&f, bake::pretty())?);
+            Ok(())
+        }
         _ => {
             eprintln!(
                 "usage:\n\
                  \x20 bake extract-iso <disc.iso>  <outdir>       the disc's DATA/_LVL_PS2 tree, as files\n\
                  \x20 bake extract-xiso <disc.iso> <outdir>       an Xbox disc's Data/_LVL_XBOX tree, shell movie only\n\
                  \x20 bake format-versions                         each output group's version, as JSON (pack.py's cache)\n\
+                 \x20 bake mod-converter-id                        the mod cache converter id it writes\n\
                  \x20 bake xbox <disc.iso|root> <outdir> [--ps2 <root>] [--maps a,b] [--allow-gameplay-drift]\n\
                  \x20                                               an Xbox disc's maps, keeping the PS2's gameplay\n\
                  \x20 bake xbox-prints <ps2 root>... <work> <file>  the PS2 gameplay hashes `bake xbox` compares with\n\
@@ -615,6 +649,7 @@ fn main() -> Result<()> {
                  \x20 bake beep       <core.lvl>   <outdir>       BF1 loading beep renders\n\
                  \x20 bake specular   <core.lvl>   <outdir>       the specular pass's lookup table\n\
                  \x20 bake omniproj   <core.lvl>   <outdir>       BF2's terrain light texture\n\
+                 \x20 bake pc-spec-cube <PC core.lvl|empty> <outdir> the PC bump specular cube (+Y face)\n\
                  \x20 bake locl       <core.lvl>   <outdir>       the English text table\n\
                  \x20 bake fonts      <core.lvl>   <outdir> <prefix> [donor-core ...] [--menu-font-core PS2-CORE.LVL]  native HUD + local BF2 Light menu\n\
                  \x20 bake ui-art     <core.lvl>   <outdir> [donor-core ...]  largest same-art UI sheets\n\
@@ -632,6 +667,13 @@ fn main() -> Result<()> {
                  \x20 bake vehicle    <side.lvl> <outdir> [pc.lvl]     every vehicle class: models, chunks, collision\n\
                  \x20 bake shadows    <file.lvl> <outdir>            BF1 shadow sidecars only\n\
                  \x20 bake effects    <side.lvl> <outdir> bf1|bf2   fx__ particle effects + their textures/models\n\
+                 \x20 bake mod-inspect <mod_dir> [env]              discover legacy mod metadata and stock replacements (RON)\n\
+                 \x20 bake mod-convert <mod_dir> <cache_dir> [--mod-id <id>] [--namespace <ns>] [env]  convert a mod into its cache\n\
+                 \x20     env: [--data-dir <openbf_data>] [--stock-assets <assets_baked|openbf.pak|exe>] [--stock-source game:platform=path]...\n\
+                 \x20 bake stock-catalog <bf1|bf2> <pc|ps2|xbox> <lvl root> <assets_baked>  stock resource catalog\n\
+                 \x20 bake stock-record <assets_baked> gameplay <bf1|bf2> <platform>       record the gameplay source\n\
+                 \x20 bake stock-record <assets_baked> dep <role> <game> <platform> <lvl root> <rel>  record a stock input\n\
+                 \x20 bake lvl-inventory <file.lvl>                  one LVL's resources, game and platform (RON)\n\
                  \nscripts/rebake.sh runs all of these over the extracted discs."
             );
             bail!("bad arguments");
@@ -747,6 +789,165 @@ fn tex_dump(lvl_path: &str, outdir: &str) -> Result<()> {
         n += 1;
     }
     println!("wrote {n} textures to {outdir}");
+    Ok(())
+}
+
+/// `--data-dir`, `--stock-assets` and `--stock-source` of `mod-inspect` and
+/// `mod-convert`; every other flag is handed back.
+struct EnvFlags {
+    data_dir: Option<PathBuf>,
+    stock_assets: Option<PathBuf>,
+    sources: Vec<String>,
+}
+
+impl EnvFlags {
+    fn take(flag: &str, rest: &mut std::slice::Iter<'_, String>, into: &mut Self) -> Result<bool> {
+        let mut value = || {
+            rest.next()
+                .cloned()
+                .with_context(|| format!("{flag} needs a value"))
+        };
+        match flag {
+            "--data-dir" => into.data_dir = Some(PathBuf::from(value()?)),
+            "--stock-assets" => into.stock_assets = Some(PathBuf::from(value()?)),
+            "--stock-source" => into.sources.push(value()?),
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn env(&self) -> Result<bake::mods::ModEnv> {
+        bake::mods::ModEnv::open(
+            self.data_dir.as_deref(),
+            self.stock_assets.as_deref(),
+            &self.sources,
+        )
+    }
+}
+
+fn mod_inspect(args: &[String]) -> Result<()> {
+    let path = Path::new(&args[0]);
+    let mut flags = EnvFlags {
+        data_dir: None,
+        stock_assets: None,
+        sources: Vec::new(),
+    };
+    let mut rest = args[1..].iter();
+    while let Some(flag) = rest.next() {
+        if !EnvFlags::take(flag, &mut rest, &mut flags)? {
+            bail!("bake mod-inspect: unknown option {flag:?}");
+        }
+    }
+    let env = flags.env()?;
+    let folder = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mod")
+        .to_owned();
+    let id = extensions::mods::stable_mod_id(&folder, std::slice::from_ref(&folder), None);
+    let ns = extensions::mods::namespace_prefix(&id);
+    let (discovered, _) = bake::mods::inspect_mod_folder(path, &id, &ns, &env);
+    println!(
+        "{}",
+        ron::ser::to_string_pretty(&discovered, bake::pretty())?
+    );
+    Ok(())
+}
+
+fn parse_game_platform(
+    g: &str,
+    p: &str,
+) -> Result<(
+    extensions::mods::catalog::SourceGame,
+    extensions::mods::catalog::SourcePlatform,
+)> {
+    use extensions::mods::catalog::{SourceGame, SourcePlatform};
+    Ok((
+        SourceGame::parse(g).with_context(|| format!("unknown game {g:?}"))?,
+        SourcePlatform::parse(p).with_context(|| format!("unknown platform {p:?}"))?,
+    ))
+}
+
+fn stock_catalog(args: &[String]) -> Result<()> {
+    let (game, platform) = parse_game_platform(&args[0], &args[1])?;
+    let root = ci(&args[2]);
+    let n = bake::stock::write_catalog(game, platform, Path::new(&root), Path::new(&args[3]))?;
+    println!("stock catalog {} {}: {n} LVLs", game.key(), platform.key());
+    Ok(())
+}
+
+fn stock_record(args: &[String]) -> Result<()> {
+    let assets = Path::new(&args[0]);
+    match (args[1].as_str(), args.len()) {
+        ("gameplay", 4) => {
+            let (game, platform) = parse_game_platform(&args[2], &args[3])?;
+            bake::stock::record_gameplay(assets, game, platform)
+        }
+        ("dep", 7) => {
+            let (game, platform) = parse_game_platform(&args[3], &args[4])?;
+            bake::stock::record_dependency(
+                assets,
+                &args[2],
+                game,
+                platform,
+                Path::new(&ci(&args[5])),
+                &args[6],
+            )
+        }
+        _ => bail!(
+            "bake stock-record: expected `gameplay <game> <platform>` or \
+             `dep <role> <game> <platform> <lvl root> <rel>`"
+        ),
+    }
+}
+
+fn mod_convert(args: &[String]) -> Result<()> {
+    let mod_dir = Path::new(&args[0]);
+    let cache_dir = Path::new(&args[1]);
+    let folder = mod_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mod")
+        .to_owned();
+    let mut mod_id = extensions::mods::stable_mod_id(&folder, std::slice::from_ref(&folder), None);
+    let mut namespace = extensions::mods::namespace_prefix(&mod_id);
+    let mut flags = EnvFlags {
+        data_dir: None,
+        stock_assets: None,
+        sources: Vec::new(),
+    };
+    let mut rest = args[2..].iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            "--mod-id" => {
+                mod_id = rest.next().context("--mod-id needs a value")?.clone();
+            }
+            "--namespace" => {
+                namespace = rest.next().context("--namespace needs a value")?.clone();
+            }
+            other => {
+                if !EnvFlags::take(other, &mut rest, &mut flags)? {
+                    bail!("bake mod-convert: unknown option {other:?}");
+                }
+            }
+        }
+    }
+    let env = flags.env()?;
+    let report = bake::mods::convert_mod_to_cache(&bake::mods::ConvertOptions {
+        mod_dir,
+        cache_dir,
+        mod_id,
+        namespace,
+        emit_progress: true,
+        env: &env,
+    })?;
+    println!(
+        "mod-convert `{}`: {} map(s), {} mission(s) -> {}",
+        report.meta.display_name,
+        report.maps_baked,
+        report.missions_written,
+        cache_dir.display()
+    );
     Ok(())
 }
 

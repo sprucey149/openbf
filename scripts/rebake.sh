@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # land.py reads this line too (it refuses a card whose `rebake=` names another).
-REBAKE_GROUPS="tat1 tat2 maps common side dlc classes sounds global-sound load beep"
+REBAKE_GROUPS="tat1 tat2 maps common side dlc classes sounds global-sound load beep catalog"
 CLI_PC_DIR=""
 MENU_FONT_CORE="${OPENBF_MENU_FONT_CORE:-}"
 WANT_GROUPS=()
@@ -359,6 +359,13 @@ if want common; then
   # BF2's terrain light pass texture (card FXBL, analysis/re-bolt.md §5.3):
   # BF1 draws no light on its terrain (§5.1).
   "$BAKE" omniproj "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
+  # The PC bump materials' specular cube, from a PC BF2 install's own core
+  # (bake::bump, analysis/re-pc-bump.md); without one the pass draws nothing.
+  if [ -n "${PC2:-}" ] && [ -f "$(ci "$PC2" CORE.LVL)" ]; then
+    "$BAKE" pc-spec-cube "$(ci "$PC2" CORE.LVL)" "$OUT/common_bf2"
+  else
+    "$BAKE" pc-spec-cube "" "$OUT/common_bf2"
+  fi
   # Each game's English text table (card EVMSG, analysis/re-event-messages.md):
   # the HUD's event lines, team, post and soldier names.
   [ "$HAS_BF1" = 1 ] && "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
@@ -437,7 +444,7 @@ if want side; then
   clean "$OUT/side_bf1/soldiers" "$OUT/side_bf1/weapons" "$OUT/side_bf1/textures" \
         "$OUT/side_bf2/soldiers" "$OUT/side_bf2/weapons" "$OUT/side_bf2/textures" \
         "$OUT/side_bf1/vehicles" "$OUT/side_bf2/vehicles" \
-        "$OUT/side_bf1/fpm" "$OUT/side_bf2/fpm" \
+        "$OUT/side_bf1/fpm" "$OUT/side_bf2/fpm" "$OUT/side_bf2/pc_first_person" \
         "$OUT/side_bf1/effects" "$OUT/side_bf2/effects" \
         "$OUT/side_bf1/droid_chunks" "$OUT/side_bf2/droid_chunks" \
         "$OUT/droid_effects" "$OUT/classes/droid_chunks.ron"
@@ -583,6 +590,9 @@ if want side; then
   done
   [ "$HAS_BF1" = 1 ] && "$BAKE" weapon  "$A1"            com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf1"
   "$BAKE" weapon  "$(ci "$B2" INGAME.LVL)" com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf2"
+  if [ -n "$PC" ]; then
+    "$BAKE" pc-first-person "$PC" "$OUT/side_bf2/pc_first_person"
+  fi
   # Every vehicle class of the four sides (card VBAKE): models (every LOD),
   # destruction chunks, collision, textures -> side_<game>/vehicles/<side>/.
   if [ "$HAS_BF1" = 1 ]; then
@@ -852,5 +862,29 @@ if want tat1 || want tat2 || want maps; then
   WARN_BF1=""
   [ "$HAS_BF1" = 1 ] && [ -n "${OPENBF_BF1_TREE:-}" ] && WARN_BF1="bf1"
   "$BAKE" check-foliage "$OUT" ${WARN_BF1:+--warn "$WARN_BF1"} ${OPENBF_BF2_TREE:+--warn bf2}
+fi
+if want catalog; then
+  stage "stock resource catalog"
+  plat_of() {
+    case "$(basename "$1" | tr 'A-Z' 'a-z')" in
+      _lvl_pc) echo pc ;;
+      _lvl_xbox) echo xbox ;;
+      *) echo ps2 ;;
+    esac
+  }
+  BF2_PLAT="$(plat_of "$B2")"
+  "$BAKE" stock-record "$OUT" gameplay bf2 "$BF2_PLAT"
+  "$BAKE" stock-record "$OUT" dep bf2_anims bf2 "$BF2_PLAT" "$B2" ingame.lvl
+  "$BAKE" stock-catalog bf2 "$BF2_PLAT" "$B2" "$OUT"
+  [ -n "${PC2:-}" ] && [ -d "$PC2" ] && "$BAKE" stock-catalog bf2 pc "$PC2" "$OUT"
+  [ -n "${XB2:-}" ] && [ -d "$XB2" ] && "$BAKE" stock-catalog bf2 xbox "$XB2" "$OUT"
+  if [ "$HAS_BF1" = 1 ] && [ -d "$B1" ]; then
+    BF1_PLAT="$(plat_of "$B1")"
+    "$BAKE" stock-record "$OUT" gameplay bf1 "$BF1_PLAT"
+    "$BAKE" stock-record "$OUT" dep bf1_anims bf1 "$BF1_PLAT" "$B1" common/eng/common.lvl
+    "$BAKE" stock-catalog bf1 "$BF1_PLAT" "$B1" "$OUT"
+    [ -n "${PC1:-}" ] && [ -d "$PC1" ] && "$BAKE" stock-catalog bf1 pc "$PC1" "$OUT"
+    [ -n "${XB1:-}" ] && [ -d "$XB1" ] && "$BAKE" stock-catalog bf1 xbox "$XB1" "$OUT"
+  fi
 fi
 echo "rebake done -> $OUT"

@@ -137,6 +137,12 @@ impl Definition {
             .map(|&(b, p)| (inv * globals[b]).transform_point3(p))
             .collect()
     }
+
+    fn write_pins(&self, inv_frame: Mat4, globals: &[Mat4], dst: &mut [Vec3]) {
+        for (slot, &(b, p)) in dst.iter_mut().zip(&self.pins) {
+            *slot = (inv_frame * globals[b]).transform_point3(p);
+        }
+    }
 }
 
 pub struct State {
@@ -202,22 +208,21 @@ impl State {
             self.previous[i] = p;
         }
         // Pinned positions follow the actual posed bones, in this frame.
-        for (i, p) in def.pin_positions(globals).into_iter().enumerate() {
-            self.positions[i] = p;
-        }
+        let inv_frame = def.frame(globals).inverse();
+        def.write_pins(inv_frame, globals, &mut self.positions);
         for k in (0..3).rev().filter(|&k| def.raw.enabled[k]) {
             for &(a, b, rest) in &def.constraints[k] {
                 constrain(&mut self.positions, def.raw.pinned, a, b, rest);
             }
         }
-        let inv_frame = def.frame(globals).inverse();
         for &(bone, kind, params, local) in &def.shapes {
             let shape = inv_frame * globals[bone] * local;
+            let shape_inv = shape.inverse();
             for p in &mut self.positions[def.raw.pinned..] {
-                collide(p, kind, params, shape);
+                collide(p, kind, params, shape, shape_inv);
             }
         }
-        self.normals = normals(&self.positions, &def.raw.triangles);
+        normals_into(&self.positions, &def.raw.triangles, &mut self.normals);
     }
 
     /// Deformed vertices in model space, matching the ordinary body draw.
@@ -255,8 +260,8 @@ fn constrain(p: &mut [Vec3], pinned: usize, a: usize, b: usize, rest: f32) {
     }
 }
 
-fn collide(p: &mut Vec3, kind: u32, params: Vec3, shape: Mat4) {
-    let mut q = shape.inverse().transform_point3(*p);
+fn collide(p: &mut Vec3, kind: u32, params: Vec3, shape: Mat4, shape_inv: Mat4) {
+    let mut q = shape_inv.transform_point3(*p);
     let before = q;
     match kind {
         0 => {
@@ -312,6 +317,13 @@ fn collide(p: &mut Vec3, kind: u32, params: Vec3, shape: Mat4) {
 
 pub fn normals(p: &[Vec3], triangles: &[[u32; 3]]) -> Vec<Vec3> {
     let mut out = vec![Vec3::ZERO; p.len()];
+    normals_into(p, triangles, &mut out);
+    out
+}
+
+fn normals_into(p: &[Vec3], triangles: &[[u32; 3]], out: &mut Vec<Vec3>) {
+    out.resize(p.len(), Vec3::ZERO);
+    out.fill(Vec3::ZERO);
     for &[a, b, c] in triangles {
         let (a, b, c) = (a as usize, b as usize, c as usize);
         let n = (p[b] - p[a]).cross(p[c] - p[a]);
@@ -320,7 +332,6 @@ pub fn normals(p: &[Vec3], triangles: &[[u32; 3]]) -> Vec<Vec3> {
         }
     }
     out.iter_mut().for_each(|n| *n = n.normalize_or_zero());
-    out
 }
 
 pub(crate) fn upload(

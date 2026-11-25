@@ -510,6 +510,18 @@ impl VehicleVisuals {
 
     /// The share of the way from the last tick to this one the frame's
     /// poses are drawn at (`crate::render_blend::share`); 1 by default.
+    /// The viewer's sim team, which colours the CTF flags
+    /// ([`super::pickups::flag_tint`]).
+    pub fn set_ctf_viewer(&mut self, team: Option<u8>) {
+        self.flags.set_viewer_team(team);
+    }
+
+    /// Each unit's drawn `bone_ribcage` (`SoldierVisuals::jet_frames`),
+    /// where a flag carried on foot draws.
+    pub fn set_flag_ribcage(&mut self, frames: Option<Vec<Option<Mat4>>>) {
+        self.flags.set_ribcage(frames);
+    }
+
     pub fn set_tick_share(&mut self, share: f32) {
         self.tick_share = share;
     }
@@ -741,7 +753,7 @@ impl VehicleVisuals {
         out.extend(self.items.draws(r, sim));
         out.extend(self.props.draws(r, sim));
         if !sim.battle.campaign_rules {
-            out.extend(self.flags.draws(sim));
+            out.extend(self.flags.draws(r, sim, self.tick_share));
         }
         out
     }

@@ -80,8 +80,19 @@ pub(super) fn shell_setup(
     );
     let assault = mission.as_ref().is_some_and(|m| m.is_hero_assault());
     let hunt = mode == "hunt";
+    let ctf = matches!(mode, "ctf" | "1flag");
     if let Some(m) = mission.as_mut().filter(|_| assault) {
         m.ai_alive_cap = session.ass_numbots.max(0) as u32;
+    }
+    if let Some(m) = mission.as_mut().filter(|_| ctf) {
+        let units = session.ctf_numbots.max(0) as u32;
+        m.ai_alive_cap = units;
+        for t in &mut m.teams {
+            t.units = units;
+        }
+        if let Some(c) = &mut m.ctf {
+            c.score_limit = Some(session.ctf_score.max(1) as u32);
+        }
     }
     let space = mode == "ass";
     let setup = BattleSetup {
@@ -97,17 +108,19 @@ pub(super) fn shell_setup(
         // Explicit CLI cap is separate from the percentage setting.
         ai_cap: space.then_some(session.ass_numbots.max(0) as u32),
         // Map-relative team size, including the human.
-        team_size_pct: (!assault && !space && !hunt).then_some(session.con_numbots as u32),
+        team_size_pct: (!assault && !space && !hunt && !ctf).then_some(session.con_numbots as u32),
         // Calibrated map tickets, scaled by the shell percentage.
         tickets: 250,
         tickets_set: false,
-        ticket_pct: if assault || space || hunt || xl {
+        ticket_pct: if assault || space || hunt || ctf || xl {
             100
         } else {
             session.con_mult.max(10) as u32
         },
         time_limit: if hunt {
             session.hun_timer.max(1) as u32
+        } else if ctf {
+            session.ctf_timer.max(0) as u32
         } else if assault || space || xl {
             0
         } else {
@@ -128,6 +141,8 @@ pub(super) fn shell_setup(
         // Hunt's 0 is "Per map": the mission's per-tier, per-side targets (battle.rs).
         score_limit: if hunt {
             session.hun_score.max(0) as u32
+        } else if ctf {
+            session.ctf_score.max(1) as u32
         } else {
             session.ass_score.max(0) as u32
         },
@@ -280,6 +295,30 @@ pub(super) fn campaign_layers_for(
     Vec::new()
 }
 
+/// World sublevel layers requested by either a campaign or mod/skirmish mission script.
+pub(super) fn mission_layers_for(
+    missions_dir: &Path,
+    map: &str,
+    mode: &str,
+    armies: Option<&[String; 2]>,
+    script: Option<&str>,
+) -> Vec<String> {
+    if mode.eq_ignore_ascii_case("campaign") {
+        return campaign_layers_for(missions_dir, map, mode, script);
+    }
+    let mission_mode = if mode == ui::shell::Mode::Xl.subst() {
+        "con"
+    } else {
+        mode
+    };
+    let pair = armies
+        .map(|a| [a[0].as_str(), a[1].as_str()])
+        .unwrap_or(["", ""]);
+    game::mission::pick(missions_dir, map, mission_mode, pair)
+        .map(|p| p.mission.layers)
+        .unwrap_or_default()
+}
+
 /// A LAN host's self-check build (`game::netplay::selfcheck`), on a worker
 /// thread: the round's map loaded from `assets_dir` again (the window's own
 /// copy stays where it is), [`build_round`], and the event feed the window
@@ -293,7 +332,13 @@ pub(super) fn rebuilder(
     game::netplay::Rebuild::Thread(std::sync::Arc::new(
         move |round: &RoundSetup, local, stop: &Stop| {
             let dir = assets_dir.join(&round.map);
-            let layers = campaign_layers_for(&missions_dir, &round.map, &round.mode, None);
+            let layers = mission_layers_for(
+                &missions_dir,
+                &round.map,
+                &round.mode,
+                Some(&round.armies),
+                None,
+            );
             let (mut scene, load) =
                 game::assets::load_battle_scene_with_layers(&dir, &round.mode, &layers)?;
             scene.kill_objects(&game::mission::scene_kills(
@@ -528,11 +573,9 @@ mod tests {
                     let row = &rows[i];
                     let assets = &assets;
                     s.spawn(move || {
-                        let (scene, _) = game::assets::load_battle_scene(
-                            &assets.join(&row.key),
-                            mode.subst(),
-                        )
-                        .unwrap();
+                        let (scene, _) =
+                            game::assets::load_battle_scene(&assets.join(&row.key), mode.subst())
+                                .unwrap();
                         let session = ui::shell::SessionOptions {
                             con_numbots: 100,
                             ..options
@@ -559,11 +602,23 @@ mod tests {
                             ticks_us.push(t.elapsed().as_micros() as u64);
                         }
                         let points = walk.sim.team_points().map(|(p, _)| p);
-                        (row.key.clone(), era, seed, clock, walk.sim.outcome, walk.sim.tick, points, ticks_us)
+                        (
+                            row.key.clone(),
+                            era,
+                            seed,
+                            clock,
+                            walk.sim.outcome,
+                            walk.sim.tick,
+                            points,
+                            ticks_us,
+                        )
                     })
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect::<Vec<_>>()
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
         });
         let mut by_map: std::collections::BTreeMap<String, Vec<u64>> = Default::default();
         let mut bad = Vec::new();

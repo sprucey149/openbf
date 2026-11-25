@@ -1164,6 +1164,7 @@ impl Sim {
             }));
         self.saber_inputs(&mut unit_pads);
         // 3. Movement.
+        let tracked_targets = self.saber_target_starts(pads);
         let floor_seam = self.nav.as_ref().and_then(|g| g.floor_seam);
         for (i, pad_i) in unit_pads.iter_mut().enumerate() {
             if let Some(floor) = self.embedded_floor(&self.units[i]) {
@@ -1538,7 +1539,7 @@ impl Sim {
         // Issue #173 [ours]: after this tick's fall, kill-floor and region
         // deaths, the forced moves that no longer count are dropped.
         self.expire_forced_moves();
-        self.saber_hits();
+        self.saber_hits_with(&unit_pads, &tracked_targets);
         // 4. Weapons → bolts. Each player's view lag first (issue #168).
         self.take_view_lags(&unit_pads);
         let first_bolt = self.bolts.len();
@@ -1745,7 +1746,7 @@ impl Sim {
                     }
                 }
             }
-            self.soldier_shots(i, None, &shots);
+            self.soldier_shots(i, None, &shots, p.tracked_shots[0]);
         }
 
         if let Some((j, aim)) = turned.take() {

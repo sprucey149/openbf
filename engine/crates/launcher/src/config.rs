@@ -238,6 +238,30 @@ impl LauncherConfig {
     }
 }
 
+impl LauncherConfig {
+    /// The original games' files as the mod converter reads them: soldier
+    /// replacements bake against the stock sibling sides and animation banks
+    /// of the install or disc this lists.
+    pub fn stock_sources(&self) -> extensions::mods::catalog::StockSourceList {
+        use extensions::mods::catalog::{SourceGame, SourcePlatform, StockSourceEntry};
+        let mut sources = Vec::new();
+        for (game, cfg) in [(SourceGame::Bf1, &self.bf1), (SourceGame::Bf2, &self.bf2)] {
+            for (platform, path) in cfg.sources() {
+                sources.push(StockSourceEntry {
+                    game,
+                    platform: match platform {
+                        Platform::Pc => SourcePlatform::Pc,
+                        Platform::Ps2 => SourcePlatform::Ps2,
+                        Platform::Xbox => SourcePlatform::Xbox,
+                    },
+                    path: path.to_path_buf(),
+                });
+            }
+        }
+        extensions::mods::catalog::StockSourceList { sources }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

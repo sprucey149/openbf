@@ -1,6 +1,8 @@
 //! Disc-authored cloth beside a soldier GLB. Older bakes keep their rigid
 //! skinned fallback; a companion opts only its listed parts into simulation.
 //! Written for every soldier that wears cloth, absent for one that wears none.
+//! The common bake writes one beside every unskinned model whose gmod lists
+//! cloth (the CTF flags' banners, [`item_path`]); those carry their texture.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -26,6 +28,10 @@ pub struct Cloth {
     pub drag: f32,
     pub mass: f32,
     pub max_acceleration: f32,
+    /// The CLTH's texture: set on an unskinned model's cloth, which has no
+    /// GLB segment to take it from; `None` (not written) on a soldier's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,4 +44,9 @@ pub struct Shape {
 
 pub fn path(side: &Path, model: &str) -> PathBuf {
     side.join("soldiers").join(format!("{model}.cloths.ron"))
+}
+
+/// An unskinned model's cloth companion, beside its GLB in `<dir>/models`.
+pub fn item_path(dir: &Path, model: &str) -> PathBuf {
+    dir.join("models").join(format!("{model}.cloths.ron"))
 }

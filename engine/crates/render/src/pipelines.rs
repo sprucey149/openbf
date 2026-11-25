@@ -52,8 +52,16 @@ impl Renderer {
                 // Detail map (PS2 `<name>_dtl` companion). Materials without
                 // one bind the base view here and switch it off in params.
                 bindings::texture_layout(2, true),
-                bindings::uniform_layout(3, wgpu::ShaderStages::FRAGMENT, false, None),
+                // The vertex stage reads `material.bump` (`vertex_lighting`).
+                bindings::uniform_layout(
+                    3,
+                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    false,
+                    None,
+                ),
                 bindings::texture_layout(4, true),
+                // PC normal map (`crate::BumpDesc`); the base view without one.
+                bindings::texture_layout(5, true),
             ],
         });
 
@@ -133,6 +141,13 @@ impl Renderer {
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             ..PipelineDesc::world("map blend pipeline", &pipeline_layout, &vb)
+        }
+        .build(&device, &shader, format);
+        let overlay_pipeline = PipelineDesc {
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            depth_write: false,
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            ..PipelineDesc::world("map overlay pipeline", &pipeline_layout, &vb)
         }
         .build(&device, &shader, format);
         let additive = wgpu::BlendState {
@@ -653,10 +668,21 @@ impl Renderer {
             Target::Window { config, .. } => config.usage.contains(wgpu::TextureUsages::COPY_SRC),
             Target::Headless { .. } => true,
         };
+        let water_reflect = crate::water_reflect::WaterReflectState::new(
+            &device,
+            &globals_bgl,
+            &texture_bgl,
+            &palette_bgl,
+            &points_buf,
+            format,
+            display_target,
+            display_format.is_some(),
+        );
         // The DomeInfo frame filter (card BFLT, `filter.rs`): its own
         // full-screen pipeline over a copy of the finished 3D frame.
         let filter = crate::filter::FilterState::new(&device, format, copyable);
         let softness = crate::filter::FilterState::new(&device, format, copyable);
+        let underwater = crate::underwater::UnderwaterState::new(&device, format);
         let particle_blur =
             crate::particle_blur::ParticleBlur::new(&device, format, &globals_bgl, &texture_bgl);
         let heat_character_mask = PipelineDesc {
@@ -731,6 +757,7 @@ impl Renderer {
                 wrap_v: WrapV::Repeat,
                 srgb: false,
                 detail: None,
+                bump: None,
                 scroll: [0.0, 0.0],
                 uv_scale: [1.0, 1.0],
                 label: Some("white"),
@@ -760,6 +787,8 @@ impl Renderer {
             device: Arc::new(device),
             queue: Arc::new(queue),
             target,
+            capture_flat: false,
+            flat_frame: None,
             depth_view,
             pipeline,
             globals_buf,
@@ -775,6 +804,7 @@ impl Renderer {
             instance_capacity,
             mask_pipeline,
             blend_pipeline,
+            overlay_pipeline,
             additive_blend_pipeline,
             fade_additive_blend_pipeline,
             water_pipeline,
@@ -833,11 +863,15 @@ impl Renderer {
             filter,
             softness,
             sun_flare: None,
+            underwater,
             bloom,
             particle_blur,
             heat_character_mask,
+            water_reflect,
             spec_buf,
             spec_bg: None,
+            spec_table: None,
+            pc_spec_cube: None,
             spec_mirror: true,
             lighting: Lighting::default(),
             character_light_regions: Vec::new(),

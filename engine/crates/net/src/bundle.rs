@@ -309,10 +309,18 @@ pub fn write_pad(w: &mut Writer, pad: &PadState, base: &PadState) {
     }
 }
 
+/// Clears offline-only spatial/tracked fields so lockstep multiplayer never
+/// accepts or forwards unagreed tracked inputs.
+pub fn strip_tracked_inputs(mut pad: PadState) -> PadState {
+    pad.tracked_shots = [None; 2];
+    pad.tracked_combat = None;
+    pad
+}
+
 /// Reads a pad written by [`write_pad`] against `base`.
 pub fn read_pad(r: &mut Reader, base: &PadState) -> WireResult<PadState> {
     let mask = r.u8()?;
-    let mut p = *base;
+    let mut p = strip_tracked_inputs(*base);
     if mask & M_LX != 0 {
         p.lx = r.i16()?;
     }

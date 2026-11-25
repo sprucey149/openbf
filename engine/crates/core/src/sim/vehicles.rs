@@ -1073,9 +1073,25 @@ impl Sim {
     /// walked its centre into the boulder's low edge; inside, the contacts
     /// push it further in. What the PS2's own bike does at that wall is
     /// unmeasured.
+    ///
+    /// A walker's `pos` is on the ground under its feet (FUN_00260ba0, §6,
+    /// `walker::legs`), not its centre, so it is asked `ai::SHUT_PROBE_UP`
+    /// over it, as every soldier shut test is. Since issue #182 B5 made a primitive's volume
+    /// solid, the feet themselves sat a float's width inside any deck
+    /// flush with the floor they came from: BF2 Mygeeto's AT-RT was put
+    /// back on every tick at `myg1_bldg_main_bridge6`'s box (top
+    /// y = 0.00012 over the base's y = 0 floor).
     fn keep_out(&mut self, i: usize, from: Vec3) {
+        let up = if self.vehicles[i].kind == crate::vehicle::VehicleKind::Walker {
+            Vec3::Y * crate::ai::SHUT_PROBE_UP
+        } else {
+            Vec3::ZERO
+        };
         let to = self.vehicles[i].pos;
-        if to == from || self.shut_in_solid(to).is_none() || self.shut_in_solid(from).is_some() {
+        if to == from
+            || self.shut_in_solid(to + up).is_none()
+            || self.shut_in_solid(from + up).is_some()
+        {
             return;
         }
         let v = &mut self.vehicles[i];

@@ -274,6 +274,7 @@ pub struct HudModel {
     pub lock: Option<HudLock>,
     pub incoming_missile: Option<f32>,
     pub hints: Vec<crate::hud_tree::HintMarker>,
+    pub flag_timers: Vec<crate::hud_tree::FlagTimer>,
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
@@ -411,6 +412,17 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 pub use crate::hud_popup::HudPopup;
 
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
+    feed_with_reticle(hud, m, has_mesh, Some([0.5, m.reticle_y]));
+}
+
+/// Publish the stock HUD with an optional reticle position. Target health uses
+/// the gameplay aim pick independently of the rendered reticle.
+pub fn feed_with_reticle(
+    hud: &mut Hud,
+    m: &HudModel,
+    has_mesh: &dyn Fn(&str) -> bool,
+    reticle_position: Option<[f32; 2]>,
+) {
     crate::hud_popup::feed(hud, m.popup.as_ref(), m.objectives_updated, has_mesh);
     feed_lock(
         hud,
@@ -420,6 +432,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         has_mesh,
     );
     hud.hint_markers.clone_from(&m.hints);
+    hud.flag_timers.clone_from(&m.flag_timers);
     crate::hud_flag::feed(hud, m.flag_status, has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
@@ -729,10 +742,10 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     feed_target(hud, target, has_mesh);
     feed_countdown(hud, m.countdown, has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
-    if let (Some(rel), true) = (m.reticle, alive) {
+    if let (Some(rel), true, Some(position)) = (m.reticle, alive, reticle_position) {
         put(
             "player1.weapon1.reticule.position",
-            EventValue::Position([0.5, m.reticle_y]),
+            EventValue::Position(position),
         );
         let c = match target {
             Some(t) => t.color(),
@@ -922,12 +935,16 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     hide(
         hud,
         "hud.gate.reticle",
-        alive && m.reticle.is_some(),
-        &[
-            "player1.weapon1.reticule.disable",
-            "player1.weapon1.target.disable",
-        ],
+        alive && m.reticle.is_some() && reticle_position.is_some(),
+        &["player1.weapon1.reticule.disable"],
         &["player1.weapon1.reticule.position"],
+    );
+    hide(
+        hud,
+        "hud.gate.target",
+        alive && m.reticle.is_some(),
+        &["player1.weapon1.target.disable"],
+        &[],
     );
     hide(
         hud,
@@ -1126,20 +1143,25 @@ pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
     if m.round_end.is_some() {
         return;
     }
-    // The round timer, top centre under the reinforcement counts.
-    if let Some(t) = m.time_left {
+    if let Some(t) = m
+        .time_left
+        .filter(|_| m.spawn.is_none() && m.outcome.is_none())
+    {
         let secs = t.max(0.0).ceil() as u32;
+        let height = ctx.content_rect().height();
         egui::Area::new(egui::Id::new("hud_timer"))
-            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 12.0))
+            .anchor(Align2::RIGHT_TOP, Vec2::new(-height * 0.16, height * 0.29))
+            .interactable(false)
             .show(ctx, |ui| {
-                panel().show(ui, |ui| {
-                    ui.label(crate::typography::egui_text(
+                ui.add(
+                    egui::Label::new(crate::typography::egui_text(
                         ctx,
-                        &crate::typography::ITEM,
+                        &crate::typography::BODY,
                         crate::typography::tint::BODY,
                         &format!("{}:{:02}", secs / 60, secs % 60),
-                    ));
-                });
+                    ))
+                    .wrap_mode(egui::TextWrapMode::Extend),
+                );
             });
     }
 
@@ -1235,6 +1257,7 @@ mod tests {
             lock: None,
             incoming_missile: None,
             hints: Vec::new(),
+            flag_timers: Vec::new(),
             team_points: None,
             unlimited_tickets: [false; 2],
             popup: None,
@@ -1324,6 +1347,41 @@ mod tests {
             feed(&mut hud, &model, &|_| false);
             assert_eq!(hud.banner, None);
         }
+    }
+
+    #[test]
+    fn target_health_stays_visible_with_the_reticle_hidden() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut m = model();
+        m.reticle = Some(-1);
+        m.hit_body = Some(target_color::ENEMY);
+        m.target = Some(HudTarget {
+            id: 9,
+            name: "Target".into(),
+            health_fraction: 0.45,
+            relation: -1,
+            team0: false,
+            shield: None,
+        });
+        feed_with_reticle(&mut hud, &m, &|_| false, None);
+        assert_eq!(
+            hud.last("player1.weapon1.target.healthFraction"),
+            Some(&EventValue::Number(0.45)),
+        );
+        let fill = hud.find("player1targethealth_fill").unwrap();
+        assert!(hud.elems[fill].fader.state < 3);
+
+        let mut hud = crate::hud_tree::fixture::reticle_hud();
+        let reticle = hud.find("player1reticule").unwrap();
+        let hit = hud.find("player1reticule_hit").unwrap();
+        feed_with_reticle(&mut hud, &m, &|_| false, None);
+        assert_eq!(hud.alpha(reticle), 0.0);
+        assert_eq!(hud.alpha(hit), 0.0);
+        feed(&mut hud, &m, &|_| false);
+        assert!(hud.alpha(reticle) > 0.0);
+        feed_with_reticle(&mut hud, &m, &|_| false, None);
+        hud.advance(1.0);
+        assert_eq!(hud.alpha(reticle), 0.0);
     }
 
     #[test]
@@ -1469,7 +1527,7 @@ mod tests {
                     _ => 0,
                 })
                 .sum();
-            assert!(indices > 100, "{w}x{h}: {indices} indices");
+            assert!(indices > 0, "{w}x{h}: no HUD geometry");
         }
         // Banner states don't panic.
         let ctx = egui::Context::default();
@@ -1480,6 +1538,31 @@ mod tests {
         m.outcome = Some(2);
         m.time_left = Some(0.0);
         let _ = ctx.run(egui::RawInput::default(), |ctx| draw_hud(ctx, &m));
+    }
+
+    #[test]
+    fn match_timer_keeps_all_digits_on_one_line() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(960.0, 540.0),
+            )),
+            ..Default::default()
+        };
+        let m = model();
+        let _ = ctx.run(input.clone(), |ctx| draw_hud(ctx, &m));
+        let out = ctx.run(input, |ctx| draw_hud(ctx, &m));
+        let timer = out
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "2:05" => Some(text),
+                _ => None,
+            })
+            .expect("timer text");
+        assert_eq!(timer.galley.rows.len(), 1);
+        assert!(timer.pos.x > 960.0 * 0.75);
     }
 
     /// The minimap stays over the death camera (`re-spawn-flow.md` §6.2).

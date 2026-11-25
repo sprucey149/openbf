@@ -1,7 +1,7 @@
 //! Shared fixtures for the render crate's GPU referees.
 //!
 //! The test modules of the suite binary — `alpha_blend`, `detail_map`, `frame_filter`, `gpu_smoke`,
-//! `light_path`, `lod_switch`, `skinned`, `sky_shell`, `specular`, `uv_scroll`,
+//! `light_path`, `lod_switch`, `pc_bump`, `skinned`, `sky_shell`, `specular`, `uv_scroll`,
 //! `water_pass`, `world_scale` — all build the same
 //! three things before they can assert anything: a 64x64 headless renderer,
 //! a view-spanning textured quad, and a pixel read out of the readback buffer.
@@ -53,6 +53,7 @@ pub fn tex_desc<'a>(
         wrap_v: WrapV::Repeat,
         srgb: true,
         detail: None,
+        bump: None,
         scroll: [0.0, 0.0],
         uv_scale: [1.0, 1.0],
         label: Some(label),

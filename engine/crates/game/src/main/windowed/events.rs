@@ -3,10 +3,10 @@
 use super::spawn_feedback::draw_snapshot_notice;
 use super::tick_hook::{TickHook, TickState};
 use super::{
-    apply_pause_action, autopilot_pad, hud_model, hud_title, lan, load_and_upload, mouse,
-    note_sounds, rain_splashes, record_round, spawn_model, start_take, stats_pages,
-    tracked_velocity, walk_draws, window_attributes, window_size_env, App, Arc, DrawCmd, PadState,
-    Renderer, Screen, CLEAR,
+    apply_pause_action, autopilot_pad, hud_model_for_view, hud_title, lan, mouse, note_sounds,
+    rain_splashes, record_round, spawn_model, start_take, stats_pages, tracked_velocity,
+    walk_draws, window_attributes, window_size_env, world_objective_draws, App, Arc, DrawCmd,
+    PadState, Screen, CLEAR,
 };
 use core::fmath::FloatExt;
 
@@ -103,7 +103,18 @@ impl winit::application::ApplicationHandler for App {
         );
         self.display_opened(mode);
         self.idle = Some(super::idle::IdleInhibit::new(&window));
-        let mut renderer = Renderer::new_windowed(window.clone()).expect("renderer");
+        let mut renderer = match self.renderer_for_window(window.clone()) {
+            Ok(renderer) => {
+                crate::extensions_host::clear_startup_error(&self.data_dir);
+                renderer
+            }
+            Err(error) => {
+                self.failure = Some(error);
+                self.window = None;
+                event_loop.exit();
+                return;
+            }
+        };
         self.overlay = Some(ui::overlay::EguiOverlay::new(
             &window,
             renderer.device(),
@@ -135,6 +146,7 @@ impl winit::application::ApplicationHandler for App {
             self.last = std::time::Instant::now();
             return;
         };
+        game::assets::scope_overlays_to_map(&map);
         let preload = game::assets::prefetch::load_key(&map, &self.mode);
         let warm = std::thread::Builder::new()
             .name("loading-prefetch".into())
@@ -142,7 +154,13 @@ impl winit::application::ApplicationHandler for App {
                 let key = preload.clone();
                 move || game::assets::prefetch::warm(&key)
             });
-        self.sounds = game::sounds::SoundLib::load(&map);
+        let sound_banks = self
+            .setup
+            .mission
+            .as_ref()
+            .map(|m| m.sound.clone())
+            .unwrap_or_default();
+        self.sounds = game::sounds::SoundLib::load_with_fallback(&map, &sound_banks);
         self.sync_audio_levels();
         self.music_voice = None;
         if let Some(sl) = &self.sounds {
@@ -155,6 +173,12 @@ impl winit::application::ApplicationHandler for App {
                 }
             );
         }
+        let layers = self
+            .setup
+            .mission
+            .as_ref()
+            .map(|m| m.layers.clone())
+            .unwrap_or_default();
         let kills = self
             .setup
             .mission
@@ -165,7 +189,13 @@ impl winit::application::ApplicationHandler for App {
             println!("loading: prefetch key={preload} decoded={n}");
         }
         let _preload = game::assets::prefetch::record(&preload);
-        match load_and_upload(&mut renderer, &map, &self.mode, &kills) {
+        match super::super::battle::load_and_upload_with_layers(
+            &mut renderer,
+            &map,
+            &self.mode,
+            &layers,
+            &kills,
+        ) {
             Ok((gpu, scene)) => {
                 if self.walk_requested {
                     let (walk, cube) = match self.battle_resources(&mut renderer, &scene, None) {
@@ -315,6 +345,21 @@ impl winit::application::ApplicationHandler for App {
                     },
                 ..
             } => self.snapshot_requested = self.blackbox.is_some(),
+            WindowEvent::KeyboardInput {
+                event:
+                    winit::event::KeyEvent {
+                        physical_key:
+                            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F10),
+                        state: winit::event::ElementState::Pressed,
+                        repeat: false,
+                        ..
+                    },
+                ..
+            } if self.display_ext.is_some() => {
+                if let Some(ext) = self.display_ext.as_mut() {
+                    ext.recenter();
+                }
+            }
             // F7: the LAN net meter (issue #168; also Options → Network meter).
             WindowEvent::KeyboardInput {
                 event:
@@ -365,6 +410,11 @@ impl winit::application::ApplicationHandler for App {
                 self.note_window_size("resized");
             }
             WindowEvent::RedrawRequested => {
+                if let Err(error) = self.begin_display_ext_frame() {
+                    self.failure = Some(error);
+                    event_loop.exit();
+                    return;
+                }
                 // A scale change without a resize shows at its next frame.
                 self.note_window_size("scale changed");
                 let elapsed = self.last.elapsed().as_secs_f32();
@@ -403,9 +453,7 @@ impl winit::application::ApplicationHandler for App {
                 }
                 if matches!(self.screen, Screen::Shell) {
                     self.redraw_shell(dt);
-                    if let Some(w) = &self.window {
-                        w.request_redraw();
-                    }
+                    self.finish_redraw(event_loop);
                     return;
                 }
                 if matches!(self.screen, Screen::Lobby) {
@@ -414,9 +462,7 @@ impl winit::application::ApplicationHandler for App {
                         self.request_close(super::CloseReason::Error);
                         return;
                     }
-                    if let Some(w) = &self.window {
-                        w.request_redraw();
-                    }
+                    self.finish_redraw(event_loop);
                     return;
                 }
                 if matches!(self.screen, Screen::NetWait) {
@@ -425,9 +471,7 @@ impl winit::application::ApplicationHandler for App {
                         self.request_close(super::CloseReason::Error);
                         return;
                     }
-                    if let Some(w) = &self.window {
-                        w.request_redraw();
-                    }
+                    self.finish_redraw(event_loop);
                     return;
                 }
                 if matches!(self.screen, Screen::Loading) {
@@ -436,17 +480,15 @@ impl winit::application::ApplicationHandler for App {
                         self.request_close(super::CloseReason::Error);
                         return;
                     }
-                    if let Some(w) = &self.window {
-                        w.request_redraw();
-                    }
+                    self.finish_redraw(event_loop);
                     return;
                 }
                 if self.battle_movie_pending() {
                     if let Err(error) = self.redraw_battle_movie(dt) {
                         eprintln!("render: {error:#}");
                         self.request_close(super::CloseReason::Error);
-                    } else if let Some(w) = &self.window {
-                        w.request_redraw();
+                    } else {
+                        self.finish_redraw(event_loop);
                     }
                     return;
                 }
@@ -456,9 +498,7 @@ impl winit::application::ApplicationHandler for App {
                 if self.netplay.is_some() {
                     self.net_idle();
                     if !matches!(self.screen, Screen::Battle) {
-                        if let Some(w) = &self.window {
-                            w.request_redraw();
-                        }
+                        self.finish_redraw(event_loop);
                         return;
                     }
                     if self.netplay.as_ref().is_some_and(|n| n.ended_done()) {
@@ -606,6 +646,7 @@ impl winit::application::ApplicationHandler for App {
                     }
                     menu = self.controls_model(icons);
                 }
+                let mut stereo_view = None;
                 // A mission popup holds single player (`FUN_0038c7a0` sets
                 // `DAT_00600b44`) until the player presses to continue
                 // (`FUN_0038cb28`); the frame's audio runs on under it.
@@ -631,12 +672,23 @@ impl winit::application::ApplicationHandler for App {
                 }
                 let camera = if self.walk.is_some() {
                     self.step_spawn_pointer(dt);
+                    let ext_infantry = self.netplay.is_none()
+                        && self
+                            .display_ext
+                            .as_ref()
+                            .zip(self.walk.as_ref())
+                            .is_some_and(|(ext, (walk, _))| {
+                                ext.is_infantry(&super::xr::sim_view(walk))
+                            });
                     let pad = if self.paused {
                         self.kbm.drop_taps();
                         game::pause::hold_for_resume(&mut self.resume_gate);
                         PadState::default()
                     } else if popup_up {
                         self.kbm.drop_taps();
+                        // The press that closes a popup is not also a jump:
+                        // whatever is still down waits for its release.
+                        game::pause::hold_for_resume(&mut self.resume_gate);
                         PadState::default()
                     } else if self
                         .walk
@@ -667,6 +719,14 @@ impl winit::application::ApplicationHandler for App {
                                 if let Some(bb) = self.blackbox.as_mut() {
                                     bb.stick(self.stick_sample.0, self.stick_sample.1);
                                 }
+                                let pad = self
+                                    .display_ext
+                                    .as_ref()
+                                    .filter(|_| self.netplay.is_none())
+                                    .map_or(pad, |ext| {
+                                        let walk = &self.walk.as_ref().expect("battle walk").0;
+                                        ext.seat_sticks(&super::xr::sim_view(walk), pad, look)
+                                    });
                                 let pad = match controls {
                                     Some(_) => self.kbm.flyer_pad(
                                         self.walk
@@ -681,23 +741,41 @@ impl winit::application::ApplicationHandler for App {
                                     ),
                                     None => self.kbm.pad(pad),
                                 };
+                                let pad = self
+                                    .display_ext
+                                    .as_ref()
+                                    .filter(|_| self.netplay.is_none())
+                                    .map_or(pad, |ext| {
+                                        let walk = &self.walk.as_ref().expect("battle walk").0;
+                                        ext.transform_pad(&super::xr::sim_view(walk), pad)
+                                    });
                                 game::pause::resume_pad(&mut self.resume_gate, pad)
                             }
                         };
-                        self.walk
-                            .as_ref()
-                            .expect("battle walk")
-                            .0
-                            .apply_sprint_latch(&mut self.sprint_latch, pad)
+                        let walk = &self.walk.as_ref().expect("battle walk").0;
+                        if let Some(ext) = self.display_ext.as_ref().filter(|_| ext_infantry) {
+                            ext.apply_sprint_latch(
+                                &super::xr::sim_view(walk),
+                                &mut self.sprint_latch,
+                                pad,
+                            )
+                        } else {
+                            walk.apply_sprint_latch(&mut self.sprint_latch, pad)
+                        }
                     };
-                    if self.view_toggle.pressed(&pad) {
+                    if self.view_toggle.pressed(&pad) && !ext_infantry {
                         let s = &mut self.profile.settings;
                         s.viewpoint = s.viewpoint.toggled();
                         if let Err(e) = self.profile.save() {
                             eprintln!("profile autosave failed: {e:#}");
                         }
                     }
-                    let pad = self.profile.settings.viewpoint.stamp(pad);
+                    let viewpoint = if ext_infantry {
+                        game::viewpoint::Viewpoint::First
+                    } else {
+                        self.profile.settings.viewpoint
+                    };
+                    let pad = viewpoint.stamp(pad);
                     // The scoreboard is held on Select / View (never with the
                     // seat chord) or Tab, read as the key (LAN §5b, #182).
                     game::kbm::step_scoreboard(&mut self.score_hold, &self.kbm, &pad, dt);
@@ -711,7 +789,10 @@ impl winit::application::ApplicationHandler for App {
                     let paused = self.paused;
                     let (walk, cube) = self.walk.as_mut().unwrap();
                     // A FIRE press fires where the reticle was drawn.
-                    let pad = walk.blend.stamp(pad);
+                    let mut pad = walk.blend.stamp(pad);
+                    if ext_infantry {
+                        pad.fire_lag = 0;
+                    }
                     let mut stuck_alarm = false;
                     let mut look = PadState::default();
                     if paused && binding_menu {
@@ -1050,6 +1131,7 @@ impl winit::application::ApplicationHandler for App {
                             matchlog: self.matchlog.as_mut(),
                             session_stats: self.session_stats.as_mut(),
                             frame_profile: self.frame_profile.as_mut(),
+                            display_ext: self.display_ext.as_deref(),
                         };
                         let feed = &mut self.feed;
                         match self.netplay.as_mut() {
@@ -1075,7 +1157,7 @@ impl winit::application::ApplicationHandler for App {
                                     &mut n.peer,
                                     &mut n.link,
                                     elapsed.fmin(1.0),
-                                    pad,
+                                    net::bundle::strip_tracked_inputs(pad),
                                     walk,
                                     Some(feed),
                                     |w, _, f, muted| {
@@ -1149,6 +1231,9 @@ impl winit::application::ApplicationHandler for App {
                                     });
                                 self.kbm.consumed(&pad, ticks);
                                 walk.blend.consumed(ticks);
+                                if let Some(ext) = self.display_ext.as_mut() {
+                                    ext.on_sim_ticks_consumed(ticks);
+                                }
                             }
                         }
                         stuck_alarm |= st.stuck_alarm;
@@ -1198,7 +1283,13 @@ impl winit::application::ApplicationHandler for App {
                             // voice queue, and an idle voice starts its head.
                             // A squad answer plays the take drawn for it,
                             // at its unit.
-                            let ears = game::event_sounds::listener(walk);
+                            let ears = self
+                                .display_ext
+                                .as_ref()
+                                .filter(|_| self.netplay.is_none())
+                                .and_then(|ext| ext.stereo_view(&super::xr::sim_view(walk)))
+                                .map(|view| super::xr::listener(&view))
+                                .unwrap_or_else(|| game::event_sounds::listener(walk));
                             if let Some(v) = walk.voice.as_mut() {
                                 let tick = walk.sim.tick;
                                 // The units' combat calls through the
@@ -1304,6 +1395,12 @@ impl winit::application::ApplicationHandler for App {
                         Some(n) => n.view.draw_in(walk),
                         None => game::render_blend::blend_in_looking(walk, &look),
                     }
+                    if !self.paused && self.netplay.is_none() && super::xr::live_view(walk) {
+                        stereo_view = self
+                            .display_ext
+                            .as_ref()
+                            .and_then(|ext| ext.stereo_view(&super::xr::sim_view(walk)));
+                    }
                     let pending = walk
                         .class_picker
                         .as_mut()
@@ -1356,10 +1453,22 @@ impl winit::application::ApplicationHandler for App {
                         r.set_sun_shadows(self.profile.settings.hard_shadows);
                         self.vehicle_vis
                             .set_tick_share(game::render_blend::share(walk));
+                        self.vehicle_vis
+                            .set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
+                        self.vehicle_vis.set_flag_ribcage(
+                            walk.sim
+                                .ctf
+                                .as_ref()
+                                .and(self.soldier_vis.as_ref())
+                                .map(|v| v.flag_ribcage_frames(walk)),
+                        );
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
                         extra.extend(self.vehicle_vis.campaign_flags(walk));
                         extra.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
-                        self.deka_vis.eye = Some(walk.camera().position);
+                        self.deka_vis.eye = Some(
+                            stereo_view
+                                .map_or_else(|| walk.camera().position, |v| v.camera.position),
+                        );
                         extra.extend(self.deka_vis.draws(r, &walk.sim));
                     }
                     if let Some(vis) = self.soldier_vis.as_mut() {
@@ -1367,7 +1476,11 @@ impl winit::application::ApplicationHandler for App {
                             let (w, h) = r.size();
                             w as f32 / h as f32
                         });
-                        vis.prepare_view(walk, &walk.camera(), aspect);
+                        if let Some(view) = stereo_view {
+                            super::xr::prepare_soldiers(&view, walk, vis);
+                        } else {
+                            vis.prepare_view(walk, &walk.camera(), aspect);
+                        }
                         skinned = vis.draws(walk);
                         extra.extend(vis.weapon_draws(walk));
                         if let Some(r) = self.renderer.as_mut() {
@@ -1396,6 +1509,14 @@ impl winit::application::ApplicationHandler for App {
                             r1: edges & game::kbm::MENU_R1 != 0,
                             square: edges & game::kbm::MENU_SQUARE != 0,
                         };
+                        let pad = super::xr::stats_pointer(
+                            pad,
+                            walk,
+                            self.display_ext.as_deref(),
+                            self.renderer.as_ref(),
+                            self.hud_view.as_ref(),
+                            &mut self.shell_pointer,
+                        );
                         let music_secs = walk.music.as_ref().and_then(|m| {
                             let team = walk.sim.units.get(walk.player.index as usize)?.team;
                             m.end_music_secs(usize::from(team), walk.sim.outcome?)
@@ -1457,7 +1578,13 @@ impl winit::application::ApplicationHandler for App {
                         let (w, h) = r.size();
                         w as f32 / h.max(1) as f32
                     });
-                    hud = Some(hud_model(walk, &mut self.feed, hud_aspect));
+                    let stereo_cam = stereo_view.as_ref().map(|v| (&v.camera, v.aspect));
+                    hud = Some(hud_model_for_view(
+                        walk,
+                        &mut self.feed,
+                        hud_aspect,
+                        stereo_cam,
+                    ));
                     // Issue #182: the teammate view's hint names the device in use.
                     if let Some(sp) = hud.as_mut().and_then(|m| m.spectate.as_mut()) {
                         if !sp.hint.is_empty() {
@@ -1487,6 +1614,7 @@ impl winit::application::ApplicationHandler for App {
                     spawn =
                         spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
                     let camera = self.fx.shake.apply(walk.camera());
+                    let camera = stereo_view.map_or(camera, |view| view.camera);
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
                     {
@@ -1544,8 +1672,8 @@ impl winit::application::ApplicationHandler for App {
                             game::forest::submit_actors(r, &walk.sim);
                             gpu.pose_doors(&walk.sim.doors);
                             gpu.hide_animated(&walk.sim.props);
-                            if let Some(campaign) = walk.campaign.as_ref() {
-                                gpu.pose_world_anims(campaign.instance_poses());
+                            if let Some(poses) = walk.world_instance_poses() {
+                                gpu.pose_world_anims(poses);
                             }
                             gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
                             gpu.pose_stations(&walk.sim);
@@ -1566,14 +1694,25 @@ impl winit::application::ApplicationHandler for App {
                                 .soldier_vis
                                 .as_ref()
                                 .map(|v| {
-                                    let mut points = v.fire_points(walk);
+                                    let mut points = v.flash_fire_points(walk);
                                     self.deka_vis.fire_points(&walk.sim, &mut points);
+                                    if let Some(view) = stereo_view {
+                                        super::xr::place_tracked_muzzle(
+                                            &view,
+                                            walk,
+                                            v,
+                                            &mut points,
+                                        );
+                                    }
                                     v.flash_draws_at(walk, &points)
                                 })
                                 .unwrap_or_default();
                             let mut particles = flashes;
                             if let Some(vis) = &self.soldier_vis {
                                 particles.extend(vis.saber_draws(walk));
+                                if let Some(view) = stereo_view {
+                                    vis.tracked_saber_draws(walk, view.hand_mounts, &mut particles);
+                                }
                             }
                             particles.extend(self.deka_vis.bubbles(
                                 &walk.sim,
@@ -1591,6 +1730,7 @@ impl winit::application::ApplicationHandler for App {
                             r.set_leaf_time(None);
                             r.set_leaf_actors(Vec::new());
                             r.set_bolts(Vec::new());
+                            r.set_underwater(None);
                             r.set_particles(Vec::new());
                             r.set_terrain_lights(Default::default());
                         }
@@ -1606,10 +1746,46 @@ impl winit::application::ApplicationHandler for App {
                         None => gpu.draws.clone(),
                     };
                     draws.append(&mut extra);
-                    if let (Some(vis), Some((walk, _))) = (self.soldier_vis.as_ref(), &self.walk) {
-                        let (arms, gun) = vis.first_person_draws(walk, &camera);
-                        skinned.extend(arms);
-                        draws.extend(gun);
+                    let mut reticle_at = None;
+                    let ext_stereo = if let (Some(ext), Some(view), Some((walk, _))) =
+                        (&self.display_ext, stereo_view, &self.walk)
+                    {
+                        let base_draws = draws.len();
+                        reticle_at =
+                            super::xr::reticle_point(&view, walk, self.soldier_vis.as_ref());
+                        if let Some(vis) = self.soldier_vis.as_ref() {
+                            vis.tracked_draws(walk, view.hand_mounts, &mut draws);
+                            if let Some((class, at)) = view.grenade {
+                                vis.tracked_grenade_draws(walk, class, at, &mut draws);
+                            }
+                        }
+                        if let (Some(quad), Some(markers)) =
+                            (self.fx_quad, self.world_markers.as_ref())
+                        {
+                            draws.extend(world_objective_draws(walk, &view.camera, quad, markers));
+                        }
+                        let result = ext.draw_stereo_eyes(r, &view, &draws, &skinned, clear);
+                        draws.truncate(base_draws);
+                        if let Err(error) = result {
+                            self.failure = Some(error);
+                            event_loop.exit();
+                            return;
+                        }
+                        true
+                    } else {
+                        false
+                    };
+                    r.capture_flat_frame(
+                        !ext_stereo && self.display_ext.as_ref().is_some_and(|ext| ext.has_frame()),
+                    );
+                    if !ext_stereo {
+                        if let (Some(vis), Some((walk, _))) =
+                            (self.soldier_vis.as_ref(), &self.walk)
+                        {
+                            let (arms, gun) = vis.first_person_draws(walk, &camera);
+                            skinned.extend(arms);
+                            draws.extend(gun);
+                        }
                     }
                     // The PS2's spawn screens (the HUD pass's, card SSELB):
                     // the soldier standing in the camera shot.
@@ -1669,6 +1845,7 @@ impl winit::application::ApplicationHandler for App {
                             .as_ref()
                             .is_some_and(|r| r.playing_movie().is_some())
                     });
+                    let mut reticle_shown = false;
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
                             hv.set_icons(icons);
@@ -1702,7 +1879,12 @@ impl winit::application::ApplicationHandler for App {
                                 hv.update_campaign_map(model, &page, [w, h]);
                                 Some(hv)
                             } else {
-                                hv.update(model, hud_dt, [w, h]);
+                                if ext_stereo {
+                                    reticle_shown =
+                                        hv.update_detached_reticle(model, hud_dt, [w, h]);
+                                } else {
+                                    hv.update(model, hud_dt, [w, h]);
+                                }
                                 game::round_end::hud_pass_drawn(
                                     model.round_end.is_some(),
                                     hud_hidden,
@@ -1712,6 +1894,22 @@ impl winit::application::ApplicationHandler for App {
                         }
                         _ => None,
                     };
+                    if let (true, Some(view), Some(point), Some(hv), Some(ext)) = (
+                        reticle_shown,
+                        stereo_view,
+                        reticle_at,
+                        hud_view.as_mut(),
+                        self.display_ext.as_mut(),
+                    ) {
+                        let paint: render::OverlayFn<'_> = &mut |dev, q, enc, view, size| {
+                            hv.paint_reticle(dev, q, enc, view, size)
+                        };
+                        if let Err(error) = ext.set_reticle(r, &view, point, paint) {
+                            self.failure = Some(error);
+                            event_loop.exit();
+                            return;
+                        }
+                    }
                     if let Some(p) = self.frame_profile.as_mut() {
                         p.lap("draws_ms");
                     }
@@ -1954,29 +2152,43 @@ impl winit::application::ApplicationHandler for App {
                                     }
                                 }
                             }
-                            r.render_frame(
-                                &camera,
-                                &draws,
-                                &skinned,
-                                clear,
-                                Some(&mut |dev, q, enc, view, size| {
+                            let draw_overlay: render::OverlayFn<'_> =
+                                &mut |dev, q, enc, view, size| {
                                     if let Some(hv) = hud_view.as_mut() {
                                         hv.paint(dev, q, enc, view, size);
                                     }
                                     overlay.paint(&paint, dev, q, enc, view, size)
-                                }),
+                                };
+                            super::xr::render_battle(
+                                r,
+                                &camera,
+                                &draws,
+                                &skinned,
+                                clear,
+                                Some(draw_overlay),
+                                self.display_ext.as_deref_mut().filter(|_| ext_stereo),
                             )
                         }
-                        _ => r.render_frame(&camera, &draws, &skinned, clear, None),
+                        _ => super::xr::render_battle(
+                            r,
+                            &camera,
+                            &draws,
+                            &skinned,
+                            clear,
+                            None,
+                            self.display_ext.as_deref_mut().filter(|_| ext_stereo),
+                        ),
                     };
                     if let Some(p) = self.frame_profile.as_mut() {
                         p.lap("render_ms");
                         let tick = self.walk.as_ref().map_or(0, |w| w.0.sim.tick);
                         p.end(f64::from(dt) * 1000.0, tick, r);
                     }
-                    if let Err(e) = result {
-                        eprintln!("render: {e}");
+                    if let Err(error) = result {
+                        eprintln!("render: {error:#}");
+                        self.failure = Some(error);
                         self.request_close(super::CloseReason::Error);
+                        return;
                     }
                     if let Some(sound) =
                         binding_click.and_then(|row| self.activate_control_row(row))
@@ -2015,9 +2227,7 @@ impl winit::application::ApplicationHandler for App {
                         }
                     }
                 }
-                if let Some(w) = &self.window {
-                    w.request_redraw();
-                }
+                self.finish_redraw(event_loop);
             }
             _ => {}
         }

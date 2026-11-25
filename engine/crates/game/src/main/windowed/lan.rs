@@ -209,8 +209,14 @@ impl LanArgs {
 }
 
 /// `game --lan-host` / `--lan-join`: the windowed game in a LAN session.
-pub(in super::super) fn run_lan(args: &[String], host: bool) -> Result<()> {
+pub(in super::super) fn run_lan(args: &[String], host: bool, no_mods: bool) -> Result<()> {
     let a = LanArgs::parse(args, host)?;
+    let _ = game::mods_runtime::mount_enabled_mods(
+        &extensions::profile::discover_data_dir(),
+        &a.assets,
+        &a.missions,
+        no_mods,
+    );
     let (event_loop, mut app) = super::shell_app(a.assets.clone(), a.missions.clone())?;
     let mut profile = PlayerProfile::from_profile(&app.profile);
     if let Some(n) = &a.name {
@@ -473,6 +479,13 @@ impl NetplaySession {
 
     /// Every connected human seated, the host's cheat policy.
     fn seat_humans(&self, mut setup: RoundSetup, profile: &game::profile::Profile) -> RoundSetup {
+        setup.map = game::mods_runtime::select_world_variant(
+            &setup.map,
+            &setup.mode,
+            &setup.armies,
+            setup.seed,
+            true,
+        );
         setup.cheat_policy = self.args.cheats;
         setup.awards = self.lobby.awards;
         setup.humans.push(HumanSeat {
@@ -656,17 +669,25 @@ impl NetplaySession {
                         "{name} {}",
                         if reconnect { "reconnected" } else { "joined" }
                     )));
-                    // A mid-round joiner without the map waits in the lobby
-                    // (one with it is checked by its build's digests).
-                    let lacks = |key: &str| {
-                        self.peer
-                            .guests()
-                            .get(&slot)
-                            .and_then(|g| g.content.as_ref())
-                            .is_some_and(|c| !c.maps.contains(key))
-                    };
-                    if let Some((key, label)) = self.lobby.round_map.clone() {
-                        if lacks(&key) {
+                    let guest_content = self
+                        .peer
+                        .guests()
+                        .get(&slot)
+                        .and_then(|g| g.content.as_ref());
+                    if let Some(reason) = game::netplay::lobby::guest_mod_mismatch(
+                        &self.lobby.content,
+                        guest_content,
+                    ) {
+                        let line = format!("{name}: {reason}");
+                        self.lobby.say(line.clone());
+                        out.push(NetAction::Line(line));
+                        if self.lobby.round_map.is_some() {
+                            self.bench(slot, GameNotice::BackToLobby(reason));
+                        }
+                    } else if let Some((key, label)) = self.lobby.round_map.clone() {
+                        // A mid-round joiner without the map waits in the lobby
+                        // (one with it is checked by its build's digests).
+                        if guest_content.is_some_and(|c| !c.maps.contains(&key)) {
                             self.bench(
                                 slot,
                                 GameNotice::BackToLobby(format!(

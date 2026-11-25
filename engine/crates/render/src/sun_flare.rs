@@ -1,5 +1,5 @@
-use crate::{bindings, Camera, Renderer};
-use glam::Vec3;
+use crate::{bindings, Camera, Renderer, ViewProjection};
+use glam::{Vec2, Vec3};
 
 mod geometry;
 
@@ -116,14 +116,17 @@ impl Renderer {
         self.sun_flare = config.map(|c| State::new(&self.device, self.format, c));
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn sun_flare_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
         camera: &Camera,
         width: u32,
         height: u32,
         gather: bool,
+        projection: ViewProjection,
     ) -> u32 {
         let Some(state) = &self.sun_flare else {
             return 0;
@@ -134,18 +137,7 @@ impl Renderer {
         if facing <= 0.0 {
             return 0;
         }
-        let clip = camera.view_proj(width as f32 / height as f32)
-            * (camera.position + dir * (camera.far * 0.5)).extend(1.0);
-        let uv = [clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5];
-        let focal = height as f32 / (2.0 * (camera.fov_y * 0.5).tan());
-        let angular_scale = focal / (facing * 120.0);
         let mut params = [[0.0f32; 4]; 10];
-        params[0] = [
-            uv[0] * width as f32,
-            uv[1] * height as f32,
-            angular_scale,
-            config.size,
-        ];
         params[1] = geometry::gs(config.color);
         for (i, ring) in config.halo_rings.iter().enumerate() {
             params[2 + i] = geometry::gs([ring[1], ring[2], ring[3], ring[4]]);
@@ -164,7 +156,32 @@ impl Renderer {
             config.color[..3].iter().copied().fold(0.0, f32::max),
         ];
         params[8] = [width as f32, height as f32, config.display_gain, 0.0];
-        let cos_half = (1.0 + ((camera.fov_y * 0.5).tan() * (0.637_07 / 0.488_378)).powi(2))
+        let (view_proj, half_tan, center) = match projection.asymmetric() {
+            Some(fov) => (
+                fov.view_projection(camera),
+                (fov.up - fov.down) * 0.5,
+                Vec2::new(
+                    -fov.left / (fov.right - fov.left) * width as f32,
+                    fov.up / (fov.up - fov.down) * height as f32,
+                ),
+            ),
+            None => (
+                camera.view_proj(width as f32 / height as f32),
+                (camera.fov_y * 0.5).tan(),
+                Vec2::new(width as f32, height as f32) * 0.5,
+            ),
+        };
+        let clip = view_proj * (camera.position + dir * (camera.far * 0.5)).extend(1.0);
+        let uv = [clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5];
+        let focal = height as f32 / (2.0 * half_tan);
+        let angular_scale = focal / (facing * 120.0);
+        params[0] = [
+            uv[0] * width as f32,
+            uv[1] * height as f32,
+            angular_scale,
+            config.size,
+        ];
+        let cos_half = (1.0 + (half_tan * (0.637_07 / 0.488_378)).powi(2))
             .sqrt()
             .recip();
         params[9] = [
@@ -173,7 +190,7 @@ impl Renderer {
             config.distance,
             ((facing - cos_half) / (1.0 - cos_half)).max(0.0),
         ];
-        let vertices = geometry::build(config, &params);
+        let vertices = geometry::build(config, &params, center);
         if vertices.is_empty() {
             return 0;
         }
@@ -181,8 +198,7 @@ impl Renderer {
             .write_buffer(&state.vertices, 0, bytemuck::cast_slice(&vertices));
         self.queue
             .write_buffer(&state.params, 0, bytemuck::cast_slice(&params));
-        let depth = self
-            .depth_view
+        let depth = depth_view
             .texture()
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("sun flare source depth"),

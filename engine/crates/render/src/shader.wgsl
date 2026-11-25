@@ -73,7 +73,7 @@ struct Globals {
     water_grid_dims: vec2<u32>, water_grid_range: vec2<f32>,
     water_grid_colors: array<vec4<u32>, 16>,
     water_fog_color: vec3<f32>, water_fog_on: f32,
-    water_fog_range: vec2<f32>, _pad_water_fog: vec2<f32>,
+    water_fog_range: vec2<f32>, water_clip_y: f32, water_clip_on: f32,
     // BF1's character ambient, flat, for LIGHT_CHARACTER draws while
     // character_ambient_on is 1 (`render::Lighting::character_ambient`).
     character_ambient: vec3<f32>, character_ambient_on: f32,
@@ -118,8 +118,14 @@ struct MaterialParams {
     // xy = a UV offset the draw sets each frame (a tread's scroll,
     // `game::viewer::treads`); zero on every other texture.
     offset: vec4<f32>,
+    // x = 1: the texture carries a PC normal map (`render::BumpDesc`,
+    // binding 5) and its lit draws take `bump_lit`; 0 everywhere else.
+    bump: vec4<f32>,
 };
 @group(1) @binding(3) var<uniform> material: MaterialParams;
+// A PC BF2 normal map (`bake::bump`): tangent-space normal in rgb, the
+// specular pass's gloss weight in alpha. Without one the base view, unread.
+@group(1) @binding(5) var t_bump: texture_2d<f32>;
 
 // Skinned draws: per-draw joint palette (model-space joint matrices, i.e.
 // joint_global * inverse_bind), bound with a dynamic offset per draw.
@@ -348,14 +354,22 @@ fn bayer4(p: vec2<f32>) -> f32 {
 }
 
 // PS2 detail modulation. The GS multiplies the two texels as stored, i.e. in
-// gamma space; our base texel arrives linearised by the sRGB sampler, so the
-// equivalent linear-space factor is pow(d, 2.2) (gamma 2.2 approximates the
-// sRGB curve). Alpha is untouched — the alpha test must see the base alpha.
-fn detail_factor(uv: vec2<f32>) -> f32 {
+// gamma space; `detail_factor_display` returns the raw `detail.a * 2` multiplier
+// for display-unit shading paths, and `detail_factor` raises it to 2.2 for the
+// linear unlit/glow paths. Alpha is untouched — the alpha test must see the
+// base alpha.
+fn detail_factor_display(uv: vec2<f32>) -> f32 {
     if material.detail.y == 0.0 || material.detail.w > 0.0 {
         return 1.0;
     }
-    let d = textureSample(t_detail, s_color, uv * material.detail.x).a * 2.0;
+    return textureSample(t_detail, s_color, uv * material.detail.x).a * 2.0;
+}
+
+fn detail_factor(uv: vec2<f32>) -> f32 {
+    let d = detail_factor_display(uv);
+    if d == 1.0 {
+        return 1.0;
+    }
     return pow(d, 2.2);
 }
 
@@ -394,6 +408,9 @@ fn fs_main(raw: VsOut) -> @location(0) vec4<f32> {
 fn far_cull(in: VsOut) {
     if !CULLS {
         return;
+    }
+    if globals.water_clip_on > 0.5 && in.world_pos.y < globals.water_clip_y {
+        discard;
     }
     let u = bayer4(in.clip_pos.xy);
     if in.view_dist > mix(in.cull.x, in.cull.y, u)
@@ -575,26 +592,135 @@ fn vertex_lighting(in: VsOut, lights: vec4<u32>) -> vec3<f32> {
     let local = point_sum(in.world_pos, in.world_normal, lights);
     let dynamic_g = sun_g * (1.0 - globals.sun_static)
         + light2_g * (1.0 - globals.light2_static) + local;
-    var lit: vec3<f32>;
+    // Both PC Direct3D 9 (`normal_shader.xml`: `mul r0.xyz, t0, v0`) and PS2
+    // GS hardware (`MODULATE`) sum lights in display (sRGB) units AND
+    // multiply vertex colour / texel in display units.
+    let vcol_g = linear_to_srgb(max(in.color.rgb, vec3<f32>(0.0)));
     switch in.light {
         case LIGHT_IFACE: {
             let sum = (IFACE_AMBIENT + max(dot(n, -globals.iface_dir), 0.0)) * in.color.rgb;
-            lit = gs_lit(vec3<f32>(1.0), sum);
+            return clamp(sum, vec3<f32>(0.0), vec3<f32>(GS_MAX));
         }
         case LIGHT_PRELIT: {
-            lit = gs_lit(in.color.rgb, dynamic_g);
+            return min(vcol_g * clamp(dynamic_g, vec3<f32>(0.0), vec3<f32>(GS_MAX)), vec3<f32>(GS_MAX));
         }
         case LIGHT_PRELIT_ADD: {
-            lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + dynamic_g);
+            return clamp(vcol_g + dynamic_g, vec3<f32>(0.0), vec3<f32>(GS_MAX));
         }
         case LIGHT_VERTEX_LIT: {
-            lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + local);
+            return clamp(vcol_g + local, vec3<f32>(0.0), vec3<f32>(GS_MAX));
         }
         default: {
-            lit = gs_lit(in.color.rgb, ambient_g + sun_g + light2_g + local);
+            // A PC bump draw lights its directional terms per pixel
+            // (`bump_lit`); only the point sum stays per vertex.
+            if material.bump.x > 0.5 {
+                return local;
+            }
+            return min(
+                vcol_g * clamp(ambient_g + sun_g + light2_g + local, vec3<f32>(0.0), vec3<f32>(GS_MAX)),
+                vec3<f32>(GS_MAX),
+            );
         }
     }
-    return linear_to_srgb(lit);
+}
+
+// PC Battlefront II normal mapping (`analysis/re-pc-bump.md` §2):
+// a PC-authored segment whose BF2 `MTRL` word carries 0x20 binds its `TNAM`
+// slot 1 normal map (`render::BumpDesc`) and the PC draws it through the
+// `bump` RTYP (core.lvl `SHDR`, `bump_shader.xml`). Its lit pixel shader
+// ps037 is
+//     light = sat(c0 + c1 * sat(N_b . L)); out = t0 * v0 * light
+// with N_b the normal map `_bx2`, L the sun in tangent space (vs416 zeroes it
+// where the vertex normal faces away), c0 the ambient and c1 the sun colour;
+// ps041 adds the second light OUTSIDE the saturate, `+ c2 * sat(N_b . L2)`.
+// The PC's light constants are the authored colours, the units the PS2's GS
+// terms here are in, so both take `linear_to_srgb` of the same globals; the
+// clamp is the PC's 1, not the GS's 2 (`GS_MAX`).
+//
+// OURS: the tangent frame comes from screen derivatives of the world
+// position and uv (T = dP/du, B = dP/dv), not the VBUF's tangent and
+// binormal: every vertex attribute location is taken. On the measured
+// AT-RT (`rep_walk_oneman_atst`) the authored tangent is dP/du (mean cos
+// 0.954) and the binormal dP/dv (0.931), so the frame is the same one.
+// replace: the VBUF's own tangent and binormal once a vertex format has room.
+// OURS: the ambient stays the hemisphere of the vertex normal and the point
+// lights the per-vertex `point_sum`, as every other lit draw here.
+// trace: what the bump vs uploads to ps037's c0, and its point-light states.
+struct BumpFrame {
+    t: vec3<f32>,
+    n: vec3<f32>,
+    nb: vec3<f32>,
+    gloss: f32,
+};
+
+fn bump_path(path: u32) -> bool {
+    return path == 0u || path == LIGHT_CHARACTER;
+}
+
+fn unit_or(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
+    let l2 = dot(v, v);
+    if l2 > 1e-24 {
+        return v * inverseSqrt(l2);
+    }
+    return fallback;
+}
+
+// Derivatives: the caller is in uniform control flow (`material.bump.x`).
+fn bump_frame(p: vec3<f32>, normal: vec3<f32>, uv: vec2<f32>, texel: vec4<f32>) -> BumpFrame {
+    let n = unit_or(normal, vec3<f32>(0.0, 1.0, 0.0));
+    let dp1 = dpdx(p);
+    let dp2 = dpdy(p);
+    let du1 = dpdx(uv);
+    let du2 = dpdy(uv);
+    let flip = select(1.0, -1.0, du1.x * du2.y - du1.y * du2.x < 0.0);
+    let t = unit_or((dp1 * du2.y - dp2 * du1.y) * flip, vec3<f32>(0.0));
+    let b = unit_or((dp2 * du1.x - dp1 * du2.x) * flip, vec3<f32>(0.0));
+    let m = texel.rgb * 2.0 - vec3<f32>(1.0);
+    var f: BumpFrame;
+    f.n = n;
+    f.t = t;
+    f.nb = unit_or(t * m.x + b * m.y + n * m.z, n);
+    f.gloss = texel.a;
+    return f;
+}
+
+// vs416's back-face test, on the interpolated vertex normal.
+fn bump_front(n: vec3<f32>, to_light: vec3<f32>) -> f32 {
+    return select(0.0, 1.0, dot(n, to_light) > 0.0);
+}
+
+// The light regions' weights on the sun and Light2 (`vertex_lighting`).
+fn bump_weights(region_top: vec4<f32>, region_bottom: vec4<f32>) -> vec2<f32> {
+    if region_top.w >= 1.0 {
+        return vec2<f32>(region_top.w - 1.0, region_bottom.w);
+    }
+    return vec2<f32>(1.0);
+}
+
+// The light a PC bump draw's texel is multiplied by, display units; the
+// vertex colour multiplies it after. `in.lighting` is the point sum.
+fn bump_lit(in: VsOut, nb: vec3<f32>) -> vec3<f32> {
+    let n = unit_or(in.world_normal, vec3<f32>(0.0, 1.0, 0.0));
+    var ambient_g = mix(
+        linear_to_srgb(globals.ambient_ground),
+        linear_to_srgb(globals.ambient_sky),
+        n.y * 0.5 + 0.5,
+    );
+    if in.light == LIGHT_CHARACTER && globals.character_ambient_on > 0.5 {
+        ambient_g = linear_to_srgb(globals.character_ambient);
+    }
+    if in.region_top.w >= 1.0 {
+        ambient_g = mix(in.region_bottom.rgb, in.region_top.rgb, n.y * 0.5 + 0.5);
+    }
+    let w = bump_weights(in.region_top, in.region_bottom);
+    let ls = -globals.sun_dir;
+    let sun_g = linear_to_srgb(globals.sun_color) * (w.x * max(dot(nb, ls), 0.0) * bump_front(n, ls));
+    var light2_g = vec3<f32>(0.0);
+    if any(globals.light2_color != vec3<f32>(0.0)) {
+        let l2 = -normalize(globals.light2_dir);
+        light2_g = linear_to_srgb(globals.light2_color) * (w.y * max(dot(nb, l2), 0.0) * bump_front(n, l2));
+    }
+    return clamp(ambient_g + sun_g, vec3<f32>(0.0), vec3<f32>(1.0)) + light2_g + max(in.lighting, vec3<f32>(0.0));
 }
 
 fn emission_gain(texel_alpha: f32, in: VsOut) -> f32 {
@@ -611,8 +737,20 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
     }
     let base = texel * in.color;
     let detail = detail_factor(uv);
+    let bumped = material.bump.x > 0.5;
+    var bump: BumpFrame;
+    if bumped {
+        bump = bump_frame(in.world_pos, in.world_normal, in.uv, textureSample(t_bump, s_color, uv));
+    }
     if vertex_lit_path(in.light) {
-        return vec4<f32>(texel.rgb * detail * srgb_to_linear(in.lighting), base.a);
+        let tex_g = linear_to_srgb(max(texel.rgb, vec3<f32>(0.0)));
+        let d_g = detail_factor_display(uv);
+        var light = max(in.lighting, vec3<f32>(0.0));
+        if bumped && bump_path(in.light) {
+            light = linear_to_srgb(max(in.color.rgb, vec3<f32>(0.0))) * bump_lit(in, bump.nb);
+        }
+        let out_g = min(tex_g * d_g * light, vec3<f32>(1.0));
+        return vec4<f32>(srgb_to_linear(out_g), base.a);
     }
     let tex = texel.rgb * detail;
     var rgb: vec3<f32>;
@@ -638,8 +776,11 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
         }
         default: {
             // LIGHT_TERRAIN: the heightfield's GS vertex byte, 0x80 = 1.0,
-            // reaching 1.94 on BF1; the GS clamps the product at 255.
-            rgb = min(tex * srgb_to_linear(in.color.rgb * (255.0 / 128.0)), vec3<f32>(1.0));
+            // reaching 1.94 on BF1; multiply in display units like PC D3D9
+            // terrain shading and PS2 GS MODULATE, clamping at white.
+            let tex_g = linear_to_srgb(max(texel.rgb, vec3<f32>(0.0)));
+            let d_g = detail_factor_display(uv);
+            rgb = srgb_to_linear(min(tex_g * d_g * (in.color.rgb * (255.0 / 128.0)), vec3<f32>(1.0)));
         }
     }
     if in.light == LIGHT_TERRAIN && material.detail.w > 0.0 {
@@ -651,16 +792,6 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
         }
     }
     return vec4<f32>(rgb, base.a);
-}
-
-// A texel (linear) under a light summed in GS units: the VU clamps the sum
-// at 255/128, the GS multiplies it into the texel. The sum is decoded once
-// and multiplied into the linear texel. The GS's own arithmetic -- the texel
-// in display units, the product clamped at white -- scored worse over the
-// 954 PCSX2 pairs (10.052 against 9.742 mean block error, card LSUM), so the
-// frame buffer's clamp is not modelled here.
-fn gs_lit(texel: vec3<f32>, light: vec3<f32>) -> vec3<f32> {
-    return texel * srgb_to_linear(clamp(light, vec3<f32>(0.0), vec3<f32>(GS_MAX)));
 }
 
 // The PS2's fog (`analysis/re-fog-amount.md` §8, [O]; the curve PROVISIONAL,
@@ -1063,8 +1194,15 @@ struct SpecParams {
     cam_right: vec3<f32>,
     // 1 = the disc's mirrored light, 0 = the consistent one.
     mirror: f32,
+    // 1 = `t_pc_cube` holds the PC cube's +Y face (`render::Renderer::
+    // set_pc_spec_cube`), 0 = none, and a PC bump pass adds nothing.
+    pc_cube: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 @group(3) @binding(2) var<uniform> spec: SpecParams;
+@group(3) @binding(3) var t_pc_cube: texture_2d<f32>;
 
 struct VsSpecOut {
     @builtin(position) clip_pos: vec4<f32>,
@@ -1088,6 +1226,11 @@ struct VsSpecOut {
     @location(11) lighting: vec3<f32>,
     // The base draw's `VsOut::wc`.
     @location(12) wc: f32,
+    // The base draw's world position and light regions, for a PC bump
+    // draw's per-pixel light (`bump_lit`, `pc_bump_spec`).
+    @location(13) world_pos: vec3<f32>,
+    @location(14) @interpolate(flat) region_top: vec4<f32>,
+    @location(15) @interpolate(flat) region_bottom: vec4<f32>,
 };
 
 @vertex
@@ -1148,6 +1291,9 @@ fn spec_varyings(
         base.region_bottom = region_bottom;
     }
     out.lighting = vertex_lighting(base, lights);
+    out.world_pos = world_pos.xyz;
+    out.region_top = base.region_top;
+    out.region_bottom = base.region_bottom;
     out.clip_pos = mesh_clip(world_pos, light);
     out.world_normal = world_normal;
     out.uv = uv;
@@ -1195,6 +1341,69 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(hi, lo, c <= vec3<f32>(0.04045));
 }
 
+// The PC's specular pass for a bump draw (`analysis/re-pc-bump.md` §3):
+// `0x702480` binds the NORMAL map to stage 0 and `0x702df0` draws once per
+// directional light through `specularlighting_shader.xml` ps004:
+//     lobe = dot(cube.rgb, c1.rgb) + cube.a * c1.a
+//     out  = lobe * c0 * c2 * v0.w * lrp(c0.w, t0.w, 1)
+// cube = `specularcubemap` at N_b in vs044's frame (X = T without its H part,
+// Y = H = normalize(V - L), Z = T x H), c0 the material's specular colour
+// (`in.spec_rgb`), c1 `0x701ff0`'s channel select of its power, c2 the light
+// colour, v0.w the vertex normal's front test, and the gloss lerp the normal
+// map's alpha (`bake::bump` folds c0.w into it). Each pass adds One/One, so
+// the sum clamps once (`fs_spec`).
+//
+// OURS: H per pixel, not vs044's per-vertex frame interpolated.
+// replace: the interpolated frame, if a still shows the per-vertex lobe.
+// trace: the per-light float `0x702df0` folds into c2 and its light flag
+// 0x800; both read as 1 / every directional light here, the sun and Light2.
+fn pc_spec_select(power: f32) -> vec4<f32> {
+    let t = (power - 10.0) * (1.0 / 90.0);
+    var c: vec4<f32>;
+    if t < 0.33333298563957214 {
+        let s = 3.000030040740967 * t;
+        c = vec4<f32>(1.0 - s, s, 0.0, 0.0);
+    } else if t < 0.6666659712791443 {
+        let s = (t - 0.3333300054073334) * 3.000030040740967;
+        c = vec4<f32>(0.0, 1.0 - s, s, 0.0);
+    } else {
+        let s = (t - 0.6666600108146667) * 3.000030040740967;
+        c = vec4<f32>(0.0, 0.0, 1.0 - s, s);
+    }
+    return clamp(c, vec4<f32>(-1.0), vec4<f32>(1.0));
+}
+
+fn pc_spec_light(f: BumpFrame, v: vec3<f32>, travel: vec3<f32>, color_g: vec3<f32>, c1: vec4<f32>, c0: vec3<f32>) -> vec3<f32> {
+    let h = unit_or(v - travel, f.n);
+    let x = unit_or(f.t - h * dot(h, f.t), vec3<f32>(0.0));
+    let z = unit_or(cross(f.t, h), vec3<f32>(0.0));
+    let d = vec3<f32>(dot(f.nb, x), dot(f.nb, h), dot(f.nb, z));
+    if d.y <= 0.0 || d.y < max(abs(d.x), abs(d.z)) {
+        return vec3<f32>(0.0);
+    }
+    let st = (vec2<f32>(d.x, d.z) / d.y + vec2<f32>(1.0)) * 0.5;
+    let cube = textureSampleLevel(t_pc_cube, s_spec, st, 0.0);
+    let lobe = clamp(dot(cube.rgb, c1.rgb) + cube.a * c1.a, -1.0, 1.0);
+    let front = bump_front(f.n, -travel);
+    let c2 = min(color_g, vec3<f32>(1.0));
+    return clamp(lobe * c0 * c2 * (front * f.gloss), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn pc_bump_spec(in: VsSpecOut, f: BumpFrame) -> vec3<f32> {
+    if spec.pc_cube < 0.5 {
+        return vec3<f32>(0.0);
+    }
+    let c1 = pc_spec_select(in.spec_uv.x * 255.0);
+    let c0 = min(in.spec_rgb, vec3<f32>(1.0));
+    let v = unit_or(-mesh_eye_delta(in.world_pos, in.light), f.n);
+    let w = bump_weights(in.region_top, in.region_bottom);
+    var add = pc_spec_light(f, v, globals.sun_dir, linear_to_srgb(globals.sun_color) * w.x, c1, c0);
+    if any(globals.light2_color != vec3<f32>(0.0)) {
+        add += pc_spec_light(f, v, normalize(globals.light2_dir), linear_to_srgb(globals.light2_color) * w.y, c1, c0);
+    }
+    return add;
+}
+
 @fragment
 fn fs_spec(in: VsSpecOut) -> @location(0) vec4<f32> {
     var b: VsOut;
@@ -1210,10 +1419,19 @@ fn fs_spec(in: VsSpecOut) -> @location(0) vec4<f32> {
     b.fog_depth = in.fog_depth;
     b.lighting = unweight(in.lighting, in.wc);
     b.wc = 0.0;
+    b.world_pos = in.world_pos;
+    b.region_top = in.region_top;
+    b.region_bottom = in.region_bottom;
     far_cull(b);
     let base = shade_unfogged(b);
-    let t = textureSample(t_spec, s_spec, in.spec_uv).r;
-    let add = min(t * in.spec_rgb, vec3<f32>(1.0)) * clamp(base.a, 0.0, 1.0);
+    var add: vec3<f32>;
+    if material.bump.x > 0.5 {
+        let texel = textureSample(t_bump, s_color, material_uv(in.uv));
+        add = pc_bump_spec(in, bump_frame(in.world_pos, in.world_normal, in.uv, texel));
+    } else {
+        let t = textureSample(t_spec, s_spec, in.spec_uv).r;
+        add = min(t * in.spec_rgb, vec3<f32>(1.0)) * clamp(base.a, 0.0, 1.0);
+    }
     let before = clamp(base.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     let after = srgb_to_linear(min(linear_to_srgb(before) + add, vec3<f32>(1.0)));
     let stored = clamp(apply_fog(base.rgb, in.fog_depth), vec3<f32>(0.0), vec3<f32>(1.0));

@@ -16,7 +16,11 @@
 //! In Two-Flag CTF (used on nine ground maps):
 //! - Each team has a home flag at their base.
 //! - Enemy flag carried to home capture region scores 1 point.
-//! - Friendly unit touching dropped team flag immediately returns it to home (Touch Return).
+//! - A flag's own team never touches it: a dropped team flag waits out its
+//!   Lifespan and then resets home. `objectivectf.luac` Start sets every
+//!   flag's `AllowTeamPickup` (hash 0xdfdb1d8b, `FUN_0035ec80` -> flag +0x45c)
+//!   to 0, and `FUN_0035e370` lets a toucher pick up only when its team
+//!   differs or that byte (and +0x45e) is set.
 
 use crate::fmath::FloatExt;
 use glam::Vec3;
@@ -31,8 +35,16 @@ pub const DEFAULT_CTF_SCORE_LIMIT: u32 = 5;
 /// Dropped space flag return timeout in seconds (com_icon_spaceflag ODF Lifespan).
 pub const SPACE_FLAG_RETURN_TIMEOUT: f32 = 15.0;
 
-/// Dropped ground flag return timeout in seconds (SWBFRNT2.ELF FUN_0035d2f8 line 343281: 60.0f).
+/// Dropped return timeout of a flag with no home, in seconds (SWBFRNT2.ELF
+/// FUN_0035d2f8 line 343281: 60.0f; PC BattlefrontII.exe 0x57e7f2).
 pub const GROUND_FLAG_RETURN_TIMEOUT: f32 = 60.0;
+
+/// Dropped return timeout of a ground flag with a home, in seconds: the class
+/// `Lifespan` (com_item_flag ODF `Lifespan = 15.0`, bf2 INGAME). FUN_0035d2f8
+/// lines 343280-343287 (PC 0x57e7b7-0x57e7f2) take the class Lifespan when the
+/// flag has a home region, which both CTF scripts set (`HomeRegion`). The
+/// battle setup replaces it with the placed flag class's own Lifespan.
+pub const GROUND_FLAG_LIFESPAN: f32 = 15.0;
 
 /// Re-pickup delay after drop in seconds (SWBFRNT2.ELF FUN_0035e370 line 343802: 0.5s).
 pub const FLAG_REPICKUP_DELAY: f32 = 0.5;
@@ -127,7 +139,7 @@ impl Flag {
             status: FlagStatus::AtHome,
             soldier_pickup_radius: SOLDIER_PICKUP_RADIUS,
             flyer_pickup_radius: FLYER_PICKUP_RADIUS,
-            drop_timeout: GROUND_FLAG_RETURN_TIMEOUT,
+            drop_timeout: GROUND_FLAG_LIFESPAN,
             carried_offset: GROUND_CARRIED_OFFSET,
             allow_ai_pickup: true,
             gravity: true,
@@ -252,8 +264,8 @@ impl CtfState {
             score_limit,
             team_points: [0, 0],
             flags: vec![
-                Flag::new_team_flag(0, team0_home, GROUND_FLAG_RETURN_TIMEOUT),
-                Flag::new_team_flag(1, team1_home, GROUND_FLAG_RETURN_TIMEOUT),
+                Flag::new_team_flag(0, team0_home, GROUND_FLAG_LIFESPAN),
+                Flag::new_team_flag(1, team1_home, GROUND_FLAG_LIFESPAN),
             ],
             capture_regions: [
                 CaptureRegion::new(0, team0_goal, DEFAULT_CAPTURE_REGION_RADIUS),
@@ -475,52 +487,23 @@ impl Sim {
                             pickup_cooldown,
                         };
 
+                        let only_enemy = matches!(ctf.mode, CtfMode::TwoFlag);
                         if pickup_cooldown <= 0.0 {
-                            if let Some(touching_unit) = self.ctf_find_pickup(&flag, false) {
+                            if let Some(touching_unit) = self.ctf_find_pickup(&flag, only_enemy)
+                            {
                                 let unit_team = self.unit(touching_unit).map_or(0, |u| u.team);
-
-                                match ctf.mode {
-                                    CtfMode::OneFlag => {
-                                        flag.status = FlagStatus::Carried {
-                                            carrier: touching_unit,
-                                        };
-                                        let (pos, _) = self.ctf_carrier_pos(touching_unit, &flag);
-                                        flag.current_pos = pos;
-                                        flag.vel = Vec3::ZERO;
-                                        flag.landed = false;
-                                        self.events.push(Event::FlagPickedUp {
-                                            flag: flag_idx as u8,
-                                            unit: touching_unit,
-                                            team: unit_team,
-                                        });
-                                    }
-                                    CtfMode::TwoFlag => {
-                                        if unit_team == flag.team {
-                                            flag.status = FlagStatus::AtHome;
-                                            flag.current_pos = flag.home_pos;
-                                            flag.vel = Vec3::ZERO;
-                                            flag.landed = !flag.gravity;
-                                            self.events.push(Event::FlagReturned {
-                                                flag: flag_idx as u8,
-                                                team: unit_team,
-                                            });
-                                        } else {
-                                            flag.status = FlagStatus::Carried {
-                                                carrier: touching_unit,
-                                            };
-                                            let (pos, _) =
-                                                self.ctf_carrier_pos(touching_unit, &flag);
-                                            flag.current_pos = pos;
-                                            flag.vel = Vec3::ZERO;
-                                            flag.landed = false;
-                                            self.events.push(Event::FlagPickedUp {
-                                                flag: flag_idx as u8,
-                                                unit: touching_unit,
-                                                team: unit_team,
-                                            });
-                                        }
-                                    }
-                                }
+                                flag.status = FlagStatus::Carried {
+                                    carrier: touching_unit,
+                                };
+                                let (pos, _) = self.ctf_carrier_pos(touching_unit, &flag);
+                                flag.current_pos = pos;
+                                flag.vel = Vec3::ZERO;
+                                flag.landed = false;
+                                self.events.push(Event::FlagPickedUp {
+                                    flag: flag_idx as u8,
+                                    unit: touching_unit,
+                                    team: unit_team,
+                                });
                             }
                         }
                     }
@@ -871,8 +854,42 @@ mod tests {
             .any(|e| matches!(e, Event::FlagReset { flag: 0 })));
     }
 
+    /// A homed ground flag starts its return timer at the flag class's
+    /// Lifespan (`com_item_flag`: 15 s), not the 60 s of a flag with no home
+    /// (FUN_0035d2f8 B2:343280-343287), and is home again once it runs out.
     #[test]
-    fn test_ctf_two_flag_touch_return() {
+    fn two_flag_drop_returns_after_the_class_lifespan() {
+        let mut sim = setup_sim();
+        let team0_home = Vec3::new(-50.0, 0.0, 0.0);
+        let team1_home = Vec3::new(50.0, 0.0, 0.0);
+        let ctf = CtfState::new_two_flag(3, team0_home, team1_home, team1_home, team0_home);
+        assert!(ctf.flags.iter().all(|f| f.drop_timeout == 15.0));
+        assert_eq!(
+            CtfState::new_ground_one_flag(3, team0_home, team1_home, team0_home).flags[0]
+                .drop_timeout,
+            GROUND_FLAG_LIFESPAN
+        );
+        sim.install_ctf(ctf);
+        let u1 = spawn_soldier(&mut sim, 1, team0_home);
+        sim.tick_ctf(0.1);
+        sim.unit_mut(u1).unwrap().soldier.pos = Vec3::ZERO;
+        sim.unit_mut(u1).unwrap().alive = false;
+        sim.tick_ctf(0.1);
+        match sim.ctf.as_ref().unwrap().flags[0].status {
+            FlagStatus::Dropped { timer, .. } => assert!(timer > 14.0 && timer <= 15.0),
+            s => panic!("expected a dropped flag, got {s:?}"),
+        }
+        sim.tick_ctf(14.0);
+        assert!(matches!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Dropped { .. }
+        ));
+        sim.tick_ctf(1.1);
+        assert_eq!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::AtHome);
+    }
+
+    #[test]
+    fn two_flag_owners_cannot_touch_their_dropped_flag() {
         let mut sim = setup_sim();
         let team0_home = Vec3::new(-50.0, 0.0, 0.0);
         let team1_home = Vec3::new(50.0, 0.0, 0.0);
@@ -899,16 +916,27 @@ mod tests {
         // Advance cooldown past 0.5s
         sim.tick_ctf(0.5);
 
-        // Friendly u0 (team 0) touches dropped team 0 flag -> Touch Return
+        // The owning team cannot touch its own flag (AllowTeamPickup 0):
+        // a friendly standing on it leaves it dropped, the countdown runs.
         let _u0 = spawn_soldier(&mut sim, 0, Vec3::ZERO);
+        sim.events.clear();
         sim.tick_ctf(0.1);
+        assert!(matches!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Dropped { .. }
+        ));
+        assert!(!sim.events.iter().any(|e| matches!(
+            e,
+            Event::FlagReturned { .. } | Event::FlagPickedUp { .. }
+        )));
 
+        sim.tick_ctf(GROUND_FLAG_LIFESPAN);
         let ctf_state = sim.ctf.as_ref().unwrap();
         assert_eq!(ctf_state.flags[0].status, FlagStatus::AtHome);
         assert_eq!(ctf_state.flags[0].current_pos, team0_home);
         assert!(sim
             .events
             .iter()
-            .any(|e| matches!(e, Event::FlagReturned { flag: 0, team: 0 })));
+            .any(|e| matches!(e, Event::FlagReset { flag: 0 })));
     }
 }

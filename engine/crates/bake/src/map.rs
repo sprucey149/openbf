@@ -394,6 +394,7 @@ fn pull_side_models(
 /// wrapper's `plan`, and the `plnp` that follows it inside the same wrapper).
 struct ModeLayer {
     group: Vec<mungefs::world::World>,
+    selector: Option<String>,
     plan: Option<mungefs::plan::Plan>,
     plnp: Option<mungefs::plan::Plnp>,
 }
@@ -451,7 +452,7 @@ enum Content {
 }
 
 pub fn bake_common(lvl_path: &str, outdir: &str, pc_lvl: Option<&str>) -> Result<CommonManifest> {
-    let m = bake_content(lvl_path, outdir, Content::Common, pc_lvl, None)?;
+    let m = bake_content(lvl_path, outdir, Content::Common, pc_lvl, None, None)?;
     let cm = CommonManifest {
         source: m.map,
         models: m.models,
@@ -462,6 +463,11 @@ pub fn bake_common(lvl_path: &str, outdir: &str, pc_lvl: Option<&str>) -> Result
         texture_tier2: m.texture_tier2,
     };
     crate::write_ron(&Path::new(outdir).join("common.ron"), &cm)?;
+    let lvl = std::fs::read(lvl_path)?;
+    let inner = mungefs::open(&lvl).map_err(|e| anyhow::anyhow!("{e}"))?;
+    for (model, cloths) in crate::cloth::item_cloths(inner)? {
+        crate::write_ron(&manifest::cloth::item_path(Path::new(outdir), &model), &cloths)?;
+    }
     // BF2's HUD layouts, fonts and extra sheets (card BHUD); a no-op for an
     // LVL with no `hud_` chunk.
     if let Some(h) = crate::hud::bake_hud(lvl_path, outdir)? {
@@ -496,11 +502,30 @@ pub fn bake_map_with_sky(
     pc_lvl: Option<&str>,
     sky_sublevel: Option<(&str, &str)>,
 ) -> Result<Manifest> {
-    let m = bake_content(lvl_path, outdir, Content::Map, pc_lvl, sky_sublevel)?;
+    let m = bake_content(lvl_path, outdir, Content::Map, pc_lvl, sky_sublevel, None)?;
     crate::write_ron(&Path::new(outdir).join("manifest.ron"), &m)?;
     let classes = Path::new(outdir).join(MAP_CLASSES_FILE);
     crate::classes::bake_classes(lvl_path, &classes.to_string_lossy())?;
     crate::world_anims::bake(lvl_path, outdir)?;
+    Ok(m)
+}
+
+pub(crate) struct AddonMapInput<'a> {
+    pub bytes: &'a [u8],
+    pub selectors: &'a std::collections::BTreeMap<u32, String>,
+}
+
+pub(crate) fn bake_addon_map(
+    lvl_path: &str,
+    outdir: &str,
+    input: AddonMapInput<'_>,
+) -> Result<Manifest> {
+    let bytes = input.bytes;
+    let m = bake_content(lvl_path, outdir, Content::Map, None, None, Some(input))?;
+    let out = Path::new(outdir);
+    crate::write_ron(&out.join("manifest.ron"), &m)?;
+    crate::classes::write_baked_classes(bytes, &out.join(MAP_CLASSES_FILE))?;
+    crate::world_anims::write(out, &crate::world_anims::read_bytes(bytes)?)?;
     Ok(m)
 }
 

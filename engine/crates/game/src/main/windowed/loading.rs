@@ -471,6 +471,7 @@ pub(super) fn prepare_round(
     job: Option<super::round_prep::RoundJob>,
 ) -> anyhow::Result<Worker<Prepared>> {
     Worker::spawn(move || {
+        game::assets::scope_overlays_to_map(&dir);
         let key = game::assets::prefetch::load_key(&dir, &mode);
         std::thread::scope(|s| {
             let warm = std::thread::Builder::new()
@@ -488,10 +489,11 @@ pub(super) fn prepare_round(
                         let script = j
                             .campaign_index
                             .map(|i| ui::campaign::RISE_OF_THE_EMPIRE[i].script);
-                        super::super::round_setup::campaign_layers_for(
+                        super::super::round_setup::mission_layers_for(
                             &j.missions_dir,
                             &j.name,
                             &mode,
+                            Some(&j.row_armies),
                             script,
                         )
                     })
@@ -959,7 +961,7 @@ impl super::App {
         }
     }
 
-    fn loading_press(&mut self) {
+    pub(super) fn loading_press(&mut self) {
         if let Some(l) = self.loading.as_mut() {
             l.playback.press(l.started.elapsed());
         }

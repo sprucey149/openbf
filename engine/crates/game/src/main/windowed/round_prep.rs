@@ -114,20 +114,28 @@ impl RoundJob {
     pub fn build(self, scene: &game::assets::Scene) -> Result<PreparedRound> {
         let started = Instant::now();
         let dir = scene.dir.clone();
+        let load_sounds = || {
+            let t = Instant::now();
+            let mission_mode = if self.mode == ui::shell::Mode::Xl.subst() {
+                "con"
+            } else {
+                self.mode.as_str()
+            };
+            let pair = [self.row_armies[0].as_str(), self.row_armies[1].as_str()];
+            let banks = game::mission::pick(&self.missions_dir, &self.name, mission_mode, pair)
+                .map(|p| p.mission.sound)
+                .unwrap_or_default();
+            let lib = game::sounds::SoundLib::load_with_fallback(&dir, &banks);
+            (lib, ms(t))
+        };
         let (built, (mut sounds, sounds_load_ms)) = std::thread::scope(|s| {
             let loader = std::thread::Builder::new()
                 .name("loading-sounds".into())
-                .spawn_scoped(s, || {
-                    let t = Instant::now();
-                    (game::sounds::SoundLib::load(&dir), ms(t))
-                });
+                .spawn_scoped(s, load_sounds);
             let built = self.walk(scene);
             let sounds = match loader {
                 Ok(h) => h.join().unwrap_or((None, 0.0)),
-                Err(_) => {
-                    let t = Instant::now();
-                    (game::sounds::SoundLib::load(&dir), ms(t))
-                }
+                Err(_) => load_sounds(),
             };
             (built, sounds)
         });

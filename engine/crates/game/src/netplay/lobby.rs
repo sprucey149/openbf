@@ -136,6 +136,33 @@ pub fn digest_mismatch_text(map: &str, host: &[(String, u64)], ours: &[(&str, u6
     format!("Your copy of {map} plays differently from the host's ({group})")
 }
 
+/// Diagnostic explaining when a guest's active gameplay-affecting content mods
+/// or override stack differ from the host (or cannot be verified).
+pub fn mod_mismatch_reason(host: &ContentManifest, guest: &ContentManifest) -> Option<String> {
+    if host.override_digest != guest.override_digest {
+        return Some(
+            "Active gameplay-affecting mods or load order differ from host (match mods and load order in Mods tab).".into(),
+        );
+    }
+    None
+}
+
+/// Conservative check for a guest's decoded [`ContentManifest`]: rejects
+/// unreadable manifests whenever the host has active gameplay overrides.
+pub fn guest_mod_mismatch(
+    host: &ContentManifest,
+    guest: Option<&ContentManifest>,
+) -> Option<String> {
+    match guest {
+        Some(g) => mod_mismatch_reason(host, g),
+        None if !host.override_digest.is_empty() => Some(
+            "Could not verify your active mods against the host's gameplay-affecting mod stack."
+                .into(),
+        ),
+        None => None,
+    }
+}
+
 /// A refused or ended connection as the player reads it.
 pub fn reject_text(reason: net::RejectReason, detail: &str, ours: &str) -> String {
     use net::RejectReason as R;

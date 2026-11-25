@@ -20,7 +20,7 @@ LightBeam anywhere on its disc.
 | Length | 0x83d03615 | +0x174 | default 10; stored max(v, 0) |
 | Position | 0x934f4e0a | +0x150 | |
 | Direction | 0xdf6dc76a | +0x160 | default (0, 1, 0) |
-| BeamIntensity | 0x75096fab | — | not read |
+| BeamIntensity | 0x75096fab | — (PS2) / +0x190 (PC) | ignored on PS2; PC ctor `0x0049aee0` sets default 1.0, parser `0x00641d20` reads `0x75096fab` into `+0x190`, renderer `0x00653dc0` multiplies view alpha factor `f` by `+0x190` on both beam and glow paths and returns early when glow `centre_alpha == 0` |
 
 With neither a Length > 0 nor a Direction authored, the length is 0 and the direction (0, 1, 0). Alpha 0 (+0x173)
 draws nothing. vtable +0x40 is a per-view hide bit (+0x12c).

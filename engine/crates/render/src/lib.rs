@@ -45,7 +45,8 @@
 //! the terrain), `point_light` (card BPNT: BF2's local lights on models —
 //! the list, the per-model gather, the shader's table), `leaf` (card LEAF:
 //! the leaf patches, on the grass's buffers and pipeline), `filter` (card
-//! BFLT: the DomeInfo frame filter), `light_beam` (card CPHOL: the
+//! BFLT: the DomeInfo frame filter), `underwater` (PC BF2's tint over the
+//! view under the water plane), `light_beam` (card CPHOL: the
 //! "lightbeam" particle's eye-facing fan), `affine` (BF2's screen-space
 //! vertex-colour blend: the guard band, the layer bit and their CPU twin)
 //! and `hud` (card BHUD2: the HUD pass). `hud` and `affine` are public
@@ -87,14 +88,18 @@ mod point_light;
 mod rand;
 mod resources;
 mod shadow;
-mod sun_shadow;
 mod sun_flare;
+mod sun_shadow;
 pub use shadow::ShadowMesh;
 mod sky;
 mod specular;
 mod stars;
 mod terrain_light;
 mod texture;
+mod underwater;
+mod reticle;
+mod visor;
+mod water_reflect;
 mod world_scale;
 
 pub use bloom::Bloom;
@@ -110,7 +115,7 @@ pub use dust::{Dust, DustConfig};
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
 pub use fog_cloud::FogCloud;
-pub use frame::{FrameStats, OverlayFn};
+pub use frame::{Frame, FrameStats, FrameTarget, OverlayFn, ViewFov, ViewProjection};
 pub use frame_ab::FrameAb;
 pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes};
 pub use leaf::{LeafClass, LeafObject, LeafSprite};
@@ -130,10 +135,13 @@ pub use sky::{
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
 pub use sun_flare::SunFlare;
+pub use underwater::UnderwaterTint;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
-pub use texture::{DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
+pub use texture::{BumpDesc, DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
+pub use reticle::{ReticlePass, WorldReticle};
+pub use visor::{Visor, VisorEye, VisorPass};
 
 use mesh::GpuMesh;
 use std::sync::Arc;
@@ -237,7 +245,9 @@ struct Globals {
     water_fog_color: [f32; 3],
     water_fog_on: f32,
     water_fog_range: [f32; 2],
-    _pad_water_fog: [f32; 2],
+    /// Horizontal reflection clip plane Y and enable flag (`1.0` during planar reflection pass).
+    water_clip_y: f32,
+    water_clip_on: f32,
     /// [`Lighting::character_ambient`], read by [`LightPath::Character`]
     /// draws when `character_ambient_on` is 1.
     character_ambient: [f32; 3],
@@ -282,6 +292,8 @@ pub struct Renderer {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     target: Target,
+    capture_flat: bool,
+    flat_frame: Option<FrameTarget>,
     /// Color format of the render target (surface or headless texture).
     format: wgpu::TextureFormat,
     depth_view: wgpu::TextureView,
@@ -293,6 +305,8 @@ pub struct Renderer {
     mask_pipeline: wgpu::RenderPipeline,
     /// Alpha-composited pass for materials the bake judged BLEND.
     blend_pipeline: wgpu::RenderPipeline,
+    /// Unoccluded alpha-composited world overlays (`DrawLayer::Overlay`).
+    overlay_pipeline: wgpu::RenderPipeline,
     additive_blend_pipeline: wgpu::RenderPipeline,
     fade_additive_blend_pipeline: wgpu::RenderPipeline,
     /// The WATER pass: alpha-composited with the depth WRITTEN and a
@@ -425,11 +439,19 @@ pub struct Renderer {
     filter: filter::FilterState,
     softness: filter::FilterState,
     sun_flare: Option<sun_flare::State>,
+    /// PC BF2's underwater tint (`underwater.rs`): its pipelines and this
+    /// frame's level and colour ([`Renderer::set_underwater`]).
+    underwater: underwater::UnderwaterState,
     bloom: bloom::BloomState,
     particle_blur: particle_blur::ParticleBlur,
     heat_character_mask: wgpu::RenderPipeline,
+    water_reflect: water_reflect::WaterReflectState,
     spec_buf: wgpu::Buffer,
     spec_bg: Option<wgpu::BindGroup>,
+    /// The `specular` table's view and sampler ([`Renderer::set_specular_table`]).
+    spec_table: Option<(wgpu::TextureView, wgpu::Sampler)>,
+    /// The PC cube's +Y face ([`Renderer::set_pc_spec_cube`]).
+    pc_spec_cube: Option<wgpu::TextureView>,
     /// The disc's mirrored specular light (`analysis/re-specular-pass.md` §4,
     /// `[O]`): on by default; off takes the consistent `d = L·R`. PROVISIONAL
     /// — how the mismatch LOOKS on the PS2 wants an in-map capture.
@@ -522,6 +544,7 @@ impl Renderer {
         self.set_fog_cloud(None);
         self.set_dust(Vec::new());
         self.set_sun_flare(None);
+        self.set_underwater(None);
         self.set_sky_particles(Vec::new());
         self.set_terrain_lights(Default::default());
         self.set_frame_filter(None);

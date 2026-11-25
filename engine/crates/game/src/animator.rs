@@ -1165,7 +1165,7 @@ impl Animator {
             return pose;
         }
         self.hit.apply(&mut pose);
-        if let Some(r) = skel.index_of("DummyRoot").and_then(|b| pose.0.get_mut(b)) {
+        if let Some(r) = skel.dummy_root.and_then(|b| pose.0.get_mut(b)) {
             // About the model's up axis: the root has no parent.
             r.rotation = glam::Quat::from_rotation_y(self.twist) * r.rotation;
         }

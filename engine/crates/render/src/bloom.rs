@@ -84,7 +84,7 @@ pub(crate) struct BloomState {
     composite: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    dest: Option<Dest>,
+    dests: Vec<Dest>,
     copyable: bool,
 }
 impl BloomState {
@@ -151,7 +151,7 @@ impl BloomState {
                     ..Default::default()
                 },
             ),
-            dest: None,
+            dests: Vec::new(),
             copyable,
         }
     }
@@ -165,9 +165,12 @@ impl Renderer {
         let Some(settings) = b.settings.filter(|_| b.copyable) else {
             return false;
         };
-        if matches!(&b.dest, Some(d) if d.size == [w,h] && d.settings == settings) {
+        if crate::resources::touch_cached(&mut b.dests, |d| {
+            d.size == [w, h] && d.settings == settings
+        }) {
             return true;
         }
+        b.dests.retain(|d| d.size != [w, h]);
         let texture = |label, size, format, usage, views: &[wgpu::TextureFormat]| {
             crate::resources::texture_2d(&self.device, label, size, format, usage, views)
         };
@@ -224,20 +227,23 @@ impl Renderer {
             })
             .collect();
         let composite_bg = group(&ping[0], 0.0);
-        b.dest = Some(Dest {
-            raw,
-            ping,
-            copy,
-            extract_bg,
-            blur_bg,
-            composite_bg,
-            size: [w, h],
-            settings,
-        });
+        crate::resources::push_cached(
+            &mut b.dests,
+            Dest {
+                raw,
+                ping,
+                copy,
+                extract_bg,
+                blur_bg,
+                composite_bg,
+                size: [w, h],
+                settings,
+            },
+        );
         true
     }
     pub(crate) fn bloom_gather_view(&self) -> &wgpu::TextureView {
-        &self.bloom.dest.as_ref().expect("prepared bloom").raw
+        &self.bloom.dests.last().expect("prepared bloom").raw
     }
     pub(crate) fn bloom_pass(
         &self,
@@ -246,7 +252,7 @@ impl Renderer {
         view: &wgpu::TextureView,
     ) -> u32 {
         let b = &self.bloom;
-        let d = b.dest.as_ref().expect("prepared bloom");
+        let d = b.dests.last().expect("prepared bloom");
         encoder.copy_texture_to_texture(
             src.as_image_copy(),
             d.copy.as_image_copy(),

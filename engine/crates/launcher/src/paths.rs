@@ -40,15 +40,26 @@ pub struct LauncherPaths {
 }
 
 impl LauncherPaths {
-    /// Discover paths from the current executable and working directory.
+    /// Discover paths from the current executable, working directory, and `OPENBF_DATA_DIR`.
     pub fn discover() -> Self {
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("openbf-launcher"));
         let cwd = std::env::current_dir().ok();
-        Self::from_exe(&exe, cwd.as_deref())
+        let env = std::env::var_os(extensions::profile::DATA_DIR_ENV);
+        Self::from_exe_with_env(&exe, cwd.as_deref(), env.as_deref())
     }
 
-    /// Pure constructor for deterministic testing.
+    /// Pure constructor for deterministic testing (without `OPENBF_DATA_DIR`).
     pub fn from_exe(exe_path: &Path, cwd: Option<&Path>) -> Self {
+        Self::from_exe_with_env(exe_path, cwd, None)
+    }
+
+    /// Pure constructor honoring an explicit `OPENBF_DATA_DIR` override while
+    /// keeping executable and packaged asset discovery tied to `exe_path`.
+    pub fn from_exe_with_env(
+        exe_path: &Path,
+        cwd: Option<&Path>,
+        data_dir_env: Option<&std::ffi::OsStr>,
+    ) -> Self {
         let exe_dir = exe_path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -65,11 +76,7 @@ impl LauncherPaths {
             _ => exe_dir.join(&openbf_name),
         };
 
-        let data_dir = game_out
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(&exe_dir)
-            .join("openbf_data");
+        let data_dir = extensions::profile::resolve_data_dir(exe_path, cwd, data_dir_env);
         Self {
             config_path: data_dir.join("launcher.ron"),
             logs_dir: data_dir.join("logs"),
@@ -80,17 +87,33 @@ impl LauncherPaths {
         }
     }
 
-    /// Locate the compiled `bake` executable (`openbf_data/tools/bake`,
-    /// beside the launcher, or in a checkout's `engine/target/{release,debug}`).
+    /// Locate the compiled `bake` executable (beside the launcher,
+    /// `openbf_data/tools/bake`, or in a checkout's
+    /// `engine/target/{release,debug}`), preferring one that writes this
+    /// build's mod converter version (`extensions::mods::pick_bake_bin`).
     pub fn bake_bin(&self) -> Option<PathBuf> {
         let name = format!("bake{EXE_SUFFIX}");
-        [
-            self.data_dir.join("tools").join(&name),
-            self.exe_dir.join(&name),
-        ]
-        .into_iter()
-        .chain(self.checkout_targets(&name))
-        .find(|p| p.is_file())
+        extensions::mods::pick_bake_bin(
+            [
+                self.exe_dir.join(&name),
+                self.data_dir.join("tools").join(&name),
+            ]
+            .into_iter()
+            .chain(self.checkout_targets(&name)),
+        )
+    }
+
+    /// The stock bake a mod scan resolves replacements against and a
+    /// conversion builds on: the built game, whose archive is the one the
+    /// game reads at play time, else a checkout's `engine/assets_baked`.
+    pub fn stock_assets(&self) -> Option<PathBuf> {
+        if self.game_out.is_file() && pak::find_archive(&self.game_out).is_some() {
+            return Some(self.game_out.clone());
+        }
+        self.checkout_root
+            .as_ref()
+            .map(|root| root.join("engine").join("assets_baked"))
+            .filter(|p| p.is_dir())
     }
 
     /// Locate the base game executable used by `--write-pack`: `game` beside
@@ -139,6 +162,65 @@ impl LauncherPaths {
             None => BuiltStatus::default(),
         }
     }
+
+    /// Location of `extensions.ron` inside `openbf_data`.
+    pub fn extensions_profile_path(&self) -> PathBuf {
+        extensions::profile::profile_path(&self.data_dir)
+    }
+
+    /// Location of `openbf_data/mods/` (filesystem source of truth for legacy mods).
+    pub fn mods_dir(&self) -> PathBuf {
+        extensions::profile::mods_dir(&self.data_dir)
+    }
+
+    /// Location of `openbf_data/mod_cache/` (versioned converted asset cache).
+    pub fn mod_cache_dir(&self) -> PathBuf {
+        extensions::profile::mod_cache_dir(&self.data_dir)
+    }
+
+    /// Location of `last_startup_error.ron` inside `openbf_data`.
+    pub fn startup_error_path(&self) -> PathBuf {
+        extensions::profile::startup_error_path(&self.data_dir)
+    }
+
+    /// Discover bundled engine extensions by querying the built/base game binary
+    /// (`--list-extensions`), falling back to the compile-time catalog.
+    pub fn probe_bundled_extensions(&self) -> Vec<extensions::ExtensionManifest> {
+        let mut candidates = Vec::new();
+        if self.game_out.is_file() {
+            candidates.push(self.game_out.clone());
+        }
+        if let Some(base) = self.base_game_bin() {
+            if !candidates.contains(&base) {
+                candidates.push(base);
+            }
+        }
+        for bin in candidates {
+            if let Some(list) = query_extensions_from_bin(&bin) {
+                if !list.is_empty() {
+                    return list;
+                }
+            }
+        }
+        extensions::bundled_extensions_catalog(cfg!(any(windows, target_os = "linux")))
+    }
+}
+
+fn query_extensions_from_bin(bin: &Path) -> Option<Vec<extensions::ExtensionManifest>> {
+    let mut cmd = std::process::Command::new(bin);
+    cmd.arg("--list-extensions");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    ron::from_str(&text).ok()
 }
 
 fn in_cargo_target(dir: &Path) -> bool {
@@ -244,6 +326,46 @@ mod tests {
                 }
             );
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extension_paths_and_fallback_catalog_work() {
+        let dir = scratch("ext_paths");
+        let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
+        let paths = LauncherPaths::from_exe(&exe, None);
+        assert_eq!(
+            paths.extensions_profile_path(),
+            paths.data_dir.join(extensions::profile::PROFILE_FILE)
+        );
+        assert_eq!(
+            paths.startup_error_path(),
+            paths.data_dir.join(extensions::profile::STARTUP_ERROR_FILE)
+        );
+        let catalog = paths.probe_bundled_extensions();
+        assert!(catalog.iter().any(|m| m.id == extensions::OPENBF_VR_ID));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn data_dir_env_override_keeps_exe_and_game_out_intact() {
+        let dir = scratch("env_override");
+        let exe = dir.join(format!("openbf-launcher{EXE_SUFFIX}"));
+        let custom = dir.join("isolated_user_data");
+
+        let paths = LauncherPaths::from_exe_with_env(&exe, None, Some(custom.as_os_str()));
+        assert_eq!(paths.exe_dir, dir);
+        assert_eq!(paths.game_out, dir.join(format!("openbf{EXE_SUFFIX}")));
+        assert_eq!(paths.data_dir, custom);
+        assert_eq!(paths.config_path, custom.join("launcher.ron"));
+        assert_eq!(paths.mods_dir(), custom.join("mods"));
+        assert_eq!(paths.mod_cache_dir(), custom.join("mod_cache"));
+        assert_eq!(paths.extensions_profile_path(), custom.join("extensions.ron"));
+        assert_eq!(
+            paths.startup_error_path(),
+            custom.join("last_startup_error.ron")
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

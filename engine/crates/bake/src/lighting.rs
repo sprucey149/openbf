@@ -78,6 +78,18 @@ pub(crate) fn srgb_to_linear(u: f32) -> f32 {
     }
 }
 
+/// Inverse of [`srgb_to_linear`]: linear RGB back to IEC 61966-2-1 display
+/// units, used when combining authored linear light colours in PC Direct3D 9
+/// display-space vertex shaders (`terrain_glb`, `foliage`).
+pub(crate) fn linear_to_srgb(u: f32) -> f32 {
+    let u = u.clamp(0.0, 1.0);
+    if u <= 0.003_130_8 {
+        u * 12.92
+    } else {
+        1.055 * u.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 /// An authored 0..255 gamma-space colour as a linear RGB triple.
 fn scale255(c: [f32; 3]) -> [f32; 3] {
     [

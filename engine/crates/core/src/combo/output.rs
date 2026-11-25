@@ -33,6 +33,30 @@ pub struct AttackWindow {
     pub play_explosion: bool,
 }
 
+fn attack_damage(attack: &Field) -> Option<f32> {
+    attack
+        .find(K::Damage)
+        .and_then(|field| number(field, 0))
+        .map(|damage| quantize(damage, 1.0, 0, 4095))
+}
+
+/// Damage for a physical VR swing comes from the opening regular cut.
+/// Some combo programs use other state names, so fall back to a direct cut
+/// from those programs in authored order.
+pub(crate) fn tracked_swing_damage(combo: &ComboDef) -> Option<f32> {
+    let cut = |state: &Field| {
+        state
+            .all(K::Attack)
+            .filter(|attack| attack.find(K::PlayExplosion).is_none())
+            .filter_map(attack_damage)
+            .find(|&damage| damage > 0.0)
+    };
+    combo
+        .state("ATTACK1")
+        .and_then(cut)
+        .or_else(|| combo.states().find_map(cut))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Movement {
     /// Local X/Z metres per second, including thrust/strafe terms.
@@ -319,7 +343,7 @@ impl ComboRuntime {
                 record: ((self.state as u64) << 32) | index as u64,
                 cache_end: cache_origin + end,
                 edge: scalar(K::Edge).unwrap_or(0.0).clamp(0.0, 15.0) as u8,
-                damage: scalar(K::Damage).map(|n| quantize(n, 1.0, 0, 4095)),
+                damage: attack_damage(attack),
                 length: length
                     .and_then(|f| number(f, 0))
                     .map(|n| quantize(n.abs(), 100.0, 0, 1023)),

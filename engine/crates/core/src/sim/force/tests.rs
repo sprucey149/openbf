@@ -147,6 +147,7 @@ fn a_saber_deflect_stops_emitter_damage_and_burn() {
                 fields: Vec::new(),
             },
             blades: Vec::new(),
+            hand_edges: Vec::new(),
             throw_edges: Vec::new(),
             deflect_edges: Vec::new(),
             weapon_bind: glam::Mat4::IDENTITY,

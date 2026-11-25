@@ -125,6 +125,14 @@ fn params_words(t: &TerrainLights) -> Vec<u32> {
     w
 }
 
+/// One cached per-resolution frame copy and its bind group.
+pub(crate) struct TerrainLightDest {
+    tex: wgpu::Texture,
+    bg: wgpu::BindGroup,
+    w: u32,
+    h: u32,
+}
+
 /// The pass's per-renderer state.
 #[derive(Default)]
 pub(crate) struct TerrainLightState {
@@ -132,9 +140,8 @@ pub(crate) struct TerrainLightState {
     /// `com_sfx_omniproj`: its view and CLAMP bilinear sampler.
     pub omniproj: Option<(wgpu::TextureView, wgpu::Sampler)>,
     pub params_buf: Option<wgpu::Buffer>,
-    /// The frame's copy the shader reads, and its size.
-    pub dest: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
-    pub bg: Option<wgpu::BindGroup>,
+    /// Cached per-resolution frame copies and their bind groups.
+    pub dests: Vec<TerrainLightDest>,
     /// Can the target be copied (headless always; a window if its surface
     /// allows COPY_SRC)?
     pub copyable: bool,
@@ -149,7 +156,7 @@ impl Renderer {
     /// GS's MODULATE does (a texel of 255 is ×255/128·the vertex colour
     /// byte's 1.0 = 0x80, i.e. the byte as is).
     pub fn set_omniproj(&mut self, tex: Option<(u32, u32, &[u8])>) -> Result<(), RenderError> {
-        self.terrain_lights.bg = None;
+        self.terrain_lights.dests.clear();
         let Some((w, h, rgba)) = tex else {
             self.terrain_lights.omniproj = None;
             return Ok(());
@@ -223,37 +230,35 @@ impl Renderer {
         }
         let buf = t.params_buf.as_ref().expect("made above");
         self.queue.write_buffer(buf, 0, bytes);
-        if !matches!(&t.dest, Some((_, _, dw, dh)) if (*dw, *dh) == (w, h)) {
-            let tex = crate::resources::texture_2d(
-                &self.device,
-                "terrain light destination",
-                [w, h],
-                self.format,
-                wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-                &[],
-            );
-            let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-            t.dest = Some((tex, view, w, h));
-            t.bg = None;
+        if crate::resources::touch_cached(&mut t.dests, |d| (d.w, d.h) == (w, h)) {
+            return;
         }
-        if t.bg.is_none() {
-            let (Some((ov, os)), Some((_, dv, _, _))) = (&t.omniproj, &t.dest) else {
-                return;
-            };
-            t.bg = Some(crate::made::bind_group(
-                &self.device,
-                &wgpu::BindGroupDescriptor {
-                    label: Some("terrain light bg"),
-                    layout: &self.terrain_light_bgl,
-                    entries: &[
-                        bindings::texture_view(0, ov),
-                        bindings::sampler(1, os),
-                        bindings::texture_view(2, dv),
-                        bindings::entire_buffer(3, buf),
-                    ],
-                },
-            ));
-        }
+        let Some((ov, os)) = &t.omniproj else {
+            return;
+        };
+        let tex = crate::resources::texture_2d(
+            &self.device,
+            "terrain light destination",
+            [w, h],
+            self.format,
+            wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            &[],
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let bg = crate::made::bind_group(
+            &self.device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("terrain light bg"),
+                layout: &self.terrain_light_bgl,
+                entries: &[
+                    bindings::texture_view(0, ov),
+                    bindings::sampler(1, os),
+                    bindings::texture_view(2, &view),
+                    bindings::entire_buffer(3, buf),
+                ],
+            },
+        );
+        crate::resources::push_cached(&mut t.dests, TerrainLightDest { tex, bg, w, h });
     }
 
     /// Copy `src` (the frame so far) and draw the pass over the base
@@ -263,26 +268,27 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         src: &wgpu::Texture,
         view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
         runs: &[(usize, std::ops::Range<u32>)],
     ) -> u32 {
         let t = &self.terrain_lights;
-        let (Some(bg), Some((dest, _, w, h))) = (&t.bg, &t.dest) else {
+        let Some(d) = t.dests.last() else {
             return 0;
         };
         encoder.copy_texture_to_texture(
             src.as_image_copy(),
-            dest.as_image_copy(),
+            d.tex.as_image_copy(),
             wgpu::Extent3d {
-                width: *w,
-                height: *h,
+                width: d.w,
+                height: d.h,
                 depth_or_array_layers: 1,
             },
         );
         let mut pass =
-            crate::frame::continue_pass(encoder, view, &self.depth_view, "terrain light pass");
+            crate::frame::continue_pass(encoder, view, depth_view, "terrain light pass");
         pass.set_pipeline(&self.terrain_light_pipeline);
         pass.set_bind_group(0, &self.globals_bg, &[]);
-        pass.set_bind_group(1, bg, &[]);
+        pass.set_bind_group(1, &d.bg, &[]);
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         let mut calls = 0;
         for (mesh, inst) in runs {

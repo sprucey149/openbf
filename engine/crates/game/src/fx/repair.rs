@@ -54,6 +54,20 @@ impl Fx {
         }
     }
 
+    pub fn has_repair_or_charge(&self) -> bool {
+        self.live
+            .iter()
+            .any(|e| e.repair.is_some() || e.charge.is_some())
+    }
+
+    pub fn needs_repair_origin(&self, unit: usize) -> bool {
+        self.live.iter().any(|e| {
+            e.repair
+                .or(e.charge)
+                .is_some_and(|(h, _)| h.index as usize == unit)
+        })
+    }
+
     /// Put the repair pulses and the charge glows (`fx/charge.rs`) on the
     /// drawn weapon tips, `points` by unit index.
     pub fn set_repair_origins(&mut self, points: &[Option<Vec3>]) {

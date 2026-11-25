@@ -72,12 +72,21 @@ pub fn part_spec(r: &Renderer, pass: Option<crate::assets::SpecPass>) -> PartSpe
 /// A skinned part's draws: `base`, then its specular second pass when it has
 /// one and is textured — the add is weighted by the base texel's alpha, so an
 /// untextured part draws none (as the world's, `crate::viewer::upload_scene`).
-pub fn with_spec(base: SkinnedDrawCmd, spec: PartSpec) -> Vec<SkinnedDrawCmd> {
+pub fn push_with_spec(out: &mut Vec<SkinnedDrawCmd>, base: SkinnedDrawCmd, spec: PartSpec) {
     let second = match (base.texture, spec) {
         (Some(_), Some((rgb, power))) => Some(base.specular(rgb, power)),
         _ => None,
     };
-    std::iter::once(base).chain(second).collect()
+    out.push(base);
+    if let Some(s) = second {
+        out.push(s);
+    }
+}
+
+pub fn with_spec(base: SkinnedDrawCmd, spec: PartSpec) -> Vec<SkinnedDrawCmd> {
+    let mut out = Vec::with_capacity(2);
+    push_with_spec(&mut out, base, spec);
+    out
 }
 
 pub struct SoldierAsset {
@@ -815,6 +824,7 @@ pub struct SoldierVisuals {
     /// Reused across generations; respawning resets CPU state, not GPU buffers.
     cloth_meshes: std::collections::HashMap<(usize, usize, usize), render::MeshHandle>,
     pub fp: first_person::FirstPersonVisuals,
+    tracked_arms: Vec<tracked::Arms>,
 }
 
 /// Seconds a corpse stays drawn, counted from the death (`dead_for`), unless
@@ -890,6 +900,8 @@ mod water;
 pub use water::WaterFeet;
 mod saber;
 mod saber_trail;
+mod tracked;
+pub use tracked::TrackedGun;
 
 #[cfg(test)]
 mod tests;

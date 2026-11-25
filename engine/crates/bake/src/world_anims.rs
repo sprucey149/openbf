@@ -21,9 +21,13 @@ fn key(k: &mungefs::world_anim::Key) -> WorldAnimKey {
 /// The world animations of the LVL at `lvl_path`.
 pub fn read(lvl_path: &str) -> Result<WorldAnims> {
     let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_owned())?;
-    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
+    read_bytes(&buf).with_context(|| lvl_path.to_owned())
+}
+
+pub(crate) fn read_bytes(buf: &[u8]) -> Result<WorldAnims> {
+    let inner = mungefs::open(buf).map_err(|e| anyhow!("{e}"))?;
     let mut out = WorldAnims::default();
-    for c in mungefs::content_chunks(inner).map_err(|e| anyhow!("{lvl_path}: {e}"))? {
+    for c in mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))? {
         if &c.tag != b"wrld" {
             continue;
         }
@@ -56,13 +60,17 @@ pub fn read(lvl_path: &str) -> Result<WorldAnims> {
 /// LVL has none. Returns how many groups it holds.
 pub fn bake(lvl_path: &str, outdir: &str) -> Result<usize> {
     let anims = read(lvl_path)?;
-    let path = Path::new(outdir).join(manifest::world_anim::FILE);
+    write(Path::new(outdir), &anims)
+}
+
+pub(crate) fn write(out: &Path, anims: &WorldAnims) -> Result<usize> {
+    let path = out.join(manifest::world_anim::FILE);
     if anims.groups.is_empty() && anims.anims.is_empty() {
         if path.exists() {
             std::fs::remove_file(&path).with_context(|| path.display().to_string())?;
         }
         return Ok(0);
     }
-    crate::write_ron(&path, &anims)?;
+    crate::write_ron(&path, anims)?;
     Ok(anims.groups.len())
 }

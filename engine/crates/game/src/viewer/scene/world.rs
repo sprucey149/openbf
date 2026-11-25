@@ -237,11 +237,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             }
             None => None,
         };
-        let normal_cfg = info
-            .config
-            .as_ref()
-            .filter(|_| info.texture.is_none())
-            .and_then(|c| c.normal_maps.as_ref());
+        let normal_cfg = super::look::normal_water_config(info);
         let mut normals = Vec::new();
         if let Some(n) = normal_cfg {
             for name in &n.textures {
@@ -259,6 +255,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                         wrap_v: render::WrapV::Repeat,
                         srgb: false,
                         detail: None,
+                        bump: None,
                         scroll: info.uv_velocity,
                         uv_scale: [1.0, 1.0],
                         label: Some(name),

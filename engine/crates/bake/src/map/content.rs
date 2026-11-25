@@ -20,6 +20,7 @@ pub(super) fn bake_content(
     kind: Content,
     pc_lvl: Option<&str>,
     sky_sublevel: Option<(&str, &str)>,
+    addon: Option<super::AddonMapInput<'_>>,
 ) -> Result<Manifest> {
     let galaxy = kind == Content::Map
         && Path::new(lvl_path)
@@ -30,12 +31,21 @@ pub(super) fn bake_content(
         .map(crate::tier::PcTextures::load)
         .transpose()
         .with_context(|| format!("PC override LVL for {lvl_path}"))?;
-    let crate::gameplay::Level {
-        gameplay: buf,
-        original,
-        water_mask,
-    } = crate::gameplay::read_level(lvl_path).with_context(|| lvl_path.to_string())?;
-    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
+    let level = addon
+        .is_none()
+        .then(|| crate::gameplay::read_level(lvl_path))
+        .transpose()
+        .with_context(|| lvl_path.to_string())?;
+    let (buf, original, water_mask) = match (&level, &addon) {
+        (_, Some(input)) => (input.bytes, None, None),
+        (Some(level), None) => (
+            level.gameplay.as_slice(),
+            level.original.as_deref(),
+            level.water_mask,
+        ),
+        (None, None) => unreachable!(),
+    };
+    let inner = mungefs::open(buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir);
     std::fs::create_dir_all(out.join("models"))?;
     std::fs::create_dir_all(out.join("textures"))?;
@@ -228,12 +238,21 @@ pub(super) fn bake_content(
                             );
                         }
                     }
-                    b"lght" => {}
+                    b"lght" if addon.is_none() => {}
                     _ => layer_chunks.push(item),
                 }
             }
             if !group.is_empty() {
-                mode_layers.push(ModeLayer { group, plan, plnp });
+                let selector = addon
+                    .as_ref()
+                    .and_then(|input| input.selectors.get(&sub.tag_u32()))
+                    .cloned();
+                mode_layers.push(ModeLayer {
+                    group,
+                    selector,
+                    plan,
+                    plnp,
+                });
             }
         }
     }
@@ -1030,6 +1049,7 @@ pub(super) fn bake_content(
             }
         }
     }
+    let bumps = crate::bump::companions(parsed_models.values());
     drop(parsed_models);
 
     // Textures: write each one, plus a `<base>.dtl.ktx2` companion for every
@@ -1400,6 +1420,7 @@ pub(super) fn bake_content(
         if crate::detail::companion(t, &all_textures).is_none() {
             crate::remove_optional_file(&tex_dir.join(crate::detail::detail_file(&lower)))?;
         }
+        crate::bump::write_bump_for(&tex_dir, &lower, &bumps, &all_textures)?;
         if let Some(o) = &tier2 {
             let file = format!("{}.tier2.ktx2", t.name);
             texture_tiers.push((lower.clone(), o.tier.as_str().to_owned()));
@@ -1555,9 +1576,18 @@ pub(super) fn bake_content(
         };
         let refs: Vec<&mungefs::world::World> = group.iter().collect();
         let nav = nav_block(graph, &refs);
+        let mut world_names: Vec<_> = group.iter().map(|g| g.name.clone()).collect();
+        if let Some(selector) = &ml.selector {
+            if !world_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(selector))
+            {
+                world_names.push(selector.clone());
+            }
+        }
         layers.push(ManifestLayer {
             name: group[0].name.clone(),
-            worlds: group.iter().map(|g| g.name.clone()).collect(),
+            worlds: world_names,
             regions: group
                 .iter()
                 .flat_map(|g| g.regions.iter().map(region_entry))
@@ -1605,17 +1635,19 @@ pub(super) fn bake_content(
         .transpose()?,
         None => None,
     };
+    let lighting =
+        crate::lighting::lighting_from(sky_cfg.as_ref(), lights_cfg.as_ref(), source_game == "bf2");
     let mut terrain_layers_glb = None;
     if let (Some(t), Some(fname)) = (&terrain_parsed, &terrain_glb) {
         let bf2 = source_game == "bf2";
         let glb = match &aligned_surface {
             Some(surface) => surface.base_glb(t)?,
-            None => crate::terrain_glb::terrain_to_glb(t, bf2)?,
+            None => crate::terrain_glb::terrain_to_glb_lit(t, bf2, Some(&lighting))?,
         };
         std::fs::write(out.join(fname), glb)?;
         let layers = match &aligned_surface {
             Some(surface) => surface.layers_glb(t, bf2)?,
-            None => crate::terrain_glb::terrain_layers_to_glb(t, bf2)?,
+            None => crate::terrain_glb::terrain_layers_to_glb_lit(t, bf2, Some(&lighting))?,
         };
         if let Some(glb) = layers {
             let fname = format!("terrain_layers_{}.glb", t.name);
@@ -1623,8 +1655,6 @@ pub(super) fn bake_content(
             terrain_layers_glb = Some(fname);
         }
     }
-    let lighting =
-        crate::lighting::lighting_from(sky_cfg.as_ref(), lights_cfg.as_ref(), source_game == "bf2");
     let foliage = if foliage_file.is_none() && grass_props.is_empty() {
         None
     } else {
@@ -1640,6 +1670,7 @@ pub(super) fn bake_content(
                 classes: &classes,
                 paths: &paths,
                 grass: &grass_props,
+                lighting: Some(&lighting),
             },
         )?;
         if let Some(f) = &f {

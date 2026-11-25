@@ -1638,6 +1638,7 @@ fn destroy_station_goal_lets_blaster_and_saber_bots_damage_until_threshold() {
                 frames: vec![vec![segment]; 16],
             }],
             state_seconds: vec![0.0, 0.5],
+            hand_edges: Vec::new(),
             throw_edges: Vec::new(),
             deflect_edges: Vec::new(),
             weapon_bind: Mat4::IDENTITY,

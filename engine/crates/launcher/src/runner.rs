@@ -190,16 +190,27 @@ impl BuildHandle {
     }
 }
 
-/// Launch the packed `openbf` game executable as a fully detached process.
-pub fn launch_game(paths: &LauncherPaths, config: &LauncherConfig) -> Result<()> {
-    if !paths.is_game_ready() {
-        bail!("openbf is not built yet — run Setup first");
-    }
+/// Build the game launch command with launcher context and display backend env vars.
+pub(crate) fn build_launch_command(
+    paths: &LauncherPaths,
+    config: &LauncherConfig,
+    force_desktop: bool,
+    ext_profile: &extensions::profile::ExtensionProfile,
+) -> Command {
     let mut cmd = Command::new(&paths.game_out);
     if let Some(dir) = paths.game_out.parent() {
         cmd.current_dir(dir);
     }
-    if let Some(backend) = config.graphics_api.wgpu_backend() {
+    cmd.env(extensions::profile::LAUNCHED_BY_LAUNCHER_ENV, "1");
+    cmd.env(extensions::profile::DATA_DIR_ENV, &paths.data_dir);
+    if force_desktop {
+        cmd.arg("--desktop");
+    }
+    let vr_active = !force_desktop && ext_profile.is_enabled(extensions::OPENBF_VR_ID);
+    if vr_active {
+        // OpenXR graphics bindings require Vulkan; ignore a desktop Dx12 choice while VR is active.
+        cmd.env_remove("WGPU_BACKEND");
+    } else if let Some(backend) = config.graphics_api.wgpu_backend() {
         cmd.env("WGPU_BACKEND", backend);
     } else {
         cmd.env_remove("WGPU_BACKEND");
@@ -215,7 +226,20 @@ pub fn launch_game(paths: &LauncherPaths, config: &LauncherConfig) -> Result<()>
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
+    cmd
+}
 
+/// Launch the packed `openbf` game executable as a fully detached process.
+pub fn launch_game(
+    paths: &LauncherPaths,
+    config: &LauncherConfig,
+    force_desktop: bool,
+    ext_profile: &extensions::profile::ExtensionProfile,
+) -> Result<()> {
+    if !paths.is_game_ready() {
+        bail!("openbf is not built yet — run Setup first");
+    }
+    let mut cmd = build_launch_command(paths, config, force_desktop, ext_profile);
     cmd.spawn()
         .with_context(|| format!("launching {}", paths.game_out.display()))?;
     Ok(())
@@ -254,6 +278,48 @@ mod tests {
         assert_eq!(
             pick_failure_line(&lines).as_deref(),
             Some("Error: bake common failed (exit code: 1)")
+        );
+    }
+
+    #[test]
+    fn launch_command_passes_desktop_override_and_clears_dx12_for_vr() {
+        let dir = std::env::temp_dir().join(format!("openbf_runner_test_{}", std::process::id()));
+        let paths = LauncherPaths::from_exe(&dir.join("openbf-launcher"), None);
+        let mut config = LauncherConfig::default();
+        config.graphics_api = crate::config::GraphicsApi::Dx12;
+        let mut profile = extensions::profile::ExtensionProfile::default();
+        profile.set_enabled(extensions::OPENBF_VR_ID, true);
+
+        let vr_cmd = build_launch_command(&paths, &config, false, &profile);
+        let vr_args: Vec<_> = vr_cmd.get_args().collect();
+        assert!(vr_args.is_empty());
+        let vr_envs: std::collections::HashMap<_, _> = vr_cmd
+            .get_envs()
+            .map(|(k, v)| (k.to_os_string(), v.map(|val| val.to_os_string())))
+            .collect();
+        assert_eq!(
+            vr_envs.get(std::ffi::OsStr::new("WGPU_BACKEND")),
+            Some(&None)
+        );
+        assert_eq!(
+            vr_envs
+                .get(std::ffi::OsStr::new(extensions::profile::LAUNCHED_BY_LAUNCHER_ENV))
+                .and_then(|v| v.as_deref()),
+            Some(std::ffi::OsStr::new("1"))
+        );
+
+        let desktop_cmd = build_launch_command(&paths, &config, true, &profile);
+        let desktop_args: Vec<_> = desktop_cmd.get_args().collect();
+        assert_eq!(desktop_args, [std::ffi::OsStr::new("--desktop")]);
+        let desktop_envs: std::collections::HashMap<_, _> = desktop_cmd
+            .get_envs()
+            .map(|(k, v)| (k.to_os_string(), v.map(|val| val.to_os_string())))
+            .collect();
+        assert_eq!(
+            desktop_envs
+                .get(std::ffi::OsStr::new("WGPU_BACKEND"))
+                .and_then(|v| v.as_deref()),
+            Some(std::ffi::OsStr::new("dx12"))
         );
     }
 }

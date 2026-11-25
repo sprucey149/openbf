@@ -66,10 +66,19 @@ impl Fx {
 pub(super) struct Glow {
     beam: render::Beam,
     color: [u8; 4],
+    flare: f32,
+    draw_corona: bool,
+    pulse_period: f32,
+    start_tick: u64,
 }
 
 impl Glow {
-    fn new(def: &manifest::FxBeam, frame: Frame, era: Era, view: Option<render::FarFade>) -> Self {
+    pub(super) fn new(
+        def: &manifest::FxBeam,
+        frame: Frame,
+        era: Era,
+        view: Option<render::FarFade>,
+    ) -> Self {
         let axis = frame.rot * Vec3::from(def.direction);
         Self {
             beam: render::Beam {
@@ -85,6 +94,7 @@ impl Glow {
                     Era::Bf1 => 0.5,
                     Era::Bf2 => 1.0,
                 },
+                intensity: def.beam_intensity,
                 top: def.fade_factor,
                 cross: Some(render::Cross {
                     x: frame.rot.x_axis,
@@ -94,6 +104,64 @@ impl Glow {
                 }),
             },
             color: def.color,
+            flare: if def.entity_light || def.corona_flare {
+                def.flare_intensity
+            } else {
+                0.0
+            },
+            draw_corona: !def.entity_light && def.length == 0.0,
+            pulse_period: def.pulse_period,
+            start_tick: 0,
+        }
+    }
+
+    pub(super) fn started_at(mut self, tick: u64) -> Self {
+        self.start_tick = tick;
+        self
+    }
+
+    pub(super) fn append_draws(
+        &self,
+        tick: u64,
+        camera: &render::Camera,
+        out: &mut Vec<render::ParticleDraw>,
+    ) {
+        let t = tick.saturating_sub(self.start_tick) as f32 * core::TICK_DT;
+        let factor = if self.pulse_period > 0.0 {
+            1.0 - (2.0 * (t / self.pulse_period).fract() - 1.0).abs()
+        } else {
+            1.0
+        };
+        if self.draw_corona || self.beam.length > 0.0 {
+            let mut draw = self.draw();
+            if let render::ParticleShape::Beam(beam) = &mut draw.shape {
+                beam.intensity *= factor;
+            }
+            out.push(draw);
+        }
+        if self.flare > 0.0 {
+            let alpha = (f32::from(self.color[3]) * self.flare * factor).round() as u8;
+            let distance = camera.position.distance(self.beam.base);
+            if alpha > 0 && (self.beam.visible <= 0.0 || distance < self.beam.visible) {
+                let rz = self.beam.cross.map_or(self.beam.r0, |cross| cross.r0z);
+                let radius = (self.beam.r0 + rz) * 0.5;
+                let [r, g, b, _] = self.color;
+                // Place a corona's flare on the same near face as its core.
+                // A flare at the model's pivot can be occluded by the lamp.
+                let origin = if self.draw_corona {
+                    self.beam.base - camera.forward() * self.beam.r1
+                } else {
+                    self.beam.base
+                };
+                out.extend(crate::holo::lens_flare(
+                    origin,
+                    radius,
+                    alpha,
+                    1.0,
+                    [r, g, b],
+                    camera,
+                ));
+            }
         }
     }
 

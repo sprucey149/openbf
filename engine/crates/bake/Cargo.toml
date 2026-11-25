@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 audio = { path = "../audio", default-features = false }
+extensions = { path = "../extensions" }
 mungefs = { path = "../mungefs" }
 manifest = { path = "../manifest" }
+pak = { path = "../pak" }
 glam.workspace = true
 anyhow.workspace = true
 png.workspace = true
@@ -15,10 +17,10 @@ serde.workspace = true
 serde_json.workspace = true
 ron.workspace = true
 sha2 = "0.10"
+ktx2.workspace = true
 
 [dev-dependencies]
 gltf.workspace = true
-ktx2.workspace = true
 
 [[bin]]
 name = "bake"

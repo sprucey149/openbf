@@ -35,12 +35,14 @@ pub mod shadow;
 
 pub mod anim_sets;
 pub mod animated_prop;
+pub mod class_patch;
 pub mod cloth;
 pub mod combo;
 pub mod fpm;
 pub mod hud;
 pub mod shell;
 pub mod world_anim;
+pub mod world_events;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestInstance {
@@ -913,6 +915,67 @@ pub struct ManifestHead {
 // `#[serde(default)]` keeps an older bake readable.
 // ---------------------------------------------------------------------------
 
+/// Addon property fields whose template is in the installed game's core bank.
+pub const SOUND_TEMPLATE_FALLBACKS: &str = "sound_templates.ron";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoundTemplateFallback {
+    pub name: u32,
+    pub level: u32,
+    pub template: u32,
+    pub fields: Vec<SoundTemplateField>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum SoundTemplateField {
+    Gain,
+    Pitch,
+    MinDistance,
+    MaxDistance,
+    MuteDistance,
+    RollInDistance,
+    Rolloff,
+    Priority,
+    Looping,
+    Mode3d,
+    PitchDev,
+    GainDev,
+    PlayInterval,
+    PlayIntervalDev,
+    PlayProbability,
+    Bus,
+}
+
+impl SoundTemplateFallback {
+    pub fn apply(&self, sound: &mut SoundProp, parent: &SoundProp) {
+        use SoundTemplateField::*;
+        let (mut interval, mut deviation) = sound.play_interval.unwrap_or_default();
+        let (parent_interval, parent_deviation) = parent.play_interval.unwrap_or_default();
+        for field in &self.fields {
+            match field {
+                Gain => sound.gain = parent.gain,
+                Pitch => sound.pitch = parent.pitch,
+                MinDistance => sound.min_distance = parent.min_distance,
+                MaxDistance => sound.max_distance = parent.max_distance,
+                MuteDistance => sound.mute_distance = parent.mute_distance,
+                RollInDistance => sound.roll_in_distance = parent.roll_in_distance,
+                Rolloff => sound.rolloff = parent.rolloff,
+                Priority => sound.priority = parent.priority,
+                Looping => sound.looping = parent.looping,
+                Mode3d => sound.flat = parent.flat,
+                PitchDev => sound.pitch_dev = parent.pitch_dev,
+                GainDev => sound.gain_dev = parent.gain_dev,
+                PlayInterval => interval = parent_interval,
+                PlayIntervalDev => deviation = parent_deviation,
+                PlayProbability => sound.play_probability = parent.play_probability,
+                Bus => sound.bus = parent.bus,
+            }
+        }
+        sound.play_interval =
+            ((interval, deviation) != (0.0, 0.0)).then_some((interval, deviation));
+    }
+}
+
 /// One `snd_` property script: the definition the game looks up by the
 /// fnv1a_lowercase hash of a class-prop string (FireSound =
 /// "all_weap_inf_rifle_fire").
@@ -1342,12 +1405,31 @@ pub struct FxLightning {
     pub child_color: Option<[f32; 4]>,
 }
 
+fn default_beam_intensity() -> f32 {
+    1.0
+}
+
+fn is_default_beam_intensity(v: &f32) -> bool {
+    (*v - 1.0).abs() <= f32::EPSILON
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FxBeam {
     pub hash: u32,
     pub name: String,
     pub color: [u8; 4],
     pub flare_intensity: f32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub entity_light: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub corona_flare: bool,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub pulse_period: f32,
+    #[serde(
+        default = "default_beam_intensity",
+        skip_serializing_if = "is_default_beam_intensity"
+    )]
+    pub beam_intensity: f32,
     pub length: f32,
     pub initial_radius: [f32; 2],
     pub final_radius: [f32; 2],
@@ -1518,3 +1600,11 @@ pub struct DroidChunkManifest {
 
 #[cfg(test)]
 mod tests;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}

@@ -1068,6 +1068,17 @@ impl WeaponState {
         self.clip = self.clip.saturating_sub(cost);
     }
 
+    pub(crate) fn tracked_throw_ready(&self, class: &WeaponClass, cheats: (bool, bool)) -> bool {
+        self.state == FireState::Idle
+            && !self.reloading()
+            && self.can_pay(class, cheats.0, cheats.1)
+    }
+
+    pub(crate) fn pay_tracked_throw(&mut self, class: &WeaponClass, cheats: (bool, bool)) {
+        self.pay(class, cheats.0, cheats.1);
+        self.shots_fired += 1;
+    }
+
     /// Trigger init (BF1 FUN_00288c58 / BF2 FUN_0032e758).
     fn trigger(&mut self, c: &WeaponClass, lcg: &mut GameLcg, no_reload: bool) {
         self.charge = if c.max_pressed_time > 0.0 {

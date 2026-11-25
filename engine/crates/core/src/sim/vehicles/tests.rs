@@ -213,6 +213,7 @@ fn atst() -> VehicleSpec {
 /// into vehicle `v`, landing at age 0.
 fn bolt_into(s: &Sim, owner: UnitHandle, wc: usize, v: VehicleHandle) -> Bolt {
     Bolt {
+        tracked_origin: false,
         visual_shot: None,
         pos: Vec3::ZERO,
         vel: Vec3::X,
@@ -1498,4 +1499,45 @@ fn driverless_hover_impact_honors_slot_invincibility() {
     sim.set_slot_cheats(0, None);
     sim.vehicle_impacts(index, &capsule);
     assert!(sim.units[index].health.cur < before);
+}
+
+/// Card VMESH: a walker whose feet step from a floor onto a box deck flush
+/// with it (BF2 Mygeeto's `myg1_bldg_main_bridge6`, top 0.00012 m over the
+/// base's floor) walks on; one whose step takes its body into a crate is
+/// put back.
+#[test]
+fn a_walker_steps_onto_a_flush_deck_but_not_into_a_crate() {
+    use crate::collision::{Body, CollisionWorld, Layers, Shape};
+    use glam::Mat4;
+    let deck = Body::with_layers(
+        Mat4::from_translation(Vec3::new(0.0, -0.54, 10.0)),
+        Shape::Box {
+            half: Vec3::new(5.0, 0.540_12, 5.0),
+        },
+        Layers::SOLDIER,
+    );
+    let crate_box = Body::with_layers(
+        Mat4::from_translation(Vec3::new(20.0, 1.5, 10.0)),
+        Shape::Box {
+            half: Vec3::new(2.0, 1.5, 2.0),
+        },
+        Layers::SOLDIER,
+    );
+    let mut s = Sim::empty(1);
+    s.collision = CollisionWorld::new(vec![deck, crate_box], Vec::new());
+    let mut spec = atst();
+    spec.pos = Vec3::new(0.0, 0.0, 4.9);
+    let v = s.spawn_vehicle(&spec);
+    let i = v.index as usize;
+    let step = |s: &mut Sim, from: Vec3, to: Vec3| {
+        s.vehicles[i].pos = to;
+        s.vehicles[i].vel = Vec3::Z;
+        s.keep_out(i, from);
+        s.vehicles[i].pos
+    };
+    let on_deck = Vec3::new(0.0, 0.0, 5.1);
+    assert_eq!(step(&mut s, Vec3::new(0.0, 0.0, 4.9), on_deck), on_deck);
+    let beside = Vec3::new(20.0, 0.0, 7.9);
+    assert_eq!(step(&mut s, beside, Vec3::new(20.0, 0.0, 8.1)), beside);
+    assert_eq!(s.vehicles[i].vel, Vec3::ZERO);
 }

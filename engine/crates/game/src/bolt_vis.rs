@@ -511,6 +511,7 @@ impl BoltVis {
                 .and_then(VecDeque::pop_front);
             let start = match old_t.as_ref() {
                 Some(t) => t.start,
+                None if b.tracked_origin => shots.for_bolt(bolt_index).map_or(spawn, |s| s.origin),
                 None => {
                     let dir = b.vel.normalize_or_zero();
                     let foot = sim.unit(b.owner).is_some_and(|u| {
@@ -624,13 +625,17 @@ impl BoltVis {
             ) else {
                 continue;
             };
-            let start = drawn_start(
-                shot.origin,
-                shot.dir,
-                p,
-                self.uses_drawn_muzzle(sim, u, shot.unit.index, class),
-                shot.muzzle(walk).or(self.fire_point(shot.unit.index)),
-            );
+            let start = if shot.flight.is_some_and(|flight| flight.tracked_origin) {
+                shot.origin
+            } else {
+                drawn_start(
+                    shot.origin,
+                    shot.dir,
+                    p,
+                    self.uses_drawn_muzzle(sim, u, shot.unit.index, class),
+                    shot.muzzle(walk).or(self.fire_point(shot.unit.index)),
+                )
+            };
             self.remnants.push(Remnant {
                 class,
                 head: p,

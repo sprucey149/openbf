@@ -805,7 +805,7 @@ fn list_scrolling_moves_top_without_moving_focus() {
     assert_eq!(m.play_list.top(), 0);
     let size = [640.0, 480.0];
     let pt_right = [400.0 * (640.0 / 512.0), 200.0];
-    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2.0));
+    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2.0, true));
     assert_eq!(
         m.play_list.top(),
         2,
@@ -815,13 +815,21 @@ fn list_scrolling_moves_top_without_moving_focus() {
 
     // scroll_pointer over left window scrolls map list
     let pt_left = [100.0 * (640.0 / 512.0), 200.0];
-    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1.0));
+    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1.0, true));
     assert_eq!(
         m.map_list.top(),
         0,
         "scroll_pointer over left window scrolls map list"
     );
     assert_eq!(m.map_list.at, 0, "focus unchanged without selecting");
+    assert!(!m.scroll_pointer(Some([0.0, 0.0]), Some(size), 1.0, true));
+    assert_eq!((m.map_list.top(), m.play_list.top()), (0, 2));
+    assert!(m.scroll_pointer(Some([0.0, 0.0]), Some(size), 1.0, false));
+    assert_eq!(
+        m.map_list.top(),
+        1,
+        "a mouse wheel still scrolls the focused list"
+    );
 }
 
 /// A trackpad sends fractions of a row: on an option group they add up
@@ -1245,4 +1253,50 @@ fn bf2_only_catalog_hides_bf1_maps() {
         entries.iter().all(|m| m.game == Game::Bf2),
         "BF2-only bakes should hide unbaked BF1 maps from Instant Action"
     );
+}
+
+#[test]
+fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
+    let mod_maps = vec![
+        ModMapEntry {
+            key: "mod_abr__abr".into(),
+            variant_keys: vec!["mod_abr__abr".into()],
+            legacy_code: "abr".into(),
+            name: "Abregado-Rae: Venezia".into(),
+            disambiguator: "ABR".into(),
+            description: "Swamp canal city".into(),
+            modes: [vec![Mode::Con, Mode::Ctf], vec![Mode::Con, Mode::Ctf]],
+        },
+        ModMapEntry {
+            key: "mod_abr_v2__abr".into(),
+            variant_keys: vec!["mod_abr_v2__abr".into()],
+            legacy_code: "abr".into(),
+            name: "Abregado-Rae: Venezia".into(),
+            disambiguator: "ABR_v2".into(),
+            description: "Remaster".into(),
+            modes: [vec![Mode::Ctf], vec![Mode::Ctf]],
+        },
+    ];
+    let bakes = vec![
+        ("mod_abr__abr".to_owned(), "bf2".to_owned()),
+        ("mod_abr_v2__abr".to_owned(), "bf2".to_owned()),
+    ];
+    let missions = |key: &str, mode: Mode| {
+        if key.starts_with("mod_abr") && matches!(mode, Mode::Con | Mode::Ctf) {
+            vec![
+                ["all".to_owned(), "imp".to_owned()],
+                ["rep".to_owned(), "cis".to_owned()],
+            ]
+        } else {
+            Vec::new()
+        }
+    };
+    let list = catalog_with_mods(&text, &bakes, &missions, &mod_maps);
+    let abr1 = list.iter().find(|m| m.key == "mod_abr__abr").unwrap();
+    let abr2 = list.iter().find(|m| m.key == "mod_abr_v2__abr").unwrap();
+    assert_ne!(abr1.label, abr2.label);
+    assert!(abr1.label.contains("(mod)"));
+    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Gcw)));
+    assert!(abr1.runnable(Mode::Ctf, Side::Era(Era::Cw)));
+    assert!(abr1.runnable(Mode::Con, Side::Mixed(0)));
 }

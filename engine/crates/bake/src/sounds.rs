@@ -13,6 +13,7 @@
 //! (`bake::global_sound::bake_map_streams`).
 
 use anyhow::{anyhow, bail, Context, Result};
+use manifest::{SoundTemplateFallback, SoundTemplateField};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -246,6 +247,24 @@ pub fn bake_sounds_with_donor(
     core_lvl: Option<&str>,
     donor_bnk: Option<&Path>,
 ) -> Result<SoundsRon> {
+    bake_sound_bank(sound_lvl, outdir, core_lvl, donor_bnk, false)
+}
+
+pub(crate) fn bake_addon_sounds(
+    sound_lvl: &str,
+    outdir: &str,
+    core_lvl: Option<&str>,
+) -> Result<SoundsRon> {
+    bake_sound_bank(sound_lvl, outdir, core_lvl, None, true)
+}
+
+fn bake_sound_bank(
+    sound_lvl: &str,
+    outdir: &str,
+    core_lvl: Option<&str>,
+    donor_bnk: Option<&Path>,
+    keep_external_templates: bool,
+) -> Result<SoundsRon> {
     let buf = std::fs::read(sound_lvl).with_context(|| sound_lvl.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir).join("sounds");
@@ -348,7 +367,15 @@ pub fn bake_sounds_with_donor(
     if late + absent > 0 {
         eprintln!("sounds: {sound_lvl}: {late} late + {absent} absent Layer entries dropped");
     }
-    let props = flatten(&raw, &core);
+    let (props, external) = flatten(&raw, &core, keep_external_templates);
+    if keep_external_templates {
+        let path = out.join(manifest::SOUND_TEMPLATE_FALLBACKS);
+        if external.is_empty() {
+            crate::remove_optional_file(&path)?;
+        } else {
+            crate::write_ron(&path, &external)?;
+        }
+    }
     repairs::tantive_female_aliases(Path::new(sound_lvl), &banks, &props, &mut samples)?;
     let odd_frequency = banks
         .iter()
@@ -411,7 +438,11 @@ pub fn bake_sounds_with_donor(
 /// SNDE), then anywhere in `raw`, then in `core`; no LVL redefines a CORE
 /// name that anything inherits (measured, both discs), so that order cannot
 /// matter. Each record keeps its sub-level (`level`).
-fn flatten(raw: &[Leveled], core: &[mungefs::sound_props::SoundProp]) -> Vec<SoundPropRon> {
+fn flatten(
+    raw: &[Leveled],
+    core: &[mungefs::sound_props::SoundProp],
+    keep_external_templates: bool,
+) -> (Vec<SoundPropRon>, Vec<SoundTemplateFallback>) {
     type Raw = mungefs::sound_props::SoundProp;
     let own: HashMap<(u32, u32), &Raw> = raw.iter().map(|(l, p)| ((*l, p.name_hash), p)).collect();
     let any: HashMap<u32, &Raw> = raw.iter().map(|(_, p)| (p.name_hash, p)).collect();
@@ -431,37 +462,61 @@ fn flatten(raw: &[Leveled], core: &[mungefs::sound_props::SoundProp]) -> Vec<Sou
         }
         None
     }
-    raw.iter()
+    let mut external = std::collections::BTreeMap::<_, (bool, _)>::new();
+    let props = raw
+        .iter()
         .map(|(level, p)| {
             let parent = |c: &Raw| -> Option<&Raw> {
                 let h = c.inherit?;
                 let found = own.get(&(*level, h)).or_else(|| any.get(&h));
                 found.or_else(|| core.get(&h)).copied()
             };
-            let max_distance =
-                resolve(p, &parent, &|c| c.max_distance).unwrap_or(DEFAULT_MAX_DISTANCE);
-            SoundPropRon {
+            let external_parent = if keep_external_templates {
+                let mut at = Some(p);
+                let mut missing = None;
+                for _ in 0..8 {
+                    let Some(node) = at else { break };
+                    at = parent(node);
+                    if at.is_none() {
+                        missing = node.inherit;
+                    }
+                }
+                missing
+            } else {
+                None
+            };
+            let mut fields = Vec::new();
+            macro_rules! setting {
+                ($key:ident, $field:ident) => {{
+                    let value = resolve(p, &parent, &|c| c.$field);
+                    if external_parent.is_some() && value.is_none() {
+                        fields.push(SoundTemplateField::$key);
+                    }
+                    value
+                }};
+            }
+            let max_distance = setting!(MaxDistance, max_distance).unwrap_or(DEFAULT_MAX_DISTANCE);
+            let sound = SoundPropRon {
                 name_hash: p.name_hash,
                 kind: p.kind,
-                gain: resolve(p, &parent, &|c| c.gain).unwrap_or(1.0),
-                pitch: resolve(p, &parent, &|c| c.pitch).unwrap_or(1.0),
-                min_distance: resolve(p, &parent, &|c| c.min_distance)
-                    .unwrap_or(DEFAULT_MIN_DISTANCE),
+                gain: setting!(Gain, gain).unwrap_or(1.0),
+                pitch: setting!(Pitch, pitch).unwrap_or(1.0),
+                min_distance: setting!(MinDistance, min_distance).unwrap_or(DEFAULT_MIN_DISTANCE),
                 max_distance,
-                rolloff: resolve(p, &parent, &|c| c.rolloff).unwrap_or(DEFAULT_ROLLOFF),
-                priority: resolve(p, &parent, &|c| c.priority).unwrap_or(0.5),
-                looping: resolve(p, &parent, &|c| c.looping).unwrap_or(false),
+                rolloff: setting!(Rolloff, rolloff).unwrap_or(DEFAULT_ROLLOFF),
+                priority: setting!(Priority, priority).unwrap_or(0.5),
+                looping: setting!(Looping, looping).unwrap_or(false),
                 samples: p.samples.clone(),
                 layers: p.layers.iter().map(|l| l.sound).collect(),
                 stream: p.stream,
                 segments: p.segments.clone(),
-                mute_distance: resolve(p, &parent, &|c| c.mute_distance)
-                    .filter(|m| *m != max_distance),
-                roll_in_distance: resolve(p, &parent, &|c| c.roll_in_distance).filter(|r| *r > 0.0),
+                mute_distance: setting!(MuteDistance, mute_distance)
+                    .filter(|m| external_parent.is_some() || *m != max_distance),
+                roll_in_distance: setting!(RollInDistance, roll_in_distance).filter(|r| *r > 0.0),
                 // No `mode3d` anywhere in the chain reads as 2-D: PROVISIONAL
                 // [H] (the menu's 259 BF2 stream properties and the layered /
                 // bus records are the only ones without it).
-                flat: !resolve(p, &parent, &|c| c.mode_3d).unwrap_or(false),
+                flat: !setting!(Mode3d, mode_3d).unwrap_or(false),
                 layer_delays: if p
                     .layers
                     .iter()
@@ -471,21 +526,47 @@ fn flatten(raw: &[Leveled], core: &[mungefs::sound_props::SoundProp]) -> Vec<Sou
                 } else {
                     Vec::new()
                 },
-                pitch_dev: resolve(p, &parent, &|c| c.pitch_dev).filter(|v| *v != 0.0),
-                gain_dev: resolve(p, &parent, &|c| c.gain_dev).filter(|v| *v != 0.0),
+                pitch_dev: setting!(PitchDev, pitch_dev).filter(|v| *v != 0.0),
+                gain_dev: setting!(GainDev, gain_dev).filter(|v| *v != 0.0),
                 play_interval: Some((
-                    resolve(p, &parent, &|c| c.play_interval).unwrap_or(0.0),
-                    resolve(p, &parent, &|c| c.play_interval_dev).unwrap_or(0.0),
+                    setting!(PlayInterval, play_interval).unwrap_or(0.0),
+                    setting!(PlayIntervalDev, play_interval_dev).unwrap_or(0.0),
                 ))
                 .filter(|v| *v != (0.0, 0.0)),
-                play_probability: resolve(p, &parent, &|c| c.play_probability)
-                    .filter(|v| *v != 1.0),
+                play_probability: setting!(PlayProbability, play_probability).filter(|v| *v != 1.0),
                 level: *level,
-                bus: resolve(p, &parent, &|c| c.bus).unwrap_or(0),
+                bus: setting!(Bus, bus).unwrap_or(0),
                 take_locks: take_locks(p),
+            };
+            if keep_external_templates {
+                let key = (*level, p.name_hash);
+                let audible = !(sound.samples.is_empty()
+                    && sound.layers.is_empty()
+                    && sound.segments.is_empty());
+                // Match the runtime bank's winner for duplicate definitions.
+                if external
+                    .get(&key)
+                    .is_none_or(|(previous, _)| audible || !previous)
+                {
+                    let fallback = external_parent.map(|template| SoundTemplateFallback {
+                        name: p.name_hash,
+                        level: *level,
+                        template,
+                        fields,
+                    });
+                    external.insert(key, (audible, fallback));
+                }
             }
+            sound
         })
-        .collect()
+        .collect();
+    (
+        props,
+        external
+            .into_values()
+            .filter_map(|(_, fallback)| fallback)
+            .collect(),
+    )
 }
 
 /// The locks of the takes a property plays (its samples when it has any,
@@ -632,7 +713,7 @@ mod tests {
                 .into_iter()
                 .map(|p| (0, p))
                 .collect();
-            let props = flatten(&raw, &read_props(&core).expect("core"));
+            let (props, _) = flatten(&raw, &read_props(&core).expect("core"), false);
             let r = SoundsRon {
                 source: String::new(),
                 banks: vec![],

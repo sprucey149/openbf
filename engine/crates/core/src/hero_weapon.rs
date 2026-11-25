@@ -442,6 +442,18 @@ pub struct Blade {
     pub trail_color: Option<[u8; 4]>,
 }
 
+impl Blade {
+    /// The two controller-driven attachments. Body attacks stay in the
+    /// authored combo path.
+    pub fn tracked_hand(&self) -> Option<usize> {
+        match self.bone.as_str() {
+            "bone_l_hand" | "bone_lf_hand" => Some(0),
+            "hp_weapons" | "bone_r_hand" | "bone_rf_hand" => Some(1),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BladeSegment {
     pub start: Vec3,
@@ -494,6 +506,8 @@ pub struct SaberThrowBinding {
 pub struct SaberClass {
     pub combo: manifest::combo::ComboDef,
     pub blades: Vec<Blade>,
+    /// Blade segments in their own attachment coordinates, in blade order.
+    pub hand_edges: Vec<BladeSegment>,
     /// Primary weapon-space edges; offhand and body attack edges stay attached.
     pub throw_edges: Vec<BladeSegment>,
     /// Local edges registered to the first owner-body attachment group.
@@ -511,6 +525,15 @@ pub struct SaberClass {
     pub hit_effect: Option<String>,
     /// `DeflectEffect` (+0x26c): spawned at a block (B2 FUN_0033e8b8).
     pub deflect_effect: Option<String>,
+}
+
+impl SaberClass {
+    pub(crate) fn has_tracked_blade(&self) -> bool {
+        self.blades
+            .iter()
+            .take(self.hand_edges.len())
+            .any(|blade| blade.length > 0.0 && blade.tracked_hand().is_some())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -548,6 +571,27 @@ pub struct MeleeState {
     pub catch_pending: bool,
     pub attacks: Vec<crate::combo::AttackWindow>,
     pub hit: Vec<MeleeHitCache>,
+    #[doc(hidden)]
+    pub tracked: Option<TrackedSwing>,
+    /// For each hand, when another tracked cut can damage each recent target.
+    #[doc(hidden)]
+    pub tracked_hit_cooldowns: [Vec<(crate::projectile::Target, u64)>; 2],
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TrackedSwing {
+    pub motion_epoch: u16,
+    pub tick: u64,
+    pub(crate) hands: [TrackedHandSwing; 2],
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TrackedHandSwing {
+    pub pose: Option<crate::sim::TrackedHand>,
+    pub direction: Vec3,
+    pub travel: f32,
+    pub quiet: u8,
+    pub stroke: u32,
 }
 
 /// Native melee keeps one eight-victim cache per authored record or nonzero
@@ -644,6 +688,35 @@ impl MeleeState {
             eat(&(cache.victims.len() as u32).to_le_bytes());
             for victim in &cache.victims {
                 hash_target(victim, eat);
+            }
+        }
+        if let Some(swing) = self.tracked {
+            eat(b"VR_SWING");
+            eat(&swing.motion_epoch.to_le_bytes());
+            eat(&swing.tick.to_le_bytes());
+            for hand in swing.hands {
+                eat(&[hand.quiet, u8::from(hand.pose.is_some())]);
+                for value in hand.direction.to_array().into_iter().chain([hand.travel]) {
+                    eat(&value.hash_bits().to_le_bytes());
+                }
+                eat(&hand.stroke.to_le_bytes());
+                if let Some(pose) = hand.pose {
+                    pose.hash_into(eat);
+                }
+            }
+        }
+        if self
+            .tracked_hit_cooldowns
+            .iter()
+            .any(|hits| !hits.is_empty())
+        {
+            eat(b"VR_HIT_COOLDOWNS");
+            for hand in &self.tracked_hit_cooldowns {
+                eat(&(hand.len() as u32).to_le_bytes());
+                for (target, next_tick) in hand {
+                    hash_target(target, eat);
+                    eat(&next_tick.to_le_bytes());
+                }
             }
         }
     }

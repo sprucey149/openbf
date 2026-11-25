@@ -93,6 +93,17 @@ impl WorldScale {
         if let Some(t) = self.targets.iter().find(|t| t.size == size) {
             return t.clone();
         }
+        let target = self.make_target(device, format, size);
+        self.targets.push(target.clone());
+        target
+    }
+
+    pub(super) fn make_target(
+        &self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        size: [u32; 2],
+    ) -> WorldTarget {
         let texture = crate::resources::texture_2d(
             device,
             "world target",
@@ -121,15 +132,13 @@ impl WorldScale {
                 ],
             },
         );
-        let target = WorldTarget {
+        WorldTarget {
             size,
             texture,
             view,
             depth: crate::device::create_depth_texture(device, size[0], size[1]),
             bind_group,
-        };
-        self.targets.push(target.clone());
-        target
+        }
     }
 
     /// Forget the targets: the window changed, and the sizes with it.
@@ -143,6 +152,16 @@ impl WorldScale {
         encoder: &mut wgpu::CommandEncoder,
         target: &WorldTarget,
         frame: &wgpu::TextureView,
+    ) {
+        self.blit(encoder, target, frame, None);
+    }
+
+    pub(super) fn blit(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &WorldTarget,
+        frame: &wgpu::TextureView,
+        viewport: Option<[f32; 4]>,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("world upscale"),
@@ -161,6 +180,9 @@ impl WorldScale {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &target.bind_group, &[]);
+        if let Some([x, y, w, h]) = viewport {
+            pass.set_viewport(x, y, w, h, 0.0, 1.0);
+        }
         pass.draw(0..3, 0..1);
     }
 }

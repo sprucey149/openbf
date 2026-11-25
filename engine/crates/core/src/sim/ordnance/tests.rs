@@ -280,6 +280,53 @@ fn throws(s: &Sim) -> usize {
         .count()
 }
 
+#[test]
+fn tracked_grenade_waits_for_release_and_uses_the_hand_launch() {
+    use crate::sim::TrackedCombat;
+    for bf2 in [false, true] {
+        let (mut sim, player) = grenadier(bf2);
+        let (class, slot, true) = sim.tracked_grenade_slot(player).unwrap() else {
+            panic!()
+        };
+        let available = |sim: &Sim| {
+            let unit = sim.unit(player).unwrap();
+            let grenade = &unit.held[usize::from(unit.cur1.unwrap())].state;
+            grenade.clip + grenade.spare
+        };
+        let ammo = available(&sim);
+        let mut input = PadState {
+            buttons: buttons::SECONDARY_FIRE,
+            tracked_combat: Some(TrackedCombat::default()),
+            ..Default::default()
+        };
+        for _ in 0..25 {
+            sim.step(&[input]);
+            assert_eq!(throws(&sim), 0);
+            assert_eq!(available(&sim), ammo);
+        }
+        let hand = Vec3::new(-0.35, 1.2, -0.3);
+        input.buttons = 0;
+        input.tracked_combat.as_mut().unwrap().grenade = Some(TrackedThrow::new(
+            class as u32,
+            slot,
+            hand,
+            Vec3::new(-4.0, 5.0, -7.0),
+        ));
+        sim.step(&[input]);
+        assert_eq!(throws(&sim), 1);
+        assert_eq!(available(&sim), ammo - 1);
+        assert!(sim.events.iter().any(|event| matches!(event,
+            Event::Throw { origin, .. } if origin.abs_diff_eq(hand, 1e-5)
+        )));
+        let flight = &sim.stickies[0];
+        assert!((flight.vel.x + 4.0).abs() < 1e-5 && (flight.vel.z + 7.0).abs() < 1e-5);
+        input.clear_once();
+        sim.step(&[input]);
+        assert_eq!(throws(&sim), 0);
+        assert_eq!(available(&sim), ammo - 1);
+    }
+}
+
 /// Step with `buttons` until a throw; the number of steps taken.
 fn steps_to_throw(s: &mut Sim, buttons: u32, limit: u32) -> Option<u32> {
     for n in 1..=limit {
@@ -1328,7 +1375,7 @@ fn a_shell_is_lifted_by_shot_elevate_for_a_human_only() {
             .unwrap();
         s.units[u.index as usize].is_player = human;
         s.units[u.index as usize].soldier.pitch = 0.0;
-        s.soldier_shots(u.index as usize, None, &[spec]);
+        s.soldier_shots(u.index as usize, None, &[spec], None);
         s.events
             .iter()
             .find_map(|e| match *e {

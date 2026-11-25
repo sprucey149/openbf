@@ -442,7 +442,7 @@ fn an_unlocked_rocket_on_the_part_is_critical() {
         assert!(s.units[i].weapon.lock_held < 1.0, "{rules:?}: no full lock");
         // The trigger's shot with no spread (the spread is not tested).
         let before = s.bolts.len();
-        s.soldier_shots(i, None, &[STRAIGHT]);
+        s.soldier_shots(i, None, &[STRAIGHT], None);
         assert!(s.bolts.len() > before, "{rules:?}: fired");
         let m = s.bolts.last().unwrap().missile.expect("a missile");
         assert_eq!((m.target, m.part), (None, None), "{rules:?}");
@@ -501,7 +501,7 @@ fn a_rocket_beside_the_part_is_plain() {
     let face = at(&s, v, Vec3::new(0.0, 1.5, 3.0));
     aim_at(&mut s, me, face);
     let before = s.bolts.len();
-    s.soldier_shots(me.index as usize, None, &[STRAIGHT]);
+    s.soldier_shots(me.index as usize, None, &[STRAIGHT], None);
     assert!(s.bolts.len() > before);
     let (drop, critical, hit) = land_at(&mut s, me, v);
     assert!(!on_plate(hit, at(&s, v, SPOT + Vec3::X * 1.5)), "{hit:?}");
@@ -763,7 +763,7 @@ fn bots_and_space_rounds_keep_the_centre() {
         let w = &mut s.units[i].weapon;
         w.lock_target = Some(MissileTarget::Vehicle(v));
         w.lock_held = 5.0;
-        s.soldier_shots(i, None, &[spec]);
+        s.soldier_shots(i, None, &[spec], None);
         s.bolts.last().unwrap().missile.unwrap()
     };
     // The human's round, laid the same way, takes the part.

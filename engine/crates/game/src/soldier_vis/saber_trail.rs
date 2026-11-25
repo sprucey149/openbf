@@ -15,16 +15,27 @@ pub(super) struct State {
 
 impl SoldierVisuals {
     pub(super) fn step_saber_trails(&mut self, walk: &WalkSim, dt: f32) {
+        let any_saber = walk.sim.units.iter().any(|u| {
+            u.alive
+                && u.mount.is_none()
+                && u.weapon.melee.is_some()
+                && self.saber_visual(u.team, u.spec.class).is_some()
+        });
+        if !any_saber && self.saber_trails.iter().all(|s| s.edges.is_empty()) {
+            return;
+        }
         let mut packets = vec![None; walk.sim.units.len()];
-        for (i, asset, model, palette) in self.posed(walk) {
-            let u = &walk.sim.units[i];
+        for (i, u) in walk.sim.units.iter().enumerate() {
             if !u.alive || u.mount.is_some() {
                 continue;
             }
+            let Some(melee) = u.weapon.melee.as_ref() else {
+                continue;
+            };
             let Some(visual) = self.saber_visual(u.team, u.spec.class) else {
                 continue;
             };
-            let Some(melee) = u.weapon.melee.as_ref() else {
+            let Some((asset, model, palette)) = self.pose_unit(walk, i, false) else {
                 continue;
             };
             let mut edges = Vec::new();
@@ -75,28 +86,29 @@ impl SoldierVisuals {
 
     pub(super) fn saber_trail_draws(&self, walk: &WalkSim) -> Vec<ParticleDraw> {
         let mut draws = Vec::new();
-        for (i, _, _, _) in self.posed(walk) {
-            if !walk.sim.units[i].alive {
+        for (i, state) in self.saber_trails.iter().enumerate() {
+            if state.edges.is_empty()
+                || !walk.sim.units.get(i).is_some_and(|u| u.alive)
+                || self.pose_unit(walk, i, false).is_none()
+            {
                 continue;
             }
-            if let Some(state) = self.saber_trails.get(i) {
-                for history in &state.edges {
-                    let sections = history.sections();
-                    if sections.len() < 2 || !sections.iter().any(|s| s.3[3] != 0) {
-                        continue;
-                    }
-                    let key = sections.last().unwrap().0;
-                    draws.push(ParticleDraw {
-                        shape: ParticleShape::Trail {
-                            sections,
-                            length: history.length,
-                        },
-                        key,
-                        color: [255; 4],
-                        texture: None,
-                        additive: true,
-                    });
+            for history in &state.edges {
+                let sections = history.sections();
+                if sections.len() < 2 || !sections.iter().any(|s| s.3[3] != 0) {
+                    continue;
                 }
+                let key = sections.last().unwrap().0;
+                draws.push(ParticleDraw {
+                    shape: ParticleShape::Trail {
+                        sections,
+                        length: history.length,
+                    },
+                    key,
+                    color: [255; 4],
+                    texture: None,
+                    additive: true,
+                });
             }
         }
         draws

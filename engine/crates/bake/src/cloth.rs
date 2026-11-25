@@ -19,7 +19,7 @@
 //! `crate::soldier::segment_blends` refuses the 0x02 bit.
 
 use crate::skin_glb::SkinnedSegment;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use mungefs::cloth::Cloth;
 use mungefs::entity::{EntityClass, GeomModel};
 use mungefs::skel::{mul_row, xform_point, RowMat4, Skeleton};
@@ -99,14 +99,19 @@ fn physics(c: &Cloth, class: &EntityClass) -> Result<manifest::cloth::Cloth> {
             .map(|p| p.value.as_str())
     };
     let scalar = |key, default| -> Result<f32> {
-        value(key).map_or(Ok(default), |v| v.trim().parse::<f32>().map_err(Into::into))
+        value(key).map_or(Ok(default), |v| {
+            v.trim()
+                .parse::<f32>()
+                .with_context(|| format!("cloth {}: property 0x{key:08x} = {v:?}", c.name))
+        })
     };
     let mut wind_direction = [1.0, 0.0, 0.0];
     if let Some(v) = value(0x415e_2b30) {
         let angles: Vec<f32> = v
             .split_whitespace()
             .map(str::parse)
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<_, _>>()
+            .with_context(|| format!("cloth {}: WindDirection = {v:?}", c.name))?;
         if angles.len() != 2 {
             bail!("cloth {}: WindDirection needs two angles", c.name);
         }
@@ -150,7 +155,75 @@ fn physics(c: &Cloth, class: &EntityClass) -> Result<manifest::cloth::Cloth> {
         drag: scalar(0xb88c_0d43, -2.0)?,
         mass,
         max_acceleration: scalar(0x4e99_4b61, 20.0)?,
+        texture: None,
     })
+}
+
+/// The cloths of every unskinned model in this LVL (`inner` = its opened
+/// payload), by gmod name, in the gmod list's order: the CTF flags' banners
+/// in INGAME (`com_icon_<side>_flag[_carried]`). The same three-way rule as
+/// [`worn_cloths`] picks them. The banner is drawn by the flag draw
+/// `FUN_0035e720` (B2:343900-344050), which steps each cloth in the entity's
+/// frame (`FUN_001de2a8` with no pose), so the frame is written in model
+/// space, `XFRM . Bind(PRNT)` of the model's own one-bone `skel` (identity
+/// on every flag), with pins on that frame. A cloth that pins to other
+/// bones or collides with shapes needs a pose and is refused. The
+/// `com_icon_alliance_flag_carried` gmod lists
+/// `com_icon_neutral_carried_cloth`, and it is kept as the disc has it.
+pub fn item_cloths(inner: &[u8]) -> Result<Vec<(String, Vec<manifest::cloth::Cloth>)>> {
+    let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+    let skels = mungefs::skel::find_skeletons(inner).map_err(|e| anyhow!("{e}"))?;
+    let classes: Vec<EntityClass> = chunks
+        .iter()
+        .filter(|c| &c.tag == b"entc")
+        .filter_map(|c| EntityClass::parse(c).ok())
+        .filter(|c| c.base.eq_ignore_ascii_case("cloth"))
+        .collect();
+    let cloths = mungefs::cloth::find_cloths(inner).map_err(|e| anyhow!("{e}"))?;
+    let mut out = Vec::new();
+    for gmod in chunks
+        .iter()
+        .filter(|c| &c.tag == b"gmod")
+        .filter_map(|c| GeomModel::parse(c).ok())
+        .filter(|g| !g.cloths.is_empty())
+    {
+        let skel = skels.iter().find(|k| k.name.eq_ignore_ascii_case(&gmod.name));
+        let mut worn = Vec::new();
+        for name in &gmod.cloths {
+            let Some(class) = classes.iter().find(|c| c.name.eq_ignore_ascii_case(name)) else {
+                continue;
+            };
+            let Some(cloth) = cloths.iter().find(|c| c.name.eq_ignore_ascii_case(name)) else {
+                continue;
+            };
+            if flag(class, PROP_HARDEDGE) || flag(class, PROP_TRANSPARENT) {
+                bail!("cloth {name} on {}: a blend the item draw does not follow", gmod.name);
+            }
+            if !cloth.pin_bones.is_empty() || !cloth.shapes.is_empty() {
+                bail!("cloth {name} on {}: pin bones or shapes on an item", gmod.name);
+            }
+            let bind = match skel {
+                Some(k) => {
+                    let binds = k.bind_matrices().map_err(|e| anyhow!("{e}"))?;
+                    let i = k.index_of(&cloth.parent_bone).ok_or_else(|| {
+                        anyhow!("cloth {name}: bone {} not in skel {}", cloth.parent_bone, k.name)
+                    })?;
+                    binds[i]
+                }
+                None => rows4(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0; 3]]),
+            };
+            let f = mul_row(&rows4(&cloth.xfrm), &bind);
+            worn.push(manifest::cloth::Cloth {
+                frame: [0, 1, 2, 3].map(|r| [f[r][0], f[r][1], f[r][2]]),
+                texture: Some(cloth.texture.clone()),
+                ..physics(cloth, class)?
+            });
+        }
+        if !worn.is_empty() {
+            out.push((gmod.name.clone(), worn));
+        }
+    }
+    Ok(out)
 }
 
 /// A class flag key's value: a number, non-zero = set (the disc writes `1`).
@@ -269,6 +342,55 @@ mod tests {
             rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             t,
         }
+    }
+
+    /// BF2 PS2 INGAME.LVL: every CTF flag model wears its banner, the loose
+    /// one pinned along the pole and the top bar (29 of 221 vertices), the
+    /// carried one 15 of 221, framed at its model root with the class
+    /// defaults (no physics property authored) and the CLTH's texture.
+    #[test]
+    fn ingame_flag_models_wear_their_banners() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../extracted/bf2/lvl/DATA/_LVL_PS2/INGAME.LVL"
+        );
+        let Ok(buf) = std::fs::read(p) else {
+            eprintln!("skip: {p} absent");
+            return;
+        };
+        let inner = mungefs::open(&buf).unwrap();
+        let items = item_cloths(inner).unwrap();
+        let find = |m: &str| {
+            &items
+                .iter()
+                .find(|(name, _)| name == m)
+                .unwrap_or_else(|| panic!("{m} has no cloth"))
+                .1
+        };
+        for side in ["neutral", "alliance", "cis", "imperial", "republic"] {
+            let loose = find(&format!("com_icon_{side}_flag"));
+            assert_eq!(loose.len(), 1);
+            assert_eq!(loose[0].name, format!("com_icon_{side}_cloth"));
+            assert_eq!(loose[0].parent, format!("com_icon_{side}"));
+            assert_eq!((loose[0].positions.len(), loose[0].pinned), (221, 29));
+            assert!(loose[0].pin_bones.is_empty());
+            assert_eq!(loose[0].wind_speed, 10.0);
+            assert_eq!(loose[0].max_acceleration, 20.0);
+            let carried = find(&format!("com_icon_{side}_flag_carried"));
+            assert_eq!((carried[0].positions.len(), carried[0].pinned), (221, 15));
+        }
+        assert_eq!(
+            find("com_icon_alliance_flag_carried")[0].name,
+            "com_icon_neutral_carried_cloth"
+        );
+        assert_eq!(
+            find("com_icon_cis_flag")[0].texture.as_deref(),
+            Some("com_icon_ctfflag_rep_cis")
+        );
+        assert_eq!(
+            find("com_icon_neutral_flag")[0].texture.as_deref(),
+            Some("com_icon_ctfflag_neutral")
+        );
     }
 
     /// Pins on their own bone, free vertices on the nearest pin's bone, the

@@ -55,6 +55,42 @@ fn gs_vertex_byte(c8: u8, bf2: bool) -> u8 {
     }
 }
 
+/// PC Battlefront II terrain vertex lighting, reproducing `core.lvl -> SHDR ->
+/// normal_terrain_shader.xml` (`vs_1_1` + `ps_1_1`) in display (sRGB) units:
+/// starts from the patch `VBUF` pre-baked static colour (`v6 / 255`), adds
+/// each non-`Static` directional light (`c21 * max(0, N·-L1) + c23 * max(0, N·-L2)`),
+/// hue-normalizes by `max(r, g, b, 1.0)`, and encodes to the GS vertex byte
+/// (`0x80 = 1.0`) consumed by `render`'s `LIGHT_TERRAIN` path.
+fn pc_terrain_gs_rgb(c8: [u8; 3], normal: [f32; 3], lighting: &manifest::ManifestLighting) -> [u8; 3] {
+    let mut r = [
+        f32::from(c8[0]) / 255.0,
+        f32::from(c8[1]) / 255.0,
+        f32::from(c8[2]) / 255.0,
+    ];
+    let add_dir = |acc: &mut [f32; 3], dir: [f32; 3], color_lin: [f32; 3]| {
+        let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+        if len <= 1e-6 {
+            return;
+        }
+        let ndotl = (-(normal[0] * dir[0] + normal[1] * dir[1] + normal[2] * dir[2]) / len).max(0.0);
+        if ndotl > 0.0 {
+            for ch in 0..3 {
+                acc[ch] += crate::lighting::linear_to_srgb(color_lin[ch]) * ndotl;
+            }
+        }
+    };
+    if !lighting.sun_static {
+        add_dir(&mut r, lighting.sun_dir, lighting.sun_color);
+    }
+    if let Some(l2) = &lighting.light2 {
+        if !l2.is_static {
+            add_dir(&mut r, l2.dir, l2.color);
+        }
+    }
+    let peak = r[0].max(r[1]).max(r[2]).max(1.0);
+    r.map(|v| ((v / peak) * 128.0).round().clamp(0.0, 255.0) as u8)
+}
+
 mod alignment;
 pub use alignment::Surface as AlignedSurface;
 
@@ -220,7 +256,7 @@ struct Ground {
     repl: Replacement,
 }
 
-fn ground(t: &Terrain, bf2: bool) -> Ground {
+fn ground(t: &Terrain, bf2: bool, lighting: Option<&manifest::ManifestLighting>) -> Ground {
     let n = t.info.grid_size;
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity((n * n) as usize);
     for z in 0..n {
@@ -270,9 +306,17 @@ fn ground(t: &Terrain, bf2: bool) -> Ground {
         (_, Some(l)) if l.len() == grid => Some(l.iter().map(|&v| [v; 3]).collect()),
         _ => None,
     };
+    let pc_lit = t.pc_patches.then_some(lighting).flatten();
     let colours = colr.map(|colr| {
-        let g = |c: [u8; 3]| c.map(|ch| gs_vertex_byte(ch, bf2));
-        let mut out: Vec<[u8; 3]> = colr.iter().map(|&c| g(c)).collect();
+        let g = |c: [u8; 3], nrm: [f32; 3]| match pc_lit {
+            Some(l) => pc_terrain_gs_rgb(c, nrm, l),
+            None => c.map(|ch| gs_vertex_byte(ch, bf2)),
+        };
+        let mut out: Vec<[u8; 3]> = colr
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| g(c, normals[i]))
+            .collect();
         // A replacement vertex takes its patch's own `COLR`, one u16 per
         // `POSI` vertex (re-terrain-layers.md §4, [O]); where that does not
         // decode (none shipped), the grid's lightmap under it, bilinearly.
@@ -286,8 +330,9 @@ fn ground(t: &Terrain, bf2: bool) -> Ground {
                 .enumerate()
             {
                 let own = pm.colr.as_ref().and_then(|c| c.get(i)).copied();
+                let nrm = normals[grid + start + i];
                 out.push(match own {
-                    Some(c) => g(c),
+                    Some(c) => g(c, nrm),
                     None => {
                         let mut c = [0.0f32; 3];
                         for (gi, w) in grid_sample(t, q[0], q[2]) {
@@ -311,6 +356,14 @@ fn ground(t: &Terrain, bf2: bool) -> Ground {
 }
 
 pub fn terrain_to_glb(t: &Terrain, bf2: bool) -> Result<Vec<u8>> {
+    terrain_to_glb_lit(t, bf2, None)
+}
+
+pub fn terrain_to_glb_lit(
+    t: &Terrain,
+    bf2: bool,
+    lighting: Option<&manifest::ManifestLighting>,
+) -> Result<Vec<u8>> {
     let n = t.info.grid_size;
     let mut bin = Bin::default();
     let Ground {
@@ -318,7 +371,7 @@ pub fn terrain_to_glb(t: &Terrain, bf2: bool) -> Result<Vec<u8>> {
         normals,
         colours,
         repl,
-    } = ground(t, bf2);
+    } = ground(t, bf2, lighting);
     let (min, max) = min_max3(&positions);
     let pos_acc = bin.f32s(&flat3(&positions), "VEC3", json!({"min": min, "max": max}));
     let nrm_acc = bin.f32s(&flat3(&normals), "VEC3", json!({}));
@@ -440,6 +493,14 @@ impl LayerDraw {
 /// BF2 in the patch's TOP layer, drawn whole with 0xf as alpha 0. A
 /// cutter-replaced patch draws its own triangles with its own nibbles (§4).
 pub fn terrain_layers_to_glb(t: &Terrain, bf2: bool) -> Result<Option<Vec<u8>>> {
+    terrain_layers_to_glb_lit(t, bf2, None)
+}
+
+pub fn terrain_layers_to_glb_lit(
+    t: &Terrain,
+    bf2: bool,
+    lighting: Option<&manifest::ManifestLighting>,
+) -> Result<Option<Vec<u8>>> {
     let layers = t.layer_textures.len().min(16);
     if layers < 2 || t.patch_alpha.len() != t.patch_layer_masks.len() {
         return Ok(None);
@@ -450,7 +511,7 @@ pub fn terrain_layers_to_glb(t: &Terrain, bf2: bool) -> Result<Option<Vec<u8>>> 
     if cells != t.patch_edge {
         return Ok(None);
     }
-    let g = ground(t, bf2);
+    let g = ground(t, bf2, lighting);
     let n = t.info.grid_size as usize;
     let edge = cells + 1;
     let mut draws: Vec<LayerDraw> = (0..layers).map(|_| LayerDraw::default()).collect();
@@ -607,6 +668,7 @@ mod tests {
                 .collect(),
             cutters: Vec::new(),
             lowres: None,
+            pc_patches: false,
         }
     }
 
@@ -743,6 +805,53 @@ mod tests {
             let cols: Vec<[u8; 4]> = reader.read_colors(0).unwrap().into_rgba_u8().collect();
             assert!(cols.iter().all(|c| *c == want), "bf2={bf2}: {:?}", cols[0]);
         }
+    }
+
+    /// PC BF2 terrain patches (`pc_patches = true`) add non-`Static`
+    /// directional lights to their pre-baked `VBUF` colour with hue-preserving
+    /// normalization (`core.lvl -> normal_terrain_shader.xml`), while `Static`
+    /// lights and PS2 terrains (`pc_patches = false`) stay untouched.
+    #[test]
+    fn pc_terrain_adds_non_static_directional_light_and_leaves_ps2_untouched() {
+        let mut t = terrain_with_one_replaced_patch(false);
+        t.colr = Some(vec![[90, 100, 90]; 16 * 16]);
+        let dyn_sun = manifest::ManifestLighting {
+            source: "lght".into(),
+            sun_dir: [-0.421_565, -0.766_168, -0.485_047],
+            sun_color: [1.0, 1.0, 1.0],
+            ambient_sky: [0.26, 0.19, 0.13],
+            ambient_ground: [0.16, 0.13, 0.10],
+            character_ambient: None,
+            fog: None,
+            near_scene_range: None,
+            far_scene_range: None,
+            sun_static: false,
+            light2: None,
+            filter: None,
+            softness: None,
+        };
+        // PS2 terrain ignores `dyn_sun`.
+        assert_eq!(
+            terrain_to_glb(&t, true).unwrap(),
+            terrain_to_glb_lit(&t, true, Some(&dyn_sun)).unwrap()
+        );
+
+        // PC terrain with non-static sun adds sun·N·L and hue-normalizes to ~1.0.
+        t.pc_patches = true;
+        let read_first = |bytes: &[u8]| {
+            let (doc, buffers, _) = gltf::import_slice(bytes).unwrap();
+            let prim = doc.meshes().next().unwrap().primitives().next().unwrap();
+            let reader = prim.reader(|b| buffers.get(b.index()).map(|d| &d.0[..]));
+            reader.read_colors(0).unwrap().into_rgba_u8().next().unwrap()
+        };
+        let lit = read_first(&terrain_to_glb_lit(&t, true, Some(&dyn_sun)).unwrap());
+        assert_eq!(lit, [124, 128, 124, 255]);
+
+        // Static sun is already baked in VBUF and is not added again.
+        let mut static_sun = dyn_sun;
+        static_sun.sun_static = true;
+        let prelit = read_first(&terrain_to_glb_lit(&t, true, Some(&static_sun)).unwrap());
+        assert_eq!(prelit, [45, 50, 45, 255]);
     }
 
     /// The base mesh splits each quad the PS2's way: diagonal (x,z)–(x+1,z+1)

@@ -290,6 +290,27 @@ pub fn hud_weapon(
 /// shows the settled HUD, not the first instant of its 3 s fade-in.
 const SETTLE_SECONDS: f32 = 10.0;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldMarkerStyle {
+    pub texture_dir: PathBuf,
+    pub texture_name: String,
+    pub rect: [f32; 4],
+    pub uv: [f32; 4],
+    pub color: [f32; 3],
+    pub friendly: Option<[f32; 3]>,
+    pub alpha: f32,
+    pub min_scale: f32,
+    pub max_scale: f32,
+    pub additive: bool,
+}
+
+#[derive(Default)]
+struct ReticleLayout {
+    verts: Vec<HudVertex>,
+    indices: Vec<u32>,
+    batches: Vec<ui::hud_draw::HudBatch>,
+}
+
 pub struct HudView {
     hud: Hud,
     art: HudArt,
@@ -319,11 +340,25 @@ pub struct HudView {
     /// The squad cross's parts of the last layout.
     squad: Vec<(ui::hud_squad::Part, [f32; 4], f32)>,
     settled: bool,
+    /// The reticle group's own layout, for [`HudView::paint_reticle`].
+    reticle: ReticleLayout,
     pause_art: bool,
     /// The shell movie's texture and the frame waiting to be written into
     /// it (card BSHLA).
     movie: Option<HudTexture>,
     movie_frame: Option<(Vec<u8>, u32, u32)>,
+}
+
+fn hud_vertices(frame: &ui::hud_draw::HudFrame) -> Vec<HudVertex> {
+    frame
+        .verts
+        .iter()
+        .map(|v| HudVertex {
+            pos: v.pos,
+            uv: v.uv,
+            color: v.color,
+        })
+        .collect()
 }
 
 fn read_ron<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
@@ -696,6 +731,16 @@ impl HudView {
         ui::spawn_draw::help_at(font, page, point, size)
     }
 
+    pub fn stats_help_at(
+        &self,
+        stats: &ui::stats::StatsScreens,
+        point: [f32; 2],
+        size: [f32; 2],
+    ) -> ui::stats::Pad {
+        let font = self.art.menu_font(ui::typography::HELP.face.role());
+        ui::stats_draw::help_at(font, stats, point, size)
+    }
+
     /// Hit-test Instant Action using the same font metrics as its draw pass.
     pub fn instant_target(
         &self,
@@ -851,6 +896,7 @@ impl HudView {
             boxes: Vec::new(),
             squad: Vec::new(),
             settled: false,
+            reticle: Default::default(),
             pause_art,
             movie: None,
             movie_frame: None,
@@ -872,7 +918,55 @@ impl HudView {
     /// Feed `model`, advance the fades by `dt` seconds and lay the HUD out
     /// for a `size` window. The first call settles the fades.
     pub fn update(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) {
-        self.feed(model, dt);
+        self.update_with_reticle(model, dt, size, Some([0.5, model.reticle_y]));
+    }
+
+    /// [`HudView::update`] with the reticle group laid out apart, at the
+    /// middle of `size`: [`HudView::paint`] leaves it out and
+    /// [`HudView::paint_reticle`] draws it. `false` when the reticle shows
+    /// nothing.
+    pub fn update_detached_reticle(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) -> bool {
+        self.feed(model, dt, Some([0.5, 0.5]));
+        let (frame, reticle) =
+            ui::hud_draw::draw_detached(&self.hud, &self.art, size.map(|v| v as f32));
+        self.install_frame(frame);
+        self.reticle = ReticleLayout {
+            verts: hud_vertices(&reticle),
+            indices: reticle.indices,
+            batches: reticle.batches,
+        };
+        !self.reticle.batches.is_empty()
+    }
+
+    /// Paint the reticle [`HudView::update_detached_reticle`] laid out. Submit
+    /// the encoder before the next paint: both share the pass's buffers.
+    pub fn paint_reticle(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        size: [u32; 2],
+    ) {
+        self.swap_reticle();
+        self.paint(device, queue, encoder, view, size);
+        self.swap_reticle();
+    }
+
+    fn swap_reticle(&mut self) {
+        std::mem::swap(&mut self.verts, &mut self.reticle.verts);
+        std::mem::swap(&mut self.indices, &mut self.reticle.indices);
+        std::mem::swap(&mut self.batches, &mut self.reticle.batches);
+    }
+
+    fn update_with_reticle(
+        &mut self,
+        model: &HudModel,
+        dt: f32,
+        size: [u32; 2],
+        position: Option<[f32; 2]>,
+    ) {
+        self.feed(model, dt, position);
         let frame = ui::hud_draw::draw(&self.hud, &self.art, size.map(|v| v as f32));
         self.install_frame(frame);
     }
@@ -883,13 +977,15 @@ impl HudView {
         page: &ui::hud_draw::campaign::Model,
         size: [u32; 2],
     ) {
-        self.feed(model, 0.0);
+        // The campaign map is a full-screen overlay: no reticle (also the VR
+        // path's choice for overlay screens, which hide the crosshair).
+        self.feed(model, 0.0, None);
         let frame =
             ui::hud_draw::campaign::draw(&self.hud, &self.art, page, size.map(|v| v as f32));
         self.install_frame(frame);
     }
 
-    fn feed(&mut self, model: &HudModel, dt: f32) {
+    fn feed(&mut self, model: &HudModel, dt: f32, reticle_position: Option<[f32; 2]>) {
         // Each weapon row's model, else its icon sheet ([`Self::weapon_mesh`]).
         let mut model = model.clone();
         for (row, w) in [(1, &mut model.weapon), (2, &mut model.weapon2)] {
@@ -916,9 +1012,12 @@ impl HudView {
         {
             let files = &self.mesh_files;
             let meshes = &self.art.meshes;
-            ui::hud::feed(&mut self.hud, &model, &|n: &str| {
-                files.contains_key(n) || meshes.contains_key(n)
-            });
+            ui::hud::feed_with_reticle(
+                &mut self.hud,
+                &model,
+                &|n: &str| files.contains_key(n) || meshes.contains_key(n),
+                reticle_position,
+            );
         }
         if let Some(dir) = model.space.as_ref().and_then(|m| m.sheet_dir.as_ref()) {
             if !self.texture_dirs.contains(dir) {
@@ -978,7 +1077,7 @@ impl HudView {
         anim: &ui::pause_draw::Animation,
         size: [u32; 2],
     ) {
-        self.feed(hud, 0.0);
+        self.feed(hud, 0.0, Some([0.5, hud.reticle_y]));
         self.install_frame(ui::pause_draw::draw(
             &self.hud,
             &self.art,
@@ -1053,12 +1152,7 @@ impl HudView {
     }
 
     fn install_frame(&mut self, frame: ui::hud_draw::HudFrame) {
-        self.verts.clear();
-        self.verts.extend(frame.verts.iter().map(|v| HudVertex {
-            pos: v.pos,
-            uv: v.uv,
-            color: v.color,
-        }));
+        self.verts = hud_vertices(&frame);
         self.indices = frame.indices;
         self.batches = frame.batches;
         self.boxes = frame.boxes;
@@ -1195,6 +1289,73 @@ impl HudView {
     /// (`ui::hud_map::window_point`).
     pub fn map_point(&self, world: [f32; 2], clamp: bool, size: [u32; 2]) -> Option<[f32; 2]> {
         ui::hud_map::window_point(&self.hud, world, clamp, [size[0] as f32, size[1] as f32])
+    }
+
+    /// Spawn/map/objective marker template resolved from the loaded HUD layout.
+    pub fn world_marker_styles(
+        &self,
+    ) -> ([Option<WorldMarkerStyle>; 2], [Option<WorldMarkerStyle>; 2]) {
+        let resolve = |style: Option<ui::hud_tree::HintStyle>| -> Option<WorldMarkerStyle> {
+            let style = style?;
+            let e = self.hud.elems.get(style.elem)?;
+            if e.rect.w <= 0.0 || e.rect.h <= 0.0 {
+                return None;
+            }
+            let raw = self.art.icons.layout_sheet(e.texture.as_deref()?);
+            let (sheet, _) = match raw.strip_suffix(ui::hud_draw::SCROLL_SHEET) {
+                Some(s) => (s, true),
+                None => (raw, false),
+            };
+            let (sheet, _) = match sheet.strip_suffix(ui::hud_draw::OPAQUE_SHEET) {
+                Some(s) => (s, true),
+                None => (sheet, false),
+            };
+            let (layer, sheet) = match sheet.split_once('/') {
+                Some((l, s)) => (Some(l), s),
+                None => (None, sheet),
+            };
+            let path = self
+                .texture_dirs
+                .iter()
+                .filter(|d| {
+                    layer.is_none_or(|l| {
+                        d.parent().and_then(|p| p.file_name()) == Some(std::ffi::OsStr::new(l))
+                    })
+                })
+                .map(|d| d.join(format!("{sheet}.ktx2")))
+                .find(|p| pak::is_file(p))?;
+            let texture_dir = path.parent()?.to_path_buf();
+            let texture_name = sheet.to_owned();
+            let sx = (4.0 / 3.0) / ui::hud_tree::FRAME_W;
+            let sy = 1.0 / ui::hud_tree::FRAME_H;
+            let (rx0, ry0) = e.rect.origin();
+            Some(WorldMarkerStyle {
+                texture_dir,
+                texture_name,
+                rect: [
+                    rx0 * sx,
+                    -(ry0 + e.rect.h) * sy,
+                    (rx0 + e.rect.w) * sx,
+                    -ry0 * sy,
+                ],
+                uv: e.tex_coords,
+                color: e.color,
+                friendly: style.friendly,
+                alpha: e.alpha,
+                min_scale: style.min_scale,
+                max_scale: style.max_scale,
+                additive: e.additive,
+            })
+        };
+        let objective = [
+            resolve(self.hud.objective_styles[0]),
+            resolve(self.hud.objective_styles[1]),
+        ];
+        let flag = [
+            resolve(self.hud.flag_styles[0]),
+            resolve(self.hud.flag_styles[1]),
+        ];
+        (objective, flag)
     }
 
     /// The layout's Map element `Scale`, which the spawn map page is drawn

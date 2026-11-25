@@ -2,8 +2,8 @@
 use super::{
     blend_order, continue_pass, create_instance_buffer, create_palette_buffer,
     display_view_allowed, draw_key, draw_key_layer, draw_mesh, iface_dir, mark, may_move,
-    run_section, runs_key, skinned_go_before, sort_distance, sort_runs, Blended, DrawSort,
-    FrameStats, OverlayFn, WorldBox,
+    overlay_order, run_section, runs_key, skinned_go_before, sort_distance, sort_runs, Blended,
+    DrawSort, FrameStats, FrameTarget, OverlayFn, ViewProjection, WorldBox,
 };
 use crate::frustum;
 use crate::mesh::{self, GpuMesh, Instance};
@@ -26,8 +26,94 @@ impl Renderer {
         clear: [f64; 4],
         overlay: Option<OverlayFn<'_>>,
     ) -> Result<(), RenderError> {
-        let leaves = self.falling_draws(camera);
+        if self.capture_flat {
+            let size: [u32; 2] = self.size().into();
+            let target = match self
+                .flat_frame
+                .take()
+                .filter(|target| target.size() == size)
+            {
+                Some(target) => target,
+                None => self.frame_target(size)?,
+            };
+            self.render_frame_to(
+                &target,
+                camera,
+                ViewProjection::Camera,
+                draws,
+                skinned,
+                clear,
+                overlay,
+            )?;
+            let result = if matches!(self.target, Target::Window { .. }) {
+                self.mirror_frame(&target, None)
+            } else {
+                Ok(())
+            };
+            self.flat_frame = Some(target);
+            return result;
+        }
         self.advance_sky();
+        let size = self.size();
+        self.update_falling(camera, size);
+        self.render_view(
+            camera,
+            ViewProjection::Camera,
+            draws,
+            skinned,
+            clear,
+            overlay,
+            None,
+            true,
+        )
+    }
+
+    /// Render a standalone scene into a caller-owned offscreen [`FrameTarget`]
+    /// without presenting or altering the default window or headless target.
+    ///
+    /// Advances per-frame scene updates once and clears queued vehicle shadow
+    /// triangles when done. To share one set of sky/falling updates and queued
+    /// shadows across multiple views in the same frame, use
+    /// [`Renderer::begin_frame`] and [`Frame::render_to`](crate::Frame::render_to).
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_frame_to(
+        &mut self,
+        target: &FrameTarget,
+        camera: &Camera,
+        projection: ViewProjection,
+        draws: &[DrawCmd],
+        skinned: &[SkinnedDrawCmd],
+        clear: [f64; 4],
+        overlay: Option<OverlayFn<'_>>,
+    ) -> Result<(), RenderError> {
+        self.advance_sky();
+        self.update_falling(camera, target.size().into());
+        self.render_view(
+            camera,
+            projection,
+            draws,
+            skinned,
+            clear,
+            overlay,
+            Some(target),
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render_view(
+        &mut self,
+        camera: &Camera,
+        projection: ViewProjection,
+        draws: &[DrawCmd],
+        skinned: &[SkinnedDrawCmd],
+        clear: [f64; 4],
+        overlay: Option<OverlayFn<'_>>,
+        external: Option<&FrameTarget>,
+        clear_shadows: bool,
+    ) -> Result<(), RenderError> {
+        let size = external.map_or_else(|| self.size(), |target| target.size().into());
+        let leaves = self.falling_draw_list();
         for d in skinned {
             let Some(mesh) = self.skinned_meshes.get(d.mesh.0 as usize) else {
                 return Err(RenderError::BadHandle(format!("skinned mesh {}", d.mesh.0)));
@@ -66,7 +152,7 @@ impl Renderer {
         }
 
         let ab = self.frame_ab;
-        let (frame_width, frame_height) = self.size();
+        let (frame_width, frame_height) = size;
         // The world's own size (`world_scale`); the projection keeps the frame's shape.
         let (width, height) = crate::world_scale::scaled(
             (frame_width, frame_height),
@@ -77,20 +163,32 @@ impl Renderer {
         let sun_direction = self.lighting.sun_dir.try_normalize();
         let use_sun_shadow = self.sun_shadow.is_some() && sun_direction.is_some();
         if !use_sun_shadow {
-            self.shadows
-                .prepare(&self.device, &self.queue, camera.view_proj(aspect));
+            self.shadows.prepare(
+                &self.device,
+                &self.queue,
+                projection.view_projection(camera, aspect),
+            );
         }
         let scene_camera = camera.reaching(self.far_range);
-        let view_proj = scene_camera.view_proj(aspect);
-        if let Some(sun) = sun_direction.filter(|_| use_sun_shadow) {
-            self.prepare_character_shadows(camera.position, sun, view_proj, draws, skinned);
-        }
-        let iface_view_proj = Camera {
-            position: glam::Vec3::ZERO,
-            ..scene_camera
-        }
-        .view_proj(aspect);
+        let view_proj = projection.view_projection(&scene_camera, aspect);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
+        if let Some(sun) = sun_direction.filter(|_| use_sun_shadow) {
+            self.prepare_character_shadows(
+                camera.position,
+                sun,
+                view_proj,
+                &frustum,
+                draws,
+                skinned,
+            );
+        }
+        let iface_view_proj = projection.view_projection(
+            &Camera {
+                position: glam::Vec3::ZERO,
+                ..scene_camera
+            },
+            aspect,
+        );
         let (lighting, dome_gain) = self.lightning.unwrap_or((self.lighting, 1.0));
         let water_fog = lighting.water_fog.or(lighting.fog);
         let globals = Globals {
@@ -144,7 +242,8 @@ impl Renderer {
             water_fog_color: water_fog.map_or([0.0; 3], |f| f.color),
             water_fog_on: f32::from(u8::from(water_fog.is_some())),
             water_fog_range: water_fog.map_or([0.0, 1.0], |f| [f.near, f.far]),
-            _pad_water_fog: [0.0; 2],
+            water_clip_y: 0.0,
+            water_clip_on: 0.0,
             character_ambient: self.lighting.character_ambient.unwrap_or([0.0; 3]),
             character_ambient_on: f32::from(u8::from(self.lighting.character_ambient.is_some())),
             iface_dir: iface_dir(camera).to_array(),
@@ -178,6 +277,8 @@ impl Renderer {
         let spec = crate::specular::SpecParams {
             cam_right: camera.right().normalize_or_zero().to_array(),
             mirror: if self.spec_mirror { 1.0 } else { 0.0 },
+            pc_cube: if self.has_pc_spec_cube() { 1.0 } else { 0.0 },
+            _pad: [0.0; 3],
         };
         self.queue
             .write_buffer(&self.spec_buf, 0, bytemuck::bytes_of(&spec));
@@ -290,7 +391,9 @@ impl Renderer {
         shadow_casters.sort_unstable_by_key(|&i| crate::sun_shadow::caster_key(&draws[i]));
 
         let mut order = sort_runs(
-            (0..draws.len()).filter(|&i| keep[i] && draws[i].layer != DrawLayer::Blend),
+            (0..draws.len()).filter(|&i| {
+                keep[i] && !matches!(draws[i].layer, DrawLayer::Blend | DrawLayer::Overlay)
+            }),
             draws,
             &sorts,
         );
@@ -312,6 +415,9 @@ impl Renderer {
             Blended::World(i) => Some(i),
             Blended::Skinned(_) => None,
         }));
+        let overlays = overlay_order(draws, &keep, camera.position);
+        let overlay_base = order.len();
+        order.extend_from_slice(&overlays);
         // The sky shells take the first slots of the same instance buffer, so
         // every other index below is offset by `sky_base`.
         let sky_base = self.sky.len();
@@ -415,6 +521,32 @@ impl Renderer {
             light: draws[i].light as u32,
             ..bytemuck::Zeroable::zeroed()
         }));
+        let water_normal_y = crate::water_reflect::water_normal_height(&self.meshes, draws, &keep);
+        let reflect_setup = water_normal_y.map(|water_y| {
+            let sky_base_instances = instances[..sky_base].to_vec();
+            let setup = self.build_water_reflect_setup(
+                water_y,
+                camera,
+                view_proj,
+                &globals,
+                &self.sky,
+                &sky_base_instances,
+                atmosphere_time,
+                draws,
+                |d| {
+                    !self.cull
+                        || (switched(d)
+                            && (self.meshes.get(d.mesh.0 as usize).is_none() || shows(d)))
+                },
+                &mut instances,
+            );
+            self.queue.write_buffer(
+                &self.water_reflect.reflect_globals_buf,
+                0,
+                bytemuck::bytes_of(&setup.globals),
+            );
+            setup
+        });
         if !instances.is_empty() {
             if instances.len() > self.instance_capacity {
                 self.instance_capacity = instances.len().next_power_of_two();
@@ -424,7 +556,26 @@ impl Renderer {
                 .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances));
         }
 
+        // Deduplicate consecutive identical palettes (a soldier's opaque, blend
+        // and specular submeshes all share one `Arc<[Mat4]>`).
+        let mut palette_slots: Vec<usize> = Vec::with_capacity(skinned.len());
         if !skinned.is_empty() {
+            let mut unique_palettes: Vec<usize> = Vec::new();
+            let mut last_ptr: Option<(*const glam::Mat4, usize, usize)> = None;
+            for (i, d) in skinned.iter().enumerate() {
+                let ptr = d.palette.as_ptr();
+                let len = d.palette.len();
+                let slot = match last_ptr {
+                    Some((lp, ll, slot)) if lp == ptr && ll == len => slot,
+                    _ => {
+                        let slot = unique_palettes.len();
+                        unique_palettes.push(i);
+                        last_ptr = Some((ptr, len, slot));
+                        slot
+                    }
+                };
+                palette_slots.push(slot);
+            }
             if skinned.len() > self.palette_capacity {
                 self.palette_capacity = skinned.len().next_power_of_two();
                 let (buf, bg) =
@@ -434,10 +585,10 @@ impl Renderer {
                 self.skinned_instance_buf =
                     create_instance_buffer(&self.device, self.palette_capacity);
             }
-            // Only the joints a draw has: a slot's stride leaves room for
-            // every joint a mesh could use, and those past its palette are
-            // never read (checked above).
-            let size = (skinned.len() * PALETTE_STRIDE) as wgpu::BufferAddress;
+            // Only the joints each unique palette has: a slot's stride leaves
+            // room for every joint a mesh could use, and those past its
+            // palette are never read (checked above).
+            let size = (unique_palettes.len() * PALETTE_STRIDE) as wgpu::BufferAddress;
             let mut palettes = self
                 .queue
                 .write_buffer_with(
@@ -446,9 +597,11 @@ impl Renderer {
                     wgpu::BufferSize::new(size).expect("skinned is not empty"),
                 )
                 .expect("the palette buffer holds every skinned draw");
-            for (i, d) in skinned.iter().enumerate() {
+            for (slot, &draw_idx) in unique_palettes.iter().enumerate() {
+                let d = &skinned[draw_idx];
+                let base = slot * PALETTE_STRIDE;
                 for (j, m) in d.palette.iter().enumerate() {
-                    let at = i * PALETTE_STRIDE + j * 64;
+                    let at = base + j * 64;
                     palettes[at..at + 64]
                         .copy_from_slice(bytemuck::bytes_of(&m.to_cols_array_2d()));
                 }
@@ -653,30 +806,29 @@ impl Renderer {
         if softness {
             self.prepare_softness(width, height);
         }
+        let water_targets = reflect_setup.as_ref().map(|_| {
+            self.water_reflect
+                .prepare_targets(&self.device, self.format, [width, height])
+        });
 
         // Acquire the frame's color view.
         let acquire = std::time::Instant::now();
-        let (frame, view) = match &self.target {
-            Target::Window { surface, .. } => match surface.get_current_texture() {
-                Ok(frame) => {
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    (Some(frame), view)
-                }
-                Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
-                    // Rebuilt at the window's size, not the stale one; left
-                    // alone while minimized (#142).
-                    let window = self.window_size().unwrap_or((0, 0));
-                    if let Some((w, h)) = crate::device::outdated_surface_size(window) {
-                        self.reconfigure_window(w, h);
-                    }
-                    return Ok(());
-                }
-                Err(wgpu::SurfaceError::Timeout) => return Ok(()),
-                Err(e) => return Err(RenderError::Surface(e.to_string())),
-            },
-            Target::Headless { view, .. } => (None, view.clone()),
+        let frame = if external.is_none() && matches!(self.target, Target::Window { .. }) {
+            let Some(frame) = self.acquire_window()? else {
+                return Ok(());
+            };
+            Some(frame)
+        } else {
+            None
+        };
+        let (frame_texture, view) = match (external, &frame, &self.target) {
+            (Some(target), _, _) => (&target.0.texture, target.0.view.clone()),
+            (_, Some(frame), _) => (
+                &frame.texture,
+                frame.texture.create_view(&Default::default()),
+            ),
+            (_, _, Target::Headless { texture, view, .. }) => (texture, view.clone()),
+            _ => unreachable!("a window frame was acquired"),
         };
         self.acquire_ms = acquire.elapsed().as_secs_f64() * 1000.0;
 
@@ -705,16 +857,10 @@ impl Renderer {
                 t.mark(&mut encoder, "sun shadow depth");
             }
         }
-        // The texture the terrain light pass copies (the frame so far).
-        let frame_texture: &wgpu::Texture = match (&frame, &self.target) {
-            (Some(f), _) => &f.texture,
-            (None, Target::Headless { texture, .. }) => texture,
-            (None, Target::Window { .. }) => unreachable!("a window frame was acquired"),
-        };
         // A scaled world draws in its own target, frame and depth, until the
         // upscale below.
         let world_target = ((width, height) != (frame_width, frame_height)
-            || (particle_blur
+            || ((particle_blur || reflect_setup.is_some())
                 && !frame_texture
                     .usage()
                     .contains(wgpu::TextureUsages::COPY_SRC)))
@@ -727,15 +873,33 @@ impl Renderer {
             Some(t) => (&t.texture, t.view.clone()),
             None => (frame_texture, view),
         };
-        let full_depth = world_target
-            .as_ref()
-            .map(|t| std::mem::replace(&mut self.depth_view, t.depth.clone()));
+        let depth_view: &wgpu::TextureView = match (&world_target, external) {
+            (Some(t), _) => &t.depth,
+            (None, Some(t)) => &t.0.depth,
+            (None, None) => &self.depth_view,
+        };
         let water_view = self.water_display_format.map(|format| {
             frame_texture.create_view(&wgpu::TextureViewDescriptor {
                 format: Some(format),
                 ..Default::default()
             })
         });
+        if let (Some(setup), Some(wt)) = (&reflect_setup, &water_targets) {
+            draw_calls += self.draw_water_reflection(
+                &mut encoder,
+                wt,
+                setup,
+                &sky_order,
+                sky_solid_count,
+                draws,
+                clear,
+                camera.position.y,
+                ab.skips("sky"),
+            );
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "water reflection");
+            }
+        }
         {
             // Render pass shape from an earlier wgpu project's main.rs "Main Render Pass".
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -758,7 +922,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
+                    view: depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Store,
@@ -852,7 +1016,7 @@ impl Renderer {
             // FarSheet → Spec → Water → Speckle (`draw_key`), the skinned
             // opaque draws between Spec and Water.
             let mut run_start = 0;
-            let mut bound_layer: Option<(DrawLayer, bool)> = None;
+            let mut bound_layer: Option<(DrawLayer, bool, bool)> = None;
             // The base terrain's runs (mesh, instances) for the terrain light
             // pass, which ends this pass once the terrain's layers are down
             // (before the first run past `TerrainLayer`) and resumes it.
@@ -862,6 +1026,7 @@ impl Renderer {
             // The GPU timer's section of the runs being drawn (`run_section`).
             let mut section: Option<&'static str> = None;
             let mut water_display_active = false;
+            let mut water_scene_copied = false;
             while run_start <= blend_base {
                 let key = (run_start < blend_base).then(|| draw_key(&draws[order[run_start]]));
                 let at_shadow = Some(run_start) == shadow_before;
@@ -874,13 +1039,17 @@ impl Renderer {
                         mark(&mut timer, &mut pass, l);
                     }
                     drop(pass);
-                    draw_calls +=
-                        self.terrain_light_pass(&mut encoder, frame_texture, &view, &terrain_runs);
+                    draw_calls += self.terrain_light_pass(
+                        &mut encoder,
+                        frame_texture,
+                        &view,
+                        depth_view,
+                        &terrain_runs,
+                    );
                     if let Some(t) = &mut timer {
                         t.mark(&mut encoder, "terrain lights");
                     }
-                    pass =
-                        continue_pass(&mut encoder, &view, &self.depth_view, "map pass, resumed");
+                    pass = continue_pass(&mut encoder, &view, depth_view, "map pass, resumed");
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
@@ -891,9 +1060,8 @@ impl Renderer {
                         mark(&mut timer, &mut pass, l);
                     }
                     drop(pass);
-                    draw_calls += shadow.composite(self, &mut encoder, frame_texture);
-                    pass =
-                        continue_pass(&mut encoder, &view, &self.depth_view, "after sun shadows");
+                    draw_calls += shadow.composite(self, &mut encoder, frame_texture, depth_view);
+                    pass = continue_pass(&mut encoder, &view, depth_view, "after sun shadows");
                     mark(&mut timer, &mut pass, "sun shadow composite");
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
@@ -916,12 +1084,8 @@ impl Renderer {
                     }
                     if water_display_active {
                         drop(pass);
-                        pass = continue_pass(
-                            &mut encoder,
-                            &view,
-                            &self.depth_view,
-                            "after terrain layers",
-                        );
+                        pass =
+                            continue_pass(&mut encoder, &view, depth_view, "after terrain layers");
                         pass.set_bind_group(0, &self.globals_bg, &[]);
                         water_display_active = false;
                     }
@@ -934,7 +1098,7 @@ impl Renderer {
                         });
                         pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                         for &i in &skin_opaque {
-                            self.draw_skinned(&mut pass, &skinned[i], i);
+                            self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i]);
                             draw_calls += 1;
                         }
                     }
@@ -951,7 +1115,7 @@ impl Renderer {
                         pass.set_bind_group(3, spec_bg, &[]);
                         pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                         for &i in &skin_spec {
-                            self.draw_skinned(&mut pass, &skinned[i], i);
+                            self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i]);
                             draw_calls += 1;
                         }
                     }
@@ -961,13 +1125,9 @@ impl Renderer {
                         drop(pass);
                         draw_calls +=
                             self.shadows
-                                .draw(&mut encoder, frame_texture, &view, &self.depth_view);
-                        pass = continue_pass(
-                            &mut encoder,
-                            &view,
-                            &self.depth_view,
-                            "after vehicle shadows",
-                        );
+                                .draw(&mut encoder, frame_texture, &view, depth_view);
+                        pass =
+                            continue_pass(&mut encoder, &view, depth_view, "after vehicle shadows");
                         mark(&mut timer, &mut pass, "vehicle shadows");
                         pass.set_bind_group(0, &self.globals_bg, &[]);
                     }
@@ -988,16 +1148,34 @@ impl Renderer {
                 }
 
                 let d = &draws[order[run_start]];
+                let is_water_normal =
+                    d.layer == DrawLayer::Water && d.light == LightPath::WaterNormal;
                 let water_display = water_view.is_some()
                     && matches!(
                         d.layer,
                         DrawLayer::TerrainLayer | DrawLayer::Water | DrawLayer::Speckle
                     );
-                if water_display != water_display_active {
+                let need_refract_copy =
+                    is_water_normal && !water_scene_copied && water_targets.is_some();
+                if water_display != water_display_active || need_refract_copy {
                     if let Some(l) = section.take() {
                         mark(&mut timer, &mut pass, l);
                     }
                     drop(pass);
+                    if need_refract_copy {
+                        if let Some(wt) = &water_targets {
+                            encoder.copy_texture_to_texture(
+                                frame_texture.as_image_copy(),
+                                wt.scene_tex.as_image_copy(),
+                                wgpu::Extent3d {
+                                    width,
+                                    height,
+                                    depth_or_array_layers: 1,
+                                },
+                            );
+                        }
+                        water_scene_copied = true;
+                    }
                     pass = continue_pass(
                         &mut encoder,
                         if water_display {
@@ -1005,7 +1183,7 @@ impl Renderer {
                         } else {
                             &view
                         },
-                        &self.depth_view,
+                        depth_view,
                         "water colour transition",
                     );
                     pass.set_bind_group(0, &self.globals_bg, &[]);
@@ -1045,35 +1223,44 @@ impl Renderer {
                         pass.set_pipeline(&self.spec_pipeline);
                         pass.set_bind_group(2, &self.palette_bg, &[0]);
                         pass.set_bind_group(3, spec_bg, &[]);
-                        bound_layer = Some((DrawLayer::Spec, may_discard));
+                        bound_layer = Some((DrawLayer::Spec, false, may_discard));
                     }
-                } else if bound_layer != Some((d.layer, may_discard)) {
-                    let clean = &self.no_discard;
-                    pass.set_pipeline(match (d.layer, fade) {
-                        (DrawLayer::Water, _) if !may_discard => &clean.water,
-                        (DrawLayer::TerrainLayer, _) if !may_discard => &clean.terrain_layer,
-                        (DrawLayer::Mask, false) if !may_discard => &clean.mask,
-                        (DrawLayer::Mask, true) if !may_discard => &clean.fade_mask,
-                        (DrawLayer::Opaque, false) if !may_discard => &clean.opaque,
-                        (DrawLayer::Opaque, true) if !may_discard => &clean.fade,
-                        // The water pass carries its own fade (see
-                        // `water_pipeline`), so it takes the same pipeline
-                        // either way.
-                        (DrawLayer::Water, _) => &self.water_pipeline,
-                        // Additive, faded in its own entry point like the
-                        // water it lies on (see `speckle_pipeline`).
-                        (DrawLayer::Speckle, _) => &self.speckle_pipeline,
-                        // No fade twin: no sheet is drawn on a fade map.
-                        (DrawLayer::FarSheet, _) => &self.far_sheet_pipeline,
-                        // Folds the fade in its own entry point.
-                        (DrawLayer::TerrainLayer, _) => &self.terrain_layer_pipeline,
-                        (DrawLayer::Spec, _) => unreachable!("bound above"),
-                        (DrawLayer::Mask, false) => &self.mask_pipeline,
-                        (DrawLayer::Mask, true) => &self.fade_mask_pipeline,
-                        (_, false) => &self.pipeline,
-                        (_, true) => &self.fade_pipeline,
-                    });
-                    bound_layer = Some((d.layer, may_discard));
+                } else if bound_layer != Some((d.layer, is_water_normal, may_discard)) {
+                    if is_water_normal {
+                        if let Some(wt) = &water_targets {
+                            pass.set_pipeline(&self.water_reflect.pipeline);
+                            pass.set_bind_group(2, &self.palette_bg, &[0]);
+                            pass.set_bind_group(3, &wt.bg, &[]);
+                        }
+                    } else {
+                        let clean = &self.no_discard;
+                        pass.set_pipeline(match (d.layer, fade) {
+                            (DrawLayer::Water, _) if !may_discard => &clean.water,
+                            (DrawLayer::TerrainLayer, _) if !may_discard => &clean.terrain_layer,
+                            (DrawLayer::Mask, false) if !may_discard => &clean.mask,
+                            (DrawLayer::Mask, true) if !may_discard => &clean.fade_mask,
+                            (DrawLayer::Opaque, false) if !may_discard => &clean.opaque,
+                            (DrawLayer::Opaque, true) if !may_discard => &clean.fade,
+                            // The water pass carries its own fade (see
+                            // `water_pipeline`), so it takes the same pipeline
+                            // either way.
+                            (DrawLayer::Water, _) => &self.water_pipeline,
+                            // Additive, faded in its own entry point like the
+                            // water it lies on (see `speckle_pipeline`).
+                            (DrawLayer::Speckle, _) => &self.speckle_pipeline,
+                            // No fade twin: no sheet is drawn on a fade map.
+                            (DrawLayer::FarSheet, _) => &self.far_sheet_pipeline,
+                            // Folds the fade in its own entry point.
+                            (DrawLayer::TerrainLayer, _) => &self.terrain_layer_pipeline,
+                            (DrawLayer::Spec, _) => unreachable!("bound above"),
+                            (DrawLayer::Overlay, _) => unreachable!("bound in overlay pass"),
+                            (DrawLayer::Mask, false) => &self.mask_pipeline,
+                            (DrawLayer::Mask, true) => &self.fade_mask_pipeline,
+                            (_, false) => &self.pipeline,
+                            (_, true) => &self.fade_pipeline,
+                        });
+                    }
+                    bound_layer = Some((d.layer, is_water_normal, may_discard));
                 }
                 pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
                 draw_mesh(
@@ -1090,7 +1277,7 @@ impl Renderer {
             }
             if water_display_active {
                 drop(pass);
-                pass = continue_pass(&mut encoder, &view, &self.depth_view, "after water");
+                pass = continue_pass(&mut encoder, &view, depth_view, "after water");
             }
 
             // The grass patches (queue FOLGG) and then the leaf patches (card
@@ -1106,7 +1293,7 @@ impl Renderer {
                     pass = continue_pass(
                         &mut encoder,
                         display_view,
-                        &self.depth_view,
+                        depth_view,
                         "grass display colour",
                     );
                 }
@@ -1124,7 +1311,7 @@ impl Renderer {
                     pass = continue_pass(
                         &mut encoder,
                         &view,
-                        &self.depth_view,
+                        depth_view,
                         "after grass display colour",
                     );
                     pass.set_bind_group(0, &self.globals_bg, &[]);
@@ -1180,7 +1367,9 @@ impl Renderer {
                         pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
                         draw_mesh(&mut pass, &self.meshes[d.mesh.0 as usize], inst..inst + 1);
                     }
-                    Blended::Skinned(i) => self.draw_skinned(&mut pass, &skinned[i], i),
+                    Blended::Skinned(i) => {
+                        self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i])
+                    }
                 }
                 draw_calls += 1;
             }
@@ -1215,7 +1404,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
+                    view: depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
@@ -1234,6 +1423,7 @@ impl Renderer {
         // it only where the backend allows, and without it both are left out
         // rather than making an illegal view.
         let frame_display_view = (world_target.is_some()
+            || external.is_some()
             || display_view_allowed(self.format, self.display_view_format()))
         .then(|| {
             frame_texture.create_view(&wgpu::TextureViewDescriptor {
@@ -1246,7 +1436,7 @@ impl Renderer {
                 &mut encoder,
                 frame_texture,
                 frame_display_view,
-                &self.depth_view,
+                depth_view,
             );
             draw_calls += 1;
             pass.set_bind_group(0, &self.globals_bg, &[]);
@@ -1256,7 +1446,7 @@ impl Renderer {
                 pass.set_pipeline(&self.heat_character_mask);
                 pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                 for &i in &skin_opaque {
-                    self.draw_skinned(&mut pass, &skinned[i], i);
+                    self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i]);
                     draw_calls += 1;
                 }
             }
@@ -1283,7 +1473,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
+                    view: depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
@@ -1337,10 +1527,12 @@ impl Renderer {
             draw_calls += self.sun_flare_pass(
                 &mut encoder,
                 self.bloom_gather_view(),
+                depth_view,
                 camera,
                 width,
                 height,
                 true,
+                projection,
             );
             draw_calls += self.bloom_pass(&mut encoder, frame_texture, &view);
             if let Some(t) = &mut timer {
@@ -1351,10 +1543,12 @@ impl Renderer {
             draw_calls += self.sun_flare_pass(
                 &mut encoder,
                 frame_display_view,
+                depth_view,
                 camera,
                 width,
                 height,
                 false,
+                projection,
             );
         }
         // The frame filter lifts the finished 3D frame, before the overlay
@@ -1371,8 +1565,36 @@ impl Renderer {
                 t.mark(&mut encoder, "softness");
             }
         }
-        if let Some(depth) = full_depth {
-            self.depth_view = depth;
+        // PC BF2's underwater tint over the finished 3D frame, before the
+        // world overlays and the HUD (`underwater.rs`). Its place against the
+        // first-person model is PROVISIONAL, trace: the PC render-object
+        // order of vtable 0x7daacc against the weapon's draw.
+        if self.underwater.tint.is_some() && !ab.skips("underwater") {
+            let display = frame_display_view.as_ref();
+            draw_calls += self.underwater_pass(
+                &mut encoder,
+                display.unwrap_or(&view),
+                display.is_some(),
+                view_proj,
+                [width, height],
+            );
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "underwater");
+            }
+        }
+        if !overlays.is_empty() && !ab.skips("blend") {
+            let mut pass = continue_pass(&mut encoder, &view, depth_view, "world overlays");
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, &self.globals_bg, &[]);
+            pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+            for (slot, &i) in overlays.iter().enumerate() {
+                let d = &draws[i];
+                pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
+                let inst = (sky_base + overlay_base + slot) as u32;
+                draw_mesh(&mut pass, &self.meshes[d.mesh.0 as usize], inst..inst + 1);
+                draw_calls += 1;
+            }
+            mark(&mut timer, &mut pass, "overlays");
         }
         if let Some(t) = &world_target {
             self.world_scale.upscale(&mut encoder, t, &frame_view);
@@ -1402,26 +1624,15 @@ impl Renderer {
             t.resolve(&mut encoder);
         }
         self.queue.submit([encoder.finish()]);
-        self.shadows.clear();
+        if clear_shadows {
+            self.shadows.clear();
+        }
         if let Some(mut t) = timer {
             t.submitted();
             self.gpu_timer = Some(t);
         }
         if let Some(frame) = frame {
-            let suboptimal = frame.suboptimal;
-            frame.present();
-            // A frame presented at a stale size: rebuild the surface at the
-            // window's, once the frame is gone (#142). The window is asked
-            // only then: on X11 its size is a round trip to the server.
-            if suboptimal {
-                let window = self.window_size().unwrap_or((0, 0));
-                let config = self.size();
-                if let Some((w, h)) =
-                    crate::device::suboptimal_rebuild_size(suboptimal, window, config)
-                {
-                    self.reconfigure_window(w, h);
-                }
-            }
+            self.present_window(frame);
         }
         Ok(())
     }

@@ -21,6 +21,8 @@ pub struct EguiOverlay {
     software_cursor: Option<SoftwareCursor>,
     /// Whether the last applied plan drew the cursor in software.
     software_shown: bool,
+    controller_pointer: Option<(Option<[f32; 2]>, bool, f32)>,
+    controller_pressed: bool,
     /// Whether the last applied plan showed the system cursor.
     os_shown: bool,
     /// Issue #182: the window fills its monitor (a fullscreen the system
@@ -178,6 +180,8 @@ impl EguiOverlay {
             cursor_pointer_present: false,
             software_cursor: None,
             software_shown: false,
+            controller_pointer: None,
+            controller_pressed: false,
             os_shown: false,
             covers_monitor: false,
             reassert: CursorReassert::default(),
@@ -201,6 +205,8 @@ impl EguiOverlay {
             cursor_pointer_present: false,
             software_cursor: None,
             software_shown: false,
+            controller_pointer: None,
+            controller_pressed: false,
             os_shown: false,
             covers_monitor: false,
             reassert: CursorReassert::default(),
@@ -283,6 +289,12 @@ impl EguiOverlay {
         }
     }
 
+    /// Feed an in-game pointer in window pixels. An active pointer with no
+    /// position is outside the screen and cancels any pending click.
+    pub fn set_controller_pointer(&mut self, sample: Option<(Option<[f32; 2]>, bool, f32)>) {
+        self.controller_pointer = sample;
+    }
+
     /// Run the UI closure for this frame and tessellate.
     pub fn begin(&mut self, window: &Window, ui: impl FnMut(&egui::Context)) -> FramePaint {
         let Some(state) = self.state.as_mut() else {
@@ -293,11 +305,18 @@ impl EguiOverlay {
                 ui,
             );
         };
-        let raw = state.take_egui_input(window);
+        let mut raw = state.take_egui_input(window);
+        let virtual_cursor = self.controller_pointer.is_some();
+        update_controller_pointer(
+            &mut raw,
+            self.controller_pointer,
+            &mut self.controller_pressed,
+            window.scale_factor() as f32 * self.ctx.zoom_factor(),
+        );
         let plan = cursor_plan(
-            self.cursor_visible && self.window_cursor.is_some(),
+            virtual_cursor || (self.cursor_visible && self.window_cursor.is_some()),
             self.software_cursor.is_some(),
-            self.covers_monitor || window.fullscreen().is_some(),
+            virtual_cursor || self.covers_monitor || window.fullscreen().is_some(),
         );
         self.cursor_dirty |= self.reassert.tick();
         self.cursor_dirty |= plan.software != self.software_shown;
@@ -446,6 +465,110 @@ impl EguiOverlay {
         for id in &frame.textures.free {
             self.renderer.free_texture(id);
         }
+    }
+}
+
+fn update_controller_pointer(
+    raw: &mut egui::RawInput,
+    sample: Option<(Option<[f32; 2]>, bool, f32)>,
+    pressed: &mut bool,
+    pixels_per_point: f32,
+) {
+    use egui::{Event, Modifiers, PointerButton, Pos2};
+    if sample.is_some() {
+        raw.events.retain(|event| {
+            !matches!(
+                event,
+                Event::PointerMoved(_)
+                    | Event::MouseMoved(_)
+                    | Event::PointerGone
+                    | Event::PointerButton { .. }
+                    | Event::WindowFocused(_)
+            )
+        });
+        raw.focused = true;
+    } else if !*pressed {
+        return;
+    }
+    let (position, down, wheel) = sample.unwrap_or((None, false, 0.0));
+    let pos = position.map(|[x, y]| Pos2::new(x / pixels_per_point, y / pixels_per_point));
+    let down = down && pos.is_some();
+    let mut events = Vec::new();
+    if let Some(pos) = pos {
+        events.push(Event::PointerMoved(pos));
+        if wheel != 0.0 {
+            events.push(Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, wheel),
+                modifiers: Modifiers::NONE,
+            });
+        }
+    } else if *pressed {
+        // Let the pointer leave the original widget before releasing the button.
+        events.push(Event::PointerMoved(Pos2::new(-1000.0, -1000.0)));
+    }
+    if *pressed != down {
+        events.push(Event::PointerButton {
+            pos: pos.unwrap_or(Pos2::new(-1000.0, -1000.0)),
+            button: PointerButton::Primary,
+            pressed: down,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    if pos.is_none() {
+        events.push(Event::PointerGone);
+    }
+    *pressed = down;
+    raw.events.splice(..0, events);
+}
+
+#[cfg(test)]
+mod controller_pointer_tests {
+    use super::update_controller_pointer;
+    use egui::{Event, Pos2, RawInput};
+
+    #[test]
+    fn tracked_click_uses_dpi_and_releases_outside_the_widget_after_tracking_loss() {
+        let mut down = false;
+        let mut raw = RawInput::default();
+        raw.events.push(Event::PointerMoved(Pos2::new(1.0, 1.0)));
+        update_controller_pointer(
+            &mut raw,
+            Some((Some([300.0, 400.0]), true, 0.0)),
+            &mut down,
+            2.0,
+        );
+        assert!(down);
+        assert_eq!(raw.events.len(), 2);
+        assert!(matches!(raw.events[0], Event::PointerMoved(p) if p == Pos2::new(150.0, 200.0)));
+        assert!(matches!(
+            raw.events[1],
+            Event::PointerButton { pressed: true, .. }
+        ));
+        raw.events.clear();
+        update_controller_pointer(&mut raw, Some((None, false, 0.0)), &mut down, 2.0);
+        assert!(!down);
+        assert!(
+            matches!(raw.events[1], Event::PointerButton { pressed: false, pos, .. } if pos.x < 0.0)
+        );
+        assert!(matches!(raw.events.last(), Some(Event::PointerGone)));
+    }
+
+    #[test]
+    fn tracked_wheel_is_routed_after_the_pointer_moves() {
+        let mut raw = RawInput::default();
+        let mut pressed = false;
+        update_controller_pointer(
+            &mut raw,
+            Some((Some([300.0, 400.0]), false, -0.3)),
+            &mut pressed,
+            2.0,
+        );
+        assert!(matches!(raw.events[0], Event::PointerMoved(p) if p == Pos2::new(150.0, 200.0)));
+        assert!(matches!(raw.events[1], Event::MouseWheel { delta, .. } if delta.y == -0.3));
+        raw.events.clear();
+        update_controller_pointer(&mut raw, Some((None, false, -0.3)), &mut pressed, 2.0);
+        assert!(matches!(raw.events.as_slice(), [Event::PointerGone]));
     }
 }
 

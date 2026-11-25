@@ -428,9 +428,14 @@ impl App {
                 std::thread::sleep(Duration::from_secs(3600));
             }
         }
+        if let Some(ext) = self.display_ext.as_mut() {
+            ext.shutdown();
+        }
+        self.display_ext = None;
         self.hud_view = None;
         self.gpu = None;
         self.walk = None;
+        pak::set_overlay_scope(None);
         self.overlay = None;
         self.renderer = None;
 

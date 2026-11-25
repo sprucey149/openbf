@@ -317,6 +317,7 @@ impl Water {
 impl Fx {
     pub fn set_water(&mut self, m: &manifest::Manifest) {
         self.water = Water::from_manifest(m);
+        self.underwater = super::underwater::Underwater::from_manifest(m);
     }
 
     pub(super) fn ride_the_water(&mut self, t: f32) -> f32 {

@@ -86,7 +86,38 @@ impl Renderer {
             .create_surface(window.clone())
             .map_err(|e| RenderError::Surface(e.to_string()))?;
         let (adapter, device, queue) = request_device(&instance, Some(&surface))?;
+        Self::finish_windowed(window, surface, adapter, device, queue, false, turn)
+    }
 
+    /// Use a graphics device selected by an external compositor. The desktop
+    /// mirror prefers an unpaced present mode so it does not pace the headset.
+    pub fn new_windowed_with_device(
+        window: Arc<winit::window::Window>,
+        surface: wgpu::Surface<'static>,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Result<Self, RenderError> {
+        Self::finish_windowed(
+            window,
+            surface,
+            adapter,
+            device,
+            queue,
+            true,
+            GpuTurn::take(),
+        )
+    }
+
+    fn finish_windowed(
+        window: Arc<winit::window::Window>,
+        surface: wgpu::Surface<'static>,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        unpaced: bool,
+        turn: GpuTurn,
+    ) -> Result<Self, RenderError> {
         // sRGB surface format selection: an earlier wgpu project's context.rs `from_parts`.
         let caps = surface.get_capabilities(&adapter);
         // An adapter that cannot present to this window reports no formats —
@@ -110,8 +141,9 @@ impl Renderer {
             caps.alpha_modes
         );
         let size = window.inner_size();
+        let no_vsync = std::env::var("OPENBF_NO_VSYNC").ok();
         let present_mode = pick_present_mode(
-            std::env::var("OPENBF_NO_VSYNC").ok().as_deref(),
+            no_vsync.as_deref().or(unpaced.then_some("1")),
             std::env::var("OPENBF_PRESENT").ok().as_deref(),
             &caps.present_modes,
         );
@@ -305,6 +337,7 @@ impl Renderer {
             surface.configure(&self.device, config);
             self.depth_view = create_depth_texture(&self.device, width, height);
             self.world_scale.clear();
+            self.water_reflect.clear();
         }
     }
 
@@ -333,6 +366,12 @@ impl Renderer {
     /// Escape hatch for the egui overlay, which builds its own renderer.
     pub fn device(&self) -> &Arc<wgpu::Device> {
         &self.device
+    }
+
+    /// Command queue paired with [`Self::device`], for callers sampling or
+    /// copying an offscreen [`FrameTarget`](crate::FrameTarget).
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
     }
 
     /// Block until the GPU has finished everything submitted so far.
@@ -378,14 +417,8 @@ fn request_device(
     };
 
     let required_features = crate::gpu_timer::wanted_features(&adapter)
-        | if adapter
-            .features()
-            .contains(wgpu::Features::DEPTH32FLOAT_STENCIL8)
-        {
-            wgpu::Features::DEPTH32FLOAT_STENCIL8
-        } else {
-            wgpu::Features::empty()
-        };
+        | (adapter.features()
+            & (wgpu::Features::DEPTH32FLOAT_STENCIL8 | wgpu::Features::DEPTH_CLIP_CONTROL));
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("swbf render device"),
         // Timestamp queries only for `OPENBF_GPU_TIMING=1` (`gpu_timer.rs`).

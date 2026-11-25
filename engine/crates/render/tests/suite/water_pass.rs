@@ -434,3 +434,82 @@ fn a_lit_water_draw_takes_the_suns_diffuse_term() {
     let far = lit(1.0, Some([2.0, 0.1]));
     assert!(near(far, 89), "0.7 of 128: {far:?}");
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn water_normal_refracts_floor_and_reflects_above_plane() {
+    let mut r = unlit();
+    r.lighting.water.specular = [1.0, 1.0, 1.0, 1.0];
+    r.lighting.water.speckle_axis = glam::Vec3::new(0.25, 0.85, 0.0);
+    let cam = Camera {
+        position: glam::Vec3::new(0.0, 2.0, 0.0),
+        pitch: -0.35,
+        ..Camera::default()
+    };
+    let n_flat = upload_tex(&mut r, 1, 1, &[128, 128, 255, 255], "normal flat");
+    let n_tilted = upload_tex(&mut r, 1, 1, &[200, 180, 255, 255], "normal tilted");
+    let water = r
+        .add_mesh(&render::MeshData {
+            positions: &[
+                [-20.0, 0.0, -20.0],
+                [20.0, 0.0, -20.0],
+                [20.0, 0.0, -1.0],
+                [-20.0, 0.0, -1.0],
+            ],
+            normals: &[[0.0, 1.0, 0.0]; 4],
+            uvs: &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            colors: None,
+            indices: &[0, 2, 1, 0, 3, 2],
+        })
+        .unwrap();
+    let floor = r
+        .add_mesh(&render::MeshData {
+            positions: &[
+                [-20.0, -2.0, -20.0],
+                [20.0, -2.0, -20.0],
+                [20.0, -2.0, -1.0],
+                [-20.0, -2.0, -1.0],
+            ],
+            normals: &[[0.0, 1.0, 0.0]; 4],
+            uvs: &[[0.0; 2]; 4],
+            colors: None,
+            indices: &[0, 2, 1, 0, 3, 2],
+        })
+        .unwrap();
+    let tower = r
+        .add_mesh(&render::MeshData {
+            positions: &[
+                [-12.0, 0.1, -6.0],
+                [12.0, 0.1, -6.0],
+                [12.0, 8.0, -6.0],
+                [-12.0, 8.0, -6.0],
+            ],
+            normals: &[[0.0, 0.0, 1.0]; 4],
+            uvs: &[[0.0; 2]; 4],
+            colors: None,
+            indices: &[0, 1, 2, 0, 2, 3],
+        })
+        .unwrap();
+    let refract = [0.0, 1.0, 0.0, 1.0];
+    let w_cmd = |tex| {
+        DrawCmd::water(water, tex, refract, Mat4::IDENTITY)
+            .with_light(render::LightPath::WaterNormal)
+    };
+    let floor_cmd = DrawCmd::flat(floor, [1.0, 1.0, 1.0, 1.0], Mat4::IDENTITY);
+    let tower_cmd = DrawCmd::flat(tower, [1.0, 0.0, 0.0, 1.0], Mat4::IDENTITY);
+
+    // Fresnel 0.5 mixes green-tinted floor refraction with red tower reflection (~128, ~128, 0).
+    r.render(&cam, &[floor_cmd, tower_cmd, w_cmd(n_flat)], [0.0; 4])
+        .unwrap();
+    let px = capture_pixel(&mut r, N / 2, (N * 3) / 4);
+    assert!(
+        px[0] > 80 && px[1] > 80 && px[2] < 20,
+        "expected reflected red + refracted green, got {px:?}"
+    );
+
+    // Changing normal texture shifts lookup & specular.
+    r.render(&cam, &[floor_cmd, tower_cmd, w_cmd(n_tilted)], [0.0; 4])
+        .unwrap();
+    let shifted = capture_pixel(&mut r, N / 2, (N * 3) / 4);
+    assert_ne!(shifted, px, "tilted normal map should perturb look");
+}

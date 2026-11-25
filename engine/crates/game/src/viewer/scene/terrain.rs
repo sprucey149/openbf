@@ -49,7 +49,7 @@ pub(super) fn upload_terrain_chunks<'a>(
     for indices in chunks.iter().filter(|c| !c.is_empty()) {
         // Compacting is what gives the chunk its own vertex range and
         // therefore its own AABB — the whole point of the split.
-        let sub = compact_submesh(cpu, indices);
+        let sub = compact_submesh(cpu.mesh_data(indices));
         let mesh = r
             .add_mesh(&sub.mesh_data())
             .map_err(|e| anyhow!("terrain chunk upload: {e}"))?;
@@ -101,7 +101,7 @@ pub(super) fn upload_terrain_layer_chunks<'a>(
             chunks[cz * per_row + cx].extend_from_slice(tri);
         }
         for indices in chunks.iter().filter(|c| !c.is_empty()) {
-            let sub = compact_submesh(layers, indices);
+            let sub = compact_submesh(layers.mesh_data(indices));
             let mesh = r
                 .add_mesh(&sub.mesh_data())
                 .map_err(|e| anyhow!("terrain layer upload: {e}"))?;

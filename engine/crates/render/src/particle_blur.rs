@@ -25,7 +25,7 @@ pub(crate) struct ParticleBlur {
     downsample: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    scene: Option<BlurScene>,
+    scenes: Vec<BlurScene>,
 }
 
 struct BlurScene {
@@ -130,16 +130,14 @@ impl ParticleBlur {
             downsample,
             layout,
             sampler,
-            scene: None,
+            scenes: Vec::new(),
         }
     }
 
     pub fn prepare(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat, size: [u32; 2]) {
-        if self
-            .scene
-            .as_ref()
-            .is_some_and(|scene| [scene.copy.width(), scene.copy.height()] == size)
-        {
+        if crate::resources::touch_cached(&mut self.scenes, |scene| {
+            [scene.copy.width(), scene.copy.height()] == size
+        }) {
             return;
         }
         let display_format = format.remove_srgb_suffix();
@@ -182,12 +180,15 @@ impl ParticleBlur {
                 },
             )
         };
-        self.scene = Some(BlurScene {
-            copy,
-            copy_group: group(&view),
-            reduced_group: group(&reduced),
-            reduced,
-        });
+        crate::resources::push_cached(
+            &mut self.scenes,
+            BlurScene {
+                copy,
+                copy_group: group(&view),
+                reduced_group: group(&reduced),
+                reduced,
+            },
+        );
     }
 
     pub fn pass<'e>(
@@ -197,7 +198,7 @@ impl ParticleBlur {
         target: &wgpu::TextureView,
         depth: &wgpu::TextureView,
     ) -> wgpu::RenderPass<'e> {
-        let scene = self.scene.as_ref().expect("prepared particle blur");
+        let scene = self.scenes.last().expect("prepared particle blur");
         encoder.copy_texture_to_texture(
             source.as_image_copy(),
             scene.copy.as_image_copy(),
@@ -253,7 +254,7 @@ impl ParticleBlur {
         } else {
             &self.pipeline
         });
-        let scene = self.scene.as_ref().expect("prepared particle blur");
+        let scene = self.scenes.last().expect("prepared particle blur");
         pass.set_bind_group(2, &scene.reduced_group, &[]);
     }
 }

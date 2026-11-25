@@ -16,6 +16,14 @@ pub struct Skeleton {
     pub global_bind: Vec<Mat4>,
     /// Inverse of `global_bind` (model space → bone space).
     pub inverse_bind: Vec<Mat4>,
+    /// Decomposed local bind transforms, precomputed once at load.
+    bind_pose: Vec<BoneXform>,
+    /// Bone indices ordered so every parent precedes its children.
+    topo_order: Vec<usize>,
+    pub(crate) dummy_root: Option<usize>,
+    pub(crate) ribcage: Option<usize>,
+    pub(crate) torso_bones: [Option<usize>; 3],
+    pub(crate) head_bones: [Option<usize>; 2],
     /// The tentacle joints [`Skeleton::sway`] moves; empty on every other body.
     sway: Vec<SwayJoint>,
 }
@@ -37,8 +45,28 @@ impl Skeleton {
     pub fn new(names: Vec<String>, parents: Vec<Option<usize>>, local_bind: Vec<Mat4>) -> Self {
         assert_eq!(names.len(), parents.len());
         assert_eq!(names.len(), local_bind.len());
-        let global_bind = globals(&parents, &local_bind);
+        let topo_order = topo_sort(&parents);
+        let global_bind = globals_ordered(&parents, &local_bind, &topo_order);
         let inverse_bind = global_bind.iter().map(Mat4::inverse).collect();
+        let bind_pose = local_bind
+            .iter()
+            .map(|m| {
+                let (_, r, t) = m.to_scale_rotation_translation();
+                BoneXform {
+                    rotation: r,
+                    translation: t,
+                }
+            })
+            .collect();
+        let find = |name: &str| names.iter().position(|n| n.eq_ignore_ascii_case(name));
+        let dummy_root = find("DummyRoot");
+        let ribcage = find("bone_ribcage");
+        let torso_bones = [
+            find("bone_a_spine"),
+            find("bone_b_spine"),
+            find("bone_ribcage"),
+        ];
+        let head_bones = [find("bone_neck"), find("bone_head")];
         let sway = names
             .iter()
             .enumerate()
@@ -54,6 +82,12 @@ impl Skeleton {
             .collect();
         Self {
             sway,
+            bind_pose,
+            topo_order,
+            dummy_root,
+            ribcage,
+            torso_bones,
+            head_bones,
             names,
             parents,
             local_bind,
@@ -94,46 +128,76 @@ impl Skeleton {
     /// space, same order as the skeleton). Bones the pose omits keep their
     /// bind transform.
     pub fn palette(&self, local_pose: &[Mat4]) -> Vec<Mat4> {
-        let locals: Vec<Mat4> = (0..self.len())
-            .map(|i| local_pose.get(i).copied().unwrap_or(self.local_bind[i]))
-            .collect();
-        let g = globals(&self.parents, &locals);
-        g.iter()
-            .zip(&self.inverse_bind)
-            .map(|(gp, ib)| *gp * *ib)
-            .collect()
+        let mut out = vec![Mat4::IDENTITY; self.len()];
+        for &i in &self.topo_order {
+            let local = local_pose.get(i).copied().unwrap_or(self.local_bind[i]);
+            out[i] = match self.parents[i] {
+                Some(p) => out[p] * local,
+                None => local,
+            };
+        }
+        for (g, ib) in out.iter_mut().zip(&self.inverse_bind) {
+            *g *= *ib;
+        }
+        out
+    }
+
+    /// Joint palette directly from a [`Pose`] in one allocation.
+    pub fn palette_from_pose(&self, pose: &Pose) -> Vec<Mat4> {
+        let mut out = vec![Mat4::IDENTITY; self.len()];
+        for &i in &self.topo_order {
+            let local = pose.0.get(i).map_or(self.local_bind[i], |b| b.to_mat4());
+            out[i] = match self.parents[i] {
+                Some(p) => out[p] * local,
+                None => local,
+            };
+        }
+        for (g, ib) in out.iter_mut().zip(&self.inverse_bind) {
+            *g *= *ib;
+        }
+        out
     }
 }
 
-/// Model-space transforms from per-bone parent-space transforms, resolving
-/// parents in any order (no assumption that parents precede children).
-fn globals(parents: &[Option<usize>], locals: &[Mat4]) -> Vec<Mat4> {
-    let n = locals.len();
-    let mut out: Vec<Option<Mat4>> = vec![None; n];
-    fn resolve(
+fn topo_sort(parents: &[Option<usize>]) -> Vec<usize> {
+    let n = parents.len();
+    let mut visited = vec![false; n];
+    let mut order = Vec::with_capacity(n);
+    fn visit(
         i: usize,
         parents: &[Option<usize>],
-        locals: &[Mat4],
-        out: &mut [Option<Mat4>],
+        visited: &mut [bool],
+        order: &mut Vec<usize>,
         depth: usize,
-    ) -> Mat4 {
-        if let Some(m) = out[i] {
-            return m;
+    ) {
+        if visited[i] {
+            return;
         }
         assert!(
             depth < parents.len() + 1,
             "skeleton parent cycle at bone {i}"
         );
-        let m = match parents[i] {
-            Some(p) => resolve(p, parents, locals, out, depth + 1) * locals[i],
+        if let Some(p) = parents[i] {
+            visit(p, parents, visited, order, depth + 1);
+        }
+        visited[i] = true;
+        order.push(i);
+    }
+    for i in 0..n {
+        visit(i, parents, &mut visited, &mut order, 0);
+    }
+    order
+}
+
+fn globals_ordered(parents: &[Option<usize>], locals: &[Mat4], order: &[usize]) -> Vec<Mat4> {
+    let mut out = vec![Mat4::IDENTITY; locals.len()];
+    for &i in order {
+        out[i] = match parents[i] {
+            Some(p) => out[p] * locals[i],
             None => locals[i],
         };
-        out[i] = Some(m);
-        m
     }
-    (0..n)
-        .map(|i| resolve(i, parents, locals, &mut out, 0))
-        .collect()
+    out
 }
 
 /// One bone's local transform in a sampled clip frame (parent space).
@@ -168,18 +232,7 @@ pub struct Pose(pub Vec<BoneXform>);
 
 impl Pose {
     pub fn bind(skel: &Skeleton) -> Self {
-        Self(
-            skel.local_bind
-                .iter()
-                .map(|m| {
-                    let (_, r, t) = m.to_scale_rotation_translation();
-                    BoneXform {
-                        rotation: r,
-                        translation: t,
-                    }
-                })
-                .collect(),
-        )
+        Self(skel.bind_pose.clone())
     }
 
     pub fn blend(&self, other: &Pose, t: f32) -> Pose {
@@ -234,10 +287,84 @@ impl Clip {
     /// Sample at a fractional frame (linear blend between neighbouring
     /// frames; wraps when `looping`, clamps otherwise).
     pub fn sample(&self, skel: &Skeleton, frame: f32, looping: bool) -> Pose {
-        let bind = Pose::bind(skel);
         if self.frames == 0 {
-            return bind;
+            return Pose::bind(skel);
         }
+        let (i0, i1, t) = self.frame_indices(frame, looping);
+        Pose(
+            (0..skel.len())
+                .map(|b| match self.tracks.get(b).and_then(|tr| tr.as_ref()) {
+                    Some(keys) if keys.len() == self.frames => keys[i0].blend(keys[i1], t),
+                    _ => skel.bind_pose[b],
+                })
+                .collect(),
+        )
+    }
+
+    /// Sample masked bones directly into `dst` with blend weight `k` without
+    /// allocating a temporary [`Pose`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn sample_masked_into(
+        &self,
+        skel: &Skeleton,
+        frame: f32,
+        looping: bool,
+        mask: &[bool],
+        k: f32,
+        flight_root: Option<(usize, Vec3)>,
+        dst: &mut Pose,
+    ) {
+        if self.frames == 0 {
+            if k >= 1.0 {
+                for (b, x) in dst.0.iter_mut().enumerate() {
+                    if mask.get(b).copied().unwrap_or(false) {
+                        let mut val = skel.bind_pose[b];
+                        if let Some((rb, rest)) = flight_root {
+                            if b == rb {
+                                (val.translation.x, val.translation.z) = (rest.x, rest.z);
+                            }
+                        }
+                        *x = val;
+                    }
+                }
+            }
+            return;
+        }
+        let (i0, i1, t) = self.frame_indices(frame, looping);
+        for (b, x) in dst.0.iter_mut().enumerate() {
+            if !mask.get(b).copied().unwrap_or(false) {
+                continue;
+            }
+            match self.tracks.get(b).and_then(Option::as_ref) {
+                Some(keys) if keys.len() == self.frames => {
+                    let mut val = keys[i0].blend(keys[i1], t);
+                    if let Some((rb, rest)) = flight_root {
+                        if b == rb {
+                            (val.translation.x, val.translation.z) = (rest.x, rest.z);
+                        }
+                    }
+                    if k >= 1.0 {
+                        *x = val;
+                    } else {
+                        *x = x.blend(val, k);
+                    }
+                }
+                _ if k >= 1.0 => {
+                    let mut val = skel.bind_pose[b];
+                    if let Some((rb, rest)) = flight_root {
+                        if b == rb {
+                            (val.translation.x, val.translation.z) = (rest.x, rest.z);
+                        }
+                    }
+                    *x = val;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[inline]
+    fn frame_indices(&self, frame: f32, looping: bool) -> (usize, usize, f32) {
         let n = self.frames as f32;
         let f = if looping {
             let wrapped = frame.rem_euclid(n);
@@ -257,14 +384,7 @@ impl Clip {
         } else {
             (i0 + 1).min(self.frames - 1)
         };
-        Pose(
-            (0..skel.len())
-                .map(|b| match self.tracks.get(b).and_then(|t| t.as_ref()) {
-                    Some(keys) if keys.len() == self.frames => keys[i0].blend(keys[i1], t),
-                    _ => bind.0[b],
-                })
-                .collect(),
-        )
+        (i0, i1, t)
     }
 }
 

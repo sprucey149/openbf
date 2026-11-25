@@ -22,11 +22,17 @@
 //! Offsets are from the start of the file. The pack start is where the executable proper ends, so re-packing a packed
 //! binary copies only the executable. [`PAK_NAME`] has the same layout with no executable bytes: its pack start is 0.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+
+pub mod overlay;
+pub use overlay::{
+    clear_overlays, current_overlays, overlay_scope, set_overlay_scope, set_overlays, OverlayLayer,
+    OverlayRule,
+};
 
 const MAGIC: &[u8; 8] = b"OPENBFPK";
 const FOOTER: u64 = 32;
@@ -487,20 +493,32 @@ pub fn collect(dir: &Path, name: &str) -> io::Result<Vec<(String, PathBuf)>> {
 
 // ---------- the mounts ----------
 
+#[derive(Clone)]
+enum MountBacking {
+    Disk(PathBuf),
+    Archive(Arc<Archive>),
+}
+
 struct Mount {
     /// The directory path as the game spells it, lexically normalised, and the same joined to the working directory.
     rel: PathBuf,
     abs: PathBuf,
     name: String,
+    backing: MountBacking,
 }
 
-static EXE: OnceLock<Option<Archive>> = OnceLock::new();
+static EXE: OnceLock<Option<Arc<Archive>>> = OnceLock::new();
 static MOUNTS: Mutex<Vec<Mount>> = Mutex::new(Vec::new());
 
 /// The running game's archive, if any (opened once): see [`find_archive`].
 pub fn exe_archive() -> Option<&'static Archive> {
-    EXE.get_or_init(|| find_archive(&std::env::current_exe().ok()?))
-        .as_ref()
+    EXE.get_or_init(|| find_archive(&std::env::current_exe().ok()?).map(Arc::new))
+        .as_deref()
+}
+
+fn exe_archive_arc() -> Option<Arc<Archive>> {
+    EXE.get_or_init(|| find_archive(&std::env::current_exe().ok()?).map(Arc::new))
+        .clone()
 }
 
 /// The archive for the executable at `exe`: the one inside it, else [`PAK_NAME`] in its folder.
@@ -535,58 +553,140 @@ pub fn find_archive(exe: &Path) -> Option<Archive> {
     }
 }
 
-/// Serve the path `dir` from the archive's `name/` when `dir` is not a directory on disk and the game's archive carries
-/// `name`. Returns true when the archive serves it. Mounting the same directory again replaces the earlier mount.
+/// Serve `dir` through `pak`, using the disk directory if present or the archive's `name/` when
+/// absent on disk and carried by `openbf.pak`. Returns true only when an archive serves the mount.
+/// Mounting either backing records the logical mount root so layered mod overlays work identically
+/// in development checkouts and packed builds.
 pub fn mount(dir: &Path, name: &str) -> bool {
     let rel = normalize(dir);
-    let mut ms = MOUNTS.lock().unwrap();
-    ms.retain(|m| m.rel != rel);
-    if dir.is_dir() || !exe_archive().is_some_and(|a| a.has_dir(name)) {
-        return false;
-    }
     let abs = std::env::current_dir()
         .map(|c| normalize(&c.join(&rel)))
         .unwrap_or_else(|_| rel.clone());
+    let mut ms = MOUNTS.lock().unwrap();
+    ms.retain(|m| m.rel != rel);
+    if dir.is_dir() {
+        ms.push(Mount {
+            rel,
+            abs,
+            name: name.to_string(),
+            backing: MountBacking::Disk(dir.to_path_buf()),
+        });
+        return false;
+    }
+    let Some(arch) = exe_archive_arc().filter(|a| a.has_dir(name)) else {
+        return false;
+    };
     ms.push(Mount {
         rel,
         abs,
         name: name.to_string(),
+        backing: MountBacking::Archive(arch),
     });
     true
 }
 
-/// True when any mount is served by the archive (a packed build running packed).
+/// True when any mount is served by an archive (a packed build running packed).
 pub fn packed() -> bool {
-    !MOUNTS.lock().unwrap().is_empty()
+    MOUNTS
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|m| matches!(m.backing, MountBacking::Archive(_)))
 }
 
-/// Where a path lives: on disk, or under this archive key.
-enum Place {
-    Disk(PathBuf),
-    Pak(String),
+#[cfg(test)]
+pub(crate) fn mount_archive_for_test(dir: &Path, name: &str, archive: Arc<Archive>) {
+    let rel = normalize(dir);
+    let abs = std::env::current_dir()
+        .map(|c| normalize(&c.join(&rel)))
+        .unwrap_or_else(|_| rel.clone());
+    let mut ms = MOUNTS.lock().unwrap();
+    ms.retain(|m| m.rel != rel);
+    ms.push(Mount {
+        rel,
+        abs,
+        name: name.to_string(),
+        backing: MountBacking::Archive(archive),
+    });
 }
 
-fn place(path: &Path) -> Place {
+#[cfg(test)]
+pub(crate) fn unmount_for_test(dir: &Path) {
+    let rel = normalize(dir);
+    MOUNTS.lock().unwrap().retain(|m| m.rel != rel);
+}
+
+struct MountMatch {
+    mount_name: String,
+    rel_key: String,
+    backing: MountBacking,
+}
+
+fn match_mount(path: &Path) -> Option<MountMatch> {
     let ms = MOUNTS.lock().unwrap();
-    if !ms.is_empty() {
-        let p = normalize(path);
-        for m in ms.iter() {
-            let root = if p.is_absolute() { &m.abs } else { &m.rel };
-            if let Ok(rest) = p.strip_prefix(root) {
-                let mut key = m.name.clone();
-                for c in rest.components() {
-                    key.push('/');
-                    key.push_str(&c.as_os_str().to_string_lossy());
+    if ms.is_empty() {
+        return None;
+    }
+    let p = normalize(path);
+    for m in ms.iter() {
+        let root = if p.is_absolute() { &m.abs } else { &m.rel };
+        if let Ok(rest) = p.strip_prefix(root) {
+            let mut rel_key = String::new();
+            for c in rest.components() {
+                if !rel_key.is_empty() {
+                    rel_key.push('/');
                 }
-                return Place::Pak(key);
+                rel_key.push_str(&c.as_os_str().to_string_lossy());
             }
+            return Some(MountMatch {
+                mount_name: m.name.clone(),
+                rel_key,
+                backing: m.backing.clone(),
+            });
         }
     }
-    Place::Disk(path.to_path_buf())
+    None
 }
 
-fn pak() -> &'static Archive {
-    exe_archive().expect("a mount exists only when the archive does")
+enum Place {
+    Disk(PathBuf),
+    Pak { archive: Arc<Archive>, key: String },
+    /// Hidden by an override layer ([`overlay::Resolved::Removed`]).
+    Removed(String),
+}
+
+fn archive_key(mount_name: &str, rel_key: &str) -> String {
+    if rel_key.is_empty() {
+        mount_name.to_owned()
+    } else {
+        format!("{mount_name}/{rel_key}")
+    }
+}
+
+fn place_for_file(path: &Path) -> Place {
+    let Some(m) = match_mount(path) else {
+        return Place::Disk(path.to_path_buf());
+    };
+    match overlay::resolve_file(&m.mount_name, &m.rel_key) {
+        Some(overlay::Resolved::File(ov)) => return Place::Disk(ov),
+        Some(overlay::Resolved::Removed) => {
+            return Place::Removed(archive_key(&m.mount_name, &m.rel_key))
+        }
+        None => {}
+    }
+    match m.backing {
+        MountBacking::Disk(disk_root) => {
+            if m.rel_key.is_empty() {
+                Place::Disk(disk_root)
+            } else {
+                Place::Disk(disk_root.join(&m.rel_key))
+            }
+        }
+        MountBacking::Archive(archive) => Place::Pak {
+            archive,
+            key: archive_key(&m.mount_name, &m.rel_key),
+        },
+    }
 }
 
 fn not_found(key: &str) -> io::Error {
@@ -617,12 +717,13 @@ fn count(bytes: usize) {
 }
 
 pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let out = match place(path.as_ref()) {
+    let out = match place_for_file(path.as_ref()) {
         Place::Disk(p) => std::fs::read(p),
-        Place::Pak(k) => {
-            let (off, len) = pak().get(&k).ok_or_else(|| not_found(&k))?;
-            pak().read(off, len)
+        Place::Pak { archive, key } => {
+            let (off, len) = archive.get(&key).ok_or_else(|| not_found(&key))?;
+            archive.read(off, len)
         }
+        Place::Removed(key) => Err(not_found(&key)),
     };
     count(out.as_ref().map_or(0, Vec::len));
     out
@@ -638,17 +739,56 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     })
 }
 
+/// Read every in-scope override layer's copy of `path` as UTF-8, ordered from
+/// highest priority (`#1`) to lowest. Stops at any layer that explicitly hides
+/// `path`. Returns an empty `Vec` when no overlay layer provides `path`.
+pub fn read_override_stack(path: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let path = path.as_ref();
+    let Some(m) = match_mount(path) else {
+        return Ok(Vec::new());
+    };
+    let files = overlay::resolve_override_stack(&m.mount_name, &m.rel_key);
+    let mut out = Vec::with_capacity(files.len());
+    for file in files {
+        let bytes = std::fs::read(&file)?;
+        count(bytes.len());
+        let text = String::from_utf8(bytes).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: not UTF-8", file.display()),
+            )
+        })?;
+        out.push(text);
+    }
+    Ok(out)
+}
+
 pub fn is_file(path: impl AsRef<Path>) -> bool {
-    match place(path.as_ref()) {
+    match place_for_file(path.as_ref()) {
         Place::Disk(p) => p.is_file(),
-        Place::Pak(k) => pak().get(&k).is_some(),
+        Place::Pak { archive, key } => archive.get(&key).is_some(),
+        Place::Removed(_) => false,
     }
 }
 
 pub fn is_dir(path: impl AsRef<Path>) -> bool {
-    match place(path.as_ref()) {
-        Place::Disk(p) => p.is_dir(),
-        Place::Pak(k) => pak().has_dir(&k),
+    let path = path.as_ref();
+    let Some(m) = match_mount(path) else {
+        return path.is_dir();
+    };
+    if overlay::has_dir(&m.mount_name, &m.rel_key) {
+        return true;
+    }
+    match m.backing {
+        MountBacking::Disk(disk_root) => {
+            let p = if m.rel_key.is_empty() {
+                disk_root
+            } else {
+                disk_root.join(&m.rel_key)
+            };
+            p.is_dir()
+        }
+        MountBacking::Archive(archive) => archive.has_dir(&archive_key(&m.mount_name, &m.rel_key)),
     }
 }
 
@@ -661,19 +801,57 @@ pub fn exists(path: impl AsRef<Path>) -> bool {
 /// fixed, on disk too.
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<PathBuf>> {
     let path = path.as_ref();
-    let mut names: Vec<std::ffi::OsString> = match place(path) {
-        Place::Disk(p) => std::fs::read_dir(p)?
-            .map(|e| e.map(|e| e.file_name()))
-            .collect::<io::Result<_>>()?,
-        Place::Pak(k) => {
-            if !pak().has_dir(&k) {
-                return Err(not_found(&k));
-            }
-            pak().children(&k).into_iter().map(Into::into).collect()
-        }
+    let Some(m) = match_mount(path) else {
+        let mut names: Vec<String> = std::fs::read_dir(path)?
+            .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect::<io::Result<_>>()?;
+        names.sort();
+        return Ok(names.into_iter().map(|n| path.join(n)).collect());
     };
-    names.sort();
-    Ok(names.into_iter().map(|n| path.join(n)).collect())
+
+    let mut merged: BTreeSet<String> = BTreeSet::new();
+    let ov_children = overlay::children_for(&m.mount_name, &m.rel_key);
+    let ov_has = overlay::has_dir(&m.mount_name, &m.rel_key) || !ov_children.is_empty();
+    merged.extend(ov_children);
+
+    match m.backing {
+        MountBacking::Disk(disk_root) => {
+            let disk_path = if m.rel_key.is_empty() {
+                disk_root
+            } else {
+                disk_root.join(&m.rel_key)
+            };
+            match std::fs::read_dir(&disk_path) {
+                Ok(rd) => {
+                    for e in rd {
+                        let e = e?;
+                        merged.insert(e.file_name().to_string_lossy().into_owned());
+                    }
+                }
+                Err(err) if ov_has && err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+        }
+        MountBacking::Archive(archive) => {
+            let key = archive_key(&m.mount_name, &m.rel_key);
+            if archive.has_dir(&key) {
+                merged.extend(archive.children(&key));
+            } else if !ov_has {
+                return Err(not_found(&key));
+            }
+        }
+    }
+
+    let prefix = if m.rel_key.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", m.rel_key.trim_end_matches('/'))
+    };
+    merged.retain(|n| {
+        overlay::resolve_file(&m.mount_name, &format!("{prefix}{n}"))
+            != Some(overlay::Resolved::Removed)
+    });
+    Ok(merged.into_iter().map(|n| path.join(n)).collect())
 }
 
 /// A file opened for seek + read: a disk file, or one entry's byte range inside the executable.
@@ -690,9 +868,10 @@ pub enum Reader {
 
 pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
     count(0);
-    match place(path.as_ref()) {
+    match place_for_file(path.as_ref()) {
         Place::Disk(p) => Ok(Reader::Disk(File::open(p)?)),
-        Place::Pak(k) => pak().open_entry(&k),
+        Place::Pak { archive, key } => archive.open_entry(&key),
+        Place::Removed(key) => Err(not_found(&key)),
     }
 }
 

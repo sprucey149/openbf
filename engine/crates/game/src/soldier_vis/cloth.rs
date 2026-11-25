@@ -42,6 +42,7 @@ impl SoldierVisuals {
     }
 
     pub(super) fn step_cloths(&mut self, walk: &WalkSim, dt: f32) {
+        let mut globals = Vec::new();
         for (i, u) in walk.sim.units.iter().enumerate() {
             let body = self.asset_index(u.team, u.spec.class);
             let Some(v) = self.units.get_mut(i) else {
@@ -52,7 +53,11 @@ impl SoldierVisuals {
                 v.cloth_body = body;
                 v.cloth_alive = Some(u.alive);
             }
-            if v.gen != u.gen
+            // Only high-LOD visible soldiers draw live cloth (`cloth_draws` skips
+            // Low and Hidden). When `prepare_view` has not run (tests), `choice`
+            // defaults to `High` so all units still step.
+            if self.lod_view.choice(i) != super::lod::Choice::High
+                || v.gen != u.gen
                 || (!u.alive
                     && (u.burst || v.gone || v.dead_for > CORPSE_SECS || !v.animator.posed()))
             {
@@ -74,7 +79,7 @@ impl SoldierVisuals {
             };
             let compute = || -> std::sync::Arc<[Mat4]> {
                 let pose = v.animator.pose(&sa.asset.skeleton);
-                sa.asset.skeleton.palette(&pose.locals()).into()
+                sa.asset.skeleton.palette_from_pose(&pose).into()
             };
             let (posed_for, memo) = v.palette.get_or_init(|| (body, compute()));
             let palette = if *posed_for == body {
@@ -82,11 +87,13 @@ impl SoldierVisuals {
             } else {
                 compute()
             };
-            let globals: Vec<_> = palette
-                .iter()
-                .zip(&sa.asset.skeleton.global_bind)
-                .map(|(p, b)| *p * *b)
-                .collect();
+            globals.clear();
+            globals.extend(
+                palette
+                    .iter()
+                    .zip(&sa.asset.skeleton.global_bind)
+                    .map(|(p, b)| *p * *b),
+            );
             if v.cloth_states.is_empty() {
                 v.cloth_states = sa
                     .cloths

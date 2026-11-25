@@ -595,6 +595,12 @@ pub struct ManifestWaterConfig {
     /// Donor normal-map water. Omitted on PS2 to preserve its bake wire bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_maps: Option<ManifestNormalWater>,
+    /// PC `UnderwaterColor`, 0..255 RGBA: the colour laid over the part of
+    /// the view whose near plane is under the water (`analysis/re-water.md`
+    /// §9.8). No PS2 map authors it; omitted then, so PS2 bakes keep their
+    /// wire bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub underwater_color: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

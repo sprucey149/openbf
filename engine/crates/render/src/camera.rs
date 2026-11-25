@@ -4,7 +4,7 @@
 //! - `yaw = 0, pitch = 0` looks down **-Z**.
 //! - `yaw` rotates around **+Y**; positive yaw turns **left** (toward -X).
 //! - `pitch` rotates around the camera's right axis; positive pitch looks **up**.
-//! - Projection is `glam::Mat4::perspective_rh` (0..1 depth, wgpu clip space).
+//! - Projection uses reverse-Z in wgpu clip space (1 at near, 0 at far).
 //!
 //! Adapted from an earlier project's camera (`build_uniform`: `look_to_rh` + `perspective_rh`,
 //! view_proj = proj * view), simplified to a
@@ -63,6 +63,23 @@ impl Camera {
     pub fn right(&self) -> Vec3 {
         let (sy, cy) = self.yaw.sin_cos();
         glam::Quat::from_axis_angle(self.forward(), self.roll) * Vec3::new(cy, 0.0, -sy)
+    }
+
+    /// The near plane's four corners in the world for a view of `aspect`,
+    /// in order around the rectangle.
+    pub fn near_corners(&self, aspect: f32) -> [Vec3; 4] {
+        let forward = self.forward();
+        let right = self.right().normalize_or_zero();
+        let up = right.cross(forward);
+        let h = self.near * (self.fov_y * 0.5).tan();
+        let w = h * aspect;
+        let centre = self.position + forward * self.near;
+        [
+            centre - right * w - up * h,
+            centre - right * w + up * h,
+            centre + right * w + up * h,
+            centre + right * w - up * h,
+        ]
     }
 
     pub fn view(&self) -> Mat4 {
@@ -140,5 +157,27 @@ mod tests {
         let near_clip = vp * Vec3::new(0.0, 0.0, -1.0).extend(1.0);
         let far_clip = vp * Vec3::new(0.0, 0.0, -1000.0).extend(1.0);
         assert!(near_clip.z / near_clip.w > far_clip.z / far_clip.w);
+    }
+
+    #[test]
+    fn near_corners_project_to_the_ndc_corners_at_depth_one() {
+        let cam = Camera {
+            position: Vec3::new(3.0, -1.3, 7.0),
+            yaw: 0.7,
+            pitch: -0.2,
+            roll: 0.1,
+            ..Camera::default()
+        };
+        let aspect = 16.0 / 9.0;
+        let vp = cam.view_proj(aspect);
+        let want = [(-1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (1.0, -1.0)];
+        for (corner, (x, y)) in cam.near_corners(aspect).into_iter().zip(want) {
+            let clip = vp * corner.extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            assert!(
+                ndc.abs_diff_eq(Vec3::new(x, y, 1.0), 1e-3),
+                "{corner} -> {ndc}"
+            );
+        }
     }
 }

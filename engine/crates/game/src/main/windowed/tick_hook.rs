@@ -87,6 +87,7 @@ pub(super) struct TickHook<'a> {
     pub matchlog: Option<&'a mut game::matchlog::MatchLog>,
     pub session_stats: Option<&'a mut game::session_stats::SessionStats>,
     pub frame_profile: Option<&'a mut game::frame_profile::FrameProfile>,
+    pub display_ext: Option<&'a dyn extensions::runtime::ActiveDisplayExtension>,
 }
 
 impl TickHook<'_> {
@@ -112,8 +113,15 @@ impl TickHook<'_> {
         let buff_loops = self.fx.buff_loops(&walk.sim);
         if let Some(vis) = self.soldier_vis.as_deref_mut() {
             vis.note_shots(walk);
-            let mut points = vis.fire_points(walk);
+            let mut points = vis.tick_fire_points(walk, |_| false);
             self.deka_vis.fire_points(&walk.sim, &mut points);
+            if let Some(view) = self
+                .display_ext
+                .filter(|_| !lockstep)
+                .and_then(|ext| ext.stereo_view(&super::xr::sim_view(walk)))
+            {
+                super::xr::place_tracked_muzzle(&view, walk, vis, &mut points);
+            }
             self.bolts.set_fire_points(points);
         }
         self.bolts.track(walk);
@@ -132,6 +140,12 @@ impl TickHook<'_> {
                 sl.play_2d(Some(audio), cue);
             }
             st.selection = next;
+            let default_listener = game::event_sounds::listener(walk);
+            let listener = self
+                .display_ext
+                .filter(|_| !lockstep)
+                .and_then(|ext| ext.stereo_view(&super::xr::sim_view(walk)))
+                .map_or(default_listener, |view| super::xr::listener(&view));
             play_event_sounds(
                 audio,
                 sl,
@@ -141,11 +155,11 @@ impl TickHook<'_> {
                 st.aspect,
                 walk,
                 muted.then_some(local),
+                &listener,
             );
             // The auras' loops (the War Hero's crackle).
-            let listener = game::event_sounds::listener(walk);
             sl.play_buff_loops(audio, &buff_loops, &listener);
-            play_ambience(audio, sl, self.ambience, walk);
+            play_ambience(audio, sl, self.ambience, walk, &listener);
         }
         if !lockstep {
             game::heroes::tick(walk, feed);
@@ -156,6 +170,9 @@ impl TickHook<'_> {
             note_sounds(bb, self.sounds.as_deref_mut(), walk.sim.tick);
         }
         if self.rumble_strength > 0.0 {
+            if let Some(ext) = self.display_ext.filter(|_| !lockstep) {
+                ext.on_sim_events(&super::xr::sim_view(walk), self.rumble_strength);
+            }
             if let Some(pulse) = self.rumble_tick.pulse(
                 &walk.sim,
                 walk.player,

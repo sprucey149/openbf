@@ -6,7 +6,8 @@ evidence, and deliberate differences are named. Players build it from their own 
 
 Read `PLAN.md` for scope and decisions, `engine/CRATES.md` for the module map,
 `analysis/INDEX.md` before reverse engineering, `analysis/dev-tools.md` for the
-black box and profiling, and `scripts/README.md` for tools.
+black box and profiling, `docs/modding-architecture.md` and `docs/extensions.md`
+for the modding and extension systems, and `scripts/README.md` for tools.
 
 ## Working rules
 
