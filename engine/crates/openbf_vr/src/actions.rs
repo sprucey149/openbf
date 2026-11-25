@@ -6,6 +6,51 @@ use openxr as xr;
 
 type Session = xr::Session<xr::Vulkan>;
 
+const SWAPS: u32 = core::sim::buttons::SWITCH_WEAPON | core::sim::buttons::SWITCH_SECONDARY;
+/// OURS: how long one weapon-swap button waits for the other before it counts
+/// alone. measure: press both together, and swap and block, in a headset.
+const CHORD_NS: i64 = 150_000_000;
+
+/// The two weapon-swap buttons held together open the game menu. Either alone
+/// waits [`CHORD_NS`] for the other, so the pair swaps nothing; a shorter tap
+/// counts as it is let go.
+#[derive(Clone, Copy, Default)]
+struct Chord {
+    since: Option<i64>,
+    waiting: u32,
+    together: bool,
+}
+
+impl Chord {
+    /// The swap buttons play sees for `held` at `now`, and whether the pair
+    /// is down.
+    fn filter(&mut self, held: u32, now: i64) -> (u32, bool) {
+        if held == SWAPS {
+            *self = Self {
+                together: true,
+                ..Self::default()
+            };
+            return (0, true);
+        }
+        if held == 0 {
+            let tapped = self.waiting;
+            *self = Self::default();
+            return (tapped, false);
+        }
+        if self.together {
+            return (0, false);
+        }
+        let since = *self.since.get_or_insert(now);
+        if now.saturating_sub(since) < CHORD_NS {
+            self.waiting = held;
+            (0, false)
+        } else {
+            self.waiting = 0;
+            (held, false)
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Pose {
     pub position: Vec3,
@@ -55,6 +100,7 @@ pub(super) struct Input {
     pub right_stick: Vec2,
     pub buttons: u32,
     pub pause: bool,
+    pub stick_click: bool,
     pub support_grip: bool,
     pub left_velocity: Option<Vec3>,
 }
@@ -93,8 +139,10 @@ pub(super) struct Actions {
     switch_secondary: xr::Action<bool>,
     sprint: xr::Action<bool>,
     pause: xr::Action<bool>,
+    stick_click: xr::Action<bool>,
     support_grip: xr::Action<bool>,
     haptic: xr::Action<xr::Haptic>,
+    chord: std::cell::Cell<Chord>,
 }
 
 impl Actions {
@@ -123,6 +171,7 @@ impl Actions {
             )?,
             sprint: set.create_action("sprint", "Sprint", &[])?,
             pause: set.create_action("pause", "Open or close the game menu", &[])?,
+            stick_click: set.create_action("stick_click", "Answer a hero offer", &[])?,
             support_grip: set.create_action(
                 "support_grip",
                 "Grip the weapon with the left hand",
@@ -130,6 +179,7 @@ impl Actions {
             )?,
             haptic: set.create_action("saber_contact", "Saber contact vibration", &hands)?,
             set,
+            chord: Default::default(),
         };
         // All profiles have aim and grip; the simple profile also lets a
         // tracked device with only a select button fire the primary weapon.
@@ -243,10 +293,12 @@ impl Actions {
                 path("left", "thumbstick/click")?,
             ));
             bindings.push(xr::Binding::new(
-                &self.pause,
+                &self.stick_click,
                 path("right", "thumbstick/click")?,
             ));
-        } else {
+        }
+        // With two swap buttons the pair opens the menu ([`Chord`]).
+        if left_face.is_none() {
             bindings.push(xr::Binding::new(&self.pause, path("left", "menu/click")?));
         }
         match instance.suggest_interaction_profile_bindings(profile, &bindings) {
@@ -344,14 +396,44 @@ impl Actions {
         }
         let pause = self.pause.state(session, xr::Path::NULL)?;
         let support_grip = self.support_grip.state(session, xr::Path::NULL)?;
+        let stick_click = self.stick_click.state(session, xr::Path::NULL)?;
+        let mut chord = self.chord.get();
+        let (swaps, paired) = chord.filter(buttons & SWAPS, time.as_nanos());
+        self.chord.set(chord);
+        buttons = buttons & !SWAPS | swaps;
         Ok(Input {
             hands,
             movement: stick(&self.move_stick)?,
             right_stick: stick(&self.turn_stick)?.unwrap_or_default(),
             buttons,
-            pause: pause.is_active && pause.current_state,
+            pause: pause.is_active && pause.current_state || paired,
+            stick_click: stick_click.is_active && stick_click.current_state,
             support_grip: support_grip.is_active && support_grip.current_state,
             left_velocity,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::sim::buttons::{SWITCH_SECONDARY as Y, SWITCH_WEAPON as B};
+
+    #[test]
+    fn the_swap_pair_pauses_without_swapping_and_either_alone_still_swaps() {
+        let mut chord = Chord::default();
+        assert_eq!(chord.filter(B, 0), (0, false));
+        assert_eq!(chord.filter(B | Y, 1), (0, true));
+        assert_eq!(chord.filter(Y, 2), (0, false));
+        assert_eq!(chord.filter(Y, CHORD_NS * 3), (0, false));
+        assert_eq!(chord.filter(0, CHORD_NS * 3), (0, false));
+
+        assert_eq!(chord.filter(B, 0), (0, false));
+        assert_eq!(chord.filter(0, 1), (B, false));
+        assert_eq!(chord.filter(0, 2), (0, false));
+
+        assert_eq!(chord.filter(Y, 0), (0, false));
+        assert_eq!(chord.filter(Y, CHORD_NS), (Y, false));
+        assert_eq!(chord.filter(0, CHORD_NS + 1), (0, false));
     }
 }

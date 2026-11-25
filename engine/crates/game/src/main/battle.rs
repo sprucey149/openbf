@@ -1545,7 +1545,7 @@ pub(super) fn hud_model_for_view(
             Some(ui::spawn_draw::SpawnPage::Map { .. }) => Some(m.spawn_model(walk, slot)),
             // A space map's dead player keeps no minimap.
             _ => (walk.space_round.is_none() && (me.alive || !walk.space_battle()))
-                .then(|| m.model(walk)),
+                .then(|| m.model_looking(walk, stereo_view.map(|(view, _)| view.yaw))),
         }),
         squad: feed.squad(walk.sim.tick),
         // The spawn screen up, drawn in the HUD's frame (card SSELB).

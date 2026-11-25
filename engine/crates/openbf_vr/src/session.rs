@@ -715,13 +715,13 @@ impl ActiveDisplayExtension for Vr {
                     combat.waypoints = self.saber.waypoints;
                 }
                 combat.grenade = self.grenade.release(sim, world);
-                pad = self.rig.pad(
-                    unit,
-                    frame.head,
-                    frame.input,
+                let saber = sim.sim.weapon_classes[unit.weapon_class].saber.is_some();
+                let facing = rig::facing(
+                    saber,
+                    world.pose(frame.head),
                     aimed.map(|m| m.transform_vector3(Vec3::Z)),
-                    pad,
                 );
+                pad = self.rig.pad(unit, frame.head, frame.input, facing, pad);
                 if let Some(aimed) = aimed {
                     let free = if foregrip.is_some() {
                         world.hand_mounts(frame.input.hands)[1].unwrap_or(aimed)

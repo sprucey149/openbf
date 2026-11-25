@@ -421,6 +421,12 @@ impl MapStatic {
 
     /// This frame's minimap for the local player.
     pub fn model(&self, walk: &WalkSim) -> MapModel {
+        self.model_looking(walk, None)
+    }
+
+    /// [`MapStatic::model`] turned to `look`, a headset's yaw, in place of
+    /// the camera's or the flown droid's.
+    pub fn model_looking(&self, walk: &WalkSim, look: Option<f32>) -> MapModel {
         let sim = &walk.sim;
         let me = &sim.units[walk.player.index as usize];
         // `[ours]` (maintainer, 2026-10-28) Flying a droid, the map is
@@ -434,7 +440,7 @@ impl MapStatic {
                 ([cam.position.x, cam.position.z], cam.yaw)
             }
         };
-        let (sy, cy) = core::fmath::sin_cos(yaw);
+        let (sy, cy) = core::fmath::sin_cos(look.unwrap_or(yaw));
         let fwd = [-sy, -cy];
         let own = me.team;
         // Native teams (Wookiees, Ewoks, ...) can be allies of a main army.

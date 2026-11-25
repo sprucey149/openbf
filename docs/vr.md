@@ -66,7 +66,8 @@ All functionality from the experimental `codex/openxr-vr` branch is preserved:
 | Click left thumbstick (L3) | Sprint latch in movement direction |
 | Right thumbstick left / right | 30-degree snap turn |
 | Right thumbstick down | Reload |
-| Right thumbstick click (or left menu) | Pause menu |
+| Right B and left Y together | Pause menu (left menu on controllers without those buttons). Each alone acts after 0.15 s, or as it is let go |
+| Hero offer: click the right thumbstick, then push it left / right | Accept / decline, with the stick held in or let go. It must pass the middle after the click, and the push does not snap-turn |
 | Right A / X / Trigger confirm buttons | Jump in battle; confirm / back navigation in menus |
 | Right B / Left Y | Switch primary / secondary weapon |
 | Left X / Left A | Enter or leave vehicles / interact |
@@ -93,15 +94,16 @@ There is no snap turn or flick reload in a seat: the right stick aims. The view 
 | Right thumbstick | Turn and aim |
 | Right trigger | Fire (standing only) |
 | Left trigger | Raise or drop the shield |
-| Right B | Fold into the ball and back |
+| Click left thumbstick (L3) | Fold into the ball and back |
+| Right B, held | Ball sprint |
 | Right A | Jump button |
-| Click left thumbstick (L3) | Ball sprint latch |
 
 Its reticle is hidden in the ball and while it folds, when it cannot fire.
 
 Additional behaviors preserved:
 
 - **Curved 16:9 Visor HUD:** Renders the native HUD across the helmet visor FOV, leaving the centre reticle group out of it, and retaining enemy target health readouts.
+- **Look direction:** The minimap turns with the headset. A lightsaber wielder's body faces where the headset looks, so Force powers, the thrown saber and deflected bolts go there; a blaster wielder's follows the right hand.
 - **World reticle:** The stock reticle, with its ammo, refire and heat rings, stands at the point the next shot reaches: along the tracked muzzle on foot, along the seat's barrels in a vehicle (the mean of barrels that fire alongside each other), and along a remote's own line. It looks smaller the farther that point is (full size up to 5 m, half at 20 m, a quarter from 80 m on, so the ammo ring stays visible), is hidden within 3 m of the head and fades in to full strength at 4.5 m. It does not predict spread, projectile drop or missile homing, and lightsabers have none. The stock ammo ring fades out a few seconds after it last changed.
 - **Reload:** The held weapon (the right arm for a Super Battle Droid) is drawn see-through while it reloads.
 - **Physical melee:** Tracked single- and dual-handed lightsaber poses drive spatial blade sweeps, block pulses, and per-hand OpenXR haptic feedback.
@@ -132,7 +134,7 @@ With an OpenXR headset runtime active:
 3. Launch Ground Conquest and verify stereo eye rendering, curved visor HUD edges (no center crosshair, enemy health visible on aim), 6-DoF head tracking, F10 recenter, desktop mirror, and 3D audio orientation.
 4. Test physical blaster aiming, two-handed rifle grip/release, L3 sprint latch, 30-degree snap turn, and Super Battle Droid wrist blasters.
 5. Switch to a lightsaber hero (for example, Mos Eisley Hero Assault) and verify tracked blade swings, dual-saber left hand where applicable, block detection, and haptic feedback.
-6. As a droideka: walk, aim, fire, raise the shield, fold with B, roll, sprint with L3 and jump. In campaign, close an objective screen with A and check that the soldier does not jump. In a hover tank, a walker, a turret, a flyer and a gunner seat: drive and aim with the sticks, switch seats both ways, boost, fire both triggers and leave with X. Check that bolts land under the reticle at near, middle and far range, that it disappears close up, and that a reloading weapon reads as see-through.
+6. As a droideka: walk, aim, fire, raise the shield, fold with L3, roll, sprint with B held and jump. Pause and resume with B and Y together, and check that neither swaps a weapon. Turn your head and snap-turn, and check that the minimap turns with the view. As a Jedi or Sith, push, pull and choke what you look at. When a hero is offered, answer with a right stick click and a push. In campaign, close an objective screen with A and check that the soldier does not jump. In a hover tank, a walker, a turret, a flyer and a gunner seat: drive and aim with the sticks, switch seats both ways, boost, fire both triggers and leave with X. Check that bolts land under the reticle at near, middle and far range, that it disappears close up, and that a reloading weapon reads as see-through.
 7. Test grenade spawn in left palm on left trigger hold, velocity throw on swing release, ammo spend on release, and closing cleanly back to desktop.
 8. Toggle **OpenBF VR** off in **Mods**, launch again, and confirm standard desktop rendering resumes.
 9. Close the OpenXR runtime before launch with **OpenBF VR** enabled to verify the launcher reopens with the Startup Error Recovery Banner and **Play in Desktop Mode** recovers immediately.

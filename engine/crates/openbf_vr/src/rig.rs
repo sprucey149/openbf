@@ -10,6 +10,13 @@ use render::Camera;
 const SNAP: f32 = std::f32::consts::FRAC_PI_6;
 const DEAD_ZONE: f32 = 0.18;
 const AIM_BUTTONS: u32 = buttons::FIRE | buttons::SECONDARY_FIRE;
+const HERO_ANSWERS: u32 = buttons::HERO_ACCEPT | buttons::HERO_DECLINE;
+/// OURS: how far the right stick goes sideways to answer a hero offer, and
+/// how near the middle it must come after its click first, so a stick clicked
+/// while turning or aiming answers nothing. measure: answer offers on foot
+/// and from a turret in a headset.
+const ANSWER_AT: f32 = 0.7;
+const AT_REST: f32 = 0.4;
 /// The controller buttons a seat or remote takes as they are. RELOAD is left
 /// out: there the right stick aims.
 const SEAT_BUTTONS: u32 = AIM_BUTTONS | buttons::JUMP | buttons::ACTION | buttons::SWITCH_WEAPON;
@@ -43,6 +50,9 @@ pub(super) struct Rig {
     boost: bool,
     boost_down: bool,
     boost_moved: bool,
+    click_down: bool,
+    answering: bool,
+    rested: bool,
     pub motion_epoch: u16,
 }
 
@@ -186,6 +196,18 @@ fn flies(view: &SimView<'_>) -> bool {
             }))
 }
 
+/// Where the body faces and so where it aims. A blaster follows the right
+/// hand's `aimed` barrel. A lightsaber's hilt points nowhere in particular,
+/// so its wielder faces where the headset looks: Force powers, the thrown
+/// saber and deflected bolts go there.
+pub(super) fn facing(saber: bool, head: Pose, aimed: Option<Vec3>) -> Option<Vec3> {
+    if saber {
+        Some(head.orientation * Vec3::NEG_Z)
+    } else {
+        aimed
+    }
+}
+
 /// Put the controllers' sticks where a gamepad's would be, ahead of the
 /// flight-stick mapping. A centred stick leaves the gamepad's and keys' axes.
 pub(super) fn seat_sticks(input: Input, mut pad: PadState, look: f32) -> PadState {
@@ -232,18 +254,19 @@ impl Rig {
         if active != self.active {
             self.motion_epoch = self.motion_epoch.wrapping_add(1);
         }
+        let answer = self.hero_answer(view.filter(|_| active), input);
         let turn = input.turn();
         if input.right_stick.x.abs() < 0.4 {
             self.snap_held = false;
         }
         if turn.abs() > 0.7 && !self.snap_held {
             self.snap_held = true;
-            if active && foot.is_some() && !input.pause {
+            if active && foot.is_some() && !input.pause && !self.answering {
                 self.yaw -= turn.signum() * SNAP;
                 self.motion_epoch = self.motion_epoch.wrapping_add(1);
             }
         }
-        let buttons = input.battle_buttons();
+        let buttons = input.battle_buttons() | answer;
         self.blocked &= buttons;
         // Focus and pose loss can temporarily report all buttons as released.
         // Quarantine any button still held when its input returns.
@@ -261,6 +284,29 @@ impl Rig {
         self.latch_boost(active && seated, held, input.movement);
         self.active = active;
         self.right_tracked = right_tracked;
+    }
+
+    /// The D-pad answer to a hero offer: click the right stick, then push it
+    /// left for yes or right for no, held in or let go.
+    fn hero_answer(&mut self, view: Option<&SimView<'_>>, input: Input) -> u32 {
+        let clicked = input.stick_click && !self.click_down;
+        self.click_down = input.stick_click;
+        let offered =
+            view.is_some_and(|view| view.sim.hero_offer(usize::from(view.local_slot)).is_some());
+        let stick = input.right_stick;
+        if clicked {
+            self.answering = true;
+            self.rested = false;
+        }
+        self.answering &= offered;
+        self.rested |= stick.length() < AT_REST;
+        if !self.answering || !self.rested || stick.x.abs() <= ANSWER_AT.max(stick.y.abs()) {
+            0
+        } else if stick.x < 0.0 {
+            buttons::HERO_ACCEPT
+        } else {
+            buttons::HERO_DECLINE
+        }
     }
 
     /// L3 holds a seat's boost on until it is clicked again or the drive
@@ -286,17 +332,23 @@ impl Rig {
 
     /// What the controllers press in a seat. B steps to the next seat as
     /// SWITCH_WEAPON; Y steps back, as the seat switch reads
-    /// SPAWN_CLASS_PREV beside it. A droideka has no seats: B is its
-    /// ROLL_STANCE, which folds it into the ball and back.
+    /// SPAWN_CLASS_PREV beside it. A droideka has no seats: L3 is its
+    /// ROLL_STANCE, which folds it into the ball and back, and B held is
+    /// the ball's sprint.
     pub fn seat_buttons(&self, view: &SimView<'_>) -> u32 {
         let pressed = self.buttons();
-        let mut seat = pressed & (SEAT_BUTTONS | buttons::SPRINT);
+        let mut seat = pressed & (SEAT_BUTTONS | HERO_ANSWERS | buttons::SPRINT);
         if rolls(view) {
-            seat &= !buttons::SWITCH_WEAPON;
-            if pressed & buttons::SWITCH_WEAPON != 0 {
+            seat &= !(buttons::SWITCH_WEAPON | buttons::SPRINT);
+            if pressed & buttons::SPRINT != 0 {
                 seat |= buttons::ROLL_STANCE;
             }
-        } else if pressed & buttons::SWITCH_SECONDARY != 0 {
+            if pressed & buttons::SWITCH_WEAPON != 0 {
+                seat |= buttons::SPRINT;
+            }
+            return seat;
+        }
+        if pressed & buttons::SWITCH_SECONDARY != 0 {
             seat |= buttons::SWITCH_WEAPON | buttons::SPAWN_CLASS_PREV;
         }
         if self.boost {
@@ -743,6 +795,31 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_saber_wielder_faces_the_look_and_a_blaster_the_hand() {
+        let (mut sim, player) = test_sim(7, Vec3::ZERO, None);
+        let hand = Vec3::new(0.0, 1.0, -0.1).normalize();
+        let look = Pose {
+            orientation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            ..HEAD
+        };
+        for (saber, want) in [(true, Vec3::NEG_X), (false, hand)] {
+            let pad = {
+                let view = sim_view(&sim, player);
+                let unit = infantry(&view).unwrap();
+                let mut input = Input::default();
+                input.hands[1].aim = Some(HEAD);
+                let direction = facing(saber, look, Some(hand));
+                Rig::default().pad(unit, look, input, direction, PadState::default())
+            };
+            sim.step(&[pad]);
+            let aim = sim.unit(player).unwrap().aim_frame().0;
+            let level = |v: Vec3| v.with_y(0.0).try_normalize().unwrap_or(Vec3::ZERO);
+            assert!(level(aim).dot(level(want)) > 0.999, "{saber} {aim:?}");
+            assert_eq!(aim.y > 0.5, !saber, "{saber} {aim:?}");
+        }
+    }
+
+    #[test]
     fn tracking_loss_discards_a_queued_shot_and_requires_trigger_release() {
         let (sim, player) = test_sim(7, Vec3::ZERO, None);
         let view = sim_view(&sim, player);
@@ -933,7 +1010,78 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_droideka_drives_like_a_seat_and_folds_with_b() {
+    fn a_hero_offer_is_answered_by_a_stick_click_then_a_push() {
+        use core::sim::heroes::Heroes;
+        use core::unit::UnitClass;
+
+        for (side, answer, held) in [
+            (-1.0, buttons::HERO_ACCEPT, false),
+            (1.0, buttons::HERO_DECLINE, true),
+        ] {
+            let (mut sim, player) = test_sim(7, Vec3::ZERO, None);
+            let spec = UnitSpec::trooper(0, Vec3::ZERO);
+            let class = UnitClass {
+                consts: spec.consts,
+                max_health: 300.0,
+                health_type: spec.health_type,
+                weapon_class: 0,
+                total_clips: 0,
+                weapon_slot: 0,
+                slots: spec.slots,
+                jet: false,
+                capture_posts: true,
+                drops: DropTable::NONE,
+                chunk: None,
+                droideka: None,
+                min: 1,
+                max: None,
+                unlock_points: 0,
+            };
+            sim.classes[0] = vec![class.clone(), class];
+            sim.heroes = Some(Heroes::new([Some(1), None]));
+            sim.heroes.as_mut().unwrap().points = vec![10];
+            sim.step(&[PadState::default()]);
+            assert!(sim.hero_offer(0).is_some());
+            let mut rig = Rig::default();
+            let mut input = Input::default();
+            input.hands[1].aim = Some(HEAD);
+            let mut sample = |sim: &mut Sim, input: Input| {
+                let pad = {
+                    let view = sim_view(sim, player);
+                    rig.track(Some(&view), Some(HEAD), input, true);
+                    let unit = infantry(&view).unwrap();
+                    let pad = rig.pad(unit, HEAD, input, None, PadState::default());
+                    rig.consumed();
+                    (pad, rig.yaw)
+                };
+                sim.step(&[pad.0]);
+                pad
+            };
+            let (_, yaw) = sample(&mut sim, input);
+            input.right_stick = Vec2::X * side;
+            sample(&mut sim, input);
+            input.stick_click = true;
+            assert!(!sample(&mut sim, input).0.pressed(answer));
+            assert!(sim.hero_offer(0).is_some());
+            input.stick_click = false;
+            input.right_stick = Vec2::ZERO;
+            sample(&mut sim, input);
+            input.stick_click = true;
+            let (_, before) = sample(&mut sim, input);
+            input.stick_click = held;
+            input.right_stick = Vec2::X * side;
+            let (pad, after) = sample(&mut sim, input);
+            assert!(pad.pressed(answer));
+            assert_eq!(before, after, "the answering flick turned the view");
+            assert_ne!(yaw, before, "an ordinary flick still turns");
+            assert!(sim.hero_offer(0).is_none());
+            let accepted = sim.heroes.as_ref().unwrap().teams[0].owner.is_some();
+            assert_eq!(accepted, answer == buttons::HERO_ACCEPT);
+        }
+    }
+
+    #[test]
+    fn a_droideka_drives_like_a_seat_folds_with_l3_and_rolls() {
         let ground = Heightfield {
             size: 2,
             unit: 100.0,
@@ -969,7 +1117,7 @@ pub(crate) mod tests {
         assert!(sim.unit(player).unwrap().soldier.pos.distance(start) > 0.5);
 
         input.movement = Some(Vec2::ZERO);
-        input.buttons = buttons::SWITCH_WEAPON;
+        input.buttons = buttons::SPRINT;
         let pad = sample(&mut sim, input);
         assert_eq!(pad.buttons, buttons::ROLL_STANCE);
         input.buttons = 0;
@@ -980,6 +1128,16 @@ pub(crate) mod tests {
             sim.unit(player).unwrap().droideka_form(),
             Some(core::droideka::Form::Ball)
         );
+        let start = sim.unit(player).unwrap().soldier.pos;
+        input.movement = Some(Vec2::Y);
+        input.buttons = buttons::SWITCH_WEAPON;
+        for _ in 0..90 {
+            assert_eq!(sample(&mut sim, input).buttons, buttons::SPRINT);
+        }
+        let ball = sim.unit(player).unwrap();
+        assert!(ball.soldier.pos.distance(start) > 3.0);
+        assert_eq!(ball.droideka_form(), Some(core::droideka::Form::Ball));
+        assert!(ball.droideka.as_ref().unwrap().boosting);
     }
 
     #[test]
