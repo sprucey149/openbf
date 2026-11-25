@@ -52,7 +52,7 @@ OpenBF VR negotiates the Vulkan graphics device with OpenXR before opening the m
 
 ## VR Controls & Gameplay Features
 
-All functionality from the experimental `codex/openxr-vr` branch is preserved:
+All functionality from the earlier experimental OpenXR VR branch is preserved:
 
 | Input | Action |
 |---|---|
@@ -112,9 +112,9 @@ Additional behaviors preserved:
 - **Audio listener:** 3D sound positioning tracks the headset pose in battle.
 - **Vehicles & multiplayer isolation:** Gamepad and keyboard controls keep working in vehicles beside the VR controllers; LAN multiplayer strips local tracked VR weapon/combat inputs before packet encoding and simulation submission so deterministic lockstep gameplay cannot desync.
 
-## Comparison Against `codex/openxr-vr`
+## Comparison Against the Earlier OpenXR VR Branch
 
-| Area | Experimental `codex/openxr-vr` | Bundled Extension (`openbf.vr`) |
+| Area | Earlier experimental OpenXR branch | Bundled Extension (`openbf.vr`) |
 |---|---|---|
 | Crate ownership | Embedded in `game/src/vr/` behind `#[cfg(feature = "vr")]` and `--vr` | Isolated in `engine/crates/openbf_vr/`, registered via `extensions` |
 | Renderer integration | VR-specific stereo path replacing multi-view helpers | Adapts `Renderer::begin_frame()` and `ViewProjection::Asymmetric(fov)` directly |
