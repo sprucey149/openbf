@@ -194,6 +194,7 @@ pub fn run_all_bake_groups(
     bake_maps(ctx, trees)?;
     bake_beep(ctx, trees)?;
     check_foliage(ctx, plan, trees)?;
+    bake_stock_catalog(ctx, plan, trees)?;
     Ok(())
 }
 
@@ -1223,6 +1224,138 @@ fn check_foliage(ctx: &ExecCtx, plan: &BuildPlan, trees: &BakeTrees) -> Result<(
         args.push("bf2".into());
     }
     ctx.run_bake(&args, &[])
+}
+
+fn platform_key(p: Platform) -> &'static str {
+    match p {
+        Platform::Pc => "pc",
+        Platform::Ps2 => "ps2",
+        Platform::Xbox => "xbox",
+    }
+}
+
+fn bake_stock_catalog(ctx: &ExecCtx, plan: &BuildPlan, trees: &BakeTrees) -> Result<()> {
+    ctx.log("== stock resource catalog ==");
+    let out = s(&trees.out_dir);
+    let bf2_plat = platform_key(plan.bf2.platform());
+    ctx.run_bake(
+        &[
+            "stock-record".into(),
+            out.clone(),
+            "gameplay".into(),
+            "bf2".into(),
+            bf2_plat.into(),
+        ],
+        &[],
+    )?;
+    ctx.run_bake(
+        &[
+            "stock-record".into(),
+            out.clone(),
+            "dep".into(),
+            "bf2_anims".into(),
+            "bf2".into(),
+            bf2_plat.into(),
+            s(&trees.bf2),
+            "ingame.lvl".into(),
+        ],
+        &[],
+    )?;
+    ctx.run_bake(
+        &[
+            "stock-catalog".into(),
+            "bf2".into(),
+            bf2_plat.into(),
+            s(&trees.bf2),
+            out.clone(),
+        ],
+        &[],
+    )?;
+    if let Some(pc2) = trees.donors.pc2.as_deref() {
+        ctx.run_bake(
+            &[
+                "stock-catalog".into(),
+                "bf2".into(),
+                "pc".into(),
+                s(pc2),
+                out.clone(),
+            ],
+            &[],
+        )?;
+    }
+    if let Some(xb2) = trees.donors.xb2.as_deref() {
+        ctx.run_bake(
+            &[
+                "stock-catalog".into(),
+                "bf2".into(),
+                "xbox".into(),
+                s(xb2),
+                out.clone(),
+            ],
+            &[],
+        )?;
+    }
+    if let (Some(bf1_src), Some(b1)) = (&plan.bf1, trees.bf1.as_deref()) {
+        let bf1_plat = platform_key(bf1_src.platform());
+        ctx.run_bake(
+            &[
+                "stock-record".into(),
+                out.clone(),
+                "gameplay".into(),
+                "bf1".into(),
+                bf1_plat.into(),
+            ],
+            &[],
+        )?;
+        ctx.run_bake(
+            &[
+                "stock-record".into(),
+                out.clone(),
+                "dep".into(),
+                "bf1_anims".into(),
+                "bf1".into(),
+                bf1_plat.into(),
+                s(b1),
+                "common/eng/common.lvl".into(),
+            ],
+            &[],
+        )?;
+        ctx.run_bake(
+            &[
+                "stock-catalog".into(),
+                "bf1".into(),
+                bf1_plat.into(),
+                s(b1),
+                out.clone(),
+            ],
+            &[],
+        )?;
+        if let Some(pc1) = trees.donors.pc1.as_deref() {
+            ctx.run_bake(
+                &[
+                    "stock-catalog".into(),
+                    "bf1".into(),
+                    "pc".into(),
+                    s(pc1),
+                    out.clone(),
+                ],
+                &[],
+            )?;
+        }
+        if let Some(xb1) = trees.donors.xb1.as_deref() {
+            ctx.run_bake(
+                &[
+                    "stock-catalog".into(),
+                    "bf1".into(),
+                    "xbox".into(),
+                    s(xb1),
+                    out,
+                ],
+                &[],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

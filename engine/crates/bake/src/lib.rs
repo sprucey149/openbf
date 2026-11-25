@@ -52,6 +52,7 @@ pub mod soldier;
 pub mod sound_names;
 pub mod sounds;
 pub mod spec;
+pub mod stock;
 pub mod terrain_glb;
 pub mod tier;
 pub mod turret_rig;

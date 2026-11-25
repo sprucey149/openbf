@@ -385,6 +385,7 @@ dependencies = [
  "ktx2",
  "manifest",
  "mungefs",
+ "pak",
  "png 0.17.16",
  "ron",
  "serde",
@@ -2247,8 +2248,12 @@ dependencies = [
 name = "mungefs"
 version = "0.1.0"
 dependencies = [
+ "extensions",
  "flate2",
+ "ron",
+ "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.20",
 ]
 

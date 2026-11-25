@@ -48,7 +48,7 @@ pub(crate) use output::bake_flags;
 use output::merge_prior;
 pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, bake_weapon_with,
-    texture_flags, weapon_flags, weapon_nodes, BakedWeapon,
+    set_lender, texture_flags, weapon_flags, weapon_nodes, BakedWeapon,
 };
 
 pub struct BakedSoldier {

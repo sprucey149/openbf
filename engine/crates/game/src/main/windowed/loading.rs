@@ -471,6 +471,7 @@ pub(super) fn prepare_round(
     job: Option<super::round_prep::RoundJob>,
 ) -> anyhow::Result<Worker<Prepared>> {
     Worker::spawn(move || {
+        game::assets::scope_overlays_to_map(&dir);
         let key = game::assets::prefetch::load_key(&dir, &mode);
         std::thread::scope(|s| {
             let warm = std::thread::Builder::new()

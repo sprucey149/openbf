@@ -64,6 +64,28 @@ fn detects_non_pc_addon_as_unsupported() {
 }
 
 #[test]
+fn a_bare_side_and_fpm_folder_is_a_replacement_candidate_set() {
+    let dir = make_temp_dir("bare_side");
+    let inner = dir.join("Some Sides 1.0");
+    fs::create_dir_all(inner.join("side")).unwrap();
+    fs::create_dir_all(inner.join("fpm/imp")).unwrap();
+    fs::write(inner.join("Readme.txt"), "copy side and fpm into _lvl_pc").unwrap();
+    fs::write(inner.join("side/imp.lvl"), [b'u', b'c', b'f', b'b', 0, 0, 0, 0]).unwrap();
+    fs::write(inner.join("fpm/imp/impoff.lvl"), [b'u', b'c', b'f', b'b', 0, 0, 0, 0]).unwrap();
+    let res = inspect_addon_dir(&dir);
+    assert!(res.content_root.is_none());
+    assert_eq!(res.kind, AddonKind::LegacyAssetPack);
+    assert!(res.compatibility != AddonCompatibility::Invalid(String::new()));
+    let mut rels: Vec<&str> = res.stock_override_lvls.iter().map(|o| o.rel_path.as_str()).collect();
+    rels.sort();
+    assert_eq!(
+        rels,
+        ["Some Sides 1.0/fpm/imp/impoff.lvl", "Some Sides 1.0/side/imp.lvl"]
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn detects_single_wrapper_layout_and_core_locl() {
     let dir = make_temp_dir("wrapped");
     let inner = dir.join("MyAddon_v1");
@@ -88,8 +110,13 @@ fn detects_single_wrapper_layout_and_core_locl() {
     assert!(res.content_root.is_some());
     assert_eq!(res.display_name, "Test City: Harbor");
     assert_eq!(res.author.as_deref(), Some("Modder"));
-    // Unreferenced TST/tst.lvl without mission.lvl is tracked as unused rather than stock override
-    assert_eq!(res.unused_lvls.len(), 1);
+    // Without addon missions an unreferenced LVL is a replacement candidate;
+    // the stock catalog then finds no stock `tst.lvl` and keeps it inactive.
+    assert!(res.unused_lvls.is_empty());
+    assert!(res
+        .stock_override_lvls
+        .iter()
+        .any(|o| o.rel_path.ends_with("TST/tst.lvl")));
     let _ = fs::remove_dir_all(&dir);
 }
 

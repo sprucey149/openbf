@@ -11,10 +11,12 @@ use std::process::Command;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{bail, Context, Result};
+use extensions::mods::catalog::StockCatalogs;
 use extensions::mods::{
-    compute_mod_fingerprint, content_mod_multiplayer_digest, list_mod_folders, mod_cache_path,
-    resolve_content_mods, DiscoveredMod, ModCacheMeta, ModCacheStatus, ModCompatibility,
-    ModFolderEntry, ModMapSummary, ResourceOverrideConflict,
+    compute_mod_fingerprint_cached, content_mod_multiplayer_digest, list_mod_folders,
+    mod_cache_path, resolve_content_mods, DiscoveredMod, FileHashCache, ModCacheMeta,
+    ModCacheStatus, ModCompatibility, ModFolderEntry, ModMapSummary, ResourceOverrideConflict,
+    TargetSelections,
 };
 use extensions::profile::{mods_dir, profile_path, ExtensionProfile};
 use manifest::hud::HudLocl;
@@ -32,6 +34,11 @@ pub struct MountedMod {
     pub source_fingerprint: String,
     pub maps: Vec<ModMapSummary>,
     pub declared_overrides: Vec<String>,
+    /// [`ModCacheMeta::replacement_key`]: which stock files this mod replaces
+    /// and how, part of the online compatibility digest.
+    pub replacement_key: String,
+    /// The mod changes gameplay through a stock replacement.
+    pub replaces_gameplay: bool,
     pub warnings: Vec<String>,
 }
 
@@ -248,22 +255,49 @@ pub fn locate_bake_bin(data_dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
-/// Convert or refresh one mod folder via external `bake mod-convert`.
+/// Where `bake mod-convert` reads the stock bake from: the asset directory
+/// when it exists on disk (a checkout), else this executable, whose archive
+/// (inside it or `openbf.pak` beside it) carries the baked assets.
+fn stock_assets_arg(assets_dir: &Path) -> Option<PathBuf> {
+    if assets_dir.is_dir() {
+        return Some(assets_dir.to_path_buf());
+    }
+    std::env::current_exe().ok()
+}
+
+/// The digest of the stock catalogs this build carries
+/// ([`StockCatalogs::digest_with`]).
+fn stock_catalog_digest(assets_dir: &Path) -> String {
+    StockCatalogs::digest_with(&|rel| pak::read(assets_dir.join(rel)).ok())
+}
+
+/// Convert or refresh one mod folder via external `bake mod-convert`. The
+/// conversion reads the stock bake from `assets_dir` (or this executable's
+/// archive) and the player's stock copies and target choices from
+/// `data_dir`.
 pub fn convert_mod_with_bake(
     bake_bin: &Path,
     mod_dir: &Path,
     cache_dir: &Path,
     mod_id: &str,
     namespace: &str,
+    data_dir: &Path,
+    assets_dir: &Path,
 ) -> Result<()> {
-    let out = Command::new(bake_bin)
-        .arg("mod-convert")
+    let mut cmd = Command::new(bake_bin);
+    cmd.arg("mod-convert")
         .arg(mod_dir)
         .arg(cache_dir)
         .arg("--mod-id")
         .arg(mod_id)
         .arg("--namespace")
         .arg(namespace)
+        .arg("--data-dir")
+        .arg(data_dir);
+    if let Some(stock) = stock_assets_arg(assets_dir) {
+        cmd.arg("--stock-assets").arg(stock);
+    }
+    let out = cmd
         .output()
         .with_context(|| format!("running {}", bake_bin.display()))?;
     if !out.status.success() {
@@ -299,9 +333,18 @@ fn parse_modes_list(strs: &[String]) -> Vec<Mode> {
     out
 }
 
+/// What a cache is checked against besides the mod's own files.
+struct CacheInputs {
+    hashes: FileHashCache,
+    selections: TargetSelections,
+    catalog_digest: String,
+    assets_dir: PathBuf,
+}
+
 fn load_cached_or_convert(
     entry: &ModFolderEntry,
     data_dir: &Path,
+    inputs: &CacheInputs,
     report: &mut MountedModsReport,
 ) -> Option<(ModCacheMeta, PathBuf)> {
     if let Some(err) = &entry.symlink_error {
@@ -310,7 +353,8 @@ fn load_cached_or_convert(
             .push(format!("Mod `{}` rejected: {err}", entry.folder_name));
         return None;
     }
-    let fp = match compute_mod_fingerprint(&entry.path) {
+    let choices = inputs.selections.for_mod(&entry.mod_id);
+    let fp = match compute_mod_fingerprint_cached(&entry.path, &inputs.hashes) {
         Ok(f) => f.digest,
         Err(e) => {
             report.errors.push(format!(
@@ -323,7 +367,11 @@ fn load_cached_or_convert(
     let cache_dir = mod_cache_path(data_dir, &entry.namespace);
     let existing = ModCacheMeta::load(&cache_dir);
     let status = match &existing {
-        Some(meta) if meta.mod_id == entry.mod_id => meta.validate(&cache_dir, &fp),
+        Some(meta) if meta.mod_id == entry.mod_id => meta.validate(
+            &cache_dir,
+            &fp,
+            &meta.expected_replacement_key(&inputs.catalog_digest, &choices),
+        ),
         Some(_) => ModCacheStatus::Stale {
             reason: "mod identity changed".into(),
         },
@@ -356,6 +404,8 @@ fn load_cached_or_convert(
         &cache_dir,
         &entry.mod_id,
         &entry.namespace,
+        data_dir,
+        &inputs.assets_dir,
     ) {
         report.errors.push(format!(
             "Mod `{}` preparation failed: {e}",
@@ -371,7 +421,11 @@ fn load_cached_or_convert(
         ));
         return None;
     };
-    match meta.validate(&cache_dir, &fp) {
+    match meta.validate(
+        &cache_dir,
+        &fp,
+        &meta.expected_replacement_key(&inputs.catalog_digest, &choices),
+    ) {
         ModCacheStatus::Ready => Some((meta, cache_dir)),
         other => {
             report.errors.push(format!(
@@ -411,6 +465,9 @@ fn discovered_from_cache(entry: &ModFolderEntry, meta: &ModCacheMeta) -> Discove
         warnings: meta.warnings.clone(),
         errors: Vec::new(),
         unused_lvls: Vec::new(),
+        resource_ops: meta.resource_ops.clone(),
+        capabilities: Vec::new(),
+        replacement_key: meta.replacement_key.clone(),
     }
 }
 
@@ -465,6 +522,12 @@ pub fn mount_enabled_mods(
     }
 
     let ordered_enabled = profile.ordered_visible(&visible_ids);
+    let inputs = CacheInputs {
+        hashes: FileHashCache::load(data_dir),
+        selections: TargetSelections::load(data_dir),
+        catalog_digest: stock_catalog_digest(assets_dir),
+        assets_dir: assets_dir.to_path_buf(),
+    };
     let mut cache_by_id: BTreeMap<String, (ModFolderEntry, ModCacheMeta, PathBuf)> =
         BTreeMap::new();
     let mut discovered_list = Vec::new();
@@ -473,7 +536,9 @@ pub fn mount_enabled_mods(
         let Some(entry) = by_id.get(mod_id) else {
             continue;
         };
-        if let Some((meta, cache_dir)) = load_cached_or_convert(entry, data_dir, &mut report) {
+        if let Some((meta, cache_dir)) =
+            load_cached_or_convert(entry, data_dir, &inputs, &mut report)
+        {
             discovered_list.push(discovered_from_cache(entry, &meta));
             cache_by_id.insert(mod_id.to_owned(), (entry.clone(), meta, cache_dir));
         }
@@ -585,9 +650,32 @@ pub fn mount_enabled_mods(
                     rule: OverlayRule::Overrides {
                         allowed_paths,
                         disk_dir: override_assets,
+                        scope: None,
                     },
                 });
             }
+        }
+
+        // Stock replacements: one layer per game, so a BF2 side replacement
+        // never reaches a BF1 battle (`pak::set_overlay_scope`).
+        let override_assets = cache_dir.join("overrides").join("assets");
+        let mut by_game: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+        for out in &meta.replacement_outputs {
+            by_game
+                .entry(out.game.key())
+                .or_default()
+                .insert(out.path.replace('\\', "/").to_ascii_lowercase());
+        }
+        for (game, allowed_paths) in by_game {
+            overlays.push(OverlayLayer {
+                id: mod_id.clone(),
+                mount_name: "assets_baked".into(),
+                rule: OverlayRule::Overrides {
+                    allowed_paths,
+                    disk_dir: override_assets.clone(),
+                    scope: Some(game.to_owned()),
+                },
+            });
         }
 
         if meta.has_locl {
@@ -612,16 +700,41 @@ pub fn mount_enabled_mods(
             source_fingerprint: meta.source_fingerprint.clone(),
             maps: meta.maps.clone(),
             declared_overrides: meta.declared_overrides.clone(),
+            replacement_key: meta.replacement_key.clone(),
+            replaces_gameplay: meta
+                .resource_ops
+                .iter()
+                .any(|o| o.is_active() && o.changes_gameplay()),
             warnings: meta.warnings.clone(),
         });
     }
+    inputs.hashes.save();
 
+    // Online play compares these: a mod that adds maps, overrides stock
+    // files or changes gameplay through a replacement must match on every
+    // machine. A purely cosmetic replacement (textures, models, class
+    // presentation) does not take part, so players may differ in it.
+    let digest_fps: Vec<String> = report
+        .active
+        .iter()
+        .zip(report.active_fingerprints.iter())
+        .map(|(m, (_, fp))| {
+            if m.replaces_gameplay {
+                format!("{fp}:{}", m.replacement_key)
+            } else {
+                fp.clone()
+            }
+        })
+        .collect();
     let override_pairs: Vec<(&str, &str)> = report
         .active
         .iter()
         .zip(report.active_fingerprints.iter())
-        .filter(|(m, _)| !m.declared_overrides.is_empty() || !m.maps.is_empty())
-        .map(|(_, (id, fp))| (id.as_str(), fp.as_str()))
+        .zip(digest_fps.iter())
+        .filter(|((m, _), _)| {
+            !m.declared_overrides.is_empty() || !m.maps.is_empty() || m.replaces_gameplay
+        })
+        .map(|((_, (id, _)), fp)| (id.as_str(), fp.as_str()))
         .collect();
     let digest = content_mod_multiplayer_digest(&override_pairs, !report.active.is_empty());
     report.override_digest = if digest == 0 {
@@ -655,7 +768,8 @@ pub fn mount_enabled_mods(
 mod tests {
     use super::*;
     use extensions::mods::{
-        ModContentType, ModMissionSummary, MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
+        compute_mod_fingerprint, ModContentType, ModMissionSummary, ReplacementOutput,
+        MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
     };
     use extensions::profile::ExtensionProfile;
     use std::sync::Mutex;
@@ -747,6 +861,12 @@ mod tests {
             declared_overrides: vec!["side_bf2/classes/all.ron".into()],
             has_locl: true,
             warnings: Vec::new(),
+            resource_ops: Vec::new(),
+            replacement_key: String::new(),
+            replacement_outputs: Vec::new(),
+            unsupported: Vec::new(),
+            catalog_digest: String::new(),
+            target_choices: BTreeMap::new(),
         };
         meta.save_atomic(&cache).unwrap();
     }
@@ -955,6 +1075,102 @@ mod tests {
             "stock"
         );
 
+        clear_runtime_mods();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bf2_scoped_replacements_leave_bf1_untouched_and_hide_removed_files() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("openbf-mods-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let assets = root.join("assets_baked");
+        let missions = root.join("missions");
+        let data = root.join("openbf_data");
+        std::fs::create_dir_all(assets.join("side_bf2/soldiers")).unwrap();
+        std::fs::create_dir_all(&missions).unwrap();
+        std::fs::write(assets.join("side_bf2/soldiers/imp.glb"), "stock_glb").unwrap();
+        std::fs::write(assets.join("side_bf2/soldiers/imp.cloth.ron"), "stock_cloth").unwrap();
+
+        let mod_dir = mods_dir(&data).join("SideMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("imp.lvl"), "mod").unwrap();
+        let fp = compute_mod_fingerprint(&mod_dir).unwrap();
+        let cache = mod_cache_path(&data, "mod_sidemod");
+        let ov = cache.join("overrides/assets/side_bf2/soldiers");
+        std::fs::create_dir_all(&ov).unwrap();
+        std::fs::write(ov.join("imp.glb"), "mod_glb").unwrap();
+        let meta = ModCacheMeta {
+            schema_version: MOD_CACHE_SCHEMA_VERSION,
+            converter_version: MOD_CONVERTER_VERSION,
+            mod_id: "content.sidemod".into(),
+            namespace: "mod_sidemod".into(),
+            source_fingerprint: fp.digest,
+            legacy_addon_id: None,
+            display_name: "SideMod".into(),
+            version: None,
+            author: None,
+            description: String::new(),
+            mod_type: ModContentType::LegacySideOverhaul,
+            maps: Vec::new(),
+            dependencies: Vec::new(),
+            conflicts: Vec::new(),
+            declared_overrides: Vec::new(),
+            has_locl: false,
+            warnings: Vec::new(),
+            resource_ops: Vec::new(),
+            replacement_key: String::new(),
+            replacement_outputs: vec![
+                ReplacementOutput {
+                    path: "side_bf2/soldiers/imp.glb".into(),
+                    game: extensions::mods::catalog::SourceGame::Bf2,
+                    removed: false,
+                },
+                ReplacementOutput {
+                    path: "side_bf2/soldiers/imp.cloth.ron".into(),
+                    game: extensions::mods::catalog::SourceGame::Bf2,
+                    removed: true,
+                },
+            ],
+            unsupported: Vec::new(),
+            catalog_digest: String::new(),
+            target_choices: BTreeMap::new(),
+        };
+        meta.save_atomic(&cache).unwrap();
+
+        let mut profile = ExtensionProfile::default();
+        profile.set_enabled("content.sidemod", true);
+        profile.order = vec!["content.sidemod".into()];
+        profile.save(&profile_path(&data)).unwrap();
+
+        let rep = mount_enabled_mods(&data, &assets, &missions, false);
+        assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+
+        // BF1 scope must remain untouched by BF2-only replacements.
+        pak::set_overlay_scope(Some("bf1"));
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/soldiers/imp.glb")).unwrap(),
+            "stock_glb"
+        );
+        assert!(pak::is_file(assets.join("side_bf2/soldiers/imp.cloth.ron")));
+
+        // BF2 scope receives the replacement and hides the removed companion.
+        pak::set_overlay_scope(Some("bf2"));
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/soldiers/imp.glb")).unwrap(),
+            "mod_glb"
+        );
+        assert!(!pak::is_file(assets.join("side_bf2/soldiers/imp.cloth.ron")));
+
+        // Disabling restores stock immediately.
+        mount_enabled_mods(&data, &assets, &missions, true);
+        assert_eq!(
+            pak::read_to_string(assets.join("side_bf2/soldiers/imp.glb")).unwrap(),
+            "stock_glb"
+        );
+        assert!(pak::is_file(assets.join("side_bf2/soldiers/imp.cloth.ron")));
+
+        pak::set_overlay_scope(None);
         clear_runtime_mods();
         let _ = std::fs::remove_dir_all(&root);
     }

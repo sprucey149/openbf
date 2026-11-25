@@ -12,10 +12,14 @@ pub enum OverlayRule {
     /// Dedicated filename prefix directly inside a mount (e.g. `missions/mod_abr__*.ron`).
     NamespacePrefix { prefix: String, disk_dir: PathBuf },
     /// Explicit stock/shared resource override: only relative paths in
-    /// `allowed_paths` participate in load-order precedence.
+    /// `allowed_paths` participate in load-order precedence. A layer with a
+    /// `scope` (`"bf1"` / `"bf2"`) serves only while [`set_overlay_scope`]
+    /// names that game: a BF2 side replacement must not reach a BF1 battle
+    /// that borrows BF2's weapon kit.
     Overrides {
         allowed_paths: BTreeSet<String>,
         disk_dir: PathBuf,
+        scope: Option<String>,
     },
 }
 
@@ -27,6 +31,25 @@ pub struct OverlayLayer {
 }
 
 static OVERLAYS: RwLock<Vec<OverlayLayer>> = RwLock::new(Vec::new());
+static SCOPE: RwLock<Option<String>> = RwLock::new(None);
+
+/// The game whose battle is loading (`"bf1"` / `"bf2"`), or `None` outside a
+/// battle. Scoped override layers serve only their own game; with no scope
+/// set they serve everything, which is what the menus see.
+pub fn set_overlay_scope(game: Option<&str>) {
+    *SCOPE.write().unwrap_or_else(|e| e.into_inner()) = game.map(str::to_ascii_lowercase);
+}
+
+pub fn overlay_scope() -> Option<String> {
+    SCOPE.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn in_scope(scope: &Option<String>) -> bool {
+    match (scope, &*SCOPE.read().unwrap_or_else(|e| e.into_inner())) {
+        (Some(layer), Some(active)) => layer == active,
+        _ => true,
+    }
+}
 
 /// Replace active overlay layers atomically (index 0 = highest priority).
 pub fn set_overlays(layers: Vec<OverlayLayer>) {
@@ -75,7 +98,18 @@ fn join_rel(base: &Path, rel: &str) -> Option<PathBuf> {
 /// Resolve an overlay file path for `(mount_name, rel_key)`.
 /// Order: private namespaces first (never shadowed by unrelated mods), then
 /// explicit overrides in load-order priority (`index 0` wins).
-pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<PathBuf> {
+/// What the overlays make of one file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Resolved {
+    /// Served from this file on disk.
+    File(PathBuf),
+    /// An override layer claims the path but has no file for it: the stock
+    /// file is hidden (a replaced soldier whose mod model has no cloth must
+    /// not pick up the stock model's cloth).
+    Removed,
+}
+
+pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<Resolved> {
     if rel_key.is_empty() || !is_safe_rel(rel_key) {
         return None;
     }
@@ -92,7 +126,7 @@ pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<PathBuf> {
                 if let Some(rest) = rel_key.strip_prefix(p).and_then(|s| s.strip_prefix('/')) {
                     if let Some(cand) = join_rel(disk_dir, rest) {
                         if cand.is_file() {
-                            return Some(cand);
+                            return Some(Resolved::File(cand));
                         }
                     }
                 }
@@ -101,7 +135,7 @@ pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<PathBuf> {
                 if !rel_key.contains('/') && rel_key.starts_with(prefix) {
                     if let Some(cand) = join_rel(disk_dir, rel_key) {
                         if cand.is_file() {
-                            return Some(cand);
+                            return Some(Resolved::File(cand));
                         }
                     }
                 }
@@ -119,14 +153,14 @@ pub(crate) fn resolve_file(mount_name: &str, rel_key: &str) -> Option<PathBuf> {
         if let OverlayRule::Overrides {
             allowed_paths,
             disk_dir,
+            scope,
         } = &layer.rule
         {
-            if allowed_paths.contains(&lower_key) {
-                if let Some(cand) = join_rel(disk_dir, rel_key) {
-                    if cand.is_file() {
-                        return Some(cand);
-                    }
-                }
+            if in_scope(scope) && allowed_paths.contains(&lower_key) {
+                return Some(match join_rel(disk_dir, rel_key) {
+                    Some(cand) if cand.is_file() => Resolved::File(cand),
+                    _ => Resolved::Removed,
+                });
             }
         }
     }
@@ -173,8 +207,13 @@ pub(crate) fn has_dir(mount_name: &str, rel_key: &str) -> bool {
                     return true;
                 }
             }
-            OverlayRule::Overrides { allowed_paths, .. } => {
-                if !lower_key.is_empty()
+            OverlayRule::Overrides {
+                allowed_paths,
+                scope,
+                ..
+            } => {
+                if in_scope(scope)
+                    && !lower_key.is_empty()
                     && allowed_paths.iter().any(|ap| ap.starts_with(&lower_prefix))
                 {
                     return true;
@@ -243,7 +282,14 @@ pub(crate) fn children_for(mount_name: &str, rel_key: &str) -> Vec<String> {
                     }
                 }
             }
-            OverlayRule::Overrides { allowed_paths, .. } => {
+            OverlayRule::Overrides {
+                allowed_paths,
+                scope,
+                ..
+            } => {
+                if !in_scope(scope) {
+                    continue;
+                }
                 for ap in allowed_paths {
                     let tail = if lower_prefix.is_empty() {
                         ap.as_str()

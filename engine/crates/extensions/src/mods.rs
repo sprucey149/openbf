@@ -4,7 +4,9 @@
 //! Used identically by `openbf-launcher`, `bake`, and `game` without requiring
 //! `game` to link LVL/Lua parsers (`mungefs`).
 
+pub mod catalog;
 pub mod fingerprint;
+pub mod replace;
 pub mod resolve;
 
 use anyhow::Result;
@@ -16,14 +18,18 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::profile::write_ron_atomic;
 
-pub use fingerprint::compute_mod_fingerprint;
+pub use fingerprint::{compute_mod_fingerprint, compute_mod_fingerprint_cached, FileHashCache};
+pub use replace::{Capability, OpStatus, ResourceOp, TargetChoice, TargetSelections};
 pub use resolve::{
     content_mod_multiplayer_digest, resolve_content_mods, ContentResolutionError,
     ContentResolutionPlan, ResourceOverrideConflict,
 };
 
 /// Bump whenever cached asset/mission schemas change so stale caches auto-rebuild.
-pub const MOD_CONVERTER_VERSION: u32 = 7;
+/// 8: legacy resource replacements (stock catalog, class patches, re-baked
+/// side models and textures).
+/// 9: PC terrain & foliage directional lighting from `normal_terrain_shader.xml`.
+pub const MOD_CONVERTER_VERSION: u32 = 9;
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
 pub const CACHE_META_FILE: &str = "cache_meta.ron";
 pub const MOD_MANIFEST_FILE: &str = "openbf_mod.ron";
@@ -122,6 +128,10 @@ pub struct OpenBfModManifest {
     pub conflicts: Vec<String>,
     #[serde(default)]
     pub overrides: Vec<String>,
+    /// Stock LVL targets for this mod's LVLs, where the evidence alone does
+    /// not settle them (`replace::DeclaredReplacement`).
+    #[serde(default)]
+    pub replacements: Vec<replace::DeclaredReplacement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,7 +171,7 @@ pub struct ModMapSummary {
     pub sound_planets: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DiscoveredMod {
     pub id: String,
     pub namespace: String,
@@ -197,9 +207,48 @@ pub struct DiscoveredMod {
     pub errors: Vec<String>,
     #[serde(default)]
     pub unused_lvls: Vec<String>,
+    /// Every LVL of the mod placed against the stock catalog
+    /// ([`replace::resolve_replacements`]).
+    #[serde(default)]
+    pub resource_ops: Vec<ResourceOp>,
+    /// What the mod's content does, from its addon missions and its active
+    /// replacements.
+    #[serde(default)]
+    pub capabilities: Vec<Capability>,
+    /// [`replace::replacement_key`] of `resource_ops`: part of the cache key.
+    #[serde(default)]
+    pub replacement_key: String,
 }
 
+impl DiscoveredMod {
+    pub fn active_ops(&self) -> impl Iterator<Item = &ResourceOp> {
+        self.resource_ops.iter().filter(|o| o.is_active())
+    }
+
+    pub fn ambiguous_ops(&self) -> impl Iterator<Item = &ResourceOp> {
+        self.resource_ops.iter().filter(|o| o.status.needs_user())
+    }
+
+    pub fn changes_gameplay(&self) -> bool {
+        self.active_ops().any(ResourceOp::changes_gameplay)
+    }
+}
+
+/// One file a replacement wrote below the cache's `overrides/assets/`,
+/// served over the stock file of the same path while a battle of `game` runs
+/// ([`pak::set_overlay_scope`](../../pak/fn.set_overlay_scope.html)).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplacementOutput {
+    /// Relative to the baked asset root, `/`-separated.
+    pub path: String,
+    pub game: catalog::SourceGame,
+    /// The stock file is hidden rather than replaced: the mod's version of
+    /// the resource has no such file (no cloth, no low-detail model).
+    #[serde(default)]
+    pub removed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModCacheMeta {
     pub schema_version: u32,
     pub converter_version: u32,
@@ -228,9 +277,48 @@ pub struct ModCacheMeta {
     pub has_locl: bool,
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The replacements this cache was converted for.
+    #[serde(default)]
+    pub resource_ops: Vec<ResourceOp>,
+    #[serde(default)]
+    pub replacement_key: String,
+    /// Files below `overrides/assets/` the replacements wrote.
+    #[serde(default)]
+    pub replacement_outputs: Vec<ReplacementOutput>,
+    /// Per active replacement: what could not be converted, honestly.
+    #[serde(default)]
+    pub unsupported: Vec<String>,
+    /// [`catalog::StockCatalogs::digest`] of the stock catalogs this cache
+    /// was resolved against.
+    #[serde(default)]
+    pub catalog_digest: String,
+    /// The player's target choices for this mod when it was converted
+    /// ([`replace::TargetSelections::for_mod`]).
+    #[serde(default)]
+    pub target_choices: BTreeMap<String, TargetChoice>,
 }
 
 impl ModCacheMeta {
+    /// The replacement key this cache still answers to, for a reader that
+    /// cannot resolve replacements itself (the game): the cache's own key
+    /// while the stock catalogs and the player's target choices are the ones
+    /// it was converted with, otherwise a key no cache carries, which reads
+    /// as stale. A cache with no replacements answers regardless.
+    pub fn expected_replacement_key(
+        &self,
+        catalog_digest: &str,
+        choices: &BTreeMap<String, TargetChoice>,
+    ) -> String {
+        if self.resource_ops.is_empty() {
+            return self.replacement_key.clone();
+        }
+        if self.catalog_digest == catalog_digest && &self.target_choices == choices {
+            self.replacement_key.clone()
+        } else {
+            "inputs-changed".into()
+        }
+    }
+
     pub fn path_in(cache_dir: &Path) -> PathBuf {
         cache_dir.join(CACHE_META_FILE)
     }
@@ -246,7 +334,12 @@ impl ModCacheMeta {
 
     /// Validate cached outputs against converter version, source fingerprint,
     /// and expected generated files on disk without allowing path traversal.
-    pub fn validate(&self, cache_dir: &Path, expected_fingerprint: &str) -> ModCacheStatus {
+    pub fn validate(
+        &self,
+        cache_dir: &Path,
+        expected_fingerprint: &str,
+        expected_replacement_key: &str,
+    ) -> ModCacheStatus {
         if self.schema_version != MOD_CACHE_SCHEMA_VERSION {
             return ModCacheStatus::Stale {
                 reason: format!(
@@ -267,6 +360,21 @@ impl ModCacheMeta {
             return ModCacheStatus::Stale {
                 reason: "mod source files changed".into(),
             };
+        }
+        if self.replacement_key != expected_replacement_key {
+            return ModCacheStatus::Stale {
+                reason: "replacement targets or the stock catalog changed".into(),
+            };
+        }
+        for out in self.replacement_outputs.iter().filter(|o| !o.removed) {
+            let rel = &out.path;
+            if !is_safe_rel_path(rel)
+                || !cache_dir.join("overrides").join("assets").join(rel).is_file()
+            {
+                return ModCacheStatus::Stale {
+                    reason: format!("missing converted replacement `{rel}`"),
+                };
+            }
         }
         for map in &self.maps {
             if !is_safe_rel_token(&map.map_key) {

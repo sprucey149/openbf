@@ -377,6 +377,21 @@ fn norm_cmp_path(path: &Path) -> String {
     }
 }
 
+/// The class property hashes `game`'s PC correction table keeps from the PC
+/// copy: the keys that only change how a class is presented (textures,
+/// icons, sounds, HUD tags). A legacy mod changing only these keys leaves
+/// gameplay as the PS2 has it.
+pub fn presentation_hashes(game: &str) -> std::collections::BTreeSet<u32> {
+    tables()
+        .map(|ts| {
+            ts.iter()
+                .filter(|t| t.game == game && t.platform == "pc")
+                .flat_map(|t| t.presentation_hashes.iter().copied())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The optional hero pack or legacy mod LVL is an addon, not a game source:
 /// reference disc reads stay strictly gated by correction tables.
 pub fn exempt_addon(path: &Path) {

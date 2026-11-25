@@ -94,6 +94,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `mungefs/src/addon/world_events.rs` 129 — bounded extraction of world animation, destruction, effect, and timer actions from mission setup and reachable callbacks · `compile`
 - `mungefs/src/addon/tests.rs` 117 — addon inspection and mission-folding unit regressions.
 - `mungefs/src/world_anim.rs` 145 — a `wrld` chunk's `anim` / `anmg` object animations and groups for the campaign scripts: 41-byte POSK/ROTK keys with tangents, play-at-load and NOHI flags · `Key`, `Anim`, `Group`, `WorldAnims`, `parse`; byte layout in the module header.
+- `mungefs/src/inventory.rs` 366 — generic `ucfb` LVL resource inventory: SHA-256, detected game/platform, sublevel hashes, per-chunk FNV-1a-64 digests and per-class property digests · `scan_file`, `scan_bytes`, `sha256_hex`
+- `mungefs/src/modscan.rs` 311 — shared mod-folder scanner combining addon inspection, cached LVL facts and stock-catalog target resolution · `inspect_mod_folder`, `ScanContext`, `FactsCache`
 
 ## bake — the `bake` binary (groups: `scripts/rebake.sh`)
 - `bake/src/dlc.rs` 437 — selective optional Kit Fisto/Ventress bake: namespaced dependency classes, their effect layer and sound bank · `bake`, `bake_sounds`.
@@ -209,6 +211,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/mods/mission.rs` 243 — emits translated native OpenBF mission RONs (`mod_<ns>__*.ron`, incl. 2-flag CTF & audio/hero tables) into a mod's cache.
 - `bake/src/mods/convert.rs` 350 — versioned content-mod conversion into `openbf_data/mod_cache/<namespace>/` without touching source mod files · `convert_mod`, `emit_progress`.
 - `bake/src/mods/world.rs` 132 — assemble mission-selected companion and primary LVL sublevels, then share byte-identical files inside the addon cache · `read_world`, `SharedWorldFiles`
+- `bake/src/mods/replace.rs` 1387 — generic stock LVL replacement converter (SIDE classes/soldiers/weapons/vehicles/effects, FPM arms, world textures/maps, load screens, removed companions, patch vs full mode) · `convert_replacements`, `class_patch`, `Replaced`
+- `bake/src/stock.rs` 530 — stock asset reader (directory or packed archive), stock source resolver (PC/PS2/Xbox dirs or ISOs), and stock resource catalog writer (`bake stock-catalog`, `bake stock-record`) · `StockAssets`, `StockSources`, `write_catalog`, `map_output_dir`, `stock_outputs`
 
 ## manifest — the schema
 - `manifest/src/lib.rs` 1468 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `LoadingLayout`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
@@ -222,6 +226,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `manifest/src/world_anim.rs` 46 — the `world_anims.ron` bake↔runtime schema: per-world animation and group records tagged with the `wrld` that carries them so unloaded mode layers play nothing · `FILE`, `WorldAnimKey`, `WorldAnim`, `WorldAnimGroup`, `WorldAnims`.
 - `manifest/src/world_events.rs` 27 — closed action and anchor types for an Instant Action environment program · `WorldEvents`, `Action`, `Anchor`
 - `manifest/src/animated_prop.rs` 129 — the `animated_props.ron` bake↔runtime schema: animated prop rigs and the props classes carry on hardpoints; absent on maps with none · `FILE`, `AnimatedProps`, `AnimatedRig`, `AttachedProp`, `PropClip`, `PropTrigger`, `PropAttach`, `PropPrim`.
+- `manifest/src/class_patch.rs` 221 — side class patch sidecar schema (`<classes>.patch.ron`) and deterministic application over stock `ClassDef` lists · `ClassPatchFile`, `ClassPatch`, `patch_path`, `apply`
 
 ## core — the sim (tick order: the header of `core/src/sim.rs`)
 
@@ -1438,7 +1443,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `extensions/src/runtime.rs` 201 — opt-in `runtime` feature traits and shared value types bridging `game` and bundled engine extensions · `EngineExtension`, `EarlyDisplayContext`, `ActiveDisplayExtension`, `SimView`, `FrameContext`, `FrameDirectives`, `StereoView`, `TrackedGun`, `EyeClipQuery`, `ListenerPose`
 - `extensions/src/mods.rs` 542 — shared content-mod manifest, namespace slugification, folder discovery (mods dir in `openbf_data`), optional mod metadata merging, and versioned cache status (`ModCacheMeta`) · `DiscoveredMod`, `ModCacheStatus`, `ModFolderEntry`, `list_mod_folders`
 - `extensions/src/mods/fingerprint.rs` 149 — deterministic recursive source-folder SHA-256 fingerprinting with symlink guardrails · `compute_mod_fingerprint`, `content_mod_multiplayer_digest`
-- `extensions/src/mods/resolve.rs` 388 — dependency validation, ordering conflict diagnostics, and load-order override precedence resolution (`resolve_content_mods`) · `ContentModPlan`, `ResourceOverrideConflict`, `ContentModError`
+- `extensions/src/mods/resolve.rs` 434 — dependency validation, ordering conflict diagnostics, and load-order override precedence resolution (`resolve_content_mods`, covering declared overrides and active stock replacements) · `ContentResolutionPlan`, `ResourceOverrideConflict`, `ContentResolutionError`
+- `extensions/src/mods/catalog.rs` 482 — stock resource catalog schema, loader/digester (`assets_baked/catalog/`), target identifiers and persisted launcher stock sources (`stock_sources.ron`) · `StockCatalog`, `StockCatalogs`, `StockBakeInfo`, `LvlFacts`, `TargetRef`, `StockSourceList`
+- `extensions/src/mods/replace.rs` 1047 — evidence-based replacement target resolution, resource/gameplay diffing, capability derivation, persistent target selections (`mod_targets.ron`) and cache replacement keys · `resolve_replacements`, `ResourceOp`, `Capability`, `OpStatus`, `ReplacementMode`, `TargetSelections`, `replacement_key`
 
 ## openbf_vr — bundled OpenBF VR OpenXR extension (`openbf.vr`)
 - `openbf_vr/src/lib.rs` 79 — extension entrypoint (`VrExtension`) and platform-gated OpenXR integration (`windows` / `linux` active, clean unsupported stub elsewhere) · `VrExtension`

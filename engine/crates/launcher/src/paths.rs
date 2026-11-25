@@ -93,6 +93,19 @@ impl LauncherPaths {
         .find(|p| p.is_file())
     }
 
+    /// The stock bake a mod scan resolves replacements against and a
+    /// conversion builds on: the built game, whose archive is the one the
+    /// game reads at play time, else a checkout's `engine/assets_baked`.
+    pub fn stock_assets(&self) -> Option<PathBuf> {
+        if self.game_out.is_file() && pak::find_archive(&self.game_out).is_some() {
+            return Some(self.game_out.clone());
+        }
+        self.checkout_root
+            .as_ref()
+            .map(|root| root.join("engine").join("assets_baked"))
+            .filter(|p| p.is_dir())
+    }
+
     /// Locate the base game executable used by `--write-pack`: `game` beside
     /// the launcher, a release folder's existing `openbf`, or a checkout's
     /// `engine/target/{release,debug}/game`.

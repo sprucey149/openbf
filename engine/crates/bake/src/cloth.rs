@@ -19,7 +19,7 @@
 //! `crate::soldier::segment_blends` refuses the 0x02 bit.
 
 use crate::skin_glb::SkinnedSegment;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use mungefs::cloth::Cloth;
 use mungefs::entity::{EntityClass, GeomModel};
 use mungefs::skel::{mul_row, xform_point, RowMat4, Skeleton};
@@ -99,14 +99,19 @@ fn physics(c: &Cloth, class: &EntityClass) -> Result<manifest::cloth::Cloth> {
             .map(|p| p.value.as_str())
     };
     let scalar = |key, default| -> Result<f32> {
-        value(key).map_or(Ok(default), |v| v.trim().parse::<f32>().map_err(Into::into))
+        value(key).map_or(Ok(default), |v| {
+            v.trim()
+                .parse::<f32>()
+                .with_context(|| format!("cloth {}: property 0x{key:08x} = {v:?}", c.name))
+        })
     };
     let mut wind_direction = [1.0, 0.0, 0.0];
     if let Some(v) = value(0x415e_2b30) {
         let angles: Vec<f32> = v
             .split_whitespace()
             .map(str::parse)
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<_, _>>()
+            .with_context(|| format!("cloth {}: WindDirection = {v:?}", c.name))?;
         if angles.len() != 2 {
             bail!("cloth {}: WindDirection needs two angles", c.name);
         }

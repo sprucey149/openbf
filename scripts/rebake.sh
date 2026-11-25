@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # land.py reads this line too (it refuses a card whose `rebake=` names another).
-REBAKE_GROUPS="tat1 tat2 maps common side dlc classes sounds global-sound load beep"
+REBAKE_GROUPS="tat1 tat2 maps common side dlc classes sounds global-sound load beep catalog"
 CLI_PC_DIR=""
 MENU_FONT_CORE="${OPENBF_MENU_FONT_CORE:-}"
 WANT_GROUPS=()
@@ -855,5 +855,29 @@ if want tat1 || want tat2 || want maps; then
   WARN_BF1=""
   [ "$HAS_BF1" = 1 ] && [ -n "${OPENBF_BF1_TREE:-}" ] && WARN_BF1="bf1"
   "$BAKE" check-foliage "$OUT" ${WARN_BF1:+--warn "$WARN_BF1"} ${OPENBF_BF2_TREE:+--warn bf2}
+fi
+if want catalog; then
+  stage "stock resource catalog"
+  plat_of() {
+    case "$(basename "$1" | tr 'A-Z' 'a-z')" in
+      _lvl_pc) echo pc ;;
+      _lvl_xbox) echo xbox ;;
+      *) echo ps2 ;;
+    esac
+  }
+  BF2_PLAT="$(plat_of "$B2")"
+  "$BAKE" stock-record "$OUT" gameplay bf2 "$BF2_PLAT"
+  "$BAKE" stock-record "$OUT" dep bf2_anims bf2 "$BF2_PLAT" "$B2" ingame.lvl
+  "$BAKE" stock-catalog bf2 "$BF2_PLAT" "$B2" "$OUT"
+  [ -n "${PC2:-}" ] && [ -d "$PC2" ] && "$BAKE" stock-catalog bf2 pc "$PC2" "$OUT"
+  [ -n "${XB2:-}" ] && [ -d "$XB2" ] && "$BAKE" stock-catalog bf2 xbox "$XB2" "$OUT"
+  if [ "$HAS_BF1" = 1 ] && [ -d "$B1" ]; then
+    BF1_PLAT="$(plat_of "$B1")"
+    "$BAKE" stock-record "$OUT" gameplay bf1 "$BF1_PLAT"
+    "$BAKE" stock-record "$OUT" dep bf1_anims bf1 "$BF1_PLAT" "$B1" common/eng/common.lvl
+    "$BAKE" stock-catalog bf1 "$BF1_PLAT" "$B1" "$OUT"
+    [ -n "${PC1:-}" ] && [ -d "$PC1" ] && "$BAKE" stock-catalog bf1 pc "$PC1" "$OUT"
+    [ -n "${XB1:-}" ] && [ -d "$XB1" ] && "$BAKE" stock-catalog bf1 xbox "$XB1" "$OUT"
+  fi
 fi
 echo "rebake done -> $OUT"

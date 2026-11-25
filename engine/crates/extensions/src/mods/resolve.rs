@@ -196,12 +196,24 @@ pub fn resolve_content_mods(
         return Err(errors);
     }
 
-    // Compute override conflicts: only mods declaring explicit overrides participate.
+    // Compute override conflicts: both explicit declared_overrides and active
+    // stock-replacement operations targeting the same logical stock LVL.
     let mut by_resource: BTreeMap<String, Vec<&DiscoveredMod>> = BTreeMap::new();
     for m in &enabled_ordered {
+        let mut seen_for_mod: BTreeSet<String> = BTreeSet::new();
         for rel in &m.declared_overrides {
             let key = rel.replace('\\', "/").to_ascii_lowercase();
-            by_resource.entry(key).or_default().push(m);
+            if seen_for_mod.insert(key.clone()) {
+                by_resource.entry(key).or_default().push(m);
+            }
+        }
+        for op in m.active_ops() {
+            if let Some(target) = &op.target {
+                let key = target.label();
+                if seen_for_mod.insert(key.clone()) {
+                    by_resource.entry(key).or_default().push(m);
+                }
+            }
         }
     }
 
@@ -312,6 +324,9 @@ mod tests {
             warnings: Vec::new(),
             errors: Vec::new(),
             unused_lvls: Vec::new(),
+            resource_ops: Vec::new(),
+            capabilities: Vec::new(),
+            replacement_key: String::new(),
         }
     }
 
@@ -384,5 +399,48 @@ mod tests {
         assert!(errs2
             .iter()
             .any(|e| matches!(e, ContentResolutionError::ExplicitConflict { .. })));
+    }
+
+    #[test]
+    fn active_replacement_ops_report_override_conflicts_by_load_order() {
+        use crate::mods::catalog::{SourceGame, SourcePlatform, TargetRef};
+        use crate::mods::replace::{OpStatus, ReplacementMode, ResourceOp};
+
+        let make_op = |path: &str| ResourceOp {
+            source: path.into(),
+            source_sha256: "abc".into(),
+            source_size: 10,
+            detected_game: Some(SourceGame::Bf2),
+            detected_platform: Some(SourcePlatform::Pc),
+            target: Some(TargetRef {
+                game: SourceGame::Bf2,
+                platform: SourcePlatform::Pc,
+                path: path.into(),
+            }),
+            mode: ReplacementMode::Full,
+            status: OpStatus::Active,
+            candidates: Vec::new(),
+            evidence: Vec::new(),
+            changes: Vec::new(),
+            gameplay: Vec::new(),
+            capabilities: Vec::new(),
+            selected_by_user: false,
+        };
+        let mut top = sample_mod("content.top", "Top Mod", None);
+        top.resource_ops.push(make_op("side/imp.lvl"));
+        let mut bottom = sample_mod("content.bottom", "Bottom Mod", None);
+        bottom.resource_ops.push(make_op("side/imp.lvl"));
+
+        let mut profile = ExtensionProfile::default();
+        profile.set_enabled("content.top", true);
+        profile.set_enabled("content.bottom", true);
+        profile.order = vec!["content.top".into(), "content.bottom".into()];
+
+        let plan = resolve_content_mods(&[bottom, top], &profile).unwrap();
+        assert_eq!(plan.active_order, ["content.top", "content.bottom"]);
+        assert_eq!(plan.conflicts.len(), 1);
+        assert_eq!(plan.conflicts[0].resource_path, "bf2 pc:side/imp.lvl");
+        assert_eq!(plan.conflicts[0].winner_id, "content.top");
+        assert_eq!(plan.conflicts[0].overridden_ids, ["content.bottom"]);
     }
 }

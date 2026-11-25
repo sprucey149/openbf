@@ -9,23 +9,22 @@ OpenBF supports filesystem-based legacy **Star Wars Battlefront II (2005)** addo
 The filesystem is the single source of truth:
 
 1. Open **`openbf-launcher`**, switch to the **Mods** tab, and click **Open Mods Folder** (or browse directly to `<data_dir>/mods/`).
-2. Copy or extract each addon folder directly into `openbf_data/mods/` using classic BF2 layout:
+2. Copy or extract each mod folder directly into `openbf_data/mods/`. OpenBF automatically discovers classic BF2 addons (`addme.script` + `mission.lvl`), conventional `side/` and `fpm/` replacement packs, `_LVL_PC/` trees, and single loose `.lvl` replacement files without requiring manual folder reorganization or manifests:
 
    ```text
    openbf_data/
      mods/
-       ABR/
+       ABR/                              # classic addon map (addme.script + mission.lvl)
          addme.script
-         Readme.txt
-         data/
-           _LVL_PC/
-             ABR/
-               ABR.lvl
-             Load/
-               common.lvl
-             core.lvl
-             mission.lvl
+         data/_LVL_PC/ABR/ABR.lvl
+       SWBF2 Improved Sides mod 1.0/     # side + FPM replacement pack (no addme.script)
+         side/all.lvl
+         fpm/...
+       EndorTexMod/                      # single loose replacement LVL
+         end1.lvl
      mod_cache/          # auto-generated native assets (safe to delete anytime)
+     mod_targets.ron     # optional persistent target choices for ambiguous LVLs
+     stock_sources.ron   # stock copy paths synced from launcher.ron
      extensions.ron      # persistent enabled states + load order (schema v2)
    ```
 
@@ -69,7 +68,8 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 
 ## 5. Legacy BF2 Addon Compatibility Report
 
-See the [advanced legacy map compatibility report](mods-advanced-maps.md) for Kothlis: Sea Haven 2.0, including the five Instant Action variants and the verified behavior of each mode.
+- See [generic legacy LVL resource replacements](mods-resource-replacements.md) for stock resource catalogs, evidence-based target resolution, scoped replacement semantics, and compatibility reports for **Improved Sides Mod 1.0** and loose **`end1.lvl`** world replacements.
+- See the [advanced legacy map compatibility report](mods-advanced-maps.md) for Kothlis: Sea Haven 2.0, including the five Instant Action variants and the verified behavior of each mode.
 
 ### Verified Acceptance Target: Abregado-Rae: Venezia (`ABR`)
 

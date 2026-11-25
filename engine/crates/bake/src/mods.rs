@@ -3,130 +3,101 @@
 
 pub mod convert;
 pub mod mission;
+pub mod replace;
 mod world;
 
-use extensions::mods::{
-    compute_mod_fingerprint, merge_optional_manifest, read_explicit_manifest, DiscoveredMod,
-    ModCompatibility, ModContentType, ModMapSummary, ModMissionSummary,
-};
-use mungefs::addon::{inspect_addon_dir, AddonCompatibility, AddonInspection, AddonKind};
-use std::collections::BTreeSet;
-use std::path::Path;
+use extensions::mods::catalog::{StockCatalogs, StockSourceList};
+use extensions::mods::{DiscoveredMod, FileHashCache, TargetSelections};
+use mungefs::addon::AddonInspection;
+use mungefs::modscan::{FactsCache, ScanContext};
+use std::path::{Path, PathBuf};
+
+use crate::stock::{StockAssets, StockSources};
 
 pub use convert::{convert_mod_to_cache, ConvertOptions, ConvertReport};
 
+/// Everything a mod inspection or conversion reads besides the mod folder:
+/// the stock bake (assets and catalog), the player's stock game copies, and
+/// the player's target choices and scan caches in `openbf_data`.
+pub struct ModEnv {
+    pub stock: Option<StockAssets>,
+    pub catalogs: StockCatalogs,
+    pub sources: StockSources,
+    pub data_dir: Option<PathBuf>,
+    pub selections: TargetSelections,
+    pub hashes: FileHashCache,
+    pub facts: FactsCache,
+}
+
+impl Default for ModEnv {
+    fn default() -> Self {
+        Self {
+            stock: None,
+            catalogs: StockCatalogs::default(),
+            sources: StockSources::default(),
+            data_dir: None,
+            selections: TargetSelections::default(),
+            hashes: FileHashCache::default(),
+            facts: FactsCache::default(),
+        }
+    }
+}
+
+impl ModEnv {
+    /// `data_dir` is `openbf_data` (target choices, stock copies, caches);
+    /// `stock_assets` the baked asset directory, `openbf.pak`, or a game
+    /// executable carrying its archive; `extra_sources` more
+    /// `game:platform=path` copies.
+    pub fn open(
+        data_dir: Option<&Path>,
+        stock_assets: Option<&Path>,
+        extra_sources: &[String],
+    ) -> anyhow::Result<Self> {
+        let mut env = Self::default();
+        if let Some(path) = stock_assets {
+            let stock = StockAssets::open(path)?;
+            env.catalogs = stock.catalogs();
+            env.stock = Some(stock);
+        }
+        if let Some(dir) = data_dir {
+            env.sources = StockSources::from_list(&StockSourceList::load(dir));
+            env.selections = TargetSelections::load(dir);
+            env.hashes = FileHashCache::load(dir);
+            env.facts = FactsCache::load(dir);
+            env.data_dir = Some(dir.to_path_buf());
+        }
+        for arg in extra_sources {
+            env.sources.parse_arg(arg)?;
+        }
+        Ok(env)
+    }
+
+    pub fn scan_context(&self) -> ScanContext<'_> {
+        ScanContext {
+            catalogs: &self.catalogs,
+            selections: &self.selections,
+            hashes: &self.hashes,
+            facts: &self.facts,
+        }
+    }
+
+    /// Write the scan caches back to `openbf_data`.
+    pub fn save_caches(&self) {
+        self.hashes.save();
+        self.facts.save();
+    }
+}
+
 /// Inspect a single directory inside `openbf_data/mods/` into shared
-/// `DiscoveredMod` metadata alongside raw [`AddonInspection`].
+/// `DiscoveredMod` metadata alongside raw [`AddonInspection`]
+/// ([`mungefs::modscan::inspect_mod_folder`]).
 pub fn inspect_mod_folder(
     mod_root: &Path,
     mod_id: &str,
     namespace: &str,
+    env: &ModEnv,
 ) -> (DiscoveredMod, AddonInspection) {
-    let folder_name = mod_root
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("mod")
-        .to_owned();
-    let mut insp = inspect_addon_dir(mod_root);
-
-    let fp = compute_mod_fingerprint(mod_root).unwrap_or_else(|e| {
-        insp.errors.push(format!("Failed to fingerprint mod: {e}"));
-        extensions::mods::fingerprint::FingerprintResult {
-            digest: String::new(),
-            warnings: Vec::new(),
-        }
-    });
-    for w in fp.warnings {
-        if !insp.warnings.contains(&w) {
-            insp.warnings.push(w);
-        }
-    }
-
-    let mod_type = match insp.kind {
-        AddonKind::LegacyMapAddon => ModContentType::LegacyMapAddon,
-        AddonKind::LegacySideOverhaul => ModContentType::LegacySideOverhaul,
-        AddonKind::LegacyAssetPack => ModContentType::LegacyAssetPack,
-        AddonKind::LegacyHybridAddon => ModContentType::LegacyHybridAddon,
-        AddonKind::Unsupported => ModContentType::Unsupported,
-        AddonKind::Invalid => ModContentType::Invalid,
-    };
-
-    let compatibility = match &insp.compatibility {
-        AddonCompatibility::Supported => ModCompatibility::Supported,
-        AddonCompatibility::PartialWithWarnings => ModCompatibility::PartialWithWarnings,
-        AddonCompatibility::Unsupported(s) => ModCompatibility::Unsupported(s.clone()),
-        AddonCompatibility::Invalid(s) => ModCompatibility::Invalid(s.clone()),
-    };
-
-    let groups = insp.map_groups(namespace);
-    let maps: Vec<ModMapSummary> = groups
-        .iter()
-        .map(|g| ModMapSummary {
-            map_key: g.map_key.clone(),
-            legacy_code: g.legacy_code.clone(),
-            display_name: g.display_name.clone(),
-            description: g.description.clone(),
-            source_lvl: g.source_lvl_rel.clone(),
-            variant_title: g.variant_title.clone(),
-            modes_cw: g.modes_cw.clone(),
-            modes_gcw: g.modes_gcw.clone(),
-            missions: g
-                .missions
-                .iter()
-                .map(|pm| ModMissionSummary {
-                    script_name: pm.mission.script_name.clone(),
-                    mode: pm.mission.mode.clone(),
-                    era: pm.mission.era.clone(),
-                    mission_ron: pm.mission_ron.clone(),
-                    single_player_weight: pm.mission.single_player_weight,
-                    multiplayer_variant: pm.mission.multiplayer_variant,
-                    supported: pm.mission.supported,
-                    unsupported_reason: pm.mission.unsupported_reason.clone(),
-                })
-                .collect(),
-            sound_planets: g.sound_planets.clone(),
-        })
-        .collect();
-
-    let mut custom_sides = BTreeSet::new();
-    for m in &insp.missions {
-        for (side, _) in &m.custom_side_lvls {
-            custom_sides.insert(side.clone());
-        }
-    }
-    let declared_overrides: Vec<String> = insp
-        .stock_override_lvls
-        .iter()
-        .map(|o| o.rel_path.clone())
-        .collect();
-
-    let mut discovered = DiscoveredMod {
-        id: mod_id.to_owned(),
-        namespace: namespace.to_owned(),
-        folder_name,
-        root_dir: mod_root.to_path_buf(),
-        content_root: insp.content_root.clone(),
-        legacy_addon_id: insp.legacy_addon_id.clone(),
-        display_name: insp.display_name.clone(),
-        version: None,
-        author: insp.author.clone(),
-        description: insp.description.clone(),
-        mod_type,
-        compatibility,
-        source_fingerprint: fp.digest,
-        maps,
-        dependencies: Vec::new(),
-        conflicts: Vec::new(),
-        declared_overrides,
-        custom_sides: custom_sides.into_iter().collect(),
-        warnings: insp.warnings.clone(),
-        errors: insp.errors.clone(),
-        unused_lvls: insp.unused_lvls.clone(),
-    };
-
-    if let Some(manifest) = read_explicit_manifest(mod_root) {
-        merge_optional_manifest(&mut discovered, manifest);
-    }
-
-    (discovered, insp)
+    let out = mungefs::modscan::inspect_mod_folder(mod_root, mod_id, namespace, &env.scan_context());
+    env.save_caches();
+    out
 }

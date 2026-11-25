@@ -29,7 +29,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub mod overlay;
-pub use overlay::{clear_overlays, current_overlays, set_overlays, OverlayLayer, OverlayRule};
+pub use overlay::{
+    clear_overlays, current_overlays, overlay_scope, set_overlay_scope, set_overlays, OverlayLayer,
+    OverlayRule,
+};
 
 const MAGIC: &[u8; 8] = b"OPENBFPK";
 const FOOTER: u64 = 32;
@@ -648,6 +651,8 @@ fn match_mount(path: &Path) -> Option<MountMatch> {
 enum Place {
     Disk(PathBuf),
     Pak { archive: Arc<Archive>, key: String },
+    /// Hidden by an override layer ([`overlay::Resolved::Removed`]).
+    Removed(String),
 }
 
 fn archive_key(mount_name: &str, rel_key: &str) -> String {
@@ -662,8 +667,12 @@ fn place_for_file(path: &Path) -> Place {
     let Some(m) = match_mount(path) else {
         return Place::Disk(path.to_path_buf());
     };
-    if let Some(ov) = overlay::resolve_file(&m.mount_name, &m.rel_key) {
-        return Place::Disk(ov);
+    match overlay::resolve_file(&m.mount_name, &m.rel_key) {
+        Some(overlay::Resolved::File(ov)) => return Place::Disk(ov),
+        Some(overlay::Resolved::Removed) => {
+            return Place::Removed(archive_key(&m.mount_name, &m.rel_key))
+        }
+        None => {}
     }
     match m.backing {
         MountBacking::Disk(disk_root) => {
@@ -714,6 +723,7 @@ pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
             let (off, len) = archive.get(&key).ok_or_else(|| not_found(&key))?;
             archive.read(off, len)
         }
+        Place::Removed(key) => Err(not_found(&key)),
     };
     count(out.as_ref().map_or(0, Vec::len));
     out
@@ -733,6 +743,7 @@ pub fn is_file(path: impl AsRef<Path>) -> bool {
     match place_for_file(path.as_ref()) {
         Place::Disk(p) => p.is_file(),
         Place::Pak { archive, key } => archive.get(&key).is_some(),
+        Place::Removed(_) => false,
     }
 }
 
@@ -807,6 +818,15 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<PathBuf>> {
         }
     }
 
+    let prefix = if m.rel_key.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", m.rel_key.trim_end_matches('/'))
+    };
+    merged.retain(|n| {
+        overlay::resolve_file(&m.mount_name, &format!("{prefix}{n}"))
+            != Some(overlay::Resolved::Removed)
+    });
     Ok(merged.into_iter().map(|n| path.join(n)).collect())
 }
 
@@ -827,6 +847,7 @@ pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
     match place_for_file(path.as_ref()) {
         Place::Disk(p) => Ok(Reader::Disk(File::open(p)?)),
         Place::Pak { archive, key } => archive.open_entry(&key),
+        Place::Removed(key) => Err(not_found(&key)),
     }
 }
 

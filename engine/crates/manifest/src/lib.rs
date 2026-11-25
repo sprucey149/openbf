@@ -35,6 +35,7 @@ pub mod shadow;
 
 pub mod anim_sets;
 pub mod animated_prop;
+pub mod class_patch;
 pub mod cloth;
 pub mod combo;
 pub mod fpm;

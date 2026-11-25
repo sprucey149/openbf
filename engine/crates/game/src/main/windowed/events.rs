@@ -146,6 +146,7 @@ impl winit::application::ApplicationHandler for App {
             self.last = std::time::Instant::now();
             return;
         };
+        game::assets::scope_overlays_to_map(&map);
         let preload = game::assets::prefetch::load_key(&map, &self.mode);
         let warm = std::thread::Builder::new()
             .name("loading-prefetch".into())

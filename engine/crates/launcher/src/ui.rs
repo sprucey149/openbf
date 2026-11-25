@@ -157,7 +157,14 @@ impl LauncherApp {
         self.extension_catalog = self.paths.probe_bundled_extensions();
         self.extension_profile = ExtensionProfile::load(&self.paths.extensions_profile_path());
         self.startup_error = StartupErrorReport::load(&self.paths.startup_error_path());
+        self.save_stock_sources();
         self.trigger_mod_scan();
+    }
+
+    fn save_stock_sources(&self) {
+        if let Err(e) = self.config.stock_sources().save(&self.paths.data_dir) {
+            eprintln!("launcher: writing stock_sources.ron: {e}");
+        }
     }
 
     pub fn cancel_build_if_running(&self) {
@@ -172,6 +179,7 @@ impl LauncherApp {
         if let Err(e) = self.config.save(&self.paths.config_path) {
             self.show_toast(format!("Could not save settings: {e}"));
         }
+        self.save_stock_sources();
     }
 
     pub(crate) fn save_extension_profile(&mut self) {
@@ -1482,7 +1490,8 @@ pub(crate) fn draw_notice_box(
         .stroke(Stroke::new(1.0, border))
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
-            ui.set_width((width - 20.0).max(140.0));
+            // 10px left + 10px right inner margin + 1px left + 1px right stroke = 22px.
+            ui.set_width((width - 22.0).max(140.0));
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(text)
@@ -1511,9 +1520,64 @@ pub(crate) fn extension_badge(ui: &mut egui::Ui, text: &str, small: bool) {
                         .font(regular_font(font_size))
                         .color(color),
                 )
+                .wrap_mode(egui::TextWrapMode::Extend)
                 .selectable(false),
             );
         });
+}
+
+/// Lay out a list of `(label, small)` badges into neat horizontal rows that
+/// wrap whole pills to the next line rather than squeezing individual words or
+/// characters into vertical columns.
+pub(crate) fn draw_badge_flow(ui: &mut egui::Ui, badges: &[(&str, bool)], max_width: f32) {
+    if badges.is_empty() {
+        return;
+    }
+    let gap_x = 6.0;
+    let gap_y = 6.0;
+    let widths: Vec<f32> = badges
+        .iter()
+        .map(|&(text, small)| {
+            let (pad_x, font_size) = if small { (5.0, 10.0) } else { (6.0, 11.0) };
+            let text_w = ui.fonts_mut(|f| {
+                f.layout_no_wrap(text.to_owned(), regular_font(font_size), TEXT_NAV)
+                    .size()
+                    .x
+            });
+            text_w + pad_x * 2.0 + 4.0
+        })
+        .collect();
+
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut cur_row: Vec<usize> = Vec::new();
+    let mut cur_w = 0.0f32;
+    for (i, &w) in widths.iter().enumerate() {
+        let add = if cur_row.is_empty() { w } else { gap_x + w };
+        if !cur_row.is_empty() && cur_w + add > max_width {
+            rows.push(cur_row);
+            cur_row = vec![i];
+            cur_w = w;
+        } else {
+            cur_row.push(i);
+            cur_w += add;
+        }
+    }
+    if !cur_row.is_empty() {
+        rows.push(cur_row);
+    }
+
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = gap_y;
+        for row in rows {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap_x;
+                for i in row {
+                    let (text, small) = badges[i];
+                    extension_badge(ui, text, small);
+                }
+            });
+        }
+    });
 }
 
 pub(crate) fn extension_toggle(

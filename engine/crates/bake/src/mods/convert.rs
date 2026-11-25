@@ -9,8 +9,8 @@ use extensions::mods::{
 };
 use mungefs::addon::read_core_locl;
 
-use super::inspect_mod_folder;
 use super::mission::mission_to_ron;
+use super::{inspect_mod_folder, ModEnv};
 use super::world::{link_tree, read_world, SharedWorldFiles};
 
 pub struct ConvertOptions<'a> {
@@ -19,6 +19,7 @@ pub struct ConvertOptions<'a> {
     pub mod_id: String,
     pub namespace: String,
     pub emit_progress: bool,
+    pub env: &'a ModEnv,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +53,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     }
 
     progress(opts.emit_progress, 5, "Inspecting mod structure...");
-    let (discovered, insp) = inspect_mod_folder(opts.mod_dir, &opts.mod_id, &opts.namespace);
+    let (discovered, insp) =
+        inspect_mod_folder(opts.mod_dir, &opts.mod_id, &opts.namespace, opts.env);
     if !discovered.compatibility.is_playable() {
         bail!(
             "{}: {}",
@@ -256,34 +258,29 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         }
     }
 
-    // Bake intentional stock overrides when present (e.g. side overhauls).
-    let mut declared_overrides = Vec::new();
-    for ov in &insp.stock_override_lvls {
-        let low = ov.rel_path.to_ascii_lowercase().replace('\\', "/");
-        if let Some(side_file) = low
-            .strip_prefix("side/")
-            .and_then(|s| s.strip_suffix(".lvl"))
-        {
-            crate::gameplay::exempt_addon(&ov.abs_path);
-            let rel_out = format!("side_bf2/classes/{side_file}.ron");
-            let dst = staging.join("overrides").join("assets").join(&rel_out);
-            if let Some(p) = dst.parent() {
-                std::fs::create_dir_all(p)?;
-            }
-            if let Err(e) =
-                crate::classes::bake_classes(&ov.abs_path.to_string_lossy(), &dst.to_string_lossy())
-            {
-                warnings.push(format!("Override `{}` failed: {e:#}", ov.rel_path));
-            } else {
-                declared_overrides.push(rel_out);
-            }
-        } else {
-            warnings.push(format!(
-                "Override LVL `{}` is not yet mapped to an OpenBF runtime resource override.",
-                ov.rel_path
-            ));
-        }
-    }
+    // Stock replacements: every active resource operation, translated onto
+    // the stock bake's own outputs (`super::replace`).
+    let replaced = if discovered.active_ops().next().is_some() {
+        progress(opts.emit_progress, 88, "Converting stock replacements...");
+        let abs: BTreeMap<String, PathBuf> = insp
+            .stock_override_lvls
+            .iter()
+            .map(|o| (o.rel_path.to_ascii_lowercase().replace('\\', "/"), o.abs_path.clone()))
+            .collect();
+        super::replace::convert_replacements(
+            &discovered.resource_ops,
+            &abs,
+            opts.env,
+            &staging.join("overrides").join("assets"),
+            &staging.join("scratch"),
+            &mut |pct, msg| progress(opts.emit_progress, pct, msg),
+        )?
+    } else {
+        super::replace::Replaced::default()
+    };
+    let _ = std::fs::remove_dir_all(staging.join("scratch"));
+    warnings.extend(replaced.warnings.iter().cloned());
+    let declared_overrides = Vec::new();
 
     progress(opts.emit_progress, 95, "Finalizing versioned cache...");
     let meta = ModCacheMeta {
@@ -304,6 +301,12 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         declared_overrides,
         has_locl,
         warnings,
+        resource_ops: discovered.resource_ops,
+        replacement_key: discovered.replacement_key,
+        replacement_outputs: replaced.outputs,
+        unsupported: replaced.unsupported,
+        catalog_digest: opts.env.catalogs.digest.clone(),
+        target_choices: opts.env.selections.for_mod(&opts.mod_id),
     };
     meta.save_atomic(&staging)?;
 
@@ -363,6 +366,7 @@ mod tests {
             mod_id: "content.abr".into(),
             namespace: "mod_abr".into(),
             emit_progress: false,
+            env: &ModEnv::default(),
         })
         .expect("ABR conversion should succeed");
         let after = extensions::mods::compute_mod_fingerprint(src_abr)
@@ -388,7 +392,7 @@ mod tests {
             assert!(cache.join("missions").join(ron).is_file(), "missing {ron}");
         }
         assert_eq!(
-            report.meta.validate(&cache, &before),
+            report.meta.validate(&cache, &before, &report.meta.replacement_key),
             extensions::mods::ModCacheStatus::Ready
         );
 

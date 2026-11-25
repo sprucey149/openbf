@@ -54,6 +54,31 @@ pub fn bake_soldier(lvl_path: &str, model: &str, outdir: &str) -> Result<BakedSo
 /// as GLB animations, `<model>.anims.ron` (what was baked) and
 /// `<model>.sets.ron` (the PS2's animation sets over them,
 /// `anim_sets::SoldierSets`).
+/// Lender LVLs set in-process ([`set_lender`]) before the `BF1_ANIMS` /
+/// `BF2_ANIMS` environment variables the stock bake script sets.
+static LENDERS: std::sync::Mutex<Vec<(&'static str, std::ffi::OsString)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Name the LVL a soldier bake borrows clips from (`"BF1_ANIMS"`: BF1's
+/// COMMON.LVL, lending prone to BF2; `"BF2_ANIMS"`: BF2's INGAME.LVL, lending
+/// the throw to BF1), or `None` to borrow nothing. A mod conversion sets the
+/// copies the stock bake used, so a replaced soldier borrows what the stock
+/// one did.
+pub fn set_lender(name: &'static str, path: Option<&Path>) {
+    let mut l = LENDERS.lock().unwrap_or_else(|e| e.into_inner());
+    l.retain(|(n, _)| *n != name);
+    l.push((name, path.map(|p| p.as_os_str().to_owned()).unwrap_or_default()));
+}
+
+fn lender_path(name: &str) -> Option<std::ffi::OsString> {
+    let l = LENDERS.lock().unwrap_or_else(|e| e.into_inner());
+    match l.iter().find(|(n, _)| *n == name) {
+        Some((_, p)) if p.is_empty() => None,
+        Some((_, p)) => Some(p.clone()),
+        None => std::env::var_os(name),
+    }
+}
+
 pub fn bake_soldier_anims(
     lvl_path: &str,
     model: &str,
@@ -304,7 +329,7 @@ pub fn bake_soldier_anims(
             Some(_) => ("BF1_ANIMS", BORROWED_PRONE),
             None => ("BF2_ANIMS", BORROWED_THROW),
         };
-        let lender_buf = match std::env::var_os(lender) {
+        let lender_buf = match lender_path(lender) {
             Some(p) => {
                 let resolved = crate::resolve_ci(&p.to_string_lossy());
                 Some(crate::gameplay::read(&resolved).with_context(|| format!("{p:?}"))?)

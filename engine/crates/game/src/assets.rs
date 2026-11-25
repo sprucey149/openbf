@@ -1735,7 +1735,20 @@ pub fn load_loading_galaxy(map_dir: &Path) -> Option<(String, CpuTexture)> {
         .then(|| load_loading_image(map_dir, name))?
 }
 
+/// Point the replacement overlays at the game of the map in `dir`
+/// ([`pak::set_overlay_scope`]): a BF2 side replacement serves a BF2 battle
+/// and never a BF1 one, even where the BF1 battle reads BF2's files.
+/// Called before anything of the battle is read, the prefetch included.
+pub fn scope_overlays_to_map(dir: &Path) {
+    let game = pak::read_to_string(dir.join("manifest.ron"))
+        .ok()
+        .and_then(|t| ron::from_str::<manifest::ManifestHead>(&t).ok())
+        .map(|h| h.source_game.to_ascii_lowercase());
+    pak::set_overlay_scope(game.as_deref());
+}
+
 pub fn load_scene(dir: &Path) -> Result<Scene> {
+    scope_overlays_to_map(dir);
     let manifest: Manifest =
         ron::from_str(&pak::read_to_string(dir.join("manifest.ron")).context("manifest.ron")?)
             .context("parse manifest.ron")?;

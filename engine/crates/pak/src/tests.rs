@@ -598,6 +598,7 @@ fn overlays_isolate_namespaces_and_respect_priority_on_disk_and_archive() {
             rule: OverlayRule::Overrides {
                 allowed_paths: BTreeSet::from(["common_bf2/shared.ron".into()]),
                 disk_dir: mod_hi_ov.clone(),
+                scope: None,
             },
         };
         let lo = OverlayLayer {
@@ -606,6 +607,7 @@ fn overlays_isolate_namespaces_and_respect_priority_on_disk_and_archive() {
             rule: OverlayRule::Overrides {
                 allowed_paths: BTreeSet::from(["common_bf2/shared.ron".into()]),
                 disk_dir: mod_lo_ov.clone(),
+                scope: None,
             },
         };
         let mut layers = if hi_first { vec![hi, lo] } else { vec![lo, hi] };

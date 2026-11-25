@@ -95,9 +95,21 @@ impl ClassDb {
 
     /// [`ClassDb::load`]; `bf1_map` marks a BF1 map's own class file.
     fn load_file(&mut self, path: &Path, bf1_map: bool) -> Result<usize> {
-        let defs: Vec<ClassDef> =
+        let mut defs: Vec<ClassDef> =
             ron::from_str(&pak::read_to_string(path).with_context(|| path.display().to_string())?)
                 .context("parse classes.ron")?;
+        // A replacement mod's class changes ride beside the stock file
+        // (`manifest::class_patch`), served only for the mod's own game
+        // (`pak::set_overlay_scope`).
+        let patch_path = manifest::class_patch::patch_path(path);
+        if pak::is_file(&patch_path) {
+            let patch: manifest::class_patch::ClassPatchFile = ron::from_str(
+                &pak::read_to_string(&patch_path)
+                    .with_context(|| patch_path.display().to_string())?,
+            )
+            .with_context(|| format!("parse {}", patch_path.display()))?;
+            manifest::class_patch::apply(&mut defs, &patch);
+        }
         if self.assets_root.is_none() {
             self.assets_root = path.parent().and_then(Path::parent).map(Path::to_path_buf);
         }

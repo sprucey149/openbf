@@ -913,7 +913,11 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
     let content_root = detect_content_root(mod_root, &root_canon);
     out.content_root = content_root.clone();
 
-    if content_root.is_none() && out.openbf_manifest_ron.is_none() {
+    let loose_lvls = content_root.is_none()
+        && facts.native_binaries.is_empty()
+        && facts.non_pc_dirs.is_empty()
+        && !facts.all_lvls.is_empty();
+    if content_root.is_none() && out.openbf_manifest_ron.is_none() && !loose_lvls {
         if !facts.native_binaries.is_empty() {
             let reason = format!(
                 "Third-party native binary/DLL mods ({}) are not supported.",
@@ -1248,8 +1252,24 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
         }
     }
 
-    // Classify remaining LVLs inside `_LVL_PC` (intentional stock overrides vs
-    // unreferenced template leftovers).
+    // A folder of LVLs with no addon layout (`side/`, `fpm/`, a loose
+    // `end1.lvl`): every LVL is a replacement candidate, placed against the
+    // stock catalog by `extensions::mods::replace`, which also keeps backup
+    // and alternative folders inactive.
+    if lvl_pc.is_none() && !has_addme {
+        for (rel_from_mod, abs_path) in &facts.all_lvls {
+            out.stock_override_lvls.push(OverrideLvl {
+                rel_path: rel_from_mod.clone(),
+                abs_path: abs_path.clone(),
+            });
+        }
+    }
+
+    // Classify remaining LVLs. Without addon missions every unreferenced LVL
+    // is a replacement candidate, wherever it sits (the resolver decides which
+    // stock file, if any, it stands in for). An addon's unreferenced leftovers
+    // inside its `_LVL_PC` (`<ID>/kas2.lvl` copied from a template) must NOT
+    // shadow stock.
     if let Some(pc) = &lvl_pc {
         let has_map_missions = !out.missions.is_empty();
         for (rel_from_mod, abs_path) in &facts.all_lvls {
@@ -1259,27 +1279,14 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
             if referenced_lvls_canon.contains(&c) {
                 continue;
             }
-            let Ok(rel_pc) = abs_path.strip_prefix(pc) else {
-                continue;
-            };
-            let rel_pc_str = rel_pc.to_string_lossy().replace('\\', "/");
-            let rel_pc_low = rel_pc_str.to_ascii_lowercase();
-            // Pure side/asset overhauls (mods without custom addme map missions)
-            // intentionally mirror stock `_LVL_PC/SIDE/*.lvl`, `common.lvl`,
-            // `ingame.lvl`, `shell.lvl`, or stock planet LVLs. Map addons with
-            // unreferenced leftover `<ID>/kas2.lvl` etc. must NOT shadow stock!
-            let is_stock_rel = !has_addme
-                && !has_map_missions
-                && (rel_pc_low.starts_with("side/")
-                    || matches!(
-                        rel_pc_low.as_str(),
-                        "common.lvl" | "ingame.lvl" | "shell.lvl" | "sound/global.lvl"
-                    ));
-            if is_stock_rel {
+            let inside_pc = abs_path.starts_with(pc);
+            if !has_addme && !has_map_missions {
                 out.stock_override_lvls.push(OverrideLvl {
-                    rel_path: rel_pc_str,
+                    rel_path: rel_from_mod.clone(),
                     abs_path: abs_path.clone(),
                 });
+            } else if !inside_pc {
+                continue;
             } else {
                 out.unused_lvls.push(rel_from_mod.clone());
             }
