@@ -686,6 +686,9 @@ impl winit::application::ApplicationHandler for App {
                         PadState::default()
                     } else if popup_up {
                         self.kbm.drop_taps();
+                        // The press that closes a popup is not also a jump:
+                        // whatever is still down waits for its release.
+                        game::pause::hold_for_resume(&mut self.resume_gate);
                         PadState::default()
                     } else if self
                         .walk
@@ -716,6 +719,14 @@ impl winit::application::ApplicationHandler for App {
                                 if let Some(bb) = self.blackbox.as_mut() {
                                     bb.stick(self.stick_sample.0, self.stick_sample.1);
                                 }
+                                let pad = self
+                                    .display_ext
+                                    .as_ref()
+                                    .filter(|_| self.netplay.is_none())
+                                    .map_or(pad, |ext| {
+                                        let walk = &self.walk.as_ref().expect("battle walk").0;
+                                        ext.seat_sticks(&super::xr::sim_view(walk), pad, look)
+                                    });
                                 let pad = match controls {
                                     Some(_) => self.kbm.flyer_pad(
                                         self.walk
@@ -1735,10 +1746,13 @@ impl winit::application::ApplicationHandler for App {
                         None => gpu.draws.clone(),
                     };
                     draws.append(&mut extra);
+                    let mut reticle_at = None;
                     let ext_stereo = if let (Some(ext), Some(view), Some((walk, _))) =
                         (&self.display_ext, stereo_view, &self.walk)
                     {
                         let base_draws = draws.len();
+                        reticle_at =
+                            super::xr::reticle_point(&view, walk, self.soldier_vis.as_ref());
                         if let Some(vis) = self.soldier_vis.as_ref() {
                             vis.tracked_draws(walk, view.hand_mounts, &mut draws);
                             if let Some((class, at)) = view.grenade {
@@ -1831,6 +1845,7 @@ impl winit::application::ApplicationHandler for App {
                             .as_ref()
                             .is_some_and(|r| r.playing_movie().is_some())
                     });
+                    let mut reticle_shown = false;
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
                             hv.set_icons(icons);
@@ -1865,7 +1880,8 @@ impl winit::application::ApplicationHandler for App {
                                 Some(hv)
                             } else {
                                 if ext_stereo {
-                                    hv.update_without_reticle(model, hud_dt, [w, h]);
+                                    reticle_shown =
+                                        hv.update_detached_reticle(model, hud_dt, [w, h]);
                                 } else {
                                     hv.update(model, hud_dt, [w, h]);
                                 }
@@ -1878,6 +1894,22 @@ impl winit::application::ApplicationHandler for App {
                         }
                         _ => None,
                     };
+                    if let (true, Some(view), Some(point), Some(hv), Some(ext)) = (
+                        reticle_shown,
+                        stereo_view,
+                        reticle_at,
+                        hud_view.as_mut(),
+                        self.display_ext.as_mut(),
+                    ) {
+                        let paint: render::OverlayFn<'_> = &mut |dev, q, enc, view, size| {
+                            hv.paint_reticle(dev, q, enc, view, size)
+                        };
+                        if let Err(error) = ext.set_reticle(r, &view, point, paint) {
+                            self.failure = Some(error);
+                            event_loop.exit();
+                            return;
+                        }
+                    }
                     if let Some(p) = self.frame_profile.as_mut() {
                         p.lap("draws_ms");
                     }

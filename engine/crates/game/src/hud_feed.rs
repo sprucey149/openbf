@@ -304,6 +304,13 @@ pub struct WorldMarkerStyle {
     pub additive: bool,
 }
 
+#[derive(Default)]
+struct ReticleLayout {
+    verts: Vec<HudVertex>,
+    indices: Vec<u32>,
+    batches: Vec<ui::hud_draw::HudBatch>,
+}
+
 pub struct HudView {
     hud: Hud,
     art: HudArt,
@@ -333,11 +340,25 @@ pub struct HudView {
     /// The squad cross's parts of the last layout.
     squad: Vec<(ui::hud_squad::Part, [f32; 4], f32)>,
     settled: bool,
+    /// The reticle group's own layout, for [`HudView::paint_reticle`].
+    reticle: ReticleLayout,
     pause_art: bool,
     /// The shell movie's texture and the frame waiting to be written into
     /// it (card BSHLA).
     movie: Option<HudTexture>,
     movie_frame: Option<(Vec<u8>, u32, u32)>,
+}
+
+fn hud_vertices(frame: &ui::hud_draw::HudFrame) -> Vec<HudVertex> {
+    frame
+        .verts
+        .iter()
+        .map(|v| HudVertex {
+            pos: v.pos,
+            uv: v.uv,
+            color: v.color,
+        })
+        .collect()
 }
 
 fn read_ron<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
@@ -875,6 +896,7 @@ impl HudView {
             boxes: Vec::new(),
             squad: Vec::new(),
             settled: false,
+            reticle: Default::default(),
             pause_art,
             movie: None,
             movie_frame: None,
@@ -899,8 +921,42 @@ impl HudView {
         self.update_with_reticle(model, dt, size, Some([0.5, model.reticle_y]));
     }
 
-    pub fn update_without_reticle(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) {
-        self.update_with_reticle(model, dt, size, None);
+    /// [`HudView::update`] with the reticle group laid out apart, at the
+    /// middle of `size`: [`HudView::paint`] leaves it out and
+    /// [`HudView::paint_reticle`] draws it. `false` when the reticle shows
+    /// nothing.
+    pub fn update_detached_reticle(&mut self, model: &HudModel, dt: f32, size: [u32; 2]) -> bool {
+        self.feed(model, dt, Some([0.5, 0.5]));
+        let (frame, reticle) =
+            ui::hud_draw::draw_detached(&self.hud, &self.art, size.map(|v| v as f32));
+        self.install_frame(frame);
+        self.reticle = ReticleLayout {
+            verts: hud_vertices(&reticle),
+            indices: reticle.indices,
+            batches: reticle.batches,
+        };
+        !self.reticle.batches.is_empty()
+    }
+
+    /// Paint the reticle [`HudView::update_detached_reticle`] laid out. Submit
+    /// the encoder before the next paint: both share the pass's buffers.
+    pub fn paint_reticle(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        size: [u32; 2],
+    ) {
+        self.swap_reticle();
+        self.paint(device, queue, encoder, view, size);
+        self.swap_reticle();
+    }
+
+    fn swap_reticle(&mut self) {
+        std::mem::swap(&mut self.verts, &mut self.reticle.verts);
+        std::mem::swap(&mut self.indices, &mut self.reticle.indices);
+        std::mem::swap(&mut self.batches, &mut self.reticle.batches);
     }
 
     fn update_with_reticle(
@@ -1096,12 +1152,7 @@ impl HudView {
     }
 
     fn install_frame(&mut self, frame: ui::hud_draw::HudFrame) {
-        self.verts.clear();
-        self.verts.extend(frame.verts.iter().map(|v| HudVertex {
-            pos: v.pos,
-            uv: v.uv,
-            color: v.color,
-        }));
+        self.verts = hud_vertices(&frame);
         self.indices = frame.indices;
         self.batches = frame.batches;
         self.boxes = frame.boxes;

@@ -97,6 +97,7 @@ mod stars;
 mod terrain_light;
 mod texture;
 mod underwater;
+mod reticle;
 mod visor;
 mod water_reflect;
 mod world_scale;
@@ -139,6 +140,7 @@ pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
 pub use texture::{BumpDesc, DetailDesc, SamplerMode, TextureDesc, TextureHandle, WrapV};
+pub use reticle::{ReticlePass, WorldReticle};
 pub use visor::{Visor, VisorEye, VisorPass};
 
 use mesh::GpuMesh;

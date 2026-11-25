@@ -16,6 +16,7 @@
 //! rides one of its armed seats.
 
 mod seat_switch;
+mod sight;
 
 use super::input::{buttons, PadState};
 use super::state::{Event, Sim};
@@ -333,19 +334,30 @@ impl Sim {
         riders: &[UnitHandle],
         own: VehicleHandle,
     ) -> Vec3 {
+        self.first_along(eye, dir, riders, Some(own))
+    }
+
+    /// [`Sim::aim_point`] for a shooter with or without a vehicle of its own.
+    pub(super) fn first_along(
+        &self,
+        eye: Vec3,
+        dir: Vec3,
+        riders: &[UnitHandle],
+        own: Option<VehicleHandle>,
+    ) -> Vec3 {
         let mut t = AIM_RAY;
         if let Some(h) = self.terrain_ray(eye, dir, t, 0.5) {
             t = t.fmin(h);
         }
         // A building turret's ray passes its own building (the PS2's
         // excludes the owner entity, `ray_past`).
-        let building = self.vehicle(own).and_then(|v| v.instance);
+        let building = own.and_then(|h| self.vehicle(h)).and_then(|v| v.instance);
         if let Some(h) = self.collision.ray_past(
             eye,
             dir,
             t,
             Layers::ORDNANCE,
-            HullFilter::except(Some(own)),
+            HullFilter::except(own),
             [building, None],
         ) {
             t = t.fmin(h.t);
@@ -545,8 +557,6 @@ impl Sim {
                 (rot * gun::dir(st.look.0, st.look.1)).normalize_or_zero(),
             )
         });
-        let right = fwd.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
-        let up = right.cross(fwd).normalize();
         let is_player = driver.is_some_and(|i| self.units[i].is_player);
         let team = driver.map_or(self.vehicles[vi].team.unwrap_or(u8::MAX), |i| {
             self.units[i].team
@@ -696,42 +706,22 @@ impl Sim {
             let mut turns = (turn0..).filter(|t| ring.is_none_or(|r| r.opens(*t)));
             for spec in shots.iter() {
                 let turn = turns.next().unwrap_or(turn0);
-                let point = (!w.fire_points.is_empty())
-                    .then(|| (turn % w.fire_points.len() as u64) as usize);
-                // A barrel on an aimer of its own (the Spider Walker's two
-                // turrets, a hover pilot's side guns) turns about that
-                // aimer's node toward the aim point, inside its limits, and
-                // fires along its own line (issue #182: from the muzzle a
-                // near target fell behind it and the shot went up and back).
-                let own_aim = point.filter(|_| !fixed_guns).and_then(|p| {
-                    if g.turn.is_some() {
-                        barrel_aim(&g, w, p, st.look, st.rel, st.target)
-                    } else {
-                        GunSetup::line_aim(w, p, target_model).map(|(aim, _)| aim)
-                    }
-                });
-                let origin = point.map_or(origin, |p| {
-                    pos + rot * g.shot_point(k, Some(p), own_aim.unwrap_or(st.aim), fixed_guns)
-                });
-                let (fwd, right, up) = if let Some(aim) = own_aim {
-                    let d = (rot * gun::dir(aim.0, aim.1)).normalize();
-                    let right = d.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
-                    (d, right, right.cross(d).normalize())
-                } else if g.turn.is_none()
-                    && !w.fire_points.is_empty()
-                    && (!fixed_guns || point.is_some_and(|p| w.fire_limits.get(p).is_some()))
-                {
-                    ring_aim(
-                        &g,
-                        w.fire_limits.get(point.unwrap_or(0)),
-                        rot,
-                        origin,
-                        target,
-                        fwd,
-                    )
-                } else {
-                    (fwd, right, up)
-                };
+                let sight::BarrelLine {
+                    point,
+                    origin,
+                    frame: (fwd, right, up),
+                } = sight::Barrels {
+                    gun: &g,
+                    pos,
+                    rot,
+                    look: st.look,
+                    rel: st.rel,
+                    aim: st.aim,
+                    aimed: st.target,
+                    target,
+                    fixed: fixed_guns,
+                }
+                .line(k, w, turn);
                 let beam_seat = super::beam::SeatBeam {
                     mount: m,
                     weapon: k as u8,

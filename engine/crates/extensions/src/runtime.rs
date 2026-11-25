@@ -165,6 +165,11 @@ pub trait ActiveDisplayExtension {
 
     fn is_infantry(&self, sim: &SimView<'_>) -> bool;
 
+    /// Lay a spatial controller's sticks onto the gamepad's axes while the
+    /// player drives something, before the game maps them for flight. `look`
+    /// is the scale the gamepad's right stick takes this frame.
+    fn seat_sticks(&self, sim: &SimView<'_>, pad: PadState, look: f32) -> PadState;
+
     fn transform_pad(&self, sim: &SimView<'_>, pad: PadState) -> PadState;
 
     fn apply_sprint_latch(
@@ -187,6 +192,17 @@ pub trait ActiveDisplayExtension {
         draws: &[DrawCmd],
         skinned: &[SkinnedDrawCmd],
         clear: [f64; 4],
+    ) -> Result<()>;
+
+    /// Stand the centre reticle at `point` in this frame's eyes. `paint`
+    /// draws it at the middle of a window-sized frame; it runs at once, ahead
+    /// of [`Self::finish_stereo`]'s overlay.
+    fn set_reticle(
+        &mut self,
+        renderer: &Renderer,
+        view: &StereoView,
+        point: Vec3,
+        paint: OverlayFn<'_>,
     ) -> Result<()>;
 
     fn finish_stereo(

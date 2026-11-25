@@ -4,7 +4,12 @@ use super::{fire_point, SoldierAsset, SoldierVisuals, WeaponAsset};
 use crate::assets::CpuSkinnedMesh;
 use crate::walk::WalkSim;
 use glam::{Mat4, Vec3};
-use render::{DrawCmd, LightPath, MeshData, MeshHandle, Renderer};
+use render::{DrawCmd, Fade, LightPath, MeshData, MeshHandle, Renderer};
+
+/// OURS: how much of a tracked weapon stays drawn while it reloads, which the
+/// hands cannot show. measure: check in a headset that the reload reads at a
+/// glance and the gun can still be aimed.
+const RELOADING_OPACITY: f32 = 0.35;
 
 #[derive(Default)]
 pub(super) struct Arms {
@@ -57,6 +62,12 @@ impl SoldierVisuals {
         let Some(unit) = walk.sim.unit(walk.player) else {
             return;
         };
+        let fade = unit
+            .active_weapon()
+            .2
+            .reloading()
+            .then(|| Fade::see_through(RELOADING_OPACITY));
+        let weapon = self.tracked_weapon(walk);
         if let Some((body, arms)) = self
             .asset_index(unit.team, unit.spec.class)
             .and_then(|i| self.assets.get(i).zip(self.tracked_arms.get(i)))
@@ -80,6 +91,7 @@ impl SoldierVisuals {
                     .map_or(Mat4::IDENTITY, |b| b.tracked_mount);
                 let model = mount * grip * arm.body_to_mount;
                 let lit = Some(crate::point_light::soldier_sphere(mount.w_axis.truncate()));
+                let drawn = draws.len();
                 for &(part, mesh) in &arm.parts {
                     let (_, texture, layer, spec) = body.meshes[part];
                     let texture = skin.get(part).copied().flatten().or(texture);
@@ -97,15 +109,19 @@ impl SoldierVisuals {
                         );
                     }
                 }
+                // The super battle droid's gun is its right arm.
+                if side == 1 && matches!(weapon, Some(TrackedWeapon::Wrist)) {
+                    set_fade(&mut draws[drawn..], fade);
+                }
             }
         }
         if self.tracked_saber_hilts(walk, mounts, draws) {
             return;
         }
-        if let Some((mount, TrackedWeapon::Held(weapon, _))) =
-            mounts[1].zip(self.tracked_weapon(walk))
-        {
+        if let Some((mount, TrackedWeapon::Held(weapon, _))) = mounts[1].zip(weapon) {
+            let drawn = draws.len();
             weapon.part_draws(mount, draws);
+            set_fade(&mut draws[drawn..], fade);
         }
     }
 
@@ -221,6 +237,14 @@ impl SoldierVisuals {
             && (class.name.starts_with("cis_weap_inf_wrist_")
                 || class.name == "cis_weap_award_wrist_blaster"))
             .then_some(TrackedWeapon::Wrist)
+    }
+}
+
+fn set_fade(draws: &mut [DrawCmd], fade: Option<Fade>) {
+    if fade.is_some() {
+        for draw in draws {
+            draw.fade = fade;
+        }
     }
 }
 
@@ -490,6 +514,18 @@ mod tests {
                 visuals.tracked_draws(&walk, mounts, &mut empty_hands);
                 assert!(!empty_hands.is_empty());
                 assert!(empty_hands.len() < draws.len());
+                assert!(draws.iter().all(|d| d.fade.is_none()));
+                visuals.per_class[usize::from(team)][usize::from(class)].weapon = Some(0);
+                walk.sim.unit_mut(walk.player).unwrap().weapon.reload_timer = 1.0;
+                let mut reloading = Vec::new();
+                visuals.tracked_draws(&walk, mounts, &mut reloading);
+                let (arms, gun) = reloading.split_at(empty_hands.len());
+                assert!(arms.iter().all(|d| d.fade.is_none()));
+                assert!(!gun.is_empty());
+                assert!(gun
+                    .iter()
+                    .all(|d| d.fade == Some(Fade::see_through(RELOADING_OPACITY))));
+                visuals.per_class[usize::from(team)][usize::from(class)].weapon = None;
                 assert!(visuals.tracked_fire_point(&walk, right_mount).is_none());
             } else {
                 for name in [

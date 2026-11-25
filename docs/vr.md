@@ -72,14 +72,43 @@ All functionality from the experimental `codex/openxr-vr` branch is preserved:
 | Left X / Left A | Enter or leave vehicles / interact |
 | **F10** in desktop window | Recenter headset origin and seated height |
 
+### In vehicles, turrets and remotes
+
+| Input | Action |
+|---|---|
+| Left thumbstick | Drive or steer (the gamepad's left stick, including the flight-control layout) |
+| Right thumbstick | Aim or look (the gamepad's right stick) |
+| Right / left trigger | Fire primary / secondary seat weapon |
+| Click left thumbstick (L3) | Boost latch, until clicked again or the left stick returns to the middle |
+| Right A | Jump button (vehicle jump, take off and land as on a gamepad) |
+| Right B / Left Y | Next / previous seat |
+| Left X | Leave the vehicle |
+| Headset | Free look from the chase camera's position |
+
+There is no snap turn or flick reload in a seat: the right stick aims. The view keeps a level horizon and turns with the chase camera, except in a flyer's pilot seat and on a guided missile, where it also pitches and rolls with the craft. A droideka uses the same controls, from its chase camera:
+
+| Input | Droideka action |
+|---|---|
+| Left thumbstick | Walk, or roll in ball form |
+| Right thumbstick | Turn and aim |
+| Right trigger | Fire (standing only) |
+| Left trigger | Raise or drop the shield |
+| Right B | Fold into the ball and back |
+| Right A | Jump button |
+| Click left thumbstick (L3) | Ball sprint latch |
+
+Its reticle is hidden in the ball and while it folds, when it cannot fire.
+
 Additional behaviors preserved:
 
-- **Curved 16:9 Visor HUD:** Renders the native HUD across the helmet visor FOV while hiding the screen-center crosshair (`HudView::update_without_reticle`) and retaining enemy target health readouts.
+- **Curved 16:9 Visor HUD:** Renders the native HUD across the helmet visor FOV, leaving the centre reticle group out of it, and retaining enemy target health readouts.
+- **World reticle:** The stock reticle, with its ammo, refire and heat rings, stands at the point the next shot reaches: along the tracked muzzle on foot, along the seat's barrels in a vehicle (the mean of barrels that fire alongside each other), and along a remote's own line. It looks smaller the farther that point is (full size up to 5 m, half at 20 m, a quarter from 80 m on, so the ammo ring stays visible), is hidden within 3 m of the head and fades in to full strength at 4.5 m. It does not predict spread, projectile drop or missile homing, and lightsabers have none. The stock ammo ring fades out a few seconds after it last changed.
+- **Reload:** The held weapon (the right arm for a Super Battle Droid) is drawn see-through while it reloads.
 - **Physical melee:** Tracked single- and dual-handed lightsaber poses drive spatial blade sweeps, block pulses, and per-hand OpenXR haptic feedback.
 - **Tracked arms & weapons:** First-person forearms, hands, held weapons, and Super Battle Droid wrist blasters follow controller tracking; muzzle flashes and bolts spawn at the physical barrel/wrist.
 - **Stereo multi-view & mirror:** Left/right eyes render via `render`'s asymmetric multi-view pipeline (`Renderer::begin_frame()` + `ViewProjection::Asymmetric(fov)`), with sun flare rendered accurately per eye and left eye mirrored to the desktop window during battle (flat menu panel mirrored when in menus).
 - **Audio listener:** 3D sound positioning tracks the headset pose in battle.
-- **Vehicles & multiplayer isolation:** Vehicles continue using desktop/gamepad controls cleanly; LAN multiplayer strips local tracked VR weapon/combat inputs before packet encoding and simulation submission so deterministic lockstep gameplay cannot desync.
+- **Vehicles & multiplayer isolation:** Gamepad and keyboard controls keep working in vehicles beside the VR controllers; LAN multiplayer strips local tracked VR weapon/combat inputs before packet encoding and simulation submission so deterministic lockstep gameplay cannot desync.
 
 ## Comparison Against `codex/openxr-vr`
 
@@ -103,6 +132,7 @@ With an OpenXR headset runtime active:
 3. Launch Ground Conquest and verify stereo eye rendering, curved visor HUD edges (no center crosshair, enemy health visible on aim), 6-DoF head tracking, F10 recenter, desktop mirror, and 3D audio orientation.
 4. Test physical blaster aiming, two-handed rifle grip/release, L3 sprint latch, 30-degree snap turn, and Super Battle Droid wrist blasters.
 5. Switch to a lightsaber hero (for example, Mos Eisley Hero Assault) and verify tracked blade swings, dual-saber left hand where applicable, block detection, and haptic feedback.
-6. Test grenade spawn in left palm on left trigger hold, velocity throw on swing release, ammo spend on release, and closing cleanly back to desktop.
-7. Toggle **OpenBF VR** off in **Mods**, launch again, and confirm standard desktop rendering resumes.
-8. Close the OpenXR runtime before launch with **OpenBF VR** enabled to verify the launcher reopens with the Startup Error Recovery Banner and **Play in Desktop Mode** recovers immediately.
+6. As a droideka: walk, aim, fire, raise the shield, fold with B, roll, sprint with L3 and jump. In campaign, close an objective screen with A and check that the soldier does not jump. In a hover tank, a walker, a turret, a flyer and a gunner seat: drive and aim with the sticks, switch seats both ways, boost, fire both triggers and leave with X. Check that bolts land under the reticle at near, middle and far range, that it disappears close up, and that a reloading weapon reads as see-through.
+7. Test grenade spawn in left palm on left trigger hold, velocity throw on swing release, ammo spend on release, and closing cleanly back to desktop.
+8. Toggle **OpenBF VR** off in **Mods**, launch again, and confirm standard desktop rendering resumes.
+9. Close the OpenXR runtime before launch with **OpenBF VR** enabled to verify the launcher reopens with the Startup Error Recovery Banner and **Play in Desktop Mode** recovers immediately.

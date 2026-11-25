@@ -80,7 +80,8 @@ const RESUME_KEEPS: u32 = buttons::MOUSE_AIM | buttons::FIRST_PERSON | buttons::
 
 /// Playtest A3: a paused frame marks every button for eating, so whatever is
 /// still down when play resumes (the Resume confirm, a Back, the click on
-/// Resume) waits for its release before play sees it.
+/// Resume) waits for its release before play sees it. A mission popup's frames
+/// mark the same, for the press that closes it.
 pub fn hold_for_resume(gate: &mut HeldEat) {
     gate.eat(!RESUME_KEEPS);
 }

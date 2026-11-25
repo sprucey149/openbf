@@ -88,6 +88,11 @@ impl Visor {
             half: half * low.max(0.01),
         }
     }
+
+    /// The angle the HUD frame's height covers on the shell.
+    pub fn radians_per_height(&self) -> f32 {
+        2.0 * self.half.y
+    }
 }
 
 fn angles(p: Vec3) -> Vec2 {

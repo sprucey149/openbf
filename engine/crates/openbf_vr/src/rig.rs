@@ -10,6 +10,9 @@ use render::Camera;
 const SNAP: f32 = std::f32::consts::FRAC_PI_6;
 const DEAD_ZONE: f32 = 0.18;
 const AIM_BUTTONS: u32 = buttons::FIRE | buttons::SECONDARY_FIRE;
+/// The controller buttons a seat or remote takes as they are. RELOAD is left
+/// out: there the right stick aims.
+const SEAT_BUTTONS: u32 = AIM_BUTTONS | buttons::JUMP | buttons::ACTION | buttons::SWITCH_WEAPON;
 /// OURS: keep the weapon origin 7 cm forward and up from the tracked palm
 /// in aim space. measure: line up the authored hand with the controller in a headset.
 const HAND_MOUNT_OFFSET: Vec3 = Vec3::new(0.0, 0.07, -0.07);
@@ -37,6 +40,9 @@ pub(super) struct Rig {
     active: bool,
     right_tracked: bool,
     support: Option<Support>,
+    boost: bool,
+    boost_down: bool,
+    boost_moved: bool,
     pub motion_epoch: u16,
 }
 
@@ -143,6 +149,59 @@ pub(super) fn infantry<'a>(view: &'a SimView<'a>) -> Option<&'a Unit> {
     })
 }
 
+/// The player drives something instead of walking: a vehicle or turret
+/// seat, a remote droid, a guided missile, or a droideka's own legs and ball.
+pub(super) fn piloted(view: &SimView<'_>) -> bool {
+    view.sim.unit(view.player).is_some_and(|u| {
+        u.alive
+            && (u.mount.is_some()
+                || u.droideka.is_some()
+                || view.sim.controlled_droid(view.player).is_some()
+                || view.sim.controlled_guided(view.player).is_some())
+    }) && view.sim.spawn_stage.get(usize::from(view.local_slot))
+        != Some(&core::sim::SpawnStage::Alive)
+        && view.sim.outcome.is_none()
+}
+
+/// The player's own body is a droideka, with no remote flown from it.
+fn rolls(view: &SimView<'_>) -> bool {
+    view.sim
+        .unit(view.player)
+        .is_some_and(|u| u.droideka.is_some() && u.mount.is_none())
+        && view.sim.controlled_droid(view.player).is_none()
+        && view.sim.controlled_guided(view.player).is_none()
+}
+
+/// The view pitches and rolls with what is flown, a flyer's pilot seat or a
+/// guided missile; everywhere else it keeps a level horizon.
+fn flies(view: &SimView<'_>) -> bool {
+    piloted(view)
+        && (view.sim.controlled_guided(view.player).is_some()
+            || view.sim.seat_of(view.player).is_some_and(|(v, seat)| {
+                seat == core::vehicle::SeatKind::Pilot
+                    && view
+                        .sim
+                        .vehicle(v)
+                        .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer)
+            }))
+}
+
+/// Put the controllers' sticks where a gamepad's would be, ahead of the
+/// flight-stick mapping. A centred stick leaves the gamepad's and keys' axes.
+pub(super) fn seat_sticks(input: Input, mut pad: PadState, look: f32) -> PadState {
+    let drive = input.movement.unwrap_or_default();
+    let (lx, ly) = (input::drive_axis(drive.x), input::drive_axis(drive.y));
+    if (lx, ly) != (0, 0) {
+        (pad.lx, pad.ly) = (lx, ly);
+    }
+    let aim = input.right_stick;
+    let (rx, ry) = (input::look_axis(aim.x, look), input::look_axis(aim.y, look));
+    if (rx, ry) != (0, 0) {
+        (pad.rx, pad.ry) = (rx, ry);
+    }
+    pad
+}
+
 impl Rig {
     pub fn recenter(&mut self) {
         self.tracking_origin = None;
@@ -168,9 +227,7 @@ impl Rig {
                 self.motion_epoch = self.motion_epoch.wrapping_add(1);
             }
         }
-        let seated = view
-            .and_then(|v| v.sim.unit(v.player))
-            .is_some_and(|u| u.alive && u.mount.is_some());
+        let seated = view.is_some_and(piloted);
         let active = playing && head.is_some() && (foot.is_some() || seated);
         if active != self.active {
             self.motion_epoch = self.motion_epoch.wrapping_add(1);
@@ -194,15 +251,58 @@ impl Rig {
         if !active || !self.active {
             self.blocked |= buttons;
             self.pending = 0;
-        } else if !right_tracked || !self.right_tracked {
+        } else if foot.is_some() && (!right_tracked || !self.right_tracked) {
             self.blocked |= buttons & AIM_BUTTONS;
             self.pending &= !AIM_BUTTONS;
         }
         let held = if active { buttons & !self.blocked } else { 0 };
         self.pending |= held & !self.held;
         self.held = held;
+        self.latch_boost(active && seated, held, input.movement);
         self.active = active;
         self.right_tracked = right_tracked;
+    }
+
+    /// L3 holds a seat's boost on until it is clicked again or the drive
+    /// stick comes back to the middle after a push.
+    fn latch_boost(&mut self, seated: bool, held: u32, drive: Option<Vec2>) {
+        let down = held & buttons::SPRINT != 0;
+        let clicked = down && !self.boost_down;
+        self.boost_down = down;
+        if !seated {
+            self.boost = false;
+            return;
+        }
+        if clicked {
+            self.boost = !self.boost;
+            self.boost_moved = false;
+        }
+        if drive.is_some_and(|stick| stick.length() > DEAD_ZONE) {
+            self.boost_moved = true;
+        } else if self.boost_moved && !down {
+            self.boost = false;
+        }
+    }
+
+    /// What the controllers press in a seat. B steps to the next seat as
+    /// SWITCH_WEAPON; Y steps back, as the seat switch reads
+    /// SPAWN_CLASS_PREV beside it. A droideka has no seats: B is its
+    /// ROLL_STANCE, which folds it into the ball and back.
+    pub fn seat_buttons(&self, view: &SimView<'_>) -> u32 {
+        let pressed = self.buttons();
+        let mut seat = pressed & (SEAT_BUTTONS | buttons::SPRINT);
+        if rolls(view) {
+            seat &= !buttons::SWITCH_WEAPON;
+            if pressed & buttons::SWITCH_WEAPON != 0 {
+                seat |= buttons::ROLL_STANCE;
+            }
+        } else if pressed & buttons::SWITCH_SECONDARY != 0 {
+            seat |= buttons::SWITCH_WEAPON | buttons::SPAWN_CLASS_PREV;
+        }
+        if self.boost {
+            seat |= buttons::SPRINT;
+        }
+        seat
     }
 
     pub fn consumed(&mut self) {
@@ -345,7 +445,14 @@ impl Rig {
             // Keep a level horizon in the desktop chase/death/spectator view.
             None => (base.position, base.yaw - heading(origin.orientation)),
         };
-        let rotation = Quat::from_rotation_y(yaw);
+        let rotation = if view.is_some_and(flies) {
+            Quat::from_rotation_y(base.yaw)
+                * Quat::from_rotation_x(base.pitch)
+                * Quat::from_rotation_z(-base.roll)
+                * Quat::from_rotation_y(-heading(origin.orientation))
+        } else {
+            Quat::from_rotation_y(yaw)
+        };
         let mut translation = base_position - rotation * origin.position;
         if let Some(view) = view.filter(|_| unit.is_some()) {
             let eye = translation + rotation * head.position;
@@ -409,6 +516,15 @@ pub(crate) mod tests {
     const EPS: f32 = 0.0001;
 
     pub(crate) fn test_sim(seed: u32, spawn: Vec3, hf: Option<Heightfield>) -> (Sim, UnitHandle) {
+        test_sim_as(seed, spawn, hf, None)
+    }
+
+    fn test_sim_as(
+        seed: u32,
+        spawn: Vec3,
+        hf: Option<Heightfield>,
+        droideka: Option<Arc<core::droideka::DroidekaClass>>,
+    ) -> (Sim, UnitHandle) {
         let mut sim = Sim::empty(seed);
         sim.heightfield = hf;
         let spawn = match &sim.heightfield {
@@ -434,7 +550,7 @@ pub(crate) mod tests {
                 class: 0,
                 skill: 0,
                 jet: false,
-                droideka: None,
+                droideka,
             })
             .expect("fresh battle has reinforcements");
         (sim, player)
@@ -769,6 +885,119 @@ pub(crate) mod tests {
         assert!(rig
             .sprint_pad(&view, HEAD, Vec2::ZERO, &mut latch, pad)
             .pressed(buttons::SPRINT));
+    }
+
+    #[test]
+    fn a_seat_takes_the_controllers_buttons_and_latches_l3_while_the_stick_drives() {
+        let (mut sim, player) = test_sim(7, Vec3::ZERO, None);
+        sim.unit_mut(player).unwrap().mount = Some(core::vehicle::Mount {
+            vehicle: core::vehicle::VehicleHandle { index: 0, gen: 0 },
+            seat: 0,
+        });
+        let view = sim_view(&sim, player);
+        assert!(piloted(&view) && infantry(&view).is_none());
+        let mut rig = Rig::default();
+        let mut input = Input::default();
+        rig.track(Some(&view), Some(HEAD), input, true);
+        input.buttons = AIM_BUTTONS | buttons::ACTION | buttons::SWITCH_WEAPON | buttons::RELOAD;
+        rig.track(Some(&view), Some(HEAD), input, true);
+        assert_eq!(
+            rig.seat_buttons(&view),
+            AIM_BUTTONS | buttons::ACTION | buttons::SWITCH_WEAPON
+        );
+        input.buttons = 0;
+        rig.track(Some(&view), Some(HEAD), input, true);
+        rig.consumed();
+        input.buttons = buttons::SWITCH_SECONDARY;
+        rig.track(Some(&view), Some(HEAD), input, true);
+        assert_eq!(
+            rig.seat_buttons(&view),
+            buttons::SWITCH_WEAPON | buttons::SPAWN_CLASS_PREV
+        );
+        input.buttons = 0;
+        rig.track(Some(&view), Some(HEAD), input, true);
+        rig.consumed();
+
+        input.buttons = buttons::SPRINT;
+        rig.track(Some(&view), Some(HEAD), input, true);
+        input.buttons = 0;
+        for drive in [None, Some(Vec2::Y), Some(Vec2::X)] {
+            input.movement = drive;
+            rig.track(Some(&view), Some(HEAD), input, true);
+            rig.consumed();
+            assert_eq!(rig.seat_buttons(&view), buttons::SPRINT);
+        }
+        input.movement = Some(Vec2::ZERO);
+        rig.track(Some(&view), Some(HEAD), input, true);
+        assert_eq!(rig.seat_buttons(&view), 0);
+    }
+
+    #[test]
+    fn a_droideka_drives_like_a_seat_and_folds_with_b() {
+        let ground = Heightfield {
+            size: 2,
+            unit: 100.0,
+            offset_x: 50.0,
+            offset_z: 50.0,
+            heights: vec![0.0; 4],
+        };
+        let class = Arc::new(core::droideka::DroidekaClass::default());
+        let (mut sim, player) = test_sim_as(7, Vec3::ZERO, Some(ground), Some(class));
+        let mut rig = Rig::default();
+        let mut sample = |sim: &mut Sim, input: Input| {
+            let pad = {
+                let view = sim_view(sim, player);
+                assert!(piloted(&view) && infantry(&view).is_none() && !flies(&view));
+                rig.track(Some(&view), Some(HEAD), input, true);
+                let mut pad = seat_sticks(input, PadState::default(), 1.0);
+                pad.buttons |= rig.seat_buttons(&view);
+                rig.consumed();
+                pad
+            };
+            sim.step(&[pad]);
+            pad
+        };
+        let mut input = Input::default();
+        for _ in 0..5 {
+            sample(&mut sim, input);
+        }
+        let start = sim.unit(player).unwrap().soldier.pos;
+        input.movement = Some(Vec2::Y);
+        for _ in 0..90 {
+            sample(&mut sim, input);
+        }
+        assert!(sim.unit(player).unwrap().soldier.pos.distance(start) > 0.5);
+
+        input.movement = Some(Vec2::ZERO);
+        input.buttons = buttons::SWITCH_WEAPON;
+        let pad = sample(&mut sim, input);
+        assert_eq!(pad.buttons, buttons::ROLL_STANCE);
+        input.buttons = 0;
+        for _ in 0..180 {
+            sample(&mut sim, input);
+        }
+        assert_eq!(
+            sim.unit(player).unwrap().droideka_form(),
+            Some(core::droideka::Form::Ball)
+        );
+    }
+
+    #[test]
+    fn seat_sticks_stand_in_for_a_gamepads_and_leave_it_alone_when_centred() {
+        let held = PadState {
+            lx: 100,
+            ry: -100,
+            ..Default::default()
+        };
+        assert_eq!(seat_sticks(Input::default(), held, 1.0), held);
+        let input = Input {
+            movement: Some(Vec2::Y),
+            right_stick: Vec2::NEG_X,
+            ..Default::default()
+        };
+        let pad = seat_sticks(input, held, 1.0);
+        assert_eq!((pad.lx, pad.ly), (0, i16::MAX));
+        assert_eq!((pad.rx, pad.ry), (input::look_axis(-1.0, 1.0), 0));
     }
 
     #[test]

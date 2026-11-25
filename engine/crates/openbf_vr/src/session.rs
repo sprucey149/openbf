@@ -15,8 +15,8 @@ use extensions::OPENBF_VR_ID;
 use glam::Vec3;
 use openxr as xr;
 use render::{
-    DrawCmd, FrameTarget, OverlayFn, Renderer, SkinnedDrawCmd, ViewFov, ViewProjection, Visor,
-    VisorEye, VisorPass,
+    DrawCmd, FrameTarget, OverlayFn, Renderer, ReticlePass, SkinnedDrawCmd, ViewFov,
+    ViewProjection, Visor, VisorEye, VisorPass, WorldReticle,
 };
 use std::sync::Arc;
 
@@ -172,6 +172,7 @@ struct Frame {
     guns: [Option<TrackedGun>; 2],
     stereo: bool,
     visor: Option<Visor>,
+    reticle: Option<(WorldReticle, [(render::Camera, ViewFov); 2])>,
 }
 
 fn live_view(view: &SimView<'_>) -> bool {
@@ -199,6 +200,8 @@ pub(crate) struct Vr {
     format: graphics::Format,
     hud_frame: Option<FrameTarget>,
     visor_pass: VisorPass,
+    reticle_frame: Option<FrameTarget>,
+    reticle_pass: ReticlePass,
     menu_pose: Option<(Placement, i64)>,
     menu_cursor: MenuCursor,
     blit: wgpu::util::TextureBlitter,
@@ -243,6 +246,7 @@ impl Vr {
         let eyes = [eye(left)?, eye(right)?];
         let blit = wgpu::util::TextureBlitter::new(&device, format.0);
         let visor_pass = VisorPass::new(&device, renderer.surface_format());
+        let reticle_pass = ReticlePass::new(&device, renderer.surface_format());
         println!(
             "OpenXR: {} using {} ({}×{} / {}×{} per eye)",
             instance.properties()?.runtime_name,
@@ -266,6 +270,8 @@ impl Vr {
             format,
             hud_frame: None,
             visor_pass,
+            reticle_frame: None,
+            reticle_pass,
             menu_pose: None,
             menu_cursor: MenuCursor::default(),
             blit,
@@ -463,6 +469,7 @@ impl Vr {
             input,
             guns: [None; 2],
             stereo,
+            reticle: None,
             visor: stereo.then(|| {
                 let inverse = head.orientation.conjugate();
                 Visor::new(views.map(|eye| {
@@ -536,8 +543,24 @@ impl Vr {
         frame: &Frame,
         overlay: Option<OverlayFn<'_>>,
     ) -> Result<()> {
+        if let (Some((reticle, eyes)), Some(source)) = (&frame.reticle, &self.reticle_frame) {
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            for (index, (eye, view)) in self.eyes.iter().zip(eyes).enumerate() {
+                self.reticle_pass.draw(
+                    renderer,
+                    &mut encoder,
+                    &eye.world,
+                    source,
+                    reticle,
+                    view,
+                    index,
+                );
+            }
+            renderer.queue().submit([encoder.finish()]);
+        }
         if let Some(overlay) = overlay {
-            let hud = self.draw_hud(renderer, overlay)?;
+            let held = self.hud_frame.take();
+            let hud = self.paint_frame(renderer, held, overlay)?;
             if let Some(visor) = &frame.visor {
                 let mut encoder = self.device.create_command_encoder(&Default::default());
                 for (index, eye) in self.eyes.iter().enumerate() {
@@ -554,9 +577,15 @@ impl Vr {
         Ok(())
     }
 
-    fn draw_hud(&mut self, renderer: &Renderer, overlay: OverlayFn<'_>) -> Result<FrameTarget> {
+    /// Paint `overlay` over a clear window-sized frame, reusing `held`.
+    fn paint_frame(
+        &self,
+        renderer: &Renderer,
+        held: Option<FrameTarget>,
+        overlay: OverlayFn<'_>,
+    ) -> Result<FrameTarget> {
         let size = renderer.size().into();
-        let target = match self.hud_frame.take().filter(|target| target.size() == size) {
+        let target = match held.filter(|target| target.size() == size) {
             Some(target) => target,
             None => renderer.frame_target(size)?,
         };
@@ -715,15 +744,17 @@ impl ActiveDisplayExtension for Vr {
                     & !(buttons::FIRE | buttons::SECONDARY_FIRE);
             }
             pad.tracked_combat = Some(combat);
-        } else if self.frame.as_ref().is_some_and(|frame| frame.stereo)
-            && sim
-                .sim
-                .unit(sim.player)
-                .is_some_and(|unit| unit.alive && unit.mount.is_some())
-        {
-            pad.buttons |= self.rig.buttons() & core::sim::buttons::ACTION;
+        } else if self.frame.as_ref().is_some_and(|frame| frame.stereo) && rig::piloted(sim) {
+            pad.buttons |= self.rig.seat_buttons(sim);
         }
         pad
+    }
+
+    fn seat_sticks(&self, sim: &SimView<'_>, pad: PadState, look: f32) -> PadState {
+        self.frame
+            .as_ref()
+            .filter(|frame| frame.stereo && self.focused && rig::piloted(sim))
+            .map_or(pad, |frame| rig::seat_sticks(frame.input, pad, look))
     }
 
     fn apply_sprint_latch(
@@ -844,6 +875,31 @@ impl ActiveDisplayExtension for Vr {
             )?;
         }
         frame.finish();
+        Ok(())
+    }
+
+    fn set_reticle(
+        &mut self,
+        renderer: &Renderer,
+        view: &StereoView,
+        point: Vec3,
+        paint: OverlayFn<'_>,
+    ) -> Result<()> {
+        let reticle = self
+            .frame
+            .as_ref()
+            .and_then(|frame| frame.visor)
+            .and_then(|visor| {
+                WorldReticle::facing(point, &view.camera, visor.radians_per_height())
+            });
+        let Some(reticle) = reticle else {
+            return Ok(());
+        };
+        let held = self.reticle_frame.take();
+        self.reticle_frame = Some(self.paint_frame(renderer, held, paint)?);
+        if let Some(frame) = self.frame.as_mut() {
+            frame.reticle = Some((reticle, view.eyes));
+        }
         Ok(())
     }
 

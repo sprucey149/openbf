@@ -59,6 +59,40 @@ pub(super) fn place_tracked_muzzle(
     }
 }
 
+/// Where the local player's next shot lands, for the headset's reticle: along
+/// the seat's barrels, a remote's own line, or the tracked gun on foot.
+/// `None` with nothing to sight along (a lightsaber, an untracked hand).
+pub(super) fn reticle_point(
+    view: &StereoView,
+    walk: &game::walk::WalkSim,
+    visuals: Option<&game::soldier_vis::SoldierVisuals>,
+) -> Option<glam::Vec3> {
+    let (sim, player) = (&walk.sim, walk.player);
+    let unit = sim.unit(player).filter(|u| u.alive)?;
+    let along = |origin: glam::Vec3, dir: glam::Vec3| Some(sim.sight_point(player, origin, dir));
+    if let Some(rocket) = sim.controlled_guided(player) {
+        return along(rocket.pos, rocket.forward());
+    }
+    if let Some(droid) = sim.controlled_droid(player) {
+        return along(droid.muzzle(), droid.aim_frame().0);
+    }
+    if unit.mount.is_some() {
+        return sim.seat_sight_point(player);
+    }
+    if unit.droideka.is_some() {
+        return sim.droideka_sight_point(player);
+    }
+    if sim.weapon_classes[unit.weapon_class].saber.is_some() {
+        return None;
+    }
+    let mount = view.hand_mounts[1]?;
+    let gun = visuals?.tracked_guns(walk)[usize::from(unit.active_channel == 1)]?;
+    along(
+        mount.transform_point3(gun.muzzle),
+        mount.transform_vector3(glam::Vec3::Z).try_normalize()?,
+    )
+}
+
 pub(super) fn stats_pointer(
     mut pad: ui::stats::Pad,
     walk: &game::walk::WalkSim,

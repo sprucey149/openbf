@@ -1100,7 +1100,43 @@ pub fn draw_shell_profiles(
     ctx.out
 }
 
+/// The layout's centre reticle group: the cross, its hit marks and the ammo,
+/// refire and heat rings around it.
+pub const RETICLE_GROUP: &str = "player1reticule";
+
 pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
+    draw_tree(hud, art, size, None)
+}
+
+/// [`draw`] with the [`RETICLE_GROUP`] laid out apart, for a view that places
+/// it in the world: (everything else, the reticle at the middle of a `size`
+/// window). The second frame is empty while no tree is drawn.
+pub fn draw_detached(hud: &Hud, art: &HudArt, size: [f32; 2]) -> (HudFrame, HudFrame) {
+    let reticle = hud.find(RETICLE_GROUP);
+    let frame = draw_tree(hud, art, size, reticle);
+    let tree = hud.shell.is_none()
+        && hud.banner.is_none()
+        && hud.stats.is_none()
+        && hud.spawn.as_ref().is_none_or(|page| page.keeps_tree());
+    let mut ctx = Ctx {
+        hud,
+        art,
+        out: HudFrame::default(),
+        clip: None,
+    };
+    if let Some(r) = reticle.filter(|_| tree) {
+        let screen = Screen {
+            origin: [0.5 * size[0], 0.5 * size[1]],
+            scale: frame_scale(size),
+        };
+        let at = hud.elems[r].pos;
+        let parent = Mat4::from_translation(Vec3::new(-at.x, -at.y, 0.0));
+        ctx.element(r, &parent, &screen);
+    }
+    (frame, ctx.out)
+}
+
+fn draw_tree(hud: &Hud, art: &HudArt, size: [f32; 2], skip: Option<usize>) -> HudFrame {
     let mut ctx = Ctx {
         hud,
         art,
@@ -1181,6 +1217,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         ctx.scope(v, size);
     }
     let mut order: Vec<usize> = if tree { hud.roots.clone() } else { Vec::new() };
+    order.retain(|r| Some(*r) != skip);
     order.reverse();
     order.sort_by_key(|c| std::cmp::Reverse(hud.elems[*c].z_order));
     for r in order {

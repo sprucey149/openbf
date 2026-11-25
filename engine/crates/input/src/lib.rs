@@ -727,6 +727,12 @@ fn move_axis(v: f32, full: f32) -> f32 {
     (dz(v) / full).clamp(-1.0, 1.0)
 }
 
+/// A left-stick axis as the sim reads it, for a stick no gilrs pad reports
+/// (a motion controller's).
+pub fn drive_axis(v: f32) -> i16 {
+    PadState::quantize(move_axis(v, STICK_FULL))
+}
+
 /// A right-stick axis as the sim reads it: the deadzone, [`LOOK_SCALE`] and
 /// the player's look sensitivity `look` (1 = the stick as [`LOOK_SCALE`]
 /// gives it; the setting is `ui::menu::PAD_LOOK_SENSITIVITY_RANGE`).
