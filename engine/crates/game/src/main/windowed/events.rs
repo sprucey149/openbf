@@ -1449,7 +1449,7 @@ impl winit::application::ApplicationHandler for App {
                                 .ctf
                                 .as_ref()
                                 .and(self.soldier_vis.as_ref())
-                                .map(|v| v.jet_frames(walk)),
+                                .map(|v| v.flag_ribcage_frames(walk)),
                         );
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
                         extra.extend(self.vehicle_vis.campaign_flags(walk));
@@ -1683,7 +1683,7 @@ impl winit::application::ApplicationHandler for App {
                                 .soldier_vis
                                 .as_ref()
                                 .map(|v| {
-                                    let mut points = v.fire_points(walk);
+                                    let mut points = v.flash_fire_points(walk);
                                     self.deka_vis.fire_points(&walk.sim, &mut points);
                                     if let Some(view) = stereo_view {
                                         super::xr::place_tracked_muzzle(

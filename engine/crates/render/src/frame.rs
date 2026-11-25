@@ -147,9 +147,15 @@ impl Renderer {
         1
     }
 
-    fn draw_skinned(&self, pass: &mut wgpu::RenderPass<'_>, d: &SkinnedDrawCmd, i: usize) {
+    fn draw_skinned(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        d: &SkinnedDrawCmd,
+        i: usize,
+        palette_slot: usize,
+    ) {
         pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
-        pass.set_bind_group(2, &self.palette_bg, &[(i * PALETTE_STRIDE) as u32]);
+        pass.set_bind_group(2, &self.palette_bg, &[(palette_slot * PALETTE_STRIDE) as u32]);
         let inst = i as u32;
         draw_mesh(
             pass,

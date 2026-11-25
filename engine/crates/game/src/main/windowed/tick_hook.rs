@@ -113,7 +113,7 @@ impl TickHook<'_> {
         let buff_loops = self.fx.buff_loops(&walk.sim);
         if let Some(vis) = self.soldier_vis.as_deref_mut() {
             vis.note_shots(walk);
-            let mut points = vis.fire_points(walk);
+            let mut points = vis.tick_fire_points(walk, |_| false);
             self.deka_vis.fire_points(&walk.sim, &mut points);
             if let Some(view) = self
                 .display_ext

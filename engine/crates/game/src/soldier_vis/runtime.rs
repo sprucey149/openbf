@@ -4,9 +4,9 @@ mod animation;
 
 use super::weapon_part_additive;
 use super::{
-    drawn, fire_point, held_or_primary, model_of, part_groups, part_spec, rider_now, seat_now,
-    turn_number, with_spec, ClassDraw, DrawPlan, FlashModel, NativeDraw, SeatClock, SoldierAsset,
-    SoldierVisuals, UnitVisual, WeaponAsset, CORPSE_SECS,
+    drawn, fire_point, held_or_primary, model_of, part_groups, part_spec, push_with_spec,
+    rider_now, seat_now, turn_number, ClassDraw, DrawPlan, FlashModel, NativeDraw, SeatClock,
+    SoldierAsset, SoldierVisuals, UnitVisual, WeaponAsset, CORPSE_SECS,
 };
 use crate::animator::{AnimInput, Animator, ClassAnim, Rig};
 use crate::assets::{load_visual_skinned_glb, SkinnedAsset};
@@ -16,10 +16,6 @@ use glam::{Mat4, Vec3};
 use render::{ParticleDraw, Renderer, SkinnedDrawCmd, TextureHandle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
-/// The bone a jet effect rides (card JETP2, PROVISIONAL: `crate::fx`
-/// `jet.rs`).
-pub const JET_BONE: &str = "bone_ribcage";
 
 fn resolve_side_dir(assets_dir: &Path, game: &str, subdir: &str, file: &str) -> (PathBuf, String) {
     let primary = assets_dir.join(format!("side_{game}"));
@@ -565,7 +561,43 @@ impl SoldierVisuals {
         } else {
             Self::load_cloths(&side, geometry, &asset)
         };
-        let (lod, low) = Self::load_low(r, assets_dir, &effective_game, geometry, &asset, cache);
+        let (lod, low) = Self::load_low(
+            r.as_deref_mut(),
+            assets_dir,
+            &effective_game,
+            geometry,
+            &asset,
+            cache,
+        );
+        if let (Some(r), Some(low_asset)) = (r, low.as_deref()) {
+            let low_opaque: Vec<render::SkinnedMeshHandle> = low_asset
+                .meshes
+                .iter()
+                .filter(|(_, _, layer, _)| *layer == render::DrawLayer::Opaque)
+                .map(|(h, ..)| *h)
+                .collect();
+            let high_opaque: Vec<render::SkinnedMeshHandle> = meshes
+                .iter()
+                .enumerate()
+                .filter(|(k, (_, _, layer, _))| {
+                    *layer == render::DrawLayer::Opaque
+                        && !cloths.iter().any(|c| c.raw.part == *k)
+                })
+                .map(|(_, (h, ..))| *h)
+                .collect();
+            if !low_opaque.is_empty() && high_opaque.len() >= low_opaque.len() {
+                for (i, &high_handle) in high_opaque.iter().enumerate() {
+                    r.set_skinned_shadow_proxy(high_handle, low_opaque.get(i).copied());
+                }
+                for (k, (h, _, layer, _)) in meshes.iter().enumerate() {
+                    if *layer == render::DrawLayer::Opaque
+                        && cloths.iter().any(|c| c.raw.part == k)
+                    {
+                        r.set_skinned_shadow_proxy(*h, None);
+                    }
+                }
+            }
+        }
         println!(
             "soldier {geometry}: {} bones, {} clips, {} parts",
             asset.skeleton.len(),
@@ -899,74 +931,86 @@ impl SoldierVisuals {
         self.posed_for(walk, false)
     }
 
+    /// One unit's posed draw state: `(asset, model, palette)`, or `None` when
+    /// it is not drawn. Memoizes the skeleton palette on `UnitVisual`.
+    pub(super) fn pose_unit(
+        &self,
+        walk: &WalkSim,
+        i: usize,
+        view: bool,
+    ) -> Option<(&SoldierAsset, Mat4, std::sync::Arc<[Mat4]>)> {
+        let u = walk.sim.units.get(i)?;
+        if u.droideka.is_some()
+            || (view && self.lod_view.choice(i) == super::lod::Choice::Hidden)
+        {
+            return None;
+        }
+        let at = self.asset_index(u.team, u.spec.class)?;
+        let sa = &self.assets[at];
+        let v = self.units.get(i)?;
+        // A droid that burst leaves no body to draw (card DROIDDEATH);
+        // a cloaked soldier is not drawn (card CLOAK).
+        // Tick effects can read the pose before sync_units has seen a
+        // hero take over the same unit slot and generation.
+        if !u.cloak.visible()
+            || v.gen != u.gen
+            || v.body != Some((u.team, u.spec.class, Some(at)))
+            || (!u.alive && (u.burst || v.gone || v.dead_for > CORPSE_SECS))
+        {
+            return None;
+        }
+        if !u.alive && !v.animator.posed() {
+            return None;
+        }
+        // A rider is hidden but in a seat that shows him (cards VTURG,
+        // VRIDE), who is drawn in every view, his own too.
+        let model = match (u.mount, v.seat_model) {
+            (Some(mount), Some(m)) => walk
+                .sim
+                .vehicle(mount.vehicle)
+                .filter(|v| v.kind == core::vehicle::VehicleKind::Walker)
+                .and_then(|_| {
+                    rider_now(
+                        &self.walker_rigs,
+                        &self.hover_rigs,
+                        &self.hover_nine,
+                        walk,
+                        mount,
+                        self.bf2,
+                    )
+                })
+                .map_or(m, |r| r.model),
+            (Some(_), None) => return None,
+            // In the scope view the player's own body is not drawn.
+            (None, _) if i == walk.player.index as usize && walk.player_body_hidden() => {
+                return None;
+            }
+            (None, _) => model_of(&u.soldier),
+        };
+        let compute = || -> std::sync::Arc<[Mat4]> {
+            let pose = v.animator.pose(&sa.asset.skeleton);
+            sa.asset.skeleton.palette_from_pose(&pose).into()
+        };
+        let (posed_for, memo) = v.palette.get_or_init(|| (at, compute()));
+        // A class change within a tick, before the animator has seen it.
+        let palette = if *posed_for == at {
+            memo.clone()
+        } else {
+            compute()
+        };
+        Some((sa, model, palette))
+    }
+
     pub(super) fn posed_for(
         &self,
         walk: &WalkSim,
         view: bool,
     ) -> Vec<(usize, &SoldierAsset, Mat4, std::sync::Arc<[Mat4]>)> {
         let mut out = Vec::new();
-        for (i, u) in walk.sim.units.iter().enumerate() {
-            if u.droideka.is_some()
-                || (view && self.lod_view.choice(i) == super::lod::Choice::Hidden)
-            {
-                continue;
+        for i in 0..walk.sim.units.len() {
+            if let Some((sa, model, palette)) = self.pose_unit(walk, i, view) {
+                out.push((i, sa, model, palette));
             }
-            let Some(at) = self.asset_index(u.team, u.spec.class) else {
-                continue;
-            };
-            let sa = &self.assets[at];
-            let Some(v) = self.units.get(i) else { continue };
-            // A droid that burst leaves no body to draw (card DROIDDEATH);
-            // a cloaked soldier is not drawn (card CLOAK).
-            // Tick effects can read the pose before sync_units has seen a
-            // hero take over the same unit slot and generation.
-            if !u.cloak.visible()
-                || v.gen != u.gen
-                || v.body != Some((u.team, u.spec.class, Some(at)))
-                || (!u.alive && (u.burst || v.gone || v.dead_for > CORPSE_SECS))
-            {
-                continue;
-            }
-            if !u.alive && !v.animator.posed() {
-                continue;
-            }
-            // A rider is hidden but in a seat that shows him (cards VTURG,
-            // VRIDE), who is drawn in every view, his own too.
-            let model = match (u.mount, v.seat_model) {
-                (Some(mount), Some(m)) => walk
-                    .sim
-                    .vehicle(mount.vehicle)
-                    .filter(|v| v.kind == core::vehicle::VehicleKind::Walker)
-                    .and_then(|_| {
-                        rider_now(
-                            &self.walker_rigs,
-                            &self.hover_rigs,
-                            &self.hover_nine,
-                            walk,
-                            mount,
-                            self.bf2,
-                        )
-                    })
-                    .map_or(m, |r| r.model),
-                (Some(_), None) => continue,
-                // In the scope view the player's own body is not drawn.
-                (None, _) if i == walk.player.index as usize && walk.player_body_hidden() => {
-                    continue
-                }
-                (None, _) => model_of(&u.soldier),
-            };
-            let compute = || -> std::sync::Arc<[Mat4]> {
-                let pose = v.animator.pose(&sa.asset.skeleton);
-                sa.asset.skeleton.palette(&pose.locals()).into()
-            };
-            let (posed_for, memo) = v.palette.get_or_init(|| (at, compute()));
-            // A class change within a tick, before the animator has seen it.
-            let palette = if *posed_for == at {
-                memo.clone()
-            } else {
-                compute()
-            };
-            out.push((i, sa, model, palette));
         }
         out
     }
@@ -995,7 +1039,7 @@ impl SoldierVisuals {
         };
         let sk = &sa.asset.skeleton;
         let pose = v.animator.pose(sk);
-        let palette = sk.palette(&pose.locals());
+        let palette = sk.palette_from_pose(&pose);
         sk.names
             .iter()
             .enumerate()
@@ -1180,12 +1224,25 @@ impl SoldierVisuals {
     /// a jet's effect rides (card JETP2, `crate::fx` `jet.rs`). `None` for a
     /// unit drawn without a model or without the bone, or in a seat.
     pub fn jet_frames(&self, walk: &WalkSim) -> Vec<Option<Mat4>> {
+        self.jet_frames_where(walk, |_, _| true)
+    }
+
+    /// Like [`Self::jet_frames`], but only evaluates poses for units where
+    /// `include(index, unit)` returns true.
+    pub fn jet_frames_where(
+        &self,
+        walk: &WalkSim,
+        include: impl Fn(usize, &core::unit::Unit) -> bool,
+    ) -> Vec<Option<Mat4>> {
         let mut out = vec![None; walk.sim.units.len()];
-        for (i, sa, model, palette) in self.posed(walk) {
-            if walk.sim.units[i].mount.is_some() {
+        for (i, u) in walk.sim.units.iter().enumerate() {
+            if u.mount.is_some() || !include(i, u) {
                 continue;
             }
-            let Some(b) = sa.asset.skeleton.index_of(JET_BONE) else {
+            let Some((sa, model, palette)) = self.pose_unit(walk, i, false) else {
+                continue;
+            };
+            let Some(b) = sa.asset.skeleton.ribcage else {
                 continue;
             };
             out[i] = Some(model * palette[b] * sa.asset.skeleton.global_bind[b]);
@@ -1193,10 +1250,33 @@ impl SoldierVisuals {
         out
     }
 
+    /// `bone_ribcage` world matrices only for units currently carrying a CTF
+    /// flag on foot.
+    pub fn flag_ribcage_frames(&self, walk: &WalkSim) -> Vec<Option<Mat4>> {
+        let Some(ctf) = &walk.sim.ctf else {
+            return Vec::new();
+        };
+        let any_carried = ctf
+            .flags
+            .iter()
+            .any(|f| matches!(f.status, core::sim::FlagStatus::Carried { .. }));
+        if !any_carried {
+            return vec![None; walk.sim.units.len()];
+        }
+        self.jet_frames_where(walk, |i, _| {
+            ctf.flags.iter().any(|f| {
+                matches!(f.status, core::sim::FlagStatus::Carried { carrier } if carrier.index as usize == i)
+            })
+        })
+    }
+
     pub fn burn_frames(&self, walk: &WalkSim) -> Vec<Vec<Option<Mat4>>> {
         let mut out = vec![Vec::new(); walk.sim.units.len()];
-        for (i, sa, model, palette) in self.posed(walk) {
-            let Some((_, effects)) = walk.sim.burn_effects(&walk.sim.units[i]) else {
+        for (i, u) in walk.sim.units.iter().enumerate() {
+            let Some((_, effects)) = walk.sim.burn_effects(u) else {
+                continue;
+            };
+            let Some((sa, model, palette)) = self.pose_unit(walk, i, false) else {
                 continue;
             };
             out[i] = effects
@@ -1217,42 +1297,118 @@ impl SoldierVisuals {
     /// sits and the drawn bolt starts (`crate::bolt_vis`). Specialized rigs
     /// overlay their animated points with `DroidekaVisuals::fire_points`.
     pub fn fire_points(&self, walk: &WalkSim) -> Vec<Option<Vec3>> {
+        self.fire_points_where(walk, |_, _| true)
+    }
+
+    /// Like [`Self::fire_points`], but only computes poses for units where
+    /// `include(index, unit)` returns true.
+    pub fn fire_points_where(
+        &self,
+        walk: &WalkSim,
+        include: impl Fn(usize, &core::unit::Unit) -> bool,
+    ) -> Vec<Option<Vec3>> {
         let mut out: Vec<Option<Vec3>> = walk
             .sim
             .units
             .iter()
-            .map(|u| u.droideka_gun(1).filter(|_| u.alive && !u.burst))
+            .enumerate()
+            .map(|(i, u)| {
+                if include(i, u) {
+                    u.droideka_gun(1).filter(|_| u.alive && !u.burst)
+                } else {
+                    None
+                }
+            })
             .collect();
-        for (i, sa, model, palette) in self.posed(walk) {
-            if let (Some(hp), None) = (sa.hp_weapons, walk.sim.units[i].mount) {
-                let u = &walk.sim.units[i];
-                let in_hand = self.hand_of(u, &walk.sim.weapon_classes);
-                let name = walk
-                    .sim
-                    .weapon_classes
-                    .get(in_hand.class)
-                    .and_then(|w| w.flash.as_ref())
-                    .map_or(core::flash::DEFAULT_FIRE_POINT, |f| f.fire_point.as_str());
-                let hand = model * palette[hp] * sa.asset.skeleton.global_bind[hp];
-                out[i] = Some(match self.weapon_for(u.team, u.spec.class, in_hand.slot) {
-                    Some(w) => fire_point(hand, &w.nodes, name),
-                    None => hand.transform_point3(Vec3::ZERO),
-                });
-            }
-        }
         for (i, u) in walk.sim.units.iter().enumerate() {
-            if let Some(frame) = u
-                .mount
-                .filter(|_| u.alive)
-                .and_then(|m| self.walker_fire_frame(walk, m))
-            {
-                out[i] = Some(frame.w_axis.truncate());
+            if !include(i, u) {
+                continue;
             }
+            if let Some(m) = u.mount {
+                if u.alive {
+                    if let Some(frame) = self.walker_fire_frame(walk, m) {
+                        out[i] = Some(frame.w_axis.truncate());
+                    }
+                }
+                continue;
+            }
+            let Some((sa, model, palette)) = self.pose_unit(walk, i, false) else {
+                continue;
+            };
+            let Some(hp) = sa.hp_weapons else {
+                continue;
+            };
+            let in_hand = self.hand_of(u, &walk.sim.weapon_classes);
+            let name = walk
+                .sim
+                .weapon_classes
+                .get(in_hand.class)
+                .and_then(|w| w.flash.as_ref())
+                .map_or(core::flash::DEFAULT_FIRE_POINT, |f| f.fire_point.as_str());
+            let hand = model * palette[hp] * sa.asset.skeleton.global_bind[hp];
+            out[i] = Some(match self.weapon_for(u.team, u.spec.class, in_hand.slot) {
+                Some(w) => fire_point(hand, &w.nodes, name),
+                None => hand.transform_point3(Vec3::ZERO),
+            });
         }
         if let Some((i, p)) = self.fp.muzzle(walk) {
-            out[i] = Some(p);
+            if walk.sim.units.get(i).is_some_and(|u| include(i, u)) {
+                out[i] = Some(p);
+            }
         }
         out
+    }
+
+    /// Fire points only for units that currently have a muzzle flash window
+    /// active (`shot_tick.is_some()` on foot).
+    pub fn flash_fire_points(&self, walk: &WalkSim) -> Vec<Option<Vec3>> {
+        self.fire_points_where(walk, |i, u| {
+            u.mount.is_none()
+                && self
+                    .units
+                    .get(i)
+                    .is_some_and(|v| v.shot_tick.is_some())
+        })
+    }
+
+    /// Fire points only for units that fired a shot or spawned a bolt on the
+    /// current tick (plus any extra units matching `extra`).
+    pub fn tick_fire_points(
+        &self,
+        walk: &WalkSim,
+        extra: impl Fn(usize) -> bool,
+    ) -> Vec<Option<Vec3>> {
+        let n = walk.sim.units.len();
+        let mut needed = vec![false; n];
+        let mut any = false;
+        for e in &walk.sim.events {
+            if let core::sim::Event::Shot { unit, .. } = e {
+                let idx = unit.index as usize;
+                if idx < n {
+                    needed[idx] = true;
+                    any = true;
+                }
+            }
+        }
+        for b in &walk.sim.bolts {
+            if b.age <= core::TICK_DT * 1.5 {
+                let idx = b.owner.index as usize;
+                if idx < n {
+                    needed[idx] = true;
+                    any = true;
+                }
+            }
+        }
+        for (i, flag) in needed.iter_mut().enumerate() {
+            if !*flag && extra(i) {
+                *flag = true;
+                any = true;
+            }
+        }
+        if !any {
+            return vec![None; n];
+        }
+        self.fire_points_where(walk, |i, _| needed[i])
     }
 
     pub fn force_points(&self, walk: &WalkSim) -> Vec<Option<Vec3>> {
@@ -1296,7 +1452,7 @@ impl SoldierVisuals {
     }
 
     pub fn flash_draws(&self, walk: &WalkSim) -> Vec<ParticleDraw> {
-        self.flash_draws_at(walk, &self.fire_points(walk))
+        self.flash_draws_at(walk, &self.flash_fire_points(walk))
     }
 
     /// Flash particles at the drawn muzzle points, including specialized rigs.
@@ -1419,7 +1575,7 @@ impl SoldierVisuals {
                     model.transform_point3(glam::Vec3::ZERO),
                 )),
             };
-            out.extend(with_spec(base, *spec));
+            push_with_spec(out, base, *spec);
         }
     }
 
@@ -1490,7 +1646,7 @@ impl SoldierVisuals {
             let palette = sa
                 .asset
                 .skeleton
-                .palette(&animator.pose(&sa.asset.skeleton).locals());
+                .palette_from_pose(&animator.pose(&sa.asset.skeleton));
             for (p, j) in m.positions.iter().zip(&m.joints) {
                 let bone = palette.get(usize::from(j[0]))?;
                 outline.add(bone.transform_point3(glam::Vec3::from(*p)));
@@ -1528,7 +1684,7 @@ impl SoldierVisuals {
         let palette: std::sync::Arc<[Mat4]> = sa
             .asset
             .skeleton
-            .palette(&animator.pose(&sa.asset.skeleton).locals())
+            .palette_from_pose(&animator.pose(&sa.asset.skeleton))
             .into();
         let mut body = Vec::new();
         self.body_draws(sa, (team, class), model, &palette, false, &mut body);

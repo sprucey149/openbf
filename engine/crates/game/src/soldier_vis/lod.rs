@@ -230,24 +230,25 @@ impl SoldierVisuals {
             let Some(sa) = self.asset_for(u.team, u.spec.class) else {
                 continue;
             };
-            // Missing companion preserves the previous full-detail draw at
-            // every distance, including old bakes. Saber bodies keep their
-            // existing draw alongside their separately submitted blade/trail
-            // passes; their LOD is outside this ordinary-soldier change.
-            if sa.low.is_none() || self.saber_visual(u.team, u.spec.class).is_some() {
-                self.lod_view.choices[i] = Choice::High;
-                continue;
-            }
+            let saber = self.saber_visual(u.team, u.spec.class).is_some();
             // Never substitute another class's low mesh.
             let sphere = sa.lod.as_ref().map_or([0.0, 1.0, 0.0, 1.5], |l| l.sphere);
             let model = v.seat_model.unwrap_or_else(|| super::model_of(&u.soldier));
             let center = model.transform_point3(Vec3::from_slice(&sphere[..3]));
-            let radius = sphere[3] + SPHERE_MARGIN;
+            let radius = sphere[3] + SPHERE_MARGIN + if saber { 1.0 } else { 0.0 };
             if frusta.iter().all(|planes| {
                 planes
                     .iter()
                     .any(|p: &Vec4| p.dot(center.extend(1.0)) < -radius)
             }) {
+                continue;
+            }
+            // Missing companion preserves the previous full-detail draw at
+            // every distance, including old bakes. Saber bodies keep their
+            // existing draw alongside their separately submitted blade/trail
+            // passes; their LOD is outside this ordinary-soldier change.
+            if sa.low.is_none() || saber {
+                self.lod_view.choices[i] = Choice::High;
                 continue;
             }
             let p = view.transform_point3(center);

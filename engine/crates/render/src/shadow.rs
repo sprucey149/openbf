@@ -141,6 +141,7 @@ fn on_grid(v: Vec3) -> Vec3 {
 
 pub(crate) struct ShadowState {
     vertices: Vec<[f32; 3]>,
+    pub(crate) scratch: crate::character_shadow::Scratch,
     buffer: wgpu::Buffer,
     capacity: usize,
     uniform: wgpu::Buffer,
@@ -148,6 +149,7 @@ pub(crate) struct ShadowState {
     volume: wgpu::RenderPipeline,
     shade: wgpu::RenderPipeline,
     display_format: wgpu::TextureFormat,
+    unclipped_depth: bool,
 }
 impl ShadowState {
     pub fn new(
@@ -156,6 +158,9 @@ impl ShadowState {
         display: Option<wgpu::TextureFormat>,
     ) -> Self {
         let display_format = display.unwrap_or(format);
+        let unclipped_depth = device
+            .features()
+            .contains(wgpu::Features::DEPTH_CLIP_CONTROL);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shadow volume"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shadow.wgsl").into()),
@@ -192,6 +197,16 @@ impl ShadowState {
             pass_op: wgpu::StencilOperation::Keep,
         };
         let make = |shade: bool| {
+            let depth_only = !shade && unclipped_depth;
+            let targets = [Some(wgpu::ColorTargetState {
+                format: if shade { display_format } else { format },
+                blend: shade.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: if shade {
+                    wgpu::ColorWrites::COLOR
+                } else {
+                    wgpu::ColorWrites::empty()
+                },
+            })];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(if shade {
                     "shadow darkening"
@@ -201,7 +216,13 @@ impl ShadowState {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: Some(if shade { "vs_full" } else { "vs_volume" }),
+                    entry_point: Some(if shade {
+                        "vs_full"
+                    } else if depth_only {
+                        "vs_volume_unclipped"
+                    } else {
+                        "vs_volume"
+                    }),
                     buffers: if shade {
                         &[]
                     } else {
@@ -219,6 +240,7 @@ impl ShadowState {
                 },
                 primitive: wgpu::PrimitiveState {
                     cull_mode: None,
+                    unclipped_depth: depth_only,
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
@@ -253,7 +275,7 @@ impl ShadowState {
                     bias: Default::default(),
                 }),
                 multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
+                fragment: (!depth_only).then(|| wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some(if !shade {
                         "fs_volume"
@@ -262,15 +284,7 @@ impl ShadowState {
                     } else {
                         "fs_black"
                     }),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: if shade { display_format } else { format },
-                        blend: shade.then_some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: if shade {
-                            wgpu::ColorWrites::COLOR
-                        } else {
-                            wgpu::ColorWrites::empty()
-                        },
-                    })],
+                    targets: &targets,
                     compilation_options: Default::default(),
                 }),
                 multiview: None,
@@ -279,6 +293,7 @@ impl ShadowState {
         };
         Self {
             vertices: Vec::new(),
+            scratch: crate::character_shadow::Scratch::default(),
             buffer: crate::resources::buffer(
                 device,
                 "shadow triangles",
@@ -291,6 +306,7 @@ impl ShadowState {
             volume: make(false),
             shade: make(true),
             display_format,
+            unclipped_depth,
         }
     }
     pub fn clear(&mut self) {
@@ -301,8 +317,10 @@ impl ShadowState {
         self.vertices.is_empty()
     }
 
-    pub fn vertices_mut(&mut self) -> &mut Vec<[f32; 3]> {
-        &mut self.vertices
+    pub fn vertices_and_scratch_mut(
+        &mut self,
+    ) -> (&mut Vec<[f32; 3]>, &mut crate::character_shadow::Scratch) {
+        (&mut self.vertices, &mut self.scratch)
     }
 
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Mat4) {
@@ -360,21 +378,23 @@ impl ShadowState {
         depth: &wgpu::TextureView,
         shade: bool,
     ) {
+        let depth_only = !shade && self.unclipped_depth;
+        let color_att = [Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })];
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(if shade {
                 "shadow darkening"
             } else {
                 "shadow stencil"
             }),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            color_attachments: if depth_only { &[] } else { &color_att },
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: depth,
                 depth_ops: Some(wgpu::Operations {

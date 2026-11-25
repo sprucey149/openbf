@@ -311,12 +311,14 @@ impl SoldierVisuals {
 
     pub fn saber_hilts(&self, walk: &WalkSim) -> Vec<render::DrawCmd> {
         let mut out = Vec::new();
-        for (i, asset, model, palette) in self.posed(walk) {
-            let u = &walk.sim.units[i];
+        for (i, u) in walk.sim.units.iter().enumerate() {
             if u.mount.is_some() {
                 continue;
             }
             let Some(visual) = self.saber_visual(u.team, u.spec.class) else {
+                continue;
+            };
+            let Some((asset, model, palette)) = self.pose_unit(walk, i, false) else {
                 continue;
             };
             let flying = self.flying_transform(walk, i).is_some();
@@ -354,12 +356,14 @@ impl SoldierVisuals {
     /// with authored half-widths and one sheet for the core and halo.
     pub fn saber_draws(&self, walk: &WalkSim) -> Vec<ParticleDraw> {
         let mut out = Vec::new();
-        for (i, asset, model, palette) in self.posed(walk) {
-            let u = &walk.sim.units[i];
+        for (i, u) in walk.sim.units.iter().enumerate() {
             if !u.alive || u.mount.is_some() {
                 continue;
             }
             let Some(visual) = self.saber_visual(u.team, u.spec.class) else {
+                continue;
+            };
+            let Some((asset, model, palette)) = self.pose_unit(walk, i, false) else {
                 continue;
             };
             let hidden = u.weapon.melee.as_ref().map_or(0, |s| s.hidden_edges);

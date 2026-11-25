@@ -211,17 +211,17 @@ fn constraints_and_authored_collision_shapes_project_as_on_ps2() {
     assert_eq!(p, [Vec3::ZERO, Vec3::NEG_Y]);
     let m = Mat4::from_translation(Vec3::new(3., 2., 1.));
     let mut p = m.transform_point3(Vec3::new(0.25, 0., 0.));
-    collide(&mut p, 0, Vec3::splat(1.), m);
+    collide(&mut p, 0, Vec3::splat(1.), m, m.inverse());
     assert_eq!(p, m.transform_point3(Vec3::X));
     let mut p = Vec3::new(0.8, 0., 0.);
-    collide(&mut p, 1, Vec3::new(1., 1., 0.), Mat4::IDENTITY);
+    collide(&mut p, 1, Vec3::new(1., 1., 0.), Mat4::IDENTITY, Mat4::IDENTITY);
     assert_eq!(p, Vec3::X);
     let mut p = Vec3::new(-0.8, 0., 0.);
-    collide(&mut p, 2, Vec3::ONE, Mat4::IDENTITY);
+    collide(&mut p, 2, Vec3::ONE, Mat4::IDENTITY, Mat4::IDENTITY);
     assert_eq!(p, Vec3::NEG_X);
     let rotated = m * Mat4::from_rotation_y(0.7) * Mat4::from_rotation_z(-0.4);
     let mut p = rotated.transform_point3(Vec3::new(-0.8, 0., 0.));
-    collide(&mut p, 2, Vec3::ONE, rotated);
+    collide(&mut p, 2, Vec3::ONE, rotated, rotated.inverse());
     assert!(p.distance(rotated.transform_point3(Vec3::NEG_X)) < 1e-5);
 }
 

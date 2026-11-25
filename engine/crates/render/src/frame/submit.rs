@@ -171,8 +171,16 @@ impl Renderer {
         }
         let scene_camera = camera.reaching(self.far_range);
         let view_proj = projection.view_projection(&scene_camera, aspect);
+        let frustum = frustum::Frustum::from_view_proj(&view_proj);
         if let Some(sun) = sun_direction.filter(|_| use_sun_shadow) {
-            self.prepare_character_shadows(camera.position, sun, view_proj, draws, skinned);
+            self.prepare_character_shadows(
+                camera.position,
+                sun,
+                view_proj,
+                &frustum,
+                draws,
+                skinned,
+            );
         }
         let iface_view_proj = projection.view_projection(
             &Camera {
@@ -181,7 +189,6 @@ impl Renderer {
             },
             aspect,
         );
-        let frustum = frustum::Frustum::from_view_proj(&view_proj);
         let (lighting, dome_gain) = self.lightning.unwrap_or((self.lighting, 1.0));
         let water_fog = lighting.water_fog.or(lighting.fog);
         let globals = Globals {
@@ -547,7 +554,26 @@ impl Renderer {
                 .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances));
         }
 
+        // Deduplicate consecutive identical palettes (a soldier's opaque, blend
+        // and specular submeshes all share one `Arc<[Mat4]>`).
+        let mut palette_slots: Vec<usize> = Vec::with_capacity(skinned.len());
         if !skinned.is_empty() {
+            let mut unique_palettes: Vec<usize> = Vec::new();
+            let mut last_ptr: Option<(*const glam::Mat4, usize, usize)> = None;
+            for (i, d) in skinned.iter().enumerate() {
+                let ptr = d.palette.as_ptr();
+                let len = d.palette.len();
+                let slot = match last_ptr {
+                    Some((lp, ll, slot)) if lp == ptr && ll == len => slot,
+                    _ => {
+                        let slot = unique_palettes.len();
+                        unique_palettes.push(i);
+                        last_ptr = Some((ptr, len, slot));
+                        slot
+                    }
+                };
+                palette_slots.push(slot);
+            }
             if skinned.len() > self.palette_capacity {
                 self.palette_capacity = skinned.len().next_power_of_two();
                 let (buf, bg) =
@@ -557,10 +583,10 @@ impl Renderer {
                 self.skinned_instance_buf =
                     create_instance_buffer(&self.device, self.palette_capacity);
             }
-            // Only the joints a draw has: a slot's stride leaves room for
-            // every joint a mesh could use, and those past its palette are
-            // never read (checked above).
-            let size = (skinned.len() * PALETTE_STRIDE) as wgpu::BufferAddress;
+            // Only the joints each unique palette has: a slot's stride leaves
+            // room for every joint a mesh could use, and those past its
+            // palette are never read (checked above).
+            let size = (unique_palettes.len() * PALETTE_STRIDE) as wgpu::BufferAddress;
             let mut palettes = self
                 .queue
                 .write_buffer_with(
@@ -569,9 +595,11 @@ impl Renderer {
                     wgpu::BufferSize::new(size).expect("skinned is not empty"),
                 )
                 .expect("the palette buffer holds every skinned draw");
-            for (i, d) in skinned.iter().enumerate() {
+            for (slot, &draw_idx) in unique_palettes.iter().enumerate() {
+                let d = &skinned[draw_idx];
+                let base = slot * PALETTE_STRIDE;
                 for (j, m) in d.palette.iter().enumerate() {
-                    let at = i * PALETTE_STRIDE + j * 64;
+                    let at = base + j * 64;
                     palettes[at..at + 64]
                         .copy_from_slice(bytemuck::bytes_of(&m.to_cols_array_2d()));
                 }
@@ -1068,7 +1096,7 @@ impl Renderer {
                         });
                         pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                         for &i in &skin_opaque {
-                            self.draw_skinned(&mut pass, &skinned[i], i);
+                            self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i]);
                             draw_calls += 1;
                         }
                     }
@@ -1085,7 +1113,7 @@ impl Renderer {
                         pass.set_bind_group(3, spec_bg, &[]);
                         pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                         for &i in &skin_spec {
-                            self.draw_skinned(&mut pass, &skinned[i], i);
+                            self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i]);
                             draw_calls += 1;
                         }
                     }
@@ -1337,7 +1365,9 @@ impl Renderer {
                         pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
                         draw_mesh(&mut pass, &self.meshes[d.mesh.0 as usize], inst..inst + 1);
                     }
-                    Blended::Skinned(i) => self.draw_skinned(&mut pass, &skinned[i], i),
+                    Blended::Skinned(i) => {
+                        self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i])
+                    }
                 }
                 draw_calls += 1;
             }
@@ -1414,7 +1444,7 @@ impl Renderer {
                 pass.set_pipeline(&self.heat_character_mask);
                 pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                 for &i in &skin_opaque {
-                    self.draw_skinned(&mut pass, &skinned[i], i);
+                    self.draw_skinned(&mut pass, &skinned[i], i, palette_slots[i]);
                     draw_calls += 1;
                 }
             }

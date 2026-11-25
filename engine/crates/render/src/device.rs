@@ -417,14 +417,8 @@ fn request_device(
     };
 
     let required_features = crate::gpu_timer::wanted_features(&adapter)
-        | if adapter
-            .features()
-            .contains(wgpu::Features::DEPTH32FLOAT_STENCIL8)
-        {
-            wgpu::Features::DEPTH32FLOAT_STENCIL8
-        } else {
-            wgpu::Features::empty()
-        };
+        | (adapter.features()
+            & (wgpu::Features::DEPTH32FLOAT_STENCIL8 | wgpu::Features::DEPTH_CLIP_CONTROL));
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("swbf render device"),
         // Timestamp queries only for `OPENBF_GPU_TIMING=1` (`gpu_timer.rs`).

@@ -609,11 +609,6 @@ impl Player {
         let (mask, game) = (if upper { &rig.upper } else { &rig.lower }, rig.game);
         let Some(s) = self.slot else { return };
         let Some(c) = clips.get(s.clip) else { return };
-        let mut sampled = c.sample(skel, self.t * c.frames.saturating_sub(1) as f32, s.looping);
-        if let (Some(true), Some((b, rest))) = (rig.flight.get(s.clip), rig.root_bone) {
-            let x = &mut sampled.0[b].translation;
-            (x.x, x.z) = (rest.x, rest.z);
-        }
         let cur = factor
             * if self.blend > 0.0 {
                 (self.secs / self.blend).fmin(1.0)
@@ -627,17 +622,19 @@ impl Player {
             Game::Bf2 => ((cur - self.weight) / (1.0 - self.weight)).clamp(0.0, 1.0),
         };
         self.weight = cur;
-        for (b, x) in pose.0.iter_mut().enumerate() {
-            if !mask.get(b).copied().unwrap_or(false) {
-                continue;
-            }
-            if k >= 1.0 {
-                // An overwrite gives a bone the clip has no track for its
-                // rest pose (`Clip::sample`'s).
-                *x = sampled.0[b];
-            } else if c.tracks.get(b).is_some_and(Option::is_some) {
-                *x = x.blend(sampled.0[b], k);
-            }
-        }
+        let flight_root = if rig.flight.get(s.clip).copied().unwrap_or(false) {
+            rig.root_bone
+        } else {
+            None
+        };
+        c.sample_masked_into(
+            skel,
+            self.t * c.frames.saturating_sub(1) as f32,
+            s.looping,
+            mask,
+            k,
+            flight_root,
+            pose,
+        );
     }
 }

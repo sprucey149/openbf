@@ -143,7 +143,7 @@ impl ReplayFrame {
         );
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
         self.vehicle_vis
-            .set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| self.vis.jet_frames(walk)));
+            .set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| self.vis.flag_ribcage_frames(walk)));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.vehicle_vis.campaign_flags(&walk));
         draws.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
@@ -172,7 +172,7 @@ impl ReplayFrame {
             &self.holos,
             &items,
         );
-        let mut points = self.vis.fire_points(walk);
+        let mut points = self.vis.flash_fire_points(walk);
         self.deka_vis.fire_points(&walk.sim, &mut points);
         let mut particles = self.vis.flash_draws_at(walk, &points);
         particles.extend(self.vis.saber_draws(walk));
@@ -676,7 +676,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         let mut draws = gpu.draws.clone();
         walk_draws(cube, &walk, &mut draws, Some(&vis));
         vehicle_vis.set_ctf_viewer(walk.sim.unit(walk.player).map(|u| u.team));
-        vehicle_vis.set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| vis.jet_frames(&walk)));
+        vehicle_vis.set_flag_ribcage(walk.sim.ctf.as_ref().map(|_| vis.flag_ribcage_frames(&walk)));
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
         draws.extend(vehicle_vis.campaign_flags(&walk));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));
@@ -950,11 +950,26 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
                 sl.voice(tick, &mut walk);
             }
             frame.vis.update(&walk, core::TICK_DT);
-            let mut fire_points = frame.vis.fire_points(&walk);
+            let mut fire_points = frame
+                .vis
+                .tick_fire_points(&walk, |i| frame.fx.needs_repair_origin(i));
             frame.deka_vis.fire_points(&walk.sim, &mut fire_points);
             frame.fx.set_repair_origins(&fire_points);
             frame.bolts.set_fire_points(fire_points);
-            frame.fx.set_jet_frames(frame.vis.jet_frames(&walk));
+            let jets = if walk
+                .sim
+                .units
+                .iter()
+                .any(|u| u.alive && u.soldier.stance.jetting())
+                || !frame.fx.jets().is_empty()
+            {
+                frame.vis.jet_frames_where(&walk, |i, u| {
+                    u.soldier.stance.jetting() || frame.fx.has_jet_for(i)
+                })
+            } else {
+                Vec::new()
+            };
+            frame.fx.set_jet_frames(jets);
             frame.fx.set_burn_frames(frame.vis.burn_frames(&walk));
             frame.fx.advance_space_dust(&walk, core::TICK_DT);
             frame.fx.update(core::TICK_DT);

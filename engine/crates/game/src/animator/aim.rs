@@ -238,19 +238,21 @@ impl Aim {
         let (yaw, pitch) = self.turn(twist);
         let turn =
             |share: f32| Quat::from_rotation_y(yaw * share) * Quat::from_rotation_x(-pitch * share);
-        for (bones, w) in [(&TORSO[..], torso), (&HEAD[..], head)] {
-            if w <= 0.0 {
-                continue;
+        if torso > 0.0 {
+            let mut at = [None; 3];
+            for (k, (&b, &(_, share))) in skel.torso_bones.iter().zip(&TORSO).enumerate() {
+                at[k] = b.map(|b| (b, turn(share * torso) * global(pose, skel, b)));
             }
-            // Each bone's turn is measured from where the pose (with the
-            // torso's turn, for the head) had it: read them all first.
-            let at: Vec<_> = bones
-                .iter()
-                .map(|(n, share)| {
-                    let b = skel.index_of(n)?;
-                    Some((b, turn(share * w) * global(pose, skel, b)))
-                })
-                .collect();
+            for (b, to) in at.into_iter().flatten() {
+                let parent = skel.parents[b].map_or(Quat::IDENTITY, |p| global(pose, skel, p));
+                pose.0[b].rotation = (parent.inverse() * to).normalize();
+            }
+        }
+        if head > 0.0 {
+            let mut at = [None; 2];
+            for (k, (&b, &(_, share))) in skel.head_bones.iter().zip(&HEAD).enumerate() {
+                at[k] = b.map(|b| (b, turn(share * head) * global(pose, skel, b)));
+            }
             for (b, to) in at.into_iter().flatten() {
                 let parent = skel.parents[b].map_or(Quat::IDENTITY, |p| global(pose, skel, p));
                 pose.0[b].rotation = (parent.inverse() * to).normalize();

@@ -75,6 +75,12 @@ impl Fx {
         self.jet_frames = frames;
     }
 
+    pub fn has_jet_for(&self, unit: usize) -> bool {
+        self.live
+            .iter()
+            .any(|e| e.jet.is_some_and(|h| h.index as usize == unit))
+    }
+
     /// The windowed game's effects step for one drawn frame, after its
     /// ticks: the soldiers' poses advance by `dt`, the effects that ride
     /// them move onto where this frame draws them, then the effects advance
@@ -94,16 +100,28 @@ impl Fx {
         self.follow_hover_water(walk);
         if let Some(vis) = vis {
             vis.update(walk, dt);
-            let (muzzles, jets, burns) = (
-                vis.fire_points(walk),
-                vis.jet_frames(walk),
-                vis.burn_frames(walk),
-            );
             if self.force_bolts() > 0 {
                 self.set_force_origins(&vis.force_points(walk));
             }
-            self.set_repair_origins(&muzzles);
+            if self.has_repair_or_charge() {
+                let muzzles = vis.fire_points_where(walk, |i, _| self.needs_repair_origin(i));
+                self.set_repair_origins(&muzzles);
+            }
+            let any_jet = self.live.iter().any(|e| e.jet.is_some())
+                || walk
+                    .sim
+                    .units
+                    .iter()
+                    .any(|u| u.alive && u.soldier.stance.jetting());
+            let jets = if any_jet {
+                vis.jet_frames_where(walk, |i, u| {
+                    u.soldier.stance.jetting() || self.has_jet_for(i)
+                })
+            } else {
+                Vec::new()
+            };
             self.set_jet_frames(jets);
+            let burns = vis.burn_frames(walk);
             self.set_burn_frames(burns);
         }
         // Registered exhaust samples must be born at the same presentation

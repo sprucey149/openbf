@@ -146,6 +146,14 @@ pub struct MeshData<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct MeshHandle(pub(crate) u32);
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ShadowSource {
+    #[default]
+    Own,
+    Proxy(SkinnedMeshHandle),
+    None,
+}
+
 pub(crate) struct GpuMesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
@@ -156,6 +164,7 @@ pub(crate) struct GpuMesh {
     /// mesh gets a degenerate box at the origin, which culls as a point.
     pub bounds: (glam::Vec3, glam::Vec3),
     pub shadow: Option<crate::character_shadow::VolumeMesh>,
+    pub shadow_source: ShadowSource,
 }
 
 /// Model-space AABB of a position list.
@@ -254,6 +263,7 @@ impl GpuMesh {
             max_joint: 0,
             bounds: aabb_of(data.positions.iter().copied()),
             shadow: None,
+            shadow_source: ShadowSource::Own,
         })
     }
 
@@ -334,6 +344,7 @@ impl GpuMesh {
             max_joint: u32::from(max_joint),
             bounds: aabb_of(data.positions.iter().copied()),
             shadow: Some(crate::character_shadow::VolumeMesh::skinned(data)),
+            shadow_source: ShadowSource::Own,
         })
     }
 }
@@ -398,6 +409,25 @@ pub struct SkinnedMeshHandle(pub(crate) u32);
 // buffer code rather than in `device.rs`'s Resources block; `Renderer`'s fields
 // are visible to this child module.
 impl crate::Renderer {
+    /// Redirect a skinned mesh's character shadow volume to another skinned
+    /// mesh (e.g. its authored low-LOD silhouette) or disable it when `None`
+    /// (for extra submeshes already covered by a combined low-LOD proxy).
+    pub fn set_skinned_shadow_proxy(
+        &mut self,
+        mesh: SkinnedMeshHandle,
+        proxy: Option<SkinnedMeshHandle>,
+    ) {
+        let len = self.skinned_meshes.len();
+        let Some(slot) = self.skinned_meshes.get_mut(mesh.0 as usize) else {
+            return;
+        };
+        slot.shadow_source = match proxy {
+            Some(p) if (p.0 as usize) < len => ShadowSource::Proxy(p),
+            _ => ShadowSource::None,
+        };
+        slot.shadow = None;
+    }
+
     /// Upload the geometry for an opaque rigid part of a character silhouette.
     pub fn add_character_mesh(
         &mut self,
@@ -459,9 +489,7 @@ impl crate::Renderer {
         self.queue.write_buffer(&m.vertex_buffer, 0, bytes);
         m.bounds = aabb_of(vertices.iter().map(|v| v.position));
         if let Some(mesh) = &mut m.shadow {
-            for (p, v) in mesh.positions.iter_mut().zip(vertices) {
-                *p = v.position;
-            }
+            mesh.update_positions(vertices);
         }
         Ok(())
     }
