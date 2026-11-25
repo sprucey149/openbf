@@ -636,6 +636,9 @@ pub struct Inputs<'a> {
     pub paths: &'a [ManifestPath],
     /// Every `grasspatch`-based `entc` of the LVL: (name, PROPs).
     pub grass: &'a [(String, Vec<(u32, String)>)],
+    /// Map lighting, used only on PC terrains (`t.pc_patches`) whose `LUMI`
+    /// excludes non-`Static` directional lights.
+    pub lighting: Option<&'a manifest::ManifestLighting>,
 }
 
 /// Does this executable hold both tables at the addresses [`rng_table`] and
@@ -695,6 +698,33 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
             );
             None
         };
+        let pc_lumi_boost = if t.pc_patches {
+            i.lighting.map_or(0.0, |l| {
+                let dir_luma = |dir: [f32; 3], color_lin: [f32; 3]| -> f32 {
+                    let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+                    if len <= 1e-6 {
+                        return 0.0;
+                    }
+                    let up = (-dir[1] / len).max(0.0);
+                    let r = crate::lighting::linear_to_srgb(color_lin[0]);
+                    let g = crate::lighting::linear_to_srgb(color_lin[1]);
+                    let b = crate::lighting::linear_to_srgb(color_lin[2]);
+                    (0.299 * r + 0.587 * g + 0.114 * b) * up
+                };
+                let mut boost = 0.0;
+                if !l.sun_static {
+                    boost += dir_luma(l.sun_dir, l.sun_color);
+                }
+                if let Some(l2) = &l.light2 {
+                    if !l2.is_static {
+                        boost += dir_luma(l2.dir, l2.color);
+                    }
+                }
+                boost
+            })
+        } else {
+            0.0
+        };
         if let (Some(mask), Some(lumi)) = (mask, Lumi::of(t)) {
             for p in place(mask, file, cell, &table) {
                 let (row, cv) = &rows[p.mesh as usize];
@@ -702,12 +732,13 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
                     continue;
                 }
                 let model = row.kind == FoliageKind::Model;
+                let sample = (lumi.sample(p.x, p.z) + pc_lumi_boost).min(1.0);
                 records.push(Record {
                     mesh: p.mesh,
                     x: p.x,
                     z: p.z,
                     yaw: p.yaw,
-                    rgba: tint(lumi.sample(p.x, p.z), model, *cv, p.x, p.z),
+                    rgba: tint(sample, model, *cv, p.x, p.z),
                 });
             }
         }

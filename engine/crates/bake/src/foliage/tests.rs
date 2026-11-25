@@ -465,6 +465,7 @@ fn a_tree_without_the_executable_keeps_its_foliage() {
             classes: &[],
             paths: &[],
             grass: &grass,
+            lighting: None,
         },
     )
     .unwrap()
@@ -497,6 +498,7 @@ fn an_executable_without_the_tables_falls_back_to_the_shipped_numbers() {
             classes: &[],
             paths: &[],
             grass: &grass,
+            lighting: None,
         },
     )
     .unwrap()

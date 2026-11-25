@@ -487,6 +487,9 @@ pub struct Terrain {
     /// `PCHS -> LOWR`, the far-LOD sheet: `None` on the 16 shipped terrains
     /// that carry none. See [`LowResSheet`].
     pub lowres: Option<LowResSheet>,
+    /// True when `PCHS` carried PC BF2 per-patch DX vertex buffers rather than
+    /// PS2 RLE streams or Xbox packed buffers (`terrain::pc`).
+    pub pc_patches: bool,
 }
 
 /// `tern -> PCHS -> LOWR`: the coarse far-LOD sheet of the terrain's OWN
@@ -800,6 +803,7 @@ impl Terrain {
             patch_edge,
         )
         .map_or_else(|| vec![Vec::new(); patch_layer_masks.len()], |(a, _)| a);
+        let pc_patches = pc.is_some();
         let (colr, patch_layer_masks, patch_meshes, patch_alpha) = match (xbox, pc) {
             (Some(x), _) => (Some(x.colr), x.masks, x.meshes, x.alpha),
             (None, Some(p)) => (Some(p.colr), p.masks, p.meshes, p.alpha),
@@ -873,6 +877,7 @@ impl Terrain {
             patch_alpha,
             cutters,
             lowres,
+            pc_patches,
         })
     }
 

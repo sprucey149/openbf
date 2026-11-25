@@ -122,7 +122,7 @@ impl Surface {
         if heights.len() != n * n || heights.iter().any(|v| !v.is_finite()) {
             bail!("invalid render height grid");
         }
-        let g = ground(t, bf2);
+        let g = ground(t, bf2, None);
         let mut out = Self {
             positions: g.positions[..n * n].to_vec(),
             normals: Vec::with_capacity(n * n),
@@ -449,6 +449,7 @@ mod tests {
             patch_alpha: vec![vec![0xe; 162]; 4],
             cutters: Vec::new(),
             lowres: None,
+            pc_patches: false,
         }
     }
 

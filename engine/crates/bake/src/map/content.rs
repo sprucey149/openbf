@@ -1633,17 +1633,19 @@ pub(super) fn bake_content(
         .transpose()?,
         None => None,
     };
+    let lighting =
+        crate::lighting::lighting_from(sky_cfg.as_ref(), lights_cfg.as_ref(), source_game == "bf2");
     let mut terrain_layers_glb = None;
     if let (Some(t), Some(fname)) = (&terrain_parsed, &terrain_glb) {
         let bf2 = source_game == "bf2";
         let glb = match &aligned_surface {
             Some(surface) => surface.base_glb(t)?,
-            None => crate::terrain_glb::terrain_to_glb(t, bf2)?,
+            None => crate::terrain_glb::terrain_to_glb_lit(t, bf2, Some(&lighting))?,
         };
         std::fs::write(out.join(fname), glb)?;
         let layers = match &aligned_surface {
             Some(surface) => surface.layers_glb(t, bf2)?,
-            None => crate::terrain_glb::terrain_layers_to_glb(t, bf2)?,
+            None => crate::terrain_glb::terrain_layers_to_glb_lit(t, bf2, Some(&lighting))?,
         };
         if let Some(glb) = layers {
             let fname = format!("terrain_layers_{}.glb", t.name);
@@ -1651,8 +1653,6 @@ pub(super) fn bake_content(
             terrain_layers_glb = Some(fname);
         }
     }
-    let lighting =
-        crate::lighting::lighting_from(sky_cfg.as_ref(), lights_cfg.as_ref(), source_game == "bf2");
     let foliage = if foliage_file.is_none() && grass_props.is_empty() {
         None
     } else {
@@ -1668,6 +1668,7 @@ pub(super) fn bake_content(
                 classes: &classes,
                 paths: &paths,
                 grass: &grass_props,
+                lighting: Some(&lighting),
             },
         )?;
         if let Some(f) = &f {
