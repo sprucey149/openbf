@@ -21,7 +21,7 @@ import sys
 SCHEMA = 1
 
 # rebake.sh's own order: `sounds` reads the baked classes (its sound-names step), so it runs after them.
-ORDER = ("tat1", "tat2", "common", "side", "dlc", "classes", "sounds", "load", "maps", "beep")
+ORDER = ("tat1", "tat2", "common", "side", "dlc", "classes", "sounds", "load", "maps", "beep", "catalog")
 # global-sound has its own per-game cache (global_sound_cache.py) and runs on every pack.
 GROUPS = ORDER + ("global-sound",)
 # A group whose output is read by another: the reader's key carries the read group's key. sounds' sound-names step reads
@@ -47,7 +47,11 @@ INPUTS = {
     "global-sound": ("sound_trees",),
     "load": (),
     "beep": ("sound_trees",),
+    "catalog": _DONORS,
 }
+# The mods' stock catalog lists the files every earlier group wrote, so any group's run makes it stale, and
+# rebake.sh adds to its folder without clearing it.
+LISTS_OUTPUTS = "catalog"
 
 # Groups that belong exclusively to BF1 and are skipped on BF2-only builds.
 BF1_ONLY_GROUPS = frozenset(("tat1", "beep"))
@@ -63,6 +67,7 @@ OUTPUTS = {
     "sounds": ("core_bf1/sounds", "core_bf2/sounds"),
     "load": ("common_bf2/load",),
     "beep": ("audio/*.ogg",),
+    "catalog": ("catalog/stock_bake.ron", "catalog/bf1_*.ron", "catalog/bf2_*.ron"),
 }
 
 # BF2-only subset of OUTPUTS when BF1 is absent.
@@ -74,6 +79,7 @@ OUTPUTS_BF2_ONLY = {
     "classes": ("classes/bf2_rep.ron",),
     "sounds": ("core_bf2/sounds",),
     "load": ("common_bf2/load",),
+    "catalog": ("catalog/stock_bake.ron", "catalog/bf2_*.ron"),
 }
 
 
@@ -286,6 +292,8 @@ def plan(store, keys, forced=None, rebake=False, has_bf1=True):
             reason = why_stale(store.read(group), keys[group])
             if reason is None and not outputs_present(store.baked, group, has_bf1=has_bf1):
                 reason = "its output is missing"
+            if reason is None and group == LISTS_OUTPUTS and baking:
+                reason = "it lists what the other groups wrote"
         carrier = next((g for g, made in ALSO_BAKES.items() if group in made and g in baking), None)
         if carrier:
             rows.append((group, f"with {carrier}", reason or "baked again by " + carrier))
@@ -305,8 +313,10 @@ def run_groups(store, keys, rows, run_group):
         if action != "bake":
             continue
         made = (group, *ALSO_BAKES.get(group, ()))
-        for name in made:
+        for name in (*made, LISTS_OUTPUTS):
             store.drop(name)
+        if group == LISTS_OUTPUTS:
+            shutil.rmtree(store.baked / LISTS_OUTPUTS, ignore_errors=True)
         run_group(group)
         for name in made:
             store.write(name, keys[name])

@@ -79,12 +79,12 @@ class GroupKeys(unittest.TestCase):
     def test_one_version_bump_bakes_that_group_and_what_reads_it(self):  # case 2
         self.bake(self.keys())
         done, rows = self.bake(self.keys(versions(sounds=2)))
-        self.assertEqual(done, ["sounds"])
+        self.assertEqual(done, ["sounds", "catalog"])
         self.assertIn(("sounds", "bake", "version 1 -> 2"), rows)
         self.assertIn("baked again: version 1 -> 2", "\n".join(bake_cache.explain_lines(rows)))
         # sound-names reads the baked classes: their new version reaches sounds too, nothing else.
         done, rows = self.bake(self.keys(versions(sounds=2, classes=2)))
-        self.assertEqual(done, ["classes", "sounds"])
+        self.assertEqual(done, ["classes", "sounds", "catalog"])
         self.assertIn(("sounds", "bake", "changed the classes it reads"), rows)
 
     def test_changed_input_bakes_only_the_groups_that_read_it(self):  # case 3
@@ -95,10 +95,40 @@ class GroupKeys(unittest.TestCase):
         for name, (value, groups) in cases.items():
             with self.subTest(input=name):
                 done, _ = self.bake(self.keys(inputs=dict(INPUTS, **{name: value})))
-                self.assertEqual(done, groups)
+                self.assertEqual(done, groups + ["catalog"])
                 self.bake(self.keys())  # back to the reference inputs
         done, _ = self.bake(self.keys(inputs=dict(INPUTS, gameplay=dict(INPUTS["gameplay"], bf1="other disc"))))
         self.assertEqual(sorted(done), sorted(g for g in bake_cache.ORDER if g != "dlc"))
+
+    def test_a_pack_runs_every_rebake_group(self):
+        script = Path(bake_cache.__file__).with_name("rebake.sh").read_text(encoding="utf-8")
+        line = next(row for row in script.splitlines() if row.startswith("REBAKE_GROUPS="))
+        self.assertEqual(sorted(line.split('"')[1].split()), sorted(bake_cache.GROUPS))
+
+    def test_a_bake_without_a_catalog_bakes_only_the_catalog(self):
+        self.bake(self.keys())
+        self.store.drop("catalog")
+        shutil.rmtree(self.baked / "catalog")
+        done, _ = self.bake(self.keys())
+        self.assertEqual(done, ["catalog"])
+
+    def test_the_catalog_is_written_from_an_empty_folder(self):
+        self.bake(self.keys())
+        (self.baked / "catalog/bf2_pc.ron").write_text("a PC copy since removed")
+        self.bake(self.keys(versions(maps=2)))
+        self.assertFalse((self.baked / "catalog/bf2_pc.ron").exists())
+
+    def test_a_run_cut_off_before_the_catalog_leaves_it_stale(self):
+        keys = self.keys()
+        self.bake(keys)
+        rows = bake_cache.plan(self.store, keys, {"side": "no BF1 vehicle shadows"})
+        self.assertIn(("catalog", "bake", "it lists what the other groups wrote"), rows)
+
+        def run(group):
+            raise KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            bake_cache.run_groups(self.store, keys, rows, run)
+        self.assertIsNone(self.store.read("catalog"))
 
     def test_keys_never_hold_bake_source_or_binary(self):  # case 4
         keys = self.keys()
@@ -110,11 +140,11 @@ class GroupKeys(unittest.TestCase):
     def test_ffmpeg_or_restoration_change_bakes_only_the_audio_groups(self):  # case 5
         self.bake(self.keys())
         done, rows = self.bake(self.keys(audio=dict(AUDIO, ffmpeg=["other", "ffmpeg version 8.0"])))
-        self.assertEqual(done, ["common", "dlc", "sounds", "beep"])
+        self.assertEqual(done, ["common", "dlc", "sounds", "beep", "catalog"])
         self.assertIn(("beep", "bake", "changed ffmpeg"), rows)
         self.bake(self.keys())
         done, _ = self.bake(self.keys(audio=dict(AUDIO, restoration=None)))
-        self.assertEqual(done, ["common", "dlc", "sounds", "beep"])
+        self.assertEqual(done, ["common", "dlc", "sounds", "beep", "catalog"])
 
     def test_moved_input_folder_with_the_same_content_is_all_hits(self):  # case 6
         first = self.root / "iso" / "BF2 PC"
@@ -171,7 +201,7 @@ class GroupKeys(unittest.TestCase):
         self.assertEqual(self.calls, ["tat1", "tat2", "common", "side"])
         self.assertIsNone(self.store.read("classes"), "a group cut off has no key")
         done, rows = self.bake(keys)
-        self.assertEqual(done, ["classes", "sounds", "load", "maps", "beep"])
+        self.assertEqual(done, ["classes", "sounds", "load", "maps", "beep", "catalog"])
         self.assertEqual([g for g, action, _ in rows if action == "hit"], ["tat1", "tat2", "common", "side", "dlc"])
 
     def test_key_with_missing_output_or_forced_reason_bakes_again(self):
@@ -186,7 +216,7 @@ class GroupKeys(unittest.TestCase):
         # sound-names reads classes/bf2_dlc.ron, which the dlc group writes: a DLC change reaches sounds.
         self.bake(self.keys())
         done, rows = self.bake(self.keys(versions(dlc=2)))
-        self.assertEqual(done, ["dlc", "sounds"])
+        self.assertEqual(done, ["dlc", "sounds", "catalog"])
         self.assertIn(("sounds", "bake", "changed the DLC classes it reads"), rows)
 
     def test_a_group_baked_over_a_matching_key_drops_it_first(self):
@@ -305,23 +335,23 @@ class PackRuns(unittest.TestCase):
         (self.baked / "classes/extra.ron").write_text("kept")
         self.assertEqual(self.pack(), [])
         self.assertTrue((self.baked / "classes/extra.ron").is_file())
-        self.assertIn("bake groups: 0 to bake, 10 reused", self.output)
+        self.assertIn("bake groups: 0 to bake, 11 reused", self.output)
         # A raised sounds version bakes only the sounds, and --explain says why.
         self.versions = versions(sounds=2)
-        self.assertEqual(self.pack("--explain"), ["sounds"])
+        self.assertEqual(self.pack("--explain"), ["sounds", "catalog"])
         self.assertIn("sounds       baked again: version 1 -> 2", self.output)
         self.assertIn("maps         reused", self.output)
         self.assertTrue((self.baked / "classes/extra.ron").is_file(), "a partial bake never empties the folder")
         # A new ffmpeg bakes the groups that encode audio.
         self.ffmpeg = ["ffmpeg", "8.0"]
-        self.assertEqual(self.pack(), ["common", "dlc", "sounds", "beep"])
+        self.assertEqual(self.pack(), ["common", "dlc", "sounds", "beep", "catalog"])
 
     def test_interrupted_reference_resumes(self):
         self.fail_at = "sounds"
         with self.assertRaises(KeyboardInterrupt):
             self.pack()
         self.fail_at = None
-        self.assertEqual(self.pack(), ["sounds", "load", "maps", "beep"])
+        self.assertEqual(self.pack(), ["sounds", "load", "maps", "beep", "catalog"])
         self.assertEqual(self.pack(), [])
 
     def test_moved_checkout_inputs_and_bake_rebuild_bake_nothing(self):
