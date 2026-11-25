@@ -25,25 +25,20 @@ pub use resolve::{
     ContentResolutionError, ContentResolutionPlan, ResourceOverrideConflict,
 };
 
-/// Bump whenever cached asset/mission schemas change so stale caches auto-rebuild.
-/// 8: legacy resource replacements (stock catalog, class patches, re-baked
-/// side models and textures).
-/// 9: PC terrain & foliage directional lighting from `normal_terrain_shader.xml`.
-/// 10: soldier skeletons re-parented onto the pose rig's hierarchy (helper
-/// `root_*` bones between rig bones no longer double-apply their bind).
-/// 11: a modded soldier whose `_low1` shares no texture sheet with its high
-/// model gets no far LOD (the stock low body was drawn far off).
-pub const MOD_CONVERTER_VERSION: u32 = 11;
+/// The converter a mod cache was written by: a hash of every source file
+/// `bake` is built from (`build.rs`), so a cache from any other converter
+/// reads as stale on its own. [`ModCacheMeta::converter`].
+pub const MOD_CONVERTER_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/converter_id"));
 pub const MOD_CACHE_SCHEMA_VERSION: u32 = 1;
 
-/// The `bake` subcommand that prints the [`MOD_CONVERTER_VERSION`] it writes.
-pub const BAKE_CONVERTER_VERSION_ARG: &str = "mod-converter-version";
+/// The `bake` subcommand that prints the [`MOD_CONVERTER_ID`] it writes.
+pub const BAKE_CONVERTER_ID_ARG: &str = "mod-converter-id";
 
-/// The [`MOD_CONVERTER_VERSION`] a `bake` binary writes, or `None` when it
-/// cannot run or predates [`BAKE_CONVERTER_VERSION_ARG`].
-pub fn bake_converter_version(bin: &Path) -> Option<u32> {
+/// The [`MOD_CONVERTER_ID`] a `bake` binary writes, or `None` when it
+/// cannot run or predates [`BAKE_CONVERTER_ID_ARG`].
+pub fn bake_converter_id(bin: &Path) -> Option<String> {
     let mut cmd = std::process::Command::new(bin);
-    cmd.arg(BAKE_CONVERTER_VERSION_ARG)
+    cmd.arg(BAKE_CONVERTER_ID_ARG)
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     #[cfg(windows)]
@@ -56,11 +51,12 @@ pub fn bake_converter_version(bin: &Path) -> Option<u32> {
     if !out.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    (!id.is_empty()).then_some(id)
 }
 
 /// The first existing `bake` among `candidates` that writes this build's
-/// [`MOD_CONVERTER_VERSION`], else the first existing one. A stale copy left
+/// [`MOD_CONVERTER_ID`], else the first existing one. A stale copy left
 /// in an earlier search location can no longer shadow the matching `bake`
 /// shipped beside the game and launcher.
 pub fn pick_bake_bin(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
@@ -71,7 +67,7 @@ pub fn pick_bake_bin(candidates: impl IntoIterator<Item = PathBuf>) -> Option<Pa
         }
     }
     seen.iter()
-        .find(|p| bake_converter_version(p) == Some(MOD_CONVERTER_VERSION))
+        .find(|p| bake_converter_id(p).as_deref() == Some(MOD_CONVERTER_ID))
         .or_else(|| seen.first())
         .cloned()
 }
@@ -295,7 +291,10 @@ pub struct ReplacementOutput {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModCacheMeta {
     pub schema_version: u32,
-    pub converter_version: u32,
+    /// The [`MOD_CONVERTER_ID`] that wrote the cache (empty in a cache from
+    /// before the id, which then reads as stale).
+    #[serde(default)]
+    pub converter: String,
     pub mod_id: String,
     pub namespace: String,
     pub source_fingerprint: String,
@@ -393,12 +392,9 @@ impl ModCacheMeta {
                 ),
             };
         }
-        if self.converter_version != MOD_CONVERTER_VERSION {
+        if self.converter != MOD_CONVERTER_ID {
             return ModCacheStatus::Stale {
-                reason: format!(
-                    "converter updated (v{} -> v{MOD_CONVERTER_VERSION})",
-                    self.converter_version
-                ),
+                reason: "the converter changed".into(),
             };
         }
         if self.source_fingerprint != expected_fingerprint {
@@ -714,7 +710,7 @@ mod tests {
         let (a, b) = (dir.join("a"), dir.join("b"));
         fs::write(&a, b"not a bake").unwrap();
         fs::write(&b, b"not a bake").unwrap();
-        assert_eq!(bake_converter_version(&a), None);
+        assert_eq!(bake_converter_id(&a), None);
         assert_eq!(
             pick_bake_bin([dir.join("missing"), a.clone(), b.clone()]),
             Some(a.clone())
@@ -726,7 +722,7 @@ mod tests {
     fn empty_meta(maps: Vec<ModMapSummary>, catalog_digest: &str) -> ModCacheMeta {
         ModCacheMeta {
             schema_version: MOD_CACHE_SCHEMA_VERSION,
-            converter_version: MOD_CONVERTER_VERSION,
+            converter: MOD_CONVERTER_ID.into(),
             mod_id: "content.test".into(),
             namespace: "mod_test".into(),
             source_fingerprint: "fp".into(),

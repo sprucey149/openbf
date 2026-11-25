@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use extensions::mods::{
-    ModCacheMeta, ModMapSummary, ModMissionSummary, MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
+    ModCacheMeta, ModMapSummary, ModMissionSummary, MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_ID,
 };
+use extensions::mods::catalog::{SourceGame, SourcePlatform};
 use mungefs::addon::read_core_locl;
 
 use super::mission::mission_to_ron;
@@ -43,6 +44,38 @@ fn progress(emit: bool, pct: u8, msg: &str) {
     if emit {
         println!("PROGRESS {pct} {msg}");
     }
+}
+
+/// The lines of a mod's CORE.LVL table the mod itself wrote. OURS: a map
+/// mod ships the whole stock PC table beside its own `level.<map>.*` lines
+/// (ABR and KTH: key 1202146172, "INSTANT ACTION"), and laid over the
+/// port's table its copies re-cased every shell label. A line is kept when
+/// its key is one the port's own BF2 table lacks, or its text differs from
+/// stock BF2 PC's CORE.LVL and from the port's line by more than case.
+/// replace: the mod's own list of changed keys, were one shipped.
+fn mod_authored_locl(
+    mut table: manifest::hud::HudLocl,
+    env: &ModEnv,
+    scratch: &Path,
+) -> manifest::hud::HudLocl {
+    let pc = env
+        .sources
+        .file(SourceGame::Bf2, SourcePlatform::Pc, "core.lvl", scratch)
+        .ok()
+        .and_then(|p| crate::hud::read_locl(&p.to_string_lossy()).ok());
+    let ours = env
+        .stock
+        .as_ref()
+        .and_then(|s| s.read("common_bf2/locl/english.ron"))
+        .and_then(|b| ron::from_str::<manifest::hud::HudLocl>(&String::from_utf8_lossy(&b)).ok());
+    table.entries.retain(|(h, text)| {
+        let Some(own) = ours.as_ref().and_then(|t| t.get(*h)) else {
+            return true;
+        };
+        let pc_copy = pc.as_ref().and_then(|t| t.get(*h)) == Some(text.as_str());
+        !pc_copy && !own.eq_ignore_ascii_case(text)
+    });
+    table
 }
 
 /// Convert a legacy BF2 addon folder into `cache_dir` atomically via a temporary
@@ -240,20 +273,25 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     if let Some(core_path) = &insp.core_lvl {
         progress(opts.emit_progress, 85, "Converting localization table...");
         crate::gameplay::exempt_addon(core_path);
-        match crate::hud::bake_locl(&core_path.to_string_lossy(), &staging.to_string_lossy()) {
-            Ok(_) => has_locl = true,
-            Err(_) => {
-                if let Ok(Some(tbl)) = read_core_locl(core_path) {
-                    let mut entries = tbl.entries;
-                    entries.sort_by_key(|(h, _)| *h);
-                    entries.dedup_by_key(|(h, _)| *h);
-                    let hud_locl = manifest::hud::HudLocl {
-                        language: "english".into(),
-                        entries,
-                    };
-                    crate::write_ron(&staging.join("locl").join("english.ron"), &hud_locl)?;
-                    has_locl = true;
+        let table = match crate::hud::read_locl(&core_path.to_string_lossy()) {
+            Ok(t) => Some(t),
+            Err(_) => read_core_locl(core_path).ok().flatten().map(|tbl| {
+                let mut entries = tbl.entries;
+                entries.sort_by_key(|(h, _)| *h);
+                entries.dedup_by_key(|(h, _)| *h);
+                manifest::hud::HudLocl {
+                    language: "english".into(),
+                    entries,
                 }
+            }),
+        };
+        if let Some(table) = table {
+            let scratch = staging.join("scratch");
+            let table = mod_authored_locl(table, opts.env, &scratch);
+            let _ = std::fs::remove_dir_all(&scratch);
+            if !table.entries.is_empty() {
+                crate::write_ron(&staging.join("locl").join("english.ron"), &table)?;
+                has_locl = true;
             }
         }
     }
@@ -293,7 +331,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     progress(opts.emit_progress, 95, "Finalizing versioned cache...");
     let meta = ModCacheMeta {
         schema_version: MOD_CACHE_SCHEMA_VERSION,
-        converter_version: MOD_CONVERTER_VERSION,
+        converter: MOD_CONVERTER_ID.into(),
         mod_id: discovered.id,
         namespace: discovered.namespace,
         source_fingerprint: discovered.source_fingerprint,

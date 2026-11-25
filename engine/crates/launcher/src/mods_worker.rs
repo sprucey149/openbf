@@ -8,7 +8,7 @@ use extensions::mods::replace::{mod_capabilities, Capability};
 use extensions::mods::{
     list_mod_folders, mod_cache_path, DiscoveredMod, FileHashCache, ModCacheMeta, ModCacheStatus,
     ModCompatibility, ModContentType, ModFolderEntry, TargetChoice, TargetSelections,
-    MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
+    MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_ID,
 };
 use mungefs::modscan::{FactsCache, ScanContext};
 use serde::{Deserialize, Serialize};
@@ -267,7 +267,7 @@ struct StockStamp {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ModIndexEntry {
     #[serde(default)]
-    converter_version: u32,
+    converter: String,
     tree_stamp: String,
     catalog_digest: String,
     target_choices: BTreeMap<String, TargetChoice>,
@@ -311,7 +311,7 @@ impl ModIndexCache {
         choices: &BTreeMap<String, TargetChoice>,
     ) -> Option<DiscoveredMod> {
         let e = self.entries.get(mod_id)?;
-        if e.converter_version == MOD_CONVERTER_VERSION
+        if e.converter == MOD_CONVERTER_ID
             && e.tree_stamp == tree_stamp
             && e.catalog_digest == catalog_digest
             && &e.target_choices == choices
@@ -333,7 +333,7 @@ impl ModIndexCache {
         self.entries.insert(
             mod_id,
             ModIndexEntry {
-                converter_version: MOD_CONVERTER_VERSION,
+                converter: MOD_CONVERTER_ID.into(),
                 tree_stamp,
                 catalog_digest,
                 target_choices,
@@ -576,7 +576,7 @@ fn try_discovered_from_cache_fast(
     let meta = ModCacheMeta::load(&cache_dir)?;
     if meta.mod_id != entry.mod_id
         || meta.schema_version != MOD_CACHE_SCHEMA_VERSION
-        || meta.converter_version != MOD_CONVERTER_VERSION
+        || meta.converter != MOD_CONVERTER_ID
     {
         return None;
     }
@@ -1153,8 +1153,8 @@ fn converted_status(
     {
         None => ModCacheStatus::Failed("missing cache metadata".into()),
         Some(ModCacheStatus::Stale { reason } | ModCacheStatus::Failed(reason)) => {
-            let written = ModCacheMeta::load(cache_dir).map(|m| m.converter_version);
-            if written.is_some_and(|v| v != MOD_CONVERTER_VERSION) {
+            let written = ModCacheMeta::load(cache_dir).map(|m| m.converter);
+            if written.is_some_and(|v| v != MOD_CONVERTER_ID) {
                 ModCacheStatus::Failed(format!(
                     "conversion finished but the cache is still stale ({reason}); `{}` may be older than the launcher",
                     bake.display()
@@ -1397,7 +1397,7 @@ mod tests {
 
         let mut meta = ModCacheMeta {
             schema_version: extensions::mods::MOD_CACHE_SCHEMA_VERSION,
-            converter_version: extensions::mods::MOD_CONVERTER_VERSION - 1,
+            converter: "an older converter".into(),
             mod_id: "content.abr".into(),
             namespace: "mod_abr".into(),
             source_fingerprint: "fp".into(),
@@ -1431,7 +1431,7 @@ mod tests {
             ModCacheStatus::NeedsConversion | ModCacheStatus::Stale { .. }
         ));
 
-        meta.converter_version = extensions::mods::MOD_CONVERTER_VERSION;
+        meta.converter = extensions::mods::MOD_CONVERTER_ID.into();
         meta.save_atomic(&cache).unwrap();
         assert_eq!(converted_status(&cache, "fp", "", bake), ModCacheStatus::Ready);
         let _ = std::fs::remove_dir_all(&cache);

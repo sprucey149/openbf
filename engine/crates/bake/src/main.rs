@@ -196,8 +196,8 @@ fn main() -> Result<()> {
             println!("baked {sounds} DLC hero sounds");
             Ok(())
         }
-        Some(extensions::mods::BAKE_CONVERTER_VERSION_ARG) if args.len() == 2 => {
-            println!("{}", extensions::mods::MOD_CONVERTER_VERSION);
+        Some(extensions::mods::BAKE_CONVERTER_ID_ARG) if args.len() == 2 => {
+            println!("{}", extensions::mods::MOD_CONVERTER_ID);
             Ok(())
         }
         Some("format-versions") if args.len() == 2 => {
@@ -614,7 +614,7 @@ fn main() -> Result<()> {
                  \x20 bake extract-iso <disc.iso>  <outdir>       the disc's DATA/_LVL_PS2 tree, as files\n\
                  \x20 bake extract-xiso <disc.iso> <outdir>       an Xbox disc's Data/_LVL_XBOX tree, shell movie only\n\
                  \x20 bake format-versions                         each output group's version, as JSON (pack.py's cache)\n\
-                 \x20 bake mod-converter-version                   the mod cache converter version it writes\n\
+                 \x20 bake mod-converter-id                        the mod cache converter id it writes\n\
                  \x20 bake xbox <disc.iso|root> <outdir> [--ps2 <root>] [--maps a,b] [--allow-gameplay-drift]\n\
                  \x20                                               an Xbox disc's maps, keeping the PS2's gameplay\n\
                  \x20 bake xbox-prints <ps2 root>... <work> <file>  the PS2 gameplay hashes `bake xbox` compares with\n\

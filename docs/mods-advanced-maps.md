@@ -43,5 +43,5 @@ Verified against a multi-variant PC BF2 addon map (5 weather/time-of-day variant
 
 ## Integration Notes
 
-- Addon conversion shares `classes.ron` and `ModCacheMeta` (`MOD_CONVERTER_VERSION`) with generic stock resource replacement conversion.
+- Addon conversion shares `classes.ron` and `ModCacheMeta` (`MOD_CONVERTER_ID`) with generic stock resource replacement conversion.
 - Global side replacements that supply alternate PC first-person weapon artwork override `side_bf2/pc_first_person` paths cleanly; private addon side namespaces remain isolated.

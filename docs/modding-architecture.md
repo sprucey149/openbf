@@ -120,7 +120,7 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 - Built into a sibling `.staging.<pid>` directory and committed via directory rename swap (`swap_dir`) so interrupted conversions never corrupt an existing cache.
 - Governed by `cache_meta.ron` (`ModCacheMeta`), validated on every launcher scan and game startup (`ModCacheMeta::validate`):
   - `schema_version == MOD_CACHE_SCHEMA_VERSION` (currently `1`)
-  - `converter_version == MOD_CONVERTER_VERSION` (currently `11`)
+  - `converter == MOD_CONVERTER_ID` (a hash of the converter's own sources, made by `engine/crates/extensions/build.rs`)
   - `source_fingerprint` (SHA-256 over relative paths, sizes, and file SHA-256s of the mod folder)
   - `replacement_key` (derived from active `ResourceOp`s; validated via `catalog_digest` and `target_choices` when replacements are present)
   - Presence and path-safety checks on every expected `manifest.ron`, mission RON, `locl/english.ron`, and non-removed `replacement_outputs` file on disk.
@@ -150,7 +150,7 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 ## 8. Extending the System (Developers & Coding Agents)
 
 - **Preserve crate boundaries:** Never add `mungefs` as a normal dependency of `game` or `extensions`. Keep runtime loading strictly over `extensions` + `manifest` + `pak`.
-- **Bump `MOD_CONVERTER_VERSION`:** Whenever `bake::mods::*` changes emitted cache files, mission RON fields, or asset layout, increment `MOD_CONVERTER_VERSION` in `engine/crates/extensions/src/mods.rs` so existing caches rebuild automatically.
+- **No converter version to bump:** `MOD_CONVERTER_ID` is a hash of every non-test source file in the crates `bake` links (`bake`, `audio`, `extensions`, `mungefs`, `manifest` with its `data/`, `pak`), computed at build time by `engine/crates/extensions/build.rs`. Any change to the converter makes existing caches read as stale and rebuild; the launcher and game pick the `bake` binary whose `bake mod-converter-id` matches their own.
 - **Adding a new stock replacement target kind:**
   1. Ensure stock catalog generation (`bake::stock`, `scripts/rebake.sh catalog`, `launcher::pipeline::rebake::bake_stock_catalog`) indexes the target LVL and its outputs.
   2. Add classification and conversion in `bake/src/mods/replace.rs`, emitting `ReplacementOutput` entries (including `removed: true` for removed companions in `Full` mode) and honest `unsupported` diagnostics for unhandled chunks.

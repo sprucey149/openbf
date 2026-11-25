@@ -10,6 +10,9 @@ default = []
 # disabled by `launcher` so the setup GUI avoids linking core/render/input).
 runtime = ["dep:core", "dep:render", "dep:input", "dep:glam", "dep:winit"]
 
+[build-dependencies]
+sha2 = "0.10"
+
 [dependencies]
 anyhow = { workspace = true }
 ron = { workspace = true }

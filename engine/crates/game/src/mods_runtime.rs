@@ -757,7 +757,7 @@ mod tests {
     use std::collections::BTreeSet;
     use extensions::mods::{
         compute_mod_fingerprint, ModContentType, ModMissionSummary, ReplacementOutput,
-        MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_VERSION,
+        MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_ID,
     };
     use extensions::profile::ExtensionProfile;
     use std::sync::Mutex;
@@ -813,7 +813,7 @@ mod tests {
 
         let meta = ModCacheMeta {
             schema_version: MOD_CACHE_SCHEMA_VERSION,
-            converter_version: MOD_CONVERTER_VERSION,
+            converter: MOD_CONVERTER_ID.into(),
             mod_id: id.into(),
             namespace: ns.into(),
             source_fingerprint: fp.digest,
@@ -1090,7 +1090,7 @@ mod tests {
         std::fs::write(ov.join("imp.glb"), "mod_glb").unwrap();
         let meta = ModCacheMeta {
             schema_version: MOD_CACHE_SCHEMA_VERSION,
-            converter_version: MOD_CONVERTER_VERSION,
+            converter: MOD_CONVERTER_ID.into(),
             mod_id: "content.sidemod".into(),
             namespace: "mod_sidemod".into(),
             source_fingerprint: fp.digest,

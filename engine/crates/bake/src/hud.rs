@@ -312,6 +312,15 @@ pub const LOCL_LANGUAGE: &str = "english";
 /// Bake the English text table of the CORE.LVL at `core_path` into
 /// `outdir/locl/english.ron`, sorted by key hash.
 pub fn bake_locl(core_path: &str, outdir: &str) -> Result<HudLocl> {
+    let locl = read_locl(core_path)?;
+    let dir = Path::new(outdir).join("locl");
+    std::fs::create_dir_all(&dir)?;
+    crate::write_ron(&dir.join(format!("{LOCL_LANGUAGE}.ron")), &locl)?;
+    Ok(locl)
+}
+
+/// A CORE.LVL's English table, sorted and deduplicated by hash.
+pub fn read_locl(core_path: &str) -> Result<HudLocl> {
     let buf = std::fs::read(core_path).with_context(|| core_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{core_path}: {e}"))?;
     let content = mungefs::content_chunks(inner).map_err(|e| anyhow!("{core_path}: {e}"))?;
@@ -321,14 +330,10 @@ pub fn bake_locl(core_path: &str, outdir: &str) -> Result<HudLocl> {
     let mut entries = table.entries;
     entries.sort_by_key(|(h, _)| *h);
     entries.dedup_by_key(|(h, _)| *h);
-    let locl = HudLocl {
+    Ok(HudLocl {
         language: table.language,
         entries,
-    };
-    let dir = Path::new(outdir).join("locl");
-    std::fs::create_dir_all(&dir)?;
-    crate::write_ron(&dir.join(format!("{LOCL_LANGUAGE}.ron")), &locl)?;
-    Ok(locl)
+    })
 }
 
 #[cfg(test)]
