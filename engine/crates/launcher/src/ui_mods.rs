@@ -114,11 +114,16 @@ impl LauncherApp {
         choice: Option<TargetChoice>,
     ) {
         let mut selections = TargetSelections::load(&self.paths.data_dir);
+        let before = selections.clone();
         selections.set(mod_id, source, choice);
+        if selections == before {
+            return;
+        }
         if let Err(e) = selections.save(&self.paths.data_dir) {
             self.show_toast(format!("Could not save target selection: {e}"));
             return;
         }
+        self.mods_worker.targets_changed(mod_id);
         self.trigger_mod_scan();
     }
 
