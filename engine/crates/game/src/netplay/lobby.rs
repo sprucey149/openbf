@@ -391,7 +391,7 @@ impl LobbyState {
             ],
             picked_map: match ia.picked_map {
                 MapPick::One(i) => Some(key(i)),
-                MapPick::All => None,
+                MapPick::Folder(_) | MapPick::All => None,
             },
             picked_mode: match ia.picked_mode {
                 ModePick::One(m) => Some(m.subst().to_owned()),
@@ -538,7 +538,7 @@ pub fn restrict(
     {
         let picked = match ia.picked_map {
             MapPick::One(i) => ia.maps.get(i).map(|m| m.key.clone()),
-            MapPick::All => None,
+            MapPick::Folder(_) | MapPick::All => None,
         };
         ia.maps = maps;
         let (kept, lost) = entries_from_keys(&ia.maps, &rows);

@@ -38,7 +38,11 @@ pub fn instant_action(
     missions_dir: &Path,
     difficulty: core::skill::Difficulty,
 ) -> InstantAction {
-    catalog_action(assets_dir, missions_dir, difficulty, true)
+    let mut ia = catalog_action(assets_dir, missions_dir, difficulty, true);
+    if std::env::var_os(extensions::profile::GROUP_MAPS_ENV).is_some() {
+        ia.group_by_source();
+    }
+    ia
 }
 
 pub fn lobby_instant_action(

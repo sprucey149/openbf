@@ -74,7 +74,7 @@ pub fn active_mod_maps() -> Vec<ModMapEntry> {
         .clone()
 }
 
-fn catalog_entries(maps: &[ModMapSummary], folder: &str) -> Vec<ModMapEntry> {
+fn catalog_entries(maps: &[ModMapSummary], folder: &str, source: &str) -> Vec<ModMapEntry> {
     let mut entries: Vec<ModMapEntry> = Vec::new();
     let mut groups = BTreeMap::new();
     for map in maps {
@@ -107,6 +107,7 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str) -> Vec<ModMapEntry> {
                 .unwrap_or(&map.display_name)
                 .clone(),
             disambiguator: folder.to_owned(),
+            source: source.to_owned(),
             description: map.description.clone(),
             modes,
             variant_keys: vec![map.map_key.clone()],
@@ -593,9 +594,11 @@ pub fn mount_enabled_mods(
                 });
             }
         }
-        report
-            .mod_maps
-            .extend(catalog_entries(&meta.maps, &entry.folder_name));
+        report.mod_maps.extend(catalog_entries(
+            &meta.maps,
+            &entry.folder_name,
+            &meta.display_name,
+        ));
 
         let missions_cache = cache_dir.join("missions");
         if missions_cache.is_dir() {
@@ -865,7 +868,7 @@ mod tests {
         let data = PathBuf::from(std::env::var_os("OPENBF_KTH_TEST_DATA").unwrap());
         let cache = data.join("mod_cache/mod_kth");
         let meta = ModCacheMeta::load(&cache).unwrap();
-        let rows = catalog_entries(&meta.maps, "KTH");
+        let rows = catalog_entries(&meta.maps, "KTH", "KTH");
         assert_eq!(rows.len(), 1);
         use ui::shell::{IaCommand, IaInput, IaTexts, InstantAction, ModePick, PointerTarget};
         let missions = cache.join("missions");

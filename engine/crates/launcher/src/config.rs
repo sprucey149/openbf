@@ -201,6 +201,8 @@ pub struct LauncherConfig {
     pub dlc_dir: Option<PathBuf>,
     #[serde(default)]
     pub graphics_api: GraphicsApi,
+    #[serde(default)]
+    pub group_maps_by_source: bool,
 }
 
 impl LauncherConfig {
@@ -280,6 +282,7 @@ mod tests {
             bf2,
             dlc_dir: Some(PathBuf::from("/games/DLC_XBOX")),
             graphics_api: GraphicsApi::Vulkan,
+            group_maps_by_source: true,
         };
         cfg.save(&path).expect("save config");
         let loaded = LauncherConfig::load(&path);

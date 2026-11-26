@@ -53,6 +53,14 @@ impl Game {
             Game::Bf2 => "bf2",
         }
     }
+
+    /// `[ours]` The folder name of the game's maps in the grouped list.
+    pub fn source_name(self) -> &'static str {
+        match self {
+            Game::Bf1 => "Battlefront 1",
+            Game::Bf2 => "Battlefront 2",
+        }
+    }
 }
 
 /// `gMapModes` in screen order (con, ctf, 1flag, tdm, hunt, ass, eli; §6);
@@ -205,6 +213,9 @@ pub struct Launch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapPick {
     One(usize),
+    /// A source folder, by its index in [`InstantAction::folders`].
+    Folder(usize),
+    /// Every map, or every map of the open folder.
     All,
 }
 
@@ -467,6 +478,10 @@ pub enum IaCommand {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstantAction {
     pub maps: Vec<MapEntry>,
+    /// `[ours]` The Planet list's source folders; empty for the flat list.
+    pub folders: Vec<String>,
+    /// The folder the Planet list is inside.
+    pub folder: Option<usize>,
     pub texts: IaTexts,
     pub state: State,
     /// The command stack's focus (kept while a list has it, f11).
@@ -636,6 +651,8 @@ impl InstantAction {
     pub fn new(maps: Vec<MapEntry>, texts: IaTexts, options: SessionOptions) -> InstantAction {
         let mut ia = InstantAction {
             maps,
+            folders: Vec::new(),
+            folder: None,
             texts,
             state: State::Command,
             command: 0,
@@ -664,6 +681,7 @@ impl InstantAction {
         self.full = false;
         self.on_page = 0.0;
         self.command = self.first_command();
+        self.folder = None;
         let live = self.live(&self.map_rows());
         self.map_list = ListCursor::first(&live, LIST_ROWS);
     }
@@ -679,12 +697,71 @@ impl InstantAction {
         !self.expand(map, mode, side).is_empty()
     }
 
-    /// The Planet list: every map, then "All Maps".
+    /// `[ours]` Lists the maps in one folder per source, without the source
+    /// suffix on their names: the two games first, then each mod by name.
+    pub fn group_by_source(&mut self) {
+        for m in &mut self.maps {
+            m.label = m.name.clone();
+        }
+        self.maps.sort_by_key(|m| m.label.to_lowercase());
+        let games = [Game::Bf1, Game::Bf2].map(Game::source_name);
+        let mut folders: Vec<String> = self.maps.iter().map(|m| m.source.clone()).collect();
+        folders.sort_by_key(|f| {
+            let rank = games.iter().position(|g| g == f).unwrap_or(games.len());
+            (rank, f.to_lowercase())
+        });
+        folders.dedup();
+        self.folders = folders;
+        self.enter();
+    }
+
+    /// The Planet list: every map, then "All Maps". Grouped, the folders
+    /// stand for the maps until one is opened.
     pub fn map_picks(&self) -> Vec<MapPick> {
-        (0..self.maps.len())
-            .map(MapPick::One)
+        let rows: Vec<MapPick> = if self.folders.is_empty() {
+            (0..self.maps.len()).map(MapPick::One).collect()
+        } else if self.folder.is_none() {
+            (0..self.folders.len()).map(MapPick::Folder).collect()
+        } else {
+            self.maps_in(MapPick::All)
+                .into_iter()
+                .map(MapPick::One)
+                .collect()
+        };
+        rows.into_iter()
             .chain(std::iter::once(MapPick::All))
             .collect()
+    }
+
+    /// The maps `pick` stands for, in list order.
+    fn maps_in(&self, pick: MapPick) -> Vec<usize> {
+        let folder = match pick {
+            MapPick::One(i) => return vec![i],
+            MapPick::Folder(k) => Some(k),
+            MapPick::All => self.folder,
+        };
+        let source = folder.and_then(|k| self.folders.get(k));
+        (0..self.maps.len())
+            .filter(|&i| source.is_none_or(|s| *s == self.maps[i].source))
+            .collect()
+    }
+
+    fn open_folder(&mut self, k: usize) {
+        self.folder = Some(k);
+        let live = self.live(&self.map_rows());
+        self.map_list = ListCursor::first(&live, LIST_ROWS);
+    }
+
+    /// Back to the folders, the cursor on the one that was open.
+    fn close_folder(&mut self) {
+        let Some(k) = self.folder.take() else {
+            return;
+        };
+        let live = self.live(&self.map_rows());
+        self.map_list = ListCursor::first(&live, LIST_ROWS);
+        self.map_list.at = k;
+        self.map_list.show(live.len(), LIST_ROWS);
+        self.map_list.view.snap();
     }
 
     pub fn map_rows(&self) -> Vec<ListRow> {
@@ -693,6 +770,7 @@ impl InstantAction {
             .map(|p| ListRow {
                 text: match p {
                     MapPick::One(i) => self.maps[i].label.clone(),
+                    MapPick::Folder(k) => self.folders[k].clone(),
                     MapPick::All => self.texts.all_maps.clone(),
                 },
                 enabled: self.adds(p, ModePick::All, SidePick::AllEras)
@@ -709,13 +787,11 @@ impl InstantAction {
 
     /// The modes `map` has, in `gMapModes` order (All Maps: any map's).
     fn modes_of(&self, map: MapPick) -> Vec<Mode> {
-        match map {
-            MapPick::One(i) => self.maps[i].all_modes(),
-            MapPick::All => MODES
-                .into_iter()
-                .filter(|m| self.maps.iter().any(|e| e.all_modes().contains(m)))
-                .collect(),
-        }
+        let maps = self.maps_in(map);
+        MODES
+            .into_iter()
+            .filter(|m| maps.iter().any(|&i| self.maps[i].all_modes().contains(m)))
+            .collect()
     }
 
     /// The Mode list: the map's modes, then "All Modes" when it has more
@@ -773,14 +849,13 @@ impl InstantAction {
     /// 2026-10-28: Clone Wars and Galactic Civil War only).
     pub fn side_picks(&self) -> Vec<SidePick> {
         let has = |e: Era| {
-            let maps: Vec<&MapEntry> = match self.picked_map {
-                MapPick::One(i) => vec![&self.maps[i]],
-                MapPick::All => self.maps.iter().collect(),
-            };
-            maps.iter().any(|m| match self.picked_mode {
-                ModePick::One(mode) => m.modes[e.index()].contains(&mode),
-                ModePick::All => m.has_era(e),
-            })
+            let maps = self.maps_in(self.picked_map);
+            maps.iter()
+                .map(|&i| &self.maps[i])
+                .any(|m| match self.picked_mode {
+                    ModePick::One(mode) => m.modes[e.index()].contains(&mode),
+                    ModePick::All => m.has_era(e),
+                })
         };
         let eras: Vec<Era> = ERAS.into_iter().filter(|e| has(*e)).collect();
         let many = eras.len() > 1;
@@ -848,10 +923,7 @@ impl InstantAction {
     /// The rows `fnAddMap1..4` would add (§1.4): maps in list order, eras
     /// outer, modes inner; `[ours]` only what the port can run.
     pub fn expand(&self, map: MapPick, mode: ModePick, side: SidePick) -> Vec<Entry> {
-        let maps: Vec<usize> = match map {
-            MapPick::One(i) => vec![i],
-            MapPick::All => (0..self.maps.len()).collect(),
-        };
+        let maps = self.maps_in(map);
         let sides: Vec<Side> = match side {
             SidePick::One(s) => vec![s],
             SidePick::AllEras => ERAS.into_iter().map(Side::Era).collect(),
@@ -911,6 +983,7 @@ impl InstantAction {
             State::Command => self.texts.command(COMMANDS[self.command]).1.to_owned(),
             State::Map => match self.map_picks().get(at(&self.map_list)) {
                 Some(MapPick::One(i)) => self.maps[*i].description.clone(),
+                Some(MapPick::Folder(k)) => self.folders[*k].clone(),
                 _ => self.texts.all_maps_desc.clone(),
             },
             State::Mode => match self.mode_picks().get(at(&self.mode_list)) {

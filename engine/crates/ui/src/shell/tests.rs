@@ -208,6 +208,101 @@ fn the_merged_list_is_both_games_case_folded() {
     assert_eq!(rows[40].text, "All Maps");
 }
 
+/// `[ours]` Grouped by source: the two games, then the mods by name, each
+/// opening to its maps without the suffix; All Maps stays inside the open
+/// folder.
+#[test]
+fn grouped_maps_open_by_source_folder() {
+    let mod_map = |key: &str, name: &str, source: &str| ModMapEntry {
+        key: key.into(),
+        variant_keys: vec![key.into()],
+        legacy_code: "abr".into(),
+        name: name.into(),
+        disambiguator: source.into(),
+        description: String::new(),
+        modes: [vec![Mode::Con], vec![Mode::Con]],
+        source: source.into(),
+    };
+    let mod_maps = [
+        mod_map("mod_z__abr", "Abregado-Rae", "Zeta Pack"),
+        mod_map("mod_a__abr", "Yoda's Hut", "alpha maps"),
+    ];
+    let bakes = [
+        ("bf1_hot1", "bf1"),
+        ("bf1_bes1", "bf1"),
+        ("bf2_hot1", "bf2"),
+        ("mod_z__abr", "bf2"),
+        ("mod_a__abr", "bf2"),
+    ]
+    .map(|(k, g)| (k.to_owned(), g.to_owned()));
+    let missions = |_: &str, mode: Mode| match mode {
+        Mode::Con => vec![["all".to_owned(), "imp".to_owned()]],
+        _ => Vec::new(),
+    };
+    let mut m = InstantAction::new(
+        catalog_with_mods(&text, &bakes, &missions, &mod_maps),
+        IaTexts::new(&|_, e| e.to_owned()),
+        SessionOptions::default(),
+    );
+    m.group_by_source();
+    let texts =
+        |m: &InstantAction| -> Vec<String> { m.map_rows().into_iter().map(|r| r.text).collect() };
+    assert_eq!(
+        texts(&m),
+        [
+            "Battlefront 1",
+            "Battlefront 2",
+            "alpha maps",
+            "Zeta Pack",
+            "All Maps"
+        ]
+    );
+
+    m.focus_command(Cmd::Add);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Map);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Map, "a folder opens in place");
+    let bf1 = texts(&m);
+    assert_eq!(bf1.len(), BF1_MAPS.len() + 1);
+    assert_eq!(bf1[0], "Bespin: Cloud City");
+    assert_eq!(bf1[bf1.len() - 1], "All Maps");
+    assert!(bf1.iter().all(|t| !t.contains("(bf")), "{bf1:?}");
+    m.step(triangle(), 0.0);
+    assert_eq!(m.state, State::Map);
+    assert_eq!(m.folder, None);
+    assert_eq!(m.map_list.at, 0);
+    m.step(triangle(), 0.0);
+    assert_eq!(m.state, State::Command);
+
+    // The folder's All Maps, then every mode and era.
+    m.focus_command(Cmd::Add);
+    m.step(cross(), 0.0);
+    m.step(cross(), 0.0);
+    m.step(up(), 0.0);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Mode);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Era);
+    m.step(cross(), 0.0);
+    assert_eq!(m.state, State::Command);
+    assert_eq!(m.folder, None);
+    let added: Vec<&str> = m
+        .playlist
+        .iter()
+        .map(|e| m.maps[e.map].source.as_str())
+        .collect();
+    assert!(!added.is_empty());
+    assert!(added.iter().all(|s| *s == "Battlefront 1"), "{added:?}");
+
+    // At the folders, All Maps is every map.
+    m.playlist.clear();
+    m.add(MapPick::All, ModePick::All, SidePick::AllEras);
+    let mut all: Vec<usize> = m.playlist.iter().map(|e| e.map).collect();
+    all.dedup();
+    assert_eq!(all.len(), bakes.len());
+}
+
 /// §7: the unbaked space maps are dimmed and the cursor skips them both
 /// ways; a mode the port does not run is dimmed, and so is All Modes with
 /// only Conquest live.
@@ -1264,6 +1359,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
             legacy_code: "abr".into(),
             name: "Abregado-Rae: Venezia".into(),
             disambiguator: "ABR".into(),
+            source: "Abregado".into(),
             description: "Swamp canal city".into(),
             modes: [vec![Mode::Con, Mode::Ctf], vec![Mode::Con, Mode::Ctf]],
         },
@@ -1273,6 +1369,7 @@ fn catalog_with_mods_supports_two_flag_ctf_and_disambiguates_duplicates() {
             legacy_code: "abr".into(),
             name: "Abregado-Rae: Venezia".into(),
             disambiguator: "ABR_v2".into(),
+            source: "Abregado".into(),
             description: "Remaster".into(),
             modes: [vec![Mode::Ctf], vec![Mode::Ctf]],
         },

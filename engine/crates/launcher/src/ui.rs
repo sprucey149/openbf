@@ -622,6 +622,29 @@ impl LauncherApp {
 
         ui.add_space(21.0);
 
+        // Instant Action map folders row.
+        ui.horizontal(|ui| {
+            row_label(ui, "Map folders", 104.0);
+            let enabled = self.config.group_maps_by_source;
+            if extension_toggle(ui, "group_maps_by_source", enabled, true) {
+                self.config.group_maps_by_source = !enabled;
+                changed = true;
+            }
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_space(112.0);
+            ui.label(
+                egui::RichText::new(
+                    "Group Instant Action maps by Battlefront 1, Battlefront 2 and each mod",
+                )
+                .font(regular_font(12.0))
+                .color(TEXT_MUTED),
+            );
+        });
+
+        ui.add_space(21.0);
+
         // Open logs folder row.
         ui.horizontal(|ui| {
             row_label(ui, "Logs", 104.0);

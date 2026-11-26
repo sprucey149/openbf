@@ -156,6 +156,7 @@ impl InstantAction {
                         Cmd::Launch => return Some(IaCommand::Launch(self.launch())),
                         Cmd::Add => {
                             self.state = State::Map;
+                            self.close_folder();
                             let live = self.live(&self.map_rows());
                             if !live.get(self.map_list.at).copied().unwrap_or(false) {
                                 self.map_list = ListCursor::first(&live, LIST_ROWS);
@@ -185,13 +186,22 @@ impl InstantAction {
                 }
                 if i.back {
                     self.click(MenuSound::Exit);
-                    self.state = State::Command;
+                    if self.folder.is_some() {
+                        self.close_folder();
+                    } else {
+                        self.state = State::Command;
+                    }
                 } else if i.confirm && live.get(self.map_list.at) == Some(&true) {
                     self.click(MenuSound::Accept);
-                    self.picked_map = self.map_picks()[self.map_list.at];
-                    self.state = State::Mode;
-                    let live = self.live(&self.mode_rows());
-                    self.mode_list = ListCursor::first(&live, LIST_ROWS);
+                    match self.map_picks()[self.map_list.at] {
+                        MapPick::Folder(k) => self.open_folder(k),
+                        pick => {
+                            self.picked_map = pick;
+                            self.state = State::Mode;
+                            let live = self.live(&self.mode_rows());
+                            self.mode_list = ListCursor::first(&live, LIST_ROWS);
+                        }
+                    }
                 }
             }
             State::Mode => {
@@ -223,6 +233,7 @@ impl InstantAction {
                     self.click(MenuSound::Accept);
                     let side = self.side_picks()[self.era_list.at];
                     self.add(self.picked_map, self.picked_mode, side);
+                    self.close_folder();
                     self.state = State::Command;
                     self.focus_command(Cmd::Launch);
                 }

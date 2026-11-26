@@ -225,6 +225,10 @@ pub struct MapEntry {
     pub code: String,
     /// "<name> (bf1)" / "<name> (bf2)" / "<name> (mod)" (§7).
     pub label: String,
+    /// The label without its source suffix, and the folder that holds the
+    /// map when the list is grouped ([`InstantAction::group_by_source`]).
+    pub name: String,
+    pub source: String,
     /// The info box's text: BF2's `mapname.description.<code>`; `[ours]`
     /// BF1 has none on its disc (§6), so its name stands alone.
     pub description: String,
@@ -246,6 +250,8 @@ pub struct ModMapEntry {
     pub disambiguator: String,
     pub description: String,
     pub modes: [Vec<Mode>; 2],
+    /// The display name of the mod that adds the map.
+    pub source: String,
 }
 
 impl MapEntry {
@@ -353,6 +359,8 @@ pub fn catalog_with_mods(
         }
         MapEntry {
             label: format!("{name} ({})", game.tag()),
+            name,
+            source: game.source_name().to_owned(),
             key,
             game,
             code,
@@ -439,11 +447,12 @@ pub fn catalog_with_mods(
         let duplicate = name_counts
             .get(&m.name.to_ascii_lowercase())
             .is_some_and(|&c| c > 1);
-        let label = if duplicate && !m.disambiguator.is_empty() {
-            format!("{} [{}] (mod)", m.name, m.disambiguator)
+        let name = if duplicate && !m.disambiguator.is_empty() {
+            format!("{} [{}]", m.name, m.disambiguator)
         } else {
-            format!("{} (mod)", m.name)
+            m.name.clone()
         };
+        let label = format!("{name} (mod)");
         let is_baked =
             bakes.is_empty() || bakes.iter().any(|(k, _)| k == &m.key) || !missions.is_empty();
         out.push(MapEntry {
@@ -451,6 +460,8 @@ pub fn catalog_with_mods(
             game: Game::Bf2,
             code: m.legacy_code.clone(),
             label,
+            name,
+            source: m.source.clone(),
             description: m.description.clone(),
             modes: m.modes.clone(),
             baked: is_baked,

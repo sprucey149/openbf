@@ -21,6 +21,8 @@ pub const MOD_CACHE_DIR: &str = "mod_cache";
 pub const DATA_DIR_ENV: &str = "OPENBF_DATA_DIR";
 /// Environment variable set by the launcher when spawning `openbf`.
 pub const LAUNCHED_BY_LAUNCHER_ENV: &str = "OPENBF_LAUNCHED_BY_LAUNCHER";
+/// Set by the launcher when Instant Action lists its maps in per-source folders.
+pub const GROUP_MAPS_ENV: &str = "OPENBF_GROUP_MAPS";
 
 const CURRENT_SCHEMA_VERSION: u32 = 2;
 
