@@ -43,13 +43,13 @@ use std::path::Path;
 mod lod;
 mod output;
 mod render_clips;
-pub(crate) use output::bake_flags;
-#[cfg(test)]
-use output::merge_prior;
+mod sheets;
+pub(crate) use output::{bake_flags, merge_prior};
 pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, bake_weapon_with,
     set_lender, texture_flags, weapon_flags, weapon_nodes, BakedWeapon, SideBakeCache,
 };
+pub(crate) use sheets::{in_parallel, LvlSheets, Plan, Request};
 
 pub struct BakedSoldier {
     pub name: String,

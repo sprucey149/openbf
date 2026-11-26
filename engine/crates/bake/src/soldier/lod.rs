@@ -132,19 +132,18 @@ fn low_to_high(
 
 /// [`bake`], for the normal build: the low model is a look, so one that cannot be
 /// read leaves this soldier at full detail, as the game draws an old bake, rather
-/// than refusing the build. Returns the textures it wrote.
+/// than refusing the build. Returns what it asks of the LVL's sheets.
 pub(super) fn bake_or_skip(
     inner: &[u8],
     buf: &[u8],
     high: &Model,
     skeleton: &Skeleton,
     out: &Path,
-    pc: Option<&crate::tier::PcTextures>,
     same_sheets: bool,
-) -> Vec<String> {
-    bake(inner, buf, high, skeleton, out, pc, same_sheets).unwrap_or_else(|e| {
+) -> Option<super::Request> {
+    bake(inner, buf, high, skeleton, out, same_sheets).unwrap_or_else(|e| {
         eprintln!("soldier {}: {e:#}, no low model", high.name);
-        Vec::new()
+        None
     })
 }
 
@@ -163,14 +162,13 @@ fn bake(
     high: &Model,
     skeleton: &Skeleton,
     out: &Path,
-    pc: Option<&crate::tier::PcTextures>,
     same_sheets: bool,
-) -> Result<Vec<String>> {
+) -> Result<Option<super::Request>> {
     std::fs::create_dir_all(out.join("soldiers"))?;
     std::fs::create_dir_all(out.join("textures"))?;
     let classes = crate::anim_sets::bf2::side_classes(buf)?;
     let Some(name) = low_name(&classes, &high.name)? else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     let (model, low_skeleton) = find_soldier(inner, &name)?;
     if same_sheets {
@@ -278,7 +276,10 @@ fn bake(
     for (texture, bits) in super::bake_flags(&model) {
         *flags.entry(texture).or_default() |= bits;
     }
-    super::bake_textures_flagged(inner, &textures, &flags, out, pc)
+    Ok(Some(super::Request {
+        wanted: textures,
+        flags,
+    }))
 }
 
 #[cfg(test)]
@@ -512,9 +513,9 @@ mod tests {
         let (model, skeleton) = super::find_soldier(inner, "rep_inf_trooper").unwrap();
         let elsewhere = mungefs::open(&cis).unwrap();
         let dir = std::env::temp_dir().join(format!("openbf-lod-skip-{}", std::process::id()));
-        assert!(super::bake(elsewhere, &rep, &model, &skeleton, &dir, None, false).is_err());
-        let baked = super::bake_or_skip(elsewhere, &rep, &model, &skeleton, &dir, None, false);
-        assert!(baked.is_empty());
+        assert!(super::bake(elsewhere, &rep, &model, &skeleton, &dir, false).is_err());
+        let baked = super::bake_or_skip(elsewhere, &rep, &model, &skeleton, &dir, false);
+        assert!(baked.is_none());
         assert!(!dir.join("soldiers/rep_inf_trooper.lod.ron").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -541,7 +542,7 @@ mod tests {
             let (model, skeleton) = super::find_soldier(inner, geometry).unwrap();
             let dir = std::env::temp_dir()
                 .join(format!("openbf-soldier-lod-{game}-{}", std::process::id()));
-            super::bake(inner, &bytes, &model, &skeleton, &dir, None, false).unwrap();
+            super::bake(inner, &bytes, &model, &skeleton, &dir, false).unwrap();
             let meta: manifest::SoldierLod = ron::from_str(
                 &std::fs::read_to_string(dir.join(format!("soldiers/{geometry}.lod.ron"))).unwrap(),
             )
