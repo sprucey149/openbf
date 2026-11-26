@@ -116,6 +116,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
     let mut baked_maps: Vec<ModMapSummary> = Vec::with_capacity(groups.len());
     let mut warnings = discovered.warnings.clone();
     let mut maps_baked = 0usize;
+    let mut first_failed_map = None;
     let mut missions_written = 0usize;
     let mut shared_world_files = SharedWorldFiles::default();
     let mut sound_bakes: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
@@ -128,6 +129,15 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             base_pct,
             &format!("Converting map `{}`...", g.display_name),
         );
+
+        // Nothing can be played on it, and its world must not fail the mod.
+        if !g.missions.iter().any(|m| m.mission.supported) {
+            warnings.push(format!(
+                "Map `{}` has no mission openbf can run yet; not converted.",
+                g.display_name
+            ));
+            continue;
+        }
 
         let Some(map_lvl) = &g.source_lvl_path else {
             warnings.push(format!(
@@ -143,21 +153,33 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         let map_lvl_str = map_lvl.to_string_lossy();
         let map_out_str = map_out.to_string_lossy();
 
-        if g.world_loads.is_empty() {
+        let baked = if g.world_loads.is_empty() {
             crate::map::bake_map(&map_lvl_str, &map_out_str, None)
-                .with_context(|| format!("baking map LVL {}", map_lvl.display()))?;
+                .with_context(|| format!("baking map LVL {}", map_lvl.display()))
         } else {
-            let world = read_world(&g.world_loads, map_lvl)
-                .with_context(|| format!("reading the archive selection for {}", g.display_name))?;
-            crate::map::bake_addon_map(
-                &map_lvl_str,
-                &map_out_str,
-                crate::map::AddonMapInput {
-                    bytes: &world.bytes,
-                    selectors: &world.selectors,
-                },
-            )
-            .with_context(|| format!("baking selected world {}", g.display_name))?;
+            read_world(&g.world_loads, map_lvl)
+                .with_context(|| format!("reading the archive selection for {}", g.display_name))
+                .and_then(|world| {
+                    crate::map::bake_addon_map(
+                        &map_lvl_str,
+                        &map_out_str,
+                        crate::map::AddonMapInput {
+                            bytes: &world.bytes,
+                            selectors: &world.selectors,
+                        },
+                    )
+                    .with_context(|| format!("baking selected world {}", g.display_name))
+                })
+        };
+        // One map that cannot be built leaves the others playable.
+        if let Err(e) = baked {
+            std::fs::remove_dir_all(&map_out)?;
+            warnings.push(format!(
+                "Map `{}` could not be converted ({e:#}).",
+                g.display_name
+            ));
+            first_failed_map.get_or_insert(e);
+            continue;
         }
         maps_baked += 1;
 
@@ -266,6 +288,10 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             missions: planned_missions,
             sound_planets: g.sound_planets.clone(),
         });
+    }
+
+    if let Some(e) = first_failed_map.filter(|_| maps_baked == 0) {
+        return Err(e);
     }
 
     // Bake core.lvl localization if present.

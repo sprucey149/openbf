@@ -307,6 +307,8 @@ fn pull_side_models(
         return Ok(Vec::new());
     };
 
+    // Beside a mod's map, the SIDE files are the mod's too.
+    let addon = crate::gameplay::is_addon(Path::new(lvl_path));
     let mut still_wanted: Vec<String> = wanted.to_vec();
     let mut found = Vec::new();
     let mut entries: Vec<_> = std::fs::read_dir(&side_dir)?.flatten().collect();
@@ -321,6 +323,9 @@ fn pull_side_models(
             .is_some_and(|e| e.eq_ignore_ascii_case("lvl"))
         {
             continue;
+        }
+        if addon {
+            crate::gameplay::exempt_addon(&path);
         }
         let bytes = crate::gameplay::read(&path)?;
         let Ok(inner) = mungefs::open(&bytes) else {

@@ -75,10 +75,9 @@ pub(super) fn read_world(loads: &[AddonWorldLoad], primary: &Path) -> Result<Wor
         }
         for selector in &load.selectors {
             let hash = mungefs::fnv1a_lowercase(selector);
-            let sublevels = wrapped
-                .get(&hash)
-                .with_context(|| format!("{} has no sublevel {selector}", load.rel_path))?;
-            for sub in sublevels {
+            // The game loads the sublevels the archive has under a requested
+            // name; a name with none loads nothing (PS2 `FUN_00177058`).
+            for sub in wrapped.get(&hash).into_iter().flatten() {
                 if is_primary {
                     let wrapper = begin_chunk(&mut bytes, b"lvl_");
                     append(&mut bytes, sub)?;
