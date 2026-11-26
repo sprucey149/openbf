@@ -24,16 +24,16 @@ Players copy extracted mod folders directly into `openbf_data/mods/`—whether t
 
 ### 1.3 Evidence-Based Target Resolution (`extensions::mods::replace`)
 
-Each candidate LVL is matched against the packaged stock catalogs using:
+Each candidate LVL is matched against the packaged Battlefront II stock catalog (only Battlefront II mods are supported, so a BF1 stock file is never a candidate) using:
 
-1. Explicit player selection (`openbf_data/mod_targets.ron`) or optional mod manifest (`openbf_mod.ron`), when present.
+1. Explicit selection (`openbf_data/mod_targets.ron`) or optional mod manifest (`openbf_mod.ron`), when present.
 2. Backup/alternative folder filtering (`backup`, `old`, `orig`, `copy`, `copia`, `unused`, `disabled`, `alt`, `optional`, `variant`, `vanilla`, `stock`, etc. stay inactive unless explicitly selected).
 3. Case-insensitive trailing relative-path suffix matching (preserving full relative paths such as `fpm/imp/allxwing.lvl` vs `fpm/rep/allxwing.lvl`).
-4. Detected game (`BF1` / `BF2`) and platform (`PC` / `PS2` / `Xbox`) from internal chunk formats and `_LVL_<platform>` anchors.
+4. Detected platform (`PC` / `PS2` / `Xbox`) from internal chunk formats and `_LVL_<platform>` anchors.
 5. Exact SHA-256 match against stock (`OpStatus::Identical`, skipped automatically).
 6. Internal `(tag, name)` resource overlap with a minimum overlap and lead threshold for filename-only matches (allowing a loose world LVL such as `end1.lvl` to resolve unambiguously to `bf2 pc:end/end1.lvl` while refusing to guess between ambiguous shared filenames).
 
-Ambiguous LVLs surface a target selector (`ComboBox` of ranked candidates plus **Ignore**) directly in the launcher's **Mods** tab; selections persist in `openbf_data/mod_targets.ron` outside the mod folder and trigger automatic rescan and cache invalidation.
+Ambiguous LVLs are listed in the launcher's **Mods** tab as an unclear target and stay stock; the launcher has no target selector. A target can still be named in `openbf_data/mod_targets.ron` or `openbf_mod.ron`.
 
 ### 1.4 Scoped Overlay & Replacement Semantics (`pak::overlay`, `game::mods_runtime`, `manifest::class_patch`)
 
@@ -80,10 +80,10 @@ Validated against a large legacy BF2 side and first-person replacement pack (8 `
 
 Validated against a loose single-file PC BF2 world replacement (`end1.lvl` with no subfolders, manifests, or registration scripts; source verified read-only):
 
-- **Discovery & target resolution:** Automatically resolved unambiguously to `bf2 pc:end/end1.lvl` via 100% resource overlap and game filtering (disambiguated from `load/end1.lvl` and `bf1 pc:end/end1.lvl`).
+- **Discovery & target resolution:** Automatically resolved unambiguously to `bf2 pc:end/end1.lvl` via 100% resource overlap (disambiguated from `load/end1.lvl`).
 - **Full world & texture-only paths:** Full world replacement (`bake::map::bake_map` with staged `SIDE/TUR.LVL`) converted in ~1 s against `openbf.pak` with 0 errors and 0 unsupported items while preserving stock `sounds/` and `load/`. A synthetic texture-only loose world LVL also validated the ~0.4 s texture-only fast path with empty gameplay delta.
 - **Coexistence & scoping:** Mounted simultaneously alongside a multi-side replacement pack and two legacy addon maps in packaged `openbf.exe`; headless overview and walk captures confirmed combined world + side replacements on BF2, byte-identical stock rendering on BF1, and clean restoration under `--no-mods`.
 
 ### Generic Infrastructure Checks
 
-- Automated unit & integration tests cover: multiple folder layouts, loose LVL discovery, duplicate filenames across FPM directories, ambiguous target detection and persistent Mods UI ComboBox selection (`mod_targets.ron`), backup/alternative folder suppression, `Full` vs `Patch` replacement semantics, load-order conflict resolution (`resolve_content_mods`), BF1/BF2 overlay scoping and removed-file hiding, cache reuse/invalidation, and pinned stock determinism (`--no-mods --desktop --sim-hash 100` = `71dabcfadf689bff`).
+- Automated unit & integration tests cover: multiple folder layouts, loose LVL discovery, duplicate filenames across FPM directories, ambiguous target detection with no Mods UI selector, `mod_targets.ron` choices, backup/alternative folder suppression, `Full` vs `Patch` replacement semantics, load-order conflict resolution (`resolve_content_mods`), BF1/BF2 overlay scoping and removed-file hiding, cache reuse/invalidation, and pinned stock determinism (`--no-mods --desktop --sim-hash 100` = `71dabcfadf689bff`).

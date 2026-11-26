@@ -375,7 +375,7 @@ pub fn inspect_mod_folder(
         capabilities.insert(Capability::AddonMissions);
     }
     let active = ops.iter().filter(|o| o.is_active()).count();
-    let ambiguous = ops.iter().filter(|o| o.status.needs_user()).count();
+    let ambiguous = ops.iter().filter(|o| o.status.is_ambiguous()).count();
 
     let mut warnings = insp.warnings.clone();
     let mut mod_type = content_type(insp.kind);
@@ -387,7 +387,7 @@ pub fn inspect_mod_folder(
     };
     if ambiguous > 0 {
         warnings.push(format!(
-            "{ambiguous} LVL file(s) could match more than one stock file; choose their targets in the Mods tab."
+            "{ambiguous} LVL file(s) match no single stock file clearly and are kept stock."
         ));
     }
     let gameplay: Vec<&ResourceOp> = ops

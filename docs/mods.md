@@ -25,13 +25,13 @@ The filesystem is the single source of truth:
        MyWorldRetex/                   # single loose replacement LVL
          end1.lvl
      mod_cache/          # auto-generated native assets (safe to delete anytime)
-     mod_targets.ron     # optional persistent target choices for ambiguous LVLs
+     mod_targets.ron     # optional hand-written targets for ambiguous LVLs
      stock_sources.ron   # stock copy paths synced from launcher.ron
      extensions.ron      # persistent enabled states + load order (schema v2)
    ```
 
 3. Return to the launcher (or click **Refresh**): the launcher automatically re-scans `openbf_data/mods/` on startup and window focus regain.
-4. Enable the mod, arrange its priority with **Up** / **Down**, resolve any ambiguous LVL target prompt if shown, wait for automatic background preparation into `openbf_data/mod_cache/`, and click **Play**.
+4. Enable the mod, arrange its priority with **Up** / **Down**, wait for automatic background preparation into `openbf_data/mod_cache/`, and click **Play**.
 
 Direct launches of `openbf` without opening the launcher first also read `openbf_data/extensions.ron` and `openbf_data/mods/`, preparing missing or stale caches automatically via `bake mod-convert` when `bake` is available. Pass `--no-mods` to suppress all content mods for a launch.
 

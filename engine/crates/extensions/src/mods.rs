@@ -266,7 +266,7 @@ impl DiscoveredMod {
     }
 
     pub fn ambiguous_ops(&self) -> impl Iterator<Item = &ResourceOp> {
-        self.resource_ops.iter().filter(|o| o.status.needs_user())
+        self.resource_ops.iter().filter(|o| o.status.is_ambiguous())
     }
 
     pub fn changes_gameplay(&self) -> bool {

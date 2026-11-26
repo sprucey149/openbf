@@ -92,18 +92,6 @@ pub struct ModsWorker {
     state: Arc<Mutex<ModsSnapshot>>,
     active_child: Arc<Mutex<Option<Child>>>,
     cancel_convert: Arc<AtomicBool>,
-    retarget: Arc<Retarget>,
-}
-
-/// What a saved target choice asks of the conversion queue, which resolved
-/// its mods before the choice and holds back the scan that follows it.
-#[derive(Default)]
-struct Retarget {
-    /// The queue stops before its next mod, so the scan runs first.
-    queue_outdated: AtomicBool,
-    /// The choice was for the mod converting now: its run is discarded, not
-    /// failed.
-    restart_current: AtomicBool,
 }
 
 impl Drop for ModsWorker {
@@ -121,18 +109,15 @@ impl ModsWorker {
         let state_bg = Arc::clone(&state);
         let child_bg = Arc::clone(&active_child);
         let cancel_bg = Arc::clone(&cancel_convert);
-        let retarget = Arc::new(Retarget::default());
-        let retarget_bg = Arc::clone(&retarget);
         std::thread::Builder::new()
             .name("launcher-mods-worker".into())
-            .spawn(move || worker_loop(rx, state_bg, child_bg, cancel_bg, retarget_bg, wake))
+            .spawn(move || worker_loop(rx, state_bg, child_bg, cancel_bg, wake))
             .expect("spawn mods worker thread");
         Self {
             tx,
             state,
             active_child,
             cancel_convert,
-            retarget,
         }
     }
 
@@ -143,17 +128,6 @@ impl ModsWorker {
             if let Some(child) = guard.as_mut() {
                 let _ = child.kill();
             }
-        }
-    }
-
-    /// A target choice of `mod_id` was saved; call before the scan that
-    /// reads it.
-    pub fn targets_changed(&self, mod_id: &str) {
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        self.retarget.queue_outdated.store(true, Ordering::SeqCst);
-        if state.converting_id.as_deref() == Some(mod_id) {
-            self.retarget.restart_current.store(true, Ordering::SeqCst);
-            self.cancel_conversion();
         }
     }
 
@@ -219,7 +193,6 @@ fn worker_loop(
     state: Arc<Mutex<ModsSnapshot>>,
     active_child: Arc<Mutex<Option<Child>>>,
     cancel_convert: Arc<AtomicBool>,
-    retarget: Arc<Retarget>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
     let mut cache = WorkerCache::default();
@@ -247,7 +220,6 @@ fn worker_loop(
         }
 
         if let Some(env) = last_scan {
-            retarget.queue_outdated.store(false, Ordering::SeqCst);
             cleanup_orphaned_staging(&env.data_dir);
             run_scan(&env, &mut cache, &state);
             wake();
@@ -264,7 +236,6 @@ fn worker_loop(
                 &state,
                 &active_child,
                 &cancel_convert,
-                &retarget,
                 &wake,
             );
         }
@@ -1046,14 +1017,10 @@ fn run_convert_queue(
     state: &Arc<Mutex<ModsSnapshot>>,
     active_child: &Arc<Mutex<Option<Child>>>,
     cancel_convert: &Arc<AtomicBool>,
-    retarget: &Retarget,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let data_dir = env.data_dir.as_path();
     for mod_id in mod_ids {
-        if retarget.queue_outdated.load(Ordering::SeqCst) {
-            return;
-        }
         let task = {
             let mut snap = state.lock().unwrap_or_else(|e| e.into_inner());
             let ModsSnapshot {
@@ -1101,7 +1068,6 @@ fn run_convert_queue(
             let key = item.discovered.replacement_key.clone();
             let cache_dir = mod_cache_path(data_dir, &ns);
             cancel_convert.store(false, Ordering::SeqCst);
-            retarget.restart_current.store(false, Ordering::SeqCst);
             *converting_id = Some(mod_id.clone());
             *generation = generation.saturating_add(1);
             Some((bake.to_path_buf(), mod_dir, cache_dir, ns, fp, key))
@@ -1134,15 +1100,6 @@ fn run_convert_queue(
         let mut snap = state.lock().unwrap_or_else(|e| e.into_inner());
         snap.converting_id = None;
         snap.generation = snap.generation.saturating_add(1);
-        if retarget.restart_current.swap(false, Ordering::SeqCst) {
-            if let Some(item) = snap.mods.get_mut(mod_id) {
-                item.convert_started_at = None;
-                item.cache_status = ModCacheStatus::NeedsConversion;
-            }
-            drop(snap);
-            wake();
-            return;
-        }
         match result {
             Ok(()) => {
                 let status = converted_status(&cache_dir, &fp, &key, &bake);
@@ -1478,59 +1435,6 @@ mod tests {
         meta.save_atomic(&cache).unwrap();
         assert_eq!(converted_status(&cache, "fp", "", bake), ModCacheStatus::Ready);
         let _ = std::fs::remove_dir_all(&cache);
-    }
-
-    #[test]
-    fn a_target_choice_restarts_the_running_conversion_without_failing_it() {
-        let root =
-            std::env::temp_dir().join(format!("openbf-worker-retarget-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let side = extensions::profile::mods_dir(&root).join("Pack/data/_LVL_PC/SIDE");
-        std::fs::create_dir_all(&side).unwrap();
-        // Large enough that the scan lists it as playable without reading it.
-        let lvl = std::fs::File::create(side.join("all.lvl")).unwrap();
-        lvl.set_len(16 * 1024 * 1024).unwrap();
-        drop(lvl);
-        let (name, script) = if cfg!(windows) {
-            ("bake.bat", "@ping -n 4 127.0.0.1 >nul\r\n")
-        } else {
-            ("bake.sh", "#!/bin/sh\nexec sleep 3\n")
-        };
-        let bake = root.join(name);
-        std::fs::write(&bake, script).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let env = ModsEnv {
-            data_dir: root.clone(),
-            stock: None,
-        };
-        let worker = ModsWorker::new(Arc::new(|| {}));
-        let wait = |until: &dyn Fn(&ModsSnapshot) -> bool| {
-            let started = Instant::now();
-            loop {
-                let snap = worker.snapshot();
-                if until(&snap) {
-                    return snap;
-                }
-                assert!(started.elapsed().as_secs() < 30, "timed out");
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-        };
-        worker.trigger_scan(env.clone());
-        wait(&|s| !s.scanning && s.mods.contains_key("content.pack"));
-        worker.queue_conversions(Some(bake), env, vec!["content.pack".into()]);
-        wait(&|s| s.converting_id.is_some());
-        worker.targets_changed("content.pack");
-        let snap = wait(&|s| s.converting_id.is_none());
-        assert_eq!(
-            snap.mods["content.pack"].cache_status,
-            ModCacheStatus::NeedsConversion
-        );
-        assert!(snap.failed_fingerprints.is_empty());
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

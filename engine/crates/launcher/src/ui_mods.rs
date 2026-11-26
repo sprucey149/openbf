@@ -13,10 +13,7 @@ use crate::ui::{
     INPUT_BORDER, TEXT_MUTED, TEXT_PRIMARY,
 };
 use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Pos2, Rect, Sense, Stroke, Vec2};
-use extensions::mods::{
-    resolve_content_mods, DiscoveredMod, ModCacheStatus, OpStatus, ResourceOp, TargetChoice,
-    TargetSelections,
-};
+use extensions::mods::{resolve_content_mods, DiscoveredMod, ModCacheStatus, OpStatus, ResourceOp};
 use extensions::{ExtensionManifest, ExtensionOrigin, OPENBF_VR_ID};
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -105,26 +102,6 @@ impl LauncherApp {
             self.mods_worker
                 .queue_conversions(self.paths.bake_bin(), self.mods_env(), to_convert);
         }
-    }
-
-    pub fn set_replacement_target(
-        &mut self,
-        mod_id: &str,
-        source: &str,
-        choice: Option<TargetChoice>,
-    ) {
-        let mut selections = TargetSelections::load(&self.paths.data_dir);
-        let before = selections.clone();
-        selections.set(mod_id, source, choice);
-        if selections == before {
-            return;
-        }
-        if let Err(e) = selections.save(&self.paths.data_dir) {
-            self.show_toast(format!("Could not save target selection: {e}"));
-            return;
-        }
-        self.mods_worker.targets_changed(mod_id);
-        self.trigger_mod_scan();
     }
 
     pub fn set_content_mod_enabled(&mut self, id: &str, enabled: bool) {
@@ -435,8 +412,6 @@ impl LauncherApp {
             .ctx()
             .data(|d| d.get_temp::<bool>(expand_id).unwrap_or(false));
         let mut action = None;
-        let mut target_change: Option<(String, Option<TargetChoice>)> = None;
-        let ambiguous_count = info.ambiguous_ops().count();
         let changes_gameplay = info.changes_gameplay();
 
         let border_color = if !playable || matches!(state.cache_status, ModCacheStatus::Failed(_)) {
@@ -638,9 +613,6 @@ impl LauncherApp {
                     if has_override_conflict && enabled {
                         badges.push(("Override", true));
                     }
-                    if ambiguous_count > 0 {
-                        badges.push(("Choose target", true));
-                    }
                     if changes_gameplay {
                         badges.push(("Gameplay", false));
                     }
@@ -728,12 +700,7 @@ impl LauncherApp {
                         );
                     }
                     if !info.resource_ops.is_empty() {
-                        draw_resource_ops(
-                            ui,
-                            &info.id,
-                            &info.resource_ops,
-                            &mut target_change,
-                        );
+                        draw_resource_ops(ui, &info.resource_ops);
                     }
                     if !info.declared_overrides.is_empty() {
                         ui.add(
@@ -772,19 +739,9 @@ impl LauncherApp {
                             .wrap(),
                         );
                     }
-                } else if ambiguous_count > 0 {
-                    draw_ambiguous_pickers(
-                        ui,
-                        &info.id,
-                        &info.resource_ops,
-                        &mut target_change,
-                    );
                 }
             });
         ui.ctx().data_mut(|d| d.insert_temp(expand_id, expanded));
-        if let Some((source, choice)) = target_change {
-            self.set_replacement_target(&info.id, &source, choice);
-        }
         match action {
             Some(CardControlAction::Toggle) => self.set_content_mod_enabled(&info.id, !enabled),
             Some(CardControlAction::MoveUp) => self.move_mod_up(&info.id),
@@ -948,24 +905,19 @@ enum CardControlAction {
     MoveDown,
 }
 
-fn draw_resource_ops(
-    ui: &mut egui::Ui,
-    mod_id: &str,
-    ops: &[ResourceOp],
-    target_change: &mut Option<(String, Option<TargetChoice>)>,
-) {
+fn draw_resource_ops(ui: &mut egui::Ui, ops: &[ResourceOp]) {
     let active = ops.iter().filter(|o| o.is_active()).count();
     let identical = ops
         .iter()
         .filter(|o| o.status == OpStatus::Identical)
         .count();
-    let ambiguous = ops.iter().filter(|o| o.status.needs_user()).count();
+    let ambiguous = ops.iter().filter(|o| o.status.is_ambiguous()).count();
     let mut parts = Vec::new();
     if active > 0 {
         parts.push(format!("{active} active"));
     }
     if ambiguous > 0 {
-        parts.push(format!("{ambiguous} need target"));
+        parts.push(format!("{ambiguous} unclear (kept stock)"));
     }
     if identical > 0 {
         parts.push(format!("{identical} identical to stock"));
@@ -983,27 +935,11 @@ fn draw_resource_ops(
         if op.status == OpStatus::Identical && !op.selected_by_user {
             continue;
         }
-        draw_one_resource_op(ui, mod_id, op, target_change);
+        draw_one_resource_op(ui, op);
     }
 }
 
-fn draw_ambiguous_pickers(
-    ui: &mut egui::Ui,
-    mod_id: &str,
-    ops: &[ResourceOp],
-    target_change: &mut Option<(String, Option<TargetChoice>)>,
-) {
-    for op in ops.iter().filter(|o| o.status.needs_user()) {
-        draw_one_resource_op(ui, mod_id, op, target_change);
-    }
-}
-
-fn draw_one_resource_op(
-    ui: &mut egui::Ui,
-    mod_id: &str,
-    op: &ResourceOp,
-    target_change: &mut Option<(String, Option<TargetChoice>)>,
-) {
+fn draw_one_resource_op(ui: &mut egui::Ui, op: &ResourceOp) {
     let status_color = match &op.status {
         OpStatus::Active => DOT_READY,
         OpStatus::Ambiguous => DOT_BUILDING,
@@ -1028,41 +964,6 @@ fn draw_one_resource_op(
         );
         if op.is_active() && op.changes_gameplay() {
             extension_badge(ui, "Gameplay", false);
-        }
-        if op.status.needs_user() || op.selected_by_user {
-            let selected_label = if op.selected_by_user {
-                match (&op.status, &op.target) {
-                    (OpStatus::Inactive(_), _) => "Ignored".to_owned(),
-                    (_, Some(t)) => t.label(),
-                    _ => "Select target...".to_owned(),
-                }
-            } else {
-                "Choose target...".to_owned()
-            };
-            egui::ComboBox::from_id_salt(("mod_target_pick", mod_id, &op.source))
-                .selected_text(selected_label)
-                .show_ui(ui, |ui| {
-                    if op.selected_by_user && ui.selectable_label(false, "Auto (reset)").clicked() {
-                        *target_change = Some((op.source.clone(), None));
-                    }
-                    for cand in &op.candidates {
-                        let label = cand.target.label();
-                        let text = format!("{label} ({:.0}% match)", cand.overlap * 100.0);
-                        let is_cur = op.target.as_ref() == Some(&cand.target);
-                        if ui.selectable_label(is_cur, text).clicked() {
-                            *target_change =
-                                Some((op.source.clone(), Some(TargetChoice::Target(label))));
-                        }
-                    }
-                    let is_ignored =
-                        op.selected_by_user && matches!(op.status, OpStatus::Inactive(_));
-                    if ui
-                        .selectable_label(is_ignored, "Ignore (do not apply)")
-                        .clicked()
-                    {
-                        *target_change = Some((op.source.clone(), Some(TargetChoice::Ignore)));
-                    }
-                });
         }
     });
     if let Some(reason) = op.status.reason() {
@@ -1218,6 +1119,7 @@ mod tests {
     use crate::paths::{LauncherPaths, EXE_SUFFIX};
     use crate::ui::{Page, WINDOW_HEIGHT, WINDOW_WIDTH};
     use egui::{Pos2, Rect, Vec2};
+    use extensions::mods::TargetSelections;
 
     fn collect_texts(shape: &egui::Shape, out: &mut Vec<(String, Rect)>) {
         match shape {
@@ -1507,9 +1409,9 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_target_picker_persists_selection_and_resolves_on_rescan() {
+    fn an_unclear_target_stays_stock_and_offers_no_picker() {
         let dir = std::env::temp_dir().join(format!(
-            "openbf_launcher_ambiguous_target_{}",
+            "openbf_launcher_unclear_target_{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1545,34 +1447,20 @@ mod tests {
         };
         wait_for_scan(&mut app, &ctx, &input);
 
-        let before = &app.mods_snapshot.mods["content.loosexwing"].discovered;
-        assert_eq!(before.ambiguous_ops().count(), 1);
-        assert_eq!(before.active_ops().count(), 0);
+        let found = &app.mods_snapshot.mods["content.loosexwing"].discovered;
+        assert_eq!(found.ambiguous_ops().count(), 1);
+        assert_eq!(found.active_ops().count(), 0);
 
-        let prev_gen = app.last_synced_mod_gen;
-        app.set_replacement_target(
-            "content.loosexwing",
-            "allxwing.lvl",
-            Some(TargetChoice::Target("bf2 pc:fpm/rep/allxwing.lvl".into())),
-        );
-        for _ in 0..50 {
-            let _ = ctx.run(input.clone(), |ctx| {
-                let _ = app.ui(ctx);
-            });
-            if app.last_synced_mod_gen > prev_gen && !app.mods_snapshot.scanning {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+        let out = ctx.run(input.clone(), |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let mut rendered = Vec::new();
+        for clipped in &out.shapes {
+            collect_texts(&clipped.shape, &mut rendered);
         }
-        let after = &app.mods_snapshot.mods["content.loosexwing"].discovered;
-        assert_eq!(after.ambiguous_ops().count(), 0);
-        assert_eq!(after.active_ops().count(), 1);
-        assert_eq!(
-            after.resource_ops[0].target.as_ref().unwrap().path,
-            "fpm/rep/allxwing.lvl"
-        );
-        assert!(TargetSelections::path(&paths.data_dir).is_file());
-        assert!(!loose_mod.join("mod_targets.ron").exists());
+        assert!(rendered.iter().any(|(t, _)| t == "LooseXWing"));
+        assert!(!rendered.iter().any(|(t, _)| t.contains("Choose target")));
+        assert!(!TargetSelections::path(&paths.data_dir).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
