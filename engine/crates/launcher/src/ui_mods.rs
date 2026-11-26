@@ -236,6 +236,7 @@ impl LauncherApp {
                 ui.set_width(list_w);
                 ui.set_max_width(list_w);
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 10.0);
+                scroll_while_dragging(ui);
 
                 match &ext_resolution {
                     Ok(plan) => {
@@ -282,40 +283,15 @@ impl LauncherApp {
                     );
                 }
 
-                match &content_resolution {
-                    Ok(plan) => {
-                        if !plan.conflicts.is_empty() {
-                            let summary: Vec<String> = plan
-                                .conflicts
-                                .iter()
-                                .map(|c| {
-                                    format!(
-                                        "{}: `{}` overrides {}",
-                                        c.resource_path,
-                                        c.winner_name,
-                                        c.overridden_names.join(", ")
-                                    )
-                                })
-                                .collect();
-                            draw_notice_box(
-                                ui,
-                                Color32::from_rgb(0xff, 0xfb, 0xeb),
-                                DOT_BUILDING,
-                                TEXT_PRIMARY,
-                                &format!("Override conflicts: {}", summary.join("; ")),
-                            );
-                        }
-                    }
-                    Err(errs) => {
-                        for err in errs {
-                            draw_notice_box(
-                                ui,
-                                Color32::from_rgb(0xfd, 0xf3, 0xf2),
-                                DOT_MISSING,
-                                DOT_MISSING,
-                                &err.to_string(),
-                            );
-                        }
+                if let Err(errs) = &content_resolution {
+                    for err in errs {
+                        draw_notice_box(
+                            ui,
+                            Color32::from_rgb(0xfd, 0xf3, 0xf2),
+                            DOT_MISSING,
+                            DOT_MISSING,
+                            &err.to_string(),
+                        );
                     }
                 }
 
@@ -905,6 +881,13 @@ enum CardControlAction {
     MoveDown,
 }
 
+fn scroll_while_dragging(ui: &egui::Ui) {
+    if ui.ctx().dragged_id().is_some() && ui.rect_contains_pointer(ui.clip_rect()) {
+        let delta = ui.input(|i| i.smooth_scroll_delta);
+        ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
+    }
+}
+
 fn draw_resource_ops(ui: &mut egui::Ui, ops: &[ResourceOp]) {
     let active = ops.iter().filter(|o| o.is_active()).count();
     let identical = ops
@@ -1405,6 +1388,108 @@ mod tests {
         assert_eq!(plan.conflicts[0].resource_path, "bf2 pc:side/all.lvl");
         assert_eq!(plan.conflicts[0].winner_id, "content.alphamod");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_list_while_text_is_being_selected() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf_launcher_drag_scroll_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_synthetic_catalog(
+            &dir,
+            &[("side/all.lvl", synthetic_ucfb(b"tex_", "all_trooper", b"stock"))],
+        );
+        let mut paths =
+            LauncherPaths::from_exe(&dir.join(format!("openbf-launcher{EXE_SUFFIX}")), None);
+        paths.checkout_root = Some(dir.clone());
+        for i in 0..24 {
+            let side = paths
+                .mods_dir()
+                .join(format!("Mod{i:02}"))
+                .join("data/_LVL_PC/SIDE");
+            std::fs::create_dir_all(&side).unwrap();
+            std::fs::write(
+                side.join("all.lvl"),
+                synthetic_ucfb(b"tex_", "all_trooper", b"modded"),
+            )
+            .unwrap();
+        }
+
+        let mut app = LauncherApp::new(paths, || {});
+        app.page = Some(Page::Mods);
+        let ctx = egui::Context::default();
+        LauncherApp::configure_style(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                Pos2::ZERO,
+                Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+            )),
+            ..Default::default()
+        };
+        wait_for_scan(&mut app, &ctx, &input);
+
+        let mut time = 0.0;
+        let mut frame = |app: &mut LauncherApp, events: Vec<egui::Event>| {
+            time += 1.0 / 60.0;
+            let mut raw = input.clone();
+            raw.time = Some(time);
+            raw.events = events;
+            let out = ctx.run(raw, |ctx| {
+                let _ = app.ui(ctx);
+            });
+            let mut texts = Vec::new();
+            for clipped in &out.shapes {
+                collect_texts(&clipped.shape, &mut texts);
+            }
+            texts
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let find = |texts: &[(String, Rect)], needle: &str| {
+            texts
+                .iter()
+                .find(|(t, _)| t.contains(needle))
+                .map(|(_, r)| *r)
+        };
+
+        let title = find(&frame(&mut app, Vec::new()), "Mod00")
+            .expect("Mod00")
+            .center();
+        frame(&mut app, vec![egui::Event::PointerMoved(title)]);
+        frame(&mut app, vec![button(title, true)]);
+        frame(&mut app, vec![button(title, false)]);
+        let before = find(&frame(&mut app, Vec::new()), "Folder: Mod00").expect("expanded card");
+
+        let start = before.left_center() + Vec2::new(4.0, 0.0);
+        let end = start + Vec2::new(60.0, 0.0);
+        frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+        frame(&mut app, vec![button(start, true)]);
+        frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+        assert!(ctx.dragged_id().is_some(), "selecting text is a drag");
+        frame(
+            &mut app,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, -40.0),
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let mut texts = Vec::new();
+        for _ in 0..30 {
+            texts = frame(&mut app, Vec::new());
+        }
+        let after = find(&texts, "Folder: Mod00").expect("still on screen");
+        assert!(
+            (before.top() - after.top() - 40.0).abs() < 1.0,
+            "{before:?} -> {after:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
