@@ -331,11 +331,15 @@ impl SideBakeCache {
                 Some(pose) => super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons")?,
                 None => false,
             };
-            let folded = match pose.as_ref().map(|p| &p.rig).or(anim.human_rig.as_ref()) {
-                Some(rig) => super::fold_unrigged_ancestors(&mut skel, rig, &sm),
-                None => false,
+            let (restored, folded) = match pose.as_ref().map(|p| &p.rig).or(anim.human_rig.as_ref())
+            {
+                Some(rig) => (
+                    super::restore_rig_ancestors(&mut skel, rig)?,
+                    super::fold_unrigged_ancestors(&mut skel, rig, &sm),
+                ),
+                None => (false, false),
             };
-            if attached || folded {
+            if attached || restored || folded {
                 sm.bones = super::bones_of(&skel);
             }
             let bones: Vec<String> = skel.bones.iter().map(|b| b.name.clone()).collect();
