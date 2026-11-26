@@ -17,6 +17,16 @@ fn norm_faction(raw: &str) -> String {
     }
 }
 
+/// `cor/cor1.lvl`: one of the game's own worlds, named for its folder and a
+/// digit. `spa/spa_sky.lvl` and `side/rep.lvl` are not.
+pub(super) fn is_stock_world_path(path: &str) -> bool {
+    path.split_once('/').is_some_and(|(dir, file)| {
+        file.strip_suffix(".lvl")
+            .and_then(|stem| stem.strip_prefix(dir))
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+    })
+}
+
 pub(super) fn fold_calls(
     analysis: &MissionScriptAnalysis,
     script_name: &str,
@@ -173,6 +183,7 @@ pub(super) fn fold_calls(
                             }
                         }
                     } else if low.ends_with(".lvl") {
+                        m.on_stock_world |= is_stock_world_path(&low);
                         for arg in a.iter().skip(1).filter_map(|v| v.as_str()) {
                             if !arg.is_empty() && !m.layers.contains(&arg.to_owned()) {
                                 m.layers.push(arg.to_owned());

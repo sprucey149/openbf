@@ -146,3 +146,53 @@ fn real_abr_inspection_when_present() {
     assert!(res.unused_lvls.iter().any(|u| u.ends_with("kas2.lvl")));
     assert!(res.unused_lvls.iter().any(|u| u.ends_with("tat2.lvl")));
 }
+
+#[test]
+fn a_mission_is_named_by_the_longest_start_of_its_script_name() {
+    let table = |key: &str| match key {
+        "mapname.name.rxc" => Some("Raxus".to_owned()),
+        "mapname.name.cor1" => Some("Coruscant".to_owned()),
+        "mapname.name.co" => Some("shorter".to_owned()),
+        _ => None,
+    };
+    let name = |script| mission_text(script, "mapname.name.", table);
+    assert_eq!(name("rxc1_con").as_deref(), Some("Raxus"));
+    assert_eq!(name("cor1c_ctf").as_deref(), Some("Coruscant"));
+    assert_eq!(name("xyz1_con"), None);
+}
+
+#[test]
+fn only_a_world_named_for_its_stock_folder_is_a_stock_world() {
+    for stock in ["cor/cor1.lvl", "kas/kas2.lvl", "spa/spa1.lvl"] {
+        assert!(mission_fold::is_stock_world_path(stock), "{stock}");
+    }
+    for other in [
+        "spa/spa_sky.lvl",
+        "side/rep.lvl",
+        "ingame.lvl",
+        "load/common.lvl",
+    ] {
+        assert!(!mission_fold::is_stock_world_path(other), "{other}");
+    }
+}
+
+#[test]
+fn a_download_laid_out_as_the_game_folder_is_read_addon_by_addon() {
+    let dir = make_temp_dir("game_folder");
+    let game = dir.join("GameData");
+    for addon in ["AAA", "BDT"] {
+        fs::create_dir_all(game.join("addon").join(addon)).unwrap();
+        fs::write(game.join("addon").join(addon).join("addme.script"), b"ucfb").unwrap();
+    }
+    fs::create_dir_all(game.join("DATA/_LVL_PC")).unwrap();
+    let canon = fs::canonicalize(&dir).unwrap();
+    let found = detect_game_folder(&dir, &canon).expect("game folder");
+    assert_eq!(found.dir, game);
+    assert_eq!(found.addons.len(), 2);
+
+    // One addon on its own is not a game folder.
+    let alone = game.join("addon/BDT");
+    let canon = fs::canonicalize(&alone).unwrap();
+    assert!(detect_game_folder(&alone, &canon).is_none());
+    let _ = fs::remove_dir_all(&dir);
+}

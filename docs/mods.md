@@ -42,6 +42,8 @@ Direct launches of `openbf` without opening the launcher first also read `openbf
 - **No untrusted code execution:** Discovery and mission inspection use static `ucfb` LVL scanning and a bounded static Lua 5.0 bytecode constant/opcode evaluator (`mungefs::lua50`)—arbitrary mod scripts or third-party native DLLs are never executed.
 - **Stable non-colliding identities:** Each discovered folder gets an internal mod ID (`content.<slug>`) and isolated asset/mission namespace (`mod_<slug>`) derived from the installed folder identity rather than the legacy three-character addon tag alone. Multiple mods sharing the same legacy tag (for example, `MAP_A` and `MAP_B`) remain distinct in the list, in `mod_cache/`, and in Instant Action with folder-name disambiguation.
 - **Map folders:** With **Map folders** on in the launcher's options, Instant Action lists its maps in folders: Battlefront 1, Battlefront 2, then one per mod that adds a map, named as the mod. Map names drop the `(bf1)`, `(bf2)` and `(mod)` suffixes. **All Maps** inside a folder means that folder's maps. The setting reaches the game through `OPENBF_GROUP_MAPS`, and the multiplayer lobby keeps the flat list.
+- **Game-folder downloads:** A mod laid out as the game folder it is copied over (`GameData/addon/<ID>/...`, with or without the `GameData` folder) is one entry in the **Mods** tab. Each addon inside it is read on its own, and the folder's `data/_LVL_PC` files are replacement candidates.
+- **Map names:** A map is named as the game names it: `mapname.name.` plus the longest start of the mission script's name that the addon's `core.lvl` has a string for (`rxc1_con`: `rxc1_`, `rxc1`, `rxc`, ...).
 - **Compatibility classification:** Each mod is marked **Supported**, **Supported (warnings)**, **Unsupported**, or **Invalid** (for example rejected symlink escapes or corrupt/empty folders) with expandable diagnostics inside the **Mods** tab.
 - **Stock protection:** Unreferenced top-level LVLs placed inside an addon folder (for instance stray copies of stock map LVLs bundled inside an addon) are detected, left unmounted with a warning, and never allowed to shadow stock maps accidentally.
 
@@ -84,6 +86,8 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 
 ### Not Supported / Skipped with Diagnostics
 
+- Missions on the game's own maps. A mission that reads a stock world (`cor\cor1.lvl`) and adds the mod's layers on top is reported and not listed as a map.
+- Custom eras and custom game modes. A new map's missions in a mode openbf does not know are reported as unsupported.
 - Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions.
 - Custom third-party native DLL plugins.
 - Full custom non-stock side LVL model/texture/animation authoring inside addon maps.
