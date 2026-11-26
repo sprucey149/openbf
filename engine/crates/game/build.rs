@@ -119,5 +119,5 @@ fn main() {
     }
     // The icon is data the OS reads: no icon named is no icon, silently, and a
     // build without `rc.exe` is a warning, not a failure.
-    build_icon::link_icon();
+    build_icon::link_icon("game");
 }

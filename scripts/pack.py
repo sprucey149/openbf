@@ -25,7 +25,7 @@ recompiles and re-packs):
      inside itself first, then for openbf.pak beside it; the two must stay together.
      Before the copy, the app icon is rendered from the bake (`game --render-icon`: the clone trooper's helmet) into
      engine/branding_baked/ and scripts/make_icons.py writes each OS's container there; on Windows the game is built
-     again so game.exe carries the .ico (OPENBF_ICON, engine/crates/game/build_icon.rs). If the render fails, a
+     again so game.exe and openbf-launcher.exe carry the .ico (OPENBF_ICON, engine/crates/game/build_icon.rs). If the render fails, a
      one-line note says so and the pack goes on without an icon. No icon art is committed (docs/branding.md).
 On macOS --app-bundle (default there) turns that into dist/openbf.app: the game, openbf.pak and openbf_data/ inside
 Contents/MacOS (an existing bundle's openbf_data/ is kept, and a flat dist/openbf_data/ from an older pack is moved
@@ -314,7 +314,7 @@ def make_icon(game, baked, icon_dir=ICON_DIR, runner=subprocess.run):
 
 def cargo_env():
     """cargo's environment with OPENBF_ICON naming the rendered .ico, which
-    engine/crates/game/build_icon.rs embeds in game.exe on Windows when it is there."""
+    engine/crates/game/build_icon.rs embeds in game.exe and openbf-launcher.exe on Windows when it is there."""
     return dict(os.environ, OPENBF_ICON=ICO)
 
 
@@ -1301,8 +1301,9 @@ def build(a, out, plan, packs, visual_report):
 
     step("6/6 pack")
     if make_icon(game, BAKED) and WINDOWS and not a.game_bin:
-        # build.rs watches the .ico it embeds: this relinks game.exe with the icon, or does nothing.
+        # build.rs watches the .ico it embeds: this relinks game.exe and the launcher with the icon, or does nothing.
         run(["cargo", "build", "--release", "-p", "game"] + game_features(a), cwd=ENGINE, env=cargo_env())
+        run(["cargo", "build", "--release", "-p", "launcher"], cwd=ENGINE, env=cargo_env())
     os.makedirs(os.path.dirname(out), exist_ok=True)
     tmp = os.path.join(os.path.dirname(out), "pack-tmp" + EXE)  # Windows runs only a name ending in .exe
     shutil.copyfile(game, tmp)
