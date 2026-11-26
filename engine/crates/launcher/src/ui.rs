@@ -7,6 +7,7 @@ use crate::config::{GraphicsApi, LauncherConfig, Platform, SourceConfig};
 use crate::mods_worker::{ModsSnapshot, ModsWorker};
 use crate::paths::{open_folder, LauncherPaths};
 use crate::runner::{is_error_line, BuildHandle, BuildOutcome, BuildProgress};
+use crate::ui_mods::card_text;
 use egui::{
     Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Id,
     Layout, Margin, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
@@ -1515,7 +1516,8 @@ pub(crate) fn draw_notice_box(
         .show(ui, |ui| {
             // 10px left + 10px right inner margin + 1px left + 1px right stroke = 22px.
             ui.set_width((width - 22.0).max(140.0));
-            ui.add(
+            card_text(
+                ui,
                 egui::Label::new(
                     egui::RichText::new(text)
                         .font(regular_font(12.0))

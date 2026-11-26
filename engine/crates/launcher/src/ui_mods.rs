@@ -12,6 +12,7 @@ use crate::ui::{
     regular_font, LauncherApp, BG_MAIN, BG_SIDEBAR, DOT_BUILDING, DOT_MISSING, DOT_READY,
     INPUT_BORDER, TEXT_MUTED, TEXT_PRIMARY,
 };
+use egui::text_selection::LabelSelectionState;
 use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Pos2, Rect, Sense, Stroke, Vec2};
 use extensions::mods::{resolve_content_mods, DiscoveredMod, ModCacheStatus, OpStatus, ResourceOp};
 use extensions::{ExtensionManifest, ExtensionOrigin, OPENBF_VR_ID};
@@ -508,10 +509,13 @@ impl LauncherApp {
                                 format!(" ({secs}s)")
                             }
                         });
-                        ui.label(
-                            egui::RichText::new(format!("{}{elapsed}", state.progress_msg))
-                                .font(regular_font(11.0))
-                                .color(TEXT_MUTED),
+                        card_text(
+                            ui,
+                            egui::Label::new(
+                                egui::RichText::new(format!("{}{elapsed}", state.progress_msg))
+                                    .font(regular_font(11.0))
+                                    .color(TEXT_MUTED),
+                            ),
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if flat_button(ui, "Cancel", Vec2::new(62.0, 22.0), true) {
@@ -523,7 +527,8 @@ impl LauncherApp {
 
                 if let ModCacheStatus::Failed(err) = &state.cache_status {
                     ui.horizontal(|ui| {
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(format!("Conversion failed: {err}"))
                                     .font(regular_font(11.5))
@@ -546,7 +551,8 @@ impl LauncherApp {
                         .compatibility
                         .reason()
                         .unwrap_or("Mod layout is invalid or unsupported.");
-                    ui.add(
+                    card_text(
+                        ui,
                         egui::Label::new(
                             egui::RichText::new(reason)
                                 .font(regular_font(11.5))
@@ -562,7 +568,8 @@ impl LauncherApp {
                             .queue_inspect(self.mods_env(), vec![info.id.clone()]);
                     }
                     if !info.description.is_empty() {
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(&info.description)
                                     .font(regular_font(12.5))
@@ -572,10 +579,13 @@ impl LauncherApp {
                         );
                     }
                     if state.inspecting || !state.inspected {
-                        ui.label(
-                            egui::RichText::new("Inspecting LVL files...")
-                                .font(regular_font(11.5))
-                                .color(TEXT_MUTED),
+                        card_text(
+                            ui,
+                            egui::Label::new(
+                                egui::RichText::new("Inspecting LVL files...")
+                                    .font(regular_font(11.5))
+                                    .color(TEXT_MUTED),
+                            ),
                         );
                     }
                     let mut badges: Vec<(&str, bool)> = vec![(info.mod_type.label(), true)];
@@ -604,7 +614,8 @@ impl LauncherApp {
                     if let Some(author) = &info.author {
                         meta_parts.push(format!("Author: {author}"));
                     }
-                    ui.add(
+                    card_text(
+                        ui,
                         egui::Label::new(
                             egui::RichText::new(meta_parts.join("  |  "))
                                 .font(regular_font(11.5))
@@ -623,7 +634,8 @@ impl LauncherApp {
                         } else {
                             map.modes_gcw.join(", ")
                         };
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(format!(
                                     "Map: {} [{}] (CW: {cw} | GCW: {gcw})",
@@ -646,7 +658,8 @@ impl LauncherApp {
                                         .unwrap_or("unsupported")
                                 )
                             };
-                            ui.add(
+                            card_text(
+                                ui,
                                 egui::Label::new(
                                     egui::RichText::new(format!(
                                         "  - {} ({}/{}): {status}",
@@ -666,20 +679,24 @@ impl LauncherApp {
                         }
                     }
                     if !info.custom_sides.is_empty() {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Custom sides: {}",
-                                info.custom_sides.join(", ")
-                            ))
-                            .font(regular_font(11.0))
-                            .color(TEXT_MUTED),
+                        card_text(
+                            ui,
+                            egui::Label::new(
+                                egui::RichText::new(format!(
+                                    "Custom sides: {}",
+                                    info.custom_sides.join(", ")
+                                ))
+                                .font(regular_font(11.0))
+                                .color(TEXT_MUTED),
+                            ),
                         );
                     }
                     if !info.resource_ops.is_empty() {
                         draw_resource_ops(ui, &info.resource_ops);
                     }
                     if !info.declared_overrides.is_empty() {
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(format!(
                                     "Stock overrides: {}",
@@ -692,7 +709,8 @@ impl LauncherApp {
                         );
                     }
                     for note in &state.cache_unsupported {
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(format!("Not converted: {note}"))
                                     .font(regular_font(11.0))
@@ -706,7 +724,8 @@ impl LauncherApp {
                         if !shown_warnings.insert(w.as_str()) {
                             continue;
                         }
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(format!("Warning: {w}"))
                                     .font(regular_font(11.0))
@@ -818,7 +837,8 @@ impl LauncherApp {
                 });
 
                 if expanded {
-                    ui.add(
+                    card_text(
+                        ui,
                         egui::Label::new(
                             egui::RichText::new(&manifest.description)
                                 .font(regular_font(12.5))
@@ -838,7 +858,8 @@ impl LauncherApp {
                         if !manifest.conflicts.is_empty() {
                             rel.push(format!("Conflicts: {}", manifest.conflicts.join(", ")));
                         }
-                        ui.add(
+                        card_text(
+                            ui,
                             egui::Label::new(
                                 egui::RichText::new(rel.join("  |  "))
                                     .font(regular_font(11.5))
@@ -854,7 +875,8 @@ impl LauncherApp {
                         .unsupported_reason
                         .as_deref()
                         .unwrap_or("Not supported on this platform or build.");
-                    ui.add(
+                    card_text(
+                        ui,
                         egui::Label::new(
                             egui::RichText::new(format!("Unavailable: {reason}"))
                                 .font(regular_font(11.5))
@@ -888,6 +910,18 @@ fn scroll_while_dragging(ui: &egui::Ui) {
     }
 }
 
+/// A card's selectable text. egui's own label joins the text selection only
+/// while it is on screen, and the selection is dropped when either end goes
+/// missing, so scrolling would lose it. This one takes part wherever it is.
+pub(crate) fn card_text(ui: &mut egui::Ui, label: egui::Label) {
+    let (pos, galley, response) = label.layout_in_ui(ui);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), galley.text())
+    });
+    let color = ui.style().visuals.text_color();
+    LabelSelectionState::label_text_selection(ui, &response, pos, galley, color, Stroke::NONE);
+}
+
 fn draw_resource_ops(ui: &mut egui::Ui, ops: &[ResourceOp]) {
     let active = ops.iter().filter(|o| o.is_active()).count();
     let identical = ops
@@ -909,10 +943,13 @@ fn draw_resource_ops(ui: &mut egui::Ui, ops: &[ResourceOp]) {
     if other > 0 {
         parts.push(format!("{other} inactive/unresolved"));
     }
-    ui.label(
-        egui::RichText::new(format!("Stock replacements: {}", parts.join(", ")))
-            .font(bold_font(11.5))
-            .color(TEXT_PRIMARY),
+    card_text(
+        ui,
+        egui::Label::new(
+            egui::RichText::new(format!("Stock replacements: {}", parts.join(", ")))
+                .font(bold_font(11.5))
+                .color(TEXT_PRIMARY),
+        ),
     );
     for op in ops {
         if op.status == OpStatus::Identical && !op.selected_by_user {
@@ -935,22 +972,29 @@ fn draw_one_resource_op(ui: &mut egui::Ui, op: &ResourceOp) {
             .as_ref()
             .map(|t| t.label())
             .unwrap_or_else(|| op.status.label().to_owned());
-        ui.label(
-            egui::RichText::new(format!("  {} -> {dest}", op.source))
-                .font(regular_font(11.0))
-                .color(TEXT_PRIMARY),
+        card_text(
+            ui,
+            egui::Label::new(
+                egui::RichText::new(format!("  {} -> {dest}", op.source))
+                    .font(regular_font(11.0))
+                    .color(TEXT_PRIMARY),
+            ),
         );
-        ui.label(
-            egui::RichText::new(format!("[{}]", op.status.label()))
-                .font(regular_font(10.5))
-                .color(status_color),
+        card_text(
+            ui,
+            egui::Label::new(
+                egui::RichText::new(format!("[{}]", op.status.label()))
+                    .font(regular_font(10.5))
+                    .color(status_color),
+            ),
         );
         if op.is_active() && op.changes_gameplay() {
             extension_badge(ui, "Gameplay", false);
         }
     });
     if let Some(reason) = op.status.reason() {
-        ui.add(
+        card_text(
+            ui,
             egui::Label::new(
                 egui::RichText::new(format!("    {reason}"))
                     .font(regular_font(10.5))
@@ -1197,7 +1241,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         write_synthetic_catalog(
             &dir,
-            &[("side/all.lvl", synthetic_ucfb(b"tex_", "all_trooper", b"stock"))],
+            &[(
+                "side/all.lvl",
+                synthetic_ucfb(b"tex_", "all_trooper", b"stock"),
+            )],
         );
         let mut paths =
             LauncherPaths::from_exe(&dir.join(format!("openbf-launcher{EXE_SUFFIX}")), None);
@@ -1400,7 +1447,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         write_synthetic_catalog(
             &dir,
-            &[("side/all.lvl", synthetic_ucfb(b"tex_", "all_trooper", b"stock"))],
+            &[(
+                "side/all.lvl",
+                synthetic_ucfb(b"tex_", "all_trooper", b"stock"),
+            )],
         );
         let mut paths =
             LauncherPaths::from_exe(&dir.join(format!("openbf-launcher{EXE_SUFFIX}")), None);
@@ -1490,6 +1540,41 @@ mod tests {
             (before.top() - after.top() - 40.0).abs() < 1.0,
             "{before:?} -> {after:?}"
         );
+
+        // Scroll the line the selection began on out of view, then finish the
+        // drag on text further down and copy.
+        frame(
+            &mut app,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, -400.0),
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        for _ in 0..30 {
+            texts = frame(&mut app, Vec::new());
+        }
+        let gone = find(&texts, "Folder: Mod00").map_or(f32::MIN, |r| r.bottom());
+        assert!(gone < end.y - 100.0, "the first line is still in view");
+        let selection = ctx.plugin::<egui::text_selection::LabelSelectionState>();
+        assert!(selection.lock().has_selection(), "dropped while scrolling");
+        frame(&mut app, vec![button(end, false)]);
+        let mut raw = input.clone();
+        raw.time = Some(100.0);
+        raw.events = vec![egui::Event::Copy];
+        let out = ctx.run(raw, |ctx| {
+            let _ = app.ui(ctx);
+        });
+        let copied: String = out
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                egui::OutputCommand::CopyText(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(copied.contains("Namespace: mod_mod00"), "{copied:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1639,10 +1724,8 @@ mod tests {
             warnings: Vec::new(),
             unsupported: Vec::new(),
         };
-        meta.replacement_key = meta.expected_replacement_key(
-            &catalog_digest,
-            &std::collections::BTreeMap::new(),
-        );
+        meta.replacement_key =
+            meta.expected_replacement_key(&catalog_digest, &std::collections::BTreeMap::new());
         meta.save_atomic(&cache_dir).unwrap();
 
         let mut app = LauncherApp::new(paths, || {});
@@ -1814,7 +1897,10 @@ mod tests {
             })
             .collect();
         let min_r = order_rights.iter().copied().fold(f32::INFINITY, f32::min);
-        let max_r = order_rights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max_r = order_rights
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         assert!(
             (max_r - min_r) < 0.5,
             "order labels drifted horizontally across cards: {order_rights:?}"
