@@ -345,6 +345,28 @@ fn new_env(proto: Proto) -> EvalEnv {
     env
 }
 
+fn key_to_val(key: LuaKey) -> LuaVal {
+    match key {
+        LuaKey::Str(s) => LuaVal::Str(s),
+        LuaKey::Int(i) => LuaVal::Num(i as f64),
+        LuaKey::Other(s) => s.parse().map_or_else(|_| LuaVal::Unknown(s), LuaVal::Num),
+    }
+}
+
+/// Lua's `type`, for the values whose type is known.
+fn type_name(value: &LuaVal) -> Option<LuaVal> {
+    let name = match value {
+        LuaVal::Nil => "nil",
+        LuaVal::Bool(_) => "boolean",
+        LuaVal::Num(_) => "number",
+        LuaVal::Str(_) => "string",
+        LuaVal::Table(_) => "table",
+        LuaVal::Closure { .. } => "function",
+        _ => return None,
+    };
+    Some(LuaVal::Str(name.to_owned()))
+}
+
 fn jump_target(next: usize, bx: usize, end: usize) -> usize {
     next.checked_add_signed(bx as isize - 131_071)
         .filter(|&target| target < end)
@@ -390,6 +412,8 @@ fn eval_proto(
         regs.insert(i, v.clone());
     }
     let exact = env.trace.is_some();
+    // The next entry of each `for ... in` over a known table, by loop register.
+    let mut cursors: BTreeMap<usize, usize> = BTreeMap::new();
     let mut pc = 0;
     let mut open_top = None;
     while let Some(&ins) = proto.code.get(pc) {
@@ -727,6 +751,12 @@ fn eval_proto(
                         }
                         if let Some(trace) = env.trace.as_mut() {
                             ret_override = match name.as_str() {
+                                // A table is its own iterator for `TForPrep`.
+                                "pairs" | "ipairs" => call_args
+                                    .first()
+                                    .filter(|v| matches!(v, LuaVal::Table(_)))
+                                    .cloned(),
+                                "type" => call_args.first().and_then(type_name),
                                 // Registration sees an installation with no separate addons.
                                 "ScriptCB_IsFileExist" => Some(LuaVal::Num(0.0)),
                                 "ScriptCB_InMultiplayer" => Some(LuaVal::Bool(trace.multiplayer)),
@@ -823,6 +853,33 @@ fn eval_proto(
                 let truth = matches!(val, LuaVal::Num(_)) || val.is_truthy().unwrap_or(false);
                 if truth == (c != 0) {
                     regs.insert(a, val);
+                } else {
+                    pc += 1;
+                }
+            }
+            // Lua 5.0 enters a generic `for` at its `TForLoop`, which either
+            // fills the loop variables and takes the jump back that follows it
+            // or skips that jump. An unknown iterator gets one pass.
+            Op50::TForPrep if exact => {
+                if matches!(regs.get(&a), Some(LuaVal::Table(_))) {
+                    cursors.insert(a, 0);
+                    pc = jump_target(pc, bx, proto.code.len());
+                } else {
+                    cursors.remove(&a);
+                }
+            }
+            Op50::TForLoop if exact => {
+                let next = match (regs.get(&a), cursors.get(&a)) {
+                    (Some(LuaVal::Table(tid)), Some(&at)) => env
+                        .tables
+                        .get(*tid)
+                        .and_then(|tbl| tbl.entries.get(at).cloned()),
+                    _ => None,
+                };
+                if let Some((key, value)) = next {
+                    *cursors.entry(a).or_default() += 1;
+                    regs.insert(a + 2, key_to_val(key));
+                    regs.insert(a + 3, value);
                 } else {
                     pc += 1;
                 }
