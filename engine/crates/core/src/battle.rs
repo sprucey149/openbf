@@ -90,6 +90,10 @@ pub struct Battle {
     pub unlimited_reinforcements: bool,
     pub unlimited_teams: [bool; 2],
     pub campaign_rules: bool,
+    /// A mod mode's translated script decides the round: BF2 pays deaths and
+    /// calls defeats in script (`Objective.lua`), and a script of the mod's
+    /// own may do neither.
+    pub script_rules: bool,
 }
 
 impl Battle {
@@ -102,6 +106,7 @@ impl Battle {
             unlimited_reinforcements: false,
             unlimited_teams: [false; 2],
             campaign_rules: false,
+            script_rules: false,
         }
     }
 
@@ -110,6 +115,7 @@ impl Battle {
     /// (BF2 Death Star's script-side second ticket is dropped on purpose;
     /// analysis/plan/FEATURE_SET.md "Every death costs one ticket").
     pub fn on_death(&mut self, team: usize, was_player: bool) {
+        let scripted = self.scripted();
         let t = &mut self.teams[team];
         if was_player {
             t.alive_players = t.alive_players.saturating_sub(1);
@@ -120,7 +126,7 @@ impl Battle {
         // MultiObjectiveContainer's OnCharacterDeath pays the reinforcement
         // (`AddReinforcements(team, -1)`, campaign/lib/multiobjectivecontainer)
         // and its OnTicketCountChange calls MissionDefeat.
-        if self.campaign_rules
+        if scripted
             || self.unlimited_reinforcements
             || self.unlimited_teams.get(team).copied().unwrap_or(false)
         {
@@ -134,6 +140,12 @@ impl Battle {
         // pool hashes a state neither disc can hold.
         t.reinforcements = (t.reinforcements - 1.0).fmax(0.0);
         debug_assert!(t.invariant_holds());
+    }
+
+    /// Whether the mission's script, not the engine, pays reinforcements and
+    /// calls the winner.
+    pub fn scripted(&self) -> bool {
+        self.campaign_rules || self.script_rules
     }
 
     /// A unit wants to spawn. Players always fit while any reinforcement
@@ -173,7 +185,7 @@ impl Battle {
     /// callers may supply an unclamped bleed rate
     /// (`analysis/re-bleed-reachability.md`).
     pub fn tick_bleed(&mut self, dt: f32) -> [u32; 2] {
-        if self.campaign_rules {
+        if self.scripted() {
             return [0; 2];
         }
         let mut shed = [0u32; 2];
@@ -336,5 +348,18 @@ mod tests {
         b.teams[0].reinforcements = 0.5;
         b.on_death(0, true);
         assert_eq!(b.teams[0].reinforcements, 0.0);
+    }
+
+    /// A scripted mode pays nothing by itself: deaths and bleed leave the
+    /// pool for the script (`AddReinforcements`) to spend.
+    #[test]
+    fn a_scripted_mode_leaves_reinforcements_to_its_script() {
+        let mut b = Battle::new([1, 100]);
+        b.script_rules = true;
+        b.teams[0].alive_players = 1;
+        b.teams[0].bleed_per_sec = 1.0;
+        b.on_death(0, true);
+        assert_eq!(b.tick_bleed(1.0), [0, 0]);
+        assert_eq!(b.teams[0].reinforcements, 1.0);
     }
 }

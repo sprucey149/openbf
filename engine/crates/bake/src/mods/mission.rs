@@ -80,6 +80,8 @@ struct MissionDefRon {
     heroes: Vec<(u8, String)>,
     class_load_order: Vec<SideClassLoadRon>,
     teams: Vec<TeamDefRon>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom_team_names: Option<[String; 2]>,
     ai_alive_cap: u32,
     spawn_delay: f32,
     spawn_interval: f32,
@@ -225,6 +227,7 @@ pub fn mission_to_ron(
             })
             .collect(),
         teams,
+        custom_team_names: m.custom_team_names.clone(),
         ai_alive_cap: m.ai_alive_cap.max(1),
         spawn_delay,
         spawn_interval,

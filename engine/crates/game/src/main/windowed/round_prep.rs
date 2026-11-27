@@ -36,6 +36,7 @@ pub(super) struct RoundJob {
     pub name: String,
     pub mode: String,
     pub row_armies: [String; 2],
+    pub era: Option<String>,
     pub session: ui::shell::SessionOptions,
     pub seed: u32,
     pub difficulty: core::skill::Difficulty,
@@ -100,6 +101,7 @@ impl RoundJob {
                     &self.name,
                     &self.mode,
                     &self.row_armies,
+                    self.era.as_deref(),
                     &self.session,
                     self.seed,
                     self.difficulty,
@@ -122,9 +124,15 @@ impl RoundJob {
                 self.mode.as_str()
             };
             let pair = [self.row_armies[0].as_str(), self.row_armies[1].as_str()];
-            let banks = game::mission::pick(&self.missions_dir, &self.name, mission_mode, pair)
-                .map(|p| p.mission.sound)
-                .unwrap_or_default();
+            let era = self
+                .net
+                .as_ref()
+                .and_then(|(r, _)| r.era.as_deref())
+                .or(self.era.as_deref());
+            let banks =
+                game::mission::pick_for_era(&self.missions_dir, &self.name, mission_mode, pair, era)
+                    .map(|p| p.mission.sound)
+                    .unwrap_or_default();
             let lib = game::sounds::SoundLib::load_with_fallback(&dir, &banks);
             (lib, ms(t))
         };
@@ -238,6 +246,7 @@ mod tests {
             name: map.into(),
             mode: "con".into(),
             row_armies: ["rep".into(), "cis".into()],
+            era: None,
             session: ui::shell::SessionOptions::default(),
             seed: 42,
             difficulty: core::skill::Difficulty::Normal,

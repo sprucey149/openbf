@@ -943,9 +943,46 @@ pub fn evaluate_toplevel(proto: Proto) -> EvalEnv {
     env
 }
 
+/// The maps of Battlefront II's own Instant Action lists. Each entry's
+/// `mapluafile` is `<code>%s_%s`: era letter, then mode.
+const STOCK_MENU_MAPS: [&str; 24] = [
+    "cor1", "dag1", "dea1", "end1", "fel1", "geo1", "hot1", "tat3", "kam1", "kas2", "tat2", "mus1",
+    "myg1", "nab2", "pol1", "spa7", "spa8", "spa3", "spa6", "spa9", "spa1", "tan1", "uta1", "yav1",
+];
+
+/// The stock map whose menu entry has the `mapluafile` `template`.
+pub(crate) fn stock_menu_map(template: &str) -> Option<&'static str> {
+    let code = template.to_ascii_lowercase();
+    let code = code.strip_suffix("%s_%s")?;
+    STOCK_MENU_MAPS.into_iter().find(|map| *map == code)
+}
+
+/// The game's lists already hold its own maps when an `addme.script` runs, and
+/// an addon adds eras and modes to one by editing its entry
+/// (`AddNewGameModes`).
+fn seed_stock_menu(env: &mut EvalEnv) {
+    for list in [env.sp_listbox_id, env.mp_listbox_id] {
+        for (index, code) in STOCK_MENU_MAPS.into_iter().enumerate() {
+            let Some(id) = env.alloc_table() else {
+                return;
+            };
+            if let Some(entry) = env.tables.get_mut(id) {
+                entry.set(
+                    LuaKey::Str("mapluafile".into()),
+                    LuaVal::Str(format!("{code}%s_%s")),
+                );
+            }
+            if let Some(table) = env.tables.get_mut(list) {
+                table.set(LuaKey::Int(index as i64 + 1), LuaVal::Table(id));
+            }
+        }
+    }
+}
+
 pub(crate) fn evaluate_standalone_registration(proto: Proto) -> EvalEnv {
     let mut env = new_env(proto);
     env.trace = Some(StandaloneTrace::default());
+    seed_stock_menu(&mut env);
     eval_proto(&mut env, &[], &[], &[], true, 0);
     env
 }

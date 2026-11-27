@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::{
-    resolve_inside_lvl_pc, AddonWorldLoad, InspectedMission, ParsedCtf, ParsedCtfFlag, ParsedTeam,
+    resolve_inside_lvl_pc, stock_world_path, AddonWorldLoad,InspectedMission, ParsedCtf, ParsedCtfFlag, ParsedTeam,
 };
 use crate::lua50::{self, LuaCall, LuaVal, MissionScriptAnalysis};
 
@@ -31,6 +31,7 @@ pub(super) fn fold_calls(
     analysis: &MissionScriptAnalysis,
     script_name: &str,
     registered_in_addme: bool,
+    declared_era: Option<&str>,
     root_canon: &Path,
     lvl_pc: Option<&Path>,
 ) -> InspectedMission {
@@ -154,9 +155,9 @@ pub(super) fn fold_calls(
                             }
                         }
                     } else if low.starts_with("side\\") || low.starts_with("side/") {
-                        let fname = norm.rsplit('/').next().unwrap_or(&norm);
+                        let fname = low.rsplit('/').next().unwrap_or(&low);
                         let side = fname.strip_suffix(".lvl").unwrap_or(fname).to_owned();
-                        match side.to_ascii_lowercase().as_str() {
+                        match side.as_str() {
                             "all" | "imp" => {
                                 eras_seen.insert("gcw".into());
                             }
@@ -164,6 +165,13 @@ pub(super) fn fold_calls(
                                 eras_seen.insert("cw".into());
                             }
                             _ => {}
+                        }
+                        if let Some(pc) = lvl_pc {
+                            if let Some((_, p)) = resolve_inside_lvl_pc(root_canon, pc, first) {
+                                if !m.custom_side_lvls.iter().any(|(s, _)| s == &side) {
+                                    m.custom_side_lvls.push((side.clone(), p));
+                                }
+                            }
                         }
                         for arg in a.iter().skip(1).filter_map(|v| v.as_str()) {
                             m.class_load_order.push((side.clone(), arg.to_owned()));
@@ -183,7 +191,20 @@ pub(super) fn fold_calls(
                             }
                         }
                     } else if low.ends_with(".lvl") {
-                        m.on_stock_world |= is_stock_world_path(&low);
+                        if is_stock_world_path(&low) {
+                            m.on_stock_world = true;
+                            m.world_loads.push(AddonWorldLoad {
+                                rel_path: low.clone(),
+                                path: stock_world_path(&low),
+                                selectors: a
+                                    .iter()
+                                    .skip(1)
+                                    .filter_map(LuaVal::as_str)
+                                    .filter(|s| !s.is_empty())
+                                    .map(str::to_owned)
+                                    .collect(),
+                            });
+                        }
                         for arg in a.iter().skip(1).filter_map(|v| v.as_str()) {
                             if !arg.is_empty() && !m.layers.contains(&arg.to_owned()) {
                                 m.layers.push(arg.to_owned());
@@ -799,8 +820,37 @@ pub(super) fn fold_calls(
         }
     }
 
+    let global_ci = |name: &str| {
+        analysis
+            .env
+            .globals
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v)
+    };
+    if global_ci("SupportsCustomEraTeams")
+        .and_then(LuaVal::is_truthy)
+        .unwrap_or(false)
+    {
+        let t1 = global_ci("CustomEraTeam1")
+            .and_then(LuaVal::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Team 1")
+            .to_owned();
+        let t2 = global_ci("CustomEraTeam2")
+            .and_then(LuaVal::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Team 2")
+            .to_owned();
+        m.custom_team_names = Some([t1, t2]);
+    }
+
     let lower_name = script_name.to_ascii_lowercase();
-    m.era = if eras_seen.contains("cw") && !eras_seen.contains("gcw") {
+    m.era = if let Some(era) = declared_era {
+        era.to_owned()
+    } else if eras_seen.contains("cw") && !eras_seen.contains("gcw") {
         "cw".into()
     } else if eras_seen.contains("gcw") && !eras_seen.contains("cw") {
         "gcw".into()

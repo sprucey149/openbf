@@ -664,6 +664,11 @@ impl EventFeed {
             [&walk.teams[0].faction, &walk.teams[1].faction],
             &walk.post_keys,
         );
+        for (slot, tmpl) in walk.teams.iter().enumerate() {
+            if let Some(ref custom) = tmpl.display_name {
+                feed.teams[slot].0 = custom.clone();
+            }
+        }
         feed.space_round = walk.space_round.clone();
         feed.set_opening_medals(walk);
         let hunt = walk.sim.is_hunt();

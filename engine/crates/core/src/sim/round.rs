@@ -201,7 +201,7 @@ impl Sim {
             return;
         }
         // BF2 conquest bleed (strict CP-value majority, clamped at alive).
-        if !self.battle.campaign_rules {
+        if !self.battle.scripted() {
             cp::apply_bleed(&mut self.battle, &self.cps);
         }
         self.apply_team_handicap();
@@ -214,7 +214,7 @@ impl Sim {
         if self.outcome.is_none() {
             // BF2 Objective.lua OnTicketCountChange: count <= 0 → MissionDefeat.
             for t in 0..teams {
-                if !self.battle.campaign_rules
+                if !self.battle.scripted()
                     && !self.battle.unlimited_reinforcements
                     && !self.battle.unlimited_teams[t]
                     && self.battle.teams[t].tickets() == 0
@@ -223,7 +223,7 @@ impl Sim {
                     self.events.push(Event::TeamDefeated { team: t as u8 });
                 }
             }
-            if !self.battle.campaign_rules {
+            if !self.battle.scripted() {
                 if let Some(loser) = cp::tick_domination(&self.cps, &mut self.domination, dt, 2) {
                     if self.outcome.is_none() {
                         self.outcome = Some(if loser == 0 { 1 } else { 0 });

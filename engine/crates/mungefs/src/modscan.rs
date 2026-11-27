@@ -141,8 +141,10 @@ pub fn quick_inspect_mod_folder(
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
             variant_title: g.variant_title.clone(),
+            stock_row: g.stock_row.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
+            modes_custom_eras: g.modes_custom_eras.clone(),
             missions: g
                 .missions
                 .iter()
@@ -344,8 +346,10 @@ pub fn inspect_mod_folder(
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
             variant_title: g.variant_title.clone(),
+            stock_row: g.stock_row.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
+            modes_custom_eras: g.modes_custom_eras.clone(),
             missions: g
                 .missions
                 .iter()

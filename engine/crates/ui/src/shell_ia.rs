@@ -1274,10 +1274,11 @@ pub(crate) mod tests {
                 name: String::new(),
                 source: String::new(),
                 description: String::new(),
-                modes: [vec![Mode::Con], Vec::new()],
-                era_overrides: [None, None],
+                modes: std::collections::BTreeMap::from([(crate::shell::Era::Cw, vec![Mode::Con])]),
+                era_overrides: std::collections::BTreeMap::new(),
                 baked: true,
                 missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
+                custom_era_missions: Vec::new(),
             })
             .collect();
         let mut ia = InstantAction::new(
@@ -1373,10 +1374,11 @@ pub(crate) mod tests {
             name: String::new(),
             source: String::new(),
             description: String::new(),
-            modes: [vec![Mode::Con], Vec::new()],
-            era_overrides: [None, None],
+            modes: std::collections::BTreeMap::from([(crate::shell::Era::Cw, vec![Mode::Con])]),
+            era_overrides: std::collections::BTreeMap::new(),
             baked: true,
             missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
+            custom_era_missions: Vec::new(),
         };
         let mut ia = InstantAction::new(
             vec![map],
@@ -1482,10 +1484,11 @@ pub(crate) mod tests {
             name: String::new(),
             source: String::new(),
             description: String::new(),
-            modes: [vec![Mode::Con], Vec::new()],
-            era_overrides: [None, None],
+            modes: std::collections::BTreeMap::from([(crate::shell::Era::Cw, vec![Mode::Con])]),
+            era_overrides: std::collections::BTreeMap::new(),
             baked,
             missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
+            custom_era_missions: Vec::new(),
         };
         let maps = vec![entry("AAA", true), entry("ZZZ", false)];
         let mut ia = InstantAction::new(

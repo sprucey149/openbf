@@ -192,6 +192,10 @@ pub struct ModMissionSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModMapSummary {
+    /// The stock map (`cor1`) on whose Instant Action row these missions are
+    /// listed, for modes and eras the mod adds to one of the game's maps.
+    #[serde(default)]
+    pub stock_row: Option<String>,
     pub map_key: String,
     pub legacy_code: String,
     pub display_name: String,
@@ -205,13 +209,18 @@ pub struct ModMapSummary {
     pub modes_cw: Vec<String>,
     #[serde(default)]
     pub modes_gcw: Vec<String>,
+    /// Supported modes for mod-declared custom eras, keyed by lowercase era code
+    /// (excluding `"cw"` and `"gcw"`).
+    #[serde(default)]
+    pub modes_custom_eras: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub missions: Vec<ModMissionSummary>,
     #[serde(default)]
     pub sound_planets: Vec<String>,
-    /// Optional custom era display overrides (`[cw, gcw]`) from `addme.script` `change.era_*`.
+    /// Optional custom era display overrides keyed by canonical era code
+    /// (`"cw"`, `"gcw"`, or custom era code) from `addme.script` `change.era_*`.
     #[serde(default)]
-    pub era_overrides: [Option<ModEraMeta>; 2],
+    pub era_overrides: BTreeMap<String, ModEraMeta>,
 }
 
 /// Optional display metadata for a mod-declared era (from `addme.script` `change.era_*`).
@@ -799,11 +808,13 @@ mod tests {
             description: String::new(),
             source_lvl: "m1.lvl".into(),
             variant_title: None,
+            stock_row: None,
             modes_cw: vec!["con".into()],
             modes_gcw: Vec::new(),
+            modes_custom_eras: BTreeMap::new(),
             missions: Vec::new(),
             sound_planets: Vec::new(),
-            era_overrides: [None, None],
+            era_overrides: BTreeMap::new(),
         };
         let meta = empty_meta(vec![map], "");
         let choices = BTreeMap::new();

@@ -26,6 +26,7 @@ pub(super) fn shell_setup(
     name: &str,
     mode: &str,
     row_armies: &[String; 2],
+    era: Option<&str>,
     session: &ui::shell::SessionOptions,
     seed: u32,
     difficulty: core::skill::Difficulty,
@@ -36,6 +37,7 @@ pub(super) fn shell_setup(
         name,
         mode,
         row_armies,
+        era,
         session,
         seed,
         difficulty,
@@ -52,6 +54,7 @@ fn setup_for(
     name: &str,
     mode: &str,
     row_armies: &[String; 2],
+    era: Option<&str>,
     session: &ui::shell::SessionOptions,
     seed: u32,
     difficulty: core::skill::Difficulty,
@@ -60,7 +63,7 @@ fn setup_for(
     let armies = [row_armies[0].as_str(), row_armies[1].as_str()];
     let xl = mode == ui::shell::Mode::Xl.subst();
     let mission_mode = if xl { "con" } else { mode };
-    let mut pick = game::mission::pick(missions_dir, name, mission_mode, armies);
+    let mut pick = game::mission::pick_for_era(missions_dir, name, mission_mode, armies, era);
     // An addon script that rolls its troops has one mission file per roll.
     if let Some(p) = pick.as_mut() {
         let rolled = super::file_name(&p.path)
@@ -210,6 +213,7 @@ pub(super) fn battle_setup(
         &round.map,
         &round.mode,
         &round.armies,
+        round.era.as_deref(),
         &session,
         round.seed,
         round.difficulty,
@@ -495,6 +499,7 @@ mod tests {
                     &row.key,
                     mode.subst(),
                     &row.armies,
+                    row.era.as_deref(),
                     &session,
                     42,
                     difficulty,
@@ -625,6 +630,7 @@ mod tests {
                             &row.key,
                             mode.subst(),
                             &row.armies,
+                            row.era.as_deref(),
                             &session,
                             seed,
                             difficulty,
@@ -778,6 +784,7 @@ mod tests {
                 map,
                 mode,
                 &armies,
+                None,
                 &session,
                 42 + 17,
                 core::skill::Difficulty::Hard,

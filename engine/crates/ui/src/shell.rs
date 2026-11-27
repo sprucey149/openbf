@@ -205,7 +205,7 @@ impl Mode {
 }
 
 /// The Era list's pick.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Side {
     Era(Era),
     /// `[ours]` an index into [`MIXED`].
@@ -213,10 +213,10 @@ pub enum Side {
 }
 
 impl Side {
-    pub fn armies(self) -> [&'static str; 2] {
+    pub fn armies(&self) -> [&'static str; 2] {
         match self {
             Side::Era(e) => e.armies(),
-            Side::Mixed(i) => MIXED[i],
+            Side::Mixed(i) => MIXED[*i],
         }
     }
 }
@@ -237,6 +237,8 @@ pub struct Launch {
     pub game: Game,
     pub mode: Mode,
     pub armies: [String; 2],
+    /// Canonical era code (`"cw"`, `"gcw"`, or custom code) for `Side::Era`, `None` for cross-era.
+    pub era: Option<String>,
     pub label: String,
 }
 
@@ -255,7 +257,7 @@ pub enum ModePick {
     All,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SidePick {
     One(Side),
     AllEras,
@@ -888,18 +890,22 @@ impl InstantAction {
     /// The Era list: the eras that have the picked mode (any mode after All
     /// Modes) and "All Eras" when more than one (f3 pc 87-143). The `[ours]`
     /// cross-era pairs ([`MIXED`]) are not listed for now (owner's call,
-    /// 2026-10-28: Clone Wars and Galactic Civil War only).
+    /// 2026-10-28: stock and mod-declared eras only).
     pub fn side_picks(&self) -> Vec<SidePick> {
-        let has = |e: Era| {
-            let maps = self.maps_in(self.picked_map);
-            maps.iter()
-                .map(|&i| &self.maps[i])
-                .any(|m| match &self.picked_mode {
-                    ModePick::One(mode) => m.modes[e.index()].contains(mode),
-                    ModePick::All => m.has_era(e),
-                })
-        };
-        let eras: Vec<Era> = ERAS.into_iter().filter(|e| has(*e)).collect();
+        let maps = self.maps_in(self.picked_map);
+        let mut eras = std::collections::BTreeSet::new();
+        for &i in &maps {
+            let m = &self.maps[i];
+            for (era, era_modes) in &m.modes {
+                let matches = match &self.picked_mode {
+                    ModePick::One(mode) => era_modes.contains(mode),
+                    ModePick::All => !era_modes.is_empty(),
+                };
+                if matches {
+                    eras.insert(era.clone());
+                }
+            }
+        }
         let many = eras.len() > 1;
         eras.into_iter()
             .map(|e| SidePick::One(Side::Era(e)))
@@ -907,33 +913,27 @@ impl InstantAction {
             .collect()
     }
 
-    fn era_display(&self, map: MapPick, e: Era) -> (String, String) {
+    fn era_display(&self, map: MapPick, e: &Era) -> (String, String) {
         if let MapPick::One(i) = map {
-            if let Some(ov) = &self.maps[i].era_overrides[e.index()] {
-                let name = ov
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| self.texts.era(e).to_owned());
-                let icon = ov
-                    .icon
-                    .clone()
-                    .unwrap_or_else(|| e.icon().to_owned());
+            if let Some(ov) = self.maps[i].era_overrides.get(e) {
+                let name = ov.name.clone().unwrap_or_else(|| self.texts.era(e));
+                let icon = ov.icon.clone().unwrap_or_else(|| self.texts.era_icon(e));
                 return (name, icon);
             }
         }
-        (self.texts.era(e).to_owned(), e.icon().to_owned())
+        (self.texts.era(e), self.texts.era_icon(e))
     }
 
     pub fn side_rows(&self) -> Vec<ListRow> {
         let picks = self.side_picks();
-        let live = |p: SidePick| self.adds(self.picked_map, self.picked_mode.clone(), p);
+        let live = |p: &SidePick| self.adds(self.picked_map, self.picked_mode.clone(), p.clone());
         let live_eras = picks
             .iter()
-            .filter(|p| matches!(p, SidePick::One(Side::Era(_))) && live(**p))
+            .filter(|p| matches!(p, SidePick::One(Side::Era(_))) && live(p))
             .count();
         picks
             .iter()
-            .map(|&p| match p {
+            .map(|p| match p {
                 SidePick::One(s) => {
                     let (text, icon) = match s {
                         Side::Era(e) => {
@@ -977,7 +977,7 @@ impl InstantAction {
             },
             enabled: true,
             icon: Some(self.texts.mode_icon(&e.mode)),
-            icon2: match e.side {
+            icon2: match &e.side {
                 Side::Era(era) => Some(self.era_display(MapPick::One(e.map), era).1),
                 Side::Mixed(_) => None,
             },
@@ -989,10 +989,6 @@ impl InstantAction {
     /// outer, modes inner; `[ours]` only what the port can run.
     pub fn expand(&self, map: MapPick, mode: ModePick, side: SidePick) -> Vec<Entry> {
         let maps = self.maps_in(map);
-        let sides: Vec<Side> = match side {
-            SidePick::One(s) => vec![s],
-            SidePick::AllEras => ERAS.into_iter().map(Side::Era).collect(),
-        };
         let modes: Vec<Mode> = match mode {
             ModePick::One(m) => vec![m],
             ModePick::All => self.modes_of(map),
@@ -1000,7 +996,11 @@ impl InstantAction {
         let mut out = Vec::new();
         for &i in &maps {
             let m = &self.maps[i];
-            for &s in &sides {
+            let sides: Vec<Side> = match &side {
+                SidePick::One(s) => vec![s.clone()],
+                SidePick::AllEras => m.eras().into_iter().map(Side::Era).collect(),
+            };
+            for s in &sides {
                 if let Side::Era(e) = s {
                     if !m.has_era(e) {
                         continue;
@@ -1011,7 +1011,7 @@ impl InstantAction {
                         out.push(Entry {
                             map: i,
                             mode: mode.clone(),
-                            side: s,
+                            side: s.clone(),
                         });
                     }
                 }
@@ -1056,8 +1056,8 @@ impl InstantAction {
                 _ => self.texts.all_modes_desc.clone(),
             },
             State::Era => match self.side_picks().get(at(&self.era_list)) {
-                Some(SidePick::One(Side::Era(e))) => self.era_display(self.picked_map, *e).0,
-                Some(SidePick::One(s)) => self.texts.side(*s),
+                Some(SidePick::One(Side::Era(e))) => self.era_display(self.picked_map, e).0,
+                Some(SidePick::One(s)) => self.texts.side(s),
                 _ => self.texts.all_eras.clone(),
             },
             State::Playlist => match at(&self.play_list) {
@@ -1119,7 +1119,11 @@ impl InstantAction {
                     key: m.key.clone(),
                     game: m.game,
                     mode: e.mode.clone(),
-                    armies: m.launch_armies(&e.mode, e.side),
+                    armies: m.launch_armies(&e.mode, &e.side),
+                    era: match &e.side {
+                        Side::Era(era) => Some(era.code().to_owned()),
+                        Side::Mixed(_) => None,
+                    },
                     label: m.label.clone(),
                 }
             })

@@ -75,6 +75,7 @@ fn shell_hunt_launches_every_matchup_with_playable_models_and_session_rules() {
             },
             mode: ui::shell::Mode::Hunt,
             armies: mission.factions(),
+            era: None,
             label: name.clone(),
         });
         start(&mut a, &name).unwrap_or_else(|e| panic!("{name}: {e:#}"));
@@ -147,6 +148,7 @@ fn shell_assault_preserves_authored_seats_options_and_spawn_flow() {
         game: ui::shell::Game::Bf2,
         mode: ui::shell::Mode::Eli,
         armies: ["imp".into(), "all".into()],
+        era: Some("gcw".into()),
         label: String::new(),
     });
     start(&mut a, "tat2").unwrap();
@@ -319,6 +321,7 @@ fn a_single_player_battle_names_the_human_by_his_profile() {
         game: ui::shell::Game::Bf1,
         mode: ui::shell::Mode::Con,
         armies: mission.factions(),
+        era: None,
         label: "bf1_nab2".into(),
     });
     start(&mut a, "bf1_nab2").unwrap_or_else(|e| panic!("bf1_nab2: {e:#}"));

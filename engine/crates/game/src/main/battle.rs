@@ -234,8 +234,18 @@ fn team_templates(
                     visuals.push(game::walk::ClassVisual::from_roster_with_held(c));
                 }
                 sim.classes[team] = table;
+                let idx = team;
                 team += 1;
-                game::walk::TeamTemplate::from_roster(&r, &sim.classes[team - 1][0], visuals)
+                let mut tmpl =
+                    game::walk::TeamTemplate::from_roster(&r, &sim.classes[idx][0], visuals);
+                if let Some(names) = b
+                    .mission
+                    .as_ref()
+                    .and_then(|m| m.custom_team_names.as_ref())
+                {
+                    tmpl.display_name = Some(names[idx].clone());
+                }
+                tmpl
             });
             if let Some(mut rules) = b
                 .heroes
@@ -487,6 +497,7 @@ pub(super) fn make_walk_with_counts(
             .map(|n| core::sim::scale_reinforcements(n, b.ticket_pct))
     };
     sim.battle = core::battle::Battle::new(tickets);
+    sim.battle.script_rules = b.mission.as_ref().is_some_and(|m| m.script.is_some());
     if let Some(c) = b.mission.as_ref().and_then(|m| m.campaign.as_ref()) {
         use core::fmath::FloatExt;
         sim.battle.campaign_rules = true;
@@ -1447,7 +1458,16 @@ pub(super) fn hud_model_for_view(
         (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk))
             .then(|| game::hud_feed::reticle_relation(&walk.sim, slot));
     ui::hud::HudModel {
-        team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
+        team_names: [
+            walk.teams[0]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[0].faction.clone()),
+            walk.teams[1]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[1].faction.clone()),
+        ],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
         unlimited_tickets: [0, 1].map(|t| b.unlimited_reinforcements || b.unlimited_teams[t]),
         popup: walk.campaign.as_ref().and_then(|c| c.popup()).map(|p| {
@@ -1794,7 +1814,16 @@ pub(super) fn spawn_model(
     let choice = walk.sim.spawn_class_choice(slot, me.team);
     let names = feed.class_names(me.team);
     Some(ui::spawn::SpawnModel {
-        team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
+        team_names: [
+            walk.teams[0]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[0].faction.clone()),
+            walk.teams[1]
+                .display_name
+                .clone()
+                .unwrap_or_else(|| walk.teams[1].faction.clone()),
+        ],
         player_team: me.team,
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
         posts,

@@ -634,12 +634,26 @@ impl LauncherApp {
                         } else {
                             map.modes_gcw.join(", ")
                         };
+                        let mut era_parts = vec![format!("CW: {cw}"), format!("GCW: {gcw}")];
+                        for (era, modes) in &map.modes_custom_eras {
+                            if !modes.is_empty() {
+                                let label = map
+                                    .era_overrides
+                                    .get(era)
+                                    .and_then(|ov| ov.name.as_deref())
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| era.to_ascii_uppercase());
+                                era_parts.push(format!("{label}: {}", modes.join(", ")));
+                            }
+                        }
                         card_text(
                             ui,
                             egui::Label::new(
                                 egui::RichText::new(format!(
-                                    "Map: {} [{}] (CW: {cw} | GCW: {gcw})",
-                                    map.display_name, map.legacy_code
+                                    "Map: {} [{}] ({})",
+                                    map.display_name,
+                                    map.legacy_code,
+                                    era_parts.join(" | ")
                                 ))
                                 .font(regular_font(11.5))
                                 .color(TEXT_PRIMARY),

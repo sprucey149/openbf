@@ -25,6 +25,8 @@ pub struct IaTexts {
     /// Mod-declared modes: `(subst, display_name, description, icon_name)`.
     pub(super) custom_modes: Vec<(String, String, String, String)>,
     pub(super) eras: Vec<String>,
+    /// Mod-declared eras: `(code, display_name, icon_name)`.
+    pub(super) custom_eras: Vec<(String, String, String)>,
     pub(super) groups: Vec<(String, String)>,
     /// `common.sides.<f>.name` for all, imp, rep, cis.
     pub(super) sides: Vec<(&'static str, String)>,
@@ -158,6 +160,7 @@ impl IaTexts {
                 .collect(),
             custom_modes: Vec::new(),
             eras: ERAS.iter().map(|e| t(e.text())).collect(),
+            custom_eras: Vec::new(),
             groups: GROUPS
                 .iter()
                 .map(|g| {
@@ -274,8 +277,41 @@ impl IaTexts {
         m.icon().to_owned()
     }
 
-    pub fn era(&self, e: Era) -> &str {
-        &self.eras[e.index()]
+    /// Register localized display name and icon for a mod-declared era.
+    pub fn set_custom_era(&mut self, code: &str, name: String, icon: String) {
+        let low = code.to_ascii_lowercase();
+        if let Some(entry) = self.custom_eras.iter_mut().find(|(c, _, _)| *c == low) {
+            entry.1 = name;
+            entry.2 = icon;
+        } else {
+            self.custom_eras.push((low, name, icon));
+        }
+    }
+
+    pub fn era(&self, e: &Era) -> String {
+        match e {
+            Era::Cw => self.eras[0].clone(),
+            Era::Gcw => self.eras[1].clone(),
+            Era::Custom(code) => self
+                .custom_eras
+                .iter()
+                .find(|(c, _, _)| c.eq_ignore_ascii_case(code))
+                .map(|(_, name, _)| name.clone())
+                .unwrap_or_else(|| e.english()),
+        }
+    }
+
+    pub fn era_icon(&self, e: &Era) -> String {
+        if let Era::Custom(code) = e {
+            if let Some((_, _, icon)) = self
+                .custom_eras
+                .iter()
+                .find(|(c, _, _)| c.eq_ignore_ascii_case(code))
+            {
+                return icon.clone();
+            }
+        }
+        e.icon().to_owned()
     }
 
     pub fn group(&self, g: Group) -> (&str, &str) {
@@ -292,13 +328,13 @@ impl IaTexts {
     }
 
     /// An Era row's text; `[ours]` a cross-era pair reads "<A> vs <B>".
-    pub fn side(&self, s: Side) -> String {
+    pub fn side(&self, s: &Side) -> String {
         match s {
-            Side::Era(e) => self.era(e).to_owned(),
+            Side::Era(e) => self.era(e),
             Side::Mixed(i) => format!(
                 "{} vs {}",
-                self.side_name(MIXED[i][0]),
-                self.side_name(MIXED[i][1])
+                self.side_name(MIXED[*i][0]),
+                self.side_name(MIXED[*i][1])
             ),
         }
     }

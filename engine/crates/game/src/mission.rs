@@ -165,6 +165,10 @@ pub struct MissionDef {
     #[serde(default)]
     pub class_load_order: Vec<SideClassLoad>,
     pub teams: Vec<TeamDef>,
+    /// Custom team display names from v1.3 `SupportsCustomEraTeams` /
+    /// `CustomEraTeam1` / `CustomEraTeam2` script globals (in mission team order).
+    #[serde(default)]
+    pub custom_team_names: Option<[String; 2]>,
     /// Alive-AI cap per team. BF2 conquest: the NumBots default, 16. BF1:
     /// there is no cap below the member pool, so this is the larger of the
     /// two unit counts and `initial_ai` clamps each team to its own pool.
@@ -668,9 +672,55 @@ pub fn pairs_with_index(
         .collect()
 }
 
+/// Like [`pairs_with_index`], for a mod-declared custom era (`<map>_<mode>_era_<era>.ron`).
+pub fn pairs_for_era_with_index(
+    dir: &Path,
+    existing: &std::collections::HashSet<String>,
+    map: &str,
+    mode: &str,
+    era: &str,
+) -> Vec<[String; 2]> {
+    let name = format!("{map}_{mode}_era_{era}.ron");
+    if !existing.contains(&name.to_ascii_lowercase()) {
+        return Vec::new();
+    }
+    load_factions_fast(&dir.join(name)).into_iter().collect()
+}
+
 /// [`pick_index`] over the mission files of `map` in `dir`. `None` when the
 /// map has no mission file for `mode`.
 pub fn pick(dir: &Path, map: &str, mode: &str, armies: [&str; 2]) -> Option<Pick> {
+    pick_for_era(dir, map, mode, armies, None)
+}
+
+/// Like [`pick`], targeting a mod-declared custom era (`<map>_<mode>_era_<era>.ron`)
+/// when `era` is `Some(code)` outside stock `"cw"`/`"gcw"`.
+pub fn pick_for_era(
+    dir: &Path,
+    map: &str,
+    mode: &str,
+    armies: [&str; 2],
+    era: Option<&str>,
+) -> Option<Pick> {
+    if let Some(custom) = era.filter(|e| !e.is_empty() && !matches!(*e, "cw" | "gcw")) {
+        let path = dir.join(format!("{map}_{mode}_era_{custom}.ron"));
+        match MissionDef::load(&path) {
+            Ok(mission) => {
+                return Some(Pick {
+                    path,
+                    mission,
+                    player_team: 0,
+                    own: true,
+                });
+            }
+            Err(e) => {
+                if pak::is_file(&path) {
+                    eprintln!("mission: {e:#}");
+                }
+                return None;
+            }
+        }
+    }
     let mut found: Vec<(PathBuf, MissionDef)> = ERA_SUFFIXES
         .iter()
         .filter_map(|s| {
@@ -1862,6 +1912,64 @@ mod tests {
         )
         .unwrap();
         assert!(load_factions_fast(&zero_no_script).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pick_for_era_distinguishes_custom_era_from_gcw_with_same_factions() {
+        let dir = std::env::temp_dir().join(format!(
+            "openbf_mission_custom_era_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ron = |era: &str, custom_names: &str| {
+            format!(
+                r#"(
+    map: "mod_tst__tst",
+    mode: "con",
+    source_game: "bf2",
+    teams: [
+        (faction: "all", units: 16, tickets: 150, classes: []),
+        (faction: "imp", units: 16, tickets: 150, classes: []),
+    ],
+    {custom_names}
+    ai_alive_cap: 16,
+    spawn_delay: 10.0,
+    spawn_interval: 0.25,
+    era: Some("{era}"),
+)"#
+            )
+        };
+        std::fs::write(dir.join("mod_tst__tst_con.ron"), ron("gcw", "")).unwrap();
+        std::fs::write(
+            dir.join("mod_tst__tst_con_era_y.ron"),
+            ron("y", r#"custom_team_names: Some(("New Republic", "Yuuzhan Vong")),"#),
+        )
+        .unwrap();
+
+        let gcw = pick_for_era(&dir, "mod_tst__tst", "con", ["all", "imp"], Some("gcw")).unwrap();
+        assert_eq!(gcw.mission.era.as_deref(), Some("gcw"));
+        assert_eq!(gcw.mission.custom_team_names, None);
+
+        let vong = pick_for_era(&dir, "mod_tst__tst", "con", ["all", "imp"], Some("y")).unwrap();
+        assert_eq!(vong.mission.era.as_deref(), Some("y"));
+        assert_eq!(
+            vong.mission.custom_team_names,
+            Some(["New Republic".to_owned(), "Yuuzhan Vong".to_owned()])
+        );
+
+        let existing: std::collections::HashSet<String> = [
+            "mod_tst__tst_con.ron".into(),
+            "mod_tst__tst_con_era_y.ron".into(),
+        ]
+        .into();
+        assert_eq!(
+            pairs_for_era_with_index(&dir, &existing, "mod_tst__tst", "con", "y"),
+            vec![["all".to_owned(), "imp".to_owned()]]
+        );
+        assert!(pairs_for_era_with_index(&dir, &existing, "mod_tst__tst", "con", "k").is_empty());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

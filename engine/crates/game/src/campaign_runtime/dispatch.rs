@@ -121,7 +121,7 @@ impl CampaignRuntime {
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,
-                        &EventKey::default(),
+                        &key,
                         vec![char_value(victim.index), k.clone()],
                     );
                     self.fire(sim, EventKind::ObjectKill, &key, vec![Value::Ud(obj), k]);
@@ -134,7 +134,7 @@ impl CampaignRuntime {
                     self.fire(
                         sim,
                         EventKind::CharacterDeath,
-                        &EventKey::default(),
+                        &key,
                         vec![char_value(unit.index), Value::Nil],
                     );
                     self.fire(
@@ -198,10 +198,13 @@ impl CampaignRuntime {
                     if unit == self.w.player {
                         self.w.human_spawned = true;
                     }
+                    // The unit's own team and class answer the `Team` /
+                    // `Class` registrations.
+                    let key = self.w.obj_key(sim, Ud::Unit(unit.index, unit.gen));
                     self.fire(
                         sim,
                         EventKind::CharacterSpawn,
-                        &EventKey::default(),
+                        &key,
                         vec![char_value(unit.index)],
                     );
                 }

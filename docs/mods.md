@@ -80,17 +80,18 @@ In the **Mods** tab, every content mod shows a **#1, #2, ...** priority badge wi
 ### Supported Out of the Box
 
 - Conventional PC `_LVL_PC` addon maps referencing stock BF2 sides, classes, weapons, vehicles, and planet sound banks.
-- Standard `addme.script` + `mission.lvl` mission scripts (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`), including multi-variant single-player world selection with fixed multiplayer branches.
+- Standard `addme.script` + `mission.lvl` mission scripts (`con`, `1flag`, `ctf`, `ass`, `hunt`, `eli`) as well as mod-declared custom game modes (translated to action-tree IR) and custom v1.3 eras (`era_<code>`, `mode_<mode>_<code>`, `change` name/icon overrides, v1.3 built-in era defaults, and `SupportsCustomEraTeams` / `CustomEraTeam1` / `CustomEraTeam2` side labels), including multi-variant single-player world selection with fixed multiplayer branches.
 - PC `tern` terrain (with PC directional lighting), PC DXT1/DXT3/DXT5/A8R8G8B8 textures, PC `V8U8` normal-mapped water, PC bump and glossmap specular materials (`MTRL` 0x20 / 0x08, specular cube from a PC BF2 `core.lvl`), static collision meshes, world instances/regions/layers, `plan`/`plnp` nav graphs, `core.lvl` localized text tables, addon load screens, and addon sound banks with stock CORE template inheritance.
 - Soldiers, weapons, vehicles, particle effects and bolt textures from an addon map's own side LVLs, with their classes and textures, including a hero a mission script picks while it runs for a third team.
 - A script that draws its troops at random during setup (for example uniforms of another period): each draw is its own roster, picked per round with the script's odds. A LAN round takes the script's multiplayer branch.
 - Generic stock LVL replacements for playable `side/*.lvl` files (class patches, soldiers, weapons, vehicles, side effects, textures), `fpm/...` first-person arm LVLs, stock world LVLs (both texture-only fast path and full world re-bake), and `load/<map>.lvl` load screens.
+- Missions on the game's own maps. A mission that reads a stock world (`cor\cor1.lvl`), with or without the mod's own layers on top, is converted into a world of its own, and the stock map is not changed. Its modes and eras join that map's row in the Instant Action list, as the mod's menu script adds them in the game; only maps the game does not ship get rows of their own. The stock world is read from your PC copy of Battlefront II, so set it in the launcher; without it these missions are skipped with a warning.
+- Only missions the mod puts in the game's menu lists are offered. A script the mod only makes loadable (`AddDownloadableContent`) has no menu entry in the game either, and is skipped with a warning.
+- A translated mode script decides its own round: reinforcements are paid and the winner is called the way the script says, not by the engine's conquest rules.
 
 ### Not Supported / Skipped with Diagnostics
 
-- Missions on the game's own maps. A mission that reads a stock world (`cor\cor1.lvl`) and adds the mod's layers on top is reported and not listed as a map.
-- Custom eras and custom game modes. A new map's missions in a mode openbf does not know are reported as unsupported.
-- Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions.
+- Arbitrary runtime Lua mission logic outside supported declarative tables, translated mode scripts, and closed world-event actions (a mission script whose custom mode cannot be translated is reported as unsupported).
 - Custom third-party native DLL plugins.
 - Vehicle sounds, unit sounds and voice lines, some first-person arms and custom animation banks from an addon map's own side LVLs.
 - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles and worn cloth render without cloth physics).

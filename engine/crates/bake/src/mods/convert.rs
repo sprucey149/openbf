@@ -8,7 +8,7 @@ use extensions::mods::{
     ModCacheMeta, ModMapSummary, ModMissionSummary, MOD_CACHE_SCHEMA_VERSION, MOD_CONVERTER_ID,
 };
 use extensions::mods::catalog::{SourceGame, SourcePlatform};
-use mungefs::addon::read_core_locl;
+use mungefs::addon::{read_core_locl, stock_world_rel, AddonWorldLoad};
 
 use super::addon_sides::{convert_addon_sides, LevelSides};
 use super::mission::mission_to_ron;
@@ -164,17 +164,32 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             continue;
         };
 
+        // A mission on one of the game's own maps takes that world from the
+        // player's PC copy, under the addon's layers.
+        let stock_scratch = staging.join(STOCK_SCRATCH);
+        let (map_lvl, world_loads) =
+            match stock_worlds(map_lvl, &g.world_loads, opts.env, &stock_scratch) {
+                Ok(found) => found,
+                Err(e) => {
+                    warnings.push(format!(
+                        "Map `{}` plays on one of the game's own maps, which needs the PC copy of Battlefront II set in the launcher ({e:#}); not converted.",
+                        g.display_name
+                    ));
+                    continue;
+                }
+            };
+
         let map_out = staging.join("assets").join(&g.map_key);
         std::fs::create_dir_all(&map_out)?;
-        crate::gameplay::exempt_addon(map_lvl);
+        crate::gameplay::exempt_addon(&map_lvl);
         let map_lvl_str = map_lvl.to_string_lossy();
         let map_out_str = map_out.to_string_lossy();
 
-        let baked = if g.world_loads.is_empty() {
+        let baked = if world_loads.is_empty() {
             crate::map::bake_map(&map_lvl_str, &map_out_str, None)
                 .with_context(|| format!("baking map LVL {}", map_lvl.display()))
         } else {
-            read_world(&g.world_loads, map_lvl)
+            read_world(&world_loads, &map_lvl)
                 .with_context(|| format!("reading the archive selection for {}", g.display_name))
                 .and_then(|world| {
                     crate::map::bake_addon_map(
@@ -351,8 +366,10 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             description: g.description.clone(),
             source_lvl: g.source_lvl_rel.clone(),
             variant_title: g.variant_title.clone(),
+            stock_row: g.stock_row.clone(),
             modes_cw: g.modes_cw.clone(),
             modes_gcw: g.modes_gcw.clone(),
+            modes_custom_eras: g.modes_custom_eras.clone(),
             missions: planned_missions,
             sound_planets: g.sound_planets.clone(),
             era_overrides: g.era_overrides.clone(),
@@ -390,6 +407,8 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             }
         }
     }
+
+    let _ = std::fs::remove_dir_all(staging.join(STOCK_SCRATCH));
 
     // The units of the maps' own SIDE LVLs, once every map is known, so that
     // a side many maps read is converted once.
@@ -520,6 +539,39 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         maps_baked,
         missions_written,
     })
+}
+
+/// Where [`stock_worlds`] may put files it has to extract; removed before
+/// the cache is committed.
+const STOCK_SCRATCH: &str = ".stock_worlds";
+
+/// A map group's primary world and layers, with each of the game's own worlds
+/// (`mungefs::addon::stock_world_rel`) found in the player's PC copy.
+fn stock_worlds(
+    primary: &Path,
+    loads: &[AddonWorldLoad],
+    env: &ModEnv,
+    scratch: &Path,
+) -> Result<(PathBuf, Vec<AddonWorldLoad>)> {
+    let find = |path: &Path| -> Result<PathBuf> {
+        let Some(rel) = stock_world_rel(path) else {
+            return Ok(path.to_owned());
+        };
+        std::fs::create_dir_all(scratch)?;
+        env.sources
+            .file(SourceGame::Bf2, SourcePlatform::Pc, rel, scratch)
+            .with_context(|| rel.to_owned())
+    };
+    let loads = loads
+        .iter()
+        .map(|load| {
+            Ok(AddonWorldLoad {
+                path: find(&load.path)?,
+                ..load.clone()
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok((find(primary)?, loads))
 }
 
 /// The map's own SIDE LVLs, in the order its missions first read them, and

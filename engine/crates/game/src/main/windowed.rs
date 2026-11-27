@@ -1576,6 +1576,7 @@ impl App {
             &row.key,
             &mode,
             &row.armies,
+            row.era.as_deref(),
             42u32.wrapping_add(self.profile.career.rounds),
             false,
         );
@@ -1600,6 +1601,7 @@ impl App {
                 || ["all".to_owned(), "imp".to_owned()],
                 |r| r.armies.clone(),
             ),
+            era: row.and_then(|r| r.era.clone()),
             session: self.session,
             seed: 42u32.wrapping_add(self.profile.career.rounds),
             difficulty: self.profile.settings.difficulty,
@@ -2324,6 +2326,7 @@ impl App {
                 name,
                 &self.mode,
                 &row_armies,
+                self.current.as_ref().and_then(|r| r.era.as_deref()),
                 &self.session,
                 42u32.wrapping_add(self.profile.career.rounds),
                 self.profile.settings.difficulty,

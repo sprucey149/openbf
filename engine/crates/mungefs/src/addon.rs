@@ -84,6 +84,20 @@ pub struct AddonWorldLoad {
     pub selectors: Vec<String>,
 }
 
+/// How an [`AddonWorldLoad::path`] names one of the game's own world LVLs,
+/// which the addon does not carry: the converter takes it from the player's
+/// PC copy.
+const STOCK_WORLD: &str = "stock:";
+
+pub(crate) fn stock_world_path(rel: &str) -> PathBuf {
+    PathBuf::from(format!("{STOCK_WORLD}{rel}"))
+}
+
+/// The game's own world (`cor/cor1.lvl`) that `path` stands for.
+pub fn stock_world_rel(path: &Path) -> Option<&str> {
+    path.to_str()?.strip_prefix(STOCK_WORLD)
+}
+
 #[derive(Debug, Clone)]
 pub enum WorldEffectAnchor {
     Object(String),
@@ -118,6 +132,9 @@ pub struct InspectedMission {
     /// The script reads one of the game's own world LVLs, so the addon's
     /// world LVLs it also reads are layers on that map.
     pub on_stock_world: bool,
+    /// The stock map (`cor1`) on whose menu row the addon lists this script.
+    /// `None` for a script of a map the addon lists itself.
+    pub stock_row: Option<String>,
     pub loadscreen_lvl_path: Option<PathBuf>,
     pub layers: Vec<String>,
     pub world_loads: Vec<AddonWorldLoad>,
@@ -133,6 +150,9 @@ pub struct InspectedMission {
     pub script_multiplayer: bool,
     pub world_events: WorldEvents,
     pub teams: Vec<ParsedTeam>,
+    /// Custom team display names from v1.3 `SupportsCustomEraTeams` /
+    /// `CustomEraTeam1` / `CustomEraTeam2` script globals.
+    pub custom_team_names: Option<[String; 2]>,
     pub local_teams: Vec<LocalTeamDef>,
     pub local_team_relations: Vec<(u8, u8, bool)>,
     pub heroes: Vec<(u8, String)>,
@@ -232,6 +252,9 @@ pub struct AddonMapGroup<'a> {
     pub description: String,
     pub source_lvl_rel: String,
     pub variant_title: Option<String>,
+    /// The stock map whose menu row offers these missions
+    /// ([`InspectedMission::stock_row`]).
+    pub stock_row: Option<String>,
     pub source_lvl_path: Option<PathBuf>,
     pub loadscreen_lvl_path: Option<PathBuf>,
     pub world_loads: Vec<AddonWorldLoad>,
@@ -239,8 +262,9 @@ pub struct AddonMapGroup<'a> {
     pub custom_sound_lvls: Vec<(String, PathBuf)>,
     pub modes_cw: Vec<String>,
     pub modes_gcw: Vec<String>,
+    pub modes_custom_eras: BTreeMap<String, Vec<String>>,
     pub sound_planets: Vec<String>,
-    pub era_overrides: [Option<extensions::mods::ModEraMeta>; 2],
+    pub era_overrides: BTreeMap<String, extensions::mods::ModEraMeta>,
     pub missions: Vec<AddonPlannedMission<'a>>,
 }
 
@@ -271,6 +295,7 @@ impl AddonInspection {
                     companion_loads,
                     m.world_variant.clone(),
                     m.map_lvl_path.clone(),
+                    m.stock_row.clone(),
                 ))
                 .or_default()
                 .push(m);
@@ -278,7 +303,8 @@ impl AddonInspection {
 
         let mut used_map_keys: BTreeSet<String> = BTreeSet::new();
         let mut groups = Vec::new();
-        for ((source_lvl_rel, companion_loads, primary_variant, _), list) in by_lvl {
+        let mut base_titles = Vec::new();
+        for ((source_lvl_rel, companion_loads, primary_variant, _, stock_row), list) in by_lvl {
             let legacy_stem = Path::new(&source_lvl_rel)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -340,6 +366,7 @@ impl AddonInspection {
 
             let mut modes_cw_set = BTreeSet::new();
             let mut modes_gcw_set = BTreeSet::new();
+            let mut modes_custom_eras_sets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
             let mut planets_set = BTreeSet::new();
             let mut side_map: BTreeMap<String, PathBuf> = BTreeMap::new();
             let mut sound_map: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -348,8 +375,13 @@ impl AddonInspection {
                 if m.supported {
                     if m.era == "cw" {
                         modes_cw_set.insert(m.mode.clone());
-                    } else {
+                    } else if m.era == "gcw" {
                         modes_gcw_set.insert(m.mode.clone());
+                    } else if !m.era.is_empty() {
+                        modes_custom_eras_sets
+                            .entry(m.era.clone())
+                            .or_default()
+                            .insert(m.mode.clone());
                     }
                 }
                 for (planet, _) in &m.sound_banks {
@@ -370,9 +402,11 @@ impl AddonInspection {
                     .iter()
                     .any(|other| other.mode == m.mode && other.era != "cw");
                 let era_suffix = if m.era == "cw" && has_non_cw_same_mode {
-                    "_cw"
+                    "_cw".to_owned()
+                } else if m.era != "cw" && m.era != "gcw" && !m.era.is_empty() {
+                    format!("_era_{}", m.era)
                 } else {
-                    ""
+                    String::new()
                 };
                 let mut fname = format!("{map_key}_{}{era_suffix}.ron", m.mode);
                 if !used_filenames.insert(fname.clone()) {
@@ -413,6 +447,7 @@ impl AddonInspection {
                 .iter()
                 .any(|m| m.shares_variant_entry)
                 .then(|| title.clone());
+            base_titles.push(title.clone());
             let title = if variant.is_empty() {
                 title
             } else {
@@ -422,29 +457,38 @@ impl AddonInspection {
                 }
                 format!("{title} ({suffix})")
             };
-            let mut era_overrides: [Option<extensions::mods::ModEraMeta>; 2] = [None, None];
+            let mut era_overrides: BTreeMap<String, extensions::mods::ModEraMeta> = BTreeMap::new();
             for m in &list {
-                let slot = if m.era == "cw" { 0 } else { 1 };
-                if era_overrides[slot].is_some() {
+                if m.era.is_empty() || era_overrides.contains_key(&m.era) {
                     continue;
                 }
+                let addme_code = match m.era.as_str() {
+                    "cw" => "c",
+                    "gcw" => "g",
+                    other => other,
+                };
                 let lower = m.script_name.to_ascii_lowercase();
-                if let Some((prefix, _)) = lower.rsplit_once('_') {
-                    if let Some(ch) = prefix.chars().last() {
-                        let map_key_era = format!("{legacy_stem}:{ch}");
-                        let found = self
-                            .custom_era_meta
-                            .get(&map_key_era)
-                            .or_else(|| {
-                                (!matches!(ch, 'c' | 'g'))
-                                    .then(|| self.custom_era_meta.get(&ch.to_string()))
-                                    .flatten()
-                            })
-                            .cloned();
-                        if found.is_some() {
-                            era_overrides[slot] = found;
-                        }
-                    }
+                let script_prefix = lower
+                    .rsplit_once('_')
+                    .and_then(|(prefix, _)| prefix.strip_suffix(addme_code))
+                    .map(|p| p.trim_end_matches('_'))
+                    .filter(|p| !p.is_empty());
+                let found = self
+                    .custom_era_meta
+                    .get(&format!("{legacy_stem}:{addme_code}"))
+                    .or_else(|| {
+                        script_prefix.and_then(|p| {
+                            self.custom_era_meta.get(&format!("{p}:{addme_code}"))
+                        })
+                    })
+                    .or_else(|| {
+                        (!matches!(addme_code, "c" | "g"))
+                            .then(|| self.custom_era_meta.get(addme_code))
+                            .flatten()
+                    })
+                    .cloned();
+                if let Some(meta) = found {
+                    era_overrides.insert(m.era.clone(), meta);
                 }
             }
             groups.push(AddonMapGroup {
@@ -452,6 +496,7 @@ impl AddonInspection {
                 legacy_code: legacy_stem,
                 display_name: title,
                 variant_title,
+                stock_row,
                 description: desc,
                 source_lvl_rel,
                 source_lvl_path,
@@ -461,12 +506,65 @@ impl AddonInspection {
                 custom_sound_lvls: sound_map.into_iter().collect(),
                 modes_cw: modes_cw_set.into_iter().collect(),
                 modes_gcw: modes_gcw_set.into_iter().collect(),
+                modes_custom_eras: modes_custom_eras_sets
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into_iter().collect()))
+                    .collect(),
                 sound_planets: planets_set.into_iter().collect(),
                 era_overrides,
                 missions: planned,
             });
         }
+        share_menu_rows(&mut groups, &base_titles);
         groups
+    }
+}
+
+/// Give one menu row to worlds that one map name covers, where scripts that
+/// layer a map differently by mode (a space map's assault, a ground map's
+/// objectives) made several. Worlds where two scripts offer the same era and
+/// mode are different choices and keep their own rows. `[ours]`
+fn share_menu_rows(groups: &mut [AddonMapGroup<'_>], base_titles: &[String]) {
+    let mut rows = BTreeMap::<(String, &str), Vec<usize>>::new();
+    for (i, (group, title)) in groups.iter().zip(base_titles).enumerate() {
+        // A stock map's row already takes every world listed on it.
+        if group.stock_row.is_some() {
+            continue;
+        }
+        let row = (group.source_lvl_rel.clone(), title.as_str());
+        rows.entry(row).or_default().push(i);
+    }
+    // A world that has its name to itself needs no telling apart.
+    for ((_, title), members) in &rows {
+        if let [only] = members[..] {
+            let shared = rows.keys().filter(|(_, other)| other == title).count() > 1;
+            if !shared {
+                groups[only].variant_title = Some((*title).to_owned());
+            }
+        }
+    }
+    for ((_, title), members) in rows {
+        if members.len() < 2 {
+            continue;
+        }
+        let mut slots = BTreeMap::<(&str, &str), &str>::new();
+        let distinct = members
+            .iter()
+            .flat_map(|&i| &groups[i].missions)
+            .map(|planned| planned.mission)
+            .filter(|m| m.supported)
+            .all(|m| {
+                let script = m.script_name.as_str();
+                slots
+                    .entry((m.era.as_str(), m.mode.as_str()))
+                    .or_insert(script)
+                    .eq_ignore_ascii_case(script)
+            });
+        if distinct {
+            for i in members {
+                groups[i].variant_title = Some(title.to_owned());
+            }
+        }
     }
 }
 
@@ -806,12 +904,64 @@ fn inspect_game_folder(
             }));
     }
     if let Some(pc) = resolve_lvl_pc_dir(&game.dir, root_canon) {
+        // Attach game-folder `DATA/_LVL_PC/SIDE/<side>.lvl` files referenced by addon
+        // missions via `ReadDataFile("SIDE\\<side>.lvl", ...)` (without `dc:`).
+        // Non-stock side LVLs (e.g. custom-era sides like `rvs.lvl`) are claimed by
+        // `custom_side_lvls` so `addon_sides` bakes their units and they are not left
+        // unresolved in `stock_override_lvls`.
+        let is_stock_bf2_side = |stem: &str| {
+            matches!(
+                stem,
+                "all"
+                    | "cis"
+                    | "des"
+                    | "ewk"
+                    | "gam"
+                    | "gar"
+                    | "geo"
+                    | "gun"
+                    | "imp"
+                    | "jaw"
+                    | "jed"
+                    | "neu"
+                    | "rep"
+                    | "snw"
+                    | "tur"
+                    | "tus"
+                    | "wok"
+            )
+        };
+        let mut claimed_custom_sides: BTreeSet<PathBuf> = BTreeSet::new();
+        for m in &mut out.missions {
+            let mut seen_sides: BTreeSet<String> = m
+                .custom_side_lvls
+                .iter()
+                .map(|(s, _)| s.to_ascii_lowercase())
+                .collect();
+            for (side, _) in &m.class_load_order {
+                let low_side = side.to_ascii_lowercase();
+                if !seen_sides.insert(low_side.clone()) {
+                    continue;
+                }
+                if let Some((_, abs)) =
+                    resolve_inside_lvl_pc(root_canon, &pc, &format!("side/{low_side}.lvl"))
+                {
+                    if !is_stock_bf2_side(&low_side) {
+                        claimed_custom_sides.insert(abs.clone());
+                    }
+                    m.custom_side_lvls.push((low_side, abs));
+                }
+            }
+        }
         for (rel_path, abs_path) in facts.all_lvls.iter().filter(|(_, abs)| abs.starts_with(&pc)) {
             let low = rel_path.to_ascii_lowercase();
             if (low.ends_with("/shell.lvl") || low == "shell.lvl")
                 && !out.shell_icon_lvls.contains(abs_path)
             {
                 out.shell_icon_lvls.push(abs_path.clone());
+            }
+            if claimed_custom_sides.contains(abs_path) {
+                continue;
             }
             out.stock_override_lvls.push(OverrideLvl {
                 rel_path: rel_path.clone(),
@@ -916,6 +1066,12 @@ fn resolve_inside_lvl_pc(
 struct AddmeSummary {
     legacy_ids: BTreeSet<String>,
     registered_scripts: BTreeSet<String>,
+    /// Canonical era code (`"cw"`, `"gcw"`, or custom code) declared in `addme.script`
+    /// for each registered mission script (lowercased).
+    script_eras: BTreeMap<String, String>,
+    /// The stock map whose menu row offers each script (lowercased) that the
+    /// addon adds to one of the game's own entries.
+    stock_row_scripts: BTreeMap<String, String>,
     core_lvl_hint: Option<String>,
     shell_lvl_hints: Vec<String>,
     custom_mode_meta: BTreeMap<String, extensions::mods::ModModeMeta>,
@@ -924,7 +1080,22 @@ struct AddmeSummary {
     warnings: Vec<String>,
 }
 
+fn canonical_era_code(raw: &str) -> Option<String> {
+    let low = raw.trim().to_ascii_lowercase();
+    if low.is_empty() || !low.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return None;
+    }
+    Some(match low.as_str() {
+        "c" | "cw" => "cw".into(),
+        "g" | "gcw" => "gcw".into(),
+        _ => low,
+    })
+}
+
 fn expand_mapluafile(template: &str, era: &str, mode: &str) -> String {
+    // A mode's script suffix is its menu key's, but for `mode_assault`
+    // (`gMapModes` key and subst columns, `analysis/re-bf2-menus.md`).
+    let mode = if mode == "assault" { "ass" } else { mode };
     let first = template.replacen("%s", era, 1);
     first.replacen("%s", mode, 1)
 }
@@ -955,21 +1126,43 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
                 let Some(tmpl) = entry.get_str_ci("mapluafile").and_then(|v| v.as_str()) else {
                     continue;
                 };
-                if let Some(id) = tmpl.split("%s").next().filter(|s| !s.is_empty()) {
+                let stock_row = lua50::stock_menu_map(tmpl);
+                // A stock entry the addon left alone is none of its maps.
+                if stock_row.is_some() && entry.entries.len() == 1 {
+                    continue;
+                }
+                if let Some(id) = tmpl
+                    .split("%s")
+                    .next()
+                    .filter(|s| !s.is_empty() && stock_row.is_none())
+                {
                     let clean_id = id.trim_end_matches('_');
                     if !clean_id.is_empty() {
                         summary.legacy_ids.insert(clean_id.to_owned());
                     }
                 }
-                for (era_code, era_field) in [("g", "era_g"), ("c", "era_c")] {
-                    let era_on = entry
-                        .get_str_ci(era_field)
-                        .and_then(|v| v.is_truthy())
-                        .unwrap_or(false);
-                    if !era_on {
+                let mut declared_eras: Vec<String> = Vec::new();
+                for (k, v) in &entry.entries {
+                    let lua50::LuaKey::Str(key) = k else {
                         continue;
+                    };
+                    let low = key.to_ascii_lowercase();
+                    let Some(era_code) = low.strip_prefix("era_") else {
+                        continue;
+                    };
+                    if !era_code.is_empty()
+                        && era_code
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                        && v.is_truthy().unwrap_or(false)
+                        && !declared_eras.iter().any(|e| e == era_code)
+                    {
+                        declared_eras.push(era_code.to_owned());
                     }
+                }
+                for era_code in &declared_eras {
                     let era_suffix = format!("_{era_code}");
+                    let canon_era = canonical_era_code(era_code);
                     for (k, v) in &entry.entries {
                         let lua50::LuaKey::Str(key) = k else {
                             continue;
@@ -982,10 +1175,20 @@ fn parse_addme_script(bytes: &[u8]) -> Result<AddmeSummary, String> {
                             continue;
                         };
                         if !mode_code.is_empty() && v.is_truthy().unwrap_or(false) {
-                            let script = expand_mapluafile(tmpl, era_code, mode_code);
-                            summary
-                                .registered_scripts
-                                .insert(script.to_ascii_lowercase());
+                            let script =
+                                expand_mapluafile(tmpl, era_code, mode_code).to_ascii_lowercase();
+                            summary.registered_scripts.insert(script.clone());
+                            if let Some(code) = stock_row {
+                                summary
+                                    .stock_row_scripts
+                                    .insert(script.clone(), code.to_owned());
+                            }
+                            if let Some(ref canon) = canon_era {
+                                summary
+                                    .script_eras
+                                    .entry(script)
+                                    .or_insert_with(|| canon.clone());
+                            }
                         }
                     }
                 }
@@ -1501,6 +1704,18 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                 continue;
             }
             let low_name = sc.name.to_ascii_lowercase();
+            // `AddDownloadableContent` only makes a script loadable: the menu
+            // offers the ones its lists name.
+            let listed = &addme_summary.script_eras;
+            if has_addme && !listed.is_empty() && !listed.contains_key(&low_name) {
+                if addme_summary.registered_scripts.contains(&low_name) {
+                    out.warnings.push(format!(
+                        "Mission script '{}' is not in the mod's menu lists, so the game offers no way to pick it (skipped).",
+                        sc.name
+                    ));
+                    continue;
+                }
+            }
             let registered = if has_addme && !addme_summary.registered_scripts.is_empty() {
                 addme_summary.registered_scripts.contains(&low_name)
             } else {
@@ -1514,11 +1729,13 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                 continue;
             }
             if let Some(proto) = script_protos.get(&low_name) {
+                let declared_era = addme_summary.script_eras.get(&low_name).map(String::as_str);
                 let fold = |analysis: &lua50::MissionScriptAnalysis| {
                     fold_calls(
                         analysis,
                         &sc.name,
                         registered,
+                        declared_era,
                         &root_canon,
                         lvl_pc.as_deref(),
                     )
@@ -1551,7 +1768,12 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                     multiplayer.multiplayer_variant = true;
                     variants.push(multiplayer);
                 }
-                if variants.len() == 1 && variants[0].world_loads.len() <= 1 {
+                // A stock world's read is a world load too: dropping it would
+                // leave the mission no map.
+                if variants.len() == 1
+                    && variants[0].world_loads.len() <= 1
+                    && !variants[0].on_stock_world
+                {
                     // Keep the original declarative extraction for single-archive scripts.
                     let mut mission = fold(&lua50::analyze_mission_script(proto.clone()));
                     mission.world_loads.clear();
@@ -1588,6 +1810,7 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                     .any(|m| m.world_loads != variants[0].world_loads);
                 for mut mission in variants {
                     mission.shares_variant_entry = shares_variant_entry;
+                    mission.stock_row = addme_summary.stock_row_scripts.get(&low_name).cloned();
                     if mission.scripted_mode && mission.supported {
                         if let Some(ref err) = ir_check {
                             mission.supported = false;
@@ -1605,15 +1828,16 @@ pub fn inspect_addon_dir(mod_root: &Path) -> AddonInspection {
                             .entry(load.path.clone())
                             .or_insert_with(|| archive_has_base_world(&root_canon, &load.path))
                     });
-                    if mission.on_stock_world {
-                        mission.map_lvl_rel = None;
-                        mission.map_lvl_path = None;
-                        mission.supported = false;
-                        mission.unsupported_reason = Some(format!(
-                            "Mission '{}' plays on a stock map, which a mod cannot change yet",
-                            mission.script_name
-                        ));
-                    } else if let Some(base) = base_world.or_else(|| mission.world_loads.last()) {
+                    // On a stock map that world is the base, and every LVL of
+                    // the addon's own is a layer on it.
+                    let stock = mission
+                        .world_loads
+                        .iter()
+                        .find(|load| stock_world_rel(&load.path).is_some());
+                    if let Some(base) = stock
+                        .or(base_world)
+                        .or_else(|| mission.world_loads.last())
+                    {
                         mission.map_lvl_rel = Some(base.rel_path.clone());
                         mission.map_lvl_path = Some(base.path.clone());
                         mission.layers = base.selectors.clone();

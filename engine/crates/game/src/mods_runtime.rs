@@ -21,7 +21,7 @@ use extensions::mods::{
 use extensions::profile::{mods_dir, profile_path, ExtensionProfile};
 use manifest::hud::HudLocl;
 use pak::{clear_overlays, set_overlays, OverlayLayer, OverlayRule};
-use ui::shell::{ModMapEntry, Mode};
+use ui::shell::{Era, ModMapEntry, Mode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountedMod {
@@ -100,21 +100,60 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str, source: &str) -> Vec<Mo
     let mut entries: Vec<ModMapEntry> = Vec::new();
     let mut groups = BTreeMap::new();
     for map in maps {
-        let modes = [
-            parse_modes_list(&map.modes_cw),
-            parse_modes_list(&map.modes_gcw),
-        ];
-        if let Some(title) = &map.variant_title {
-            let group = (map.source_lvl.as_str(), title.as_str());
+        let mut modes: BTreeMap<Era, Vec<Mode>> = BTreeMap::new();
+        let cw = parse_modes_list(&map.modes_cw);
+        if !cw.is_empty() {
+            modes.insert(Era::Cw, cw);
+        }
+        let gcw = parse_modes_list(&map.modes_gcw);
+        if !gcw.is_empty() {
+            modes.insert(Era::Gcw, gcw);
+        }
+        for (era_code, mode_list) in &map.modes_custom_eras {
+            if let Some(era) = Era::from_code(era_code) {
+                let parsed = parse_modes_list(mode_list);
+                if !parsed.is_empty() {
+                    let slot = modes.entry(era).or_default();
+                    for mode in parsed {
+                        if !slot.contains(&mode) {
+                            slot.push(mode);
+                        }
+                    }
+                }
+            }
+        }
+        let mut era_overrides: BTreeMap<Era, ui::shell::EraOverride> = BTreeMap::new();
+        for (era_code, ov) in &map.era_overrides {
+            if let Some(era) = Era::from_code(era_code) {
+                era_overrides.insert(
+                    era,
+                    ui::shell::EraOverride {
+                        name: ov.name.clone(),
+                        icon: ov.icon.clone(),
+                    },
+                );
+            }
+        }
+        // Every world a mod lists on a stock map's row shares one entry.
+        let group = match (&map.stock_row, &map.variant_title) {
+            (Some(code), _) => Some(("", code.as_str())),
+            (None, Some(title)) => Some((map.source_lvl.as_str(), title.as_str())),
+            (None, None) => None,
+        };
+        if let Some(group) = group {
             if let Some(&index) = groups.get(&group) {
                 let entry: &mut ModMapEntry = &mut entries[index];
                 entry.variant_keys.push(map.map_key.clone());
-                for (all, variant) in entry.modes.iter_mut().zip(modes) {
+                for (era, variant) in modes {
+                    let all = entry.modes.entry(era).or_default();
                     for mode in variant {
                         if !all.contains(&mode) {
                             all.push(mode);
                         }
                     }
+                }
+                for (era, ov) in era_overrides {
+                    entry.era_overrides.entry(era).or_insert(ov);
                 }
                 continue;
             }
@@ -122,6 +161,7 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str, source: &str) -> Vec<Mo
         }
         entries.push(ModMapEntry {
             key: map.map_key.clone(),
+            stock_row: map.stock_row.clone(),
             legacy_code: map.legacy_code.clone(),
             name: map
                 .variant_title
@@ -132,12 +172,7 @@ fn catalog_entries(maps: &[ModMapSummary], folder: &str, source: &str) -> Vec<Mo
             source: source.to_owned(),
             description: map.description.clone(),
             modes,
-            era_overrides: map.era_overrides.clone().map(|ov| {
-                ov.map(|m| ui::shell::EraOverride {
-                    name: m.name,
-                    icon: m.icon,
-                })
-            }),
+            era_overrides,
             variant_keys: vec![map.map_key.clone()],
         });
     }
@@ -149,24 +184,34 @@ pub fn select_world_variant(
     key: &str,
     mode: &str,
     armies: &[String; 2],
+    era: Option<&str>,
     seed: u32,
     multiplayer: bool,
 ) -> String {
     let state = RUNTIME_STATE.read().unwrap_or_else(|e| e.into_inner());
-    let Some(row) = state
+    let maps = || state.active.iter().flat_map(|m| &m.maps);
+    let era = era.unwrap_or_else(|| {
+        if armies.iter().any(|a| a == "rep" || a == "cis") {
+            "cw"
+        } else {
+            "gcw"
+        }
+    });
+    let choose = |row| choose_world_variant(row, maps(), mode, era, seed, multiplayer);
+    if let Some(row) = state.mod_maps.iter().find(|row| row.key == key) {
+        if row.variant_keys.len() > 1 {
+            return choose(row).unwrap_or(key).to_owned();
+        }
+        return key.to_owned();
+    }
+    // A stock map's row: the first mod in load order that lists this mode and
+    // era on it supplies the round's map. Otherwise the stock one plays.
+    let code = key.strip_prefix("bf2_").unwrap_or(key);
+    state
         .mod_maps
         .iter()
-        .find(|row| row.key == key && row.variant_keys.len() > 1)
-    else {
-        return key.to_owned();
-    };
-    let maps = state.active.iter().flat_map(|m| &m.maps);
-    let era = if armies.iter().any(|a| a == "rep" || a == "cis") {
-        "cw"
-    } else {
-        "gcw"
-    };
-    choose_world_variant(row, maps, mode, era, seed, multiplayer)
+        .filter(|row| row.stock_row.as_deref() == Some(code))
+        .find_map(choose)
         .unwrap_or(key)
         .to_owned()
 }
@@ -1005,8 +1050,10 @@ mod tests {
                 description: String::new(),
                 source_lvl: "ABR/ABR.lvl".into(),
                 variant_title: None,
+                stock_row: None,
                 modes_cw: Vec::new(),
                 modes_gcw: vec!["con".into()],
+                modes_custom_eras: BTreeMap::new(),
                 missions: vec![ModMissionSummary {
                     script_name: format!("{ns}_con"),
                     mode: "con".into(),
@@ -1018,7 +1065,7 @@ mod tests {
                     unsupported_reason: None,
                 }],
                 sound_planets: Vec::new(),
-                era_overrides: [None, None],
+                era_overrides: BTreeMap::new(),
             }],
             dependencies: Vec::new(),
             conflicts: Vec::new(),

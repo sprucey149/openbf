@@ -88,10 +88,14 @@ fn catalog_action(
         Mode::Xl => Vec::new(),
         _ => crate::mission::pairs_with_index(missions_dir, &mission_files, key, mode.subst()),
     };
-    let maps = ui::shell::catalog_with_mods(
+    let custom_era_missions = |key: &str, mode: Mode, era: &str| {
+        crate::mission::pairs_for_era_with_index(missions_dir, &mission_files, key, mode.subst(), era)
+    };
+    let mut maps = ui::shell::catalog_with_mods_and_eras(
         &text,
         &bakes,
         &missions,
+        &custom_era_missions,
         &crate::mods_runtime::active_mod_maps(),
     );
     let mut texts = IaTexts::new(&|key, english| {
@@ -106,8 +110,34 @@ fn catalog_action(
         icon_dirs.iter().any(|d| pak::is_file(d.join(&fname)))
     };
     let mut custom_seen = std::collections::BTreeSet::new();
-    for map in &maps {
-        for era_modes in &map.modes {
+    let mut custom_eras_seen = std::collections::BTreeSet::new();
+    for map in &mut maps {
+        for ov in map.era_overrides.values_mut() {
+            if let Some(ref ic) = ov.icon {
+                if !has_icon(ic) {
+                    ov.icon = None;
+                }
+            }
+        }
+        for (era, era_modes) in &map.modes {
+            if let ui::shell::Era::Custom(code) = era {
+                if custom_eras_seen.insert(code.clone()) {
+                    let locl_name = bf2
+                        .bf2_text(&format!("common.era.{code}"))
+                        .map(|t| t.trim().to_owned())
+                        .filter(|t| !t.is_empty());
+                    let v13 = ui::shell::Era::v13_default(code);
+                    let name = locl_name
+                        .or_else(|| v13.map(|(n, _)| n.to_owned()))
+                        .unwrap_or_else(|| format!("Era {}", code.to_ascii_uppercase()));
+                    let icon = v13
+                        .map(|(_, ic)| ic)
+                        .filter(|ic| has_icon(ic))
+                        .unwrap_or("imp_icon")
+                        .to_owned();
+                    texts.set_custom_era(code, name, icon);
+                }
+            }
             for mode in era_modes {
                 let Mode::Custom(s) = mode else { continue };
                 if !custom_seen.insert(s.clone()) {
@@ -206,7 +236,7 @@ mod tests {
         let hoth = ia.maps.iter().find(|m| m.label == "Hoth (bf2)").unwrap();
         assert_eq!(hoth.key, "bf2_hot1");
         assert!(hoth.description.starts_with("Hoth: Echo Base"));
-        assert!(hoth.runnable(&Mode::Con, ui::shell::Side::Era(ui::shell::Era::Gcw)));
+        assert!(hoth.runnable(&Mode::Con, &ui::shell::Side::Era(ui::shell::Era::Gcw)));
         let dune = ia
             .maps
             .iter()

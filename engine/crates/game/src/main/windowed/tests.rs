@@ -901,6 +901,7 @@ fn restart_requeues_the_battle_in_play_first() {
         game: ui::shell::Game::Bf2,
         mode: ui::shell::Mode::Con,
         armies: ["rep".to_owned(), "cis".to_owned()],
+        era: Some("cw".to_owned()),
         label: key.to_owned(),
     };
     let mut playlist: std::collections::VecDeque<_> = [row("tat2"), row("hot1")].into();

@@ -231,7 +231,7 @@ impl InstantAction {
                 } else if i.confirm && live.get(self.era_list.at) == Some(&true) {
                     // The full popup opens silently over this accept.
                     self.click(MenuSound::Accept);
-                    let side = self.side_picks()[self.era_list.at];
+                    let side = self.side_picks()[self.era_list.at].clone();
                     self.add(self.picked_map, self.picked_mode.clone(), side);
                     self.close_folder();
                     self.state = State::Command;
