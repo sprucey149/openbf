@@ -32,6 +32,7 @@ const GAME_KEY: &str = "bf2";
 const SHARED_CLASSES: &str = "bf2_ingame.ron";
 
 /// One map's own sides and what its missions ask of them.
+#[derive(Debug)]
 pub(super) struct LevelSides {
     pub map_key: String,
     /// `(stem, LVL)` in the order the scripts first read them: the first
@@ -341,36 +342,73 @@ pub(super) fn convert_addon_sides(
         }
     }
 
-    // Maps that read the same sides share one effects layer.
-    let mut effect_layers: BTreeMap<Vec<&PathBuf>, PathBuf> = BTreeMap::new();
-    for (level, wanted) in levels.iter().zip(&vehicle_sides) {
-        write_level(level, env, stock, &stock_files, &lvls, staging)
-            .with_context(|| format!("writing the addon units of {}", level.map_key))?;
-        let order: Vec<&PathBuf> = level.sides.iter().map(|(_, p)| p).collect();
-        let next = effect_layers.len();
-        let layer = effect_layers.entry(order).or_insert_with_key(|order| {
-            let out = scratch.join(format!("fx{next}"));
-            progress(&format!(
-                "Converting the addon's effects for {}...",
-                level.map_key
-            ));
-            if let Err(e) = bake_effects(order, &lvls, &out) {
-                warnings.push(format!(
-                    "The addon's side effects for `{}` could not be converted ({e:#}).",
-                    level.map_key
-                ));
-            }
-            out
-        });
-        let to = staging.join("levels").join(&level.map_key).join("assets");
-        link_files(layer, &to.join(EFFECTS_DIR))?;
-        for &at in wanted {
-            let (stem, path) = &level.sides[at];
-            if let Some(layer) = vehicle_layers.get(path) {
-                link_files(layer, &to.join(vehicle_dir(at, stem)))?;
-            }
+    // Maps that read the same sides share one effects layer. The layers are
+    // independent, so they bake together over one read of each side.
+    let orders: Vec<Vec<&PathBuf>> = levels
+        .iter()
+        .map(|l| l.sides.iter().map(|(_, p)| p).collect())
+        .collect();
+    let mut unique: Vec<(&[&PathBuf], &str)> = Vec::new();
+    let mut layer_of = Vec::with_capacity(levels.len());
+    for (level, order) in levels.iter().zip(&orders) {
+        let at = unique.iter().position(|(o, _)| *o == order.as_slice());
+        layer_of.push(at.unwrap_or(unique.len()));
+        if at.is_none() {
+            unique.push((order, &level.map_key));
         }
     }
+    let bufs: BTreeMap<&PathBuf, _> = lvls
+        .keys()
+        .map(|p| (p, crate::gameplay::read(p)))
+        .collect();
+    let jobs: Vec<usize> = (0..unique.len()).collect();
+    let layer_dir = |at: usize| scratch.join(format!("fx{at}"));
+    let results = crate::soldier::in_parallel(
+        &jobs,
+        |&at| bake_effects(unique[at].0, &lvls, &bufs, &layer_dir(at)),
+        |done, _| {
+            progress(&format!(
+                "Converting the addon's effects ({done}/{})...",
+                jobs.len()
+            ))
+        },
+    );
+    for ((_, map_key), result) in unique.iter().zip(results) {
+        if let Err(e) = result {
+            warnings.push(format!(
+                "The addon's side effects for `{map_key}` could not be converted ({e:#})."
+            ));
+        }
+    }
+    drop(bufs);
+
+    // Each map writes only its own folder, mostly links to the shared bakes,
+    // and the file system takes those far faster from several threads.
+    let maps: Vec<usize> = (0..levels.len()).collect();
+    let written = crate::soldier::in_parallel(
+        &maps,
+        |&at| -> Result<()> {
+            let level = &levels[at];
+            write_level(level, env, stock, &stock_files, &lvls, staging)
+                .with_context(|| format!("writing the addon units of {}", level.map_key))?;
+            let to = staging.join("levels").join(&level.map_key).join("assets");
+            link_files(&layer_dir(layer_of[at]), &to.join(EFFECTS_DIR))?;
+            for &side in &vehicle_sides[at] {
+                let (stem, path) = &level.sides[side];
+                if let Some(layer) = vehicle_layers.get(path) {
+                    link_files(layer, &to.join(vehicle_dir(side, stem)))?;
+                }
+            }
+            Ok(())
+        },
+        |done, _| {
+            progress(&format!(
+                "Writing each map's units ({done}/{})...",
+                maps.len()
+            ))
+        },
+    );
+    written.into_iter().collect::<Result<()>>()?;
     let _ = std::fs::remove_dir_all(&scratch);
     Ok(warnings)
 }
@@ -403,7 +441,12 @@ const EFFECTS_DIR: &str = "side_bf2/effects/addon";
 
 /// The particle effects of a map's SIDE LVLs, and the sheets their ordnance
 /// classes draw bolts with.
-fn bake_effects(order: &[&PathBuf], lvls: &BTreeMap<PathBuf, SideLvl>, out: &Path) -> Result<()> {
+fn bake_effects<B: std::ops::Deref<Target = [u8]>>(
+    order: &[&PathBuf],
+    lvls: &BTreeMap<PathBuf, SideLvl>,
+    bufs: &BTreeMap<&PathBuf, Result<B>>,
+    out: &Path,
+) -> Result<()> {
     let laser = mungefs::fnv1a_lowercase("LaserTexture");
     let sheets: BTreeSet<String> = order
         .iter()
@@ -414,12 +457,14 @@ fn bake_effects(order: &[&PathBuf], lvls: &BTreeMap<PathBuf, SideLvl>, out: &Pat
         .map(|(_, v)| v.trim().trim_matches('"').to_ascii_lowercase())
         .filter(|v| !v.is_empty())
         .collect();
-    let bufs = order
+    let slices = order
         .iter()
-        .filter(|p| lvls.contains_key(**p))
-        .map(|p| crate::gameplay::read(p))
-        .collect::<Result<Vec<_>>>()?;
-    let slices: Vec<&[u8]> = bufs.iter().map(|b| &b[..]).collect();
+        .filter_map(|p| bufs.get(*p))
+        .map(|b| match b {
+            Ok(b) => Ok(&**b),
+            Err(e) => Err(anyhow::anyhow!("{e:#}")),
+        })
+        .collect::<Result<Vec<&[u8]>>>()?;
     let sheets: Vec<String> = sheets.into_iter().collect();
     crate::effects::bake_layers(
         &slices,
