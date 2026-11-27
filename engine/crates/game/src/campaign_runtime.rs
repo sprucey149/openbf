@@ -414,6 +414,14 @@ pub(crate) struct World {
     pub team_value_rows: [usize; 2],
     pub native_classes: BTreeMap<u8, Vec<String>>,
     pub native_units: BTreeMap<u8, u32>,
+    /// The classes a script's setup gave a third team the mission's file
+    /// holds none for (a script that picks its hero while it runs), as
+    /// `(class, min, max)`; the battle builds those teams after the setup
+    /// ([`CampaignRuntime::take_native_requests`]).
+    pub native_requests: BTreeMap<u8, Vec<(String, u32, Option<u32>)>>,
+    /// The `MaxHealth` a script's `SetClassProperty` gave a class, by
+    /// lowercase class name, for the third teams' members as they enter.
+    pub native_health: BTreeMap<String, f32>,
     pub vehicle_classes: Vec<String>,
     /// BF2 class indices per army: the order `AddUnitClass` added them
     /// (what `GetCharacterClass` returns), as sim class indices.
@@ -627,6 +635,8 @@ impl CampaignRuntime {
             ],
             native_classes: BTreeMap::new(),
             native_units: BTreeMap::new(),
+            native_requests: BTreeMap::new(),
+            native_health: BTreeMap::new(),
             vehicle_classes: Vec::new(),
             class_order: [Vec::new(), Vec::new()],
             class_names: Vec::new(),
@@ -707,6 +717,20 @@ impl CampaignRuntime {
             self.w.native_classes.insert(team, classes);
             self.w.native_units.insert(team, units);
         }
+    }
+
+    /// The third teams the script's setup filled, as the mission file's
+    /// `local_teams` rows would have: for each, the class rows and its
+    /// `SetUnitCount`.
+    pub fn take_native_requests(&mut self) -> Vec<crate::mission::LocalTeamDef> {
+        std::mem::take(&mut self.w.native_requests)
+            .into_iter()
+            .map(|(team, classes)| crate::mission::LocalTeamDef {
+                team: team + 1,
+                units: self.w.native_units.get(&team).copied().unwrap_or(1),
+                classes,
+            })
+            .collect()
     }
 
     pub fn set_vehicle_classes(&mut self, classes: &[String]) {

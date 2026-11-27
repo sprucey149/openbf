@@ -498,6 +498,43 @@ fn discovered_from_cache(entry: &ModFolderEntry, meta: &ModCacheMeta) -> Discove
     }
 }
 
+/// The layer of a converted map's own units and classes
+/// (`levels/<map>/`, `bake mod-convert`), served only while that map is
+/// loaded; `None` for a map with no SIDE LVLs of its own.
+fn level_layer(mod_id: &str, cache_dir: &Path, map_key: &str) -> Option<OverlayLayer> {
+    let root = cache_dir.join("levels").join(map_key);
+    let assets = root.join("assets");
+    let mut entries: BTreeMap<String, Option<PathBuf>> = BTreeMap::new();
+    // The stock companions the addon's version of a model does not have.
+    let removed: Vec<String> = std::fs::read_to_string(root.join("removed.ron"))
+        .ok()
+        .and_then(|t| ron::from_str(&t).ok())
+        .unwrap_or_default();
+    for rel in removed {
+        entries.insert(rel.to_ascii_lowercase(), None);
+    }
+    let mut pending = vec![assets.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(rel) = path.strip_prefix(&assets) {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                entries.insert(rel.to_ascii_lowercase(), Some(path));
+            }
+        }
+    }
+    (!entries.is_empty()).then(|| OverlayLayer {
+        id: mod_id.to_owned(),
+        mount_name: "assets_baked".into(),
+        rule: OverlayRule::Overrides {
+            entries,
+            scope: Some(format!("{}{}", pak::LEVEL_SCOPE, map_key.to_ascii_lowercase())),
+        },
+    })
+}
+
 /// Scan `openbf_data/mods/`, ensure caches for enabled mods from `extensions.ron`,
 /// validate dependencies and load order, and mount VFS & localization overlays.
 pub fn mount_enabled_mods(
@@ -599,6 +636,8 @@ pub fn mount_enabled_mods(
     }
 
     let mut overlays: Vec<OverlayLayer> = Vec::new();
+    // Each addon map's own units stand over everything else on that map.
+    let mut level_layers: Vec<OverlayLayer> = Vec::new();
     let mut locls: Vec<Arc<HudLocl>> = Vec::new();
 
     for mod_id in &plan.active_order {
@@ -618,6 +657,9 @@ pub fn mount_enabled_mods(
                     },
                 });
             }
+        }
+        for map in &meta.maps {
+            level_layers.extend(level_layer(mod_id, cache_dir, &map.map_key));
         }
         report.mod_maps.extend(catalog_entries(
             &meta.maps,
@@ -782,7 +824,8 @@ pub fn mount_enabled_mods(
         format!("{digest:016x}")
     };
 
-    set_overlays(overlays);
+    level_layers.append(&mut overlays);
+    set_overlays(level_layers);
     crate::event_feed::set_mod_locls(locls);
 
     if !report.active.is_empty() {

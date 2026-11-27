@@ -1812,6 +1812,7 @@ pub fn scope_overlays_to_map(dir: &Path) {
         .and_then(|t| ron::from_str::<manifest::ManifestHead>(&t).ok())
         .map(|h| h.source_game.to_ascii_lowercase());
     pak::set_overlay_scope(game.as_deref());
+    pak::set_level_scope(dir.file_name().and_then(|n| n.to_str()));
 }
 
 pub fn load_scene(dir: &Path) -> Result<Scene> {

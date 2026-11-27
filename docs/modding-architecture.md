@@ -85,7 +85,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
    - **Class patches:** Side replacement class edits are emitted as `<classes>.patch.ron` sidecars (`manifest::class_patch`) containing only properties whose digest differs from the stock PC catalog. `game::classdb` reads the in-scope override stack (`pak::read_override_stack`) and applies `manifest::class_patch::apply_stack` over the stock PS2-canonical `classes/<g>_<side>.ron`: a `Full` replacement forms a coherent base that shadows lower-priority patches to the same side, while partial `Patch` layers above it compose from lowest to highest priority so `#1` wins on conflicts and independent class changes compose cleanly.
 3. **Stock fallback:**
    - Any path not claimed by an overlay falls through transparently to the immutable stock mount (`assets_baked/` and `missions/` on disk in a checkout, or `openbf.pak` / appended executable in a packed build).
-4. **Localization (`locl`):**
+4. **Level layers (`level:<map_key>`):** An addon map's own units (see §5) are converted into `levels/<map_key>/assets/` in the mod's cache, under the same relative names as stock assets (`side_bf2/soldiers`, `side_bf2/weapons`, `side_bf2/textures`, `classes/<file>.patch.ron`), with `levels/<map_key>/removed.ron` listing stock companions the addon model has none of. `game::mods_runtime` mounts it as an `Overrides` layer scoped to that map, above the mods' replacements, and `game::assets::scope_overlays_to_map` activates it with `pak::set_level_scope` only while that map is loaded.
+5. **Localization (`locl`):**
    - Addon `core.lvl` string tables are converted to `locl/english.ron` and stacked in load-order priority via `game::event_feed::set_mod_locls`.
 
 ---
@@ -102,7 +103,11 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 2. **Addon world & audio baking (`bake::mods::convert`, `bake::mods::world`):**
    - Primary and companion world LVLs are assembled per variant and baked through `bake::map` into GLB meshes/terrain/water/lowres, KTX2 textures (including signed D3D9 `V8U8` normal maps for PC water), `manifest.ron`, `classes.ron`, `effects.ron`, `foliage.bin`, and `world_anims.ron`. Byte-identical files across variants share storage via hard links where supported.
    - Optional addon load screens (`bake::loadscreen`), `core.lvl` localization (`bake::hud::bake_locl`), and one addon sound archive per map group (`bake::sounds::bake_addon_sounds`, inheriting stock CORE templates for spatial/bus defaults) are baked into the same cache.
-3. **Stock LVL replacement baking (`bake::mods::replace`, `bake::stock`):**
+3. **Addon units (`bake::mods::addon_sides`):**
+   - The side LVLs a mission loads from the addon's own folder (`ReadDataFile("dc:SIDE\...")`) supply the soldiers and weapons that mission asks for: each unit's body and every weapon along its class parents are baked with their textures, and their classes become class patches. A name two side files define takes the first in script load order.
+   - A script may choose a unit while it runs and load it through a variable, so every soldier of the map's side files that a script of the mod names is baked too.
+   - A third team whose classes are only known when its script runs joins the battle after the script's setup (`CampaignRuntime::take_native_requests`), and `SpawnCharacter` fields the class the script selected for that member.
+4. **Stock LVL replacement baking (`bake::mods::replace`, `bake::stock`):**
    - During stock asset preparation (`scripts/rebake.sh catalog` or `launcher::pipeline::rebake::bake_stock_catalog`), `bake stock-catalog` writes metadata-only catalogs (`assets_baked/catalog/<game>_<platform>.ron` and `stock_bake.ron`) containing chunk/property digests and output mappings (no copyrighted assets).
    - `bake::mods::replace` diffs each active replacement LVL against its stock catalog entry and re-bakes only what changed:
      - **SIDE (`side/*.lvl`):** Class patch sidecar, changed soldiers/weapons/vehicles (borrowing stock animation banks verified by SHA-256), side effects, and changed textures at both texture tiers.
@@ -165,7 +170,8 @@ Every runtime asset read in `game` goes through `pak`. `pak::overlay::resolve_fi
 - **Unsupported legacy mod features (reported honestly in diagnostics):**
   - Arbitrary runtime Lua mission logic outside supported declarative tables and closed world-event actions (e.g., ambient fish/bird flocks, custom Lua timers/triggers, movie previews).
   - Third-party native DLL plugins.
-  - Full custom non-stock side LVL model/texture/animation authoring inside addon maps (only custom side `classes.ron` is currently baked for addon-private sides).
+  - Vehicles, side effects, unit sounds and voice lines, first-person arms and custom animation banks from an addon map's own side LVLs (its soldiers, weapons and their textures are converted).
+  - On a script's third team, `SetClassProperty` applies `MaxHealth` only.
   - Dynamic BF2 `CLTH` cloth simulation (deferred engine-wide under `CLOTH2`; rigid flagpoles/worn cloth render without physics).
   - Menu shell side LVLs (`side/*shell.lvl`), PC 1.1 `GeometryAddon` attachments, 3D starfighter cockpit FPM models, normal/bump maps on non-water surfaces, custom `zaf_`/`zaa_` animation banks, and unsupported skinned MTRL blend modes.
 - **Multiple full side replacements targeting the same stock side:** Two `Full` side LVL replacements targeting the same stock side are treated as coherent replacement sets where `#1` shadows `#2` rather than mixing incompatible models/skeletons/classes; partial `Patch` layers above a full replacement or each other compose per-class with `#1` winning on conflicts.

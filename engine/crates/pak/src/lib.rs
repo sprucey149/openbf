@@ -30,7 +30,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 pub mod overlay;
 pub use overlay::{
-    clear_overlays, current_overlays, overlay_scope, set_overlay_scope, set_overlays, OverlayLayer,
+    clear_overlays, current_overlays, overlay_scope, set_level_scope, set_overlay_scope, set_overlays, OverlayLayer,
+    LEVEL_SCOPE,
     OverlayRule,
 };
 

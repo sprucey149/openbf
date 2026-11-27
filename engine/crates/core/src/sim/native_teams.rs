@@ -296,6 +296,68 @@ impl Sim {
         self.spawn_native_member(team, node, None)
     }
 
+    /// A script's `SetClassProperty(.., "MaxHealth", v)` for class `class`
+    /// of native `team`: the members still to enter and those on the field.
+    pub fn set_native_class_max_health(&mut self, team: u8, class: usize, v: f32) {
+        let Some(entry) = self.native_team_index(team) else {
+            return;
+        };
+        let native = &mut self.native_teams[entry];
+        if let Some(spec) = native
+            .draw
+            .as_mut()
+            .and_then(|d| d.templates.get_mut(class))
+        {
+            spec.max_health = v;
+        }
+        for spec in &mut native.pending {
+            if usize::from(spec.class) == class {
+                spec.max_health = v;
+            }
+        }
+        for u in &mut self.units {
+            if u.team == team && usize::from(u.spec.class) == class {
+                u.spec.max_health = v;
+                if u.alive {
+                    u.health.max = v;
+                    u.health.cur = u.health.cur.fmin(v);
+                }
+            }
+        }
+    }
+
+    /// One member of native `team` enters at `node` as class `class` of the
+    /// team's own table: a mission script's `SelectCharacterClass` followed
+    /// by its `SpawnCharacter`. `old` is the slot the member held in an
+    /// earlier life. `None` for a team or class it does not have.
+    pub fn spawn_native_class(
+        &mut self,
+        team: u8,
+        class: usize,
+        node: (Vec3, f32),
+        old: u32,
+    ) -> Option<crate::unit::UnitHandle> {
+        let entry = self.native_team_index(team)?;
+        let mut spec = self.native_teams[entry]
+            .draw
+            .as_ref()?
+            .templates
+            .get(class)?
+            .clone();
+        spec.pos = node.0;
+        spec.yaw = node.1;
+        // The member the script placed is one of the pool's.
+        self.native_teams[entry].pending.pop_front();
+        // The script brings the member back, so its earlier life's own
+        // respawn must not field it a second time.
+        if let Some(u) = self.units.get_mut(old as usize) {
+            if u.team == team && !u.alive {
+                u.respawn_at = None;
+            }
+        }
+        self.spawn_scripted_slot(&spec)
+    }
+
     /// [`Sim::spawn_native_character`] for a member that held class `old`
     /// in an earlier life (`None`: one the selector left with no class,
     /// [`NativeClassDraw::unassigned`]). Once the never-spawned members are gone, its
@@ -1123,5 +1185,32 @@ mod tests {
         let h = sim.spawn_native_member(2, at, Some(0)).unwrap();
         assert_eq!(sim.unit(h).unwrap().spec.class, 1);
         assert_eq!(sim.native_teams[0].draw.as_ref().unwrap().counts, [0, 1]);
+    }
+
+    #[test]
+    fn a_scripted_hero_keeps_its_slot_and_class_health_when_spawned_again() {
+        let mut sim = Sim::empty(42);
+        let mut hero = UnitSpec::trooper(2, Vec3::ZERO);
+        hero.controller = Controller::Ai;
+        sim.add_native_team(2, Vec::new());
+        sim.set_native_class_draw(
+            2,
+            NativeClassDraw {
+                templates: vec![hero],
+                limits: vec![(1, 1)],
+                counts: vec![0],
+                unassigned: 1,
+            },
+        );
+        sim.set_native_class_max_health(2, 0, 4000.0);
+        let at = (Vec3::new(3.0, 0.0, 0.0), 0.0);
+        let h = sim.spawn_native_class(2, 0, at, u32::MAX).unwrap();
+        assert_eq!(sim.unit(h).unwrap().health.max, 4000.0);
+        sim.kill_environment(h, crate::sim::DeathCause::DeathRegion);
+        sim.units[h.index as usize].respawn_at = Some(sim.tick + 100);
+        let again = sim.spawn_native_class(2, 0, at, h.index).unwrap();
+        assert_eq!(again.index, h.index, "the member is not fielded twice");
+        assert_eq!(sim.alive_units().count(), 1);
+        assert!(sim.spawn_native_class(2, 1, at, u32::MAX).is_none());
     }
 }

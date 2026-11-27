@@ -172,6 +172,30 @@ impl World {
         // the army it moved the member to, at the path point it asked for.
         // The native pool's own (already spawned) template is not used.
         if let Some(class) = scripted.as_ref().and_then(|s| s.class.as_deref()) {
+            if team >= 2 {
+                // The member enters once: one already on the field stays.
+                if self.char_unit(sim, c).is_some() {
+                    return;
+                }
+                let Some(ci) = self.native_classes.get(&team).and_then(|classes| {
+                    classes.iter().position(|n| n.eq_ignore_ascii_case(class))
+                }) else {
+                    self.report(&format!(
+                        "SpawnCharacter: {class} is not in team {}'s roster",
+                        team + 1
+                    ));
+                    return;
+                };
+                if let Some(&v) = self.native_health.get(&class.to_ascii_lowercase()) {
+                    sim.set_native_class_max_health(team, ci, v);
+                }
+                if let Some(h) = sim.spawn_native_class(team, ci, pos, self.char_slot(c)) {
+                    if h.index != c {
+                        self.char_alias.insert(c, h.index);
+                    }
+                }
+                return;
+            }
             let Some(ci) = self
                 .team_classes
                 .get(usize::from(team))
@@ -312,7 +336,24 @@ impl World {
         max: Option<f32>,
     ) -> Option<usize> {
         if t >= 2 {
-            return None;
+            let known = self.native_classes.get(&t).and_then(|classes| {
+                classes.iter().position(|c| c.eq_ignore_ascii_case(class))
+            });
+            // Only the setup can still add a class to a team the mission's
+            // file holds none for.
+            if known.is_some() || self.post_loaded {
+                return known;
+            }
+            let rows = self.native_requests.entry(t).or_default();
+            if let Some(at) = rows.iter().position(|r| r.0.eq_ignore_ascii_case(class)) {
+                return Some(at);
+            }
+            rows.push((
+                class.to_ascii_lowercase(),
+                min.map_or(0, |m| m as u32),
+                max.map(|m| m as u32),
+            ));
+            return Some(rows.len() - 1);
         }
         let ti = usize::from(t);
         let Some(ci) = self.team_classes[ti]

@@ -845,6 +845,21 @@ pub(super) fn make_walk_with_counts(
                 );
                 rt.load_world_anims(&scene.dir, &scene.manifest, &walk.sim);
                 rt.start(&mut walk.sim);
+                // The third teams the script filled while it ran (a hero it
+                // picked at random) join once their classes are known.
+                let requested = rt.take_native_requests();
+                if m.script.is_some() && !requested.is_empty() {
+                    let mut with = m.clone();
+                    with.local_teams = requested;
+                    game::native_teams::install(
+                        &mut walk,
+                        &layout,
+                        &b.classes_dir,
+                        assets_dir,
+                        &with,
+                        &scene.manifest,
+                    );
+                }
                 // ScriptPostLoad requests the same opening clip played by the
                 // campaign shell before loading the battle.
                 rt.take_movies();

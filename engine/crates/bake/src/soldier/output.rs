@@ -411,10 +411,23 @@ impl SideBakeCache {
                         scope_provenance: own.scope_provenance,
                         ..manifest::combo::ComboSet::default()
                     };
+                    // [ours] An addon's SIDE LVL may name a stock hero's
+                    // combo without carrying it; it is then read from the
+                    // sides loaded beside it. PROVISIONAL, trace: where the
+                    // PC game finds such a combo.
+                    let mut beside = Vec::new();
+                    if bindings
+                        .iter()
+                        .any(|b| !own.combos.iter().any(|c| c.name_hash == b.name_hash))
+                    {
+                        for side in &anim.sides {
+                            beside.push(crate::combo::baked_combos_from_lvl(side)?);
+                        }
+                    }
                     for binding in bindings {
-                        let combo = own
-                            .combos
-                            .iter()
+                        let combo = std::iter::once(&own)
+                            .chain(&beside)
+                            .flat_map(|set| &set.combos)
                             .find(|c| c.name_hash == binding.name_hash)
                             .with_context(|| {
                                 format!("{}: missing combo 0x{:08x}", m.name, binding.name_hash)

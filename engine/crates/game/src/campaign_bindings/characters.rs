@@ -220,6 +220,24 @@ impl Ctx<'_> {
                 if let Some(cls) = arg(a, 0).as_str() {
                     let key = text(arg(a, 1));
                     let val = text(arg(a, 2));
+                    // A third team's classes live in its own table.
+                    if key.trim().eq_ignore_ascii_case("maxhealth") {
+                        let health = val.split_whitespace().next();
+                        if let Some(v) = health
+                            .and_then(|s| s.parse::<f32>().ok())
+                            .filter(|v| *v > 0.0)
+                        {
+                            // Setup sets it before the team exists.
+                            w.native_health.insert(cls.to_ascii_lowercase(), v);
+                            for (&t, classes) in &w.native_classes {
+                                if let Some(ci) =
+                                    classes.iter().position(|c| c.eq_ignore_ascii_case(cls))
+                                {
+                                    sim.set_native_class_max_health(t, ci, v);
+                                }
+                            }
+                        }
+                    }
                     crate::campaign_runtime::apply_class_property(
                         sim,
                         &w.team_classes,

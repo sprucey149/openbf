@@ -1,6 +1,7 @@
 //! Generic legacy Battlefront II addon discovery, mission translation, and
 //! versioned cache conversion.
 
+mod addon_sides;
 pub mod convert;
 pub mod mission;
 pub mod replace;

@@ -1,6 +1,6 @@
 //! Atomic legacy BF2 addon converter -> versioned `openbf_data/mod_cache/<ns>/`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -10,6 +10,7 @@ use extensions::mods::{
 use extensions::mods::catalog::{SourceGame, SourcePlatform};
 use mungefs::addon::read_core_locl;
 
+use super::addon_sides::{convert_addon_sides, LevelSides};
 use super::mission::mission_to_ron;
 use super::{inspect_mod_folder, ModEnv};
 use super::world::{link_tree, read_world, SharedWorldFiles};
@@ -135,6 +136,7 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         }
     }
     let mut written_libs: BTreeMap<String, String> = BTreeMap::new();
+    let mut levels: Vec<LevelSides> = Vec::new();
 
     let total_steps = groups.len().max(1);
     for (gi, g) in groups.iter().enumerate() {
@@ -214,18 +216,9 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
             shared_world_files.share(&map_out)?;
         }
 
-        for (side, side_lvl) in &g.custom_side_lvls {
-            crate::gameplay::exempt_addon(side_lvl);
-            let side_dir = staging
-                .join("assets")
-                .join(format!("{}_side_{side}", opts.namespace));
-            std::fs::create_dir_all(&side_dir)?;
-            if let Err(e) = crate::classes::bake_classes(
-                &side_lvl.to_string_lossy(),
-                &side_dir.join("classes.ron").to_string_lossy(),
-            ) {
-                warnings.push(format!("Custom SIDE `{side}.lvl` partial skip: {e:#}"));
-            }
+        let level = level_sides(g);
+        if !level.sides.is_empty() {
+            levels.push(level);
         }
 
         if let Some((snd_name, snd_lvl)) = g.custom_sound_lvls.first() {
@@ -398,6 +391,27 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         }
     }
 
+    // The units of the maps' own SIDE LVLs, once every map is known, so that
+    // a side many maps read is converted once.
+    let script_names: BTreeSet<String> = mission_scripts
+        .values()
+        .filter_map(|body| mungefs::lua50::undump(body).ok())
+        .flat_map(|proto| {
+            proto
+                .string_constants()
+                .into_iter()
+                .map(str::to_ascii_lowercase)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    warnings.extend(convert_addon_sides(
+        &levels,
+        &script_names,
+        opts.env,
+        &staging,
+        &mut |msg| progress(opts.emit_progress, 81, msg),
+    )?);
+
     // Stock replacements: every active resource operation, translated onto
     // the stock bake's own outputs (`super::replace`).
     let replaced = if discovered.active_ops().next().is_some() {
@@ -506,6 +520,29 @@ pub fn convert_mod_to_cache(opts: &ConvertOptions<'_>) -> Result<ConvertReport> 
         maps_baked,
         missions_written,
     })
+}
+
+/// The map's own SIDE LVLs, in the order its missions first read them, and
+/// the classes they ask of them.
+fn level_sides(group: &mungefs::addon::AddonMapGroup<'_>) -> LevelSides {
+    let mut level = LevelSides {
+        map_key: group.map_key.clone(),
+        sides: Vec::new(),
+        requests: Default::default(),
+    };
+    for planned in group.missions.iter().filter(|m| m.mission.supported) {
+        let mission = planned.mission;
+        for (side, request) in &mission.class_load_order {
+            let Some((_, path)) = mission.custom_side_lvls.iter().find(|(s, _)| s == side) else {
+                continue;
+            };
+            if !level.sides.iter().any(|(_, p)| p == path) {
+                level.sides.push((side.clone(), path.clone()));
+            }
+            level.requests.insert((side.clone(), request.clone()));
+        }
+    }
+    level
 }
 
 fn swap_dir(staging: &Path, target: &Path) -> std::io::Result<()> {
